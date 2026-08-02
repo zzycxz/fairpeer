@@ -1,20 +1,20 @@
-; momapeer NSIS Installer Script
+; fairpeer NSIS Installer Script
 ; Build: makensis scripts\installer.nsi
-; Output: dist\momapeer-setup.exe
+; Output: dist\fairpeer-setup.exe
 
 !cd ".."
 
-!define APP_NAME "momapeer"
+!define APP_NAME "fairpeer"
 !define APP_VERSION "0.5.6"
-!define APP_PUBLISHER "momapeer Contributors"
-!define APP_EXE "momapeer.exe"
+!define APP_PUBLISHER "fairpeer Contributors"
+!define APP_EXE "fairpeer.exe"
 !define INSTALL_DIR "$LOCALAPPDATA\${APP_NAME}"
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 
 Name "${APP_NAME} ${APP_VERSION}"
-OutFile "dist\momapeer-setup.exe"
+OutFile "dist\fairpeer-setup.exe"
 InstallDir "${INSTALL_DIR}"
 InstallDirRegKey HKCU "Software\${APP_NAME}" "InstallDir"
 RequestExecutionLevel user
@@ -40,17 +40,17 @@ Section "Install"
     File "desktop\build\bin\${APP_EXE}"
 
     ; NOTE: built-in skills (ppt-auto) are no longer copied here — they are
-    ; embedded in the binary and released to $PROFILE\.momapeer\skills\ on first
+    ; embedded in the binary and released to $PROFILE\.fairpeer\skills\ on first
     ; run by the app itself. See internal/assets/.
 
     ; codegraph (code intelligence engine: node.exe + lib)
     ; bundled() expects: exe_dir/codegraph/bin/codegraph.cmd
     ; So unpack directly into codegraph/ (NOT codegraph/v1.0.0/)
     SetOutPath "$INSTDIR\codegraph\bin"
-    File "C:\Users\13852\AppData\Local\momapeer\codegraph\v1.0.0\bin\codegraph.cmd"
+    File "C:\Users\13852\AppData\Local\fairpeer\codegraph\v1.0.0\bin\codegraph.cmd"
     SetOutPath "$INSTDIR\codegraph\lib"
-    File /r "C:\Users\13852\AppData\Local\momapeer\codegraph\v1.0.0\lib\*"
-    File "C:\Users\13852\AppData\Local\momapeer\codegraph\v1.0.0\node.exe"
+    File /r "C:\Users\13852\AppData\Local\fairpeer\codegraph\v1.0.0\lib\*"
+    File "C:\Users\13852\AppData\Local\fairpeer\codegraph\v1.0.0\node.exe"
 
     ; Registry (uninstall info)
     WriteRegStr HKCU "Software\${APP_NAME}" "InstallDir" "$INSTDIR"
@@ -90,8 +90,8 @@ SectionEnd
 
 Section "Uninstall"
     ; Delete files
-    ; NOTE: $INSTDIR\.momapeer is no longer created (skills are released to the
-    ; user profile by the app). $PROFILE\.momapeer is left intact — it may hold
+    ; NOTE: $INSTDIR\.fairpeer is no longer created (skills are released to the
+    ; user profile by the app). $PROFILE\.fairpeer is left intact — it may hold
     ; the user's own skills/data and is not owned by the installer.
     RMDir /r "$INSTDIR\codegraph"
     Delete "$INSTDIR\${APP_EXE}"

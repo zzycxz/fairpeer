@@ -5,12 +5,12 @@
 #
 # Output lands in <repo>/dist/ with stable, platform-keyed names that
 # desktop/cmd/sign's `manifest` subcommand maps back to update.PlatformKey:
-#   macOS:   momapeer-darwin-<arch>.zip                  (ditto archive; updater channel)
-#            momapeer-darwin-universal.dmg               (drag-to-install; human download)
-#   Windows: momapeer-windows-<arch>-installer.exe       (NSIS per-user installer; updater channel)
-#            momapeer-windows-<arch>.zip                 (portable human download)
-#   Linux:   momapeer-linux-<arch>.tar.gz                (bare binary; updater channel)
-#            momapeer-linux-<arch>.deb                   (Debian/Ubuntu package; human download)
+#   macOS:   fairpeer-darwin-<arch>.zip                  (ditto archive; updater channel)
+#            fairpeer-darwin-universal.dmg               (drag-to-install; human download)
+#   Windows: fairpeer-windows-<arch>-installer.exe       (NSIS per-user installer; updater channel)
+#            fairpeer-windows-<arch>.zip                 (portable human download)
+#   Linux:   fairpeer-linux-<arch>.tar.gz                (bare binary; updater channel)
+#            fairpeer-linux-<arch>.deb                   (Debian/Ubuntu package; human download)
 #
 # Usage: scripts/desktop-build.sh <os/arch> <version> [channel]
 #   e.g. scripts/desktop-build.sh darwin/arm64 v1.1.0
@@ -25,8 +25,8 @@ os="${PLATFORM%/*}"
 arch="${PLATFORM#*/}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APPNAME="momapeer"            # wails.json productName -> momapeer.app
-BINNAME="momapeer-desktop"    # wails.json outputfilename -> linux binary name
+APPNAME="fairpeer"            # wails.json productName -> fairpeer.app
+BINNAME="fairpeer-desktop"    # wails.json outputfilename -> linux binary name
 
 cd "$ROOT/desktop"
 
@@ -52,11 +52,11 @@ mkdir -p "$ROOT/dist"
 
 case "$os" in
 darwin)
-	# Wails names the bundle after outputfilename (momapeer-desktop.app); repackage
-	# it as momapeer.app for a clean user-facing name.
+	# Wails names the bundle after outputfilename (fairpeer-desktop.app); repackage
+	# it as fairpeer.app for a clean user-facing name.
 	staging=$(mktemp -d)
 	app="$staging/${APPNAME}.app"
-	cp -R "build/bin/momapeer-desktop.app" "$app"
+	cp -R "build/bin/fairpeer-desktop.app" "$app"
 
 	# Two signing paths, selected by HAS_APPLE_CERT (set by release-desktop.yml when
 	# the APPLE_* secrets are present). With a real Developer ID cert + notarization
