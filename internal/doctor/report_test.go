@@ -33,7 +33,7 @@ func TestRedactHome(t *testing.T) {
 }
 
 func TestCollectReportRedactsSecrets(t *testing.T) {
-	t.Setenv("MOMAPEER_TEST_SECRET", "sk-live-secret")
+	t.Setenv("FAIRPEER_TEST_SECRET", "sk-live-secret")
 
 	cfg := config.Default()
 	cfg.DefaultModel = "custom"
@@ -42,7 +42,7 @@ func TestCollectReportRedactsSecrets(t *testing.T) {
 		Kind:      "openai",
 		BaseURL:   "https://api.example.com/v1?token=secret-query",
 		Model:     "model-a",
-		APIKeyEnv: "MOMAPEER_TEST_SECRET",
+		APIKeyEnv: "FAIRPEER_TEST_SECRET",
 	}}
 	cfg.Plugins = []config.PluginEntry{{
 		Name:    "remote",

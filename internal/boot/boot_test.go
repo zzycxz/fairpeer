@@ -56,7 +56,7 @@ name = "test-model"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "x"
-api_key_env = "MOMAPEER_TEST_KEY_UNSET"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 `)
 	writeFile(t, dir, "momapeer.md", "Project rule: always run go vet before committing.")
 
@@ -467,7 +467,7 @@ name = "test-model"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "x"
-api_key_env = "MOMAPEER_TEST_KEY_UNSET"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 `)
 
 	sessionDir := filepath.Join(t.TempDir(), "desktop-workspace-sessions")
@@ -505,7 +505,7 @@ name = "test-model"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "x"
-api_key_env = "MOMAPEER_TEST_KEY_UNSET"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 `)
 	writeFile(t, dir, ".momapeer/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
 
@@ -578,7 +578,7 @@ name = "test-model"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "x"
-api_key_env = "MOMAPEER_TEST_KEY_UNSET"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 `)
 	writeFile(t, dir, ".momapeer/skills/projskill.md", "---\ndescription: a project skill\n---\nplaybook")
 
@@ -643,7 +643,7 @@ name = "test-model"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "x"
-api_key_env = "MOMAPEER_TEST_KEY_UNSET"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 `)
 	// The dev profile's whitelist exposes only coding skills; every other
 	// builtin (browser-auto, email-auto, rag-auto, …) is hidden by the whitelist.
@@ -705,7 +705,7 @@ name = "test-model"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "x"
-api_key_env = "MOMAPEER_TEST_KEY_UNSET"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 `, excluded))
 
 	ctrl, err := Build(context.Background(), Options{})
@@ -748,7 +748,7 @@ name = "test-model"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "x"
-api_key_env = "MOMAPEER_TEST_KEY_UNSET"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 `)
 
 	ctrl, err := Build(context.Background(), Options{})
@@ -797,7 +797,7 @@ name = "test-model"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "x"
-api_key_env = "MOMAPEER_TEST_KEY_UNSET"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 `)
 
 	ctrl, err := Build(context.Background(), Options{})
@@ -1195,7 +1195,7 @@ name = "test-model"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "x"
-api_key_env = "MOMAPEER_TEST_KEY_UNSET"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 
 [[plugins]]
 name = "legacy-eager"
@@ -1243,7 +1243,7 @@ name = "test-model"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "x"
-api_key_env = "MOMAPEER_TEST_KEY_UNSET"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 
 [[plugins]]
 name = "legacy-lazy"
@@ -1295,7 +1295,7 @@ name = "test-model"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "x"
-api_key_env = "MOMAPEER_TEST_KEY_UNSET"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 `, launcher))
 
 	var notices []event.Event
@@ -1370,7 +1370,7 @@ name = "test-model"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "x"
-api_key_env = "MOMAPEER_TEST_KEY_UNSET"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 `, launcher))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -1406,7 +1406,7 @@ name = "root-model"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "x"
-api_key_env = "MOMAPEER_TEST_KEY_UNSET"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 `)
 	t.Chdir(subdir)
 
@@ -1445,7 +1445,7 @@ name = "test-model"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "x"
-api_key_env = "MOMAPEER_TEST_KEY_UNSET"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 
 [[plugins]]
 name = "slowserver"

@@ -206,7 +206,7 @@ var English = Messages{
 	ArgEffortXHigh:      "extra deep reasoning",
 	ArgEffortMax:        "maximum reasoning",
 	ArgThemeCurrent:     "current",
-	ArgLanguageAuto:     "auto-detect from MOMAPEER_LANG / locale",
+	ArgLanguageAuto:     "auto-detect from FAIRPEER_LANG / locale",
 	ArgLanguageEn:       "English",
 	ArgLanguageZh:       "中文",
 

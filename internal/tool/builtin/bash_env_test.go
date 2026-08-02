@@ -27,7 +27,7 @@ func TestBashMergesLoginShellPath(t *testing.T) {
 		t.Fatalf("write probe: %v", err)
 	}
 	loginShell := filepath.Join(dir, "login-shell")
-	if err := os.WriteFile(loginShell, []byte("#!/bin/sh\nprintf '\\n__MOMAPEER_BASH_PATH__=%s\\n' '"+bin+":/usr/bin:/bin"+"'\n"), 0o755); err != nil {
+	if err := os.WriteFile(loginShell, []byte("#!/bin/sh\nprintf '\\n__FAIRPEER_BASH_PATH__=%s\\n' '"+bin+":/usr/bin:/bin"+"'\n"), 0o755); err != nil {
 		t.Fatalf("write login shell: %v", err)
 	}
 

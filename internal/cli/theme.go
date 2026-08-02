@@ -102,7 +102,7 @@ func configureCLITheme(mode string) {
 }
 
 func configureCLIThemeWithStyle(mode, style string) {
-	if env := strings.TrimSpace(os.Getenv("MOMAPEER_THEME")); env != "" {
+	if env := strings.TrimSpace(os.Getenv("FAIRPEER_THEME")); env != "" {
 		if st, ok := cliThemeStyleByName(env); ok {
 			mode = st.mode
 			style = st.name
@@ -110,7 +110,7 @@ func configureCLIThemeWithStyle(mode, style string) {
 			mode = env
 		}
 	}
-	if env := strings.TrimSpace(os.Getenv("MOMAPEER_THEME_STYLE")); env != "" {
+	if env := strings.TrimSpace(os.Getenv("FAIRPEER_THEME_STYLE")); env != "" {
 		style = env
 	}
 	activeCLITheme = resolveCLIThemeWithStyle(mode, style)

@@ -44,7 +44,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 			Server:   "127.0.0.1",
 			Port:     7890,
 			Username: "user",
-			Password: "${MOMAPEER_PROXY_PASSWORD}",
+			Password: "${FAIRPEER_PROXY_PASSWORD}",
 		},
 	}
 	orig.Skills.Paths = []string{"~/my-skills", "../shared/skills"}

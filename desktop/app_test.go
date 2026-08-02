@@ -576,13 +576,13 @@ func TestSaveProviderPersistsReasoningProtocol(t *testing.T) {
 
 func TestDeleteProviderMigratesConfigAndOpenTabs(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	t.Setenv("MOMAPEER_TEST_KEY", "sk-test")
+	t.Setenv("FAIRPEER_TEST_KEY", "sk-test")
 
 	cfg := config.Default()
 	cfg.DefaultModel = "prov-a/model-a2"
 	cfg.Providers = []config.ProviderEntry{
-		{Name: "prov-a", Kind: "openai", BaseURL: "https://a.example.com", Model: "model-a1", Models: []string{"model-a1", "model-a2"}, APIKeyEnv: "MOMAPEER_TEST_KEY"},
-		{Name: "prov-b", Kind: "openai", BaseURL: "https://b.example.com", Model: "model-b1", APIKeyEnv: "MOMAPEER_TEST_KEY"},
+		{Name: "prov-a", Kind: "openai", BaseURL: "https://a.example.com", Model: "model-a1", Models: []string{"model-a1", "model-a2"}, APIKeyEnv: "FAIRPEER_TEST_KEY"},
+		{Name: "prov-b", Kind: "openai", BaseURL: "https://b.example.com", Model: "model-b1", APIKeyEnv: "FAIRPEER_TEST_KEY"},
 	}
 	cfg.Agent.PlannerModel = "prov-a"
 	cfg.Desktop.ProviderAccess = []string{"prov-a", "prov-b"}
@@ -622,13 +622,13 @@ func TestDeleteProviderMigratesConfigAndOpenTabs(t *testing.T) {
 
 func TestDeleteProviderRejectsRunningAffectedTab(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	t.Setenv("MOMAPEER_TEST_KEY", "sk-test")
+	t.Setenv("FAIRPEER_TEST_KEY", "sk-test")
 
 	cfg := config.Default()
 	cfg.DefaultModel = "prov-a/model-a1"
 	cfg.Providers = []config.ProviderEntry{
-		{Name: "prov-a", Kind: "openai", BaseURL: "https://a.example.com", Model: "model-a1", APIKeyEnv: "MOMAPEER_TEST_KEY"},
-		{Name: "prov-b", Kind: "openai", BaseURL: "https://b.example.com", Model: "model-b1", APIKeyEnv: "MOMAPEER_TEST_KEY"},
+		{Name: "prov-a", Kind: "openai", BaseURL: "https://a.example.com", Model: "model-a1", APIKeyEnv: "FAIRPEER_TEST_KEY"},
+		{Name: "prov-b", Kind: "openai", BaseURL: "https://b.example.com", Model: "model-b1", APIKeyEnv: "FAIRPEER_TEST_KEY"},
 	}
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
@@ -1680,7 +1680,7 @@ func TestSetMCPServerTierEnablesCodegraphAndIgnoresLegacyTier(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", robustTempDir(t))
 	t.Setenv("AppData", robustTempDir(t))
 	t.Setenv("PATH", robustTempDir(t))
-	t.Setenv("MOMAPEER_CACHE_DIR", robustTempDir(t)) // isolate the codegraph bundle cache so Resolve fails deterministically
+	t.Setenv("FAIRPEER_CACHE_DIR", robustTempDir(t)) // isolate the codegraph bundle cache so Resolve fails deterministically
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "momapeer.toml"), []byte(`

@@ -362,12 +362,12 @@ func TestSessionAggregateCacheRate(t *testing.T) {
 
 func TestReleaseCacheHitGuard(t *testing.T) {
 	t.Skip("MoMA does not report prompt cache tokens")
-	if os.Getenv("MOMAPEER_RELEASE_CACHE_GUARD") == "" {
-		t.Skip("set MOMAPEER_RELEASE_CACHE_GUARD=1 to run the release cache guard")
+	if os.Getenv("FAIRPEER_RELEASE_CACHE_GUARD") == "" {
+		t.Skip("set FAIRPEER_RELEASE_CACHE_GUARD=1 to run the release cache guard")
 	}
 
-	threshold := envInt("MOMAPEER_CACHE_GUARD_THRESHOLD", 90)
-	maxLowCases := envInt("MOMAPEER_CACHE_GUARD_MAX_LOW_CASES", 1)
+	threshold := envInt("FAIRPEER_CACHE_GUARD_THRESHOLD", 90)
+	maxLowCases := envInt("FAIRPEER_CACHE_GUARD_MAX_LOW_CASES", 1)
 
 	cases := []struct {
 		name string
@@ -456,7 +456,7 @@ func TestReleaseCacheHitGuard(t *testing.T) {
 		}
 		msg := fmt.Sprintf("%d cache guard cases are below %d%%: %s", len(lows), threshold, strings.Join(parts, ", "))
 		t.Logf("CACHE_GUARD_WARNING: %s", msg)
-		if os.Getenv("MOMAPEER_CACHE_GUARD_STRICT") != "" {
+		if os.Getenv("FAIRPEER_CACHE_GUARD_STRICT") != "" {
 			t.Fatal(msg)
 		}
 	}

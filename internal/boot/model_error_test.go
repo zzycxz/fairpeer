@@ -29,7 +29,7 @@ name = "moma"
 kind = "openai"
 base_url = "https://example.invalid"
 model = "qwen3.6-35b"
-api_key_env = "MOMAPEER_TEST_KEY_UNSET"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 `)
 
 	_, err := Build(context.Background(), Options{Sink: event.Discard})
@@ -48,7 +48,7 @@ api_key_env = "MOMAPEER_TEST_KEY_UNSET"
 // builds fine (RequireKey is false so the UI stays reachable) but must emit a
 // notice naming the env var, instead of silently showing a dead/empty model.
 func TestBuildNoticesMissingAPIKey(t *testing.T) {
-	const keyEnv = "MOMAPEER_MISSING_KEY_FOR_TEST"
+	const keyEnv = "FAIRPEER_MISSING_KEY_FOR_TEST"
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "momapeer.toml", `

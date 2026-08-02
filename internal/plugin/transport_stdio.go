@@ -276,7 +276,7 @@ func defaultStdioShellPATH(ctx context.Context) string {
 	if shell == "" {
 		return ""
 	}
-	const marker = "__MOMAPEER_PATH__="
+	const marker = "__FAIRPEER_PATH__="
 	script := "printf '\\n" + marker + "%s\\n' \"$PATH\""
 	for _, args := range [][]string{
 		{"-l", "-i", "-c", script},

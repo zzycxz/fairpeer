@@ -207,7 +207,7 @@ var Chinese = Messages{
 	ArgEffortXHigh:      "超高推理",
 	ArgEffortMax:        "最高推理",
 	ArgThemeCurrent:     "当前",
-	ArgLanguageAuto:     "从 MOMAPEER_LANG / 系统 locale 自动检测",
+	ArgLanguageAuto:     "从 FAIRPEER_LANG / 系统 locale 自动检测",
 	ArgLanguageEn:       "English",
 	ArgLanguageZh:       "中文",
 

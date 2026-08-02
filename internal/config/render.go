@@ -46,17 +46,17 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	fmt.Fprintf(&b, "config_version = %d   # schema marker for diagnostics; old versions may ignore it\n", configVersion(c))
 	fmt.Fprintf(&b, "default_model = %q\n", c.DefaultModel)
 	if c.Language != "" {
-		fmt.Fprintf(&b, "language      = %q   # ui/model language; empty = auto-detect from $LANG / $MOMAPEER_LANG\n", c.Language)
+		fmt.Fprintf(&b, "language      = %q   # ui/model language; empty = auto-detect from $LANG / $FAIRPEER_LANG\n", c.Language)
 	} else {
-		b.WriteString("# language      = \"zh\"   # ui/model language; empty = auto-detect from $LANG / $MOMAPEER_LANG\n")
+		b.WriteString("# language      = \"zh\"   # ui/model language; empty = auto-detect from $LANG / $FAIRPEER_LANG\n")
 	}
 	b.WriteString("\n")
 
 	if shouldRenderUI(c, defaults, scope) {
 		b.WriteString("[ui]\n")
-		fmt.Fprintf(&b, "theme = %q   # auto|dark|light; CLI colors only; MOMAPEER_THEME can override per run\n", c.UITheme())
+		fmt.Fprintf(&b, "theme = %q   # auto|dark|light; CLI colors only; FAIRPEER_THEME can override per run\n", c.UITheme())
 		if style := c.UIThemeStyle(); style != "" {
-			fmt.Fprintf(&b, "theme_style = %q   # CLI accent palette; MOMAPEER_THEME_STYLE can override per run\n", style)
+			fmt.Fprintf(&b, "theme_style = %q   # CLI accent palette; FAIRPEER_THEME_STYLE can override per run\n", style)
 		} else {
 			b.WriteString("# theme_style = \"slate\"   # slate|graphite|aurora|midnight|sandstone|porcelain|linen|glacier\n")
 		}
@@ -144,7 +144,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		if c.Network.Proxy.Password != "" {
 			fmt.Fprintf(&b, "password = %q   # supports ${VAR} expansion\n", c.Network.Proxy.Password)
 		} else {
-			b.WriteString("# password = \"${MOMAPEER_PROXY_PASSWORD}\"   # optional; supports ${VAR} expansion\n")
+			b.WriteString("# password = \"${FAIRPEER_PROXY_PASSWORD}\"   # optional; supports ${VAR} expansion\n")
 		}
 		b.WriteString("\n")
 	}

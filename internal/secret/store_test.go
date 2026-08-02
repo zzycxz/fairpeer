@@ -70,7 +70,7 @@ func TestStoreCiphertextOnDisk(t *testing.T) {
 }
 
 func TestStoreLoadIntoEnv(t *testing.T) {
-	const key = "MOMAPEER_TEST_SECRET_XYZ_001"
+	const key = "FAIRPEER_TEST_SECRET_XYZ_001"
 	os.Unsetenv(key)
 	s := New(filepath.Join(t.TempDir(), "secrets.enc.json"))
 	if err := s.Set(key, "hello-env"); err != nil {

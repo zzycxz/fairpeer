@@ -44,10 +44,10 @@ func SetDownloadBase(url string) { customDownloadBase = strings.TrimSpace(url) }
 
 // CacheDir is where the CodeGraph bundle is unpacked on first use:
 // <user cache>/momapeer/codegraph/<Version>. Versioned so a bump installs cleanly
-// beside the old one. MOMAPEER_CACHE_DIR overrides the base (relocate the cache,
+// beside the old one. FAIRPEER_CACHE_DIR overrides the base (relocate the cache,
 // or isolate it in tests). Empty when no cache/config dir resolves.
 func CacheDir() string {
-	base := os.Getenv("MOMAPEER_CACHE_DIR")
+	base := os.Getenv("FAIRPEER_CACHE_DIR")
 	if base == "" {
 		var err error
 		if base, err = os.UserCacheDir(); err != nil {
@@ -155,7 +155,7 @@ func InstallWithClient(ctx context.Context, client *http.Client, log func(string
 		if p, ok := cached(); ok {
 			return p, nil // a concurrent winner landed during our retries
 		}
-		return "", fmt.Errorf("codegraph: install to %s failed: %w — the cache directory may be read-only or locked by antivirus; set MOMAPEER_CACHE_DIR to a writable location to relocate it", dir, err)
+		return "", fmt.Errorf("codegraph: install to %s failed: %w — the cache directory may be read-only or locked by antivirus; set FAIRPEER_CACHE_DIR to a writable location to relocate it", dir, err)
 	}
 	p, ok := cached()
 	if !ok {

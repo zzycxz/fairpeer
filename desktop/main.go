@@ -43,7 +43,7 @@ var version = "dev"
 // tracks the opt-in pre-release line and never crosses over to stable.
 var channel = "stable"
 
-const disableWebview2GPUEnv = "MOMAPEER_DESKTOP_DISABLE_WEBVIEW2_GPU"
+const disableWebview2GPUEnv = "FAIRPEER_DESKTOP_DISABLE_WEBVIEW2_GPU"
 
 func windowsWebview2GPUDisabled() bool {
 	if raw, ok := os.LookupEnv(disableWebview2GPUEnv); ok {

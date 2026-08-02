@@ -616,7 +616,7 @@ api_key_env = "JIUTIAN_API_KEY"
 - CLI（所有工具描述、帮助文本）
 - 工具输出（错误信息、状态提示）
 
-`language` 配置项或自动检测（`$LANG` / `$MOMAPEER_LANG`）。
+`language` 配置项或自动检测（`$LANG` / `$FAIRPEER_LANG`）。
 
 ---
 

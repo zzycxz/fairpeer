@@ -399,8 +399,8 @@ func TestMCPEditConfigLaunchEditorRejectsShellMetachars(t *testing.T) {
 // the behavior of the prior sh -lc path for users who set values such as
 // EDITOR="$HOME/bin/myeditor" verbatim.
 func TestMCPEditConfigLaunchEditorExpandsEnvVar(t *testing.T) {
-	t.Setenv("MOMAPEER_TEST_EDITOR_BIN", "/opt/custom/bin/myed")
-	t.Setenv("VISUAL", "$MOMAPEER_TEST_EDITOR_BIN --flag")
+	t.Setenv("FAIRPEER_TEST_EDITOR_BIN", "/opt/custom/bin/myed")
+	t.Setenv("VISUAL", "$FAIRPEER_TEST_EDITOR_BIN --flag")
 	t.Setenv("EDITOR", "")
 
 	path := "/tmp/momapeer.toml"
@@ -542,7 +542,7 @@ func TestApplyMCPModeRecordsPluginConnectFailure(t *testing.T) {
 func TestApplyMCPModeRecordsCodegraphConnectFailure(t *testing.T) {
 	isolateUserConfig(t)
 	t.Setenv("PATH", "")
-	t.Setenv("MOMAPEER_CACHE_DIR", t.TempDir())
+	t.Setenv("FAIRPEER_CACHE_DIR", t.TempDir())
 	cfg := config.Default()
 	cfg.Codegraph.Enabled = false
 	cfg.Codegraph.Tier = "eager"

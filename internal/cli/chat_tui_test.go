@@ -976,7 +976,7 @@ func TestLanguageCommandAutoClearsPinnedLanguage(t *testing.T) {
 
 func TestLanguageCommandAutoClearsLowerPriorityUserOverride(t *testing.T) {
 	isolateUserConfig(t)
-	t.Setenv("MOMAPEER_LANG", "")
+	t.Setenv("FAIRPEER_LANG", "")
 	t.Setenv("LC_ALL", "")
 	t.Setenv("LC_MESSAGES", "")
 	t.Setenv("LANG", "")

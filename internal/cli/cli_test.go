@@ -532,10 +532,10 @@ func TestFetchOrFallback(t *testing.T) {
 	})
 
 	t.Run("no key set returns static list (offline first-run)", func(t *testing.T) {
-		t.Setenv("MOMAPEER_FETCH_TEST_KEY", "")
+		t.Setenv("FAIRPEER_FETCH_TEST_KEY", "")
 		probe := config.ProviderEntry{
 			BaseURL:   "http://127.0.0.1:1", // unreachable, no listener
-			APIKeyEnv: "MOMAPEER_FETCH_TEST_KEY",
+			APIKeyEnv: "FAIRPEER_FETCH_TEST_KEY",
 			Models:    []string{"preset-a"},
 		}
 		got := fetchOrFallback(&probe, "Test")

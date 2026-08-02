@@ -179,7 +179,7 @@ handled here, and what to reach for if a target misbehaves:
 - **Windows / WebView2** — `Theme: SystemDefault` follows the OS light/dark
   setting; the installer embeds the WebView2 bootstrapper. Canary builds disable
   WebView2 GPU acceleration by default to smoke-test blank-window reports; set
-  `MOMAPEER_DESKTOP_DISABLE_WEBVIEW2_GPU=1` or `0` to force the fallback on or
+  `FAIRPEER_DESKTOP_DISABLE_WEBVIEW2_GPU=1` or `0` to force the fallback on or
   off.
 - **macOS / WebKit** — inset/hidden title bar (`TitleBarHiddenInset`); the CSS
   marks the top bar as an OS drag region (`--wails-draggable: drag`) and leaves

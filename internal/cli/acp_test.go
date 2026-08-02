@@ -70,7 +70,7 @@ func TestACPInitializesWithoutAPIKey(t *testing.T) {
 
 func TestACPFactoryLoadsSessionCwdProjectConfig(t *testing.T) {
 	home := isolateCLIConfigHome(t)
-	t.Setenv("MOMAPEER_TEST_KEY", "test-key")
+	t.Setenv("FAIRPEER_TEST_KEY", "test-key")
 	project := t.TempDir()
 	if err := os.WriteFile(filepath.Join(project, "momapeer.toml"), []byte(`
 default_model = "local"
@@ -83,7 +83,7 @@ name = "local"
 kind = "acp-test-provider"
 base_url = "http://example.invalid"
 model = "fake-model"
-api_key_env = "MOMAPEER_TEST_KEY"
+api_key_env = "FAIRPEER_TEST_KEY"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}

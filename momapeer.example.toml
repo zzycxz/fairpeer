@@ -3,10 +3,10 @@
 # Secrets come from the environment via api_key_env; never put keys here.
 
 default_model = "moma/qwen/qwen3.6-35b"   # MoMA default model
-# language      = "zh"   # ui language; empty = auto-detect from $LANG / $MOMAPEER_LANG
+# language      = "zh"   # ui language; empty = auto-detect from $LANG / $FAIRPEER_LANG
 
 [ui]
-theme = "auto"   # auto|dark|light; controls CLI colors only; MOMAPEER_THEME can override per run
+theme = "auto"   # auto|dark|light; controls CLI colors only; FAIRPEER_THEME can override per run
 # theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber|ember|midnight|sandstone|porcelain|linen|glacier
 # shortcut_layout = "desktop"   # classic|desktop; compatibility setting; Shift+Tab toggles Plan, Ctrl+Y toggles YOLO
 

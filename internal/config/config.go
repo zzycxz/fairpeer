@@ -41,7 +41,7 @@ func SkillNameKey(name string) string {
 type Config struct {
 	ConfigVersion int    `toml:"config_version"`
 	DefaultModel  string `toml:"default_model"`
-	Language      string `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $MOMAPEER_LANG
+	Language      string `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $FAIRPEER_LANG
 	// ReasoningLanguage steers ONLY the visible thinking/reasoning text language
 	// (auto|zh|en), independent of the final-answer language. Default "auto" leaves
 	// it to the provider. It is injected as a transient per-turn block, never into

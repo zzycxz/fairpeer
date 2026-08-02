@@ -27,7 +27,7 @@ never stored in config files.
 
 ```toml
 default_model = "moma/qwen/qwen3.6-35b"   # executor; set [agent].planner_model to add a planner
-# language    = "zh"               # ui language; empty = auto-detect from $LANG / $MOMAPEER_LANG
+# language    = "zh"               # ui language; empty = auto-detect from $LANG / $FAIRPEER_LANG
 
 [ui]
 # shortcut_layout = "desktop"      # classic|desktop; compatibility setting

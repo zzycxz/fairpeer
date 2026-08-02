@@ -26,7 +26,7 @@
 
 ```toml
 default_model = "moma/qwen/qwen3.6-35b"   # 执行器；设 [agent].planner_model 可加规划器
-# language    = "zh"               # 界面语言；为空则按 $LANG / $MOMAPEER_LANG 自动检测
+# language    = "zh"               # 界面语言；为空则按 $LANG / $FAIRPEER_LANG 自动检测
 
 [ui]
 # shortcut_layout = "desktop"      # classic|desktop；兼容旧配置

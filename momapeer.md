@@ -24,7 +24,7 @@ momapeer 是一个基于 Go 语言构建的、配置驱动的 AI 编程智能体
 | npm 包 | `momapeer` |
 | CLI 命令 | `momapeer` |
 | 配置文件 | `momapeer.toml` |
-| 环境变量前缀 | `MOMAPEER_*` |
+| 环境变量前缀 | `FAIRPEER_*` |
 | 记忆文件 | `momapeer.md` / `AGENTS.md` |
 
 ## 架构概览

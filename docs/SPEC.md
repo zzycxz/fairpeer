@@ -230,7 +230,7 @@ type Chunk struct {
 
 ```toml
 default_model = "moma"   # provider 的名称 (将指向其默认模型) 或者是 "provider/model" 显式格式
-# language    = "zh"     # 界面语言环境；为空则根据 $LANG / $MOMAPEER_LANG 自动检测
+# language    = "zh"     # 界面语言环境；为空则根据 $LANG / $FAIRPEER_LANG 自动检测
 
 [agent]
 system_prompt = "You are momapeer, a coding agent..."  # 或者使用 system_prompt_file = "..." 引入外部文件
