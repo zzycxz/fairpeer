@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/command"
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/memory"
-	"github.com/zzycxz/momapeer/internal/provider"
-	"github.com/zzycxz/momapeer/internal/skill"
+	"github.com/zzycxz/fairpeer/internal/command"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/memory"
+	"github.com/zzycxz/fairpeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/skill"
 )
 
 type fakeAutoPlanClassifier struct {

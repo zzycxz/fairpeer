@@ -3,7 +3,7 @@ package main
 import (
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/config"
 )
 
 // desktopSessionDirFor returns the session directory for a workspace root

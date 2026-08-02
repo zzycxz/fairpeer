@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // probeResult captures the cache-relevant numbers from one real completion.

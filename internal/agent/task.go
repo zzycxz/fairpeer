@@ -8,10 +8,10 @@ import (
 	"io"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/jobs"
-	"github.com/zzycxz/momapeer/internal/provider"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/jobs"
+	"github.com/zzycxz/fairpeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // DefaultTaskSystemPrompt steers a sub-agent toward focused, terse delivery —

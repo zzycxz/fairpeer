@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // Turn describes one expected Stream call: the text, optional reasoning,

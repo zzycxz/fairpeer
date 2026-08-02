@@ -11,10 +11,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/provider"
-	"github.com/zzycxz/momapeer/internal/tool"
-	_ "github.com/zzycxz/momapeer/internal/tool/builtin"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/tool"
+	_ "github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 // TestTruncateToolOutputUnderCap leaves small payloads alone — the cap should

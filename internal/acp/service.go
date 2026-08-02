@@ -13,12 +13,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/agent"
-	"github.com/zzycxz/momapeer/internal/control"
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/fileutil"
-	"github.com/zzycxz/momapeer/internal/plugin"
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/agent"
+	"github.com/zzycxz/fairpeer/internal/control"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/fileutil"
+	"github.com/zzycxz/fairpeer/internal/plugin"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // SessionParams is everything a Factory needs to assemble one ACP session's

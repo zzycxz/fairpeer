@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/jobs"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/jobs"
 )
 
 // End-to-end through the actual tools: a background bash job runs under a manager

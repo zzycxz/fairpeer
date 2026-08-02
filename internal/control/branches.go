@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/agent"
+	"github.com/zzycxz/fairpeer/internal/agent"
 )
 
 // ParseBranchTarget parses the arguments after "/branch". A leading positive

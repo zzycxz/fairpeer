@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // TestStdioEndToEnd drives a real subprocess (this test binary re-invoked in

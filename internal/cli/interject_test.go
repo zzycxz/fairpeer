@@ -5,8 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/zzycxz/momapeer/internal/control"
-	"github.com/zzycxz/momapeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/control"
+	"github.com/zzycxz/fairpeer/internal/event"
 )
 
 func TestInterjectQueuesWhileRunningWithoutOverwrite(t *testing.T) {

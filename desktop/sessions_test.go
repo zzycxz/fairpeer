@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/agent"
+	"github.com/zzycxz/fairpeer/internal/agent"
 )
 
 // --- loadSessionTitles ---

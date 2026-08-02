@@ -7,14 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/acp"
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/netclient"
-	"github.com/zzycxz/momapeer/internal/provider"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/acp"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/netclient"
+	"github.com/zzycxz/fairpeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/tool"
 
-	_ "github.com/zzycxz/momapeer/internal/tool/builtin"
+	_ "github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 const acpTestProviderKind = "acp-test-provider"

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/provider/openai"
+	"github.com/zzycxz/fairpeer/internal/provider/openai"
 )
 
 var knownModelFetchCompatSuffixes = []string{

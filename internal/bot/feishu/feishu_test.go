@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/bot"
-	"github.com/zzycxz/momapeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/bot"
+	"github.com/zzycxz/fairpeer/internal/config"
 )
 
 func TestVerificationTokenValidRequiresConfiguredToken(t *testing.T) {

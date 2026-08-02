@@ -10,7 +10,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // TodoItem mirrors the todo_write item shape the host needs for step matching.

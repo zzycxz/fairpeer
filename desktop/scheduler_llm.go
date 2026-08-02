@@ -26,9 +26,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/boot"
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/jiutian"
+	"github.com/zzycxz/fairpeer/internal/boot"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/jiutian"
 )
 
 // llmResolveTimeTimeout bounds a single LLM time-parse call. PreviewSchedule is a

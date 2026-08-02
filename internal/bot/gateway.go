@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/boot"
-	"github.com/zzycxz/momapeer/internal/control"
-	"github.com/zzycxz/momapeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/boot"
+	"github.com/zzycxz/fairpeer/internal/control"
+	"github.com/zzycxz/fairpeer/internal/event"
 )
 
 // GatewayConfig 是 BotGateway 的配置。

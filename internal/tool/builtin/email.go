@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // Email tools (Phase 3 of coWork). Phase 3 ships outbound email_send (SMTP,

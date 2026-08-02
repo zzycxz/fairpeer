@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/skill"
+	"github.com/zzycxz/fairpeer/internal/skill"
 )
 
 var reComposeBlock = regexp.MustCompile(`(?s)^\s*<(?:memory-update|background-jobs)>.*?</(?:memory-update|background-jobs)>\s*\n`)

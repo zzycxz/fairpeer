@@ -23,8 +23,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/bot"
-	"github.com/zzycxz/momapeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/bot"
+	"github.com/zzycxz/fairpeer/internal/config"
 )
 
 const (

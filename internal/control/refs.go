@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/proc"
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/proc"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // maxFileRefBytes caps how much of an @-referenced file is injected into a

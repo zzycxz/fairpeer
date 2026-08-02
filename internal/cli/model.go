@@ -5,8 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/i18n"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/i18n"
 )
 
 // runModelSubcommand handles "/model": with no argument it lists the configured

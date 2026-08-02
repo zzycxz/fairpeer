@@ -1,8 +1,8 @@
 package notify
 
 import (
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/event"
 )
 
 // Message is the user-visible payload sent to the platform notifier.

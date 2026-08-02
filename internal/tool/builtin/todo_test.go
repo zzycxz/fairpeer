@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/evidence"
+	"github.com/zzycxz/fairpeer/internal/evidence"
 )
 
 func TestTodoWriteAcceptsLevels(t *testing.T) {

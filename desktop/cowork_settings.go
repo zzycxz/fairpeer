@@ -11,11 +11,11 @@ import (
 	"strings"
 	"sync"
 
-	skillassets "github.com/zzycxz/momapeer/internal/assets"
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/ppttemplate"
-	"github.com/zzycxz/momapeer/internal/secret"
-	"github.com/zzycxz/momapeer/internal/tool/builtin"
+	skillassets "github.com/zzycxz/fairpeer/internal/assets"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/ppttemplate"
+	"github.com/zzycxz/fairpeer/internal/secret"
+	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 // CoWorkSettingsView is the settings-panel view of the coWork profile config.

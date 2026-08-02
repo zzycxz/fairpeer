@@ -1,4 +1,4 @@
-module github.com/zzycxz/momapeer
+module github.com/zzycxz/fairpeer
 
 go 1.26
 

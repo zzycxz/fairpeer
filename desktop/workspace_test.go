@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/config"
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
 

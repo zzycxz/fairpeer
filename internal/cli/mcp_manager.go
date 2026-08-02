@@ -7,9 +7,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/mcpdiag"
-	"github.com/zzycxz/momapeer/internal/plugin"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/mcpdiag"
+	"github.com/zzycxz/fairpeer/internal/plugin"
 )
 
 const (

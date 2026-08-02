@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/event"
 )
 
 // AskTool lets the model put a structured multiple-choice question (or a few) to

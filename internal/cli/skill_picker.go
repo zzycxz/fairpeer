@@ -9,8 +9,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/zzycxz/momapeer/internal/i18n"
-	"github.com/zzycxz/momapeer/internal/skill"
+	"github.com/zzycxz/fairpeer/internal/i18n"
+	"github.com/zzycxz/fairpeer/internal/skill"
 )
 
 var scopePriority = map[skill.Scope]int{

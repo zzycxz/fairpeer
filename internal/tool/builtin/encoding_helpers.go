@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	fileenc "github.com/zzycxz/momapeer/internal/fileutil/encoding"
+	fileenc "github.com/zzycxz/fairpeer/internal/fileutil/encoding"
 )
 
 // readFileEncoded reads a file and decodes its encoding to UTF-8.

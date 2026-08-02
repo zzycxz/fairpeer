@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/bot"
+	"github.com/zzycxz/fairpeer/internal/bot"
 
 	"golang.org/x/net/websocket"
 )

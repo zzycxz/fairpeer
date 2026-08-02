@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/hook"
+	"github.com/zzycxz/fairpeer/internal/hook"
 )
 
 type HookConfigView struct {

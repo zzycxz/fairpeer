@@ -8,9 +8,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/hook"
-	"github.com/zzycxz/momapeer/internal/skill"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/hook"
+	"github.com/zzycxz/fairpeer/internal/skill"
 )
 
 func (m *chatTUI) runSkillSubcommand(input string) {

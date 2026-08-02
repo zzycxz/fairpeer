@@ -13,7 +13,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/config"
 )
 
 // telemetry_app.go is the anonymous launch ping: one POST per app start carrying a

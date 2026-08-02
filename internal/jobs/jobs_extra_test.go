@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/event"
 )
 
 type typedNilJobSink struct{}

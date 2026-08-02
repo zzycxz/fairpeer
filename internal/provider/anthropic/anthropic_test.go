@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // TestBuildRequest covers the protocol conversion: system lift, tool_use /

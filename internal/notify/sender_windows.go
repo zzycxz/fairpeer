@@ -5,7 +5,7 @@ package notify
 import (
 	"os/exec"
 
-	"github.com/zzycxz/momapeer/internal/proc"
+	"github.com/zzycxz/fairpeer/internal/proc"
 )
 
 // PlatformSender delivers notifications through the host OS.

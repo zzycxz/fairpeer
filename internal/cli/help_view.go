@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/command"
-	"github.com/zzycxz/momapeer/internal/i18n"
-	"github.com/zzycxz/momapeer/internal/plugin"
-	"github.com/zzycxz/momapeer/internal/skill"
+	"github.com/zzycxz/fairpeer/internal/command"
+	"github.com/zzycxz/fairpeer/internal/i18n"
+	"github.com/zzycxz/fairpeer/internal/plugin"
+	"github.com/zzycxz/fairpeer/internal/skill"
 )
 
 const helpMaxDynamicItems = 8

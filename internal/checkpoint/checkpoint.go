@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/diff"
-	fileenc "github.com/zzycxz/momapeer/internal/fileutil/encoding"
+	"github.com/zzycxz/fairpeer/internal/diff"
+	fileenc "github.com/zzycxz/fairpeer/internal/fileutil/encoding"
 )
 
 // FileSnap is one file's state at the moment it was first touched in a turn.

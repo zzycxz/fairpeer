@@ -12,15 +12,15 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/zzycxz/momapeer/internal/diff"
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/evidence"
-	"github.com/zzycxz/momapeer/internal/instruction"
-	"github.com/zzycxz/momapeer/internal/jobs"
-	"github.com/zzycxz/momapeer/internal/memory"
-	"github.com/zzycxz/momapeer/internal/nilutil"
-	"github.com/zzycxz/momapeer/internal/provider"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/diff"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/evidence"
+	"github.com/zzycxz/fairpeer/internal/instruction"
+	"github.com/zzycxz/fairpeer/internal/jobs"
+	"github.com/zzycxz/fairpeer/internal/memory"
+	"github.com/zzycxz/fairpeer/internal/nilutil"
+	"github.com/zzycxz/fairpeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // maxToolOutputBytes caps a single tool result before it goes into the model's

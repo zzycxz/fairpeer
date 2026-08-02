@@ -21,10 +21,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/control"
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/experts"
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/control"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/experts"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // expertRunStatus labels an in-flight run's phase for the frontend.

@@ -21,9 +21,9 @@ import (
 	"github.com/minio/selfupdate"
 	"golang.org/x/mod/semver"
 
-	"github.com/zzycxz/momapeer/desktop/internal/update"
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/netclient"
+	"github.com/zzycxz/fairpeer/desktop/internal/update"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/netclient"
 )
 
 // updater.go is the transport-free core of the desktop auto-updater: manifest
@@ -33,7 +33,7 @@ import (
 
 // Manifest endpoints — GitHub releases as the sole source.
 const (
-	ghReleasesBase = "https://github.com/zzycxz/momapeer/releases"
+	ghReleasesBase = "https://github.com/zzycxz/fairpeer/releases"
 	httpTimeout    = 15 * time.Second
 )
 

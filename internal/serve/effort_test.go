@@ -3,7 +3,7 @@ package serve
 import (
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/config"
 )
 
 func TestApplyEffortEditUpsertsMissingProvider(t *testing.T) {

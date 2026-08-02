@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/event"
 )
 
 // TestTextSinkSkipsPartialDispatch probes the headless sink against the early

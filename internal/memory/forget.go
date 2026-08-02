@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // forgetTool deletes a saved memory the model judges wrong or stale. Like

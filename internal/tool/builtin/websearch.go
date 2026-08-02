@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/netclient"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/netclient"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 func init() { tool.RegisterBuiltin(webSearch{}) }

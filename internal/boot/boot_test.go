@@ -18,20 +18,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/agent"
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/instruction"
-	"github.com/zzycxz/momapeer/internal/netclient"
-	"github.com/zzycxz/momapeer/internal/plugin"
-	"github.com/zzycxz/momapeer/internal/provider"
-	"github.com/zzycxz/momapeer/internal/sandbox"
-	"github.com/zzycxz/momapeer/internal/tool"
-	"github.com/zzycxz/momapeer/internal/tool/builtin"
+	"github.com/zzycxz/fairpeer/internal/agent"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/instruction"
+	"github.com/zzycxz/fairpeer/internal/netclient"
+	"github.com/zzycxz/fairpeer/internal/plugin"
+	"github.com/zzycxz/fairpeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/sandbox"
+	"github.com/zzycxz/fairpeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 
 	// Blank import registers the provider kind the same way cmd/momapeer's main
 	// does; importing builtin above registers the built-in tools.
-	_ "github.com/zzycxz/momapeer/internal/provider/openai"
+	_ "github.com/zzycxz/fairpeer/internal/provider/openai"
 )
 
 // TestBuildFoldsProjectMemoryIntoSystemPrompt is the end-to-end proof of the

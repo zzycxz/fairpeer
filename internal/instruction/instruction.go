@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/memory"
-	"github.com/zzycxz/momapeer/internal/provider/openai"
+	"github.com/zzycxz/fairpeer/internal/memory"
+	"github.com/zzycxz/fairpeer/internal/provider/openai"
 )
 
 // VerifyCheck is a host-observable project check extracted from structured

@@ -10,7 +10,7 @@ import (
 
 	"aead.dev/minisign"
 
-	"github.com/zzycxz/momapeer/desktop/internal/update"
+	"github.com/zzycxz/fairpeer/desktop/internal/update"
 )
 
 // TestSignFiles signs a file with a throwaway key pair (injected via env, exactly
@@ -89,11 +89,11 @@ func TestGenManifest(t *testing.T) {
 	if !ok {
 		t.Fatal("windows-amd64 missing")
 	}
-	wantURL := "https://github.com/zzycxz/momapeer/releases/download/desktop-v1.2.0/momapeer-windows-amd64.exe"
+	wantURL := "https://github.com/zzycxz/fairpeer/releases/download/desktop-v1.2.0/momapeer-windows-amd64.exe"
 	if win.URL != wantURL {
 		t.Fatalf("windows url = %q, want %q", win.URL, wantURL)
 	}
-	wantSig := "https://github.com/zzycxz/momapeer/releases/download/desktop-v1.2.0-sigs/momapeer-windows-amd64.exe.minisig"
+	wantSig := "https://github.com/zzycxz/fairpeer/releases/download/desktop-v1.2.0-sigs/momapeer-windows-amd64.exe.minisig"
 	if win.Sig != wantSig {
 		t.Fatalf("windows sig = %q, want %q", win.Sig, wantSig)
 	}

@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // DefaultStartupBudget is the per-plugin latency budget used by boot when

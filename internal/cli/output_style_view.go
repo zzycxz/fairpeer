@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/outputstyle"
+	"github.com/zzycxz/fairpeer/internal/outputstyle"
 )
 
 func renderOutputStyles(width int, styles []outputstyle.OutputStyle, active string) string {

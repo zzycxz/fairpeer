@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/sandbox"
+	"github.com/zzycxz/fairpeer/internal/sandbox"
 )
 
 func powershellPath(t *testing.T) string {

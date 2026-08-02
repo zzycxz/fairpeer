@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/zzycxz/momapeer/internal/codegraph"
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/netclient"
+	"github.com/zzycxz/fairpeer/internal/codegraph"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/netclient"
 )
 
 // codegraphCommand backs `momapeer codegraph` — managing the CodeGraph

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/diff"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/diff"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 func init() { tool.RegisterBuiltin(deleteRange{}) }

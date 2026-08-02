@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/zzycxz/momapeer/internal/jiutian"
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/jiutian"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // VLM 可切换调用层。screen_perceive 的视觉理解走一条降级链：优先 provider

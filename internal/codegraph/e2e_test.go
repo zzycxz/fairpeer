@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/plugin"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/plugin"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // TestE2ECodegraphMCP drives the whole integration against a real CodeGraph

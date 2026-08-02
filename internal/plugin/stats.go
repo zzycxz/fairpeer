@@ -18,7 +18,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/config"
 )
 
 const (

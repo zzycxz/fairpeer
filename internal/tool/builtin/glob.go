@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 func init() { tool.RegisterBuiltin(globTool{}) }

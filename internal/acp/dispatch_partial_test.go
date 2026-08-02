@@ -3,7 +3,7 @@ package acp
 import (
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/event"
 )
 
 // TestUpdateSinkSkipsPartialDispatch probes the ACP adapter against the early

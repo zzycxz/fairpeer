@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 const goalJudgeTimeout = 60 * time.Second

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/control"
+	"github.com/zzycxz/fairpeer/internal/control"
 )
 
 // TestControllerAccessorIsRaceSafe guards the switchModel concurrency contract:

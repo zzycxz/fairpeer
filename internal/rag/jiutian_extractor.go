@@ -20,7 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/zzycxz/momapeer/internal/jiutian"
+	"github.com/zzycxz/fairpeer/internal/jiutian"
 )
 
 // JiutianExtractorConfig configures the LLM-backed extractor.

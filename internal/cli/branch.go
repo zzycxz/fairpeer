@@ -6,8 +6,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/zzycxz/momapeer/internal/agent"
-	"github.com/zzycxz/momapeer/internal/control"
+	"github.com/zzycxz/fairpeer/internal/agent"
+	"github.com/zzycxz/fairpeer/internal/control"
 )
 
 func (m *chatTUI) showBranchTree() {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/control"
+	"github.com/zzycxz/fairpeer/internal/control"
 )
 
 func testTab(id, root string) *WorkspaceTab {

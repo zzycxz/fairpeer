@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/zzycxz/momapeer/internal/i18n"
+	"github.com/zzycxz/fairpeer/internal/i18n"
 )
 
 // errCancelled is returned by selectOne when the user aborts (q or Ctrl-C).

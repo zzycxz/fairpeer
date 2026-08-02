@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/proc"
+	"github.com/zzycxz/fairpeer/internal/proc"
 )
 
 // psUTF8Prologue forces PowerShell to emit UTF-8 instead of the host's OEM code

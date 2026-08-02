@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/proc"
+	"github.com/zzycxz/fairpeer/internal/proc"
 )
 
 const closeWaitBudget = 5 * time.Second

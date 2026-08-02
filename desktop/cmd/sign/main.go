@@ -29,7 +29,7 @@ import (
 
 	"aead.dev/minisign"
 
-	"github.com/zzycxz/momapeer/desktop/internal/update"
+	"github.com/zzycxz/fairpeer/desktop/internal/update"
 )
 
 // platforms are the manifest keys we publish. A built artifact is matched to a key

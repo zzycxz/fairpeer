@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/codegraph"
-	"github.com/zzycxz/momapeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/codegraph"
+	"github.com/zzycxz/fairpeer/internal/config"
 )
 
 // mcp.go holds the MCP server-management surface shared by the `momapeer mcp`

@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/config"
 )
 
 // Win32 API for keyboard state polling.

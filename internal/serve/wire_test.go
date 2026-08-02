@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 func TestToWire(t *testing.T) {

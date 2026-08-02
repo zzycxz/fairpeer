@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/diff"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/diff"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // TestWritersImplementPreviewer locks in that every file-writer exposes the

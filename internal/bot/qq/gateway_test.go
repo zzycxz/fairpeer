@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/bot"
+	"github.com/zzycxz/fairpeer/internal/bot"
 )
 
 func TestHandleDispatchDirectMessageUsesDirectChatType(t *testing.T) {

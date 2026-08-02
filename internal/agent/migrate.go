@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // legacyEvent is the subset of the v0.x typed event stream (<name>.events.jsonl)

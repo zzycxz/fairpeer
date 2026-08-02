@@ -16,8 +16,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/zzycxz/momapeer/internal/netclient"
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/netclient"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 var validSkillName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)

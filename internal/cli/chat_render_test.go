@@ -6,7 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 
-	"github.com/zzycxz/momapeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/event"
 )
 
 // newTestChatTUI builds a chatTUI with just the pieces the streaming/commit and

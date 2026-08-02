@@ -18,8 +18,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/frontmatter"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/frontmatter"
 )
 
 // Scope records where a skill was loaded from. Higher-priority scopes win on a

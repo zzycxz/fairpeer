@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/sandbox"
+	"github.com/zzycxz/fairpeer/internal/sandbox"
 )
 
 func TestBashForegroundTimeoutConfig(t *testing.T) {

@@ -18,7 +18,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/assets"
+	"github.com/zzycxz/fairpeer/internal/assets"
 )
 
 // Template is one PPT template spec, parsed from a JSON file in the templates

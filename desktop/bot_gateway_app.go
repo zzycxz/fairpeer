@@ -5,12 +5,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/bot"
-	"github.com/zzycxz/momapeer/internal/bot/feishu"
-	"github.com/zzycxz/momapeer/internal/bot/qq"
-	"github.com/zzycxz/momapeer/internal/bot/weixin"
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/tool/builtin"
+	"github.com/zzycxz/fairpeer/internal/bot"
+	"github.com/zzycxz/fairpeer/internal/bot/feishu"
+	"github.com/zzycxz/fairpeer/internal/bot/qq"
+	"github.com/zzycxz/fairpeer/internal/bot/weixin"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 // startBotGateway 启动内嵌的 bot gateway。

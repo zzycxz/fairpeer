@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/desktop/internal/update"
+	"github.com/zzycxz/fairpeer/desktop/internal/update"
 )
 
 func TestNormalizeVersion(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // TestSessionConcurrentAddAndRead models the real hazard: the run loop appends

@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/bot"
-	"github.com/zzycxz/momapeer/internal/bot/feishu"
-	"github.com/zzycxz/momapeer/internal/bot/qq"
-	"github.com/zzycxz/momapeer/internal/bot/weixin"
-	"github.com/zzycxz/momapeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/bot"
+	"github.com/zzycxz/fairpeer/internal/bot/feishu"
+	"github.com/zzycxz/fairpeer/internal/bot/qq"
+	"github.com/zzycxz/fairpeer/internal/bot/weixin"
+	"github.com/zzycxz/fairpeer/internal/config"
 )
 
 func botCommand(args []string, version string) int {

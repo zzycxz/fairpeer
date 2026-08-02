@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/control"
-	"github.com/zzycxz/momapeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/control"
+	"github.com/zzycxz/fairpeer/internal/event"
 )
 
 // renderSink 将 momapeer 事件流渲染为平台消息。

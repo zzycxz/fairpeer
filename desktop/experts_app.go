@@ -20,15 +20,15 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
-	"github.com/zzycxz/momapeer/internal/agent"
-	"github.com/zzycxz/momapeer/internal/boot"
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/experts"
-	"github.com/zzycxz/momapeer/internal/netclient"
-	"github.com/zzycxz/momapeer/internal/provider"
-	"github.com/zzycxz/momapeer/internal/tool"
-	"github.com/zzycxz/momapeer/internal/tool/builtin"
+	"github.com/zzycxz/fairpeer/internal/agent"
+	"github.com/zzycxz/fairpeer/internal/boot"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/experts"
+	"github.com/zzycxz/fairpeer/internal/netclient"
+	"github.com/zzycxz/fairpeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 // TeamView is the JSON-friendly projection of experts.Team.

@@ -27,7 +27,7 @@ import (
 	cdptarget "github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // Browser automation tools (Phase 1 of coWork). These drive a real Chromium via

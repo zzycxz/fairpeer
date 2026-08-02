@@ -21,8 +21,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // cacheableToolsOf extracts the persistable subset of remote tools so Start()

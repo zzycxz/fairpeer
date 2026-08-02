@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/rag"
+	"github.com/zzycxz/fairpeer/internal/rag"
 )
 
 // jiutianEmbedder is a rag.Embedder backed by the Jiutian (MoMA) platform's

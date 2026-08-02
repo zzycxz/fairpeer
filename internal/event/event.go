@@ -12,9 +12,9 @@
 package event
 
 import (
-	"github.com/zzycxz/momapeer/internal/evidence"
-	"github.com/zzycxz/momapeer/internal/nilutil"
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/evidence"
+	"github.com/zzycxz/fairpeer/internal/nilutil"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // Kind tags an Event. Read the field(s) documented for that kind.

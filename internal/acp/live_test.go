@@ -18,11 +18,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/agent"
-	"github.com/zzycxz/momapeer/internal/control"
-	"github.com/zzycxz/momapeer/internal/provider"
-	_ "github.com/zzycxz/momapeer/internal/provider/openai" // registers the "openai" provider kind
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/agent"
+	"github.com/zzycxz/fairpeer/internal/control"
+	"github.com/zzycxz/fairpeer/internal/provider"
+	_ "github.com/zzycxz/fairpeer/internal/provider/openai" // registers the "openai" provider kind
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 type liveFactory struct{ prov provider.Provider }

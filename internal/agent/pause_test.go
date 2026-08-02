@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/agent/testutil"
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/provider"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/agent/testutil"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // This file tests the graceful pause/resume mechanism (coWork Harness module 2).

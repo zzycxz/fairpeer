@@ -3,7 +3,7 @@ package builtin
 import (
 	"context"
 
-	"github.com/zzycxz/momapeer/internal/jiutian"
+	"github.com/zzycxz/fairpeer/internal/jiutian"
 )
 
 // jiutianEmbedRequest calls the Jiutian embedding endpoint via the shared

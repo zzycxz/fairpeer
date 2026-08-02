@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/zzycxz/momapeer/internal/diff"
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/diff"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // Tool is a capability the model can invoke.

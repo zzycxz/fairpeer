@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/evidence"
-	"github.com/zzycxz/momapeer/internal/instruction"
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/evidence"
+	"github.com/zzycxz/fairpeer/internal/instruction"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 func TestTodoInventoryListsTurnTodos(t *testing.T) {

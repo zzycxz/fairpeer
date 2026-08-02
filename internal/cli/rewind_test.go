@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/checkpoint"
-	"github.com/zzycxz/momapeer/internal/i18n"
+	"github.com/zzycxz/fairpeer/internal/checkpoint"
+	"github.com/zzycxz/fairpeer/internal/i18n"
 )
 
 func TestOneLine(t *testing.T) {

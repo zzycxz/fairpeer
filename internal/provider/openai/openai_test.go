@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // TestStreamRetriesThenSucceeds drives the real retry path end-to-end: the

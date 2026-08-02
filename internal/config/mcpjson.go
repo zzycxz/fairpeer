@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/fileutil"
-	"github.com/zzycxz/momapeer/internal/mcpdiag"
+	"github.com/zzycxz/fairpeer/internal/fileutil"
+	"github.com/zzycxz/fairpeer/internal/mcpdiag"
 )
 
 // mcpJSONFile is the project-root file Claude Code calls .mcp.json. momapeer reads

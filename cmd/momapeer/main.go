@@ -4,12 +4,12 @@ package main
 import (
 	"os"
 
-	"github.com/zzycxz/momapeer/internal/cli"
+	"github.com/zzycxz/fairpeer/internal/cli"
 
 	// Blank imports wire compile-time built-ins into their registries.
-	_ "github.com/zzycxz/momapeer/internal/provider/anthropic"
-	_ "github.com/zzycxz/momapeer/internal/provider/openai"
-	_ "github.com/zzycxz/momapeer/internal/tool/builtin"
+	_ "github.com/zzycxz/fairpeer/internal/provider/anthropic"
+	_ "github.com/zzycxz/fairpeer/internal/provider/openai"
+	_ "github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 // version is injected at build time via -ldflags "-X main.version=...".

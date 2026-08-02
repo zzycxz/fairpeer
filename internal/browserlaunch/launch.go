@@ -41,7 +41,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/proc"
+	"github.com/zzycxz/fairpeer/internal/proc"
 )
 
 // launchReadyTimeout caps how long Launch waits for CDP to become reachable.

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // buildExamplePlugin compiles cmd/momapeer-plugin-example into a temp binary and
@@ -24,7 +24,7 @@ func buildExamplePlugin(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	out, err := exec.Command("go", "build", "-o", bin, "github.com/zzycxz/momapeer/cmd/momapeer-plugin-example").CombinedOutput()
+	out, err := exec.Command("go", "build", "-o", bin, "github.com/zzycxz/fairpeer/cmd/momapeer-plugin-example").CombinedOutput()
 	if err != nil {
 		t.Fatalf("build example plugin: %v\n%s", err, out)
 	}

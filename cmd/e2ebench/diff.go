@@ -399,11 +399,11 @@ func parseCoverProfile(repo, path string) map[string][]coverBlock {
 	return out
 }
 
-// repoRelFromModulePath turns "github.com/zzycxz/momapeer/internal/agent/foo.go" into
+// repoRelFromModulePath turns "github.com/zzycxz/fairpeer/internal/agent/foo.go" into
 // "internal/agent/foo.go" by dropping the first path element (the module root).
 func repoRelFromModulePath(p string) string {
 	// Strip the full module prefix; a generic first-segment cut mis-strips a multi-segment module path.
-	prefix := "github.com/zzycxz/momapeer/"
+	prefix := "github.com/zzycxz/fairpeer/"
 	if strings.HasPrefix(p, prefix) {
 		return p[len(prefix):]
 	}

@@ -16,9 +16,9 @@ import (
 
 	"golang.org/x/text/transform"
 
-	fileenc "github.com/zzycxz/momapeer/internal/fileutil/encoding"
-	"github.com/zzycxz/momapeer/internal/proc"
-	"github.com/zzycxz/momapeer/internal/tool"
+	fileenc "github.com/zzycxz/fairpeer/internal/fileutil/encoding"
+	"github.com/zzycxz/fairpeer/internal/proc"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 const (

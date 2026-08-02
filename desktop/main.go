@@ -20,9 +20,9 @@ import (
 
 	// Blank imports wire compile-time built-ins into their registries, exactly as
 	// cmd/momapeer does — boot.Build resolves providers/tools from these registries.
-	_ "github.com/zzycxz/momapeer/internal/provider/anthropic"
-	_ "github.com/zzycxz/momapeer/internal/provider/openai"
-	_ "github.com/zzycxz/momapeer/internal/tool/builtin"
+	_ "github.com/zzycxz/fairpeer/internal/provider/anthropic"
+	_ "github.com/zzycxz/fairpeer/internal/provider/openai"
+	_ "github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 // assets embeds the built frontend. `all:` so dotfiles (e.g. the dist .gitkeep

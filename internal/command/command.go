@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/frontmatter"
+	"github.com/zzycxz/fairpeer/internal/frontmatter"
 )
 
 // Command is a custom slash command loaded from a .md file.

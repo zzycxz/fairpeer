@@ -7,10 +7,10 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/fileutil"
-	"github.com/zzycxz/momapeer/internal/mcpdiag"
-	"github.com/zzycxz/momapeer/internal/netclient"
-	"github.com/zzycxz/momapeer/internal/permission"
+	"github.com/zzycxz/fairpeer/internal/fileutil"
+	"github.com/zzycxz/fairpeer/internal/mcpdiag"
+	"github.com/zzycxz/fairpeer/internal/netclient"
+	"github.com/zzycxz/fairpeer/internal/permission"
 )
 
 // edit.go is the programmatic mutation surface a settings UI drives: change the

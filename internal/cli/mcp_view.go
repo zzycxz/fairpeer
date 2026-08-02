@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/plugin"
+	"github.com/zzycxz/fairpeer/internal/plugin"
 )
 
 const mcpMaxItemsPerSection = 6

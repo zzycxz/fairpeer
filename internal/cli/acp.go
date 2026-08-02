@@ -10,16 +10,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/acp"
-	"github.com/zzycxz/momapeer/internal/boot"
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/control"
-	"github.com/zzycxz/momapeer/internal/i18n"
-	"github.com/zzycxz/momapeer/internal/netclient"
-	"github.com/zzycxz/momapeer/internal/provider"
-	"github.com/zzycxz/momapeer/internal/sandbox"
-	"github.com/zzycxz/momapeer/internal/tool"
-	"github.com/zzycxz/momapeer/internal/tool/builtin"
+	"github.com/zzycxz/fairpeer/internal/acp"
+	"github.com/zzycxz/fairpeer/internal/boot"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/control"
+	"github.com/zzycxz/fairpeer/internal/i18n"
+	"github.com/zzycxz/fairpeer/internal/netclient"
+	"github.com/zzycxz/fairpeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/sandbox"
+	"github.com/zzycxz/fairpeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 // acpCommand runs momapeer as an Agent Client Protocol agent: a stdio JSON-RPC

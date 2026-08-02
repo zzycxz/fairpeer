@@ -17,7 +17,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/tool"
 
 	"golang.org/x/sys/windows"
 )

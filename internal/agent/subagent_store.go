@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/fileutil"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/fileutil"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 type SubagentStatus string

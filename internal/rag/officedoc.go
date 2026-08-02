@@ -23,8 +23,8 @@ import (
 
 	pdflib "github.com/ledongthuc/pdf"
 
-	"github.com/zzycxz/momapeer/internal/docconv"
-	"github.com/zzycxz/momapeer/internal/proc"
+	"github.com/zzycxz/fairpeer/internal/docconv"
+	"github.com/zzycxz/fairpeer/internal/proc"
 )
 
 // cjkSpaceRe matches a space between two CJK characters.

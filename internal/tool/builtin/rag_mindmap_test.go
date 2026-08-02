@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/rag"
+	"github.com/zzycxz/fairpeer/internal/rag"
 )
 
 // TestRAGMindMapBuildsTree confirms rag_mindmap walks the entity graph outward

@@ -3,7 +3,7 @@ package cli
 import (
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/skill"
+	"github.com/zzycxz/fairpeer/internal/skill"
 )
 
 // TestSlashItemsIncludesSkills proves every loaded skill is offered in the slash

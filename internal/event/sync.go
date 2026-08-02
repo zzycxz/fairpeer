@@ -3,8 +3,8 @@ package event
 import (
 	"sync"
 
-	"github.com/zzycxz/momapeer/internal/evidence"
-	"github.com/zzycxz/momapeer/internal/nilutil"
+	"github.com/zzycxz/fairpeer/internal/evidence"
+	"github.com/zzycxz/fairpeer/internal/nilutil"
 )
 
 // Sync wraps a Sink so concurrent Emit calls are serialized. The base Sink

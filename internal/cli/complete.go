@@ -9,10 +9,10 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/zzycxz/momapeer/internal/control"
-	"github.com/zzycxz/momapeer/internal/fileref"
-	"github.com/zzycxz/momapeer/internal/i18n"
-	"github.com/zzycxz/momapeer/internal/skill"
+	"github.com/zzycxz/fairpeer/internal/control"
+	"github.com/zzycxz/fairpeer/internal/fileref"
+	"github.com/zzycxz/fairpeer/internal/i18n"
+	"github.com/zzycxz/fairpeer/internal/skill"
 )
 
 // compKind distinguishes the two completion menus.

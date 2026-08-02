@@ -1,4 +1,4 @@
-module github.com/zzycxz/momapeer/desktop
+module github.com/zzycxz/fairpeer/desktop
 
 go 1.26
 
@@ -6,11 +6,11 @@ toolchain go1.26.5
 
 // The desktop shell is a nested module so its CGO/WebKit build never touches the
 // CLI's CGO_ENABLED=0 single-static-binary guarantee. The replace lets it import
-// the same github.com/zzycxz/momapeer/internal/* kernel (the import path stays
+// the same github.com/zzycxz/fairpeer/internal/* kernel (the import path stays
 // under the module, so the internal rule still permits it). `go mod tidy` here
 // resolves Wails + its transitive deps; the parent module's go build/test ./...
 // skips this directory.
-require github.com/zzycxz/momapeer v0.0.0
+require github.com/zzycxz/fairpeer v0.0.0
 
 require (
 	aead.dev/minisign v0.3.0
@@ -84,4 +84,4 @@ require (
 	modernc.org/sqlite v1.52.0 // indirect
 )
 
-replace github.com/zzycxz/momapeer => ../
+replace github.com/zzycxz/fairpeer => ../

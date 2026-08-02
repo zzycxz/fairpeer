@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/proc"
+	"github.com/zzycxz/fairpeer/internal/proc"
 )
 
 // Event is a point in the agent loop a hook can fire at.

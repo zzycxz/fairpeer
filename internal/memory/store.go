@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/frontmatter"
+	"github.com/zzycxz/fairpeer/internal/frontmatter"
 )
 
 // indexMu serializes MEMORY.md read-modify-write per directory. The store is a

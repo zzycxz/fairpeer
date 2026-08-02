@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/agent"
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/agent"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 func coldResumeFixture(t *testing.T, threshold time.Duration) (*agent.Session, string) {

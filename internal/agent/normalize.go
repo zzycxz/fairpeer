@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/zzycxz/momapeer/internal/provider"
+import "github.com/zzycxz/fairpeer/internal/provider"
 
 // NormalizeSession runs the persisted-history-safe repairs on a loaded
 // conversation and is the agent-side entry point for making old, partially

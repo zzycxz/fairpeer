@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/proc"
+	"github.com/zzycxz/fairpeer/internal/proc"
 )
 
 type gitStatusEntry struct {

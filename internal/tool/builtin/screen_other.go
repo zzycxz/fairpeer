@@ -2,7 +2,7 @@
 
 package builtin
 
-import "github.com/zzycxz/momapeer/internal/tool"
+import "github.com/zzycxz/fairpeer/internal/tool"
 
 // ScreenTools returns the desktop-automation tools. On non-Windows platforms
 // these are unavailable (the Win32 capture/input APIs don't exist), so we return

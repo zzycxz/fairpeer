@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/rag"
+	"github.com/zzycxz/fairpeer/internal/rag"
 )
 
 // TestRAGSearchSurfacesProvenance confirms the structured (entity/relation)

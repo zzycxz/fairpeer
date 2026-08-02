@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/agent/testutil"
-	"github.com/zzycxz/momapeer/internal/event"
-	"github.com/zzycxz/momapeer/internal/provider"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/agent/testutil"
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/tool"
 
-	_ "github.com/zzycxz/momapeer/internal/tool/builtin"
+	_ "github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 type stubBash struct{}

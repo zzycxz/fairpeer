@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/fileutil"
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/fileutil"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // executorHandoffMarker is the header the (now-removed) two-model Coordinator

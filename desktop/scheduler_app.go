@@ -20,9 +20,9 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
-	"github.com/zzycxz/momapeer/internal/jiutian"
-	"github.com/zzycxz/momapeer/internal/scheduler"
-	"github.com/zzycxz/momapeer/internal/tool/builtin"
+	"github.com/zzycxz/fairpeer/internal/jiutian"
+	"github.com/zzycxz/fairpeer/internal/scheduler"
+	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 // TaskView is the JSON-friendly projection of scheduler.ScheduledTask for the UI.

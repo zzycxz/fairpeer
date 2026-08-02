@@ -10,8 +10,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/zzycxz/momapeer/internal/diff"
-	fileenc "github.com/zzycxz/momapeer/internal/fileutil/encoding"
+	"github.com/zzycxz/fairpeer/internal/diff"
+	fileenc "github.com/zzycxz/fairpeer/internal/fileutil/encoding"
 )
 
 func write(t *testing.T, p, s string) {

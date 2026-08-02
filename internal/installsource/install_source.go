@@ -17,9 +17,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/skill"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/skill"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // MCPConnectResult is what the ConnectMCP callback returns. Disconnect is

@@ -6,7 +6,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/zzycxz/momapeer/internal/netclient"
+	"github.com/zzycxz/fairpeer/internal/netclient"
 )
 
 // ssrfGuardClient wraps base so every fetch refuses to connect to private,

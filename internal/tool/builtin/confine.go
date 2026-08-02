@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/netclient"
-	"github.com/zzycxz/momapeer/internal/sandbox"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/netclient"
+	"github.com/zzycxz/fairpeer/internal/sandbox"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // ConfineBash returns the bash built-in bound to an OS-sandbox spec, overriding

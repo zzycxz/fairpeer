@@ -18,10 +18,10 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/zzycxz/momapeer/internal/browserlaunch"
-	"github.com/zzycxz/momapeer/internal/browseruse"
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/tool/builtin"
+	"github.com/zzycxz/fairpeer/internal/browserlaunch"
+	"github.com/zzycxz/fairpeer/internal/browseruse"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 // --- desktop-registered process-global hooks --------------------------------

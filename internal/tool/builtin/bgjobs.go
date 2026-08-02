@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/jobs"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/jobs"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // bash_output / kill_shell / wait operate the background jobs registered by

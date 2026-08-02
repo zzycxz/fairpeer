@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 func TestMockProviderStreamHonorsCanceledContext(t *testing.T) {

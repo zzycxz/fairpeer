@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // TestStreamStallTimesOut covers issue #3374: a half-open connection (a proxy

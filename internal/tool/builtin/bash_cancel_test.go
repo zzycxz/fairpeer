@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/sandbox"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/sandbox"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // TestBashCancelReturnsPromptly proves a cancelled bash run stops fast instead of

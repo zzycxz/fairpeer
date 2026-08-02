@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/jobs"
-	"github.com/zzycxz/momapeer/internal/sandbox"
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/jobs"
+	"github.com/zzycxz/fairpeer/internal/sandbox"
+	"github.com/zzycxz/fairpeer/internal/tool"
 	"golang.org/x/sync/singleflight"
 )
 

@@ -13,7 +13,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/nilutil"
+	"github.com/zzycxz/fairpeer/internal/nilutil"
 )
 
 // Role is the role of a message.

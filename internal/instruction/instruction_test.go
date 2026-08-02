@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/memory"
+	"github.com/zzycxz/fairpeer/internal/memory"
 )
 
 func TestForModel_ThinkingModel(t *testing.T) {

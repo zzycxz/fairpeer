@@ -20,7 +20,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/proc"
+	"github.com/zzycxz/fairpeer/internal/proc"
 )
 
 // Result is the JSON shape emitted by doc_converter.py (and ocr_pdf.py).

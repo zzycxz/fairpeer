@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/net/http/httpproxy"
 
-	"github.com/zzycxz/momapeer/internal/sysproxy"
+	"github.com/zzycxz/fairpeer/internal/sysproxy"
 )
 
 const (

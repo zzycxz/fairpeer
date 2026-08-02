@@ -3,7 +3,7 @@ package control
 import (
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/skill"
+	"github.com/zzycxz/fairpeer/internal/skill"
 )
 
 func labelsOf(items []SlashItem) []string {

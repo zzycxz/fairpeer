@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/zzycxz/momapeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/config"
 )
 
 // The desktop is a GUI app: launched from Finder or `open`, it starts with the

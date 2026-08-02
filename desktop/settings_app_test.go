@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 func TestWithFreshSystemPromptReplacesExistingSystemMessage(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/config"
 )
 
 // packageNameRe matches valid npm package-name segments. Pinned by [a-z0-9._-]

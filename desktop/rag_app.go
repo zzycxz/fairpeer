@@ -30,11 +30,11 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
-	"github.com/zzycxz/momapeer/internal/boot"
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/jiutian"
-	"github.com/zzycxz/momapeer/internal/rag"
-	"github.com/zzycxz/momapeer/internal/tool/builtin"
+	"github.com/zzycxz/fairpeer/internal/boot"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/jiutian"
+	"github.com/zzycxz/fairpeer/internal/rag"
+	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 // RagNodeView is one node in the RAG file/folder tree.

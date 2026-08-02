@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/sandbox"
+	"github.com/zzycxz/fairpeer/internal/sandbox"
 )
 
 func TestWithin(t *testing.T) {

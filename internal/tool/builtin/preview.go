@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/diff"
-	fileenc "github.com/zzycxz/momapeer/internal/fileutil/encoding"
+	"github.com/zzycxz/fairpeer/internal/diff"
+	fileenc "github.com/zzycxz/fairpeer/internal/fileutil/encoding"
 )
 
 // preview.go gives the file-writing built-ins the optional tool.Previewer

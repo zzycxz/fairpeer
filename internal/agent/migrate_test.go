@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 const legacyEventLog = `{"type":"model.turn.started","id":1,"ts":"t","turn":0,"model":"MoMA"}

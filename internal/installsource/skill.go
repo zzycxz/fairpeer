@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/frontmatter"
-	"github.com/zzycxz/momapeer/internal/skill"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/frontmatter"
+	"github.com/zzycxz/fairpeer/internal/skill"
 )
 
 const (

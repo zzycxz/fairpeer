@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/diff"
+	"github.com/zzycxz/fairpeer/internal/diff"
 )
 
 type fakeWriter struct {

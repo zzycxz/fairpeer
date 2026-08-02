@@ -3,7 +3,7 @@ package bot
 import (
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/event"
 )
 
 func TestApprovalCardCarriesChatType(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/frontmatter"
+	"github.com/zzycxz/fairpeer/internal/frontmatter"
 )
 
 // OutputStyle is one selectable persona. Body is appended to the system prompt

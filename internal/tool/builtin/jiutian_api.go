@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/jiutian"
+	"github.com/zzycxz/fairpeer/internal/jiutian"
 )
 
 // jiutianAPICall delegates to the shared Jiutian API helper.

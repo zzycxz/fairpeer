@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zzycxz/momapeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/event"
 
-	_ "github.com/zzycxz/momapeer/internal/provider/openai"
-	_ "github.com/zzycxz/momapeer/internal/tool/builtin"
+	_ "github.com/zzycxz/fairpeer/internal/provider/openai"
+	_ "github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 // TestBuildUnknownModelErrorIsActionable: a default_model that doesn't resolve

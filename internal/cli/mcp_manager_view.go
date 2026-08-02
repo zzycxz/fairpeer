@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/mcpdiag"
+	"github.com/zzycxz/fairpeer/internal/mcpdiag"
 )
 
 func (m chatTUI) renderMCPManager() string {

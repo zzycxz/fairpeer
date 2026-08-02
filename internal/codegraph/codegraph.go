@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/proc"
+	"github.com/zzycxz/fairpeer/internal/proc"
 )
 
 const initTimeout = 30 * time.Second

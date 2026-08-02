@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/fileutil"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // dotenvMu serializes read-modify-write of the global credentials file and

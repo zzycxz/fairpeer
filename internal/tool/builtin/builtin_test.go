@@ -16,7 +16,7 @@ import (
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 
-	"github.com/zzycxz/momapeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
 // argsJSON marshals m into the JSON form a tool expects. Tests must not build

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/zzycxz/momapeer/internal/config"
-	"github.com/zzycxz/momapeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/event"
 )
 
 // metrics_app.go is the opt-in aggregate agent-metrics flush: anonymous

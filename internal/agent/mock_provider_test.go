@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 
-	"github.com/zzycxz/momapeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // mockProvider replays preset chunks and records the last request it received.

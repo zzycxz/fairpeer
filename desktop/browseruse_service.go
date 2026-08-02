@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zzycxz/momapeer/internal/browseruse"
-	"github.com/zzycxz/momapeer/internal/proc"
+	"github.com/zzycxz/fairpeer/internal/browseruse"
+	"github.com/zzycxz/fairpeer/internal/proc"
 )
 
 const (

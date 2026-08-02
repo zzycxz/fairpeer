@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zzycxz/momapeer/internal/hook"
+	"github.com/zzycxz/fairpeer/internal/hook"
 )
 
 func renderHooks(width int, hooks []hook.ResolvedHook, trusted bool, projectDefines bool) string {
