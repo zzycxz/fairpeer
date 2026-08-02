@@ -59,7 +59,7 @@ const eventChannel = "agent:event"
 // singleInstanceID is used by Wails to route a second desktop launch back to the
 // running instance. Keep it stable across releases so launcher/Dock/taskbar
 // reopen behavior remains predictable on every platform.
-const singleInstanceID = "com.momapeer.desktop"
+const singleInstanceID = "com.fairpeer.desktop"
 
 // App is the Wails-bound application object: the desktop frontend's command
 // surface. Its exported methods (Submit/Cancel/Approve/…) are generated into JS
@@ -265,13 +265,13 @@ func (a *App) ensureMediaTokenStore() *mediaTokenStore {
 }
 
 // workspaceMediaMiddleware returns an HTTP middleware that intercepts
-// /__momapeer_workspace_media/{token}/{filename} requests and serves the
+// /__fairpeer_workspace_media/{token}/{filename} requests and serves the
 // corresponding workspace file. All other paths pass through to the Wails
 // default asset handler unchanged.
 func (a *App) workspaceMediaMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			prefix := "/__momapeer_workspace_media/"
+			prefix := "/__fairpeer_workspace_media/"
 			if !strings.HasPrefix(r.URL.Path, prefix) {
 				next.ServeHTTP(w, r)
 				return
@@ -4990,7 +4990,7 @@ func (a *App) ReadFile(rel string) FilePreview {
 		token := a.ensureMediaTokenStore().create(path, info.Name(), mime, kind, info.Size(), info.ModTime())
 		out.Kind = kind
 		out.Mime = mime
-		out.URL = "/__momapeer_workspace_media/" + token + "/" + url.PathEscape(info.Name())
+		out.URL = "/__fairpeer_workspace_media/" + token + "/" + url.PathEscape(info.Name())
 		return out
 	}
 	f, err := os.Open(path)
@@ -5266,7 +5266,7 @@ func (a *App) SaveExportFile(path, payload string, base64Encoded bool) error {
 func safeExportFilename(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "momapeer-session.md"
+		return "fairpeer-session.md"
 	}
 	return filepath.Base(name)
 }
@@ -5418,7 +5418,7 @@ type MemoryView struct {
 // writableScopes are the quick-add targets the panel offers, broad → specific.
 var writableScopes = []memory.Scope{memory.ScopeUser, memory.ScopeProject, memory.ScopeLocal}
 
-// Memory returns the loaded memory for the panel: the momapeer.md hierarchy, the
+// Memory returns the loaded memory for the panel: the fairpeer.md hierarchy, the
 // saved auto-memories, and the writable scopes. Read-only; mutations go through
 // Remember / SaveDoc.
 func (a *App) Memory() MemoryView {

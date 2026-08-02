@@ -236,7 +236,7 @@ func TestReadFileMediaPreview(t *testing.T) {
 	if image.Body != "" {
 		t.Fatalf("media preview should have empty body, got %q", image.Body)
 	}
-	if !strings.HasPrefix(image.URL, "/__momapeer_workspace_media/") || !strings.HasSuffix(image.URL, "/shot.PNG") {
+	if !strings.HasPrefix(image.URL, "/__fairpeer_workspace_media/") || !strings.HasSuffix(image.URL, "/shot.PNG") {
 		t.Fatalf("unexpected media URL: %q", image.URL)
 	}
 
@@ -253,7 +253,7 @@ func TestReadFileMediaPreview(t *testing.T) {
 	if pdf.Body != "" {
 		t.Fatalf("media preview should have empty body, got %q", pdf.Body)
 	}
-	if !strings.HasPrefix(pdf.URL, "/__momapeer_workspace_media/") || !strings.HasSuffix(pdf.URL, "/report.pdf") {
+	if !strings.HasPrefix(pdf.URL, "/__fairpeer_workspace_media/") || !strings.HasSuffix(pdf.URL, "/report.pdf") {
 		t.Fatalf("unexpected media URL: %q", pdf.URL)
 	}
 }
@@ -430,7 +430,7 @@ func TestMediaTokenHandlerBadToken(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/__momapeer_workspace_media/deadbeef/fake.png", nil)
+	req := httptest.NewRequest(http.MethodGet, "/__fairpeer_workspace_media/deadbeef/fake.png", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

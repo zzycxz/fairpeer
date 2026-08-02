@@ -1,7 +1,7 @@
-// Command momapeer-desktop is the Wails shell around the momapeer kernel: a native
+// Command fairpeer-desktop is the Wails shell around the fairpeer kernel: a native
 // window hosting a webview frontend, with the Go-side control.Controller bound
 // directly to the UI (no HTTP hop — bindings in, runtime events out). It lives in
-// a nested module (momapeer/desktop) so the CGO/WebKit desktop build never touches
+// a nested module (fairpeer/desktop) so the CGO/WebKit desktop build never touches
 // the CLI's CGO_ENABLED=0 single-static-binary guarantee, while still importing
 // the same internal/* kernel.
 package main
@@ -72,7 +72,7 @@ func main() {
 	}
 
 	err := wails.Run(&options.App{
-		Title:     "momapeer",
+		Title:     "fairpeer",
 		Width:     width,
 		Height:    height,
 		MinWidth:  760,
@@ -116,7 +116,7 @@ func main() {
 			WebviewGpuIsDisabled: windowsWebview2GPUDisabled(),
 		},
 		Linux: &linux.Options{
-			ProgramName: "momapeer",
+			ProgramName: "fairpeer",
 			// WebKitGTK GPU compositing is inconsistent across distros/drivers and
 			// is the one real cross-platform rough edge for a Go+webview stack:
 			// "always" can yield blank or flickering webviews on some setups, so
