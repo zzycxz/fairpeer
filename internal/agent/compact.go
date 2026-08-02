@@ -1,0 +1,743 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/zzycxz/momapeer/internal/event"
+	"github.com/zzycxz/momapeer/internal/provider"
+)
+
+// Compaction is a low-frequency cache-reset point: the prompt grows append-only
+// until a turn nears compactRatio of the window, then it is compacted down to a
+// tail budget. (MoMA currently does not report cache tokens; the prefix stability
+// still reduces token transmission and prepares for future cache support.) The budget is a fixed token count, not a
+// fraction of the window, so a huge window still compacts rarely while a small
+// one still lands below the trigger (which is what stops the re-compaction loop).
+const (
+	defaultSoftCompactRatio   = 0.5   // report growing context here, but keep the cache-stable prefix intact
+	defaultCompactRatio       = 0.8   // trigger: prompt at this fraction of the window compacts
+	defaultCompactForceRatio  = 0.9   // force compaction at this high-water mark even for low-value folds
+	defaultCompactTarget      = 0.5   // safety cap: the kept tail never exceeds this fraction of the window
+	defaultTailTokens         = 16384 // verbatim recent-tail budget, in tokens
+	minRecentKeep             = 2     // never keep fewer recent messages than this
+	minCompactMessages        = 2     // skip compaction below this many compactable messages
+	fallbackTokPerChar        = 0.25  // ~4 chars/token, used before any usage is available to calibrate
+	maxPinnedFirstUserTokens  = 1500  // ceiling on pinning the first user turn verbatim; larger first turns (pasted content) stay foldable
+	pinnedFirstUserWindowFrac = 0.15  // and never pin a first turn worth more than this fraction of the window
+)
+
+// summaryTag wraps the compaction summary so the model can distinguish it from
+// live user input and later strip or skip it when reasoning about the current turn.
+const (
+	summaryTagOpen  = "<compaction-summary>"
+	summaryTagClose = "</compaction-summary>"
+)
+
+// summarySystemPrompt steers the executor to distill older history into a
+// structured briefing it can keep relying on after the originals are dropped.
+// The section layout mirrors what a coding agent actually needs to resume work
+// mid-task: the goal verbatim, the concrete state of the code, and an explicit
+// next step — so the post-compaction turn doesn't lose the thread or re-derive
+// decisions already made.
+const summarySystemPrompt = `You are compacting the earlier part of a coding agent's conversation to save context.
+The agent keeps your summary alongside the user's own turns (kept verbatim) and the recent tail; your job is to fold the assistant/tool work into a briefing it can resume from.
+Write under these exact headings, omitting a heading only if it has no content:
+
+## Standing facts & constraints
+Everything the user stated that still governs the work — names, paths, IDs, versions, tokens, preferences, and hard "never do X" rules — in their own words. Be exhaustive; this is the durable contract, so prefer over- to under-including.
+
+## Goal
+The user's request and intent.
+
+## Decisions & rationale
+Key choices made so far and why — so they are not re-litigated or reversed.
+
+## Files & code
+Files read or modified, with the specific facts that matter: signatures, line locations, data shapes, and exact edits applied. Be concrete; this is what lets the agent act without re-reading everything.
+
+## Commands & outcomes
+Commands run (builds, tests, git) and their relevant results — what passed, what failed, and the error text that matters.
+
+## Errors & fixes
+Problems hit and how they were resolved (or not), so the same dead ends are not repeated.
+
+## Pending & next step
+What is still in progress or unstarted, and the single most concrete next action to take.
+
+Rules: be terse — bullet points and fragments, not prose. Preserve identifiers, paths, and numbers exactly. Do NOT invent anything not present in the messages; if something is unknown, leave it out rather than guessing.`
+
+// updateSummarySystemPrompt is used when a previous compaction summary already
+// exists: instead of re-deriving the whole briefing from scratch (expensive and
+// prone to dropping facts the first summary captured), the summarizer updates
+// the existing one in place with only the new turn's progress. The previous
+// summary is fed back in <previous-summary> tags. Mirrors pi's
+// UPDATE_SUMMARIZATION_PROMPT (compaction.ts:483-520).
+const updateSummarySystemPrompt = `You are updating an existing conversation summary with NEW messages from a coding agent's conversation.
+The previous summary is provided verbatim in <previous-summary> tags. The transcript below it is the NEW work to fold in.
+
+Update the previous summary. RULES:
+- PRESERVE all existing information from <previous-summary> unless it is clearly obsolete.
+- ADD new progress, decisions, files, commands, and errors from the new messages.
+- UPDATE "## Pending & next step" based on what was just accomplished — move finished items out, add the next concrete action.
+- PRESERVE exact file paths, identifiers, versions, and error text verbatim.
+- Drop an item ONLY when it is clearly resolved or no longer relevant; when unsure, keep it.
+
+Keep the SAME heading structure as <previous-summary> (## Standing facts & constraints, ## Goal, ## Decisions & rationale, ## Files & code, ## Commands & outcomes, ## Errors & fixes, ## Pending & next step), omitting a heading only if it has no content.
+
+Style: be terse — bullet points and fragments, not prose. Do NOT invent anything not present in the previous summary or the new messages.`
+
+// maybeCompact compacts the session when the last turn's prompt has grown to the
+// configured fraction of the context window. It is a no-op when compaction is
+// disabled (no window) or usage is unavailable.
+func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
+	if a.contextWindow <= 0 || u == nil || u.PromptTokens == 0 {
+		return
+	}
+	high := int(float64(a.contextWindow) * a.compactRatio)
+	soft := int(float64(a.contextWindow) * a.softCompactRatio)
+	// Between the soft ratio and the trigger, report growing context once without
+	// rewriting the prefix — a compaction here would needlessly crater the cache.
+	if u.PromptTokens >= soft && u.PromptTokens < high && !a.softCompactNoticed {
+		a.softCompactNoticed = true
+		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("context reached %.0f%% of window; keeping cache-first prefix until compact threshold %.0f%%", a.softCompactRatio*100, a.compactRatio*100)})
+		return
+	}
+	if u.PromptTokens < high {
+		// A turn that sits under the trigger is the breathing room a healthy
+		// compaction buys; it clears the stuck latch, the run counter, and the
+		// one-shot soft notice.
+		a.consecutiveCompacts = 0
+		a.compactStuck = false
+		a.softCompactNoticed = false
+		return
+	}
+	if a.compactStuck {
+		return
+	}
+	force := u.PromptTokens >= int(float64(a.contextWindow)*a.compactForceRatio)
+	// Soft-trim large outputs first (head+tail preservation), then hard-prune
+	// whatever is still too large. The two-pass approach saves context tokens
+	// while keeping the most useful parts of large tool outputs.
+	ratio := a.tokPerChar()
+	if st, err := a.SoftTrimLargeResults(); err == nil && st.Results > 0 {
+		saved := int(float64(st.SavedChars) * ratio)
+		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(
+			"soft-trimmed %d large tool outputs (~%d tokens est.)", st.Results, saved)})
+	}
+	// Prune before folding: when eliding stale tool results alone clears the
+	// trigger, this turn's (paid) summarize call is skipped entirely.
+	if st, err := a.PruneStaleToolResults(); err == nil && st.Results > 0 {
+		saved := int(float64(st.SavedChars) * ratio)
+		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(
+			"pruned %d stale tool results (~%d tokens est.) before compaction", st.Results, saved)})
+		if !force && u.PromptTokens-saved < high {
+			return
+		}
+	}
+	if err := a.compact(ctx, "auto", "", force); err != nil {
+		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("compaction skipped: %v", err)})
+		return
+	}
+	// A healthy compaction drops the prompt under the trigger, so the next turn
+	// won't compact. Compacting on consecutive turns means the kept tail alone
+	// exceeds the trigger — the system prompt plus one verbatim turn is bigger than
+	// the window allows. Re-firing every turn is the loop users hit, so pause
+	// auto-compaction and say why, once.
+	a.consecutiveCompacts++
+	if a.consecutiveCompacts >= 2 {
+		a.compactStuck = true
+		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: fmt.Sprintf(
+			"context_window=%d is too small for compaction to help (the system prompt plus one turn already exceeds %.0f%% of it); raise context_window or shrink tool output. Auto-compaction paused until the prompt drops.",
+			a.contextWindow, a.compactRatio*100)})
+	}
+}
+
+// foldEconomics estimates whether compacting the given region saves enough
+// tokens to justify the summarization API call. It returns false when the
+// region is too small for the savings to outweigh the extra round-trip cost
+// and latency of calling the summarizer.
+func foldEconomics(region []provider.Message) bool {
+	const minFoldTokens = 400
+	return estimateMessagesTokens(region) >= minFoldTokens
+}
+
+func estimateMessagesTokens(msgs []provider.Message) int {
+	total := 0
+	for _, m := range msgs {
+		total += 4 // chat-message framing overhead
+		total += estimateTextTokens(provider.ContentString(m.Content))
+		total += estimateTextTokens(m.ReasoningContent)
+		total += estimateTextTokens(m.Name)
+		total += estimateTextTokens(m.ToolCallID)
+		for _, tc := range m.ToolCalls {
+			total += 8
+			total += estimateTextTokens(tc.ID)
+			total += estimateTextTokens(tc.Name)
+			total += estimateTextTokens(tc.Arguments)
+		}
+	}
+	return total
+}
+
+func estimateTextTokens(s string) int {
+	if s == "" {
+		return 0
+	}
+	// A conservative cross-language approximation: English-ish text trends near
+	// four bytes per token, while CJK-heavy text is closer to one rune per token.
+	bytes := len(s)
+	runes := utf8.RuneCountInString(s)
+	byBytes := (bytes + 3) / 4
+	if runes > byBytes {
+		return runes
+	}
+	return byBytes
+}
+
+// compact summarizes the older middle of the session and replaces it in place:
+// the session becomes system + summary + recent tail. The dropped originals are
+// archived first, so the full history stays traceable. trigger is "auto" (the
+// window threshold) or "manual" (/compact); it rides the Compaction events so a
+// frontend can label the card. instructions is optional extra summary guidance
+// (the user's `/compact <focus>` text); a PreCompact hook can contribute more.
+// force bypasses the fold-economics skip (manual /compact and the force-ratio
+// high-water mark always compact). A Started event is emitted before the (network)
+// summarize so the UI can show a "compacting…" placeholder, and a Done event
+// (carrying the summary) replaces it.
+func (a *Agent) compact(ctx context.Context, trigger, instructions string, force bool) error {
+	msgs := a.session.Messages
+	head, start, ok := a.planCompaction(msgs, minCompactMessages)
+	if !ok {
+		// A single huge message can still be worth folding. Keep the normal
+		// message-count guard for small histories, but let content size decide
+		// whether a one-message region has real compaction value.
+		head, start, ok = a.planCompaction(msgs, 1)
+	}
+	if !ok {
+		return nil // recent tail already covers everything worth keeping
+	}
+	region := msgs[head:start]
+
+	// Incremental compaction: if a prior <compaction-summary> already sits in
+	// the pinned prefix, fold it into this pass instead of letting the old and
+	// new summaries coexist (the pre-incremental behaviour kept every prior
+	// summary verbatim, so a long session accumulated a stack of stale digests).
+	// We feed the old summary to the summarizer as <previous-summary> and drop
+	// the old summary message from the kept prefix — the updated summary that
+	// comes out replaces it. prevSummaryIdx==-1 means first-time compaction and
+	// the fresh-summary path runs unchanged. We only honour a previous summary
+	// that lives in the pinned prefix (idx < head); a summary stranded inside
+	// the foldable region is rare (pinnedPrefixLen consumes a contiguous run of
+	// them) and would complicate the kept/fold split, so we leave it alone and
+	// fall back to the fresh-summary path.
+	prevSummary, prevSummaryIdx := latestCompactionSummary(msgs)
+	if prevSummaryIdx >= head {
+		prevSummary, prevSummaryIdx = "", -1
+	}
+
+	// Deterministically collect every file path the region's tool calls touched,
+	// so the summary can carry exact <read-files>/<modified-files> lists instead
+	// of relying on the summarizer to lift paths out of free text. Computed once
+	// here (before archive) because the region is dropped from the session after
+	// compaction — the paths would otherwise be unrecoverable.
+	fileOps := ExtractFileOps(region)
+
+	// Base layer: every small user turn in the region is kept verbatim (the
+	// deterministic floor — a fact the user stated is never summarized away,
+	// wherever in the session they said it); only the rest folds into the digest.
+	kept, fold := a.partitionFold(region)
+	if len(fold) == 0 {
+		return nil // nothing but kept user turns — a fold would save nothing
+	}
+
+	// Economic check on the foldable part (kept user turns don't count toward the
+	// savings): skip if too small to justify the call, unless force demands it.
+	if !force && !foldEconomics(fold) {
+		return nil
+	}
+
+	a.sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: trigger}})
+
+	// A PreCompact hook can steer what the summary keeps; its stdout joins any
+	// explicit /compact <focus> text.
+	if a.hooks != nil {
+		if hookInstr := a.hooks.PreCompact(ctx, trigger); hookInstr != "" {
+			if instructions != "" {
+				instructions += "\n"
+			}
+			instructions += hookInstr
+		}
+	}
+
+	archived := ""
+	if a.archiveDir != "" {
+		path, err := archiveMessages(a.archiveDir, fold)
+		if err != nil {
+			a.emitCompactionAborted(trigger)
+			return fmt.Errorf("archive: %w", err)
+		}
+		archived = path
+	}
+
+	// Upper layer: the digest is built from the whole region (kept turns included),
+	// so its structured "user facts & constraints" section consolidates what the
+	// user said into one tidy view — redundant with the verbatim turns by design,
+	// so a weak summarizer dropping a fact here loses nothing. When a previous
+	// summary exists, the summarizer updates it instead of regenerating.
+	summary, err := a.summarizeWithRetry(ctx, region, instructions, prevSummary)
+	if err != nil {
+		// Summarizer unreachable after retry — use a mechanical fold digest
+		// instead of aborting. The region is already archived, so context is
+		// freed either way; the digest just won't be as useful.
+		summary = mechanicalFoldDigest(len(fold), archived)
+		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+			Text: fmt.Sprintf("compaction: summarizer failed (%v); using mechanical fold", err)})
+	}
+
+	// Append the deterministic file-ops block (computed above) to whichever
+	// summary we ended up with. Doing this after the summarizer means the
+	// exact paths survive even when the LLM dropped or paraphrased them, and
+	// they survive the mechanical-fold fallback too.
+	if fileBlock := fileOps.Format(); fileBlock != "" {
+		summary += "\n\n" + fileBlock
+	}
+
+	// Build the post-compaction transcript. When incremental compaction folded a
+	// prior summary, drop that old summary message (the updated one replaces it)
+	// — otherwise the old and new summaries would coexist, doubling the briefing
+	// tokens and re-introducing the very drift incremental mode exists to fix.
+	prefix := msgs[:head]
+	if prevSummaryIdx >= 0 && prevSummaryIdx < head {
+		filtered := make([]provider.Message, 0, head-1)
+		filtered = append(filtered, msgs[:prevSummaryIdx]...)
+		filtered = append(filtered, msgs[prevSummaryIdx+1:head]...)
+		prefix = filtered
+	}
+
+	compacted := make([]provider.Message, 0, len(prefix)+len(kept)+1+len(msgs)-start)
+	compacted = append(compacted, prefix...)
+	compacted = append(compacted, kept...)
+	compacted = append(compacted, provider.Message{
+		Role: provider.RoleUser,
+		Content: summaryTagOpen + "\n" +
+			"Summary of earlier conversation (older messages were compacted to save context):\n" +
+			summary + "\n" +
+			summaryTagClose,
+	})
+	compacted = append(compacted, msgs[start:]...)
+	a.session.Replace(compacted)
+	a.session.IncrementRewrite()
+
+	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
+		Trigger: trigger, Messages: len(fold), Summary: summary, Archive: archived,
+	}})
+	return nil
+}
+
+// emitCompactionAborted resolves a "compacting…" placeholder when a pass fails
+// after the Started event: a Done with no summary tells a frontend to drop the
+// placeholder. The caller still surfaces the reason (a Notice), so this carries
+// no text of its own.
+func (a *Agent) emitCompactionAborted(trigger string) {
+	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Trigger: trigger}})
+}
+
+// SummarizeFrom replaces the messages from fromIdx onward with a single summary,
+// keeping everything before it verbatim ("summarize from here"). fromIdx is a turn
+// boundary (a user message), so the split never severs a tool_call/result pair —
+// those live within one turn. A no-op when the region is empty.
+func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
+	msgs := a.session.Messages
+	if fromIdx < 0 || fromIdx >= len(msgs) {
+		return nil
+	}
+	region := msgs[fromIdx:]
+	if a.archiveDir != "" {
+		_, _ = archiveMessages(a.archiveDir, region) // best-effort traceability
+	}
+	summary, err := a.summarize(ctx, region, "", "")
+	if err != nil {
+		return err
+	}
+	next := make([]provider.Message, 0, fromIdx+1)
+	next = append(next, msgs[:fromIdx]...)
+	next = append(next, provider.Message{
+		Role:    provider.RoleUser,
+		Content: "Summary of the later conversation (compacted from here on):\n" + summary,
+	})
+	a.session.Replace(next)
+	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+		Text: fmt.Sprintf("summarized %d later messages → summary", len(region))})
+	return nil
+}
+
+// SummarizeUpTo replaces the messages before toIdx (after the system prompt) with
+// a single summary, keeping toIdx onward verbatim ("summarize up to here"). toIdx
+// is a turn boundary, so no tool pair is split. A no-op when the region is empty.
+func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
+	msgs := a.session.Messages
+	head := 0
+	if len(msgs) > 0 && msgs[0].Role == provider.RoleSystem {
+		head = 1
+	}
+	if toIdx <= head || toIdx > len(msgs) {
+		return nil
+	}
+	region := msgs[head:toIdx]
+	if a.archiveDir != "" {
+		_, _ = archiveMessages(a.archiveDir, region)
+	}
+	summary, err := a.summarize(ctx, region, "", "")
+	if err != nil {
+		return err
+	}
+	next := make([]provider.Message, 0, head+1+len(msgs)-toIdx)
+	next = append(next, msgs[:head]...)
+	next = append(next, provider.Message{
+		Role:    provider.RoleUser,
+		Content: "Summary of earlier conversation (compacted up to here):\n" + summary,
+	})
+	next = append(next, msgs[toIdx:]...)
+	a.session.Replace(next)
+	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+		Text: fmt.Sprintf("summarized %d earlier messages → summary", len(region))})
+	return nil
+}
+
+// isCompactionSummary reports whether m is a rolling summary from a prior fold.
+func isCompactionSummary(m provider.Message) bool {
+	return m.Role == provider.RoleUser &&
+		strings.HasPrefix(strings.TrimLeft(provider.ContentString(m.Content), "\n "), summaryTagOpen)
+}
+
+// latestCompactionSummary returns the text of the most recent compaction-summary
+// message in msgs plus its index, or ("", -1) when none exists. Only the summary
+// body is returned — the surrounding tag wrapper and the "Summary of earlier
+// conversation ..." preamble are stripped. It walks newest→oldest so the caller
+// always gets the rolling summary that's currently in effect (which, under the
+// pinned-prefix layout, is the last summary message before the kept tail).
+func latestCompactionSummary(msgs []provider.Message) (text string, idx int) {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if !isCompactionSummary(m) {
+			continue
+		}
+		body := provider.ContentString(m.Content)
+		// The wrapper layout is:
+		//   <compaction-summary>\n
+		//   Summary of earlier conversation (...):\n
+		//   <body...>\n
+		//   </compaction-summary>
+		// Strip the opening tag (and any whitespace glued to it), drop the
+		// single preamble line, then strip the closing tag.
+		body = strings.TrimLeft(body, "\n ")
+		body = strings.TrimPrefix(body, summaryTagOpen)
+		body = strings.TrimLeft(body, "\n ") // remove the \n glued to the tag
+		// Drop the preamble line (first line after the tag).
+		lines := strings.Split(body, "\n")
+		startLine := 1
+		if len(lines) == 1 {
+			startLine = 0 // defensive: no preamble present
+		}
+		bodyLines := lines[startLine:]
+		// Strip the trailing closing tag if present (it may be its own line or
+		// trailing on the last body line).
+		if n := len(bodyLines); n > 0 {
+			last := strings.TrimRight(bodyLines[n-1], "\n ")
+			last = strings.TrimSuffix(last, summaryTagClose)
+			bodyLines[n-1] = last
+		}
+		return strings.TrimSpace(strings.Join(bodyLines, "\n")), i
+	}
+	return "", -1
+}
+
+// pinnedPrefixLen counts the leading messages a fold keeps verbatim: the system
+// prompt, the first user turn (its task + stated facts/constraints) when it is
+// small enough to be a brief, and any prior summaries — so a fold never
+// summarizes the user's facts away, and a later fold never re-summarizes an
+// earlier summary into nothing (the drift that silently dropped user-stated facts
+// after the second compaction). A large first turn (pasted content) stays
+// foldable so pinning never starves the window.
+func (a *Agent) pinnedPrefixLen(msgs []provider.Message) int {
+	i := 0
+	if i < len(msgs) && msgs[i].Role == provider.RoleSystem {
+		i++
+	}
+	if i < len(msgs) && msgs[i].Role == provider.RoleUser && !isCompactionSummary(msgs[i]) && a.pinnableUserTurn(msgs[i]) {
+		i++
+	}
+	for i < len(msgs) && isCompactionSummary(msgs[i]) {
+		i++
+	}
+	return i
+}
+
+// pinnableUserTurn reports whether a user turn is small enough to keep verbatim. A
+// turn larger than a brief (pasted content) folds like any other message so the
+// kept-verbatim floor never starves the window.
+func (a *Agent) pinnableUserTurn(m provider.Message) bool {
+	budget := maxPinnedFirstUserTokens
+	if a.contextWindow > 0 {
+		if f := int(float64(a.contextWindow) * pinnedFirstUserWindowFrac); f < budget {
+			budget = f
+		}
+	}
+	return int(float64(msgChars(m))*a.tokPerChar()) <= budget
+}
+
+// partitionFold splits a compaction region into messages kept verbatim and the
+// rest, which folds into the digest. Kept messages are: small user turns (the
+// deterministic floor — a fact the user stated is never summarized away) and
+// prior compaction summaries (so a later fold never re-summarizes an earlier
+// digest, preventing the information-drift that silently dropped user-stated
+// facts after the second compaction). Order within each group is preserved.
+func (a *Agent) partitionFold(region []provider.Message) (kept, fold []provider.Message) {
+	for _, m := range region {
+		if isCompactionSummary(m) || (m.Role == provider.RoleUser && a.pinnableUserTurn(m)) {
+			kept = append(kept, m)
+		} else {
+			fold = append(fold, m)
+		}
+	}
+	return kept, fold
+}
+
+// planCompaction locates the region to summarize. head is the count of leading
+// messages preserved verbatim (see pinnedPrefixLen); start is where the preserved
+// recent tail begins, so msgs[head:start] is compacted. The tail is bounded by a
+// token budget (not a message count), so a few large tool outputs can't keep it
+// above the trigger and re-fire compaction every turn. ok is false when there is
+// too little to compact.
+func (a *Agent) planCompaction(msgs []provider.Message, min int) (head, start int, ok bool) {
+	head = a.pinnedPrefixLen(msgs)
+	if a.contextWindow > 0 {
+		budget := defaultTailTokens
+		if maxByWin := int(float64(a.contextWindow) * defaultCompactTarget); maxByWin < budget {
+			budget = maxByWin
+		}
+		start = tailStart(msgs, head, budget, a.tokPerChar(), a.tailFloor())
+	} else {
+		// No window to budget against (manual /compact on an unconfigured
+		// provider): keep a fixed count of recent messages, aligned off any tool.
+		start = len(msgs) - a.tailFloor()
+		for start > head && msgs[start].Role == provider.RoleTool {
+			start--
+		}
+	}
+	if start < head {
+		start = head
+	}
+	if start-head < min {
+		return head, start, false
+	}
+	return head, start, true
+}
+
+func (a *Agent) tailFloor() int {
+	if a.recentKeep > minRecentKeep {
+		return a.recentKeep
+	}
+	return minRecentKeep
+}
+
+// tailStart walks newest→oldest, growing the verbatim tail until the next
+// message would push its token estimate past budgetTokens (but never below
+// minKeep messages), then aligns the boundary back off any tool result so the
+// tail never begins with an orphan whose assistant tool_calls were summarized
+// away.
+func tailStart(msgs []provider.Message, head, budgetTokens int, tokPerChar float64, minKeep int) int {
+	start := len(msgs)
+	acc := 0
+	for i := len(msgs) - 1; i > head; i-- {
+		c := int(float64(msgChars(msgs[i])) * tokPerChar)
+		if len(msgs)-i > minKeep && acc+c > budgetTokens {
+			break
+		}
+		acc += c
+		start = i
+	}
+	// start == len(msgs) when nothing fit the tail (a session too small to have a
+	// message after head); there is no msgs[start] to align off, and the caller's
+	// minCompactMessages check then no-ops the pass.
+	for start > head && start < len(msgs) && msgs[start].Role == provider.RoleTool {
+		start--
+	}
+	return start
+}
+
+// tokPerChar derives a tokens-per-character ratio from the last turn's real
+// usage so per-message estimates track the provider's tokenizer without a local
+// one. Reasoning content is excluded from the char count to match the prompt
+// actually sent (the provider strips it). Falls back to ~4 chars/token before
+// any usage is known, and ignores absurd ratios.
+func (a *Agent) tokPerChar() float64 {
+	if u := a.lastUsage.Load(); u != nil && u.PromptTokens > 0 {
+		if c := charsOfMessages(a.session.Messages); c > 0 {
+			if r := float64(u.PromptTokens) / float64(c); r > 0.05 && r < 2 {
+				return r
+			}
+		}
+	}
+	return fallbackTokPerChar
+}
+
+// msgChars counts the characters that ride to the provider for one message —
+// content plus tool-call names and arguments, but not reasoning (stripped on
+// send).
+func msgChars(m provider.Message) int {
+	n := provider.ContentLen(m.Content)
+	for _, tc := range m.ToolCalls {
+		n += len(tc.Name) + len(tc.Arguments)
+	}
+	return n
+}
+
+func charsOfMessages(msgs []provider.Message) int {
+	n := 0
+	for _, m := range msgs {
+		n += msgChars(m)
+	}
+	return n
+}
+
+// summaryTimeout bounds one summarizer call so a stalled stream surfaces a clear
+// error instead of blocking the agent forever.
+const summaryTimeout = 90 * time.Second
+
+// summarize asks the executor's own provider (no tools) to distill the region
+// into a briefing, returning the collected text. instructions, when non-empty,
+// is appended to the system prompt as extra focus guidance (from /compact <focus>
+// and/or a PreCompact hook). When previousSummary is non-empty, the update
+// prompt is used instead of the fresh-summary prompt and the previous summary
+// is fed back inside <previous-summary> tags — this lets a second/third fold
+// extend the existing briefing instead of regenerating it from scratch (token
+// savings + protects facts the first summary already captured).
+func (a *Agent) summarize(ctx context.Context, region []provider.Message, instructions, previousSummary string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, summaryTimeout)
+	defer cancel()
+
+	sys := summarySystemPrompt
+	if previousSummary != "" {
+		sys = updateSummarySystemPrompt
+	}
+	if strings.TrimSpace(instructions) != "" {
+		sys += "\n\nAdditional focus for this compaction (prioritize keeping this):\n" + strings.TrimSpace(instructions)
+	}
+
+	userContent := renderTranscript(region)
+	if previousSummary != "" {
+		userContent = "<previous-summary>\n" + previousSummary + "\n</previous-summary>\n\n" + userContent
+	}
+
+	ch, err := a.prov.Stream(ctx, provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleSystem, Content: sys},
+			{Role: provider.RoleUser, Content: userContent},
+		},
+		Temperature: a.temperature,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	var b strings.Builder
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case chunk, ok := <-ch:
+			if !ok {
+				s := strings.TrimSpace(b.String())
+				if s == "" {
+					return "", fmt.Errorf("summarizer returned empty output")
+				}
+				return s, nil
+			}
+			switch chunk.Type {
+			case provider.ChunkText:
+				b.WriteString(chunk.Text)
+			case provider.ChunkError:
+				return "", chunk.Err
+			}
+		}
+	}
+}
+
+// summarizeWithRetry retries the summarizer once on non-terminal errors (network
+// hiccups, transient 5xx) before giving up. Context cancellation and deadline
+// errors are not retried — those are intentional aborts.
+func (a *Agent) summarizeWithRetry(ctx context.Context, fold []provider.Message, instructions, previousSummary string) (string, error) {
+	summary, err := a.summarize(ctx, fold, instructions, previousSummary)
+	if err == nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return summary, err
+	}
+	return a.summarize(ctx, fold, instructions, previousSummary)
+}
+
+// mechanicalFoldDigest is the deterministic stand-in used when the summarizer is
+// unreachable after retry: the foldable region is already archived, so the
+// digest just notes the gap and points the model at the user for anything it
+// needs from before it.
+func mechanicalFoldDigest(n int, archive string) string {
+	where := "."
+	if archive != "" {
+		where = " (archived to " + archive + ")."
+	}
+	return fmt.Sprintf("%d earlier message(s) were folded here to free context, but the automatic summary was unavailable%s Ask the user if you need details from before this point.", n, where)
+}
+
+// renderTranscript flattens messages into a readable transcript for summarization.
+func renderTranscript(msgs []provider.Message) string {
+	var b strings.Builder
+	for _, m := range msgs {
+		text := provider.ContentString(m.Content)
+		switch m.Role {
+		case provider.RoleUser:
+			fmt.Fprintf(&b, "[user]\n%s\n\n", text)
+		case provider.RoleAssistant:
+			if text != "" {
+				fmt.Fprintf(&b, "[assistant]\n%s\n", text)
+			}
+			for _, tc := range m.ToolCalls {
+				fmt.Fprintf(&b, "[assistant calls %s] %s\n", tc.Name, tc.Arguments)
+			}
+			b.WriteString("\n")
+		case provider.RoleTool:
+			fmt.Fprintf(&b, "[tool %s result]\n%s\n\n", m.Name, text)
+		case provider.RoleSystem:
+			fmt.Fprintf(&b, "[system]\n%s\n\n", text)
+		}
+	}
+	return b.String()
+}
+
+// archiveMessages writes the dropped originals to a timestamped .jsonl (one
+// message per line) under dir, returning the file path.
+func archiveMessages(dir string, msgs []provider.Message) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, time.Now().Format("20060102-150405.000")+".jsonl")
+	f, err := os.Create(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	enc := json.NewEncoder(f)
+	for _, m := range msgs {
+		if err := enc.Encode(m); err != nil {
+			return "", err
+		}
+	}
+	return path, nil
+}

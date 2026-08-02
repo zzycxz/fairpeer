@@ -1,0 +1,46 @@
+# Go sources: force LF so Windows checkouts stay gofmt-clean locally (CI runs
+# gofmt on Linux; without this, Windows devs see every file flagged by `gofmt -l`
+# due to CRLF, and ci.yml works around by skipping the step on Windows).
+*.go    text eol=lf
+*.mod   text eol=lf
+*.sum   text eol=lf
+.githooks/** text eol=lf
+benchmarks/**/*.sh text eol=lf
+# LFS rules removed: Python runtime (.dll/.pyd) was removed from git tracking.
+# Skills SVG/PPTX files are small enough for regular git.
+
+# FairPeer clean start: normalize ALL text files to LF so Windows checkouts do
+# not produce spurious whole-file diffs (the pre-cleanstart repo had 232 phantom
+# "modified" files purely from CRLF/LF flip). Cover the rest of the text tree.
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.js        text eol=lf
+*.mjs       text eol=lf
+*.cjs       text eol=lf
+*.json      text eol=lf
+*.jsonc     text eol=lf
+*.html      text eol=lf
+*.css       text eol=lf
+*.md        text eol=lf
+*.markdown  text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.toml      text eol=lf
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.ps1       text eol=lf
+*.py        text eol=lf
+*.sql       text eol=lf
+*.xml       text eol=lf
+*.svg       text eol=lf
+*.txt       text eol=lf
+*.env       text eol=lf
+*.example   text eol=lf
+*.gitignore text eol=lf
+*.dockerfile text eol=lf
+Dockerfile  text eol=lf
+Makefile    text eol=lf
+*.nsi       text eol=lf
+*.desktop   text eol=lf
+.editorconfig text eol=lf
+.gitattributes text eol=lf

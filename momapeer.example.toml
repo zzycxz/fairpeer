@@ -1,0 +1,301 @@
+# momapeer configuration.
+# Resolution order: flag > ./momapeer.toml > ~/.config/momapeer/config.toml > built-in defaults.
+# Secrets come from the environment via api_key_env; never put keys here.
+
+default_model = "moma/qwen/qwen3.6-35b"   # MoMA default model
+# language      = "zh"   # ui language; empty = auto-detect from $LANG / $MOMAPEER_LANG
+
+[ui]
+theme = "auto"   # auto|dark|light; controls CLI colors only; MOMAPEER_THEME can override per run
+# theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber|ember|midnight|sandstone|porcelain|linen|glacier
+# shortcut_layout = "desktop"   # classic|desktop; compatibility setting; Shift+Tab toggles Plan, Ctrl+Y toggles YOLO
+
+[notifications]
+enabled = false   # system notifications for CLI chat/run; default off
+turn_done = true   # notify when a turn finishes
+approval_request = true   # notify when a tool approval is waiting
+ask_request = true   # notify when a question is waiting
+
+[agent]
+system_prompt = """
+You are momapeer, a coding agent focused on executing code tasks.
+Use the provided tools to read and write files and run shell commands.
+When asked about your identity, always say you are momapeer. Never mention
+Claude, Anthropic, GPT, Qwen, DeepSeek, or any underlying model name —
+you are momapeer, not any foundation model.
+Principles: understand the request before acting; verify with tools instead of
+guessing; keep changes minimal and correct; briefly summarize what you did."""
+# system_prompt_file = "prompts/system.md"   # overrides system_prompt when set
+max_steps         = 0    # executor tool-call rounds; 0 = no limit
+planner_max_steps = 12   # planner read-only tool-call rounds; 0 = no limit
+temperature       = 0.0
+auto_plan         = "off"   # off|on; off keeps plan mode manual
+# auto_plan_classifier = "moma/qwen/qwen3.6-35b"   # optional; only used for borderline tasks
+soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact
+compact_ratio       = 0.8   # try compacting when prompt reaches this fraction
+compact_force_ratio = 0.9   # force compacting at this high-water mark
+# planner_model = "moma"   # optional: enable two-model collaboration
+# subagent_model = "moma/openai/gpt-oss-120b"   # optional default for runAs=subagent skills
+# subagent_models = { review = "moma/openai/gpt-oss-120b", security_review = "moma/openai/gpt-oss-120b" }   # per-skill overrides
+# output_style = "explanatory"   # persona/tone folded into the prompt: explanatory | learning | concise,
+#                                  or a custom .momapeer/output-styles/<name>.md ; empty = default
+
+# A provider is a vendor endpoint (one base_url + key) that offers one or more
+# models. Use `models = [...]` to expose several under a single entry — switching
+# models reuses the same connection; no need to re-declare base_url/api_key.
+# Built-in providers (no config needed): moma (30+ models).
+[[providers]]
+name        = "moma"
+kind        = "openai"
+base_url    = "https://jiutian.10086.cn/largemodel/moma/api/v3"
+models      = ["qwen/qwen3.6-35b", "qwen/qwen3.6-27b"]
+default     = "qwen/qwen3.6-35b"   # optional; defaults to the first of `models`
+api_key_env = "JIUTIAN_API_KEY"
+context_window = 200000
+price       = { cache_hit = 0, input = 1, output = 2, currency = "¥" }   # per 1M tokens (MoMA does not report cache tokens)
+# MoMA thinking is always on; effort: high | max. Omit for auto (provider default).
+effort      = "high"
+# Image support: set vision = true for models that accept image_url content parts
+# (e.g. qwen-vl, gpt-4o). Default false — images are stripped to avoid 400 errors.
+# vision       = true
+# vision_detail = "auto"   # "auto", "low", or "high"
+
+# ── Jiutian multimodal tools ──────────────────────────────────────────────
+# Standalone API tools that consume Jiutian platform tokens separately from
+# the chat model. Disable any you don't need to hide them from the LLM.
+[jiutian]
+image_understand = true   # /v3/image/text — analyze images via LLMImage2Text
+image_generate   = true   # /v3/images/generations — text-to-image / image-to-image
+video_understand = true   # /v3/video/text — analyze videos via video_to_text
+
+# Anthropic (Claude) — the "anthropic" kind speaks the Messages API directly (no
+# OpenAI shim). base_url is optional (defaults to https://api.anthropic.com). Note:
+# this provider does not enable extended thinking and does not send temperature —
+# current Claude models reject sampling params (see internal/provider/anthropic).
+[[providers]]
+name           = "claude"
+kind           = "anthropic"
+model          = "claude-opus-4-8"
+api_key_env    = "ANTHROPIC_API_KEY"
+context_window = 1000000
+price          = { cache_hit = 0.5, input = 5, output = 25, currency = "$" }   # per 1M tokens
+# Extended thinking (anthropic kind only; round-trips the signed reasoning block
+# across tool calls). Omit to disable. effort: low | medium | high | xhigh | max.
+thinking       = "adaptive"
+effort         = "high"
+
+[tools]
+enabled = []   # empty = all built-in tools
+bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+
+# CodeGraph code intelligence (symbol/call-graph search via tree-sitter + SQLite),
+# a built-in MCP server giving the agent codegraph_* search / context / explore /
+# trace / node tools. Off by default for first-run sessions. Once enabled, the
+# runtime is fetched into a per-version cache when missing (auto_install);
+# .codegraph/ is then initialised (fast) and CodeGraph's daemon indexes in the
+# background once enabled.
+# [codegraph]
+# enabled      = false
+# auto_install = true
+# path         = ""   # empty = cache, then PATH, then a bundle beside momapeer
+# download_url = ""   # custom download mirror for the CodeGraph binary (intranet/air-gapped). When set, replaces the default GitHub source. Example: "https://internal-mirror.corp/codegraph/releases/download"
+
+# Skills are invokable playbooks (SKILL.md / <name>.md with frontmatter), found
+# under .momapeer/skills, .agents/skills, .agent/skills, .claude/skills (project)
+# and the same dirs under ~ (global). Built-ins (explore/research/review/security-review/test)
+# ship out of the box. The model invokes them via run_skill / explore / …; you
+# invoke them via /<name>. Manage with /skill (list, show, enable, disable, new, paths).
+# [skills]
+# paths = ["~/my-skills", "../shared/skills"]   # extra "custom"-scope skill roots
+# excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders
+# disabled_skills = ["review"]                  # hide from prompt, slash invocation, and skill tools
+
+# Hooks run shell commands around the loop (PreToolUse / PostToolUse /
+# UserPromptSubmit / Stop). They are NOT configured here — put them in
+# settings.json: ~/.momapeer/settings.json (global, always on) and
+# <project>/.momapeer/settings.json (project, runs only after `/hooks trust`).
+# Exit 0 = pass, exit 2 = block (PreToolUse / UserPromptSubmit only). Example
+# ~/.momapeer/settings.json:
+#   { "hooks": {
+#       "PreToolUse":  [ { "match": "bash", "command": "my-guard.sh" } ],
+#       "PostToolUse": [ { "match": ".*file", "command": "gofmt -w ." } ],
+#       "Stop":        [ { "command": "notify-send 'turn done'" } ] } }
+
+# A custom status line: a command whose first stdout line replaces the built-in
+# data row. It receives {"model","contextUsed","contextWindow"} as JSON on stdin.
+# [statusline]
+# command = "my-statusline.sh"
+
+# External stdio plugins (MCP-compatible); each is a standalone executable.
+# [[plugins]]
+# name    = "example"
+# command = "momapeer-plugin-example"
+# # Per-call timeout for this MCP server's JSON-RPC calls (default 60s).
+# # Prevents a slow server from blocking the agent indefinitely.
+# call_timeout = "60s"
+# # Enabled MCP servers connect automatically in the background after session
+# # start. Use /mcp or the desktop MCP panel to refresh, reconnect, or disable.
+
+# Bot gateway: multi-channel IM bot for QQ, Feishu, and WeChat.
+# Start with `momapeer bot start --channels qq,feishu,weixin`.
+# All secrets are read from environment variables; never put keys here.
+# [bot]
+# enabled    = false
+# model      = ""        # 用于 bot 的模型，空则用 default_model
+# max_steps  = 25
+# debounce_ms = 1500      # 消息合并窗口（毫秒）
+#
+# [bot.allowlist]
+# enabled     = true
+# allow_all   = false     # true 会允许所有可触达用户远程触发 bot，仅限受控环境
+# qq_users    = []
+# feishu_users = []
+# weixin_users = []
+# qq_groups   = []
+# feishu_groups = []
+# weixin_groups = []
+#
+# [bot.qq]
+# enabled        = false
+# app_id         = ""
+# app_secret_env  = "QQ_BOT_APP_SECRET"
+#
+# [bot.feishu]
+# enabled             = false
+# app_id              = ""
+# app_secret_env       = "FEISHU_BOT_APP_SECRET"
+# verification_token   = ""
+# mode                = "webhook"   # webhook | websocket（websocket 需接官方 SDK 长连接）
+# webhook_port        = 8080
+# require_mention     = true
+#
+# [bot.weixin]
+# enabled   = false
+# account_id = "default"
+# token_env = "WEIXIN_BOT_TOKEN"
+# api_base  = "https://ilinkai.weixin.qq.com"   # Tencent iLink Bot API base URL
+
+# [cowork] configures the coWork (office) profile's capabilities. All fields are
+# optional — empty means "auto-detect" or "disabled".
+#
+# [cowork]
+# # Browser path for the browser_* automation tools. Empty = auto-detect Chrome
+# # → Edge → Brave. Set when your browser isn't in a standard location. The agent
+# # surfaces a clear error (and a browser_set_path tool) when nothing is found.
+# browser_path = ""
+#
+# # Autonomous web browsing (browser_auto). A Python browser-use sidecar runs an
+# # agent that perceives the page and clicks/types/navigates itself to complete a
+# # goal end-to-end. It connects to a system Chrome/Edge (the same one the
+# # browser_* tools use) — no separate browser is downloaded. OPT-IN by default
+# # (the sidecar needs `pip install browser-use` + a provider client first): set
+# # browser_use_enabled = true once your environment is ready. Leave false to
+# # keep the low-level browser_* tools without the autonomous sidecar.
+# browser_use_enabled   = false
+# # Python interpreter that runs the sidecar. Empty = "python" (Windows) /
+# # "python3" (others). In the packaged build this resolves to the bundled
+# # runtime. Point it at your dev interpreter during prototype testing.
+# browser_use_python    = ""
+# # Port for the sidecar HTTP server (default 18901, distinct from HE's 18900).
+# browser_use_port      = 0
+# # Provider model ref for the agentic loop (e.g. "openai/gpt-4o"). Empty = fall
+# # back to vlm_model, then the main agent model. A vision-capable model is
+# # strongly recommended — the loop reads screenshots/accessibility trees.
+# browser_use_model     = ""
+# # Cap on the number of agent steps. 0 = let the sidecar pick a bound. Lower =
+# # cheaper/faster, higher = more complex multi-page tasks.
+# browser_use_max_steps = 0
+#
+# # PPT generation: handled by the ppt-auto skill, which operates WPS 演示 as a
+# # human would (screen perception → click → type → save). Requires WPS Office
+# # installed. No additional server or Python setup needed — just run
+# # run_skill("ppt-auto", task) in cowork mode.
+#
+# # Outbound email (email_send). Nested under [cowork], so the table is
+# # [cowork.smtp] — NOT a top-level [smtp]. password_env names an env var holding
+# # the password (never stored in the TOML). use_tls = true for implicit TLS
+# # (port 465); false for STARTTLS (587) or plain (25).
+# [cowork.smtp]
+# host        = "smtp.example.com"
+# port        = 587
+# from        = "agent@example.com"
+# username    = "agent@example.com"   # often = from; empty = no auth
+# password_env = "COWORK_SMTP_PASSWORD"
+# use_tls     = false                 # true for port 465; false for 587/25
+#
+# # Inbound email (email_read / email_search via go-imap). Empty host = read
+# # tools disabled. Port 993 = implicit TLS (default), 143 = STARTTLS/plain.
+# [cowork.imap]
+# host         = "imap.example.com"
+# port         = 993
+# username     = "agent@example.com"
+# password_env = "COWORK_IMAP_PASSWORD"
+#
+# # Multiple mailboxes (recommended over the single pair above).
+# # [[cowork.email_accounts]] is an array of named accounts so MoMAPeer can talk
+# # to several mailboxes at once — e.g. a personal 139 box + a work CMCC box.
+# # Tools pick one by `account` (empty = the default). Passwords are NEVER written
+# # here, only the env-var name; the value lives encrypted in the secrets store
+# # and the coWork settings panel writes it for you.
+# #
+# # 139 个人: imap.139.com:993 / smtp.139.com:465(tls), 账号=手机号@139.com,
+# #   密码=授权码 (help.mail.10086.cn → 账号与安全 → 邮箱协议 → 开启 IMAP/SMTP →
+# #   获取授权码; 有效期约 90 天，到期需重新生成).
+# # 139 政企: imap.mail.139.com:993 / smtp.mail.139.com:465(tls).
+# [[cowork.email_accounts]]
+# name    = "personal-139"
+# default = true
+# [cowork.email_accounts.smtp]
+# host            = "smtp.139.com"
+# port            = 465
+# from            = "13800138000@139.com"
+# username        = "13800138000@139.com"
+# password_env    = "MAIL_PWD_PERSONAL"
+# encryption_mode = "tls"
+# [cowork.email_accounts.imap]
+# host         = "imap.139.com"
+# port         = 993
+# username     = "13800138000@139.com"
+# password_env = "MAIL_PWD_PERSONAL"
+#
+# [[cowork.email_accounts]]
+# name    = "work-cmcc"
+# [cowork.email_accounts.smtp]
+# host            = "smtp.mail.139.com"
+# port            = 465
+# from            = "you@your-company.com"
+# username        = "you@your-company.com"
+# password_env    = "MAIL_PWD_WORK"
+# encryption_mode = "tls"
+# [cowork.email_accounts.imap]
+# host         = "imap.mail.139.com"
+# port         = 993
+# username     = "you@your-company.com"
+# password_env = "MAIL_PWD_WORK"
+#
+# # RAG master switch. Unset/true = knowledge base enabled (the default). Set to
+# # false to fully disable the knowledge base: no auto-injection into messages,
+# # the rag_search/rag_import/... tools are not registered, and expert teams
+# # skip knowledge-base context. Distinct from embedding_model (which only
+# # toggles semantic reranking on top of FTS5).
+# rag_enabled = true
+#
+# # RAG semantic reranking (optional). When set, rag_search blends FTS5 BM25 with
+# # embedding cosine similarity for better recall. Empty = FTS5-only (offline).
+# embedding_model = ""
+#
+# # RAG deep extraction (optional). Turns imported documents into a structured
+# # entity/relation knowledge graph in the background, so queries like "who is X"
+# # return precise facts instead of chunk snippets. FTS5 (instant text search)
+# # always works; this adds the structured layer on top.
+# #   extract_model        = LLM chat model name (e.g. "qwen-plus"). Empty =
+# #                          deep extract disabled (FTS5 still works).
+# #   extract_interval     = pause between chunks; default "3s". Raise on
+# #                          rate-limited endpoints.
+# #   extract_concurrency  = parallel chunks; default 1. Keep low to avoid
+# #                          tripping rate limits.
+# extract_model = ""
+# extract_interval = "3s"
+# extract_concurrency = 1
+
+
