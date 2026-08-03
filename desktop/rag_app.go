@@ -765,9 +765,9 @@ func (a *App) RagSummarize(collection string) (KnowledgeSummaryView, error) {
 }
 
 // RagAsk is the knowledge-base Q&A endpoint: it searches the RAG store for
-// context relevant to the user's question, then calls the 九天 LLM to generate
+// context relevant to the user's question, then calls the configured LLM to generate
 // a grounded answer. This is fairpeer's equivalent of Hyper-Extract's `he talk`
-// — but uses fairpeer's own FTS5 + entity retrieval and the 九天 chat API,
+// — but uses fairpeer's own FTS5 + entity retrieval and the configured chat API,
 // without depending on the HE Python server.
 //
 // The model used is the same fast_task_model as RAG extraction (resolved via

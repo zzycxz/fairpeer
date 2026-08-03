@@ -33,7 +33,7 @@ import (
 )
 
 // Extractor turns one chunk of text into entities + relations. The default
-// implementation calls an LLM (九天/OpenAI-compatible /chat/completions with a
+// implementation calls an LLM (OpenAI-compatible /chat/completions with a
 // JSON schema); a no-op stub is used in tests.
 //
 // nodePrompt and edgePrompt override the default extraction prompts when

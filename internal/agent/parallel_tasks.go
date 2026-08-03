@@ -20,7 +20,7 @@ import (
 // resolution, tool filtering, transcript runs) so every sub-task inherits the
 // same sandbox, gate, and hooks — only the dispatch is parallel.
 //
-// MoMA fit: each sub-task accepts an optional model/effort override, so a caller
+// Multi-model fit: each sub-task accepts an optional model/effort override, so a caller
 // can route independent pieces of work to different models on the same platform
 // — e.g. planning to a large reasoning model, code generation to a code-tuned
 // model, search/routing to a small fast model. The TaskTool.resolveProvider

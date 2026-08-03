@@ -1,13 +1,12 @@
 // Package openai implements the OpenAI-compatible /chat/completions provider.
-// It self-registers under the "openai" kind, so MoMA (九天), MiniMax-M3, and
-// any other OpenAI-compatible endpoint are just config instances rather than
-// code. Each instance picks the wire shape from its base URL:
-//   - api.jiutian.10086.cn → emits thinking.type=enabled (MoMA-flavor CoT) plus
-//     thinking_effort as a depth hint.
-//   - api.minimaxi.com → emits thinking.type=adaptive|disabled (M3's binary
-//     knob) instead of reasoning_effort, since M3 has no level scale.
-//   - everything else (MoMA and other OpenAI-compatible gateways) uses the
-//     vanilla reasoning_effort scale (low/medium/high).
+// It self-registers under the "openai" kind, so any OpenAI-compatible endpoint
+// (Qwen, DeepSeek, GLM, MiniMax, etc.) is just a config instance rather than
+// code. Each instance picks its reasoning wire shape from the explicit
+// reasoning_protocol config field (not URL auto-detection):
+//   - "moma" → emits thinking.type=enabled plus thinking_effort as a depth
+//     hint (for endpoints that expect the Jiutian/MoMA-flavor CoT shape).
+//   - everything else uses the vanilla reasoning_effort scale
+//     (low/medium/high).
 package openai
 
 import (
@@ -544,7 +543,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 // top of usage; OpenAI and MoMA put it nested under prompt_tokens_details.
 // Whichever side reports non-zero wins; miss is derived when only hit is given.
 // Reasoning tokens land in completion_tokens_details on thinking-mode models.
-// Note: MoMA currently does not report cache tokens (both fields are 0); the
+// Note: some providers do not report cache tokens (both fields are 0); the
 // normalisation logic is kept for future cache support and for other providers.
 func normaliseUsage(u *wireUsage) *provider.Usage {
 	hit := u.PromptCacheHitTokens
@@ -707,6 +706,6 @@ func imageContentParts(parts []provider.ContentPart, detail string) []chatConten
 	return out
 }
 
-// imageUnderstandPrompt and the in-conversation 九天 image-degradation path were
+// imageUnderstandPrompt and the in-conversation legacy image-degradation path were
 // removed (WP-2.6). Public-network users now use each vendor's native vision
-// capability instead of the 九天 LLMImage2Text fallback.
+// capability instead of the a vision-model fallback.

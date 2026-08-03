@@ -87,10 +87,10 @@ type RunRequest struct {
 	// "provider/model" ref down to this bare name before sending.
 	Model string `json:"model,omitempty"`
 	// ProviderKind selects the LLM client family: "openai" (OpenAI-compatible,
-	// the default — also covers 九天/azure-compatible via BaseURL) or "anthropic".
+	// the default — also covers azure-compatible via BaseURL) or "anthropic".
 	ProviderKind string `json:"provider_kind,omitempty"`
 	// BaseURL overrides the LLM provider endpoint (for OpenAI-compatible gateways
-	// like 九天/MoMA). Empty = the client's default (api.openai.com / anthropic).
+	// like vendor gateways). Empty = the client's default (api.openai.com / anthropic).
 	BaseURL string `json:"base_url,omitempty"`
 	// APIKeyEnv names the environment variable holding the API key. The sidecar
 	// reads os.environ[APIKeyEnv] — the key is never sent over the wire, matching

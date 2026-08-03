@@ -12,7 +12,7 @@
   "info": {
     "companyName": "fairpeer",
     "productName": "fairpeer",
-    "productVersion": "1.0.0",
+    "productVersion": "0.1.0",
     "copyright": "Copyright © 2026 FairPeer Contributors",
     "comments": "fairpeer desktop — a Wails shell around the Go kernel."
   }

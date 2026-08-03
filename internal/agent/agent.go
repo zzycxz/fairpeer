@@ -164,8 +164,8 @@ type Agent struct {
 	// — a steadier, cost-oriented number than the single-turn rate. They are NOT
 	// reset on compaction (compaction only rewrites session.Messages), so the
 	// aggregate never craters when the prefix is summarized away. Atomic: the run
-	// loop accumulates them while the status line reads them. MoMA currently does
-	// not report cache tokens, so these stay at 0 for MoMA providers.
+	// loop accumulates them while the status line reads them. Some providers do
+	// not report cache tokens, so these stay at 0 for providers that omit cache stats.
 	sessCacheHit  atomic.Int64
 	sessCacheMiss atomic.Int64
 

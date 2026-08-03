@@ -484,12 +484,12 @@ type CoworkConfig struct {
 	// works offline). Set to a real embedding model (e.g. a provider with kind
 	// "embedding") to upgrade RAG to hybrid.
 	EmbeddingModel string `toml:"embedding_model"`
-	// VLMBackend selects the visual-language model backend for screen_perceive
-	// (desktop automation). "jiutian" (default, 九天 LLMImage2Text) or "provider"
-	// (走 provider 多模态聊天, 用 VLMModel 指定模型).
+	// VLMBackend is legacy: VLM now always uses the provider multimodal chat path
+	// (base64 image_url content parts). Kept for TOML backward-compat but ignored.
+	// Use VLMModel / ScreenshotVLMModel to pick the vision model.
 	VLMBackend string `toml:"vlm_backend"`
-	// VLMModel is the provider model ref for VLM when VLMBackend="provider".
-	// E.g. "minimax/minimax-m2.7", "moonshotai/kimi-k2.6". Must be vision-capable.
+	// VLMModel is the provider model ref for image recognition (screen_perceive).
+	// E.g. "qwen/qwen3.7-plus". Must be vision-capable (provider vision=true).
 	VLMModel string `toml:"vlm_model"`
 	// IMAP configures inbound email (email_read/search). Empty Host = read tools
 	// return "not configured". Reading uses go-imap + go-message (protocol-level
@@ -592,7 +592,7 @@ func (c CoworkConfig) RAGEnabledOrDefault() bool {
 // across ALL providers via a decorator, so main-agent + subagent + RAG
 // extraction + IM bot responses all share the same per-API-key RPM quota.
 //
-// RPM reflects the user's real API-key rate limit (MoMA defaults to 60/min;
+// RPM reflects the user's real API-key rate limit (default 60/min;
 // higher tiers or other providers may allow more). Leave at 0 to disable
 // rate limiting entirely (unlimited, backward-compatible).
 //
@@ -1072,7 +1072,7 @@ func (c *Config) BashMode() string {
 // AgentConfig configures the harness loop. PlannerModel is optional: when set
 // to another provider's name it enables two-model collaboration, where the
 // planner handles low-frequency planning in its own session (kept separate so
-// each model's prompt prefix stays cache-stable; MoMA currently does not report
+// each model's prompt prefix stays cache-stable; some providers do not report
 // cache tokens). SubagentModel is the optional default for runAs=subagent
 // skills; SubagentModels overrides it per skill name.
 type AgentConfig struct {
@@ -1927,7 +1927,7 @@ const userDirname = "fairpeer"
 
 // userDir returns the fairpeer user config dir (~/.config/fairpeer on Linux,
 // ~/Library/Application Support/fairpeer on macOS, %AppData%/fairpeer on Windows).
-// FairPeer is an independent project from momapeer — no cross-project data migration.
+// FairPeer is an independent project — no legacy data migration from upstream sources.
 func userDir() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {

@@ -17,7 +17,7 @@ import (
 
 // Compaction is a low-frequency cache-reset point: the prompt grows append-only
 // until a turn nears compactRatio of the window, then it is compacted down to a
-// tail budget. (MoMA currently does not report cache tokens; the prefix stability
+// tail budget. (some providers do not report cache tokens; the prefix stability
 // still reduces token transmission and prepares for future cache support.) The budget is a fixed token count, not a
 // fraction of the window, so a huge window still compacts rarely while a small
 // one still lands below the trigger (which is what stops the re-compaction loop).

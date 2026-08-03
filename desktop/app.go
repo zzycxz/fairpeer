@@ -466,7 +466,7 @@ func (a *App) initRAG() {
 				extCfg.Model = e.Model
 				slog.Info("rag: extraction model resolved", "ref", modelRef, "model", e.Model, "provider", e.Name)
 			} else {
-				// Fallback: send the ref as-is to the default 九天 endpoint.
+				// Fallback: send the ref as-is to the default provider endpoint.
 				extCfg.Model = modelRef
 				slog.Warn("rag: could not resolve model ref, using as-is", "ref", modelRef)
 			}

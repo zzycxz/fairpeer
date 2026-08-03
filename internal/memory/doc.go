@@ -18,7 +18,7 @@
 // (see Compose), so it rides the provider's automatic prefix cache at zero per-turn
 // cost. Mid-session changes never mutate that prefix; they take effect through
 // the controller's transient tail-injection and fold into the prefix on the next
-// session. (MoMA currently does not report cache tokens; the prefix stability
+// session. (some providers do not report cache tokens; the prefix stability
 // still reduces token transmission and prepares for future cache support.)
 package memory
 

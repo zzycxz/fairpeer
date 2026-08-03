@@ -12,7 +12,7 @@ import (
 
 // PrefixShape hashes the portions of the request prefix that influence
 // provider-side prompt-cache reuse. Comparing snapshots across turns
-// lets us explain *why* a cache miss happened. (MoMA currently does not
+// lets us explain *why* a cache miss happened. (some providers do not
 // report cache tokens; the prefix stability still reduces token transmission
 // and prepares for future cache support.)
 type PrefixShape struct {

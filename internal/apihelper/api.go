@@ -4,7 +4,7 @@
 // response-truncation utility so these callers do not duplicate the HTTP
 // boilerplate.
 //
-// (The former 九天-private APICall helper was removed in WP-2.6 along with the
+// (The former private-protocol APICall helper was removed in WP-2.6 along with the
 // multimodal tools; only the generic Client/BaseURL/Truncate utilities remain,
 // borrowed by the /chat/completions callers above.)
 package apihelper
@@ -15,11 +15,11 @@ import (
 	"time"
 )
 
-// defaultBaseURL is the default API root used by the scheduler/RAG direct
-// /chat/completions callers when no override is configured. Kept as a const so
-// the original value is preserved for reference; BaseURL (a var) is what
-// callers read and is overridable via SetBaseDomain.
-const defaultBaseURL = "https://jiutian.10086.cn/largemodel/moma/api/v3"
+// defaultBaseURL is empty — FairPeer ships no built-in API endpoint. The
+// scheduler/RAG direct /chat/completions callers must get their base URL from
+// the resolved provider config (Cowork.FastLLMBaseDomain override, or the
+// fast-task model's provider entry). An empty BaseURL means "not configured".
+const defaultBaseURL = ""
 
 // BaseURL is the API root for direct /chat/completions calls made by the
 // scheduler time-parser and RAG ask. It's a var (not a const) so a private

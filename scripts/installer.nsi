@@ -5,7 +5,7 @@
 !cd ".."
 
 !define APP_NAME "fairpeer"
-!define APP_VERSION "1.0.0"
+!define APP_VERSION "0.1.0"
 !define APP_PUBLISHER "fairpeer Contributors"
 !define APP_EXE "fairpeer.exe"
 !define INSTALL_DIR "$LOCALAPPDATA\${APP_NAME}"

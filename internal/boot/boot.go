@@ -347,7 +347,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Output style: fold the selected persona/tone block into the base prompt
 	// before language/memory/skills append, so a "replace" style (keep-coding
 	// false) still keeps those. Applied once, into the cache-stable prefix.
-	// (MoMA currently does not report cache tokens; the prefix stability still helps.)
+	// (some providers do not report cache tokens; the prefix stability still helps.)
 	if st, ok := outputstyle.Resolve(cfg.Agent.OutputStyle, outputstyle.Dirs()); ok {
 		sysPrompt = outputstyle.Apply(sysPrompt, st)
 	}
@@ -603,7 +603,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// VLM backend for screen_perceive (desktop automation).
 		//
 		// DEFAULT is now the provider multimodal channel (qwen/qwen3.6-27b), NOT
-		// the 九天 LLMImage2Text /image/text endpoint. The dedicated endpoint
+		// the legacy multimodal endpoint. The dedicated endpoint
 		// intermittently returns HTTP 500 ("系统异常,请稍后重试") under load, which
 		// blinds the CUA mid-task and sends it into a spiral of improvised
 		// PowerShell/Python workarounds. The provider multimodal path is reached

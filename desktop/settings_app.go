@@ -214,14 +214,9 @@ func officialProviderHost(baseURL string) string {
 	return strings.ToLower(u.Hostname())
 }
 
+// officialProviderKindFromEntry previously detected built-in official providers
+// (jiutian moma). FairPeer ships no official presets, so this always returns "".
 func officialProviderKindFromEntry(p config.ProviderEntry) string {
-	host := officialProviderHost(p.BaseURL)
-	switch config.CanonicalDesktopOfficialProviderName(p.Name) {
-	case "moma":
-		if host == "jiutian.10086.cn" {
-			return "moma"
-		}
-	}
 	return ""
 }
 

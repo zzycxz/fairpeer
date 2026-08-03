@@ -1,7 +1,7 @@
 package rag
 
 // jiutian_extractor.go is the default rag.Extractor implementation: it calls
-// the 九天 (Jiutian/MoMA) /chat/completions endpoint with a JSON-output
+// the configured OpenAI-compatible /chat/completions endpoint with a JSON-output
 // instruction and parses the structured entities+relations out of the response.
 //
 // This lives in the rag package (not internal/tool/builtin) so it's reusable by

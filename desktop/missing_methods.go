@@ -14,7 +14,7 @@ import (
 //
 // 全部从 7/15 exe 的真实调用上下文反推签名 + 复用已有 config 字段实现。
 
-// --- Fast-LLM base domain（legacy: 九天 private deployment/proxy）---------
+// --- Fast-LLM base domain（legacy: custom private deployment/proxy）---------
 
 // GetJiutianBaseDomain returns the configured fast-LLM base URL override, or ""
 // when unset. Method name kept for frontend bridge compatibility; the field
