@@ -58,13 +58,23 @@ func (s *Server) ctl() *control.Controller {
 
 // initTitleProvider builds a lightweight provider used solely to generate short
 // session titles. Errors are silently swallowed — title generation is best-effort,
-// and the server works fine without it.
+// and the server works fine without it. Uses the configured fast-task model
+// (falling back to the default model); no hardcoded vendor model.
 func (s *Server) initTitleProvider() {
 	cfg, err := config.Load()
 	if err != nil {
 		return
 	}
-	entry, ok := cfg.ResolveModel("moma/qwen/qwen3.6-35b")
+	// Prefer the fast-task model for cheap title generation; fall back to the
+	// main default model. Empty/unknown → skip (best-effort, no error).
+	modelRef := strings.TrimSpace(cfg.Agent.FastTaskModel)
+	if modelRef == "" {
+		modelRef = strings.TrimSpace(cfg.DefaultModel)
+	}
+	if modelRef == "" {
+		return
+	}
+	entry, ok := cfg.ResolveModel(modelRef)
 	if !ok {
 		return
 	}

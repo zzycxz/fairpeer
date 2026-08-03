@@ -813,7 +813,7 @@ func selectLanguage() (string, error) {
 }
 
 // selectEnabledProviders prompts a single multi-select of provider families
-// (MoMA / MoMA / custom / …) and returns one ProviderEntry per chosen
+// (vendor-A / vendor-B / custom / …) and returns one ProviderEntry per chosen
 // family, carrying the models the user picked. Built-in families try the
 // OpenAI-compatible GET /models endpoint first (so the user sees the real
 // list, not a stale hard-coded one) and fall back to the preset's static
@@ -1008,7 +1008,7 @@ func fetchModelListCompat(ctx context.Context, baseURL, apiKey string) ([]string
 // didn't pick (or was empty).
 // buildFamilyEntries splits the user's selection back across the family's preset
 // members so each model keeps its own entry — and therefore its own pricing
-// and context window. A family like MoMA ships flash and pro as
+// and context window. A family like a vendor ships flash and pro as
 // separate presets with different prices; collapsing them into one entry would
 // bill pro at flash's rate. Models the live /models list returned that match no
 // preset (a new SKU) fall under the probe entry. Member order is preserved;
@@ -1121,7 +1121,7 @@ func providerSlug(kind, baseURL string) string {
 
 // providerFamily is a wizard-only grouping of provider SKUs by vendor; it does
 // not exist in config because users editing fairpeer.toml deal with SKU names
-// directly. Keys mirror the SKU name prefix (MoMA-*, MoMA) so adding a new
+// directly. Keys mirror the SKU name prefix so adding a new
 // preset only requires a familyOf case.
 type providerFamily struct {
 	key  string
@@ -1129,15 +1129,12 @@ type providerFamily struct {
 	desc string
 }
 
+// familyOf groups provider SKUs by vendor for the setup wizard. FairPeer ships
+// no built-in presets (Default().Providers is empty), so every family here is
+// derived from a user-configured provider name. Unknown names fall through to
+// a generic family keyed by the name itself.
 func familyOf(name string) providerFamily {
-	switch {
-	case strings.HasPrefix(name, "moma"):
-		return providerFamily{key: "moma", name: "MoMA (九天)", desc: "中国移动九天聚合模型平台，支持 300+ 模型"}
-	case strings.HasPrefix(name, "MoMA"):
-		return providerFamily{key: "MoMA", name: "MoMA (China Mobile)", desc: "long-horizon agentic"}
-	default:
-		return providerFamily{key: name, name: name}
-	}
+	return providerFamily{key: name, name: name}
 }
 
 // promptCustomProvider handles the custom provider entry flow.
@@ -1367,11 +1364,11 @@ func groupByFamily(providers []config.ProviderEntry) ([]string, map[string][]int
 	return order, members, info
 }
 
-// withBuiltinFamilies guarantees the wizard always offers the built-in provider
-// families (MoMA, MoMA) even when the loaded config replaced them — a
-// fairpeer.toml that defines only [[providers]] for MoMA otherwise hides
-// MoMA from setup, since [[providers]] replaces the presets wholesale. Families
-// already present are left untouched (the user's customizations win); only the
+// withBuiltinFamilies merges any built-in default providers into the wizard's
+// offer list. Since FairPeer ships no built-in presets (Default().Providers is
+// empty), this is currently a no-op pass-through — the wizard shows exactly the
+// providers the user already configured. Families already present are left
+// untouched (the user's customizations win); only the
 // missing built-in families get their default entries appended.
 func withBuiltinFamilies(providers []config.ProviderEntry) []config.ProviderEntry {
 	have := map[string]bool{}
@@ -1414,7 +1411,7 @@ func promptMissingKeys(cfg *config.Config) int {
 
 // providersWithMissingKeys returns the providers the active configuration
 // actually references (default/planner/subagent models) whose api_key_env is
-// declared but not set. Merely-available presets stay silent — a MoMA-only
+// declared but not set. Merely-available presets stay silent — a single-vendor
 // user must not be prompted for JIUTIAN_API_KEY (#3939); the chat banner still
 // warns if they later switch to a model whose key is missing. configureKeys
 // dedupes shared envs, so duplicates are fine to leave in.
@@ -1462,7 +1459,7 @@ func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {
 // environment. For every distinct api_key_env: if the variable is already set,
 // setup asks whether to re-enter it; Enter keeps and re-pins the existing value.
 // Otherwise the user is asked once per env var (deduped across providers that
-// share one, e.g. both MoMA models). Returns KEY=value lines to append to
+// share one, e.g. both vendor models). Returns KEY=value lines to append to
 // .env. Re-pinning matters because loadDotEnv is first-wins, so a stale key left
 // earlier in the credentials file would otherwise keep shadowing the fresh value.
 func configureKeys(selected []config.ProviderEntry, r io.Reader, w io.Writer) []string {
