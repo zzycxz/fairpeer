@@ -44,7 +44,7 @@ func TestUsageLine(t *testing.T) {
 	}
 }
 
-// TestUsageLineDerivesMissFromHit covers the OpenAI/MoMA shape where only the
+// TestUsageLineDerivesMissFromHit covers the OpenAI/test-provider shape where only the
 // cached count is reported; the displayed "new" value comes from
 // PromptTokens - CacheHitTokens. Verifies the absolute split doesn't show 0.
 func TestUsageLineDerivesMissFromHit(t *testing.T) {

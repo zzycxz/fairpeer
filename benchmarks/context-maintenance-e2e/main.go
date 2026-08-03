@@ -1,4 +1,4 @@
-// Drives the context-maintenance E2E scenarios against the real MoMA API:
+// Drives the context-maintenance E2E scenarios against a real LLM API:
 // seed → (idle past cache TTL) → resume A/B-compares cold-restart miss tokens with and without pruning.
 package main
 
@@ -21,19 +21,29 @@ import (
 )
 
 const (
-	model      = "qwen/qwen3.6-35b"
-	baseURL    = "https://api.openai.com/v1" // default; override via -base flag
-	fatResults = 20
-	fatBytes   = 12_000
+	defaultModel = ""                          // override via -model flag (provider/model format)
+	defaultBase  = "https://api.openai.com/v1" // default; override via -base flag
+	fatResults   = 20
+	fatBytes     = 12_000
+)
+
+var (
+	modelFlag = flag.String("model", defaultModel, "model to benchmark")
+	baseFlag  = flag.String("base", defaultBase, "API base URL")
 )
 
 func prov() provider.Provider {
+	flag.Parse()
+	if *modelFlag == "" {
+		fmt.Fprintln(os.Stderr, "-model is required (provider/model format)")
+		os.Exit(1)
+	}
 	key := os.Getenv("OPENAI_API_KEY") // any OpenAI-compatible provider key
 	if key == "" {
 		fmt.Fprintln(os.Stderr, "OPENAI_API_KEY not set")
 		os.Exit(1)
 	}
-	p, err := provider.New("openai", provider.Config{Name: "e2e", BaseURL: baseURL, Model: model, APIKey: key})
+	p, err := provider.New("openai", provider.Config{Name: "e2e", BaseURL: *baseFlag, Model: *modelFlag, APIKey: key})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

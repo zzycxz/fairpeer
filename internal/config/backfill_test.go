@@ -4,14 +4,14 @@ import "testing"
 
 func TestNormalizeLegacyProviderModelsRepairsOfficialProvider(t *testing.T) {
 	c := &Config{Providers: []ProviderEntry{{
-		Name:      "moma",
+		Name:      "test-provider",
 		Kind:      "openai",
-		BaseURL:   "https://jiutian.10086.cn/largemodel/moma/api/v3",
-		APIKeyEnv: "JIUTIAN_API_KEY",
+		BaseURL:   "https://example.com/largemodel/test-provider/api/v3",
+		APIKeyEnv: "FAIRPEER_API_KEY",
 	}}}
 	normalizeLegacyProviderModels(c)
 	if got := c.Providers[0].Model; got != "" {
-		t.Fatalf("moma model = %q, want empty as it has no single legacy official fallback here", got)
+		t.Fatalf("test-provider model = %q, want empty as it has no single legacy official fallback here", got)
 	}
 }
 
@@ -28,19 +28,19 @@ func TestNormalizeLegacyProviderModelsLeavesCustomProviderUntouched(t *testing.T
 }
 
 func TestNormalizeDesktopOfficialProviderAccessCanonicalizesLegacyIDs(t *testing.T) {
-	t.Skip("Skipped due to MoMA protocol rename")
+	t.Skip("Skipped due to test-provider protocol rename")
 	c := Default()
-	c.DefaultModel = "moma/qwen/qwen3.6-35b"
-	c.Desktop.ProviderAccess = []string{"moma", "custom"}
+	c.DefaultModel = "test-provider/test-provider/test-model-a"
+	c.Desktop.ProviderAccess = []string{"test-provider", "custom"}
 	normalizeDesktopOfficialProviderAccess(c)
-	if len(c.Desktop.ProviderAccess) != 2 || c.Desktop.ProviderAccess[0] != "moma" || c.Desktop.ProviderAccess[1] != "custom" {
+	if len(c.Desktop.ProviderAccess) != 2 || c.Desktop.ProviderAccess[0] != "test-provider" || c.Desktop.ProviderAccess[1] != "custom" {
 		t.Fatalf("provider_access = %+v, want canonical official ids", c.Desktop.ProviderAccess)
 	}
-	if c.DefaultModel != "moma/qwen/qwen3.6-35b" {
-		t.Fatalf("default_model = %q, want moma/qwen/qwen3.6-35b", c.DefaultModel)
+	if c.DefaultModel != "test-provider/test-provider/test-model-a" {
+		t.Fatalf("default_model = %q, want test-provider/test-provider/test-model-a", c.DefaultModel)
 	}
-	if _, ok := c.Provider("moma"); !ok {
-		t.Fatal("canonical moma provider missing")
+	if _, ok := c.Provider("test-provider"); !ok {
+		t.Fatal("canonical test-provider provider missing")
 	}
 	if _, ok := c.Provider("custom"); !ok {
 		t.Fatal("canonical custom provider missing")
@@ -48,17 +48,17 @@ func TestNormalizeDesktopOfficialProviderAccessCanonicalizesLegacyIDs(t *testing
 }
 
 func TestNormalizeDesktopOfficialProviderAccessNoPresetProviders(t *testing.T) {
-	// FairPeer no longer ships a preset MoMA official provider. Declaring
-	// "moma" in provider_access must NOT silently materialize a provider entry;
+	// FairPeer no longer ships a preset test-provider official provider. Declaring
+	// "test-provider" in provider_access must NOT silently materialize a provider entry;
 	// it just survives as a plain access id (canonicalized to a trimmed name).
 	c := Default()
-	c.DefaultModel = "moma/jiutian/jiutian-lan-35b"
-	c.Desktop.ProviderAccess = []string{"moma"}
+	c.DefaultModel = "test-provider/test-model-a"
+	c.Desktop.ProviderAccess = []string{"test-provider"}
 	normalizeDesktopOfficialProviderAccess(c)
-	if _, ok := c.Provider("moma"); ok {
-		t.Fatal("no preset official provider should be materialized for moma")
+	if _, ok := c.Provider("test-provider"); ok {
+		t.Fatal("no preset official provider should be materialized for test-provider")
 	}
-	if got := c.Desktop.ProviderAccess; len(got) != 1 || got[0] != "moma" {
-		t.Fatalf("provider_access = %+v, want [moma]", got)
+	if got := c.Desktop.ProviderAccess; len(got) != 1 || got[0] != "test-provider" {
+		t.Fatalf("provider_access = %+v, want [test-provider]", got)
 	}
 }

@@ -141,7 +141,7 @@ acquireSharedHost  →  snapshot 历史  →  Ctrl.Close()
 **RAG 知识库面板（分层检索 v2：FTS5 + 结构化抽取）** ✅：
 - **痛点与决策**：FTS5 切块在跨段事实组合上精度弱；研究 Hyper-Extract 后借鉴其"抽取+合并"思路，但**纯 Go 自研**（不引入 Python/faiss/langchain）。FTS5（即时）与结构化抽取（显式触发，用户控成本）并存。
 - **数据层（`entities.go`）**：SQLite 新增 rag_jobs/rag_chunks/rag_entities/rag_relations 4 表。SIMPLE 合并（normalizeName=lower+trim；同义实体不合并，留作未来 LLM 增强）。
-- **抽取引擎（`extract.go` + `jiutian_extractor.go`）**：队列+限速 worker（默认串行+3s 间隔）+ 指数退避重试 + slidingWindow 滑动平均 ETA。九天/OpenAI `/chat/completions` + json_object + 围栏剥离容错。
+- **抽取引擎（`extract.go` + `platform_extractor.go`）**：队列+限速 worker（默认串行+3s 间隔）+ 指数退避重试 + slidingWindow 滑动平均 ETA。平台 API/OpenAI `/chat/completions` + json_object + 围栏剥离容错。
 - **工具升级**：`rag_search` 返回 FTS5+结构化两层合并；新增 `rag_graph`（纯结构化查询）。
 - **前端（`components/cowork/`）**：`RagPanel`（导入+collection+检索框+树+拖拽）+ `RagNode`（递归树+状态徽章+进度条+ETA hover Tooltip）。`desktop/rag_app.go` 9 个桥方法+2 事件。`[cowork] extract_model/interval/concurrency` 配置。
 - 12 个新测试（合并/同义/关系/空跳过/job/全失败/JSON/围栏/pipeline 端到端/重试/取消/滑动窗口）。
@@ -204,7 +204,7 @@ embedding_model = ""   # 一个支持 embedding 的 provider model ref
 [[profiles]]
 name = "cowork"
 display_name = "My Office"
-model = "moma/qwen/qwen3.6-35b"        # 可选：pin 模型
+model = "qwen/qwen3-max"                # 可选：pin 模型
 system_prompt_addon = ""               # 可选：追加 prompt
 enabled_skills = []                    # 可选：skill 白名单
 plugins = ["wps-ppt"]                  # 可选：plugin 白名单
@@ -232,11 +232,11 @@ workspace_type = "document"
 |---|---|---|
 | 真 .docx/.xlsx/pptx 二进制 | ✅ | `officedoc.go`：**xlsx 读写用 excelize**（样式/公式/多 sheet 全支持）；docx/pptx 文本提取用 stdlib（archive/zip + encoding/xml，无轻量 docx 库替代）。写 .docx 仍不支持（用源 app 或 ppt 工具）|
 | 元素级 UI 树 | ✅ | `get_ui_tree` 用 EnumChildWindows 枚举窗口子控件（按钮/编辑框/标签 + 精确 rect），VLM 可点控件中心而非猜坐标。full IUIAutomation COM 未做（EnumChildWindows 覆盖主要痛点，零 COM 依赖）|
-| embedding 向量层 | ✅ | `rag/embedding.go`：rag.Search 过取 top_k×4 → `Store.Rerank` 用 embedding cosine + BM25 混合重排。`[cowork] embedding_model` 配置 Jiutian embedder；空 = 纯 FTS5（graceful degradation）|
+| embedding 向量层 | ✅ | `rag/embedding.go`：rag.Search 过取 top_k×4 → `Store.Rerank` 用 embedding cosine + BM25 混合重排。`[cowork] embedding_model` 配置平台 embedder；空 = 纯 FTS5（graceful degradation）|
 | IMAP 邮件读取 | ✅ | `email_imap.go`：**go-imap + go-message**（协议级正确：完整 SEARCH、RFC 2047 编码头解码、multipart MIME、字符集转换）。`email_read`/`email_search` 工具，`[cowork.imap]` 配置 |
 | IM push 全打通 | ✅ | `bot.BotGateway.Push(dest, text)` 出站推送；scheduler `OutputMode="im"`（dest=`platform:chatID`）/`"file"` 自动路由；desktop 懒绑定 botGW（bot 后启动也能推）|
 | 自动化面板（定时任务 UI） | ✅ | `internal/scheduler/` 引擎升级（at/in + 中文相对词 `reltime.go` + OneShot + 历史环形缓冲）；投递扩 email/notify；5 个内置模板；`desktop/scheduler_app.go` 10 个桥方法 + 2 个事件；`components/cowork/` 四件套（AutomationPanel/TaskForm/TaskCard/RunHistory）+ 50+ i18n key |
-| RAG 知识库面板（分层检索） | ✅ | 借鉴 Hyper-Extract 但纯 Go 自研：FTS5（即时）+ 结构化抽取（显式触发）。`entities.go` 4 表 + SIMPLE 合并；`extract.go` 队列+限速+重试+滑动平均 ETA；`jiutian_extractor.go` 走 `/chat/completions`；rag_search 双层合并 + rag_graph 工具；`desktop/rag_app.go` 9 桥方法+2 事件；`RagPanel`/`RagNode`（递归树+进度条+ETA Tooltip+拖拽）。12 测试 |
+| RAG 知识库面板（分层检索） | ✅ | 借鉴 Hyper-Extract 但纯 Go 自研：FTS5（即时）+ 结构化抽取（显式触发）。`entities.go` 4 表 + SIMPLE 合并；`extract.go` 队列+限速+重试+滑动平均 ETA；`platform_extractor.go` 走 `/chat/completions`；rag_search 双层合并 + rag_graph 工具；`desktop/rag_app.go` 9 桥方法+2 事件；`RagPanel`/`RagNode`（递归树+进度条+ETA Tooltip+拖拽）。12 测试 |
 
 ---
 

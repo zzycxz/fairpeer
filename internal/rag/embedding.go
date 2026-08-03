@@ -10,7 +10,7 @@ import (
 )
 
 // Embedder produces a vector for a text string, enabling semantic reranking of
-// FTS5 hits. Implementations call an embedding API (Jiutian/other). When nil,
+// FTS5 hits. Implementations call an embedding API. When nil,
 // rag_search uses FTS5 alone. The interface is minimal so any provider can
 // implement it; the store never assumes a dimension or model.
 type Embedder interface {
@@ -120,7 +120,7 @@ func chunkHash(collection, path string, chunk int, body string) string {
 
 // embedModelName returns a stable per-model cache key. The default embedder has
 // no model string exposed, so we fall back to a constant name; real models
-// (e.g. the jiutian embedder) can expose one via an optional interface.
+// (e.g. a provider embedder) can expose one via an optional interface.
 func embedModelName(emb Embedder) string {
 	if m, ok := emb.(interface{ Model() string }); ok {
 		if name := m.Model(); name != "" {

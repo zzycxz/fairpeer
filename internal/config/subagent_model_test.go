@@ -10,19 +10,19 @@ func TestAgentSubagentModelConfigDecodesFromTOML(t *testing.T) {
 	var cfg Config
 	if _, err := toml.Decode(`
 [agent]
-subagent_model = "moma"
-subagent_models = { explore = "moma", "security-review" = "moma" }
+subagent_model = "test-provider"
+subagent_models = { explore = "test-provider", "security-review" = "test-provider" }
 `, &cfg); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 
-	if cfg.Agent.SubagentModel != "moma" {
-		t.Fatalf("subagent_model = %q, want moma", cfg.Agent.SubagentModel)
+	if cfg.Agent.SubagentModel != "test-provider" {
+		t.Fatalf("subagent_model = %q, want test-provider", cfg.Agent.SubagentModel)
 	}
-	if cfg.Agent.SubagentModels["explore"] != "moma" {
+	if cfg.Agent.SubagentModels["explore"] != "test-provider" {
 		t.Fatalf("explore model = %q", cfg.Agent.SubagentModels["explore"])
 	}
-	if cfg.Agent.SubagentModels["security-review"] != "moma" {
+	if cfg.Agent.SubagentModels["security-review"] != "test-provider" {
 		t.Fatalf("security-review model = %q", cfg.Agent.SubagentModels["security-review"])
 	}
 	if cfg.Agent.SubagentEffort != "" {

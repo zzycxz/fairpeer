@@ -47,10 +47,10 @@ func TestGitStatusRenderRepoUsesSuppliedRepoStyle(t *testing.T) {
 }
 
 func TestGitStatusRenderWithinCompactsRepoBeforeBranch(t *testing.T) {
-	status := gitStatus{Repo: "VeryLongMoMAfairpeerWorkspace", Branch: "codex/cli-tui-status-row"}
+	status := gitStatus{Repo: "VeryLongtest-providerfairpeerWorkspace", Branch: "codex/cli-tui-status-row"}
 
 	full := ansi.Strip(status.RenderWithin(80, statusAutoColor))
-	if full != "VeryLongMoMAfairpeerWorkspace@codex/cli-tui-status-row" {
+	if full != "VeryLongtest-providerfairpeerWorkspace@codex/cli-tui-status-row" {
 		t.Fatalf("wide RenderWithin = %q", full)
 	}
 
@@ -68,7 +68,7 @@ func TestGitStatusRenderWithinCompactsRepoBeforeBranch(t *testing.T) {
 
 func TestGitStatusRenderWithinKeepsDirtySuffix(t *testing.T) {
 	status := gitStatus{
-		Repo:      "VeryLongMoMAfairpeerWorkspace",
+		Repo:      "VeryLongtest-providerfairpeerWorkspace",
 		Branch:    "codex/cli-tui-status-row",
 		Added:     12,
 		Removed:   3,

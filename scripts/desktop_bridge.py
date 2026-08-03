@@ -1,5 +1,5 @@
 """
-Unified desktop interaction bridge for momapeer.
+Unified desktop interaction bridge for fairpeer.
 
 Called by Go via subprocess. All actions use JSON stdin/stdout protocol.
 

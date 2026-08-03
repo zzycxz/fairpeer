@@ -10,7 +10,7 @@
 //     call followed thinking, so Message carries ReasoningSignature alongside
 //     ReasoningContent and this provider replays the signed block on the next
 //     request. Off by default because the field is Anthropic-specific — an
-//     OpenAI-compatible gateway (e.g. MoMA's) would reject it. (redacted_thinking
+//     OpenAI-compatible gateway would reject it. (redacted_thinking
 //     blocks are not yet captured/replayed.)
 //   - No temperature/top_p. Current Claude models (Opus 4.8/4.7) reject sampling
 //     parameters with a 400; Anthropic steers behavior via prompting instead.
@@ -118,7 +118,7 @@ type client struct {
 	baseURL     string
 	model       string
 	thinking    string // "adaptive" enables extended thinking; "" = off (config-driven)
-	effort      string // output_config.effort: low|medium|high|xhigh|max; "" = provider default
+	effort      string // output_config.effort: low|medium|high; "" = provider default
 	http        *http.Client
 	idleTimeout time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
 }
@@ -276,9 +276,9 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 		Tools:     tools,
 		Stream:    true,
 	}
-	// Extended thinking is opt-in and Anthropic-specific (a compatible gateway like
-	// MoMA's would reject the field). "summarized" display streams the reasoning
-	// text; the default omits it but still emits the signature we round-trip.
+	// Extended thinking is opt-in and Anthropic-specific (a compatible gateway would
+	// reject the field). "summarized" display streams the reasoning text; the default
+	// omits it but still emits the signature we round-trip.
 	if c.thinking == "adaptive" {
 		r.Thinking = &thinkingConfig{Type: "adaptive", Display: "summarized"}
 		if c.effort != "" {
@@ -485,7 +485,7 @@ type thinkingConfig struct {
 }
 
 type outputConfig struct {
-	Effort string `json:"effort,omitempty"` // low | medium | high | xhigh | max
+	Effort string `json:"effort,omitempty"` // low | medium | high
 }
 
 type textBlock struct {

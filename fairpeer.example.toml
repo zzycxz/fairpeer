@@ -2,7 +2,7 @@
 # Resolution order: flag > ./fairpeer.toml > ~/.config/fairpeer/config.toml > built-in defaults.
 # Secrets come from the environment via api_key_env; never put keys here.
 
-# default_model = "deepseek/deepseek-v4-pro"   # uncomment + set after configuring a provider
+# default_model = "<provider>/<model>"   # uncomment + set after configuring a provider
 # language      = "zh"   # ui language; empty = auto-detect from $LANG / $FAIRPEER_LANG
 
 [ui]
@@ -30,13 +30,14 @@ max_steps         = 0    # executor tool-call rounds; 0 = no limit
 planner_max_steps = 12   # planner read-only tool-call rounds; 0 = no limit
 temperature       = 0.0
 auto_plan         = "off"   # off|on; off keeps plan mode manual
-# auto_plan_classifier = "deepseek/deepseek-v4-flash"   # optional; only used for borderline tasks
+# auto_plan_classifier = "<provider>/<model>"   # optional; only used for borderline tasks
 soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact
 compact_ratio       = 0.8   # try compacting when prompt reaches this fraction
 compact_force_ratio = 0.9   # force compacting at this high-water mark
-# planner_model = "deepseek/deepseek-v4-pro"   # optional: enable two-model collaboration
-# subagent_model = "deepseek/deepseek-v4-flash"   # optional default for runAs=subagent skills
-# subagent_models = { review = "deepseek/deepseek-v4-flash", security_review = "deepseek/deepseek-v4-flash" }   # per-skill overrides
+# fast_task_model = "<provider>/<model>"   # lightweight model for background tasks (dream/distill/rag-extract)
+# planner_model = "<provider>/<model>"   # optional: enable two-model collaboration
+# subagent_model = "<provider>/<model>"   # optional default for runAs=subagent skills
+# subagent_models = { review = "<provider>/<model>", security_review = "<provider>/<model>" }   # per-skill overrides
 # output_style = "explanatory"   # persona/tone folded into the prompt: explanatory | learning | concise,
 #                                  or a custom .fairpeer/output-styles/<name>.md ; empty = default
 
@@ -362,6 +363,15 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # optional — empty means "auto-detect" or "disabled".
 #
 # [cowork]
+# # Vision model for image recognition (screen_perceive, VLM tools).
+# # Set to a vision-capable model from your configured providers.
+# # Empty = no vision capability.
+# vlm_model = ""
+#
+# # Screenshot recognition model (screenshot hotkey). Falls back to vlm_model
+# # if empty. Set once in the cowork settings page.
+# screenshot_vlm_model = ""
+#
 # # Browser path for the browser_* automation tools. Empty = auto-detect Chrome
 # # → Edge → Brave. Set when your browser isn't in a standard location. The agent
 # # surfaces a clear error (and a browser_set_path tool) when nothing is found.
@@ -381,7 +391,7 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # browser_use_python    = ""
 # # Port for the sidecar HTTP server (default 18901, distinct from HE's 18900).
 # browser_use_port      = 0
-# # Provider model ref for the agentic loop (e.g. "openai/gpt-4o"). Empty = fall
+# # Provider model ref for the agentic loop (e.g. "<provider>/<model>"). Empty = fall
 # # back to vlm_model, then the main agent model. A vision-capable model is
 # # strongly recommended — the loop reads screenshots/accessibility trees.
 # browser_use_model     = ""

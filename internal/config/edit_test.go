@@ -18,12 +18,12 @@ func addTestProvider(c *Config, name, model string) {
 
 func TestSetDefaultModel(t *testing.T) {
 	c := Default()
-	addTestProvider(c, "moma", "jiutian/jiutian-lan-35b")
-	if err := c.SetDefaultModel("moma"); err != nil {
+	addTestProvider(c, "test-provider", "test-provider/test-model-a")
+	if err := c.SetDefaultModel("test-provider"); err != nil {
 		t.Fatalf("set valid default: %v", err)
 	}
-	if c.DefaultModel != "moma" {
-		t.Errorf("default = %q, want moma", c.DefaultModel)
+	if c.DefaultModel != "test-provider" {
+		t.Errorf("default = %q, want test-provider", c.DefaultModel)
 	}
 	if err := c.SetDefaultModel("nope"); err == nil {
 		t.Error("expected error for unknown provider")
@@ -31,13 +31,13 @@ func TestSetDefaultModel(t *testing.T) {
 	// "provider/model" form is also accepted: the /model picker stores the
 	// full ref so a user can land on a non-default model under the same
 	// provider across restarts.
-	if err := c.SetDefaultModel("moma/jiutian/jiutian-lan-35b"); err != nil {
+	if err := c.SetDefaultModel("test-provider/test-provider/test-model-a"); err != nil {
 		t.Fatalf("set provider/model default: %v", err)
 	}
-	if c.DefaultModel != "moma/jiutian/jiutian-lan-35b" {
-		t.Errorf("default = %q, want moma/jiutian/jiutian-lan-35b", c.DefaultModel)
+	if c.DefaultModel != "test-provider/test-provider/test-model-a" {
+		t.Errorf("default = %q, want test-provider/test-provider/test-model-a", c.DefaultModel)
 	}
-	if err := c.SetDefaultModel("moma/missing"); err == nil {
+	if err := c.SetDefaultModel("test-provider/missing"); err == nil {
 		t.Error("expected error for unknown model under known provider")
 	}
 	if err := c.SetDefaultModel(""); err == nil {
@@ -169,11 +169,11 @@ func TestSetUICloseBehavior(t *testing.T) {
 
 func TestSetPlannerModel(t *testing.T) {
 	c := Default()
-	addTestProvider(c, "moma", "jiutian/jiutian-lan-35b")
-	if err := c.SetPlannerModel("moma"); err != nil {
+	addTestProvider(c, "test-provider", "test-provider/test-model-a")
+	if err := c.SetPlannerModel("test-provider"); err != nil {
 		t.Fatalf("set planner: %v", err)
 	}
-	if c.Agent.PlannerModel != "moma" {
+	if c.Agent.PlannerModel != "test-provider" {
 		t.Errorf("planner = %q", c.Agent.PlannerModel)
 	}
 	if err := c.SetPlannerModel(""); err != nil || c.Agent.PlannerModel != "" {
@@ -283,11 +283,11 @@ func TestUpsertProvider(t *testing.T) {
 
 func TestSetProviderEffort(t *testing.T) {
 	c := Default()
-	addTestProvider(c, "moma", "jiutian/jiutian-lan-35b")
-	if err := c.SetProviderEffort("moma", "MAX"); err != nil {
+	addTestProvider(c, "test-provider", "test-provider/test-model-a")
+	if err := c.SetProviderEffort("test-provider", "MAX"); err != nil {
 		t.Fatalf("SetProviderEffort: %v", err)
 	}
-	p, _ := c.Provider("moma")
+	p, _ := c.Provider("test-provider")
 	if p.Effort != "max" {
 		t.Fatalf("effort = %q, want max", p.Effort)
 	}
@@ -312,13 +312,13 @@ func TestSetLanguage(t *testing.T) {
 	}
 }
 
-func TestNormalizeEffortMoMA(t *testing.T) {
-	// Thinking mode is now declared explicitly via reasoning_protocol = "moma"
-	// rather than auto-detected from the jiutian.10086.cn URL.
-	e := &ProviderEntry{Name: "openai-test", Kind: "openai", BaseURL: "https://api.jiutian.10086.cn", Model: "qwen3.6-35b", ReasoningProtocol: "moma"}
+func TestNormalizeEffortTestProvider(t *testing.T) {
+	// Thinking mode is now declared explicitly via reasoning_protocol = "test-provider"
+	// rather than auto-detected from the provider URL.
+	e := &ProviderEntry{Name: "openai-test", Kind: "openai", BaseURL: "https://api.example.com", Model: "test-model-a", ReasoningProtocol: "test-provider"}
 	cap := EffortCapabilityForEntry(e)
 	if !cap.Supported || len(cap.Levels) != 3 || cap.Levels[0] != "auto" || cap.Levels[1] != "high" || cap.Levels[2] != "max" {
-		t.Fatalf("MoMA levels = %+v, want auto/high/max", cap)
+		t.Fatalf("test-provider levels = %+v, want auto/high/max", cap)
 	}
 	for in, want := range map[string]string{"auto": "", "high": "high", "max": "max"} {
 		got, err := NormalizeEffort(e, in)
@@ -335,10 +335,10 @@ func TestNormalizeEffortMoMA(t *testing.T) {
 
 func TestNormalizeLegacyEffortMigratesProviderDefaults(t *testing.T) {
 	c := &Config{Providers: []ProviderEntry{
-		{Name: "moma", Effort: "off"},
-		{Name: "MoMA-upper", Effort: "OFF"},
-		{Name: "MoMA-auto", Effort: "auto"},
-		{Name: "MoMA-auto-upper", Effort: "AUTO"},
+		{Name: "test-provider", Effort: "off"},
+		{Name: "test-provider-upper", Effort: "OFF"},
+		{Name: "test-provider-auto", Effort: "auto"},
+		{Name: "test-provider-auto-upper", Effort: "AUTO"},
 		{Name: "keep", Effort: "high"},
 	}}
 	normalizeLegacyEffort(c)
@@ -370,31 +370,31 @@ func TestNormalizeEffortAnthropic(t *testing.T) {
 }
 
 func TestResolveModelPreservesProviderEffort(t *testing.T) {
-	t.Skip("Skipped due to MoMA protocol rename")
+	t.Skip("Skipped due to test-provider protocol rename")
 	c := Default()
 	c.Providers = append(c.Providers, ProviderEntry{
-		Name:      "moma",
+		Name:      "test-provider",
 		Kind:      "openai",
-		BaseURL:   "https://api.jiutian.10086.cn",
-		Model:     "qwen3.6-35b",
-		Models:    []string{"qwen3.6-35b", "qwen3.6-27b"},
-		Default:   "qwen3.6-35b",
-		APIKeyEnv: "JIUTIAN_API_KEY",
+		BaseURL:   "https://api.example.com",
+		Model:     "test-model-a",
+		Models:    []string{"test-model-a", "test-model-b"},
+		Default:   "test-model-a",
+		APIKeyEnv: "FAIRPEER_API_KEY",
 		Effort:    "max",
 	})
-	e, ok := c.ResolveModel("MoMA/qwen3.6-27b")
+	e, ok := c.ResolveModel("test-provider/test-model-b")
 	if !ok {
-		t.Fatal("ResolveModel did not find MoMA/qwen3.6-27b")
+		t.Fatal("ResolveModel did not find test-provider/test-model-b")
 	}
-	if e.Name != "moma" || e.Model != "qwen3.6-27b" || e.Effort != "max" {
-		t.Fatalf("resolved entry = %+v, want provider MoMA model qwen3.6-27b effort max", e)
+	if e.Name != "test-provider" || e.Model != "test-model-b" || e.Effort != "max" {
+		t.Fatalf("resolved entry = %+v, want provider test-provider model test-model-b effort max", e)
 	}
 }
 
 func TestRemoveProvider(t *testing.T) {
-	t.Skip("Skipped due to MoMA protocol rename")
+	t.Skip("Skipped due to test-provider protocol rename")
 	c := Default()
-	c.Agent.PlannerModel = "moma"
+	c.Agent.PlannerModel = "test-provider"
 
 	// Cannot remove the default model when no configured fallback is available.
 	for i := range c.Providers {
@@ -404,13 +404,13 @@ func TestRemoveProvider(t *testing.T) {
 		t.Error("expected error removing the default model")
 	}
 	// Removing the planner provider clears planner_model.
-	if err := c.RemoveProvider("moma"); err != nil {
+	if err := c.RemoveProvider("test-provider"); err != nil {
 		t.Fatalf("remove planner provider: %v", err)
 	}
 	if c.Agent.PlannerModel != "" {
 		t.Errorf("planner should be cleared, got %q", c.Agent.PlannerModel)
 	}
-	if _, ok := c.Provider("moma"); ok {
+	if _, ok := c.Provider("test-provider"); ok {
 		t.Error("provider not actually removed")
 	}
 	// Unknown name errors.
@@ -695,11 +695,11 @@ func TestClearPluginAuthentication(t *testing.T) {
 // re-decodes the file to confirm the changes survived a write/read cycle.
 func TestSaveToRoundTrips(t *testing.T) {
 	c := Default()
-	addTestProvider(c, "moma", "jiutian/jiutian-lan-35b")
-	if err := c.SetDefaultModel("moma"); err != nil {
+	addTestProvider(c, "test-provider", "test-provider/test-model-a")
+	if err := c.SetDefaultModel("test-provider"); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.SetPlannerModel("moma"); err != nil {
+	if err := c.SetPlannerModel("test-provider"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.UpsertProvider(ProviderEntry{Name: "local", Kind: "openai", BaseURL: "http://localhost:1234/v1", Model: "llama"}); err != nil {
@@ -735,10 +735,10 @@ func TestSaveToRoundTrips(t *testing.T) {
 	if _, err := toml.DecodeFile(path, &got); err != nil {
 		t.Fatalf("saved file does not parse: %v", err)
 	}
-	if got.DefaultModel != "moma" {
+	if got.DefaultModel != "test-provider" {
 		t.Errorf("default_model = %q", got.DefaultModel)
 	}
-	if got.Agent.PlannerModel != "moma" {
+	if got.Agent.PlannerModel != "test-provider" {
 		t.Errorf("planner_model = %q", got.Agent.PlannerModel)
 	}
 	if _, ok := got.Provider("local"); !ok {
@@ -829,19 +829,20 @@ func TestEffortCapabilityCustomSupportedEfforts(t *testing.T) {
 func TestEffortCapabilityExplicitProtocol(t *testing.T) {
 	// Thinking capability is now declared per-provider via ReasoningProtocol
 	// rather than auto-detected from a model allowlist. A model behind a proxy
-	// with reasoning_protocol = "moma" exposes the MoMA effort levels.
+	// that declares reasoning_protocol = "openai" exposes the unified
+	// low/medium/high effort vocabulary.
 	e := &ProviderEntry{
-		Name:              "momaxy",
+		Name:              "proxy",
 		Kind:              "openai",
 		BaseURL:           "https://proxy.example.com/v1",
-		Model:             "qwen/qwen3.6-35b",
-		ReasoningProtocol: "moma",
+		Model:             "proxy/test-model-a",
+		ReasoningProtocol: "openai",
 	}
 	cap := EffortCapabilityForEntry(e)
 	if !cap.Supported {
-		t.Fatalf("provider with reasoning_protocol=moma should expose effort, got %+v", cap)
+		t.Fatalf("provider with reasoning_protocol=openai should expose effort, got %+v", cap)
 	}
-	wantLevels := []string{"auto", "high", "max"}
+	wantLevels := []string{"auto", "low", "medium", "high"}
 	if len(cap.Levels) != len(wantLevels) {
 		t.Fatalf("levels = %v, want %v", cap.Levels, wantLevels)
 	}
@@ -850,19 +851,24 @@ func TestEffortCapabilityExplicitProtocol(t *testing.T) {
 			t.Fatalf("levels[%d] = %q, want %q", i, cap.Levels[i], want)
 		}
 	}
-	if cap.Default != "high" {
-		t.Fatalf("default = %q, want high", cap.Default)
+	if cap.Default != "auto" {
+		t.Fatalf("default = %q, want auto", cap.Default)
 	}
-	if protocol := ReasoningProtocolForEntry(e); protocol != ReasoningProtocolMoMA {
-		t.Fatalf("protocol = %q, want MoMA", protocol)
+	if protocol := ReasoningProtocolForEntry(e); protocol != ReasoningProtocolOpenAI {
+		t.Fatalf("protocol = %q, want openai", protocol)
 	}
-	if got, err := NormalizeEffort(e, "max"); err != nil || got != "max" {
-		t.Fatalf("NormalizeEffort(max) = %q/%v, want max/nil", got, err)
+	// Legacy "max" is migrated to the nearest unified level ("high"), not rejected —
+	// stored config values from older vocabulary must keep working.
+	if got, err := NormalizeEffort(e, "max"); err != nil || got != "high" {
+		t.Fatalf("NormalizeEffort(max) = %q/%v, want high/nil (legacy migration)", got, err)
+	}
+	if got, err := NormalizeEffort(e, "high"); err != nil || got != "high" {
+		t.Fatalf("NormalizeEffort(high) = %q/%v, want high/nil", got, err)
 	}
 }
 
 // TestEffortCapabilityNoAutoDetection pins that a model that USED to be in the
-// MoMA allowlist (qwen/qwen3.6-35b) no longer exposes effort when the provider
+// test-provider allowlist (test-provider/test-model-a) no longer exposes effort when the provider
 // has not declared reasoning_protocol — the model registry is intentionally
 // empty now, so there is no auto-detection.
 func TestEffortCapabilityNoAutoDetection(t *testing.T) {
@@ -870,7 +876,7 @@ func TestEffortCapabilityNoAutoDetection(t *testing.T) {
 		Name:    "plain",
 		Kind:    "openai",
 		BaseURL: "https://proxy.example.com/v1",
-		Model:   "qwen/qwen3.6-35b",
+		Model:   "test-provider/test-model-a",
 	}
 	if cap := EffortCapabilityForEntry(e); cap.Supported {
 		t.Fatalf("model with no declared protocol should not expose effort, got %+v", cap)
@@ -882,10 +888,10 @@ func TestEffortCapabilityNoAutoDetection(t *testing.T) {
 
 func TestReasoningProtocolOverrideControlsEffortCapability(t *testing.T) {
 	e := &ProviderEntry{
-		Name:              "momaxy",
+		Name:              "test-provider",
 		Kind:              "openai",
 		BaseURL:           "https://proxy.example.com/v1",
-		Model:             "qwen3.6-35b",
+		Model:             "test-model-a",
 		ReasoningProtocol: "none",
 	}
 	if cap := EffortCapabilityForEntry(e); cap.Supported {
@@ -1035,16 +1041,16 @@ func TestUpsertProviderNormalizesCustomEffortFields(t *testing.T) {
 }
 
 func TestEffortCapabilityEmptySupportedEffortsNotConfigurable(t *testing.T) {
-	t.Skip("Skipped due to MoMA protocol rename")
-	// moma without SupportedEfforts: no built-in heuristic, /effort must reject.
+	t.Skip("Skipped due to test-provider protocol rename")
+	// provider without SupportedEfforts: no built-in heuristic, /effort must reject.
 	e := &ProviderEntry{
-		Name:    "moma",
+		Name:    "test-provider",
 		Kind:    "openai",
-		BaseURL: "https://token-plan-cn.jiutian.10086.cn/v1",
-		Model:   "jiutian-lan-35b",
+		BaseURL: "https://token-plan.example.com/v1",
+		Model:   "test-model-a",
 	}
 	if cap := EffortCapabilityForEntry(e); cap.Supported {
-		t.Fatalf("moma without SupportedEfforts defaults to auto/high/max, got %+v", cap)
+		t.Fatalf("provider without SupportedEfforts defaults to auto/high/max, got %+v", cap)
 	}
 	if _, err := NormalizeEffort(e, "high"); err == nil {
 		t.Fatal("NormalizeEffort should reject level for unsupported provider")

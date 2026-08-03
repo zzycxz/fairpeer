@@ -120,7 +120,7 @@ type App struct {
 	ragStore    *ragpkg.Store
 	ragPipeline *ragpkg.Pipeline
 	ragSession  *ragpkg.SessionRAGContext
-	// ragExtractor holds the configured extraction model (jiutianExtractor, or
+	// ragExtractor holds the configured extraction model (legacyExtractor, or
 	// nil when no extract model is set). Kept on the App so boot.RebindRAGBudget
 	// can re-inject the global RPM budget after each boot.Build — without it,
 	// a runtime RPM change (settings rebuild) wouldn't reach RAG extraction
@@ -457,7 +457,7 @@ func (a *App) initRAG() {
 			modelRef = strings.TrimSpace(c.DefaultModel)
 		}
 		if modelRef != "" {
-			extCfg := ragpkg.JiutianExtractorConfig{TwoStage: true}
+			extCfg := ragpkg.LLMExtractorConfig{TwoStage: true}
 			if e, ok := c.ResolveModel(modelRef); ok {
 				// ResolveModel gives us the concrete provider (base_url, api_key_env)
 				// + bare model name. This is the same resolution the main agent uses.
@@ -470,7 +470,7 @@ func (a *App) initRAG() {
 				extCfg.Model = modelRef
 				slog.Warn("rag: could not resolve model ref, using as-is", "ref", modelRef)
 			}
-			extractor = ragpkg.NewJiutianExtractor(extCfg)
+			extractor = ragpkg.NewLLMExtractor(extCfg)
 		}
 	}
 	if extractor == nil {
@@ -4132,8 +4132,8 @@ func (a *App) ModelsForTab(tabID string) []ModelInfo {
 	if entry, ok := cfg.ResolveModel(curModel); ok {
 		curModel = entry.Name + "/" + entry.Model
 		// normalize aliases to main provider so they highlight correctly in UI
-		if entry.Name == "moma-alias1" || entry.Name == "moma-alias2" {
-			curModel = "moma/" + entry.Model
+		if entry.Name == "legacy-alias1" || entry.Name == "legacy-alias2" {
+			curModel = "legacy/" + entry.Model
 		}
 	}
 	access := providerAccessSet(cfg.Desktop.ProviderAccess)
@@ -4415,7 +4415,7 @@ func (a *App) SwitchProfileForTab(tabID, name string) error {
 	}
 	// Normalize effort against the resolved model, mirroring SetModelForTab. A
 	// profile switch can change the model (via prof.Model), so an effort level
-	// valid for the old model (e.g. "high" on a MoMA model) may be unsupported on
+	// valid for the old model (e.g. "high" on a reasoning-capable model) may be unsupported on
 	// the new one — drop it then rather than passing an invalid level that boot
 	// would silently keep.
 	effortOverride := cloneStringPtr(oldEffort)
@@ -4684,9 +4684,7 @@ func providerEffortTargetNames(cfg *config.Config, entry *config.ProviderEntry) 
 	}
 	var family []string
 	switch kind {
-	case "moma":
-		family = []string{"moma"}
-
+	// No special family grouping needed for standard providers
 	}
 	for _, name := range family {
 		if seen[name] {
@@ -5537,8 +5535,8 @@ func parseScope(s string) memory.Scope {
 	}
 }
 
-// onboardingKeyEnv is the default provider (moma) key from config.Default().
-const onboardingKeyEnv = "JIUTIAN_API_KEY"
+// onboardingKeyEnv is the default provider key from config.Default().
+const onboardingKeyEnv = "FAIRPEER_API_KEY"
 
 // probeProviderKey validates an API key by hitting the provider's /models endpoint.
 // This is a lightweight connectivity + auth check used during onboarding.

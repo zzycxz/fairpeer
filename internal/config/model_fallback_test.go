@@ -70,7 +70,7 @@ func TestResolveModelWithFallbackSkipsKeylessProvider(t *testing.T) {
 
 // TestResolveModelWithFallbackHonorsDefaultModel verifies that when the ref is
 // stale or empty, the function tries c.DefaultModel before iterating providers
-// in order. Without this, the first provider (MoMA, by default) always wins
+// in order. Without this, the first provider (test-provider, by default) always wins
 // even when the user has configured a different default_model (#3801).
 func TestResolveModelWithFallbackHonorsDefaultModel(t *testing.T) {
 	c := testModelFallbackConfig(t)
@@ -108,16 +108,16 @@ func TestResolveModelWithFallbackHonorsDefaultModel(t *testing.T) {
 }
 
 func TestModelRefsProvider(t *testing.T) {
-	if !ModelRefsProvider("moma", "moma") {
+	if !ModelRefsProvider("test-provider", "test-provider") {
 		t.Fatal("bare provider ref should match provider")
 	}
-	if !ModelRefsProvider("moma/qwen3.6-35b", "moma") {
+	if !ModelRefsProvider("test-provider/test-model-a", "test-provider") {
 		t.Fatal("provider/model ref should match provider")
 	}
-	if ModelRefsProvider("other/model", "moma") {
+	if ModelRefsProvider("other/model", "test-provider") {
 		t.Fatal("different provider should not match")
 	}
-	if ModelRefsProvider("", "moma") {
+	if ModelRefsProvider("", "test-provider") {
 		t.Fatal("empty ref should not match")
 	}
 }

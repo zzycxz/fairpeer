@@ -18,7 +18,7 @@ import (
 // defaults and make this test flaky (machine-dependent refs).
 func TestModelRefsFromConfig(t *testing.T) {
 	isolateUserConfig(t) // no fairpeer.toml → built-in default providers
-	t.Setenv("JIUTIAN_API_KEY", "test-key")
+	t.Setenv("FAIRPEER_API_KEY", "test-key")
 	refs := modelRefs()
 	if len(refs) == 0 {
 		t.Fatal("expected default provider/model refs, got none")
@@ -34,7 +34,7 @@ func TestModelRefsFromConfig(t *testing.T) {
 // picker offers nothing rather than listing models the user can't select.
 func TestModelRefsSkipsUnconfigured(t *testing.T) {
 	isolateUserConfig(t)
-	t.Setenv("JIUTIAN_API_KEY", "")
+	t.Setenv("FAIRPEER_API_KEY", "")
 	if refs := modelRefs(); len(refs) != 0 {
 		t.Errorf("no keys set → no refs, got %v", refs)
 	}
@@ -44,7 +44,7 @@ func TestModelRefsSkipsUnconfigured(t *testing.T) {
 // through the shared completion path.
 func TestModelArgCompletion(t *testing.T) {
 	isolateUserConfig(t)
-	t.Setenv("JIUTIAN_API_KEY", "test-key")
+	t.Setenv("FAIRPEER_API_KEY", "test-key")
 	m := newTestChatTUI()
 	items, _, ok := m.slashArgItems("/model ")
 	if !ok || len(items) == 0 {
@@ -59,16 +59,16 @@ func TestModelArgCompletion(t *testing.T) {
 // next startup read the global default.
 func TestPersistModelWritesDefaultModel(t *testing.T) {
 	isolateUserConfig(t)
-	t.Setenv("JIUTIAN_API_KEY", "test-key")
+	t.Setenv("FAIRPEER_API_KEY", "test-key")
 
 	m := newTestChatTUI()
-	m.persistModel("moma/qwen/qwen3.6-35b")
+	m.persistModel("test-provider/test-provider/test-model-a")
 
 	body, err := os.ReadFile(config.UserConfigPath())
 	if err != nil {
 		t.Fatalf("read saved config: %v", err)
 	}
-	if !strings.Contains(string(body), `default_model = "moma/qwen/qwen3.6-35b"`) {
+	if !strings.Contains(string(body), `default_model = "test-provider/test-provider/test-model-a"`) {
 		t.Fatalf("saved config missing default_model ref:\n%s", body)
 	}
 }
@@ -81,7 +81,7 @@ func TestPersistModelWritesDefaultModel(t *testing.T) {
 // memory switch still goes through.
 func TestPersistModelRejectsUnknownRef(t *testing.T) {
 	isolateUserConfig(t)
-	t.Setenv("JIUTIAN_API_KEY", "test-key")
+	t.Setenv("FAIRPEER_API_KEY", "test-key")
 
 	m := newTestChatTUI()
 	m.persistModel("ghost/never-existed")

@@ -122,7 +122,7 @@ func TestTaskToolUsesConfiguredProfileForExecution(t *testing.T) {
 		gotModel, gotEffort = model, effort
 		return resolved, nil, 0, nil
 	}
-	task := newTestTaskTool(t, parent, tool.NewRegistry(), "sys", "moma", "max", resolve)
+	task := newTestTaskTool(t, parent, tool.NewRegistry(), "sys", "test-provider", "max", resolve)
 
 	out, err := task.Execute(testTaskContext(), []byte(`{"prompt":"x"}`))
 	if err != nil {
@@ -131,8 +131,8 @@ func TestTaskToolUsesConfiguredProfileForExecution(t *testing.T) {
 	if !strings.Contains(out, "resolved answer") {
 		t.Fatalf("sub-agent did not use resolved provider, got %q", out)
 	}
-	if gotModel != "moma" || gotEffort != "max" {
-		t.Fatalf("resolved profile = %q/%q, want moma/max", gotModel, gotEffort)
+	if gotModel != "test-provider" || gotEffort != "max" {
+		t.Fatalf("resolved profile = %q/%q, want test-provider/max", gotModel, gotEffort)
 	}
 }
 

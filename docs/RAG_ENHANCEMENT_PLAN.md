@@ -32,7 +32,7 @@
 |----|---------|------|
 | **P1-1/2/3** RagNode 挂载 + 取消按钮 + progress 事件 | `CoworkDock.tsx`（用 `RagNode` 替换简版 `RagFileTree`，接 `RagStartExtract`/`RagCancelExtract`/`RagRemovePath` + 订阅 `onRagProgress`/`onRagChanged` 事件驱动刷新，删除死代码 `RagFileTree`）、`RagNode.tsx`（加 `onFileClick` prop，文件标签可点开预览） | ✅ typecheck |
 | **P1-4** 静默吞错→toast | `TemplateSelect.tsx`（2 处 catch 改 `showToast`）、`EntityEditModal.tsx`（2 处 catch 改 `showToast`） | ✅ typecheck |
-| **P1-5** HE 离线引导 | `TemplateSelect.tsx`（状态文案区分"模板抽取"vs"九天回退"，明确告知行为而非无声 fallback） | ✅ typecheck |
+| **P1-5** HE 离线引导 | `TemplateSelect.tsx`（状态文案区分"模板抽取"vs"平台回退"，明确告知行为而非无声 fallback） | ✅ typecheck |
 | **P1-6** 格式提示动态化 | `RagPanel.tsx`（调 `RagListTemplates()` 动态渲染支持格式，替代写死的"md/docx/pdf/xlsx"） | ✅ typecheck |
 | **P1-7** 反向高亮断链修复 | `GraphCanvas.tsx`（监听 `rag:highlight-node` 事件，设 `highlightedName` 闪亮 + scrollIntoView 聚焦节点，2.5s 后清除） | ✅ typecheck |
 | **P1-8** "全不选"假操作修复 | `CoworkDock.tsx`（清除 activeCollection + 加 title 说明搜索覆盖全部集合，消除"限定范围"误解） | ✅ typecheck |
@@ -84,7 +84,7 @@ markitdown(Python 文档解析)  →  fairpeer RAG(Go 存储/编排/检索)  →
 
 - **① 文档解析层**：`internal/rag/officedoc.go` + `doc_converter.py`(markitdown) + `ocr_pdf.py`(PaddleOCR)。PDF 走 OCR 管线；docx/xlsx/pptx 走 markitdown→Go stdlib 回退；epub/xls/msg 仅 markitdown。
 - **② 存储与编排层（核心）**：`internal/rag/store.go` 单文件 SQLite + FTS5，7 张表。FTS5 全文检索是永久基线（永不断电）；结构化实体/关系是 LLM 抽取的增值层。
-- **③ 知识抽取层**：双路径——Go 原生 `JiutianExtractor`（直调九天，两阶段抽取，chunk 级 + RPM 限流）为主路径；Hyper-Extract Python 服务（`hyper_extract_server.py:18900`）为可选增强，提供模板抽取/embedding/summarize。
+- **③ 知识抽取层**：双路径——Go 原生 `PlatformExtractor`（直调平台 API，两阶段抽取，chunk 级 + RPM 限流）为主路径；Hyper-Extract Python 服务（`hyper_extract_server.py:18900`）为可选增强，提供模板抽取/embedding/summarize。
 
 **关键设计**：FTS5 即时索引（秒级，用户导入即可搜索）+ 异步深度抽取（实体/关系/图谱），双层容灾——哪怕没配 LLM、没装 Python，基础检索始终可用。
 
@@ -95,7 +95,7 @@ markitdown(Python 文档解析)  →  fairpeer RAG(Go 存储/编排/检索)  →
 | 能力 | 实现位置 | 状态 |
 |------|---------|------|
 | FTS5 全文检索（CJK 感知分词） | `store.go:860` | ✅ |
-| 结构化实体/关系抽取（两阶段 LLM） | `jiutian_extractor.go` | ✅ |
+| 结构化实体/关系抽取（两阶段 LLM） | `platform_extractor.go` | ✅ |
 | embedding 持久缓存 + 混合重排（BM25×0.5 + 余弦×0.5） | `embedding.go` | ✅ |
 | 知识图谱可视化（React Flow 交互式） | `GraphCanvas.tsx` | ✅ |
 | 实体编辑/合并/原文溯源 | `EntityDetail.tsx` / `rag_app.go:970,998,1010` | ✅ |
@@ -211,13 +211,13 @@ markitdown(Python 文档解析)  →  fairpeer RAG(Go 存储/编排/检索)  →
 
 `TemplateSelect.tsx:116,172`、`EntityEditModal.tsx:49,65` 都 `catch {}` 注释"handled silently"，用户点了"立即理解"失败时**无任何反馈**。
 
-**提升**：catch 里 `showToast` 展示错误 + 可操作建议（如"HE 离线，已改用九天抽取，请等待"）。
+**提升**：catch 里 `showToast` 展示错误 + 可操作建议（如"HE 离线，已改用平台抽取，请等待"）。
 
 ### P1-5　HE 离线仍允许点提取
 
 `TemplateSelect` 显示"离线"但按钮不 disable，点击后 fallback 失败又被静默吞 → "点了没反应"。
 
-**提升**：HE 离线时明确标注将走九天回退，或 disable + 提示如何启用 HE。
+**提升**：HE 离线时明确标注将走平台回退，或 disable + 提示如何启用 HE。
 
 ### P1-6　格式提示错误
 
@@ -449,7 +449,7 @@ P2-1 抽公共包、P2-2 删死代码、P2-3 统一抽取路径、P2-4~P2-7 工�
 | 关注点 | 文件 |
 |--------|------|
 | 存储核心 | `internal/rag/store.go`、`entities.go`、`embedding.go` |
-| 抽取管线 | `internal/rag/extract.go`、`jiutian_extractor.go`、`extract_queue.go`(死代码) |
+| 抽取管线 | `internal/rag/extract.go`、`platform_extractor.go`、`extract_queue.go`(死代码) |
 | 文档解析 | `internal/rag/officedoc.go`、`doc_converter.py`、`ocr_pdf.py` |
 | HE 集成 | `internal/rag/he_client.go`、`desktop/he_service.go`、`hyper_extract_server.py` |
 | 桥接层 | `desktop/rag_app.go`、`desktop/app.go(initRAG)` |

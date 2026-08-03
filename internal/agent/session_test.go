@@ -292,11 +292,11 @@ func TestPreviewSessionMalformed(t *testing.T) {
 
 func TestNewSessionPath(t *testing.T) {
 	dir := t.TempDir()
-	path := NewSessionPath(dir, "MoMA-chat")
+	path := NewSessionPath(dir, "test-provider-chat")
 	if !strings.HasSuffix(path, ".jsonl") {
 		t.Errorf("should end with .jsonl: %s", path)
 	}
-	if !strings.Contains(path, "MoMA-chat") {
+	if !strings.Contains(path, "test-provider-chat") {
 		t.Errorf("should contain model name: %s", path)
 	}
 	if !strings.HasPrefix(path, dir) {

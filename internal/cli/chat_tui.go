@@ -2429,7 +2429,7 @@ func cacheRateLabel(format string, hit, denom int) string {
 
 // cacheTag renders both prompt cache-hit rates for the status line —
 // "turn hit 88.00% · avg 78.00%": the single-turn rate (latest turn, the higher/steeper
-// number on a non-compacting MoMA session) and the session-aggregate rate
+// number on a non-compacting session) and the session-aggregate rate
 // Σhit/Σ(hit+miss) (the steadier, cost-oriented number that matches the legacy
 // dashboard). "" before any cache tokens have been reported.
 func (m chatTUI) cacheTag() string {

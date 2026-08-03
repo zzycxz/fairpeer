@@ -34,13 +34,13 @@ func TestBypassed(t *testing.T) {
 		host, bypass string
 		want         bool
 	}{
-		{"api.jiutian.10086.cn", "<local>", false},
+		{"api.example.com", "<local>", false},
 		{"intranet", "<local>", true},
 		{"host.corp.local", "*.corp.local", true},
-		{"api.jiutian.10086.cn", "*.corp.local;<local>", false},
-		{"api.jiutian.10086.cn", "api.jiutian.10086.cn", true},
-		{"API.jiutian.10086.cn", "api.jiutian.10086.cn", true},
-		{"api.jiutian.10086.cn", "", false},
+		{"api.example.com", "*.corp.local;<local>", false},
+		{"api.example.com", "api.example.com", true},
+		{"API.example.com", "api.example.com", true},
+		{"api.example.com", "", false},
 	} {
 		if got := bypassed(tc.host, tc.bypass); got != tc.want {
 			t.Errorf("bypassed(%q, %q) = %v, want %v", tc.host, tc.bypass, got, tc.want)

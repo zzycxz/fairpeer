@@ -56,7 +56,7 @@ func TestAgentEmitsRetryingThenStreams(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	prov, err := openai.New(provider.Config{Name: "MoMA", BaseURL: srv.URL, Model: "qwen3.6-35b", APIKey: "k"})
+	prov, err := openai.New(provider.Config{Name: "test-provider", BaseURL: srv.URL, Model: "test-model-a", APIKey: "k"})
 	if err != nil {
 		t.Fatalf("New provider: %v", err)
 	}

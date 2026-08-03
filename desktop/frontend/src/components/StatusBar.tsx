@@ -57,7 +57,7 @@ function formatRate(hit: number, denom: number): string | null {
 
 // nowRate is the SINGLE-TURN prompt cache-hit % (latest turn) — the higher,
 // steeper number on a non-compacting session. null when the provider does not
-// report cache tokens (e.g. MoMA currently omits these fields).
+// report cache tokens (e.g. some providers currently omit these fields).
 function nowRate(u?: WireUsage): string | null {
   if (!u) return null;
   const denom = u.cacheHitTokens + u.cacheMissTokens;
@@ -66,7 +66,7 @@ function nowRate(u?: WireUsage): string | null {
 
 // avgRate is the SESSION-AGGREGATE cache-hit % — Σhit/Σ(hit+miss) across every
 // turn — the steadier, cost-oriented number that matches the legacy dashboard.
-// On a non-compacting MoMA session it trails nowRate (early cold-start turns
+// On a non-compacting session it trails nowRate (early cold-start turns
 // drag the average down); it overtakes only when compaction craters single turns.
 function avgRate(u?: WireUsage): string | null {
   if (!u) return null;

@@ -5,7 +5,7 @@ tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 
 set +e
-MOMAPEER_RELEASE_CACHE_GUARD=1 go test ./internal/agent -run '^TestReleaseCacheHitGuard$' -v -count=1 2>&1 | tee "$tmp"
+FAIRPEER_RELEASE_CACHE_GUARD=1 go test ./internal/agent -run '^TestReleaseCacheHitGuard$' -v -count=1 2>&1 | tee "$tmp"
 status=${PIPESTATUS[0]}
 set -e
 

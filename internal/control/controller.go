@@ -3033,7 +3033,7 @@ func (c *Controller) DisconnectMCPServer(name string) bool {
 	return disconnected || removedPlaceholder > 0
 }
 
-// Label returns the human-readable model label, e.g. "moma/qwen/qwen3.6-35b".
+// Label returns the human-readable model label, e.g. "openai/gpt-4o".
 func (c *Controller) Label() string { return c.label }
 
 // WorkspaceRoot returns the workspace root for this controller's session

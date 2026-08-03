@@ -468,7 +468,7 @@ type ragGraph struct{}
 func (ragGraph) Name() string { return "rag_graph" }
 
 func (ragGraph) Description() string {
-	return "Query the structured knowledge graph (entities + relations) of a collection directly, without FTS5 text snippets. Use when you want pure facts/relationships (e.g. \"list everyone who reports to 张三\", \"what does MoMAPeer relate to\"). Returns entities matching the query plus all their relations (both directions). Requires the collection to have been deep-extracted; returns 'no entities' otherwise (fall back to rag_search for FTS5-only collections)."
+	return "Query the structured knowledge graph (entities + relations) of a collection directly, without FTS5 text snippets. Use when you want pure facts/relationships (e.g. \"list everyone who reports to 张三\", \"what does project Alpha relate to\"). Returns entities matching the query plus all their relations (both directions). Requires the collection to have been deep-extracted; returns 'no entities' otherwise (fall back to rag_search for FTS5-only collections)."
 }
 
 func (ragGraph) Schema() json.RawMessage {

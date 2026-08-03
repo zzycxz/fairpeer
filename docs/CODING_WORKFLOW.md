@@ -340,7 +340,7 @@ auto_plan = "on"          # 启用自动规划判定
 ```toml
 [agent]
 auto_plan = "off"                    # 默认关；"on" 启用自动规划
-fast_task_model = "moma/qwen/qwen3.6-35b"  # 后台 dream/distill 模型
+fast_task_model = "qwen/qwen3-max"           # 后台 dream/distill 模型
 max_steps = 0                        # 0=不限；每 turn 工具调用上限
 
 [lsp]

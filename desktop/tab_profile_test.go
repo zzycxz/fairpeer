@@ -17,7 +17,7 @@ func testTab(id, root string) *WorkspaceTab {
 		WorkspaceRoot: root,
 		Ready:         true,
 		Ctrl:          control.New(control.Options{Label: id}),
-		model:         "moma/qwen3.6-35b",
+		model:         "test-provider/test-model-a",
 		mode:          "normal",
 		disabledMCP:   map[string]ServerView{},
 	}
@@ -68,17 +68,17 @@ func TestEffortForTabResolvesProjectProviderConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	projectRoot := t.TempDir()
-	// Thinking mode is declared explicitly via reasoning_protocol = "moma"
-	// rather than auto-detected from the jiutian.10086.cn URL.
-	configBody := `default_model = "project-provider/qwen3.6-35b"
+	// Thinking mode is declared explicitly via reasoning_protocol = "test-provider"
+	// rather than auto-detected from the example.com URL.
+	configBody := `default_model = "project-provider/test-model-a"
 [[providers]]
 name = "project-provider"
 kind = "openai"
-base_url = "https://api.jiutian.10086.cn"
-model = "qwen3.6-35b"
+base_url = "https://api.example.com"
+model = "test-model-a"
 api_key_env = "PROJECT_API_KEY"
 effort = "max"
-reasoning_protocol = "moma"
+reasoning_protocol = "test-provider"
 `
 	if err := os.WriteFile(filepath.Join(projectRoot, "fairpeer.toml"), []byte(configBody), 0o644); err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ reasoning_protocol = "moma"
 
 	app := NewApp()
 	tab := testTab("project", projectRoot)
-	tab.model = "project-provider/qwen3.6-35b"
+	tab.model = "project-provider/test-model-a"
 	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
 	app.activeTabID = tab.ID
 	defer tab.Ctrl.Close()
@@ -103,15 +103,15 @@ func TestEffortForTabUsesKnownModelRegistry(t *testing.T) {
 	projectRoot := t.TempDir()
 	// Thinking capability is now declared explicitly via reasoning_protocol
 	// rather than auto-detected from a model allowlist, so the provider
-	// declares reasoning_protocol = "moma" to expose the MoMA effort levels.
-	configBody := `default_model = "project-provider/qwen/qwen3.6-35b"
+	// declares reasoning_protocol = "test-provider" to expose the test-provider effort levels.
+	configBody := `default_model = "project-provider/test-provider/test-model-a"
 [[providers]]
 name = "project-provider"
 kind = "openai"
 base_url = "https://proxy.example.com/v1"
-model = "qwen/qwen3.6-35b"
+model = "test-provider/test-model-a"
 api_key_env = "PROJECT_API_KEY"
-reasoning_protocol = "moma"
+reasoning_protocol = "test-provider"
 `
 	if err := os.WriteFile(filepath.Join(projectRoot, "fairpeer.toml"), []byte(configBody), 0o644); err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ reasoning_protocol = "moma"
 
 	app := NewApp()
 	tab := testTab("project", projectRoot)
-	tab.model = "project-provider/qwen/qwen3.6-35b"
+	tab.model = "project-provider/test-provider/test-model-a"
 	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
 	app.activeTabID = tab.ID
 	defer tab.Ctrl.Close()
@@ -146,7 +146,7 @@ func TestSaveTabsPersistsModelAndEffort(t *testing.T) {
 	app := NewApp()
 	tab := testTab("a", t.TempDir())
 	tab.effort = &effort
-	tab.model = "moma/qwen3.6-27b"
+	tab.model = "test-provider/test-model-b"
 	tab.mode = "plan"
 	tab.Ctrl.SetPlanMode(true)
 	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}

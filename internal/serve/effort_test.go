@@ -8,12 +8,12 @@ import (
 
 func TestApplyEffortEditUpsertsMissingProvider(t *testing.T) {
 	edit := &config.Config{}
-	entry := &config.ProviderEntry{Name: "MoMA", Kind: "openai", BaseURL: "https://api.jiutian.10086.cn", Model: "qwen3.6-35b"}
+	entry := &config.ProviderEntry{Name: "test-provider", Kind: "openai", BaseURL: "https://api.example.com", Model: "test-model-a"}
 
 	if err := applyEffortEdit(edit, entry, "high"); err != nil {
 		t.Fatalf("applyEffortEdit: %v", err)
 	}
-	got, ok := edit.Provider("MoMA")
+	got, ok := edit.Provider("test-provider")
 	if !ok {
 		t.Fatal("provider absent from user config should be upserted so the effort edit lands")
 	}

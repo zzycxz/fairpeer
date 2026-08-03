@@ -16,11 +16,9 @@ import (
 
 // --- Fast-LLM base domain（legacy: custom private deployment/proxy）---------
 
-// GetJiutianBaseDomain returns the configured fast-LLM base URL override, or ""
-// when unset. Method name kept for frontend bridge compatibility; the field
-// migrated from the removed [jiutian] section to [cowork] fast_llm_base_domain.
-// Powers the "模型域名" input in SettingsPanel (will be removed in Phase 3).
-func (a *App) GetJiutianBaseDomain() string {
+// GetFastLLMBaseDomain returns the configured fast-LLM base URL override, or ""
+// when unset. The field lives in [cowork] fast_llm_base_domain.
+func (a *App) GetFastLLMBaseDomain() string {
 	cfg, err := config.Load()
 	if err != nil {
 		return ""
@@ -28,9 +26,8 @@ func (a *App) GetJiutianBaseDomain() string {
 	return strings.TrimSpace(cfg.Cowork.FastLLMBaseDomain)
 }
 
-// SetJiutianBaseDomain persists a fast-LLM base URL override ("" = reset).
-// Method name kept for frontend bridge compatibility.
-func (a *App) SetJiutianBaseDomain(domain string) error {
+// SetFastLLMBaseDomain persists a fast-LLM base URL override ("" = reset).
+func (a *App) SetFastLLMBaseDomain(domain string) error {
 	domain = strings.TrimSpace(domain)
 	return a.applyConfigChange(func(c *config.Config) error {
 		c.Cowork.FastLLMBaseDomain = domain

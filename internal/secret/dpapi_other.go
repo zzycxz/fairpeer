@@ -12,7 +12,7 @@ import (
 	"os"
 )
 
-// Non-Windows fallback for Protect/Unprotect. MoMAPeer targets Windows for the
+// Non-Windows fallback for Protect/Unprotect. FairPeer targets Windows for the
 // email/desktop features (Win32 automation), so this path exists only so the
 // package compiles and runs its tests on macOS/Linux/CI. It derives a static
 // AES-256 key from machine identity (hostname + home dir) — far weaker than

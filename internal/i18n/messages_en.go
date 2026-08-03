@@ -19,7 +19,7 @@ var English = Messages{
 	StepSetKey:      "set API key",
 
 	InitHint:       "Project memory (AGENTS.md) is generated in-session: run `fairpeer chat`, then `/init` — the model analyzes the codebase and writes it. For configuration, use `fairpeer setup`.",
-	StepSetKeyHint: "run `fairpeer setup`, or export JIUTIAN_API_KEY=…",
+	StepSetKeyHint: "run `fairpeer setup`, or export OPENAI_API_KEY=…",
 	StepChatDesc:   "interactive session",
 	StepRunDesc:    "one-shot task",
 	HelpFooter:     "fairpeer help · all commands",
@@ -260,7 +260,7 @@ var English = Messages{
 	SetupComplete:         "Setup complete.",
 	SetupCancelled:        "setup cancelled.",
 	TryHintFmt:            "Try: %s",
-	NextHint:              "Next: set your API key (run `fairpeer setup` or export JIUTIAN_API_KEY=...), then run `fairpeer run \"your task\"`.",
+	NextHint:              "Next: set your API key (run `fairpeer setup` or export OPENAI_API_KEY=...), then run `fairpeer run \"your task\"`.",
 	ConfirmReconfigureFmt: "%s already exists. Reconfigure and overwrite?",
 	KeepingExisting:       "Keeping existing config.",
 	NotOverwritingFmt:     "%s already exists; not overwriting",
@@ -354,12 +354,12 @@ Examples:
   fairpeer chat
   fairpeer chat --continue
   fairpeer run "implement the TODOs in main.go"
-  fairpeer run --model moma "add unit tests for this function"
+  fairpeer run --model provider/model "add unit tests for this function"
   echo "explain this code" | fairpeer run
 
 Configuration:
   Resolution: flag > ./fairpeer.toml > ~/.config/fairpeer/config.toml > built-in defaults
-  Secrets come from the environment via api_key_env (e.g. JIUTIAN_API_KEY).
+  Secrets come from the environment via api_key_env (e.g. OPENAI_API_KEY).
   Run 'fairpeer setup' to scaffold a config; see docs/SPEC.md.
 `,
 }

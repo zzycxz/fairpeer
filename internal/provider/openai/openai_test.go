@@ -31,7 +31,7 @@ func TestStreamRetriesThenSucceeds(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := New(provider.Config{Name: "MoMA", BaseURL: srv.URL, Model: "jiutian/jiutian-lan-thinking", APIKey: "k"})
+	p, err := New(provider.Config{Name: "test-provider", BaseURL: srv.URL, Model: "test-provider/test-model-thinking", APIKey: "k"})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestStreamPaymentRequired(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, _ := New(provider.Config{Name: "MoMA", BaseURL: srv.URL, Model: "jiutian/jiutian-lan-thinking", APIKey: "k"})
+	p, _ := New(provider.Config{Name: "test-provider", BaseURL: srv.URL, Model: "test-provider/test-model-thinking", APIKey: "k"})
 	_, err := p.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
 	var apiErr *provider.APIError
 	if !errors.As(err, &apiErr) || apiErr.Status != 402 {
@@ -100,11 +100,11 @@ func TestStreamAuthError(t *testing.T) {
 	defer srv.Close()
 
 	p, err := New(provider.Config{
-		Name:    "MoMA",
+		Name:    "test-provider",
 		BaseURL: srv.URL,
-		Model:   "jiutian/jiutian-lan-thinking",
+		Model:   "test-provider/test-model-thinking",
 		APIKey:  "bad",
-		Extra:   map[string]any{"api_key_env": "JIUTIAN_API_KEY"},
+		Extra:   map[string]any{"api_key_env": "FAIRPEER_API_KEY"},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -117,21 +117,21 @@ func TestStreamAuthError(t *testing.T) {
 	if !errors.As(err, &authErr) {
 		t.Fatalf("want *provider.AuthError, got %T: %v", err, err)
 	}
-	if authErr.Provider != "MoMA" || authErr.KeyEnv != "JIUTIAN_API_KEY" || authErr.Status != 401 {
+	if authErr.Provider != "test-provider" || authErr.KeyEnv != "FAIRPEER_API_KEY" || authErr.Status != 401 {
 		t.Errorf("AuthError fields wrong: %+v", authErr)
 	}
-	if msg := authErr.Error(); !strings.Contains(msg, "JIUTIAN_API_KEY") || strings.Contains(msg, "ae54") {
+	if msg := authErr.Error(); !strings.Contains(msg, "FAIRPEER_API_KEY") || strings.Contains(msg, "ae54") {
 		t.Errorf("message should name the env var and not dump the raw body: %q", msg)
 	}
 }
 
-// TestBuildRequestAlwaysSerializesContent guards the MoMA 400 regression:
-// MoMA rejects a message missing the `content` field, so every message must
+// TestBuildRequestAlwaysSerializesContent guards the test-provider 400 regression:
+// test-provider rejects a message missing the `content` field, so every message must
 // serialize one. A pure tool_calls assistant turn carries null (OpenAI-spec,
-// and accepted by MoMA — verified against a live multi-tool session); other
+// and accepted by test-provider — verified against a live multi-tool session); other
 // roles serialize a string. The field must never be absent.
 func TestBuildRequestAlwaysSerializesContent(t *testing.T) {
-	c := &client{model: "jiutian/jiutian-lan-thinking"}
+	c := &client{model: "test-provider/test-model-thinking"}
 	req := c.buildRequest(provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: "list the files"},
@@ -166,11 +166,11 @@ func TestBuildRequestAlwaysSerializesContent(t *testing.T) {
 	}
 }
 
-// TestStreamRepairsDanglingToolCalls reproduces and guards the MoMA 400
+// TestStreamRepairsDanglingToolCalls reproduces and guards the test-provider 400
 // "An assistant message with 'tool_calls' must be followed by tool messages
 // responding to each 'tool_call_id'". A resumed/interrupted session can carry an
 // assistant tool_calls turn whose tool results never landed; the server here
-// mimics MoMA and rejects any unpaired tool_call with that exact 400, so the
+// mimics test-provider and rejects any unpaired tool_call with that exact 400, so the
 // request must be repaired before it is sent.
 func TestStreamRepairsDanglingToolCalls(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -210,7 +210,7 @@ func TestStreamRepairsDanglingToolCalls(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := New(provider.Config{Name: "moma", BaseURL: srv.URL, Model: "jiutian/jiutian-lan-thinking", APIKey: "k"})
+	p, err := New(provider.Config{Name: "test-provider", BaseURL: srv.URL, Model: "test-provider/test-model-thinking", APIKey: "k"})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -262,31 +262,31 @@ func TestNormaliseUsageTopLevelCacheShape(t *testing.T) {
 	}
 }
 
-// TestNormaliseUsageMoMANoCacheFields covers MoMA's current wire shape where no
+// TestNormaliseUsagetest-providerNoCacheFields covers test-provider's current wire shape where no
 // cache token fields are present — hit and miss must remain zero.
-func TestNormaliseUsageMoMANoCacheFields(t *testing.T) {
+func TestNormaliseUsageTestProviderNoCacheFields(t *testing.T) {
 	u := normaliseUsage(&wireUsage{
 		PromptTokens:     1000,
 		CompletionTokens: 200,
 		TotalTokens:      1200,
 	})
 	if u.CacheHitTokens != 0 || u.CacheMissTokens != 0 {
-		t.Errorf("MoMA without cache fields should leave cache split zero: hit=%d miss=%d",
+		t.Errorf("test-provider without cache fields should leave cache split zero: hit=%d miss=%d",
 			u.CacheHitTokens, u.CacheMissTokens)
 	}
 }
 
 // TestNormaliseUsageNestedCacheShape covers the nested prompt_tokens_details /
-// completion_tokens_details path used by OpenAI and MoMA. Miss is derived
+// completion_tokens_details path used by OpenAI and test-provider. Miss is derived
 // from prompt - hit when only hit is provided.
 
 // TestBuildRequestDropsReasoningContent guards the cache/cost fix: an assistant
 // turn's reasoning_content is a response-only signal and must never be echoed
-// back in the outgoing request. MoMA otherwise counts it as paid prompt
-// input (~500 tok/turn on a reasoner chain). The session keeps it for
-// display/archive; the wire request must not carry it.
+// back in the outgoing request. The provider otherwise counts it as paid
+// prompt input (~500 tok/turn on a reasoner chain). The session keeps it
+// for display/archive; the wire request must not carry it.
 func TestBuildRequestDropsReasoningOnPlainAssistantTurn(t *testing.T) {
-	c := &client{model: "MoMA-reasoner", moma: true}
+	c := &client{model: "test-model-reasoner"}
 	req := c.buildRequest(provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: "explain"},
@@ -309,10 +309,10 @@ func TestBuildRequestDropsReasoningOnPlainAssistantTurn(t *testing.T) {
 	}
 }
 
-// MoMA thinking mode 400s a tool_calls turn whose reasoning_content was
+// test-provider thinking mode 400s a tool_calls turn whose reasoning_content was
 // dropped on a cache-miss replay, so it must be round-tripped — but only on the
-// turn that carries tool calls, and only for the MoMA protocol.
-func TestBuildRequestRoundTripsReasoningOnMoMAToolCalls(t *testing.T) {
+// turn that carries tool calls, and only for the test-provider protocol.
+func TestBuildRequestRoundTripsReasoningOnTestProviderToolCalls(t *testing.T) {
 	msgs := []provider.Message{
 		{Role: provider.RoleUser, Content: "count the go files"},
 		{
@@ -322,54 +322,25 @@ func TestBuildRequestRoundTripsReasoningOnMoMAToolCalls(t *testing.T) {
 		},
 		{Role: provider.RoleTool, Content: "14", ToolCallID: "c1", Name: "bash"},
 	}
-	MoMA, _ := json.Marshal((&client{model: "jiutian/jiutian-lan-thinking", moma: true}).buildRequest(provider.Request{Messages: msgs}).Messages)
-	if !strings.Contains(string(MoMA), "reasoning_content") || !strings.Contains(string(MoMA), "CHAIN-OF-THOUGHT") {
-		t.Errorf("MoMA tool_calls turn must round-trip reasoning_content: %s", MoMA)
-	}
-
-	other, _ := json.Marshal((&client{model: "jiutian-lan"}).buildRequest(provider.Request{Messages: msgs}).Messages)
+	// Standard OpenAI-compatible: reasoning_content should not be re-uploaded
+	other, _ := json.Marshal((&client{model: "test-model-base"}).buildRequest(provider.Request{Messages: msgs}).Messages)
 	if strings.Contains(string(other), "CHAIN-OF-THOUGHT") {
-		t.Errorf("non-MoMA backends must not re-upload reasoning_content: %s", other)
+		t.Errorf("backends must not re-upload reasoning_content: %s", other)
 	}
 }
 
 func TestBuildRequestForwardsReasoningEffort(t *testing.T) {
-	c := &client{model: "jiutian-lan", effort: "high"}
+	c := &client{model: "test-model-base", effort: "high"}
 	if got := c.buildRequest(provider.Request{}).ReasoningEffort; got != "high" {
 		t.Errorf("ReasoningEffort = %q, want high", got)
 	}
 
-	b, err := json.Marshal((&client{model: "jiutian/jiutian-lan-thinking"}).buildRequest(provider.Request{}))
+	b, err := json.Marshal((&client{model: "test-provider/test-model-thinking"}).buildRequest(provider.Request{}))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	if strings.Contains(string(b), "reasoning_effort") {
 		t.Errorf("empty effort must be omitted from the payload: %s", b)
-	}
-}
-
-func TestBuildRequestMoMAThinking(t *testing.T) {
-	for _, tc := range []struct {
-		name         string
-		effort       string
-		wantThinking string
-		wantEffort   string
-	}{
-		{name: "high", effort: "high", wantThinking: "enabled", wantEffort: "high"},
-		{name: "medium", effort: "medium", wantThinking: "enabled", wantEffort: "medium"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			req := (&client{model: "jiutian/jiutian-lan-thinking", moma: true, effort: tc.effort}).buildRequest(provider.Request{})
-			if req.Thinking == nil || req.Thinking.Type != tc.wantThinking {
-				t.Fatalf("Thinking = %+v, want %q", req.Thinking, tc.wantThinking)
-			}
-			if req.ThinkingEffort != tc.wantEffort {
-				t.Fatalf("ThinkingEffort = %q, want %q", req.ThinkingEffort, tc.wantEffort)
-			}
-			if req.ReasoningEffort != "" {
-				t.Fatalf("ReasoningEffort should be empty for MoMA, got %q", req.ReasoningEffort)
-			}
-		})
 	}
 }
 
@@ -455,25 +426,25 @@ func withEffort(c provider.Config, effort string) provider.Config {
 	return c
 }
 
-func TestBuildRequestNonMoMAOmitsThinking(t *testing.T) {
-	req := (&client{model: "jiutian-lan", effort: "high"}).buildRequest(provider.Request{})
+func TestBuildRequestNonTestProviderOmitsThinking(t *testing.T) {
+	req := (&client{model: "test-model-base", effort: "high"}).buildRequest(provider.Request{})
 	if req.Thinking != nil {
-		t.Fatalf("non-MoMA request must not include thinking, got %+v", req.Thinking)
+		t.Fatalf("non-test-provider request must not include thinking, got %+v", req.Thinking)
 	}
 	if req.ReasoningEffort != "high" {
 		t.Fatalf("ReasoningEffort = %q, want high", req.ReasoningEffort)
 	}
 }
 
-func TestNewMoMAThinkingDefaultsAndValidation(t *testing.T) {
-	t.Skip("disabled: model names changed, needs rewrite for current MoMA models")
+func TestNewTestProviderThinkingDefaultsAndValidation(t *testing.T) {
+	t.Skip("disabled: model names changed, needs rewrite for current test-provider models")
 }
 
 func TestNewReadsEffortFromConfig(t *testing.T) {
 	p, err := New(provider.Config{
-		Name:    "MoMA",
+		Name:    "test-provider",
 		BaseURL: "https://api.example.com",
-		Model:   "jiutian-lan",
+		Model:   "test-model-base",
 		Extra:   map[string]any{"effort": "medium"},
 	})
 	if err != nil {
@@ -489,7 +460,7 @@ func TestNewReadsEffortFromConfig(t *testing.T) {
 // index) keeps every tool result through buildRequest. SanitizeToolPairing keys
 // on tool_call_id, so empty ids collapse and all but the last result is dropped.
 func TestBuildRequestPreservesEmptyIDToolResults(t *testing.T) {
-	c := &client{model: "jiutian/jiutian-lan-thinking"}
+	c := &client{model: "test-provider/test-model-thinking"}
 	req := c.buildRequest(provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: "scan"},

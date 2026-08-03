@@ -1,5 +1,5 @@
 /*
- * momapeer desktop — single-column, developer-dense, terminal-flavored chat UI.
+ * FairPeer desktop — single-column, developer-dense, terminal-flavored chat UI.
  *
  * Multi-platform notes:
  *  - System font stack only; no web-font fetches (offline-first, consistent).
@@ -8797,7 +8797,7 @@ a[href] {
   overflow-wrap: anywhere;
 }
 
-/* Jiutian multimodal tools — deliberately NOT styled like skill cards. These
+/* Provider multimodal tools — deliberately NOT styled like skill cards. These
    are tool toggles, not skills, so they render as plain label+hint+switch rows
    to avoid the visual confusion of a third "skill group" that isn't one. */
 .cap-tools {

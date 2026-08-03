@@ -1546,7 +1546,7 @@ function SelfEvolutionSection() {
 	};
 
 	// Optimistic toggle: flip immediately, roll back on failure (mirrors
-	// JiutianSection's pattern so the switch never visibly snaps back).
+	// the provider section's pattern so the switch never visibly snaps back).
 	const toggleEnabled = async (enabled: boolean) => {
 		const prev = status;
 		if (prev) setStatus({ ...prev, enabled });

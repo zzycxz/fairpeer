@@ -200,7 +200,6 @@ export interface AppBindings {
   RemoveSkillPath(path: string): Promise<void>;
   RefreshSkills(): Promise<void>;
   SetSkillEnabled(name: string, enabled: boolean): Promise<void>;
-  SetJiutianTool(name: string, enabled: boolean): Promise<void>;
   DreamStatus(): Promise<DreamStatusView>;
   SetDreamEnabled(enabled: boolean): Promise<void>;
   SetDreamIntervals(dreamDays: number, distillDays: number): Promise<void>;
@@ -252,8 +251,6 @@ export interface AppBindings {
   PortraitProfile(): Promise<ProfileView>;
   Settings(): Promise<SettingsView>;
   SetDefaultModel(ref: string): Promise<void>;
-  GetJiutianBaseDomain(): Promise<string>;
-  SetJiutianBaseDomain(domain: string): Promise<void>;
   SetSubagentModel(ref: string): Promise<void>;
   SetSubagentEffort(level: string): Promise<void>;
   SetAutoPlan(mode: string): Promise<void>;
@@ -1188,7 +1185,6 @@ function makeMockApp(): AppBindings {
       exaKeySet: false,
       linkupKeySet: false,
     },
-    jiutian: undefined,
     desktopLanguage: "",
     desktopTheme: "light",
     desktopThemeStyle: "graphite",
@@ -1452,7 +1448,7 @@ function makeMockApp(): AppBindings {
       workspaceName: "Global",
       topicId: "",
       topicTitle: "Global",
-      label: "Qwen3.6-35B",
+      label: "gpt-4o",
       ready: true,
       running: false,
       mode: "normal",
@@ -1470,7 +1466,7 @@ function makeMockApp(): AppBindings {
       topicId: "topic_dev_standard",
       topicTitle: t("mock.trashDevStandardTitle"),
       projectColor: "blue",
-      label: "Qwen3.6-35B",
+      label: "gpt-4o",
       ready: true,
       running: false,
       mode: "normal",
@@ -1487,7 +1483,7 @@ function makeMockApp(): AppBindings {
       topicId: "topic_p3b_pd",
       topicTitle: "p3b P&D",
       projectColor: "purple",
-      label: "Qwen3.6-35B",
+      label: "gpt-4o",
       ready: true,
       running: runningMock && mockTopicIsRunning("topic_p3b_pd"),
       mode: "normal",
@@ -1514,7 +1510,7 @@ function makeMockApp(): AppBindings {
     },
   ];
   const mockModelCatalog = [
-    { ref: "deepseek/deepseek-v4-pro", provider: "deepseek", model: "deepseek-v4-pro" },
+    { ref: "openai/gpt-4o", provider: "openai", model: "gpt-4o" },
   ];
   const defaultMockModelRef = mockModelCatalog[0].ref;
   const mockModelRef = (name: string): string => {
@@ -2100,7 +2096,7 @@ function makeMockApp(): AppBindings {
           const toolApprovalMode = normalizeToolApprovalMode(active?.toolApprovalMode, active ? normalizeMode(active.mode) : "normal", settings.autoApproveTools);
           const autoApproveTools = toolApprovalMode === "yolo";
           return {
-            label: active?.label ?? "Qwen3.6-35B",
+            label: active?.label ?? "",
             ready: active?.ready ?? true,
             eventChannel: EVENT_CHANNEL,
             cwd: active?.cwd || cwd,
@@ -2116,7 +2112,7 @@ function makeMockApp(): AppBindings {
           const toolApprovalMode = normalizeToolApprovalMode(tab?.toolApprovalMode, tab ? normalizeMode(tab.mode) : "normal", settings.autoApproveTools);
           const autoApproveTools = toolApprovalMode === "yolo";
           return {
-            label: tab?.label ?? "Qwen3.6-35B",
+            label: tab?.label ?? "",
             ready: tab?.ready ?? true,
             eventChannel: EVENT_CHANNEL,
             cwd: tab?.cwd || cwd,
@@ -2254,9 +2250,6 @@ function makeMockApp(): AppBindings {
       const skill = capSkills.find((s) => s.name === name);
       if (skill) skill.enabled = enabled;
     },
-    async SetJiutianTool(_name: string, _enabled: boolean) {
-      // mock: jiutian multimodal tools removed (provider-agnostic)
-    },
     async DreamStatus(): Promise<DreamStatusView> {
       return {
         enabled: dreamMock.enabled,
@@ -2342,12 +2335,13 @@ function makeMockApp(): AppBindings {
           { label: "trust", insert: "trust", hint: "trust this project's hooks" },
         ],
         "/model": [
-          { label: "deepseek/deepseek-v4-pro", insert: "deepseek/deepseek-v4-pro", hint: "current" },
+          { label: "openai/gpt-4o", insert: "openai/gpt-4o", hint: "current" },
         ],
         "/effort": [
           { label: "auto", insert: "auto", hint: "use the model default" },
+          { label: "low", insert: "low", hint: "lightweight reasoning" },
+          { label: "medium", insert: "medium", hint: "balanced reasoning" },
           { label: "high", insert: "high", hint: "deeper reasoning" },
-          { label: "max", insert: "max", hint: "maximum reasoning" },
         ],
       };
       const items = (subs[cmd] ?? [])
@@ -2643,12 +2637,6 @@ function makeMockApp(): AppBindings {
     async SetDefaultModel(ref: string) {
       settings.defaultModel = ref;
     },
-    async GetJiutianBaseDomain(): Promise<string> {
-      return "";
-    },
-    async SetJiutianBaseDomain(_domain: string) {
-      // mock: no-op
-    },
     async SetFastTaskModel(ref: string) {
       settings.fastTaskModel = ref;
     },
@@ -2882,13 +2870,13 @@ function makeMockApp(): AppBindings {
     // Dev seam: drives the overlay flow in the browser until ConnectKey sets the
     // key. Matches ConnectKey on apiKeyEnv so the two stay in sync.
     async NeedsOnboarding() {
-      return !settings.providers.find((p) => p.apiKeyEnv === "JIUTIAN_API_KEY")?.keySet;
+      return !settings.providers.some((p) => p.keySet);
     },
     async ConnectKey(apiKey: string) {
       if (!apiKey.trim()) throw new Error("key is required");
-      settings.providers.forEach((p) => {
-        if (p.apiKeyEnv === "JIUTIAN_API_KEY") p.keySet = true;
-      });
+      // Mark the first provider as having a key set (mock behavior)
+      const first = settings.providers[0];
+      if (first) first.keySet = true;
       await delay(300);
     },
     async ReportCrash() {

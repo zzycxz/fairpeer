@@ -9,7 +9,7 @@ import (
 // --- SanitizeToolPairing ---
 
 // toolIDsAnswered reports whether every assistant tool_call id has a following
-// tool message answering it — the contract the OpenAI/MoMA API enforces.
+// tool message answering it — the contract the OpenAI/test-provider API enforces.
 func toolIDsAnswered(msgs []Message) bool {
 	answered := map[string]bool{}
 	for _, m := range msgs {
@@ -169,7 +169,7 @@ func TestPricingCostCalculation(t *testing.T) {
 }
 
 func TestPricingCostNoCacheInfo(t *testing.T) {
-	// MoMA currently does not report cache tokens (both fields are 0).
+	// test-provider currently does not report cache tokens (both fields are 0).
 	// Prompt tokens must still be billed at Input price.
 	p := &Pricing{CacheHit: 0.02, Input: 1.0, Output: 2.0}
 	u := &Usage{
@@ -220,9 +220,9 @@ func TestPricingSymbolCustom(t *testing.T) {
 // --- AuthError ---
 
 func TestAuthErrorWithKeyEnv(t *testing.T) {
-	e := &AuthError{Provider: "MoMA", KeyEnv: "JIUTIAN_API_KEY", Status: 401}
+	e := &AuthError{Provider: "test-provider", KeyEnv: "FAIRPEER_API_KEY", Status: 401}
 	msg := e.Error()
-	for _, want := range []string{"MoMA", "JIUTIAN_API_KEY", "401", "invalid or expired"} {
+	for _, want := range []string{"test-provider", "FAIRPEER_API_KEY", "401", "invalid or expired"} {
 		if !contains(msg, want) {
 			t.Errorf("AuthError.Error() missing %q: %s", want, msg)
 		}

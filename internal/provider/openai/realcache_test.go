@@ -18,29 +18,29 @@ type probeResult struct {
 	reasoningText                string
 }
 
-// TestRealMoMACacheProbe is an env-gated end-to-end probe against the live
-// MoMA API. It answers, with real numbers:
-//  1. does MoMA's auto cache actually serve fairpeer's request shape, and how
+// TestRealtest-providerCacheProbe is an env-gated end-to-end probe against the live
+// test-provider API. It answers, with real numbers:
+//  1. does test-provider's auto cache actually serve fairpeer's request shape, and how
 //     much does a repeated prefix hit;
-//  2. does qwen3.6-35b even return reasoning_content (i.e. is the round-trip
+//  2. does test-model-a even return reasoning_content (i.e. is the round-trip
 //     amplifier real for this model);
 //  3. does re-sending reasoning_content inflate prompt_tokens and/or break the
 //     cache hit on the next turn (the open question the mock can't answer).
 //
-// Run with:  set -a; source .env; set +a; go test ./internal/provider/openai/ -run TestRealMoMACacheProbe -v -count=1
-func TestRealMoMACacheProbe(t *testing.T) {
-	t.Skip("MoMA does not report prompt cache tokens — cache probe is meaningless")
-	key := os.Getenv("JIUTIAN_API_KEY")
+// Run with:  set -a; source .env; set +a; go test ./internal/provider/openai/ -run TestRealtest-providerCacheProbe -v -count=1
+func TestRealTestProviderCacheProbe(t *testing.T) {
+	t.Skip("test-provider does not report prompt cache tokens — cache probe is meaningless")
+	key := os.Getenv("FAIRPEER_API_KEY")
 	if key == "" {
-		t.Skip("JIUTIAN_API_KEY not set — skipping live probe")
+		t.Skip("FAIRPEER_API_KEY not set — skipping live probe")
 	}
 
 	p, err := New(provider.Config{
-		Name:    "MoMA",
-		BaseURL: "https://api.jiutian.10086.cn",
-		Model:   "qwen3.6-35b",
+		Name:    "test-provider",
+		BaseURL: "https://api.example.com",
+		Model:   "test-model-a",
 		APIKey:  key,
-		Extra:   map[string]any{"api_key_env": "JIUTIAN_API_KEY"},
+		Extra:   map[string]any{"api_key_env": "FAIRPEER_API_KEY"},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -86,7 +86,7 @@ func TestRealMoMACacheProbe(t *testing.T) {
 		return formatPct(r.hit, denom)
 	}
 
-	// A large, stable head so the repeated prefix comfortably exceeds MoMA's
+	// A large, stable head so the repeated prefix comfortably exceeds test-provider's
 	// 64-token cache block granularity and a hit is unambiguous.
 	bigHead := "You are a coding agent. Follow these standing instructions precisely. " +
 		strings.Repeat("Keep the prefix identical across turns so the context cache can serve it. ", 60)
@@ -114,12 +114,12 @@ func TestRealMoMACacheProbe(t *testing.T) {
 	}
 
 	// ---- Probe 3 (cheap, do it early): does v4-flash emit reasoning_content? ----
-	t.Logf("==== Probe 3: does qwen3.6-35b return reasoning_content? ====")
+	t.Logf("==== Probe 3: does test-model-a return reasoning_content? ====")
 	t.Logf("saw reasoning chunks: %v   reasoning_tokens reported: %d   reasoning_text_len: %d",
 		p1a.sawReasoning, p1a.reasoning, len(p1a.reasoningText))
 	if !p1a.sawReasoning && p1a.reasoning == 0 {
 		t.Logf("→ v4-flash does NOT produce reasoning_content, so the reasoning round-trip " +
-			"amplifier does not apply to your active model (it only bites MoMA-reasoner).")
+			"amplifier does not apply to your active model (it only bites test-provider-reasoner).")
 	}
 
 	// ---- Probe 2: does re-sending reasoning_content inflate prompt / break cache? ----
@@ -139,7 +139,7 @@ func TestRealMoMACacheProbe(t *testing.T) {
 			{Role: provider.RoleSystem, Content: bigHead},
 			{Role: provider.RoleUser, Content: "Read the config and tell me the model."},
 			asst,
-			{Role: provider.RoleTool, Content: "model = qwen3.6-35b", ToolCallID: "call_1", Name: "read_file"},
+			{Role: provider.RoleTool, Content: "model = test-model-a", ToolCallID: "call_1", Name: "read_file"},
 			{Role: provider.RoleUser, Content: "Thanks. Now reply with the single word: ok."},
 		}
 	}
@@ -150,7 +150,7 @@ func TestRealMoMACacheProbe(t *testing.T) {
 	// warm each prefix once, then measure the second (cache-eligible) call.
 	if _, err := send(withR); err != nil {
 		t.Logf("==== Probe 2 ====")
-		t.Logf("MoMA REJECTED a request carrying reasoning_content in history: %v", err)
+		t.Logf("test-provider REJECTED a request carrying reasoning_content in history: %v", err)
 		t.Logf("→ round-tripping reasoning_content is not just a cache concern; the API refuses it.")
 	} else {
 		if _, err := send(noR); err != nil {
@@ -168,7 +168,7 @@ func TestRealMoMACacheProbe(t *testing.T) {
 		t.Logf("==== Probe 2: reasoning_content round-trip on real cache ====")
 		t.Logf("WITH reasoning_content: prompt=%d hit=%d miss=%d  rate=%s", p2withR.prompt, p2withR.hit, p2withR.miss, rate(p2withR))
 		t.Logf("WITHOUT (stripped):     prompt=%d hit=%d miss=%d  rate=%s", p2noR.prompt, p2noR.hit, p2noR.miss, rate(p2noR))
-		// Before the fix this delta was ~+500 (MoMA billed the re-sent
+		// Before the fix this delta was ~+500 (test-provider billed the re-sent
 		// reasoning as prompt input). After the fix the openai provider drops
 		// reasoning_content from the request, so both variants send an identical
 		// wire request and the delta should be ~0.

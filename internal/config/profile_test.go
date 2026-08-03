@@ -48,13 +48,13 @@ func TestResolveProfileConfigOverridesBuiltin(t *testing.T) {
 	// A [[profiles]] entry with a builtin name replaces the builtin.
 	cfg := Default()
 	cfg.Profiles = []Profile{
-		{Name: "cowork", DisplayName: "My Office", Model: "moma/qwen/qwen3.6-35b", Plugins: []string{"wps-ppt"}},
+		{Name: "cowork", DisplayName: "My Office", Model: "test-provider/test-provider/test-model-a", Plugins: []string{"wps-ppt"}},
 	}
 	cw, err := cfg.ResolveProfile("cowork")
 	if err != nil {
 		t.Fatalf("cowork: %v", err)
 	}
-	if cw.Model != "moma/qwen/qwen3.6-35b" || cw.DisplayName != "My Office" {
+	if cw.Model != "test-provider/test-provider/test-model-a" || cw.DisplayName != "My Office" {
 		t.Fatalf("config did not override builtin: %+v", cw)
 	}
 	// The builtin prompt addon is dropped when the config entry replaces it

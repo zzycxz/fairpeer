@@ -55,7 +55,7 @@ func TestMigrateImportsKeyPluginsAndLang(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read credentials: %v", err)
 	}
-	if !strings.Contains(string(envData), "JIUTIAN_API_KEY=sk-legacy-123") {
+	if !strings.Contains(string(envData), "FAIRPEER_API_KEY=sk-legacy-123") {
 		t.Errorf("credentials missing key: %q", envData)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".env")); !os.IsNotExist(err) {
@@ -156,7 +156,7 @@ func TestMigrateSkipsWhenDestExists(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(dest, []byte("default_model = \"moma\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(dest, []byte("default_model = \"test-provider\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -176,7 +176,7 @@ func TestMigrateImportsLegacyV1TOMLBeforeJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(legacyTOML, []byte(`
-default_model = "moma"
+default_model = "test-provider"
 language = "en"
 
 [ui]
@@ -222,7 +222,7 @@ func TestMigrateImportsLegacyV1HomeTOMLBeforeJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(legacyTOML, []byte(`
-default_model = "moma"
+default_model = "test-provider"
 
 [[plugins]]
 name = "legacy-home-v1"
@@ -272,7 +272,7 @@ func TestMigrateToleratesUTF8BOM(t *testing.T) {
 		t.Fatalf("BOM-prefixed config did not migrate: %+v", res)
 	}
 	data, _ := os.ReadFile(UserCredentialsPath())
-	if !strings.Contains(string(data), "JIUTIAN_API_KEY=sk-bom") {
+	if !strings.Contains(string(data), "FAIRPEER_API_KEY=sk-bom") {
 		t.Errorf("key not migrated from BOM-prefixed config: %q", data)
 	}
 }
@@ -291,7 +291,7 @@ func TestMigrateCustomBaseURLWarns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load migrated config: %v", err)
 	}
-	// FairPeer no longer ships a preset MoMA provider; a v0.x base_url is now
+	// FairPeer no longer ships a preset test-provider provider; a v0.x base_url is now
 	// carried over as an explicit user provider named "migrated".
 	p, ok := cfg.Provider("migrated")
 	if !ok || p.BaseURL != "https://my-proxy.example/v1" {

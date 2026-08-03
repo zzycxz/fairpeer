@@ -1,4 +1,4 @@
-"""Test moonshotai/kimi-k2.6 audio recognition on MoMA platform.
+"""Test moonshotai/kimi-k2.6 audio recognition via OpenAI-compatible API.
 
 Usage:
     python scripts/test_kimi_audio.py [path_to_audio_file]
@@ -59,7 +59,7 @@ def audio_to_data_url(audio_bytes, fmt="wav"):
 
 
 def test_audio_recognition(audio_bytes, audio_format="wav", model="moonshotai/kimi-k2.6"):
-    """Test audio recognition via MoMA API."""
+    """Test audio recognition via OpenAI-compatible API."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         print("ERROR: OPENAI_API_KEY environment variable not set")

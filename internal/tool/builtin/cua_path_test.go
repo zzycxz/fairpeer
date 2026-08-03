@@ -14,9 +14,9 @@ import (
 // TestCallVLMProviderPath verifies the PRODUCTION VLM path end-to-end:
 // SetProviderChatRunner (the boot injection point) → CallVLM (backend=provider)
 // → callProviderVLM → the injected runner. This is the exact chain screen_perceive
-// uses in cowork mode now. It does NOT mock the HTTP layer — when JIUTIAN_API_KEY
+// uses in cowork mode now. It does NOT mock the HTTP layer — when FAIRPEER_API_KEY
 // is set it builds a REAL one-shot provider client (mirroring runProviderVLMChat)
-// and hits the live qwen3.6-27b endpoint, so a green result means the production
+// and hits the live test-model-b endpoint, so a green result means the production
 // vision path genuinely works, not a unit-test stub.
 //
 // Without the key it still runs a cheap path: inject a fake runner that asserts
@@ -25,7 +25,7 @@ import (
 // silently dropped" class of bug.
 func TestCallVLMProviderPath(t *testing.T) {
 	// Configure the global VLM model (the production default is a provider
-	// multimodal model). We set it to qwen3.6-27b and inject a fake runner that
+	// multimodal model). We set it to test-model-b and inject a fake runner that
 	// asserts the image part is present, proving the multimodal message
 	// construction is correct even offline.
 	origModel := vlmModel
@@ -34,7 +34,7 @@ func TestCallVLMProviderPath(t *testing.T) {
 		vlmModel = origModel
 		runProviderChat = origRunner
 	})
-	SetVLMModel("qwen/qwen3.6-27b")
+	SetVLMModel("test-provider/test-model-b")
 
 	const prompt = "Reply with exactly: VLM_OK"
 	// 1x1 red PNG — minimal valid image. We're testing the path, not the vision.
@@ -45,8 +45,8 @@ func TestCallVLMProviderPath(t *testing.T) {
 	// runs in CI without secrets and proves the dispatch + multimodal message
 	// construction are correct — the part most likely to silently break.
 	SetProviderChatRunner(func(ctx context.Context, modelRef string, msgs []provider.Message) ([]provider.Message, error) {
-		if modelRef != "qwen/qwen3.6-27b" {
-			t.Errorf("model ref = %q, want qwen/qwen3.6-27b", modelRef)
+		if modelRef != "test-provider/test-model-b" {
+			t.Errorf("model ref = %q, want test-provider/test-model-b", modelRef)
 		}
 		for _, m := range msgs {
 			if len(provider.ImageParts(m.Content)) > 0 {

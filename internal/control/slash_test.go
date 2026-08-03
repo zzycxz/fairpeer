@@ -24,17 +24,17 @@ func has(items []SlashItem, label string) bool {
 }
 
 func TestSlashArgItems(t *testing.T) {
-	t.Skip("Skipped due to MoMA protocol rename")
+	t.Skip("Skipped due to test-provider protocol rename")
 	data := ArgData{
 		Skills:          []skill.Skill{{Name: "explore", Scope: skill.ScopeBuiltin}, {Name: "review", Scope: skill.ScopeBuiltin}},
 		DisabledSkills:  []skill.Skill{{Name: "security-review", Scope: skill.ScopeBuiltin}},
 		ServerNames:     []string{"fs", "git"},
 		ConfiguredMCP:   []string{"fs", "linear"},
 		DisconnectedMCP: []string{"optional"},
-		ModelRefs:       []string{"moma/qwen3.6-35b", "moma/qwen3.6-27b"},
-		CurrentModel:    "moma/qwen3.6-35b",
-		ProviderNames:   []string{"moma", "moma", "custom"},
-		CurrentProvider: "moma",
+		ModelRefs:       []string{"test-provider/test-model-a", "test-provider/test-model-b"},
+		CurrentModel:    "test-provider/test-model-a",
+		ProviderNames:   []string{"test-provider", "test-provider", "custom"},
+		CurrentProvider: "test-provider",
 	}
 
 	// /skills subcommands
@@ -101,7 +101,7 @@ func TestSlashArgItems(t *testing.T) {
 	}
 	// /model → refs, current marked
 	items, _ = SlashArgItems("/model ", data)
-	if !has(items, "moma/qwen3.6-27b") {
+	if !has(items, "test-provider/test-model-b") {
 		t.Errorf("/model should list refs; got %v", labelsOf(items))
 	}
 	for _, it := range items {
@@ -111,7 +111,7 @@ func TestSlashArgItems(t *testing.T) {
 	}
 	// /provider → provider names, current marked
 	items, _ = SlashArgItems("/provider ", data)
-	if !has(items, "moma") || !has(items, "custom") {
+	if !has(items, "test-provider") || !has(items, "custom") {
 		t.Errorf("/provider should list provider names; got %v", labelsOf(items))
 	}
 	for _, it := range items {
@@ -119,10 +119,10 @@ func TestSlashArgItems(t *testing.T) {
 			t.Errorf("active provider should be hinted 'current', got %q", it.Hint)
 		}
 	}
-	// /provider mo → filter to MoMA-*
+	// /provider mo → filter to test-provider-*
 	items, _ = SlashArgItems("/provider mo", data)
 	if len(items) != 2 {
-		t.Errorf("/provider mo should filter to 2 moma providers; got %v", labelsOf(items))
+		t.Errorf("/provider mo should filter to 2 test-provider providers; got %v", labelsOf(items))
 	}
 	// /hooks
 	items, _ = SlashArgItems("/hooks ", data)

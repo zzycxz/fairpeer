@@ -1412,7 +1412,7 @@ func promptMissingKeys(cfg *config.Config) int {
 // providersWithMissingKeys returns the providers the active configuration
 // actually references (default/planner/subagent models) whose api_key_env is
 // declared but not set. Merely-available presets stay silent — a single-vendor
-// user must not be prompted for JIUTIAN_API_KEY (#3939); the chat banner still
+// user must not be prompted for API keys they don't use (#3939); the chat banner still
 // warns if they later switch to a model whose key is missing. configureKeys
 // dedupes shared envs, so duplicates are fine to leave in.
 func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {

@@ -11,7 +11,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
-const legacyEventLog = `{"type":"model.turn.started","id":1,"ts":"t","turn":0,"model":"MoMA"}
+const legacyEventLog = `{"type":"model.turn.started","id":1,"ts":"t","turn":0,"model":"test-provider"}
 {"type":"user.message","id":2,"ts":"t","turn":0,"text":"list the files"}
 {"type":"model.delta","id":3,"ts":"t","turn":0,"channel":"content","text":"sure"}
 {"type":"model.final","id":4,"ts":"t","turn":0,"content":"On it.","toolCalls":[{"id":"call_1","type":"function","function":{"name":"ls","arguments":"{\"path\":\".\"}"}}],"usage":{},"costUsd":0}

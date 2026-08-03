@@ -28,7 +28,7 @@ func TestGenSampleGongwenDoc(t *testing.T) {
 			{Type: "paragraph", Text: "关于推进九天大模型平台建设工作方案",
 				Style: DocStyle{Font: "SimSun", Size: 44, Bold: true, Align: "center"}},
 			// 正文开头：仿宋三号 首行缩进2字符
-			{Type: "paragraph", Text: "为深入贯彻落实人工智能发展战略，加快推进中国移动九天（MoMA）大模型平台建设，提升企业级AI应用能力，现结合工作实际，制定本方案。",
+			{Type: "paragraph", Text: "为深入贯彻落实人工智能发展战略，加快推进中国移动九天（test-provider）大模型平台建设，提升企业级AI应用能力，现结合工作实际，制定本方案。",
 				Style: DocStyle{Font: "FangSong", Size: 32, Indent: 2}},
 			// 一级标题：黑体三号不加粗
 			{Type: "heading", Level: 1, Text: "一、总体要求",

@@ -204,7 +204,7 @@ a.prov.Stream({ Messages, Tools: a.tools.Schemas() })   ← 每轮现取(已验�
 ```
 reg := NewRegistry()
 addBuiltins(reg, …)            // universal + coding builtins
-JiutianTools / BrowserTools → reg                 // universal
+PlatformTools / BrowserTools → reg                 // universal
 if cowork: Screen/Window/PPT/Schedule/Email/RAG/Document/Expert → reg
 plugins / lsp / codegraph → reg
 task / skill / memory / ask → reg

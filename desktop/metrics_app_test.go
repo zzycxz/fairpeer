@@ -18,7 +18,7 @@ func TestObserveClassifiesEvents(t *testing.T) {
 		{Kind: event.ToolResult, Tool: event.Tool{Name: "bash", Err: "blocked by permission policy"}},
 		{Kind: event.CompactionDone},
 		{Kind: event.Notice, Text: "empty final answer blocked: model returned no visible answer text; retrying"},
-		{Kind: event.TurnDone, Err: errors.New("moma: status 429: rate limited")},
+		{Kind: event.TurnDone, Err: errors.New("test-provider: status 429: rate limited")},
 		{Kind: event.TurnDone},
 	}
 	for _, e := range feed {
@@ -54,7 +54,7 @@ func TestObserveReadsNoMessageText(t *testing.T) {
 
 func TestErrorClass(t *testing.T) {
 	cases := map[string]string{
-		"MoMA: status 400: bad":               "http_400",
+		"test-provider: status 400: bad":      "http_400",
 		"status 401 unauthorized":             "http_401",
 		"status 403 forbidden":                "http_401",
 		"status 429 too many":                 "http_429",

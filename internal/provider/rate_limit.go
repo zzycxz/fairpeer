@@ -74,7 +74,7 @@ func UnwrapProvider(p Provider) Provider {
 // platform counts requests per key, regardless of which model/feature/client
 // issued them). The name parameter is accepted for call-site symmetry with
 // provider.Config but intentionally NOT included, so the main conversation,
-// subagents, Jiutian multimodal tools, RAG extraction/embedding, and RagAsk all
+// subagents, multimodal tools, RAG extraction/embedding, and RagAsk all
 // draw from one bucket when they share an endpoint+key.
 func BudgetKeyForConfig(name, baseURL, apiKey string) string {
 	_ = name // accepted for symmetry; deliberately excluded from the key

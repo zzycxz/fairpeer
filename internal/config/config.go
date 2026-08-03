@@ -489,13 +489,13 @@ type CoworkConfig struct {
 	// Use VLMModel / ScreenshotVLMModel to pick the vision model.
 	VLMBackend string `toml:"vlm_backend"`
 	// VLMModel is the provider model ref for image recognition (screen_perceive).
-	// E.g. "qwen/qwen3.7-plus". Must be vision-capable (provider vision=true).
+	// E.g. "<provider>/<model>". Must be vision-capable (provider vision=true).
 	VLMModel string `toml:"vlm_model"`
 	// IMAP configures inbound email (email_read/search). Empty Host = read tools
 	// return "not configured". Reading uses go-imap + go-message (protocol-level
 	// correct: full SEARCH, RFC 2047 header decoding, multipart MIME).
 	IMAP IMAPConfig `toml:"imap"`
-	// EmailAccounts holds the mailboxes MoMAPeer can talk to. At load time
+	// EmailAccounts holds the mailboxes FairPeer can talk to. At load time
 	// normalizeEmailAccounts folds the legacy single [cowork.smtp]/[cowork.imap]
 	// pair above into EmailAccounts[0] when this slice is empty, so existing
 	// single-account configs keep working unchanged; new configs may use either
@@ -516,19 +516,18 @@ type CoworkConfig struct {
 	ExtractConcurrency int `toml:"extract_concurrency"`
 
 	// ScreenshotEnabled turns on the global-hotkey screenshot-to-VLM feature.
-	// When true, pressing ScreenshotHotkey anywhere (even when MoMAPeer is in
+	// When true, pressing ScreenshotHotkey anywhere (even when FairPeer is in
 	// the background) captures the screen, sends it to ScreenshotVLMModel for
 	// recognition, and replies via IM bot + in-app toast. Default false — the
 	// user opts in via the cowork settings tab.
 	ScreenshotEnabled bool `toml:"screenshot_enabled"`
 	// ScreenshotHotkey is the global hotkey combination (e.g. "Ctrl+Shift+Alt+W").
-	// Detected via GetAsyncKeyState polling so it fires even when MoMAPeer isn't
+	// Detected via GetAsyncKeyState polling so it fires even when FairPeer isn't
 	// focused. Default "Ctrl+Shift+Alt+W".
 	ScreenshotHotkey string `toml:"screenshot_hotkey"`
-	// ScreenshotVLMModel is the model used for screenshot recognition. Default
-	// "qwen/qwen3.5-397b-a17b" (heavy multimodal). Alternative: "qwen/qwen3.6-
-	// 27b" (lightweight). This is the SINGLE place all image-recognition config
-	// lives — set it once in the cowork settings page.
+	// ScreenshotVLMModel is the model used for screenshot recognition.
+	// This is the SINGLE place all image-recognition config lives —
+	// set it once in the cowork settings page.
 	ScreenshotVLMModel string `toml:"screenshot_vlm_model"`
 	// ScreenshotPrompt is the user prompt sent with the screenshot image to the
 	// VLM model. Users can customize this to change the solving behavior (e.g.
@@ -537,7 +536,7 @@ type CoworkConfig struct {
 	ScreenshotPrompt string `toml:"screenshot_prompt"`
 
 	// EStopHotkey is the global EMERGENCY-STOP hotkey for coWork desktop
-	// automation. Pressing it anywhere (even with MoMAPeer minimized) cancels
+	// automation. Pressing it anywhere (even with FairPeer minimized) cancels
 	// the in-flight turn on the active tab — the kill switch for screen_* tools,
 	// whose clicks/typing are irreversible. Registered via Win32 RegisterHotKey
 	// like the screenshot hotkey. Default "Ctrl+Shift+Pause". Set to "off" to
@@ -562,8 +561,8 @@ type CoworkConfig struct {
 	// use the built-in default (18901, distinct from HE's 18900).
 	BrowserUsePort int `toml:"browser_use_port"`
 	// BrowserUseModel is the provider model ref the sidecar uses for the
-	// agentic loop (e.g. "openai/gpt-4o"). Empty = fall back to VLMModel, then
-	// the main agent model. A strong vision-capable model is strongly
+	// agentic loop (e.g. "<provider>/<model>"). Empty = fall back to VLMModel,
+	// then the main agent model. A strong vision-capable model is strongly
 	// recommended — the loop reads screenshots/accessibility trees.
 	BrowserUseModel string `toml:"browser_use_model"`
 	// BrowserUseMaxSteps caps the agentic loop. Default 0 means let the sidecar
@@ -627,7 +626,7 @@ type SMTPConfig struct {
 }
 
 // EmailAccount bundles one mailbox's inbound (IMAP) and outbound (SMTP) settings
-// under a user-chosen name, so MoMAPeer can talk to multiple mailboxes at once
+// under a user-chosen name, so FairPeer can talk to multiple mailboxes at once
 // (e.g. a personal 139 box and a work CMCC box). Tools/scheduler select an
 // account by Name; the one flagged Default (or else the first) is used when the
 // caller omits a name.
@@ -851,7 +850,7 @@ func (c *Config) NetworkProxySpec() netclient.ProxySpec {
 // netclient bypasses the proxy for them without knowing any provider by name.
 //
 // Only for an auto-detected proxy (auto/env): that proxy is typically a
-// GFW-circumvention one not meant for domestic endpoints (e.g. MoMA), so keep
+// GFW-circumvention one not meant for domestic endpoints, so keep
 // them direct. An explicit proxy_mode = "custom" is the user saying "route
 // everything through this" — e.g. a mandatory corporate proxy — so honor it for
 // every provider; a custom-proxy user who wants a host direct uses
@@ -1127,7 +1126,7 @@ type ProviderEntry struct {
 	// via Config.Extra. The anthropic provider reads Thinking="adaptive" to enable
 	// extended thinking and Effort ("low".."max") to tune depth. The
 	// openai-compatible provider forwards Effort as reasoning_effort for
-	// thinking-capable models; MoMA accepts high|max.
+	// thinking-capable models.
 	// Empty = provider default.
 	Thinking string `toml:"thinking"`
 	Effort   string `toml:"effort"`
@@ -1136,10 +1135,9 @@ type ProviderEntry struct {
 	// heuristics; none disables automatic reasoning controls for this provider.
 	ReasoningProtocol string `toml:"reasoning_protocol"`
 	// SupportedEfforts lists the /effort levels this provider/model exposes.
-	// When non-empty, it overrides the built-in defaults derived from
-	// Kind/BaseURL and makes /effort configurable. "auto" is the implicit
-	// prefix — always accepted. DefaultEffort resolves it; omit DefaultEffort
-	// (or set one outside this list) to fall back to SupportedEfforts[0].
+	// When non-empty, it overrides the built-in defaults. All providers
+	// support the unified low/medium/high vocabulary by default. "auto" is
+	// the implicit prefix — always accepted.
 	SupportedEfforts []string `toml:"supported_efforts"`
 	// DefaultEffort is the /effort level used when the user picks "auto" or
 	// has not set Effort. Ignored when SupportedEfforts is empty.
@@ -1574,7 +1572,7 @@ func resolveRoot(root string) string {
 	return filepath.Clean(root)
 }
 
-// normalizeLegacyEffort migrates the retired MoMA effort="off" (the old
+// normalizeLegacyEffort migrates the retired effort="off" (the old
 // /thinking off that disabled thinking) to the provider default, so a config
 // written by an older version keeps loading instead of erroring on a value the
 // provider no longer accepts.

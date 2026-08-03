@@ -41,7 +41,7 @@ func SetClient(c *http.Client) {
 
 // SetBaseDomain overrides the API base URL used by the direct
 // /chat/completions callers. Pass the full base (e.g.
-// "https://jiutian.example.cn/largemodel/moma/api/v3"); an empty value resets
+// "https://api.example.com/v1"); an empty value resets
 // to the default. boot.go derives the value from [cowork] fast_llm_base_domain
 // so a private deployment or proxy can redirect these calls without code
 // changes.

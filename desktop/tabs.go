@@ -1109,7 +1109,7 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 	}
 
 	// boot.Build just (re)initialized the global RPM budget. Rebind it into the
-	// RAG extractor and the Jiutian direct-call path so extraction / multimodal
+	// RAG extractor and the platform direct-call path so extraction / multimodal
 	// tools / embedding share the same per-minute quota as the main conversation.
 	// On first launch this is when globalBudget first becomes available (initRAG
 	// runs before Build); on later tabs it's an idempotent refresh. cfg is this

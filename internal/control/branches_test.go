@@ -173,20 +173,20 @@ func TestFormatBranchTreeMarksCurrent(t *testing.T) {
 func TestFormatBranchTreeUsesCompactVisualRows(t *testing.T) {
 	branches := []agent.BranchInfo{
 		{
-			BranchMeta: agent.BranchMeta{ID: "20260601-033830.928433000-qwen3.6-35b"},
+			BranchMeta: agent.BranchMeta{ID: "20260601-033830.928433000-test-model-a"},
 			Preview:    "你是谁",
 			Turns:      3,
 		},
 		{
 			BranchMeta: agent.BranchMeta{
-				ID:       "20260601-033937.165828000-qwen3.6-35b",
-				ParentID: "20260601-033830.928433000-qwen3.6-35b",
+				ID:       "20260601-033937.165828000-test-model-a",
+				ParentID: "20260601-033830.928433000-test-model-a",
 			},
 			Preview: `{ "code": 0, "msg": "success", "data": { "rows": [] } }`,
 			Turns:   1,
 		},
 	}
-	got := FormatBranchTree(branches, "20260601-033937.165828000-qwen3.6-35b")
+	got := FormatBranchTree(branches, "20260601-033937.165828000-test-model-a")
 	checks := []string{
 		"└─",
 		"0601-033937.165",
@@ -199,7 +199,7 @@ func TestFormatBranchTreeUsesCompactVisualRows(t *testing.T) {
 			t.Fatalf("tree missing %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "20260601-033937.165828000-qwen3.6-35b") {
+	if strings.Contains(got, "20260601-033937.165828000-test-model-a") {
 		t.Fatalf("tree should use compact branch IDs:\n%s", got)
 	}
 	if strings.Contains(got, `"data"`) {
@@ -209,7 +209,7 @@ func TestFormatBranchTreeUsesCompactVisualRows(t *testing.T) {
 
 func TestResolveBranchAcceptsDisplayedShortID(t *testing.T) {
 	branches := []agent.BranchInfo{
-		{BranchMeta: agent.BranchMeta{ID: "20260601-033937.165828000-qwen3.6-35b"}},
+		{BranchMeta: agent.BranchMeta{ID: "20260601-033937.165828000-test-model-a"}},
 	}
 	got, err := resolveBranch(branches, "0601-033937.165")
 	if err != nil {

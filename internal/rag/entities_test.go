@@ -15,7 +15,7 @@ func TestUpsertEntitySimpleMerge(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Same name, different case/whitespace → should merge.
-	if err := s.UpsertEntity("docs", Entity{NameRaw: " 张三 ", Type: "", Description: "技术总监，负责 MoMAPeer"}, src2); err != nil {
+	if err := s.UpsertEntity("docs", Entity{NameRaw: " 张三 ", Type: "", Description: "技术总监，负责 TestProject"}, src2); err != nil {
 		t.Fatal(err)
 	}
 
@@ -30,7 +30,7 @@ func TestUpsertEntitySimpleMerge(t *testing.T) {
 	if len(e.Sources) != 2 {
 		t.Errorf("expected 2 merged sources, got %d", len(e.Sources))
 	}
-	want := "技术总监，负责 MoMAPeer"
+	want := "技术总监，负责 TestProject"
 	if e.Description != want {
 		t.Errorf("description = %q, want longer %q", e.Description, want)
 	}
@@ -61,7 +61,7 @@ func TestUpsertEntityDifferentNamesDontMerge(t *testing.T) {
 func TestUpsertRelationAndLookup(t *testing.T) {
 	s := newTestStore(t)
 	src := Source{Path: "/m.md", Chunk: 1}
-	if err := s.UpsertRelation("docs", Relation{Source: "张三", Target: "MoMAPeer", Type: "负责", Description: "牵头交付"}, src); err != nil {
+	if err := s.UpsertRelation("docs", Relation{Source: "张三", Target: "TestProject", Type: "负责", Description: "牵头交付"}, src); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.UpsertRelation("docs", Relation{Source: "张三", Target: "李四", Type: "汇报给"}, src); err != nil {
@@ -77,22 +77,22 @@ func TestUpsertRelationAndLookup(t *testing.T) {
 		t.Errorf("outgoing relations = %d, want 2", len(rels))
 	}
 
-	// Inverse: MoMAPeer is a target, so includeInverse should find it.
-	rels, err = s.RelationsOf("docs", "MoMAPeer", true)
+	// Inverse: TestProject is a target, so includeInverse should find it.
+	rels, err = s.RelationsOf("docs", "TestProject", true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rels) != 1 {
-		t.Errorf("inverse relations for MoMAPeer = %d, want 1", len(rels))
+		t.Errorf("inverse relations for TestProject = %d, want 1", len(rels))
 	}
 
-	// Without inverse, MoMAPeer (only a target) has zero outgoing.
-	rels, err = s.RelationsOf("docs", "MoMAPeer", false)
+	// Without inverse, TestProject (only a target) has zero outgoing.
+	rels, err = s.RelationsOf("docs", "TestProject", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rels) != 0 {
-		t.Errorf("outgoing-only for MoMAPeer = %d, want 0", len(rels))
+		t.Errorf("outgoing-only for TestProject = %d, want 0", len(rels))
 	}
 }
 

@@ -83,7 +83,7 @@ export interface WireUsage {
   reasoningTokens?: number;
   // Session-cumulative cache tokens — the status bar shows the aggregate
   // hit-rate (Σhit/Σ(hit+miss)), steadier than the single-turn cacheHitTokens.
-  // MoMA currently does not report these fields, so they remain 0.
+  // Some providers currently do not report these fields, so they remain 0.
   sessionCacheHitTokens: number;
   sessionCacheMissTokens: number;
 }
@@ -502,12 +502,6 @@ export interface CapabilitiesView {
   servers: ServerView[];
   skills: SkillView[];
   skillRoots: SkillRootView[];
-  jiutianTools?: JiutianToolView[];
-}
-export interface JiutianToolView {
-  name: string;
-  description: string;
-  enabled: boolean;
 }
 export interface MCPServerInput {
   name: string;
@@ -1012,7 +1006,7 @@ export interface ProviderView {
   apiKeyEnv: string;
   keySet: boolean; // the env var currently resolves to a value
   contextWindow: number;
-  reasoningProtocol: string; // auto|moma|MoMA|openai|none; empty = auto/model registry
+  reasoningProtocol: string; // auto|openai|none; empty = auto/model registry
   supportedEfforts: string[]; // custom /effort levels; empty = use built-in Kind/BaseURL default
   defaultEffort: string; // /effort level when user picks "auto" or unset; "" = supportedEfforts[0]
 }
@@ -1342,7 +1336,6 @@ export interface SettingsView {
   bot: BotSettingsView;
   cowork: CoWorkSettingsView;
   webSearch: WebSearchView;
-  jiutian?: { imageUnderstand: boolean; imageGenerate: boolean; videoUnderstand: boolean };
   desktopLanguage: string; // "" | "en" | "zh"; empty = auto
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;

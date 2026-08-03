@@ -69,22 +69,22 @@ var globalBudget *provider.RequestBudget
 // layer). May be nil when limiting is off.
 func GlobalBudget() *provider.RequestBudget { return globalBudget }
 
-// jiutianBudgetKey returns the budget bucket key for direct Jiutian platform
+// platformBudgetKey returns the budget bucket key for direct API
 // calls (image/video tools, RAG embedding, the VLM fallback). Because
 // BudgetKeyForConfig keys only on baseURL+apiKey (not name), this resolves to
-// the SAME bucket the main conversation uses when it targets the Jiutian
-// endpoint with JIUTIAN_API_KEY — so all such calls share one per-minute quota,
+// the SAME bucket the main conversation uses when it targets the platform
+// endpoint with the platform API key — so all such calls share one per-minute quota,
 // matching how the platform meters a single API key. The placeholder name is
 // passed only to satisfy the call-site signature.
-func jiutianBudgetKey() string {
-	return provider.BudgetKeyForConfig("jiutian-direct", apihelper.BaseURL, os.Getenv("JIUTIAN_API_KEY"))
+func platformBudgetKey() string {
+	return provider.BudgetKeyForConfig("platform-direct", apihelper.BaseURL, os.Getenv("FAIRPEER_API_KEY"))
 }
 
 // ragBudgetKey returns the budget bucket key for RAG extraction (the
-// jiutianExtractor). It resolves the model with the SAME priority order initRAG
+// platform extractor). It resolves the model with the SAME priority order initRAG
 // uses (extract_model → fast_task_model → default_model) so the key matches the
 // endpoint the extractor actually hits. If the model can't be resolved it falls
-// back to the generic Jiutian key so extraction is still gated under one bucket.
+// back to the generic platform key so extraction is still gated under one bucket.
 func ragBudgetKey(cfg *config.Config) string {
 	if cfg != nil {
 		ref := strings.TrimSpace(cfg.Cowork.ExtractModel)
@@ -100,7 +100,7 @@ func ragBudgetKey(cfg *config.Config) string {
 			}
 		}
 	}
-	return jiutianBudgetKey()
+	return platformBudgetKey()
 }
 
 // RebindRAGBudget re-injects the current globalBudget into an extractor, so a
@@ -109,7 +109,7 @@ func ragBudgetKey(cfg *config.Config) string {
 // rag.BudgetSetter (e.g. HE-based extraction), in which case nothing is rebound.
 // Pass the loaded config so the RAG bucket key resolves to the extract model.
 func RebindRAGBudget(extractor any, cfg *config.Config) {
-	// Rebind the extractor if it supports it (jiutianExtractor does; HE-based
+	// Rebind the extractor if it supports it (platform extractor does; HE-based
 	// extraction runs in a subprocess and is not gated here).
 	if extractor == nil {
 		return
@@ -136,7 +136,7 @@ func RagAskBudgetKey(cfg *config.Config) string {
 			}
 		}
 	}
-	return jiutianBudgetKey()
+	return platformBudgetKey()
 }
 
 // Options carries the per-run knobs a frontend chooses; everything else is read
@@ -602,7 +602,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 		// VLM backend for screen_perceive (desktop automation).
 		//
-		// DEFAULT is now the provider multimodal channel (qwen/qwen3.6-27b), NOT
+		// DEFAULT is now the provider multimodal channel, NOT
 		// the legacy multimodal endpoint. The dedicated endpoint
 		// intermittently returns HTTP 500 ("系统异常,请稍后重试") under load, which
 		// blinds the CUA mid-task and sends it into a spiral of improvised
@@ -618,9 +618,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// CallVLM returns a clear error guiding the user to Settings.
 		vlmModel := strings.TrimSpace(cfg.Cowork.VLMModel)
 		if vlmModel == "" {
-			// Fall back to the screenshot-recognition model (defaults to
-			// qwen/qwen3.5-397b-a17b via normalizeCoworkDefaults) so the two
-			// vision uses share one configured model.
+			// Fall back to the screenshot-recognition model so the two
+			// vision uses share one configured model. Both are empty by
+			// default — the user must pick a vision-capable model in Settings.
 			vlmModel = cfg.Cowork.ScreenshotVLMModel
 		}
 		builtin.SetVLMModel(vlmModel)
@@ -644,7 +644,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// optional screencast sink so the panel can mirror the agent's browser.
 		builtin.SetBrowserAutoRuntime(buildBrowserAutoRuntime(cfg, opts))
 		// Hybrid RAG: an embedding model was previously used to inject an embedder
-		// for semantic reranking. The Jiutian-only embedder was removed; pass nil
+		// for semantic reranking. The platform-only embedder was removed; pass nil
 		// so rag_search stays FTS5-only (the default, works offline). A provider
 		// embedder will be reintroduced in a later phase.
 		builtin.SetRAGEmbedder(nil)
@@ -1211,8 +1211,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 
 	// Dream/distill provider: use the fast_task_model when configured so the
-	// background self-evolution runs on a cheaper model (the default is
-	// qwen3.6-35b) instead of the main model — keeping per-run cost negligible.
+	// background self-evolution runs on a cheaper model instead of the main
+	// model — keeping per-run cost negligible.
 	// Falls back to the main provider when fast_task_model is unset, so behaviour
 	// is unchanged for users who haven't configured one. This is the wire-up the
 	// FastTaskModel config field was always meant to have.

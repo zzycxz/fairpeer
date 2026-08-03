@@ -138,7 +138,7 @@ func TestRunMigratesLegacyConfigBeforeConfigOnlyCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(legacyPath, []byte(`
-default_model = "moma"
+default_model = "test-provider"
 
 [[plugins]]
 name = "legacy-cli"
@@ -173,7 +173,7 @@ func TestRunMetadataCommandsDoNotMigrateLegacyConfig(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(legacyPath, []byte(`default_model = "moma"`), 0o644); err != nil {
+	if err := os.WriteFile(legacyPath, []byte(`default_model = "test-provider"`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -211,7 +211,7 @@ func TestConfigAutoPlanLocalCreatesMinimalProjectOverride(t *testing.T) {
 	isolateCLIConfigHome(t)
 
 	userCfg := config.Default()
-	userCfg.DefaultModel = "moma"
+	userCfg.DefaultModel = "test-provider"
 	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("write user config: %v", err)
 	}
@@ -240,8 +240,8 @@ func TestConfigAutoPlanLocalCreatesMinimalProjectOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load merged config: %v", err)
 	}
-	if cfg.DefaultModel != "moma" {
-		t.Fatalf("default_model = %q, want global moma", cfg.DefaultModel)
+	if cfg.DefaultModel != "test-provider" {
+		t.Fatalf("default_model = %q, want global test-provider", cfg.DefaultModel)
 	}
 	if cfg.Agent.AutoPlan != "on" {
 		t.Fatalf("auto_plan = %q, want local on", cfg.Agent.AutoPlan)
@@ -262,21 +262,21 @@ func TestWelcomePromptMissingKeysRequiresConfigSource(t *testing.T) {
 
 func TestProvidersWithMissingKeysOnlyChecksActiveDefaultModel(t *testing.T) {
 	cfg := config.Default()
-	t.Setenv("JIUTIAN_API_KEY", "")
-	t.Setenv("JIUTIAN_API_KEY", "")
+	t.Setenv("FAIRPEER_API_KEY", "")
+	t.Setenv("FAIRPEER_API_KEY", "")
 
 	missing := providersWithMissingKeys(cfg)
 	if len(missing) != 1 {
 		t.Fatalf("missing providers = %+v, want only active default model provider", missing)
 	}
-	if missing[0].APIKeyEnv != "JIUTIAN_API_KEY" {
-		t.Fatalf("missing key env = %q, want JIUTIAN_API_KEY", missing[0].APIKeyEnv)
+	if missing[0].APIKeyEnv != "FAIRPEER_API_KEY" {
+		t.Fatalf("missing key env = %q, want FAIRPEER_API_KEY", missing[0].APIKeyEnv)
 	}
 }
 
 func TestProvidersWithMissingKeysIgnoresUnusedBuiltInPresets(t *testing.T) {
 	cfg := config.Default()
-	t.Setenv("JIUTIAN_API_KEY", "test-key")
+	t.Setenv("FAIRPEER_API_KEY", "test-key")
 
 	if missing := providersWithMissingKeys(cfg); len(missing) != 0 {
 		t.Fatalf("missing providers = %+v, want none when key is set", missing)
@@ -285,29 +285,29 @@ func TestProvidersWithMissingKeysIgnoresUnusedBuiltInPresets(t *testing.T) {
 
 func TestProvidersWithMissingKeysIncludesReferencedSecondaryModels(t *testing.T) {
 	cfg := config.Default()
-	cfg.Agent.PlannerModel = "moma"
-	cfg.Agent.SubagentModel = "moma"
+	cfg.Agent.PlannerModel = "test-provider"
+	cfg.Agent.SubagentModel = "test-provider"
 	cfg.Agent.SubagentModels = map[string]string{
-		"review": "moma/jiutian/jiutian-lan-35b",
+		"review": "test-provider/test-provider/test-model-a",
 	}
-	cfg.Agent.AutoPlanClassifier = "moma/jiutian/jiutian-lan-35b"
-	t.Setenv("JIUTIAN_API_KEY", "test-key")
-	t.Setenv("JIUTIAN_API_KEY", "")
+	cfg.Agent.AutoPlanClassifier = "test-provider/test-provider/test-model-a"
+	t.Setenv("FAIRPEER_API_KEY", "test-key")
+	t.Setenv("FAIRPEER_API_KEY", "")
 
 	missing := providersWithMissingKeys(cfg)
 	if len(missing) != 1 {
-		t.Fatalf("missing providers = %+v, want MoMA once", missing)
+		t.Fatalf("missing providers = %+v, want test-provider once", missing)
 	}
-	if missing[0].APIKeyEnv != "JIUTIAN_API_KEY" {
-		t.Fatalf("missing key env = %q, want JIUTIAN_API_KEY", missing[0].APIKeyEnv)
+	if missing[0].APIKeyEnv != "FAIRPEER_API_KEY" {
+		t.Fatalf("missing key env = %q, want FAIRPEER_API_KEY", missing[0].APIKeyEnv)
 	}
 }
 
 func TestProvidersWithMissingKeysSkipsDisabledAutoPlanClassifier(t *testing.T) {
 	cfg := config.Default()
 	cfg.Agent.AutoPlan = "off"
-	cfg.Agent.AutoPlanClassifier = "moma/qwen/qwen3.6-35b"
-	t.Setenv("JIUTIAN_API_KEY", "")
+	cfg.Agent.AutoPlanClassifier = "test-provider/test-provider/test-model-a"
+	t.Setenv("FAIRPEER_API_KEY", "")
 
 	if missing := providersWithMissingKeys(cfg); len(missing) != 1 {
 		t.Fatalf("missing providers = %+v, want 1 (default model key missing)", missing)
@@ -315,13 +315,13 @@ func TestProvidersWithMissingKeysSkipsDisabledAutoPlanClassifier(t *testing.T) {
 
 	cfg.Agent.AutoPlan = "on"
 	missing := providersWithMissingKeys(cfg)
-	// Both default model and auto-plan classifier use the same provider (moma),
+	// Both default model and auto-plan classifier use the same provider (test-provider),
 	// so only 1 unique missing key entry.
 	if len(missing) != 1 {
 		t.Fatalf("missing providers = %+v, want 1 (same provider for both)", missing)
 	}
-	if missing[0].APIKeyEnv != "JIUTIAN_API_KEY" {
-		t.Fatalf("missing key env = %q, want JIUTIAN_API_KEY", missing[0].APIKeyEnv)
+	if missing[0].APIKeyEnv != "FAIRPEER_API_KEY" {
+		t.Fatalf("missing key env = %q, want FAIRPEER_API_KEY", missing[0].APIKeyEnv)
 	}
 }
 
@@ -390,16 +390,16 @@ func TestSetupOverwritePromptShowsYNDefault(t *testing.T) {
 // TestConfigureKeys verifies that a shared api_key_env (each vendor's SKUs use
 // the same env var) is asked only once, and entered keys become env lines.
 func TestConfigureKeys(t *testing.T) {
-	t.Setenv("JIUTIAN_API_KEY", "")
-	selected := config.Default().Providers // moma
+	t.Setenv("FAIRPEER_API_KEY", "")
+	selected := config.Default().Providers // test-provider
 
 	input := "ji-key\n"
 	env := configureKeys(selected, strings.NewReader(input), io.Discard)
 
 	if len(env) != 1 {
-		t.Fatalf("env = %v (want 1: JIUTIAN asked once)", env)
+		t.Fatalf("env = %v (want 1: FAIRPEER asked once)", env)
 	}
-	if env[0] != "JIUTIAN_API_KEY=ji-key" {
+	if env[0] != "FAIRPEER_API_KEY=ji-key" {
 		t.Errorf("env[0] = %q", env[0])
 	}
 }
@@ -412,45 +412,45 @@ func TestConfigureKeys(t *testing.T) {
 // existing value in envLines so the value is re-pinned into .env on
 // re-runs of setup.
 func TestConfigureKeysReusesExistingEnv(t *testing.T) {
-	t.Setenv("JIUTIAN_API_KEY", "preset-ji-key") // reuse this one
+	t.Setenv("FAIRPEER_API_KEY", "preset-ji-key") // reuse this one
 
 	selected := config.Default().Providers
 	var output bytes.Buffer
 	env := configureKeys(selected, strings.NewReader("\n"), &output)
 
 	if len(env) != 1 {
-		t.Fatalf("env = %v (want 1: JIUTIAN reused)", env)
+		t.Fatalf("env = %v (want 1: FAIRPEER reused)", env)
 	}
-	if env[0] != "JIUTIAN_API_KEY=preset-ji-key" {
+	if env[0] != "FAIRPEER_API_KEY=preset-ji-key" {
 		t.Errorf("env[0] = %q, want re-pinned existing value", env[0])
 	}
-	if !strings.Contains(output.String(), "JIUTIAN_API_KEY") {
-		t.Errorf("expected a 'reusing' confirmation for JIUTIAN_API_KEY, got:\n%s", output.String())
+	if !strings.Contains(output.String(), "FAIRPEER_API_KEY") {
+		t.Errorf("expected a 'reusing' confirmation for FAIRPEER_API_KEY, got:\n%s", output.String())
 	}
 }
 
 func TestConfigureKeysCanResetExistingEnv(t *testing.T) {
-	t.Setenv("JIUTIAN_API_KEY", "stale-ji-key") // reset this one
+	t.Setenv("FAIRPEER_API_KEY", "stale-ji-key") // reset this one
 
 	selected := config.Default().Providers
 	var output bytes.Buffer
 	env := configureKeys(selected, strings.NewReader("y\nfresh-ji-key\n"), &output)
 
 	if len(env) != 1 {
-		t.Fatalf("env = %v (want 1: JIUTIAN reset)", env)
+		t.Fatalf("env = %v (want 1: FAIRPEER reset)", env)
 	}
-	if env[0] != "JIUTIAN_API_KEY=fresh-ji-key" {
+	if env[0] != "FAIRPEER_API_KEY=fresh-ji-key" {
 		t.Errorf("env[0] = %q, want freshly entered value", env[0])
 	}
-	if !strings.Contains(output.String(), "[y/N]:") || !strings.Contains(output.String(), "JIUTIAN_API_KEY") {
-		t.Errorf("expected a reset confirmation for JIUTIAN_API_KEY, got:\n%s", output.String())
+	if !strings.Contains(output.String(), "[y/N]:") || !strings.Contains(output.String(), "FAIRPEER_API_KEY") {
+		t.Errorf("expected a reset confirmation for FAIRPEER_API_KEY, got:\n%s", output.String())
 	}
 }
 
 // TestConfigureKeysAllSetDefaultsToReusingInput ensures that when every env var
 // is already populated, pressing Enter at each confirmation keeps the values.
 func TestConfigureKeysAllSetDefaultsToReusingInput(t *testing.T) {
-	t.Setenv("JIUTIAN_API_KEY", "ji")
+	t.Setenv("FAIRPEER_API_KEY", "ji")
 
 	selected := config.Default().Providers
 	env := configureKeys(selected, strings.NewReader("\n"), io.Discard)
@@ -464,21 +464,21 @@ func TestConfigureKeysAllSetDefaultsToReusingInput(t *testing.T) {
 // var. loadDotEnv is first-wins, so without dedupe the stale key kept
 // authenticating, and the user saw a 401 with no obvious cause.
 func TestAppendEnvUpsertReplacesExistingKey(t *testing.T) {
-	t.Setenv("JIUTIAN_API_KEY", "") // also covers the os.Setenv pin path
+	t.Setenv("FAIRPEER_API_KEY", "") // also covers the os.Setenv pin path
 	p := filepath.Join(t.TempDir(), ".env")
-	os.WriteFile(p, []byte("# initial\nJIUTIAN_API_KEY=stale\nJIUTIAN_API_KEY=keepme\n"), 0o600)
+	os.WriteFile(p, []byte("# initial\nFAIRPEER_API_KEY=stale\nFAIRPEER_API_KEY=keepme\n"), 0o600)
 
-	if err := appendEnv(p, []string{"JIUTIAN_API_KEY=fresh"}); err != nil {
+	if err := appendEnv(p, []string{"FAIRPEER_API_KEY=fresh"}); err != nil {
 		t.Fatalf("appendEnv: %v", err)
 	}
 	got, _ := os.ReadFile(p)
-	// appendEnv deduplicates: all old JIUTIAN_API_KEY lines are replaced with the new one.
-	want := "# initial\nJIUTIAN_API_KEY=fresh\n"
+	// appendEnv deduplicates: all old FAIRPEER_API_KEY lines are replaced with the new one.
+	want := "# initial\nFAIRPEER_API_KEY=fresh\n"
 	if string(got) != want {
 		t.Errorf("after upsert =\n%s\nwant =\n%s", got, want)
 	}
-	if got := os.Getenv("JIUTIAN_API_KEY"); got != "fresh" {
-		t.Errorf("process env JIUTIAN_API_KEY = %q, want %q (upsert should pin in-process)", got, "fresh")
+	if got := os.Getenv("FAIRPEER_API_KEY"); got != "fresh" {
+		t.Errorf("process env FAIRPEER_API_KEY = %q, want %q (upsert should pin in-process)", got, "fresh")
 	}
 }
 
@@ -498,18 +498,18 @@ func TestAppendEnvUpsertHandlesExportPrefix(t *testing.T) {
 }
 
 // TestGroupByFamily verifies the wizard groups the default preset into
-// one family: moma.
+// one family: test-provider.
 func TestGroupByFamily(t *testing.T) {
 	order, members, info := groupByFamily(config.Default().Providers)
 
 	if len(order) != 1 {
 		t.Fatalf("family count = %d, want 1: %v", len(order), order)
 	}
-	if _, ok := members["moma"]; !ok {
-		t.Errorf("moma family missing from members")
+	if _, ok := members["test-provider"]; !ok {
+		t.Errorf("test-provider family missing from members")
 	}
-	if info["moma"].key != "moma" {
-		t.Errorf("moma family key = %q, want moma", info["moma"].key)
+	if info["test-provider"].key != "test-provider" {
+		t.Errorf("test-provider family key = %q, want test-provider", info["test-provider"].key)
 	}
 }
 
@@ -631,12 +631,12 @@ func TestFetchModelListCompatWalksCandidates(t *testing.T) {
 // users with only flash when the live /models probe failed.
 func TestFamilyStaticModels(t *testing.T) {
 	providers := []config.ProviderEntry{
-		{Name: "moma", Model: "qwen3.6-35b"},
-		{Name: "moma", Model: "qwen3.6-27b"},
-		{Name: "moma", Model: "jiutian-lan.5"},
+		{Name: "test-provider", Model: "test-model-a"},
+		{Name: "test-provider", Model: "test-model-b"},
+		{Name: "test-provider", Model: "test-model-5"},
 	}
 	got := familyStaticModels(providers, []int{0, 1})
-	want := []string{"qwen3.6-35b", "qwen3.6-27b"}
+	want := []string{"test-model-a", "test-model-b"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
@@ -656,13 +656,13 @@ func TestFamilyStaticModelsDedupes(t *testing.T) {
 // TestBuildFamilyEntriesGroupsModels proves models under the same provider name
 // land in one entry with all selected models.
 func TestBuildFamilyEntriesGroupsModels(t *testing.T) {
-	moma := config.ProviderEntry{Name: "moma", BaseURL: "https://api.jiutian.10086.cn", Model: "qwen3.6-35b", Price: &provider.Pricing{Input: 1, Output: 2}}
-	got := buildFamilyEntries(moma, []config.ProviderEntry{moma}, []string{"qwen3.6-35b", "qwen3.6-27b"})
+	testEntry := config.ProviderEntry{Name: "test-provider", BaseURL: "https://api.example.com", Model: "test-model-a", Price: &provider.Pricing{Input: 1, Output: 2}}
+	got := buildFamilyEntries(testEntry, []config.ProviderEntry{testEntry}, []string{"test-model-a", "test-model-b"})
 	if len(got) != 1 {
 		t.Fatalf("got %d entries, want 1", len(got))
 	}
-	if got[0].Name != "moma" {
-		t.Errorf("entry name = %q, want moma", got[0].Name)
+	if got[0].Name != "test-provider" {
+		t.Errorf("entry name = %q, want test-provider", got[0].Name)
 	}
 	if len(got[0].Models) != 2 {
 		t.Errorf("models = %v, want 2", got[0].Models)
@@ -672,12 +672,12 @@ func TestBuildFamilyEntriesGroupsModels(t *testing.T) {
 // TestBuildFamilyEntriesUnknownModelUsesProbe puts a live-only SKU (no matching
 // preset) under the probe entry rather than dropping it.
 func TestBuildFamilyEntriesUnknownModelUsesProbe(t *testing.T) {
-	flash := config.ProviderEntry{Name: "moma", Model: "qwen3.6-35b", Price: &provider.Pricing{Input: 1}}
-	got := buildFamilyEntries(flash, []config.ProviderEntry{flash}, []string{"qwen3.6-35b", "MoMA-v9-experimental"})
-	if len(got) != 1 || got[0].Name != "moma" {
-		t.Fatalf("got %+v, want one moma entry", got)
+	flash := config.ProviderEntry{Name: "test-provider", Model: "test-model-a", Price: &provider.Pricing{Input: 1}}
+	got := buildFamilyEntries(flash, []config.ProviderEntry{flash}, []string{"test-model-a", "test-provider-v9-experimental"})
+	if len(got) != 1 || got[0].Name != "test-provider" {
+		t.Fatalf("got %+v, want one test-provider entry", got)
 	}
-	if !reflect.DeepEqual(got[0].Models, []string{"qwen3.6-35b", "MoMA-v9-experimental"}) {
+	if !reflect.DeepEqual(got[0].Models, []string{"test-model-a", "test-provider-v9-experimental"}) {
 		t.Errorf("Models = %v, want both under the probe entry", got[0].Models)
 	}
 }
@@ -692,33 +692,33 @@ func TestBuildFamilyEntriesUnknownModelUsesProbe(t *testing.T) {
 func TestBuildFamilyEntry(t *testing.T) {
 	t.Run("default reset when not in selection", func(t *testing.T) {
 		probe := config.ProviderEntry{
-			Name: "MoMA", Kind: "openai",
-			BaseURL: "https://api.jiutian.10086.cn",
-			Models:  []string{"qwen3.6-35b", "qwen3.6-27b"},
-			Default: "qwen3.6-27b",
+			Name: "test-provider", Kind: "openai",
+			BaseURL: "https://api.example.com",
+			Models:  []string{"test-model-a", "test-model-b"},
+			Default: "test-model-b",
 		}
-		got := buildFamilyEntry(probe, []string{"qwen3.6-35b"})
-		if got.Model != "qwen3.6-35b" {
-			t.Errorf("Model = %q, want qwen3.6-35b", got.Model)
+		got := buildFamilyEntry(probe, []string{"test-model-a"})
+		if got.Model != "test-model-a" {
+			t.Errorf("Model = %q, want test-model-a", got.Model)
 		}
-		if got.Default != "qwen3.6-35b" {
+		if got.Default != "test-model-a" {
 			t.Errorf("Default = %q, want reset to first selected", got.Default)
 		}
-		if !reflect.DeepEqual(got.Models, []string{"qwen3.6-35b"}) {
+		if !reflect.DeepEqual(got.Models, []string{"test-model-a"}) {
 			t.Errorf("Models = %v", got.Models)
 		}
-		if got.BaseURL != "https://api.jiutian.10086.cn" {
+		if got.BaseURL != "https://api.example.com" {
 			t.Errorf("BaseURL lost: %q", got.BaseURL)
 		}
 	})
 
 	t.Run("default preserved when in selection", func(t *testing.T) {
 		probe := config.ProviderEntry{
-			Name: "MoMA", Default: "qwen3.6-27b",
-			BaseURL: "https://api.jiutian.10086.cn",
+			Name: "test-provider", Default: "test-model-b",
+			BaseURL: "https://api.example.com",
 		}
-		got := buildFamilyEntry(probe, []string{"qwen3.6-35b", "qwen3.6-27b"})
-		if got.Default != "qwen3.6-27b" {
+		got := buildFamilyEntry(probe, []string{"test-model-a", "test-model-b"})
+		if got.Default != "test-model-b" {
 			t.Errorf("Default = %q, want preserved", got.Default)
 		}
 	})
@@ -785,10 +785,10 @@ func TestProviderSlug(t *testing.T) {
 // still gets them back in the dropped slice to surface a warning.
 func TestFilterStaleCustomEntries(t *testing.T) {
 	in := []config.ProviderEntry{
-		{Name: "MoMA", Kind: "openai", BaseURL: "https://api.jiutian.10086.cn"},
+		{Name: "test-provider", Kind: "openai", BaseURL: "https://api.example.com"},
 		{Name: "custom", Kind: "openai", BaseURL: "https://old.example/v1"},                // stale
 		{Name: "anthropic", Kind: "anthropic", BaseURL: "https://old.example/v1/messages"}, // stale
-		{Name: "MoMA-tp", Kind: "openai", BaseURL: "https://token-plan-cn.jiutian.10086.cn/v1"},
+		{Name: "test-provider-tp", Kind: "openai", BaseURL: "https://token-plan.example.com/v1"},
 	}
 	kept, dropped := filterStaleCustomEntries(in)
 	if len(kept) != 2 {
@@ -827,22 +827,22 @@ func TestFilterStaleCustomEntries(t *testing.T) {
 	})
 }
 
-func TestWithBuiltinFamiliesAddsMissingMoMA(t *testing.T) {
-	// The user's case: a fairpeer.toml that defines only moma providers.
+func TestWithBuiltinFamiliesAddsMissingTestProvider(t *testing.T) {
+	// The user's case: a fairpeer.toml that defines only test-provider providers.
 	cfg := []config.ProviderEntry{
-		{Name: "moma", Kind: "openai", BaseURL: "https://api.jiutian.10086.cn"},
+		{Name: "test-provider", Kind: "openai", BaseURL: "https://api.example.com"},
 	}
 	order, _, info := groupByFamily(withBuiltinFamilies(cfg))
 	seen := map[string]bool{}
 	for _, k := range order {
 		seen[info[k].name] = true
 	}
-	if !seen["MoMA (九天)"] {
-		t.Fatalf("wizard families = %v, want MoMA (九天)", order)
+	if !seen["test-provider (九天)"] {
+		t.Fatalf("wizard families = %v, want test-provider (九天)", order)
 	}
-	// A user's customized moma must not be duplicated.
-	if n := len(groupByFamilyKeys(withBuiltinFamilies(cfg), "moma")); n != 1 {
-		t.Fatalf("moma members = %d, want the user's 1 (no injected duplicate)", n)
+	// A user.s customized provider must not be duplicated.
+	if n := len(groupByFamilyKeys(withBuiltinFamilies(cfg), "test-provider")); n != 1 {
+		t.Fatalf("test-provider members = %d, want the user's 1 (no injected duplicate)", n)
 	}
 }
 
@@ -883,7 +883,7 @@ func captureStderr(t *testing.T, fn func()) string {
 }
 
 func TestProvidersWithMissingKeysOnlyReferenced(t *testing.T) {
-	t.Setenv("JIUTIAN_API_KEY", "")
+	t.Setenv("FAIRPEER_API_KEY", "")
 	cfg := config.Default()
 
 	got := providersWithMissingKeys(cfg)
@@ -891,19 +891,19 @@ func TestProvidersWithMissingKeysOnlyReferenced(t *testing.T) {
 	for _, p := range got {
 		envs[p.APIKeyEnv] = true
 	}
-	if !envs["JIUTIAN_API_KEY"] {
+	if !envs["FAIRPEER_API_KEY"] {
 		t.Errorf("the default model's missing key must be prompted, got %v", got)
 	}
 }
 
 func TestProvidersWithMissingKeysIncludesPlannerModel(t *testing.T) {
-	t.Setenv("JIUTIAN_API_KEY", "set")
-	t.Setenv("JIUTIAN_API_KEY", "")
+	t.Setenv("FAIRPEER_API_KEY", "set")
+	t.Setenv("FAIRPEER_API_KEY", "")
 	cfg := config.Default()
-	cfg.Agent.PlannerModel = "moma"
+	cfg.Agent.PlannerModel = "test-provider"
 
 	got := providersWithMissingKeys(cfg)
-	if len(got) != 1 || got[0].APIKeyEnv != "JIUTIAN_API_KEY" {
+	if len(got) != 1 || got[0].APIKeyEnv != "FAIRPEER_API_KEY" {
 		t.Errorf("planner model's missing key must be prompted, got %+v", got)
 	}
 }

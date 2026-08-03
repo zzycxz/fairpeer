@@ -417,11 +417,11 @@ func TestNewProviderAppliesModelReasoningProtocol(t *testing.T) {
 	defer srv.Close()
 
 	p, err := NewProvider(&config.ProviderEntry{
-		Name:              "momaxy",
+		Name:              "test-provider",
 		Kind:              "openai",
 		BaseURL:           srv.URL,
-		Model:             "jiutian/jiutian-lan-thinking",
-		ReasoningProtocol: "moma",
+		Model:             "test-provider/test-model-thinking",
+		ReasoningProtocol: "test-provider",
 	})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
@@ -438,10 +438,10 @@ func TestNewProviderAppliesModelReasoningProtocol(t *testing.T) {
 		}
 	}
 	if got := gotReq["thinking_effort"]; got != "high" {
-		t.Fatalf("thinking_effort = %#v, want high from MoMA model capability", got)
+		t.Fatalf("thinking_effort = %#v, want high from test-provider model capability", got)
 	}
 	if got := gotReq["reasoning_effort"]; got != nil {
-		t.Fatalf("reasoning_effort should be absent for MoMA, got %#v", got)
+		t.Fatalf("reasoning_effort should be absent for test-provider, got %#v", got)
 	}
 	thinking, ok := gotReq["thinking"].(map[string]any)
 	if !ok || thinking["type"] != "enabled" {
@@ -836,7 +836,7 @@ func stripThinkingAddon(s string) string {
 	// ForModel now only returns a FamilyAddon (the ThinkingAddon injection was
 	// removed when thinking became a per-provider declaration). Use Replace
 	// instead of TrimSuffix because addon order/whitespace varies.
-	for _, family := range []string{"qwen", "glm", "deepseek", "kimi", "jiutian", "gpt"} {
+	for _, family := range []string{"qwen", "glm", "deepseek", "kimi", "test-provider", "gpt"} {
 		if addon := instruction.FamilyAddon(family); addon != "" {
 			s = strings.TrimSpace(strings.Replace(s, "\n\n"+addon, "", 1))
 			s = strings.TrimSpace(strings.Replace(s, addon, "", 1))
@@ -1009,7 +1009,7 @@ func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
 	t.Setenv("USERPROFILE", home)                               // os.UserHomeDir on Windows
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config")) // os.UserConfigDir on Linux
 	t.Setenv("AppData", filepath.Join(home, "AppData"))         // os.UserConfigDir on Windows
-	t.Setenv("JIUTIAN_API_KEY", "")                             // track for cleanup; migration os.Setenv's it live
+	t.Setenv("FAIRPEER_API_KEY", "")                            // track for cleanup; migration os.Setenv's it live
 
 	proj := robustTempDir(t)
 	t.Chdir(proj)
@@ -1054,11 +1054,11 @@ func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
 		t.Errorf("migrated config missing plugin/lang:\n%s", data)
 	}
 
-	if got := os.Getenv("JIUTIAN_API_KEY"); got != "sk-e2e" {
-		t.Errorf("JIUTIAN_API_KEY not pinned into env after migration: %q", got)
+	if got := os.Getenv("FAIRPEER_API_KEY"); got != "sk-e2e" {
+		t.Errorf("FAIRPEER_API_KEY not pinned into env after migration: %q", got)
 	}
 
-	if data, err := os.ReadFile(config.UserCredentialsPath()); err != nil || !strings.Contains(string(data), "JIUTIAN_API_KEY=sk-e2e") {
+	if data, err := os.ReadFile(config.UserCredentialsPath()); err != nil || !strings.Contains(string(data), "FAIRPEER_API_KEY=sk-e2e") {
 		t.Errorf("credentials store missing migrated key: %q (err %v)", data, err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".env")); !os.IsNotExist(err) {

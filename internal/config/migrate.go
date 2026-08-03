@@ -104,9 +104,9 @@ func MigrateLegacyIfNeeded() (*MigrationResult, error) {
 
 	var envLines []string
 	if key := strings.TrimSpace(legacy.APIKey); key != "" {
-		envLines = append(envLines, "JIUTIAN_API_KEY="+key)
+		envLines = append(envLines, "FAIRPEER_API_KEY="+key)
 		res.KeyToEnv = true
-		if base := strings.TrimSpace(legacy.BaseURL); base != "" && !strings.Contains(base, "10086.cn") {
+		if base := strings.TrimSpace(legacy.BaseURL); base != "" {
 			res.Warnings = append(res.Warnings, "your previous base_url was "+base+
 				" — it was carried over as a user provider; verify the model list if this endpoint is not OpenAI-compatible")
 		}
@@ -161,12 +161,9 @@ func legacyTOMLPaths(dest, home string) []string {
 	return paths
 }
 
-// migrateLegacyBaseURL carries a v0.x baseUrl forward as a user provider entry.
-// Earlier versions pointed a preset MoMA provider at this URL; FairPeer is now
-// provider-agnostic and ships no presets, so we materialize an explicit user
-// entry named "migrated" instead so an upgrading user does not lose their
-// endpoint. The Jiutian MoMA canonical URL is still recognized so legacy
-// installs on the default endpoint land on a sensibly-named "jiutian" entry.
+// migrateLegacyBaseURL carries a legacy baseUrl forward as a user provider entry.
+// FairPeer is provider-agnostic and ships no presets, so we materialize an explicit
+// user entry named "migrated" so an upgrading user does not lose their endpoint.
 func migrateLegacyBaseURL(cfg *Config, baseURL string) {
 	baseURL = strings.TrimSpace(baseURL)
 	if cfg == nil || baseURL == "" {
@@ -177,15 +174,11 @@ func migrateLegacyBaseURL(cfg *Config, baseURL string) {
 			return
 		}
 	}
-	name := "migrated"
-	if strings.Contains(baseURL, "10086.cn") {
-		name = "jiutian"
-	}
 	cfg.Providers = append(cfg.Providers, ProviderEntry{
-		Name:      name,
+		Name:      "migrated",
 		Kind:      "openai",
 		BaseURL:   baseURL,
-		APIKeyEnv: "JIUTIAN_API_KEY",
+		APIKeyEnv: "FAIRPEER_API_KEY",
 	})
 }
 

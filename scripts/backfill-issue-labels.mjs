@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Backfill area/platform/severity labels on existing open issues via the MoMA
+// Backfill area/platform/severity labels on existing open issues via an LLM
 // API — the one-off companion to .github/workflows/issue-auto-label.yml (which
 // only fires on new issues). Keep the label sets and prompt in sync with that
 // workflow. GitHub access uses the local `gh` CLI (must be authenticated).
@@ -31,7 +31,7 @@ const SEVERITY = ['crash', 'data-loss', 'security'];
 const ALLOWED = new Set([...AREA, ...PLATFORM, ...SEVERITY]);
 
 const SYSTEM = [
-  'You categorize GitHub issues for momapeer, a Go-based AI coding agent with a Wails desktop app and a terminal UI.',
+  'You categorize GitHub issues for fairpeer, a Go-based AI coding agent with a Wails desktop app and a terminal UI.',
   'Pick labels ONLY from these fixed sets. Never invent labels.',
   'area (0-2, the affected subsystem):',
   '  agent: core agent loop / tool-calling / reasoning',
@@ -70,7 +70,7 @@ async function classify(title, body) {
       ],
     }),
   });
-  if (!res.ok) throw new Error(`moma API ${res.status}: ${await res.text()}`);
+  if (!res.ok) throw new Error(`LLM API ${res.status}: ${await res.text()}`);
   const data = await res.json();
   const parsed = JSON.parse(data.choices[0].message.content);
   return [...(parsed.area || []), ...(parsed.platform || []), ...(parsed.severity || [])].filter((l) => ALLOWED.has(l));

@@ -31,18 +31,18 @@ func (f *liveFactory) NewSession(_ context.Context, p SessionParams) (*control.C
 	executor := agent.New(f.prov, tool.NewRegistry(),
 		agent.NewSession("You are a terse assistant. Answer in as few words as possible."),
 		agent.Options{MaxSteps: 3}, p.Sink)
-	return control.New(control.Options{Runner: executor, Executor: executor, Sink: p.Sink, Label: "MoMA"}), nil
+	return control.New(control.Options{Runner: executor, Executor: executor, Sink: p.Sink, Label: "test-provider"}), nil
 }
 
-func TestLiveMoMAPrompt(t *testing.T) {
-	key := os.Getenv("JIUTIAN_API_KEY")
+func TestLiveTestProviderPrompt(t *testing.T) {
+	key := os.Getenv("FAIRPEER_API_KEY")
 	if key == "" {
-		t.Skip("JIUTIAN_API_KEY not set")
+		t.Skip("FAIRPEER_API_KEY not set")
 	}
 	prov, err := provider.New("openai", provider.Config{
-		Name:    "MoMA",
-		BaseURL: "https://api.jiutian.10086.cn",
-		Model:   "qwen3.6-35b",
+		Name:    "test-provider",
+		BaseURL: "https://api.example.com",
+		Model:   "test-model-a",
 		APIKey:  key,
 	})
 	if err != nil {

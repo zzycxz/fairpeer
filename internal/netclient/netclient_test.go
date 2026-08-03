@@ -29,7 +29,7 @@ func TestCustomProxyBuildsSocks5URL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("proxyFunc: %v", err)
 	}
-	got, err := pf(&http.Request{URL: mustURL("https://api.jiutian.10086.cn/chat/completions")})
+	got, err := pf(&http.Request{URL: mustURL("https://api.example.com/chat/completions")})
 	if err != nil {
 		t.Fatalf("proxy lookup: %v", err)
 	}
@@ -45,12 +45,12 @@ func TestCustomProxyHonorsNoProxy(t *testing.T) {
 	pf, err := proxyFunc(ProxySpec{
 		Mode:    "custom",
 		URL:     "http://proxy.example.com:8080",
-		NoProxy: "api.jiutian.10086.cn",
+		NoProxy: "api.example.com",
 	})
 	if err != nil {
 		t.Fatalf("proxyFunc: %v", err)
 	}
-	got, err := pf(&http.Request{URL: mustURL("https://api.jiutian.10086.cn/chat/completions")})
+	got, err := pf(&http.Request{URL: mustURL("https://api.example.com/chat/completions")})
 	if err != nil {
 		t.Fatalf("proxy lookup: %v", err)
 	}
@@ -62,12 +62,12 @@ func TestCustomProxyHonorsNoProxy(t *testing.T) {
 func TestDirectHostsBypassProxy(t *testing.T) {
 	t.Setenv("HTTPS_PROXY", "http://proxy.example.com:8080")
 	t.Setenv("NO_PROXY", "")
-	pf, err := proxyFunc(ProxySpec{Mode: "auto", DirectHosts: []string{"token-plan-cn.jiutian.10086.cn"}})
+	pf, err := proxyFunc(ProxySpec{Mode: "auto", DirectHosts: []string{"token-plan.example.com"}})
 	if err != nil {
 		t.Fatalf("proxyFunc: %v", err)
 	}
 
-	got, err := pf(&http.Request{URL: mustURL("https://token-plan-cn.jiutian.10086.cn/v1/chat")})
+	got, err := pf(&http.Request{URL: mustURL("https://token-plan.example.com/v1/chat")})
 	if err != nil {
 		t.Fatalf("direct-host lookup: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestNoDirectHostsKeepsEveryoneProxied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("proxyFunc: %v", err)
 	}
-	got, err := pf(&http.Request{URL: mustURL("https://token-plan-cn.jiutian.10086.cn/v1/chat")})
+	got, err := pf(&http.Request{URL: mustURL("https://token-plan.example.com/v1/chat")})
 	if err != nil {
 		t.Fatalf("lookup: %v", err)
 	}

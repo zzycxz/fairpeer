@@ -17,8 +17,8 @@ func TestIsLikelyChatModel_RejectsEmptyInput(t *testing.T) {
 
 func TestIsLikelyChatModel_AllowsKnownChatModels(t *testing.T) {
 	for _, model := range []string{
-		"jiutian-lan.5", "jiutian-lan-35b", "jiutian-lan-pro", "jiutian-lan-omni",
-		"qwen3.6-35b", "qwen3.6-27b",
+		"test-model-5", "test-model-a", "test-model-pro", "test-model-omni",
+		"test-model-a", "test-model-b",
 		"gpt-4o", "gpt-4o-mini",
 		"claude-3.5-sonnet", "qwen-max",
 	} {
@@ -31,8 +31,8 @@ func TestIsLikelyChatModel_AllowsKnownChatModels(t *testing.T) {
 func TestIsLikelyChatModel_FiltersAudioModels(t *testing.T) {
 	// Real-world samples from #3483.
 	for _, model := range []string{
-		"jiutian-lan.5-asr", "jiutian-lan.5-tts", "jiutian-lan.5-tts-voice",
-		"jiutian-lan-tts-voiceclone", "jiutian-lan-tts-voicedesign",
+		"test-model-5-asr", "test-model-5-tts", "test-model-5-tts-voice",
+		"test-model-tts-voiceclone", "test-model-tts-voicedesign",
 		"tts-1",
 	} {
 		if IsLikelyChatModel(model) {
@@ -71,14 +71,14 @@ func TestIsLikelyChatModel_DoesNotFilterVoiceAlone(t *testing.T) {
 func TestModelList_ReturnsRawList(t *testing.T) {
 	p := ProviderEntry{
 		Models: []string{
-			"jiutian-lan.5", "jiutian-lan-35b",
-			"jiutian-lan.5-asr", "jiutian-lan.5-tts", "jiutian-lan.5-tts-voice",
+			"test-model-5", "test-model-a",
+			"test-model-5-asr", "test-model-5-tts", "test-model-5-tts-voice",
 		},
 	}
 	got := p.ModelList()
 	want := []string{
-		"jiutian-lan.5", "jiutian-lan-35b",
-		"jiutian-lan.5-asr", "jiutian-lan.5-tts", "jiutian-lan.5-tts-voice",
+		"test-model-5", "test-model-a",
+		"test-model-5-asr", "test-model-5-tts", "test-model-5-tts-voice",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ModelList() = %v, want %v", got, want)
@@ -88,13 +88,13 @@ func TestModelList_ReturnsRawList(t *testing.T) {
 func TestChatModelList_FiltersNonChatModels(t *testing.T) {
 	p := ProviderEntry{
 		Models: []string{
-			"jiutian-lan.5", "jiutian-lan-35b",
-			"jiutian-lan.5-asr", "jiutian-lan.5-tts", "jiutian-lan.5-tts-voice",
-			"jiutian-lan-tts-voiceclone", "jiutian-lan-tts-voicedesign",
+			"test-model-5", "test-model-a",
+			"test-model-5-asr", "test-model-5-tts", "test-model-5-tts-voice",
+			"test-model-tts-voiceclone", "test-model-tts-voicedesign",
 		},
 	}
 	got := p.ChatModelList()
-	want := []string{"jiutian-lan.5", "jiutian-lan-35b"}
+	want := []string{"test-model-5", "test-model-a"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ChatModelList() = %v, want %v", got, want)
 	}
@@ -102,7 +102,7 @@ func TestChatModelList_FiltersNonChatModels(t *testing.T) {
 
 func TestChatModelList_AllNonChat(t *testing.T) {
 	p := ProviderEntry{
-		Models: []string{"jiutian-lan.5-tts", "jiutian-lan.5-asr"},
+		Models: []string{"test-model-5-tts", "test-model-5-asr"},
 	}
 	got := p.ChatModelList()
 	if len(got) != 0 {

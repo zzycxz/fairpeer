@@ -897,7 +897,7 @@ export default function App() {
   }, [closeTransientOverlays]);
 
   // Screenshot hotkey recognition results — surface as a toast so the user sees
-  // the VLM output even when MoMAPeer isn't focused.
+  // the VLM output even when FairPeer isn't focused.
   useEffect(() => {
     if (typeof window === "undefined" || !window.runtime) return;
     return window.runtime.EventsOn("screenshot:notice", (...data: unknown[]) => {
@@ -909,7 +909,7 @@ export default function App() {
   // Emergency-stop hotkey confirmation — the global Ctrl+Shift+Pause fired and
   // cancelled the in-flight turn. Surface a prominent (error-level = red) toast
   // so the user gets immediate visible confirmation the stop landed, even when
-  // MoMAPeer is in the background (the event is emitted from the backend).
+  // FairPeer is in the background (the event is emitted from the backend).
   useEffect(() => {
     if (typeof window === "undefined" || !window.runtime) return;
     return window.runtime.EventsOn("estop:fired", (...data: unknown[]) => {

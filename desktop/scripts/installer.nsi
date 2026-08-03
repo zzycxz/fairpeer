@@ -1,9 +1,9 @@
-; MoMAPeer Desktop Installer
+; FairPeer Desktop Installer
 ; NSIS script for Windows installation
 
-!define APP_NAME "MoMAPeer"
-!define APP_VERSION "0.5.6"
-!define APP_PUBLISHER "zzycxz"
+!define APP_NAME "fairpeer"
+!define APP_VERSION "0.1.0"
+!define APP_PUBLISHER "FairPeer Contributors"
 !define APP_URL "https://github.com/zzycxz/fairpeer"
 !define APP_EXE "fairpeer.exe"
 

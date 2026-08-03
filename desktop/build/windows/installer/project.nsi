@@ -75,9 +75,9 @@ ManifestDPIAware true
 
 Name "${INFO_PRODUCTNAME}"
 OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the installer's file.
-!define MOMAPEER_DEFAULT_INSTALLDIR "$LOCALAPPDATA\Programs\${INFO_PRODUCTNAME}"
+!define FAIRPEER_DEFAULT_INSTALLDIR "$LOCALAPPDATA\Programs\${INFO_PRODUCTNAME}"
 InstallDirRegKey HKCU "${UNINST_KEY}" "InstallLocation" # Reuse the previous install path on update; .onInit falls back to the default on first install.
-InstallDir "${MOMAPEER_DEFAULT_INSTALLDIR}" # Per-user install location (no admin rights required).
+InstallDir "${FAIRPEER_DEFAULT_INSTALLDIR}" # Per-user install location (no admin rights required).
 ShowInstDetails show # This will always show the installation details.
 
 ####
@@ -126,7 +126,7 @@ Function .onInit
    StrCmp $INSTDIR "" fallback done
 
 fallback:
-   StrCpy $INSTDIR "${MOMAPEER_DEFAULT_INSTALLDIR}"
+   StrCpy $INSTDIR "${FAIRPEER_DEFAULT_INSTALLDIR}"
 done:
 FunctionEnd
 

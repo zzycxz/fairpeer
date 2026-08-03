@@ -15,10 +15,10 @@ func TestParseExtractJSONCanonical(t *testing.T) {
 	in := []byte(`{
 		"entities": [
 			{"name": "张三", "type": "person", "description": "技术总监"},
-			{"name": "MoMAPeer", "type": "project", "description": "办公助手"}
+			{"name": "TestProject", "type": "project", "description": "办公助手"}
 		],
 		"relations": [
-			{"source": "张三", "target": "MoMAPeer", "type": "负责", "description": "牵头开发"}
+			{"source": "张三", "target": "TestProject", "type": "负责", "description": "牵头开发"}
 		]
 	}`)
 	res, err := ParseExtractJSON(in)
@@ -31,7 +31,7 @@ func TestParseExtractJSONCanonical(t *testing.T) {
 	if len(res.Relations) != 1 {
 		t.Errorf("relations = %d, want 1", len(res.Relations))
 	}
-	if res.Relations[0].Source != "张三" || res.Relations[0].Target != "MoMAPeer" {
+	if res.Relations[0].Source != "张三" || res.Relations[0].Target != "TestProject" {
 		t.Errorf("relation = %+v", res.Relations[0])
 	}
 }
@@ -87,20 +87,20 @@ func TestPipelineEnqueueAndProcess(t *testing.T) {
 	s := newTestStore(t)
 	dir := t.TempDir()
 	fpath := dir + "/doc.md"
-	content := "张三是技术总监。\n\n他负责 MoMAPeer 项目。\n\n他向李四汇报。"
+	content := "张三是技术总监。\n\n他负责 TestProject 项目。\n\n他向李四汇报。"
 	if err := writeTestFile(fpath, content); err != nil {
 		t.Fatal(err)
 	}
 
 	ext := &fakeExtractor{
 		perChunk: map[string]ExtractResult{
-			"张三是技术总监。\n\n他负责 MoMAPeer 项目。\n\n他向李四汇报。": {
+			"张三是技术总监。\n\n他负责 TestProject 项目。\n\n他向李四汇报。": {
 				Entities: []Entity{
 					{NameRaw: "张三", Type: "person", Description: "技术总监"},
-					{NameRaw: "MoMAPeer", Type: "project"},
+					{NameRaw: "TestProject", Type: "project"},
 				},
 				Relations: []Relation{
-					{Source: "张三", Target: "MoMAPeer", Type: "负责"},
+					{Source: "张三", Target: "TestProject", Type: "负责"},
 				},
 			},
 		},

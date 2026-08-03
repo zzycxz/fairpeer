@@ -10,14 +10,14 @@ func TestModelFamily(t *testing.T) {
 		model string
 		want  string
 	}{
-		{"qwen/qwen3.6-35b", "qwen"},
-		{"moma/qwen/qwen3.6-35b", "qwen"},
+		{"test-provider/test-model-a", "qwen"},
+		{"test-provider/test-provider/test-model-a", "qwen"},
 		{"deepseek/deepseek-v4-flash", "deepseek"},
 		{"z.ai/glm-5.1", "glm"},
-		{"moma/z.ai/glm-5.2", "glm"},
+		{"test-provider/z.ai/glm-5.2", "glm"},
 		{"moonshotai/kimi-k2.6", "kimi"},
 		{"minimax/minimax-m2.7", "minimax"},
-		{"jiutian/jiutian-lan-35b", "jiutian"},
+		{"test-provider/test-model-a", "test-provider"},
 		{"openai/gpt-oss-120b", "gpt"},
 		{"unknown-model", ""},
 		{"", ""},
@@ -33,7 +33,7 @@ func TestModelFamily(t *testing.T) {
 
 func TestFamilyAddon(t *testing.T) {
 	// Known families return non-empty addons.
-	for _, family := range []string{"qwen", "glm", "deepseek", "kimi", "jiutian"} {
+	for _, family := range []string{"qwen", "glm", "deepseek", "kimi", "test-provider"} {
 		if FamilyAddon(family) == "" {
 			t.Errorf("FamilyAddon(%q) is empty", family)
 		}
@@ -46,7 +46,7 @@ func TestFamilyAddon(t *testing.T) {
 
 func TestForModelIncludesFamilyAddon(t *testing.T) {
 	// Non-thinking qwen model should get the qwen addon.
-	got := ForModel("qwen/qwen3.6-35b")
+	got := ForModel("test-provider/test-model-a")
 	if !strings.Contains(got, "tool call") {
 		t.Errorf("ForModel(qwen model) should include qwen addon about tool calls, got: %q", got)
 	}

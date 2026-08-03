@@ -3,15 +3,21 @@ package config
 import (
 	"fmt"
 	"strings"
-
-	"github.com/zzycxz/fairpeer/internal/provider/openai"
 )
 
 const (
 	ReasoningProtocolAuto   = "auto"
-	ReasoningProtocolMoMA   = "moma"
 	ReasoningProtocolOpenAI = "openai"
 	ReasoningProtocolNone   = "none"
+)
+
+// Canonical effort levels. All providers use this unified vocabulary.
+// Provider-specific translation happens at the wire layer (openai.go, anthropic.go).
+const (
+	EffortAuto   = "auto"
+	EffortLow    = "low"
+	EffortMedium = "medium"
+	EffortHigh   = "high"
 )
 
 // EffortCapability describes the abstract effort levels a provider/model can set
@@ -22,18 +28,16 @@ type EffortCapability struct {
 	Default   string
 }
 
-type modelReasoningCapability struct {
-	Protocol string
-	Levels   []string
-	Default  string
+// UnifiedEffortCapability returns the standard effort capability for any provider
+// that supports reasoning. This is the Claude Code-style approach: a simple
+// low/medium/high vocabulary that works across all providers.
+func UnifiedEffortCapability() EffortCapability {
+	return EffortCapability{
+		Supported: true,
+		Levels:    []string{EffortAuto, EffortLow, EffortMedium, EffortHigh},
+		Default:   EffortAuto,
+	}
 }
-
-// modelReasoningCapabilities is intentionally empty: thinking capability is now
-// declared per-provider via ProviderEntry.ReasoningProtocol / SupportedEfforts,
-// not derived from a hardcoded model allowlist. The variable is retained because
-// resolvedModelReasoningCapability / effortCapabilityFromModel still reference it
-// for forward compatibility with future model-level capability declarations.
-var modelReasoningCapabilities = map[string]modelReasoningCapability{}
 
 // EffortCapabilityForEntry returns the user-facing /effort levels for a resolved
 // provider entry. Provider implementations still decide how a stored effort is
@@ -42,53 +46,20 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 	if explicitReasoningProtocol(e) == ReasoningProtocolNone {
 		return EffortCapability{}
 	}
-	supported := normalizedSupportedEfforts(e)
-	if len(supported) > 0 {
-		levels := make([]string, 0, len(supported)+1)
-		levels = append(levels, "auto")
-		levels = append(levels, supported...)
-		def := normalizeEffortLevel(e.DefaultEffort)
-		if def == "" || !containsString(supported, def) {
-			def = supported[0]
-		}
-		return EffortCapability{Supported: true, Levels: levels, Default: def}
-	}
-	switch explicitReasoningProtocol(e) {
-	case ReasoningProtocolMoMA:
-		return momaEffortCapability()
-	case ReasoningProtocolOpenAI:
-		return openAIEffortCapability()
-	}
-	if cap, ok := resolvedModelReasoningCapability(e); ok {
-		return effortCapabilityFromModel(cap)
-	}
-	switch ReasoningProtocolForEntry(e) {
-	case ReasoningProtocolMoMA:
-		return momaEffortCapability()
-	case ReasoningProtocolOpenAI:
-		return openAIEffortCapability()
-	}
-	switch {
-	case isMiniMaxEntry(e):
-		// MiniMax-M3 only exposes a binary thinking knob (adaptive|disabled)
-		// on its OpenAI-compatible endpoint, so /effort mirrors the API
-		// vocabulary verbatim. Default is "adaptive" because the M3 model
-		// runs with thinking on out of the box; "auto" means "don't override
-		// the model default" (== adaptive for M3).
-		return EffortCapability{Supported: true, Levels: []string{"auto", "adaptive", "disabled"}, Default: "adaptive"}
-	case e != nil && e.Kind == "anthropic":
-		return EffortCapability{Supported: true, Levels: []string{"auto", "low", "medium", "high", "xhigh", "max"}, Default: "auto"}
-	default:
-		return EffortCapability{}
-	}
+	// All providers that support reasoning use the unified low/medium/high levels.
+	return UnifiedEffortCapability()
 }
 
 // NormalizeEffort maps a user-supplied /effort level into the value stored in
-// config. Empty means auto/provider default.
+// config. Empty means auto/provider default. All providers use the unified
+// low/medium/high vocabulary. Legacy values are migrated:
+//   - max/xhigh → high
+//   - adaptive → high
+//   - disabled/off → low
 func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 	level := normalizeEffortLevel(raw)
 	if level == "" {
-		return "", fmt.Errorf("usage: /effort auto|<level>")
+		return "", fmt.Errorf("usage: /effort auto|low|medium|high")
 	}
 	if level == "auto" {
 		return "", nil
@@ -96,57 +67,21 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 	if explicitReasoningProtocol(e) == ReasoningProtocolNone {
 		return "", effortNotConfigurableError(e)
 	}
-	supported := normalizedSupportedEfforts(e)
-	if len(supported) > 0 {
-		if containsString(supported, level) {
-			return level, nil
-		}
-		return "", fmt.Errorf("usage: /effort auto|%s", strings.Join(supported, "|"))
+	// Migrate legacy values to unified vocabulary
+	switch level {
+	case "max", "xhigh":
+		level = EffortHigh
+	case "adaptive":
+		level = EffortHigh
+	case "disabled", "off":
+		level = EffortLow
 	}
-	switch ReasoningProtocolForEntry(e) {
-	case ReasoningProtocolMoMA:
-		switch level {
-		case "high", "max":
-			return level, nil
-		default:
-			return "", fmt.Errorf("usage: /effort auto|high|max")
-		}
-	case ReasoningProtocolOpenAI:
-		switch level {
-		case "low", "medium", "high":
-			return level, nil
-		default:
-			return "", fmt.Errorf("usage: /effort auto|low|medium|high")
-		}
-	}
-	switch {
-	case isMiniMaxEntry(e):
-		// The M3 knob is binary; map Anthropic / OpenAI-style levels onto the
-		// nearest valid value so a stale /effort high|low still works. "off"
-		// is a retired MoMA level meaning "no thinking" — on M3 that maps
-		// to "disabled" rather than the model default, since M3 actually
-		// supports a "thinking off" mode and "off" is the natural request.
-		switch level {
-		case "adaptive", "disabled":
-			return level, nil
-		case "off":
-			return "disabled", nil
-		case "low", "medium", "high":
-			return "adaptive", nil
-		case "xhigh", "max":
-			return "disabled", nil
-		default:
-			return "", fmt.Errorf("usage: /effort auto|adaptive|disabled")
-		}
-	case e != nil && e.Kind == "anthropic":
-		switch level {
-		case "low", "medium", "high", "xhigh", "max":
-			return level, nil
-		default:
-			return "", fmt.Errorf("usage: /effort auto|low|medium|high|xhigh|max")
-		}
+	// Validate against unified levels
+	switch level {
+	case EffortLow, EffortMedium, EffortHigh:
+		return level, nil
 	default:
-		return "", effortNotConfigurableError(e)
+		return "", fmt.Errorf("usage: /effort auto|low|medium|high")
 	}
 }
 
@@ -209,18 +144,11 @@ func normalizeStoredEffort(raw string) string {
 }
 
 // ReasoningProtocolForEntry resolves the provider request shape for reasoning
-// controls. Explicit per-provider config wins, then the (currently empty) model
-// capability registry. With no URL-based fallback, an empty result means the
-// provider uses standard OpenAI-compatible request shape unless it declares
-// reasoning_protocol = "moma" / "openai" explicitly.
+// controls. Explicit per-provider config wins. With no URL-based fallback, an
+// empty result means the provider uses standard OpenAI-compatible request shape
+// unless it declares reasoning_protocol = "openai" explicitly.
 func ReasoningProtocolForEntry(e *ProviderEntry) string {
-	if explicit := explicitReasoningProtocol(e); explicit != "" {
-		return explicit
-	}
-	if cap, ok := resolvedModelReasoningCapability(e); ok {
-		return cap.Protocol
-	}
-	return ""
+	return explicitReasoningProtocol(e)
 }
 
 func explicitReasoningProtocol(e *ProviderEntry) string {
@@ -238,45 +166,11 @@ func normalizeReasoningProtocol(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "", ReasoningProtocolAuto:
 		return ""
-	case ReasoningProtocolMoMA, ReasoningProtocolOpenAI, ReasoningProtocolNone:
+	case ReasoningProtocolOpenAI, ReasoningProtocolNone:
 		return strings.ToLower(strings.TrimSpace(raw))
 	default:
 		return ""
 	}
-}
-
-// isMiniMaxEntry reports whether the entry points at MiniMax's OpenAI-compatible
-// endpoint. See openai.IsMiniMax for the host-matching rule; the entry-wrapper
-// just gates on the openai kind.
-func isMiniMaxEntry(e *ProviderEntry) bool {
-	return e != nil && e.Kind == "openai" && openai.IsMiniMax(e.BaseURL)
-}
-
-func resolvedModelReasoningCapability(e *ProviderEntry) (modelReasoningCapability, bool) {
-	if e == nil || e.Kind != "openai" {
-		return modelReasoningCapability{}, false
-	}
-	cap, ok := modelReasoningCapabilities[strings.ToLower(strings.TrimSpace(e.Model))]
-	return cap, ok
-}
-
-func effortCapabilityFromModel(cap modelReasoningCapability) EffortCapability {
-	levels := make([]string, 0, len(cap.Levels)+1)
-	levels = append(levels, "auto")
-	levels = append(levels, cap.Levels...)
-	def := normalizeEffortLevel(cap.Default)
-	if def == "" || !containsString(cap.Levels, def) {
-		def = "auto"
-	}
-	return EffortCapability{Supported: true, Levels: levels, Default: def}
-}
-
-func momaEffortCapability() EffortCapability {
-	return EffortCapability{Supported: true, Levels: []string{"auto", "high", "max"}, Default: "high"}
-}
-
-func openAIEffortCapability() EffortCapability {
-	return EffortCapability{Supported: true, Levels: []string{"auto", "low", "medium", "high"}, Default: "auto"}
 }
 
 func effortNotConfigurableError(e *ProviderEntry) error {

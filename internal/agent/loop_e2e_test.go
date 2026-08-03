@@ -79,7 +79,7 @@ func TestRunCancelledMidStreamLeavesResumableSession(t *testing.T) {
 }
 
 func TestRunRecoversInterruptedStreamAfterPartialText(t *testing.T) {
-	interrupted := &provider.StreamInterruptedError{Err: errors.New("moma: read stream: unexpected EOF")}
+	interrupted := &provider.StreamInterruptedError{Err: errors.New("test-provider: read stream: unexpected EOF")}
 	mp := testutil.NewMock("m",
 		testutil.Turn{Text: "partial ", ChunkError: interrupted},
 		testutil.Turn{Text: "continued"},
@@ -123,7 +123,7 @@ func TestRunRecoversInterruptedStreamAfterPartialText(t *testing.T) {
 }
 
 func TestRunRecoversInterruptedPartialToolCallWithoutExecutingIt(t *testing.T) {
-	interrupted := &provider.StreamInterruptedError{Err: errors.New("moma: read stream: unexpected EOF")}
+	interrupted := &provider.StreamInterruptedError{Err: errors.New("test-provider: read stream: unexpected EOF")}
 	mp := testutil.NewMock("m",
 		testutil.Turn{Chunks: []provider.Chunk{
 			{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: "c1", Name: "echo"}},

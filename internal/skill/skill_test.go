@@ -177,7 +177,7 @@ func TestExcludedPathsHideConventionRoots(t *testing.T) {
 func TestFrontmatterFields(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".fairpeer/skills/sub.md",
-		"---\ndescription: a sub\nrunAs: subagent\nallowed-tools: read_file, grep\nmodel: moma\n---\nbody")
+		"---\ndescription: a sub\nrunAs: subagent\nallowed-tools: read_file, grep\nmodel: test-provider\n---\nbody")
 	writeSkill(t, home, ".fairpeer/skills/fork.md", "---\ndescription: f\ncontext: fork\n---\nbody")
 	writeSkill(t, home, ".fairpeer/skills/plain.md", "---\ndescription: p\n---\nbody")
 
@@ -189,7 +189,7 @@ func TestFrontmatterFields(t *testing.T) {
 	if len(sub.AllowedTools) != 2 || sub.AllowedTools[0] != "read_file" || sub.AllowedTools[1] != "grep" {
 		t.Errorf("allowed-tools mis-parsed: %v", sub.AllowedTools)
 	}
-	if sub.Model != "moma" {
+	if sub.Model != "test-provider" {
 		t.Errorf("model mis-parsed: %q", sub.Model)
 	}
 	if fork, _ := st.Read("fork"); fork.RunAs != RunSubagent {

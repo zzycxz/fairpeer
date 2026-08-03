@@ -5,7 +5,7 @@
 // Two modes:
 //
 //  1. REPLAY (default, any platform): read PNG screenshots (from a dir, default
-//     .fairpeer/attachments) and run each through the qwen3.6-27b multimodal
+//     .fairpeer/attachments) and run each through the configured multimodal
 //     model, printing what the VLM saw + any coordinates it returned. Copies each
 //     image + the VLM's raw response into cua-replay-trace/ numbered in order, so
 //     you can open the folder and walk through every frame the agent looked at.
@@ -32,7 +32,7 @@
 //	go run ./cmd/cua-replay -live -task "find the text input area"
 //
 //	# Override the model:
-//	go run ./cmd/cua-replay -model qwen/qwen3.6-27b
+//	go run ./cmd/cua-replay -model provider/model
 //
 // Requires OPENAI_API_KEY (or any OpenAI-compatible provider key) in the environment.
 package main
@@ -60,7 +60,7 @@ const defaultBaseURL = "https://api.openai.com/v1" // default; override via -bas
 func main() {
 	var (
 		task     = flag.String("task", "找到屏幕上可以输入文字的区域，给我它的中心坐标", "what to look for in each frame")
-		model    = flag.String("model", "gpt-4o", "multimodal model")
+		model    = flag.String("model", "", "multimodal model (provider/model format); set via [cowork] vlm_model in fairpeer.toml")
 		srcDir   = flag.String("dir", ".fairpeer/attachments", "dir to replay screenshots from (replay mode)")
 		image    = flag.String("image", "", "analyze a single image file (overrides -dir)")
 		live     = flag.Bool("live", false, "capture the current screen once and analyze it (Windows)")
@@ -72,6 +72,9 @@ func main() {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
 		die("OPENAI_API_KEY not set")
+	}
+	if *model == "" {
+		die("-model is required (provider/model format); set via [cowork] vlm_model in fairpeer.toml or pass -model flag")
 	}
 
 	if err := os.MkdirAll(*traceDir, 0o755); err != nil {

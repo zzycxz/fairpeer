@@ -833,13 +833,13 @@ func (a *App) RagAsk(collection, question string) (string, error) {
 		}
 	}
 	if modelName == "" {
-		modelName = "deepseek/deepseek-v4-flash" // fallback
+		return "", fmt.Errorf("no LLM model configured: set fast_task_model or default_model in fairpeer.toml")
 	}
 
 	// 4. Build the chat request.
 	apiKey := os.Getenv(apiKeyEnv)
 	if apiKey == "" {
-		apiKey = os.Getenv("JIUTIAN_API_KEY")
+		apiKey = os.Getenv("FAIRPEER_API_KEY")
 	}
 	if apiKey == "" {
 		return "", fmt.Errorf("LLM api key not configured")

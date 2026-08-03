@@ -36,7 +36,7 @@ func TestRunStatuslineCmd(t *testing.T) {
 		t.Errorf("multi-line output should collapse to the first row, got %q", got)
 	}
 	// The JSON payload is delivered on stdin.
-	if got := runStatuslineCmd(stdinCmd, `{"model":"MoMA"}`); got != `{"model":"MoMA"}` {
+	if got := runStatuslineCmd(stdinCmd, `{"model":"test-provider"}`); got != `{"model":"test-provider"}` {
 		t.Errorf("stdin payload not forwarded, got %q", got)
 	}
 	// A failing command yields an empty line, not an error.
@@ -199,7 +199,7 @@ func TestStatuslineKeepsCacheRatesInPrimaryDataRow(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("status block lines = %d, want 2:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
-	want := "qwen3.6-35b · turn hit 90.00% · avg 90.00%"
+	want := "test-model-a · turn hit 90.00% · avg 90.00%"
 	if !strings.Contains(lines[1], want) {
 		t.Fatalf("data row should keep cache rates next to model:\n%s", strings.Join(lines, "\n"))
 	}
@@ -219,7 +219,7 @@ func TestStatuslinePutsGitIdentityOnModeRow(t *testing.T) {
 	if strings.Contains(lines[1], "fairpeer@codex/demo") {
 		t.Fatalf("data row should not include git identity:\n%s", strings.Join(lines, "\n"))
 	}
-	if !strings.Contains(lines[1], "qwen3.6-35b") || strings.Contains(lines[1], "effort auto") {
+	if !strings.Contains(lines[1], "test-model-a") || strings.Contains(lines[1], "effort auto") {
 		t.Fatalf("data row should keep model without effort:\n%s", strings.Join(lines, "\n"))
 	}
 }
@@ -242,7 +242,7 @@ func TestRefreshEffortStatusUsesCurrentModel(t *testing.T) {
 
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
-	m.modelRef = "moma/qwen/qwen3.6-35b"
+	m.modelRef = "test-provider/test-provider/test-model-a"
 	m.refreshEffortStatus()
 	if m.effortLevel != "auto" {
 		t.Fatalf("effortLevel = %q, want auto", m.effortLevel)
@@ -277,7 +277,7 @@ func renderStatuslineViewWithEffort(t *testing.T, effort string) string {
 
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
-	m.label = "qwen3.6-35b"
+	m.label = "test-model-a"
 	m.effortLevel = effort
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return next.(chatTUI).View().Content
@@ -288,7 +288,7 @@ func renderStatuslineViewWithGitAndEffort(t *testing.T) string {
 
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 120)
-	m.label = "qwen3.6-35b"
+	m.label = "test-model-a"
 	m.effortLevel = "auto"
 	m.gitStatus = gitStatus{
 		Repo:      "fairpeer",
@@ -304,7 +304,7 @@ func renderStatuslineViewWithGitAndEffort(t *testing.T) string {
 func renderStatuslineViewWithCache(t *testing.T) string {
 	t.Helper()
 
-	prov := testutil.NewMock("qwen3.6-35b", testutil.Turn{
+	prov := testutil.NewMock("test-model-a", testutil.Turn{
 		Text: "ok",
 		Usage: &provider.Usage{
 			CacheHitTokens:   900,
@@ -320,7 +320,7 @@ func renderStatuslineViewWithCache(t *testing.T) string {
 	}
 	ctrl := control.New(control.Options{Executor: exec})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 160)
-	m.label = "qwen3.6-35b"
+	m.label = "test-model-a"
 	m.effortLevel = "auto"
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
 	return next.(chatTUI).View().Content

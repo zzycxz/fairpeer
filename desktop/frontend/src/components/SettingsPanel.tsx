@@ -411,8 +411,8 @@ const PROXY_MODES = ["auto", "custom", "off"] as const;
 // recognises. The settings UI exposes these as toggleable checkboxes; users
 // can additionally add arbitrary custom names via the "Add" input. The order
 // here is what the user sees in the dropdown.
-const EFFORT_PRESETS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
-const REASONING_PROTOCOLS: readonly string[] = ["", "moma", "MoMA", "openai", "none"];
+const EFFORT_PRESETS: readonly string[] = ["low", "medium", "high"];
+const REASONING_PROTOCOLS: readonly string[] = ["", "openai", "none"];
 
 // COMMON_PROVIDER_PRESETS are one-click base_url + context_window shortcuts for
 // the most popular OpenAI-compatible platforms, so users don't have to look up
@@ -646,10 +646,6 @@ function sandboxModeLabel(mode: string, t: ReturnType<typeof useT>): string {
 
 function reasoningProtocolLabel(protocol: string, t: ReturnType<typeof useT>): string {
   switch (protocol) {
-    case "moma":
-      return t("settings.reasoningProtocol.moma");
-    case "MoMA":
-      return t("settings.reasoningProtocol.moma");
     case "openai":
       return t("settings.reasoningProtocol.openai");
     case "none":
@@ -659,7 +655,7 @@ function reasoningProtocolLabel(protocol: string, t: ReturnType<typeof useT>): s
   }
 }
 
-// effortLabel maps raw effort levels (low/medium/high/xhigh/max) to localized
+// effortLabel maps raw effort levels (low/medium/high) to localized
 // friendly names so users don't see raw English enum values in dropdowns and
 // checkboxes. Falls back to the raw value if unrecognized.
 export function effortLabel(level: string, t: ReturnType<typeof useI18n>["t"]): string {
@@ -670,10 +666,6 @@ export function effortLabel(level: string, t: ReturnType<typeof useI18n>["t"]): 
       return t("settings.effortMedium");
     case "high":
       return t("settings.effortHigh");
-    case "xhigh":
-      return t("settings.effortXhigh");
-    case "max":
-      return t("settings.effortMax");
     default:
       return level;
   }
@@ -1937,10 +1929,6 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
 function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) {
   const t = useT();
   const [subtab, setSubtab] = useState<"usage" | "access">("usage");
-  const [modelDomainValue, setModelDomainValue] = useState("");
-  useEffect(() => {
-    app.GetJiutianBaseDomain().then(setModelDomainValue).catch(() => {});
-  }, []);
   const autoRefreshKeyRef = useRef("");
   const refs = allRefs(s);
   const defaultRef = toRef(s.defaultModel, s);
@@ -2029,17 +2017,6 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
                 value={toRef(s.defaultModel, s)}
                 disabled={busy}
                 onPick={(ref) => void apply(() => app.SetDefaultModel(ref))}
-              />
-            </SettingsField>
-
-            <SettingsField label={t("settings.modelDomain")}>
-              <input
-                className="mem-input"
-                placeholder={t("settings.modelDomainHint")}
-                value={modelDomainValue}
-                onChange={e => setModelDomainValue(e.target.value)}
-                onBlur={() => void app.SetJiutianBaseDomain(modelDomainValue)}
-                onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
               />
             </SettingsField>
 

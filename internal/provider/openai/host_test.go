@@ -21,7 +21,7 @@ func TestIsMiniMax(t *testing.T) {
 		{"https://minimaxi.com/v1", false},
 		{"https://minimaxi.com", false},
 		// Other vendors must not match
-		{"https://jiutian.10086.cn", false},
+		{"https://example.com", false},
 		{"https://api.openai.com/v1", false},
 		// Wrong spelling — minimax, not minimaxi — must not match
 		{"https://api.minimax.com/v1", false},

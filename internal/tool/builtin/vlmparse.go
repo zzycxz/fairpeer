@@ -9,7 +9,7 @@ import (
 // VLM output parsing: extract coordinates (normalized 0-1000) or element labels
 // (IDs like "A", "B3") from the freeform text VLMs return. This is the Go port
 // of Rooster's VisionStrategy._parse_coordinates (10-pattern chain) + the label
-// selection parser. Different VLMs (九天/minimax/kimi/GLM/Doubao) format their
+// selection parser. Different VLMs (minimax/kimi/GLM/Doubao) format their
 // outputs differently; the chain tries each format in priority order and uses
 // the first match.
 

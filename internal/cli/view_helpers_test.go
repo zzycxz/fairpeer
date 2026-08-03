@@ -91,8 +91,8 @@ func TestRenderOutputStylesUsesActiveStatus(t *testing.T) {
 
 func TestRenderModelsUsesActiveStatus(t *testing.T) {
 	width := 72
-	got := renderModels(width, []string{"MoMA/v4", "openai/really-long-model-name-" + strings.Repeat("x", 80)}, "MoMA/v4")
-	for _, want := range []string{"models", "MoMA/v4", "active", "…", "switch with /model"} {
+	got := renderModels(width, []string{"test-provider/v4", "openai/really-long-model-name-" + strings.Repeat("x", 80)}, "test-provider/v4")
+	for _, want := range []string{"models", "test-provider/v4", "active", "…", "switch with /model"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("model view missing %q:\n%s", want, got)
 		}

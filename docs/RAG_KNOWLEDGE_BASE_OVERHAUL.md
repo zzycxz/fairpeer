@@ -888,7 +888,7 @@ rag_max_total_output = 3000
 
 | 风险 | 缓解 |
 |------|------|
-| Python 服务启动失败 | 降级到 FTS5-only + JiutianExtractor |
+| Python 服务启动失败 | 降级到 FTS5-only + PlatformExtractor |
 | LLM 限流导致提取慢 | 已有 RPM limiter + 进度条 |
 | docx/pdf 提取质量差 | 复用已验证的 doc_read |
 | 图谱节点过多（>500） | 按关系统计截断 top-N，支持搜索筛选 |

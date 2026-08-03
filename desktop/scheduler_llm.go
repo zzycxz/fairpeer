@@ -43,7 +43,7 @@ const llmResolveTimeTimeout = 8 * time.Second
 //
 // now is the reference instant the phrase is resolved against (today/now); the
 // caller passes time.Now(). Provider/key resolution follows the RagAsk path:
-// fast_task_model → default_model → deepseek-v4-flash fallback.
+// fast_task_model → default_model → error if not configured.
 func llmParseTime(ctx context.Context, text string, now time.Time) (time.Time, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -66,7 +66,7 @@ func llmParseTime(ctx context.Context, text string, now time.Time) (time.Time, e
 	}
 	apiKey := os.Getenv(apiKeyEnv)
 	if apiKey == "" {
-		apiKey = os.Getenv("JIUTIAN_API_KEY")
+		apiKey = os.Getenv("FAIRPEER_API_KEY")
 	}
 	if apiKey == "" {
 		return time.Time{}, fmt.Errorf("LLM api key not configured")
@@ -75,7 +75,7 @@ func llmParseTime(ctx context.Context, text string, now time.Time) (time.Time, e
 		baseURL = apihelper.BaseURL
 	}
 	if modelName == "" {
-		modelName = "deepseek/deepseek-v4-flash"
+		return time.Time{}, fmt.Errorf("no LLM model configured: set fast_task_model or default_model in fairpeer.toml")
 	}
 
 	// Strict output contract: one line "YYYY-MM-DD HH:MM", or "N/A". We give the

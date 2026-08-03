@@ -9,44 +9,44 @@ import (
 
 func TestSubagentModelRefUsesConfiguredDefault(t *testing.T) {
 	cfg := config.Default()
-	cfg.Agent.SubagentModel = "moma"
+	cfg.Agent.SubagentModel = "test-provider"
 
 	got := subagentModelRef(cfg, skill.Skill{Name: "explore", RunAs: skill.RunSubagent})
-	if got != "moma" {
-		t.Fatalf("subagent model = %q, want moma", got)
+	if got != "test-provider" {
+		t.Fatalf("subagent model = %q, want test-provider", got)
 	}
 }
 
 func TestSubagentModelRefHonorsPrecedence(t *testing.T) {
 	cfg := config.Default()
-	cfg.Agent.SubagentModel = "moma"
-	cfg.Agent.SubagentModels = map[string]string{"review": "moma"}
+	cfg.Agent.SubagentModel = "test-provider"
+	cfg.Agent.SubagentModels = map[string]string{"review": "test-provider"}
 
 	got := subagentModelRef(cfg, skill.Skill{
 		Name:  "review",
 		RunAs: skill.RunSubagent,
-		Model: "moma",
+		Model: "test-provider",
 	})
-	if got != "moma" {
+	if got != "test-provider" {
 		t.Fatalf("per-skill config should override skill frontmatter and default, got %q", got)
 	}
 
 	got = subagentModelRef(cfg, skill.Skill{
 		Name:  "custom",
 		RunAs: skill.RunSubagent,
-		Model: "moma",
+		Model: "test-provider",
 	})
-	if got != "moma" {
+	if got != "test-provider" {
 		t.Fatalf("skill frontmatter should override default config, got %q", got)
 	}
 }
 
 func TestSubagentModelRefAcceptsToolNameAliases(t *testing.T) {
 	cfg := config.Default()
-	cfg.Agent.SubagentModels = map[string]string{"security_review": "moma"}
+	cfg.Agent.SubagentModels = map[string]string{"security_review": "test-provider"}
 
 	got := subagentModelRef(cfg, skill.Skill{Name: "security-review", RunAs: skill.RunSubagent})
-	if got != "moma" {
+	if got != "test-provider" {
 		t.Fatalf("security_review alias should configure security-review, got %q", got)
 	}
 }

@@ -53,7 +53,7 @@ func TestStreamReconnectsOnEarlyConnReset(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := New(provider.Config{Name: "MoMA", BaseURL: srv.URL, Model: "qwen3.6-35b", APIKey: "k"})
+	p, err := New(provider.Config{Name: "test-provider", BaseURL: srv.URL, Model: "test-model-a", APIKey: "k"})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestStreamTreatsCleanEOFWithoutDoneAsCut(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := New(provider.Config{Name: "MoMA", BaseURL: srv.URL, Model: "qwen3.6-35b", APIKey: "k"})
+	p, err := New(provider.Config{Name: "test-provider", BaseURL: srv.URL, Model: "test-model-a", APIKey: "k"})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestStreamDropsPartialToolCallOnCleanEOF(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := New(provider.Config{Name: "MoMA", BaseURL: srv.URL, Model: "qwen3.6-35b", APIKey: "k"})
+	p, err := New(provider.Config{Name: "test-provider", BaseURL: srv.URL, Model: "test-model-a", APIKey: "k"})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestStreamAcceptsFinishReasonWithoutDone(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := New(provider.Config{Name: "MoMA", BaseURL: srv.URL, Model: "qwen3.6-35b", APIKey: "k"})
+	p, err := New(provider.Config{Name: "test-provider", BaseURL: srv.URL, Model: "test-model-a", APIKey: "k"})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestStreamDoesNotReplayAfterOutput(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p, err := New(provider.Config{Name: "MoMA", BaseURL: srv.URL, Model: "qwen3.6-35b", APIKey: "k"})
+	p, err := New(provider.Config{Name: "test-provider", BaseURL: srv.URL, Model: "test-model-a", APIKey: "k"})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

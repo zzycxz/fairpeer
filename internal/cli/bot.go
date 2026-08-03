@@ -398,7 +398,7 @@ Subcommands:
 
 Examples:
   fairpeer bot start --channels qq,feishu
-  fairpeer bot start --dir /path/to/project --model deepseek/deepseek-v4-pro
+  fairpeer bot start --dir /path/to/project --model provider/model
   fairpeer bot doctor --json
 
 Configuration:

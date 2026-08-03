@@ -230,7 +230,7 @@ func testSubagentSpec(t *testing.T, name string) SubagentSpec {
 		ParentSession: "parent-session",
 		SystemPrompt:  "review persona",
 		Registry:      reg,
-		Model:         "MoMA",
+		Model:         "test-provider",
 		Effort:        "max",
 	}
 }

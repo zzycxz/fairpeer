@@ -1,4 +1,4 @@
-// Package calendar provides a local SQLite-backed calendar for MoMAPeer.
+// Package calendar provides a local SQLite-backed calendar for FairPeer.
 // Events are stored in a single user-scoped database (~/.fairpeer/calendar.db)
 // and queried by time range for efficient month/week views. Recurring events
 // store an RRULE and expand on read.

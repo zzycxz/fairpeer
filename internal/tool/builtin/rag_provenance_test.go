@@ -15,11 +15,11 @@ import (
 // makes the knowledge graph quotable by the agent (the highest-ROI gap).
 func TestRAGSearchSurfacesProvenance(t *testing.T) {
 	s := newRAGTestStore(t)
-	// Seed: 张三 --[负责]--> MoMAPeer, extracted from /docs/spec.md chunk 3.
+	// Seed: 张三 --[负责]--> TestProject, extracted from /docs/spec.md chunk 3.
 	src := rag.Source{Path: "/docs/spec.md", Chunk: 3}
 	mustUpsertRAG(t, s, "docs",
 		rag.Entity{NameRaw: "张三", Type: "person", Description: "技术总监"},
-		rag.Relation{Source: "张三", Target: "MoMAPeer", Type: "负责"},
+		rag.Relation{Source: "张三", Target: "TestProject", Type: "负责"},
 		src)
 
 	prev := globalRAGStore

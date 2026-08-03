@@ -70,10 +70,10 @@ func TestToWireToolDispatch(t *testing.T) {
 func TestToWireToolDispatchProfile(t *testing.T) {
 	e := event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
 		ID: "1", Name: "task", Args: `{"prompt":"x"}`,
-		Profile: &event.Profile{Model: "moma", Effort: "max"},
+		Profile: &event.Profile{Model: "test-provider", Effort: "max"},
 	}}
 	w := toWire(e)
-	if w.Tool == nil || w.Tool.Profile == nil || w.Tool.Profile.Model != "moma" || w.Tool.Profile.Effort != "max" {
+	if w.Tool == nil || w.Tool.Profile == nil || w.Tool.Profile.Model != "test-provider" || w.Tool.Profile.Effort != "max" {
 		t.Errorf("tool profile = %+v", w.Tool)
 	}
 }

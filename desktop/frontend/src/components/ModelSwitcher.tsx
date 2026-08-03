@@ -15,7 +15,6 @@ interface CategoryDef {
 
 const CATEGORIES: CategoryDef[] = [
   { id: "qwen",     label: "千问",       prefixes: ["qwen/"] },
-  { id: "jiutian",  label: "九天",       prefixes: ["jiutian/"] },
   { id: "deepseek", label: "DeepSeek",   prefixes: ["deepseek/"] },
   { id: "minimax",  label: "MiniMax",    prefixes: ["minimax/"] },
   { id: "zai",      label: "智谱",       prefixes: ["z.ai/"] },
@@ -29,7 +28,6 @@ function catForModel(modelName: string): string {
   }
   const lower = modelName.toLowerCase();
   if (lower.includes("qwen"))      return "qwen";
-  if (lower.includes("jiutian"))   return "jiutian";
   if (lower.includes("deepseek"))  return "deepseek";
   if (lower.includes("minimax"))   return "minimax";
   if (lower.includes("z.ai") || lower.includes("glm")) return "zai";
@@ -209,11 +207,9 @@ function ModelRow({ m, onPick }: { m: ModelInfo; onPick: (ref: string) => void }
 
 function providerLabel(provider: string): string {
   switch (provider) {
-    case "moma":          return "九天 MoMA";
     case "openai":        return "OpenAI";
     case "minimax":       return "MiniMax";
     case "zai":           return "Z.ai";
-    case "jiutian":       return "Jiutian";
     case "deepseek":      return "DeepSeek";
     case "moonshot":      return "月之暗面";
     default:              return provider;

@@ -12,11 +12,11 @@ import (
 // an equivalent config — i.e. the wizard never writes a file it can't read.
 func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig := Default()
-	// FairPeer no longer ships a preset MoMA provider; seed an explicit
-	// "moma" user entry so the round-trip can exercise provider field
+	// FairPeer no longer ships a preset test-provider provider; seed an explicit
+	// "test-provider" user entry so the round-trip can exercise provider field
 	// preservation (default_model, base_url, reasoning_protocol, effort).
-	orig.Providers = append(orig.Providers, ProviderEntry{Name: "moma", Kind: "openai", BaseURL: "https://jiutian.10086.cn/largemodel/moma/api/v3", APIKeyEnv: "JIUTIAN_API_KEY"})
-	orig.DefaultModel = "moma"
+	orig.Providers = append(orig.Providers, ProviderEntry{Name: "test-provider", Kind: "openai", BaseURL: "https://example.com/largemodel/test-provider/api/v3", APIKeyEnv: "FAIRPEER_API_KEY"})
+	orig.DefaultModel = "test-provider"
 	orig.Language = "zh"
 	orig.UI.Theme = "light"
 	orig.UI.ThemeStyle = "glacier"
@@ -31,9 +31,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Notifications.TurnDone = true
 	orig.Notifications.ApprovalRequest = true
 	orig.Notifications.AskRequest = true
-	orig.Agent.AutoPlanClassifier = "moma"
-	orig.Agent.SubagentModel = "moma"
-	orig.Agent.SubagentModels = map[string]string{"review": "moma/openai/gpt-oss-120b"}
+	orig.Agent.AutoPlanClassifier = "test-provider"
+	orig.Agent.SubagentModel = "test-provider"
+	orig.Agent.SubagentModels = map[string]string{"review": "test-provider/openai/gpt-oss-120b"}
 	orig.Tools.BashTimeoutSeconds = intPtr(900)
 	orig.Permissions = PermissionsConfig{
 		Mode:  "deny",
@@ -63,7 +63,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 		Label:         "Lark",
 		Enabled:       true,
 		Status:        "connected",
-		Model:         "moma/openai/gpt-oss-120b",
+		Model:         "test-provider/openai/gpt-oss-120b",
 		WorkspaceRoot: "/tmp/fairpeer-bot",
 		Credential:    BotConnectionCredential{AppID: "cli_lark", AppSecretEnv: "LARK_BOT_APP_SECRET"},
 		SessionMappings: []BotConnectionSessionMapping{{
@@ -91,10 +91,10 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 		{Name: "example", Command: "fairpeer-plugin-example"},
 		{Name: "stripe", Type: "http", URL: "https://mcp.stripe.com", Headers: map[string]string{"Authorization": "Bearer x"}, AutoStart: boolPtr(false), Tier: "background"},
 	}
-	mm, _ := orig.Provider("moma")
+	mm, _ := orig.Provider("test-provider")
 	mm.BaseURL = "http://localhost:8000/v1"
 	mm.ReasoningProtocol = "openai"
-	ds, _ := orig.Provider("moma")
+	ds, _ := orig.Provider("test-provider")
 	ds.Effort = "max"
 
 	rendered := RenderTOML(orig)
@@ -104,8 +104,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 		t.Fatalf("rendered TOML does not parse: %v\n---\n%s", err, rendered)
 	}
 
-	if got.DefaultModel != "moma" {
-		t.Errorf("default_model = %q, want moma", got.DefaultModel)
+	if got.DefaultModel != "test-provider" {
+		t.Errorf("default_model = %q, want test-provider", got.DefaultModel)
 	}
 	if got.ConfigVersion != 2 {
 		t.Errorf("config_version = %d, want 2", got.ConfigVersion)
@@ -146,7 +146,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Agent.PlannerMaxSteps != orig.Agent.PlannerMaxSteps {
 		t.Errorf("planner_max_steps = %d, want %d", got.Agent.PlannerMaxSteps, orig.Agent.PlannerMaxSteps)
 	}
-	if len(got.Bot.Connections) != 1 || got.Bot.Connections[0].Model != "moma/openai/gpt-oss-120b" || got.Bot.Connections[0].WorkspaceRoot != "/tmp/fairpeer-bot" {
+	if len(got.Bot.Connections) != 1 || got.Bot.Connections[0].Model != "test-provider/openai/gpt-oss-120b" || got.Bot.Connections[0].WorkspaceRoot != "/tmp/fairpeer-bot" {
 		t.Errorf("bot connection not preserved: %+v", got.Bot.Connections)
 	}
 	if len(got.Bot.Connections[0].SessionMappings) != 1 || got.Bot.Connections[0].SessionMappings[0].Scope != "project" || got.Bot.Connections[0].SessionMappings[0].WorkspaceRoot != "/tmp/fairpeer-bot" {
@@ -158,8 +158,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Agent.AutoPlan != "off" {
 		t.Errorf("auto_plan = %q, want off", got.Agent.AutoPlan)
 	}
-	if got.Agent.AutoPlanClassifier != "moma" {
-		t.Errorf("auto_plan_classifier = %q, want moma", got.Agent.AutoPlanClassifier)
+	if got.Agent.AutoPlanClassifier != "test-provider" {
+		t.Errorf("auto_plan_classifier = %q, want test-provider", got.Agent.AutoPlanClassifier)
 	}
 	if got.Agent.SoftCompactRatio != orig.Agent.SoftCompactRatio {
 		t.Errorf("soft_compact_ratio = %v, want %v", got.Agent.SoftCompactRatio, orig.Agent.SoftCompactRatio)
@@ -201,20 +201,20 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if len(lua.Extensions) != 3 || lua.Extensions[2] != ".gui_script" {
 		t.Errorf("lsp.servers.lua.extensions = %v", lua.Extensions)
 	}
-	if got.Agent.SubagentModel != "moma" {
-		t.Errorf("subagent_model = %q, want moma", got.Agent.SubagentModel)
+	if got.Agent.SubagentModel != "test-provider" {
+		t.Errorf("subagent_model = %q, want test-provider", got.Agent.SubagentModel)
 	}
-	if got.Agent.SubagentModels["review"] != "moma/openai/gpt-oss-120b" {
-		t.Errorf("subagent_models.review = %q, want moma", got.Agent.SubagentModels["review"])
+	if got.Agent.SubagentModels["review"] != "test-provider/openai/gpt-oss-120b" {
+		t.Errorf("subagent_models.review = %q, want test-provider", got.Agent.SubagentModels["review"])
 	}
 	if got.Tools.BashTimeoutSeconds == nil || *got.Tools.BashTimeoutSeconds != 900 {
 		t.Errorf("tools.bash_timeout_seconds = %v, want 900", got.Tools.BashTimeoutSeconds)
 	}
-	if g, _ := got.Provider("moma"); g == nil || g.BaseURL != "http://localhost:8000/v1" || g.ReasoningProtocol != "openai" {
-		t.Errorf("moma base_url not preserved: %+v", g)
+	if g, _ := got.Provider("test-provider"); g == nil || g.BaseURL != "http://localhost:8000/v1" || g.ReasoningProtocol != "openai" {
+		t.Errorf("test-provider base_url not preserved: %+v", g)
 	}
-	if g, _ := got.Provider("moma"); g == nil || g.Effort != "max" {
-		t.Errorf("moma effort not preserved: %+v", g)
+	if g, _ := got.Provider("test-provider"); g == nil || g.Effort != "max" {
+		t.Errorf("test-provider effort not preserved: %+v", g)
 	}
 	if len(got.Providers) != len(orig.Providers) {
 		t.Errorf("providers count = %d, want %d", len(got.Providers), len(orig.Providers))
@@ -267,7 +267,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 func TestScopedRenderPreservesLSPConfig(t *testing.T) {
 	const src = `
 config_version = 2
-default_model = "MoMA"
+default_model = "test-provider"
 
 [lsp]
 enabled = true

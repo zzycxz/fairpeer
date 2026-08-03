@@ -80,7 +80,7 @@ func TestCollectReportRedactsSecrets(t *testing.T) {
 }
 
 func TestCollectReportDoesNotRequireAPIKey(t *testing.T) {
-	t.Setenv("JIUTIAN_API_KEY", "")
+	t.Setenv("FAIRPEER_API_KEY", "")
 
 	cfg := config.Default()
 	report := Collect(Options{Version: "1.2.3", Config: cfg})

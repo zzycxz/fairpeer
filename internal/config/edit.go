@@ -294,7 +294,7 @@ func (c *Config) SetNetwork(n NetworkConfig) error {
 }
 
 // ModelRefsProvider reports whether ref targets the named provider. It matches
-// both bare provider names ("MoMA") and "provider/model" refs.
+// both bare provider names ("openai") and "provider/model" refs.
 func ModelRefsProvider(ref, name string) bool {
 	ref = strings.TrimSpace(ref)
 	name = strings.TrimSpace(name)

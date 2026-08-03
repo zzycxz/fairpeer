@@ -56,12 +56,12 @@ func (s *collectSink) Emit(e event.Event) {
 	}
 }
 
-// --- a mock MoMA endpoint that derives cache-hit tokens from the byte-
+// --- a mock test-provider endpoint that derives cache-hit tokens from the byte-
 // identical message prefix it shares with the previous *conversation* request.
 // The reported hit rate is therefore a direct measurement of how stable the
 // client keeps its request prefix turn over turn. ---
 
-type mockMoMA struct {
+type mockTestProvider struct {
 	t            *testing.T
 	prevMessages []json.RawMessage // last conversation request's messages
 	reqChars     []int             // total prompt chars per conversation request
@@ -71,7 +71,7 @@ type mockMoMA struct {
 	toolRounds   int               // remaining tool-call rounds before a final answer
 }
 
-func (m *mockMoMA) handler(w http.ResponseWriter, r *http.Request) {
+func (m *mockTestProvider) handler(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 
 	// Compaction issues a tool-less summarize request whose system prompt is the
@@ -118,7 +118,7 @@ func (m *mockMoMA) handler(w http.ResponseWriter, r *http.Request) {
 	writeSSE(w, m.t, chunks...)
 }
 
-func (m *mockMoMA) tools() *tool.Registry {
+func (m *mockTestProvider) tools() *tool.Registry {
 	reg := tool.NewRegistry()
 	if m.withTools {
 		reg.Add(echoTool{})
@@ -141,7 +141,7 @@ func hitRate(u *provider.Usage) int {
 const systemPrompt = "You are fairpeer, a coding agent. Be concise and follow project conventions. " +
 	"This system prompt is the cacheable head of every request and must never change between turns."
 
-// longReasoning stands in for a MoMA-reasoner chain-of-thought that the agent
+// longReasoning stands in for a test-provider-reasoner chain-of-thought that the agent
 // round-trips onto the assistant turn (agent.go round-trips ReasoningContent).
 const longReasoning = "Let me reason about this carefully. I will weigh the constraints, " +
 	"enumerate the candidate approaches, reject the ones that violate a requirement, and then " +
@@ -152,8 +152,8 @@ const longReasoning = "Let me reason about this carefully. I will weigh the cons
 // hit% equals hit/prompt%. This rules out "something is breaking the cache" and
 // "the display math is wrong" for the no-compaction path.
 func TestCacheHitPrefixStable(t *testing.T) {
-	t.Skip("MoMA does not report prompt cache tokens")
-	mock := &mockMoMA{t: t, withTools: true, reasoning: longReasoning, toolRounds: 2}
+	t.Skip("test-provider does not report prompt cache tokens")
+	mock := &mockTestProvider{t: t, withTools: true, reasoning: longReasoning, toolRounds: 2}
 	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
 	defer srv.Close()
 
@@ -193,8 +193,8 @@ func TestCacheHitPrefixStable(t *testing.T) {
 // compaction DISABLED and prints the hit-rate curve. With a stable prefix the
 // rate should climb past 90% as history dwarfs each turn's fresh tail.
 func TestCacheHitClimbsWithoutCompaction(t *testing.T) {
-	t.Skip("MoMA does not report prompt cache tokens")
-	mock := &mockMoMA{t: t, reasoning: longReasoning}
+	t.Skip("test-provider does not report prompt cache tokens")
+	mock := &mockTestProvider{t: t, reasoning: longReasoning}
 	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
 	defer srv.Close()
 
@@ -231,8 +231,8 @@ func TestCacheHitClimbsWithoutCompaction(t *testing.T) {
 // progress, pauses it (with a notice), and lets the prefix grow append-only — so
 // the hit rate recovers and stays high instead of collapsing repeatedly.
 func TestCacheHitSurvivesTooSmallWindow(t *testing.T) {
-	t.Skip("MoMA does not report prompt cache tokens")
-	mock := &mockMoMA{t: t, withTools: true, reasoning: longReasoning, toolRounds: 30}
+	t.Skip("test-provider does not report prompt cache tokens")
+	mock := &mockTestProvider{t: t, withTools: true, reasoning: longReasoning, toolRounds: 30}
 	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
 	defer srv.Close()
 
@@ -280,12 +280,12 @@ func TestCacheHitSurvivesTooSmallWindow(t *testing.T) {
 
 // TestReasoningRoundTripCost contrasts the hit-rate curve WITH vs WITHOUT the
 // reasoning_content round-trip (agent.go re-sends the assistant chain-of-thought
-// every turn). It quantifies how much that round-tripped CoT — assuming MoMA
+// every turn). It quantifies how much that round-tripped CoT — assuming test-provider
 // counts it as uncached prompt — drags the hit rate down at each turn.
 func TestReasoningRoundTripCost(t *testing.T) {
-	t.Skip("MoMA does not report prompt cache tokens")
+	t.Skip("test-provider does not report prompt cache tokens")
 	curve := func(reasoning string) []int {
-		mock := &mockMoMA{t: t, reasoning: reasoning}
+		mock := &mockTestProvider{t: t, reasoning: reasoning}
 		srv := httptest.NewServer(http.HandlerFunc(mock.handler))
 		defer srv.Close()
 		a, sink := newAgent(t, srv.URL, mock.tools(), 0, 0)
@@ -327,8 +327,8 @@ func TestReasoningRoundTripCost(t *testing.T) {
 // (so it equals the sum of the per-turn usages), and the aggregate rate is the
 // steadier, higher number compared to the volatile single-turn rate.
 func TestSessionAggregateCacheRate(t *testing.T) {
-	t.Skip("MoMA does not report prompt cache tokens")
-	mock := &mockMoMA{t: t, reasoning: longReasoning}
+	t.Skip("test-provider does not report prompt cache tokens")
+	mock := &mockTestProvider{t: t, reasoning: longReasoning}
 	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
 	defer srv.Close()
 
@@ -361,7 +361,7 @@ func TestSessionAggregateCacheRate(t *testing.T) {
 }
 
 func TestReleaseCacheHitGuard(t *testing.T) {
-	t.Skip("MoMA does not report prompt cache tokens")
+	t.Skip("test-provider does not report prompt cache tokens")
 	if os.Getenv("FAIRPEER_RELEASE_CACHE_GUARD") == "" {
 		t.Skip("set FAIRPEER_RELEASE_CACHE_GUARD=1 to run the release cache guard")
 	}
@@ -376,19 +376,19 @@ func TestReleaseCacheHitGuard(t *testing.T) {
 		{
 			name: "plain-dialogue",
 			run: func(t *testing.T) []int {
-				return cacheCurve(t, &mockMoMA{t: t, reasoning: longReasoning}, 14)
+				return cacheCurve(t, &mockTestProvider{t: t, reasoning: longReasoning}, 14)
 			},
 		},
 		{
 			name: "plain-dialogue-no-reasoning",
 			run: func(t *testing.T) []int {
-				return cacheCurve(t, &mockMoMA{t: t}, 14)
+				return cacheCurve(t, &mockTestProvider{t: t}, 14)
 			},
 		},
 		{
 			name: "long-dialogue",
 			run: func(t *testing.T) []int {
-				return cacheCurveWithMessages(t, &mockMoMA{t: t, reasoning: longReasoning}, repeatedMessages(18, 18))
+				return cacheCurveWithMessages(t, &mockTestProvider{t: t, reasoning: longReasoning}, repeatedMessages(18, 18))
 			},
 		},
 		{
@@ -402,31 +402,31 @@ func TestReleaseCacheHitGuard(t *testing.T) {
 					}
 					msgs = append(msgs, fmt.Sprintf("Turn %d: ", i)+strings.Repeat("preserve the request prefix while handling varied input. ", repeats))
 				}
-				return cacheCurveWithMessages(t, &mockMoMA{t: t, reasoning: longReasoning}, msgs)
+				return cacheCurveWithMessages(t, &mockTestProvider{t: t, reasoning: longReasoning}, msgs)
 			},
 		},
 		{
 			name: "tool-loop",
 			run: func(t *testing.T) []int {
-				return toolLoopCurve(t, &mockMoMA{t: t, withTools: true, reasoning: longReasoning, toolRounds: 14})
+				return toolLoopCurve(t, &mockTestProvider{t: t, withTools: true, reasoning: longReasoning, toolRounds: 14})
 			},
 		},
 		{
 			name: "tool-loop-no-reasoning",
 			run: func(t *testing.T) []int {
-				return toolLoopCurve(t, &mockMoMA{t: t, withTools: true, toolRounds: 14})
+				return toolLoopCurve(t, &mockTestProvider{t: t, withTools: true, toolRounds: 14})
 			},
 		},
 		{
 			name: "long-tool-loop",
 			run: func(t *testing.T) []int {
-				return toolLoopCurve(t, &mockMoMA{t: t, withTools: true, reasoning: longReasoning, toolRounds: 24})
+				return toolLoopCurve(t, &mockTestProvider{t: t, withTools: true, reasoning: longReasoning, toolRounds: 24})
 			},
 		},
 		{
 			name: "long-tool-loop-no-reasoning",
 			run: func(t *testing.T) []int {
-				return toolLoopCurve(t, &mockMoMA{t: t, withTools: true, toolRounds: 24})
+				return toolLoopCurve(t, &mockTestProvider{t: t, withTools: true, toolRounds: 24})
 			},
 		},
 	}
@@ -462,7 +462,7 @@ func TestReleaseCacheHitGuard(t *testing.T) {
 	}
 }
 
-func cacheCurve(t *testing.T, mock *mockMoMA, turns int) []int {
+func cacheCurve(t *testing.T, mock *mockTestProvider, turns int) []int {
 	return cacheCurveWithMessages(t, mock, repeatedMessages(turns, 6))
 }
 
@@ -474,7 +474,7 @@ func repeatedMessages(turns, repeats int) []string {
 	return msgs
 }
 
-func cacheCurveWithMessages(t *testing.T, mock *mockMoMA, messages []string) []int {
+func cacheCurveWithMessages(t *testing.T, mock *mockTestProvider, messages []string) []int {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
 	defer srv.Close()
@@ -488,7 +488,7 @@ func cacheCurveWithMessages(t *testing.T, mock *mockMoMA, messages []string) []i
 	return usageRates(sink.usages)
 }
 
-func toolLoopCurve(t *testing.T, mock *mockMoMA) []int {
+func toolLoopCurve(t *testing.T, mock *mockTestProvider) []int {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
 	defer srv.Close()
@@ -538,11 +538,11 @@ func envInt(name string, fallback int) int {
 func newAgent(t *testing.T, url string, reg *tool.Registry, contextWindow, recentKeep int) (*Agent, *collectSink) {
 	t.Helper()
 	prov, err := openai.New(provider.Config{
-		Name:    "MoMA",
+		Name:    "test-provider",
 		BaseURL: url,
-		Model:   "MoMA-reasoner",
+		Model:   "test-provider-reasoner",
 		APIKey:  "test",
-		Extra:   map[string]any{"api_key_env": "JIUTIAN_API_KEY"},
+		Extra:   map[string]any{"api_key_env": "FAIRPEER_API_KEY"},
 	})
 	if err != nil {
 		t.Fatalf("provider New: %v", err)

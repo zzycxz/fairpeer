@@ -13,25 +13,25 @@ import (
 
 // TestRAGMindMapBuildsTree confirms rag_mindmap walks the entity graph outward
 // from a root and compiles it into a mind-map Markdown file. We seed a store
-// with a small graph (张三→MoMAPeer→RAG模块), set it as the global RAG store,
+// with a small graph (张三→TestProject→RAG模块), set it as the global RAG store,
 // run the tool, and check the output reflects the relations.
 func TestRAGMindMapBuildsTree(t *testing.T) {
 	s := newRAGTestStore(t)
-	// Seed: 张三 --[负责]--> MoMAPeer; MoMAPeer --[包含]--> RAG模块.
+	// Seed: 张三 --[负责]--> TestProject; TestProject --[包含]--> RAG模块.
 	src := rag.Source{Path: "/doc.md", Chunk: 0}
 	if err := s.UpsertEntity("docs", rag.Entity{NameRaw: "张三", Type: "person", Description: "技术总监"}, src); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpsertEntity("docs", rag.Entity{NameRaw: "MoMAPeer", Type: "project"}, src); err != nil {
+	if err := s.UpsertEntity("docs", rag.Entity{NameRaw: "TestProject", Type: "project"}, src); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.UpsertEntity("docs", rag.Entity{NameRaw: "RAG模块", Type: "module"}, src); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpsertRelation("docs", rag.Relation{Source: "张三", Target: "MoMAPeer", Type: "负责"}, src); err != nil {
+	if err := s.UpsertRelation("docs", rag.Relation{Source: "张三", Target: "TestProject", Type: "负责"}, src); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpsertRelation("docs", rag.Relation{Source: "MoMAPeer", Target: "RAG模块", Type: "包含"}, src); err != nil {
+	if err := s.UpsertRelation("docs", rag.Relation{Source: "TestProject", Target: "RAG模块", Type: "包含"}, src); err != nil {
 		t.Fatal(err)
 	}
 

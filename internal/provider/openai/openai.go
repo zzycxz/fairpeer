@@ -1,12 +1,7 @@
 // Package openai implements the OpenAI-compatible /chat/completions provider.
 // It self-registers under the "openai" kind, so any OpenAI-compatible endpoint
 // (Qwen, DeepSeek, GLM, MiniMax, etc.) is just a config instance rather than
-// code. Each instance picks its reasoning wire shape from the explicit
-// reasoning_protocol config field (not URL auto-detection):
-//   - "moma" → emits thinking.type=enabled plus thinking_effort as a depth
-//     hint (for endpoints that expect the Jiutian/MoMA-flavor CoT shape).
-//   - everything else uses the vanilla reasoning_effort scale
-//     (low/medium/high).
+// code. All providers use the standard reasoning_effort scale (low/medium/high).
 package openai
 
 import (
@@ -63,48 +58,30 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	protocol = normalizeReasoningProtocol(protocol)
-	// Thinking protocol is now opt-in per provider via reasoning_protocol="moma".
-	// No more URL-based auto-detection or hardcoded model allowlist — any provider
-	// (not just Jiutian MoMA) can declare this protocol explicitly.
-	moma := protocol == "moma"
 	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
 	switch {
 	case protocol == "none":
 		effort = ""
-	case moma:
-		switch effort {
-		case "", "off": // "off" is a retired level (disabled thinking); fall back to the default depth
-			effort = "high"
-		case "medium", "high":
-			// pass through — universally accepted by all MoMA models (18/18 tested)
-		case "low":
-			effort = "medium" // low rejected by kimi-k2.6, jiutian-lan-236b; clamp to medium
-		case "xhigh", "max":
-			effort = "high" // rejected by 16/18 MoMA models; clamp to high
-		default:
-			return nil, fmt.Errorf("openai: provider %q uses MoMA thinking; effort must be low, medium, or high", name)
-		}
 	case minimax:
-		// M3's knob is binary. The config effort layer normalises user input
-		// to "adaptive", "disabled", or "" (== auto). We keep "high"/"max"
-		// (legacy MoMA) and "low"/"medium" (Anthropic) out — config-level
-		// NormalizeEffort remaps them to "adaptive" already, so anything
-		// reaching here is expected to be one of: "", "adaptive", "disabled".
-		effort = strings.ToLower(strings.TrimSpace(effort))
+		// MiniMax: binary adaptive/disabled knob. Map unified levels:
+		// low/medium → disabled, high → adaptive
 		switch effort {
-		case "": // auto — leave empty so the wire emits thinking.type=adaptive
-		case "adaptive", "disabled":
+		case "":
+			// auto — leave empty so the wire emits thinking.type=adaptive
+		case "low", "medium":
+			effort = "disabled"
+		case "high", "adaptive":
+			effort = "adaptive"
+		case "disabled":
+			// pass through
 		default:
-			return nil, fmt.Errorf("openai: provider %q uses MiniMax thinking; effort must be adaptive or disabled", name)
+			return nil, fmt.Errorf("openai: provider %q uses MiniMax thinking; effort must be low, medium, or high", name)
 		}
 	case effort != "":
-		// Non-MoMA backends use OpenAI's reasoning_effort scale (low/medium/
-		// high); "max" is a MoMA-ism other gateways reject with 400, so clamp it
-		// to the OpenAI ceiling and reject other values at boot, not at request time.
+		// Standard OpenAI-compatible: pass through low/medium/high directly.
 		switch effort {
-		case "max":
-			effort = "high"
 		case "low", "medium", "high":
+			// pass through
 		default:
 			return nil, fmt.Errorf("openai: provider %q: effort must be low, medium, or high", name)
 		}
@@ -124,7 +101,6 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		keyEnv:       keyEnv,
 		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
 		model:        cfg.Model,
-		moma:         moma,
 		minimax:      minimax,
 		effort:       effort,
 		vision:       vision,
@@ -151,7 +127,6 @@ type client struct {
 	baseURL      string
 	model        string
 	http         *http.Client
-	moma         bool
 	minimax      bool                            // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
 	effort       string                          // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
 	vision       bool                            // true when the provider supports image_url content parts
@@ -173,7 +148,7 @@ func (c *client) SetOnReplay(fn func(ctx context.Context) error) { c.onReplay = 
 
 func normalizeReasoningProtocol(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "moma", "openai", "none":
+	case "openai", "none":
 		return strings.ToLower(strings.TrimSpace(raw))
 	default:
 		return ""
@@ -288,8 +263,8 @@ func (c *client) streamWithReconnect(ctx context.Context, resp *http.Response, n
 
 func (c *client) buildRequest(req provider.Request) chatRequest {
 	// Repair tool-call pairing before sending: an interrupted/resumed history can
-	// carry an assistant tool_calls turn whose results never landed, which MoMA
-	// rejects with a 400 ("must be followed by tool messages …").
+	// carry an assistant tool_calls turn whose results never landed, which the
+	// API rejects with a 400 ("must be followed by tool messages …").
 	src := provider.SanitizeToolPairing(req.Messages)
 	msgs := make([]chatMessage, len(src))
 	for i, m := range src {
@@ -297,12 +272,6 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 			Role:       string(m.Role),
 			ToolCallID: m.ToolCallID,
 			Name:       m.Name,
-		}
-		// MoMA thinking mode 400s a tool_calls turn whose reasoning_content was
-		// dropped on a cache-miss replay ("reasoning_content … must be passed back"),
-		// so round it back — but only on the turn that carries the tool calls.
-		if c.moma && m.Role == provider.RoleAssistant && len(m.ToolCalls) > 0 {
-			cm.ReasoningContent = m.ReasoningContent
 		}
 		for _, tc := range m.ToolCalls {
 			wire := chatToolCall{ID: tc.ID, Type: "function"}
@@ -342,11 +311,6 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		MaxTokens:     req.MaxTokens,
 	}
 	switch {
-	case c.moma:
-		// MoMA uses `thinking_effort` (not OpenAI's `reasoning_effort`) for depth.
-		// Thinking is always enabled for MoMA thinking models.
-		out.Thinking = &thinkingMode{Type: "enabled"}
-		out.ThinkingEffort = c.effort
 	case c.minimax:
 		// M3 uses a single `thinking.type` field with two valid values:
 		// "adaptive" (default, thinking on) and "disabled" (off). Reasoning
@@ -539,9 +503,9 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 }
 
 // normaliseUsage folds the two cache-hit shapes the OpenAI-compatible ecosystem
-// uses into a single Usage: MoMA puts prompt_cache_{hit,miss}_tokens at the
-// top of usage; OpenAI and MoMA put it nested under prompt_tokens_details.
-// Whichever side reports non-zero wins; miss is derived when only hit is given.
+// uses into a single Usage: some providers put prompt_cache_{hit,miss}_tokens at
+// the top of usage; others put it nested under prompt_tokens_details. Whichever
+// side reports non-zero wins; miss is derived when only hit is given.
 // Reasoning tokens land in completion_tokens_details on thinking-mode models.
 // Note: some providers do not report cache tokens (both fields are 0); the
 // normalisation logic is kept for future cache support and for other providers.
@@ -579,7 +543,6 @@ type chatRequest struct {
 	Temperature     float64        `json:"temperature,omitempty"`
 	MaxTokens       int            `json:"max_tokens,omitempty"`
 	ReasoningEffort string         `json:"reasoning_effort,omitempty"` // OpenAI standard
-	ThinkingEffort  string         `json:"thinking_effort,omitempty"`  // MoMA platform
 	Thinking        *thinkingMode  `json:"thinking,omitempty"`
 }
 
@@ -593,11 +556,11 @@ type streamOptions struct {
 
 type chatMessage struct {
 	Role string `json:"role"`
-	// content is always present (never omitted): MoMA's strict deserializer
-	// rejects a message missing the field. A pure tool_calls assistant turn
-	// serializes as null (OpenAI-spec, and what strict clones expect); every
-	// other role/message serializes as a string, empty included — null is
-	// rejected by some backends for a tool message.
+	// content is always present (never omitted): some providers' strict
+	// deserializers reject a message missing the field. A pure tool_calls
+	// assistant turn serializes as null (OpenAI-spec, and what strict clones
+	// expect); every other role/message serializes as a string, empty
+	// included — null is rejected by some backends for a tool message.
 	// For multimodal messages, content is an array of ContentPart objects.
 	Content          any            `json:"content"`
 	ReasoningContent string         `json:"reasoning_content,omitempty"`
@@ -643,9 +606,8 @@ type streamResponse struct {
 	} `json:"error"`
 }
 
-// wireUsage covers both MoMA's top-level cache fields and the
-// OpenAI/MoMA nested details — normaliseUsage chooses whichever side
-// reports values.
+// wireUsage covers both top-level cache fields and nested details —
+// normaliseUsage chooses whichever side reports values.
 type wireUsage struct {
 	PromptTokens          int `json:"prompt_tokens"`
 	CompletionTokens      int `json:"completion_tokens"`

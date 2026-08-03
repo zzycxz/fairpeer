@@ -89,7 +89,7 @@ func TestEffortDefaultsBeforeStartup(t *testing.T) {
 
 	got := NewApp().Effort()
 	if !got.Supported || got.Current != "auto" || got.Default != "high" || !hasLevel(got.Levels, "auto") {
-		t.Fatalf("pre-startup Effort() = %+v, want auto with MoMA default high", got)
+		t.Fatalf("pre-startup Effort() = %+v, want auto with test-provider default high", got)
 	}
 }
 
@@ -303,26 +303,26 @@ close_behavior = "quit"
 
 func TestSettingsSubagentDefaultsRoundTrip(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	t.Setenv("JIUTIAN_API_KEY", "sk-test")
+	t.Setenv("FAIRPEER_API_KEY", "sk-test")
 	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
 	if err := os.WriteFile(config.UserConfigPath(), []byte(`
-default_model = "moma/qwen3.6-35b"
+default_model = "test-provider/test-model-a"
 
 [[providers]]
-name = "moma"
+name = "test-provider"
 kind = "openai"
-base_url = "https://api.jiutian.10086.cn"
-models = ["qwen3.6-35b", "qwen3.6-27b"]
-default = "qwen3.6-35b"
-api_key_env = "JIUTIAN_API_KEY"
+base_url = "https://api.example.com"
+models = ["test-model-a", "test-model-b"]
+default = "test-model-a"
+api_key_env = "FAIRPEER_API_KEY"
 `), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
 	app := NewApp()
-	if err := app.SetSubagentModel("moma/qwen3.6-27b"); err != nil {
+	if err := app.SetSubagentModel("test-provider/test-model-b"); err != nil {
 		t.Fatalf("SetSubagentModel: %v", err)
 	}
 	if err := app.SetSubagentEffort("max"); err != nil {
@@ -330,42 +330,42 @@ api_key_env = "JIUTIAN_API_KEY"
 	}
 
 	got := app.Settings()
-	if got.SubagentModel != "moma/qwen3.6-27b" || got.SubagentEffort != "max" {
+	if got.SubagentModel != "test-provider/test-model-b" || got.SubagentEffort != "max" {
 		t.Fatalf("subagent settings = model:%q effort:%q", got.SubagentModel, got.SubagentEffort)
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
-	if cfg.Agent.SubagentModel != "moma/qwen3.6-27b" || cfg.Agent.SubagentEffort != "max" {
+	if cfg.Agent.SubagentModel != "test-provider/test-model-b" || cfg.Agent.SubagentEffort != "max" {
 		t.Fatalf("saved config = model:%q effort:%q", cfg.Agent.SubagentModel, cfg.Agent.SubagentEffort)
 	}
 }
 
 func TestSettingsSurfacesOfficialProviderTemplatesSeparately(t *testing.T) {
-	t.Skip("Incompatible with MoMA-only architecture")
+	t.Skip("Incompatible with test-provider-only architecture")
 }
 
 func TestSettingsRepairsLegacyOfficialProviderWithoutModel(t *testing.T) {
-	t.Skip("Incompatible with MoMA-only architecture")
+	t.Skip("Incompatible with test-provider-only architecture")
 }
 
 func TestSettingsTreatsReservedProviderNameWithExternalEndpointAsCustom(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	t.Setenv("JIUTIAN_API_KEY", "sk-test")
+	t.Setenv("FAIRPEER_API_KEY", "sk-test")
 	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
 	if err := os.WriteFile(config.UserConfigPath(), []byte(`
-default_model = "qwen/qwen3.6-35b"
+default_model = "test-provider/test-model-a"
 
 [desktop]
-provider_access = ["moma"]
+provider_access = ["test-provider"]
 
 [[providers]]
-name = "moma"
+name = "test-provider"
 kind = "openai"
 base_url = "https://opencode.ai/zen/go/v1"
-models = ["qwen3.6-35b", "qwen3.6-27b", "glm-5"]
-default = "qwen3.6-35b"
-api_key_env = "JIUTIAN_API_KEY"
+models = ["test-model-a", "test-model-b", "glm-5"]
+default = "test-model-a"
+api_key_env = "FAIRPEER_API_KEY"
 `), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -373,50 +373,50 @@ api_key_env = "JIUTIAN_API_KEY"
 	got := NewApp().Settings()
 	var custom *ProviderView
 	for i := range got.Providers {
-		if got.Providers[i].Name == "moma" {
+		if got.Providers[i].Name == "test-provider" {
 			custom = &got.Providers[i]
 			break
 		}
 	}
 	if custom == nil {
-		t.Fatalf("settings providers missing MoMA: %+v", got.Providers)
+		t.Fatalf("settings providers missing test-provider: %+v", got.Providers)
 	}
 	if custom.BuiltIn {
-		t.Fatalf("external MoMA endpoint should be custom, got built-in provider: %+v", *custom)
+		t.Fatalf("external test-provider endpoint should be custom, got built-in provider: %+v", *custom)
 	}
 	if !custom.Added || !custom.KeySet || custom.BaseURL != "https://opencode.ai/zen/go/v1" {
-		t.Fatalf("external MoMA provider = %+v, want added key-set custom opencode endpoint", *custom)
+		t.Fatalf("external test-provider provider = %+v, want added key-set custom opencode endpoint", *custom)
 	}
 	for _, p := range got.OfficialProviders {
-		if p.Name == "moma" && p.Added {
-			t.Fatalf("official MoMA template should not be marked added by external endpoint: %+v", p)
+		if p.Name == "test-provider" && p.Added {
+			t.Fatalf("official test-provider template should not be marked added by external endpoint: %+v", p)
 		}
 	}
 }
 
 func TestSettingsInfersLegacyProviderAccessWhenMissing(t *testing.T) {
-	t.Skip("Incompatible with MoMA-only architecture")
+	t.Skip("Incompatible with test-provider-only architecture")
 }
 
 func TestSettingsDoesNotInferProviderAccessWhenExplicitlyEmpty(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	t.Setenv("JIUTIAN_API_KEY", "sk-test")
+	t.Setenv("FAIRPEER_API_KEY", "sk-test")
 	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
 	if err := os.WriteFile(config.UserConfigPath(), []byte(`
-default_model = "moma/qwen3.6-35b"
+default_model = "test-provider/test-model-a"
 
 [desktop]
 provider_access = []
 
 [[providers]]
-name = "moma"
+name = "test-provider"
 kind = "openai"
-base_url = "https://api.jiutian.10086.cn"
-models = ["qwen3.6-35b"]
-default = "qwen3.6-35b"
-api_key_env = "JIUTIAN_API_KEY"
+base_url = "https://api.example.com"
+models = ["test-model-a"]
+default = "test-model-a"
+api_key_env = "FAIRPEER_API_KEY"
 `), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -430,13 +430,13 @@ api_key_env = "JIUTIAN_API_KEY"
 }
 
 func TestSettingsInfersConfiguredBuiltInsWithoutConfigFile(t *testing.T) {
-	t.Skip("Incompatible with MoMA-only architecture")
+	t.Skip("Incompatible with test-provider-only architecture")
 }
 
 func TestSettingsDoesNotInferBuiltInsWithoutKeys(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	t.Setenv("JIUTIAN_API_KEY", "")
-	t.Setenv("JIUTIAN_API_KEY", "")
+	t.Setenv("FAIRPEER_API_KEY", "")
+	t.Setenv("FAIRPEER_API_KEY", "")
 
 	got := NewApp().Settings()
 	for _, p := range got.Providers {
@@ -447,32 +447,32 @@ func TestSettingsDoesNotInferBuiltInsWithoutKeys(t *testing.T) {
 }
 
 func TestAddOfficialProviderAccessReplacesLegacyProviderWithoutModel(t *testing.T) {
-	t.Skip("Incompatible with MoMA-only architecture")
+	t.Skip("Incompatible with test-provider-only architecture")
 }
 
 func TestRemoveBuiltInProviderAccessRetargetsDefaultToRemainingAccess(t *testing.T) {
-	t.Skip("Incompatible with MoMA-only architecture")
+	t.Skip("Incompatible with test-provider-only architecture")
 }
 
 func TestModelsForTabOnlyListsProviderAccessWhenConfigured(t *testing.T) {
-	t.Skip("Incompatible with MoMA-only architecture")
+	t.Skip("Incompatible with test-provider-only architecture")
 }
 
-func TestModelsForTabListsMoMAAPIPaidAccess(t *testing.T) {
+func TestModelsForTabListsTestProviderAPIPaidAccess(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	t.Setenv("JIUTIAN_API_KEY", "sk-test")
+	t.Setenv("FAIRPEER_API_KEY", "sk-test")
 
 	cfg := config.Default()
-	cfg.DefaultModel = "moma/qwen3.6-35b"
-	cfg.Desktop.ProviderAccess = []string{"moma"}
+	cfg.DefaultModel = "test-provider/test-model-a"
+	cfg.Desktop.ProviderAccess = []string{"test-provider"}
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
 
 	models := NewApp().Models()
 	refs := modelRefsFromView(models)
-	if !refs["moma/qwen3.6-35b"] {
-		t.Fatalf("Models() refs = %+v, missing moma/qwen3.6-35b", models)
+	if !refs["test-provider/test-model-a"] {
+		t.Fatalf("Models() refs = %+v, missing test-provider/test-model-a", models)
 	}
 	if len(models) == 0 {
 		t.Fatalf("Models() len = 0, want > 0")
@@ -481,12 +481,12 @@ func TestModelsForTabListsMoMAAPIPaidAccess(t *testing.T) {
 
 func TestSetModelForTabRejectsProviderOutsideAccess(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	t.Setenv("JIUTIAN_API_KEY", "sk-test")
-	t.Setenv("JIUTIAN_API_KEY", "sk-test")
+	t.Setenv("FAIRPEER_API_KEY", "sk-test")
+	t.Setenv("FAIRPEER_API_KEY", "sk-test")
 
 	cfg := config.Default()
-	cfg.DefaultModel = "moma/qwen3.6-35b"
-	cfg.Desktop.ProviderAccess = []string{"moma"}
+	cfg.DefaultModel = "test-provider/test-model-a"
+	cfg.Desktop.ProviderAccess = []string{"test-provider"}
 	cfg.Providers = append(cfg.Providers, config.ProviderEntry{
 		Name:    "other",
 		Kind:    "openai",
@@ -499,7 +499,7 @@ func TestSetModelForTabRejectsProviderOutsideAccess(t *testing.T) {
 
 	app := NewApp()
 	app.ctx = context.Background()
-	tab := &WorkspaceTab{ID: "tab_a", Scope: "global", Ready: true, model: "moma/qwen3.6-35b"}
+	tab := &WorkspaceTab{ID: "tab_a", Scope: "global", Ready: true, model: "test-provider/test-model-a"}
 	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
 	app.tabOrder = []string{tab.ID}
 	app.activeTabID = tab.ID
@@ -512,25 +512,25 @@ func TestSetModelForTabRejectsProviderOutsideAccess(t *testing.T) {
 
 func TestSetDefaultModelRejectsProviderWithoutKey(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	t.Setenv("JIUTIAN_API_KEY", "")
+	t.Setenv("FAIRPEER_API_KEY", "")
 
 	cfg := config.Default()
-	cfg.Desktop.ProviderAccess = []string{"moma"}
+	cfg.Desktop.ProviderAccess = []string{"test-provider"}
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
 
 	app := NewApp()
-	tab := &WorkspaceTab{ID: "tab_a", Scope: "global", Ready: true, model: "moma/qwen3.6-35b"}
+	tab := &WorkspaceTab{ID: "tab_a", Scope: "global", Ready: true, model: "test-provider/test-model-a"}
 	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
 	app.tabOrder = []string{tab.ID}
 	app.activeTabID = tab.ID
 
-	err := app.SetDefaultModel("moma/qwen3.6-27b")
+	err := app.SetDefaultModel("test-provider/test-model-b")
 	if err == nil || !strings.Contains(err.Error(), "has no key") {
 		t.Fatalf("SetDefaultModel no-key error = %v, want has no key", err)
 	}
-	if tab.model != "moma/qwen3.6-35b" {
+	if tab.model != "test-provider/test-model-a" {
 		t.Fatalf("tab model after failed default change = %q, want previous", tab.model)
 	}
 }
@@ -540,12 +540,12 @@ func TestSaveProviderPersistsReasoningProtocol(t *testing.T) {
 
 	app := NewApp()
 	if err := app.SaveProvider(ProviderView{
-		Name:              "momaxy",
+		Name:              "test-provider",
 		Kind:              "openai",
 		BaseURL:           "https://proxy.example.com/v1",
-		Models:            []string{"qwen3.6-35b"},
-		Default:           "qwen3.6-35b",
-		APIKeyEnv:         "MoMA_PROXY_KEY",
+		Models:            []string{"test-model-a"},
+		Default:           "test-model-a",
+		APIKeyEnv:         "test-provider_PROXY_KEY",
 		ReasoningProtocol: "none",
 		SupportedEfforts:  []string{"high", "max"},
 		DefaultEffort:     "max",
@@ -554,7 +554,7 @@ func TestSaveProviderPersistsReasoningProtocol(t *testing.T) {
 	}
 
 	cfg := config.LoadForEdit(config.UserConfigPath())
-	got, ok := cfg.Provider("momaxy")
+	got, ok := cfg.Provider("test-provider")
 	if !ok {
 		t.Fatal("saved provider not found")
 	}
@@ -564,7 +564,7 @@ func TestSaveProviderPersistsReasoningProtocol(t *testing.T) {
 
 	view := app.Settings()
 	for _, p := range view.Providers {
-		if p.Name == "momaxy" {
+		if p.Name == "test-provider" {
 			if p.ReasoningProtocol != "none" {
 				t.Fatalf("settings reasoningProtocol = %q, want none", p.ReasoningProtocol)
 			}
@@ -685,7 +685,7 @@ func TestSetEffortRebuildsController(t *testing.T) {
 	app.ctx = context.Background()
 	app.readyHook = func() {}
 	old := control.New(control.Options{Label: "old-controller"})
-	app.setTestCtrl(old, "moma/qwen3.6-35b")
+	app.setTestCtrl(old, "test-provider/test-model-a")
 	defer func() {
 		if c := app.activeCtrl(); c != nil {
 			c.Close()
@@ -1087,7 +1087,7 @@ func TestSubmitToTabHistoryDisplaysRawInputAfterMemoryCompose(t *testing.T) {
 	defer ctrl.Close()
 
 	app := NewApp()
-	app.setTestCtrl(ctrl, "moma/test")
+	app.setTestCtrl(ctrl, "test-provider/test")
 	ctrl.QueueMemory(`Saved memory "fairpeer-contributions": contribution count updated`)
 
 	const prompt = "不要，删了"
@@ -1138,7 +1138,7 @@ func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 		WorkspaceRoot: workspace,
 	})
 	app := NewApp()
-	app.setTestCtrl(ctrl, "moma/test")
+	app.setTestCtrl(ctrl, "test-provider/test")
 	app.tabs["test"].Scope = "project"
 	app.tabs["test"].WorkspaceRoot = workspace
 	app.tabs["test"].TopicID = "topic_source"

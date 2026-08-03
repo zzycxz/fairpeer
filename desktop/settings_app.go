@@ -214,8 +214,8 @@ func officialProviderHost(baseURL string) string {
 	return strings.ToLower(u.Hostname())
 }
 
-// officialProviderKindFromEntry previously detected built-in official providers
-// (jiutian moma). FairPeer ships no official presets, so this always returns "".
+// officialProviderKindFromEntry previously detected built-in official providers.
+// FairPeer ships no official presets, so this always returns "".
 func officialProviderKindFromEntry(p config.ProviderEntry) string {
 	return ""
 }
@@ -277,17 +277,7 @@ func providerViewFromEntry(p config.ProviderEntry, builtIn, added bool) Provider
 func officialProviderViews(added map[string]bool) []ProviderView {
 	// FairPeer ships no preset official providers, so this is always empty —
 	// but the frontend expects a non-nil [] (not null), so allocate it.
-	out := []ProviderView{}
-	for _, kind := range []string{"moma"} {
-		entries, _, err := officialProviderTemplate(kind)
-		if err != nil {
-			continue
-		}
-		for _, entry := range entries {
-			out = append(out, providerViewFromEntry(entry, true, added[entry.Name]))
-		}
-	}
-	return out
+	return []ProviderView{}
 }
 
 func officialProviderAddedSet(cfg *config.Config) map[string]bool {
@@ -654,9 +644,9 @@ func (a *App) rebuild() error {
 		return err
 	}
 	// boot.Build (re)built the global RPM budget; rebind it into RAG extraction
-	// and the Jiutian direct-call path so a runtime RPM change propagates to all
+	// and the platform direct-call path so a runtime RPM change propagates to all
 	// request paths, not just the main conversation. cfg resolves the RAG bucket
-	// key to the configured extract model; nil falls back to the Jiutian key.
+	// key to the configured extract model; nil falls back to the platform key.
 	rebuildCfg, _ := config.LoadForRoot(root)
 	boot.RebindRAGBudget(a.ragExtractor, rebuildCfg)
 

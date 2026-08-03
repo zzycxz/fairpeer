@@ -225,7 +225,7 @@ type Request struct {
 
 // interruptedToolResult stands in for a tool result that never landed — an
 // assistant tool_calls turn whose execution was cut short (interrupt, crash) and
-// later resumed. Sending such a turn unanswered trips the OpenAI/MoMA 400
+// later resumed. Sending such a turn unanswered trips the OpenAI 400
 // "An assistant message with 'tool_calls' must be followed by tool messages
 // responding to each 'tool_call_id'".
 const interruptedToolResult = "[no result: the previous turn was interrupted before this tool call completed]"
@@ -384,8 +384,8 @@ const (
 )
 
 // Usage reports token accounting for a completion. Cache hit/miss come from
-// either MoMA's top-level prompt_cache_{hit,miss}_tokens or the OpenAI/MoMA
-// standard prompt_tokens_details.cached_tokens — the openai provider normalises
+// either top-level prompt_cache_{hit,miss}_tokens or the OpenAI standard
+// prompt_tokens_details.cached_tokens — the openai provider normalises
 // both shapes into these fields. Note: some providers do not report cache
 // tokens (both fields stay 0); the normalisation is kept for future support.
 // ReasoningTokens is the thinking-mode subset of
@@ -500,7 +500,7 @@ func IsStreamInterrupted(err error) bool {
 
 // Provider is a chat-capable model backend.
 type Provider interface {
-	// Name returns the provider instance name, e.g. "MoMA" / "MoMA".
+	// Name returns the provider instance name, e.g. "openai" / "anthropic".
 	Name() string
 	// Stream starts a streaming completion, pushing increments on the channel.
 	// Cancelling ctx must abort the underlying request; a closed channel marks
@@ -510,7 +510,7 @@ type Provider interface {
 
 // Config is a resolved provider instance configuration.
 type Config struct {
-	Name    string         // instance name, e.g. "MoMA"
+	Name    string         // instance name, e.g. "openai"
 	BaseURL string         // OpenAI-compatible endpoint
 	Model   string         // model id
 	APIKey  string         // resolved from api_key_env
@@ -523,7 +523,7 @@ type Config struct {
 // surface it verbatim instead of dumping a raw status body. Providers should
 // return this (rather than a generic status error) for auth failures.
 type AuthError struct {
-	Provider string // the provider instance name, e.g. "MoMA"
+	Provider string // the provider instance name, e.g. "openai"
 	KeyEnv   string // the api_key_env the key is read from, when known
 	Status   int    // the HTTP status (401 or 403)
 	HasKey   bool   // a non-empty key was sent vs. no key configured

@@ -194,7 +194,7 @@ func writeBranchMeta(t *testing.T, path string, createdAt, updatedAt time.Time) 
 }
 
 func TestContinueSessionPathReusesPriorFile(t *testing.T) {
-	prev := filepath.Join("sessions", "20260602-120000.000000000-MoMA.jsonl")
+	prev := filepath.Join("sessions", "20260602-120000.000000000-test-provider.jsonl")
 	if got := ContinueSessionPath(prev, "sessions", "other-model"); got != prev {
 		t.Fatalf("carried conversation should keep its file %q, got %q", prev, got)
 	}
@@ -202,14 +202,14 @@ func TestContinueSessionPathReusesPriorFile(t *testing.T) {
 
 func TestContinueSessionPathMintsFreshWhenNoPrior(t *testing.T) {
 	dir := t.TempDir()
-	got := ContinueSessionPath("", dir, "MoMA")
+	got := ContinueSessionPath("", dir, "test-provider")
 	if filepath.Dir(got) != dir || !strings.HasSuffix(got, ".jsonl") {
 		t.Fatalf("fresh path = %q, want a .jsonl under %q", got, dir)
 	}
 }
 
 func TestContinueSessionPathNoPersistence(t *testing.T) {
-	if got := ContinueSessionPath("", "", "MoMA"); got != "" {
+	if got := ContinueSessionPath("", "", "test-provider"); got != "" {
 		t.Fatalf("no session dir should disable persistence, got %q", got)
 	}
 }

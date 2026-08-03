@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """browseruse_server.py — local HTTP sidecar that runs a browser-use Agent.
 
-The momapeer Go host launches a system Chromium-based browser (Chrome / Edge)
+The fairpeer Go host launches a system Chromium-based browser (Chrome / Edge)
 itself (see internal/browserlaunch), hands this server a CDP wsURL via the
 /run endpoint, and this server drives that very browser with a browser-use
 agentic loop. There is exactly ONE shared browser instance: the agent drives
@@ -22,7 +22,7 @@ LLM credentials are inherited from the parent environment (the Go host runs
 loadDotEnv at boot and spawns this process without overriding the env, so
 OPENAI_API_KEY / ANTHROPIC_API_KEY etc. are present). The model + base_url +
 proxy come per-request from the host so the sidecar uses the same provider the
-user configured in momapeer.
+user configured in fairpeer.
 
 Run standalone for debugging:
     python browseruse_server.py --port 18901 --host 127.0.0.1
@@ -89,8 +89,8 @@ class RunSpec:
         # family deterministically rather than guessing from the model name.
         self.provider_kind: str = (payload.get("provider_kind") or "").strip().lower()
         self.base_url: str = payload.get("base_url") or ""
-        # api_key_env: which env var holds the key. The host passes the momapeer
-        # provider's api_key_env name (e.g. JIUTIAN_API_KEY); we surface it as
+        # api_key_env: which env var holds the key. The host passes the fairpeer
+        # provider's api_key_env name (e.g. OPENAI_API_KEY); we surface it as
         # the standard OPENAI_API_KEY/ANTHROPIC_API_KEY the chat clients read.
         self.api_key_env: str = (payload.get("api_key_env") or "").strip()
         self.proxy: str = payload.get("proxy") or ""
@@ -99,7 +99,7 @@ class RunSpec:
 def _resolve_api_key(spec: RunSpec, default_env: str) -> str:
     """Return the API key for the resolved provider.
 
-    Preference: the env var named by api_key_env (the momapeer provider's key),
+    Preference: the env var named by api_key_env (the fairpeer provider's key),
     then the standard default_env (OPENAI_API_KEY / ANTHROPIC_API_KEY), then "".
     Also surface the resolved key as default_env in os.environ so LangChain chat
     clients (which hard-read os.environ[default_env]) pick it up.
@@ -117,9 +117,9 @@ def _resolve_api_key(spec: RunSpec, default_env: str) -> str:
 def build_llm(spec: RunSpec):
     """Construct the LLM client from the per-request model/base_url/key.
 
-    browser-use accepts LangChain-style chat models. The host resolves momapeer's
+    browser-use accepts LangChain-style chat models. The host resolves fairpeer's
     "provider/model" ref into (bare model name, base_url, provider_kind, api_key_env)
-    so a custom gateway (九天/MoMA) is driven correctly instead of hitting the
+    so a custom gateway is driven correctly instead of hitting the
     default api.openai.com. Keys come from the environment, never over the wire.
     """
     model = spec.model or ""
@@ -146,7 +146,7 @@ def build_llm(spec: RunSpec):
         if http_client is not None:
             kwargs["http_client"] = http_client
         return _llm_clients["anthropic"](**kwargs)
-    # Default: OpenAI-compatible (covers OpenAI, Azure-compatible, 九天/MoMA, and
+    # Default: OpenAI-compatible (covers OpenAI, Azure-compatible, and
     # any OpenAI-compatible gateway via base_url).
     if "openai" in _llm_clients:
         _resolve_api_key(spec, "OPENAI_API_KEY")

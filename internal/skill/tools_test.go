@@ -68,7 +68,7 @@ func TestRunSkillSubagentRuns(t *testing.T) {
 
 func TestRunSkillSubagentResolvesProfile(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".fairpeer/skills/deep.md", "---\ndescription: deep\nrunAs: subagent\nmodel: moma\neffort: max\n---\nbody")
+	writeSkill(t, home, ".fairpeer/skills/deep.md", "---\ndescription: deep\nrunAs: subagent\nmodel: test-provider\neffort: max\n---\nbody")
 	tl := NewRunSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), nil)
 
 	pr, ok := tl.(interface {
@@ -78,8 +78,8 @@ func TestRunSkillSubagentResolvesProfile(t *testing.T) {
 		t.Fatal("run_skill should expose ResolveProfile")
 	}
 	got := pr.ResolveProfile(json.RawMessage(`{"name":"deep","arguments":"x"}`))
-	if got == nil || got.Model != "moma" || got.Effort != "max" {
-		t.Fatalf("profile = %+v, want moma/max", got)
+	if got == nil || got.Model != "test-provider" || got.Effort != "max" {
+		t.Fatalf("profile = %+v, want test-provider/max", got)
 	}
 }
 
@@ -197,7 +197,7 @@ func TestInstallSkill(t *testing.T) {
 	tl := NewInstallSkillTool(st, nil)
 
 	out, err := tl.Execute(context.Background(), json.RawMessage(
-		`{"name":"deploy","description":"ship it","body":"steps","runAs":"subagent","model":"moma","effort":"max","allowedTools":["bash","read_file"]}`))
+		`{"name":"deploy","description":"ship it","body":"steps","runAs":"subagent","model":"test-provider","effort":"max","allowedTools":["bash","read_file"]}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestInstallSkill(t *testing.T) {
 	if !ok {
 		t.Fatal("installed skill not readable")
 	}
-	if sk.RunAs != RunSubagent || sk.Model != "moma" || sk.Effort != "max" || len(sk.AllowedTools) != 2 {
+	if sk.RunAs != RunSubagent || sk.Model != "test-provider" || sk.Effort != "max" || len(sk.AllowedTools) != 2 {
 		t.Errorf("frontmatter not round-tripped: runAs=%s model=%q effort=%q tools=%v", sk.RunAs, sk.Model, sk.Effort, sk.AllowedTools)
 	}
 	// Refuses overwrite.

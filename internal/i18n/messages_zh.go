@@ -20,7 +20,7 @@ var Chinese = Messages{
 	StepSetKey:      "设置 API key",
 
 	InitHint:       "项目记忆（AGENTS.md）在会话内由模型生成：运行 `fairpeer chat`，然后 `/init` —— 模型会分析代码库并写入。配置请用 `fairpeer setup`。",
-	StepSetKeyHint: "运行 `fairpeer setup`，或 export JIUTIAN_API_KEY=…",
+	StepSetKeyHint: "运行 `fairpeer setup`，或 export OPENAI_API_KEY=…",
 	StepChatDesc:   "交互式会话",
 	StepRunDesc:    "执行单次任务",
 	HelpFooter:     "fairpeer help · 查看全部命令",
@@ -261,7 +261,7 @@ var Chinese = Messages{
 	SetupComplete:         "设置完成。",
 	SetupCancelled:        "设置已取消。",
 	TryHintFmt:            "试试: %s",
-	NextHint:              "下一步：设置 API key（运行 `fairpeer setup` 或 export JIUTIAN_API_KEY=...），然后运行 `fairpeer run \"你的任务\"`。",
+	NextHint:              "下一步：设置 API key（运行 `fairpeer setup` 或 export OPENAI_API_KEY=...），然后运行 `fairpeer run \"你的任务\"`。",
 	ConfirmReconfigureFmt: "%s 已存在。重新配置并覆盖？",
 	KeepingExisting:       "保留原配置不变。",
 	NotOverwritingFmt:     "%s 已存在，不覆盖",
@@ -355,12 +355,12 @@ var Chinese = Messages{
   fairpeer chat
   fairpeer chat --continue
   fairpeer run "把 main.go 里的 TODO 实现掉"
-  fairpeer run --model moma "给这个函数补单元测试"
+  fairpeer run --model provider/model "给这个函数补单元测试"
   echo "解释这段代码" | fairpeer run
 
 配置：
   优先级：flag > ./fairpeer.toml > ~/.config/fairpeer/config.toml > 内置默认值
-  密钥通过 api_key_env 从环境变量注入（如 JIUTIAN_API_KEY）。
+  密钥通过 api_key_env 从环境变量注入（如 OPENAI_API_KEY）。
   运行 'fairpeer setup' 生成配置；详见 docs/SPEC.md。
 `,
 }

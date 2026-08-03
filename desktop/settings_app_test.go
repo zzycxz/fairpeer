@@ -46,15 +46,15 @@ func TestWithFreshSystemPromptPrependsMissingSystemMessage(t *testing.T) {
 
 func TestProviderViewFromEntry_FiltersNonChatModels(t *testing.T) {
 	p := config.ProviderEntry{
-		Name: "moma",
+		Name: "test-provider",
 		Models: []string{
-			"jiutian-lan", "jiutian-lan-pro",
-			"jiutian-lan-asr", "jiutian-lan-tts",
-			"jiutian-lan-tts-voiceclone", "jiutian-lan-tts-voicedesign",
+			"test-model-base", "test-model-pro",
+			"test-model-asr", "test-model-tts",
+			"test-model-tts-voiceclone", "test-model-tts-voicedesign",
 		},
 	}
 	view := providerViewFromEntry(p, true, false)
-	want := []string{"jiutian-lan", "jiutian-lan-pro"}
+	want := []string{"test-model-base", "test-model-pro"}
 	if !reflect.DeepEqual(view.Models, want) {
 		t.Errorf("ProviderView.Models = %v, want %v", view.Models, want)
 	}
@@ -74,23 +74,23 @@ func TestFetchProviderModelsFiltersNonChatModels(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"object": "list",
 			"data": []map[string]string{
-				{"id": "jiutian-lan-35b", "object": "model"},
-				{"id": "jiutian-lan.5-asr", "object": "model"},
-				{"id": "jiutian-lan.5-tts", "object": "model"},
+				{"id": "test-model-a", "object": "model"},
+				{"id": "test-model-5-asr", "object": "model"},
+				{"id": "test-model-5-tts", "object": "model"},
 			},
 		})
 	}))
 	defer srv.Close()
 
 	got, err := NewApp().FetchProviderModels(ProviderView{
-		Name:      "moma",
+		Name:      "test-provider",
 		BaseURL:   srv.URL,
 		APIKeyEnv: "TEST_PROVIDER_KEY",
 	})
 	if err != nil {
 		t.Fatalf("FetchProviderModels: %v", err)
 	}
-	want := []string{"jiutian-lan-35b"}
+	want := []string{"test-model-a"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("FetchProviderModels = %v, want %v", got, want)
 	}
@@ -101,27 +101,27 @@ func TestSaveProviderFiltersNonChatModels(t *testing.T) {
 
 	app := NewApp()
 	if err := app.SaveProvider(ProviderView{
-		Name:      "custom-moma",
+		Name:      "custom-provider",
 		Kind:      "openai",
-		BaseURL:   "https://api.jiutian.10086.cn/v1",
-		Models:    []string{"jiutian-lan.5-asr", "jiutian-lan-35b", "jiutian-lan.5-tts"},
-		Default:   "jiutian-lan.5-asr",
-		APIKeyEnv: "JIUTIAN_API_KEY",
+		BaseURL:   "https://api.example.com/v1",
+		Models:    []string{"test-model-5-asr", "test-model-a", "test-model-5-tts"},
+		Default:   "test-model-5-asr",
+		APIKeyEnv: "FAIRPEER_API_KEY",
 	}); err != nil {
 		t.Fatalf("SaveProvider: %v", err)
 	}
 
 	cfg := config.LoadForEdit(config.UserConfigPath())
-	got, ok := cfg.Provider("custom-moma")
+	got, ok := cfg.Provider("custom-provider")
 	if !ok {
 		t.Fatal("saved provider not found")
 	}
-	want := []string{"jiutian-lan-35b"}
+	want := []string{"test-model-a"}
 	if !reflect.DeepEqual(got.ModelList(), want) {
 		t.Errorf("saved provider models = %v, want %v", got.ModelList(), want)
 	}
-	if got.DefaultModel() != "jiutian-lan-35b" {
-		t.Errorf("saved provider default = %q, want jiutian-lan-35b", got.DefaultModel())
+	if got.DefaultModel() != "test-model-a" {
+		t.Errorf("saved provider default = %q, want test-model-a", got.DefaultModel())
 	}
 }
 

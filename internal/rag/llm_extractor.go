@@ -1,12 +1,12 @@
 package rag
 
-// jiutian_extractor.go is the default rag.Extractor implementation: it calls
+// llm_extractor.go is the default rag.Extractor implementation: it calls
 // the configured OpenAI-compatible /chat/completions endpoint with a JSON-output
 // instruction and parses the structured entities+relations out of the response.
 //
 // This lives in the rag package (not internal/tool/builtin) so it's reusable by
 // the Pipeline without a circular dep on the tool layer. It depends only on
-// the shared jiutian HTTP helper.
+// the shared HTTP helper.
 
 import (
 	"bytes"
@@ -23,17 +23,17 @@ import (
 	"github.com/zzycxz/fairpeer/internal/apihelper"
 )
 
-// JiutianExtractorConfig configures the LLM-backed extractor.
-type JiutianExtractorConfig struct {
-	BaseURL  string // e.g. "https://jiutian.10086.cn/largemodel/moma/api/v3" ("" = uses apihelper.BaseURL)
-	APIKey   string // env var name to read the key from (e.g. "JIUTIAN_API_KEY"); if empty, reads JIUTIAN_API_KEY
+// LLMExtractorConfig configures the LLM-backed extractor.
+type LLMExtractorConfig struct {
+	BaseURL  string // e.g. "https://api.example.com/v1" ("" = uses apihelper.BaseURL)
+	APIKey   string // env var name to read the key from (e.g. "FAIRPEER_API_KEY"); if empty, reads FAIRPEER_API_KEY
 	Model    string // chat model to use (e.g. the cowork main model)
 	TwoStage bool   // extract entities then relations in two LLM calls (higher quality, 2× tokens); false = single combined call
 }
 
-// jiutianExtractor implements rag.Extractor via /chat/completions + JSON mode.
-type jiutianExtractor struct {
-	cfg     JiutianExtractorConfig
+// llmExtractor implements rag.Extractor via /chat/completions + JSON mode.
+type llmExtractor struct {
+	cfg     LLMExtractorConfig
 	baseURL string
 	client  *http.Client
 	// budget gates LLM calls through the global RPM limiter so extraction
@@ -46,19 +46,19 @@ type jiutianExtractor struct {
 }
 
 // SetBudget installs the global RPM limiter. Implements rag.BudgetSetter.
-func (e *jiutianExtractor) SetBudget(b BudgetAcquirer, key string) {
+func (e *llmExtractor) SetBudget(b BudgetAcquirer, key string) {
 	e.budget = b
 	e.budgetKey = key
 }
 
-// NewJiutianExtractor builds the default extractor. The cfg passed from boot.go
+// NewLLMExtractor builds the default extractor. The cfg passed from boot.go
 // carries the model from [cowork] extract_model (or the main model when empty).
-func NewJiutianExtractor(cfg JiutianExtractorConfig) Extractor {
+func NewLLMExtractor(cfg LLMExtractorConfig) Extractor {
 	base := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	if base == "" {
 		base = apihelper.BaseURL
 	}
-	return &jiutianExtractor{
+	return &llmExtractor{
 		cfg:     cfg,
 		baseURL: base,
 		client:  &http.Client{Timeout: 180 * time.Second},
@@ -71,7 +71,7 @@ func NewJiutianExtractor(cfg JiutianExtractorConfig) Extractor {
 // {known_nodes} — which forces relation endpoints to be real entities and cuts
 // hallucinated edges (mirrors HE graph.py:510). Two-stage costs ~2× tokens but
 // markedly improves graph quality; single-stage is the cheaper fallback.
-func (e *jiutianExtractor) Extract(ctx context.Context, chunk string, nodePrompt, edgePrompt string) (ExtractResult, error) {
+func (e *llmExtractor) Extract(ctx context.Context, chunk string, nodePrompt, edgePrompt string) (ExtractResult, error) {
 	if strings.TrimSpace(chunk) == "" {
 		return ExtractResult{}, nil
 	}
@@ -80,7 +80,7 @@ func (e *jiutianExtractor) Extract(ctx context.Context, chunk string, nodePrompt
 	}
 	apiKey := resolveKey(e.cfg.APIKey)
 	if apiKey == "" {
-		return ExtractResult{}, fmt.Errorf("LLM api key not set (JIUTIAN_API_KEY)")
+		return ExtractResult{}, fmt.Errorf("LLM api key not set (FAIRPEER_API_KEY)")
 	}
 
 	text := truncateChunk(chunk, 6000)
@@ -147,7 +147,7 @@ func (e *jiutianExtractor) Extract(ctx context.Context, chunk string, nodePrompt
 
 // chatJSON sends one user message and returns the assistant's content string
 // (JSON fences stripped). Shared by both single- and two-stage paths.
-func (e *jiutianExtractor) chatJSON(ctx context.Context, apiKey, userMsg string) (string, error) {
+func (e *llmExtractor) chatJSON(ctx context.Context, apiKey, userMsg string) (string, error) {
 	// Gate through the global RPM limiter so extraction shares the per-minute
 	// quota with all other LLM calls. Background priority (false) so extraction
 	// doesn't starve the interactive conversation under tight RPM limits.
@@ -263,10 +263,10 @@ func parseRelationsJSON(b []byte) ([]Relation, error) {
 	return out, nil
 }
 
-// resolveKey reads the API key from the named env var (default JIUTIAN_API_KEY).
+// resolveKey reads the API key from the named env var (default FAIRPEER_API_KEY).
 func resolveKey(envName string) string {
 	if envName == "" {
-		envName = "JIUTIAN_API_KEY"
+		envName = "FAIRPEER_API_KEY"
 	}
 	return strings.TrimSpace(os.Getenv(envName))
 }

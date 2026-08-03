@@ -19,9 +19,9 @@ func TestToWire(t *testing.T) {
 	t.Run("tool dispatch profile", func(t *testing.T) {
 		w := toWire(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
 			Name: "task", Args: `{"prompt":"x"}`,
-			Profile: &event.Profile{Model: "moma", Effort: "max"},
+			Profile: &event.Profile{Model: "test-provider", Effort: "max"},
 		}})
-		if w.Tool == nil || w.Tool.Profile == nil || w.Tool.Profile.Model != "moma" || w.Tool.Profile.Effort != "max" {
+		if w.Tool == nil || w.Tool.Profile == nil || w.Tool.Profile.Model != "test-provider" || w.Tool.Profile.Effort != "max" {
 			t.Errorf("profile = %+v", w.Tool)
 		}
 	})

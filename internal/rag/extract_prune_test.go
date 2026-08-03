@@ -11,19 +11,19 @@ func TestPruneDanglingRelations(t *testing.T) {
 	res := ExtractResult{
 		Entities: []Entity{
 			{NameRaw: "张三"},
-			{NameRaw: "MoMAPeer"},
+			{NameRaw: "TestProject"},
 		},
 		Relations: []Relation{
-			{Source: "张三", Target: "MoMAPeer", Type: "负责"},   // valid
-			{Source: "张三", Target: "幻觉实体", Type: "虚构"},       // dangling target
-			{Source: "虚构公司", Target: "MoMAPeer", Type: "投资"}, // dangling source
+			{Source: "张三", Target: "TestProject", Type: "负责"},   // valid
+			{Source: "张三", Target: "幻觉实体", Type: "虚构"},          // dangling target
+			{Source: "虚构公司", Target: "TestProject", Type: "投资"}, // dangling source
 		},
 	}
 	got := pruneDanglingRelations(res)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 valid relation, got %d: %+v", len(got), got)
 	}
-	if got[0].Target != "MoMAPeer" {
+	if got[0].Target != "TestProject" {
 		t.Errorf("surviving relation wrong: %+v", got[0])
 	}
 }
@@ -83,8 +83,8 @@ func TestParseRelationsJSON(t *testing.T) {
 // TestFormatKnownNodes confirms the stage-2 known-nodes bullet list is built
 // from the stage-1 entities (raw display names, verbatim-matchable).
 func TestFormatKnownNodes(t *testing.T) {
-	got := formatKnownNodes([]Entity{{NameRaw: "张三"}, {NameRaw: " MoMAPeer "}})
-	if got != "- 张三\n- MoMAPeer" {
+	got := formatKnownNodes([]Entity{{NameRaw: "张三"}, {NameRaw: " TestProject "}})
+	if got != "- 张三\n- TestProject" {
 		t.Errorf("known-nodes list wrong: %q", got)
 	}
 	if formatKnownNodes(nil) != "（本段未识别到具体实体）" {

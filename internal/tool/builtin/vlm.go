@@ -21,7 +21,7 @@ import (
 
 var (
 	vlmMu    sync.RWMutex
-	vlmModel string // the configured vision model ref (e.g. "qwen/qwen3.6-27b"); "" = unconfigured
+	vlmModel string // the configured vision model ref (from [cowork] vlm_model); "" = unconfigured
 )
 
 // SetVLMModel sets the vision model used by CallVLM. boot.go calls this after

@@ -83,7 +83,7 @@ type RunRequest struct {
 	// MaxSteps caps the agentic loop (default applied by the sidecar if 0).
 	MaxSteps int `json:"max_steps,omitempty"`
 	// Model is the LLM model NAME (no provider prefix) the sidecar should use
-	// (e.g. "gpt-4o", "claude-sonnet-4-..."). The host resolves the fairpeer
+	// (e.g. "gpt-4o", "claude-sonnet-4-5"). The host resolves the fairpeer
 	// "provider/model" ref down to this bare name before sending.
 	Model string `json:"model,omitempty"`
 	// ProviderKind selects the LLM client family: "openai" (OpenAI-compatible,

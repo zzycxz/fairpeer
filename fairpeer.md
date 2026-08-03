@@ -111,7 +111,7 @@ make cross    # → dist/（6 个目标）
 桌面端通过 GitHub Actions 自动构建，推送 `desktop-v*` 标签触发：
 
 ```bash
-git tag desktop-v0.1.6 && git push origin desktop-v0.1.6
+git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
 ```
 
 CI 自动构建 6 个平台（Windows/macOS/Linux × amd64/arm64）、签名、
@@ -132,8 +132,6 @@ CI 自动构建 6 个平台（Windows/macOS/Linux × amd64/arm64）、签名、
 
 ## 版本历史
 
-- **v0.1.0**（2026-06-14）：初始版本，MoMA 平台适配、搜索降级链、
-  Bot 网关、ACP、LSP、CodeGraph、i18n。
-- **v0.1.5**（2026-06-15）：Time MCP、Built-in MCP toggle、计费修复。
-- **v0.1.6**（2026-06-15）：自动更新修复、版本号注入、签名分离、
-  Bot 功能公开、品牌名称全面修正。
+- **v0.1.0**（2026-08-03）：FairPeer 首版发布。从 MoMAPeer 全面改造：
+  去九天专属、对接 11 家公网 LLM + 7 个 Coding Plan、
+  新增主流邮箱支持、PPT 模板智能化、品牌焕新。

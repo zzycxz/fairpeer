@@ -811,14 +811,14 @@ func isolateUserConfig(t *testing.T) {
 	t.Chdir(root)
 }
 
-func TestEffortCommandWritesCurrentMoMAProvider(t *testing.T) {
+func TestEffortCommandWritesCurrentTestProviderProvider(t *testing.T) {
 	isolateUserConfig(t)
 
 	m := newTestChatTUI()
-	m.ctrl = control.New(control.Options{Label: "moma"})
-	m.modelRef = "moma/qwen/qwen3.6-35b"
+	m.ctrl = control.New(control.Options{Label: "test-provider"})
+	m.modelRef = "test-provider/test-provider/test-model-a"
 	m.buildController = func(_ string, _ []provider.Message, _ string) (*control.Controller, error) {
-		return control.New(control.Options{Label: "moma"}), nil
+		return control.New(control.Options{Label: "test-provider"}), nil
 	}
 
 	cmd := m.runEffortCommand("/effort max")
@@ -840,10 +840,10 @@ func TestEffortCommandRejectsUnsupportedProvider(t *testing.T) {
 	isolateUserConfig(t)
 
 	m := newTestChatTUI()
-	m.ctrl = control.New(control.Options{Label: "moma"})
+	m.ctrl = control.New(control.Options{Label: "test-provider"})
 	m.modelRef = "custom-provider/some-model"
 	m.buildController = func(_ string, _ []provider.Message, _ string) (*control.Controller, error) {
-		return control.New(control.Options{Label: "moma"}), nil
+		return control.New(control.Options{Label: "test-provider"}), nil
 	}
 
 	if cmd := m.runEffortCommand("/effort max"); cmd != nil {
@@ -858,10 +858,10 @@ func TestEffortCommandAutoClearsProviderEffort(t *testing.T) {
 	isolateUserConfig(t)
 
 	m := newTestChatTUI()
-	m.ctrl = control.New(control.Options{Label: "moma"})
-	m.modelRef = "moma/qwen/qwen3.6-35b"
+	m.ctrl = control.New(control.Options{Label: "test-provider"})
+	m.modelRef = "test-provider/test-provider/test-model-a"
 	m.buildController = func(_ string, _ []provider.Message, _ string) (*control.Controller, error) {
-		return control.New(control.Options{Label: "moma"}), nil
+		return control.New(control.Options{Label: "test-provider"}), nil
 	}
 
 	if cmd := m.runEffortCommand("/effort max"); cmd == nil {
@@ -874,9 +874,9 @@ func TestEffortCommandAutoClearsProviderEffort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read saved config: %v", err)
 	}
-	section := providerSection(string(body), "moma")
+	section := providerSection(string(body), "test-provider")
 	if strings.Contains(section, `effort      = "`) {
-		t.Fatalf("auto should clear saved moma effort:\n%s", section)
+		t.Fatalf("auto should clear saved effort:\n%s", section)
 	}
 }
 

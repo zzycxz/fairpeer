@@ -71,10 +71,10 @@ func TestRemoveEnvFileDeletesKeyAndUnsetsProcessEnv(t *testing.T) {
 func TestPromoteProviderKeysLiftsProjectKeyAndStripsHomeEnv(t *testing.T) {
 	home := isolateDesktopUserDirs(t)
 	homeEnv := filepath.Join(home, ".env")
-	if err := os.WriteFile(homeEnv, []byte("JIUTIAN_API_KEY=sk-test\nNPM_TOKEN=secret\n"), 0o600); err != nil {
+	if err := os.WriteFile(homeEnv, []byte("FAIRPEER_API_KEY=sk-test\nNPM_TOKEN=secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("JIUTIAN_API_KEY", "sk-test")
+	t.Setenv("FAIRPEER_API_KEY", "sk-test")
 	t.Setenv("NPM_TOKEN", "secret")
 
 	promoteProviderKeysToCredentials(config.Default())
@@ -83,7 +83,7 @@ func TestPromoteProviderKeysLiftsProjectKeyAndStripsHomeEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("credentials not written: %v", err)
 	}
-	if !strings.Contains(string(cred), "JIUTIAN_API_KEY=sk-test") {
+	if !strings.Contains(string(cred), "FAIRPEER_API_KEY=sk-test") {
 		t.Errorf("provider key not promoted to credentials:\n%s", cred)
 	}
 	if strings.Contains(string(cred), "NPM_TOKEN") {
@@ -91,7 +91,7 @@ func TestPromoteProviderKeysLiftsProjectKeyAndStripsHomeEnv(t *testing.T) {
 	}
 
 	rest, _ := os.ReadFile(homeEnv)
-	if strings.Contains(string(rest), "JIUTIAN_API_KEY") {
+	if strings.Contains(string(rest), "FAIRPEER_API_KEY") {
 		t.Errorf("promoted key must be stripped from ~/.env:\n%s", rest)
 	}
 	if !strings.Contains(string(rest), "NPM_TOKEN=secret") {
@@ -106,19 +106,19 @@ func TestPromoteProviderKeysLeavesExistingCredentialsKey(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(config.UserCredentialsPath()), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(config.UserCredentialsPath(), []byte("JIUTIAN_API_KEY=sk-global\n"), 0o600); err != nil {
+	if err := os.WriteFile(config.UserCredentialsPath(), []byte("FAIRPEER_API_KEY=sk-global\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	homeEnv := filepath.Join(home, ".env")
-	if err := os.WriteFile(homeEnv, []byte("JIUTIAN_API_KEY=sk-stale\n"), 0o600); err != nil {
+	if err := os.WriteFile(homeEnv, []byte("FAIRPEER_API_KEY=sk-stale\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("JIUTIAN_API_KEY", "sk-global")
+	t.Setenv("FAIRPEER_API_KEY", "sk-global")
 
 	promoteProviderKeysToCredentials(config.Default())
 
 	cred, _ := os.ReadFile(config.UserCredentialsPath())
-	if !strings.Contains(string(cred), "JIUTIAN_API_KEY=sk-global") {
+	if !strings.Contains(string(cred), "FAIRPEER_API_KEY=sk-global") {
 		t.Errorf("existing credentials key was changed:\n%s", cred)
 	}
 	if data, err := os.Stat(homeEnv); err != nil || data.Size() == 0 {

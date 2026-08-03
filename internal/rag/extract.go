@@ -755,7 +755,7 @@ func pruneDanglingRelations(res ExtractResult) []Relation {
 
 // ParseExtractJSON unmarshals an LLM JSON response into ExtractResult. The LLM
 // may return either the canonical {entities:[...], relations:[...]} shape or
-// wrap it; we tolerate both. Exposed so the jiutian extractor impl can share
+// wrap it; we tolerate both. Exposed so the LLM extractor impl can share
 // parsing logic.
 func ParseExtractJSON(b []byte) (ExtractResult, error) {
 	var raw struct {
@@ -797,7 +797,7 @@ func ParseExtractJSON(b []byte) (ExtractResult, error) {
 
 // ExtractionPrompt is the system+user prompt sent to the LLM for each chunk.
 // Adapted from Hyper-Extract's AutoGraph default (types/graph.py:41). Kept as
-// a constant so the jiutian impl and any future provider impl share it.
+// a constant so the LLM impl and any future provider impl share it.
 const ExtractionPrompt = `你是知识抽取助手。从下面这段文本中抽取所有实体（人/组织/项目/产品/概念/地点/事件/主题）和它们之间的关系。
 
 要求：
@@ -810,7 +810,7 @@ const ExtractionPrompt = `你是知识抽取助手。从下面这段文本中抽
 7. 每条关系给出 strength 评分(1-10整数)：10=核心/直接/明确的关系（如"负责""属于""包含"），5=一般关联，1=弱/间接/模糊关系
 
 只返回 JSON，格式如下：
-{"entities":[{"name":"张三","type":"person","description":"..."}],"relations":[{"source":"张三","target":"MoMAPeer","type":"负责","description":"...","strength":8}]}
+{"entities":[{"name":"张三","type":"person","description":"..."}],"relations":[{"source":"张三","target":"项目Alpha","type":"负责","description":"...","strength":8}]}
 
 type 可选值：person, organization, project, product, concept, location, event, topic, other
 
@@ -851,7 +851,7 @@ const EdgeExtractionPrompt = `你是关系抽取助手。下面已给出本段�
 已知实体：
 %s
 
-只返回 JSON：{"relations":[{"source":"张三","target":"MoMAPeer","type":"负责","description":"...","strength":8}]}
+只返回 JSON：{"relations":[{"source":"张三","target":"项目Alpha","type":"负责","description":"...","strength":8}]}
 
 ### 文本：
 %s`

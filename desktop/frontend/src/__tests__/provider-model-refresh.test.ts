@@ -36,28 +36,28 @@ eq(
 );
 
 eq(
-  mergedFetchedProviderModels(["jiutian-lan-35b"], ["jiutian-lan-8b", "jiutian-lan-omni", "jiutian-lan-35b"], { preserveCurated: true }),
-  ["jiutian-lan-35b"],
-  "manual access refresh preserves selected MoMA model instead of importing provider catalog",
+  mergedFetchedProviderModels(["qwen3-max"], ["qwen3-plus", "qwen3-coder", "qwen3-max"], { preserveCurated: true }),
+  ["qwen3-max"],
+  "manual access refresh preserves selected model instead of importing provider catalog",
 );
 
 eq(
-  providerModelCandidates(["jiutian-lan-35b"], ["jiutian-lan-8b", "jiutian-lan-omni", "jiutian-lan-35b"]),
-  ["jiutian-lan-35b", "jiutian-lan-8b", "jiutian-lan-omni"],
+  providerModelCandidates(["qwen3-max"], ["qwen3-plus", "qwen3-coder", "qwen3-max"]),
+  ["qwen3-max", "qwen3-plus", "qwen3-coder"],
   "manual access refresh can show provider catalog as unsaved candidates",
 );
 
 eq(
-  providerModelCandidates(["jiutian-lan-35b"], ["jiutian-lan.5-asr", "jiutian-lan.5-tts", "jiutian-lan.5", "jiutian-lan-35b"]),
-  ["jiutian-lan-35b", "jiutian-lan.5"],
+  providerModelCandidates(["qwen3-max"], ["qwen-vl-plus", "qwen-tts-1", "qwen3.5", "qwen3-max"]),
+  ["qwen3-max", "qwen3.5"],
   "manual access refresh filters non-chat candidates before saving",
 );
 
 eq(
   [
-    isLikelyChatModel("jiutian-lan-35b"),
-    isLikelyChatModel("jiutian-lan.5-asr"),
-    isLikelyChatModel("jiutian-lan.5-tts"),
+    isLikelyChatModel("qwen3-max"),
+    isLikelyChatModel("qwen-vl-plus"),
+    isLikelyChatModel("qwen-tts-1"),
     isLikelyChatModel("text-embedding-3-small"),
   ],
   [true, false, false, false],
