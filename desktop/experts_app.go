@@ -255,7 +255,7 @@ func (r *desktopExpertRunner) Run(ctx context.Context, model, systemPrompt, task
 	// rate-limit decorator (background priority, since this runs in a team).
 	// Experts run as background work, not the main agent — pass mainProvider=false
 	// so they respect reserve_main and never starve the foreground conversation.
-	prov, err := boot.NewProviderWithProxy(entry, netclient.ProxySpec{Mode: netclient.ModeAuto}, false, false)
+	prov, err := boot.NewProviderWithProxy(entry, netclient.ProxySpec{Mode: netclient.ModeAuto}, false)
 	if err != nil {
 		return "", fmt.Errorf("build provider for %s: %w", entry.Model, err)
 	}

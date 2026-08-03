@@ -41,7 +41,7 @@ func TestLiveMoMAPrompt(t *testing.T) {
 	}
 	prov, err := provider.New("openai", provider.Config{
 		Name:    "MoMA",
-		BaseURL: "https://api.apihelper.10086.cn",
+		BaseURL: "https://api.jiutian.10086.cn",
 		Model:   "qwen3.6-35b",
 		APIKey:  key,
 	})

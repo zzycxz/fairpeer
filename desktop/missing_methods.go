@@ -14,28 +14,26 @@ import (
 //
 // 全部从 7/15 exe 的真实调用上下文反推签名 + 复用已有 config 字段实现。
 
-// --- 九天 base domain（私有部署/代理）-----------------------------------
+// --- Fast-LLM base domain（legacy: 九天 private deployment/proxy）---------
 
-// GetJiutianBaseDomain returns the configured Jiutian API root override, or ""
-// when unset (the caller then falls back to the built-in default). Powers the
-// "模型域名" input in SettingsPanel — the user types a custom base URL for a
-// private Jiutian deployment, and this read populates the input on panel open.
+// GetJiutianBaseDomain returns the configured fast-LLM base URL override, or ""
+// when unset. Method name kept for frontend bridge compatibility; the field
+// migrated from the removed [jiutian] section to [cowork] fast_llm_base_domain.
+// Powers the "模型域名" input in SettingsPanel (will be removed in Phase 3).
 func (a *App) GetJiutianBaseDomain() string {
 	cfg, err := config.Load()
 	if err != nil {
 		return ""
 	}
-	return cfg.Jiutian.BaseDomainOrDefault()
+	return strings.TrimSpace(cfg.Cowork.FastLLMBaseDomain)
 }
 
-// SetJiutianBaseDomain persists a Jiutian API root override ("" = reset to the
-// built-in default). The SettingsPanel input fires this on blur/Enter so the
-// change survives restarts. A non-empty value rewrites every Jiutian provider's
-// base URL via boot-time apihelper.SetBaseDomain on the next launch.
+// SetJiutianBaseDomain persists a fast-LLM base URL override ("" = reset).
+// Method name kept for frontend bridge compatibility.
 func (a *App) SetJiutianBaseDomain(domain string) error {
 	domain = strings.TrimSpace(domain)
 	return a.applyConfigChange(func(c *config.Config) error {
-		c.Jiutian.BaseDomain = domain
+		c.Cowork.FastLLMBaseDomain = domain
 		return nil
 	})
 }

@@ -2723,17 +2723,9 @@ func (a *App) SlashArgs(input string) SlashArgsResult {
 // CapabilitiesView is the MCP & Skills drawer's data: connected/failed MCP
 // servers and the discoverable skills, the GUI counterpart to `/mcp` + `/skill`.
 type CapabilitiesView struct {
-	Servers      []ServerView      `json:"servers"`
-	Skills       []SkillView       `json:"skills"`
-	SkillRoots   []SkillRootView   `json:"skillRoots"`
-	JiutianTools []JiutianToolView `json:"jiutianTools"`
-}
-
-// JiutianToolView represents one Jiutian multimodal tool with its toggle state.
-type JiutianToolView struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Enabled     bool   `json:"enabled"`
+	Servers    []ServerView    `json:"servers"`
+	Skills     []SkillView     `json:"skills"`
+	SkillRoots []SkillRootView `json:"skillRoots"`
 }
 
 // ServerView is one MCP server for the drawer. Status is "connected" (with
@@ -2989,45 +2981,7 @@ func (a *App) Capabilities() CapabilitiesView {
 		})
 	}
 	out.SkillRoots = skillRootsView()
-	// Jiutian multimodal tools exposed in the skills page. image_understand
-	// is intentionally NOT listed here — it's now globally unified through the
-	// VLM degradation chain (qwen → 九天) configured via the model-page dropdown,
-	// so there's no per-skill toggle for it. Only the 九天-specific generation
-	// and video tools remain toggleable.
-	if loadedCfg != nil {
-		out.JiutianTools = []JiutianToolView{
-			{Name: "image_generate", Description: "图片生成 — 文生图、图生图", Enabled: loadedCfg.Jiutian.ImageGenerate},
-			{Name: "video_understand", Description: "视频理解 — 分析操作录屏、演示视频", Enabled: loadedCfg.Jiutian.VideoUnderstand},
-		}
-	}
 	return out
-}
-
-// SetJiutianTool enables or disables a Jiutian multimodal tool in the config file.
-// It goes through applyConfigChange (loadDesktopUserConfigForEdit → SaveTo → rebuild)
-// so the write uses the same source path that Settings() reads from. The previous
-// hand-rolled config.Load()+WriteFile read via LoadForRoot (merging project toml)
-// but wrote the user file, so the success-path re-read in the UI rolled the toggle
-// back to a stale value — the switch appeared unclickable.
-func (a *App) SetJiutianTool(name string, enabled bool) error {
-	return a.applyConfigChange(func(cfg *config.Config) error {
-		switch name {
-		case "image_understand":
-			// No longer surfaced in the skills UI — image understanding is
-			// globally unified via the VLM chain. The field is kept for
-			// backward compat: it still toggles the in-conversation image
-			// degradation path (openai provider), which is the only remaining
-			// use. Future config schemas may rename it.
-			cfg.Jiutian.ImageUnderstand = enabled
-		case "image_generate":
-			cfg.Jiutian.ImageGenerate = enabled
-		case "video_understand":
-			cfg.Jiutian.VideoUnderstand = enabled
-		default:
-			return fmt.Errorf("unknown jiutian tool: %s", name)
-		}
-		return nil
-	})
 }
 
 // DreamRunView is one Dream/Distill run record for the settings panel.

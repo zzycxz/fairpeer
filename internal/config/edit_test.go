@@ -303,7 +303,7 @@ func TestSetLanguage(t *testing.T) {
 }
 
 func TestNormalizeEffortMoMA(t *testing.T) {
-	e := &ProviderEntry{Name: "openai-test", Kind: "openai", BaseURL: "https://api.apihelper.10086.cn", Model: "qwen3.6-35b"}
+	e := &ProviderEntry{Name: "openai-test", Kind: "openai", BaseURL: "https://api.jiutian.10086.cn", Model: "qwen3.6-35b"}
 	cap := EffortCapabilityForEntry(e)
 	if !cap.Supported || len(cap.Levels) != 3 || cap.Levels[0] != "auto" || cap.Levels[1] != "high" || cap.Levels[2] != "max" {
 		t.Fatalf("MoMA levels = %+v, want auto/high/max", cap)
@@ -363,7 +363,7 @@ func TestResolveModelPreservesProviderEffort(t *testing.T) {
 	c.Providers = append(c.Providers, ProviderEntry{
 		Name:      "moma",
 		Kind:      "openai",
-		BaseURL:   "https://api.apihelper.10086.cn",
+		BaseURL:   "https://api.jiutian.10086.cn",
 		Model:     "qwen3.6-35b",
 		Models:    []string{"qwen3.6-35b", "qwen3.6-27b"},
 		Default:   "qwen3.6-35b",
@@ -1004,7 +1004,7 @@ func TestEffortCapabilityEmptySupportedEffortsNotConfigurable(t *testing.T) {
 	e := &ProviderEntry{
 		Name:    "moma",
 		Kind:    "openai",
-		BaseURL: "https://token-plan-cn.apihelper.10086.cn/v1",
+		BaseURL: "https://token-plan-cn.jiutian.10086.cn/v1",
 		Model:   "jiutian-lan-35b",
 	}
 	if cap := EffortCapabilityForEntry(e); cap.Supported {

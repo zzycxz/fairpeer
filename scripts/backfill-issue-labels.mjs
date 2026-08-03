@@ -5,7 +5,7 @@
 // workflow. GitHub access uses the local `gh` CLI (must be authenticated).
 //
 // Usage:
-//   JIUTIAN_API_KEY=... node scripts/backfill-issue-labels.mjs [options]
+//   OPENAI_API_KEY=... node scripts/backfill-issue-labels.mjs [options]
 // Options:
 //   --dry-run          print what would change, apply nothing
 //   --only-unlabeled   skip issues that already have an area label
@@ -19,9 +19,9 @@ const onlyUnlabeled = args.includes('--only-unlabeled');
 const li = args.indexOf('--limit');
 const limit = li >= 0 ? parseInt(args[li + 1], 10) : 200;
 
-const KEY = process.env.JIUTIAN_API_KEY;
+const KEY = process.env.OPENAI_API_KEY;
 if (!KEY) {
-  console.error('JIUTIAN_API_KEY is not set');
+  console.error('OPENAI_API_KEY is not set');
   process.exit(1);
 }
 
@@ -57,7 +57,7 @@ function gh(args) {
 }
 
 async function classify(title, body) {
-  const res = await fetch('https://jiutian.10086.cn/largemodel/moma/api/v3/chat/completions', {
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({

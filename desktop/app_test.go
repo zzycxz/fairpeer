@@ -313,7 +313,7 @@ default_model = "moma/qwen3.6-35b"
 [[providers]]
 name = "moma"
 kind = "openai"
-base_url = "https://api.apihelper.10086.cn"
+base_url = "https://api.jiutian.10086.cn"
 models = ["qwen3.6-35b", "qwen3.6-27b"]
 default = "qwen3.6-35b"
 api_key_env = "JIUTIAN_API_KEY"
@@ -413,7 +413,7 @@ provider_access = []
 [[providers]]
 name = "moma"
 kind = "openai"
-base_url = "https://api.apihelper.10086.cn"
+base_url = "https://api.jiutian.10086.cn"
 models = ["qwen3.6-35b"]
 default = "qwen3.6-35b"
 api_key_env = "JIUTIAN_API_KEY"

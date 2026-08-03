@@ -40,7 +40,6 @@ import (
 	"github.com/zzycxz/fairpeer/internal/permission"
 	"github.com/zzycxz/fairpeer/internal/plugin"
 	"github.com/zzycxz/fairpeer/internal/provider"
-	openaiprov "github.com/zzycxz/fairpeer/internal/provider/openai"
 	"github.com/zzycxz/fairpeer/internal/rag"
 	"github.com/zzycxz/fairpeer/internal/sandbox"
 	"github.com/zzycxz/fairpeer/internal/secret"
@@ -104,18 +103,12 @@ func ragBudgetKey(cfg *config.Config) string {
 	return jiutianBudgetKey()
 }
 
-// RebindRAGBudget re-injects the current globalBudget into an extractor and the
-// Jiutian direct-call path, so a runtime RPM change (settings rebuild) or the
-// first boot.Build propagates to RAG extraction / multimodal tools / embedding
-// without an app restart. extractor may be nil or not implement rag.BudgetSetter
-// (e.g. HE-based extraction), in which case only the Jiutian path is rebound.
+// RebindRAGBudget re-injects the current globalBudget into an extractor, so a
+// runtime RPM change (settings rebuild) or the first boot.Build propagates to
+// RAG extraction without an app restart. extractor may be nil or not implement
+// rag.BudgetSetter (e.g. HE-based extraction), in which case nothing is rebound.
 // Pass the loaded config so the RAG bucket key resolves to the extract model.
 func RebindRAGBudget(extractor any, cfg *config.Config) {
-	// Always rebind the Jiutian direct path — covers multimodal tools, embedding,
-	// and the VLM fallback regardless of which extractor is in use.
-	if globalBudget != nil {
-		apihelper.SetBudget(globalBudget, jiutianBudgetKey())
-	}
 	// Rebind the extractor if it supports it (jiutianExtractor does; HE-based
 	// extraction runs in a subprocess and is not gated here).
 	if extractor == nil {
@@ -283,29 +276,22 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// default) disables limiting; NewProviderWithProxy then passes providers
 	// through unwrapped, preserving backward compatibility.
 	globalBudget = provider.NewRequestBudget(cfg.LLM.RPM, cfg.LLM.ReserveMain)
-	// Re-inject the fresh budget into the Jiutian direct-call path so multimodal
-	// tools, RAG embedding, and the VLM fallback share this quota on every
-	// rebuild (a runtime RPM change re-runs Build). Extraction's per-extractor
-	// binding is rebound separately by RebindRAGBudget from the desktop layer,
-	// which owns the extractor instance.
-	apihelper.SetBudget(globalBudget, jiutianBudgetKey())
 	httpClient, err := netclient.NewHTTPClient(proxySpec, netclient.TransportOptions{})
 	if err != nil {
 		return nil, err
 	}
-	// Inject the proxy-aware client into the shared Jiutian helper. Without this,
-	// apihelper.APICall (used by the 九天 VLM fallback in the degradation chain,
-	// video_understand, file upload, and image generation) bypasses the proxy
-	// and fails with EOF in environments that require one. Done unconditionally
-	// so all callers share the same client.
+	// Inject the proxy-aware client into the shared apihelper. Without this,
+	// the direct /chat/completions callers (scheduler time-parser, RAG ask,
+	// RAG extractor) bypass the proxy and fail with EOF in environments that
+	// require one. Done unconditionally so all callers share the same client.
 	apihelper.SetClient(httpClient)
-	apihelper.SetBaseDomain(cfg.Jiutian.BaseDomainOrDefault())
+	apihelper.SetBaseDomain(cfg.Cowork.FastLLMBaseDomain)
 
 	// The executor's provider is the main-agent provider — pass mainProvider=true
 	// so NewProviderWithProxy marks it high-priority (always granted RPM slots;
 	// reserve_main protects it from background tasks). Subagent/classifier/VLM
 	// providers built elsewhere pass false (background priority, respect reserve).
-	execProv, err := NewProviderWithProxy(entry, proxySpec, cfg.Jiutian.ImageUnderstand, true)
+	execProv, err := NewProviderWithProxy(entry, proxySpec, true)
 	if err != nil {
 		return nil, err
 	}
@@ -520,11 +506,6 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	searchSpec := builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, stderr)
 	bashTimeout := time.Duration(cfg.BashTimeoutSeconds()) * time.Second
 	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRootsForRoot(root), cfg.ReadRoots(), bashSpec, bashTimeout, searchSpec, stderr, root, proxySpec)
-	// Register Jiutian multimodal tools based on config (not via init(), so they
-	// can be toggled per-capability in [jiutian] config section).
-	for _, t := range builtin.JiutianTools(&cfg.Jiutian) {
-		reg.Add(t)
-	}
 
 	// coWork-only capabilities: desktop automation, scheduled tasks, email,
 	// RAG, PPT. These are office-specific and stay gated to the cowork profile
@@ -663,13 +644,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				Label: vlmModel,
 			})
 		}
-		// Terminal fallback: 九天 always closes the chain. Even when the primary
-		// backend is jiutian, having a single-element chain is fine — CallVLM
-		// tries each in order and surfaces the last error.
-		chain = append(chain, builtin.VLMBackend{
-			Kind:  builtin.VLMBackendJiutian,
-			Label: "jiutian-LLMImage2Text",
-		})
+		// Terminal fallback removed: 九天 is no longer appended. An empty chain
+		// means CallVLM returns "no VLM backend configured", guiding the user to
+		// set a vision-capable model in Settings.
 		builtin.SetVLMChain(chain)
 		// Wire the provider-backed VLM runner so VLMBackend="provider" actually
 		// works. Without this, callProviderVLM returns "provider VLM bridge not
@@ -679,13 +656,6 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// rebuilds via a fresh Build) re-resolves models.
 		builtin.SetProviderChatRunner(func(ctx context.Context, modelRef string, msgs []provider.Message) ([]provider.Message, error) {
 			return runProviderVLMChat(ctx, cfg, modelRef, msgs)
-		})
-		// Inject the VLM chain into the openai provider so the in-conversation
-		// image-degradation path (text model + user image) also goes through the
-		// global qwen→九天 fallback instead of hard-coding 九天. Same chain as
-		// image_understand and screen_perceive — one configuration, one chain.
-		openaiprov.SetVLMBridge(func(ctx context.Context, image, prompt string) (string, error) {
-			return builtin.CallVLM(ctx, image, prompt)
 		})
 		// Browser launch options: visible browser + persistent profile + proxy, so
 		// the driven browser behaves like a human user and reaches sites the same
@@ -699,10 +669,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// client + browser-launch are owned here; the desktop registers an
 		// optional screencast sink so the panel can mirror the agent's browser.
 		builtin.SetBrowserAutoRuntime(buildBrowserAutoRuntime(cfg, opts))
-		// Hybrid RAG: when an embedding model is configured, inject an embedder so
-		// rag_search reranks FTS5 hits with semantic similarity. Empty model =
-		// FTS5-only (the default, works offline).
-		builtin.SetRAGEmbedder(builtin.ResolveRAGEmbedder(cfg.Cowork.EmbeddingModel))
+		// Hybrid RAG: an embedding model was previously used to inject an embedder
+		// for semantic reranking. The Jiutian-only embedder was removed; pass nil
+		// so rag_search stays FTS5-only (the default, works offline). A provider
+		// embedder will be reintroduced in a later phase.
+		builtin.SetRAGEmbedder(nil)
 		// Document tools (csv/json/md/txt read + write + convert). Text-based
 		// formats only; binary Office handled elsewhere (ppt via WPS MCP).
 		for _, t := range builtin.DocumentTools() {
@@ -1069,7 +1040,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				me.Thinking = "adaptive"
 			}
 		}
-		p, err := NewProviderWithProxy(&me, proxySpec, false, false)
+		p, err := NewProviderWithProxy(&me, proxySpec, false)
 		if err != nil {
 			return nil, nil, 0, err
 		}
@@ -1274,7 +1245,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	dreamProv := execProv
 	if ft := strings.TrimSpace(cfg.Agent.FastTaskModel); ft != "" {
 		if fe, ok := cfg.ResolveModel(ft); ok {
-			if dp, err := NewProviderWithProxy(fe, proxySpec, false, false); err == nil {
+			if dp, err := NewProviderWithProxy(fe, proxySpec, false); err == nil {
 				dreamProv = dp
 			} else {
 				fmt.Fprintf(stderr, "warning: fast_task_model %q not built, dream falls back to main model: %v\n", ft, err)
@@ -1338,7 +1309,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if !ok {
 			return nil, fmt.Errorf("auto_plan_classifier %q is not a configured provider", cm)
 		}
-		classifierProv, err := NewProviderWithProxy(ce, proxySpec, false, false)
+		classifierProv, err := NewProviderWithProxy(ce, proxySpec, false)
 		if err != nil {
 			return nil, fmt.Errorf("auto_plan_classifier %q: %w", cm, err)
 		}
@@ -1687,7 +1658,7 @@ func runProviderVLMChat(ctx context.Context, cfg *config.Config, modelRef string
 	if !ok {
 		return nil, fmt.Errorf("vlm_model %q is not a configured provider", ref)
 	}
-	prov, err := NewProviderWithProxy(entry, proxySpecForVLM, false, false)
+	prov, err := NewProviderWithProxy(entry, proxySpecForVLM, false)
 	if err != nil {
 		return nil, fmt.Errorf("build VLM provider %q: %w", ref, err)
 	}
@@ -1749,19 +1720,18 @@ func resolveBrowserProxyURL(spec netclient.ProxySpec) string {
 // custom assemblers (e.g. the ACP per-session factory) can reuse it without
 // going through the full Build.
 func NewProvider(e *config.ProviderEntry) (provider.Provider, error) {
-	return NewProviderWithProxy(e, netclient.ProxySpec{Mode: netclient.ModeAuto}, false, false)
+	return NewProviderWithProxy(e, netclient.ProxySpec{Mode: netclient.ModeAuto}, false)
 }
 
 // NewProviderWithProxy builds a provider.Provider with the configured ordinary
 // network proxy settings, and wraps it with the global request-budget decorator
 // (when [llm] rpm > 0) so it shares the per-API-key RPM quota.
 //
-// imageUnderstand toggles the 九天 image-vision fallback. mainProvider marks
-// the provider as the main-agent's (high-priority RPM slots, protected by
-// reserve_main); background providers (subagents, classifiers, VLM, etc.)
-// pass false. mainProvider is threaded explicitly so concurrent boot.Build
-// calls don't race on a process-global "which provider is main" flag.
-func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec, imageUnderstand, mainProvider bool) (provider.Provider, error) {
+// mainProvider marks the provider as the main-agent's (high-priority RPM slots,
+// protected by reserve_main); background providers (subagents, classifiers,
+// VLM, etc.) pass false. mainProvider is threaded explicitly so concurrent
+// boot.Build calls don't race on a process-global "which provider is main" flag.
+func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec, mainProvider bool) (provider.Provider, error) {
 	p, err := provider.New(e.Kind, provider.Config{
 		Name:    e.Name,
 		BaseURL: e.BaseURL,
@@ -1771,14 +1741,13 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec, im
 		// provider-kind-specific knobs. EffectiveEffort applies a configured
 		// default_effort when the user has not explicitly selected /effort.
 		Extra: map[string]any{
-			"api_key_env":              e.APIKeyEnv,
-			"thinking":                 e.Thinking,
-			"effort":                   config.EffectiveEffort(e),
-			"reasoning_protocol":       config.ReasoningProtocolForEntry(e),
-			"proxy_spec":               proxy,
-			"vision":                   e.Vision,
-			"vision_detail":            e.VisionDetail,
-			"jiutian_image_understand": imageUnderstand,
+			"api_key_env":        e.APIKeyEnv,
+			"thinking":           e.Thinking,
+			"effort":             config.EffectiveEffort(e),
+			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
+			"proxy_spec":         proxy,
+			"vision":             e.Vision,
+			"vision_detail":      e.VisionDetail,
 		},
 	})
 	if err != nil {

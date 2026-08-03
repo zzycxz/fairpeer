@@ -72,7 +72,7 @@ func TestEffortForTabResolvesProjectProviderConfig(t *testing.T) {
 [[providers]]
 name = "project-provider"
 kind = "openai"
-base_url = "https://api.apihelper.10086.cn"
+base_url = "https://api.jiutian.10086.cn"
 model = "qwen3.6-35b"
 api_key_env = "PROJECT_API_KEY"
 effort = "max"

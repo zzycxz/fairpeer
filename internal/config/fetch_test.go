@@ -17,8 +17,8 @@ func TestBuildModelFetchURLs(t *testing.T) {
 	}{
 		{
 			name: "root endpoint keeps legacy models path first",
-			base: "https://api.apihelper.10086.cn",
-			want: []string{"https://api.apihelper.10086.cn/models", "https://api.apihelper.10086.cn/v1/models"},
+			base: "https://api.jiutian.10086.cn",
+			want: []string{"https://api.jiutian.10086.cn/models", "https://api.jiutian.10086.cn/v1/models"},
 		},
 		{
 			name: "versioned endpoint uses models under version",
@@ -35,19 +35,19 @@ func TestBuildModelFetchURLs(t *testing.T) {
 		},
 		{
 			name: "anthropic compatible subpath adds root candidates",
-			base: "https://api.apihelper.10086.cn/anthropic",
+			base: "https://api.jiutian.10086.cn/anthropic",
 			want: []string{
-				"https://api.apihelper.10086.cn/anthropic/models",
-				"https://api.apihelper.10086.cn/anthropic/v1/models",
-				"https://api.apihelper.10086.cn/models",
-				"https://api.apihelper.10086.cn/v1/models",
+				"https://api.jiutian.10086.cn/anthropic/models",
+				"https://api.jiutian.10086.cn/anthropic/v1/models",
+				"https://api.jiutian.10086.cn/models",
+				"https://api.jiutian.10086.cn/v1/models",
 			},
 		},
 		{
 			name:     "override wins",
-			base:     "https://api.apihelper.10086.cn",
-			override: "https://api.apihelper.10086.cn/custom/models",
-			want:     []string{"https://api.apihelper.10086.cn/custom/models"},
+			base:     "https://api.jiutian.10086.cn",
+			override: "https://api.jiutian.10086.cn/custom/models",
+			want:     []string{"https://api.jiutian.10086.cn/custom/models"},
 		},
 	}
 	for _, tt := range tests {

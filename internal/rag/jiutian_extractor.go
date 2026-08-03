@@ -25,7 +25,7 @@ import (
 
 // JiutianExtractorConfig configures the LLM-backed extractor.
 type JiutianExtractorConfig struct {
-	BaseURL  string // e.g. "https://apihelper.10086.cn/largemodel/moma/api/v3" ("" = uses apihelper.BaseURL)
+	BaseURL  string // e.g. "https://jiutian.10086.cn/largemodel/moma/api/v3" ("" = uses apihelper.BaseURL)
 	APIKey   string // env var name to read the key from (e.g. "JIUTIAN_API_KEY"); if empty, reads JIUTIAN_API_KEY
 	Model    string // chat model to use (e.g. the cowork main model)
 	TwoStage bool   // extract entities then relations in two LLM calls (higher quality, 2× tokens); false = single combined call

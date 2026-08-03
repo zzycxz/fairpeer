@@ -58,7 +58,7 @@ func (a *App) triggerScreenshotSolve() {
 			a.emitScreenshotNotice("模型未找到: "+err.Error(), "")
 			return
 		}
-		prov, err := boot.NewProviderWithProxy(entry, netclient.ProxySpec{Mode: netclient.ModeAuto}, false, false)
+		prov, err := boot.NewProviderWithProxy(entry, netclient.ProxySpec{Mode: netclient.ModeAuto}, false)
 		if err != nil {
 			a.emitScreenshotNotice("模型初始化失败: "+err.Error(), "")
 			return

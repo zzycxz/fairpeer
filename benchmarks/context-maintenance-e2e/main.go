@@ -22,15 +22,15 @@ import (
 
 const (
 	model      = "qwen/qwen3.6-35b"
-	baseURL    = "https://apihelper.10086.cn/largemodel/moma/api/v3"
+	baseURL    = "https://api.openai.com/v1" // default; override via -base flag
 	fatResults = 20
 	fatBytes   = 12_000
 )
 
 func prov() provider.Provider {
-	key := os.Getenv("JIUTIAN_API_KEY")
+	key := os.Getenv("OPENAI_API_KEY") // any OpenAI-compatible provider key
 	if key == "" {
-		fmt.Fprintln(os.Stderr, "JIUTIAN_API_KEY not set")
+		fmt.Fprintln(os.Stderr, "OPENAI_API_KEY not set")
 		os.Exit(1)
 	}
 	p, err := provider.New("openai", provider.Config{Name: "e2e", BaseURL: baseURL, Model: model, APIKey: key})

@@ -6,16 +6,16 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/zzycxz/fairpeer/internal/apihelper"
 	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 // VLM 可切换调用层。screen_perceive 的视觉理解走一条降级链：优先 provider
-// 多模态模型（qwen3.6-27b 等），失败时回落到九天 LLMImage2Text。boot.go 根据
-// [cowork] vlm_backend/vlm_model 构造链后通过 SetVLMChain 注入。
+// 多模态模型（qwen3.6-27b 等）。boot.go 根据 [cowork] vlm_backend/vlm_model
+// 构造链后通过 SetVLMChain 注入。
 //
 // 链中每个 backend 独立尝试：成功即返回，失败（5xx/超时/空）则尝试下一个，
-// 全部失败时返回最后一个错误。九天始终作为链尾兜底（只要有 JIUTIAN_API_KEY）。
+// 全部失败时返回最后一个错误。空链表示未配置任何 vision backend，CallVLM
+// 直接返回错误，引导用户在 Settings 里配置一个支持 vision 的模型。
 
 // VLMBackendKind identifies one backend in the VLM degradation chain.
 type VLMBackendKind int
@@ -24,9 +24,6 @@ const (
 	// VLMBackendProvider is a provider-layer multimodal chat model (qwen/kimi/etc).
 	// The model must be vision-capable; the runner is injected from boot.
 	VLMBackendProvider VLMBackendKind = iota
-	// VLMBackendJiutian is the 九天 LLMImage2Text endpoint, the default terminal
-	// fallback that only needs JIUTIAN_API_KEY.
-	VLMBackendJiutian
 )
 
 // VLMBackend is one link in the VLM degradation chain. Kind selects the backend;
@@ -44,37 +41,34 @@ var (
 )
 
 // SetVLMChain replaces the VLM degradation chain. boot.go calls this after
-// resolving config; the chain always closes with the 九天 terminal fallback so a
-// configured primary backend failing doesn't leave screen_perceive blind. An
-// empty chain falls back to jiutian-only so CallVLM never has nothing to try.
+// resolving config. An empty chain is accepted as-is; CallVLM will then return a
+// "no VLM backend configured" error, guiding the user to set a vision-capable
+// model in Settings.
 func SetVLMChain(chain []VLMBackend) {
 	vlmChainMu.Lock()
 	defer vlmChainMu.Unlock()
-	if len(chain) == 0 {
-		globalVLMChain = []VLMBackend{{Kind: VLMBackendJiutian, Label: "jiutian-LLMImage2Text"}}
-		return
-	}
 	globalVLMChain = append([]VLMBackend(nil), chain...)
 }
 
-// vlmChain returns a snapshot of the current chain under the read lock. Falls
-// back to jiutian-only when SetVLMChain was never called (zero value).
+// vlmChain returns a snapshot of the current chain under the read lock. Returns
+// nil when SetVLMChain was never called or was called with an empty chain.
 func vlmChain() []VLMBackend {
 	vlmChainMu.RLock()
 	defer vlmChainMu.RUnlock()
-	if len(globalVLMChain) == 0 {
-		return []VLMBackend{{Kind: VLMBackendJiutian, Label: "jiutian-LLMImage2Text"}}
-	}
-	return globalVLMChain
+	return append([]VLMBackend(nil), globalVLMChain...)
 }
 
 // CallVLM sends an image (base64 data URL) + prompt to the VLM degradation chain
 // and returns the first backend's text response. Each backend is tried in order;
 // on failure (error or empty result) the next is attempted, and the last error
-// is surfaced only when every backend failed. This is the unified entry for the
-// screen_perceive loop.
+// is surfaced only when every backend failed. When the chain is empty (no vision
+// backend configured) it returns a clear configuration error. This is the
+// unified entry for the screen_perceive loop.
 func CallVLM(ctx context.Context, imgDataURL string, prompt string) (string, error) {
 	chain := vlmChain()
+	if len(chain) == 0 {
+		return "", fmt.Errorf("no VLM backend configured: set a vision-capable model in Settings")
+	}
 	var lastErr error
 	for _, b := range chain {
 		text, err := callVLMBackend(ctx, b, imgDataURL, prompt)
@@ -88,7 +82,7 @@ func CallVLM(ctx context.Context, imgDataURL string, prompt string) (string, err
 		}
 	}
 	if lastErr == nil {
-		lastErr = fmt.Errorf("no VLM backend configured")
+		lastErr = fmt.Errorf("no VLM backend configured: set a vision-capable model in Settings")
 	}
 	return "", lastErr
 }
@@ -99,36 +93,9 @@ func callVLMBackend(ctx context.Context, b VLMBackend, imgDataURL, prompt string
 	switch b.Kind {
 	case VLMBackendProvider:
 		return callProviderVLM(ctx, b.Model, imgDataURL, prompt)
-	case VLMBackendJiutian:
-		return callJiutianVLM(ctx, imgDataURL, prompt)
 	default:
 		return "", fmt.Errorf("unknown VLM backend kind %d", b.Kind)
 	}
-}
-
-// callJiutianVLM uses the 九天 /image/text endpoint (LLMImage2Text). Terminal
-// fallback — only needs JIUTIAN_API_KEY, no provider config.
-func callJiutianVLM(ctx context.Context, imgDataURL string, prompt string) (string, error) {
-	req := struct {
-		Model  string `json:"model"`
-		Image  string `json:"image"`
-		Prompt string `json:"prompt"`
-		Stream bool   `json:"stream"`
-	}{
-		Model:  "LLMImage2Text",
-		Image:  imgDataURL,
-		Prompt: prompt,
-		Stream: false,
-	}
-	var resp struct {
-		Result struct {
-			Text string `json:"text"`
-		} `json:"result"`
-	}
-	if err := apihelper.APICall(ctx, "POST", "/image/text", req, &resp); err != nil {
-		return "", fmt.Errorf("jiutian VLM: %w", err)
-	}
-	return resp.Result.Text, nil
 }
 
 // callProviderVLM uses the provider layer's multimodal chat (qwen/kimi/etc). The

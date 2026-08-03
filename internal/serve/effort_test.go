@@ -8,7 +8,7 @@ import (
 
 func TestApplyEffortEditUpsertsMissingProvider(t *testing.T) {
 	edit := &config.Config{}
-	entry := &config.ProviderEntry{Name: "MoMA", Kind: "openai", BaseURL: "https://api.apihelper.10086.cn", Model: "qwen3.6-35b"}
+	entry := &config.ProviderEntry{Name: "MoMA", Kind: "openai", BaseURL: "https://api.jiutian.10086.cn", Model: "qwen3.6-35b"}
 
 	if err := applyEffortEdit(edit, entry, "high"); err != nil {
 		t.Fatalf("applyEffortEdit: %v", err)

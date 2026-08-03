@@ -34,7 +34,7 @@
 //	# Override the model:
 //	go run ./cmd/cua-replay -model qwen/qwen3.6-27b
 //
-// Requires JIUTIAN_API_KEY in the environment.
+// Requires OPENAI_API_KEY (or any OpenAI-compatible provider key) in the environment.
 package main
 
 import (
@@ -55,12 +55,12 @@ import (
 	"time"
 )
 
-const momaBaseURL = "https://apihelper.10086.cn/largemodel/moma/api/v3"
+const defaultBaseURL = "https://api.openai.com/v1" // default; override via -base flag
 
 func main() {
 	var (
 		task     = flag.String("task", "找到屏幕上可以输入文字的区域，给我它的中心坐标", "what to look for in each frame")
-		model    = flag.String("model", "qwen/qwen3.6-27b", "moma multimodal model")
+		model    = flag.String("model", "gpt-4o", "multimodal model")
 		srcDir   = flag.String("dir", ".fairpeer/attachments", "dir to replay screenshots from (replay mode)")
 		image    = flag.String("image", "", "analyze a single image file (overrides -dir)")
 		live     = flag.Bool("live", false, "capture the current screen once and analyze it (Windows)")
@@ -69,9 +69,9 @@ func main() {
 	)
 	flag.Parse()
 
-	apiKey := os.Getenv("JIUTIAN_API_KEY")
+	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		die("JIUTIAN_API_KEY not set")
+		die("OPENAI_API_KEY not set")
 	}
 
 	if err := os.MkdirAll(*traceDir, 0o755); err != nil {
@@ -171,7 +171,7 @@ func collectFrames(single, dir string, live bool, limit int) []frame {
 	return fs
 }
 
-// analyzeFrame runs one image through the moma multimodal endpoint and parses the
+// analyzeFrame runs one image through the multimodal endpoint and parses the
 // normalized coordinate / confidence / NO_TARGET. Mirrors what callProviderVLM +
 // the parse helpers do in production, kept local so this tool is self-contained.
 func analyzeFrame(apiKey, model string, imgBytes []byte, task string) (text string, conf int, cx, cy float64, hasCoord bool, noTarget bool, err error) {
@@ -202,7 +202,7 @@ func analyzeFrame(apiKey, model string, imgBytes []byte, task string) (text stri
 	raw, _ := json.Marshal(body)
 
 	client := &http.Client{Timeout: 90 * time.Second}
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", momaBaseURL+"/chat/completions", bytes.NewReader(raw))
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", defaultBaseURL+"/chat/completions", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	resp, doErr := client.Do(req)

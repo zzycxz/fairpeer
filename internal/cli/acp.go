@@ -139,7 +139,7 @@ func newACPSubagentProviderResolver(cfg *config.Config, parent *config.ProviderE
 			}
 		}
 
-		prov, err := boot.NewProviderWithProxy(entry, proxySpec, false, false)
+		prov, err := boot.NewProviderWithProxy(entry, proxySpec, false)
 		if err != nil {
 			return nil, nil, 0, err
 		}

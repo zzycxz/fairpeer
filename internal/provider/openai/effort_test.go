@@ -23,7 +23,7 @@ func newClient(t *testing.T, baseURL, effort string) *client {
 
 func TestEffortNormalization(t *testing.T) {
 	const MoMA = "https://example.com"
-	const moma = "https://apihelper.10086.cn/v1"
+	const moma = "https://jiutian.10086.cn/v1"
 
 	tests := []struct {
 		base, effort, want string

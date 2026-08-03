@@ -20,7 +20,7 @@ cd <项目路径>/momapeer
 **判断标准**：
 - ✅ **成功**：它准确说出你屏幕上当前开着的窗口（比如"有一个 VSCode 窗口、一个 Chrome、任务栏在底部"）
 - ❌ **失败信号**：
-  - 报 `EOF` / `image/text` 错误 → 九天 VLM 没接通（检查 `JIUTIAN_API_KEY` 和代理配置）
+  - 报 `EOF` / `image/text` 错误 → OpenAI-compatible VLM 没接通（检查 `OPENAI_API_KEY` 和代理配置）
   - 报 `UIA dump failed` 且没 fallback → 跑的是旧二进制，重新 `make`
   - 它乱编屏幕内容（说的和实际不符）→ VLM 调用没真正发生
 
@@ -104,8 +104,8 @@ cd <项目路径>/momapeer
 | 现象 | 处理 |
 |---|---|
 | `momapeer.exe: command not found` | 用 `./bin/momapeer.exe`（带 `./`），或先 `cd` 到 momapeer 目录 |
-| 报 `JIUTIAN_API_KEY not set` | 设环境变量：`export JIUTIAN_API_KEY=你的key`（Git Bash） |
-| screen_perceive 报 EOF | 九天 API 连不上，检查网络/代理；确认跑的是 dev-cua 新二进制 |
+| 报 `OPENAI_API_KEY not set` | 设环境变量：`export OPENAI_API_KEY=你的key`（Git Bash） |
+| screen_perceive 报 EOF | OpenAI-compatible API 连不上，检查网络/代理；确认跑的是 dev-cua 新二进制 |
 | browser 报 context canceled | 代理没配，见测试3说明 |
 | 模型说"我没有这个工具" | 命令漏了 `--profile cowork` |
 | PowerShell 跑不了 exe | 在 Git Bash 里跑，或 exe 用完整路径 |

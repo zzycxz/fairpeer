@@ -136,13 +136,6 @@ type WebSearchView struct {
 	LinkupKeySet bool `json:"linkupKeySet"`
 }
 
-// JiutianView reports the enabled state of each Jiutian multimodal tool.
-type JiutianView struct {
-	ImageUnderstand bool `json:"imageUnderstand"`
-	ImageGenerate   bool `json:"imageGenerate"`
-	VideoUnderstand bool `json:"videoUnderstand"`
-}
-
 // SettingsView is the whole Settings panel payload.
 type SettingsView struct {
 	DefaultModel string `json:"defaultModel"`
@@ -163,7 +156,6 @@ type SettingsView struct {
 	Bot               BotSettingsView    `json:"bot"`
 	Cowork            CoWorkSettingsView `json:"cowork"`
 	WebSearch         WebSearchView      `json:"webSearch"`
-	Jiutian           JiutianView        `json:"jiutian"`
 	DesktopLanguage   string             `json:"desktopLanguage"`
 	DesktopTheme      string             `json:"desktopTheme"`
 	DesktopThemeStyle string             `json:"desktopThemeStyle"`
@@ -226,7 +218,7 @@ func officialProviderKindFromEntry(p config.ProviderEntry) string {
 	host := officialProviderHost(p.BaseURL)
 	switch config.CanonicalDesktopOfficialProviderName(p.Name) {
 	case "moma":
-		if host == "apihelper.10086.cn" {
+		if host == "jiutian.10086.cn" {
 			return "moma"
 		}
 	}
@@ -408,11 +400,6 @@ func (a *App) Settings() SettingsView {
 			BraveKeySet:  os.Getenv("BRAVE_API_KEY") != "" || os.Getenv("BRAVE_SEARCH_API_KEY") != "",
 			ExaKeySet:    os.Getenv("EXA_API_KEY") != "",
 			LinkupKeySet: os.Getenv("LINKUP_API_KEY") != "",
-		},
-		Jiutian: JiutianView{
-			ImageUnderstand: cfg.Jiutian.ImageUnderstand,
-			ImageGenerate:   cfg.Jiutian.ImageGenerate,
-			VideoUnderstand: cfg.Jiutian.VideoUnderstand,
 		},
 		DesktopLanguage:   cfg.DesktopLanguage(),
 		DesktopTheme:      cfg.DesktopTheme(),
@@ -860,7 +847,7 @@ func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, erro
 		return []config.ProviderEntry{{
 			Name:          "moma",
 			Kind:          "openai",
-			BaseURL:       "https://apihelper.10086.cn/largemodel/moma/api/v3",
+			BaseURL:       "https://jiutian.10086.cn/largemodel/moma/api/v3",
 			Models:        config.BuiltinMoMAModels,
 			Default:       "qwen/qwen3.6-35b",
 			APIKeyEnv:     "JIUTIAN_API_KEY",

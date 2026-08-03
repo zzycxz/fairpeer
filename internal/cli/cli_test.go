@@ -656,7 +656,7 @@ func TestFamilyStaticModelsDedupes(t *testing.T) {
 // TestBuildFamilyEntriesGroupsModels proves models under the same provider name
 // land in one entry with all selected models.
 func TestBuildFamilyEntriesGroupsModels(t *testing.T) {
-	moma := config.ProviderEntry{Name: "moma", BaseURL: "https://api.apihelper.10086.cn", Model: "qwen3.6-35b", Price: &provider.Pricing{Input: 1, Output: 2}}
+	moma := config.ProviderEntry{Name: "moma", BaseURL: "https://api.jiutian.10086.cn", Model: "qwen3.6-35b", Price: &provider.Pricing{Input: 1, Output: 2}}
 	got := buildFamilyEntries(moma, []config.ProviderEntry{moma}, []string{"qwen3.6-35b", "qwen3.6-27b"})
 	if len(got) != 1 {
 		t.Fatalf("got %d entries, want 1", len(got))
@@ -693,7 +693,7 @@ func TestBuildFamilyEntry(t *testing.T) {
 	t.Run("default reset when not in selection", func(t *testing.T) {
 		probe := config.ProviderEntry{
 			Name: "MoMA", Kind: "openai",
-			BaseURL: "https://api.apihelper.10086.cn",
+			BaseURL: "https://api.jiutian.10086.cn",
 			Models:  []string{"qwen3.6-35b", "qwen3.6-27b"},
 			Default: "qwen3.6-27b",
 		}
@@ -707,7 +707,7 @@ func TestBuildFamilyEntry(t *testing.T) {
 		if !reflect.DeepEqual(got.Models, []string{"qwen3.6-35b"}) {
 			t.Errorf("Models = %v", got.Models)
 		}
-		if got.BaseURL != "https://api.apihelper.10086.cn" {
+		if got.BaseURL != "https://api.jiutian.10086.cn" {
 			t.Errorf("BaseURL lost: %q", got.BaseURL)
 		}
 	})
@@ -715,7 +715,7 @@ func TestBuildFamilyEntry(t *testing.T) {
 	t.Run("default preserved when in selection", func(t *testing.T) {
 		probe := config.ProviderEntry{
 			Name: "MoMA", Default: "qwen3.6-27b",
-			BaseURL: "https://api.apihelper.10086.cn",
+			BaseURL: "https://api.jiutian.10086.cn",
 		}
 		got := buildFamilyEntry(probe, []string{"qwen3.6-35b", "qwen3.6-27b"})
 		if got.Default != "qwen3.6-27b" {
@@ -785,10 +785,10 @@ func TestProviderSlug(t *testing.T) {
 // still gets them back in the dropped slice to surface a warning.
 func TestFilterStaleCustomEntries(t *testing.T) {
 	in := []config.ProviderEntry{
-		{Name: "MoMA", Kind: "openai", BaseURL: "https://api.apihelper.10086.cn"},
+		{Name: "MoMA", Kind: "openai", BaseURL: "https://api.jiutian.10086.cn"},
 		{Name: "custom", Kind: "openai", BaseURL: "https://old.example/v1"},                // stale
 		{Name: "anthropic", Kind: "anthropic", BaseURL: "https://old.example/v1/messages"}, // stale
-		{Name: "MoMA-tp", Kind: "openai", BaseURL: "https://token-plan-cn.apihelper.10086.cn/v1"},
+		{Name: "MoMA-tp", Kind: "openai", BaseURL: "https://token-plan-cn.jiutian.10086.cn/v1"},
 	}
 	kept, dropped := filterStaleCustomEntries(in)
 	if len(kept) != 2 {
@@ -830,7 +830,7 @@ func TestFilterStaleCustomEntries(t *testing.T) {
 func TestWithBuiltinFamiliesAddsMissingMoMA(t *testing.T) {
 	// The user's case: a fairpeer.toml that defines only moma providers.
 	cfg := []config.ProviderEntry{
-		{Name: "moma", Kind: "openai", BaseURL: "https://api.apihelper.10086.cn"},
+		{Name: "moma", Kind: "openai", BaseURL: "https://api.jiutian.10086.cn"},
 	}
 	order, _, info := groupByFamily(withBuiltinFamilies(cfg))
 	seen := map[string]bool{}

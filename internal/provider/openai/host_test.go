@@ -3,7 +3,7 @@ package openai
 import "testing"
 
 // TestIsMoMA pins the host-matching rule for MoMA: the canonical
-// api.apihelper.10086.cn, any *.moma.com subdomain, but NOT the apex
+// api.jiutian.10086.cn, any *.moma.com subdomain, but NOT the apex
 // moma.com (a misconfiguration we explicitly reject).
 func TestIsMoMA(t *testing.T) {
 	for _, tc := range []struct {
@@ -11,12 +11,12 @@ func TestIsMoMA(t *testing.T) {
 		want    bool
 	}{
 		// Canonical
-		{"https://apihelper.10086.cn", true},
-		{"https://apihelper.10086.cn/v1", true},
-		{"https://apihelper.10086.cn/anthropic", true},
+		{"https://jiutian.10086.cn", true},
+		{"https://jiutian.10086.cn/v1", true},
+		{"https://jiutian.10086.cn/anthropic", true},
 		// Regional subdomains under the apex
-		{"https://apihelper.10086.cn/v1", true},
-		{"https://apihelper.10086.cn/v1", true},
+		{"https://jiutian.10086.cn/v1", true},
+		{"https://jiutian.10086.cn/v1", true},
 		// Apex rejected (would require a user pointing their base_url at
 		// the apex domain, which is a misconfiguration)
 		{"https://moma.com/v1", false},
@@ -56,7 +56,7 @@ func TestIsMiniMax(t *testing.T) {
 		{"https://minimaxi.com/v1", false},
 		{"https://minimaxi.com", false},
 		// Other vendors must not match
-		{"https://apihelper.10086.cn", false},
+		{"https://jiutian.10086.cn", false},
 		{"https://api.openai.com/v1", false},
 		// Wrong spelling — minimax, not minimaxi — must not match
 		{"https://api.minimax.com/v1", false},

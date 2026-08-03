@@ -60,12 +60,12 @@ def audio_to_data_url(audio_bytes, fmt="wav"):
 
 def test_audio_recognition(audio_bytes, audio_format="wav", model="moonshotai/kimi-k2.6"):
     """Test audio recognition via MoMA API."""
-    api_key = os.getenv("JIUTIAN_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        print("ERROR: JIUTIAN_API_KEY environment variable not set")
+        print("ERROR: OPENAI_API_KEY environment variable not set")
         sys.exit(1)
 
-    url = "https://jiutian.10086.cn/largemodel/moma/api/v3/chat/completions"
+    url = "https://api.openai.com/v1/chat/completions"
     data_url = audio_to_data_url(audio_bytes, audio_format)
 
     # Try OpenAI-style input_audio format

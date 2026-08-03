@@ -298,17 +298,6 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	fmt.Fprintf(&b, "context7_enabled = %v   # built-in Context7 MCP; off until manually enabled\n", c.BuiltInMCP.Context7Enabled)
 	b.WriteString("\n")
 
-	// [jiutian] toggles the Jiutian multimodal tools registered with the LLM.
-	// Without this section in the rendered file, SetJiutianTool's write was
-	// silently dropped (LoadForRoot then fell back to defaults), so the
-	// image_generate / video_understand switches never persisted and the tools
-	// never reached the model after a rebuild.
-	b.WriteString("[jiutian]\n")
-	fmt.Fprintf(&b, "image_understand = %v   # LLMImage2Text vision tool\n", c.Jiutian.ImageUnderstand)
-	fmt.Fprintf(&b, "image_generate   = %v   # cntxt2image text-to-image / image-to-image tool\n", c.Jiutian.ImageGenerate)
-	fmt.Fprintf(&b, "video_understand = %v   # video_to_text tool\n", c.Jiutian.VideoUnderstand)
-	b.WriteString("\n")
-
 	// [dream] toggles the background self-evolution agents. Without this section
 	// in the rendered file, SetDreamEnabled/Intervals writes were silently dropped
 	// (LoadForRoot fell back to defaults), so the master switch never persisted —
@@ -351,6 +340,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	if c.Cowork.EStopHotkey != "" {
 		fmt.Fprintf(&b, "estop_hotkey = %q   # emergency-stop hotkey; \"off\" disables\n", c.Cowork.EStopHotkey)
+	}
+	if c.Cowork.FastLLMBaseDomain != "" {
+		fmt.Fprintf(&b, "fast_llm_base_domain = %q   # overrides the base URL for direct /chat/completions calls (scheduler/RAG); empty = built-in default\n", c.Cowork.FastLLMBaseDomain)
 	}
 
 	// Mail config. When EmailAccounts is set, it's the source of truth and we

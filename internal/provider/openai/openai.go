@@ -2,7 +2,7 @@
 // It self-registers under the "openai" kind, so MoMA (九天), MiniMax-M3, and
 // any other OpenAI-compatible endpoint are just config instances rather than
 // code. Each instance picks the wire shape from its base URL:
-//   - api.apihelper.10086.cn → emits thinking.type=enabled (MoMA-flavor CoT) plus
+//   - api.jiutian.10086.cn → emits thinking.type=enabled (MoMA-flavor CoT) plus
 //     thinking_effort as a depth hint.
 //   - api.minimaxi.com → emits thinking.type=adaptive|disabled (M3's binary
 //     knob) instead of reasoning_effort, since M3 has no level scale.
@@ -24,7 +24,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zzycxz/fairpeer/internal/apihelper"
 	"github.com/zzycxz/fairpeer/internal/netclient"
 	"github.com/zzycxz/fairpeer/internal/provider"
 )
@@ -128,21 +127,19 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if visionDetail == "" {
 		visionDetail = "auto"
 	}
-	imageUnderstand, _ := cfg.Extra["jiutian_image_understand"].(bool)
 	return &client{
-		name:            name,
-		apiKey:          cfg.APIKey,
-		keyEnv:          keyEnv,
-		baseURL:         strings.TrimRight(cfg.BaseURL, "/"),
-		model:           cfg.Model,
-		moma:            moma,
-		minimax:         minimax,
-		effort:          effort,
-		vision:          vision,
-		visionDetail:    visionDetail,
-		imageUnderstand: imageUnderstand,
-		http:            httpClient,
-		idleTimeout:     defaultStreamIdleTimeout,
+		name:         name,
+		apiKey:       cfg.APIKey,
+		keyEnv:       keyEnv,
+		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
+		model:        cfg.Model,
+		moma:         moma,
+		minimax:      minimax,
+		effort:       effort,
+		vision:       vision,
+		visionDetail: visionDetail,
+		http:         httpClient,
+		idleTimeout:  defaultStreamIdleTimeout,
 	}, nil
 }
 
@@ -168,7 +165,6 @@ type client struct {
 	effort          string                          // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
 	vision          bool                            // true when the provider supports image_url content parts
 	visionDetail    string                          // "auto", "low", "high" — forwarded as image detail level
-	imageUnderstand bool                            // true when Jiutian image_understand tool is enabled (auto-degradation)
 	idleTimeout     time.Duration                   // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
 	authed          atomic.Bool                     // true after first successful auth; enables transient 401 retry
 	onReplay        func(ctx context.Context) error // optional: charged by the RPM limiter on each mid-stream replay
@@ -258,94 +254,6 @@ var bufPool = sync.Pool{
 }
 
 func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
-	// When the model doesn't support vision, automatically analyze each image
-	// via the VLM degradation chain (qwen → 九天, injected via SetVLMBridge) and
-	// replace image parts with the text descriptions. Only when the feature is
-	// enabled in config ([jiutian] image_understand) — that toggle is the only
-	// remaining use of the field after image_understand was globally unified.
-	if !ModelSupportsVision(c.model, c.vision) && c.imageUnderstand {
-		analyzed := false
-		imageCount := 0
-		// Count images first.
-		for _, m := range req.Messages {
-			if m.Role != provider.RoleUser {
-				continue
-			}
-			if parts, ok := m.Content.([]provider.ContentPart); ok {
-				for _, p := range parts {
-					if p.Type == "image_url" && p.ImageURL != nil {
-						imageCount++
-					}
-				}
-			}
-		}
-		// Inject a status message so the user sees progress while waiting.
-		if imageCount > 0 {
-			noun := "image"
-			if imageCount > 1 {
-				noun = "images"
-			}
-			// Deep-copy the slice to avoid aliasing the caller's backing array.
-			// req is a value type but req.Messages is a slice header sharing the
-			// same underlying array.  If the original had spare capacity (cap > len),
-			// an in-place append would corrupt the caller's data.
-			msgs := make([]provider.Message, len(req.Messages))
-			copy(msgs, req.Messages)
-			req.Messages = msgs
-
-			statusMsg := fmt.Sprintf("[Analyzing %d %s via vision model...]", imageCount, noun)
-			req.Messages = append(req.Messages[:len(req.Messages)-1],
-				provider.Message{Role: provider.RoleAssistant, Content: statusMsg},
-				req.Messages[len(req.Messages)-1],
-			)
-		}
-		for i := range req.Messages {
-			m := &req.Messages[i]
-			if m.Role != provider.RoleUser {
-				continue
-			}
-			parts, ok := m.Content.([]provider.ContentPart)
-			if !ok || !hasImageParts(parts) {
-				continue
-			}
-			var replaced []provider.ContentPart
-			for _, p := range parts {
-				if p.Type == "text" {
-					replaced = append(replaced, p)
-					continue
-				}
-				if p.Type == "image_url" && p.ImageURL != nil {
-					desc, err := jiutianImageUnderstand(ctx, p.ImageURL.URL)
-					if err != nil {
-						replaced = append(replaced, provider.ContentPart{
-							Type: "text",
-							Text: fmt.Sprintf("[Image analysis failed: %v]", err),
-						})
-					} else {
-						replaced = append(replaced, provider.ContentPart{
-							Type: "text",
-							Text: fmt.Sprintf("[Image content: %s]", desc),
-						})
-					}
-					analyzed = true
-				}
-			}
-			if len(replaced) == 0 {
-				replaced = []provider.ContentPart{{Type: "text", Text: "(image attached)"}}
-			}
-			m.Content = replaced
-		}
-		if analyzed {
-			req.Messages = append(req.Messages[:len(req.Messages)-1],
-				provider.Message{Role: provider.RoleAssistant, Content: fmt.Sprintf(
-					"[Image analysis complete. Your model %q does not support native image input, so images were pre-analyzed by a vision model. The descriptions above are the vision model's output — use them to answer the user's question.]",
-					c.model,
-				)},
-				req.Messages[len(req.Messages)-1],
-			)
-		}
-	}
-
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	if err := json.NewEncoder(buf).Encode(c.buildRequest(req)); err != nil {
@@ -855,53 +763,6 @@ func imageContentParts(parts []provider.ContentPart, detail string) []chatConten
 	return out
 }
 
-// imageUnderstandPrompt tells the vision model that its output will be consumed
-// by a text-only LLM, so it should produce stable, structured descriptions.
-const imageUnderstandPrompt = "Your output will be read by a text-only AI model. Describe the image concisely in one paragraph — transcribe all visible text (errors, code, labels) exactly, skip decorative elements and filler phrases, match the dominant language of the text."
-
-// vlmBridge 是注入的图片理解降级链入口。boot.go 启动时把 builtin.CallVLM
-// 注入进来，让会话降级复用全局链条（qwen 397B → 27B → 九天）。
-// 未注入时（nil）回退到旧的直调九天路径，保持向后兼容。
-var vlmBridge func(ctx context.Context, image, prompt string) (string, error)
-
-// SetVLMBridge 注入图片理解降级链。由 boot.go 调用，避免 provider→builtin 循环依赖。
-func SetVLMBridge(fn func(ctx context.Context, image, prompt string) (string, error)) {
-	vlmBridge = fn
-}
-
-// jiutianImageUnderstand calls the configured VLM chain (default qwen → 九天 fallback)
-// to describe an image. imageParam can be a base64 data URL or a Jiutian uploaded
-// file path. Returns the text description.
-//
-// 当 vlmBridge 已注入（boot.go 启动后常态），走降级链条；否则回退到直调九天
-// 的旧行为，保证测试和未完成初始化的路径不会 NPE。
-func jiutianImageUnderstand(ctx context.Context, imageParam string) (string, error) {
-	if vlmBridge != nil {
-		text, err := vlmBridge(ctx, imageParam, imageUnderstandPrompt)
-		if err == nil && strings.TrimSpace(text) != "" {
-			return text, nil
-		}
-		// 桥失败（整条链都失败）→ 落到下面的九天直调做最后兜底。
-		// 不在这里 return err，因为旧路径可能仍然可用。
-	}
-	payload := map[string]any{
-		"model":  "LLMImage2Text",
-		"image":  imageParam,
-		"prompt": imageUnderstandPrompt,
-		"stream": false,
-	}
-
-	var result struct {
-		Code   int `json:"code"`
-		Result struct {
-			Text string `json:"text"`
-		} `json:"result"`
-	}
-	if err := apihelper.APICall(ctx, "POST", "/image/text", payload, &result); err != nil {
-		return "", err
-	}
-	if result.Code != 200 || result.Result.Text == "" {
-		return "", fmt.Errorf("jiutian image/text code=%d, empty text", result.Code)
-	}
-	return result.Result.Text, nil
-}
+// imageUnderstandPrompt and the in-conversation 九天 image-degradation path were
+// removed (WP-2.6). Public-network users now use each vendor's native vision
+// capability instead of the 九天 LLMImage2Text fallback.

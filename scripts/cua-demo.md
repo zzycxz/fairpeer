@@ -21,12 +21,12 @@ proxy_url = "http://127.0.0.1:7890"   # 换成你自己的代理端口
 [cowork]
 browser_headless = false                                              # 有头，更像真人
 browser_user_data_dir = "C:/Users/<你的用户名>/.momapeer/chrome-profile"  # 持久登录态（路径换成你的）
-vlm_backend = "jiutian"     # 视觉模型后端（用九天；或 "provider" + vlm_model）
+vlm_backend = "openai-compatible"     # 视觉模型后端（用OpenAI-compatible；或 "provider" + vlm_model）
 ```
 
 环境变量（`.env` 或系统环境）：
 ```
-JIUTIAN_API_KEY=你的key      # 九天/VLM 后端用
+OPENAI_API_KEY=你的key      # OpenAI-compatible/VLM 后端用
 ```
 
 ---
@@ -88,7 +88,7 @@ cd <项目路径>\momapeer
 - [ ] 用 browser_snapshot + ref 操作，而不是瞎猜坐标
 - [ ] 返回的结果正确（esengine/DeepSeek-Reasonix，23.7k 左右 star）
 
-**如果报 EOF / 连不上**：检查 `[network] proxy` 配置和 `JIUTIAN_API_KEY`。
+**如果报 EOF / 连不上**：检查 `[network] proxy` 配置和 `OPENAI_API_KEY`。
 
 ---
 
@@ -147,7 +147,7 @@ cd <项目路径>\momapeer
 |---|---|---|
 | 模型说"我没有 screen_ 工具" | 没进 cowork | 命令加 `--profile cowork` |
 | browser_navigate: context canceled | 跑的是旧二进制 / 没代理 | 重新 `make`；配 `[network] proxy` |
-| image_understand: EOF | 九天直连没走代理 | 已修复，确认跑的是新二进制 + 配了代理 |
+| image_understand: EOF | OpenAI-compatible直连没走代理 | 已修复，确认跑的是新二进制 + 配了代理 |
 | 模型不截图就开始瞎点 | 提示词没生效 | 确认 `dev-cua` 版本；明确说"先截图看清楚再操作" |
 | 操作卡住反复点同一处 | 死循环（护栏应触发） | 已加护栏；若仍循环，Ctrl+C 停止并反馈 |
 

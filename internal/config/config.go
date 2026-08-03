@@ -60,7 +60,6 @@ type Config struct {
 	Skills            SkillsConfig        `toml:"skills"`
 	Codegraph         CodegraphConfig     `toml:"codegraph"`
 	BuiltInMCP        BuiltInMCPConfig    `toml:"builtin_mcp"`
-	Jiutian           JiutianConfig       `toml:"jiutian"`
 	Dream             DreamConfig         `toml:"dream"`
 	Statusline        StatuslineConfig    `toml:"statusline"`
 	LSP               LSPConfig           `toml:"lsp"`
@@ -319,23 +318,6 @@ type BuiltInMCPConfig struct {
 	Context7Enabled bool `toml:"context7_enabled"`
 }
 
-// JiutianConfig controls which Jiutian platform capabilities are enabled.
-// These are standalone API tools (not chat-model features) that consume
-// tokens from the Jiutian platform separately from the chat model.
-type JiutianConfig struct {
-	ImageUnderstand bool   `toml:"image_understand"` // image_understand tool (LLMImage2Text)
-	ImageGenerate   bool   `toml:"image_generate"`   // image_generate tool (cntxt2image)
-	VideoUnderstand bool   `toml:"video_understand"` // video_understand tool (video_to_text)
-	BaseDomain      string `toml:"base_domain"`      // override the Jiutian API root (private deployment/proxy); empty = default
-}
-
-// BaseDomainOrDefault returns the configured Jiutian base URL, or "" when unset
-// so the caller (boot → apihelper.SetBaseDomain) resets to the default rather
-// than forcing an empty override.
-func (j JiutianConfig) BaseDomainOrDefault() string {
-	return strings.TrimSpace(j.BaseDomain)
-}
-
 // DreamConfig controls the background self-evolution agents: Dream consolidates
 // session knowledge into project memory, Distill extracts repeated workflows
 // into reusable skills. Intervals are in days; a value <= 0 falls back to the
@@ -588,6 +570,11 @@ type CoworkConfig struct {
 	// pick a sensible bound. Set lower for cheaper/faster runs, higher for
 	// complex multi-page tasks.
 	BrowserUseMaxSteps int `toml:"browser_use_max_steps"`
+	// FastLLMBaseDomain overrides the base URL for direct /chat/completions calls
+	// made by the scheduler time-parser and RAG ask (legacy path; Phase 3 will
+	// route these through the resolved fast-task provider instead). Empty = the
+	// built-in default.
+	FastLLMBaseDomain string `toml:"fast_llm_base_domain"`
 }
 
 // RAGEnabledOrDefault reports whether the knowledge base (RAG) is enabled. A nil
@@ -1473,8 +1460,6 @@ func Default() *Config {
 		Codegraph: CodegraphConfig{Enabled: true, AutoInstall: true},
 		// BuiltInMCP configuration
 		BuiltInMCP: BuiltInMCPConfig{},
-		// Jiutian multimodal tools — image understanding on by default; generation/video off.
-		Jiutian: JiutianConfig{ImageUnderstand: true, ImageGenerate: false, VideoUnderstand: false},
 		// Background self-evolution (Dream/Distill) on by default; 7/30 day cadence.
 		Dream: DreamConfig{Enabled: true, DreamInterval: DefaultDreamInterval, DistillInterval: DefaultDistillInterval, SkillColdDays: DefaultSkillColdDays},
 		// LSP tools on by default, but dormant until a language server is on PATH;
@@ -1494,7 +1479,7 @@ func Default() *Config {
 		// in reserve for the main agent under concurrent load.
 		LLM: LLMConfig{RPM: 60, ReserveMain: 2},
 		Providers: []ProviderEntry{
-			{Name: "moma", Kind: "openai", BaseURL: "https://apihelper.10086.cn/largemodel/moma/api/v3", Models: BuiltinMoMAModels, Default: "minimax/minimax-m2.7", APIKeyEnv: "JIUTIAN_API_KEY", ContextWindow: 200_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
+			{Name: "moma", Kind: "openai", BaseURL: "https://jiutian.10086.cn/largemodel/moma/api/v3", Models: BuiltinMoMAModels, Default: "minimax/minimax-m2.7", APIKeyEnv: "JIUTIAN_API_KEY", ContextWindow: 200_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
 		},
 	}
 }
@@ -1937,7 +1922,7 @@ func ensureMoMAOfficialProvider(c *Config) {
 	entry := ProviderEntry{
 		Name:          "moma",
 		Kind:          "openai",
-		BaseURL:       "https://apihelper.10086.cn/largemodel/moma/api/v3",
+		BaseURL:       "https://jiutian.10086.cn/largemodel/moma/api/v3",
 		Models:        officialModels,
 		Default:       "minimax/minimax-m2.7",
 		APIKeyEnv:     "JIUTIAN_API_KEY",
