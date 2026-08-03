@@ -526,7 +526,7 @@ func TestSkillEnabledMutator(t *testing.T) {
 func TestPluginMutators(t *testing.T) {
 	c := Default()
 
-	if err := c.UpsertPlugin(PluginEntry{Name: "ex", Command: "momapeer-plugin-example"}); err != nil {
+	if err := c.UpsertPlugin(PluginEntry{Name: "ex", Command: "fairpeer-plugin-example"}); err != nil {
 		t.Fatalf("add stdio: %v", err)
 	}
 	if err := c.UpsertPlugin(PluginEntry{Name: "stripe", Type: "http", URL: "https://mcp.stripe.com"}); err != nil {
@@ -593,7 +593,7 @@ func TestCodegraphDefaultEnabledForUpgrades(t *testing.T) {
 
 func TestLoadForEditPreservesCodegraphWithoutSection(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "momapeer.toml")
+	path := filepath.Join(dir, "fairpeer.toml")
 	if err := os.WriteFile(path, []byte("default_model = \"x\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -713,7 +713,7 @@ func TestSaveToRoundTrips(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	path := filepath.Join(t.TempDir(), "nested", "momapeer.toml")
+	path := filepath.Join(t.TempDir(), "nested", "fairpeer.toml")
 	if err := c.SaveTo(path); err != nil {
 		t.Fatalf("SaveTo: %v", err)
 	}
@@ -767,7 +767,7 @@ func TestSaveToScopesUserAndProjectFiles(t *testing.T) {
 		t.Fatalf("user config should include desktop preferences:\n%s", userBody)
 	}
 
-	projectPath := filepath.Join(t.TempDir(), "momapeer.toml")
+	projectPath := filepath.Join(t.TempDir(), "fairpeer.toml")
 	if err := c.SaveTo(projectPath); err != nil {
 		t.Fatalf("SaveTo project config: %v", err)
 	}

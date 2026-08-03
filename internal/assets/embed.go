@@ -1,6 +1,6 @@
-// Package assets embeds the built-in, cross-platform skill payloads that momapeer
+// Package assets embeds the built-in, cross-platform skill payloads that fairpeer
 // ships with its binary. Embedding lets a single downloaded executable carry
-// everything it needs, instead of distributing a separate .momapeer "tail".
+// everything it needs, instead of distributing a separate .fairpeer "tail".
 //
 // Currently this embeds the ppt-auto skill (SVG → PPTX, pure Python + python-pptx).
 // The heavy, platform-specific Python runtime is intentionally NOT embedded: the
@@ -12,7 +12,7 @@ package assets
 import "embed"
 
 // pptauto is the embedded ppt-auto skill tree. It is released to the user's
-// ~/.momapeer/skills/ppt-auto/ on first run by EnsurePPTAutoSkill.
+// ~/.fairpeer/skills/ppt-auto/ on first run by EnsurePPTAutoSkill.
 //
 // The `all:` prefix is required: the tree contains entries whose names begin
 // with `_` (Python __init__.py, templates/_index.md) which a bare //go:embed

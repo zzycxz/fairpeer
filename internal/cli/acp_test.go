@@ -63,7 +63,7 @@ func TestACPInitializesWithoutAPIKey(t *testing.T) {
 			t.Fatalf("Run --acp initialize rc = %d, want 0", rc)
 		}
 	})
-	if !strings.Contains(out, `"protocolVersion":1`) || !strings.Contains(out, `"name":"momapeer"`) {
+	if !strings.Contains(out, `"protocolVersion":1`) || !strings.Contains(out, `"name":"fairpeer"`) {
 		t.Fatalf("initialize output = %s", out)
 	}
 }
@@ -72,7 +72,7 @@ func TestACPFactoryLoadsSessionCwdProjectConfig(t *testing.T) {
 	home := isolateCLIConfigHome(t)
 	t.Setenv("FAIRPEER_TEST_KEY", "test-key")
 	project := t.TempDir()
-	if err := os.WriteFile(filepath.Join(project, "momapeer.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(project, "fairpeer.toml"), []byte(`
 default_model = "local"
 
 [codegraph]
@@ -87,7 +87,7 @@ api_key_env = "FAIRPEER_TEST_KEY"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmdDir := filepath.Join(project, ".momapeer", "commands")
+	cmdDir := filepath.Join(project, ".fairpeer", "commands")
 	if err := os.MkdirAll(cmdDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

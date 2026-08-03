@@ -1,4 +1,4 @@
-// Package compose implements momapeer's structured development workflow:
+// Package compose implements fairpeer's structured development workflow:
 // after a plan is approved, a multi-task feature runs through Implement →
 // Verify → (Review) with bounded retries, instead of a single execution
 // turn that never validates the result.

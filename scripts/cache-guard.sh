@@ -26,5 +26,5 @@ fi
 
 while IFS= read -r line; do
   msg=${line#*CACHE_GUARD_WARNING: }
-  echo "::warning title=momapeer cache guard::$msg"
+  echo "::warning title=fairpeer cache guard::$msg"
 done < <(grep 'CACHE_GUARD_WARNING:' "$tmp" || true)

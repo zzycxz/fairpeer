@@ -215,12 +215,12 @@ func TestSandboxEnforcesWrites(t *testing.T) {
 	if err != nil {
 		t.Skipf("no home dir: %v", err)
 	}
-	workRoot, err := os.MkdirTemp(home, ".momapeer-sbtest-work-*")
+	workRoot, err := os.MkdirTemp(home, ".fairpeer-sbtest-work-*")
 	if err != nil {
 		t.Skipf("cannot create work dir under home: %v", err)
 	}
 	t.Cleanup(func() { os.RemoveAll(workRoot) })
-	outside, err := os.MkdirTemp(home, ".momapeer-sbtest-out-*")
+	outside, err := os.MkdirTemp(home, ".fairpeer-sbtest-out-*")
 	if err != nil {
 		t.Skipf("cannot create outside dir under home: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestGoBuildUnderSandbox(t *testing.T) {
 	if err != nil {
 		t.Skipf("no home dir: %v", err)
 	}
-	work, err := os.MkdirTemp(home, ".momapeer-sbtest-go-*")
+	work, err := os.MkdirTemp(home, ".fairpeer-sbtest-go-*")
 	if err != nil {
 		t.Skipf("cannot create work dir under home: %v", err)
 	}

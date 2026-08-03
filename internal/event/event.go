@@ -122,7 +122,7 @@ type Profile struct {
 // text output, so a frontend can render it directly under the tool card without
 // relying on the model to echo the path into its reply.
 type Attachment struct {
-	Path string `json:"path"` // repo-relative, under .momapeer/attachments/
+	Path string `json:"path"` // repo-relative, under .fairpeer/attachments/
 	Kind string `json:"kind"` // "image"
 }
 
@@ -147,7 +147,7 @@ type Tool struct {
 	// them under it. Empty for top-level calls.
 	ParentID string
 	// Attachments carries files the tool generated (e.g. image_generate pictures
-	// saved under .momapeer/attachments/), parsed from the result text so the
+	// saved under .fairpeer/attachments/), parsed from the result text so the
 	// frontend can display them regardless of what the model writes back.
 	Attachments []Attachment
 	FileDiff

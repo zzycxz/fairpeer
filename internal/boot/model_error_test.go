@@ -18,7 +18,7 @@ import (
 func TestBuildUnknownModelErrorIsActionable(t *testing.T) {
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	writeFile(t, dir, "momapeer.toml", `
+	writeFile(t, dir, "fairpeer.toml", `
 default_model = "MoMA"
 
 [codegraph]
@@ -51,7 +51,7 @@ func TestBuildNoticesMissingAPIKey(t *testing.T) {
 	const keyEnv = "FAIRPEER_MISSING_KEY_FOR_TEST"
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	writeFile(t, dir, "momapeer.toml", `
+	writeFile(t, dir, "fairpeer.toml", `
 default_model = "x"
 
 [codegraph]

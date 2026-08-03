@@ -172,7 +172,7 @@ func botStart(args []string, version string) int {
 		gw.Stop()
 	}()
 
-	fmt.Fprintf(os.Stderr, "momapeer bot starting (model: %s, channels: %s)...\n", modelName, *channels)
+	fmt.Fprintf(os.Stderr, "fairpeer bot starting (model: %s, channels: %s)...\n", modelName, *channels)
 	fmt.Fprintf(os.Stderr, "version: %s\n", version)
 
 	if err := gw.Start(ctx); err != nil {
@@ -302,7 +302,7 @@ func botDoctor(args []string) int {
 		} else if weixin.HasSavedAccount(bc.Weixin.AccountID) {
 			addCheck("bot.weixin.token", "ok", "saved iLink account is available")
 		} else {
-			addCheck("bot.weixin.token", "missing", bc.Weixin.TokenEnv+" is not set; run `momapeer bot weixin-login` to save an iLink account")
+			addCheck("bot.weixin.token", "missing", bc.Weixin.TokenEnv+" is not set; run `fairpeer bot weixin-login` to save an iLink account")
 		}
 	} else {
 		addCheck("bot.weixin", "disabled", "")
@@ -378,18 +378,18 @@ func botWeixinLogin(args []string) int {
 		return 1
 	}
 	fmt.Printf("\n微信登录成功: account_id=%s user_id=%s base_url=%s\n", result.AccountID, result.UserID, result.BaseURL)
-	fmt.Println("凭据已保存到 momapeer 用户配置目录；也可以把 [bot.weixin] account_id 设置为该 account_id。")
+	fmt.Println("凭据已保存到 fairpeer 用户配置目录；也可以把 [bot.weixin] account_id 设置为该 account_id。")
 
 	return 0
 }
 
 func botUsage() {
-	fmt.Print(`momapeer bot — multi-channel IM bot gateway (QQ / Feishu / WeChat)
+	fmt.Print(`fairpeer bot — multi-channel IM bot gateway (QQ / Feishu / WeChat)
 
 Usage:
-  momapeer bot start   [--channels qq,feishu,weixin] [--dir PATH] [--model NAME]
-  momapeer bot doctor  [--json]
-  momapeer bot weixin-login [--timeout SECONDS]
+  fairpeer bot start   [--channels qq,feishu,weixin] [--dir PATH] [--model NAME]
+  fairpeer bot doctor  [--json]
+  fairpeer bot weixin-login [--timeout SECONDS]
 
 Subcommands:
   start         启动 bot 网关
@@ -397,12 +397,12 @@ Subcommands:
   weixin-login  微信 iLink 二维码登录
 
 Examples:
-  momapeer bot start --channels qq,feishu
-  momapeer bot start --dir /path/to/project --model moma/openai/gpt-oss-120b
-  momapeer bot doctor --json
+  fairpeer bot start --channels qq,feishu
+  fairpeer bot start --dir /path/to/project --model moma/openai/gpt-oss-120b
+  fairpeer bot doctor --json
 
 Configuration:
-  Edit momapeer.toml:
+  Edit fairpeer.toml:
     [bot]           enabled / model / max_steps
     [bot.allowlist]  enabled / qq_users / feishu_users / weixin_users
     [bot.qq]         enabled / app_id / app_secret_env

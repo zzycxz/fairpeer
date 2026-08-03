@@ -60,7 +60,7 @@ func FromContext(ctx context.Context) []VerifyCheck {
 	return append([]VerifyCheck(nil), checks...)
 }
 
-// ExtractHostChecks reads only the structured "momapeer host checks" section.
+// ExtractHostChecks reads only the structured "fairpeer host checks" section.
 // Ordinary project instructions remain guidance and do not become hard gates.
 func ExtractHostChecks(docs []memory.Source) []VerifyCheck {
 	seen := map[string]bool{}
@@ -70,7 +70,7 @@ func ExtractHostChecks(docs []memory.Source) []VerifyCheck {
 		for i, raw := range strings.Split(doc.Body, "\n") {
 			line := strings.TrimRight(raw, "\r")
 			if heading, ok := markdownHeading(line); ok {
-				inSection = strings.EqualFold(heading, "momapeer host checks")
+				inSection = strings.EqualFold(heading, "fairpeer host checks")
 				continue
 			}
 			if !inSection {

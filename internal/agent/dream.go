@@ -27,7 +27,7 @@ const (
 )
 
 // dreamStateName is the JSON file recording Dream/Distill run history, written
-// in the workspace's .momapeer/ directory (the parent of sessionDir). It exists
+// in the workspace's .fairpeer/ directory (the parent of sessionDir). It exists
 // because the sub-agents spawned here reuse the parent session in memory and
 // never persist their own .jsonl transcript — so the previous design of scanning
 // sessions/*.jsonl.meta for a topicTitle marker could never match (nothing was
@@ -251,7 +251,7 @@ const DistillTask = `You are a workflow distillation agent. Your job is to revie
    - Include clear step-by-step instructions
    - Reference specific tools and commands needed
    - Make it reusable across similar tasks
-3. Save skills to .momapeer/skills/ directory.
+3. Save skills to .fairpeer/skills/ directory.
 4. Focus on workflows that would save significant time if automated.
 
 ## Good candidates for skills
@@ -278,8 +278,8 @@ func dreamConfig() (config.DreamConfig, bool) {
 }
 
 // dreamStatePath resolves the state file location for the given session dir.
-// sessionDir is .../.momapeer/sessions; the state file lives one level up in
-// .../.momapeer/. An empty sessionDir yields "" (state disabled).
+// sessionDir is .../.fairpeer/sessions; the state file lives one level up in
+// .../.fairpeer/. An empty sessionDir yields "" (state disabled).
 func dreamStatePath(sessionDir string) string {
 	if sessionDir == "" {
 		return ""

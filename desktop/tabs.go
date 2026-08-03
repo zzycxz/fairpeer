@@ -600,7 +600,7 @@ func (a *App) OpenProjectTab3(workspaceRoot, topicID, profile string) (TabMeta, 
 }
 
 // OpenGlobalTab opens a new global-scope tab (no project root). The global
-// workspace root is the momapeer user config directory.
+// workspace root is the fairpeer user config directory.
 // OpenGlobalTab opens (or activates) a global-scope tab. The profile-aware form
 // takes (topicID, profile); the legacy form takes (topicID) and defaults profile
 // to "". The profile routes the new tab into the right partition (dev/cowork)
@@ -1450,9 +1450,9 @@ func desktopConfigDir() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		home, _ := os.UserHomeDir()
-		return filepath.Join(home, ".momapeer")
+		return filepath.Join(home, ".fairpeer")
 	}
-	return filepath.Join(dir, "momapeer")
+	return filepath.Join(dir, "fairpeer")
 }
 
 func (a *App) saveTabsLocked() {
@@ -1892,21 +1892,21 @@ func topicTitlesPath(workspaceRoot string) string {
 	if workspaceRoot == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicTitlesFile)
 	}
-	return filepath.Join(workspaceRoot, ".momapeer", topicTitlesFile)
+	return filepath.Join(workspaceRoot, ".fairpeer", topicTitlesFile)
 }
 
 func topicTitleSourcesPath(workspaceRoot string) string {
 	if workspaceRoot == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicTitleSourcesFile)
 	}
-	return filepath.Join(workspaceRoot, ".momapeer", topicTitleSourcesFile)
+	return filepath.Join(workspaceRoot, ".fairpeer", topicTitleSourcesFile)
 }
 
 func topicCreatedAtsPath(workspaceRoot string) string {
 	if workspaceRoot == "" {
 		return filepath.Join(desktopConfigDir(), "global", topicCreatedAtsFile)
 	}
-	return filepath.Join(workspaceRoot, ".momapeer", topicCreatedAtsFile)
+	return filepath.Join(workspaceRoot, ".fairpeer", topicCreatedAtsFile)
 }
 
 func loadTopicTitles(workspaceRoot string) map[string]string {
@@ -3414,9 +3414,9 @@ func globalWorkspaceRoot() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		home, _ := os.UserHomeDir()
-		return filepath.Join(home, ".momapeer", "global-workspace")
+		return filepath.Join(home, ".fairpeer", "global-workspace")
 	}
-	return filepath.Join(dir, "momapeer", "global-workspace")
+	return filepath.Join(dir, "fairpeer", "global-workspace")
 }
 
 func ensureGlobalWorkspaceRoot() (string, error) {

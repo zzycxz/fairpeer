@@ -107,10 +107,10 @@ type App struct {
 	// scheduler is the app-level scheduled-task engine (coWork). Created once at
 	// startup; bound to the active cowork controller via schedulerRunner so
 	// scheduled prompts fire into whichever tab is active. Persists tasks to
-	// ~/.config/momapeer/scheduled_tasks.json across restarts.
+	// ~/.config/fairpeer/scheduled_tasks.json across restarts.
 	scheduler *schedulerpkg.Scheduler
 	// calendarStore is the cowork calendar store (SQLite). Created once at
-	// startup; persists to ~/.config/momapeer/calendar.db.
+	// startup; persists to ~/.config/fairpeer/calendar.db.
 	calendarStore  *calendarpkg.Store
 	calendarRemind *calendarpkg.ReminderEngine
 
@@ -382,7 +382,7 @@ func (a *App) startup(ctx context.Context) {
 
 	go a.restoreOrBuildTabs()
 	go a.sendStartupPing()
-	// Load coWork secrets (SMTP/IMAP passwords) from the momapeer-managed .env
+	// Load coWork secrets (SMTP/IMAP passwords) from the fairpeer-managed .env
 	// into the process environment BEFORE initScheduler/initRAG, so coWork tools
 	// find them via os.Getenv without the user setting system env vars manually.
 	loadCoworkEnvAtStartup()
@@ -582,7 +582,7 @@ func (a *App) initScheduler() {
 	// Surface any one-shot reminders that were due while the app was down. Load
 	// captured them; we drain now (after the notifier + OS-toast init are bound)
 	// and fire a catch-up notification for each, so a reminder the user set isn't
-	// silently lost just because momapeer wasn't running at the fire instant.
+	// silently lost just because fairpeer wasn't running at the fire instant.
 	// Delayed briefly so the OS notification registration (InitializeNotifications
 	// in startup) has settled before we send.
 	if missed := a.scheduler.DrainMissedReminders(); len(missed) > 0 {
@@ -685,7 +685,7 @@ func runScheduledPrompt(ctx context.Context, ctrl *control.Controller, prompt st
 
 // runHeadlessScheduled builds a throwaway headless cowork controller, runs the
 // prompt, then tears the controller down (releasing the shared plugin host).
-// WorkspaceRoot is the global cowork root (~/.momapeer) since scheduled tasks
+// WorkspaceRoot is the global cowork root (~/.fairpeer) since scheduled tasks
 // are not bound to a specific project. See C7.
 func (a *App) runHeadlessScheduled(ctx context.Context, profileName, prompt string) (string, error) {
 	root := globalTabWorkspaceRoot()
@@ -2616,7 +2616,7 @@ type CommandInfo struct {
 }
 
 // Commands lists the slash commands available this session — built-in actions,
-// custom commands (.momapeer/commands), and MCP prompts — for the composer's "/"
+// custom commands (.fairpeer/commands), and MCP prompts — for the composer's "/"
 // autocomplete menu.
 func (a *App) Commands() []CommandInfo {
 	out := []CommandInfo{
@@ -5195,7 +5195,7 @@ func (a *App) withActiveWorkspaceDo(fn func() error) error {
 }
 
 // SavePastedImage stores a browser clipboard image data URL under the active
-// tab's workspace .momapeer/attachments and returns the relative @-reference path.
+// tab's workspace .fairpeer/attachments and returns the relative @-reference path.
 func (a *App) SavePastedImage(dataURL string) (string, error) {
 	return a.withActiveWorkspace(func() (string, error) {
 		return control.SaveImageDataURL(dataURL)
@@ -5203,14 +5203,14 @@ func (a *App) SavePastedImage(dataURL string) (string, error) {
 }
 
 // SaveClipboardImage reads the native OS clipboard image under the active tab's
-// workspace .momapeer/attachments and returns the relative @-reference path.
+// workspace .fairpeer/attachments and returns the relative @-reference path.
 func (a *App) SaveClipboardImage() (string, error) {
 	return a.withActiveWorkspace(control.SaveClipboardImage)
 }
 
 // SavePastedFile stores a dropped non-image file (the browser exposes its bytes
 // as a data URL but not a real path) under the active tab's workspace
-// .momapeer/attachments and returns the relative @-reference path.
+// .fairpeer/attachments and returns the relative @-reference path.
 func (a *App) SavePastedFile(name, dataURL string) (string, error) {
 	return a.withActiveWorkspace(func() (string, error) {
 		return control.SaveAttachmentDataURL(name, dataURL)
@@ -5297,7 +5297,7 @@ func (a *App) AttachmentDataURL(path string) (string, error) {
 
 // DroppedItem is one OS-dropped file resolved into a composer context entry: an
 // in-tree file becomes a workspace @reference (read in place, no copy), while an
-// image or out-of-tree file is copied into .momapeer/attachments.
+// image or out-of-tree file is copied into .fairpeer/attachments.
 type DroppedItem struct {
 	Kind       string `json:"kind"` // "workspace" | "attachment"
 	Path       string `json:"path"`
@@ -5308,7 +5308,7 @@ type DroppedItem struct {
 // AttachDropped turns an absolute path from the native file-drop bridge into a
 // composer context entry. Images are stored as attachments so the chip shows a
 // thumbnail; other in-workspace files are referenced relatively (no copy); files
-// outside the workspace are copied into .momapeer/attachments.
+// outside the workspace are copied into .fairpeer/attachments.
 func (a *App) AttachDropped(path string) (DroppedItem, error) {
 	var item DroppedItem
 	err := a.withActiveWorkspaceDo(func() error {

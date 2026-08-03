@@ -1,7 +1,7 @@
 export type DisplayMode = "standard" | "compact" | "minimal";
 
-const DISPLAY_MODE_KEY = "momapeer-display-mode";
-const DISPLAY_MODE_EVENT = "momapeer:display-mode";
+const DISPLAY_MODE_KEY = "fairpeer-display-mode";
+const DISPLAY_MODE_EVENT = "fairpeer:display-mode";
 
 export function getDisplayMode(): DisplayMode {
   if (typeof localStorage === "undefined") return "minimal";

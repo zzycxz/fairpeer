@@ -32,8 +32,8 @@ func (a *App) startTray() {
 
 	t.end = startDesktopTray(func() {
 		systray.SetIcon(trayIconBytes)
-		systray.SetTitle("momapeer")
-		systray.SetTooltip("momapeer")
+		systray.SetTitle("fairpeer")
+		systray.SetTooltip("fairpeer")
 		// Run off the systray Win32 message loop: SetOnTapped fires inside wndProc,
 		// so a blocking showFromTray (a wedged webview after sleep freezes
 		// runtime.WindowShow) would stall the whole tray's message pump (#3834). The
@@ -149,19 +149,19 @@ func trayMenuLabels(locale string) trayLabels {
 	if locale == "zh" {
 		return trayLabels{
 			openTitle:         "打开",
-			openTooltip:       "打开 momapeer 窗口",
+			openTooltip:       "打开 fairpeer 窗口",
 			screenshotTitle:   "📷 截图解题",
 			screenshotTooltip: "截取屏幕并 AI 解题，结果通过 IM 推送",
 			quitTitle:         "退出",
-			quitTooltip:       "退出 momapeer",
+			quitTooltip:       "退出 fairpeer",
 		}
 	}
 	return trayLabels{
 		openTitle:         "Open",
-		openTooltip:       "Open the momapeer window",
+		openTooltip:       "Open the fairpeer window",
 		screenshotTitle:   "📷 Screenshot Solve",
 		screenshotTooltip: "Capture screen and AI solve, push result via IM",
 		quitTitle:         "Quit",
-		quitTooltip:       "Quit momapeer",
+		quitTooltip:       "Quit fairpeer",
 	}
 }

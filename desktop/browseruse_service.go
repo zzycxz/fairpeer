@@ -230,7 +230,7 @@ func FindBrowserUseScript() string {
 }
 
 // findRepoRootFrom walks up from start until it finds a directory containing
-// go.mod (momapeer's module marker), returning that directory or "".
+// go.mod (fairpeer's module marker), returning that directory or "".
 func findRepoRootFrom(start string) string {
 	for d := start; d != ""; d = parentDir(d) {
 		if fileExists(filepath.Join(d, "go.mod")) {

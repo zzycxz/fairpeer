@@ -11,7 +11,7 @@ import (
 // A profile does NOT replace configuration; it layers on top of it:
 //
 //   - Model / SubagentModel / Effort override the resolved provider knobs, so a
-//     coWork profile can pin a cheaper/faster model without touching momapeer.toml.
+//     coWork profile can pin a cheaper/faster model without touching fairpeer.toml.
 //   - SystemPromptAddon is appended to the resolved system prompt (after the
 //     instruction/output-style/memory/skill folding in boot.Build), so a profile
 //     can bias behaviour (e.g. "you are an office agent") without owning the
@@ -60,7 +60,7 @@ const (
 )
 
 // builtinProfiles are the always-available profiles. They are the floor: a
-// [[profiles]] entry in momapeer.toml with the same name overrides the builtin,
+// [[profiles]] entry in fairpeer.toml with the same name overrides the builtin,
 // so users can customise cowork's model or prompt without forking code.
 func builtinProfiles() []Profile {
 	return []Profile{
@@ -73,7 +73,7 @@ func builtinProfiles() []Profile {
 			// auto-open or desktop automation. They're still callable via
 			// run_skill if explicitly invoked, just not surfaced in the index
 			// or counted toward the model's "available skills" mental model.
-			// Users who want them back can override in momapeer.toml:
+			// Users who want them back can override in fairpeer.toml:
 			//   [[profiles]]
 			//   name = "dev"
 			//   enabled_skills = []   # empty = all skills
@@ -161,7 +161,7 @@ func CoworkPromptAddon(disabledSkills []string) string {
 	return strings.Join(kept, "\n")
 }
 
-// DefaultProfiles returns the profiles effective when momapeer.toml declares no
+// DefaultProfiles returns the profiles effective when fairpeer.toml declares no
 // [[profiles]]. The caller (Config.Profiles resolution) merges user entries on
 // top of these by name.
 func DefaultProfiles() []Profile { return builtinProfiles() }

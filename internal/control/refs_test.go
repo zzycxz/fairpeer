@@ -62,9 +62,9 @@ func TestClassifyRef(t *testing.T) {
 	files := map[string]bool{
 		"src/main.go": true,
 		"README.md":   true,
-		".momapeer/attachments/clipboard-20260601-010203.000000.png": true,
-		".momapeer/attachments/clipboard-20260601-010203.000000.yml": true,
-		".momapeer/attachments/clipboard-20260601-010203.000000.zip": true,
+		".fairpeer/attachments/clipboard-20260601-010203.000000.png": true,
+		".fairpeer/attachments/clipboard-20260601-010203.000000.yml": true,
+		".fairpeer/attachments/clipboard-20260601-010203.000000.zip": true,
 	}
 	exists := func(p string) bool { return files[p] }
 
@@ -76,9 +76,9 @@ func TestClassifyRef(t *testing.T) {
 		{"docs:doc://style", true, refResource}, // known server + uri
 		{"src/main.go", true, refFile},          // existing file
 		{"README.md", true, refFile},            // existing file
-		{".momapeer/attachments/clipboard-20260601-010203.000000.png", true, refImage},
-		{".momapeer/attachments/clipboard-20260601-010203.000000.yml", true, refFile},
-		{".momapeer/attachments/clipboard-20260601-010203.000000.zip", true, refFile},
+		{".fairpeer/attachments/clipboard-20260601-010203.000000.png", true, refImage},
+		{".fairpeer/attachments/clipboard-20260601-010203.000000.yml", true, refFile},
+		{".fairpeer/attachments/clipboard-20260601-010203.000000.zip", true, refFile},
 		{"ghost:issue://1", false, 0}, // unknown server, no such file
 		{"missing.go", false, 0},      // nonexistent path → not a ref
 		{"docs:", false, 0},           // empty uri → not a resource, no file
@@ -97,14 +97,14 @@ func TestClassifyRef(t *testing.T) {
 
 func TestResolveRefsAttachmentKinds(t *testing.T) {
 	temp := t.TempDir()
-	attachmentsDir := filepath.Join(temp, ".momapeer", "attachments")
+	attachmentsDir := filepath.Join(temp, ".fairpeer", "attachments")
 	if err := os.MkdirAll(attachmentsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	ymlRef := filepath.ToSlash(".momapeer/attachments/config.yml")
-	zipRef := filepath.ToSlash(".momapeer/attachments/archive.zip")
-	pngRef := filepath.ToSlash(".momapeer/attachments/shot.png")
-	if err := os.WriteFile(filepath.Join(temp, filepath.FromSlash(ymlRef)), []byte("name: momapeer\n"), 0o644); err != nil {
+	ymlRef := filepath.ToSlash(".fairpeer/attachments/config.yml")
+	zipRef := filepath.ToSlash(".fairpeer/attachments/archive.zip")
+	pngRef := filepath.ToSlash(".fairpeer/attachments/shot.png")
+	if err := os.WriteFile(filepath.Join(temp, filepath.FromSlash(ymlRef)), []byte("name: fairpeer\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(temp, filepath.FromSlash(zipRef)), []byte{'P', 'K', 0x03, 0x04, 0x00}, 0o644); err != nil {
@@ -138,7 +138,7 @@ func TestResolveRefsAttachmentKinds(t *testing.T) {
 		t.Fatalf("expected multimodal content (images present), got plain string: %s", b)
 	case []provider.ContentPart:
 		blockStr := provider.ContentString(block)
-		if !strings.Contains(blockStr, `<file path="`+ymlRef+`">`) || !strings.Contains(blockStr, "name: momapeer") {
+		if !strings.Contains(blockStr, `<file path="`+ymlRef+`">`) || !strings.Contains(blockStr, "name: fairpeer") {
 			t.Fatalf("expected yml attachment to resolve as file content, got: %s", blockStr)
 		}
 		if !strings.Contains(blockStr, `<file path="`+zipRef+`">`) || !strings.Contains(blockStr, "[binary file "+zipRef) {

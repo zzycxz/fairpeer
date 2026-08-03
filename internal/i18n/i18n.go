@@ -37,15 +37,15 @@ type Messages struct {
 	NoKey           string // status dot — no API key set
 	Ready           string // status dot — provider ready
 	GetStarted      string // section title above numbered steps
-	StepScaffold    string // step 1 desc — momapeer setup
+	StepScaffold    string // step 1 desc — fairpeer setup
 	StepSetKey      string // step 2 command label
 
-	// `momapeer init` — points to the in-session /init skill + setup
+	// `fairpeer init` — points to the in-session /init skill + setup
 	InitHint       string
 	StepSetKeyHint string // step 2 desc — env var hint
-	StepChatDesc   string // momapeer chat step desc
-	StepRunDesc    string // momapeer run step desc
-	HelpFooter     string // dim footer linking to momapeer help
+	StepChatDesc   string // fairpeer chat step desc
+	StepRunDesc    string // fairpeer run step desc
+	HelpFooter     string // dim footer linking to fairpeer help
 
 	// chat REPL
 	ChatTip           string // tip line under the chat banner
@@ -294,7 +294,7 @@ type Messages struct {
 	SelectProvidersLabel  string // multi-select label
 	EnterAPIKeysHeader    string // header before the per-env-var prompts
 	MissingKeyIntro       string // shown when re-running the key step on a configured setup
-	WroteFileFmt          string // "Wrote %s" — used for momapeer.toml and .env both
+	WroteFileFmt          string // "Wrote %s" — used for fairpeer.toml and .env both
 	SetupComplete         string // success line at end of init
 	SetupCancelled        string // shown when the user aborts the wizard
 	TryHintFmt            string // "Try: %s" — %s = command to try (styled)
@@ -313,7 +313,7 @@ type Messages struct {
 	NoModelsAvailableFmt       string // "%s: no models available, skipping"
 	CustomFetchEmpty           string // "/models returned an empty list — falling back to manual entry"
 	AnthropicFetchEmpty        string // "/models returned an empty list — Anthropic-compatible providers usually don't expose one, falling back to manual entry"
-	SkipStaleCustomEntryFmt    string // "skipping stale %q entry from momapeer.toml (pointing at %s) — please remove it"
+	SkipStaleCustomEntryFmt    string // "skipping stale %q entry from fairpeer.toml (pointing at %s) — please remove it"
 	APIKeyAlreadySetFmt        string // "reusing existing value for %s"
 	APIKeyResetPromptFmt       string // "Re-enter %s?"
 
@@ -347,7 +347,7 @@ type Messages struct {
 
 	// top-level / runAgent
 	UnknownCommandFmt         string // "unknown command %q"
-	UsageRunHint              string // "usage: momapeer run [--model NAME] <task>"
+	UsageRunHint              string // "usage: fairpeer run [--model NAME] <task>"
 	ErrorPrefix               string // "error:" — prefix for fatal-error output
 	ReconfigureOnUnknownModel string // shown when the configured model no longer resolves and setup is re-run
 	WriteConfigErr            string // "write config:" — prefix for write failure

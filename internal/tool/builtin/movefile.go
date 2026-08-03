@@ -101,7 +101,7 @@ func (m moveFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 }
 
 func renameSameFileDestination(src, dst string) error {
-	tmp, err := os.CreateTemp(filepath.Dir(src), ".momapeer-move-*")
+	tmp, err := os.CreateTemp(filepath.Dir(src), ".fairpeer-move-*")
 	if err != nil {
 		return err
 	}

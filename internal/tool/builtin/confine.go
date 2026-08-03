@@ -22,7 +22,7 @@ func ConfineBash(spec sandbox.Spec, timeout ...time.Duration) tool.Tool {
 	return b
 }
 
-// ConfineWebFetch returns the web_fetch built-in bound to momapeer proxy
+// ConfineWebFetch returns the web_fetch built-in bound to fairpeer proxy
 // settings while preserving its SSRF-guarded dialer.
 func ConfineWebFetch(proxySpec netclient.ProxySpec) tool.Tool {
 	return webFetch{proxySpec: proxySpec}
@@ -96,7 +96,7 @@ func confineRead(roots []string, target string) error {
 		}
 	}
 	return fmt.Errorf("path %q is outside the read boundary (reads are confined to %s); "+
-		"read inside it, or widen [sandbox] read_roots in momapeer.toml",
+		"read inside it, or widen [sandbox] read_roots in fairpeer.toml",
 		target, strings.Join(roots, ", "))
 }
 
@@ -131,7 +131,7 @@ func confine(roots []string, target string) error {
 		}
 	}
 	return fmt.Errorf("path %q is outside the workspace (writes are confined to %s); "+
-		"write inside it, or widen [sandbox] workspace_root / allow_write in momapeer.toml",
+		"write inside it, or widen [sandbox] workspace_root / allow_write in fairpeer.toml",
 		target, strings.Join(roots, ", "))
 }
 

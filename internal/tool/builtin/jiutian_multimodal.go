@@ -153,7 +153,7 @@ func (*imageGenerate) Execute(ctx context.Context, args json.RawMessage) (string
 	for i, img := range result.Choices[0].Data {
 		// The /fs/getFile link requires the API-key Bearer header, so a bare URL
 		// answers 401. Download each image with auth and save it under
-		// .momapeer/attachments so the user gets an accessible local file; fall
+		// .fairpeer/attachments so the user gets an accessible local file; fall
 		// back to the raw link (with a note) if the download fails.
 		downloadURL := fmt.Sprintf("https://jiutian.10086.cn/largemodel/moma/api/v1/fs/getFile?key=%s", img.URL)
 		raw, mime, err := jiutianDownloadFile(ctx, downloadURL)
@@ -167,7 +167,7 @@ func (*imageGenerate) Execute(ctx context.Context, args json.RawMessage) (string
 			continue
 		}
 		// Output as markdown image syntax so the chat renders the picture inline
-		// (Markdown.tsx resolves .momapeer/attachments paths to data URLs). The
+		// (Markdown.tsx resolves .fairpeer/attachments paths to data URLs). The
 		// file is already saved locally by SaveImageBytes, satisfying "save to
 		// project + show in chat" without relying on the model echoing anything.
 		fmt.Fprintf(&sb, "  %d: ![image](%s)\n", i+1, rel)
@@ -269,7 +269,7 @@ func ImageToDataURL(path string) (string, error) {
 // attachmentSeq makes saved-image filenames unique within a process.
 var attachmentSeq atomic.Uint64
 
-// saveImageAttachment writes image bytes to .momapeer/attachments/ and returns
+// saveImageAttachment writes image bytes to .fairpeer/attachments/ and returns
 // the repo-relative path. It mirrors control.SaveImageBytes but lives in this
 // package to avoid a builtin→control→agent import cycle (agent's test bundle
 // blank-imports builtin). Used by image_generate to persist generated pictures
@@ -292,7 +292,7 @@ func saveImageAttachment(declaredMime string, raw []byte) (string, error) {
 	default:
 		return "", fmt.Errorf("generated data is not a supported image (mime=%s)", mime)
 	}
-	root := filepath.Join(".momapeer", "attachments")
+	root := filepath.Join(".fairpeer", "attachments")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return "", fmt.Errorf("create attachments dir: %w", err)
 	}

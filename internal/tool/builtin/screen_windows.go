@@ -694,9 +694,9 @@ func utf8RuneCount(s string) int {
 }
 func screenAttachmentsDir() string {
 	if wd, err := os.Getwd(); err == nil {
-		return filepath.Join(wd, ".momapeer", "attachments")
+		return filepath.Join(wd, ".fairpeer", "attachments")
 	}
-	return filepath.Join(os.TempDir(), "momapeer-screen")
+	return filepath.Join(os.TempDir(), "fairpeer-screen")
 }
 
 // screenKey implements the `screen_key` tool: send a keyboard shortcut (e.g.

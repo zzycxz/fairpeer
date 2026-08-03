@@ -10,9 +10,9 @@ import (
 	"strings"
 )
 
-// legacyConfig is the subset of the v0.x (~/.momapeer/config.json) schema this
+// legacyConfig is the subset of the v0.x (~/.fairpeer/config.json) schema this
 // import carries forward. Fields absent here are dropped on purpose: desktop tab
-// state is frontend-owned, and skills already live in the shared ~/.momapeer/skills
+// state is frontend-owned, and skills already live in the shared ~/.fairpeer/skills
 // root that v1+ also scans, so they need no migration.
 type legacyConfig struct {
 	APIKey      string                       `json:"apiKey"`
@@ -51,7 +51,7 @@ func (r *MigrationResult) Notice() string {
 		fmt.Fprintf(&b, " (%d MCP server(s))", r.Plugins)
 	}
 	if r.KeyToEnv {
-		b.WriteString("; API key saved to momapeer's credentials store")
+		b.WriteString("; API key saved to fairpeer's credentials store")
 	}
 	b.WriteString(". The old files were left untouched.")
 	for _, w := range r.Warnings {
@@ -63,7 +63,7 @@ func (r *MigrationResult) Notice() string {
 
 // MigrateLegacyIfNeeded performs a one-time, non-destructive import of older
 // installs into the current user config when the latter does not exist yet. It
-// checks v1-era TOML first, then v0.5/v0.x ~/.momapeer/config.json, and never
+// checks v1-era TOML first, then v0.5/v0.x ~/.fairpeer/config.json, and never
 // modifies or deletes the legacy files. Returns nil when there is nothing to
 // migrate, or when the current user config already exists.
 func MigrateLegacyIfNeeded() (*MigrationResult, error) {
@@ -81,7 +81,7 @@ func MigrateLegacyIfNeeded() (*MigrationResult, error) {
 	if res, err := migrateLegacyTOMLIfNeeded(dest, home); res != nil || err != nil {
 		return res, err
 	}
-	src := filepath.Join(home, ".momapeer", "config.json")
+	src := filepath.Join(home, ".fairpeer", "config.json")
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return nil, nil
@@ -154,9 +154,9 @@ func migrateLegacyTOMLIfNeeded(dest, home string) (*MigrationResult, error) {
 }
 
 func legacyTOMLPaths(dest, home string) []string {
-	paths := []string{filepath.Join(filepath.Dir(dest), "momapeer.toml")}
+	paths := []string{filepath.Join(filepath.Dir(dest), "fairpeer.toml")}
 	if home != "" {
-		paths = append(paths, filepath.Join(home, ".momapeer", "momapeer.toml"))
+		paths = append(paths, filepath.Join(home, ".fairpeer", "fairpeer.toml"))
 	}
 	return paths
 }
@@ -262,8 +262,8 @@ func mergeEnv(base, overlay map[string]string) map[string]string {
 	return out
 }
 
-// writeCredentialsEnv merges lines into the momapeer-owned global credentials
-// file (UserCredentialsPath, e.g. %AppData%\momapeer\credentials), replacing any
+// writeCredentialsEnv merges lines into the fairpeer-owned global credentials
+// file (UserCredentialsPath, e.g. %AppData%\fairpeer\credentials), replacing any
 // existing assignment of the same key, and pins them into the current process env
 // so the just-built session resolves the key without a restart. Falls back to
 // ~/.env only when the user config dir can't be resolved — never a project .env,

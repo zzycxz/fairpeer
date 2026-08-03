@@ -70,7 +70,7 @@ export interface WireTool {
 }
 
 export interface WireAttachment {
-  path: string; // repo-relative, under .momapeer/attachments/
+  path: string; // repo-relative, under .fairpeer/attachments/
   kind: string; // "image"
 }
 
@@ -1173,7 +1173,7 @@ export interface BotSettingsView {
 
 // CoWorkSettingsView mirrors the Go CoWorkSettingsView. Secrets (SMTP/IMAP
 // passwords) are presented as plain fields here; they're persisted to a
-// momapeer-managed .env (not config.toml). detectedBrowser is a read-only
+// fairpeer-managed .env (not config.toml). detectedBrowser is a read-only
 // diagnostic from CheckCoworkBrowser. pptTemplates/pptActiveTemplate drive the
 // PPT-template dropdown; pptTemplateDir is where the user drops JSON templates.
 export interface CoWorkSettingsView {

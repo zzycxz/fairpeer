@@ -9,15 +9,15 @@ import (
 )
 
 // TestModelRefsFromConfig verifies the /model picker enumerates configured
-// provider/model refs (built-in defaults when no momapeer.toml is present), and
+// provider/model refs (built-in defaults when no fairpeer.toml is present), and
 // only those whose provider API key is set.
 //
 // Uses isolateUserConfig (not just t.Chdir) because modelRefs() reads the USER
-// config dir (~/.config/momapeer or %AppData%\momapeer), not the CWD. Without
+// config dir (~/.config/fairpeer or %AppData%\fairpeer), not the CWD. Without
 // isolating it, a real user config on the machine would override the built-in
 // defaults and make this test flaky (machine-dependent refs).
 func TestModelRefsFromConfig(t *testing.T) {
-	isolateUserConfig(t) // no momapeer.toml → built-in default providers
+	isolateUserConfig(t) // no fairpeer.toml → built-in default providers
 	t.Setenv("JIUTIAN_API_KEY", "test-key")
 	refs := modelRefs()
 	if len(refs) == 0 {

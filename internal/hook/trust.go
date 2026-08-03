@@ -6,14 +6,14 @@ import (
 	"path/filepath"
 )
 
-// Trust gates project hooks. A project's .momapeer/settings.json can run
+// Trust gates project hooks. A project's .fairpeer/settings.json can run
 // arbitrary shell commands, so cloning a repo must not silently execute its
 // hooks: project hooks load only after the user explicitly trusts that project
-// root. The trust flag lives in user-global state (~/.momapeer/trust.json),
+// root. The trust flag lives in user-global state (~/.fairpeer/trust.json),
 // NOT in the project file itself — an attacker controls the latter. Global
-// hooks (~/.momapeer/settings.json) are the user's own and always run.
+// hooks (~/.fairpeer/settings.json) are the user's own and always run.
 
-// TrustFilename is the user-global trust store under ~/.momapeer.
+// TrustFilename is the user-global trust store under ~/.fairpeer.
 const TrustFilename = "trust.json"
 
 type trustFile struct {
@@ -21,7 +21,7 @@ type trustFile struct {
 	Projects map[string]bool `json:"projects"`
 }
 
-// TrustPath is ~/.momapeer/trust.json (homeDir overrides ~).
+// TrustPath is ~/.fairpeer/trust.json (homeDir overrides ~).
 func TrustPath(homeDir string) string {
 	return filepath.Join(home(homeDir), SettingsDirname, TrustFilename)
 }

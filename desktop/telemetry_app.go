@@ -20,7 +20,7 @@ import (
 // random install id, version, and OS facts — never conversation, key, or file data.
 // Gated on config desktop.telemetry (default on) and skipped entirely in dev builds.
 
-var pingEndpoint = "https://crash.momapeer.io/v1/ping"
+var pingEndpoint = "https://crash.fairpeer.io/v1/ping"
 
 var installIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 

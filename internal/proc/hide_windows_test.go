@@ -38,13 +38,13 @@ func TestHideWindowPreservesExistingFlags(t *testing.T) {
 }
 
 func TestHideWindowPreservesStdoutCapture(t *testing.T) {
-	cmd := exec.Command("cmd", "/c", "echo", "momapeer-ok")
+	cmd := exec.Command("cmd", "/c", "echo", "fairpeer-ok")
 	HideWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("command failed: %v", err)
 	}
-	if !strings.Contains(string(out), "momapeer-ok") {
-		t.Fatalf("output = %q, want it to contain momapeer-ok", out)
+	if !strings.Contains(string(out), "fairpeer-ok") {
+		t.Fatalf("output = %q, want it to contain fairpeer-ok", out)
 	}
 }

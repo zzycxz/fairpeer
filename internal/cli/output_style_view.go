@@ -24,6 +24,6 @@ func renderOutputStyles(width int, styles []outputstyle.OutputStyle, active stri
 		desc := viewCompactText(st.Description, viewBudget(width, used))
 		fmt.Fprintf(&b, "  %-16s %s  %s%s\n", st.Name, viewMeta(scopeText), desc, status)
 	}
-	b.WriteString(viewHint(viewCompactText("set agent.output_style in momapeer.toml to apply one (takes effect next session)", viewBudget(width, 2))))
+	b.WriteString(viewHint(viewCompactText("set agent.output_style in fairpeer.toml to apply one (takes effect next session)", viewBudget(width, 2))))
 	return strings.TrimRight(b.String(), "\n")
 }

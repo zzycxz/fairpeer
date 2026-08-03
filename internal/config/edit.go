@@ -16,7 +16,7 @@ import (
 // edit.go is the programmatic mutation surface a settings UI drives: change the
 // default model, add/remove a provider, set the planner, edit permission rules,
 // add/remove an MCP server — each validated, then persisted with SaveTo. It is
-// separate from the `momapeer setup` wizard (cli) so a GUI can apply one setting at a
+// separate from the `fairpeer setup` wizard (cli) so a GUI can apply one setting at a
 // time without replaying the whole interactive flow. Every mutator works on the
 // in-memory *Config; nothing writes to disk until SaveTo/Save is called, so a UI
 // can stage several changes and commit once. Mutations round-trip through
@@ -660,7 +660,7 @@ func (c *Config) ClearPluginAuthentication(name string) (PluginEntry, bool, erro
 // ClearPluginAuthenticationInSource clears auth material in the file that actually
 // owns the MCP server. Load() merges user/project TOML and project .mcp.json into
 // one Config, so callers must not mutate that merged view and Save() it back: a
-// .mcp.json-only server would otherwise be serialized into momapeer.toml or the
+// .mcp.json-only server would otherwise be serialized into fairpeer.toml or the
 // user config. Source priority mirrors Load(): project TOML, user TOML, then the
 // project .mcp.json entry if TOML did not define that server.
 func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, error) {
@@ -685,7 +685,7 @@ func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, 
 }
 
 func pluginTOMLSourcePath(name string) string {
-	for _, path := range []string{"momapeer.toml", userConfigPath()} {
+	for _, path := range []string{"fairpeer.toml", userConfigPath()} {
 		if strings.TrimSpace(path) == "" {
 			continue
 		}
@@ -721,7 +721,7 @@ func validatePlugin(e PluginEntry) error {
 
 // SaveTo writes the configuration to path as annotated TOML, atomically: it
 // writes a sibling temp file then renames, so a crash mid-write can't leave a
-// half-written momapeer.toml that fails to parse on next load. Parent directories
+// half-written fairpeer.toml that fails to parse on next load. Parent directories
 // are created as needed.
 func (c *Config) SaveTo(path string) error {
 	return c.SaveToScope(path, renderScopeForPath(path))
@@ -743,7 +743,7 @@ func SaveMinimalProjectAutoPlan(path, mode string) (string, error) {
 	if err := cfg.SetAutoPlan(mode); err != nil {
 		return "", err
 	}
-	body := fmt.Sprintf(`# momapeer project configuration.
+	body := fmt.Sprintf(`# fairpeer project configuration.
 # Project-local overrides are merged over the user config.
 
 [agent]
@@ -760,7 +760,7 @@ func writeConfigFile(path, body string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("save: create dir: %w", err)
 	}
-	tmp, err := os.CreateTemp(dir, ".momapeer.*.toml.tmp")
+	tmp, err := os.CreateTemp(dir, ".fairpeer.*.toml.tmp")
 	if err != nil {
 		return fmt.Errorf("save: create temp: %w", err)
 	}
@@ -799,23 +799,23 @@ func isUserConfigPath(path string) bool {
 }
 
 // Save writes the configuration back to the file it was loaded from
-// (SourcePath), or to ./momapeer.toml when none exists yet — the conventional
+// (SourcePath), or to ./fairpeer.toml when none exists yet — the conventional
 // project-local target a fresh GUI session would create.
 func (c *Config) Save() error {
 	path := SourcePath()
 	if path == "" {
-		path = "momapeer.toml"
+		path = "fairpeer.toml"
 	}
 	return c.SaveTo(path)
 }
 
-// SaveForRoot saves the config to root's momapeer.toml, falling back to the
-// user's global config when root has no existing momapeer.toml.
+// SaveForRoot saves the config to root's fairpeer.toml, falling back to the
+// user's global config when root has no existing fairpeer.toml.
 func (c *Config) SaveForRoot(root string) error {
 	root = resolveRoot(root)
-	projectTOML := "momapeer.toml"
+	projectTOML := "fairpeer.toml"
 	if root != "." {
-		projectTOML = filepath.Join(root, "momapeer.toml")
+		projectTOML = filepath.Join(root, "fairpeer.toml")
 	}
 	if _, err := os.Stat(projectTOML); err == nil {
 		return c.SaveTo(projectTOML)

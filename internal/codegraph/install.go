@@ -33,7 +33,7 @@ const (
 
 // customDownloadBase, when set via SetDownloadBase, replaces the default GitHub
 // download source. This lets air-gapped/intranet deployments host the CodeGraph
-// binary on an internal mirror and point momapeer at it via
+// binary on an internal mirror and point fairpeer at it via
 // [codegraph].download_url in config.toml. Set by boot.go before Install.
 var customDownloadBase string
 
@@ -43,7 +43,7 @@ var customDownloadBase string
 func SetDownloadBase(url string) { customDownloadBase = strings.TrimSpace(url) }
 
 // CacheDir is where the CodeGraph bundle is unpacked on first use:
-// <user cache>/momapeer/codegraph/<Version>. Versioned so a bump installs cleanly
+// <user cache>/fairpeer/codegraph/<Version>. Versioned so a bump installs cleanly
 // beside the old one. FAIRPEER_CACHE_DIR overrides the base (relocate the cache,
 // or isolate it in tests). Empty when no cache/config dir resolves.
 func CacheDir() string {
@@ -55,7 +55,7 @@ func CacheDir() string {
 				return ""
 			}
 		}
-		base = filepath.Join(base, "momapeer")
+		base = filepath.Join(base, "fairpeer")
 	}
 	return filepath.Join(base, "codegraph", Version)
 }
@@ -93,7 +93,7 @@ func assetName() string {
 }
 
 // Install downloads and unpacks the CodeGraph bundle into CacheDir on first use,
-// verifying it against the checksum baked into the momapeer binary, then returns
+// verifying it against the checksum baked into the fairpeer binary, then returns
 // the launcher path.
 // It is idempotent: a present cache is returned untouched. log, if non-nil,
 // receives a couple of progress lines. The extraction is staged in a temp dir and
@@ -103,7 +103,7 @@ func Install(ctx context.Context, log func(string)) (string, error) {
 	return InstallWithClient(ctx, http.DefaultClient, log)
 }
 
-// InstallWithClient is Install with an explicit HTTP client, used when momapeer
+// InstallWithClient is Install with an explicit HTTP client, used when fairpeer
 // network proxy settings should apply.
 func InstallWithClient(ctx context.Context, client *http.Client, log func(string)) (string, error) {
 	if client == nil {

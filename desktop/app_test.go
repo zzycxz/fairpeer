@@ -223,7 +223,7 @@ func TestSettingsUsesUserDesktopPreferencesNotProjectConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	project := robustTempDir(t)
-	if err := os.WriteFile(filepath.Join(project, "momapeer.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(project, "fairpeer.toml"), []byte(`
 [desktop]
 language = "zh"
 theme = "light"
@@ -263,7 +263,7 @@ func TestSettingsSeedsMissingUserConfigFromLegacyProjectConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	project := robustTempDir(t)
-	if err := os.WriteFile(filepath.Join(project, "momapeer.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(project, "fairpeer.toml"), []byte(`
 default_model = "legacy-provider/legacy-model"
 
 [desktop]
@@ -1088,7 +1088,7 @@ func TestSubmitToTabHistoryDisplaysRawInputAfterMemoryCompose(t *testing.T) {
 
 	app := NewApp()
 	app.setTestCtrl(ctrl, "moma/test")
-	ctrl.QueueMemory(`Saved memory "momapeer-contributions": contribution count updated`)
+	ctrl.QueueMemory(`Saved memory "fairpeer-contributions": contribution count updated`)
 
 	const prompt = "不要，删了"
 	app.SubmitToTab("test", prompt)
@@ -1117,7 +1117,7 @@ func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	workspace := robustTempDir(t)
-	if err := os.WriteFile(filepath.Join(workspace, "momapeer.toml"), []byte("[codegraph]\nenabled = false\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "fairpeer.toml"), []byte("[codegraph]\nenabled = false\n"), 0o644); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
 	dir := config.SessionDir()
@@ -1211,7 +1211,7 @@ func TestCapabilitiesShowsDefaultMCPAsInitializingNotDisabled(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "momapeer.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "fairpeer.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1277,7 +1277,7 @@ func TestCapabilitiesMarksBackgroundRemoteMCPAuthPossible(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "momapeer.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "fairpeer.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1310,7 +1310,7 @@ func TestCapabilitiesDoesNotMarkRemoteMCPWithAuthHeaderPossible(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "momapeer.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "fairpeer.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1344,7 +1344,7 @@ func TestCapabilitiesMarksAuthFailureRequired(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "momapeer.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "fairpeer.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1379,7 +1379,7 @@ func TestClearMCPServerAuthenticationClearsConfigAndFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "momapeer.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "fairpeer.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1442,7 +1442,7 @@ func TestUpdateMCPServerMigratesLegacyTierToBackground(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "momapeer.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "fairpeer.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1493,7 +1493,7 @@ tier = "lazy"
 	if userPlugin.Tier != "" {
 		t.Fatalf("user plugin tier = %q, want migrated empty", userPlugin.Tier)
 	}
-	projectCfg := config.LoadForEdit(filepath.Join(dir, "momapeer.toml"))
+	projectCfg := config.LoadForEdit(filepath.Join(dir, "fairpeer.toml"))
 	if _, ok := findPluginEntry(projectCfg.Plugins, "playwright"); ok {
 		t.Fatalf("project plugin should be removed after desktop migration: %+v", projectCfg.Plugins)
 	}
@@ -1519,7 +1519,7 @@ func TestUpdateMCPServerSplitsPastedCommandLine(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := t.TempDir()
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "momapeer.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "fairpeer.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1559,7 +1559,7 @@ func TestUpdateMCPServerRecordsReconnectFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "momapeer.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "fairpeer.toml"), []byte(`
 [codegraph]
 enabled = false
 
@@ -1578,7 +1578,7 @@ tier = "background"
 	if err := app.UpdateMCPServer("broken", MCPServerInput{
 		Name:      "broken",
 		Transport: "stdio",
-		Command:   "momapeer-missing-mcp-binary",
+		Command:   "fairpeer-missing-mcp-binary",
 	}); err != nil {
 		t.Fatalf("UpdateMCPServer should persist config even when reconnect fails: %v", err)
 	}
@@ -1586,7 +1586,7 @@ tier = "background"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Plugins[0].Command; got != "momapeer-missing-mcp-binary" {
+	if got := cfg.Plugins[0].Command; got != "fairpeer-missing-mcp-binary" {
 		t.Fatalf("updated command = %q, want missing binary", got)
 	}
 	if got := cfg.Plugins[0].Tier; got != "" {
@@ -1601,7 +1601,7 @@ tier = "background"
 			if s.Status != "failed" {
 				t.Fatalf("server status = %q, want failed; server = %+v", s.Status, s)
 			}
-			if s.Command != "momapeer-missing-mcp-binary" || s.Tier != "background" {
+			if s.Command != "fairpeer-missing-mcp-binary" || s.Tier != "background" {
 				t.Fatalf("server config not refreshed after failed reconnect: %+v", s)
 			}
 			return
@@ -1614,13 +1614,13 @@ func TestSetMCPServerTierRecordsConnectFailure(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "momapeer.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "fairpeer.toml"), []byte(`
 [codegraph]
 enabled = false
 
 [[plugins]]
 name = "broken"
-command = "momapeer-missing-mcp-binary"
+command = "fairpeer-missing-mcp-binary"
 tier = "lazy"
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -1652,7 +1652,7 @@ tier = "lazy"
 	if userPlugin.Tier != "" {
 		t.Fatalf("user plugin tier = %q, want migrated empty", userPlugin.Tier)
 	}
-	projectCfg := config.LoadForEdit(filepath.Join(dir, "momapeer.toml"))
+	projectCfg := config.LoadForEdit(filepath.Join(dir, "fairpeer.toml"))
 	if _, ok := findPluginEntry(projectCfg.Plugins, "broken"); ok {
 		t.Fatalf("project plugin should be removed after desktop migration: %+v", projectCfg.Plugins)
 	}
@@ -1683,7 +1683,7 @@ func TestSetMCPServerTierEnablesCodegraphAndIgnoresLegacyTier(t *testing.T) {
 	t.Setenv("FAIRPEER_CACHE_DIR", robustTempDir(t)) // isolate the codegraph bundle cache so Resolve fails deterministically
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "momapeer.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "fairpeer.toml"), []byte(`
 [codegraph]
 enabled = false
 auto_install = true
@@ -1737,7 +1737,7 @@ func TestSetMCPServerEnabledPersistsCodegraphOff(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "momapeer.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "fairpeer.toml"), []byte(`
 [codegraph]
 enabled = true
 tier = "lazy"
@@ -1779,13 +1779,13 @@ func TestCapabilitiesMigratesFailedMCPConfiguredTierAfterRestart(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
-	if err := os.WriteFile(filepath.Join(dir, "momapeer.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "fairpeer.toml"), []byte(`
 [codegraph]
 enabled = false
 
 [[plugins]]
 name = "broken"
-command = "momapeer-missing-mcp-binary"
+command = "fairpeer-missing-mcp-binary"
 tier = "eager"
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -1796,7 +1796,7 @@ tier = "eager"
 	defer app.activeCtrl().Close()
 	recordMCPFailure(app.activeCtrl(), config.PluginEntry{
 		Name:    "broken",
-		Command: "momapeer-missing-mcp-binary",
+		Command: "fairpeer-missing-mcp-binary",
 		Tier:    "eager",
 	}, errors.New("connect: missing binary"))
 

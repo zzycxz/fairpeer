@@ -1,7 +1,7 @@
 Unicode true
 
 ####
-## momapeer per-user NSIS installer.
+## fairpeer per-user NSIS installer.
 ##
 ## This file is COMMITTED and customized (Wails leaves an existing project.nsi
 ## untouched and only regenerates wails_tools.nsh). The customizations vs.
@@ -17,8 +17,8 @@ Unicode true
 ##      InstallLocation (HKCU\...\Uninstall\InstallLocation). When upgrading from
 ##      a build that did not write InstallLocation yet, .onInit falls back to the
 ##      old DisplayIcon path before using the default. Without this, every release
-##      forces the user back to %LOCALAPPDATA%\Programs\momapeer even if they had
-##      moved the install to a different drive (e.g. D:\Tools\momapeer); the silent
+##      forces the user back to %LOCALAPPDATA%\Programs\fairpeer even if they had
+##      moved the install to a different drive (e.g. D:\Tools\fairpeer); the silent
 ##      auto-updater would re-run with /S into the wrong dir, leaving the old
 ##      install orphaned.
 ##
@@ -84,7 +84,7 @@ ShowInstDetails show # This will always show the installation details.
 ## Per-user uninstaller registry (HKCU). Replaces wails.writeUninstaller /
 ## wails.deleteUninstaller, which write HKLM and would fail without admin rights.
 ####
-!macro momapeer.writeUninstaller
+!macro fairpeer.writeUninstaller
     WriteUninstaller "$INSTDIR\uninstall.exe"
 
     WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "${INFO_COMPANYNAME}"
@@ -95,8 +95,8 @@ ShowInstDetails show # This will always show the installation details.
     WriteRegStr HKCU "${UNINST_KEY}" "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"
     # Persist the resolved install path so a subsequent update picks it up
     # via InstallDirRegKey above. Without this, every release would force the
-    # user back to %LOCALAPPDATA%\Programs\momapeer even if they had moved
-    # the install to a different drive (e.g. D:\Tools\momapeer). The auto-
+    # user back to %LOCALAPPDATA%\Programs\fairpeer even if they had moved
+    # the install to a different drive (e.g. D:\Tools\fairpeer). The auto-
     # updater re-runs this installer with /S and trusts the persisted path,
     # so it has to be present before the silent re-install.
     WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
@@ -106,7 +106,7 @@ ShowInstDetails show # This will always show the installation details.
     WriteRegDWORD HKCU "${UNINST_KEY}" "EstimatedSize" "$0"
 !macroend
 
-!macro momapeer.deleteUninstaller
+!macro fairpeer.deleteUninstaller
     Delete "$INSTDIR\uninstall.exe"
     DeleteRegKey HKCU "${UNINST_KEY}"
 !macroend
@@ -145,7 +145,7 @@ Section
     !insertmacro wails.associateFiles
     !insertmacro wails.associateCustomProtocols
 
-    !insertmacro momapeer.writeUninstaller
+    !insertmacro fairpeer.writeUninstaller
 SectionEnd
 
 Section "uninstall"
@@ -161,5 +161,5 @@ Section "uninstall"
     !insertmacro wails.unassociateFiles
     !insertmacro wails.unassociateCustomProtocols
 
-    !insertmacro momapeer.deleteUninstaller
+    !insertmacro fairpeer.deleteUninstaller
 SectionEnd

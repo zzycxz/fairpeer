@@ -10,7 +10,7 @@ import (
 )
 
 // TextSink renders a turn's event stream to ANSI text on an io.Writer. It is
-// the reference terminal frontend: a headless `momapeer run` writes to stdout,
+// the reference terminal frontend: a headless `fairpeer run` writes to stdout,
 // and during the cache-first migration the chat TUI is fed through it too. The
 // output is byte-for-byte what the agent used to print directly, now driven by
 // typed events instead of inline Fprint calls.

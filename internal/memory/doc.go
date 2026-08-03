@@ -1,7 +1,7 @@
-// Package memory implements momapeer's persistent memory. It mirrors Claude
-// Code's two-layer model while honoring momapeer's cache-first architecture:
+// Package memory implements fairpeer's persistent memory. It mirrors Claude
+// Code's two-layer model while honoring fairpeer's cache-first architecture:
 //
-//   - Hierarchical doc memory: momapeer.md / AGENTS.md files discovered from the
+//   - Hierarchical doc memory: fairpeer.md / AGENTS.md files discovered from the
 //     user config dir and up the project tree, with "@path" imports. This is the
 //     analog of CLAUDE.md.
 //   - Auto-memory store: per-project fact files with frontmatter plus a MEMORY.md
@@ -35,22 +35,22 @@ import (
 type Scope string
 
 const (
-	ScopeUser     Scope = "user"     // ~/.config/momapeer/momapeer.md
-	ScopeAncestor Scope = "ancestor" // a momapeer.md above the project root
-	ScopeProject  Scope = "project"  // ./momapeer.md (committed, shared)
-	ScopeLocal    Scope = "local"    // ./momapeer.local.md (personal, git-ignored)
+	ScopeUser     Scope = "user"     // ~/.config/fairpeer/fairpeer.md
+	ScopeAncestor Scope = "ancestor" // a fairpeer.md above the project root
+	ScopeProject  Scope = "project"  // ./fairpeer.md (committed, shared)
+	ScopeLocal    Scope = "local"    // ./fairpeer.local.md (personal, git-ignored)
 )
 
 // docNames are the recognized memory filenames at each level, in load order.
-// momapeer.md is ours; AGENTS.md and CLAUDE.md are the cross-tool conventions.
+// fairpeer.md is ours; AGENTS.md and CLAUDE.md are the cross-tool conventions.
 // When several distinct files exist in one directory, all load (each labeled with
 // its source path), so a repo already carrying an AGENTS.md / CLAUDE.md is picked
 // up without renaming. New docs are created as AGENTS.md (the universal
 // convention) — see defaultDocName / Set.DocPath.
-var docNames = []string{"momapeer.md", "AGENTS.md", "CLAUDE.md"}
+var docNames = []string{"fairpeer.md", "AGENTS.md", "CLAUDE.md"}
 
 // localNames are the personal, git-ignored overrides, highest precedence.
-var localNames = []string{"momapeer.local.md", "AGENTS.local.md", "CLAUDE.local.md"}
+var localNames = []string{"fairpeer.local.md", "AGENTS.local.md", "CLAUDE.local.md"}
 
 // defaultDocName / defaultLocalName are the filenames a fresh doc is created as
 // when a directory has none yet: AGENTS.md is the widely-shared convention, so a

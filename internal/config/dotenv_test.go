@@ -46,8 +46,8 @@ func TestLoadDotEnvFallsBackToHome(t *testing.T) {
 	}
 }
 
-// TestLoadDotEnvReadsGlobalCredentials proves `momapeer setup`'s target — the
-// momapeer-owned credentials file in the user config dir — is loaded from any
+// TestLoadDotEnvReadsGlobalCredentials proves `fairpeer setup`'s target — the
+// fairpeer-owned credentials file in the user config dir — is loaded from any
 // working directory, while a project ./.env still wins on a shared key.
 func TestLoadDotEnvReadsGlobalCredentials(t *testing.T) {
 	cwd := t.TempDir()

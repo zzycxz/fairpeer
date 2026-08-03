@@ -1,5 +1,5 @@
-# momapeer configuration.
-# Resolution order: flag > ./momapeer.toml > ~/.config/momapeer/config.toml > built-in defaults.
+# fairpeer configuration.
+# Resolution order: flag > ./fairpeer.toml > ~/.config/fairpeer/config.toml > built-in defaults.
 # Secrets come from the environment via api_key_env; never put keys here.
 
 default_model = "moma/qwen/qwen3.6-35b"   # MoMA default model
@@ -18,11 +18,11 @@ ask_request = true   # notify when a question is waiting
 
 [agent]
 system_prompt = """
-You are momapeer, a coding agent focused on executing code tasks.
+You are fairpeer, a coding agent focused on executing code tasks.
 Use the provided tools to read and write files and run shell commands.
-When asked about your identity, always say you are momapeer. Never mention
+When asked about your identity, always say you are fairpeer. Never mention
 Claude, Anthropic, GPT, Qwen, DeepSeek, or any underlying model name —
-you are momapeer, not any foundation model.
+you are fairpeer, not any foundation model.
 Principles: understand the request before acting; verify with tools instead of
 guessing; keep changes minimal and correct; briefly summarize what you did."""
 # system_prompt_file = "prompts/system.md"   # overrides system_prompt when set
@@ -38,7 +38,7 @@ compact_force_ratio = 0.9   # force compacting at this high-water mark
 # subagent_model = "moma/openai/gpt-oss-120b"   # optional default for runAs=subagent skills
 # subagent_models = { review = "moma/openai/gpt-oss-120b", security_review = "moma/openai/gpt-oss-120b" }   # per-skill overrides
 # output_style = "explanatory"   # persona/tone folded into the prompt: explanatory | learning | concise,
-#                                  or a custom .momapeer/output-styles/<name>.md ; empty = default
+#                                  or a custom .fairpeer/output-styles/<name>.md ; empty = default
 
 # A provider is a vendor endpoint (one base_url + key) that offers one or more
 # models. Use `models = [...]` to expose several under a single entry — switching
@@ -97,11 +97,11 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # [codegraph]
 # enabled      = false
 # auto_install = true
-# path         = ""   # empty = cache, then PATH, then a bundle beside momapeer
+# path         = ""   # empty = cache, then PATH, then a bundle beside fairpeer
 # download_url = ""   # custom download mirror for the CodeGraph binary (intranet/air-gapped). When set, replaces the default GitHub source. Example: "https://internal-mirror.corp/codegraph/releases/download"
 
 # Skills are invokable playbooks (SKILL.md / <name>.md with frontmatter), found
-# under .momapeer/skills, .agents/skills, .agent/skills, .claude/skills (project)
+# under .fairpeer/skills, .agents/skills, .agent/skills, .claude/skills (project)
 # and the same dirs under ~ (global). Built-ins (explore/research/review/security-review/test)
 # ship out of the box. The model invokes them via run_skill / explore / …; you
 # invoke them via /<name>. Manage with /skill (list, show, enable, disable, new, paths).
@@ -112,10 +112,10 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 
 # Hooks run shell commands around the loop (PreToolUse / PostToolUse /
 # UserPromptSubmit / Stop). They are NOT configured here — put them in
-# settings.json: ~/.momapeer/settings.json (global, always on) and
-# <project>/.momapeer/settings.json (project, runs only after `/hooks trust`).
+# settings.json: ~/.fairpeer/settings.json (global, always on) and
+# <project>/.fairpeer/settings.json (project, runs only after `/hooks trust`).
 # Exit 0 = pass, exit 2 = block (PreToolUse / UserPromptSubmit only). Example
-# ~/.momapeer/settings.json:
+# ~/.fairpeer/settings.json:
 #   { "hooks": {
 #       "PreToolUse":  [ { "match": "bash", "command": "my-guard.sh" } ],
 #       "PostToolUse": [ { "match": ".*file", "command": "gofmt -w ." } ],
@@ -129,7 +129,7 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # External stdio plugins (MCP-compatible); each is a standalone executable.
 # [[plugins]]
 # name    = "example"
-# command = "momapeer-plugin-example"
+# command = "fairpeer-plugin-example"
 # # Per-call timeout for this MCP server's JSON-RPC calls (default 60s).
 # # Prevents a slow server from blocking the agent indefinitely.
 # call_timeout = "60s"
@@ -137,7 +137,7 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # # start. Use /mcp or the desktop MCP panel to refresh, reconnect, or disable.
 
 # Bot gateway: multi-channel IM bot for QQ, Feishu, and WeChat.
-# Start with `momapeer bot start --channels qq,feishu,weixin`.
+# Start with `fairpeer bot start --channels qq,feishu,weixin`.
 # All secrets are read from environment variables; never put keys here.
 # [bot]
 # enabled    = false

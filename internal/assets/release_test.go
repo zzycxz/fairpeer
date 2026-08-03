@@ -8,10 +8,10 @@ import (
 
 // TestEnsurePPTAutoSkill_ReleasesEmbeddedTree verifies that EnsurePPTAutoSkill
 // actually walks the embedded ppt-auto tree and writes it under the user's
-// ~/.momapeer/skills/ppt-auto/, including dot/underscore entries that `all:` is
+// ~/.fairpeer/skills/ppt-auto/, including dot/underscore entries that `all:` is
 // required for. It uses a fake HOME so it never touches the real user dir.
 func TestEnsurePPTAutoSkill_ReleasesEmbeddedTree(t *testing.T) {
-	// Sandbox HOME so the test never writes to the real ~/.momapeer.
+	// Sandbox HOME so the test never writes to the real ~/.fairpeer.
 	tmp := t.TempDir()
 	// t.Setenv automatically handles cleanup, no need for manual defer/unset
 	t.Setenv("USERPROFILE", tmp)

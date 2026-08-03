@@ -8,7 +8,7 @@ var Chinese = Messages{
 	WelcomeTitleFmt: "欢迎使用 %s",
 	NoConfigYet:     "还没有配置 — 现在来设置一下吧。",
 	StartingChatFmt: "正在启动 %s…",
-	SetKeyHint:      "设置好 API key 后运行 `momapeer chat`。",
+	SetKeyHint:      "设置好 API key 后运行 `fairpeer chat`。",
 	ConfigLabel:     "配置",
 	ModelsLabel:     "模型",
 	ConfigNotFound:  "未找到 — 使用内置默认值",
@@ -16,18 +16,18 @@ var Chinese = Messages{
 	NoKey:           "未设置 key",
 	Ready:           "已就绪",
 	GetStarted:      "开始使用",
-	StepScaffold:    "生成 momapeer.toml",
+	StepScaffold:    "生成 fairpeer.toml",
 	StepSetKey:      "设置 API key",
 
-	InitHint:       "项目记忆（AGENTS.md）在会话内由模型生成：运行 `momapeer chat`，然后 `/init` —— 模型会分析代码库并写入。配置请用 `momapeer setup`。",
-	StepSetKeyHint: "运行 `momapeer setup`，或 export JIUTIAN_API_KEY=…",
+	InitHint:       "项目记忆（AGENTS.md）在会话内由模型生成：运行 `fairpeer chat`，然后 `/init` —— 模型会分析代码库并写入。配置请用 `fairpeer setup`。",
+	StepSetKeyHint: "运行 `fairpeer setup`，或 export JIUTIAN_API_KEY=…",
 	StepChatDesc:   "交互式会话",
 	StepRunDesc:    "执行单次任务",
-	HelpFooter:     "momapeer help · 查看全部命令",
+	HelpFooter:     "fairpeer help · 查看全部命令",
 
 	ChatTip:           "对话上下文将跨轮保留。输入 'exit' 或按 Ctrl-D 退出。",
 	TurnCancelled:     "已取消 — 回到提示符",
-	NoSessionToResume: "没有可恢复的会话 — 用 `momapeer chat` 开一个新的",
+	NoSessionToResume: "没有可恢复的会话 — 用 `fairpeer chat` 开一个新的",
 	ResumeRequiresTTY: "--resume 需要交互式终端；用 --continue 直接恢复最近一次",
 	PickSessionLabel:  "恢复哪个会话？",
 
@@ -73,7 +73,7 @@ var Chinese = Messages{
 
 	OutputStyleNone:    "没有可用的输出风格",
 	OutputStyleHeader:  "输出风格：",
-	OutputStyleHint:    "在 momapeer.toml 设置 agent.output_style 即可启用（下次会话生效）",
+	OutputStyleHint:    "在 fairpeer.toml 设置 agent.output_style 即可启用（下次会话生效）",
 	ThemeHeader:        "主题：",
 	ThemeHint:          "使用 /theme <auto|light|dark|style> 切换",
 	ThemeChangedFmt:    "已切换主题为 %s / %s",
@@ -145,7 +145,7 @@ var Chinese = Messages{
 	SkillPickerStatusNotDir:      "非目录",
 	SkillPickerStatusUnreadable:  "无权限",
 	SlashPromptEmpty:             "该 MCP prompt 没有返回可发送的内容",
-	SlashMCPNone:                 "没有配置 MCP 服务器 — 在 momapeer.toml 加一个 [[plugins]] 条目",
+	SlashMCPNone:                 "没有配置 MCP 服务器 — 在 fairpeer.toml 加一个 [[plugins]] 条目",
 	CtrlCQuitHint:                "再按一次 Ctrl+C 退出",
 	CompHintSlash:                "↑/↓ 移动 · Tab/Enter 选中 · Esc 关闭",
 	CompHintFile:                 "↑/↓ 移动 · Tab/Enter 进入文件夹或选中文件 · Esc 关闭",
@@ -218,11 +218,11 @@ var Chinese = Messages{
 	ListSkillsHeaderFmt: "skills（%d 个）",
 	ListSkillsNone:      "暂无 skill — 调用内置的（如 /init），或用 install_skill 创建一个",
 	ListHooksHeaderFmt:  "hooks（生效 %d 个）",
-	ListHooksNone:       "无生效 hooks — 在 .momapeer/settings.json（项目，需信任后）或 ~/.momapeer/settings.json（全局）配置",
+	ListHooksNone:       "无生效 hooks — 在 .fairpeer/settings.json（项目，需信任后）或 ~/.fairpeer/settings.json（全局）配置",
 	ListMcpHeader:       "MCP 服务器",
-	ListMcpNone:         "未连接 MCP 服务器 — 在 momapeer.toml（[[plugins]]）或项目 .mcp.json 中添加",
+	ListMcpNone:         "未连接 MCP 服务器 — 在 fairpeer.toml（[[plugins]]）或项目 .mcp.json 中添加",
 
-	MemoryNone:             "还没有加载任何记忆 — 输入 \"/remember 内容\" 可快速记录，也可以在项目根目录创建 momapeer.md",
+	MemoryNone:             "还没有加载任何记忆 — 输入 \"/remember 内容\" 可快速记录，也可以在项目根目录创建 fairpeer.md",
 	MemoryLoaded:           "当前已加载的记忆：",
 	MemorySavedHeader:      "  已记录的条目（用 “/forget <name>” 删除）：",
 	MemoryStoredUnderFmt:   "  存放于 %s",
@@ -256,12 +256,12 @@ var Chinese = Messages{
 
 	SelectProvidersLabel:  "选择要启用的 provider",
 	EnterAPIKeysHeader:    "输入 API key（回车跳过、稍后再设）：",
-	MissingKeyIntro:       "momapeer.toml 已配置好 — 只差一个 API key 就可以开始。",
+	MissingKeyIntro:       "fairpeer.toml 已配置好 — 只差一个 API key 就可以开始。",
 	WroteFileFmt:          "已写入 %s",
 	SetupComplete:         "设置完成。",
 	SetupCancelled:        "设置已取消。",
 	TryHintFmt:            "试试: %s",
-	NextHint:              "下一步：设置 API key（运行 `momapeer setup` 或 export JIUTIAN_API_KEY=...），然后运行 `momapeer run \"你的任务\"`。",
+	NextHint:              "下一步：设置 API key（运行 `fairpeer setup` 或 export JIUTIAN_API_KEY=...），然后运行 `fairpeer run \"你的任务\"`。",
 	ConfirmReconfigureFmt: "%s 已存在。重新配置并覆盖？",
 	KeepingExisting:       "保留原配置不变。",
 	NotOverwritingFmt:     "%s 已存在，不覆盖",
@@ -276,7 +276,7 @@ var Chinese = Messages{
 	NoModelsAvailableFmt:       "%s: 没有可用模型，跳过",
 	CustomFetchEmpty:           "/models 返回为空，回退到手动输入",
 	AnthropicFetchEmpty:        "/models 返回为空 — Anthropic 兼容服务通常不提供此端点，回退到手动输入",
-	SkipStaleCustomEntryFmt:    "跳过 momapeer.toml 里的旧 %q 条目（指向 %s）— 请手动从 [[providers]] 里删除",
+	SkipStaleCustomEntryFmt:    "跳过 fairpeer.toml 里的旧 %q 条目（指向 %s）— 请手动从 [[providers]] 里删除",
 	APIKeyAlreadySetFmt:        "复用已设置的 %s",
 	APIKeyResetPromptFmt:       "重新输入 %s？",
 
@@ -309,14 +309,14 @@ var Chinese = Messages{
 	AnthropicSelectModelsLabel:     "选择要启用的 %s 模型",
 
 	UnknownCommandFmt:         "未知命令 %q",
-	UsageRunHint:              "用法：momapeer run [--model NAME] <task>",
+	UsageRunHint:              "用法：fairpeer run [--model NAME] <task>",
 	ErrorPrefix:               "错误：",
 	ReconfigureOnUnknownModel: "配置的模型已不可用 —— 重新运行引导配置。",
 	WriteConfigErr:            "写入配置失败：",
 	WriteEnvErr:               "写入 .env 失败：",
 
 	ProviderErrBadRequest:    "请求格式错误 (HTTP 400)：请求体被拒绝，通常是程序缺陷。若持续出现请反馈。",
-	ProviderErrAuth:          "认证失败 (HTTP 401)：API key 缺失、错误或已过期。请检查 .env 中的密钥，或运行 `momapeer setup`。",
+	ProviderErrAuth:          "认证失败 (HTTP 401)：API key 缺失、错误或已过期。请检查 .env 中的密钥，或运行 `fairpeer setup`。",
 	ProviderErrUnprocessable: "参数错误 (HTTP 422)：某个请求参数被拒绝，通常是程序缺陷。若持续出现请反馈。",
 	ProviderErrRateLimited:   "请求速率达到上限 (HTTP 429)：请求过于频繁 (TPM/RPM)。已退避重试，请放慢速率或稍后再试。",
 	ProviderErrServer:        "服务器故障 (HTTP 500)：服务端内部错误。已退避重试；若持续失败请稍后再试。",
@@ -336,31 +336,31 @@ var Chinese = Messages{
 	ProviderPickLabel:    "选择 %s 的一个模型",
 	ProviderNoModelsFmt:  "供应商 %s 没有已配置的模型",
 
-	UsageBody: `momapeer — 由配置和插件驱动的 coding agent（多模型）
+	UsageBody: `fairpeer — 由配置和插件驱动的 coding agent（多模型）
 
 用法：
-  momapeer chat [--model NAME] [-c|--continue] [--resume]   交互式会话（多轮；-c 恢复最近一次，--resume 选择一个）
-  momapeer run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] <task>   执行单次任务后退出
-  momapeer serve [--model NAME] [--addr HOST:PORT]      通过 HTTP+SSE 提供会话（浏览器客户端在 /）
-  momapeer acp [--model NAME]                           通过 stdio 提供 Agent Client Protocol（也可用：momapeer --acp）
-  momapeer setup [path]                                 交互式配置向导；生成 momapeer.toml（及 .env）
-  momapeer config auto-plan [off|on]                    配置自动计划模式
-  momapeer mcp <add|remove|list>                        管理 momapeer.toml 里的 MCP 服务器
-  momapeer doctor [--json]                              输出脱敏的本地诊断信息
-  momapeer bot start|doctor|weixin-login                多渠道 IM bot 网关
-  momapeer version
-  momapeer help
+  fairpeer chat [--model NAME] [-c|--continue] [--resume]   交互式会话（多轮；-c 恢复最近一次，--resume 选择一个）
+  fairpeer run  [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] <task>   执行单次任务后退出
+  fairpeer serve [--model NAME] [--addr HOST:PORT]      通过 HTTP+SSE 提供会话（浏览器客户端在 /）
+  fairpeer acp [--model NAME]                           通过 stdio 提供 Agent Client Protocol（也可用：fairpeer --acp）
+  fairpeer setup [path]                                 交互式配置向导；生成 fairpeer.toml（及 .env）
+  fairpeer config auto-plan [off|on]                    配置自动计划模式
+  fairpeer mcp <add|remove|list>                        管理 fairpeer.toml 里的 MCP 服务器
+  fairpeer doctor [--json]                              输出脱敏的本地诊断信息
+  fairpeer bot start|doctor|weixin-login                多渠道 IM bot 网关
+  fairpeer version
+  fairpeer help
 
 示例：
-  momapeer chat
-  momapeer chat --continue
-  momapeer run "把 main.go 里的 TODO 实现掉"
-  momapeer run --model moma "给这个函数补单元测试"
-  echo "解释这段代码" | momapeer run
+  fairpeer chat
+  fairpeer chat --continue
+  fairpeer run "把 main.go 里的 TODO 实现掉"
+  fairpeer run --model moma "给这个函数补单元测试"
+  echo "解释这段代码" | fairpeer run
 
 配置：
-  优先级：flag > ./momapeer.toml > ~/.config/momapeer/config.toml > 内置默认值
+  优先级：flag > ./fairpeer.toml > ~/.config/fairpeer/config.toml > 内置默认值
   密钥通过 api_key_env 从环境变量注入（如 JIUTIAN_API_KEY）。
-  运行 'momapeer setup' 生成配置；详见 docs/SPEC.md。
+  运行 'fairpeer setup' 生成配置；详见 docs/SPEC.md。
 `,
 }

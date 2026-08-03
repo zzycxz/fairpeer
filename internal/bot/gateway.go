@@ -55,7 +55,7 @@ type AllowlistConfig struct {
 	Groups   map[Platform][]string
 }
 
-// BotGateway 是 momapeer bot 消息网关，管理 Controller 生命周期、session 并发、
+// BotGateway 是 fairpeer bot 消息网关，管理 Controller 生命周期、session 并发、
 // 事件渲染和平台适配器。
 type BotGateway struct {
 	cfg      GatewayConfig

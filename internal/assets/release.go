@@ -29,12 +29,12 @@ const skillDirName = "ppt-auto"
 const embedRoot = "pptauto"
 
 // EnsurePPTAutoSkill releases the embedded ppt-auto skill to the user's global
-// skills directory (~/.momapeer/skills/ppt-auto) if it is missing or stale.
+// skills directory (~/.fairpeer/skills/ppt-auto) if it is missing or stale.
 // It is idempotent: when the on-disk .embedded-version matches SkillVersion,
 // it does nothing. On a version bump it overwrites the existing copy.
 //
 // The release target is the global-scope skill root that the skill store scans
-// (internal/skill: Store.roots → home/.momapeer/skills), so both the CLI and the
+// (internal/skill: Store.roots → home/.fairpeer/skills), so both the CLI and the
 // desktop app discover the released skill without any discovery-code changes.
 //
 // A nil error is returned (best-effort): a failure to release is logged but does
@@ -46,7 +46,7 @@ func EnsurePPTAutoSkill() error {
 	if err != nil || home == "" {
 		return errors.New("assets: cannot determine user home dir")
 	}
-	dst := filepath.Join(home, ".momapeer", "skills", skillDirName)
+	dst := filepath.Join(home, ".fairpeer", "skills", skillDirName)
 
 	// Skip if the on-disk copy is already at the embedded version.
 	if current, ok := readVersion(dst); ok && current == SkillVersion {
@@ -97,14 +97,14 @@ func EnsurePPTAutoSkill() error {
 }
 
 // PPTAutoSkillDir returns the absolute path where EnsurePPTAutoSkill releases
-// the embedded skill (~/.momapeer/skills/ppt-auto), regardless of whether it
+// the embedded skill (~/.fairpeer/skills/ppt-auto), regardless of whether it
 // has been released yet. Useful for callers that want the canonical location.
 func PPTAutoSkillDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return "", errors.New("assets: cannot determine user home dir")
 	}
-	return filepath.Join(home, ".momapeer", "skills", skillDirName), nil
+	return filepath.Join(home, ".fairpeer", "skills", skillDirName), nil
 }
 
 // PPTAutoTemplatesDir returns the released skill's templates/ directory, or ""

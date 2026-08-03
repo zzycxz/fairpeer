@@ -169,7 +169,7 @@ func TestExportWritesMarkdownAndStripsReferencedContext(t *testing.T) {
 
 	checks := map[string]bool{
 		"system prompt excluded": !strings.Contains(got, "system prompt should not export"),
-		"has title":              strings.HasPrefix(got, "# momapeer session"),
+		"has title":              strings.HasPrefix(got, "# fairpeer session"),
 		"user turn present":      strings.Contains(got, "## User"),
 		"assistant turn present": strings.Contains(got, "## Assistant") && strings.Contains(got, "hi there"),
 		// The wrapper header must be stripped; the user's actual text remains.

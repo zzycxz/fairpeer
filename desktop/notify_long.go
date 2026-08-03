@@ -24,7 +24,7 @@ import (
 // "知道了" dismiss button. It is best-effort: errors are swallowed by the caller.
 // AppID matches Wails' InitializeNotifications (filepath.Base of the executable)
 // so it shares the same registry/COM registration and the toast attributes
-// correctly to momapeer.
+// correctly to fairpeer.
 //
 // The dismiss Action uses Foreground activation so clicking it both closes the
 // toast AND routes through Wails' OnNotificationResponse (registered in startup
@@ -50,13 +50,13 @@ func notifyLongDurationToast(title, body string) {
 	_ = n.Push()
 }
 
-// appExeBaseName returns the running executable's base name (e.g. "momapeer.exe"),
+// appExeBaseName returns the running executable's base name (e.g. "fairpeer.exe"),
 // matching what Wails' InitializeNotifications uses as the toast AppID. Falls
-// back to "momapeer.exe" if the path can't be resolved (keeps the toast working
+// back to "fairpeer.exe" if the path can't be resolved (keeps the toast working
 // rather than failing with an empty AppID, which Windows would suppress).
 func appExeBaseName() string {
 	if exe, err := os.Executable(); err == nil {
 		return filepath.Base(exe)
 	}
-	return "momapeer.exe"
+	return "fairpeer.exe"
 }

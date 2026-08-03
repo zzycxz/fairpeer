@@ -19,7 +19,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 
 	// Blank imports wire compile-time built-ins into their registries, exactly as
-	// cmd/momapeer does — boot.Build resolves providers/tools from these registries.
+	// cmd/fairpeer does — boot.Build resolves providers/tools from these registries.
 	_ "github.com/zzycxz/fairpeer/internal/provider/anthropic"
 	_ "github.com/zzycxz/fairpeer/internal/provider/openai"
 	_ "github.com/zzycxz/fairpeer/internal/tool/builtin"
@@ -33,7 +33,7 @@ import (
 var assets embed.FS
 
 // version is injected at build time via `wails build -ldflags "-X main.version=..."`,
-// mirroring cmd/momapeer/main.go. The auto-updater reads it (App.Version) to compare
+// mirroring cmd/fairpeer/main.go. The auto-updater reads it (App.Version) to compare
 // against the published manifest; an un-injected dev build stays "dev" and never
 // prompts to update.
 var version = "dev"

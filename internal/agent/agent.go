@@ -35,7 +35,7 @@ const maxStreamRecoveries = 1
 
 // Runner executes one task turn. *Agent satisfies it; the controller and compose
 // hold a Runner so they're agnostic to the concrete executor. (The two-model
-// Coordinator that previously also satisfied Runner has been removed — momapeer
+// Coordinator that previously also satisfied Runner has been removed — fairpeer
 // uses a single-model planner-executor path exclusively. The interface stays so
 // callers don't depend on the concrete *Agent type.)
 type Runner interface {
@@ -339,7 +339,7 @@ func planModeReadOK(t tool.Tool, args json.RawMessage) bool {
 	return false
 }
 
-// SetGate installs the per-call permission gate. Used by `momapeer chat` to swap the
+// SetGate installs the per-call permission gate. Used by `fairpeer chat` to swap the
 // headless gate built in setup for an interactive one that prompts the user;
 // nil disables gating. Safe to call before the run loop starts.
 func (a *Agent) SetGate(g Gate) {
@@ -386,7 +386,7 @@ func (a *Agent) Session() *Session {
 }
 
 // SetSession replaces the agent's conversation wholesale. Used by
-// `momapeer chat --resume` to load a saved JSONL transcript before the first turn,
+// `fairpeer chat --resume` to load a saved JSONL transcript before the first turn,
 // so the model picks up exactly where it left off. Callers serialise it against a
 // running turn (it only fires while idle); sessMu guards the pointer swap itself.
 func (a *Agent) SetSession(s *Session) {
@@ -1606,13 +1606,13 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	return toolOutcome{output: body, truncated: truncMsg != "", truncMsg: truncMsg, attachments: extractImageAttachments(body)}
 }
 
-// attachmentImageRe matches image file paths under .momapeer/attachments/ that a
+// attachmentImageRe matches image file paths under .fairpeer/attachments/ that a
 // tool may emit in its result text (e.g. image_generate's ![image](...) output).
 // We surface them as structured attachments so the frontend can render the
 // picture under the tool card without depending on the model echoing the path.
-var attachmentImageRe = regexp.MustCompile(`\.momapeer/attachments/[^\s)'"]+\.(?:png|jpg|jpeg|gif|webp|bmp|svg|tif|tiff)`)
+var attachmentImageRe = regexp.MustCompile(`\.fairpeer/attachments/[^\s)'"]+\.(?:png|jpg|jpeg|gif|webp|bmp|svg|tif|tiff)`)
 
-// extractImageAttachments pulls deduped .momapeer/attachments image paths from a
+// extractImageAttachments pulls deduped .fairpeer/attachments image paths from a
 // tool result string, preserving first-seen order.
 func extractImageAttachments(s string) []event.Attachment {
 	matches := attachmentImageRe.FindAllString(s, -1)

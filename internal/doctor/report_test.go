@@ -95,7 +95,7 @@ func TestCollectReportDoesNotRequireAPIKey(t *testing.T) {
 	if report.Providers[0].KeyPresent {
 		t.Fatal("provider key should be reported missing when env is empty")
 	}
-	if !strings.Contains(text, "momapeer 1.2.3 doctor") {
+	if !strings.Contains(text, "fairpeer 1.2.3 doctor") {
 		t.Fatalf("text report missing header:\n%s", text)
 	}
 	if !strings.Contains(text, "missing") {
@@ -104,7 +104,7 @@ func TestCollectReportDoesNotRequireAPIKey(t *testing.T) {
 }
 
 func TestRenderTextSurfacesWarningsUpTop(t *testing.T) {
-	text := RenderText(Report{Warnings: []string{"config momapeer.toml: parse boom"}})
+	text := RenderText(Report{Warnings: []string{"config fairpeer.toml: parse boom"}})
 	w := strings.Index(text, "parse boom")
 	if w < 0 {
 		t.Fatalf("warning missing from report:\n%s", text)

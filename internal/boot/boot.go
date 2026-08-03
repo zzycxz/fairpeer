@@ -173,7 +173,7 @@ type Options struct {
 	WorkspaceRoot string
 	// ExtraPlugins are session-scoped MCP servers supplied by a host transport
 	// (for example ACP session/new). They are connected eagerly for this
-	// controller but are not persisted to momapeer.toml.
+	// controller but are not persisted to fairpeer.toml.
 	ExtraPlugins []plugin.Spec
 	// SessionDir overrides where persisted chat transcripts are written. When
 	// empty, the shared CLI/global session directory is used.
@@ -227,7 +227,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	entry, ok := cfg.ResolveModel(modelName)
 	if !ok {
-		return nil, fmt.Errorf("%w %q (configured: %s); note: defining [[providers]] replaces the built-in presets, so add a [[providers]] entry for it or use a configured name, or run `momapeer setup` to reconfigure", ErrUnknownModel, modelName, providerNames(cfg))
+		return nil, fmt.Errorf("%w %q (configured: %s); note: defining [[providers]] replaces the built-in presets, so add a [[providers]] entry for it or use a configured name, or run `fairpeer setup` to reconfigure", ErrUnknownModel, modelName, providerNames(cfg))
 	}
 	if opts.EffortOverride != nil {
 		entry.Effort = *opts.EffortOverride
@@ -255,7 +255,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	sink := event.Sync(opts.Sink)
 
 	if migErr != nil {
-		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "config migration from ~/.momapeer failed: " + migErr.Error()})
+		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "config migration from ~/.fairpeer failed: " + migErr.Error()})
 	} else if migrated != nil {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: migrated.Notice()})
 	}
@@ -367,7 +367,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	sysPrompt += "\n\n" + config.LanguagePolicy
 
-	// Persistent memory (momapeer.md / AGENTS.md hierarchy + portrait layer +
+	// Persistent memory (fairpeer.md / AGENTS.md hierarchy + portrait layer +
 	// auto-memory index) folds into the system prompt exactly here, once: it
 	// becomes part of the durable, cache-stable prefix every turn reuses, so
 	// memory costs nothing per turn. Mid-session changes never touch this prefix
@@ -414,7 +414,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if udir := config.MemoryUserDir(); udir != "" {
 		skillLegacyPath = filepath.Join(udir, "skill_usage.json")
 	}
-	// Release the embedded ppt-auto skill to ~/.momapeer/skills/ppt-auto/ before
+	// Release the embedded ppt-auto skill to ~/.fairpeer/skills/ppt-auto/ before
 	// the skill store scans, so the just-released skill is discovered this run.
 	// Best-effort: a failure is logged but never aborts startup, since the user
 	// may already have a working skill from a prior release or a manual install.
@@ -689,7 +689,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		})
 		// Browser launch options: visible browser + persistent profile + proxy, so
 		// the driven browser behaves like a human user and reaches sites the same
-		// way momapeer's other HTTP traffic does. The proxy URL is resolved from
+		// way fairpeer's other HTTP traffic does. The proxy URL is resolved from
 		// the network spec; auto/env modes fall back to a probe via ProxyURLFor
 		// (chromedp needs one concrete --proxy-server URL, not a per-request func).
 		builtin.SetBrowserLaunchOptions(cfg.Cowork.BrowserHeadless, cfg.Cowork.BrowserUserDataDir, resolveBrowserProxyURL(proxySpec))
@@ -853,7 +853,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			}
 		default:
 			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
-				Text: "codegraph: not installed — run `momapeer codegraph install` to enable symbol-graph tools"})
+				Text: "codegraph: not installed — run `fairpeer codegraph install` to enable symbol-graph tools"})
 		}
 	}
 	eagerSpecs = append(eagerSpecs, opts.ExtraPlugins...)
@@ -1014,7 +1014,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	subagentStore := newSubagentStore(config.SessionDir())
 
 	// Permission policy gates every tool call. The headless gate (no Approver)
-	// resolves "ask" to allow — preserving `momapeer run` autonomy — while deny
+	// resolves "ask" to allow — preserving `fairpeer run` autonomy — while deny
 	// rules hard-block in every mode. Interactive frontends (chat, desktop) swap
 	// in an interactive gate later via Controller.EnableInteractiveApproval.
 	// Sub-agents always run headless: they have no UI to answer a prompt, so they
@@ -1130,7 +1130,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		parentSession := agent.ParentSession(sctx)
 		var run *agent.SubagentRun
 		if subagentStore == nil || parentSession == "" {
-			// Headless runs (e.g. `momapeer run`) have no persistent session to
+			// Headless runs (e.g. `fairpeer run`) have no persistent session to
 			// own a transcript. Run the skill sub-agent ephemerally, as before
 			// persisted transcripts existed, instead of failing. Continuation and
 			// fork need a persisted owner, so they error here.
@@ -1300,7 +1300,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		ArchiveDir:        config.ArchiveDir(),
 	}, sink)
 
-	// Custom slash commands (.momapeer/commands + user dir). Best-effort: a malformed
+	// Custom slash commands (.fairpeer/commands + user dir). Best-effort: a malformed
 	// file is skipped, and a load error never blocks the session.
 	cmds, _ := command.Load(config.CommandDirsForRoot(root)...)
 
@@ -1436,8 +1436,8 @@ func migrateLegacySessionSources(sink event.Sink) {
 	var sources []legacySource
 	if home, herr := os.UserHomeDir(); herr == nil {
 		sources = append(sources, legacySource{
-			dir:     filepath.Join(home, ".momapeer", "sessions"),
-			label:   "~/.momapeer/sessions",
+			dir:     filepath.Join(home, ".fairpeer", "sessions"),
+			label:   "~/.fairpeer/sessions",
 			migrate: agent.MigrateLegacySessions,
 		})
 	}
@@ -1492,11 +1492,11 @@ func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
 func rememberPermissionConfigPath(workspaceRoot string) string {
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
 	if workspaceRoot != "" {
-		return filepath.Join(workspaceRoot, "momapeer.toml")
+		return filepath.Join(workspaceRoot, "fairpeer.toml")
 	}
 	path := config.SourcePath()
 	if path == "" {
-		path = "momapeer.toml" // match Config.Save() fallback
+		path = "fairpeer.toml" // match Config.Save() fallback
 	}
 	return path
 }

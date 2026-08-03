@@ -38,7 +38,7 @@ func TestExtractHostChecksFromStructuredSection(t *testing.T) {
 		Scope: memory.ScopeProject,
 		Body: strings.Join([]string{
 			"# Project rules",
-			"## momapeer host checks",
+			"## fairpeer host checks",
 			"- verify: go test ./internal/...",
 			"* verify: git diff --check",
 			"- verify: go test ./internal/...",
@@ -62,7 +62,7 @@ func TestExtractHostChecksFromStructuredSection(t *testing.T) {
 
 func TestExtractHostChecksIgnoresOrdinaryGuidance(t *testing.T) {
 	docs := []memory.Source{{
-		Path: "momapeer.md",
+		Path: "fairpeer.md",
 		Body: "Always run go test before committing.\n\n- verify: go test ./...",
 	}}
 
@@ -73,8 +73,8 @@ func TestExtractHostChecksIgnoresOrdinaryGuidance(t *testing.T) {
 
 func TestExtractHostChecksIsCaseInsensitive(t *testing.T) {
 	docs := []memory.Source{{
-		Path: "momapeer.md",
-		Body: "## momapeer HOST checks\n- verify: go test ./...",
+		Path: "fairpeer.md",
+		Body: "## fairpeer HOST checks\n- verify: go test ./...",
 	}}
 
 	checks := ExtractHostChecks(docs)

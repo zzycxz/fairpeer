@@ -57,7 +57,7 @@ function page(title: string, crumb: string, body: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
 <title>${esc(title)}</title><style>${CSS}</style></head><body><div class="wrap">
-<header><a class="brand" href="https://momapeer.io">${LOGO}</a><a class="brand" href="https://momapeer.io">momapeer</a><span class="crumb">/ ${esc(crumb)}</span></header>
+<header><a class="brand" href="https://fairpeer.io">${LOGO}</a><a class="brand" href="https://fairpeer.io">fairpeer</a><span class="crumb">/ ${esc(crumb)}</span></header>
 ${body}</div></body></html>`;
 }
 
@@ -140,7 +140,7 @@ export function renderStats(data: {
     : `<div class="empty">No crash reports yet — that's the good kind of empty · 还没有崩溃报告</div>`;
 
   return page(
-    "momapeer · Stats",
+    "fairpeer · Stats",
     "stats",
     `<h1>Desktop stats</h1><p class="sub">Today: <b>${totalUsers}</b> active installs · anonymous launch pings and user-sent crash reports only</p>
 <div class="grid">
@@ -181,7 +181,7 @@ export function renderGroup(
     : `<div class="empty">No raw samples stored for this group</div>`;
 
   return page(
-    `momapeer · ${group.fingerprint.slice(0, 8)}`,
+    `fairpeer · ${group.fingerprint.slice(0, 8)}`,
     `stats / ${group.fingerprint.slice(0, 8)}`,
     `<h1><span class="pill ${group.kind === "crash" ? "crash" : ""}">${esc(group.kind)}</span> ${esc(group.fingerprint.slice(0, 8))}</h1>
 <p class="sub"><b>${group.count}</b> occurrences · first ${esc(group.first_seen.slice(0, 10))} · last ${esc(group.last_seen.slice(0, 10))} on ${esc(group.last_version)}</p>

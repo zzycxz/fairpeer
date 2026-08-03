@@ -345,9 +345,9 @@ func (*installSkillTool) Name() string   { return "install_skill" }
 func (*installSkillTool) ReadOnly() bool { return false }
 
 func (t *installSkillTool) Description() string {
-	scope := "'global' (only option — no project workspace) writes to ~/.momapeer/skills/."
+	scope := "'global' (only option — no project workspace) writes to ~/.fairpeer/skills/."
 	if t.store.HasProjectScope() {
-		scope = "'project' (default) writes to <repo>/.momapeer/skills/ (this workspace only); 'global' writes to ~/.momapeer/skills/ (every project)."
+		scope = "'project' (default) writes to <repo>/.fairpeer/skills/ (this workspace only); 'global' writes to ~/.fairpeer/skills/ (every project)."
 	}
 	return "Author and save a new skill — a reusable playbook future turns invoke via run_skill (or /<name>). Runnable immediately this turn; appears in the pinned Skills index on the next launch. " + scope
 }
@@ -356,7 +356,7 @@ func (*installSkillTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
-  "name":{"type":"string","description":"Identifier — letters/digits/_/-/., 1-64 chars, starts alphanumeric. Becomes the skill folder name under ~/.momapeer/skills/<name>/SKILL.md."},
+  "name":{"type":"string","description":"Identifier — letters/digits/_/-/., 1-64 chars, starts alphanumeric. Becomes the skill folder name under ~/.fairpeer/skills/<name>/SKILL.md."},
   "description":{"type":"string","description":"≤120-char one-liner shown in the pinned Skills index — future agents read it to decide whether to invoke."},
   "body":{"type":"string","description":"Markdown playbook. For subagent skills, write the subagent's persona/rules — it gets no context besides 'arguments' at runtime."},
   "scope":{"type":"string","enum":["project","global"],"description":"Where to write. Defaults to project when a workspace exists, else global."},

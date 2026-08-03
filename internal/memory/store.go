@@ -51,8 +51,8 @@ func indexLockFor(dir string) *sync.Mutex {
 // injection (status/importance/decay/compact) had no remaining job. Same-name
 // save overwrites; history is the user's VCS.
 type Store struct {
-	Dir       string // .../momapeer/projects/<slug>/<profile>/memory (mode-partitioned)
-	GlobalDir string // .../momapeer/memory/<profile> (shared facts for this mode)
+	Dir       string // .../fairpeer/projects/<slug>/<profile>/memory (mode-partitioned)
+	GlobalDir string // .../fairpeer/memory/<profile> (shared facts for this mode)
 }
 
 // Type classifies a memory, mirroring the auto-memory taxonomy. It is kept as a

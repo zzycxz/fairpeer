@@ -32,7 +32,7 @@ func (m *chatTUI) runModelSubcommand(input string) {
 		m.notice(fmt.Sprintf(i18n.M.ModelAlreadyOnFmt, ref))
 		return
 	}
-	// Persist the user's choice to ~/.config/momapeer/config.toml so the next
+	// Persist the user's choice to ~/.config/fairpeer/config.toml so the next
 	// session starts on the same model instead of falling back to the global
 	// default. Mirrors the pattern used by /theme (persistTheme), /effort, and
 	// /language.
@@ -102,7 +102,7 @@ func (m *chatTUI) showModels() {
 }
 
 // persistModel writes ref (a "provider/model" string) to default_model in
-// ~/.config/momapeer/config.toml so the next CLI launch starts on the same
+// ~/.config/fairpeer/config.toml so the next CLI launch starts on the same
 // model. The in-memory switch is always allowed to proceed regardless of the
 // outcome here, but every step (rejected by validation, save failed, or
 // persisted successfully) reports back to the TUI notice channel so the user

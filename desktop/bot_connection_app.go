@@ -235,13 +235,13 @@ func (a *App) TestBotConnection(id, target string) (BotConnectionDiagnostic, err
 		feishuCfg.Domain = firstNonEmptyBot(conn.Domain, feishuCfg.Domain)
 		feishuCfg.AppID = firstNonEmptyBot(conn.Credential.AppID, feishuCfg.AppID)
 		feishuCfg.AppSecretEnv = firstNonEmptyBot(conn.Credential.AppSecretEnv, feishuCfg.AppSecretEnv)
-		result, err = feishu.SendText(ctx, feishuCfg, target, "momapeer bot 测试消息：连接和发送链路可用。")
+		result, err = feishu.SendText(ctx, feishuCfg, target, "fairpeer bot 测试消息：连接和发送链路可用。")
 	case "weixin":
 		weixinCfg := cfg.Bot.Weixin
 		weixinCfg.Enabled = true
 		weixinCfg.AccountID = firstNonEmptyBot(conn.Credential.AccountID, weixinCfg.AccountID)
 		weixinCfg.TokenEnv = firstNonEmptyBot(conn.Credential.TokenEnv, weixinCfg.TokenEnv)
-		result, err = weixin.SendText(ctx, weixinCfg, target, "momapeer bot 测试消息：连接和发送链路可用。")
+		result, err = weixin.SendText(ctx, weixinCfg, target, "fairpeer bot 测试消息：连接和发送链路可用。")
 	}
 	if err != nil {
 		return BotConnectionDiagnostic{ID: conn.ID, Label: conn.Label, Status: "error", Message: err.Error()}, nil

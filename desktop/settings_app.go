@@ -513,7 +513,7 @@ func botDomainOrDefault(domain string) string {
 // applyConfigChange mutates the user-global config and rebuilds the controller so
 // the change takes effect this session. Desktop settings such as providers and
 // keys are account-level, not per-project: writing them to the global config
-// rather than the cwd's momapeer.toml is what lets them survive a workspace switch.
+// rather than the cwd's fairpeer.toml is what lets them survive a workspace switch.
 func (a *App) applyConfigChange(mutate func(*config.Config) error) error {
 	cfg, path, err := a.loadDesktopUserConfigForEdit()
 	if err != nil {
@@ -600,9 +600,9 @@ func (a *App) activeWorkspaceRoot() string {
 
 func projectConfigPathForRoot(root string) string {
 	if strings.TrimSpace(root) == "" || root == "." {
-		return "momapeer.toml"
+		return "fairpeer.toml"
 	}
-	return filepath.Join(root, "momapeer.toml")
+	return filepath.Join(root, "fairpeer.toml")
 }
 
 func sameConfigPath(a, b string) bool {

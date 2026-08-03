@@ -1,5 +1,5 @@
-// Package config loads momapeer's runtime configuration from TOML. Resolution order:
-// flag > project ./momapeer.toml > user ~/.config/momapeer/config.toml > built-in defaults.
+// Package config loads fairpeer's runtime configuration from TOML. Resolution order:
+// flag > project ./fairpeer.toml > user ~/.config/fairpeer/config.toml > built-in defaults.
 // Secrets come from the environment via api_key_env and are never stored in
 // config files.
 package config
@@ -37,7 +37,7 @@ func SkillNameKey(name string) string {
 	return name
 }
 
-// Config is momapeer's runtime configuration.
+// Config is fairpeer's runtime configuration.
 type Config struct {
 	ConfigVersion int    `toml:"config_version"`
 	DefaultModel  string `toml:"default_model"`
@@ -290,8 +290,8 @@ type StatuslineConfig struct {
 // search / context / explore / trace / node tools. Enabled defaults to true so
 // upgrades keep it for existing configs; first-run scaffolds write enabled =
 // false so only brand-new users start without it. AutoInstall (default true)
-// lets momapeer fetch the CodeGraph runtime into its cache when CodeGraph is
-// enabled but missing; set false to require an explicit `momapeer codegraph
+// lets fairpeer fetch the CodeGraph runtime into its cache when CodeGraph is
+// enabled but missing; set false to require an explicit `fairpeer codegraph
 // install` (e.g. for air-gapped or headless runs). Path overrides binary
 // resolution; empty resolves the cache, then a `codegraph` on PATH, then a
 // bundle beside the executable. CodeGraph always starts in the background when
@@ -473,7 +473,7 @@ type CoworkConfig struct {
 	// are human" friction on revisit.
 	BrowserUserDataDir string `toml:"browser_user_data_dir"`
 	// PPTActiveTemplate is the id of the active PPT template (from the templates
-	// dir <user-config>/momapeer/ppt-templates/<id>.json). When set, the ppt-wizard
+	// dir <user-config>/fairpeer/ppt-templates/<id>.json). When set, the ppt-wizard
 	// skill generates decks from that template: it opens the template's master_file
 	// in WPS (if any) and places content at the template's pre-defined layout
 	// coordinates, so most slides don't need per-step VLM perception. Empty = no
@@ -898,7 +898,7 @@ func (c *Config) NetworkProxyMode() string {
 
 // SkillsConfig configures skill discovery. Paths adds extra "custom"-scope skill
 // roots — each a directory of SKILL.md / <name>.md playbooks — scanned between
-// the project roots (.momapeer/.agents/.agent/.claude under the workspace) and
+// the project roots (.fairpeer/.agents/.agent/.claude under the workspace) and
 // the global roots. ExcludedPaths hides matching discovery roots without deleting
 // folders. ~, relative paths, and ${VAR} expansion are supported. DisabledSkills
 // hides named skills from the agent prompt, slash invocation, and skill tools
@@ -1007,7 +1007,7 @@ type SandboxConfig struct {
 	// RequireAvailable, when true, makes bash mode "enforce" fail-closed (refuse
 	// all commands) if no OS sandbox is available on this platform, rather than
 	// silently degrading to unconfined. False (default) keeps the graceful
-	// fallback so momapeer stays usable on unsupported OSes.
+	// fallback so fairpeer stays usable on unsupported OSes.
 	RequireAvailable bool `toml:"require_available"`
 	// StrictWrites narrows the macOS Seatbelt toolchain-cache grants to true
 	// cache subdirs only (~/.cargo/registry/cache, ~/Library/Caches, …) so a
@@ -1102,7 +1102,7 @@ type AgentConfig struct {
 	FastTaskModel    string            `toml:"fast_task_model"` // lightweight model for dream/distill background tasks
 	// OutputStyle selects a persona/tone block folded into the system prompt at
 	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
-	// .momapeer/output-styles/<name>.md). Empty = the unmodified prompt.
+	// .fairpeer/output-styles/<name>.md). Empty = the unmodified prompt.
 	OutputStyle string `toml:"output_style"`
 	// AutoPlan controls whether interactive turns that look multi-step start in
 	// plan mode automatically: "off" keeps plan mode manual, "on" enables the
@@ -1313,7 +1313,7 @@ type PermissionsConfig struct {
 // static Headers. String fields support ${VAR} / ${VAR:-default} expansion so
 // secrets (bearer tokens, keys) come from the environment, not the file. The
 // fields mirror Claude Code's mcpServers spec, so entries can come from either
-// momapeer.toml's [[plugins]] or a project-root .mcp.json (see loadMCPJSON).
+// fairpeer.toml's [[plugins]] or a project-root .mcp.json (see loadMCPJSON).
 type PluginEntry struct {
 	Name    string            `toml:"name"`
 	Type    string            `toml:"type"` // "stdio" (default) | "http" | "sse"
@@ -1377,11 +1377,11 @@ func (c *Config) AutoStartPlugins() []PluginEntry {
 }
 
 // DefaultSystemPrompt is used when config provides none.
-const DefaultSystemPrompt = `You are momapeer, a coding agent focused on executing code tasks.
+const DefaultSystemPrompt = `You are fairpeer, a coding agent focused on executing code tasks.
 Use the provided tools to read and write files and run shell commands.
-When asked about your identity, always say you are momapeer. Never mention
+When asked about your identity, always say you are fairpeer. Never mention
 Claude, Anthropic, GPT, Qwen, DeepSeek, or any underlying model name —
-you are momapeer, not any foundation model.
+you are fairpeer, not any foundation model.
 Principles: understand the request before acting; verify with tools instead of
 guessing; keep changes minimal and correct; briefly summarize what you did.
 When the request leaves a real choice to the user — which approach or library,
@@ -1457,8 +1457,8 @@ func Default() *Config {
 			CompactRatio:      0.8,
 			CompactForceRatio: 0.9,
 		},
-		// Mode "ask" with no rules keeps `momapeer run` autonomous (no TTY → ask
-		// resolves to allow) while `momapeer chat` prompts before writers. Users add
+		// Mode "ask" with no rules keeps `fairpeer run` autonomous (no TTY → ask
+		// resolves to allow) while `fairpeer chat` prompts before writers. Users add
 		// deny/allow rules to harden or quiet specific tools.
 		Permissions: PermissionsConfig{Mode: "ask"},
 		// Sandbox on by default: bash is jailed (macOS), network allowed so
@@ -1501,7 +1501,7 @@ func Default() *Config {
 
 // Load builds the configuration: defaults, then user config, then project
 // config, then MCP servers from Claude Code's .mcp.json, then (lowest priority)
-// the v0.x ~/.momapeer/config.json's mcpServers. A .env in the working directory
+// the v0.x ~/.fairpeer/config.json's mcpServers. A .env in the working directory
 // is loaded first so api_key_env can resolve.
 func Load() (*Config, error) {
 	return LoadForRoot(".")
@@ -1510,16 +1510,16 @@ func Load() (*Config, error) {
 // LoadForRoot builds the configuration with project files resolved from root
 // instead of the current working directory. When root is "" or ".", it behaves
 // like Load(). This is the workspace-aware entry point: desktop tabs use it so
-// each project's momapeer.toml + .env + .mcp.json are resolved independently
+// each project's fairpeer.toml + .env + .mcp.json are resolved independently
 // without changing the process cwd.
 func LoadForRoot(root string) (*Config, error) {
 	root = resolveRoot(root)
 	loadDotEnvForRoot(root)
 	cfg := Default()
 
-	projectTOML := "momapeer.toml"
+	projectTOML := "fairpeer.toml"
 	if root != "." {
-		projectTOML = filepath.Join(root, "momapeer.toml")
+		projectTOML = filepath.Join(root, "fairpeer.toml")
 	}
 
 	var tomlSources []string
@@ -1541,7 +1541,7 @@ func LoadForRoot(root string) (*Config, error) {
 	}
 	// toml.DecodeFile replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
-	// project momapeer.toml doesn't drop the global config's MCP servers.
+	// project fairpeer.toml doesn't drop the global config's MCP servers.
 	plugins, err := mergeTOMLPlugins(tomlSources)
 	if err != nil {
 		return nil, err
@@ -1550,7 +1550,7 @@ func LoadForRoot(root string) (*Config, error) {
 
 	// Claude Code's .mcp.json (project root) is read last and merged into
 	// [[plugins]], so a server configured for Claude works here unchanged.
-	// momapeer.toml wins on a name collision (see mergeMCPJSON).
+	// fairpeer.toml wins on a name collision (see mergeMCPJSON).
 	mcpFile := mcpJSONFile
 	if root != "." {
 		mcpFile = filepath.Join(root, mcpJSONFile)
@@ -1561,7 +1561,7 @@ func LoadForRoot(root string) (*Config, error) {
 	}
 	cfg.mergeMCPJSON(entries)
 
-	// Lowest priority: the v0.x ~/.momapeer/config.json's mcpServers, so upgrading
+	// Lowest priority: the v0.x ~/.fairpeer/config.json's mcpServers, so upgrading
 	// from the TypeScript line keeps MCP servers without rewriting them. Anything
 	// the v2 config or .mcp.json already declared wins on a name collision.
 	cfg.mergeMCPJSON(loadLegacyMCP(legacyConfigPath()))
@@ -1696,7 +1696,7 @@ func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
 	return merged, nil
 }
 
-// LoadForEdit returns a config to seed the `momapeer setup` wizard when reconfiguring:
+// LoadForEdit returns a config to seed the `fairpeer setup` wizard when reconfiguring:
 // the built-in defaults with the file at path (if present) decoded on top, so a
 // reconfigure preserves the user's existing providers and agent settings instead
 // of resetting to defaults. .env is loaded so api_key_env resolution works while
@@ -1986,35 +1986,17 @@ func retargetDesktopOfficialRef(ref string, _ map[string]bool) string {
 	}
 }
 
-const userDirname = "momapeer"
+const userDirname = "fairpeer"
 
-// userDir returns the user config dir, migrating from the legacy "momapeer" dir if needed.
+// userDir returns the fairpeer user config dir (~/.config/fairpeer on Linux,
+// ~/Library/Application Support/fairpeer on macOS, %AppData%/fairpeer on Windows).
+// FairPeer is an independent project from momapeer — no cross-project data migration.
 func userDir() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return ""
 	}
-	newPath := filepath.Join(dir, userDirname)
-	oldPath := filepath.Join(dir, "momapeer")
-
-	// Transparently rename the old directory if the new one doesn't exist yet.
-	if _, err := os.Stat(newPath); os.IsNotExist(err) {
-		if _, err := os.Stat(oldPath); err == nil {
-			_ = os.Rename(oldPath, newPath)
-		}
-	} else if _, err := os.Stat(filepath.Join(newPath, "config.toml")); os.IsNotExist(err) {
-		// If newPath exists but is missing config.toml (e.g. created by Wails automatically),
-		// attempt to copy the essential config files over.
-		oldConfig := filepath.Join(oldPath, "config.toml")
-		if raw, err := os.ReadFile(oldConfig); err == nil {
-			_ = os.WriteFile(filepath.Join(newPath, "config.toml"), raw, 0600)
-		}
-		oldCreds := filepath.Join(oldPath, "credentials")
-		if raw, err := os.ReadFile(oldCreds); err == nil {
-			_ = os.WriteFile(filepath.Join(newPath, "credentials"), raw, 0600)
-		}
-	}
-	return newPath
+	return filepath.Join(dir, userDirname)
 }
 
 func userConfigPath() string {
@@ -2025,12 +2007,12 @@ func userConfigPath() string {
 	return filepath.Join(dir, "config.toml")
 }
 
-// UserConfigPath is the user-global config file (~/.config/momapeer/config.toml),
+// UserConfigPath is the user-global config file (~/.config/fairpeer/config.toml),
 // or "" when the user config dir can't be resolved.
 func UserConfigPath() string { return userConfigPath() }
 
-// UserCredentialsPath is the momapeer-owned global secrets file, beside
-// config.toml in the user config dir (e.g. ~/.config/momapeer/credentials). It
+// UserCredentialsPath is the fairpeer-owned global secrets file, beside
+// config.toml in the user config dir (e.g. ~/.config/fairpeer/credentials). It
 // holds KEY=value lines loaded into the environment by loadDotEnv. The setup
 // wizard writes API keys here, deliberately NOT named .env: keys never land in a
 // project's own .env (which can't be selectively gitignored), never get
@@ -2056,7 +2038,7 @@ func ArchiveDir() string {
 }
 
 // SessionDir is where chat sessions are persisted (one .jsonl per session).
-// Used by `momapeer chat --continue` / `--resume` to find the recent ones. Empty
+// Used by `fairpeer chat --continue` / `--resume` to find the recent ones. Empty
 // if the user config dir can't be resolved — sessions then aren't saved.
 func SessionDir() string {
 	dir := userDir()
@@ -2130,7 +2112,7 @@ func WorkspaceSlug(absPath string) string {
 
 // CacheDir is the per-user cache root for derived/regenerable artefacts: MCP
 // handshake snapshots, plugin startup-latency telemetry. Lives beside the
-// existing dirs (UserConfigDir/momapeer/...) so the whole momapeer state tree
+// existing dirs (UserConfigDir/fairpeer/...) so the whole fairpeer state tree
 // shares one root the user can wipe in a single rm. Empty when the OS dir is
 // unavailable — callers must tolerate that (caching is best-effort).
 func CacheDir() string {
@@ -2141,24 +2123,24 @@ func CacheDir() string {
 	return filepath.Join(dir, "cache")
 }
 
-// MemoryUserDir returns the momapeer user config root (…/momapeer), under which
-// the user-global momapeer.md and the per-project auto-memory store live. Empty
+// MemoryUserDir returns the fairpeer user config root (…/fairpeer), under which
+// the user-global fairpeer.md and the per-project auto-memory store live. Empty
 // when the user config dir can't be resolved, which disables user-scoped memory.
 func MemoryUserDir() string {
 	return userDir()
 }
 
 // ConventionDirs are the parent directories scanned for agent assets (skills,
-// commands), in canonical-first order. .momapeer is ours; .agents / .agent /
+// commands), in canonical-first order. .fairpeer is ours; .agents / .agent /
 // .claude let users drop in assets authored for other agent tools without moving
 // files. Shared so skills (internal/skill) and commands (CommandDirs) discover
 // the same set. Note: hooks are NOT scanned across these — a .claude/settings.json
 // uses a different hook schema that can't be parsed as ours, so hooks stay in
-// .momapeer/settings.json (see internal/hook).
-var ConventionDirs = []string{".momapeer", ".agents", ".agent", ".claude"}
+// .fairpeer/settings.json (see internal/hook).
+var ConventionDirs = []string{".fairpeer", ".agents", ".agent", ".claude"}
 
 // conventionSubdirsAsc joins sub under each ConventionDir of base, in ascending
-// priority (reverse of ConventionDirs) so the canonical .momapeer ends up the
+// priority (reverse of ConventionDirs) so the canonical .fairpeer ends up the
 // highest-priority entry — command.Load lets a later directory win on a clash.
 func conventionSubdirsAsc(base, sub string) []string {
 	out := make([]string, 0, len(ConventionDirs))
@@ -2170,9 +2152,9 @@ func conventionSubdirsAsc(base, sub string) []string {
 
 // CommandDirs returns the directories scanned for custom slash commands, lowest
 // priority first, so a later (more specific) directory overrides an earlier one
-// on a name clash. Order: home-dir convention dirs (~/.claude/commands … ~/.momapeer/commands),
-// the legacy XDG user dir (~/.config/momapeer/commands), then the project's
-// convention dirs (.claude/commands … .momapeer/commands). Scanning the .claude /
+// on a name clash. Order: home-dir convention dirs (~/.claude/commands … ~/.fairpeer/commands),
+// the legacy XDG user dir (~/.config/fairpeer/commands), then the project's
+// convention dirs (.claude/commands … .fairpeer/commands). Scanning the .claude /
 // .agents / .agent dirs lets commands authored for other agent tools (same .md +
 // frontmatter format) work here unchanged.
 func CommandDirs() []string {
@@ -2189,7 +2171,7 @@ func CommandDirsForRoot(root string) []string {
 		dirs = append(dirs, conventionSubdirsAsc(home, "commands")...)
 	}
 	if dir, err := os.UserConfigDir(); err == nil {
-		dirs = append(dirs, filepath.Join(dir, "momapeer", "commands"))
+		dirs = append(dirs, filepath.Join(dir, "fairpeer", "commands"))
 	}
 	dirs = append(dirs, conventionSubdirsAsc(root, "commands")...)
 	return dirs
@@ -2204,9 +2186,9 @@ func SourcePath() string {
 // root, or "" if none. Equivalent to SourcePath() when root is ".".
 func SourcePathForRoot(root string) string {
 	root = resolveRoot(root)
-	projectTOML := "momapeer.toml"
+	projectTOML := "fairpeer.toml"
 	if root != "." {
-		projectTOML = filepath.Join(root, "momapeer.toml")
+		projectTOML = filepath.Join(root, "fairpeer.toml")
 	}
 	if _, err := os.Stat(projectTOML); err == nil {
 		return projectTOML

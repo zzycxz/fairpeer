@@ -20,7 +20,7 @@ import (
 // still recognizes it so historical session transcripts saved under the old
 // architecture surface the user's original words in previews/titles instead of
 // the handoff boilerplate (#3860).
-const executorHandoffMarker = "momapeer executor handoff"
+const executorHandoffMarker = "fairpeer executor handoff"
 
 // HandoffTask returns the original user task embedded in an executor handoff
 // message, or s unchanged when it is not one. Session previews and auto-titles

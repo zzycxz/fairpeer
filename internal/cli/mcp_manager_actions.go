@@ -380,7 +380,7 @@ func mcpConfigLocation() string {
 	if path := config.UserConfigPath(); path != "" {
 		return path
 	}
-	return "momapeer.toml"
+	return "fairpeer.toml"
 }
 
 type mcpEditConfigLaunch struct {

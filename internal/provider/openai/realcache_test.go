@@ -20,7 +20,7 @@ type probeResult struct {
 
 // TestRealMoMACacheProbe is an env-gated end-to-end probe against the live
 // MoMA API. It answers, with real numbers:
-//  1. does MoMA's auto cache actually serve momapeer's request shape, and how
+//  1. does MoMA's auto cache actually serve fairpeer's request shape, and how
 //     much does a repeated prefix hit;
 //  2. does qwen3.6-35b even return reasoning_content (i.e. is the round-trip
 //     amplifier real for this model);

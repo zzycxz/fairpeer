@@ -806,9 +806,9 @@ function makeMockApp(): AppBindings {
   let cancelled = false;
   let pendingAskPreview = false;
   let pendingApprovalPreview = false;
-  const globalWorkspaceRoot = "~/Library/Application Support/momapeer/global-workspace";
+  const globalWorkspaceRoot = "~/Library/Application Support/fairpeer/global-workspace";
   let cwd = freshMock ? globalWorkspaceRoot : "~/projects/joyquant-db"; // mutable so PickWorkspace is visible in dev
-  let workspaces = freshMock ? [] : ["~/projects/joyquant-db", "~/projects/joyquant-sys", "~/projects/momapeer", "~/projects/blade"];
+  let workspaces = freshMock ? [] : ["~/projects/joyquant-db", "~/projects/joyquant-sys", "~/projects/fairpeer", "~/projects/blade"];
   let mockEffort = "auto";
   // In-memory RAG state for browser dev. Seeded with one file mid-extraction so
   // the panel shows a live progress bar + ETA outside the Wails shell.
@@ -914,10 +914,10 @@ function makeMockApp(): AppBindings {
   const capSkills: SkillView[] = [
     { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "builtin", runAs: "subagent", enabled: true },
     { name: "review", description: "Review the staged diff", scope: "project", runAs: "inline", enabled: false },
-    { name: "init", description: "Scaffold a project memory doc (momapeer.md) for this repo", scope: "builtin", runAs: "inline", enabled: true },
+    { name: "init", description: "Scaffold a project memory doc (fairpeer.md) for this repo", scope: "builtin", runAs: "inline", enabled: true },
   ];
   let capSkillRoots: SkillRootView[] = [
-    { dir: "~/projects/momapeer/.momapeer/skills", scope: "project", priority: 1, status: "missing", configured: false, removable: true, skills: 0 },
+    { dir: "~/projects/fairpeer/.fairpeer/skills", scope: "project", priority: 1, status: "missing", configured: false, removable: true, skills: 0 },
     {
       dir: "~/my-skills",
       scope: "custom",
@@ -929,7 +929,7 @@ function makeMockApp(): AppBindings {
       skillItems: [{ name: "review", description: "Review the staged diff", scope: "custom", runAs: "inline" }],
     },
     {
-      dir: "~/.momapeer/skills",
+      dir: "~/.fairpeer/skills",
       scope: "global",
       priority: 6,
       status: "ok",
@@ -938,7 +938,7 @@ function makeMockApp(): AppBindings {
       skills: 2,
       skillItems: [
         { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "global", runAs: "subagent" },
-        { name: "init", description: "Scaffold a project memory doc (momapeer.md) for this repo", scope: "global", runAs: "inline" },
+        { name: "init", description: "Scaffold a project memory doc (fairpeer.md) for this repo", scope: "global", runAs: "inline" },
       ],
     },
   ];
@@ -1032,7 +1032,7 @@ function makeMockApp(): AppBindings {
   const hookSettings: Record<string, HooksSettingsView> = {
     global: {
       scope: "global",
-      path: "~/.momapeer/settings.json",
+      path: "~/.fairpeer/settings.json",
       projectRoot: "",
       trusted: true,
       events: hookEvents,
@@ -1040,7 +1040,7 @@ function makeMockApp(): AppBindings {
     },
     project: {
       scope: "project",
-      path: "./.momapeer/settings.json",
+      path: "./.fairpeer/settings.json",
       projectRoot: "/mock/project",
       trusted: false,
       events: hookEvents,
@@ -1201,7 +1201,7 @@ function makeMockApp(): AppBindings {
     checkUpdates: true,
     telemetry: true,
     expandThinking: false,
-    configPath: "~/projects/momapeer/momapeer.toml",
+    configPath: "~/projects/fairpeer/fairpeer.toml",
     providerKinds: ["openai"],
     autoApproveTools: false,
     bypass: false,
@@ -1210,7 +1210,7 @@ function makeMockApp(): AppBindings {
     provider.apiKeyEnv === "JIUTIAN_API_KEY" ? { ...provider, keySet: !freshMock } : provider,
   );
   if (freshMock) {
-    settings.configPath = "~/.config/momapeer/config.toml";
+    settings.configPath = "~/.config/fairpeer/config.toml";
   }
   const mockNow = Date.now();
   const mockProjectTree: ProjectNode[] = freshMock ? [] : [
@@ -1298,12 +1298,12 @@ function makeMockApp(): AppBindings {
           {
             role: "user",
             content: [
-              "[[momapeer-im]]",
+              "[[fairpeer-im]]",
               "provider=lark",
               "label=Feishu / Lark",
               "sender=ou_3a2bdd60640aaa95518186677b1f6d8c",
               "chat=p2p 会话",
-              "[[/momapeer-im]]",
+              "[[/fairpeer-im]]",
               "你可以做什么",
             ].join("\n"),
           },
@@ -1317,12 +1317,12 @@ function makeMockApp(): AppBindings {
           {
             role: "user",
             content: [
-              "[[momapeer-im]]",
+              "[[fairpeer-im]]",
               "provider=weixin",
               "label=微信",
               "sender=wxid_kun_auto",
               "chat=单聊",
-              "[[/momapeer-im]]",
+              "[[/fairpeer-im]]",
               "帮我整理一下今天要做的事",
             ].join("\n"),
           },
@@ -1336,12 +1336,12 @@ function makeMockApp(): AppBindings {
           {
             role: "user",
             content: [
-              "[[momapeer-im]]",
+              "[[fairpeer-im]]",
               "provider=lark",
               "label=Feishu / Lark",
               "sender=ou_3a2bdd60640aaa95518186677b1f6d8c",
               "chat=p2p 会话",
-              "[[/momapeer-im]]",
+              "[[/fairpeer-im]]",
               "你可以做什么",
             ].join("\n"),
           },
@@ -2075,7 +2075,7 @@ function makeMockApp(): AppBindings {
     async PickWorkspace() {
       // Browser dev has no native dialog; simulate picking a folder and re-root so
       // the topbar folder chip visibly changes.
-      return mockSwitchWorkspace(cwd.endsWith("another-project") ? "~/projects/momapeer" : "~/projects/another-project");
+      return mockSwitchWorkspace(cwd.endsWith("another-project") ? "~/projects/fairpeer" : "~/projects/another-project");
     },
     async PickImportFolder() {
       return "~/Documents/my-import-folder";
@@ -2396,8 +2396,8 @@ function makeMockApp(): AppBindings {
     },
     async ReadFile(rel: string) {
       const samples: Record<string, string> = {
-        "README.md": "# momapeer\n\nBrowser-dev workspace preview.\n\n- Chat in the center\n- Browse files on the right\n- Keep sessions on the left\n",
-        "go.mod": "module momapeer\n\ngo 1.23\n",
+        "README.md": "# fairpeer\n\nBrowser-dev workspace preview.\n\n- Chat in the center\n- Browse files on the right\n- Keep sessions on the left\n",
+        "go.mod": "module fairpeer\n\ngo 1.23\n",
         "desktop/file.go": "package desktop\n\nfunc main() {\n\tprintln(\"workspace preview\")\n}\n",
         "internal/event.go": "package internal\n\n// mock file used by the browser dev seam\n",
       };
@@ -2454,13 +2454,13 @@ function makeMockApp(): AppBindings {
       console.info("mock RevealPath", path);
     },
     async SavePastedImage(_dataUrl: string) {
-      return ".momapeer/attachments/mock.png";
+      return ".fairpeer/attachments/mock.png";
     },
     async SaveClipboardImage() {
-      return ".momapeer/attachments/mock-clipboard.png";
+      return ".fairpeer/attachments/mock-clipboard.png";
     },
     async SavePastedFile(name: string, _dataUrl: string) {
-      return `.momapeer/attachments/mock-${name}`;
+      return `.fairpeer/attachments/mock-${name}`;
     },
     async PickExportFile(defaultFilename: string, _mimeType: string) {
       return defaultFilename;
@@ -2482,7 +2482,7 @@ function makeMockApp(): AppBindings {
     },
     async AttachDropped(path: string) {
       const name = path.split(/[/\\]/).filter(Boolean).pop() ?? path;
-      return { kind: "attachment" as const, path: `.momapeer/attachments/mock-${name}` };
+      return { kind: "attachment" as const, path: `.fairpeer/attachments/mock-${name}` };
     },
     async AttachmentDataURL(_path: string) {
       return "data:image/png;base64,iVBORw0KGgo=";
@@ -2538,15 +2538,15 @@ function makeMockApp(): AppBindings {
     async Memory() {
       return {
         available: true,
-        storeDir: "~/.config/momapeer/projects/-mock/memory",
+        storeDir: "~/.config/fairpeer/projects/-mock/memory",
         docs: [
           {
-            path: "momapeer.md",
+            path: "fairpeer.md",
             scope: "project",
-            body: "# momapeer project memory\n\nMock doc shown in the browser dev seam.\n\n## Notes\n\n- prefers concise replies",
+            body: "# fairpeer project memory\n\nMock doc shown in the browser dev seam.\n\n## Notes\n\n- prefers concise replies",
           },
           {
-            path: "~/.config/momapeer/momapeer.md",
+            path: "~/.config/fairpeer/fairpeer.md",
             scope: "user",
             body: t("mock.memoryBody"),
           },
@@ -2579,9 +2579,9 @@ function makeMockApp(): AppBindings {
           },
         ],
         scopes: [
-          { scope: "user", path: "~/.config/momapeer/momapeer.md" },
-          { scope: "project", path: "momapeer.md" },
-          { scope: "local", path: "momapeer.local.md" },
+          { scope: "user", path: "~/.config/fairpeer/fairpeer.md" },
+          { scope: "project", path: "fairpeer.md" },
+          { scope: "local", path: "fairpeer.local.md" },
         ],
       };
     },
@@ -2590,7 +2590,7 @@ function makeMockApp(): AppBindings {
       // record (the Beijing address that the Shanghai move replaced).
       return {
         available: true,
-        storeDir: "~/.config/momapeer/projects/-mock/memory",
+        storeDir: "~/.config/fairpeer/projects/-mock/memory",
         docs: [],
         facts: [
           {
@@ -2631,7 +2631,7 @@ function makeMockApp(): AppBindings {
     },
     async Remember(scope: string, note: string) {
       emit({ kind: "notice", level: "info", text: `remembered → ${scope}` });
-      return `${scope} momapeer.md (mock): ${note}`;
+      return `${scope} fairpeer.md (mock): ${note}`;
     },
     async Forget(name: string) {
       emit({ kind: "notice", level: "info", text: `forgot → ${name}` });
@@ -2767,7 +2767,7 @@ function makeMockApp(): AppBindings {
             provider: normalizedProvider,
             domain: normalizedDomain,
             installId: `mock-${normalizedProvider}-${normalizedDomain}`,
-            url: "https://example.com/momapeer-bot-qr",
+            url: "https://example.com/fairpeer-bot-qr",
             deviceCode: "MOCKDEVICE",
             userCode: normalizedProvider === "weixin" ? "" : "MOCK-CODE",
             interval: 3,
@@ -2893,7 +2893,7 @@ function makeMockApp(): AppBindings {
     },
     async OpenDownloadPage() {
       if (typeof window !== "undefined") {
-        window.open("https://github.com/zzycxz/momapeer/releases/latest", "_blank", "noopener");
+        window.open("https://github.com/zzycxz/fairpeer/releases/latest", "_blank", "noopener");
       }
     },
     // Dev seam: drives the overlay flow in the browser until ConnectKey sets the

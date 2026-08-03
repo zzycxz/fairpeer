@@ -2,12 +2,12 @@ package main
 
 // hooks_settings_app.go exposes the hook configuration (settings.json) to the
 // desktop frontend's Settings → Hooks tab. It supports BOTH scopes (global
-// ~/.momapeer/settings.json and project <root>/.momapeer/settings.json), the
+// ~/.fairpeer/settings.json and project <root>/.fairpeer/settings.json), the
 // project-trust gate (project hooks load only when trusted), and surfaces the
 // file path + valid event list so the GUI can render a JSON editor.
 //
 // Ported from DeepSeek-Reasonix (desktop/hooks_settings_app.go), adapted to the
-// momapeer module path. The wire types (HookConfigView/HooksSettingsView) are
+// fairpeer module path. The wire types (HookConfigView/HooksSettingsView) are
 // flat (one entry per hook, carrying its event) so the frontend edits a single
 // JSON document and groups by event itself.
 

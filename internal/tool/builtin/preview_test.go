@@ -55,7 +55,7 @@ func TestPreviewMatchesExecute(t *testing.T) {
 			tool: editFile{},
 			seed: "hello world\n",
 			args: func(p string) map[string]any {
-				return map[string]any{"path": p, "old_string": "world", "new_string": "momapeer"}
+				return map[string]any{"path": p, "old_string": "world", "new_string": "fairpeer"}
 			},
 		},
 		{
@@ -65,7 +65,7 @@ func TestPreviewMatchesExecute(t *testing.T) {
 			args: func(p string) map[string]any {
 				return map[string]any{"path": p, "edits": []map[string]any{
 					{"old_string": "package old", "new_string": "package new"},
-					{"old_string": "old", "new_string": "momapeer", "replace_all": true},
+					{"old_string": "old", "new_string": "fairpeer", "replace_all": true},
 				}}
 			},
 		},

@@ -75,7 +75,7 @@ func runBrowserAuto(ctx context.Context, cfg *config.Config, req builtin.Browser
 	}
 
 	// Resolve the LLM provider entry so we can hand the sidecar the bare model
-	// name + base_url + api-key-env it needs. momapeer uses "provider/model"
+	// name + base_url + api-key-env it needs. fairpeer uses "provider/model"
 	// refs (and may point at a custom gateway like 九天/MoMA), but browser-use's
 	// ChatOpenAI/ChatAnthropic expect a bare model name and (for OpenAI-compatible
 	// gateways) an explicit base_url. Without this translation the sidecar would
@@ -107,7 +107,7 @@ func runBrowserAuto(ctx context.Context, cfg *config.Config, req builtin.Browser
 	// isolated (no cross-task cookie bleed) unless the user configured a
 	// persistent BrowserUserDataDir (to keep login state). The proxy routes the
 	// browser through the user's network config so the agent reaches the same
-	// sites momapeer's other traffic does (e.g. a CN proxy for GitHub).
+	// sites fairpeer's other traffic does (e.g. a CN proxy for GitHub).
 	handle, err := browserlaunch.Launch(ctx, browserlaunch.LaunchOptions{
 		Headless:    cfg.Cowork.BrowserHeadless,
 		UserDataDir: cfg.Cowork.BrowserUserDataDir,

@@ -975,7 +975,7 @@ type HookScope = "global" | "project";
 
 // HooksSection edits the hooks store (settings.json) for either scope (global or
 // project), with a JSON editor (copy/paste/format) and the project-trust gate.
-// Ported from DeepSeek-Reasonix, adapted to momapeer's onChanged signature.
+// Ported from DeepSeek-Reasonix, adapted to fairpeer's onChanged signature.
 function HooksSection({ onChanged }: { onChanged: () => void }) {
   const t = useT();
   const [scope, setScope] = useState<HookScope>("global");

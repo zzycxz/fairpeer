@@ -1,4 +1,4 @@
-// Command momapeer is a config- and plugin-driven coding agent CLI.
+// Command fairpeer is a config- and plugin-driven coding agent CLI.
 package main
 
 import (

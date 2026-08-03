@@ -438,14 +438,14 @@ func TestMainManagerFollowsTranscriptWithoutTopPadding(t *testing.T) {
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	m = m0.(chatTUI)
-	m.wrappedLines = []string{"momapeer chat", "› /mcp"}
+	m.wrappedLines = []string{"fairpeer chat", "› /mcp"}
 
 	out := ansi.Strip(m.renderTranscriptWithMainManager("Manage MCP servers\n1 servers"))
 	lines := strings.Split(out, "\n")
 	if len(lines) < 4 {
 		t.Fatalf("rendered manager area too short:\n%s", out)
 	}
-	if !strings.Contains(lines[0], "momapeer chat") || !strings.Contains(lines[1], "/mcp") {
+	if !strings.Contains(lines[0], "fairpeer chat") || !strings.Contains(lines[1], "/mcp") {
 		t.Fatalf("transcript lines should stay above manager:\n%s", out)
 	}
 	if strings.TrimSpace(lines[2]) != "" {
@@ -806,7 +806,7 @@ func isolateUserConfig(t *testing.T) {
 	t.Setenv("HOME", root)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	appData := filepath.Join(root, "AppData")
-	os.MkdirAll(filepath.Join(appData, "momapeer"), 0o755)
+	os.MkdirAll(filepath.Join(appData, "fairpeer"), 0o755)
 	t.Setenv("AppData", appData) // os.UserConfigDir reads AppData on Windows
 	t.Chdir(root)
 }
@@ -914,7 +914,7 @@ func TestAutoPlanCommandPersistsAndUpdatesController(t *testing.T) {
 
 func TestAutoPlanCommandWritesUserConfigNotProjectConfig(t *testing.T) {
 	isolateUserConfig(t)
-	projectPath := filepath.Join(mustGetwd(t), "momapeer.toml")
+	projectPath := filepath.Join(mustGetwd(t), "fairpeer.toml")
 	if err := os.WriteFile(projectPath, []byte("[agent]\nauto_plan = \"off\"\n"), 0o644); err != nil {
 		t.Fatalf("write project config: %v", err)
 	}
@@ -992,7 +992,7 @@ func TestLanguageCommandAutoClearsLowerPriorityUserOverride(t *testing.T) {
 		t.Fatalf("save user config: %v", err)
 	}
 	projectCfg := config.Default()
-	if err := projectCfg.SaveTo("momapeer.toml"); err != nil {
+	if err := projectCfg.SaveTo("fairpeer.toml"); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 

@@ -11,7 +11,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/event"
 )
 
-// renderSink 将 momapeer 事件流渲染为平台消息。
+// renderSink 将 fairpeer 事件流渲染为平台消息。
 type renderSink struct {
 	ctx      context.Context
 	adapter  Adapter

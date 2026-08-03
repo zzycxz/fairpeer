@@ -219,7 +219,7 @@ func (p *mcpManager) renderConfirmRemove(_ int) string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Remove MCP server %q?\n", v.Name)
-	b.WriteString(viewMeta("This removes it from momapeer config. It cannot be undone from this panel."))
+	b.WriteString(viewMeta("This removes it from fairpeer config. It cannot be undone from this panel."))
 	b.WriteString("\n\n")
 	b.WriteString(rowLine(p.confirm == 0, 1, "", "Confirm remove", false))
 	b.WriteString("\n")

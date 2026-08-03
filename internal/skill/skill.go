@@ -4,7 +4,7 @@
 // a tool result, a "subagent" skill runs in an isolated child loop and returns
 // only its final answer. Project scope wins over global; only names+descriptions
 // enter the cache-stable system-prompt index (see index.go) — bodies load on
-// demand. Discovery scans several conventions (.momapeer / .agents / .agent /
+// demand. Discovery scans several conventions (.fairpeer / .agents / .agent /
 // .claude under the project root and the home dir — see config.ConventionDirs) so
 // skills authored for other agent tools migrate in unchanged, and follows
 // symlinks, so a linked skill directory or flat <name>.md is picked up like a real one.
@@ -203,7 +203,7 @@ type Root struct {
 }
 
 // roots returns the discovery directories, highest priority first: the
-// convention dirs (config.ConventionDirs: .momapeer / .agents / .agent / .claude)
+// convention dirs (config.ConventionDirs: .fairpeer / .agents / .agent / .claude)
 // under the project root → custom paths → the same convention dirs under the home
 // dir. A later root never overrides an earlier one.
 func (s *Store) roots() []Root {
@@ -493,9 +493,9 @@ func (s *Store) CreateWithContent(name string, scope Scope, content string) (str
 		if s.projectRoot == "" {
 			return "", fmt.Errorf("project scope requires a workspace — run from a project directory, or use global scope")
 		}
-		root = filepath.Join(s.projectRoot, ".momapeer", SkillsDirname)
+		root = filepath.Join(s.projectRoot, ".fairpeer", SkillsDirname)
 	default:
-		root = filepath.Join(s.homeDir, ".momapeer", SkillsDirname)
+		root = filepath.Join(s.homeDir, ".fairpeer", SkillsDirname)
 	}
 	flat := filepath.Join(root, name+".md")
 	folder := filepath.Join(root, name, SkillFile)

@@ -5,7 +5,7 @@
 // Two modes:
 //
 //  1. REPLAY (default, any platform): read PNG screenshots (from a dir, default
-//     .momapeer/attachments) and run each through the qwen3.6-27b multimodal
+//     .fairpeer/attachments) and run each through the qwen3.6-27b multimodal
 //     model, printing what the VLM saw + any coordinates it returned. Copies each
 //     image + the VLM's raw response into cua-replay-trace/ numbered in order, so
 //     you can open the folder and walk through every frame the agent looked at.
@@ -26,7 +26,7 @@
 //	go run ./cmd/cua-replay
 //
 //	# Replay a specific image with a custom task:
-//	go run ./cmd/cua-replay -image .momapeer/attachments/perceive-noUIA-1782574502.png -task "where is the save button"
+//	go run ./cmd/cua-replay -image .fairpeer/attachments/perceive-noUIA-1782574502.png -task "where is the save button"
 //
 //	# Live capture (Windows) — see what the VLM sees right now:
 //	go run ./cmd/cua-replay -live -task "find the text input area"
@@ -61,7 +61,7 @@ func main() {
 	var (
 		task     = flag.String("task", "找到屏幕上可以输入文字的区域，给我它的中心坐标", "what to look for in each frame")
 		model    = flag.String("model", "qwen/qwen3.6-27b", "moma multimodal model")
-		srcDir   = flag.String("dir", ".momapeer/attachments", "dir to replay screenshots from (replay mode)")
+		srcDir   = flag.String("dir", ".fairpeer/attachments", "dir to replay screenshots from (replay mode)")
 		image    = flag.String("image", "", "analyze a single image file (overrides -dir)")
 		live     = flag.Bool("live", false, "capture the current screen once and analyze it (Windows)")
 		traceDir = flag.String("trace", "cua-replay-trace", "where to copy frames + VLM responses")

@@ -4,12 +4,12 @@
 !define APP_NAME "MoMAPeer"
 !define APP_VERSION "0.5.6"
 !define APP_PUBLISHER "zzycxz"
-!define APP_URL "https://github.com/zzycxz/momapeer"
-!define APP_EXE "momapeer.exe"
+!define APP_URL "https://github.com/zzycxz/fairpeer"
+!define APP_EXE "fairpeer.exe"
 
 ; Installer attributes
 Name "${APP_NAME} ${APP_VERSION}"
-OutFile "..\build\bin\momapeer-setup.exe"
+OutFile "..\build\bin\fairpeer-setup.exe"
 InstallDir "$LOCALAPPDATA\${APP_NAME}"
 InstallDirRegKey HKCU "Software\${APP_NAME}" ""
 RequestExecutionLevel user
@@ -43,7 +43,7 @@ Section "Install"
   File "..\build\bin\${APP_EXE}"
 
   ; NOTE: built-in skills (ppt-auto) are no longer copied here — they are
-  ; embedded in the binary and released to $PROFILE\.momapeer\skills\ on first
+  ; embedded in the binary and released to $PROFILE\.fairpeer\skills\ on first
   ; run by the app itself. See internal/assets/.
 
   ; Create Desktop Shortcut

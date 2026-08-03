@@ -62,7 +62,7 @@ func (m *chatTUI) skillList() {
 		skills = m.ctrl.AllSkills()
 	}
 	if len(skills) == 0 {
-		m.notice("no skills found. Add SKILL.md / <name>.md under .momapeer/skills (project) or ~/.momapeer/skills (global); .agents/.agent/.claude skills dirs also work. Invoke with /<name> or run_skill.")
+		m.notice("no skills found. Add SKILL.md / <name>.md under .fairpeer/skills (project) or ~/.fairpeer/skills (global); .agents/.agent/.claude skills dirs also work. Invoke with /<name> or run_skill.")
 		return
 	}
 	m.commitLine(renderSkillList(m.width, sortedSkills(skills), m.disabledSkillNames()))

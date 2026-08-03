@@ -13,7 +13,7 @@ import (
 // status display, so it must be reliable on its own.
 func TestDreamStateRecordAndRead(t *testing.T) {
 	dir := t.TempDir()
-	sessionsDir := filepath.Join(dir, ".momapeer", "sessions")
+	sessionsDir := filepath.Join(dir, ".fairpeer", "sessions")
 	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

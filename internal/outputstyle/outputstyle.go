@@ -76,7 +76,7 @@ func Dirs() []string {
 
 // conventionDirs mirrors config.ConventionDirs (kept local to avoid an import
 // cycle; config imports nothing from here, but this package stays dependency-light).
-var conventionDirs = []string{".momapeer", ".agents", ".agent", ".claude"}
+var conventionDirs = []string{".fairpeer", ".agents", ".agent", ".claude"}
 
 // List returns every available style — built-ins plus the markdown files under
 // dirs — deduped by lowercased name, with custom files overriding built-ins.

@@ -19,8 +19,8 @@ type ImSourceMessage = {
   text: string;
 };
 
-const IM_SOURCE_START = "[[momapeer-im]]";
-const IM_SOURCE_END = "[[/momapeer-im]]";
+const IM_SOURCE_START = "[[fairpeer-im]]";
+const IM_SOURCE_END = "[[/fairpeer-im]]";
 
 function parseImSourceMessage(text: string): ImSourceMessage | null {
   // Display-only metadata: keep IM sender/chat details out of model prompts.

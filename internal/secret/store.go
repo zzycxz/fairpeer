@@ -36,7 +36,7 @@ type Store struct {
 	injectedKeys []string
 }
 
-const userDirname = "momapeer"
+const userDirname = "fairpeer"
 
 // defaultStoreOnce ensures Default() returns a single shared Store instance so
 // that LoadIntoEnv (which records injected keys) and UnloadFromEnv (which
@@ -51,7 +51,7 @@ var (
 func New(path string) *Store { return &Store{path: path} }
 
 // DefaultPath returns the canonical store location, beside config.toml and the
-// credentials file: os.UserConfigDir()/momapeer/secrets.enc.json. This matches
+// credentials file: os.UserConfigDir()/fairpeer/secrets.enc.json. This matches
 // config.userDir()/desktopConfigDir() so a single migration sweep finds the
 // legacy cowork.env and credentials files.
 func DefaultPath() string {

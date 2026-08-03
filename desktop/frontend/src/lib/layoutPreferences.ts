@@ -14,19 +14,19 @@ type LayoutPreferences = {
   sizes?: Partial<Record<LayoutSizeKey, number>>;
 };
 
-const STORAGE_KEY = "momapeer.layoutPreferences.v1";
+const STORAGE_KEY = "fairpeer.layoutPreferences.v1";
 
 const LEGACY_SIZE_KEYS: Record<LayoutSizeKey, string[]> = {
-  sidebarWidth: ["momapeer.sidebar.width"],
+  sidebarWidth: ["fairpeer.sidebar.width"],
   sidebarWidthGraphite: [],
   rightDockWidth: [],
   rightDockTreeWidth: [],
   rightDockPreviewWidth: [],
   workspaceFileTreePanelWidth: [],
-  workspaceTreeWidth: ["momapeer.workspaceTree.width"],
-  composerHeight: ["momapeer.composerHeight"],
-  drawerWidth: ["momapeer.drawer.width"],
-  settingsDrawerWidth: ["momapeer.settingsDrawer.width"],
+  workspaceTreeWidth: ["fairpeer.workspaceTree.width"],
+  composerHeight: ["fairpeer.composerHeight"],
+  drawerWidth: ["fairpeer.drawer.width"],
+  settingsDrawerWidth: ["fairpeer.settingsDrawer.width"],
 };
 
 type ClampSize = (value: number) => number;

@@ -1,8 +1,8 @@
 // Package hook runs user-configured shell-command hooks around the agent loop:
 // PreToolUse / PostToolUse fire around each tool call, UserPromptSubmit before a
 // turn, Stop after it. Hooks come from settings.json — a project
-// (.momapeer/settings.json, only when the project is trusted) and a global
-// (~/.momapeer/settings.json) file. A hook's exit
+// (.fairpeer/settings.json, only when the project is trusted) and a global
+// (~/.fairpeer/settings.json) file. A hook's exit
 // code is its verdict: 0 = pass, 2 = block (only on the gating events), other =
 // warn. The payload is delivered as JSON on stdin; output is captured (capped)
 // and surfaced to the user. This package only loads, matches, and runs hooks;
@@ -129,16 +129,16 @@ func (h ResolvedHook) timeout() time.Duration {
 
 // SettingsDirname / SettingsFilename locate a scope's settings.json.
 const (
-	SettingsDirname  = ".momapeer"
+	SettingsDirname  = ".fairpeer"
 	SettingsFilename = "settings.json"
 )
 
-// GlobalSettingsPath is ~/.momapeer/settings.json (homeDir overrides ~).
+// GlobalSettingsPath is ~/.fairpeer/settings.json (homeDir overrides ~).
 func GlobalSettingsPath(homeDir string) string {
 	return filepath.Join(home(homeDir), SettingsDirname, SettingsFilename)
 }
 
-// ProjectSettingsPath is <root>/.momapeer/settings.json.
+// ProjectSettingsPath is <root>/.fairpeer/settings.json.
 func ProjectSettingsPath(projectRoot string) string {
 	return filepath.Join(projectRoot, SettingsDirname, SettingsFilename)
 }

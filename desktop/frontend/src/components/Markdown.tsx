@@ -74,7 +74,7 @@ function removeStreamingCursor(container: HTMLElement): void {
     .forEach((el) => el.remove());
 }
 
-// MdImage renders markdown images. Relative `.momapeer/attachments/...` paths
+// MdImage renders markdown images. Relative `.fairpeer/attachments/...` paths
 // can't be loaded by a bare <img> (the webview has no disk base URL), so fetch
 // the data URL via the kernel — same mechanism UserMessage uses for previews.
 // http(s)/data: URLs render natively.
@@ -82,14 +82,14 @@ function MdImage({ src, alt }: { src?: string; alt?: string }) {
   const s = String(src ?? "");
   const [dataUrl, setDataUrl] = useState<string>("");
   useEffect(() => {
-    if (!s.startsWith(".momapeer/attachments/")) return;
+    if (!s.startsWith(".fairpeer/attachments/")) return;
     let cancelled = false;
     app.AttachmentDataURL(s)
       .then((url) => { if (!cancelled) setDataUrl(url); })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [s]);
-  const resolved = dataUrl || (s.startsWith(".momapeer/attachments/") ? "" : s);
+  const resolved = dataUrl || (s.startsWith(".fairpeer/attachments/") ? "" : s);
   if (!resolved) return null;
   return <img className="md-img" src={resolved} alt={alt ?? ""} loading="lazy" />;
 }

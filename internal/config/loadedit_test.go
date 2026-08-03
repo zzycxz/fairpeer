@@ -9,7 +9,7 @@ import (
 
 func TestLoadForEdit(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "momapeer.toml")
+	path := filepath.Join(dir, "fairpeer.toml")
 	custom := `default_model = "custom"
 [[providers]]
 name = "custom"
@@ -40,7 +40,7 @@ api_key_env = "X_KEY"
 
 func TestLoadForEditMigratesLegacyMCPTiers(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "momapeer.toml")
+	path := filepath.Join(dir, "fairpeer.toml")
 	body := `
 [codegraph]
 enabled = true

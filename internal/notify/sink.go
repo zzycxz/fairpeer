@@ -51,17 +51,17 @@ func message(cfg config.NotificationsConfig, e event.Event) (Message, bool) {
 	case event.TurnDone:
 		if cfg.TurnDone {
 			if e.Err != nil {
-				return Message{Title: "momapeer", Body: "Turn failed"}, true
+				return Message{Title: "fairpeer", Body: "Turn failed"}, true
 			}
-			return Message{Title: "momapeer", Body: "Turn finished"}, true
+			return Message{Title: "fairpeer", Body: "Turn finished"}, true
 		}
 	case event.ApprovalRequest:
 		if cfg.ApprovalRequest {
-			return Message{Title: "momapeer", Body: "Approval needed"}, true
+			return Message{Title: "fairpeer", Body: "Approval needed"}, true
 		}
 	case event.AskRequest:
 		if cfg.AskRequest {
-			return Message{Title: "momapeer", Body: "Question needs your answer"}, true
+			return Message{Title: "fairpeer", Body: "Question needs your answer"}, true
 		}
 	}
 	return Message{}, false

@@ -77,7 +77,7 @@ func TestDialogDefaultDirectoryFallsBackFromMissingWorkspace(t *testing.T) {
 
 func TestDialogDefaultDirectoryUsesFileParent(t *testing.T) {
 	dir := t.TempDir()
-	file := filepath.Join(dir, "momapeer.toml")
+	file := filepath.Join(dir, "fairpeer.toml")
 	if err := os.WriteFile(file, []byte("default_model = \"x\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

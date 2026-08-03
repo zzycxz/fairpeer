@@ -339,7 +339,7 @@ func buildMessage(from string, to, cc, bcc []string, subject, body, format strin
 	}
 
 	// Multipart: text/html part + base64 attachment parts.
-	boundary := fmt.Sprintf("momapeer-%d", time.Now().UnixNano())
+	boundary := fmt.Sprintf("fairpeer-%d", time.Now().UnixNano())
 	headers["Content-Type"] = "multipart/mixed; boundary=" + boundary
 	buf.Reset()
 	writeHeaders()

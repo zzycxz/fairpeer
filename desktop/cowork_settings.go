@@ -20,7 +20,7 @@ import (
 
 // CoWorkSettingsView is the settings-panel view of the coWork profile config.
 // It mirrors config.CoworkConfig but presents secrets (SMTP/IMAP passwords) as
-// plain values the user types — they're stored in a momapeer-managed .env file
+// plain values the user types — they're stored in a fairpeer-managed .env file
 // (loaded at startup), NOT in config.toml. The *_env fields in config point at
 // env var names; this view resolves them to/from the .env so the user never
 // touches environment variables manually.
@@ -254,13 +254,13 @@ func scanPPTXTemplates(dir string) []ppttemplate.View {
 
 // updatePPTSkillConfig updates a single key in the PPT skill's template_config.json.
 func (a *App) updatePPTSkillConfig(key, value string) error {
-	// Prefer the released embedded skill's config (~/.momapeer/skills/ppt-auto),
+	// Prefer the released embedded skill's config (~/.fairpeer/skills/ppt-auto),
 	// then fall back to the legacy exe-sibling layout for older installs.
 	configPath := skillassets.PPTAutoConfigPath()
 	if configPath == "" {
 		exePath, _ := os.Executable()
 		exeDir := filepath.Dir(exePath)
-		configPath = filepath.Join(exeDir, ".momapeer", "skills", "ppt-auto", "template_config.json")
+		configPath = filepath.Join(exeDir, ".fairpeer", "skills", "ppt-auto", "template_config.json")
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
@@ -289,7 +289,7 @@ func (a *App) updatePPTSkillConfig(key, value string) error {
 
 // SetCoWorkSettings persists the coWork settings: non-secret fields to
 // config.toml via the edit pipeline, secret fields (SMTP/IMAP passwords) to the
-// momapeer-managed .env. The password_env names are auto-assigned when empty so
+// fairpeer-managed .env. The password_env names are auto-assigned when empty so
 // the user doesn't have to invent env var names.
 func (a *App) SetCoWorkSettings(v CoWorkSettingsView) (err error) {
 	// Recover from panic so a bug in the save path returns an error to the
@@ -648,7 +648,7 @@ func (a *App) OpenPPTTemplateDir() error {
 
 // --- .env management --------------------------------------------------------
 
-// coworkEnvPath is the momapeer-managed .env holding coWork secrets (SMTP/IMAP
+// coworkEnvPath is the fairpeer-managed .env holding coWork secrets (SMTP/IMAP
 // passwords). Lives in the user config dir alongside config.toml. Loaded at
 // startup into the process env so the tools see the passwords via os.Getenv.
 func coworkEnvPath() string {

@@ -1,4 +1,4 @@
-export const WORKSPACE_REF_DRAG_TYPE = "application/x-momapeer-workspace-ref";
+export const WORKSPACE_REF_DRAG_TYPE = "application/x-fairpeer-workspace-ref";
 
 export interface WorkspaceRefDragPayload {
   path: string;

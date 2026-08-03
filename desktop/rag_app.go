@@ -766,8 +766,8 @@ func (a *App) RagSummarize(collection string) (KnowledgeSummaryView, error) {
 
 // RagAsk is the knowledge-base Q&A endpoint: it searches the RAG store for
 // context relevant to the user's question, then calls the 九天 LLM to generate
-// a grounded answer. This is momapeer's equivalent of Hyper-Extract's `he talk`
-// — but uses momapeer's own FTS5 + entity retrieval and the 九天 chat API,
+// a grounded answer. This is fairpeer's equivalent of Hyper-Extract's `he talk`
+// — but uses fairpeer's own FTS5 + entity retrieval and the 九天 chat API,
 // without depending on the HE Python server.
 //
 // The model used is the same fast_task_model as RAG extraction (resolved via
@@ -1422,7 +1422,7 @@ func (a *App) WriteKnowledgeRef(collection string, entityNames []string, relatio
 		return "", fmt.Errorf("RAG store offline")
 	}
 	content := rag.FormatKnowledgeRef(a.ragStore, collection, entityNames, relationKeys)
-	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("momapeer_knowledge_ref_%d.md", time.Now().UnixMilli()))
+	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("fairpeer_knowledge_ref_%d.md", time.Now().UnixMilli()))
 	if err := os.WriteFile(tmpPath, []byte(content), 0o644); err != nil {
 		return "", err
 	}

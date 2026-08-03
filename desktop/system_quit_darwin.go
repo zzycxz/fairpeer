@@ -4,7 +4,7 @@ package main
 
 /*
 #cgo darwin LDFLAGS: -framework Cocoa
-void installmomapeerSystemQuitHook(void);
+void installfairpeerSystemQuitHook(void);
 */
 import "C"
 
@@ -14,11 +14,11 @@ var installSystemQuitHookOnce sync.Once
 
 func installSystemQuitHook() {
 	installSystemQuitHookOnce.Do(func() {
-		C.installmomapeerSystemQuitHook()
+		C.installfairpeerSystemQuitHook()
 	})
 }
 
-//export momapeerMarkSystemQuit
-func momapeerMarkSystemQuit() {
+//export fairpeerMarkSystemQuit
+func fairpeerMarkSystemQuit() {
 	markSystemQuitRequested()
 }

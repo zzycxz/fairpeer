@@ -18,9 +18,9 @@ import (
 // cwd isn't writable.
 
 // workspaceStatePath is where the last working folder is remembered (under the
-// user config dir, shared with the rest of momapeer's state).
+// user config dir, shared with the rest of fairpeer's state).
 func workspaceStatePath() string {
-	dir := config.MemoryUserDir() // …/momapeer
+	dir := config.MemoryUserDir() // …/fairpeer
 	if dir == "" {
 		return ""
 	}
@@ -180,7 +180,7 @@ func cwdWritable() bool {
 	if err != nil {
 		return false
 	}
-	f, err := os.CreateTemp(cwd, ".momapeer-wtest-*")
+	f, err := os.CreateTemp(cwd, ".fairpeer-wtest-*")
 	if err != nil {
 		return false
 	}

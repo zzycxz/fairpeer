@@ -16,7 +16,7 @@ const (
 	RenderScopeProject RenderScope = "project"
 )
 
-// RenderTOML renders the config as annotated TOML in the `momapeer setup` house style:
+// RenderTOML renders the config as annotated TOML in the `fairpeer setup` house style:
 // comments preserved, system_prompt as a multi-line string, helpful hints. The
 // output round-trips back through Load (see render_test.go).
 func RenderTOML(c *Config) string {
@@ -25,7 +25,7 @@ func RenderTOML(c *Config) string {
 
 // RenderTOMLForScope renders an annotated TOML file for a specific persistence
 // target. User configs can carry desktop and account-level preferences; project
-// momapeer.toml stays focused on project behavior and intentionally excludes
+// fairpeer.toml stays focused on project behavior and intentionally excludes
 // desktop-only preferences.
 func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	if c == nil {
@@ -39,8 +39,8 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	defaults := Default()
 	var b strings.Builder
 
-	b.WriteString("# momapeer configuration.\n")
-	b.WriteString("# Resolution order: flag > ./momapeer.toml > ~/.config/momapeer/config.toml > built-in defaults.\n")
+	b.WriteString("# fairpeer configuration.\n")
+	b.WriteString("# Resolution order: flag > ./fairpeer.toml > ~/.config/fairpeer/config.toml > built-in defaults.\n")
 	b.WriteString("# Secrets come from the environment via api_key_env; never put keys here.\n\n")
 
 	fmt.Fprintf(&b, "config_version = %d   # schema marker for diagnostics; old versions may ignore it\n", configVersion(c))
@@ -290,7 +290,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	if c.Codegraph.Path != "" {
 		fmt.Fprintf(&b, "path         = %q   # optional launcher override\n", c.Codegraph.Path)
 	} else {
-		b.WriteString("# path       = \"\"   # empty = cache, then PATH, then a bundle beside momapeer\n")
+		b.WriteString("# path       = \"\"   # empty = cache, then PATH, then a bundle beside fairpeer\n")
 	}
 	b.WriteString("\n")
 
@@ -522,7 +522,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	if len(c.Plugins) == 0 {
 		b.WriteString("# [[plugins]]\n")
 		b.WriteString("# name    = \"example\"\n")
-		b.WriteString("# command = \"momapeer-plugin-example\"\n")
+		b.WriteString("# command = \"fairpeer-plugin-example\"\n")
 		b.WriteString("# [[plugins]]                                  # a remote server over Streamable HTTP\n")
 		b.WriteString("# name    = \"stripe\"\n")
 		b.WriteString("# type    = \"http\"\n")
@@ -813,7 +813,7 @@ func renderBotSessionMappings(mappings []BotConnectionSessionMapping) string {
 }
 
 // renderRuleList emits a permission rule list. A populated list renders as an
-// active TOML array; an empty one renders as a commented example so `momapeer setup`
+// active TOML array; an empty one renders as a commented example so `fairpeer setup`
 // scaffolds discoverable guidance without imposing surprising rules.
 func renderRuleList(key string, rules []string, example string) string {
 	if len(rules) == 0 {

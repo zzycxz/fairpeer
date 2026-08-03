@@ -1,4 +1,4 @@
-// Package netclient builds HTTP clients and proxy resolvers that share momapeer's
+// Package netclient builds HTTP clients and proxy resolvers that share fairpeer's
 // user-facing proxy settings. web_fetch reuses the resolver while keeping its own
 // dial-time SSRF guard.
 package netclient
@@ -94,7 +94,7 @@ func ProxyURLFor(spec ProxySpec, req *http.Request) (string, error) {
 	return u.String(), nil
 }
 
-// NewHTTPClient returns an HTTP client with momapeer proxy settings applied.
+// NewHTTPClient returns an HTTP client with fairpeer proxy settings applied.
 func NewHTTPClient(spec ProxySpec, opts TransportOptions) (*http.Client, error) {
 	tr, err := NewTransport(spec, opts)
 	if err != nil {

@@ -1,4 +1,4 @@
-// Package builtinmcp defines MCP servers that ship with momapeer without
+// Package builtinmcp defines MCP servers that ship with fairpeer without
 // requiring user configuration. Currently only Context7 is bundled; the
 // package is designed so more built-in servers can be added later.
 package builtinmcp
@@ -61,7 +61,7 @@ func Entry(name string) (config.PluginEntry, bool) {
 	return config.PluginEntry{}, false
 }
 
-// IsBuiltIn reports whether name is a momapeer-shipped MCP server.
+// IsBuiltIn reports whether name is a fairpeer-shipped MCP server.
 func IsBuiltIn(name string) bool {
 	_, ok := Entry(name)
 	return ok

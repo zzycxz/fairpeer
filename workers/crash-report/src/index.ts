@@ -263,7 +263,7 @@ export default {
       if (!statsAuthorized(request, env)) {
         return new Response("auth required", {
           status: 401,
-          headers: { "www-authenticate": 'Basic realm="momapeer-stats"' },
+          headers: { "www-authenticate": 'Basic realm="fairpeer-stats"' },
         });
       }
       return group ? handleGroup(env, group[1]) : handleStats(env);

@@ -59,11 +59,11 @@ func TestRAGMindMapBuildsTree(t *testing.T) {
 		t.Fatalf("read output: %v", err)
 	}
 	got := string(data)
-	// Root = 张三 (H1), branch = [负责] momapeer (H2), nested = [包含] rag模块 (H3).
+	// Root = 张三 (H1), branch = [负责] fairpeer (H2), nested = [包含] rag模块 (H3).
 	// Entity names are normalized to lowercase by the SIMPLE merge key, so the
 	// display forms here are lowercased (the raw form is kept in the DB but
 	// RelationsOf returns the normalized name).
-	for _, want := range []string{"# 张三", "[负责] momapeer", "[包含] rag模块"} {
+	for _, want := range []string{"# 张三", "[负责] fairpeer", "[包含] rag模块"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("mindmap missing %q\ngot:\n%s", want, got)
 		}

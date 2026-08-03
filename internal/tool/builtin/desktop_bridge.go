@@ -106,7 +106,7 @@ func findBridgeScript() string {
 		for _, p := range []string{
 			filepathJoin(dir, "scripts", "desktop_bridge.py"),
 			filepathJoin(dir, "..", "scripts", "desktop_bridge.py"),
-			filepathJoin(dir, "..", "momapeer", "scripts", "desktop_bridge.py"),
+			filepathJoin(dir, "..", "fairpeer", "scripts", "desktop_bridge.py"),
 		} {
 			if fileExists(p) {
 				return p
@@ -116,9 +116,9 @@ func findBridgeScript() string {
 	// Try CWD and common subdirectories.
 	for _, p := range []string{
 		"scripts/desktop_bridge.py",
-		"momapeer/scripts/desktop_bridge.py",
+		"fairpeer/scripts/desktop_bridge.py",
 		"../scripts/desktop_bridge.py",
-		"../momapeer/scripts/desktop_bridge.py",
+		"../fairpeer/scripts/desktop_bridge.py",
 	} {
 		if fileExists(p) {
 			return p

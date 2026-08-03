@@ -10,7 +10,7 @@
 // search UI and a keybinding the OS doesn't already take. The arrow
 // navigation is the common case and is the smallest useful addition.
 
-const KEY = "momapeer.composer.history";
+const KEY = "fairpeer.composer.history";
 const CAP = 200;
 
 export interface HistoryEntry {

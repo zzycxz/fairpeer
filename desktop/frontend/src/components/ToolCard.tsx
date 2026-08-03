@@ -29,7 +29,7 @@ function formatToolDuration(ms?: number): string {
 }
 
 // ToolAttachments renders image files a tool produced (e.g. image_generate
-// pictures saved under .momapeer/attachments/) directly under the tool card.
+// pictures saved under .fairpeer/attachments/) directly under the tool card.
 // Paths can't be loaded by a bare <img> in the webview, so fetch a data URL via
 // the kernel — the same bridge UserMessage uses for pasted-image previews.
 function ToolAttachments({ paths }: { paths: string[] }) {
