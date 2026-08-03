@@ -611,49 +611,23 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// same stable path the screenshot hotkey uses — and was verified by the
 		// tests/cua_vlm_test.go probe to localize labeled targets reliably.
 		//
-		// Explicit config wins: if the user sets [cowork] vlm_backend, honor it
-		// verbatim (so "jiutian" still works, and "provider" + a custom vlm_model
-		// works). When vlm_backend is empty (the common, unconfigured case) we
-		// default to "provider" and pick the ScreenshotVLMModel (qwen3.6-27b) as
-		// the vision model — reusing the one model the user already has configured
-		// for screenshot recognition, so there's a single vision model in play.
-		vlmBackend := strings.TrimSpace(cfg.Cowork.VLMBackend)
+		// Resolve the vision model for CallVLM (screen_perceive). The image is
+		// sent as a base64 data URL via the standard OpenAI multimodal chat
+		// format (image_url content parts) to the user-configured vision model —
+		// no degradation chain, no fallback. When no vision model is configured,
+		// CallVLM returns a clear error guiding the user to Settings.
 		vlmModel := strings.TrimSpace(cfg.Cowork.VLMModel)
-		if vlmBackend == "" {
-			vlmBackend = "provider"
-		}
 		if vlmModel == "" {
 			// Fall back to the screenshot-recognition model (defaults to
 			// qwen/qwen3.5-397b-a17b via normalizeCoworkDefaults) so the two
 			// vision uses share one configured model.
 			vlmModel = cfg.Cowork.ScreenshotVLMModel
 		}
-		// Build a degradation chain instead of a single backend. The chain has
-		// exactly TWO rings — no automatic second qwen:
-		//   1. primary: the model the user picked in the model-page dropdown
-		//      (vlm_model, or screenshot_vlm_model which defaults to 397B). The
-		//      user's choice IS the preferred vision model; we don't second-guess
-		//      it by injecting the other qwen as a middle ring.
-		//   2. terminal: 九天 LLMImage2Text (always available with JIUTIAN_API_KEY).
-		//      If the primary qwen fails (5xx / timeout / empty), 九天 handles it.
-		var chain []builtin.VLMBackend
-		if vlmBackend == "provider" {
-			chain = append(chain, builtin.VLMBackend{
-				Kind:  builtin.VLMBackendProvider,
-				Model: vlmModel,
-				Label: vlmModel,
-			})
-		}
-		// Terminal fallback removed: 九天 is no longer appended. An empty chain
-		// means CallVLM returns "no VLM backend configured", guiding the user to
-		// set a vision-capable model in Settings.
-		builtin.SetVLMChain(chain)
-		// Wire the provider-backed VLM runner so VLMBackend="provider" actually
-		// works. Without this, callProviderVLM returns "provider VLM bridge not
-		// initialized". The runner resolves the model ref to a provider entry,
-		// builds a one-shot client (with the network proxy), and streams the
-		// multimodal chat. cfg is captured by closure so a profile switch (which
-		// rebuilds via a fresh Build) re-resolves models.
+		builtin.SetVLMModel(vlmModel)
+		// Wire the provider-backed VLM runner so CallVLM can build a proxy-aware
+		// one-shot client. Without this, callProviderVLM returns "provider VLM
+		// bridge not initialized". cfg is captured by closure so a profile switch
+		// (which rebuilds via a fresh Build) re-resolves models.
 		builtin.SetProviderChatRunner(func(ctx context.Context, modelRef string, msgs []provider.Message) ([]provider.Message, error) {
 			return runProviderVLMChat(ctx, cfg, modelRef, msgs)
 		})

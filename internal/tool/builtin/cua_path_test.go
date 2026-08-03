@@ -5,7 +5,6 @@ package builtin
 import (
 	"context"
 	"encoding/base64"
-	"os"
 	"strings"
 	"testing"
 
@@ -25,69 +24,26 @@ import (
 // construction are correct even offline. That alone catches the "image was
 // silently dropped" class of bug.
 func TestCallVLMProviderPath(t *testing.T) {
-	// Switch the global VLM config to provider mode (the production default).
-	// With the chain refactor, SetVLMConfig now builds a single-backend chain;
-	// we replace it with a chain whose only provider entry is qwen3.6-27b so
-	// the offline injected runner is the one that answers.
-	origChain := globalVLMChain
+	// Configure the global VLM model (the production default is a provider
+	// multimodal model). We set it to qwen3.6-27b and inject a fake runner that
+	// asserts the image part is present, proving the multimodal message
+	// construction is correct even offline.
+	origModel := vlmModel
 	origRunner := runProviderChat
 	t.Cleanup(func() {
-		globalVLMChain = origChain
+		vlmModel = origModel
 		runProviderChat = origRunner
 	})
-	SetVLMChain([]VLMBackend{
-		{Kind: VLMBackendProvider, Model: "qwen/qwen3.6-27b", Label: "qwen3.6-27b"},
-	})
+	SetVLMModel("qwen/qwen3.6-27b")
 
 	const prompt = "Reply with exactly: VLM_OK"
 	// 1x1 red PNG — minimal valid image. We're testing the path, not the vision.
 	const red1x1B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
 	imgDataURL := "data:image/png;base64," + red1x1B64
 
-	if key := os.Getenv("JIUTIAN_API_KEY"); key != "" {
-		// LIVE path: build a real provider client like runProviderVLMChat does, wire
-		// it as the runner, and call CallVLM. A green result = production path works
-		// against the real endpoint.
-		t.Log("JIUTIAN_API_KEY set → live VLM call against qwen3.6-27b")
-		// We can't import boot (cycle), so replicate runProviderVLMChat's core: resolve
-		// is done by the runner. Inject a runner that just forwards via provider.ImageContent
-		// to a hand-built moma openai client. Reuse the existing callProviderVLM by giving
-		// it a real runner:
-		SetProviderChatRunner(func(ctx context.Context, modelRef string, msgs []provider.Message) ([]provider.Message, error) {
-			// Sanity: assert the message actually carries an image part. This is the
-			// assertion that would have caught a "vision dropped the image" regression.
-			hasImage := false
-			for _, m := range msgs {
-				if len(provider.ImageParts(m.Content)) > 0 {
-					hasImage = true
-					break
-				}
-			}
-			if !hasImage {
-				t.Errorf("runner got a message with NO image part — image was dropped before reaching the provider (the vision-model check failed)")
-			}
-			t.Logf("model ref: %s, message has image: %v", modelRef, hasImage)
-			// Return a canned assistant text so the path completes without a network
-			// call from THIS test (the live network call is exercised by tests/cua_vlm_test).
-			// The point here is the in-process path + image construction, not the HTTP.
-			return []provider.Message{{Role: provider.RoleAssistant, Content: "VLM_OK (injected runner received image)"}}, nil
-		})
-
-		text, err := CallVLM(context.Background(), imgDataURL, prompt)
-		if err != nil {
-			t.Fatalf("CallVLM (provider) failed: %v", err)
-		}
-		if !strings.Contains(text, "VLM_OK") {
-			t.Errorf("unexpected VLM output: %q", text)
-		}
-		t.Logf("✅ production VLM path works: %q", text)
-		return
-	}
-
-	// OFFLINE path (no key): inject a fake runner that asserts image presence. This
-	// runs in CI without secrets and still proves the dispatch + multimodal message
+	// Inject a fake runner that asserts the message carries an image part. This
+	// runs in CI without secrets and proves the dispatch + multimodal message
 	// construction are correct — the part most likely to silently break.
-	t.Log("no JIUTIAN_API_KEY → offline path verification (image not dropped)")
 	SetProviderChatRunner(func(ctx context.Context, modelRef string, msgs []provider.Message) ([]provider.Message, error) {
 		if modelRef != "qwen/qwen3.6-27b" {
 			t.Errorf("model ref = %q, want qwen/qwen3.6-27b", modelRef)
@@ -103,7 +59,7 @@ func TestCallVLMProviderPath(t *testing.T) {
 	})
 
 	if _, err := CallVLM(context.Background(), imgDataURL, prompt); err != nil {
-		t.Fatalf("CallVLM (provider) offline failed: %v", err)
+		t.Fatalf("CallVLM (provider) failed: %v", err)
 	}
 }
 
