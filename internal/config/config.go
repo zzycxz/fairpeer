@@ -343,11 +343,11 @@ const DefaultSkillColdDays = 90
 // contention and matches the "consolidate when idle" intent.
 const DefaultIdleMinutes = 10
 
-// DefaultFastTaskModel is the model dream/distill/rag-extract run on out of the
-// box (agent.fast_task_model). Must be in BuiltinMoMAModels. deepseek-v4-flash
-// is fast (~4s/chunk); qwen3.6-35b is a thinking model but set as default per user request.
-// Users override via [agent].fast_task_model in config.
-const DefaultFastTaskModel = "qwen/qwen3.6-35b"
+// DefaultFastTaskModel is the model dream/distill/rag-extract run on. Empty
+// means unconfigured — at runtime an empty agent.fast_task_model falls back to
+// the default model; this constant no longer hardcodes a vendor model. Phase 3
+// will resolve it from the configured provider's fast_model role.
+const DefaultFastTaskModel = ""
 
 // IdleMinutesEffective returns the effective user-inactivity threshold in
 // minutes before an idle Dream run may fire, applying the default when the
@@ -1413,11 +1413,15 @@ var BuiltinMoMAModels = []string{
 	"moonshotai/kimi-k2.6", "moonshotai/kimi-k2.5-thinking",
 }
 
-// Default returns the built-in default configuration (MoMA + MoMA presets).
+// Default returns the built-in default configuration. No provider is preset —
+// FairPeer is provider-agnostic, so the user configures their own via the CLI
+// setup wizard (fairpeer chat/run) or the desktop onboarding/settings panel.
+// An empty DefaultModel + empty Providers means the first run enters the setup
+// wizard (CLI) or the onboarding overlay (desktop).
 func Default() *Config {
 	return &Config{
 		ConfigVersion: 2,
-		DefaultModel:  "minimax/minimax-m2.7",
+		DefaultModel:  "",
 		UI:            UIConfig{Theme: "light"},
 		Desktop:       DesktopConfig{Theme: "light", ThemeStyle: "slate"},
 		Cowork: CoworkConfig{
@@ -1474,13 +1478,14 @@ func Default() *Config {
 			Feishu:     FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
 			Weixin:     WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
 		},
-		// RPM default 60: MoMA's per-key rate limit is now set to 60/min.
-		// Users with higher tiers can raise this. ReserveMain=2 keeps requests
-		// in reserve for the main agent under concurrent load.
+		// RPM default 60: a conservative per-key rate cap that suits most
+		// OpenAI-compatible providers. Users on higher tiers can raise this.
+		// ReserveMain=2 keeps requests in reserve for the main agent under
+		// concurrent load.
 		LLM: LLMConfig{RPM: 60, ReserveMain: 2},
-		Providers: []ProviderEntry{
-			{Name: "moma", Kind: "openai", BaseURL: "https://jiutian.10086.cn/largemodel/moma/api/v3", Models: BuiltinMoMAModels, Default: "minimax/minimax-m2.7", APIKeyEnv: "JIUTIAN_API_KEY", ContextWindow: 200_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
-		},
+		// Providers intentionally empty — no built-in provider preset. The user
+		// configures providers via setup wizard / settings panel.
+		Providers: nil,
 	}
 }
 
