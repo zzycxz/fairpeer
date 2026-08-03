@@ -146,20 +146,20 @@ func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 }
 
 type client struct {
-	name            string
-	apiKey          string
-	keyEnv          string // api_key_env name, surfaced in auth errors
-	baseURL         string
-	model           string
-	http            *http.Client
-	moma            bool
-	minimax         bool                            // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
-	effort          string                          // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
-	vision          bool                            // true when the provider supports image_url content parts
-	visionDetail    string                          // "auto", "low", "high" — forwarded as image detail level
-	idleTimeout     time.Duration                   // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
-	authed          atomic.Bool                     // true after first successful auth; enables transient 401 retry
-	onReplay        func(ctx context.Context) error // optional: charged by the RPM limiter on each mid-stream replay
+	name         string
+	apiKey       string
+	keyEnv       string // api_key_env name, surfaced in auth errors
+	baseURL      string
+	model        string
+	http         *http.Client
+	moma         bool
+	minimax      bool                            // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
+	effort       string                          // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
+	vision       bool                            // true when the provider supports image_url content parts
+	visionDetail string                          // "auto", "low", "high" — forwarded as image detail level
+	idleTimeout  time.Duration                   // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
+	authed       atomic.Bool                     // true after first successful auth; enables transient 401 retry
+	onReplay     func(ctx context.Context) error // optional: charged by the RPM limiter on each mid-stream replay
 }
 
 func (c *client) Name() string { return c.name }

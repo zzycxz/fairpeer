@@ -30,9 +30,9 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/zzycxz/fairpeer/internal/apihelper"
 	"github.com/zzycxz/fairpeer/internal/boot"
 	"github.com/zzycxz/fairpeer/internal/config"
-	"github.com/zzycxz/fairpeer/internal/apihelper"
 	"github.com/zzycxz/fairpeer/internal/rag"
 	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )

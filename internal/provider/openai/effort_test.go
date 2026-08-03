@@ -34,21 +34,21 @@ func TestEffortNormalization(t *testing.T) {
 		protocol, effort, want string
 	}{
 		// Standard OpenAI-compatible scale (no reasoning protocol declared).
-		{"", "max", "high"},   // max is a MoMA-ism; clamp to the OpenAI ceiling
-		{"", "high", "high"},  // pass through
+		{"", "max", "high"},  // max is a MoMA-ism; clamp to the OpenAI ceiling
+		{"", "high", "high"}, // pass through
 		{"", "medium", "medium"},
 		{"", "low", "low"},
 		{"", "MAX", "high"}, // case-insensitive
 		{"", "auto", ""},    // auto means omit provider-specific effort
 		{"", "", ""},        // unset stays omitted
 		// Explicit reasoning_protocol = "moma" takes the MoMA thinking branch.
-		{"moma", "max", "high"},    // max rejected by most MoMA models; clamp to high
-		{"moma", "high", "high"},   // pass through
+		{"moma", "max", "high"},  // max rejected by most MoMA models; clamp to high
+		{"moma", "high", "high"}, // pass through
 		{"moma", "medium", "medium"},
-		{"moma", "low", "medium"},  // low rejected by some MoMA models; clamp to medium
-		{"moma", "auto", "high"},   // auto → default depth
-		{"moma", "", "high"},       // unset → default MoMA depth
-		{"moma", "off", "high"},    // retired level → default depth
+		{"moma", "low", "medium"}, // low rejected by some MoMA models; clamp to medium
+		{"moma", "auto", "high"},  // auto → default depth
+		{"moma", "", "high"},      // unset → default MoMA depth
+		{"moma", "off", "high"},   // retired level → default depth
 	}
 	for _, tc := range tests {
 		if got := newClient(t, base, tc.protocol, tc.effort).effort; got != tc.want {

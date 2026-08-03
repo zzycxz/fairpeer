@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.0.0] — 2026-08-03
+
+**FairPeer 首版发布。基于 MoMAPeer clean start，全面去中国移动九天耦合，改造为面向公网用户的通用 AI 编程助手。**
+
+### 品牌与架构
+- 新建独立仓库（clean start），Go module `github.com/zzycxz/fairpeer`，切断与 momapeer 的 git 历史
+- 全品牌焕新：fairpeer 名称/图标/banner/wails.json/goreleaser/CI-CD/installer/desktop/Linux 包
+- 27 个 `MOMAPEER_*` 环境变量重命名为 `FAIRPEER_*`（无兼容）
+- 用户数据目录 `.momapeer/` → `.fairpeer/`，配置 `momapeer.toml` → `fairpeer.toml`，记忆 `momapeer.md` → `fairpeer.md`
+- 更新链迁移：updater.go 7 处 + Gitee 镜像 + homebrew tap 指向 fairpeer
+
+### 九天平台解绑（Phase 2）
+- 删除九天多模态工具（image_understand/video_understand/image_generate）
+- `internal/jiutian/` 重命名为 `internal/apihelper/`（通用 HTTP helper）
+- VLM 简化为单一 vision 模型 + base64（移除降级链）
+- 九天模型硬编码默认值全部移除（ScreenshotVLMModel 等），改为读用户配置
+
+### 多厂商 LLM 架构（Phase 3）⭐ 核心
+- `config.Default()` 重写为 provider-agnostic（无内置 provider，首次启动引导 setup）
+- 移除 `BuiltinMoMAModels` + `MoMAVisionModels`/`MoMAThinkingModels` 白名单 + `IsMoMA` URL 检测
+- Vision 能力完全由 per-provider `Vision` 字段驱动
+- Thinking 协议改为显式声明（`reasoning_protocol="moma"`），不再 URL 自动检测
+- ProviderEntry 新增 `FastModel`/`CodingOnly`/`Aggregator` 字段（三类模型角色 + Coding Plan 双标志）
+- 预置 11 厂商 + 7 聚合平台配置模板
+- 桌面端设置页/Onboarding/bridge mock 全去九天
+- 五前端（CLI/serve/bot/acp/desktop）统一解耦九天模型
+
+### 其他
+- PPT 模板去品牌化（中国移动模板.pptx → default.pptx，配色保留为通用商务蓝）
+- 邮件系统新增主流邮箱示例（Gmail/QQ/163/Outlook 等）
+- 流式超时从 3 分钟提升到 30 分钟（适配深度推理模型）
+- 31 个文档全量去品牌
+- API Key 加密、PPT 模板颜色自动检测、provider 健康探测列为后续增强
+
+> 0.5.15 及以下条目为 MoMAPeer 历史记录（clean start 前身），保留供追溯。
+
 ## [0.5.15] — 2026-08-02
 
 **快捷截屏功能全面修复：热键检测从 RegisterHotKey 改为 GetAsyncKeyState 轮询（解决键盘事件到不了的问题），提示词升级为「先定位题目→给答案→解题过程→验证」四步结构，新增用户可自定义提示词，系统托盘加「截图解题」菜单项，全局热键改为 Ctrl+Shift+Alt+W 避免冲突。**

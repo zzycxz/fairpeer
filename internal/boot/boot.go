@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/agent"
+	"github.com/zzycxz/fairpeer/internal/apihelper"
 	"github.com/zzycxz/fairpeer/internal/assets"
 	"github.com/zzycxz/fairpeer/internal/builtinmcp"
 	"github.com/zzycxz/fairpeer/internal/codegraph"
@@ -31,7 +32,6 @@ import (
 	"github.com/zzycxz/fairpeer/internal/hook"
 	"github.com/zzycxz/fairpeer/internal/installsource"
 	"github.com/zzycxz/fairpeer/internal/instruction"
-	"github.com/zzycxz/fairpeer/internal/apihelper"
 	"github.com/zzycxz/fairpeer/internal/jobs"
 	"github.com/zzycxz/fairpeer/internal/lsp"
 	"github.com/zzycxz/fairpeer/internal/memory"

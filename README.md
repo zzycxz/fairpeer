@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/zzycxz/fairpeer/releases"><img src="https://img.shields.io/badge/version-v0.5.6-0153e5?style=flat-square" alt="Version 0.5.6"/></a>
+  <a href="https://github.com/zzycxz/fairpeer/releases"><img src="https://img.shields.io/badge/version-v1.0.0-0153e5?style=flat-square" alt="Version 1.0.0"/></a>
   <a href="https://github.com/zzycxz/fairpeer/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zzycxz/fairpeer/ci.yml?style=flat-square&label=ci&labelColor=161b22&logo=githubactions&logoColor=white" alt="CI"/></a>
   <a href="./LICENSE"><img src="https://img.shields.io/github/license/zzycxz/fairpeer.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
   <a href="https://github.com/zzycxz/fairpeer/stargazers"><img src="https://img.shields.io/github/stars/zzycxz/fairpeer.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
