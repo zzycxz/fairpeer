@@ -1115,6 +1115,11 @@ type ProviderEntry struct {
 	Models        []string          `toml:"models"`     // a vendor's model list (one base_url/key, many models)
 	ModelsURL     string            `toml:"models_url"` // auto-fetch models from this URL on startup
 	Default       string            `toml:"default"`    // default model when Models is set (else Models[0])
+	// FastModel is the lightweight model used for background/fast tasks
+	// (dream/distill/rag-extract, scheduler time-parse). Empty = fall back to
+	// Default at runtime. This is the per-provider "fast" role; the global
+	// agent.fast_task_model can override it.
+	FastModel      string            `toml:"fast_model"`
 	APIKeyEnv     string            `toml:"api_key_env"`
 	ContextWindow int               `toml:"context_window"`
 	Price         *provider.Pricing `toml:"price"`
@@ -1149,6 +1154,14 @@ type ProviderEntry struct {
 	// NoProxy reaches this provider's base_url directly, never through the proxy.
 	// For China-only endpoints a foreign-exit proxy resets the TLS handshake (#2803).
 	NoProxy bool `toml:"no_proxy"`
+	// CodingOnly marks this provider as consuming a Coding Plan subscription
+	// quota (vs the regular token quota). UI surfaces a "consumes subscription
+	// quota" hint; optionally restricts to coding-tool use per vendor terms.
+	CodingOnly bool `toml:"coding_only"`
+	// Aggregator marks this provider as a model-aggregation platform that can
+	// call multiple vendors' models under one endpoint+key (e.g. a Coding Plan).
+	// UI groups these under an "aggregators" section; not a routing branch.
+	Aggregator bool `toml:"aggregator"`
 }
 
 // ModelList returns the models this provider exposes: the explicit `models` list,
