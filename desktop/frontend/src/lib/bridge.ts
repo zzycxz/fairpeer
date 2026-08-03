@@ -8,7 +8,7 @@
 import type * as GeneratedApp from "../../wailsjs/go/main/App";
 
 import { t } from "./i18n";
-import { modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeToolApprovalMode } from "./types";
+import { modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeToolApprovalMode, ProviderTemplate } from "./types";
 
 import type {
   BotConnectionDiagnostic,
@@ -327,6 +327,10 @@ export interface AppBindings {
   OpenDownloadPage(): Promise<void>;
   NeedsOnboarding(): Promise<boolean>;
   ConnectKey(apiKey: string): Promise<void>;
+  // Multi-vendor onboarding (provider_templates.go + app.go).
+  GetProviderTemplates(): Promise<ProviderTemplate[]>;
+  ProbeVendorKey(baseURL: string, apiKey: string): Promise<void>;
+  SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string): Promise<void>;
   // Crash overlay "Send report" (desktop/crash_app.go): scrubs user paths, attaches
   // version/os/arch, POSTs to the collection endpoint. Only ever sent on user click.
   ReportCrash(kind: string, detail: string): Promise<void>;
@@ -2888,6 +2892,44 @@ function makeMockApp(): AppBindings {
       const first = settings.providers[0];
       if (first) first.keySet = true;
       await delay(300);
+    },
+    async GetProviderTemplates() {
+      // Minimal mock: return a couple of representative templates so the
+      // wizard renders in-browser without the Go backend.
+      await delay(100);
+      return [
+        { name: "deepseek", displayName: "DeepSeek", kind: "openai",
+          baseUrl: "https://api.deepseek.com", apiKeyEnv: "DEEPSEEK_API_KEY",
+          defaultModel: "deepseek-v4-pro", fastModel: "deepseek-v4-flash",
+          visionModel: "deepseek-v4-pro", vision: true, contextWindow: 1000000,
+          codingOnly: false, aggregator: false, category: "direct",
+          docUrl: "https://platform.deepseek.com/api_keys",
+          models: ["deepseek-v4-pro", "deepseek-v4-flash"] },
+        { name: "zhipu", displayName: "智谱 AI (GLM)", kind: "openai",
+          baseUrl: "https://open.bigmodel.cn/api/paas/v4", apiKeyEnv: "ZHIPU_API_KEY",
+          defaultModel: "glm-5.2", fastModel: "glm-4.7-flash",
+          visionModel: "glm-5v-turbo", vision: true, contextWindow: 1000000,
+          codingOnly: false, aggregator: false, category: "direct",
+          docUrl: "https://open.bigmodel.cn/usercenter/apikeys",
+          models: ["glm-5.2", "glm-5v-turbo", "glm-4.7-flash"] },
+      ] as ProviderTemplate[];
+    },
+    async ProbeVendorKey(_baseURL: string, apiKey: string) {
+      if (!apiKey.trim()) throw new Error("invalid API key");
+      await delay(500);
+    },
+    async SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string) {
+      if (!apiKey.trim()) throw new Error("key is required");
+      await delay(300);
+      // Mock: add the provider to settings so NeedsOnboarding flips to false.
+      settings.providers.push({
+        name: template.name, builtIn: false, added: true, kind: template.kind,
+        baseUrl: template.baseUrl, models: template.models, modelsUrl: "",
+        default: defaultModel || template.defaultModel, apiKeyEnv: template.apiKeyEnv,
+        keySet: true, contextWindow: template.contextWindow,
+        reasoningProtocol: "", supportedEfforts: [], defaultEffort: "",
+      });
+      settings.defaultModel = template.name + "/" + (defaultModel || template.defaultModel);
     },
     async ReportCrash() {
       await delay(300);

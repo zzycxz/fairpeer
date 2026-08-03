@@ -1011,6 +1011,26 @@ export interface ProviderView {
   defaultEffort: string; // /effort level when user picks "auto" or unset; "" = supportedEfforts[0]
 }
 
+// ProviderTemplate is a built-in vendor preset for the onboarding wizard and
+// the "add provider" picker. Mirrors desktop/provider_templates.go ProviderTemplate.
+export interface ProviderTemplate {
+  name: string;
+  displayName: string;
+  kind: string; // "openai" | "anthropic"
+  baseUrl: string;
+  apiKeyEnv: string;
+  defaultModel: string; // recommended default (vendor-relative, no provider prefix)
+  fastModel: string; // recommended fast model
+  visionModel: string; // recommended vision model ("" = same as default)
+  vision: boolean; // provider supports image input
+  contextWindow: number;
+  codingOnly: boolean; // consumes Coding Plan subscription quota
+  aggregator: boolean; // model-aggregation platform
+  category: string; // "direct" | "aggregator"
+  docUrl: string; // where to get an API key
+  models: string[]; // preset model list (fallback when probe fails)
+}
+
 // JobView is one running background job (desktop/app.go Jobs) for the status bar.
 export interface JobView {
   id: string;

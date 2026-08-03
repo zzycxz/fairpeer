@@ -5535,25 +5535,24 @@ func parseScope(s string) memory.Scope {
 	}
 }
 
-// onboardingKeyEnv is the default provider key from config.Default().
+// onboardingKeyEnv is a legacy fallback env name; NeedsOnboarding now checks
+// whether ANY configured provider has a resolvable key.
 const onboardingKeyEnv = "FAIRPEER_API_KEY"
 
-// probeProviderKey validates an API key by hitting the provider's /models endpoint.
-// This is a lightweight connectivity + auth check used during onboarding.
-// The baseURL is read from the default config so it adapts to whatever
-// provider is actually configured.
-func probeProviderKey(ctx context.Context, apiKey string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+// probeVendorKey validates an API key by hitting the vendor's /models endpoint.
+// A lightweight connectivity + auth check used during onboarding. The baseURL
+// is passed by the caller (the selected vendor's endpoint) — it no longer
+// assumes a single built-in provider.
+func probeVendorKey(ctx context.Context, baseURL, apiKey string) error {
+	// Try the common OpenAI-compatible model-list shapes. Most vendors answer
+	// at least one of these; a 200 means the key is valid for the endpoint.
+	candidates := []string{
+		strings.TrimRight(baseURL, "/") + "/models",
+		strings.TrimRight(baseURL, "/") + "/v1/models",
 	}
-	// Find the first provider that uses this key env
-	for _, p := range cfg.Providers {
-		if p.APIKeyEnv != onboardingKeyEnv {
-			continue
-		}
-		url := strings.TrimRight(p.BaseURL, "/") + "/models"
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	var lastErr error
+	for _, u := range candidates {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			return err
 		}
@@ -5561,19 +5560,27 @@ func probeProviderKey(ctx context.Context, apiKey string) error {
 		req.Header.Set("Accept", "application/json")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			return fmt.Errorf("network: %w", err)
+			lastErr = fmt.Errorf("network: %w", err)
+			continue
 		}
 		resp.Body.Close()
 		switch resp.StatusCode {
 		case http.StatusOK:
-			return nil
-		case http.StatusUnauthorized:
+			return nil // key works
+		case http.StatusUnauthorized, http.StatusForbidden:
 			return fmt.Errorf("invalid API key")
+		case http.StatusNotFound:
+			// Wrong path shape; try the next candidate.
+			lastErr = fmt.Errorf("unexpected status %d", resp.StatusCode)
+			continue
 		default:
-			return fmt.Errorf("unexpected status %d", resp.StatusCode)
+			lastErr = fmt.Errorf("unexpected status %d", resp.StatusCode)
 		}
 	}
-	return fmt.Errorf("no provider configured for %s", onboardingKeyEnv)
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("could not validate key against %s", baseURL)
 }
 
 // NativeConfirmRequest is the payload for ConfirmAction — a native OS confirmation
@@ -5638,27 +5645,143 @@ func (a *App) ConfirmAction(req NativeConfirmRequest) (bool, error) {
 	return result == confirm, nil
 }
 
+// NeedsOnboarding reports whether the user has at least one provider with a
+// resolvable API key. FairPeer ships no built-in provider, so the first run
+// shows the onboarding wizard until the user configures one.
 func (a *App) NeedsOnboarding() bool {
+	cfg, err := config.Load()
+	if err != nil {
+		// Can't load config — show onboarding so the user can set things up.
+		return true
+	}
+	for _, p := range cfg.Providers {
+		if p.APIKeyEnv != "" && strings.TrimSpace(os.Getenv(p.APIKeyEnv)) != "" {
+			return false // at least one provider has a key
+		}
+	}
+	// Legacy fallback: a bare FAIRPEER_API_KEY without a provider entry.
 	return strings.TrimSpace(os.Getenv(onboardingKeyEnv)) == ""
+}
+
+// ProbeVendorKey validates an API key against a vendor endpoint during the
+// onboarding wizard (step 2). baseURL is the vendor's API root (e.g.
+// "https://api.deepseek.com"). Does NOT persist anything — call SetupProvider
+// to commit after the user picks a model.
+func (a *App) ProbeVendorKey(baseURL, apiKey string) error {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return fmt.Errorf("key is required")
+	}
+	if strings.TrimSpace(baseURL) == "" {
+		return fmt.Errorf("base URL is required")
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+	return probeVendorKey(ctx, baseURL, apiKey)
+}
+
+// SetupProvider commits a vendor selection from the onboarding wizard. It
+// writes the API key, saves the provider config (with the chosen default model),
+// sets it as the global default, and rebuilds so it takes effect immediately.
+// template is the vendor preset; apiKey is the user's key; defaultModel is the
+// vendor-relative model name picked in step 3 (e.g. "deepseek-v4-pro" — no
+// provider prefix; SetupProvider adds "deepseek/").
+func (a *App) SetupProvider(template ProviderTemplate, apiKey string, defaultModel string) error {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return fmt.Errorf("key is required")
+	}
+	defaultModel = strings.TrimSpace(defaultModel)
+	if defaultModel == "" {
+		// Fall back to the template's recommended default.
+		defaultModel = template.DefaultModel
+	}
+
+	// 1. Write the key to .env so FetchModels / SaveProvider can resolve it.
+	if err := upsertDotEnv(template.APIKeyEnv, apiKey); err != nil {
+		return fmt.Errorf("save key: %w", err)
+	}
+
+	// 2. Build the model list: vendor-relative names (no provider prefix). The
+	// provider prefix (e.g. "deepseek/") is added by the config layer on read;
+	// here we store bare model names matching what /models returns.
+	models := template.Models
+	ref := template.Name + "/" + defaultModel
+
+	// 3. Save the provider entry. SaveProvider upserts + applyConfigChange
+	// (which rebuilds the controller).
+	pv := ProviderView{
+		Name:          template.Name,
+		Kind:          template.Kind,
+		BaseURL:       template.BaseURL,
+		APIKeyEnv:     template.APIKeyEnv,
+		ContextWindow: template.ContextWindow,
+		Default:       defaultModel,
+		Models:        models,
+	}
+	// Vision capability: SaveProvider does not read it from ProviderView, so we
+	// patch the entry's Vision flag via applyConfigChange right after.
+	if err := a.SaveProvider(pv); err != nil {
+		return fmt.Errorf("save provider: %w", err)
+	}
+	if template.Vision {
+		_ = a.applyConfigChange(func(c *config.Config) error {
+			for i := range c.Providers {
+				if c.Providers[i].Name == template.Name {
+					c.Providers[i].Vision = true
+					break
+				}
+			}
+			return nil
+		})
+	}
+
+	// 4. Set as global default so the agent starts using it immediately.
+	if err := a.SetDefaultModel(ref); err != nil {
+		// Non-fatal: provider is configured, just not the default.
+		a.mu.Lock()
+		if tab := a.activeTabLocked(); tab != nil {
+			tab.StartupErr = "provider configured but could not set as default: " + err.Error()
+		}
+		a.mu.Unlock()
+	}
+	return nil
 }
 
 // ConnectKey validates apiKey against the provider endpoint, persists it to the
 // global credentials file, and rebuilds the controller so the new key takes effect.
+//
+// Deprecated: kept for backward compatibility with older frontends. New code
+// should use ProbeVendorKey + SetupProvider (the multi-vendor onboarding flow).
 func (a *App) ConnectKey(apiKey string) error {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
 		return fmt.Errorf("key is required")
 	}
-	ctx, cancel := context.WithTimeout(a.ctx, 8*time.Second)
+	// Legacy single-provider path: validate against the first configured
+	// provider's endpoint, then store under FAIRPEER_API_KEY.
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	var baseURL string
+	for _, p := range cfg.Providers {
+		if p.APIKeyEnv == onboardingKeyEnv || p.APIKey() != "" {
+			baseURL = p.BaseURL
+			break
+		}
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
 	defer cancel()
-	if err := probeProviderKey(ctx, apiKey); err != nil {
-		return fmt.Errorf("validate: %w", err)
+	if baseURL != "" {
+		if err := probeVendorKey(ctx, baseURL, apiKey); err != nil {
+			return fmt.Errorf("validate: %w", err)
+		}
 	}
 	if err := upsertDotEnv(onboardingKeyEnv, apiKey); err != nil {
 		return fmt.Errorf("save: %w", err)
 	}
 	if err := a.rebuild(); err != nil {
-		// Key is persisted; surface the failure but let the next rebuild load it.
 		a.mu.Lock()
 		if tab := a.activeTabLocked(); tab != nil {
 			tab.StartupErr = err.Error()
