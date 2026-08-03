@@ -19,7 +19,7 @@ func TestBuildUnknownModelErrorIsActionable(t *testing.T) {
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	writeFile(t, dir, "fairpeer.toml", `
-default_model = "test-provider"
+default_model = "definitely-not-configured"
 
 [codegraph]
 enabled = false
@@ -37,7 +37,7 @@ api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 		t.Fatal("expected an error for an unresolvable default_model")
 	}
 	msg := err.Error()
-	for _, want := range []string{`"test-provider"`, "test-provider", "[[providers]]"} {
+	for _, want := range []string{`"definitely-not-configured"`, "definitely-not-configured", "[[providers]]"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("error %q should mention %q", msg, want)
 		}

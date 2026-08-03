@@ -313,20 +313,30 @@ func TestSetLanguage(t *testing.T) {
 }
 
 func TestNormalizeEffortTestProvider(t *testing.T) {
-	// Thinking mode is now declared explicitly via reasoning_protocol = "test-provider"
-	// rather than auto-detected from the provider URL.
-	e := &ProviderEntry{Name: "openai-test", Kind: "openai", BaseURL: "https://api.example.com", Model: "test-model-a", ReasoningProtocol: "test-provider"}
+	// Effort vocabulary is unified to low/medium/high (+auto) across all
+	// providers. Non-openai/none reasoning_protocol values normalize away, so
+	// "test-provider" behaves like an auto/openai provider exposing the
+	// unified levels. Legacy values (max/xhigh/adaptive) migrate to "high",
+	// and disabled/off migrate to "low".
+	e := &ProviderEntry{Name: "openai-test", Kind: "openai", BaseURL: "https://api.example.com", Model: "test-model-a", ReasoningProtocol: "openai"}
 	cap := EffortCapabilityForEntry(e)
-	if !cap.Supported || len(cap.Levels) != 3 || cap.Levels[0] != "auto" || cap.Levels[1] != "high" || cap.Levels[2] != "max" {
-		t.Fatalf("test-provider levels = %+v, want auto/high/max", cap)
+	wantLevels := []string{"auto", "low", "medium", "high"}
+	if !cap.Supported || len(cap.Levels) != len(wantLevels) {
+		t.Fatalf("test-provider levels = %+v, want %v", cap, wantLevels)
 	}
-	for in, want := range map[string]string{"auto": "", "high": "high", "max": "max"} {
+	for i, want := range wantLevels {
+		if cap.Levels[i] != want {
+			t.Fatalf("levels[%d] = %q, want %q", i, cap.Levels[i], want)
+		}
+	}
+	for in, want := range map[string]string{"auto": "", "high": "high", "medium": "medium", "low": "low", "max": "high", "xhigh": "high", "adaptive": "high", "disabled": "low", "off": "low"} {
 		got, err := NormalizeEffort(e, in)
 		if err != nil || got != want {
 			t.Fatalf("NormalizeEffort(%q) = %q/%v, want %q/nil", in, got, err, want)
 		}
 	}
-	for _, bad := range []string{"low", "medium", "xhigh", "off"} {
+	// Truly unknown effort names are still rejected.
+	for _, bad := range []string{"bogus", "ultra", "", "  "} {
 		if _, err := NormalizeEffort(e, bad); err == nil {
 			t.Fatalf("NormalizeEffort(%q) should be rejected", bad)
 		}
@@ -352,15 +362,23 @@ func TestNormalizeLegacyEffortMigratesProviderDefaults(t *testing.T) {
 }
 
 func TestNormalizeEffortAnthropic(t *testing.T) {
+	// Anthropic models expose the unified low/medium/high vocabulary.
+	// Legacy "max"/"xhigh" migrate to "high".
 	e := &ProviderEntry{Name: "claude", Kind: "anthropic", Model: "claude-opus-4-8"}
 	cap := EffortCapabilityForEntry(e)
-	if !cap.Supported || len(cap.Levels) != 6 {
-		t.Fatalf("Anthropic levels = %+v, want auto plus five levels", cap)
+	wantLevels := []string{"auto", "low", "medium", "high"}
+	if !cap.Supported || len(cap.Levels) != len(wantLevels) {
+		t.Fatalf("Anthropic levels = %+v, want %v", cap, wantLevels)
 	}
-	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
-		got, err := NormalizeEffort(e, level)
-		if err != nil || got != level {
-			t.Fatalf("NormalizeEffort(%q) = %q/%v, want %q/nil", level, got, err, level)
+	for i, want := range wantLevels {
+		if cap.Levels[i] != want {
+			t.Fatalf("levels[%d] = %q, want %q", i, cap.Levels[i], want)
+		}
+	}
+	for in, want := range map[string]string{"low": "low", "medium": "medium", "high": "high", "xhigh": "high", "max": "high"} {
+		got, err := NormalizeEffort(e, in)
+		if err != nil || got != want {
+			t.Fatalf("NormalizeEffort(%q) = %q/%v, want %q/nil", in, got, err, want)
 		}
 	}
 	got, err := NormalizeEffort(e, "auto")
@@ -801,6 +819,9 @@ func TestSetNetworkRejectsIncompleteCustomProxy(t *testing.T) {
 }
 
 func TestEffortCapabilityCustomSupportedEfforts(t *testing.T) {
+	// The unified effort vocabulary ignores provider-specific supported_efforts
+	// for the user-facing capability (always auto/low/medium/high, default auto).
+	// The custom SupportedEfforts only feeds EffectiveEffort at runtime.
 	e := &ProviderEntry{
 		Name:             "custom",
 		Kind:             "openai",
@@ -821,8 +842,8 @@ func TestEffortCapabilityCustomSupportedEfforts(t *testing.T) {
 			t.Errorf("levels[%d] = %q, want %q", i, cap.Levels[i], l)
 		}
 	}
-	if cap.Default != "high" {
-		t.Errorf("default = %q, want high", cap.Default)
+	if cap.Default != "auto" {
+		t.Errorf("default = %q, want auto (unified capability default)", cap.Default)
 	}
 }
 
@@ -867,10 +888,11 @@ func TestEffortCapabilityExplicitProtocol(t *testing.T) {
 	}
 }
 
-// TestEffortCapabilityNoAutoDetection pins that a model that USED to be in the
-// test-provider allowlist (test-provider/test-model-a) no longer exposes effort when the provider
-// has not declared reasoning_protocol — the model registry is intentionally
-// empty now, so there is no auto-detection.
+// TestEffortCapabilityNoAutoDetection pins that there is no model-allowlist
+// auto-detection: a model that USED to be in the test-provider allowlist
+// (test-provider/test-model-a) does not get any special family handling.
+// The unified vocabulary still exposes effort levels for any provider whose
+// reasoning_protocol is not explicitly "none".
 func TestEffortCapabilityNoAutoDetection(t *testing.T) {
 	e := &ProviderEntry{
 		Name:    "plain",
@@ -878,11 +900,22 @@ func TestEffortCapabilityNoAutoDetection(t *testing.T) {
 		BaseURL: "https://proxy.example.com/v1",
 		Model:   "test-provider/test-model-a",
 	}
-	if cap := EffortCapabilityForEntry(e); cap.Supported {
-		t.Fatalf("model with no declared protocol should not expose effort, got %+v", cap)
+	cap := EffortCapabilityForEntry(e)
+	if !cap.Supported {
+		t.Fatalf("unified capability should expose effort for plain openai provider, got %+v", cap)
 	}
+	wantLevels := []string{"auto", "low", "medium", "high"}
+	if len(cap.Levels) != len(wantLevels) {
+		t.Fatalf("levels = %v, want %v", cap.Levels, wantLevels)
+	}
+	for i, want := range wantLevels {
+		if cap.Levels[i] != want {
+			t.Fatalf("levels[%d] = %q, want %q", i, cap.Levels[i], want)
+		}
+	}
+	// No reasoning_protocol override was set, so it resolves to empty.
 	if protocol := ReasoningProtocolForEntry(e); protocol != "" {
-		t.Fatalf("protocol = %q, want empty (no auto-detection)", protocol)
+		t.Fatalf("protocol = %q, want empty (no explicit override)", protocol)
 	}
 }
 
@@ -918,8 +951,13 @@ func TestReasoningProtocolOverrideControlsEffortCapability(t *testing.T) {
 			t.Fatalf("levels[%d] = %q, want %q", i, cap.Levels[i], want)
 		}
 	}
-	if _, err := NormalizeEffort(e, "max"); err == nil {
-		t.Fatal("OpenAI reasoning_protocol should reject max")
+	// Legacy "max" is migrated to the unified "high" rather than rejected.
+	if got, err := NormalizeEffort(e, "max"); err != nil || got != "high" {
+		t.Fatalf("NormalizeEffort(max) = %q/%v, want high/nil (legacy migration)", got, err)
+	}
+	// A genuinely invalid level is still rejected.
+	if _, err := NormalizeEffort(e, "bogus"); err == nil {
+		t.Fatal("OpenAI reasoning_protocol should reject unknown effort level")
 	}
 	if got, err := NormalizeEffort(e, "medium"); err != nil || got != "medium" {
 		t.Fatalf("NormalizeEffort(medium) = %q/%v, want medium/nil", got, err)
@@ -927,19 +965,32 @@ func TestReasoningProtocolOverrideControlsEffortCapability(t *testing.T) {
 }
 
 func TestNormalizeEffortCustomSupportedEfforts(t *testing.T) {
+	// Custom SupportedEfforts no longer gates NormalizeEffort — all providers
+	// share the unified low/medium/high vocabulary, and legacy values migrate.
 	e := &ProviderEntry{
 		Name:             "custom",
 		Kind:             "openai",
 		BaseURL:          "https://example.com",
 		SupportedEfforts: []string{"low", "medium", "high"},
 	}
-	for in, want := range map[string]string{"auto": "", "low": "low", "MEDIUM": "medium", "high": "high"} {
+	for in, want := range map[string]string{
+		"auto":     "",
+		"low":      "low",
+		"MEDIUM":   "medium",
+		"high":     "high",
+		"max":      "high", // legacy migration
+		"xhigh":    "high", // legacy migration
+		"adaptive": "high", // legacy migration
+		"disabled": "low",  // legacy migration
+		"off":      "low",  // legacy migration
+	} {
 		got, err := NormalizeEffort(e, in)
 		if err != nil || got != want {
 			t.Fatalf("NormalizeEffort(%q) = %q/%v, want %q/nil", in, got, err, want)
 		}
 	}
-	for _, bad := range []string{"max", "xhigh", "", "  "} {
+	// Empty / whitespace-only input is rejected because it normalizes to "".
+	for _, bad := range []string{"", "  ", "bogus"} {
 		if _, err := NormalizeEffort(e, bad); err == nil {
 			t.Errorf("NormalizeEffort(%q) should be rejected", bad)
 		}
@@ -952,17 +1003,23 @@ func TestNormalizeEffortCustomDefaultEffort(t *testing.T) {
 		Kind:             "openai",
 		BaseURL:          "https://example.com",
 		SupportedEfforts: []string{"low", "medium", "high"},
-		DefaultEffort:    "xhigh", // not in the list — must fall back to the first level
+		DefaultEffort:    "xhigh", // not in the list — falls back to the first level
 	}
+	// The user-facing capability always reports "auto" (unified default).
 	cap := EffortCapabilityForEntry(e)
-	if cap.Default != "low" {
-		t.Fatalf("default = %q, want low (first of supported_efforts)", cap.Default)
+	if cap.Default != "auto" {
+		t.Fatalf("capability default = %q, want auto (unified capability default)", cap.Default)
+	}
+	// EffectiveEffort still honors the custom SupportedEfforts + DefaultEffort.
+	// DefaultEffort "xhigh" is not in the list, so it falls back to the first level.
+	if got := EffectiveEffort(e); got != "low" {
+		t.Fatalf("EffectiveEffort with bad default = %q, want low (first of supported_efforts)", got)
 	}
 	// Omitting DefaultEffort also falls back to the first level.
 	e2 := *e
 	e2.DefaultEffort = ""
-	if cap := EffortCapabilityForEntry(&e2); cap.Default != "low" {
-		t.Errorf("empty default = %q, want low", cap.Default)
+	if got := EffectiveEffort(&e2); got != "low" {
+		t.Errorf("empty default EffectiveEffort = %q, want low", got)
 	}
 	// /effort auto still maps to "" regardless of DefaultEffort.
 	if got, err := NormalizeEffort(e, "auto"); err != nil || got != "" {
@@ -986,8 +1043,10 @@ func TestNormalizeEffortCustomLevelsCaseInsensitive(t *testing.T) {
 		SupportedEfforts: []string{"Low", "MEDIUM", "medium", "auto", " "},
 		DefaultEffort:    "MEDIUM",
 	}
+	// Capability exposes the unified levels (auto/low/medium/high) with an
+	// "auto" default — custom supported_efforts no longer shape the capability.
 	cap := EffortCapabilityForEntry(e)
-	wantLevels := []string{"auto", "low", "medium"}
+	wantLevels := []string{"auto", "low", "medium", "high"}
 	if len(cap.Levels) != len(wantLevels) {
 		t.Fatalf("levels = %v, want %v", cap.Levels, wantLevels)
 	}
@@ -996,13 +1055,14 @@ func TestNormalizeEffortCustomLevelsCaseInsensitive(t *testing.T) {
 			t.Fatalf("levels[%d] = %q, want %q", i, cap.Levels[i], want)
 		}
 	}
-	if cap.Default != "medium" {
-		t.Fatalf("default = %q, want medium", cap.Default)
+	if cap.Default != "auto" {
+		t.Fatalf("capability default = %q, want auto (unified)", cap.Default)
 	}
 	got, err := NormalizeEffort(e, "MEDIUM")
 	if err != nil || got != "medium" {
 		t.Fatalf("NormalizeEffort(MEDIUM) = %q/%v, want medium/nil", got, err)
 	}
+	// EffectiveEffort still honors the custom default "MEDIUM" (normalized).
 	if got := EffectiveEffort(e); got != "medium" {
 		t.Fatalf("EffectiveEffort = %q, want medium", got)
 	}

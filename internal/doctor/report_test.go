@@ -82,7 +82,19 @@ func TestCollectReportRedactsSecrets(t *testing.T) {
 func TestCollectReportDoesNotRequireAPIKey(t *testing.T) {
 	t.Setenv("FAIRPEER_API_KEY", "")
 
+	// Default() ships no built-in presets (setup wizard owns first-run config),
+	// so a test provider is declared explicitly to exercise the provider report.
 	cfg := config.Default()
+	cfg.Providers = []config.ProviderEntry{{
+		Name:      "test-provider",
+		Kind:      "openai",
+		BaseURL:   "https://example.invalid",
+		Model:     "test-provider/test-model",
+		Default:   "test-provider/test-model",
+		Models:    []string{"test-provider/test-model"},
+		APIKeyEnv: "FAIRPEER_API_KEY",
+	}}
+	cfg.DefaultModel = "test-provider"
 	report := Collect(Options{Version: "1.2.3", Config: cfg})
 	text := RenderText(report)
 
@@ -90,7 +102,7 @@ func TestCollectReportDoesNotRequireAPIKey(t *testing.T) {
 		t.Fatalf("version = %q, want 1.2.3", report.Version)
 	}
 	if len(report.Providers) == 0 {
-		t.Fatal("expected built-in providers in report")
+		t.Fatal("expected configured providers in report")
 	}
 	if report.Providers[0].KeyPresent {
 		t.Fatal("provider key should be reported missing when env is empty")

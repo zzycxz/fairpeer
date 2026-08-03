@@ -194,7 +194,9 @@ func TestACPSubagentProviderResolverRejectsInvalidEffort(t *testing.T) {
 	}
 
 	resolve := newACPSubagentProviderResolver(cfg, parent, netclient.ProxySpec{})
-	if _, _, _, err := resolve("", "max"); err == nil {
+	// "bogus" is a genuinely unknown effort level (legacy values like "max"
+	// migrate to "high", so use a value that cannot be normalized).
+	if _, _, _, err := resolve("", "bogus"); err == nil {
 		t.Fatal("invalid effort should fail before ACP task falls back to the parent profile")
 	}
 }

@@ -2,26 +2,53 @@ package cli
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/zzycxz/fairpeer/internal/config"
 )
 
+// writeTestUserConfig writes a minimal fairpeer.toml declaring a synthetic
+// "test-provider" into the isolated user config dir. Default() ships no built-in
+// presets (setup wizard owns first-run config), so tests that exercise the
+// /model picker must declare a provider explicitly.
+func writeTestUserConfig(t *testing.T) {
+	t.Helper()
+	dir := filepath.Dir(config.UserConfigPath())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir user config dir: %v", err)
+	}
+	body := `
+default_model = "test-provider/test-provider/test-model-a"
+
+[[providers]]
+name = "test-provider"
+kind = "openai"
+base_url = "http://localhost:0"
+model = "test-provider/test-model-a"
+default = "test-provider/test-model-a"
+api_key_env = "FAIRPEER_API_KEY"
+`
+	if err := os.WriteFile(config.UserConfigPath(), []byte(body), 0o644); err != nil {
+		t.Fatalf("write user config: %v", err)
+	}
+}
+
 // TestModelRefsFromConfig verifies the /model picker enumerates configured
-// provider/model refs (built-in defaults when no fairpeer.toml is present), and
-// only those whose provider API key is set.
+// provider/model refs, and only those whose provider API key is set.
 //
 // Uses isolateUserConfig (not just t.Chdir) because modelRefs() reads the USER
 // config dir (~/.config/fairpeer or %AppData%\fairpeer), not the CWD. Without
-// isolating it, a real user config on the machine would override the built-in
-// defaults and make this test flaky (machine-dependent refs).
+// isolating it, a real user config on the machine would override the test
+// config and make this test flaky (machine-dependent refs).
 func TestModelRefsFromConfig(t *testing.T) {
-	isolateUserConfig(t) // no fairpeer.toml → built-in default providers
+	isolateUserConfig(t)
+	writeTestUserConfig(t)
 	t.Setenv("FAIRPEER_API_KEY", "test-key")
 	refs := modelRefs()
 	if len(refs) == 0 {
-		t.Fatal("expected default provider/model refs, got none")
+		t.Fatal("expected configured provider/model refs, got none")
 	}
 	for _, r := range refs {
 		if !strings.Contains(r, "/") {
@@ -34,6 +61,7 @@ func TestModelRefsFromConfig(t *testing.T) {
 // picker offers nothing rather than listing models the user can't select.
 func TestModelRefsSkipsUnconfigured(t *testing.T) {
 	isolateUserConfig(t)
+	writeTestUserConfig(t)
 	t.Setenv("FAIRPEER_API_KEY", "")
 	if refs := modelRefs(); len(refs) != 0 {
 		t.Errorf("no keys set → no refs, got %v", refs)
@@ -44,6 +72,7 @@ func TestModelRefsSkipsUnconfigured(t *testing.T) {
 // through the shared completion path.
 func TestModelArgCompletion(t *testing.T) {
 	isolateUserConfig(t)
+	writeTestUserConfig(t)
 	t.Setenv("FAIRPEER_API_KEY", "test-key")
 	m := newTestChatTUI()
 	items, _, ok := m.slashArgItems("/model ")
@@ -59,6 +88,7 @@ func TestModelArgCompletion(t *testing.T) {
 // next startup read the global default.
 func TestPersistModelWritesDefaultModel(t *testing.T) {
 	isolateUserConfig(t)
+	writeTestUserConfig(t)
 	t.Setenv("FAIRPEER_API_KEY", "test-key")
 
 	m := newTestChatTUI()

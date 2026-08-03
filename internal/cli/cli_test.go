@@ -22,6 +22,23 @@ import (
 	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
+// seedTestProvider injects a synthetic "test-provider" onto cfg so tests can
+// exercise model/effort/key flows without relying on a preset official provider
+// (FairPeer ships none by default). It mirrors what the setup wizard would
+// write for a custom OpenAI-compatible provider.
+func seedTestProvider(cfg *config.Config) {
+	cfg.Providers = []config.ProviderEntry{{
+		Name:      "test-provider",
+		Kind:      "openai",
+		BaseURL:   "http://localhost:0",
+		Model:     "test-provider/test-model",
+		Models:    []string{"test-provider/test-model"},
+		Default:   "test-provider/test-model",
+		APIKeyEnv: "FAIRPEER_API_KEY",
+	}}
+	cfg.DefaultModel = "test-provider"
+}
+
 func TestChdirTo(t *testing.T) {
 	orig, err := os.Getwd()
 	if err != nil {
@@ -262,7 +279,7 @@ func TestWelcomePromptMissingKeysRequiresConfigSource(t *testing.T) {
 
 func TestProvidersWithMissingKeysOnlyChecksActiveDefaultModel(t *testing.T) {
 	cfg := config.Default()
-	t.Setenv("FAIRPEER_API_KEY", "")
+	seedTestProvider(cfg)
 	t.Setenv("FAIRPEER_API_KEY", "")
 
 	missing := providersWithMissingKeys(cfg)
@@ -276,6 +293,7 @@ func TestProvidersWithMissingKeysOnlyChecksActiveDefaultModel(t *testing.T) {
 
 func TestProvidersWithMissingKeysIgnoresUnusedBuiltInPresets(t *testing.T) {
 	cfg := config.Default()
+	seedTestProvider(cfg)
 	t.Setenv("FAIRPEER_API_KEY", "test-key")
 
 	if missing := providersWithMissingKeys(cfg); len(missing) != 0 {
@@ -285,13 +303,13 @@ func TestProvidersWithMissingKeysIgnoresUnusedBuiltInPresets(t *testing.T) {
 
 func TestProvidersWithMissingKeysIncludesReferencedSecondaryModels(t *testing.T) {
 	cfg := config.Default()
+	seedTestProvider(cfg)
 	cfg.Agent.PlannerModel = "test-provider"
 	cfg.Agent.SubagentModel = "test-provider"
 	cfg.Agent.SubagentModels = map[string]string{
-		"review": "test-provider/test-provider/test-model-a",
+		"review": "test-provider/test-provider/test-model",
 	}
-	cfg.Agent.AutoPlanClassifier = "test-provider/test-provider/test-model-a"
-	t.Setenv("FAIRPEER_API_KEY", "test-key")
+	cfg.Agent.AutoPlanClassifier = "test-provider/test-provider/test-model"
 	t.Setenv("FAIRPEER_API_KEY", "")
 
 	missing := providersWithMissingKeys(cfg)
@@ -305,8 +323,9 @@ func TestProvidersWithMissingKeysIncludesReferencedSecondaryModels(t *testing.T)
 
 func TestProvidersWithMissingKeysSkipsDisabledAutoPlanClassifier(t *testing.T) {
 	cfg := config.Default()
+	seedTestProvider(cfg)
 	cfg.Agent.AutoPlan = "off"
-	cfg.Agent.AutoPlanClassifier = "test-provider/test-provider/test-model-a"
+	cfg.Agent.AutoPlanClassifier = "test-provider/test-provider/test-model"
 	t.Setenv("FAIRPEER_API_KEY", "")
 
 	if missing := providersWithMissingKeys(cfg); len(missing) != 1 {
@@ -387,11 +406,23 @@ func TestSetupOverwritePromptShowsYNDefault(t *testing.T) {
 	}
 }
 
+// testProviderEntries returns the synthetic provider list used by configureKeys
+// tests (Default() ships no built-in presets).
+func testProviderEntries() []config.ProviderEntry {
+	return []config.ProviderEntry{{
+		Name:      "test-provider",
+		Kind:      "openai",
+		BaseURL:   "http://localhost:0",
+		Model:     "test-provider/test-model",
+		APIKeyEnv: "FAIRPEER_API_KEY",
+	}}
+}
+
 // TestConfigureKeys verifies that a shared api_key_env (each vendor's SKUs use
 // the same env var) is asked only once, and entered keys become env lines.
 func TestConfigureKeys(t *testing.T) {
 	t.Setenv("FAIRPEER_API_KEY", "")
-	selected := config.Default().Providers // test-provider
+	selected := testProviderEntries()
 
 	input := "ji-key\n"
 	env := configureKeys(selected, strings.NewReader(input), io.Discard)
@@ -414,7 +445,7 @@ func TestConfigureKeys(t *testing.T) {
 func TestConfigureKeysReusesExistingEnv(t *testing.T) {
 	t.Setenv("FAIRPEER_API_KEY", "preset-ji-key") // reuse this one
 
-	selected := config.Default().Providers
+	selected := testProviderEntries()
 	var output bytes.Buffer
 	env := configureKeys(selected, strings.NewReader("\n"), &output)
 
@@ -432,7 +463,7 @@ func TestConfigureKeysReusesExistingEnv(t *testing.T) {
 func TestConfigureKeysCanResetExistingEnv(t *testing.T) {
 	t.Setenv("FAIRPEER_API_KEY", "stale-ji-key") // reset this one
 
-	selected := config.Default().Providers
+	selected := testProviderEntries()
 	var output bytes.Buffer
 	env := configureKeys(selected, strings.NewReader("y\nfresh-ji-key\n"), &output)
 
@@ -452,7 +483,7 @@ func TestConfigureKeysCanResetExistingEnv(t *testing.T) {
 func TestConfigureKeysAllSetDefaultsToReusingInput(t *testing.T) {
 	t.Setenv("FAIRPEER_API_KEY", "ji")
 
-	selected := config.Default().Providers
+	selected := testProviderEntries()
 	env := configureKeys(selected, strings.NewReader("\n"), io.Discard)
 	if len(env) != 1 {
 		t.Errorf("env = %v, want 1 (reused)", env)
@@ -497,10 +528,14 @@ func TestAppendEnvUpsertHandlesExportPrefix(t *testing.T) {
 	}
 }
 
-// TestGroupByFamily verifies the wizard groups the default preset into
-// one family: test-provider.
+// TestGroupByFamily verifies the wizard groups configured providers into
+// per-provider families (Default() ships no built-in presets, so families are
+// derived from user-configured provider names only).
 func TestGroupByFamily(t *testing.T) {
-	order, members, info := groupByFamily(config.Default().Providers)
+	providers := []config.ProviderEntry{
+		{Name: "test-provider"},
+	}
+	order, members, info := groupByFamily(providers)
 
 	if len(order) != 1 {
 		t.Fatalf("family count = %d, want 1: %v", len(order), order)
@@ -828,20 +863,22 @@ func TestFilterStaleCustomEntries(t *testing.T) {
 }
 
 func TestWithBuiltinFamiliesAddsMissingTestProvider(t *testing.T) {
-	// The user's case: a fairpeer.toml that defines only test-provider providers.
+	// Default() ships no built-in presets, so withBuiltinFamilies is a no-op:
+	// it must neither inject any built-in families nor drop/duplicate the user's
+	// configured providers. The wizard shows exactly what the user configured.
 	cfg := []config.ProviderEntry{
 		{Name: "test-provider", Kind: "openai", BaseURL: "https://api.example.com"},
 	}
-	order, _, info := groupByFamily(withBuiltinFamilies(cfg))
-	seen := map[string]bool{}
-	for _, k := range order {
-		seen[info[k].name] = true
+	got := withBuiltinFamilies(cfg)
+	if len(got) != len(cfg) {
+		t.Fatalf("withBuiltinFamilies changed provider count: got %d, want %d (no built-in injection)", len(got), len(cfg))
 	}
-	if !seen["test-provider (九天)"] {
-		t.Fatalf("wizard families = %v, want test-provider (九天)", order)
+	order, _, info := groupByFamily(got)
+	if len(order) != 1 || info["test-provider"].name != "test-provider" {
+		t.Fatalf("wizard families = %v, want only the user's test-provider", order)
 	}
-	// A user.s customized provider must not be duplicated.
-	if n := len(groupByFamilyKeys(withBuiltinFamilies(cfg), "test-provider")); n != 1 {
+	// A user's customized provider must not be duplicated.
+	if n := len(groupByFamilyKeys(got, "test-provider")); n != 1 {
 		t.Fatalf("test-provider members = %d, want the user's 1 (no injected duplicate)", n)
 	}
 }
@@ -885,6 +922,7 @@ func captureStderr(t *testing.T, fn func()) string {
 func TestProvidersWithMissingKeysOnlyReferenced(t *testing.T) {
 	t.Setenv("FAIRPEER_API_KEY", "")
 	cfg := config.Default()
+	seedTestProvider(cfg)
 
 	got := providersWithMissingKeys(cfg)
 	envs := map[string]bool{}
@@ -897,9 +935,9 @@ func TestProvidersWithMissingKeysOnlyReferenced(t *testing.T) {
 }
 
 func TestProvidersWithMissingKeysIncludesPlannerModel(t *testing.T) {
-	t.Setenv("FAIRPEER_API_KEY", "set")
 	t.Setenv("FAIRPEER_API_KEY", "")
 	cfg := config.Default()
+	seedTestProvider(cfg)
 	cfg.Agent.PlannerModel = "test-provider"
 
 	got := providersWithMissingKeys(cfg)

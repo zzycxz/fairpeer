@@ -8,12 +8,12 @@ import (
 )
 
 func TestForModel_QwenFamilyAddon(t *testing.T) {
-	addon := ForModel("test-provider/test-model-a")
+	addon := ForModel("qwen/qwen3-max")
 	// qwen models should get the family addon. Thinking behavior is now declared
 	// per-provider via ReasoningProtocol rather than injected as a prompt addon,
 	// so there is no thinking-capability addon assertion here.
 	if !strings.Contains(addon, "tool call") {
-		t.Fatalf("expected QwenAddon (tool call) for test-model-a, got %q", addon)
+		t.Fatalf("expected QwenAddon (tool call) for qwen3-max, got %q", addon)
 	}
 }
 

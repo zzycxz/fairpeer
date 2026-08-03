@@ -371,20 +371,22 @@ func TestBuildRequestMiniMaxThinking(t *testing.T) {
 }
 
 // TestNewMiniMaxEffortValidation locks in the boot-time validation for the
-// MiniMax path. The config effort layer remaps legacy level names, so by the
-// time effort reaches this factory it must be one of: "", "adaptive",
-// "disabled". Anything else is a config bug, surfaced now (not at request
-// time) for an actionable error.
+// MiniMax path. The MiniMax wire is a binary adaptive/disabled knob, so the
+// unified low/medium/high vocabulary is mapped at the factory: low/medium →
+// disabled, high/adaptive → adaptive. The accepted inputs at this layer are
+// "", "low", "medium", "high", "adaptive", "disabled". Anything else is a
+// config bug, surfaced now (not at request time) for an actionable error.
 func TestNewMiniMaxEffortValidation(t *testing.T) {
 	base := provider.Config{Name: "m3", BaseURL: "https://api.minimaxi.com/v1", Model: "MiniMax-M3", APIKey: "k"}
-	// happy path: auto (empty effort) and both explicit values are accepted
-	for _, ok := range []string{"", "adaptive", "disabled"} {
+	// happy path: auto (empty effort) plus the unified levels and the raw
+	// MiniMax knob values all map onto a valid thinking type.
+	for _, ok := range []string{"", "low", "medium", "high", "adaptive", "disabled"} {
 		if _, err := New(withEffort(base, ok)); err != nil {
 			t.Errorf("effort=%q should be accepted: %v", ok, err)
 		}
 	}
 	// unhappy: anything else is rejected up front
-	for _, bad := range []string{"high", "low", "max", "turbo"} {
+	for _, bad := range []string{"max", "xhigh", "off", "turbo"} {
 		if _, err := New(withEffort(base, bad)); err == nil {
 			t.Errorf("effort=%q should be rejected", bad)
 		}

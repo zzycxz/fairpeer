@@ -416,12 +416,17 @@ func TestNewProviderAppliesModelReasoningProtocol(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// reasoning_protocol is restricted to openai/none/""(auto). A provider
+	// declaring reasoning_protocol = "openai" plus an effort exposes the
+	// standard OpenAI reasoning_effort field; thinking_effort (the retired
+	// test-provider knob) and the Anthropic-style "thinking" object are absent.
 	p, err := NewProvider(&config.ProviderEntry{
 		Name:              "test-provider",
 		Kind:              "openai",
 		BaseURL:           srv.URL,
 		Model:             "test-provider/test-model-thinking",
-		ReasoningProtocol: "test-provider",
+		ReasoningProtocol: "openai",
+		Effort:            "high",
 	})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
@@ -437,15 +442,14 @@ func TestNewProviderAppliesModelReasoningProtocol(t *testing.T) {
 			t.Fatalf("stream error: %v", chunk.Err)
 		}
 	}
-	if got := gotReq["thinking_effort"]; got != "high" {
-		t.Fatalf("thinking_effort = %#v, want high from test-provider model capability", got)
+	if got := gotReq["reasoning_effort"]; got != "high" {
+		t.Fatalf("reasoning_effort = %#v, want high for openai reasoning protocol", got)
 	}
-	if got := gotReq["reasoning_effort"]; got != nil {
-		t.Fatalf("reasoning_effort should be absent for test-provider, got %#v", got)
+	if got := gotReq["thinking_effort"]; got != nil {
+		t.Fatalf("thinking_effort should be absent (retired knob), got %#v", got)
 	}
-	thinking, ok := gotReq["thinking"].(map[string]any)
-	if !ok || thinking["type"] != "enabled" {
-		t.Fatalf("thinking = %#v, want enabled", gotReq["thinking"])
+	if thinking, ok := gotReq["thinking"]; ok {
+		t.Fatalf("thinking field should be absent for openai reasoning protocol, got %#v", thinking)
 	}
 }
 
@@ -1014,8 +1018,21 @@ func TestBuildMigratesLegacyConfigEndToEnd(t *testing.T) {
 	proj := robustTempDir(t)
 	t.Chdir(proj)
 	// codegraph off keeps Build offline; it merges over the migrated user config
-	// without dropping the migrated plugins.
-	writeFile(t, proj, "fairpeer.toml", "[codegraph]\nenabled = false\n")
+	// without dropping the migrated plugins. A test provider is declared because
+	// Default() ships no built-in presets (setup wizard owns first-run config).
+	writeFile(t, proj, "fairpeer.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "FAIRPEER_API_KEY"
+`)
 	writeFile(t, filepath.Join(home, ".fairpeer"), "config.json",
 		`{"apiKey":"sk-e2e","lang":"zh","mcpServers":{"fs":{"command":"npx","args":["-y","server-fs"]}}}`)
 	writeFile(t, filepath.Join(home, ".fairpeer", "sessions"), "chat-1.events.jsonl",
@@ -1088,7 +1105,21 @@ func TestBuildMigratesLegacySessionsFromConfigSessionDir(t *testing.T) {
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 
 	proj := robustTempDir(t)
-	writeFile(t, proj, "fairpeer.toml", "[codegraph]\nenabled = false\n")
+	// Default() ships no built-in presets, so a [[providers]] entry is required
+	// for Build to resolve a default_model without running the setup wizard.
+	writeFile(t, proj, "fairpeer.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
+`)
 
 	legacyDir := config.SessionDir()
 	writeFile(t, legacyDir, "custom-root.events.jsonl",

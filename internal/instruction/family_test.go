@@ -6,18 +6,20 @@ import (
 )
 
 func TestModelFamily(t *testing.T) {
+	// Family detection matches on real vendor prefixes/names. "test-provider"
+	// is not a real vendor, so it resolves to "".
 	tests := []struct {
 		model string
 		want  string
 	}{
-		{"test-provider/test-model-a", "qwen"},
-		{"test-provider/test-provider/test-model-a", "qwen"},
+		{"qwen/qwen3-max", "qwen"},
+		{"test-provider/qwen3-max", "qwen"},
 		{"deepseek/deepseek-v4-flash", "deepseek"},
 		{"z.ai/glm-5.1", "glm"},
 		{"test-provider/z.ai/glm-5.2", "glm"},
 		{"moonshotai/kimi-k2.6", "kimi"},
 		{"minimax/minimax-m2.7", "minimax"},
-		{"test-provider/test-model-a", "test-provider"},
+		{"test-provider/test-model-a", ""},
 		{"openai/gpt-oss-120b", "gpt"},
 		{"unknown-model", ""},
 		{"", ""},
@@ -33,20 +35,22 @@ func TestModelFamily(t *testing.T) {
 
 func TestFamilyAddon(t *testing.T) {
 	// Known families return non-empty addons.
-	for _, family := range []string{"qwen", "glm", "deepseek", "kimi", "test-provider"} {
+	for _, family := range []string{"qwen", "glm", "deepseek", "kimi"} {
 		if FamilyAddon(family) == "" {
 			t.Errorf("FamilyAddon(%q) is empty", family)
 		}
 	}
-	// Unknown families return empty.
-	if FamilyAddon("unknown") != "" {
-		t.Errorf("FamilyAddon(\"unknown\") is non-empty")
+	// Unknown families (including the synthetic "test-provider") return empty.
+	for _, family := range []string{"unknown", "test-provider"} {
+		if FamilyAddon(family) != "" {
+			t.Errorf("FamilyAddon(%q) is non-empty", family)
+		}
 	}
 }
 
 func TestForModelIncludesFamilyAddon(t *testing.T) {
 	// Non-thinking qwen model should get the qwen addon.
-	got := ForModel("test-provider/test-model-a")
+	got := ForModel("qwen/qwen3-max")
 	if !strings.Contains(got, "tool call") {
 		t.Errorf("ForModel(qwen model) should include qwen addon about tool calls, got: %q", got)
 	}

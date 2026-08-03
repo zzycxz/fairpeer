@@ -813,6 +813,7 @@ func isolateUserConfig(t *testing.T) {
 
 func TestEffortCommandWritesCurrentTestProviderProvider(t *testing.T) {
 	isolateUserConfig(t)
+	writeTestUserConfig(t)
 
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{Label: "test-provider"})
@@ -821,6 +822,7 @@ func TestEffortCommandWritesCurrentTestProviderProvider(t *testing.T) {
 		return control.New(control.Options{Label: "test-provider"}), nil
 	}
 
+	// Legacy "max" migrates to the unified "high" level before being persisted.
 	cmd := m.runEffortCommand("/effort max")
 	if cmd == nil {
 		t.Fatal("/effort max should return a rebuild command")
@@ -831,8 +833,8 @@ func TestEffortCommandWritesCurrentTestProviderProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read saved config: %v", err)
 	}
-	if !strings.Contains(string(body), `effort      = "max"`) {
-		t.Fatalf("saved config missing effort=max:\n%s", body)
+	if !strings.Contains(string(body), `effort      = "high"`) {
+		t.Fatalf("saved config missing effort=high (migrated from max):\n%s", body)
 	}
 }
 
@@ -856,6 +858,7 @@ func TestEffortCommandRejectsUnsupportedProvider(t *testing.T) {
 
 func TestEffortCommandAutoClearsProviderEffort(t *testing.T) {
 	isolateUserConfig(t)
+	writeTestUserConfig(t)
 
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{Label: "test-provider"})
@@ -864,9 +867,11 @@ func TestEffortCommandAutoClearsProviderEffort(t *testing.T) {
 		return control.New(control.Options{Label: "test-provider"}), nil
 	}
 
-	if cmd := m.runEffortCommand("/effort max"); cmd == nil {
-		t.Fatal("/effort max should return a rebuild command")
+	// Legacy "max" migrates to "high" and is persisted.
+	if cmd := m.runEffortCommand("/effort high"); cmd == nil {
+		t.Fatal("/effort high should return a rebuild command")
 	}
+	// "/effort auto" clears the stored effort.
 	if cmd := m.runEffortCommand("/effort auto"); cmd == nil {
 		t.Fatal("/effort auto should return a rebuild command")
 	}

@@ -30,29 +30,41 @@ func newClient(t *testing.T, baseURL, reasoningProtocol, effort string) *client 
 func TestEffortNormalization(t *testing.T) {
 	const base = "https://example.com"
 
+	// The wire layer only accepts the unified low/medium/high vocabulary and
+	// "auto" (== ""). Legacy values (max/xhigh/adaptive/disabled/off) are no
+	// longer migrated at the provider layer; they are rejected so the
+	// /effort command's NormalizeEffort is the single migration point.
+	// reasoning_protocol values other than openai/none normalize to "", so a
+	// stray "test-provider" behaves exactly like the default OpenAI path.
 	tests := []struct {
 		protocol, effort, want string
 	}{
 		// Standard OpenAI-compatible scale (no reasoning protocol declared).
-		{"", "max", "high"},  // max is a test-provider-ism; clamp to the OpenAI ceiling
-		{"", "high", "high"}, // pass through
+		{"", "high", "high"},
 		{"", "medium", "medium"},
 		{"", "low", "low"},
-		{"", "MAX", "high"}, // case-insensitive
-		{"", "auto", ""},    // auto means omit provider-specific effort
-		{"", "", ""},        // unset stays omitted
-		// Explicit reasoning_protocol = "test-provider" takes the test-provider thinking branch.
-		{"test-provider", "max", "high"},  // max rejected by most test-provider models; clamp to high
-		{"test-provider", "high", "high"}, // pass through
-		{"test-provider", "medium", "medium"},
-		{"test-provider", "low", "medium"}, // low rejected by some test-provider models; clamp to medium
-		{"test-provider", "auto", "high"},  // auto → default depth
-		{"test-provider", "", "high"},      // unset → default test-provider depth
-		{"test-provider", "off", "high"},   // retired level → default depth
+		{"", "HIGH", "high"}, // case-insensitive
+		{"", "auto", ""},     // auto means omit provider-specific effort
+		{"", "", ""},         // unset stays omitted
+		// An explicit "openai" reasoning protocol is the same path.
+		{"openai", "high", "high"},
+		{"openai", "medium", "medium"},
+		{"openai", "low", "low"},
+		{"openai", "auto", ""},
+		{"openai", "", ""},
 	}
 	for _, tc := range tests {
 		if got := newClient(t, base, tc.protocol, tc.effort).effort; got != tc.want {
 			t.Errorf("protocol=%q effort=%q: got %q, want %q", tc.protocol, tc.effort, got, tc.want)
+		}
+	}
+
+	// Legacy / unknown levels are rejected with the standard validation error.
+	for _, bad := range []string{"max", "xhigh", "adaptive", "disabled", "off", "turbo"} {
+		extra := map[string]any{"effort": bad}
+		_, err := New(provider.Config{Name: "p", BaseURL: base, Model: "m", APIKey: "k", Extra: extra})
+		if err == nil {
+			t.Errorf("effort=%q should be rejected", bad)
 		}
 	}
 }
