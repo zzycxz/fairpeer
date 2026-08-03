@@ -416,45 +416,53 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 #
 # # Multiple mailboxes (recommended over the single pair above).
 # # [[cowork.email_accounts]] is an array of named accounts so FairPeer can talk
-# # to several mailboxes at once — e.g. a personal 139 box + a work CMCC box.
+# # to several mailboxes at once — e.g. a personal Gmail box + a work Outlook box.
 # # Tools pick one by `account` (empty = the default). Passwords are NEVER written
 # # here, only the env-var name; the value lives encrypted in the secrets store
 # # and the coWork settings panel writes it for you.
 # #
-# # 139 个人: imap.139.com:993 / smtp.139.com:465(tls), 账号=手机号@139.com,
-# #   密码=授权码 (help.mail.10086.cn → 账号与安全 → 邮箱协议 → 开启 IMAP/SMTP →
-# #   获取授权码; 有效期约 90 天，到期需重新生成).
-# # 139 政企: imap.mail.139.com:993 / smtp.mail.139.com:465(tls).
+# # Common providers (use an app-specific password / authorization code, not your
+# # account password):
+# #   Gmail:     imap.gmail.com:993 / smtp.gmail.com:587(STARTTLS) — app password
+# #   Outlook:   outlook.office365.com:993 / smtp.office365.com:587(STARTTLS)
+# #   QQ:        imap.qq.com:993 / smtp.qq.com:465(TLS) — 授权码
+# #   163:       imap.163.com:993 / smtp.163.com:465(TLS) — 授权码
+# #   126:       imap.126.com:993 / smtp.126.com:465(TLS) — 授权码
+# #   Yahoo:     imap.mail.yahoo.com:993 / smtp.mail.yahoo.com:587(STARTTLS)
+# #   iCloud:    imap.mail.me.com:993 / smtp.mail.me.com:587(STARTTLS) — app password
+# #
+# # Gmail example:
 # [[cowork.email_accounts]]
-# name    = "personal-139"
+# name    = "gmail"
 # default = true
 # [cowork.email_accounts.smtp]
-# host            = "smtp.139.com"
-# port            = 465
-# from            = "13800138000@139.com"
-# username        = "13800138000@139.com"
-# password_env    = "MAIL_PWD_PERSONAL"
-# encryption_mode = "tls"
+# host            = "smtp.gmail.com"
+# port            = 587
+# from            = "you@gmail.com"
+# username        = "you@gmail.com"
+# password_env    = "MAIL_PWD_GMAIL"
+# encryption_mode = "starttls"
 # [cowork.email_accounts.imap]
-# host         = "imap.139.com"
+# host         = "imap.gmail.com"
 # port         = 993
-# username     = "13800138000@139.com"
-# password_env = "MAIL_PWD_PERSONAL"
+# username     = "you@gmail.com"
+# password_env = "MAIL_PWD_GMAIL"
 #
+# # QQ 邮箱 example (authorization code, not account password):
 # [[cowork.email_accounts]]
-# name    = "work-cmcc"
+# name    = "qq"
 # [cowork.email_accounts.smtp]
-# host            = "smtp.mail.139.com"
+# host            = "smtp.qq.com"
 # port            = 465
-# from            = "you@your-company.com"
-# username        = "you@your-company.com"
-# password_env    = "MAIL_PWD_WORK"
+# from            = "you@qq.com"
+# username        = "you@qq.com"
+# password_env    = "MAIL_PWD_QQ"
 # encryption_mode = "tls"
 # [cowork.email_accounts.imap]
-# host         = "imap.mail.139.com"
+# host         = "imap.qq.com"
 # port         = 993
-# username     = "you@your-company.com"
-# password_env = "MAIL_PWD_WORK"
+# username     = "you@qq.com"
+# password_env = "MAIL_PWD_QQ"
 #
 # # RAG master switch. Unset/true = knowledge base enabled (the default). Set to
 # # false to fully disable the knowledge base: no auto-injection into messages,

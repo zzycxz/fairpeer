@@ -77,8 +77,8 @@ func imapConnect(ctx context.Context, cfg config.IMAPConfig) (*client.Client, er
 	if port == 993 {
 		// Try strict TLS first; on handshake failure, retry with RSA key-exchange
 		// ciphers re-enabled. Go 1.22+ removed RSA key-exchange suites from the
-		// default list, but some providers (notably 139.com/10086.cn) only support
-		// RSA key exchange — without these the handshake always fails. Certificate
+		// default list, but some providers (notably 139.com) only support RSA key
+		// exchange — without these the handshake always fails. Certificate
 		// verification stays ON unless the user opted in via skip_tls_verify.
 		tlsCfg := &tls.Config{ServerName: cfg.Host}
 		c, err = client.DialWithDialerTLS(dialer, addr, tlsCfg)
@@ -170,7 +170,7 @@ func isTLSError(err error) bool {
 
 // decodeRFC2047 decodes RFC 2047 encoded words (e.g. =?gbk?b?...?=) in header
 // values. The standard mime.WordDecoder handles UTF-8/Latin-1 but does NOT know
-// GBK/GB2312/GB18030 — the charsets 139.com (China Mobile) and many Chinese
+// GBK/GB2312/GB18030 — the charsets used by 139.com and many Chinese
 // mailers use. We first try the standard decoder (for UTF-8 etc.), then fall
 // back to a manual pass that handles the GBK family via golang.org/x/text, so
 // Chinese subjects/senders render correctly instead of showing the raw
@@ -555,8 +555,8 @@ func extractTextPreview(raw []byte) string {
 
 // decodeBodyCharset converts a mail body part from its declared charset to
 // UTF-8. go-message's mail.Reader undoes Content-Transfer-Encoding (base64/QP)
-// but does NOT transcode charsets, so a GBK-encoded body (common in 139.com /
-// China Mobile mail) would arrive as raw GBK bytes and render as mojibake. We
+// but does NOT transcode charsets, so a GBK-encoded body (common in 139.com,
+// QQ Mail, etc.) would arrive as raw GBK bytes and render as mojibake. We
 // parse the charset from the Content-Type header and run it through the same
 // x/text decoder used for RFC 2047 headers. UTF-8 / unknown charsets pass
 // through unchanged (UTF-8 needs no conversion; unknown is better left raw than
