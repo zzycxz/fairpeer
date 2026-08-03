@@ -51,13 +51,6 @@ func TestForModelIncludesFamilyAddon(t *testing.T) {
 		t.Errorf("ForModel(qwen model) should include qwen addon about tool calls, got: %q", got)
 	}
 
-	// Thinking qwen model should get thinking addon + qwen addon.
-	got = ForModel("qwen/qwen3.6-35b") // this is in MoMAThinkingModels
-	// qwen3.6-35b IS a thinking model, so should have both
-	if !strings.Contains(got, "thinking capability") {
-		t.Logf("note: qwen3.6-35b is a thinking model, ForModel should include thinking addon")
-	}
-
 	// GLM should get serial tool guidance.
 	got = ForModel("z.ai/glm-5.2")
 	if !strings.Contains(got, "one tool per message") && !strings.Contains(got, "sequential") {

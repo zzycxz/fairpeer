@@ -7,12 +7,11 @@ import (
 	"github.com/zzycxz/fairpeer/internal/memory"
 )
 
-func TestForModel_ThinkingModel(t *testing.T) {
+func TestForModel_QwenFamilyAddon(t *testing.T) {
 	addon := ForModel("qwen/qwen3.6-35b")
-	if !strings.Contains(addon, ThinkingAddon) {
-		t.Fatalf("expected ThinkingAddon for qwen3.6-35b, got %q", addon)
-	}
-	// qwen models should also get the family addon.
+	// qwen models should get the family addon. Thinking behavior is now declared
+	// per-provider via ReasoningProtocol rather than injected as a prompt addon,
+	// so there is no thinking-capability addon assertion here.
 	if !strings.Contains(addon, "tool call") {
 		t.Fatalf("expected QwenAddon (tool call) for qwen3.6-35b, got %q", addon)
 	}

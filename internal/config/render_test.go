@@ -12,6 +12,10 @@ import (
 // an equivalent config — i.e. the wizard never writes a file it can't read.
 func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig := Default()
+	// FairPeer no longer ships a preset MoMA provider; seed an explicit
+	// "moma" user entry so the round-trip can exercise provider field
+	// preservation (default_model, base_url, reasoning_protocol, effort).
+	orig.Providers = append(orig.Providers, ProviderEntry{Name: "moma", Kind: "openai", BaseURL: "https://jiutian.10086.cn/largemodel/moma/api/v3", APIKeyEnv: "JIUTIAN_API_KEY"})
 	orig.DefaultModel = "moma"
 	orig.Language = "zh"
 	orig.UI.Theme = "light"

@@ -280,7 +280,9 @@ func providerViewFromEntry(p config.ProviderEntry, builtIn, added bool) Provider
 }
 
 func officialProviderViews(added map[string]bool) []ProviderView {
-	var out []ProviderView
+	// FairPeer ships no preset official providers, so this is always empty —
+	// but the frontend expects a non-nil [] (not null), so allocate it.
+	out := []ProviderView{}
 	for _, kind := range []string{"moma"} {
 		entries, _, err := officialProviderTemplate(kind)
 		if err != nil {
@@ -841,21 +843,13 @@ func desktopAutoPlanMode(mode string) string {
 	}
 }
 
+// officialProviderTemplate returns the provider entries for a curated desktop
+// provider kind. FairPeer ships no preset official providers (it is
+// provider-agnostic over the public network), so every kind is unknown until a
+// future template is registered here. Callers receiving this error should
+// surface it to the user as "no official provider templates available".
 func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, error) {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "moma", "moma-official":
-		return []config.ProviderEntry{{
-			Name:          "moma",
-			Kind:          "openai",
-			BaseURL:       "https://jiutian.10086.cn/largemodel/moma/api/v3",
-			Models:        config.BuiltinMoMAModels,
-			Default:       "qwen/qwen3.6-35b",
-			APIKeyEnv:     "JIUTIAN_API_KEY",
-			ContextWindow: 200_000,
-		}}, "JIUTIAN_API_KEY", nil
-	default:
-		return nil, "", fmt.Errorf("unknown official provider template %q", kind)
-	}
+	return nil, "", fmt.Errorf("no official provider templates available (requested %q)", kind)
 }
 
 func chatProviderModels(models []string) []string {

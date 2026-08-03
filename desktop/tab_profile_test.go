@@ -68,6 +68,8 @@ func TestEffortForTabResolvesProjectProviderConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	projectRoot := t.TempDir()
+	// Thinking mode is declared explicitly via reasoning_protocol = "moma"
+	// rather than auto-detected from the jiutian.10086.cn URL.
 	configBody := `default_model = "project-provider/qwen3.6-35b"
 [[providers]]
 name = "project-provider"
@@ -76,6 +78,7 @@ base_url = "https://api.jiutian.10086.cn"
 model = "qwen3.6-35b"
 api_key_env = "PROJECT_API_KEY"
 effort = "max"
+reasoning_protocol = "moma"
 `
 	if err := os.WriteFile(filepath.Join(projectRoot, "fairpeer.toml"), []byte(configBody), 0o644); err != nil {
 		t.Fatal(err)
@@ -98,6 +101,9 @@ func TestEffortForTabUsesKnownModelRegistry(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	projectRoot := t.TempDir()
+	// Thinking capability is now declared explicitly via reasoning_protocol
+	// rather than auto-detected from a model allowlist, so the provider
+	// declares reasoning_protocol = "moma" to expose the MoMA effort levels.
 	configBody := `default_model = "project-provider/qwen/qwen3.6-35b"
 [[providers]]
 name = "project-provider"
@@ -105,6 +111,7 @@ kind = "openai"
 base_url = "https://proxy.example.com/v1"
 model = "qwen/qwen3.6-35b"
 api_key_env = "PROJECT_API_KEY"
+reasoning_protocol = "moma"
 `
 	if err := os.WriteFile(filepath.Join(projectRoot, "fairpeer.toml"), []byte(configBody), 0o644); err != nil {
 		t.Fatal(err)

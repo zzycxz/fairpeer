@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/zzycxz/fairpeer/internal/memory"
-	"github.com/zzycxz/fairpeer/internal/provider/openai"
 )
 
 // VerifyCheck is a host-observable project check extracted from structured
@@ -16,19 +15,18 @@ type VerifyCheck struct {
 	Line       int
 }
 
-// ForModel returns a model-specific prompt addon based on MoMA model capabilities.
-// The base DefaultSystemPrompt is model-agnostic; this function adds targeted
-// instructions for models that need them (thinking models, serial-constraint models).
-// Returns empty string for models that work fine with the default prompt.
+// ForModel returns a model-specific prompt addon. The base DefaultSystemPrompt is
+// model-agnostic; this function adds targeted instructions for models that need
+// them (e.g. serial-constraint models). Returns empty string for models that work
+// fine with the default prompt.
+//
+// Note: thinking behavior is now declared per-provider via
+// ProviderEntry.ReasoningProtocol rather than injected as a prompt addon for a
+// hardcoded model allowlist, so there is no thinking-protocol branch here.
 func ForModel(modelID string) string {
 	id := strings.ToLower(strings.TrimSpace(modelID))
 
 	var parts []string
-
-	// Thinking-capable models: encourage deep reasoning before tool calls.
-	if openai.MoMAThinkingModels[id] {
-		parts = append(parts, ThinkingAddon)
-	}
 
 	// Family-specific addon (tool-call format, serial constraints, etc.).
 	if addon := FamilyAddon(ModelFamily(id)); addon != "" {
@@ -37,8 +35,6 @@ func ForModel(modelID string) string {
 
 	return strings.Join(parts, "\n\n")
 }
-
-const ThinkingAddon = `You have extended thinking capability. When facing complex problems, think step by step before calling tools. Use your reasoning to plan the approach first, then execute with tools.`
 
 const SerialAddon = `Important: Use exactly one tool per assistant message. Wait for the tool result before calling the next tool. Do not call multiple tools in parallel.`
 

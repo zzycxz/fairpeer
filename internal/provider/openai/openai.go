@@ -64,18 +64,10 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	protocol = normalizeReasoningProtocol(protocol)
-	// moma is true when the provider uses MoMA-compatible thinking mode.
-	// For MoMA, only thinking-capable models (registered in MoMAThinkingModels)
-	// get thinking enabled — non-reasoning models (qwen, glm, etc.) would 400.
-	//
-	// SECURITY/RELIABILITY: a model in MoMAHarmfulThinkingModels is excluded
-	// from thinking EVEN when the user explicitly sets reasoning_protocol=moma.
-	// Without this guard, glm-5.2 + explicit moma short-circuits past the
-	// MoMAThinkingModels allow-list (line 71's first term) and sends thinking
-	// params to a model the MoMA platform hangs on — a 180s stall with a
-	// misleading "stream stalled" error. See audit finding B4.
-	modelKey := strings.ToLower(strings.TrimSpace(cfg.Model))
-	moma := (protocol == "moma" || (protocol == "" && IsMoMA(cfg.BaseURL) && MoMAThinkingModels[modelKey])) && !MoMAHarmfulThinkingModels[modelKey]
+	// Thinking protocol is now opt-in per provider via reasoning_protocol="moma".
+	// No more URL-based auto-detection or hardcoded model allowlist — any provider
+	// (not just Jiutian MoMA) can declare this protocol explicitly.
+	moma := protocol == "moma"
 	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
 	switch {
 	case protocol == "none":
@@ -189,60 +181,12 @@ func normalizeReasoningProtocol(raw string) string {
 	}
 }
 
-// MoMAThinkingModels lists MoMA-hosted models that support MoMA-compatible
-// thinking mode. Only these models receive the thinking: {type: "enabled"} parameter.
-// This is the single source of truth; config/effort.go derives its map from this.
-// Note: this controls the REQUEST-side thinking field, not the RESPONSE-side
-// reasoning_content/reasoning fields (which are driven by whatever the model returns).
-// Models verified to return reasoning_content via MoMA platform test (2026-06-13)
-var MoMAThinkingModels = map[string]bool{
-	"jiutian/jiutian-lan-thinking": true,
-	"jiutian/jiutian-da-35b":       true,
-	"qwen/qwen3.6-35b":             true,
-	"qwen/qwen3.6-27b":             true,
-	"qwen/qwen3.5-397b-a17b":       true,
-	"z.ai/glm-5.1":                 true,
-	// "z.ai/glm-5.2": removed — MoMA platform hangs (no response) when
-	// thinking parameters are sent to glm-5.2; glm-5.1 works fine.
-	"minimax/minimax-m2.7":          true,
-	"minimax/minimax-m2.5":          true,
-	"moonshotai/kimi-k2.6":          true,
-	"moonshotai/kimi-k2.5-thinking": true,
-	"openai/gpt-oss-120b":           true,
-}
-
-// MoMAHarmfulThinkingModels lists models the MoMA platform HANGS on (no
-// response, eventually times out) when thinking parameters are sent. These are
-// excluded from moma thinking even when the user explicitly sets
-// reasoning_protocol = "moma" — that explicit setting would otherwise bypass
-// the MoMAThinkingModels allow-list above. Each entry must reference a real
-// platform behavior with a documented failure mode.
-var MoMAHarmfulThinkingModels = map[string]bool{
-	// glm-5.2: verified platform hang (2026-06-13). glm-5.1 works fine, so
-	// this is model-specific. The user experiences a ~180s idle-timeout stall
-	// reported as "stream stalled" rather than a clear "thinking not supported".
-	"z.ai/glm-5.2": true,
-}
-
-// MoMAVisionModels lists MoMA-hosted models that support image_url content
-// parts (multimodal / vision). Models NOT in this list will reject image input
-// with a 400 error ("不支持的消息部件类型 image_url"). Users can override
-// per-provider with vision = true in config.
-// Verified via MoMA platform API test with 100x100 PNG (2026-06-17).
-var MoMAVisionModels = map[string]bool{
-	"qwen/qwen3.5-397b-a17b": true, // Qwen-VL series
-	"qwen/qwen3.6-35b":       true, // Qwen3.6 (vision confirmed)
-	"qwen/qwen3.6-27b":       true, // Qwen3.6 (vision confirmed)
-	"moonshotai/kimi-k2.6":   true, // Kimi (vision confirmed)
-}
-
-// ModelSupportsVision reports whether the given model ID supports image input.
-// Checks the provider-level override first, then falls back to the model registry.
-func ModelSupportsVision(modelID string, providerOverride bool) bool {
-	if providerOverride {
-		return true
-	}
-	return MoMAVisionModels[strings.ToLower(strings.TrimSpace(modelID))]
+// ModelSupportsVision reports whether a model can accept image input. Vision
+// capability is declared per-provider via ProviderEntry.Vision (toml "vision"),
+// not by a hardcoded model allowlist. The modelID parameter is retained for
+// signature compatibility but no longer consulted.
+func ModelSupportsVision(_ string, providerOverride bool) bool {
+	return providerOverride
 }
 
 // bufPool reuses byte buffers for JSON-marshalled request bodies. Each turn

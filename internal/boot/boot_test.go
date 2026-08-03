@@ -417,10 +417,11 @@ func TestNewProviderAppliesModelReasoningProtocol(t *testing.T) {
 	defer srv.Close()
 
 	p, err := NewProvider(&config.ProviderEntry{
-		Name:    "momaxy",
-		Kind:    "openai",
-		BaseURL: srv.URL,
-		Model:   "jiutian/jiutian-lan-thinking",
+		Name:              "momaxy",
+		Kind:              "openai",
+		BaseURL:           srv.URL,
+		Model:             "jiutian/jiutian-lan-thinking",
+		ReasoningProtocol: "moma",
 	})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
@@ -832,9 +833,9 @@ func stripLanguagePolicy(s string) string {
 }
 
 func stripThinkingAddon(s string) string {
-	// ForModel may return ThinkingAddon + FamilyAddon; strip both.
-	// Use Replace instead of TrimSuffix because addon order varies.
-	s = strings.TrimSpace(strings.Replace(s, instruction.ThinkingAddon, "", 1))
+	// ForModel now only returns a FamilyAddon (the ThinkingAddon injection was
+	// removed when thinking became a per-provider declaration). Use Replace
+	// instead of TrimSuffix because addon order/whitespace varies.
 	for _, family := range []string{"qwen", "glm", "deepseek", "kimi", "jiutian", "gpt"} {
 		if addon := instruction.FamilyAddon(family); addon != "" {
 			s = strings.TrimSpace(strings.Replace(s, "\n\n"+addon, "", 1))

@@ -28,16 +28,12 @@ type modelReasoningCapability struct {
 	Default  string
 }
 
-// modelReasoningCapabilities is derived from openai.MoMAThinkingModels — the
-// single source of truth for which MoMA models support thinking mode. All entries
-// share the same MoMA protocol / effort levels; only the model ID varies.
-var modelReasoningCapabilities = func() map[string]modelReasoningCapability {
-	m := make(map[string]modelReasoningCapability, len(openai.MoMAThinkingModels))
-	for id := range openai.MoMAThinkingModels {
-		m[id] = modelReasoningCapability{Protocol: ReasoningProtocolMoMA, Levels: []string{"high", "max"}, Default: "high"}
-	}
-	return m
-}()
+// modelReasoningCapabilities is intentionally empty: thinking capability is now
+// declared per-provider via ProviderEntry.ReasoningProtocol / SupportedEfforts,
+// not derived from a hardcoded model allowlist. The variable is retained because
+// resolvedModelReasoningCapability / effortCapabilityFromModel still reference it
+// for forward compatibility with future model-level capability declarations.
+var modelReasoningCapabilities = map[string]modelReasoningCapability{}
 
 // EffortCapabilityForEntry returns the user-facing /effort levels for a resolved
 // provider entry. Provider implementations still decide how a stored effort is
@@ -213,8 +209,10 @@ func normalizeStoredEffort(raw string) string {
 }
 
 // ReasoningProtocolForEntry resolves the provider request shape for reasoning
-// controls. Explicit config wins, then the model capability registry, then legacy
-// endpoint heuristics.
+// controls. Explicit per-provider config wins, then the (currently empty) model
+// capability registry. With no URL-based fallback, an empty result means the
+// provider uses standard OpenAI-compatible request shape unless it declares
+// reasoning_protocol = "moma" / "openai" explicitly.
 func ReasoningProtocolForEntry(e *ProviderEntry) string {
 	if explicit := explicitReasoningProtocol(e); explicit != "" {
 		return explicit
@@ -222,13 +220,6 @@ func ReasoningProtocolForEntry(e *ProviderEntry) string {
 	if cap, ok := resolvedModelReasoningCapability(e); ok {
 		return cap.Protocol
 	}
-	if isMoMAEntry(e) {
-		return ReasoningProtocolMoMA
-	}
-	// MoMA hosts both reasoning and non-reasoning models behind one URL.
-	// Do NOT fall back to ReasoningProtocolMoMA by URL alone — only models
-	// registered in modelReasoningCapabilities (checked above) get thinking.
-	// Unregistered MoMA models are treated as standard OpenAI-compatible.
 	return ""
 }
 
@@ -252,13 +243,6 @@ func normalizeReasoningProtocol(raw string) string {
 	default:
 		return ""
 	}
-}
-
-// isMoMAEntry reports whether the entry points at MoMA's API. The
-// actual host matching lives in provider/openai so the openai package and
-// the config layer stay in lockstep when new gateways are added.
-func isMoMAEntry(e *ProviderEntry) bool {
-	return e != nil && e.Kind == "openai" && openai.IsMoMA(e.BaseURL)
 }
 
 // isMiniMaxEntry reports whether the entry points at MiniMax's OpenAI-compatible

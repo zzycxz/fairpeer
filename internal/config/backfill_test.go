@@ -47,15 +47,18 @@ func TestNormalizeDesktopOfficialProviderAccessCanonicalizesLegacyIDs(t *testing
 	}
 }
 
-func TestNormalizeDesktopOfficialProviderAccessEnsuresMoMAAPI(t *testing.T) {
+func TestNormalizeDesktopOfficialProviderAccessNoPresetProviders(t *testing.T) {
+	// FairPeer no longer ships a preset MoMA official provider. Declaring
+	// "moma" in provider_access must NOT silently materialize a provider entry;
+	// it just survives as a plain access id (canonicalized to a trimmed name).
 	c := Default()
 	c.DefaultModel = "moma/jiutian/jiutian-lan-35b"
 	c.Desktop.ProviderAccess = []string{"moma"}
 	normalizeDesktopOfficialProviderAccess(c)
-	if _, ok := c.Provider("moma"); !ok {
-		t.Fatal("moma paid provider missing")
+	if _, ok := c.Provider("moma"); ok {
+		t.Fatal("no preset official provider should be materialized for moma")
 	}
 	if got := c.Desktop.ProviderAccess; len(got) != 1 || got[0] != "moma" {
-		t.Fatalf("provider_access = %+v, want moma", got)
+		t.Fatalf("provider_access = %+v, want [moma]", got)
 	}
 }

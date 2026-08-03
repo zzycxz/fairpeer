@@ -1393,26 +1393,6 @@ const LanguagePolicy = `Reply in the same language the user is using in their mo
 	`whenever they switch. Let this also guide the language you think in. Always keep code, ` +
 	`identifiers, file paths, shell commands, and technical terms in their original form — never translate them.`
 
-// BuiltinMoMAModels is the single source of truth for the MoMA official model
-// list. Every place that needs this list (Default, ensureMoMAOfficialProvider,
-// desktop settings template, frontend mock) should reference this variable to
-// prevent drift.
-var BuiltinMoMAModels = []string{
-	// 九天自有
-	"jiutian/jiutian-lan-236b", "jiutian/jiutian-lan-35b",
-	"jiutian/jiutian-lan-thinking", "jiutian/jiutian-da-35b",
-	// 通义千问
-	"qwen/qwen3.6-35b", "qwen/qwen3.6-27b", "qwen/qwen3.5-397b-a17b",
-	// DeepSeek
-	"deepseek/deepseek-v4-flash",
-	// 智谱
-	"z.ai/glm-5.1", "z.ai/glm-5.2",
-	// MiniMax
-	"minimax/minimax-m2.7", "minimax/minimax-m2.5",
-	// 月之暗面
-	"moonshotai/kimi-k2.6", "moonshotai/kimi-k2.5-thinking",
-}
-
 // Default returns the built-in default configuration. No provider is preset —
 // FairPeer is provider-agnostic, so the user configures their own via the CLI
 // setup wizard (fairpeer chat/run) or the desktop onboarding/settings panel.
@@ -1835,9 +1815,6 @@ func normalizeDesktopOfficialProviderAccess(c *Config) {
 		next = append(next, name)
 	}
 	c.Desktop.ProviderAccess = next
-	if seen["moma"] {
-		ensureMoMAOfficialProvider(c)
-	}
 	retargetDesktopOfficialRefs(c, seen)
 }
 
@@ -1887,15 +1864,11 @@ func NormalizeLegacyDesktopProviderAccess(c *Config) {
 	normalizeDesktopOfficialProviderAccess(c)
 }
 
-// canonicalDesktopOfficialProviderName normalizes alternative provider names
+// canonicalDesktopOfficialProviderName normalizes alternative provider names.
+// FairPeer ships no preset official providers, so this is currently a passthrough
+// trim; the indirection is kept so future official aliases can plug in here.
 func canonicalDesktopOfficialProviderName(name string) string {
-	name = strings.TrimSpace(name)
-
-	if name == "moma" || name == "MoMA" {
-		return "moma"
-	}
-
-	return name
+	return strings.TrimSpace(name)
 }
 
 // CanonicalDesktopOfficialProviderName returns the Settings Center provider ID
@@ -1913,45 +1886,6 @@ func desktopProviderAccessMap(names []string) map[string]bool {
 		}
 	}
 	return out
-}
-
-func ensureMoMAOfficialProvider(c *Config) {
-	officialModels := BuiltinMoMAModels
-
-	if existing, ok := c.Provider("moma"); ok {
-		// If the user already has a moma provider, ensure they get all the official models
-		existing.Models = officialModels
-		existing.Default = firstKnownModel(existing.Default, existing.Models, "minimax/minimax-m2.7")
-		return
-	}
-	entry := ProviderEntry{
-		Name:          "moma",
-		Kind:          "openai",
-		BaseURL:       "https://jiutian.10086.cn/largemodel/moma/api/v3",
-		Models:        officialModels,
-		Default:       "minimax/minimax-m2.7",
-		APIKeyEnv:     "JIUTIAN_API_KEY",
-		ContextWindow: 200_000,
-	}
-	c.Providers = append(c.Providers, entry)
-}
-
-func firstKnownModel(current string, models []string, fallback string) string {
-	current = strings.TrimSpace(current)
-	for _, model := range models {
-		if model == current {
-			return current
-		}
-	}
-	for _, model := range models {
-		if model == fallback {
-			return fallback
-		}
-	}
-	if len(models) > 0 {
-		return models[0]
-	}
-	return ""
 }
 
 func retargetDesktopOfficialRefs(c *Config, access map[string]bool) {

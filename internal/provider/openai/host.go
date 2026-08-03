@@ -30,12 +30,6 @@ func matchesVendorHost(baseURL, apex string, canonical ...string) bool {
 	return strings.HasSuffix(host, "."+apex)
 }
 
-// IsMoMA reports whether baseURL points at MoMA's API
-// endpoint (jiutian.10086.cn or any subdomain).
-func IsMoMA(baseURL string) bool {
-	return matchesVendorHost(baseURL, "jiutian.10086.cn", "jiutian.10086.cn")
-}
-
 // IsMiniMax reports whether baseURL points at MiniMax's OpenAI-compatible
 // endpoint (api.minimaxi.com or any *.minimaxi.com subdomain).
 //

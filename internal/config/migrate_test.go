@@ -285,16 +285,16 @@ func TestMigrateCustomBaseURLWarns(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 	if len(res.Warnings) == 0 {
-		t.Error("a non-MoMA base_url should produce a warning")
+		t.Error("a non-default base_url should produce a warning")
 	}
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("load migrated config: %v", err)
 	}
-	for _, name := range []string{"moma"} {
-		p, ok := cfg.Provider(name)
-		if !ok || p.BaseURL != "https://my-proxy.example/v1" {
-			t.Fatalf("%s base_url was not migrated: %+v", name, p)
-		}
+	// FairPeer no longer ships a preset MoMA provider; a v0.x base_url is now
+	// carried over as an explicit user provider named "migrated".
+	p, ok := cfg.Provider("migrated")
+	if !ok || p.BaseURL != "https://my-proxy.example/v1" {
+		t.Fatalf("migrated base_url was not carried over: %+v", p)
 	}
 }

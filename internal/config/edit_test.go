@@ -9,8 +9,16 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// addTestProvider seeds a named provider with a single model onto c so tests
+// can exercise SetDefaultModel / SetPlannerModel / SetProviderEffort without
+// relying on a preset official provider (FairPeer ships none by default).
+func addTestProvider(c *Config, name, model string) {
+	c.Providers = append(c.Providers, ProviderEntry{Name: name, Kind: "openai", Model: model})
+}
+
 func TestSetDefaultModel(t *testing.T) {
 	c := Default()
+	addTestProvider(c, "moma", "jiutian/jiutian-lan-35b")
 	if err := c.SetDefaultModel("moma"); err != nil {
 		t.Fatalf("set valid default: %v", err)
 	}
@@ -161,6 +169,7 @@ func TestSetUICloseBehavior(t *testing.T) {
 
 func TestSetPlannerModel(t *testing.T) {
 	c := Default()
+	addTestProvider(c, "moma", "jiutian/jiutian-lan-35b")
 	if err := c.SetPlannerModel("moma"); err != nil {
 		t.Fatalf("set planner: %v", err)
 	}
@@ -274,6 +283,7 @@ func TestUpsertProvider(t *testing.T) {
 
 func TestSetProviderEffort(t *testing.T) {
 	c := Default()
+	addTestProvider(c, "moma", "jiutian/jiutian-lan-35b")
 	if err := c.SetProviderEffort("moma", "MAX"); err != nil {
 		t.Fatalf("SetProviderEffort: %v", err)
 	}
@@ -303,7 +313,9 @@ func TestSetLanguage(t *testing.T) {
 }
 
 func TestNormalizeEffortMoMA(t *testing.T) {
-	e := &ProviderEntry{Name: "openai-test", Kind: "openai", BaseURL: "https://api.jiutian.10086.cn", Model: "qwen3.6-35b"}
+	// Thinking mode is now declared explicitly via reasoning_protocol = "moma"
+	// rather than auto-detected from the jiutian.10086.cn URL.
+	e := &ProviderEntry{Name: "openai-test", Kind: "openai", BaseURL: "https://api.jiutian.10086.cn", Model: "qwen3.6-35b", ReasoningProtocol: "moma"}
 	cap := EffortCapabilityForEntry(e)
 	if !cap.Supported || len(cap.Levels) != 3 || cap.Levels[0] != "auto" || cap.Levels[1] != "high" || cap.Levels[2] != "max" {
 		t.Fatalf("MoMA levels = %+v, want auto/high/max", cap)
@@ -683,6 +695,7 @@ func TestClearPluginAuthentication(t *testing.T) {
 // re-decodes the file to confirm the changes survived a write/read cycle.
 func TestSaveToRoundTrips(t *testing.T) {
 	c := Default()
+	addTestProvider(c, "moma", "jiutian/jiutian-lan-35b")
 	if err := c.SetDefaultModel("moma"); err != nil {
 		t.Fatal(err)
 	}
@@ -813,16 +826,20 @@ func TestEffortCapabilityCustomSupportedEfforts(t *testing.T) {
 	}
 }
 
-func TestEffortCapabilityUsesKnownModelRegistry(t *testing.T) {
+func TestEffortCapabilityExplicitProtocol(t *testing.T) {
+	// Thinking capability is now declared per-provider via ReasoningProtocol
+	// rather than auto-detected from a model allowlist. A model behind a proxy
+	// with reasoning_protocol = "moma" exposes the MoMA effort levels.
 	e := &ProviderEntry{
-		Name:    "momaxy",
-		Kind:    "openai",
-		BaseURL: "https://proxy.example.com/v1",
-		Model:   "qwen/qwen3.6-35b",
+		Name:              "momaxy",
+		Kind:              "openai",
+		BaseURL:           "https://proxy.example.com/v1",
+		Model:             "qwen/qwen3.6-35b",
+		ReasoningProtocol: "moma",
 	}
 	cap := EffortCapabilityForEntry(e)
 	if !cap.Supported {
-		t.Fatalf("MoMA model behind proxy should expose effort, got %+v", cap)
+		t.Fatalf("provider with reasoning_protocol=moma should expose effort, got %+v", cap)
 	}
 	wantLevels := []string{"auto", "high", "max"}
 	if len(cap.Levels) != len(wantLevels) {
@@ -841,6 +858,25 @@ func TestEffortCapabilityUsesKnownModelRegistry(t *testing.T) {
 	}
 	if got, err := NormalizeEffort(e, "max"); err != nil || got != "max" {
 		t.Fatalf("NormalizeEffort(max) = %q/%v, want max/nil", got, err)
+	}
+}
+
+// TestEffortCapabilityNoAutoDetection pins that a model that USED to be in the
+// MoMA allowlist (qwen/qwen3.6-35b) no longer exposes effort when the provider
+// has not declared reasoning_protocol — the model registry is intentionally
+// empty now, so there is no auto-detection.
+func TestEffortCapabilityNoAutoDetection(t *testing.T) {
+	e := &ProviderEntry{
+		Name:    "plain",
+		Kind:    "openai",
+		BaseURL: "https://proxy.example.com/v1",
+		Model:   "qwen/qwen3.6-35b",
+	}
+	if cap := EffortCapabilityForEntry(e); cap.Supported {
+		t.Fatalf("model with no declared protocol should not expose effort, got %+v", cap)
+	}
+	if protocol := ReasoningProtocolForEntry(e); protocol != "" {
+		t.Fatalf("protocol = %q, want empty (no auto-detection)", protocol)
 	}
 }
 
