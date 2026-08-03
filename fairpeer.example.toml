@@ -2,7 +2,7 @@
 # Resolution order: flag > ./fairpeer.toml > ~/.config/fairpeer/config.toml > built-in defaults.
 # Secrets come from the environment via api_key_env; never put keys here.
 
-default_model = "moma/qwen/qwen3.6-35b"   # MoMA default model
+# default_model = "deepseek/deepseek-v4-pro"   # uncomment + set after configuring a provider
 # language      = "zh"   # ui language; empty = auto-detect from $LANG / $FAIRPEER_LANG
 
 [ui]
@@ -30,59 +30,242 @@ max_steps         = 0    # executor tool-call rounds; 0 = no limit
 planner_max_steps = 12   # planner read-only tool-call rounds; 0 = no limit
 temperature       = 0.0
 auto_plan         = "off"   # off|on; off keeps plan mode manual
-# auto_plan_classifier = "moma/qwen/qwen3.6-35b"   # optional; only used for borderline tasks
+# auto_plan_classifier = "deepseek/deepseek-v4-flash"   # optional; only used for borderline tasks
 soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact
 compact_ratio       = 0.8   # try compacting when prompt reaches this fraction
 compact_force_ratio = 0.9   # force compacting at this high-water mark
-# planner_model = "moma"   # optional: enable two-model collaboration
-# subagent_model = "moma/openai/gpt-oss-120b"   # optional default for runAs=subagent skills
-# subagent_models = { review = "moma/openai/gpt-oss-120b", security_review = "moma/openai/gpt-oss-120b" }   # per-skill overrides
+# planner_model = "deepseek/deepseek-v4-pro"   # optional: enable two-model collaboration
+# subagent_model = "deepseek/deepseek-v4-flash"   # optional default for runAs=subagent skills
+# subagent_models = { review = "deepseek/deepseek-v4-flash", security_review = "deepseek/deepseek-v4-flash" }   # per-skill overrides
 # output_style = "explanatory"   # persona/tone folded into the prompt: explanatory | learning | concise,
 #                                  or a custom .fairpeer/output-styles/<name>.md ; empty = default
 
 # A provider is a vendor endpoint (one base_url + key) that offers one or more
 # models. Use `models = [...]` to expose several under a single entry — switching
 # models reuses the same connection; no need to re-declare base_url/api_key.
-# Built-in providers (no config needed): moma (30+ models).
-[[providers]]
-name        = "moma"
-kind        = "openai"
-base_url    = "https://jiutian.10086.cn/largemodel/moma/api/v3"
-models      = ["qwen/qwen3.6-35b", "qwen/qwen3.6-27b"]
-default     = "qwen/qwen3.6-35b"   # optional; defaults to the first of `models`
-api_key_env = "JIUTIAN_API_KEY"
-context_window = 200000
-price       = { cache_hit = 0, input = 1, output = 2, currency = "¥" }   # per 1M tokens (MoMA does not report cache tokens)
-# MoMA thinking is always on; effort: high | max. Omit for auto (provider default).
-effort      = "high"
-# Image support: set vision = true for models that accept image_url content parts
-# (e.g. qwen-vl, gpt-4o). Default false — images are stripped to avoid 400 errors.
-# vision       = true
-# vision_detail = "auto"   # "auto", "low", or "high"
+# Uncomment the providers you have an API key for. FairPeer ships NO built-in
+# provider — configure at least one before first run (or use `fairpeer setup`).
 
-# ── Jiutian multimodal tools ──────────────────────────────────────────────
-# Standalone API tools that consume Jiutian platform tokens separately from
-# the chat model. Disable any you don't need to hide them from the LLM.
-[jiutian]
-image_understand = true   # /v3/image/text — analyze images via LLMImage2Text
-image_generate   = true   # /v3/images/generations — text-to-image / image-to-image
-video_understand = true   # /v3/video/text — analyze videos via video_to_text
+# ── Direct providers (11 vendors) ──────────────────────────────────────────
+# Each shows the three model roles: default (main chat), fast (background
+# tasks), vision (image recognition). Adjust models as vendors release newer
+# ones — run `fairpeer setup` or the Settings "fetch models" button to
+# auto-discover available models from a configured endpoint.
 
-# Anthropic (Claude) — the "anthropic" kind speaks the Messages API directly (no
-# OpenAI shim). base_url is optional (defaults to https://api.anthropic.com). Note:
-# this provider does not enable extended thinking and does not send temperature —
-# current Claude models reject sampling params (see internal/provider/anthropic).
-[[providers]]
-name           = "claude"
-kind           = "anthropic"
-model          = "claude-opus-4-8"
-api_key_env    = "ANTHROPIC_API_KEY"
-context_window = 1000000
-price          = { cache_hit = 0.5, input = 5, output = 25, currency = "$" }   # per 1M tokens
-# Extended thinking (anthropic kind only; round-trips the signed reasoning block
-# across tool calls). Omit to disable. effort: low | medium | high | xhigh | max.
-thinking       = "adaptive"
-effort         = "high"
+# ── 通义千问 (Qwen / DashScope) ──
+# [[providers]]
+# name        = "qwen"
+# kind        = "openai"
+# base_url    = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# api_key_env = "QWEN_API_KEY"
+# default     = "qwen3.7-max"          # 1M context, thinking
+# fast_model  = "qwen3.6-flash"        # 1M, fast/cheap
+# models      = ["qwen3.7-max", "qwen3.7-plus", "qwen3.6-flash"]
+# vision      = true                    # qwen3.7-plus has integrated vision
+# context_window = 1000000
+
+# ── DeepSeek ── (no Coding Plan, pure pay-per-token)
+# [[providers]]
+# name        = "deepseek"
+# kind        = "openai"
+# base_url    = "https://api.deepseek.com"
+# api_key_env = "DEEPSEEK_API_KEY"
+# default     = "deepseek-v4-pro"       # 1M, native multimodal
+# fast_model  = "deepseek-v4-flash"     # 1M, very cheap
+# models      = ["deepseek-v4-pro", "deepseek-v4-flash"]
+# vision      = true
+# context_window = 1000000
+
+# ── 火山引擎 (Volcengine / Doubao) ──
+# [[providers]]
+# name        = "volcengine"
+# kind        = "openai"
+# base_url    = "https://ark.cn-beijing.volces.com/api/v3"
+# api_key_env = "VOLCENGINE_API_KEY"
+# default     = "doubao-seed-evolving"  # 1M, Coding & Agent
+# fast_model  = "doubao-seed-2.1-turbo" # 256K
+# models      = ["doubao-seed-evolving", "doubao-seed-2.1-turbo"]
+# vision      = true
+# context_window = 1000000
+
+# ── 智谱 AI (Zhipu / GLM) ──
+# [[providers]]
+# name        = "zhipu"
+# kind        = "openai"
+# base_url    = "https://open.bigmodel.cn/api/paas/v4"
+# api_key_env = "ZHIPU_API_KEY"
+# default     = "glm-5.2"               # 1M with [1m] suffix, open-source SOTA
+# fast_model  = "glm-4.7-flash"         # 200K, free
+# models      = ["glm-5.2", "glm-5v-turbo", "glm-4.7-flash"]
+# vision      = true
+# context_window = 1000000
+
+# ── MiniMax ──
+# [[providers]]
+# name        = "minimax"
+# kind        = "openai"
+# base_url    = "https://api.minimaxi.com/v1"
+# api_key_env = "MINIMAX_API_KEY"
+# default     = "minimax-m3"            # 1M, native multimodal
+# fast_model  = "minimax-m2.5"          # 200K
+# models      = ["minimax-m3", "minimax-m2.5"]
+# vision      = true
+# context_window = 1000000
+
+# ── Moonshot (Kimi) ──
+# [[providers]]
+# name        = "moonshot"
+# kind        = "openai"
+# base_url    = "https://api.moonshot.cn/v1"
+# api_key_env = "MOONSHOT_API_KEY"
+# default     = "kimi-k3"               # 1M, native multimodal
+# fast_model  = "kimi-k2.6"             # 256K
+# models      = ["kimi-k3", "kimi-k2.6"]
+# vision      = true
+# context_window = 1000000
+
+# ── MiMo (Xiaomi) ──
+# [[providers]]
+# name        = "mimo"
+# kind        = "openai"
+# base_url    = "https://api.xiaomimimo.com/v1"
+# api_key_env = "MIMO_API_KEY"
+# default     = "mimo-v2.5-pro"         # 1M, deep thinking
+# fast_model  = "mimo-v2.5"             # 1M, cheapest
+# models      = ["mimo-v2.5-pro", "mimo-v2.5"]
+# vision      = true
+# context_window = 1000000
+
+# ── 阶跃星辰 (StepFun) ──
+# [[providers]]
+# name        = "stepfun"
+# kind        = "openai"
+# base_url    = "https://api.stepfun.com/v1"
+# api_key_env = "STEPFUN_API_KEY"
+# default     = "step-3.7-flash"        # 256K, native multimodal
+# fast_model  = "step-3.5-flash"        # 256K
+# models      = ["step-3.7-flash", "step-3.5-flash"]
+# vision      = true
+# context_window = 256000
+
+# ── 讯飞 MaaS (iFlytek) ──
+# [[providers]]
+# name        = "xfyun"
+# kind        = "openai"
+# base_url    = "https://spark-api-open.xf-yun.com/v1"
+# api_key_env = "XFYUN_API_KEY"
+# default     = "glm-5.2"               # platform caps context at 256K
+# fast_model  = "qwen3.6-35b-a3b"       # platform caps at 128K
+# models      = ["glm-5.2", "qwen3.5-397b-a17b", "qwen3.6-35b-a3b"]
+# vision      = true
+# context_window = 128000               # iFlytek platform reduces context
+
+# ── Anthropic (Claude) ── "anthropic" kind speaks the Messages API directly.
+# [[providers]]
+# name           = "anthropic"
+# kind           = "anthropic"
+# model          = "claude-sonnet-5"    # 1M
+# api_key_env    = "ANTHROPIC_API_KEY"
+# context_window = 1000000
+# vision         = true
+# thinking       = "adaptive"           # extended thinking; effort: low|medium|high|xhigh|max
+# effort         = "high"
+
+# ── OpenAI (GPT) ──
+# [[providers]]
+# name        = "openai"
+# kind        = "openai"
+# base_url    = "https://api.openai.com/v1"
+# api_key_env = "OPENAI_API_KEY"
+# default     = "gpt-5.6-terra"         # 1.05M
+# fast_model  = "gpt-5.6-luna"          # 1.05M
+# models      = ["gpt-5.6-terra", "gpt-5.6-luna"]
+# vision      = true
+# context_window = 1050000
+
+# ── Coding Plan aggregators (7 platforms) ──────────────────────────────────
+# These are model-aggregation platforms: one endpoint+key calls multiple
+# vendors' models. coding_only = consumes Coding Plan subscription quota (vs
+# token quota). aggregator = UI groups under "aggregators". Same provider as
+# a direct endpoint? Add a second [[providers]] entry — they share nothing
+# but the name prefix you choose.
+
+# ── 通义千问 Coding Plan ── (aggregator: qwen/kimi/glm/minimax)
+# [[providers]]
+# name        = "qwen-coding"
+# kind        = "openai"
+# base_url    = "https://coding.dashscope.aliyuncs.com/v1"
+# api_key_env = "QWEN_CODING_API_KEY"   # sk-sp- prefix, separate from DashScope
+# coding_only = true
+# aggregator  = true
+# default     = "qwen3.7-plus"
+# models      = ["qwen3.7-plus", "qwen3.6-plus", "kimi-k2.5", "glm-5", "minimax-m2.5", "qwen3-coder-plus", "glm-4.7"]
+
+# ── 智谱 z.ai Coding Plan ──
+# [[providers]]
+# name        = "zhipu-coding"
+# kind        = "openai"
+# base_url    = "https://api.z.ai/v1"
+# api_key_env = "ZHIPU_CODING_API_KEY"
+# coding_only = true
+# aggregator  = true
+# default     = "glm-5.2"
+# models      = ["glm-5.2", "glm-5.1", "glm-5"]
+
+# ── 火山引擎 Coding/Agent Plan ──
+# [[providers]]
+# name        = "volcengine-coding"
+# kind        = "openai"
+# base_url    = "https://ark.cn-beijing.volces.com/api/v3"
+# api_key_env = "VOLCENGINE_API_KEY"    # shared endpoint, subscription tier
+# coding_only = true
+# aggregator  = true
+# default     = "doubao-seed-evolving"
+# models      = ["doubao-seed-evolving", "doubao-seed-2.1-turbo", "deepseek-v4-pro", "kimi-k2.6"]
+
+# ── 百度千帆 Token Plan ── (was Coding Plan, converted 2026-07)
+# [[providers]]
+# name        = "baidu-coding"
+# kind        = "openai"
+# base_url    = "https://qianfan.baidubce.com/v2/tokenplan/personal"
+# api_key_env = "BAIDU_API_KEY"
+# coding_only = true
+# aggregator  = true
+# default     = "glm-5.2"
+# models      = ["ernie-5.1", "glm-5.2", "kimi-k2.6", "deepseek-v4-pro"]
+
+# ── 腾讯云 TokenHub ──
+# [[providers]]
+# name        = "tencent-coding"
+# kind        = "openai"
+# base_url    = "https://api.lkeap.cloud.tencent.com/v1"
+# api_key_env = "TENCENT_API_KEY"
+# coding_only = true
+# aggregator  = true
+# default     = "deepseek-v4-pro"
+# models      = ["deepseek-v4-pro", "glm-5.2", "kimi-k2.6", "minimax-m2.7"]
+
+# ── 阶跃星辰 Step Plan ── (coding_only but NOT aggregator: own models only)
+# [[providers]]
+# name        = "stepfun-coding"
+# kind        = "openai"
+# base_url    = "https://api.stepfun.com/v1"
+# api_key_env = "STEPFUN_API_KEY"
+# coding_only = true
+# default     = "step-3.7-flash"
+# models      = ["step-3.7-flash", "step-3.5-flash"]
+
+# ── 讯飞 MaaS Coding Plan ── (unified model id, platform routes internally)
+# [[providers]]
+# name        = "xfyun-coding"
+# kind        = "openai"
+# base_url    = "https://spark-api-open.xf-yun.com/v1"
+# api_key_env = "XFYUN_API_KEY"
+# coding_only = true
+# aggregator  = true
+# default     = "astron-code-latest"
+# models      = ["astron-code-latest"]
+
 
 [tools]
 enabled = []   # empty = all built-in tools
@@ -232,7 +415,7 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # password_env = "COWORK_IMAP_PASSWORD"
 #
 # # Multiple mailboxes (recommended over the single pair above).
-# # [[cowork.email_accounts]] is an array of named accounts so MoMAPeer can talk
+# # [[cowork.email_accounts]] is an array of named accounts so FairPeer can talk
 # # to several mailboxes at once — e.g. a personal 139 box + a work CMCC box.
 # # Tools pick one by `account` (empty = the default). Passwords are NEVER written
 # # here, only the env-var name; the value lives encrypted in the secrets store
