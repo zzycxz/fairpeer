@@ -2,7 +2,7 @@
 
 ## 概述
 
-RAG（Retrieval-Augmented Generation）知识库是 MoMAPeer 的核心功能之一，允许您将文档导入知识库，通过语义搜索和知识图谱为 AI 提供上下文参考。
+RAG（Retrieval-Augmented Generation）知识库是 fairpeer 的核心功能之一，允许您将文档导入知识库，通过语义搜索和知识图谱为 AI 提供上下文参考。
 
 ## 功能特性
 
@@ -37,10 +37,10 @@ RAG（Retrieval-Augmented Generation）知识库是 MoMAPeer 的核心功能之�
 ```toml
 [cowork]
 # Embedding 模型（可选，启用语义搜索）
-embedding_model = "moma/qwen/qwen3.6-27b"
+embedding_model = "qwen/qwen3-embedding"
 
 # 提取模型（可选，用于深度提取）
-extract_model = "moma/jiutian/jiutian-lan-35b"
+extract_model = "deepseek/deepseek-v4-flash"
 ```
 
 ## 最佳实践

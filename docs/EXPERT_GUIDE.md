@@ -2,7 +2,7 @@
 
 ## 概述
 
-专家团是 MoMAPeer 的多模型协作功能，允许多个 AI 专家围绕同一问题进行讨论、辩论或分工协作，产生更全面、更可靠的结论。
+专家团是 fairpeer 的多模型协作功能，允许多个 AI 专家围绕同一问题进行讨论、辩论或分工协作，产生更全面、更可靠的结论。
 
 ## 功能特性
 
@@ -38,20 +38,20 @@
 ## 配置
 
 ```toml
-# 在 momapeer.toml 中配置专家团使用的模型
+# 在 fairpeer.toml 中配置专家团使用的模型
 [providers]
 name = "expert-qwen"
 kind = "openai"
-base_url = "https://jiutian.10086.cn/largemodel/moma/api/v3"
-model = "moma/qwen/qwen3.6-35b"
-api_key_env = "JIUTIAN_API_KEY"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+model = "qwen/qwen3.7-max"
+api_key_env = "QWEN_API_KEY"
 
 [providers]
 name = "expert-deepseek"
 kind = "openai"
-base_url = "https://jiutian.10086.cn/largemodel/moma/api/v3"
-model = "moma/deepseek/deepseek-v4-flash"
-api_key_env = "JIUTIAN_API_KEY"
+base_url = "https://api.deepseek.com"
+model = "deepseek/deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
 ```
 
 ## 最佳实践

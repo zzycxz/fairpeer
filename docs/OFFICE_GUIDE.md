@@ -2,7 +2,7 @@
 
 ## 概述
 
-MoMAPeer 提供完整的办公自动化功能，包括邮件管理、日历任务、PPT 生成和定时任务，帮助您高效处理日常办公事务。
+fairpeer 提供完整的办公自动化功能，包括邮件管理、日历任务、PPT 生成和定时任务，帮助您高效处理日常办公事务。
 
 ## 邮件集成
 
@@ -63,7 +63,7 @@ calendar_enabled = true
 ### PPT 模板
 
 - **通用模板**：适用于大多数场景
-- **自定义模板**：放置在 `.momapeer/skills/ppt-auto/templates/`
+- **自定义模板**：放置在 `.fairpeer/skills/ppt-auto/templates/`
 
 ### 配置
 

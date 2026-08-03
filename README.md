@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" alt="momapeer" width="640"/>
+  <img src="docs/logo.png" alt="fairpeer" width="640"/>
 </p>
 
 <p align="center">
@@ -13,37 +13,37 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/zzycxz/momapeer/releases"><img src="https://img.shields.io/badge/version-v0.5.6-0153e5?style=flat-square" alt="Version 0.5.6"/></a>
-  <a href="https://github.com/zzycxz/momapeer/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zzycxz/momapeer/ci.yml?style=flat-square&label=ci&labelColor=161b22&logo=githubactions&logoColor=white" alt="CI"/></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/github/license/zzycxz/momapeer.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
-  <a href="https://github.com/zzycxz/momapeer/stargazers"><img src="https://img.shields.io/github/stars/zzycxz/momapeer.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
+  <a href="https://github.com/zzycxz/fairpeer/releases"><img src="https://img.shields.io/badge/version-v0.5.6-0153e5?style=flat-square" alt="Version 0.5.6"/></a>
+  <a href="https://github.com/zzycxz/fairpeer/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zzycxz/fairpeer/ci.yml?style=flat-square&label=ci&labelColor=161b22&logo=githubactions&logoColor=white" alt="CI"/></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/zzycxz/fairpeer.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
+  <a href="https://github.com/zzycxz/fairpeer/stargazers"><img src="https://img.shields.io/github/stars/zzycxz/fairpeer.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
 </p>
 
 <br/>
 
-<h3 align="center">中国移动九天原生的企业级全场景 AI 编程助手。</h3>
+<h3 align="center">全场景通用 AI 编程助手。</h3>
 <p align="center">
-  基于中国移动 MoMA（九天）大模型平台深度打造，提供极致的编码智能与终端体验。<br/>
+  对接任意 OpenAI / Anthropic 兼容的大模型端点（Qwen、GLM、DeepSeek、Kimi、Doubao、GPT、Claude 等 300+ 模型）。<br/>
   单一静态 Go 二进制，零运行时依赖，多平台无缝覆盖。
 </p>
 
 <br/>
 
-## momapeer 是什么？
+## fairpeer 是什么？
 
-momapeer 是一款专为中国移动九天 (MoMA) 平台生态打造的 AI 智能编程助手，以高度可配置化和 MCP 插件体系为核心驱动力。
-它不仅提供强大的本地代码理解能力，更能深度接入九天大模型（如 DeepSeek、Qwen、GLM 等 300+ 模型）实现自然语言驱动的自主编程。
+fairpeer 是一款通用 AI 智能编程助手，以高度可配置化和 MCP 插件体系为核心驱动力。
+它不仅提供强大的本地代码理解能力，更能深度接入主流大模型（如 DeepSeek、Qwen、GLM、Kimi、GPT、Claude 等 300+ 模型）实现自然语言驱动的自主编程。
 
 Agent 可以在 **终端**（TUI）、**桌面客户端**（基于 Wails）、**HTTP/SSE 服务器** 或 **多通道 IM 机器人**（企业微信 / 飞书 / QQ）等全场景中运行——所有前端均由同一个高性能、传输无关的核心引擎驱动。
 
 > **开源声明：** 本项目基于 [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix) 进行二次开发，
-> 针对中国移动九天平台与企业级场景进行了深度的架构优化与扩展。
+> 针对通用多模型场景与企业级需求进行了深度的架构优化与扩展。
 
 ## 核心特性
 
 ### 工程化与生态
 
-- **九天原生架构** — 深度优化对接 MoMA 平台，支持 thinking mode 协议、reasoning_content 回传、16 个预置模型 CNY 定价，通过 `momapeer.toml` 完全配置驱动。
+- **通用 Provider 架构** — 统一对接任意 OpenAI / Anthropic 兼容端点，支持 thinking mode 协议、reasoning_content 回传、11 个直连厂商 + 7 个聚合平台（Coding Plan），通过 `fairpeer.toml` 完全配置驱动。
 - **MCP 插件生态** — 全面支持 Model Context Protocol (MCP)，外部工具以子进程形式通过 stdio / HTTP 运行，无限扩展 Agent 能力。
 - **内置 Web Search** — 集成 Brave → Exa → Linkup 三引擎链式降级搜索，无需外部 MCP 即可联网检索。
 - **极速轻量分发** — `CGO_ENABLED=0` 单二进制打包，极简部署，支持交叉编译 6 大操作系统架构。
@@ -86,29 +86,29 @@ Agent 可以在 **终端**（TUI）、**桌面客户端**（基于 Wails）、**
 
 | 前端形态 | 启动命令 | 场景说明 |
 |------|------|------|
-| **终端 TUI** | `momapeer chat` | 极客首选：沉浸式终端界面（基于 Charm Bubble Tea） |
-| **API 服务** | `momapeer serve` | 开放能力：提供标准 HTTP/SSE 编程接入接口 |
+| **终端 TUI** | `fairpeer chat` | 极客首选：沉浸式终端界面（基于 Charm Bubble Tea） |
+| **API 服务** | `fairpeer serve` | 开放能力：提供标准 HTTP/SSE 编程接入接口 |
 | **桌面客户端** | Wails 图标启动 | UI 交互：提供原生 macOS / Windows / Linux 多标签体验 |
-| **企业机器人** | `momapeer bot start` | 团队协作：企业微信 / 飞书 / QQ 等 IM 网关接入 |
-| **ACP 服务** | `momapeer acp` | 协议桥接：Agent Control Protocol 远程控制层 |
+| **企业机器人** | `fairpeer bot start` | 团队协作：企业微信 / 飞书 / QQ 等 IM 网关接入 |
+| **ACP 服务** | `fairpeer acp` | 协议桥接：Agent Control Protocol 远程控制层 |
 
 ## 安装指南
 
 当前版本：**v0.5.6**
 
 ```sh
-npm i -g momapeer                        # 任意系统——自动拉取对应平台的原生二进制
-brew install zzycxz/momapeer/momapeer    # macOS 用户
+npm i -g fairpeer                        # 任意系统——自动拉取对应平台的原生二进制
+brew install zzycxz/fairpeer/fairpeer    # macOS 用户
 ```
 
-您也可以在 [GitHub Releases](https://github.com/zzycxz/momapeer/releases) 获取预编译归档文件（支持 `darwin|linux|windows × amd64|arm64`）。
+您也可以在 [GitHub Releases](https://github.com/zzycxz/fairpeer/releases) 获取预编译归档文件（支持 `darwin|linux|windows × amd64|arm64`）。
 
 > **⚠️ macOS 桌面版安装必读：**
 > 如果您下载了 `.zip` 格式的 macOS 桌面端应用，由于这是开源项目未进行 Apple 开发者签名，解压后双击运行可能会提示 **"App is damaged and can't be opened"（文件已损坏，请移至废纸篓）**。
 >
 > **解决办法：** 打开终端，运行以下命令解除隔离保护（假设 App 在下载目录）：
 > ```sh
-> xattr -cr ~/Downloads/momapeer.app
+> xattr -cr ~/Downloads/fairpeer.app
 > ```
 > 然后即可正常双击运行。
 
@@ -123,62 +123,63 @@ make cross    # 交叉编译至 dist/（生成 6 个目标平台二进制）
 ## 快速上手与配置
 
 ```sh
-momapeer setup                        # 启动配置向导 → 生成 ./momapeer.toml
-export JIUTIAN_API_KEY=your-key-here  # 设置九天平台密钥 (或写入 .env)
-momapeer chat                         # 进入交互终端，输入 /init 生成项目上下文
-momapeer run "实现 main.go 里的所有 TODO"
-momapeer run --model moma/deepseek/deepseek-v4-flash "补充单元测试"
-echo "解释这段代码" | momapeer run
+fairpeer setup                       # 启动配置向导 → 生成 ./fairpeer.toml
+export DEEPSEEK_API_KEY=your-key     # 设置模型 API Key (或写入 .env)
+fairpeer chat                        # 进入交互终端，输入 /init 生成项目上下文
+fairpeer run "实现 main.go 里的所有 TODO"
+fairpeer run --model deepseek/deepseek-v4-flash "补充单元测试"
+echo "解释这段代码" | fairpeer run
 ```
 
-## 接入中国移动 MoMA（九天平台）
+## 接入模型 Provider
 
-[MoMA 平台](https://jiutian.10086.cn) 是中国移动打造的企业级聚合模型平台，全面兼容标准协议。
+fairpeer 不绑定任何模型平台：通过统一的 Provider 抽象接入任意 OpenAI / Anthropic 兼容端点。完整模板见 [`fairpeer.example.toml`](./fairpeer.example.toml)（11 个直连厂商 + 7 个聚合平台）。
 
-### 第一步：获取平台 API Key
-1. 前往 [九天官方平台](https://jiutian.10086.cn) 注册并登录。
-2. 进入 **密钥管理** 页面，创建您的专属鉴权密钥。
-3. 复制该密钥，作为环境变量 `JIUTIAN_API_KEY` 使用。
+### 第一步：获取模型 API Key
+以 DeepSeek 为例（其余厂商同理）：前往对应模型平台官网注册并创建 API Key。
 
 ### 第二步：配置环境变量
 ```sh
 # Linux / macOS
-export JIUTIAN_API_KEY="您的真实密钥"
+export DEEPSEEK_API_KEY="您的真实密钥"
 
 # Windows (PowerShell)
-$env:JIUTIAN_API_KEY = "您的真实密钥"
+$env:DEEPSEEK_API_KEY = "您的真实密钥"
 ```
 
-### 第三步：配置 Provider (`momapeer.toml`)
-在项目根目录创建或修改 `momapeer.toml`：
+### 第三步：配置 Provider (`fairpeer.toml`)
+在项目根目录创建或修改 `fairpeer.toml`：
 
 ```toml
-default_model = "moma"
+default_model = "deepseek"
 
 [[providers]]
-name        = "moma"
+name        = "deepseek"
 kind        = "openai"
-base_url    = "https://jiutian.10086.cn/largemodel/moma/api/v3"
-model       = "moma/jiutian/jiutian-lan-35b"
-api_key_env = "JIUTIAN_API_KEY"
+base_url    = "https://api.deepseek.com"
+api_key_env = "DEEPSEEK_API_KEY"
+default     = "deepseek-v4-pro"
+fast_model  = "deepseek-v4-flash"
+models      = ["deepseek-v4-pro", "deepseek-v4-flash"]
 ```
 
-完成配置后，只需执行 `momapeer chat`，即可开始体验九天大模型的智能编程赋能。
+完成配置后，只需执行 `fairpeer chat`，即可开始体验大模型的智能编程赋能。
 
 > **💡 进阶技巧：定制 AI 身份与规范**
-> 如果你想让 AI 更懂你们团队的开发规范，可以在项目根目录创建或修改 `momapeer.md`，写上你的专属规则和身份声明。AI 会在每次对话时自动读取并遵循这些设定。
+> 如果你想让 AI 更懂你们团队的开发规范，可以在项目根目录创建或修改 `fairpeer.md`，写上你的专属规则和身份声明。AI 会在每次对话时自动读取并遵循这些设定。
 
-### MoMA 推荐模型
+### 推荐模型
 
-在 `model` 字段中，支持使用 `provider/厂商/模型名` 灵活切换。九天平台专属推荐：
+在 `model` 字段中，支持使用 `provider/厂商/模型名` 灵活切换。常用直连厂商推荐：
 
 | 模型 ID | 核心优势 | 适用场景 |
 |---------|------|------|
-| `moma/jiutian/jiutian-lan-35b` | 综合能力强大，逻辑严密 | 核心架构设计、复杂需求分析、主力编码 |
-| `moma/jiutian/jiutian-lan-236b` | 旗舰模型，推理最强 | 复杂架构设计、疑难 bug、跨模块重构 |
-| `moma/deepseek/deepseek-v4-flash` | 极速响应，代码专精 | 代码片段补全、快速重构、单元测试生成 |
+| `deepseek/deepseek-v4-pro` | 综合能力强大，原生多模态 | 核心架构设计、复杂需求分析、主力编码 |
+| `qwen/qwen3.7-max` | 1M 上下文，支持 thinking | 长上下文分析、复杂架构设计 |
+| `zhipu/glm-5.2` | 开源 SOTA，1M 上下文 | 通用编码、跨模块重构 |
+| `deepseek/deepseek-v4-flash` | 极速响应，代码专精 | 代码片段补全、快速重构、单元测试生成 |
 
-> 完整模型列表请登录 [九天平台控制台](https://jiutian.10086.cn/largemodel/llmstudio/#/modelHub) 查看。只需修改 `model` 字段即可无缝热切换，零代码侵入。
+> fairpeer 支持 18 家厂商、300+ 模型。详见 [`fairpeer.example.toml`](./fairpeer.example.toml) 的完整 Provider 模板（含通义、智谱、火山、MiniMax、Kimi、Anthropic、OpenAI 等）。只需修改 `model` 字段即可无缝热切换，零代码侵入。
 
 ## 文档指引
 
@@ -203,7 +204,7 @@ Developer → CLI / Desktop / HTTP / Bot / ACP
              ↓
              agent.Agent         (ReAct 循环核心: 思考流 → 工具调度 → 结果解析 → …)
              ↓
-             provider.Provider   (对接九天大模型等标准接口)
+             provider.Provider   (对接任意 OpenAI/Anthropic 兼容大模型)
              tool.Registry       (执行器沙盒：内置 Native 工具 + MCP 外挂插件)
 ```
 
@@ -215,4 +216,3 @@ Developer → CLI / Desktop / HTTP / Bot / ACP
 <p align="center">
   <sub>MIT License —— 详情参见 <a href="./LICENSE">LICENSE</a> 文件。</sub>
 </p>
-# Updated

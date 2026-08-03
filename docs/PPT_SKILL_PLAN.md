@@ -2,7 +2,7 @@
 
 ## 一、目标
 
-将 PPT 生成能力封装为 momapeer 的独立 skill 安装包。用户通过自然语言指令即可生成专业 PPT，不依赖完整 ppt-master 项目。
+将 PPT 生成能力封装为 fairpeer 的独立 skill 安装包。用户通过自然语言指令即可生成专业 PPT，不依赖完整 ppt-master 项目。
 
 ## 二、架构
 
@@ -27,7 +27,7 @@
 ## 三、文件结构
 
 ```
-momapeer/skills/ppt-auto/
+fairpeer/skills/ppt-auto/
 ├── SKILL.md                    # 流程指引（给模型读）
 ├── template_config.json        # 默认设计约束（用户可编辑）
 ├── templates/
@@ -162,7 +162,7 @@ COM 接口：
 
 ### Phase 3：发布（待定）
 
-- [ ] 集成到 momapeer exe 安装包
+- [ ] 集成到 fairpeer exe 安装包
 - [ ] 测试新环境安装
 - [ ] 编写用户文档
 

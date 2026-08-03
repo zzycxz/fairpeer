@@ -1,6 +1,6 @@
-# MoMAPeer 功能全景
+# fairpeer 功能全景
 
-> MoMAPeer 是面向中国移动九天大模型平台的企业级全场景 AI 助手，基于 Wails 桌面框架（Go 后端 + React 前端）构建。单一静态二进制，零运行时依赖，支持 Windows / macOS / Linux。
+> fairpeer 是面向通用多模型生态的企业级全场景 AI 助手，基于 Wails 桌面框架（Go 后端 + React 前端）构建。单一静态二进制，零运行时依赖，支持 Windows / macOS / Linux。
 
 ---
 
@@ -35,11 +35,11 @@
 
 | 模式 | 命令 | 说明 |
 |------|------|------|
-| 终端 TUI | `momapeer chat` | Charm Bubble Tea 沉浸式终端 |
-| API 服务 | `momapeer serve` | HTTP/SSE 编程接口 |
+| 终端 TUI | `fairpeer chat` | Charm Bubble Tea 沉浸式终端 |
+| API 服务 | `fairpeer serve` | HTTP/SSE 编程接口 |
 | 桌面客户端 | 双击图标启动 | 原生多标签页 UI |
-| IM 机器人 | `momapeer bot start` | 飞书/微信/QQ 网关 |
-| ACP 服务 | `momapeer acp` | Agent Control Protocol 远程控制 |
+| IM 机器人 | `fairpeer bot start` | 飞书/微信/QQ 网关 |
+| ACP 服务 | `fairpeer acp` | Agent Control Protocol 远程控制 |
 
 ---
 
@@ -47,11 +47,10 @@
 
 ### 多模型支持
 
-内置 300+ 模型预设，通过九天 MoMA 平台统一接入：
+内置 300+ 模型预设，通过统一 Provider 抽象接入多家厂商：
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  九天系列    │ jiutian-lan-236b / 35b / thinking     │
 │  通义千问    │ qwen3.6-35b / 27b, qwen3.5-397b      │
 │  DeepSeek   │ deepseek-v4-flash                      │
 │  智谱 GLM   │ glm-5.1 / 5.2                          │
@@ -170,7 +169,7 @@
 │  快捷截屏                                                    │
 │                                                             │
 │  图片理解模型        [qwen/qwen3.5-397b-a17b ▾]             │
-│  全局图片识别的主模型。失败时自动降级到九天兜底。              │
+│  全局图片识别的主模型。失败时自动降级到备选视觉模型。          │
 │                                                             │
 │  启用快捷截屏        [✓]                                    │
 │  开启后，按快捷键截屏 → AI 解题 → 结果发 IM + 弹窗          │
@@ -298,8 +297,8 @@
 │                                                         │
 │  发现来源：                                              │
 │  • 内置（随二进制发布）                                   │
-│  • 项目（.momapeer/skills/）                             │
-│  • 全局（~/.momapeer/skills/）                           │
+│  • 项目（.fairpeer/skills/）                             │
+│  • 全局（~/.fairpeer/skills/）                           │
 │  • 自定义路径（config 配置）                              │
 │                                                         │
 │  ┌─────────────────────────────────────────────────┐   │
@@ -451,7 +450,7 @@
 - 模板系统：`ppt_active_template` 选择模板
 - 两种模式：`fast`（单轮）/ `validate`（生成+检查+返工）
 - CUA 驱动：像人一样操作 WPS Presentation（打开→感知→点击→输入）
-- 嵌入二进制，首次运行释放到 `~/.momapeer/skills/ppt-auto/`
+- 嵌入二进制，首次运行释放到 `~/.fairpeer/skills/ppt-auto/`
 
 ---
 
@@ -473,7 +472,7 @@
 │  机器人：飞书/微信/QQ 连接、QR 码扫描、白名单               │
 │  办公：浏览器、PPT、邮件（多账号）、RAG、截屏热键、E-Stop   │
 │  MCP：MCP 服务器管理、搜索引擎配置                           │
-│  技能：技能启用/禁用、自定义路径、九天多模态工具              │
+│  技能：技能启用/禁用、自定义路径、多模态工具                  │
 │  记忆：用户画像、自动记忆、项目文档                          │
 │  权限：基于主体的权限策略（glob 匹配）                       │
 │  沙箱：Bash 沙箱模式、写入/读取根、网络出口                  │
@@ -579,7 +578,7 @@
 
 **格式**：TOML
 
-**加载顺序**：命令行 flag > 项目 `./momapeer.toml` > 用户 `~/.config/momapeer/config.toml` > 内置默认
+**加载顺序**：命令行 flag > 项目 `./fairpeer.toml` > 用户 `~/.config/fairpeer/config.toml` > 内置默认
 
 **密钥**：通过 `api_key_env` 从环境变量读取，不写入配置文件
 
@@ -600,11 +599,11 @@ screenshot_vlm_model = "qwen/qwen3.5-397b-a17b"
 screenshot_prompt = "请从屏幕截图中找到问题，给出答案..."
 
 [[providers]]
-name = "moma"
+name = "qwen"
 kind = "openai"
-base_url = "https://jiutian.10086.cn/largemodel/moma/api/v3"
-models = ["qwen/qwen3.6-35b", "qwen/qwen3.5-397b-a17b"]
-api_key_env = "JIUTIAN_API_KEY"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+models = ["qwen3.7-max", "qwen3.6-35b", "qwen3.5-397b-a17b"]
+api_key_env = "QWEN_API_KEY"
 ```
 
 ---

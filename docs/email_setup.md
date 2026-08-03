@@ -1,6 +1,6 @@
 # 邮件集成配置指南（多账号 + 周/月总结）
 
-MoMAPeer 的邮件能力（SMTP 收发 + IMAP 读取/搜索 + 定时总结）已内置。本文档说明如何配置**多个邮箱账号**（如 139 个人邮箱 + 中国移动政企邮箱）、如何获取授权码、以及如何设置**每周/每月自动邮件总结**。
+fairpeer 的邮件能力（SMTP 收发 + IMAP 读取/搜索 + 定时总结）已内置。本文档说明如何配置**多个邮箱账号**（如 139 个人邮箱 + 企业邮箱）、如何获取授权码、以及如何设置**每周/每月自动邮件总结**。
 
 ## 1. 配置多个邮箱
 
@@ -24,7 +24,7 @@ username     = "13800138000@139.com"
 password_env = "MAIL_PWD_PERSONAL"
 
 [[cowork.email_accounts]]
-name    = "work-cmcc"        # 中国移动 / 139 政企邮箱
+name    = "work-cmcc"        # 企业邮箱（示例，可替换为任意邮箱服务）
 [cowork.email_accounts.smtp]
 host            = "smtp.mail.139.com"
 port            = 465
@@ -46,7 +46,7 @@ password_env = "MAIL_PWD_WORK"
 授权码在各邮箱网页版生成，**有效期约 90 天**，到期需重新生成：
 
 - **139 邮箱**（个人 `@139.com`）：登录 mail.10086.cn → 设置 → 账号与安全 → 邮箱协议设置 → 开启 **IMAP/SMTP 服务** → 获取授权码。
-- **中国移动 / 139 政企邮箱**：联系单位邮箱管理员或在政企邮箱后台开启 IMAP/SMTP，服务器为 `imap.mail.139.com` / `smtp.mail.139.com`。
+- **企业邮箱**：联系单位邮箱管理员或在企业邮箱后台开启 IMAP/SMTP，按服务商提供的服务器地址配置（如 `imap.mail.139.com` / `smtp.mail.139.com`）。
 
 拿到授权码后，在 **coWork 设置面板**的"邮件"区填入（密码框留空表示不修改；面板只显示"已设置/未设置"，授权码本身不会回传前端）。授权码会用 **Windows DPAPI** 加密存储在用户目录下，绑定当前 Windows 用户。
 
@@ -94,7 +94,7 @@ schedule_create:
 
 ## 4. 授权码过期处理
 
-139 授权码约 90 天过期。MoMAPeer 会自动检测：
+139 授权码约 90 天过期。fairpeer 会自动检测：
 - 当 `email_read` / `email_send` 因授权码失效失败时，工具返回明确提示并弹**桌面 toast**。
 - 对 `output_mode = "email"` 的定时任务，触发前会预检账号 IMAP 登录；失效则跳过本次（不浪费 token）并提示。
 - 收到提示后，到 coWork 设置面板重新获取并填入新授权码即可。

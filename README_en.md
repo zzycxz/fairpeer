@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" alt="momapeer" width="640"/>
+  <img src="docs/logo.png" alt="fairpeer" width="640"/>
 </p>
 
 <p align="center">
@@ -13,36 +13,36 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/zzycxz/momapeer/releases"><img src="https://img.shields.io/badge/version-v0.5.6-0153e5?style=flat-square" alt="Version 0.5.6"/></a>
-  <a href="https://github.com/zzycxz/momapeer/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zzycxz/momapeer/ci.yml?style=flat-square&label=ci&labelColor=161b22&logo=githubactions&logoColor=white" alt="CI"/></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/github/license/zzycxz/momapeer.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
-  <a href="https://github.com/zzycxz/momapeer/stargazers"><img src="https://img.shields.io/github/stars/zzycxz/momapeer.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
+  <a href="https://github.com/zzycxz/fairpeer/releases"><img src="https://img.shields.io/badge/version-v0.5.6-0153e5?style=flat-square" alt="Version 0.5.6"/></a>
+  <a href="https://github.com/zzycxz/fairpeer/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zzycxz/fairpeer/ci.yml?style=flat-square&label=ci&labelColor=161b22&logo=githubactions&logoColor=white" alt="CI"/></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/zzycxz/fairpeer.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
+  <a href="https://github.com/zzycxz/fairpeer/stargazers"><img src="https://img.shields.io/github/stars/zzycxz/fairpeer.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
 </p>
 
 <br/>
 
-<h3 align="center">China Mobile MoMA-native enterprise AI coding agent.</h3>
+<h3 align="center">A universal, full-scenario AI coding agent.</h3>
 <p align="center">
-  Built exclusively for the China Mobile MoMA (九天) aggregated model platform.<br/>
+  Connects to any OpenAI / Anthropic compatible model endpoint (Qwen, GLM, DeepSeek, Kimi, Doubao, GPT, Claude, and 300+ others).<br/>
   A single static Go binary. Zero runtime dependencies. Cross-platform distribution.
 </p>
 
 <br/>
 
-## What is momapeer?
+## What is fairpeer?
 
-momapeer is an enterprise-grade AI coding agent designed specifically for the China Mobile Jiutian (MoMA) ecosystem. Driven by a highly configurable core and Model Context Protocol (MCP) plugins, momapeer natively integrates with MoMA models (DeepSeek, Qwen, GLM, and 300+ others) to provide autonomous, natural-language-driven programming capabilities.
+fairpeer is a universal AI coding agent designed to work with any standard model endpoint. Driven by a highly configurable core and Model Context Protocol (MCP) plugins, fairpeer integrates with mainstream LLMs (DeepSeek, Qwen, GLM, Kimi, GPT, Claude, and 300+ others) to provide autonomous, natural-language-driven programming capabilities.
 
 The agent can run in your **terminal** (TUI), as a **native desktop app** (Wails), as an **HTTP/SSE server**, or as a **multi-channel IM bot** (WeCom / Feishu / QQ) — all powered by a single, high-performance, transport-agnostic engine.
 
 > **Open Source Attribution:** This project is derived from [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix),
-> deeply optimized and architecturally expanded for the China Mobile Jiutian platform and enterprise scenarios.
+> deeply optimized and architecturally expanded for a general-purpose, multi-model workflow and enterprise scenarios.
 
 ## Core Features
 
 ### Architecture & Ecosystem
 
-- **MoMA-Native Architecture** — Deep integration with the MoMA platform: thinking mode protocol, reasoning_content round-trip, 16 built-in models with CNY pricing. Fully configuration-driven via `momapeer.toml`.
+- **Universal Provider Architecture** — A unified abstraction that connects to any OpenAI / Anthropic compatible endpoint: thinking mode protocol, reasoning_content round-trip, 11 direct vendors + 7 aggregators (Coding Plan). Fully configuration-driven via `fairpeer.toml`.
 - **MCP Plugin Ecosystem** — Full support for Model Context Protocol (MCP). External tools run as subprocesses over stdio / HTTP, providing infinite extensibility.
 - **Built-in Web Search** — Integrated Brave → Exa → Linkup three-engine fallback chain search, no external MCP needed.
 - **Zero-Friction Distribution** — `CGO_ENABLED=0` single binary. Cross-compiled for 6 major OS/Architecture targets.
@@ -87,29 +87,29 @@ Domain capabilities (browser/desktop automation, email, knowledge base, document
 
 | Frontend | Command | Description |
 |------|------|------|
-| **Terminal TUI** | `momapeer chat` | For geeks: Immersive terminal UI (Charm Bubble Tea) |
-| **API Server** | `momapeer serve` | Open capabilities: Standard HTTP/SSE programmatic interface |
+| **Terminal TUI** | `fairpeer chat` | For geeks: Immersive terminal UI (Charm Bubble Tea) |
+| **API Server** | `fairpeer serve` | Open capabilities: Standard HTTP/SSE programmatic interface |
 | **Desktop App** | Wails Launcher | UI interaction: Native macOS / Windows / Linux multi-tab experience |
-| **Enterprise Bot** | `momapeer bot start` | Team collaboration: WeCom / Feishu / QQ IM gateway integration |
-| **ACP Server** | `momapeer acp` | Protocol bridge: Agent Control Protocol remote execution layer |
+| **Enterprise Bot** | `fairpeer bot start` | Team collaboration: WeCom / Feishu / QQ IM gateway integration |
+| **ACP Server** | `fairpeer acp` | Protocol bridge: Agent Control Protocol remote execution layer |
 
 ## Install
 
 Current Release: **v0.5.6**
 
 ```sh
-npm i -g momapeer                        # Any OS — pulls the prebuilt native binary
-brew install zzycxz/momapeer/momapeer    # macOS users
+npm i -g fairpeer                        # Any OS — pulls the prebuilt native binary
+brew install zzycxz/fairpeer/fairpeer    # macOS users
 ```
 
-You can also download prebuilt archives (`darwin|linux|windows × amd64|arm64`) directly from [GitHub Releases](https://github.com/zzycxz/momapeer/releases).
+You can also download prebuilt archives (`darwin|linux|windows × amd64|arm64`) directly from [GitHub Releases](https://github.com/zzycxz/fairpeer/releases).
 
 > **⚠️ macOS Desktop Installation Guide:**
 > If you downloaded the `.zip` archive for the macOS desktop app, because this is an open-source project without Apple developer signing, extracting and running the app might trigger an **"App is damaged and can't be opened"** warning.
 >
 > **Solution:** Open your terminal and run the following command to remove the quarantine attribute (assuming the app is in your Downloads folder):
 > ```sh
-> xattr -cr ~/Downloads/momapeer.app
+> xattr -cr ~/Downloads/fairpeer.app
 > ```
 > After running this, you can double-click and open the app normally.
 
@@ -124,62 +124,63 @@ make cross    # Cross-compile for 6 target platforms to dist/
 ## Quick Start & Configuration
 
 ```sh
-momapeer setup                        # Configuration wizard → generates ./momapeer.toml
-export JIUTIAN_API_KEY=your-key-here  # Set your Jiutian platform API key (or add to .env)
-momapeer chat                         # Enter the interactive TUI, type /init to generate project context
-momapeer run "implement all TODOs in main.go"
-momapeer run --model moma/deepseek/deepseek-v4-flash "add unit tests"
-echo "explain this code block" | momapeer run
+fairpeer setup                       # Configuration wizard → generates ./fairpeer.toml
+export DEEPSEEK_API_KEY=your-key     # Set your model API key (or add to .env)
+fairpeer chat                        # Enter the interactive TUI, type /init to generate project context
+fairpeer run "implement all TODOs in main.go"
+fairpeer run --model deepseek/deepseek-v4-flash "add unit tests"
+echo "explain this code block" | fairpeer run
 ```
 
-## Connecting to China Mobile MoMA (九天)
+## Connecting a Model Provider
 
-[MoMA](https://jiutian.10086.cn) is China Mobile's enterprise-grade aggregated model platform, fully compatible with standard API protocols.
+fairpeer is not tied to any model platform: a unified Provider abstraction connects to any OpenAI / Anthropic compatible endpoint. Full templates are in [`fairpeer.example.toml`](./fairpeer.example.toml) (11 direct vendors + 7 aggregators).
 
 ### Step 1: Obtain an API Key
-1. Go to the [Jiutian Official Platform](https://jiutian.10086.cn) to register and log in.
-2. Navigate to **Key Management** (密钥管理) and create a new authentication key.
-3. Copy this key to use as your `JIUTIAN_API_KEY`.
+Using DeepSeek as an example (other vendors follow the same flow): register on the vendor's platform and create an API key.
 
 ### Step 2: Set the Environment Variable
 ```sh
 # Linux / macOS
-export JIUTIAN_API_KEY="your-real-api-key"
+export DEEPSEEK_API_KEY="your-real-api-key"
 
 # Windows (PowerShell)
-$env:JIUTIAN_API_KEY = "your-real-api-key"
+$env:DEEPSEEK_API_KEY = "your-real-api-key"
 ```
 
-### Step 3: Configure the Provider (`momapeer.toml`)
-Create or modify `momapeer.toml` in your project root:
+### Step 3: Configure the Provider (`fairpeer.toml`)
+Create or modify `fairpeer.toml` in your project root:
 
 ```toml
-default_model = "moma"
+default_model = "deepseek"
 
 [[providers]]
-name        = "moma"
+name        = "deepseek"
 kind        = "openai"
-base_url    = "https://jiutian.10086.cn/largemodel/moma/api/v3"
-model       = "moma/jiutian/jiutian-lan-35b"
-api_key_env = "JIUTIAN_API_KEY"
+base_url    = "https://api.deepseek.com"
+api_key_env = "DEEPSEEK_API_KEY"
+default     = "deepseek-v4-pro"
+fast_model  = "deepseek-v4-flash"
+models      = ["deepseek-v4-pro", "deepseek-v4-flash"]
 ```
 
-Once configured, simply run `momapeer chat` to experience the intelligent programming power of Jiutian models.
+Once configured, simply run `fairpeer chat` to experience intelligent programming powered by your model of choice.
 
 > **💡 Pro Tip: Customizing AI Identity & Rules**
-> If you want the AI to better understand your team's development standards, you can create or modify `momapeer.md` in your project root to write down your specific rules and identity declarations. The AI will automatically read and follow these instructions in every conversation.
+> If you want the AI to better understand your team's development standards, you can create or modify `fairpeer.md` in your project root to write down your specific rules and identity declarations. The AI will automatically read and follow these instructions in every conversation.
 
-### Recommended MoMA Models
+### Recommended Models
 
-In the `model` field, you can flexibly switch using the `provider/vendor/model-name` format. Recommended Jiutian models:
+In the `model` field, you can flexibly switch using the `provider/vendor/model-name` format. Recommended direct vendors:
 
 | Model ID | Core Advantage | Best For |
 |---------|------|------|
-| `moma/jiutian/jiutian-lan-35b` | Strong comprehensive capability, rigorous logic | Core architecture design, complex analysis, primary coding |
-| `moma/jiutian/jiutian-lan-236b` | Flagship model, strongest reasoning | Complex architecture design, tricky bugs, cross-module refactoring |
-| `moma/deepseek/deepseek-v4-flash` | Extremely fast response, code-specialized | Code snippet completion, quick refactoring, unit tests |
+| `deepseek/deepseek-v4-pro` | Strong capability, native multimodal | Core architecture design, complex analysis, primary coding |
+| `qwen/qwen3.7-max` | 1M context, thinking support | Long-context analysis, complex architecture design |
+| `zhipu/glm-5.2` | Open-source SOTA, 1M context | General coding, cross-module refactoring |
+| `deepseek/deepseek-v4-flash` | Extremely fast response, code-specialized | Code snippet completion, quick refactoring, unit tests |
 
-> For the full list of available models, visit the [Jiutian Platform Console](https://jiutian.10086.cn/largemodel/llmstudio/#/modelHub). Switch models seamlessly by changing the `model` field — zero code changes required.
+> fairpeer supports 18 vendors and 300+ models. See the full Provider templates in [`fairpeer.example.toml`](./fairpeer.example.toml) (Qwen, Zhipu, Volcengine, MiniMax, Kimi, Anthropic, OpenAI, and more). Switch models seamlessly by changing the `model` field — zero code changes required.
 
 ## Documentation Reference
 
@@ -201,7 +202,7 @@ Developer → CLI / Desktop / HTTP / Bot / ACP
              ↓
              agent.Agent         (ReAct loop core: think stream → tool dispatch → parse → …)
              ↓
-             provider.Provider   (Connects to Jiutian LLMs via standard interfaces)
+             provider.Provider   (Connects to any OpenAI/Anthropic compatible LLM)
              tool.Registry       (Execution sandbox: Native tools + MCP external plugins)
 ```
 

@@ -1,6 +1,6 @@
 # PPT Skill
 
-为 momapeer 提供 PPT 生成能力。用户通过自然语言指令即可生成专业演示文稿。
+为 fairpeer 提供 PPT 生成能力。用户通过自然语言指令即可生成专业演示文稿。
 
 ## 功能
 
@@ -19,10 +19,10 @@
 
 ### 安装
 
-将 `skills/ppt/` 目录复制到 momapeer 的 skill 目录。无需安装 Python 或任何依赖，全部内置。
+将 `skills/ppt/` 目录复制到 fairpeer 的 skill 目录。无需安装 Python 或任何依赖，全部内置。
 
 ```
-momapeer/
+fairpeer/
 └── skills/
     └── ppt/                    (77MB, 零安装)
         ├── SKILL.md
@@ -45,7 +45,7 @@ momapeer/
 
 ## 使用
 
-在 momapeer 中输入自然语言指令：
+在 fairpeer 中输入自然语言指令：
 
 ```
 "用一个通用模板做一个华为智算中心的汇报PPT"
