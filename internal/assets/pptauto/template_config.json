@@ -22,7 +22,7 @@
       "普通内容页建议3-5个内容块，内容要充实，尽量减少空白区域",
       "布局要多样化，不要全用卡片",
       "可以包含表格、时间线、对比图、仪表盘等",
-      "配色以中国移动主蓝 #1084CD 为主，活力橙 #FF7F00 只用于关键数据、按钮、警告，绿色只作为品牌呼应色少量使用"
+      "配色以主蓝 #1084CD 为主，活力橙 #FF7F00 只用于关键数据、按钮、警告，绿色只作为呼应色少量使用"
     ],
     "output_requirements": [
       "SVG格式，viewBox=0 0 1280 720",
@@ -64,7 +64,7 @@
         "description": "至少使用2种不同类型的SVG元素",
         "min_element_types": 2
       },
-      "fill_requirement": "中国移动风格要求内容充实、信息密度高，尽量减少空白区域；保证清晰和对齐的前提下，把内容区域填满",
+      "fill_requirement": "内容充实、信息密度高，尽量减少空白区域；保证清晰和对齐的前提下，把内容区域填满",
       "max_whitespace_ratio": 0.35,
       "min_content_blocks": 3,
       "min_lines_per_block": 2,
@@ -101,7 +101,7 @@
     "cover": 1,
     "ending": 3
   },
-  "template": "内置:templates/中国移动模板.pptx",
+  "template": "内置:templates/default.pptx",
   "template_override": null,
   "template_usage": {
     "apply_to": {
@@ -111,7 +111,7 @@
       "layout": false,
       "logo": true
     },
-    "description": "使用模板的品牌标识、配色和背景装饰；内容布局可调整，但必须保持中国移动商务风格、留白和克制配色",
+    "description": "使用模板的品牌标识、配色和背景装饰；内容布局可调整，但必须保持商务风格、留白和克制配色",
     "mode": "fast"
   }
 }

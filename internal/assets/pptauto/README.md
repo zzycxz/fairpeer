@@ -29,7 +29,7 @@ momapeer/
         ├── template_config.json
         ├── README.md
         ├── templates/
-        │   └── 中国移动模板.pptx
+        │   └── default.pptx
         ├── scripts/
         │   ├── analyze_template.py
         │   ├── fix_svg.py
@@ -48,7 +48,7 @@ momapeer/
 在 momapeer 中输入自然语言指令：
 
 ```
-"用中国移动模板做一个华为智算中心的汇报PPT"
+"用一个通用模板做一个华为智算中心的汇报PPT"
 "帮我做一个关于产品规划的PPT，要有表格和甘特图"
 "做一个10页的年终总结PPT，深色风格"
 "第3页太空了，加点内容"
