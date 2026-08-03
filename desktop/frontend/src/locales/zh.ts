@@ -1351,6 +1351,8 @@ export const zh: Record<DictKey, string> = {
   "onboarding.title": "欢迎使用 FairPeer",
   "onboarding.tagline": "选择一个 LLM 供应商开始使用。",
   "onboarding.step1Hint": "选择你的 AI 供应商：",
+  "onboarding.selectPlaceholder": "— 选择供应商 —",
+  "onboarding.next": "下一步",
   "onboarding.categoryDirect": "直连厂商",
   "onboarding.categoryAggregator": "Coding Plan 平台",
   "onboarding.aggregatorNote": "聚合平台用一个订阅 key 即可调用多家厂商的模型。",

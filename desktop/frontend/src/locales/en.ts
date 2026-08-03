@@ -1350,6 +1350,8 @@ export const en = {
   "onboarding.title": "Welcome to FairPeer",
   "onboarding.tagline": "Pick an LLM provider to get started.",
   "onboarding.step1Hint": "Choose your AI provider:",
+  "onboarding.selectPlaceholder": "— Select a provider —",
+  "onboarding.next": "Next",
   "onboarding.categoryDirect": "Direct providers",
   "onboarding.categoryAggregator": "Coding Plan platforms",
   "onboarding.aggregatorNote": "Aggregation platforms bundle multiple vendors under one subscription key.",

@@ -13299,6 +13299,146 @@ a[href] {
   cursor: not-allowed;
 }
 
+/* ── Multi-vendor onboarding wizard (three-step) ────────────────────────── */
+/* Transparent, inherits the overlay's backdrop. No card-style gray panels. */
+.onboarding__card--wide {
+  max-width: 480px;
+}
+.onboarding__step {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+/* Dropdown — transparent, blends with overlay, hover highlight. */
+.onboarding__select {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%23888' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+.onboarding__select:hover {
+  border-color: var(--accent, #0153e5);
+  background: var(--hover-bg, rgba(0, 0, 0, 0.04));
+}
+.onboarding__select:focus {
+  outline: none;
+  border-color: var(--accent, #0153e5);
+}
+.onboarding__select option,
+.onboarding__select optgroup {
+  background: var(--panel-bg, #fff);
+  color: var(--text, #333);
+}
+/* Vendor info shown after picking in the dropdown. */
+.onboarding__vendor-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.onboarding__endpoint {
+  font-size: 12px;
+  color: var(--text-muted, #888);
+  word-break: break-all;
+}
+.onboarding__vendor-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  font-size: 11px;
+  color: var(--text-muted, #888);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+}
+.onboarding__vendor-picked {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+/* Action row: back + submit side by side. */
+.onboarding__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 4px;
+}
+.onboarding__back {
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--text-muted, #888);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.15s, color 0.15s;
+}
+.onboarding__back:hover {
+  background: var(--hover-bg, rgba(0, 0, 0, 0.04));
+  color: var(--text);
+}
+.onboarding__doclink {
+  font-size: 12px;
+  color: var(--accent, #0153e5);
+  text-decoration: none;
+  margin-top: 4px;
+}
+.onboarding__doclink:hover {
+  text-decoration: underline;
+}
+/* Model picker list — transparent radio rows with hover highlight. */
+.onboarding__model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.onboarding__model-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-radius: 8px;
+  background: transparent;
+  transition: background 0.12s;
+}
+.onboarding__model-item:hover {
+  background: var(--hover-bg, rgba(0, 0, 0, 0.04));
+}
+.onboarding__model-item--selected {
+  background: var(--hover-bg, rgba(0, 0, 0, 0.06));
+}
+.onboarding__model-item input[type="radio"] {
+  accent-color: var(--accent, #0153e5);
+}
+.onboarding__model-name {
+  font-size: 13px;
+  color: var(--text);
+  flex: 1;
+}
+.onboarding__model-role {
+  font-size: 11px;
+  color: var(--text-muted, #888);
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+}
+
 /* Memory filter input: a full-width mem-input variant that sits below
    the section title. The existing mem-input already has a 28px height
    and the right border tokens; this just sets margin so it doesn't

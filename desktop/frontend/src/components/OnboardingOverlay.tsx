@@ -82,36 +82,52 @@ function VendorStep({ direct, aggregators, onPick, t }: {
   onPick: (tpl: ProviderTemplate) => void;
   t: Translator;
 }) {
+  const all = [...direct, ...aggregators];
+  const [value, setValue] = useState("");
+  const selected = all.find((x) => x.name === value) ?? null;
+
   return (
     <div className="onboarding__step">
       <div className="onboarding__tag">{t("onboarding.step1Hint")}</div>
 
-      <div className="onboarding__vendor-group">
-        <div className="onboarding__vendor-group-title">{t("onboarding.categoryDirect")}</div>
-        <div className="onboarding__vendor-grid">
+      <select
+        className="onboarding__select"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+      >
+        <option value="">{t("onboarding.selectPlaceholder")}</option>
+        <optgroup label={t("onboarding.categoryDirect")}>
           {direct.map((tpl) => (
-            <button key={tpl.name} type="button" className="onboarding__vendor-card" onClick={() => onPick(tpl)}>
-              <div className="onboarding__vendor-name">{tpl.displayName}</div>
-              {tpl.vision && <span className="onboarding__vendor-badge">{t("onboarding.badgeVision")}</span>}
-            </button>
+            <option key={tpl.name} value={tpl.name}>{tpl.displayName}</option>
           ))}
-        </div>
-      </div>
-
-      {aggregators.length > 0 && (
-        <div className="onboarding__vendor-group">
-          <div className="onboarding__vendor-group-title">{t("onboarding.categoryAggregator")}</div>
-          <div className="onboarding__vendor-grid">
+        </optgroup>
+        {aggregators.length > 0 && (
+          <optgroup label={t("onboarding.categoryAggregator")}>
             {aggregators.map((tpl) => (
-              <button key={tpl.name} type="button" className="onboarding__vendor-card onboarding__vendor-card--agg" onClick={() => onPick(tpl)}>
-                <div className="onboarding__vendor-name">{tpl.displayName}</div>
-                {tpl.codingOnly && <span className="onboarding__vendor-badge">{t("onboarding.badgeCoding")}</span>}
-              </button>
+              <option key={tpl.name} value={tpl.name}>{tpl.displayName}</option>
             ))}
-          </div>
-          <div className="onboarding__vendor-note">{t("onboarding.aggregatorNote")}</div>
+          </optgroup>
+        )}
+      </select>
+
+      {selected && (
+        <div className="onboarding__vendor-info">
+          <div className="onboarding__endpoint">{selected.baseUrl}</div>
+          {selected.vision && <span className="onboarding__vendor-badge">{t("onboarding.badgeVision")}</span>}
+          {selected.codingOnly && <span className="onboarding__vendor-badge">{t("onboarding.badgeCoding")}</span>}
         </div>
       )}
+
+      <div className="onboarding__actions">
+        <button
+          type="button"
+          className="onboarding__submit"
+          onClick={() => selected && onPick(selected)}
+          disabled={!selected}
+        >
+          {t("onboarding.next")}
+        </button>
+      </div>
     </div>
   );
 }
