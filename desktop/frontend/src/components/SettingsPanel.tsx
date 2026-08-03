@@ -130,7 +130,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab, initialPayload }
                 {tab === "bots" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "cowork" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><CoWorkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy ?? false} apply={apply}><MCPServersSettingsPage initialHighlight={initialPayload} />{s && <WebSearchSection s={s} busy={busy} apply={apply} />}</SettingsPageShell>}
-                {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><SkillsSettingsPage initialHighlight={initialPayload} /><JiutianSection /></SettingsPageShell>}
+                {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><SkillsSettingsPage initialHighlight={initialPayload} /></SettingsPageShell>}
                 {tab === "memory" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MemorySettingsPage /></SettingsPageShell>}
                 {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
@@ -1937,9 +1937,9 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
 function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) {
   const t = useT();
   const [subtab, setSubtab] = useState<"usage" | "access">("usage");
-  const [jiutianDomain, setJiutianDomain] = useState("");
+  const [modelDomainValue, setModelDomainValue] = useState("");
   useEffect(() => {
-    app.GetJiutianBaseDomain().then(setJiutianDomain).catch(() => {});
+    app.GetJiutianBaseDomain().then(setModelDomainValue).catch(() => {});
   }, []);
   const autoRefreshKeyRef = useRef("");
   const refs = allRefs(s);
@@ -2035,10 +2035,10 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
             <SettingsField label={t("settings.modelDomain")}>
               <input
                 className="mem-input"
-                placeholder={t("settings.jiutianDomainHint")}
-                value={jiutianDomain}
-                onChange={e => setJiutianDomain(e.target.value)}
-                onBlur={() => void app.SetJiutianBaseDomain(jiutianDomain)}
+                placeholder={t("settings.modelDomainHint")}
+                value={modelDomainValue}
+                onChange={e => setModelDomainValue(e.target.value)}
+                onBlur={() => void app.SetJiutianBaseDomain(modelDomainValue)}
                 onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
               />
             </SettingsField>
@@ -2485,85 +2485,6 @@ function proxyModeLabel(mode: ProxyMode, t: ReturnType<typeof useT>): string {
   }
 }
 
-// 工具名到状态键的映射
-const JIUTIAN_TOOL_KEYS: Record<string, keyof { imageUnderstand: boolean; imageGenerate: boolean; videoUnderstand: boolean }> = {
-  image_understand: "imageUnderstand",
-  image_generate: "imageGenerate",
-  video_understand: "videoUnderstand",
-};
-
-function JiutianSection() {
-  const t = useT();
-  const [jiutian, setJiutian] = useState<{ imageUnderstand: boolean; imageGenerate: boolean; videoUnderstand: boolean } | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    app.Settings()
-      .then((s) => setJiutian(s.jiutian ?? { imageUnderstand: true, imageGenerate: false, videoUnderstand: false }))
-      .catch(() => {});
-  }, []);
-
-  const toggle = async (name: string, value: boolean) => {
-    if (busy) return;
-    // 乐观更新：点击立即反映到 UI，不等待异步完成。成功后保持乐观值，不再
-    // 立即回读 app.Settings()——后端写读现已同源(applyConfigChange)，回读
-    // 只会把刚写入的值原样覆盖回来，徒增把开关"弹回"的风险。
-    const stateKey = JIUTIAN_TOOL_KEYS[name];
-    const prev = jiutian;
-    if (stateKey) setJiutian((p) => p ? { ...p, [stateKey]: value } : p);
-    setBusy(true);
-    try {
-      await app.SetJiutianTool(name, value);
-    } catch {
-      // 写入失败：回滚到点击前的本地状态，而非再调 app.Settings()。
-      setJiutian(prev);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!jiutian) return null;
-
-  const fields: Array<{ key: keyof typeof jiutian; labelKey: DictKey; hintKey: DictKey; toolName: string }> = [
-    { key: "imageGenerate",   labelKey: "settings.jiutianImageGenerate",   hintKey: "settings.jiutianImageGenerateHint",   toolName: "image_generate" },
-    { key: "videoUnderstand", labelKey: "settings.jiutianVideoUnderstand", hintKey: "settings.jiutianVideoUnderstandHint", toolName: "video_understand" },
-  ];
-
-  return (
-    <section className="mem-section cap-tools">
-      <div className="cap-tools__head">
-        <div className="cap-tools__title">{t("settings.jiutianTitle")}</div>
-        <div className="cap-tools__summary">{t("settings.jiutianSummary")}</div>
-      </div>
-      <div className="cap-tools__list">
-        {fields.map(({ key, labelKey, hintKey, toolName }) => {
-          const label = t(labelKey);
-          const hint = t(hintKey);
-          return (
-            <div key={key} className={`cap-tool-row${!jiutian[key] ? " cap-tool-row--off" : ""}`}>
-              <div className="cap-tool-row__copy">
-                <div className="cap-tool-row__label">{label}</div>
-                <div className="cap-tool-row__hint">{hint}</div>
-              </div>
-              <Tooltip label={`${label}${jiutian[key] ? t("settings.jiutianDisable") : t("settings.jiutianEnable")}`}>
-                <label className="cap-switch" aria-label={`${label}${jiutian[key] ? t("settings.jiutianDisable") : t("settings.jiutianEnable")}`}>
-                  <input
-                    type="checkbox"
-                    checked={jiutian[key]}
-                    disabled={busy}
-                    onChange={(e) => void toggle(toolName, e.target.checked)}
-                  />
-                  <span className="cap-switch__track" />
-                </label>
-              </Tooltip>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 function WebSearchSection({ s, busy, apply }: SectionProps) {
   const t = useT();
   return (
@@ -2759,7 +2680,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
       title={t("settings.providerAccess")}
       description={t("settings.providerAccessHint")}
       actions={
-        <button className="btn btn--small" disabled={busy || adding !== null} onClick={() => setAdding("official")}>
+        <button className="btn btn--small" disabled={busy || adding !== null} onClick={() => setAdding("custom")}>
           {t("settings.addProvider")}
         </button>
       }
@@ -2770,9 +2691,6 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             <strong>{t("settings.providerAccessEmptyTitle")}</strong>
             <span>{t("settings.providerAccessEmptyHint")}</span>
             <div className="provider-empty__actions">
-              <button type="button" className="btn btn--small" disabled={busy} onClick={() => setAdding("official")}>
-                {t("settings.addProvider.officialChoice")}
-              </button>
               <button type="button" className="btn btn--small" disabled={busy} onClick={() => setAdding("custom")}>
                 {t("settings.addProvider.customChoice")}
               </button>
@@ -2784,9 +2702,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             mode={adding}
             kinds={s.providerKinds}
             busy={busy}
-            onMode={setAdding}
             onCancel={() => setAdding(null)}
-            onAddOfficial={(kind, key) => apply(() => app.AddOfficialProviderAccess(kind, key)).then(() => setAdding(null))}
             onAddCustom={(pv) => apply(() => app.SaveProvider(pv)).then(() => setAdding(null))}
           />
         )}
@@ -2851,34 +2767,22 @@ type ProviderModelDraft = {
   selected: string[];
 };
 
-type AddProviderMode = null | "official" | "custom";
-type OfficialProviderKind = "moma";
-
-const OFFICIAL_PROVIDER_CHOICES: Array<{ kind: OfficialProviderKind; labelKey: DictKey; descKey: DictKey; keyEnv: string }> = [
-  { kind: "moma", labelKey: "settings.addProvider.official.moma", descKey: "settings.addProvider.official.momaDesc", keyEnv: "JIUTIAN_API_KEY" },
-];
+type AddProviderMode = null | "custom";
 
 function AddProviderPanel({
   mode,
   kinds,
   busy,
-  onMode,
   onCancel,
-  onAddOfficial,
   onAddCustom,
 }: {
   mode: AddProviderMode;
   kinds: string[];
   busy: boolean;
-  onMode: (mode: AddProviderMode) => void;
   onCancel: () => void;
-  onAddOfficial: (kind: OfficialProviderKind, key: string) => Promise<void>;
   onAddCustom: (p: ProviderView) => void | Promise<void>;
 }) {
   const t = useT();
-  const [officialKind, setOfficialKind] = useState<OfficialProviderKind>("moma");
-  const [key, setKey] = useState("");
-  const selected = OFFICIAL_PROVIDER_CHOICES.find((choice) => choice.kind === officialKind) ?? OFFICIAL_PROVIDER_CHOICES[0];
 
   const header = (
     <div className="provider-add-panel__head">
@@ -2891,82 +2795,11 @@ function AddProviderPanel({
       </button>
     </div>
   );
-  const modeSwitch = (
-    <div className="provider-add-segmented" role="tablist" aria-label={t("settings.addProvider.chooseTitle")}>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={mode === "official"}
-        className={mode === "official" ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
-        disabled={busy}
-        onClick={() => onMode("official")}
-      >
-        {t("settings.addProvider.officialChoice")}
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={mode === "custom"}
-        className={mode === "custom" ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
-        disabled={busy}
-        onClick={() => onMode("custom")}
-      >
-        {t("settings.addProvider.customChoice")}
-      </button>
-    </div>
-  );
-
-  if (mode === "official") {
-    return (
-      <div className="provider-add-panel">
-        {header}
-        {modeSwitch}
-        <div className="provider-add-panel__hint">{t("settings.addProvider.officialHint")}</div>
-        <div className="provider-template-grid">
-          {OFFICIAL_PROVIDER_CHOICES.map((choice) => (
-            <button
-              key={choice.kind}
-              type="button"
-              className={`provider-template-card${officialKind === choice.kind ? " provider-template-card--active" : ""}`}
-              disabled={busy}
-              onClick={() => setOfficialKind(choice.kind)}
-            >
-              <strong>{t(choice.labelKey)}</strong>
-              <span>{t(choice.descKey)}</span>
-            </button>
-          ))}
-        </div>
-        <label className="set-label">{t("settings.providerKeyOptional")}</label>
-        <input
-          className="mem-input"
-          type="password"
-          placeholder={t("settings.setKey", { env: selected.keyEnv })}
-          value={key}
-          disabled={busy}
-          onChange={(e) => setKey(e.target.value)}
-        />
-        <div className="prov-card__actions">
-          <button type="button" className="btn btn--small" disabled={busy} onClick={onCancel}>
-            {t("common.cancel")}
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary btn--small"
-            disabled={busy}
-            onClick={() => void onAddOfficial(officialKind, key.trim())}
-          >
-            {t("settings.addProvider.confirm")}
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   if (mode === "custom") {
     return (
       <div className="provider-add-panel">
         {header}
-        {modeSwitch}
         <div className="provider-add-panel__hint">{t("settings.addProvider.customHint")}</div>
         <ProviderEditor
           kinds={kinds}
@@ -3270,46 +3103,17 @@ function providerAccessGroups(providers: ProviderView[], t: ReturnType<typeof us
   return Array.from(groups.values());
 }
 
-function providerBaseHost(baseUrl: string): string {
-  try {
-    return new URL(baseUrl).hostname.toLowerCase();
-  } catch {
-    return "";
-  }
-}
-
-function canonicalOfficialProviderName(name: string): string {
-  switch (name.trim()) {
-    case "moma":
-      return "moma";
-    default:
-      return name.trim();
-  }
-}
-
-function officialProviderKind(p: ProviderView): string {
-  if (!p.builtIn) return "";
-  const name = canonicalOfficialProviderName(p.name);
-  const host = providerBaseHost(p.baseUrl);
-  if (name === "moma" && host === "jiutian.10086.cn") return "moma";
-  return "";
-}
-
 function providerGroupID(p: ProviderView): string {
-  const official = officialProviderKind(p);
-  if (official) return `builtin:${official}`;
+  // Providers are user-defined (config.Default no longer bundles official
+  // presets); group by name. builtIn is kept only for legacy display.
   return `custom:${p.name}`;
 }
 
-function providerGroupLabel(p: ProviderView, t?: ReturnType<typeof useT>): string {
-  const id = providerGroupID(p);
-	if (id === "builtin:moma") return t ? t("settings.providerLabel.moma") : "MoMA";
+function providerGroupLabel(p: ProviderView, _t?: ReturnType<typeof useT>): string {
   return p.name;
 }
 
-function providerGroupDescription(p: ProviderView, t: ReturnType<typeof useT>): string {
-  const id = providerGroupID(p);
-	if (id === "builtin:moma") return t("settings.providerDesc.moma");
+function providerGroupDescription(p: ProviderView, _t: ReturnType<typeof useT>): string {
   return p.baseUrl;
 }
 

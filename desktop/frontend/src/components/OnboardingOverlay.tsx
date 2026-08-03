@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import logo from "../assets/logo.png";
 import { useT } from "../lib/i18n";
-import { app, openExternal } from "../lib/bridge";
+import { app } from "../lib/bridge";
 
 // Full-window first-run gate: validate a pasted key via Go, then onComplete
 // unmounts us so the rebuilt controller's main UI takes over.
@@ -94,14 +94,6 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
         </button>
 
         <div className="onboarding__links">
-          <button
-            type="button"
-            className="onboarding__link"
-            onClick={() => openExternal("https://jiutian.10086.cn")}
-          >
-            {t("onboarding.getKey")}
-          </button>
-          <span className="onboarding__sep">·</span>
           <span className="onboarding__privacy">{t("onboarding.privacy")}</span>
         </div>
 

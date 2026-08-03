@@ -1048,17 +1048,13 @@ function makeMockApp(): AppBindings {
     },
   };
   const settings: SettingsView = {
-    defaultModel: "moma",
-    fastTaskModel: "moma/qwen/qwen3.6-35b",
+    defaultModel: "",
+    fastTaskModel: "",
     subagentModel: "",
     subagentEffort: "",
     autoPlan: "off",
-    providers: [
-      { name: "moma", builtIn: true, added: false, kind: "openai", baseUrl: "https://jiutian.10086.cn/largemodel/moma/api/v3", modelsUrl: "", models: ["jiutian/jiutian-lan-236b", "jiutian/jiutian-lan-35b", "jiutian/jiutian-lan-thinking", "jiutian/jiutian-da-35b", "qwen/qwen3.6-35b", "qwen/qwen3.6-27b", "qwen/qwen3.5-397b-a17b", "deepseek/deepseek-v4-flash", "z.ai/glm-5.1", "z.ai/glm-5.2", "minimax/minimax-m2.7", "minimax/minimax-m2.5", "moonshotai/kimi-k2.6", "moonshotai/kimi-k2.5-thinking"], default: "minimax/minimax-m2.7", apiKeyEnv: "JIUTIAN_API_KEY", keySet: true, contextWindow: 200_000, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
-    ],
-    officialProviders: [
-      { name: "moma", builtIn: true, added: false, kind: "openai", baseUrl: "https://jiutian.10086.cn/largemodel/moma/api/v3", modelsUrl: "", models: ["jiutian/jiutian-lan-236b", "jiutian/jiutian-lan-35b", "jiutian/jiutian-lan-thinking", "jiutian/jiutian-da-35b", "qwen/qwen3.6-35b", "qwen/qwen3.6-27b", "qwen/qwen3.5-397b-a17b", "deepseek/deepseek-v4-flash", "z.ai/glm-5.1", "z.ai/glm-5.2", "minimax/minimax-m2.7", "minimax/minimax-m2.5", "moonshotai/kimi-k2.6", "moonshotai/kimi-k2.5-thinking"], default: "minimax/minimax-m2.7", apiKeyEnv: "JIUTIAN_API_KEY", keySet: true, contextWindow: 200_000, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
-    ],
+    providers: [],
+    officialProviders: [],
     permissions: { mode: "ask", allow: ["read_file"], ask: [], deny: ["Bash(rm:*)"] },
     sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [] },
     network: {
@@ -1192,7 +1188,7 @@ function makeMockApp(): AppBindings {
       exaKeySet: false,
       linkupKeySet: false,
     },
-    jiutian: { imageUnderstand: true, imageGenerate: true, videoUnderstand: false },
+    jiutian: undefined,
     desktopLanguage: "",
     desktopTheme: "light",
     desktopThemeStyle: "graphite",
@@ -1206,9 +1202,7 @@ function makeMockApp(): AppBindings {
     autoApproveTools: false,
     bypass: false,
   };
-  settings.providers = settings.providers.map((provider) =>
-    provider.apiKeyEnv === "JIUTIAN_API_KEY" ? { ...provider, keySet: !freshMock } : provider,
-  );
+  // providers default to empty (provider-agnostic)
   if (freshMock) {
     settings.configPath = "~/.config/fairpeer/config.toml";
   }
@@ -1509,7 +1503,7 @@ function makeMockApp(): AppBindings {
       workspaceName: "Global",
       topicId: "topic_global",
       topicTitle: "Global",
-      label: "Qwen3.6-35B",
+      label: "",
       ready: true,
       running: false,
       mode: "normal",
@@ -1520,14 +1514,12 @@ function makeMockApp(): AppBindings {
     },
   ];
   const mockModelCatalog = [
-    { ref: "qwen/qwen3.6-35b", provider: "moma", model: "qwen3.6-35b" },
-    { ref: "moonshotai/kimi-k2.6", provider: "moma", model: "kimi-k2.6" },
-    { ref: "minimax/minimax-m2.7", provider: "moma", model: "minimax-m2.7" },
+    { ref: "deepseek/deepseek-v4-pro", provider: "deepseek", model: "deepseek-v4-pro" },
   ];
   const defaultMockModelRef = mockModelCatalog[0].ref;
   const mockModelRef = (name: string): string => {
     const trimmed = name.trim();
-    if (!trimmed || trimmed === "Qwen3.6-35B") return defaultMockModelRef;
+    if (!trimmed) return defaultMockModelRef;
     const exact = mockModelCatalog.find((model) => model.ref === trimmed);
     if (exact) return exact.ref;
     const byModel = mockModelCatalog.find((model) => model.model === trimmed);
@@ -2262,12 +2254,8 @@ function makeMockApp(): AppBindings {
       const skill = capSkills.find((s) => s.name === name);
       if (skill) skill.enabled = enabled;
     },
-    async SetJiutianTool(name: string, enabled: boolean) {
-      const jiutian = settings.jiutian ?? { imageUnderstand: true, imageGenerate: true, videoUnderstand: false };
-      if (name === "image_understand") jiutian.imageUnderstand = enabled;
-      if (name === "image_generate") jiutian.imageGenerate = enabled;
-      if (name === "video_understand") jiutian.videoUnderstand = enabled;
-      settings.jiutian = jiutian;
+    async SetJiutianTool(_name: string, _enabled: boolean) {
+      // mock: jiutian multimodal tools removed (provider-agnostic)
     },
     async DreamStatus(): Promise<DreamStatusView> {
       return {
@@ -2354,9 +2342,7 @@ function makeMockApp(): AppBindings {
           { label: "trust", insert: "trust", hint: "trust this project's hooks" },
         ],
         "/model": [
-          { label: "qwen/qwen3.6-35b", insert: "qwen/qwen3.6-35b", hint: "current" },
-          { label: "minimax/minimax-m2.7", insert: "minimax/minimax-m2.7", hint: "" },
-          { label: "moonshotai/kimi-k2.6", insert: "moonshotai/kimi-k2.6", hint: "" },
+          { label: "deepseek/deepseek-v4-pro", insert: "deepseek/deepseek-v4-pro", hint: "current" },
         ],
         "/effort": [
           { label: "auto", insert: "auto", hint: "use the model default" },
@@ -2658,7 +2644,7 @@ function makeMockApp(): AppBindings {
       settings.defaultModel = ref;
     },
     async GetJiutianBaseDomain(): Promise<string> {
-      return "https://jiutian.10086.cn";
+      return "";
     },
     async SetJiutianBaseDomain(_domain: string) {
       // mock: no-op
@@ -2682,10 +2668,8 @@ function makeMockApp(): AppBindings {
       else settings.providers.push(p);
     },
     async AddOfficialProviderAccess(kind: string, key: string) {
-      const templates: Record<string, ProviderView> = {
-        moma: { name: "moma", builtIn: true, added: true, kind: "openai", baseUrl: "https://jiutian.10086.cn/largemodel/moma/api/v3", modelsUrl: "", models: ["jiutian/jiutian-lan-236b", "jiutian/jiutian-lan-35b", "jiutian/jiutian-lan-thinking", "jiutian/jiutian-da-35b", "qwen/qwen3.6-35b", "qwen/qwen3.6-27b", "qwen/qwen3.5-397b-a17b", "deepseek/deepseek-v4-flash", "z.ai/glm-5.1", "z.ai/glm-5.2", "minimax/minimax-m2.7", "minimax/minimax-m2.5", "moonshotai/kimi-k2.6", "moonshotai/kimi-k2.5-thinking"], default: "minimax/minimax-m2.7", apiKeyEnv: "JIUTIAN_API_KEY", keySet: !!key.trim(), contextWindow: 200_000, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" },
-      };
-      const next = templates[kind] ?? templates.moma;
+      // mock: no official provider templates bundled (provider-agnostic)
+      const next: ProviderView = { name: kind || "custom", builtIn: false, added: true, kind: "openai", baseUrl: "", modelsUrl: "", models: [], default: "", apiKeyEnv: "", keySet: !!key.trim(), contextWindow: 0, reasoningProtocol: "", supportedEfforts: [], defaultEffort: "" };
       const i = settings.providers.findIndex((x) => x.name === next.name);
       if (i >= 0) settings.providers[i] = { ...settings.providers[i], ...next, keySet: next.keySet || settings.providers[i].keySet };
       else settings.providers.push(next);
@@ -2694,8 +2678,7 @@ function makeMockApp(): AppBindings {
       if (!p.baseUrl.trim()) throw new Error(t("settings.fetchModelsMissingBaseUrl"));
       if (!p.apiKeyEnv.trim()) throw new Error(t("settings.fetchModelsMissingKeyEnv"));
       await delay(350);
-      if (p.baseUrl.includes("jiutian")) return ["jiutian/jiutian-lan-236b", "jiutian/jiutian-lan-35b", "jiutian/jiutian-lan-thinking", "jiutian/jiutian-da-35b"];
-      return ["qwen/qwen3.6-35b"];
+      return [];
     },
     async DeleteProvider(name: string) {
       settings.providers = settings.providers.filter((p) => p.name !== name);
@@ -2930,7 +2913,7 @@ function makeMockApp(): AppBindings {
         topicId: _topicID,
         topicTitle: topicLabel(_topicID, t("mock.newSession")),
         projectColor: mockProjectTree.find((node) => node.root === workspaceRoot)?.projectColor,
-        label: "qwen/qwen3.6-35b",
+        label: "",
         ready: true,
         running: mockTopicRunsInScenario(_topicID),
         mode: "normal",
@@ -2959,7 +2942,7 @@ function makeMockApp(): AppBindings {
         workspaceName: "Global",
         topicId: _topicID,
         topicTitle: topicLabel(_topicID, "Global"),
-        label: "qwen/qwen3.6-35b",
+        label: "",
         ready: true,
         running: false,
         mode: "normal",
