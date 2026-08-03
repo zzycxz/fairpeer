@@ -29,7 +29,7 @@ func TestSignFiles(t *testing.T) {
 	t.Setenv("MINISIGN_PASSWORD", "pw")
 
 	dir := t.TempDir()
-	artifact := filepath.Join(dir, "momapeer-linux-amd64.tar.gz")
+	artifact := filepath.Join(dir, "fairpeer-linux-amd64.tar.gz")
 	payload := []byte("pretend this is a release tarball")
 	if err := os.WriteFile(artifact, payload, 0o644); err != nil {
 		t.Fatal(err)
@@ -53,12 +53,12 @@ func TestSignFiles(t *testing.T) {
 func TestGenManifest(t *testing.T) {
 	dir := t.TempDir()
 	names := []string{
-		"momapeer-darwin-arm64.zip",
-		"momapeer-darwin-amd64.zip",
-		"momapeer-windows-amd64.exe", // CI-produced binary (updater channel)
-		"momapeer-linux-amd64.tar.gz",
-		"momapeer-linux-amd64.deb",            // human download, not the updater channel
-		"momapeer-linux-amd64.tar.gz.minisig", // must be skipped
+		"fairpeer-darwin-arm64.zip",
+		"fairpeer-darwin-amd64.zip",
+		"fairpeer-windows-amd64.exe", // CI-produced binary (updater channel)
+		"fairpeer-linux-amd64.tar.gz",
+		"fairpeer-linux-amd64.deb",            // human download, not the updater channel
+		"fairpeer-linux-amd64.tar.gz.minisig", // must be skipped
 		"README.txt",                          // unmatched, must be skipped
 	}
 	for _, n := range names {
@@ -66,7 +66,7 @@ func TestGenManifest(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("GITHUB_REPOSITORY", "zzycxz/momapeer")
+	t.Setenv("GITHUB_REPOSITORY", "zzycxz/fairpeer")
 
 	if err := genManifest(dir, "v1.2.0", "desktop-v1.2.0"); err != nil {
 		t.Fatalf("genManifest: %v", err)
@@ -89,11 +89,11 @@ func TestGenManifest(t *testing.T) {
 	if !ok {
 		t.Fatal("windows-amd64 missing")
 	}
-	wantURL := "https://github.com/zzycxz/fairpeer/releases/download/desktop-v1.2.0/momapeer-windows-amd64.exe"
+	wantURL := "https://github.com/zzycxz/fairpeer/releases/download/desktop-v1.2.0/fairpeer-windows-amd64.exe"
 	if win.URL != wantURL {
 		t.Fatalf("windows url = %q, want %q", win.URL, wantURL)
 	}
-	wantSig := "https://github.com/zzycxz/fairpeer/releases/download/desktop-v1.2.0-sigs/momapeer-windows-amd64.exe.minisig"
+	wantSig := "https://github.com/zzycxz/fairpeer/releases/download/desktop-v1.2.0-sigs/fairpeer-windows-amd64.exe.minisig"
 	if win.Sig != wantSig {
 		t.Fatalf("windows sig = %q, want %q", win.Sig, wantSig)
 	}
@@ -106,7 +106,7 @@ func TestGenManifest(t *testing.T) {
 	if !ok {
 		t.Fatal("linux-amd64 missing")
 	}
-	if !strings.HasSuffix(lin.URL, "/momapeer-linux-amd64.tar.gz") {
+	if !strings.HasSuffix(lin.URL, "/fairpeer-linux-amd64.tar.gz") {
 		t.Fatalf("linux-amd64 url = %q, want the .tar.gz, not the .deb", lin.URL)
 	}
 }

@@ -30,8 +30,8 @@ jobs:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
           # Configure Gitee remote with token auth
-          git remote add gitee https://oauth2:${GITEE_TOKEN}@gitee.com/zzycxz/momapeer.git 2>/dev/null || \
-            git remote set-url gitee https://oauth2:${GITEE_TOKEN}@gitee.com/zzycxz/momapeer.git
+          git remote add gitee https://oauth2:${GITEE_TOKEN}@gitee.com/zzycxz/fairpeer.git 2>/dev/null || \
+            git remote set-url gitee https://oauth2:${GITEE_TOKEN}@gitee.com/zzycxz/fairpeer.git
 
           # Disable LFS for this push (Gitee free doesn't support LFS)
           # This prevents git from trying to upload LFS objects
@@ -51,5 +51,5 @@ jobs:
         run: |
           BRANCH="${{ github.event.ref }}"
           curl -X DELETE \
-            "https://gitee.com/api/v5/repos/zzycxz/momapeer/branches/${BRANCH}" \
+            "https://gitee.com/api/v5/repos/zzycxz/fairpeer/branches/${BRANCH}" \
             -d "access_token=${GITEE_TOKEN}" || true

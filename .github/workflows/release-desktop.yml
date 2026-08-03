@@ -17,45 +17,45 @@ jobs:
         include:
           - os: macos-latest
             platform: darwin/amd64
-            artifact: momapeer-macos-intel.zip
-            binary_name: momapeer.app
+            artifact: fairpeer-macos-intel.zip
+            binary_name: fairpeer.app
             apt_deps: ''
             build_args: ''
 
           - os: macos-latest
             platform: darwin/arm64
-            artifact: momapeer-macos-silicon.zip
-            binary_name: momapeer.app
+            artifact: fairpeer-macos-silicon.zip
+            binary_name: fairpeer.app
             apt_deps: ''
             build_args: ''
 
           - os: windows-latest
             platform: windows/amd64
-            artifact: momapeer-windows-amd64.exe
-            binary_name: momapeer.exe
-            setup_artifact: momapeer-setup-*-amd64.exe
+            artifact: fairpeer-windows-amd64.exe
+            binary_name: fairpeer.exe
+            setup_artifact: fairpeer-setup-*-amd64.exe
             apt_deps: ''
             build_args: ''
 
           - os: windows-latest
             platform: windows/arm64
-            artifact: momapeer-windows-arm64.exe
-            binary_name: momapeer.exe
-            setup_artifact: momapeer-setup-*-arm64.exe
+            artifact: fairpeer-windows-arm64.exe
+            binary_name: fairpeer.exe
+            setup_artifact: fairpeer-setup-*-arm64.exe
             apt_deps: ''
             build_args: ''
 
           - os: ubuntu-22.04
             platform: linux/amd64
-            artifact: momapeer-linux-amd64
-            binary_name: momapeer
+            artifact: fairpeer-linux-amd64
+            binary_name: fairpeer
             apt_deps: 'libgtk-3-dev libwebkit2gtk-4.0-dev x11-utils scrot'
             build_args: ''
 
           - os: ubuntu-24.04-arm
             platform: linux/arm64
-            artifact: momapeer-linux-arm64
-            binary_name: momapeer
+            artifact: fairpeer-linux-arm64
+            binary_name: fairpeer
             apt_deps: 'libgtk-3-dev libwebkit2gtk-4.1-dev x11-utils scrot'
             build_args: '-tags webkit2_41'
 
@@ -159,15 +159,15 @@ jobs:
         run: |
           Write-Output "Listing ./build/bin directory for debugging:"
           Get-ChildItem -Path ./build/bin
-          if (-not (Test-Path "./build/bin/momapeer.exe")) {
+          if (-not (Test-Path "./build/bin/fairpeer.exe")) {
             Write-Output "⚠️ Binary not found! Attempting to locate any exe in the directory."
             $exeFiles = Get-ChildItem -Path ./build/bin/*.exe
             foreach ($file in $exeFiles) {
               Write-Output "Found $($file.Name), copying to expected name..."
-              Copy-Item $file.FullName -Destination "./build/bin/momapeer.exe"
+              Copy-Item $file.FullName -Destination "./build/bin/fairpeer.exe"
             }
           }
-          if (-not (Test-Path "./build/bin/momapeer.exe")) {
+          if (-not (Test-Path "./build/bin/fairpeer.exe")) {
             Write-Error "❌ Still missing after fallback. Failing job."
             exit 1
           }
@@ -186,9 +186,9 @@ jobs:
           & "C:\Program Files (x86)\NSIS\makensis.exe" scripts\installer.nsi
           # Rename with version and arch
           $arch = "${{ matrix.platform }}".Replace("windows/", "")
-          $setupName = "momapeer-setup-$ver-$arch.exe"
-          if (Test-Path "build\bin\momapeer-setup.exe") {
-            Rename-Item "build\bin\momapeer-setup.exe" "$setupName"
+          $setupName = "fairpeer-setup-$ver-$arch.exe"
+          if (Test-Path "build\bin\fairpeer-setup.exe") {
+            Rename-Item "build\bin\fairpeer-setup.exe" "$setupName"
           } else {
             Write-Error "NSIS installer not created"
             exit 1
@@ -198,24 +198,24 @@ jobs:
         if: runner.os == 'Windows'
         uses: softprops/action-gh-release@v2
         with:
-          name: momapeer ${{ github.ref_name }}
+          name: fairpeer ${{ github.ref_name }}
           make_latest: true
           body: |
             ## MoMAPeer Desktop ${{ github.ref_name }}
 
-            See [CHANGELOG.md](https://github.com/zzycxz/momapeer/blob/main/CHANGELOG.md) for details.
+            See [CHANGELOG.md](https://github.com/zzycxz/fairpeer/blob/main/CHANGELOG.md) for details.
           files: ./desktop/build/bin/${{ matrix.setup_artifact }}
 
       - name: Upload Artifact (macOS/Linux)
         if: runner.os != 'Windows'
         uses: softprops/action-gh-release@v2
         with:
-          name: momapeer ${{ github.ref_name }}
+          name: fairpeer ${{ github.ref_name }}
           make_latest: true
           body: |
             ## MoMAPeer Desktop ${{ github.ref_name }}
 
-            See [CHANGELOG.md](https://github.com/zzycxz/momapeer/blob/main/CHANGELOG.md) for details.
+            See [CHANGELOG.md](https://github.com/zzycxz/fairpeer/blob/main/CHANGELOG.md) for details.
           files: ./desktop/build/bin/${{ matrix.artifact }}
 
   manifest:
@@ -237,7 +237,7 @@ jobs:
       - name: Download release artifacts (exclude stale signatures)
         run: |
           mkdir -p release-assets
-          gh release download ${{ github.ref_name }} --dir release-assets --pattern 'momapeer-*' --pattern 'latest.json' || true
+          gh release download ${{ github.ref_name }} --dir release-assets --pattern 'fairpeer-*' --pattern 'latest.json' || true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -285,7 +285,7 @@ jobs:
           fi
           
           TAG="${{ github.ref_name }}"
-          REPO="zzycxz/momapeer"
+          REPO="zzycxz/fairpeer"
           
           echo "Pushing directly to Gitee to sync..."
           git config --global user.name "github-actions[bot]"

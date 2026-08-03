@@ -117,11 +117,11 @@ func TestCheckSHA256(t *testing.T) {
 }
 
 func TestExtractBinary(t *testing.T) {
-	want := []byte("#!/bin/sh\necho momapeer\n")
+	want := []byte("#!/bin/sh\necho fairpeer\n")
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
-	files := map[string][]byte{"README": []byte("ignore me"), "momapeer-desktop": want}
+	files := map[string][]byte{"README": []byte("ignore me"), "fairpeer-desktop": want}
 	for name, body := range files {
 		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
 			t.Fatal(err)
@@ -133,7 +133,7 @@ func TestExtractBinary(t *testing.T) {
 	tw.Close()
 	gz.Close()
 
-	got, err := extractBinary(buf.Bytes(), "momapeer-desktop")
+	got, err := extractBinary(buf.Bytes(), "fairpeer-desktop")
 	if err != nil {
 		t.Fatalf("extractBinary: %v", err)
 	}

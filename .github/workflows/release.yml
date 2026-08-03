@@ -9,7 +9,7 @@ name: Release
 # (brew has no prerelease channel — see .goreleaser.yaml).
 #
 # DISABLED for now: re-enable tag-triggered releases once the Homebrew tap
-# repository (zzycxz/homebrew-momapeer) and the HOMEBREW_TAP_TOKEN secret exist.
+# repository (zzycxz/homebrew-fairpeer) and the HOMEBREW_TAP_TOKEN secret exist.
 # Until then this only runs on manual dispatch (Actions tab → Run workflow).
 on:
   push:

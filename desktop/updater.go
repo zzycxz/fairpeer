@@ -118,13 +118,13 @@ func fetchManifest(ctx context.Context, c *http.Client) (*update.Manifest, error
 
 	// 1. Try Gitee API first
 	if channel != "canary" {
-		apiURL := "https://gitee.com/api/v5/repos/zzycxz/momapeer/releases/latest"
+		apiURL := "https://gitee.com/api/v5/repos/zzycxz/fairpeer/releases/latest"
 		if b, err := fetchBytes(ctx, c, apiURL); err == nil {
 			var res struct {
 				TagName string `json:"tag_name"`
 			}
 			if err := json.Unmarshal(b, &res); err == nil && res.TagName != "" {
-				dlURL := fmt.Sprintf("https://gitee.com/zzycxz/momapeer/releases/download/%s/latest.json", res.TagName)
+				dlURL := fmt.Sprintf("https://gitee.com/zzycxz/fairpeer/releases/download/%s/latest.json", res.TagName)
 				if b2, err := fetchBytes(ctx, c, dlURL); err == nil {
 					var m update.Manifest
 					if err := json.Unmarshal(b2, &m); err == nil {
@@ -295,7 +295,7 @@ func extractBinary(targz []byte, name string) ([]byte, error) {
 // applyLinux replaces the running binary with the one inside the downloaded
 // tar.gz; the caller relaunches afterwards.
 func applyLinux(targz []byte) error {
-	bin, err := extractBinary(targz, "momapeer-desktop")
+	bin, err := extractBinary(targz, "fairpeer-desktop")
 	if err != nil {
 		return err
 	}
@@ -325,7 +325,7 @@ func applyWindows(newExe []byte) error {
 
 	// Write a batch script that waits for the current process to exit, replaces
 	// the binary, cleans up, and relaunches.
-	batPath := filepath.Join(filepath.Dir(currentExe), "momapeer-update.bat")
+	batPath := filepath.Join(filepath.Dir(currentExe), "fairpeer-update.bat")
 	bat := fmt.Sprintf(`@echo off
 :wait
 timeout /t 1 /nobreak >nul
