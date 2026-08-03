@@ -71,7 +71,7 @@ export function StartupSplash({ hold, onDone }: { hold: boolean; onDone: () => v
         <div className="startup-splash__mark" aria-hidden="true">
           <img src={logoSymbol} alt="" draggable={false} />
         </div>
-        <div className="startup-splash__name">MoMA</div>
+        <div className="startup-splash__name">FairPeer</div>
         <div className="startup-splash__sub">{t("app.splashSubtitle")}</div>
         <div className="startup-splash__dots" aria-hidden="true">
           <span />

@@ -58,7 +58,7 @@ export function Welcome({
   return (
     <div className={`welcome welcome--brand${isCowork ? " welcome--cowork" : ""}`}>
       <span className="welcome__brand">
-        <img src={logoWordmark} className="welcome__brand-logo" alt="MoMA" draggable={false} />
+        <img src={logoWordmark} className="welcome__brand-logo" alt="FairPeer" draggable={false} />
       </span>
       <h2 className="welcome__title">{t("welcome.title")}</h2>
       <div className="welcome__tag">{t("welcome.tagline")}</div>

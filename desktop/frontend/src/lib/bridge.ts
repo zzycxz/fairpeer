@@ -1067,7 +1067,7 @@ function makeMockApp(): AppBindings {
       noProxy: "",
       proxy: { type: "socks5", server: "127.0.0.1", port: 7890, username: "", password: "" },
     },
-    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 0, systemPrompt: "You are momapeer, a coding agent.", rpm: 60 },
+    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 0, systemPrompt: "You are fairpeer, a coding agent.", rpm: 60 },
     cowork: {
       browserPath: "",
       embeddingModel: "",
