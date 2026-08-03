@@ -138,6 +138,10 @@ export interface AppBindings {
   AnswerQuestionForTab(tabID: string, id: string, answers: QuestionAnswer[]): Promise<void>;
   ReplayPendingPrompts(): Promise<void>;
   SetFastTaskModel(ref: string): Promise<void>;
+  // FastLLMBaseDomain getters/setters retained for Wails binding parity
+  // (_CheckGenToApp); not called by the frontend UI. Mock impls included below.
+  GetFastLLMBaseDomain(): Promise<string>;
+  SetFastLLMBaseDomain(domain: string): Promise<void>;
   // SetPlanMode/SetMode/SetGoal etc. (non-ForTab variants) are retained for
   // Wails binding parity (_CheckGenToApp) but not called by the frontend,
   // which uses the *ForTab variants exclusively. Their mock impls are omitted.
@@ -2639,6 +2643,12 @@ function makeMockApp(): AppBindings {
     },
     async SetFastTaskModel(ref: string) {
       settings.fastTaskModel = ref;
+    },
+    async GetFastLLMBaseDomain() {
+      return "";
+    },
+    async SetFastLLMBaseDomain(_domain: string) {
+      // mock no-op
     },
     async SetSubagentModel(ref: string) {
       settings.subagentModel = ref;
