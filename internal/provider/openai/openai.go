@@ -35,10 +35,10 @@ import (
 // live streams emit tokens/keepalives far more often. Stored per-client
 // (client.idleTimeout) so a test can shorten it without a shared global that
 // would race other streams' watchdogs.
-// NOTE: Increased from 120s to 180s to accommodate slower models (e.g. glm-5.1)
-// that may take longer to generate responses, especially for complex tasks like
-// PPT generation.
-const defaultStreamIdleTimeout = 180 * time.Second
+// NOTE: Increased to 30m to accommodate deep-reasoning models (e.g. o1/R1/GLM
+// thinking) that can spend a long time in the reasoning phase before emitting
+// the first visible token, especially for complex tasks like PPT generation.
+const defaultStreamIdleTimeout = 30 * time.Minute
 
 func init() {
 	provider.Register("openai", New)

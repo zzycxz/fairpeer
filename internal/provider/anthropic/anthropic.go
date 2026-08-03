@@ -37,7 +37,9 @@ import (
 // mid-stream) sends no RST, so scanner.Scan() would block forever. Generous on
 // purpose; live streams emit far more often. Stored per-client (client.idleTimeout)
 // so a test can shorten it without a shared global that races other watchdogs.
-const defaultStreamIdleTimeout = 120 * time.Second
+// NOTE: Increased to 30m to accommodate deep-reasoning models that can spend a
+// long time thinking before emitting the first visible token.
+const defaultStreamIdleTimeout = 30 * time.Minute
 
 const (
 	// anthropicVersion is the required API version header value.
