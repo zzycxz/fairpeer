@@ -8,7 +8,7 @@ package main
 // keystroke; this LLM parse is the on-demand upgrade for complex phrases.
 //
 // Architecture note: this mirrors App.RagAsk (desktop/rag_app.go) — a direct
-// /chat/completions POST on the fast_task_model (迅捷任务模型, default qwen3.6-35b)
+// /chat/completions POST on the fast_task_model (迅捷任务模型)
 // with temperature:0, gated through the global RPM budget, NOT through
 // provider.SendWithRetry (whose 10x backoff would blow the UI's responsiveness
 // budget). The call is synchronous because SmartParseSchedule is a sync Wails

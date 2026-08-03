@@ -2044,19 +2044,19 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
             </SettingsField>
 
             <SettingsField label={t("settings.screenshotVlmLabel")} hint={t("settings.screenshotVlmHint")}>
-              <SimpleSelect
-                value={s.cowork?.screenshotVlmModel || "qwen/qwen3.5-397b-a17b"}
+              <ModelPicker
+                s={s}
+                refs={refs}
+                value={s.cowork?.screenshotVlmModel ?? ""}
                 disabled={busy}
-                options={[
-                  { value: "qwen/qwen3.6-27b", label: `qwen/qwen3.6-27b — ${t("settings.screenshotVlmLight")}` },
-                  { value: "qwen/qwen3.5-397b-a17b", label: `qwen/qwen3.5-397b-a17b — ${t("settings.screenshotVlmStrong")}` },
-                ]}
-                onChange={(vlm) => {
+                emptyOptionLabel={t("settings.screenshotVlmNone")}
+                emptyOptionHint={t("settings.screenshotVlmNoneHint")}
+                onPick={(vlm) => {
                   const base = s.cowork ?? {
                     browserPath: "", embeddingModel: "", ragEnabled: null,
                     pptActiveTemplate: "", pptTemplates: [], pptTemplateDir: "",
                     smtpPassword: "", imapPassword: "", smtpPasswordSet: false, imapPasswordSet: false, detectedBrowser: "",
-                    screenshotEnabled: false, screenshotHotkey: "Ctrl+Shift+Alt+W", screenshotVlmModel: "qwen/qwen3.6-27b", screenshotPrompt: "",
+                    screenshotEnabled: false, screenshotHotkey: "Ctrl+Shift+Alt+W", screenshotVlmModel: "", screenshotPrompt: "",
                     estopHotkey: "Ctrl+Shift+Pause",
                   };
                   void apply(() => app.SetCoWorkSettings({ ...base, screenshotVlmModel: vlm } as any));
@@ -4243,12 +4243,13 @@ function browserDisplayName(path: string): string {
 
 function CoWorkSection({ s, busy, apply }: SectionProps) {
   const t = useT();
+  const refs = allRefs(s);
   const [draft, setDraft] = useState<CoWorkSettingsView>(() => {
     const base = s.cowork ?? {
       browserPath: "", embeddingModel: "", ragEnabled: null,
       pptActiveTemplate: "", pptTemplates: [], pptTemplateDir: "",
       smtpPassword: "", imapPassword: "", smtpPasswordSet: false, imapPasswordSet: false, detectedBrowser: "",
-      screenshotEnabled: false, screenshotHotkey: "Ctrl+Shift+Alt+W", screenshotVlmModel: "qwen/qwen3.6-27b", screenshotPrompt: "",
+      screenshotEnabled: false, screenshotHotkey: "Ctrl+Shift+Alt+W", screenshotVlmModel: "", screenshotPrompt: "",
       estopHotkey: "Ctrl+Shift+Pause",
     };
     // Default mail provider = 139 (China Mobile). Only when the user hasn't
@@ -4843,14 +4844,14 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
       {/* --- 快捷截屏（全局热键 → 截屏 → AI 解题+联网搜索 → IM/弹窗） --- */}
       <SettingsSection title={t("settings.screenshotTitle")}>
         <SettingsField label={t("settings.screenshotVlmLabel")} hint={t("settings.screenshotVlmHint")}>
-          <SimpleSelect
-            value={draft.screenshotVlmModel || "qwen/qwen3.5-397b-a17b"}
+          <ModelPicker
+            s={s}
+            refs={refs}
+            value={draft.screenshotVlmModel ?? ""}
             disabled={busy}
-            options={[
-              { value: "qwen/qwen3.6-27b", label: `qwen/qwen3.6-27b — ${t("settings.screenshotVlmLight")}` },
-              { value: "qwen/qwen3.5-397b-a17b", label: `qwen/qwen3.5-397b-a17b — ${t("settings.screenshotVlmStrong")}` },
-            ]}
-            onChange={(vlm) => { setDraft(d => { const n = { ...d, screenshotVlmModel: vlm }; commitDraft(n); return n; }); }}
+            emptyOptionLabel={t("settings.screenshotVlmNone")}
+            emptyOptionHint={t("settings.screenshotVlmNoneHint")}
+            onPick={(vlm) => { setDraft(d => { const n = { ...d, screenshotVlmModel: vlm }; commitDraft(n); return n; }); }}
           />
         </SettingsField>
 

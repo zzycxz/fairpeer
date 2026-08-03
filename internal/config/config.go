@@ -1589,14 +1589,14 @@ func normalizeLegacyEffort(c *Config) {
 }
 
 // normalizeCoworkDefaults fills in cowork defaults that the user hasn't set.
-// ScreenshotVLMModel defaults to qwen/qwen3.5-397b-a17b (heavy multimodal);
-// ScreenshotHotkey defaults to Ctrl+Shift+S; EStopHotkey defaults to
-// Ctrl+Shift+Pause. These are only applied when the TOML didn't specify them
-// (empty → default), so explicit user config always wins.
+// ScreenshotVLMModel is left empty when unset — there is no built-in default
+// model, since the vision model depends on which provider the user configured
+// (resolved in Phase 3 from the per-provider vision_model role). An empty value
+// means CallVLM returns a "no VLM model configured" error until the user picks
+// one in Settings. ScreenshotHotkey defaults to Ctrl+Shift+Alt+W; EStopHotkey
+// defaults to Ctrl+Shift+Pause. These are only applied when the TOML didn't
+// specify them (empty → default), so explicit user config always wins.
 func normalizeCoworkDefaults(c *Config) {
-	if strings.TrimSpace(c.Cowork.ScreenshotVLMModel) == "" {
-		c.Cowork.ScreenshotVLMModel = "qwen/qwen3.5-397b-a17b"
-	}
 	if strings.TrimSpace(c.Cowork.ScreenshotHotkey) == "" {
 		c.Cowork.ScreenshotHotkey = "Ctrl+Shift+Alt+W"
 	}

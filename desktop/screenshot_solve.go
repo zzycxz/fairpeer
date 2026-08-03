@@ -51,7 +51,8 @@ func (a *App) triggerScreenshotSolve() {
 		}
 		model := cfg.Cowork.ScreenshotVLMModel
 		if model == "" {
-			model = "qwen/qwen3.5-397b-a17b"
+			a.emitScreenshotNotice("未配置图片识别模型：请在设置中选择一个支持视觉的模型", "")
+			return
 		}
 		entry, err := resolveModelEntry(model)
 		if err != nil {

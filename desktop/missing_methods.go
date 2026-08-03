@@ -41,7 +41,7 @@ func (a *App) SetJiutianBaseDomain(domain string) error {
 // --- Fast-task model（dream/distill 用）---------------------------------
 
 // SetFastTaskModel sets the lightweight model used for background dream/distill
-// runs (config [agent] fast_task_model, default "moma/qwen/qwen3.6-35b"). The
+// runs (config [agent] fast_task_model, default derived from the fast-task provider). The
 // SettingsPanel exposes this as a per-model picker next to the default-model
 // picker, so the user can route background tasks to a cheaper/faster model
 // while keeping the main agent on a stronger one.

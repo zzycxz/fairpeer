@@ -1086,7 +1086,7 @@ function makeMockApp(): AppBindings {
       screenshotEnabled: false,
       screenshotHotkey: "Ctrl+Shift+Alt+W",
       screenshotPrompt: "",
-      screenshotVlmModel: "qwen/qwen3.6-27b",
+      screenshotVlmModel: "",
       estopHotkey: "Ctrl+Shift+Pause",
       emailAccounts: [],
       allowHeadlessEmail: false,
