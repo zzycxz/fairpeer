@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/zzycxz/fairpeer/internal/jiutian"
+	"github.com/zzycxz/fairpeer/internal/apihelper"
 	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
@@ -125,7 +125,7 @@ func callJiutianVLM(ctx context.Context, imgDataURL string, prompt string) (stri
 			Text string `json:"text"`
 		} `json:"result"`
 	}
-	if err := jiutian.APICall(ctx, "POST", "/image/text", req, &resp); err != nil {
+	if err := apihelper.APICall(ctx, "POST", "/image/text", req, &resp); err != nil {
 		return "", fmt.Errorf("jiutian VLM: %w", err)
 	}
 	return resp.Result.Text, nil

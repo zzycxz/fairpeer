@@ -28,7 +28,7 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/boot"
 	"github.com/zzycxz/fairpeer/internal/config"
-	"github.com/zzycxz/fairpeer/internal/jiutian"
+	"github.com/zzycxz/fairpeer/internal/apihelper"
 )
 
 // llmResolveTimeTimeout bounds a single LLM time-parse call. PreviewSchedule is a
@@ -72,7 +72,7 @@ func llmParseTime(ctx context.Context, text string, now time.Time) (time.Time, e
 		return time.Time{}, fmt.Errorf("LLM api key not configured")
 	}
 	if baseURL == "" {
-		baseURL = jiutian.BaseURL
+		baseURL = apihelper.BaseURL
 	}
 	if modelName == "" {
 		modelName = "deepseek/deepseek-v4-flash"
@@ -123,14 +123,14 @@ func llmParseTime(ctx context.Context, text string, now time.Time) (time.Time, e
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := jiutian.Client.Do(req)
+	resp, err := apihelper.Client.Do(req)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("LLM request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		return time.Time{}, fmt.Errorf("LLM HTTP %d: %s", resp.StatusCode, jiutian.Truncate(string(respBody), 300))
+		return time.Time{}, fmt.Errorf("LLM HTTP %d: %s", resp.StatusCode, apihelper.Truncate(string(respBody), 300))
 	}
 
 	var chatResp struct {

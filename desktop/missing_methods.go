@@ -31,7 +31,7 @@ func (a *App) GetJiutianBaseDomain() string {
 // SetJiutianBaseDomain persists a Jiutian API root override ("" = reset to the
 // built-in default). The SettingsPanel input fires this on blur/Enter so the
 // change survives restarts. A non-empty value rewrites every Jiutian provider's
-// base URL via boot-time jiutian.SetBaseDomain on the next launch.
+// base URL via boot-time apihelper.SetBaseDomain on the next launch.
 func (a *App) SetJiutianBaseDomain(domain string) error {
 	domain = strings.TrimSpace(domain)
 	return a.applyConfigChange(func(c *config.Config) error {

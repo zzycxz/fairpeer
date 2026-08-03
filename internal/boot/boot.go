@@ -31,7 +31,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/hook"
 	"github.com/zzycxz/fairpeer/internal/installsource"
 	"github.com/zzycxz/fairpeer/internal/instruction"
-	"github.com/zzycxz/fairpeer/internal/jiutian"
+	"github.com/zzycxz/fairpeer/internal/apihelper"
 	"github.com/zzycxz/fairpeer/internal/jobs"
 	"github.com/zzycxz/fairpeer/internal/lsp"
 	"github.com/zzycxz/fairpeer/internal/memory"
@@ -78,7 +78,7 @@ func GlobalBudget() *provider.RequestBudget { return globalBudget }
 // matching how the platform meters a single API key. The placeholder name is
 // passed only to satisfy the call-site signature.
 func jiutianBudgetKey() string {
-	return provider.BudgetKeyForConfig("jiutian-direct", jiutian.BaseURL, os.Getenv("JIUTIAN_API_KEY"))
+	return provider.BudgetKeyForConfig("jiutian-direct", apihelper.BaseURL, os.Getenv("JIUTIAN_API_KEY"))
 }
 
 // ragBudgetKey returns the budget bucket key for RAG extraction (the
@@ -114,7 +114,7 @@ func RebindRAGBudget(extractor any, cfg *config.Config) {
 	// Always rebind the Jiutian direct path — covers multimodal tools, embedding,
 	// and the VLM fallback regardless of which extractor is in use.
 	if globalBudget != nil {
-		jiutian.SetBudget(globalBudget, jiutianBudgetKey())
+		apihelper.SetBudget(globalBudget, jiutianBudgetKey())
 	}
 	// Rebind the extractor if it supports it (jiutianExtractor does; HE-based
 	// extraction runs in a subprocess and is not gated here).
@@ -288,18 +288,18 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// rebuild (a runtime RPM change re-runs Build). Extraction's per-extractor
 	// binding is rebound separately by RebindRAGBudget from the desktop layer,
 	// which owns the extractor instance.
-	jiutian.SetBudget(globalBudget, jiutianBudgetKey())
+	apihelper.SetBudget(globalBudget, jiutianBudgetKey())
 	httpClient, err := netclient.NewHTTPClient(proxySpec, netclient.TransportOptions{})
 	if err != nil {
 		return nil, err
 	}
 	// Inject the proxy-aware client into the shared Jiutian helper. Without this,
-	// jiutian.APICall (used by the 九天 VLM fallback in the degradation chain,
+	// apihelper.APICall (used by the 九天 VLM fallback in the degradation chain,
 	// video_understand, file upload, and image generation) bypasses the proxy
 	// and fails with EOF in environments that require one. Done unconditionally
 	// so all callers share the same client.
-	jiutian.SetClient(httpClient)
-	jiutian.SetBaseDomain(cfg.Jiutian.BaseDomainOrDefault())
+	apihelper.SetClient(httpClient)
+	apihelper.SetBaseDomain(cfg.Jiutian.BaseDomainOrDefault())
 
 	// The executor's provider is the main-agent provider — pass mainProvider=true
 	// so NewProviderWithProxy marks it high-priority (always granted RPM slots;

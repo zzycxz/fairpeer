@@ -330,7 +330,7 @@ type JiutianConfig struct {
 }
 
 // BaseDomainOrDefault returns the configured Jiutian base URL, or "" when unset
-// so the caller (boot → jiutian.SetBaseDomain) resets to the default rather
+// so the caller (boot → apihelper.SetBaseDomain) resets to the default rather
 // than forcing an empty override.
 func (j JiutianConfig) BaseDomainOrDefault() string {
 	return strings.TrimSpace(j.BaseDomain)
@@ -1494,7 +1494,7 @@ func Default() *Config {
 		// in reserve for the main agent under concurrent load.
 		LLM: LLMConfig{RPM: 60, ReserveMain: 2},
 		Providers: []ProviderEntry{
-			{Name: "moma", Kind: "openai", BaseURL: "https://jiutian.10086.cn/largemodel/moma/api/v3", Models: BuiltinMoMAModels, Default: "minimax/minimax-m2.7", APIKeyEnv: "JIUTIAN_API_KEY", ContextWindow: 200_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
+			{Name: "moma", Kind: "openai", BaseURL: "https://apihelper.10086.cn/largemodel/moma/api/v3", Models: BuiltinMoMAModels, Default: "minimax/minimax-m2.7", APIKeyEnv: "JIUTIAN_API_KEY", ContextWindow: 200_000, Price: &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}},
 		},
 	}
 }
@@ -1937,7 +1937,7 @@ func ensureMoMAOfficialProvider(c *Config) {
 	entry := ProviderEntry{
 		Name:          "moma",
 		Kind:          "openai",
-		BaseURL:       "https://jiutian.10086.cn/largemodel/moma/api/v3",
+		BaseURL:       "https://apihelper.10086.cn/largemodel/moma/api/v3",
 		Models:        officialModels,
 		Default:       "minimax/minimax-m2.7",
 		APIKeyEnv:     "JIUTIAN_API_KEY",

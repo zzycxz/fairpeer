@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
-	"github.com/zzycxz/fairpeer/internal/jiutian"
+	"github.com/zzycxz/fairpeer/internal/apihelper"
 	"github.com/zzycxz/fairpeer/internal/scheduler"
 	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
@@ -389,7 +389,7 @@ func (n schedulerNotifier) Notify(name, result string) {
 	// to Windows Action Center. We bypass Wails' SendNotification (hardcoded 7s
 	// Short, no override) and call go-toast directly with Duration=Long, reusing
 	// the AUMID/COM registration from InitializeNotifications. Best-effort.
-	go notifyLongDurationToast(name, jiutian.Truncate(result, 200))
+	go notifyLongDurationToast(name, apihelper.Truncate(result, 200))
 }
 
 // --- helpers ----------------------------------------------------------------

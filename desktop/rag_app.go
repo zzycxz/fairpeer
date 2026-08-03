@@ -32,7 +32,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"github.com/zzycxz/fairpeer/internal/boot"
 	"github.com/zzycxz/fairpeer/internal/config"
-	"github.com/zzycxz/fairpeer/internal/jiutian"
+	"github.com/zzycxz/fairpeer/internal/apihelper"
 	"github.com/zzycxz/fairpeer/internal/rag"
 	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
@@ -845,7 +845,7 @@ func (a *App) RagAsk(collection, question string) (string, error) {
 		return "", fmt.Errorf("LLM api key not configured")
 	}
 	if baseURL == "" {
-		baseURL = jiutian.BaseURL
+		baseURL = apihelper.BaseURL
 	}
 
 	systemPrompt := `你是一个知识库问答助手。请严格基于下方"知识库参考"中的信息回答用户的问题。
@@ -887,14 +887,14 @@ func (a *App) RagAsk(collection, question string) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := jiutian.Client.Do(req)
+	resp, err := apihelper.Client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("LLM request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("LLM HTTP %d: %s", resp.StatusCode, jiutian.Truncate(string(respBody), 300))
+		return "", fmt.Errorf("LLM HTTP %d: %s", resp.StatusCode, apihelper.Truncate(string(respBody), 300))
 	}
 
 	var chatResp struct {

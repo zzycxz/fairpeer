@@ -22,7 +22,7 @@ import (
 
 const (
 	model      = "qwen/qwen3.6-35b"
-	baseURL    = "https://jiutian.10086.cn/largemodel/moma/api/v3"
+	baseURL    = "https://apihelper.10086.cn/largemodel/moma/api/v3"
 	fatResults = 20
 	fatBytes   = 12_000
 )

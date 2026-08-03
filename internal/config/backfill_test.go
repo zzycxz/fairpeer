@@ -6,7 +6,7 @@ func TestNormalizeLegacyProviderModelsRepairsOfficialProvider(t *testing.T) {
 	c := &Config{Providers: []ProviderEntry{{
 		Name:      "moma",
 		Kind:      "openai",
-		BaseURL:   "https://jiutian.10086.cn/largemodel/moma/api/v3",
+		BaseURL:   "https://apihelper.10086.cn/largemodel/moma/api/v3",
 		APIKeyEnv: "JIUTIAN_API_KEY",
 	}}}
 	normalizeLegacyProviderModels(c)

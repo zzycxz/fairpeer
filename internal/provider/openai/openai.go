@@ -2,7 +2,7 @@
 // It self-registers under the "openai" kind, so MoMA (九天), MiniMax-M3, and
 // any other OpenAI-compatible endpoint are just config instances rather than
 // code. Each instance picks the wire shape from its base URL:
-//   - api.jiutian.10086.cn → emits thinking.type=enabled (MoMA-flavor CoT) plus
+//   - api.apihelper.10086.cn → emits thinking.type=enabled (MoMA-flavor CoT) plus
 //     thinking_effort as a depth hint.
 //   - api.minimaxi.com → emits thinking.type=adaptive|disabled (M3's binary
 //     knob) instead of reasoning_effort, since M3 has no level scale.
@@ -24,7 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zzycxz/fairpeer/internal/jiutian"
+	"github.com/zzycxz/fairpeer/internal/apihelper"
 	"github.com/zzycxz/fairpeer/internal/netclient"
 	"github.com/zzycxz/fairpeer/internal/provider"
 )
@@ -897,7 +897,7 @@ func jiutianImageUnderstand(ctx context.Context, imageParam string) (string, err
 			Text string `json:"text"`
 		} `json:"result"`
 	}
-	if err := jiutian.APICall(ctx, "POST", "/image/text", payload, &result); err != nil {
+	if err := apihelper.APICall(ctx, "POST", "/image/text", payload, &result); err != nil {
 		return "", err
 	}
 	if result.Code != 200 || result.Result.Text == "" {

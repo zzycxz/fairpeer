@@ -226,7 +226,7 @@ func officialProviderKindFromEntry(p config.ProviderEntry) string {
 	host := officialProviderHost(p.BaseURL)
 	switch config.CanonicalDesktopOfficialProviderName(p.Name) {
 	case "moma":
-		if host == "jiutian.10086.cn" {
+		if host == "apihelper.10086.cn" {
 			return "moma"
 		}
 	}
@@ -860,7 +860,7 @@ func officialProviderTemplate(kind string) ([]config.ProviderEntry, string, erro
 		return []config.ProviderEntry{{
 			Name:          "moma",
 			Kind:          "openai",
-			BaseURL:       "https://jiutian.10086.cn/largemodel/moma/api/v3",
+			BaseURL:       "https://apihelper.10086.cn/largemodel/moma/api/v3",
 			Models:        config.BuiltinMoMAModels,
 			Default:       "qwen/qwen3.6-35b",
 			APIKeyEnv:     "JIUTIAN_API_KEY",

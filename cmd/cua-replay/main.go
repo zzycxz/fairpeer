@@ -55,7 +55,7 @@ import (
 	"time"
 )
 
-const momaBaseURL = "https://jiutian.10086.cn/largemodel/moma/api/v3"
+const momaBaseURL = "https://apihelper.10086.cn/largemodel/moma/api/v3"
 
 func main() {
 	var (

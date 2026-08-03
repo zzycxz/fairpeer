@@ -103,7 +103,7 @@ func TestSaveProviderFiltersNonChatModels(t *testing.T) {
 	if err := app.SaveProvider(ProviderView{
 		Name:      "custom-moma",
 		Kind:      "openai",
-		BaseURL:   "https://api.jiutian.10086.cn/v1",
+		BaseURL:   "https://api.apihelper.10086.cn/v1",
 		Models:    []string{"jiutian-lan.5-asr", "jiutian-lan-35b", "jiutian-lan.5-tts"},
 		Default:   "jiutian-lan.5-asr",
 		APIKeyEnv: "JIUTIAN_API_KEY",

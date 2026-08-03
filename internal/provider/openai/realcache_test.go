@@ -37,7 +37,7 @@ func TestRealMoMACacheProbe(t *testing.T) {
 
 	p, err := New(provider.Config{
 		Name:    "MoMA",
-		BaseURL: "https://api.jiutian.10086.cn",
+		BaseURL: "https://api.apihelper.10086.cn",
 		Model:   "qwen3.6-35b",
 		APIKey:  key,
 		Extra:   map[string]any{"api_key_env": "JIUTIAN_API_KEY"},

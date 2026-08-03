@@ -7,7 +7,7 @@ func TestDirectProxyHostsFromNoProxyProviders(t *testing.T) {
 	spec := Default().NetworkProxySpec()
 	hasJiutian := false
 	for _, h := range spec.DirectHosts {
-		if h == "api.jiutian.10086.cn" {
+		if h == "api.apihelper.10086.cn" {
 			hasJiutian = true
 		}
 	}
@@ -24,7 +24,7 @@ func TestExplicitProxyOverridesProviderNoProxy(t *testing.T) {
 	c.Network.ProxyMode = "custom"
 	spec := c.NetworkProxySpec()
 	for _, h := range spec.DirectHosts {
-		if h == "token-plan-cn.jiutian.10086.cn" {
+		if h == "token-plan-cn.apihelper.10086.cn" {
 			t.Fatalf("custom proxy must not force MoMA direct; DirectHosts = %v", spec.DirectHosts)
 		}
 	}

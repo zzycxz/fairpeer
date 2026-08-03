@@ -12,12 +12,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zzycxz/fairpeer/internal/jiutian"
+	"github.com/zzycxz/fairpeer/internal/apihelper"
 )
 
 // jiutianAPICall delegates to the shared Jiutian API helper.
 func jiutianAPICall(ctx context.Context, method, path string, payload any, out any) error {
-	return jiutian.APICall(ctx, method, path, payload, out)
+	return apihelper.APICall(ctx, method, path, payload, out)
 }
 
 // jiutianUploadFile uploads a local file to Jiutian's file storage and returns
@@ -52,14 +52,14 @@ func jiutianUploadFile(ctx context.Context, filePath string) (string, error) {
 		return "", fmt.Errorf("JIUTIAN_API_KEY not set")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://jiutian.10086.cn/largemodel/moma/api/v1/fs/uploadFile", &body)
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://apihelper.10086.cn/largemodel/moma/api/v1/fs/uploadFile", &body)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := jiutian.Client.Do(req)
+	resp, err := apihelper.Client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("jiutian upload: %w", err)
 	}
@@ -67,7 +67,7 @@ func jiutianUploadFile(ctx context.Context, filePath string) (string, error) {
 	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("jiutian upload HTTP %d: %s", resp.StatusCode, jiutian.Truncate(string(respBody), 300))
+		return "", fmt.Errorf("jiutian upload HTTP %d: %s", resp.StatusCode, apihelper.Truncate(string(respBody), 300))
 	}
 
 	var result struct {
@@ -102,7 +102,7 @@ func jiutianDownloadFile(ctx context.Context, url string) ([]byte, string, error
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := jiutian.Client.Do(req)
+	resp, err := apihelper.Client.Do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("jiutian download: %w", err)
 	}
@@ -113,7 +113,7 @@ func jiutianDownloadFile(ctx context.Context, url string) ([]byte, string, error
 		return nil, "", fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != 200 {
-		return nil, "", fmt.Errorf("jiutian download HTTP %d: %s", resp.StatusCode, jiutian.Truncate(string(raw), 300))
+		return nil, "", fmt.Errorf("jiutian download HTTP %d: %s", resp.StatusCode, apihelper.Truncate(string(raw), 300))
 	}
 	if len(raw) == 0 || len(raw) > 10*1024*1024 {
 		return nil, "", fmt.Errorf("downloaded image must be between 1 byte and 10 MB")

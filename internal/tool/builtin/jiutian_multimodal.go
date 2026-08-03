@@ -155,7 +155,7 @@ func (*imageGenerate) Execute(ctx context.Context, args json.RawMessage) (string
 		// answers 401. Download each image with auth and save it under
 		// .fairpeer/attachments so the user gets an accessible local file; fall
 		// back to the raw link (with a note) if the download fails.
-		downloadURL := fmt.Sprintf("https://jiutian.10086.cn/largemodel/moma/api/v1/fs/getFile?key=%s", img.URL)
+		downloadURL := fmt.Sprintf("https://apihelper.10086.cn/largemodel/moma/api/v1/fs/getFile?key=%s", img.URL)
 		raw, mime, err := jiutianDownloadFile(ctx, downloadURL)
 		if err != nil {
 			fmt.Fprintf(&sb, "  %d: %s  (本地保存失败：%v；该链接需带 API Key 访问)\n", i+1, downloadURL, err)

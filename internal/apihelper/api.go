@@ -1,8 +1,9 @@
-// Package jiutian provides shared helpers for calling China Mobile's Jiutian
-// (MoMA) platform APIs. Both the tool layer (image_understand, video_understand)
-// and the provider layer (vision image description) import this package to avoid
-// duplicating the HTTP call pattern.
-package jiutian
+// Package apihelper provides a shared HTTP helper for OpenAI-compatible API
+// calls used by the tool layer (multimodal), the provider layer (vision image
+// description), and desktop features (scheduler LLM, RAG ask). It centralizes
+// API-key lookup, request building, rate-limit gating, and response parsing so
+// these callers do not duplicate the HTTP boilerplate.
+package apihelper
 
 import (
 	"bytes"
@@ -107,7 +108,7 @@ func APICall(ctx context.Context, method, path string, payload any, out any) err
 	// when reserve_main is configured. File-storage paths (/fs/*) skip this.
 	if budget != nil && isLLMPath(path) {
 		if err := budget.Acquire(ctx, budgetKey, false); err != nil {
-			return fmt.Errorf("jiutian %s rate-limited: %w", path, err)
+			return fmt.Errorf("apihelper %s rate-limited: %w", path, err)
 		}
 	}
 
@@ -131,14 +132,14 @@ func APICall(ctx context.Context, method, path string, payload any, out any) err
 
 	resp, err := Client.Do(req)
 	if err != nil {
-		return fmt.Errorf("jiutian %s: %w", path, err)
+		return fmt.Errorf("apihelper %s: %w", path, err)
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != 200 {
 		errMsg := Truncate(string(respBody), 300)
-		return fmt.Errorf("jiutian %s HTTP %d: %s", path, resp.StatusCode, errMsg)
+		return fmt.Errorf("apihelper %s HTTP %d: %s", path, resp.StatusCode, errMsg)
 	}
 
 	if out != nil {
