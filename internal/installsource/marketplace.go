@@ -39,6 +39,31 @@ func DefaultMarketSources() []MarketSource {
 	}
 }
 
+// BuiltinCatalog returns the offline curated skill catalog (exported for the
+// desktop settings panel to show without network).
+func BuiltinCatalog() []CatalogEntry {
+	return builtinCatalog
+}
+
+// MarketSourceMeta is the desktop-facing view of a market source (no internal
+// types leaked).
+type MarketSourceMeta struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// DefaultMarketSourceMetas returns the default sources as lightweight metadata
+// for the frontend.
+func DefaultMarketSourceMetas() []MarketSourceMeta {
+	sources := DefaultMarketSources()
+	out := make([]MarketSourceMeta, len(sources))
+	for i, s := range sources {
+		out[i] = MarketSourceMeta{ID: s.ID, Name: s.Name, Type: s.Type}
+	}
+	return out
+}
+
 // CatalogEntry is one installable skill from a market source, in a unified
 // cross-source format. This is what browse/search returns and what the agent
 // presents to the user.

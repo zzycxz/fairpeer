@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/boot"
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/control"
+	"github.com/zzycxz/fairpeer/internal/installsource"
 	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
@@ -1428,4 +1430,62 @@ func trimList(in []string) []string {
 		}
 	}
 	return out
+}
+
+// --- Skill Marketplace (SPEC v2 §3.4C) ---------------------------------------
+// The desktop UI calls these to browse/search the skill catalog and install from
+// it, without going through the agent's natural-language flow. They reuse the
+// same installSourceTool (SSRF guard, safety scan, manifest) as skill_market.
+
+// SkillMarketBrowse returns a browsable catalog of skills from the builtin
+// source (offline, always available). For network sources (Anthropic/OpenAI/
+// ClawHub), use SkillMarketSearch which handles network access.
+func (a *App) SkillMarketBrowse() ([]installsource.CatalogEntry, error) {
+	return installsource.BuiltinCatalog(), nil
+}
+
+// SkillMarketSources returns the list of default market sources for the UI.
+func (a *App) SkillMarketSources() []installsource.MarketSourceMeta {
+	return installsource.DefaultMarketSourceMetas()
+}
+
+// SkillMarketSearch searches across all default sources by keyword. Returns
+// matching skills from all sources (builtin + GitHub + ClawHub).
+func (a *App) SkillMarketSearch(query string) (string, error) {
+	home, _ := os.UserHomeDir()
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+	tl := installsource.NewMarketToolFromOptions(installsource.Options{
+		ProjectRoot: home,
+		HomeDir:     home,
+	})
+	raw, _ := json.Marshal(map[string]any{"action": "search", "query": query})
+	return tl.Execute(ctx, raw)
+}
+
+// SkillMarketInstall installs a skill from the marketplace by its installRef
+// (obtained from browse/search results). Goes through the same plan→apply
+// pipeline as install_source (safety scan + manifest). Returns the install
+// result summary. When apply=false, returns the plan for review.
+func (a *App) SkillMarketInstall(installRef, name, scope string, apply bool) (string, error) {
+	home, _ := os.UserHomeDir()
+	ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
+	defer cancel()
+	tl := installsource.NewMarketToolFromOptions(installsource.Options{
+		ProjectRoot: home,
+		HomeDir:     home,
+	})
+	args := map[string]any{
+		"action":     "install",
+		"installRef": installRef,
+		"apply":      apply,
+	}
+	if name != "" {
+		args["name"] = name
+	}
+	if scope != "" {
+		args["scope"] = scope
+	}
+	raw, _ := json.Marshal(args)
+	return tl.Execute(ctx, raw)
 }

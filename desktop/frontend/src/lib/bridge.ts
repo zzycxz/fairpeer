@@ -81,6 +81,8 @@ import type {
   ExpertRunView,
   RecentChatView,
   BotDockStatusView,
+  CatalogEntry,
+  MarketSourceMeta,
 } from "./types";
 
 const GLOBAL_PROJECT_ORDER_KEY = "__global__";
@@ -204,6 +206,10 @@ export interface AppBindings {
   RemoveSkillPath(path: string): Promise<void>;
   RefreshSkills(): Promise<void>;
   SetSkillEnabled(name: string, enabled: boolean): Promise<void>;
+  SkillMarketBrowse(): Promise<CatalogEntry[]>;
+  SkillMarketSources(): Promise<MarketSourceMeta[]>;
+  SkillMarketSearch(query: string): Promise<string>;
+  SkillMarketInstall(installRef: string, name: string, scope: string, apply: boolean): Promise<string>;
   DreamStatus(): Promise<DreamStatusView>;
   SetDreamEnabled(enabled: boolean): Promise<void>;
   SetDreamIntervals(dreamDays: number, distillDays: number): Promise<void>;
@@ -330,7 +336,7 @@ export interface AppBindings {
   // Multi-vendor onboarding (provider_templates.go + app.go).
   GetProviderTemplates(): Promise<ProviderTemplate[]>;
   ProbeVendorKey(baseURL: string, apiKey: string): Promise<void>;
-  SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string): Promise<void>;
+  SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string, visionModel: string, fastModel: string): Promise<void>;
   // Provider-template registry (registry.go).
   GetRegistryStatus(): Promise<RegistryStatus>;
   RefreshRegistry(): Promise<void>;
@@ -2261,6 +2267,27 @@ function makeMockApp(): AppBindings {
       const skill = capSkills.find((s) => s.name === name);
       if (skill) skill.enabled = enabled;
     },
+    async SkillMarketBrowse(): Promise<CatalogEntry[]> {
+      return [
+        { source: "builtin", name: "pdf", description: "Create and analyze PDF documents", topics: ["office"], installs: 0, contentUrl: "", installRef: "" },
+        { source: "builtin", name: "docx", description: "Create and edit Word documents", topics: ["office"], installs: 0, contentUrl: "", installRef: "" },
+        { source: "builtin", name: "skill-creator", description: "Create and edit skills", topics: ["meta"], installs: 0, contentUrl: "", installRef: "" },
+      ];
+    },
+    async SkillMarketSources(): Promise<MarketSourceMeta[]> {
+      return [
+        { id: "builtin", name: "Curated", type: "builtin-catalog" },
+        { id: "anthropics", name: "Anthropic Skills", type: "github-repo" },
+        { id: "openai", name: "OpenAI Skills", type: "github-repo" },
+        { id: "clawhub", name: "ClawHub Community", type: "clawhub-api" },
+      ];
+    },
+    async SkillMarketSearch(_query: string): Promise<string> {
+      return "No results (dev mock)";
+    },
+    async SkillMarketInstall(_installRef: string, _name: string, _scope: string, _apply: boolean): Promise<string> {
+      return "Installed (dev mock)";
+    },
     async DreamStatus(): Promise<DreamStatusView> {
       return {
         enabled: dreamMock.enabled,
@@ -2889,6 +2916,19 @@ function makeMockApp(): AppBindings {
     async NeedsOnboarding() {
       return !settings.providers.some((p) => p.keySet);
     },
+    async SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string, visionModel: string, fastModel: string) {
+      if (!apiKey.trim()) throw new Error("key is required");
+      await delay(300);
+      // Mock: add the provider to settings so NeedsOnboarding flips to false.
+      settings.providers.push({
+        name: template.name, builtIn: false, added: true, kind: template.kind,
+        baseUrl: template.baseUrl, models: template.models, modelsUrl: "",
+        default: defaultModel || template.defaultModel, apiKeyEnv: template.apiKeyEnv,
+        keySet: true, contextWindow: template.contextWindow,
+        reasoningProtocol: "", supportedEfforts: [], defaultEffort: "",
+      });
+      settings.defaultModel = template.name + "/" + (defaultModel || template.defaultModel);
+    },
     async ConnectKey(apiKey: string) {
       if (!apiKey.trim()) throw new Error("key is required");
       // Mark the first provider as having a key set (mock behavior)
@@ -2920,19 +2960,6 @@ function makeMockApp(): AppBindings {
     async ProbeVendorKey(_baseURL: string, apiKey: string) {
       if (!apiKey.trim()) throw new Error("invalid API key");
       await delay(500);
-    },
-    async SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string) {
-      if (!apiKey.trim()) throw new Error("key is required");
-      await delay(300);
-      // Mock: add the provider to settings so NeedsOnboarding flips to false.
-      settings.providers.push({
-        name: template.name, builtIn: false, added: true, kind: template.kind,
-        baseUrl: template.baseUrl, models: template.models, modelsUrl: "",
-        default: defaultModel || template.defaultModel, apiKeyEnv: template.apiKeyEnv,
-        keySet: true, contextWindow: template.contextWindow,
-        reasoningProtocol: "", supportedEfforts: [], defaultEffort: "",
-      });
-      settings.defaultModel = template.name + "/" + (defaultModel || template.defaultModel);
     },
     async GetRegistryStatus() {
       await delay(50);

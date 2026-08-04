@@ -481,6 +481,25 @@ export interface SkillView {
    * skill the user left enabled — enabled=true, active=false. */
   active?: boolean;
 }
+
+/** A skill catalog entry from the marketplace (browse/search results). */
+export interface CatalogEntry {
+  source: string;
+  name: string;
+  slug?: string;
+  description: string;
+  topics?: string[];
+  installs: number;
+  contentUrl: string;
+  installRef: string;
+}
+
+/** A marketplace source's metadata (for the source list UI). */
+export interface MarketSourceMeta {
+  id: string;
+  name: string;
+  type: string;
+}
 export interface SkillRootSkillView {
   name: string;
   description: string;

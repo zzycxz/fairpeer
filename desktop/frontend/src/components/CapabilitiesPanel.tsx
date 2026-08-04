@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { asArray } from "../lib/array";
 import { app, openExternal } from "../lib/bridge";
 import { useT } from "../lib/i18n";
-import type { CapabilitiesView, MCPServerInput, ServerView, SkillRootSkillView, SkillRootView, SkillView } from "../lib/types";
+import type { CapabilitiesView, CatalogEntry, MCPServerInput, ServerView, SkillRootSkillView, SkillRootView, SkillView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
@@ -1739,7 +1739,131 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 					))}
 				</div>
 			)}
+
+			<SkillMarketSection />
 		</section>
+	);
+}
+
+// SkillMarketSection is the marketplace browse/search/install UI embedded at
+// the bottom of the skills page. Users search across all default sources
+// (Anthropic, OpenAI, ClawHub, curated) and install any skill directly from
+// the GUI — no need to go through the agent's natural-language flow.
+function SkillMarketSection() {
+	const t = useT();
+	const [query, setQuery] = useState("");
+	const [results, setResults] = useState<CatalogEntry[] | null>(null);
+	const [searching, setSearching] = useState(false);
+	const [err, setErr] = useState<string | null>(null);
+	const [installing, setInstalling] = useState<string | null>(null);
+	const [installMsg, setInstallMsg] = useState<string | null>(null);
+
+	const doSearch = useCallback(async () => {
+		const q = query.trim();
+		if (!q) return;
+		setSearching(true);
+		setErr(null);
+		setResults(null);
+		try {
+			const out = await app.SkillMarketSearch(q);
+			// SkillMarketSearch returns a formatted string. Parse skill entries
+			// from it (lines starting with "- **name** [source] — desc").
+			const entries: CatalogEntry[] = [];
+			for (const line of out.split("\n")) {
+				const m = line.match(/^- \*\*(.+?)\*\* \[(.+?)\] — (.+?)(?: \((\d+) installs\))?(?: `installRef: (.+?)`)?$/);
+				if (m) {
+					entries.push({
+						source: m[2],
+						name: m[1],
+						description: m[3],
+						installs: m[4] ? parseInt(m[4], 10) : 0,
+						contentUrl: m[5] || "",
+						installRef: m[5] || "",
+					});
+				}
+			}
+			setResults(entries);
+		} catch (e) {
+			setErr(String((e as Error)?.message ?? e));
+		} finally {
+			setSearching(false);
+		}
+	}, [query]);
+
+	const doInstall = useCallback(async (entry: CatalogEntry) => {
+		if (!entry.installRef) return;
+		setInstalling(entry.installRef);
+		setInstallMsg(null);
+		try {
+			await app.SkillMarketInstall(entry.installRef, entry.name, "project", true);
+			setInstallMsg(t("caps.marketInstalled"));
+		} catch (e) {
+			setInstallMsg(t("caps.marketInstallFailed", { msg: String((e as Error)?.message ?? e) }));
+		} finally {
+			setInstalling(null);
+		}
+	}, [t]);
+
+	return (
+		<div className="cap-market" style={{ marginTop: "24px" }}>
+			<div className="cap-skills-head">
+				<div className="cap-skills-head__copy">
+					<div className="cap-skills-head__title">{t("caps.marketBrowse")}</div>
+				</div>
+			</div>
+			<div className="cap-search" style={{ marginBottom: "12px" }}>
+				<input
+					className="mem-input"
+					type="search"
+					placeholder={t("caps.marketSearchPlaceholder")}
+					value={query}
+					onChange={(e) => setQuery(e.target.value)}
+					onKeyDown={(e) => { if (e.key === "Enter") void doSearch(); }}
+				/>
+				<button
+					className="btn btn--small"
+					disabled={searching || !query.trim()}
+					onClick={() => void doSearch()}
+				>
+					{searching ? t("caps.marketSearching") : t("caps.marketSearch")}
+				</button>
+			</div>
+			{err && <div className="banner banner--error" style={{ marginBottom: "8px" }}>{err}</div>}
+			{installMsg && <div className="banner" style={{ marginBottom: "8px" }}>{installMsg}</div>}
+			{results !== null && (
+				<>
+					{results.length === 0 ? (
+						<div className="mem-empty">{t("caps.marketNoResults")}</div>
+					) : (
+						<div className="cap-skills">
+							{results.map((e, i) => (
+								<div key={`${e.name}-${i}`} className="cap-skill-card">
+									<div className="cap-skill-card__head">
+										<span className="cap-skill-card__name">{e.name}</span>
+										<span className="cap-skill-badge">{e.source}</span>
+										{e.installs > 0 && (
+											<span className="cap-skill-badge cap-skill-badge--off">
+												{t("caps.marketInstalls", { n: e.installs })}
+											</span>
+										)}
+									</div>
+									<div className="cap-skill-card__desc">{e.description}</div>
+									<div style={{ marginTop: "8px" }}>
+										<button
+											className="btn btn--small btn--primary"
+											disabled={installing === e.installRef || !e.installRef}
+											onClick={() => void doInstall(e)}
+										>
+											{installing === e.installRef ? t("caps.marketInstalling") : t("caps.marketInstall")}
+										</button>
+									</div>
+								</div>
+							))}
+						</div>
+					)}
+				</>
+			)}
+		</div>
 	);
 }
 
