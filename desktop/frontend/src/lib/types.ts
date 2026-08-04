@@ -1031,6 +1031,12 @@ export interface ProviderTemplate {
   models: string[]; // preset model list (fallback when probe fails)
 }
 
+// RegistryStatus reports the provider-template registry freshness for Settings.
+export interface RegistryStatus {
+  updatedAt: string; // RFC3339; "" = never (using embed snapshot)
+  source: string; // "cache" | "embed"
+}
+
 // JobView is one running background job (desktop/app.go Jobs) for the status bar.
 export interface JobView {
   id: string;

@@ -21,8 +21,8 @@ import (
 
 // registryCacheFile is the on-disk cache format.
 type registryCacheFile struct {
-	UpdatedAt string              `json:"updated_at"` // RFC3339
-	Templates []ProviderTemplate  `json:"templates"`
+	UpdatedAt string             `json:"updated_at"` // RFC3339
+	Templates []ProviderTemplate `json:"templates"`
 }
 
 // modelsDevResponse is the subset of models.dev/api.json we decode. Only the
@@ -30,18 +30,18 @@ type registryCacheFile struct {
 type modelsDevResponse map[string]modelsDevVendor
 
 type modelsDevVendor struct {
-	Name   string                  `json:"name"`   // display name
-	API    string                  `json:"api"`    // base URL
-	Env    []string                `json:"env"`    // env var names
-	Doc    string                  `json:"doc"`    // doc URL
+	Name   string                    `json:"name"`   // display name
+	API    string                    `json:"api"`    // base URL
+	Env    []string                  `json:"env"`    // env var names
+	Doc    string                    `json:"doc"`    // doc URL
 	Models map[string]modelsDevModel `json:"models"` // model ID → detail
 }
 
 type modelsDevModel struct {
-	Name       string           `json:"name"`
-	Attachment bool             `json:"attachment"` // supports image/file input
-	Reasoning  bool             `json:"reasoning"`
-	Limit      modelsDevLimit   `json:"limit"`
+	Name       string         `json:"name"`
+	Attachment bool           `json:"attachment"` // supports image/file input
+	Reasoning  bool           `json:"reasoning"`
+	Limit      modelsDevLimit `json:"limit"`
 }
 
 type modelsDevLimit struct {

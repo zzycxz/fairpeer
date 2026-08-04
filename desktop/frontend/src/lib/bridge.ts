@@ -8,7 +8,7 @@
 import type * as GeneratedApp from "../../wailsjs/go/main/App";
 
 import { t } from "./i18n";
-import { modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeToolApprovalMode, ProviderTemplate } from "./types";
+import { modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeToolApprovalMode, ProviderTemplate, RegistryStatus } from "./types";
 
 import type {
   BotConnectionDiagnostic,
@@ -330,7 +330,10 @@ export interface AppBindings {
   // Multi-vendor onboarding (provider_templates.go + app.go).
   GetProviderTemplates(): Promise<ProviderTemplate[]>;
   ProbeVendorKey(baseURL: string, apiKey: string): Promise<void>;
-  SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string, visionModel: string, fastModel: string): Promise<void>;
+  SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string): Promise<void>;
+  // Provider-template registry (registry.go).
+  GetRegistryStatus(): Promise<RegistryStatus>;
+  RefreshRegistry(): Promise<void>;
   // Crash overlay "Send report" (desktop/crash_app.go): scrubs user paths, attaches
   // version/os/arch, POSTs to the collection endpoint. Only ever sent on user click.
   ReportCrash(kind: string, detail: string): Promise<void>;
@@ -2886,9 +2889,6 @@ function makeMockApp(): AppBindings {
     async NeedsOnboarding() {
       return !settings.providers.some((p) => p.keySet);
     },
-    async SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string, visionModel: string, fastModel: string) {
-      return Call(142, template, apiKey, defaultModel, visionModel, fastModel);
-    },
     async ConnectKey(apiKey: string) {
       if (!apiKey.trim()) throw new Error("key is required");
       // Mark the first provider as having a key set (mock behavior)
@@ -2933,6 +2933,13 @@ function makeMockApp(): AppBindings {
         reasoningProtocol: "", supportedEfforts: [], defaultEffort: "",
       });
       settings.defaultModel = template.name + "/" + (defaultModel || template.defaultModel);
+    },
+    async GetRegistryStatus() {
+      await delay(50);
+      return { updatedAt: "", source: "embed" } as RegistryStatus;
+    },
+    async RefreshRegistry() {
+      await delay(500);
     },
     async ReportCrash() {
       await delay(300);

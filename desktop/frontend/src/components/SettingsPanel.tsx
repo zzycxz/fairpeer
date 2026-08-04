@@ -2798,8 +2798,8 @@ function AddProviderPanel({
   }
 
   if (mode === "builtin") {
-    const direct = templates.filter(t => !t.isAggregator);
-    const aggregators = templates.filter(t => t.isAggregator);
+    const direct = templates.filter(t => !t.aggregator);
+    const aggregators = templates.filter(t => t.aggregator);
     return (
       <div className="provider-add-panel">
         {header}

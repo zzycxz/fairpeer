@@ -311,7 +311,7 @@ export function ModelStep({ template, apiKey, onDone, t }: {
     setState("saving");
     setError(null);
     try {
-      await app.SetupProvider(template, apiKey, defaultPick, visionPick, fastPick);
+      await app.SetupProvider(template, apiKey, defaultPick);
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

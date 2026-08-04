@@ -1377,6 +1377,12 @@ export const zh: Record<DictKey, string> = {
   "onboarding.error.network": "无法连接供应商 —— 检查网络后再试。",
   "onboarding.error.unknown": "出错啦：{msg}",
   "onboarding.skip": "稍后设置",
+  "settings.registryTitle": "模型库",
+  "settings.registryLastUpdated": "最后更新：{time}",
+  "settings.registryNeverUpdated": "使用内置默认",
+  "settings.registryCheckUpdate": "检查更新",
+  "settings.registryChecking": "检查中…",
+  "settings.registryUpdated": "模型库已更新。",
 
   // 上下文面板
   "context.overview": "当前会话概览",

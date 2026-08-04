@@ -1376,6 +1376,12 @@ export const en = {
   "onboarding.error.network": "Couldn't reach the provider — check your network and try again.",
   "onboarding.error.unknown": "Something went wrong: {msg}",
   "onboarding.skip": "Skip for now",
+  "settings.registryTitle": "Model library",
+  "settings.registryLastUpdated": "Last updated: {time}",
+  "settings.registryNeverUpdated": "Using built-in defaults",
+  "settings.registryCheckUpdate": "Check for updates",
+  "settings.registryChecking": "Checking…",
+  "settings.registryUpdated": "Model library updated.",
 
   // context panel
   "context.overview": "Session overview",

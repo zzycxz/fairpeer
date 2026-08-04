@@ -162,4 +162,3 @@ func (a *App) GetRegistryStatus() RegistryStatus {
 }
 
 // RefreshRegistry and initRegistry live in registry_fetcher.go (remote + cache).
-
