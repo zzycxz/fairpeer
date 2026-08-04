@@ -20,7 +20,7 @@ import {
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
 import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
-import type { BotConnectionView, BotInstallStartResult, BotSettingsView, CoWorkSettingsView, HookConfigView, HooksSettingsView, MailProbeResult, NetworkView, ProviderTemplate, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotConnectionView, BotInstallStartResult, BotSettingsView, CoWorkSettingsView, HookConfigView, HooksSettingsView, MailProbeResult, NetworkView, ProviderTemplate, ProviderView, RegistryStatus, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
@@ -2644,6 +2644,8 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   };
 
   return (
+    <>
+    <RegistryBox />
     <SettingsSection
       title={t("settings.providerAccess")}
       description={t("settings.providerAccessHint")}
@@ -2712,6 +2714,47 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             onDelete={(p) => apply(() => app.RemoveProviderAccess(p.name))}
           />
         ))}
+      </div>
+    </SettingsSection>
+    </>
+  );
+}
+
+// RegistryBox shows the model-library freshness + "check for updates" button.
+function RegistryBox() {
+  const t = useT();
+  const [status, setStatus] = useState<RegistryStatus | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    app.GetRegistryStatus().then(setStatus).catch(() => {});
+  }, []);
+
+  const check = async () => {
+    setChecking(true);
+    try {
+      await app.RefreshRegistry();
+      const s = await app.GetRegistryStatus();
+      setStatus(s);
+    } catch { /* ignore */ }
+    setChecking(false);
+  };
+
+  const timeStr = status?.updatedAt
+    ? new Date(status.updatedAt).toLocaleString()
+    : t("settings.registryNeverUpdated");
+
+  return (
+    <SettingsSection title={t("settings.registryTitle")}>
+      <div className="registry-box">
+        <span className="registry-box__time">
+          {status?.updatedAt
+            ? t("settings.registryLastUpdated").replace("{time}", timeStr)
+            : t("settings.registryNeverUpdated")}
+        </span>
+        <button className="btn btn--small" onClick={() => void check()} disabled={checking}>
+          {checking ? t("settings.registryChecking") : t("settings.registryCheckUpdate")}
+        </button>
       </div>
     </SettingsSection>
   );

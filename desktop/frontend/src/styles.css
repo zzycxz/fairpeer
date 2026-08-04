@@ -25302,3 +25302,16 @@ a[href] {
     transform: translateY(0) scale(1);
   }
 }
+
+/* ── Model library (registry) box in Providers settings ─────────────────── */
+.registry-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+}
+.registry-box__time {
+  font-size: 13px;
+  color: var(--text-muted, #888);
+}
