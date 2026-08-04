@@ -123,64 +123,6 @@ var providerTemplates = []ProviderTemplate{
 		DocURL: "https://platform.openai.com/api-keys",
 		Models: []string{"gpt-5.6-terra", "gpt-5.6-luna"},
 	},
-
-	// ── Coding Plan aggregators (7) ─────────────────────────────────────
-	{
-		Name: "qwen-coding", DisplayName: "通义 Coding Plan", Kind: "openai",
-		BaseURL: "https://coding.dashscope.aliyuncs.com/v1", APIKeyEnv: "QWEN_CODING_API_KEY",
-		DefaultModel: "qwen3.7-plus", VisionModel: "qwen3.7-plus",
-		Vision: true, ContextWindow: 1000000, CodingOnly: true, Aggregator: true, Category: "aggregator",
-		DocURL: "https://bailian.console.aliyun.com/?apiKey=1",
-		Models: []string{"qwen3.7-plus", "qwen3.6-plus", "kimi-k2.5", "glm-5", "minimax-m2.5", "qwen3-coder-plus", "glm-4.7"},
-	},
-	{
-		Name: "zhipu-coding", DisplayName: "智谱 z.ai", Kind: "openai",
-		BaseURL: "https://api.z.ai/v1", APIKeyEnv: "ZHIPU_CODING_API_KEY",
-		DefaultModel: "glm-5.2", VisionModel: "glm-5.2",
-		Vision: true, ContextWindow: 1000000, CodingOnly: true, Aggregator: true, Category: "aggregator",
-		DocURL: "https://z.ai/manage/apikey",
-		Models: []string{"glm-5.2", "glm-5.1", "glm-5"},
-	},
-	{
-		Name: "volcengine-coding", DisplayName: "火山 Coding Plan", Kind: "openai",
-		BaseURL: "https://ark.cn-beijing.volces.com/api/v3", APIKeyEnv: "VOLCENGINE_API_KEY",
-		DefaultModel: "doubao-seed-evolving", VisionModel: "doubao-seed-evolving",
-		Vision: true, ContextWindow: 1000000, CodingOnly: true, Aggregator: true, Category: "aggregator",
-		DocURL: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
-		Models: []string{"doubao-seed-evolving", "doubao-seed-2.1-turbo", "deepseek-v4-pro", "kimi-k2.6"},
-	},
-	{
-		Name: "baidu-coding", DisplayName: "百度千帆 Token Plan", Kind: "openai",
-		BaseURL: "https://qianfan.baidubce.com/v2/tokenplan/personal", APIKeyEnv: "BAIDU_API_KEY",
-		DefaultModel: "glm-5.2", VisionModel: "glm-5.2",
-		Vision: true, ContextWindow: 1000000, CodingOnly: true, Aggregator: true, Category: "aggregator",
-		DocURL: "https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application",
-		Models: []string{"ernie-5.1", "glm-5.2", "kimi-k2.6", "deepseek-v4-pro"},
-	},
-	{
-		Name: "tencent-coding", DisplayName: "腾讯云 TokenHub", Kind: "openai",
-		BaseURL: "https://api.lkeap.cloud.tencent.com/v1", APIKeyEnv: "TENCENT_API_KEY",
-		DefaultModel: "deepseek-v4-pro", VisionModel: "deepseek-v4-pro",
-		Vision: true, ContextWindow: 1000000, CodingOnly: true, Aggregator: true, Category: "aggregator",
-		DocURL: "https://console.cloud.tencent.com/lkeap/api-key",
-		Models: []string{"deepseek-v4-pro", "glm-5.2", "kimi-k2.6", "minimax-m2.7"},
-	},
-	{
-		Name: "stepfun-coding", DisplayName: "阶跃 Step Plan", Kind: "openai",
-		BaseURL: "https://api.stepfun.com/v1", APIKeyEnv: "STEPFUN_API_KEY",
-		DefaultModel: "step-3.7-flash", VisionModel: "step-3.7-flash",
-		Vision: true, ContextWindow: 256000, CodingOnly: true, Aggregator: false, Category: "aggregator",
-		DocURL: "https://platform.stepfun.com/interface-key",
-		Models: []string{"step-3.7-flash", "step-3.5-flash"},
-	},
-	{
-		Name: "xfyun-coding", DisplayName: "讯飞 MaaS Coding", Kind: "openai",
-		BaseURL: "https://maas-coding-api.cn-huabei-1.xf-yun.com/v2", APIKeyEnv: "XFYUN_API_KEY",
-		DefaultModel: "astron-code-latest", VisionModel: "astron-code-latest",
-		Vision: true, ContextWindow: 256000, CodingOnly: true, Aggregator: true, Category: "aggregator",
-		DocURL: "https://www.xfyun.cn/doc/spark/CodingPlan.html",
-		Models: []string{"astron-code-latest", "auto", "xsparkx2agent"},
-	},
 }
 
 // GetProviderTemplates returns the built-in vendor presets for the onboarding
