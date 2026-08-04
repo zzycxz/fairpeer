@@ -1247,11 +1247,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Hooks:             hookRunner,
 		Jobs:              jm,
 		ProjectChecks:     projectChecks,
-		ContextWindow:     entry.ContextWindow,
-		SoftCompactRatio:  cfg.Agent.SoftCompactRatio,
-		CompactRatio:      cfg.Agent.CompactRatio,
-		CompactForceRatio: cfg.Agent.CompactForceRatio,
-		ArchiveDir:        config.ArchiveDir(),
+		ContextWindow:        entry.ContextWindow,
+		SoftCompactRatio:     cfg.Agent.SoftCompactRatio,
+		CompactRatio:         cfg.Agent.CompactRatio,
+		CompactForceRatio:    cfg.Agent.CompactForceRatio,
+		ContextBudgetPercent: cfg.Agent.ContextBudgetPercent,
+		ArchiveDir:           config.ArchiveDir(),
 	}, sink)
 
 	// Custom slash commands (.fairpeer/commands + user dir). Best-effort: a malformed

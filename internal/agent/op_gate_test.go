@@ -255,3 +255,32 @@ func TestOpGate_GuidanceReturned(t *testing.T) {
 		t.Errorf("op already stopped: no duplicate op-stop guidance, got %q", msg2)
 	}
 }
+
+// TestEffectiveContextWindow_Budget verifies the context-budget percentage
+// scales the window used for compaction decisions (SPEC v2 §3.6). A separate
+// test file would be cleaner but reusing this one avoids a new import block.
+func TestEffectiveContextWindow_Budget(t *testing.T) {
+	cases := []struct {
+		window int
+		pct    int
+		want   int
+	}{
+		{100000, 0, 100000},   // 0/100 = full window (default)
+		{100000, 100, 100000}, // 100 = full window
+		{100000, 80, 80000},   // 80% budget
+		{100000, 50, 50000},   // 50% budget
+		{0, 80, 0},            // no window at all
+	}
+	for _, c := range cases {
+		a := &Agent{contextWindow: c.window, contextBudgetFrac: float64(c.pct) / 100.0}
+		// Guard against pct=0 → frac would be 0; effectiveContextWindow clamps
+		// frac<=0 to 1.0, so reproduce that for the 0 case.
+		if c.pct == 0 {
+			a.contextBudgetFrac = 1.0
+		}
+		got := a.effectiveContextWindow()
+		if got != c.want {
+			t.Errorf("window=%d pct=%d → effective=%d, want %d", c.window, c.pct, got, c.want)
+		}
+	}
+}

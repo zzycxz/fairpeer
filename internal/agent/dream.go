@@ -155,7 +155,9 @@ Four files hold the always-injected memory (find them under the user config dir,
 - NEVER exceed the character targets. If a file is full, compress by merging or cutting the least-valuable line — do not grow it.
 - NEVER save transient debug state (a current stack trace, file contents being inspected, today's throwaway todo) — those belong nowhere in the portrait.
 - NEVER duplicate the same fact across files. Mode-specific → <mode>.md; mode-agnostic identity → user.md; mode-agnostic world fact → memory.md.
+- NEVER duplicate a fact already in the file — before writing, check each line is not a restatement of an existing one (a "prefers Go" line already covers "likes Go"; merge instead of adding). If two lines say nearly the same thing, fold them into one.
 - Identity facts (user.md) are the most stable — only change them on strong evidence; prefer refining over rewriting.
+- RESPECT protected sections: any region wrapped in <!-- protected --> ... <!-- /protected --> tags is a user-declared red line (a core constraint, a hard preference). You may NOT modify, delete, or move text inside these tags. Write around them — update the unprotected parts only. If a file has protected regions, output them verbatim in your rewrite.
 - Prefer concrete specifics over generic praise ("后端工程师，8年Go经验" not "experienced developer").`
 
 // Portrait file size targets (characters). dreamCompactThreshold is the HARD

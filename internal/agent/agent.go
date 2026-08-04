@@ -277,6 +277,7 @@ type Agent struct {
 	// pauses instead of looping. softCompactNoticed gates the one-shot soft-ratio
 	// notice so it fires once per approach, not every turn.
 	contextWindow       int
+	contextBudgetFrac   float64 // ContextBudgetPercent / 100; 1.0 = full window
 	softCompactRatio    float64
 	compactRatio        float64
 	compactForceRatio   float64
@@ -420,6 +421,23 @@ func (a *Agent) SessionCache() (hit, miss int) {
 // ContextWindow returns the configured context-window size in tokens. 0
 // means compaction is disabled for this agent.
 func (a *Agent) ContextWindow() int { return a.contextWindow }
+
+// effectiveContextWindow returns the window the agent actually treats as
+// available for compaction decisions: contextWindow scaled by the user's
+// context-budget percentage (SPEC v2 §3.6). A budget of 80% makes compaction
+// trigger as if the window were 20% smaller — saving cost on pricing tiers
+// and avoiding quality drop near the edge. When no budget is set (frac=1.0),
+// this equals contextWindow, so default behavior is unchanged.
+func (a *Agent) effectiveContextWindow() int {
+	if a.contextWindow <= 0 {
+		return 0
+	}
+	frac := a.contextBudgetFrac
+	if frac <= 0 || frac > 1 {
+		frac = 1
+	}
+	return int(float64(a.contextWindow) * frac)
+}
 
 // mid-turn steer marker.
 const midTurnSteerPrefix = "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]"
@@ -594,6 +612,13 @@ type Options struct {
 	CompactForceRatio float64
 	RecentKeep        int
 	ArchiveDir        string
+	// ContextBudgetPercent caps the effective context window the agent treats as
+	// available, triggering compaction earlier (SPEC v2 §3.6). 0 or 100 = use
+	// the full window (the default, zero user config). 80 = compact as if the
+	// window were 80% of its real size — useful for cost tiers (input past a
+	// provider's pricing breakpoint doubles) and for models whose quality
+	// degrades near the window edge. Clamped to (0,100].
+	ContextBudgetPercent int
 
 	// Hooks fires PreToolUse / PostToolUse shell hooks around tool calls. nil
 	// disables hook firing.
@@ -622,6 +647,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	}
 	if opts.RecentKeep <= 0 {
 		opts.RecentKeep = minRecentKeep
+	}
+	// Context budget: default 100 (use the full window). Clamp into (0,100].
+	budgetPct := opts.ContextBudgetPercent
+	if budgetPct <= 0 || budgetPct > 100 {
+		budgetPct = 100
 	}
 	if nilutil.IsNil(sink) {
 		sink = event.Discard
@@ -653,6 +683,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		evidence:          evidence.NewLedger(),
 		projectChecks:     append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
 		contextWindow:     opts.ContextWindow,
+		contextBudgetFrac: float64(budgetPct) / 100.0,
 		softCompactRatio:  opts.SoftCompactRatio,
 		compactRatio:      opts.CompactRatio,
 		compactForceRatio: opts.CompactForceRatio,

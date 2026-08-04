@@ -34,6 +34,7 @@ auto_plan         = "off"   # off|on; off keeps plan mode manual
 soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact
 compact_ratio       = 0.8   # try compacting when prompt reaches this fraction
 compact_force_ratio = 0.9   # force compacting at this high-water mark
+# context_budget_percent = 80   # cap the effective window for compaction (0/100 = full). Lower = compact earlier — saves cost on input pricing tiers and avoids quality drop near the window edge.
 # fast_task_model = "<provider>/<model>"   # lightweight model for background tasks (dream/distill/rag-extract)
 # planner_model = "<provider>/<model>"   # optional: enable two-model collaboration
 # subagent_model = "<provider>/<model>"   # optional default for runAs=subagent skills

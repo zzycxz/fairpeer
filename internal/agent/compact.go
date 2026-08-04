@@ -101,8 +101,11 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	if a.contextWindow <= 0 || u == nil || u.PromptTokens == 0 {
 		return
 	}
-	high := int(float64(a.contextWindow) * a.compactRatio)
-	soft := int(float64(a.contextWindow) * a.softCompactRatio)
+	// Use the budget-scaled window so a user-set ContextBudgetPercent (SPEC v2
+	// §3.6) triggers compaction earlier without shrinking the real window.
+	win := a.effectiveContextWindow()
+	high := int(float64(win) * a.compactRatio)
+	soft := int(float64(win) * a.softCompactRatio)
 	// Between the soft ratio and the trigger, report growing context once without
 	// rewriting the prefix — a compaction here would needlessly crater the cache.
 	if u.PromptTokens >= soft && u.PromptTokens < high && !a.softCompactNoticed {
@@ -122,7 +125,7 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	if a.compactStuck {
 		return
 	}
-	force := u.PromptTokens >= int(float64(a.contextWindow)*a.compactForceRatio)
+	force := u.PromptTokens >= int(float64(win)*a.compactForceRatio)
 	// Soft-trim large outputs first (head+tail preservation), then hard-prune
 	// whatever is still too large. The two-pass approach saves context tokens
 	// while keeping the most useful parts of large tool outputs.

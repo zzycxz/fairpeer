@@ -1101,6 +1101,11 @@ type AgentConfig struct {
 	SoftCompactRatio  float64 `toml:"soft_compact_ratio"`
 	CompactRatio      float64 `toml:"compact_ratio"`
 	CompactForceRatio float64 `toml:"compact_force_ratio"`
+	// ContextBudgetPercent caps the effective window for compaction decisions
+	// (SPEC v2 §3.6). 0/100 = full window (default, zero config). E.g. 80 =
+	// compact as if the window were 80% of its real size — saves cost on input
+	// pricing tiers and avoids quality drop near the window edge.
+	ContextBudgetPercent int `toml:"context_budget_percent"`
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
