@@ -643,11 +643,18 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// client + browser-launch are owned here; the desktop registers an
 		// optional screencast sink so the panel can mirror the agent's browser.
 		builtin.SetBrowserAutoRuntime(buildBrowserAutoRuntime(cfg, opts))
-		// Hybrid RAG: an embedding model was previously used to inject an embedder
-		// for semantic reranking. The platform-only embedder was removed; pass nil
-		// so rag_search stays FTS5-only (the default, works offline). A provider
-		// embedder will be reintroduced in a later phase.
+		// RAG semantic layer: the embedding-based reranker was removed (it needed
+		// an external Python service). Keep it off — the LLM semantic layer below
+		// replaces it with zero external deps.
 		builtin.SetRAGEmbedder(nil)
+		// LLM-driven semantic search (SPEC v2 §3.6): query expansion (synonyms /
+		// English stems / cross-language) + rerank, reusing the user's already-
+		// configured provider. Fully internalized — no Python, no embedding model,
+		// no new deps. nil provider (e.g. headless run before keys are set) keeps
+		// rag_search at plain FTS5; any call failure degrades the same way.
+		if execProv != nil {
+			builtin.SetRAGLLM(rag.NewLLMSemantic(execProv))
+		}
 		// Document tools (csv/json/md/txt read + write + convert). Text-based
 		// formats only; binary Office handled elsewhere (ppt via WPS MCP).
 		for _, t := range builtin.DocumentTools() {

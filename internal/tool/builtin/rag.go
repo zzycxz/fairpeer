@@ -34,6 +34,16 @@ func SetRAGEmbedder(e rag.Embedder) { globalRAGEmbedder = e }
 
 var globalRAGEmbedder rag.Embedder
 
+// globalRAGLLM is the LLM-driven semantic layer (query expansion + rerank),
+// reusing the user's already-configured provider. nil = off (plain FTS5).
+var globalRAGLLM *rag.LLMSemantic
+
+// SetRAGLLM injects the LLM semantic layer (SPEC v2 §3.6). Called at boot when
+// a provider is available; nil = FTS5-only (graceful degradation). The layer
+// is automatic — the user never configures it, it just improves recall/precision
+// using the provider key they already set up.
+func SetRAGLLM(l *rag.LLMSemantic) { globalRAGLLM = l }
+
 // globalRAGSessionResolver returns the session's active collections so that
 // rag_search can auto-scope when the caller omits the collection parameter.
 // Injected via SetRAGSessionResolver (desktop app.go). nil = no session scope
@@ -132,10 +142,28 @@ func AutoSearch(ctx context.Context, query, collection string) string {
 		}
 	}
 
-	// Layer 2: FTS5 original-text snippets.
-	results, err := globalRAGStore.Search(query, collection, topK)
+	// Layer 2: FTS5 original-text snippets. When the LLM semantic layer is
+	// available, expand the query first (synonyms/stems/cross-language) to
+	// improve recall, then rerank the over-fetched pool for precision.
+	expandedQuery := query
+	overFetch := topK
+	if globalRAGLLM != nil {
+		if terms := globalRAGLLM.ExpandQuery(ctx, query); len(terms) > 1 {
+			expandedQuery = strings.Join(terms, " OR ")
+		}
+		overFetch = topK * 4
+		if overFetch < 20 {
+			overFetch = 20
+		}
+	}
+	results, err := globalRAGStore.Search(expandedQuery, collection, overFetch)
 	if err == nil && len(results) > 0 {
-		if globalRAGEmbedder != nil {
+		if globalRAGLLM != nil {
+			results = globalRAGLLM.Rerank(ctx, query, results)
+			if len(results) > topK {
+				results = results[:topK]
+			}
+		} else if globalRAGEmbedder != nil {
 			results = globalRAGStore.Rerank(ctx, query, results, globalRAGEmbedder, 0.5)
 			if len(results) > topK {
 				results = results[:topK]
@@ -327,19 +355,35 @@ func (ragSearch) Execute(ctx context.Context, args json.RawMessage) (string, err
 	}
 
 	// Layer 2: FTS5 original-text snippets (always available; the quotable
-	// source-text layer). Over-fetch for reranking when an embedder is present.
+	// source-text layer). Over-fetch + rerank when a semantic layer is present
+	// (LLM preferred; embedding fallback). Query expansion improves recall
+	// before reranking sharpens precision.
+	expandedQuery := p.Query
 	pool := p.TopK
-	if globalRAGEmbedder != nil {
+	if globalRAGLLM != nil {
+		if terms := globalRAGLLM.ExpandQuery(ctx, p.Query); len(terms) > 1 {
+			expandedQuery = strings.Join(terms, " OR ")
+		}
+		pool = p.TopK * 4
+		if pool < 20 {
+			pool = 20
+		}
+	} else if globalRAGEmbedder != nil {
 		pool = p.TopK * 4
 		if pool < 20 {
 			pool = 20
 		}
 	}
-	results, err := s.Search(p.Query, collection, pool)
+	results, err := s.Search(expandedQuery, collection, pool)
 	if err != nil {
 		return "", err
 	}
-	if globalRAGEmbedder != nil && len(results) > 0 {
+	if globalRAGLLM != nil && len(results) > 0 {
+		results = globalRAGLLM.Rerank(ctx, p.Query, results)
+		if len(results) > p.TopK {
+			results = results[:p.TopK]
+		}
+	} else if globalRAGEmbedder != nil && len(results) > 0 {
 		results = s.Rerank(ctx, p.Query, results, globalRAGEmbedder, 0.5)
 		if len(results) > p.TopK {
 			results = results[:p.TopK]
