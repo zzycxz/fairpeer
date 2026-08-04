@@ -50,6 +50,17 @@ func (t *installSourceTool) skillAction(req request, cand skillCandidate, mode s
 		a.RiskLevel = RiskHigh
 		a.RiskReasons = append(a.RiskReasons, "link target is an absolute path outside the project or home root")
 	}
+	// Pre-install content safety scan (SPEC v2 §3.4A): statically inspect the
+	// skill body for prompt-injection / payload patterns. Findings flow into the
+	// plan's riskReasons (already shown to the user), and a block-level finding
+	// escalates RiskLevel to high so the model asks before applying. This makes
+	// suspicious skills loud in the plan with zero new UI and zero prompt bloat.
+	if findings := scanSkillContent(cand.Content); len(findings) > 0 {
+		if safetyHasBlock(findings) {
+			a.RiskLevel = RiskHigh
+		}
+		a.RiskReasons = append(a.RiskReasons, safetyFindingsToRiskReasons(findings)...)
+	}
 	return a
 }
 
