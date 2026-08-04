@@ -396,6 +396,9 @@ func (a *App) startup(ctx context.Context) {
 	// safety baseline for screen_* tools; registering it unconditionally (rather
 	// than only when a turn is running) keeps the kill switch always-available.
 	a.StartEStopHotkey()
+	// Initialize the provider-template registry (cache → models.dev remote).
+	// Non-blocking: the embed snapshot is used until the cache/remote data loads.
+	go a.initRegistry()
 }
 
 // initRAG opens the coWork knowledge-base store (FTS5 + structured entities)

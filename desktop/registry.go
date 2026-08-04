@@ -161,13 +161,5 @@ func (a *App) GetRegistryStatus() RegistryStatus {
 	return RegistryStatus{Source: "embed"}
 }
 
-// RefreshRegistry forces a fresh pull from models.dev (Settings "check for
-// updates" button). Step 2 implements the actual fetch; Step 1 is a stub that
-// reloads the embed snapshot so the method exists for the UI.
-func (a *App) RefreshRegistry() error {
-	// Step 1: just reload embed snapshot (Step 2 adds remote fetch).
-	ts := loadEmbedSnapshot()
-	globalRegistry.set(ts, time.Now())
-	return nil
-}
+// RefreshRegistry and initRegistry live in registry_fetcher.go (remote + cache).
 
