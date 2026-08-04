@@ -21,9 +21,14 @@ except ImportError:
 # Default page transition injected by `apply` when neither the CLI flag nor a
 # per-slide plan field asks for something else. Use `keep` to preserve the
 # source transitions instead.
-DEFAULT_TRANSITION = "fade"
-DEFAULT_TRANSITION_DURATION = 0.5
+#
+# When the optional pptx_animations module is absent (TRANSITIONS == {}), the
+# default must be a value present in the (degraded) choices list — "keep" or
+# "none". Hard-coding "fade" here would make argparse reject EVERY `apply`
+# invocation because "fade" isn't in ["none", "keep"] — a silent 100% failure.
 KEEP_TRANSITION = "keep"
+DEFAULT_TRANSITION = "fade" if TRANSITIONS else KEEP_TRANSITION
+DEFAULT_TRANSITION_DURATION = 0.5
 
 _UNSET = object()
 

@@ -19,7 +19,7 @@
 
 ### 安装
 
-将 `skills/ppt/` 目录复制到 fairpeer 的 skill 目录。无需安装 Python 或任何依赖，全部内置。
+将 `skills/ppt/` 目录复制到 fairpeer 的 skill 目录。本 skill 需要 **系统 Python 3.10+**，并按 `requirements.txt` 安装依赖（`python3 -m pip install -r requirements.txt`）。大部分依赖为纯 Python，SVG→PPTX 主流程无需 Office/WPS。详细的 Python 环境准备见 `SKILL.md` 的"前置条件"一节。
 
 ```
 fairpeer/

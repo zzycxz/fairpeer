@@ -301,7 +301,15 @@ const builtinDocumentAutoBody = `You are running as a document subagent. The par
 Tools:
 - doc_read / csv_read / xlsx_read: read the file's structured content (tables, paragraphs, cells).
 - doc_write / csv_write / xlsx_write: write structured content to a new or existing file.
-- doc_convert: convert between formats (e.g. docx → pdf, xlsx → csv).
+- doc_convert: convert text formats — md→html, html→md/text, json pretty-print. Binary Office conversions (docx→pdf, xlsx→csv) are NOT supported.
+- For .docx files, sections support types: heading, paragraph, list, table, image, toc.
+- For images, use: {type: "image", image_path: "path/to/image.png", image_alt: "description", image_width: 400, image_height: 300}. Supported formats: PNG/JPG/GIF (SVG is NOT supported — convert SVG to PNG first). image_width/image_height are in pixels (0 or omitted = defaults 400x300).
+- For table of contents, use: {type: "toc", toc_level: 3}.
+- For .docx, set append:true on doc_write to insert new sections into an existing document (preserves prior chapters and styles); a non-existent path degrades to a fresh write.
+- For .xlsx structured content, use an object with sheets (multi-sheet, per-cell style/format), optional charts and cond_fmt.
+- For numeric cells that formulas should sum, use the "number" field (real numeric cell): {ref: "B2", number: 1000}. Text/labels use "value"; formulas use "formula".
+- For .xlsx charts, add to the charts array: {sheet: "Sheet1", type: "bar", title: "Revenue", data_range: "B1:B10", category_range: "A1:A10", position: "D2"}. data_range is the value range (numbers to plot); category_range is optional axis labels (empty = positional). Supported chart types: bar, line, pie, scatter.
+- For .xlsx conditional formatting, add to a sheet's cond_fmt array: {range: "A1:A10", type: "cell", criteria: "greater_than", value: "100", format: {bg: "#FF0000"}}. Supported cond_fmt types: cell, data_bar, color_scale. cell criteria: greater_than/less_than/equal/between (between uses value "min,max"); data_bar/color_scale use format.bg as the bar/gradient color.
 - For plain text files (.txt, .md, .json), prefer read_file / write_file instead of the Office tools.
 
 Output: the file's content (for reads), the written file path (for writes), or the conversion result. If a file doesn't exist or can't be parsed, report the error.`
@@ -446,7 +454,7 @@ func builtinSkills() []Skill {
 		},
 		{
 			Name:         "document-auto",
-			Description:  "Read or write Office documents — Word/Excel/CSV, plus format conversion. Use for docx/xlsx/csv file operations when you need structured parsing or Office-format output, not plain text.",
+			Description:  "Read or write Office documents — Word/Excel/CSV, plus format conversion, images, charts, and conditional formatting. Use for docx/xlsx/csv file operations when you need structured parsing, Office-format output, images, table of contents, charts, or conditional formatting.",
 			Body:         builtinDocumentAutoBody,
 			Scope:        ScopeBuiltin,
 			Path:         "(builtin)",

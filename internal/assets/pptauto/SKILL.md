@@ -1,6 +1,6 @@
 ---
 name: ppt-auto
-description: 使用PPT模板生成演示文稿。根据用户主题，通过SVG路径或模板填充方式生成专业PPT。
+description: 使用PPT模板生成演示文稿。根据用户主题，通过SVG路径或模板填充方式生成专业PPT。支持动画、过渡效果、图表(SVG)。
 runAs: subagent
 effort: high
 allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, image_understand, image_generate, web_search, web_fetch
@@ -258,6 +258,102 @@ python3 <skill_dir>/scripts/export_pdf.py <input.pptx> <output.pdf>
 - **解析反馈**：如"第3页太空"→增内容密度；"换布局"→换布局类型重生成该页；"颜色不好看"→调整（仍须在 config 配色范围内）
 - **只改有问题的页**：用 `edit_file` 改单页 SVG，其他页保持不变
 - **确认**：修正后询问"已修正第X页，您看看是否满意？"，最多 3 轮
+
+### 动画、过渡与旁白（`svg_to_pptx.py` 进阶参数）
+
+`svg_to_pptx.py` 支持页面过渡、元素入场动画和演讲旁白，全部通过命令行参数控制。下面列出与默认 Step 12 转换命令搭配的进阶开关。
+
+> ⚠️ **动画/过渡 XML 写入依赖可选的 `pptx_animations` 模块**。脚本在缺失该模块时会优雅降级（`try/except ImportError`），此时下列参数仍会被校验，但生成的 PPTX **不会包含动画/过渡 XML**。若发现参数已传但 PPT 里没有动效，即属此情况。安装该模块后即可写入完整动画/过渡。
+
+#### 过渡效果（`-t/--transition`，页面切换）
+
+| 取值 | 效果 |
+|------|------|
+| `fade` | 淡入淡出（默认） |
+| `push` | 推入 |
+| `wipe` | 擦除 |
+| `split` | 分割 |
+| `strips` | 条纹 |
+| `cover` | 覆盖 |
+| `random` | 随机 |
+| `none` | 无过渡 |
+
+配套：`--transition-duration 0.5`（过渡时长，秒，默认 0.5）。
+
+#### 元素入场动画（`-a/--animation`，仅 native shapes 模式）
+
+> 默认是 `none`（**动画默认关闭**）——设计上避免"AI 生成的演示文稿里元素自动逐个弹入"这种刻板印象。需要时显式开启。
+
+| 取值 | 效果 |
+|------|------|
+| `fade` | 淡入 |
+| `fly` | 飞入 |
+| `zoom` | 缩放 |
+| `appear` | 出现 |
+| `auto` | 按 SVG group id 自动映射（chart→wipe，card-/step-/pillar-→fly，title/takeaway→fade；图片类 id 在 zoom/dissolve/circle/box/diamond/wheel 中轮换；未匹配 id 轮换 fade/wipe/fly/zoom） |
+| `mixed` | 轮换 legacy 16 效果池（按 group 顺序） |
+| `random` | 从 legacy 效果池随机采样 |
+| `none` | 无元素动画（默认） |
+
+动画参数：
+- `--animation-duration 0.4` — 单元素入场时长（秒，默认 0.4）
+- `--animation-trigger <mode>` — 开始方式，对应 PowerPoint 的 Start 下拉：
+  - `on-click` — 每点一次进入一个元素
+  - `with-previous` — 所有元素随幻灯片进入同时开始
+  - `after-previous` — **默认**，上一个之后级联进入；间隔由 `--animation-stagger` 控制
+- `--animation-stagger 0.5` — `after-previous` 模式下元素间延迟（秒，默认 0.5；其他模式忽略）
+- `--animation-config <path>` — 每页/每对象的精细动画覆盖配置，默认读取 `<project>/animations.json`（存在时）
+
+#### 自动翻页（`--auto-advance`）
+
+- `--auto-advance 3.0` — 幻灯片自动翻页间隔（秒）；默认手动翻页。配合旁白时长自动设置时尤其有用。
+
+#### 旁白 / 录音（narration）
+
+PPT-auto 支持把演讲录音嵌入幻灯片，用于"录制式"演示或视频导出：
+
+- `--recorded-narration <dir>` — **完整录制模式**：目录内每页幻灯片需有一个 m4a/mp3/wav 文件（按 SVG 文件名或页码匹配）。会：
+  - 保留演讲备注（启用时）
+  - 嵌入每页音频
+  - 按音频时长设置每页自动翻页时间，便于视频导出选"录制时间和旁白"
+  - **拒绝 on-click 动画**（与自动翻页冲突）；改用 `after-previous` 或 `with-previous`
+- `--narration-audio-dir <dir>` — **低级音频嵌入**：嵌入匹配到的文件，允许部分匹配；仅当不需要完整录制时间轴时使用
+- `--use-narration-timings` — 按旁白音频时长设置幻灯片自动翻页时间
+- `--narration-padding 0.5` — 每段旁白结束后追加的秒数再翻页（默认 0.5）
+
+#### 其它常用进阶参数
+
+| 参数 | 作用 |
+|------|------|
+| `-o/--output <path>` | 显式输出路径（默认 `exports/*.pptx`，并备份到 `backup/<ts>/`） |
+| `-s/--source <name>` | SVG 源目录：`output`=svg_output（默认 native）、`final`=svg_final（legacy），或自定义子目录名 |
+| `-f/--format <name>` | 画布格式（见 CANVAS_FORMATS） |
+| `--only native\|legacy` | 只生成一种版本（native 可编辑形状 / legacy SVG 图片） |
+| `--svg-snapshot` | 额外输出 SVG 渲染快照 pptx，与 native 并排放在 exports/ |
+| `--no-compat` | 关闭 Office 兼容模式（纯 SVG，仅 Office 2019+ 支持） |
+| `--no-notes` | 关闭演讲备注嵌入（默认开启） |
+| `--no-image-optimize` | 关闭栅格图优化，嵌入原图字节 |
+| `--conversion-trace` | 在 native pptx 旁写出诊断 JSON（`<output>.trace.json`） |
+| `--cache-dir <dir>` / `--no-cache` / `--keep-cache` | SVG→PNG 渲染缓存控制 |
+| `--workers <n>` | 并行 worker 数 |
+
+#### 完整示例
+
+```bash
+# 带过渡和级联动画
+python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir> \
+  -t push --transition-duration 1.0 \
+  -a auto --animation-trigger after-previous --animation-stagger 0.4
+
+# 录制式旁白（每页一个音频文件，自动设翻页时间）
+python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir> --recorded-narration audio
+
+# 自动翻页、关闭动画
+python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir> -a none --auto-advance 5.0
+```
+
+**图表支持：**
+图表需要先生成为 SVG，然后包含在 PPT 中。使用 `image_generate` 工具生成图表 SVG，或使用 Python 的 matplotlib 生成。
 
 ---
 
