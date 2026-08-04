@@ -178,7 +178,7 @@ type docWrite struct{ roots []string }
 func (docWrite) Name() string { return "doc_write" }
 
 func (docWrite) Description() string {
-	return "Write a document to a path, creating parent dirs. Format by extension: .md/.txt/.html/code (string content), .json (pretty-printed object), .csv (rows as array of arrays of strings), .xlsx (rows as an array of arrays → real spreadsheet, or a structured object for multi-sheet/styled output), .docx (structured sections → real Word document with headings/paragraphs/lists/tables + styling). Overwrites existing files."
+	return "Write a document to a path, creating parent dirs. Format by extension: .md/.txt/.html/code (string content), .json (pretty-printed object), .csv (rows as array of arrays of strings), .xlsx (rows array → simple spreadsheet, OR a structured object for multi-sheet/styled output with charts and conditional formatting), .docx (structured sections → real Word document with headings/paragraphs/lists/tables/images/table-of-contents + styling). Overwrites by default; set append=true to extend .docx or append text to .md/.txt/.html."
 }
 
 func (docWrite) Schema() json.RawMessage {
@@ -186,10 +186,10 @@ func (docWrite) Schema() json.RawMessage {
 "type":"object",
 "properties":{
   "path":{"type":"string","description":"Absolute path to write (extension determines format)"},
-  "content":{"description":"For .md/.txt/.html/code: a string. For .json: any JSON value. For .csv/.xlsx: an array of arrays of strings (simple) OR an object (structured — see xlsx notes)."},
-  "sections":{"type":"array","description":"For .docx ONLY: document blocks. Each {type:'heading'|'paragraph'|'list'|'table', text, level(1-3), items(list), ordered(list bool), headers/rows(table), style:{bold,italic,color:'#RRGGBB',size(half-pts),font,align:'left|center|right',bg,header_bg}}."},
+  "content":{"description":"For .md/.txt/.html/code: a string. For .json: any JSON value. For .csv: an array of arrays of strings. For .xlsx SIMPLE form: an array of arrays of strings (rows → Sheet1). For .xlsx STRUCTURED form: an object {sheets:[{name, cells:[{ref, value, number, formula, format, style}], merges:[{range}], col_widths:[{col,width}], cond_fmt:[{range,type:'cell|data_bar|color_scale',criteria,value,format:{...}}]}], charts:[{sheet,type:'bar|line|pie|scatter',title,data_range,category_range,position}]}. Use 'number' (numeric) for cells you intend to sum with formulas."},
+  "sections":{"type":"array","description":"For .docx ONLY: document blocks. Each {type:'heading'|'paragraph'|'list'|'table'|'image'|'toc' (also accepts 'para'/'text'/'ul'/'ol' aliases), text, level(1-6, default 1), items(list), ordered(list bool), headers/rows(table), image_path(PNG/JPG/GIF), image_alt, image_width(image px, default 400), image_height(image px, default 300), toc_level(1-9, default 3), style:{bold,italic,color:'#RRGGBB',size(half-pts),font,align:'left|center|right',bg,header_bg,lineSpacing,indent}}."},
   "title":{"type":"string","description":"For .docx: optional document title (rendered as H1)."},
-  "append":{"type":"boolean","description":"Append to the file instead of overwriting (text formats only, default false)"}
+  "append":{"type":"boolean","description":"Append mode. .docx: insert new sections into the existing document (preserves prior chapters/styles); appends to a non-existent path create a fresh doc. .md/.txt/.html: append text to the file. Other formats ignore append. Default false."}
 },
 "required":["path"]
 }`)
@@ -224,7 +224,7 @@ func (w docWrite) Execute(ctx context.Context, args json.RawMessage) (string, er
 				return "", fmt.Errorf("docx sections must be an array: %w", err)
 			}
 		}
-		if err := writeDOCX(DocInput{Path: abs, Title: p.Title, Sections: sections}); err != nil {
+		if err := writeDOCX(DocInput{Path: abs, Title: p.Title, Sections: sections, Append: p.Append}); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("wrote %s (%d sections)", abs, len(sections)), nil
@@ -309,6 +309,7 @@ func (w docWrite) Execute(ctx context.Context, args json.RawMessage) (string, er
 	if p.Append {
 		mode = "appended"
 	}
+
 	return fmt.Sprintf("%s %s (%d bytes)", mode, abs, len(data)), nil
 }
 

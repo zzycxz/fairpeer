@@ -21,13 +21,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
 // DocSection is one block of the document. Type selects the renderer; the
 // shared Style applies to text runs within the section where relevant.
 type DocSection struct {
-	Type    string     `json:"type"`    // "heading"|"paragraph"|"list"|"table"
+	Type    string     `json:"type"`    // "heading"|"paragraph"|"list"|"table"|"image"|"toc"
 	Level   int        `json:"level"`   // heading level (1-6, default 1)
 	Text    string     `json:"text"`    // heading/paragraph text; list single item (when Items empty)
 	Items   []string   `json:"items"`   // list items (type=list)
@@ -35,6 +37,17 @@ type DocSection struct {
 	Headers []string   `json:"headers"` // table header cells (type=table)
 	Rows    [][]string `json:"rows"`    // table body rows (type=table)
 	Style   DocStyle   `json:"style"`   // run styling (bold/italic/color/size/font/align)
+
+	// Image fields (type=image). Supported: PNG/JPG/GIF. SVG is NOT supported
+	// (Word needs a PNG raster fallback + asvg extension; convert SVG to PNG
+	// first — writeDOCX returns an explicit error for .svg paths).
+	ImagePath  string `json:"image_path,omitempty"`  // path to image file (PNG/JPG/GIF)
+	ImageAlt   string `json:"image_alt,omitempty"`   // alt text for accessibility (→ wp:docPr descr)
+	ImageWidth int   `json:"image_width,omitempty"`  // image width in pixels (0 = default 400)
+	ImageHeight int  `json:"image_height,omitempty"` // image height in pixels (0 = default 300)
+
+	// TOC fields (type=toc)
+	TOCLevel int `json:"toc_level,omitempty"` // depth of TOC (heading levels 1-N; default 3)
 }
 
 // DocStyle is the shared run/paragraph style vocabulary. Color is "#RRGGBB".
@@ -65,40 +78,62 @@ type DocInput struct {
 // word/styles.xml. Produces a file openable in any conformant reader.
 //
 // When in.Append is true and the file already exists, new sections are inserted
-// before </w:body> in the existing document.xml, preserving all prior content.
+// before </w:body> in the existing document.xml. Append preserves the existing
+// package: all non-overwritten parts (media, headers/footers, numbering, rels,
+// content types) are copied verbatim from the original, and new images get rIds
+// continuing past the original's maximum so existing image references stay valid.
 func writeDOCX(in DocInput) error {
 	if err := os.MkdirAll(filepath.Dir(in.Path), 0o755); err != nil {
 		return err
 	}
 
-	var xmlBody string
-	var styles string
-
-	if in.Append {
-		// Read existing document.xml and insert new sections before </w:body>.
-		existing, err := readDocxPart(in.Path, "word/document.xml")
-		if err != nil {
-			// Append to a non-existent file degrades to a full write — the
-			// common "first chapter" case where the agent starts with
-			// append:true and no file exists yet. Any other read error (corrupt
-			// zip, permission) still surfaces as an error.
-			if !errors.Is(err, fs.ErrNotExist) {
-				return fmt.Errorf("append: read existing docx: %w", err)
-			}
-			xmlBody = buildDocumentXML(in)
-			styles = defaultStylesXML()
-		} else {
-			newFragments := buildSectionsXML(in)
-			xmlBody = strings.Replace(existing, "</w:body>", newFragments+"</w:body>", 1)
-			styles, _ = readDocxPart(in.Path, "word/styles.xml")
-			if styles == "" {
-				styles = defaultStylesXML()
-			}
+	// Collect & validate images up-front (before any file is created). Done
+	// first because both append and full-write paths need the list, and a
+	// missing/unsupported image must error out with no partial .docx on disk.
+	// usedNames also de-duplicates media filenames (two logo.png in different
+	// dirs would collide in word/media/).
+	var images []struct{ name, path string }
+	usedNames := make(map[string]int)
+	for _, s := range in.Sections {
+		if s.Type != "image" || strings.TrimSpace(s.ImagePath) == "" {
+			continue
 		}
-	} else {
-		xmlBody = buildDocumentXML(in)
-		styles = defaultStylesXML()
+		if strings.ToLower(filepath.Ext(s.ImagePath)) == ".svg" {
+			return fmt.Errorf("SVG image not supported (Word needs a PNG raster fallback); convert to PNG first: %s", s.ImagePath)
+		}
+		if _, err := os.Stat(s.ImagePath); err != nil {
+			return fmt.Errorf("image not readable: %w", err)
+		}
+		base := filepath.Base(s.ImagePath)
+		name := base
+		if n, dup := usedNames[base]; dup {
+			ext := filepath.Ext(base)
+			stem := strings.TrimSuffix(base, ext)
+			name = fmt.Sprintf("%s_%d%s", stem, n+1, ext)
+			usedNames[base] = n + 1
+		} else {
+			usedNames[base] = 1
+		}
+		images = append(images, struct{ name, path string }{name: name, path: s.ImagePath})
 	}
+
+	// Append mode: try to extend an existing package. If the file doesn't exist
+	// (the common "first chapter" case), fall through to a full write.
+	if in.Append {
+		if _, statErr := os.Stat(in.Path); statErr == nil {
+			return writeDOCXAppend(in, images)
+		}
+		// File missing → degrade to a full write below.
+	}
+	return writeDOCXFull(in, images)
+}
+
+// writeDOCXFull builds a complete .docx from scratch. Image rIds start at 100
+// (continuing past the static rels' rId1/rId2), so this is only correct when
+// the package contains no other relationships.
+func writeDOCXFull(in DocInput, images []struct{ name, path string }) error {
+	xmlBody := buildDocumentXML(in)
+	styles := defaultStylesXML()
 
 	f, err := os.Create(in.Path)
 	if err != nil {
@@ -106,10 +141,23 @@ func writeDOCX(in DocInput) error {
 	}
 	defer f.Close()
 	zw := zip.NewWriter(f)
+
+	// Build content types (add image types if needed)
+	ctXML := contentTypesXML
+	if len(images) > 0 {
+		ctXML = addImageContentTypes(ctXML, images)
+	}
+
+	// Build document rels (add image relationships if needed)
+	relsXML := documentRelsXML
+	if len(images) > 0 {
+		relsXML = addImageRels(relsXML, images, 100)
+	}
+
 	parts := []struct{ name, body string }{
-		{"[Content_Types].xml", contentTypesXML},
+		{"[Content_Types].xml", ctXML},
 		{"_rels/.rels", rootRelsXML},
-		{"word/_rels/document.xml.rels", documentRelsXML},
+		{"word/_rels/document.xml.rels", relsXML},
 		{"word/styles.xml", styles},
 		{"word/numbering.xml", numberingXML},
 		{"word/document.xml", xmlBody},
@@ -123,57 +171,369 @@ func writeDOCX(in DocInput) error {
 			return err
 		}
 	}
+
+	// Add image files to the zip
+	for _, img := range images {
+		if err := addImageToZip(zw, img); err != nil {
+			return err
+		}
+	}
+
 	return zw.Close()
 }
 
-// readDocxPart extracts a single part from an existing .docx zip archive.
-func readDocxPart(docxPath, partName string) (string, error) {
-	r, err := zip.OpenReader(docxPath)
-	if err != nil {
-		return "", err
-	}
-	defer r.Close()
-	for _, f := range r.File {
-		if f.Name == partName {
-			rc, err := f.Open()
-			if err != nil {
-				return "", err
-			}
-			defer rc.Close()
-			data, err := io.ReadAll(rc)
-			if err != nil {
-				return "", err
-			}
-			return string(data), nil
+// writeDOCXAppend inserts new sections into an existing .docx while preserving
+// the rest of the package. It copies every original part verbatim except:
+//   - word/document.xml (new sections spliced before </w:body>)
+//   - word/_rels/document.xml.rels (original + new image relationships)
+//   - [Content_Types].xml (original + new image MIME types)
+// New image rIds continue past the original's maximum rId so existing image
+// references (and any header/footer/hyperlink relationships) stay intact.
+func writeDOCXAppend(in DocInput, images []struct{ name, path string }) error {
+	// buildTemp reads the existing package, splices in new sections, copies all
+	// unchanged parts, and writes the result to a temp file. It returns the
+	// temp path. The original zip reader is closed (via defer) BEFORE this
+	// returns, so the caller's rename onto the original path isn't blocked by
+	// an open file handle (a Windows-specific failure).
+	buildTemp := func() (string, error) {
+		rz, err := zip.OpenReader(in.Path)
+		if err != nil {
+			return "", fmt.Errorf("append: open existing docx: %w", err)
 		}
+		defer rz.Close()
+
+		// Read the parts we must modify.
+		existingDoc, err := readDocxPartFromReader(rz, "word/document.xml")
+		if err != nil {
+			return "", fmt.Errorf("append: read existing document.xml: %w", err)
+		}
+		existingStyles, sErr := readDocxPartFromReader(rz, "word/styles.xml")
+		var styles string
+		if sErr != nil {
+			// styles.xml missing is non-fatal (use defaults), but a corrupt-but-
+			// present file must surface rather than silently swapping styling.
+			if !errors.Is(sErr, fs.ErrNotExist) {
+				return "", fmt.Errorf("append: read existing styles.xml: %w", sErr)
+			}
+			styles = defaultStylesXML()
+		} else {
+			styles = existingStyles
+		}
+		existingRels, relErr := readDocxPartFromReader(rz, "word/_rels/document.xml.rels")
+		existingCT, ctErr := readDocxPartFromReader(rz, "[Content_Types].xml")
+
+		// New image rIds continue past the original's max rId so existing image
+		// / header / footer relationships stay valid. Computed BEFORE splicing
+		// so the new fragments can be remapped in isolation (remapping the merged
+		// body would also rewrite the original image's rIds).
+		relsBase := nextRIdBase(existingRels, relErr)
+
+		// Build the new section fragments and remap their rIds to the append
+		// base BEFORE splicing. renderImage always emits rId100+i (the full-write
+		// base); here we shift each new image's embed to relsBase+i so it points
+		// at the relationship added below. Done on the fragment alone so the
+		// original body's rIds are untouched.
+		newFragments := buildSectionsXML(in)
+		if relsBase != 100 && len(images) > 0 {
+			for i := len(images) - 1; i >= 0; i-- {
+				old := fmt.Sprintf(`r:embed="rId%d"`, 100+i)
+				newAttr := fmt.Sprintf(`r:embed="rId%d"`, relsBase+i)
+				newFragments = strings.ReplaceAll(newFragments, old, newAttr)
+			}
+		}
+		xmlBody := strings.Replace(existingDoc, "</w:body>", newFragments+"</w:body>", 1)
+
+		// Merged rels / content-types; fall back to static defaults when a part
+		// is absent (hand-authored minimal docx) so the package stays valid.
+		relsXML := existingRels
+		if relErr != nil {
+			relsXML = documentRelsXML
+		}
+		if len(images) > 0 {
+			relsXML = addImageRels(relsXML, images, relsBase)
+		}
+		ctXML := existingCT
+		if ctErr != nil {
+			ctXML = contentTypesXML
+		}
+		if len(images) > 0 {
+			ctXML = addImageContentTypes(ctXML, images)
+		}
+
+		// De-dup new image basenames against existing media entries.
+		origMedia := make(map[string]bool)
+		for _, f := range rz.File {
+			if strings.HasPrefix(f.Name, "word/media/") {
+				origMedia[filepath.Base(f.Name)] = true
+			}
+		}
+		for i := range images {
+			if origMedia[images[i].name] {
+				ext := filepath.Ext(images[i].name)
+				stem := strings.TrimSuffix(images[i].name, ext)
+				for n := 2; ; n++ {
+					cand := fmt.Sprintf("%s_%d%s", stem, n, ext)
+					if !origMedia[cand] {
+						images[i].name = cand
+						origMedia[cand] = true
+						break
+					}
+				}
+			}
+		}
+
+		// Write to a temp file: copy every original part verbatim except the
+		// four modified ones, then write those + new media.
+		out, err := os.CreateTemp(filepath.Dir(in.Path), ".docx-append-*")
+		if err != nil {
+			return "", fmt.Errorf("append: create temp file: %w", err)
+		}
+		tmpName := out.Name()
+		zw := zip.NewWriter(out)
+
+		skip := map[string]bool{
+			"word/document.xml":            true,
+			"word/styles.xml":              true,
+			"word/_rels/document.xml.rels": true,
+			"[Content_Types].xml":          true,
+		}
+		for _, f := range rz.File {
+			if skip[f.Name] {
+				continue
+			}
+			if err := copyZipPart(zw, f); err != nil {
+				zw.Close()
+				out.Close()
+				_ = os.Remove(tmpName)
+				return "", fmt.Errorf("append: copy %s: %w", f.Name, err)
+			}
+		}
+		modified := []struct{ name, body string }{
+			{"[Content_Types].xml", ctXML},
+			{"word/_rels/document.xml.rels", relsXML},
+			{"word/styles.xml", styles},
+			{"word/document.xml", xmlBody},
+		}
+		for _, p := range modified {
+			w, err := zw.Create(p.name)
+			if err != nil {
+				zw.Close()
+				out.Close()
+				_ = os.Remove(tmpName)
+				return "", err
+			}
+			if _, err := w.Write([]byte(p.body)); err != nil {
+				zw.Close()
+				out.Close()
+				_ = os.Remove(tmpName)
+				return "", err
+			}
+		}
+		for _, img := range images {
+			if err := addImageToZip(zw, img); err != nil {
+				zw.Close()
+				out.Close()
+				_ = os.Remove(tmpName)
+				return "", err
+			}
+		}
+		if err := zw.Close(); err != nil {
+			out.Close()
+			_ = os.Remove(tmpName)
+			return "", fmt.Errorf("append: close zip: %w", err)
+		}
+		if err := out.Close(); err != nil {
+			_ = os.Remove(tmpName)
+			return "", fmt.Errorf("append: close file: %w", err)
+		}
+		return tmpName, nil
 	}
-	return "", fmt.Errorf("part %q not found in %s", partName, docxPath)
+
+	tmpName, err := buildTemp()
+	if err != nil {
+		return err
+	}
+	// The original reader is now closed; safe to rename over the original.
+	_ = os.Remove(in.Path)
+	if err := os.Rename(tmpName, in.Path); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("append: replace file: %w", err)
+	}
+	return nil
 }
 
+// nextRIdBase scans a document.xml.rels body for rId<N> relationships and
+// returns N+1 of the maximum, so new relationships never collide with existing
+// ones. Falls back to 100 when the part is absent/unreadable.
+func nextRIdBase(relsXML string, relErr error) int {
+	if relErr != nil || relsXML == "" {
+		return 100
+	}
+	maxID := 1
+	for _, m := range reIdRegexp.FindAllStringSubmatch(relsXML, -1) {
+		if len(m) >= 2 {
+			if n, err := strconv.Atoi(m[1]); err == nil && n > maxID {
+				maxID = n
+			}
+		}
+	}
+	return maxID + 1
+}
+
+// copyZipPart copies one file from a source zip reader into a zip writer,
+// preserving its name and (compressed) content.
+func copyZipPart(zw *zip.Writer, f *zip.File) error {
+	rc, err := f.Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	w, err := zw.Create(f.Name)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(w, rc)
+	return err
+}
+
+// addImageToZip reads an image file and writes it into word/media/<name>.
+func addImageToZip(zw *zip.Writer, img struct{ name, path string }) error {
+	imgData, err := os.ReadFile(img.path)
+	if err != nil {
+		return fmt.Errorf("read image %s: %w", img.path, err)
+	}
+	w, err := zw.Create("word/media/" + img.name)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(imgData)
+	return err
+}
+
+// readDocxPartFromReader extracts a single named part from an already-open zip
+// reader (used by append mode, which already has the reader open for copying).
+func readDocxPartFromReader(r *zip.ReadCloser, partName string) (string, error) {
+	for _, f := range r.File {
+		if f.Name != partName {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return "", err
+		}
+		defer rc.Close()
+		data, err := io.ReadAll(rc)
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
+	return "", fmt.Errorf("part %q not found", partName)
+}
+
+// addImageContentTypes adds image MIME types to [Content_Types].xml. Each
+// extension is declared at most once — OOXML requires Default extensions to be
+// unique, so two .png images would otherwise produce a duplicate entry that
+// Word rejects as a corrupt package.
+func addImageContentTypes(ctXML string, images []struct{ name, path string }) string {
+	seen := make(map[string]string) // ext → mime (first wins)
+	for _, img := range images {
+		ext := strings.ToLower(filepath.Ext(img.name))
+		if ext == "" {
+			continue
+		}
+		if _, dup := seen[ext]; dup {
+			continue
+		}
+		mime := "image/png"
+		switch ext {
+		case ".jpg", ".jpeg":
+			mime = "image/jpeg"
+		case ".gif":
+			mime = "image/gif"
+		}
+		seen[ext] = mime
+	}
+	if len(seen) == 0 {
+		return ctXML
+	}
+	var additions strings.Builder
+	// Stable order: sort extensions for deterministic output.
+	var exts []string
+	for ext := range seen {
+		exts = append(exts, ext)
+	}
+	// Simple insertion sort (extension set is tiny).
+	for i := 1; i < len(exts); i++ {
+		for j := i; j > 0 && exts[j] < exts[j-1]; j-- {
+			exts[j], exts[j-1] = exts[j-1], exts[j]
+		}
+	}
+	for _, ext := range exts {
+		additions.WriteString(fmt.Sprintf(`  <Default Extension="%s" ContentType="%s"/>`+"\n", strings.TrimPrefix(ext, "."), seen[ext]))
+	}
+	return strings.Replace(ctXML, "</Types>", additions.String()+"</Types>", 1)
+}
+
+// addImageRels adds image relationships to word/_rels/document.xml.rels. base
+// is the starting rId number (100 for a full write continuing past the static
+// rId1/rId2; one-past-the-max for an append so existing relationships survive).
+func addImageRels(relsXML string, images []struct{ name, path string }, base int) string {
+	additions := ""
+	for i, img := range images {
+		additions += fmt.Sprintf(`  <Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/%s"/>`+"\n", base+i, img.name)
+	}
+	return strings.Replace(relsXML, "</Relationships>", additions+"</Relationships>", 1)
+}
+
+// reIdRegexp matches rId<digits> relationship ids inside a .rels part, used to
+// find the maximum existing rId so appended relationships never collide.
+var reIdRegexp = regexp.MustCompile(`Id="rId(\d+)"`)
+
 // buildSectionsXML renders only the section fragments (no XML header or
-// <w:body> wrapper) for use in append mode.
+// <w:body> wrapper) for use in append mode. It mirrors renderSection's dispatch
+// so the same input renders identically in append and full-write modes.
 func buildSectionsXML(in DocInput) string {
 	var b strings.Builder
+	imgCounter := 0 // shared across the loop → unique r:embed / docPr id per image
 	for _, sec := range in.Sections {
-		switch sec.Type {
+		switch strings.ToLower(strings.TrimSpace(sec.Type)) {
 		case "heading":
-			b.WriteString(renderHeading(sec.Text, sec.Level, sec.Style))
-		case "paragraph":
+			lvl := sec.Level
+			if lvl < 1 {
+				lvl = 1
+			}
+			if lvl > 6 {
+				lvl = 6
+			}
+			b.WriteString(renderHeading(sec.Text, lvl, sec.Style))
+		case "paragraph", "para", "text", "":
 			b.WriteString(renderParagraph(sec.Text, sec.Style))
 		case "table":
 			b.WriteString(renderTable(sec.Headers, sec.Rows, sec.Style))
-		case "list":
-			// Render list items as bullet paragraphs.
-			for _, item := range sec.Items {
-				b.WriteString(renderParagraph("• "+item, sec.Style))
+		case "list", "ul", "ol":
+			items := sec.Items
+			if len(items) == 0 && sec.Text != "" {
+				items = []string{sec.Text}
 			}
+			b.WriteString(renderList(items, sec.Ordered))
+		case "image":
+			b.WriteString(renderImage(sec, imgCounter))
+			imgCounter++
+		case "toc":
+			b.WriteString(renderTOC(sec.TOCLevel))
+		default:
+			// Unknown → paragraph, same safety net as renderSection.
+			b.WriteString(renderParagraph(sec.Text, sec.Style))
 		}
 	}
 	return b.String()
 }
 
 // buildDocumentXML renders the <w:document><w:body>…</w:body></w:document>
-// from sections. Each section maps to one or more <w:p>/<w:tbl> blocks.
+// from sections. Each section maps to one or more <w:p>/<w:tbl> blocks. An
+// image counter is threaded through so each drawing gets a unique r:embed and
+// docPr id (matching the image collection order in writeDOCX).
 func buildDocumentXML(in DocInput) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` + "\n")
@@ -182,8 +542,9 @@ func buildDocumentXML(in DocInput) string {
 	if strings.TrimSpace(in.Title) != "" {
 		b.WriteString(renderHeading(in.Title, 1, DocStyle{Bold: true}))
 	}
+	imgCounter := 0
 	for _, s := range in.Sections {
-		b.WriteString(renderSection(s))
+		b.WriteString(renderSection(s, &imgCounter))
 	}
 	// Section properties: A4 page size + default margins so the doc renders
 	// predictably across readers (Word defaults to US Letter otherwise).
@@ -195,8 +556,10 @@ func buildDocumentXML(in DocInput) string {
 }
 
 // renderSection dispatches by Type. Unknown types render as a plain paragraph
-// so the agent never produces a broken doc over a typo.
-func renderSection(s DocSection) string {
+// so the agent never produces a broken doc over a typo. imgIdx is incremented
+// once per image section so every drawing references a distinct relationship id
+// (rId100+i) and carries a unique docPr id (1000+i).
+func renderSection(s DocSection, imgIdx *int) string {
 	switch strings.ToLower(s.Type) {
 	case "heading":
 		lvl := s.Level
@@ -222,6 +585,15 @@ func renderSection(s DocSection) string {
 		return renderList(items, s.Ordered)
 	case "table":
 		return renderTable(s.Headers, s.Rows, s.Style)
+	case "image":
+		idx := 0
+		if imgIdx != nil {
+			idx = *imgIdx
+			*imgIdx++
+		}
+		return renderImage(s, idx)
+	case "toc":
+		return renderTOC(s.TOCLevel)
 	default:
 		return renderParagraph(s.Text, s.Style)
 	}
@@ -345,6 +717,95 @@ func runXML(text string, st DocStyle) string {
 	xml.Escape(&esc, []byte(text))
 	// preserveSpaces keeps leading/trailing spaces Word would otherwise trim.
 	return fmt.Sprintf(`<w:r>%s<w:t xml:space="preserve">%s</w:t></w:r>`, rPr, esc.String())
+}
+
+// renderImage renders an image section as OOXML. imgIdx is the image's position
+// among all image sections (0-based); it drives both the relationship id
+// (rId100+imgIdx — matching addImageRels) and the drawing/docPr ids (1000+imgIdx)
+// so a multi-image document never reuses an id. imageAlt, if set, becomes the
+// wp:docPr descr (accessibility text).
+func renderImage(s DocSection, imgIdx int) string {
+	filename := filepath.Base(s.ImagePath)
+	width := s.ImageWidth
+	height := s.ImageHeight
+	if width == 0 {
+		width = 400
+	}
+	if height == 0 {
+		height = 300
+	}
+	// Convert pixels to EMUs (1 pixel = 9525 EMUs)
+	widthEMU := width * 9525
+	heightEMU := height * 9525
+
+	// docPr descr (alt text) — emitted only when provided, XML-escaped.
+	var descrAttr string
+	if alt := strings.TrimSpace(s.ImageAlt); alt != "" {
+		var esc strings.Builder
+		xml.Escape(&esc, []byte(alt))
+		descrAttr = fmt.Sprintf(` descr="%s"`, esc.String())
+	}
+
+	// Unique ids: relationships start at rId100 (see addImageRels), drawing
+	// object ids at 1000 to avoid colliding with other package parts.
+	rID := fmt.Sprintf("rId%d", 100+imgIdx)
+	drawID := 1000 + imgIdx
+
+	return fmt.Sprintf(`<w:p>
+  <w:r>
+    <w:drawing>
+      <wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+        <wp:extent cx="%d" cy="%d"/>
+        <wp:docPr id="%d" name="%s"%s/>
+        <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+          <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+            <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+              <pic:nvPicPr>
+                <pic:cNvPr id="%d" name="%s"/>
+                <pic:cNvPicPr/>
+              </pic:nvPicPr>
+              <pic:blipFill>
+                <a:blip r:embed="%s" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>
+                <a:stretch><a:fillRect/></a:stretch>
+              </pic:blipFill>
+              <pic:spPr>
+                <a:xfrm>
+                  <a:off x="0" y="0"/>
+                  <a:ext cx="%d" cy="%d"/>
+                </a:xfrm>
+                <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+              </pic:spPr>
+            </pic:pic>
+          </a:graphicData>
+        </a:graphic>
+      </wp:inline>
+    </w:drawing>
+  </w:r>
+</w:p>`, widthEMU, heightEMU, drawID, filename, descrAttr, drawID, filename, rID, widthEMU, heightEMU)
+}
+
+// renderTOC renders a Table of Contents field.
+func renderTOC(level int) string {
+	if level < 1 {
+		level = 3
+	}
+	return fmt.Sprintf(`<w:p>
+  <w:r>
+    <w:fldChar w:fldCharType="begin"/>
+  </w:r>
+  <w:r>
+    <w:instrText xml:space="preserve"> TOC \o "1-%d" \h \z \u </w:instrText>
+  </w:r>
+  <w:r>
+    <w:fldChar w:fldCharType="separate"/>
+  </w:r>
+  <w:r>
+    <w:t>[Table of Contents - Update field to populate]</w:t>
+  </w:r>
+  <w:r>
+    <w:fldChar w:fldCharType="end"/>
+  </w:r>
+</w:p>`, level)
 }
 
 // runPropsXML builds the <w:rPr> for a run from a DocStyle. Empty when no
