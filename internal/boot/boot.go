@@ -1194,6 +1194,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			return false
 		},
 	}))
+	// skill_market: browse/search the skill marketplace and install from it
+	// (SPEC v2 §3.4C). Shares the same SSRF-guarded httpClient as install_source.
+	reg.Add(installsource.NewMarketToolFromOptions(installsource.Options{
+		ProjectRoot: root,
+		HTTPClient:  httpClient,
+	}))
 	for _, t := range skill.BuiltinSubagentTools(skillStore, skillRunner, skillProfile) {
 		reg.Add(t)
 	}

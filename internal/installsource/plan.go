@@ -98,6 +98,17 @@ func (t *installSourceTool) tryGitHubRepo(ctx context.Context, req request) ([]a
 	}
 	var warnings []string
 	for _, branch := range src.branches() {
+		// SPEC v2 §3.4C: check for a Claude marketplace.json first. If the repo
+		// has one, its plugins[] become skill install actions (richer than a
+		// raw SKILL.md scan, and the standard Claude ecosystem format).
+		if req.Kind == "auto" || req.Kind == "skill" {
+			if mp, mpErr := t.fetchMarketplaceJSON(ctx, req.Source); mpErr == nil {
+				actions := t.marketplaceActions(ctx, req, src, branch, mp)
+				if len(actions) > 0 {
+					return actions, warnings
+				}
+			}
+		}
 		if req.Kind == "auto" || req.Kind == "mcp" {
 			cand := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", src.Owner, src.Repo, branch, joinURLPath(src.Path, ".mcp.json"))
 			actions, _, err := t.planDownloadedURL(ctx, req, cand)

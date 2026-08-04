@@ -1,0 +1,308 @@
+package installsource
+
+// marketplace.go implements the skill-marketplace data layer (SPEC v2 §3.4C):
+// multi-source catalog aggregation, Claude marketplace.json parsing, and an
+// offline builtin catalog. It lets the user browse/search skills across several
+// default sources (Anthropic/OpenAI GitHub repos, clawhub.ai community API, and
+// a builtin curated list) and install any of them — reusing the existing
+// install_source plan→apply pipeline (with safety scan + manifest).
+//
+// Design constraints (SPEC v2 §2.0): zero user learning cost (defaults work out
+// of the box; "find me a code-review skill" is enough), zero prompt bloat (this
+// is a tool's internal logic, never enters the system prompt).
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+// MarketSource describes one catalog source the user can browse/search.
+type MarketSource struct {
+	ID   string `json:"id"`   // "anthropics" / "openai" / "clawhub" / "builtin"
+	Name string `json:"name"` // human label
+	Type string `json:"type"` // "github-repo" / "clawhub-api" / "builtin-catalog"
+	URL  string `json:"url"`  // repo URL / API base / empty for builtin
+}
+
+// DefaultMarketSources returns the built-in default sources, available with no
+// user configuration. Multiple sources avoid depending on a single service:
+// if clawhub is down, GitHub repos still work; if GitHub rate-limits, the
+// builtin catalog is offline-available.
+func DefaultMarketSources() []MarketSource {
+	return []MarketSource{
+		{ID: "builtin", Name: "Curated", Type: "builtin-catalog", URL: ""},
+		{ID: "anthropics", Name: "Anthropic Skills", Type: "github-repo", URL: "https://github.com/anthropics/skills"},
+		{ID: "openai", Name: "OpenAI Skills", Type: "github-repo", URL: "https://github.com/openai/skills"},
+		{ID: "clawhub", Name: "ClawHub Community", Type: "clawhub-api", URL: "https://clawhub.ai"},
+	}
+}
+
+// CatalogEntry is one installable skill from a market source, in a unified
+// cross-source format. This is what browse/search returns and what the agent
+// presents to the user.
+type CatalogEntry struct {
+	Source      string   `json:"source"`      // source ID
+	Name        string   `json:"name"`        // skill name (install name)
+	Slug        string   `json:"slug"`        // source-native identifier (clawhub slug)
+	Description string   `json:"description"` // one-line summary
+	Topics      []string `json:"topics"`      // categories/tags
+	Installs    int      `json:"installs"`    // download count (clawhub has, GitHub doesn't)
+	ContentURL  string   `json:"contentUrl"`  // URL to fetch SKILL.md (install path)
+	InstallRef  string   `json:"installRef"`  // value to pass to install_source's `source`
+}
+
+// --- Claude marketplace.json parsing ----------------------------------------
+
+// claudeMarketplacePlugin is one entry in a Claude Code marketplace.json's
+// plugins[] array. We only extract the fields we need; extra fields are ignored.
+type claudeMarketplacePlugin struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Source      json.RawMessage `json:"source"` // string or object
+	Skills      []string        `json:"skills"` // skill directories
+	Version     string          `json:"version"`
+}
+
+type claudeMarketplace struct {
+	Name        string                   `json:"name"`
+	Owner       json.RawMessage          `json:"owner"` // object, ignored
+	Plugins     []claudeMarketplacePlugin `json:"plugins"`
+}
+
+// fetchMarketplaceJSON fetches and parses a Claude Code marketplace.json from a
+// GitHub repo URL. Returns the plugins array. Used by browse (to list a repo's
+// skills) and by plan (to install from a marketplace repo).
+//
+// repoURL may be "github.com/owner/repo" or a full tree URL; we construct the
+// raw URL for ".claude-plugin/marketplace.json" and fetch it.
+func (t *installSourceTool) fetchMarketplaceJSON(ctx context.Context, repoURL string) (*claudeMarketplace, error) {
+	src, ok := parseGitHubRepoSource(repoURL)
+	if !ok {
+		return nil, newErr(ErrUnsupportedKind, "%s is not a GitHub repo", repoURL)
+	}
+	branch := "main"
+	if len(src.branches()) > 0 {
+		branch = src.branches()[0]
+	}
+	path := joinURLPath(src.Path, ".claude-plugin", "marketplace.json")
+	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", src.Owner, src.Repo, branch, path)
+	body, err := t.fetchText(ctx, rawURL)
+	if err != nil {
+		return nil, err
+	}
+	var mp claudeMarketplace
+	if err := json.Unmarshal([]byte(body), &mp); err != nil {
+		return nil, newErr(ErrInvalidManifest, "marketplace.json parse error: %v", err)
+	}
+	if len(mp.Plugins) == 0 {
+		return nil, newErr(ErrUnsupportedKind, "marketplace.json has no plugins")
+	}
+	return &mp, nil
+}
+
+// marketplaceToCatalog converts a parsed marketplace.json into CatalogEntries.
+// Each plugin's skill directories become entries whose ContentURL points to the
+// raw SKILL.md on GitHub.
+func marketplaceToCatalog(repoURL, sourceID string, mp *claudeMarketplace) []CatalogEntry {
+	src, _ := parseGitHubRepoSource(repoURL)
+	branch := "main"
+	if src.Owner != "" && len(src.branches()) > 0 {
+		branch = src.branches()[0]
+	}
+	var out []CatalogEntry
+	for _, p := range mp.Plugins {
+		// If the plugin declares skill directories, each is a separate entry.
+		if len(p.Skills) > 0 {
+			for _, skillDir := range p.Skills {
+				name := p.Name
+				if idx := strings.LastIndexByte(skillDir, '/'); idx >= 0 {
+					name = skillDir[idx+1:]
+				}
+				rawPath := joinURLPath(src.Path, skillDir, "SKILL.md")
+				contentURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", src.Owner, src.Repo, branch, rawPath)
+				out = append(out, CatalogEntry{
+					Source:      sourceID,
+					Name:        name,
+					Description: p.Description,
+					ContentURL:  contentURL,
+					InstallRef:  contentURL,
+				})
+			}
+			continue
+		}
+		// Plugin with no skill dirs: treat the plugin itself as one entry.
+		rawPath := joinURLPath(src.Path, p.Name, "SKILL.md")
+		contentURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", src.Owner, src.Repo, branch, rawPath)
+		out = append(out, CatalogEntry{
+			Source:      sourceID,
+			Name:        p.Name,
+			Description: p.Description,
+			ContentURL:  contentURL,
+			InstallRef:  contentURL,
+		})
+	}
+	return out
+}
+
+// --- Builtin curated catalog -------------------------------------------------
+
+// builtinCatalog is a small set of well-known skills indexed at compile time so
+// the user can browse offline (content is fetched on install from GitHub raw).
+// Curated from PromptHub's BUILTIN_SKILL_REGISTRY (Anthropic + OpenAI + community).
+var builtinCatalog = []CatalogEntry{
+	{Source: "builtin", Name: "pdf", Description: "Create and analyze PDF documents (reports, posters, academic LaTeX)", Topics: []string{"office", "document"}, ContentURL: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/pdf/SKILL.md", InstallRef: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/pdf/SKILL.md"},
+	{Source: "builtin", Name: "docx", Description: "Create and edit Word documents with formatting preservation", Topics: []string{"office", "document"}, ContentURL: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/docx/SKILL.md", InstallRef: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/docx/SKILL.md"},
+	{Source: "builtin", Name: "xlsx", Description: "Create and edit Excel spreadsheets with formulas and charts", Topics: []string{"office", "data"}, ContentURL: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/xlsx/SKILL.md", InstallRef: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/xlsx/SKILL.md"},
+	{Source: "builtin", Name: "pptx", Description: "Create PowerPoint presentations with native shapes", Topics: []string{"office", "design"}, ContentURL: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/pptx/SKILL.md", InstallRef: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/pptx/SKILL.md"},
+	{Source: "builtin", Name: "skill-creator", Description: "Create new skills, edit existing skills, iterate wording", Topics: []string{"meta"}, ContentURL: "https://raw.githubusercontent.com/anthropics/skills/main/skill-creator/SKILL.md", InstallRef: "https://raw.githubusercontent.com/anthropics/skills/main/skill-creator/SKILL.md"},
+	{Source: "builtin", Name: "artifacts-builder", Description: "Build interactive React artifacts for the web", Topics: []string{"frontend", "design"}, ContentURL: "https://raw.githubusercontent.com/anthropics/skills/main/artifacts-builder/SKILL.md", InstallRef: "https://raw.githubusercontent.com/anthropics/skills/main/artifacts-builder/SKILL.md"},
+	{Source: "builtin", Name: "mcp-builder", Description: "Build MCP servers with TypeScript or Python", Topics: []string{"meta", "integration"}, ContentURL: "https://raw.githubusercontent.com/anthropics/skills/main/mcp-builder/SKILL.md", InstallRef: "https://raw.githubusercontent.com/anthropics/skills/main/mcp-builder/SKILL.md"},
+	{Source: "builtin", Name: "webapp-testing", Description: "Test web apps with Playwright browser automation", Topics: []string{"testing", "frontend"}, ContentURL: "https://raw.githubusercontent.com/openai/skills/main/skills/.curated/webapp-testing/SKILL.md", InstallRef: "https://raw.githubusercontent.com/openai/skills/main/skills/.curated/webapp-testing/SKILL.md"},
+	{Source: "builtin", Name: "gh-fix-ci", Description: "Fix failing CI/CD pipelines on GitHub Actions", Topics: []string{"devops", "ci"}, ContentURL: "https://raw.githubusercontent.com/openai/skills/main/skills/.curated/gh-fix-ci/SKILL.md", InstallRef: "https://raw.githubusercontent.com/openai/skills/main/skills/.curated/gh-fix-ci/SKILL.md"},
+}
+
+// marketplaceActions builds install actions from a Claude marketplace.json by
+// downloading each plugin's SKILL.md content and running it through skillAction
+// (which applies the safety scan + risk classification). Called by tryGitHubRepo
+// when a marketplace.json is found, so installing from a marketplace repo is
+// identical to installing individual skills — same safety, same manifest.
+func (t *installSourceTool) marketplaceActions(ctx context.Context, req request, src githubRepoSource, branch string, mp *claudeMarketplace) []action {
+	entries := marketplaceToCatalog(req.Source, "marketplace", mp)
+	var actions []action
+	for _, e := range entries {
+		// Fetch the SKILL.md content for this entry.
+		body, err := t.fetchText(ctx, e.ContentURL)
+		if err != nil {
+			continue
+		}
+		cand, err := parseSkillContent(body, e.Name, e.ContentURL, req.strict())
+		if err != nil {
+			continue
+		}
+		actions = append(actions, t.skillAction(req, cand, "copy"))
+	}
+	return actions
+}
+
+// --- Cross-source aggregation ------------------------------------------------
+
+// FetchCatalog fetches a browsable skill catalog from one source. For github-repo
+// sources, it tries marketplace.json first, then falls back to scanning for
+// SKILL.md via the Contents API. For clawhub-api, it calls the REST API.
+func (t *installSourceTool) FetchCatalog(ctx context.Context, src MarketSource) ([]CatalogEntry, error) {
+	switch src.Type {
+	case "builtin-catalog":
+		return builtinCatalog, nil
+	case "clawhub-api":
+		entries, _, err := t.clawhubList(ctx, 50, "")
+		return entries, err
+	case "github-repo":
+		// Try marketplace.json first (richer metadata).
+		if mp, err := t.fetchMarketplaceJSON(ctx, src.URL); err == nil {
+			return marketplaceToCatalog(src.URL, src.ID, mp), nil
+		}
+		// Fall back to scanning the repo for SKILL.md files.
+		return t.catalogFromGitHubRepo(ctx, src)
+	default:
+		return nil, newErr(ErrUnsupportedKind, "unsupported source type %q", src.Type)
+	}
+}
+
+// catalogFromGitHubRepo scans a GitHub repo for SKILL.md files and returns them
+// as catalog entries. Reuses the existing scanGitHubSkills logic.
+func (t *installSourceTool) catalogFromGitHubRepo(ctx context.Context, src MarketSource) ([]CatalogEntry, error) {
+	gsrc, ok := parseGitHubRepoSource(src.URL)
+	if !ok {
+		return nil, newErr(ErrUnsupportedKind, "%s is not a GitHub repo", src.URL)
+	}
+	var out []CatalogEntry
+	for _, branch := range gsrc.branches() {
+		cands, _, err := t.scanGitHubSkills(ctx, request{Kind: "skill"}, gsrc, branch)
+		if err != nil {
+			continue
+		}
+		for _, c := range cands {
+			desc := c.Description
+			if len(desc) > 120 {
+				desc = desc[:120] + "…"
+			}
+			out = append(out, CatalogEntry{
+				Source:      src.ID,
+				Name:        c.Name,
+				Description: desc,
+				ContentURL:  c.SourcePath,
+				InstallRef:  c.SourcePath,
+			})
+		}
+		if len(out) > 0 {
+			break
+		}
+	}
+	return out, nil
+}
+
+// SearchCatalog searches across all default sources and returns matching entries.
+// The search is a simple case-insensitive substring match on name + description
+// + topics. For clawhub, it delegates to the server-side search API for better
+// recall; other sources are filtered locally after fetching.
+func (t *installSourceTool) SearchCatalog(ctx context.Context, query string) ([]CatalogEntry, error) {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return nil, nil
+	}
+	var results []CatalogEntry
+	for _, src := range DefaultMarketSources() {
+		var entries []CatalogEntry
+		var err error
+		if src.Type == "clawhub-api" {
+			// clawhub has a server-side search — use it for better recall.
+			entries, err = t.clawhubSearch(ctx, query)
+		} else {
+			entries, err = t.FetchCatalog(ctx, src)
+		}
+		if err != nil {
+			continue // a source failing shouldn't block the others
+		}
+		for _, e := range entries {
+			if src.Type == "clawhub-api" {
+				// clawhub search already filtered; include all.
+				results = append(results, e)
+				continue
+			}
+			if catalogMatches(e, query) {
+				results = append(results, e)
+			}
+		}
+	}
+	// Sort by installs descending (clawhub entries first), then name.
+	for i := 1; i < len(results); i++ {
+		for j := i; j > 0; j-- {
+			if results[j].Installs > results[j-1].Installs ||
+				(results[j].Installs == results[j-1].Installs && results[j].Name < results[j-1].Name) {
+				results[j], results[j-1] = results[j-1], results[j]
+			}
+		}
+	}
+	return results, nil
+}
+
+// catalogMatches reports whether an entry matches the query in name/description/topics.
+func catalogMatches(e CatalogEntry, query string) bool {
+	if query == "" {
+		return false
+	}
+	if strings.Contains(strings.ToLower(e.Name), query) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(e.Description), query) {
+		return true
+	}
+	for _, t := range e.Topics {
+		if strings.Contains(strings.ToLower(t), query) {
+			return true
+		}
+	}
+	return false
+}
