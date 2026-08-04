@@ -86,10 +86,10 @@ var providerTemplates = []ProviderTemplate{
 	{
 		Name: "mimo", DisplayName: "MiMo (小米)", Kind: "openai",
 		BaseURL: "https://api.xiaomimimo.com/v1", APIKeyEnv: "MIMO_API_KEY",
-		DefaultModel: "mimo-v2.5-pro", FastModel: "mimo-v2.5", VisionModel: "mimo-v2.5",
+		DefaultModel: "MiMo-V2.5-Pro", FastModel: "MiMo-V2.5-Pro-UltraSpeed", VisionModel: "MiMo-V2.5-Pro",
 		Vision: true, ContextWindow: 1000000, Category: "direct",
-		DocURL: "https://xiaomimimo.com/console/api-keys",
-		Models: []string{"mimo-v2.5-pro", "mimo-v2.5"},
+		DocURL: "https://mimo.mi.com",
+		Models: []string{"MiMo-V2.5-Pro", "MiMo-V2.5-Pro-UltraSpeed", "MiMo-V2.5"},
 	},
 	{
 		Name: "stepfun", DisplayName: "阶跃星辰 (StepFun)", Kind: "openai",
@@ -101,11 +101,11 @@ var providerTemplates = []ProviderTemplate{
 	},
 	{
 		Name: "xfyun", DisplayName: "讯飞 MaaS (iFlytek)", Kind: "openai",
-		BaseURL: "https://spark-api-open.xf-yun.com/v1", APIKeyEnv: "XFYUN_API_KEY",
-		DefaultModel: "glm-5.2", FastModel: "qwen3.6-35b-a3b", VisionModel: "qwen3.5-397b-a17b",
-		Vision: true, ContextWindow: 128000, Category: "direct",
+		BaseURL: "https://maas-token-api.cn-huabei-1.xf-yun.com/v2", APIKeyEnv: "XFYUN_API_KEY",
+		DefaultModel: "xopglm52", FastModel: "xopqwen36v35b", VisionModel: "xopqwen35397b",
+		Vision: true, ContextWindow: 256000, Category: "direct",
 		DocURL: "https://console.xfyun.cn/services/bm4",
-		Models: []string{"glm-5.2", "qwen3.5-397b-a17b", "qwen3.6-35b-a3b"},
+		Models: []string{"xopglm52", "xopdeepseekv4pro", "xopqwen35397b", "xopqwen36v35b", "xsparkx2agent"},
 	},
 	{
 		Name: "anthropic", DisplayName: "Anthropic (Claude)", Kind: "anthropic",
@@ -175,11 +175,11 @@ var providerTemplates = []ProviderTemplate{
 	},
 	{
 		Name: "xfyun-coding", DisplayName: "讯飞 MaaS Coding", Kind: "openai",
-		BaseURL: "https://spark-api-open.xf-yun.com/v1", APIKeyEnv: "XFYUN_API_KEY",
+		BaseURL: "https://maas-coding-api.cn-huabei-1.xf-yun.com/v2", APIKeyEnv: "XFYUN_API_KEY",
 		DefaultModel: "astron-code-latest", VisionModel: "astron-code-latest",
-		Vision: true, ContextWindow: 128000, CodingOnly: true, Aggregator: true, Category: "aggregator",
-		DocURL: "https://console.xfyun.cn/services/bm4",
-		Models: []string{"astron-code-latest"},
+		Vision: true, ContextWindow: 256000, CodingOnly: true, Aggregator: true, Category: "aggregator",
+		DocURL: "https://www.xfyun.cn/doc/spark/CodingPlan.html",
+		Models: []string{"astron-code-latest", "auto", "xsparkx2agent"},
 	},
 }
 
