@@ -86,10 +86,10 @@ var providerTemplates = []ProviderTemplate{
 	{
 		Name: "mimo", DisplayName: "MiMo (小米)", Kind: "openai",
 		BaseURL: "https://api.xiaomimimo.com/v1", APIKeyEnv: "MIMO_API_KEY",
-		DefaultModel: "MiMo-V2.5-Pro", FastModel: "MiMo-V2.5-Pro-UltraSpeed", VisionModel: "MiMo-V2.5-Pro",
+		DefaultModel: "mimo-v2.5-pro", FastModel: "mimo-v2.5", VisionModel: "mimo-v2.5-pro",
 		Vision: true, ContextWindow: 1000000, Category: "direct",
 		DocURL: "https://mimo.mi.com",
-		Models: []string{"MiMo-V2.5-Pro", "MiMo-V2.5-Pro-UltraSpeed", "MiMo-V2.5"},
+		Models: []string{"mimo-v2.5-pro", "mimo-v2.5"},
 	},
 	{
 		Name: "stepfun", DisplayName: "阶跃星辰 (StepFun)", Kind: "openai",
