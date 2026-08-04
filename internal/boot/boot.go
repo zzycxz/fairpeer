@@ -965,7 +965,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Sub-agents always run headless: they have no UI to answer a prompt, so they
 	// inherit this same gate.
 	policy := permission.New(cfg.Permissions.Mode, cfg.Permissions.Allow, cfg.Permissions.Ask, cfg.Permissions.Deny)
+	riskOverrides := buildRiskOverrides(cfg.Plugins)
 	headlessGate := permission.NewGate(policy, nil)
+	headlessGate.RiskOverrides = riskOverrides
 
 	// Hooks: load the global settings.json plus the project's (only when trusted —
 	// project hooks run arbitrary shell commands, so cloning a repo must not
@@ -1365,7 +1367,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if classifier != nil {
 		ctrlOpts.Classifier = classifier
 	}
-	return control.New(ctrlOpts), nil
+	ctrl := control.New(ctrlOpts)
+	// Inject the per-tool risk-class overrides (SPEC v2 §3.2A) so the interactive
+	// gate honors [[plugins]] risk config the same way the headless gate does.
+	ctrl.SetRiskOverrides(riskOverrides)
+	return ctrl, nil
 }
 
 func migrateLegacySessionSources(sink event.Sink) {
@@ -1920,6 +1926,7 @@ func PluginSpecs(entries []config.PluginEntry) []plugin.Spec {
 			URL:         e.URL,
 			Headers:     e.Headers,
 			CallTimeout: parseDuration(e.CallTimeout),
+			ServerRisk:  e.Risk,
 		}
 	}
 	return specs
@@ -1929,6 +1936,32 @@ func PluginSpecs(entries []config.PluginEntry) []plugin.Spec {
 func parseDuration(s string) time.Duration {
 	d, _ := time.ParseDuration(strings.TrimSpace(s))
 	return d
+}
+
+// buildRiskOverrides turns each [[plugins]] risk="…" declaration into a per-
+// server prefix entry on the permission Gate's RiskOverrides map (SPEC v2
+// §3.2A). A server configured risk="read" yields key "mcp__<server>__" →
+// RiskRead, so every tool on that server skips the external-risk default.
+// Empty/unknown risk strings are skipped (they default to external via
+// permission.Classify's MCP rule — no map entry needed). Returns nil when no
+// server declares a non-default risk, keeping the Gate's override map empty.
+func buildRiskOverrides(entries []config.PluginEntry) map[string]permission.RiskClass {
+	var overrides map[string]permission.RiskClass
+	for _, e := range entries {
+		raw := strings.TrimSpace(e.Risk)
+		if raw == "" || strings.EqualFold(raw, "external") {
+			continue // default; no override needed
+		}
+		cls := permission.ParseRiskClass(raw)
+		if cls == permission.RiskExternal {
+			continue // ParseRiskClass's safe-default also lands here; skip.
+		}
+		if overrides == nil {
+			overrides = make(map[string]permission.RiskClass)
+		}
+		overrides["mcp__"+e.Name+"__"] = cls
+	}
+	return overrides
 }
 
 // MCPStartupNotice formats the warning shown when configured MCP servers failed

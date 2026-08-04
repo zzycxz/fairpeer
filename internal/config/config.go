@@ -1338,6 +1338,12 @@ type PluginEntry struct {
 	// server's JSON-RPC calls. Prevents a slow server from blocking the agent.
 	// Format: Go duration string (e.g. "30s", "2m", "0" to disable).
 	CallTimeout string `toml:"call_timeout"`
+	// Risk marks this MCP server's tools' risk class for the permission gate
+	// (SPEC v2 §3.2A). MCP tools default to "external" (safe: outward
+	// operations need approval). Set to "read" for a trusted read-only server
+	// so its tools don't prompt; "write_local"/"exec" for the in-between cases.
+	// Empty/unknown = "external" (fail-safe). See internal/permission/risk.go.
+	Risk string `toml:"risk"`
 }
 
 func (e PluginEntry) ShouldAutoStart() bool {

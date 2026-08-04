@@ -72,6 +72,12 @@ type Spec struct {
 	// caller's context has no deadline. Zero uses the default (60s). Prevents a
 	// slow or hung MCP server from blocking the agent indefinitely.
 	CallTimeout time.Duration
+	// ServerRisk is the config-declared risk class for ALL tools on this server
+	// (SPEC v2 §3.2A). Raw string ("read"/"write_local"/"exec"/"external"); the
+	// boot layer translates it into per-tool RiskOverrides on the permission Gate.
+	// Empty = "external" (safe default: MCP tools prompt). Kept as a string here
+	// so this package need not depend on internal/permission.
+	ServerRisk string
 }
 
 // transport carries JSON-RPC messages to and from one MCP server. call sends a

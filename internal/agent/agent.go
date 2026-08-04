@@ -309,6 +309,13 @@ type Agent struct {
 	// tool-level guards above, which key on tool calls, not narrated text.
 	repeatText       repeatTextMonitor
 	repeatTextWarned bool
+	// opGate is the operation-level failure-recovery gate (SPEC v2 §3.1): stops
+	// an agent from looping on the same failing write/command. A third guard
+	// alongside stormSig (batch-tail, name+error) and repeatSuccessCounts
+	// (write success). Keys on a name+args fingerprint so the exact failing op is
+	// stopped while unrelated work continues. nil disables (default: on via
+	// newOpGate in Options). Pure host logic — the model never sees it.
+	opGate *opGate
 }
 
 // SetPlanMode flips the read-only gate. While true, executeOne refuses any
@@ -651,6 +658,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		compactForceRatio: opts.CompactForceRatio,
 		recentKeep:        opts.RecentKeep,
 		archiveDir:        opts.ArchiveDir,
+		opGate:            newOpGate(),
 	}
 }
 
@@ -677,6 +685,9 @@ func (a *Agent) Run(ctx context.Context, input any) error {
 	a.repeatSuccessCounts = nil
 	a.repeatText.reset()
 	a.repeatTextWarned = false
+	if a.opGate != nil {
+		a.opGate.reset()
+	}
 	a.sink.Emit(event.Event{Kind: event.TurnStarted})
 	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
 
@@ -1533,6 +1544,22 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 			}
 		}
 	}
+	// Operation-level failure-recovery gate (SPEC v2 §3.1): refuse a write/command
+	// op that has already failed the same way past its budget this turn. Runs after
+	// all gating (permission/hooks) so a policy denial never reaches it, and only
+	// for non-read-only tools — diagnosis must always be possible. Pure host logic;
+	// the model only sees the returned tool-result message, never "fingerprint".
+	if a.opGate != nil && !t.ReadOnly() {
+		if msg, stop := a.opGate.beforeMutation(opFingerprint(call)); stop {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+				Text: fmt.Sprintf("op-recovery: %s blocked — already failing past this turn's budget", call.Name)})
+			return toolOutcome{
+				output:  msg,
+				blocked: true,
+				errMsg:  "blocked by op-recovery gate",
+			}
+		}
+	}
 	// Checkpoint the file this writer is about to change, so the turn can be
 	// rewound. Fires after all gating (the edit is cleared to run) and only for
 	// tools that can describe their change; a Preview error means the edit will
@@ -1593,7 +1620,25 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 			detail = strings.TrimRight(detail, "\n") + "\nThe arguments were not valid JSON. Re-emit them exactly per this schema:\n" + string(t.Schema())
 		}
 		body, truncMsg := truncateToolOutput(fmt.Sprintf("error: %v\n%s", err, detail))
-		return toolOutcome{output: body, errMsg: firstLine(err.Error()), truncated: truncMsg != "", truncMsg: truncMsg}
+		errMsg := firstLine(err.Error())
+		outcome := toolOutcome{output: body, errMsg: errMsg, truncated: truncMsg != "", truncMsg: truncMsg}
+		// Observe the failure for the op-recovery gate. A qualifying failure (not
+		// a block, not read-only, not transient) increments the budget; if it
+		// crosses a threshold the gate returns a guidance nudge appended to the
+		// model-facing output. We surface a Notice too so the user sees the stop.
+		if a.opGate != nil {
+			if guidance := a.opGate.observeResult(opFingerprint(call), errMsg, false, t.ReadOnly()); guidance != "" {
+				outcome.output = strings.TrimRight(outcome.output, "\n") + guidance
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+					Text: fmt.Sprintf("op-recovery: %s failed past this turn's budget — stopping retries", call.Name)})
+			}
+		}
+		return outcome
+	}
+	// Success: a write/command success is real progress — clear that op's failure
+	// history so a later unrelated failure starts fresh.
+	if a.opGate != nil {
+		a.opGate.observeResult(opFingerprint(call), "", false, t.ReadOnly())
 	}
 	a.recordRepeatSuccess(call, t)
 	// A foreground `task` sub-agent just finished — its result is the final answer.

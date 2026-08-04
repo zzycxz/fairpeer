@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/zzycxz/fairpeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/validation"
 )
 
 func init() { tool.RegisterBuiltin(multiEdit{}) }
@@ -125,6 +126,11 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		applied++
 	}
 
+	// Pre-write syntax validation (SPEC v2 §3.3): validate the final accumulated
+	// content after all edits before it hits disk. One bad edit breaks the file.
+	if err := validation.ValidateSyntax(p.Path, content); err != nil {
+		return "", fmt.Errorf("pre-write syntax check failed — fix the error and retry; the file was NOT written: %w", err)
+	}
 	if err := writeFileEncoded(p.Path, content, enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}

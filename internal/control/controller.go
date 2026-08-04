@@ -65,6 +65,10 @@ type Controller struct {
 	dreamProvider provider.Provider
 	sink          event.Sink
 	policy        permission.Policy
+	// riskOverrides is the per-tool risk-class map (SPEC v2 §3.2A) built at boot
+	// from [[plugins]] risk config, so trusted MCP servers' tools can skip the
+	// external-risk default. Used by newInteractiveGate; nil = MCP tools external.
+	riskOverrides map[string]permission.RiskClass
 
 	label         string
 	systemPrompt  string
@@ -1463,6 +1467,15 @@ func (c *Controller) Approve(id string, allow, session, persist bool) {
 	}
 }
 
+// SetRiskOverrides installs the per-tool risk-class map (SPEC v2 §3.2A) built
+// from [[plugins]] risk config. Called once at boot after plugins are resolved.
+// A nil/empty map keeps the safe default (MCP tools external-risk).
+func (c *Controller) SetRiskOverrides(overrides map[string]permission.RiskClass) {
+	c.mu.Lock()
+	c.riskOverrides = overrides
+	c.mu.Unlock()
+}
+
 // EnableInteractiveApproval swaps the executor's gate for one that routes
 // approval decisions to the frontend via ApprovalRequest events, and wires the
 // controller in as the executor's Asker so the `ask` tool can question the user.
@@ -1498,6 +1511,7 @@ func (c *Controller) newInteractiveGate() *permission.Gate {
 		policy.Mode = permission.Ask
 	}
 	gate := permission.NewGate(policy, gateApprover{c})
+	gate.RiskOverrides = c.riskOverrides
 	gate.OnRemember = func(rule string) {
 		if c.onRemember != nil {
 			_ = c.onRemember(rule)

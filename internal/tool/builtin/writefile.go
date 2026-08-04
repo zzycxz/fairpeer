@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/zzycxz/fairpeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/validation"
 )
 
 func init() { tool.RegisterBuiltin(writeFile{}) }
@@ -60,6 +61,12 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", fmt.Errorf("mkdir %s: %w", dir, err)
 		}
+	}
+	// Pre-write syntax validation (SPEC v2 §3.3): refuse to write a .go/.json
+	// file whose content has syntax errors, so the file isn't corrupted on disk.
+	// The agent gets a clear error and can fix it; unrecognized extensions pass.
+	if err := validation.ValidateSyntax(p.Path, p.Content); err != nil {
+		return "", fmt.Errorf("pre-write syntax check failed — fix the error and retry; the file was NOT written: %w", err)
 	}
 	if err := writeFileEncoded(p.Path, p.Content, enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)

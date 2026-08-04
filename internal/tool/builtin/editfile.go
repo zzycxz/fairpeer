@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/zzycxz/fairpeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/validation"
 )
 
 func init() { tool.RegisterBuiltin(editFile{}) }
@@ -98,6 +99,11 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 
 	updated := strings.Replace(content, region, newStr, 1)
+	// Pre-write syntax validation (SPEC v2 §3.3): validate the PROPOSED updated
+	// content before it hits disk. Catches an edit that breaks Go/JSON syntax.
+	if err := validation.ValidateSyntax(p.Path, updated); err != nil {
+		return "", fmt.Errorf("pre-write syntax check failed — fix the error and retry; the file was NOT written: %w", err)
+	}
 	if err := writeFileEncoded(p.Path, updated, enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
