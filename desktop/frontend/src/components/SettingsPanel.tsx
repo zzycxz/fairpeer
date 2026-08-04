@@ -20,10 +20,11 @@ import {
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
 import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
-import type { BotConnectionView, BotInstallStartResult, BotSettingsView, CoWorkSettingsView, HookConfigView, HooksSettingsView, MailProbeResult, NetworkView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotConnectionView, BotInstallStartResult, BotSettingsView, CoWorkSettingsView, HookConfigView, HooksSettingsView, MailProbeResult, NetworkView, ProviderTemplate, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
+import { VendorStep, KeyStep, ModelStep } from "./OnboardingOverlay";
 import { MCPServersSettingsPage, SkillsSettingsPage } from "./CapabilitiesPanel";
 import { MemorySettingsPage } from "./MemoryPanel";
 import { ModalCloseButton } from "./ModalCloseButton";
@@ -414,17 +415,7 @@ const PROXY_MODES = ["auto", "custom", "off"] as const;
 const EFFORT_PRESETS: readonly string[] = ["low", "medium", "high"];
 const REASONING_PROTOCOLS: readonly string[] = ["", "openai", "none"];
 
-// COMMON_PROVIDER_PRESETS are one-click base_url + context_window shortcuts for
-// the most popular OpenAI-compatible platforms, so users don't have to look up
-// and hand-type the API endpoint. Selecting a preset fills both fields; the
-// user can then edit freely.
-const COMMON_PROVIDER_PRESETS: { label: string; baseUrl: string; context: number }[] = [
-  { label: "DeepSeek", baseUrl: "https://api.deepseek.com", context: 128000 },
-  { label: "Kimi", baseUrl: "https://api.moonshot.cn/v1", context: 128000 },
-  { label: "智谱", baseUrl: "https://open.bigmodel.cn/api/paas/v4", context: 128000 },
-  { label: "通义", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", context: 128000 },
-  { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", context: 200000 },
-];
+
 
 const PROXY_TYPES = ["http", "https", "socks5", "socks5h"] as const;
 const LANGUAGE_PREFS: LangPref[] = ["", "zh", "en"];
@@ -2657,7 +2648,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
       title={t("settings.providerAccess")}
       description={t("settings.providerAccessHint")}
       actions={
-        <button className="btn btn--small" disabled={busy || adding !== null} onClick={() => setAdding("custom")}>
+        <button className="btn btn--small" disabled={busy || adding !== null} onClick={() => setAdding("builtin")}>
           {t("settings.addProvider")}
         </button>
       }
@@ -2668,6 +2659,9 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             <strong>{t("settings.providerAccessEmptyTitle")}</strong>
             <span>{t("settings.providerAccessEmptyHint")}</span>
             <div className="provider-empty__actions">
+              <button type="button" className="btn btn--primary btn--small" disabled={busy} onClick={() => setAdding("builtin")}>
+                {t("settings.addProvider")}
+              </button>
               <button type="button" className="btn btn--small" disabled={busy} onClick={() => setAdding("custom")}>
                 {t("settings.addProvider.customChoice")}
               </button>
@@ -2681,6 +2675,9 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             busy={busy}
             onCancel={() => setAdding(null)}
             onAddCustom={(pv) => apply(() => app.SaveProvider(pv)).then(() => setAdding(null))}
+            onDoneBuiltin={() => {
+              apply(() => Promise.resolve()).then(() => setAdding(null));
+            }}
           />
         )}
         {adding === null && groups.map((group) => (
@@ -2744,7 +2741,7 @@ type ProviderModelDraft = {
   selected: string[];
 };
 
-type AddProviderMode = null | "custom";
+type AddProviderMode = null | "custom" | "builtin";
 
 function AddProviderPanel({
   mode,
@@ -2752,14 +2749,26 @@ function AddProviderPanel({
   busy,
   onCancel,
   onAddCustom,
+  onDoneBuiltin,
 }: {
   mode: AddProviderMode;
   kinds: string[];
   busy: boolean;
   onCancel: () => void;
   onAddCustom: (p: ProviderView) => void | Promise<void>;
+  onDoneBuiltin: () => void;
 }) {
   const t = useT();
+  const [templates, setTemplates] = useState<ProviderTemplate[]>([]);
+  const [step, setStep] = useState<"vendor" | "key" | "model">("vendor");
+  const [selected, setSelected] = useState<ProviderTemplate | null>(null);
+  const [apiKey, setApiKey] = useState("");
+
+  useEffect(() => {
+    if (mode === "builtin") {
+      app.GetProviderTemplates().then(setTemplates).catch(console.error);
+    }
+  }, [mode]);
 
   const header = (
     <div className="provider-add-panel__head">
@@ -2787,6 +2796,45 @@ function AddProviderPanel({
       </div>
     );
   }
+
+  if (mode === "builtin") {
+    const direct = templates.filter(t => !t.isAggregator);
+    const aggregators = templates.filter(t => t.isAggregator);
+    return (
+      <div className="provider-add-panel">
+        {header}
+        <div style={{ marginTop: "1rem" }}>
+          {step === "vendor" && (
+            <VendorStep
+              direct={direct}
+              aggregators={aggregators}
+              onPick={(tpl) => { setSelected(tpl); setStep("key"); }}
+              t={t}
+            />
+          )}
+          {step === "key" && selected && (
+            <KeyStep
+              template={selected}
+              apiKey={apiKey}
+              onApiKeyChange={setApiKey}
+              onBack={() => setStep("vendor")}
+              onConnected={() => setStep("model")}
+              t={t}
+            />
+          )}
+          {step === "model" && selected && (
+            <ModelStep
+              template={selected}
+              apiKey={apiKey}
+              onDone={onDoneBuiltin}
+              t={t}
+            />
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -3408,21 +3456,7 @@ function ProviderEditor({
       <label className="set-label">{t("settings.providerProtocol")}</label>
       {protocolField}
       <label className="set-label">{t("settings.providerBaseUrlLabel")}</label>
-      <div className="provider-presets">
-        {COMMON_PROVIDER_PRESETS.map((preset) => (
-          <button
-            key={preset.label}
-            type="button"
-            className={"set-seg__btn provider-presets__btn" + (baseUrl === preset.baseUrl ? " set-seg__btn--on" : "")}
-            onClick={() => {
-              setBaseUrl(preset.baseUrl);
-              if (preset.context) setCtx(String(preset.context));
-            }}
-          >
-            {preset.label}
-          </button>
-        ))}
-      </div>
+
       <input className="mem-input" placeholder={t("settings.providerBaseUrl")} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
       {!initial && (
         <>
@@ -3447,31 +3481,35 @@ function ProviderEditor({
           />
         </>
       )}
-      <div className="provider-model-fetch-row">
-        <button
-          type="button"
-          className="btn btn--small"
-          disabled={busy || fetchingModels || !canFetch}
-          onClick={() => void fetchModels()}
-        >
-          {fetchingModels ? t("settings.fetchingModels") : t("settings.testFetchModels")}
-        </button>
-        <span>{t("settings.testFetchModelsHint")}</span>
-      </div>
-      {fetchStatus && <div className="provider-fetch-status provider-fetch-status--ok">{fetchStatus}</div>}
-      {fetchErr && <div className="provider-fetch-status provider-fetch-status--error">{fetchErr}</div>}
-      {modelNames.length > 0 && (
-        <div className="provider-card-block">
-          <div className="provider-card-block__label">{t("settings.availableModels")}</div>
-          <div className="provider-model-chips">
-            {modelNames.slice(0, 8).map((model) => (
-              <span className="provider-model-chip" key={model}>{model}</span>
-            ))}
-            {modelNames.length > 8 && (
-              <span className="provider-model-chip provider-model-chip--more">{t("settings.moreModels", { n: modelNames.length - 8 })}</span>
-            )}
+      {!initial && (
+        <>
+          <div className="provider-model-fetch-row">
+            <button
+              type="button"
+              className="btn btn--small"
+              disabled={busy || fetchingModels || !canFetch}
+              onClick={() => void fetchModels()}
+            >
+              {fetchingModels ? t("settings.fetchingModels") : t("settings.testFetchModels")}
+            </button>
+            <span>{t("settings.testFetchModelsHint")}</span>
           </div>
-        </div>
+          {fetchStatus && <div className="provider-fetch-status provider-fetch-status--ok">{fetchStatus}</div>}
+          {fetchErr && <div className="provider-fetch-status provider-fetch-status--error">{fetchErr}</div>}
+          {modelNames.length > 0 && (
+            <div className="provider-card-block">
+              <div className="provider-card-block__label">{t("settings.availableModels")}</div>
+              <div className="provider-model-chips">
+                {modelNames.slice(0, 8).map((model) => (
+                  <span className="provider-model-chip" key={model}>{model}</span>
+                ))}
+                {modelNames.length > 8 && (
+                  <span className="provider-model-chip provider-model-chip--more">{t("settings.moreModels", { n: modelNames.length - 8 })}</span>
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
       <label className="set-label">{t("settings.manualModels")}</label>
       <input className="mem-input" placeholder={t("settings.providerModels")} value={models} onChange={(e) => setModels(e.target.value)} />

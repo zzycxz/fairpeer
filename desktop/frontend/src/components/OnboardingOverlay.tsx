@@ -3,6 +3,8 @@ import logo from "../assets/logo.png";
 import { useT, type Translator } from "../lib/i18n";
 import { app } from "../lib/bridge";
 import type { ProviderTemplate } from "../lib/types";
+import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
+import { Check, ChevronsUpDown } from "lucide-react";
 
 // Three-step first-run wizard: pick vendor → paste key → pick default model.
 // Replaces the old single-key-input overlay (which assumed a built-in provider
@@ -76,7 +78,7 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
 }
 
 // ── Step 1: vendor grid ───────────────────────────────────────────────────
-function VendorStep({ direct, aggregators, onPick, t }: {
+export function VendorStep({ direct, aggregators, onPick, t }: {
   direct: ProviderTemplate[];
   aggregators: ProviderTemplate[];
   onPick: (tpl: ProviderTemplate) => void;
@@ -86,29 +88,97 @@ function VendorStep({ direct, aggregators, onPick, t }: {
   const [value, setValue] = useState("");
   const selected = all.find((x) => x.name === value) ?? null;
 
+  const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
+
+  const closeMenu = useCallback(() => {
+    if (closeTimerRef.current !== null) return;
+    setClosing(true);
+    window.requestAnimationFrame(() => setOpen(false));
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      setClosing(false);
+    }, reduceMotion ? 0 : ANCHORED_POPOVER_CLOSE_MS);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+    };
+  }, []);
+
   return (
     <div className="onboarding__step">
       <div className="onboarding__tag">{t("onboarding.step1Hint")}</div>
 
-      <select
-        className="onboarding__select"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-      >
-        <option value="">{t("onboarding.selectPlaceholder")}</option>
-        <optgroup label={t("onboarding.categoryDirect")}>
-          {direct.map((tpl) => (
-            <option key={tpl.name} value={tpl.name}>{tpl.displayName}</option>
-          ))}
-        </optgroup>
-        {aggregators.length > 0 && (
-          <optgroup label={t("onboarding.categoryAggregator")}>
-            {aggregators.map((tpl) => (
-              <option key={tpl.name} value={tpl.name}>{tpl.displayName}</option>
+      <div className="onboarding__dropdown">
+        <button
+          ref={triggerRef}
+          type="button"
+          className="onboarding__dropdown-trigger"
+          aria-expanded={open && !closing}
+          onClick={() => (open || closing ? closeMenu() : setOpen(true))}
+        >
+          <span className="onboarding__dropdown-label">
+            {selected ? selected.displayName : t("onboarding.selectPlaceholder")}
+          </span>
+          <ChevronsUpDown size={14} className="onboarding__dropdown-icon" />
+        </button>
+
+        <AnchoredPopover
+          open={open}
+          closing={closing}
+          anchorRef={triggerRef}
+          onClose={closeMenu}
+          className="onboarding__menu onboarding__menu--portal"
+          style={{ width: triggerRef.current?.getBoundingClientRect().width ?? 280 }}
+        >
+          <div className="onboarding__menu-list" role="listbox">
+            <div className="onboarding__menu-group">{t("onboarding.categoryDirect")}</div>
+            {direct.map((tpl) => (
+              <button
+                key={tpl.name}
+                type="button"
+                role="option"
+                aria-selected={value === tpl.name}
+                className={`onboarding__menu-item ${value === tpl.name ? "onboarding__menu-item--selected" : ""}`}
+                onClick={() => {
+                  setValue(tpl.name);
+                  closeMenu();
+                }}
+              >
+                <span className="onboarding__menu-item-label">{tpl.displayName}</span>
+                {value === tpl.name && <Check size={14} className="onboarding__menu-item-check" />}
+              </button>
             ))}
-          </optgroup>
-        )}
-      </select>
+            
+            {aggregators.length > 0 && (
+              <>
+                <div className="onboarding__menu-group">{t("onboarding.categoryAggregator")}</div>
+                {aggregators.map((tpl) => (
+                  <button
+                    key={tpl.name}
+                    type="button"
+                    role="option"
+                    aria-selected={value === tpl.name}
+                    className={`onboarding__menu-item ${value === tpl.name ? "onboarding__menu-item--selected" : ""}`}
+                    onClick={() => {
+                      setValue(tpl.name);
+                      closeMenu();
+                    }}
+                  >
+                    <span className="onboarding__menu-item-label">{tpl.displayName}</span>
+                    {value === tpl.name && <Check size={14} className="onboarding__menu-item-check" />}
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
+        </AnchoredPopover>
+      </div>
 
       {selected && (
         <div className="onboarding__vendor-info">
@@ -133,7 +203,7 @@ function VendorStep({ direct, aggregators, onPick, t }: {
 }
 
 // ── Step 2: paste API key ─────────────────────────────────────────────────
-function KeyStep({ template, apiKey, onApiKeyChange, onBack, onConnected, t }: {
+export function KeyStep({ template, apiKey, onApiKeyChange, onBack, onConnected, t }: {
   template: ProviderTemplate;
   apiKey: string;
   onApiKeyChange: (v: string) => void;
@@ -223,13 +293,15 @@ function KeyStep({ template, apiKey, onApiKeyChange, onBack, onConnected, t }: {
 // discovery happens later in Settings; here we use the curated preset so the
 // user gets a working default in one shot. SetupProvider persists key + provider
 // + default in one atomic call.
-function ModelStep({ template, apiKey, onDone, t }: {
+export function ModelStep({ template, apiKey, onDone, t }: {
   template: ProviderTemplate;
   apiKey: string;
   onDone: () => void;
   t: Translator;
 }) {
-  const [pick, setPick] = useState<string>(template.defaultModel);
+  const [defaultPick, setDefaultPick] = useState<string>(template.defaultModel);
+  const [visionPick, setVisionPick] = useState<string>(template.visionModel || template.defaultModel);
+  const [fastPick, setFastPick] = useState<string>(template.fastModel || "follow");
   const [state, setState] = useState<"ready" | "saving" | "error">("ready");
   const [error, setError] = useState<string | null>(null);
 
@@ -239,27 +311,46 @@ function ModelStep({ template, apiKey, onDone, t }: {
     setState("saving");
     setError(null);
     try {
-      await app.SetupProvider(template, apiKey, pick);
+      await app.SetupProvider(template, apiKey, defaultPick, visionPick, fastPick);
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setState("error");
     }
-  }, [template, apiKey, pick, onDone]);
+  }, [template, apiKey, defaultPick, visionPick, fastPick, onDone]);
 
   return (
     <div className="onboarding__step">
       <div className="onboarding__tag">{t("onboarding.step3Hint")}</div>
-      <div className="onboarding__model-list">
-        {models.map((m) => (
-          <label key={m} className={`onboarding__model-item ${pick === m ? "onboarding__model-item--selected" : ""}`}>
-            <input type="radio" name="default-model" value={m} checked={pick === m} onChange={() => setPick(m)} />
-            <span className="onboarding__model-name">{m}</span>
-            {m === template.defaultModel && <span className="onboarding__model-role">{t("onboarding.roleDefault")}</span>}
-            {m === template.visionModel && m !== template.defaultModel && <span className="onboarding__model-role">{t("onboarding.roleVision")}</span>}
-            {m === template.fastModel && m !== template.defaultModel && <span className="onboarding__model-role">{t("onboarding.roleFast")}</span>}
-          </label>
-        ))}
+      <div className="onboarding__model-selectors" style={{ display: "flex", flexDirection: "column", gap: "1rem", margin: "1.5rem 0" }}>
+        <div>
+          <label className="set-label" style={{ display: "block", marginBottom: "0.25rem" }}>{t("settings.defaultModel")}</label>
+          <select className="mem-select" style={{ width: "100%" }} value={defaultPick} onChange={(e) => setDefaultPick(e.target.value)}>
+            {models.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </div>
+        
+        <div>
+          <label className="set-label" style={{ display: "block", marginBottom: "0.25rem" }}>{t("settings.screenshotVlmLabel") || "图片识别模型"}</label>
+          <select className="mem-select" style={{ width: "100%" }} value={visionPick} onChange={(e) => setVisionPick(e.target.value)}>
+            <option value="none">{t("settings.screenshotVlmNone") || "未配置"}</option>
+            {models.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </div>
+        
+        <div>
+          <label className="set-label" style={{ display: "block", marginBottom: "0.25rem" }}>{t("settings.fastTaskModel") || "迅捷任务模型"}</label>
+          <select className="mem-select" style={{ width: "100%" }} value={fastPick} onChange={(e) => setFastPick(e.target.value)}>
+            <option value="follow">{t("settings.fastTaskNone") || "跟随默认"}</option>
+            {models.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {state === "error" && error && <div className="onboarding__error" role="alert">{error}</div>}

@@ -202,65 +202,65 @@ compact_force_ratio = 0.9   # force compacting at this high-water mark
 # default     = "qwen3.7-plus"
 # models      = ["qwen3.7-plus", "qwen3.6-plus", "kimi-k2.5", "glm-5", "minimax-m2.5", "qwen3-coder-plus", "glm-4.7"]
 
-# ── 智谱 z.ai Coding Plan ──
+# ── 智谱 GLM Coding Plan ── (专用端点，非普通 API)
 # [[providers]]
 # name        = "zhipu-coding"
 # kind        = "openai"
-# base_url    = "https://api.z.ai/v1"
+# base_url    = "https://open.bigmodel.cn/api/coding/paas/v4"   # Coding Plan 专用端点
 # api_key_env = "ZHIPU_CODING_API_KEY"
 # coding_only = true
 # aggregator  = true
 # default     = "glm-5.2"
 # models      = ["glm-5.2", "glm-5.1", "glm-5"]
 
-# ── 火山引擎 Coding/Agent Plan ──
+# ── 火山引擎 Coding/Agent Plan ── (专用端点，非普通 API)
 # [[providers]]
 # name        = "volcengine-coding"
 # kind        = "openai"
-# base_url    = "https://ark.cn-beijing.volces.com/api/v3"
+# base_url    = "https://ark.cn-beijing.volces.com/api/coding/v3"   # Coding Plan 专用端点
 # api_key_env = "VOLCENGINE_API_KEY"    # shared endpoint, subscription tier
 # coding_only = true
 # aggregator  = true
 # default     = "doubao-seed-evolving"
 # models      = ["doubao-seed-evolving", "doubao-seed-2.1-turbo", "deepseek-v4-pro", "kimi-k2.6"]
 
-# ── 百度千帆 Token Plan ── (was Coding Plan, converted 2026-07)
+# ── 百度千帆 Coding Plan ── (专用端点，非普通 API)
 # [[providers]]
 # name        = "baidu-coding"
 # kind        = "openai"
-# base_url    = "https://qianfan.baidubce.com/v2/tokenplan/personal"
+# base_url    = "https://qianfan.baidubce.com/v2/coding"   # Coding Plan 专用端点
 # api_key_env = "BAIDU_API_KEY"
 # coding_only = true
 # aggregator  = true
 # default     = "glm-5.2"
 # models      = ["ernie-5.1", "glm-5.2", "kimi-k2.6", "deepseek-v4-pro"]
 
-# ── 腾讯云 TokenHub ──
+# ── 腾讯云 TokenHub Coding Plan ── (专用端点，非普通 API)
 # [[providers]]
 # name        = "tencent-coding"
 # kind        = "openai"
-# base_url    = "https://api.lkeap.cloud.tencent.com/v1"
+# base_url    = "https://api.lkeap.cloud.tencent.com/coding/v1"   # Coding Plan 专用端点
 # api_key_env = "TENCENT_API_KEY"
 # coding_only = true
 # aggregator  = true
 # default     = "deepseek-v4-pro"
 # models      = ["deepseek-v4-pro", "glm-5.2", "kimi-k2.6", "minimax-m2.7"]
 
-# ── 阶跃星辰 Step Plan ── (coding_only but NOT aggregator: own models only)
+# ── 阶跃星辰 Step Plan ── (专用端点，非普通 API)
 # [[providers]]
 # name        = "stepfun-coding"
 # kind        = "openai"
-# base_url    = "https://api.stepfun.com/v1"
+# base_url    = "https://api.stepfun.com/step_plan/v1"   # Step Plan 专用端点
 # api_key_env = "STEPFUN_API_KEY"
 # coding_only = true
 # default     = "step-3.7-flash"
 # models      = ["step-3.7-flash", "step-3.5-flash"]
 
-# ── 讯飞 MaaS Coding Plan ── (unified model id, platform routes internally)
+# ── 讯飞 MaaS Coding Plan ── (专用端点，统一模型 ID)
 # [[providers]]
 # name        = "xfyun-coding"
 # kind        = "openai"
-# base_url    = "https://spark-api-open.xf-yun.com/v1"
+# base_url    = "https://maas-token-api.cn-huabei-1.xf-yun.com/v2"   # Coding Plan 专用端点
 # api_key_env = "XFYUN_API_KEY"
 # coding_only = true
 # aggregator  = true

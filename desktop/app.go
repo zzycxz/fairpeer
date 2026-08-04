@@ -5684,32 +5684,49 @@ func (a *App) ProbeVendorKey(baseURL, apiKey string) error {
 // writes the API key, saves the provider config (with the chosen default model),
 // sets it as the global default, and rebuilds so it takes effect immediately.
 // template is the vendor preset; apiKey is the user's key; defaultModel is the
-// vendor-relative model name picked in step 3 (e.g. "deepseek-v4-pro" — no
-// provider prefix; SetupProvider adds "deepseek/").
-func (a *App) SetupProvider(template ProviderTemplate, apiKey string, defaultModel string) error {
+// template is the vendor preset; apiKey is the user's key; defaultModel is the
+// vendor-relative model name picked in step 3 (e.g. "deepseek-v4-pro").
+// visionModel and fastModel are similarly vendor-relative names for those roles.
+func (a *App) SetupProvider(template ProviderTemplate, apiKey string, defaultModel string, visionModel string, fastModel string) error {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
 		return fmt.Errorf("key is required")
 	}
 	defaultModel = strings.TrimSpace(defaultModel)
 	if defaultModel == "" {
-		// Fall back to the template's recommended default.
 		defaultModel = template.DefaultModel
 	}
+	visionModel = strings.TrimSpace(visionModel)
+	fastModel = strings.TrimSpace(fastModel)
 
 	// 1. Write the key to .env so FetchModels / SaveProvider can resolve it.
 	if err := upsertDotEnv(template.APIKeyEnv, apiKey); err != nil {
 		return fmt.Errorf("save key: %w", err)
 	}
 
-	// 2. Build the model list: vendor-relative names (no provider prefix). The
-	// provider prefix (e.g. "deepseek/") is added by the config layer on read;
-	// here we store bare model names matching what /models returns.
-	models := template.Models
+	// 2. Build the model list (unique names among the picked models + template recommendations)
+	modelsMap := make(map[string]bool)
+	for _, m := range template.Models {
+		modelsMap[m] = true
+	}
+	modelsMap[defaultModel] = true
+	if visionModel != "" && visionModel != "none" {
+		modelsMap[visionModel] = true
+	}
+	if fastModel != "" && fastModel != "follow" {
+		modelsMap[fastModel] = true
+	}
+	var models []string
+	for m := range modelsMap {
+		if m != "" {
+			models = append(models, m)
+		}
+	}
+	sort.Strings(models)
+
 	ref := template.Name + "/" + defaultModel
 
-	// 3. Save the provider entry. SaveProvider upserts + applyConfigChange
-	// (which rebuilds the controller).
+	// 3. Save the provider entry.
 	pv := ProviderView{
 		Name:          template.Name,
 		Kind:          template.Kind,
@@ -5719,26 +5736,31 @@ func (a *App) SetupProvider(template ProviderTemplate, apiKey string, defaultMod
 		Default:       defaultModel,
 		Models:        models,
 	}
-	// Vision capability: SaveProvider does not read it from ProviderView, so we
-	// patch the entry's Vision flag via applyConfigChange right after.
 	if err := a.SaveProvider(pv); err != nil {
 		return fmt.Errorf("save provider: %w", err)
 	}
-	if template.Vision {
-		_ = a.applyConfigChange(func(c *config.Config) error {
-			for i := range c.Providers {
-				if c.Providers[i].Name == template.Name {
-					c.Providers[i].Vision = true
-					break
-				}
-			}
-			return nil
-		})
-	}
 
-	// 4. Set as global default so the agent starts using it immediately.
+	// 4. Update the config for Vision and Fast models.
+	_ = a.applyConfigChange(func(c *config.Config) error {
+		for i := range c.Providers {
+			if c.Providers[i].Name == template.Name {
+				c.Providers[i].Vision = true
+				break
+			}
+		}
+		if visionModel != "" && visionModel != "none" {
+			c.Cowork.ScreenshotVLMModel = template.Name + "/" + visionModel
+		}
+		if fastModel == "follow" || fastModel == "" {
+			c.Agent.FastTaskModel = "" // follows default
+		} else {
+			c.Agent.FastTaskModel = template.Name + "/" + fastModel
+		}
+		return nil
+	})
+
+	// 5. Set as global default so the agent starts using it immediately.
 	if err := a.SetDefaultModel(ref); err != nil {
-		// Non-fatal: provider is configured, just not the default.
 		a.mu.Lock()
 		if tab := a.activeTabLocked(); tab != nil {
 			tab.StartupErr = "provider configured but could not set as default: " + err.Error()

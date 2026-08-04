@@ -330,7 +330,7 @@ export interface AppBindings {
   // Multi-vendor onboarding (provider_templates.go + app.go).
   GetProviderTemplates(): Promise<ProviderTemplate[]>;
   ProbeVendorKey(baseURL: string, apiKey: string): Promise<void>;
-  SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string): Promise<void>;
+  SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string, visionModel: string, fastModel: string): Promise<void>;
   // Crash overlay "Send report" (desktop/crash_app.go): scrubs user paths, attaches
   // version/os/arch, POSTs to the collection endpoint. Only ever sent on user click.
   ReportCrash(kind: string, detail: string): Promise<void>;
@@ -2885,6 +2885,9 @@ function makeMockApp(): AppBindings {
     // key. Matches ConnectKey on apiKeyEnv so the two stay in sync.
     async NeedsOnboarding() {
       return !settings.providers.some((p) => p.keySet);
+    },
+    async SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string, visionModel: string, fastModel: string) {
+      return Call(142, template, apiKey, defaultModel, visionModel, fastModel);
     },
     async ConnectKey(apiKey: string) {
       if (!apiKey.trim()) throw new Error("key is required");
