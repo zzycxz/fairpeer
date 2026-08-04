@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/skill"
@@ -115,7 +116,22 @@ func (t *installSourceTool) applyCopySkill(req request, act *action) error {
 	}
 	act.Target = canonical
 	act.CanonicalPath = canonical
-	return t.verifySkill(req.Scope, act.skill.Name, act)
+	if err := t.verifySkill(req.Scope, act.skill.Name, act); err != nil {
+		return err
+	}
+	// Record install provenance (SPEC v2 §3.4B): source + content hash for the
+	// audit trail and future update-check. Best-effort — a write failure doesn't
+	// undo a successful install (the skill works; we just lose provenance).
+	if root, rerr := t.skillInstallRoot(req.Scope); rerr == nil {
+		_ = recordInstall(root, act.skill.Name, ManifestEntry{
+			Source:      act.Source,
+			ContentHash: contentHash(act.skill.Content),
+			InstalledAt: time.Now(),
+			Scope:       req.Scope,
+			Mode:        "copy",
+		})
+	}
+	return nil
 }
 
 // applyLinkSkill creates a symlink in the skills dir pointing at the source.
@@ -286,6 +302,16 @@ func (t *installSourceTool) applyRemoveSkill(_ request, act *action) error {
 		return err
 	}
 	act.Target = ""
+	// Forget install provenance (SPEC v2 §3.4B). Best-effort.
+	name := ""
+	if len(act.Skills) > 0 {
+		name = act.Skills[0]
+	}
+	if name != "" {
+		if root, rerr := t.skillInstallRoot(act.Scope); rerr == nil {
+			_ = forgetInstall(root, name)
+		}
+	}
 	return nil
 }
 
