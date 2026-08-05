@@ -11,11 +11,36 @@ permissions:
   contents: write
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows/amd64
+            ext: .exe
+          - os: windows-latest
+            platform: windows/arm64
+            ext: .exe
+          - os: macos-latest
+            platform: darwin/amd64
+            ext: .app
+          - os: macos-latest
+            platform: darwin/arm64
+            ext: .app
+          - os: ubuntu-latest
+            platform: linux/amd64
+            ext: ""
+          - os: ubuntu-24.04-arm
+            platform: linux/arm64
+            ext: ""
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Setup System Deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -36,7 +61,51 @@ jobs:
 
       - name: Build Wails App
         working-directory: desktop
-        run: wails build -webview2 embed
+        run: wails build -platform ${{ matrix.platform }} -webview2 embed
+
+      - name: Package Artifact
+        working-directory: desktop/build/bin
+        shell: bash
+        run: |
+          PLAT_NAME=$(echo "${{ matrix.platform }}" | tr '/' '-')
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            # Windows already produces an .exe
+            mv fairpeer.exe fairpeer-${PLAT_NAME}.exe
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            # Compress .app to tar.gz to preserve permissions
+            tar -czf fairpeer-${PLAT_NAME}.tar.gz fairpeer.app
+          else
+            # Linux produces a binary without extension
+            tar -czf fairpeer-${PLAT_NAME}.tar.gz fairpeer
+          fi
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifact-${{ matrix.os }}-${{ strategy.job-index }}
+          path: |
+            desktop/build/bin/*.exe
+            desktop/build/bin/*.tar.gz
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: desktop/build/bin
+          pattern: build-artifact-*
+          merge-multiple: true
 
       - name: Sign and Generate latest.json
         working-directory: desktop
@@ -45,16 +114,18 @@ jobs:
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          # Parse version from tag
           $tag = "${{ github.ref_name }}"
-          # Call the sign tool
+          # The cmd/sign requires bash or sh to glob, so we'll just run it with bash
+          go run ./cmd/sign sign build/bin/*
           go run ./cmd/sign manifest build/bin $tag $tag
+        shell: bash
 
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            desktop/build/bin/fairpeer.exe
-            desktop/build/bin/fairpeer.exe.minisig
+            desktop/build/bin/*.exe
+            desktop/build/bin/*.tar.gz
+            desktop/build/bin/*.minisig
             desktop/build/bin/latest.json
           generate_release_notes: true
