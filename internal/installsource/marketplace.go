@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -33,9 +34,10 @@ type MarketSource struct {
 func DefaultMarketSources() []MarketSource {
 	return []MarketSource{
 		{ID: "builtin", Name: "Curated", Type: "builtin-catalog", URL: ""},
-		{ID: "anthropics", Name: "Anthropic Skills", Type: "github-repo", URL: "https://github.com/anthropics/skills"},
-		{ID: "openai", Name: "OpenAI Skills", Type: "github-repo", URL: "https://github.com/openai/skills"},
 		{ID: "clawhub", Name: "ClawHub Community", Type: "clawhub-api", URL: "https://clawhub.ai"},
+		{ID: "anthropic", Name: "Anthropic Skills", Type: "github-repo", URL: "https://github.com/anthropics/skills"},
+		{ID: "openai", Name: "OpenAI Skills", Type: "github-repo", URL: "https://github.com/openai/skills"},
+		{ID: "mcp-servers", Name: "MCP Servers", Type: "github-repo", URL: "https://github.com/modelcontextprotocol/servers"},
 	}
 }
 
@@ -43,6 +45,22 @@ func DefaultMarketSources() []MarketSource {
 // desktop settings panel to show without network).
 func BuiltinCatalog() []CatalogEntry {
 	return builtinCatalog
+}
+
+// InstalledSkillNames reads the install manifest from both project and global
+// scopes and returns a map of skill-name → source-URL. Used by the frontend
+// to mark skills as "already installed" in search results.
+func InstalledSkillNames(homeDir string) map[string]string {
+	result := make(map[string]string)
+	for _, root := range []string{
+		filepath.Join(homeDir, ".fairpeer", "skills"),
+	} {
+		m := loadManifest(root)
+		for name, entry := range m.Skills {
+			result[name] = entry.Source
+		}
+	}
+	return result
 }
 
 // MarketSourceMeta is the desktop-facing view of a market source (no internal
@@ -71,6 +89,7 @@ type CatalogEntry struct {
 	Source      string   `json:"source"`      // source ID
 	Name        string   `json:"name"`        // skill name (install name)
 	Slug        string   `json:"slug"`        // source-native identifier (clawhub slug)
+	Author      string   `json:"author,omitempty"` // author handle (clawhub ownerHandle)
 	Description string   `json:"description"` // one-line summary
 	Topics      []string `json:"topics"`      // categories/tags
 	Installs    int      `json:"installs"`    // download count (clawhub has, GitHub doesn't)
@@ -141,7 +160,7 @@ func marketplaceToCatalog(repoURL, sourceID string, mp *claudeMarketplace) []Cat
 		// If the plugin declares skill directories, each is a separate entry.
 		if len(p.Skills) > 0 {
 			for _, skillDir := range p.Skills {
-				name := p.Name
+				name := skillDir
 				if idx := strings.LastIndexByte(skillDir, '/'); idx >= 0 {
 					name = skillDir[idx+1:]
 				}
@@ -151,6 +170,7 @@ func marketplaceToCatalog(repoURL, sourceID string, mp *claudeMarketplace) []Cat
 					Source:      sourceID,
 					Name:        name,
 					Description: p.Description,
+					Topics:      []string{},
 					ContentURL:  contentURL,
 					InstallRef:  contentURL,
 				})
@@ -164,6 +184,7 @@ func marketplaceToCatalog(repoURL, sourceID string, mp *claudeMarketplace) []Cat
 			Source:      sourceID,
 			Name:        p.Name,
 			Description: p.Description,
+			Topics:      []string{},
 			ContentURL:  contentURL,
 			InstallRef:  contentURL,
 		})
@@ -177,15 +198,22 @@ func marketplaceToCatalog(repoURL, sourceID string, mp *claudeMarketplace) []Cat
 // the user can browse offline (content is fetched on install from GitHub raw).
 // Curated from PromptHub's BUILTIN_SKILL_REGISTRY (Anthropic + OpenAI + community).
 var builtinCatalog = []CatalogEntry{
-	{Source: "builtin", Name: "pdf", Description: "Create and analyze PDF documents (reports, posters, academic LaTeX)", Topics: []string{"office", "document"}, ContentURL: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/pdf/SKILL.md", InstallRef: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/pdf/SKILL.md"},
-	{Source: "builtin", Name: "docx", Description: "Create and edit Word documents with formatting preservation", Topics: []string{"office", "document"}, ContentURL: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/docx/SKILL.md", InstallRef: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/docx/SKILL.md"},
-	{Source: "builtin", Name: "xlsx", Description: "Create and edit Excel spreadsheets with formulas and charts", Topics: []string{"office", "data"}, ContentURL: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/xlsx/SKILL.md", InstallRef: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/xlsx/SKILL.md"},
-	{Source: "builtin", Name: "pptx", Description: "Create PowerPoint presentations with native shapes", Topics: []string{"office", "design"}, ContentURL: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/pptx/SKILL.md", InstallRef: "https://raw.githubusercontent.com/anthropics/skills/main/document-skills/pptx/SKILL.md"},
+
 	{Source: "builtin", Name: "skill-creator", Description: "Create new skills, edit existing skills, iterate wording", Topics: []string{"meta"}, ContentURL: "https://raw.githubusercontent.com/anthropics/skills/main/skill-creator/SKILL.md", InstallRef: "https://raw.githubusercontent.com/anthropics/skills/main/skill-creator/SKILL.md"},
 	{Source: "builtin", Name: "artifacts-builder", Description: "Build interactive React artifacts for the web", Topics: []string{"frontend", "design"}, ContentURL: "https://raw.githubusercontent.com/anthropics/skills/main/artifacts-builder/SKILL.md", InstallRef: "https://raw.githubusercontent.com/anthropics/skills/main/artifacts-builder/SKILL.md"},
 	{Source: "builtin", Name: "mcp-builder", Description: "Build MCP servers with TypeScript or Python", Topics: []string{"meta", "integration"}, ContentURL: "https://raw.githubusercontent.com/anthropics/skills/main/mcp-builder/SKILL.md", InstallRef: "https://raw.githubusercontent.com/anthropics/skills/main/mcp-builder/SKILL.md"},
 	{Source: "builtin", Name: "webapp-testing", Description: "Test web apps with Playwright browser automation", Topics: []string{"testing", "frontend"}, ContentURL: "https://raw.githubusercontent.com/openai/skills/main/skills/.curated/webapp-testing/SKILL.md", InstallRef: "https://raw.githubusercontent.com/openai/skills/main/skills/.curated/webapp-testing/SKILL.md"},
 	{Source: "builtin", Name: "gh-fix-ci", Description: "Fix failing CI/CD pipelines on GitHub Actions", Topics: []string{"devops", "ci"}, ContentURL: "https://raw.githubusercontent.com/openai/skills/main/skills/.curated/gh-fix-ci/SKILL.md", InstallRef: "https://raw.githubusercontent.com/openai/skills/main/skills/.curated/gh-fix-ci/SKILL.md"},
+}
+
+// builtinMcpCatalog is a curated list of official and popular MCP servers.
+var builtinMcpCatalog = []CatalogEntry{
+	{Source: "builtin", Name: "sqlite", Description: "Database interaction and querying for SQLite databases.", Topics: []string{"database", "sqlite"}, InstallRef: "npx -y @modelcontextprotocol/server-sqlite"},
+	{Source: "builtin", Name: "filesystem", Description: "Securely read and write files to the local file system.", Topics: []string{"system", "files"}, InstallRef: "npx -y @modelcontextprotocol/server-filesystem"},
+	{Source: "builtin", Name: "github", Description: "Interact with GitHub API: read repos, PRs, issues.", Topics: []string{"github", "vcs"}, InstallRef: "npx -y @modelcontextprotocol/server-github"},
+	{Source: "builtin", Name: "puppeteer", Description: "Browser automation for web scraping and interaction.", Topics: []string{"web", "browser"}, InstallRef: "npx -y @modelcontextprotocol/server-puppeteer"},
+	{Source: "builtin", Name: "brave-search", Description: "Web search and summarization using Brave Search API.", Topics: []string{"search", "web"}, InstallRef: "npx -y @modelcontextprotocol/server-brave-search"},
+	{Source: "builtin", Name: "postgres", Description: "Database interaction and querying for PostgreSQL databases.", Topics: []string{"database", "postgres"}, InstallRef: "npx -y @modelcontextprotocol/server-postgres"},
 }
 
 // marketplaceActions builds install actions from a Claude marketplace.json by
@@ -213,9 +241,7 @@ func (t *installSourceTool) marketplaceActions(ctx context.Context, req request,
 
 // --- Cross-source aggregation ------------------------------------------------
 
-// FetchCatalog fetches a browsable skill catalog from one source. For github-repo
-// sources, it tries marketplace.json first, then falls back to scanning for
-// SKILL.md via the Contents API. For clawhub-api, it calls the REST API.
+// FetchCatalog fetches a browsable skill catalog from one source.
 func (t *installSourceTool) FetchCatalog(ctx context.Context, src MarketSource) ([]CatalogEntry, error) {
 	switch src.Type {
 	case "builtin-catalog":
@@ -224,15 +250,28 @@ func (t *installSourceTool) FetchCatalog(ctx context.Context, src MarketSource) 
 		entries, _, err := t.clawhubList(ctx, 50, "")
 		return entries, err
 	case "github-repo":
-		// Try marketplace.json first (richer metadata).
 		if mp, err := t.fetchMarketplaceJSON(ctx, src.URL); err == nil {
 			return marketplaceToCatalog(src.URL, src.ID, mp), nil
 		}
-		// Fall back to scanning the repo for SKILL.md files.
 		return t.catalogFromGitHubRepo(ctx, src)
 	default:
 		return nil, newErr(ErrUnsupportedKind, "unsupported source type %q", src.Type)
 	}
+}
+
+// FetchMcpCatalog returns the curated MCP catalog
+func (t *installSourceTool) FetchMcpCatalog(ctx context.Context, src MarketSource) ([]CatalogEntry, error) {
+	switch src.Type {
+	case "builtin-catalog":
+		return builtinMcpCatalog, nil
+	default:
+		return []CatalogEntry{}, nil
+	}
+}
+
+// BuiltinMcpCatalog returns the compiled curated list of MCP servers.
+func BuiltinMcpCatalog() []CatalogEntry {
+	return builtinMcpCatalog
 }
 
 // catalogFromGitHubRepo scans a GitHub repo for SKILL.md files and returns them
@@ -257,6 +296,7 @@ func (t *installSourceTool) catalogFromGitHubRepo(ctx context.Context, src Marke
 				Source:      src.ID,
 				Name:        c.Name,
 				Description: desc,
+				Topics:      []string{},
 				ContentURL:  c.SourcePath,
 				InstallRef:  c.SourcePath,
 			})
@@ -272,35 +312,63 @@ func (t *installSourceTool) catalogFromGitHubRepo(ctx context.Context, src Marke
 // The search is a simple case-insensitive substring match on name + description
 // + topics. For clawhub, it delegates to the server-side search API for better
 // recall; other sources are filtered locally after fetching.
-func (t *installSourceTool) SearchCatalog(ctx context.Context, query string) ([]CatalogEntry, error) {
+func (t *installSourceTool) SearchCatalog(ctx context.Context, query string, filterSource string) ([]CatalogEntry, error) {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
 		return nil, nil
 	}
+
+	sources := DefaultMarketSources()
+	if filterSource != "" {
+		var filtered []MarketSource
+		for _, s := range sources {
+			if s.ID == filterSource {
+				filtered = []MarketSource{s}
+				break
+			}
+		}
+		sources = filtered
+	}
+
+	type result struct {
+		entries []CatalogEntry
+		err     error
+	}
+	resChan := make(chan result, len(sources))
+
+	for _, src := range sources {
+		go func(s MarketSource) {
+			var entries []CatalogEntry
+			var err error
+			if s.Type == "clawhub-api" {
+				entries, err = t.clawhubSearch(ctx, query)
+			} else {
+				entries, err = t.FetchCatalog(ctx, s)
+			}
+			if err == nil {
+				var filtered []CatalogEntry
+				for _, e := range entries {
+					if s.Type == "clawhub-api" {
+						filtered = append(filtered, e)
+					} else if catalogMatches(e, query) {
+						filtered = append(filtered, e)
+					}
+				}
+				resChan <- result{entries: filtered, err: nil}
+			} else {
+				resChan <- result{entries: nil, err: err}
+			}
+		}(src)
+	}
+
 	var results []CatalogEntry
-	for _, src := range DefaultMarketSources() {
-		var entries []CatalogEntry
-		var err error
-		if src.Type == "clawhub-api" {
-			// clawhub has a server-side search — use it for better recall.
-			entries, err = t.clawhubSearch(ctx, query)
-		} else {
-			entries, err = t.FetchCatalog(ctx, src)
-		}
-		if err != nil {
-			continue // a source failing shouldn't block the others
-		}
-		for _, e := range entries {
-			if src.Type == "clawhub-api" {
-				// clawhub search already filtered; include all.
-				results = append(results, e)
-				continue
-			}
-			if catalogMatches(e, query) {
-				results = append(results, e)
-			}
+	for i := 0; i < len(sources); i++ {
+		res := <-resChan
+		if res.err == nil && res.entries != nil {
+			results = append(results, res.entries...)
 		}
 	}
+
 	// Sort by installs descending (clawhub entries first), then name.
 	for i := 1; i < len(results); i++ {
 		for j := i; j > 0; j-- {
@@ -316,7 +384,7 @@ func (t *installSourceTool) SearchCatalog(ctx context.Context, query string) ([]
 // catalogMatches reports whether an entry matches the query in name/description/topics.
 func catalogMatches(e CatalogEntry, query string) bool {
 	if query == "" {
-		return false
+		return true
 	}
 	if strings.Contains(strings.ToLower(e.Name), query) {
 		return true

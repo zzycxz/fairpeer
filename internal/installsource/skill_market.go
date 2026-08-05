@@ -58,7 +58,7 @@ func (SkillMarketTool) Schema() json.RawMessage {
 "type":"object",
 "properties":{
   "action":{"type":"string","enum":["browse","search","install"],"description":"browse lists available skills; search finds skills by keyword; install installs a skill by installRef."},
-  "source":{"type":"string","description":"For browse: filter to one source (builtin, anthropics, openai, clawhub). Omit for all sources."},
+  "source":{"type":"string","description":"For browse and search: filter to one source (builtin, anthropics, openai, clawhub). Omit for all sources."},
   "query":{"type":"string","description":"For search: the keyword(s) to search for."},
   "installRef":{"type":"string","description":"For install: the installRef from a browse/search result (a URL to the skill's SKILL.md)."},
   "name":{"type":"string","description":"For install: optional skill name override."},
@@ -89,7 +89,7 @@ func (m *SkillMarketTool) Execute(ctx context.Context, args json.RawMessage) (st
 	case "browse":
 		return m.browse(ctx, p.Source)
 	case "search":
-		return m.search(ctx, p.Query)
+		return m.search(ctx, p.Query, p.Source)
 	case "install":
 		return m.install(ctx, p.InstallRef, p.Name, p.Scope, p.Apply)
 	default:
@@ -153,12 +153,12 @@ func (m *SkillMarketTool) browse(ctx context.Context, sourceFilter string) (stri
 	return b.String(), nil
 }
 
-// search searches across all sources and returns matching skills.
-func (m *SkillMarketTool) search(ctx context.Context, query string) (string, error) {
+// search searches across sources and returns matching skills.
+func (m *SkillMarketTool) search(ctx context.Context, query string, source string) (string, error) {
 	if strings.TrimSpace(query) == "" {
-		return "", fmt.Errorf("search query is required")
+		// allow empty query to fetch default/trending list
 	}
-	entries, err := m.installer.SearchCatalog(ctx, query)
+	entries, err := m.installer.SearchCatalog(ctx, query, source)
 	if err != nil {
 		return "", err
 	}

@@ -480,13 +480,19 @@ export interface SkillView {
   /** In effect under the current product profile. A profile whitelist can hide a
    * skill the user left enabled — enabled=true, active=false. */
   active?: boolean;
+  /**
+   * InstalledFrom is the marketplace source URL when the skill was installed
+   * via install_source (empty for builtins and manually created skills).
+   */
+  installedFrom?: string;
 }
 
 /** A skill catalog entry from the marketplace (browse/search results). */
 export interface CatalogEntry {
   source: string;
   name: string;
-  slug?: string;
+  slug: string;
+  author?: string;
   description: string;
   topics?: string[];
   installs: number;

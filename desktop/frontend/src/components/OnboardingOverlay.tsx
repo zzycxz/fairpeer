@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import logo from "../assets/logo.png";
 import { useT, type Translator } from "../lib/i18n";
 import { app } from "../lib/bridge";
 import type { ProviderTemplate } from "../lib/types";
 import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, Loader2, RefreshCw } from "lucide-react";
 
 // Three-step first-run wizard: pick vendor → paste key → pick default model.
 // Replaces the old single-key-input overlay (which assumed a built-in provider
@@ -15,6 +15,7 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
   const t = useT();
   const [step, setStep] = useState<Step>("vendor");
   const [templates, setTemplates] = useState<ProviderTemplate[]>([]);
+  const [syncing, setSyncing] = useState(false);
   const [selected, setSelected] = useState<ProviderTemplate | null>(null);
   // The API key is entered in step 2 and consumed in step 3 (SetupProvider).
   // Lifted here so both steps share it without a global.
@@ -29,9 +30,6 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
     return () => { cancelled = true; };
   }, []);
 
-  const direct = useMemo(() => templates.filter((x) => x.category === "direct"), [templates]);
-  const aggregators = useMemo(() => templates.filter((x) => x.category === "aggregator"), [templates]);
-
   return (
     <div className="onboarding">
       <div className="onboarding__card onboarding__card--wide">
@@ -42,9 +40,19 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
 
         {step === "vendor" && (
           <VendorStep
-            direct={direct}
-            aggregators={aggregators}
+            direct={templates.filter((t) => t.category === "direct")}
+            aggregators={templates.filter((t) => t.category === "aggregator")}
             onPick={(tpl) => { setSelected(tpl); setStep("key"); }}
+            syncing={syncing}
+            onSync={async () => {
+              setSyncing(true);
+              try {
+                await app.RefreshRegistry();
+                const fresh = await app.GetProviderTemplates();
+                setTemplates(fresh);
+              } catch (e) { console.error(e); }
+              setSyncing(false);
+            }}
             t={t}
           />
         )}
@@ -78,10 +86,12 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
 }
 
 // ── Step 1: vendor grid ───────────────────────────────────────────────────
-export function VendorStep({ direct, aggregators, onPick, t }: {
+export function VendorStep({ direct, aggregators, onPick, syncing, onSync, t }: {
   direct: ProviderTemplate[];
   aggregators: ProviderTemplate[];
   onPick: (tpl: ProviderTemplate) => void;
+  syncing: boolean;
+  onSync: () => void;
   t: Translator;
 }) {
   const all = [...direct, ...aggregators];
@@ -112,7 +122,19 @@ export function VendorStep({ direct, aggregators, onPick, t }: {
 
   return (
     <div className="onboarding__step">
-      <div className="onboarding__tag">{t("onboarding.step1Hint")}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div className="onboarding__tag">{t("onboarding.step1Hint")}</div>
+        <button 
+          type="button" 
+          className="btn btn--small" 
+          style={{ background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px", fontSize: "12px" }}
+          onClick={onSync}
+          disabled={syncing}
+        >
+          {syncing ? <Loader2 size={12} className="onboarding__spinner" /> : <RefreshCw size={12} />}
+          {t("settings.registryCheckUpdate") || "同步模型"}
+        </button>
+      </div>
 
       <div className="onboarding__dropdown">
         <button
@@ -311,7 +333,7 @@ export function ModelStep({ template, apiKey, onDone, t }: {
     setState("saving");
     setError(null);
     try {
-      await app.SetupProvider(template, apiKey, defaultPick);
+      await app.SetupProvider(template, apiKey, defaultPick, visionPick, fastPick);
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

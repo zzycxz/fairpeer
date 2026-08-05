@@ -7,6 +7,7 @@ import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
 import { ModalCloseButton } from "./ModalCloseButton";
+import { ConfirmModal } from "./ConfirmModal";
 
 // CapabilitiesPanel is the desktop MCP & Skills drawer — the GUI counterpart to
 // the CLI's /mcp + /skill, aligning with Claude Code's Customize → Connectors:
@@ -227,7 +228,22 @@ export function CapabilitiesPanel({
                   </div>
                 )}
                 {adding ? (
-                  <AddServerForm busy={busy} onCancel={() => setAdding(false)} onAdd={async (input) => (await mutate(() => app.AddMCPServer(input))) && setAdding(false)} />
+                  <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "flex-start", marginTop: "16px" }}>
+                    <div style={{ flex: "1 1 300px" }}>
+                      <h3 className="cap-list__heading" style={{ marginBottom: "8px" }}>{t("caps.mcpAdvancedTitle")}</h3>
+                      <AddServerForm
+                        busy={busy}
+                        onCancel={() => setAdding(false)}
+                        onAdd={(input) => void mutate(() => app.AddMCPServer(input).then(() => setAdding(false)))}
+                      />
+                    </div>
+                    <div style={{ flex: "1 1 400px" }}>
+                      <CuratedMcpList
+                        busy={busy}
+                        onAdd={(input) => void mutate(() => app.AddMCPServer(input).then(() => setAdding(false)))}
+                      />
+                    </div>
+                  </div>
                 ) : null}
               </section>
             ) : (
@@ -1295,12 +1311,14 @@ function SkillRow({
   expanded,
   onToggle,
   onToggleEnabled,
+  onUninstall,
 }: {
   skill: SkillView;
   busy: boolean;
   expanded: boolean;
   onToggle: () => void;
   onToggleEnabled: (enabled: boolean) => void;
+  onUninstall?: () => void;
 }) {
   const t = useT();
   const summary = summarizeSkillDescription(skill.description);
@@ -1334,8 +1352,20 @@ function SkillRow({
             <span className="cap-switch__track" />
           </label>
         </Tooltip>
+        {onUninstall && (
+          <button className="btn btn--small btn--danger" style={{ marginLeft: "8px" }} disabled={busy} onClick={(e) => { e.stopPropagation(); onUninstall(); }}>
+            {t("caps.uninstall")}
+          </button>
+        )}
       </div>
-      <div className="cap-skill-card__desc">{expanded ? skill.description : summary}</div>
+      <div className="cap-skill-card__desc">
+        {expanded ? skill.description : summary}
+        {expanded && skill.installedFrom && (
+          <div style={{ marginTop: 8, fontSize: "13px", color: "var(--text-muted)", wordBreak: "break-all" }}>
+            {t("caps.skillInstalledFrom")}: <a href={skill.installedFrom} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "underline" }}>{skill.installedFrom}</a>
+          </div>
+        )}
+      </div>
       {canExpand && (
         <button className="cap-skill-card__more" type="button" onClick={onToggle} aria-expanded={expanded}>
           {expanded ? t("common.collapse") : t("common.expand")}
@@ -1406,6 +1436,9 @@ function AddServerForm({
 
   return (
     <div className="prov-card prov-card--edit">
+      <div style={{ padding: "12px", backgroundColor: "var(--bg-2)", borderRadius: "6px", marginBottom: "16px", fontSize: "13px", lineHeight: "1.5", color: "var(--fg-2)" }}>
+        💡 寻找更多工具？推荐前往 <a href="https://smithery.ai" target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "none" }}>Smithery.ai</a> 或 <a href="https://mcpmarket.cn" target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "none" }}>mcpmarket.cn</a> 发现数以万计的 MCP 插件，只需复制启动命令填入下方即可使用。
+      </div>
       <input className="mem-input" placeholder={t("caps.namePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} />
       <label className="set-label">{t("caps.transport")}</label>
       <select className="mem-select" value={transport} onChange={(e) => setTransport(e.target.value)}>
@@ -1430,6 +1463,57 @@ function AddServerForm({
       </div>
     </div>
   );
+}
+
+function CuratedMcpList({
+	busy,
+	onAdd,
+}: {
+	busy: boolean;
+	onAdd: (input: MCPServerInput) => void;
+}) {
+	const t = useT();
+	const [results, setResults] = useState<CatalogEntry[] | null>(null);
+
+	useEffect(() => {
+		app.SkillMarketSearch("", "builtin-mcp").then(res => setResults(res || []));
+	}, []);
+
+	if (results === null) return null;
+
+	return (
+		<div className="prov-card prov-card--edit" style={{ marginTop: 16 }}>
+			<h3 className="cap-list__heading" style={{ marginBottom: "16px" }}>{t("caps.mcpCuratedTitle", { defaultValue: "官方精选 MCP Servers" })}</h3>
+			<div className="cap-skills" style={{ maxHeight: "400px", overflowY: "auto" }}>
+				{results.map((e, i) => (
+					<div key={`mcp-${e.name}-${i}`} className="cap-skill-card">
+						<div className="cap-skill-card__head">
+							<span className="cap-skill-card__name">{e.name}</span>
+							<div style={{ flex: 1 }} />
+							<button
+								className="btn btn--small btn--primary"
+								disabled={busy}
+								onClick={() => {
+									const parts = e.installRef.trim().split(/\s+/).filter(Boolean);
+									onAdd({
+										name: e.name,
+										transport: "stdio",
+										command: parts[0] || "npx",
+										args: parts.slice(1),
+										url: "",
+										env: {},
+									});
+								}}
+							>
+								{t("caps.install", { defaultValue: "安装" })}
+							</button>
+						</div>
+						<div className="cap-skill-card__desc">{e.description}</div>
+					</div>
+				))}
+			</div>
+		</div>
+	);
 }
 
 // MCPServersSettingsPage is a self-contained MCP servers management page
@@ -1510,50 +1594,65 @@ export function MCPServersSettingsPage({ initialHighlight }: { initialHighlight?
 				</div>
 			</div>
 			{serverGroups.failed.length > 0 && (
-				<FailedServersNotice
-					servers={serverGroups.failed}
-					expanded={expandedErrors}
-					busy={busy}
-					onToggle={toggleError}
-					onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
-					onRetryMany={(names) => void mutate(() => Promise.allSettled(names.map((name) => app.ReconnectMCPServer(name))))}
-					onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
-					onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
-					onConfirmMany={(names) => void mutate(() => Promise.allSettled(names.map((name) => app.RemoveMCPServer(name))))}
-				/>
-			)}
-			{view.servers.length === 0 && !adding && (
-				<div className="mem-empty">{t("caps.noServers")}</div>
-			)}
-			{serverGroups.active.length > 0 && (
-				<div className="cap-server-section">
-					<div className="cap-server-section__title">{t("caps.availableServers")}</div>
-					<ServerGroup
-						busy={busy}
-						servers={serverGroups.active}
-						expanded={expandedServers}
-						expandedTools={expandedServerTools}
-						editing={editing}
-						onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
-						onEdit={(name) => { setEditing(name); }}
-						onCancelEdit={() => setEditing(null)}
-						onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
-						onReconnect={(name) => void mutate(() => app.ReconnectMCPServer(name))}
-						onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
-						onToggle={(name, on) => void mutate(() => app.SetMCPServerEnabled(name, on))}
-						onUpdate={(name, input) =>
-							void mutate(() => app.UpdateMCPServer(name, input)).then((ok) => {
-								if (ok) setEditing(null);
-							})
-						}
-						onToggleDetails={toggleServer}
-						onToggleTools={toggleServerTools}
-					/>
-				</div>
-			)}
-			{adding ? (
-				<AddServerForm busy={busy} onCancel={() => setAdding(false)} onAdd={async (input) => (await mutate(() => app.AddMCPServer(input))) && setAdding(false)} />
-			) : null}
+						<FailedServersNotice
+							servers={serverGroups.failed}
+							expanded={expandedErrors}
+							busy={busy}
+							onToggle={toggleError}
+							onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+							onRetryMany={(names) => void mutate(() => Promise.allSettled(names.map((name) => app.ReconnectMCPServer(name))))}
+							onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
+							onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
+							onConfirmMany={(names) => void mutate(() => Promise.allSettled(names.map((name) => app.RemoveMCPServer(name))))}
+						/>
+					)}
+					{view.servers.length === 0 && !adding && (
+						<div className="mem-empty">{t("caps.noServers")}</div>
+					)}
+					{serverGroups.active.length > 0 && (
+						<div className="cap-server-section">
+							<div className="cap-server-section__title">{t("caps.availableServers")}</div>
+							<ServerGroup
+								busy={busy}
+								servers={serverGroups.active}
+								expanded={expandedServers}
+								expandedTools={expandedServerTools}
+								editing={editing}
+								onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
+								onEdit={(name) => { setEditing(name); }}
+								onCancelEdit={() => setEditing(null)}
+								onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+								onReconnect={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+								onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
+								onToggle={(name, on) => void mutate(() => app.SetMCPServerEnabled(name, on))}
+								onUpdate={(name, input) =>
+									void mutate(() => app.UpdateMCPServer(name, input)).then((ok) => {
+										if (ok) setEditing(null);
+									})
+								}
+								onToggleDetails={toggleServer}
+								onToggleTools={toggleServerTools}
+							/>
+						</div>
+					)}
+					{adding && (
+						<div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "flex-start", marginTop: "16px" }}>
+							<div style={{ flex: "1 1 300px" }}>
+								<h3 className="cap-list__heading" style={{ marginBottom: "8px" }}>{t("caps.mcpAdvancedTitle")}</h3>
+								<AddServerForm
+									busy={busy}
+									onCancel={() => setAdding(false)}
+									onAdd={(input) => void mutate(() => app.AddMCPServer(input).then(() => setAdding(false)))}
+								/>
+							</div>
+							<div style={{ flex: "1 1 400px" }}>
+								<CuratedMcpList
+									busy={busy}
+									onAdd={(input) => void mutate(() => app.AddMCPServer(input).then(() => setAdding(false)))}
+								/>
+							</div>
+						</div>
+					)}
 		</section>
 	);
 }
@@ -1568,6 +1667,8 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 	const [skillQuery, setSkillQuery] = useState(initialHighlight || "");
 	const [expandedSkills, setExpandedSkills] = useState<Set<string>>(() => new Set(initialHighlight ? [initialHighlight] : []));
 	const [skillSubtab, setSkillSubtab] = useState<"builtin" | "market">("builtin");
+	const [pendingUninstall, setPendingUninstall] = useState<string | null>(null);
+	const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
 	const reload = useCallback(async () => {
 		setView(normalizeCapabilitiesView(await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [] }))));
@@ -1590,6 +1691,17 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 		}
 	};
 
+	const confirmUninstall = useCallback(async () => {
+		if (!pendingUninstall) return;
+		const name = pendingUninstall;
+		setPendingUninstall(null);
+		const success = await mutate(() => app.SkillMarketUninstall(name, "global"));
+		if (success) {
+			setSuccessMsg(t("caps.marketUninstalled"));
+			setTimeout(() => setSuccessMsg(null), 3000);
+		}
+	}, [pendingUninstall, mutate, t]);
+
 	const filteredSkills = useMemo(() => {
 		if (!view) return [];
 		const q = skillQuery.trim().toLowerCase();
@@ -1607,34 +1719,33 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 	// (email/rag/schedule were dumped into "coding") and broke when a skill was
 	// shadowed by a global override (ppt-auto showed as both builtin-office and
 	// global). Grouping by `active` reflects the real prompt the model sees.
-	const builtinSkills = useMemo(
-		() => filteredSkills.filter((sk) => sk.scope === "builtin"),
-		[filteredSkills],
+	const OFFICIAL_SKILLS = useMemo(() => new Set(["init", "explore", "research", "install-capability", "review", "security-review", "test", "document-auto", "email-auto", "schedule-auto", "rag-auto", "expert-auto", "browser-auto", "computer-auto", "ppt-auto"]), []);
+	const OFFICE_SKILLS = useMemo(() => new Set(["document-auto", "email-auto", "schedule-auto", "rag-auto", "expert-auto", "browser-auto", "computer-auto", "ppt-auto"]), []);
+
+	const officialSkills = useMemo(
+		() => filteredSkills.filter((sk) => sk.scope === "builtin" || OFFICIAL_SKILLS.has(sk.name)),
+		[filteredSkills, OFFICIAL_SKILLS],
 	);
-	const activeBuiltinSkills = useMemo(
-		() => builtinSkills.filter((sk) => sk.active !== false),
-		[builtinSkills],
+	const activeOfficialSkills = useMemo(
+		() => officialSkills.filter((sk) => sk.active !== false),
+		[officialSkills],
 	);
-	const inactiveBuiltinSkills = useMemo(
-		() => builtinSkills.filter((sk) => sk.active === false),
-		[builtinSkills],
+	const inactiveOfficialSkills = useMemo(
+		() => officialSkills.filter((sk) => sk.active === false),
+		[officialSkills],
 	);
-	// Split active builtins into "office automation" vs "general development"
-	// so the user can tell at a glance which skills are for office work and
-	// which are general coding tools. The split is name-based (the set is
-	// fixed and small); no backend change needed.
-	const OFFICE_SKILLS = new Set(["document-auto", "email-auto", "schedule-auto", "rag-auto", "expert-auto", "browser-auto", "computer-auto", "ppt-auto"]);
+
 	const officeSkills = useMemo(
-		() => activeBuiltinSkills.filter((sk) => OFFICE_SKILLS.has(sk.name)),
-		[activeBuiltinSkills],
+		() => activeOfficialSkills.filter((sk) => OFFICE_SKILLS.has(sk.name)),
+		[activeOfficialSkills, OFFICE_SKILLS],
 	);
 	const generalSkills = useMemo(
-		() => activeBuiltinSkills.filter((sk) => !OFFICE_SKILLS.has(sk.name)),
-		[activeBuiltinSkills],
+		() => activeOfficialSkills.filter((sk) => !OFFICE_SKILLS.has(sk.name)),
+		[activeOfficialSkills, OFFICE_SKILLS],
 	);
 	const userSkills = useMemo(
-		() => filteredSkills.filter((sk) => sk.scope !== "builtin"),
-		[filteredSkills],
+		() => filteredSkills.filter((sk) => sk.scope !== "builtin" && !OFFICIAL_SKILLS.has(sk.name)),
+		[filteredSkills, OFFICIAL_SKILLS],
 	);
 
 	const skillSummary = useMemo(() => {
@@ -1651,6 +1762,7 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 	return (
 		<section className="mem-section">
 			{err && <div className="banner banner--error">{err}</div>}
+			{successMsg && <div className="banner banner--success">{successMsg}</div>}
 			<div className="settings-subtabs">
 				<button
 					type="button"
@@ -1671,10 +1783,10 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 			</div>
 
 			{skillSubtab === "market" ? (
-				<SkillMarketSection />
+				<SkillMarketSection installedNames={new Set(view?.skills.map((s) => s.name) ?? [])} />
 			) : (
 				<>
-			<div className="cap-search">
+			<div className="cap-search" style={{ marginTop: "12px", marginBottom: "12px" }}>
 				<input
 					className="mem-input"
 					type="search"
@@ -1749,18 +1861,18 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 			{/* Built-in skills the current mode HIDES (profile whitelist). They're
 			    not in the model's prompt; switching mode brings them back. Shown
 			    greyed so the user understands the distinction. */}
-			{inactiveBuiltinSkills.length > 0 && (
+			{inactiveOfficialSkills.length > 0 && (
 				<div className="cap-market cap-market--inactive">
 					<div className="cap-skills-head">
 						<div className="cap-skills-head__copy">
 							<div className="cap-skills-head__title">{t("caps.marketTitleInactive")}</div>
 							<div className="cap-skills-head__summary">
-								{t("caps.marketInactiveSummary", { count: inactiveBuiltinSkills.length })}
+								{t("caps.marketInactiveSummary", { count: inactiveOfficialSkills.length })}
 							</div>
 						</div>
 					</div>
 					<div className="cap-skills">
-						{inactiveBuiltinSkills.map((sk) => (
+						{inactiveOfficialSkills.map((sk) => (
 							<SkillRow
 								key={sk.name}
 								skill={sk}
@@ -1775,29 +1887,41 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 			)}
 
 			{/* User's own skills (project / global / custom): managed list. */}
-			<div className="cap-skills-head">
-				<div className="cap-skills-head__copy">
-					<div className="cap-skills-head__title">{t("caps.mySkills")}</div>
-					<div className="cap-skills-head__summary">{skillSummary}</div>
-				</div>
-			</div>
-			{userSkills.length === 0 ? (
-				<div className="mem-empty">{t("caps.noUserSkills")}</div>
-			) : (
-				<div className="cap-skills">
-					{userSkills.map((sk) => (
-						<SkillRow
-							key={sk.name}
-							skill={sk}
-							busy={busy}
-							expanded={expandedSkills.has(sk.name)}
-							onToggle={() => toggleSkill(sk.name)}
-							onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
-						/>
-					))}
-				</div>
+			{userSkills.length > 0 && (
+				<>
+					<div className="cap-skills-head">
+						<div className="cap-skills-head__copy">
+							<div className="cap-skills-head__title">{t("caps.mySkills")}</div>
+							<div className="cap-skills-head__summary">{skillSummary}</div>
+						</div>
+					</div>
+					<div className="cap-skills">
+						{userSkills.map((sk) => (
+							<SkillRow
+								key={sk.name}
+								skill={sk}
+								busy={busy}
+								expanded={expandedSkills.has(sk.name)}
+								onToggle={() => toggleSkill(sk.name)}
+								onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
+								onUninstall={sk.installedFrom ? () => setPendingUninstall(sk.name) : undefined}
+							/>
+						))}
+					</div>
+				</>
 			)}
 			</>
+			)}
+			{pendingUninstall && (
+				<ConfirmModal
+					title={t("caps.marketConfirmUninstall", { name: pendingUninstall })}
+					message={t("caps.marketUninstallWarning", { name: pendingUninstall })}
+					confirmLabel={t("caps.uninstall")}
+					cancelLabel={t("common.cancel")}
+					danger={true}
+					onConfirm={() => void confirmUninstall()}
+					onClose={() => setPendingUninstall(null)}
+				/>
 			)}
 		</section>
 	);
@@ -1807,44 +1931,78 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 // the bottom of the skills page. Users search across all default sources
 // (Anthropic, OpenAI, ClawHub, curated) and install any skill directly from
 // the GUI — no need to go through the agent's natural-language flow.
-function SkillMarketSection() {
+function SkillMarketSection({ installedNames }: { installedNames: Set<string> }) {
 	const t = useT();
 	const [query, setQuery] = useState("");
-	const [results, setResults] = useState<CatalogEntry[] | null>(null);
+	const [searchSource, setSearchSource] = useState("");
 	const [searching, setSearching] = useState(false);
+	const [results, setResults] = useState<CatalogEntry[] | null>(null);
 	const [err, setErr] = useState<string | null>(null);
 	const [installing, setInstalling] = useState<string | null>(null);
 	const [installMsg, setInstallMsg] = useState<string | null>(null);
+	const [pendingInstall, setPendingInstall] = useState<{ entry: CatalogEntry; plan: string } | null>(null);
 
-	const doSearch = useCallback(async () => {
-		const q = query.trim();
-		if (!q) return;
+	const sourceLabel = useCallback((sourceId: string) => {
+		switch (sourceId) {
+			case "builtin": return t("caps.sourceBuiltin", { defaultValue: "Curated" });
+			case "clawhub": return "ClawHub";
+			case "anthropic": return "Anthropic";
+			case "openai": return "OpenAI";
+			default: return sourceId;
+		}
+	}, [t]);
+
+	const doSearch = useCallback(async (searchQuery: string, source: string) => {
+		const q = searchQuery.trim();
 		setSearching(true);
 		setErr(null);
 		setResults(null);
 		try {
-			const entries = await app.SkillMarketSearch(q);
+			let entries: CatalogEntry[] = [];
+			if (q || source) {
+				entries = await app.SkillMarketSearch(q, source);
+			}
 			setResults(entries);
 		} catch (e) {
 			setErr(String((e as Error)?.message ?? e));
 		} finally {
 			setSearching(false);
 		}
-	}, [query]);
+	}, []);
+
+	// Load builtins on mount
+	useEffect(() => {
+		void doSearch("", searchSource);
+	}, [doSearch, searchSource]);
 
 	const doInstall = useCallback(async (entry: CatalogEntry) => {
 		if (!entry.installRef) return;
 		setInstalling(entry.installRef);
 		setInstallMsg(null);
 		try {
-			await app.SkillMarketInstall(entry.installRef, entry.name, "project", true);
-			setInstallMsg(t("caps.marketInstalled"));
+			const plan = await app.SkillMarketInstall(entry.installRef, entry.name, "global", false);
+			setPendingInstall({ entry, plan });
 		} catch (e) {
 			setInstallMsg(t("caps.marketInstallFailed", { msg: String((e as Error)?.message ?? e) }));
 		} finally {
 			setInstalling(null);
 		}
 	}, [t]);
+
+	const confirmInstall = useCallback(async () => {
+		if (!pendingInstall) return;
+		const { entry } = pendingInstall;
+		setPendingInstall(null);
+		setInstalling(entry.installRef);
+		try {
+			const result = await app.SkillMarketInstall(entry.installRef, entry.name, "global", true);
+			setInstallMsg(t("caps.marketInstalledWithResult", { result }));
+		} catch (e) {
+			setInstallMsg(t("caps.marketInstallFailed", { msg: String((e as Error)?.message ?? e) }));
+		} finally {
+			setInstalling(null);
+		}
+	}, [pendingInstall, t]);
 
 	return (
 		<div className="cap-market" style={{ marginTop: "24px" }}>
@@ -1853,19 +2011,32 @@ function SkillMarketSection() {
 					<div className="cap-skills-head__title">{t("caps.marketBrowse")}</div>
 				</div>
 			</div>
-			<div className="cap-search" style={{ marginBottom: "12px" }}>
+			<div className="cap-search" style={{ marginBottom: "12px", display: "flex", gap: "8px" }}>
+				<select
+					className="mem-input"
+					style={{ width: "160px", margin: 0 }}
+					value={searchSource}
+					onChange={(e) => setSearchSource(e.target.value)}
+				>
+					<option value="">{t("common.all", { defaultValue: "All Sources" })}</option>
+					<option value="clawhub">ClawHub</option>
+					<option value="anthropic">Anthropic</option>
+					<option value="openai">OpenAI</option>
+				</select>
 				<input
 					className="mem-input"
+					style={{ flex: 1, margin: 0 }}
 					type="search"
 					placeholder={t("caps.marketSearchPlaceholder")}
 					value={query}
 					onChange={(e) => setQuery(e.target.value)}
-					onKeyDown={(e) => { if (e.key === "Enter") void doSearch(); }}
+					onKeyDown={(e) => { if (e.key === "Enter") void doSearch(query, searchSource); }}
 				/>
 				<button
 					className="btn btn--small"
-					disabled={searching || !query.trim()}
-					onClick={() => void doSearch()}
+					style={{ margin: 0 }}
+					disabled={searching}
+					onClick={() => void doSearch(query, searchSource)}
 				>
 					{searching ? t("caps.marketSearching") : t("caps.marketSearch")}
 				</button>
@@ -1878,32 +2049,54 @@ function SkillMarketSection() {
 						<div className="mem-empty">{t("caps.marketNoResults")}</div>
 					) : (
 						<div className="cap-skills">
-							{results.map((e, i) => (
-								<div key={`${e.name}-${i}`} className="cap-skill-card">
-									<div className="cap-skill-card__head">
-										<span className="cap-skill-card__name">{e.name}</span>
-										<span className="cap-skill-badge">{e.source}</span>
-										{e.installs > 0 && (
-											<span className="cap-skill-badge cap-skill-badge--off">
-												{t("caps.marketInstalls", { n: e.installs })}
-											</span>
-										)}
-									</div>
-									<div className="cap-skill-card__desc">{e.description}</div>
-									<div style={{ marginTop: "8px" }}>
-										<button
-											className="btn btn--small btn--primary"
-											disabled={installing === e.installRef || !e.installRef}
-											onClick={() => void doInstall(e)}
-										>
-											{installing === e.installRef ? t("caps.marketInstalling") : t("caps.marketInstall")}
-										</button>
-									</div>
-								</div>
-							))}
+							{results.length > 0 && (
+								<>
+									<h3 className="cap-list__heading" style={{ marginTop: 16 }}>{t("caps.skillCommunity")}</h3>
+									{results.map((e, i) => (
+										<div key={`sr-${e.name}-${i}`} className="cap-skill-card">
+											<div className="cap-skill-card__head">
+												<span className="cap-skill-card__name">{e.name}</span>
+												<span className="cap-skill-badge">{sourceLabel(e.source)}</span>
+												{e.author && <span className="cap-skill-badge cap-skill-badge--off">{e.author}</span>}
+												{e.installs > 0 && (
+													<span className="cap-skill-badge cap-skill-badge--off">
+														{t("caps.marketInstalls", { n: e.installs })}
+													</span>
+												)}
+												<div style={{ flex: 1 }} />
+												{installedNames.has(e.name) ? (
+													<button className="btn btn--small" disabled>
+														✓ {t("caps.marketAlreadyInstalled")}
+													</button>
+												) : (
+													<button
+														className="btn btn--small btn--primary"
+														disabled={installing === e.installRef || !e.installRef}
+														onClick={() => void doInstall(e)}
+													>
+														{installing === e.installRef ? t("caps.marketInstalling") : t("caps.marketInstall")}
+													</button>
+												)}
+											</div>
+											<div className="cap-skill-card__desc">{e.description}</div>
+										</div>
+									))}
+								</>
+							)}
 						</div>
 					)}
 				</>
+			)}
+			{pendingInstall && (
+				<ConfirmModal
+					title={t("caps.marketConfirmInstall", { name: pendingInstall.entry.name })}
+					message={pendingInstall.plan}
+					confirmLabel={t("caps.marketInstall")}
+					cancelLabel={t("common.cancel")}
+					danger={false}
+					onConfirm={() => void confirmInstall()}
+					onClose={() => setPendingInstall(null)}
+				/>
 			)}
 		</div>
 	);

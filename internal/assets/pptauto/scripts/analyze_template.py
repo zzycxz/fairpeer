@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 模板分析脚本：导出 PPT 模板每页为 PNG 背景图。
 支持 PowerPoint 和 WPS。
@@ -10,7 +11,79 @@
   output_dir/slide_03.png  (结尾)
 """
 import sys, os
+import json
 
+def extract_colors(image_path, max_colors=4):
+    try:
+        from PIL import Image
+        img = Image.open(image_path).convert("RGB")
+        img.thumbnail((200, 200))
+        q_img = img.quantize(colors=16)
+        palette = q_img.getpalette()
+        counts = q_img.getcolors()
+        if not counts or not palette: return []
+        
+        counts.sort(reverse=True, key=lambda x: x[0])
+        hex_colors = []
+        for count, idx in counts:
+            r = palette[idx*3]
+            g = palette[idx*3+1]
+            b = palette[idx*3+2]
+            # Skip pure white/black as main theme colors
+            if r > 240 and g > 240 and b > 240: continue
+            if r < 15 and g < 15 and b < 15: continue
+            hex_c = f"#{r:02x}{g:02x}{b:02x}"
+            if hex_c not in hex_colors:
+                hex_colors.append(hex_c)
+            if len(hex_colors) >= max_colors:
+                break
+        return hex_colors
+    except ImportError:
+        print("Pillow not installed, skipping color extraction.")
+        return []
+    except Exception as e:
+        print(f"Color extraction failed: {e}")
+        return []
+
+def write_dynamic_style(bg_cover, bg_content, project_dir):
+    # Determine max_colors from template_config.json if possible
+    max_extracted = 4
+    max_per_page = 3
+    config_path = os.path.join(os.path.dirname(__file__), "..", "template_config.json")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+            max_extracted = cfg.get("rules", {}).get("color_limits", {}).get("max_extracted", 4)
+            max_per_page = cfg.get("rules", {}).get("color_limits", {}).get("max_per_page", 3)
+    except Exception:
+        pass
+
+    colors = []
+    if bg_content and os.path.exists(bg_content):
+        colors = extract_colors(bg_content, max_extracted)
+    if not colors and bg_cover and os.path.exists(bg_cover):
+        colors = extract_colors(bg_cover, max_extracted)
+        
+    if not colors: return
+    
+    style = {
+        "colors": {
+            "primary": colors[0] if len(colors) > 0 else "#ffffff",
+            "secondary": colors[1] if len(colors) > 1 else "#a0a0a0",
+            "accent": colors[2] if len(colors) > 2 else "#f28b50"
+        },
+        "rules": {
+            "color_usage": f"严格遵守配置的色彩，单页最多允许使用 {max_per_page} 种颜色，防花哨。基于实际视觉提取，严禁臆想。",
+            "color_limits": {
+                "max_extracted": max_extracted,
+                "max_per_page": max_per_page
+            }
+        }
+    }
+    out = os.path.join(project_dir, "dynamic_style.json")
+    with open(out, 'w', encoding='utf-8') as f:
+        json.dump(style, f, ensure_ascii=False, indent=2)
+    print(f"  Extracted dynamic style to {out}")
 
 def detect_office_app():
     """检测本机安装的办公软件，返回 COM 对象名称"""
@@ -110,6 +183,15 @@ def analyze_template(template_path, output_dir):
                 print(f"  {role}: {dst}")
 
     print(f"\nDone. Backgrounds in {output_dir}")
+    
+    # Output dynamic style to the project dir (parent of backgrounds)
+    project_dir = os.path.dirname(os.path.normpath(output_dir))
+    write_dynamic_style(
+        os.path.join(output_dir, "bg_cover.png"),
+        os.path.join(output_dir, "bg_content.png"),
+        project_dir
+    )
+    
     return result
 
 

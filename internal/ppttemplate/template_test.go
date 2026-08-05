@@ -14,7 +14,7 @@ func TestLoadFile(t *testing.T) {
 	os.WriteFile(path, []byte(`{
 		"name": "我的模板",
 		"master_file": "C:/x.pptx",
-		"theme": { "primary_color": "1A56DB", "font_size_title": 40 },
+		"theme": { "primary_color": "F28B50", "font_size_title": 40 },
 		"layouts": {
 			"content": { "title_x": 8, "title_y": 8, "body_x": 8, "body_y": 25 }
 		},

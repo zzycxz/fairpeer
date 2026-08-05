@@ -72,6 +72,7 @@ type clawhubSearchResult struct {
 	Slug        string `json:"slug"`
 	DisplayName string `json:"displayName"`
 	Summary     string `json:"summary"`
+	OwnerHandle string `json:"ownerHandle"` // e.g. "ivangdavila" — avoids ambiguous-slug errors
 	Downloads   int    `json:"downloads"`
 	Install     struct {
 		Kind      string `json:"kind"`
@@ -136,15 +137,22 @@ func clawhubSearchResultsToCatalog(results []clawhubSearchResult) []CatalogEntry
 		if topics == nil {
 			topics = []string{}
 		}
+		// Use ownerHandle/slug for the content URL to avoid AMBIGUOUS_SKILL_SLUG
+		// errors when multiple authors use the same slug name.
+		fullSlug := r.Slug
+		if r.OwnerHandle != "" {
+			fullSlug = r.OwnerHandle + "/" + r.Slug
+		}
 		out = append(out, CatalogEntry{
 			Source:      "clawhub",
 			Name:        name,
 			Slug:        r.Slug,
+			Author:      r.OwnerHandle,
 			Description: desc,
 			Topics:      topics,
 			Installs:    installs,
-			ContentURL:  clawhubContentURL(r.Slug),
-			InstallRef:  clawhubContentURL(r.Slug),
+			ContentURL:  clawhubContentURL(fullSlug),
+			InstallRef:  clawhubContentURL(fullSlug),
 		})
 	}
 	return out
@@ -152,7 +160,7 @@ func clawhubSearchResultsToCatalog(results []clawhubSearchResult) []CatalogEntry
 
 // clawhubContentURL returns the URL to fetch a skill's SKILL.md from ClawHub.
 func clawhubContentURL(slug string) string {
-	return fmt.Sprintf("https://clawhub.ai/api/v1/skills/%s/file?path=SKILL.md", slug)
+	return fmt.Sprintf("https://clawhub.ai/api/v1/skills/%s/file?path=SKILL.md", url.PathEscape(slug))
 }
 
 // clawhubItemsToCatalog converts ClawHub API items to the unified CatalogEntry
@@ -172,12 +180,16 @@ func clawhubItemsToCatalog(items []clawhubItem) []CatalogEntry {
 		if len(desc) > 150 {
 			desc = desc[:150] + "…"
 		}
+		topics := item.Topics
+		if topics == nil {
+			topics = []string{}
+		}
 		out = append(out, CatalogEntry{
 			Source:      "clawhub",
 			Name:        name,
 			Slug:        item.Slug,
 			Description: desc,
-			Topics:      item.Topics,
+			Topics:      topics,
 			Installs:    item.Stats.Installs,
 			ContentURL:  clawhubContentURL(item.Slug),
 			InstallRef:  clawhubContentURL(item.Slug),

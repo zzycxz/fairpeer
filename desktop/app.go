@@ -2776,6 +2776,9 @@ type SkillView struct {
 	// Enabled=true yet Active=false. The skills page uses this to separate "in
 	// effect for this mode" from "available after switching mode".
 	Active bool `json:"active"`
+	// InstalledFrom is the marketplace source URL when the skill was installed
+	// via install_source (empty for builtins and manually created skills).
+	InstalledFrom string `json:"installedFrom,omitempty"`
 }
 
 type SkillRootSkillView struct {
@@ -2968,6 +2971,7 @@ func (a *App) Capabilities() CapabilitiesView {
 			}
 		}
 	}
+	installedSkillSources, _ := a.SkillMarketInstalledNames()
 	for _, s := range ctrl.AllSkills() {
 		enabled := ctrl.SkillEnabled(s.Name)
 		// A profile whitelist hides skills not named in it. User-disabled skills
@@ -2981,6 +2985,7 @@ func (a *App) Capabilities() CapabilitiesView {
 			Name: s.Name, Description: s.Description,
 			Scope: string(s.Scope), RunAs: string(s.RunAs),
 			Enabled: enabled, Active: active,
+			InstalledFrom: installedSkillSources[s.Name],
 		})
 	}
 	out.SkillRoots = skillRootsView()

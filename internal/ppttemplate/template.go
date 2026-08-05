@@ -266,11 +266,11 @@ const exampleTemplate = `{
   "name": "示例模板（可复制修改）",
   "master_file": "",
   "theme": {
-    "primary_color": "1A56DB",
-    "accent_color": "F59E0B",
-    "background_color": "FFFFFF",
-    "font_title": "微软雅黑",
-    "font_body": "微软雅黑",
+    "primary_color": "F28B50",
+    "accent_color": "1E1E1E",
+    "background_color": "121212",
+    "font_title": "Inter",
+    "font_body": "Inter",
     "font_size_title": 36,
     "font_size_body": 20
   },

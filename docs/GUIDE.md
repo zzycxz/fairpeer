@@ -18,6 +18,7 @@
 - [Slash commands](#slash-commands)
 - [@ references](#-references)
 - [Two-model collaboration](#two-model-collaboration)
+- [Office Automation](#office-automation)
 
 ## Configuration
 
@@ -266,3 +267,122 @@ shell command only when you intentionally want a project-local override.
 
 The why behind separate sessions (keeping each model's prefix cache-stable) is in
 [`SPEC.md` §3.5](./SPEC.md#35-two-model-collaboration-coordinator).
+
+## Office Automation
+
+fairpeer provides complete Office document processing capabilities through the `document-auto` and `ppt-auto` Skills.
+
+### Word Documents
+
+Use the `doc_write` tool to create and edit Word documents:
+
+```json
+{
+  "path": "report.docx",
+  "sections": [
+    {"type": "heading", "text": "Chapter 1", "level": 1},
+    {"type": "paragraph", "text": "Content here"},
+    {"type": "image", "image_path": "/path/to/image.png", "image_alt": "Logo"},
+    {"type": "toc", "toc_level": 3}
+  ]
+}
+```
+
+Supported features:
+- Paragraphs, headings, lists, tables
+- Image insertion (PNG/JPG/GIF/SVG)
+- Table of contents generation
+- Format control (fonts, colors, alignment)
+
+### Excel Spreadsheets
+
+Use the `xlsx_write` tool to create and edit Excel spreadsheets:
+
+```json
+{
+  "path": "data.xlsx",
+  "sheets": [{
+    "name": "Sheet1",
+    "cells": [
+      {"ref": "A1", "value": "Month"},
+      {"ref": "B1", "value": "Sales"}
+    ],
+    "cond_fmt": [{
+      "range": "B2:B10",
+      "type": "cell",
+      "criteria": "greater_than",
+      "value": "10000",
+      "format": {"bg": "#00FF00"}
+    }]
+  }],
+  "charts": [{
+    "sheet": "Sheet1",
+    "type": "bar",
+    "title": "Monthly Sales",
+    "data_range": "A1:B10",
+    "position": "D2"
+  }]
+}
+```
+
+Supported features:
+- Cell read/write, multiple sheets
+- Charts (bar, line, pie, scatter)
+- Conditional formatting (cell conditions, data bars, color scales)
+- Formula support
+
+### PowerPoint Presentations
+
+Use the `ppt-auto` Skill to create professional presentations:
+
+```bash
+# Create PPT
+fairpeer run "Create a presentation about AI"
+
+# Use template
+fairpeer run "Create PPT using template, topic is digital transformation"
+
+# With animation
+fairpeer run "Add fade-in animation to PPT"
+```
+
+Supported features:
+- SVG free design
+- Template filling
+- Animation effects (fade, fly, zoom)
+- Transition effects (fade, slide, zoom)
+- VLM integration (vision model assisted design)
+
+### Email Integration
+
+```toml
+[cowork]
+[[cowork.email_accounts]]
+name = "Work Email"
+smtp_host = "smtp.gmail.com"
+smtp_port = 587
+imap_host = "imap.gmail.com"
+imap_port = 993
+username = "your@email.com"
+password_env = "EMAIL_PASSWORD"
+```
+
+Supported features:
+- Multi-account support (Gmail/Outlook/QQ/163 etc.)
+- Send/read/search emails
+- Scheduled sending
+
+### Calendar Tasks
+
+```toml
+[cowork]
+[[cowork.schedules]]
+name = "Daily Reminder"
+cron = "0 9 * * *"
+prompt = "Remind me about the morning meeting"
+```
+
+Supported features:
+- Cron expression scheduling
+- Timed reminders/execution
+- ICS format support

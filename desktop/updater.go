@@ -116,40 +116,7 @@ func normalizeVersion(v string) (string, bool) {
 func fetchManifest(ctx context.Context, c *http.Client) (*update.Manifest, error) {
 	var errs []string
 
-	// 1. Try Gitee API first
-	if channel != "canary" {
-		apiURL := "https://gitee.com/api/v5/repos/zzycxz/fairpeer/releases/latest"
-		if b, err := fetchBytes(ctx, c, apiURL); err == nil {
-			var res struct {
-				TagName string `json:"tag_name"`
-			}
-			if err := json.Unmarshal(b, &res); err == nil && res.TagName != "" {
-				dlURL := fmt.Sprintf("https://gitee.com/zzycxz/fairpeer/releases/download/%s/latest.json", res.TagName)
-				if b2, err := fetchBytes(ctx, c, dlURL); err == nil {
-					var m update.Manifest
-					if err := json.Unmarshal(b2, &m); err == nil {
-						// Rewrite binary URLs to point to Gitee for faster download
-						for k, v := range m.Platforms {
-							v.URL = strings.ReplaceAll(v.URL, "github.com", "gitee.com")
-							v.Sig = strings.ReplaceAll(v.Sig, "github.com", "gitee.com")
-							m.Platforms[k] = v
-						}
-						return &m, nil
-					} else {
-						errs = append(errs, fmt.Sprintf("gitee parse manifest: %v", err))
-					}
-				} else {
-					errs = append(errs, fmt.Sprintf("gitee fetch manifest: %v", err))
-				}
-			} else {
-				errs = append(errs, fmt.Sprintf("gitee parse api: %v", err))
-			}
-		} else {
-			errs = append(errs, fmt.Sprintf("gitee fetch api: %v", err))
-		}
-	}
-
-	// 2. Try GitHub endpoints
+	// Try GitHub endpoints
 	for _, url := range manifestEndpoints() {
 		b, err := fetchBytes(ctx, c, url)
 		if err != nil {

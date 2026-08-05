@@ -130,7 +130,7 @@ func ProbeAccountIMAP(account string) error {
 // standalone config, own timeout, friendly error on auth/connection failure.
 func ReadInboxFor(cfg config.IMAPConfig, mailbox string, limit int, unreadOnly bool) ([]EmailMessage, error) {
 	if limit <= 0 {
-		limit = 10
+		limit = 30
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -796,14 +796,14 @@ type emailReadTool struct{}
 func (emailReadTool) Name() string { return "email_read" }
 
 func (emailReadTool) Description() string {
-	return "Read recent emails from the configured IMAP inbox ([cowork.imap] host/port/username/password_env). Returns the most recent messages with from/to/subject/date/body-preview (RFC 2047 subjects and multipart bodies handled correctly). Set unread_only=true for unread only, limit to cap the count (default 10). Requires IMAP config; returns a config error if unset."
+	return "Read recent emails from the configured IMAP inbox ([cowork.imap] host/port/username/password_env). Returns the most recent messages with from/to/subject/date/body-preview (RFC 2047 subjects and multipart bodies handled correctly). Set unread_only=true for unread only, limit to cap the count (default 30). Requires IMAP config; returns a config error if unset."
 }
 
 func (emailReadTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
-  "limit":{"type":"integer","description":"Max messages to return (default 10)"},
+  "limit":{"type":"integer","description":"Max messages to return (default 30)"},
   "unread_only":{"type":"boolean","description":"Only unread messages (default false)"},
   "account":{"type":"string","description":"邮箱账号名（[[cowork.email_accounts]] 的 name），留空=默认账号"},
   "since":{"type":"string","description":"只读这个日期之后的邮件；绝对日期 2026-06-01 或相对 7d/1w/1m（近N天/周/月）"},
@@ -889,7 +889,7 @@ func (emailSearchTool) Schema() json.RawMessage {
 "properties":{
   "from":{"type":"string","description":"发件人地址子串（IMAP SEARCH FROM），可选"},
   "subject":{"type":"string","description":"主题子串（IMAP SEARCH SUBJECT），可选"},
-  "limit":{"type":"integer","description":"Max results (default 10)"},
+  "limit":{"type":"integer","description":"Max results (default 30)"},
   "account":{"type":"string","description":"邮箱账号名（[[cowork.email_accounts]] 的 name），留空=默认账号"},
   "since":{"type":"string","description":"只搜这个日期之后的邮件；绝对日期 2026-06-01 或相对 7d/1w/1m"},
   "before":{"type":"string","description":"只搜这个日期之前的邮件；格式同 since"},

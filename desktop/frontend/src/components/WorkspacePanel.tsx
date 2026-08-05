@@ -1175,7 +1175,7 @@ export function WorkspacePanel({
                               ))}
                             </div>
                           ) : (
-                            <div className="workspace-empty">No details available</div>
+                            <div className="workspace-empty">{t("caps.noDetailsAvailable")}</div>
                           )}
                         </div>
                       )}
@@ -1216,7 +1216,7 @@ export function WorkspacePanel({
                           ) : commitDetail?.diff ? (
                             <CodeViewer value={cleanGitDiff(commitDetail.diff)} language="diff" />
                           ) : (
-                            <div className="workspace-empty">No details available</div>
+                            <div className="workspace-empty">{t("caps.noDetailsAvailable")}</div>
                           )}
                         </div>
                       )}

@@ -12,8 +12,8 @@ import (
 // secrets (generated with `cmd/sign genkey`). Key ID AF12CA46F4A9EBB0. If the
 // signing key is ever rotated, regenerate and update this constant in lockstep
 // with the CI secret.
-const publicKey = `untrusted comment: minisign public key: 1123CC6D2198A9D5
-RWTVqZghbcwjEZklRjR9P4CAROGJzt5dkFXGD0KRrxC/blQk2gmnaoSm`
+const publicKey = `untrusted comment: minisign public key: DAEB1C7D5B320F6C
+RWRsDzJbfRzr2nAAU/iuyuroV6wCrcCqMJCO/gX8neSA82E3hzTgfixI`
 
 // Verify reports whether sig (the contents of a .minisig file) is a valid minisign
 // signature of data under the embedded public key. A nil return means the artifact

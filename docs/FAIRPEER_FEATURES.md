@@ -445,12 +445,31 @@
 
 ---
 
-## 11. PPT 生成
+## 11. Office 自动化
 
-- 模板系统：`ppt_active_template` 选择模板
-- 两种模式：`fast`（单轮）/ `validate`（生成+检查+返工）
-- CUA 驱动：像人一样操作 WPS Presentation（打开→感知→点击→输入）
-- 嵌入二进制，首次运行释放到 `~/.fairpeer/skills/ppt-auto/`
+### Word 文档
+
+- **创建/编辑**：使用 `doc_write` 工具，支持段落、标题、列表、表格
+- **图片插入**：支持 PNG/JPG/GIF/SVG 格式
+- **目录生成**：自动生成可点击跳转的目录
+- **格式控制**：字体、颜色、对齐、样式
+
+### Excel 表格
+
+- **创建/编辑**：使用 `xlsx_write` 工具，支持多 Sheet
+- **图表支持**：柱状图、折线图、饼图、散点图
+- **条件格式**：单元格条件、数据条、色阶
+- **公式支持**：内置公式计算
+
+### PPT 演示
+
+- **模板系统**：`ppt_active_template` 选择模板
+- **两种模式**：`fast`（单轮）/ `validate`（生成+检查+返工）
+- **SVG 自由设计**：完全自由的布局设计
+- **动画效果**：支持 fade、fly、zoom 等动画
+- **过渡效果**：支持 fade、slide、zoom 等过渡
+- **CUA 驱动**：像人一样操作 WPS Presentation（打开→感知→点击→输入）
+- **嵌入二进制**，首次运行释放到 `~/.fairpeer/skills/ppt-auto/`
 
 ---
 

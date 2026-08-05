@@ -208,8 +208,11 @@ export interface AppBindings {
   SetSkillEnabled(name: string, enabled: boolean): Promise<void>;
   SkillMarketBrowse(): Promise<CatalogEntry[]>;
   SkillMarketSources(): Promise<MarketSourceMeta[]>;
-  SkillMarketSearch(query: string): Promise<CatalogEntry[]>;
+  SkillMarketSearch(query: string, source?: string): Promise<CatalogEntry[]>;
   SkillMarketInstall(installRef: string, name: string, scope: string, apply: boolean): Promise<string>;
+  SkillMarketUninstall(name: string, scope: string): Promise<string>;
+  SkillMarketInstalledNames(): Promise<Record<string, string>>;
+  GenerateTaskSubagents(task: string): Promise<Record<string, string>>;
   DreamStatus(): Promise<DreamStatusView>;
   SetDreamEnabled(enabled: boolean): Promise<void>;
   SetDreamIntervals(dreamDays: number, distillDays: number): Promise<void>;
@@ -2269,9 +2272,9 @@ function makeMockApp(): AppBindings {
     },
     async SkillMarketBrowse(): Promise<CatalogEntry[]> {
       return [
-        { source: "builtin", name: "pdf", description: "Create and analyze PDF documents", topics: ["office"], installs: 0, contentUrl: "", installRef: "" },
-        { source: "builtin", name: "docx", description: "Create and edit Word documents", topics: ["office"], installs: 0, contentUrl: "", installRef: "" },
-        { source: "builtin", name: "skill-creator", description: "Create and edit skills", topics: ["meta"], installs: 0, contentUrl: "", installRef: "" },
+        { source: "builtin", name: "pdf", slug: "pdf", description: "Create and analyze PDF documents", topics: ["office"], installs: 0, contentUrl: "", installRef: "" },
+        { source: "builtin", name: "docx", slug: "docx", description: "Create and edit Word documents", topics: ["office"], installs: 0, contentUrl: "", installRef: "" },
+        { source: "builtin", name: "skill-creator", slug: "skill-creator", description: "Create and edit skills", topics: ["meta"], installs: 0, contentUrl: "", installRef: "" },
       ];
     },
     async SkillMarketSources(): Promise<MarketSourceMeta[]> {
@@ -2282,14 +2285,26 @@ function makeMockApp(): AppBindings {
         { id: "clawhub", name: "ClawHub Community", type: "clawhub-api" },
       ];
     },
-    async SkillMarketSearch(_query: string): Promise<CatalogEntry[]> {
+    async SkillMarketSearch(_query: string, _source?: string): Promise<CatalogEntry[]> {
       return [
-        { source: "clawhub", name: "code-review", description: "Code review skill", installs: 42, contentUrl: "https://example.com/SKILL.md", installRef: "https://example.com/SKILL.md" },
-        { source: "builtin", name: "pdf", description: "PDF tools", installs: 0, contentUrl: "", installRef: "" },
+        { source: "clawhub", name: "code-review", slug: "code-review", description: "Code review skill", installs: 42, contentUrl: "https://example.com/SKILL.md", installRef: "https://example.com/SKILL.md" },
+        { source: "builtin", name: "pdf", slug: "pdf", description: "PDF tools", installs: 0, contentUrl: "", installRef: "" },
       ];
     },
     async SkillMarketInstall(_installRef: string, _name: string, _scope: string, _apply: boolean): Promise<string> {
       return "Installed (dev mock)";
+    },
+    async SkillMarketUninstall(_name: string, _scope: string): Promise<string> {
+      await delay(500);
+      return "Uninstall successful";
+    },
+    async SkillMarketInstalledNames(): Promise<Record<string, string>> {
+      await delay(100);
+      return {};
+    },
+    async GenerateTaskSubagents(_task: string): Promise<Record<string, string>> {
+      await delay(100);
+      return { "agent-1": "subtask 1" };
     },
     async DreamStatus(): Promise<DreamStatusView> {
       return {
@@ -2919,7 +2934,7 @@ function makeMockApp(): AppBindings {
     async NeedsOnboarding() {
       return !settings.providers.some((p) => p.keySet);
     },
-    async SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string, visionModel: string, fastModel: string) {
+    async SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string, _visionModel: string, _fastModel: string) {
       if (!apiKey.trim()) throw new Error("key is required");
       await delay(300);
       // Mock: add the provider to settings so NeedsOnboarding flips to false.

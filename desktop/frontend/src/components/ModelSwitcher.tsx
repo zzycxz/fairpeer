@@ -6,34 +6,6 @@ import { useT } from "../lib/i18n";
 import type { ModelInfo } from "../lib/types";
 import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
 
-// ── Cascade category definitions ────────────────────────────────────────
-interface CategoryDef {
-  id: string;
-  label: string;
-  prefixes: string[];
-}
-
-const CATEGORIES: CategoryDef[] = [
-  { id: "qwen",     label: "千问",       prefixes: ["qwen/"] },
-  { id: "deepseek", label: "DeepSeek",   prefixes: ["deepseek/"] },
-  { id: "minimax",  label: "MiniMax",    prefixes: ["minimax/"] },
-  { id: "zai",      label: "智谱",       prefixes: ["z.ai/"] },
-  { id: "moonshot", label: "月之暗面",   prefixes: ["moonshotai/"] },
-  { id: "other",    label: "其他",       prefixes: ["nvidia/"] },
-];
-
-function catForModel(modelName: string): string {
-  for (const cat of CATEGORIES) {
-    if (cat.prefixes.some((p) => modelName.startsWith(p))) return cat.id;
-  }
-  const lower = modelName.toLowerCase();
-  if (lower.includes("qwen"))      return "qwen";
-  if (lower.includes("deepseek"))  return "deepseek";
-  if (lower.includes("minimax"))   return "minimax";
-  if (lower.includes("z.ai") || lower.includes("glm")) return "zai";
-  if (lower.includes("moonshot") || lower.includes("kimi")) return "moonshot";
-  return "other";
-}
 
 // ── ModelSwitcher (cascade) ─────────────────────────────────────────────
 export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?: string; onPick: (name: string) => void }) {
@@ -83,10 +55,10 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
     closeMenu(() => onPick(name));
   };
 
-  // Group models by category
+  // Group models by provider
   const grouped = new Map<string, ModelInfo[]>();
   for (const m of models) {
-    const cat = catForModel(m.model);
+    const cat = m.provider || "other";
     if (!grouped.has(cat)) grouped.set(cat, []);
     grouped.get(cat)!.push(m);
   }
@@ -113,11 +85,11 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
     if (hoverTimerRef.current !== null) window.clearTimeout(hoverTimerRef.current);
   }, []);
 
-  // Only show categories that have models, in defined order
-  const visibleCats = CATEGORIES.filter((c) => {
-    const list = grouped.get(c.id);
-    return list && list.length > 0;
-  });
+  // Only show categories that have models, derived from available providers
+  const visibleCats = Array.from(grouped.keys()).map(provider => ({
+    id: provider,
+    label: providerLabel(provider)
+  })).sort((a, b) => a.label.localeCompare(b.label));
 
   // Only use flat list if there are very few models, to prevent long cluttered menus.
   const flatMode = models.length <= 5;

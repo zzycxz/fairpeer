@@ -2650,9 +2650,14 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
       title={t("settings.providerAccess")}
       description={t("settings.providerAccessHint")}
       actions={
-        <button className="btn btn--small" disabled={busy || adding !== null} onClick={() => setAdding("builtin")}>
-          {t("settings.addProvider")}
-        </button>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <button className="btn btn--small" disabled={busy || adding !== null} onClick={() => setAdding("builtin")}>
+            {t("settings.addProvider")}
+          </button>
+          <button className="btn btn--small" disabled={busy || adding !== null} onClick={() => setAdding("custom")}>
+            {t("settings.addProvider.customChoice")}
+          </button>
+        </div>
       }
     >
       <div className="provider-access-grid">
@@ -2806,6 +2811,7 @@ function AddProviderPanel({
   const [step, setStep] = useState<"vendor" | "key" | "model">("vendor");
   const [selected, setSelected] = useState<ProviderTemplate | null>(null);
   const [apiKey, setApiKey] = useState("");
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     if (mode === "builtin") {
@@ -2852,6 +2858,16 @@ function AddProviderPanel({
               direct={direct}
               aggregators={aggregators}
               onPick={(tpl) => { setSelected(tpl); setStep("key"); }}
+              syncing={syncing}
+              onSync={async () => {
+                setSyncing(true);
+                try {
+                  await app.RefreshRegistry();
+                  const fresh = await app.GetProviderTemplates();
+                  setTemplates(fresh);
+                } catch (e) { console.error(e); }
+                setSyncing(false);
+              }}
               t={t}
             />
           )}
@@ -4525,27 +4541,47 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
                             // cmtt.chinamobile.com) and most standard providers,
                             // without forcing the user to open Advanced settings.
                             const domain = email.split("@")[1]?.trim().toLowerCase() ?? "";
-                            const smtpHost = acct.smtp.host || (domain ? `smtp.${domain}` : "");
-                            const imapHost = acct.imap.host || (domain ? `imap.${domain}` : "");
+                            let autoSmtpHost = domain ? `smtp.${domain}` : "";
+                            let autoImapHost = domain ? `imap.${domain}` : "";
+                            let autoSmtpPort = 465;
+                            let autoSmtpEnc: "tls" | "starttls" | "none" = "tls";
+                            let autoImapPort = 993;
+
+                            switch (domain) {
+                              case "outlook.com":
+                              case "hotmail.com":
+                                autoSmtpHost = "smtp-mail.outlook.com";
+                                autoImapHost = "imap-mail.outlook.com";
+                                autoSmtpPort = 587;
+                                autoSmtpEnc = "starttls";
+                                break;
+                              case "yahoo.com":
+                                autoSmtpHost = "smtp.mail.yahoo.com";
+                                autoImapHost = "imap.mail.yahoo.com";
+                                break;
+                              case "foxmail.com":
+                                autoSmtpHost = "smtp.qq.com";
+                                autoImapHost = "imap.qq.com";
+                                break;
+                            }
+
+                            const smtpHost = acct.smtp.host || autoSmtpHost;
+                            const imapHost = acct.imap.host || autoImapHost;
                             patchAccount(i, {
                               smtp: {
                                 ...acct.smtp,
                                 username: email,
                                 from: email,
                                 host: smtpHost,
-                                // Default to implicit TLS (465/993) — the common
-                                // case for chinamobile.com and 139.com. The user
-                                // can override in Advanced if their server uses
-                                // STARTTLS (587) or plain (25).
-                                port: acct.smtp.port || (domain ? 465 : acct.smtp.port),
-                                encryptionMode: acct.smtp.encryptionMode || (domain ? "tls" : acct.smtp.encryptionMode),
-                                useTLS: acct.smtp.encryptionMode ? acct.smtp.useTLS : (domain ? true : acct.smtp.useTLS),
+                                port: acct.smtp.port || (domain ? autoSmtpPort : acct.smtp.port),
+                                encryptionMode: acct.smtp.encryptionMode || (domain ? autoSmtpEnc : acct.smtp.encryptionMode),
+                                useTLS: acct.smtp.encryptionMode ? acct.smtp.useTLS : (domain ? (autoSmtpEnc === "tls" || autoSmtpEnc === "starttls") : acct.smtp.useTLS),
                               },
                               imap: {
                                 ...acct.imap,
                                 username: email,
                                 host: imapHost,
-                                port: acct.imap.port || (domain ? 993 : acct.imap.port),
+                                port: acct.imap.port || (domain ? autoImapPort : acct.imap.port),
                               },
                             });
                           }}

@@ -26,21 +26,36 @@ import json, re, sys, os
 import xml.etree.ElementTree as ET
 
 
-def load_config(config_path=None):
-    """加载配置文件"""
-    if config_path and os.path.exists(config_path):
-        with open(config_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {
+def load_config(config_path=None, svg_path=None):
+    """加载配置文件，并合并项目级的动态样式（若存在）"""
+    config = {
         "colors": {
-            "primary": "#0070C0", "secondary": "#2E8B57", "accent": "#FF8C00",
-            "text": "#333333", "text_secondary": "#666666", "card_bg": "#F5F7FA"
+            "primary": "#ffffff", "secondary": "#a0a0a0", "accent": "#f28b50",
+            "text": "#ffffff", "text_secondary": "#a0a0a0", "card_bg": "#1e1e1e"
         },
         "rules": {
             "forbidden_elements": ["filter", "feDropShadow", "pattern", "mask", "foreignObject"],
             "text_length": 20
         }
     }
+    
+    if config_path and os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            config.update(json.load(f))
+            
+    if svg_path:
+        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(svg_path)))
+        dynamic_path = os.path.join(project_dir, "dynamic_style.json")
+        if os.path.exists(dynamic_path):
+            try:
+                with open(dynamic_path, "r", encoding="utf-8") as f:
+                    dynamic_cfg = json.load(f)
+                    if "colors" in dynamic_cfg:
+                        config["colors"].update(dynamic_cfg["colors"])
+            except Exception as e:
+                print(f"Warning: failed to load dynamic style: {e}")
+                
+    return config
 
 
 def parse_text_elements(content):
@@ -442,6 +457,6 @@ if __name__ == "__main__":
         if idx + 1 < len(sys.argv):
             mode = sys.argv[idx + 1]
 
-    config = load_config(config_path)
+    config = load_config(config_path, svg_path)
     result = check_svg(svg_path, config, mode)
     sys.exit(result)

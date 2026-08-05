@@ -2,7 +2,83 @@
 
 ## 概述
 
-fairpeer 提供完整的办公自动化功能，包括邮件管理、日历任务、PPT 生成和定时任务，帮助您高效处理日常办公事务。
+fairpeer 提供完整的办公自动化功能，包括 Word/Excel/PPT 文档处理、邮件管理、日历任务和定时任务，帮助您高效处理日常办公事务。
+
+## 文档处理
+
+### Word 文档
+
+fairpeer 支持完整的 Word 文档操作：
+
+- **创建文档**：使用 `doc_write` 工具
+- **读取文档**：使用 `doc_read` 工具
+- **插入图片**：在 sections 中添加 `{type: "image", image_path: "..."}`
+- **生成目录**：在 sections 中添加 `{type: "toc", toc_level: 3}`
+
+```json
+{
+  "path": "report.docx",
+  "sections": [
+    {"type": "heading", "text": "第一章", "level": 1},
+    {"type": "image", "image_path": "/path/to/image.png", "image_alt": "Logo"},
+    {"type": "toc", "toc_level": 3},
+    {"type": "paragraph", "text": "正文内容"}
+  ]
+}
+```
+
+### Excel 表格
+
+fairpeer 支持完整的 Excel 操作：
+
+- **创建表格**：使用 `xlsx_write` 工具
+- **读取数据**：使用 `xlsx_read` 工具
+- **添加图表**：在 charts 数组中配置
+- **条件格式**：在 cond_fmt 数组中配置
+
+```json
+{
+  "path": "data.xlsx",
+  "sheets": [{
+    "name": "Sheet1",
+    "cells": [
+      {"ref": "A1", "value": "月份"},
+      {"ref": "B1", "value": "销售额"}
+    ],
+    "cond_fmt": [{
+      "range": "B2:B10",
+      "type": "cell",
+      "criteria": "greater_than",
+      "value": "10000",
+      "format": {"bg": "#00FF00"}
+    }]
+  }],
+  "charts": [{
+    "sheet": "Sheet1",
+    "type": "bar",
+    "title": "月度销售额",
+    "data_range": "A1:B10",
+    "position": "D2"
+  }]
+}
+```
+
+### PPT 演示
+
+fairpeer 通过 PPT-auto Skill 提供专业的 PPT 生成能力：
+
+- **SVG 自由设计**：完全自由的布局设计
+- **模板填充**：基于现有模板填充内容
+- **动画效果**：支持 fade、fly、zoom 等动画
+- **过渡效果**：支持 fade、slide、zoom 等过渡
+
+```bash
+# 使用 PPT-auto Skill
+fairpeer run "创建一个关于AI的PPT演示文稿"
+
+# 带动画效果
+fairpeer run "创建PPT，使用淡入动画"
+```
 
 ## 邮件集成
 

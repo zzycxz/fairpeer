@@ -1453,31 +1453,35 @@ func (a *App) SkillMarketSources() []installsource.MarketSourceMeta {
 // SkillMarketSearch searches across all default sources by keyword. Returns
 // structured JSON (CatalogEntry[]) so the frontend can render directly without
 // fragile text parsing.
-func (a *App) SkillMarketSearch(query string) ([]installsource.CatalogEntry, error) {
-	home, _ := os.UserHomeDir()
+func (a *App) SkillMarketSearch(query string, sourceID string) ([]installsource.CatalogEntry, error) {
+	if sourceID == "builtin-mcp" {
+		all := installsource.BuiltinMcpCatalog()
+		var filtered []installsource.CatalogEntry
+		q := strings.ToLower(query)
+		for _, e := range all {
+			if strings.Contains(strings.ToLower(e.Name), q) || strings.Contains(strings.ToLower(e.Description), q) {
+				filtered = append(filtered, e)
+			}
+		}
+		return filtered, nil
+	}
+
+	if a.ctx == nil {
+		return nil, fmt.Errorf("app not initialized")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("get home dir: %w", err)
+	}
 	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
 	defer cancel()
-	// Build a real installSourceTool for SearchCatalog (needs the unexported
-	// method, so go through NewMarketToolFromOptions → Execute won't give
-	// structured data). Use the tool's Execute to trigger search, but since we
-	// need structured CatalogEntry[], we call SearchCatalog via the market tool.
-	// The market tool wraps an installSourceTool; we call Execute and parse the
-	// text output... but that's fragile. Instead, build the installer directly.
-	tl := installsource.NewTool(installsource.Options{ProjectRoot: home, HomeDir: home})
-	// Execute skill_market search to get text, but we want structured data.
-	// The cleanest path: call the market tool's Execute with search action,
-	// which returns formatted text. We parse it on the frontend.
-	// BUT: a better path is to return structured data directly. Since
-	// SearchCatalog is on the unexported type, we go through the market tool.
-	_ = tl
 	// Use the market tool which internally calls SearchCatalog and returns text.
-	// The frontend parses the text — this is the existing contract. The real fix
-	// would be to export SearchCatalog, but for now the text format is stable.
+	// The frontend parses the text — this is the existing contract.
 	mt := installsource.NewMarketToolFromOptions(installsource.Options{
 		ProjectRoot: home,
 		HomeDir:     home,
 	})
-	raw, _ := json.Marshal(map[string]any{"action": "search", "query": query})
+	raw, _ := json.Marshal(map[string]any{"action": "search", "query": query, "source": sourceID})
 	out, err := mt.Execute(ctx, raw)
 	if err != nil {
 		return nil, err
@@ -1550,7 +1554,13 @@ func parseSearchText(text string) []installsource.CatalogEntry {
 // pipeline as install_source (safety scan + manifest). Returns the install
 // result summary. When apply=false, returns the plan for review.
 func (a *App) SkillMarketInstall(installRef, name, scope string, apply bool) (string, error) {
-	home, _ := os.UserHomeDir()
+	if a.ctx == nil {
+		return "", fmt.Errorf("app not initialized")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("get home dir: %w", err)
+	}
 	ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
 	defer cancel()
 	tl := installsource.NewMarketToolFromOptions(installsource.Options{
@@ -1569,5 +1579,60 @@ func (a *App) SkillMarketInstall(installRef, name, scope string, apply bool) (st
 		args["scope"] = scope
 	}
 	raw, _ := json.Marshal(args)
-	return tl.Execute(ctx, raw)
+	result, err := tl.Execute(ctx, raw)
+	if err != nil {
+		return result, err
+	}
+	// Refresh the skill store so the new skill is immediately available.
+	if apply {
+		_ = a.RefreshSkills()
+	}
+	// Append install path to the result for user feedback.
+	if name != "" {
+		result += "\n" + filepath.Join(home, ".fairpeer", "skills", name)
+	}
+	return result, nil
+}
+
+// SkillMarketUninstall removes a previously installed skill by name.
+func (a *App) SkillMarketUninstall(name string, scope string) (string, error) {
+	if a.ctx == nil {
+		return "", fmt.Errorf("app not initialized")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("get home dir: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+	if scope == "" {
+		scope = "global"
+	}
+	// Use install_source op=uninstall.
+	tl := installsource.NewTool(installsource.Options{ProjectRoot: home, HomeDir: home})
+	args := map[string]any{
+		"op":    "uninstall",
+		"kind":  "skill",
+		"name":  name,
+		"scope": scope,
+		"apply": true,
+	}
+	raw, _ := json.Marshal(args)
+	result, err := tl.Execute(ctx, raw)
+	if err != nil {
+		return result, err
+	}
+	_ = a.RefreshSkills()
+	return result, nil
+}
+
+// SkillMarketInstalledNames returns the set of skill names installed via
+// the marketplace, with their source URLs. Used by the frontend to mark
+// search results as "already installed".
+func (a *App) SkillMarketInstalledNames() (map[string]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("get home dir: %w", err)
+	}
+	return installsource.InstalledSkillNames(home), nil
 }

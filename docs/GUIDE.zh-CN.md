@@ -18,6 +18,7 @@
 - [斜杠命令](#斜杠命令)
 - [@ 引用](#-引用)
 - [双模型协同](#双模型协同)
+- [办公自动化](#办公自动化)
 
 ## 配置
 
@@ -233,6 +234,125 @@ Subagent skills 默认继承执行器模型。设置 `subagent_model` 可让它�
 `fairpeer chat` 里的 `/auto-plan off|on` 修改用户级设置，或在 shell/脚本里用
 `fairpeer config auto-plan off|on`。只有明确想写项目级覆盖时，才给 shell 命令加
 `--local`。
+
+## 办公自动化
+
+fairpeer 提供完整的 Office 文档处理能力，通过 `document-auto` 和 `ppt-auto` Skill 实现。
+
+### Word 文档
+
+使用 `doc_write` 工具创建和编辑 Word 文档：
+
+```json
+{
+  "path": "report.docx",
+  "sections": [
+    {"type": "heading", "text": "第一章", "level": 1},
+    {"type": "paragraph", "text": "正文内容"},
+    {"type": "image", "image_path": "/path/to/image.png", "image_alt": "Logo"},
+    {"type": "toc", "toc_level": 3}
+  ]
+}
+```
+
+支持的功能：
+- 段落、标题、列表、表格
+- 图片插入（PNG/JPG/GIF/SVG）
+- 目录生成
+- 格式控制（字体、颜色、对齐）
+
+### Excel 表格
+
+使用 `xlsx_write` 工具创建和编辑 Excel 表格：
+
+```json
+{
+  "path": "data.xlsx",
+  "sheets": [{
+    "name": "Sheet1",
+    "cells": [
+      {"ref": "A1", "value": "月份"},
+      {"ref": "B1", "value": "销售额"}
+    ],
+    "cond_fmt": [{
+      "range": "B2:B10",
+      "type": "cell",
+      "criteria": "greater_than",
+      "value": "10000",
+      "format": {"bg": "#00FF00"}
+    }]
+  }],
+  "charts": [{
+    "sheet": "Sheet1",
+    "type": "bar",
+    "title": "月度销售额",
+    "data_range": "A1:B10",
+    "position": "D2"
+  }]
+}
+```
+
+支持的功能：
+- 单元格读写、多 Sheet
+- 图表（柱状图、折线图、饼图、散点图）
+- 条件格式（单元格条件、数据条、色阶）
+- 公式支持
+
+### PPT 演示
+
+使用 `ppt-auto` Skill 创建专业 PPT：
+
+```bash
+# 创建 PPT
+fairpeer run "创建一个关于AI的PPT演示文稿"
+
+# 使用模板
+fairpeer run "使用模板创建PPT，主题是数字化转型"
+
+# 带动画效果
+fairpeer run "为PPT添加淡入动画效果"
+```
+
+支持的功能：
+- SVG 自由设计
+- 模板填充
+- 动画效果（fade、fly、zoom）
+- 过渡效果（fade、slide、zoom）
+- VLM 集成（视觉模型辅助设计）
+
+### 邮件集成
+
+```toml
+[cowork]
+[[cowork.email_accounts]]
+name = "工作邮箱"
+smtp_host = "smtp.gmail.com"
+smtp_port = 587
+imap_host = "imap.gmail.com"
+imap_port = 993
+username = "your@email.com"
+password_env = "EMAIL_PASSWORD"
+```
+
+支持的功能：
+- 多账号支持（Gmail/Outlook/QQ/163 等）
+- 发送/读取/搜索邮件
+- 定时发送
+
+### 日历任务
+
+```toml
+[cowork]
+[[cowork.schedules]]
+name = "每日提醒"
+cron = "0 9 * * *"
+prompt = "提醒我开晨会"
+```
+
+支持的功能：
+- cron 表达式调度
+- 定时提醒/执行
+- ICS 格式支持
 
 分离 session（让各模型前缀缓存稳定）背后的取舍见
 [`SPEC.md` §3.5](./SPEC.md#35-two-model-collaboration-coordinator)。
