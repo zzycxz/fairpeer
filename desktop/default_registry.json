@@ -46,7 +46,7 @@
   },
   {
     "name": "zhipu",
-    "displayName": "智谱 AI (GLM)",
+    "displayName": "智谱 (Z.ai)",
     "kind": "openai",
     "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
     "apiKeyEnv": "ZHIPU_API_KEY",
@@ -121,7 +121,7 @@
   },
   {
     "name": "xfyun",
-    "displayName": "讯飞 MaaS (iFlytek)",
+    "displayName": "讯飞星火 (iFlytek)",
     "kind": "openai",
     "baseUrl": "https://maas-token-api.cn-huabei-1.xf-yun.com/v2",
     "apiKeyEnv": "XFYUN_API_KEY",
@@ -215,7 +215,7 @@
   },
   {
     "name": "zhipu-coding",
-    "displayName": "智谱 GLM Coding Plan",
+    "displayName": "智谱 (Z.ai) Coding Plan",
     "kind": "openai",
     "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
     "apiKeyEnv": "ZHIPU_CODING_API_KEY",
@@ -300,7 +300,7 @@
   },
   {
     "name": "xfyun-coding",
-    "displayName": "讯飞 MaaS Coding Plan",
+    "displayName": "讯飞星火 Coding Plan",
     "kind": "openai",
     "baseUrl": "https://maas-token-api.cn-huabei-1.xf-yun.com/v2",
     "apiKeyEnv": "XFYUN_API_KEY",
