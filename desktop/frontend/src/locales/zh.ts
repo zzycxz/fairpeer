@@ -225,6 +225,8 @@ export const zh: Record<DictKey, string> = {
   "caps.marketBrowse": "技能市场",
   "caps.skillTabBuiltin": "内置",
   "caps.skillTabMarket": "远程市场",
+  "caps.skillCategoryGeneral": "通用技能",
+  "caps.skillCategoryOffice": "办公自动化",
   "caps.marketSearchPlaceholder": "跨 Anthropic、OpenAI、ClawHub 和精选技能搜索…",
   "caps.marketSearch": "搜索",
   "caps.marketSearching": "搜索中…",

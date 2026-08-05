@@ -1619,13 +1619,22 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 		() => builtinSkills.filter((sk) => sk.active === false),
 		[builtinSkills],
 	);
+	// Split active builtins into "office automation" vs "general development"
+	// so the user can tell at a glance which skills are for office work and
+	// which are general coding tools. The split is name-based (the set is
+	// fixed and small); no backend change needed.
+	const OFFICE_SKILLS = new Set(["document-auto", "email-auto", "schedule-auto", "rag-auto", "expert-auto", "browser-auto", "computer-auto", "ppt-auto"]);
+	const officeSkills = useMemo(
+		() => activeBuiltinSkills.filter((sk) => OFFICE_SKILLS.has(sk.name)),
+		[activeBuiltinSkills],
+	);
+	const generalSkills = useMemo(
+		() => activeBuiltinSkills.filter((sk) => !OFFICE_SKILLS.has(sk.name)),
+		[activeBuiltinSkills],
+	);
 	const userSkills = useMemo(
 		() => filteredSkills.filter((sk) => sk.scope !== "builtin"),
 		[filteredSkills],
-	);
-	const activeBuiltinEnabledCount = useMemo(
-		() => activeBuiltinSkills.filter((sk) => sk.enabled).length,
-		[activeBuiltinSkills],
 	);
 
 	const skillSummary = useMemo(() => {
@@ -1685,20 +1694,45 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 				onRemove={(path) => mutate(() => app.RemoveSkillPath(path))}
 			/>
 
-			{/* Built-in skills IN EFFECT for the current mode: these are the ones
-			    the model actually sees in its prompt index right now. */}
-			{activeBuiltinSkills.length > 0 && (
+			{/* General development skills (active in the current mode). */}
+			{generalSkills.length > 0 && (
 				<div className="cap-market">
 					<div className="cap-skills-head">
 						<div className="cap-skills-head__copy">
-							<div className="cap-skills-head__title">{t("caps.marketTitleActive")}</div>
+							<div className="cap-skills-head__title">{t("caps.skillCategoryGeneral")}</div>
 							<div className="cap-skills-head__summary">
-								{t("caps.marketSummary", { on: activeBuiltinEnabledCount, total: activeBuiltinSkills.length })}
+								{t("caps.marketSummary", { on: generalSkills.filter((s) => s.enabled).length, total: generalSkills.length })}
 							</div>
 						</div>
 					</div>
 					<div className="cap-skills">
-						{activeBuiltinSkills.map((sk) => (
+						{generalSkills.map((sk) => (
+							<SkillRow
+								key={sk.name}
+								skill={sk}
+								busy={busy}
+								expanded={expandedSkills.has(sk.name)}
+								onToggle={() => toggleSkill(sk.name)}
+								onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
+							/>
+						))}
+					</div>
+				</div>
+			)}
+
+			{/* Office automation skills (document/email/schedule/rag/browser/etc). */}
+			{officeSkills.length > 0 && (
+				<div className="cap-market">
+					<div className="cap-skills-head">
+						<div className="cap-skills-head__copy">
+							<div className="cap-skills-head__title">{t("caps.skillCategoryOffice")}</div>
+							<div className="cap-skills-head__summary">
+								{t("caps.marketSummary", { on: officeSkills.filter((s) => s.enabled).length, total: officeSkills.length })}
+							</div>
+						</div>
+					</div>
+					<div className="cap-skills">
+						{officeSkills.map((sk) => (
 							<SkillRow
 								key={sk.name}
 								skill={sk}

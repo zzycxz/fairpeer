@@ -224,6 +224,8 @@ export const en = {
   "caps.marketBrowse": "Skill Marketplace",
   "caps.skillTabBuiltin": "Built-in",
   "caps.skillTabMarket": "Remote Market",
+  "caps.skillCategoryGeneral": "General Skills",
+  "caps.skillCategoryOffice": "Office Automation",
   "caps.marketSearchPlaceholder": "Search across Anthropic, OpenAI, ClawHub, and curated skills…",
   "caps.marketSearch": "Search",
   "caps.marketSearching": "Searching…",
