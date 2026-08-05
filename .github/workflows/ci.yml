@@ -67,7 +67,8 @@ jobs:
         run: |
           if [ "${{ matrix.goos }}" = "windows" ]; then
             wails build -platform ${{ matrix.goos }}/${{ matrix.goarch }} -clean -trimpath -webview2 embed
+          elif [ "${{ matrix.goos }}" = "linux" ]; then
+            wails build -platform ${{ matrix.goos }}/${{ matrix.goarch }} -clean -trimpath -tags webkit2_41
           else
             wails build -platform ${{ matrix.goos }}/${{ matrix.goarch }} -clean -trimpath
           fi
-
