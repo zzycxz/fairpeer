@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -121,26 +122,31 @@ func fetchRemote(ctx context.Context, url string) ([]ProviderTemplate, error) {
 	// Start from the embed snapshot (carries DisplayName/DocURL/roles).
 	snapshot := loadEmbedSnapshot()
 	merged := make([]ProviderTemplate, 0, len(snapshot))
-	seen := map[string]bool{}
 
-	// Reverse lookup: our provider name → models.dev vendor ID.
-	devIDForName := make(map[string]string, len(trackedVendors))
+	// Build a reverse lookup: our provider name → list of models.dev vendor IDs
+	// (multiple dev IDs can map to the same provider, e.g. alibaba-cn + alibaba
+	// both enrich "qwen"). Order matters: CN variants are listed first in
+	// trackedVendors so iteration picks them first (map order is random, so we
+	// collect ALL candidates and prefer the first match present in the response).
+	devIDsForName := make(map[string][]string, len(trackedVendors))
 	for devID, ourName := range trackedVendors {
-		devIDForName[ourName] = devID
+		devIDsForName[ourName] = append(devIDsForName[ourName], devID)
 	}
 
-	// For each snapshot vendor, enrich with live data from models.dev if present.
+	// For each snapshot vendor, enrich with live data from models.dev. When
+	// multiple dev IDs map to one provider, try each in order and use the first
+	// present in the response (CN endpoints are listed first → preferred).
 	for _, snap := range snapshot {
 		t := snap // copy
-		devID := devIDForName[snap.Name]
-		if v, ok := raw[devID]; ok {
-			t = mergeRemote(snap, v)
+		for _, devID := range devIDsForName[snap.Name] {
+			if v, ok := raw[devID]; ok {
+				t = mergeRemote(snap, v)
+				break // first match wins (CN preferred over intl)
+			}
 		}
 		merged = append(merged, t)
-		seen[snap.Name] = true
 	}
 
-	_ = seen // (future: could append vendors present in remote but not snapshot)
 	return merged, nil
 }
 
@@ -171,6 +177,7 @@ func mergeRemote(snap ProviderTemplate, v modelsDevVendor) ProviderTemplate {
 				maxCtx = m.Limit.Context
 			}
 		}
+		sort.Strings(models)
 		t.Models = models
 		t.Vision = anyVision || snap.Vision // keep snapshot's vision flag if models.dev says no
 		if maxCtx > 0 {
