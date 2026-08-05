@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/banner.png" alt="fairpeer" />
+  <img src="docs/assets/fairpeer_banner_wide.png" alt="fairpeer" />
 </p>
 
 <p align="center">
