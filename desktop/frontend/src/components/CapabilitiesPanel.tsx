@@ -1567,6 +1567,7 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 	const [err, setErr] = useState<string | null>(null);
 	const [skillQuery, setSkillQuery] = useState(initialHighlight || "");
 	const [expandedSkills, setExpandedSkills] = useState<Set<string>>(() => new Set(initialHighlight ? [initialHighlight] : []));
+	const [skillSubtab, setSkillSubtab] = useState<"builtin" | "market">("builtin");
 
 	const reload = useCallback(async () => {
 		setView(normalizeCapabilitiesView(await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [] }))));
@@ -1641,6 +1642,29 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 	return (
 		<section className="mem-section">
 			{err && <div className="banner banner--error">{err}</div>}
+			<div className="settings-subtabs">
+				<button
+					type="button"
+					className={`settings-subtab${skillSubtab === "builtin" ? " settings-subtab--active" : ""}`}
+					aria-selected={skillSubtab === "builtin"}
+					onClick={() => setSkillSubtab("builtin")}
+				>
+					{t("caps.skillTabBuiltin")}
+				</button>
+				<button
+					type="button"
+					className={`settings-subtab${skillSubtab === "market" ? " settings-subtab--active" : ""}`}
+					aria-selected={skillSubtab === "market"}
+					onClick={() => setSkillSubtab("market")}
+				>
+					{t("caps.skillTabMarket")}
+				</button>
+			</div>
+
+			{skillSubtab === "market" ? (
+				<SkillMarketSection />
+			) : (
+				<>
 			<div className="cap-search">
 				<input
 					className="mem-input"
@@ -1739,8 +1763,8 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 					))}
 				</div>
 			)}
-
-			<SkillMarketSection />
+			</>
+			)}
 		</section>
 	);
 }
