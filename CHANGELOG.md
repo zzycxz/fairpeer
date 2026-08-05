@@ -16,17 +16,12 @@ with operation-level failure recovery, bilingual semantic search, a third-party
 skill marketplace, pre-write syntax validation, and comprehensive Office/PPT
 enhancements.
 
-### Architecture — SPEC v2
+### Design Constraints
 
-A complete technical specification (`docs/SPEC_v2.md`) was written based on
-**line-by-line code audit** (not impression) and source-level study of six
-reference projects in swarm-os (MiMo-Code, DeepSeek-Reasonix, openwork,
-openworker, rooster, PromptHub). Two hard constraints govern every feature:
+All new features in this release adhere to two hard constraints:
 
-1. **Zero user learning cost** — features work out of the box; users never
-   encounter new concepts (RiskClass, operation fingerprint, inbox state machine)
-2. **Zero prompt bloat** — capabilities are host-side mechanisms (pure functions,
-   code logic), never injected into the system prompt (base prompt stays ~900 chars)
+1. **零用户学习成本** — 功能开箱即用，用户永远不需要理解新概念（如 RiskClass、操作指纹、Inbox 状态机）。用户的心智模型始终是："FairPeer 自己会处理，我只在被问时点一下"
+2. **零提示词膨胀** — 功能实现不得向 base system prompt 注入新指令。能力靠 host 侧硬机制（纯函数/代码逻辑），而非 prompt 说教。base prompt 保持 ~900 字符不变
 
 ### Added — Reliability (Phase 1)
 
