@@ -85,9 +85,45 @@ jobs:
             echo "name=${{ matrix.goos }}-${{ matrix.goarch }}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Compress Build Output
+        working-directory: desktop/build/bin
+        shell: bash
+        run: |
+          ARTIFACT_NAME="fairpeer-${{ steps.artifact_name.outputs.name }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            7z a "${ARTIFACT_NAME}.zip" *
+            find . -mindepth 1 -maxdepth 1 ! -name "*.zip" -exec rm -rf {} +
+          else
+            tar -czf "${ARTIFACT_NAME}.tar.gz" *
+            find . -mindepth 1 -maxdepth 1 ! -name "*.tar.gz" -exec rm -rf {} +
+          fi
+
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: fairpeer-${{ steps.artifact_name.outputs.name }}
           path: |
-            desktop/build/bin/*
+            desktop/build/bin/*.zip
+            desktop/build/bin/*.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create Continuous Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "latest"
+          name: "Latest Build (Nightly)"
+          body: "Automated build for the latest commit on main branch."
+          files: artifacts/*
+          prerelease: true
