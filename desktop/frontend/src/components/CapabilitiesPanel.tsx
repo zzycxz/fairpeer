@@ -1823,23 +1823,7 @@ function SkillMarketSection() {
 		setErr(null);
 		setResults(null);
 		try {
-			const out = await app.SkillMarketSearch(q);
-			// SkillMarketSearch returns a formatted string. Parse skill entries
-			// from it (lines starting with "- **name** [source] — desc").
-			const entries: CatalogEntry[] = [];
-			for (const line of out.split("\n")) {
-				const m = line.match(/^- \*\*(.+?)\*\* \[(.+?)\] — (.+?)(?: \((\d+) installs\))?(?: `installRef: (.+?)`)?$/);
-				if (m) {
-					entries.push({
-						source: m[2],
-						name: m[1],
-						description: m[3],
-						installs: m[4] ? parseInt(m[4], 10) : 0,
-						contentUrl: m[5] || "",
-						installRef: m[5] || "",
-					});
-				}
-			}
+			const entries = await app.SkillMarketSearch(q);
 			setResults(entries);
 		} catch (e) {
 			setErr(String((e as Error)?.message ?? e));

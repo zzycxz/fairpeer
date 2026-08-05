@@ -208,7 +208,7 @@ export interface AppBindings {
   SetSkillEnabled(name: string, enabled: boolean): Promise<void>;
   SkillMarketBrowse(): Promise<CatalogEntry[]>;
   SkillMarketSources(): Promise<MarketSourceMeta[]>;
-  SkillMarketSearch(query: string): Promise<string>;
+  SkillMarketSearch(query: string): Promise<CatalogEntry[]>;
   SkillMarketInstall(installRef: string, name: string, scope: string, apply: boolean): Promise<string>;
   DreamStatus(): Promise<DreamStatusView>;
   SetDreamEnabled(enabled: boolean): Promise<void>;
@@ -2282,8 +2282,11 @@ function makeMockApp(): AppBindings {
         { id: "clawhub", name: "ClawHub Community", type: "clawhub-api" },
       ];
     },
-    async SkillMarketSearch(_query: string): Promise<string> {
-      return "No results (dev mock)";
+    async SkillMarketSearch(_query: string): Promise<CatalogEntry[]> {
+      return [
+        { source: "clawhub", name: "code-review", description: "Code review skill", installs: 42, contentUrl: "https://example.com/SKILL.md", installRef: "https://example.com/SKILL.md" },
+        { source: "builtin", name: "pdf", description: "PDF tools", installs: 0, contentUrl: "", installRef: "" },
+      ];
     },
     async SkillMarketInstall(_installRef: string, _name: string, _scope: string, _apply: boolean): Promise<string> {
       return "Installed (dev mock)";

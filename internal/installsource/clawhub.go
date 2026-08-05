@@ -65,23 +65,89 @@ func (t *installSourceTool) clawhubList(ctx context.Context, perPage int, cursor
 	return clawhubItemsToCatalog(resp.Items), resp.NextCursor, nil
 }
 
+// clawhubSearchResult is one entry in the /api/v1/search response. The search
+// API returns a DIFFERENT structure from the list API — results[] with nested
+// install/native fields — so we need a separate type.
+type clawhubSearchResult struct {
+	Slug        string `json:"slug"`
+	DisplayName string `json:"displayName"`
+	Summary     string `json:"summary"`
+	Downloads   int    `json:"downloads"`
+	Install     struct {
+		Kind      string `json:"kind"`
+		Reference string `json:"reference"` // "owner/slug"
+		SourceURL string `json:"sourceUrl"`
+	} `json:"install"`
+	Native struct {
+		Skill struct {
+			Stats struct {
+				Installs int `json:"installs"`
+				Stars    int `json:"stars"`
+			} `json:"stats"`
+			Topics []string `json:"topics"` // note: search API puts topics under native.skill, not top-level
+		} `json:"skill"`
+	} `json:"native"`
+}
+
+type clawhubSearchResponse struct {
+	Results []clawhubSearchResult `json:"results"`
+}
+
 // clawhubSearch searches ClawHub server-side. Returns matching entries.
+// The search API (/api/v1/search) returns {results: [...]} with a different
+// structure than the list API (/api/v1/skills) — so we use a separate parser.
 func (t *installSourceTool) clawhubSearch(ctx context.Context, query string) ([]CatalogEntry, error) {
 	u := "https://clawhub.ai/api/v1/search?q=" + url.QueryEscape(query)
 	body, err := t.fetchText(ctx, u)
 	if err != nil {
 		return nil, err
 	}
-	// The search endpoint may return either {items: [...]} or a bare array.
-	var resp clawhubListResponse
-	if err := json.Unmarshal([]byte(body), &resp); err == nil && resp.Items != nil {
-		return clawhubItemsToCatalog(resp.Items), nil
-	}
-	var items []clawhubItem
-	if err := json.Unmarshal([]byte(body), &items); err != nil {
+	var resp clawhubSearchResponse
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		// Fallback: try the list-style structure (some endpoints share schemas).
+		var listResp clawhubListResponse
+		if err2 := json.Unmarshal([]byte(body), &listResp); err2 == nil && listResp.Items != nil {
+			return clawhubItemsToCatalog(listResp.Items), nil
+		}
 		return nil, newErr(ErrInvalidManifest, "clawhub search parse error: %v", err)
 	}
-	return clawhubItemsToCatalog(items), nil
+	return clawhubSearchResultsToCatalog(resp.Results), nil
+}
+
+// clawhubSearchResultsToCatalog converts search API results to CatalogEntry.
+// The search API's install.reference is "owner/slug"; the content URL uses the
+// slug to fetch SKILL.md via the file endpoint.
+func clawhubSearchResultsToCatalog(results []clawhubSearchResult) []CatalogEntry {
+	out := make([]CatalogEntry, 0, len(results))
+	for _, r := range results {
+		name := r.Slug
+		if name == "" {
+			name = slugify(r.DisplayName)
+		}
+		desc := r.Summary
+		if len(desc) > 150 {
+			desc = desc[:150] + "…"
+		}
+		installs := r.Downloads
+		if installs == 0 {
+			installs = r.Native.Skill.Stats.Installs
+		}
+		topics := r.Native.Skill.Topics
+		if topics == nil {
+			topics = []string{}
+		}
+		out = append(out, CatalogEntry{
+			Source:      "clawhub",
+			Name:        name,
+			Slug:        r.Slug,
+			Description: desc,
+			Topics:      topics,
+			Installs:    installs,
+			ContentURL:  clawhubContentURL(r.Slug),
+			InstallRef:  clawhubContentURL(r.Slug),
+		})
+	}
+	return out
 }
 
 // clawhubContentURL returns the URL to fetch a skill's SKILL.md from ClawHub.
