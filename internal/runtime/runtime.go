@@ -80,12 +80,17 @@ func ResolveUV() (string, bool) {
 			uvPath, uvFound = p, true
 			return
 		}
-		// 2. Bundle (exe-adjacent)
+		// 2. Cache (auto-downloaded by Install)
+		if p, ok := cachedUV(); ok {
+			uvPath, uvFound = p, true
+			return
+		}
+		// 3. Bundle (exe-adjacent)
 		if p, ok := bundledUV(); ok {
 			uvPath, uvFound = p, true
 			return
 		}
-		// 3. Windows: check common install dirs (handled by lookPathInDir)
+		// 4. Windows: check common install dirs
 		uvPath, uvFound = "", false
 	})
 	return uvPath, uvFound

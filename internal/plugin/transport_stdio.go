@@ -247,6 +247,9 @@ func windowsStdioFallbackPATH(env []string) string {
 		filepath.Join(userProfile, ".bun", "bin"),
 		filepath.Join(userProfile, ".cargo", "bin"),
 		filepath.Join(chocolatey, "bin"),
+		// uv / Python (astral-sh) — added for runtime.ResolveUV compat.
+		filepath.Join(userProfile, ".local", "bin"),
+		filepath.Join(localAppData, "Programs", "uv"),
 	}
 	var existing []string
 	for _, dir := range candidates {
