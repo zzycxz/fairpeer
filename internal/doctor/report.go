@@ -13,6 +13,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/codegraph"
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/netclient"
+	runtimepkg "github.com/zzycxz/fairpeer/internal/runtime"
 	"github.com/zzycxz/fairpeer/internal/sandbox"
 )
 
@@ -35,7 +36,16 @@ type Report struct {
 	Sandbox    SandboxReport    `json:"sandbox"`
 	Network    NetworkReport    `json:"network"`
 	Permission PermissionReport `json:"permission"`
+	Runtime    RuntimeReport    `json:"runtime"`
 	Warnings   []string         `json:"warnings,omitempty"`
+}
+
+// RuntimeReport shows the availability of Python/Node/uv runtimes.
+type RuntimeReport struct {
+	UV     string `json:"uv"`
+	Python string `json:"python"`
+	Node   string `json:"node"`
+	NPX    string `json:"npx"`
 }
 
 type ConfigReport struct {
@@ -191,6 +201,33 @@ func Collect(opts Options) Report {
 			Target:    pluginTarget(p),
 		})
 	}
+
+	// Runtime detection (Python / Node / uv).
+	rtStatus := runtimepkg.DetectAll()
+	if rtStatus.UV.Available {
+		report.Runtime.UV = rtStatus.UV.Path + " (" + rtStatus.UV.Source + ")"
+	} else {
+		report.Runtime.UV = "not found"
+	}
+	if rtStatus.Python.Available {
+		report.Runtime.Python = rtStatus.Python.Path
+		if rtStatus.Python.Source == "uv" {
+			report.Runtime.Python += " (via uv)"
+		}
+	} else {
+		report.Runtime.Python = "not found"
+	}
+	if rtStatus.Node.Available {
+		report.Runtime.Node = rtStatus.Node.Path
+	} else {
+		report.Runtime.Node = "not found"
+	}
+	if rtStatus.NPX.Available {
+		report.Runtime.NPX = rtStatus.NPX.Path
+	} else {
+		report.Runtime.NPX = "not found"
+	}
+
 	return report
 }
 
@@ -268,6 +305,12 @@ func RenderText(r Report) string {
 	fmt.Fprintf(&b, "  proxy_mode   %s\n", r.Network.ProxyMode)
 	fmt.Fprintf(&b, "  proxy        %s\n", r.Network.Proxy)
 	fmt.Fprintf(&b, "  no_proxy     %v\n", r.Network.NoProxy)
+
+	fmt.Fprintf(&b, "\nruntime\n")
+	fmt.Fprintf(&b, "  python       %s\n", r.Runtime.Python)
+	fmt.Fprintf(&b, "  uv           %s\n", r.Runtime.UV)
+	fmt.Fprintf(&b, "  node         %s\n", r.Runtime.Node)
+	fmt.Fprintf(&b, "  npx          %s\n", r.Runtime.NPX)
 
 	fmt.Fprintf(&b, "\npermissions\n")
 	fmt.Fprintf(&b, "  mode         %s\n", valueOr(r.Permission.Mode, "ask"))

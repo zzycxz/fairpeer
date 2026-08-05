@@ -40,6 +40,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/permission"
 	"github.com/zzycxz/fairpeer/internal/plugin"
 	"github.com/zzycxz/fairpeer/internal/provider"
+	runtimepkg "github.com/zzycxz/fairpeer/internal/runtime"
 	"github.com/zzycxz/fairpeer/internal/rag"
 	"github.com/zzycxz/fairpeer/internal/sandbox"
 	"github.com/zzycxz/fairpeer/internal/secret"
@@ -808,6 +809,22 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				Text: "codegraph: not installed — run `fairpeer codegraph install` to enable symbol-graph tools"})
 		}
 	}
+
+	// Runtime: if uv is not found, auto-download it in the background so the
+	// first Python-dependent feature (PPT, doc-convert, MCP, HE) doesn't fail.
+	// This is non-blocking — features that need Python will fall back to PATH
+	// lookup or error with a clear message until uv is ready.
+	if _, ok := runtimepkg.ResolveUV(); !ok {
+		go func() {
+			bgCtx := context.Background()
+			if err := runtimepkg.Install(bgCtx); err != nil {
+				slog.Debug("runtime: uv auto-download failed (non-fatal)", "error", err)
+			} else {
+				slog.Info("runtime: uv downloaded successfully — Python features will use it")
+			}
+		}()
+	}
+
 	eagerSpecs = append(eagerSpecs, opts.ExtraPlugins...)
 
 	// Deduplicate specs across all tiers by name. This prevents duplicated startup

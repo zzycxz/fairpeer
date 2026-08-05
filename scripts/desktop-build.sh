@@ -45,6 +45,43 @@ build_args=(-clean -platform "$PLATFORM" -ldflags "-X main.version=$VERSION -X m
 # Ubuntu 24.04+/Fedora 40+, while 4.1 ships from Ubuntu 22.04 onward.
 [ "$os" = linux ] && build_args+=(-tags webkit2_41)
 
+# Pre-download uv binary into the build's runtimes/ directory so the packaged
+# app can use Python features (PPT, doc-convert, MCP) without requiring the
+# user to install Python/uv manually. uv is ~15MB single-binary.
+UV_VERSION="0.5.11"
+RUNTIMES_DIR="$ROOT/desktop/build/bin/runtimes"
+mkdir -p "$RUNTIMES_DIR"
+case "$os" in
+windows) UV_ASSET="uv-x86_64-pc-windows-msvc.zip"; UV_BIN="uv.exe" ;;
+darwin)  UV_ASSET="uv-aarch64-apple-darwin.tar.gz"; UV_BIN="uv" ;;
+darwin-x86) UV_ASSET="uv-x86_64-apple-darwin.tar.gz"; UV_BIN="uv" ;;
+linux)   UV_ASSET="uv-x86_64-unknown-linux-gnu.tar.gz"; UV_BIN="uv" ;;
+esac
+if [ -n "$UV_ASSET" ] && [ ! -f "$RUNTIMES_DIR/$UV_BIN" ]; then
+	echo "==> downloading uv $UV_VERSION ($UV_ASSET)"
+	uv_url="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${UV_ASSET}"
+	tmp_uv=$(mktemp)
+	if curl -sSL "$uv_url" -o "$tmp_uv"; then
+		case "$UV_ASSET" in
+		*.zip)
+			tmpdir_uv=$(mktemp -d)
+			(cd "$tmpdir_uv" && unzip -q "$tmp_uv" && cp "$UV_BIN" "$RUNTIMES_DIR/$UV_BIN" 2>/dev/null || cp "*/$UV_BIN" "$RUNTIMES_DIR/$UV_BIN" 2>/dev/null || true)
+			rm -rf "$tmpdir_uv"
+			;;
+		*.tar.gz)
+			tmpdir_uv=$(mktemp -d)
+			(cd "$tmpdir_uv" && tar xzf "$tmp_uv" && cp "$UV_BIN" "$RUNTIMES_DIR/$UV_BIN" 2>/dev/null || cp "*/$UV_BIN" "$RUNTIMES_DIR/$UV_BIN" 2>/dev/null || true)
+			rm -rf "$tmpdir_uv"
+			;;
+		esac
+		chmod +x "$RUNTIMES_DIR/$UV_BIN" 2>/dev/null || true
+		echo "    uv bundled: $RUNTIMES_DIR/$UV_BIN"
+	else
+		echo "    uv download failed (non-fatal — app will auto-download on first use)"
+	fi
+	rm -f "$tmp_uv"
+fi
+
 echo "==> wails build ${build_args[*]}"
 wails build "${build_args[@]}"
 
