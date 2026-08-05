@@ -72,3 +72,22 @@ jobs:
           else
             wails build -platform ${{ matrix.goos }}/${{ matrix.goarch }} -clean -trimpath
           fi
+
+      - name: Determine Artifact Name
+        id: artifact_name
+        shell: bash
+        run: |
+          if [ "${{ matrix.goos }}" = "darwin" ] && [ "${{ matrix.goarch }}" = "amd64" ]; then
+            echo "name=macos-intel" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.goos }}" = "darwin" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
+            echo "name=macos-silicon" >> $GITHUB_OUTPUT
+          else
+            echo "name=${{ matrix.goos }}-${{ matrix.goarch }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fairpeer-${{ steps.artifact_name.outputs.name }}
+          path: |
+            desktop/build/bin/*
