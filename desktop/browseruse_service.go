@@ -21,6 +21,7 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/browseruse"
 	"github.com/zzycxz/fairpeer/internal/proc"
+	runtimepkg "github.com/zzycxz/fairpeer/internal/runtime"
 )
 
 const (
@@ -48,9 +49,13 @@ func NewBrowserUseService(pythonPath string, scriptPath string, port int) *Brows
 		port = defaultBrowserUsePort
 	}
 	if pythonPath == "" {
-		pythonPath = "python3"
-		if runtime.GOOS == "windows" {
-			pythonPath = "python"
+		if cmd, _, err := runtimepkg.ResolvePython(); err == nil {
+			pythonPath = cmd
+		} else {
+			pythonPath = "python3"
+			if runtime.GOOS == "windows" {
+				pythonPath = "python"
+			}
 		}
 	}
 	return &BrowserUseService{

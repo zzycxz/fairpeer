@@ -17,6 +17,7 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/proc"
 	"github.com/zzycxz/fairpeer/internal/rag"
+	runtimepkg "github.com/zzycxz/fairpeer/internal/runtime"
 )
 
 const (
@@ -44,9 +45,14 @@ func NewHEService(pythonPath string, scriptPath string, port int) *HEService {
 		port = defaultHEPort
 	}
 	if pythonPath == "" {
-		pythonPath = "python3"
-		if runtime.GOOS == "windows" {
-			pythonPath = "python"
+		// Use the unified runtime resolver (prefers uv if bundled).
+		if cmd, _, err := runtimepkg.ResolvePython(); err == nil {
+			pythonPath = cmd
+		} else {
+			pythonPath = "python3"
+			if runtime.GOOS == "windows" {
+				pythonPath = "python"
+			}
 		}
 	}
 	return &HEService{

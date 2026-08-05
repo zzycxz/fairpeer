@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,6 +21,8 @@ import (
 	"unicode/utf8"
 
 	pdflib "github.com/ledongthuc/pdf"
+
+	rt "github.com/zzycxz/fairpeer/internal/runtime"
 
 	"github.com/zzycxz/fairpeer/internal/docconv"
 	"github.com/zzycxz/fairpeer/internal/proc"
@@ -134,15 +135,16 @@ func readPDFWithOCR(path string) (string, error) {
 	if script == "" {
 		return "", fmt.Errorf("ocr_pdf.py not found")
 	}
-	python := "python"
-	if runtime.GOOS != "windows" {
-		python = "python3"
+	pyCmd, pyPrefix, _ := rt.ResolvePython()
+	if pyCmd == "" {
+		pyCmd = "python3"
 	}
+	args := append(append([]string{}, pyPrefix...), script, path)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, python, script, path)
+	cmd := exec.CommandContext(ctx, pyCmd, args...)
 	proc.HideWindow(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -15,6 +15,7 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/proc"
 	"github.com/zzycxz/fairpeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/runtime"
 )
 
 // maxFileRefBytes caps how much of an @-referenced file is injected into a
@@ -594,14 +595,15 @@ func extractPDFTextDefault(path string) (pdfExtractResult, error) {
 			firstErr = err
 		}
 	}
-	python, err := findPython()
+	python, pyPrefix, err := runtime.ResolvePython()
 	if err != nil {
 		if firstErr != nil {
 			return pdfExtractResult{}, fmt.Errorf("pdftotext failed (%v), and Python PDF libraries are not available", firstErr)
 		}
 		return pdfExtractResult{}, fmt.Errorf("pdftotext and Python PDF libraries are not available")
 	}
-	text, truncated, err := runPDFTextCommand(python, []string{"-c", pythonPDFExtractScript, path})
+	pyArgs := append(append([]string{}, pyPrefix...), "-c", pythonPDFExtractScript, path)
+	text, truncated, err := runPDFTextCommand(python, pyArgs)
 	if err != nil {
 		if firstErr != nil {
 			return pdfExtractResult{}, fmt.Errorf("pdftotext failed (%v), Python PDF extraction failed (%w)", firstErr, err)
@@ -609,15 +611,6 @@ func extractPDFTextDefault(path string) (pdfExtractResult, error) {
 		return pdfExtractResult{}, err
 	}
 	return pdfExtractResult{text: text, tool: "Python PDF library", truncated: truncated}, nil
-}
-
-func findPython() (string, error) {
-	for _, name := range []string{"python3", "python", "py"} {
-		if p, err := exec.LookPath(name); err == nil {
-			return p, nil
-		}
-	}
-	return "", fmt.Errorf("python not found")
 }
 
 func runPDFTextCommand(name string, args []string) (string, bool, error) {

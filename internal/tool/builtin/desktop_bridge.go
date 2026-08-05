@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	rt "github.com/zzycxz/fairpeer/internal/runtime"
 )
 
 // desktop_bridge.go — Unified Python bridge for all desktop interactions.
@@ -35,7 +37,10 @@ var (
 // DesktopBridgeAvailable and callDesktopBridge.
 func initBridge() {
 	bridgeOnce.Do(func() {
-		bridgePython = findPython()
+		// Use runtime.ResolvePython for unified uv/PATH resolution.
+		if cmd, _, err := rt.ResolvePython(); err == nil {
+			bridgePython = cmd
+		}
 		bridgeScript = findBridgeScript()
 		bridgeReady = bridgePython != "" && bridgeScript != ""
 		fmt.Printf("[bridge] python=%q script=%q ready=%v\n", bridgePython, bridgeScript, bridgeReady)
@@ -147,23 +152,6 @@ func exeDir(exe string) string {
 
 func filepathJoin(parts ...string) string {
 	return strings.Join(parts, string(os.PathSeparator))
-}
-
-// findPython returns the first Python executable on PATH, or "" if none is
-// installed. Windows tries "python" first (the official installer's launcher);
-// other platforms prefer "python3". Returns "" — not an error — so initBridge
-// can simply compare against the empty string.
-func findPython() string {
-	names := []string{"python3", "python", "py"}
-	if runtime.GOOS == "windows" {
-		names = []string{"python", "py", "python3"}
-	}
-	for _, name := range names {
-		if p, err := exec.LookPath(name); err == nil {
-			return p
-		}
-	}
-	return ""
 }
 
 // fileExists reports whether path names an existing regular file. Used by

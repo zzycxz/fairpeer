@@ -17,10 +17,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/proc"
+	"github.com/zzycxz/fairpeer/internal/runtime"
 )
 
 // Result is the JSON shape emitted by doc_converter.py (and ocr_pdf.py).
@@ -66,13 +66,16 @@ func ScriptCandidates(name string) []string {
 	return candidates
 }
 
-// pythonExe returns the Python executable name for the current platform:
-// "python" on Windows, "python3" elsewhere. Matches the prior per-package logic.
-func pythonExe() string {
-	if runtime.GOOS == "windows" {
-		return "python"
+// pythonExe returns the Python command and optional prefix args (for uv: "uv",
+// ["run","python"]). Prefers uv (handles deps + venv isolation); falls back to
+// a direct python3/python on PATH.
+func pythonExe() (string, []string) {
+	cmd, prefix, err := runtime.ResolvePython()
+	if err != nil {
+		// Fallback: keep the old behavior so we never hard-fail at import time.
+		return "python3", nil
 	}
-	return "python3"
+	return cmd, prefix
 }
 
 // ConvertFile runs the given Python script against `path`, capturing its JSON
@@ -93,7 +96,9 @@ func ConvertFile(scriptPath, path string, timeout time.Duration) (Result, error)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, pythonExe(), scriptPath, path)
+	pyCmd, pyPrefix := pythonExe()
+	args := append(append([]string{}, pyPrefix...), scriptPath, path)
+	cmd := exec.CommandContext(ctx, pyCmd, args...)
 	proc.HideWindow(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

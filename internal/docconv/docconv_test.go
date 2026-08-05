@@ -19,14 +19,15 @@ func TestFindScriptMissingReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestPythonExePlatform verifies the python name matches the platform convention.
+// TestPythonExePlatform verifies pythonExe returns a usable command (either a
+// direct python path or "uv" with prefix args).
 func TestPythonExePlatform(t *testing.T) {
-	got := pythonExe()
-	want := "python3"
-	// runtime.GOOS check mirrors pythonExe's own logic; we can't import runtime
-	// in a deterministic cross-platform way, so just assert it's one of the two.
-	if got != "python" && got != "python3" {
-		t.Fatalf("pythonExe() = %q, want python or python3", got)
+	cmd, prefix := pythonExe()
+	if cmd == "" {
+		t.Fatal("pythonExe() returned empty command")
 	}
-	_ = want
+	// When using uv, prefix is ["run","python"]; otherwise prefix is nil.
+	if len(prefix) > 0 && prefix[0] != "run" {
+		t.Errorf("uv prefix should start with 'run', got %v", prefix)
+	}
 }
