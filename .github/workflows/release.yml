@@ -42,6 +42,7 @@ jobs:
         working-directory: desktop
         env:
           MINISIGN_PRIVATE_KEY: ${{ secrets.MINISIGN_PRIVATE_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           # Parse version from tag
