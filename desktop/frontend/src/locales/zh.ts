@@ -157,6 +157,7 @@ export const zh: Record<DictKey, string> = {
 
   // MCP 与技能抽屉
   "caps.title": "MCP 与技能",
+    "caps.mcpCuratedTitle": "官方精选 MCP Servers",
   "caps.loading": "加载中…",
   "caps.summary": "{connected} 个已连接 · {failed} 个异常 · {skills} 个技能",
   "caps.mcpSummary": "{connected} 个已连接 · {failed} 个异常 · {tools} 个工具",

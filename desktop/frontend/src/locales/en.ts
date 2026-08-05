@@ -156,6 +156,7 @@ export const en = {
 
   // mcp & skills drawer
   "caps.title": "MCP & Skills",
+  "caps.mcpCuratedTitle": "Official curated MCP Servers",
   "caps.loading": "Loading…",
   "caps.summary": "{connected} connected · {failed} issues · {skills} skills",
   "caps.mcpSummary": "{connected} connected · {failed} issues · {tools} tools",
