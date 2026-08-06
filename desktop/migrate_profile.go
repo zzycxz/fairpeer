@@ -708,6 +708,13 @@ func rewriteTabSessionPaths(userDir string) {
 // a real topic/session — so it survives the next prune. Best-effort: errors are
 // logged and swallowed.
 func pruneGhostProjects() {
+	// Clean up orphan .meta sidecar files (no corresponding .jsonl). These
+	// accumulate when a tab is created (writes .meta via saveTabSessionMeta)
+	// but the user never sends a message (Session.Save never fires, so .jsonl
+	// is never created). They don't appear in ListSessions (which only reads
+	// .jsonl), but they clutter the disk and confuse manual inspection.
+	pruneOrphanMetaFiles()
+
 	for _, profileKey := range []string{config.ProfileDev, config.ProfileCowork} {
 		f := loadProjectsFile(profileKey)
 		if len(f.Projects) == 0 {
@@ -763,4 +770,33 @@ func projectHasSessionsInProfile(workspaceRoot, profileKey string) bool {
 		}
 	}
 	return false
+}
+
+// pruneOrphanMetaFiles removes .jsonl.meta sidecar files that have no
+// corresponding .jsonl session file. These orphans accumulate when a tab is
+// created (saveTabSessionMeta writes the .meta) but the user never sends a
+// message (Session.Save never creates the .jsonl). Safe to delete — they carry
+// no data, just an empty sidecar.
+func pruneOrphanMetaFiles() {
+	base := desktopConfigDir()
+	if base == "" {
+		return
+	}
+	// Walk all session directories under the config dir.
+	filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		// Only look at .meta files (sidecars for .jsonl sessions).
+		if !strings.HasSuffix(path, ".jsonl.meta") {
+			return nil
+		}
+		// The corresponding .jsonl is the path without the ".meta" suffix.
+		jsonlPath := strings.TrimSuffix(path, ".meta")
+		if _, err := os.Stat(jsonlPath); os.IsNotExist(err) {
+			// Orphan: .meta exists but .jsonl doesn't. Remove it.
+			os.Remove(path)
+		}
+		return nil
+	})
 }
