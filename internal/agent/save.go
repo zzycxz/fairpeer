@@ -112,12 +112,8 @@ func (s *Session) cachePreviewInMeta(path string) {
 // snapshot (under the session lock) instead of re-decoding the .jsonl. Returns
 // the number of user-role messages and a truncated first-user-message preview.
 func countTurnsAndPreview(msgs []provider.Message) (turns int, preview string) {
-	hasAssistant := false
 	for _, m := range msgs {
 		if m.Role != provider.RoleUser {
-			if m.Role == provider.RoleAssistant {
-				hasAssistant = true
-			}
 			continue
 		}
 		turns++
@@ -128,13 +124,6 @@ func countTurnsAndPreview(msgs []provider.Message) (turns int, preview string) {
 			}
 			preview = s
 		}
-	}
-	// A session with user messages but no assistant response is an incomplete
-	// conversation (the user sent something but the model never replied —
-	// likely the tab was closed/switched before the turn finished). Treat it
-	// as turns=0 so ListSessions skips it.
-	if turns > 0 && !hasAssistant {
-		turns = 0
 	}
 	return turns, preview
 }
@@ -291,7 +280,6 @@ func previewSession(path string) (string, int) {
 	dec := json.NewDecoder(f)
 	first := ""
 	turns := 0
-	hasAssistant := false
 	for {
 		var m provider.Message
 		if err := dec.Decode(&m); err != nil {
@@ -306,15 +294,7 @@ func previewSession(path string) (string, int) {
 				}
 				first = s
 			}
-		} else if m.Role == provider.RoleAssistant {
-			hasAssistant = true
 		}
-	}
-	// Skip incomplete conversations: user sent a message but the model never
-	// replied (tab closed/switched mid-turn). Treat as turns=0 so ListSessions
-	// filters it out.
-	if turns > 0 && !hasAssistant {
-		turns = 0
 	}
 	return first, turns
 }
