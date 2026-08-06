@@ -46,7 +46,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.26'
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -62,7 +62,15 @@ jobs:
 
       - name: Build Wails App
         working-directory: desktop
-        run: wails build -platform ${{ matrix.platform }} -webview2 embed
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            wails build -platform ${{ matrix.platform }} -clean -trimpath -webview2 embed -nsis
+          elif [ "${{ runner.os }}" = "Linux" ]; then
+            wails build -platform ${{ matrix.platform }} -clean -trimpath -tags webkit2_41
+          else
+            wails build -platform ${{ matrix.platform }} -clean -trimpath
+          fi
 
       - name: Package Artifact
         working-directory: desktop/build/bin
@@ -70,8 +78,12 @@ jobs:
         run: |
           PLAT_NAME=$(echo "${{ matrix.platform }}" | tr '/' '-')
           if [ "${{ runner.os }}" = "Windows" ]; then
-            # Windows already produces an .exe
-            mv fairpeer.exe fairpeer-${PLAT_NAME}.exe
+            if ls *-installer.exe 1> /dev/null 2>&1; then
+              mv *-installer.exe fairpeer-${PLAT_NAME}.exe
+              rm -f fairpeer.exe
+            else
+              mv fairpeer.exe fairpeer-${PLAT_NAME}.exe
+            fi
           elif [ "${{ runner.os }}" = "macOS" ]; then
             # Compress .app to tar.gz to preserve permissions
             tar -czf fairpeer-${PLAT_NAME}.tar.gz fairpeer.app
@@ -99,7 +111,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.26'
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4

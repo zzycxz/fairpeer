@@ -56,6 +56,14 @@ if (typeof window !== "undefined" && window.runtime) {
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");
 
+// Remove the HTML splash screen once React mounts
+const splash = document.getElementById("splash");
+if (splash) {
+  splash.style.transition = "opacity 0.3s ease-out";
+  splash.style.opacity = "0";
+  setTimeout(() => splash.remove(), 300);
+}
+
 createRoot(root).render(
   <StrictMode>
     <ErrorBoundary>
