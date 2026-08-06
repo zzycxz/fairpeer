@@ -107,7 +107,7 @@
     "cover_count": 1,
     "ending_count": 1
   },
-  "template": "内置:templates/通用商务模板.pptx",
+  "template": "内置:templates/default.pptx",
   "template_override": null,
   "template_usage": {
     "apply_to": {
