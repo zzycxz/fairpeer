@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — 2026-08-05
+## [0.1.1] — 2026-08-06
 
 The first major feature release after the v0.1.0 brand migration (momapeer →
 fairpeer). This version transforms fairpeer from a provider-agnostic coding
@@ -157,6 +157,64 @@ All new features in this release adhere to two hard constraints:
   before any third-party skill enters the install pipeline
 - **SSRF guard**: install_source already guards against cloud metadata / internal
   services; now all marketplace fetches go through the same guarded httpClient
+
+### Added — Cross-Platform Desktop Automation
+
+桌面自动化（screen_click / screen_type / screen_key / screen_scroll / screen_perceive）从
+Windows-only 扩展到三平台（Windows / macOS / Linux）全部可用。
+
+- **跨平台点击/输入/快捷键/滚动** — macOS 通过 `cliclick`、Linux 通过 `xdotool` 实现底层
+  输入；`parseKeyCombo` 从 Windows VK code 重构为平台无关的 key-name 字符串，各平台自行翻译
+- **screen_perceive macOS/Linux** — VLM-only 路径（截图 → 视觉模型 → JSON 坐标），不需要 UIA
+  元素树；Windows 仍保留 UIA+VLM 融合路径
+- **screenAttachmentsDir 修复** — 从 windows-only 文件移到平台无关文件，解除 macOS/Linux
+  编译阻塞（影响 10 个下游包）
+- **三平台 `go build ./...` 全绿**（Windows/Linux/macOS 交叉编译验证通过）
+- browser 工具链确认为原生跨平台（chromedp CDP 协议，三平台统一，无需改动）
+
+### Added — Dynamic Model Registry (models.dev)
+
+从硬编码 Go 静态表升级为动态模型注册表，模型/URL 更新不再需要改代码发版。
+
+- **embed JSON 快照**（`default_registry.json`）— 11 厂商数据编译时内嵌，离线兜底
+- **models.dev 远程同步** — 启动时异步拉取 `models.dev/api.json`，过滤 11 家 tracked vendors，
+  合并远程数据（URL/模型/上下文）与快照角色字段（DisplayName/推荐角色）
+- **本地缓存 12h TTL**（`~/.fairpeer/registry-cache.json`）
+- **四层兜底**：内存 → 本地缓存 → models.dev → embed 快照（永不失败）
+- **设置面板"检查更新"按钮** — RegistryBox 显示最后更新时间，手动触发刷新
+
+### Added — Multi-Vendor Onboarding
+
+首次启动向导从单 API key 输入框重写为三步向导。
+
+- **Step 1 选厂商** — 下拉框（11 家直连厂商，透明背景 + 悬浮高亮）
+- **Step 2 填 key** — ProbeVendorKey 探测选中厂商端点 + 获取 key 链接
+- **Step 3 选模型** — 预置模型列表（带 default/vision/fast 角色标注），SetupProvider 一次性
+  完成 key 写入 + provider 配置 + 设为默认
+
+### Added — Web Search
+
+- **AnySearch 第 4 级搜索引擎** — 降级链 Brave → Exa → Linkup → AnySearch
+- **搜索缓存** — 内存 map（10min TTL），原 SQLite 方案因 CGO 依赖改为纯 Go 内存
+
+### Changed
+
+- **厂商数据官方文档核实** — 11 家厂商 model ID / base_url 全部对照官方 API 文档确认
+  （通义 qwen3.8-max、DeepSeek deepseek-v4-pro、智谱 glm-5.2、MiniMax MiniMax-M3、讯飞
+  maas-token-api 端点 + xopglm52 模型 ID 等）
+- **聚合平台移除** — v0.1.0 只保留 11 家直连厂商，7 个 Coding Plan 聚合平台后续再加
+- **邮箱示例更新** — SMTP/IMAP 占位符从 139/chinamobile 改为 QQ/126
+- **PPT SKILL.md 精简** — 441→196 行（-55%）；新增 todo 管理规则（解决子代理 readiness
+  死锁根因）；动画参数抽到 `references/animations.md`；默认无动画无过渡
+
+### Fixed
+
+- **PPT 子代理卡死** — 根因：子代理 todo_write 项未全部标 completed → finalReadinessCheck
+  阻止输出 → 3 次重试后报错。修复：SKILL.md 增加 todo 管理规范（每步完成即标记、最终答案前
+  确认无 in_progress 项）
+- **search_cache.go CGO 依赖** — SQLite + go-sqlite3 导致非 CGO 环境编译失败；改为内存 map
+- **screenAttachmentsDir 跨平台** — 平台无关函数被放在 windows-only 文件里，阻塞 mac/linux
+  编译；移到 screen_tools.go
 
 ---
 

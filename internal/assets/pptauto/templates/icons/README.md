@@ -19,7 +19,7 @@ This directory provides **11,600+ high-quality SVG icons** across five libraries
 This directory is the **global library**. At selection time the Strategist copies the chosen icons into the deck's own `<project>/icons/<lib>/` with `icon_sync.py`:
 
 ```bash
-python3 skills/ppt-master/scripts/icon_sync.py <project_path> chunk-filled/home tabler-outline/bulb
+python3 skills/ppt-auto/scripts/icon_sync.py <project_path> chunk-filled/home tabler-outline/bulb
 ```
 
 A name the library does not have is reported and the command exits non-zero — re-pick a real one then, not at export. `finalize_svg.py embed-icons` embeds **project-first** (from `<project>/icons/`), falling back to this global library per-icon.
@@ -66,11 +66,11 @@ python3 scripts/svg_finalize/embed_icons.py svg_output/*.svg
 Use `ls | grep` — zero token cost:
 
 ```bash
-ls skills/ppt-master/templates/icons/chunk-filled/ | grep home
-ls skills/ppt-master/templates/icons/tabler-filled/ | grep home
-ls skills/ppt-master/templates/icons/tabler-outline/ | grep chart
-ls skills/ppt-master/templates/icons/phosphor-duotone/ | grep house
-ls skills/ppt-master/templates/icons/simple-icons/ | grep github
+ls skills/ppt-auto/templates/icons/chunk-filled/ | grep home
+ls skills/ppt-auto/templates/icons/tabler-filled/ | grep home
+ls skills/ppt-auto/templates/icons/tabler-outline/ | grep chart
+ls skills/ppt-auto/templates/icons/phosphor-duotone/ | grep house
+ls skills/ppt-auto/templates/icons/simple-icons/ | grep github
 ```
 
 ---

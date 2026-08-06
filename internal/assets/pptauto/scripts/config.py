@@ -51,7 +51,7 @@ CHART_TEMPLATES_DIR = TEMPLATES_DIR / 'charts'
 # Environment Configuration
 # ============================================================
 
-USER_CONFIG_DIR = Path.home() / '.ppt-master'
+USER_CONFIG_DIR = Path.home() / '.fairpeer'
 USER_ENV_FILE = USER_CONFIG_DIR / '.env'
 
 

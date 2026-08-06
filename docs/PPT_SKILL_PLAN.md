@@ -1,7 +1,7 @@
 ﻿# PPT Skill 瀹炴柦鏂规
 
 ## 涓€銆佺洰鏍?
-灏?PPT 鐢熸垚鑳藉姏灏佽涓?fairpeer 鐨勭嫭绔?skill 瀹夎鍖呫€傜敤鎴烽€氳繃鑷劧璇█鎸囦护鍗冲彲鐢熸垚涓撲笟 PPT锛屼笉渚濊禆瀹屾暣 ppt-master 椤圭洰銆?
+灏?PPT 鐢熸垚鑳藉姏灏佽涓?fairpeer 鐨勭嫭绔?skill 瀹夎鍖呫€傜敤鎴烽€氳繃鑷劧璇█鎸囦护鍗冲彲鐢熸垚涓撲笟 PPT锛屼笉渚濊禆瀹屾暣 ppt-auto 椤圭洰銆?
 ## 浜屻€佹灦鏋?
 ```
 鐢ㄦ埛锛?鍋氫竴涓崕涓烘櫤绠椾腑蹇冪殑PPT"
@@ -19,7 +19,7 @@ fairpeer/skills/ppt-auto/
 鈹溾攢鈹€ template_config.json        # 榛樿璁捐绾︽潫锛堢敤鎴峰彲缂栬緫锛?鈹溾攢鈹€ templates/
 鈹?  鈹斺攢鈹€ 涓浗绉诲姩妯℃澘.pptx        # 榛樿妯℃澘锛堟墦鍖呭唴缃級
 鈹溾攢鈹€ scripts/
-鈹?  鈹溾攢鈹€ analyze_template.py     # 妯℃澘鍒嗘瀽锛圥owerPoint + WPS锛?鈹?  鈹斺攢鈹€ svg_to_pptx.py          # SVG 杞?PPTX锛堜粠 ppt-master 鎻愬彇锛?鈹斺攢鈹€ README.md                   # 浣跨敤璇存槑
+鈹?  鈹溾攢鈹€ analyze_template.py     # 妯℃澘鍒嗘瀽锛圥owerPoint + WPS锛?鈹?  鈹斺攢鈹€ svg_to_pptx.py          # SVG 杞?PPTX锛堜粠 ppt-auto 鎻愬彇锛?鈹斺攢鈹€ README.md                   # 浣跨敤璇存槑
 ```
 
 ## 鍥涖€佸悇鏂囦欢璁捐
@@ -78,11 +78,11 @@ COM 鎺ュ彛锛?- PowerPoint: `comtypes.client.CreateObject("PowerPoint.Applica
 - WPS: `comtypes.client.CreateObject("KWPS.Application")` 鎴?`comtypes.client.CreateObject("PowerPoint.Application")`锛圵PS 鍏煎妯″紡锛?
 ### 4.4 svg_to_pptx.py
 
-**浠?ppt-master 鎻愬彇鐨勬牳蹇冭浆鎹㈣剼鏈?*銆?
+**浠?ppt-auto 鎻愬彇鐨勬牳蹇冭浆鎹㈣剼鏈?*銆?
 闇€瑕佹彁鍙栫殑鏂囦欢锛?- `svg_to_pptx.py`锛堝叆鍙ｏ級
 - `svg_to_pptx/` 鐩綍锛坉rawingml_converter銆乸ptx_builder 绛夛級
 
-鍙彁鍙栬浆鎹㈢浉鍏崇殑浠ｇ爜锛屼笉鍖呭惈 ppt-master 鐨勬ā鏉跨郴缁熴€佺‘璁?UI銆佸浘鐗囩敓鎴愮瓑銆?
+鍙彁鍙栬浆鎹㈢浉鍏崇殑浠ｇ爜锛屼笉鍖呭惈 ppt-auto 鐨勬ā鏉跨郴缁熴€佺‘璁?UI銆佸浘鐗囩敓鎴愮瓑銆?
 ### 4.5 榛樿妯℃澘
 
 `templates/涓浗绉诲姩妯℃澘.pptx` 鎵撳寘鍐呯疆銆傜敤鎴峰湪 `template_config.json` 涓缃?`template_override` 涓烘湰鍦拌矾寰勫悗锛岄粯璁ゆā鏉垮け鏁堛€?
@@ -100,7 +100,7 @@ COM 鎺ュ彛锛?- PowerPoint: `comtypes.client.CreateObject("PowerPoint.Applica
 妯″瀷鐞嗚В鎰忓浘锛屼笉闇€瑕佺敤鎴峰啓 JSON銆?
 ## 鍏€佸疄鏂芥楠?
 ### Phase 1锛氭墦鍖?skill 鉁?
-- [x] 鎻愬彇 `svg_to_pptx.py` 鍙婂叾渚濊禆锛堜粠 ppt-master锛?- [x] 鎻愬彇 `svg_finalize` 妯″潡锛坰vg_to_pptx 渚濊禆锛?- [x] 鏇存柊 `analyze_template.py` 鏀寔 WPS
+- [x] 鎻愬彇 `svg_to_pptx.py` 鍙婂叾渚濊禆锛堜粠 ppt-auto锛?- [x] 鎻愬彇 `svg_finalize` 妯″潡锛坰vg_to_pptx 渚濊禆锛?- [x] 鏇存柊 `analyze_template.py` 鏀寔 WPS
 - [x] 绮剧畝 `template_config.json`锛堟渶灏忕害鏉燂級
 - [x] 瀹屽杽 `SKILL.md`锛堝伐浣滄祦鎸囧紩 + SVG 娉ㄦ剰浜嬮」锛?- [x] 鍐呯疆 `涓浗绉诲姩妯℃澘.pptx`
 - [x] 缂栧啓 `README.md`
@@ -126,7 +126,7 @@ COM 鎺ュ彛锛?- PowerPoint: `comtypes.client.CreateObject("PowerPoint.Applica
 渚濊禆娓呭崟锛歱ython-pptx 1.0.2銆乧omtypes銆乴xml銆丳IL/Pillow
 
 ## 涔濄€佷笉鍋氱殑浜?
-1. **涓嶆墦鍖呭畬鏁?ppt-master**鈥斺€斿彧鎻愬彇 svg_to_pptx + svg_finalize 杞崲妯″潡
+1. **涓嶆墦鍖呭畬鏁?ppt-auto**鈥斺€斿彧鎻愬彇 svg_to_pptx + svg_finalize 杞崲妯″潡
 2. **涓嶅湪浠ｇ爜涓‖缂栫爜甯冨眬绾︽潫**鈥斺€旂害鏉熷湪閰嶇疆鏂囦欢涓紝鐢ㄦ埛鍙敼
 3. **涓嶆牎楠屾ā鍨嬭緭鍑?*鈥斺€旀ā鍨嬫槸璁捐甯堬紝鑷繁璐熻矗璐ㄩ噺
 4. **涓嶇粦瀹氱壒瀹氭ā鍨?*鈥斺€攕kill 閫傜敤浜庝换浣曡兘鐢熸垚 SVG 鐨勬ā鍨?5. **涓嶈姹傜敤鎴峰畨瑁?Python**鈥斺€斿叏閮ㄥ唴缃湪 skill 鍖呬腑
