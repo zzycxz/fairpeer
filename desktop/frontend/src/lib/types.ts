@@ -282,11 +282,13 @@ export interface SessionMeta {
   deletedAt?: number; // unix milliseconds, present for trashed sessions
   current: boolean;
   open: boolean;
-  scope?: string;       // "project" | "global"; empty for legacy → treated as "global"
+  scope?: string;       // "project" | "global" | "expert"; empty for legacy → treated as "global"
   workspaceRoot?: string;
   topicId?: string;
   topicTitle?: string;
   profile?: string;
+  isExpert?: boolean; // true = expert-team collaboration session (scope="expert")
+  expertTeamId?: string; // identifies the expert team for expert sessions
 }
 
 // SessionReference is a session selected via @ past:chats for context injection.

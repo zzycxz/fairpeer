@@ -3466,6 +3466,12 @@ func saveTabSessionMeta(tab *WorkspaceTab, path string) error {
 	m.WorkspaceRoot = tab.WorkspaceRoot
 	m.TopicID = tab.TopicID
 	m.TopicTitle = tab.TopicTitle
+	if tab.IsExpertSession {
+		m.ExpertTeamID = strings.TrimSpace(tab.ExpertTeamID)
+	} else if m.Scope != "expert" {
+		// Clear a stale team id if a session file is reused by a non-expert tab.
+		m.ExpertTeamID = ""
+	}
 	return agent.SaveBranchMetaPreserveUpdated(path, m)
 }
 

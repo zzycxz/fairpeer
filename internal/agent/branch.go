@@ -27,6 +27,10 @@ type BranchMeta struct {
 	WorkspaceRoot    string    `json:"workspace_root,omitempty"`
 	TopicID          string    `json:"topic_id,omitempty"`
 	TopicTitle       string    `json:"topic_title,omitempty"`
+	// ExpertTeamID identifies the expert team a scope="expert" session belongs
+	// to. Empty for normal (global/project) sessions. Lets ListSessions tag the
+	// session as an expert-team collaboration so the frontend can group it.
+	ExpertTeamID string `json:"expert_team_id,omitempty"`
 	// Profile records the product mode ("dev"|"cowork") this session was created
 	// under. Empty (on legacy sidecars) is treated as "dev". It lets findTopic*
 	// scope its scan so a dev session is never matched as a cowork one and vice
@@ -57,6 +61,8 @@ func (m BranchMeta) DefaultScope() string {
 	switch m.Scope {
 	case "project":
 		return "project"
+	case "expert":
+		return "expert"
 	default:
 		return "global"
 	}

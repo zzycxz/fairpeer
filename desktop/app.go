@@ -1610,6 +1610,12 @@ type SessionMeta struct {
 	TopicID        string `json:"topicId,omitempty"`
 	TopicTitle     string `json:"topicTitle,omitempty"`
 	Profile        string `json:"profile,omitempty"`
+	// IsExpert is true for expert-team collaboration sessions (scope="expert").
+	// The frontend uses it to group expert sessions separately in the panel.
+	IsExpert bool `json:"isExpert,omitempty"`
+	// ExpertTeamID identifies the expert team for an expert session; empty for
+	// normal sessions. Pairs with IsExpert so the panel can group by team.
+	ExpertTeamID string `json:"expertTeamId,omitempty"`
 }
 
 type WorkspaceMeta struct {
@@ -1657,20 +1663,44 @@ func (a *App) activeSessionDir() string {
 // ListSessions returns the saved sessions newest-first for the history panel,
 // marking the one the current conversation is writing to and attaching any
 // user-chosen titles.
+//
+// It scans every known session directory (global + every project + every tab's
+// controller dir), not just the active tab's, so a session created in one
+// project's tab still shows up in the panel while another tab is active.
+// Directories returned by knownSessionDirs may overlap (the same dir added via
+// different paths), so entries are deduped by session file path.
 func (a *App) ListSessions() []SessionMeta {
-	dir := a.activeSessionDir()
-	infos, err := agent.ListSessions(dir)
-	if err != nil {
-		return []SessionMeta{}
+	out := []SessionMeta{}
+	seen := map[string]bool{} // dedupe by session file path; same dir can be listed more than once
+	// The "current"/"open" markers are per-directory: a session is only current
+	// relative to the dir its tab writes to, so resolve them once per dir.
+	activeDir := a.activeSessionDir()
+	activePath := a.activeSessionPath(activeDir)
+	for _, dir := range a.knownSessionDirs() {
+		infos, err := agent.ListSessions(dir)
+		if err != nil {
+			continue
+		}
+		titles := loadSessionTitles(dir)
+		open := a.openSessionPaths(dir)
+		for _, s := range infos {
+			if seen[s.Path] {
+				continue
+			}
+			seen[s.Path] = true
+			_, isOpen := open[s.Path]
+			meta := sessionMetaFromInfo(s, titles[filepath.Base(s.Path)], s.Path == activePath, isOpen, 0)
+			out = append(out, meta)
+		}
 	}
-	titles := loadSessionTitles(dir)
-	open := a.openSessionPaths(dir)
-	active := a.activeSessionPath(dir)
-	out := make([]SessionMeta, 0, len(infos))
-	for _, s := range infos {
-		_, isOpen := open[s.Path]
-		out = append(out, sessionMetaFromInfo(s, titles[filepath.Base(s.Path)], s.Path == active, isOpen, 0))
-	}
+	// Newest activity first. knownSessionDirs already orders dirs somewhat, but
+	// a flat sort gives a stable recency order across all dirs.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].LastActivityAt == out[j].LastActivityAt {
+			return out[i].Path < out[j].Path
+		}
+		return out[i].LastActivityAt > out[j].LastActivityAt
+	})
 	return out
 }
 
@@ -1738,6 +1768,8 @@ func sessionMetaFromInfo(s agent.SessionInfo, title string, current, open bool, 
 		TopicID:        s.TopicID,
 		TopicTitle:     s.TopicTitle,
 		Profile:        s.Profile,
+		IsExpert:       s.Scope == "expert",
+		ExpertTeamID:   s.ExpertTeamID,
 	}
 }
 
