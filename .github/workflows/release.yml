@@ -65,11 +65,11 @@ jobs:
         shell: bash
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
-            wails build -platform ${{ matrix.platform }} -clean -trimpath -webview2 embed -nsis
+            wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-X main.version=${{ github.ref_name }}" -webview2 embed -nsis
           elif [ "${{ runner.os }}" = "Linux" ]; then
-            wails build -platform ${{ matrix.platform }} -clean -trimpath -tags webkit2_41
+            wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-X main.version=${{ github.ref_name }}" -tags webkit2_41
           else
-            wails build -platform ${{ matrix.platform }} -clean -trimpath
+            wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-X main.version=${{ github.ref_name }}"
           fi
 
       - name: Package Artifact
