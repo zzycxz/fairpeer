@@ -53,19 +53,24 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, web_sea
 ls <skill_dir>/templates/*.pptx
 ```
 
-- **有且仅有 1 个模板**（如"中国移动模板.pptx"）→ 直接使用，记录路径
-- **有多个模板** → 询问用户"检测到以下模板：xxx、yyy，使用哪个？"，或根据主题自动选择最匹配的
-- **没有模板**（只有 default.pptx）→ 不使用模板背景（白底），使用默认深色配色
+- **有且仅有 1 个模板** → 直接使用，记录路径
+- **有多个模板** → 询问用户"检测到以下模板：xxx、yyy，使用哪个？"
+- **没有模板**（只有 default.pptx）→ 无模板模式：SVG 自己画背景色
 
-**如果有模板，必须先提取配色**：
+**如果有模板，先提取配色**：
 
 ```bash
 python3 <skill_dir>/scripts/extract_template_colors.py <template.pptx> <skill_dir>/template_config.json
 ```
 
-这会从模板的 slide master/layout 中提取颜色方案（主题色、背景色、强调色），自动更新 `template_config.json` 的 `colors` 段。后续 SVG 生成使用模板配色，确保视觉风格一致。
+这会从模板提取颜色方案，更新 `template_config.json`。
 
-**记录模板路径**，后续 Step 12 转换时必须传给 `svg_to_pptx.py --template`。
+**⚠️ SVG 背景规则（极其重要）**：
+
+- **有模板时**：SVG **不画背景矩形**——背景由模板的 slide master 提供（通过 `--template` 继承）。SVG 只画内容元素（文字、卡片、图表、线条），背景保持透明，让模板背景透出来。
+- **无模板时**：SVG 画一个全屏 `<rect width="1280" height="720" fill="#背景色"/>` 作为背景。
+
+这条规则直接影响 Step 5-8 的 SVG 生成。在生成 SVG 前必须确定是否有模板。
 
 ### Step 1: 提取源文档（如有）
 
