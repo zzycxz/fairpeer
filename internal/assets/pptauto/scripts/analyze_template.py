@@ -99,7 +99,8 @@ def write_dynamic_style(bg_cover, bg_content, project_dir):
             "card_bg": "#ffffff",
             "text": "#1f2937",
             "text_muted": "#64748b",
-            "text_secondary": "#475569"
+            "text_secondary": "#475569",
+            "line": "#e5e7eb"
         })
         theme_style = "商务专业风格，现代简洁，留白充足"
     else:
@@ -108,7 +109,8 @@ def write_dynamic_style(bg_cover, bg_content, project_dir):
             "card_bg": "#1e1e1e",
             "text": "#ffffff",
             "text_muted": "#94a3b8",
-            "text_secondary": "#cbd5e1"
+            "text_secondary": "#cbd5e1",
+            "line": "#333333"
         })
         theme_style = "科技感，深色极客风格，信息密度高"
     
