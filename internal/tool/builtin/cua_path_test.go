@@ -63,53 +63,6 @@ func TestCallVLMProviderPath(t *testing.T) {
 	}
 }
 
-// TestParseKeyCombo covers the screen_key parser across the shapes the agent
-// actually sends: ctrl+s, ctrl+shift+t, lone enter, single letters with ctrl.
-// A wrong parse here = the wrong key gets pressed (e.g. ctrl+c instead of ctrl+s
-// → copy instead of save), so it's worth locking down.
-func TestParseKeyCombo(t *testing.T) {
-	cases := []struct {
-		in     string
-		hasMod bool
-		mainVK uint16
-	}{
-		{"ctrl+s", true, 'S'},
-		{"Control+S", true, 'S'},
-		{"ctrl+shift+t", true, 'T'},
-		{"ctrl-shift-tab", true, 0x09}, // tab
-		{"enter", false, 0x0D},
-		{"escape", false, 0x1B},
-		{"esc", false, 0x1B},
-		{"ctrl+a", true, 'A'},
-		{"f5", false, 0x74},
-		{"alt+tab", true, 0x09},
-		{"backspace", false, 0x08},
-		{"", false, 0}, // error path
-	}
-	for _, c := range cases {
-		mod, main, err := parseKeyCombo(c.in)
-		if c.in == "" {
-			if err == nil {
-				t.Errorf("parseKeyCombo(%q) want error, got mod=%v main=%d", c.in, mod, main)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("parseKeyCombo(%q) unexpected error: %v", c.in, err)
-			continue
-		}
-		if c.hasMod && mod == 0 {
-			t.Errorf("parseKeyCombo(%q) expected modifier, got mod=0", c.in)
-		}
-		if !c.hasMod && mod != 0 {
-			t.Errorf("parseKeyCombo(%q) unexpected modifier 0x%X", c.in, mod)
-		}
-		if main != c.mainVK {
-			t.Errorf("parseKeyCombo(%q) main VK = 0x%X, want 0x%X", c.in, main, c.mainVK)
-		}
-	}
-}
-
 // TestFocusWindowDoesNotPanic exercises the full focusWindow path — the one that
 // panicked in the field with "Failed to find GetCurrentThreadId procedure in
 // user32.dll". GetCurrentThreadId is a kernel32 export; we declare it there now.

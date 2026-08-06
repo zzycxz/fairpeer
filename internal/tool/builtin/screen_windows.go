@@ -119,21 +119,20 @@ type bitmapInfoHeader struct {
 	ClrImportant  uint32
 }
 
-// ScreenTools returns the desktop-automation tools, for registration under the
-// cowork profile. Windows-only; the non-Windows stub returns nil (see
-// screen_other.go) so the cowork tool list simply omits them on macOS/Linux.
-// Includes get_ui_tree (defined in uiauto_windows.go) which gives the VLM exact
-// window + child-control coordinates to cross-reference with a screenshot.
+// ScreenTools returns the Windows desktop-automation tools: the cross-platform
+// base set (screen_click/type/scroll/key from screen_tools.go) plus the
+// Windows-native perception tools — screenshot (Win32 BitBlt), get_ui_tree
+// (UIA), and screen_perceive (UIA + VLM fusion). On macOS/Linux the
+// non-Windows ScreenTools (screen_other.go) returns the base set plus its own
+// VLM-only perceive; this Windows build excludes that one.
 func ScreenTools() []tool.Tool {
-	return []tool.Tool{
+	tools := baseScreenTools()
+	tools = append(tools,
 		screenCapture{},
-		screenClick{},
-		screenType{},
-		screenScroll{},
-		screenKey{},
 		getUITreeEnhanced{},
 		screenPerceive{},
-	}
+	)
+	return tools
 }
 
 // --- screenshot -------------------------------------------------------------
@@ -198,152 +197,6 @@ func (screenCapture) Execute(ctx context.Context, args json.RawMessage) (string,
 		thumb = thumb[:4096] + "…"
 	}
 	return fmt.Sprintf("screenshot saved: %s (%dx%d)\nbase64 (first 4k): %s", path, img.Bounds().Dx(), img.Bounds().Dy(), thumb), nil
-}
-
-// --- screen_click -----------------------------------------------------------
-
-type screenClick struct{}
-
-func (screenClick) Name() string { return "screen_click" }
-
-func (screenClick) Description() string {
-	return "Click at screen coordinates (x, y). button is left (default)/right/middle; double sends a double-click. Coordinates are in physical screen pixels — get them from a screenshot analysis (image_understand) or get_ui_tree bounding boxes. Move + press + release is synthesized via SendInput, so it works on any window the cursor can reach."
-}
-
-func (screenClick) Schema() json.RawMessage {
-	return json.RawMessage(`{
-"type":"object",
-"properties":{
-  "x":{"type":"integer","description":"Screen X coordinate (pixels)"},
-  "y":{"type":"integer","description":"Screen Y coordinate (pixels)"},
-  "button":{"type":"string","enum":["left","right","middle"],"description":"Mouse button (default left)"},
-  "double":{"type":"boolean","description":"Double-click (default false)"}
-},
-"required":["x","y"]
-}`)
-}
-
-func (screenClick) ReadOnly() bool { return false }
-
-func (screenClick) Execute(ctx context.Context, args json.RawMessage) (string, error) {
-	var p struct {
-		X      int    `json:"x"`
-		Y      int    `json:"y"`
-		Button string `json:"button"`
-		Double bool   `json:"double"`
-	}
-	if err := json.Unmarshal(args, &p); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
-	}
-	if err := moveMouse(p.X, p.Y); err != nil {
-		return "", err
-	}
-	times := 1
-	if p.Double {
-		times = 2
-	}
-	for i := 0; i < times; i++ {
-		if err := clickMouse(p.Button); err != nil {
-			return "", err
-		}
-	}
-	return fmt.Sprintf("clicked (%d, %d)%s%s", p.X, p.Y, buttonLabel(p.Button), doubleLabel(p.Double)), nil
-}
-
-// --- screen_type ------------------------------------------------------------
-
-type screenType struct{}
-
-func (screenType) Name() string { return "screen_type" }
-
-func (screenType) Description() string {
-	return "Type text at the current cursor focus via synthesized keyboard input. The target element must already have focus (click it first with screen_click). Uses SendInput with per-character unicode key synthesis (KEYEVENTF_UNICODE), so it works in any focused field — native apps, browsers, Electron apps — regardless of keyboard layout, including non-ASCII characters. Optional press_enter sends Enter after typing."
-}
-
-func (screenType) Schema() json.RawMessage {
-	return json.RawMessage(`{
-"type":"object",
-"properties":{
-  "text":{"type":"string","description":"Text to type"},
-  "press_enter":{"type":"boolean","description":"Press Enter after typing (default false)"}
-},
-"required":["text"]
-}`)
-}
-
-func (screenType) ReadOnly() bool { return false }
-
-func (screenType) Execute(ctx context.Context, args json.RawMessage) (string, error) {
-	var p struct {
-		Text       string `json:"text"`
-		PressEnter bool   `json:"press_enter"`
-	}
-	if err := json.Unmarshal(args, &p); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
-	}
-	if err := typeText(p.Text); err != nil {
-		return "", err
-	}
-	if p.PressEnter {
-		if err := pressKey(0x0D /* VK_RETURN */); err != nil {
-			return "", err
-		}
-	}
-	suffix := ""
-	if p.PressEnter {
-		suffix = " + Enter"
-	}
-	return fmt.Sprintf("typed %d chars%s", len(p.Text), suffix), nil
-}
-
-// --- screen_scroll ----------------------------------------------------------
-
-type screenScroll struct{}
-
-func (screenScroll) Name() string { return "screen_scroll" }
-
-func (screenScroll) Description() string {
-	return "Scroll the mouse wheel at (x, y). amount is in notches (one notch ≈ 120 units); positive scrolls down/forward, negative up/back. Move + wheel synthesized via SendInput. Use to reach content below the fold before re-screenshotting."
-}
-
-func (screenScroll) Schema() json.RawMessage {
-	return json.RawMessage(`{
-"type":"object",
-"properties":{
-  "x":{"type":"integer"},
-  "y":{"type":"integer"},
-  "amount":{"type":"integer","description":"Wheel notches: positive = down/forward, negative = up/back (default 3)"}
-},
-"required":["x","y"]
-}`)
-}
-
-func (screenScroll) ReadOnly() bool { return false }
-
-func (screenScroll) Execute(ctx context.Context, args json.RawMessage) (string, error) {
-	var p struct {
-		X      int `json:"x"`
-		Y      int `json:"y"`
-		Amount int `json:"amount"`
-	}
-	if err := json.Unmarshal(args, &p); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
-	}
-	amount := p.Amount
-	if amount == 0 {
-		amount = 3
-	}
-	if err := moveMouse(p.X, p.Y); err != nil {
-		return "", err
-	}
-	if err := scrollWheel(amount); err != nil {
-		return "", err
-	}
-	dir := "down"
-	if amount < 0 {
-		dir = "up"
-	}
-	return fmt.Sprintf("scrolled %s %d notches at (%d, %d)", dir, absInt(amount), p.X, p.Y), nil
 }
 
 // --- Win32 capture ----------------------------------------------------------
@@ -548,35 +401,87 @@ func typeViaClipboard(text string) error {
 		// Clipboard failed — fall back to per-character (may lose emoji).
 		return typeViaUnicode(text)
 	}
-	// Ctrl down → V down → V up → Ctrl up.
-	if err := pressKeyCombo(0x11 /*VK_CONTROL*/, 0x56 /*VK_V*/); err != nil {
+	// Ctrl down → V down → V up → Ctrl up. Names are translated to VK codes
+	// inside pressKeyCombo (see input contract in input.go).
+	if err := pressKeyCombo("ctrl", "v"); err != nil {
 		return err
 	}
 	time.Sleep(50 * time.Millisecond)
 	return nil
 }
 
-// pressKeyCombo presses two keys simultaneously (modifier + key), then releases.
-func pressKeyCombo(modifier, key uint16) error {
-	// Modifier down
-	mi := keyboardInput{Type: inputKeyboard, Vk: modifier}
-	if err := sendInput(inputKeyboard, unsafe.Pointer(&mi), int(unsafe.Sizeof(mi))); err != nil {
+// pressKeyCombo presses one or more modifier keys + a key simultaneously, then
+// releases. modName is a '+'-joined list of platform-agnostic modifier names
+// ("ctrl", "ctrl+shift", ""); keyName is a single platform-agnostic key name
+// ("s", "f5", "enter"). The names are translated to Windows VK codes here.
+func pressKeyCombo(modName, keyName string) error {
+	keyVK, err := parseVK(keyName)
+	if err != nil {
 		return err
 	}
-	// Key down
-	ki := keyboardInput{Type: inputKeyboard, Vk: key}
+	modVKs, err := parseModifierVKs(modName)
+	if err != nil {
+		return err
+	}
+	// Modifiers down (in declared order).
+	for _, vk := range modVKs {
+		mi := keyboardInput{Type: inputKeyboard, Vk: vk}
+		if err := sendInput(inputKeyboard, unsafe.Pointer(&mi), int(unsafe.Sizeof(mi))); err != nil {
+			return err
+		}
+	}
+	// Key down.
+	ki := keyboardInput{Type: inputKeyboard, Vk: keyVK}
 	if err := sendInput(inputKeyboard, unsafe.Pointer(&ki), int(unsafe.Sizeof(ki))); err != nil {
 		return err
 	}
 	time.Sleep(30 * time.Millisecond)
-	// Key up
+	// Key up.
 	ki.Flags = keyeventfKeyUp
 	if err := sendInput(inputKeyboard, unsafe.Pointer(&ki), int(unsafe.Sizeof(ki))); err != nil {
 		return err
 	}
-	// Modifier up
-	mi.Flags = keyeventfKeyUp
-	return sendInput(inputKeyboard, unsafe.Pointer(&mi), int(unsafe.Sizeof(mi)))
+	// Modifiers up (reverse order, matching typical human release).
+	for i := len(modVKs) - 1; i >= 0; i-- {
+		mi := keyboardInput{Type: inputKeyboard, Vk: modVKs[i], Flags: keyeventfKeyUp}
+		if err := sendInput(inputKeyboard, unsafe.Pointer(&mi), int(unsafe.Sizeof(mi))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// parseModifierVKs splits a '+'-joined modifier string ("ctrl+shift") into VK
+// codes, deduplicating. Empty string → no modifiers. Mirrors the modifier
+// handling that used to live inline in the VK-returning parseKeyCombo.
+func parseModifierVKs(modName string) ([]uint16, error) {
+	seen := map[uint16]bool{}
+	var vks []uint16
+	for _, p := range splitModifiers(modName) {
+		// splitModifiers doesn't lowercase; normalize here for safety. The
+		// platform-agnostic parseKeyCombo already lowercases, but callers may
+		// invoke pressKeyCombo directly (e.g. typeViaClipboard's "ctrl","v").
+		switch strings.ToLower(p) {
+		case "ctrl", "control":
+			if !seen[0x11] {
+				seen[0x11] = true
+				vks = append(vks, 0x11)
+			}
+		case "shift":
+			if !seen[0x10] {
+				seen[0x10] = true
+				vks = append(vks, 0x10)
+			}
+		case "alt":
+			if !seen[0x12] {
+				seen[0x12] = true
+				vks = append(vks, 0x12)
+			}
+		default:
+			return nil, fmt.Errorf("unknown modifier %q (use ctrl, shift, or alt)", p)
+		}
+	}
+	return vks, nil
 }
 
 // setClipboardText puts text on the Windows clipboard via user32 (OpenClipboard
@@ -632,8 +537,13 @@ func setClipboardText(text string) error {
 	return nil
 }
 
-// pressKey presses + releases a virtual-key code (Enter, Esc, etc.).
-func pressKey(vk uint16) error {
+// pressKey presses + releases a single key given its platform-agnostic name
+// ("enter", "esc", "f5", "a", ...). The name is translated to a VK code here.
+func pressKey(keyName string) error {
+	vk, err := parseVK(keyName)
+	if err != nil {
+		return err
+	}
 	ki := keyboardInput{Type: inputKeyboard, Vk: vk}
 	if err := sendInput(inputKeyboard, unsafe.Pointer(&ki), int(unsafe.Sizeof(ki))); err != nil {
 		return err
@@ -659,28 +569,8 @@ func sendInput(inputType uint32, data unsafe.Pointer, size int) error {
 	return nil
 }
 
-// --- message helpers --------------------------------------------------------
-
-func buttonLabel(b string) string {
-	if b == "" || b == "left" {
-		return ""
-	}
-	return " " + b
-}
-func doubleLabel(d bool) string {
-	if d {
-		return " (double)"
-	}
-	return ""
-}
-func absInt(n int) int {
-	if n < 0 {
-		return -n
-	}
-	return n
-}
-
-// randInt returns a random int in [min, max]. Used for human-like jitter/timing.
+// randInt returns a random int in [min, max]. Used for human-like jitter/timing
+// in the Windows input backends (moveMouse / clickMouse).
 func randInt(min, max int) int {
 	if max <= min {
 		return min
@@ -688,10 +578,12 @@ func randInt(min, max int) int {
 	return min + rand.Intn(max-min+1)
 }
 
-// utf8RuneCount counts runes in a string (for the clipboard-vs-unicode decision).
+// utf8RuneCount counts runes in a string (for the clipboard-vs-unicode decision
+// in typeText).
 func utf8RuneCount(s string) int {
 	return len([]rune(s))
 }
+
 func screenAttachmentsDir() string {
 	if wd, err := os.Getwd(); err == nil {
 		return filepath.Join(wd, ".fairpeer", "attachments")
@@ -699,92 +591,9 @@ func screenAttachmentsDir() string {
 	return filepath.Join(os.TempDir(), "fairpeer-screen")
 }
 
-// screenKey implements the `screen_key` tool: send a keyboard shortcut (e.g.
-// "ctrl+s", "alt+tab", "shift+enter") or a single key (e.g. "enter", "esc",
-// "f5") to whatever window currently has keyboard focus. This is the save-PPT
-// path (Ctrl+S), the close-dialog path (Esc), the confirm path (Enter) — the
-// shortcuts screen_type cannot express (it types text, not modifiers).
-type screenKey struct{}
-
-func (screenKey) Name() string { return "screen_key" }
-
-func (screenKey) Description() string {
-	return "Send a keyboard shortcut or single key to the focused window. Use for actions screen_type can't do: Ctrl+S (save), Ctrl+A (select all), Ctrl+C/V (copy/paste), Enter (confirm), Esc (cancel/close dialog), Tab, arrow keys, F-keys. The keys string uses '+' to combine a modifier (ctrl/shift/alt) with a key: 'ctrl+s', 'alt+tab', 'shift+arrowleft'. Single keys: 'enter', 'esc', 'tab', 'f5', 'delete', 'backspace'. Keys go to whatever window has focus — call window_focus first to be sure."
-}
-
-func (screenKey) Schema() json.RawMessage {
-	return json.RawMessage(`{
-		"type": "object",
-		"properties": {
-			"keys": {"type": "string", "description": "Key combination, e.g. \"ctrl+s\", \"alt+tab\", \"enter\", \"esc\". Modifiers: ctrl, shift, alt. Keys: a-z, 0-9, enter, esc, tab, space, delete, backspace, home, end, pageup, pagedown, arrowup/down/left/right, f1-f12."}
-		},
-		"required": ["keys"]
-	}`)
-}
-
-func (screenKey) Execute(ctx context.Context, args json.RawMessage) (string, error) {
-	var in struct {
-		Keys string `json:"keys"`
-	}
-	if err := json.Unmarshal(args, &in); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
-	keys := strings.TrimSpace(in.Keys)
-	if keys == "" {
-		return "", fmt.Errorf("keys is required")
-	}
-	mod, key, err := parseKeyCombo(keys)
-	if err != nil {
-		return "", err
-	}
-	if mod != 0 {
-		if err := pressKeyCombo(mod, key); err != nil {
-			return "", fmt.Errorf("key combo %q failed: %w", keys, err)
-		}
-	} else {
-		if err := pressKey(key); err != nil {
-			return "", fmt.Errorf("key %q failed: %w", keys, err)
-		}
-	}
-	time.Sleep(50 * time.Millisecond) // let the app react
-	return fmt.Sprintf("Sent key %q.", keys), nil
-}
-
-func (screenKey) ReadOnly() bool { return false }
-
-// parseKeyCombo parses a key combination string like "ctrl+shift+s" or "enter"
-// into a Windows VK modifier code (0 if none) and a VK key code. Supported
-// modifiers: ctrl (0x11), shift (0x10), alt (0x12). Supported keys: a-z,
-// 0-9, enter/return, esc/escape, tab, space, delete/del, backspace, home, end,
-// pageup, pagedown, arrowup/down/left/right, f1-f12.
-func parseKeyCombo(s string) (mod, key uint16, err error) {
-	// Normalize: replace dashes with plus signs so both ctrl+s and ctrl-s work.
-	normalized := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), "-", "+")
-	parts := strings.Split(normalized, "+")
-	if len(parts) == 0 || parts[len(parts)-1] == "" {
-		return 0, 0, fmt.Errorf("empty key combo")
-	}
-	// All parts except the last are modifiers; the last is the key.
-	for _, p := range parts[:len(parts)-1] {
-		switch strings.TrimSpace(p) {
-		case "ctrl", "control":
-			mod |= 0x11
-		case "shift":
-			mod |= 0x10
-		case "alt":
-			mod |= 0x12
-		default:
-			return 0, 0, fmt.Errorf("unknown modifier %q (use ctrl, shift, or alt)", p)
-		}
-	}
-	key, err = parseVK(strings.TrimSpace(parts[len(parts)-1]))
-	if err != nil {
-		return 0, 0, err
-	}
-	return mod, key, nil
-}
-
-// parseVK maps a key name to its Windows virtual-key code.
+// parseVK maps a platform-agnostic key name to its Windows virtual-key code.
+// Used by pressKey / pressKeyCombo (Windows input backend) to translate the
+// string key names produced by the platform-agnostic parseKeyCombo.
 func parseVK(name string) (uint16, error) {
 	if len(name) == 1 {
 		c := name[0]

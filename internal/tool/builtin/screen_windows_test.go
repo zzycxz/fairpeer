@@ -4,14 +4,15 @@ package builtin
 
 import "testing"
 
-// TestScreenToolsRoster guards the desktop-automation tool set. On Windows the
-// roster includes all 7 tools; on other platforms ScreenTools returns nil (the
-// tools don't exist) — the test asserts whichever applies so a dropped tool is
-// caught regardless of build platform.
+// TestScreenToolsRoster guards the WINDOWS desktop-automation tool set: the
+// four cross-platform action tools PLUS the Windows-native perception tools
+// (screenshot, get_ui_tree, screen_perceive). This file is //go:build windows,
+// so it only runs on Windows. The cross-platform base set (screen_click /
+// screen_type / screen_scroll / screen_key) is covered separately and runs on
+// every platform — see TestBaseScreenToolsRoster in screen_tools_test.go.
 func TestScreenToolsRoster(t *testing.T) {
 	tools := ScreenTools()
-	// On Windows we expect the full set; the build tag selects screen_windows.go.
-	// This file compiles on all platforms (no _windows suffix), so handle both.
+	// Windows exposes the full 7-tool set (base actions + Windows perception).
 	want := map[string]bool{
 		"screenshot": true, "screen_click": true, "screen_type": true,
 		"screen_scroll": true, "get_ui_tree": true, "screen_perceive": true,
@@ -25,13 +26,9 @@ func TestScreenToolsRoster(t *testing.T) {
 			t.Errorf("unexpected screen tool %q", name)
 		}
 	}
-	// On Windows every expected tool must be present. On non-Windows, ScreenTools
-	// returns nil (no tools) — that's the documented stub, not a failure.
-	if len(tools) > 0 {
-		for name := range want {
-			if !seen[name] {
-				t.Errorf("missing screen tool %q", name)
-			}
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("missing screen tool %q", name)
 		}
 	}
 }
@@ -49,12 +46,5 @@ func TestScreenToolsReadOnlyClassification(t *testing.T) {
 	}
 }
 
-// TestAbsInt covers the scroll-direction helper used by screen_scroll's message.
-func TestAbsInt(t *testing.T) {
-	cases := map[int]int{0: 0, 3: 3, -3: 3, 100: 100, -100: 100}
-	for in, want := range cases {
-		if got := absInt(in); got != want {
-			t.Errorf("absInt(%d) = %d, want %d", in, got, want)
-		}
-	}
-}
+// TestAbsInt was moved to screen_tools_test.go (the helper is now
+// platform-agnostic, so the test runs on every platform there).
