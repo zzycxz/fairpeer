@@ -2780,6 +2780,11 @@ export default function App() {
             onSidebarResizeStart={startSidebarResize}
             onSidebarResizeKey={resizeSidebarWithKeyboard}
             onSidebarResetWidth={() => setExpandedSidebarWidth(defaultSidebarWidth())}
+            contextInfo={state.context}
+            usage={state.usage}
+            sessionTokens={state.sessionTokens}
+            activeTabId={activeTabId}
+            dockRefreshKey={dockRefreshKey}
           />
         )}
         <AppChrome

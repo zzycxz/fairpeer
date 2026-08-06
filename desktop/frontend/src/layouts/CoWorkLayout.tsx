@@ -8,6 +8,7 @@ import { RagPanel } from "../components/cowork/RagPanel";
 import { PreferencePanel } from "../components/cowork/PreferencePanel";
 import { ExpertPanel } from "../components/cowork/ExpertPanel";
 import { CoworkDock } from "../components/cowork/CoworkDock";
+import type { ContextInfo, WireUsage } from "../lib/types";
 
 export type CoWorkPanel = "taskCenter" | "preference" | "calendarTask" | "rag" | "experts";
 
@@ -42,6 +43,15 @@ export interface CoWorkLayoutProps {
   onSidebarResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onSidebarResizeKey?: (event: ReactKeyboardEvent<HTMLButtonElement>) => void;
   onSidebarResetWidth?: () => void;
+  // Context overview tab data — forwarded to CoworkDock's "概览" (Overview) tab,
+  // which renders ContextPanel. Mirrors the coding-mode ContextPanel wiring
+  // (App.tsx:2940); these props are optional because the dock still works
+  // without them (ContextPanel falls back to its own app.ContextPanel fetch).
+  contextInfo?: ContextInfo;
+  usage?: WireUsage;
+  sessionTokens?: number;
+  activeTabId?: string;
+  dockRefreshKey?: number;
 }
 
 export function CoWorkLayout({
@@ -68,6 +78,11 @@ export function CoWorkLayout({
   onSidebarResizeStart,
   onSidebarResizeKey,
   onSidebarResetWidth,
+  contextInfo,
+  usage,
+  sessionTokens,
+  activeTabId,
+  dockRefreshKey,
 }: CoWorkLayoutProps) {
   const t = useT();
   const [activePanel, setActivePanel] = useState<CoWorkPanel>("taskCenter");
@@ -277,6 +292,11 @@ export function CoWorkLayout({
             // Dispatch event so the main panel can open the file.
             window.dispatchEvent(new CustomEvent("rag:open-file", { detail: { path } }));
           }}
+          contextInfo={contextInfo}
+          usage={usage}
+          sessionTokens={sessionTokens}
+          activeTabId={activeTabId}
+          dockRefreshKey={dockRefreshKey}
         />
       )}
 

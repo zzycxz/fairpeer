@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  Activity,
   CalendarClock,
   CalendarDays,
   ChevronDown,
@@ -39,6 +40,7 @@ import {
 import { app, onRagChanged, onRagProgress } from "../../lib/bridge";
 import { useToast } from "../../lib/toast";
 import { CustomSelect } from "./CustomSelect";
+import { ContextPanel } from "../ContextPanel";
 
 // realApp mirrors bridge.ts's private helper: returns the Wails binding only
 // when window.go.main.App is present (i.e. we are inside the desktop shell).
@@ -50,11 +52,13 @@ function realApp(): unknown | undefined {
 import { useT } from "../../lib/i18n";
 import type {
   CalendarEventView,
+  ContextInfo,
   MailProbeResult,
   RagCollectionView,
   RagNodeView,
   TaskView,
   BotDockStatusView,
+  WireUsage,
 } from "../../lib/types";
 import { WorkspacePanel } from "../WorkspacePanel";
 import { EntityDetail } from "./EntityDetail";
@@ -132,6 +136,14 @@ export interface CoworkDockProps {
   mode?: "default" | "rag";
   onEntityClick?: (name: string) => void;
   onFileClick?: (path: string) => void;
+  // Context overview tab data — forwarded to DefaultDock's "概览" (Overview)
+  // tab, which renders ContextPanel. Optional; ContextPanel degrades to its
+  // own app.ContextPanel fetch when these are absent.
+  contextInfo?: ContextInfo;
+  usage?: WireUsage;
+  sessionTokens?: number;
+  activeTabId?: string;
+  dockRefreshKey?: number;
 }
 
 export function CoworkDock({
@@ -142,6 +154,11 @@ export function CoworkDock({
   mode = "default",
   onEntityClick,
   onFileClick,
+  contextInfo,
+  usage,
+  sessionTokens,
+  activeTabId,
+  dockRefreshKey,
 }: CoworkDockProps) {
   return mode === "rag" ? (
     <RagDock onEntityClick={onEntityClick} onFileClick={onFileClick} />
@@ -151,6 +168,11 @@ export function CoworkDock({
       maximized={maximized}
       onClose={onClose}
       onToggleMaximized={onToggleMaximized}
+      contextInfo={contextInfo}
+      usage={usage}
+      sessionTokens={sessionTokens}
+      activeTabId={activeTabId}
+      refreshKey={dockRefreshKey}
     />
   );
 }
@@ -159,18 +181,28 @@ export function CoworkDock({
 // DefaultDock (Kp) — 今日 / 邮件 / 文件
 // ===========================================================================
 
-type DefaultTab = "today" | "mail" | "files";
+type DefaultTab = "today" | "mail" | "files" | "overview";
 
 function DefaultDock({
   cwd,
   maximized,
   onClose,
   onToggleMaximized,
+  contextInfo,
+  usage,
+  sessionTokens,
+  activeTabId,
+  refreshKey,
 }: {
   cwd?: string;
   maximized: boolean;
   onClose: () => void;
   onToggleMaximized: () => void;
+  contextInfo?: ContextInfo;
+  usage?: WireUsage;
+  sessionTokens?: number;
+  activeTabId?: string;
+  refreshKey?: number;
 }) {
   const t = useT();
   const [tab, setTab] = useState<DefaultTab>("today");
@@ -212,6 +244,17 @@ function DefaultDock({
             <FileText size={13} />
             <span className="workbench-dock__tab-label">{t("coworkDock.files") || "文件"}</span>
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "overview"}
+            className={"workbench-dock__tab" + (tab === "overview" ? " workbench-dock__tab--active" : "")}
+            onClick={() => setTab("overview")}
+            title={t("coworkDock.overview") || "概览"}
+          >
+            <Activity size={13} />
+            <span className="workbench-dock__tab-label">{t("coworkDock.overview") || "概览"}</span>
+          </button>
         </div>
       </div>
 
@@ -239,6 +282,15 @@ function DefaultDock({
               </p>
             </div>
           ))}
+        {tab === "overview" && (
+          <ContextPanel
+            tabId={activeTabId}
+            context={contextInfo}
+            usage={usage}
+            sessionTokens={sessionTokens}
+            refreshKey={refreshKey}
+          />
+        )}
       </div>
     </aside>
   );

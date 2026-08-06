@@ -1761,6 +1761,7 @@ export const zh: Record<DictKey, string> = {
   "coworkDock.today": "今日",
   "coworkDock.mail": "邮件",
   "coworkDock.files": "文件",
+  "coworkDock.overview": "概览",
   "coworkDock.briefingTitle": "行政决策早报",
   "coworkDock.todayEvents": "今日日程",
   "coworkDock.noEvents": "今日暂无日程",

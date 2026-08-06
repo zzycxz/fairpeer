@@ -1761,6 +1761,7 @@ export const en = {
   "coworkDock.today": "Today",
   "coworkDock.mail": "Mail",
   "coworkDock.files": "Files",
+  "coworkDock.overview": "Overview",
   "coworkDock.briefingTitle": "Executive Briefing",
   "coworkDock.todayEvents": "Today's events",
   "coworkDock.noEvents": "No events today",
