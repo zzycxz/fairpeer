@@ -25315,3 +25315,10 @@ a[href] {
   font-size: 13px;
   color: var(--text-muted, #888);
 }
+
+
+/* Compact-now button in ContextPanel session-status section */
+.context-panel__compact-btn {
+  margin-top: 8px;
+  width: 100%;
+}

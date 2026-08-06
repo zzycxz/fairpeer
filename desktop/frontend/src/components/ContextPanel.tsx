@@ -271,6 +271,12 @@ export function ContextPanel({
               <MetricCard label={t("context.health")} value={t(health.shortKey, health.vars)} tone={health.tone} />
               <MetricCard label={t("context.compaction")} value={compactPct > 0 ? `${compactPct}%` : "-"} />
             </div>
+            <button
+              className="btn btn--small context-panel__compact-btn"
+              onClick={() => void app.Compact().catch(() => {})}
+            >
+              {t("context.compactNow")}
+            </button>
           </section>
           <PreviewSection
             title={t("context.referencedFiles")}
