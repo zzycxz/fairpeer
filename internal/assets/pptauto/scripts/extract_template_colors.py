@@ -351,10 +351,16 @@ def extract_colors_from_pptx(pptx_path):
         colors['card_bg'] = '#F5F5F5'
         colors['line'] = '#E0E0E0'
 
-    # accent：选饱和度最高、且不是背景色的
-    accent_candidates = [c for c, _ in sorted_colors if c != bg_hex]
+    # accent：在前 N 个高频色里选饱和度最高、且不是背景色的。
+    # 只按饱和度选会选到一次性杂色（频率1的高饱和像素），所以限制候选范围。
+    accent_candidates = [(c, cnt) for c, cnt in sorted_colors[:8] if c != bg_hex]
     if accent_candidates:
-        most_saturated = max(accent_candidates, key=_saturation)
+        # 综合饱和度与频率：饱和度为主，频率作微弱加权（log 抑制极端频率）
+        import math
+        def accent_score(c_cnt):
+            c, cnt = c_cnt
+            return _saturation(c) * (1 + math.log(max(cnt, 1)) * 0.1)
+        most_saturated = max(accent_candidates, key=accent_score)[0]
         colors['accent'] = f"#{most_saturated}"
     else:
         colors['accent'] = '#4472C4'  # 兜底

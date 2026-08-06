@@ -350,6 +350,17 @@ def check_svg(svg_path, config=None, mode="fast"):
     errors = []
     warnings = []
 
+    # 是否处于模板模式？模板模式下，SVG 不应画任何全屏背景（模板自带背景）。
+    # 判定依据：template_config.json 的 colors.background_type，或存在
+    # dynamic_style.json（说明 Step 6 用模板渲染过）。
+    bg_type = config.get("colors", {}).get("background_type")
+    has_template = bg_type in ("image", "solid")
+    # dynamic_style.json 存在也说明用了模板
+    if not has_template and svg_path:
+        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(svg_path)))
+        if os.path.exists(os.path.join(project_dir, "dynamic_style.json")):
+            has_template = True
+
     # === 始终检查的项目 ===
 
     # 1. XML 格式
@@ -358,9 +369,44 @@ def check_svg(svg_path, config=None, mode="fast"):
     except ET.ParseError as e:
         errors.append(f"XML 格式错误: {e}")
 
-    # 2. 背景图
-    if '<image' not in content:
-        warnings.append("缺少背景图")
+    # 2. 背景
+    if has_template:
+        # 模板模式：禁止画全屏不透明背景矩形/图片（会遮住模板背景）。
+        # 检测 viewBox 全尺寸且 fill 不透明的 <rect>。
+        try:
+            root = ET.fromstring(content)
+            vb = root.get("viewBox", "0 0 1280 720").split()
+            vb_w, vb_h = float(vb[2]), float(vb[3])
+            for r in root.iter():
+                if r.tag.split('}')[-1].lower() != 'rect':
+                    continue
+                try:
+                    rw = float(r.get('width', 0)); rh = float(r.get('height', 0))
+                    rx = float(r.get('x', 0)); ry = float(r.get('y', 0))
+                except (ValueError, TypeError):
+                    continue
+                # 全屏判定：覆盖 ≥95% viewBox 且起点在左上角附近
+                covers = (rx <= vb_w * 0.05 and ry <= vb_h * 0.05 and
+                          rw >= vb_w * 0.95 and rh >= vb_h * 0.95)
+                if not covers:
+                    continue
+                fill = r.get('fill', '')
+                opacity = r.get('opacity', '1')
+                fill_opacity = r.get('fill-opacity', '1')
+                # 不透明 = 非none、非低透明度
+                is_opaque = (fill and fill.lower() != 'none' and
+                             float(opacity) >= 0.9 and float(fill_opacity) >= 0.9)
+                if is_opaque:
+                    errors.append(
+                        f"模板模式下禁止画全屏不透明背景矩形(fill={fill})——"
+                        "会遮住模板背景。如需局部遮罩用半透明色(rgba alpha<0.5)。")
+                    break
+        except ET.ParseError:
+            pass  # XML 错误已在上面报告
+    else:
+        # 无模板模式：需要背景图（与旧行为一致）
+        if '<image' not in content:
+            warnings.append("缺少背景图")
 
     # 3. 禁止元素
     forbidden = config.get("rules", {}).get("forbidden_elements", [])

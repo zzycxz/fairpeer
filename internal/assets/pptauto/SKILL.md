@@ -122,18 +122,18 @@ read_file <skill_dir>/template_config.json
 | 层级 | 来源 | 说明 |
 |------|------|------|
 | 基线 | `template_config.json` | 始终有效，提供全部颜色字段 |
-| 模板提取 | `dynamic_style.json`（若存在） | 只覆盖 primary/secondary/accent，其余沿用基线 |
+| 模板提取 | `dynamic_style.json`（若存在） | **整组 colors 字段全覆盖**基线；由 Step 6 生成（仅装了 Office 时） |
 | 用户输入 | 自然语言（"用绿色主色"） | 只覆盖明确提及的字段 |
 
-**严禁在三层之外凭空捏造颜色。**
+**严禁在三层之外凭空捏造颜色。** 注意：Step 0 的 `extract_template_colors.py`（纯 Python + PIL）和 Step 6 的 `analyze_template.py`（需 Office COM）都会提取模板配色——前者写 `template_config.json`，后者写 `dynamic_style.json` 并整组覆盖。装了 Office 时以后者为准，没装时以前者为准。
 
-### Step 6: 分析模板
+### Step 6: 分析模板（可选，需 Office）
 
 ```bash
-python3 <skill_dir>/scripts/analyze_template.py <template.pptx> <project_dir>/backgrounds/
+python3 <skill_dir>/scripts/analyze_template.py ~/.fairpeer/ppt-template.pptx <project_dir>/backgrounds/
 ```
 
-需 PowerPoint/WPS（COM）。未安装则跳过，SVG 用纯色背景代替，告知用户。
+需 PowerPoint/WPS（COM 自动化）。**若报错（未装 Office/comtypes），将该步标 completed 并继续**——Step 0 的纯 Python 配色提取已足够，SVG 用提取的配色即可。同时写入 `<project_dir>/dynamic_style.json`（整组覆盖基线配色）。
 
 ### Step 7: 规划页面布局
 
@@ -143,7 +143,7 @@ python3 <skill_dir>/scripts/analyze_template.py <template.pptx> <project_dir>/ba
 
 每页写入 `<project_dir>/svg_output/slide_01.svg`…。每页 SVG 必须：
 
-1. 背景图作为第一个 `<image>` 元素
+1. **背景**：遵循 Step 0 的判定——有模板时不画任何全屏背景（矩形/图片都不画，模板背景会透出）；无模板时第一个元素是全屏 `<rect>` 背景色。check_svg.py 会强制校验这条。
 2. viewBox 固定 `"0 0 1280 720"`
 3. 配色严格读 config，不得凭空捏造
 4. 强调色只用于关键数据/按钮/警告（面积 ≤5%）
@@ -180,10 +180,10 @@ python3 <skill_dir>/scripts/save_notes.py <project_dir> <notes_json>
 ### Step 12: 转换 PPTX
 
 ```bash
-python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir> --template <skill_dir>/templates/<模板名>.pptx
+python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
 ```
 
-**必须在 Step 0 确定了模板时传 `--template` 参数**，否则输出为白底，模板背景丢失。模板路径就是 Step 0 扫描到的文件。
+转换器会**自动检测** `~/.fairpeer/ppt-template.pptx`（Step 0 扫到的文件），无需手动传参。仅当要覆盖自动检测时才显式传 `--template <路径>`。
 
 纯 Python（python-pptx），**不需要 Office**。默认无动画无过渡。
 
