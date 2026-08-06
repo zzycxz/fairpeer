@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -23,6 +24,37 @@ func init() { tool.RegisterBuiltin(webSearch{}) }
 // path parses structured JSON, so it's not affected.)
 const webSearchErrorMaxRead = 8 << 10 // 8 KiB
 
+// searchCacheTTL is the default TTL for search cache entries.
+const searchCacheTTL = 10 * time.Minute
+
+// searchCache is the global search cache instance.
+// Initialized lazily on first use.
+var searchCache *SearchCache
+
+// initSearchCache initializes the search cache if not already done.
+func initSearchCache() {
+	if searchCache != nil {
+		return
+	}
+
+	// Get cache directory from environment or use default
+	cacheDir := os.Getenv("FAIRPEER_CACHE_DIR")
+	if cacheDir == "" {
+		homeDir, _ := os.UserHomeDir()
+		cacheDir = filepath.Join(homeDir, ".fairpeer", "cache")
+	}
+
+	dbPath := filepath.Join(cacheDir, "search-cache.db")
+	cache, err := NewSearchCache(dbPath, searchCacheTTL)
+	if err != nil {
+		// Log error but don't fail - caching is optional
+		fmt.Fprintf(os.Stderr, "Warning: Failed to initialize search cache: %v\n", err)
+		return
+	}
+
+	searchCache = cache
+}
+
 type webSearch struct {
 	proxySpec netclient.ProxySpec
 }
@@ -32,7 +64,7 @@ const webSearchTimeout = 15 * time.Second
 func (webSearch) Name() string { return "web_search" }
 
 func (webSearch) Description() string {
-	return "Perform a web search to find current information, news, or reference material. It automatically uses available search engines (Brave, Exa, Linkup) in a fallback chain. Returns a formatted markdown list of search results including titles, URLs, and snippets."
+	return "Perform a web search to find current information, news, or reference material. It automatically uses available search engines (Brave, Exa, Linkup, AnySearch) in a fallback chain. Returns a formatted markdown list of search results including titles, URLs, and snippets."
 }
 
 func (webSearch) Schema() json.RawMessage {
@@ -66,6 +98,26 @@ func (ws webSearch) Execute(ctx context.Context, args json.RawMessage) (string, 
 	}
 	if strings.TrimSpace(p.Query) == "" {
 		return "", fmt.Errorf("query is required")
+	}
+
+	// Initialize cache if needed
+	initSearchCache()
+
+	// Check cache first
+	if searchCache != nil {
+		if cachedResults, engine, found := searchCache.Get(p.Query); found && len(cachedResults) > 0 {
+			// Return cached results
+			var sb strings.Builder
+			fmt.Fprintf(&sb, "Search results for %q (via %s, cached):\n\n", p.Query, engine)
+			for i, r := range cachedResults {
+				fmt.Fprintf(&sb, "### %d. [%s](%s)\n", i+1, r.Title, r.URL)
+				if r.Snippet != "" {
+					fmt.Fprintf(&sb, "> %s\n", strings.ReplaceAll(strings.TrimSpace(r.Snippet), "\n", "\n> "))
+				}
+				sb.WriteString("\n")
+			}
+			return WrapUntrusted("web", sb.String()), nil
+		}
 	}
 
 	client := ssrfGuardedClient(ws.proxyURLFor)
@@ -110,14 +162,28 @@ func (ws webSearch) Execute(ctx context.Context, args json.RawMessage) (string, 
 		}
 	}
 
+	// 4. Try AnySearch
+	if key := os.Getenv("ANYSEARCH_API_KEY"); key != "" {
+		results, lastErr = searchAnySearch(ctx, client, key, p.Query)
+		if lastErr == nil {
+			engineUsed = "AnySearch"
+			goto Render
+		}
+	}
+
 	if lastErr != nil {
 		return "", fmt.Errorf("all configured search engines failed. Last error: %w", lastErr)
 	}
-	return "", fmt.Errorf("no search engine API keys configured. Please set BRAVE_API_KEY, EXA_API_KEY, or LINKUP_API_KEY")
+	return "", fmt.Errorf("no search engine API keys configured. Please set BRAVE_API_KEY, EXA_API_KEY, LINKUP_API_KEY, or ANYSEARCH_API_KEY")
 
 Render:
 	if len(results) == 0 {
 		return fmt.Sprintf("No results found for %q using %s.", p.Query, engineUsed), nil
+	}
+
+	// Cache the results
+	if searchCache != nil {
+		searchCache.Set(p.Query, results, engineUsed)
 	}
 
 	var sb strings.Builder
@@ -296,6 +362,73 @@ func searchLinkup(ctx context.Context, client *http.Client, key, query string) (
 		}
 		out = append(out, searchResultItem{
 			Title:   r.Name,
+			URL:     r.URL,
+			Snippet: snippet,
+		})
+	}
+	return out, nil
+}
+
+func searchAnySearch(ctx context.Context, client *http.Client, key, query string) ([]searchResultItem, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, webSearchTimeout)
+	defer cancel()
+
+	payload := map[string]any{
+		"query":       query,
+		"max_results": 10,
+	}
+	bodyData, _ := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", "https://api.anysearch.com/v1/search", bytes.NewReader(bodyData))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, webSearchErrorMaxRead))
+		return nil, fmt.Errorf("anysearch returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var data struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			Results []struct {
+				Title   string `json:"title"`
+				URL     string `json:"url"`
+				Snippet string `json:"snippet"`
+				Content string `json:"content"`
+			} `json:"results"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, err
+	}
+
+	if data.Code != 0 {
+		return nil, fmt.Errorf("anysearch error: %s", data.Message)
+	}
+
+	var out []searchResultItem
+	for _, r := range data.Data.Results {
+		snippet := r.Snippet
+		if snippet == "" {
+			snippet = r.Content
+		}
+		if len(snippet) > 800 {
+			snippet = snippet[:800] + "..."
+		}
+		out = append(out, searchResultItem{
+			Title:   r.Title,
 			URL:     r.URL,
 			Snippet: snippet,
 		})
