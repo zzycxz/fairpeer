@@ -793,11 +793,23 @@ def create_pptx_with_native_svg(
             xml_slides = prs.slides._sldIdLst
             for slide in list(xml_slides):
                 xml_slides.remove(slide)
-            # Use the template's first layout (carries the master's background).
-            if len(prs.slide_layouts) > 0:
-                template_layout = prs.slide_layouts[0]
-            else:
-                template_layout = prs.slide_layouts[6]  # fallback: Blank
+            # Read the best layout index from template_config.json (written by
+            # extract_template_colors.py). Falls back to 0 if not set.
+            best_layout_idx = 0
+            config_path = Path(template_path).parent.parent / 'template_config.json'
+            if not config_path.exists():
+                config_path = Path(__file__).resolve().parent.parent.parent / 'template_config.json'
+            try:
+                import json
+                cfg = json.loads(config_path.read_text(encoding='utf-8'))
+                best_layout_idx = cfg.get('_template', {}).get('best_layout_index', 0)
+            except Exception:
+                pass
+            if best_layout_idx >= len(prs.slide_layouts):
+                best_layout_idx = 0
+            template_layout = prs.slide_layouts[best_layout_idx]
+            if verbose:
+                print(f"    Using layout[{best_layout_idx}]: \"{template_layout.name}\"")
             # Override slide dimensions to match the SVG canvas (not the
             # template's). This ensures the SVG fills the slide correctly even
             # if the template used a different aspect ratio.
