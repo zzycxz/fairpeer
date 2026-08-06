@@ -304,6 +304,7 @@ export interface AppBindings {
   TrustProjectHooksForRoot(projectRoot: string): Promise<void>;
   CheckCoworkBrowser(): Promise<string>;
   OpenPPTTemplateDir(): Promise<void>;
+  PickPPTTemplate(): Promise<string>;
   SetBotSecret(envName: string, value: string): Promise<void>;
   ClearBotSecret(envName: string): Promise<void>;
   StartBotConnectionInstall(provider: string, domain: string): Promise<BotInstallStartResult>;
@@ -3526,6 +3527,7 @@ function makeMockApp(): AppBindings {
     },
     async CheckCoworkBrowser() { return "Chrome"; },
     async OpenPPTTemplateDir() {},
+    async PickPPTTemplate() { return ""; },
     async ContextPanel(_tabID: string) {
       const now = Date.now();
       return {

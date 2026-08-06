@@ -47,43 +47,27 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, web_sea
 
 ### Step 0: 确定模板（关键！）
 
-**首先检查用户在设置面板选择的模板**：
+检查固定位置的模板文件：
 
 ```bash
-# 读取 fairpeer 配置中的模板选择（跨平台路径）
-cat ~/.fairpeer/config.toml 2>/dev/null | grep ppt_active_template
+ls ~/.fairpeer/ppt-template.pptx 2>/dev/null
 ```
 
-- 如果 `ppt_active_template` 的值不是空或 `default`，则该值就是模板文件名（不含扩展名），使用 `<skill_dir>/templates/<该值>.pptx`
-- 如果值为空或 `default`，继续下面的目录扫描
-
-**然后扫描模板目录确认文件存在**：
-
-```bash
-ls <skill_dir>/templates/*.pptx
-```
-
-- **配置指定了模板** → 使用该模板（确认文件存在），记录完整路径
-- **配置为空，目录有且仅有 1 个模板** → 直接使用
-- **配置为空，目录有多个模板** → 询问用户"检测到以下模板：xxx、yyy，使用哪个？"
-- **配置为空，没有模板**（只有 default.pptx）→ 无模板模式：SVG 自己画背景色
+- **文件存在** → 使用 `~/.fairpeer/ppt-template.pptx` 作为模板
+- **文件不存在** → 无模板模式：SVG 自己画背景色
 
 **如果有模板，先提取配色**：
 
 ```bash
-python3 <skill_dir>/scripts/extract_template_colors.py <template.pptx> <skill_dir>/template_config.json
+python3 <skill_dir>/scripts/extract_template_colors.py ~/.fairpeer/ppt-template.pptx <skill_dir>/template_config.json
 ```
-
-这会从模板提取颜色方案，更新 `template_config.json`。
 
 **⚠️ SVG 背景规则（极其重要）**：
 
-- **有模板时**：禁止画全屏不透明背景矩形（会完全遮住模板背景）。卡片、内容块可以用半透明色（如 `rgba(0,0,0,0.3)`）做局部背景，让模板背景透出来同时增强内容可读性。就像在 PPT 里给文字加一个半透明蒙版，而不是盖一层纯色。
+- **有模板时**：禁止画全屏不透明背景矩形。卡片、内容块可以用半透明色（如 `rgba(0,0,0,0.3)`）做局部背景，让模板背景透出来。
 - **无模板时**：画一个全屏 `<rect width="1280" height="720" fill="#背景色"/>` 作为背景。
 
-这条规则直接影响 Step 5-8 的 SVG 生成。在生成 SVG 前必须确定是否有模板。
-
-**记录模板完整路径**，Step 12 转换时传给 `svg_to_pptx.py --template <完整路径>`。
+**Step 12 转换时传 `--template ~/.fairpeer/ppt-template.pptx`**（文件存在时）。
 
 ### Step 1: 提取源文档（如有）
 

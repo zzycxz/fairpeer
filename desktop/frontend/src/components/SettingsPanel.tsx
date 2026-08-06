@@ -4268,8 +4268,13 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
     }
   };
 
-  const openTemplateDir = async () => {
-    try { await app.OpenPPTTemplateDir(); } catch { /* see backend log */ }
+  const pickPPTTemplate = async () => {
+    try {
+      const path = await app.PickPPTTemplate();
+      if (path) {
+        setDraft(d => { const n = { ...d, pptActiveTemplate: path }; commitDraft(n); return n; });
+      }
+    } catch { /* user cancelled */ }
   };
 
   // Derive enabled state from draft values — empty = disabled.
@@ -4430,24 +4435,33 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
         <OptionalModule title={t("cowork.ppt")} description={t("cowork.pptDescFull")} enabled={pptOn} onToggle={togglePpt}>
           <div className="optional-module__controls">
             <div className="set-input-browse">
-              <select
-                className="mem-input set-grow"
-                value={draft.pptActiveTemplate}
-                onChange={e => setDraft(d => { const n = { ...d, pptActiveTemplate: e.target.value }; commitDraft(n); return n; })}
-              >
-                <option value="">{t("cowork.pptSelectTemplate")}</option>
-                {(draft.pptTemplates ?? []).map(tpl => (
-                  <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
-                ))}
-              </select>
+              <input
+                className="mem-input"
+                type="text"
+                placeholder={t("cowork.pptSelectTemplate")}
+                value={draft.pptActiveTemplate || ""}
+                readOnly
+                style={{ cursor: "default" }}
+              />
               <button
                 type="button"
                 className="btn btn--small set-input-browse__btn"
                 disabled={busy}
-                onClick={() => void openTemplateDir()}
+                onClick={() => void pickPPTTemplate()}
               >
-                {t("cowork.pptOpenTemplateDir")}
+                {t("cowork.pptPickTemplate")}
               </button>
+              {draft.pptActiveTemplate && (
+                <button
+                  type="button"
+                  className="btn btn--small btn--danger"
+                  disabled={busy}
+                  onClick={() => { setDraft(d => { const n = { ...d, pptActiveTemplate: "" }; commitDraft(n); return n; }); }}
+                  style={{ marginLeft: "4px" }}
+                >
+                  ×
+                </button>
+              )}
             </div>
             <div style={{ marginTop: "12px" }}>
               <label style={{ fontSize: "12px", color: "#666", marginBottom: "4px", display: "block" }}>{t("cowork.pptGenMode")}</label>

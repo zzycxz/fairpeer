@@ -16,6 +16,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/ppttemplate"
 	"github.com/zzycxz/fairpeer/internal/secret"
 	"github.com/zzycxz/fairpeer/internal/tool/builtin"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // CoWorkSettingsView is the settings-panel view of the coWork profile config.
@@ -632,6 +633,36 @@ func (a *App) OpenPPTTemplateDir() error {
 		return fmt.Errorf("无法定位模板目录（用户配置目录不可用）")
 	}
 	return openInFileExplorer(dir)
+}
+
+// PickPPTTemplate opens a file picker for .pptx files and copies the selected
+// file to ~/.fairpeer/ppt-template.pptx (a fixed path the ppt-auto skill reads).
+// Returns the display name of the selected file, or "" if cancelled.
+func (a *App) PickPPTTemplate() (string, error) {
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择 PPT 模板",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "PowerPoint 模板 (*.pptx)", Pattern: "*.pptx"},
+		},
+	})
+	if err != nil || path == "" {
+		return "", nil
+	}
+	// Copy the selected file to the fixed location.
+	home, _ := os.UserHomeDir()
+	dest := filepath.Join(home, ".fairpeer", "ppt-template.pptx")
+	srcData, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("读取模板文件失败: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(dest, srcData, 0o644); err != nil {
+		return "", fmt.Errorf("写入模板文件失败: %w", err)
+	}
+	// Return the filename for display.
+	return filepath.Base(path), nil
 }
 
 // --- .env management --------------------------------------------------------
