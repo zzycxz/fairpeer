@@ -10,7 +10,7 @@ from .drawingml_context import ConvertContext
 from .drawingml_utils import (
     SVG_NS, ANGLE_UNIT, DASH_PRESETS,
     px_to_emu, _f, _get_attr,
-    parse_hex_color, parse_stop_style, resolve_url_id,
+    parse_hex_color, parse_color_alpha, parse_stop_style, resolve_url_id,
 )
 
 
@@ -134,7 +134,11 @@ def build_fill_xml(
 
     color = parse_hex_color(fill)
     if color:
-        return build_solid_fill(color, opacity)
+        rgba_alpha = parse_color_alpha(fill)
+        eff_op = opacity
+        if rgba_alpha is not None:
+            eff_op = rgba_alpha if opacity is None else opacity * rgba_alpha
+        return build_solid_fill(color, eff_op)
 
     return '<a:noFill/>'
 
@@ -404,9 +408,14 @@ def build_stroke_xml(
     if not color:
         return '<a:ln><a:noFill/></a:ln>'
 
+    eff_op = opacity
+    rgba_alpha = parse_color_alpha(stroke)
+    if rgba_alpha is not None:
+        eff_op = rgba_alpha if opacity is None else opacity * rgba_alpha
+
     alpha_xml = ''
-    if opacity is not None and opacity < 1.0:
-        alpha_xml = f'<a:alpha val="{int(opacity * 100000)}"/>'
+    if eff_op is not None and eff_op < 1.0:
+        alpha_xml = f'<a:alpha val="{int(eff_op * 100000)}"/>'
 
     return f'''<a:ln w="{width_emu}"{cap_attr}>
 <a:solidFill><a:srgbClr val="{color}">{alpha_xml}</a:srgbClr></a:solidFill>{dash_xml}{join_xml}{line_ends}

@@ -331,11 +331,36 @@ def ctx_h(val: float, ctx: ConvertContext) -> float:
 # Color / style parsing
 # ---------------------------------------------------------------------------
 
+_RGB_FN_RE = re.compile(
+    r'^rgba?\s*\(\s*([0-9.]+)([%]?)\s*[,\s]\s*([0-9.]+)([%]?)\s*[,\s]\s*([0-9.]+)([%]?)'
+    r'(?:\s*[,\s/]\s*([0-9.]+)([%]?))?\s*\)\s*$',
+    re.IGNORECASE,
+)
+
+
 def parse_hex_color(color_str: str) -> str | None:
-    """Parse '#RRGGBB' or '#RGB' to 'RRGGBB'. Returns None on failure."""
+    """Parse '#RRGGBB', '#RGB', 'rgb()', or 'rgba()' to 'RRGGBB'.
+
+    Alpha in rgba() is ignored here — use parse_color_alpha() to retrieve it.
+    Returns None on failure.
+    """
     if not color_str:
         return None
     color_str = color_str.strip()
+
+    # rgb() / rgba() functional notation
+    m = _RGB_FN_RE.match(color_str)
+    if m:
+        def to_byte(val: str, pct: str | None) -> int:
+            fv = float(val)
+            if pct == '%':
+                fv = fv / 100.0 * 255.0
+            return max(0, min(255, int(round(fv))))
+        r = to_byte(m.group(1), m.group(2))
+        g = to_byte(m.group(3), m.group(4))
+        b = to_byte(m.group(5), m.group(6))
+        return f'{r:02X}{g:02X}{b:02X}'
+
     if color_str.startswith('#'):
         color_str = color_str[1:]
     if len(color_str) == 3:
@@ -343,6 +368,30 @@ def parse_hex_color(color_str: str) -> str | None:
     if len(color_str) == 6 and all(c in '0123456789abcdefABCDEF' for c in color_str):
         return color_str.upper()
     return None
+
+
+def parse_color_alpha(color_str: str) -> float | None:
+    """Return the alpha channel of an rgba()/rgb() color, or None.
+
+    - rgba(0,0,0,0.35) → 0.35
+    - rgba(0,0,0,35%)  → 0.35
+    - rgb(0,0,0) / #000000 → None (fully opaque)
+    """
+    if not color_str:
+        return None
+    m = _RGB_FN_RE.match(color_str.strip())
+    if not m or m.group(7) is None:
+        return None
+    a_str = m.group(7).strip()
+    a_pct = m.group(8)
+    if a_pct == '%':
+        return float(a_str) / 100.0
+    a = float(a_str)
+    # CSS rgb() allows alpha as 0-1 or 0-100 depending on delimiters; we treat
+    # any value > 1 as a 0-100 percentage (per the CSS Color 4 spec).
+    if a > 1.0:
+        a = a / 100.0
+    return max(0.0, min(1.0, a))
 
 
 def parse_stop_style(style_str: str) -> tuple[str | None, float]:
