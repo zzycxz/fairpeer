@@ -228,28 +228,13 @@ func accountPasswordEnvs(name string) (smtpEnv, imapEnv string) {
 	return "COWORK_SMTP_PASSWORD_" + upper, "COWORK_IMAP_PASSWORD_" + upper
 }
 
-// scanPPTXTemplates scans a directory for .pptx files and returns them as template views.
+// scanPPTXTemplates scans a directory for template files (.json specs and .pptx
+// files) and returns them as template views for the settings dropdown.
 func scanPPTXTemplates(dir string) []ppttemplate.View {
 	if dir == "" {
 		return []ppttemplate.View{}
 	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return []ppttemplate.View{}
-	}
-	out := make([]ppttemplate.View, 0)
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".pptx" {
-			continue
-		}
-		name := e.Name()
-		id := strings.TrimSuffix(name, filepath.Ext(name))
-		out = append(out, ppttemplate.View{
-			ID:   id,
-			Name: name,
-		})
-	}
-	return out
+	return ppttemplate.Views(dir)
 }
 
 // updatePPTSkillConfig updates a single key in the PPT skill's template_config.json.
@@ -371,12 +356,12 @@ func (a *App) SetCoWorkSettings(v CoWorkSettingsView) (err error) {
 		c.Cowork.PPTActiveTemplate = strings.TrimSpace(v.PPTActiveTemplate)
 		c.Cowork.PPTMode = strings.TrimSpace(v.PPTMode)
 		// PPT template ↔ ppt-auto skill linkage: clearing the template disables
-		// the ppt-auto skill so the user isn't routed to a skill with no template
-		// configured. Setting a template does NOT force-enable the skill — that
-		// would override an explicit user disable in Capabilities. (The reverse
-		// direction, disabling the skill, clears nothing; the template stays.)
+		// the ppt-auto skill, while setting a template enables it. This keeps the
+		// Office UI toggle in sync with the Capabilities panel toggle.
 		if strings.TrimSpace(v.PPTActiveTemplate) == "" {
 			c.SetSkillEnabled("ppt-auto", false)
+		} else {
+			c.SetSkillEnabled("ppt-auto", true)
 		}
 		c.Cowork.ScreenshotEnabled = v.ScreenshotEnabled
 		c.Cowork.ScreenshotHotkey = strings.TrimSpace(v.ScreenshotHotkey)

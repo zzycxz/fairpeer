@@ -183,16 +183,22 @@ func SkillTemplatesDir() string {
 	return ""
 }
 
-// LoadDir scans `dir` for *.json templates and returns them sorted by name. A
-// malformed file is skipped (not fatal) so one bad template doesn't break the
-// whole list — it's logged via the returned error count. Returns an empty slice
-// (not nil) if the dir is empty/missing.
+// LoadDir scans `dir` for *.json templates AND *.pptx files, returning them
+// sorted by name. .json files are parsed as full template specs; .pptx files
+// that don't have a matching .json are returned as lightweight synthetic
+// templates (ID = filename stem, MasterFile = absolute path) so the user can
+// simply drop a .pptx into the directory and use it without writing JSON.
+// A malformed .json file is skipped (not fatal) so one bad template doesn't
+// break the whole list.
 func LoadDir(dir string) ([]Template, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return []Template{}, err
 	}
+
+	// Collect .json specs first (canonical).
 	var out []Template
+	jsonIDs := map[string]bool{}
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
@@ -202,7 +208,25 @@ func LoadDir(dir string) ([]Template, error) {
 			continue // skip malformed; the user can fix it
 		}
 		out = append(out, t)
+		jsonIDs[t.ID] = true
 	}
+
+	// Add .pptx files that don't already have a .json spec.
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".pptx" {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".pptx")
+		if jsonIDs[id] {
+			continue // .json spec takes precedence
+		}
+		out = append(out, Template{
+			ID:         id,
+			Name:       id,
+			MasterFile: filepath.Join(dir, e.Name()),
+		})
+	}
+
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
@@ -231,20 +255,38 @@ func loadFile(path string) (Template, error) {
 // is empty / not found. Empty id means "no active template" → the CUA falls
 // back to a default blank deck; not finding a configured id is an error so the
 // user knows the setting points at something deleted.
+//
+// LoadActive supports both .json template specs AND direct .pptx files. If `id`
+// matches a .json file, that spec is loaded. If it matches a .pptx file (by
+// filename stem), a synthetic template is returned with the .pptx as its
+// MasterFile — so users can simply drop a .pptx into the templates dir and
+// select it without writing any JSON.
 func LoadActive(dir, id string) (*Template, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return nil, nil
 	}
+
+	// 1. Try .json specs first (the canonical path).
 	all, err := LoadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	for i := range all {
-		if all[i].ID == id {
-			return &all[i], nil
+	if err == nil {
+		for i := range all {
+			if all[i].ID == id {
+				return &all[i], nil
+			}
 		}
 	}
+
+	// 2. Fallback: check for a .pptx file with matching stem.
+	pptxPath := filepath.Join(dir, id+".pptx")
+	if _, statErr := os.Stat(pptxPath); statErr == nil {
+		return &Template{
+			ID:         id,
+			Name:       id,
+			MasterFile: pptxPath,
+		}, nil
+	}
+
 	return nil, fmt.Errorf("PPT 模板 %q 未找到 — 请在设置里重新选择，或在 %s 添加该模板", id, dir)
 }
 
