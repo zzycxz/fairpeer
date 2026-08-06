@@ -45,6 +45,28 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, web_sea
 
 ## 路线 A：SVG 生成（15 步）
 
+### Step 0: 确定模板（关键！）
+
+扫描 `<skill_dir>/templates/` 目录下的 `.pptx` 文件（排除 `default.pptx`）：
+
+```bash
+ls <skill_dir>/templates/*.pptx
+```
+
+- **有且仅有 1 个模板**（如"中国移动模板.pptx"）→ 直接使用，记录路径
+- **有多个模板** → 询问用户"检测到以下模板：xxx、yyy，使用哪个？"，或根据主题自动选择最匹配的
+- **没有模板**（只有 default.pptx）→ 不使用模板背景（白底），使用默认深色配色
+
+**如果有模板，必须先提取配色**：
+
+```bash
+python3 <skill_dir>/scripts/extract_template_colors.py <template.pptx> <skill_dir>/template_config.json
+```
+
+这会从模板的 slide master/layout 中提取颜色方案（主题色、背景色、强调色），自动更新 `template_config.json` 的 `colors` 段。后续 SVG 生成使用模板配色，确保视觉风格一致。
+
+**记录模板路径**，后续 Step 12 转换时必须传给 `svg_to_pptx.py --template`。
+
 ### Step 1: 提取源文档（如有）
 
 ```bash
@@ -152,22 +174,14 @@ python3 <skill_dir>/scripts/save_notes.py <project_dir> <notes_json>
 ### Step 12: 转换 PPTX
 
 ```bash
-python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
+python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir> --template <skill_dir>/templates/<模板名>.pptx
 ```
+
+**必须在 Step 0 确定了模板时传 `--template` 参数**，否则输出为白底，模板背景丢失。模板路径就是 Step 0 扫描到的文件。
 
 纯 Python（python-pptx），**不需要 Office**。默认无动画无过渡。
 
 > 如需动画/过渡/旁白，参数见 `references/animations.md`。
-
-**使用模板背景**（用户提供了 PPTX 模板时）：
-
-```bash
-python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir> --template <template.pptx>
-```
-
-`--template` 指定一个 PPTX 模板文件，输出的 PPT 会继承模板的母版背景、版式和配色。模板原有的 slides 会被清除，SVG 内容叠加在模板背景之上。这对于需要企业 VI（如中国移动模板）的场景非常重要——不指定模板时输出为白底。
-
-模板放在 `<skill_dir>/templates/` 目录下，agent 可直接引用路径。
 
 ### Step 13: 视觉检查（仅 validate 模式）
 

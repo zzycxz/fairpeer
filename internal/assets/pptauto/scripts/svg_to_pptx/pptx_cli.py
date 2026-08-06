@@ -568,6 +568,34 @@ Recorded narration:
             else:
                 print("  [warn] metadata.json ignored (top level is not an object)", file=sys.stderr)
 
+    # Auto-detect template: if --template not given, scan skill templates dirs
+    # for a non-default .pptx. Checks both the installed skill dir (~/.fairpeer/)
+    # and the dev source dir. If exactly one found, use it automatically.
+    template_path_resolved = Path(args.template) if args.template else None
+    if template_path_resolved is None:
+        # Search both installed and source skill dirs.
+        script_dir = Path(__file__).resolve().parent  # scripts/svg_to_pptx/
+        search_dirs = [
+            script_dir.parent.parent / 'templates',          # source: pptauto/templates/
+            Path.home() / '.fairpeer' / 'skills' / 'ppt-auto' / 'templates',  # installed
+        ]
+        for templates_dir in search_dirs:
+            if not templates_dir.exists():
+                continue
+            candidates = [f for f in templates_dir.glob('*.pptx')
+                          if f.name.lower() != 'default.pptx']
+            if len(candidates) == 1:
+                template_path_resolved = candidates[0]
+                if verbose:
+                    print(f"  Auto-detected template: {template_path_resolved.name}")
+                break
+            elif len(candidates) > 1:
+                if verbose:
+                    names = ', '.join(f.name for f in candidates)
+                    print(f"  Multiple templates found ({names}); use --template to select one. Using first.")
+                template_path_resolved = candidates[0]
+                break
+
     shared_kwargs = dict(
         canvas_format=canvas_format,
         doc_metadata=doc_metadata,
@@ -595,7 +623,7 @@ Recorded narration:
         image_sizing=args.image_sizing,
         image_scale=args.image_scale,
         image_quality=args.image_quality,
-        template_path=Path(args.template) if args.template else None,
+        template_path=template_path_resolved,
     )
 
     success = True
