@@ -12,8 +12,8 @@
   "info": {
     "companyName": "fairpeer",
     "productName": "fairpeer",
-    "productVersion": "0.1.1",
+    "productVersion": "0.1.2",
     "copyright": "Copyright © 2026 FairPeer Contributors",
-    "comments": "fairpeer desktop — a Wails shell around the Go kernel."
+    "comments": "fairpeer desktop �?a Wails shell around the Go kernel."
   }
 }
