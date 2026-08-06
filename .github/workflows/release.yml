@@ -127,7 +127,7 @@ jobs:
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          $tag = "${{ github.ref_name }}"
+          tag="${{ github.ref_name }}"
           # The cmd/sign requires bash or sh to glob, so we'll just run it with bash
           go run ./cmd/sign sign build/bin/*
           go run ./cmd/sign manifest build/bin $tag $tag
