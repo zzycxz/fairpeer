@@ -215,6 +215,28 @@ Windows-only 扩展到三平台（Windows / macOS / Linux）全部可用。
 - **search_cache.go CGO 依赖** — SQLite + go-sqlite3 导致非 CGO 环境编译失败；改为内存 map
 - **screenAttachmentsDir 跨平台** — 平台无关函数被放在 windows-only 文件里，阻塞 mac/linux
   编译；移到 screen_tools.go
+- **Session 从左侧项目工作区消失** — ListSessions 只扫描当前 tab 的 session 目录，切换 tab 后其他
+  项目的 session 不可见。改为遍历 knownSessionDirs() 扫描全局+所有项目+所有 tab
+- **专家团 session 无法识别** — BranchMeta.DefaultScope() 把 scope="expert" 映射成 "global"，
+  丢失标识。修复：保留 "expert" + 新增 ExpertTeamID 字段端到端传递（BranchMeta→SessionInfo→
+  SessionMeta→前端 types.ts）
+- **HistoryPanel 显示空会话** — 新建 tab 但未发消息会留下孤儿 .meta 文件（无对应 .jsonl）。
+  修复：启动时 pruneOrphanMetaFiles() 自动清理；ListSessions 的 turns==0 过滤保留原有逻辑
+  （用户发了消息但模型未回复的会话仍然显示）
+- **邮箱服务器示例** — SMTP/IMAP 占位符从 139/chinamobile 改为 QQ/126
+- **Compact 按钮无反馈** — 点击后无 loading 状态，用户以为没反应。改为按钮显示"压缩中…"+禁用
+- **marketplace 测试断言** — TestDefaultMarketSources 期望 "anthropics" 但实际 ID 是
+  "anthropic"；TestCatalogMatches 空查询期望 false 但实现返回 true（显示全部）。测试已同步
+
+### Added — Office Overview Tab + Manual Compaction
+
+- **办公模式"概览"页卡** — CoworkDock（今日/邮件/文件）新增第 4 个 tab「概览」，渲染
+  ContextPanel：token 用量甜甜圈图、prompt/completion/reasoning/other 分色、cache hit 率、
+  健康度、压缩进度、引用文件、变更文件
+- **「立即压缩」按钮** — ContextPanel 的 session-status 区块新增按钮，点击调 app.Compact()
+  手动触发上下文压缩；带 loading 状态（"压缩中…" + 禁用防重复点击）
+- 数据透传链路：App.tsx → CoWorkLayout → CoworkDock → DefaultDock → ContextPanel
+  （contextInfo/usage/sessionTokens/activeTabId/dockRefreshKey）
 
 ---
 
