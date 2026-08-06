@@ -21,9 +21,16 @@ def extract_colors(image_path, max_colors=4):
         q_img = img.quantize(colors=16)
         palette = q_img.getpalette()
         counts = q_img.getcolors()
-        if not counts or not palette: return []
+        if not counts or not palette: return None, []
         
         counts.sort(reverse=True, key=lambda x: x[0])
+        
+        # Determine true dominant background color (can be white/black)
+        bg_r = palette[counts[0][1]*3]
+        bg_g = palette[counts[0][1]*3+1]
+        bg_b = palette[counts[0][1]*3+2]
+        bg_hex = f"#{bg_r:02x}{bg_g:02x}{bg_b:02x}"
+        
         hex_colors = []
         for count, idx in counts:
             r = palette[idx*3]
@@ -37,13 +44,13 @@ def extract_colors(image_path, max_colors=4):
                 hex_colors.append(hex_c)
             if len(hex_colors) >= max_colors:
                 break
-        return hex_colors
+        return bg_hex, hex_colors
     except ImportError:
         print("Pillow not installed, skipping color extraction.")
-        return []
+        return None, []
     except Exception as e:
         print(f"Color extraction failed: {e}")
-        return []
+        return None, []
 
 def write_dynamic_style(bg_cover, bg_content, project_dir):
     # Determine max_colors from template_config.json if possible
@@ -59,18 +66,56 @@ def write_dynamic_style(bg_cover, bg_content, project_dir):
         pass
 
     colors = []
+    bg_hex = None
     if bg_content and os.path.exists(bg_content):
-        colors = extract_colors(bg_content, max_extracted)
+        bg_hex, colors = extract_colors(bg_content, max_extracted)
     if not colors and bg_cover and os.path.exists(bg_cover):
-        colors = extract_colors(bg_cover, max_extracted)
+        bg_hex, colors = extract_colors(bg_cover, max_extracted)
         
     if not colors: return
     
+    # Calculate brightness of background to determine Light vs Dark theme
+    is_light = True
+    if bg_hex:
+        try:
+            r = int(bg_hex[1:3], 16)
+            g = int(bg_hex[3:5], 16)
+            b = int(bg_hex[5:7], 16)
+            if (r + g + b) < 380:
+                is_light = False
+        except:
+            pass
+
+    # Generate full palette to override template_config.json baseline
+    palette = {
+        "primary": colors[0] if len(colors) > 0 else "#ffffff",
+        "secondary": colors[1] if len(colors) > 1 else "#a0a0a0",
+        "accent": colors[2] if len(colors) > 2 else "#f28b50"
+    }
+    
+    if is_light:
+        palette.update({
+            "background": bg_hex if bg_hex else "#ffffff",
+            "card_bg": "#ffffff",
+            "text": "#1f2937",
+            "text_muted": "#64748b",
+            "text_secondary": "#475569"
+        })
+        theme_style = "商务专业风格，现代简洁，留白充足"
+    else:
+        palette.update({
+            "background": bg_hex if bg_hex else "#121212",
+            "card_bg": "#1e1e1e",
+            "text": "#ffffff",
+            "text_muted": "#94a3b8",
+            "text_secondary": "#cbd5e1"
+        })
+        theme_style = "科技感，深色极客风格，信息密度高"
+    
     style = {
-        "colors": {
-            "primary": colors[0] if len(colors) > 0 else "#ffffff",
-            "secondary": colors[1] if len(colors) > 1 else "#a0a0a0",
-            "accent": colors[2] if len(colors) > 2 else "#f28b50"
+        "colors": palette,
+        "default_prompt": {
+            "style": theme_style
         },
         "rules": {
             "color_usage": f"严格遵守配置的色彩，单页最多允许使用 {max_per_page} 种颜色，防花哨。基于实际视觉提取，严禁臆想。",
