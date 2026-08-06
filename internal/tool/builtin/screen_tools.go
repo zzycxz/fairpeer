@@ -15,6 +15,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -349,4 +351,13 @@ func absInt(n int) int {
 		return -n
 	}
 	return n
+}
+
+// screenAttachmentsDir returns the directory for saving screenshot/perceive
+// attachments. Platform-agnostic (os.Getwd + filepath.Join).
+func screenAttachmentsDir() string {
+	if wd, err := os.Getwd(); err == nil {
+		return filepath.Join(wd, ".fairpeer", "attachments")
+	}
+	return filepath.Join(os.TempDir(), "fairpeer-screen")
 }

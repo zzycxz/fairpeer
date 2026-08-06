@@ -584,13 +584,6 @@ func utf8RuneCount(s string) int {
 	return len([]rune(s))
 }
 
-func screenAttachmentsDir() string {
-	if wd, err := os.Getwd(); err == nil {
-		return filepath.Join(wd, ".fairpeer", "attachments")
-	}
-	return filepath.Join(os.TempDir(), "fairpeer-screen")
-}
-
 // parseVK maps a platform-agnostic key name to its Windows virtual-key code.
 // Used by pressKey / pressKeyCombo (Windows input backend) to translate the
 // string key names produced by the platform-agnostic parseKeyCombo.
