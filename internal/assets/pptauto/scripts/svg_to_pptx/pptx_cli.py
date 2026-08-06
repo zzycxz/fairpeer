@@ -164,6 +164,9 @@ Recorded narration:
                         help='Specify canvas format')
     parser.add_argument('-q', '--quiet', action='store_true', help='Quiet mode')
 
+    parser.add_argument('--template', type=str, default=None,
+                        help='PPTX template file. When provided, the output inherits the template\'s slide master / layout / background. The template\'s existing slides are cleared and replaced with the SVG content on top of the template background.')
+
     parser.add_argument('--no-compat', action='store_true',
                         help='Disable Office compatibility mode (pure SVG only, requires Office 2019+)')
 
@@ -592,6 +595,7 @@ Recorded narration:
         image_sizing=args.image_sizing,
         image_scale=args.image_scale,
         image_quality=args.image_quality,
+        template_path=Path(args.template) if args.template else None,
     )
 
     success = True

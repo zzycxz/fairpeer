@@ -159,6 +159,16 @@ python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
 
 > 如需动画/过渡/旁白，参数见 `references/animations.md`。
 
+**使用模板背景**（用户提供了 PPTX 模板时）：
+
+```bash
+python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir> --template <template.pptx>
+```
+
+`--template` 指定一个 PPTX 模板文件，输出的 PPT 会继承模板的母版背景、版式和配色。模板原有的 slides 会被清除，SVG 内容叠加在模板背景之上。这对于需要企业 VI（如中国移动模板）的场景非常重要——不指定模板时输出为白底。
+
+模板放在 `<skill_dir>/templates/` 目录下，agent 可直接引用路径。
+
 ### Step 13: 视觉检查（仅 validate 模式）
 
 **13a** 导出截图（需 PowerPoint/WPS）：

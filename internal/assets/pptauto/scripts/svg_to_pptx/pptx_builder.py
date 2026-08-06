@@ -615,6 +615,7 @@ def create_pptx_with_native_svg(
     animation: str | None = None,
     animation_duration: float = 0.4,
     animation_stagger: float = 0.5,
+    template_path: Path | None = None,
     animation_trigger: str = 'after-previous',
     animation_config: dict[str, Any] | None = None,
     animation_cli_overrides: dict[str, bool] | None = None,
@@ -640,6 +641,37 @@ def create_pptx_with_native_svg(
         canvas_format: Canvas format key.
         verbose: Whether to output detailed information.
         transition: Transition effect name.
+        transition_duration: Transition duration in seconds.
+        auto_advance: Auto-advance interval in seconds.
+        use_compat_mode: Use Office compatibility mode (PNG + SVG dual format).
+        notes: Notes dict, key is SVG stem, value is notes content.
+        enable_notes: Whether to enable notes embedding.
+        use_native_shapes: Convert SVG to native DrawingML shapes.
+        animation: Per-element entrance animation mode.
+        animation_duration: Per-element entrance duration in seconds.
+        animation_stagger: Delay between elements in ``after-previous``.
+        animation_trigger: PowerPoint Start mode.
+        animation_config: Optional sidecar overrides from animations.json.
+        animation_cli_overrides: Flags indicating explicit CLI overrides.
+        narration_audio: Optional dict mapping SVG stem to narration audio.
+        use_narration_timings: Whether to set slide auto-advance from audio.
+        narration_padding: Extra seconds added after each narration.
+        cache_dir: Cache directory for SVG→PNG renders.
+        workers: Number of parallel workers.
+        merge_paragraphs: Whether to merge paragraph blocks.
+        image_optimize: Whether to downscale oversized raster images.
+        image_max_dimension: Maximum optimized image dimension in pixels.
+        image_sizing: ``cap`` or ``display``.
+        image_scale: Target image pixels per SVG display pixel.
+        image_quality: JPEG quality for optimized opaque rasters.
+        conversion_trace_path: Optional JSON path for diagnostics.
+        doc_metadata: Optional document metadata dict.
+        template_path: Optional PPTX template. When provided, the output
+            inherits the template's slide master / slide layout / background.
+            The template's existing slides are cleared; new slides are added
+            using the template's first slide layout, so the master background
+            shows through behind the SVG content. When None (default), a blank
+            Presentation() is used (white background, no template inheritance).
         transition_duration: Transition duration in seconds.
         auto_advance: Auto-advance interval in seconds.
         use_compat_mode: Use Office compatibility mode (PNG + SVG dual format).
@@ -746,14 +778,39 @@ def create_pptx_with_native_svg(
     temp_dir = _create_writable_work_dir(output_path)
 
     try:
-        # Create base PPTX with python-pptx
-        prs = Presentation()
-        prs.slide_width = width_emu
-        prs.slide_height = height_emu
+        # Create base PPTX with python-pptx. When a template is provided, open
+        # it so the output inherits the template's slide master / layout /
+        # background. The template's existing slides are cleared; new slides
+        # are added using the template's first layout so the master background
+        # shows through behind the SVG content. Without a template, fall back
+        # to the default blank Presentation (white background).
+        if template_path and Path(template_path).exists():
+            prs = Presentation(str(template_path))
+            if verbose:
+                print(f"  Using template: {template_path}")
+                print(f"    Layouts: {len(prs.slide_layouts)}, Masters: {len(prs.slide_masters)}")
+            # Clear the template's existing slides (keep master + layouts).
+            xml_slides = prs.slides._sldIdLst
+            for slide in list(xml_slides):
+                xml_slides.remove(slide)
+            # Use the template's first layout (carries the master's background).
+            if len(prs.slide_layouts) > 0:
+                template_layout = prs.slide_layouts[0]
+            else:
+                template_layout = prs.slide_layouts[6]  # fallback: Blank
+            # Override slide dimensions to match the SVG canvas (not the
+            # template's). This ensures the SVG fills the slide correctly even
+            # if the template used a different aspect ratio.
+            prs.slide_width = width_emu
+            prs.slide_height = height_emu
+        else:
+            prs = Presentation()
+            prs.slide_width = width_emu
+            prs.slide_height = height_emu
+            template_layout = prs.slide_layouts[6]  # Blank
 
-        blank_layout = prs.slide_layouts[6]
         for _ in svg_files:
-            prs.slides.add_slide(blank_layout)
+            prs.slides.add_slide(template_layout)
 
         base_pptx = temp_dir / 'base.pptx'
         prs.save(str(base_pptx))
