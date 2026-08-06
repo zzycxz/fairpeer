@@ -639,7 +639,10 @@ func (a *App) CheckCoworkBrowser() string {
 // user can add/edit JSON templates directly. Powers the "打开模板目录" button. The
 // dir is created/seeded first so it always exists when opened.
 func (a *App) OpenPPTTemplateDir() error {
-	dir := ppttemplate.DefaultDir()
+	dir := ppttemplate.SkillTemplatesDir()
+	if dir == "" {
+		dir = ppttemplate.DefaultDir()
+	}
 	if dir == "" {
 		return fmt.Errorf("无法定位模板目录（用户配置目录不可用）")
 	}

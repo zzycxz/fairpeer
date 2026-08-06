@@ -66,7 +66,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            wails build -platform ${{ matrix.goos }}/${{ matrix.goarch }} -clean -trimpath -webview2 embed
+            wails build -platform ${{ matrix.goos }}/${{ matrix.goarch }} -clean -trimpath -webview2 embed -nsis
           elif [ "${{ matrix.goos }}" = "linux" ]; then
             wails build -platform ${{ matrix.goos }}/${{ matrix.goarch }} -clean -trimpath -tags webkit2_41
           else
@@ -122,13 +122,13 @@ jobs:
       - name: Generate Manifest
         run: |
           cd desktop
-          go run ./cmd/sign manifest ../artifacts v0.1.0 latest
+          go run ./cmd/sign manifest ../artifacts v0.1.1 v0.1.1
 
       - name: Create Continuous Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "latest"
-          name: "Latest Build (Nightly)"
-          body: "Automated build for the latest commit on main branch."
+          tag_name: "v0.1.1"
+          name: "Release v0.1.1"
+          body: "Automated build for version v0.1.1"
           files: artifacts/*
-          prerelease: true
+          prerelease: false
