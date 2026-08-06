@@ -12,6 +12,17 @@ import os
 import json
 from pathlib import Path
 
+# Fix Windows console encoding (GBK → UTF-8) so Chinese template names and
+# color output don't crash with UnicodeEncodeError.
+try:
+    from console_encoding import configure_utf8_stdio
+    configure_utf8_stdio()
+except ImportError:
+    # Fallback: force UTF-8 directly if console_encoding module not on path.
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 def extract_colors_from_pptx(pptx_path):
     """从 PPTX 模板提取配色方案 + 最佳 layout 索引，返回 dict。"""
     from pptx import Presentation

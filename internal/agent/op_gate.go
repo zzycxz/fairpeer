@@ -176,6 +176,11 @@ func isQualifyingFailure(errMsg string, blocked, toolReadOnly bool) bool {
 // isTransientErr matches the transient-error keywords Reasonix recognized
 // (rules.go transientFailureText), which signal a timeout/deadline that the
 // provider retry layer already handles — not a deterministic loop.
+//
+// Also excludes validation-script failures (check_svg.py exit 1/2) — these
+// are intentional quality-gate results ("SVG has errors"), not execution
+// failures. Counting them would make the gate fire during normal validate-mode
+// PPT generation.
 func isTransientErr(s string) bool {
 	l := strings.ToLower(s)
 	for _, k := range []string{
@@ -185,6 +190,20 @@ func isTransientErr(s string) bool {
 		"context deadline exceeded",
 		"deadline exceeded",
 		"execution timeout",
+	} {
+		if strings.Contains(l, k) {
+			return true
+		}
+	}
+	// Validation scripts: check_svg.py / check_svg return non-zero exit codes
+	// when they find issues (exit 1=warnings, exit 2=errors). These are
+	// quality-gate results, not execution failures.
+	for _, k := range []string{
+		"check_svg",
+		"check-svg",
+		"[error]",
+		"[warn]",
+		"validation failed",
 	} {
 		if strings.Contains(l, k) {
 			return true

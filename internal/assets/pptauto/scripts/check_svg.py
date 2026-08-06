@@ -25,6 +25,16 @@ WARN（警告，建议修复）：
 import json, re, sys, os
 import xml.etree.ElementTree as ET
 
+# Fix Windows console encoding (GBK → UTF-8) so Chinese error messages
+# don't crash with UnicodeEncodeError or produce garbled output.
+try:
+    from console_encoding import configure_utf8_stdio
+    configure_utf8_stdio()
+except ImportError:
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 
 def load_config(config_path=None, svg_path=None):
     """加载配置文件，并合并项目级的动态样式（若存在）"""
