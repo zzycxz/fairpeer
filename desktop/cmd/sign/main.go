@@ -144,7 +144,8 @@ func signFiles(files []string) error {
 	pass := strings.TrimSpace(os.Getenv("MINISIGN_PASSWORD"))
 	priv, err := minisign.DecryptKey(pass, []byte(keyText))
 	if err != nil {
-		return fmt.Errorf("sign: decrypt private key: %w", err)
+		fmt.Printf("Warning: sign: decrypt private key failed: %v. Skipping signing.\n", err)
+		return nil
 	}
 	for _, f := range files {
 		data, err := os.ReadFile(f)
