@@ -137,11 +137,12 @@ func signFiles(files []string) error {
 	if len(files) == 0 {
 		return fmt.Errorf("sign: no files given")
 	}
-	keyText := os.Getenv("MINISIGN_PRIVATE_KEY")
-	if strings.TrimSpace(keyText) == "" {
+	keyText := strings.TrimSpace(os.Getenv("MINISIGN_PRIVATE_KEY"))
+	if keyText == "" {
 		return fmt.Errorf("sign: MINISIGN_PRIVATE_KEY is empty")
 	}
-	priv, err := minisign.DecryptKey(os.Getenv("MINISIGN_PASSWORD"), []byte(keyText))
+	pass := strings.TrimSpace(os.Getenv("MINISIGN_PASSWORD"))
+	priv, err := minisign.DecryptKey(pass, []byte(keyText))
 	if err != nil {
 		return fmt.Errorf("sign: decrypt private key: %w", err)
 	}
