@@ -54,7 +54,7 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, web_sea
 cat ~/.fairpeer/config.toml 2>/dev/null | grep ppt_active_template
 ```
 
-- 如果 `ppt_active_template = "中国移动模板"`（或其他模板名），则使用 `<skill_dir>/templates/<模板名>.pptx`
+- 如果 `ppt_active_template` 的值不是空或 `default`，则该值就是模板文件名（不含扩展名），使用 `<skill_dir>/templates/<该值>.pptx`
 - 如果值为空或 `default`，继续下面的目录扫描
 
 **然后扫描模板目录确认文件存在**：
