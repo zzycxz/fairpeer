@@ -1428,7 +1428,7 @@ func Default() *Config {
 		Desktop:       DesktopConfig{Theme: "light", ThemeStyle: "slate"},
 		Cowork: CoworkConfig{
 			EmbeddingModel:    "",
-			PPTActiveTemplate: "example",
+			PPTActiveTemplate: "通用商务模板",
 		},
 		Notifications: NotificationsConfig{
 			Enabled:         false,
