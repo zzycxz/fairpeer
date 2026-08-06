@@ -64,8 +64,12 @@ python3 <skill_dir>/scripts/extract_template_colors.py ~/.fairpeer/ppt-template.
 
 **⚠️ SVG 背景规则（极其重要）**：
 
-- **有模板时**：禁止画全屏不透明背景矩形。卡片、内容块可以用半透明色（如 `rgba(0,0,0,0.3)`）做局部背景，让模板背景透出来。
+提取后查看 `template_config.json` 的 `colors.background_type`：
+- **`image`（图片背景模板）**：禁止画任何全屏背景矩形——模板的图片背景必须透出来。卡片、内容块用半透明色（如 `rgba(0,0,0,0.3)`）做局部遮罩。
+- **`solid`（纯色背景模板）**：同样禁止画全屏背景矩形——模板自带纯色背景。
 - **无模板时**：画一个全屏 `<rect width="1280" height="720" fill="#背景色"/>` 作为背景。
+
+简言之：**只要 Step 0 找到了模板，就绝不画全屏背景矩形**。颜色信息（`background`、`accent`、`text` 等）用于卡片、标题、分隔线、图标等着色，不是用来铺满背景的。
 
 **Step 12 转换时传 `--template ~/.fairpeer/ppt-template.pptx`**（文件存在时）。
 
