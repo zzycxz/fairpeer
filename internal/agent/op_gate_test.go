@@ -63,11 +63,11 @@ func TestDecide_OrderingPrecedence(t *testing.T) {
 // read-only failures, and transient errors must NOT count against the budget.
 func TestIsQualifyingFailure(t *testing.T) {
 	tests := []struct {
-		name          string
-		errMsg        string
-		blocked       bool
-		toolReadOnly  bool
-		want          bool
+		name         string
+		errMsg       string
+		blocked      bool
+		toolReadOnly bool
+		want         bool
 	}{
 		{"success never qualifies", "", false, false, false},
 		{"permission/plan/hook block never qualifies", "blocked by permission policy", true, false, false},

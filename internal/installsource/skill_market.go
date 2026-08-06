@@ -203,11 +203,11 @@ func (m *SkillMarketTool) install(ctx context.Context, installRef, name, scope s
 		scope = "project"
 	}
 	args := map[string]any{
-		"op":      "install",
-		"source":  installRef,
-		"kind":    "skill",
-		"scope":   scope,
-		"apply":   apply,
+		"op":     "install",
+		"source": installRef,
+		"kind":   "skill",
+		"scope":  scope,
+		"apply":  apply,
 	}
 	if name != "" {
 		args["name"] = name

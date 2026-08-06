@@ -43,22 +43,22 @@ const registryCacheFilename = "registry-cache.json"
 // Chinese users). Coding-plan variants map to their "-coding" counterparts.
 var trackedVendors = map[string]string{
 	// Direct vendors (prefer CN endpoints for Chinese users)
-	"alibaba-cn":  "qwen",
-	"alibaba":     "qwen",    // fallback to intl if CN absent
-	"deepseek":    "deepseek",
-	"volcengine":  "volcengine",
-	"zhipuai":     "zhipu",   // CN endpoint (bigmodel.cn)
-	"zai":         "zhipu",   // intl endpoint (z.ai) — fallback
-	"minimax-cn":  "minimax",
-	"minimax":     "minimax", // intl fallback
+	"alibaba-cn":    "qwen",
+	"alibaba":       "qwen", // fallback to intl if CN absent
+	"deepseek":      "deepseek",
+	"volcengine":    "volcengine",
+	"zhipuai":       "zhipu", // CN endpoint (bigmodel.cn)
+	"zai":           "zhipu", // intl endpoint (z.ai) — fallback
+	"minimax-cn":    "minimax",
+	"minimax":       "minimax", // intl fallback
 	"moonshotai-cn": "moonshot",
 	"moonshotai":    "moonshot", // intl fallback
-	"xiaomi":      "mimo",
-	"stepfun":     "stepfun",  // CN endpoint
-	"stepfun-ai":  "stepfun",  // intl fallback
-	"xfyun":       "xfyun",
-	"anthropic":   "anthropic",
-	"openai":      "openai",
+	"xiaomi":        "mimo",
+	"stepfun":       "stepfun", // CN endpoint
+	"stepfun-ai":    "stepfun", // intl fallback
+	"xfyun":         "xfyun",
+	"anthropic":     "anthropic",
+	"openai":        "openai",
 
 	// Aggregators
 	"siliconflow-cn": "siliconflow",
@@ -66,15 +66,15 @@ var trackedVendors = map[string]string{
 	"openrouter":     "openrouter",
 
 	// Coding plans
-	"alibaba-coding-plan-cn":  "qwen-coding",
-	"alibaba-coding-plan":     "qwen-coding",
-	"zhipuai-coding-plan":     "zhipu-coding",
-	"zai-coding-plan":         "zhipu-coding",
-	"stepfun-step-plan":       "stepfun-coding",
-	"stepfun-ai-step-plan":    "stepfun-coding",
-	"tencent-coding-plan":     "tencent-coding",
-	"minimax-cn-coding-plan":  "minimax-coding",
-	"minimax-coding-plan":     "minimax-coding",
+	"alibaba-coding-plan-cn": "qwen-coding",
+	"alibaba-coding-plan":    "qwen-coding",
+	"zhipuai-coding-plan":    "zhipu-coding",
+	"zai-coding-plan":        "zhipu-coding",
+	"stepfun-step-plan":      "stepfun-coding",
+	"stepfun-ai-step-plan":   "stepfun-coding",
+	"tencent-coding-plan":    "tencent-coding",
+	"minimax-cn-coding-plan": "minimax-coding",
+	"minimax-coding-plan":    "minimax-coding",
 }
 
 // ModelRegistry holds the in-memory vendor list + cache metadata.

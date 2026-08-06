@@ -23,10 +23,10 @@ import (
 
 // clawhubItem is one skill entry in the ClawHub API response.
 type clawhubItem struct {
-	Slug        string `json:"slug"`
-	DisplayName string `json:"displayName"`
-	Summary     string `json:"summary"`
-	Description string `json:"description"`
+	Slug        string   `json:"slug"`
+	DisplayName string   `json:"displayName"`
+	Summary     string   `json:"summary"`
+	Description string   `json:"description"`
 	Topics      []string `json:"topics"`
 	Stats       struct {
 		Installs int `json:"installs"`

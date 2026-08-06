@@ -138,10 +138,12 @@ func TestExecuteOne_OpGateSuccessClears(t *testing.T) {
 // distinct fingerprints.
 type switchTool struct{ name string }
 
-func (s switchTool) Name() string            { return s.name }
-func (s switchTool) Description() string     { return "" }
-func (s switchTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}}}`) }
-func (s switchTool) ReadOnly() bool          { return false }
+func (s switchTool) Name() string        { return s.name }
+func (s switchTool) Description() string { return "" }
+func (s switchTool) Schema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}}}`)
+}
+func (s switchTool) ReadOnly() bool { return false }
 func (s switchTool) Execute(_ context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Content string `json:"content"`

@@ -14,11 +14,11 @@ import "testing"
 // test only locks the parsing contract.
 func TestParseKeyCombo(t *testing.T) {
 	cases := []struct {
-		in     string
-		hasMod bool
-		mod    string // expected modName ("" if hasMod is false)
-		key    string // expected keyName ("" for error seeds)
-		wantErr bool  // true → expect a non-nil error
+		in      string
+		hasMod  bool
+		mod     string // expected modName ("" if hasMod is false)
+		key     string // expected keyName ("" for error seeds)
+		wantErr bool   // true → expect a non-nil error
 	}{
 		{"ctrl+s", true, "ctrl", "s", false},
 		{"Control+S", true, "ctrl", "s", false},
@@ -36,8 +36,8 @@ func TestParseKeyCombo(t *testing.T) {
 		{"arrowleft", false, "", "arrowleft", false},
 		{"pageup", false, "", "pageup", false},
 		{"delete", false, "", "delete", false},
-		{"", false, "", "", true},    // empty input
-		{"xyz", false, "", "", true}, // unknown key
+		{"", false, "", "", true},      // empty input
+		{"xyz", false, "", "", true},   // unknown key
 		{"ctrl+", false, "", "", true}, // empty key after +
 		{"foo+s", false, "", "", true}, // unknown modifier
 	}
@@ -152,12 +152,12 @@ func TestAbsInt(t *testing.T) {
 // all matter for the assembled key combo.
 func TestSplitModifiers(t *testing.T) {
 	cases := map[string][]string{
-		"":            nil,
-		"ctrl":        {"ctrl"},
-		"ctrl+shift":  {"ctrl", "shift"},
-		"shift+ctrl":  {"shift", "ctrl"},
-		"ctrl+shift ": {"ctrl", "shift"}, // trailing space trimmed
-		" ctrl + alt ": {"ctrl", "alt"},  // surrounding spaces trimmed
+		"":             nil,
+		"ctrl":         {"ctrl"},
+		"ctrl+shift":   {"ctrl", "shift"},
+		"shift+ctrl":   {"shift", "ctrl"},
+		"ctrl+shift ":  {"ctrl", "shift"}, // trailing space trimmed
+		" ctrl + alt ": {"ctrl", "alt"},   // surrounding spaces trimmed
 	}
 	for in, want := range cases {
 		got := splitModifiers(in)

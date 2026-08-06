@@ -17,7 +17,7 @@ func TestDefaultMarketSources(t *testing.T) {
 	for _, s := range sources {
 		ids[s.ID] = true
 	}
-	for _, want := range []string{"builtin", "anthropics", "openai", "clawhub"} {
+	for _, want := range []string{"builtin", "anthropic", "openai", "clawhub"} {
 		if !ids[want] {
 			t.Errorf("default source %q missing", want)
 		}
@@ -59,7 +59,7 @@ func TestCatalogMatches(t *testing.T) {
 		"security":  true,  // topic + description match
 		"automated": true,  // description match
 		"missing":   false, // no match
-		"":          false, // empty query
+		"":          true,  // empty query = show all (matches implementation)
 	}
 	for query, want := range cases {
 		if got := catalogMatches(e, query); got != want {

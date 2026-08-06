@@ -6,11 +6,11 @@ import "testing"
 // (override > builtin > MCP > bash > readOnly).
 func TestClassify(t *testing.T) {
 	tests := []struct {
-		name     string
-		tool     string
-		readOnly bool
+		name      string
+		tool      string
+		readOnly  bool
 		overrides map[string]RiskClass
-		want     RiskClass
+		want      RiskClass
 	}{
 		// Path 1: explicit override wins over everything.
 		{"override beats builtin", "email_send", false, map[string]RiskClass{"email_send": RiskRead}, RiskRead},
@@ -62,12 +62,12 @@ func TestClassify_PriorityOrdering(t *testing.T) {
 // TestIsExternal confirms the predicate Gate.Check consults.
 func TestIsExternal(t *testing.T) {
 	cases := map[string]bool{
-		"email_send":               true,  // builtin external
-		"rag_delete":               true,  // builtin external
-		"mcp__srv__tool":           true,  // MCP default external
-		"read_file":                false, // read
-		"edit_file":                false, // write_local
-		"bash":                     false, // exec (not external)
+		"email_send":     true,  // builtin external
+		"rag_delete":     true,  // builtin external
+		"mcp__srv__tool": true,  // MCP default external
+		"read_file":      false, // read
+		"edit_file":      false, // write_local
+		"bash":           false, // exec (not external)
 	}
 	for tool, want := range cases {
 		t.Run(tool, func(t *testing.T) {
@@ -135,9 +135,9 @@ func TestParseRiskClass(t *testing.T) {
 		{"exec", RiskExec},
 		{"external", RiskExternal},
 		{"outward", RiskExternal},
-		{"", RiskExternal},        // empty → safe default
-		{"typo", RiskExternal},    // unknown → safe default
-		{"  Read  ", RiskRead},    // trimmed
+		{"", RiskExternal},     // empty → safe default
+		{"typo", RiskExternal}, // unknown → safe default
+		{"  Read  ", RiskRead}, // trimmed
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {

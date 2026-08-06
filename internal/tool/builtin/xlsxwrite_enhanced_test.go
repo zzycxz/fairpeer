@@ -423,4 +423,3 @@ func TestXLSXStyleDeduplication(t *testing.T) {
 		t.Errorf("style dedup failed: %d distinct style ids for 100 cells (want ≤2); ids=%v", len(seen), seen)
 	}
 }
-

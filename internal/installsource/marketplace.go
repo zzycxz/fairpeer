@@ -86,15 +86,15 @@ func DefaultMarketSourceMetas() []MarketSourceMeta {
 // cross-source format. This is what browse/search returns and what the agent
 // presents to the user.
 type CatalogEntry struct {
-	Source      string   `json:"source"`      // source ID
-	Name        string   `json:"name"`        // skill name (install name)
-	Slug        string   `json:"slug"`        // source-native identifier (clawhub slug)
+	Source      string   `json:"source"`           // source ID
+	Name        string   `json:"name"`             // skill name (install name)
+	Slug        string   `json:"slug"`             // source-native identifier (clawhub slug)
 	Author      string   `json:"author,omitempty"` // author handle (clawhub ownerHandle)
-	Description string   `json:"description"` // one-line summary
-	Topics      []string `json:"topics"`      // categories/tags
-	Installs    int      `json:"installs"`    // download count (clawhub has, GitHub doesn't)
-	ContentURL  string   `json:"contentUrl"`  // URL to fetch SKILL.md (install path)
-	InstallRef  string   `json:"installRef"`  // value to pass to install_source's `source`
+	Description string   `json:"description"`      // one-line summary
+	Topics      []string `json:"topics"`           // categories/tags
+	Installs    int      `json:"installs"`         // download count (clawhub has, GitHub doesn't)
+	ContentURL  string   `json:"contentUrl"`       // URL to fetch SKILL.md (install path)
+	InstallRef  string   `json:"installRef"`       // value to pass to install_source's `source`
 }
 
 // --- Claude marketplace.json parsing ----------------------------------------
@@ -110,9 +110,9 @@ type claudeMarketplacePlugin struct {
 }
 
 type claudeMarketplace struct {
-	Name        string                   `json:"name"`
-	Owner       json.RawMessage          `json:"owner"` // object, ignored
-	Plugins     []claudeMarketplacePlugin `json:"plugins"`
+	Name    string                    `json:"name"`
+	Owner   json.RawMessage           `json:"owner"` // object, ignored
+	Plugins []claudeMarketplacePlugin `json:"plugins"`
 }
 
 // fetchMarketplaceJSON fetches and parses a Claude Code marketplace.json from a

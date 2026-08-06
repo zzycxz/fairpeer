@@ -56,14 +56,14 @@ func npxNames() []string {
 // --- cached results ---------------------------------------------------------
 
 var (
-	uvOnce   sync.Once
-	uvPath   string
-	uvFound  bool
+	uvOnce  sync.Once
+	uvPath  string
+	uvFound bool
 
-	pyOnce     sync.Once
-	pyCmd      string
-	pyPrefix   []string
-	pyErr      error
+	pyOnce   sync.Once
+	pyCmd    string
+	pyPrefix []string
+	pyErr    error
 
 	nodeOnce  sync.Once
 	nodePath  string

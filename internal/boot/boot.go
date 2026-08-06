@@ -40,8 +40,8 @@ import (
 	"github.com/zzycxz/fairpeer/internal/permission"
 	"github.com/zzycxz/fairpeer/internal/plugin"
 	"github.com/zzycxz/fairpeer/internal/provider"
-	runtimepkg "github.com/zzycxz/fairpeer/internal/runtime"
 	"github.com/zzycxz/fairpeer/internal/rag"
+	runtimepkg "github.com/zzycxz/fairpeer/internal/runtime"
 	"github.com/zzycxz/fairpeer/internal/sandbox"
 	"github.com/zzycxz/fairpeer/internal/secret"
 	"github.com/zzycxz/fairpeer/internal/skill"
@@ -1263,13 +1263,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 
 	execSess := agent.NewSession(sysPrompt)
 	executor := agent.New(execProv, reg, execSess, agent.Options{
-		MaxSteps:          maxSteps,
-		Temperature:       cfg.Agent.Temperature,
-		Pricing:           entry.Price,
-		Gate:              headlessGate,
-		Hooks:             hookRunner,
-		Jobs:              jm,
-		ProjectChecks:     projectChecks,
+		MaxSteps:             maxSteps,
+		Temperature:          cfg.Agent.Temperature,
+		Pricing:              entry.Price,
+		Gate:                 headlessGate,
+		Hooks:                hookRunner,
+		Jobs:                 jm,
+		ProjectChecks:        projectChecks,
 		ContextWindow:        entry.ContextWindow,
 		SoftCompactRatio:     cfg.Agent.SoftCompactRatio,
 		CompactRatio:         cfg.Agent.CompactRatio,

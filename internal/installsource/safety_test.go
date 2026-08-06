@@ -26,8 +26,8 @@ Report findings concisely.`
 // pattern is detected and classified block/warn.
 func TestScanSkillContent_InjectionPatterns(t *testing.T) {
 	tests := []struct {
-		needle     string
-		wantBlock  bool // block-level expected
+		needle    string
+		wantBlock bool // block-level expected
 	}{
 		{"ignore all previous instructions", true},
 		{"ignore your previous instructions", true},

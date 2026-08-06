@@ -41,10 +41,10 @@ type DocSection struct {
 	// Image fields (type=image). Supported: PNG/JPG/GIF. SVG is NOT supported
 	// (Word needs a PNG raster fallback + asvg extension; convert SVG to PNG
 	// first — writeDOCX returns an explicit error for .svg paths).
-	ImagePath  string `json:"image_path,omitempty"`  // path to image file (PNG/JPG/GIF)
-	ImageAlt   string `json:"image_alt,omitempty"`   // alt text for accessibility (→ wp:docPr descr)
-	ImageWidth int   `json:"image_width,omitempty"`  // image width in pixels (0 = default 400)
-	ImageHeight int  `json:"image_height,omitempty"` // image height in pixels (0 = default 300)
+	ImagePath   string `json:"image_path,omitempty"`   // path to image file (PNG/JPG/GIF)
+	ImageAlt    string `json:"image_alt,omitempty"`    // alt text for accessibility (→ wp:docPr descr)
+	ImageWidth  int    `json:"image_width,omitempty"`  // image width in pixels (0 = default 400)
+	ImageHeight int    `json:"image_height,omitempty"` // image height in pixels (0 = default 300)
 
 	// TOC fields (type=toc)
 	TOCLevel int `json:"toc_level,omitempty"` // depth of TOC (heading levels 1-N; default 3)
@@ -187,6 +187,7 @@ func writeDOCXFull(in DocInput, images []struct{ name, path string }) error {
 //   - word/document.xml (new sections spliced before </w:body>)
 //   - word/_rels/document.xml.rels (original + new image relationships)
 //   - [Content_Types].xml (original + new image MIME types)
+//
 // New image rIds continue past the original's maximum rId so existing image
 // references (and any header/footer/hyperlink relationships) stay intact.
 func writeDOCXAppend(in DocInput, images []struct{ name, path string }) error {

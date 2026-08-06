@@ -136,7 +136,7 @@ func stableMarshalManifest(m Manifest) ([]byte, error) {
 	sort.Strings(names)
 	// Build an ordered map representation for stable JSON.
 	type orderedEntry struct {
-		Name string      `json:"name"`
+		Name  string `json:"name"`
 		Entry ManifestEntry
 	}
 	var ordered []orderedEntry
