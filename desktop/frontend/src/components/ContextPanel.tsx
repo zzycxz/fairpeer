@@ -147,6 +147,19 @@ export function ContextPanel({
 }: ContextPanelProps) {
   const t = useT();
   const [info, setInfo] = useState<ContextPanelInfo | null>(null);
+  const [compacting, setCompacting] = useState(false);
+
+  const handleCompact = useCallback(async () => {
+    if (compacting) return;
+    setCompacting(true);
+    try {
+      await app.Compact();
+    } catch {
+      /* ignore */
+    } finally {
+      setCompacting(false);
+    }
+  }, [compacting]);
 
   const refresh = useCallback(async () => {
     if (!tabId) return;
@@ -273,9 +286,10 @@ export function ContextPanel({
             </div>
             <button
               className="btn btn--small context-panel__compact-btn"
-              onClick={() => void app.Compact().catch(() => {})}
+              onClick={() => void handleCompact()}
+              disabled={compacting}
             >
-              {t("context.compactNow")}
+              {compacting ? t("context.compacting") : t("context.compactNow")}
             </button>
           </section>
           <PreviewSection

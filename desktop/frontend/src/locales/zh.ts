@@ -1461,6 +1461,7 @@ export const zh: Record<DictKey, string> = {
   "context.time": "耗时",
   "context.compaction": "压缩状态",
   "context.compactNow": "立即压缩",
+  "context.compacting": "压缩中…",
   "context.durationSeconds": "{seconds}秒",
   "context.durationMinutesSeconds": "{minutes}分{seconds}秒",
 

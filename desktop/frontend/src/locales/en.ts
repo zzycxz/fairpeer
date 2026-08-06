@@ -1460,6 +1460,7 @@ export const en = {
   "context.time": "Time",
   "context.compaction": "Compaction",
   "context.compactNow": "Compact now",
+  "context.compacting": "Compacting…",
   "context.durationSeconds": "{seconds}s",
   "context.durationMinutesSeconds": "{minutes}m {seconds}s",
 
