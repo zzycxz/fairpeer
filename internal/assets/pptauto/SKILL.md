@@ -47,15 +47,26 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, web_sea
 
 ### Step 0: 确定模板（关键！）
 
-扫描 `<skill_dir>/templates/` 目录下的 `.pptx` 文件（排除 `default.pptx`）：
+**首先检查用户在设置面板选择的模板**：
+
+```bash
+# 读取 fairpeer 配置中的模板选择（跨平台路径）
+cat ~/.fairpeer/config.toml 2>/dev/null | grep ppt_active_template
+```
+
+- 如果 `ppt_active_template = "中国移动模板"`（或其他模板名），则使用 `<skill_dir>/templates/<模板名>.pptx`
+- 如果值为空或 `default`，继续下面的目录扫描
+
+**然后扫描模板目录确认文件存在**：
 
 ```bash
 ls <skill_dir>/templates/*.pptx
 ```
 
-- **有且仅有 1 个模板** → 直接使用，记录路径
-- **有多个模板** → 询问用户"检测到以下模板：xxx、yyy，使用哪个？"
-- **没有模板**（只有 default.pptx）→ 无模板模式：SVG 自己画背景色
+- **配置指定了模板** → 使用该模板（确认文件存在），记录完整路径
+- **配置为空，目录有且仅有 1 个模板** → 直接使用
+- **配置为空，目录有多个模板** → 询问用户"检测到以下模板：xxx、yyy，使用哪个？"
+- **配置为空，没有模板**（只有 default.pptx）→ 无模板模式：SVG 自己画背景色
 
 **如果有模板，先提取配色**：
 
@@ -71,6 +82,8 @@ python3 <skill_dir>/scripts/extract_template_colors.py <template.pptx> <skill_di
 - **无模板时**：画一个全屏 `<rect width="1280" height="720" fill="#背景色"/>` 作为背景。
 
 这条规则直接影响 Step 5-8 的 SVG 生成。在生成 SVG 前必须确定是否有模板。
+
+**记录模板完整路径**，Step 12 转换时传给 `svg_to_pptx.py --template <完整路径>`。
 
 ### Step 1: 提取源文档（如有）
 
