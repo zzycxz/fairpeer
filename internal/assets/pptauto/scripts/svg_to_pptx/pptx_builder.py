@@ -821,8 +821,36 @@ def create_pptx_with_native_svg(
             prs.slide_height = height_emu
             template_layout = prs.slide_layouts[6]  # Blank
 
-        for _ in svg_files:
-            prs.slides.add_slide(template_layout)
+        for slide_idx in range(len(svg_files)):
+            # Choose layout per slide position: first slide may use a cover
+            # layout, last slide an ending layout, middle slides use the best
+            # content layout. Falls back to best_layout for all if no
+            # cover/ending layouts are identified.
+            chosen_layout = template_layout  # default: best content layout
+            if template_path and Path(template_path).exists():
+                # Read layout roles from template_config.json
+                config_path = Path(template_path).parent.parent / 'template_config.json'
+                if not config_path.exists():
+                    config_path = Path(__file__).resolve().parent.parent.parent / 'template_config.json'
+                try:
+                    import json
+                    _cfg = json.loads(config_path.read_text(encoding='utf-8'))
+                    _layouts = _cfg.get('_template', {}).get('layouts', [])
+                    _cover_idx = None
+                    _ending_idx = None
+                    for _li in _layouts:
+                        if _li.get('is_cover') and _cover_idx is None:
+                            _cover_idx = _li['index']
+                        if _li.get('is_ending') and _ending_idx is None:
+                            _ending_idx = _li['index']
+                    total = len(svg_files)
+                    if slide_idx == 0 and _cover_idx is not None and _cover_idx < len(prs.slide_layouts):
+                        chosen_layout = prs.slide_layouts[_cover_idx]
+                    elif slide_idx == total - 1 and total > 2 and _ending_idx is not None and _ending_idx < len(prs.slide_layouts):
+                        chosen_layout = prs.slide_layouts[_ending_idx]
+                except Exception:
+                    pass
+            prs.slides.add_slide(chosen_layout)
 
         base_pptx = temp_dir / 'base.pptx'
         prs.save(str(base_pptx))
