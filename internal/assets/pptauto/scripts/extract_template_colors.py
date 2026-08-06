@@ -27,6 +27,7 @@ def extract_colors_from_pptx(pptx_path):
     """从 PPTX 模板提取配色方案 + 最佳 layout 索引，返回 dict。"""
     from pptx import Presentation
     from lxml import etree
+    import zipfile
 
     NS = {
         'p': 'http://schemas.openxmlformats.org/presentationml/2006/main',
@@ -37,27 +38,70 @@ def extract_colors_from_pptx(pptx_path):
     prs = Presentation(str(pptx_path))
     all_colors = {}  # hex -> count
 
+    # --- 1. 读 theme.xml 的配色方案（之前完全漏掉的来源）---
+    # theme 的 accent1-6 是模板真正的主题色，比 layout 里的更权威。
+    # schemeClr 引用（accent1/tx1/bg1 等）也靠这个表解析。
+    scheme_map = {}  # scheme name → hex (e.g. "accent1" → "4472C4")
+    try:
+        with zipfile.ZipFile(str(pptx_path)) as zf:
+            theme_xml = etree.fromstring(zf.read('ppt/theme/theme1.xml'))
+            clr_scheme = theme_xml.find('.//a:clrScheme', NS)
+            if clr_scheme is not None:
+                for child in clr_scheme:
+                    tag = child.tag.split('}')[-1]  # accent1, dk1, lt1, etc.
+                    srgb = child.find('a:srgbClr', NS)
+                    sys_clr = child.find('a:sysClr', NS)
+                    hex_val = None
+                    if srgb is not None:
+                        hex_val = srgb.get('val', '').upper()
+                    elif sys_clr is not None:
+                        hex_val = sys_clr.get('lastClr', '').upper()
+                    if hex_val:
+                        scheme_map[tag] = hex_val
+                        if hex_val not in ('000000', 'FFFFFF', '00000000'):
+                            all_colors[hex_val] = all_colors.get(hex_val, 0) + 5  # theme 颜色权重高
+    except Exception:
+        pass
+
+    def resolve_scheme_clr(val):
+        """把 schemeClr 的值（如 accent1/tx1/bg1）解析成 hex。"""
+        if not val:
+            return None
+        v = val.lower()
+        # 直接映射
+        if v in scheme_map:
+            return scheme_map[v]
+        # 别名
+        aliases = {'tx1': 'dk1', 'bg1': 'lt1', 'tx2': 'dk2', 'bg2': 'lt2'}
+        if v in aliases and aliases[v] in scheme_map:
+            return scheme_map[aliases[v]]
+        return None
+
     def collect_colors(xml_element):
-        """递归收集 srgbClr 颜色值。"""
+        """收集 srgbClr + schemeClr 颜色值。"""
         for clr in xml_element.findall('.//a:srgbClr', NS):
             val = clr.get('val')
             if val:
                 val = val.upper()
-                if val in ('000000', 'FFFFFF', '00000000'):
-                    continue
-                all_colors[val] = all_colors.get(val, 0) + 1
+                if val not in ('000000', 'FFFFFF', '00000000'):
+                    all_colors[val] = all_colors.get(val, 0) + 1
+        # 也收集 schemeClr 引用（之前完全漏掉的来源）
+        for clr in xml_element.findall('.//a:schemeClr', NS):
+            val = clr.get('val')
+            resolved = resolve_scheme_clr(val)
+            if resolved and resolved not in ('000000', 'FFFFFF', '00000000'):
+                all_colors[resolved] = all_colors.get(resolved, 0) + 1
 
     def count_shapes(xml_element):
-        """统计 shapes 数量（区分内容页 vs 封面页）。"""
         sps = xml_element.findall('.//p:sp', NS)
         pics = xml_element.findall('.//p:pic', NS)
         return len(sps) + len(pics)
 
-    # 扫描 slide master
+    # --- 2. 扫描 slide master（包括 schemeClr 引用）---
     for master in prs.slide_masters:
         collect_colors(master.element)
 
-    # 分析每个 layout：收集颜色 + 统计 shapes + 记录图片数
+    # --- 3. 分析每个 layout ---
     layout_info = []
     for li, layout in enumerate(prs.slide_layouts):
         layout_colors = {}
@@ -67,6 +111,11 @@ def extract_colors_from_pptx(pptx_path):
                 val = val.upper()
                 if val not in ('000000', 'FFFFFF', '00000000'):
                     layout_colors[val] = layout_colors.get(val, 0) + 1
+        # 也收集 schemeClr
+        for clr in layout.element.findall('.//a:schemeClr', NS):
+            resolved = resolve_scheme_clr(clr.get('val'))
+            if resolved and resolved not in ('000000', 'FFFFFF'):
+                layout_colors[resolved] = layout_colors.get(resolved, 0) + 1
         shape_count = count_shapes(layout.element)
         image_count = len(layout.element.findall('.//a:blip', NS))
         layout_info.append({
@@ -78,7 +127,7 @@ def extract_colors_from_pptx(pptx_path):
         })
         collect_colors(layout.element)
 
-    # 扫描 slides
+    # --- 4. 扫描 slides ---
     for slide in prs.slides:
         collect_colors(slide.element)
 
