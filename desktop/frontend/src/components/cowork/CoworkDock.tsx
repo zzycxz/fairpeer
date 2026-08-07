@@ -437,7 +437,7 @@ function TodayView() {
         {/* 1. 顶部简报卡片 */}
         <div className="cowork-today__briefing">
           <div className="cowork-today__briefing-head" style={{ display: "flex", alignItems: "center", justifyContent: "flex-start" }}>
-            <Sparkles size={14} style={{ color: "#f26522", marginRight: "4px" }} />
+            <Sparkles size={14} style={{ color: "var(--accent)", marginRight: "4px" }} />
             <span style={{ fontWeight: 600 }}>今日日程与任务</span>
           </div>
           <div className="cowork-today__briefing-body" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -455,7 +455,7 @@ function TodayView() {
           <div className="cowork-today__briefing-actions">
             <button 
               className="rag-toolbar__btn" 
-              style={{ background: "#f26522", color: "#fff", border: "none" }}
+              style={{ background: "var(--accent)", color: "var(--accent-fg)", border: "none" }}
               onClick={() => {
                 const prompt = `请生成今日行政决策早报。在早报开头，请务必直接列出以下现状信息：\n1. 今日安排核心日程 ${todayItems.length} 项。\n2. 待处理未读件 ${unreadCount} 封。\n3. 当前时段的紧迫议程。\n4. 昨日邮件的重要内容。\n\n接下来，请调用邮箱等工具分析上述内容，并向我简炼总结：今日还需要做的事情，以及昨天已经进行或遗留的重要事项。`;
                 window.dispatchEvent(new CustomEvent("cowork:insert-text", { detail: prompt }));
