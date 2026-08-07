@@ -210,10 +210,18 @@ func scanForFullScreenBlip(text string) string {
 			picBlock = rest
 		}
 
-		off := extractAttrInt(picBlock, "<a:off", "x")
-		offY := extractAttrInt(picBlock, "<a:off", "y")
-		cx := extractAttrInt(picBlock, "<a:ext", "cx")
-		cy := extractAttrInt(picBlock, "<a:ext", "cy")
+		// Scope geometry search to <a:xfrm>...</a:xfrm> to avoid matching
+		// <a:ext> inside <a:extLst> (which is a different element that also
+		// starts with "<a:ext" but has uri= instead of cx=/cy= attributes).
+		xfrmBlock := extractTagContent(picBlock, "a:xfrm")
+		if xfrmBlock == "" {
+			continue // no xfrm = can't determine geometry
+		}
+
+		off := extractAttrInt(xfrmBlock, "<a:off", "x")
+		offY := extractAttrInt(xfrmBlock, "<a:off", "y")
+		cx := extractAttrInt(xfrmBlock, "<a:ext", "cx")
+		cy := extractAttrInt(xfrmBlock, "<a:ext", "cy")
 
 		if !isFullScreenEMU(off, offY, cx, cy) {
 			continue
@@ -226,6 +234,34 @@ func scanForFullScreenBlip(text string) string {
 		}
 	}
 	return ""
+}
+
+// extractTagContent returns the text between the first <tag> and </tag>,
+// or "" if not found. Handles both <tag>...</tag> and <tag/> (returns "" for
+// self-closing since there's no content).
+func extractTagContent(text, tag string) string {
+	openTag := "<" + tag
+	closeTag := "</" + tag + ">"
+	idx := strings.Index(text, openTag)
+	if idx < 0 {
+		return ""
+	}
+	// Skip past the opening tag (find its closing >)
+	rest := text[idx:]
+	gt := strings.Index(rest, ">")
+	if gt < 0 {
+		return ""
+	}
+	// Check for self-closing <tag .../>
+	if gt > 0 && rest[gt-1] == '/' {
+		return ""
+	}
+	contentStart := rest[gt+1:]
+	end := strings.Index(contentStart, closeTag)
+	if end < 0 {
+		return ""
+	}
+	return contentStart[:end]
 }
 
 // splitXMLBlock splits text on a tag-start, returning the remainder after each
@@ -290,14 +326,19 @@ func extractAttrInt(block, tagPrefix, attrName string) int64 {
 
 // extractBlipRID extracts r:embed="rId2" from a blip element.
 func extractBlipRID(block string) string {
-	// blip tag: <a:blip r:embed="rIdN" ...>
-	// The namespace prefix may vary; search for embed="
+	// Scope to <a:blip ...> to avoid matching embed= in unrelated elements.
+	blipIdx := strings.Index(block, "<a:blip")
+	if blipIdx < 0 {
+		// Some producers use a different prefix; fall back to whole-block search
+		blipIdx = 0
+	}
+	searchBlock := block[blipIdx:]
 	embedKey := "embed=\""
-	idx := strings.Index(block, embedKey)
+	idx := strings.Index(searchBlock, embedKey)
 	if idx < 0 {
 		return ""
 	}
-	rest := block[idx+len(embedKey):]
+	rest := searchBlock[idx+len(embedKey):]
 	end := strings.Index(rest, "\"")
 	if end < 0 {
 		return ""
@@ -441,7 +482,7 @@ func readZipFile(f *zip.File) ([]byte, error) {
 // parseVLMStyleResponse extracts the JSON from the VLM's text response. The
 // model may wrap it in markdown or add prose, so we find the first {...} block.
 func parseVLMStyleResponse(resp string) *templateStyleResult {
-	// Find the first { and last }
+	// Find the first { and last } to extract the JSON object from prose/markdown
 	start := strings.Index(resp, "{")
 	end := strings.LastIndex(resp, "}")
 	if start < 0 || end < 0 || end <= start {
@@ -449,76 +490,19 @@ func parseVLMStyleResponse(resp string) *templateStyleResult {
 	}
 	jsonStr := resp[start : end+1]
 
-	// Manual parse (avoid adding encoding/json import churn for a simple struct)
 	result := &templateStyleResult{Source: "vision-vlm", BackgroundType: "image"}
-	// Extract background
-	if v := extractJSONString(jsonStr, "background"); v != "" {
-		result.Background = v
+	if err := json.Unmarshal([]byte(jsonStr), result); err != nil {
+		return nil // malformed JSON — fall back to Python extractor
 	}
-	if v := extractJSONBool(jsonStr, "is_dark"); v {
-		result.IsDark = true
-	}
-	if v := extractJSONString(jsonStr, "text_color"); v != "" {
-		result.TextColor = v
-	}
-	result.AccentColors = extractJSONStringArray(jsonStr, "accent_colors")
-	result.StyleKeywords = extractJSONStringArray(jsonStr, "style_keywords")
+	// Override the defaults (Unmarshal would leave these as zero values)
+	result.Source = "vision-vlm"
+	result.BackgroundType = "image"
 
 	// Sanity: must have at least a background
 	if result.Background == "" {
 		return nil
 	}
 	return result
-}
-
-// extractJSONString extracts a string value for a key from JSON text.
-func extractJSONString(json, key string) string {
-	search := "\"" + key + "\":\""
-	idx := strings.Index(json, search)
-	if idx < 0 {
-		return ""
-	}
-	rest := json[idx+len(search):]
-	end := strings.Index(rest, "\"")
-	if end < 0 {
-		return ""
-	}
-	return rest[:end]
-}
-
-// extractJSONBool extracts a bool value for a key from JSON text.
-func extractJSONBool(json, key string) bool {
-	search := "\"" + key + "\":"
-	idx := strings.Index(json, search)
-	if idx < 0 {
-		return false
-	}
-	rest := json[idx+len(search):]
-	return strings.HasPrefix(strings.TrimSpace(rest), "true")
-}
-
-// extractJSONStringArray extracts a string array for a key from JSON text.
-func extractJSONStringArray(json, key string) []string {
-	search := "\"" + key + "\":["
-	idx := strings.Index(json, search)
-	if idx < 0 {
-		return nil
-	}
-	rest := json[idx+len(search):]
-	end := strings.Index(rest, "]")
-	if end < 0 {
-		return nil
-	}
-	arrStr := rest[:end]
-	out := []string{}
-	for _, part := range strings.Split(arrStr, ",") {
-		part = strings.TrimSpace(part)
-		part = strings.Trim(part, "\"")
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
 }
 
 // jsonMarshal marshals the result to indented JSON.

@@ -180,8 +180,7 @@ def extract_colors_from_pptx(pptx_path):
     for master in prs.slide_masters:
         collect_colors(master.element)
 
-    # --- 3. 检测全屏图片背景 + 收集 layout 信息 ---
-    layout_info = []
+    # --- 3. 检测全屏图片背景 ---
     image_bg_info = None  # (avg_hex, [top_hexes]) 或 None
 
     with zipfile.ZipFile(str(pptx_path)) as zf:
@@ -204,24 +203,10 @@ def extract_colors_from_pptx(pptx_path):
                         return zf.read(img_path)
             return None
 
-        for li, layout in enumerate(prs.slide_layouts):
-            layout_colors = {}
-            for clr in layout.element.findall('.//a:srgbClr', NS):
-                val = clr.get('val')
-                if val:
-                    val = val.upper()
-                    if val not in ('000000', 'FFFFFF', '00000000'):
-                        layout_colors[val] = layout_colors.get(val, 0) + 1
-            for clr in layout.element.findall('.//a:schemeClr', NS):
-                resolved = resolve_scheme_clr(clr.get('val'))
-                if resolved and resolved not in ('000000', 'FFFFFF'):
-                    layout_colors[resolved] = layout_colors.get(resolved, 0) + 1
-
+        for layout in prs.slide_layouts:
             # 检测全屏图片背景
             has_image_bg = False
-            sps = layout.element.findall('.//p:sp', NS)
             pics = layout.element.findall('.//p:pic', NS)
-            blips = layout.element.findall('.//a:blip', NS)
             for pic in pics:
                 xfrm = pic.find('.//p:spPr/a:xfrm', NS)
                 if xfrm is None:
@@ -265,14 +250,6 @@ def extract_colors_from_pptx(pptx_path):
                                 if h not in ('000000', 'FFFFFF'):
                                     all_colors[h] = all_colors.get(h, 0) + 2
 
-            layout_info.append({
-                'index': li,
-                'name': layout.name,
-                'colors': layout_colors,
-                'shapes': len(sps),
-                'images': len(blips),
-                'has_image_bg': has_image_bg,
-            })
             collect_colors(layout.element)
 
         for slide in prs.slides:

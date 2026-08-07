@@ -369,10 +369,7 @@ def check_svg(svg_path, config=None, mode="fast"):
         # 检测全屏 rect 或 image（覆盖 ≥90% viewBox）
         for elem in root.iter():
             tag = elem.tag.split('}')[-1].lower()
-            if tag == 'image':
-                has_background = True
-                break
-            if tag == 'rect':
+            if tag in ('image', 'rect'):
                 try:
                     rw = float(elem.get('width', 0)); rh = float(elem.get('height', 0))
                     rx = float(elem.get('x', 0)); ry = float(elem.get('y', 0))

@@ -27,9 +27,8 @@
     ],
     "output_requirements": [
       "SVG格式，viewBox=0 0 1280 720",
-      "使用模板时：禁止画全屏不透明背景矩形（会遮住模板背景）。可以画局部半透明色块（如卡片背景用 rgba(0,0,0,0.3)）增强内容可读性，但面积不能超过页面的 60%",
-      "不使用模板时：画一个全屏 rect 填充 background 色作为背景",
-      "卡片、内容块可以有自己的半透明背景色，让模板背景若隐若现",
+      "每页第一个元素必须是全屏背景 <rect width=\"1280\" height=\"720\" fill=\"#背景色\"/>（背景色读 colors.background）。无论有无模板都要画——SVG 管线不继承模板背景",
+      "卡片、内容块可以有自己的半透明背景色（如 rgba(0,0,0,0.3)）增强可读性",
       "文字在框体内，不溢出",
       "禁止使用filter/pattern/mask"
     ],
@@ -107,18 +106,5 @@
     "content_count": 6,
     "cover_count": 1,
     "ending_count": 1
-  },
-  "template": "内置:templates/default.pptx",
-  "template_override": null,
-  "template_usage": {
-    "apply_to": {
-      "background": true,
-      "colors": true,
-      "content_structure": false,
-      "layout": false,
-      "logo": true
-    },
-    "description": "使用模板的品牌标识、配色和背景装饰；内容布局可调整，但必须保持科技极客风格、留白和克制配色",
-    "mode": "fast"
   }
 }
