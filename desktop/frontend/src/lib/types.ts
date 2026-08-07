@@ -1118,9 +1118,11 @@ export interface BotAllowlistView {
   qqUsers: string[];
   feishuUsers: string[];
   weixinUsers: string[];
+  telegramUsers: string[];
   qqGroups: string[];
   feishuGroups: string[];
   weixinGroups: string[];
+  telegramGroups: string[];
 }
 
 export interface QQBotView {
@@ -1150,6 +1152,13 @@ export interface WeixinBotView {
   apiBase: string;
 }
 
+export interface TelegramBotView {
+  enabled: boolean;
+  tokenEnv: string;
+  tokenSet: boolean;
+  apiBase: string;
+}
+
 export interface BotConnectionCredentialView {
   appId: string;
   appSecretEnv: string;
@@ -1168,8 +1177,8 @@ export interface BotConnectionSessionMappingView {
 
 export interface BotConnectionView {
   id: string;
-  provider: "qq" | "feishu" | "weixin" | string;
-  domain: "qq" | "feishu" | "lark" | "weixin" | string;
+  provider: "qq" | "feishu" | "weixin" | "telegram" | string;
+  domain: "qq" | "feishu" | "lark" | "weixin" | "telegram" | string;
   label: string;
   enabled: boolean;
   status: "disconnected" | "pending" | "connected" | "error" | string;
@@ -1215,6 +1224,7 @@ export interface BotSettingsView {
   qq: QQBotView;
   feishu: FeishuBotView;
   weixin: WeixinBotView;
+  telegram: TelegramBotView;
   connections: BotConnectionView[];
 }
 

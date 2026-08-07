@@ -500,6 +500,19 @@ func (a *App) SetCoWorkSettings(v CoWorkSettingsView) (err error) {
 	if err := a.updatePPTSkillConfig("mode", mode); err != nil {
 		slog.Warn("SetCoWorkSettings: updatePPTSkillConfig failed", "err", err)
 	}
+
+	// Hot-reload the global hotkeys so a changed combo or a just-enabled toggle
+	// takes effect immediately — without this, StartScreenshotHotkey() (called
+	// once at startup) would keep polling with the OLD config (or not run at all
+	// if the feature was off at boot), so the user would have to restart the app
+	// to use the hotkey. Stop-then-Start is safe: Stop is a no-op when nothing
+	// is running (and idempotent via stopOnce), and Start reads fresh config and
+	// returns early when the feature is disabled.
+	a.StopScreenshotHotkey()
+	a.StartScreenshotHotkey()
+	a.StopEStopHotkey()
+	a.StartEStopHotkey()
+
 	slog.Info("SetCoWorkSettings complete")
 	return nil
 }

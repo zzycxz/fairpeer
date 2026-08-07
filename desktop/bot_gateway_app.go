@@ -8,6 +8,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/bot"
 	"github.com/zzycxz/fairpeer/internal/bot/feishu"
 	"github.com/zzycxz/fairpeer/internal/bot/qq"
+	"github.com/zzycxz/fairpeer/internal/bot/telegram"
 	"github.com/zzycxz/fairpeer/internal/bot/weixin"
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/tool/builtin"
@@ -52,6 +53,9 @@ func (a *App) startBotGateway(cfg *config.Config) {
 	if cfg.Bot.Weixin.Enabled {
 		adapters[bot.PlatformWeixin] = weixin.New(cfg.Bot.Weixin, logger)
 	}
+	if cfg.Bot.Telegram.Enabled {
+		adapters[bot.PlatformTelegram] = telegram.New(cfg.Bot.Telegram, logger)
+	}
 
 	if len(adapters) == 0 {
 		logger.Warn("bot enabled but no channels enabled, skipping gateway start")
@@ -68,39 +72,44 @@ func (a *App) startBotGateway(cfg *config.Config) {
 		Model:    modelName,
 		MaxSteps: cfg.Bot.MaxSteps,
 		Enabled: map[bot.Platform]bool{
-			bot.PlatformQQ:     cfg.Bot.QQ.Enabled,
-			bot.PlatformFeishu: cfg.Bot.Feishu.Enabled,
-			bot.PlatformWeixin: cfg.Bot.Weixin.Enabled,
+			bot.PlatformQQ:       cfg.Bot.QQ.Enabled,
+			bot.PlatformFeishu:   cfg.Bot.Feishu.Enabled,
+			bot.PlatformWeixin:   cfg.Bot.Weixin.Enabled,
+			bot.PlatformTelegram: cfg.Bot.Telegram.Enabled,
 		},
 		Allowlist: bot.AllowlistConfig{
 			Enabled:  cfg.Bot.Allowlist.Enabled,
 			AllowAll: cfg.Bot.Allowlist.AllowAll,
 			Mode:     cfg.Bot.Allowlist.Mode,
 			Users: map[bot.Platform][]string{
-				bot.PlatformQQ:     cfg.Bot.Allowlist.QQUsers,
-				bot.PlatformFeishu: cfg.Bot.Allowlist.FeishuUsers,
-				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinUsers,
+				bot.PlatformQQ:       cfg.Bot.Allowlist.QQUsers,
+				bot.PlatformFeishu:   cfg.Bot.Allowlist.FeishuUsers,
+				bot.PlatformWeixin:   cfg.Bot.Allowlist.WeixinUsers,
+				bot.PlatformTelegram: cfg.Bot.Allowlist.TelegramUsers,
 			},
 			Groups: map[bot.Platform][]string{
-				bot.PlatformQQ:     cfg.Bot.Allowlist.QQGroups,
-				bot.PlatformFeishu: cfg.Bot.Allowlist.FeishuGroups,
-				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinGroups,
+				bot.PlatformQQ:       cfg.Bot.Allowlist.QQGroups,
+				bot.PlatformFeishu:   cfg.Bot.Allowlist.FeishuGroups,
+				bot.PlatformWeixin:   cfg.Bot.Allowlist.WeixinGroups,
+				bot.PlatformTelegram: cfg.Bot.Allowlist.TelegramGroups,
 			},
 		},
 		Channels: botChannelConfigsFromConnections(cfg.Bot.Connections),
 		Debounce: time.Duration(cfg.Bot.DebounceMs) * time.Millisecond,
-		AllowlistSaver: func(alCfg bot.AllowlistConfig) {
-			if err := a.applyConfigOnly(func(c *config.Config) error {
-				c.Bot.Allowlist.Enabled = alCfg.Enabled
-				c.Bot.Allowlist.AllowAll = alCfg.AllowAll
-				c.Bot.Allowlist.FeishuUsers = alCfg.Users[bot.PlatformFeishu]
-				c.Bot.Allowlist.WeixinUsers = alCfg.Users[bot.PlatformWeixin]
-				c.Bot.Allowlist.QQUsers = alCfg.Users[bot.PlatformQQ]
-				return nil
-			}); err != nil {
-				logger.Warn("failed to persist allowlist", "err", err)
-			}
-		},
+			AllowlistSaver: func(alCfg bot.AllowlistConfig) {
+				if err := a.applyConfigOnly(func(c *config.Config) error {
+					c.Bot.Allowlist.Enabled = alCfg.Enabled
+					c.Bot.Allowlist.AllowAll = alCfg.AllowAll
+					c.Bot.Allowlist.FeishuUsers = alCfg.Users[bot.PlatformFeishu]
+					c.Bot.Allowlist.WeixinUsers = alCfg.Users[bot.PlatformWeixin]
+					c.Bot.Allowlist.QQUsers = alCfg.Users[bot.PlatformQQ]
+					c.Bot.Allowlist.TelegramUsers = alCfg.Users[bot.PlatformTelegram]
+					c.Bot.Allowlist.TelegramGroups = alCfg.Groups[bot.PlatformTelegram]
+					return nil
+				}); err != nil {
+					logger.Warn("failed to persist allowlist", "err", err)
+				}
+			},
 		OnTurnFinished: func(plat bot.Platform, remoteID, sessionPath string) {
 			// 一轮对话结束后回写：remoteID 填「远端 ID」、sessionPath 填「本地话题」。
 			provider := botPlatformToProvider(plat)
@@ -262,7 +271,7 @@ func (a *App) BotDockStatus() BotDockStatusView {
 // to find the connection whose SessionMappings should record the remote ID.
 func botPlatformToProvider(plat bot.Platform) string {
 	switch plat {
-	case bot.PlatformFeishu, bot.PlatformWeixin, bot.PlatformQQ:
+	case bot.PlatformFeishu, bot.PlatformWeixin, bot.PlatformQQ, bot.PlatformTelegram:
 		return string(plat)
 	}
 	return ""
@@ -280,7 +289,7 @@ func botChannelConfigsFromConnections(connections []config.BotConnectionConfig) 
 		}
 		plat := bot.Platform(strings.TrimSpace(conn.Provider))
 		switch plat {
-		case bot.PlatformQQ, bot.PlatformFeishu, bot.PlatformWeixin:
+		case bot.PlatformQQ, bot.PlatformFeishu, bot.PlatformWeixin, bot.PlatformTelegram:
 		default:
 			continue
 		}

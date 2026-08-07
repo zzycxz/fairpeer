@@ -136,7 +136,7 @@ type HistoryViewState =
   | { kind: "history"; source: "scope"; filter: HistoryScopeFilter; sessions: SessionMeta[] }
   | { kind: "history"; source: "all"; sessions: SessionMeta[] }
   | { kind: "trash"; sessions: SessionMeta[] };
-type SidebarImPlatform = "feishu" | "lark" | "weixin";
+type SidebarImPlatform = "feishu" | "lark" | "weixin" | "telegram";
 type SidebarImStatus = "connected" | "disabled" | "pending" | "error" | "disconnected";
 type SidebarImConnection = {
   id: string;
@@ -166,15 +166,17 @@ type SidebarImConnectionDetailProps = {
 };
 
 function isSidebarImConnection(connection: BotConnectionView): boolean {
-  return connection.provider === "feishu" || connection.provider === "weixin";
+  return connection.provider === "feishu" || connection.provider === "weixin" || connection.provider === "telegram";
 }
 
 function sidebarImPlatform(connection: BotConnectionView): SidebarImPlatform {
+  if (connection.provider === "telegram") return "telegram";
   if (connection.provider === "weixin") return "weixin";
   return connection.domain === "lark" ? "lark" : "feishu";
 }
 
 function sidebarImPlatformLabel(platform: SidebarImPlatform, translate: Translator): string {
+  if (platform === "telegram") return translate("settings.botTelegram");
   if (platform === "lark") return "Lark";
   if (platform === "weixin") return translate("settings.botWeixin");
   return translate("settings.botFeishu");

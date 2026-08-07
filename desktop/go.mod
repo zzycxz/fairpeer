@@ -19,6 +19,7 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/minio/selfupdate v0.6.0
 	github.com/wailsapp/wails/v2 v2.13.0
+	golang.org/x/image v0.43.0
 	golang.org/x/mod v0.37.0
 	golang.org/x/sys v0.46.0
 	golang.org/x/text v0.39.0
@@ -75,7 +76,6 @@ require (
 	github.com/xuri/excelize/v2 v2.11.0 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
-	golang.org/x/image v0.43.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	modernc.org/libc v1.72.3 // indirect

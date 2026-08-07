@@ -309,6 +309,9 @@ export interface AppBindings {
   ClearBotSecret(envName: string): Promise<void>;
   StartBotConnectionInstall(provider: string, domain: string): Promise<BotInstallStartResult>;
   PollBotConnectionInstall(installID: string): Promise<BotInstallPollResult>;
+  // CompleteTelegramBotConnection validates a pasted Bot Token via getMe and
+  // saves the connection in one step (Telegram needs no OAuth/QR install flow).
+  CompleteTelegramBotConnection(token: string): Promise<BotInstallPollResult>;
   DiagnoseBotConnection(id: string): Promise<BotConnectionDiagnostic>;
   TestBotConnection(id: string, target?: string): Promise<BotConnectionDiagnostic>;
   // ListRecentBotChats returns recently-seen IM chats for the task-form picker.
@@ -1117,9 +1120,11 @@ function makeMockApp(): AppBindings {
         qqUsers: [],
         feishuUsers: [],
         weixinUsers: [],
+        telegramUsers: [],
         qqGroups: [],
         feishuGroups: [],
         weixinGroups: [],
+        telegramGroups: [],
       },
       qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false },
       feishu: {
@@ -1139,6 +1144,12 @@ function makeMockApp(): AppBindings {
         tokenEnv: "WEIXIN_BOT_TOKEN",
         tokenSet: false,
         apiBase: "https://ilinkai.weixin.qq.com",
+      },
+      telegram: {
+        enabled: false,
+        tokenEnv: "TELEGRAM_BOT_TOKEN",
+        tokenSet: false,
+        apiBase: "",
       },
       connections: freshMock ? [] : [
         {
@@ -2774,6 +2785,7 @@ function makeMockApp(): AppBindings {
           if (settings.bot.qq.appSecretEnv === name) settings.bot.qq.secretSet = true;
           if (settings.bot.feishu.appSecretEnv === name) settings.bot.feishu.secretSet = true;
           if (settings.bot.weixin.tokenEnv === name) settings.bot.weixin.tokenSet = true;
+          if (settings.bot.telegram.tokenEnv === name) settings.bot.telegram.tokenSet = true;
           settings.bot.connections = settings.bot.connections.map((connection) => ({
             ...connection,
             credential: connection.credential.appSecretEnv === name || connection.credential.tokenEnv === name
@@ -2786,6 +2798,7 @@ function makeMockApp(): AppBindings {
           if (settings.bot.qq.appSecretEnv === name) settings.bot.qq.secretSet = false;
           if (settings.bot.feishu.appSecretEnv === name) settings.bot.feishu.secretSet = false;
           if (settings.bot.weixin.tokenEnv === name) settings.bot.weixin.tokenSet = false;
+          if (settings.bot.telegram.tokenEnv === name) settings.bot.telegram.tokenSet = false;
           settings.bot.connections = settings.bot.connections.map((connection) => ({
             ...connection,
             credential: connection.credential.appSecretEnv === name || connection.credential.tokenEnv === name
@@ -2827,6 +2840,31 @@ function makeMockApp(): AppBindings {
               appSecretEnv: provider === "feishu" ? (domain === "lark" ? "LARK_BOT_APP_SECRET" : "FEISHU_BOT_APP_SECRET") : "",
               accountId: provider === "weixin" ? "mock-account" : "",
               tokenEnv: provider === "weixin" ? "WEIXIN_BOT_TOKEN" : "",
+              secretSet: true,
+            },
+            sessionMappings: [],
+            lastError: "",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          settings.bot.connections = [...settings.bot.connections.filter((c) => c.id !== connection.id), connection];
+          return { done: true, connection, status: "connected", message: "connected", error: "" };
+        },
+        async CompleteTelegramBotConnection(_token: string) {
+          const connection = {
+            id: "telegram-telegram",
+            provider: "telegram",
+            domain: "telegram",
+            label: "Telegram @mockbot",
+            enabled: true,
+            status: "connected",
+            model: "",
+            workspaceRoot: "",
+            credential: {
+              appId: "",
+              appSecretEnv: "",
+              accountId: "",
+              tokenEnv: "TELEGRAM_BOT_TOKEN",
               secretSet: true,
             },
             sessionMappings: [],

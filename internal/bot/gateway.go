@@ -183,7 +183,7 @@ func NewGateway(cfg GatewayConfig, adapters map[Platform]Adapter, logger *slog.L
 }
 
 func (gw *BotGateway) buildAllowlist() {
-	for _, plat := range []Platform{PlatformQQ, PlatformFeishu, PlatformWeixin} {
+	for _, plat := range []Platform{PlatformQQ, PlatformFeishu, PlatformWeixin, PlatformTelegram} {
 		gw.allowlist[plat] = make(map[string]bool)
 		if !gw.cfg.Allowlist.Enabled {
 			continue
@@ -472,9 +472,10 @@ func (gw *BotGateway) snapshotAllowlist() AllowlistConfig {
 	cfg.Enabled = true
 	cfg.AllowAll = false
 	cfg.Users = map[Platform][]string{
-		PlatformFeishu: allowlistKeys(gw.allowlist[PlatformFeishu]),
-		PlatformWeixin: allowlistKeys(gw.allowlist[PlatformWeixin]),
-		PlatformQQ:     allowlistKeys(gw.allowlist[PlatformQQ]),
+		PlatformFeishu:   allowlistKeys(gw.allowlist[PlatformFeishu]),
+		PlatformWeixin:   allowlistKeys(gw.allowlist[PlatformWeixin]),
+		PlatformQQ:       allowlistKeys(gw.allowlist[PlatformQQ]),
+		PlatformTelegram: allowlistKeys(gw.allowlist[PlatformTelegram]),
 	}
 	return cfg
 }

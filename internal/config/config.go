@@ -430,6 +430,7 @@ type BotConfig struct {
 	QQ          QQBotConfig           `toml:"qq"`
 	Feishu      FeishuBotConfig       `toml:"feishu"`
 	Weixin      WeixinBotConfig       `toml:"weixin"`
+	Telegram    TelegramBotConfig     `toml:"telegram"`
 	Connections []BotConnectionConfig `toml:"connections"`
 }
 
@@ -733,12 +734,14 @@ type BotAllowlist struct {
 	Enabled      bool     `toml:"enabled"`
 	AllowAll     bool     `toml:"allow_all"`
 	Mode         string   `toml:"mode"` // "open"（默认，自动加入）| "review"（需管理员审批）
-	QQUsers      []string `toml:"qq_users"`
-	FeishuUsers  []string `toml:"feishu_users"`
-	WeixinUsers  []string `toml:"weixin_users"`
-	QQGroups     []string `toml:"qq_groups"`
-	FeishuGroups []string `toml:"feishu_groups"`
-	WeixinGroups []string `toml:"weixin_groups"`
+	QQUsers       []string `toml:"qq_users"`
+	FeishuUsers   []string `toml:"feishu_users"`
+	WeixinUsers   []string `toml:"weixin_users"`
+	TelegramUsers []string `toml:"telegram_users"`
+	QQGroups      []string `toml:"qq_groups"`
+	FeishuGroups  []string `toml:"feishu_groups"`
+	WeixinGroups  []string `toml:"weixin_groups"`
+	TelegramGroups []string `toml:"telegram_groups"`
 }
 
 // QQBotConfig QQ 官方 Bot API v2 配置。
@@ -768,14 +771,21 @@ type WeixinBotConfig struct {
 	APIBase   string `toml:"api_base"`  // iLink API base URL
 }
 
+// TelegramBotConfig Telegram Bot API 配置。鉴权用单个静态 Bot Token（@BotFather 颁发）。
+type TelegramBotConfig struct {
+	Enabled  bool   `toml:"enabled"`
+	TokenEnv string `toml:"token_env"` // 环境变量名，如 TELEGRAM_BOT_TOKEN
+	APIBase  string `toml:"api_base"`  // 可选：自建 Bot API 服务器，空 = 官方 https://api.telegram.org
+}
+
 // BotConnectionConfig is the desktop-friendly connection record for IM bot
 // channels. It keeps install/runtime state separate from legacy per-provider
 // knobs so the UI can expose a simple "connect first" flow while old configs
 // keep working.
 type BotConnectionConfig struct {
 	ID              string                        `toml:"id"`
-	Provider        string                        `toml:"provider"` // qq|feishu|weixin
-	Domain          string                        `toml:"domain"`   // feishu|lark|weixin|qq
+	Provider        string                        `toml:"provider"` // qq|feishu|weixin|telegram
+	Domain          string                        `toml:"domain"`   // feishu|lark|weixin|qq|telegram
 	Label           string                        `toml:"label"`
 	Enabled         bool                          `toml:"enabled"`
 	Status          string                        `toml:"status"` // disconnected|pending|connected|error
@@ -1479,6 +1489,7 @@ func Default() *Config {
 			QQ:         QQBotConfig{AppSecretEnv: "QQ_BOT_APP_SECRET"},
 			Feishu:     FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
 			Weixin:     WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
+			Telegram:   TelegramBotConfig{TokenEnv: "TELEGRAM_BOT_TOKEN"},
 		},
 		// RPM default 60: a conservative per-key rate cap that suits most
 		// OpenAI-compatible providers. Users on higher tiers can raise this.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { Check, CheckCircle2, ChevronDown, Loader2, QrCode, RefreshCw, Trash2 } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, Loader2, QrCode, RefreshCw, Trash2, Bot } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app } from "../lib/bridge";
@@ -460,9 +460,11 @@ function defaultBotSettings(): BotSettingsView {
       qqUsers: [],
       feishuUsers: [],
       weixinUsers: [],
+      telegramUsers: [],
       qqGroups: [],
       feishuGroups: [],
       weixinGroups: [],
+      telegramGroups: [],
     },
     qq: { enabled: false, appId: "", appSecretEnv: "QQ_BOT_APP_SECRET", secretSet: false },
     feishu: {
@@ -483,6 +485,7 @@ function defaultBotSettings(): BotSettingsView {
       tokenSet: false,
       apiBase: "https://ilinkai.weixin.qq.com",
     },
+    telegram: { enabled: false, tokenEnv: "TELEGRAM_BOT_TOKEN", tokenSet: false, apiBase: "" },
     connections: [],
   };
 }
@@ -502,13 +505,16 @@ function normalizeBotSettings(bot: BotSettingsView | null | undefined): BotSetti
       qqUsers: asArray(allowlist.qqUsers),
       feishuUsers: asArray(allowlist.feishuUsers),
       weixinUsers: asArray(allowlist.weixinUsers),
+      telegramUsers: asArray(allowlist.telegramUsers),
       qqGroups: asArray(allowlist.qqGroups),
       feishuGroups: asArray(allowlist.feishuGroups),
       weixinGroups: asArray(allowlist.weixinGroups),
+      telegramGroups: asArray(allowlist.telegramGroups),
     },
     qq: { ...fallback.qq, ...bot?.qq },
     feishu: { ...fallback.feishu, ...bot?.feishu, domain: bot?.feishu?.domain === "lark" ? "lark" : "feishu", mode },
     weixin: { ...fallback.weixin, ...bot?.weixin },
+    telegram: { ...fallback.telegram, ...bot?.telegram },
     connections: asArray(bot?.connections).map(normalizeBotConnection),
   };
 }
@@ -953,7 +959,7 @@ function NetworkSection({ s, busy, apply }: SectionProps) {
   );
 }
 
-type BotInstallTarget = "qq" | "feishu" | "lark" | "weixin";
+type BotInstallTarget = "qq" | "feishu" | "lark" | "weixin" | "telegram";
 type HookScope = "global" | "project";
 
 // HooksSection edits the hooks store (settings.json) for either scope (global or
@@ -1275,7 +1281,7 @@ type BotInstallState = {
   timeLeft: number;
   message: string;
 };
-const BOT_INSTALL_TARGETS: BotOfficialInstallTarget[] = ["feishu", "lark", "weixin"];
+const BOT_INSTALL_TARGETS: BotOfficialInstallTarget[] = ["feishu", "lark", "weixin", "telegram"];
 const BOT_INSTALL_DEFAULT_TIMEOUT_SECONDS = 300;
 const BOT_INSTALL_MIN_POLL_SECONDS = 3;
 
@@ -1289,6 +1295,8 @@ function BotsSection({ s, busy, apply }: SectionProps) {
   const [testTargets, setTestTargets] = useState<Record<string, string>>({});
   const [connectionSecrets, setConnectionSecrets] = useState<Record<string, string>>({});
   const [expandedConnectionId, setExpandedConnectionId] = useState("");
+  // Telegram 用粘贴 token 一键连接（无 QR/OAuth），需要独立的 token 输入状态
+  const [telegramToken, setTelegramToken] = useState("");
   const installRef = useRef(install);
   const installPollTimerRef = useRef<number | null>(null);
   const installCountdownTimerRef = useRef<number | null>(null);
@@ -1372,6 +1380,44 @@ function BotsSection({ s, busy, apply }: SectionProps) {
       installAttemptRef.current += 1;
       clearInstallTimers();
       setInstall({ target, result: null, status: "connected", timeLeft: 0, message: t("settings.botInstallAlreadyConnected", { provider: botTargetLabel(target, t) }) });
+      return;
+    }
+    // Telegram 走专用的一步连接流：粘贴 Bot Token → getMe 校验 → 落盘，无 QR/OAuth。
+    if (target === "telegram") {
+      const token = telegramToken.trim();
+      if (!token) {
+        setInstall({ target, result: null, status: "error", timeLeft: 0, message: t("settings.botInstallTelegramHint") });
+        return;
+      }
+      clearInstallTimers();
+      const attempt = installAttemptRef.current + 1;
+      installAttemptRef.current = attempt;
+      installRequestInFlightRef.current = true;
+      setInstall({ target, result: null, status: "starting", timeLeft: 0, message: t("settings.botInstallTelegramConnecting") });
+      try {
+        const poll = await app.CompleteTelegramBotConnection(token);
+        if (installAttemptRef.current !== attempt) return;
+        if (poll.done) {
+          clearInstallTimers();
+          setDraft((prev) => ({
+            ...prev,
+            enabled: true,
+            connections: [...prev.connections.filter((c) => c.id !== poll.connection.id), poll.connection],
+          }));
+          setTelegramToken("");
+          setInstall({ target, result: null, status: "connected", timeLeft: 0, message: poll.message || t("settings.botInstallConnected") });
+        } else {
+          setInstall({ target, result: null, status: "error", timeLeft: 0, message: poll.error || t("settings.botInstallFailed") });
+        }
+      } catch (err) {
+        if (installAttemptRef.current === attempt) {
+          setInstall({ target, result: null, status: "error", timeLeft: 0, message: err instanceof Error ? err.message : t("settings.botInstallFailed") });
+        }
+      } finally {
+        if (installAttemptRef.current === attempt) {
+          installRequestInFlightRef.current = false;
+        }
+      }
       return;
     }
     clearInstallTimers();
@@ -1583,14 +1629,14 @@ function BotsSection({ s, busy, apply }: SectionProps) {
                           <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void diagnoseConnection(connection.id)}>
                             {t("settings.botDiagnose")}
                           </button>
-                          {(connection.provider === "feishu" || connection.provider === "weixin") ? (
+                          {(connection.provider === "feishu" || connection.provider === "weixin" || connection.provider === "telegram") ? (
                             <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void testConnection(connection)}>
                               {t("settings.botTest")}
                             </button>
                           ) : null}
                         </div>
                       </SettingsField>
-                      {(connection.provider === "feishu" || connection.provider === "weixin") ? (
+                      {(connection.provider === "feishu" || connection.provider === "weixin" || connection.provider === "telegram") ? (
                         <SettingsField label={t("settings.botTestChatId")}>
                           <input
                             className="mem-input"
@@ -1702,6 +1748,70 @@ function BotsSection({ s, busy, apply }: SectionProps) {
           </div>
 
           <div className="bot-connect-panel bot-connect-panel--phone">
+            {installTarget === "telegram" ? (
+              <>
+                <div className="bot-connect-panel__qr">
+                  {selectedInstallConnection ? (
+                    <div className="bot-connect-panel__state bot-connect-panel__state--success">
+                      <CheckCircle2 aria-hidden="true" />
+                    </div>
+                  ) : install.status === "starting" ? (
+                    <div className="bot-connect-panel__state">
+                      <Loader2 className="bot-spin" aria-hidden="true" />
+                      <span>{t("settings.botInstallStarting")}</span>
+                    </div>
+                  ) : install.status === "error" ? (
+                    <div className="bot-connect-panel__state bot-connect-panel__state--error">
+                      <RefreshCw aria-hidden="true" />
+                    </div>
+                  ) : (
+                    <div className="bot-connect-panel__state">
+                      <Bot aria-hidden="true" />
+                    </div>
+                  )}
+                </div>
+                <div className="bot-connect-panel__body">
+                  <strong>{selectedInstallLabel}</strong>
+                  <p>
+                    {selectedInstallConnection
+                      ? t("settings.botInstallAlreadyConnected", { provider: selectedInstallLabel })
+                      : install.message || botTargetHint(installTarget, t)}
+                  </p>
+                  {selectedInstallConnection ? null : (
+                    <input
+                      type="password"
+                      className="mem-input"
+                      placeholder="123456789:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+                      value={telegramToken}
+                      disabled={busy || install.status === "starting"}
+                      onChange={(e) => setTelegramToken(e.target.value)}
+                    />
+                  )}
+                  <div className="bot-connect-panel__actions">
+                    {!selectedInstallConnection ? (
+                      <button
+                        type="button"
+                        className="btn btn--primary btn--small"
+                        disabled={busy || install.status === "starting" || !telegramToken.trim()}
+                        onClick={() => void startInstall("telegram")}
+                      >
+                        {install.status === "starting" ? <Loader2 className="bot-spin" aria-hidden="true" /> : null}
+                        {install.status === "starting"
+                          ? t("settings.botInstallTelegramConnecting")
+                          : install.status === "error"
+                            ? t("settings.botInstallRetry")
+                            : t("settings.botInstallTelegramConnect")}
+                      </button>
+                    ) : (
+                      <button type="button" className="btn btn--secondary btn--small" disabled={busy} onClick={() => void diagnoseConnection(selectedInstallConnection.id)}>
+                        {t("settings.botDiagnose")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
             <div className="bot-connect-panel__qr">
               {selectedInstallConnection ? (
                 <div className="bot-connect-panel__state bot-connect-panel__state--success">
@@ -1758,6 +1868,8 @@ function BotsSection({ s, busy, apply }: SectionProps) {
                 ) : null}
               </div>
             </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -1770,6 +1882,7 @@ function botTargetLabel(target: BotInstallTarget, t: ReturnType<typeof useT>): s
     case "qq": return "QQ";
     case "lark": return "Lark";
     case "weixin": return t("settings.botWeixin");
+    case "telegram": return t("settings.botTelegram");
     default: return t("settings.botFeishu");
   }
 }
@@ -1779,12 +1892,14 @@ function botTargetHint(target: BotInstallTarget, t: ReturnType<typeof useT>): st
     case "qq": return t("settings.botInstallQQHint");
     case "lark": return t("settings.botInstallLarkHint");
     case "weixin": return t("settings.botInstallWeixinHint");
+    case "telegram": return t("settings.botInstallTelegramHint");
     default: return t("settings.botInstallFeishuHint");
   }
 }
 
 function botInstallTargetMatchesConnection(target: BotOfficialInstallTarget, connection: BotConnectionView): boolean {
   if (target === "weixin") return connection.provider === "weixin";
+  if (target === "telegram") return connection.provider === "telegram";
   if (target === "lark") return connection.provider === "feishu" && connection.domain === "lark";
   return connection.provider === "feishu" && connection.domain !== "lark";
 }
@@ -1806,6 +1921,7 @@ function botConnectionLabel(connection: BotConnectionView, t: ReturnType<typeof 
   if (connection.domain === "lark") return "Lark";
   if (connection.provider === "weixin") return t("settings.botWeixin");
   if (connection.provider === "qq") return "QQ";
+  if (connection.provider === "telegram") return t("settings.botTelegram");
   return t("settings.botFeishu");
 }
 
@@ -1822,11 +1938,16 @@ function botConnectionScopeLabel(connection: BotConnectionView, t: ReturnType<ty
 }
 
 function botConnectionSecretEnv(connection: BotConnectionView): string {
-  return connection.provider === "weixin" ? connection.credential.tokenEnv : connection.credential.appSecretEnv;
+  // weixin 和 telegram 都用 tokenEnv（单个静态 token）；feishu/qq 用 appSecretEnv
+  return connection.provider === "weixin" || connection.provider === "telegram"
+    ? connection.credential.tokenEnv
+    : connection.credential.appSecretEnv;
 }
 
 function botConnectionSecretPatch(connection: BotConnectionView, value: string): Partial<BotConnectionView["credential"]> {
-  return connection.provider === "weixin" ? { tokenEnv: value } : { appSecretEnv: value };
+  return connection.provider === "weixin" || connection.provider === "telegram"
+    ? { tokenEnv: value }
+    : { appSecretEnv: value };
 }
 
 function botConnectionCredentialSummary(connection: BotConnectionView, t: ReturnType<typeof useT>): string {
@@ -1889,9 +2010,11 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
       qqUsers: uniqueStrings(bot.allowlist.qqUsers.map((v) => v.trim())),
       feishuUsers: uniqueStrings(bot.allowlist.feishuUsers.map((v) => v.trim())),
       weixinUsers: uniqueStrings(bot.allowlist.weixinUsers.map((v) => v.trim())),
+      telegramUsers: uniqueStrings(bot.allowlist.telegramUsers.map((v) => v.trim())),
       qqGroups: uniqueStrings(bot.allowlist.qqGroups.map((v) => v.trim())),
       feishuGroups: uniqueStrings(bot.allowlist.feishuGroups.map((v) => v.trim())),
       weixinGroups: uniqueStrings(bot.allowlist.weixinGroups.map((v) => v.trim())),
+      telegramGroups: uniqueStrings(bot.allowlist.telegramGroups.map((v) => v.trim())),
     },
     qq: {
       ...bot.qq,
@@ -1912,6 +2035,11 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
       accountId: bot.weixin.accountId.trim(),
       tokenEnv: bot.weixin.tokenEnv.trim(),
       apiBase: bot.weixin.apiBase.trim().replace(/\/+$/, ""),
+    },
+    telegram: {
+      ...bot.telegram,
+      tokenEnv: bot.telegram.tokenEnv.trim(),
+      apiBase: bot.telegram.apiBase.trim().replace(/\/+$/, ""),
     },
     connections: bot.connections.map(normalizeBotConnection).filter((conn) => conn.id && conn.provider),
   };
@@ -4157,6 +4285,13 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
   const [browserDetecting, setBrowserDetecting] = useState(false);
   const [recordingHotkey, setRecordingHotkey] = useState(false);
   const [recordingEStopHotkey, setRecordingEStopHotkey] = useState(false);
+  // recordingRef mirrors which hotkey (if any) is being recorded. The window-
+  // level keydown listener below reads it so its handler closure never goes
+  // stale across renders. Values: "screenshot" | "estop" | null.
+  const recordingRef = useRef<"screenshot" | "estop" | null>(null);
+  useEffect(() => {
+    recordingRef.current = recordingHotkey ? "screenshot" : (recordingEStopHotkey ? "estop" : null);
+  }, [recordingHotkey, recordingEStopHotkey]);
   // draftRef mirrors the latest draft so async commit handlers (onBlur firing
   // right after a setDraft) read the post-update value, not the stale render
   // closure. Without this, typing into the password field then blurring could
@@ -4190,6 +4325,12 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
     dirtyRef.current = false;
     void apply(() => app.SetCoWorkSettings(next));
   };
+  // commitDraftRef mirrors the latest commitDraft so the window-level recording
+  // listener (installed once with []) always invokes the current closure instead
+  // of the one captured on first render — apply/reload/onChanged rebuild each
+  // render, so a stale closure would save against an outdated view.
+  const commitDraftRef = useRef(commitDraft);
+  commitDraftRef.current = commitDraft;
   // commitCurrent flushes the latest draft, but only if something actually
   // changed since the last save (dirtyRef). The ref read ensures an onBlur
   // firing right after a setDraft sees the updated value, not the closure's.
@@ -4197,6 +4338,58 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
     if (!dirtyRef.current) return;
     commitDraft(draftRef.current);
   };
+
+  // Global hotkey recording. The old implementation lived on <input onKeyDown>,
+  // but Wails/WebView swallows system-level combos like Ctrl+Shift+Alt+<letter>
+  // (Alt+letter is treated as a menu mnemonic) before they reach the React
+  // handler, so recording silently did nothing on Windows. We now install a
+  // capture-phase window listener that grabs the keydown first thing, reads the
+  // modifier flags straight off the event, and stopPropagation() so the
+  // settings-modal's "close on Esc" handler never fires while recording (Esc
+  // exits recording instead of dismissing the panel). The listener is always
+  // installed but no-ops unless recordingRef.current is set.
+  useEffect(() => {
+    const MOD = new Set(["Control", "Alt", "Shift", "Meta"]);
+    const onKey = (e: KeyboardEvent) => {
+      const which = recordingRef.current;
+      if (!which) return;
+      // Always swallow the event during recording so the system/Wails doesn't
+      // act on it, and so the modal Esc-close handler (a later bubble-phase
+      // document listener) never sees it — capture phase runs first.
+      e.preventDefault();
+      e.stopPropagation();
+      // Pure modifier press: keep waiting for the main key. Esc cancels.
+      if (e.key === "Escape") {
+        if (which === "screenshot") setRecordingHotkey(false);
+        else setRecordingEStopHotkey(false);
+        return;
+      }
+      if (MOD.has(e.key)) return;
+      const parts: string[] = [];
+      if (e.ctrlKey) parts.push("Ctrl");
+      if (e.altKey) parts.push("Alt");
+      if (e.shiftKey) parts.push("Shift");
+      if (e.metaKey) parts.push("Win");
+      // Single-char keys are upper-cased to match the backend parser (keyToVK
+      // accepts A-Z / 0-9); named keys (F1, Enter, Pause…) are kept verbatim.
+      const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+      parts.push(key);
+      const combo = parts.filter(Boolean).join("+");
+      // Build the next draft from draftRef (the post-update view), then persist
+      // it. Persisting is done OUTSIDE the setDraft updater on purpose: React
+      // StrictMode double-invokes updaters, so a save call inside one would fire
+      // the backend request twice.
+      const n = which === "screenshot"
+        ? { ...draftRef.current, screenshotHotkey: combo }
+        : { ...draftRef.current, estopHotkey: combo };
+      setDraft(n);
+      commitDraftRef.current(n);
+      if (which === "screenshot") setRecordingHotkey(false);
+      else setRecordingEStopHotkey(false);
+    };
+    window.addEventListener("keydown", onKey, true); // capture phase
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
 
   // probeMail tests a saved mailbox's IMAP login and updates that account's
   // status dot. `skey` is the status-map key (the account's list index, stable
@@ -4784,23 +4977,8 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
               value={recordingHotkey ? t("settings.hotkeyRecord") : (draft.screenshotHotkey ?? "Ctrl+Shift+Alt+W")}
               readOnly={recordingHotkey}
               placeholder="Ctrl+Shift+Alt+W"
-              onKeyDown={(e) => {
-                if (!recordingHotkey) return;
-                const modKeys = ["Control", "Alt", "Shift", "Meta"];
-                if (modKeys.includes(e.key)) return;
-                e.preventDefault();
-                const parts: string[] = [];
-                if (e.ctrlKey) parts.push("Ctrl");
-                if (e.altKey) parts.push("Alt");
-                if (e.shiftKey) parts.push("Shift");
-                if (e.metaKey) parts.push(e.metaKey ? "Win" : "");
-                const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
-                parts.push(key);
-                setDraft(d => { const n = { ...d, screenshotHotkey: parts.filter(Boolean).join("+") }; commitDraft(n); return n; });
-                setRecordingHotkey(false);
-              }}
               onBlur={() => { if (recordingHotkey) setRecordingHotkey(false); else commitCurrent(); }}
-              onChange={e => !recordingHotkey && setDraft({ ...draft, screenshotHotkey: e.target.value })}
+              onChange={e => !recordingHotkey && setDraft(d => { const n = { ...d, screenshotHotkey: e.target.value }; return n; })}
             />
             <button
               type="button"
@@ -4850,23 +5028,8 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
               value={recordingEStopHotkey ? t("settings.hotkeyRecord") : (draft.estopHotkey ?? "Ctrl+Shift+Pause")}
               readOnly={recordingEStopHotkey}
               placeholder="Ctrl+Shift+Pause"
-              onKeyDown={(e) => {
-                if (!recordingEStopHotkey) return;
-                const modKeys = ["Control", "Alt", "Shift", "Meta"];
-                if (modKeys.includes(e.key)) return;
-                e.preventDefault();
-                const parts: string[] = [];
-                if (e.ctrlKey) parts.push("Ctrl");
-                if (e.altKey) parts.push("Alt");
-                if (e.shiftKey) parts.push("Shift");
-                if (e.metaKey) parts.push(e.metaKey ? "Win" : "");
-                const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
-                parts.push(key);
-                setDraft(d => { const n = { ...d, estopHotkey: parts.filter(Boolean).join("+") }; commitDraft(n); return n; });
-                setRecordingEStopHotkey(false);
-              }}
               onBlur={() => { if (recordingEStopHotkey) setRecordingEStopHotkey(false); else commitCurrent(); }}
-              onChange={e => !recordingEStopHotkey && setDraft({ ...draft, estopHotkey: e.target.value })}
+              onChange={e => !recordingEStopHotkey && setDraft(d => { const n = { ...d, estopHotkey: e.target.value }; return n; })}
             />
             <button
               type="button"

@@ -140,9 +140,16 @@ func (h *hotkeyManager) checkKeys() bool {
 	return true
 }
 
+// isKeyDown reports whether the given virtual key is currently held, per
+// GetAsyncKeyState. The API returns a SHORT whose high bit (0x8000) is set when
+// the key is down. syscall.Call returns it as a uintptr (64-bit on amd64), so
+// we mask to the low 16 bits first to drop any sign-extension / upper-word
+// noise, then test the high bit. GetAsyncKeyState is global (not tied to the
+// calling thread's message queue), so it works even when fairpeer lacks focus
+// and does not require LockOSThread — unlike RegisterHotKey + WM_HOTKEY.
 func isKeyDown(vk uint16) bool {
 	ret, _, _ := procGetAsyncKeyState.Call(uintptr(vk))
-	return (ret & 0x8000) != 0
+	return (uint16(ret) & 0x8000) != 0
 }
 
 func (h *hotkeyManager) Stop() {

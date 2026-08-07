@@ -33,6 +33,7 @@ const IM_PLATFORMS = [
   { value: "feishu", label: "飞书 / Feishu" },
   { value: "qq", label: "QQ" },
   { value: "weixin", label: "微信 / WeChat" },
+  { value: "telegram", label: "Telegram" },
 ] as const;
 
 // exprToPickerValue converts a one-shot scheduler expression ("at 2026-07-31

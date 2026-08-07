@@ -114,6 +114,10 @@ func (s *renderSink) Emit(e event.Event) {
 		switch s.adapter.Platform() {
 		case PlatformQQ:
 			msg.Keyboard = approvalKeyboard(e.Approval.ID)
+		case PlatformTelegram:
+			// Telegram 原生支持 inline keyboard（callback_query），与 QQ 共用 InlineKeyboard；
+			// adapter.Send 里把 Rows[] 翻译成 reply_markup.inline_keyboard[][]。
+			msg.Keyboard = approvalKeyboard(e.Approval.ID)
 		case PlatformFeishu:
 			msg.Card = approvalCard(e.Approval, s.chatType)
 		}

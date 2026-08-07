@@ -14,6 +14,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/bot"
 	"github.com/zzycxz/fairpeer/internal/bot/feishu"
 	"github.com/zzycxz/fairpeer/internal/bot/qq"
+	"github.com/zzycxz/fairpeer/internal/bot/telegram"
 	"github.com/zzycxz/fairpeer/internal/bot/weixin"
 	"github.com/zzycxz/fairpeer/internal/config"
 )
@@ -46,7 +47,7 @@ func botCommand(args []string, version string) int {
 
 func botStart(args []string, version string) int {
 	fs := flag.NewFlagSet("bot start", flag.ContinueOnError)
-	channels := fs.String("channels", "", "启用的平台，逗号分隔：qq,feishu,weixin")
+	channels := fs.String("channels", "", "启用的平台，逗号分隔：qq,feishu,weixin,telegram")
 	dir := fs.String("dir", "", "工作目录")
 	model := fs.String("model", "", "模型名（空则用 default_model）")
 
@@ -91,6 +92,8 @@ func botStart(args []string, version string) int {
 				enabledPlatforms[bot.PlatformFeishu] = cfg.Bot.Feishu.Enabled
 			case bot.PlatformWeixin:
 				enabledPlatforms[bot.PlatformWeixin] = cfg.Bot.Weixin.Enabled
+			case bot.PlatformTelegram:
+				enabledPlatforms[bot.PlatformTelegram] = cfg.Bot.Telegram.Enabled
 			default:
 				fmt.Fprintf(os.Stderr, "warning: unknown channel %q\n", ch)
 			}
@@ -99,6 +102,7 @@ func botStart(args []string, version string) int {
 		enabledPlatforms[bot.PlatformQQ] = cfg.Bot.QQ.Enabled
 		enabledPlatforms[bot.PlatformFeishu] = cfg.Bot.Feishu.Enabled
 		enabledPlatforms[bot.PlatformWeixin] = cfg.Bot.Weixin.Enabled
+		enabledPlatforms[bot.PlatformTelegram] = cfg.Bot.Telegram.Enabled
 	}
 
 	hasEnabled := false
@@ -134,14 +138,16 @@ func botStart(args []string, version string) int {
 			Enabled:  cfg.Bot.Allowlist.Enabled,
 			AllowAll: cfg.Bot.Allowlist.AllowAll,
 			Users: map[bot.Platform][]string{
-				bot.PlatformQQ:     cfg.Bot.Allowlist.QQUsers,
-				bot.PlatformFeishu: cfg.Bot.Allowlist.FeishuUsers,
-				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinUsers,
+				bot.PlatformQQ:       cfg.Bot.Allowlist.QQUsers,
+				bot.PlatformFeishu:   cfg.Bot.Allowlist.FeishuUsers,
+				bot.PlatformWeixin:   cfg.Bot.Allowlist.WeixinUsers,
+				bot.PlatformTelegram: cfg.Bot.Allowlist.TelegramUsers,
 			},
 			Groups: map[bot.Platform][]string{
-				bot.PlatformQQ:     cfg.Bot.Allowlist.QQGroups,
-				bot.PlatformFeishu: cfg.Bot.Allowlist.FeishuGroups,
-				bot.PlatformWeixin: cfg.Bot.Allowlist.WeixinGroups,
+				bot.PlatformQQ:       cfg.Bot.Allowlist.QQGroups,
+				bot.PlatformFeishu:   cfg.Bot.Allowlist.FeishuGroups,
+				bot.PlatformWeixin:   cfg.Bot.Allowlist.WeixinGroups,
+				bot.PlatformTelegram: cfg.Bot.Allowlist.TelegramGroups,
 			},
 		},
 		Debounce: time.Duration(cfg.Bot.DebounceMs) * time.Millisecond,
@@ -157,6 +163,9 @@ func botStart(args []string, version string) int {
 	}
 	if enabledPlatforms[bot.PlatformWeixin] {
 		adapters[bot.PlatformWeixin] = weixin.New(cfg.Bot.Weixin, logger)
+	}
+	if enabledPlatforms[bot.PlatformTelegram] {
+		adapters[bot.PlatformTelegram] = telegram.New(cfg.Bot.Telegram, logger)
 	}
 
 	gw := bot.NewGateway(gwCfg, adapters, logger)
@@ -196,7 +205,7 @@ func botChannelConfigs(connections []config.BotConnectionConfig, includeModel bo
 		}
 		plat := bot.Platform(strings.TrimSpace(conn.Provider))
 		switch plat {
-		case bot.PlatformQQ, bot.PlatformFeishu, bot.PlatformWeixin:
+		case bot.PlatformQQ, bot.PlatformFeishu, bot.PlatformWeixin, bot.PlatformTelegram:
 		default:
 			continue
 		}
@@ -308,15 +317,29 @@ func botDoctor(args []string) int {
 		addCheck("bot.weixin", "disabled", "")
 	}
 
+	// Telegram 检查
+	if bc.Telegram.Enabled {
+		addCheck("bot.telegram.enabled", "ok", "")
+		token := os.Getenv(bc.Telegram.TokenEnv)
+		if token == "" {
+			addCheck("bot.telegram.token", "missing", bc.Telegram.TokenEnv+" is not set")
+		} else {
+			addCheck("bot.telegram.token", "ok", bc.Telegram.TokenEnv+" is set")
+		}
+	} else {
+		addCheck("bot.telegram", "disabled", "")
+	}
+
 	// Allowlist 检查
 	if bc.Allowlist.AllowAll {
 		addCheck("bot.allowlist", "open", "allow_all=true — every reachable user can trigger local tools")
 	} else if bc.Allowlist.Enabled {
 		addCheck("bot.allowlist", "enabled",
-			fmt.Sprintf("qq=%d feishu=%d weixin=%d users",
+			fmt.Sprintf("qq=%d feishu=%d weixin=%d telegram=%d users",
 				len(bc.Allowlist.QQUsers),
 				len(bc.Allowlist.FeishuUsers),
-				len(bc.Allowlist.WeixinUsers)))
+				len(bc.Allowlist.WeixinUsers),
+				len(bc.Allowlist.TelegramUsers)))
 	} else {
 		addCheck("bot.allowlist", "missing", "bot start will refuse without allowlist or allow_all=true")
 	}
@@ -349,7 +372,7 @@ func botDoctor(args []string) int {
 }
 
 func botAllowlistUserCount(a config.BotAllowlist) int {
-	return len(a.QQUsers) + len(a.FeishuUsers) + len(a.WeixinUsers)
+	return len(a.QQUsers) + len(a.FeishuUsers) + len(a.WeixinUsers) + len(a.TelegramUsers)
 }
 
 func botWeixinLogin(args []string) int {
@@ -384,10 +407,10 @@ func botWeixinLogin(args []string) int {
 }
 
 func botUsage() {
-	fmt.Print(`fairpeer bot — multi-channel IM bot gateway (QQ / Feishu / WeChat)
+	fmt.Print(`fairpeer bot — multi-channel IM bot gateway (QQ / Feishu / WeChat / Telegram)
 
 Usage:
-  fairpeer bot start   [--channels qq,feishu,weixin] [--dir PATH] [--model NAME]
+  fairpeer bot start   [--channels qq,feishu,weixin,telegram] [--dir PATH] [--model NAME]
   fairpeer bot doctor  [--json]
   fairpeer bot weixin-login [--timeout SECONDS]
 
@@ -404,10 +427,11 @@ Examples:
 Configuration:
   Edit fairpeer.toml:
     [bot]           enabled / model / max_steps
-    [bot.allowlist]  enabled / qq_users / feishu_users / weixin_users
+    [bot.allowlist]  enabled / qq_users / feishu_users / weixin_users / telegram_users
     [bot.qq]         enabled / app_id / app_secret_env
     [bot.feishu]     enabled / app_id / app_secret_env / verification_token / mode
     [bot.weixin]     enabled / account_id / token_env / api_base
+    [bot.telegram]   enabled / token_env / api_base
 
   All secrets are read from environment variables; never put keys in config files.
 `)

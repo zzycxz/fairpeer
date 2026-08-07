@@ -14,6 +14,7 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/bot"
 	"github.com/zzycxz/fairpeer/internal/bot/feishu"
+	"github.com/zzycxz/fairpeer/internal/bot/telegram"
 	"github.com/zzycxz/fairpeer/internal/bot/weixin"
 	"github.com/zzycxz/fairpeer/internal/config"
 )
@@ -178,6 +179,59 @@ func (a *App) PollBotConnectionInstall(installID string) (BotInstallPollResult, 
 	return a.pollFeishuConnectionInstall(installID, session)
 }
 
+// CompleteTelegramBotConnection 用用户粘贴的 Bot Token 完成 Telegram 连接（一步到位）。
+// Telegram 不像飞书需要 OAuth、微信需要扫码——它只需一个 @BotFather 颁发的静态 token，
+// 所以不走 StartBotConnectionInstall/PollBotConnectionInstall 两阶段，直接校验 + 落盘。
+// 返回连接视图供前端刷新 UI。
+func (a *App) CompleteTelegramBotConnection(token string) (BotInstallPollResult, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return BotInstallPollResult{Status: "error", Error: "请输入 Telegram Bot Token。"}, nil
+	}
+	// 用 getMe 校验 token 有效性，拿到 bot username 做连接标签
+	cfg, err := config.Load()
+	if err != nil {
+		return BotInstallPollResult{Status: "error", Error: err.Error()}, nil
+	}
+	tgCfg := cfg.Bot.Telegram
+	if strings.TrimSpace(tgCfg.TokenEnv) == "" {
+		tgCfg.TokenEnv = "TELEGRAM_BOT_TOKEN"
+	}
+	// 临时把 token 写进环境变量，让 VerifyToken 能读到
+	if err := os.Setenv(tgCfg.TokenEnv, token); err != nil {
+		return BotInstallPollResult{Status: "error", Error: err.Error()}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	username, err := telegram.VerifyToken(ctx, tgCfg)
+	if err != nil {
+		return BotInstallPollResult{Status: "error", Error: "Token 校验失败：" + err.Error()}, nil
+	}
+	label := "Telegram"
+	if username != "" {
+		label = "Telegram @" + username
+	}
+	conn, err := a.upsertBotConnection(config.BotConnectionConfig{
+		ID:         connectionID("telegram", "telegram"),
+		Provider:   "telegram",
+		Domain:     "telegram",
+		Label:      label,
+		Enabled:    true,
+		Status:     "connected",
+		Credential: config.BotConnectionCredential{TokenEnv: tgCfg.TokenEnv},
+	}, func(c *config.Config) {
+		c.Bot.Enabled = true
+		c.Bot.Telegram.Enabled = true
+		if c.Bot.Telegram.TokenEnv == "" {
+			c.Bot.Telegram.TokenEnv = tgCfg.TokenEnv
+		}
+	})
+	if err != nil {
+		return BotInstallPollResult{Status: "error", Error: err.Error()}, nil
+	}
+	return BotInstallPollResult{Done: true, Status: "connected", Connection: conn, Message: "Telegram 已连接。"}, nil
+}
+
 func (a *App) DiagnoseBotConnection(id string) (BotConnectionDiagnostic, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -219,7 +273,7 @@ func (a *App) TestBotConnection(id, target string) (BotConnectionDiagnostic, err
 		return BotConnectionDiagnostic{ID: id, Status: "missing", Message: "未找到连接。"}, nil
 	}
 	target = firstNonEmptyBot(strings.TrimSpace(target), firstSessionRemoteID(conn.SessionMappings))
-	if conn.Provider != "feishu" && conn.Provider != "weixin" {
+	if conn.Provider != "feishu" && conn.Provider != "weixin" && conn.Provider != "telegram" {
 		return BotConnectionDiagnostic{ID: conn.ID, Label: conn.Label, Status: "warning", Message: "当前渠道暂不支持桌面端主动发送测试消息，可使用诊断检查基础配置。"}, nil
 	}
 	if target == "" {
@@ -242,6 +296,11 @@ func (a *App) TestBotConnection(id, target string) (BotConnectionDiagnostic, err
 		weixinCfg.AccountID = firstNonEmptyBot(conn.Credential.AccountID, weixinCfg.AccountID)
 		weixinCfg.TokenEnv = firstNonEmptyBot(conn.Credential.TokenEnv, weixinCfg.TokenEnv)
 		result, err = weixin.SendText(ctx, weixinCfg, target, "fairpeer bot 测试消息：连接和发送链路可用。")
+	case "telegram":
+		telegramCfg := cfg.Bot.Telegram
+		telegramCfg.Enabled = true
+		telegramCfg.TokenEnv = firstNonEmptyBot(conn.Credential.TokenEnv, telegramCfg.TokenEnv)
+		result, err = telegram.SendText(ctx, telegramCfg, target, "fairpeer bot 测试消息：连接和发送链路可用。")
 	}
 	if err != nil {
 		return BotConnectionDiagnostic{ID: conn.ID, Label: conn.Label, Status: "error", Message: err.Error()}, nil
@@ -461,7 +520,7 @@ func (a *App) screenshotPushDest() string {
 		if !conn.Enabled || conn.Status != "connected" {
 			continue
 		}
-		if conn.Provider != "feishu" && conn.Provider != "weixin" {
+		if conn.Provider != "feishu" && conn.Provider != "weixin" && conn.Provider != "telegram" {
 			continue // qq etc. don't support desktop-initiated sends
 		}
 		if remote := firstSessionRemoteID(conn.SessionMappings); remote != "" {

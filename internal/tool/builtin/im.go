@@ -65,11 +65,11 @@ func (imSend) Name() string { return "im_send" }
 func (imSend) ReadOnly() bool { return false }
 
 func (imSend) Description() string {
-	return "Send a text message to a connected IM bot conversation (Feishu/Lark or WeChat). " +
-		"Use this when the user asks to send/notify/push something to Feishu/WeChat/IM — do NOT use a browser to log into web IM. " +
+	return "Send a text message to a connected IM bot conversation (Feishu/Lark, WeChat, or Telegram). " +
+		"Use this when the user asks to send/notify/push something to Feishu/WeChat/Telegram/IM — do NOT use a browser to log into web IM. " +
 		"dest is optional: omit it to send to the user's default connected conversation (recommended); " +
-		"or set dest explicitly as \"platform:chatID\" (e.g. \"feishu:oc_xxx\", \"weixin:wxid_xxx\"). " +
-		"text is the message body (markdown supported on Feishu)."
+		"or set dest explicitly as \"platform:chatID\" (e.g. \"feishu:oc_xxx\", \"weixin:wxid_xxx\", \"telegram:123456\"). " +
+		"text is the message body (markdown supported on Feishu/Telegram)."
 }
 
 func (imSend) Schema() json.RawMessage {
@@ -116,7 +116,7 @@ func (imSend) Execute(ctx context.Context, args json.RawMessage) (string, error)
 		}
 		dest = defaultIMPushDest(cfg.Bot.Connections)
 		if dest == "" {
-			return "", errors.New("no connected Feishu/WeChat conversation found — connect a bot in Settings > IM and message it once so it remembers the chat")
+			return "", errors.New("no connected Feishu/WeChat/Telegram conversation found — connect a bot in Settings > IM and message it once so it remembers the chat")
 		}
 	}
 
@@ -141,8 +141,8 @@ func defaultIMPushDest(conns []config.BotConnectionConfig) string {
 		if !conn.Enabled || conn.Status != "connected" {
 			continue
 		}
-		if conn.Provider != "feishu" && conn.Provider != "weixin" {
-			continue // qq doesn't support desktop-initiated sends
+		if conn.Provider != "feishu" && conn.Provider != "weixin" && conn.Provider != "telegram" {
+			continue // qq doesn't support desktop-initiated sends; feishu/weixin/telegram do
 		}
 		for _, m := range conn.SessionMappings {
 			if id := strings.TrimSpace(m.RemoteID); id != "" {

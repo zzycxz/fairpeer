@@ -321,8 +321,8 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # # Enabled MCP servers connect automatically in the background after session
 # # start. Use /mcp or the desktop MCP panel to refresh, reconnect, or disable.
 
-# Bot gateway: multi-channel IM bot for QQ, Feishu, and WeChat.
-# Start with `fairpeer bot start --channels qq,feishu,weixin`.
+# Bot gateway: multi-channel IM bot for QQ, Feishu, WeChat, and Telegram.
+# Start with `fairpeer bot start --channels qq,feishu,weixin,telegram`.
 # All secrets are read from environment variables; never put keys here.
 # [bot]
 # enabled    = false
@@ -336,9 +336,11 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # qq_users    = []
 # feishu_users = []
 # weixin_users = []
+# telegram_users = []
 # qq_groups   = []
 # feishu_groups = []
 # weixin_groups = []
+# telegram_groups = []
 #
 # [bot.qq]
 # enabled        = false
@@ -359,6 +361,11 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # account_id = "default"
 # token_env = "WEIXIN_BOT_TOKEN"
 # api_base  = "https://ilinkai.weixin.qq.com"   # Tencent iLink Bot API base URL
+#
+# [bot.telegram]
+# enabled   = false
+# token_env = "TELEGRAM_BOT_TOKEN"   # @BotFather 颁发的 Bot Token
+# api_base  = ""                      # 可选：自建 Bot API 服务器，空 = 官方 https://api.telegram.org
 
 # [cowork] configures the coWork (office) profile's capabilities. All fields are
 # optional — empty means "auto-detect" or "disabled".
