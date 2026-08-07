@@ -45,7 +45,7 @@ export function ExpertSessionView({
   teamName: string;
   teamId: string;
   running: boolean;
-  onSend: (task: string, mode: string, rounds: number) => void;
+  onSend: (task: string, mode: string, rounds: number) => Promise<void>;
 }) {
   const t = useT();
   const { showToast } = useToast();
@@ -214,14 +214,21 @@ export function ExpertSessionView({
   );
   const busy = running || liveRunning;
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!task.trim() || busy) return;
     const userTask = task.trim();
     setLiveRunning(true);
     setLiveTask(userTask);
     setLiveMessages([]);
-    onSend(userTask, mode, mode === "debate" ? rounds : 0);
     setTask("");
+    try {
+      await onSend(userTask, mode, mode === "debate" ? rounds : 0);
+    } catch {
+      // runExpertFromSession failed or user cancelled confirmation — reset
+      // the loading state so the composer isn't stuck on "Collaborating…"
+      setLiveRunning(false);
+      setLiveTask("");
+    }
   };
 
   return (

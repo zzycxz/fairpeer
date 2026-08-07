@@ -2084,15 +2084,15 @@ export default function App() {
   // is warned ONCE per team per session — not nagged on every follow-up.
   const searchCostConfirmedRef = useRef<Set<string>>(new Set());
   const runExpertFromSession = useCallback(async (teamId: string, task: string, mode: string, rounds: number) => {
-    try {
-      const teams = await app.ListExpertTeams().catch(() => []);
-      const team = teams.find((tm) => tm.id === teamId);
-      if (team?.allowSearch && !searchCostConfirmedRef.current.has(teamId)) {
-        if (!(await confirm({ title: "搜索确认", message: t("cowork.expertSearchCostConfirm"), danger: false }))) return;
-        searchCostConfirmedRef.current.add(teamId);
+    const teams = await app.ListExpertTeams().catch(() => []);
+    const team = teams.find((tm) => tm.id === teamId);
+    if (team?.allowSearch && !searchCostConfirmedRef.current.has(teamId)) {
+      if (!(await confirm({ title: t("cowork.expertSearchBadge"), message: t("cowork.expertSearchCostConfirm"), danger: false }))) {
+        throw new Error("cancelled"); // ExpertSessionView resets liveRunning on reject
       }
-      await app.RunExpertTeam(teamId, task, mode, rounds);
-    } catch { /* ExpertSessionView shows error via stream events */ }
+      searchCostConfirmedRef.current.add(teamId);
+    }
+    await app.RunExpertTeam(teamId, task, mode, rounds);
   }, [t]);
 
   const handleOpenTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string) => {
@@ -2604,7 +2604,7 @@ export default function App() {
           teamName={state.meta.expertSession.teamName}
           teamId={state.meta.expertSession.teamId}
           running={state.running}
-          onSend={(task, mode, rounds) => void runExpertFromSession(state.meta!.expertSession!.teamId, task, mode, rounds)}
+          onSend={(task, mode, rounds) => runExpertFromSession(state.meta!.expertSession!.teamId, task, mode, rounds)}
         />
       ) : (
         <Transcript

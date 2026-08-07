@@ -72,7 +72,11 @@ export function TeamManager({
     }
   };
 
-  const valid = name.trim() && experts.some((e) => e.name.trim());
+  // Debate/pipeline modes need ≥2 named experts to be meaningful; parallel
+  // can work with just 1.
+  const namedExperts = experts.filter((e) => e.name.trim()).length;
+  const minExperts = mode === "parallel" ? 1 : 2;
+  const valid = name.trim() && namedExperts >= minExperts;
 
   return (
     <div className="cowork-taskform-overlay" onClick={onCancel}>

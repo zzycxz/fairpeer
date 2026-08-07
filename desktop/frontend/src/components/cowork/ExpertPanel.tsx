@@ -328,7 +328,7 @@ export function ExpertPanel() {
                     </button>
                   </div>
                   {experts.length > 0 && (
-                    <div className="cowork-expert__card-roster" style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
+                    <div className="cowork-expert__card-roster" style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '12px', color: 'var(--fg-faint)', marginTop: '8px' }}>
                       专家成员: {experts.map((ex) => ex.name).join(", ")}
                     </div>
                   )}
