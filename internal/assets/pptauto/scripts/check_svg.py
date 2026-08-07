@@ -517,7 +517,7 @@ if __name__ == "__main__":
 
     svg_path = sys.argv[1]
     config_path = None
-    mode = "fast"
+    mode = None  # None = read from config
 
     if "--config" in sys.argv:
         idx = sys.argv.index("--config")
@@ -530,5 +530,8 @@ if __name__ == "__main__":
             mode = sys.argv[idx + 1]
 
     config = load_config(config_path, svg_path)
+    # If --mode not passed on CLI, read it from config (set by settings panel)
+    if mode is None:
+        mode = config.get("mode", "fast")
     result = check_svg(svg_path, config, mode)
     sys.exit(result)

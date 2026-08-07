@@ -42,6 +42,7 @@
   "fonts": {
     "family": "\"Microsoft YaHei\", \"微软雅黑\", \"PingFang SC\", \"Noto Sans CJK SC\", sans-serif"
   },
+  "mode": "fast",
   "rules": {
     "alignment": "同类元素必须对齐，间距均匀，不要参差不齐",
     "color_limits": {
