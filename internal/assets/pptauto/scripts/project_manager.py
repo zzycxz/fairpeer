@@ -143,8 +143,14 @@ class ProjectManager:
         project_dir_name = f"{project_name}_{normalized_format}_{date_str}"
         project_path = base_path / project_dir_name
 
+        # If the directory already exists (same name + same day), auto-append
+        # a counter suffix instead of erroring — avoids model retrying 3 times.
         if project_path.exists():
-            raise FileExistsError(f"Project directory already exists: {project_path}")
+            counter = 2
+            while project_path.exists():
+                project_dir_name = f"{project_name}_{normalized_format}_{date_str}_{counter}"
+                project_path = base_path / project_dir_name
+                counter += 1
 
         for rel_path in (
             "svg_output",

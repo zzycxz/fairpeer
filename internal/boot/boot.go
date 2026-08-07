@@ -408,6 +408,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if err := assets.EnsurePPTAutoSkill(); err != nil {
 		slog.Warn("assets: failed to release embedded ppt-auto skill", "err", err)
 	}
+	// Restore the user's ppt_mode choice into the just-released config.
+	// EnsurePPTAutoSkill ships mode="fast"; without this, a SkillVersion bump
+	// resets the user's "validate" choice to "fast" on every launch.
+	if err := assets.SyncPPTMode(cfg.Cowork.PPTMode); err != nil {
+		slog.Warn("assets: failed to sync ppt_mode", "err", err)
+	}
 	skillStore := skill.New(skill.Options{
 		ProjectRoot:     root,
 		CustomPaths:     cfg.SkillCustomPaths(),

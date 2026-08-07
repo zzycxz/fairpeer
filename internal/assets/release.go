@@ -2,6 +2,7 @@ package assets
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,7 +15,7 @@ import (
 // that should force a refresh of the released copy. Bump this when you update
 // the embedded scripts/templates/SKILL.md and want existing users to get the
 // new version on next launch.
-const SkillVersion = "21"
+const SkillVersion = "22"
 
 // versionFileName is written into the released skill dir so we can tell whether
 // the on-disk copy matches the embedded version.
@@ -140,6 +141,35 @@ func PPTAutoConfigPath() string {
 		return p
 	}
 	return ""
+}
+
+// SyncPPTMode writes the user's ppt_mode setting (from config.toml) into the
+// released template_config.json's "mode" field. This must be called after
+// EnsurePPTAutoSkill at startup, because the embedded config ships with
+// mode="fast" and would overwrite the user's "validate" choice on every
+// SkillVersion bump.
+func SyncPPTMode(pptMode string) error {
+	if pptMode != "fast" && pptMode != "validate" {
+		return nil // ignore invalid values
+	}
+	configPath := PPTAutoConfigPath()
+	if configPath == "" {
+		return nil
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+	cfg["mode"] = pptMode
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(configPath, out, 0o644)
 }
 
 // readVersion reads the .embedded-version marker from a released skill dir.
