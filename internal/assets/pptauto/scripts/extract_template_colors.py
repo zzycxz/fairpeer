@@ -281,24 +281,6 @@ def extract_colors_from_pptx(pptx_path):
     if not all_colors and image_bg_info is None:
         return None
 
-    # 选最佳 content layout：shapes 多（内容页）+ 有图片，排除封面/结尾名
-    cover_names = {'封面', '标题', 'cover', 'title slide', 'title'}
-    ending_names = {'结尾', '致谢', 'ending', 'thank', 'back'}
-
-    best_layout_index = 0
-    best_score = -1
-    for info in layout_info:
-        name_lower = (info['name'] or '').lower()
-        penalty = 0
-        if any(kw in name_lower for kw in cover_names):
-            penalty = 5
-        if any(kw in name_lower for kw in ending_names):
-            penalty = 5
-        score = info['shapes'] + info['images'] * 2 - penalty
-        if score > best_score:
-            best_score = score
-            best_layout_index = info['index']
-
     sorted_colors = sorted(all_colors.items(), key=lambda x: -x[1])
 
     # --- 4. 决定背景色：优先用图片视觉结果，否则用最深色 ---
@@ -369,24 +351,12 @@ def extract_colors_from_pptx(pptx_path):
 
     extracted_palette = [f"#{c}" for c, _ in sorted_colors[:6]]
 
-    layout_summary = [{
-        'index': info['index'],
-        'name': info['name'],
-        'shapes': info['shapes'],
-        'images': info['images'],
-        'has_image_bg': info['has_image_bg'],
-        'is_cover': any(kw in (info['name'] or '').lower() for kw in cover_names),
-        'is_ending': any(kw in (info['name'] or '').lower() for kw in ending_names),
-    } for info in layout_info]
-
     return {
         'colors': colors,
         'is_dark_theme': is_dark,
         'has_image_background': has_image_background,
         'extracted_palette': extracted_palette,
         'template_name': Path(pptx_path).stem,
-        'best_layout_index': best_layout_index,
-        'layouts': layout_summary,
     }
 
 
@@ -409,8 +379,6 @@ def update_template_config(config_path, extracted):
     config['_template']['is_dark'] = extracted['is_dark_theme']
     config['_template']['has_image_background'] = extracted.get('has_image_background', False)
     config['_template']['palette'] = extracted['extracted_palette']
-    config['_template']['best_layout_index'] = extracted['best_layout_index']
-    config['_template']['layouts'] = extracted['layouts']
 
     with open(config_path, 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)

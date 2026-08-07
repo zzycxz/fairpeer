@@ -661,6 +661,11 @@ func (a *App) PickPPTTemplate() (string, error) {
 	if err := os.WriteFile(dest, srcData, 0o644); err != nil {
 		return "", fmt.Errorf("写入模板文件失败: %w", err)
 	}
+	// Kick off async vision-based color/style extraction. This writes
+	// ~/.fairpeer/ppt-template-style.json which the ppt-auto skill reads
+	// (Step 0) as the highest-priority color source. Best-effort: silently
+	// degrades if no VLM configured or no full-screen bg image found.
+	go a.analyzeTemplateStyleAsync(dest)
 	// Return the filename for display.
 	return filepath.Base(path), nil
 }

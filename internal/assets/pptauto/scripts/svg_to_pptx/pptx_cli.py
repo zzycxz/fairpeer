@@ -165,7 +165,10 @@ Recorded narration:
     parser.add_argument('-q', '--quiet', action='store_true', help='Quiet mode')
 
     parser.add_argument('--template', type=str, default=None,
-                        help='PPTX template file. When provided, the output inherits the template\'s slide master / layout / background. The template\'s existing slides are cleared and replaced with the SVG content on top of the template background.')
+                        help='[Deprecated, no-op] Previously used to inherit a template\'s '
+                             'slide master/layout/background. The SVG pipeline now always '
+                             'starts from a blank Presentation; template colors/fonts are '
+                             'extracted separately. Kept for backward-compat.')
 
     parser.add_argument('--no-compat', action='store_true',
                         help='Disable Office compatibility mode (pure SVG only, requires Office 2019+)')
@@ -568,33 +571,10 @@ Recorded narration:
             else:
                 print("  [warn] metadata.json ignored (top level is not an object)", file=sys.stderr)
 
-    # Auto-detect template: check the fixed path first (~/.fairpeer/ppt-template.pptx),
-    # then fall back to scanning skill templates dirs.
-    template_path_resolved = Path(args.template) if args.template else None
-    if template_path_resolved is None:
-        # 1. Fixed path (set by settings panel's file picker)
-        fixed = Path.home() / '.fairpeer' / 'ppt-template.pptx'
-        if fixed.exists():
-            template_path_resolved = fixed
-            if verbose:
-                print(f"  Using template: {fixed}")
-        else:
-            # 2. Fallback: scan skill templates dirs
-            script_dir = Path(__file__).resolve().parent
-            search_dirs = [
-                Path.home() / '.fairpeer' / 'skills' / 'ppt-auto' / 'templates',
-                script_dir.parent.parent / 'templates',
-            ]
-            for templates_dir in search_dirs:
-                if not templates_dir.exists():
-                    continue
-                candidates = [f for f in templates_dir.glob('*.pptx')
-                              if f.name.lower() != 'default.pptx']
-                if candidates:
-                    template_path_resolved = candidates[0]
-                    if verbose:
-                        print(f"  Auto-detected template: {template_path_resolved.name}")
-                    break
+    # --template is deprecated/no-op: the builder always uses a blank
+    # Presentation now. Template colors/fonts are extracted separately by
+    # extract_template_colors.py + the Go vision layer, not via OOXML
+    # inheritance. We intentionally do NOT pass template_path to the builder.
 
     shared_kwargs = dict(
         canvas_format=canvas_format,
@@ -623,7 +603,6 @@ Recorded narration:
         image_sizing=args.image_sizing,
         image_scale=args.image_scale,
         image_quality=args.image_quality,
-        template_path=template_path_resolved,
     )
 
     success = True

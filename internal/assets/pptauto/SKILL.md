@@ -45,7 +45,7 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, web_sea
 
 ## 路线 A：SVG 生成（15 步）
 
-### Step 0: 确定模板（关键！）
+### Step 0: 确定模板配色（关键！）
 
 检查固定位置的模板文件：
 
@@ -53,25 +53,22 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, web_sea
 ls ~/.fairpeer/ppt-template.pptx 2>/dev/null
 ```
 
-- **文件存在** → 使用 `~/.fairpeer/ppt-template.pptx` 作为模板
-- **文件不存在** → 无模板模式：SVG 自己画背景色
+- **文件存在** → 有模板：提取配色，SVG 用模板的配色风格生成
+- **文件不存在** → 无模板：用 `template_config.json` 的默认配色
 
-**如果有模板，先提取配色**：
+**如果有模板，提取配色**（纯 Python + PIL，不依赖 Office）：
 
 ```bash
 python3 <skill_dir>/scripts/extract_template_colors.py ~/.fairpeer/ppt-template.pptx <skill_dir>/template_config.json
 ```
 
-**⚠️ SVG 背景规则（极其重要）**：
+**视觉配色（可选，优先级最高）**：若 `~/.fairpeer/ppt-template-style.json` 存在（由设置面板选模板时后台自动生成），其中的配色是视觉模型从模板背景图识别的，**优先于 extract_template_colors.py 的结果**。读它覆盖 `template_config.json` 的 colors。
 
-提取后查看 `template_config.json` 的 `colors.background_type`：
-- **`image`（图片背景模板）**：禁止画任何全屏背景矩形——模板的图片背景必须透出来。卡片、内容块用半透明色（如 `rgba(0,0,0,0.3)`）做局部遮罩。
-- **`solid`（纯色背景模板）**：同样禁止画全屏背景矩形——模板自带纯色背景。
-- **无模板时**：画一个全屏 `<rect width="1280" height="720" fill="#背景色"/>` 作为背景。
+**⚠️ SVG 背景规则（重要）**：
 
-简言之：**只要 Step 0 找到了模板，就绝不画全屏背景矩形**。颜色信息（`background`、`accent`、`text` 等）用于卡片、标题、分隔线、图标等着色，不是用来铺满背景的。
+**无论有无模板，每页 SVG 的第一个元素必须是全屏背景 `<rect width="1280" height="720" fill="#背景色"/>`**。背景色来自提取的配色（`colors.background`）。SVG 管线不再继承模板的 layout/背景——所有视觉元素（含背景）都由 SVG 显式画出。
 
-**Step 12 转换时传 `--template ~/.fairpeer/ppt-template.pptx`**（文件存在时）。
+check_svg.py 会校验：缺少全屏背景 → 警告。
 
 ### Step 1: 提取源文档（如有）
 
@@ -105,7 +102,7 @@ init 创建目录结构，后续文件路径：
 | `svg_output/` | 逐页 SVG（`slide_01.svg`…） |
 | `notes/` | 演讲者备注 |
 | `exports/` | 最终 PPTX |
-| `backgrounds/` | 模板背景图 |
+| `backgrounds/` | 模板背景截图（Step 6 可选，懒创建） |
 
 **init 后立刻把大纲写入 `<project_dir>/design_spec.md`**（完整性校验必需）。
 
@@ -122,10 +119,11 @@ read_file <skill_dir>/template_config.json
 | 层级 | 来源 | 说明 |
 |------|------|------|
 | 基线 | `template_config.json` | 始终有效，提供全部颜色字段 |
-| 模板提取 | `dynamic_style.json`（若存在） | **整组 colors 字段全覆盖**基线；由 Step 6 生成（仅装了 Office 时） |
+| 视觉提取（最高） | `~/.fairpeer/ppt-template-style.json`（若存在） | 设置面板选模板时由视觉模型自动生成；覆盖 background/accent/text 等关键字段 |
+| 模板提取 | `dynamic_style.json`（若存在） | 整组 colors 覆盖基线；由 Step 6 生成（仅装了 Office 时） |
 | 用户输入 | 自然语言（"用绿色主色"） | 只覆盖明确提及的字段 |
 
-**严禁在三层之外凭空捏造颜色。** 注意：Step 0 的 `extract_template_colors.py`（纯 Python + PIL）和 Step 6 的 `analyze_template.py`（需 Office COM）都会提取模板配色——前者写 `template_config.json`，后者写 `dynamic_style.json` 并整组覆盖。装了 Office 时以后者为准，没装时以前者为准。
+**严禁凭空捏造颜色。** 优先级：用户输入 > 视觉提取(ppt-template-style.json) > Step 6(dynamic_style.json) > Step 0(template_config.json) > 默认。Step 0 有模板时，先读 `~/.fairpeer/ppt-template-style.json`（若存在），其配色优先于 `extract_template_colors.py` 的结果。
 
 ### Step 6: 分析模板（可选，需 Office）
 
@@ -133,7 +131,7 @@ read_file <skill_dir>/template_config.json
 python3 <skill_dir>/scripts/analyze_template.py ~/.fairpeer/ppt-template.pptx <project_dir>/backgrounds/
 ```
 
-需 PowerPoint/WPS（COM 自动化）。**若报错（未装 Office/comtypes），将该步标 completed 并继续**——Step 0 的纯 Python 配色提取已足够，SVG 用提取的配色即可。同时写入 `<project_dir>/dynamic_style.json`（整组覆盖基线配色）。
+需 PowerPoint/WPS（COM 自动化）。**若报错（未装 Office/comtypes），将该步标 completed 并继续**——Step 0 的纯 Python 配色提取已足够。此步用 Office 渲染模板截图做更精细的 PIL 配色量化，写入 `<project_dir>/dynamic_style.json`（仅覆盖 colors，**不影响背景逻辑**——SVG 总是自己画背景）。通常可跳过。
 
 ### Step 7: 规划页面布局
 
@@ -143,7 +141,7 @@ python3 <skill_dir>/scripts/analyze_template.py ~/.fairpeer/ppt-template.pptx <p
 
 每页写入 `<project_dir>/svg_output/slide_01.svg`…。每页 SVG 必须：
 
-1. **背景**：遵循 Step 0 的判定——有模板时不画任何全屏背景（矩形/图片都不画，模板背景会透出）；无模板时第一个元素是全屏 `<rect>` 背景色。check_svg.py 会强制校验这条。
+1. **背景**：第一个元素是全屏 `<rect width="1280" height="720" fill="#背景色"/>`（背景色来自 Step 0 提取的 `colors.background`）。无论有无模板都要画——SVG 管线不继承模板背景。
 2. viewBox 固定 `"0 0 1280 720"`
 3. 配色严格读 config，不得凭空捏造
 4. 强调色只用于关键数据/按钮/警告（面积 ≤5%）
@@ -183,7 +181,7 @@ python3 <skill_dir>/scripts/save_notes.py <project_dir> <notes_json>
 python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
 ```
 
-转换器会**自动检测** `~/.fairpeer/ppt-template.pptx`（Step 0 扫到的文件），无需手动传参。仅当要覆盖自动检测时才显式传 `--template <路径>`。
+转换器从**空白 Presentation** 开始，把每页 SVG 转成原生 DrawingML 形状/文字（**可编辑**）。不再继承模板 layout——所有视觉元素已在 SVG 里显式画出。`--template` 参数已废弃（no-op），无需传。
 
 纯 Python（python-pptx），**不需要 Office**。默认无动画无过渡。
 
