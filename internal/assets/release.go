@@ -1,6 +1,7 @@
 package assets
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -75,6 +76,12 @@ func EnsurePPTAutoSkill() error {
 		}
 		if werr := os.MkdirAll(filepath.Dir(target), 0o755); werr != nil {
 			return fmt.Errorf("mkdir for %s: %w", target, werr)
+		}
+		// Skip writing if the target already exists with identical content.
+		// This avoids rewriting 11000+ icon files on every SkillVersion bump
+		// when only scripts changed — the biggest startup-latency source.
+		if existing, err := os.ReadFile(target); err == nil && bytes.Equal(existing, data) {
+			return nil
 		}
 		// Write atomically-ish: write then chmod. Preserve executability for
 		// shell scripts on POSIX (cosmetic on Windows).
