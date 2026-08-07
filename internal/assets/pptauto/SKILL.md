@@ -29,7 +29,9 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, complet
 
 `evidence` 必须是**数组**，每项含 `kind`（verification/diff/files/manual）+ `summary`，以及可选的 `command`/`paths`。
 
-**关键：`command` 字段必须和你实际跑的 bash 命令完全一致**（系统会拿它去匹配 bash 执行记录）。不一致会报 "no matching successful bash receipt"。如果拿不准命令原文，用 `kind: "manual"` 代替。
+**关键规则**：
+1. `command` 字段必须和你实际跑的 bash 命令**完全一致**（系统会拿它去匹配 bash 执行记录）。不一致会报 "no matching successful bash receipt"。如果拿不准命令原文，用 `kind: "manual"` 代替。
+2. `kind: "files"` 的 `paths` 只能引用**你自己用 write_file/edit_file 直接写过的文件**。脚本生成的文件（如 `exports/*.pptx`、`backup/`、`template_config.json` 被 extract_template_colors.py 改写）**不算你写的**——用 `kind: "verification"` + `command`（引用生成它的脚本命令）代替。
 
 正确示例：
 ```json
@@ -42,7 +44,18 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, complet
 }
 ```
 
-简化方案（拿不准命令原文时用 manual）：
+转换 PPTX 步骤（脚本生成的文件用 verification，不用 files）：
+```json
+{
+  "step": "Step 7: 转换 PPTX",
+  "result": "PPTX 已生成",
+  "evidence": [
+    {"kind": "verification", "summary": "svg_to_pptx 转换成功，57个元素", "command": "python \"C:\\Users\\13852\\.fairpeer\\skills\\ppt-auto\\scripts\\svg_to_pptx.py\" \"<project_dir>\""}
+  ]
+}
+```
+
+write_file 写的文件用 files：
 ```json
 {
   "step": "Step 5: 写大纲",
@@ -51,6 +64,11 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, complet
     {"kind": "files", "summary": "design_spec.md 已创建", "paths": ["<project_dir>/design_spec.md"]}
   ]
 }
+```
+
+拿不准时用 manual（不匹配命令也不匹配文件）：
+```json
+{"kind": "manual", "summary": "检查通过，无报错"}
 ```
 
 ## 输入与输出
