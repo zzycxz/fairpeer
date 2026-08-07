@@ -165,10 +165,9 @@ Recorded narration:
     parser.add_argument('-q', '--quiet', action='store_true', help='Quiet mode')
 
     parser.add_argument('--template', type=str, default=None,
-                        help='[Deprecated, no-op] Previously used to inherit a template\'s '
-                             'slide master/layout/background. The SVG pipeline now always '
-                             'starts from a blank Presentation; template colors/fonts are '
-                             'extracted separately. Kept for backward-compat.')
+                        help='PPTX template file. When provided, the output inherits the '
+                             'template\'s slide master/layout/background. Auto-detected from '
+                             '~/.fairpeer/ppt-template.pptx if omitted.')
 
     parser.add_argument('--no-compat', action='store_true',
                         help='Disable Office compatibility mode (pure SVG only, requires Office 2019+)')
@@ -571,10 +570,14 @@ Recorded narration:
             else:
                 print("  [warn] metadata.json ignored (top level is not an object)", file=sys.stderr)
 
-    # --template is deprecated/no-op: the builder always uses a blank
-    # Presentation now. Template colors/fonts are extracted separately by
-    # extract_template_colors.py + the Go vision layer, not via OOXML
-    # inheritance. We intentionally do NOT pass template_path to the builder.
+    # Auto-detect template: check the fixed path first (~/.fairpeer/ppt-template.pptx).
+    template_path_resolved = Path(args.template) if args.template else None
+    if template_path_resolved is None:
+        fixed = Path.home() / '.fairpeer' / 'ppt-template.pptx'
+        if fixed.exists():
+            template_path_resolved = fixed
+            if verbose:
+                print(f"  Using template: {fixed}")
 
     shared_kwargs = dict(
         canvas_format=canvas_format,
@@ -603,6 +606,7 @@ Recorded narration:
         image_sizing=args.image_sizing,
         image_scale=args.image_scale,
         image_quality=args.image_quality,
+        template_path=template_path_resolved,
     )
 
     success = True

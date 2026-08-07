@@ -110,14 +110,15 @@ def _saturation(hex_val):
     return mx - mn if mx > 0 else 0
 
 
-def extract_colors_from_pptx(pptx_path, bg_image_out=None):
-    """从 PPTX 模板提取配色方案 + 背景图，返回 dict。
+def extract_colors_from_pptx(pptx_path):
+    """从 PPTX 模板提取配色方案，返回 dict。
 
     三层提取：
       ① theme1.xml 配色方案（accent1-6 等）
       ② master/layout/slide 的 solidFill + schemeClr
       ③ 全屏 blipFill 图片背景 → PIL 算真实背景色（视觉兜底）
-         + 若 bg_image_out 指定，把原始背景图字节写到该路径
+         用于检测 is_dark + 设 background_type=image
+         （背景图本身由 PPTX layout 继承保留，不需要提取）
     """
     from pptx import Presentation
     from lxml import etree
@@ -255,7 +256,7 @@ def extract_colors_from_pptx(pptx_path, bg_image_out=None):
                     bg_img_bytes, bg_img_ext = result
                     break
 
-        # 如果找到了背景图，算配色 + 写出文件
+        # 如果找到了背景图，算配色（背景图本身由 PPTX 继承保留，不提取）
         if bg_img_bytes:
             avg_hex, top_hexes = _pil_average_color(bg_img_bytes)
             if avg_hex:
@@ -265,13 +266,6 @@ def extract_colors_from_pptx(pptx_path, bg_image_out=None):
                 for h in (top_hexes or []):
                     if h not in ('000000', 'FFFFFF'):
                         all_colors[h] = all_colors.get(h, 0) + 2
-            # 写背景图到指定路径
-            if bg_image_out is not None:
-                bg_image_out = Path(bg_image_out)
-                bg_image_out.parent.mkdir(parents=True, exist_ok=True)
-                # 确保扩展名匹配
-                out_path = bg_image_out.with_suffix(f'.{bg_img_ext}')
-                out_path.write_bytes(bg_img_bytes)
 
         for layout in prs.slide_layouts:
             collect_colors(layout.element)
@@ -356,7 +350,6 @@ def extract_colors_from_pptx(pptx_path, bg_image_out=None):
         'colors': colors,
         'is_dark_theme': is_dark,
         'has_image_background': has_image_background,
-        'background_image_ext': bg_img_ext if bg_img_bytes else None,
         'extracted_palette': extracted_palette,
         'template_name': Path(pptx_path).stem,
     }
@@ -390,12 +383,11 @@ def update_template_config(config_path, extracted):
 
 def main():
     if len(sys.argv) < 3:
-        print("用法: python3 extract_template_colors.py <template.pptx> <template_config.json> [bg_image_output]")
+        print("用法: python3 extract_template_colors.py <template.pptx> <template_config.json>")
         sys.exit(1)
 
     pptx_path = Path(sys.argv[1])
     config_path = Path(sys.argv[2])
-    bg_image_out = Path(sys.argv[3]) if len(sys.argv) >= 4 else None
 
     if not pptx_path.exists():
         print(f"错误: 模板文件不存在: {pptx_path}")
@@ -405,7 +397,7 @@ def main():
         print(f"错误: 配置文件不存在: {config_path}")
         sys.exit(1)
 
-    extracted = extract_colors_from_pptx(pptx_path, bg_image_out=bg_image_out)
+    extracted = extract_colors_from_pptx(pptx_path)
     if extracted is None:
         print(f"警告: 未能从模板 {pptx_path.name} 提取配色，保留现有配色")
         sys.exit(0)
@@ -418,8 +410,6 @@ def main():
     print(f"  text:            {colors.get('text')}")
     print(f"  深色主题:        {extracted['is_dark_theme']}")
     print(f"  图片背景:        {extracted.get('has_image_background', False)}")
-    if extracted.get('background_image_ext'):
-        print(f"  背景图:          已提取 (.{extracted['background_image_ext']})")
     print(f"  提取调色板:      {extracted['extracted_palette']}")
 
 

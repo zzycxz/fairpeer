@@ -45,7 +45,7 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, complet
 
 ## 路线 A：SVG 生成（15 步）
 
-### Step 0: 提取模板配色 + 背景图（关键！）
+### Step 0: 提取模板配色（关键！）
 
 检查固定位置的模板文件：
 
@@ -53,18 +53,16 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, complet
 ls ~/.fairpeer/ppt-template.pptx 2>/dev/null
 ```
 
-- **文件存在** → 有模板：提取配色 + 背景图
-- **文件不存在** → 无模板：用 `template_config.json` 的默认配色
+- **文件存在** → 有模板：提取配色（用于内容着色）。模板的背景/装饰/logo 由 PPTX 继承自动透出，SVG 不需要画背景
+- **文件不存在** → 无模板：SVG 自己画背景色
 
-**如果有模板，提取配色 + 背景图**（纯 Python + PIL，不依赖 Office）：
+**如果有模板，提取配色**（纯 Python + PIL，不依赖 Office）：
 
 ```bash
-python3 <skill_dir>/scripts/extract_template_colors.py ~/.fairpeer/ppt-template.pptx <skill_dir>/template_config.json ~/.fairpeer/ppt-template-bg.png
+python3 <skill_dir>/scripts/extract_template_colors.py ~/.fairpeer/ppt-template.pptx <skill_dir>/template_config.json
 ```
 
-第三个参数是背景图输出路径。提取后：
-- `template_config.json` 的 `colors` 被更新为模板真实配色
-- `~/.fairpeer/ppt-template-bg.png` 是模板的全屏背景图（若有图片背景）
+提取后 `template_config.json` 的 `colors` 被更新为模板真实配色（background/accent/text 等），用于后续内容卡片、标题、图标的着色。
 
 **视觉配色（可选，优先级最高）**：若 `~/.fairpeer/ppt-template-style.json` 存在（由设置面板选模板时后台自动生成），其配色优先于 `extract_template_colors.py` 的结果。
 
@@ -123,14 +121,9 @@ init 创建目录结构，后续文件路径：
 | `svg_output/` | 逐页 SVG（`slide_01.svg`…） |
 | `notes/` | 演讲者备注 |
 | `exports/` | 最终 PPTX |
-| `images/` | 图片资源（含模板背景图） |
+| `images/` | 图片资源 |
 
 **init 后把大纲写入 `<project_dir>/design_spec.md`**（完整性校验必需）。
-
-**若有模板背景图，复制到项目 images/**：
-```bash
-cp ~/.fairpeer/ppt-template-bg.png <project_dir>/images/bg_template.png 2>/dev/null
-```
 
 ### Step 6: 分析模板（可选，需 Office）
 
@@ -148,19 +141,9 @@ python3 <skill_dir>/scripts/analyze_template.py ~/.fairpeer/ppt-template.pptx <p
 
 每页写入 `<project_dir>/svg_output/slide_01.svg`…。每页 SVG 必须：
 
-1. **背景**（由 Step 0/5 的结果决定，不要自己选）：
-   - 检查 `<project_dir>/images/bg_template.png` 是否存在（`ls <project_dir>/images/bg_template.png`）。
-   - **存在** → 每页第一个元素**必须**是：
-     ```xml
-     <image href="images/bg_template.png" x="0" y="0" width="1280" height="720" preserveAspectRatio="xMidYMid slice"/>
-     ```
-     直接铺模板背景图，保留模板的渐变/装饰/logo。**不要画 `<rect>` 背景盖住它。**
-   - **不存在**（无模板，或模板无图片背景）→ 每页第一个元素是：
-     ```xml
-     <rect width="1280" height="720" fill="#背景色"/>
-     ```
-     背景色用 `colors.background`（来自 Step 3 读的 config）。
-   - 用户明确说"重新设计背景/换个背景风格"时，才允许不用 bg_template.png 而自创背景。否则一律按上述规则。
+1. **背景**（取决于 Step 0 是否有模板）：
+   - **有模板**（`~/.fairpeer/ppt-template.pptx` 存在）：**不要画任何全屏背景**（不要 rect、不要 image）。模板的背景/渐变/装饰/logo 会通过 PPTX layout 继承自动透出。SVG 只画内容（卡片、文字、图标）。画全屏 rect 会盖住模板背景！check_svg.py 会报错。
+   - **无模板**：每页第一个元素是全屏 `<rect width="1280" height="720" fill="#背景色"/>`（`colors.background`）。
 2. viewBox 固定 `"0 0 1280 720"`
 3. 配色严格读 config，不得凭空捏造
 4. 强调色只用于关键数据/按钮/警告（面积 ≤5%）
@@ -200,7 +183,7 @@ python3 <skill_dir>/scripts/save_notes.py <project_dir> <notes_json>
 python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
 ```
 
-转换器从**空白 Presentation** 开始，把每页 SVG 转成原生 DrawingML 形状/文字（**可编辑**）。SVG 里的 `<image>` 会被嵌入 PPTX 的 media。`--template` 参数已废弃（no-op），无需传。
+转换器会**自动检测** `~/.fairpeer/ppt-template.pptx`：有模板时打开模板、清空已有 slides、用模板的 layout 添加新 slide（模板的背景/master/装饰通过继承保留），把每页 SVG 转成原生 DrawingML 形状/文字（**可编辑**）叠加在模板背景上。无模板时用空白 Presentation。无需手动传参。
 
 纯 Python（python-pptx），**不需要 Office**。默认无动画无过渡。
 

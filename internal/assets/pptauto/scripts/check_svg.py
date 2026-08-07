@@ -350,6 +350,16 @@ def check_svg(svg_path, config=None, mode="fast"):
     errors = []
     warnings = []
 
+    # 是否处于模板模式？模板模式下，SVG 不应画任何全屏背景（模板的
+    # master/layout 背景会通过 PPTX 继承自动透出）。画了全屏 rect 反而
+    # 会盖住模板背景。
+    bg_type = config.get("colors", {}).get("background_type")
+    has_template = bg_type in ("image", "solid")
+    if not has_template and svg_path:
+        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(svg_path)))
+        if os.path.exists(os.path.join(project_dir, "dynamic_style.json")):
+            has_template = True
+
     # === 始终检查的项目 ===
 
     # 1. XML 格式
@@ -358,15 +368,13 @@ def check_svg(svg_path, config=None, mode="fast"):
     except ET.ParseError as e:
         errors.append(f"XML 格式错误: {e}")
 
-    # 2. 背景——SVG 必须自己画背景（全屏 rect 或 image）。
-    # 不再区分"模板模式"vs"无模板模式"：SVG 管线总是从空白 Presentation
-    # 开始，所以每页 SVG 必须显式画出自己的背景。
-    has_background = False
+    # 2. 背景
     try:
         root = ET.fromstring(content)
         vb = root.get("viewBox", "0 0 1280 720").split()
         vb_w, vb_h = float(vb[2]), float(vb[3])
         # 检测全屏 rect 或 image（覆盖 ≥90% viewBox）
+        full_screen_elem = None
         for elem in root.iter():
             tag = elem.tag.split('}')[-1].lower()
             if tag in ('image', 'rect'):
@@ -378,12 +386,29 @@ def check_svg(svg_path, config=None, mode="fast"):
                 covers = (rx <= vb_w * 0.1 and ry <= vb_h * 0.1 and
                           rw >= vb_w * 0.9 and rh >= vb_h * 0.9)
                 if covers:
-                    has_background = True
+                    full_screen_elem = elem
                     break
     except ET.ParseError:
-        pass  # XML 错误已在上面报告
-    if not has_background:
-        warnings.append("缺少全屏背景（应为第一个 <rect> 或 <image>，覆盖整个 viewBox）")
+        full_screen_elem = None
+
+    if has_template:
+        # 模板模式：模板的 layout 背景会自动透出，SVG 不应画全屏背景。
+        # 如果画了全屏不透明 rect，会盖住模板背景 → 报错。
+        if full_screen_elem is not None:
+            tag = full_screen_elem.tag.split('}')[-1].lower()
+            fill = full_screen_elem.get('fill', '')
+            opacity = full_screen_elem.get('opacity', '1')
+            fill_opacity = full_screen_elem.get('fill-opacity', '1')
+            is_opaque_rect = (tag == 'rect' and fill and fill.lower() != 'none'
+                              and float(opacity) >= 0.9 and float(fill_opacity) >= 0.9)
+            if is_opaque_rect:
+                errors.append(
+                    f"模板模式下禁止画全屏不透明背景矩形(fill={fill})——"
+                    "会盖住模板背景。模板的背景会通过 PPTX 继承自动透出，SVG 只画内容。")
+    else:
+        # 无模板模式：SVG 必须自己画全屏背景
+        if full_screen_elem is None:
+            warnings.append("缺少全屏背景（应为第一个 <rect> 或 <image>，覆盖整个 viewBox）")
 
     # 3. 禁止元素
     forbidden = config.get("rules", {}).get("forbidden_elements", [])

@@ -666,10 +666,11 @@ def create_pptx_with_native_svg(
         image_quality: JPEG quality for optimized opaque rasters.
         conversion_trace_path: Optional JSON path for diagnostics.
         doc_metadata: Optional document metadata dict.
-        template_path: Deprecated, no longer used. Kept for backward-compat
-            with older callers. The SVG pipeline now always starts from a blank
-            Presentation — template colors/fonts are extracted separately and
-            feed SVG authoring as facts, not OOXML layout inheritance.
+        template_path: Optional PPTX template. When provided, the output
+            inherits the template's slide master / layout / background. The
+            template's slides are cleared and new slides use the template's
+            layouts, so the master background shows through. When None, a blank
+            Presentation is used (SVG must draw its own background).
         transition_duration: Transition duration in seconds.
         auto_advance: Auto-advance interval in seconds.
         use_compat_mode: Use Office compatibility mode (PNG + SVG dual format).
@@ -776,25 +777,39 @@ def create_pptx_with_native_svg(
     temp_dir = _create_writable_work_dir(output_path)
 
     try:
-        # Always start from a blank Presentation. The SVG pipeline does NOT
-        # inherit the template's slide master/layout/background — every visual
-        # element (including the background) is authored explicitly in the SVG
-        # and converted to native DrawingML shapes on top of a blank slide.
+        # When a template is provided, open it so the output inherits the
+        # template's slide master / layout / background. The template's existing
+        # slides are cleared; new slides are added using the template's layouts,
+        # so the master background (images, gradients, decorations) shows through
+        # behind the SVG content. The SVG must NOT draw its own full-screen
+        # background rect in template mode (that would cover the template bg).
         #
-        # This avoids the uncontrollable layout-inheritance problems that arise
-        # when trying to overlay SVG content on a template's master background.
-        # Template colors/fonts are extracted separately (extract_template_colors.py
-        # + the Go-side vision layer) and feed SVG authoring as facts, not as
-        # OOXML inheritance.
-        #
-        # template_path is accepted for backward-compat but no longer used here.
-        prs = Presentation()
-        prs.slide_width = width_emu
-        prs.slide_height = height_emu
-        blank_layout = prs.slide_layouts[6]  # Blank
+        # Without a template, use a blank Presentation and the SVG draws its own
+        # background.
+        if template_path and Path(template_path).exists():
+            prs = Presentation(str(template_path))
+            if verbose:
+                print(f"  Using template: {template_path}")
+                print(f"    Layouts: {len(prs.slide_layouts)}, Masters: {len(prs.slide_masters)}")
+            # Clear the template's existing slides (keep master + layouts).
+            xml_slides = prs.slides._sldIdLst
+            for slide in list(xml_slides):
+                xml_slides.remove(slide)
+            # Use the template's first layout (typically the main content layout).
+            # The layout carries the background image/decoration via inheritance.
+            chosen_layout = prs.slide_layouts[0]
+            # Override slide dimensions to match the SVG canvas so content
+            # aligns correctly even if the template used a different aspect ratio.
+            prs.slide_width = width_emu
+            prs.slide_height = height_emu
+        else:
+            prs = Presentation()
+            prs.slide_width = width_emu
+            prs.slide_height = height_emu
+            chosen_layout = prs.slide_layouts[6]  # Blank
 
         for _ in range(len(svg_files)):
-            prs.slides.add_slide(blank_layout)
+            prs.slides.add_slide(chosen_layout)
 
         base_pptx = temp_dir / 'base.pptx'
         prs.save(str(base_pptx))
