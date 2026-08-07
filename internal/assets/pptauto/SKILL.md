@@ -90,7 +90,9 @@ ls ~/.fairpeer/ppt-template.pptx 2>/dev/null
 python3 <skill_dir>/scripts/extract_template_colors.py ~/.fairpeer/ppt-template.pptx <skill_dir>/template_config.json
 ```
 
-提取后 `template_config.json` 的 `colors` 被更新为模板真实配色（background/accent/text 等），用于后续内容卡片、标题、图标的着色。
+提取后 `template_config.json` 被更新：
+- `colors`：模板真实配色（background/accent/text 等），用于内容着色
+- `fonts.family`：模板字体 + 跨平台降级链（如 `"等线", "Microsoft YaHei", "PingFang SC", sans-serif`），SVG 文字用此字体
 
 **视觉配色（可选，优先级最高）**：若 `~/.fairpeer/ppt-template-style.json` 存在（由设置面板选模板时后台自动生成），其配色优先于 `extract_template_colors.py` 的结果。
 

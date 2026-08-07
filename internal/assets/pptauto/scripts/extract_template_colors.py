@@ -132,8 +132,9 @@ def extract_colors_from_pptx(pptx_path):
     prs = Presentation(str(pptx_path))
     all_colors = {}  # hex -> count（出现频率，用于排序强调色）
 
-    # --- 1. 读 theme.xml 的配色方案（accent1-6 是模板真正的主题色）---
+    # --- 1. 读 theme.xml 的配色方案 + 字体 ---
     scheme_map = {}  # scheme name → hex
+    template_fonts = {}  # {heading: "...", body: "..."}
     try:
         with zipfile.ZipFile(str(pptx_path)) as zf:
             theme_xml = etree.fromstring(zf.read('ppt/theme/theme1.xml'))
@@ -152,6 +153,22 @@ def extract_colors_from_pptx(pptx_path):
                         scheme_map[tag] = hex_val
                         if hex_val not in ('000000', 'FFFFFF', '00000000'):
                             all_colors[hex_val] = all_colors.get(hex_val, 0) + 5
+            # 提取字体方案（majorFont=标题, minorFont=正文）
+            font_scheme = theme_xml.find('.//a:fontScheme', NS)
+            if font_scheme is not None:
+                # 优先取东亚字体（EA），没有则取 Latin
+                for role, fname in [('heading', 'a:majorFont'), ('body', 'a:minorFont')]:
+                    fnode = font_scheme.find(f'{fname}', NS)
+                    if fnode is not None:
+                        ea = fnode.find('a:ea', NS)
+                        latin = fnode.find('a:latin', NS)
+                        typeface = ''
+                        if ea is not None and ea.get('typeface', '').strip():
+                            typeface = ea.get('typeface')
+                        elif latin is not None and latin.get('typeface', '').strip():
+                            typeface = latin.get('typeface')
+                        if typeface and typeface not in ('+mj-ea', '+mn-ea', ''):
+                            template_fonts[role] = typeface
     except Exception:
         pass
 
@@ -352,6 +369,7 @@ def extract_colors_from_pptx(pptx_path):
         'has_image_background': has_image_background,
         'extracted_palette': extracted_palette,
         'template_name': Path(pptx_path).stem,
+        'fonts': template_fonts if template_fonts else None,
     }
 
 
@@ -374,6 +392,32 @@ def update_template_config(config_path, extracted):
     config['_template']['is_dark'] = extracted['is_dark_theme']
     config['_template']['has_image_background'] = extracted.get('has_image_background', False)
     config['_template']['palette'] = extracted['extracted_palette']
+
+    # 用模板字体覆盖默认字体（保留跨平台降级链）
+    template_fonts = extracted.get('fonts')
+    if template_fonts:
+        # 优先用正文字体作为 family，加跨平台降级
+        body_font = template_fonts.get('body', '')
+        heading_font = template_fonts.get('heading', '')
+        primary = body_font or heading_font
+        if primary:
+            # 构建降级链：模板字体 → 微软雅黑 → PingFang SC → Noto → sans-serif
+            fallbacks = [
+                f'"{primary}"',
+                '"Microsoft YaHei"', '"微软雅黑"',
+                '"PingFang SC"', '"Noto Sans CJK SC"',
+                'sans-serif',
+            ]
+            # 去重
+            seen = set()
+            unique = []
+            for f in fallbacks:
+                key = f.lower().strip('"')
+                if key not in seen:
+                    seen.add(key)
+                    unique.append(f)
+            config['fonts'] = {'family': ', '.join(unique)}
+            config['_template']['fonts'] = template_fonts
 
     with open(config_path, 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
