@@ -499,7 +499,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	sysPrompt = skill.ApplyIndex(sysPrompt, indexedSkills)
 
 	reg := tool.NewRegistry()
-	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: cfg.WriteRootsForRoot(root), Network: cfg.Sandbox.Network, RequireAvailable: cfg.Sandbox.RequireAvailable, StrictWrites: cfg.Sandbox.StrictWrites}
+	// Compute write roots: workspace + user allow_write + ~/.fairpeer (for
+	// built-in skill configs like ppt-auto/template_config.json, which skills
+	// must update at runtime but live outside the workspace).
+	writeRoots := cfg.WriteRootsForRoot(root)
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		writeRoots = append(writeRoots, filepath.Join(home, ".fairpeer"))
+	}
+	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: writeRoots, Network: cfg.Sandbox.Network, RequireAvailable: cfg.Sandbox.RequireAvailable, StrictWrites: cfg.Sandbox.StrictWrites}
 	if bashSpec.Mode == "enforce" && !sandbox.Available() {
 		if cfg.Sandbox.RequireAvailable {
 			fmt.Fprintln(stderr, "warning: bash sandbox 'enforce' requested with require_available=true, but no OS sandbox is available on this platform. bash commands will be REFUSED (fail-closed) until an OS sandbox is available or require_available is disabled.")
@@ -512,7 +519,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	searchSpec := builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, stderr)
 	bashTimeout := time.Duration(cfg.BashTimeoutSeconds()) * time.Second
-	addBuiltins(reg, cfg.Tools.Enabled, cfg.WriteRootsForRoot(root), cfg.ReadRoots(), bashSpec, bashTimeout, searchSpec, stderr, root, proxySpec)
+	addBuiltins(reg, cfg.Tools.Enabled, writeRoots, cfg.ReadRoots(), bashSpec, bashTimeout, searchSpec, stderr, root, proxySpec)
 
 	// coWork-only capabilities: desktop automation, scheduled tasks, email,
 	// RAG, PPT. These are office-specific and stay gated to the cowork profile
