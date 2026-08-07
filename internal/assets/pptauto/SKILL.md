@@ -148,10 +148,19 @@ python3 <skill_dir>/scripts/analyze_template.py ~/.fairpeer/ppt-template.pptx <p
 
 每页写入 `<project_dir>/svg_output/slide_01.svg`…。每页 SVG 必须：
 
-1. **背景**（三选一，取决于 Step 0/5 的结果）：
-   - **有模板背景图**（`images/bg_template.png` 存在）：第一个元素是 `<image href="images/bg_template.png" x="0" y="0" width="1280" height="720" preserveAspectRatio="xMidYMid slice"/>`——直接铺模板背景图，100% 还原
-   - **无模板**：第一个元素是全屏 `<rect width="1280" height="720" fill="#背景色"/>`（`colors.background`）
-   - **用户要求重新设计背景**：可用 rect/渐变自创，不引用模板图
+1. **背景**（由 Step 0/5 的结果决定，不要自己选）：
+   - 检查 `<project_dir>/images/bg_template.png` 是否存在（`ls <project_dir>/images/bg_template.png`）。
+   - **存在** → 每页第一个元素**必须**是：
+     ```xml
+     <image href="images/bg_template.png" x="0" y="0" width="1280" height="720" preserveAspectRatio="xMidYMid slice"/>
+     ```
+     直接铺模板背景图，保留模板的渐变/装饰/logo。**不要画 `<rect>` 背景盖住它。**
+   - **不存在**（无模板，或模板无图片背景）→ 每页第一个元素是：
+     ```xml
+     <rect width="1280" height="720" fill="#背景色"/>
+     ```
+     背景色用 `colors.background`（来自 Step 3 读的 config）。
+   - 用户明确说"重新设计背景/换个背景风格"时，才允许不用 bg_template.png 而自创背景。否则一律按上述规则。
 2. viewBox 固定 `"0 0 1280 720"`
 3. 配色严格读 config，不得凭空捏造
 4. 强调色只用于关键数据/按钮/警告（面积 ≤5%）
