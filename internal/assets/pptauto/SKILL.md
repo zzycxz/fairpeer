@@ -174,9 +174,13 @@ init 创建目录结构：
 ```bash
 # 修复常见 XML 错误（markdown 标记、未闭合标签等）
 python3 <skill_dir>/scripts/fix_svg.py <project_dir>/svg_output/slide_01.svg <project_dir>/svg_output/slide_01.svg
-# 质量检查（背景/密度/溢出/重叠/对齐——总是全量检查）
-python3 <skill_dir>/scripts/check_svg.py <project_dir>/svg_output/slide_01.svg --config <skill_dir>/template_config.json
+# 质量检查（fast 模式：XML/背景/禁止元素；validate 模式：额外检查密度/溢出/重叠/覆盖/对齐）
+python3 <skill_dir>/scripts/check_svg.py <project_dir>/svg_output/slide_01.svg --config <skill_dir>/template_config.json --mode <fast|validate>
 ```
+
+**模式选择**：
+- `fast`（默认）：只跑基础检查（XML 格式、背景规则、禁止元素）——快，适合快速出稿
+- `validate`：全量检查（额外检查内容密度、文字溢出、文字重叠、空间覆盖、对齐间距）——慢但质量高，适合最终交付
 
 check_svg 报 ERROR 时必须修正后重查（edit_file 改 SVG → 重跑 fix_svg + check_svg）。WARN 可酌情处理。
 
@@ -217,6 +221,7 @@ python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
 | "用XX模板" | template |
 | "做10页" | pages |
 | "深色风格" / "用绿色主色" | style / colors |
+| "快速模式" / "校验模式" | mode = fast / validate |
 | "要动画" | 参考 references/animations.md |
 
 ---

@@ -427,68 +427,70 @@ def check_svg(svg_path, config=None, mode="fast"):
         if f"<{elem}" in content:
             errors.append(f"包含禁止元素: <{elem}>")
 
-    # === 深度检查（内容密度/溢出/重叠）——总是执行，不再区分模式 ===
-    texts = parse_text_elements(content)
-    rects = parse_rect_elements(content)
-    text_count = len(texts)
-    rect_count = len(rects)
+    # === 深度检查（内容密度/溢出/重叠/覆盖/对齐/间距）——仅 validate 模式 ===
+    # fast 模式只跑上面的基础检查（XML/背景/禁止元素），跳过耗时的深度检查
+    if mode == "validate":
+        texts = parse_text_elements(content)
+        rects = parse_rect_elements(content)
+        text_count = len(texts)
+        rect_count = len(rects)
 
-    # 4. 内容密度
-    density_config = config.get("rules", {}).get("content_density", {})
-    min_text = density_config.get("min_text_elements", 6)
-    min_rect = density_config.get("min_rect_elements", 2)
+        # 4. 内容密度
+        density_config = config.get("rules", {}).get("content_density", {})
+        min_text = density_config.get("min_text_elements", 6)
+        min_rect = density_config.get("min_rect_elements", 2)
 
-    if is_cover or is_ending:
-        if text_count < 3:
-            errors.append(f"内容严重不足: {text_count} 个文字")
-    else:
-        if text_count < 5:
-            errors.append(f"内容严重不足: {text_count} 个文字")
-        elif text_count < min_text:
-            warnings.append(f"内容偏少: {text_count} 个文字 (建议 {min_text}+)")
-
-    # 5. 文字溢出（精确检测）
-    overflow_issues = check_text_overflow(texts, rects)
-    for level, msg in overflow_issues:
-        if level == "error":
-            errors.append(msg)
+        if is_cover or is_ending:
+            if text_count < 3:
+                errors.append(f"内容严重不足: {text_count} 个文字")
         else:
-            warnings.append(msg)
+            if text_count < 5:
+                errors.append(f"内容严重不足: {text_count} 个文字")
+            elif text_count < min_text:
+                warnings.append(f"内容偏少: {text_count} 个文字 (建议 {min_text}+)")
 
-    # 6. 文字重叠（精确检测）
-    overlap_issues = check_text_overlap(texts)
-    for level, msg in overlap_issues:
-        errors.append(msg)
-
-    # 7. 垂直覆盖 — 封面/结尾页只有标题和致谢，内容天然少，跳过密度检查
-    if not is_cover and not is_ending:
-        vc_issues = check_vertical_coverage(texts, rects, config)
-        for level, msg in vc_issues:
-            errors.append(msg)
-
-    # 8. 空间覆盖 — 同上，封面/结尾页不受空间覆盖率约束
-    if not is_cover and not is_ending:
-        sc_issues = check_spatial_coverage(texts, rects, config)
-        for level, msg in sc_issues:
+        # 5. 文字溢出（精确检测）
+        overflow_issues = check_text_overflow(texts, rects)
+        for level, msg in overflow_issues:
             if level == "error":
                 errors.append(msg)
             else:
                 warnings.append(msg)
 
-    # 9. 对齐检查
-    align_issues = check_alignment(texts, rects)
-    for level, msg in align_issues:
-        warnings.append(msg)
+        # 6. 文字重叠（精确检测）
+        overlap_issues = check_text_overlap(texts)
+        for level, msg in overlap_issues:
+            errors.append(msg)
 
-    # 10. 间距检查
-    spacing_issues = check_spacing(texts, rects)
-    for level, msg in spacing_issues:
-        warnings.append(msg)
+        # 7. 垂直覆盖 — 封面/结尾页只有标题和致谢，内容天然少，跳过密度检查
+        if not is_cover and not is_ending:
+            vc_issues = check_vertical_coverage(texts, rects, config)
+            for level, msg in vc_issues:
+                errors.append(msg)
 
-    # 11. 元素多样性
-    variety_issues = check_element_variety(content, config)
-    for level, msg in variety_issues:
-        warnings.append(msg)
+        # 8. 空间覆盖 — 同上，封面/结尾页不受空间覆盖率约束
+        if not is_cover and not is_ending:
+            sc_issues = check_spatial_coverage(texts, rects, config)
+            for level, msg in sc_issues:
+                if level == "error":
+                    errors.append(msg)
+                else:
+                    warnings.append(msg)
+
+        # 9. 对齐检查
+        align_issues = check_alignment(texts, rects)
+        for level, msg in align_issues:
+            warnings.append(msg)
+
+        # 10. 间距检查
+        spacing_issues = check_spacing(texts, rects)
+        for level, msg in spacing_issues:
+            warnings.append(msg)
+
+        # 11. 元素多样性
+        variety_issues = check_element_variety(content, config)
+        for level, msg in variety_issues:
+            warnings.append(msg)
 
     # === 输出结果 ===
     print(f"=== {os.path.basename(svg_path)} ===")
