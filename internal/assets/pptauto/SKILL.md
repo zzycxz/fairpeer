@@ -176,15 +176,15 @@ init 创建目录结构：
 ```bash
 # 修复常见 XML 错误（markdown 标记、未闭合标签等）
 python3 <skill_dir>/scripts/fix_svg.py <project_dir>/svg_output/slide_01.svg <project_dir>/svg_output/slide_01.svg
-# 质量检查（fast 模式：XML/背景/禁止元素；validate 模式：额外检查密度/溢出/重叠/覆盖/对齐）
-python3 <skill_dir>/scripts/check_svg.py <project_dir>/svg_output/slide_01.svg --config <skill_dir>/template_config.json --mode <fast|validate>
+# 质量检查（默认 fast 模式：XML/背景/禁止元素——快）
+python3 <skill_dir>/scripts/check_svg.py <project_dir>/svg_output/slide_01.svg --config <skill_dir>/template_config.json --mode fast
 ```
 
-**模式选择**：
-- `fast`（默认）：只跑基础检查（XML 格式、背景规则、禁止元素）——快，适合快速出稿
-- `validate`：全量检查（额外检查内容密度、文字溢出、文字重叠、空间覆盖、对齐间距）——慢但质量高，适合最终交付
+**模式选择**（用户说"校验模式"时才用 validate）：
+- `fast`（默认）：只跑基础检查（XML 格式、背景规则、禁止元素）——快，出稿用
+- `validate`：全量检查（额外检查密度/溢出/重叠/覆盖/对齐）——慢，最终交付用。validate 的 WARN 是建议性的，不阻止流程
 
-check_svg 报 ERROR 时必须修正后重查（edit_file 改 SVG → 重跑 fix_svg + check_svg）。WARN 可酌情处理。
+check_svg 报 ERROR（exit code 2）时必须修正后重查。WARN 不阻止流程。
 
 > **演讲者备注**：用户明确要求时才做——在 `notes/slide_NN.md` 写每页 2-5 句备注，svg_to_pptx 会自动读取嵌入。默认不生成。
 

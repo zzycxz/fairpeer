@@ -505,7 +505,9 @@ def check_svg(svg_path, config=None, mode="fast"):
     if not errors and not warnings:
         print(f"  [OK]")
 
-    return 2 if errors else (1 if warnings else 0)
+    # Exit code: 2 = ERROR（必须修），0 = OK 或只有 WARN（可以继续）。
+    # WARN 不阻止流程（返回 0），否则 complete_step 会因非零退出码拒绝。
+    return 2 if errors else 0
 
 
 if __name__ == "__main__":

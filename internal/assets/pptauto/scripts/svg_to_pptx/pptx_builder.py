@@ -792,9 +792,16 @@ def create_pptx_with_native_svg(
                 print(f"  Using template: {template_path}")
                 print(f"    Layouts: {len(prs.slide_layouts)}, Masters: {len(prs.slide_masters)}")
             # Clear the template's existing slides (keep master + layouts).
-            xml_slides = prs.slides._sldIdLst
-            for slide in list(xml_slides):
-                xml_slides.remove(slide)
+            # Use drop_rel/drop_part to fully remove slide parts (not just sldIdLst
+            # entries, which leaves orphan parts → Duplicate name zip warnings).
+            for slide in list(prs.slides._sldIdLst):
+                rId = slide.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+                prs.slides._sldIdLst.remove(slide)
+                if rId:
+                    try:
+                        prs.part.drop_rel(rId)
+                    except Exception:
+                        pass
             # Use the template's first layout (typically the main content layout).
             # The layout carries the background image/decoration via inheritance.
             chosen_layout = prs.slide_layouts[0]
