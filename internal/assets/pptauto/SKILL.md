@@ -28,7 +28,7 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, complet
 ## 输入与输出
 
 - **输入**：主题（如"企业数字化转型"），可选源文档 + 页数/风格要求
-- **输出**：`<project_dir>/exports/*.pptx`，每页带演讲者备注
+- **输出**：`<project_dir>/exports/*.pptx`
 
 ## 路径占位符
 
@@ -110,7 +110,7 @@ init 创建目录结构：
 | 目录 | 用途 |
 |------|------|
 | `svg_output/` | 逐页 SVG（`slide_01.svg`…） |
-| `notes/` | 演讲者备注（每页一个 `.md`） |
+| `notes/` | 演讲者备注（用户要求时才写） |
 | `exports/` | 最终 PPTX |
 | `images/` | 图片资源 |
 
@@ -124,9 +124,9 @@ init 创建目录结构：
 
 把大纲写入 `<project_dir>/design_spec.md`（完整性校验必需）。
 
-### Step 6: 逐页生成 SVG + 备注制作
+### Step 6: 逐页生成 SVG
 
-每页写入 `<project_dir>/svg_output/slide_01.svg`…，同时写备注到 `<project_dir>/notes/slide_01.md`。
+每页写入 `<project_dir>/svg_output/slide_01.svg`…。
 
 每页 SVG 必须：
 
@@ -152,7 +152,7 @@ python3 <skill_dir>/scripts/check_svg.py <project_dir>/svg_output/slide_01.svg -
 
 check_svg 报 ERROR 时必须修正后重查（edit_file 改 SVG → 重跑 fix_svg + check_svg）。WARN 可酌情处理。
 
-备注格式（`notes/slide_01.md`）：每页 2-5 句，补充解释而非重复页面文字。
+> **演讲者备注**：用户明确要求时才做——在 `notes/slide_NN.md` 写每页 2-5 句备注，svg_to_pptx 会自动读取嵌入。默认不生成。
 
 ### Step 7: 转换 PPTX
 
@@ -162,7 +162,7 @@ python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
 
 转换器会**自动检测** `~/.fairpeer/ppt-template.pptx`：有模板时打开模板、清空已有 slides、用模板的 layout 添加新 slide（模板的背景/master/装饰通过继承保留），把每页 SVG 转成原生 DrawingML 形状/文字（**可编辑**）叠加在模板背景上。无模板时用空白 Presentation。无需手动传参。
 
-演讲者备注自动从 `notes/` 目录读取嵌入，无需额外操作。
+若 `notes/` 目录有备注文件（用户要求时才生成），转换器会自动读取嵌入。
 
 纯 Python（python-pptx），**不需要 Office**。默认无动画无过渡。
 
