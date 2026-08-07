@@ -25,6 +25,34 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, complet
 3. 某步失败无法完成时，也使用 `complete_step` 提交结果并在证据里说明原因
 4. **最终答案前，确认所有步骤都已通过 `complete_step` 完成**——否则系统会判定任务未完成并阻止输出
 
+### complete_step 证据格式（严格遵守，否则报错）
+
+`evidence` 必须是**数组**，每项含 `kind`（verification/diff/files/manual）+ `summary`，以及可选的 `command`/`paths`。
+
+**关键：`command` 字段必须和你实际跑的 bash 命令完全一致**（系统会拿它去匹配 bash 执行记录）。不一致会报 "no matching successful bash receipt"。如果拿不准命令原文，用 `kind: "manual"` 代替。
+
+正确示例：
+```json
+{
+  "step": "Step 0: 提取模板配色",
+  "result": "已提取模板配色并更新 template_config.json",
+  "evidence": [
+    {"kind": "verification", "summary": "extract_template_colors 成功，background=#EDF8FC", "command": "python \"C:\\Users\\13852\\.fairpeer\\skills\\ppt-auto\\scripts\\extract_template_colors.py\" \"C:\\Users\\13852\\.fairpeer\\ppt-template.pptx\" \"C:\\Users\\13852\\.fairpeer\\skills\\ppt-auto\\template_config.json\""}
+  ]
+}
+```
+
+简化方案（拿不准命令原文时用 manual）：
+```json
+{
+  "step": "Step 5: 写大纲",
+  "result": "大纲已写入 design_spec.md",
+  "evidence": [
+    {"kind": "files", "summary": "design_spec.md 已创建", "paths": ["<project_dir>/design_spec.md"]}
+  ]
+}
+```
+
 ## 输入与输出
 
 - **输入**：主题（如"企业数字化转型"），可选源文档 + 页数/风格要求
