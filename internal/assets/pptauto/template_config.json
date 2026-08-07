@@ -43,7 +43,6 @@
   "fonts": {
     "family": "Inter, JetBrains Mono, sans-serif"
   },
-  "mode": "fast",
   "rules": {
     "alignment": "同类元素必须对齐，间距均匀，不要参差不齐",
     "color_limits": {

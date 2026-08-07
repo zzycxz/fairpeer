@@ -20,7 +20,7 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, complet
 
 ## todo 管理规则（严格遵守，否则任务无法完成）
 
-1. Step 4 init 前，用 `todo_write` 创建所有步骤
+1. Step 0 开始前，用 `todo_write` 创建所有步骤
 2. **每完成一步，必须使用 `complete_step` 提交证据**（系统会自动将该步标记为 completed 并将下一步置为 in_progress，**不要手动用 `todo_write` 去改状态**）
 3. 某步失败无法完成时，也使用 `complete_step` 提交结果并在证据里说明原因
 4. **最终答案前，确认所有步骤都已通过 `complete_step` 完成**——否则系统会判定任务未完成并阻止输出
@@ -43,7 +43,7 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, complet
 
 ---
 
-## 路线 A：SVG 生成（15 步）
+## 路线 A：SVG 生成（8 步）
 
 ### Step 0: 提取模板配色（关键！）
 
@@ -95,12 +95,26 @@ read_file <skill_dir>/template_config.json
 |------|------|------|
 | 基线 | `template_config.json` | 始终有效，提供全部颜色字段 |
 | 视觉提取（最高） | `~/.fairpeer/ppt-template-style.json`（若存在） | 设置面板选模板时由视觉模型自动生成；覆盖 background/accent/text 等关键字段 |
-| 模板提取 | `dynamic_style.json`（若存在） | 整组 colors 覆盖基线；由 Step 6 生成（仅装了 Office 时） |
 | 用户输入 | 自然语言（"用绿色主色"） | 只覆盖明确提及的字段 |
 
 **⚠️ 严禁凭空捏造颜色。严禁凭主题名推断品牌色（如"中国移动"≠ 自己编蓝色）。配色只能从已读的 config 取。**
 
-### Step 4: 写内容大纲
+### Step 4: 初始化项目
+
+```bash
+python3 <skill_dir>/scripts/project_manager.py init <project_name> --format ppt169
+```
+
+init 创建目录结构：
+
+| 目录 | 用途 |
+|------|------|
+| `svg_output/` | 逐页 SVG（`slide_01.svg`…） |
+| `notes/` | 演讲者备注（每页一个 `.md`） |
+| `exports/` | 最终 PPTX |
+| `images/` | 图片资源 |
+
+### Step 5: 写大纲 + design_spec
 
 规划每页：页面类型（封面/目录/内容/结尾）、标题、要点（3-6 条）、布局选型（参考 `references/layout_templates.md`）。
 
@@ -108,38 +122,13 @@ read_file <skill_dir>/template_config.json
 
 **⚠️ 配色方案必须直接引用 Step 3 读到的 config colors 值，不得自创。**
 
-### Step 5: 初始化项目
+把大纲写入 `<project_dir>/design_spec.md`（完整性校验必需）。
 
-```bash
-python3 <skill_dir>/scripts/project_manager.py init <project_name> --format ppt169
-```
+### Step 6: 逐页生成 SVG + 备注制作
 
-init 创建目录结构，后续文件路径：
+每页写入 `<project_dir>/svg_output/slide_01.svg`…，同时写备注到 `<project_dir>/notes/slide_01.md`。
 
-| 目录 | 用途 |
-|------|------|
-| `svg_output/` | 逐页 SVG（`slide_01.svg`…） |
-| `notes/` | 演讲者备注 |
-| `exports/` | 最终 PPTX |
-| `images/` | 图片资源 |
-
-**init 后把大纲写入 `<project_dir>/design_spec.md`**（完整性校验必需）。
-
-### Step 6: 分析模板（可选，需 Office）
-
-```bash
-python3 <skill_dir>/scripts/analyze_template.py ~/.fairpeer/ppt-template.pptx <project_dir>/backgrounds/
-```
-
-需 PowerPoint/WPS（COM 自动化）。**若报错（未装 Office/comtypes），将该步标 completed 并继续**——Step 0 的纯 Python 配色提取已足够。此步用 Office 渲染模板截图做更精细的 PIL 配色量化，写入 `<project_dir>/dynamic_style.json`（仅覆盖 colors）。通常可跳过。
-
-### Step 7: 规划页面布局
-
-根据大纲为每页选布局，版式要多样（同一版式不超过总页数 1/5）。对照 `references/layout_templates.md` 选型。
-
-### Step 8: 逐页生成 SVG
-
-每页写入 `<project_dir>/svg_output/slide_01.svg`…。每页 SVG 必须：
+每页 SVG 必须：
 
 1. **背景**（取决于 Step 0 是否有模板）：
    - **有模板**（`~/.fairpeer/ppt-template.pptx` 存在）：**不要画任何全屏背景**（不要 rect、不要 image）。模板的背景/渐变/装饰/logo 会通过 PPTX layout 继承自动透出。SVG 只画内容（卡片、文字、图标）。画全屏 rect 会盖住模板背景！check_svg.py 会报错。
@@ -153,31 +142,19 @@ python3 <skill_dir>/scripts/analyze_template.py ~/.fairpeer/ppt-template.pptx <p
 8. 纯 SVG 代码，不要 markdown 代码块
 9. 封面只叠加标题副标题；结尾页只加致谢文字
 
-### Step 9: 修复 SVG XML
-
+**每页生成后，自动跑修复 + 检查**：
 ```bash
+# 修复常见 XML 错误（markdown 标记、未闭合标签等）
 python3 <skill_dir>/scripts/fix_svg.py <project_dir>/svg_output/slide_01.svg <project_dir>/svg_output/slide_01.svg
-# 对每页重复
+# 质量检查（背景/密度/溢出/重叠/对齐——总是全量检查）
+python3 <skill_dir>/scripts/check_svg.py <project_dir>/svg_output/slide_01.svg --config <skill_dir>/template_config.json
 ```
 
-### Step 10: 质量检查（根据模式）
+check_svg 报 ERROR 时必须修正后重查（edit_file 改 SVG → 重跑 fix_svg + check_svg）。WARN 可酌情处理。
 
-```bash
-python3 <skill_dir>/scripts/check_svg.py <project_dir>/svg_output/slide_01.svg --config <skill_dir>/template_config.json --mode <fast|validate>
-```
+备注格式（`notes/slide_01.md`）：每页 2-5 句，补充解释而非重复页面文字。
 
-- `fast`（默认）：跳过本步
-- `validate`：逐页检查，有问题用 edit_file 修后重查（最多 3 轮）
-
-### Step 11: 演讲者备注
-
-```bash
-python3 <skill_dir>/scripts/save_notes.py <project_dir> <notes_json>
-```
-
-每页 2-5 句，补充解释而非重复页面文字。
-
-### Step 12: 转换 PPTX
+### Step 7: 转换 PPTX
 
 ```bash
 python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
@@ -185,33 +162,17 @@ python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
 
 转换器会**自动检测** `~/.fairpeer/ppt-template.pptx`：有模板时打开模板、清空已有 slides、用模板的 layout 添加新 slide（模板的背景/master/装饰通过继承保留），把每页 SVG 转成原生 DrawingML 形状/文字（**可编辑**）叠加在模板背景上。无模板时用空白 Presentation。无需手动传参。
 
+演讲者备注自动从 `notes/` 目录读取嵌入，无需额外操作。
+
 纯 Python（python-pptx），**不需要 Office**。默认无动画无过渡。
 
 > 如需动画/过渡/旁白，参数见 `references/animations.md`。
 
-### Step 13: 视觉检查（仅 validate 模式）
+---
 
-**13a** 导出截图（需 PowerPoint/WPS）：
-```bash
-python3 <skill_dir>/scripts/export_previews.py <project_dir>
-```
+**生成完成后**：把 `<project_dir>/exports/*.pptx` 交付给用户。如用户要求修改，用 edit_file 改对应页 SVG → 重跑 Step 7。
 
-**13b** 逐页检查：对每页截图用 `image_understand` 检查文字压边/溢出/对齐/配色/可读性。
-
-**13c** 修正：发现问题用 `edit_file` 改单页 SVG → 修复 → 转换 → 重查。
-
-### Step 14: 导出 PDF（可选）
-
-```bash
-python3 <skill_dir>/scripts/export_pdf.py <input.pptx> <output.pdf>
-```
-
-需 PowerPoint/WPS，未安装则跳过。
-
-### Step 15: 用户反馈处理
-
-- 只改有问题的页（edit_file 改单页 SVG）
-- 修正后确认，最多 3 轮
+> 导出 PDF 需额外安装 PowerPoint/WPS，用户明确要求时才做：`python3 <skill_dir>/scripts/export_pdf.py <input.pptx> <output.pdf>`
 
 ---
 
@@ -228,7 +189,6 @@ python3 <skill_dir>/scripts/export_pdf.py <input.pptx> <output.pdf>
 | "用XX模板" | template |
 | "做10页" | pages |
 | "深色风格" / "用绿色主色" | style / colors |
-| "快速模式" / "校验模式" | mode = fast / validate |
 | "要动画" | 参考 references/animations.md |
 
 ---
@@ -238,13 +198,12 @@ python3 <skill_dir>/scripts/export_pdf.py <input.pptx> <output.pdf>
 | 脚本 | 依赖 |
 |------|------|
 | extract_content.py | 纯 Python |
+| extract_template_colors.py | 纯 Python（需 Pillow） |
 | project_manager.py init | 纯 Python |
 | fix_svg.py | 纯 Python |
 | check_svg.py | 纯 Python |
 | svg_to_pptx.py | python-pptx（纯 Python） |
-| save_notes.py | 纯 Python |
-| analyze_template.py | **需 PowerPoint/WPS** |
-| export_previews.py | **需 PowerPoint/WPS** |
+| template_fill_pptx.py | python-pptx（纯 Python） |
 | export_pdf.py | **需 PowerPoint/WPS** |
 
 ## 资源
