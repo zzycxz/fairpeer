@@ -40,8 +40,8 @@ def load_config(config_path=None, svg_path=None):
     """加载配置文件，并合并项目级的动态样式（若存在）"""
     config = {
         "colors": {
-            "primary": "#ffffff", "secondary": "#a0a0a0", "accent": "#f28b50",
-            "text": "#ffffff", "text_secondary": "#a0a0a0", "card_bg": "#1e1e1e"
+            "primary": "#1A1A1A", "secondary": "#666666", "accent": "#4472C4",
+            "text": "#1A1A1A", "text_secondary": "#666666", "card_bg": "#F5F5F5"
         },
         "rules": {
             "forbidden_elements": ["filter", "feDropShadow", "pattern", "mask", "foreignObject"],

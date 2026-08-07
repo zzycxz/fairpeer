@@ -4,18 +4,17 @@
     "width": 1280
   },
   "colors": {
-    "accent": "#f28b50",
-    "background": "#121212",
-    "brand_green": "#8CC63F",
-    "card_bg": "#1e1e1e",
-    "line": "#333333",
-    "primary": "#ffffff",
-    "secondary": "#a0a0a0",
-    "secondary_light": "#2a2a2a",
-    "text": "#ffffff",
-    "text_muted": "#888888",
-    "text_secondary": "#a0a0a0",
-    "white": "#ffffff"
+    "accent": "#4472C4",
+    "background": "#FFFFFF",
+    "card_bg": "#F5F5F5",
+    "line": "#E0E0E0",
+    "primary": "#1A1A1A",
+    "secondary": "#666666",
+    "secondary_light": "#E8E8E8",
+    "text": "#1A1A1A",
+    "text_muted": "#999999",
+    "text_secondary": "#666666",
+    "white": "#FFFFFF"
   },
   "default_prompt": {
     "content_requirements": [
@@ -27,13 +26,13 @@
     ],
     "output_requirements": [
       "SVG格式，viewBox=0 0 1280 720",
-      "每页第一个元素必须是全屏背景 <rect width=\"1280\" height=\"720\" fill=\"#背景色\"/>（背景色读 colors.background）。无论有无模板都要画——SVG 管线不继承模板背景",
-      "卡片、内容块可以有自己的半透明背景色（如 rgba(0,0,0,0.3)）增强可读性",
+      "背景规则：有模板时不画任何全屏背景（模板背景通过 PPTX 继承自动透出）；无模板时第一个元素是全屏 <rect> 背景色",
+      "卡片、内容块可以有自己的半透明背景色增强可读性",
       "文字在框体内，不溢出",
       "禁止使用filter/pattern/mask"
     ],
     "pages": 8,
-    "style": "科技感，深色极客风格，信息密度高",
+    "style": "专业简洁，根据用户主题自适应风格",
     "title_position": {
       "content_pages": "x=60, y=60（左上角，固定位置，不要居中或偏移）",
       "cover_page": "居中",
@@ -41,7 +40,7 @@
     }
   },
   "fonts": {
-    "family": "\"Microsoft YaHei\", \"微软雅黑\", sans-serif"
+    "family": "\"Microsoft YaHei\", \"微软雅黑\", \"PingFang SC\", \"Noto Sans CJK SC\", sans-serif"
   },
   "rules": {
     "alignment": "同类元素必须对齐，间距均匀，不要参差不齐",
@@ -50,11 +49,11 @@
       "max_per_page": 3
     },
     "background_rules": {
-      "content_page": "可叠加暗色卡片、细线、表格和图表；避免大面积亮色块、强渐变、重阴影和复杂装饰",
+      "content_page": "可叠加卡片、细线、表格和图表；避免大面积强渐变、重阴影和复杂装饰",
       "cover_page": "只叠加标题文字，不要添加任何装饰元素",
       "ending_page": "只叠加致谢文字（感谢聆听+副标题+联系方式），不要添加卡片、图表、色块等装饰元素，保持简洁"
     },
-    "color_usage": "严格遵守提取或配置的主题色彩，保持科技极简风；禁止使用未经配置的霓虹色或彩虹图表",
+    "color_usage": "严格遵守提取或配置的主题色彩；禁止使用未经配置的颜色",
     "content_density": {
       "element_variety": {
         "allowed_types": [
