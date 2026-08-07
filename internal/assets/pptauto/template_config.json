@@ -6,7 +6,7 @@
   "colors": {
     "accent": "#4472C4",
     "background": "#FFFFFF",
-    "card_bg": "#F5F5F5",
+    "card_bg": "rgba(255,255,255,0.75)",
     "line": "#E0E0E0",
     "primary": "#1A1A1A",
     "secondary": "#666666",
