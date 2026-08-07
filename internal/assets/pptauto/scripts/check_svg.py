@@ -195,21 +195,32 @@ def check_text_overflow(texts, rects):
 
 
 def check_text_overlap(texts):
-    """检查文字重叠（精确版）"""
+    """检查文字重叠——只报真正的视觉重叠（文字压字），不报正常的数字+标签堆叠"""
     issues = []
     for i in range(len(texts)):
         for j in range(i + 1, len(texts)):
             t1, t2 = texts[i], texts[j]
-            # 计算 bounding box
+            # bounding box: x 从 x 开始向右 width，y 从 y-size 到 y+size*0.4
             box1 = {"x": t1["x"], "y": t1["y"] - t1["size"],
                      "w": t1["width"], "h": t1["size"] * 1.4}
             box2 = {"x": t2["x"], "y": t2["y"] - t2["size"],
                      "w": t2["width"], "h": t2["size"] * 1.4}
-            # 检查 bounding box 交叉
-            if (box1["x"] < box2["x"] + box2["w"] and
-                box1["x"] + box1["w"] > box2["x"] and
-                box1["y"] < box2["y"] + box2["h"] and
-                box1["y"] + box1["h"] > box2["y"]):
+            # 检查 X 轴和 Y 轴是否都交叉
+            x_overlap = (box1["x"] < box2["x"] + box2["w"] and
+                         box1["x"] + box1["w"] > box2["x"])
+            y_overlap = (box1["y"] < box2["y"] + box2["h"] and
+                         box1["y"] + box1["h"] > box2["y"])
+            if not (x_overlap and y_overlap):
+                continue
+            # 计算实际重叠面积占两者较小框的比例
+            xo = min(box1["x"] + box1["w"], box2["x"] + box2["w"]) - max(box1["x"], box2["x"])
+            yo = min(box1["y"] + box1["h"], box2["y"] + box2["h"]) - max(box1["y"], box2["y"])
+            overlap_area = xo * yo
+            min_area = min(box1["w"] * box1["h"], box2["w"] * box2["h"])
+            overlap_ratio = overlap_area / min_area if min_area > 0 else 0
+            # 只有重叠面积占比较小框 >40% 才报错（真正的压字）
+            # 正常的"大数字+下方标签"堆叠，Y 方向只轻微重叠，面积比通常 <30%
+            if overlap_ratio > 0.4:
                 issues.append(("error", f"文字重叠: '{t1['content'][:15]}' 和 '{t2['content'][:15]}'"))
     return issues
 
