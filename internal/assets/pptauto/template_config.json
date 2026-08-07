@@ -41,7 +41,7 @@
     }
   },
   "fonts": {
-    "family": "Inter, JetBrains Mono, sans-serif"
+    "family": "\"Microsoft YaHei\", \"微软雅黑\", sans-serif"
   },
   "rules": {
     "alignment": "同类元素必须对齐，间距均匀，不要参差不齐",
