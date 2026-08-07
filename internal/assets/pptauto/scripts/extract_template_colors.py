@@ -333,8 +333,8 @@ def extract_colors_from_pptx(pptx_path):
         colors['secondary_light'] = '#2A2A2A'
         colors['text_muted'] = '#888888'
         colors['text_secondary'] = '#A0A0A0'
-        colors['card_bg'] = '#1E1E1E'
-        colors['line'] = '#333333'
+        colors['card_bg'] = 'rgba(255,255,255,0.08)'
+        colors['line'] = 'rgba(255,255,255,0.15)'
     else:
         colors['primary'] = '#1A1A1A'
         colors['text'] = '#1A1A1A'
@@ -342,8 +342,8 @@ def extract_colors_from_pptx(pptx_path):
         colors['secondary_light'] = '#E8E8E8'
         colors['text_muted'] = '#999999'
         colors['text_secondary'] = '#666666'
-        colors['card_bg'] = '#F5F5F5'
-        colors['line'] = '#E0E0E0'
+        colors['card_bg'] = 'rgba(255,255,255,0.75)'
+        colors['line'] = 'rgba(0,0,0,0.1)'
 
     # accent：在前 N 个高频色里选饱和度最高、且不是背景色的。
     # 只按饱和度选会选到一次性杂色（频率1的高饱和像素），所以限制候选范围。

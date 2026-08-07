@@ -7,7 +7,7 @@
     "accent": "#4472C4",
     "background": "#FFFFFF",
     "card_bg": "rgba(255,255,255,0.75)",
-    "line": "#E0E0E0",
+    "line": "rgba(0,0,0,0.1)",
     "primary": "#1A1A1A",
     "secondary": "#666666",
     "secondary_light": "#E8E8E8",
