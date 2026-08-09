@@ -714,10 +714,9 @@ func renderTableCell(text string, st DocStyle, bg string) string {
 // escaping is via xml.Escape (handles & < > and quotes).
 func runXML(text string, st DocStyle) string {
 	rPr := runPropsXML(st)
-	var esc strings.Builder
-	xml.Escape(&esc, []byte(text))
+	escaped := xmlEscapeText(text)
 	// preserveSpaces keeps leading/trailing spaces Word would otherwise trim.
-	return fmt.Sprintf(`<w:r>%s<w:t xml:space="preserve">%s</w:t></w:r>`, rPr, esc.String())
+	return fmt.Sprintf(`<w:r>%s<w:t xml:space="preserve">%s</w:t></w:r>`, rPr, escaped)
 }
 
 // renderImage renders an image section as OOXML. imgIdx is the image's position

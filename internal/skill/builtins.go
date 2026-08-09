@@ -301,6 +301,7 @@ const builtinDocumentAutoBody = `You are running as a document subagent. The par
 Tools:
 - doc_read / csv_read / xlsx_read: read the file's structured content (tables, paragraphs, cells).
 - doc_write / csv_write / xlsx_write: write structured content to a new or existing file.
+- doc_template: fill a .docx TEMPLATE and write a NEW file (the template is never modified). Supports find_replace (placeholder substitution), table_fill (fill table cells by table/row/col index), paragraph_replace (replace body paragraph text by index), and header/footer text. Use when the user has an existing Word template to populate.
 - doc_convert: convert text formats — md→html, html→md/text, json pretty-print. Binary Office conversions (docx→pdf, xlsx→csv) are NOT supported.
 - For .docx files, sections support types: heading, paragraph, list, table, image, toc.
 - For images, use: {type: "image", image_path: "path/to/image.png", image_alt: "description", image_width: 400, image_height: 300}. Supported formats: PNG/JPG/GIF (SVG is NOT supported — convert SVG to PNG first). image_width/image_height are in pixels (0 or omitted = defaults 400x300).
@@ -454,12 +455,12 @@ func builtinSkills() []Skill {
 		},
 		{
 			Name:         "document-auto",
-			Description:  "Read or write Office documents — Word/Excel/CSV, plus format conversion, images, charts, and conditional formatting. Use for docx/xlsx/csv file operations when you need structured parsing, Office-format output, images, table of contents, charts, or conditional formatting.",
+			Description:  "Read, write, or FILL Office documents — Word/Excel/CSV. For 'fill this Word/template/form', delegate the WHOLE task in ONE call: pass the file path + what to fill (e.g. 'fill 申报书.docx, name=张昭轶, company=中移铁通, write a case intro about FairPeer') and the subagent reads the template AND fills it itself. Do NOT call this skill to just parse a document then rebuild it elsewhere — the subagent owns the full read+fill+write cycle. Also covers structured parsing, Office-format output, images, charts, conditional formatting.",
 			Body:         builtinDocumentAutoBody,
 			Scope:        ScopeBuiltin,
 			Path:         "(builtin)",
 			RunAs:        RunSubagent,
-			AllowedTools: []string{"doc_read", "doc_write", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "doc_convert", "read_file", "write_file"},
+			AllowedTools: []string{"doc_read", "doc_write", "doc_template", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "doc_convert", "read_file", "write_file"},
 		},
 		{
 			Name:         "expert-auto",

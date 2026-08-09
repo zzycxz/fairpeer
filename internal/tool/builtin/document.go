@@ -79,7 +79,7 @@ func (docRead) Execute(ctx context.Context, args json.RawMessage) (string, error
 		}
 		return content, nil
 	case "docx":
-		content, err := readDOCX(abs)
+		content, err := readDOCXStructure(abs)
 		if err != nil {
 			return "", err
 		}
@@ -178,18 +178,24 @@ type docWrite struct{ roots []string }
 func (docWrite) Name() string { return "doc_write" }
 
 func (docWrite) Description() string {
-	return "Write a document to a path, creating parent dirs. Format by extension: .md/.txt/.html/code (string content), .json (pretty-printed object), .csv (rows as array of arrays of strings), .xlsx (rows array → simple spreadsheet, OR a structured object for multi-sheet/styled output with charts and conditional formatting), .docx (structured sections → real Word document with headings/paragraphs/lists/tables/images/table-of-contents + styling). Overwrites by default; set append=true to extend .docx or append text to .md/.txt/.html."
+	return "Write a document to a path, creating parent dirs. Format by extension: .md/.txt/.html/code, .json, .csv, .xlsx, .docx (structured sections). Overwrites by default; set append=true to extend. If 'source' is provided for a .docx file, doc_write acts as a template filler: it reads the source template, applies find_replace, paragraph_replace, table_fill, header/footer modifications, and writes the NEW filled document to 'path'."
 }
 
 func (docWrite) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
+  "source": {"type": "string", "description": "Read-only template path (.docx). If provided, acts as a template filler and writes the filled result to path."},
   "path":{"type":"string","description":"Absolute path to write (extension determines format)"},
   "content":{"description":"For .md/.txt/.html/code: a string. For .json: any JSON value. For .csv: an array of arrays of strings. For .xlsx SIMPLE form: an array of arrays of strings (rows → Sheet1). For .xlsx STRUCTURED form: an object {sheets:[{name, cells:[{ref, value, number, formula, format, style}], merges:[{range}], col_widths:[{col,width}], cond_fmt:[{range,type:'cell|data_bar|color_scale',criteria,value,format:{...}}]}], charts:[{sheet,type:'bar|line|pie|scatter',title,data_range,category_range,position}]}. Use 'number' (numeric) for cells you intend to sum with formulas."},
   "sections":{"type":"array","description":"For .docx ONLY: document blocks. Each {type:'heading'|'paragraph'|'list'|'table'|'image'|'toc' (also accepts 'para'/'text'/'ul'/'ol' aliases), text, level(1-6, default 1), items(list), ordered(list bool), headers/rows(table), image_path(PNG/JPG/GIF), image_alt, image_width(image px, default 400), image_height(image px, default 300), toc_level(1-9, default 3), style:{bold,italic,color:'#RRGGBB',size(half-pts),font,align:'left|center|right',bg,header_bg,lineSpacing,indent}}."},
   "title":{"type":"string","description":"For .docx: optional document title (rendered as H1)."},
-  "append":{"type":"boolean","description":"Append mode. .docx: insert new sections into the existing document (preserves prior chapters/styles); appends to a non-existent path create a fresh doc. .md/.txt/.html: append text to the file. Other formats ignore append. Default false."}
+  "append":{"type":"boolean","description":"Append mode. .docx: insert new sections into the existing document (preserves prior chapters/styles); appends to a non-existent path create a fresh doc. .md/.txt/.html: append text to the file. Other formats ignore append. Default false."},
+  "find_replace": {"type": "array", "description": "SHORT field substitutions for .docx template. Each {find: \"{{甲方}}\", replace: \"张三\"}.", "items": {"type": "object", "properties": {"find": {"type": "string"}, "replace": {"type": "string"}}, "required": ["find", "replace"]}},
+  "paragraph_replace": {"type": "array", "description": "Replace body paragraph text by INDEX in .docx template. Each {index: N, text: \"new content\"}.", "items": {"type": "object", "properties": {"index": {"type": "integer"}, "text": {"type": "string"}}, "required": ["index", "text"]}},
+  "table_fill": {"type": "array", "description": "Cell fills by index for .docx template. Each {table: 0, row: 2, col: 1, value: \"...\"}.", "items": {"type": "object", "properties": {"table": {"type": "integer"}, "row": {"type": "integer"}, "col": {"type": "integer"}, "value": {"type": "string"}, "style": {"description": "optional DocStyle"}}}, "required": ["table", "row", "col", "value"]},
+  "header": {"type": "object", "description": "Replace the default header text for .docx template. {text: \"...\", align: \"left|center|right\"}.", "properties": {"text": {"type": "string"}, "align": {"type": "string"}}},
+  "footer": {"type": "object", "description": "Replace the default footer text for .docx template. {text: \"...\", align: \"left|center|right\"}.", "properties": {"text": {"type": "string"}, "align": {"type": "string"}}}
 },
 "required":["path"]
 }`)
@@ -199,23 +205,113 @@ func (docWrite) ReadOnly() bool { return false }
 
 func (w docWrite) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
-		Path     string          `json:"path"`
-		Content  json.RawMessage `json:"content"`
-		Sections json.RawMessage `json:"sections"`
-		Title    string          `json:"title"`
-		Append   bool            `json:"append"`
+		Source           string               `json:"source"`
+		Path             string               `json:"path"`
+		Content          json.RawMessage      `json:"content"`
+		Sections         json.RawMessage      `json:"sections"`
+		Title            string               `json:"title"`
+		Append           bool                 `json:"append"`
+		FindReplace      []findReplacePair    `json:"find_replace"`
+		TableFill        []tableFillOp        `json:"table_fill"`
+		ParagraphReplaceRaw json.RawMessage      `json:"paragraph_replace"`
+		Header           *headerFooterSpec    `json:"header"`
+		Footer           *headerFooterSpec    `json:"footer"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
-	if err := confine(w.roots, p.Path); err != nil {
+	
+	var paragraphReplace []paragraphReplaceOp
+	if len(p.ParagraphReplaceRaw) > 0 && string(p.ParagraphReplaceRaw) != "null" {
+		raw := p.ParagraphReplaceRaw
+		if len(raw) > 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+			var s string
+			if err := json.Unmarshal(raw, &s); err == nil {
+				raw = []byte(s)
+			}
+		}
+		if err := json.Unmarshal(raw, &paragraphReplace); err != nil {
+			return "", fmt.Errorf("invalid args for paragraph_replace: %w", err)
+		}
+	}
+	var abs string
+	var err error
+	var ext string
+	if strings.TrimSpace(p.Path) == "" {
+		if strings.TrimSpace(p.Source) != "" {
+			srcAbs, err := filepath.Abs(strings.TrimSpace(p.Source))
+			if err != nil {
+				return "", err
+			}
+			abs = defaultFilledPath(srcAbs)
+			ext = "docx"
+		} else {
+			return "", errors.New("path is required")
+		}
+	} else {
+		abs, err = filepath.Abs(strings.TrimSpace(p.Path))
+		if err != nil {
+			return "", err
+		}
+		ext = strings.ToLower(strings.TrimPrefix(filepath.Ext(abs), "."))
+	}
+	if err := confine(w.roots, abs); err != nil {
 		return "", err
 	}
-	abs, err := filepath.Abs(strings.TrimSpace(p.Path))
-	if err != nil {
-		return "", err
+	if ext == "docx" {
+		if len(p.FindReplace) > 0 || len(p.TableFill) > 0 || len(paragraphReplace) > 0 || p.Header != nil || p.Footer != nil {
+			if strings.TrimSpace(p.Source) == "" {
+				return "", DocError{Code: ErrInvalidArg, Message: "source is REQUIRED when using find_replace, paragraph_replace, or table_fill on a .docx file. In-place modification is not supported; provide the original template in 'source' and the output path in 'path'."}
+			}
+		}
 	}
-	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(abs), "."))
+	
+	if ext == "docx" && strings.TrimSpace(p.Source) != "" {
+		src := strings.TrimSpace(p.Source)
+		srcAbs, err := filepath.Abs(src)
+		if err != nil {
+			return "", err
+		}
+		if err := confineRead(w.roots, srcAbs); err != nil {
+			return "", fmt.Errorf("source: %w", err)
+		}
+		if filepath.Clean(srcAbs) == filepath.Clean(abs) {
+			return "", DocError{Code: ErrInvalidArg,
+				Message:    "source and path must differ (the template is read-only; doc_template never modifies the source)",
+				Suggestion: "set path to a different filename"}
+		}
+		if err := checkFileExists(srcAbs); err != nil {
+			return "", err
+		}
+		if err := guardDecompressionBomb(srcAbs); err != nil {
+			return "", err
+		}
+		if _, statErr := os.Stat(abs); statErr == nil {
+			if err := checkFileLocked(abs); err != nil {
+				return "", err
+			}
+		}
+
+		result, err := fillDocxTemplate(srcAbs, abs, fillJob{
+			findReplace:      p.FindReplace,
+			tableFill:        p.TableFill,
+			paragraphReplace: paragraphReplace,
+			header:           p.Header,
+			footer:           p.Footer,
+		})
+		if err != nil {
+			return "", err
+		}
+		out := fmt.Sprintf("wrote %s from template %s", abs, srcAbs)
+		if len(result.warnings) > 0 {
+			out += "\nwarnings:"
+			for _, w := range result.warnings {
+				out += "\n  - " + w.Error()
+			}
+		}
+		return out, nil
+	}
+
 	// Binary docx: structured sections → real Word document.
 	if ext == "docx" {
 		var sections []DocSection

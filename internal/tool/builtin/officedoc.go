@@ -131,6 +131,8 @@ func parseDOCXText(data []byte) string {
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	var b strings.Builder
 	var inPara bool
+	var inTable bool
+	var firstCellInRow bool
 	for {
 		tok, err := dec.Token()
 		if err != nil {
@@ -139,9 +141,23 @@ func parseDOCXText(data []byte) string {
 		switch t := tok.(type) {
 		case xml.StartElement:
 			switch t.Name.Local {
+			case "tbl":
+				inTable = true
+			case "tr":
+				b.WriteByte('\n')
+				firstCellInRow = true
+			case "tc":
+				if !firstCellInRow {
+					b.WriteString(" | ")
+				}
+				firstCellInRow = false
 			case "p":
 				if inPara {
-					b.WriteByte('\n')
+					if inTable {
+						b.WriteByte(' ')
+					} else {
+						b.WriteByte('\n')
+					}
 				}
 				inPara = true
 			case "t":
@@ -152,12 +168,22 @@ func parseDOCXText(data []byte) string {
 			case "tab":
 				b.WriteByte('\t')
 			case "br":
-				b.WriteByte('\n')
+				if inTable {
+					b.WriteByte(' ')
+				} else {
+					b.WriteByte('\n')
+				}
 			}
 		case xml.EndElement:
-			if t.Name.Local == "p" {
-				b.WriteByte('\n')
+			switch t.Name.Local {
+			case "p":
+				if !inTable {
+					b.WriteByte('\n')
+				}
 				inPara = false
+			case "tbl":
+				b.WriteString("\n\n")
+				inTable = false
 			}
 		}
 	}
