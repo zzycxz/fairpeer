@@ -78,30 +78,30 @@ func readPartFromDocx(t *testing.T, path, name string) string {
 // the original template is untouched.
 func TestDocTemplateOmitsPathAutoCopy(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, "申报书.docx")
-	makeTemplateDocx(t, src, `<w:p><w:r><w:t>案例名称：</w:t></w:r></w:p>`)
+	src := filepath.Join(dir, "template.docx")
+	makeTemplateDocx(t, src, `<w:p><w:r><w:t>{{title}}</w:t></w:r></w:p>`)
 
 	args := mustJSONArgs(t, map[string]any{
-		// NOTE: no "path" — tool should default to 申报书-filled.docx.
+		// NOTE: no "path" — tool should default to template-filled.docx.
 		"source": src,
-		"find_replace": []map[string]string{{"find": "案例名称：", "replace": "案例名称：FairPeer 智能办公"}},
+		"find_replace": []map[string]string{{"find": "{{title}}", "replace": "My Title"}},
 	})
 	out, err := (docWrite{}).Execute(context.Background(), args)
 	if err != nil {
 		t.Fatalf("omitted path should succeed: %v", err)
 	}
-	// The output should be 申报书-filled.docx next to the source.
-	expected := filepath.Join(dir, "申报书-filled.docx")
+	// The output should be template-filled.docx next to the source.
+	expected := filepath.Join(dir, "template-filled.docx")
 	if !strings.Contains(out, expected) {
 		t.Errorf("expected auto output %s; got: %s", expected, out)
 	}
 	body := readPartFromDocx(t, expected, "word/document.xml")
-	if !strings.Contains(body, "FairPeer 智能办公") {
+	if !strings.Contains(body, "My Title") {
 		t.Errorf("fill didn't land in the auto-copy; body:\n%s", body)
 	}
-	// Original must be unchanged (no "FairPeer" in it).
+	// Original must be unchanged (no "My Title" in it).
 	origBody := readPartFromDocx(t, src, "word/document.xml")
-	if strings.Contains(origBody, "FairPeer") {
+	if strings.Contains(origBody, "My Title") {
 		t.Errorf("ORIGINAL template was modified! body:\n%s", origBody)
 	}
 }

@@ -4,8 +4,8 @@ package builtin
 // find_replace.
 //
 // PROBLEM: Word splits a paragraph's text across multiple <w:r><w:t> elements.
-// A user-visible string like "简单介绍申报案例" may serialize as:
-//   <w:r><w:t>简单</w:t></w:r><w:r><w:t>介绍</w:t></w:r><w:r><w:t>申报案例</w:t></w:r>
+// A user-visible string like "some visible text" may serialize as:
+//   <w:r><w:t>some </w:t></w:r><w:r><w:t>visible</w:t></w:r><w:r><w:t> text</w:t></w:r>
 // A naive bytes.Contains on the raw XML misses it — the text never appears
 // contiguously because of the intervening tags.
 //

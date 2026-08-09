@@ -303,8 +303,8 @@ Tools:
 - doc_write / csv_write / xlsx_write: write structured content to a new or existing file.
 - doc_template: fill a .docx TEMPLATE and write a NEW file (the template is never modified). Supports find_replace, table_fill, paragraph_replace, and header/footer. Use when the user has an existing Word template to populate.
   RULES (follow strictly):
-  1. CHECKBOX CELLS — If a table cell contains multiple □ options (e.g. "□选项A □选项B □选项C"), NEVER use table_fill on that cell (it erases all other options). Use find_replace to toggle only the chosen one: {"find": "□选项B", "replace": "☑选项B"}. All other □ options remain intact.
-  2. LABEL COLUMNS — Table cells that are read-only labels (e.g. "联系人：", "单位名称", "所属方向") must NOT be modified with find_replace. Use table_fill to fill the adjacent empty VALUE cell to its right. Never append content to a label cell.
+  1. CHECKBOX CELLS — If a table cell contains multiple checkbox options (e.g. "[ ] Option A [ ] Option B" or "□ Option A □ Option B"), NEVER use table_fill on that cell (it erases all other options). Use find_replace to toggle only the chosen one: {"find": "[ ] Option B", "replace": "[x] Option B"} (or "□"/"☑"). All other options remain intact.
+  2. LABEL COLUMNS — Table cells that are read-only labels (e.g. "Name:", "Date", "Amount") must NOT be modified with find_replace. Use table_fill to fill the adjacent empty VALUE cell to its right. Never append content to a label cell.
   3. PARAGRAPH_REPLACE FORMAT — paragraph_replace MUST be a proper JSON array literal, never a string. Each element: {"index": N, "text": "content"}. Do NOT wrap the array in surrounding quotes.
 - doc_convert: convert text formats — md→html, html→md/text, json pretty-print. Binary Office conversions (docx→pdf, xlsx→csv) are NOT supported.
 - For .docx files, sections support types: heading, paragraph, list, table, image, toc.
@@ -459,7 +459,7 @@ func builtinSkills() []Skill {
 		},
 		{
 			Name:         "document-auto",
-			Description:  "Read, write, or FILL Office documents — Word/Excel/CSV. For 'fill this Word/template/form', delegate the WHOLE task in ONE call: pass the file path + what to fill (e.g. 'fill 申报书.docx, name=张昭轶, company=中移铁通, write a case intro about FairPeer') and the subagent reads the template AND fills it itself. Do NOT call this skill to just parse a document then rebuild it elsewhere — the subagent owns the full read+fill+write cycle. Also covers structured parsing, Office-format output, images, charts, conditional formatting.",
+			Description:  "Read, write, or FILL Office documents — Word/Excel/CSV. For 'fill this Word/template/form', delegate the WHOLE task in ONE call: pass the file path + what to fill (e.g. 'fill template.docx, name=Alice, company=Acme Corp, write an introduction about the product') and the subagent reads the template AND fills it itself. Do NOT call this skill to just parse a document then rebuild it elsewhere — the subagent owns the full read+fill+write cycle. Also covers structured parsing, Office-format output, images, charts, conditional formatting.",
 			Body:         builtinDocumentAutoBody,
 			Scope:        ScopeBuiltin,
 			Path:         "(builtin)",

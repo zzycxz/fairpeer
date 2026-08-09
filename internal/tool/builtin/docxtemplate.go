@@ -9,7 +9,7 @@ package builtin
 // Design (absorbs the v3 plan + the audit findings):
 //   - source is READ-ONLY and confined to the workspace; source != path is
 //     enforced so a crash can never overwrite the template.
-//   - find_replace uses a Unicode-aware placeholder regex ({{甲方}}, {{a.b}},
+//   - find_replace uses a Unicode-aware placeholder regex ({{name}}, {{a.b}},
 //     {{items[0]}}) and handles placeholders that span multiple <w:r> runs by
 //     splitting the boundary runs (SplitRuns, mirroring OfficeCLI's
 //     WordHandler.Helpers.FindReplace). Replacement values are NOT re-scanned
@@ -52,7 +52,7 @@ type tableFillOp struct {
 
 // paragraphReplaceOp replaces the text of the Nth <w:p> in word/document.xml.
 // The index matches doc_read's structure output (block index), so the LLM can
-// say "block[11] is the 总体介绍 prompt, replace it with this content" without
+// say "block[11] is the introduction prompt, replace it with this content" without
 // needing to match the exact source text (which may be split across runs or
 // use different encoding). This is far faster and more reliable than find_replace
 // for long body text.
@@ -209,8 +209,8 @@ func writeZipParts(dst *os.File, order []string, parts map[string][]byte) error 
 
 // defaultFilledPath generates the default output path for a doc_template fill
 // when the caller omits path: the source's name with "-filled" inserted before
-// the extension, in the same directory. e.g. "C:\docs\申报书.docx" →
-// "C:\docs\申报书-filled.docx". If that name already exists, append "-2", "-3",
+// the extension, in the same directory. e.g. "C:\docs\template.docx" →
+// "C:\docs\template-filled.docx". If that name already exists, append "-2", "-3",
 // ... until a free name is found (best-effort; the actual write is still
 // atomic, so a race only costs the suffix).
 func defaultFilledPath(src string) string {

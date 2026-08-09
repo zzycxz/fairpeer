@@ -206,7 +206,7 @@ func findTCEnd(result []byte, tagEnd int) int {
 // rewriteTC robustly fills a table cell with a new value.
 // - If the cell has top-level <w:t> tags, it replaces the FIRST one's content
 //   with the value, and EMPTIES the content of all subsequent <w:t> tags. This
-//   prevents leftover placeholder text (like "      省（市...") from breaking layout.
+//   prevents leftover placeholder text from breaking layout.
 // - If the cell has ZERO <w:t> tags (a completely empty cell), it injects a
 //   fresh <w:r><w:t>VALUE</w:t></w:r> right before the cell's last </w:p>.
 func rewriteTC(tcFragment []byte, value string, style DocStyle) ([]byte, bool) {
