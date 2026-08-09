@@ -1,0 +1,740 @@
+{
+  "blocks": [
+    {
+      "type": "heading",
+      "level": 1,
+      "index": 0,
+      "text": "信息通信行业人工智能应用实践案例征集申报书",
+      "style": {
+        "bold": true,
+        "style_id": "Heading1"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 1,
+      "text": "信息通信行业人工智能应用实践案例征集申报书",
+      "style": {
+        "size": "56",
+        "font": "黑体",
+        "align": "center"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 2,
+      "text": "（申报参考模板）",
+      "style": {
+        "bold": true,
+        "size": "24",
+        "align": "center"
+      }
+    },
+    {
+      "type": "table",
+      "table": {
+        "index": 0,
+        "headers": [
+          "案例名称：",
+          "中移铁通智能装维AI助手应用实践案例"
+        ],
+        "rows": [
+          [
+            "联系人：",
+            "王小宝"
+          ],
+          [
+            "联系方式：",
+            "13800138000"
+          ],
+          [
+            "填报日期：",
+            "2026年8月8日"
+          ]
+        ]
+      }
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "index": 3,
+      "text": "一、基本信息",
+      "style": {
+        "style_id": "Heading2"
+      }
+    },
+    {
+      "type": "table",
+      "table": {
+        "index": 1,
+        "headers": [
+          "牵头单位信息",
+          "单位名称",
+          "中移铁通有限公司",
+          "单位性质",
+          "国有控股企业"
+        ],
+        "rows": [
+          [
+            "",
+            "通讯地址",
+            "北京市丰台区富丰路中移铁通有限公司总部",
+            "邮政编码",
+            "100070"
+          ],
+          [
+            "",
+            "所在地区",
+            "北京市"
+          ],
+          [
+            "",
+            "联系电话",
+            "010-52688000",
+            "单位成立时间",
+            "2001年1月"
+          ],
+          [
+            "",
+            "组织机构代码或统一社会信用代码",
+            "91110000710929094C"
+          ],
+          [
+            "第一联系人信息",
+            "姓名",
+            "王小宝",
+            "移动电话",
+            "13800138000"
+          ],
+          [
+            "",
+            "电子信箱",
+            "wangxiaobao@chinatietong.com",
+            "身份证号码",
+            "（身份证号码）"
+          ],
+          [
+            "第二联系人信息",
+            "姓名",
+            "李明",
+            "移动电话",
+            "13900139000"
+          ],
+          [
+            "",
+            "电子信箱",
+            "liming@chinatietong.com",
+            "身份证号码",
+            "（身份证号码）"
+          ],
+          [
+            "联合单位信息（按照贡献大小排序）",
+            "序号",
+            "单位名称",
+            "单位性质",
+            "组织机构代码或统一社会信用代码"
+          ],
+          [
+            "",
+            "1",
+            "",
+            "",
+            ""
+          ],
+          [
+            "",
+            "2",
+            "",
+            "",
+            ""
+          ],
+          [
+            "",
+            "3",
+            "",
+            "",
+            ""
+          ],
+          [
+            "",
+            "4",
+            "",
+            "",
+            ""
+          ],
+          [
+            "",
+            "5",
+            "",
+            "",
+            ""
+          ],
+          [
+            "案例主要完成人（按照贡献大小排序）",
+            "王小宝、李明、张伟、刘洋、陈静"
+          ],
+          [
+            "案例基本情况（运营企业填写，如果申报企业是产品提供商、服务商等不必填写本项）",
+            "应用具体单位名称",
+            "中移铁通有限公司总部及各省分公司",
+            "地址",
+            "北京市丰台区富丰路中移铁通有限公司"
+          ],
+          [
+            "",
+            "运营时间",
+            "2024年6月至今",
+            "所属方向",
+            "智能网络"
+          ],
+          [
+            "",
+            "应用范围",
+            "全国31个省（自治区、直辖市）中移铁通下属分公司网络运维及装维服务"
+          ],
+          [
+            "",
+            "常规类申报：已在实际场景中完成部署并开展服务，取得显著的经济社会效益，具备较强的创新性、实用性和行业推广价值。",
+            "□常规类申报：已在实际场景中完成部署并开展服务，取得显著的经济社会效益，具备较强的创新性、实用性和行业推广价值。□创新突破类申报：案例上线运行时间3个月以上，或在特定高价值场景（如6G前瞻技术、具身智能与信息通信融合创新、专业性强的网络大模型和智能体等）中取得阶段性验证成果（中小微初创企业、专精特新企业可选此类型）"
+          ]
+        ]
+      }
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "index": 5,
+      "text": "二、总体介绍",
+      "style": {
+        "style_id": "Heading2"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 6,
+      "text": "简单介绍申报案例的总体情况，包括但不限于案例名称、具体适用场景、研发/使用时间、案例概况等。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "index": 8,
+      "text": "三、背景及需求",
+      "style": {
+        "style_id": "Heading2"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "index": 9,
+      "text": "（一）背景",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading3"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 10,
+      "text": "介绍参赛案例面临的产业政策、行业应用、技术演进等背景。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "index": 11,
+      "text": "（二）业务痛点与需求分析",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading3"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 12,
+      "text": "1.业务痛点",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 13,
+      "text": "描述应用AI技术前，信息通信业务或网络运维中面临的具体痛点（如人工排障效率低、能耗居高不下、诈骗手段隐蔽、客户服务响应慢等），阐述痛点的严重程度、影响范围及亟待解决的原因。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 14,
+      "text": "2.技术引入的必要性与预期目标",
+      "style": {
+        "bold": true,
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 15,
+      "text": "阐述引入人工智能大模型/智能体解决上述痛点的必要性，明确预期目标（如故障恢复时间缩短比例、能耗降低幅度、反诈识别准确率等），说明为何AI技术是解决该痛点的最优或可行路径。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "index": 17,
+      "text": "四、技术路线与解决方案",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading2"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "index": 18,
+      "text": "（一）核心技术架构",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading3"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 19,
+      "text": "1.大模型底座",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 20,
+      "text": "说明所采用的大模型名称、参数量级、基础能力，是自研还是基于开源模型二次开发。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 21,
+      "text": "2.算力部署方式",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 22,
+      "text": "描述算力部署方式，以及算力规模。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 23,
+      "text": "3.软硬件适配情况",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 24,
+      "text": "说明AI系统与现有信息通信基础设施（如网络设备、业务系统、数据中台等）的适配集成方案，包括接口协议、数据流转、兼容性处理等。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "index": 25,
+      "text": "（二）创新点提炼",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading3"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 26,
+      "text": "1.算法优化创新",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 27,
+      "text": "针对信息通信行业场景，在算法层面做了哪些针对性优化，如模型剪枝、微调策略、推理加速等；",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 28,
+      "text": "2.行业专识数据集构建",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 29,
+      "text": "是否构建了面向信息通信行业的专属训练/微调数据集，说明数据来源、规模、标注方式及数据治理方法；",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 30,
+      "text": "3.智能体工作流设计",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 31,
+      "text": "如涉及多智能体协同、任务规划、工具调用等工作流设计，说明其架构设计与创新点。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "index": 32,
+      "text": "（三）数据安全与合规",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading3"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 33,
+      "text": "1.数据脱敏与隐私保护",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 34,
+      "text": "说明在数据采集、传输、存储、使用全链路中采取的数据脱敏、差分隐私等隐私保护措施。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 35,
+      "text": "2.模型安全评测",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 36,
+      "text": "说明是否对模型进行了安全对齐（如RLHF）、内容安全过滤、越狱攻击防护等安全机制建设。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 37,
+      "text": "3. 合规认证情况",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 38,
+      "text": "说明智能体或模型是否通过了国家相关安全评估、算法备案、功能性能验证等合规性工作。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "index": 40,
+      "text": "五、应用成效与价值评估",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading2"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "index": 41,
+      "text": "（一）经济效益",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading3"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 42,
+      "text": "定量分析案例应用带来的直接或间接经济效益，提供详实的财务数据或业务指标对比。并提供相应的证明材料。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "index": 43,
+      "text": "（二）社会效益",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading3"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 44,
+      "text": "1.公共服务提升",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 45,
+      "text": "说明案例在提升信息通信服务水平、普惠便民、消除数字鸿沟等方面的贡献。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 46,
+      "text": "2.绿色低碳贡献",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 47,
+      "text": "说明案例在节能降碳、资源节约、促进绿色转型方面的成效（如涉及）。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 48,
+      "text": "3.通信安全保障",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 49,
+      "text": "说明案例在防范电信网络诈骗、保障网络与数据安全、维护用户权益等方面的社会价值。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "index": 51,
+      "text": "六、推广前景与未来规划",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading2"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "index": 52,
+      "text": "（一）可复制性分析",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading3"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 53,
+      "text": "分析案例在技术方案、实施路径、适配条件等方面的标准化程度，说明该案例在同行业、同场景中是否具备可复制推广的条件。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "index": 54,
+      "text": "（二）未来规划",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading3"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 55,
+      "text": "1.技术迭代计划",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 56,
+      "text": "说明下一阶段的技术演进方向，如模型升级、功能扩展、性能优化等。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "index": 57,
+      "text": "2.生态拓展方向",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading4"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 58,
+      "text": "说明案例向更多业务场景、更多行业领域拓展应用的规划设想。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "index": 60,
+      "text": "七、其他",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading2"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 61,
+      "text": "如有其他需要说明的事项请在此处自行补充。",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "index": 63,
+      "text": "附录",
+      "style": {
+        "font": "宋体",
+        "style_id": "Heading2"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 64,
+      "text": "1.知识产权专利、软著等证明材料（如有）",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 65,
+      "text": "2.科技查新报告（如有）",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 66,
+      "text": "3.第三方检测/认证报告（如有）",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 67,
+      "text": "4.商用部署证明材料（合同/验收报告/系统截图等）",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 68,
+      "text": "5.经济效益证明材料（能耗/成本对比数据等）",
+      "style": {
+        "font": "宋体"
+      }
+    },
+    {
+      "type": "paragraph",
+      "index": 69,
+      "text": "6.其他证明材料",
+      "style": {
+        "font": "宋体"
+      }
+    }
+  ],
+  "metadata": {}
+}
