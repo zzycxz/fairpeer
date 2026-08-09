@@ -222,16 +222,23 @@ func (w docWrite) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 	
 	var paragraphReplace []paragraphReplaceOp
+	var paragraphReplaceWarn string
 	if len(p.ParagraphReplaceRaw) > 0 && string(p.ParagraphReplaceRaw) != "null" {
 		raw := p.ParagraphReplaceRaw
-		if len(raw) > 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+		// Unwrap string-wrapped JSON — AI sometimes serialises the array as a JSON
+		// string (or even double-escaped). Retry until the outer wrapper is gone.
+		for len(raw) > 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
 			var s string
-			if err := json.Unmarshal(raw, &s); err == nil {
-				raw = []byte(s)
+			if err2 := json.Unmarshal(raw, &s); err2 != nil {
+				break
 			}
+			raw = []byte(s)
 		}
-		if err := json.Unmarshal(raw, &paragraphReplace); err != nil {
-			return "", fmt.Errorf("invalid args for paragraph_replace: %w", err)
+		if err2 := json.Unmarshal(raw, &paragraphReplace); err2 != nil {
+			// Non-fatal: record warning and skip paragraph_replace so that
+			// find_replace / table_fill in the same call still succeed.
+			paragraphReplace = nil
+			paragraphReplaceWarn = "paragraph_replace parse error (skipped): " + err2.Error()
 		}
 	}
 	var abs string
@@ -303,6 +310,9 @@ func (w docWrite) Execute(ctx context.Context, args json.RawMessage) (string, er
 			return "", err
 		}
 		out := fmt.Sprintf("wrote %s from template %s", abs, srcAbs)
+		if paragraphReplaceWarn != "" {
+			out += "\nwarning: " + paragraphReplaceWarn
+		}
 		if len(result.warnings) > 0 {
 			out += "\nwarnings:"
 			for _, w := range result.warnings {

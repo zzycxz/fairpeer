@@ -301,7 +301,11 @@ const builtinDocumentAutoBody = `You are running as a document subagent. The par
 Tools:
 - doc_read / csv_read / xlsx_read: read the file's structured content (tables, paragraphs, cells).
 - doc_write / csv_write / xlsx_write: write structured content to a new or existing file.
-- doc_template: fill a .docx TEMPLATE and write a NEW file (the template is never modified). Supports find_replace (placeholder substitution), table_fill (fill table cells by table/row/col index), paragraph_replace (replace body paragraph text by index), and header/footer text. Use when the user has an existing Word template to populate.
+- doc_template: fill a .docx TEMPLATE and write a NEW file (the template is never modified). Supports find_replace, table_fill, paragraph_replace, and header/footer. Use when the user has an existing Word template to populate.
+  RULES (follow strictly):
+  1. CHECKBOX CELLS — If a table cell contains multiple □ options (e.g. "□选项A □选项B □选项C"), NEVER use table_fill on that cell (it erases all other options). Use find_replace to toggle only the chosen one: {"find": "□选项B", "replace": "☑选项B"}. All other □ options remain intact.
+  2. LABEL COLUMNS — Table cells that are read-only labels (e.g. "联系人：", "单位名称", "所属方向") must NOT be modified with find_replace. Use table_fill to fill the adjacent empty VALUE cell to its right. Never append content to a label cell.
+  3. PARAGRAPH_REPLACE FORMAT — paragraph_replace MUST be a proper JSON array literal, never a string. Each element: {"index": N, "text": "content"}. Do NOT wrap the array in surrounding quotes.
 - doc_convert: convert text formats — md→html, html→md/text, json pretty-print. Binary Office conversions (docx→pdf, xlsx→csv) are NOT supported.
 - For .docx files, sections support types: heading, paragraph, list, table, image, toc.
 - For images, use: {type: "image", image_path: "path/to/image.png", image_alt: "description", image_width: 400, image_height: 300}. Supported formats: PNG/JPG/GIF (SVG is NOT supported — convert SVG to PNG first). image_width/image_height are in pixels (0 or omitted = defaults 400x300).

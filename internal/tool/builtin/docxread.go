@@ -60,9 +60,8 @@ type docxRunStyle struct {
 }
 
 type docxTableInfo struct {
-	Index  int         `json:"index"`
-	Header []string    `json:"headers,omitempty"`
-	Rows   [][]string  `json:"rows"`
+	Index int        `json:"index"`
+	Rows  [][]string `json:"rows"`
 }
 
 type docxMetadataOut struct {
@@ -481,11 +480,7 @@ func parseBlocks(body []byte) []docxBlock {
 				case "tr":
 					if inTable && inRow {
 						row := append([]string(nil), curRow...)
-						if len(curTable.Header) == 0 && len(curTable.Rows) == 0 {
-							curTable.Header = row
-						} else {
-							curTable.Rows = append(curTable.Rows, row)
-						}
+						curTable.Rows = append(curTable.Rows, row)
 						inRow = false
 					}
 				case "tbl":
