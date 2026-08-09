@@ -66,8 +66,8 @@ func replaceHFText(parts map[string][]byte, body, rels []byte, kind string, spec
 }
 
 // refIDRe captures the r:id (or relationships:id) value from a header/footer
-// reference element. Matches w:r:id="rId7" / r:id='rId7'.
-var refIDRe = regexp.MustCompile(`(?:r:id|r:id)\s*=\s*["']([^"']+)["']`)
+// reference element. Matches w:r:id="rId7" / r:id='rId7' / relationships:id="rId7".
+var refIDRe = regexp.MustCompile(`(?:r:id|relationships:id)\s*=\s*["']([^"']+)["']`)
 
 // findFirstRefID returns the r:id of the first <w:{refName}> in body, or "".
 func findFirstRefID(body []byte, refName string) string {

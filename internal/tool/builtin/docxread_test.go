@@ -46,7 +46,9 @@ func TestDocReadStructureMode(t *testing.T) {
 			}
 		case "table":
 			foundTable = true
-			if b.Table == nil || len(b.Table.Rows) != 1 { // header + 1 row
+			// 2 <w:tr> elements → 2 rows (doc_read no longer separates headers;
+			// all rows are in Rows).
+			if b.Table == nil || len(b.Table.Rows) != 2 {
 				t.Errorf("table rows wrong: %+v", b.Table)
 			}
 		}
@@ -150,24 +152,25 @@ func TestDocReadDefaultIsStructure(t *testing.T) {
 	}
 }
 
-// TestDocReadTextMode verifies mode:"text" returns a plain-text string (not
-// JSON) — the lightweight read for when the caller wants a flat string.
+// TestDocReadTextMode verifies doc_read returns structured JSON (the default
+// for .docx). The old plain-text "text" mode was replaced by readDOCXStructure
+// so the agent can target table_fill by row/col index.
 func TestDocReadTextMode(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "d.docx")
 	makeTemplateDocx(t, path, `<w:p><w:r><w:t>hello world</w:t></w:r></w:p>`)
 
-	args, _ := json.Marshal(map[string]string{"path": path, "mode": "text"})
+	args, _ := json.Marshal(map[string]string{"path": path})
 	out, err := docRead{}.Execute(context.Background(), args)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out, "hello world") {
-		t.Errorf("text mode lost content: %s", out)
+		t.Errorf("content lost: %s", out)
 	}
-	// Should NOT be JSON (it's plain text).
-	if strings.HasPrefix(strings.TrimSpace(out), "{") {
-		t.Errorf("text mode returned JSON, not plain text: %s", out[:80])
+	// Should be structured JSON (not plain text).
+	if !strings.HasPrefix(strings.TrimSpace(out), "{") {
+		t.Errorf("doc_read should return JSON for .docx: %s", out[:80])
 	}
 }
 

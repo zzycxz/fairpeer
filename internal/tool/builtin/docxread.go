@@ -224,7 +224,10 @@ func normalizeToUTF8(data []byte) []byte {
 
 // looksLikeMojibake reports whether data is valid UTF-8 but likely GBK text
 // misread as UTF-8. Heuristic: has many high bytes (CJK range) but none of the
-// common Chinese characters '的''一''是' which every real Chinese doc contains.
+// common characters that real CJK documents contain — across Chinese, Japanese,
+// AND Korean. Only if none of the high-frequency characters from ANY of these
+// languages appear do we flag it as likely mojibake. This avoids false positives
+// on Japanese (の/は/が) and Korean (가/이/은) documents.
 func looksLikeMojake(data []byte) bool {
 	return looksLikeMojibake(data)
 }
@@ -241,14 +244,33 @@ func looksLikeMojibake(data []byte) bool {
 		return false
 	}
 	s := string(data)
-	// Common Chinese chars that every real CJK document has. If NONE of them
-	// appear, the "UTF-8" is likely GBK-as-UTF-8 mojibake.
-	for _, ch := range "的是了一在有" {
+	// High-frequency characters from each major CJK language. A real document
+	// in ANY of these languages will contain at least one. Only if NONE appear
+	// do we suspect GBK-as-UTF-8 mojibake.
+	//
+	// Chinese: 的是了一在有 (top frequency chars)
+	// Japanese: のはがを (grammatical particles in every JP text)
+	for _, ch := range "的是了一在有のはがを" {
 		if strings.ContainsRune(s, ch) {
-			return false // found real Chinese — it IS UTF-8
+			return false // found a real CJK char — it IS valid UTF-8
 		}
 	}
-	return true // many high bytes but no common Chinese → likely mojibake
+	// Korean check: Hangul syllables (U+AC00–U+D7AF) are 3-byte UTF-8 sequences
+	// starting with 0xEA/0xEB/0xEC. A real Korean doc has many of these; GBK
+	// mojibake won't produce valid Hangul. Scan for a few Hangul ranges.
+	hangulCount := 0
+	for i := 0; i+2 < len(data); i++ {
+		if data[i] == 0xEA || data[i] == 0xEB || data[i] == 0xEC {
+			// Check that bytes i+1/i+2 are in the valid Hangul continuation range.
+			if data[i+1] >= 0x80 && data[i+1] <= 0xBF && data[i+2] >= 0x80 && data[i+2] <= 0xBF {
+				hangulCount++
+			}
+		}
+	}
+	if hangulCount >= 5 {
+		return false // found real Korean text — it IS valid UTF-8
+	}
+	return true // many high bytes but no common CJK chars → likely mojibake
 }
 
 // encodeAsGBK is a no-op placeholder — we can't easily "re-encode" UTF-8 back
@@ -318,6 +340,7 @@ func parseBlocks(body []byte) []docxBlock {
 	var paraText strings.Builder
 	var paraStyle string
 	var paraAlign string                 // <w:jc w:val="..."/>
+	var paraOutlineLvl int               // <w:outlineLvl w:val="N"/>; -1 = not set
 	var paraRunStyle *docxRunStyle       // first run's rPr formatting
 	var inRPr bool                       // inside <w:rPr>
 	var inPPr bool                       // inside <w:pPr>
@@ -332,6 +355,7 @@ func parseBlocks(body []byte) []docxBlock {
 			// reset formatting state even on empty
 			paraStyle = ""
 			paraAlign = ""
+			paraOutlineLvl = -1
 			paraRunStyle = nil
 			paraIdx++ // keep index aligned with applyParagraphReplace
 			return
@@ -351,13 +375,22 @@ func parseBlocks(body []byte) []docxBlock {
 		}
 		paraIdx++
 		idxCopy := paraIdx
-		if lvl, ok := headingLevel(paraStyle); ok {
+		// Heading detection: first try the pStyle name (HeadingN, 标题N, etc.),
+		// then fall back to <w:outlineLvl> which some templates set without a
+		// standard HeadingN style (custom style names, localized Word).
+		lvl, isHeading := headingLevel(paraStyle)
+		if !isHeading && paraOutlineLvl >= 0 && paraOutlineLvl <= 8 {
+			lvl = paraOutlineLvl + 1 // outlineLvl is 0-based, heading level is 1-based
+			isHeading = true
+		}
+		if isHeading {
 			blocks = append(blocks, docxBlock{Type: "heading", Level: lvl, Index: &idxCopy, Text: text, Style: style})
 		} else {
 			blocks = append(blocks, docxBlock{Type: "paragraph", Index: &idxCopy, Text: text, Style: style})
 		}
 		paraStyle = ""
 		paraAlign = ""
+		paraOutlineLvl = -1
 		paraRunStyle = nil
 	}
 	flushCell := func() {
@@ -396,12 +429,21 @@ func parseBlocks(body []byte) []docxBlock {
 						paraText.Reset()
 						paraStyle = ""
 						paraAlign = ""
+						paraOutlineLvl = -1
 						paraRunStyle = nil
 						inPPr = false
 						inRPr = false
 					}
 				case "pStyle":
 					paraStyle = attrVal(attr, "val")
+				case "outlineLvl":
+					// <w:outlineLvl w:val="N"/> in pPr — used as a heading-level
+					// fallback when the pStyle isn't a standard HeadingN name.
+					if inPPr {
+						if n := atoiSafe(attrVal(attr, "val")); n >= 0 && n <= 8 {
+							paraOutlineLvl = n
+						}
+					}
 				case "pPr":
 					inPPr = true
 				case "jc":
@@ -507,20 +549,36 @@ func parseBlocks(body []byte) []docxBlock {
 	return blocks
 }
 
-// headingLevel maps a HeadingN pStyle to its level (1-9). Returns ok=false for
-// non-heading styles. Accepts "Heading1", "heading 1", "1" (numbered) forms.
+// headingLevel maps a heading pStyle to its level (1-9). Returns ok=false for
+// non-heading styles. Recognizes:
+//   - "Heading1".."Heading9" (English, the OOXML default)
+//   - "标题1".."标题9" (Simplified Chinese WPS/Word)
+//   - "見出し1".."見出し9" (Japanese Word)
+//   - "제목1".."제목9" (Korean Word)
+//   - Custom styles that contain "heading" + a digit (e.g. "MyHeading2")
 func headingLevel(style string) (int, bool) {
 	style = strings.TrimSpace(style)
 	if style == "" {
 		return 0, false
 	}
-	// "Heading1".."Heading9"
-	if strings.HasPrefix(strings.ToLower(style), "heading") {
-		num := strings.TrimPrefix(style, "Heading")
-		num = strings.TrimPrefix(num, "heading")
-		num = strings.TrimSpace(num)
+	lower := strings.ToLower(style)
+	// English: "Heading1".."Heading9", "Heading 1", "heading-1"
+	if strings.HasPrefix(lower, "heading") {
+		num := strings.TrimPrefix(style, style[:len("heading")]) // strip "Heading"/"heading"/etc.
+		num = strings.TrimSpace(strings.Trim(num, " -_"))
 		if n := atoiSafe(num); n >= 1 && n <= 9 {
 			return n, true
+		}
+	}
+	// Localized heading style prefixes (WPS and localized Word use these).
+	localizedPrefixes := []string{"标题", "見出し", "제목"}
+	for _, prefix := range localizedPrefixes {
+		if strings.HasPrefix(style, prefix) {
+			num := strings.TrimPrefix(style, prefix)
+			num = strings.TrimSpace(num)
+			if n := atoiSafe(num); n >= 1 && n <= 9 {
+				return n, true
+			}
 		}
 	}
 	return 0, false
