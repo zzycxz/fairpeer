@@ -112,8 +112,17 @@ type Collab = json.RawMessage
 
 // Record is one presentation event, persisted as one JSONL line in the sidecar.
 // Only the fields meaningful for Kind are populated; the rest are zero/omitted.
+//
+// MsgIdx carries len(session.Messages) at the moment this event was emitted, so
+// the recorder can truncate records in lockstep with a compaction that shrank
+// Messages: after a compact, the controller tells the recorder the new Messages
+// length, and the recorder drops every record whose MsgIdx is below the kept
+// region's start. This is the only reliable way to align the sidecar with the
+// post-compact Messages array, because compaction/prune/softTrim/summarize all
+// rewrite Messages by token budget (not turn count) and only some emit events.
 type Record struct {
 	Kind       Kind        `json:"kind"`
+	MsgIdx     int         `json:"msgIdx,omitempty"` // 1-based len(Messages) when emitted; 0 = unknown/legacy
 	Text       string      `json:"text,omitempty"`
 	Reasoning  string      `json:"reasoning,omitempty"`
 	Level      string      `json:"level,omitempty"` // "info"|"warn" for notice
@@ -230,6 +239,14 @@ func PresentPath(sessionPath string) string {
 	return sessionPath + ".present.jsonl"
 }
 
+// maxRecorderTurns caps how many turns the recorder keeps in memory. Each turn
+// averages ~7KB of records, so 100 turns ≈ 700KB — a generous ceiling that keeps
+// long sessions bounded without dropping anything a user is likely to scroll
+// back to. When exceeded the oldest turns are dropped (their records never reach
+// the sidecar either, matching what the user sees: those turns are far off the
+// top of the transcript). Compaction resets the counter anyway.
+const maxRecorderTurns = 100
+
 // Recorder accumulates the presentation records for one session and writes them
 // as a sidecar. It is goroutine-safe. The zero value is a no-op recorder (all
 // methods are safe to call); wire it via NewRecorder when a session path is known.
@@ -257,9 +274,11 @@ type Recorder struct {
 func NewRecorder() *Recorder { return &Recorder{} }
 
 // Append records one event if it has presentation value. Safe to call on a nil
-// recorder (no-op). Events between turns accumulate; TurnStarted marks a new turn
-// boundary the truncator can cut against.
-func (r *Recorder) Append(e event.Event) {
+// recorder (no-op). msgIdx is len(session.Messages) at emit time, stamped onto
+// the record so TruncateToMessageIndex can later drop records the model forgot
+// after a compaction. A msgIdx <= 0 means "unknown" — the record is kept through
+// any message-based truncation (treated as belonging to the current tail).
+func (r *Recorder) Append(e event.Event, msgIdx int) {
 	if r == nil {
 		return
 	}
@@ -267,10 +286,24 @@ func (r *Recorder) Append(e event.Event) {
 	if !ok {
 		return
 	}
+	rec.MsgIdx = msgIdx
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if rec.Kind == KindTurnStarted {
 		r.turnStartIndex = append(r.turnStartIndex, len(r.records))
+		// Bounded retention: once we exceed maxRecorderTurns, drop the oldest
+		// turn's records so memory stays flat over a long session. The dropped
+		// turns are old enough that they're typically off-screen and (in a
+		// compacted session) already forgotten by the model.
+		if len(r.turnStartIndex) > maxRecorderTurns {
+			dropAt := r.turnStartIndex[0]
+			r.records = append([]Record(nil), r.records[dropAt:]...)
+			shifted := r.turnStartIndex[1:]
+			for i := range shifted {
+				shifted[i] -= dropAt
+			}
+			r.turnStartIndex = shifted
+		}
 	}
 	r.records = append(r.records, rec)
 }
@@ -287,42 +320,35 @@ func (r *Recorder) SetRewriteVersion(v int) {
 	r.mu.Unlock()
 }
 
-// TruncateToTurn drops records from completed turns, keeping only the most recent
-// `keepTurns` turns (counted by TurnStarted markers). Called after a compaction
-// so the sidecar describes the same turns the model still remembers.
-//
-// keepTurns <= 0 keeps everything (no truncation). With keepTurns=1 the recorder
-// keeps only the in-progress turn (the last TurnStarted onwards). The very first
-// turn's marker is always preserved so records before any turn (rare) are kept.
-func (r *Recorder) TruncateToTurn(keepTurns int) {
-	if r == nil || keepTurns <= 0 {
+// SyncBeforeSave reconciles the recorder with the session right before a Save.
+// If the session's RewriteVersion advanced since the last sync (meaning a
+// compaction/prune/softTrim/summarize rewrote Messages) and a CompactionDone was
+// observed, the recorder is reset around that compaction so the sidecar never
+// carries records describing messages the model has forgotten. The version is
+// then stamped onto the recorder for the next sync. Safe to call on a nil
+// recorder; lastDone may be a zero event (no compaction observed).
+func (r *Recorder) SyncBeforeSave(currentVersion int, lastDone event.Event) {
+	if r == nil {
 		return
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.truncateLocked(keepTurns)
+	if r.rewriteVersion != 0 && currentVersion != r.rewriteVersion && lastDone.Kind != 0 {
+		// A rewrite happened since the last save. Re-seed around the compaction.
+		r.records = nil
+		r.turnStartIndex = nil
+		if rec, ok := FromEvent(lastDone); ok {
+			r.records = append(r.records, rec)
+		}
+	}
+	r.rewriteVersion = currentVersion
+	r.mu.Unlock()
 }
 
-func (r *Recorder) truncateLocked(keepTurns int) {
-	if len(r.turnStartIndex) == 0 {
-		return // no turn boundary yet — nothing to truncate against
-	}
-	// keep the last keepTurns turns; earlier turns are forgotten by the model.
-	keepFromTurn := len(r.turnStartIndex) - keepTurns
-	if keepFromTurn <= 0 {
-		return // we're keeping every turn that exists
-	}
-	startIdx := r.turnStartIndex[keepFromTurn]
-	r.records = append([]Record(nil), r.records[startIdx:]...)
-	// Rebuild turnStartIndex relative to the new slice origin.
-	newTSI := make([]int, 0, keepTurns)
-	for i := keepFromTurn; i < len(r.turnStartIndex); i++ {
-		newTSI = append(newTSI, r.turnStartIndex[i]-startIdx)
-	}
-	r.turnStartIndex = newTSI
-}
+// lastCompactionEvent is held by the controller (it sees the live stream) and
+// passed to SyncBeforeSave; this package does not retain events.
 
-// Records returns a snapshot of the current records (for in-process consumers
+// lastCompactionEvent is held by the controller (it sees the live stream) and
+// passed to SyncBeforeSave; this package does not retain events.// Records returns a snapshot of the current records (for in-process consumers
 // like PresentForTab that can read from memory without hitting disk).
 func (r *Recorder) Records() []Record {
 	if r == nil {

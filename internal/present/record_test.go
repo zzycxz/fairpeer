@@ -76,11 +76,11 @@ func TestFromEventToolCarriesRichFields(t *testing.T) {
 func TestRecorderAppendAndTurnBoundaries(t *testing.T) {
 	r := NewRecorder()
 	// Turn 1: started + one tool
-	r.Append(event.Event{Kind: event.TurnStarted})
-	r.Append(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "a"}})
+	r.Append(event.Event{Kind: event.TurnStarted}, 0)
+	r.Append(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "a"}}, 1)
 	// Turn 2: started + one tool
-	r.Append(event.Event{Kind: event.TurnStarted})
-	r.Append(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "b"}})
+	r.Append(event.Event{Kind: event.TurnStarted}, 2)
+	r.Append(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "b"}}, 3)
 
 	recs := r.Records()
 	// 2 turn markers + 2 tool dispatches = 4 records
@@ -90,46 +90,66 @@ func TestRecorderAppendAndTurnBoundaries(t *testing.T) {
 	if len(r.turnStartIndex) != 2 {
 		t.Errorf("turnStartIndex len = %d, want 2", len(r.turnStartIndex))
 	}
+	// MsgIdx stamping survives.
+	if recs[1].MsgIdx != 1 {
+		t.Errorf("record[1].MsgIdx = %d, want 1", recs[1].MsgIdx)
+	}
 }
 
-func TestRecorderTruncateToTurn(t *testing.T) {
+func TestRecorderSyncBeforeSaveReseedsOnCompaction(t *testing.T) {
 	r := NewRecorder()
-	// Three turns, each with a tool.
+	// Three turns of records accumulate.
 	for turn := 0; turn < 3; turn++ {
-		r.Append(event.Event{Kind: event.TurnStarted})
-		r.Append(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: string(rune('a' + turn))}})
+		r.Append(event.Event{Kind: event.TurnStarted}, turn*2)
+		r.Append(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: string(rune('a' + turn))}}, turn*2+1)
 	}
-	// Keep only the last turn.
-	r.TruncateToTurn(1)
+	// First save: version 1, no compaction yet — records preserved.
+	r.SyncBeforeSave(1, event.Event{})
+	if len(r.Records()) != 6 {
+		t.Fatalf("after first sync len = %d, want 6 (no compaction)", len(r.Records()))
+	}
+	// A compaction happens: CompactionDone observed, version bumps to 2.
+	done := event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Trigger: "auto", Messages: 4, Summary: "folded earlier"}}
+	r.SyncBeforeSave(2, done)
 	recs := r.Records()
-	// Should keep: turn_started + tool dispatch from the last turn only.
-	if len(recs) != 2 {
-		t.Fatalf("after truncate len = %d, want 2", len(recs))
+	// After re-seed: only the compaction_done record survives.
+	if len(recs) != 1 {
+		t.Fatalf("after compaction sync len = %d, want 1 (compaction card only)", len(recs))
 	}
-	if recs[0].Kind != KindTurnStarted {
-		t.Errorf("first kept record = %q, want turn_started", recs[0].Kind)
-	}
-	if recs[1].Tool == nil || recs[1].Tool.ID != "c" {
-		t.Errorf("kept tool = %+v, want id=c", recs[1].Tool)
+	if recs[0].Kind != KindCompactionDone {
+		t.Errorf("kept record kind = %q, want compaction_done", recs[0].Kind)
 	}
 }
 
-func TestRecorderTruncateKeepsAllWhenKeepTurnsExceedsCount(t *testing.T) {
+func TestRecorderSyncBeforeSaveNoOpWithoutVersionChange(t *testing.T) {
 	r := NewRecorder()
-	r.Append(event.Event{Kind: event.TurnStarted})
-	r.Append(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "a"}})
-	r.TruncateToTurn(5) // more turns than exist
+	r.Append(event.Event{Kind: event.TurnStarted}, 0)
+	r.Append(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "a"}}, 1)
+	r.SyncBeforeSave(5, event.Event{})
+	r.SyncBeforeSave(5, event.Event{}) // same version — no reset
 	if len(r.Records()) != 2 {
-		t.Errorf("truncate over-truncated: len = %d, want 2", len(r.Records()))
+		t.Errorf("same-version sync reset records: len = %d, want 2", len(r.Records()))
+	}
+}
+
+func TestRecorderSyncBeforeSaveIgnoresCompactionWithoutVersionChange(t *testing.T) {
+	// A CompactionDone seen but version unchanged (e.g. abort path) must NOT reset.
+	r := NewRecorder()
+	r.Append(event.Event{Kind: event.TurnStarted}, 0)
+	r.SyncBeforeSave(5, event.Event{})
+	done := event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{Summary: "x"}}
+	r.SyncBeforeSave(5, done) // same version — even with done, no reset
+	if len(r.Records()) != 1 {
+		t.Errorf("same-version sync with done reset records: len = %d, want 1", len(r.Records()))
 	}
 }
 
 func TestRecorderNilIsNoOp(t *testing.T) {
 	// A nil recorder must never panic — callers invoke Append/Save without nil checks.
 	var r *Recorder
-	r.Append(event.Event{Kind: event.TurnStarted})
+	r.Append(event.Event{Kind: event.TurnStarted}, 0)
 	r.SetRewriteVersion(3)
-	r.TruncateToTurn(1)
+	r.SyncBeforeSave(4, event.Event{})
 	if err := r.Save(""); err != nil {
 		t.Errorf("Save(\"\") = %v, want nil", err)
 	}
@@ -142,10 +162,10 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.present.jsonl")
 	r := NewRecorder()
-	r.Append(event.Event{Kind: event.TurnStarted})
-	r.Append(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "c1", Name: "bash"}})
-	r.Append(event.Event{Kind: event.Notice, Text: "hello", Level: event.LevelInfo})
-	r.SetRewriteVersion(42)
+	r.Append(event.Event{Kind: event.TurnStarted}, 0)
+	r.Append(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "c1", Name: "bash"}}, 1)
+	r.Append(event.Event{Kind: event.Notice, Text: "hello", Level: event.LevelInfo}, 2)
+	r.SyncBeforeSave(42, event.Event{})
 
 	if err := r.Save(path); err != nil {
 		t.Fatalf("Save: %v", err)

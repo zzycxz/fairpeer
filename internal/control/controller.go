@@ -96,7 +96,8 @@ type Controller struct {
 	// notice/phase/compaction cards) so a frontend can rebuild the exact transcript
 	// a user saw after a tab switch/reload/crash. nil = sidecar disabled (the
 	// degraded provider.Message-only history is used). Never feeds the LLM.
-	present *present.Recorder
+	present            *present.Recorder
+	lastCompactionDone *event.Event // points at the sink-wrapper's lastDone var; snapshot reads it for SyncBeforeSave
 
 	// jobs is the session-scoped background-job manager. The agent's background
 	// tools spawn into it; Compose drains its completion notes into the next turn;
@@ -338,17 +339,25 @@ func New(opts Options) *Controller {
 	// Present is off the recorder stays nil and the wrapper is skipped, so CLI /
 	// headless paths that don't render a rich UI pay no overhead.
 	var rec *present.Recorder
+	lastDone := event.Event{}            // shared with c via pointer; snapshot reads it
+	var lastDonePtr = &lastDone
 	if opts.Present {
 		rec = present.NewRecorder()
+		exec := opts.Executor // captured before c exists; safe to read Session() at emit time
 		orig := sink
 		sink = event.FuncSink(func(e event.Event) {
-			// On compaction we truncate the sidecar to the recent turn so it never
-			// shows content the model forgot (the "follow truncation" invariant).
-			// A summary=="" Done is an abort — don't truncate on it.
+			// Remember the most recent successful compaction so snapshot can reset
+			// the recorder against it when it detects the RewriteVersion moved.
 			if e.Kind == event.CompactionDone && e.Compaction.Summary != "" {
-				rec.TruncateToTurn(1)
+				*lastDonePtr = e
 			}
-			rec.Append(e)
+			// msgIdx = current len(Messages), stamped onto the record so the
+			// recorder can later drop records the model forgot after a compaction.
+			msgIdx := 0
+			if exec != nil {
+				msgIdx = len(exec.Session().Snapshot())
+			}
+			rec.Append(e, msgIdx)
 			orig.Emit(e)
 		})
 	}
@@ -384,8 +393,9 @@ func New(opts Options) *Controller {
 		toolApprovalMode: ToolApprovalAsk,
 		approvals:        map[string]pendingApproval{},
 		asks:             map[string]pendingAsk{},
-		granted:          map[string]bool{},
-		present:          rec,
+		granted:            map[string]bool{},
+		present:            rec,
+		lastCompactionDone: lastDonePtr,
 	}
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
 	c.rebindCheckpoints(opts.SessionPath)
@@ -2391,7 +2401,15 @@ func (c *Controller) snapshot(markActivity bool) error {
 	// detected on load. Best-effort: a sidecar write failure is logged, not
 	// propagated — losing it only degrades reload fidelity, not the session.
 	if c.present != nil {
-		c.present.SetRewriteVersion(s.RewriteVersion())
+		// Sync against the session before saving: if a compaction rewrote Messages
+		// since the last save (RewriteVersion moved), re-seed the recorder around
+		// the compaction so the sidecar never carries records describing messages
+		// the model has forgotten.
+		lastDone := event.Event{}
+		if c.lastCompactionDone != nil {
+			lastDone = *c.lastCompactionDone
+		}
+		c.present.SyncBeforeSave(s.RewriteVersion(), lastDone)
 		if perr := c.present.Save(present.PresentPath(path)); perr != nil {
 			slog.Warn("controller: present sidecar save", "err", perr)
 		}

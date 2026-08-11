@@ -41,6 +41,7 @@ import (
 	fileenc "github.com/zzycxz/fairpeer/internal/fileutil/encoding"
 	"github.com/zzycxz/fairpeer/internal/i18n"
 	"github.com/zzycxz/fairpeer/internal/mcpdiag"
+	"github.com/zzycxz/fairpeer/internal/mcpregistry"
 	"github.com/zzycxz/fairpeer/internal/memory"
 	"github.com/zzycxz/fairpeer/internal/plugin"
 	"github.com/zzycxz/fairpeer/internal/present"
@@ -2174,9 +2175,11 @@ type HistoryMessage struct {
 }
 
 type HistoryToolCall struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Arguments   string           `json:"arguments"`
+	Subagent    []HistoryMessage `json:"subagent,omitempty"`
+	SubagentRef string           `json:"subagentRef,omitempty"`
 }
 
 // PresentForTab returns the presentation event records persisted for the tab's
@@ -2268,7 +2271,20 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 // transcript load per matching tool call that is actually present in this page.
 // Sub-agents still running (no .jsonl yet) or crashed (only .meta.json) are
 // silently skipped — the parent card keeps its final-result text either way.
+// maxSubagentDepth caps recursive sub-agent nesting. A sub-agent may itself
+// spawn sub-agents (e.g. research → research); we load transcripts down to this
+// depth so nested delegation renders, with a guard against pathological or
+// cyclic chains. 4 covers realistic delegation trees.
+const maxSubagentDepth = 4
+
 func attachSubagentTranscripts(hm []HistoryMessage, sessionDir, sessionPath string, resolveUserContent func(string) string) {
+	attachSubagentTranscriptsDepth(hm, sessionDir, sessionPath, resolveUserContent, 0)
+}
+
+// attachSubagentTranscriptsDepth is the recursive worker. depth tracks how many
+// sub-agent layers we've descended; at maxSubagentDepth we stop descending
+// (deeper transcripts are omitted, not malformed — the parent card still shows).
+func attachSubagentTranscriptsDepth(hm []HistoryMessage, sessionDir, sessionPath string, resolveUserContent func(string) string, depth int) {
 	subagentTools := agent.SubagentMetaTools()
 	isSubagent := make(map[string]bool, len(subagentTools))
 	for _, n := range subagentTools {
@@ -2315,11 +2331,22 @@ func attachSubagentTranscripts(hm []HistoryMessage, sessionDir, sessionPath stri
 			if lerr != nil || sess == nil {
 				continue // running sub-agent (no .jsonl yet) or crash — skip
 			}
-			hm[i].ToolCalls[j].Subagent = historyMessages(sess.Snapshot(), resolveUserContent)
+			sub := historyMessages(sess.Snapshot(), resolveUserContent)
+			hm[i].ToolCalls[j].Subagent = sub
 			hm[i].ToolCalls[j].SubagentRef = art.Ref
+			// Descend: a sub-agent's own tool calls may have spawned grandchild
+			// agents (their transcripts sit in the same subagents/ dir, keyed by
+			// this sub-agent's session id). Recurse with the sub-agent's session
+			// path so ListSubagentsByParent resolves to its children, until the
+			// depth cap is reached.
+			if depth+1 < maxSubagentDepth {
+				attachSubagentTranscriptsDepth(sub, sessionDir, art.SessionPath, resolveUserContent, depth+1)
+			}
 		}
 	}
 }
+
+func previewSessionMessages(sessionDir, path string) ([]HistoryMessage, error) {
 	sessionPath, _, err := validateSessionPath(sessionDir, path)
 	if err != nil {
 		return nil, err
@@ -3536,6 +3563,94 @@ type MCPServerInput struct {
 	Args      []string          `json:"args"`
 	URL       string            `json:"url"`
 	Env       map[string]string `json:"env"`
+}
+
+// MCPRegistryEntryView is one official MCP Registry server in the shape the
+// desktop marketplace consumes: enough to render a card and, when Installable,
+// assemble an MCPServerInput without a second round-trip.
+type MCPRegistryEntryView struct {
+	Name              string   `json:"name"`
+	SuggestedName     string   `json:"suggestedName"`
+	Title             string   `json:"title,omitempty"`
+	Description       string   `json:"description,omitempty"`
+	Version           string   `json:"version,omitempty"`
+	RepositoryURL     string   `json:"repositoryUrl,omitempty"`
+	Installable       bool     `json:"installable"`
+	UnavailableReason string   `json:"unavailableReason,omitempty"`
+	Transport         string   `json:"transport,omitempty"`
+	Command           string   `json:"command,omitempty"`
+	Args              []string `json:"args"`
+	URL               string   `json:"url,omitempty"`
+}
+
+// MCPRegistryView is the marketplace query result. Cached/Warning surface a
+// registry outage gracefully: browsing keeps working from the on-disk cache,
+// but the UI must say so.
+type MCPRegistryView struct {
+	Servers []MCPRegistryEntryView `json:"servers"`
+	Cached  bool                   `json:"cached"`
+	Warning string                 `json:"warning,omitempty"`
+}
+
+// MCPRegistrySearch queries the official MCP Registry
+// (registry.modelcontextprotocol.io). Only the settings marketplace calls it —
+// boot and tool discovery never touch the network. A per-query cache keeps the
+// page useful during a registry outage without treating cached entries as
+// install metadata.
+func (a *App) MCPRegistrySearch(query string) (MCPRegistryView, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := mcpregistry.New(mcpRegistryCachePath()).Search(ctx, query, 50)
+	if err != nil {
+		return MCPRegistryView{Servers: []MCPRegistryEntryView{}}, err
+	}
+	view := MCPRegistryView{
+		Servers: make([]MCPRegistryEntryView, 0, len(result.Entries)),
+		Cached:  result.Cached,
+		Warning: result.Warning,
+	}
+	for _, entry := range result.Entries {
+		view.Servers = append(view.Servers, mcpRegistryEntryView(entry))
+	}
+	return view, nil
+}
+
+// MCPRegistryResolve re-fetches one Registry entry immediately before the
+// marketplace installs it. Offline cache stays useful for browsing, but it is
+// never accepted as installation metadata — a cached package may have been
+// removed or changed since it was stored.
+func (a *App) MCPRegistryResolve(registryName string) (MCPRegistryEntryView, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	entry, _, err := mcpregistry.New(mcpRegistryCachePath()).Resolve(ctx, registryName)
+	if err != nil {
+		return MCPRegistryEntryView{}, err
+	}
+	return mcpRegistryEntryView(entry), nil
+}
+
+func mcpRegistryCachePath() string {
+	if cacheDir := config.CacheDir(); cacheDir != "" {
+		return filepath.Join(cacheDir, "mcp-registry.json")
+	}
+	return ""
+}
+
+func mcpRegistryEntryView(entry mcpregistry.Entry) MCPRegistryEntryView {
+	return MCPRegistryEntryView{
+		Name:              entry.Name,
+		SuggestedName:     entry.SuggestedName,
+		Title:             entry.Title,
+		Description:       entry.Description,
+		Version:           entry.Version,
+		RepositoryURL:     entry.RepositoryURL,
+		Installable:       entry.Installable,
+		UnavailableReason: entry.UnavailableReason,
+		Transport:         entry.Transport,
+		Command:           entry.Command,
+		Args:              append([]string(nil), entry.Args...),
+		URL:               entry.URL,
+	}
 }
 
 // AddMCPServer connects a server live and persists it to config (Customize → MCP →

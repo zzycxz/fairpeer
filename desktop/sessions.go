@@ -147,12 +147,10 @@ func trashSessionArtifacts(dir, sessionPath, key string) error {
 	// Presentation sidecar (rich view-only event log). Sibling to .jsonl, written
 	// by the controller when Present is on. Trashed/restored alongside the session
 	// so a restored session keeps its rich transcript and a deleted one leaves no
-	// orphan sidecar.
+	// orphan sidecar. (No .sig sibling — the present sidecar isn't HMAC-signed, so
+	// there's no integrity file to move.)
 	presentName := key + ".present.jsonl"
 	if err := movePathIfExists(sessionPath+".present.jsonl", filepath.Join(itemDir, presentName)); err != nil {
-		return err
-	}
-	if err := movePathIfExists(sessionPath+".present.jsonl.sig", filepath.Join(itemDir, presentName+".sig")); err != nil {
 		return err
 	}
 	if err := trashSubagentArtifacts(dir, sessionPath, itemDir); err != nil {
@@ -242,9 +240,6 @@ func restoreTrashedSessionFile(dir, path string) error {
 	// trashSessionArtifacts for the matching move).
 	presentName := key + ".present.jsonl"
 	if err := movePathIfExists(filepath.Join(itemDir, presentName), filepath.Join(dir, presentName)); err != nil {
-		return err
-	}
-	if err := movePathIfExists(filepath.Join(itemDir, presentName+".sig"), filepath.Join(dir, presentName+".sig")); err != nil {
 		return err
 	}
 	if err := restoreSubagentArtifacts(dir, itemDir); err != nil {

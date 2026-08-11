@@ -279,13 +279,22 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
         // Without this, a tab switch makes every sub-agent's internal steps
         // vanish, leaving only the parent card's final-answer text.
         if (tc.subagent && tc.subagent.length > 0) {
-          const { items: subItems, seq: subSeq } = historyMessagesToItems(tc.subagent, `${toolID}/`, seq + 1);
+          // idPrefix "" (not `${toolID}/`): the sub-agent's tool ids are its own
+          // real ids; we namespacing them ourselves below so they match the live
+          // stream's format (task.go subSinkFor rewrites child ids to
+          // `parentID/childID`). Matching the live stream's id format is what lets
+          // the present sidecar's tool overlays (keyed by namespaced id) land on
+          // these rebuilt items and restore their rich fields (durationMs etc).
+          const { items: subItems, seq: subSeq } = historyMessagesToItems(tc.subagent, "s", seq + 1);
           for (const si of subItems) {
             // Only tool items carry parentId — assistant/phase/notice inside a
             // sub-agent aren't nested-renderable by ToolCard, and the live stream
             // (subSinkFor) only forwards ToolDispatch/ToolResult anyway.
             if (si.kind === "tool") {
-              items.push({ ...si, parentId: toolID });
+              // Namespace the id: parentID/childID. Matches subSinkFor's rewrite
+              // so sidecar overlays resolve correctly.
+              const childID = si.id.startsWith(`${toolID}/`) ? si.id : `${toolID}/${si.id}`;
+              items.push({ ...si, id: childID, parentId: toolID });
             } else {
               items.push(si);
             }
