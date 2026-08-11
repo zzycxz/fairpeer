@@ -292,9 +292,10 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
             // (subSinkFor) only forwards ToolDispatch/ToolResult anyway.
             if (si.kind === "tool") {
               // Namespace the id: parentID/childID. Matches subSinkFor's rewrite
-              // so sidecar overlays resolve correctly.
-              const childID = si.id.startsWith(`${toolID}/`) ? si.id : `${toolID}/${si.id}`;
-              items.push({ ...si, id: childID, parentId: toolID });
+              // (task.go:520, `parentID + "/" + childID`) so the present sidecar's
+              // tool overlays — keyed by that same namespaced id — land on these
+              // rebuilt items and restore their rich fields (durationMs etc).
+              items.push({ ...si, id: `${toolID}/${si.id}`, parentId: toolID });
             } else {
               items.push(si);
             }

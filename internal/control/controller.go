@@ -339,25 +339,18 @@ func New(opts Options) *Controller {
 	// Present is off the recorder stays nil and the wrapper is skipped, so CLI /
 	// headless paths that don't render a rich UI pay no overhead.
 	var rec *present.Recorder
-	lastDone := event.Event{}            // shared with c via pointer; snapshot reads it
+	lastDone := event.Event{} // shared with c via pointer; snapshot reads it
 	var lastDonePtr = &lastDone
 	if opts.Present {
 		rec = present.NewRecorder()
-		exec := opts.Executor // captured before c exists; safe to read Session() at emit time
 		orig := sink
 		sink = event.FuncSink(func(e event.Event) {
-			// Remember the most recent successful compaction so snapshot can reset
-			// the recorder against it when it detects the RewriteVersion moved.
+			// Remember the most recent successful compaction so snapshot can
+			// re-seed the recorder around it when it detects a rewrite.
 			if e.Kind == event.CompactionDone && e.Compaction.Summary != "" {
 				*lastDonePtr = e
 			}
-			// msgIdx = current len(Messages), stamped onto the record so the
-			// recorder can later drop records the model forgot after a compaction.
-			msgIdx := 0
-			if exec != nil {
-				msgIdx = len(exec.Session().Snapshot())
-			}
-			rec.Append(e, msgIdx)
+			rec.Append(e)
 			orig.Emit(e)
 		})
 	}

@@ -112,17 +112,8 @@ type Collab = json.RawMessage
 
 // Record is one presentation event, persisted as one JSONL line in the sidecar.
 // Only the fields meaningful for Kind are populated; the rest are zero/omitted.
-//
-// MsgIdx carries len(session.Messages) at the moment this event was emitted, so
-// the recorder can truncate records in lockstep with a compaction that shrank
-// Messages: after a compact, the controller tells the recorder the new Messages
-// length, and the recorder drops every record whose MsgIdx is below the kept
-// region's start. This is the only reliable way to align the sidecar with the
-// post-compact Messages array, because compaction/prune/softTrim/summarize all
-// rewrite Messages by token budget (not turn count) and only some emit events.
 type Record struct {
 	Kind       Kind        `json:"kind"`
-	MsgIdx     int         `json:"msgIdx,omitempty"` // 1-based len(Messages) when emitted; 0 = unknown/legacy
 	Text       string      `json:"text,omitempty"`
 	Reasoning  string      `json:"reasoning,omitempty"`
 	Level      string      `json:"level,omitempty"` // "info"|"warn" for notice
@@ -274,11 +265,9 @@ type Recorder struct {
 func NewRecorder() *Recorder { return &Recorder{} }
 
 // Append records one event if it has presentation value. Safe to call on a nil
-// recorder (no-op). msgIdx is len(session.Messages) at emit time, stamped onto
-// the record so TruncateToMessageIndex can later drop records the model forgot
-// after a compaction. A msgIdx <= 0 means "unknown" — the record is kept through
-// any message-based truncation (treated as belonging to the current tail).
-func (r *Recorder) Append(e event.Event, msgIdx int) {
+// recorder (no-op). TurnStarted marks a new turn boundary the retention cap and
+// any future turn-aligned truncation can cut against.
+func (r *Recorder) Append(e event.Event) {
 	if r == nil {
 		return
 	}
@@ -286,7 +275,6 @@ func (r *Recorder) Append(e event.Event, msgIdx int) {
 	if !ok {
 		return
 	}
-	rec.MsgIdx = msgIdx
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if rec.Kind == KindTurnStarted {
@@ -321,23 +309,34 @@ func (r *Recorder) SetRewriteVersion(v int) {
 }
 
 // SyncBeforeSave reconciles the recorder with the session right before a Save.
-// If the session's RewriteVersion advanced since the last sync (meaning a
-// compaction/prune/softTrim/summarize rewrote Messages) and a CompactionDone was
-// observed, the recorder is reset around that compaction so the sidecar never
-// carries records describing messages the model has forgotten. The version is
-// then stamped onto the recorder for the next sync. Safe to call on a nil
-// recorder; lastDone may be a zero event (no compaction observed).
+// If the session's RewriteVersion advanced since the last sync, the recorder is
+// reset: a rewrite means compaction/prune/softTrim/summarize physically replaced
+// Messages, so the sidecar must not keep records describing what the model has
+// forgotten. On a compaction specifically, the CompactionDone card is re-seeded
+// (if observed) so the user still sees "N messages compacted"; a prune/softTrim
+// (which only emits Notice, no CompactionDone) clears the records outright —
+// acceptable, since those rewrites are silent in the live stream too.
+//
+// This must trigger on ANY RewriteVersion change, not just CompactionDone,
+// because prune.go's SoftTrim/Prune bump the version and rewrite Messages
+// without emitting a Compaction event — gating on lastDone.Kind would let those
+// rewrites leave stale records in the sidecar.
 func (r *Recorder) SyncBeforeSave(currentVersion int, lastDone event.Event) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
-	if r.rewriteVersion != 0 && currentVersion != r.rewriteVersion && lastDone.Kind != 0 {
-		// A rewrite happened since the last save. Re-seed around the compaction.
+	if r.rewriteVersion != 0 && currentVersion != r.rewriteVersion {
+		// A rewrite happened since the last save. Reset; if the most-recent
+		// rewrite was a compaction (lastDone observed), keep its card so the
+		// user sees a compaction happened. Otherwise (prune/softTrim/summarize)
+		// clear entirely.
 		r.records = nil
 		r.turnStartIndex = nil
-		if rec, ok := FromEvent(lastDone); ok {
-			r.records = append(r.records, rec)
+		if lastDone.Kind == event.CompactionDone && lastDone.Compaction.Summary != "" {
+			if rec, ok := FromEvent(lastDone); ok {
+				r.records = append(r.records, rec)
+			}
 		}
 	}
 	r.rewriteVersion = currentVersion
