@@ -17,6 +17,7 @@ import type {
   JobView,
   MemoryView,
   Meta,
+  PresentRecord,
   QuestionAnswer,
   SessionMeta,
   TabMeta,
@@ -169,6 +170,7 @@ type Action =
   | { type: "message_action_start"; action: MessageActionState }
   | { type: "message_action_done" }
   | { type: "history"; messages: HistoryMessage[] }
+  | { type: "present"; records: PresentRecord[] }
   | { type: "local_notice"; level: "info" | "warn"; text: string }
   | { type: "clearApproval" }
   | { type: "clearAsk" }
@@ -327,6 +329,149 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
     }
   }
   return { items, seq };
+}
+
+// presentRecordsToOverlays splits a presentation sidecar's records into two
+// parts the "present" reducer can apply on top of history-built items:
+//
+//   - overlays: per-tool rich fields (readOnly, durationMs, truncated, attachments,
+//     profile, parentId, output, error) keyed by tool id. tool_dispatch and
+//     tool_result for the same id are merged; tool_progress chunks accumulate into
+//     output (matching the live stream's incremental append).
+//   - cards: standalone items history can't reconstruct — notice, phase,
+//     compaction, expert_collab. These are appended to the transcript.
+//
+// user / assistant / reasoning / message records are ignored here: history
+// already produced those from provider.Message, and re-emitting them would
+// duplicate the transcript. Only the presentation-only information survives.
+//
+// startSeq seeds the id namespace for cards and id-less tools so the caller can
+// keep its seq counter monotonic.
+function presentRecordsToOverlays(
+  records: PresentRecord[],
+  startSeq: number,
+): { overlays: Map<string, ToolOverlay>; cards: Item[] } {
+  const overlays = new Map<string, ToolOverlay>();
+  const cards: Item[] = [];
+  let seq = startSeq;
+
+  const overlayFor = (id: string): ToolOverlay => {
+    let ov = overlays.get(id);
+    if (!ov) {
+      ov = { id };
+      overlays.set(id, ov);
+    }
+    return ov;
+  };
+
+  for (const r of records) {
+    switch (r.kind) {
+      case "tool_dispatch": {
+        if (!r.tool?.id) break;
+        const ov = overlayFor(r.tool.id);
+        if (r.tool.name !== undefined) ov.name = r.tool.name;
+        if (r.tool.args !== undefined) ov.args = r.tool.args;
+        if (r.tool.readOnly !== undefined) ov.readOnly = r.tool.readOnly;
+        if (r.tool.parentId !== undefined) ov.parentId = r.tool.parentId;
+        if (r.tool.profile) ov.profile = r.tool.profile;
+        break;
+      }
+      case "tool_progress": {
+        if (!r.tool?.id) break;
+        const ov = overlayFor(r.tool.id);
+        // Live stream appends progress chunks (useController.ts tool_progress
+        // case does `it.output + chunk`); mirror that so reload reconstructs the
+        // same accumulated output when there was no tool_result yet.
+        ov.output = (ov.output ?? "") + (r.tool.output ?? "");
+        break;
+      }
+      case "tool_result": {
+        if (!r.tool?.id) break;
+        const ov = overlayFor(r.tool.id);
+        // A result's output is authoritative (full, final) — overwrite any
+        // accumulated progress chunks.
+        if (r.tool.output !== undefined) ov.output = r.tool.output;
+        if (r.tool.err !== undefined && r.tool.err !== "") ov.error = r.tool.err;
+        if (r.tool.durationMs !== undefined) ov.durationMs = r.tool.durationMs;
+        if (r.tool.truncated !== undefined) ov.truncated = r.tool.truncated;
+        if (r.tool.attachments !== undefined) ov.attachments = r.tool.attachments as WireAttachment[];
+        if (r.tool.readOnly !== undefined) ov.readOnly = r.tool.readOnly;
+        if (r.tool.parentId !== undefined) ov.parentId = r.tool.parentId;
+        if (r.tool.name !== undefined) ov.name = r.tool.name;
+        break;
+      }
+      case "notice": {
+        if (r.text && r.text.trim()) {
+          cards.push({ kind: "notice", id: `pn${seq}`, level: r.level === "warn" ? "warn" : "info", text: r.text });
+          seq++;
+        }
+        break;
+      }
+      case "phase": {
+        if (r.text && r.text.trim()) {
+          cards.push({ kind: "phase", id: `pp${seq}`, text: r.text });
+          seq++;
+        }
+        break;
+      }
+      case "compaction_started": {
+        cards.push({ kind: "compaction", id: `pc${seq}`, pending: true, trigger: r.compaction?.trigger ?? "", messages: 0, summary: "", archive: "" });
+        seq++;
+        break;
+      }
+      case "compaction_done": {
+        // An aborted compaction (empty summary) resolves the pending placeholder;
+        // a real one fills it. We don't try to match the pending card here — the
+        // sidecar is replayed wholesale, so we just emit the filled card. If a
+        // pending one preceded it, the transcript shows both briefly; acceptable
+        // for a rare, informational card.
+        if (r.compaction && r.compaction.summary) {
+          cards.push({
+            kind: "compaction",
+            id: `pc${seq}`,
+            pending: false,
+            trigger: r.compaction.trigger ?? "",
+            messages: r.compaction.messages ?? 0,
+            summary: r.compaction.summary,
+            archive: r.compaction.archive ?? "",
+          });
+          seq++;
+        }
+        break;
+      }
+      case "expert_collab": {
+        // collab is stored as raw JSON mirroring event.Collab; cast to WireCollab.
+        if (r.collab) {
+          cards.push({ kind: "expert_collab", id: `pec${seq}`, collab: r.collab as WireCollab });
+          seq++;
+        }
+        break;
+      }
+      default:
+        // turn_started / reasoning / text / message / usage / retrying / steer /
+        // paused / resumed — not recoverable as standalone items (they'd duplicate
+        // history or are transient indicators). Skip.
+        break;
+    }
+  }
+  return { overlays, cards };
+}
+
+// ToolOverlay is the per-tool rich-field patch the present reducer applies to a
+// history-built tool item. Every field is optional; only the ones the sidecar
+// recorded are set.
+interface ToolOverlay {
+  id?: string;
+  name?: string;
+  args?: string;
+  readOnly?: boolean;
+  durationMs?: number;
+  truncated?: boolean;
+  parentId?: string;
+  profile?: { model?: string; effort?: string };
+  attachments?: WireAttachment[];
+  output?: string;
+  error?: string;
 }
 
 function ensureAssistant(s: State): { items: Item[]; id: string; seq: number } {
@@ -594,6 +739,74 @@ export function reducer(s: State, a: Action): State {
       return { ...s, items: mergeRunningIntoHistory(histItems, runningItems), seq };
     }
     case "local_notice": return { ...s, running: false, turnActive: false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
+    case "present": {
+      // Merge the presentation sidecar's rich fields onto the history-built items.
+      // historyMessagesToItems produced tool items with readOnly=false, no
+      // durationMs/truncated/attachments/profile/parentId, and dropped notice/
+      // phase/compaction cards entirely (provider.Message doesn't carry them).
+      // The sidecar has all of that; we project its records into:
+      //   (a) rich-field overlays keyed by tool id — applied to existing tool items,
+      //   (b) standalone cards (notice/phase/compaction/expert_collab) — inserted.
+      // user/assistant text from the sidecar is NOT re-emitted: history already has
+      // those, and duplicating them would double the transcript. Only the fields
+      // history CAN'T reconstruct are recovered here.
+      const { overlays, cards } = presentRecordsToOverlays(a.records, s.seq);
+      if (overlays.size === 0 && cards.length === 0) {
+        return s; // nothing to merge (e.g. sidecar only had text/reasoning)
+      }
+      let seq = s.seq;
+      const items: Item[] = [];
+      for (const it of s.items) {
+        if (it.kind === "tool") {
+          const ov = overlays.get(it.id);
+          if (ov) {
+            overlays.delete(it.id);
+            items.push({
+              ...it,
+              ...(ov.readOnly !== undefined ? { readOnly: ov.readOnly } : {}),
+              ...(ov.durationMs !== undefined ? { durationMs: ov.durationMs } : {}),
+              ...(ov.truncated !== undefined ? { truncated: ov.truncated } : {}),
+              ...(ov.profile !== undefined ? { profile: ov.profile } : {}),
+              ...(ov.parentId !== undefined ? { parentId: ov.parentId } : {}),
+              ...(ov.attachments !== undefined ? { attachments: ov.attachments } : {}),
+              ...(ov.output !== undefined ? { output: ov.output } : {}),
+              ...(ov.error !== undefined ? { error: ov.error } : {}),
+            });
+            continue;
+          }
+        }
+        items.push(it);
+      }
+      // Remaining overlays (tools in the sidecar but not in history — e.g. a tool
+      // whose result wasn't persisted) become standalone tool items at the end.
+      for (const ov of overlays.values()) {
+        items.push({
+          kind: "tool",
+          id: ov.id ?? `p${seq}`,
+          name: ov.name ?? "tool",
+          args: ov.args ?? "",
+          readOnly: ov.readOnly ?? false,
+          status: ov.error ? "error" : "done",
+          ...(ov.output !== undefined ? { output: ov.output } : {}),
+          ...(ov.error !== undefined ? { error: ov.error } : {}),
+          ...(ov.durationMs !== undefined ? { durationMs: ov.durationMs } : {}),
+          ...(ov.truncated !== undefined ? { truncated: ov.truncated } : {}),
+          ...(ov.profile !== undefined ? { profile: ov.profile } : {}),
+          ...(ov.parentId !== undefined ? { parentId: ov.parentId } : {}),
+          ...(ov.attachments !== undefined ? { attachments: ov.attachments } : {}),
+        });
+        seq++;
+      }
+      // Standalone cards (notice/phase/compaction/expert_collab) — these have no
+      // counterpart in history, so append them. Ordering across turns is imperfect
+      // (we don't interleave with history items by turn), but these cards are rare
+      // and informational; appending them is strictly better than dropping them.
+      for (const card of cards) {
+        items.push({ ...card, id: card.id || `p${seq}` });
+        seq++;
+      }
+      return { ...s, items, seq };
+    }
     case "clearApproval": return { ...s, approval: undefined };
     case "clearAsk": return { ...s, ask: undefined };
     case "reset": return { ...initialState, meta: s.meta, context: { ...s.context, used: 0, sessionTokens: 0 }, effort: s.effort, jobs: s.jobs };
@@ -703,13 +916,14 @@ export function useController(getProfile?: () => string) {
   const loadSessionDataForTab = useCallback(async (tabId: string, reset = false) => {
     const seq = bumpSessionLoadSeq(tabId);
     const safe = <T,>(p: Promise<T>): Promise<T | undefined> => p.catch(() => undefined);
-    const [meta, context, effort, jobs, checkpoints, history] = await Promise.all([
+    const [meta, context, effort, jobs, checkpoints, history, present] = await Promise.all([
       safe(app.MetaForTab(tabId)),
       safe(app.ContextUsageForTab(tabId)),
       safe(app.EffortForTab(tabId)),
       safe(app.JobsForTab(tabId)),
       safe(app.CheckpointsForTab(tabId)),
       safe(app.HistoryForTab(tabId)),
+      safe(app.PresentForTab(tabId)),
     ]);
     if (!sessionLoadCurrent(tabId, seq)) return;
     if (reset) dispatchTo(tabId, { type: "reset" });
@@ -718,8 +932,16 @@ export function useController(getProfile?: () => string) {
     if (effort) dispatchTo(tabId, { type: "effort", effort });
     if (jobs) dispatchTo(tabId, { type: "jobs", jobs: asArray(jobs) });
     if (checkpoints) dispatchTo(tabId, { type: "checkpoints", checkpoints: asArray(checkpoints) });
-    const messages = asArray(history);
+    const messages = asArray<HistoryMessage>(history);
     if (messages.length) dispatchTo(tabId, { type: "history", messages });
+    // The presentation sidecar carries the rich view-only fields provider.Message
+    // can't (readOnly, durationMs, truncated, attachments, parentId, notice/phase/
+    // compaction cards). Dispatch it AFTER history so the reducer can merge the
+    // rich fields onto the history-built tool items by id, and insert any cards
+    // history couldn't reconstruct.
+    if (present && Array.isArray(present.records) && present.records.length) {
+      dispatchTo(tabId, { type: "present", records: present.records });
+    }
   }, [bumpSessionLoadSeq, dispatchTo, sessionLoadCurrent]);
 
   const activeTabFromBackend = useCallback(async (): Promise<TabMeta | undefined> => {

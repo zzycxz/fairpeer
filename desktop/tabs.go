@@ -1097,6 +1097,7 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 		EffortOverride: cloneStringPtr(tab.effort),
 		Host:           a.acquireSharedHost(root),
 		Profile:        profile,
+		Present:        true,
 	})
 	if err != nil {
 		a.releaseSharedHost(root) // Build failed: drop the acquire

@@ -43,6 +43,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/mcpdiag"
 	"github.com/zzycxz/fairpeer/internal/memory"
 	"github.com/zzycxz/fairpeer/internal/plugin"
+	"github.com/zzycxz/fairpeer/internal/present"
 	"github.com/zzycxz/fairpeer/internal/provider"
 	ragpkg "github.com/zzycxz/fairpeer/internal/rag"
 	schedulerpkg "github.com/zzycxz/fairpeer/internal/scheduler"
@@ -2178,9 +2179,31 @@ type HistoryToolCall struct {
 	Arguments string `json:"arguments"`
 }
 
-// History returns the session's message log.
-func (a *App) History() []HistoryMessage {
-	return a.HistoryForTab("")
+// PresentForTab returns the presentation event records persisted for the tab's
+// session (the rich view-only stream: tool dispatches with readOnly/profile/
+// parentId, results with durationMs/truncated/attachments, notice/phase/
+// compaction cards). Returns an empty slice when no sidecar exists (a session
+// created before Present was enabled, or a CLI-started session) — callers fall
+// back to the degraded provider.Message-only history in that case. The rewrite
+// version the sidecar was aligned to is returned alongside so the frontend can
+// detect staleness after a compaction that hasn't re-flushed.
+func (a *App) PresentForTab(tabID string) PresentPayload {
+	ctrl := a.ctrlByTabID(tabID)
+	if ctrl == nil {
+		return PresentPayload{}
+	}
+	path := present.PresentPath(ctrl.SessionPath())
+	records, ver, err := present.Load(path)
+	if err != nil {
+		return PresentPayload{}
+	}
+	return PresentPayload{Records: records, RewriteVersion: ver}
+}
+
+// PresentPayload is the wire shape of PresentForTab's return.
+type PresentPayload struct {
+	Records        []present.Record `json:"records"`
+	RewriteVersion int              `json:"rewriteVersion,omitempty"`
 }
 
 func (a *App) HistoryForTab(tabID string) []HistoryMessage {
@@ -4350,6 +4373,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 		SessionDir:     tabSessionDir(tab),
 		EffortOverride: cloneStringPtr(effortOverride),
 		Host:           sharedHost,
+		Present:        true,
 	})
 	if err != nil {
 		a.releaseSharedHost(root) // Build failed: drop our acquire
@@ -4570,6 +4594,7 @@ func (a *App) SwitchProfileForTab(tabID, name string) error {
 		EffortOverride: effortOverride, // already cloned+normalized above; no double-clone
 		Host:           sharedHost,
 		Profile:        prof,
+		Present:        true,
 	})
 	if err != nil {
 		// No state was mutated yet (tab.profile not flipped until the Lock below),
@@ -4729,6 +4754,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		SessionDir:     tabSessionDir(tab),
 		EffortOverride: &effort,
 		Host:           sharedHost,
+		Present:        true,
 	})
 	if err != nil {
 		a.releaseSharedHost(root) // Build failed: drop our acquire

@@ -1,0 +1,422 @@
+// Package present records the presentation event stream — the rich, view-only
+// view of a turn (tool dispatches with readOnly/profile/parentId, tool progress
+// chunks, results with durationMs/truncated/attachments, notice/phase/compaction
+// cards, expert-collab cards) — so a frontend can rebuild the exact transcript a
+// user saw even after a tab switch, reload, or crash.
+//
+// It exists because the durable session store (internal/agent Session.Save) only
+// persists provider.Message — the model's view of the conversation. Everything
+// that makes the UI informative (how long a tool took, whether its output was
+// truncated, what notices fired, what a sub-agent did) is carried by event.Event
+// and, before this package, lived only in the frontend's memory. Reloading from
+// the durable store rebuilt a degraded transcript with those fields blank.
+//
+// The sidecar is <session>.present.jsonl: one Record per line, rewritten in full
+// on each save (mirroring Session.Save's rewrite strategy) and TRUNCATED on
+// compaction to stay consistent with the post-compact provider.Message array — a
+// user sees exactly what the model still remembers, nothing the model forgot. It
+// never feeds the LLM; provider.Request is built solely from session.Messages.
+package present
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+
+	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/fileutil"
+)
+
+// Kind is the string tag of a Record. It mirrors event.Kind's meaningful subset —
+// the kinds a frontend renders — as a stable string so the JSONL is self-
+// describing and survives event.Kind reordering. Kinds that only drive live
+// interaction (ApprovalRequest, AskRequest, TurnStarted/Done) are either omitted
+// or recorded as plain markers (a turn boundary marker) since replaying them has
+// no interactive effect.
+type Kind string
+
+const (
+	KindTurnStarted       Kind = "turn_started"
+	KindReasoning         Kind = "reasoning"
+	KindText              Kind = "text"
+	KindMessage           Kind = "message"
+	KindToolDispatch      Kind = "tool_dispatch"
+	KindToolResult        Kind = "tool_result"
+	KindToolProgress      Kind = "tool_progress"
+	KindUsage             Kind = "usage"
+	KindNotice            Kind = "notice"
+	KindPhase             Kind = "phase"
+	KindCompactionStarted Kind = "compaction_started"
+	KindCompactionDone    Kind = "compaction_done"
+	KindRetrying          Kind = "retrying"
+	KindSteer             Kind = "steer"
+	KindPaused            Kind = "paused"
+	KindResumed           Kind = "resumed"
+	KindExpertCollab      Kind = "expert_collab"
+)
+
+// Attachment mirrors event.Attachment (a tool-produced file) for JSON serialization.
+type Attachment struct {
+	Path string `json:"path,omitempty"`
+	Kind string `json:"kind,omitempty"`
+}
+
+// Profile mirrors event.Profile (subagent model/effort).
+type Profile struct {
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
+}
+
+// Tool captures the presentation fields of an event.Tool. It is wider than what
+// survives in provider.Message: ReadOnly, ParentID, DurationMs, Truncated,
+// Attachments, Profile, and the streamed Progress chunks are all here. On dispatch
+// only ID/Name/Args/ReadOnly/ParentID/Profile are set; on result Output/Err/
+// Truncated/DurationMs/Attachments are filled; on progress only ID/Output(chunk).
+type Tool struct {
+	ID          string       `json:"id,omitempty"`
+	Name        string       `json:"name,omitempty"`
+	Args        string       `json:"args,omitempty"`
+	Output      string       `json:"output,omitempty"`
+	Err         string       `json:"err,omitempty"`
+	ReadOnly    bool         `json:"readOnly,omitempty"`
+	Truncated   bool         `json:"truncated,omitempty"`
+	DurationMs  int64        `json:"durationMs,omitempty"`
+	ParentID    string       `json:"parentId,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
+	Profile     *Profile     `json:"profile,omitempty"`
+}
+
+// Usage carries the per-turn token telemetry, mirroring the subset of
+// provider.Usage a frontend renders.
+type Usage struct {
+	InputTokens  int `json:"inputTokens,omitempty"`
+	OutputTokens int `json:"outputTokens,omitempty"`
+	TotalTokens  int `json:"totalTokens,omitempty"`
+	CacheRead    int `json:"cacheRead,omitempty"`
+}
+
+// Compaction mirrors event.Compaction for the compaction cards.
+type Compaction struct {
+	Trigger  string `json:"trigger,omitempty"`
+	Messages int    `json:"messages,omitempty"`
+	Summary  string `json:"summary,omitempty"`
+	Archive  string `json:"archive,omitempty"`
+}
+
+// Collab mirrors event.Collab (expert-team collaboration) for the collab cards.
+// Stored as raw JSON so the package need not depend on the experts shape; the
+// frontend already deserializes the same structure from the live stream.
+type Collab = json.RawMessage
+
+// Record is one presentation event, persisted as one JSONL line in the sidecar.
+// Only the fields meaningful for Kind are populated; the rest are zero/omitted.
+type Record struct {
+	Kind       Kind        `json:"kind"`
+	Text       string      `json:"text,omitempty"`
+	Reasoning  string      `json:"reasoning,omitempty"`
+	Level      string      `json:"level,omitempty"` // "info"|"warn" for notice
+	Tool       *Tool       `json:"tool,omitempty"`
+	Usage      *Usage      `json:"usage,omitempty"`
+	Compaction *Compaction `json:"compaction,omitempty"`
+	Collab     Collab      `json:"collab,omitempty"`
+	Retry      *Retry      `json:"retry,omitempty"`
+}
+
+// Retry carries Retrying event fields.
+type Retry struct {
+	Attempt int `json:"attempt"`
+	Max     int `json:"max,omitempty"`
+}
+
+// FromEvent projects the presentation-relevant fields of an event.Event onto a
+// Record. Returns ok=false for kinds that have no presentation value
+// (ApprovalRequest, AskRequest, TurnDone) — these drive live interaction and are
+// not worth persisting. TurnStarted is recorded as a turn-boundary marker so the
+// recorder can truncate by turn on compaction.
+func FromEvent(e event.Event) (Record, bool) {
+	switch e.Kind {
+	case event.TurnStarted:
+		return Record{Kind: KindTurnStarted}, true
+	case event.Reasoning:
+		return Record{Kind: KindReasoning, Text: e.Text}, true
+	case event.Text:
+		return Record{Kind: KindText, Text: e.Text}, true
+	case event.Message:
+		return Record{Kind: KindMessage, Text: e.Text, Reasoning: e.Reasoning}, true
+	case event.ToolDispatch:
+		return Record{Kind: KindToolDispatch, Tool: toolFromEvent(e.Tool)}, true
+	case event.ToolResult:
+		return Record{Kind: KindToolResult, Tool: toolFromEvent(e.Tool)}, true
+	case event.ToolProgress:
+		return Record{Kind: KindToolProgress, Tool: &Tool{ID: e.Tool.ID, Output: e.Tool.Output}}, true
+	case event.Usage:
+		return Record{Kind: KindUsage, Usage: usageFromEvent(e)}, true
+	case event.Notice:
+		lvl := "info"
+		if e.Level == event.LevelWarn {
+			lvl = "warn"
+		}
+		return Record{Kind: KindNotice, Text: e.Text, Level: lvl}, true
+	case event.Phase:
+		return Record{Kind: KindPhase, Text: e.Text}, true
+	case event.CompactionStarted:
+		return Record{Kind: KindCompactionStarted, Compaction: &Compaction{Trigger: e.Compaction.Trigger}}, true
+	case event.CompactionDone:
+		return Record{Kind: KindCompactionDone, Compaction: &Compaction{
+			Trigger: e.Compaction.Trigger, Messages: e.Compaction.Messages,
+			Summary: e.Compaction.Summary, Archive: e.Compaction.Archive,
+		}}, true
+	case event.Retrying:
+		return Record{Kind: KindRetrying, Retry: &Retry{Attempt: e.RetryAttempt, Max: e.RetryMax}}, true
+	case event.Steer:
+		return Record{Kind: KindSteer, Text: e.Text}, true
+	case event.Paused:
+		return Record{Kind: KindPaused}, true
+	case event.Resumed:
+		return Record{Kind: KindResumed}, true
+	case event.ExpertCollab:
+		// Marshal the collab payload once, here, so the line is self-contained.
+		if raw, err := json.Marshal(e.Collab); err == nil {
+			return Record{Kind: KindExpertCollab, Collab: raw}, true
+		}
+		return Record{Kind: KindExpertCollab}, true
+	default:
+		// ApprovalRequest, AskRequest, TurnDone, MCPSurfaceReady — no replay value.
+		return Record{}, false
+	}
+}
+
+func toolFromEvent(t event.Tool) *Tool {
+	out := &Tool{
+		ID: t.ID, Name: t.Name, Args: t.Args, Output: t.Output, Err: t.Err,
+		ReadOnly: t.ReadOnly, Truncated: t.Truncated, DurationMs: t.DurationMs,
+		ParentID: t.ParentID,
+	}
+	if len(t.Attachments) > 0 {
+		out.Attachments = make([]Attachment, len(t.Attachments))
+		for i, a := range t.Attachments {
+			out.Attachments[i] = Attachment{Path: a.Path, Kind: a.Kind}
+		}
+	}
+	if t.Profile != nil {
+		out.Profile = &Profile{Model: t.Profile.Model, Effort: t.Profile.Effort}
+	}
+	return out
+}
+
+func usageFromEvent(e event.Event) *Usage {
+	if e.Usage == nil {
+		return nil
+	}
+	u := &Usage{
+		InputTokens: e.Usage.PromptTokens, OutputTokens: e.Usage.CompletionTokens,
+		TotalTokens: e.Usage.TotalTokens,
+	}
+	if e.Usage.CacheHitTokens > 0 {
+		u.CacheRead = e.Usage.CacheHitTokens
+	}
+	return u
+}
+
+// PresentPath returns the sidecar path for a session path:
+// "<session>.jsonl" → "<session>.present.jsonl". For a session path that does not
+// end in .jsonl it appends ".present.jsonl" anyway, so the sidecar stays a sibling.
+func PresentPath(sessionPath string) string {
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionPath + ".present.jsonl"
+}
+
+// Recorder accumulates the presentation records for one session and writes them
+// as a sidecar. It is goroutine-safe. The zero value is a no-op recorder (all
+// methods are safe to call); wire it via NewRecorder when a session path is known.
+//
+// Consistency model: the recorder keeps the full record list in memory and
+// rewrites the sidecar on Save (mirroring Session.Save's strategy). On
+// compaction the controller calls TruncateToTurn, which drops records from
+// completed turns the model has forgotten — so the sidecar and the post-compact
+// provider.Message array describe the same turns. RewriteVersion is captured on
+// each Save so a stale sidecar (from before a compaction that didn't yet flush)
+// can be detected and discarded on load.
+type Recorder struct {
+	mu sync.Mutex
+
+	records        []Record
+	turnStartIndex []int // indices into records where a TurnStarted marker sits
+	rewriteVersion int   // session.RewriteVersion() at last Save
+
+	// pending stores the records accumulated since the last TruncateToTurn/Save;
+	// turnStartIndex lets TruncateToTurn find the boundary to keep from. The
+	// kept slice always begins at a TurnStarted marker.
+}
+
+// NewRecorder returns a ready recorder.
+func NewRecorder() *Recorder { return &Recorder{} }
+
+// Append records one event if it has presentation value. Safe to call on a nil
+// recorder (no-op). Events between turns accumulate; TurnStarted marks a new turn
+// boundary the truncator can cut against.
+func (r *Recorder) Append(e event.Event) {
+	if r == nil {
+		return
+	}
+	rec, ok := FromEvent(e)
+	if !ok {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if rec.Kind == KindTurnStarted {
+		r.turnStartIndex = append(r.turnStartIndex, len(r.records))
+	}
+	r.records = append(r.records, rec)
+}
+
+// SetRewriteVersion records the session's current RewriteVersion, captured at
+// Save so a stale sidecar can be detected on load. Called by the controller
+// alongside Save.
+func (r *Recorder) SetRewriteVersion(v int) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.rewriteVersion = v
+	r.mu.Unlock()
+}
+
+// TruncateToTurn drops records from completed turns, keeping only the most recent
+// `keepTurns` turns (counted by TurnStarted markers). Called after a compaction
+// so the sidecar describes the same turns the model still remembers.
+//
+// keepTurns <= 0 keeps everything (no truncation). With keepTurns=1 the recorder
+// keeps only the in-progress turn (the last TurnStarted onwards). The very first
+// turn's marker is always preserved so records before any turn (rare) are kept.
+func (r *Recorder) TruncateToTurn(keepTurns int) {
+	if r == nil || keepTurns <= 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.truncateLocked(keepTurns)
+}
+
+func (r *Recorder) truncateLocked(keepTurns int) {
+	if len(r.turnStartIndex) == 0 {
+		return // no turn boundary yet — nothing to truncate against
+	}
+	// keep the last keepTurns turns; earlier turns are forgotten by the model.
+	keepFromTurn := len(r.turnStartIndex) - keepTurns
+	if keepFromTurn <= 0 {
+		return // we're keeping every turn that exists
+	}
+	startIdx := r.turnStartIndex[keepFromTurn]
+	r.records = append([]Record(nil), r.records[startIdx:]...)
+	// Rebuild turnStartIndex relative to the new slice origin.
+	newTSI := make([]int, 0, keepTurns)
+	for i := keepFromTurn; i < len(r.turnStartIndex); i++ {
+		newTSI = append(newTSI, r.turnStartIndex[i]-startIdx)
+	}
+	r.turnStartIndex = newTSI
+}
+
+// Records returns a snapshot of the current records (for in-process consumers
+// like PresentForTab that can read from memory without hitting disk).
+func (r *Recorder) Records() []Record {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Record, len(r.records))
+	copy(out, r.records)
+	return out
+}
+
+// Save writes the current records to path as JSONL (one Record per line), using
+// the tmp-file-then-rename pattern from Session.Save so a crash mid-write can't
+// leave a partial sidecar. An empty path is a no-op. The rewriteVersion is written
+// as a header line (Kind="_header") so Load can detect a stale sidecar.
+func (r *Recorder) Save(path string) error {
+	if r == nil || path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create present dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".present.*.tmp")
+	if err != nil {
+		return fmt.Errorf("create present tmp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	enc := json.NewEncoder(tmp)
+	// Header carries the rewriteVersion this sidecar was aligned to. On load, if
+	// the session's current RewriteVersion differs AND compaction has happened
+	// since, the loader should treat the sidecar as stale.
+	header := recordWrapper{Record: Record{Kind: "_header"}, RewriteVersion: r.rewriteVersion}
+	if err := enc.Encode(header); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("encode present header: %w", err)
+	}
+	r.mu.Lock()
+	snap := make([]Record, len(r.records))
+	copy(snap, r.records)
+	r.mu.Unlock()
+	for _, rec := range snap {
+		if err := enc.Encode(recordWrapper{Record: rec}); err != nil {
+			tmp.Close()
+			os.Remove(tmpPath)
+			return fmt.Errorf("encode present record: %w", err)
+		}
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return fileutil.ReplaceFile(tmpPath, path)
+}
+
+// recordWrapper is the on-disk line shape. The header line uses Kind="_header"
+// and carries RewriteVersion; all other lines leave RewriteVersion at zero.
+type recordWrapper struct {
+	Record
+	RewriteVersion int `json:"rewriteVersion,omitempty"`
+}
+
+// Load reads a sidecar produced by Save, returning the records and the
+// rewriteVersion they were aligned to. A missing file returns (nil, 0, nil) —
+// callers treat that as "no sidecar, fall back to degraded history".
+func Load(path string) ([]Record, int, error) {
+	if path == "" {
+		return nil, 0, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, 0, nil
+		}
+		return nil, 0, err
+	}
+	defer f.Close()
+	var out []Record
+	var rewriteVersion int
+	dec := json.NewDecoder(f)
+	for dec.More() {
+		var rw recordWrapper
+		if err := dec.Decode(&rw); err != nil {
+			// A truncated last line (crash mid-write before rename) shouldn't fail
+			// the whole load — return what decoded cleanly. The atomic rename means
+			// this is rare, but tolerating it is strictly safer.
+			break
+		}
+		if rw.Kind == "_header" {
+			rewriteVersion = rw.RewriteVersion
+			continue
+		}
+		out = append(out, rw.Record)
+	}
+	return out, rewriteVersion, nil
+}

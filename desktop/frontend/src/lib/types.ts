@@ -262,6 +262,76 @@ export interface HistoryToolCall {
   subagentRef?: string;
 }
 
+// PresentPayload is the rich view-only event stream persisted alongside the
+// session (the <session>.present.jsonl sidecar). It carries what
+// provider.Message cannot: tool dispatches with readOnly/profile/parentId,
+// results with durationMs/truncated/attachments, notice/phase/compaction cards,
+// streamed tool-progress chunks. The frontend rebuilds the exact transcript a
+// user saw from these records after a reload, instead of the degraded
+// message-only history. rewriteVersion lets a stale sidecar (saved before a
+// compaction that hasn't re-flushed) be detected.
+export interface PresentPayload {
+  records: PresentRecord[];
+  rewriteVersion?: number;
+}
+
+export type PresentKind =
+  | "turn_started"
+  | "reasoning"
+  | "text"
+  | "message"
+  | "tool_dispatch"
+  | "tool_result"
+  | "tool_progress"
+  | "usage"
+  | "notice"
+  | "phase"
+  | "compaction_started"
+  | "compaction_done"
+  | "retrying"
+  | "steer"
+  | "paused"
+  | "resumed"
+  | "expert_collab";
+
+export interface PresentTool {
+  id?: string;
+  name?: string;
+  args?: string;
+  output?: string;
+  err?: string;
+  readOnly?: boolean;
+  truncated?: boolean;
+  durationMs?: number;
+  parentId?: string;
+  attachments?: { path?: string; kind?: string }[];
+  profile?: { model?: string; effort?: string };
+}
+
+export interface PresentCompaction {
+  trigger?: string;
+  messages?: number;
+  summary?: string;
+  archive?: string;
+}
+
+export interface PresentRetry {
+  attempt: number;
+  max?: number;
+}
+
+export interface PresentRecord {
+  kind: PresentKind;
+  text?: string;
+  reasoning?: string;
+  level?: string;
+  tool?: PresentTool;
+  usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number; cacheRead?: number };
+  compaction?: PresentCompaction;
+  collab?: unknown;
+  retry?: PresentRetry;
+}
+
 // CheckpointMeta is one rewind point (a user turn) for the rewind UI.
 export interface CheckpointMeta {
   turn: number;

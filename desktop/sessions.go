@@ -144,6 +144,17 @@ func trashSessionArtifacts(dir, sessionPath, key string) error {
 	if err := movePathIfExists(strings.TrimSuffix(sessionPath, ".jsonl")+".ckpt", filepath.Join(itemDir, ckptName)); err != nil {
 		return err
 	}
+	// Presentation sidecar (rich view-only event log). Sibling to .jsonl, written
+	// by the controller when Present is on. Trashed/restored alongside the session
+	// so a restored session keeps its rich transcript and a deleted one leaves no
+	// orphan sidecar.
+	presentName := key + ".present.jsonl"
+	if err := movePathIfExists(sessionPath+".present.jsonl", filepath.Join(itemDir, presentName)); err != nil {
+		return err
+	}
+	if err := movePathIfExists(sessionPath+".present.jsonl.sig", filepath.Join(itemDir, presentName+".sig")); err != nil {
+		return err
+	}
 	if err := trashSubagentArtifacts(dir, sessionPath, itemDir); err != nil {
 		return err
 	}
@@ -225,6 +236,15 @@ func restoreTrashedSessionFile(dir, path string) error {
 	}
 	ckptName := strings.TrimSuffix(key, ".jsonl") + ".ckpt"
 	if err := movePathIfExists(filepath.Join(itemDir, ckptName), filepath.Join(dir, ckptName)); err != nil {
+		return err
+	}
+	// Restore the presentation sidecar alongside its session (see
+	// trashSessionArtifacts for the matching move).
+	presentName := key + ".present.jsonl"
+	if err := movePathIfExists(filepath.Join(itemDir, presentName), filepath.Join(dir, presentName)); err != nil {
+		return err
+	}
+	if err := movePathIfExists(filepath.Join(itemDir, presentName+".sig"), filepath.Join(dir, presentName+".sig")); err != nil {
 		return err
 	}
 	if err := restoreSubagentArtifacts(dir, itemDir); err != nil {

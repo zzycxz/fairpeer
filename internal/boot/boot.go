@@ -189,6 +189,13 @@ type Options struct {
 	// and Profile.Model are set, Model wins (caller's explicit knob beats the
 	// profile default); same for EffortOverride vs Profile.Effort.
 	Profile *config.Profile
+	// Present enables the presentation sidecar: the controller records the rich
+	// view-only event stream (tool dispatches/results/progress, notice/phase/
+	// compaction cards) to <session>.present.jsonl so a frontend can rebuild the
+	// exact transcript after a tab switch/reload/crash. The sidecar never feeds
+	// the LLM. Desktop frontends set this; the TUI/CLI leave it off (the terminal
+	// scrollback IS the presentation layer, so a reload rebuilds nothing).
+	Present bool
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
@@ -342,9 +349,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// "AI created a task in the wrong year" bug. Built once per
 	// Build (cache-stable for the session).
 	now := time.Now()
-	weekdays := []string{"日", "一", "二", "三", "四", "五", "六"}
-	sysPrompt += fmt.Sprintf("\n\n# 当前时间\n【重要】现在是 %s 周%s。在任何需要判断当前年份（例如搜索“最新”资讯）或生成具体日期/时间的任务中，都必须严格以此当前时间为准！",
-		now.Format("2006-01-02 15:04"), weekdays[int(now.Weekday())])
+	if strings.HasPrefix(strings.ToLower(cfg.Language), "zh") {
+		weekdays := []string{"日", "一", "二", "三", "四", "五", "六"}
+		sysPrompt += fmt.Sprintf("\n\n# 当前时间\n【重要】现在是 %s 周%s。在任何需要判断当前年份（例如搜索“最新”资讯）或生成具体日期/时间的任务中，都必须严格以此当前时间为准！",
+			now.Format("2006-01-02 15:04"), weekdays[int(now.Weekday())])
+	} else {
+		sysPrompt += fmt.Sprintf("\n\n# Current Time\n[IMPORTANT] Current time: %s %s. In any task that requires judging the current year (e.g. searching for 'latest' news) or generating concrete dates/times, you MUST use this current time as the reference.",
+			now.Format("2006-01-02 15:04 MST"), now.Weekday())
+	}
 	// Output style: fold the selected persona/tone block into the base prompt
 	// before language/memory/skills append, so a "replace" style (keep-coding
 	// false) still keeps those. Applied once, into the cache-stable prefix.
@@ -1376,6 +1388,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Registry:      reg,
 		PluginCtx:     ctx,
 		WorkspaceRoot: root,
+		Present:       opts.Present,
 		AutoPlan:      cfg.Agent.AutoPlan,
 		OnRemember: func(rule string) control.RememberResult {
 			return rememberPermissionRule(root, rule)

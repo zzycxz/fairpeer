@@ -43,6 +43,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/nilutil"
 	"github.com/zzycxz/fairpeer/internal/permission"
 	"github.com/zzycxz/fairpeer/internal/plugin"
+	"github.com/zzycxz/fairpeer/internal/present"
 	"github.com/zzycxz/fairpeer/internal/provider"
 	"github.com/zzycxz/fairpeer/internal/sandbox"
 	"github.com/zzycxz/fairpeer/internal/skill"
@@ -90,6 +91,12 @@ type Controller struct {
 	onTurnEnd     func(ctx context.Context, lastUserMsg, lastAssistant string) // set via Options; passive memory capture
 	ragContextFn  func(ctx context.Context, query, collection string) string   // set via Options; auto-retrieves knowledge-base context
 	ragScope      string                                                       // knowledge-base collection to scope auto-injection to; "" = don't inject (guarded by c.mu)
+	// present records the rich presentation event stream (tool dispatches with
+	// readOnly/profile/parentId, results with durationMs/truncated/attachments,
+	// notice/phase/compaction cards) so a frontend can rebuild the exact transcript
+	// a user saw after a tab switch/reload/crash. nil = sidecar disabled (the
+	// degraded provider.Message-only history is used). Never feeds the LLM.
+	present *present.Recorder
 
 	// jobs is the session-scoped background-job manager. The agent's background
 	// tools spawn into it; Compose drains its completion notes into the next turn;
@@ -276,7 +283,13 @@ type Options struct {
 	// WorkspaceRoot is the project root checkpoint restores are confined to ("" =
 	// no confinement). Frontends pass the cwd they launched the session in.
 	WorkspaceRoot string
-	AutoPlan      string
+	// Present enables the presentation sidecar: the controller records the rich
+	// view-only event stream (tool dispatches/results/progress, notice/phase/
+	// compaction cards) to <session>.present.jsonl so a frontend can rebuild the
+	// exact transcript after a reload. The sidecar never feeds the LLM. Off by
+	// default; boot turns it on for desktop sessions that render a rich UI.
+	Present   bool
+	AutoPlan  string
 	// GoalJudge enables the independent goal judge: when the model reports
 	// [goal:complete], a separate LLM call verifies completion based on the
 	// transcript. nil disables the judge (model self-report is trusted).
@@ -318,6 +331,27 @@ func New(opts Options) *Controller {
 	if pluginCtx == nil {
 		pluginCtx = context.Background()
 	}
+	// The presentation recorder captures the rich event stream so a frontend can
+	// rebuild the transcript a user saw after a reload. We wrap the sink: every
+	// event still flows to the original sink unchanged, and is also fed to the
+	// recorder (which drops non-presentable kinds like ApprovalRequest). When
+	// Present is off the recorder stays nil and the wrapper is skipped, so CLI /
+	// headless paths that don't render a rich UI pay no overhead.
+	var rec *present.Recorder
+	if opts.Present {
+		rec = present.NewRecorder()
+		orig := sink
+		sink = event.FuncSink(func(e event.Event) {
+			// On compaction we truncate the sidecar to the recent turn so it never
+			// shows content the model forgot (the "follow truncation" invariant).
+			// A summary=="" Done is an abort — don't truncate on it.
+			if e.Kind == event.CompactionDone && e.Compaction.Summary != "" {
+				rec.TruncateToTurn(1)
+			}
+			rec.Append(e)
+			orig.Emit(e)
+		})
+	}
 	c := &Controller{
 		runner:           opts.Runner,
 		executor:         opts.Executor,
@@ -351,6 +385,7 @@ func New(opts Options) *Controller {
 		approvals:        map[string]pendingApproval{},
 		asks:             map[string]pendingAsk{},
 		granted:          map[string]bool{},
+		present:          rec,
 	}
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
 	c.rebindCheckpoints(opts.SessionPath)
@@ -2348,6 +2383,18 @@ func (c *Controller) snapshot(markActivity bool) error {
 	}
 	if err := s.Save(path); err != nil {
 		return err
+	}
+	// Persist the presentation sidecar alongside session.jsonl: same rewrite
+	// strategy (full rewrite per save), so a compaction that shrank Messages is
+	// reflected here too. The rewriteVersion captured on the recorder lets a
+	// stale sidecar (saved before a compaction that hasn't flushed yet) be
+	// detected on load. Best-effort: a sidecar write failure is logged, not
+	// propagated — losing it only degrades reload fidelity, not the session.
+	if c.present != nil {
+		c.present.SetRewriteVersion(s.RewriteVersion())
+		if perr := c.present.Save(present.PresentPath(path)); perr != nil {
+			slog.Warn("controller: present sidecar save", "err", perr)
+		}
 	}
 	// Persist the current plan/tool-approval mode into the BranchMeta sidecar
 	// so a later Resume can restore it (see restoreModeFromMeta). Done after

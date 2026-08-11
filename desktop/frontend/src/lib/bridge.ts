@@ -35,6 +35,7 @@ import type {
   ModelInfo,
   ProfileView,
   NetworkView,
+  PresentPayload,
   ProjectNode,
   ProfileInfo,
   ProviderView,
@@ -166,6 +167,7 @@ export interface AppBindings {
   ClearSession(): Promise<void>;
   History(): Promise<HistoryMessage[]>;
   HistoryForTab(tabID: string): Promise<HistoryMessage[]>;
+  PresentForTab(tabID: string): Promise<PresentPayload>;
   Checkpoints(): Promise<CheckpointMeta[]>;
   CheckpointsForTab(tabID: string): Promise<CheckpointMeta[]>;
   Rewind(turn: number, scope: string): Promise<void>;
@@ -2017,6 +2019,9 @@ function makeMockApp(): AppBindings {
             return mockTopicHistory(tab.topicId);
           }
           return this.History();
+        },
+        async PresentForTab(_tabID?: string) {
+          return { records: [], rewriteVersion: 0 };
         },
     async ListSessions() {
       return sessions.map((s) => ({ ...s }));
