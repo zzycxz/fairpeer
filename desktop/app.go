@@ -2156,18 +2156,20 @@ func (a *App) SwitchWorkspace(dir string) (string, error) {
 // HistoryMessage is one prior turn, for the frontend to repopulate its transcript
 // after a reload.
 type HistoryMessage struct {
-	Role       string            `json:"role"`
-	Content    string            `json:"content"`
-	Reasoning  string            `json:"reasoning,omitempty"`
-	Level      string            `json:"level,omitempty"`
-	ToolCalls  []HistoryToolCall `json:"toolCalls,omitempty"`
-	ToolCallID string            `json:"toolCallId,omitempty"`
-	ToolName   string            `json:"toolName,omitempty"`
-	Pending    bool              `json:"pending,omitempty"`
-	Trigger    string            `json:"trigger,omitempty"`
-	Messages   int               `json:"messages,omitempty"`
-	Summary    string            `json:"summary,omitempty"`
-	Archive    string            `json:"archive,omitempty"`
+	Role        string            `json:"role"`
+	Content     string            `json:"content"`
+	Reasoning   string            `json:"reasoning,omitempty"`
+	Level       string            `json:"level,omitempty"`
+	ToolCalls   []HistoryToolCall `json:"toolCalls,omitempty"`
+	ToolCallID  string            `json:"toolCallId,omitempty"`
+	ToolName    string            `json:"toolName,omitempty"`
+	Pending     bool              `json:"pending,omitempty"`
+	Trigger     string            `json:"trigger,omitempty"`
+	Messages    int               `json:"messages,omitempty"`
+	Summary     string            `json:"summary,omitempty"`
+	Archive     string            `json:"archive,omitempty"`
+	Subagent    []HistoryMessage  `json:"subagent,omitempty"`    // nested transcript for a task/run_skill/... call (loaded from subagents/sa_xxx.jsonl)
+	SubagentRef string            `json:"subagentRef,omitempty"` // the sa_... ref identifying this nested transcript (for "Subagent reference: sa_...")
 }
 
 type HistoryToolCall struct {
@@ -2187,7 +2189,17 @@ func (a *App) HistoryForTab(tabID string) []HistoryMessage {
 		return []HistoryMessage{}
 	}
 	msgs := ctrl.History()
-	return historyMessages(msgs, sessionDisplayResolver(controllerSessionDir(ctrl), ctrl.SessionPath()))
+	resolve := sessionDisplayResolver(controllerSessionDir(ctrl), ctrl.SessionPath())
+	out := historyMessages(msgs, resolve)
+	// Attach nested sub-agent transcripts to the task/run_skill/... tool calls that
+	// spawned them. Sub-agent transcripts are persisted independently
+	// (subagents/sa_xxx.jsonl) and keyed by ParentToolCallID == the parent's
+	// ToolCall.ID, but were never loaded on history rebuild — so a tab switch or
+	// reload made every sub-agent's internal steps vanish, leaving only the final
+	// answer. This injects them back so the rebuilt transcript nests exactly like
+	// the live stream (which uses parentId-based nesting in Transcript.tsx).
+	attachSubagentTranscripts(out, controllerSessionDir(ctrl), ctrl.SessionPath(), resolve)
+	return out
 }
 
 func historyMessages(msgs []provider.Message, resolveUserContent func(string) string) []HistoryMessage {
@@ -2220,7 +2232,71 @@ func historyMessages(msgs []provider.Message, resolveUserContent func(string) st
 	return out
 }
 
-func previewSessionMessages(sessionDir, path string) ([]HistoryMessage, error) {
+// attachSubagentTranscripts loads persisted sub-agent transcripts (subagents/
+// sa_xxx.jsonl) for the parent session and inlines them under the tool call
+// that spawned them. It mutates hm in place: for each assistant tool call whose
+// name is a sub-agent meta-tool (task/run_skill/explore/...), if a matching
+// SubagentArtifact exists (Meta.ParentToolCallID == tc.ID), its transcript is
+// loaded via LoadSession, mapped with historyMessages, and attached as
+// hm.ToolCalls[i].Subagent (+ SubagentRef). The frontend then nests these
+// exactly as it does the live stream (parentId-based, ToolCard.tsx).
+//
+// Cost: one ListSubagentsByParent per call (O(n) over the subagents dir) + one
+// transcript load per matching tool call that is actually present in this page.
+// Sub-agents still running (no .jsonl yet) or crashed (only .meta.json) are
+// silently skipped — the parent card keeps its final-result text either way.
+func attachSubagentTranscripts(hm []HistoryMessage, sessionDir, sessionPath string, resolveUserContent func(string) string) {
+	subagentTools := agent.SubagentMetaTools()
+	isSubagent := make(map[string]bool, len(subagentTools))
+	for _, n := range subagentTools {
+		isSubagent[n] = true
+	}
+	// Quick reject: is there any sub-agent tool call at all?
+	hasSubagentCall := false
+	for i := range hm {
+		for _, tc := range hm[i].ToolCalls {
+			if isSubagent[tc.Name] {
+				hasSubagentCall = true
+				break
+			}
+		}
+		if hasSubagentCall {
+			break
+		}
+	}
+	if !hasSubagentCall {
+		return
+	}
+	parentSession := agent.BranchID(sessionPath)
+	artifacts, err := agent.ListSubagentsByParent(sessionDir, parentSession)
+	if err != nil || len(artifacts) == 0 {
+		return
+	}
+	// Index by ParentToolCallID for O(1) lookup per tool call.
+	byToolCall := make(map[string]agent.SubagentArtifact, len(artifacts))
+	for _, art := range artifacts {
+		if id := strings.TrimSpace(art.Meta.ParentToolCallID); id != "" {
+			byToolCall[id] = art
+		}
+	}
+	for i := range hm {
+		for j, tc := range hm[i].ToolCalls {
+			if !isSubagent[tc.Name] {
+				continue
+			}
+			art, ok := byToolCall[tc.ID]
+			if !ok {
+				continue
+			}
+			sess, lerr := agent.LoadSession(art.SessionPath)
+			if lerr != nil || sess == nil {
+				continue // running sub-agent (no .jsonl yet) or crash — skip
+			}
+			hm[i].ToolCalls[j].Subagent = historyMessages(sess.Snapshot(), resolveUserContent)
+			hm[i].ToolCalls[j].SubagentRef = art.Ref
+		}
+	}
+}
 	sessionPath, _, err := validateSessionPath(sessionDir, path)
 	if err != nil {
 		return nil, err

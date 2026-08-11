@@ -258,6 +258,8 @@ export interface HistoryToolCall {
   id: string;
   name: string;
   arguments: string;
+  subagent?: HistoryMessage[];
+  subagentRef?: string;
 }
 
 // CheckpointMeta is one rewind point (a user turn) for the rewind UI.

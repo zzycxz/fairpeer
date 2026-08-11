@@ -256,21 +256,45 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
         if (tc.id) consumedToolIDs.add(tc.id);
         const output = result?.content ?? "";
         const error = output.startsWith("[error") || output.startsWith("Error:") ? output : undefined;
+        const toolID = tc.id || `${idPrefix}tool${seq}`;
         items.push({
           kind: "tool",
-          id: tc.id || `${idPrefix}tool${seq}`,
+          id: toolID,
           name: tc.name,
           args: tc.arguments ?? "",
           readOnly: false,
           status: error ? "error" : "done",
           output,
           error,
-        isShell: isShellTool(tc.name, tc.id || ""),
-      });
-      seq++;
+          isShell: isShellTool(tc.name, toolID),
+        });
+        // Sub-agent transcript (task/run_skill/explore/...): the backend loads the
+        // persisted sub-agent session (subagents/sa_xxx.jsonl) and attaches it as
+        // tc.subagent. Recurse into it and emit each sub-step as a tool item with
+        // parentId == this call's id, so Transcript.tsx's subcallsByParent nests
+        // them exactly as the live stream does (which carries parentId on the
+        // forwarded ToolDispatch/ToolResult events — see task.go subSinkFor).
+        // Without this, a tab switch makes every sub-agent's internal steps
+        // vanish, leaving only the parent card's final-answer text.
+        if (tc.subagent && tc.subagent.length > 0) {
+          const { items: subItems, seq: subSeq } = historyMessagesToItems(tc.subagent, `${toolID}/`, seq + 1);
+          for (const si of subItems) {
+            // Only tool items carry parentId — assistant/phase/notice inside a
+            // sub-agent aren't nested-renderable by ToolCard, and the live stream
+            // (subSinkFor) only forwards ToolDispatch/ToolResult anyway.
+            if (si.kind === "tool") {
+              items.push({ ...si, parentId: toolID });
+            } else {
+              items.push(si);
+            }
+          }
+          seq = subSeq;
+        } else {
+          seq++;
+        }
+      }
+      continue;
     }
-    continue;
-  }
   if (m.role === "tool") {
     if (m.toolCallId && consumedToolIDs.has(m.toolCallId)) continue;
     // A persisted expert-team collaboration is stored as a tool message whose
@@ -469,6 +493,39 @@ function applyEvent(s: State, e: WireEvent): State {
   }
 }
 
+// mergeRunningIntoHistory re-attaches in-flight tools (still "running") to a
+// freshly rebuilt history. Without this, a history reload issued mid-run
+// (watchdog reconcile, tab switch) silently discards the live tool card.
+//
+// Anchor strategy: stream-time tool ids are `a${seq}`/`call_xxx` while history
+// rebuilds assistants as `h${seq}`, so we CANNOT match by parentId (the ids are
+// disjoint namespaces). Instead:
+//  1. If history already has the same tool id at a terminal state, the turn has
+//     finished and been persisted — keep the history (final) version.
+//  2. Otherwise the tool has not been persisted yet — insert it after the last
+//     assistant in history (its likely parent) or append at the end.
+export function mergeRunningIntoHistory(histItems: Item[], runningItems: Item[]): Item[] {
+  const terminal = new Set(
+    histItems
+      .filter((it) => it.kind === "tool")
+      .map((it) => it.id),
+  );
+  const survivors = runningItems.filter((it) => !terminal.has(it.id));
+  if (survivors.length === 0) return histItems;
+
+  // Find the index just past the last assistant item (the natural spot for the
+  // in-flight tools of the current, still-unpersisted turn).
+  let insertIdx = -1;
+  for (let i = histItems.length - 1; i >= 0; i--) {
+    if (histItems[i].kind === "assistant") { insertIdx = i + 1; break; }
+  }
+  if (insertIdx < 0) return [...histItems, ...survivors];
+
+  const before = histItems.slice(0, insertIdx);
+  const after = histItems.slice(insertIdx);
+  return [...before, ...survivors, ...after];
+}
+
 export function reducer(s: State, a: Action): State {
   switch (a.type) {
     case "user": {
@@ -522,8 +579,19 @@ export function reducer(s: State, a: Action): State {
     case "message_action_start": return { ...s, messageAction: a.action };
     case "message_action_done": return { ...s, messageAction: undefined };
     case "history": {
-      const { items, seq } = historyMessagesToItems(a.messages, "h", s.seq);
-      return { ...s, items, seq };
+      const { items: histItems, seq } = historyMessagesToItems(a.messages, "h", s.seq);
+      // Preserve in-flight tools across a history reload. historyMessagesToItems
+      // rebuilds items from persisted messages, which discards any tool that was
+      // still running when the reload was issued (e.g. 120s watchdog reconcile).
+      // Re-attach those running tools so a tab switch / background reload does
+      // not "swallow" live tool output.
+      const runningItems = s.items.filter(
+        (it) => it.kind === "tool" && it.status === "running",
+      );
+      if (runningItems.length === 0) {
+        return { ...s, items: histItems, seq };
+      }
+      return { ...s, items: mergeRunningIntoHistory(histItems, runningItems), seq };
     }
     case "local_notice": return { ...s, running: false, turnActive: false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
     case "clearApproval": return { ...s, approval: undefined };
@@ -752,24 +820,29 @@ export function useController(getProfile?: () => string) {
   }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
 
   // Stale-stream watchdog: if the frontend thinks the agent is running but
-  // no token events have arrived for 30 seconds, reconcile with the backend.
+  // no token events have arrived for 120 seconds, reconcile with the backend.
   // This catches the case where the Wails event channel silently drops the
-  // turn_done event after a model-service interruption (#3746).
+  // turn_done event after a model-service interruption (#3746). The threshold
+  // is deliberately generous: a reconcile triggers a full reset+history reload
+  // that discards in-flight tool output, so long compiles/tests/generations
+  // (which may legitimately pause text streaming) must not trip it. This only
+  // fires while the assistant is actively streaming text (s.live set); a pure
+  // tool run has no live stream and is out of scope here.
   useEffect(() => {
     if (!activeTabId) return;
     const s = statesRef.current.get(activeTabId);
     if (!s?.running || !s.live) return;
     const since = Date.now() - lastTokenAt.current;
-    if (since >= 30_000) {
+    if (since >= 120_000) {
       void reconcileTabRuntime(activeTabId);
       return;
     }
     const timer = window.setTimeout(() => {
       const cur = statesRef.current.get(activeTabId);
-      if (cur?.running && cur.live && Date.now() - lastTokenAt.current >= 30_000) {
+      if (cur?.running && cur.live && Date.now() - lastTokenAt.current >= 120_000) {
         void reconcileTabRuntime(activeTabId);
       }
-    }, 30_000 - since);
+    }, 120_000 - since);
     return () => window.clearTimeout(timer);
   }, [activeTabId, reconcileTabRuntime, activeState.running, activeState.live]);
 
