@@ -2379,6 +2379,16 @@ func (c *Controller) snapshot(markActivity bool) error {
 	if !s.HasContent() {
 		return nil
 	}
+	// Seed the presentation recorder from the on-disk sidecar the first time we
+	// snapshot. A freshly-built controller (after close+reopen, or app restart)
+	// starts with an empty recorder; without seeding, the first post-reopen Save
+	// would full-rewrite the sidecar with only the new turn's records, erasing
+	// every prior turn's rich fields and cards. SeedFromPath is idempotent.
+	if c.present != nil {
+		if err := c.present.SeedFromPath(present.PresentPath(path)); err != nil {
+			slog.Warn("controller: present sidecar seed", "err", err)
+		}
+	}
 	if !markActivity {
 		if _, err := agent.EnsureBranchMeta(path); err != nil {
 			return err

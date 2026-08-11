@@ -232,3 +232,77 @@ func TestPresentPath(t *testing.T) {
 		t.Error("PresentPath(\"\") should be empty")
 	}
 }
+
+func TestSeedFromPathPreventsOverwrite(t *testing.T) {
+	// Regression: a freshly-built controller (after close+reopen) has an empty
+	// recorder. Without seeding, its first Save would rewrite the sidecar with
+	// only the new turn — erasing prior turns. SeedFromPath must load the
+	// existing records so the next Save extends rather than overwrites.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.present.jsonl")
+
+	// Simulate a prior session's sidecar: two records, version 7.
+	prior := NewRecorder()
+	prior.Append(event.Event{Kind: event.TurnStarted})
+	prior.Append(event.Event{Kind: event.Notice, Text: "old turn"})
+	prior.SyncBeforeSave(7, event.Event{})
+	if err := prior.Save(path); err != nil {
+		t.Fatalf("prior Save: %v", err)
+	}
+
+	// New controller, new recorder — seed from the existing sidecar.
+	fresh := NewRecorder()
+	if err := fresh.SeedFromPath(path); err != nil {
+		t.Fatalf("SeedFromPath: %v", err)
+	}
+	loaded := fresh.Records()
+	if len(loaded) != 2 {
+		t.Fatalf("after seed len = %d, want 2 (prior records)", len(loaded))
+	}
+	// A new turn arrives.
+	fresh.Append(event.Event{Kind: event.TurnStarted})
+	fresh.Append(event.Event{Kind: event.Notice, Text: "new turn"})
+	// Save — must contain BOTH old and new, not just new.
+	fresh.SyncBeforeSave(7, event.Event{}) // same version — no reset
+	if err := fresh.Save(path); err != nil {
+		t.Fatalf("fresh Save: %v", err)
+	}
+	reloaded, _, err := Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	// 2 old + 2 new = 4. Without seed this would be just 2 (the overwrite bug).
+	if len(reloaded) != 4 {
+		t.Errorf("reloaded len = %d, want 4 (seeded + new turn)", len(reloaded))
+	}
+}
+
+func TestSeedFromPathMissingFileIsNoOp(t *testing.T) {
+	r := NewRecorder()
+	if err := r.SeedFromPath(filepath.Join(t.TempDir(), "nope.present.jsonl")); err != nil {
+		t.Errorf("SeedFromPath missing file: %v", err)
+	}
+	if len(r.Records()) != 0 {
+		t.Error("missing file should leave recorder empty")
+	}
+}
+
+func TestSeedFromPathIdempotent(t *testing.T) {
+	// Seeding twice must not double-load or clobber live state.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.present.jsonl")
+	prior := NewRecorder()
+	prior.Append(event.Event{Kind: event.Notice, Text: "old"})
+	prior.SyncBeforeSave(5, event.Event{})
+	_ = prior.Save(path)
+
+	r := NewRecorder()
+	_ = r.SeedFromPath(path)
+	r.Append(event.Event{Kind: event.Notice, Text: "live"}) // live state after first seed
+	_ = r.SeedFromPath(path)                                 // second seed must NOT clobber
+	recs := r.Records()
+	// old (seeded) + live, not old + old (re-seed) or just live.
+	if len(recs) != 2 {
+		t.Errorf("after double-seed len = %d, want 2", len(recs))
+	}
+}

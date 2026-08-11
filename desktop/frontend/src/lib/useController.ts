@@ -450,11 +450,10 @@ function presentRecordsToOverlays(
         break;
       }
       case "expert_collab": {
-        // collab is stored as raw JSON mirroring event.Collab; cast to WireCollab.
-        if (r.collab) {
-          cards.push({ kind: "expert_collab", id: `pec${seq}`, collab: r.collab as WireCollab });
-          seq++;
-        }
+        // expert_collab is ALREADY persisted as a tool message in session.jsonl
+        // (content = CollabRecord JSON with __type marker) and rebuilt by
+        // historyMessagesToItems → parseCollabRecord. Emitting it again from the
+        // sidecar would duplicate the card. Skip — history owns this card.
         break;
       }
       default:

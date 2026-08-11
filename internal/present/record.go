@@ -255,6 +255,7 @@ type Recorder struct {
 	records        []Record
 	turnStartIndex []int // indices into records where a TurnStarted marker sits
 	rewriteVersion int   // session.RewriteVersion() at last Save
+	seeded         bool  // SeedFromPath has run; guard against re-seeding
 
 	// pending stores the records accumulated since the last TruncateToTurn/Save;
 	// turnStartIndex lets TruncateToTurn find the boundary to keep from. The
@@ -263,6 +264,44 @@ type Recorder struct {
 
 // NewRecorder returns a ready recorder.
 func NewRecorder() *Recorder { return &Recorder{} }
+
+// SeedFromPath loads an existing sidecar into the recorder so a freshly-built
+// controller (e.g. after close+reopen) extends the persisted history instead of
+// overwriting it. It is meant to be called once, before the first Save, when the
+// session path is known. A missing file is a no-op (first-ever turn). If the
+// recorder already has records or a rewriteVersion, SeedFromPath is a no-op
+// (idempotent against accidental double-seed). Best-effort: a read failure is
+// logged via the returned error but does not block recording.
+//
+// Without this, the new controller's empty recorder would, on the first post-
+// reopen turn's Save, full-rewrite the sidecar with only that turn's records —
+// silently erasing every prior turn's rich fields and notice/phase/compaction
+// cards. The session.jsonl skeleton survives (so text/tools are fine), but the
+// presentation layer degrades to "no durations / no cards" for old turns.
+func (r *Recorder) SeedFromPath(path string) error {
+	if r == nil || path == "" {
+		return nil
+	}
+	r.mu.Lock()
+	if len(r.records) > 0 || r.rewriteVersion != 0 || r.seeded {
+		// Already has in-memory state (live session) or already seeded — don't
+		// clobber. The seeded flag guards the rare case where records is empty
+		// but rewriteVersion is also 0 because the seeded file had a zero header.
+		r.mu.Unlock()
+		return nil
+	}
+	r.seeded = true
+	r.mu.Unlock()
+	records, ver, err := Load(path)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.records = records
+	r.rewriteVersion = ver
+	r.mu.Unlock()
+	return nil
+}
 
 // Append records one event if it has presentation value. Safe to call on a nil
 // recorder (no-op). TurnStarted marks a new turn boundary the retention cap and
