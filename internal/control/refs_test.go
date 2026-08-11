@@ -132,29 +132,27 @@ func TestResolveRefsAttachmentKinds(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("ResolveRefs errors = %v", errs)
 	}
-	// When images are present, block is []ContentPart (multimodal); otherwise string.
-	switch b := block.(type) {
-	case string:
-		t.Fatalf("expected multimodal content (images present), got plain string: %s", b)
-	case []provider.ContentPart:
-		blockStr := provider.ContentString(block)
-		if !strings.Contains(blockStr, `<file path="`+ymlRef+`">`) || !strings.Contains(blockStr, "name: fairpeer") {
-			t.Fatalf("expected yml attachment to resolve as file content, got: %s", blockStr)
-		}
-		if !strings.Contains(blockStr, `<file path="`+zipRef+`">`) || !strings.Contains(blockStr, "[binary file "+zipRef) {
-			t.Fatalf("expected zip attachment to resolve as binary file note, got: %s", blockStr)
-		}
-		// Check that image part exists as image_url content part
-		hasImage := false
-		for _, p := range b {
-			if p.Type == "image_url" && p.ImageURL != nil && strings.HasPrefix(p.ImageURL.URL, "data:image/png;base64,") {
-				hasImage = true
-				break
-			}
-		}
-		if !hasImage {
-			t.Fatalf("expected png attachment to resolve as image_url content part, got parts: %+v", b)
-		}
+	// Single-track image path: images are never expanded into image_url parts.
+	// Every ref (file, binary, image) resolves into the text block, so block is
+	// always a plain string. The image becomes an <image path="..."> reference
+	// that tells the main model to call image_understand for its contents.
+	blockStr, ok := block.(string)
+	if !ok {
+		t.Fatalf("expected plain string block (single-track image path), got %T: %+v", block, block)
+	}
+	if !strings.Contains(blockStr, `<file path="`+ymlRef+`">`) || !strings.Contains(blockStr, "name: fairpeer") {
+		t.Fatalf("expected yml attachment to resolve as file content, got: %s", blockStr)
+	}
+	if !strings.Contains(blockStr, `<file path="`+zipRef+`">`) || !strings.Contains(blockStr, "[binary file "+zipRef) {
+		t.Fatalf("expected zip attachment to resolve as binary file note, got: %s", blockStr)
+	}
+	// Image: rendered as a text reference pointing the model at image_understand,
+	// NOT as an image_url content part.
+	if !strings.Contains(blockStr, `<image path="`+pngRef+`">`) {
+		t.Fatalf("expected png attachment to resolve as <image path=...> text reference, got: %s", blockStr)
+	}
+	if !strings.Contains(blockStr, "image_understand") {
+		t.Fatalf("expected image reference to mention image_understand tool, got: %s", blockStr)
 	}
 }
 

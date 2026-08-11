@@ -42,19 +42,20 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 	roots := realRoots(writeRoots)
 
 	overrides := map[string]tool.Tool{
-		"read_file":     readFile{workDir: w.Dir},
-		"write_file":    writeFile{workDir: w.Dir, roots: roots},
-		"edit_file":     editFile{workDir: w.Dir, roots: roots},
-		"multi_edit":    multiEdit{workDir: w.Dir, roots: roots},
-		"notebook_edit": notebookEdit{workDir: w.Dir, roots: roots},
-		"delete_range":  deleteRange{workDir: w.Dir, roots: roots},
-		"delete_symbol": deleteSymbol{workDir: w.Dir, roots: roots},
-		"bash":          bash{workDir: w.Dir, sb: w.Bash, timeout: w.BashTimeout},
-		"ls":            listDir{workDir: w.Dir},
-		"glob":          globTool{workDir: w.Dir},
-		"grep":          grepTool{workDir: w.Dir, rg: w.Search.RgPath},
-		"code_index":    codeIndex{workDir: w.Dir},
-		"web_fetch":     webFetch{proxySpec: w.ProxySpec},
+		"read_file":        readFile{workDir: w.Dir},
+		"write_file":       writeFile{workDir: w.Dir, roots: roots},
+		"edit_file":        editFile{workDir: w.Dir, roots: roots},
+		"multi_edit":       multiEdit{workDir: w.Dir, roots: roots},
+		"notebook_edit":    notebookEdit{workDir: w.Dir, roots: roots},
+		"delete_range":     deleteRange{workDir: w.Dir, roots: roots},
+		"delete_symbol":    deleteSymbol{workDir: w.Dir, roots: roots},
+		"bash":             bash{workDir: w.Dir, sb: w.Bash, timeout: w.BashTimeout},
+		"ls":               listDir{workDir: w.Dir},
+		"glob":             globTool{workDir: w.Dir},
+		"grep":             grepTool{workDir: w.Dir, rg: w.Search.RgPath},
+		"code_index":       codeIndex{workDir: w.Dir},
+		"web_fetch":        webFetch{proxySpec: w.ProxySpec},
+		"image_understand": imageUnderstand{workDir: w.Dir},
 	}
 	all := tool.Builtins()
 	if len(enabled) == 0 {

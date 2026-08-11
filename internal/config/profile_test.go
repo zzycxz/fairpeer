@@ -130,3 +130,27 @@ func TestCoworkPromptAddonDropsDisabledRows(t *testing.T) {
 		t.Fatal("SkillNameKey normalization failed: ' ppt-auto ' did not match 'ppt-auto'")
 	}
 }
+
+// TestImageUnderstandNeverHiddenByBuiltinProfiles guards the single-track image
+// path: image_understand must stay visible to the main model in BOTH builtin
+// profiles. The feature relies on a semantic loop — ResolveRefs emits a text
+// <image path="..."> reference that tells the model to "call image_understand",
+// and that only works if the tool's schema is in Schemas(). If a profile lists
+// image_understand in HiddenTools, the reference becomes a dead end and user
+// images go unhandled. ZCode's analyze_image follows the same "always visible"
+// policy; this test keeps fairpeer aligned with it across profile changes.
+func TestImageUnderstandNeverHiddenByBuiltinProfiles(t *testing.T) {
+	cfg := Default()
+	for _, name := range []string{ProfileDev, ProfileCowork} {
+		prof, err := cfg.ResolveProfile(name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		for _, hidden := range prof.HiddenTools {
+			if hidden == "image_understand" {
+				t.Errorf("profile %q hides image_understand — user images would become dead references; "+
+					"remove it from HiddenTools or make the image path dual-track", name)
+			}
+		}
+	}
+}

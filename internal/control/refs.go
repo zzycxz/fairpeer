@@ -314,18 +314,22 @@ func (c *Controller) ResolveRefs(ctx context.Context, line string) (block any, e
 			}
 			appendRefBlock(&b, tag, `path="`+r.path+`"`, text)
 		case refImage:
-			dataURL, err := ImageDataURL(r.path)
-			if err != nil {
-				errs = append(errs, "@"+r.raw+" — "+err.Error())
-				continue
-			}
-			imageParts = append(imageParts, provider.ContentPart{
-				Type:     "image_url",
-				ImageURL: &provider.ImageURL{URL: dataURL},
-			})
+			// Single-track image path: never expand an image into an image_url
+			// part. The main model (vision-capable or not) instead sees a text
+			// <image path="..."> reference and calls the image_understand tool
+			// with a task-specific prompt to get the image's content as text.
+			// This keeps image_url parts out of the main-model request entirely,
+			// so no model can 400 on an image it can't handle. Mirrors ZCode's
+			// "[Image: source: path]" projection.
+			appendRefBlock(&b, "image", `path="`+r.path+`"`,
+				"用户上传的图片。调用 image_understand 工具并传入此 path 可获取图片内容描述。")
 		}
 	}
-	// If we have image parts, return multimodal content
+	// Single-track note: imageParts is always empty now (the refImage case above
+	// no longer appends to it), so this multimodal branch is dead code. Kept as a
+	// hook in case a future dual-track mode restores inline image_url parts for
+	// vision models; remove this block only if that option is permanently off
+	// the table.
 	if len(imageParts) > 0 {
 		textBlock := b.String()
 		parts := []provider.ContentPart{{Type: "text", Text: textBlock}}
