@@ -186,8 +186,8 @@ Rules:
 // both dev and cowork when enabled.
 // builtinComputerAutoBody is the coWork desktop-automation subagent. The desktop
 // has no DOM or accessibility tree like a browser does — perception is via
-// screenshot + image_understand (VLM), with get_ui_tree giving precise window
-// coordinates so the VLM doesn't have to eyeball pixels. screen_* tools only
+// screen_perceive (UIA + VLM fusion) returns element coordinates; get_ui_tree gives
+// the window structure. screen_* tools only
 // exist under cowork on Windows; elsewhere this skill is uncallable.
 const builtinComputerAutoBody = `You are running as a desktop-automation subagent. Drive the user's actual desktop — native apps (WPS, Excel, system dialogs), desktop UI — via UIA+VLM perception and human-like input.
 
@@ -198,14 +198,15 @@ The core loop — repeat until done:
 2. Check the VLM choice from screen_perceive:
    - If it returned coordinates (x, y) with confidence ≥70: screen_click(x, y)
    - If confidence <70 or VLM was unsure: look at the labeled screenshot + element list yourself, decide which element to click, use its coordinates
-   - If VLM said [NO_TARGET]: re-perceive with a more specific task_hint, or screenshot + image_understand for visual inspection
+   - If VLM said [NO_TARGET]: re-perceive with a more specific task_hint, or use get_ui_tree to inspect the window structure and find the target by ref/coords.
 3. For text input: screen_click the target field first (to focus), then screen_type the text
 4. Verify: call screen_perceive again to confirm the action took effect (the UI state should have changed). Desktop UI can lag — if nothing changed, wait and re-check.
 5. Stop as soon as the task is done. Return the result.
 
 Perception strategy:
 - screen_perceive is PRIMARY — it gives you precise coordinates via UIA+VLM fusion.
-- screenshot + image_understand is FALLBACK — use when screen_perceive fails or you need a general visual description.
+- screen_perceive is your ONLY visual perception — it gives coordinates via UIA+VLM fusion.
+- If screen_perceive fails or returns [NO_TARGET]: retry it with a more specific task_hint, or fall back to get_ui_tree for the window structure. Both give you coordinates/refs you can act on.
 - get_ui_tree is for quick window-level diagnostics (which windows are open, their rects).
 
 Robustness rules:
@@ -449,7 +450,7 @@ func builtinSkills() []Skill {
 			Scope:        ScopeBuiltin,
 			Path:         "(builtin)",
 			RunAs:        RunSubagent,
-			AllowedTools: []string{"screen_perceive", "screenshot", "screen_click", "screen_type", "screen_scroll", "screen_key", "get_ui_tree", "image_understand", "window_focus", "window_maximize", "window_restore", "window_move", "window_close", "read_file", "write_file"},
+			AllowedTools: []string{"screen_perceive", "screenshot", "screen_click", "screen_type", "screen_scroll", "screen_key", "get_ui_tree", "window_focus", "window_maximize", "window_restore", "window_move", "window_close", "read_file", "write_file"},
 		},
 		{
 			Name:         "email-auto",
