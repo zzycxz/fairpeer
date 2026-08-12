@@ -17,31 +17,50 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/mobilebridge"
 )
 
-// debugExec 打印收到的命令 —— 看到 [CMD] 就证明 linkpeer 的 AEAD 加密帧
-// 已被 S 解密并路由到 executor（整条加密链路通）。
-type debugExec struct{}
+// replyExec 模拟 fairpeer 真实对话：submit 后回 reasoning + text + 工具卡 + turn_done，
+// 让 linkpeer 对话页有真实的双向交互（不只是 [CMD] 打印）。
+type replyExec struct{ conn atomic.Pointer[mobilebridge.Conn] }
 
-func (debugExec) Submit(tab, input, _ string) error {
+func (e *replyExec) Submit(tab, input, _ string) error {
 	fmt.Printf("[CMD] ✓ submit  tab=%s input=%q\n", tab, input)
+	go e.reply(input)
 	return nil
 }
-func (debugExec) Cancel(tab string) error      { fmt.Printf("[CMD] cancel  tab=%s\n", tab); return nil }
-func (debugExec) Steer(tab, text string) error { fmt.Printf("[CMD] steer   tab=%s\n", tab); return nil }
-func (debugExec) Pause(string) error           { return nil }
-func (debugExec) Resume(string) error          { return nil }
-func (debugExec) Approve(string, string, bool, bool, bool) error {
-	return nil
+
+// reply 模拟 fairpeer 的对话回复流（reasoning → text → tool dispatch → tool result → turn_done）。
+func (e *replyExec) reply(input string) {
+	c := e.conn.Load()
+	if c == nil {
+		return
+	}
+	send := func(evt string, d time.Duration) {
+		time.Sleep(d)
+		_ = c.SendEvent([]byte(evt))
+	}
+	send(`{"kind":"reasoning","reasoning":"用户说：「`+input+`」。我来分析一下需求……"}`, 300*time.Millisecond)
+	send(`{"kind":"text","text":"收到：**`+input+`** —— 这是 fairpeer 经 P2P 加密通道的回复。我能读写代码、执行工具、生成文档。这条回复模拟了真实对话流（reasoning 思考 → text → 工具卡 → turn_done）。"}`, 500*time.Millisecond)
+	send(`{"kind":"tool_dispatch","tool":{"id":"t1","name":"read","args":"main.go","readOnly":true}}`, 300*time.Millisecond)
+	send(`{"kind":"tool_result","tool":{"id":"t1","name":"read","output":"package main\n\nfunc main() {\n\tprintln(\"hello\")\n}"}}`, 400*time.Millisecond)
+	send(`{"kind":"turn_done","err":""}`, 200*time.Millisecond)
+	fmt.Println("[EVT] ✓ 模拟对话回复已发（reasoning + text + tool×2 + turn_done）")
 }
-func (debugExec) Answer(string, string, []string) error      { return nil }
-func (debugExec) SetPlan(string, bool) error                 { return nil }
-func (debugExec) SetModel(string, string) error              { return nil }
-func (debugExec) ListSessions() ([]mobilebridge.SessionInfo, error) { return nil, nil }
+
+func (e *replyExec) Cancel(tab string) error      { fmt.Printf("[CMD] cancel  tab=%s\n", tab); return nil }
+func (e *replyExec) Steer(tab, text string) error { fmt.Printf("[CMD] steer   tab=%s\n", tab); return nil }
+func (e *replyExec) Pause(string) error           { return nil }
+func (e *replyExec) Resume(string) error          { return nil }
+func (e *replyExec) Approve(string, string, bool, bool, bool) error { return nil }
+func (e *replyExec) Answer(string, string, []string) error          { return nil }
+func (e *replyExec) SetPlan(string, bool) error                     { return nil }
+func (e *replyExec) SetModel(string, string) error                  { return nil }
+func (e *replyExec) ListSessions() ([]mobilebridge.SessionInfo, error) { return nil, nil }
 
 func main() {
 	signalURL := flag.String("signal", "http://192.168.1.48:8080", "K signal URL (手机可达的局域网地址)")
@@ -59,18 +78,20 @@ func main() {
 	cfg.ReadOnlyDefault = false // 联调：允许 submit，方便验证上行
 
 	audit := mobilebridge.NewAudit("info")
-	bridge := mobilebridge.NewBridge(cfg, priv, pub, store, debugExec{}, audit)
+	exec := &replyExec{}
+	bridge := mobilebridge.NewBridge(cfg, priv, pub, store, exec, audit)
 
-	// onReady：握手完成后发测试 wireEvent（模拟 fairpeer 下行，验证 linkpeer 能收）
+	// onReady：存 conn（供 replyExec 模拟回复）+ 发欢迎 wireEvent
 	bridge.SetOnReady(func(c *mobilebridge.Conn) {
-		fmt.Println("[EVT] conn ready，0.5s 后发测试 wireEvent")
+		exec.conn.Store(c)
+		fmt.Println("[EVT] conn ready，0.5s 后发欢迎 wireEvent")
 		go func() {
 			time.Sleep(500 * time.Millisecond)
-			evt := `{"kind":"text","text":"👋 我是 fairpeer，这条消息经 P2P 加密通道到达你（M2 下行 wireEvent 验证）"}`
+			evt := `{"kind":"text","text":"👋 我是 fairpeer，P2P 加密通道已建立。发消息试试——我会回复 reasoning + text + 工具卡（模拟真实对话流）。"}`
 			if err := c.SendEvent([]byte(evt)); err != nil {
 				fmt.Printf("[EVT] send err: %v\n", err)
 			} else {
-				fmt.Println("[EVT] ✓ wireEvent 已发")
+				fmt.Println("[EVT] ✓ 欢迎 wireEvent 已发")
 			}
 		}()
 	})
@@ -97,7 +118,7 @@ func main() {
 					}
 				}
 			}
-			time.Sleep(400 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond) // 联调：快轮询，确保 confirm 早于 C 连接
 		}
 	}()
 
