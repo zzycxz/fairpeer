@@ -217,7 +217,6 @@ export interface AppBindings {
   SkillMarketInstall(installRef: string, name: string, scope: string, apply: boolean): Promise<string>;
   SkillMarketUninstall(name: string, scope: string): Promise<string>;
   SkillMarketInstalledNames(): Promise<Record<string, string>>;
-  GenerateTaskSubagents(task: string): Promise<Record<string, string>>;
   DreamStatus(): Promise<DreamStatusView>;
   SetDreamEnabled(enabled: boolean): Promise<void>;
   SetDreamIntervals(dreamDays: number, distillDays: number): Promise<void>;
@@ -2355,10 +2354,6 @@ function makeMockApp(): AppBindings {
     async SkillMarketInstalledNames(): Promise<Record<string, string>> {
       await delay(100);
       return {};
-    },
-    async GenerateTaskSubagents(_task: string): Promise<Record<string, string>> {
-      await delay(100);
-      return { "agent-1": "subtask 1" };
     },
     async DreamStatus(): Promise<DreamStatusView> {
       return {
