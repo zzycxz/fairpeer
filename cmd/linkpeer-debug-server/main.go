@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -30,12 +31,12 @@ type replyExec struct{ conn atomic.Pointer[mobilebridge.Conn] }
 
 func (e *replyExec) Submit(tab, input, _ string) error {
 	fmt.Printf("[CMD] ✓ submit  tab=%s input=%q\n", tab, input)
-	go e.reply(input)
+	go e.reply(tab, input)
 	return nil
 }
 
-// reply 模拟 fairpeer 的对话回复流（reasoning → text → tool dispatch → tool result → turn_done）。
-func (e *replyExec) reply(input string) {
+// reply 模拟 fairpeer 的回复：office tab → 办公结果；其他 → 对话流。
+func (e *replyExec) reply(tab, input string) {
 	c := e.conn.Load()
 	if c == nil {
 		return
@@ -44,6 +45,17 @@ func (e *replyExec) reply(input string) {
 		time.Sleep(d)
 		_ = c.SendEvent([]byte(evt))
 	}
+	if strings.HasPrefix(tab, "office") {
+		// 办公任务：模拟生成文件
+		send(`{"kind":"reasoning","reasoning":"办公任务：「`+input+`」。我来生成对应文档……"}`, 300*time.Millisecond)
+		tpl := strings.TrimSuffix(strings.TrimPrefix(input, "办公：生成「"), "」")
+		fname := tpl + "-" + time.Now().Format("0102") + ".docx"
+		send(`{"kind":"text","text":"📁 办公任务完成\n\n生成文件：**`+fname+`**\n\n（模拟）真实环境下 fairpeer 会调 office 工具读模板、填数据、生成文件，保存在桌面端下载目录。"}`, 600*time.Millisecond)
+		send(`{"kind":"turn_done","err":""}`, 200*time.Millisecond)
+		fmt.Println("[EVT] ✓ 模拟办公结果已发：" + fname)
+		return
+	}
+	// 普通对话：reasoning → text → tool dispatch → tool result → turn_done
 	send(`{"kind":"reasoning","reasoning":"用户说：「`+input+`」。我来分析一下需求……"}`, 300*time.Millisecond)
 	send(`{"kind":"text","text":"收到：**`+input+`** —— 这是 fairpeer 经 P2P 加密通道的回复。我能读写代码、执行工具、生成文档。这条回复模拟了真实对话流（reasoning 思考 → text → 工具卡 → turn_done）。"}`, 500*time.Millisecond)
 	send(`{"kind":"tool_dispatch","tool":{"id":"t1","name":"read","args":"main.go","readOnly":true}}`, 300*time.Millisecond)
