@@ -160,8 +160,10 @@ type SidebarImTopicSource = {
 };
 type SidebarImConnectionDetailProps = {
   connection: SidebarImConnection;
+  sessions: SessionMeta[];
   onClose: () => void;
   onOpenSession: () => void;
+  onOpenSessionPath: (path: string) => void;
   onOpenSettings: () => void;
 };
 
@@ -324,7 +326,7 @@ function sidebarImSessionLabel(connection: SidebarImConnection, translate: Trans
   return target.value;
 }
 
-function SidebarImConnectionDetail({ connection, onClose, onOpenSession, onOpenSettings }: SidebarImConnectionDetailProps) {
+function SidebarImConnectionDetail({ connection, sessions, onClose, onOpenSession, onOpenSessionPath, onOpenSettings }: SidebarImConnectionDetailProps) {
   const translate = useT();
   const target = mappedSessionTarget(connection.sessionId);
   return (
@@ -372,6 +374,32 @@ function SidebarImConnectionDetail({ connection, onClose, onOpenSession, onOpenS
             <strong>{sidebarImScopeLabel(connection, translate)}</strong>
           </div>
         </div>
+      </section>
+
+      <section className="bot-detail__panel" aria-label={translate("botDetail.sessions")}>
+        <div className="bot-detail__section-head">
+          <span>{translate("botDetail.sessions")}</span>
+        </div>
+        {sessions.length === 0 ? (
+          <div className="bot-detail__empty">{translate("botDetail.noSessions")}</div>
+        ) : (
+          <div className="bot-detail__sessions">
+            {sessions.map((s) => (
+              <div key={s.path} className="bot-detail__session-row">
+                <div className="bot-detail__session-main">
+                  <div className="bot-detail__session-time">
+                    {new Date(s.lastActivityAt).toLocaleString()}
+                    <span className="bot-detail__session-turns"> · {s.turns} {translate("botDetail.turns")}</span>
+                  </div>
+                  <div className="bot-detail__session-preview">{(s.title || s.preview || "").trim() || translate("botDetail.noPreview")}</div>
+                </div>
+                <button type="button" className="btn btn--secondary btn--small" onClick={() => onOpenSessionPath(s.path)}>
+                  {translate("botDetail.continue")}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );
@@ -676,6 +704,7 @@ export default function App() {
   const [sidebarImConnections, setSidebarImConnections] = useState<SidebarImConnection[]>([]);
   const [imTopicSources, setImTopicSources] = useState<Record<string, SidebarImTopicSource>>({});
   const [sidebarImDetailConnectionId, setSidebarImDetailConnectionId] = useState("");
+  const [sidebarImSessions, setSidebarImSessions] = useState<SessionMeta[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsed);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [sidebarResizing, setSidebarResizing] = useState(false);
@@ -888,7 +917,7 @@ export default function App() {
       });
     }
     // Frontend DOM event (e.g. dock → settings → bots). detail carries the tab.
-    const validTabs = ["general", "models", "bots", "cowork", "mcp", "skills", "memory", "permissions", "sandbox", "network", "hooks", "appearance", "updates"];
+    const validTabs = ["general", "models", "bots", "cowork", "mcp", "skills", "memory", "permissions", "sandbox", "network", "hooks", "appearance", "updates", "mobile"];
     const handler = (e: Event) => {
       closeTransientOverlays();
       const tab = (e as CustomEvent<string>).detail;
@@ -983,6 +1012,22 @@ export default function App() {
     () => sidebarImConnections.find((connection) => connection.id === sidebarImDetailConnectionId) ?? null,
     [sidebarImConnections, sidebarImDetailConnectionId],
   );
+
+  // Load this contact's bot sessions (transcripts whose .meta was stamped with
+  // platform/remoteID/mode="bot" by OnTurnFinished) so the sidebar detail can
+  // list every conversation the contact had with the bot, newest first.
+  useEffect(() => {
+    const conn = sidebarImDetailConnection;
+    if (!conn) { setSidebarImSessions([]); return; }
+    let cancelled = false;
+    app.ListSessions().then((all) => {
+      if (cancelled) return;
+      setSidebarImSessions(
+        all.filter((s) => s.mode === "bot" && s.platform === conn.platform && s.remoteId === conn.remoteId),
+      );
+    }).catch(() => { if (!cancelled) setSidebarImSessions([]); });
+    return () => { cancelled = true; };
+  }, [sidebarImDetailConnection]);
   useEffect(() => {
     let cancelled = false;
     if (!activeTab?.topicId) {
@@ -2151,6 +2196,22 @@ export default function App() {
     }
   }, [ensureBlankTab, openGlobalTab, openProjectTab, refreshTabMetas, resumeSession, showToast, t]);
 
+  const openSidebarImSessionPath = useCallback(async (path: string) => {
+    const conn = sidebarImDetailConnection;
+    if (!conn) return;
+    setSidebarImDetailConnectionId("");
+    try {
+      const tab = await ensureBlankTab(conn.scope, conn.scope === "project" ? conn.workspaceRoot : "", profileRef.current);
+      await resumeSession(path, tab.id);
+      await refreshTabMetas();
+      setProjectRevision((value) => value + 1);
+      setTabRevealSignal((signal) => signal + 1);
+    } catch (err) {
+      console.warn("bot sidebar open path failed", err);
+      showToast(t("sidebar.imOpenFailed", { name: conn.title }));
+    }
+  }, [sidebarImDetailConnection, ensureBlankTab, refreshTabMetas, resumeSession, showToast, t]);
+
   const showSidebarImDetail = useCallback(() => {
     closeTransientOverlays();
     if (sidebarImConnections.length === 0) {
@@ -2590,9 +2651,11 @@ export default function App() {
       {sidebarImDetailConnection ? (
         <SidebarImConnectionDetail
           connection={sidebarImDetailConnection}
+          sessions={sidebarImSessions}
           onClose={() => setSidebarImDetailConnectionId("")}
           onOpenSettings={openBotSettings}
           onOpenSession={() => void openSidebarImConnectionSession(sidebarImDetailConnection)}
+          onOpenSessionPath={(path) => void openSidebarImSessionPath(path)}
         />
       ) : state.meta?.ready === false && !state.meta?.startupErr ? (
         <div className="loading-screen">

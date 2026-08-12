@@ -1950,6 +1950,11 @@ a[href] {
   color: var(--err);
   border-bottom: 1px solid var(--border-soft);
 }
+.banner--success {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-soft));
+  color: var(--accent);
+  border-bottom: 1px solid var(--border-soft);
+}
 .banner--update {
   display: flex;
   align-items: center;
@@ -4092,6 +4097,46 @@ a[href] {
   color: var(--control-disabled-fg);
   cursor: default;
   transform: none;
+}
+/* Voice (mic) button: deliberately quieter than send — it's a secondary input
+ * affordance, not the primary action. transparent bg + currentColor keeps it
+ * legible across light/dark themes without a per-theme override. */
+.composer__btn--voice {
+  background: transparent;
+  color: var(--text-3, currentColor);
+  opacity: 0.72;
+}
+.composer__btn--voice:not(:disabled):hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  opacity: 1;
+}
+.composer__btn--voice:not(:disabled):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.composer__btn--voice:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* Recording state: solid red + breathing pulse so the user sees it's live.
+ * The pulse uses a fading box-shadow ring (no layout shift, GPU-friendly). */
+.composer__btn--voice-recording,
+.composer__btn--voice-recording:hover {
+  background: #e5484d;
+  color: #fff;
+  opacity: 1;
+  animation: composer-voice-pulse 1.4s ease-in-out infinite;
+}
+@keyframes composer-voice-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.55); }
+  50%      { box-shadow: 0 0 0 7px rgba(229, 72, 77, 0); }
+}
+/* Spinner for the transcribing state (Loader2 icon rotation). */
+.composer__spin {
+  animation: composer-spin 0.9s linear infinite;
+}
+@keyframes composer-spin {
+  to { transform: rotate(360deg); }
 }
 .composer-meta {
   display: flex;
@@ -9010,6 +9055,13 @@ a[href] {
 .cap-skill-badge--off {
   color: var(--fg-faint);
   background: color-mix(in srgb, var(--bg-elev) 80%, transparent);
+}
+.cap-skill-card__name {
+  font-weight: 650;
+  font-size: 12.5px;
+}
+.cap-market .cap-skill-card__desc {
+  margin-left: 0;
 }
 .cap-skill-card__desc {
   margin: 6px 0 0 33px;
@@ -25324,3 +25376,41 @@ a[href] {
   margin-top: 8px;
   width: 100%;
 }
+
+/* ── Frontend UX Enhancements (V2) ─────────────────────────────── */
+/* Button active press feedback */
+.button:active, .btn:active, .list-row:active {
+  transform: scale(0.97);
+  transition: transform 0.1s ease;
+}
+
+/* ToolCard CSS Grid transition */
+.tool__body-wrapper {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-base) var(--ease-out), opacity var(--dur-base) var(--ease-out);
+  opacity: 0;
+}
+.tool__body-wrapper.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.tool__body-wrapper > .tool__body {
+  overflow: hidden;
+}
+
+/* === linkpeer 移动端配对面板（§12.5 + plan §3.1）=== */
+.mobile-pair-panel { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; align-items: start; }
+.mobile-pair-panel__qr { display: flex; flex-direction: column; align-items: center; gap: 10px; min-height: 220px; justify-content: center; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--bg-elev) 92%, var(--border)); }
+.mobile-pair-panel__qr-code { display: block; }
+.mobile-pair-panel__code { font-size: 13px; color: var(--fg-dim); }
+.mobile-pair-panel__body { display: flex; flex-direction: column; gap: 12px; }
+.mobile-pair-panel__title { font-size: 16px; font-weight: 600; color: var(--fg); }
+.mobile-pair-panel__desc { font-size: 13px; line-height: 1.6; color: var(--fg-dim); margin: 0; }
+.mobile-pair-panel__pending { padding: 12px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: 8px; background: var(--accent-soft); }
+.mobile-pair-panel__pending-title { font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 8px; }
+.mobile-pair-panel__device { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; font-size: 13px; color: var(--fg); border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
+.mobile-pair-panel__device:last-child { border-bottom: none; }
+.mobile-pair-panel__device-actions { display: flex; gap: 6px; }
+.mobile-pair-panel__hint { font-size: 12px; color: var(--fg-faint); padding: 8px 10px; border-radius: 6px; background: color-mix(in srgb, var(--bg-elev-2) 80%, var(--border)); }
+@media (max-width: 640px) { .mobile-pair-panel { grid-template-columns: 1fr; } }

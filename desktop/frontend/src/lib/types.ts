@@ -80,6 +80,7 @@ export interface WireUsage {
   totalTokens: number;
   cacheHitTokens: number;
   cacheMissTokens: number;
+  cacheWriteTokens?: number; // cache-creation writes (Anthropic); billed above input
   reasoningTokens?: number;
   // Session-cumulative cache tokens — the status bar shows the aggregate
   // hit-rate (Σhit/Σ(hit+miss)), steadier than the single-turn cacheHitTokens.
@@ -212,6 +213,7 @@ export interface ContextPanelInfo {
   reasoningTokens: number;
   cacheHitTokens: number;
   cacheMissTokens: number;
+  cacheWriteTokens?: number;
   requestCount?: number;
   elapsedMs?: number;
   mock?: boolean;
@@ -361,6 +363,12 @@ export interface SessionMeta {
   profile?: string;
   isExpert?: boolean; // true = expert-team collaboration session (scope="expert")
   expertTeamId?: string; // identifies the expert team for expert sessions
+  // IM bot session origin (empty for desktop-tab sessions). The sidebar IM-
+  // contact detail groups bot sessions by platform + remoteId.
+  platform?: string;
+  remoteId?: string;
+  chatType?: string;
+  mode?: string; // "bot" for IM bot sessions
 }
 
 // SessionReference is a session selected via @ past:chats for context injection.
@@ -609,6 +617,31 @@ export interface MCPServerInput {
   args: string[];
   url: string;
   env?: Record<string, string> | null;
+}
+
+// MCPRegistryEntry mirrors desktop.MCPRegistryEntryView — one official MCP
+// Registry server, enough to render a card and assemble an MCPServerInput.
+export interface MCPRegistryEntry {
+  name: string;
+  suggestedName: string;
+  title?: string;
+  description?: string;
+  version?: string;
+  repositoryUrl?: string;
+  installable: boolean;
+  unavailableReason?: string;
+  transport?: string;
+  command?: string;
+  args: string[];
+  url?: string;
+}
+
+// MCPRegistryView mirrors desktop.MCPRegistryView. cached/warning surface a
+// registry outage so the UI can keep browsing from the on-disk cache.
+export interface MCPRegistryView {
+  servers: MCPRegistryEntry[];
+  cached: boolean;
+  warning?: string;
 }
 
 export interface ModelInfo {
@@ -1090,7 +1123,7 @@ export interface DreamStatusView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "bots" | "cowork" | "preference" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "network" | "hooks" | "appearance" | "updates";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "cowork" | "preference" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "network" | "hooks" | "appearance" | "updates" | "mobile";
 
 // Settings panel payloads (desktop/settings_app.go).
 export interface ProviderView {
@@ -1332,6 +1365,8 @@ export interface CoWorkSettingsView {
   screenshotHotkey: string;
   screenshotVlmModel: string;
   screenshotPrompt: string;
+  /** STT model ref (provider/model) for voice input; "" = disabled. */
+  voiceModel: string;
   // Emergency-stop hotkey for desktop automation (always on by default; set
   // "off" to disable). Cancels the in-flight turn globally.
   estopHotkey: string;
@@ -1385,6 +1420,7 @@ export interface WebSearchView {
   braveKeySet: boolean;
   exaKeySet: boolean;
   linkupKeySet: boolean;
+  anysearchKeySet: boolean;
 }
 
 export interface BotInstallStartResult {

@@ -153,12 +153,18 @@ func (a *App) ensureMobileBridge(ctx context.Context) {
 
 // --- Wails-bound methods (frontend calls these) ---
 
-func (a *App) MobileBridgeStartPairing() (code, qrURL string, err error) {
+// MobileBridgeStartPairing 返回 JSON {code, qrURL}（避免 Wails 多返回值折叠成单 string 的歧义）。
+func (a *App) MobileBridgeStartPairing() (string, error) {
 	mb := a.mobilebridge.Load()
 	if mb == nil {
-		return "", "", fmt.Errorf("mobile bridge not initialized")
+		return "", fmt.Errorf("mobile bridge not initialized")
 	}
-	return mb.StartPairing()
+	code, qrURL, err := mb.StartPairing()
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.Marshal(map[string]string{"code": code, "qrURL": qrURL})
+	return string(b), nil
 }
 
 // MobileBridgeStatus reports state for the settings panel.

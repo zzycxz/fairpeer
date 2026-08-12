@@ -29,7 +29,7 @@ import { MCPServersSettingsPage, SkillsSettingsPage } from "./CapabilitiesPanel"
 import { MemorySettingsPage } from "./MemoryPanel";
 import { ModalCloseButton } from "./ModalCloseButton";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "cowork", "mcp", "skills", "memory", "permissions", "sandbox", "network", "hooks", "appearance", "updates"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "cowork", "mcp", "skills", "memory", "permissions", "sandbox", "network", "hooks", "appearance", "updates", "mobile"];
 
 // SettingsPanel is the desktop settings centre — a centred modal with left
 // navigation and a right content area. It hosts all settings pages plus MCP,
@@ -176,6 +176,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab, initialPayload }
                     />
                   </SettingsPageShell>
                 )}
+                {tab === "mobile" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MobileSection /></SettingsPageShell>}
               </>
             )}
           </main>
@@ -292,6 +293,84 @@ type SectionProps = {
   apply: (fn: () => Promise<void>) => Promise<void>;
 };
 
+// MobileSection —— linkpeer 移动端配对面板（调 MobileBridge* 绑定）。
+// 开始配对 → 显示二维码/配对码 → linkpeer 扫码 → 待确认设备允许/拒绝。
+function MobileSection() {
+  const [pairing, setPairing] = useState(false);
+  const [qrURL, setQrURL] = useState("");
+  const [code, setCode] = useState("");
+  const [status, setStatus] = useState<{ enabled?: boolean; pending?: { PairID: string; DevC: string; FpC: string }[] }>({});
+  const [err, setErr] = useState("");
+
+  const startPairing = async () => {
+    setPairing(true); setErr("");
+    try {
+      const raw = await app.MobileBridgeStartPairing();
+      const parsed = JSON.parse(raw as string);
+      setQrURL(parsed.qrURL || "");
+      setCode(parsed.code || "");
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    } finally { setPairing(false); }
+  };
+
+  const refreshStatus = async () => {
+    try { setStatus((await app.MobileBridgeStatus()) as { enabled?: boolean; pending?: any[] }); } catch { /* ignore */ }
+  };
+
+  useEffect(() => {
+    refreshStatus();
+    const id = window.setInterval(refreshStatus, 2000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const confirm = async (pairID: string) => { await app.MobileBridgeConfirm(pairID); refreshStatus(); };
+  const reject = async (pairID: string) => { await app.MobileBridgeReject(pairID); refreshStatus(); };
+
+  const pending = status.pending ?? [];
+  return (
+    <SettingsSection title="linkpeer 移动端配对" description="配对手机/桌面 linkpeer，P2P 直连 + 端到端加密">
+      <div className="mobile-pair-panel">
+        <div className="mobile-pair-panel__qr">
+          {qrURL ? (
+            <>
+              <QRCodeSVG value={qrURL} size={196} marginSize={1} className="mobile-pair-panel__qr-code" />
+              <div className="mobile-pair-panel__code">配对码：<strong>{code}</strong></div>
+              <button className="btn btn--secondary btn--small" onClick={() => { try { navigator.clipboard?.writeText(qrURL); } catch { /* ignore */ } }}>复制配对链接</button>
+            </>
+          ) : (
+            <button className="btn btn--primary" onClick={startPairing} disabled={pairing}>
+              {pairing ? <Loader2 className="spin" size={16} /> : <QrCode size={16} />} 开始配对
+            </button>
+          )}
+        </div>
+        <div className="mobile-pair-panel__body">
+          <div className="mobile-pair-panel__title">linkpeer 移动伴侣端</div>
+          <p className="mobile-pair-panel__desc">
+            用 linkpeer App 扫描左侧二维码，或在 App「我的 → 扫码配对」粘贴配对链接。两端经云端信令敲门后建立 WebRTC P2P 直连，业务流量全程端到端加密（AES-256-GCM）。
+          </p>
+          {pending.length > 0 && (
+            <div className="mobile-pair-panel__pending">
+              <div className="mobile-pair-panel__pending-title">待确认的设备</div>
+              {pending.map((p) => (
+                <div key={p.PairID} className="mobile-pair-panel__device">
+                  <span>{p.DevC}</span>
+                  <div className="mobile-pair-panel__device-actions">
+                    <button className="btn btn--primary btn--small" onClick={() => confirm(p.PairID)}><CheckCircle2 size={14} /> 允许</button>
+                    <button className="btn btn--secondary btn--small" onClick={() => reject(p.PairID)}>拒绝</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {!status.enabled && <div className="mobile-pair-panel__hint">移动端桥接未启用（启动 fairpeer 时未连接信令服务，或未设 LINKPEER_SIGNAL 环境变量）</div>}
+          {err && <div className="banner banner--error">{err}</div>}
+        </div>
+      </div>
+    </SettingsSection>
+  );
+}
+
 type ModelsSectionProps = SectionProps & {
   backgroundApply: (fn: () => Promise<void>) => Promise<void>;
 };
@@ -326,6 +405,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.updates");
     case "cowork":
       return t("settings.tab.cowork");
+    case "mobile":
+      return "移动端";
     default:
       return id;
   }
@@ -2153,9 +2234,30 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
                     pptActiveTemplate: "", pptTemplates: [], pptTemplateDir: "",
                     smtpPassword: "", imapPassword: "", smtpPasswordSet: false, imapPasswordSet: false, detectedBrowser: "",
                     screenshotEnabled: false, screenshotHotkey: "Ctrl+Shift+Alt+W", screenshotVlmModel: "", screenshotPrompt: "",
-                    estopHotkey: "Ctrl+Shift+Pause",
+                    estopHotkey: "Ctrl+Shift+Pause", voiceModel: "",
                   };
                   void apply(() => app.SetCoWorkSettings({ ...base, screenshotVlmModel: vlm } as any));
+                }}
+              />
+            </SettingsField>
+
+            <SettingsField label={t("settings.voiceModelLabel")} hint={t("settings.voiceModelHint")}>
+              <ModelPicker
+                s={s}
+                refs={refs}
+                value={s.cowork?.voiceModel ?? ""}
+                disabled={busy}
+                emptyOptionLabel={t("settings.voiceModelNone")}
+                emptyOptionHint={t("settings.voiceModelNoneHint")}
+                onPick={(voice) => {
+                  const base = s.cowork ?? {
+                    browserPath: "", embeddingModel: "", ragEnabled: null,
+                    pptActiveTemplate: "", pptTemplates: [], pptTemplateDir: "",
+                    smtpPassword: "", imapPassword: "", smtpPasswordSet: false, imapPasswordSet: false, detectedBrowser: "",
+                    screenshotEnabled: false, screenshotHotkey: "Ctrl+Shift+Alt+W", screenshotVlmModel: "", screenshotPrompt: "",
+                    estopHotkey: "Ctrl+Shift+Pause", voiceModel: "",
+                  };
+                  void apply(() => app.SetCoWorkSettings({ ...base, voiceModel: voice } as any));
                 }}
               />
             </SettingsField>
@@ -2605,6 +2707,14 @@ function WebSearchSection({ s, busy, apply }: SectionProps) {
         label="Linkup Search"
         apiKeyEnv="LINKUP_API_KEY"
         keySet={s.webSearch?.linkupKeySet}
+        busy={busy}
+        onSave={(env, val) => apply(() => app.SetProviderKey(env, val))}
+        onClear={(env) => apply(() => app.ClearProviderKey(env))}
+      />
+      <WebSearchKeyField
+        label="AnySearch"
+        apiKeyEnv="ANYSEARCH_API_KEY"
+        keySet={s.webSearch?.anysearchKeySet}
         busy={busy}
         onSave={(env, val) => apply(() => app.SetProviderKey(env, val))}
         onClear={(env) => apply(() => app.ClearProviderKey(env))}
@@ -4256,7 +4366,7 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
       pptActiveTemplate: "", pptTemplates: [], pptTemplateDir: "",
       smtpPassword: "", imapPassword: "", smtpPasswordSet: false, imapPasswordSet: false, detectedBrowser: "",
       screenshotEnabled: false, screenshotHotkey: "Ctrl+Shift+Alt+W", screenshotVlmModel: "", screenshotPrompt: "",
-      estopHotkey: "Ctrl+Shift+Pause",
+      estopHotkey: "Ctrl+Shift+Pause", voiceModel: "",
     };
     // Default mail provider = 139 (China Mobile). Only when the user hasn't
     // configured mail yet (no saved SMTP host); a saved config — including one
