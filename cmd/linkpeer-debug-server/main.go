@@ -59,6 +59,7 @@ func (e *replyExec) reply(tab, input string) {
 	send(`{"kind":"reasoning","reasoning":"用户说：「`+input+`」。我来分析一下需求……"}`, 300*time.Millisecond)
 	send(`{"kind":"text","text":"收到：**`+input+`** —— 这是 fairpeer 经 P2P 加密通道的回复。我能读写代码、执行工具、生成文档。这条回复模拟了真实对话流（reasoning 思考 → text → 工具卡 → turn_done）。"}`, 500*time.Millisecond)
 	send(`{"kind":"tool_dispatch","tool":{"id":"t1","name":"read","args":"main.go","readOnly":true}}`, 300*time.Millisecond)
+	send(`{"kind":"approval_request","approval":{"id":"a1","tool":"edit","subject":"将修改 main.go 的 main 函数（需要你批准）"}}`, 300*time.Millisecond)
 	send(`{"kind":"tool_result","tool":{"id":"t1","name":"read","output":"package main\n\nfunc main() {\n\tprintln(\"hello\")\n}"}}`, 400*time.Millisecond)
 	send(`{"kind":"turn_done","err":""}`, 200*time.Millisecond)
 	fmt.Println("[EVT] ✓ 模拟对话回复已发（reasoning + text + tool×2 + turn_done）")
