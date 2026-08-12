@@ -151,8 +151,13 @@ func TestImageUnderstandEndToEndWithStub(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if got != wantDesc {
-		t.Errorf("result = %q, want %q", got, wantDesc)
+	// Result is now the VLM description prefixed with an objective header
+	// ([image: name | WxH | mime | vision: model]). Verify both halves.
+	if !strings.Contains(got, wantDesc) {
+		t.Errorf("result missing VLM answer %q; got %q", wantDesc, got)
+	}
+	if !strings.Contains(got, "[image: table.png | 1x1 | image/png |") {
+		t.Errorf("result missing objective header (name/dims/mime); got %q", got)
 	}
 	fmt.Printf("[e2e] VLM received prompt=%q → returned %q\n", truncN(gotPrompt, 60), got)
 }

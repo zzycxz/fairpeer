@@ -64,7 +64,7 @@ const (
 func (imageUnderstand) Name() string { return "image_understand" }
 
 func (imageUnderstand) Description() string {
-	return "Understand a user-uploaded image: read an image file (the path appears in the conversation as an <image path=\"...\"> reference, e.g. .fairpeer/attachments/xxx.png) and ask the configured vision model about it. You MUST pass a `prompt` describing what you want to know — e.g. 'describe the overall layout', 'what does the error message say', 'transcribe the table as markdown'. The more specific your prompt, the more useful the answer. Returns the model's text description of the image. Use this whenever the user attached an image and you need its contents (the main model cannot see the image bytes directly)."
+	return "Understand a user-uploaded image: read an image file (the path appears in the conversation as an <image path=\"...\"> reference, e.g. .fairpeer/attachments/xxx.png) and ask the configured vision model about it. You MUST pass a `prompt` describing what you want to know — e.g. 'describe the overall layout', 'what does the error message say', 'transcribe the table as markdown'. The more specific your prompt, the more useful the answer. Returns the model's text answer PREFIXED with an [image: name | WxH | mime | vision: model] header of objective facts (dimensions/MIME/vision model are certain; the answer below is the VLM's possibly-imperfect description). Use this whenever the user attached an image and you need its contents (the main model cannot see the image bytes directly). STRENGTHS: describing content/layout, OCR (reading text), identifying objects/scenes/UI, reading simple tables as markdown. LIMITS: it CANNOT return precise pixel coordinates or bounding boxes (no visual grounding), CANNOT reliably give exact hex color codes, and does NOT guarantee structured/JSON output — for locating UI elements use screen_perceive, and accept that coordinates/exact-colors/layout-cloning are beyond this tool's reliable reach."
 }
 
 func (imageUnderstand) Schema() json.RawMessage {
@@ -130,13 +130,25 @@ func (i imageUnderstand) Execute(ctx context.Context, args json.RawMessage) (str
 		return "", fmt.Errorf("%s is not a recognized image", p.Path)
 	}
 
-	dataURL := encodeForVLMGeneric(data)
+	dataURL, imgW, imgH := encodeForVLMGeneric(data)
 
 	description, err := CallVLM(ctx, dataURL, p.Prompt)
 	if err != nil {
 		return "", fmt.Errorf("image_understand (%s): %w", filepath.Base(p.Path), err)
 	}
-	return description, nil
+	// Prefix the VLM's answer with a one-line header of OBJECTIVE facts about
+	// the image (dimensions, MIME, vision model) so the main model can tell
+	// these certainties apart from the VLM's possibly-wrong description, and
+	// judge reliability — e.g. a small image can't carry fine detail; a
+	// known-weaker VLM deserves more skepticism. Built from facts the tool
+	// already has; no extra VLM call, no guessing.
+	vlmModel := configuredVLMModel()
+	if vlmModel == "" {
+		vlmModel = "(unconfigured)"
+	}
+	header := fmt.Sprintf("[image: %s | %dx%d | %s | vision: %s]",
+		filepath.Base(p.Path), imgW, imgH, mime, vlmModel)
+	return header + "\n" + description, nil
 }
 
 // sniffImageMIME reports the image MIME type of data, falling back to the file
@@ -169,18 +181,19 @@ func sniffImageMIME(data []byte, path string) string {
 	return ""
 }
 
-// encodeForVLMGeneric downscales img bytes (if larger than vlmLongEdge on the
-// long edge) and returns a base64 JPEG data URL. It is the cross-platform
-// counterpart of vlmimage_windows.go's encodeForVLM: same long-edge cap (1920),
-// same CatmullRom downscaler, same JPEG quality 85 — values tuned in
-// vlmimage_windows.go to turn 30-47s VLM calls into ~8-12s without losing small
-// text legibility. If the bytes cannot be decoded as a known image format, the
-// original bytes are base64-encoded as-is so the VLM still receives something
-// (the VLM or provider will reject it if truly unsupported, surfacing a clear
-// error rather than failing opaquely here).
-func encodeForVLMGeneric(data []byte) string {
-	if img, _, err := image.Decode(bytes.NewReader(data)); err == nil {
-		return encodeImageToVLMDataURL(img)
+// encodeForVLMGeneric decodes img bytes, scales them down to vlmLongEdge on the
+// long edge if needed, and returns a base64 data URL (preserving the source
+// format — see encodeImageToVLMDataURL) plus the ORIGINAL image dimensions
+// (before any downscale). The dimensions let callers (image_understand) report
+// the image's true size in their output without a second decode. If the bytes
+// cannot be decoded as a known image format, the original bytes are base64-
+// encoded as-is (dims 0x0) so the VLM still receives something — the provider
+// rejects it if truly unsupported, surfacing a clear error rather than failing
+// opaquely here.
+func encodeForVLMGeneric(data []byte) (dataURL string, w, h int) {
+	if img, format, err := image.Decode(bytes.NewReader(data)); err == nil {
+		b := img.Bounds()
+		return encodeImageToVLMDataURL(img, format), b.Dx(), b.Dy()
 	}
 	// Decode failed (unknown/truncated format): fall back to raw bytes. Sniff the
 	// MIME once more so the data URL prefix is honest; default to jpeg.
@@ -189,13 +202,18 @@ func encodeForVLMGeneric(data []byte) string {
 	if mime == "" {
 		prefix = "data:image/jpeg;base64,"
 	}
-	return prefix + base64.StdEncoding.EncodeToString(data)
+	return prefix + base64.StdEncoding.EncodeToString(data), 0, 0
 }
 
 // encodeImageToVLMDataURL scales img down to vlmLongEdge on its long edge and
-// JPEG-encodes it as a data URL. Mirrors vlmimage_windows.go's encodeForVLM
-// logic byte-for-byte, but operates on a decoded image.Image so it is portable.
-func encodeImageToVLMDataURL(img image.Image) string {
+// re-encodes it as a base64 data URL, PRESERVING the source format: PNG (and
+// any non-JPEG format) stays lossless PNG, JPEG stays JPEG at q92. This is a
+// deliberate divergence from vlmimage_windows.go's encodeForVLM (which always
+// emits JPEG q85) — image_understand serves user screenshots/attachments whose
+// PNG solid colors and sharp text get smeared by JPEG, hurting OCR accuracy and
+// color identification. The Windows screen-capture path keeps q85 because CUA
+// clicks value latency over fidelity; this path inverts that tradeoff.
+func encodeImageToVLMDataURL(img image.Image, format string) string {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	scaled := img
@@ -214,16 +232,27 @@ func encodeImageToVLMDataURL(img image.Image) string {
 		scaled = dst
 	}
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, scaled, &jpeg.Options{Quality: 85}); err != nil {
-		// Extremely unlikely for a valid image; retry at higher quality, then give
-		// up to a PNG fallback so we never return nothing.
-		buf.Reset()
-		if err := jpeg.Encode(&buf, scaled, &jpeg.Options{Quality: 90}); err != nil {
-			buf.Reset()
-			_ = png.Encode(&buf, scaled)
-			return "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
+	switch format {
+	case "jpeg":
+		// Re-encode JPEG at high quality (downscale, if any, already applied).
+		// q92 is near-lossless and far gentler than the old unconditional q85.
+		if err := jpeg.Encode(&buf, scaled, &jpeg.Options{Quality: 92}); err == nil {
+			return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
 		}
+		// Encode failed (extremely unlikely) — fall through to PNG below.
+		buf.Reset()
 	}
+	// Default / PNG / any other decoded format (webp/gif/bmp/tiff): emit
+	// lossless PNG. This is the key fix — the old code unconditionally smashed
+	// everything through JPEG q85, which introduced ringing around solid-color
+	// blocks and drifted their colors, exactly the artifacts that wrecked
+	// OCR and hex-color identification. Lossless PNG keeps what the VLM needs.
+	if err := png.Encode(&buf, scaled); err == nil {
+		return "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
+	}
+	// Last-resort fallback so we never return nothing.
+	buf.Reset()
+	_ = jpeg.Encode(&buf, scaled, &jpeg.Options{Quality: 92})
 	return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
 }
 

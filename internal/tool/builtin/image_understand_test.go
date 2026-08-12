@@ -112,8 +112,15 @@ func TestImageUnderstandReturnsVLMDescription(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
-	if got != wantDesc {
-		t.Errorf("description = %q, want %q", got, wantDesc)
+	// Result is now the VLM description prefixed with an objective header
+	// ([image: name | WxH | mime | vision: model]). Verify the VLM answer is
+	// intact AND the header carries the image facts (incl. PNG staying PNG —
+	// the format-preservation fix, not smashed to jpeg).
+	if !strings.Contains(got, wantDesc) {
+		t.Errorf("result missing VLM answer %q; got %q", wantDesc, got)
+	}
+	if !strings.Contains(got, "[image: shot.png | 1x1 | image/png |") {
+		t.Errorf("result missing objective header (name/dims/mime); got %q", got)
 	}
 }
 
