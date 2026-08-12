@@ -1,0 +1,9 @@
+# M2 联调用 signal 配置。监听 0.0.0.0:8080 让手机（同 WiFi）能访问 K。
+# 生产部署用 deploy/linkpeer-signal/signal.toml（Caddy + coturn + 限流调优）。
+# 其余字段走 DefaultConfig（PROTOCOL §10.4 的 5000-peer 调优默认）。
+
+[server]
+listen = "0.0.0.0:8080"
+
+[log]
+level = "info"
