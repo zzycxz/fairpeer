@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zzycxz/fairpeer/internal/agent"
 	"github.com/zzycxz/fairpeer/internal/bot"
 	"github.com/zzycxz/fairpeer/internal/bot/feishu"
 	"github.com/zzycxz/fairpeer/internal/bot/qq"
@@ -136,6 +137,13 @@ func (a *App) startBotGateway(cfg *config.Config) {
 			}
 			// 异步落盘，不阻塞消息处理。
 			go func() {
+				// Mark this transcript as a bot IM session with its origin so the
+				// desktop sidebar can list it under the right contact. Idempotent.
+				if sessionPath != "" {
+					if err := agent.SetSessionIMSource(sessionPath, string(plat), remoteID, ""); err != nil {
+						logger.Warn("set bot session IM source meta failed", "err", err)
+					}
+				}
 				conns, err := config.Load()
 				if err != nil {
 					if needRemote {

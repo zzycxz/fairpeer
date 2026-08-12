@@ -179,6 +179,12 @@ type SessionInfo struct {
 	TopicTitle     string
 	Profile        string
 	ExpertTeamID   string
+	// Platform/RemoteID/ChatType/Mode are non-empty only for IM bot sessions
+	// (see BranchMeta). Let callers group bot sessions by IM contact.
+	Platform string
+	RemoteID string
+	ChatType string
+	Mode     string
 }
 
 // ListSessions returns every *.jsonl session under dir, most-recently-active
@@ -230,6 +236,10 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 		topicTitle := ""
 		profile := ""
 		expertTeamID := ""
+		platform := ""
+		remoteID := ""
+		chatType := ""
+		mode := ""
 		if metaOK {
 			if !meta.CreatedAt.IsZero() {
 				createdAt = meta.CreatedAt
@@ -243,6 +253,10 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 			topicTitle = meta.TopicTitle
 			profile = meta.Profile
 			expertTeamID = meta.ExpertTeamID
+			platform = meta.Platform
+			remoteID = meta.RemoteID
+			chatType = meta.ChatType
+			mode = meta.Mode
 		}
 		out = append(out, SessionInfo{
 			Path:           full,
@@ -257,6 +271,10 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 			TopicTitle:     topicTitle,
 			Profile:        profile,
 			ExpertTeamID:   expertTeamID,
+			Platform:       platform,
+			RemoteID:       remoteID,
+			ChatType:       chatType,
+			Mode:           mode,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -266,6 +284,27 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 		return out[i].LastActivityAt.After(out[j].LastActivityAt)
 	})
 	return out, nil
+}
+
+// SetSessionIMSource writes the IM origin (platform/remoteID/chatType) and
+// mode="bot" into a session's .meta sidecar, so ListSessions can group bot
+// sessions by IM contact. Idempotent — re-writing the same values is harmless.
+// The bot gateway calls this from OnTurnFinished once it has the session path.
+func SetSessionIMSource(sessionPath, platform, remoteID, chatType string) error {
+	if sessionPath == "" {
+		return nil
+	}
+	meta, _, err := LoadBranchMeta(sessionPath)
+	if err != nil {
+		return err
+	}
+	meta.Platform = platform
+	meta.RemoteID = remoteID
+	meta.ChatType = chatType
+	if meta.Mode == "" {
+		meta.Mode = "bot"
+	}
+	return SaveBranchMetaPreserveUpdated(sessionPath, meta)
 }
 
 // previewSession returns the first user message (truncated) and the number of

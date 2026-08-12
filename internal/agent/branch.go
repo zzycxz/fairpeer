@@ -51,6 +51,14 @@ type BranchMeta struct {
 	// "yolo") so Resume can restore it. Restoring YOLO is intentional — if the
 	// user had auto-approve on, they expect it to stay on across a restart.
 	ToolApprovalMode string `json:"tool_approval_mode,omitempty"`
+	// Platform/RemoteID/ChatType/Mode mark a session as originating from an IM bot
+	// (the bot gateway creates the session in response to an IM message). Empty on
+	// desktop-tab sessions. Mode="bot" lets ListSessions separate bot sessions
+	// from desktop sessions and group them by IM contact for the sidebar detail.
+	Platform string `json:"platform,omitempty"`
+	RemoteID string `json:"remote_id,omitempty"`
+	ChatType string `json:"chat_type,omitempty"`
+	Mode     string `json:"mode,omitempty"`
 	// NOTE: Goal is intentionally NOT persisted here. Restoring a non-empty goal
 	// would auto-resume the goal loop (continueGoal), re-running a pursuit the
 	// user may have manually stopped. Goal state is ephemeral; users re-enter it
