@@ -14,6 +14,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -98,6 +99,26 @@ func main() {
 	fmt.Printf(" code:   %s\n", code)
 	fmt.Printf(" qrURL（粘到 linkpeer 配对页）:\n %s\n", qrURL)
 	fmt.Printf("========================================\n\n")
+
+	// 联调辅助：手机浏览器访问 http://<电脑IP>:8081/qr 拿新鲜 qrURL（每次访问
+	// 重新 StartPairing，规避 60s 过期 + 解决跨设备文本传输难题）。
+	go func() {
+		http.HandleFunc("/qr", func(w http.ResponseWriter, r *http.Request) {
+			_, qr, err := bridge.StartPairing()
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			fmt.Fprintf(w, "%s\n\n长按上面 linkpeer:// 整行 → 复制 → 切到 linkpeer 配对页粘贴 → 连接\n", qr)
+			fmt.Printf("[QR] served to %s\n", r.RemoteAddr)
+		})
+		fmt.Println("QR 辅助端点: 手机浏览器访问 http://192.168.1.48:8081/qr 拿链接")
+		if err := http.ListenAndServe(":8081", nil); err != nil {
+			fmt.Fprintf(os.Stderr, "qr http: %v\n", err)
+		}
+	}()
+
 	fmt.Printf("等 linkpeer 连接…（握手成功后打印 [CMD]，证明加密链路通）\n\n")
 
 	sig := make(chan os.Signal, 1)

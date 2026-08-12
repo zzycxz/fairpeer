@@ -5,5 +5,12 @@
 [server]
 listen = "0.0.0.0:8080"
 
+[pair]
+# 联调放宽：1 小时 TTL + 高并发/限速（联调反复 StartPairing，默认 3/5 太紧）。
+code_ttl = 3600
+max_concurrent_per_dev = 100
+max_per_dev_per_hour = 10000
+max_fail_per_ip_per_hour = 10000
+
 [log]
 level = "info"
