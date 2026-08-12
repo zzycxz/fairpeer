@@ -84,6 +84,8 @@ export const zh: Record<DictKey, string> = {
   "botDetail.noSessions": "暂无会话记录（bot 收到 IM 消息后会出现）",
   "botDetail.noPreview": "（无预览）",
   "botDetail.continue": "继续",
+  "botDetail.contacts": "联系人",
+  "botDetail.noContact": "暂无联系人",
   "botDetail.status": "状态",
   "botDetail.permission": "权限策略",
   "botDetail.scopeGlobal": "Global",

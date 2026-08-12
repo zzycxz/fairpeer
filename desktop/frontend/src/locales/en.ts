@@ -83,6 +83,8 @@ export const en = {
   "botDetail.noSessions": "No sessions yet (appears after the bot receives an IM message)",
   "botDetail.noPreview": "(no preview)",
   "botDetail.continue": "Continue",
+  "botDetail.contacts": "Contacts",
+  "botDetail.noContact": "No contact yet",
   "botDetail.status": "Status",
   "botDetail.permission": "Permission policy",
   "botDetail.scopeGlobal": "Global",

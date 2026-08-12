@@ -161,10 +161,12 @@ type SidebarImTopicSource = {
 type SidebarImConnectionDetailProps = {
   connection: SidebarImConnection;
   sessions: SessionMeta[];
+  allConnections: SidebarImConnection[];
   onClose: () => void;
   onOpenSession: () => void;
   onOpenSessionPath: (path: string) => void;
   onOpenSettings: () => void;
+  onSelectConnection: (id: string) => void;
 };
 
 function isSidebarImConnection(connection: BotConnectionView): boolean {
@@ -182,14 +184,6 @@ function sidebarImPlatformLabel(platform: SidebarImPlatform, translate: Translat
   if (platform === "lark") return "Lark";
   if (platform === "weixin") return translate("settings.botWeixin");
   return translate("settings.botFeishu");
-}
-
-function firstBotSessionMapping(connection: BotConnectionView): BotConnectionView["sessionMappings"][number] | null {
-  return (
-    connection.sessionMappings.find((mapping) => mapping.sessionId.trim()) ??
-    connection.sessionMappings.find((mapping) => mapping.remoteId.trim()) ??
-    null
-  );
 }
 
 function botMappingScope(mapping: BotConnectionView["sessionMappings"][number] | null | undefined, connectionWorkspaceRoot: string): "global" | "project" {
@@ -237,37 +231,54 @@ function sidebarImStatusLabel(status: SidebarImStatus, translate: Translator): s
 
 function sidebarImConnectionsFromBot(bot: BotSettingsView | null | undefined, translate: Translator): SidebarImConnection[] {
   if (!bot?.connections?.length) return [];
-  return bot.connections
-    .filter(isSidebarImConnection)
-    .map((connection) => {
-      const platform = sidebarImPlatform(connection);
-      const platformLabel = sidebarImPlatformLabel(platform, translate);
-      const mapping = firstBotSessionMapping(connection);
-      const remoteId = mapping?.remoteId.trim() ?? "";
-      const sessionId = mapping?.sessionId.trim() ?? "";
-      const scope = botMappingScope(mapping, connection.workspaceRoot);
-      const workspaceRoot = botMappingWorkspaceRoot(mapping, connection.workspaceRoot);
-      const status = sidebarImStatus(connection, bot.enabled);
-      const title = connection.label.trim() || platformLabel;
-      const subtitleParts = [
-        remoteId ? compactRemoteId(remoteId) : platformLabel,
-        connection.model.trim() || "",
-        sidebarImStatusLabel(status, translate),
-      ].filter(Boolean);
-      return {
-        id: connection.id,
+  // One sidebar entry per (bot connection × known contact). A bot can carry many
+  // contacts in its sessionMappings (each person/group it has talked to), and we
+  // surface each as its own row so the user can pick a bot and then a person —
+  // collapsing to a single entry per bot would hide everyone but the first.
+  // Dedupe by remoteId (backend normally keeps one mapping per contact; guard
+  // against dupes so each person shows up exactly once). A bot with no
+  // conversations yet still gets a placeholder entry so it stays visible.
+  const out: SidebarImConnection[] = [];
+  for (const connection of bot.connections) {
+    if (!isSidebarImConnection(connection)) continue;
+    const platform = sidebarImPlatform(connection);
+    const platformLabel = sidebarImPlatformLabel(platform, translate);
+    const status = sidebarImStatus(connection, bot.enabled);
+    const statusLabel = sidebarImStatusLabel(status, translate);
+    const title = connection.label.trim() || platformLabel;
+    const mappings = asArray(connection.sessionMappings).filter((m) => m.remoteId.trim() || m.sessionId.trim());
+    const seenRemote = new Set<string>();
+    const pushEntry = (remoteId: string, sessionId: string, mapping: BotConnectionView["sessionMappings"][number] | null) => {
+      out.push({
+        id: connection.id + ":" + (remoteId || "__"),
         platform,
         title,
         platformLabel,
-        subtitle: subtitleParts.join(" · "),
+        subtitle: [
+          remoteId ? compactRemoteId(remoteId) : platformLabel,
+          connection.model.trim() || "",
+          statusLabel,
+        ].filter(Boolean).join(" · "),
         status,
-        statusLabel: sidebarImStatusLabel(status, translate),
+        statusLabel,
         remoteId,
         sessionId,
-        scope,
-        workspaceRoot,
-      };
-    });
+        scope: botMappingScope(mapping, connection.workspaceRoot),
+        workspaceRoot: botMappingWorkspaceRoot(mapping, connection.workspaceRoot),
+      });
+    };
+    if (mappings.length === 0) {
+      pushEntry("", "", null);
+      continue;
+    }
+    for (const mapping of mappings) {
+      const remoteId = mapping.remoteId.trim();
+      if (remoteId && seenRemote.has(remoteId)) continue;
+      if (remoteId) seenRemote.add(remoteId);
+      pushEntry(remoteId, mapping.sessionId.trim(), mapping);
+    }
+  }
+  return out;
 }
 
 function mappedSessionTarget(sessionId: string): { kind: "path" | "topic"; value: string } | null {
@@ -326,7 +337,7 @@ function sidebarImSessionLabel(connection: SidebarImConnection, translate: Trans
   return target.value;
 }
 
-function SidebarImConnectionDetail({ connection, sessions, onClose, onOpenSession, onOpenSessionPath, onOpenSettings }: SidebarImConnectionDetailProps) {
+function SidebarImConnectionDetail({ connection, sessions, allConnections, onClose, onOpenSession, onOpenSessionPath, onOpenSettings, onSelectConnection }: SidebarImConnectionDetailProps) {
   const translate = useT();
   const target = mappedSessionTarget(connection.sessionId);
   return (
@@ -355,6 +366,30 @@ function SidebarImConnectionDetail({ connection, sessions, onClose, onOpenSessio
           </button>
         </div>
       </section>
+
+      {allConnections.length > 1 && (
+        <section className="bot-detail__panel" aria-label={translate("botDetail.contacts")}>
+          <div className="bot-detail__section-head">
+            <span>{translate("botDetail.contacts")}</span>
+            <strong>{allConnections.length}</strong>
+          </div>
+          <div className="bot-detail__contacts">
+            {allConnections.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className={"bot-detail__contact-row" + (c.id === connection.id ? " is-active" : "")}
+                onClick={() => onSelectConnection(c.id)}
+                title={c.subtitle}
+              >
+                <span className="bot-detail__contact-platform">{c.platformLabel}</span>
+                <span className="bot-detail__contact-title">{c.title}</span>
+                <span className="bot-detail__contact-remote">{c.remoteId ? compactRemoteId(c.remoteId) : translate("botDetail.noContact")}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="bot-detail__panel bot-detail__panel--facts" aria-label={translate("botDetail.summary")}>
         <div className="bot-detail__section-head">
@@ -2652,10 +2687,12 @@ export default function App() {
         <SidebarImConnectionDetail
           connection={sidebarImDetailConnection}
           sessions={sidebarImSessions}
+          allConnections={sidebarImConnections}
           onClose={() => setSidebarImDetailConnectionId("")}
           onOpenSettings={openBotSettings}
           onOpenSession={() => void openSidebarImConnectionSession(sidebarImDetailConnection)}
           onOpenSessionPath={(path) => void openSidebarImSessionPath(path)}
+          onSelectConnection={(id) => setSidebarImDetailConnectionId(id)}
         />
       ) : state.meta?.ready === false && !state.meta?.startupErr ? (
         <div className="loading-screen">
