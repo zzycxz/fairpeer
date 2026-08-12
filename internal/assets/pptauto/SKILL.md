@@ -156,6 +156,15 @@ read_file ~/.fairpeer/reference-style.json
 
 写大纲（Step 5）和 SVG（Step 6）时参照它——目标是"画一页类似的"，不是像素复刻。
 
+**字号自适应（有参考图时）**：参考图能看出"密度"和"标题/正文比例"，但 VLM 看不到 exact px——不要让它瞎给字号数值。改为从 reference-style 的 LAYOUT（密度）+ FORMAT（比例）推断 density（high/medium/low）和 title/body ratio，套模板基线机械算：
+
+```bash
+python3 <skill_dir>/scripts/autofit_fontsize.py --density <high|medium|low> --ratio <标题是正文的几倍>
+# 输出 {"title": N, "card_title": N, "body": N}，生成 SVG 时用这套字号（覆盖 config 的硬编码 26/18/14）
+```
+
+依据：模板基线（config）× 密度系数（密→缩小，疏→放大，±15%）× 比例保持（标题>卡片标题>正文）。这是"有判断、不瞎猜"——不靠 VLM 给 px，靠它的定性判断（密度+比例）机械算。无参考图时退回 config 默认字号。
+
 ### 颜色规则（唯一来源）
 
 | 层级 | 来源 | 说明 |
