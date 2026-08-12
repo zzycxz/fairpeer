@@ -32,6 +32,8 @@ type Bridge struct {
 	byDev   map[string]*Conn            // devC → Conn (latest, for event routing)
 	tabSub  map[string]map[string]bool  // tabId → set[connId]
 	ctx     context.Context
+
+	onReady func(*Conn) // 全局 onReady hook（debug-server 注册，发测试 wireEvent）
 }
 
 // NewBridge wires everything but does NOT connect yet (Start does that).
@@ -55,6 +57,10 @@ func (b *Bridge) Start(ctx context.Context) error {
 	b.ctx = ctx
 	return b.signal.Run(ctx)
 }
+
+// SetOnReady 注册全局 onReady hook：每个 Conn 握手完成时回调（debug-server 用它
+// 在握手后发测试 wireEvent，模拟 fairpeer 下行）。
+func (b *Bridge) SetOnReady(fn func(*Conn)) { b.onReady = fn }
 
 // StartPairing kicks off a new pairing session (Wails UI calls this).
 func (b *Bridge) StartPairing() (code, qrURL string, err error) {
@@ -123,6 +129,9 @@ func (b *Bridge) handleOffer(msg SignalMsg) {
 		b.mu.Lock()
 		b.byDev[c.DevC()] = c
 		b.mu.Unlock()
+		if b.onReady != nil {
+			b.onReady(c)
+		}
 	})
 	conn.SetOnClose(func(c *Conn) {
 		b.mu.Lock()

@@ -61,6 +61,20 @@ func main() {
 	audit := mobilebridge.NewAudit("info")
 	bridge := mobilebridge.NewBridge(cfg, priv, pub, store, debugExec{}, audit)
 
+	// onReady：握手完成后发测试 wireEvent（模拟 fairpeer 下行，验证 linkpeer 能收）
+	bridge.SetOnReady(func(c *mobilebridge.Conn) {
+		fmt.Println("[EVT] conn ready，0.5s 后发测试 wireEvent")
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			evt := `{"kind":"text","text":"👋 我是 fairpeer，这条消息经 P2P 加密通道到达你（M2 下行 wireEvent 验证）"}`
+			if err := c.SendEvent([]byte(evt)); err != nil {
+				fmt.Printf("[EVT] send err: %v\n", err)
+			} else {
+				fmt.Println("[EVT] ✓ wireEvent 已发")
+			}
+		}()
+	})
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go bridge.Start(ctx) // 连 K
