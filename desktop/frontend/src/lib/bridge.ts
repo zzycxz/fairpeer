@@ -169,7 +169,6 @@ export interface AppBindings {
   Compact(): Promise<void>;
   NewSession(): Promise<void>;
   ClearSession(): Promise<void>;
-  History(): Promise<HistoryMessage[]>;
   HistoryForTab(tabID: string): Promise<HistoryMessage[]>;
   PresentForTab(tabID: string): Promise<PresentPayload>;
   Checkpoints(): Promise<CheckpointMeta[]>;
@@ -2039,16 +2038,13 @@ function makeMockApp(): AppBindings {
     },
     async SummarizeFrom() {},
     async SummarizeUpTo() {},
-        async History() {
-          return [];
-        },
         async HistoryForTab(tabID?: string) {
           const tab = mockTabs.find((item) => item.id === tabID) ?? mockTabs.find((item) => item.active);
           if (tab?.topicId) {
             queueMockTopicRuntime(tab);
             return mockTopicHistory(tab.topicId);
           }
-          return this.History();
+          return [];
         },
         async PresentForTab(_tabID?: string) {
           return { records: [], rewriteVersion: 0 };
