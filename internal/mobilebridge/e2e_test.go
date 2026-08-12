@@ -32,15 +32,24 @@ func (m *mockExecutor) Submit(_, input, _ string) error {
 	m.mu.Unlock()
 	return nil
 }
-func (m *mockExecutor) Cancel(string) error                                        { return nil }
-func (m *mockExecutor) Steer(string, string) error                                  { return nil }
-func (m *mockExecutor) Pause(string) error                                          { return nil }
-func (m *mockExecutor) Resume(string) error                                         { return nil }
-func (m *mockExecutor) Approve(string, string, bool, bool, bool) error              { return nil }
-func (m *mockExecutor) Answer(string, string, []string) error                       { return nil }
-func (m *mockExecutor) SetPlan(string, bool) error                                  { return nil }
-func (m *mockExecutor) SetModel(string, string) error                               { return nil }
-func (m *mockExecutor) ListSessions() ([]SessionInfo, error)                        { return nil, nil }
+func (m *mockExecutor) Cancel(string) error                               { return nil }
+func (m *mockExecutor) Steer(string, string) error                        { return nil }
+func (m *mockExecutor) Pause(string) error                                { return nil }
+func (m *mockExecutor) Resume(string) error                               { return nil }
+func (m *mockExecutor) Approve(string, string, bool, bool, bool) error    { return nil }
+func (m *mockExecutor) Answer(string, string, []string) error             { return nil }
+func (m *mockExecutor) SetPlan(string, bool) error                        { return nil }
+func (m *mockExecutor) SetModel(string, string) error                     { return nil }
+func (m *mockExecutor) ListSessions() ([]SessionInfo, error)              { return nil, nil }
+func (m *mockExecutor) ListModels() ([]ModelInfo, error)                  { return nil, nil }
+func (m *mockExecutor) NewTab(_, _ string) (string, error)                { return "", nil }
+func (m *mockExecutor) RenameSession(string, string) error                { return nil }
+func (m *mockExecutor) DeleteSession(string) error                        { return nil }
+func (m *mockExecutor) OfficeRun(string, string, map[string]string) error { return nil }
+func (m *mockExecutor) FileStart(string, string, int64) error             { return nil }
+func (m *mockExecutor) FileChunk(string, int, string) error               { return nil }
+func (m *mockExecutor) FileEnd(string, string) error                      { return nil }
+func (m *mockExecutor) LoadSession(string) ([]map[string]any, error)      { return nil, nil }
 func (m *mockExecutor) submitted() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -127,7 +136,7 @@ func TestE2EFullLink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	const cTs int64 = 1700000000123
+	cTs := time.Now().UnixMilli()
 	nc := bytes.Repeat([]byte{1}, 16)
 	cEph, _ := GenerateEphemeral()
 	cEphPub := cEph.PublicKey().Bytes()

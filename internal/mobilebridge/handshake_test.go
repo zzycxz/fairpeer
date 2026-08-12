@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 // TestHandshakeFullFlow runs the complete C↔S handshake end-to-end and proves
@@ -20,7 +21,7 @@ func TestHandshakeFullFlow(t *testing.T) {
 	sEph, _ := GenerateEphemeral()
 	nc, _ := Random(16)
 	ns, _ := Random(16)
-	ts := int64(1700000000123)
+	ts := time.Now().UnixMilli()
 
 	// C builds + S verifies ClientHello
 	ch := BuildClientHello(cPriv, cEph.PublicKey().Bytes(), nc, cid, sid, ts)
@@ -87,7 +88,7 @@ func TestHandshakeBadSigRejected(t *testing.T) {
 	_, _, _ = GenerateLongTerm()
 	nc, _ := Random(16)
 	cEph, _ := GenerateEphemeral()
-	ch := BuildClientHello(cPriv, cEph.PublicKey().Bytes(), nc, "cid", "sid", 1)
+	ch := BuildClientHello(cPriv, cEph.PublicKey().Bytes(), nc, "cid", "sid", time.Now().UnixMilli())
 	ch.Sig = b64(bytes.Repeat([]byte{0}, 64)) // wrong sig
 	if err := VerifyClientHello(cPub, ch); err != ErrBadSig {
 		t.Fatalf("want ErrBadSig, got %v", err)
@@ -98,7 +99,7 @@ func TestHandshakeBadEphemeral(t *testing.T) {
 	cPub, cPriv, _ := GenerateLongTerm()
 	nc, _ := Random(16)
 	cEph, _ := GenerateEphemeral()
-	ch := BuildClientHello(cPriv, cEph.PublicKey().Bytes(), nc, "cid", "sid", 1)
+	ch := BuildClientHello(cPriv, cEph.PublicKey().Bytes(), nc, "cid", "sid", time.Now().UnixMilli())
 	ch.Eph = b64([]byte("short")) // wrong length
 	if err := VerifyClientHello(cPub, ch); err != ErrBadEphemeral {
 		t.Fatalf("want ErrBadEphemeral, got %v", err)

@@ -4,13 +4,14 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func makeTestHello(t *testing.T, cPriv ed25519.PrivateKey, cDev, sDev string) []byte {
 	t.Helper()
 	eph, _ := GenerateEphemeral()
 	nc, _ := Random(16)
-	ch := BuildClientHello(cPriv, eph.PublicKey().Bytes(), nc, cDev, sDev, 1700000000123)
+	ch := BuildClientHello(cPriv, eph.PublicKey().Bytes(), nc, cDev, sDev, time.Now().UnixMilli())
 	b, _ := json.Marshal(ch)
 	return b
 }

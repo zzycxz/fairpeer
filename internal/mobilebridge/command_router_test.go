@@ -9,9 +9,9 @@ import (
 
 // recordingExec records every command method called on it.
 type recordingExec struct {
-	mu                  sync.Mutex
-	called              []string
-	lastTab, lastInput  string
+	mu                 sync.Mutex
+	called             []string
+	lastTab, lastInput string
 }
 
 func (e *recordingExec) mark(name string) {
@@ -26,16 +26,39 @@ func (e *recordingExec) names() []string {
 	return append([]string{}, e.called...)
 }
 
-func (e *recordingExec) Submit(tab, input, _ string) error { e.mark("submit"); e.lastTab = tab; e.lastInput = input; return nil }
-func (e *recordingExec) Cancel(string) error               { e.mark("cancel"); return nil }
-func (e *recordingExec) Steer(string, string) error         { e.mark("steer"); return nil }
-func (e *recordingExec) Pause(string) error                 { e.mark("pause"); return nil }
-func (e *recordingExec) Resume(string) error                { e.mark("resume"); return nil }
-func (e *recordingExec) Approve(string, string, bool, bool, bool) error { e.mark("approve"); return nil }
-func (e *recordingExec) Answer(string, string, []string) error          { e.mark("answer"); return nil }
-func (e *recordingExec) SetPlan(string, bool) error          { e.mark("setplan"); return nil }
-func (e *recordingExec) SetModel(tab, m string) error        { e.mark("setmodel"); return nil }
-func (e *recordingExec) ListSessions() ([]SessionInfo, error) { e.mark("list"); return nil, nil }
+func (e *recordingExec) Submit(tab, input, _ string) error {
+	e.mark("submit")
+	e.lastTab = tab
+	e.lastInput = input
+	return nil
+}
+func (e *recordingExec) Cancel(string) error        { e.mark("cancel"); return nil }
+func (e *recordingExec) Steer(string, string) error { e.mark("steer"); return nil }
+func (e *recordingExec) Pause(string) error         { e.mark("pause"); return nil }
+func (e *recordingExec) Resume(string) error        { e.mark("resume"); return nil }
+func (e *recordingExec) Approve(string, string, bool, bool, bool) error {
+	e.mark("approve")
+	return nil
+}
+func (e *recordingExec) Answer(string, string, []string) error { e.mark("answer"); return nil }
+func (e *recordingExec) SetPlan(string, bool) error            { e.mark("setplan"); return nil }
+func (e *recordingExec) SetModel(tab, m string) error          { e.mark("setmodel"); return nil }
+func (e *recordingExec) ListSessions() ([]SessionInfo, error)  { e.mark("list"); return nil, nil }
+func (e *recordingExec) DeleteSession(string) error            { e.mark("deletesession"); return nil }
+func (e *recordingExec) ListModels() ([]ModelInfo, error)      { e.mark("listmodels"); return nil, nil }
+func (e *recordingExec) NewTab(_, _ string) (string, error)    { e.mark("newtab"); return "", nil }
+func (e *recordingExec) RenameSession(string, string) error    { e.mark("renamesession"); return nil }
+func (e *recordingExec) OfficeRun(string, string, map[string]string) error {
+	e.mark("officerun")
+	return nil
+}
+func (e *recordingExec) FileStart(string, string, int64) error { e.mark("filestart"); return nil }
+func (e *recordingExec) FileChunk(string, int, string) error   { e.mark("filechunk"); return nil }
+func (e *recordingExec) FileEnd(string, string) error          { e.mark("fileend"); return nil }
+func (e *recordingExec) LoadSession(string) ([]map[string]any, error) {
+	e.mark("loadsession")
+	return nil, nil
+}
 
 func TestRouteAllCommands(t *testing.T) {
 	exec := &recordingExec{}
