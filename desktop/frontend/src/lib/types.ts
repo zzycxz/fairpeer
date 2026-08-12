@@ -364,10 +364,12 @@ export interface SessionMeta {
   isExpert?: boolean; // true = expert-team collaboration session (scope="expert")
   expertTeamId?: string; // identifies the expert team for expert sessions
   // IM bot session origin (empty for desktop-tab sessions). The sidebar IM-
-  // contact detail groups bot sessions by platform + remoteId.
+  // contact detail groups bot sessions by platform + chatType + chatId + remoteId
+  // so the same person's conversations in different groups stay separate.
   platform?: string;
   remoteId?: string;
   chatType?: string;
+  chatId?: string;
   mode?: string; // "bot" for IM bot sessions
 }
 
@@ -1287,6 +1289,8 @@ export interface BotConnectionCredentialView {
 
 export interface BotConnectionSessionMappingView {
   remoteId: string;
+  chatType: string;
+  chatId: string;
   sessionId: string;
   scope: "global" | "project" | string;
   workspaceRoot: string;

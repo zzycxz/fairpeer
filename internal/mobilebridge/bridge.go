@@ -3,6 +3,7 @@ package mobilebridge
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -269,10 +270,14 @@ func (b *Bridge) handleOffer(msg SignalMsg) {
 		conn.close()
 		return
 	}
+	// P2-2: 签名 answer（防信令伪造）
+	ansSigMsg := "answer|" + connID + "|" + b.devS + "|" + msg.From + "|" + answerSDP
+	ansSig := ed25519.Sign(b.sPriv, []byte(ansSigMsg))
 	_ = b.signal.Send(SignalMsg{
 		Type: "answer", ConnID: connID,
 		From: b.devS, To: msg.From,
-		SDP: answerSDP,
+		SDP:  answerSDP,
+		Sig:  base64.URLEncoding.EncodeToString(ansSig),
 	})
 }
 

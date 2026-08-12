@@ -152,6 +152,8 @@ type SidebarImConnection = {
   status: SidebarImStatus;
   statusLabel: string;
   remoteId: string;
+  chatType: string;
+  chatId: string;
   sessionId: string;
   scope: "global" | "project";
   workspaceRoot: string;
