@@ -238,13 +238,11 @@ function sidebarImStatusLabel(status: SidebarImStatus, translate: Translator): s
 
 function sidebarImConnectionsFromBot(bot: BotSettingsView | null | undefined, translate: Translator): SidebarImConnection[] {
   if (!bot?.connections?.length) return [];
-  // One sidebar entry per (bot connection × known contact). A bot can carry many
-  // contacts in its sessionMappings (each person/group it has talked to), and we
-  // surface each as its own row so the user can pick a bot and then a person —
-  // collapsing to a single entry per bot would hide everyone but the first.
-  // Dedupe by remoteId (backend normally keeps one mapping per contact; guard
-  // against dupes so each person shows up exactly once). A bot with no
-  // conversations yet still gets a placeholder entry so it stays visible.
+  // One sidebar entry per (bot connection × conversation). chatType+chatId are
+  // part of the key so the same person's DM and their conversations in different
+  // groups each get their own row — without them, a user in 3 groups would
+  // collapse into one entry and those sessions would merge. Dedupe by the full
+  // scope key. A bot with no conversations yet still gets a placeholder entry.
   const out: SidebarImConnection[] = [];
   for (const connection of bot.connections) {
     if (!isSidebarImConnection(connection)) continue;
@@ -254,38 +252,80 @@ function sidebarImConnectionsFromBot(bot: BotSettingsView | null | undefined, tr
     const statusLabel = sidebarImStatusLabel(status, translate);
     const title = connection.label.trim() || platformLabel;
     const mappings = asArray(connection.sessionMappings).filter((m) => m.remoteId.trim() || m.sessionId.trim());
-    const seenRemote = new Set<string>();
-    const pushEntry = (remoteId: string, sessionId: string, mapping: BotConnectionView["sessionMappings"][number] | null) => {
+    const seenScope = new Set<string>();
+    const pushEntry = (remoteId: string, chatType: string, chatId: string, sessionId: string, mapping: BotConnectionView["sessionMappings"][number] | null) => {
       out.push({
-        id: connection.id + ":" + (remoteId || "__"),
+        id: connection.id + ":" + (scopeKey(remoteId, chatType, chatId) || "__"),
         platform,
         title,
         platformLabel,
-        subtitle: [
-          remoteId ? compactRemoteId(remoteId) : platformLabel,
-          connection.model.trim() || "",
-          statusLabel,
-        ].filter(Boolean).join(" · "),
+        subtitle: conversationSubtitle(remoteId, chatType, chatId, platformLabel, connection.model, statusLabel, translate),
         status,
         statusLabel,
         remoteId,
+        chatType,
+        chatId,
         sessionId,
         scope: botMappingScope(mapping, connection.workspaceRoot),
         workspaceRoot: botMappingWorkspaceRoot(mapping, connection.workspaceRoot),
       });
     };
     if (mappings.length === 0) {
-      pushEntry("", "", null);
+      pushEntry("", "", "", "", null);
       continue;
     }
     for (const mapping of mappings) {
       const remoteId = mapping.remoteId.trim();
-      if (remoteId && seenRemote.has(remoteId)) continue;
-      if (remoteId) seenRemote.add(remoteId);
-      pushEntry(remoteId, mapping.sessionId.trim(), mapping);
+      const chatType = (mapping.chatType || "").trim();
+      const chatId = (mapping.chatId || "").trim();
+      const key = scopeKey(remoteId, chatType, chatId);
+      if (key && seenScope.has(key)) continue;
+      if (key) seenScope.add(key);
+      pushEntry(remoteId, chatType, chatId, mapping.sessionId.trim(), mapping);
     }
   }
   return out;
+}
+
+// scopeKey is the stable identity of one IM conversation: chatType+chatId+
+// remoteId. It mirrors the backend's per-conversation dedup so a person's DM and
+// their group conversations are distinct. Empty for placeholder entries.
+function scopeKey(remoteId: string, chatType: string, chatId: string): string {
+  return `${chatType}|${chatId}|${remoteId}`;
+}
+
+// conversationSubtitle builds the secondary line for a contact row: a translated
+// chat-type label (DM / Group / …), the contact id, then model + status.
+function conversationSubtitle(
+  remoteId: string,
+  chatType: string,
+  chatId: string,
+  platformLabel: string,
+  model: string,
+  statusLabel: string,
+  translate: Translator,
+): string {
+  const typeLabel = chatTypeLabel(chatType, translate);
+  const who = remoteId ? compactRemoteId(remoteId) : platformLabel;
+  const where = chatId ? compactRemoteId(chatId) : "";
+  return [typeLabel, where ? `${who} @ ${where}` : who, (model || "").trim(), statusLabel].filter(Boolean).join(" · ");
+}
+
+// chatTypeLabel maps a backend ChatType to a short localized label for display.
+function chatTypeLabel(chatType: string, translate: Translator): string {
+  switch ((chatType || "").trim()) {
+    case "group":
+    case "guild":
+      return translate("botDetail.chatTypeGroup");
+    case "thread":
+      return translate("botDetail.chatTypeThread");
+    case "direct":
+      return translate("botDetail.chatTypeDirect");
+    case "dm":
+      return translate("botDetail.chatTypeDM");
+    default:
+      return chatType.trim() ? chatType.trim() : translate("botDetail.chatTypeDM");
+  }
 }
 
 function mappedSessionTarget(sessionId: string): { kind: "path" | "topic"; value: string } | null {
@@ -391,6 +431,7 @@ function SidebarImConnectionDetail({ connection, sessions, allConnections, onClo
               >
                 <span className="bot-detail__contact-platform">{c.platformLabel}</span>
                 <span className="bot-detail__contact-title">{c.title}</span>
+                <span className="bot-detail__contact-type">{chatTypeLabel(c.chatType, translate)}</span>
                 <span className="bot-detail__contact-remote">{c.remoteId ? compactRemoteId(c.remoteId) : translate("botDetail.noContact")}</span>
               </button>
             ))}
@@ -1068,7 +1109,14 @@ export default function App() {
     app.ListSessions().then((all) => {
       if (cancelled) return;
       setSidebarImSessions(
-        all.filter((s) => s.mode === "bot" && s.platform === conn.platform && s.remoteId === conn.remoteId),
+        all.filter(
+          (s) =>
+            s.mode === "bot" &&
+            s.platform === conn.platform &&
+            s.remoteId === conn.remoteId &&
+            (s.chatType || "") === conn.chatType &&
+            (s.chatId || "") === conn.chatId,
+        ),
       );
     }).catch(() => { if (!cancelled) setSidebarImSessions([]); });
     return () => { cancelled = true; };
