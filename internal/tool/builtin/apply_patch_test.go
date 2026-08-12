@@ -173,6 +173,47 @@ func TestDeriveNewContent_RemoveLines(t *testing.T) {
 	}
 }
 
+// TestDeriveNewContent_PreservesCRLFEndings pins the A3 fix: a CRLF source
+// edited by an LF patch (the common case — patches are copied from LF diffs)
+// must come out fully CRLF, not mixed. Before the fix, the TrimSpace fallback
+// matched stripped lines and the patched line leaked a bare \n, flipping the
+// whole file in git.
+func TestDeriveNewContent_PreservesCRLFEndings(t *testing.T) {
+	original := "line1\r\nline2\r\nline3\r\n"
+	chunks := []updateChunk{
+		{oldLines: []string{"line2"}, newLines: []string{"LINE2"}},
+	}
+	result, err := deriveNewContent(original, chunks)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	want := "line1\r\nLINE2\r\nline3\r\n"
+	if result != want {
+		t.Fatalf("CRLF not preserved:\nwant %q\n got %q", want, result)
+	}
+	// No bare \n should remain once CRLF pairs are removed.
+	if strings.Contains(strings.ReplaceAll(result, "\r\n", ""), "\n") {
+		t.Fatalf("a bare \\n leaked into a CRLF file: %q", result)
+	}
+}
+
+// TestDeriveNewContent_PreservesLFEndings is the LF regression guard: the
+// line-ending fix must not change behaviour for plain-LF sources.
+func TestDeriveNewContent_PreservesLFEndings(t *testing.T) {
+	original := "line1\nline2\nline3\n"
+	chunks := []updateChunk{
+		{oldLines: []string{"line2"}, newLines: []string{"LINE2"}},
+	}
+	result, err := deriveNewContent(original, chunks)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	want := "line1\nLINE2\nline3\n"
+	if result != want {
+		t.Fatalf("LF changed unexpectedly:\nwant %q\n got %q", want, result)
+	}
+}
+
 func TestSeekSequence_Exact(t *testing.T) {
 	lines := []string{"a", "b", "c", "d"}
 	pattern := []string{"b", "c"}

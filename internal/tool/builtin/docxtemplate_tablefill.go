@@ -1,6 +1,6 @@
 package builtin
 
-// docxtemplate_tablefill.go: table cell filling for doc_template's table_fill.
+// docxtemplate_tablefill.go: table cell filling for doc_write's template-fill table_fill.
 //
 // STRING-LEVEL surgery (same rationale as find_replace: Go's encoding/xml
 // normalizes namespace prefix on re-encode, which breaks OOXML — a re-encoded

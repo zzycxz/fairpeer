@@ -1,7 +1,6 @@
 package builtin
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -180,14 +179,17 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	cmd.Env = cmdEnv
 	setKillTree(cmd)
 	cmd.WaitDelay = bashWaitDelay
-	var buf bytes.Buffer
-	w := io.Writer(&buf)
+	buf := jobs.NewCappedBuffer(jobs.JobOutputCap)
+	w := io.Writer(buf)
 	if emit, ok := tool.ProgressFrom(ctx); ok {
-		w = io.MultiWriter(&buf, newProgressWriter(emit))
+		w = io.MultiWriter(buf, newProgressWriter(emit))
 	}
 	cmd.Stdout = w
 	cmd.Stderr = w
 	err := cmd.Run()
+	// Note: `buf` is a capped buffer (jobs.CappedBuffer) so a runaway command
+	// (yes, cat /dev/urandom) can't OOM the process; output past the cap is
+	// head+tail truncated. Same discipline as background jobs.
 	// A foreground command that spawned a lingering child (e.g. `bazel run`'s
 	// server) leaves it in the process group; Wait only reaped the shell leader.
 	// Kill the group so those don't accumulate into an OOM (#3702). On cancel/

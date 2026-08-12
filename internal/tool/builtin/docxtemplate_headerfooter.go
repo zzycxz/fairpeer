@@ -1,6 +1,6 @@
 package builtin
 
-// docxtemplate_headerfooter.go: header/footer text replacement for doc_template.
+// docxtemplate_headerfooter.go: header/footer text replacement for doc_write's template-fill.
 //
 // STRING-LEVEL (same rationale as find_replace/table_fill — encoding/xml
 // normalizes namespace prefixes and breaks OOXML). We:

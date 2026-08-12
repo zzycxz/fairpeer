@@ -205,12 +205,12 @@ func (scheduleUpdate) Schema() json.RawMessage {
 "type":"object",
 "properties":{
   "id":{"type":"string","description":"Task id from schedule_list"},
-  "name":{"type":"string"},
-  "expression":{"type":"string"},
-  "prompt":{"type":"string"},
-  "enabled":{"type":"boolean"},
-  "output_mode":{"type":"string"},
-  "output_dest":{"type":"string"}
+  "name":{"type":"string","description":"New display name (omit to keep current)"},
+  "expression":{"type":"string","description":"New cron expression M H DoM Mon DoW (omit to keep current)"},
+  "prompt":{"type":"string","description":"New prompt template (omit to keep current)"},
+  "enabled":{"type":"boolean","description":"true to enable, false to disable"},
+  "output_mode":{"type":"string","description":"im, email, notify, or file"},
+  "output_dest":{"type":"string","description":"Target address/path (omit to clear)"}
 },
 "required":["id"]
 }`)

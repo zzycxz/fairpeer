@@ -22,7 +22,7 @@ type globTool struct{ workDir string }
 func (globTool) Name() string { return "glob" }
 
 func (globTool) Description() string {
-	return "Find files matching a glob pattern (e.g. \"*.go\", \"internal/*/*.go\", \"**/*.test.ts\"). Supports shell metacharacters * ? [] and the recursive ** pattern."
+	return "Find files matching a glob pattern (e.g. \"*.go\", \"internal/*/*.go\", \"**/*.test.ts\"). Supports shell metacharacters * ? [] and the recursive ** pattern. Note: results are capped at 200 entries; use more specific patterns to narrow down."
 }
 
 func (globTool) Schema() json.RawMessage {

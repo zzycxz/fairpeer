@@ -1,17 +1,22 @@
 package builtin
 
-// atomic.go provides crash-atomic file writes for document/builtin tools.
+// atomic.go provides crash-atomic file writes for the document tools.
 //
-// All file-producing tools (doc_write, xlsx_write, csv_write, write_file,
-// edit_file, multi_edit, apply_patch, delete_range, mindmap_create) ultimately
-// write a target path. A naive truncate-and-write (os.Create / os.WriteFile /
-// excelize.SaveAs) leaves a torn, unopenable file behind if the process dies
-// mid-write — the original bytes are already gone, so there is no fallback.
+// A naive truncate-and-write (os.Create / os.WriteFile / excelize.SaveAs)
+// leaves a torn, unopenable file behind if the process dies mid-write — the
+// original bytes are already gone, so there is no fallback. atomicWrite instead
+// serializes the full payload to a sibling temp file, fsyncs it, then swaps it
+// over the target in a single os.Rename. A crash at any point leaves either the
+// old file or the new file intact, never a torn one. This mirrors OfficeCLI's
+// AtomicPackageWriter (AtomicPackageWriter.cs).
 //
-// atomicWrite instead serializes the full payload to a sibling temp file,
-// fsyncs it, then swaps it over the target in a single os.Rename. A crash at
-// any point leaves either the old file or the new file intact, never a torn
-// one. This mirrors OfficeCLI's AtomicPackageWriter (AtomicPackageWriter.cs).
+// COVERAGE: every code-path text writer is crash-atomic. writeFileEncoded
+// (encoding_helpers.go) routes through atomicWriteBytes below, covering
+// write_file, edit_file, multi_edit, apply_patch, delete_range, and
+// delete_symbol. notebook_edit calls atomicWriteBytes directly. The document
+// writers (doc_write text/csv/json branch, doc_convert, docx/xlsx) use
+// atomicWrite or their own fsync+rename paths. Any remaining bare os.WriteFile
+// in a writer is a bug — route it through atomicWriteBytes.
 //
 // CRITICAL: the caller MUST close any handle it holds on `path` before calling
 // (e.g. the zip reader in writeDOCXAppend). On Windows, os.Rename onto a path
@@ -90,9 +95,10 @@ func cleanupStaleTemps(dir string) {
 			return nil
 		}
 		base := filepath.Base(p)
-		// Only our own temp prefix — never touch .docx-append-* (legacy) or
-		// unrelated dotfiles. Hidden prefix avoids matching real user files.
-		if !strings.HasPrefix(base, ".fp-tmp-") {
+		// Our own temp prefixes. Hidden prefixes avoid matching real user files.
+		// .docx-append-* is writeDOCXAppend's staging file — it renames on
+		// success, so a leftover is from a crash; sweep it like .fp-tmp-*.
+		if !strings.HasPrefix(base, ".fp-tmp-") && !strings.HasPrefix(base, ".docx-append-") {
 			return nil
 		}
 		if info.ModTime().After(cutoff) {

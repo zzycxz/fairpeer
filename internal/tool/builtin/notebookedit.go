@@ -38,7 +38,8 @@ func (notebookEdit) Description() string {
 		"source; \"insert\" adds a new cell after cell_number (use -1 to prepend at the " +
 		"top), taking cell_type and new_source; \"delete\" removes the cell. cell_type is " +
 		"\"code\" or \"markdown\" (required for insert). Editing a code cell clears its " +
-		"outputs. Prefer this over edit_file for notebooks — it keeps the JSON valid."
+		"outputs. Prefer this over edit_file for notebooks — it keeps the JSON valid. " +
+		"Accepts \"content\", \"source\", or \"new_string\" as aliases for \"new_source\"."
 }
 
 func (notebookEdit) Schema() json.RawMessage {
@@ -100,7 +101,9 @@ func (n notebookEdit) Execute(ctx context.Context, raw json.RawMessage) (string,
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(a.Path, out, 0o644); err != nil {
+	// Write atomically (temp + rename) like the other writers — a bare
+	// os.WriteFile is a truncate-write that leaves a half notebook on crash.
+	if err := atomicWriteBytes(a.Path, out); err != nil {
 		return "", fmt.Errorf("write %s: %w", a.Path, err)
 	}
 	return fmt.Sprintf("%s in %s (cell %d; %d cells total)", summary, a.Path, idx, len(nb.cells)), nil

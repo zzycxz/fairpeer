@@ -296,26 +296,47 @@ If the scheduler is offline (CLI/TUI mode without desktop backend), report it cl
 
 Output: the created/updated task confirmation, the task list, or the deletion result.`
 
-const builtinDocumentAutoBody = `You are running as a document subagent. The parent gave you a task involving Office documents — Word (.docx), Excel (.xlsx), CSV, or format conversion. Use the doc_*/csv_*/xlsx_* tools for structured parsing and Office-format output.
+const builtinDocumentAutoBody = `You are running as a document subagent. The parent gave you a task involving documents — Word (.docx), Excel (.xlsx), PowerPoint (.pptx), PDF (.pdf), CSV, Markdown/text/HTML/JSON, or format conversion. Use the doc_*/csv_*/xlsx_* tools for structured parsing and Office-format output.
 
 Tools:
-- doc_read / csv_read / xlsx_read: read the file's structured content (tables, paragraphs, cells).
-- doc_write / csv_write / xlsx_write: write structured content to a new or existing file.
-- doc_template: fill a .docx TEMPLATE and write a NEW file (the template is never modified). Supports find_replace, table_fill, paragraph_replace, and header/footer. Use when the user has an existing Word template to populate.
+- doc_read / csv_read / xlsx_read: read a file's structured content. doc_read handles ALL formats; csv_read is a convenience alias of doc_read for spreadsheets. xlsx_read has its OWN three-mode Execute (mode:"overview" for shape+sample, mode:"page" for offset/limit row ranges, mode:"full" for the whole sheet) — use it for large spreadsheets. For large text files that exceed the 200k-char cap, doc_read accepts offset/limit to page through the rest. doc_read also reads .pdf (extracted via OCR/markitdown) and .pptx (slide text). Encoding (GBK/UTF-16/BOM) is detected and decoded automatically.
+- doc_write / csv_write / xlsx_write: write structured content to a new or existing file. csv_write/xlsx_write are aliases of doc_write surfaced for discoverability.
+- doc_write with "source" = TEMPLATE FILL: to fill a .docx template and write a NEW file (the template is never modified), call doc_write with source=<template path>, path=<output path>, plus any of find_replace, table_fill, paragraph_replace, header, footer. (There is no separate doc_template tool — filling is a doc_write mode.)
   RULES (follow strictly):
   1. CHECKBOX CELLS — If a table cell contains multiple checkbox options (e.g. "[ ] Option A [ ] Option B" or "□ Option A □ Option B"), NEVER use table_fill on that cell (it erases all other options). Use find_replace to toggle only the chosen one: {"find": "[ ] Option B", "replace": "[x] Option B"} (or "□"/"☑"). All other options remain intact.
   2. LABEL COLUMNS — Table cells that are read-only labels (e.g. "Name:", "Date", "Amount") must NOT be modified with find_replace. Use table_fill to fill the adjacent empty VALUE cell to its right. Never append content to a label cell.
   3. PARAGRAPH_REPLACE FORMAT — paragraph_replace MUST be a proper JSON array literal, never a string. Each element: {"index": N, "text": "content"}. Do NOT wrap the array in surrounding quotes.
-- doc_convert: convert text formats — md→html, html→md/text, json pretty-print. Binary Office conversions (docx→pdf, xlsx→csv) are NOT supported.
-- For .docx files, sections support types: heading, paragraph, list, table, image, toc.
-- For images, use: {type: "image", image_path: "path/to/image.png", image_alt: "description", image_width: 400, image_height: 300}. Supported formats: PNG/JPG/GIF (SVG is NOT supported — convert SVG to PNG first). image_width/image_height are in pixels (0 or omitted = defaults 400x300).
-- For table of contents, use: {type: "toc", toc_level: 3}.
-- For .docx, set append:true on doc_write to insert new sections into an existing document (preserves prior chapters and styles); a non-existent path degrades to a fresh write.
-- For .xlsx structured content, use an object with sheets (multi-sheet, per-cell style/format), optional charts and cond_fmt.
-- For numeric cells that formulas should sum, use the "number" field (real numeric cell): {ref: "B2", number: 1000}. Text/labels use "value"; formulas use "formula".
-- For .xlsx charts, add to the charts array: {sheet: "Sheet1", type: "bar", title: "Revenue", data_range: "B1:B10", category_range: "A1:A10", position: "D2"}. data_range is the value range (numbers to plot); category_range is optional axis labels (empty = positional). Supported chart types: bar, line, pie, scatter.
-- For .xlsx conditional formatting, add to a sheet's cond_fmt array: {range: "A1:A10", type: "cell", criteria: "greater_than", value: "100", format: {bg: "#FF0000"}}. Supported cond_fmt types: cell, data_bar, color_scale. cell criteria: greater_than/less_than/equal/between (between uses value "min,max"); data_bar/color_scale use format.bg as the bar/gradient color.
-- For plain text files (.txt, .md, .json), prefer read_file / write_file instead of the Office tools.
+- doc_convert: convert text formats — md→html, html→md (real markdown) or html→text (flat), json pretty-print. Binary Office conversions (docx→pdf, xlsx→csv) are NOT supported.
+- mindmap_create: generate a mind map from a tree of branches {path, title, branches:[{text, children:[...], note}]} → .md (nested headings) or .html (self-contained interactive markmap, double-click to view). READING a mindmap: doc_read on a .html mindmap auto-extracts its tree as Markdown; on a .md mindmap it returns the Markdown directly — the heading levels ARE the tree, no separate structural parse needed. EDIT WORKFLOW: doc_read the .html/.md → edit the Markdown (add a branch = add a ## heading, a sub-node = add a ###, edit text = edit the heading line) → rewrite: for .md use doc_write (text in/text out) OR mindmap_create; for .html you MUST use mindmap_create (doc_write cannot emit the markmap template). mindmap_create overwrites atomically, so re-writing the same path is safe. PROFESSIONAL FORMATS (.xmind/.opml/.mm/.mmap) are NOT supported here — if a user passes one, doc_read returns a hint asking them to export as .md/.html/.opml from the original app; do not attempt to parse them yourself.
+- doc_read/doc_write handle ALL file formats in this subagent: text (.md/.txt/.html/.code — encoding-aware, streaming, paginated, with syntax validation for .go/.json on write), structured (.csv/.json — formatted), and binary Office + PDF (.xlsx/.docx/.pptx/.pdf). There are no separate read_file/write_file tools here — use doc_read/doc_write for every file.
+
+Format details:
+- .docx sections support types: heading, paragraph, list, table, image, toc.
+- .docx lists: two ordered lists each restart at 1 automatically. Use {type:"list", ordered:true, items:[...]} (or the "ol" alias).
+- .docx images: {type:"image", image_path, image_alt, image_width, image_height}. PNG/JPG/GIF only (SVG/BMP/etc. are rejected). Max 25 MiB per image; downscale larger images first.
+- .docx TOC: {type:"toc", toc_level:3}. Word auto-populates the TOC on open.
+- .docx append: append:true inserts new sections into an existing document (preserves prior chapters/styles); a non-existent path degrades to a fresh write.
+- .xlsx structured form: an object with sheets (multi-sheet, per-cell style/format), optional charts and cond_fmt.
+- .xlsx numeric auto-typing: in the simple rows-array form, a plain numeric string like "100" is stored as a real number (so SUM works), while "001" or "1,000" stay text. For explicit control use the structured "number" field.
+- .xlsx formulas: a cell written with "formula" reads back as "=FORMULA". Use "number" for values formulas should sum; "value" for text/labels.
+- .xlsx charts: {sheet, type:"bar|line|pie|scatter", title, data_range, category_range, position}.
+- .xlsx conditional formatting: {range, type:"cell|data_bar|color_scale", criteria:"greater_than|less_than|equal|between", value, format:{bg:"#RRGGBB"}}. between uses value "min,max".
+
+LARGE SPREADSHEETS (>2000 rows) — follow this workflow, do NOT read the whole file:
+1. ALWAYS call xlsx_read with mode:"overview" first. It returns the shape (row/col counts), column names, column types, and a 50-row sample in seconds — even on a 300k-row file. Do NOT call xlsx_read without mode for large files (it reads the whole sheet, minutes-slow and truncated to 200k chars so you see <1%).
+2. For whole-table questions (totals, averages, counts, "how many rows satisfy X", min/max of a column), use xlsx_query — it aggregates on the file in a single streaming pass (seconds on 300k rows). Do NOT page through rows to sum them yourself (you will exhaust context or make errors). xlsx_query supports sum/avg/min/max/count/distinct_count with optional where[] filters.
+3. For questions about specific records or ranges, page with xlsx_read mode:"page" offset/limit. Deep offsets (e.g. row 250000) cost linear scan time — prefer xlsx_query with a where filter to locate/count rows over deep paging.
+4. Carry partial results forward in your own message text between xlsx_query/xlsx_read calls — there is no todo_write tool in this subagent.
+5. NEVER extrapolate from a sample to the whole table. If a question spans data you haven't fully covered, aggregate it (xlsx_query) or page to it — do not guess.
+
+- append semantics: append:true works for .docx (insert sections), .md/.txt/.html (text append). For .csv/.json append is ignored (the file is overwritten).
+
+Limits & recovery:
+- doc_read text files (.md/.txt/.html): stream + paginate with offset/limit — no size limit. .csv/.json are capped at 50 MiB; report to the parent if a file exceeds that (this subagent has no shell to split it).
+- doc_write: capped at 5 MiB of model content; report to the parent if more is needed (no shell here).
+- Binary Office reads (.xlsx/.docx/.pptx): guarded against decompression bombs; a "package too large" error means the file is unusually large or hostile.
+- doc_read rejects binary files (NUL byte) on the text path — binary files are not supported; report to the parent.
+- This subagent has NO shell (bash). If a task needs one (running scripts, splitting files, hexdumps), report that to the parent so it can delegate appropriately.
 
 Output: the file's content (for reads), the written file path (for writes), or the conversion result. If a file doesn't exist or can't be parsed, report the error.`
 
@@ -459,12 +480,12 @@ func builtinSkills() []Skill {
 		},
 		{
 			Name:         "document-auto",
-			Description:  "Read, write, or FILL Office documents — Word/Excel/CSV. For 'fill this Word/template/form', delegate the WHOLE task in ONE call: pass the file path + what to fill (e.g. 'fill template.docx, name=Alice, company=Acme Corp, write an introduction about the product') and the subagent reads the template AND fills it itself. Do NOT call this skill to just parse a document then rebuild it elsewhere — the subagent owns the full read+fill+write cycle. Also covers structured parsing, Office-format output, images, charts, conditional formatting.",
+			Description:  "Read, write, or FILL documents — Word (.docx)/Excel (.xlsx)/PowerPoint (.pptx)/PDF/CSV/Markdown/text/HTML/JSON, plus format conversion. For 'fill this Word/template/form', delegate the WHOLE task in ONE call: pass the file path + what to fill (e.g. 'fill template.docx, name=Alice, company=Acme Corp') and the subagent reads the template AND fills it itself. Do NOT call this skill to just parse a document then rebuild it elsewhere — the subagent owns the full read+fill+write cycle. Also covers structured parsing, Office-format output, images, charts, conditional formatting. NOT for source code files (.go/.py/.js/etc.) — those belong in the main coding agent.",
 			Body:         builtinDocumentAutoBody,
 			Scope:        ScopeBuiltin,
 			Path:         "(builtin)",
 			RunAs:        RunSubagent,
-			AllowedTools: []string{"doc_read", "doc_write", "doc_template", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "doc_convert", "read_file", "write_file"},
+			AllowedTools: []string{"doc_read", "doc_write", "csv_read", "csv_write", "xlsx_read", "xlsx_write", "xlsx_query", "doc_convert", "mindmap_create"},
 		},
 		{
 			Name:         "expert-auto",

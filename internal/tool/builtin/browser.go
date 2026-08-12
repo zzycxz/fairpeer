@@ -1054,8 +1054,8 @@ func (browserClick) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
-  "session_id":{"type":"string"},
-  "target":{"description":"A snapshot ref (\"e5\"), a CSS selector (\"button.submit\"), or a coordinate object {\"x\":320,\"y\":240}. Prefer refs from browser_snapshot."}
+  "session_id":{"type":"string","description":"Browser session id from browser_open"},
+  "target":{"description":"A snapshot ref (\"e5\"), a CSS selector (\"button.submit\"), or {\"x\":320,\"y\":240}. Prefer refs from browser_snapshot.","oneOf":[{"type":"string"},{"type":"object","properties":{"x":{"type":"number"},"y":{"type":"number"}},"required":["x","y"]}]}
 },
 "required":["session_id","target"]
 }`)
@@ -1217,7 +1217,7 @@ func (browserType) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
-  "session_id":{"type":"string"},
+  "session_id":{"type":"string","description":"Browser session id from browser_open"},
   "ref":{"type":"string","description":"Snapshot ref of the input element (e.g. \"e5\"), from browser_snapshot. Preferred over selector."},
   "selector":{"type":"string","description":"CSS selector of the input element. Used when no ref is given. Omit both ref and selector to type into the currently-focused element."},
   "text":{"type":"string","description":"Text to type"},
@@ -1511,9 +1511,9 @@ func (browserScroll) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
-  "session_id":{"type":"string"},
+  "session_id":{"type":"string","description":"Browser session id from browser_open"},
   "direction":{"type":"string","enum":["up","down","left","right"],"description":"Scroll direction"},
-  "amount":{"type":"integer","description":"Pixels to scroll (default 600)"}
+  "amount":{"type":"integer","minimum":1,"description":"Pixels to scroll (default 600)"}
 },
 "required":["session_id","direction"]
 }`)
@@ -1577,7 +1577,7 @@ func (browserExtract) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
-  "session_id":{"type":"string"},
+  "session_id":{"type":"string","description":"Browser session id from browser_open"},
   "selector":{"type":"string","description":"Optional CSS selector to extract from a specific element. Omit for the whole page body."}
 },
 "required":["session_id"]
@@ -1638,7 +1638,7 @@ func (browserScreenshot) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
-  "session_id":{"type":"string"},
+  "session_id":{"type":"string","description":"Browser session id from browser_open"},
   "full_page":{"type":"boolean","description":"Capture the entire scrollable page, not just the viewport (default false)"}
 },
 "required":["session_id"]
@@ -1715,7 +1715,7 @@ func (browserEvaluate) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
-  "session_id":{"type":"string"},
+  "session_id":{"type":"string","description":"Browser session id from browser_open"},
   "expression":{"type":"string","description":"JavaScript expression to evaluate. Must return a JSON-serializable value."}
 },
 "required":["session_id","expression"]
@@ -1785,7 +1785,7 @@ func (browserSelectOption) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
-  "session_id":{"type":"string"},
+  "session_id":{"type":"string","description":"Browser session id from browser_open"},
   "ref":{"type":"string","description":"Snapshot ref of the <select> element (e.g. \"e9\"). Preferred over selector."},
   "selector":{"type":"string","description":"CSS selector of the <select> element. Used when no ref is given."},
   "value":{"type":"string","description":"The option's value attribute. Preferred over label (matches exactly)."},
@@ -1916,7 +1916,7 @@ func (browserUploadFile) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
-  "session_id":{"type":"string"},
+  "session_id":{"type":"string","description":"Browser session id from browser_open"},
   "ref":{"type":"string","description":"Snapshot ref of the <input type=\"file\"> element (e.g. \"e7\"), from browser_snapshot."},
   "files":{"type":"array","items":{"type":"string"},"description":"Absolute file path(s) to upload. The browser process must be able to read them."},
   "selector":{"type":"string","description":"CSS selector of the file input. Used when no ref is given; ref is preferred."}

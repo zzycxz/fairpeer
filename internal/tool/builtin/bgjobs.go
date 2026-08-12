@@ -131,7 +131,7 @@ type waitJob struct{}
 func (waitJob) Name() string { return "wait" }
 
 func (waitJob) Description() string {
-	return "Block until background jobs finish, then return each job's status and final output/answer. Use to collect the result of a task(run_in_background) or bash(run_in_background) before continuing. Omit job_ids to wait for every running job."
+	return "Wait for a background job to finish, then return its status and final output/answer. Use to collect the result of a task(run_in_background) or bash(run_in_background) before continuing. Omit job_ids to wait for every running job."
 }
 
 func (waitJob) Schema() json.RawMessage {

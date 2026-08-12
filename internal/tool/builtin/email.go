@@ -28,33 +28,20 @@ import (
 //
 // The SMTP config (host/port/credentials) comes from the [[cowork.email_accounts]]
 // multi-account list, injected at boot via SetEmailAccounts. The legacy
-// config.Cowork.SMTP single-account table ([cowork.smtp], nested under cowork)
-// is kept only as a fallback via globalEmailConfig. When no account resolves,
-// email_send returns a clear config error rather than failing opaquely at the
-// socket.
-
-var globalEmailConfig *config.SMTPConfig
-
-// SetEmailConfig injects the legacy single-account SMTP settings.
-//
-// Deprecated: boot.go no longer calls this — it injects the multi-account
-// slice via SetEmailAccounts instead, and accountByName is now the source of
-// truth. globalEmailConfig is kept only as a fallback for configs that haven't
-// migrated to [[cowork.email_accounts]]; new code should call SendPlainTextAs.
-func SetEmailConfig(c *config.SMTPConfig) { globalEmailConfig = c }
+// config.Cowork.SMTP single-account table ([cowork.smtp]) is folded into
+// EmailAccounts[0] by normalizeEmailAccounts at config-load, so no separate
+// runtime fallback path is needed. When no account resolves, email_send
+// returns a clear config error rather than failing opaquely at the socket.
 
 // resolveSMTP picks the SMTP config for an outbound send. A named account
 // (non-empty) resolves via accountByName; empty resolves to the Default
-// account. Falls back to the legacy globalEmailConfig when no accounts are
-// configured, so older configs that haven't migrated to
-// [[cowork.email_accounts]] still work. Returns a clear error when neither
-// source is configured (the common "email not configured" message).
+// account. Returns a clear error when no account is configured (the common
+// "email not configured" message). The legacy [cowork.smtp] single-account
+// table still works because normalizeEmailAccounts folds it into
+// EmailAccounts[0] at config-load, so no runtime fallback is needed.
 func resolveSMTP(account string) (config.SMTPConfig, error) {
 	if a, ok := accountByName(account); ok && strings.TrimSpace(a.SMTP.Host) != "" {
 		return a.SMTP, nil
-	}
-	if globalEmailConfig != nil && globalEmailConfig.Host != "" {
-		return *globalEmailConfig, nil
 	}
 	return config.SMTPConfig{}, fmt.Errorf("email not configured: set [[cowork.email_accounts]] (or legacy [cowork.smtp]) host/port/from/username/password_env in config")
 }
@@ -106,15 +93,6 @@ func buildPlainTextMessage(from string, to []string, subject, body string) []byt
 	return []byte(buf.String())
 }
 
-var globalIMAPConfig *config.IMAPConfig
-
-// SetIMAPConfig injects the legacy single-account inbound-mail settings for
-// email_read/search. This is a legacy fallback — boot.go injects the
-// multi-account config via SetEmailAccounts instead; globalIMAPConfig is kept
-// only for configs that haven't migrated. nil disables the read tools (they
-// return a config error).
-func SetIMAPConfig(c *config.IMAPConfig) { globalIMAPConfig = c }
-
 // emailAccounts holds the multi-mailbox config injected at boot (and refreshed
 // by the desktop settings panel on save). It's the source of truth for
 // accountByName — the per-account lookup email tools/scheduler use. Guarded by
@@ -161,17 +139,14 @@ func accountByName(name string) (config.EmailAccount, bool) {
 	return config.EmailAccount{}, false
 }
 
-// resolveIMAP picks the IMAP config an email_read/search call should use. The
-// multi-account path (accountByName) wins when a matching named account exists;
-// otherwise it falls back to the legacy single-account globalIMAPConfig injected
-// via SetIMAPConfig, so older configs that haven't migrated to [[cowork.email_accounts]]
-// still work. Returns a clear error when neither source is configured.
+// resolveIMAP picks the IMAP config an email_read/search call should use. A
+// matching named account resolves via accountByName. Returns a clear error when
+// no account is configured. The legacy [cowork.imap] single-account table still
+// works because normalizeEmailAccounts folds it into EmailAccounts[0] at
+// config-load, so no runtime fallback is needed.
 func resolveIMAP(account string) (config.IMAPConfig, error) {
 	if a, ok := accountByName(account); ok && strings.TrimSpace(a.IMAP.Host) != "" {
 		return a.IMAP, nil
-	}
-	if globalIMAPConfig != nil && strings.TrimSpace(globalIMAPConfig.Host) != "" {
-		return *globalIMAPConfig, nil
 	}
 	return config.IMAPConfig{}, fmt.Errorf("email account %q not configured (no matching [[cowork.email_accounts]] entry and no legacy [cowork.imap])", account)
 }

@@ -1,7 +1,7 @@
 package builtin
 
-// docxtemplate_findreplace.go: cross-run text substitution for doc_template's
-// find_replace.
+// docxtemplate_findreplace.go: cross-run text substitution for doc_write's
+// template-fill find_replace.
 //
 // PROBLEM: Word splits a paragraph's text across multiple <w:r><w:t> elements.
 // A user-visible string like "some visible text" may serialize as:

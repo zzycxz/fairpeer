@@ -10,6 +10,7 @@ import (
 
 	fileenc "github.com/zzycxz/fairpeer/internal/fileutil/encoding"
 	"github.com/zzycxz/fairpeer/internal/tool"
+	"github.com/zzycxz/fairpeer/internal/validation"
 )
 
 func init() { tool.RegisterBuiltin(applyPatch{}) }
@@ -193,7 +194,18 @@ func parseUpdateChunks(lines []string, start, end int) ([]updateChunk, int) {
 // --- Apply update chunks ---
 
 func deriveNewContent(original string, chunks []updateChunk) (string, error) {
-	origLines := strings.Split(original, "\n")
+	// Detect the original's dominant line ending so we can preserve it on
+	// output. A CRLF source edited by an LF patch would otherwise end up with
+	// mixed endings — changed lines as LF, unchanged lines keeping their \r —
+	// which flips the whole file in git.
+	lineSep := "\n"
+	if strings.Contains(original, "\r\n") {
+		lineSep = "\r\n"
+	}
+	// Normalise to LF for matching (strip every \r) so seekSequence compares
+	// against the patch's LF lines cleanly, instead of falling back to the
+	// TrimSpace pass that silently relocates matches on CRLF files.
+	origLines := strings.Split(strings.ReplaceAll(original, "\r", ""), "\n")
 	// Drop trailing empty element.
 	if len(origLines) > 0 && origLines[len(origLines)-1] == "" {
 		origLines = origLines[:len(origLines)-1]
@@ -253,7 +265,7 @@ func deriveNewContent(original string, chunks []updateChunk) (string, error) {
 	if len(result) == 0 || result[len(result)-1] != "" {
 		result = append(result, "")
 	}
-	return strings.Join(result, "\n"), nil
+	return strings.Join(result, lineSep), nil
 }
 
 // seekSequence finds pattern in lines starting from startIdx.
@@ -385,46 +397,122 @@ func (a applyPatch) Execute(ctx context.Context, args json.RawMessage) (string, 
 		}
 	}
 
-	// Phase 2: Apply changes.
+	// Phase 2: Apply changes, rolling back on failure. Phase 1 already read
+	// every target's oldContent into the fileChange, so a mid-Phase-2 failure
+	// (e.g. disk full on the 3rd write) can restore the prior on-disk state
+	// instead of leaving the workspace half-changed. Each write is itself
+	// crash-atomic (atomicWrite temp+rename), so the danger is cross-file
+	// inconsistency, not a torn single file — which is exactly what this loop
+	// guards. applied tracks how far we got; rollback walks it in reverse.
 	var summary []string
-	for _, c := range changes {
+	applied := 0
+	applyErr := func(err error) (string, error) {
+		// Restore files [0, applied) in reverse insertion order. add→remove the
+		// newly created file; update→write oldContent back; move→remove the new
+		// path and write oldContent back to the source; delete→write oldContent.
+		// Best-effort: a rollback write failure is logged into the message but
+		// never masks the original applyErr, since the original error is what the
+		// model needs to fix.
+		var restoreWarns []string
+		for j := applied - 1; j >= 0; j-- {
+			c := changes[j]
+			switch c.changeType {
+			case "add":
+				_ = os.Remove(c.path)
+			case "delete":
+				if werr := writeFileEncoded(c.path, c.oldContent, c.enc); werr != nil {
+					restoreWarns = append(restoreWarns, fmt.Sprintf("failed to restore deleted %s: %v", c.path, werr))
+				}
+			case "move":
+				_ = os.Remove(c.movePath)
+				if werr := writeFileEncoded(c.path, c.oldContent, c.enc); werr != nil {
+					restoreWarns = append(restoreWarns, fmt.Sprintf("failed to restore moved %s: %v", c.path, werr))
+				}
+			case "update":
+				if werr := writeFileEncoded(c.path, c.oldContent, c.enc); werr != nil {
+					restoreWarns = append(restoreWarns, fmt.Sprintf("failed to restore updated %s: %v", c.path, werr))
+				}
+			}
+		}
+		msg := err.Error()
+		if len(restoreWarns) > 0 {
+			msg += "; rollback warnings: " + strings.Join(restoreWarns, "; ")
+		} else {
+			msg += " (all prior files rolled back)"
+		}
+		return "", fmt.Errorf("%s", msg)
+	}
+	for i, c := range changes {
 		switch c.changeType {
 		case "add":
 			dir := filepath.Dir(c.path)
 			if err := os.MkdirAll(dir, 0o755); err != nil {
-				return "", fmt.Errorf("mkdir %s: %w", dir, err)
+				return applyErr(fmt.Errorf("mkdir %s: %w", dir, err))
+			}
+			// Pre-write syntax validation (like write_file/edit_file) so a
+			// malformed .go/.json in a patch is rejected, not persisted.
+			if verr := validation.ValidateSyntax(c.path, c.newContent); verr != nil {
+				return applyErr(fmt.Errorf("syntax check %s: %w", c.path, verr))
 			}
 			if err := writeFileEncoded(c.path, c.newContent, 0); err != nil {
-				return "", fmt.Errorf("write %s: %w", c.path, err)
+				return applyErr(fmt.Errorf("write %s: %w", c.path, err))
 			}
-			summary = append(summary, fmt.Sprintf("A %s", c.path))
+			// Surface post-edit diagnostics (LSP) so the edit→diagnose→fix loop
+			// survives batch patches — mirrors edit_file/write_file/multi_edit.
+			line := "A " + c.path
+			if extra := runPostEditHook(ctx, c.path); extra != "" {
+				line += "\n" + extra
+			}
+			summary = append(summary, line)
 
 		case "update":
+			// Pre-write syntax validation.
+			if verr := validation.ValidateSyntax(c.path, c.newContent); verr != nil {
+				return applyErr(fmt.Errorf("syntax check %s: %w", c.path, verr))
+			}
 			// Preserve the original file's encoding (GBK/UTF-16/etc.) on write —
 			// re-encoding to UTF-8 would silently corrupt non-UTF-8 sources.
 			if err := writeFileEncoded(c.path, c.newContent, c.enc); err != nil {
-				return "", fmt.Errorf("write %s: %w", c.path, err)
+				return applyErr(fmt.Errorf("write %s: %w", c.path, err))
 			}
-			summary = append(summary, fmt.Sprintf("M %s", c.path))
+			line := "M " + c.path
+			if extra := runPostEditHook(ctx, c.path); extra != "" {
+				line += "\n" + extra
+			}
+			summary = append(summary, line)
 
 		case "move":
 			dir := filepath.Dir(c.movePath)
 			if err := os.MkdirAll(dir, 0o755); err != nil {
-				return "", fmt.Errorf("mkdir %s: %w", dir, err)
+				return applyErr(fmt.Errorf("mkdir %s: %w", dir, err))
+			}
+			// Pre-write syntax validation at the destination.
+			if verr := validation.ValidateSyntax(c.movePath, c.newContent); verr != nil {
+				return applyErr(fmt.Errorf("syntax check %s: %w", c.movePath, verr))
 			}
 			// Carry the source file's encoding to the destination.
 			if err := writeFileEncoded(c.movePath, c.newContent, c.enc); err != nil {
-				return "", fmt.Errorf("write %s: %w", c.movePath, err)
+				return applyErr(fmt.Errorf("write %s: %w", c.movePath, err))
 			}
-			os.Remove(c.path)
-			summary = append(summary, fmt.Sprintf("M %s -> %s", c.path, c.movePath))
+			// Removing the source is part of an atomic move. A failure leaves a
+			// duplicate (the move becomes a silent copy) and must roll back the
+			// already-applied changes rather than report success.
+			if err := os.Remove(c.path); err != nil {
+				return applyErr(fmt.Errorf("remove source %s after move: %w", c.path, err))
+			}
+			line := fmt.Sprintf("M %s -> %s", c.path, c.movePath)
+			if extra := runPostEditHook(ctx, c.movePath); extra != "" {
+				line += "\n" + extra
+			}
+			summary = append(summary, line)
 
 		case "delete":
 			if err := os.Remove(c.path); err != nil {
-				return "", fmt.Errorf("delete %s: %w", c.path, err)
+				return applyErr(fmt.Errorf("delete %s: %w", c.path, err))
 			}
 			summary = append(summary, fmt.Sprintf("D %s", c.path))
 		}
+		applied = i + 1
 	}
 
 	return fmt.Sprintf("apply_patch: %d files changed\n%s", len(summary), strings.Join(summary, "\n")), nil

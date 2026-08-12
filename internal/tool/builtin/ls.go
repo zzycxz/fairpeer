@@ -24,7 +24,7 @@ func (listDir) Description() string {
 }
 
 func (listDir) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory path (default \".\")"},"recursive":{"type":"boolean","description":"When true, recursively list all nested files (default false)"}}}`)
+	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory path (default \".\")"},"recursive":{"type":"boolean","description":"When true, recursively list all nested files (default false)"}},"required":[]}`)
 }
 
 func (listDir) ReadOnly() bool { return true }

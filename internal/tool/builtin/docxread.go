@@ -2,8 +2,9 @@ package builtin
 
 // docxread.go implements doc_read's non-default modes for .docx:
 //   - structure: JSON of paragraphs/headings/tables with indices that align
-//     with doc_template's find_replace (text runs) and table_fill (table/row/col)
-//   - tables: JSON of tables only — the rows/cols a doc_template table_fill op
+//     with doc_write template-fill's find_replace (text runs) and table_fill
+//     (table/row/col)
+//   - tables: JSON of tables only — the rows/cols a template-fill table_fill op
 //     would target
 //   - metadata: author/title/created/modified from docProps/core.xml
 //
@@ -11,7 +12,7 @@ package builtin
 // find_replace and table_fill do: encoding/xml normalizes namespace prefixes
 // on re-encode and breaks the OOXML round-trip. We read only — no mutation —
 // so we could safely use xml.Decoder here, but keeping the parse style uniform
-// with the rest of the doc_template subsystem avoids a second mental model.
+// with the rest of the template-fill subsystem avoids a second mental model.
 
 import (
 	"archive/zip"
@@ -27,7 +28,7 @@ import (
 
 // docxStructure is the JSON shape returned by mode:"structure". It mirrors the
 // document's block flow so the LLM can see headings, paragraphs, and tables in
-// order, with table/row/col indices that match doc_template's table_fill.
+// order, with table/row/col indices that match template-fill's table_fill.
 type docxStructure struct {
 	Title    string          `json:"title,omitempty"`
 	Blocks   []docxBlock     `json:"blocks"`

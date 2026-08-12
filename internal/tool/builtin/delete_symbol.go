@@ -7,7 +7,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -45,7 +44,7 @@ func (deleteSymbol) Schema() json.RawMessage {
 	"properties":{
 		"path":{"type":"string","description":"Path to the source file"},
 		"name":{"type":"string","description":"Name of the symbol to delete"},
-		"kind":{"type":"string","description":"Optional kind filter: func, method, type, interface, const, var"},
+		"kind":{"type":"string","enum":["func","method","type","interface","const","var"],"description":"Optional kind filter"},
 		"parent":{"type":"string","description":"Optional parent struct name for method disambiguation"}
 	},
 	"required":["path","name"]
@@ -85,14 +84,16 @@ func (d deleteSymbol) Execute(ctx context.Context, args json.RawMessage) (string
 		return "", err
 	}
 
-	src, err := os.ReadFile(p.Path)
+	original, enc, err := readFileEncoded(p.Path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
-	original := string(src)
 
 	newContent := deleteLines(original, fset, m)
-	if err := os.WriteFile(p.Path, []byte(newContent), 0o644); err != nil {
+	// Write atomically (temp + rename) and preserve the detected encoding, like
+	// edit_file/write_file/delete_range — a bare os.WriteFile is a truncate-write
+	// that leaves a half file on crash.
+	if err := writeFileEncoded(p.Path, newContent, enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
 
@@ -131,11 +132,10 @@ func (d deleteSymbol) Preview(args json.RawMessage) (diff.Change, error) {
 		return diff.Change{}, err
 	}
 
-	src, err := os.ReadFile(p.Path)
+	original, _, err := readFileEncoded(p.Path)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
-	original := string(src)
 
 	newContent := deleteLines(original, fset, m)
 	return diff.Build(p.Path, original, newContent, diff.Modify), nil

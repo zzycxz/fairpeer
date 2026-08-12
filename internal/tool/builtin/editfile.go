@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/zzycxz/fairpeer/internal/diff"
 	"github.com/zzycxz/fairpeer/internal/tool"
 	"github.com/zzycxz/fairpeer/internal/validation"
 )
@@ -99,6 +100,13 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 
 	updated := strings.Replace(content, region, newStr, 1)
+	// No-op guard: if the replacement left the file byte-identical (e.g. the
+	// model passed old_string == new_string, or a fuzzy match produced a region
+	// that already equals newStr), skip the write so we don't dirty mtime / git
+	// status for nothing — mirrors write_file's existing-content check.
+	if updated == content {
+		return fmt.Sprintf("%s: no changes made (old_string equals new_string)", p.Path), nil
+	}
 	// Pre-write syntax validation (SPEC v2 §3.3): validate the PROPOSED updated
 	// content before it hits disk. Catches an edit that breaks Go/JSON syntax.
 	if err := validation.ValidateSyntax(p.Path, updated); err != nil {
@@ -107,7 +115,17 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	if err := writeFileEncoded(p.Path, updated, enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
+	// Surface the unified diff so the model can verify what it changed instead
+	// of only knowing "edited <path>". This closes the edit→repeat loop: without
+	// the diff the model may re-edit a region it already fixed. diff.Build
+	// returns a Change whose .Diff is unified-diff text (3 lines of context,
+	// git-style) and .Added/.Removed are the line tallies; for a binary or
+	// no-op change Diff is empty.
+	ch := diff.Build(p.Path, content, updated, diff.Modify)
 	msg := fmt.Sprintf("edited %s", p.Path)
+	if ch.Diff != "" {
+		msg += "\n\n" + ch.Diff
+	}
 	if extra := runPostEditHook(ctx, p.Path); extra != "" {
 		msg += "\n" + extra
 	}

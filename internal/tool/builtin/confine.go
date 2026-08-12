@@ -28,24 +28,33 @@ func ConfineWebFetch(proxySpec netclient.ProxySpec) tool.Tool {
 	return webFetch{proxySpec: proxySpec}
 }
 
-// ConfineWriters returns the file-writing built-ins (write_file, edit_file)
-// bound to roots — the only directories they may modify. The composition root
-// adds these to the per-run registry to override the unconfined instances
-// registered at init time, so writes stay inside the workspace by default.
-// roots may be relative; they are resolved to absolute, symlink-free paths once
-// here. An empty roots slice yields unconfined writers.
+// ConfineWriters returns the file-writing built-ins bound to roots — the only
+// directories they may modify: write_file, edit_file, multi_edit, and the
+// document writers (doc_write, csv_write, xlsx_write, doc_convert). The
+// composition root adds these to the per-run registry to override the
+// unconfined instances registered at init time, so writes stay inside the
+// workspace by default. roots may be relative; they are resolved to absolute,
+// symlink-free paths once here. An empty roots slice yields unconfined writers.
 //
 // ConfineReaders is the read-side counterpart: when [sandbox] read_roots is
-// configured, it returns read_file/grep bound to those roots so the agent
-// can't read host files outside them. By default read tools are unconfined
-// (see ConfineReaders note). This keeps the workspace boundary a WRITE boundary
-// by default — read isolation is opt-in for high-security deployments. Audit A7.
+// configured, it returns read_file/grep AND the document readers (doc_read,
+// csv_read, xlsx_read) bound to those roots so the agent can't read host files
+// outside them. By default read tools are unconfined (see ConfineReaders note).
+// This keeps the workspace boundary a WRITE boundary by default — read
+// isolation is opt-in for high-security deployments. Audit A7.
 func ConfineWriters(roots []string) []tool.Tool {
 	rs := realRoots(roots)
 	return []tool.Tool{
 		writeFile{roots: rs},
 		editFile{roots: rs},
 		multiEdit{roots: rs},
+		// delete_range/delete_symbol/notebook_edit are writers too (they mutate or
+		// remove file content); their init()-registered zero values have roots==nil
+		// and would otherwise bypass the workspace boundary. The desktop/workspace
+		// path (Workspace.Tools) already binds roots; this covers the CLI/library path.
+		deleteRange{roots: rs},
+		deleteSymbol{roots: rs},
+		notebookEdit{roots: rs},
 		// Document tools that write files (doc_write/csv_write/xlsx_write/doc_convert)
 		// are confined here too — without this they'd only do filepath.Abs and could
 		// write anywhere (e.g. ~/.ssh/authorized_keys), bypassing [sandbox] workspace_root.
@@ -53,6 +62,10 @@ func ConfineWriters(roots []string) []tool.Tool {
 		csvWrite{roots: rs},
 		xlsxWrite{roots: rs},
 		docConvert{roots: rs},
+		// mindmap_create writes .md/.html — without this it is the one writer
+		// that escapes the workspace boundary entirely (it also lacks a Workspace
+		// override), so it could write ~/.bashrc or .git/config.
+		mindmapCreate{roots: rs},
 	}
 }
 
@@ -76,6 +89,13 @@ func ConfineReaders(roots []string) []tool.Tool {
 	return []tool.Tool{
 		readFile{roots: rs},
 		grepTool{roots: rs},
+		// Document read tools (doc_read/csv_read/xlsx_read/xlsx_query) also read
+		// files by path, so they need the same read-boundary as read_file when
+		// read isolation is enabled — otherwise they'd bypass [sandbox] read_roots.
+		docRead{roots: rs},
+		csvRead{roots: rs},
+		xlsxRead{roots: rs},
+		xlsxQuery{roots: rs},
 	}
 }
 

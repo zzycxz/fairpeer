@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 )
@@ -172,9 +171,3 @@ func TestSetCellAutoType(t *testing.T) {
 
 // sentinel error so tests can distinguish a simulated failure.
 var errSimulatedWriteFailure = errors.New("simulated write failure")
-
-func isNumericLiteral(s string) bool {
-    if s == "" { return false }
-    _, err := strconv.ParseFloat(s, 64)
-    return err == nil
-}

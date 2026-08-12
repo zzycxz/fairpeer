@@ -312,12 +312,85 @@ func TestXLSXMergeStyleAppliedToRange(t *testing.T) {
 // TestHtmlToMarkdown converts a small HTML doc and checks key mappings.
 func TestHtmlToMarkdown(t *testing.T) {
 	html := `<h1>Title</h1><p>This is <strong>bold</strong> and <em>italic</em>.</p><ul><li>a</li><li>b</li></ul><a href="http://x">link</a>`
-	md := stripHTMLText(html)
+	md := htmlToMarkdown(html)
 	checks := []string{"# Title", "**bold**", "*italic*", "- a", "- b", "[link](http://x)"}
 	for _, c := range checks {
 		if !strings.Contains(md, c) {
 			t.Errorf("markdown missing %q; got:\n%s", c, md)
 		}
+	}
+}
+
+// TestWriteDOCXAppendOrderedListsRestartNumbering verifies that ordered lists
+// appended to an existing .docx each restart at 1, and that the appended
+// numbering definitions don't collide with the base doc's existing numIds.
+func TestWriteDOCXAppendOrderedListsRestartNumbering(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "chapters.docx")
+	// Base doc with one ordered list (numId=2 in full-write).
+	base := DocInput{Path: path, Sections: []DocSection{
+		{Type: "list", Items: []string{"a", "b"}, Ordered: true},
+	}}
+	if err := writeDOCX(base); err != nil {
+		t.Fatal(err)
+	}
+	// Append a second ordered list — it should get its own numId (not 2, which
+	// the base already uses) with a startOverride so it restarts at 1.
+	appendIn := DocInput{Path: path, Append: true, Sections: []DocSection{
+		{Type: "list", Items: []string{"x", "y"}, Ordered: true},
+	}}
+	if err := writeDOCX(appendIn); err != nil {
+		t.Fatal(err)
+	}
+	numbering := string(readDocxPartForTest(t, path, "word/numbering.xml"))
+	// The appended list must reference a numId > 2 (the base's max). Count
+	// <w:num> entries with startOverride — there should be one for the appended
+	// list (the base's numId=2 has no startOverride in the static numberingXML).
+	startOverrideCount := strings.Count(numbering, "startOverride")
+	if startOverrideCount == 0 {
+		t.Errorf("append should inject a startOverride for the new ordered list; numbering:\n%s", numbering)
+	}
+	body := string(readDocxPartForTest(t, path, "word/document.xml"))
+	// The appended list's paragraphs should reference a numId distinct from 2.
+	if !strings.Contains(body, `<w:numId w:val="2"/>`) {
+		t.Errorf("base ordered list (numId=2) should still be present in body; body:\n%s", body)
+	}
+}
+
+// TestWriteDOCXAppendTOCInjectsUpdateFields verifies that appending a TOC
+// section into an existing .docx injects <w:updateFields/> into settings.xml
+// (or creates it), so Word populates the TOC on open.
+func TestWriteDOCXAppendTOCInjectsUpdateFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.docx")
+	// Base doc with no TOC (no settings.xml emitted by full-write without TOC).
+	base := DocInput{Path: path, Sections: []DocSection{
+		{Type: "heading", Text: "Intro", Level: 1},
+		{Type: "paragraph", Text: "body"},
+	}}
+	if err := writeDOCX(base); err != nil {
+		t.Fatal(err)
+	}
+	// Append a TOC — settings.xml should be created with updateFields.
+	appendIn := DocInput{Path: path, Append: true, Sections: []DocSection{
+		{Type: "toc", TOCLevel: 2},
+	}}
+	if err := writeDOCX(appendIn); err != nil {
+		t.Fatal(err)
+	}
+	settings := string(readDocxPartForTest(t, path, "word/settings.xml"))
+	if !strings.Contains(settings, "updateFields") {
+		t.Errorf("appended TOC should inject updateFields into settings.xml; got:\n%s", settings)
+	}
+	// ContentTypes must declare the settings part.
+	ct := string(readDocxPartForTest(t, path, "[Content_Types].xml"))
+	if !strings.Contains(ct, "/word/settings.xml") {
+		t.Errorf("ContentTypes missing settings override after append TOC")
+	}
+	// Rels must wire a relationship to settings.xml.
+	rels := string(readDocxPartForTest(t, path, "word/_rels/document.xml.rels"))
+	if !strings.Contains(rels, "settings.xml") {
+		t.Errorf("rels missing settings relationship after append TOC")
 	}
 }
 

@@ -158,13 +158,17 @@ func AutoSearch(ctx context.Context, query, collection string) string {
 	}
 	results, err := globalRAGStore.Search(expandedQuery, collection, overFetch)
 	if err == nil && len(results) > 0 {
-		if globalRAGLLM != nil {
-			results = globalRAGLLM.Rerank(ctx, query, results)
+		// Rerank: prefer the embedding layer when available (cheaper — vector
+		// cosine, no LLM call, no candidate cap); fall back to the LLM reranker.
+		// Query expansion above still uses the LLM, so the hybrid pipeline is
+		// LLM expands (recall) → embeddings precision-rank (or LLM if no embedder).
+		if globalRAGEmbedder != nil {
+			results = globalRAGStore.Rerank(ctx, query, results, globalRAGEmbedder, 0.5)
 			if len(results) > topK {
 				results = results[:topK]
 			}
-		} else if globalRAGEmbedder != nil {
-			results = globalRAGStore.Rerank(ctx, query, results, globalRAGEmbedder, 0.5)
+		} else if globalRAGLLM != nil {
+			results = globalRAGLLM.Rerank(ctx, query, results)
 			if len(results) > topK {
 				results = results[:topK]
 			}
@@ -378,13 +382,16 @@ func (ragSearch) Execute(ctx context.Context, args json.RawMessage) (string, err
 	if err != nil {
 		return "", err
 	}
-	if globalRAGLLM != nil && len(results) > 0 {
-		results = globalRAGLLM.Rerank(ctx, p.Query, results)
+	// Prefer the embedding reranker when available (cheaper, no LLM call); fall
+	// back to the LLM reranker. The LLM still owns query expansion above, so the
+	// hybrid pipeline keeps recall (LLM expand) + precision (embedding cosine).
+	if globalRAGEmbedder != nil && len(results) > 0 {
+		results = s.Rerank(ctx, p.Query, results, globalRAGEmbedder, 0.5)
 		if len(results) > p.TopK {
 			results = results[:p.TopK]
 		}
-	} else if globalRAGEmbedder != nil && len(results) > 0 {
-		results = s.Rerank(ctx, p.Query, results, globalRAGEmbedder, 0.5)
+	} else if globalRAGLLM != nil && len(results) > 0 {
+		results = globalRAGLLM.Rerank(ctx, p.Query, results)
 		if len(results) > p.TopK {
 			results = results[:p.TopK]
 		}

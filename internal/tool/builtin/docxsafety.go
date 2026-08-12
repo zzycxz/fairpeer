@@ -1,10 +1,11 @@
 package builtin
 
-// docxsafety.go provides the read-side safety guards that doc_template needs
-// when it opens a user-supplied .docx/.xlsx template. Phase 0's atomic.go
-// protects WRITES (a failed write never tears the user's file). This file
-// protects READS of untrusted Office packages: a malicious or corrupted
-// template can't OOM the process (decompression bomb), and a template that's
+// docxsafety.go provides the read-side safety guards shared by every tool that
+// opens an untrusted Office package: doc_read (.xlsx/.docx/.pptx), doc_write's
+// template-fill path (.docx source), and writeDOCXAppend (existing .docx).
+// atomic.go protects WRITES (a failed write never tears the user's file); this
+// file protects READS of untrusted Office packages: a malicious or corrupted
+// package can't OOM the process (decompression bomb), and a package that's
 // still open in Word/Excel fails loudly instead of producing a half-read result.
 //
 // We deliberately stop at three bomb heuristics (total bytes / entry count /
@@ -215,7 +216,7 @@ func xmlEscapeText(s string) string {
 	return b.String()
 }
 
-// --- existence guard (used by doc_template before bomb/lock checks) --------
+// --- existence guard (used by template-fill before bomb/lock checks) --------
 
 // checkFileExists is a cheap pre-flight that returns a friendly ErrFileNotFound
 // before the caller attempts a more expensive zip open. The order matters:

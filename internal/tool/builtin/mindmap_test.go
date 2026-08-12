@@ -151,3 +151,44 @@ func TestMindMapCreateToolExecute(t *testing.T) {
 		t.Errorf("tool output missing # T")
 	}
 }
+
+// TestExtractMindMapMarkdownRoundtrip confirms extractMindMapMarkdown is the
+// faithful inverse of writeMindMapHTML: generate an html mindmap, pull the
+// embedded markdown back out, and the heading levels match the generator.
+func TestExtractMindMapMarkdownRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "map.html")
+	in := MMInput{
+		Path:  path,
+		Title: "产品规划",
+		Branches: []MMNode{
+			{Text: "A", Children: []MMNode{{Text: "A1"}}},
+			{Text: "B", Note: "noteB"},
+		},
+	}
+	if _, err := writeMindMap(in); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	md, ok := extractMindMapMarkdown(string(data))
+	if !ok {
+		t.Fatalf("extractMindMapMarkdown did not detect a markmap HTML")
+	}
+	for _, want := range []string{"# 产品规划", "## A", "### A1", "## B", "_noteB_"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("extracted md missing %q\ngot:\n%s", want, md)
+		}
+	}
+}
+
+// TestExtractMindMapMarkdownRejectsPlainHTML confirms a non-markmap HTML page
+// is NOT misdetected (returns false), so plain HTML keeps streaming as text.
+func TestExtractMindMapMarkdownRejectsPlainHTML(t *testing.T) {
+	md, ok := extractMindMapMarkdown("<!DOCTYPE html><html><body><h1>hello</h1></body></html>")
+	if ok {
+		t.Errorf("plain HTML must not be detected as markmap; got md=%q", md)
+	}
+}

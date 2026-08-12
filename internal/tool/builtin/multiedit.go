@@ -134,8 +134,13 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if err := writeFileEncoded(p.Path, content, enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
-	runPostEditHook(ctx, p.Path)
-	return fmt.Sprintf("multi_edit %s: %d edits applied (%d total replacements)", p.Path, len(p.Edits), applied), nil
+	// Surface post-edit diagnostics (e.g. LSP) to the model — without this the
+	// edit→diagnose→fix loop breaks for batch edits. Mirrors edit_file/write_file.
+	msg := fmt.Sprintf("multi_edit %s: %d edits applied (%d total replacements)", p.Path, len(p.Edits), applied)
+	if extra := runPostEditHook(ctx, p.Path); extra != "" {
+		msg += "\n" + extra
+	}
+	return msg, nil
 }
 
 // multiOldStringNotFoundError is the multi_edit analogue of edit_file's

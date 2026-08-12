@@ -56,6 +56,18 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		"code_index":       codeIndex{workDir: w.Dir},
 		"web_fetch":        webFetch{proxySpec: w.ProxySpec},
 		"image_understand": imageUnderstand{workDir: w.Dir},
+		"audio_understand": audioUnderstand{workDir: w.Dir},
+		// Document/mindmap writers: without these bindings the workspace path
+		// falls back to the init-registered roots==nil instances, so doc/csv/
+		// xlsx/doc_convert/mindmap writes would escape the workspace (the CLI
+		// path covers them via ConfineWriters; the workspace path needs them
+		// here too — Bug 2). These tools resolve via filepath.Abs, so they do
+		// not take a workDir, but they honour roots.
+		"doc_write":      docWrite{roots: roots},
+		"csv_write":      csvWrite{roots: roots},
+		"xlsx_write":     xlsxWrite{roots: roots},
+		"doc_convert":    docConvert{roots: roots},
+		"mindmap_create": mindmapCreate{roots: roots},
 	}
 	all := tool.Builtins()
 	if len(enabled) == 0 {

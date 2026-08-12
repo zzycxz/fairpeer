@@ -98,16 +98,30 @@ func writeDOCX(in DocInput) error {
 		if s.Type != "image" || strings.TrimSpace(s.ImagePath) == "" {
 			continue
 		}
-		if strings.ToLower(filepath.Ext(s.ImagePath)) == ".svg" {
+		// Whitelist the formats addImageContentTypes knows a MIME type for;
+		// anything else (bmp/tiff/webp/svg/…) would be stored with a wrong
+		// content-type and corrupt the package, so reject it up front.
+		ext := strings.ToLower(filepath.Ext(s.ImagePath))
+		switch ext {
+		case ".png", ".jpg", ".jpeg", ".gif":
+			// supported
+		case ".svg":
 			return fmt.Errorf("SVG image not supported (Word needs a PNG raster fallback); convert to PNG first: %s", s.ImagePath)
+		default:
+			return fmt.Errorf("unsupported image format %q (png/jpg/jpeg/gif only): %s", ext, s.ImagePath)
 		}
-		if _, err := os.Stat(s.ImagePath); err != nil {
+		// Size cap: addImageToZip reads the whole image into memory, so a
+		// multi-GB referenced image would OOM. Stat is cheap and gates it.
+		info, err := os.Stat(s.ImagePath)
+		if err != nil {
 			return fmt.Errorf("image not readable: %w", err)
+		}
+		if info.Size() > maxImageBytes {
+			return fmt.Errorf("image %s is %d bytes (limit %d); downscale it before embedding", s.ImagePath, info.Size(), maxImageBytes)
 		}
 		base := filepath.Base(s.ImagePath)
 		name := base
 		if n, dup := usedNames[base]; dup {
-			ext := filepath.Ext(base)
 			stem := strings.TrimSuffix(base, ext)
 			name = fmt.Sprintf("%s_%d%s", stem, n+1, ext)
 			usedNames[base] = n + 1
@@ -134,18 +148,27 @@ func writeDOCX(in DocInput) error {
 func writeDOCXFull(in DocInput, images []struct{ name, path string }) error {
 	xmlBody := buildDocumentXML(in)
 	styles := defaultStylesXML()
+	numbering := buildNumberingXML(countOrderedLists(in)) // C-3: per-list numId
 
-	f, err := os.Create(in.Path)
-	if err != nil {
-		return err
+	// C-4: a TOC section needs <w:updateFields/> in word/settings.xml so Word
+	// populates the TOC on open instead of leaving placeholder text.
+	hasTOC := false
+	for _, s := range in.Sections {
+		if strings.EqualFold(strings.TrimSpace(s.Type), "toc") {
+			hasTOC = true
+			break
+		}
 	}
-	defer f.Close()
-	zw := zip.NewWriter(f)
 
 	// Build content types (add image types if needed)
 	ctXML := contentTypesXML
 	if len(images) > 0 {
 		ctXML = addImageContentTypes(ctXML, images)
+	}
+	// Register settings.xml override when we emit it (TOC case).
+	if hasTOC {
+		ctXML = strings.Replace(ctXML, "</Types>",
+			`<Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/></Types>`, 1)
 	}
 
 	// Build document rels (add image relationships if needed)
@@ -153,33 +176,53 @@ func writeDOCXFull(in DocInput, images []struct{ name, path string }) error {
 	if len(images) > 0 {
 		relsXML = addImageRels(relsXML, images, 100)
 	}
+	// Wire rId3 → settings.xml (rId1/rId2 are styles/numbering; images start at 100).
+	if hasTOC {
+		relsXML = strings.Replace(relsXML, "</Relationships>",
+			`<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/></Relationships>`, 1)
+	}
 
 	parts := []struct{ name, body string }{
 		{"[Content_Types].xml", ctXML},
 		{"_rels/.rels", rootRelsXML},
 		{"word/_rels/document.xml.rels", relsXML},
 		{"word/styles.xml", styles},
-		{"word/numbering.xml", numberingXML},
+		{"word/numbering.xml", numbering},
 		{"word/document.xml", xmlBody},
 	}
-	for _, p := range parts {
-		w, err := zw.Create(p.name)
-		if err != nil {
-			return err
-		}
-		if _, err := w.Write([]byte(p.body)); err != nil {
-			return err
-		}
+	if hasTOC {
+		parts = append(parts, struct{ name, body string }{
+			"word/settings.xml",
+			`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` + "\n" +
+				`<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+				`<w:updateFields w:val="true"/></w:settings>`,
+		})
 	}
 
-	// Add image files to the zip
-	for _, img := range images {
-		if err := addImageToZip(zw, img); err != nil {
-			return err
+	// Write to a temp file, then atomically rename over the target so a crash
+	// mid-write leaves the prior file (or no file on first write) intact rather
+	// than a truncated, unopenable .docx.
+	return atomicWrite(in.Path, func(f *os.File) error {
+		zw := zip.NewWriter(f)
+		for _, p := range parts {
+			w, err := zw.Create(p.name)
+			if err != nil {
+				return err
+			}
+			if _, err := w.Write([]byte(p.body)); err != nil {
+				return err
+			}
 		}
-	}
-
-	return zw.Close()
+		// Add image files to the zip
+		for _, img := range images {
+			if err := addImageToZip(zw, img); err != nil {
+				return err
+			}
+		}
+		// Close flushes the zip's central directory to f; do it inside the
+		// callback so an error aborts the rename (atomicWrite cleans up temp).
+		return zw.Close()
+	})
 }
 
 // writeDOCXAppend inserts new sections into an existing .docx while preserving
@@ -191,6 +234,14 @@ func writeDOCXFull(in DocInput, images []struct{ name, path string }) error {
 // New image rIds continue past the original's maximum rId so existing image
 // references (and any header/footer/hyperlink relationships) stay intact.
 func writeDOCXAppend(in DocInput, images []struct{ name, path string }) error {
+	// Guard the existing package against a decompression bomb before opening
+	// it — the append reads every part (copyZipPart io.Copy's each entry, and
+	// readDocxPartFromReader io.ReadAll's the modified ones). Without this a
+	// hostile/corrupted .docx passed as the append target OOMs the process.
+	// Mirrors the doc_write template-fill read guard and doc_read's binary-branch guard.
+	if err := guardDecompressionBomb(in.Path); err != nil {
+		return err
+	}
 	// buildTemp reads the existing package, splices in new sections, copies all
 	// unchanged parts, and writes the result to a temp file. It returns the
 	// temp path. The original zip reader is closed (via defer) BEFORE this
@@ -222,6 +273,8 @@ func writeDOCXAppend(in DocInput, images []struct{ name, path string }) error {
 		}
 		existingRels, relErr := readDocxPartFromReader(rz, "word/_rels/document.xml.rels")
 		existingCT, ctErr := readDocxPartFromReader(rz, "[Content_Types].xml")
+		existingNumbering, _ := readDocxPartFromReader(rz, "word/numbering.xml")
+		existingSettings, setErr := readDocxPartFromReader(rz, "word/settings.xml")
 
 		// New image rIds continue past the original's max rId so existing image
 		// / header / footer relationships stay valid. Computed BEFORE splicing
@@ -229,12 +282,19 @@ func writeDOCXAppend(in DocInput, images []struct{ name, path string }) error {
 		// body would also rewrite the original image's rIds).
 		relsBase := nextRIdBase(existingRels, relErr)
 
+		// Appended ordered lists need their own numIds that don't collide with
+		// the base doc's existing numbering definitions. numBase is the highest
+		// existing numId; buildSectionsXMLWithBase then allocates numBase+1,
+		// numBase+2, … per appended ordered list (each restarting at 1).
+		numBase := maxNumIdInNumbering(existingNumbering)
+		orderedCount := countOrderedLists(in)
+
 		// Build the new section fragments and remap their rIds to the append
 		// base BEFORE splicing. renderImage always emits rId100+i (the full-write
 		// base); here we shift each new image's embed to relsBase+i so it points
 		// at the relationship added below. Done on the fragment alone so the
 		// original body's rIds are untouched.
-		newFragments := buildSectionsXML(in)
+		newFragments := buildSectionsXMLWithBase(in, numBase)
 		if relsBase != 100 && len(images) > 0 {
 			for i := len(images) - 1; i >= 0; i-- {
 				old := fmt.Sprintf(`r:embed="rId%d"`, 100+i)
@@ -243,6 +303,29 @@ func writeDOCXAppend(in DocInput, images []struct{ name, path string }) error {
 			}
 		}
 		xmlBody := strings.Replace(existingDoc, "</w:body>", newFragments+"</w:body>", 1)
+
+		// Merge new numbering definitions (one per appended ordered list, each
+		// with a startOverride) into the existing numbering.xml so the appended
+		// lists render with independent counters.
+		numberingXML := mergeNumberingForAppend(existingNumbering, numBase, orderedCount)
+
+		// TOC handling: if the appended sections include a TOC, ensure
+		// word/settings.xml carries <w:updateFields/> so Word populates it on
+		// open. Inject into the existing settings if present, else create a
+		// minimal settings part. Also wire its content-type override + rel.
+		hasAppendTOC := false
+		for _, s := range in.Sections {
+			if strings.EqualFold(strings.TrimSpace(s.Type), "toc") {
+				hasAppendTOC = true
+				break
+			}
+		}
+		settingsXML := ""
+		needsSettingsPart := false
+		if hasAppendTOC {
+			settingsXML = injectUpdateFields(existingSettings, setErr)
+			needsSettingsPart = true
+		}
 
 		// Merged rels / content-types; fall back to static defaults when a part
 		// is absent (hand-authored minimal docx) so the package stays valid.
@@ -259,6 +342,23 @@ func writeDOCXAppend(in DocInput, images []struct{ name, path string }) error {
 		}
 		if len(images) > 0 {
 			ctXML = addImageContentTypes(ctXML, images)
+		}
+		// If we're emitting/overwriting settings.xml for a TOC, register its
+		// content-type override (idempotent — a base doc with settings already
+		// has it) and its relationship (use the next free rId past images).
+		if needsSettingsPart {
+			if !strings.Contains(ctXML, "/word/settings.xml") {
+				ctXML = strings.Replace(ctXML, "</Types>",
+					`<Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/></Types>`, 1)
+			}
+			if !strings.Contains(relsXML, `Target="settings.xml"`) {
+				settingsRId := relsBase // images occupy relsBase..relsBase+len-1
+				if len(images) > 0 {
+					settingsRId = relsBase + len(images)
+				}
+				relsXML = strings.Replace(relsXML, "</Relationships>",
+					fmt.Sprintf(`<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/></Relationships>`, settingsRId), 1)
+			}
 		}
 
 		// De-dup new image basenames against existing media entries.
@@ -284,7 +384,9 @@ func writeDOCXAppend(in DocInput, images []struct{ name, path string }) error {
 		}
 
 		// Write to a temp file: copy every original part verbatim except the
-		// four modified ones, then write those + new media.
+		// modified ones, then write those + new media. We always rewrite
+		// document/styles/rels/content-types; numbering.xml only when we added
+		// ordered-list definitions, and settings.xml only for a TOC.
 		out, err := os.CreateTemp(filepath.Dir(in.Path), ".docx-append-*")
 		if err != nil {
 			return "", fmt.Errorf("append: create temp file: %w", err)
@@ -297,6 +399,16 @@ func writeDOCXAppend(in DocInput, images []struct{ name, path string }) error {
 			"word/styles.xml":              true,
 			"word/_rels/document.xml.rels": true,
 			"[Content_Types].xml":          true,
+		}
+		// When we're rewriting numbering/settings, skip the original copies so
+		// our merged versions replace them (a zip can't contain two entries
+		// with the same name).
+		rewriteNumbering := orderedCount > 0
+		if rewriteNumbering {
+			skip["word/numbering.xml"] = true
+		}
+		if needsSettingsPart {
+			skip["word/settings.xml"] = true
 		}
 		for _, f := range rz.File {
 			if skip[f.Name] {
@@ -314,6 +426,12 @@ func writeDOCXAppend(in DocInput, images []struct{ name, path string }) error {
 			{"word/_rels/document.xml.rels", relsXML},
 			{"word/styles.xml", styles},
 			{"word/document.xml", xmlBody},
+		}
+		if rewriteNumbering {
+			modified = append(modified, struct{ name, body string }{"word/numbering.xml", numberingXML})
+		}
+		if needsSettingsPart {
+			modified = append(modified, struct{ name, body string }{"word/settings.xml", settingsXML})
 		}
 		for _, p := range modified {
 			w, err := zw.Create(p.name)
@@ -354,13 +472,42 @@ func writeDOCXAppend(in DocInput, images []struct{ name, path string }) error {
 	if err != nil {
 		return err
 	}
-	// The original reader is now closed; safe to rename over the original.
-	_ = os.Remove(in.Path)
+	// fsync the temp before the rename so a power loss after a successful
+	// rename still leaves the bytes committed to disk (crash-safety comes from
+	// the rename alone; this adds durability, mirroring atomicWrite's tmp.Sync).
+	if fsErr := fsyncPath(tmpName); fsErr != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("append: fsync temp: %w", fsErr)
+	}
+	// The original reader is now closed; rename the temp over the original in
+	// one step. os.Rename atomically replaces the destination on all platforms
+	// (POSIX rename-over-existing; Windows MoveFileEx with REPLACE_EXISTING),
+	// so we must NOT os.Remove the original first — a crash between a Remove
+	// and a Rename would lose the user's only copy. On any rename error the
+	// temp is cleaned up and the original is left untouched.
 	if err := os.Rename(tmpName, in.Path); err != nil {
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("append: replace file: %w", err)
 	}
 	return nil
+}
+
+// fsyncPath opens path read-write, fsyncs it, and closes it. This forces the
+// kernel page cache to disk so a power loss after a subsequent rename still
+// leaves the file's bytes committed. Errors are surfaced (best-effort: a
+// fsync failure on some filesystems is non-fatal, but we err on the side of
+// reporting).
+func fsyncPath(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR, 0o644)
+	if err != nil {
+		return err
+	}
+	syncErr := f.Sync()
+	closeErr := f.Close()
+	if syncErr != nil {
+		return syncErr
+	}
+	return closeErr
 }
 
 // nextRIdBase scans a document.xml.rels body for rId<N> relationships and
@@ -379,6 +526,86 @@ func nextRIdBase(relsXML string, relErr error) int {
 		}
 	}
 	return maxID + 1
+}
+
+// maxNumIdInNumbering scans a word/numbering.xml body for <w:num w:numId="N">
+// entries and returns the maximum N, so appended ordered lists can allocate
+// numIds that don't collide with the base document's existing definitions.
+// Returns 1 (the legacy decimal numId fairpeer always defines) when the part
+// is absent/unreadable — append then behaves like full-write (lists use 2,3,…).
+func maxNumIdInNumbering(numberingXML string) int {
+	if numberingXML == "" {
+		return 1
+	}
+	maxID := 1
+	for _, m := range numIdRegexp.FindAllStringSubmatch(numberingXML, -1) {
+		if len(m) >= 2 {
+			if n, err := strconv.Atoi(m[1]); err == nil && n > maxID {
+				maxID = n
+			}
+		}
+	}
+	return maxID
+}
+
+// injectUpdateFields returns a word/settings.xml body that forces Word to
+// update fields (TOC, page numbers) on open. If existingSettings is non-empty
+// and already contains updateFields, it's returned unchanged; otherwise
+// updateFields is injected before </w:settings>. When the base doc has no
+// settings part (setErr != nil / existingSettings empty), a minimal settings
+// part is created. This is used by append mode so a TOC added via append
+// auto-populates just like a full-write TOC.
+func injectUpdateFields(existingSettings string, setErr error) string {
+	const updateFieldsTag = `<w:updateFields w:val="true"/>`
+	if setErr != nil || existingSettings == "" {
+		// No settings part in the base doc — create a minimal one.
+		return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` + "\n" +
+			`<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+			updateFieldsTag + `</w:settings>`
+	}
+	if strings.Contains(existingSettings, "updateFields") {
+		return existingSettings // already asks Word to update fields
+	}
+	// Inject just before the closing tag. If the body lacks </w:settings>
+	// (malformed), fall back to creating a fresh minimal part.
+	merged := strings.Replace(existingSettings, "</w:settings>", updateFieldsTag+"</w:settings>", 1)
+	if merged == existingSettings {
+		return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` + "\n" +
+			`<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+			updateFieldsTag + `</w:settings>`
+	}
+	return merged
+}
+
+// mergeNumberingForAppend inserts one <w:num> entry per appended ordered list
+// into an existing numbering.xml body, each referencing abstractNumId=1 (the
+// shared decimal definition) with a <w:startOverride> so its counter restarts
+// at 1. numBase is the first numId to allocate; orderedCount is how many
+// ordered lists the appended sections contain. If the base numbering part is
+// empty/unreadable, fall back to the static numberingXML and append onto that.
+func mergeNumberingForAppend(existingNumbering string, numBase, orderedCount int) string {
+	if orderedCount <= 0 {
+		if existingNumbering == "" {
+			return numberingXML
+		}
+		return existingNumbering
+	}
+	base := existingNumbering
+	if base == "" {
+		base = numberingXML
+	}
+	var extra strings.Builder
+	for i := 1; i <= orderedCount; i++ {
+		numID := numBase + i
+		fmt.Fprintf(&extra, `<w:num w:numId="%d"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>`, numID)
+	}
+	// Insert before the closing tag. If the body somehow lacks </w:numbering>
+	// (malformed), append at the end as a last resort.
+	merged := strings.Replace(base, "</w:numbering>", extra.String()+"</w:numbering>", 1)
+	if merged == base {
+		merged = base + extra.String()
+	}
+	return merged
 }
 
 // copyZipPart copies one file from a source zip reader into a zip writer,
@@ -429,7 +656,10 @@ func readDocxPartFromReader(r *zip.ReadCloser, partName string) (string, error) 
 		}
 		return string(data), nil
 	}
-	return "", fmt.Errorf("part %q not found", partName)
+	// Wrap fs.ErrNotExist so callers can distinguish a missing part (use
+	// defaults) from a corrupt-but-present part (must surface). The append path
+	// checks errors.Is(err, fs.ErrNotExist) to decide its styles.xml fallback.
+	return "", fmt.Errorf("part %q not found: %w", partName, fs.ErrNotExist)
 }
 
 // addImageContentTypes adds image MIME types to [Content_Types].xml. Each
@@ -491,12 +721,24 @@ func addImageRels(relsXML string, images []struct{ name, path string }, base int
 // find the maximum existing rId so appended relationships never collide.
 var reIdRegexp = regexp.MustCompile(`Id="rId(\d+)"`)
 
+// numIdRegexp matches <w:num w:numId="N"> entries inside numbering.xml, used to
+// find the maximum existing numId so appended ordered lists allocate ids that
+// don't collide with the base document's numbering definitions.
+var numIdRegexp = regexp.MustCompile(`<w:num w:numId="(\d+)"`)
+
 // buildSectionsXML renders only the section fragments (no XML header or
 // <w:body> wrapper) for use in append mode. It mirrors renderSection's dispatch
 // so the same input renders identically in append and full-write modes.
-func buildSectionsXML(in DocInput) string {
+// buildSectionsXML renders the new-section fragments (WITHOUT the
+// <w:body> wrapper) for use in append mode. numBase is the first numId the
+// appended ordered lists may use (so they don't collide with the base doc's
+// existing numbering definitions); pass 1 for full-write mode (lists then use
+// 2,3,…). It mirrors renderSection's dispatch so the same input renders
+// identically in append and full-write modes.
+func buildSectionsXMLWithBase(in DocInput, numBase int) string {
 	var b strings.Builder
-	imgCounter := 0 // shared across the loop → unique r:embed / docPr id per image
+	imgCounter := 0     // shared across the loop → unique r:embed / docPr id per image
+	orderedCounter := 0 // each ordered list gets its own numId (restart at 1)
 	for _, sec := range in.Sections {
 		switch strings.ToLower(strings.TrimSpace(sec.Type)) {
 		case "heading":
@@ -517,7 +759,12 @@ func buildSectionsXML(in DocInput) string {
 			if len(items) == 0 && sec.Text != "" {
 				items = []string{sec.Text}
 			}
-			b.WriteString(renderList(items, sec.Ordered))
+			numID := 0
+			if sec.Ordered {
+				orderedCounter++
+				numID = numBase + orderedCounter
+			}
+			b.WriteString(renderList(items, sec.Ordered, numID))
 		case "image":
 			b.WriteString(renderImage(sec, imgCounter))
 			imgCounter++
@@ -530,6 +777,11 @@ func buildSectionsXML(in DocInput) string {
 	}
 	return b.String()
 }
+
+// buildSectionsXML is the full-write-mode wrapper: ordered lists use numId 2,3,…
+// (numBase=1, so the first ordered list is numBase+1=2). Kept for back-compat
+// with call sites that don't append into an existing package.
+func buildSectionsXML(in DocInput) string { return buildSectionsXMLWithBase(in, 1) }
 
 // buildDocumentXML renders the <w:document><w:body>…</w:body></w:document>
 // from sections. Each section maps to one or more <w:p>/<w:tbl> blocks. An
@@ -544,8 +796,9 @@ func buildDocumentXML(in DocInput) string {
 		b.WriteString(renderHeading(in.Title, 1, DocStyle{Bold: true}))
 	}
 	imgCounter := 0
+	orderedCounter := 0
 	for _, s := range in.Sections {
-		b.WriteString(renderSection(s, &imgCounter))
+		b.WriteString(renderSection(s, &imgCounter, &orderedCounter))
 	}
 	// Section properties: A4 page size + default margins so the doc renders
 	// predictably across readers (Word defaults to US Letter otherwise).
@@ -560,7 +813,7 @@ func buildDocumentXML(in DocInput) string {
 // so the agent never produces a broken doc over a typo. imgIdx is incremented
 // once per image section so every drawing references a distinct relationship id
 // (rId100+i) and carries a unique docPr id (1000+i).
-func renderSection(s DocSection, imgIdx *int) string {
+func renderSection(s DocSection, imgIdx *int, orderedCounter *int) string {
 	switch strings.ToLower(s.Type) {
 	case "heading":
 		lvl := s.Level
@@ -583,7 +836,15 @@ func renderSection(s DocSection, imgIdx *int) string {
 		if len(items) == 0 && s.Text != "" {
 			items = []string{s.Text}
 		}
-		return renderList(items, s.Ordered)
+		// Allocate a fresh numId (>=2) for each ordered list so it restarts at 1.
+		// numId=1 stays defined as the legacy default but is never referenced by
+		// renderList anymore; ordered lists use 2, 3, 4… built by buildNumberingXML.
+		numID := 0
+		if s.Ordered && orderedCounter != nil {
+			*orderedCounter++
+			numID = *orderedCounter + 1 // +1 so the first ordered list is numId=2
+		}
+		return renderList(items, s.Ordered, numID)
 	case "table":
 		return renderTable(s.Headers, s.Rows, s.Style)
 	case "image":
@@ -645,12 +906,14 @@ func pPrXML(pStyle string, st DocStyle) string {
 }
 
 // renderList emits a sequence of paragraphs each carrying a numbering property.
-// We use the numPr abstractNumId 0 (unordered, bullet) or 1 (ordered, decimal)
-// defined in styles.xml — so lists show proper bullets/numbers, not dashes.
-func renderList(items []string, ordered bool) string {
-	numID := 0
-	if ordered {
-		numID = 1
+// Unordered lists use numId=0 (bullet). Each ordered list gets its own numId
+// (>=2) so it restarts counting at 1 instead of continuing from the previous
+// ordered list — the matching <w:num> with <w:startOverride> is emitted by
+// buildNumberingXML. Pass numID=0 for unordered, or the allocated id for
+// ordered (the caller increments its ordered-list counter before calling).
+func renderList(items []string, ordered bool, numID int) string {
+	if !ordered {
+		numID = 0 // bullet abstractNum
 	}
 	var b strings.Builder
 	for _, it := range items {
@@ -862,6 +1125,12 @@ func hexNoHash(s string) string {
 
 // --- static OOXML parts -----------------------------------------------------
 
+// maxImageBytes caps a single embedded image's size. addImageToZip reads the
+// whole image into memory, so without this a multi-GB referenced image would
+// OOM. 25 MiB is well above any reasonable embedded doc image (a full-page
+// 300 DPI photo is ~5-10 MiB) while bounding peak memory.
+const maxImageBytes int64 = 25 << 20 // 25 MiB
+
 const contentTypesXML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
@@ -892,6 +1161,40 @@ const numberingXML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>
 <w:num w:numId="0"><w:abstractNumId w:val="0"/></w:num>
 </w:numbering>`
+
+// buildNumberingXML returns the numbering.xml part with one decimal <w:num>
+// entry per ordered list in the document, each carrying a <w:startOverride
+// w:val="1"/> so every ordered list restarts counting at 1 instead of
+// continuing from the previous one. numId=0 (bullet) and numId=1 (legacy
+// decimal, kept for back-compat) are always present; ordered lists use
+// numId 2..orderedCount+1. abstractNumId=1 is the shared decimal definition.
+func buildNumberingXML(orderedCount int) string {
+	if orderedCount <= 0 {
+		return numberingXML
+	}
+	var extra strings.Builder
+	for i := 1; i <= orderedCount; i++ {
+		numID := i + 1
+		fmt.Fprintf(&extra, `<w:num w:numId="%d"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>`, numID)
+	}
+	// Insert before </w:numbering>.
+	return strings.Replace(numberingXML, "</w:numbering>", extra.String()+"</w:numbering>", 1)
+}
+
+// countOrderedLists returns how many ordered list sections appear in in.Sections.
+// Used to size the per-list numbering definitions emitted by buildNumberingXML.
+// Matches renderSection's accepted type aliases: "list" (with Ordered), and
+// "ol" (always ordered). "ul" is unordered and excluded.
+func countOrderedLists(in DocInput) int {
+	n := 0
+	for _, s := range in.Sections {
+		t := strings.ToLower(strings.TrimSpace(s.Type))
+		if t == "ol" || (t == "list" && s.Ordered) {
+			n++
+		}
+	}
+	return n
+}
 
 // defaultStylesXML defines Normal + Heading1-6 styles. Heading sizes:
 // H1=32 half-pts (16pt), H2=28 (14pt), H3=24 (12pt), H4=24 (12pt), H5=22 (11pt),

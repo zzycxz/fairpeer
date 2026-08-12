@@ -1,12 +1,12 @@
 package builtin
 
-// docxtemplate.go implements the doc_template tool: read a .docx template,
-// fill placeholders / table cells / header-footer, and write a NEW file
-// (the template is never modified). This is the office-assistant's core
+// docxtemplate.go implements doc_write's template-fill mode: read a .docx
+// template, fill placeholders / table cells / header-footer, and write a NEW
+// file (the template is never modified). This is the office-assistant's core
 // workflow: a user has a contract/report template and asks the agent to fill
 // in the names, dates, amounts, and table data.
 //
-// Design (absorbs the v3 plan + the audit findings):
+// Design:
 //   - source is READ-ONLY and confined to the workspace; source != path is
 //     enforced so a crash can never overwrite the template.
 //   - find_replace uses a Unicode-aware placeholder regex ({{name}}, {{a.b}},
@@ -18,9 +18,9 @@ package builtin
 //     resolve correctly through merged cells; filling a vMerge-continuation
 //     cell returns ErrMergedCell pointing at the merge start.
 //   - header/footer resolves rId → file via word/_rels/document.xml.rels
-//     (the v3 plan's "just read document.xml" approach can't locate them).
-//   - Writes are crash-atomic via atomicWrite (Phase 0); best-effort mode
-//     collects failures as warnings instead of aborting the whole fill.
+//     (a "just read document.xml" approach can't locate them).
+//   - Writes are crash-atomic via atomicWrite; best-effort mode collects
+//     failures as warnings instead of aborting the whole fill.
 //
 // The OOXML walk is a custom xml.Decoder streaming pass rather than a DOM
 // library — we only need to splice text runs and tc shading, and a streaming

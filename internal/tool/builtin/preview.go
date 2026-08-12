@@ -35,6 +35,12 @@ func (w writeFile) Preview(args json.RawMessage) (diff.Change, error) {
 		return diff.Change{}, fmt.Errorf("path is required")
 	}
 	p.Path = resolveIn(w.workDir, p.Path)
+	// Confine reads to the workspace too — a preview runs BEFORE the permission
+	// gate, so without this the diff card could surface file contents from
+	// outside the workspace. Execute enforces the same boundary after the gate.
+	if err := confine(w.roots, p.Path); err != nil {
+		return diff.Change{}, err
+	}
 
 	old, kind := "", diff.Create
 	if data, err := os.ReadFile(p.Path); err == nil {
@@ -65,6 +71,10 @@ func (e editFile) Preview(args json.RawMessage) (diff.Change, error) {
 		return diff.Change{}, fmt.Errorf("old_string is required")
 	}
 	p.Path = resolveIn(e.workDir, p.Path)
+	// Confine reads to the workspace — preview runs before the permission gate.
+	if err := confine(e.roots, p.Path); err != nil {
+		return diff.Change{}, err
+	}
 
 	content, _, err := readFileEncoded(p.Path)
 	if err != nil {
@@ -116,6 +126,10 @@ func (m multiEdit) Preview(args json.RawMessage) (diff.Change, error) {
 		return diff.Change{}, fmt.Errorf("edits must not be empty")
 	}
 	p.Path = resolveIn(m.workDir, p.Path)
+	// Confine reads to the workspace — preview runs before the permission gate.
+	if err := confine(m.roots, p.Path); err != nil {
+		return diff.Change{}, err
+	}
 
 	content, _, err := readFileEncoded(p.Path)
 	if err != nil {

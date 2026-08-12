@@ -152,7 +152,13 @@ func XLSXWriteStructured(wb XLSXWorkbook) (int, error) {
 		}
 	}
 
-	if err := f.SaveAs(wb.Path); err != nil {
+	// Write the workbook to a temp file via f.WriteTo, then atomically swap it
+	// over wb.Path (temp + fsync + rename) so a crash mid-write can't leave a
+	// torn .xlsx. atomicWrite creates the temp in filepath.Dir(wb.Path).
+	if err := atomicWrite(wb.Path, func(out *os.File) error {
+		_, err := f.WriteTo(out)
+		return err
+	}); err != nil {
 		return 0, err
 	}
 	return len(wb.Sheets), nil
@@ -191,8 +197,20 @@ func writeSheet(f *excelize.File, sheet string, sh XLSXSheet, styleCache map[str
 				return fmt.Errorf("number %s: %w", ref, err)
 			}
 		} else if c.Value != nil {
-			if err := f.SetCellValue(sheet, ref, *c.Value); err != nil {
-				return fmt.Errorf("value %s: %w", ref, err)
+			// Auto-type numeric-looking strings (mirrors XLSXWriteRows) so a
+			// value field of "100" is stored as a number and sums correctly.
+			// Callers wanting explicit text should still use the value field
+			// with a non-numeric string; for explicit numbers use the number
+			// field. Leading-zero / thousands-separated strings stay text.
+			v := *c.Value
+			if isNumericLiteral(v) {
+				if err := f.SetCellValue(sheet, ref, numericValue(v)); err != nil {
+					return fmt.Errorf("value %s: %w", ref, err)
+				}
+			} else {
+				if err := f.SetCellValue(sheet, ref, v); err != nil {
+					return fmt.Errorf("value %s: %w", ref, err)
+				}
 			}
 		}
 		// Style + number format: build ONE style that carries both the run
@@ -308,7 +326,7 @@ func addConditionalFormat(f *excelize.File, sheet string, cf XLSXCondFmt) error 
 		}
 		format := excelize.ConditionalFormatOptions{
 			Type:     "cell",
-			Criteria: cf.Criteria,
+			Criteria: normalizeCriteria(cf.Criteria),
 			Format:   &styleID,
 			Value:    cf.Value, // "min,max" for "between"; single value otherwise
 		}

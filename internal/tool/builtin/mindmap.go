@@ -69,7 +69,7 @@ func writeMindMapMD(in MMInput) (string, error) {
 		writeMDNode(&b, node, startLevel)
 	}
 	out := strings.TrimRight(b.String(), "\n") + "\n"
-	if err := os.WriteFile(in.Path, []byte(out), 0o644); err != nil {
+	if err := atomicWriteBytes(in.Path, []byte(out)); err != nil {
 		return "", err
 	}
 	return "md", nil
@@ -151,10 +151,33 @@ func writeMindMapHTML(in MMInput) (string, error) {
 </script>
 </body>
 </html>`
-	if err := os.WriteFile(in.Path, []byte(htmlDoc), 0o644); err != nil {
+	if err := atomicWriteBytes(in.Path, []byte(htmlDoc)); err != nil {
 		return "", err
 	}
 	return "html", nil
+}
+
+// extractMindMapMarkdown is the inverse of writeMindMapHTML: it detects whether
+// an HTML document is a self-contained markmap mind map (the signature is the
+// `<svg id="mindmap">` target plus the `const MD = "..."` line written by
+// writeMindMapHTML) and, if so, pulls the embedded Markdown back out. The
+// markdown is stored as a JSON-encoded string literal, so a json.Decoder reads
+// exactly one value and ignores the trailing `;` and viewer script. Returns
+// (markdown, true) on a match, ("", false) for any other HTML. doc_read uses
+// this so reading a mind-map .html yields the heading-level tree (the model
+// sees the tree, not a wall of CDN <script> tags).
+func extractMindMapMarkdown(htmlContent string) (string, bool) {
+	if !strings.Contains(htmlContent, `<svg id="mindmap">`) || !strings.Contains(htmlContent, "const MD =") {
+		return "", false
+	}
+	idx := strings.Index(htmlContent, "const MD =")
+	rest := htmlContent[idx+len("const MD ="):]
+	dec := json.NewDecoder(strings.NewReader(rest))
+	var md string
+	if err := dec.Decode(&md); err != nil {
+		return "", false
+	}
+	return md, true
 }
 
 // describeMindMapOutput renders the success message for the tool.
@@ -169,7 +192,10 @@ var _ = html.EscapeString // keep html import used (title escaping)
 
 // --- mindmap_create tool ----------------------------------------------------
 
-type mindmapCreate struct{}
+type mindmapCreate struct {
+	roots   []string
+	workDir string
+}
 
 func (mindmapCreate) Name() string { return "mindmap_create" }
 
@@ -200,7 +226,7 @@ func (mindmapCreate) Schema() json.RawMessage {
 
 func (mindmapCreate) ReadOnly() bool { return false }
 
-func (mindmapCreate) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (m mindmapCreate) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var in MMInput
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -208,14 +234,17 @@ func (mindmapCreate) Execute(ctx context.Context, args json.RawMessage) (string,
 	if strings.TrimSpace(in.Path) == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	abs, err := filepath.Abs(in.Path)
-	if err != nil {
+	in.Path = resolveIn(m.workDir, in.Path)
+	// Confine writes to the workspace — without this mindmap_create is the one
+	// writer that could scribble outside [sandbox] workspace_root (e.g. into
+	// ~/.bashrc or .git/config), since it never went through ConfineWriters or
+	// Workspace.Tools overrides. Same boundary the other writers enforce.
+	if err := confine(m.roots, in.Path); err != nil {
 		return "", err
 	}
-	in.Path = abs
 	format, err := writeMindMap(in)
 	if err != nil {
 		return "", err
 	}
-	return describeMindMapOutput(abs, format), nil
+	return describeMindMapOutput(in.Path, format), nil
 }
