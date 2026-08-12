@@ -112,7 +112,13 @@ python3 <skill_dir>/scripts/extract_template_colors.py ~/.fairpeer/ppt-template.
 - `colors`：模板真实配色（background/accent/text 等），用于内容着色
 - `fonts.family`：模板字体 + 跨平台降级链（如 `"等线", "Microsoft YaHei", "PingFang SC", sans-serif`），SVG 文字用此字体
 
-**视觉配色（可选，优先级最高）**：若 `~/.fairpeer/ppt-template-style.json` 存在（由设置面板选模板时后台自动生成），其配色优先于 `extract_template_colors.py` 的结果。
+**合并视觉配色（机械步骤，必须执行）**：extract 之后运行 merge，把 VLM 提取的颜色真正写进 config（不合并则视觉配色只是文件摆在那、不生效）：
+
+```bash
+python3 <skill_dir>/scripts/merge_vlm_style.py <skill_dir>/template_config.json
+```
+
+此脚本读 `~/.fairpeer/ppt-template-style.json`（选模板时视觉模型生成）和 `~/.fairpeer/reference-style.json`（参考图分析生成，若有），把颜色**机械合并进** `template_config.json`（reference 优先 > 模板视觉 > extract 基线，含 is_dark 派生 secondary/muted/card_bg/line）。合并后 config 的 `colors` 即最终生效值——Step 3 只读它，无需再单独读 ppt-template-style.json。
 
 ### Step 1: 提取源文档（如有）
 
@@ -135,14 +141,27 @@ read_file <skill_dir>/template_config.json
 
 `template_config.json` 是**配色、字号、布局规则的唯一事实源**。牢记其中的 `colors`（background/accent/text 等）——后续写大纲、生成 SVG 时**只能用这些颜色，禁止凭主题名推断品牌色**。
 
-若有 `~/.fairpeer/ppt-template-style.json`（视觉提取），也读它——其配色优先级最高。
+（视觉配色已由 Step 0 的 `merge_vlm_style.py` 机械合并进 `template_config.json`，无需另读 `ppt-template-style.json`）
+
+**参考图（若有）**：若 `~/.fairpeer/reference-style.json` 存在（用户给参考图时由 desktop 的 `AnalyzeReferenceImage` 生成），读它的 `description`——VLM 对参考图的 4 段描述：
+
+```bash
+read_file ~/.fairpeer/reference-style.json
+```
+
+- **CONTENT**：参考图文字内容（若用户要"照这个内容"，以此为准）
+- **LAYOUT**：版式 + 内容密度（选 `references/layout_templates.md` 对应布局，密度指导元素数）
+- **FORMAT**：字号相对比例（标题/正文 谁大谁小，喂字号选择）
+- **DESIGN**：颜色/风格（辅助；精确颜色仍以 `template_config.json` 为准）
+
+写大纲（Step 5）和 SVG（Step 6）时参照它——目标是"画一页类似的"，不是像素复刻。
 
 ### 颜色规则（唯一来源）
 
 | 层级 | 来源 | 说明 |
 |------|------|------|
 | 基线 | `template_config.json` | 始终有效，提供全部颜色字段 |
-| 视觉提取（最高） | `~/.fairpeer/ppt-template-style.json`（若存在） | 设置面板选模板时由视觉模型自动生成；覆盖 background/accent/text 等关键字段 |
+| 视觉提取（最高） | 由 Step 0 `merge_vlm_style.py` 机械合并进 `template_config.json` | 来源：`ppt-template-style.json`（选模板）+ `reference-style.json`（参考图，若有）；reference 优先 |
 | 用户输入 | 自然语言（"用绿色主色"） | 只覆盖明确提及的字段 |
 
 **⚠️ 严禁凭空捏造颜色。严禁凭主题名推断品牌色（如"中国移动"≠ 自己编蓝色）。配色只能从已读的 config 取。**
