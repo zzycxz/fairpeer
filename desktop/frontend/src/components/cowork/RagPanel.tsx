@@ -232,45 +232,13 @@ export function RagPanel() {
             }}
           />
         ) : (
-          <div
-            className="rag-panel__empty-canvas-guide"
-            style={{
-              flex: 1,
-              width: "100%",
-              height: "100%",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 16,
-              background: "radial-gradient(circle at center, rgba(59, 130, 246, 0.05) 0%, transparent 70%)",
-            }}
-          >
-            <div
-              style={{
-                width: 64,
-                height: 64,
-                borderRadius: 20,
-                background: "rgba(249, 115, 22, 0.1)",
-                color: "#f97316",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                boxShadow: "0 8px 24px rgba(249, 115, 22, 0.12)",
-                border: "1px solid rgba(249, 115, 22, 0.2)",
-              }}
-            >
-              <FolderPlus size={32} />
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, maxWidth: 480, textAlign: "center" }}>
-              <h3 style={{ fontSize: 17, fontWeight: 600, color: "var(--fg)", margin: 0 }}>
-                {activeCollection ? t("cowork.ragEmptyInCollection", { collection: activeCollection }) : t("cowork.ragHomeReady")}
-              </h3>
-              <p style={{ fontSize: 13, color: "var(--fg-dim)", margin: 0, lineHeight: 1.5 }}>
-                {t("cowork.ragBuildDesc")}
-              </p>
-            </div>
-            <div style={{ padding: "6px 14px", borderRadius: 20, background: "var(--bg-soft)", border: "1px solid var(--border-soft)", fontSize: 11.5, color: "var(--fg-faint)" }}>
+          <div className="rag-panel__empty-canvas-guide empty-state" style={{ flex: 1 }}>
+            <div className="empty-state__icon"><FolderPlus size={28} /></div>
+            <h3 className="empty-state__title">
+              {activeCollection ? t("cowork.ragEmptyInCollection", { collection: activeCollection }) : t("cowork.ragHomeReady")}
+            </h3>
+            <p className="empty-state__desc">{t("cowork.ragBuildDesc")}</p>
+            <div className="badge">
               {supportedFormats.length > 0
                 ? t("cowork.ragSupportFormats", { formats: supportedFormats.join(" / ") })
                 : t("cowork.ragSupportFormatsDefault")}
@@ -279,21 +247,6 @@ export function RagPanel() {
               type="button"
               className="btn btn--primary"
               onClick={() => setShowImportModal(true)}
-              style={{
-                marginTop: 6,
-                padding: "9px 24px",
-                borderRadius: 8,
-                background: "var(--accent)",
-                color: "#fff",
-                border: "none",
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                boxShadow: "0 4px 12px rgba(249, 115, 22, 0.25)",
-              }}
             >
               <FolderPlus size={16} />
               <span>{t("cowork.ragImportAssets")}</span>

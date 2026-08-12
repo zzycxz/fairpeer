@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Loader2, XCircle } from "lucide-react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
 import { useT } from "../lib/i18n";
@@ -162,6 +162,8 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         }}
         aria-expanded={hasBody ? open : undefined}
       >
+        {item.status === "running" && <Loader2 size={13} className="tool__status tool__status--running" />}
+        {item.status === "error" && <XCircle size={13} className="tool__status tool__status--error" />}
         <span className="tool__label-group">
           <span className="tool__name">{item.name}</span>
           {subject && <span className="tool__subject">{subject}</span>}

@@ -6,7 +6,7 @@ import { replaceAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
 import { AssistantMessage, TurnActions, UserMessage } from "./Message";
 import { ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
-import { ChevronRight } from "lucide-react";
+import { AlertTriangle, ChevronRight, Info } from "lucide-react";
 import { Welcome } from "./Welcome";
 import { getDisplayMode, onDisplayModeChange, type DisplayMode } from "../lib/displayMode";
 
@@ -1133,7 +1133,7 @@ function PhaseCard({ text }: { text: string }) {
 function NoticeCard({ level, text }: { level: NoticeItem["level"]; text: string }) {
   return (
     <div className={`notice-line notice-line--${level}`}>
-      <span className="notice-line__icon">{level === "warn" ? "⚠ " : "ℹ "}</span>
+      <span className="notice-line__icon">{level === "warn" ? <AlertTriangle size={13} /> : <Info size={13} />}</span>
       <span className="notice-line__text">{text}</span>
     </div>
   );

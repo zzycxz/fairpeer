@@ -4,7 +4,7 @@
 // new topic.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ChevronRight, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare } from "lucide-react";
+import { Archive, ChevronRight, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare, Users } from "lucide-react";
 import { asArray } from "../lib/array";
 import { app } from "../lib/bridge";
 import type { ProjectNode, ProjectTopicStatus } from "../lib/types";
@@ -640,7 +640,7 @@ export function ProjectTree({
           onContextMenu={openExpertMenu}
           onClick={() => { if (onOpenExpertSession) void onOpenExpertSession(node.expertTeamId!, node.expertTeamName ?? label); }}
         >
-          <span className="project-tree__topic-icon">🤝</span>
+          <span className="project-tree__topic-icon"><Users size={14} /></span>
           <span className="project-tree__topic-label">{label}</span>
           {node.open && <span className="project-tree__topic-open-dot" />}
           {status && <span className={`project-tree__topic-status project-tree__topic-status--${status}`} />}

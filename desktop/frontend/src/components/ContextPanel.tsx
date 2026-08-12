@@ -212,7 +212,7 @@ export function ContextPanel({
     : 0;
   const breakdown = contextBreakdown(usedTokens, windowTokens, promptTokens, completionTokens, reasoningTokens);
   const donutStyle = {
-    background: `conic-gradient(#13a7a5 0 ${breakdown.promptPct}%, #2f6df6 ${breakdown.promptPct}% ${breakdown.completionPct}%, #f97316 ${breakdown.completionPct}% ${breakdown.reasoningPct}%, var(--border) ${breakdown.reasoningPct}% ${breakdown.otherPct}%, var(--border-soft) ${breakdown.otherPct}% 100%)`,
+    background: `conic-gradient(var(--token-prompt) 0 ${breakdown.promptPct}%, var(--token-completion) ${breakdown.promptPct}% ${breakdown.completionPct}%, var(--token-reasoning) ${breakdown.completionPct}% ${breakdown.reasoningPct}%, var(--border) ${breakdown.reasoningPct}% ${breakdown.otherPct}%, var(--border-soft) ${breakdown.otherPct}% 100%)`,
   };
   const eventTimes = [
     ...readFiles.map((file) => file.time),

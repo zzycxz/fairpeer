@@ -8,6 +8,7 @@
 // expert researching, separate from its spoken answer.
 
 import type { RefObject } from "react";
+import { Search } from "lucide-react";
 import type { Translator } from "../../lib/i18n";
 
 export interface StreamMessage {
@@ -27,6 +28,18 @@ type Segment =
   | { type: "search"; query: string };
 
 const SEARCH_MARKER = "🔍 搜索:";
+
+// Peer identity — each expert gets a stable color (name hash → hue) + initial,
+// so the multi-expert collab stream reads as distinct peers rather than a stack
+// of identical text boxes (the flagship "peer collaboration" visual).
+function peerColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return `hsl(${h % 360}, 52%, 46%)`;
+}
+function peerInitial(name: string): string {
+  return (name.trim()[0] || "?").toUpperCase();
+}
 
 // splitSegments pulls "🔍 搜索: query" lines out of an expert's text, returning
 // alternating text/search segments. Lines without the marker are answer prose.
@@ -96,13 +109,14 @@ export function CollabStream({
             return (
               <div key={i} className={`cowork-expert__turn ${m.streaming ? "cowork-expert__turn--streaming" : ""}`}>
                 <div className="cowork-expert__turn-head">
+                  <span className="cowork-expert__turn-avatar" style={{ background: peerColor(m.expertName) }} aria-hidden="true">{peerInitial(m.expertName)}</span>
                   <span className="cowork-expert__turn-name">{m.expertName}</span>
                   {m.streaming && <span className="cowork-expert__turn-cursor">▋</span>}
                 </div>
                 {segs.map((seg, si) =>
                   seg.type === "search" ? (
                     <div key={si} className="cowork-expert__search-card">
-                      <span className="cowork-expert__search-card-icon">🔍</span>
+                      <span className="cowork-expert__search-card-icon"><Search size={12} /></span>
                       <span className="cowork-expert__search-card-label">{t("cowork.expertSearching")}</span>
                       <span className="cowork-expert__search-card-query">{seg.query}</span>
                     </div>

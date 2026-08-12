@@ -27,6 +27,9 @@ import {
   Folder,
   FolderPlus,
   Mail,
+  Coffee,
+  MessageSquare,
+  PartyPopper,
 
   RefreshCw,
   Search,
@@ -441,15 +444,15 @@ function TodayView() {
             <span style={{ fontWeight: 600 }}>{t("cowork.todaySchedule")}</span>
           </div>
           <div className="cowork-today__briefing-body" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            <div>1. <CalendarClock size={13} style={{ color: "#8b949e", margin: "0 2px", verticalAlign: "middle" }} />{t("cowork.todayItems", { count: String(todayItems.length) })}</div>
-            <div>2. <Mail size={13} style={{ color: "#58a6ff", margin: "0 2px", verticalAlign: "middle" }} />{t("cowork.unreadMails", { count: String(unreadCount) })}</div>
-            <div>3. ☕ {t("cowork.noUrgenda")}</div>
-            <div>4. 🤖 {t("cowork.clickForSummary")}</div>
+            <div>1. <CalendarClock size={13} style={{ color: "var(--fg-faint)", margin: "0 2px", verticalAlign: "middle" }} />{t("cowork.todayItems", { count: String(todayItems.length) })}</div>
+            <div>2. <Mail size={13} style={{ color: "var(--accent)", margin: "0 2px", verticalAlign: "middle" }} />{t("cowork.unreadMails", { count: String(unreadCount) })}</div>
+            <div>3. <Coffee size={13} style={{ margin: "0 2px", verticalAlign: "middle" }} /> {t("cowork.noUrgenda")}</div>
+            <div>4. <Bot size={13} style={{ margin: "0 2px", verticalAlign: "middle" }} /> {t("cowork.clickForSummary")}</div>
             {todayHoliday && (
-              <div style={{ color: "#f85149", fontWeight: 600 }}>🎉 {t("cowork.holidayGreeting", { name: todayHoliday.title })}</div>
+              <div style={{ color: "var(--err)", fontWeight: 600 }}><PartyPopper size={13} style={{ margin: "0 2px", verticalAlign: "middle" }} /> {t("cowork.holidayGreeting", { name: todayHoliday.title })}</div>
             )}
             {!todayHoliday && nextHoliday && daysToNext <= 14 && (
-              <div style={{ color: "#f0883e" }}>📅 {t("cowork.daysToHoliday", { name: nextHoliday.title, count: String(daysToNext) })}</div>
+              <div style={{ color: "var(--warn)" }}><CalendarDays size={13} style={{ margin: "0 2px", verticalAlign: "middle" }} /> {t("cowork.daysToHoliday", { name: nextHoliday.title, count: String(daysToNext) })}</div>
             )}
           </div>
           <div className="cowork-today__briefing-actions">
@@ -494,11 +497,11 @@ function TodayView() {
                   {/* kind badge: 📅 event vs ⚡ task, so the two underlying systems
                       are still distinguishable inside the unified list. */}
                   <span className="cowork-today__kind" title={it.kind === "event" ? t("cowork.calendarEvent") : t("cowork.scheduledTask")}>
-                    {it.kind === "event" ? "📅" : "⚡"}
+                    {it.kind === "event" ? <CalendarDays size={12} /> : <Zap size={12} />}
                   </span>
                   {/* output-mode hint when the item pushes to IM/email */}
-                  {it.outputMode === "im" && <span className="cowork-today__out" title={t("cowork.pushToIM")}>💬</span>}
-                  {it.outputMode === "email" && <span className="cowork-today__out" title={t("cowork.pushToEmail")}>✉️</span>}
+                  {it.outputMode === "im" && <span className="cowork-today__out" title={t("cowork.pushToIM")}><MessageSquare size={12} /></span>}
+                  {it.outputMode === "email" && <span className="cowork-today__out" title={t("cowork.pushToEmail")}><Mail size={12} /></span>}
                 </li>
               );
             })}
@@ -1395,7 +1398,7 @@ function RagDock({
                       className={`rag-create-modal__template ${newCollectionParent === tpl ? "rag-create-modal__template--selected" : ""}`}
                       onClick={() => setNewCollectionParent(tpl)}
                     >
-                      📁 {tpl}
+                      <Folder size={13} /> {tpl}
                     </button>
                   ))}
                   <button

@@ -9,7 +9,7 @@
 // structure matches the live panel (rounds → expert turns → synthesis).
 
 import { useState, type MouseEvent } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Users } from "lucide-react";
 
 import { useT } from "../lib/i18n";
 import { useConfirm } from "../lib/confirm";
@@ -62,7 +62,7 @@ export function ExpertCollabCard({ item, onDelete }: { item: CollabItem; onDelet
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((v) => !v); } }}
         aria-expanded={open}
       >
-        <span className="expert-collab__icon">🤝</span>
+        <span className="expert-collab__icon"><Users size={14} /></span>
         <span className="expert-collab__title">{t("cowork.expertCollabCard")}</span>
         <span className="expert-collab__team">{c.teamName}</span>
         <span className="expert-collab__mode">{modeLabel(c.mode)}</span>

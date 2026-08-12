@@ -8,7 +8,7 @@ import {
   Plus, ChevronLeft, ChevronRight, Calendar as CalendarIcon, Search,
   List as ListIcon, Grid3X3, Columns3, Download, Upload,
   PlayCircle, Pause, Play, Pencil, Trash2, History as HistoryIcon,
-  LayoutTemplate,
+  LayoutTemplate, Clock, MessageSquare, Mail, MapPin, Repeat, Zap,
 } from "lucide-react";
 
 import {
@@ -225,8 +225,8 @@ export function CalendarTaskPanel() {
             <button className="btn btn--primary btn--small" onClick={openCreateMenu}><Plus size={14} /> {t("cal.new")}</button>
             {createMode === null && (
               <div className="cowork-calendar-task__create-menu" onClick={closeCreateMenu}>
-                <div className="cowork-calendar-task__create-item" onClick={chooseCreateTask}>⏰ {t("cal.newTask")}</div>
-                <div className="cowork-calendar-task__create-item" onClick={() => { setCreateMode(null); setEditingEvent(null); setEventFormOpen(true); }}>📅 {t("cal.newEvent")}</div>
+                <div className="cowork-calendar-task__create-item" onClick={chooseCreateTask}><Clock size={13} /> {t("cal.newTask")}</div>
+                <div className="cowork-calendar-task__create-item" onClick={() => { setCreateMode(null); setEditingEvent(null); setEventFormOpen(true); }}><CalendarIcon size={13} /> {t("cal.newEvent")}</div>
                 <div className="cowork-calendar-task__create-divider" />
                 <div className="cowork-calendar-task__create-label">{t("cal.fromTemplate")}</div>
                 {templates.map((tpl) => (
@@ -341,9 +341,9 @@ export function CalendarTaskPanel() {
                         <span className="cowork-calendar-task__dot" style={{ background: colorForEvent(e) }} />
                         <span className="cowork-calendar-task__list-time">{e.allDay ? t("cal.allDay") : formatTime(e.start)}</span>
                         <span className="cowork-calendar-task__list-title">{e.title}</span>
-                        {e.outputMode === "im" && <span className="cowork-calendar-task__push-badge" title={`${t("cal.pushIM")}: ${e.outputDest}`}>💬</span>}
-                        {e.outputMode === "email" && <span className="cowork-calendar-task__push-badge" title={`${t("cal.pushEmail")}: ${e.outputDest}`}>✉️</span>}
-                        {e.location && <span className="cowork-calendar-task__list-loc">📍 {e.location}</span>}
+                        {e.outputMode === "im" && <span className="cowork-calendar-task__push-badge" title={`${t("cal.pushIM")}: ${e.outputDest}`}><MessageSquare size={12} /></span>}
+                        {e.outputMode === "email" && <span className="cowork-calendar-task__push-badge" title={`${t("cal.pushEmail")}: ${e.outputDest}`}><Mail size={12} /></span>}
+                        {e.location && <span className="cowork-calendar-task__list-loc"><MapPin size={12} /> {e.location}</span>}
                       </div>
                     ))}
                   </div>
@@ -370,8 +370,8 @@ export function CalendarTaskPanel() {
                     <span className="cowork-calendar-task__event-name">{e.title}</span>
                   </div>
                   <div className="cowork-calendar-task__event-time">{e.allDay ? t("cal.allDay") : `${formatTime(e.start)} - ${formatTime(e.end)}`}</div>
-                  {e.recurrence && <span className="cowork-calendar-task__badge">🔁</span>}
-                  {e.taskId && <span className="cowork-calendar-task__badge cowork-calendar-task__badge--task">⚡</span>}
+                  {e.recurrence && <span className="cowork-calendar-task__badge"><Repeat size={12} /></span>}
+                  {e.taskId && <span className="cowork-calendar-task__badge cowork-calendar-task__badge--task"><Zap size={12} /></span>}
                 </div>
               ))
             )}
@@ -381,8 +381,8 @@ export function CalendarTaskPanel() {
           <div className="cowork-calendar-task__sidebar-section">
             <div className="cowork-calendar-task__task-filters">
               <button className={`cowork-calendar-task__filter ${taskFilter === "all" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("all")}>{t("cal.filterAll")}</button>
-              <button className={`cowork-calendar-task__filter ${taskFilter === "manual" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("manual")}>⏰ {t("cal.filterManual")}</button>
-              <button className={`cowork-calendar-task__filter ${taskFilter === "calendar" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("calendar")}>📅 {t("cal.filterCalendar")}</button>
+              <button className={`cowork-calendar-task__filter ${taskFilter === "manual" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("manual")}><Clock size={13} /> {t("cal.filterManual")}</button>
+              <button className={`cowork-calendar-task__filter ${taskFilter === "calendar" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("calendar")}><CalendarIcon size={13} /> {t("cal.filterCalendar")}</button>
             </div>
           </div>
 
@@ -398,7 +398,7 @@ export function CalendarTaskPanel() {
                   <div className="cowork-calendar-task__task-head">
                     <span className={`cowork-calendar-task__task-dot ${task.enabled ? "cowork-calendar-task__task-dot--on" : ""}`} />
                     <span className="cowork-calendar-task__task-name">{task.name}</span>
-                    {task.source === "calendar" && <span className="cowork-calendar-task__badge cowork-calendar-task__badge--calendar">📅</span>}
+                    {task.source === "calendar" && <span className="cowork-calendar-task__badge cowork-calendar-task__badge--calendar"><CalendarIcon size={12} /></span>}
                     {task.oneShot && <span className="cowork-calendar-task__badge">{t("cal.oneShot")}</span>}
                   </div>
                   <div className="cowork-calendar-task__task-meta">
