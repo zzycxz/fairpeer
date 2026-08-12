@@ -1289,8 +1289,11 @@ export interface BotConnectionCredentialView {
 
 export interface BotConnectionSessionMappingView {
   remoteId: string;
-  chatType: string;
-  chatId: string;
+  // chatType/chatId are populated by the backend once a conversation happens
+  // (they identify which group/DM the mapping is for). Optional because the
+  // settings form constructs these literals before any conversation exists.
+  chatType?: string;
+  chatId?: string;
   sessionId: string;
   scope: "global" | "project" | string;
   workspaceRoot: string;
