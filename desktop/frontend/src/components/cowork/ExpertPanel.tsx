@@ -179,7 +179,7 @@ export function ExpertPanel() {
     // and costlier. Warn once per team selection so the user isn't surprised by
     // a 3-5 minute wait, but don't nag on every re-run of the same team.
     if (activeTeam?.allowSearch && !searchCostConfirmed) {
-      if (!(await confirm({ title: "搜索确认", message: t("cowork.expertSearchCostConfirm"), danger: false }))) {
+      if (!(await confirm({ title: t("expertPanel.searchConfirm"), message: t("cowork.expertSearchCostConfirm"), danger: false }))) {
         return;
       }
       setSearchCostConfirmed(true);
@@ -203,7 +203,7 @@ export function ExpertPanel() {
   };
 
   const handleDelete = async (team: TeamView) => {
-    if (!(await confirm({ title: "删除专家团", message: t("cowork.expertConfirmDelete").replace("{name}", team.name) }))) return;
+    if (!(await confirm({ title: t("expertPanel.deleteTeam"), message: t("cowork.expertConfirmDelete").replace("{name}", team.name) }))) return;
     try {
       await app.DeleteExpertTeam(team.id);
       if (activeTeamId === team.id) setActiveTeamId("");
@@ -329,7 +329,7 @@ export function ExpertPanel() {
                   </div>
                   {experts.length > 0 && (
                     <div className="cowork-expert__card-roster" style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '12px', color: 'var(--fg-faint)', marginTop: '8px' }}>
-                      专家成员: {experts.map((ex) => ex.name).join(", ")}
+                      {t("expertPanel.experts", { names: experts.map((ex) => ex.name).join(", ") })}
                     </div>
                   )}
                   <div className="cowork-expert__card-foot">

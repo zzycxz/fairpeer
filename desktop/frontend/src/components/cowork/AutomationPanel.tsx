@@ -88,7 +88,7 @@ export function AutomationPanel() {
   };
 
   const handleDelete = async (task: TaskView) => {
-    if (!(await confirm({ title: "删除任务", message: t("cowork.automationConfirmDelete").replace("{name}", task.name) }))) return;
+    if (!(await confirm({ title: t("automation.deleteTask"), message: t("cowork.automationConfirmDelete").replace("{name}", task.name) }))) return;
     try {
       await app.DeleteScheduledTask(task.id);
     } catch (e) {
@@ -188,7 +188,7 @@ export function AutomationPanel() {
           onDelete={
             editing
               ? () => {
-                  void confirm({ title: "删除任务", message: t("cowork.automationConfirmDelete").replace("{name}", editing.name) }).then((ok) => {
+                  void confirm({ title: t("automation.deleteTask"), message: t("cowork.automationConfirmDelete").replace("{name}", editing.name) }).then((ok) => {
                     if (ok) {
                       void app.DeleteScheduledTask(editing.id).then(() => {
                         setFormOpen(false);

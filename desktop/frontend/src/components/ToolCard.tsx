@@ -7,6 +7,7 @@ import { diffsFor, subjectOf } from "../lib/tools";
 import { useShellExpand } from "../lib/shellExpand";
 import { app } from "../lib/bridge";
 import type { Item } from "../lib/useController";
+import { getInitialOpenState, shouldKeepMounted } from "./toolcardLogic";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
@@ -98,8 +99,15 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   // Open while running so the user sees live progress; closed once settled.
   // Shell cards (incl. agent-initiated bash) follow the same rule so streamed
   // stdout stays visible during a long command and auto-collapses on finish.
-  const [open, setOpen] = useState((hasNested || item.isShell) ? item.status === "running" : false);
+  const [open, setOpen] = useState(getInitialOpenState(item.status, hasNested, item.isShell ?? false));
+  const [hasBeenOpened, setHasBeenOpened] = useState(open);
   const [showAll, setShowAll] = useState(false);
+  
+  useEffect(() => {
+    if (open && !hasBeenOpened) {
+      setHasBeenOpened(true);
+    }
+  }, [open, hasBeenOpened]);
   // Track whether the user has manually toggled this card, so the auto-open /
   // auto-close effect below doesn't fight a deliberate interaction.
   const userToggledRef = useRef(false);
@@ -116,13 +124,13 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
     });
   }, [item.isShell, item.id, shellExpand]);
 
-  // Auto-open shell cards while running (so streamed chunks are visible) and
-  // auto-collapse when done — but only until the user manually toggles, after
-  // which we respect their choice. Mirrors how streaming-thinking cards behave.
+  // Auto-open shell cards while running so streamed chunks are visible. Once
+  // running, we leave the card alone — do NOT auto-collapse on completion, so a
+  // long command's output stays readable without the user having to re-expand.
+  // We only respect a manual toggle (Ctrl/Cmd+B or the header) thereafter.
   useEffect(() => {
     if (!item.isShell || userToggledRef.current) return;
-    const should = item.status === "running";
-    if (should !== open) setOpen(should);
+    if (item.status === "running" && !open) setOpen(true);
   }, [item.isShell, item.status, open]);
 
   // Keep the shell output pinned to the bottom as new chunks stream in, so the
@@ -167,9 +175,10 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         )}
       </button>
 
-      {open && (
-        <div className="tool__body">
-          {summary && <div className="tool__summary">{summary}</div>}
+      <div className={`tool__body-wrapper ${open ? "open" : "closed"}`}>
+        {shouldKeepMounted(hasBeenOpened, open) && (
+          <div className="tool__body">
+            {summary && <div className="tool__summary">{summary}</div>}
 
         {diffs.map((d, i) => (
           <div key={i}>
@@ -210,9 +219,10 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
           </>
         )}
 
-        {item.error && <div className="tool__err">{item.error}</div>}
-        </div>
-      )}
+          {item.error && <div className="tool__err">{item.error}</div>}
+          </div>
+        )}
+      </div>
 
       {item.attachments && item.attachments.filter((a) => a.kind === "image").length > 0 && (
         <ToolAttachments paths={item.attachments!.filter((a) => a.kind === "image").map((a) => a.path)} />

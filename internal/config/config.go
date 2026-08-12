@@ -76,6 +76,22 @@ type Config struct {
 	// so users can customise a profile's model/prompt/skills without code. Empty
 	// means only the builtins are available (dev + cowork).
 	Profiles []Profile `toml:"profiles"`
+	// MobileBridge configures the linkpeer mobile companion bridge (desktop ↔
+	// phone P2P). Empty means mobilebridge uses its built-in defaults; the
+	// LINKPEER_SIGNAL env var still overrides signal_url for ad-hoc dev.
+	MobileBridge MobileBridgeConfig `toml:"mobilebridge"`
+}
+
+// MobileBridgeConfig is the user-facing [mobilebridge] section. Only the
+// fields a user realistically edits live here; the rest of
+// mobilebridge.Config comes from DefaultConfig(). signal_url is what makes
+// the bridge actually connect — set it to your linkpeer-signal K base URL,
+// e.g. signal_url = "http://192.168.1.48:8080".
+type MobileBridgeConfig struct {
+	SignalURL   string   `toml:"signal_url"`    // linkpeer-signal K base URL; empty = DefaultConfig placeholder
+	STUNServers []string `toml:"stun_servers"`  // extra STUN servers for cross-network P2P (M3)
+	LogLevel    string   `toml:"log_level"`     // trace|debug|info|warn|error; empty = info
+	AutoConfirm bool     `toml:"auto_confirm"`  // 联调：收到 exchange 自动确认，不等用户点允许
 }
 
 // UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
@@ -432,6 +448,16 @@ type BotConfig struct {
 	Weixin      WeixinBotConfig       `toml:"weixin"`
 	Telegram    TelegramBotConfig     `toml:"telegram"`
 	Connections []BotConnectionConfig `toml:"connections"`
+	// DesktopWatchers 是持久化的"桌面事件订阅"列表：哪些 IM 聊天要接收桌面
+	// agent 的审批/提问/完成推送（/desktop watch on 订阅，跨重启保留）。
+	DesktopWatchers []BotDesktopWatcher `toml:"desktop_watchers"`
+}
+
+// BotDesktopWatcher 是一条持久化的桌面事件订阅（哪个 IM 聊天收桌面推送）。
+type BotDesktopWatcher struct {
+	Platform string `toml:"platform"`
+	ChatType string `toml:"chat_type"`
+	ChatID   string `toml:"chat_id"`
 }
 
 // CoworkConfig holds coWork (office) profile settings: browser path, PPT
@@ -530,6 +556,14 @@ type CoworkConfig struct {
 	// This is the SINGLE place all image-recognition config lives —
 	// set it once in the cowork settings page.
 	ScreenshotVLMModel string `toml:"screenshot_vlm_model"`
+	// VoiceModel is the provider model ref for speech-to-text, used by voice
+	// input (mic button) and audio-attachment understanding. E.g.
+	// "stepfun/stepaudio-2.5-asr" or "zhipu/glm-asr-2512". It must point at an
+	// OpenAI-compatible /audio/transcriptions endpoint. Independent of the main
+	// chat model — any main model works, since audio is transcribed to text
+	// first and the text is then sent to the main model. Empty = voice input
+	// disabled (the mic button is disabled with a hint to configure a model).
+	VoiceModel string `toml:"voice_model"`
 	// ScreenshotPrompt is the user prompt sent with the screenshot image to the
 	// VLM model. Users can customize this to change the solving behavior (e.g.
 	// focus on specific subjects, require verification, etc.). Empty means use
@@ -807,6 +841,8 @@ type BotConnectionCredential struct {
 
 type BotConnectionSessionMapping struct {
 	RemoteID      string `toml:"remote_id"`
+	ChatType      string `toml:"chat_type"`
+	ChatID        string `toml:"chat_id"`
 	SessionID     string `toml:"session_id"`
 	Scope         string `toml:"scope"`
 	WorkspaceRoot string `toml:"workspace_root"`
@@ -1396,13 +1432,17 @@ func (c *Config) AutoStartPlugins() []PluginEntry {
 }
 
 // DefaultSystemPrompt is used when config provides none.
-const DefaultSystemPrompt = `You are fairpeer, a coding agent focused on executing code tasks.
-Use the provided tools to read and write files and run shell commands.
+const DefaultSystemPrompt = `# Identity
+You are fairpeer, a coding agent focused on executing code tasks.
 When asked about your identity, always say you are fairpeer. Never mention
 Claude, Anthropic, GPT, Qwen, DeepSeek, or any underlying model name —
 you are fairpeer, not any foundation model.
-Principles: understand the request before acting; verify with tools instead of
-guessing; keep changes minimal and correct; briefly summarize what you did.
+
+# Principles
+- Understand the request before acting.
+- Verify with tools instead of guessing.
+- Keep changes minimal and correct.
+- Briefly summarize what you did.
 When the request leaves a real choice to the user — which approach or library,
 the scope, or a consequential or ambiguous decision — call the ask tool to offer
 2-4 concrete options rather than guessing or burying the question in prose. Skip
@@ -1410,9 +1450,52 @@ it when there's an obvious default; don't ask just to confirm. Approval-bypass
 modes do not answer ask questions or approve plans for the user. If no
 interactive user is available, the ask tool returns a model-assumption fallback;
 state the assumption you made before proceeding.
+
+# Tools
+Use the provided tools to read and write files and run shell commands.
+- read_file: Read file contents. Always read before editing.
+- edit_file: Targeted find-and-replace. Use for modifying existing files.
+- write_file: Full file write. Use only for new files or complete rewrites.
+- multi_edit: Atomic batch of edits. Use when making 3+ changes to one file.
+- apply_patch: Multi-file patch. Use when changing 3+ files together.
+- grep: Search code by regex. Prefer this over bash grep.
+- glob: Find files by pattern. Prefer this over bash find.
+- bash: Run shell commands. Use for builds, tests, git, installations.
 For multi-step work, track progress with the todo_write tool: lay out the steps,
-keep exactly one in_progress, and flip each to completed as you finish it — update
-the list as you go, not just at the end.
+keep exactly one in_progress, and flip each to completed as you finish it.
+
+# Anti-Hallucination
+- NEVER fabricate file contents. Always use read_file before editing.
+- NEVER guess file paths. Use glob or grep to find them.
+- NEVER invent function signatures, class names, or API endpoints. Read the source.
+- NEVER claim success without evidence. Show the tool output that confirms it.
+- If unsure about a library API, read the source or documentation — do not guess.
+
+# Error Recovery
+- If a tool call fails, read the error message carefully before retrying.
+- Do not retry the exact same call — change your approach.
+- For file-not-found errors, use glob or grep to locate the correct path.
+- For permission errors, check if the file is locked by another process.
+- If stuck after 2-3 attempts, explain the problem to the user and ask for help.
+
+# Coding Style
+- Match the existing code style in the project you're working in.
+- Follow the language's standard conventions (gofmt, prettier, black, etc.).
+- Add comments only when the intent is non-obvious.
+- Handle errors explicitly — do not silently ignore them.
+- Write tests for new functionality when the project has existing tests.
+
+# Safety
+- Do not run destructive commands (rm -rf, sudo) without explicit user request.
+- Do not read or modify .env, credentials, or SSH keys unless explicitly asked.
+- Do not make network requests to unexpected endpoints.
+
+# Context Management
+- Earlier messages may be summarized to stay within the context window.
+- Rely on file contents and todo_write state rather than remembering what was
+  discussed earlier. If you need something from earlier, re-read the relevant file.
+
+# Plan Mode
 In plan mode the harness blocks writer tools: do read-only research, then write a
 concise plan as your reply and stop. The user is asked to approve before anything
 is changed; once approved, work through the steps, updating the task list as you go.`

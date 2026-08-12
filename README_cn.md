@@ -46,7 +46,7 @@ Agent 可以在 **终端**（TUI）、**桌面客户端**（基于 Wails）、**
 
 - **通用 Provider 架构** — 统一对接任意 OpenAI / Anthropic 兼容端点，支持 thinking mode 协议、reasoning_content 回传、11 个直连厂商 + 7 个聚合平台（Coding Plan），通过 `fairpeer.toml` 完全配置驱动。
 - **MCP 插件生态** — 全面支持 Model Context Protocol (MCP)，外部工具以子进程形式通过 stdio / HTTP 运行，无限扩展 Agent 能力。
-- **内置 Web Search** — 集成 Brave → Exa → Linkup 三引擎链式降级搜索，无需外部 MCP 即可联网检索。
+- **内置 Web Search** — 集成 Brave → Exa → Linkup → AnySearch 四引擎链式降级搜索，无需外部 MCP 即可联网检索。
 - **极速轻量分发** — `CGO_ENABLED=0` 单二进制打包，极简部署，支持交叉编译 6 大操作系统架构。
 
 ### 内置智能工具箱

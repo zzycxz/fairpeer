@@ -932,12 +932,17 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 		if c.spec.StripRawPrefix != "" {
 			visibleName = strings.TrimPrefix(visibleName, c.spec.StripRawPrefix)
 		}
-		toolInfos = append(toolInfos, ToolInfo{Name: t.Name, Description: t.Description})
+		// Sanitize the description: MCP servers are third-party/untrusted, and a
+		// hostile description could carry prompt-injection instructions. Truncate
+		// to a sane length and prefix so the model can tell tool descriptions from
+		// its own instructions.
+		safeDesc := sanitizeToolDescription(t.Description)
+		toolInfos = append(toolInfos, ToolInfo{Name: t.Name, Description: safeDesc})
 		tools = append(tools, &remoteTool{
 			client:   c,
 			name:     toolName(c.name, visibleName),
 			rawName:  t.Name,
-			desc:     t.Description,
+			desc:     safeDesc,
 			schema:   canonicalizeSchema(t.InputSchema),
 			readOnly: c.spec.toolReadOnly(t.Name, hinted),
 		})
@@ -1054,6 +1059,32 @@ func (t *remoteTool) Execute(ctx context.Context, args json.RawMessage) (string,
 	return parseToolResult(res)
 }
 
+// maxMCPDescLen caps an MCP tool description length. A malicious server could
+// embed a long prompt-injection payload in the description; truncating bounds
+// the blast radius while leaving room for a real description.
+const maxMCPDescLen = 2000
+
+// sanitizeToolDescription truncates an MCP tool description to maxMCPDescLen
+// and prefixes it with [MCP] so the model can distinguish third-party tool
+// descriptions from its own system-prompt instructions. This is a defense
+// against prompt injection carried in MCP tool descriptions.
+func sanitizeToolDescription(desc string) string {
+	const prefix = "[MCP tool] "
+	const marker = "... (truncated)"
+	if len(desc) > maxMCPDescLen {
+		desc = desc[:maxMCPDescLen-len(marker)] + marker
+	}
+	return prefix + desc
+}
+
+// maxMCPResultBytes caps the total text parseToolResult accumulates from an
+// MCP server's tool result. Without it a malicious/misbehaving server could
+// return multi-GB text and exhaust process memory. 1 MiB is well above any
+// useful tool result; the agent layer separately truncates tool output to 32
+// KiB before it reaches the model, so anything past ~32 KiB is discarded
+// downstream anyway.
+const maxMCPResultBytes = 1 << 20 // 1 MiB
+
 // parseToolResult flattens an MCP tools/call result into plain text.
 func parseToolResult(res json.RawMessage) (string, error) {
 	var out struct {
@@ -1067,8 +1098,22 @@ func parseToolResult(res json.RawMessage) (string, error) {
 		return "", fmt.Errorf("decode tool result: %w", err)
 	}
 	var sb strings.Builder
+	truncated := false
 	for _, c := range out.Content {
+		if truncated {
+			break // stop accumulating once over cap; ignore remaining chunks
+		}
 		if c.Type == "text" {
+			if sb.Len()+len(c.Text) > maxMCPResultBytes {
+				// Fill up to the cap and mark truncated.
+				remaining := maxMCPResultBytes - sb.Len()
+				if remaining > 0 {
+					sb.WriteString(c.Text[:remaining])
+				}
+				sb.WriteString("\n... (truncated: MCP result exceeded 1 MiB limit)")
+				truncated = true
+				continue
+			}
 			sb.WriteString(c.Text)
 		}
 	}

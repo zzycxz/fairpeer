@@ -6,6 +6,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { CodeViewer } from "./CodeViewer";
+import { MermaidViewer } from "./MermaidViewer";
 import { normalizeMath } from "./mathNormalize";
 import { app, openExternal } from "../lib/bridge";
 
@@ -102,6 +103,9 @@ const components: Components = {
     const match = /language-([\w-]+)/.exec(className ?? "");
     const isBlock = match !== null || text.includes("\n");
     if (isBlock) {
+      if (match?.[1] === "mermaid") {
+        return <MermaidViewer chart={text.replace(/\n$/, "")} />;
+      }
       return <CodeViewer value={text.replace(/\n$/, "")} language={match?.[1]} maxHeight={360} />;
     }
     return <code className="md-code">{children}</code>;

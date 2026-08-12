@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, Edit3, MapPin } from "lucide-react";
 
 import { app } from "../../lib/bridge";
+import { useT } from "../../lib/i18n";
 import type { EntityDetailView, EntityRelationView } from "../../lib/types";
 import { EntityEditModal } from "./EntityEditModal";
 import { labelFor, communityColor } from "./entityTypes";
@@ -20,6 +21,7 @@ export interface EntityDetailProps {
 }
 
 export function EntityDetail({ collection, entityName, onBack, onHighlightInGraph, onNavigatePeer }: EntityDetailProps) {
+  const t = useT();
   const [entity, setEntity] = useState<EntityDetailView | null>(null);
   const [loading, setLoading] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -38,10 +40,10 @@ export function EntityDetail({ collection, entityName, onBack, onHighlightInGrap
   };
 
   if (loading) {
-    return <div className="rag-detail__loading">加载中...</div>;
+    return <div className="rag-detail__loading">{t("entityDetail.loading")}</div>;
   }
   if (!entity) {
-    return <div className="rag-detail__empty">实体未找到</div>;
+    return <div className="rag-detail__empty">{t("entityDetail.notFound")}</div>;
   }
 
   // Group relations by direction.
@@ -67,13 +69,13 @@ export function EntityDetail({ collection, entityName, onBack, onHighlightInGrap
 
       {/* Meta badges */}
       <div className="rag-detail__meta">
-        <span className="rag-detail__meta-item">关联 {entity.relationCnt ?? 0}</span>
+        <span className="rag-detail__meta-item">{t("entityDetail.relations", { count: String(entity.relationCnt ?? 0) })}</span>
         {(entity.community ?? 0) >= 0 && (
           <span
             className="rag-detail__community-badge"
             style={{ borderColor: communityColor(entity.community ?? 0) }}
           >
-            社区 {entity.community ?? 0}
+            {t("entityDetail.community", { id: String(entity.community ?? 0) })}
           </span>
         )}
       </div>
@@ -86,7 +88,7 @@ export function EntityDetail({ collection, entityName, onBack, onHighlightInGrap
       {/* Relations */}
       {outRels.length > 0 && (
         <div className="rag-detail__section">
-          <div className="rag-detail__section-title">→ 关联 ({outRels.length})</div>
+          <div className="rag-detail__section-title">{t("entityDetail.outRelations", { count: String(outRels.length) })}</div>
           {outRels.map((r, i) => (
             <RelationItem key={`out-${i}`} rel={r} onClick={() => handleRelClick(r.peer)} />
           ))}
@@ -94,7 +96,7 @@ export function EntityDetail({ collection, entityName, onBack, onHighlightInGrap
       )}
       {inRels.length > 0 && (
         <div className="rag-detail__section">
-          <div className="rag-detail__section-title">← 被引用 ({inRels.length})</div>
+          <div className="rag-detail__section-title">{t("entityDetail.inRelations", { count: String(inRels.length) })}</div>
           {inRels.map((r, i) => (
             <RelationItem key={`in-${i}`} rel={r} onClick={() => handleRelClick(r.peer)} />
           ))}
@@ -104,7 +106,7 @@ export function EntityDetail({ collection, entityName, onBack, onHighlightInGrap
       {/* Sources */}
       {(entity.sources ?? []).length > 0 && (
         <div className="rag-detail__section">
-          <div className="rag-detail__section-title">来源 ({(entity.sources ?? []).length})</div>
+          <div className="rag-detail__section-title">{t("entityDetail.sources", { count: String((entity.sources ?? []).length) })}</div>
           {(entity.sources ?? []).map((s, i) => (
             <div key={i} className="rag-detail__source">
               <span className="rag-detail__source-path">{s.path.split(/[/\\]/).pop()}</span>
@@ -118,11 +120,11 @@ export function EntityDetail({ collection, entityName, onBack, onHighlightInGrap
       <div className="rag-detail__actions">
         <button className="rag-detail__action-btn" onClick={() => setShowEdit(true)}>
           <Edit3 size={14} />
-          <span>编辑</span>
+          <span>{t("entityDetail.edit")}</span>
         </button>
         <button className="rag-detail__action-btn" onClick={() => onHighlightInGraph(entity.name)}>
           <MapPin size={14} />
-          <span>在图谱高亮</span>
+          <span>{t("entityDetail.highlight")}</span>
         </button>
       </div>
 

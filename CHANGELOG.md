@@ -7,6 +7,132 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.8] — 2026-08-12
+
+聚焦**搜索降级链 UI 补全**的修复批次：0.1.0 在后端加入了 AnySearch 第 4 级搜索引擎，但桌面端设置面板、类型层与能力探测一直漏接——用户在 UI 上既看不到也配不了 AnySearch（后端却会静默使用环境变量里的 key）。本次把这条链路从 UI 到文档全层对齐。无破坏性变更（见末尾兼容性说明）。
+
+### Web Search — AnySearch 全层对齐
+
+- **设置面板新增 AnySearch 输入框** (`desktop/frontend/src/components/SettingsPanel.tsx`)
+  - `WebSearchSection` 第 4 个 `WebSearchKeyField`：label `AnySearch`、env `ANYSEARCH_API_KEY`，与前三个引擎共用同一保存/清除链路（`SetProviderKey`/`ClearProviderKey`，无白名单校验，直接落盘凭证文件）
+- **后端状态视图补字段** (`desktop/settings_app.go`)
+  - `WebSearchView` 加 `AnySearchKeySet`（json tag `anysearchKeySet`）
+  - **两个** builder（正常路径 + fallback 路径）都补 `ANYSEARCH_API_KEY` 探测——首轮 `replace_all` 因两处缩进不同只命中一个，复查时抓出正常路径漏改并补齐（否则状态灯永远显示"未设置"）
+- **能力探测补引擎** (`desktop/screenshot_solve.go`)：`webSearchKeyConfigured` 加入 `ANYSEARCH_API_KEY`，配了 AnySearch 也算"web 搜索可用"
+- **类型 / mock 对齐** (`desktop/frontend/src/lib/types.ts`、`bridge.ts`)：`WebSearchView` 接口 + mock 默认值补 `anysearchKeySet`
+- **文案补全** (`desktop/frontend/src/locales/zh.ts`、`en.ts`)：降级链描述由"这三个搜索引擎（Brave -> Exa -> Linkup）"改为"这些搜索引擎（Brave -> Exa -> Linkup -> AnySearch）"
+- **文档对齐** (`README_cn.md`、`docs/FAIRPEER_FEATURES.md`、`docs/DEV_COWORK_TOOL_COMPARISON.md`、`docs/COWORK_IMPLEMENTATION_PLAN.md`)：四处仍写"三引擎"的全部更新为四引擎链
+
+### 兼容性
+
+无破坏性变更：`WebSearchView` 加字段零值兼容（旧前端读到缺省 `false` 等同"未设置"）；未配 `ANYSEARCH_API_KEY` 时降级链行为与 0.1.7 完全一致（Brave → Exa → Linkup 三级），AnySearch 仅作为末位兜底。
+
+## [0.1.7] — 2026-08-12
+
+聚焦**语音输入**的新功能批次：用户可通过麦克风说话转文字填入对话框，agent 能理解用户上传的音频附件。新增统一的语音转写接口（基于多模态 `input_audio`），与主对话模型完全解耦。无破坏性变更（见末尾兼容性说明）。
+
+### 语音输入 — 统一转写接口
+
+- **`CallSTT` 统一入口** (`internal/tool/builtin/stt.go` 新增)
+  - 音频 base64 → 多模态聊天 `input_audio` content part → 转写文字，复用 VLM 的 provider chat runner（`SetProviderChatRunner`）
+  - 一套接口服务所有接受 `input_audio` 的多模态模型（MiMo-V2.5 / GLM-4-Voice / GPT-4o-audio / Qwen-Omni 等），**不写逐家适配**
+  - `voice_model` 独立于主对话模型——音频先转文字，再发给任意主模型（含 DeepSeek/Claude/Kimi/MiniMax 这些无音频能力的模型），voice_model 本身就是"兜底"
+- **`input_audio` content 支持** (`internal/provider`)
+  - `ContentPart` 新增 `InputAudio` 字段 + `InputAudio` 类型（Data/Format）；新增 `AudioContent`/`AudioParts` helper，对称于 `image_url`/`ImageContent`
+  - `openai` provider `buildRequest` 处理 `input_audio` part → 标准 OpenAI 网络格式 `{"type":"input_audio","input_audio":{"data":...,"format":...}}`；`ContentLen`/`hasAudioParts` 配套
+  - 与 `image_url` 共用同一个 wire 转换器（`imageContentParts` 扩展为处理全部多模态 part 类型）
+
+### 语音输入 — 配置 UI
+
+- **`voice_model` 配置字段** (`internal/config`、`desktop`)
+  - `CoworkConfig` 新增 `VoiceModel`（`[cowork] voice_model`），对称 `screenshot_vlm_model`；`render.go` 配套渲染
+  - `CoWorkSettingsView` 双向映射 + **热生效**：`SetCoWorkSettings` 末尾重新 `SetVoiceModel`，改完立即生效不用重启
+- **onboarding / Settings 选择器**
+  - 三步向导 `ModelStep` 新增第 4 个"语音识别模型"下拉（Settings 添加 provider 复用同一组件，改一处两入口都生效）
+  - Settings 模型管理页新增 voice `ModelPicker`（事后修改）；所有 cowork base fallback 补 `voiceModel` 字段，避免改其他字段时清空 voice_model
+  - `SetupProvider` 链路加 `voiceModel` 参数（Go + TS + wailsjs 绑定同步）
+
+### 语音输入 — 麦克风按钮
+
+- **对话框麦克风按钮** (`desktop/frontend/src/components/Composer.tsx`)
+  - 发送按钮左侧新增麦克风按钮（cowork/dev 两种界面共用同一 Composer，改一次通用），不扩大输入框——复用发送按钮区，仅微调 textarea 右 padding
+  - 状态机：idle → recording（红色脉冲呼吸动画）→ transcribing（spinner）→ idle；未配置 voice_model 时按钮不显示（对话框保持干净）
+  - 转写结果插入 textarea **光标位置**（前字符非空格自动补空格），用户可编辑后再发送
+- **独立录音工具** (`desktop/frontend/src/lib/voiceRecorder.ts` 新增)
+  - Web Audio API（`ScriptProcessorNode`）采集 PCM → 编码 **WAV**（统一格式，所有目标模型都支持 wav，避开 MediaRecorder 的 webm 兼容坑）
+  - `startRecording`/`stop()` 返回 base64 WAV data URL；`VoiceRecorderError` 错误分类（denied/notfound/unsupported/other）
+
+### 语音输入 — 麦克风权限（跨平台）
+
+- **macOS**：新增 `build/darwin/Info.plist` 的 `NSMicrophoneUsageDescription`（Wails build 时 merge 进最终 plist；无此 key macOS 直接拒绝 getUserMedia，不弹窗）
+- **Windows / Linux**：WebView2 / WebKitGTK 原生支持 getUserMedia（无需特殊配置）
+- **权限预检 + 分级提醒**：点麦克风前先查 `Permissions API`，系统级禁用直接指引"Windows 设置 → 隐私 → 麦克风 / macOS 系统设置 → 隐私 → 麦克风"（不浪费一次失败重试）；四级错误映射（系统禁用 / 网页拒绝 / 无设备 / 浏览器不支持）
+
+### 音频附件 — agent 理解（对称 image 单轨）
+
+- **`audio_understand` 工具** (`internal/tool/builtin/audio_understand.go` 新增)
+  - 照搬 `image_understand` 单轨设计：读音频文件 → base64 → `CallSTT` 转写 → 返回文字
+  - 25MB 大小限制、symlink/目录拒绝、`sniffAudioMIME`（mp3/wav/m4a/flac/ogg/aac/webm/opus）
+- **音频引用识别** (`internal/control/refs.go`)
+  - 新增 `refAudio` 分类 + `isAudioAttachmentRef` + `ResolveRefs` 生成 `<audio path="...">` 文本引用
+  - 音频字节**永不内联**进主模型请求（绝大多数模型不能处理 audio part）——agent 看到 `<audio>` 引用后调 `audio_understand` 拿转写文字，再自行翻译/总结/引用
+  - 前端零改动（音频文件本就被正确存为附件，只是之前 refs.go 当二进制黑盒）
+- **测试** (`internal/control/refs_test.go`)：`TestClassifyRef`/`TestResolveRefsAttachmentKinds` 加 mp3 → refAudio 分类与 `<audio path>` 引用断言
+
+### 升级兼容性
+
+无破坏性变更：旧 TOML 无 `voice_model` → 默认空（语音功能禁用，麦克风按钮不显示，对话框外观不变）；`ContentPart`/`CoworkConfig`/`CoWorkSettingsView`/`ProviderTemplate` 加字段零值兼容；未配置 voice_model 时所有语音入口（麦克风按钮、`CallSTT`、`audio_understand`）优雅禁用并返回明确配置提示，不影响现有对话/图片能力。
+
+## [0.1.6] — 2026-08-12
+
+聚焦**计费准确性、代码编辑工具健壮性、办公面工作区安全、RAG hybrid 检索激活**的修复批次。无破坏性变更（见末尾兼容性说明）。
+
+### Provider — 计费准确性
+
+- **Anthropic cache-write 计费修正** (`internal/provider`)
+  - `Usage` 新增 `CacheWriteTokens` 字段；`Pricing` 新增 `cache_write` 档位（per 1M cache-creation tokens）
+  - `cache_creation_input_tokens` 不再混入 `CacheMissTokens` 按普通 input 1× 计——独立走 `cache_write`，默认 1.25× input（Anthropic 5m cache write 实际费率）
+  - 旧 TOML 不配 `cache_write` 时自动用 1.25× input 兜底，比原来的 1× 更准
+  - 全链路同步 hit-rate / new tokens / metrics 语义，保持用户可见数字连贯：`session hit-rate`、textsink `new`、`run --metrics`、桌面 metrics 都把 cache write 计入"非命中"分母
+  - wire usage 事件 + telemetry + `ContextPanel` 新增 `cacheWriteTokens` 字段
+  - `cache_shape.go` 的 prefix-churn miss 诊断自动变准（cache write 不再算 miss）
+
+### 代码编辑工具 — 健壮性
+
+- **multi_edit / apply_patch** 现在正确返回 post-edit LSP 诊断（之前静默丢弃），edit→diagnose→fix 闭环在批量编辑时不再断裂
+- **apply_patch move** 删源失败时回滚（之前静默吞错，留下源+目标并存，move 变成 silent copy）
+- **apply_patch** 保留 CRLF 行尾（之前 CRLF 源 + LF patch 会混合行尾，git 整文件 diff）
+- **delete_symbol / notebook_edit** 改用原子写（temp+rename），崩溃不再留半个文件
+- **edit_file** `old_string == new_string` 时短路返回（不再污染 mtime / git status）
+- **Preview**（write_file/edit_file/multi_edit）补 workspace confine，批准前的 diff 卡片不再泄露工作区外文件内容
+- **edit_file/multi_edit/apply_patch/delete_*** 现在拒绝二进制文件（`readFileEncoded` 加 NUL 字节检查，与 `read_file` 的二进制标记统一）——之前可盲目编辑二进制而损坏文件；`write_file` 覆盖二进制不受影响（容错读错误，回落 UTF-8）
+
+### 办公面 — 工作区安全
+
+- **mindmap_create** 补 workspace confine + 原子写——之前是唯一能写工作区外的写工具（`~/.bashrc` / `.git/config` 等）
+- **workspace 装配路径**补 `doc_write`/`csv_write`/`xlsx_write`/`doc_convert` 的 roots 绑定——desktop/cowork 多项目模式之前回落到未约束实例
+- `ConfineWriters` 补 `delete_range`/`delete_symbol`/`notebook_edit`/`mindmap_create`（CLI 路径防御纵深）
+
+### RAG — hybrid 检索激活
+
+- **embedding 重排重接**：`rag_search` 改组合式管道（LLM 负责查询扩展召回，embedding 做向量 cosine 精排，LLM rerank 兜底）；`boot.go` 移除强制 `SetRAGEmbedder(nil)` 断路（不再在 profile 切换时周期性清空 desktop 注入）；desktop 的 HEService 就绪后注入 HEClient 作为 embedder——兑现设置面板已暴露的 "hybrid search" 承诺，比 LLM rerank 更便宜（无 20 候选上限、无额外 LLM 调用）。无 embedder 时（headless/CLI 或 HE 未启动）自动退回 LLM rerank，embed 调用失败优雅降级为纯 FTS5
+
+### 其他
+
+- **currencySymbol** 映射 `INR → ₹`（之前返回字面量 "INR"）
+- **doc_convert** 补 post-edit hook（与 doc_write 一致）
+- **CSV 写出** 用 CRLF 行尾（RFC 4180 §2 合规，Excel/WPS 互通更稳）
+- **启动时清理** `.docx-append-*` 残留临时文件（崩溃遗留）
+- **wizard** 添加 provider 时 `Vision` 标志跟随 models.dev 判定（之前硬编码 true，纯文本模型也被标 vision 导致图片被静默丢弃）
+
+### Removed
+
+- 移除 legacy `SetEmailConfig` / `SetIMAPConfig` 单账号 setter 及其死 fallback 分支（`normalizeEmailAccounts` 在 config 加载时已把 `[cowork.smtp]`/`[cowork.imap]` 折叠进 `[[cowork.email_accounts]]`，运行时无需 fallback）
+
+### 升级兼容性
+
+无破坏性变更：旧 TOML `[price]` 缺 `cache_write` → 用 1.25× input 默认；旧 `telemetry.json` 缺 `cacheWriteTokens` → 0；旧 `session.json` 不受影响（不持久化 Usage）；前端 TS 结构化缺字段不报错；`[cowork.smtp]`/`[cowork.imap]` 旧配置仍工作；`Usage`/`Pricing` Go 结构加字段零值兼容。
+
 ## [0.1.4] — 2026-08-07
 
 聚焦 **PPT-auto 技能的深度修复与架构重构**，以及专家团、主题系统、沙箱的改进。

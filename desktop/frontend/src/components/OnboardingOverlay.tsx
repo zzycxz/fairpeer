@@ -324,6 +324,7 @@ export function ModelStep({ template, apiKey, onDone, t }: {
   const [defaultPick, setDefaultPick] = useState<string>(template.defaultModel);
   const [visionPick, setVisionPick] = useState<string>(template.visionModel || template.defaultModel);
   const [fastPick, setFastPick] = useState<string>(template.fastModel || "follow");
+  const [voicePick, setVoicePick] = useState<string>("none");
   const [state, setState] = useState<"ready" | "saving" | "error">("ready");
   const [error, setError] = useState<string | null>(null);
 
@@ -333,13 +334,13 @@ export function ModelStep({ template, apiKey, onDone, t }: {
     setState("saving");
     setError(null);
     try {
-      await app.SetupProvider(template, apiKey, defaultPick, visionPick, fastPick);
+      await app.SetupProvider(template, apiKey, defaultPick, visionPick, fastPick, voicePick);
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setState("error");
     }
-  }, [template, apiKey, defaultPick, visionPick, fastPick, onDone]);
+  }, [template, apiKey, defaultPick, visionPick, fastPick, voicePick, onDone]);
 
   return (
     <div className="onboarding__step">
@@ -358,6 +359,16 @@ export function ModelStep({ template, apiKey, onDone, t }: {
           <label className="set-label" style={{ display: "block", marginBottom: "0.25rem" }}>{t("settings.screenshotVlmLabel") || "图片识别模型"}</label>
           <select className="mem-select" style={{ width: "100%" }} value={visionPick} onChange={(e) => setVisionPick(e.target.value)}>
             <option value="none">{t("settings.screenshotVlmNone") || "未配置"}</option>
+            {models.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="set-label" style={{ display: "block", marginBottom: "0.25rem" }}>{t("settings.voiceModelLabel") || "语音识别模型"}</label>
+          <select className="mem-select" style={{ width: "100%" }} value={voicePick} onChange={(e) => setVoicePick(e.target.value)}>
+            <option value="none">{t("settings.voiceModelNone") || "未配置"}</option>
             {models.map((m) => (
               <option key={m} value={m}>{m}</option>
             ))}

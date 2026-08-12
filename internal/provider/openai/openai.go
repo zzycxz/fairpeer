@@ -282,11 +282,15 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		if m.Role != provider.RoleAssistant || len(cm.ToolCalls) == 0 || provider.ContentString(m.Content) != "" {
 			cm.Content = m.Content
 			// For vision-capable models, convert image content parts to the
-			// wire format with detail level. The Stream() early-exit already
-			// rejects images for non-vision models, so this only runs when safe.
-			if ModelSupportsVision(c.model, c.vision) && m.Role == provider.RoleUser {
-				if parts, ok := m.Content.([]provider.ContentPart); ok && hasImageParts(parts) {
-					cm.Content = imageContentParts(parts, c.visionDetail)
+			// wire format with detail level. Audio (input_audio) parts convert
+			// unconditionally — they target models the user explicitly chose as
+			// voice_model, which are audio-capable by definition; there's no
+			// separate "audio" capability flag to gate on.
+			if m.Role == provider.RoleUser {
+				if parts, ok := m.Content.([]provider.ContentPart); ok {
+					if (ModelSupportsVision(c.model, c.vision) && hasImageParts(parts)) || hasAudioParts(parts) {
+						cm.Content = imageContentParts(parts, c.visionDetail)
+					}
 				}
 			}
 		}
@@ -634,9 +638,10 @@ func hasImageParts(parts []provider.ContentPart) bool {
 
 // chatContentPart is the wire format for a content part in the OpenAI API.
 type chatContentPart struct {
-	Type     string            `json:"type"`
-	Text     string            `json:"text,omitempty"`
-	ImageURL *chatImageURLPart `json:"image_url,omitempty"`
+	Type       string              `json:"type"`
+	Text       string              `json:"text,omitempty"`
+	ImageURL   *chatImageURLPart   `json:"image_url,omitempty"`
+	InputAudio *chatInputAudioPart `json:"input_audio,omitempty"`
 }
 
 // chatImageURLPart is the wire format for an image_url content part.
@@ -645,8 +650,18 @@ type chatImageURLPart struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// chatInputAudioPart is the wire format for an input_audio content part
+// (GPT-4o-audio / MiMo-V2.5-ASR style). Data is pure base64, Format is the bare
+// container ("wav", "mp3").
+type chatInputAudioPart struct {
+	Data   string `json:"data"`
+	Format string `json:"format,omitempty"`
+}
+
 // imageContentParts converts provider ContentParts to the OpenAI wire format,
-// applying the vision detail level to all images.
+// applying the vision detail level to all images. Despite the legacy name it
+// now handles all multimodal part types — text, image_url, and input_audio —
+// so STT (which sends input_audio) routes through the same converter.
 func imageContentParts(parts []provider.ContentPart, detail string) []chatContentPart {
 	out := make([]chatContentPart, 0, len(parts))
 	for _, p := range parts {
@@ -663,9 +678,29 @@ func imageContentParts(parts []provider.ContentPart, detail string) []chatConten
 					},
 				})
 			}
+		case "input_audio":
+			if p.InputAudio != nil {
+				out = append(out, chatContentPart{
+					Type: "input_audio",
+					InputAudio: &chatInputAudioPart{
+						Data:   p.InputAudio.Data,
+						Format: p.InputAudio.Format,
+					},
+				})
+			}
 		}
 	}
 	return out
+}
+
+// hasAudioParts reports whether any part in the slice is an input_audio block.
+func hasAudioParts(parts []provider.ContentPart) bool {
+	for _, p := range parts {
+		if p.Type == "input_audio" && p.InputAudio != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // imageUnderstandPrompt and the in-conversation legacy image-degradation path were

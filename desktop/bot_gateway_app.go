@@ -97,30 +97,33 @@ func (a *App) startBotGateway(cfg *config.Config) {
 		},
 		Channels: botChannelConfigsFromConnections(cfg.Bot.Connections),
 		Debounce: time.Duration(cfg.Bot.DebounceMs) * time.Millisecond,
-			AllowlistSaver: func(alCfg bot.AllowlistConfig) {
-				if err := a.applyConfigOnly(func(c *config.Config) error {
-					c.Bot.Allowlist.Enabled = alCfg.Enabled
-					c.Bot.Allowlist.AllowAll = alCfg.AllowAll
-					c.Bot.Allowlist.FeishuUsers = alCfg.Users[bot.PlatformFeishu]
-					c.Bot.Allowlist.WeixinUsers = alCfg.Users[bot.PlatformWeixin]
-					c.Bot.Allowlist.QQUsers = alCfg.Users[bot.PlatformQQ]
-					c.Bot.Allowlist.TelegramUsers = alCfg.Users[bot.PlatformTelegram]
-					c.Bot.Allowlist.TelegramGroups = alCfg.Groups[bot.PlatformTelegram]
-					return nil
-				}); err != nil {
-					logger.Warn("failed to persist allowlist", "err", err)
-				}
-			},
-		OnTurnFinished: func(plat bot.Platform, remoteID, sessionPath string) {
-			// 一轮对话结束后回写：remoteID 填「远端 ID」、sessionPath 填「本地话题」。
-			provider := botPlatformToProvider(plat)
+		AllowlistSaver: func(alCfg bot.AllowlistConfig) {
+			if err := a.applyConfigOnly(func(c *config.Config) error {
+				c.Bot.Allowlist.Enabled = alCfg.Enabled
+				c.Bot.Allowlist.AllowAll = alCfg.AllowAll
+				c.Bot.Allowlist.FeishuUsers = alCfg.Users[bot.PlatformFeishu]
+				c.Bot.Allowlist.WeixinUsers = alCfg.Users[bot.PlatformWeixin]
+				c.Bot.Allowlist.QQUsers = alCfg.Users[bot.PlatformQQ]
+				c.Bot.Allowlist.TelegramUsers = alCfg.Users[bot.PlatformTelegram]
+				c.Bot.Allowlist.TelegramGroups = alCfg.Groups[bot.PlatformTelegram]
+				return nil
+			}); err != nil {
+				logger.Warn("failed to persist allowlist", "err", err)
+			}
+		},
+		OnTurnFinished: func(src bot.SessionSource, sessionPath string) {
+			// 一轮对话结束后回写：src.UserID 填「远端 ID」、sessionPath 填「本地话题」。
+			// chatType+chatID 一起带上，让同一人在不同群里的对话分开（见 SetSessionIMSource）。
+			provider := botPlatformToProvider(src.Platform)
 			if provider == "" {
 				return
 			}
-			// 内存级去重，避免每轮 turn 都 read-modify-write config.toml：
-			//  - "p:remote" 标记远端 ID 已记录（首次落盘后命中即跳过）
-			//  - "p:remote:session" 标记本地话题已记录（拿到非空 sessionPath 后落一次）
-			remoteKey := provider + ":" + remoteID
+			userID := strings.TrimSpace(src.UserID)
+			chatType := strings.TrimSpace(string(src.ChatType))
+			chatID := strings.TrimSpace(src.ChatID)
+			// 内存级去重，避免每轮 turn 都 read-modify-write config.toml。key 带上
+			// chatType+chatID：同一人在两个群里的首轮各自落一次，而不是互相吞掉。
+			remoteKey := provider + ":" + chatType + ":" + chatID + ":" + userID
 			sessionKey := remoteKey + ":session"
 			needRemote := true
 			if _, loaded := a.knownRemoteIDs.LoadOrStore(remoteKey, true); loaded {
@@ -140,7 +143,7 @@ func (a *App) startBotGateway(cfg *config.Config) {
 				// Mark this transcript as a bot IM session with its origin so the
 				// desktop sidebar can list it under the right contact. Idempotent.
 				if sessionPath != "" {
-					if err := agent.SetSessionIMSource(sessionPath, string(plat), remoteID, ""); err != nil {
+					if err := agent.SetSessionIMSource(sessionPath, string(src.Platform), userID, chatType, chatID); err != nil {
 						logger.Warn("set bot session IM source meta failed", "err", err)
 					}
 				}
@@ -158,10 +161,16 @@ func (a *App) startBotGateway(cfg *config.Config) {
 					if !conn.Enabled || conn.Provider != provider {
 						continue
 					}
-					_ = a.rememberBotConnectionRemote(conn.ID, remoteID, sessionPath)
+					_ = a.rememberBotConnectionRemote(conn.ID, userID, chatType, chatID, sessionPath)
 				}
 			}()
 		},
+	}
+
+	// 注入桌面桥：让 /desktop 命令能观察+审批桌面 live 会话。用 typed local
+	// 避免 nil *botBridgeHub 被包成非 nil 接口（Go 经典坑）。
+	if hub := a.botBridge.Load(); hub != nil {
+		gwCfg.Desktop = hub
 	}
 
 	gw := bot.NewGateway(gwCfg, adapters, logger)

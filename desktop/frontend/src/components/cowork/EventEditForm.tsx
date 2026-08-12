@@ -130,7 +130,7 @@ export function EventEditForm({
           {/* Color & Location */}
           <div className="cowork-taskform__section">
             <label className="cowork-taskform__label">
-              <span className="cowork-taskform__labeltext">颜色与地点</span>
+              <span className="cowork-taskform__labeltext">{t("eventEdit.colorAndLocation")}</span>
               <div style={{ display: "flex", gap: "8px" }}>
                 <input
                   type="color"
@@ -143,7 +143,7 @@ export function EventEditForm({
                   className="cowork-taskform__input"
                   style={{ flex: 1 }}
                   value={location}
-                  placeholder="地点 (如：会议室A)"
+                  placeholder={t("eventEdit.locationPlaceholder")}
                   onChange={(e) => setLocation(e.target.value)}
                 />
               </div>
@@ -158,14 +158,14 @@ export function EventEditForm({
                 checked={allDay}
                 onChange={(e) => setAllDay(e.target.checked)}
               />
-              <span className="cowork-taskform__labeltext">全天</span>
+              <span className="cowork-taskform__labeltext">{t("eventEdit.allDay")}</span>
             </label>
           </div>
 
           {/* Start / End time */}
           <div className="cowork-taskform__section">
             <label className="cowork-taskform__label">
-              <span className="cowork-taskform__labeltext">开始时间</span>
+              <span className="cowork-taskform__labeltext">{t("eventEdit.startTime")}</span>
               <input
                 type="datetime-local"
                 className="cowork-taskform__input"
@@ -175,7 +175,7 @@ export function EventEditForm({
             </label>
             {!allDay && (
               <label className="cowork-taskform__label">
-                <span className="cowork-taskform__labeltext">结束时间</span>
+                <span className="cowork-taskform__labeltext">{t("eventEdit.endTime")}</span>
                 <input
                   type="datetime-local"
                   className="cowork-taskform__input"
@@ -188,12 +188,12 @@ export function EventEditForm({
 
           {/* Description */}
           <label className="cowork-taskform__label cowork-taskform__label--top">
-            <span className="cowork-taskform__labeltext">描述</span>
+            <span className="cowork-taskform__labeltext">{t("eventEdit.description")}</span>
             <textarea
               className="cowork-taskform__textarea"
               value={description}
               rows={4}
-              placeholder="日程描述（可选）"
+              placeholder={t("eventEdit.descriptionPlaceholder")}
               onChange={(e) => setDescription(e.target.value)}
             />
           </label>
@@ -201,11 +201,11 @@ export function EventEditForm({
           {/* Reminders (comma-separated minutes) */}
           <div className="cowork-taskform__section">
             <label className="cowork-taskform__label">
-              <span className="cowork-taskform__labeltext">提醒提前（分钟，逗号分隔）</span>
+              <span className="cowork-taskform__labeltext">{t("eventEdit.reminders")}</span>
               <input
                 className="cowork-taskform__input"
                 value={reminders}
-                placeholder="如：15,5"
+                placeholder={t("eventEdit.remindersPlaceholder")}
                 onChange={(e) => setReminders(e.target.value)}
               />
             </label>
@@ -214,11 +214,11 @@ export function EventEditForm({
           {/* Tags (comma-separated) */}
           <div className="cowork-taskform__section">
             <label className="cowork-taskform__label">
-              <span className="cowork-taskform__labeltext">标签（逗号分隔）</span>
+              <span className="cowork-taskform__labeltext">{t("eventEdit.tags")}</span>
               <input
                 className="cowork-taskform__input"
                 value={tags}
-                placeholder="如：工作,例会"
+                placeholder={t("eventEdit.tagsPlaceholder")}
                 onChange={(e) => setTags(e.target.value)}
               />
             </label>

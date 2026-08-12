@@ -651,6 +651,19 @@ export interface ModelInfo {
   current: boolean;
 }
 
+// Mobile bridge payloads (mobilebridge_app.go) — trimmed subsets mirroring the
+// mobilebridge.ModelInfo / mobilebridge.SessionInfo classes generated in
+// wailsjs/go/models.ts. Deliberately separate from ModelInfo/SessionMeta above:
+// the mobile payload only carries id/label (models) and path/title (sessions).
+export interface MobileModelInfo {
+  id: string;
+  label: string;
+}
+export interface MobileSessionInfo {
+  path: string;
+  title: string;
+}
+
 export interface EffortInfo {
   supported: boolean;
   current: string; // "auto" | "low" | "medium" | "high" | "xhigh" | "max"

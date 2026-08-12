@@ -83,15 +83,26 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 
 // ContentPart is one block in a multimodal message (OpenAI content parts format).
 type ContentPart struct {
-	Type     string    `json:"type"`                // "text" or "image_url"
-	Text     string    `json:"text,omitempty"`      // for Type == "text"
-	ImageURL *ImageURL `json:"image_url,omitempty"` // for Type == "image_url"
+	Type       string      `json:"type"`                 // "text", "image_url", or "input_audio"
+	Text       string      `json:"text,omitempty"`       // for Type == "text"
+	ImageURL   *ImageURL   `json:"image_url,omitempty"`  // for Type == "image_url"
+	InputAudio *InputAudio `json:"input_audio,omitempty"` // for Type == "input_audio"
 }
 
 // ImageURL holds a base64 data URL for inline image content.
 type ImageURL struct {
 	URL    string `json:"url"`              // "data:image/png;base64,..."
 	Detail string `json:"detail,omitempty"` // "low", "high", "auto"
+}
+
+// InputAudio holds an inline audio block for multimodal models that accept
+// audio input (OpenAI GPT-4o-audio style: {"type":"input_audio","input_audio":
+// {"data":"<base64>","format":"wav"}}). Unlike ImageURL.URL (a full data URL),
+// Data is the PURE base64 payload with no "data:...;base64," prefix; Format is
+// the bare container ("wav", "mp3").
+type InputAudio struct {
+	Data   string `json:"data"`              // pure base64 (no data: prefix)
+	Format string `json:"format,omitempty"`  // "wav", "mp3"
 }
 
 // ContentString extracts the text portion of a Message.Content field.
@@ -136,6 +147,10 @@ func ContentLen(content any) int {
 				if p.ImageURL != nil {
 					n += len(p.ImageURL.URL)
 				}
+			case "input_audio":
+				if p.InputAudio != nil {
+					n += len(p.InputAudio.Data)
+				}
 			}
 		}
 		return n
@@ -162,6 +177,42 @@ func ImageContent(text string, imageURLs ...string) any {
 		parts = append(parts, ContentPart{Type: "image_url", ImageURL: &ImageURL{URL: url}})
 	}
 	return parts
+}
+
+// AudioContent creates a multimodal Content value with a text prompt and one or
+// more audio parts. Each audioDataURL must be a "data:audio/wav;base64,..."
+// data URL; the prefix is split into a pure-base64 Data + a bare Format so the
+// OpenAI input_audio block is shaped correctly. Used by STT (CallSTT): the
+// model receives the audio plus a prompt asking it to transcribe, and returns
+// text. Non-parseable data URLs are silently skipped (defensive — the frontend
+// recorder always emits valid data URLs).
+func AudioContent(text string, audioDataURLs ...string) any {
+	parts := []ContentPart{{Type: "text", Text: text}}
+	for _, url := range audioDataURLs {
+		mediaType, b64, ok := ParseImageDataURL(url) // ParseImageDataURL is a generic data-URL splitter
+		if !ok {
+			continue
+		}
+		parts = append(parts, ContentPart{
+			Type:       "input_audio",
+			InputAudio: &InputAudio{Data: b64, Format: audioFormatFromMime(mediaType)},
+		})
+	}
+	return parts
+}
+
+// audioFormatFromMime maps an audio MIME type to the bare container name used
+// by the OpenAI input_audio.format field. Unknown MIME → "" (let the server
+// sniff from bytes).
+func audioFormatFromMime(mime string) string {
+	switch strings.ToLower(mime) {
+	case "audio/wav", "audio/wave", "audio/x-wav":
+		return "wav"
+	case "audio/mpeg", "audio/mp3":
+		return "mp3"
+	default:
+		return ""
+	}
 }
 
 // ParseImageDataURL splits a "data:image/png;base64,AAAA..." data URL into its
@@ -199,6 +250,22 @@ func ImageParts(content any) []ContentPart {
 		}
 	}
 	return imgs
+}
+
+// AudioParts extracts audio ContentParts from a multimodal Content value.
+// Returns nil when Content is a plain string or contains no audio.
+func AudioParts(content any) []ContentPart {
+	parts, ok := content.([]ContentPart)
+	if !ok {
+		return nil
+	}
+	var auds []ContentPart
+	for _, p := range parts {
+		if p.Type == "input_audio" && p.InputAudio != nil && p.InputAudio.Data != "" {
+			auds = append(auds, p)
+		}
+	}
+	return auds
 }
 
 // ToolCall is a tool invocation requested by the model. Arguments is raw JSON.
@@ -397,7 +464,8 @@ type Usage struct {
 	CompletionTokens int
 	TotalTokens      int
 	CacheHitTokens   int    // prompt tokens served from cache
-	CacheMissTokens  int    // prompt tokens not cached
+	CacheMissTokens  int    // pure uncached prompt tokens (not cached, not a cache write)
+	CacheWriteTokens int    // cache-creation writes (Anthropic cache_creation_input_tokens; billed above input)
 	ReasoningTokens  int    // subset of CompletionTokens spent on chain-of-thought
 	FinishReason     string // "stop", "tool_calls", "length", "content_filter", "repetition_truncation", …
 }
@@ -405,10 +473,11 @@ type Usage struct {
 // Pricing is a provider's per-1M-token rates, used to estimate spend. Currency
 // is just a display symbol (default "¥"). toml tags let config decode it.
 type Pricing struct {
-	CacheHit float64 `toml:"cache_hit"` // per 1M cached prompt tokens
-	Input    float64 `toml:"input"`     // per 1M uncached prompt tokens
-	Output   float64 `toml:"output"`    // per 1M completion tokens
-	Currency string  `toml:"currency"`
+	CacheHit   float64 `toml:"cache_hit"`   // per 1M cached prompt tokens
+	CacheWrite float64 `toml:"cache_write"` // per 1M cache-creation tokens (Anthropic 5m write = 1.25× input; 0 → defaults to 1.25× Input in Cost)
+	Input      float64 `toml:"input"`       // per 1M uncached prompt tokens
+	Output     float64 `toml:"output"`      // per 1M completion tokens
+	Currency   string  `toml:"currency"`
 }
 
 // Cost estimates the spend for a usage record.
@@ -416,8 +485,17 @@ func (p *Pricing) Cost(u *Usage) float64 {
 	if p == nil || u == nil {
 		return 0
 	}
-	promptCost := float64(u.CacheHitTokens)*p.CacheHit + float64(u.CacheMissTokens)*p.Input
-	// When the provider reports no cache split (both zero), treat all prompt
+	// Cache writes are billed above the input rate (Anthropic 5m write is 1.25×
+	// input). When the user hasn't set cache_write, default to 1.25× Input so
+	// Anthropic cache-creation isn't silently under-billed as plain input.
+	cacheWriteRate := p.CacheWrite
+	if cacheWriteRate == 0 && p.Input > 0 {
+		cacheWriteRate = 1.25 * p.Input
+	}
+	promptCost := float64(u.CacheHitTokens)*p.CacheHit +
+		float64(u.CacheWriteTokens)*cacheWriteRate +
+		float64(u.CacheMissTokens)*p.Input
+	// When the provider reports no cache split (all zero), treat all prompt
 	// tokens as full-price input — the cost is non-zero even when caching is
 	// unavailable or unreported (e.g. some providers omit cache fields).
 	if promptCost == 0 && u.PromptTokens > 0 {
@@ -450,7 +528,7 @@ func currencySymbol(code string) string {
 		return "¥"
 	case "KRW":
 		return "₩"
-	case "₹":
+	case "INR":
 		return "₹"
 	default:
 		// If the code is already a single Unicode rune (e.g. "€"), pass through.

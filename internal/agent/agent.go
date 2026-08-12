@@ -794,6 +794,37 @@ func (a *Agent) Run(ctx context.Context, input any) error {
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
 		}
 
+		// Truncation safety: a "length"/"repetition_truncation" finish means the
+		// output was cut off mid-generation, so a tool call's JSON arguments may be
+		// half-written (e.g. edit_file old_string ends mid-token). Executing such a
+		// call can silently corrupt a file — a truncated old_string may match the
+		// wrong location, a truncated write_file content writes partial bytes. Fail
+		// every call in the turn instead, persist the tool-role messages so the next
+		// round re-injects the failure, and loop so the model retries. content_filter
+		// is excluded: the call args are complete, only the text was filtered.
+		if truncated := usage != nil && (usage.FinishReason == "length" || usage.FinishReason == "repetition_truncation"); truncated && len(calls) > 0 {
+			const skipMsg = "tool call skipped: response was truncated (output ended mid-token), arguments may be incomplete. Re-issue the call in full."
+			for _, call := range calls {
+				ev := event.Tool{ID: call.ID, Name: call.Name, Args: call.Arguments}
+				a.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: ev})
+				a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
+					ID:     call.ID,
+					Name:   call.Name,
+					Args:   call.Arguments,
+					Output: skipMsg,
+					Err:    "skipped: response truncated",
+				}})
+				a.session.Add(provider.Message{
+					Role:       provider.RoleTool,
+					Content:    skipMsg,
+					ToolCallID: call.ID,
+					Name:       call.Name,
+				})
+			}
+			a.maybeCompact(ctx, usage)
+			continue
+		}
+
 		// Keep reasoning_content on the assistant turn for display and session
 		// archive. It is NOT re-uploaded to the API: the openai provider drops it
 		// when building the request, since re-sent reasoning is billable prompt
@@ -1261,7 +1292,11 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 			usage = chunk.Usage
 			a.lastUsage.Store(chunk.Usage)
 			a.sessCacheHit.Add(int64(chunk.Usage.CacheHitTokens))
-			a.sessCacheMiss.Add(int64(chunk.Usage.CacheMissTokens))
+			// sessCacheMiss keeps the legacy "non-hit" semantics (uncached input
+			// + cache writes) so the session hit-rate the frontend shows stays
+			// comparable across versions. Cache writes are billed separately via
+			// Usage.CacheWriteTokens / Pricing.cache_write, not double-counted.
+			a.sessCacheMiss.Add(int64(chunk.Usage.CacheMissTokens + chunk.Usage.CacheWriteTokens))
 		case provider.ChunkError:
 			if provider.IsStreamInterrupted(chunk.Err) {
 				stored, _ := finishReasoning()

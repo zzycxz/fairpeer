@@ -46,7 +46,7 @@ export function TaskCard({
         <div className="cowork-task-card__title">
           <span className={`cowork-task-card__dot ${task.enabled ? "cowork-task-card__dot--on" : ""}`} />
           <span className="cowork-task-card__name">{task.name}</span>
-          {task.source === "calendar" && <span className="cowork-task-card__badge cowork-task-card__badge--calendar">📅 日历</span>}
+          {task.source === "calendar" && <span className="cowork-task-card__badge cowork-task-card__badge--calendar">📅 {t("taskCard.calendar")}</span>}
           {task.oneShot && <span className="cowork-task-card__badge">{t("cowork.automationOneShot")}</span>}
           {!task.enabled && <span className="cowork-task-card__badge cowork-task-card__badge--muted">{t("cowork.automationPaused")}</span>}
         </div>
@@ -97,7 +97,7 @@ export function TaskCard({
         {task.nextRun && (
           <span className="cowork-task-card__nextrun">
             {t("cowork.automationNextRun")}: {task.nextRun}
-            <span className="cowork-task-card__countdown">{relativeCountdown(task.nextRun)}</span>
+            <span className="cowork-task-card__countdown">{relativeCountdown(task.nextRun, t)}</span>
           </span>
         )}
       </div>
@@ -141,17 +141,17 @@ export function TaskCard({
 // relativeCountdown turns a "2006-01-02 15:04" nextRun into a compact relative
 // hint like "3小时后" / "2天后" / "已过期". Computed once at render; not a live
 // ticking timer (good enough for a card that refreshes on data reload).
-function relativeCountdown(nextRun: string): string {
-  const t = new Date(nextRun.replace(/-/g, "/")).getTime();
-  if (isNaN(t)) return "";
-  const diff = t - Date.now();
-  if (diff < 0) return "（已过期）";
+function relativeCountdown(nextRun: string, t: Translator): string {
+  const ts = new Date(nextRun.replace(/-/g, "/")).getTime();
+  if (isNaN(ts)) return "";
+  const diff = ts - Date.now();
+  if (diff < 0) return t("taskCard.expired");
   const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `（${mins}分钟后）`;
+  if (mins < 60) return t("taskCard.inMinutes", { n: String(mins) });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `（${hours}小时后）`;
+  if (hours < 24) return t("taskCard.inHours", { n: String(hours) });
   const days = Math.floor(hours / 24);
-  return `（${days}天后）`;
+  return t("taskCard.inDays", { n: String(days) });
 }
 
 function deliveryLabel(t: Translator, mode: string): string {

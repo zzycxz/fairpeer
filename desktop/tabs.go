@@ -112,6 +112,7 @@ type sessionUsageStats struct {
 	ReasoningTokens  int   `json:"reasoningTokens"`
 	CacheHitTokens   int   `json:"cacheHitTokens"`
 	CacheMissTokens  int   `json:"cacheMissTokens"`
+	CacheWriteTokens int   `json:"cacheWriteTokens"`
 	RequestCount     int   `json:"requestCount"`
 	ElapsedMs        int64 `json:"elapsedMs"`
 
@@ -202,6 +203,7 @@ func (t *WorkspaceTab) recordUsage(e event.Event) {
 	} else {
 		t.usageTelemetry.CacheHitTokens += u.CacheHitTokens
 		t.usageTelemetry.CacheMissTokens += u.CacheMissTokens
+		t.usageTelemetry.CacheWriteTokens += u.CacheWriteTokens
 	}
 	t.usageTelemetry.RequestCount++
 	t.telemMu.Unlock()
@@ -263,6 +265,27 @@ func (s *tabEventSink) Emit(e event.Event) {
 	// Persist after each turn so a force-kill loses at most the in-flight prompt.
 	if e.Kind == event.TurnDone && s.app != nil {
 		s.app.scheduleTabSnapshot(s.tabID)
+	}
+	// linkpeer mobile bridge: forward this event (as wireEvent JSON) to any
+	// mobile client subscribed to this tab. Single injection point — the
+	// mobilebridge package owns all P2P/encryption downstream of here.
+	if s.app != nil {
+		if mb := s.app.mobilebridge.Load(); mb != nil {
+			if wireJSON, err := json.Marshal(toWireTab(e, s.tabID)); err == nil {
+				mb.ForwardEvent(s.tabID, wireJSON)
+			}
+		}
+	}
+	// bot desktop bridge: forward approval/ask/turn-done events to subscribed IM
+	// chats. Observe only does in-memory bookkeeping + enqueue, so it never
+	// blocks this controller event goroutine.
+	if s.app != nil {
+		if bb := s.app.botBridge.Load(); bb != nil {
+			switch e.Kind {
+			case event.ApprovalRequest, event.AskRequest, event.TurnDone:
+				bb.Observe(s.tabID, e)
+			}
+		}
 	}
 }
 
@@ -806,6 +829,7 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot, profile string) (TabMeta, err
 
 	a.startTabControllerBuild(created)
 	a.emitProjectTreeChanged()
+	a.notifyMobileSessionList()
 	return meta, nil
 }
 
@@ -970,6 +994,7 @@ func (a *App) CloseTab(tabID string) error {
 	if tab.sink != nil {
 		tab.sink.ctx = nil // stop further emissions (nil ctx → Emit becomes no-op)
 	}
+	a.notifyMobileSessionList()
 	return nil
 }
 
@@ -1263,6 +1288,15 @@ func (a *App) ctrlByTabID(tabID string) *control.Controller {
 		return nil
 	}
 	return tab.Ctrl
+}
+
+// ActiveTabID returns the currently focused tab's ID. mobilebridge maps the
+// linkpeer "default"/"" tab alias onto this so the phone joins the desktop's
+// active session without knowing fairpeer's UUID-style tab IDs.
+func (a *App) ActiveTabID() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.activeTabID
 }
 
 // activeSink returns the active tab's event sink, or nil.
@@ -3168,6 +3202,7 @@ type ContextPanelInfo struct {
 	ReasoningTokens  int               `json:"reasoningTokens"`
 	CacheHitTokens   int               `json:"cacheHitTokens"`
 	CacheMissTokens  int               `json:"cacheMissTokens"`
+	CacheWriteTokens int               `json:"cacheWriteTokens"`
 	RequestCount     int               `json:"requestCount"`
 	ElapsedMs        int64             `json:"elapsedMs"`
 	Mock             bool              `json:"mock,omitempty"`
@@ -3213,6 +3248,7 @@ func (a *App) ContextPanel(tabID string) ContextPanelInfo {
 			info.ReasoningTokens = u.ReasoningTokens
 			info.CacheHitTokens = u.CacheHitTokens
 			info.CacheMissTokens = u.CacheMissTokens
+			info.CacheWriteTokens = u.CacheWriteTokens
 		}
 	}
 

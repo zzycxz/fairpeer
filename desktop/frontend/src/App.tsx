@@ -105,10 +105,10 @@ import { useWindowStatePersistence } from "./lib/windowState";
 import { availableWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
 
 const SIDEBAR_COLLAPSED_KEY = "fairpeer.sidebar.collapsed";
-const SIDEBAR_DEFAULT_WIDTH = 264;
-const SIDEBAR_MIN_WIDTH = 264;
-const SIDEBAR_MAX_WIDTH = 300;
-const SIDEBAR_VIEWPORT_RATIO = 0.18;
+const SIDEBAR_DEFAULT_WIDTH = 220;
+const SIDEBAR_MIN_WIDTH = 200;
+const SIDEBAR_MAX_WIDTH = 480;
+const SIDEBAR_VIEWPORT_RATIO = 0.14;
 const CHAT_MIN_WIDTH = 400;
 const CHAT_COMFORT_MIN_WIDTH = 560;
 const WORKSPACE_RESIZER_WIDTH = 8;
@@ -116,12 +116,17 @@ const WORKSPACE_RESIZER_WIDTH = 8;
 function isThemeMode(value: string): value is Theme {
   return value === "auto" || value === "light" || value === "dark";
 }
-const RIGHT_DOCK_TREE_DEFAULT_WIDTH = 300;
-const RIGHT_DOCK_TREE_MIN_WIDTH = 300;
-const RIGHT_DOCK_TREE_MAX_WIDTH = 560;
+const RIGHT_DOCK_TREE_DEFAULT_WIDTH = 260;
+const RIGHT_DOCK_TREE_MIN_WIDTH = 260;
+const RIGHT_DOCK_TREE_MAX_WIDTH = 680;
 const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 660;
 const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
-const RIGHT_DOCK_MIN_RENDER_WIDTH = 280;
+const RIGHT_DOCK_MIN_RENDER_WIDTH = 240;
+// Drag-to-edge hide thresholds: while dragging a resizer, releasing past these
+// collapses the sidebar / closes the dock instead of pinning at min width
+// (VS Code-style edge-hide). Sidebar uses viewport-x; dock uses raw dragged width.
+const SIDEBAR_COLLAPSE_THRESHOLD = 96;
+const DOCK_CLOSE_THRESHOLD = 180;
 const RIGHT_DOCK_MAX_WIDTH = 860;
 
 type RightDockMode = "context" | "files" | "changed";
@@ -744,7 +749,10 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
-  const [workspacePanelOpen, setWorkspacePanelOpen] = useState(true);
+  // Default closed so the chat pane gets the full center column on launch.
+  // Opened on demand via the AppChrome PanelRight toggle. No persistence —
+  // resets to this calm default each launch.
+  const [workspacePanelOpen, setWorkspacePanelOpen] = useState(false);
   // Cowork dock has its OWN open state, separate from the coding-mode
   // workspacePanelOpen. Rationale: the cowork overview dock (今日/邮件/文件)
   // is the centerpiece of office mode — it should default open and NOT be
@@ -1784,13 +1792,22 @@ export default function App() {
       closeTransientOverlays();
       setSidebarResizing(true);
       let nextWidth = sidebarWidth;
+      let lastClientX = sidebarWidth;
       const onMove = (moveEvent: PointerEvent) => {
+        lastClientX = moveEvent.clientX;
         nextWidth = clampSidebarWidth(moveEvent.clientX);
         setSidebarWidth(nextWidth);
       };
       const onDone = () => {
-        setSidebarWidth(nextWidth);
-        saveSidebarWidth(nextWidth);
+        // Drag-to-edge hide: releasing with the pointer near the left viewport
+        // edge collapses the sidebar instead of pinning it at min width.
+        if (lastClientX < SIDEBAR_COLLAPSE_THRESHOLD) {
+          setSidebarCollapsed(true);
+          saveSidebarCollapsed(true);
+        } else {
+          setSidebarWidth(nextWidth);
+          saveSidebarWidth(nextWidth);
+        }
         setSidebarResizing(false);
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onDone);
@@ -1853,24 +1870,44 @@ export default function App() {
 
   const startWorkspacePanelResize = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
-      if (!workspacePanelOpen) return;
+      // Cowork mode tracks its own dock open state (coworkDockOpen) separately
+      // from the coding-mode workspacePanelOpen — accept either so the resizer
+      // works in both layouts (previously cowork's resizer was dead because
+      // workspacePanelOpen is always false in cowork).
+      const dockOpen = coworkActive ? coworkDockOpen : workspacePanelOpen;
+      if (!dockOpen) return;
       event.preventDefault();
       closeTransientOverlays();
       setWorkspacePanelResizing(true);
       const startX = event.clientX;
       const startDockWidth = workspacePanelRenderWidth;
       let nextDockWidth = startDockWidth;
+      let rawDockWidth = startDockWidth;
       const onMove = (moveEvent: PointerEvent) => {
         const delta = moveEvent.clientX - startX;
-        nextDockWidth = startDockWidth - delta;
+        rawDockWidth = startDockWidth - delta;
+        nextDockWidth = rightDockDetailActive
+          ? clampRightDockPreviewWidth(rawDockWidth)
+          : clampRightDockTreeWidth(rawDockWidth);
         if (rightDockDetailActive) {
-          setRightDockPreviewWidth(clampRightDockPreviewWidth(nextDockWidth));
+          setRightDockPreviewWidth(nextDockWidth);
         } else {
-          setRightDockTreeWidth(clampRightDockTreeWidth(nextDockWidth));
+          setRightDockTreeWidth(nextDockWidth);
         }
       };
       const onDone = () => {
-        setSavedWorkspacePanelWidth(nextDockWidth);
+        // Drag-to-edge hide: releasing with the dock dragged below the close
+        // threshold closes it instead of pinning at min width.
+        if (rawDockWidth < DOCK_CLOSE_THRESHOLD) {
+          if (coworkActive) {
+            setCoworkDockOpen(false);
+          } else {
+            setWorkspacePanelMaximized(false);
+            setWorkspacePanelOpen(false);
+          }
+        } else {
+          setSavedWorkspacePanelWidth(nextDockWidth);
+        }
         setWorkspacePanelResizing(false);
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onDone);
@@ -1884,7 +1921,7 @@ export default function App() {
       window.addEventListener("pointerup", onDone);
       window.addEventListener("pointercancel", onDone);
     },
-    [closeTransientOverlays, rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelOpen, workspacePanelRenderWidth],
+    [closeTransientOverlays, coworkActive, coworkDockOpen, rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelOpen, workspacePanelRenderWidth],
   );
 
   const resizeWorkspacePanelWithKeyboard = useCallback(

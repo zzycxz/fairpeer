@@ -75,6 +75,19 @@ func (e *replyExec) Answer(string, string, []string) error          { return nil
 func (e *replyExec) SetPlan(string, bool) error                     { return nil }
 func (e *replyExec) SetModel(string, string) error                  { return nil }
 func (e *replyExec) ListSessions() ([]mobilebridge.SessionInfo, error) { return nil, nil }
+func (e *replyExec) ListModels() ([]mobilebridge.ModelInfo, error) {
+	return []mobilebridge.ModelInfo{{ID: "mock/model", Label: "模拟模型"}}, nil
+}
+func (e *replyExec) NewTab(string, string) (string, error) { return "tab_mock", nil }
+func (e *replyExec) RenameSession(string, string) error     { return nil }
+func (e *replyExec) DeleteSession(string) error             { return nil }
+func (e *replyExec) OfficeRun(string, string, map[string]string) error {
+	return nil
+}
+func (e *replyExec) FileStart(string, string, int64) error { return nil }
+func (e *replyExec) FileChunk(string, int, string) error   { return nil }
+func (e *replyExec) FileEnd(string, string) error          { return nil }
+func (e *replyExec) LoadSession(string) ([]map[string]any, error) { return nil, nil }
 
 func main() {
 	signalURL := flag.String("signal", "http://192.168.1.48:8080", "K signal URL (手机可达的局域网地址)")

@@ -46,6 +46,7 @@ var slashCommands = map[string]bool{
 	"/answer":  true,
 	"/status":  true,
 	"/help":    true,
+	"/desktop": true,
 }
 
 // IsSlashBypass 判断消息是否为绕过队列的斜杠命令。

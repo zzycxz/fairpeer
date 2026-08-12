@@ -57,6 +57,9 @@ func indexLine(sk Skill) string {
 	if sk.Disabled {
 		tag += " [关闭]"
 	}
+	if sk.Cold {
+		tag += " [休眠]"
+	}
 	max := 130 - len([]rune(sk.Name)) - len([]rune(tag))
 	clipped := clipRunes(desc, max)
 	if clipped == "" {

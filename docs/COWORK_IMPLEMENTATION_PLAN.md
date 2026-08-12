@@ -24,7 +24,7 @@ v1.0 原计划 18 周/9 Phase 全量并行。v2.0 改为：
 | v1.0 说法 | 代码事实 | 影响 |
 |---|---|---|
 | 「config 有 profile section 可扩展」| `config.go`/`example.toml` **没有** `[profile]` | profile section 从零设计 |
-| 「web_search 是 MCP 通道」| `websearch.go`/`webfetch.go` 是编译进 Go 的 built-in（Brave/Exa/Linkup），非 MCP | 架构图纠错 |
+| 「web_search 是 MCP 通道」| `websearch.go`/`webfetch.go` 是编译进 Go 的 built-in（Brave/Exa/Linkup/AnySearch），非 MCP | 架构图纠错 |
 | 「ppt 复用」| `wps-ppt-mcp-server` 是仓库外独立 Python server，fairpeer **零引用** | 接入是新工作（但省 greenfield）|
 | 「App.tsx 2700 行必须先拆」| 2705 行属实，但 `AppChrome`/`ProjectTree`/`Transcript`/`Composer`/`WorkspacePanel` 已是独立组件 | 不必先全量拆，增量改即可 |
 | 「SetSkillEnabled 可 live 切」| `controller.go:2219` docstring 明说**需 rebuild 才生效** | profile 统一走 rebuild |

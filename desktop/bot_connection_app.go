@@ -29,6 +29,8 @@ type BotConnectionCredentialView struct {
 
 type BotConnectionSessionMappingView struct {
 	RemoteID      string `json:"remoteId"`
+	ChatType      string `json:"chatType"`
+	ChatID        string `json:"chatId"`
 	SessionID     string `json:"sessionId"`
 	Scope         string `json:"scope"`
 	WorkspaceRoot string `json:"workspaceRoot"`
@@ -305,7 +307,7 @@ func (a *App) TestBotConnection(id, target string) (BotConnectionDiagnostic, err
 	if err != nil {
 		return BotConnectionDiagnostic{ID: conn.ID, Label: conn.Label, Status: "error", Message: err.Error()}, nil
 	}
-	_ = a.rememberBotConnectionRemote(conn.ID, target, "")
+	_ = a.rememberBotConnectionRemote(conn.ID, target, "", "", "")
 	msg := "测试消息已发送。"
 	if result.MessageID != "" {
 		msg += " Message ID: " + result.MessageID
@@ -447,9 +449,11 @@ func (a *App) upsertBotConnection(conn config.BotConnectionConfig, updateLegacy 
 	return botConnectionView(conn), err
 }
 
-func (a *App) rememberBotConnectionRemote(id, remoteID, sessionPath string) error {
+func (a *App) rememberBotConnectionRemote(id, remoteID, chatType, chatID, sessionPath string) error {
 	id = strings.TrimSpace(id)
 	remoteID = strings.TrimSpace(remoteID)
+	chatType = strings.TrimSpace(chatType)
+	chatID = strings.TrimSpace(chatID)
 	sessionPath = strings.TrimSpace(sessionPath)
 	if id == "" || remoteID == "" {
 		return nil
@@ -461,11 +465,14 @@ func (a *App) rememberBotConnectionRemote(id, remoteID, sessionPath string) erro
 				continue
 			}
 			for j := range c.Bot.Connections[i].SessionMappings {
-				if c.Bot.Connections[i].SessionMappings[j].RemoteID == remoteID {
-					// 已有该远端 ID 的映射：仅在拿到非空 sessionPath 且当前
-					// SessionID 为空时补填「本地话题」，避免反复写盘。
-					if sessionPath != "" && strings.TrimSpace(c.Bot.Connections[i].SessionMappings[j].SessionID) == "" {
-						c.Bot.Connections[i].SessionMappings[j].SessionID = "path:" + sessionPath
+				m := &c.Bot.Connections[i].SessionMappings[j]
+				// 同一对话才命中：remoteID + chatType + chatID 三者全等。这样同一
+				// 个人在不同群里的对话各自独立成条，而不是互相覆盖。
+				if m.RemoteID == remoteID && m.ChatType == chatType && m.ChatID == chatID {
+					// 已有该对话的映射：仅在拿到非空 sessionPath 且当前 SessionID 为
+					// 空时补填「本地话题」，避免反复写盘。
+					if sessionPath != "" && strings.TrimSpace(m.SessionID) == "" {
+						m.SessionID = "path:" + sessionPath
 						c.Bot.Connections[i].UpdatedAt = now
 					}
 					return nil
@@ -474,6 +481,8 @@ func (a *App) rememberBotConnectionRemote(id, remoteID, sessionPath string) erro
 			scope := botMappingScope("", c.Bot.Connections[i].WorkspaceRoot)
 			c.Bot.Connections[i].SessionMappings = append(c.Bot.Connections[i].SessionMappings, config.BotConnectionSessionMapping{
 				RemoteID:      remoteID,
+				ChatType:      chatType,
+				ChatID:        chatID,
 				SessionID:     botMappingSessionID(sessionPath),
 				Scope:         scope,
 				WorkspaceRoot: botMappingWorkspaceRoot(scope, c.Bot.Connections[i].WorkspaceRoot),
@@ -709,6 +718,8 @@ func botSessionMappingViews(mappings []config.BotConnectionSessionMapping, conne
 		scope := botMappingScope(m.Scope, workspaceRoot)
 		out = append(out, BotConnectionSessionMappingView{
 			RemoteID:      m.RemoteID,
+			ChatType:      m.ChatType,
+			ChatID:        m.ChatID,
 			SessionID:     m.SessionID,
 			Scope:         scope,
 			WorkspaceRoot: botMappingWorkspaceRoot(scope, workspaceRoot),
@@ -728,6 +739,8 @@ func botSessionMappingConfigs(mappings []BotConnectionSessionMappingView, connec
 		scope := botMappingScope(m.Scope, workspaceRoot)
 		out = append(out, config.BotConnectionSessionMapping{
 			RemoteID:      strings.TrimSpace(m.RemoteID),
+			ChatType:      strings.TrimSpace(m.ChatType),
+			ChatID:        strings.TrimSpace(m.ChatID),
 			SessionID:     strings.TrimSpace(m.SessionID),
 			Scope:         scope,
 			WorkspaceRoot: botMappingWorkspaceRoot(scope, workspaceRoot),

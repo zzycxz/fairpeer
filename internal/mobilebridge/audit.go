@@ -2,7 +2,6 @@ package mobilebridge
 
 import (
 	"log/slog"
-	"os"
 )
 
 // Audit logs ONLY metadata about mobile-side activity: devIds (truncated),
@@ -12,18 +11,12 @@ import (
 type Audit struct{ log *slog.Logger }
 
 func NewAudit(level string) *Audit {
-	var lv slog.Level
-	switch level {
-	case "debug":
-		lv = slog.LevelDebug
-	case "warn":
-		lv = slog.LevelWarn
-	case "error":
-		lv = slog.LevelError
-	default:
-		lv = slog.LevelInfo
-	}
-	return &Audit{slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lv}))}
+	// 用 fairpeer 全局 slog（startup 时 route 到 app.log）。原来用 os.Stdout，
+	// 但 wails GUI 应用没有控制台，stdout 不可见，dc_open/cmd/conn_open 等
+	// 关键日志全丢了。level 跟随全局配置（[mobilebridge] log_level=debug 时
+	// 整个 app.log 已是 debug 级）。
+	_ = level
+	return &Audit{log: slog.Default()}
 }
 
 // truncDev shortens a devId so logs can't reconstruct the full identifier.

@@ -53,6 +53,9 @@ type Conn struct {
 	sendSeq  uint64
 	recvMax  uint64
 	recvDone bool // any inbound frame seen? (distinguishes seq=0 from "no data")
+	// 帧解密失败计数（§6.1 防 garbage frame）：1min 窗口超 10 次断连。
+	decryptFailures int
+	decryptWindow   time.Time
 
 	transcript []byte // for Finished verification
 	writeMu    sync.Mutex
@@ -245,7 +248,20 @@ func (c *Conn) handleFinished(raw []byte) {
 func (c *Conn) handleFrame(raw []byte) {
 	seq, pt, err := OpenFrame(c.c2s, raw)
 	if err != nil {
-		return // drop bad frame; repeated failures should trip a counter (M2 polish)
+		// 帧解密失败计数：1min 内超 10 次断连（防 garbage frame / 篡改探测，§6.1）。
+		c.cryptoMu.Lock()
+		now := time.Now()
+		if now.Sub(c.decryptWindow) >= time.Minute {
+			c.decryptWindow = now
+			c.decryptFailures = 0
+		}
+		c.decryptFailures++
+		trip := c.decryptFailures > 10
+		c.cryptoMu.Unlock()
+		if trip {
+			c.fail("too_many_decrypt_failures", err)
+		}
+		return
 	}
 	c.cryptoMu.Lock()
 	if c.recvDone && seq <= c.recvMax {

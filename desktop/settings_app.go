@@ -134,9 +134,10 @@ type BotSettingsView struct {
 }
 
 type WebSearchView struct {
-	BraveKeySet  bool `json:"braveKeySet"`
-	ExaKeySet    bool `json:"exaKeySet"`
-	LinkupKeySet bool `json:"linkupKeySet"`
+	BraveKeySet     bool `json:"braveKeySet"`
+	ExaKeySet       bool `json:"exaKeySet"`
+	LinkupKeySet    bool `json:"linkupKeySet"`
+	AnySearchKeySet bool `json:"anysearchKeySet"`
 }
 
 // SettingsView is the whole Settings panel payload.
@@ -320,9 +321,10 @@ func (a *App) Settings() SettingsView {
 			Bot:     botSettingsView(config.BotConfig{}),
 			Cowork:  coworkSettingsView(config.CoworkConfig{}),
 			WebSearch: WebSearchView{
-				BraveKeySet:  os.Getenv("BRAVE_API_KEY") != "" || os.Getenv("BRAVE_SEARCH_API_KEY") != "",
-				ExaKeySet:    os.Getenv("EXA_API_KEY") != "",
-				LinkupKeySet: os.Getenv("LINKUP_API_KEY") != "",
+				BraveKeySet:     os.Getenv("BRAVE_API_KEY") != "" || os.Getenv("BRAVE_SEARCH_API_KEY") != "",
+				ExaKeySet:       os.Getenv("EXA_API_KEY") != "",
+				LinkupKeySet:    os.Getenv("LINKUP_API_KEY") != "",
+				AnySearchKeySet: os.Getenv("ANYSEARCH_API_KEY") != "",
 			},
 			AutoPlan:          "off",
 			DesktopTheme:      "light",
@@ -387,9 +389,10 @@ func (a *App) Settings() SettingsView {
 			return cv
 		}(),
 		WebSearch: WebSearchView{
-			BraveKeySet:  os.Getenv("BRAVE_API_KEY") != "" || os.Getenv("BRAVE_SEARCH_API_KEY") != "",
-			ExaKeySet:    os.Getenv("EXA_API_KEY") != "",
-			LinkupKeySet: os.Getenv("LINKUP_API_KEY") != "",
+			BraveKeySet:     os.Getenv("BRAVE_API_KEY") != "" || os.Getenv("BRAVE_SEARCH_API_KEY") != "",
+			ExaKeySet:       os.Getenv("EXA_API_KEY") != "",
+			LinkupKeySet:    os.Getenv("LINKUP_API_KEY") != "",
+			AnySearchKeySet: os.Getenv("ANYSEARCH_API_KEY") != "",
 		},
 		DesktopLanguage:   cfg.DesktopLanguage(),
 		DesktopTheme:      cfg.DesktopTheme(),

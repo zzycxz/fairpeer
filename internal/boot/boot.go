@@ -650,6 +650,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			vlmModel = cfg.Cowork.ScreenshotVLMModel
 		}
 		builtin.SetVLMModel(vlmModel)
+		// Voice input (mic button + audio attachment understanding): resolve
+		// [cowork] voice_model. CallSTT reuses the same provider chat runner as
+		// VLM (SetProviderChatRunner below), sending audio as an input_audio
+		// content part — one unified interface for every audio-capable model.
+		// When no voice model is configured, CallSTT returns a clear error and
+		// the desktop mic button is disabled with a hint.
+		builtin.SetVoiceModel(strings.TrimSpace(cfg.Cowork.VoiceModel))
 		// Wire the provider-backed VLM runner so CallVLM can build a proxy-aware
 		// one-shot client. Without this, callProviderVLM returns "provider VLM
 		// bridge not initialized". cfg is captured by closure so a profile switch
@@ -669,10 +676,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// client + browser-launch are owned here; the desktop registers an
 		// optional screencast sink so the panel can mirror the agent's browser.
 		builtin.SetBrowserAutoRuntime(buildBrowserAutoRuntime(cfg, opts))
-		// RAG semantic layer: the embedding-based reranker was removed (it needed
-		// an external Python service). Keep it off — the LLM semantic layer below
-		// replaces it with zero external deps.
-		builtin.SetRAGEmbedder(nil)
+		// RAG embedding reranker: boot no longer force-disables it. The desktop
+		// injects a Hyper-Extract embedder (HEClient) once the HE service starts;
+		// headless/CLI runs leave it nil and rag_search falls back to the LLM
+		// reranker below. boot.Build re-runs on profile switch — a hardcoded
+		// SetRAGEmbedder(nil) here would wipe the desktop's injection each time.
 		// LLM-driven semantic search (SPEC v2 §3.6): query expansion (synonyms /
 		// English stems / cross-language) + rerank, reusing the user's already-
 		// configured provider. Fully internalized — no Python, no embedding model,
@@ -1699,7 +1707,16 @@ func runProviderVLMChat(ctx context.Context, cfg *config.Config, modelRef string
 	if err != nil {
 		return nil, fmt.Errorf("build VLM provider %q: %w", ref, err)
 	}
-	ch, err := prov.Stream(ctx, provider.Request{Messages: msgs, MaxTokens: 1024})
+	// VLM image descriptions cap at 1024 tokens; STT transcripts (audio input)
+	// can be much longer, so lift the cap when the request carries audio parts.
+	maxTokens := 1024
+	for _, m := range msgs {
+		if len(provider.AudioParts(m.Content)) > 0 {
+			maxTokens = 4096
+			break
+		}
+	}
+	ch, err := prov.Stream(ctx, provider.Request{Messages: msgs, MaxTokens: maxTokens})
 	if err != nil {
 		return nil, err
 	}

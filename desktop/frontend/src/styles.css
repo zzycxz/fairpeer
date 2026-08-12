@@ -28,7 +28,7 @@
   --workspace-selection-fg: var(--accent);
   --workspace-selection-bar: var(--accent);
   --border: #343945;
-  --border-soft: #252a34;
+  --border-soft: #2f3540;
 
   /* text */
   --fg: #f4f5f7;
@@ -70,8 +70,8 @@
   --danger: #e5484d;
   --danger-fg: #fff;
   --shell-accent: #22c55e;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.22);
-  --shadow-2: 0 14px 40px rgba(0, 0, 0, 0.28);
+  --shadow-1: 0 1px 1px rgba(0, 0, 0, 0.22);
+  --shadow-2: 0 6px 16px rgba(0, 0, 0, 0.28);
 
   /* z-index scale */
   --z-local-raised: 2;
@@ -102,7 +102,7 @@
 
   /* component recipes */
   --list-row-height: 38px;
-  --list-row-radius: 7px;
+  --list-row-radius: 4px;
   --list-row-gap: 10px;
   --list-row-px: 10px;
   --list-row-title: var(--fg-dim);
@@ -189,7 +189,7 @@
   --motion-pop-scale: 0.98; /* enter-from scale for popovers/palette */
   --motion-rise: 4px; /* enter-from translateY for popovers/menus */
 
-  --radius: 9px;
+  --radius: 5px;
   --maxw: 940px;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, "Cascadia Code", Consolas,
     "Liberation Mono", Menlo, monospace;
@@ -400,12 +400,12 @@ button {
   --control-primary-fg: #0c0d10;
   --code-bg: #101115;
   --grad: linear-gradient(120deg, #ff6a3d, #ff9a52);
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --shadow-2: 0 14px 40px rgba(0, 0, 0, 0.6);
+  --shadow-1: 0 1px 1px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 6px 16px rgba(0, 0, 0, 0.6);
   --r-s: 5px;
   --r: 8px;
   --r-l: 11px;
-  --radius: 8px;
+  --radius: 4px;
 }
 :root[data-theme="light"][data-theme-style="graphite"] {
   --stage: #e6e6e1;
@@ -469,8 +469,8 @@ button {
   --code-bg: #f6f5f1;
   --focus-ring: 0 0 0 3px rgba(255, 90, 44, 0.16);
   --grad: linear-gradient(120deg, #ff5a2c, #ff8a3d);
-  --shadow-1: 0 1px 2px rgba(20, 22, 28, 0.06);
-  --shadow-2: 0 12px 34px rgba(20, 22, 28, 0.14);
+  --shadow-1: 0 1px 1px rgba(20, 22, 28, 0.06);
+  --shadow-2: 0 6px 16px rgba(20, 22, 28, 0.14);
   --r-s: 5px;
   --r: 8px;
   --r-l: 11px;
@@ -538,8 +538,8 @@ button {
     --code-bg: #f6f5f1;
     --focus-ring: 0 0 0 3px rgba(255, 90, 44, 0.16);
     --grad: linear-gradient(120deg, #ff5a2c, #ff8a3d);
-    --shadow-1: 0 1px 2px rgba(20, 22, 28, 0.06);
-    --shadow-2: 0 12px 34px rgba(20, 22, 28, 0.14);
+    --shadow-1: 0 1px 1px rgba(20, 22, 28, 0.06);
+    --shadow-2: 0 6px 16px rgba(20, 22, 28, 0.14);
     --r-s: 5px;
     --r: 8px;
     --r-l: 11px;
@@ -608,12 +608,12 @@ button {
   --code-bg: #0f0e1c;
   --focus-ring: 0 0 0 3px rgba(139, 124, 255, 0.2);
   --grad: linear-gradient(120deg, #8b7cff, #b07cff 42%, #38d6e6);
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 34px rgba(0, 0, 0, 0.46);
-  --shadow-2: 0 24px 70px rgba(0, 0, 0, 0.62);
+  --shadow-1: 0 1px 1px rgba(0, 0, 0, 0.4), 0 12px 34px rgba(0, 0, 0, 0.46);
+  --shadow-2: 0 6px 16px rgba(0, 0, 0, 0.62);
   --r-s: 10px;
   --r: 15px;
   --r-l: 22px;
-  --radius: 12px;
+  --radius: 6px;
 }
 :root[data-theme="light"][data-theme-style="aurora"] {
   --stage: #e7e2f3;
@@ -677,8 +677,8 @@ button {
   --code-bg: #f3effb;
   --focus-ring: 0 0 0 3px rgba(109, 94, 252, 0.18);
   --grad: linear-gradient(120deg, #6d5efc, #9b5cf6 42%, #21c8d8);
-  --shadow-1: 0 1px 2px rgba(26, 16, 60, 0.06), 0 10px 30px rgba(26, 16, 60, 0.08);
-  --shadow-2: 0 20px 60px rgba(26, 16, 60, 0.18);
+  --shadow-1: 0 1px 1px rgba(26, 16, 60, 0.06), 0 10px 30px rgba(26, 16, 60, 0.08);
+  --shadow-2: 0 6px 16px rgba(26, 16, 60, 0.18);
   --r-s: 10px;
   --r: 15px;
   --r-l: 22px;
@@ -746,8 +746,8 @@ button {
     --code-bg: #f3effb;
     --focus-ring: 0 0 0 3px rgba(109, 94, 252, 0.18);
     --grad: linear-gradient(120deg, #6d5efc, #9b5cf6 42%, #21c8d8);
-    --shadow-1: 0 1px 2px rgba(26, 16, 60, 0.06), 0 10px 30px rgba(26, 16, 60, 0.08);
-    --shadow-2: 0 20px 60px rgba(26, 16, 60, 0.18);
+    --shadow-1: 0 1px 1px rgba(26, 16, 60, 0.06), 0 10px 30px rgba(26, 16, 60, 0.08);
+    --shadow-2: 0 6px 16px rgba(26, 16, 60, 0.18);
     --r-s: 10px;
     --r: 15px;
     --r-l: 22px;
@@ -816,8 +816,8 @@ button {
   --code-bg: #0c0e12;
   --focus-ring: 0 0 0 3px rgba(77, 141, 246, 0.2);
   --grad: linear-gradient(120deg, #4d8df6, #3b82f6);
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.4);
-  --shadow-2: 0 20px 60px rgba(0, 0, 0, 0.55);
+  --shadow-1: 0 1px 1px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 6px 16px rgba(0, 0, 0, 0.55);
   --r-s: 8px;
   --r: 12px;
   --r-l: 16px;
@@ -884,8 +884,8 @@ button {
   --code-bg: #f1f3f7;
   --focus-ring: 0 0 0 3px rgba(47, 111, 224, 0.18);
   --grad: linear-gradient(120deg, #2f6fe0, #3b82f6);
-  --shadow-1: 0 1px 2px rgba(20, 28, 46, 0.06), 0 8px 22px rgba(20, 28, 46, 0.07);
-  --shadow-2: 0 16px 44px rgba(20, 28, 46, 0.14);
+  --shadow-1: 0 1px 1px rgba(20, 28, 46, 0.06), 0 8px 22px rgba(20, 28, 46, 0.07);
+  --shadow-2: 0 6px 16px rgba(20, 28, 46, 0.14);
   --r-s: 8px;
   --r: 12px;
   --r-l: 16px;
@@ -953,8 +953,8 @@ button {
     --code-bg: #f1f3f7;
     --focus-ring: 0 0 0 3px rgba(47, 111, 224, 0.18);
     --grad: linear-gradient(120deg, #2f6fe0, #3b82f6);
-    --shadow-1: 0 1px 2px rgba(20, 28, 46, 0.06), 0 8px 22px rgba(20, 28, 46, 0.07);
-    --shadow-2: 0 16px 44px rgba(20, 28, 46, 0.14);
+    --shadow-1: 0 1px 1px rgba(20, 28, 46, 0.06), 0 8px 22px rgba(20, 28, 46, 0.07);
+    --shadow-2: 0 6px 16px rgba(20, 28, 46, 0.14);
     --r-s: 8px;
     --r: 12px;
     --r-l: 16px;
@@ -1023,8 +1023,8 @@ button {
   --code-bg: #0d0c0b;
   --focus-ring: 0 0 0 3px rgba(45, 212, 191, 0.18);
   --grad: linear-gradient(120deg, #2dd4bf, #22d3ee);
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 30px rgba(0, 0, 0, 0.5);
-  --shadow-2: 0 22px 64px rgba(0, 0, 0, 0.62);
+  --shadow-1: 0 1px 1px rgba(0, 0, 0, 0.5), 0 12px 30px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 6px 16px rgba(0, 0, 0, 0.62);
   --r-s: 7px;
   --r: 10px;
   --r-l: 14px;
@@ -1091,8 +1091,8 @@ button {
   --code-bg: #f2efe9;
   --focus-ring: 0 0 0 3px rgba(13, 148, 136, 0.17);
   --grad: linear-gradient(120deg, #0d9488, #0891b2);
-  --shadow-1: 0 1px 2px rgba(30, 26, 20, 0.06);
-  --shadow-2: 0 16px 44px rgba(30, 26, 20, 0.14);
+  --shadow-1: 0 1px 1px rgba(30, 26, 20, 0.06);
+  --shadow-2: 0 6px 16px rgba(30, 26, 20, 0.14);
   --r-s: 7px;
   --r: 10px;
   --r-l: 14px;
@@ -1160,8 +1160,8 @@ button {
     --code-bg: #f2efe9;
     --focus-ring: 0 0 0 3px rgba(13, 148, 136, 0.17);
     --grad: linear-gradient(120deg, #0d9488, #0891b2);
-    --shadow-1: 0 1px 2px rgba(30, 26, 20, 0.06);
-    --shadow-2: 0 16px 44px rgba(30, 26, 20, 0.14);
+    --shadow-1: 0 1px 1px rgba(30, 26, 20, 0.06);
+    --shadow-2: 0 6px 16px rgba(30, 26, 20, 0.14);
     --r-s: 7px;
     --r: 10px;
     --r-l: 14px;
@@ -1230,8 +1230,8 @@ button {
   --code-bg: #0e0e18;
   --focus-ring: 0 0 0 3px rgba(129, 140, 248, 0.2);
   --grad: linear-gradient(120deg, #818cf8, #a78bfa);
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 34px rgba(0, 0, 0, 0.46);
-  --shadow-2: 0 24px 70px rgba(0, 0, 0, 0.6);
+  --shadow-1: 0 1px 1px rgba(0, 0, 0, 0.4), 0 12px 34px rgba(0, 0, 0, 0.46);
+  --shadow-2: 0 6px 16px rgba(0, 0, 0, 0.6);
   --r-s: 11px;
   --r: 16px;
   --r-l: 22px;
@@ -1298,8 +1298,8 @@ button {
   --code-bg: #f2f0fb;
   --focus-ring: 0 0 0 3px rgba(99, 102, 241, 0.18);
   --grad: linear-gradient(120deg, #6366f1, #8b5cf6);
-  --shadow-1: 0 1px 2px rgba(26, 16, 60, 0.06), 0 10px 30px rgba(26, 16, 60, 0.08);
-  --shadow-2: 0 20px 60px rgba(26, 16, 60, 0.16);
+  --shadow-1: 0 1px 1px rgba(26, 16, 60, 0.06), 0 10px 30px rgba(26, 16, 60, 0.08);
+  --shadow-2: 0 6px 16px rgba(26, 16, 60, 0.16);
   --r-s: 11px;
   --r: 16px;
   --r-l: 22px;
@@ -1367,8 +1367,8 @@ button {
     --code-bg: #f2f0fb;
     --focus-ring: 0 0 0 3px rgba(99, 102, 241, 0.18);
     --grad: linear-gradient(120deg, #6366f1, #8b5cf6);
-    --shadow-1: 0 1px 2px rgba(26, 16, 60, 0.06), 0 10px 30px rgba(26, 16, 60, 0.08);
-    --shadow-2: 0 20px 60px rgba(26, 16, 60, 0.16);
+    --shadow-1: 0 1px 1px rgba(26, 16, 60, 0.06), 0 10px 30px rgba(26, 16, 60, 0.08);
+    --shadow-2: 0 6px 16px rgba(26, 16, 60, 0.16);
     --r-s: 11px;
     --r: 16px;
     --r-l: 22px;
@@ -1452,7 +1452,7 @@ a[href] {
 }
 
 .layout {
-  --sidebar-width: var(--sidebar-expanded-width, clamp(264px, 18vw, 300px));
+  --sidebar-width: var(--sidebar-expanded-width, clamp(200px, 14vw, 480px));
   --chat-min-width: 760px;
   --workspace-width: 420px;
   --workspace-resizer-width: 8px;
@@ -1559,7 +1559,7 @@ a[href] {
   width: 100%;
   min-width: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
@@ -1577,7 +1577,7 @@ a[href] {
   margin-bottom: 10px;
   background: var(--grad);
   border: 0;
-  border-radius: 12px;
+  border-radius: 6px;
   color: var(--accent-text);
   font-size: 13px;
   font-weight: 600;
@@ -1685,7 +1685,7 @@ a[href] {
   flex-basis: 36px;
   height: 36px;
   min-height: 36px;
-  border-radius: 8px;
+  border-radius: 4px;
 }
 
 .app--darwin .sidebar--collapsed .sidebar__new span,
@@ -1715,7 +1715,7 @@ a[href] {
   flex-basis: 40px;
   height: 40px;
   min-height: 40px;
-  border-radius: 10px;
+  border-radius: 5px;
 }
 .sidebar--collapsed .sidebar__new span,
 .sidebar--collapsed .sidebar__navitem span {
@@ -2054,7 +2054,7 @@ a[href] {
   gap: 12px 14px;
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   padding: 14px 16px;
 }
@@ -2064,7 +2064,7 @@ a[href] {
   flex: 0 0 auto;
   width: 42px;
   height: 42px;
-  border-radius: 9px;
+  border-radius: 5px;
   color: #fff;
   font-size: 16px;
   font-weight: 800;
@@ -2133,7 +2133,7 @@ a[href] {
 }
 .bot-detail__panel {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
 }
 .bot-detail__panel {
@@ -2194,7 +2194,7 @@ a[href] {
   display: block;
   width: fit-content;
   max-width: 100%;
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--bg-elev-2);
   color: var(--fg-dim);
   font-family: var(--mono);
@@ -2355,6 +2355,15 @@ a[href] {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 24px 32px 32px;
+  /* Faint theme-aware grid — tech skeleton; message cards sit on top so the grid
+     only peeks through the empty space. color-mix(in srgb, var(--fg) 3%, ...)
+     auto-adapts line color to the active theme (dark=light lines, light=dark).
+     Easy revert: delete these 4 declarations. */
+  background-color: var(--chat-bg);
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--fg) 3%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--fg) 3%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
@@ -2381,7 +2390,7 @@ a[href] {
   margin: 6px auto;
   padding: 11px 14px;
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-faint);
   font: inherit;
@@ -2399,7 +2408,7 @@ a[href] {
   max-width: var(--maxw);
   margin: 6px auto;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   overflow: hidden;
   transition: border-color 0.12s;
@@ -2479,7 +2488,7 @@ a[href] {
   font-size: 13px;
   line-height: 1.5;
   color: var(--fg-faint);
-  border-radius: 6px;
+  border-radius: 3px;
 }
 .notice-line--warn {
   color: var(--accent);
@@ -2612,7 +2621,7 @@ a[href] {
   padding: 4px 8px;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--bg-elev);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   color: var(--fg);
@@ -2706,7 +2715,7 @@ a[href] {
   color: var(--fg-dim);
   background: var(--bg-elev-2);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 3px;
   padding: 1px 6px;
   min-width: 18px;
   text-align: center;
@@ -2727,7 +2736,7 @@ a[href] {
   font: inherit;
   font-size: 13px;
   padding: 9px 13px;
-  border-radius: 9px;
+  border-radius: 5px;
   transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
 .welcome__ex:hover {
@@ -2845,7 +2854,7 @@ a[href] {
   height: 22px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 3px;
   color: var(--fg-dim);
   padding: 0;
   box-shadow: 0 1px 4px rgba(0,0,0,0.12);
@@ -2872,7 +2881,7 @@ a[href] {
   padding: 6px;
   background: var(--bg-soft);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
 }
 .rewind__menu-hint {
@@ -2898,7 +2907,7 @@ a[href] {
   background: none;
   border: none;
   color: var(--fg-dim);
-  border-radius: 6px;
+  border-radius: 3px;
   font-size: 12px;
   padding: 5px 9px;
 }
@@ -2978,7 +2987,7 @@ a[href] {
   white-space: nowrap;
   padding: 3px 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-soft) 72%, var(--bg-elev));
   color: var(--fg-faint);
   font-size: 11px;
@@ -3016,7 +3025,7 @@ a[href] {
   height: 64px;
   padding: 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-soft) 78%, transparent);
 }
 .msg-attachment--image {
@@ -3032,7 +3041,7 @@ a[href] {
   justify-content: center;
   width: 38px;
   height: 38px;
-  border-radius: 7px;
+  border-radius: 4px;
   color: var(--fg-dim);
   background: var(--bg-elev);
 }
@@ -3046,7 +3055,7 @@ a[href] {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: 3px;
 }
 .msg-attachment--image .msg-attachment__main {
   display: none;
@@ -3250,7 +3259,7 @@ a[href] {
   justify-content: center;
   width: 22px;
   height: 22px;
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--process-tone-soft);
   color: var(--process-tone);
   flex-shrink: 0;
@@ -3452,7 +3461,7 @@ a[href] {
   font-size: 0.88em;
   background: var(--bg-elev-2);
   border: 1px solid var(--border-soft);
-  border-radius: 5px;
+  border-radius: 3px;
   padding: 1px 5px;
 }
 .md table {
@@ -3479,7 +3488,7 @@ a[href] {
   padding: 11px 13px;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   font-family: var(--mono);
   font-size: var(--font-code);
   line-height: 1.55;
@@ -3499,7 +3508,7 @@ a[href] {
   background: var(--bg-elev-2);
   border: 1px solid var(--border);
   color: var(--fg-faint);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 3px 7px;
   font: inherit;
   font-size: 11px;
@@ -3552,7 +3561,7 @@ a[href] {
   background: var(--bg-elev-2);
   border: 1px solid var(--border);
   color: var(--fg-faint);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 3px 7px;
   font: inherit;
   font-size: 11px;
@@ -3586,7 +3595,7 @@ a[href] {
   margin: 4px 0;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   font-family: var(--mono);
   font-size: 12.5px;
   line-height: 1.55;
@@ -3791,7 +3800,7 @@ a[href] {
   padding: 7px 10px;
   background: var(--del-bg);
   color: var(--err);
-  border-radius: 6px;
+  border-radius: 3px;
   font-family: var(--mono);
   font-size: 12px;
   white-space: pre-wrap;
@@ -3806,7 +3815,7 @@ a[href] {
   max-width: 100%;
   width: auto;
   max-height: 360px;
-  border-radius: 8px;
+  border-radius: 4px;
   border: 1px solid var(--border-soft);
   object-fit: contain;
 }
@@ -3894,7 +3903,7 @@ a[href] {
   container-type: inline-size;
   position: relative;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 6px;
   background: var(--bg-elev);
   overflow: visible;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.08);
@@ -3969,7 +3978,7 @@ a[href] {
   overflow-y: auto;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 5px;
   padding: 5px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
   z-index: var(--z-inline-sticky);
@@ -3992,7 +4001,7 @@ a[href] {
   padding: 6px 9px;
   background: none;
   border: none;
-  border-radius: 7px;
+  border-radius: 4px;
   color: inherit;
   font: inherit;
   text-align: left;
@@ -4130,7 +4139,7 @@ a[href] {
   width: 32px;
   height: 32px;
   border: none;
-  border-radius: 8px;
+  border-radius: 4px;
   flex-shrink: 0;
   transition: color 0.12s, background 0.12s, box-shadow 0.12s, transform 0.12s;
 }
@@ -4433,7 +4442,7 @@ a[href] {
   height: 32px;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--surface-2);
   color: var(--fg-dim);
   font: inherit;
@@ -4571,7 +4580,7 @@ a[href] {
   gap: 8px;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--surface-2);
   color: var(--fg-dim);
   font-size: 12px;
@@ -4723,7 +4732,7 @@ a[href] {
   width: min(336px, calc(100vw - 16px));
   padding: 7px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 5px;
   background: var(--bg-elev);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
 }
@@ -4753,7 +4762,7 @@ a[href] {
   gap: 9px;
   padding: 7px 8px;
   border: none;
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
@@ -4823,7 +4832,7 @@ a[href] {
   height: 34px;
   padding: 0 8px;
   border: none;
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
@@ -5143,7 +5152,7 @@ a[href] {
   overflow: visible;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 5px;
   padding: 5px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
   scrollbar-width: thin;
@@ -5188,7 +5197,7 @@ a[href] {
   align-items: center;
   gap: 6px;
   padding: 5px 9px;
-  border-radius: 6px;
+  border-radius: 3px;
   cursor: pointer;
   font-size: 11.5px;
   font-weight: 600;
@@ -5206,7 +5215,7 @@ a[href] {
   color: var(--muted);
   background: var(--panel-2);
   padding: 0 5px;
-  border-radius: 8px;
+  border-radius: 4px;
   line-height: 16px;
 }
 .modelsw__cascade-arrow {
@@ -5231,7 +5240,7 @@ a[href] {
   padding: 4px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   box-shadow: 0 8px 24px rgba(0,0,0,.18);
   z-index: var(--z-local-popover);
   max-height: 60vh;
@@ -5250,7 +5259,7 @@ a[href] {
   padding: 6px 9px;
   background: none;
   border: none;
-  border-radius: 6px;
+  border-radius: 3px;
   color: var(--fg-dim);
   font: inherit;
   font-family: inherit;
@@ -5358,7 +5367,7 @@ a[href] {
   max-width: 440px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 6px;
   padding: 18px;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
 }
@@ -5374,7 +5383,7 @@ a[href] {
   padding: 9px 11px;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border-radius: 4px;
   font-family: var(--mono);
   font-size: 12.5px;
   white-space: pre-wrap;
@@ -5469,7 +5478,7 @@ a[href] {
   gap: 10px;
   min-height: 54px;
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
-  border-radius: 10px;
+  border-radius: 5px;
   background: var(--bg-elev);
   box-shadow:
     inset 3px 0 0 color-mix(in srgb, var(--accent) 68%, transparent),
@@ -5564,7 +5573,7 @@ a[href] {
   min-width: 0;
   max-width: 188px;
   border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--bg-soft);
   color: var(--fg);
   font: inherit;
@@ -5618,7 +5627,7 @@ a[href] {
   width: 20px;
   height: 20px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 3px;
   color: var(--fg-dim);
   background: var(--bg);
   font-family: var(--mono);
@@ -5647,7 +5656,7 @@ a[href] {
 .prompt-shelf__panel {
   margin-top: 6px;
   border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
-  border-radius: 10px;
+  border-radius: 5px;
   background: var(--bg-elev);
   box-shadow: 0 7px 18px rgba(0, 0, 0, 0.1);
   padding: 10px;
@@ -5661,7 +5670,7 @@ a[href] {
   min-height: 72px;
   resize: vertical;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg);
   color: var(--fg);
   font: inherit;
@@ -5688,7 +5697,7 @@ a[href] {
   padding: 9px 11px;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   font-family: var(--mono);
   font-size: 12.5px;
   white-space: pre-wrap;
@@ -5726,7 +5735,7 @@ a[href] {
   grid-template-columns: minmax(120px, 0.45fr) 1fr;
   gap: 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-soft);
   padding: 8px 9px;
 }
@@ -5753,7 +5762,7 @@ a[href] {
   flex: 1;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 4px;
   color: var(--fg);
   font: inherit;
   font-size: 13px;
@@ -6037,7 +6046,7 @@ a[href] {
   width: 24px;
   height: 24px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-faint);
 }
@@ -6060,7 +6069,7 @@ a[href] {
   width: min(260px, calc(100vw - 24px));
   padding: 7px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 5px;
   background: var(--bg-elev);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
 }
@@ -6082,7 +6091,7 @@ a[href] {
   gap: 8px;
   padding: 7px 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
@@ -6127,7 +6136,7 @@ a[href] {
   width: 28px;
   height: 28px;
   border: none;
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-faint);
   transition: color 0.12s, background 0.12s;
@@ -6272,7 +6281,7 @@ a[href] {
   margin-bottom: 10px;
   padding: 6px 9px;
   border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--bg-soft);
   color: var(--fg-dim);
   font-size: 12px;
@@ -6289,7 +6298,7 @@ a[href] {
   min-width: 148px;
   padding: 5px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.36);
   transform-origin: top left;
@@ -6302,7 +6311,7 @@ a[href] {
   width: 100%;
   padding: 7px 9px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg);
   font: inherit;
@@ -6331,7 +6340,7 @@ a[href] {
   max-width: min(320px, calc(100vw - 16px));
   padding: 6px 8px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--bg-elev);
   color: var(--fg);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
@@ -6481,7 +6490,7 @@ a[href] {
   justify-content: center;
   gap: 3px;
   padding: 3px;
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg);
   border: 1px solid var(--border-soft);
 }
@@ -6495,7 +6504,7 @@ a[href] {
   height: 24px;
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-faint);
   font: inherit;
@@ -6519,7 +6528,7 @@ a[href] {
   justify-content: center;
   gap: 6px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg);
   color: var(--fg-dim);
   font-size: 12px;
@@ -6534,7 +6543,7 @@ a[href] {
   padding: 0 9px;
   height: 32px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg);
   color: var(--fg-faint);
 }
@@ -6560,7 +6569,7 @@ a[href] {
   margin: 0 10px 8px;
   padding: 5px 6px 5px 9px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-soft);
   color: var(--fg-dim);
   font-size: 11.5px;
@@ -6591,7 +6600,7 @@ a[href] {
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-faint);
 }
@@ -6722,7 +6731,7 @@ a[href] {
   height: 18px;
   padding: 0 5px;
   border: 1px solid var(--border-soft);
-  border-radius: 5px;
+  border-radius: 3px;
   color: var(--fg-faint);
   font-size: 10.5px;
   line-height: 1;
@@ -6742,7 +6751,7 @@ a[href] {
   gap: 7px;
   padding: 7px 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-soft);
 }
 .workspace-change-scope__title,
@@ -6772,7 +6781,7 @@ a[href] {
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-faint);
 }
@@ -6797,7 +6806,7 @@ a[href] {
 }
 .workspace-git-history__item {
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-soft);
   overflow: hidden;
 }
@@ -7024,7 +7033,7 @@ a[href] {
   font-size: 10px;
   color: var(--fg-faint);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 3px;
   padding: 3px 6px;
 }
 .palette__list {
@@ -7064,7 +7073,7 @@ a[href] {
   gap: 5px;
   padding: 10px 6px;
   border: none;
-  border-radius: 8px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg);
   font: inherit;
@@ -7081,7 +7090,7 @@ a[href] {
   height: 28px;
   display: grid;
   place-items: center;
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--bg-soft);
   color: var(--accent);
 }
@@ -7099,7 +7108,7 @@ a[href] {
   width: 100%;
   padding: 10px 12px;
   border: none;
-  border-radius: 8px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg);
   font: inherit;
@@ -7119,7 +7128,7 @@ a[href] {
   display: grid;
   place-items: center;
   flex: 0 0 30px;
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-soft);
   color: var(--accent);
 }
@@ -7354,7 +7363,7 @@ a[href] {
 }
 .dream-card {
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: 5px;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -7448,7 +7457,7 @@ a[href] {
   gap: 7px;
   padding: 0 9px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg);
   color: var(--fg-faint);
 }
@@ -7501,7 +7510,7 @@ a[href] {
 .mem-input {
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 4px;
   color: var(--fg);
   font: inherit;
   font-size: var(--font-control);
@@ -7561,7 +7570,7 @@ a[href] {
   margin-bottom: 12px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-elev-1) 76%, transparent);
 }
 .mem-add-card__head {
@@ -7589,7 +7598,7 @@ a[href] {
 }
 .mem-doc {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   margin-bottom: 10px;
   overflow: hidden;
 }
@@ -7607,7 +7616,7 @@ a[href] {
   place-items: center;
   width: 28px;
   height: 28px;
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--bg);
   border: 1px solid var(--border);
   color: var(--accent);
@@ -7702,7 +7711,7 @@ a[href] {
   resize: vertical;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 4px;
   color: var(--fg);
   font-family: var(--mono);
   font-size: 12px;
@@ -7723,7 +7732,7 @@ a[href] {
 .mem-fact {
   position: relative;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-elev) 78%, var(--bg) 22%);
   overflow: hidden;
   transition: border-color 0.12s, background 0.12s, transform 0.12s cubic-bezier(0.34, 1.4, 0.5, 1), box-shadow 0.12s;
@@ -7907,7 +7916,7 @@ a[href] {
   margin-top: 8px;
   padding: 7px 9px;
   border: 1px solid color-mix(in srgb, var(--danger, #d66) 34%, transparent);
-  border-radius: 6px;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--danger, #d66) 10%, transparent);
   color: var(--danger, #d66);
   font-size: 11.5px;
@@ -8120,7 +8129,7 @@ a[href] {
   padding: 5px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 5px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   display: flex;
   flex-direction: column;
@@ -8140,7 +8149,7 @@ a[href] {
   font: inherit;
   font-size: 13px;
   text-align: left;
-  border-radius: 6px;
+  border-radius: 3px;
 }
 .menu__item:hover {
   background: var(--bg-soft);
@@ -8289,7 +8298,7 @@ a[href] {
 .cap-connection-options {
   margin-top: 4px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   overflow: hidden;
   background: var(--bg);
 }
@@ -8408,14 +8417,14 @@ a[href] {
   gap: 3px;
   padding: 3px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-soft);
 }
 .cap-tab {
   --wails-draggable: no-drag;
   height: 28px;
   border: none;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
@@ -8512,7 +8521,7 @@ a[href] {
   gap: 9px;
   padding: 8px 9px;
   border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-soft) 42%, transparent);
 }
 .cap-source--empty {
@@ -8678,7 +8687,7 @@ a[href] {
   margin-bottom: 12px;
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--err) 24%, var(--border-soft));
-  border-radius: 8px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--err) 5%, var(--bg-soft));
 }
 .cap-failures__head {
@@ -8755,7 +8764,7 @@ a[href] {
   align-items: start;
   padding: 7px 8px;
   border: 1px solid color-mix(in srgb, var(--err) 18%, var(--border-soft));
-  border-radius: 7px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-elev) 54%, transparent);
 }
 .cap-failure__main {
@@ -8795,7 +8804,7 @@ a[href] {
   grid-column: 1 / -1;
   margin: 8px 0 0;
   border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--bg);
   overflow: hidden;
 }
@@ -8866,7 +8875,7 @@ a[href] {
   gap: 8px;
   padding: 12px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev, var(--bg));
 }
 .cap-market-card--on {
@@ -8934,7 +8943,7 @@ a[href] {
   gap: 12px;
   padding: 9px 12px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 4px;
   background: transparent;
   transition: background 0.12s;
 }
@@ -9001,7 +9010,7 @@ a[href] {
   min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-soft) 76%, transparent);
   color: var(--fg);
   font: inherit;
@@ -9037,7 +9046,7 @@ a[href] {
 .cap-skill-card__toggle:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 52%, transparent);
   outline-offset: 3px;
-  border-radius: 6px;
+  border-radius: 3px;
 }
 .cap-skill-card__toggle:active {
   transform: translateY(1px);
@@ -9056,7 +9065,7 @@ a[href] {
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--bg-elev);
   color: var(--accent);
   font-family: var(--mono);
@@ -9149,7 +9158,7 @@ a[href] {
 .cap-skill-card__more:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 52%, transparent);
   outline-offset: 3px;
-  border-radius: 5px;
+  border-radius: 3px;
 }
 .cap-skill-card__more:hover {
   color: var(--accent-strong);
@@ -9546,7 +9555,7 @@ a[href] {
   margin-bottom: 6px;
   background: var(--bg-soft);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   overflow: hidden;
   transition: border-color 0.12s, transform 0.12s cubic-bezier(0.34, 1.4, 0.5, 1), box-shadow 0.12s;
 }
@@ -9652,7 +9661,7 @@ a[href] {
   padding: 6px 8px;
   background: var(--bg);
   border: 1px solid var(--accent-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   color: var(--fg);
   font: inherit;
   font-size: 13px;
@@ -9722,7 +9731,7 @@ a[href] {
   min-width: 0;
   padding: 9px 10px;
   border: none;
-  border-radius: 8px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
@@ -9819,7 +9828,7 @@ a[href] {
   margin-bottom: 16px;
   padding: 16px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-elev-2) 76%, var(--bg-elev));
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
 }
@@ -9921,7 +9930,7 @@ a[href] {
 .optional-module {
   margin-bottom: 12px;
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: 5px;
   overflow: hidden;
   transition: border-color 0.15s, background 0.15s;
 }
@@ -10008,7 +10017,7 @@ a[href] {
   margin-bottom: 10px;
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
-  border-radius: 8px;
+  border-radius: 4px;
 }
 .cowork-mail-guide__step {
   font-size: 12px;
@@ -10047,7 +10056,7 @@ a[href] {
 .cowork-mail-account {
   padding: 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-soft);
 }
 .cowork-mail-account__head {
@@ -10187,7 +10196,7 @@ a[href] {
   color: var(--fg-dim);
   cursor: pointer;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--bg-soft);
 }
 .cowork-mail-autosend input {
@@ -10310,7 +10319,7 @@ a[href] {
 .settings-page .cap-skill-card,
 .settings-page .mem-fact,
 .settings-page .mem-doc {
-  border-radius: 8px;
+  border-radius: 4px;
   box-shadow: none;
 }
 
@@ -10326,7 +10335,7 @@ a[href] {
   padding: 3px;
   gap: 2px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg);
 }
 
@@ -10338,7 +10347,7 @@ a[href] {
   min-height: 30px;
   padding: 5px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
@@ -10392,7 +10401,7 @@ a[href] {
 
 .settings-page--form .set-rules-grid .set-rules,
 .settings-page--form .set-rules:not(.set-rules-grid .set-rules) {
-  border-radius: 8px;
+  border-radius: 4px;
   box-shadow: none;
 }
 
@@ -10451,7 +10460,7 @@ a[href] {
     flex: 0 0 auto;
     width: auto;
     padding: 7px 12px;
-    border-radius: 7px;
+    border-radius: 4px;
     white-space: nowrap;
   }
 
@@ -10532,7 +10541,7 @@ a[href] {
   gap: 14px;
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev-1);
   padding: 11px 12px;
 }
@@ -10594,7 +10603,7 @@ a[href] {
   min-height: 44px;
   padding: 7px 10px 7px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg);
   color: var(--fg);
   font: inherit;
@@ -10652,7 +10661,7 @@ a[href] {
   flex-direction: column;
   max-height: min(420px, calc(100vh - 24px));
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: 4px;
   border: 1px solid var(--border);
   background: var(--bg-elev);
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.46);
@@ -10669,7 +10678,7 @@ a[href] {
   height: 32px;
   padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--bg);
   color: var(--fg);
   font: inherit;
@@ -10722,7 +10731,7 @@ a[href] {
   min-width: 0;
   padding: 8px 9px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg);
   font: inherit;
@@ -10813,7 +10822,7 @@ a[href] {
   flex-direction: column;
   gap: 7px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 9px 10px;
   margin-bottom: 8px;
   background: var(--bg-elev-2);
@@ -10868,7 +10877,7 @@ a[href] {
   gap: 12px;
   padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev-2);
 }
 .provider-add-panel__head {
@@ -10904,14 +10913,14 @@ a[href] {
   gap: 4px;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg);
 }
 .provider-add-segmented__item {
   min-height: 32px;
   padding: 0 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-dim);
   font-size: var(--font-control-small);
@@ -10939,7 +10948,7 @@ a[href] {
   min-width: 0;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev-1);
   color: var(--fg);
   text-align: left;
@@ -10970,7 +10979,7 @@ a[href] {
   gap: 12px;
   padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev-2);
 }
 .provider-access-card--builtin {
@@ -11071,7 +11080,7 @@ a[href] {
   max-width: 100%;
   padding: 5px 8px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 4px;
   font-size: var(--font-control-small);
   line-height: 1.4;
   overflow-wrap: anywhere;
@@ -11137,7 +11146,7 @@ a[href] {
   min-height: 32px;
   padding: 5px 7px;
   border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg) 70%, transparent);
   color: var(--fg);
   font-family: var(--mono);
@@ -11162,7 +11171,7 @@ a[href] {
   min-width: 0;
   padding: 9px 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev-1);
 }
 .provider-key-status strong {
@@ -11208,7 +11217,7 @@ a[href] {
   gap: 8px;
   padding: 7px 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg) 72%, transparent);
   color: var(--fg-dim);
   font-size: var(--font-control-small);
@@ -11228,7 +11237,7 @@ a[href] {
   gap: 6px;
   padding: 18px;
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   color: var(--fg-dim);
   background: var(--bg-elev-1);
 }
@@ -11252,7 +11261,7 @@ a[href] {
   gap: 8px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg);
 }
 .provider-editor--wizard {
@@ -11268,7 +11277,7 @@ a[href] {
   align-items: center;
   padding: 0 12px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-elev-1) 72%, transparent);
   color: var(--fg);
   font-size: var(--font-control);
@@ -11318,7 +11327,7 @@ a[href] {
   margin-bottom: 8px;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   font-size: var(--font-control-small);
   line-height: 1.4;
   background: var(--bg-elev-1);
@@ -11334,7 +11343,7 @@ a[href] {
 .provider-editor-advanced {
   margin-top: 4px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-elev-1) 72%, transparent);
 }
 .provider-editor-advanced > summary {
@@ -11375,7 +11384,7 @@ a[href] {
   margin-bottom: 0;
   padding: 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev-2);
 }
 .set-rules__label {
@@ -11403,7 +11412,7 @@ a[href] {
   padding: 3px 4px 3px 7px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 3px;
 }
 .set-rule__x {
   border: none;
@@ -11428,7 +11437,7 @@ a[href] {
 .set-seg {
   display: inline-flex;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 4px;
   overflow: hidden;
   background: var(--bg);
 }
@@ -11488,7 +11497,7 @@ a[href] {
   gap: 16px;
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   padding: 14px 16px;
 }
@@ -11535,7 +11544,7 @@ a[href] {
   align-items: flex-start;
   padding: 10px 14px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   cursor: pointer;
   flex: 1;
   min-width: 0;
@@ -11613,7 +11622,7 @@ a[href] {
   width: max-content;
   max-width: 100%;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   padding: 2px;
 }
@@ -11625,7 +11634,7 @@ a[href] {
   min-height: 30px;
   min-width: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg);
   cursor: pointer;
@@ -11672,7 +11681,7 @@ a[href] {
   gap: 8px;
   min-height: 34px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   color: var(--fg-dim);
   padding: 6px 10px;
@@ -11712,7 +11721,7 @@ a[href] {
 .bot-connect-target {
   min-height: 82px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   color: var(--fg);
   padding: 12px;
@@ -11749,7 +11758,7 @@ a[href] {
   gap: 18px;
   align-items: center;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   padding: 16px;
 }
@@ -11763,14 +11772,14 @@ a[href] {
   display: grid;
   place-items: center;
   min-height: 220px;
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev-2);
 }
 .bot-connect-panel__qr img,
 .bot-connect-panel__qr-code {
   width: 196px;
   height: 196px;
-  border-radius: 6px;
+  border-radius: 3px;
   background: #fff;
   padding: 8px;
 }
@@ -11805,7 +11814,7 @@ a[href] {
 }
 .bot-connect-panel__timer {
   width: fit-content;
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--accent-soft);
   color: var(--accent);
   font-size: var(--font-control-small);
@@ -11832,7 +11841,7 @@ a[href] {
 .bot-connect-panel__body code {
   width: fit-content;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--bg-elev-2);
   padding: 6px 8px;
 }
@@ -11885,7 +11894,7 @@ a[href] {
 .bot-connection-empty,
 .bot-connection-row {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   padding: 12px;
 }
@@ -11898,7 +11907,7 @@ a[href] {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
 }
 .bot-connection-table__header,
@@ -11974,7 +11983,7 @@ a[href] {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--bg-elev-2);
   color: var(--fg-dim);
   font-family: var(--mono);
@@ -12095,7 +12104,7 @@ a[href] {
   min-width: 0;
   padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev-1);
 }
 .bot-channel-card--enabled {
@@ -12271,7 +12280,7 @@ a[href] {
   min-width: 0;
   overflow: hidden;
   border: 1.5px solid var(--border);
-  border-radius: 12px;
+  border-radius: 6px;
   background: var(--surface, var(--bg));
   color: var(--fg);
   font: inherit;
@@ -12337,7 +12346,7 @@ a[href] {
   flex: 1;
   min-width: 28px;
   height: 30px;
-  border-radius: 7px;
+  border-radius: 4px;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg-faint) 30%, transparent);
 }
 .theme-card__desc {
@@ -12460,7 +12469,7 @@ a[href] {
   .bot-detail__avatar {
     width: 40px;
     height: 40px;
-    border-radius: 9px;
+    border-radius: 5px;
     font-size: 15px;
   }
   .bot-detail__summary-actions {
@@ -12612,7 +12621,7 @@ a[href] {
   max-width: var(--maxw);
   margin: 0 auto 8px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 5px;
   background: var(--bg-soft);
   overflow: hidden;
   animation: todobar-in var(--dur-base) var(--ease-out) both;
@@ -12655,7 +12664,7 @@ a[href] {
   background: none;
   border: none;
   color: var(--fg-faint);
-  border-radius: 5px;
+  border-radius: 3px;
 }
 .todobar__close:hover {
   color: var(--fg);
@@ -12763,7 +12772,7 @@ a[href] {
   height: 34px;
   padding: 0 5px 0 11px;
   border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
-  border-radius: 10px;
+  border-radius: 5px;
   background: color-mix(in srgb, var(--accent) 9%, var(--bg-elev));
   color: var(--accent);
   font-family: var(--sans);
@@ -12798,7 +12807,7 @@ a[href] {
   height: 26px;
   padding: 0 9px;
   border: 1px solid color-mix(in srgb, var(--err) 42%, transparent);
-  border-radius: 7px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--err) 14%, var(--bg-elev-2));
   color: var(--err);
   font: inherit;
@@ -12839,7 +12848,7 @@ a[href] {
   height: 26px;
   padding: 0 9px;
   border: 1px solid color-mix(in srgb, var(--warn, var(--accent)) 42%, transparent);
-  border-radius: 7px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--warn, var(--accent)) 14%, var(--bg-elev-2));
   color: var(--warn, var(--accent));
   font: inherit;
@@ -12893,7 +12902,7 @@ a[href] {
   height: 64px;
   padding: 8px 30px 8px 8px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--panel);
   color: var(--fg-dim);
   font-size: 12.5px;
@@ -12942,7 +12951,7 @@ a[href] {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: 3px;
   border: 1px solid var(--border);
   background: var(--bg-soft);
 }
@@ -12953,7 +12962,7 @@ a[href] {
   flex-shrink: 0;
   width: 38px;
   height: 38px;
-  border-radius: 8px;
+  border-radius: 4px;
   color: var(--fg-dim);
   background: var(--bg-elev);
 }
@@ -13054,7 +13063,7 @@ a[href] {
 }
 .composer__pasted-block {
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--panel);
   overflow: hidden;
 }
@@ -13093,7 +13102,7 @@ a[href] {
   height: 24px;
   padding: 0 7px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-faint);
   font: inherit;
@@ -13227,7 +13236,7 @@ a[href] {
 .crash-overlay__send {
   padding: 6px 12px;
   border: 1px solid #444;
-  border-radius: 6px;
+  border-radius: 3px;
   background: #2a2a40;
   color: inherit;
 }
@@ -13264,7 +13273,7 @@ a[href] {
   padding: 32px 32px 28px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 6px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(217, 119, 87, 0.04);
   display: flex;
   flex-direction: column;
@@ -13301,7 +13310,7 @@ a[href] {
   padding: 10px 12px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 3px;
   color: var(--fg);
   outline: none;
   transition: border-color 120ms ease, box-shadow 120ms ease;
@@ -13320,7 +13329,7 @@ a[href] {
   color: #ff8b7a;
   background: rgba(255, 70, 70, 0.08);
   border: 1px solid rgba(255, 70, 70, 0.25);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 8px 10px;
 }
 .onboarding__submit {
@@ -13329,7 +13338,7 @@ a[href] {
   background: var(--accent);
   color: #1a0e08;
   border: none;
-  border-radius: 6px;
+  border-radius: 3px;
   font-size: 13px;
   font-weight: 600;
   display: inline-flex;
@@ -13433,7 +13442,7 @@ a[href] {
   color: var(--text);
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
 }
@@ -13460,7 +13469,7 @@ a[href] {
 .onboarding__menu {
   background: var(--bg-elev, #fff);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   overflow: hidden;
   display: flex;
@@ -13525,7 +13534,7 @@ a[href] {
   font-size: 11px;
   color: var(--fg-faint);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 5px;
   background: transparent;
 }
 .onboarding__vendor-picked {
@@ -13548,7 +13557,7 @@ a[href] {
   background: transparent;
   border: none;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: 4px;
   transition: background 0.15s, color 0.15s;
 }
 .onboarding__back:hover {
@@ -13578,7 +13587,7 @@ a[href] {
   gap: 8px;
   padding: 8px 10px;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: 4px;
   background: transparent;
   transition: background 0.12s;
 }
@@ -13601,7 +13610,7 @@ a[href] {
   color: var(--fg-faint);
   padding: 1px 6px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 5px;
   background: transparent;
 }
 
@@ -13623,7 +13632,7 @@ a[href] {
 .inline-diff {
   margin: 4px 0;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--bg-soft);
   overflow: hidden;
 }
@@ -14042,7 +14051,7 @@ a[href] {
   top: 7px;
   height: 30px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 4px;
   background: transparent;
   transition:
     color 0.14s ease,
@@ -14280,7 +14289,7 @@ a[href] {
   width: 32px;
   height: 30px;
   margin: 4px 0 4px 0;
-  border-radius: 8px;
+  border-radius: 4px;
 }
 
 .app--windows .app-chrome--native-tabs,
@@ -14333,7 +14342,7 @@ a[href] {
   width: 30px;
   height: 30px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-dim);
   isolation: isolate;
@@ -14479,7 +14488,7 @@ a[href] {
   padding: 0 30px 0 10px;
   border: 1px solid transparent;
   border-right: 0;
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-dim);
   box-shadow: none;
@@ -14638,7 +14647,7 @@ a[href] {
   height: 28px;
   padding: 0 9px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 4px;
   outline: none;
   background: var(--bg-elev);
   color: var(--fg);
@@ -14694,7 +14703,7 @@ a[href] {
   height: 18px;
   padding: 0 6px;
   border: 1px solid color-mix(in srgb, #0ea5e9 18%, var(--border-soft));
-  border-radius: 6px;
+  border-radius: 3px;
   background: color-mix(in srgb, #0ea5e9 8%, transparent);
   color: color-mix(in srgb, #0284c7 76%, var(--fg-dim));
   font-size: 11px;
@@ -14716,7 +14725,7 @@ a[href] {
   min-height: 28px;
   padding: 0 11px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   color: var(--fg-dim);
   font: inherit;
@@ -14780,7 +14789,7 @@ a[href] {
   min-width: 172px;
   padding: 5px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
 }
@@ -14792,7 +14801,7 @@ a[href] {
   width: 100%;
   padding: 8px 9px;
   border: none;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
@@ -14813,7 +14822,7 @@ a[href] {
   width: 30px;
   height: 30px;
   border: none;
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-faint);
 }
@@ -14842,7 +14851,7 @@ a[href] {
   height: 30px;
   padding: 0 8px;
   border: none;
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-faint);
   font: inherit;
@@ -14879,7 +14888,7 @@ a[href] {
   min-width: 168px;
   padding: 5px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.36);
   --wails-draggable: no-drag;
@@ -14893,7 +14902,7 @@ a[href] {
   gap: 8px;
   padding: 0 8px;
   border: none;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
@@ -15074,7 +15083,7 @@ a[href] {
   display: inline-flex;
   align-items: center;
   padding: 0 5px;
-  border-radius: 5px;
+  border-radius: 3px;
   font-size: 9.5px;
   line-height: 1;
   font-weight: 700;
@@ -15150,7 +15159,7 @@ a[href] {
   justify-content: center;
   margin-left: 1px;
   border: none;
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-dim);
 }
@@ -15173,7 +15182,7 @@ a[href] {
   margin-left: 24px;
   padding: 0 9px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-elev) 60%, transparent);
   color: var(--fg-faint);
   font: inherit;
@@ -15280,7 +15289,7 @@ a[href] {
   line-height: 1;
   color: var(--fg-faint);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 3px;
   padding: 0 6px;
   background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
   transition:
@@ -15315,7 +15324,7 @@ a[href] {
   margin: 0 var(--project-tree-edge-gap);
   padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 6px;
   background: color-mix(in srgb, var(--bg-elev) 72%, var(--bg-soft));
   color: var(--fg-faint);
 }
@@ -15394,7 +15403,7 @@ a[href] {
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-faint);
   padding: 0;
@@ -15405,7 +15414,7 @@ a[href] {
 .project-tree__header-actions .project-tree__collapse-all {
   width: 22px;
   height: 22px;
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--bg-elev);
   box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow) 9%, transparent);
 }
@@ -15585,7 +15594,7 @@ a[href] {
   min-width: 0;
   height: 26px;
   border: 1px solid var(--accent-soft);
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--bg-elev);
   color: var(--fg);
   font: inherit;
@@ -15722,7 +15731,7 @@ a[href] {
   align-items: center;
   gap: 3px;
   padding: 0 5px;
-  border-radius: 5px;
+  border-radius: 3px;
   background: color-mix(in srgb, #3b82f6 10%, transparent);
   color: color-mix(in srgb, #2563eb 78%, var(--fg-dim));
   font-size: 10.5px;
@@ -15760,7 +15769,7 @@ a[href] {
   align-items: center;
   justify-content: center;
   padding: 0 5px;
-  border-radius: 5px;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--project-accent, var(--accent)) 11%, transparent);
   color: color-mix(in srgb, var(--project-accent, var(--accent)) 72%, var(--fg-dim));
   font-size: 10.5px;
@@ -15813,7 +15822,7 @@ a[href] {
   min-width: 0;
   height: 26px;
   border: 1px solid var(--accent-soft);
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--bg-elev);
   color: var(--fg);
   font: inherit;
@@ -15877,7 +15886,7 @@ a[href] {
   overscroll-behavior: contain;
   padding: 5px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.36);
   transform-origin: top left;
@@ -15897,7 +15906,7 @@ a[href] {
   align-items: center;
   gap: 8px;
   border: none;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
@@ -15979,7 +15988,7 @@ a[href] {
   height: 32px;
   margin: 0 8px;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
-  border-radius: 7px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev));
   color: var(--accent-strong);
   font: inherit;
@@ -16050,7 +16059,7 @@ a[href] {
   justify-content: center;
   gap: 3px;
   padding: 3px;
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg);
   border: 1px solid var(--border-soft);
 }
@@ -16067,7 +16076,7 @@ a[href] {
   height: 24px;
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-faint);
   font: inherit;
@@ -16179,7 +16188,7 @@ a[href] {
   margin: 0;
   padding: 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg);
 }
 
@@ -16319,7 +16328,7 @@ a[href] {
   gap: 5px;
   padding: 9px 11px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg);
 }
 
@@ -16598,7 +16607,7 @@ a[href] {
   max-height: 300px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 3px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
   overflow: hidden;
 }
@@ -16697,7 +16706,7 @@ a[href] {
   --ok: #76c878;
   --warn: #d9a441;
   --button-radius: 7px;
-  --radius: 8px;
+  --radius: 4px;
   --maxw: 920px;
   --sans: -apple-system, "SF Pro Text", "PingFang SC", "Noto Sans SC",
     "Microsoft YaHei", BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -16760,7 +16769,7 @@ a[href] {
   align-self: center;
   padding: 0 28px 0 10px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-dim);
 }
@@ -16783,7 +16792,7 @@ a[href] {
 .workspace-tabs-bar .tabbar__new {
   height: 30px;
   margin: 0;
-  border-radius: 7px;
+  border-radius: 4px;
 }
 
 .app-chrome__panel-toggle,
@@ -16792,7 +16801,7 @@ a[href] {
   height: 30px;
   width: 30px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: 4px;
 }
 
 .app-chrome__panel-toggle:hover,
@@ -16860,7 +16869,7 @@ a[href] {
   min-height: 44px;
   margin-bottom: 10px;
   padding: 0 var(--sidebar-entry-content-inset);
-  border-radius: 12px;
+  border-radius: 6px;
   color: var(--accent-text);
   background: var(--grad);
   border: 0;
@@ -16889,7 +16898,7 @@ a[href] {
 
 .sidebar__navitem {
   height: 28px;
-  border-radius: 7px;
+  border-radius: 4px;
 }
 
 .sidebar--collapsed .sidebar__brand {
@@ -16913,7 +16922,7 @@ a[href] {
   min-height: 40px;
   margin: 0;
   padding: 0 var(--sidebar-entry-content-inset);
-  border-radius: 12px;
+  border-radius: 6px;
   background: color-mix(in srgb, var(--bg-elev) 72%, var(--bg-soft));
 }
 
@@ -17029,7 +17038,7 @@ a[href] {
   gap: 0;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--bg-elev);
   color: var(--fg-dim);
 }
@@ -17087,7 +17096,7 @@ a[href] {
 }
 
 .welcome__ex {
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
 }
 
@@ -17097,12 +17106,12 @@ a[href] {
 
 .msg--user .msg__body {
   border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
-  border-radius: 8px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--accent) 11%, var(--bg-elev));
 }
 
 .process-card {
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   box-shadow: none;
 }
@@ -17121,7 +17130,7 @@ a[href] {
 }
 
 .composer-card {
-  border-radius: 9px;
+  border-radius: 5px;
   background: var(--bg-elev);
   box-shadow: none;
 }
@@ -17139,7 +17148,7 @@ a[href] {
 .composer__btn {
   width: 34px;
   height: 34px;
-  border-radius: 8px;
+  border-radius: 4px;
 }
 
 .composer-meta {
@@ -17152,22 +17161,22 @@ a[href] {
 }
 
 .composer-modebar {
-  border-radius: 8px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-elev-2) 72%, transparent);
 }
 
 .composer-modebar__thumb {
-  border-radius: 6px;
+  border-radius: 3px;
 }
 
 .composer-modebar__item {
-  border-radius: 6px;
+  border-radius: 3px;
 }
 
 .composer-context__item,
 .meta-chip,
 .composer-meta .modelsw__trigger {
-  border-radius: 7px;
+  border-radius: 4px;
 }
 
 .statusbar {
@@ -17197,7 +17206,7 @@ a[href] {
 
 .workbench-dock__tabs {
   width: 100%;
-  border-radius: 8px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg) 72%, transparent);
 }
 
@@ -17205,7 +17214,7 @@ a[href] {
   flex: 1 1 0;
   max-width: none;
   height: 28px;
-  border-radius: 7px;
+  border-radius: 4px;
 }
 
 .workbench-dock__tab--active {
@@ -17226,7 +17235,7 @@ a[href] {
 .workspace-search {
   height: 34px;
   margin: 10px 12px 8px;
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--chat-bg);
 }
 
@@ -17240,7 +17249,7 @@ a[href] {
 .workspace-change-row,
 .workspace-files__tab,
 .workspace-iconbtn {
-  border-radius: 7px;
+  border-radius: 4px;
 }
 
 .workspace-preview__head,
@@ -17284,7 +17293,7 @@ a[href] {
   --r-s: 5px;
   --r: 8px;
   --r-l: 11px;
-  --radius: 8px;
+  --radius: 4px;
   --dur-fast: 130ms;
   --dur-base: 220ms;
   --dur-slow: 320ms;
@@ -17552,7 +17561,7 @@ a[href] {
   right: 11px;
   width: 18px;
   height: 18px;
-  border-radius: 5px;
+  border-radius: 3px;
   opacity: 0;
   color: var(--fg-faint);
   pointer-events: none;
@@ -17634,7 +17643,7 @@ a[href] {
 :root[data-theme-style] .tabbar__mode-badge {
   height: 16px;
   padding: 0 5px;
-  border-radius: 5px;
+  border-radius: 3px;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -17651,7 +17660,7 @@ a[href] {
   margin-left: auto;
   color: var(--fg-faint);
   border-color: var(--border);
-  border-radius: 5px;
+  border-radius: 3px;
   background: var(--surface-2);
   box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 58%, transparent);
 }
@@ -17820,7 +17829,7 @@ a[href] {
   margin-bottom: 10px;
   padding: 0 var(--sidebar-entry-content-inset);
   border: 0;
-  border-radius: 12px;
+  border-radius: 6px;
   color: var(--accent-text);
   background: var(--grad);
   box-shadow: var(--shadow-1);
@@ -17858,7 +17867,7 @@ a[href] {
   padding: 0 var(--sidebar-entry-content-inset);
   gap: 9px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: 6px;
   background: color-mix(in srgb, var(--bg-soft) 82%, var(--bg-elev));
   color: var(--fg-faint);
   font-size: 13px;
@@ -18058,7 +18067,7 @@ a[href] {
   padding: 0;
   gap: 0;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--bg-elev);
   color: var(--fg-dim);
   box-shadow: var(--app-graphite-shadow);
@@ -18075,7 +18084,7 @@ a[href] {
   width: 30px;
   min-width: 30px;
   height: 28px;
-  border-radius: 7px;
+  border-radius: 4px;
 }
 
 :root[data-theme-style] .topicbar__action-btn--utility {
@@ -18132,7 +18141,7 @@ a[href] {
   margin: 12px 16px 0;
   padding: 11px 14px 11px 18px;
   border: 1px solid var(--app-graphite-hairline-strong);
-  border-radius: 8px;
+  border-radius: 4px;
   background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 12%, var(--chat-bg)), color-mix(in srgb, var(--chat-bg) 94%, var(--bg-elev)));
   box-shadow: var(--app-graphite-shadow);
   animation: graphite-drop-in var(--dur-slow) var(--ease-out) both;
@@ -18145,7 +18154,7 @@ a[href] {
 
 :root[data-theme-style] .banner--update .btn--primary {
   border: 0;
-  border-radius: 7px;
+  border-radius: 4px;
   color: var(--accent-fg);
   background: linear-gradient(120deg, var(--accent), var(--accent-strong));
   box-shadow: 0 6px 16px -8px var(--accent);
@@ -18153,7 +18162,7 @@ a[href] {
 
 :root[data-theme-style] .banner--update .btn:not(.btn--primary) {
   border: 1px solid color-mix(in srgb, var(--fg-faint) 28%, var(--border));
-  border-radius: 7px;
+  border-radius: 4px;
   color: var(--fg-dim);
   background: color-mix(in srgb, var(--bg-elev) 74%, transparent);
 }
@@ -18218,7 +18227,7 @@ a[href] {
 :root[data-theme-style] .welcome kbd {
   min-width: 23px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 3px;
   background: var(--bg-soft);
   color: var(--fg-dim);
   box-shadow: none;
@@ -18237,7 +18246,7 @@ a[href] {
   min-height: 44px;
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   color: var(--fg-dim);
   font-size: 13px;
@@ -18263,7 +18272,7 @@ a[href] {
   max-width: min(80%, 650px);
   padding: 11px 15px;
   border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
-  border-radius: 8px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--fg) 96%, var(--accent));
   color: var(--bg);
   box-shadow: var(--app-graphite-shadow);
@@ -18290,7 +18299,7 @@ a[href] {
 :root[data-theme-style] .ask-card,
 :root[data-theme-style] .approval-modal {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   box-shadow: var(--app-graphite-shadow);
   transition: border-color var(--dur-fast), transform var(--dur-fast) var(--ease-out), background var(--dur-fast);
@@ -18476,7 +18485,7 @@ a[href] {
 :root[data-theme-style] .composer__btn {
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: 5px;
 }
 
 :root[data-theme-style] .composer__btn--send {
@@ -18502,7 +18511,7 @@ a[href] {
 :root[data-theme-style] .composer-more-trigger,
 :root[data-theme-style] .composer-meta .modelsw__trigger,
 :root[data-theme-style] .composer-context__item {
-  border-radius: 7px;
+  border-radius: 4px;
   border-color: var(--border);
   background: color-mix(in srgb, var(--bg-elev-2) 70%, transparent);
   transition: border-color var(--dur-fast), background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast) var(--ease-out);
@@ -18547,7 +18556,7 @@ a[href] {
 
 :root[data-theme-style] .composer-modebar__thumb,
 :root[data-theme-style] .composer-modebar__item {
-  border-radius: 6px;
+  border-radius: 3px;
 }
 
 :root[data-theme-style] .composer-modebar {
@@ -18693,7 +18702,7 @@ a[href] {
 :root[data-theme-style] .mem-select,
 :root[data-theme-style] .mem-textarea {
   border-color: var(--border);
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--bg-soft);
 }
 
@@ -18708,12 +18717,12 @@ a[href] {
 
 :root[data-theme-style] .history-filter {
   border-color: var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-elev) 70%, var(--bg-soft));
 }
 
 :root[data-theme-style] .history-filter__pill {
-  border-radius: 6px;
+  border-radius: 3px;
   color: var(--fg-dim);
 }
 
@@ -18741,7 +18750,7 @@ a[href] {
 :root[data-theme-style] .hist-item {
   margin-bottom: 6px;
   border-color: var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   box-shadow: var(--app-graphite-shadow);
 }
@@ -18796,7 +18805,7 @@ a[href] {
 }
 
 :root[data-theme-style] .settings-center__navitem {
-  border-radius: 8px;
+  border-radius: 4px;
   transition: background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast) var(--ease-out);
 }
 
@@ -18827,7 +18836,7 @@ a[href] {
 :root[data-theme-style] .settings-section,
 :root[data-theme-style] .settings-page--manager .mem-section {
   border-color: var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   box-shadow: var(--app-graphite-shadow);
 }
@@ -18841,7 +18850,7 @@ a[href] {
 :root[data-theme-style] .provider-add-segmented,
 :root[data-theme-style] .cap-tabs {
   border-color: var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-soft);
 }
 
@@ -18861,7 +18870,7 @@ a[href] {
 :root[data-theme-style] .provider-editor,
 :root[data-theme-style] .set-rules-grid .set-rules {
   border-color: var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   box-shadow: var(--app-graphite-shadow);
 }
@@ -18983,7 +18992,7 @@ a[href] {
   height: 34px;
   margin: 10px 12px 8px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-soft);
   color: var(--fg-faint);
   transition: border-color var(--dur-fast), background var(--dur-fast);
@@ -18998,7 +19007,7 @@ a[href] {
 :root[data-theme-style] .workspace-files__scope {
   margin: 0 12px 8px;
   border-color: var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-soft);
 }
 
@@ -19017,7 +19026,7 @@ a[href] {
 :root[data-theme-style] .workspace-files__tab,
 :root[data-theme-style] .workspace-iconbtn,
 :root[data-theme-style] .workspace-recent-menu__item {
-  border-radius: 7px;
+  border-radius: 4px;
 }
 
 :root[data-theme-style] .workspace-tree__row {
@@ -19091,7 +19100,7 @@ a[href] {
 
 :root[data-theme-style] .workspace-change__badge {
   height: 18px;
-  border-radius: 5px;
+  border-radius: 3px;
   background: var(--bg-soft);
   color: var(--fg-faint);
 }
@@ -19197,7 +19206,7 @@ a[href] {
 :root[data-theme-style] .context-menu,
 :root[data-theme-style] .modelsw__menu {
   border-color: var(--app-graphite-hairline-strong);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   box-shadow: var(--app-graphite-shadow-float);
 }
@@ -19251,7 +19260,7 @@ a[href] {
 :root[data-theme-style] .context-panel__section,
 :root[data-theme-style] .context-panel__preview {
   border-color: var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   box-shadow: var(--app-graphite-shadow);
 }
@@ -19262,7 +19271,7 @@ a[href] {
 }
 
 :root[data-theme-style] .context-panel__file-row {
-  border-radius: 7px;
+  border-radius: 4px;
   transition: background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast) var(--ease-out);
 }
 
@@ -19317,7 +19326,7 @@ a[href] {
 
 :root[data-theme-style] .palette__esc,
 :root[data-theme-style] .palette__foot kbd {
-  border-radius: 5px;
+  border-radius: 3px;
   background: var(--bg-soft);
   color: var(--fg-faint);
 }
@@ -19335,7 +19344,7 @@ a[href] {
   min-height: 50px;
   padding: 10px 12px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: 4px;
   transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast) var(--ease-out);
 }
 
@@ -19584,7 +19593,7 @@ a[href] {
   cursor: pointer;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 5px;
   padding: 10px 20px;
   font-size: 14px;
   color: var(--fg);
@@ -19804,7 +19813,7 @@ a[href] {
   justify-content: center;
   gap: 3px;
   padding: 3px;
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg);
   border: 1px solid var(--border-soft);
 }
@@ -19821,7 +19830,7 @@ a[href] {
   height: 24px;
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-faint);
   font: inherit;
@@ -19920,7 +19929,7 @@ a[href] {
   gap: 8px;
   min-width: 0;
   padding: 5px 6px;
-  border-radius: 6px;
+  border-radius: 3px;
   font-size: 12.5px;
 }
 
@@ -19961,7 +19970,7 @@ a[href] {
 :root[data-theme-style] .cowork-today__heading-count {
   margin-left: 6px;
   padding: 0 6px;
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev-2);
   color: var(--fg-faint);
   font-size: 11px;
@@ -19993,7 +20002,7 @@ a[href] {
 :root[data-theme-style] .cowork-today__badge {
   margin-left: auto;
   padding: 1px 7px;
-  border-radius: 10px;
+  border-radius: 5px;
   background: var(--bg);
   border: 1px solid var(--border-soft);
   color: var(--fg-faint);
@@ -20003,7 +20012,7 @@ a[href] {
 
 :root[data-theme-style] .cowork-today__hint {
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--bg);
   border: 1px solid var(--border-soft);
   color: var(--fg-faint);
@@ -20080,7 +20089,7 @@ a[href] {
   width: 26px;
   height: 26px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-faint);
   cursor: pointer;
@@ -20103,7 +20112,7 @@ a[href] {
   color: var(--fg-dim);
   background: transparent;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   cursor: pointer;
 }
 :root[data-theme-style] .cowork-mailtab__folder--active {
@@ -20126,7 +20135,7 @@ a[href] {
 
 :root[data-theme-style] .cowork-mailtab__item {
   padding: 8px 9px;
-  border-radius: 7px;
+  border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s ease;
 }
@@ -20177,7 +20186,7 @@ a[href] {
 :root[data-theme-style] .cowork-mailtab__preview {
   margin-top: 6px;
   padding: 7px 9px;
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--bg);
   border: 1px solid var(--border-soft);
   font-size: 12px;
@@ -20192,7 +20201,7 @@ a[href] {
 /* --- CoWork 2.0 智能行政决策卡与邮件协同操作杠 --- */
 :root[data-theme-style] .cowork-today__briefing {
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: 4px;
   background: linear-gradient(135deg, var(--bg) 0%, var(--bg-elev) 100%);
   border: 1px solid var(--border-soft);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
@@ -20219,7 +20228,7 @@ a[href] {
   color: var(--fg-dim);
   background: var(--bg);
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: 3px;
   border: 1px solid var(--border-subtle, var(--border-soft));
 }
 
@@ -20242,7 +20251,7 @@ a[href] {
   align-items: center;
   gap: 4px;
   padding: 4px 8px;
-  border-radius: 5px;
+  border-radius: 3px;
   font-size: 11px;
   font-weight: 500;
   background: var(--bg-elev);
@@ -20318,7 +20327,7 @@ a[href] {
   gap: 9px;
   padding: 0 12px;
   border: none;
-  border-radius: 8px;
+  border-radius: 4px;
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
@@ -20369,7 +20378,7 @@ a[href] {
 :root[data-theme-style] .cowork-main__analysis {
   font-size: 13px;
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--bg-soft);
   color: var(--fg);
   margin: 12px 20px 0;
@@ -20415,7 +20424,7 @@ a[href] {
   flex-wrap: wrap;
   gap: 6px;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
 }
@@ -20472,7 +20481,7 @@ a[href] {
 
 :root[data-theme-style] .cowork-task-card {
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: 5px;
   background: var(--bg-elev);
   padding: 10px 12px;
   transition: border-color 0.12s, box-shadow 0.12s;
@@ -20557,7 +20566,7 @@ a[href] {
   border: none;
   background: transparent;
   color: var(--fg-dim);
-  border-radius: 6px;
+  border-radius: 3px;
   cursor: default;
   transition: background 0.12s, color 0.12s;
 }
@@ -20625,7 +20634,7 @@ a[href] {
   padding: 8px 10px;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   font-size: 12px;
   color: var(--fg-dim);
   white-space: pre-wrap;
@@ -20645,7 +20654,7 @@ a[href] {
   gap: 6px;
   background: rgba(245, 158, 11, 0.12);
   border: 1px solid rgba(245, 158, 11, 0.4);
-  border-radius: 6px;
+  border-radius: 3px;
   font-size: 12px;
   color: #fbbf24;
   cursor: help;
@@ -20678,7 +20687,7 @@ a[href] {
   flex-direction: column;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 6px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
 }
 
@@ -20727,7 +20736,7 @@ a[href] {
   --wails-draggable: no-drag;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 7px 10px;
   color: var(--fg);
   font: inherit;
@@ -20742,7 +20751,7 @@ a[href] {
 :root[data-theme-style] .cowork-taskform__textarea {
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 8px 10px;
   color: var(--fg);
   font: inherit;
@@ -20797,7 +20806,7 @@ a[href] {
   border: 1px solid var(--border-soft);
   background: transparent;
   color: var(--fg-dim);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 3px 10px;
   font: inherit;
   font-size: 12px;
@@ -20838,7 +20847,7 @@ a[href] {
   gap: 8px;
   font-size: 12px;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
   color: var(--fg-dim);
@@ -20864,7 +20873,7 @@ a[href] {
   margin-left: auto;
   font-size: 11px;
   padding: 3px 10px;
-  border-radius: 6px;
+  border-radius: 3px;
   border: 1px solid var(--accent);
   background: transparent;
   color: var(--accent);
@@ -20889,7 +20898,7 @@ a[href] {
   flex-wrap: wrap;
   padding: 8px 10px;
   margin-top: 4px;
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
   cursor: pointer;
@@ -20917,7 +20926,7 @@ a[href] {
   gap: 8px;
   padding: 9px 12px;
   margin-top: 6px;
-  border-radius: 8px;
+  border-radius: 4px;
   background: rgba(240, 136, 62, 0.1);
   border: 1px solid rgba(240, 136, 62, 0.4);
   color: var(--fg-dim);
@@ -20929,7 +20938,7 @@ a[href] {
   flex: 0 0 auto;
   font-size: 12px;
   padding: 5px 12px;
-  border-radius: 6px;
+  border-radius: 3px;
   border: 1px solid var(--accent);
   background: var(--accent);
   color: #fff;
@@ -20951,7 +20960,7 @@ a[href] {
   border: 1px solid var(--border-soft);
   background: var(--bg-elev-2);
   color: var(--fg-dim);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 5px 12px;
   font: inherit;
   font-size: 12px;
@@ -20999,7 +21008,7 @@ a[href] {
   color: #f87171;
   padding: 6px 10px;
   background: rgba(239, 68, 68, 0.1);
-  border-radius: 6px;
+  border-radius: 3px;
 }
 
 :root[data-theme-style] .cowork-taskform__foot {
@@ -21072,7 +21081,7 @@ a[href] {
 
 :root[data-theme-style] .cowork-history-row {
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-soft);
   padding: 8px 10px;
   cursor: default;
@@ -21184,7 +21193,7 @@ a[href] {
   --wails-draggable: no-drag;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 5px 10px;
   color: var(--fg);
   font: inherit;
@@ -21204,7 +21213,7 @@ a[href] {
   align-items: center;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 0 10px;
 }
 
@@ -21237,7 +21246,7 @@ a[href] {
   padding: 8px 10px;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
 }
 
 :root[data-theme-style] .cowork-rag__hits-layer {
@@ -21351,7 +21360,7 @@ a[href] {
   flex: 1;
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 6px 10px;
   color: var(--fg);
   font: inherit;
@@ -21374,7 +21383,7 @@ a[href] {
   padding: 10px 12px;
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   font-size: 13px;
   line-height: 1.6;
   color: var(--fg);
@@ -21447,7 +21456,7 @@ a[href] {
   transform: translateX(-50%);
   max-width: 80%;
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   border: 1px solid var(--border, #888);
   color: var(--fg-dim);
@@ -21518,7 +21527,7 @@ a[href] {
 .rag-toolbar__select {
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 4px 8px;
   color: var(--fg);
   font: inherit;
@@ -21532,7 +21541,7 @@ a[href] {
   gap: 4px;
   padding: 4px 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--bg-elev);
   color: var(--fg-dim);
   font-size: 12px;
@@ -21557,7 +21566,7 @@ a[href] {
   gap: 6px;
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 4px 8px;
   flex: 1;
   min-width: 120px;
@@ -21623,7 +21632,7 @@ a[href] {
   margin-top: 4px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 8px;
   box-shadow: var(--shadow-2);
   z-index: var(--z-local-popover);
@@ -21724,7 +21733,7 @@ a[href] {
   padding: 8px 16px;
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
-  border-radius: 12px;
+  border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.1);
   flex-wrap: wrap;
 }
@@ -21787,7 +21796,7 @@ a[href] {
   background: var(--accent);
   color: var(--accent-fg);
   border: none;
-  border-radius: 6px;
+  border-radius: 3px;
   font-size: 12px;
   cursor: pointer;
 }
@@ -21814,7 +21823,7 @@ a[href] {
   width: 28px;
   height: 28px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   background: none;
   color: var(--fg-dim);
   cursor: pointer;
@@ -21947,7 +21956,7 @@ a[href] {
   gap: 4px;
   padding: 4px 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   background: none;
   color: var(--fg-dim);
   font-size: 12px;
@@ -22017,7 +22026,7 @@ a[href] {
 .rag-edit-modal__textarea {
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 6px 10px;
   color: var(--fg);
   font: inherit;
@@ -22159,7 +22168,7 @@ a[href] {
   gap: 8px;
   padding: 8px 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   cursor: pointer;
 }
 .rag-skill-modal__item:hover {
@@ -22182,7 +22191,7 @@ a[href] {
 .rag-skill-modal__preview {
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 10px;
   max-height: 200px;
   overflow-y: auto;
@@ -22227,7 +22236,7 @@ a[href] {
   width: 28px;
   height: 28px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   background: none;
   color: var(--fg-dim);
   cursor: pointer;
@@ -22254,7 +22263,7 @@ a[href] {
   padding: 8px;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
 }
 .rag-docpreview__chunk-label {
   font-size: 10px;
@@ -22388,7 +22397,7 @@ a[href] {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   padding: 1px 6px;
-  border-radius: 10px;
+  border-radius: 5px;
   background: var(--bg-elev);
 }
 .rag-dock__collection-header {
@@ -22484,7 +22493,7 @@ a[href] {
   align-items: center;
   gap: 4px;
   padding: 3px 10px;
-  border-radius: 12px;
+  border-radius: 6px;
   font-size: 11.5px;
   background: var(--bg-elev);
   color: var(--fg-dim);
@@ -22507,7 +22516,7 @@ a[href] {
   margin: 0 8px 8px;
   width: calc(100% - 16px);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 5px 8px;
   font: inherit;
   font-size: 12px;
@@ -22585,7 +22594,7 @@ a[href] {
   width: 28px;
   height: 28px;
   border: none;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-dim);
   cursor: pointer;
@@ -22622,7 +22631,7 @@ a[href] {
   font-size: 11px;
   font-weight: 500;
   padding: 3px 10px;
-  border-radius: 6px;
+  border-radius: 3px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -22646,7 +22655,7 @@ a[href] {
 .rag-summary {
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 10px 14px;
   margin: 0 8px 4px;
 }
@@ -22689,7 +22698,7 @@ a[href] {
   gap: 6px;
   padding: 10px 12px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   cursor: pointer;
   transition: all 0.15s ease;
@@ -22724,7 +22733,7 @@ a[href] {
 .rag-template__select {
   width: 100%;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 8px 10px;
   font: inherit;
   font-size: 13px;
@@ -22741,7 +22750,7 @@ a[href] {
   padding: 10px 12px;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -22802,7 +22811,7 @@ a[href] {
   justify-content: center;
   gap: 6px;
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: 4px;
   font-size: 12.5px;
   font-weight: 500;
   transition: all 0.15s;
@@ -22846,7 +22855,7 @@ a[href] {
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: 3px;
   font-size: 12px;
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
@@ -22915,7 +22924,7 @@ a[href] {
   gap: 20px;
   padding: 10px 14px;
   background: color-mix(in srgb, var(--accent) 5%, var(--bg-soft));
-  border-radius: 8px;
+  border-radius: 4px;
   margin: 0 14px 8px;
   border: 1px solid color-mix(in srgb, var(--accent) 10%, var(--border-soft));
 }
@@ -22936,7 +22945,7 @@ a[href] {
   padding: 10px 14px;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   margin: 0 14px 12px;
   font-size: 12px;
   color: var(--fg-dim);
@@ -22987,7 +22996,7 @@ a[href] {
   gap: 16px;
   padding: 12px;
   background: var(--bg-soft);
-  border-radius: 8px;
+  border-radius: 4px;
 }
 .rag-result__stat {
   display: flex;
@@ -23065,7 +23074,7 @@ a[href] {
   gap: 8px;
   padding: 6px 8px;
   background: var(--bg-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   font-size: 12px;
 }
 .rag-result__entity-type {
@@ -23112,7 +23121,7 @@ a[href] {
   gap: 6px;
   padding: 6px 8px;
   background: var(--bg-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   font-size: 12px;
 }
 .rag-result__rel-node {
@@ -23167,7 +23176,7 @@ a[href] {
   --wails-draggable: no-drag;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 5px 10px;
   color: var(--fg);
   font: inherit;
@@ -23239,7 +23248,7 @@ a[href] {
   flex: 1;
   background: var(--bg-soft);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 8px 10px;
   color: var(--fg);
   font: inherit;
@@ -23277,7 +23286,7 @@ a[href] {
 
 :root[data-theme-style] .cowork-expert__turn {
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-soft);
   padding: 10px 12px;
 }
@@ -23364,7 +23373,7 @@ a[href] {
   margin: 6px auto;
   max-width: var(--maxw);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-soft);
   overflow: hidden;
 }
@@ -23537,7 +23546,7 @@ a[href] {
 
 :root[data-theme-style] .expert-session__collab {
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: 5px;
   background: var(--bg-soft);
   overflow: hidden;
   margin-bottom: 20px;
@@ -23564,7 +23573,7 @@ a[href] {
   padding: 8px 14px;
   margin-bottom: 8px;
   background: var(--bg-elev);
-  border-radius: 8px;
+  border-radius: 4px;
   font-size: 14px;
   font-weight: 500;
   color: var(--fg);
@@ -23589,7 +23598,7 @@ a[href] {
   width: 100%;
   resize: none;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-elev);
   color: var(--fg);
   font-size: 13px;
@@ -23614,7 +23623,7 @@ a[href] {
 :root[data-theme-style] .expert-session__controls input[type="number"] {
   font-size: 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--bg-elev);
   color: var(--fg);
   padding: 4px 6px;
@@ -23637,7 +23646,7 @@ a[href] {
   min-height: 30px;
   font-size: 13px;
   color: var(--fg-dim);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 2px 0;
 }
 
@@ -23773,7 +23782,7 @@ a[href] {
   border: none;
   background: transparent;
   color: var(--fg-dim);
-  border-radius: 5px;
+  border-radius: 3px;
   cursor: default;
 }
 
@@ -23989,7 +23998,7 @@ a[href] {
   border: none;
   background: transparent;
   color: var(--fg-dim);
-  border-radius: 5px;
+  border-radius: 3px;
   cursor: default;
   padding: 0;
 }
@@ -24016,7 +24025,7 @@ a[href] {
   position: relative;
   display: inline-flex;
   align-items: center;
-  height: 24px;
+  height: 30px;
   margin: 0 4px;
   padding: 2px;
   align-self: center;
@@ -24052,14 +24061,14 @@ a[href] {
   /* flex:1 forces every segment to share the container width equally, so the
      equally-divided indicator always lands centered under each label. */
   flex: 1 1 0;
-  min-width: 40px;
+  min-width: 46px;
   height: 100%;
-  padding: 0 10px;
+  padding: 0 12px;
   border: none;
   border-radius: 999px;
   background: transparent;
   color: var(--text, inherit);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
@@ -24072,6 +24081,14 @@ a[href] {
 .app-chrome__profile-seg-item--active:hover {
   background: transparent;
   color: #fff;
+}
+.app-chrome__profile-seg-icon {
+  margin-right: 5px;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+.app-chrome__profile-seg-item--active .app-chrome__profile-seg-icon {
+  opacity: 1;
 }
 
 
@@ -24137,7 +24154,7 @@ a[href] {
   padding: 0 6px;
   border: 1px solid var(--border-soft, rgba(128, 128, 128, 0.3));
   border-bottom-width: 2px;
-  border-radius: 5px;
+  border-radius: 3px;
   background: var(--bg-elev, var(--bg));
   font-family: var(--mono, ui-monospace, monospace);
   font-size: 11.5px;
@@ -24206,7 +24223,7 @@ a[href] {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: 3px;
   color: var(--fg-dim);
   background: transparent;
   border: none;
@@ -24312,7 +24329,7 @@ a[href] {
   flex-direction: column;
   background: var(--bg-elev, #ffffff);
   border: 1px solid color-mix(in srgb, var(--border, #e5e5e5) 70%, transparent);
-  border-radius: 12px;
+  border-radius: 6px;
   padding: 16px;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
@@ -24345,7 +24362,7 @@ a[href] {
   justify-content: center;
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: 5px;
   background: var(--bg-elev-high);
   color: var(--fg-dim);
   transition: all 0.3s ease;
@@ -24389,7 +24406,7 @@ a[href] {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: 3px;
   border: none;
   background: var(--bg-elev-high);
   color: var(--fg-dim);
@@ -24472,7 +24489,7 @@ a[href] {
 .cowork-expert__composer {
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
-  border-radius: 12px;
+  border-radius: 6px;
   padding: 16px;
   box-shadow: none;
 }
@@ -24490,7 +24507,7 @@ a[href] {
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
 }
@@ -24519,14 +24536,14 @@ a[href] {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: 3px;
 }
 
 .cowork-expert__composer-input {
   width: 100%;
   background: var(--bg);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 12px;
   font-family: inherit;
   font-size: 14px;
@@ -24591,7 +24608,7 @@ a[href] {
 .cowork-expert__filter {
   font-size: 12px;
   padding: 3px 10px;
-  border-radius: 12px;
+  border-radius: 6px;
   border: 1px solid var(--border-soft);
   background: transparent;
   color: var(--fg-dim);
@@ -24618,7 +24635,7 @@ a[href] {
   color: var(--fg-dim);
   background: var(--bg-soft);
   border: 1px dashed var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 3px 9px;
   margin: 4px 0;
 }
@@ -24661,7 +24678,7 @@ a[href] {
 
 .cowork-expert__composer-select {
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: 3px;
   border: 1px solid var(--border-soft);
   background: var(--bg-elev);
   color: var(--fg);
@@ -24729,7 +24746,7 @@ a[href] {
   resize: none;
   padding: 12px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font-mono, ui-monospace, monospace);
@@ -24836,7 +24853,7 @@ a[href] {
   display: flex;
   gap: 2px;
   background: var(--bg-secondary);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 2px;
 }
 .cowork-calendar-task__view-switcher .btn--active {
@@ -24849,7 +24866,7 @@ a[href] {
   gap: 4px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 4px 8px;
 }
 .cowork-calendar-task__search input {
@@ -24870,7 +24887,7 @@ a[href] {
   margin-top: 4px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.15);
   z-index: var(--z-dock);
   min-width: 160px;
@@ -25007,7 +25024,7 @@ a[href] {
 .cowork-calendar-task__event-card {
   padding: 6px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 3px;
   margin-bottom: 6px;
   cursor: pointer;
   transition: border-color 0.15s;
@@ -25033,7 +25050,7 @@ a[href] {
 .cowork-calendar-task__filter {
   padding: 3px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--text-secondary);
   font-size: 11px;
@@ -25047,7 +25064,7 @@ a[href] {
 .cowork-calendar-task__task-card {
   padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 3px;
   margin-bottom: 6px;
   transition: border-color 0.15s;
 }
@@ -25091,7 +25108,7 @@ a[href] {
 .cowork-calendar-task__list { padding: 12px; overflow-y: auto; }
 .cowork-calendar-task__list-group { margin-bottom: 16px; }
 .cowork-calendar-task__list-date { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
-.cowork-calendar-task__list-item { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 6px; cursor: pointer; transition: background 0.1s; }
+.cowork-calendar-task__list-item { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 3px; cursor: pointer; transition: background 0.1s; }
 .cowork-calendar-task__list-item:hover { background: var(--bg-secondary); }
 .cowork-calendar-task__list-time { font-size: 12px; color: var(--text-secondary); min-width: 48px; }
 .cowork-calendar-task__list-title { font-size: 13px; font-weight: 500; }
@@ -25110,7 +25127,7 @@ a[href] {
   width: 280px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.15);
   z-index: var(--z-dock);
   max-height: 300px;
@@ -25190,7 +25207,7 @@ a[href] {
   width: 22px;
   height: 22px;
   border: 1px solid var(--border-soft);
-  border-radius: 5px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-dim);
   font-size: 15px;
@@ -25240,7 +25257,7 @@ a[href] {
   color: var(--fg-faint);
   background: var(--bg-elev);
   padding: 1px 5px;
-  border-radius: 8px;
+  border-radius: 4px;
   flex-shrink: 0;
 }
 
@@ -25271,7 +25288,7 @@ a[href] {
   flex-direction: column;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 6px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
   overflow: hidden;
 }
@@ -25296,7 +25313,7 @@ a[href] {
   width: 24px;
   height: 24px;
   border: none;
-  border-radius: 6px;
+  border-radius: 3px;
   background: transparent;
   color: var(--fg-dim);
   font-size: 13px;
@@ -25342,7 +25359,7 @@ a[href] {
 .rag-create-modal__template {
   padding: 5px 12px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg);
   color: var(--fg-dim);
   font-size: 12.5px;
@@ -25364,7 +25381,7 @@ a[href] {
   padding: 6px 10px;
   background: var(--bg);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   font-size: 12.5px;
   color: var(--fg-dim);
 }
@@ -25374,7 +25391,7 @@ a[href] {
   padding: 8px 10px;
   background: var(--bg);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: 3px;
   color: var(--fg);
   font-size: 13px;
   outline: none;
@@ -25386,7 +25403,7 @@ a[href] {
 .rag-create-modal__preview {
   padding: 6px 10px;
   background: color-mix(in srgb, var(--accent) 6%, transparent);
-  border-radius: 6px;
+  border-radius: 3px;
   font-size: 12px;
   color: var(--fg-dim);
 }
@@ -25455,16 +25472,22 @@ a[href] {
 
 /* === linkpeer 移动端配对面板（§12.5 + plan §3.1）=== */
 .mobile-pair-panel { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; align-items: start; }
-.mobile-pair-panel__qr { display: flex; flex-direction: column; align-items: center; gap: 10px; min-height: 220px; justify-content: center; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--bg-elev) 92%, var(--border)); }
+.mobile-pair-panel__qr { display: flex; flex-direction: column; align-items: center; gap: 10px; min-height: 220px; justify-content: center; padding: 16px; border: 1px solid var(--border); border-radius: 4px; background: color-mix(in srgb, var(--bg-elev) 92%, var(--border)); }
 .mobile-pair-panel__qr-code { display: block; }
 .mobile-pair-panel__code { font-size: 13px; color: var(--fg-dim); }
 .mobile-pair-panel__body { display: flex; flex-direction: column; gap: 12px; }
 .mobile-pair-panel__title { font-size: 16px; font-weight: 600; color: var(--fg); }
 .mobile-pair-panel__desc { font-size: 13px; line-height: 1.6; color: var(--fg-dim); margin: 0; }
-.mobile-pair-panel__pending { padding: 12px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: 8px; background: var(--accent-soft); }
+.mobile-pair-panel__pending { padding: 12px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: 4px; background: var(--accent-soft); }
 .mobile-pair-panel__pending-title { font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 8px; }
 .mobile-pair-panel__device { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; font-size: 13px; color: var(--fg); border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
 .mobile-pair-panel__device:last-child { border-bottom: none; }
 .mobile-pair-panel__device-actions { display: flex; gap: 6px; }
-.mobile-pair-panel__hint { font-size: 12px; color: var(--fg-faint); padding: 8px 10px; border-radius: 6px; background: color-mix(in srgb, var(--bg-elev-2) 80%, var(--border)); }
+.mobile-pair-panel__hint { font-size: 12px; color: var(--fg-faint); padding: 8px 10px; border-radius: 3px; background: color-mix(in srgb, var(--bg-elev-2) 80%, var(--border)); }
+.mobile-pair-panel__url { font-size: 11px; color: var(--fg-faint); word-break: break-all; max-width: 200px; line-height: 1.4; margin-top: 2px; font-family: var(--mono-font, ui-monospace, monospace); }
+.mobile-pair-panel__status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-dim); }
+.mobile-pair-panel__dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+.mobile-pair-panel__dot--ok { background: #3fb950; box-shadow: 0 0 6px rgba(63, 185, 80, 0.5); }
+.mobile-pair-panel__dot--warn { background: #d29922; }
+.mobile-pair-panel__dot--off { background: var(--fg-faint); }
 @media (max-width: 640px) { .mobile-pair-panel { grid-template-columns: 1fr; } }

@@ -3,12 +3,14 @@
 // determines the outer ring color (Louvain detection).
 
 import { ENTITY_TYPES, communityColor } from "./entityTypes";
+import { useT } from "../../lib/i18n";
 
 export function GraphLegend({ hasCommunities = false }: { hasCommunities?: boolean }) {
+  const t = useT();
   return (
     <div className="rag-legend">
       <div className="rag-legend__group">
-        <span className="rag-legend__title">类型</span>
+        <span className="rag-legend__title">{t("graphLegend.type")}</span>
         {ENTITY_TYPES.map((item) => (
           <div key={item.key} className="rag-legend__item">
             <span className="rag-legend__dot" style={{ background: item.color }} />
@@ -18,13 +20,13 @@ export function GraphLegend({ hasCommunities = false }: { hasCommunities?: boole
       </div>
       {hasCommunities && (
         <div className="rag-legend__group">
-          <span className="rag-legend__title">社区</span>
+          <span className="rag-legend__title">{t("graphLegend.community")}</span>
           <div className="rag-legend__item">
             <span
               className="rag-legend__ring"
               style={{ borderColor: communityColor(0) }}
             />
-            <span className="rag-legend__label">节点外环 = 社区</span>
+            <span className="rag-legend__label">{t("graphLegend.nodeRing")}</span>
           </div>
         </div>
       )}

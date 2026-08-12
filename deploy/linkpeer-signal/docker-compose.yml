@@ -1,0 +1,46 @@
+# linkpeer-signal deployment: signal (Go) + coturn (STUN only) + caddy (TLS/WSS).
+# See docs/LINKPEER_PROTOCOL.md §10 for the full design.
+#
+# 5000-peer scale: 4C8G VPS, LimitNOFILE=65535 (set on the host, not here —
+# docker inherits host ulimit; verify with `docker exec signal cat /proc/1/limits`).
+#
+# Deploy: cd deploy/linkpeer-signal && docker-compose up -d
+# Verify: curl https://signal.example.com/healthz  →  {"ok":true,...}
+version: "3.8"
+services:
+  signal:
+    build:
+      context: ../..
+      dockerfile: deploy/linkpeer-signal/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./signal.toml:/etc/linkpeer/signal.toml:ro
+    networks: [internal]
+
+  coturn:
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    # host networking so STUN UDP 3478 is reachable without port-mapping gymnastics.
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/turnserver.conf:ro
+    command: ["-c", "/etc/turnserver.conf"]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [internal]
+    depends_on: [signal]
+
+networks:
+  internal: {}
+volumes:
+  caddy_data: {}
+  caddy_config: {}

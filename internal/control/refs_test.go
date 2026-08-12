@@ -63,6 +63,7 @@ func TestClassifyRef(t *testing.T) {
 		"src/main.go": true,
 		"README.md":   true,
 		".fairpeer/attachments/clipboard-20260601-010203.000000.png": true,
+		".fairpeer/attachments/clipboard-20260601-010203.000000.mp3": true,
 		".fairpeer/attachments/clipboard-20260601-010203.000000.yml": true,
 		".fairpeer/attachments/clipboard-20260601-010203.000000.zip": true,
 	}
@@ -77,6 +78,7 @@ func TestClassifyRef(t *testing.T) {
 		{"src/main.go", true, refFile},          // existing file
 		{"README.md", true, refFile},            // existing file
 		{".fairpeer/attachments/clipboard-20260601-010203.000000.png", true, refImage},
+		{".fairpeer/attachments/clipboard-20260601-010203.000000.mp3", true, refAudio},
 		{".fairpeer/attachments/clipboard-20260601-010203.000000.yml", true, refFile},
 		{".fairpeer/attachments/clipboard-20260601-010203.000000.zip", true, refFile},
 		{"ghost:issue://1", false, 0}, // unknown server, no such file
@@ -104,6 +106,7 @@ func TestResolveRefsAttachmentKinds(t *testing.T) {
 	ymlRef := filepath.ToSlash(".fairpeer/attachments/config.yml")
 	zipRef := filepath.ToSlash(".fairpeer/attachments/archive.zip")
 	pngRef := filepath.ToSlash(".fairpeer/attachments/shot.png")
+	mp3Ref := filepath.ToSlash(".fairpeer/attachments/clip.mp3")
 	if err := os.WriteFile(filepath.Join(temp, filepath.FromSlash(ymlRef)), []byte("name: fairpeer\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -111,6 +114,12 @@ func TestResolveRefsAttachmentKinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(temp, filepath.FromSlash(pngRef)), []byte("\x89PNG\r\n\x1a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Minimal MP3 frame header (ID3-less) so sniffAudioMIME/isAudioAttachmentRef
+	// recognise it by extension; the body is irrelevant — audio never reaches
+	// the main model, it's transcribed on demand by audio_understand.
+	if err := os.WriteFile(filepath.Join(temp, filepath.FromSlash(mp3Ref)), []byte{'I', 'D', '3', 0x03}, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -127,7 +136,7 @@ func TestResolveRefsAttachmentKinds(t *testing.T) {
 		}
 	})
 
-	line := "check @" + ymlRef + " @" + zipRef + " @" + pngRef
+	line := "check @" + ymlRef + " @" + zipRef + " @" + pngRef + " @" + mp3Ref
 	block, errs := (&Controller{}).ResolveRefs(context.Background(), line)
 	if len(errs) != 0 {
 		t.Fatalf("ResolveRefs errors = %v", errs)
@@ -153,6 +162,14 @@ func TestResolveRefsAttachmentKinds(t *testing.T) {
 	}
 	if !strings.Contains(blockStr, "image_understand") {
 		t.Fatalf("expected image reference to mention image_understand tool, got: %s", blockStr)
+	}
+	// Audio: rendered as a text reference pointing the model at audio_understand,
+	// NOT inlined as an input_audio part — mirrors the single-track image path.
+	if !strings.Contains(blockStr, `<audio path="`+mp3Ref+`">`) {
+		t.Fatalf("expected mp3 attachment to resolve as <audio path=...> text reference, got: %s", blockStr)
+	}
+	if !strings.Contains(blockStr, "audio_understand") {
+		t.Fatalf("expected audio reference to mention audio_understand tool, got: %s", blockStr)
 	}
 }
 

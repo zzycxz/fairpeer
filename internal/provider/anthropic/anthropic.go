@@ -132,6 +132,16 @@ var bufPool = sync.Pool{
 }
 
 func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	// Anthropic's Messages API accepts only text and image content blocks — it
+	// has no audio input. If a caller routed audio here (e.g. voice_model set to
+	// an anthropic-kind provider such as bailian-token), fail loudly with a clear
+	// message instead of silently dropping the audio and letting the model
+	// hallucinate a transcript from the text-only prompt.
+	for _, m := range req.Messages {
+		if len(provider.AudioParts(m.Content)) > 0 {
+			return nil, fmt.Errorf("%s: Anthropic providers do not support audio input — set [cowork] voice_model to an OpenAI-compatible provider (e.g. mimo, zhipu)", c.name)
+		}
+	}
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	if err := json.NewEncoder(buf).Encode(c.buildRequest(req)); err != nil {
@@ -438,7 +448,8 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
 			CompletionTokens: outTok,
 			TotalTokens:      inTok + cacheCreate + cacheRead + outTok,
 			CacheHitTokens:   cacheRead,
-			CacheMissTokens:  inTok + cacheCreate, // uncached input + cache writes (billed ≥1×)
+			CacheMissTokens:  inTok,       // pure uncached input
+			CacheWriteTokens: cacheCreate, // cache-creation writes (Cost bills these above the input rate)
 			FinishReason:     mapStopReason(stopReason),
 		}}
 	}

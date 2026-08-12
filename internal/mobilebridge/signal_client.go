@@ -1,0 +1,209 @@
+package mobilebridge
+
+import (
+	"context"
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"math/rand"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+// SignalMsg is the envelope forwarded through K. Pair-exchange notices reuse
+// this shape (PROTOCOL §3.1: K pushes pubC to S over this same WS).
+type SignalMsg struct {
+	Type    string `json:"type"`
+	From    string `json:"from,omitempty"`
+	To      string `json:"to,omitempty"`
+	Ts      int64  `json:"ts,omitempty"`
+	Sig     string `json:"sig,omitempty"`
+	SDP     string `json:"sdp,omitempty"`
+	SDPType string `json:"sdpType,omitempty"` // "offer" | "answer"
+	Cand    string `json:"cand,omitempty"`
+	ConnID  string `json:"connId,omitempty"`
+	// pair_exchange notice fields:
+	PairID string `json:"pairId,omitempty"`
+	PubC   string `json:"pubC,omitempty"`
+	FpC    string `json:"fpC,omitempty"`
+	DevC   string `json:"devC,omitempty"`
+}
+
+// SignalHandler receives inbound messages from K. The Bridge implements this
+// and dispatches offer/ice to peer, pair_exchange to Pairing.
+type SignalHandler interface {
+	OnSignalMsg(msg SignalMsg)
+}
+
+// SignalClient is S's persistent OUTBOUND WSS link to K. Outbound pierces NAT
+// (S needs no public IP). Reconnects with exponential backoff + ±100% jitter
+// to avoid the thundering-herd when K restarts under 5000 peers (PROTOCOL §4.5,
+// §7.2, ENGINEERING §10.7). Authenticates statelessly per §4.1 (URL-safe b64
+// in the query string).
+type SignalClient struct {
+	signalURL string
+	longPub   ed25519.PublicKey
+	longPriv  ed25519.PrivateKey
+	devID     string
+	handler   SignalHandler
+	audit     *Audit
+
+	connMu  sync.Mutex
+	conn    *websocket.Conn
+	writeMu sync.Mutex
+	closed  atomic.Bool
+}
+
+func NewSignalClient(signalURL string, pub ed25519.PublicKey, priv ed25519.PrivateKey, h SignalHandler, audit *Audit) *SignalClient {
+	return &SignalClient{
+		signalURL: signalURL,
+		longPub:   pub,
+		longPriv:  priv,
+		devID:     DevID(pub),
+		handler:   h,
+		audit:     audit,
+	}
+}
+
+// Close stops Run and drops the current connection.
+func (c *SignalClient) Close() error {
+	c.closed.Store(true)
+	c.connMu.Lock()
+	conn := c.conn
+	c.connMu.Unlock()
+	if conn != nil {
+		return conn.Close()
+	}
+	return nil
+}
+
+// Connected reports whether the WS link to K is currently up. Used by the
+// settings panel so the user can see "已连接信令" vs "连接中…/失败".
+func (c *SignalClient) Connected() bool {
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+	return c.conn != nil
+}
+
+// Run connects and stays connected until ctx is done or Close is called.
+func (c *SignalClient) Run(ctx context.Context) error {
+	backoff := time.Second
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if c.closed.Load() {
+			return nil
+		}
+		err := c.connectAndServe(ctx)
+		if c.closed.Load() || ctx.Err() != nil {
+			return nil
+		}
+		c.audit.Error("signal_disconnect", c.devID, err)
+		// backoff + jitter (±100%) — jitter is what prevents 5000 S from
+		// all reconnecting in lockstep when K reboots.
+		wait := backoff + time.Duration(rand.Int63n(int64(backoff)))
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+		if backoff < 30*time.Second {
+			backoff *= 2
+		}
+	}
+}
+
+func (c *SignalClient) connectAndServe(ctx context.Context) error {
+	ts := time.Now().Unix()
+	sig := ed25519.Sign(c.longPriv, []byte(c.devID+strconv.FormatInt(ts, 10)))
+	uEnc := base64.URLEncoding.WithPadding(base64.NoPadding)
+	// cfg.SignalURL is http(s):// (Pairing uses plain HTTP POSTs against the
+	// same host); the WS dialer needs ws(s)://.
+	base := c.signalURL
+	if i := strings.Index(base, "://"); i >= 0 {
+		scheme := "ws"
+		if strings.HasPrefix(base, "https://") {
+			scheme = "wss"
+		}
+		base = scheme + "://" + base[i+3:]
+	}
+	u := base + "/session/ws?dev=" + c.devID +
+		"&ts=" + strconv.FormatInt(ts, 10) +
+		"&pub=" + uEnc.EncodeToString(c.longPub) +
+		"&sig=" + uEnc.EncodeToString(sig)
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, u, http.Header{})
+	if err != nil {
+		return err
+	}
+	c.connMu.Lock()
+	c.conn = conn
+	c.connMu.Unlock()
+	defer func() {
+		c.connMu.Lock()
+		c.conn = nil
+		c.connMu.Unlock()
+		conn.Close()
+	}()
+
+	stopKeep := make(chan struct{})
+	defer close(stopKeep)
+	go c.keepalive(conn, stopKeep)
+
+	for {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			return err
+		}
+		var msg SignalMsg
+		if json.Unmarshal(raw, &msg); err != nil {
+			continue
+		}
+		switch msg.Type {
+		case "kp":
+			_ = c.rawSend(SignalMsg{Type: "kp_ack"})
+		case "server_shutdown":
+			return errors.New("server_shutdown")
+		default:
+			c.handler.OnSignalMsg(msg)
+		}
+	}
+}
+
+func (c *SignalClient) keepalive(conn *websocket.Conn, stop <-chan struct{}) {
+	t := time.NewTicker(25 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			if c.rawSend(SignalMsg{Type: "kp"}) != nil {
+				return
+			}
+		}
+	}
+}
+
+// Send posts a message to K (answer/ice generated by the peer). Error if disconnected.
+func (c *SignalClient) Send(msg SignalMsg) error { return c.rawSend(msg) }
+
+func (c *SignalClient) rawSend(msg SignalMsg) error {
+	c.connMu.Lock()
+	conn := c.conn
+	c.connMu.Unlock()
+	if conn == nil {
+		return errors.New("not connected to K")
+	}
+	b, _ := json.Marshal(msg)
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return conn.WriteMessage(websocket.TextMessage, b)
+}

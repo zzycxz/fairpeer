@@ -508,3 +508,27 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # extract_concurrency = 1
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# linkpeer mobile bridge (fairpeer ↔ linkpeer phone client)
+# linkpeer is a separate Flutter app that mirrors this fairpeer's conversations
+# over an end-to-end-encrypted WebRTC P2P link. This section enables the
+# desktop-side bridge. See docs/LINKPEER_*.md for the full design.
+#
+# A cloud signaling server (linkpeer-signal) is required for the phone to find
+# this desktop across NATs; it only does "knock" — no business traffic flows
+# through it. Deploy your own: see deploy/linkpeer-signal/docker-compose.yml.
+# ─────────────────────────────────────────────────────────────────────────────
+[mobilebridge]
+# enabled          = false                          # master switch (default off)
+# signal_url       = "wss://signal.example.com"     # your self-hosted signaling K
+# stun_servers     = ["stun:signal.example.com:3478"]
+# turn_enabled     = false                           # opt-in relay (default off; pure P2P)
+# turn_servers     = ["turn:signal.example.com:5349"]
+# upnp             = true                            # auto port-map on home routers
+# readonly_default = false                           # new phones default to read-only
+# require_approval = false                           # mobile submits need desktop OK
+# allow_file_drop  = true                            # phone → desktop file delivery
+# allow_high_risk  = false                           # mobile may trigger shell/exec
+# max_connections  = 4                               # concurrent phone clients
+# log_level        = "info"

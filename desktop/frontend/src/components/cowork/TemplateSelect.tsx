@@ -7,6 +7,7 @@ import { Zap, Clock, RefreshCw, ArrowRight, Eye, Trash2, Folder, Sparkles, Corne
 import { CustomSelect, type CustomSelectOption } from "./CustomSelect";
 
 import { app } from "../../lib/bridge";
+import { useT } from "../../lib/i18n";
 import { asArray } from "../../lib/array";
 import { useToast } from "../../lib/toast";
 import { useConfirm } from "../../lib/confirm";
@@ -52,6 +53,7 @@ export interface TemplateSelectProps {
 const MAX_POLL_TICKS = 150; // 150 × 2s = 5min max
 
 export function TemplateSelect({ collection, collections, onCollectionChange, onBack, onViewGraph }: TemplateSelectProps) {
+  const t = useT();
   const { showToast } = useToast();
   const confirm = useConfirm();
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -108,7 +110,7 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
   const handleCancel = () => {
     stopPolling();
     setLoading(false);
-    showToast("已停止监听进度，提取仍在后台继续", "info");
+    showToast(t("templateSelect.stoppedListening"), "info");
   };
 
   const handleSilentExtract = async () => {
@@ -119,9 +121,9 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
     } catch (e) {
       const msg = String(e);
       if (msg.includes("no documents")) {
-        showToast("当前集合暂无文档，请先导入文件", "error");
+        showToast(t("templateSelect.noDocs"), "error");
       } else {
-        showToast(`启动提取失败：${msg}`, "error");
+        showToast(`${t("templateSelect.startFailed")}: ${msg}`, "error");
       }
     } finally {
       setLoading(false);
@@ -129,7 +131,7 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
   };
 
   const handleFullExtract = async () => {
-    if (!(await confirm({ title: "重新提取", message: "确定重新提取全部文档？已有实体和关系将被清空。" }))) return;
+    if (!(await confirm({ title: t("templateSelect.reExtract"), message: t("templateSelect.reExtractMsg") }))) return;
     setLoading(true);
     setJobs([]);
     setShowResult(false);
@@ -169,7 +171,7 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
             setLoading(false);
             const errorCount = mapped.filter((j) => j.status === "failed").length;
             if (errorCount > 0) {
-              showToast(`提取完成，但有 ${errorCount} 个文件失败`, "warn");
+              showToast(t("templateSelect.extractPartialDone", { count: String(errorCount) }), "warn");
             }
             if (extractResult.hasData) {
               setShowResult(true);
@@ -184,7 +186,7 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
       }, 2000);
     } catch (e) {
       setLoading(false);
-      showToast(`启动提取失败：${e}`, "error");
+      showToast(`${t("templateSelect.startFailed")}: ${e}`, "error");
     }
   };
 
@@ -248,9 +250,9 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
             setLoading(false);
             const errorCount = mapped.filter((j) => j.status === "failed").length;
             if (errorCount > 0) {
-              showToast(`提取完成，但有 ${errorCount} 个文件失败（可能是 API 限流或内容不合规）`, "warn");
+              showToast(t("templateSelect.extractPartialDone", { count: String(errorCount) }), "warn");
             } else {
-              showToast(`提取完成！已生成 ${extractResult.entityCount} 个实体、${extractResult.relationCount} 条关系`, "info");
+              showToast(t("templateSelect.extractDone", { entities: String(extractResult.entityCount), relations: String(extractResult.relationCount) }), "info");
             }
             if (extractResult.hasData) {
               // Auto-switch to graph view — the user just watched extraction,
@@ -270,9 +272,9 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
       setLoading(false);
       const msg = String(e);
       if (msg.includes("no documents")) {
-        showToast("当前集合暂无文档，请先导入文件", "error");
+        showToast(t("templateSelect.noDocs"), "error");
       } else {
-        showToast(`启动提取失败：${msg}`, "error");
+        showToast(`${t("templateSelect.startFailed")}: ${msg}`, "error");
       }
     }
   };
@@ -288,12 +290,12 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
       {/* Header */}
       <div className="rag-template__header">
         <button className="rag-template__back" onClick={onBack}>←</button>
-        <span className="rag-template__title">深度提取</span>
+        <span className="rag-template__title">{t("templateSelect.deepExtract")}</span>
       </div>
 
       {/* Collection — clean dropdown selector */}
       <div className="rag-template__section">
-        <span className="rag-template__label">知识库分类集合</span>
+        <span className="rag-template__label">{t("templateSelect.collectionLabel")}</span>
         {collections && onCollectionChange ? (
           <CustomSelect
             value={collection}
@@ -302,7 +304,7 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
             options={(() => {
               const opts: CustomSelectOption[] = [{
                 value: "",
-                label: `全部文档 (${collections.reduce((s, c) => s + (c.documents ?? 0), 0)})`,
+                label: t("cowork.allDocs", { count: String(collections.reduce((s, c) => s + (c.documents ?? 0), 0)) }),
                 icon: <Folder size={13} style={{ color: "var(--accent)" }} />,
               }];
               
@@ -332,7 +334,7 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
                         <span title={c.name} style={{ fontWeight: depth === 0 ? 500 : 400 }}>{displayName}</span>
                       </span>
                       <span style={{ fontSize: "10px", color: "var(--fg-faint)", marginLeft: "6px", flexShrink: 0 }}>
-                        {c.documents} 篇
+                        {t("cowork.nArticles", { count: String(c.documents) })}
                       </span>
                     </span>
                   )
@@ -342,23 +344,23 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
             })()}
           />
         ) : (
-          <span className="rag-template__value">{collection || "全部"}</span>
+          <span className="rag-template__value">{collection || t("cowork.all")}</span>
         )}
       </div>
 
       {/* Engine Status */}
       <div className="rag-template__section">
-        <span className="rag-template__label">提取引擎</span>
+        <span className="rag-template__label">{t("templateSelect.extractEngine")}</span>
         <span className="rag-template__status rag-template__status--ok">
           {heReady
-            ? "全领域知识图谱引擎就绪 (自研内置架构 + HE 增强协同)"
-            : "全领域知识图谱引擎就绪 (自适应两阶段全链路专业提取)"}
+            ? t("templateSelect.engineReady") + " (HE enhanced)"
+            : t("templateSelect.engineReady") + " (adaptive two-stage)"}
         </span>
       </div>
 
       {/* Template selection — clean dropdown + single active preview card */}
       <div className="rag-template__section">
-        <span className="rag-template__label">提取模板</span>
+        <span className="rag-template__label">{t("templateSelect.extractTemplate")}</span>
         {templates.length > 0 ? (
           <>
             <CustomSelect
@@ -391,7 +393,7 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
                     <div className="rag-template__fields" style={{ marginTop: 8 }}>
                       {entityFields.length > 0 && (
                         <span className="rag-template__field-group">
-                          <span className="rag-template__field-label">实体</span>
+                          <span className="rag-template__field-label">{t("templateSelect.entities")}</span>
                           {entityFields.map((f) => (
                             <span key={f.name} className="rag-template__field-chip" title={f.description}>{f.name}</span>
                           ))}
@@ -399,7 +401,7 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
                       )}
                       {relationFields.length > 0 && (
                         <span className="rag-template__field-group">
-                          <span className="rag-template__field-label">关系</span>
+                          <span className="rag-template__field-label">{t("templateSelect.relations")}</span>
                           {relationFields.map((f) => (
                             <span key={f.name} className="rag-template__field-chip" title={f.description}>{f.name}</span>
                           ))}
@@ -443,9 +445,9 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
             >
               <Sparkles size={22} style={{ opacity: 0.9 }} />
             </div>
-            <p style={{ fontWeight: 600, color: "var(--fg)", fontSize: 13, margin: 0 }}>暂无自定义专项提取模板</p>
+            <p style={{ fontWeight: 600, color: "var(--fg)", fontSize: 13, margin: 0 }}>{t("templateSelect.noCustomTemplates")}</p>
             <p style={{ fontSize: 11.5, color: "var(--fg-faint)", margin: 0, lineHeight: 1.5, maxWidth: 260 }}>
-              系统内置大语言模型深度推理与图谱挖掘，即便无需模版也可在下方直接开启全量智能理解。
+              {t("templateSelect.builtinHint")}
             </p>
           </div>
         )}
@@ -460,7 +462,7 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
             style={{ color: "var(--fg-dim)", borderColor: "var(--border)", width: "100%" }}
           >
             <RefreshCw size={14} />
-            <span>停止监听 (不中断后台作业)</span>
+            <span>{t("templateSelect.stopListening")}</span>
           </button>
         ) : (
           <>
@@ -471,7 +473,7 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
               style={{ width: "100%" }}
             >
               <Zap size={15} />
-              <span>智能增量理解 (构建知识图谱)</span>
+              <span>{t("templateSelect.smartIncremental")}</span>
             </button>
             <div className="rag-template__actions-sub">
               <button
@@ -479,20 +481,20 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
                 onClick={() => void handleFullExtract()}
                 disabled={loading}
                 style={{ flex: 1 }}
-                title="清空已有图谱实体，重新对分类下全部文档进行提取"
+                title={t("templateSelect.fullRebuildHint")}
               >
                 <RefreshCw size={13} />
-                <span>全量重建</span>
+                <span>{t("templateSelect.fullRebuild")}</span>
               </button>
               <button
                 className="rag-template__btn"
                 onClick={() => void handleSilentExtract()}
                 disabled={loading}
                 style={{ flex: 1 }}
-                title="进入后台静默任务排队，不阻塞现有界面"
+                title={t("templateSelect.silentHint")}
               >
                 <Clock size={13} />
-                <span>静默理解</span>
+                <span>{t("templateSelect.silentUnderstanding")}</span>
               </button>
             </div>
           </>
@@ -503,10 +505,10 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
       {loading && result && (
         <div className="rag-template__live-stats">
           <span className="rag-template__live-stat">
-            实体 <strong>{result.entityCount}</strong>
+            {t("templateSelect.entitiesCount")} <strong>{result.entityCount}</strong>
           </span>
           <span className="rag-template__live-stat">
-            关系 <strong>{result.relationCount}</strong>
+            {t("templateSelect.relationsCount")} <strong>{result.relationCount}</strong>
           </span>
         </div>
       )}
@@ -529,11 +531,11 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
                 </div>
                 <span className="rag-template__progress-text">
                   {loading ? (
-                    currentFile ? `正在理解：${currentFile.path.split(/[/\\]/).pop()}（${currentFile.progress}%）` :
-                    pendingCount > 0 ? `等待中...（${doneCount}/${total} 完成）` :
-                    `${doneCount}/${total} 完成`
+                    currentFile ? t("templateSelect.understanding", { file: currentFile.path.split(/[/\\]/).pop() || "", progress: String(currentFile.progress) }) :
+                    pendingCount > 0 ? t("templateSelect.waiting", { done: String(doneCount), total: String(total) }) :
+                    t("templateSelect.progressDone", { done: String(doneCount), total: String(total) })
                   ) : (
-                    `${doneCount}/${total} 完成` + (failedCount > 0 ? `，${failedCount} 失败` : "")
+                    t("templateSelect.progressDone", { done: String(doneCount), total: String(total) }) + (failedCount > 0 ? `, ${failedCount} failed` : "")
                   )}
                 </span>
               </div>
@@ -544,10 +546,10 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
             <div key={j.id} className={`rag-template__job rag-template__job--${j.status}`}>
               <span className="rag-template__job-path">{j.path.split(/[/\\]/).pop()}</span>
               <span className="rag-template__job-status">
-                {j.status === "done" ? `✓ ${j.entities} 实体` :
+                {j.status === "done" ? `✓ ${j.entities} ${t("templateSelect.entitiesCount").toLowerCase()}` :
                  j.status === "running" || j.status === "extracting" ? `${j.progress}%` :
-                 j.status === "failed" ? `✗ 失败` :
-                 j.status === "queued" || j.status === "pending" ? "等待中" :
+                 j.status === "failed" ? `✗ failed` :
+                 j.status === "queued" || j.status === "pending" ? "waiting" :
                  j.status}
               </span>
               {j.status === "failed" && (
@@ -580,14 +582,14 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600, color: "var(--fg)" }}>
               <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)" }} />
-              <span>已提取知识</span>
+              <span>{t("templateSelect.extractedKnowledge")}</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11 }}>
               <span style={{ padding: "2px 7px", borderRadius: 10, background: "rgba(59, 130, 246, 0.12)", color: "#3b82f6", fontWeight: 500 }}>
-                {result.entityCount} 实体
+                {result.entityCount} {t("templateSelect.entitiesCount").toLowerCase()}
               </span>
               <span style={{ padding: "2px 7px", borderRadius: 10, background: "rgba(168, 85, 247, 0.12)", color: "#a855f7", fontWeight: 500 }}>
-                {result.relationCount} 关系
+                {result.relationCount} {t("templateSelect.relationsCount").toLowerCase()}
               </span>
             </div>
           </div>
@@ -616,12 +618,12 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
               }}
             >
               <Eye size={13} />
-              <span>查看详情</span>
+              <span>{t("templateSelect.viewDetails")}</span>
             </button>
             <button
               type="button"
               onClick={async () => {
-                if (await confirm({ title: "清理知识", message: "确认清理所有提取的知识？文档不会被删除，可重新提取。" })) {
+                if (await confirm({ title: t("templateSelect.cleanKnowledge"), message: t("templateSelect.cleanKnowledgeMsg") })) {
                   await app.RagCleanCollection(collection);
                   setResult(null);
                 }
@@ -640,10 +642,10 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
                 fontSize: 11.5,
                 cursor: "pointer",
               }}
-              title="清理已提取的图谱知识"
+              title={t("templateSelect.cleanKnowledge")}
             >
               <Trash2 size={13} />
-              <span>清理</span>
+              <span>{t("templateSelect.clean")}</span>
             </button>
           </div>
         </div>
@@ -662,6 +664,7 @@ function ExtractionResult({ result, onBack, onViewGraph, onReExtract }: {
   onViewGraph?: () => void;
   onReExtract: () => void;
 }) {
+  const t = useT();
   // Group entities by type for distribution bar.
   const typeGroups = new Map<string, number>();
   for (const e of result.topEntities) {
@@ -674,29 +677,29 @@ function ExtractionResult({ result, onBack, onViewGraph, onReExtract }: {
       {/* Header */}
       <div className="rag-result__header">
         <button className="rag-template__back" onClick={onBack}>←</button>
-        <span className="rag-result__title">提取结果</span>
+        <span className="rag-result__title">{t("templateSelect.extractResult")}</span>
       </div>
 
       {/* Summary */}
       <div className="rag-result__summary">
         <div className="rag-result__stat">
           <span className="rag-result__stat-num">{result.entityCount}</span>
-          <span className="rag-result__stat-label">实体</span>
+          <span className="rag-result__stat-label">{t("templateSelect.entities")}</span>
         </div>
         <div className="rag-result__stat">
           <span className="rag-result__stat-num">{result.relationCount}</span>
-          <span className="rag-result__stat-label">关系</span>
+          <span className="rag-result__stat-label">{t("templateSelect.relations")}</span>
         </div>
         <div className="rag-result__stat">
           <span className="rag-result__stat-num">{result.doneCount}/{result.jobCount}</span>
-          <span className="rag-result__stat-label">文件</span>
+          <span className="rag-result__stat-label">{t("cowork.files")}</span>
         </div>
       </div>
 
       {/* Entity type distribution */}
       {typeGroups.size > 0 && (
         <div className="rag-result__section">
-          <div className="rag-result__section-title">实体类型分布</div>
+          <div className="rag-result__section-title">{t("templateSelect.entityTypeDistribution")}</div>
           <div className="rag-result__distribution">
             {Array.from(typeGroups.entries()).map(([type, count]) => (
               <div key={type} className="rag-result__dist-row">
@@ -720,7 +723,7 @@ function ExtractionResult({ result, onBack, onViewGraph, onReExtract }: {
       {/* Top entities */}
       {result.topEntities.length > 0 && (
         <div className="rag-result__section">
-          <div className="rag-result__section-title">高频实体</div>
+          <div className="rag-result__section-title">{t("templateSelect.topEntities")}</div>
           <div className="rag-result__entity-list">
             {result.topEntities.slice(0, 10).map((e) => (
               <EntityCard key={e.name} entity={e} />
@@ -732,7 +735,7 @@ function ExtractionResult({ result, onBack, onViewGraph, onReExtract }: {
       {/* Top relations */}
       {result.topRelations.length > 0 && (
         <div className="rag-result__section">
-          <div className="rag-result__section-title">关系示例</div>
+          <div className="rag-result__section-title">{t("templateSelect.relationExamples")}</div>
           <div className="rag-result__relation-list">
             {result.topRelations.slice(0, 5).map((r, i) => (
               <div key={i} className="rag-result__relation">
@@ -751,12 +754,12 @@ function ExtractionResult({ result, onBack, onViewGraph, onReExtract }: {
         {onViewGraph && (
           <button className="btn btn--primary" onClick={onViewGraph}>
             <Eye size={14} />
-            <span>查看图谱</span>
+            <span>{t("templateSelect.viewGraph")}</span>
           </button>
         )}
         <button className="btn" onClick={onReExtract}>
           <RefreshCw size={14} />
-          <span>换模板重提取</span>
+          <span>{t("templateSelect.changeTemplateReExtract")}</span>
         </button>
       </div>
     </div>
@@ -764,6 +767,7 @@ function ExtractionResult({ result, onBack, onViewGraph, onReExtract }: {
 }
 
 function EntityCard({ entity }: { entity: RagEntityBrief }) {
+  const t = useT();
   const label = ENTITY_TYPE_LABELS[entity.type] ?? entity.type;
   const color = ENTITY_TYPE_COLORS[entity.type] ?? "#95A5A6";
   return (
@@ -776,7 +780,7 @@ function EntityCard({ entity }: { entity: RagEntityBrief }) {
         )}
       </div>
       {entity.relationCount > 0 && (
-        <span className="rag-result__entity-rels">{entity.relationCount} 关系</span>
+        <span className="rag-result__entity-rels">{entity.relationCount} {t("templateSelect.relationsCount").toLowerCase()}</span>
       )}
     </div>
   );

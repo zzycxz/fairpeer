@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>STT Spike — 麦克风/录音格式验证</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 24px; max-width: 880px; }
+  h1 { font-size: 18px; }
+  h2 { font-size: 15px; margin-top: 28px; border-bottom: 1px solid #8884; padding-bottom: 4px; }
+  button { font: inherit; padding: 8px 14px; margin: 4px 6px 4px 0; cursor: pointer; border-radius: 6px; border: 1px solid #888; background: #eee; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.rec { background: #f66; color: #fff; border-color: #c33; }
+  pre { background: #0001; padding: 10px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; max-height: 320px; overflow: auto; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 99px; background: #4563; color: #fff; font-size: 12px; }
+  .pill.no { background: #c454; }
+  audio { width: 100%; margin-top: 8px; }
+  table { border-collapse: collapse; margin-top: 8px; }
+  td, th { border: 1px solid #8886; padding: 4px 10px; }
+  .muted { color: #888; }
+  code { background: #0002; padding: 1px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h1>STT Spike — 麦克风 &amp; 录音格式验证</h1>
+<p class="muted">纯静态单文件，浏览器双击打开即可。目的：搞清楚“浏览器/WebView 到底能录出什么格式”，以便判断哪些 STT 厂商能直接吃。把录出的文件丢给 <code>api/</code> 的后端程序做转写交叉验证。</p>
+
+<h2>① MediaRecorder 支持的格式</h2>
+<p class="muted">点击下方按钮探测当前环境 <code>MediaRecorder.isTypeSupported()</code> 的结果。</p>
+<button id="probe">探测支持的 MIME</button>
+<div id="mimeTable"></div>
+
+<h2>② 录音</h2>
+<p class="muted">点“开始录音”授权麦克风并录制；“停止”后会打印 Blob 的真实 MIME 类型，并生成可下载、可播放的文件。</p>
+<div class="row">
+  <button id="start">🎙 开始录音</button>
+  <button id="stop" class="rec" disabled>⏹ 停止</button>
+  <span id="status" class="muted">待机</span>
+</div>
+
+<h3>录出的 Blob</h3>
+<pre id="blobInfo">（尚未录音）</pre>
+
+<h3>播放 &amp; 下载</h3>
+<audio id="player" controls></audio>
+<div class="row" style="margin-top:8px">
+  <a id="download" style="display:none">⬇ 下载录音（拿去喂给后端 test 命令）</a>
+</div>
+
+<h2>③ getUserMedia 权限诊断</h2>
+<pre id="permInfo">（点开始录音后显示）</pre>
+
+<h2>④ 结论记录（手填后丢回 README）</h2>
+<p class="muted">录完后把“录出的 Blob”里的 <code>type</code> 抄到 <code>spike/stt/README.md</code> 的格式矩阵里。</p>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let mediaRecorder = null, chunks = [], stream = null;
+
+// ---- ① MIME probe ----
+const CANDIDATES = [
+  "audio/webm",
+  "audio/webm;codecs=opus",
+  "audio/webm;codecs=vorbis",
+  "audio/ogg",
+  "audio/ogg;codecs=opus",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/wave",
+];
+$("probe").onclick = () => {
+  const rows = CANDIDATES.map((m) => {
+    let ok;
+    try { ok = MediaRecorder.isTypeSupported(m); } catch (e) { ok = "ERR:" + e.message; }
+    const cls = ok === true ? "" : " class='no'";
+    return `<tr><td><code>${m}</code></td><td${cls}>${ok}</td></tr>`;
+  }).join("");
+  $("mimeTable").innerHTML = `<table><tr><th>MIME</th><th>isTypeSupported</th></tr>${rows}</table>`;
+  const def = (() => { try { return MediaRecorder.prototype ? "存在" : "无"; } catch { return "?"; } })();
+  console.log("MediaRecorder typeof:", typeof MediaRecorder);
+};
+
+// ---- ② recording ----
+$("start").onclick = async () => {
+  $("status").textContent = "请求麦克风权限…";
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    $("permInfo").textContent = "getUserMedia 失败: " + e.name + " — " + e.message +
+      "\n\n常见原因：\n" +
+      "  NotAllowedError  : 用户拒绝授权或浏览器策略禁止\n" +
+      "  NotFoundError    : 没有麦克风设备\n" +
+      "  (Wails/WebView)  : 可能需在宿主配置里声明麦克风权限";
+    $("status").textContent = "权限失败";
+    return;
+  }
+  const tracks = stream.getAudioTracks();
+  $("permInfo").textContent = "getUserMedia OK\n" +
+    "  tracks: " + tracks.length + "\n" +
+    tracks.map((t) => "  - label=" + t.label + "\n    settings=" + JSON.stringify(t.getSettings())).join("\n");
+
+  // pick best supported mime
+  const pick = CANDIDATES.find((m) => { try { return MediaRecorder.isTypeSupported(m); } catch { return false; } }) || "";
+  mediaRecorder = new MediaRecorder(stream, pick ? { mimeType: pick } : undefined);
+  chunks = [];
+  mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(chunks, { type: mediaRecorder.mimeType || pick || "audio/webm" });
+    const url = URL.createObjectURL(blob);
+    const ext = mimeToExt(blob.type);
+    $("blobInfo").textContent =
+      "Blob.type        = " + blob.type + "\n" +
+      "size (bytes)     = " + blob.size + "\n" +
+      "duration (approx)= " + (chunks.length ? "(见播放器进度条)" : "?") + "\n" +
+      "suggested ext    = ." + ext + "\n" +
+      "requested mime   = " + (pick || "(default)");
+    $("player").src = url;
+    const a = $("download");
+    a.href = url;
+    a.download = "voice." + ext;
+    a.style.display = "inline";
+    a.textContent = "⬇ 下载录音 voice." + ext + "（" + blob.type + "）";
+    stream.getTracks().forEach((t) => t.stop());
+  };
+  mediaRecorder.start();
+  $("start").disabled = true;
+  $("stop").disabled = false;
+  $("status").textContent = "录音中… (mime=" + (pick || "default") + ")";
+};
+$("stop").onclick = () => {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+  $("start").disabled = false;
+  $("stop").disabled = true;
+  $("status").textContent = "已停止";
+};
+
+function mimeToExt(m) {
+  if (!m) return "webm";
+  if (m.includes("webm")) return "webm";
+  if (m.includes("ogg")) return "ogg";
+  if (m.includes("mp4") || m.includes("mpeg") && !m.includes("audio/mpeg")) return "m4a";
+  if (m.includes("mpeg")) return "mp3";
+  if (m.includes("wav") || m.includes("wave")) return "wav";
+  return "bin";
+}
+</script>
+</body>
+</html>

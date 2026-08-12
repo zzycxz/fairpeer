@@ -19,7 +19,7 @@ export interface EditorProps {
 // The replacement only has to honor EditorProps. It's lazy-loaded so a heavy
 // editor (~MBs) never lands in the initial bundle — it streams in the first time
 // a code block or tool result is shown. See desktop/README.md ("Editor seam").
-const Impl = lazy(() => import("./editors/HljsCode"));
+const Impl = lazy(() => import("./editors/CodeMirrorCode"));
 
 export function CodeViewer(props: EditorProps) {
   return (

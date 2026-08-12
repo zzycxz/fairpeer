@@ -26,10 +26,13 @@ import (
 
 // FileSnap is one file's state at the moment it was first touched in a turn.
 // Content == nil means the file did not exist then, so a restore deletes it.
+// Perm captures the file's permission bits (e.g. 0755 for scripts) so a restore
+// preserves executability instead of forcing everything to 0644.
 type FileSnap struct {
 	Path     string        `json:"path"`
 	Content  *string       `json:"content"`
 	Encoding *fileenc.Kind `json:"encoding,omitempty"`
+	Perm     *uint32       `json:"perm,omitempty"`
 }
 
 // Checkpoint anchors the pre-edit state of every distinct file touched during one
@@ -65,6 +68,11 @@ type Store struct {
 	seen map[string]bool // paths already snapshotted this turn (dedup)
 }
 
+// maxCheckpointsPerSession caps how many checkpoint files accumulate per
+// session. Without pruning, a long session grows turn-*.json files unboundedly,
+// wasting disk. 50 keeps ample undo history while bounding footprint.
+const maxCheckpointsPerSession = 50
+
 // New returns a store for the given checkpoint dir and workspace root, loading any
 // checkpoints already persisted under dir. A "" dir disables persistence (the
 // store still works in memory for the session).
@@ -72,8 +80,29 @@ func New(dir, root string) *Store {
 	s := &Store{dir: dir, root: root, seen: map[string]bool{}}
 	if dir != "" {
 		s.load()
+		s.prune()
 	}
 	return s
+}
+
+// prune deletes the oldest checkpoint files (and their in-memory entries) once
+// the count exceeds maxCheckpointsPerSession. Called once at load; safe for a
+// pure in-memory store (dir == "") — it's a no-op there.
+func (s *Store) prune() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.done) <= maxCheckpointsPerSession {
+		return
+	}
+	excess := len(s.done) - maxCheckpointsPerSession
+	// done is append-ordered by turn (ascending), so the first `excess` entries
+	// are the oldest. Delete their files and slice them off.
+	for i := 0; i < excess; i++ {
+		if s.dir != "" {
+			_ = os.Remove(filepath.Join(s.dir, fmt.Sprintf("turn-%d.json", s.done[i].Turn)))
+		}
+	}
+	s.done = append([]*Checkpoint{}, s.done[excess:]...)
 }
 
 func (s *Store) load() {
@@ -149,7 +178,7 @@ func (s *Store) Snapshot(ch diff.Change) {
 		old := ch.OldText
 		content = &old
 	}
-	s.cur.Files = append(s.cur.Files, FileSnap{Path: ch.Path, Content: content, Encoding: enc})
+	s.cur.Files = append(s.cur.Files, FileSnap{Path: ch.Path, Content: content, Encoding: enc, Perm: s.detectPerm(ch.Path)})
 	s.persist(s.cur)
 }
 
@@ -164,6 +193,35 @@ func (s *Store) detectEncoding(p string) *fileenc.Kind {
 	}
 	enc, _ := fileenc.Detect(b)
 	return &enc
+}
+
+// restorePerm resolves the permission bits to use when restoring a file: the
+// snapshotted perm if present (preserving executability), else the current
+// file's perm (a rollback of a non-exec edit), else the 0644 default.
+func restorePerm(snap FileSnap) os.FileMode {
+	if snap.Perm != nil && *snap.Perm != 0 {
+		return os.FileMode(*snap.Perm)
+	}
+	if info, err := os.Stat(snap.Path); err == nil {
+		return info.Mode().Perm()
+	}
+	return 0o644
+}
+
+// detectPerm returns the file's permission bits (e.g. 0755 for an executable
+// script) so RestoreCode can preserve them. Returns nil for unreadable/missing
+// files (restore then falls back to 0644).
+func (s *Store) detectPerm(p string) *uint32 {
+	abs, err := safePath(s.root, p)
+	if err != nil {
+		return nil
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return nil
+	}
+	perm := uint32(info.Mode().Perm())
+	return &perm
 }
 
 func (s *Store) persist(c *Checkpoint) {
@@ -280,7 +338,7 @@ func (s *Store) RestoreCode(fromTurn int) (written, deleted []string, err error)
 		} else if current := detectCurrentEncoding(abs); current != nil {
 			enc = *current
 		}
-		if wErr := os.WriteFile(abs, fileenc.Encode(*snap.Content, enc), 0o644); wErr != nil {
+		if wErr := os.WriteFile(abs, fileenc.Encode(*snap.Content, enc), restorePerm(snap)); wErr != nil {
 			err = wErr
 			continue
 		}

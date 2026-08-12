@@ -1,0 +1,29 @@
+# Caddy reverse proxy: auto TLS (Let's Encrypt) + WSS upgrade for /session/ws.
+# WebSocket support is automatic in Caddy's reverse_proxy.
+#
+# Prereq: point signal.example.com A record → this VPS, open 80+443.
+# Caddy obtains and renews the cert on first start.
+
+signal.example.com {
+	# /metrics 含 Prometheus 运维指标，禁止公网访问（防信息泄露）。
+	# 如需抓取，绑内网或在此加 Basic Auth / IP 白名单。
+	@metrics path /metrics
+	respond @metrics 403
+
+	reverse_proxy signal:8080
+
+	# Rate-limit the unauthenticated /pair/* endpoints at the edge (defense in
+	# depth alongside K's own devRL/ipRL). Requires the caddy-ratelimit plugin
+	# OR rely on K's limiter alone for the MVP.
+	#
+	# @pair path /pair/*
+	# rate_limit @pair 100r/m
+
+	log {
+		output file /data/access.log {
+			roll_size 100mb
+			roll_keep 7
+		}
+		format json
+	}
+}

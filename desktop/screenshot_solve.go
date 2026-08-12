@@ -132,7 +132,7 @@ func solveOneShot(ctx context.Context, prov provider.Provider, content any) (str
 }
 
 func webSearchKeyConfigured() bool {
-	return os.Getenv("BRAVE_API_KEY") != "" || os.Getenv("BRAVE_SEARCH_API_KEY") != "" || os.Getenv("EXA_API_KEY") != "" || os.Getenv("LINKUP_API_KEY") != ""
+	return os.Getenv("BRAVE_API_KEY") != "" || os.Getenv("BRAVE_SEARCH_API_KEY") != "" || os.Getenv("EXA_API_KEY") != "" || os.Getenv("LINKUP_API_KEY") != "" || os.Getenv("ANYSEARCH_API_KEY") != ""
 }
 
 func resolveModelEntry(modelRef string) (*config.ProviderEntry, error) {

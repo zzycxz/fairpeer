@@ -178,7 +178,7 @@ func TestRememberBotConnectionRemoteStoresStableScope(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatalf("upsert global connection: %v", err)
 	}
-	if err := app.rememberBotConnectionRemote("feishu-lark", "ou_global", ""); err != nil {
+	if err := app.rememberBotConnectionRemote("feishu-lark", "ou_global", "", "", ""); err != nil {
 		t.Fatalf("remember global remote: %v", err)
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
@@ -197,7 +197,7 @@ func TestRememberBotConnectionRemoteStoresStableScope(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatalf("upsert project connection: %v", err)
 	}
-	if err := app.rememberBotConnectionRemote("weixin-project", "wxid_project", ""); err != nil {
+	if err := app.rememberBotConnectionRemote("weixin-project", "wxid_project", "", "", ""); err != nil {
 		t.Fatalf("remember project remote: %v", err)
 	}
 	cfg = config.LoadForEdit(config.UserConfigPath())
@@ -230,7 +230,7 @@ func TestRememberBotConnectionRemoteStoresSessionPath(t *testing.T) {
 	}
 
 	// 首轮：只拿到 remoteID，sessionPath 为空 → SessionID 应为空。
-	if err := app.rememberBotConnectionRemote("feishu-feishu", "ou_test", ""); err != nil {
+	if err := app.rememberBotConnectionRemote("feishu-feishu", "ou_test", "", "", ""); err != nil {
 		t.Fatalf("remember remote (no session): %v", err)
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
@@ -240,7 +240,7 @@ func TestRememberBotConnectionRemoteStoresSessionPath(t *testing.T) {
 
 	// 次轮：拿到 sessionPath → SessionID 应补填为 "path:xxx"。
 	const path = "/home/u/.config/fairpeer/sessions/bot_abc.jsonl"
-	if err := app.rememberBotConnectionRemote("feishu-feishu", "ou_test", path); err != nil {
+	if err := app.rememberBotConnectionRemote("feishu-feishu", "ou_test", "", "", path); err != nil {
 		t.Fatalf("remember remote (with session): %v", err)
 	}
 	cfg = config.LoadForEdit(config.UserConfigPath())
@@ -249,7 +249,7 @@ func TestRememberBotConnectionRemoteStoresSessionPath(t *testing.T) {
 	}
 
 	// 第三轮：再次带不同 sessionPath → 已有 SessionID 不应被覆盖（保持首次话题）。
-	if err := app.rememberBotConnectionRemote("feishu-feishu", "ou_test", "/other.jsonl"); err != nil {
+	if err := app.rememberBotConnectionRemote("feishu-feishu", "ou_test", "", "", "/other.jsonl"); err != nil {
 		t.Fatalf("remember remote (repeat): %v", err)
 	}
 	cfg = config.LoadForEdit(config.UserConfigPath())

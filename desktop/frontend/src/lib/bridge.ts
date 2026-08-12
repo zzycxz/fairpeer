@@ -29,9 +29,13 @@ import type {
   FilePreview,
   HistoryMessage,
   JobView,
+  MCPRegistryEntry,
+  MCPRegistryView,
   MCPServerInput,
   MemoryView,
   Meta,
+  MobileModelInfo,
+  MobileSessionInfo,
   ModelInfo,
   ProfileView,
   NetworkView,
@@ -222,6 +226,8 @@ export interface AppBindings {
   TriggerDistill(): Promise<DreamRunView>;
   SetMCPServerEnabled(name: string, enabled: boolean): Promise<void>;
   SetMCPServerTier(name: string, tier: string): Promise<void>;
+  MCPRegistrySearch(query: string): Promise<MCPRegistryView>;
+  MCPRegistryResolve(name: string): Promise<MCPRegistryEntry>;
   SlashArgs(input: string): Promise<SlashArgsResult>;
   ListDir(rel: string): Promise<DirEntry[]>;
   SearchFileRefs(query: string): Promise<DirEntry[]>;
@@ -241,6 +247,28 @@ export interface AppBindings {
   SaveExportFile(path: string, payload: string, base64Encoded: boolean): Promise<void>;
   AttachDropped(path: string): Promise<DroppedItem>;
   AttachmentDataURL(path: string): Promise<string>;
+  // Voice input (mic button). VoiceModelConfigured is a cheap poll (reads an
+  // in-memory field) so the Composer can render the mic enabled/disabled each
+  // render. TranscribeAudio sends a base64 wav data URL → returns transcript.
+  VoiceModelConfigured(): Promise<boolean>;
+  TranscribeAudio(audioDataURL: string, language: string): Promise<string>;
+  // Mobile bridge (mobilebridge_app.go) — wailsjs generates these from the Go
+  // methods; AppBindings must declare them so _CheckGenToApp stays satisfied.
+  // NOTE: MobileBridgeStartPairing's Go signature returns (code, qrURL, err);
+  // wailsjs collapses it to Promise<string>. Matching that here keeps tsc happy;
+  // the runtime shape is a separate (pre-existing) concern for the mobile bridge.
+  MobileBridgeConfirm(pairID: string): Promise<void>;
+  MobileBridgeReject(pairID: string): Promise<void>;
+  MobileBridgeStartPairing(): Promise<string>;
+  MobileBridgeStatus(): Promise<Record<string, any>>;
+  MobileBridgeUnpair(deviceCode: string): Promise<void>;
+  // Mobile-facing readouts (mobilebridge_app.go + tabs.go). ModelsForMobile /
+  // SessionListForMobile return the trimmed mobile payloads above, NOT the
+  // app-wide ModelInfo/SessionMeta. ActiveTabID feeds the current tab id to the
+  // mobile companion.
+  ActiveTabID(): Promise<string>;
+  ModelsForMobile(): Promise<MobileModelInfo[]>;
+  SessionListForMobile(): Promise<MobileSessionInfo[]>;
   Models(): Promise<ModelInfo[]>;
   SetModel(name: string): Promise<void>;
   ModelsForTab(tabID: string): Promise<ModelInfo[]>;
@@ -345,7 +373,7 @@ export interface AppBindings {
   // Multi-vendor onboarding (provider_templates.go + app.go).
   GetProviderTemplates(): Promise<ProviderTemplate[]>;
   ProbeVendorKey(baseURL: string, apiKey: string): Promise<void>;
-  SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string, visionModel: string, fastModel: string): Promise<void>;
+  SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string, visionModel: string, fastModel: string, voiceModel: string): Promise<void>;
   // Provider-template registry (registry.go).
   GetRegistryStatus(): Promise<RegistryStatus>;
   RefreshRegistry(): Promise<void>;
@@ -830,8 +858,8 @@ function makeMockApp(): AppBindings {
   let pendingAskPreview = false;
   let pendingApprovalPreview = false;
   const globalWorkspaceRoot = "~/Library/Application Support/fairpeer/global-workspace";
-  let cwd = freshMock ? globalWorkspaceRoot : "~/projects/joyquant-db"; // mutable so PickWorkspace is visible in dev
-  let workspaces = freshMock ? [] : ["~/projects/joyquant-db", "~/projects/joyquant-sys", "~/projects/fairpeer", "~/projects/blade"];
+  let cwd = freshMock ? globalWorkspaceRoot : "~/projects/web-app"; // mutable so PickWorkspace is visible in dev
+  let workspaces = freshMock ? [] : ["~/projects/web-app", "~/projects/api-server", "~/projects/docs", "~/projects/mobile"];
   let mockEffort = "auto";
   // In-memory RAG state for browser dev. Seeded with one file mid-extraction so
   // the panel shows a live progress bar + ETA outside the Wails shell.
@@ -940,7 +968,7 @@ function makeMockApp(): AppBindings {
     { name: "init", description: "Scaffold a project memory doc (fairpeer.md) for this repo", scope: "builtin", runAs: "inline", enabled: true },
   ];
   let capSkillRoots: SkillRootView[] = [
-    { dir: "~/projects/fairpeer/.fairpeer/skills", scope: "project", priority: 1, status: "missing", configured: false, removable: true, skills: 0 },
+    { dir: "~/projects/docs/.fairpeer/skills", scope: "project", priority: 1, status: "missing", configured: false, removable: true, skills: 0 },
     {
       dir: "~/my-skills",
       scope: "custom",
@@ -999,7 +1027,7 @@ function makeMockApp(): AppBindings {
       current: false,
       open: false,
       scope: "project",
-      workspaceRoot: "~/projects/joyquant-db",
+      workspaceRoot: "~/projects/web-app",
       topicId: "topic_dev_standard",
       topicTitle: t("mock.trashDevStandardTitle"),
     },
@@ -1015,7 +1043,7 @@ function makeMockApp(): AppBindings {
       current: false,
       open: false,
       scope: "project",
-      workspaceRoot: "~/projects/joyquant-sys",
+      workspaceRoot: "~/projects/api-server",
       topicId: "topic_p3a_pd",
       topicTitle: t("mock.trashP3aTitle"),
     },
@@ -1106,6 +1134,7 @@ function makeMockApp(): AppBindings {
       screenshotHotkey: "Ctrl+Shift+Alt+W",
       screenshotPrompt: "",
       screenshotVlmModel: "",
+      voiceModel: "",
       estopHotkey: "Ctrl+Shift+Pause",
       emailAccounts: [],
       allowHeadlessEmail: false,
@@ -1218,6 +1247,7 @@ function makeMockApp(): AppBindings {
       braveKeySet: false,
       exaKeySet: false,
       linkupKeySet: false,
+      anysearchKeySet: false,
     },
     desktopLanguage: "",
     desktopTheme: "light",
@@ -1227,7 +1257,7 @@ function makeMockApp(): AppBindings {
     checkUpdates: true,
     telemetry: true,
     expandThinking: false,
-    configPath: "~/projects/fairpeer/fairpeer.toml",
+    configPath: "~/projects/docs/fairpeer.toml",
     providerKinds: ["openai"],
     autoApproveTools: false,
     bypass: false,
@@ -1239,30 +1269,30 @@ function makeMockApp(): AppBindings {
   const mockNow = Date.now();
   const mockProjectTree: ProjectNode[] = freshMock ? [] : [
     {
-      key: "project_~/projects/joyquant-db",
+      key: "project_~/projects/web-app",
       kind: "project",
       label: t("mock.projectJoyquantDb"),
-      root: "~/projects/joyquant-db",
+      root: "~/projects/web-app",
       projectColor: "blue",
       children: [
-        { key: "topic_dev_standard", kind: "topic", label: `● ${t("mock.topicDevStandard")}`, root: "~/projects/joyquant-db", topicId: "topic_dev_standard", projectColor: "blue", turns: 18, lastActivityAt: mockNow - 8 * 60_000, open: true, running: runningMock },
-        { key: "topic_db_maint", kind: "topic", label: t("mock.topicDbMaint"), root: "~/projects/joyquant-db", topicId: "topic_db_maint", projectColor: "blue", turns: 7, lastActivityAt: mockNow - 2 * 60 * 60_000 },
-        { key: "topic_env", kind: "topic", label: t("mock.topicEnv"), root: "~/projects/joyquant-db", topicId: "topic_env", projectColor: "blue", turns: 3, lastActivityAt: mockNow - 26 * 60 * 60_000 },
+        { key: "topic_dev_standard", kind: "topic", label: `● ${t("mock.topicDevStandard")}`, root: "~/projects/web-app", topicId: "topic_dev_standard", projectColor: "blue", turns: 18, lastActivityAt: mockNow - 8 * 60_000, open: true, running: runningMock },
+        { key: "topic_db_maint", kind: "topic", label: t("mock.topicDbMaint"), root: "~/projects/web-app", topicId: "topic_db_maint", projectColor: "blue", turns: 7, lastActivityAt: mockNow - 2 * 60 * 60_000 },
+        { key: "topic_env", kind: "topic", label: t("mock.topicEnv"), root: "~/projects/web-app", topicId: "topic_env", projectColor: "blue", turns: 3, lastActivityAt: mockNow - 26 * 60 * 60_000 },
       ],
     },
     {
-      key: "project_~/projects/joyquant-sys",
+      key: "project_~/projects/api-server",
       kind: "project",
       label: t("mock.projectJoyquantSys"),
-      root: "~/projects/joyquant-sys",
+      root: "~/projects/api-server",
       projectColor: "purple",
       children: [
-        { key: "topic_p3b_pd", kind: "topic", label: `● ${t("mock.topicP3b")}`, root: "~/projects/joyquant-sys", topicId: "topic_p3b_pd", projectColor: "purple", turns: 11, lastActivityAt: mockNow - 3 * 24 * 60 * 60_000, status: runningMock ? "streaming" : undefined },
-        { key: "topic_p3a_pd", kind: "topic", label: t("mock.topicP3a"), root: "~/projects/joyquant-sys", topicId: "topic_p3a_pd", projectColor: "purple", turns: 9, lastActivityAt: mockNow - 4 * 24 * 60 * 60_000, status: runningMock ? "thinking" : undefined },
-        { key: "topic_hotfix", kind: "topic", label: t("mock.topicHotfix"), root: "~/projects/joyquant-sys", topicId: "topic_hotfix", projectColor: "purple", turns: 4, lastActivityAt: mockNow - 5 * 24 * 60 * 60_000, status: runningMock ? "thinking" : undefined },
-        { key: "topic_sys_coord", kind: "topic", label: t("mock.topicSysCoord"), root: "~/projects/joyquant-sys", topicId: "topic_sys_coord", projectColor: "purple", turns: 14, lastActivityAt: mockNow - 6 * 24 * 60 * 60_000, status: runningMock ? "waiting_confirmation" : undefined },
-        { key: "topic_sys_standard", kind: "topic", label: t("mock.topicSysStandard"), root: "~/projects/joyquant-sys", topicId: "topic_sys_standard", projectColor: "purple", turns: 6, lastActivityAt: mockNow - 7 * 24 * 60 * 60_000, status: "paused" },
-        { key: "topic_sys_exception", kind: "topic", label: t("mock.topicSysException"), root: "~/projects/joyquant-sys", topicId: "topic_sys_exception", projectColor: "purple", turns: 2, lastActivityAt: mockNow - 8 * 24 * 60 * 60_000, status: "error" },
+        { key: "topic_p3b_pd", kind: "topic", label: `● ${t("mock.topicP3b")}`, root: "~/projects/api-server", topicId: "topic_p3b_pd", projectColor: "purple", turns: 11, lastActivityAt: mockNow - 3 * 24 * 60 * 60_000, status: runningMock ? "streaming" : undefined },
+        { key: "topic_p3a_pd", kind: "topic", label: t("mock.topicP3a"), root: "~/projects/api-server", topicId: "topic_p3a_pd", projectColor: "purple", turns: 9, lastActivityAt: mockNow - 4 * 24 * 60 * 60_000, status: runningMock ? "thinking" : undefined },
+        { key: "topic_hotfix", kind: "topic", label: t("mock.topicHotfix"), root: "~/projects/api-server", topicId: "topic_hotfix", projectColor: "purple", turns: 4, lastActivityAt: mockNow - 5 * 24 * 60 * 60_000, status: runningMock ? "thinking" : undefined },
+        { key: "topic_sys_coord", kind: "topic", label: t("mock.topicSysCoord"), root: "~/projects/api-server", topicId: "topic_sys_coord", projectColor: "purple", turns: 14, lastActivityAt: mockNow - 6 * 24 * 60 * 60_000, status: runningMock ? "waiting_confirmation" : undefined },
+        { key: "topic_sys_standard", kind: "topic", label: t("mock.topicSysStandard"), root: "~/projects/api-server", topicId: "topic_sys_standard", projectColor: "purple", turns: 6, lastActivityAt: mockNow - 7 * 24 * 60 * 60_000, status: "paused" },
+        { key: "topic_sys_exception", kind: "topic", label: t("mock.topicSysException"), root: "~/projects/api-server", topicId: "topic_sys_exception", projectColor: "purple", turns: 2, lastActivityAt: mockNow - 8 * 24 * 60 * 60_000, status: "error" },
       ],
     },
     {
@@ -1390,7 +1420,7 @@ function makeMockApp(): AppBindings {
         ];
       case "topic_sys_coord":
         return [
-          { role: "user", content: "准备执行 joyquant-sys 的同步脚本，但需要我确认后再运行。" },
+          { role: "user", content: "准备执行 api-server 的同步脚本，但需要我确认后再运行。" },
           { role: "assistant", content: "", reasoning: "这个动作会运行脚本并可能刷新本地缓存，所以需要先等用户确认。" },
         ];
       case "topic_sys_standard":
@@ -1451,7 +1481,7 @@ function makeMockApp(): AppBindings {
             approval: {
               id: "mock-sys-confirm",
               tool: "bash",
-              subject: "npm run sync:joyquant-sys\n\n该命令会同步 SYS 项目配置并刷新本地缓存。",
+              subject: "npm run sync:api-server\n\n该命令会同步 SYS 项目配置并刷新本地缓存。",
             },
           });
         }
@@ -1493,10 +1523,10 @@ function makeMockApp(): AppBindings {
     },
   ] : [
     {
-      id: "tab_joyquant_db",
+      id: "tab_web_app",
       scope: "project",
-      workspaceRoot: "~/projects/joyquant-db",
-      workspaceName: "joyquant-db",
+      workspaceRoot: "~/projects/web-app",
+      workspaceName: "web-app",
       topicId: "topic_dev_standard",
       topicTitle: t("mock.trashDevStandardTitle"),
       projectColor: "blue",
@@ -1507,13 +1537,13 @@ function makeMockApp(): AppBindings {
       collaborationMode: "normal",
       toolApprovalMode: "ask",
       active: true,
-      cwd: "~/projects/joyquant-db",
+      cwd: "~/projects/web-app",
     },
     {
-      id: "tab_joyquant_sys",
+      id: "tab_api_server",
       scope: "project",
-      workspaceRoot: "~/projects/joyquant-sys",
-      workspaceName: "joyquant-sys",
+      workspaceRoot: "~/projects/api-server",
+      workspaceName: "api-server",
       topicId: "topic_p3b_pd",
       topicTitle: "p3b P&D",
       projectColor: "purple",
@@ -1524,7 +1554,7 @@ function makeMockApp(): AppBindings {
       collaborationMode: "normal",
       toolApprovalMode: "ask",
       active: false,
-      cwd: "~/projects/joyquant-sys",
+      cwd: "~/projects/api-server",
     },
     {
       id: "tab_global",
@@ -1540,7 +1570,7 @@ function makeMockApp(): AppBindings {
       collaborationMode: "normal",
       toolApprovalMode: "ask",
       active: false,
-      cwd: "~/projects/joyquant-db",
+      cwd: "~/projects/web-app",
     },
   ];
   const mockModelCatalog = [
@@ -2100,7 +2130,7 @@ function makeMockApp(): AppBindings {
     async PickWorkspace() {
       // Browser dev has no native dialog; simulate picking a folder and re-root so
       // the topbar folder chip visibly changes.
-      return mockSwitchWorkspace(cwd.endsWith("another-project") ? "~/projects/fairpeer" : "~/projects/another-project");
+      return mockSwitchWorkspace(cwd.endsWith("another-project") ? "~/projects/docs" : "~/projects/another-project");
     },
     async PickImportFolder() {
       return "~/Documents/my-import-folder";
@@ -2307,6 +2337,17 @@ function makeMockApp(): AppBindings {
         { source: "clawhub", name: "code-review", slug: "code-review", description: "Code review skill", installs: 42, contentUrl: "https://example.com/SKILL.md", installRef: "https://example.com/SKILL.md" },
         { source: "builtin", name: "pdf", slug: "pdf", description: "PDF tools", installs: 0, contentUrl: "", installRef: "" },
       ];
+    },
+    async MCPRegistrySearch(_query: string): Promise<MCPRegistryView> {
+      return {
+        servers: [
+          { name: "io.example/mock", suggestedName: "mock", title: "Mock Server", description: "Mock MCP Registry entry", installable: true, transport: "stdio", command: "npx", args: ["-y", "@example/mock-mcp"] },
+        ],
+        cached: false,
+      };
+    },
+    async MCPRegistryResolve(name: string): Promise<MCPRegistryEntry> {
+      return { name, suggestedName: name, installable: true, transport: "stdio", command: "npx", args: ["-y", "@example/mock-mcp"] };
     },
     async SkillMarketInstall(_installRef: string, _name: string, _scope: string, _apply: boolean): Promise<string> {
       return "Installed (dev mock)";
@@ -2540,6 +2581,23 @@ function makeMockApp(): AppBindings {
     async AttachmentDataURL(_path: string) {
       return "data:image/png;base64,iVBORw0KGgo=";
     },
+    async VoiceModelConfigured() {
+      return true;
+    },
+    async TranscribeAudio(_audioDataURL: string, _language: string) {
+      await delay(500);
+      return "（语音转写结果 — 开发模式 mock）";
+    },
+    async MobileBridgeConfirm(_pairID: string) { /* mock: accept pairing is a no-op in the browser shell */ },
+    async MobileBridgeReject(_pairID: string) { /* mock: reject pairing is a no-op */ },
+    async MobileBridgeStartPairing() { return ""; },
+    async MobileBridgeStatus() { return { paired: false, devices: [] }; },
+    async MobileBridgeUnpair(_deviceCode: string) { /* mock: unpair is a no-op */ },
+    // Mobile-facing readouts — browser mock returns minimal data; the real
+    // payloads come from mobilebridge_app.go in the Wails build.
+    async ActiveTabID() { return mockTabs.find((t) => t.active)?.id ?? ""; },
+    async ModelsForMobile() { return []; },
+    async SessionListForMobile() { return []; },
         async Models() {
           const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];
           const current = mockTabModelRef(active);
@@ -2978,7 +3036,7 @@ function makeMockApp(): AppBindings {
     async NeedsOnboarding() {
       return !settings.providers.some((p) => p.keySet);
     },
-    async SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string, _visionModel: string, _fastModel: string) {
+    async SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string, _visionModel: string, _fastModel: string, _voiceModel: string) {
       if (!apiKey.trim()) throw new Error("key is required");
       await delay(300);
       // Mock: add the provider to settings so NeedsOnboarding flips to false.

@@ -88,6 +88,7 @@ type wireUsage struct {
 	TotalTokens      int                   `json:"totalTokens"`
 	CacheHitTokens   int                   `json:"cacheHitTokens"`
 	CacheMissTokens  int                   `json:"cacheMissTokens"`
+	CacheWriteTokens int                   `json:"cacheWriteTokens"`
 	ReasoningTokens  int                   `json:"reasoningTokens,omitempty"`
 	CacheDiagnostics *wireCacheDiagnostics `json:"cacheDiagnostics,omitempty"`
 	// Session-cumulative cache tokens — the status line shows the aggregate
@@ -183,7 +184,7 @@ func toWire(e event.Event) wireEvent {
 			w.Usage = &wireUsage{
 				PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens,
 				TotalTokens: u.TotalTokens, CacheHitTokens: u.CacheHitTokens,
-				CacheMissTokens: u.CacheMissTokens, ReasoningTokens: u.ReasoningTokens,
+				CacheMissTokens: u.CacheMissTokens, CacheWriteTokens: u.CacheWriteTokens, ReasoningTokens: u.ReasoningTokens,
 				SessionCacheHitTokens: e.SessionHit, SessionCacheMissTokens: e.SessionMiss,
 			}
 			if e.CacheDiagnostics != nil {

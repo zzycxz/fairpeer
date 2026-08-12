@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -39,10 +41,13 @@ func NewServer(cfg Config, audit *Audit) *Server {
 }
 
 // realIP honors X-Forwarded-For from the reverse proxy (Caddy). Without this,
-// rate limiting would see only the proxy's internal IP and be useless. K
-// trusts XFF only because it sits behind Caddy (PROTOCOL §10.5 / SIGNAL_SPEC §13.5).
+// rate limiting would see only the proxy's internal IP and be useless.
+//
+// SECURITY (SIGNAL_SPEC §13.5): XFF is ONLY trusted when the request comes
+// from a trusted proxy (127.0.0.1 / ::1 / docker 172.x). If K's port were
+// exposed directly, a client could forge XFF to bypass IP rate limiting.
 func realIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" && isTrustedProxy(r.RemoteAddr) {
 		for i := 0; i < len(xff); i++ {
 			if xff[i] == ',' {
 				return xff[:i]
@@ -57,6 +62,22 @@ func realIP(r *http.Request) string {
 		}
 	}
 	return host
+}
+
+// isTrustedProxy returns true if the direct peer is localhost or a Docker
+// internal address (172.16-31.x / 10.x / 192.168.x). Caddy runs alongside K
+// in docker-compose, so the upstream is always one of these.
+func isTrustedProxy(remoteAddr string) bool {
+	host := remoteAddr
+	for i := 0; i < len(host); i++ {
+		if host[i] == ':' {
+			host = host[:i]
+			break
+		}
+	}
+	return host == "127.0.0.1" || host == "::1" ||
+		strings.HasPrefix(host, "172.") || strings.HasPrefix(host, "10.") ||
+		strings.HasPrefix(host, "192.168.")
 }
 
 // --- /pair/register ---
@@ -226,7 +247,14 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 	}
 	pc := &PeerConn{DevID: devID, conn: c}
 	pc.touch()
-	s.sessions.Register(pc)
+	if !s.sessions.Register(pc) {
+		// 达 MaxPeers 上限：拒绝新连接（§11.2⑤）。
+		s.metrics.Error("4513")
+		_ = c.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(1013, "capacity_full"))
+		_ = c.Close()
+		return
+	}
 	s.audit.WSConnect(devID, realIP(r))
 	s.metrics.WSConnect()
 	defer func() {
@@ -244,6 +272,13 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 		if len(raw) > s.cfg.Session.WSMaxMsgBytes {
 			continue // oversize: drop silently, don't kill the link
 		}
+		if !pc.allowMsg(s.cfg.Session.WSMsgPerSecPerDev) {
+			// 超速：关闭连接（§6 per-dev 速率限制）
+			s.metrics.Error("4404")
+			_ = c.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(CloseRateLimited, "rate_limited"))
+			return
+		}
 		pc.touch()
 		msgType, _, rerr := s.sessions.Route(pc, raw)
 		if rerr != nil {
@@ -257,11 +292,20 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 // --- /healthz ---
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
 	writeJSON(w, 200, map[string]any{
-		"ok":     true,
-		"online": s.sessions.OnlineCount(),
-		"uptime": int(time.Since(s.startup).Seconds()),
+		"ok":        true,
+		"online":    s.sessions.OnlineCount(),
+		"uptime":    int(time.Since(s.startup).Seconds()),
+		"goroutines": runtime.NumGoroutine(),
+		"heap_mb":   m.HeapAlloc / (1024 * 1024),
 	})
+}
+
+// BroadcastShutdown 给所有在线 WS 客户端发 server_shutdown（§13.2）。
+func (s *Server) BroadcastShutdown(retryAfter int) {
+	s.sessions.BroadcastShutdown(retryAfter)
 }
 
 // Routes returns the HTTP mux.

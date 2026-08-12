@@ -41,6 +41,7 @@ const (
 	refResource refKind = iota // an MCP resource: @<server>:<uri>
 	refFile                    // a local file or directory: @<path>
 	refImage                   // a local image attachment: @.fairpeer/attachments/<file>
+	refAudio                   // a local audio attachment: @.fairpeer/attachments/<file>
 )
 
 // ref is a resolved @reference found in a submitted line.
@@ -84,6 +85,9 @@ func classifyRef(token string, known map[string]bool, exists func(string) bool) 
 		if isImageAttachmentRef(token) {
 			return ref{kind: refImage, path: token, raw: token}, true
 		}
+		if isAudioAttachmentRef(token) {
+			return ref{kind: refAudio, path: token, raw: token}, true
+		}
 		return ref{kind: refFile, path: token, raw: token}, true
 	}
 	if exists(token) {
@@ -99,6 +103,18 @@ func isAttachmentRef(token string) bool {
 func isImageAttachmentRef(token string) bool {
 	switch strings.ToLower(filepath.Ext(token)) {
 	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".tif", ".tiff":
+		return true
+	}
+	return false
+}
+
+// isAudioAttachmentRef recognizes audio attachment extensions. Audio refs follow
+// the same single-track design as images: ResolveRefs leaves a text <audio
+// path="..."> reference and the agent calls audio_understand to transcribe it,
+// so audio bytes never reach the main model directly.
+func isAudioAttachmentRef(token string) bool {
+	switch strings.ToLower(filepath.Ext(token)) {
+	case ".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".webm", ".opus":
 		return true
 	}
 	return false
@@ -323,6 +339,15 @@ func (c *Controller) ResolveRefs(ctx context.Context, line string) (block any, e
 			// "[Image: source: path]" projection.
 			appendRefBlock(&b, "image", `path="`+r.path+`"`,
 				"用户上传的图片。调用 image_understand 工具并传入此 path 可获取图片内容描述。")
+		case refAudio:
+			// Single-track audio path (mirrors refImage): never inline audio
+			// bytes into the main-model request — most models can't handle
+			// audio content parts. Instead leave a text <audio path="...">
+			// reference; the main model sees it and calls audio_understand to
+			// obtain the audio's transcript as text, exactly like it does for
+			// images. Keeps the main-model request free of audio parts.
+			appendRefBlock(&b, "audio", `path="`+r.path+`"`,
+				"用户上传的音频。调用 audio_understand 工具并传入此 path 可获取音频的转写文本。")
 		}
 	}
 	// Single-track note: imageParts is always empty now (the refImage case above

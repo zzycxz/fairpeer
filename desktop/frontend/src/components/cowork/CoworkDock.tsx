@@ -208,7 +208,7 @@ function DefaultDock({
   const [tab, setTab] = useState<DefaultTab>("today");
 
   return (
-    <aside className="cowork-dock" aria-label={t("coworkDock.label") || "办公概览"}>
+    <aside className="cowork-dock" aria-label={t("coworkDock.label")}>
       <div className="workbench-dock__tools">
         <div className="workbench-dock__tabs" role="tablist">
           <button
@@ -217,10 +217,10 @@ function DefaultDock({
             aria-selected={tab === "today"}
             className={"workbench-dock__tab" + (tab === "today" ? " workbench-dock__tab--active" : "")}
             onClick={() => setTab("today")}
-            title={t("coworkDock.today") || "今日"}
+            title={t("coworkDock.today")}
           >
             <CalendarDays size={13} />
-            <span className="workbench-dock__tab-label">{t("coworkDock.today") || "今日"}</span>
+            <span className="workbench-dock__tab-label">{t("coworkDock.today")}</span>
           </button>
           <button
             type="button"
@@ -228,10 +228,10 @@ function DefaultDock({
             aria-selected={tab === "mail"}
             className={"workbench-dock__tab" + (tab === "mail" ? " workbench-dock__tab--active" : "")}
             onClick={() => setTab("mail")}
-            title={t("coworkDock.mail") || "邮件"}
+            title={t("coworkDock.mail")}
           >
             <Mail size={13} />
-            <span className="workbench-dock__tab-label">{t("coworkDock.mail") || "邮件"}</span>
+            <span className="workbench-dock__tab-label">{t("coworkDock.mail")}</span>
           </button>
           <button
             type="button"
@@ -239,10 +239,10 @@ function DefaultDock({
             aria-selected={tab === "files"}
             className={"workbench-dock__tab" + (tab === "files" ? " workbench-dock__tab--active" : "")}
             onClick={() => setTab("files")}
-            title={t("coworkDock.files") || "文件"}
+            title={t("coworkDock.files")}
           >
             <FileText size={13} />
-            <span className="workbench-dock__tab-label">{t("coworkDock.files") || "文件"}</span>
+            <span className="workbench-dock__tab-label">{t("coworkDock.files")}</span>
           </button>
           <button
             type="button"
@@ -250,10 +250,10 @@ function DefaultDock({
             aria-selected={tab === "overview"}
             className={"workbench-dock__tab" + (tab === "overview" ? " workbench-dock__tab--active" : "")}
             onClick={() => setTab("overview")}
-            title={t("coworkDock.overview") || "概览"}
+            title={t("coworkDock.overview")}
           >
             <Activity size={13} />
-            <span className="workbench-dock__tab-label">{t("coworkDock.overview") || "概览"}</span>
+            <span className="workbench-dock__tab-label">{t("coworkDock.overview")}</span>
           </button>
         </div>
       </div>
@@ -276,9 +276,9 @@ function DefaultDock({
           ) : (
             <div className="cowork-dock__empty-state">
               <FileText size={22} />
-              <p>{t("coworkDock.noWorkspace") || "当前会话未关联工作区文件夹"}</p>
+              <p>{t("coworkDock.noWorkspace")}</p>
               <p className="cowork-dock__empty-hint">
-                {t("coworkDock.noWorkspaceHint") || "新建会话时选择一个项目文件夹即可在此浏览文件"}
+                {t("coworkDock.noWorkspaceHint")}
               </p>
             </div>
           ))}
@@ -346,7 +346,7 @@ function TodayView() {
     Promise.all([
       (app as unknown as { ProbeMailAccount: (name: string) => Promise<MailProbeResult> })
         .ProbeMailAccount("")
-        .catch(() => ({ ok: false, status: "error", message: "Wails调用异常" } as MailProbeResult)),
+        .catch(() => ({ ok: false, status: "error", message: t("cowork.wailsError") } as MailProbeResult)),
       (app as unknown as { InboxPreview?: (mailbox: string, n: number) => Promise<InboxItem[]> })
         .InboxPreview?.("INBOX", 10)
         .catch(() => [] as InboxItem[]) ?? Promise.resolve([] as InboxItem[]),
@@ -438,18 +438,18 @@ function TodayView() {
         <div className="cowork-today__briefing">
           <div className="cowork-today__briefing-head" style={{ display: "flex", alignItems: "center", justifyContent: "flex-start" }}>
             <Sparkles size={14} style={{ color: "var(--accent)", marginRight: "4px" }} />
-            <span style={{ fontWeight: 600 }}>今日日程与任务</span>
+            <span style={{ fontWeight: 600 }}>{t("cowork.todaySchedule")}</span>
           </div>
           <div className="cowork-today__briefing-body" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            <div>1. <CalendarClock size={13} style={{ color: "#8b949e", margin: "0 2px", verticalAlign: "middle" }} />今日安排核心日程 {todayItems.length} 项。</div>
-            <div>2. <Mail size={13} style={{ color: "#58a6ff", margin: "0 2px", verticalAlign: "middle" }} />待处理未读件 {unreadCount} 封。</div>
-            <div>3. ☕ 当前时段暂无紧迫议程。</div>
-            <div>4. 🤖 请点击下方按钮，获取昨日邮件工作总结。</div>
+            <div>1. <CalendarClock size={13} style={{ color: "#8b949e", margin: "0 2px", verticalAlign: "middle" }} />{t("cowork.todayItems", { count: String(todayItems.length) })}</div>
+            <div>2. <Mail size={13} style={{ color: "#58a6ff", margin: "0 2px", verticalAlign: "middle" }} />{t("cowork.unreadMails", { count: String(unreadCount) })}</div>
+            <div>3. ☕ {t("cowork.noUrgenda")}</div>
+            <div>4. 🤖 {t("cowork.clickForSummary")}</div>
             {todayHoliday && (
-              <div style={{ color: "#f85149", fontWeight: 600 }}>🎉 今天是「{todayHoliday.title}」假期，祝您节日愉快！</div>
+              <div style={{ color: "#f85149", fontWeight: 600 }}>🎉 {t("cowork.holidayGreeting", { name: todayHoliday.title })}</div>
             )}
             {!todayHoliday && nextHoliday && daysToNext <= 14 && (
-              <div style={{ color: "#f0883e" }}>📅 距「{nextHoliday.title}」还有 {daysToNext} 天。</div>
+              <div style={{ color: "#f0883e" }}>📅 {t("cowork.daysToHoliday", { name: nextHoliday.title, count: String(daysToNext) })}</div>
             )}
           </div>
           <div className="cowork-today__briefing-actions">
@@ -461,7 +461,7 @@ function TodayView() {
                 window.dispatchEvent(new CustomEvent("cowork:insert-text", { detail: prompt }));
               }}
             >
-              <Sparkles size={13} /> 生成深度决策指引
+              <Sparkles size={13} /> {t("cowork.genDeepGuide")}
             </button>
           </div>
         </div>
@@ -469,11 +469,11 @@ function TodayView() {
       <section className="cowork-today__section" style={{ marginTop: "20px", paddingBottom: "12px" }}>
         <h4 className="cowork-today__heading">
           <CalendarClock size={13} />
-          {t("coworkDock.todayTodo") || "今日待办"}
+          {t("coworkDock.todayTodo")}
           <span className="cowork-today__heading-count">{todayItems.length}</span>
         </h4>
         {todayItems.length === 0 ? (
-          <div className="cowork-today__empty">{t("coworkDock.noTodo") || "今日暂无待办"}</div>
+          <div className="cowork-today__empty">{t("coworkDock.noTodo")}</div>
         ) : (
           <ul className="cowork-today__list">
             {todayItems.map((it) => {
@@ -486,19 +486,19 @@ function TodayView() {
                   className="cowork-today__row"
                   style={{ opacity: past ? 0.55 : 1 }}
                 >
-                  <span className="cowork-today__time">{it.allDay ? "全天" : formatEventTime(it.time.toISOString())}</span>
+                  <span className="cowork-today__time">{it.allDay ? t("cal.allDay") : formatEventTime(it.time.toISOString())}</span>
                   <span className="cowork-today__dot" style={{ background: it.color }} />
                   <span className="cowork-today__text" title={it.title + (it.location ? ` @ ${it.location}` : "")}>
                     {it.title}
                   </span>
                   {/* kind badge: 📅 event vs ⚡ task, so the two underlying systems
                       are still distinguishable inside the unified list. */}
-                  <span className="cowork-today__kind" title={it.kind === "event" ? "日历事件" : "定时任务"}>
+                  <span className="cowork-today__kind" title={it.kind === "event" ? t("cowork.calendarEvent") : t("cowork.scheduledTask")}>
                     {it.kind === "event" ? "📅" : "⚡"}
                   </span>
                   {/* output-mode hint when the item pushes to IM/email */}
-                  {it.outputMode === "im" && <span className="cowork-today__out" title="推送到 IM">💬</span>}
-                  {it.outputMode === "email" && <span className="cowork-today__out" title="推送到邮件">✉️</span>}
+                  {it.outputMode === "im" && <span className="cowork-today__out" title={t("cowork.pushToIM")}>💬</span>}
+                  {it.outputMode === "email" && <span className="cowork-today__out" title={t("cowork.pushToEmail")}>✉️</span>}
                 </li>
               );
             })}
@@ -524,17 +524,17 @@ function TodayView() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderBottom: "1px solid var(--border-soft)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <Mail size={14} style={{ color: "var(--fg-dim)" }} />
-              <span style={{ fontSize: "13px", fontWeight: 500 }}>邮箱</span>
+              <span style={{ fontSize: "13px", fontWeight: 500 }}>{t("cowork.mailbox")}</span>
               <span className={"mail-status-dot mail-status-dot--" + (loading ? "warning" : (mailOk ? "ok" : "error"))} style={{ marginLeft: "4px" }} />
               <span style={{ fontSize: "12px", color: "var(--fg-dim)", maxWidth: "80px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {loading ? "同步中..." : (mailOk ? "已连接" : (probe?.message || "连接失败"))}
+                {loading ? t("cowork.syncing") : (mailOk ? t("cowork.connected") : (probe?.message))}
               </span>
             </div>
             <div>
               {unreadCount > 0 ? (
-                <span style={{ color: "#e84e3c", fontWeight: 600, fontSize: "12px" }}>{unreadCount}封未读</span>
+                <span style={{ color: "#e84e3c", fontWeight: 600, fontSize: "12px" }}>{t("cowork.nUnread", { count: String(unreadCount) })}</span>
               ) : (
-                <span style={{ color: "var(--fg-faint)", fontSize: "12px" }}>0封未读</span>
+                <span style={{ color: "var(--fg-faint)", fontSize: "12px" }}>{t("cowork.zeroUnread")}</span>
               )}
             </div>
           </div>
@@ -544,23 +544,23 @@ function TodayView() {
           <div
             style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", cursor: "pointer" }}
             onClick={() => window.dispatchEvent(new CustomEvent("app:open-settings-tab", { detail: "bots" }))}
-            title="点击查看 IM bot 连接详情"
+            title={t("cowork.imBotDetail")}
           >
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <Bot size={14} style={{ color: "var(--fg-dim)" }} />
               <span style={{ fontSize: "13px", fontWeight: 500 }}>IM bot</span>
               <span className={"mail-status-dot mail-status-dot--" + (loading ? "warning" : (botStatus?.online ? "ok" : "idle"))} style={{ marginLeft: "4px" }} />
               <span style={{ fontSize: "12px", color: "var(--fg-dim)" }}>
-                {loading ? "同步中..." : (botStatus?.online
-                  ? (botStatus.platforms.length > 0 ? `在线（${botStatus.platforms.join("、")}）` : "在线")
-                  : "未启动")}
+                {loading ? t("cowork.syncing") : (botStatus?.online
+                  ? (botStatus.platforms.length > 0 ? t("cowork.onlinePlatforms", { platforms: botStatus.platforms.join(", ") }) : t("cowork.online"))
+                  : t("cowork.notStarted"))}
               </span>
             </div>
             <div>
               <span style={{ color: "var(--fg-faint)", fontSize: "12px" }}>
                 {botStatus?.online && botStatus.recentCount > 0
-                  ? `${botStatus.recentCount} 个近期会话`
-                  : "暂无消息"}
+                  ? t("cowork.nRecentConvs", { count: String(botStatus.recentCount) })
+                  : t("cowork.noMessages")}
                 <span style={{ marginLeft: "4px", opacity: 0.6 }}>›</span>
               </span>
             </div>
@@ -586,7 +586,7 @@ function TodayView() {
           onClick={refresh}
         >
           <RefreshCw size={12} className={loading ? "spin" : ""} />
-          刷新状态
+          {t("cowork.refreshStatus")}
         </div>
       </div>
     </div>
@@ -621,7 +621,7 @@ function MailView() {
       const [mb, inb, sent] = await Promise.all([
         (app as unknown as { ProbeMailAccount: (name: string) => Promise<MailProbeResult> })
           .ProbeMailAccount("")
-          .catch(() => ({ ok: false, status: "error", message: "Wails调用异常" } as MailProbeResult)),
+          .catch(() => ({ ok: false, status: "error", message: t("cowork.wailsError") } as MailProbeResult)),
         (app as unknown as { InboxPreview?: (mailbox: string, n: number) => Promise<InboxItem[]> })
           .InboxPreview?.("INBOX", 30) ??
           Promise.resolve([] as InboxItem[]),
@@ -659,16 +659,16 @@ function MailView() {
           />
           <span>
             {mailUnconfigured
-              ? t("coworkDock.mailUnconfigured") || "未配置邮箱"
+              ? t("coworkDock.mailUnconfigured")
               : mailOk
-                ? t("coworkDock.mailConnected") || "已连接"
-                : probe?.message || t("coworkDock.mailError") || "连接失败"}
+                ? t("coworkDock.mailConnected")
+                : probe?.message || t("coworkDock.mailError")}
           </span>
         </div>
         <button
           className="cowork-mailtab__refresh"
           onClick={() => refresh()}
-          title={t("common.refresh") || "刷新"}
+          title={t("common.refresh")}
         >
           <RefreshCw size={13} className={loading ? "spin" : ""} />
         </button>
@@ -681,13 +681,13 @@ function MailView() {
             className={"cowork-mailtab__folder" + (folder === "inbox" ? " cowork-mailtab__folder--active" : "")}
             onClick={() => setFolder("inbox")}
           >
-            {t("coworkDock.mailInbox") || "收件箱"}
+            {t("coworkDock.mailInbox")}
           </button>
           <button
             className={"cowork-mailtab__folder" + (folder === "sent" ? " cowork-mailtab__folder--active" : "")}
             onClick={() => setFolder("sent")}
           >
-            {t("coworkDock.mailSent") || "发件箱"}
+            {t("coworkDock.mailSent")}
           </button>
         </div>
       )}
@@ -699,9 +699,9 @@ function MailView() {
       ) : mailUnconfigured ? (
         <div className="cowork-dock__empty-state">
           <Mail size={22} />
-          <p>{t("coworkDock.mailUnconfigured") || "未配置邮箱"}</p>
+          <p>{t("coworkDock.mailUnconfigured")}</p>
           <p className="cowork-dock__empty-hint">
-            {t("coworkDock.mailConfigureHint") || "请在「设置」-「办公」中配置邮箱"}
+            {t("coworkDock.mailConfigureHint")}
           </p>
         </div>
       ) : mailOk ? (
@@ -719,12 +719,12 @@ function MailView() {
                   <div className="cowork-mailtab__item-head">
                     {/* Inbox shows sender (from); Sent shows recipient (to). */}
                     <span className="cowork-mailtab__from" title={folder === "sent" ? m.to : m.from}>
-                      {folder === "sent" ? (m.to || "（未知收件人）") : m.from}
+                      {folder === "sent" ? (m.to) : m.from}
                     </span>
                     <span className="cowork-mailtab__date">{formatDateTime(m.date)}</span>
                   </div>
                   <div className="cowork-mailtab__subject" title={m.subject}>
-                    {m.subject || "（无主题）"}
+                    {m.subject}
                   </div>
                   {open && m.preview && <div className="cowork-mailtab__preview">{m.preview}</div>}
                 </li>
@@ -732,10 +732,10 @@ function MailView() {
             })}
           </ul>
         ) : (
-          <div className="cowork-today__empty">{t("coworkDock.noUnreadMail") || "没有未读邮件"}</div>
+          <div className="cowork-today__empty">{t("coworkDock.noUnreadMail")}</div>
         )
       ) : (
-        <div className="cowork-today__empty">{probe?.message || t("coworkDock.mailError") || "连接失败"}</div>
+        <div className="cowork-today__empty">{probe?.message || t("coworkDock.mailError")}</div>
       )}
     </div>
   );
@@ -785,6 +785,7 @@ function RagDock({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
   const [newCollectionParent, setNewCollectionParent] = useState("");
+  const t = useT();
   const { showToast } = useToast();
   const confirm = useConfirm();
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
@@ -857,13 +858,13 @@ function RagDock({
   const handleQuickExtract = async (collectionName: string) => {
     try {
       await app.RagStartExtract(collectionName, "general/graph", "incremental");
-      showToast(`正在提取「${collectionName}」…`, "info");
+      showToast(t("cowork.extracting", { name: collectionName }), "info");
     } catch (e) {
       const msg = String(e);
       if (msg.includes("已提取完成")) {
-        showToast(`「${collectionName}」已全部提取完成`, "info");
+        showToast(t("cowork.extractDone", { name: collectionName }), "info");
       } else {
-        showToast(`提取失败：${msg}`, "error");
+        showToast(`${t("cowork.extractFailed")}: ${msg}`, "error");
       }
     }
   };
@@ -977,7 +978,7 @@ function RagDock({
 
   // --- main tabbed body (2 tabs: 分类 + 文件) -----------------------------
   return (
-    <aside className="cowork-dock" aria-label="知识库导航">
+    <aside className="cowork-dock" aria-label={t("cowork.knowledgeNav")}>
       <div className="workbench-dock__tools">
         <div className="workbench-dock__tabs" role="tablist">
           <button
@@ -986,10 +987,10 @@ function RagDock({
             aria-selected={tab === "collections"}
             className={"workbench-dock__tab" + (tab === "collections" ? " workbench-dock__tab--active" : "")}
             onClick={() => setTab("collections")}
-            title="分类"
+            title={t("cowork.categories")}
           >
             <Folder size={13} />
-            <span className="workbench-dock__tab-label">分类</span>
+            <span className="workbench-dock__tab-label">{t("cowork.categories")}</span>
           </button>
           <button
             type="button"
@@ -997,10 +998,10 @@ function RagDock({
             aria-selected={tab === "files"}
             className={"workbench-dock__tab" + (tab === "files" ? " workbench-dock__tab--active" : "")}
             onClick={() => setTab("files")}
-            title="文件"
+            title={t("cowork.files")}
           >
             <FileText size={13} />
-            <span className="workbench-dock__tab-label">文件</span>
+            <span className="workbench-dock__tab-label">{t("cowork.files")}</span>
           </button>
           <button
             type="button"
@@ -1008,10 +1009,10 @@ function RagDock({
             aria-selected={tab === "extract"}
             className={"workbench-dock__tab" + (tab === "extract" ? " workbench-dock__tab--active" : "")}
             onClick={() => setTab("extract")}
-            title="深度提取"
+            title={t("cowork.deepExtract")}
           >
             <Zap size={13} />
-            <span className="workbench-dock__tab-label">提取</span>
+            <span className="workbench-dock__tab-label">{t("cowork.deepExtract")}</span>
           </button>
         </div>
       </div>
@@ -1026,7 +1027,7 @@ function RagDock({
             onDrop={(e) => void handleDrop(e)}
           >
             <div className="rag-dock__collection-header">
-              <span className="rag-dock__collection-title">激活集合</span>
+              <span className="rag-dock__collection-title">{t("cowork.activeCollection")}</span>
               <div className="rag-dock__collection-actions">
                 <button
                   className="rag-dock__collection-action"
@@ -1038,11 +1039,11 @@ function RagDock({
                       .catch(() => {});
                   }}
                 >
-                  全选
+                  {t("cowork.selectAll")}
                 </button>
                 <button
                   className="rag-dock__collection-action"
-                  title="新建分类"
+                  title={t("cowork.newCategory")}
                   onClick={() => setShowCreateModal(true)}
                 >
                   +
@@ -1057,7 +1058,7 @@ function RagDock({
                 <input
                   value={catSearch}
                   onChange={(e) => setCatSearch(e.target.value)}
-                  placeholder="检索分类名称或层级..."
+                  placeholder={t("cowork.searchCategories")}
                   style={{ fontSize: "11.5px" }}
                 />
                 {catSearch && (
@@ -1093,9 +1094,9 @@ function RagDock({
                 {allExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
               </button>
               <Folder size={13} className="rag-dock__collection-icon" style={{ color: "var(--accent)" }} />
-              <span className="rag-dock__collection-label" style={{ fontWeight: 600 }}>全部</span>
+              <span className="rag-dock__collection-label" style={{ fontWeight: 600 }}>{t("cowork.all")}</span>
               <span className="rag-dock__collection-count">
-                {collections.reduce((s, c) => s + c.documents, 0)} 文档
+                {t("cowork.nDocs", { count: String(collections.reduce((s, c) => s + c.documents, 0)) })}
               </span>
             </div>
 
@@ -1113,7 +1114,7 @@ function RagDock({
               if (filteredCols.length === 0 && qCat) {
                 return (
                   <div style={{ padding: "24px 12px", textAlign: "center", color: "var(--fg-faint)", fontSize: "12px" }}>
-                    未检索到匹配「{catSearch}」的分类
+                    {t("cowork.noMatchCategory", { query: catSearch })}
                   </div>
                 );
               }
@@ -1174,7 +1175,7 @@ function RagDock({
                         window.dispatchEvent(new CustomEvent("rag:collection-selected", { detail: { collection: node.path } }));
                       }}
                       style={{ cursor: "pointer", paddingLeft: `${22 + depth * 14}px`, gap: "4px" }}
-                      title={`${node.documents} 文档 · ${node.entities} 实体`}
+                      title={t("cowork.nDocsEntities", { docs: String(node.documents), entities: String(node.entities) })}
                     >
                       {hasKids ? (
                         <button
@@ -1199,13 +1200,13 @@ function RagDock({
                       
                       {!node.isVirtual && (
                         <>
-                          <button className="rag-dock__collection-action-btn" title="导入" onClick={(e) => { e.stopPropagation(); void handleImportToCollection(node.path); }}>
+                          <button className="rag-dock__collection-action-btn" title={t("cowork.import")} onClick={(e) => { e.stopPropagation(); void handleImportToCollection(node.path); }}>
                             <FolderPlus size={12} />
                           </button>
-                          <button className="rag-dock__collection-action-btn" title="提取" onClick={(e) => { e.stopPropagation(); void handleQuickExtract(node.path); }}>
+                          <button className="rag-dock__collection-action-btn" title={t("cowork.extract")} onClick={(e) => { e.stopPropagation(); void handleQuickExtract(node.path); }}>
                             <Zap size={12} />
                           </button>
-                          <button className="rag-dock__collection-delete" title="删除" onClick={(e) => {
+                          <button className="rag-dock__collection-delete" title={t("cowork.delete")} onClick={(e) => {
                             e.stopPropagation();
                             setDeleteTarget({ name: node.name, path: node.path });
                           }}>
@@ -1225,7 +1226,7 @@ function RagDock({
             {collections.length === 0 && (
               <div className="cowork-dock__empty-state">
                 <Folder size={22} />
-                <p>暂无集合</p>
+                <p>{t("cowork.noCollections")}</p>
               </div>
             )}
           </div>
@@ -1259,13 +1260,13 @@ function RagDock({
                 options={[
                   {
                     value: "",
-                    label: `全部文档 (${collections.reduce((acc, c) => acc + (c.documents || 0), 0)})`,
+                    label: t("cowork.allDocs", { count: String(collections.reduce((acc, c) => acc + (c.documents || 0), 0)) }),
                     icon: <Folder size={13} style={{ color: "var(--accent)" }} />,
                   },
                   ...collections.map((c) => ({
                     value: c.path || c.name,
                     label: c.name,
-                    subtitle: c.documents > 0 ? `${c.documents} 篇` : undefined,
+                    subtitle: c.documents > 0 ? t("cowork.nArticles", { count: String(c.documents) }) : undefined,
                     indent: !!c.parent,
                     icon: <Folder size={13} />,
                   })),
@@ -1280,7 +1281,7 @@ function RagDock({
                 <input
                   value={fileSearch}
                   onChange={(e) => setFileSearch(e.target.value)}
-                  placeholder="检索当前列表文件或文档..."
+                  placeholder={t("cowork.searchFiles")}
                   style={{ fontSize: "11.5px" }}
                 />
                 {fileSearch && (
@@ -1301,7 +1302,7 @@ function RagDock({
               if (displayTree.length === 0 && tree.length > 0 && fileSearch.trim()) {
                 return (
                   <div style={{ padding: "24px 12px", textAlign: "center", color: "var(--fg-faint)", fontSize: "12px" }}>
-                    未检索到匹配「{fileSearch}」的文档
+                    {t("cowork.noMatchFile", { query: fileSearch })}
                   </div>
                 );
               }
@@ -1313,19 +1314,19 @@ function RagDock({
               activeCollection ? (
                 <div className="cowork-dock__empty-state">
                   <FileText size={22} />
-                  <p>此分类暂无文件</p>
+                  <p>{t("cowork.noFilesInCategory")}</p>
                   <button
                     className="btn btn--small btn--primary"
                     onClick={() => void handleImportToCollection(activeCollection)}
                   >
                     <FolderPlus size={14} />
-                    <span>导入文件</span>
+                    <span>{t("cowork.importFiles")}</span>
                   </button>
                 </div>
               ) : (
                 <div className="cowork-dock__empty-state">
                   <FileText size={22} />
-                  <p>暂无文件</p>
+                  <p>{t("cowork.noFiles")}</p>
                 </div>
               )
             ) : (
@@ -1353,7 +1354,7 @@ function RagDock({
                         }}
                         onRemove={(n) => {
                           if (!n.path) return;
-                          void confirm({ title: "删除提取的知识", message: `确定删除该文件已提取的知识？\n${n.path}\n\n文档本身不会被删除，可重新提取。` }).then((ok) => {
+                          void confirm({ title: t("cowork.deleteExtracted"), message: t("cowork.deleteExtractedMsg", { path: n.path }) }).then((ok) => {
                             if (!ok) return;
                             (app as unknown as { RagRemovePath: (c: string, p: string) => Promise<void> })
                               .RagRemovePath(activeCollection, n.path)
@@ -1381,14 +1382,14 @@ function RagDock({
         <div className="rag-create-overlay" onClick={() => setShowCreateModal(false)}>
           <div className="rag-create-modal" onClick={(e) => e.stopPropagation()}>
             <div className="rag-create-modal__head">
-              <h3 className="rag-create-modal__title">新建分类</h3>
+              <h3 className="rag-create-modal__title">{t("cowork.newCategoryTitle")}</h3>
               <button className="rag-create-modal__close" onClick={() => setShowCreateModal(false)}>✕</button>
             </div>
             <div className="rag-create-modal__body">
               <div className="rag-create-modal__section">
-                <label className="rag-create-modal__label">选择模板或自定义</label>
+                <label className="rag-create-modal__label">{t("cowork.selectTemplate")}</label>
                 <div className="rag-create-modal__templates">
-                  {["工作", "学习", "个人", "项目"].map((tpl) => (
+                  {["work", "study", "personal", "project"].map((tpl) => (
                     <button
                       key={tpl}
                       className={`rag-create-modal__template ${newCollectionParent === tpl ? "rag-create-modal__template--selected" : ""}`}
@@ -1401,21 +1402,21 @@ function RagDock({
                     className={`rag-create-modal__template ${newCollectionParent === "" ? "rag-create-modal__template--selected" : ""}`}
                     onClick={() => setNewCollectionParent("")}
                   >
-                    ✏️ 自定义
+                    {t("cowork.custom")}
                   </button>
                 </div>
               </div>
               {newCollectionParent && (
                 <div className="rag-create-modal__section">
-                  <label className="rag-create-modal__label">父分类</label>
+                  <label className="rag-create-modal__label">{t("cowork.parentCategory")}</label>
                   <div className="rag-create-modal__parent">{newCollectionParent}/</div>
                 </div>
               )}
               <div className="rag-create-modal__section">
-                <label className="rag-create-modal__label">分类名称</label>
+                <label className="rag-create-modal__label">{t("cowork.categoryName")}</label>
                 <input
                   className="rag-create-modal__input"
-                  placeholder={newCollectionParent ? "如：领导材料" : "如：工作 或 工作/领导材料"}
+                  placeholder={newCollectionParent ? "e.g. Leadership" : "e.g. Work or Work/Leadership"}
                   value={newCollectionName}
                   onChange={(e) => setNewCollectionName(e.target.value)}
                   onKeyDown={(e) => {
@@ -1444,11 +1445,11 @@ function RagDock({
               <div className="rag-create-modal__preview">
                 {newCollectionParent && newCollectionName
                   ? `${newCollectionParent}/${newCollectionName}`
-                  : newCollectionName || "（请输入名称）"}
+                  : newCollectionName}
               </div>
             </div>
             <div className="rag-create-modal__foot">
-              <button className="btn btn--small" onClick={() => setShowCreateModal(false)}>取消</button>
+              <button className="btn btn--small" onClick={() => setShowCreateModal(false)}>{t("entityEdit.cancel")}</button>
               <button
                 className="btn btn--primary btn--small"
                 disabled={!newCollectionName.trim()}
@@ -1470,7 +1471,7 @@ function RagDock({
                     .catch(() => {});
                 }}
               >
-                创建
+                {t("cowork.create")}
               </button>
             </div>
           </div>
@@ -1488,8 +1489,8 @@ function RagDock({
       />
       {deleteTarget && (
         <ConfirmModal
-          title={`删除"${deleteTarget.name}"`}
-          message="该分类及其全部文档、已抽取的知识图谱将被永久删除，此操作不可撤销。"
+          title={t("cowork.deleteCategory", { name: deleteTarget.name })}
+          message={t("cowork.deleteCategoryMsg")}
           onConfirm={() => {
             const path = deleteTarget.path;
             (app as unknown as { RagDeleteCollection: (n: string) => Promise<void> })

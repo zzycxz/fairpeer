@@ -2435,7 +2435,7 @@ func cacheRateLabel(format string, hit, denom int) string {
 func (m chatTUI) cacheTag() string {
 	now := ""
 	if u := m.ctrl.LastUsage(); u != nil {
-		d := u.CacheHitTokens + u.CacheMissTokens
+			d := u.CacheHitTokens + u.CacheMissTokens + u.CacheWriteTokens
 		if d == 0 {
 			d = u.PromptTokens
 		}

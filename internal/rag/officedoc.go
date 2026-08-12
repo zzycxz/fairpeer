@@ -103,6 +103,11 @@ func readPDF(path string) (string, error) {
 	return fixCJKSpaces(result), nil
 }
 
+// ReadPDF is the exported wrapper around readPDF so other packages (e.g. the
+// document tools in internal/tool/builtin) can reuse the same PDF extraction
+// pipeline (ocr_pdf.py → markitdown → pure-Go fallback) without duplicating it.
+func ReadPDF(path string) (string, error) { return readPDF(path) }
+
 // ocrScriptCandidates lists possible locations of ocr_pdf.py.
 func ocrScriptCandidates() []string { //nolint:unused
 	return docconv.ScriptCandidates("ocr_pdf.py")

@@ -934,7 +934,7 @@ function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) 
       if (it.kind === "phase") return mode !== "minimal";
       if (it.kind !== "tool") return false;
       if (it.parentId || it.name === "todo_write" || it.name === "exit_plan_mode") return false;
-      if (mode === "minimal") return (!it.readOnly && it.name !== "bash") || Boolean(it.attachments && it.attachments.length);
+      if (mode === "minimal") return !it.readOnly || Boolean(it.attachments && it.attachments.length);
       return true;
     });
   }, [items, mode]);

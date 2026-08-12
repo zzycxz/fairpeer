@@ -36,8 +36,6 @@ func ForModel(modelID string) string {
 	return strings.Join(parts, "\n\n")
 }
 
-const SerialAddon = `Important: Use exactly one tool per assistant message. Wait for the tool result before calling the next tool. Do not call multiple tools in parallel.`
-
 type contextKey struct{}
 
 func WithChecks(ctx context.Context, checks []VerifyCheck) context.Context {

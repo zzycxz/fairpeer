@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Minus, PanelLeft, PanelRight, Search, Square, X } from "lucide-react";
+import { CalendarDays, Code2, Minus, PanelLeft, PanelRight, Search, Square, X } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { TabBar } from "./TabBar";
 import type { TabMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
@@ -195,10 +196,15 @@ export function AppChrome({
    re-syncs the local index whenever the `profile` prop changes (e.g. when the
    switch lands, or when the active tab changes elsewhere), so the indicator
    never desyncs from the real state. */
-const PROFILE_SEGMENTS = [
-  { key: "dev", labelKey: "cowork.badgeDev", titleKey: "cowork.switchToDev" },
-  { key: "cowork", labelKey: "cowork.badgeCoWork", titleKey: "cowork.switchToCoWork" },
-] as const;
+const PROFILE_SEGMENTS: ReadonlyArray<{
+  key: string;
+  labelKey: string;
+  titleKey: string;
+  Icon: LucideIcon;
+}> = [
+  { key: "dev", labelKey: "cowork.badgeDev", titleKey: "cowork.switchToDev", Icon: Code2 },
+  { key: "cowork", labelKey: "cowork.badgeCoWork", titleKey: "cowork.switchToCoWork", Icon: CalendarDays },
+];
 
 function ProfileSegmented({
   profile,
@@ -249,6 +255,7 @@ function ProfileSegmented({
           }}
           title={t(seg.titleKey as never)}
         >
+          <seg.Icon size={13} className="app-chrome__profile-seg-icon" />
           {t(seg.labelKey as never)}
         </button>
       ))}

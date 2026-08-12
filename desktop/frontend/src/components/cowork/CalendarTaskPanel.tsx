@@ -23,8 +23,9 @@ import { EventEditForm } from "./EventEditForm";
 import { RunHistory } from "./RunHistory";
 import { useToast } from "../../lib/toast";
 import { useConfirm } from "../../lib/confirm";
+import { useT, type Translator } from "../../lib/i18n";
 
-const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
+const WEEKDAY_KEYS = ["cal.mon", "cal.tue", "cal.wed", "cal.thu", "cal.fri", "cal.sat", "cal.sun"] as const;
 const HOURS = Array.from({ length: 14 }, (_, i) => i + 8);
 const COLORS = ["#FF4444", "#4488FF", "#44BB44", "#FF8800", "#AA44FF", "#FF44AA", "#44CCCC", "#888888"];
 
@@ -75,8 +76,8 @@ function eventsForDay(events: CalendarEventView[] | null | undefined, day: Date)
 function formatTime(dateStr: string): string {
   return new Date(dateStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr); return `${d.getMonth() + 1}月${d.getDate()}日`;
+function formatDate(dateStr: string, t: Translator): string {
+  const d = new Date(dateStr); return t("cal.date", { month: String(d.getMonth() + 1), day: String(d.getDate()) });
 }
 
 type ViewMode = "month" | "week" | "list";
@@ -84,6 +85,7 @@ type TaskFilter = "all" | "manual" | "calendar";
 type CreateMode = "event" | "task" | "template";
 
 export function CalendarTaskPanel() {
+  const t = useT();
   const { showToast } = useToast();
   const confirm = useConfirm();
 
@@ -133,7 +135,7 @@ export function CalendarTaskPanel() {
     if (typeof window !== "undefined" && window.runtime) {
       return window.runtime.EventsOn("calendar:reminder", (...args: unknown[]) => {
         const d = (args?.[0] ?? {}) as { title?: string; body?: string };
-        showToast(`${d.title || "提醒"}: ${d.body || ""}`, "info");
+        showToast(`${d.title || t("cal.reminder")}: ${d.body || ""}`, "info");
       });
     }
   }, [showToast]);
@@ -151,9 +153,9 @@ export function CalendarTaskPanel() {
   const prev = () => { if (viewMode === "week") { const d = new Date(selectedDay || new Date()); d.setDate(d.getDate() - 7); setSelectedDay(d); } else setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1)); };
   const next = () => { if (viewMode === "week") { const d = new Date(selectedDay || new Date()); d.setDate(d.getDate() + 7); setSelectedDay(d); } else setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1)); };
   const goToday = () => { const n = new Date(); setViewDate(new Date(n.getFullYear(), n.getMonth(), 1)); setSelectedDay(n); };
-  const headerTitle = viewMode === "month" ? `${viewDate.getFullYear()}年${viewDate.getMonth() + 1}月`
-    : viewMode === "week" ? `${weekDays[0].getMonth() + 1}月${weekDays[0].getDate()}日 - ${weekDays[6].getMonth() + 1}月${weekDays[6].getDate()}日`
-      : `${viewDate.getFullYear()}年${viewDate.getMonth() + 1}月`;
+  const headerTitle = viewMode === "month" ? t("cal.monthTitle", { year: String(viewDate.getFullYear()), month: String(viewDate.getMonth() + 1) })
+    : viewMode === "week" ? `${t("cal.date", { month: String(weekDays[0].getMonth() + 1), day: String(weekDays[0].getDate()) })} - ${t("cal.date", { month: String(weekDays[6].getMonth() + 1), day: String(weekDays[6].getDate()) })}`
+      : t("cal.monthTitle", { year: String(viewDate.getFullYear()), month: String(viewDate.getMonth() + 1) });
 
   // --- Calendar CRUD ---
   const handleSearch = async () => { if (!searchQuery.trim()) { setSearchResults([]); return; } setSearchResults(await app.SearchCalendarEvents(searchQuery, 20)); };
@@ -161,8 +163,8 @@ export function CalendarTaskPanel() {
   // --- Task CRUD ---
   const handleCreateTask = async (input: TaskInput) => { await app.CreateScheduledTask(input); setTaskFormOpen(false); setEditingTask(null); setPresetTemplate(null); };
   const handleUpdateTask = async (input: TaskInput) => { if (editingTask) await app.UpdateScheduledTask({ ...input, id: editingTask.id }); setTaskFormOpen(false); setEditingTask(null); };
-  const handleDeleteTask = async (task: TaskView) => { if (!(await confirm({ title: "删除任务", message: `确定删除任务"${task.name}"？` }))) return; try { await app.DeleteScheduledTask(task.id); } catch (e) { showToast(String(e), "error"); } };
-  const handleRunNow = async (task: TaskView) => { showToast(`执行中: ${task.name}`, "info"); try { const r = await app.RunScheduledTaskNow(task.id); showToast(`完成: ${task.name}${r ? `: ${r.slice(0, 100)}` : ""}`, "info"); } catch (e) { showToast(`失败: ${task.name} - ${e}`, "error"); } };
+  const handleDeleteTask = async (task: TaskView) => { if (!(await confirm({ title: t("cal.deleteTask"), message: t("cal.deleteTaskMsg", { name: task.name }) }))) return; try { await app.DeleteScheduledTask(task.id); } catch (e) { showToast(String(e), "error"); } };
+  const handleRunNow = async (task: TaskView) => { showToast(t("cal.running", { name: task.name }), "info"); try { const r = await app.RunScheduledTaskNow(task.id); showToast(t("cal.runDone", { name: task.name }) + (r ? `: ${r.slice(0, 100)}` : ""), "info"); } catch (e) { showToast(t("cal.runFailed", { name: task.name }) + ` - ${e}`, "error"); } };
   const handleTogglePause = async (task: TaskView) => { try { if (task.enabled) await app.PauseScheduledTask(task.id); else await app.ResumeScheduledTask(task.id); } catch (e) { showToast(String(e), "error"); } };
 
   // --- Pure calendar event CRUD (events with no associated task) ---
@@ -176,7 +178,7 @@ export function CalendarTaskPanel() {
   };
   const handleCreateEvent = async (input: CalendarEventInput) => { await app.CreateCalendarEvent(input); setEventFormOpen(false); setEditingEvent(null); void refreshEvents(); };
   const handleUpdateEvent = async (input: CalendarEventInput) => { if (editingEvent) await app.UpdateCalendarEvent({ ...input, id: editingEvent.id }); setEventFormOpen(false); setEditingEvent(null); void refreshEvents(); };
-  const handleDeleteEvent = async () => { if (!editingEvent) return; if (!(await confirm({ title: "删除日程", message: `确定删除日程"${editingEvent.title}"？` }))) return; try { await app.DeleteCalendarEvent(editingEvent.id); setEventFormOpen(false); setEditingEvent(null); void refreshEvents(); } catch (e) { showToast(String(e), "error"); } };
+  const handleDeleteEvent = async () => { if (!editingEvent) return; if (!(await confirm({ title: t("cal.deleteEvent"), message: t("cal.deleteEventMsg", { name: editingEvent.title }) }))) return; try { await app.DeleteCalendarEvent(editingEvent.id); setEventFormOpen(false); setEditingEvent(null); void refreshEvents(); } catch (e) { showToast(String(e), "error"); } };
 
   // --- Create menu ---
   const openCreateMenu = () => setCreateMode(null);
@@ -188,13 +190,13 @@ export function CalendarTaskPanel() {
     try {
       const r = await app.ExportCalendarDialog();
       if (r) showToast(r, "info");
-    } catch (e) { showToast(`导出失败：${e}`, "error"); }
+    } catch (e) { showToast(`${t("cal.exportFailed")}: ${e}`, "error"); }
   };
   const handleImport = async () => {
     try {
       const r = await app.ImportCalendarDialog();
       if (r) { showToast(r, "info"); void refreshEvents(); }
-    } catch (e) { showToast(`导入失败：${e}`, "error"); }
+    } catch (e) { showToast(`${t("cal.importFailed")}: ${e}`, "error"); }
   };
 
   return (
@@ -205,28 +207,28 @@ export function CalendarTaskPanel() {
           <button className="btn btn--icon" onClick={prev}><ChevronLeft size={16} /></button>
           <span className="cowork-calendar-task__title">{headerTitle}</span>
           <button className="btn btn--icon" onClick={next}><ChevronRight size={16} /></button>
-          <button className="btn btn--small" onClick={goToday}>今天</button>
+          <button className="btn btn--small" onClick={goToday}>{t("cal.today")}</button>
         </div>
         <div className="cowork-calendar-task__actions">
           <div className="cowork-calendar-task__view-switcher">
-            <button className={`btn btn--icon ${viewMode === "month" ? "btn--active" : ""}`} onClick={() => setViewMode("month")} title="月"><Grid3X3 size={14} /></button>
-            <button className={`btn btn--icon ${viewMode === "week" ? "btn--active" : ""}`} onClick={() => setViewMode("week")} title="周"><Columns3 size={14} /></button>
-            <button className={`btn btn--icon ${viewMode === "list" ? "btn--active" : ""}`} onClick={() => setViewMode("list")} title="列表"><ListIcon size={14} /></button>
+            <button className={`btn btn--icon ${viewMode === "month" ? "btn--active" : ""}`} onClick={() => setViewMode("month")} title={t("cal.month")}><Grid3X3 size={14} /></button>
+            <button className={`btn btn--icon ${viewMode === "week" ? "btn--active" : ""}`} onClick={() => setViewMode("week")} title={t("cal.week")}><Columns3 size={14} /></button>
+            <button className={`btn btn--icon ${viewMode === "list" ? "btn--active" : ""}`} onClick={() => setViewMode("list")} title={t("cal.list")}><ListIcon size={14} /></button>
           </div>
           <div className="cowork-calendar-task__search">
             <Search size={14} />
-            <input type="text" placeholder="搜索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void handleSearch(); }} />
+            <input type="text" placeholder={t("cal.search")} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void handleSearch(); }} />
           </div>
-          <button className="btn btn--icon" title="导出日历 (.ics)" onClick={() => void handleExport()}><Download size={14} /></button>
-          <button className="btn btn--icon" title="导入日历 (.ics)" onClick={() => void handleImport()}><Upload size={14} /></button>
+          <button className="btn btn--icon" title={t("cal.exportIcs")} onClick={() => void handleExport()}><Download size={14} /></button>
+          <button className="btn btn--icon" title={t("cal.importIcs")} onClick={() => void handleImport()}><Upload size={14} /></button>
           <div className="cowork-calendar-task__create-wrap">
-            <button className="btn btn--primary btn--small" onClick={openCreateMenu}><Plus size={14} /> 新建</button>
+            <button className="btn btn--primary btn--small" onClick={openCreateMenu}><Plus size={14} /> {t("cal.new")}</button>
             {createMode === null && (
               <div className="cowork-calendar-task__create-menu" onClick={closeCreateMenu}>
-                <div className="cowork-calendar-task__create-item" onClick={chooseCreateTask}>⏰ 新建任务</div>
-                <div className="cowork-calendar-task__create-item" onClick={() => { setCreateMode(null); setEditingEvent(null); setEventFormOpen(true); }}>📅 新建日程</div>
+                <div className="cowork-calendar-task__create-item" onClick={chooseCreateTask}>⏰ {t("cal.newTask")}</div>
+                <div className="cowork-calendar-task__create-item" onClick={() => { setCreateMode(null); setEditingEvent(null); setEventFormOpen(true); }}>📅 {t("cal.newEvent")}</div>
                 <div className="cowork-calendar-task__create-divider" />
-                <div className="cowork-calendar-task__create-label">从模板建</div>
+                <div className="cowork-calendar-task__create-label">{t("cal.fromTemplate")}</div>
                 {templates.map((tpl) => (
                   <div key={tpl.id} className="cowork-calendar-task__create-item cowork-calendar-task__create-tpl" onClick={() => chooseTemplate(tpl)}>
                     <LayoutTemplate size={12} /> {tpl.name}
@@ -241,14 +243,14 @@ export function CalendarTaskPanel() {
       {/* Search results dropdown */}
       {searchResults.length > 0 && (
         <div className="cowork-calendar-task__search-results">
-          <div className="cowork-calendar-task__search-header"><span>{searchResults.length} 个结果</span><button className="btn btn--text" onClick={() => setSearchResults([])}>清除</button></div>
+          <div className="cowork-calendar-task__search-header"><span>{t("cal.nResults", { count: String(searchResults.length) })}</span><button className="btn btn--text" onClick={() => setSearchResults([])}>{t("cal.clear")}</button></div>
           {searchResults.map((e) => (
             <div key={e.id} className="cowork-calendar-task__search-item" onClick={() => {
               onEventClick(e);
               setSearchResults([]);
             }}>
               <span className="cowork-calendar-task__dot" style={{ background: colorForEvent(e) }} /><span>{e.title}</span>
-              <span className="cowork-calendar-task__search-time">{formatDate(e.start)}</span>
+              <span className="cowork-calendar-task__search-time">{formatDate(e.start, t)}</span>
             </div>
           ))}
         </div>
@@ -260,7 +262,7 @@ export function CalendarTaskPanel() {
         <div className="cowork-calendar-task__main">
           {viewMode === "month" && (
             <div className="cowork-calendar-task__grid">
-              {WEEKDAYS.map((wd) => <div key={wd} className="cowork-calendar-task__weekday">{wd}</div>)}
+              {WEEKDAY_KEYS.map((key) => <div key={key} className="cowork-calendar-task__weekday">{t(key)}</div>)}
               {grid.map((day, i) => {
                 if (!day) return <div key={i} className="cowork-calendar-task__day cowork-calendar-task__day--empty" />;
                 const dayEvents = eventsForDay(events, day);
@@ -294,7 +296,7 @@ export function CalendarTaskPanel() {
                 <div className="cowork-calendar-task__week-time-col" />
                 {weekDays.map((d, i) => (
                   <div key={i} className={`cowork-calendar-task__week-day-header ${isToday(d) ? "cowork-calendar-task__week-day-header--today" : ""}`}>
-                    <span className="cowork-calendar-task__week-day-name">{WEEKDAYS[i]}</span>
+                    <span className="cowork-calendar-task__week-day-name">{t(WEEKDAY_KEYS[i])}</span>
                     <span className="cowork-calendar-task__week-day-num">{d.getDate()}</span>
                   </div>
                 ))}
@@ -328,7 +330,7 @@ export function CalendarTaskPanel() {
                 const sorted = [...(events ?? [])].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
                 const groups = new Map<string, CalendarEventView[]>();
                 for (const e of sorted) { const k = new Date(e.start).toLocaleDateString(); if (!groups.has(k)) groups.set(k, []); groups.get(k)!.push(e); }
-                if (groups.size === 0) return <div className="cowork-calendar-task__empty-day">暂无日程</div>;
+                if (groups.size === 0) return <div className="cowork-calendar-task__empty-day">{t("cal.noEvents")}</div>;
                 return Array.from(groups.entries()).map(([date, evts]) => (
                   <div key={date} className="cowork-calendar-task__list-group">
                     <div className="cowork-calendar-task__list-date">{date}</div>
@@ -337,10 +339,10 @@ export function CalendarTaskPanel() {
                         onEventClick(e);
                       }}>
                         <span className="cowork-calendar-task__dot" style={{ background: colorForEvent(e) }} />
-                        <span className="cowork-calendar-task__list-time">{e.allDay ? "全天" : formatTime(e.start)}</span>
+                        <span className="cowork-calendar-task__list-time">{e.allDay ? t("cal.allDay") : formatTime(e.start)}</span>
                         <span className="cowork-calendar-task__list-title">{e.title}</span>
-                        {e.outputMode === "im" && <span className="cowork-calendar-task__push-badge" title={`提醒推送 IM：${e.outputDest}`}>💬</span>}
-                        {e.outputMode === "email" && <span className="cowork-calendar-task__push-badge" title={`提醒推送邮件：${e.outputDest}`}>✉️</span>}
+                        {e.outputMode === "im" && <span className="cowork-calendar-task__push-badge" title={`${t("cal.pushIM")}: ${e.outputDest}`}>💬</span>}
+                        {e.outputMode === "email" && <span className="cowork-calendar-task__push-badge" title={`${t("cal.pushEmail")}: ${e.outputDest}`}>✉️</span>}
                         {e.location && <span className="cowork-calendar-task__list-loc">📍 {e.location}</span>}
                       </div>
                     ))}
@@ -355,9 +357,9 @@ export function CalendarTaskPanel() {
         <div className="cowork-calendar-task__sidebar">
           {/* Today's events */}
           <div className="cowork-calendar-task__sidebar-section">
-            <h3><CalendarIcon size={14} />{selectedDay ? `${selectedDay.getMonth() + 1}月${selectedDay.getDate()}日` : "今日"}日程</h3>
+            <h3><CalendarIcon size={14} />{selectedDay ? t("cal.dayEvents", { month: String(selectedDay.getMonth() + 1), day: String(selectedDay.getDate()) }) : t("cal.todayEvents")}</h3>
             {todayEvents.length === 0 ? (
-              <div className="cowork-calendar-task__empty-day">暂无日程</div>
+              <div className="cowork-calendar-task__empty-day">{t("cal.noEvents")}</div>
             ) : (
               todayEvents.map((e) => (
                 <div key={e.id} className="cowork-calendar-task__event-card" onClick={() => {
@@ -367,7 +369,7 @@ export function CalendarTaskPanel() {
                     <span className="cowork-calendar-task__dot" style={{ background: colorForEvent(e) }} />
                     <span className="cowork-calendar-task__event-name">{e.title}</span>
                   </div>
-                  <div className="cowork-calendar-task__event-time">{e.allDay ? "全天" : `${formatTime(e.start)} - ${formatTime(e.end)}`}</div>
+                  <div className="cowork-calendar-task__event-time">{e.allDay ? t("cal.allDay") : `${formatTime(e.start)} - ${formatTime(e.end)}`}</div>
                   {e.recurrence && <span className="cowork-calendar-task__badge">🔁</span>}
                   {e.taskId && <span className="cowork-calendar-task__badge cowork-calendar-task__badge--task">⚡</span>}
                 </div>
@@ -378,9 +380,9 @@ export function CalendarTaskPanel() {
           {/* Task filters */}
           <div className="cowork-calendar-task__sidebar-section">
             <div className="cowork-calendar-task__task-filters">
-              <button className={`cowork-calendar-task__filter ${taskFilter === "all" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("all")}>全部</button>
-              <button className={`cowork-calendar-task__filter ${taskFilter === "manual" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("manual")}>⏰ 手动</button>
-              <button className={`cowork-calendar-task__filter ${taskFilter === "calendar" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("calendar")}>📅 日历</button>
+              <button className={`cowork-calendar-task__filter ${taskFilter === "all" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("all")}>{t("cal.filterAll")}</button>
+              <button className={`cowork-calendar-task__filter ${taskFilter === "manual" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("manual")}>⏰ {t("cal.filterManual")}</button>
+              <button className={`cowork-calendar-task__filter ${taskFilter === "calendar" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("calendar")}>📅 {t("cal.filterCalendar")}</button>
             </div>
           </div>
 
@@ -389,7 +391,7 @@ export function CalendarTaskPanel() {
             {tasks === null ? (
               <div className="cowork-calendar-task__loading">…</div>
             ) : filteredTasks.length === 0 ? (
-              <div className="cowork-calendar-task__empty-day">暂无任务</div>
+              <div className="cowork-calendar-task__empty-day">{t("cal.noTasks")}</div>
             ) : (
               filteredTasks.map((task) => (
                 <div key={task.id} className={`cowork-calendar-task__task-card ${!task.enabled ? "cowork-calendar-task__task-card--paused" : ""}`}>
@@ -397,17 +399,17 @@ export function CalendarTaskPanel() {
                     <span className={`cowork-calendar-task__task-dot ${task.enabled ? "cowork-calendar-task__task-dot--on" : ""}`} />
                     <span className="cowork-calendar-task__task-name">{task.name}</span>
                     {task.source === "calendar" && <span className="cowork-calendar-task__badge cowork-calendar-task__badge--calendar">📅</span>}
-                    {task.oneShot && <span className="cowork-calendar-task__badge">一次</span>}
+                    {task.oneShot && <span className="cowork-calendar-task__badge">{t("cal.oneShot")}</span>}
                   </div>
                   <div className="cowork-calendar-task__task-meta">
-                    {task.humanSchedule} {task.lastRun && `· 上次: ${task.lastRun.slice(5)}`}
+                    {task.humanSchedule} {task.lastRun && `· ${t("cal.lastRun")}: ${task.lastRun.slice(5)}`}
                   </div>
                   <div className="cowork-calendar-task__task-actions">
-                    <button className="cowork-calendar-task__btn" title="立即执行" onClick={() => void handleRunNow(task)}><PlayCircle size={13} /></button>
-                    <button className="cowork-calendar-task__btn" title={task.enabled ? "暂停" : "恢复"} onClick={() => void handleTogglePause(task)}>{task.enabled ? <Pause size={13} /> : <Play size={13} />}</button>
-                    <button className="cowork-calendar-task__btn" title="编辑" onClick={() => { setEditingTask(task); setTaskFormOpen(true); }}><Pencil size={13} /></button>
-                    <button className="cowork-calendar-task__btn" title="删除" onClick={() => void handleDeleteTask(task)}><Trash2 size={13} /></button>
-                    <button className="cowork-calendar-task__btn" title="历史" onClick={() => setHistoryTask({ id: task.id, name: task.name })}><HistoryIcon size={13} /></button>
+                    <button className="cowork-calendar-task__btn" title={t("cal.runNow")} onClick={() => void handleRunNow(task)}><PlayCircle size={13} /></button>
+                    <button className="cowork-calendar-task__btn" title={task.enabled ? t("cal.pause") : t("cal.resume")} onClick={() => void handleTogglePause(task)}>{task.enabled ? <Pause size={13} /> : <Play size={13} />}</button>
+                    <button className="cowork-calendar-task__btn" title={t("cal.edit")} onClick={() => { setEditingTask(task); setTaskFormOpen(true); }}><Pencil size={13} /></button>
+                    <button className="cowork-calendar-task__btn" title={t("cal.delete")} onClick={() => void handleDeleteTask(task)}><Trash2 size={13} /></button>
+                    <button className="cowork-calendar-task__btn" title={t("cal.history")} onClick={() => setHistoryTask({ id: task.id, name: task.name })}><HistoryIcon size={13} /></button>
                   </div>
                 </div>
               ))
@@ -424,7 +426,7 @@ export function CalendarTaskPanel() {
           templates={templates}
           onSubmit={(input) => editingTask ? handleUpdateTask(input) : handleCreateTask(input)}
           onCancel={() => { setTaskFormOpen(false); setEditingTask(null); setPresetTemplate(null); }}
-          onDelete={editingTask ? () => { void confirm({ title: "删除任务", message: `确定删除"${editingTask.name}"？` }).then((ok) => { if (ok) { void app.DeleteScheduledTask(editingTask.id).then(() => { setTaskFormOpen(false); setEditingTask(null); }); } }); } : undefined}
+          onDelete={editingTask ? () => { void confirm({ title: t("cal.deleteTask"), message: t("cal.deleteTaskMsg", { name: editingTask.name }) }).then((ok) => { if (ok) { void app.DeleteScheduledTask(editingTask.id).then(() => { setTaskFormOpen(false); setEditingTask(null); }); } }); } : undefined}
         />
       )}
 

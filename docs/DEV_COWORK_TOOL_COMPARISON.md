@@ -29,7 +29,7 @@ dev（编码）和 cowork（办公）**共用同一个工具注册池**——所
 | `grep` | ripgrep 搜索文件内容 | builtin/grep.go |
 | `glob` | `**/*.go` 递归文件模式匹配 | builtin/glob.go |
 | `web_fetch` | 抓取网页内容 | builtin/webfetch.go |
-| `web_search` | Brave→Exa→Linkup 链式搜索 | builtin/websearch.go |
+| `web_search` | Brave→Exa→Linkup→AnySearch 链式搜索 | builtin/websearch.go |
 | `todo_write` | 两级任务列表（phase + sub-step） | builtin/todo.go |
 | `complete_step` | 带证据签收步骤完成 | builtin/completestep.go |
 | `ask` | 交互询问（多选问题） | agent/ask.go |

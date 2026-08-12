@@ -1,6 +1,6 @@
 {
   "name": "@zzycxz/fairpeer",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "A general-purpose AI coding agent for the terminal.",
   "bin": {
     "fairpeer": "bin/fairpeer.js"

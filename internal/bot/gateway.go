@@ -33,11 +33,16 @@ type GatewayConfig struct {
 	// 参数为更新后的完整 AllowlistConfig。nil 表示不持久化。
 	AllowlistSaver func(AllowlistConfig)
 	// OnTurnFinished 在一轮对话结束后调用（无论成功或出错），用于让上层（desktop）
-	// 把对话方的远端 ID（如飞书 open_id）和本次会话的本地 transcript 路径回写到
-	// BotConnection 的 SessionMappings —— 否则只有手动「测试连接」才记录 remoteID、
-	// 而 SessionID（本地话题）永远为空，UI 显示「等待首条消息」。放在 turn 结束后
-	// 是因为 sessionPath 要等首轮 RunTurn 才确定（prewarm 时为空）。nil 表示不回写。
-	OnTurnFinished func(plat Platform, remoteID, sessionPath string)
+	// 把对话方的会话来源（platform/chatType/chatID/userID）和本次会话的本地 transcript
+	// 路径回写到 BotConnection 的 SessionMappings —— 否则只有手动「测试连接」才记录
+	// remoteID、而 SessionID（本地话题）永远为空，UI 显示「等待首条消息」。传整个
+	// SessionSource 而非单个 remoteID，是为了让 chatType/chatID 也带上：同一人在不同
+	// 群里的对话才能分开。放在 turn 结束后是因为 sessionPath 要等首轮 RunTurn 才确定
+	// （prewarm 时为空）。nil 表示不回写。
+	OnTurnFinished func(src SessionSource, sessionPath string)
+	// Desktop，非 nil 时启用 /desktop 系列命令（远程观察 + 审批桌面 live 会话）。
+	// 由桌面端进程注入；独立 bot 进程（无桌面）保持 nil，/desktop 会提示不可用。
+	Desktop DesktopBridge
 }
 
 // ChannelConfig overrides gateway defaults for one IM channel.
@@ -627,6 +632,9 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 			_ = gw.sendText(ctx, adapter, msg, "已退出规划模式。")
 		}
 
+	case strings.HasPrefix(msg.Text, "/desktop"):
+		_ = gw.sendText(ctx, adapter, msg, gw.handleDesktopCommand(msg))
+
 	case strings.HasPrefix(msg.Text, "/help"):
 		help := "可用命令:\n" +
 			"/stop - 停止当前任务\n" +
@@ -637,6 +645,7 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 			"/answer <id> <选项> - 回答 ask 问题\n" +
 			"/plan - 进入规划模式（只读）\n" +
 			"/plan off - 退出规划模式\n" +
+			"/desktop - 远程查看/审批桌面会话\n" +
 			"/status - 查看状态\n" +
 			"/whoami - 查看你的用户 ID\n" +
 			"/help - 显示帮助"
@@ -718,7 +727,7 @@ func (gw *BotGateway) runTurn(ctx context.Context, adapter Adapter, key string, 
 	// remoteID 填「远端 ID」、用 sessionPath 填「本地话题」，让 UI 不再显示
 	// 「等待首条消息」。只传非空值，desktop 侧自行去重落盘。
 	if gw.cfg.OnTurnFinished != nil && strings.TrimSpace(msg.UserID) != "" {
-		gw.cfg.OnTurnFinished(msg.Platform, msg.UserID, state.ctrl.SessionPath())
+		gw.cfg.OnTurnFinished(msg.Session(), state.ctrl.SessionPath())
 	}
 }
 

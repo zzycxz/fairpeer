@@ -244,8 +244,8 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				fmt.Fprintf(&b, "context_window = %d   # tokens; compaction triggers near this limit\n", p.ContextWindow)
 			}
 			if p.Price != nil {
-				fmt.Fprintf(&b, "price       = { cache_hit = %v, input = %v, output = %v, currency = %q }   # per 1M tokens\n",
-					p.Price.CacheHit, p.Price.Input, p.Price.Output, p.Price.Symbol())
+				fmt.Fprintf(&b, "price       = { cache_hit = %v, cache_write = %v, input = %v, output = %v, currency = %q }   # per 1M tokens (cache_write 0 → defaults to 1.25× input)\n",
+					p.Price.CacheHit, p.Price.CacheWrite, p.Price.Input, p.Price.Output, p.Price.Symbol())
 			}
 			if p.Thinking != "" {
 				fmt.Fprintf(&b, "thinking    = %q\n", p.Thinking)
@@ -333,6 +333,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	if c.Cowork.ScreenshotVLMModel != "" {
 		fmt.Fprintf(&b, "screenshot_vlm_model = %q\n", c.Cowork.ScreenshotVLMModel)
+	}
+	if c.Cowork.VoiceModel != "" {
+		fmt.Fprintf(&b, "voice_model = %q   # STT model for voice input; provider/model ref, OpenAI-compatible /audio/transcriptions\n", c.Cowork.VoiceModel)
 	}
 	if c.Cowork.ScreenshotPrompt != "" {
 		fmt.Fprintf(&b, "screenshot_prompt = %q\n", c.Cowork.ScreenshotPrompt)

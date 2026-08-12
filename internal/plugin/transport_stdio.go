@@ -392,13 +392,34 @@ func mergePathLists(primary, secondary string) string {
 	return strings.Join(out, string(os.PathListSeparator))
 }
 
+// maxMCPStdioLine caps a single JSON-RPC message line read from an MCP stdio
+// server's stdout. bufio.Reader.ReadBytes grows unboundedly per line, so a
+// malicious/buggy server emitting a multi-GB line (no '\n') would exhaust
+// memory before parseToolResult's own cap ever sees it. 16 MiB matches the HTTP
+// transport's maxHTTPBody and is far above any legitimate single JSON-RPC
+// message (parseToolResult further caps accumulated text at 1 MiB).
+const maxMCPStdioLine = 16 << 20 // 16 MiB
+
+// readBoundedLine reads one '\n'-terminated line from r, refusing lines longer
+// than maxBytes. It wraps ReadBytes with a size check so a multi-GB line (no
+// '\n') is rejected before it exhausts memory. EOF is propagated (as io.EOF, or
+// with partial data + io.EOF) so the caller can detect process exit — same
+// contract as ReadBytes.
+func readBoundedLine(r *bufio.Reader, maxBytes int) ([]byte, error) {
+	line, err := r.ReadBytes('\n')
+	if len(line) > maxBytes {
+		return nil, fmt.Errorf("MCP stdio line exceeded %d-byte limit (got %d); the server may be misbehaving", maxBytes, len(line))
+	}
+	return line, err
+}
+
 // readLoop owns stdout for the transport's lifetime: it reads one JSON-RPC
 // message per line, drops server-initiated notifications/requests (they carry a
 // method), and hands each response to the call waiting on its id. On any read
 // error it fails every pending call and exits.
 func (t *stdioTransport) readLoop() {
 	for {
-		line, err := t.stdout.ReadBytes('\n')
+		line, err := readBoundedLine(t.stdout, maxMCPStdioLine)
 		if err != nil {
 			t.failAll(err)
 			return

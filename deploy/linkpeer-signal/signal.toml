@@ -1,0 +1,26 @@
+# linkpeer-signal config. Tune for 5000-peer scale (ENGINEERING §10).
+# Place at deploy/linkpeer-signal/signal.toml on the VPS.
+
+[server]
+listen      = "127.0.0.1:8080"             # behind Caddy reverse proxy
+public_relay = "wss://signal.example.com"  # the URL clients connect to (change to your domain)
+
+[pair]
+code_ttl              = 60      # seconds
+max_fail_per_pair     = 5       # lock after 5 failed attempts
+max_fail_per_ip_per_hour = 200  # broad, anti-flood only (NAT-shared users)
+max_per_dev_per_hour  = 5       # primary anti-bruteforce dimension
+max_concurrent_per_dev = 3
+max_global            = 50000   # hard cap on in-flight pairs
+
+[session]
+ws_msg_per_sec_per_dev = 50
+ws_max_msg_bytes     = 32768
+offer_ts_skew        = 60      # seconds (WS auth freshness window)
+idle_timeout         = 90      # seconds; reaper kills unseen peers
+
+[stun]
+servers = ["stun:signal.example.com:3478"]
+
+[log]
+level = "info"   # info | warn | error | debug  (never logs business content)

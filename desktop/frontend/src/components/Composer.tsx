@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowUp, Check, Eye, FileText, Folder, Gauge, List, MessageSquare, MoreHorizontal, Pause, Play, Search, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, Eye, FileText, Folder, Gauge, List, Loader2, MessageSquare, Mic, MoreHorizontal, Pause, Play, Search, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
+import { startRecording, checkMicPermission, VoiceRecorderError, type RecordingSession } from "../lib/voiceRecorder";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { useToast } from "../lib/toast";
@@ -424,6 +425,12 @@ export function Composer({
   const [loadingPastChats, setLoadingPastChats] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [composerPrompt, setComposerPrompt] = useState<string | null>(null);
+  // Voice input state machine: idle → recording → transcribing → idle.
+  // hasVoiceModel gates the mic button visibility (only show when a voice_model
+  // is configured, per the "don't add other capabilities" constraint).
+  const [voiceState, setVoiceState] = useState<"idle" | "recording" | "transcribing">("idle");
+  const [hasVoiceModel, setHasVoiceModel] = useState(false);
+  const recorderRef = useRef<RecordingSession | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const composerCardRef = useRef<HTMLDivElement>(null);
   const intentMenuAnchorRef = useRef<HTMLButtonElement>(null);
@@ -828,6 +835,115 @@ export function Composer({
   const planModeOn = collaborationMode === "plan";
   const activeGoal = (goal ?? "").trim();
   const goalModeOn = collaborationMode === "goal";
+
+  // Poll whether a voice model is configured (cheap backend read) so the mic
+  // button only renders when voice input is actually available — keeps the
+  // composer clean for users who haven't set one up ("don't add other
+  // capabilities" until it's configured).
+  useEffect(() => {
+    let cancelled = false;
+    app.VoiceModelConfigured().then((ok) => { if (!cancelled) setHasVoiceModel(ok); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // Inserts the transcribed text at the textarea caret (or appends when the
+  // textarea isn't mounted), then restores focus + caret to just after the
+  // inserted span so the user can keep typing. Prepends a space when the
+  // preceding char isn't whitespace, so the transcript flows into existing text.
+  const insertTranscriptAtCursor = useCallback((insert: string) => {
+    const before = text.slice(0, lastSelectionRef.current.start);
+    const piece = insert && before && !/\s$/.test(before) ? " " + insert : insert;
+    setText((prev) => {
+      const ta = taRef.current;
+      if (!ta) return prev + piece;
+      const { start, end } = lastSelectionRef.current;
+      const next = prev.slice(0, start) + piece + prev.slice(end);
+      const caret = start + piece.length;
+      requestAnimationFrame(() => {
+        ta.focus();
+        try { ta.setSelectionRange(caret, caret); } catch { /* range race */ }
+      });
+      return next;
+    });
+  }, [text]);
+
+  // Mic button click drives the idle → recording → transcribing → idle state
+  // machine. On stop, the recorded wav is sent to the backend and the transcript
+  // is inserted at the caret. Permission/device errors surface as a non-fatal
+  // toast (matching the paste error pattern) and never clear the textarea.
+  // finishTranscription is shared by the manual stop and the VAD auto-stop:
+  // send the recorded wav to the backend, insert the transcript at the caret,
+  // and reset to idle. recorderRef is the "who handles this stop" lock — see
+  // onMicClick's manual branch and startRecording's onAutoStop for the race rule.
+  const finishTranscription = async (wavDataURL: string) => {
+    setVoiceState("transcribing");
+    try {
+      const transcript = (await app.TranscribeAudio(wavDataURL, "auto")).trim();
+      if (transcript) insertTranscriptAtCursor(transcript);
+    } catch (e: any) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showToast(t("composer.voiceTranscribeFailed") + (msg ? ": " + msg : ""), "warn");
+    } finally {
+      setVoiceState("idle");
+      // Re-check config: the user may have opened Settings and changed the
+      // voice model while the mic was active.
+      app.VoiceModelConfigured().then(setHasVoiceModel).catch(() => {});
+    }
+  };
+
+  const onMicClick = async () => {
+    if (voiceState === "idle") {
+      // Pre-check the permission state when the webview's Permissions API
+      // supports it. If access is already explicitly denied (system level),
+      // getUserMedia would fail anyway — skip straight to the system-settings
+      // hint instead of putting the user through a confusing retry loop.
+      const perm = await checkMicPermission();
+      if (perm === "denied") {
+        showToast(t("composer.voiceDeniedSystem"), "warn");
+        return;
+      }
+      try {
+        recorderRef.current = await startRecording({
+          // VAD: auto-stop after 3s of silence (the user finished their
+          // sentence) and a 60s hard cap (forgot to stop). On auto-stop we
+          // transcribe the same way as a manual stop — the user just talks
+          // and the text appears, no second click needed.
+          silenceSeconds: 3,
+          maxSeconds: 60,
+          onAutoStop: (dataURL) => {
+            // Take the lock and transcribe. If the user already stopped manually
+            // (lock null), bail to avoid a double transcribe.
+            if (!recorderRef.current) return;
+            recorderRef.current = null;
+            void finishTranscription(dataURL);
+          },
+        });
+        setVoiceState("recording");
+      } catch (e) {
+        const err = e as VoiceRecorderError;
+        const hint = err?.kind === "denied" ? t("composer.voiceDenied")
+          : err?.kind === "notfound" ? t("composer.voiceNotFound")
+          : err?.kind === "unsupported" ? t("composer.voiceUnsupported")
+          : t("composer.voiceFailed");
+        showToast(hint, "warn");
+      }
+    } else if (voiceState === "recording") {
+      // Manual stop: take the lock so a racing auto-stop bails. session.stop()
+      // resolves even if auto-stop already began (shared promise in the recorder),
+      // but the lock check prevents a double transcribe.
+      const session = recorderRef.current;
+      if (!session) return;
+      recorderRef.current = null;
+      try {
+        const wavDataURL = await session.stop();
+        await finishTranscription(wavDataURL);
+      } catch (e: any) {
+        const msg = e instanceof Error ? e.message : String(e);
+        showToast(t("composer.voiceFailed") + (msg ? ": " + msg : ""), "warn");
+        setVoiceState("idle");
+      }
+    }
+  };
 
   const submit = async () => {
     if (disabled || submittingRef.current) return;
@@ -1930,6 +2046,24 @@ export function Composer({
             <span className="composer__prompt" role="status">
               {composerPrompt}
             </span>
+          )}
+          {!running && hasVoiceModel && (
+            <Tooltip label={voiceState === "recording" ? t("composer.voiceStop") : voiceState === "transcribing" ? t("composer.voiceTranscribing") : t("composer.voiceStart")}>
+              <button
+                className={`composer__btn composer__btn--voice${voiceState === "recording" ? " composer__btn--voice-recording" : ""}`}
+                onClick={() => void onMicClick()}
+                disabled={voiceState === "transcribing" || disabled || submitting}
+                aria-label={t("composer.voiceStart")}
+              >
+                {voiceState === "transcribing" ? (
+                  <Loader2 size={16} className="composer__spin" />
+                ) : voiceState === "recording" ? (
+                  <Square size={12} fill="currentColor" />
+                ) : (
+                  <Mic size={16} />
+                )}
+              </button>
+            </Tooltip>
           )}
           {!running && (
             <Tooltip label={t("composer.send")}>

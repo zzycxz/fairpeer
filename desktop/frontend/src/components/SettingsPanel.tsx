@@ -299,7 +299,7 @@ function MobileSection() {
   const [pairing, setPairing] = useState(false);
   const [qrURL, setQrURL] = useState("");
   const [code, setCode] = useState("");
-  const [status, setStatus] = useState<{ enabled?: boolean; pending?: { PairID: string; DevC: string; FpC: string }[] }>({});
+  const [status, setStatus] = useState<{ enabled?: boolean; connected?: boolean; signal_url?: string; pending?: { PairID: string; DevC: string; FpC: string }[] }>({});
   const [err, setErr] = useState("");
 
   const startPairing = async () => {
@@ -315,7 +315,7 @@ function MobileSection() {
   };
 
   const refreshStatus = async () => {
-    try { setStatus((await app.MobileBridgeStatus()) as { enabled?: boolean; pending?: any[] }); } catch { /* ignore */ }
+    try { setStatus((await app.MobileBridgeStatus()) as { enabled?: boolean; connected?: boolean; signal_url?: string; pending?: any[] }); } catch { /* ignore */ }
   };
 
   useEffect(() => {
@@ -337,6 +337,7 @@ function MobileSection() {
               <QRCodeSVG value={qrURL} size={196} marginSize={1} className="mobile-pair-panel__qr-code" />
               <div className="mobile-pair-panel__code">配对码：<strong>{code}</strong></div>
               <button className="btn btn--secondary btn--small" onClick={() => { try { navigator.clipboard?.writeText(qrURL); } catch { /* ignore */ } }}>复制配对链接</button>
+              <div className="mobile-pair-panel__url" title={qrURL}>{qrURL}</div>
             </>
           ) : (
             <button className="btn btn--primary" onClick={startPairing} disabled={pairing}>
@@ -346,8 +347,18 @@ function MobileSection() {
         </div>
         <div className="mobile-pair-panel__body">
           <div className="mobile-pair-panel__title">linkpeer 移动伴侣端</div>
+          <div className="mobile-pair-panel__status">
+            {status.enabled ? (
+              <span className={status.connected ? "mobile-pair-panel__dot mobile-pair-panel__dot--ok" : "mobile-pair-panel__dot mobile-pair-panel__dot--warn"} />
+            ) : (
+              <span className="mobile-pair-panel__dot mobile-pair-panel__dot--off" />
+            )}
+            {status.enabled
+              ? (status.connected ? `已连接信令 · ${status.signal_url ?? ""}` : `正在连接信令… · ${status.signal_url ?? ""}`)
+              : "桥接未启用"}
+          </div>
           <p className="mobile-pair-panel__desc">
-            用 linkpeer App 扫描左侧二维码，或在 App「我的 → 扫码配对」粘贴配对链接。两端经云端信令敲门后建立 WebRTC P2P 直连，业务流量全程端到端加密（AES-256-GCM）。
+            用 linkpeer App 扫描左侧二维码，或在 App「我的 → 扫码配对」粘贴配对链接（桌面 linkpeer 可直接复制上方链接）。两端经云端信令敲门后建立 WebRTC P2P 直连，业务流量全程端到端加密（AES-256-GCM）。
           </p>
           {pending.length > 0 && (
             <div className="mobile-pair-panel__pending">
@@ -363,7 +374,8 @@ function MobileSection() {
               ))}
             </div>
           )}
-          {!status.enabled && <div className="mobile-pair-panel__hint">移动端桥接未启用（启动 fairpeer 时未连接信令服务，或未设 LINKPEER_SIGNAL 环境变量）</div>}
+          {!status.enabled && <div className="mobile-pair-panel__hint">移动端桥接未启用：请在 config.toml 添加 [mobilebridge] 段并设置 signal_url，或用 LINKPEER_SIGNAL 环境变量。</div>}
+          {status.enabled && !status.connected && <div className="mobile-pair-panel__hint">信令连接尚未建立 —— 检查 K (signal_url) 是否在线，或等待重连。</div>}
           {err && <div className="banner banner--error">{err}</div>}
         </div>
       </div>

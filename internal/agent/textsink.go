@@ -189,7 +189,7 @@ func FormatUsageLine(u *provider.Usage, p *provider.Pricing, d *event.CacheDiagn
 	cacheCol := ""
 	if u.PromptTokens > 0 {
 		cached := u.CacheHitTokens
-		fresh := u.CacheMissTokens
+		fresh := u.CacheMissTokens + u.CacheWriteTokens // "new" = non-hit (uncached input + cache writes)
 		if fresh == 0 {
 			if d := u.PromptTokens - cached; d > 0 {
 				fresh = d

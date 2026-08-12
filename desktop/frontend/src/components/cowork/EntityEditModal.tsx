@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 
 import { app } from "../../lib/bridge";
+import { useT } from "../../lib/i18n";
 import { useToast } from "../../lib/toast";
 import type { EntityDetailView } from "../../lib/types";
 
@@ -20,6 +21,7 @@ export interface EntityEditModalProps {
 }
 
 export function EntityEditModal({ collection, entity, onClose, onSave }: EntityEditModalProps) {
+  const t = useT();
   const { showToast } = useToast();
   const [nameRaw, setNameRaw] = useState(entity.nameRaw);
   const [typ, setTyp] = useState(entity.type);
@@ -79,7 +81,7 @@ export function EntityEditModal({ collection, entity, onClose, onSave }: EntityE
       onSave();
       onClose();
     } catch (e) {
-      showToast(`保存失败：${e}`, "error");
+      showToast(`${t("entityEdit.saveFailed")}: ${e}`, "error");
     } finally {
       setSaving(false);
     }
@@ -95,7 +97,7 @@ export function EntityEditModal({ collection, entity, onClose, onSave }: EntityE
       onSave();
       onClose();
     } catch (e) {
-      showToast(`合并失败：${e}`, "error");
+      showToast(`${t("entityEdit.mergeFailed")}: ${e}`, "error");
     } finally {
       setSaving(false);
     }
@@ -105,7 +107,7 @@ export function EntityEditModal({ collection, entity, onClose, onSave }: EntityE
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal rag-edit-modal" onClick={(e) => e.stopPropagation()}>
         <div className="rag-edit-modal__header">
-          <span className="rag-edit-modal__title">编辑实体</span>
+          <span className="rag-edit-modal__title">{t("entityEdit.editEntity")}</span>
           <button className="rag-edit-modal__close" onClick={onClose}>
             <X size={16} />
           </button>
@@ -114,7 +116,7 @@ export function EntityEditModal({ collection, entity, onClose, onSave }: EntityE
         <div className="rag-edit-modal__body">
           {/* Name */}
           <label className="rag-edit-modal__field">
-            <span className="rag-edit-modal__label">名称</span>
+            <span className="rag-edit-modal__label">{t("entityEdit.name")}</span>
             <input
               type="text"
               value={nameRaw}
@@ -125,21 +127,21 @@ export function EntityEditModal({ collection, entity, onClose, onSave }: EntityE
 
           {/* Type */}
           <label className="rag-edit-modal__field">
-            <span className="rag-edit-modal__label">类型</span>
+            <span className="rag-edit-modal__label">{t("entityEdit.type")}</span>
             <select
               value={typ}
               onChange={(e) => setTyp(e.target.value)}
               className="rag-edit-modal__select"
             >
-              {TYPE_OPTIONS.map((t) => (
-                <option key={t} value={t}>{t || "未分类"}</option>
+              {TYPE_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>{opt || t("entityEdit.unclassified")}</option>
               ))}
             </select>
           </label>
 
           {/* Description */}
           <label className="rag-edit-modal__field">
-            <span className="rag-edit-modal__label">描述</span>
+            <span className="rag-edit-modal__label">{t("entityEdit.desc")}</span>
             <textarea
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
@@ -154,18 +156,18 @@ export function EntityEditModal({ collection, entity, onClose, onSave }: EntityE
               className="rag-edit-modal__merge-toggle"
               onClick={() => setShowMerge(!showMerge)}
             >
-              合并重复实体...
+              {t("entityEdit.mergeDuplicates")}
             </button>
 
             {showMerge && (
               <div className="rag-edit-modal__merge-body">
                 <p className="rag-edit-modal__merge-hint">
-                  勾选要合并到 "{entity.nameRaw}" 的实体，关系自动迁移
+                  {t("entityEdit.mergeHint", { name: entity.nameRaw })}
                 </p>
                 {mergeLoading ? (
-                  <p className="rag-edit-modal__merge-empty">正在分析相似实体...</p>
+                  <p className="rag-edit-modal__merge-empty">{t("entityEdit.analyzing")}</p>
                 ) : mergeCandidates.length === 0 ? (
-                  <p className="rag-edit-modal__merge-empty">未找到相似实体</p>
+                  <p className="rag-edit-modal__merge-empty">{t("entityEdit.noSimilar")}</p>
                 ) : (
                   <div className="rag-edit-modal__merge-list">
                     {mergeCandidates.map((c) => (
@@ -193,7 +195,7 @@ export function EntityEditModal({ collection, entity, onClose, onSave }: EntityE
                 )}
                 {mergeSelected.length > 0 && (
                   <p className="rag-edit-modal__merge-preview">
-                    合并后将迁移 {mergeSelected.length} 个实体的关系
+                    {t("entityEdit.mergeWillMigrate", { count: String(mergeSelected.length) })}
                   </p>
                 )}
               </div>
@@ -202,14 +204,14 @@ export function EntityEditModal({ collection, entity, onClose, onSave }: EntityE
         </div>
 
         <div className="modal__actions">
-          <button className="btn" onClick={onClose}>取消</button>
+          <button className="btn" onClick={onClose}>{t("entityEdit.cancel")}</button>
           {showMerge && mergeSelected.length > 0 ? (
             <button className="btn btn--primary" onClick={handleMerge} disabled={saving}>
-              {saving ? "合并中..." : "合并并保存"}
+              {saving ? t("entityEdit.merging") : t("entityEdit.mergeAndSave")}
             </button>
           ) : (
             <button className="btn btn--primary" onClick={handleSave} disabled={saving}>
-              {saving ? "保存中..." : "保存"}
+              {saving ? t("entityEdit.saving") : t("entityEdit.save")}
             </button>
           )}
         </div>

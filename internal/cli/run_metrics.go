@@ -15,6 +15,7 @@ type RunMetrics struct {
 	CompletionTokens              int `json:"completion_tokens"`
 	CacheHitTokens                int `json:"cache_hit_tokens"`
 	CacheMissTokens               int `json:"cache_miss_tokens"`
+	CacheWriteTokens              int `json:"cache_write_tokens"`
 	Steps                         int `json:"steps"` // model calls (one per stream, incl. tool rounds)
 	Compactions                   int `json:"compactions"`
 	ReadinessChecks               int `json:"readiness_checks"`
@@ -42,6 +43,7 @@ func (s *metricsSink) Emit(e event.Event) {
 		s.m.CompletionTokens += u.CompletionTokens
 		s.m.CacheHitTokens += u.CacheHitTokens
 		s.m.CacheMissTokens += u.CacheMissTokens
+		s.m.CacheWriteTokens += u.CacheWriteTokens
 		s.m.Steps++
 	}
 	if e.Kind == event.CompactionStarted {

@@ -29,6 +29,27 @@ type PeerConn struct {
 	conn     *websocket.Conn
 	writeMu  sync.Mutex // serialize writes — gorilla/websocket forbids concurrent WriteMessage
 	lastSeen atomic.Int64
+	// per-dev 消息速率限制（§6 ws_msg_per_sec_per_dev）：固定 1s 窗口。
+	rlMu     sync.Mutex
+	rlWindow time.Time
+	rlCount  int
+}
+
+// allowMsg 实现简单的固定窗口限流（每秒 limit 条）。超限返回 false，由调用方
+// 决定 drop 还是 close。防止恶意设备灌爆信令中转。
+func (pc *PeerConn) allowMsg(limit int) bool {
+	if limit <= 0 {
+		return true
+	}
+	pc.rlMu.Lock()
+	defer pc.rlMu.Unlock()
+	now := time.Now()
+	if now.Sub(pc.rlWindow) >= time.Second {
+		pc.rlWindow = now
+		pc.rlCount = 0
+	}
+	pc.rlCount++
+	return pc.rlCount <= limit
 }
 
 func (pc *PeerConn) send(raw []byte) error {
@@ -96,10 +117,15 @@ func verifyAuth(devIDParam, tsStr, pubB64, sigB64 string, skew time.Duration) er
 	return nil
 }
 
-func (s *SessionStore) Register(pc *PeerConn) {
+func (s *SessionStore) Register(pc *PeerConn) bool {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	// 在线 WS 硬上限（§11.2⑤）：达上限且非重连则拒绝，防内存耗尽。
+	if s.cfg.MaxPeers > 0 && s.peers[pc.DevID] == nil && len(s.peers) >= s.cfg.MaxPeers {
+		return false
+	}
 	s.peers[pc.DevID] = pc
-	s.mu.Unlock()
+	return true
 }
 
 func (s *SessionStore) Unregister(devID string) {
@@ -152,6 +178,17 @@ func (s *SessionStore) SendTo(devID string, raw []byte) bool {
 		return false
 	}
 	return to.send(raw) == nil
+}
+
+// BroadcastShutdown 给所有在线 peer 发 server_shutdown 通知（§13.2），让客户端
+// 立即按 retry_after 重连，而不是等 WS 自然断 + backoff 才察觉。
+func (s *SessionStore) BroadcastShutdown(retryAfter int) {
+	msg, _ := json.Marshal(map[string]any{"type": "server_shutdown", "retry_after": retryAfter})
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, pc := range s.peers {
+		_ = pc.send(msg)
+	}
 }
 
 // SweepIdle reaps peers unseen within timeout. Caller runs it periodically.

@@ -68,6 +68,10 @@ type CoWorkSettingsView struct {
 	ScreenshotHotkey   string `json:"screenshotHotkey"`
 	ScreenshotVLMModel string `json:"screenshotVlmModel"`
 	ScreenshotPrompt   string `json:"screenshotPrompt"`
+	// VoiceModel is the provider/model ref for speech-to-text (voice input +
+	// audio attachment understanding), e.g. "mimo/mimo-v2.5-asr". Empty = voice
+	// input disabled. Mirrors [cowork] voice_model.
+	VoiceModel string `json:"voiceModel"`
 	// EStopHotkey is the global emergency-stop combo for desktop automation.
 	EStopHotkey string `json:"estopHotkey"`
 	// EmailAccounts is the multi-mailbox list. When non-empty it is the source of
@@ -145,6 +149,7 @@ func coworkSettingsView(c config.CoworkConfig) CoWorkSettingsView {
 		ScreenshotHotkey:   c.ScreenshotHotkey,
 		ScreenshotVLMModel: c.ScreenshotVLMModel,
 		ScreenshotPrompt:   c.ScreenshotPrompt,
+		VoiceModel:         c.VoiceModel,
 		EStopHotkey:        c.EStopHotkey,
 		SMTP: SMTPSettings{
 			Host:           smtp.Host,
@@ -368,6 +373,7 @@ func (a *App) SetCoWorkSettings(v CoWorkSettingsView) (err error) {
 		c.Cowork.ScreenshotHotkey = strings.TrimSpace(v.ScreenshotHotkey)
 		c.Cowork.ScreenshotVLMModel = strings.TrimSpace(v.ScreenshotVLMModel)
 		c.Cowork.ScreenshotPrompt = v.ScreenshotPrompt
+		c.Cowork.VoiceModel = strings.TrimSpace(v.VoiceModel)
 		c.Cowork.EStopHotkey = strings.TrimSpace(v.EStopHotkey)
 		smtp := config.SMTPConfig{
 			Host:           strings.TrimSpace(v.SMTP.Host),
@@ -487,6 +493,10 @@ func (a *App) SetCoWorkSettings(v CoWorkSettingsView) (err error) {
 	// updated config without requiring a restart.
 	if freshCfg, err := config.Load(); err == nil {
 		builtin.SetEmailAccounts(freshCfg.Cowork.EmailAccounts)
+		// Hot-reload the voice model so the mic button picks up the new STT
+		// model without a restart (boot.Build would otherwise only re-inject
+		// on profile switch).
+		builtin.SetVoiceModel(freshCfg.Cowork.VoiceModel)
 		slog.Info("SetCoWorkSettings done", "savedAccounts", len(freshCfg.Cowork.EmailAccounts))
 	} else {
 		slog.Warn("SetCoWorkSettings: reload config failed", "err", err)

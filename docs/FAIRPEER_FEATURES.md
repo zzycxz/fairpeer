@@ -104,7 +104,7 @@
 │  grep          │ 搜索文件内容（ripgrep 或原生 Go）      │
 │  glob          │ 文件模式匹配                           │
 │  web_fetch     │ 抓取 URL 内容（代理感知，SSRF 防护）   │
-│  web_search    │ 网页搜索（Brave → Exa → Linkup 链）    │
+│  web_search    │ 网页搜索（Brave→Exa→Linkup→AnySearch）│
 │  apply_patch   │ 应用 unified diff 补丁                 │
 │  todo_write    │ 任务列表追踪                           │
 │  task          │ 生成子 agent                           │

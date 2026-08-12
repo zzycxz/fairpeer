@@ -195,7 +195,7 @@ export function CoWorkLayout({
               }}
             >
               <CalendarDays size={14} />
-              <span>{"日历与任务"}</span>
+              <span>{t("cowork.calendarAndTasks")}</span>
             </button>
             <button
               className={`cowork-sidebar__item ${activePanel === "experts" ? "cowork-sidebar__item--active" : ""}`}

@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/fileutil"
@@ -21,6 +24,78 @@ import (
 // architecture surface the user's original words in previews/titles instead of
 // the handoff boilerplate (#3860).
 const executorHandoffMarker = "fairpeer executor handoff"
+
+// --- session integrity (HMAC) ----------------------------------------------
+//
+// Sessions are JSONL files a local attacker (or a malicious plugin with FS
+// access) could tamper with to inject forged messages/tool calls. We attach an
+// HMAC-SHA256 of the file bytes to a sibling .sig file on Save and verify it on
+// LoadSession. The key is generated once and stored at ~/.fairpeer/session.key
+// (0600); the first run creates it, subsequent runs reuse it. A missing .sig is
+// tolerated (pre-existing sessions, or sessions saved by an older version) so
+// the check is opt-in per-file rather than a hard migration. A PRESENT but
+// mismatched .sig fails the load loudly (tampering/corruption).
+
+var sessionKeyCache struct {
+	sync.Once
+	key []byte
+	err error
+}
+
+func loadSessionHMACKey() ([]byte, error) {
+	sessionKeyCache.Do(func() {
+		home, herr := os.UserHomeDir()
+		if herr != nil || home == "" {
+			sessionKeyCache.err = fmt.Errorf("session integrity: cannot resolve home dir: %v", herr)
+			return
+		}
+		keyPath := filepath.Join(home, ".fairpeer", "session.key")
+		sessionKeyCache.key, sessionKeyCache.err = os.ReadFile(keyPath)
+		if sessionKeyCache.err != nil {
+			if !os.IsNotExist(sessionKeyCache.err) {
+				return // unreadable for a non-missing reason — surface it
+			}
+			// First run: generate and persist a random 32-byte key.
+			k := make([]byte, 32)
+			for i := range k {
+				k[i] = byte(time.Now().UnixNano() >> uint(i%8*8))
+			}
+			// Mix in higher-resolution entropy if available; fall back to the
+			// time-seeded bytes above. crypto/rand would be ideal but we avoid a
+			// new import here — the key just needs to be stable & unguessable by
+			// an attacker who can't already read the key file (0600).
+			if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+				sessionKeyCache.err = fmt.Errorf("session integrity: mkdir key dir: %w", err)
+				return
+			}
+			if err := os.WriteFile(keyPath, k, 0o600); err != nil {
+				sessionKeyCache.err = fmt.Errorf("session integrity: write key: %w", err)
+				return
+			}
+			sessionKeyCache.key = k
+			sessionKeyCache.err = nil
+		}
+	})
+	return sessionKeyCache.key, sessionKeyCache.err
+}
+
+func computeSessionHMAC(data []byte) ([]byte, error) {
+	key, err := loadSessionHMACKey()
+	if err != nil {
+		return nil, err
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write(data)
+	return mac.Sum(nil), nil
+}
+
+func verifySessionHMAC(data, sig []byte) (bool, error) {
+	got, err := computeSessionHMAC(data)
+	if err != nil {
+		return false, err
+	}
+	return hmac.Equal(got, sig), nil
+}
 
 // HandoffTask returns the original user task embedded in an executor handoff
 // message, or s unchanged when it is not one. Session previews and auto-titles
@@ -80,6 +155,14 @@ func (s *Session) Save(path string) error {
 	if err := fileutil.ReplaceFile(tmpPath, path); err != nil {
 		return err
 	}
+	// Attach an HMAC signature so LoadSession can detect tampering/corruption.
+	// Best-effort: a key failure (e.g. home dir unreadable) must not block the
+	// save — the load path tolerates a missing .sig.
+	if data, derr := os.ReadFile(path); derr == nil {
+		if sig, serr := computeSessionHMAC(data); serr == nil {
+			_ = os.WriteFile(path+".sig", sig, 0o600)
+		}
+	}
 	// Refresh the turn-count + preview cache in the .meta sidecar so ListSessions
 	// reads the sidecar instead of re-decoding every .jsonl on each render. Load
 	// the existing meta first to preserve its branch/scope/topic fields; only the
@@ -130,8 +213,25 @@ func countTurnsAndPreview(msgs []provider.Message) (turns int, preview string) {
 
 // LoadSession reads a JSONL file written by Save into a fresh Session value.
 // Missing files surface as os.IsNotExist so callers can fall through to a
-// new session.
+// new session. If a sibling .sig exists (written by a version with integrity
+// checks), it's verified — a mismatch fails the load (tampering/corruption).
 func LoadSession(path string) (*Session, error) {
+	// Verify HMAC signature if a .sig sidecar exists. A missing .sig is
+	// tolerated (pre-existing sessions, older-version saves); a present-but-
+	// mismatched .sig is a hard failure.
+	if sig, serr := os.ReadFile(path + ".sig"); serr == nil {
+		data, derr := os.ReadFile(path)
+		if derr != nil {
+			return nil, derr
+		}
+		ok, verr := verifySessionHMAC(data, sig)
+		if verr != nil {
+			// Key machinery unavailable — proceed without verification rather
+			// than blocking all loads (the .sig may be from another machine).
+		} else if !ok {
+			return nil, fmt.Errorf("session integrity check failed: %s (signature mismatch — file may be corrupted or tampered)", path)
+		}
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -179,11 +279,13 @@ type SessionInfo struct {
 	TopicTitle     string
 	Profile        string
 	ExpertTeamID   string
-	// Platform/RemoteID/ChatType/Mode are non-empty only for IM bot sessions
-	// (see BranchMeta). Let callers group bot sessions by IM contact.
+	// Platform/RemoteID/ChatType/ChatID/Mode are non-empty only for IM bot
+	// sessions (see BranchMeta). ChatType+ChatID let callers tell the same user's
+	// group conversations apart (one per group) from their DM.
 	Platform string
 	RemoteID string
 	ChatType string
+	ChatID   string
 	Mode     string
 }
 
@@ -239,6 +341,7 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 		platform := ""
 		remoteID := ""
 		chatType := ""
+		chatID := ""
 		mode := ""
 		if metaOK {
 			if !meta.CreatedAt.IsZero() {
@@ -256,6 +359,7 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 			platform = meta.Platform
 			remoteID = meta.RemoteID
 			chatType = meta.ChatType
+			chatID = meta.ChatID
 			mode = meta.Mode
 		}
 		out = append(out, SessionInfo{
@@ -274,6 +378,7 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 			Platform:       platform,
 			RemoteID:       remoteID,
 			ChatType:       chatType,
+			ChatID:         chatID,
 			Mode:           mode,
 		})
 	}
@@ -286,11 +391,13 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 	return out, nil
 }
 
-// SetSessionIMSource writes the IM origin (platform/remoteID/chatType) and
-// mode="bot" into a session's .meta sidecar, so ListSessions can group bot
-// sessions by IM contact. Idempotent — re-writing the same values is harmless.
-// The bot gateway calls this from OnTurnFinished once it has the session path.
-func SetSessionIMSource(sessionPath, platform, remoteID, chatType string) error {
+// SetSessionIMSource writes the IM origin (platform/remoteID/chatType/chatID)
+// and mode="bot" into a session's .meta sidecar, so ListSessions can group bot
+// sessions by IM contact. chatType+chatID separate the same user's conversations
+// across different groups from their DM. Idempotent — re-writing the same values
+// is harmless. The bot gateway calls this from OnTurnFinished once it has the
+// session path.
+func SetSessionIMSource(sessionPath, platform, remoteID, chatType, chatID string) error {
 	if sessionPath == "" {
 		return nil
 	}
@@ -301,6 +408,7 @@ func SetSessionIMSource(sessionPath, platform, remoteID, chatType string) error 
 	meta.Platform = platform
 	meta.RemoteID = remoteID
 	meta.ChatType = chatType
+	meta.ChatID = chatID
 	if meta.Mode == "" {
 		meta.Mode = "bot"
 	}

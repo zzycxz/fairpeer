@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { asArray } from "../lib/array";
 import { app, openExternal } from "../lib/bridge";
 import { useT } from "../lib/i18n";
@@ -27,6 +27,7 @@ export function CapabilitiesPanel({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [mcpSubtab, setMcpSubtab] = useState<"builtin" | "market">("builtin");
   const [editing, setEditing] = useState<string | null>(null);
   const [tab, setTab] = useState<CapTab>(initialTab);
   const [skillQuery, setSkillQuery] = useState("");
@@ -176,6 +177,14 @@ export function CapabilitiesPanel({
 
             {tab === "servers" ? (
               <section className="mem-section">
+                <div className="settings-subtabs">
+                  <button type="button" className={`settings-subtab${mcpSubtab === "builtin" ? " settings-subtab--active" : ""}`} aria-selected={mcpSubtab === "builtin"} onClick={() => setMcpSubtab("builtin")}>{t("caps.mcpTabBuiltin")}</button>
+                  <button type="button" className={`settings-subtab${mcpSubtab === "market" ? " settings-subtab--active" : ""}`} aria-selected={mcpSubtab === "market"} onClick={() => setMcpSubtab("market")}>{t("caps.mcpTabMarket")}</button>
+                </div>
+                {mcpSubtab === "market" ? (
+                  <McpMarketSection busy={busy} installedNames={new Set(view.servers.map((s) => s.name))} onInstalled={() => void reload()} />
+                ) : (
+                  <>
                 <div className="cap-mcp-toolbar cap-mcp-toolbar--drawer">
                   {!adding && (
                     <button className="btn btn--small" disabled={busy} onClick={() => setAdding(true)}>
@@ -237,14 +246,10 @@ export function CapabilitiesPanel({
                         onAdd={(input) => void mutate(() => app.AddMCPServer(input).then(() => setAdding(false)))}
                       />
                     </div>
-                    <div style={{ flex: "1 1 400px" }}>
-                      <CuratedMcpList
-                        busy={busy}
-                        onAdd={(input) => void mutate(() => app.AddMCPServer(input).then(() => setAdding(false)))}
-                      />
-                    </div>
                   </div>
                 ) : null}
+                  </>
+                )}
               </section>
             ) : (
               <section className="mem-section">
@@ -1465,57 +1470,6 @@ function AddServerForm({
   );
 }
 
-function CuratedMcpList({
-	busy,
-	onAdd,
-}: {
-	busy: boolean;
-	onAdd: (input: MCPServerInput) => void;
-}) {
-	const t = useT();
-	const [results, setResults] = useState<CatalogEntry[] | null>(null);
-
-	useEffect(() => {
-		app.SkillMarketSearch("", "builtin-mcp").then(res => setResults(res || []));
-	}, []);
-
-	if (results === null) return null;
-
-	return (
-		<div className="prov-card prov-card--edit" style={{ marginTop: 16 }}>
-			<h3 className="cap-list__heading" style={{ marginBottom: "16px" }}>{t("caps.mcpCuratedTitle", { defaultValue: "官方精选 MCP Servers" })}</h3>
-			<div className="cap-skills" style={{ maxHeight: "400px", overflowY: "auto" }}>
-				{results.map((e, i) => (
-					<div key={`mcp-${e.name}-${i}`} className="cap-skill-card">
-						<div className="cap-skill-card__head">
-							<span className="cap-skill-card__name">{e.name}</span>
-							<div style={{ flex: 1 }} />
-							<button
-								className="btn btn--small btn--primary"
-								disabled={busy}
-								onClick={() => {
-									const parts = e.installRef.trim().split(/\s+/).filter(Boolean);
-									onAdd({
-										name: e.name,
-										transport: "stdio",
-										command: parts[0] || "npx",
-										args: parts.slice(1),
-										url: "",
-										env: {},
-									});
-								}}
-							>
-								{t("caps.install", { defaultValue: "安装" })}
-							</button>
-						</div>
-						<div className="cap-skill-card__desc">{e.description}</div>
-					</div>
-				))}
-			</div>
-		</div>
-	);
-}
-
 // MCPServersSettingsPage is a self-contained MCP servers management page
 // embedded inside the settings centre.
 export function MCPServersSettingsPage({ initialHighlight }: { initialHighlight?: string }) {
@@ -1528,6 +1482,7 @@ export function MCPServersSettingsPage({ initialHighlight }: { initialHighlight?
 	const [expandedErrors, setExpandedErrors] = useState<Set<string>>(() => new Set());
 	const [expandedServers, setExpandedServers] = useState<Set<string>>(() => new Set(initialHighlight ? [initialHighlight] : []));
 	const [expandedServerTools, setExpandedServerTools] = useState<Set<string>>(() => new Set());
+	const [mcpSubtab, setMcpSubtab] = useState<"builtin" | "market">("builtin");
 
 	const reload = useCallback(async () => {
 		setView(normalizeCapabilitiesView(await app.Capabilities().catch(() => ({ servers: [], skills: [], skillRoots: [] }))));
@@ -1583,7 +1538,15 @@ export function MCPServersSettingsPage({ initialHighlight }: { initialHighlight?
 	return (
 		<section className="mem-section">
 			{err && serverGroups.failed.length === 0 && <div className="banner banner--error">{err}</div>}
-			<div className="cap-mcp-toolbar">
+			<div className="settings-subtabs">
+				<button type="button" className={`settings-subtab${mcpSubtab === "builtin" ? " settings-subtab--active" : ""}`} aria-selected={mcpSubtab === "builtin"} onClick={() => setMcpSubtab("builtin")}>{t("caps.mcpTabBuiltin")}</button>
+				<button type="button" className={`settings-subtab${mcpSubtab === "market" ? " settings-subtab--active" : ""}`} aria-selected={mcpSubtab === "market"} onClick={() => setMcpSubtab("market")}>{t("caps.mcpTabMarket")}</button>
+			</div>
+			{mcpSubtab === "market" ? (
+				<McpMarketSection busy={busy} installedNames={new Set(view.servers.map((s) => s.name))} onInstalled={() => void reload()} />
+			) : (
+				<>
+					<div className="cap-mcp-toolbar">
 				{view.servers.length > 0 ? <div className="drawer__summary">{summary}</div> : <span />}
 				<div className="cap-mcp-toolbar__actions">
 					{!adding && (
@@ -1645,15 +1608,252 @@ export function MCPServersSettingsPage({ initialHighlight }: { initialHighlight?
 									onAdd={(input) => void mutate(() => app.AddMCPServer(input).then(() => setAdding(false)))}
 								/>
 							</div>
-							<div style={{ flex: "1 1 400px" }}>
-								<CuratedMcpList
-									busy={busy}
-									onAdd={(input) => void mutate(() => app.AddMCPServer(input).then(() => setAdding(false)))}
-								/>
-							</div>
-						</div>
-					)}
+				</div>
+			)}
+				</>
+			)}
 		</section>
+	);
+}
+
+// MarketCard is the unified shape McpMarketSection renders: builtin-curated
+// entries (installRef = npx command) and official-Registry entries (command/args
+// or url) collapse into one card carrying a closure that builds the MCPServerInput.
+type MarketCard = {
+	key: string;
+	name: string;
+	installName: string;
+	desc: string;
+	sourceLabel: string;
+	transport?: string;
+	installable: boolean;
+	unavailableReason?: string;
+	registryName?: string;
+	buildInput: () => MCPServerInput;
+};
+
+// McpMarketSection is the MCP "remote marketplace" tab: browse the official MCP
+// Registry and the builtin curated list, search, and install any server straight
+// into config with one click — the same AddMCPServer path as manual add.
+function McpMarketSection({
+	busy,
+	installedNames,
+	onInstalled,
+}: {
+	busy: boolean;
+	installedNames: Set<string>;
+	onInstalled: () => void;
+}) {
+	const t = useT();
+	const [query, setQuery] = useState("");
+	const [source, setSource] = useState<"" | "builtin" | "registry">("");
+	const [searching, setSearching] = useState(false);
+	const [cards, setCards] = useState<MarketCard[] | null>(null);
+	const [err, setErr] = useState<string | null>(null);
+	const [installing, setInstalling] = useState<string | null>(null);
+	const [installMsg, setInstallMsg] = useState<string | null>(null);
+	const [registryNote, setRegistryNote] = useState<string | null>(null);
+	const genRef = useRef(0);
+
+	const sourceLabel = useCallback((id: string) => {
+		switch (id) {
+			case "builtin": return t("caps.mcpMarketSourceBuiltin");
+			case "registry": return t("caps.mcpMarketSourceRegistry");
+			default: return id;
+		}
+	}, [t]);
+
+	const buildCards = useCallback(async (q: string, src: string): Promise<MarketCard[]> => {
+		const out: MarketCard[] = [];
+		if (src === "" || src === "builtin") {
+			try {
+				const entries = await app.SkillMarketSearch(q, "builtin-mcp");
+				for (const e of (entries || [])) {
+					const parts = (e.installRef || "").trim().split(/\s+/).filter(Boolean);
+					const name = e.name;
+					out.push({
+						key: `builtin:${name}`,
+						name,
+						installName: name,
+						desc: e.description,
+						sourceLabel: sourceLabel("builtin"),
+						installable: parts.length > 0,
+						buildInput: () => ({ name, transport: "stdio", command: parts[0] || "npx", args: parts.slice(1), url: "" }),
+					});
+				}
+			} catch { /* builtin is offline-curated; never blocks */ }
+		}
+		if (src === "" || src === "registry") {
+			try {
+				setRegistryNote(null);
+				const view = await app.MCPRegistrySearch(q);
+				if (view.warning) {
+					setRegistryNote(view.cached ? t("caps.mcpMarketRegistryCached", { msg: view.warning }) : view.warning);
+				}
+				for (const e of (view.servers || [])) {
+					const suggested = e.suggestedName || e.name;
+					out.push({
+						key: `registry:${e.name}`,
+						name: e.title || suggested,
+						installName: suggested,
+						registryName: e.name,
+						desc: e.description || "",
+						sourceLabel: sourceLabel("registry"),
+						transport: e.transport,
+						installable: e.installable,
+						unavailableReason: e.unavailableReason,
+						buildInput: () => ({
+							name: suggested,
+							transport: e.transport === "http" || e.transport === "sse" ? e.transport : "stdio",
+							command: e.command || "",
+							args: e.args || [],
+							url: e.url || "",
+						}),
+					});
+				}
+			} catch (e) {
+				setErr(String((e as Error)?.message ?? e));
+			}
+		}
+		return out;
+	}, [sourceLabel, t]);
+
+	const doSearch = useCallback(async (q: string, src: string) => {
+		const gen = ++genRef.current;
+		setSearching(true);
+		setErr(null);
+		setInstallMsg(null);
+		setRegistryNote(null);
+		try {
+			const next = await buildCards(q, src);
+			if (gen !== genRef.current) return; // a newer search superseded this one
+			setCards(next);
+		} finally {
+			if (gen === genRef.current) setSearching(false);
+		}
+	}, [buildCards]);
+
+	// Load on mount and whenever the selected source changes. Query is applied on
+	// Enter / button click so the Registry isn't hit on every keystroke.
+	useEffect(() => {
+		void doSearch(query, source);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [doSearch, source]);
+
+	const doInstall = useCallback(async (card: MarketCard) => {
+		setInstalling(card.key);
+		setErr(null);
+		setInstallMsg(null);
+		try {
+			let input = card.buildInput();
+			// Registry installs must use freshly fetched metadata, never the disk
+			// cache — a cached package may have been removed or changed since store.
+			if (card.registryName) {
+				const fresh = await app.MCPRegistryResolve(card.registryName);
+				input = {
+					name: fresh.suggestedName || fresh.name,
+					transport: fresh.transport === "http" || fresh.transport === "sse" ? fresh.transport : "stdio",
+					command: fresh.command || "",
+					args: fresh.args || [],
+					url: fresh.url || "",
+				};
+			}
+			await app.AddMCPServer(input);
+			setInstallMsg(t("caps.mcpMarketInstalled", { name: card.name }));
+			onInstalled();
+		} catch (e) {
+			setErr(t("caps.mcpMarketInstallFailed", { msg: String((e as Error)?.message ?? e) }));
+		} finally {
+			setInstalling(null);
+		}
+	}, [onInstalled, t]);
+
+	const doUninstall = useCallback(async (card: MarketCard) => {
+		setInstalling(card.key);
+		setErr(null);
+		setInstallMsg(null);
+		try {
+			await app.RemoveMCPServer(card.installName);
+			setInstallMsg(t("caps.mcpMarketUninstalled", { name: card.name }));
+			onInstalled(); // shared reload callback — refreshes installed badges
+		} catch (e) {
+			setErr(t("caps.mcpMarketUninstallFailed", { msg: String((e as Error)?.message ?? e) }));
+		} finally {
+			setInstalling(null);
+		}
+	}, [onInstalled, t]);
+
+	return (
+		<div className="cap-market" style={{ marginTop: "16px" }}>
+			<div className="cap-search" style={{ marginBottom: "12px", display: "flex", gap: "8px" }}>
+				<select className="mem-input" style={{ flex: "0 0 150px", width: "150px", margin: 0 }} value={source} onChange={(e) => setSource(e.target.value as "" | "builtin" | "registry")}>
+					<option value="">{t("caps.mcpMarketSourceAll")}</option>
+					<option value="builtin">{t("caps.mcpMarketSourceBuiltin")}</option>
+					<option value="registry">{t("caps.mcpMarketSourceRegistry")}</option>
+				</select>
+				<input
+					className="mem-input"
+					style={{ flex: 1, margin: 0 }}
+					type="search"
+					placeholder={t("caps.mcpSearchPlaceholder")}
+					value={query}
+					onChange={(e) => setQuery(e.target.value)}
+					onKeyDown={(e) => { if (e.key === "Enter") void doSearch(query, source); }}
+				/>
+				<button className="btn btn--small" style={{ margin: 0 }} disabled={searching} onClick={() => void doSearch(query, source)}>
+					{searching ? t("caps.mcpSearching") : t("caps.mcpSearch")}
+				</button>
+			</div>
+			{registryNote && <div className="banner" role="status" style={{ marginBottom: "8px" }}>{registryNote}</div>}
+			{err && <div className="banner banner--error" role="alert" style={{ marginBottom: "8px" }}>{err}</div>}
+			{installMsg && <div className="banner banner--success" style={{ marginBottom: "8px" }}>{installMsg}</div>}
+			{searching && cards === null && <div className="mem-empty">{t("caps.loading")}</div>}
+			{!searching && cards && cards.length === 0 && <div className="mem-empty">{t("caps.mcpNoResults")}</div>}
+			{cards && cards.length > 0 && (
+				<div className="cap-skills">
+					{cards.map((card) => {
+						const installed = installedNames.has(card.installName);
+						return (
+							<div key={card.key} className="cap-skill-card">
+								<div className="cap-skill-card__head">
+									<span className="cap-skill-card__name">{card.name}</span>
+									{card.transport && <span className="cap-skill-badge">{card.transport}</span>}
+									<div style={{ flex: 1 }} />
+									{installed ? (
+										<>
+											<span className="cap-skill-badge cap-skill-badge--off">{t("caps.mcpMarketInstalledBadge")}</span>
+											<InlineConfirmButton
+												label={t("caps.uninstall")}
+												confirmLabel={t("caps.confirmRemove")}
+												cancelLabel={t("common.cancel")}
+												disabled={busy || installing !== null}
+												danger
+												onConfirm={() => void doUninstall(card)}
+											/>
+										</>
+									) : card.installable ? (
+										<button
+											className="btn btn--small btn--primary"
+											disabled={busy || installing !== null}
+											onClick={() => void doInstall(card)}
+										>
+											{installing === card.key ? t("caps.marketInstalling") : t("caps.marketInstall")}
+										</button>
+									) : (
+										<span className="cap-skill-badge cap-skill-badge--off">{t("caps.mcpMarketManualSetup")}</span>
+									)}
+								</div>
+								<div className="cap-skill-card__desc">
+									{card.desc}
+									{!card.installable && card.unavailableReason ? ` — ${card.unavailableReason}` : ""}
+								</div>
+								<div className="cap-skill-card__desc" style={{ opacity: 0.6 }}>{card.sourceLabel}</div>
+							</div>
+						);
+					})}
+				</div>
+			)}
+		</div>
 	);
 }
 

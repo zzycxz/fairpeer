@@ -28,6 +28,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/zzycxz/fairpeer/internal/agent"
+	"github.com/zzycxz/fairpeer/internal/mobilebridge"
 	"github.com/zzycxz/fairpeer/internal/boot"
 	"github.com/zzycxz/fairpeer/internal/bot"
 	"github.com/zzycxz/fairpeer/internal/browseruse"
@@ -84,6 +85,11 @@ type App struct {
 	// when desktop.metrics is enabled in config). Swapped live by
 	// SetDesktopMetrics so the toggle takes effect without a restart.
 	metrics atomic.Pointer[metricsAggregator]
+
+	// mobilebridge is the linkpeer P2P bridge (nil until ensureMobileBridge
+	// completes during startup). Read atomically from tabEventSink.Emit's hot path.
+	mobilebridge atomic.Pointer[mobilebridge.Bridge]
+	botBridge    atomic.Pointer[botBridgeHub]
 
 	forceQuit           atomic.Bool
 	backgroundMaximised atomic.Bool
@@ -338,6 +344,12 @@ func (a *App) Platform() string {
 // off the initialization in a background goroutine so the webview loads immediately.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// bot desktop bridge: observe every tab's approval/ask/turn-done events and
+	// forward to subscribed IM chats. Sync init — only loads the watcher list.
+	a.botBridge.Store(newBotBridge(a))
+	// linkpeer mobile bridge: loads device key, connects to signaling K.
+	// Runs async — never blocks GUI startup. No-op if the key store can't init.
+	go a.ensureMobileBridge(ctx)
 	// Route slog to a file in the config dir so diagnostic logs (mail save,
 	// probe, panic traces) are visible in a packaged GUI build, where stdout/
 	// stderr are not attached. Truncates on each launch to avoid unbounded
@@ -519,6 +531,13 @@ func (a *App) initRAG() {
 		if err := a.heService.Start(); err != nil {
 			slog.Warn("Hyper-Extract service not started", "err", err)
 			a.heService = nil
+		} else {
+			// HE is ready — wire its embedder into RAG so rag_search reranks FTS5
+			// hits by vector cosine (hybrid pipeline: LLM expands for recall, HE
+			// precision-ranks). The LLM reranker stays as the fallback when HE is
+			// absent (headless/CLI) or the embed call fails (Store.Rerank degrades
+			// to plain FTS5 order on any embed error).
+			builtin.SetRAGEmbedder(a.heService.Client())
 		}
 	} else {
 		slog.Info("Hyper-Extract script not found — HE extraction unavailable")
@@ -1045,8 +1064,72 @@ func (a *App) SubmitToTab(tabID, input string) {
 		a.runEffortCommandForTab(tabID, trimmed)
 		return
 	}
-	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
-		ctrl.SubmitDisplay(input, input)
+	ctrl := a.ctrlByTabID(tabID)
+	if ctrl == nil {
+		// Controller 可能还没构建（重启后异步构建未完成/失败）。同步重建一次。
+		// mobilebridge 的 submit 在独立 goroutine 里，阻塞在此可接受。
+		slog.Info("SubmitToTab: controller missing, rebuilding", "tabID", tabID)
+		if tab := a.tabByID(tabID); tab != nil {
+			a.buildTabController(tab)
+			ctrl = a.ctrlByTabID(tabID)
+		}
+	}
+	if ctrl == nil {
+		slog.Warn("SubmitToTab: controller still nil after rebuild — message dropped",
+			"tabID", tabID, "activeTab", a.ActiveTabID())
+		return
+	}
+	ctrl.SubmitDisplay(input, input)
+	slog.Info("SubmitToTab: dispatched to controller", "tabID", tabID, "inputLen", len(input))
+}
+
+// SessionListForMobile returns all tabs as SessionInfo for linkpeer's session
+// drawer (the list_sessions command reply).
+func (a *App) SessionListForMobile() []mobilebridge.SessionInfo {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	out := make([]mobilebridge.SessionInfo, 0, len(a.tabOrder))
+	for _, id := range a.tabOrder {
+		if t := a.tabs[id]; t != nil {
+			title := t.TopicTitle
+			if strings.TrimSpace(title) == "" {
+				title = t.Label
+			}
+			if strings.TrimSpace(title) == "" {
+				title = "会话"
+			}
+			out = append(out, mobilebridge.SessionInfo{Path: id, Title: title})
+		}
+	}
+	return out
+}
+
+// ModelsForMobile returns the model list for linkpeer's model switcher
+// (the list_models command reply).
+func (a *App) ModelsForMobile() []mobilebridge.ModelInfo {
+	ms := a.Models()
+	out := make([]mobilebridge.ModelInfo, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, mobilebridge.ModelInfo{ID: m.Ref, Label: m.Model})
+	}
+	return out
+}
+
+// RenameTabForMobile 改 tab 的显示标题（移动端 rename_session）。
+func (a *App) RenameTabForMobile(tabID, title string) {
+	a.mu.Lock()
+	if t := a.tabs[tabID]; t != nil {
+		t.TopicTitle = title
+		a.saveTabsLocked()
+	}
+	a.mu.Unlock()
+	a.notifyMobileSessionList()
+}
+
+// notifyMobileSessionList 通知所有在线 linkpeer：会话列表变了，刷新（方案B）。
+func (a *App) notifyMobileSessionList() {
+	if mb := a.mobilebridge.Load(); mb != nil {
+		mb.NotifySessionListChanged()
 	}
 }
 
@@ -1618,6 +1701,12 @@ type SessionMeta struct {
 	// ExpertTeamID identifies the expert team for an expert session; empty for
 	// normal sessions. Pairs with IsExpert so the panel can group by team.
 	ExpertTeamID string `json:"expertTeamId,omitempty"`
+	// Platform/RemoteID/ChatType/Mode are non-empty only for IM bot sessions.
+	// The sidebar IM-contact detail uses them to list a contact's bot sessions.
+	Platform string `json:"platform,omitempty"`
+	RemoteID string `json:"remoteId,omitempty"`
+	ChatType string `json:"chatType,omitempty"`
+	Mode     string `json:"mode,omitempty"`
 }
 
 type WorkspaceMeta struct {
@@ -1772,6 +1861,10 @@ func sessionMetaFromInfo(s agent.SessionInfo, title string, current, open bool, 
 		Profile:        s.Profile,
 		IsExpert:       s.Scope == "expert",
 		ExpertTeamID:   s.ExpertTeamID,
+		Platform:       s.Platform,
+		RemoteID:       s.RemoteID,
+		ChatType:       s.ChatType,
+		Mode:           s.Mode,
 	}
 }
 
@@ -3648,7 +3741,7 @@ func mcpRegistryEntryView(entry mcpregistry.Entry) MCPRegistryEntryView {
 		UnavailableReason: entry.UnavailableReason,
 		Transport:         entry.Transport,
 		Command:           entry.Command,
-		Args:              append([]string(nil), entry.Args...),
+		Args:              append(make([]string, 0, len(entry.Args)), entry.Args...),
 		URL:               entry.URL,
 	}
 }
@@ -5943,8 +6036,9 @@ func (a *App) ProbeVendorKey(baseURL, apiKey string) error {
 // template is the vendor preset; apiKey is the user's key; defaultModel is the
 // template is the vendor preset; apiKey is the user's key; defaultModel is the
 // vendor-relative model name picked in step 3 (e.g. "deepseek-v4-pro").
-// visionModel and fastModel are similarly vendor-relative names for those roles.
-func (a *App) SetupProvider(template ProviderTemplate, apiKey string, defaultModel string, visionModel string, fastModel string) error {
+// visionModel, fastModel and voiceModel are similarly vendor-relative names for
+// those roles. voiceModel picks the speech-to-text model (empty/"none" = skip).
+func (a *App) SetupProvider(template ProviderTemplate, apiKey string, defaultModel string, visionModel string, fastModel string, voiceModel string) error {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
 		return fmt.Errorf("key is required")
@@ -5999,14 +6093,26 @@ func (a *App) SetupProvider(template ProviderTemplate, apiKey string, defaultMod
 
 	// 4. Update the config for Vision and Fast models.
 	_ = a.applyConfigChange(func(c *config.Config) error {
+		// Vision follows the registry's per-provider capability (sourced from
+		// models.dev), or is forced on when the user explicitly picked a vision
+		// model. A bare `true` here marks text-only providers (deepseek-chat, o1,
+		// …) vision-capable, which later silently drops images the model rejects.
+		vision := template.Vision
+		if visionModel != "" && visionModel != "none" {
+			vision = true
+		}
 		for i := range c.Providers {
 			if c.Providers[i].Name == template.Name {
-				c.Providers[i].Vision = true
+				c.Providers[i].Vision = vision
 				break
 			}
 		}
 		if visionModel != "" && visionModel != "none" {
 			c.Cowork.ScreenshotVLMModel = template.Name + "/" + visionModel
+		}
+		voiceModel = strings.TrimSpace(voiceModel)
+		if voiceModel != "" && voiceModel != "none" {
+			c.Cowork.VoiceModel = template.Name + "/" + voiceModel
 		}
 		if fastModel == "follow" || fastModel == "" {
 			c.Agent.FastTaskModel = "" // follows default

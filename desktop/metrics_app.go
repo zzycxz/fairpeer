@@ -72,8 +72,8 @@ func (m *metricsAggregator) observe(e event.Event) {
 		if e.Usage.FinishReason != "" {
 			m.inc("finish_reason", e.Usage.FinishReason)
 		}
-		if e.Usage.CacheHitTokens+e.Usage.CacheMissTokens > 0 {
-			m.inc("cache_hit", cacheBucket(e.Usage.CacheHitTokens, e.Usage.CacheMissTokens))
+		if e.Usage.CacheHitTokens+e.Usage.CacheMissTokens+e.Usage.CacheWriteTokens > 0 {
+			m.inc("cache_hit", cacheBucket(e.Usage.CacheHitTokens, e.Usage.CacheMissTokens+e.Usage.CacheWriteTokens))
 		}
 	case event.TurnDone:
 		m.inc("turns", "total")

@@ -61,7 +61,7 @@ type Job struct {
 	Label string
 
 	mu         sync.Mutex
-	buf        bytes.Buffer
+	buf        *cappedBuffer
 	readOffset int
 	status     Status
 	result     string
@@ -69,6 +69,77 @@ type Job struct {
 	startedAt  int64
 	cancel     context.CancelFunc
 	done       chan struct{}
+}
+
+// JobOutputCap bounds how much output a job retains. Without it a long-running
+// background process (dev server, build watcher) streams unboundedly and the
+// buffer grows forever (readOffset advances but buf never shrinks) until OOM.
+// 1 MiB is generous for diagnostics while bounding a long session's memory.
+const JobOutputCap = 1 << 20 // 1 MiB
+
+// cappedBuffer is a bytes.Buffer that stops storing once it reaches cap bytes.
+// It keeps the FIRST cap/2 bytes and the LAST cap/2 bytes (head+tail) with a
+// truncation marker between them, so both early output and the final error
+// (almost always at the tail) stay visible. Writes past the cap return success
+// (the producer is never blocked) but the bytes are discarded.
+type cappedBuffer struct {
+	head      bytes.Buffer
+	tail      []byte // ring of recent bytes (simple: we rebuild on flush)
+	tailCap   int
+	full      bool
+	truncated int64
+}
+
+// NewCappedBuffer returns a capped buffer retaining at most capBytes (split
+// head+tail). Used by background jobs and foreground bash so runaway output
+// can't OOM the process.
+func NewCappedBuffer(capBytes int) *cappedBuffer {
+	return newCappedBuffer(capBytes)
+}
+
+func newCappedBuffer(capBytes int) *cappedBuffer {
+	half := capBytes / 2
+	if half < 1 {
+		half = 1
+	}
+	return &cappedBuffer{tailCap: half}
+}
+
+// Write stores p, honoring the head+tail cap. Always returns len(p), nil so the
+// producer (cmd.Stdout) never errors on a cap overrun.
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if b.full {
+		b.truncated += int64(len(p))
+		return len(p), nil
+	}
+	// If head still has room, append there.
+	if b.head.Len()+len(p) <= b.tailCap {
+		b.head.Write(p)
+		return len(p), nil
+	}
+	// Head is full: switch to tail mode. Keep the most recent tailCap bytes.
+	b.full = true
+	b.tail = append(b.tail, p...)
+	if len(b.tail) > b.tailCap {
+		b.truncated += int64(len(b.tail) - b.tailCap)
+		b.tail = b.tail[len(b.tail)-b.tailCap:]
+	}
+	return len(p), nil
+}
+
+// String returns the head + (if truncated) a marker + the tail.
+func (b *cappedBuffer) String() string {
+	if !b.full {
+		return b.head.String()
+	}
+	return b.head.String() +
+		fmt.Sprintf("\n... (truncated %d bytes) ...\n", b.truncated) +
+		string(b.tail)
+}
+
+// Len returns the total retained length (head + tail, excluding discarded).
+func (b *cappedBuffer) Len() int {
+	return b.head.Len() + len(b.tail)
 }
 
 // Manager is the session's background-job table. It is safe for concurrent use.
@@ -116,7 +187,7 @@ func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io
 	m.seq++
 	id := fmt.Sprintf("%s-%d", kind, m.seq)
 	ctx, cancel := context.WithCancel(m.root)
-	j := &Job{ID: id, Kind: kind, Label: label, status: Running, startedAt: nowMs(), cancel: cancel, done: make(chan struct{})}
+	j := &Job{ID: id, Kind: kind, Label: label, status: Running, startedAt: nowMs(), cancel: cancel, done: make(chan struct{}), buf: newCappedBuffer(JobOutputCap)}
 	m.jobs[id] = j
 	m.order = append(m.order, id)
 	m.mu.Unlock()
