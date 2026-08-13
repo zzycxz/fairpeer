@@ -28,7 +28,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/zzycxz/fairpeer/internal/agent"
-	"github.com/zzycxz/fairpeer/internal/mobilebridge"
 	"github.com/zzycxz/fairpeer/internal/boot"
 	"github.com/zzycxz/fairpeer/internal/bot"
 	"github.com/zzycxz/fairpeer/internal/browseruse"
@@ -44,6 +43,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/mcpdiag"
 	"github.com/zzycxz/fairpeer/internal/mcpregistry"
 	"github.com/zzycxz/fairpeer/internal/memory"
+	"github.com/zzycxz/fairpeer/internal/mobilebridge"
 	"github.com/zzycxz/fairpeer/internal/plugin"
 	"github.com/zzycxz/fairpeer/internal/present"
 	"github.com/zzycxz/fairpeer/internal/provider"
@@ -1078,6 +1078,19 @@ func (a *App) SubmitToTab(tabID, input string) {
 		slog.Warn("SubmitToTab: controller still nil after rebuild — message dropped",
 			"tabID", tabID, "activeTab", a.ActiveTabID())
 		return
+	}
+	// If the user attached a reference image/PDF with PPT-making intent, run the
+	// VLM gatekeeper NOW (synchronously) so reference-style.json / page-N.json is
+	// ready by the time the controller dispatches to ppt-auto (which reads them in
+	// Step 3). See ppt-vision-enhancement-spec §六.五. Best-effort: errors here do
+	// NOT block the message — ppt-auto degrades to its normal topic-driven flow.
+	if refPath, ok := pptReferenceAttachment(input); ok {
+		if err := a.withActiveWorkspaceDo(func() error {
+			_, _ = a.PreparePPTReference(refPath)
+			return nil
+		}); err != nil {
+			slog.Warn("SubmitToTab: PreparePPTReference failed (degrading to normal flow)", "err", err)
+		}
 	}
 	ctrl.SubmitDisplay(input, input)
 	slog.Info("SubmitToTab: dispatched to controller", "tabID", tabID, "inputLen", len(input))

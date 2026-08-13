@@ -211,3 +211,61 @@ func parseClassification(resp string) *ReferenceClassification {
 	// on an uncertain answer.
 	return &ReferenceClassification{IsVisual: false, Verdict: "A?", Reason: strings.TrimSpace(resp)}
 }
+
+// pptIntentKeywords marks user input as PPT-making intent. Kept broad on purpose:
+// the VLM classify step (PreparePPTReference → ClassifyReferenceVisual) is the
+// real gatekeeper that decides vision-flow vs plain-text, so a loose keyword net
+// here just avoids burning a VLM call on every screenshot a user pastes for
+// non-PPT reasons.
+var pptIntentKeywords = []string{"ppt", "幻灯", "演示文稿", "slides", "slide"}
+
+func hasPPTIntent(lowered string) bool {
+	for _, kw := range pptIntentKeywords {
+		if strings.Contains(lowered, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// referenceAttachmentExts are attachment extensions that can be a visual reference
+// for PPT generation (images + PDF).
+var referenceAttachmentExts = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true, ".bmp": true,
+	".pdf": true,
+}
+
+// pptReferenceAttachment scans input for an @.fairpeer/attachments/<file> token
+// whose extension is an image/PDF, AND whose text shows PPT intent. Returns the
+// attachment path (relative, without the leading @) and true when both match —
+// the signal that PreparePPTReference should run before the message reaches the
+// model, so reference-style.json / page-N.json is ready when ppt-auto reads it.
+func pptReferenceAttachment(input string) (string, bool) {
+	if !hasPPTIntent(strings.ToLower(input)) {
+		return "", false
+	}
+	const prefix = "@.fairpeer/attachments/"
+	search := input
+	for {
+		idx := strings.Index(search, prefix)
+		if idx < 0 {
+			return "", false
+		}
+		rest := search[idx+len(prefix):]
+		end := len(rest)
+		for i, r := range rest {
+			if r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '@' || r == ',' || r == '，' {
+				end = i
+				break
+			}
+		}
+		name := rest[:end]
+		search = rest[end:] // advance for the next iteration
+		if name == "" {
+			continue
+		}
+		if referenceAttachmentExts[strings.ToLower(filepath.Ext(name))] {
+			return ".fairpeer/attachments/" + name, true
+		}
+	}
+}
