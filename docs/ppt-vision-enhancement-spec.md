@@ -1,6 +1,6 @@
 # PPT 视觉增强 Spec（图片 / PDF → PPT）
 
-> **状态**：spec 已定，分阶段实施中
+> **状态**：Phase 1-6 全部已实施 ✅（端到端链路接通；merge/字号/触发均测试通过）
 > **范围**：让 fairpeer 能"给一张 PPT 图片（或扫描 PDF）→ 用 VLM 理解 → ppt-auto 生成一页类似的"
 > **基础**：基于多轮讨论 + ppt-master 调研 + ppt-auto config 体系深调
 > **不属本 spec**：PPT 文件（.pptx）仿写/扩写 —— 那走结构化解析（readPPTX 增强），不靠 VLM，另立 spec
