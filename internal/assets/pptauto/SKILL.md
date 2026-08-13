@@ -156,6 +156,18 @@ read_file ~/.fairpeer/reference-style.json
 
 写大纲（Step 5）和 SVG（Step 6）时参照它——目标是"画一页类似的"，不是像素复刻。
 
+**参考 PDF（若有，多页）**：若 `~/.fairpeer/pdf-pages/page-1.json` 等存在（用户给扫描/图片式 PDF 时由 desktop 的 `AnalyzePDFPages` 生成），这是**多页参考**——每个 `page-N.json` 对应一页，含同样的 4 段 `description`：
+- 每页对应生成**一张 slide**（page-1.json → slide 1，page-2.json → slide 2…）
+- 每页按各自 `description` 的 CONTENT/LAYOUT/FORMAT/DESIGN 画（同单图参考规则）
+- 总页数 = page-N.json 的数量（覆盖 `default_prompt.pages`）
+
+```bash
+ls ~/.fairpeer/pdf-pages/page-*.json 2>/dev/null   # 看有几页
+read_file ~/.fairpeer/pdf-pages/page-1.json         # 逐页读其 description
+```
+
+单图参考（`reference-style.json`）和多页 PDF 参考（`page-N.json`）一般不同时存在——前者画一张，后者画多张。若两者都有，以 PDF 多页为准。
+
 **字号自适应（有参考图时）**：参考图能看出"密度"和"标题/正文比例"，但 VLM 看不到 exact px——不要让它瞎给字号数值。改为从 reference-style 的 LAYOUT（密度）+ FORMAT（比例）推断 density（high/medium/low）和 title/body ratio，套模板基线机械算：
 
 ```bash
