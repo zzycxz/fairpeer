@@ -1086,7 +1086,16 @@ func (a *App) SubmitToTab(tabID, input string) {
 	// NOT block the message — ppt-auto degrades to its normal topic-driven flow.
 	if refPath, ok := pptReferenceAttachment(input); ok {
 		if err := a.withActiveWorkspaceDo(func() error {
-			_, _ = a.PreparePPTReference(refPath)
+			res, perr := a.PreparePPTReference(refPath)
+			if perr == nil && res != nil && res.NeedsVLMConfig {
+				// VLM 未配置：发前端告警事件（前端监听 "ppt:reference-warning" 显示提示）+ 日志。
+				// 不阻塞消息——ppt-auto 退回普通主题驱动流程。
+				runtime.EventsEmit(a.ctx, "ppt:reference-warning", map[string]string{
+					"reason": "no_vlm_model",
+					"hint":   "未配置视觉模型(VLM)，无法分析参考图样式，已用普通流程生成。请在设置里配置 VLM。",
+				})
+				slog.Warn("SubmitToTab: VLM not configured — reference image not analyzed, degrading to normal flow")
+			}
 			return nil
 		}); err != nil {
 			slog.Warn("SubmitToTab: PreparePPTReference failed (degrading to normal flow)", "err", err)

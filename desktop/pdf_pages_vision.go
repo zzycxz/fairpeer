@@ -93,7 +93,11 @@ func analyzePDFPages(ctx context.Context, pdfPath string) (int, error) {
 			pyCmd = "python"
 		}
 	}
-	args := append(append([]string{}, pyPrefix...), script, pdfPath, outDir, "--scale", "2")
+	// Cap pages at 6 — each page is one VLM call, so an unbounded PDF would block
+	// SubmitToTab for minutes (the call is synchronous on the submit path). 6 covers
+	// most decks; bigger PDFs degrade gracefully (only the first 6 pages analyzed,
+	// the rest fall back to plain topic-driven generation).
+	args := append(append([]string{}, pyPrefix...), script, pdfPath, outDir, "--scale", "2", "--max-pages", "6")
 	rctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(rctx, pyCmd, args...)

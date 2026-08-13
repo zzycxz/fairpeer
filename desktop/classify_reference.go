@@ -130,11 +130,12 @@ func singleImageForVLM(ctx context.Context, filePath string) (imgPath string, cl
 // flow ran, whether it hit any per-step error (best-effort — a VLM hiccup on one
 // step shouldn't sink the whole request).
 type PrepareResult struct {
-	IsVisual    bool   `json:"is_visual"`              // true = vision flow ran, false = plain text
-	Verdict     string `json:"verdict"`                // "A" (plain) or "B" (visual)
-	Reason      string `json:"reason"`                 // VLM's one-line classify reason
-	PDFPages    int    `json:"pdf_pages,omitempty"`    // pages processed when input was a PDF
-	VisionError string `json:"vision_error,omitempty"` // non-fatal error from the vision step, if any
+	IsVisual       bool   `json:"is_visual"`                  // true = vision flow ran, false = plain text
+	Verdict        string `json:"verdict"`                    // "A" (plain) or "B" (visual)
+	Reason         string `json:"reason"`                     // VLM's one-line classify reason
+	PDFPages       int    `json:"pdf_pages,omitempty"`        // pages processed when input was a PDF
+	VisionError    string `json:"vision_error,omitempty"`     // non-fatal error from the vision step, if any
+	NeedsVLMConfig bool   `json:"needs_vlm_config,omitempty"` // VLM not configured — caller should warn the user to set one in Settings
 }
 
 // PreparePPTReference is the unified entry point the PPT request handler calls
@@ -154,6 +155,11 @@ type PrepareResult struct {
 func (a *App) PreparePPTReference(filePath string) (*PrepareResult, error) {
 	cls, err := a.ClassifyReferenceVisual(filePath)
 	if err != nil {
+		// VLM 未配置是可识别的配置错误：返回带 NeedsVLMConfig 的 result，让调用方
+		// (SubmitToTab) 告警用户去设置 VLM，而不是当普通错误静默吞掉。其他错误正常返回。
+		if strings.Contains(err.Error(), "no VLM model configured") {
+			return &PrepareResult{NeedsVLMConfig: true, VisionError: err.Error()}, nil
+		}
 		return nil, err
 	}
 	result := &PrepareResult{
@@ -161,23 +167,31 @@ func (a *App) PreparePPTReference(filePath string) (*PrepareResult, error) {
 		Verdict:  cls.Verdict,
 		Reason:   cls.Reason,
 	}
-	if !cls.IsVisual {
-		// Plain text: no vision flow. ppt-auto handles the file as source material.
-		return result, nil
-	}
-
-	// Visually designed → run the vision flow for this file type.
+	// Route by verdict + file type.
 	ext := strings.ToLower(filepath.Ext(filePath))
-	if ext == ".pdf" {
+	switch {
+	case cls.IsVisual && ext == ".pdf":
+		// Visually designed PDF → per-page vision flow.
 		n, verr := a.AnalyzePDFPages(filePath)
 		result.PDFPages = n
 		if verr != nil {
 			result.VisionError = verr.Error()
 		}
-	} else {
+	case cls.IsVisual:
+		// Visually designed image → 4-section description + structured colors.
 		if verr := a.AnalyzeReferenceImage(filePath); verr != nil {
 			result.VisionError = verr.Error()
 		}
+	case ext != ".pdf":
+		// PLAIN-TEXT IMAGE → OCR its words into reference-style.json so ppt-auto
+		// has the content (ppt-auto can't read image bytes; refs.go only leaves a
+		// text placeholder for images). No visual flow — nothing to replicate
+		// design-wise, just harvest the words as source material.
+		if verr := a.extractImageText(filePath); verr != nil {
+			result.VisionError = verr.Error()
+		}
+		// Plain-text PDF falls through with no action: refs.go already extracts
+		// its text when the @PDF reference is resolved, so ppt-auto receives it.
 	}
 	return result, nil
 }
