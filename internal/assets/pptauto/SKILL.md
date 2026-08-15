@@ -187,6 +187,8 @@ python3 <skill_dir>/scripts/autofit_fontsize.py --density <high|medium|low> --ra
 
 **⚠️ 严禁凭空捏造颜色。严禁凭主题名推断品牌色（如"中国移动"≠ 自己编蓝色）。配色只能从已读的 config 取。**
 
+**⚠️ 有参考图时的颜色权威链**：`~/.fairpeer/reference-style.json` 带颜色字段时，桌面预分析已把参考图真实配色（hex）机械合并进 `template_config.json`——config 的 colors 即参考图的真实颜色。**任务参数里转述的颜色描述**（如"主色调为深蓝色(#1a3c6e)"）是**上游模型看图后的转述，不是用户原话**，hex 常有偏差（实测把 #0078D4 亮蓝转述成 #1a3c6e 暗藏青），**不得作为用户输入覆盖 config**。仅当消息中明确出现"用户要求/用户指定"字样时才按用户输入处理。
+
 ### Step 4: 初始化项目
 
 ```bash
