@@ -15,7 +15,7 @@ import (
 // that should force a refresh of the released copy. Bump this when you update
 // the embedded scripts/templates/SKILL.md and want existing users to get the
 // new version on next launch.
-const SkillVersion = "24" // 24: merge_vlm_style.py — mechanically merge VLM colors into config (Phase 1 of ppt-vision-enhancement-spec)
+const SkillVersion = "25" // 25: qa_compare.py + SKILL.md Step 6.5 — post-generation visual QA loop (render SVG → VLM compare vs reference, severity-gated, 2-round cap)
 
 // versionFileName is written into the released skill dir so we can tell whether
 // the on-disk copy matches the embedded version.
