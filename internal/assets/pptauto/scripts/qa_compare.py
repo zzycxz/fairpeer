@@ -199,8 +199,23 @@ def data_url(path):
 
 
 def render_svg(svg_path, png_path):
-    import cairosvg  # already a skill dependency (requirements.txt)
-    cairosvg.svg2png(url=svg_path, write_to=png_path, output_width=1280)
+    """Render one slide SVG to PNG. cairosvg first (best filter/gradient
+    support), resvg-py as the Windows-friendly fallback — cairosvg needs the
+    native cairo DLL which stock Windows Pythons don't ship, while resvg-py
+    bundles its Rust renderer with zero system dependencies. On a missing DLL
+    cairosvg raises OSError at import (cairocffi dlopens cairo), so catch both.
+    Any other failure propagates and the page degrades per-page."""
+    try:
+        import cairosvg
+        cairosvg.svg2png(url=svg_path, write_to=png_path, output_width=1280)
+        return
+    except (ImportError, OSError):
+        pass
+    import resvg_py
+    with open(svg_path, "r", encoding="utf-8") as f:
+        svg = f.read()
+    with open(png_path, "wb") as f:
+        f.write(resvg_py.svg_to_bytes(svg_string=svg, width=1280))
 
 
 # ── the compare prompt (severity-gated: only MAJOR asks for a rework) ───────

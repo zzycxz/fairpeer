@@ -15,7 +15,7 @@ import (
 // that should force a refresh of the released copy. Bump this when you update
 // the embedded scripts/templates/SKILL.md and want existing users to get the
 // new version on next launch.
-const SkillVersion = "25" // 25: qa_compare.py + SKILL.md Step 6.5 — post-generation visual QA loop (render SVG → VLM compare vs reference, severity-gated, 2-round cap)
+const SkillVersion = "26" // 26: qa_compare.py renderer fallback (cairosvg → resvg-py, Windows needs no cairo DLL) + requirements resvg-py
 
 // versionFileName is written into the released skill dir so we can tell whether
 // the on-disk copy matches the embedded version.
