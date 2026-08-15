@@ -1707,9 +1707,13 @@ func runProviderVLMChat(ctx context.Context, cfg *config.Config, modelRef string
 	if err != nil {
 		return nil, fmt.Errorf("build VLM provider %q: %w", ref, err)
 	}
-	// VLM image descriptions cap at 1024 tokens; STT transcripts (audio input)
-	// can be much longer, so lift the cap when the request carries audio parts.
-	maxTokens := 1024
+	// VLM output cap. Reasoning-model VLMs (e.g. mimo) burn tokens on hidden
+	// reasoning BEFORE the visible content — at 1024 a color-JSON prompt could
+	// return HTTP 200 with content=None (reasoning ate the whole budget), which
+	// surfaced as colors silently vanishing from reference-style.json. 2048
+	// leaves headroom for reasoning + a short answer; STT transcripts (audio
+	// input) can be much longer, so lift the cap when the request carries audio.
+	maxTokens := 2048
 	for _, m := range msgs {
 		if len(provider.AudioParts(m.Content)) > 0 {
 			maxTokens = 4096

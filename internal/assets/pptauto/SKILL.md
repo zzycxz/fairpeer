@@ -247,9 +247,11 @@ check_svg 报 ERROR（exit code 2）时必须修正后重查。WARN 不阻止流
 
 > **演讲者备注**：用户明确要求时才做——在 `notes/slide_NN.md` 写每页 2-5 句备注，svg_to_pptx 会自动读取嵌入。默认不生成。
 
-### Step 6.5: 视觉 QA 回路（仅有参考图/参考 PDF 时）
+### Step 6.5: 视觉 QA 回路（**必须列入 todo**；无参考时在本步说明跳过）
 
-**触发条件**：`~/.fairpeer/reference-style.json`（单图参考）或 `~/.fairpeer/pdf-pages/page-1.json`（PDF 参考）存在；两者都没有（纯主题驱动）时**跳过本步直接进 Step 7**。
+**本步骤必须出现在 Step 0 创建的 todo 列表中**——它是条件步骤，但"有没有参考"由本步自己判断，不许在创建 todo 时省略。无参考时仍执行本步，在 complete_step 里说明"无参考，跳过"。
+
+判断条件：`~/.fairpeer/reference-style.json`（单图参考）或 `~/.fairpeer/pdf-pages/page-1.json`（PDF 参考）存在才真正对比；两者都没有（纯主题驱动）时按上述方式标记跳过。
 
 把生成的 SVG 渲染成图，与参考图并排送 VLM 对比（用的是 fairpeer 配置的视觉模型，无需额外参数）：
 

@@ -230,7 +230,7 @@ Respond with ONLY a JSON object: {"verdict":"PASS"|"MINOR"|"MAJOR","issues":["sh
 def vlm_compare(vlm, ref_url, gen_url):
     payload = {
         "model": vlm["model"],
-        "max_tokens": 512,
+        "max_tokens": 1024,  # reasoning-model VLMs spend tokens before content; 512 could yield content=None
         "messages": [{
             "role": "user",
             "content": [

@@ -486,23 +486,43 @@ func parseVLMStyleResponse(resp string) *templateStyleResult {
 	start := strings.Index(resp, "{")
 	end := strings.LastIndex(resp, "}")
 	if start < 0 || end < 0 || end <= start {
+		pptVisionDebugLog("parseVLMStyleResponse: no JSON object in response (len=%d, head=%q)", len(resp), strHead(resp, 120))
 		return nil
 	}
 	jsonStr := resp[start : end+1]
 
 	result := &templateStyleResult{Source: "vision-vlm", BackgroundType: "image"}
 	if err := json.Unmarshal([]byte(jsonStr), result); err != nil {
+		// Reasoning-model VLMs can return HTTP 200 with content=None (reasoning
+		// ate the whole token budget) — resp is then empty and lands in the
+		// no-JSON branch above; other malformations land here. Log enough to
+		// diagnose without re-running the call.
+		pptVisionDebugLog("parseVLMStyleResponse: unmarshal failed: %v (json head=%q)", err, strHead(jsonStr, 160))
 		return nil // malformed JSON — fall back to Python extractor
 	}
-	// Override the defaults (Unmarshal would leave these as zero values)
+	// Override the defaults (Unmarshal would leave these at zero values)
 	result.Source = "vision-vlm"
-	result.BackgroundType = "image"
+	// Preserve the VLM's background_type when it gave one ("solid" matters for
+	// reference pages — unconditionally forcing "image" used to mislabel
+	// flat-color references); "image" remains only the fallback (template bg).
+	if result.BackgroundType == "" {
+		result.BackgroundType = "image"
+	}
 
 	// Sanity: must have at least a background
 	if result.Background == "" {
+		pptVisionDebugLog("parseVLMStyleResponse: parsed JSON has no background field (%q)", strHead(jsonStr, 160))
 		return nil
 	}
 	return result
+}
+
+// strHead returns the first n bytes of s, for logging arbitrary responses.
+func strHead(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
 
 // jsonMarshal marshals the result to indented JSON.

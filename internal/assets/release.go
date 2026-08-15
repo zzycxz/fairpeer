@@ -15,7 +15,7 @@ import (
 // that should force a refresh of the released copy. Bump this when you update
 // the embedded scripts/templates/SKILL.md and want existing users to get the
 // new version on next launch.
-const SkillVersion = "26" // 26: qa_compare.py renderer fallback (cairosvg → resvg-py, Windows needs no cairo DLL) + requirements resvg-py
+const SkillVersion = "27" // 27: Step 6.5 must appear in the todo list (subagent dropped it as optional); qa_compare max_tokens 1024 (reasoning VLMs)
 
 // versionFileName is written into the released skill dir so we can tell whether
 // the on-disk copy matches the embedded version.
