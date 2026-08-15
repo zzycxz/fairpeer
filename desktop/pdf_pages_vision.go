@@ -44,7 +44,6 @@ import (
 	"github.com/zzycxz/fairpeer/internal/docconv"
 	"github.com/zzycxz/fairpeer/internal/proc"
 	runtimepkg "github.com/zzycxz/fairpeer/internal/runtime"
-	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 // pdfPageResult is one page's VLM description, written to page-{N}.json.
@@ -66,21 +65,27 @@ func (a *App) AnalyzePDFPages(pdfPath string) (int, error) {
 	if a.ctx != nil {
 		ctx = a.ctx
 	}
-	return analyzePDFPages(ctx, pdfPath)
+	n, _, err := analyzePDFPages(ctx, pdfPath)
+	return n, err
 }
 
-func analyzePDFPages(ctx context.Context, pdfPath string) (int, error) {
+// analyzePDFPages returns (analyzed, total, err): analyzed = pages actually
+// described by the VLM, total = the source PDF's full page count. analyzed <
+// total means the render cap truncated the run and the caller should surface
+// that (ppt:reference-warning "pdf_truncated") instead of silently shipping a
+// half-reference-driven deck.
+func analyzePDFPages(ctx context.Context, pdfPath string) (int, int, error) {
 	// 1. Locate the renderer script — same search path as ocr_pdf.py (both sit at
 	//    the project root and ship together).
 	script := docconv.FindScript("pdf_to_page_images.py")
 	if script == "" {
-		return 0, fmt.Errorf("pdf_to_page_images.py not found")
+		return 0, 0, fmt.Errorf("pdf_to_page_images.py not found")
 	}
 
 	home, _ := os.UserHomeDir()
 	outDir := filepath.Join(home, ".fairpeer", "pdf-pages")
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return 0, fmt.Errorf("create pdf-pages dir: %w", err)
+		return 0, 0, fmt.Errorf("create pdf-pages dir: %w", err)
 	}
 
 	// 2. Render pages via the python script (fitz). ResolvePython prefers a bundled
@@ -106,13 +111,13 @@ func analyzePDFPages(ctx context.Context, pdfPath string) (int, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return 0, fmt.Errorf("render pdf pages: %w: %s", err, stderr.String())
+		return 0, 0, fmt.Errorf("render pdf pages: %w: %s", err, stderr.String())
 	}
 
 	// 3. Parse the LAST stdout line as JSON {"pages": [...], "total_pages": N}.
 	pages, total, err := parseRenderOutput(stdout.Bytes())
 	if err != nil {
-		return 0, fmt.Errorf("parse render output: %w (stdout=%q)", err, strings.TrimSpace(stdout.String()))
+		return 0, 0, fmt.Errorf("parse render output: %w (stdout=%q)", err, strings.TrimSpace(stdout.String()))
 	}
 
 	// 4. Send each page PNG to the VLM and write one JSON per page. Per-page
@@ -124,7 +129,7 @@ func analyzePDFPages(ctx context.Context, pdfPath string) (int, error) {
 			// PNG bytes as-is — no JPEG re-encode, no downscale (scale=2 already
 			// applied at render time; PNG keeps text/edges sharp for the VLM).
 			dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(imgBytes)
-			if resp, verr := builtin.CallVLM(ctx, dataURL, prompt); verr == nil {
+			if resp, verr := callVLMWithTimeout(ctx, dataURL, prompt); verr == nil {
 				result.Desc = resp
 			} else {
 				result.Error = verr.Error()
@@ -135,7 +140,7 @@ func analyzePDFPages(ctx context.Context, pdfPath string) (int, error) {
 		data, _ := jsonMarshal(result)
 		_ = os.WriteFile(filepath.Join(outDir, fmt.Sprintf("page-%d.json", i+1)), data, 0o644)
 	}
-	return len(pages), nil
+	return len(pages), total, nil
 }
 
 // parseRenderOutput extracts the JSON object from the last non-empty stdout line.

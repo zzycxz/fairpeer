@@ -1047,6 +1047,38 @@ export default function App() {
     });
   }, [showToast]);
 
+  // PPT reference pre-analysis degraded: the desktop layer analyzed (or failed
+  // to analyze) a reference image/PDF BEFORE the message reached the model
+  // (mayPreparePPTReference), but something dropped the reference — VLM not
+  // configured, VLM timeout, oversized image, PDF render failure, page-cap
+  // truncation, or a pasted path that doesn't exist. All of these used to be
+  // silent: the user got a deck that ignored their reference with no idea why.
+  // The warn toast restores the user's chance to fix it (configure VLM, shrink
+  // the image, upload instead of pasting a path, …).
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.runtime) return;
+    return window.runtime.EventsOn("ppt:reference-warning", (...data: unknown[]) => {
+      const e = (data?.[0] ?? {}) as { hint?: string };
+      if (e.hint) showToast(e.hint, "warn");
+    });
+  }, [showToast]);
+
+  // PPT reference verdict: the pre-analysis finished and judged the reference
+  // (visually designed → redraw similar; plain text → harvest words as
+  // material). Surfaced as a short info toast so the user can catch a misroute
+  // ("it judged plain text but I wanted the layout copied") while it's still
+  // cheap to correct — human confirmation beats the code guessing intent.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.runtime) return;
+    return window.runtime.EventsOn("ppt:reference-analyzed", (...data: unknown[]) => {
+      const e = (data?.[0] ?? {}) as { is_visual?: boolean };
+      showToast(
+        e.is_visual ? "已识别参考图样式，将按参考图生成 PPT" : "参考图判断为纯文字，将提取文字内容作为素材",
+        "info",
+      );
+    });
+  }, [showToast]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onResize = () => setViewportWidth(window.innerWidth);

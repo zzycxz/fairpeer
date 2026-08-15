@@ -33,6 +33,43 @@ import (
 	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
+// pptVisionDebugLog appends a timestamped line to ~/.fairpeer/ppt-vision-debug.log
+// so the image→PPT pipeline can be diagnosed end-to-end without relying on slog
+// routing (which may go to stderr and be lost when the app is double-clicked).
+// Best-effort: errors silently dropped. Remove/toggle off once the pipeline is stable.
+func pptVisionDebugLog(format string, args ...any) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	path := filepath.Join(home, ".fairpeer", "ppt-vision-debug.log")
+	msg := fmt.Sprintf(format, args...)
+	line := fmt.Sprintf("[%s] %s\n", time.Now().Format("15:04:05.000"), msg)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(line)
+}
+
+// pptVLMTimeout bounds each VLM call on the submit-blocking pre-analysis path.
+// mayPreparePPTReference runs synchronously before SubmitDisplay, so a hung
+// provider would freeze the send button indefinitely — and no deadline existed
+// anywhere on the CallVLM chain (the existing WithTimeout calls cover only the
+// python render subprocesses). 90s is generous for a vision call while still
+// failing faster than a user gives up and retypes.
+const pptVLMTimeout = 90 * time.Second
+
+// callVLMWithTimeout is builtin.CallVLM with a deadline, shared by every VLM
+// call on the PPT pre-analysis path (classify / describe / colors / OCR /
+// per-page).
+func callVLMWithTimeout(ctx context.Context, dataURL, prompt string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, pptVLMTimeout)
+	defer cancel()
+	return builtin.CallVLM(ctx, dataURL, prompt)
+}
+
 // classifyVisualPrompt asks the VLM for a single A/B verdict on whether the
 // reference is plain text or visually designed. Kept short on purpose — this is
 // the cheap gate before the expensive 4-section extraction.
@@ -60,23 +97,30 @@ func (a *App) ClassifyReferenceVisual(filePath string) (*ReferenceClassification
 	if a.ctx != nil {
 		ctx = a.ctx
 	}
+	pptVisionDebugLog("ClassifyReferenceVisual start: filePath=%s", filePath)
 	imgPath, cleanup, err := singleImageForVLM(ctx, filePath)
 	if err != nil {
+		pptVisionDebugLog("ClassifyReferenceVisual singleImageForVLM err: %v", err)
 		return nil, err
 	}
 	defer cleanup()
 
 	imgBytes, err := os.ReadFile(imgPath)
 	if err != nil {
+		pptVisionDebugLog("ClassifyReferenceVisual read img err: %v (imgPath=%s)", err, imgPath)
 		return nil, fmt.Errorf("read image for classify: %w", err)
 	}
+	pptVisionDebugLog("ClassifyReferenceVisual img ready: imgPath=%s size=%d", imgPath, len(imgBytes))
 	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(imgBytes)
 
-	resp, err := builtin.CallVLM(ctx, dataURL, classifyVisualPrompt)
+	resp, err := callVLMWithTimeout(ctx, dataURL, classifyVisualPrompt)
 	if err != nil {
+		pptVisionDebugLog("ClassifyReferenceVisual CallVLM FAILED: %v", err)
 		return nil, fmt.Errorf("classify VLM: %w", err)
 	}
-	return parseClassification(resp), nil
+	cls := parseClassification(resp)
+	pptVisionDebugLog("ClassifyReferenceVisual OK: verdict=%s isVisual=%v reason=%q", cls.Verdict, cls.IsVisual, cls.Reason)
+	return cls, nil
 }
 
 // singleImageForVLM returns a path to a single image the VLM can look at, plus a
@@ -134,6 +178,7 @@ type PrepareResult struct {
 	Verdict        string `json:"verdict"`                    // "A" (plain) or "B" (visual)
 	Reason         string `json:"reason"`                     // VLM's one-line classify reason
 	PDFPages       int    `json:"pdf_pages,omitempty"`        // pages processed when input was a PDF
+	PDFTotalPages  int    `json:"pdf_total_pages,omitempty"`  // total pages of the source PDF (analyzed < total ⇒ truncated)
 	VisionError    string `json:"vision_error,omitempty"`     // non-fatal error from the vision step, if any
 	NeedsVLMConfig bool   `json:"needs_vlm_config,omitempty"` // VLM not configured — caller should warn the user to set one in Settings
 }
@@ -153,6 +198,10 @@ type PrepareResult struct {
 // Vision-step errors are recorded in VisionError, not returned as a fatal error —
 // the caller can still proceed (degrade to topic-driven) if the vision step hiccups.
 func (a *App) PreparePPTReference(filePath string) (*PrepareResult, error) {
+	ctx := context.Background()
+	if a.ctx != nil {
+		ctx = a.ctx
+	}
 	cls, err := a.ClassifyReferenceVisual(filePath)
 	if err != nil {
 		// VLM 未配置是可识别的配置错误：返回带 NeedsVLMConfig 的 result，让调用方
@@ -172,8 +221,9 @@ func (a *App) PreparePPTReference(filePath string) (*PrepareResult, error) {
 	switch {
 	case cls.IsVisual && ext == ".pdf":
 		// Visually designed PDF → per-page vision flow.
-		n, verr := a.AnalyzePDFPages(filePath)
+		n, total, verr := analyzePDFPages(ctx, filePath)
 		result.PDFPages = n
+		result.PDFTotalPages = total
 		if verr != nil {
 			result.VisionError = verr.Error()
 		}
@@ -281,5 +331,98 @@ func pptReferenceAttachment(input string) (string, bool) {
 		if referenceAttachmentExts[strings.ToLower(filepath.Ext(name))] {
 			return ".fairpeer/attachments/" + name, true
 		}
+	}
+}
+
+// localPathReference scans input for an ABSOLUTE local file path with an
+// image/PDF extension — the "user pasted a path instead of uploading the file"
+// form (e.g. 把 C:\Users\me\Desktop\shot.png 转成PPT). pptReferenceAttachment only
+// recognizes @.fairpeer/attachments tokens, so without this the message would
+// bypass the pre-analysis gate entirely and ppt-auto would run with no
+// reference-style.json at all (the model improvising via image_understand).
+// Returns the first path that EXISTS on disk (symlinks rejected, mirroring
+// image_understand's guards). A path-shaped token with a whitelisted extension
+// that does NOT exist is returned as `missing` so the caller can warn the user
+// instead of silently dropping the reference. URLs are excluded ("://" tokens).
+func localPathReference(input string) (found string, missing string, ok bool) {
+	for _, raw := range strings.FieldsFunc(input, func(r rune) bool {
+		switch r {
+		case ' ', '\t', '\n', '\r', ',', '，', '。', '、', ';', '；',
+			'"', '\'', '“', '”', '‘', '’', '「', '」', '《', '》':
+			return true
+		}
+		return false
+	}) {
+		token := strings.Trim(raw, "\"'“”‘’「」《》()（）")
+		if token == "" || strings.Contains(token, "://") {
+			continue // URL, not a local path
+		}
+		if !isAbsoluteishPath(token) {
+			continue
+		}
+		if !referenceAttachmentExts[strings.ToLower(filepath.Ext(token))] {
+			continue
+		}
+		info, err := os.Lstat(token)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 || info.IsDir() {
+			if missing == "" {
+				missing = token
+			}
+			continue
+		}
+		return token, "", true
+	}
+	return "", missing, false
+}
+
+// isAbsoluteishPath reports whether token looks like an absolute local path: a
+// Windows drive-rooted path (C:\ or C:/) or a POSIX root path. Relative paths
+// (./x.png, x.png) are deliberately NOT matched — they resolve against an
+// ambiguous base and would false-positive on ordinary words ending in .png.
+func isAbsoluteishPath(token string) bool {
+	if filepath.IsAbs(token) {
+		return true
+	}
+	// Drive path with either separator. Checked manually because filepath.IsAbs
+	// only recognizes the host's native form (backslash on Windows), and the
+	// slashed form (C:/x) shows up in pasted paths.
+	if len(token) >= 3 && token[1] == ':' {
+		c := token[0]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+			return token[2] == '\\' || token[2] == '/'
+		}
+	}
+	return false
+}
+
+// clearStaleReferenceFiles enforces the invariant "reference-style.json /
+// pdf-pages exist ⟺ the CURRENT PPT task provided a reference". When a message
+// shows PPT intent but carries no reference, leftovers from a previous task
+// would silently hijack this run — worst case pdf-pages/page-N.json overrides
+// the deck's page count (SKILL.md Step 3 takes page-N count as authoritative).
+// Colors already merged into template_config.json survive the clear, so an
+// iteration request ("把第3页改一下") only loses the 4-section description — the
+// accepted trade: cross-task contamination is a real bug, iteration without
+// re-attaching is rarer and recoverable (re-attach the reference).
+func clearStaleReferenceFiles() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	clearStaleReferenceFilesIn(home)
+}
+
+// clearStaleReferenceFilesIn is the testable core of clearStaleReferenceFiles.
+func clearStaleReferenceFilesIn(home string) {
+	if home == "" {
+		return
+	}
+	fp := filepath.Join(home, ".fairpeer", "reference-style.json")
+	if err := os.Remove(fp); err == nil {
+		pptVisionDebugLog("cleared stale reference file: %s", fp)
+	}
+	pd := filepath.Join(home, ".fairpeer", "pdf-pages")
+	if err := os.RemoveAll(pd); err == nil {
+		pptVisionDebugLog("cleared stale pdf-pages dir: %s", pd)
 	}
 }

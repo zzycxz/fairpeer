@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 // TestPPTReferenceAttachment verifies the SubmitToTab trigger condition: an
 // attachment is only routed to PreparePPTReference when BOTH (a) it's an
@@ -69,4 +73,72 @@ func lowerForTest(s string) string {
 		out[i] = c
 	}
 	return string(out)
+}
+
+// TestLocalPathReference verifies the second reference form: an ABSOLUTE local
+// path pasted as text (e.g. 把 C:\Users\me\Desktop\shot.png 转成PPT). Guards three
+// failure modes: existing paths must route (previously this form bypassed the
+// gate entirely), non-existent paths must surface as `missing` (so the caller
+// warns instead of silently dropping the reference), and URLs / relative paths
+// must NOT match (false positives would burn VLM calls on ordinary messages).
+func TestLocalPathReference(t *testing.T) {
+	tmp := t.TempDir()
+	existing := tmp + string(filepath.Separator) + "shot.png"
+	if err := os.WriteFile(existing, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pdf := tmp + string(filepath.Separator) + "deck.pdf"
+	if err := os.WriteFile(pdf, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name        string
+		input       string
+		wantFound   string
+		wantMissing string
+		wantOK      bool
+	}{
+		{"existing png path", "把 " + existing + " 转成PPT", existing, "", true},
+		{"existing pdf path, quoted", `转成幻灯 "` + pdf + `" 谢谢`, pdf, "", true},
+		{"missing path → missing, not ok", "把 " + tmp + string(filepath.Separator) + "nope.png 做成PPT", "", tmp + string(filepath.Separator) + "nope.png", false},
+		{"URL with image ext → skip (no :// tokens)", "看这个 https://example.com/a.png 做PPT", "", "", false},
+		{"relative path → skip", "把 shot.png 做成PPT", "", "", false},
+		{"bare extension word → skip", "做个 shots.png 主题的PPT", "", "", false},
+		{"no path at all", "做个PPT关于AI", "", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, miss, ok := localPathReference(c.input)
+			if got != c.wantFound || miss != c.wantMissing || ok != c.wantOK {
+				t.Errorf("localPathReference(%q) = (%q, %q, %v), want (%q, %q, %v)",
+					c.input, got, miss, ok, c.wantFound, c.wantMissing, c.wantOK)
+			}
+		})
+	}
+}
+
+// TestClearStaleReferenceFilesIn verifies the existence invariant's core: both
+// leftovers from a previous task (reference-style.json + pdf-pages/) are
+// removed, and clearing an already-clean home is a harmless no-op.
+func TestClearStaleReferenceFilesIn(t *testing.T) {
+	home := t.TempDir()
+	fp := filepath.Join(home, ".fairpeer", "reference-style.json")
+	pd := filepath.Join(home, ".fairpeer", "pdf-pages", "page-1.json")
+	if err := os.MkdirAll(filepath.Dir(pd), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{fp, pd} {
+		if err := os.WriteFile(p, []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clearStaleReferenceFilesIn(home)
+	for _, p := range []string{fp, pd} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s still exists after clear (err=%v)", p, err)
+		}
+	}
+	// Idempotent: a second clear on the clean home must not error or panic.
+	clearStaleReferenceFilesIn(home)
 }

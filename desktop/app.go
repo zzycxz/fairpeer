@@ -1082,27 +1082,115 @@ func (a *App) SubmitToTab(tabID, input string) {
 	// If the user attached a reference image/PDF with PPT-making intent, run the
 	// VLM gatekeeper NOW (synchronously) so reference-style.json / page-N.json is
 	// ready by the time the controller dispatches to ppt-auto (which reads them in
-	// Step 3). See ppt-vision-enhancement-spec §六.五. Best-effort: errors here do
-	// NOT block the message — ppt-auto degrades to its normal topic-driven flow.
-	if refPath, ok := pptReferenceAttachment(input); ok {
-		if err := a.withActiveWorkspaceDo(func() error {
-			res, perr := a.PreparePPTReference(refPath)
-			if perr == nil && res != nil && res.NeedsVLMConfig {
-				// VLM 未配置：发前端告警事件（前端监听 "ppt:reference-warning" 显示提示）+ 日志。
-				// 不阻塞消息——ppt-auto 退回普通主题驱动流程。
-				runtime.EventsEmit(a.ctx, "ppt:reference-warning", map[string]string{
-					"reason": "no_vlm_model",
-					"hint":   "未配置视觉模型(VLM)，无法分析参考图样式，已用普通流程生成。请在设置里配置 VLM。",
-				})
-				slog.Warn("SubmitToTab: VLM not configured — reference image not analyzed, degrading to normal flow")
-			}
-			return nil
-		}); err != nil {
-			slog.Warn("SubmitToTab: PreparePPTReference failed (degrading to normal flow)", "err", err)
-		}
-	}
+	// Image→PPT gatekeeper. Called from BOTH submit entry points (see
+	// mayPreparePPTReference) — the frontend routes here via SubmitToTab OR
+	// SubmitDisplayToTab (the latter when display≠submit, i.e. exactly when an
+	// attachment @ref is present). Best-effort; never blocks the message.
+	a.mayPreparePPTReference(input)
 	ctrl.SubmitDisplay(input, input)
 	slog.Info("SubmitToTab: dispatched to controller", "tabID", tabID, "inputLen", len(input))
+}
+
+// mayPreparePPTReference is the image→PPT gatekeeper. Called from BOTH submit
+// entry points: SubmitToTab (display==submit) and SubmitDisplayToTab (display≠
+// submit, which is EXACTLY when there's an attachment @ref — the case we must
+// catch). It detects a PPT reference — an uploaded attachment token OR an
+// absolute local path pasted as text — runs PreparePPTReference synchronously
+// (VLM classify → vision flow), and writes reference-style.json / page-N.json
+// before the message reaches the model. See ppt-vision-enhancement-spec §六.五.
+// Best-effort: any failure logs, emits a ppt:reference-warning so the user KNOWS
+// the reference was dropped (silent degradation used to ship decks that ignored
+// the reference with no explanation), and degrades to normal topic-driven flow.
+func (a *App) mayPreparePPTReference(input string) {
+	if !hasPPTIntent(strings.ToLower(input)) {
+		return
+	}
+	// Reference form 1: an uploaded attachment token. Form 2: an absolute local
+	// path typed/pasted into the message (e.g. C:\Users\me\Desktop\shot.png) —
+	// both route to the same PreparePPTReference.
+	refPath, refMatched := pptReferenceAttachment(input)
+	missingPath := ""
+	if !refMatched {
+		if lp, miss, ok := localPathReference(input); ok {
+			refPath, refMatched = lp, true
+		} else {
+			missingPath = miss
+		}
+	}
+	head := input
+	if len(head) > 120 {
+		head = head[:120] + "..."
+	}
+	pptVisionDebugLog("trigger check: matched=%v refPath=%q missing=%q inputHead=%q", refMatched, refPath, missingPath, head)
+	if !refMatched {
+		if missingPath != "" {
+			runtime.EventsEmit(a.ctx, "ppt:reference-warning", map[string]string{
+				"reason": "path_not_found",
+				"hint":   fmt.Sprintf("引用的参考文件不存在：%s — 请检查路径，或直接把图片拖入对话上传。", missingPath),
+			})
+		}
+		// PPT task WITHOUT a reference: leftovers from a previous task would
+		// silently hijack this run (pdf-pages/page-N.json even overrides the
+		// deck's page count per SKILL.md Step 3). Enforce the invariant:
+		// those files exist ⟺ the current task provided a reference.
+		clearStaleReferenceFiles()
+		return
+	}
+	if err := a.withActiveWorkspaceDo(func() error {
+		res, perr := a.PreparePPTReference(refPath)
+		vErr := ""
+		pages, total := 0, 0
+		if res != nil {
+			vErr = res.VisionError
+			pages = res.PDFPages
+			total = res.PDFTotalPages
+		}
+		pptVisionDebugLog("PreparePPTReference: err=%v isVisual=%v needsVLM=%v visionErr=%q pdfPages=%d/%d",
+			perr, res != nil && res.IsVisual, res != nil && res.NeedsVLMConfig, vErr, pages, total)
+		switch {
+		case perr == nil && res != nil && res.NeedsVLMConfig:
+			runtime.EventsEmit(a.ctx, "ppt:reference-warning", map[string]string{
+				"reason": "no_vlm_model",
+				"hint":   "未配置视觉模型(VLM)，无法分析参考图样式，已用普通流程生成。请在设置里配置 VLM。",
+			})
+			slog.Warn("mayPreparePPTReference: VLM not configured — reference image not analyzed, degrading to normal flow")
+		case perr != nil:
+			// The classify call itself failed (timeout / provider error) — the
+			// whole pre-analysis is skipped, so the user must hear about it.
+			runtime.EventsEmit(a.ctx, "ppt:reference-warning", map[string]string{
+				"reason": "classify_failed",
+				"hint":   fmt.Sprintf("参考图分析失败：%v — 已按普通流程生成，参考图样式未被应用。", perr),
+			})
+			slog.Warn("mayPreparePPTReference: classify failed (degrading to normal flow)", "err", perr)
+		}
+		if perr == nil && res != nil {
+			if vErr != "" {
+				runtime.EventsEmit(a.ctx, "ppt:reference-warning", map[string]string{
+					"reason": "vision_error",
+					"hint":   fmt.Sprintf("参考图视觉分析部分失败：%s — 已按普通流程降级生成。", vErr),
+				})
+			}
+			if total > pages && pages > 0 {
+				runtime.EventsEmit(a.ctx, "ppt:reference-warning", map[string]string{
+					"reason": "pdf_truncated",
+					"hint":   fmt.Sprintf("PDF 共 %d 页，仅分析了前 %d 页，其余页面将按普通方式生成。", total, pages),
+				})
+			}
+			// Surface the verdict so the user can catch a misroute ("it judged
+			// plain text but I wanted the layout") while it's still cheap to
+			// correct — human confirmation beats the code guessing intent.
+			runtime.EventsEmit(a.ctx, "ppt:reference-analyzed", map[string]any{
+				"verdict":   res.Verdict,
+				"is_visual": res.IsVisual,
+				"reason":    res.Reason,
+				"pdf_pages": pages,
+			})
+		}
+		return nil
+	}); err != nil {
+		pptVisionDebugLog("withActiveWorkspaceDo err: %v", err)
+		slog.Warn("mayPreparePPTReference: PreparePPTReference failed (degrading to normal flow)", "err", err)
+	}
 }
 
 // SessionListForMobile returns all tabs as SessionInfo for linkpeer's session
@@ -1174,6 +1262,12 @@ func (a *App) SubmitDisplay(display, input string) {
 }
 
 func (a *App) SubmitDisplayToTab(tabID, display, input string) {
+	// Image→PPT gatekeeper — MUST run here too. The frontend routes to
+	// SubmitDisplayToTab (not SubmitToTab) exactly when display≠submit, i.e. when
+	// an attachment @ref is present — which is precisely the case we must catch.
+	// Without this, image references bypassed the gatekeeper entirely (the bug
+	// that caused the first test runs to hallucinate). See mayPreparePPTReference.
+	a.mayPreparePPTReference(input)
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return

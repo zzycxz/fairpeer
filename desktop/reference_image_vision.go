@@ -25,8 +25,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 // referenceImageMaxBytes caps the image size sent to the VLM. VLM providers reject
@@ -104,10 +102,13 @@ func (a *App) AnalyzeReferenceImage(imgPath string) error {
 }
 
 func analyzeReferenceImage(ctx context.Context, imgPath string) error {
+	pptVisionDebugLog("analyzeReferenceImage start: imgPath=%s", imgPath)
 	imgBytes, err := readImageForVLM(imgPath)
 	if err != nil {
+		pptVisionDebugLog("analyzeReferenceImage readImageForVLM err: %v", err)
 		return fmt.Errorf("read reference image: %w", err)
 	}
+	pptVisionDebugLog("analyzeReferenceImage img read OK: size=%d", len(imgBytes))
 	// PNG-lossless data URL — no JPEG re-encode, no downscale. Keeps text/edges/
 	// solid-color blocks sharp for the VLM (same lesson as image_understand's
 	// format-preservation fix: JPEG q85 smears exactly what OCR/layout/color
@@ -117,10 +118,12 @@ func analyzeReferenceImage(ctx context.Context, imgPath string) error {
 
 	// Call 1: 4-section description (content/layout/format/design) — ppt-auto
 	// Step 3 reads Description for layout/content/font-ratio guidance.
-	desc, err := builtin.CallVLM(ctx, dataURL, pdfPageVLMPrompt)
+	desc, err := callVLMWithTimeout(ctx, dataURL, pdfPageVLMPrompt)
 	if err != nil {
+		pptVisionDebugLog("analyzeReferenceImage describe CallVLM FAILED: %v", err)
 		return fmt.Errorf("reference image VLM (describe): %w", err)
 	}
+	pptVisionDebugLog("analyzeReferenceImage describe OK (len=%d)", len(desc))
 
 	result := referenceStyleResult{
 		Image:       filepath.Base(imgPath),
@@ -131,7 +134,7 @@ func analyzeReferenceImage(ctx context.Context, imgPath string) error {
 	// are what merge_vlm_style.py reads to recolor the deck — without them the
 	// reference's palette never reaches the generated PPT. Best-effort: a color-call
 	// failure leaves Description intact; merge just skips colors (template fallback).
-	if colorResp, cerr := builtin.CallVLM(ctx, dataURL, referenceColorPrompt); cerr == nil {
+	if colorResp, cerr := callVLMWithTimeout(ctx, dataURL, referenceColorPrompt); cerr == nil {
 		if cs := parseVLMStyleResponse(colorResp); cs != nil {
 			result.Background = cs.Background
 			result.IsDark = cs.IsDark
@@ -148,7 +151,10 @@ func analyzeReferenceImage(ctx context.Context, imgPath string) error {
 		return fmt.Errorf("ensure ~/.fairpeer: %w", err)
 	}
 	data, _ := jsonMarshal(result)
-	return os.WriteFile(filepath.Join(outDir, "reference-style.json"), data, 0o644)
+	refPath := filepath.Join(outDir, "reference-style.json")
+	writeErr := os.WriteFile(refPath, data, 0o644)
+	pptVisionDebugLog("analyzeReferenceImage write reference-style.json: path=%s err=%v", refPath, writeErr)
+	return writeErr
 }
 
 // ocrTextPrompt transcribes the words in a plain-text image. Used when
@@ -174,7 +180,7 @@ func (a *App) extractImageText(imgPath string) error {
 		return fmt.Errorf("read image for OCR: %w", err)
 	}
 	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(imgBytes)
-	text, err := builtin.CallVLM(ctx, dataURL, ocrTextPrompt)
+	text, err := callVLMWithTimeout(ctx, dataURL, ocrTextPrompt)
 	if err != nil {
 		return fmt.Errorf("image OCR: %w", err)
 	}
