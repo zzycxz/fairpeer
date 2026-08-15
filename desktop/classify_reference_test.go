@@ -142,3 +142,85 @@ func TestClearStaleReferenceFilesIn(t *testing.T) {
 	// Idempotent: a second clear on the clean home must not error or panic.
 	clearStaleReferenceFilesIn(home)
 }
+
+// TestParseRefAnalysis verifies the merged analyzer's verdict parser: the first
+// non-empty line decides PLAIN/VISUAL, the rest becomes Body. Guards the two
+// failure modes of a one-call gate: an ambiguous answer must default to the
+// CHEAP path (PLAIN, never burn the vision pipeline on uncertainty), and the
+// verdict line must not leak into the description/transcription consumed by
+// ppt-auto.
+func TestParseRefAnalysis(t *testing.T) {
+	cases := []struct {
+		name       string
+		resp       string
+		wantVisual bool
+		wantVerdic string
+		wantBody   string
+	}{
+		{
+			name:       "visual + 4 sections",
+			resp:       "VISUAL\n## 1 CONTENT\n标题\n## 2 LAYOUT\ntop-center title",
+			wantVisual: true,
+			wantVerdic: "VISUAL",
+			wantBody:   "## 1 CONTENT\n标题\n## 2 LAYOUT\ntop-center title",
+		},
+		{
+			name:       "plain + transcription",
+			resp:       "PLAIN\n第一行文字\n第二行文字",
+			wantVisual: false,
+			wantVerdic: "PLAIN",
+			wantBody:   "第一行文字\n第二行文字",
+		},
+		{
+			name:       "code-fenced verdict",
+			resp:       "`VISUAL`\n## 1 CONTENT\nx",
+			wantVisual: true,
+			wantVerdic: "VISUAL",
+			wantBody:   "## 1 CONTENT\nx",
+		},
+		{
+			name:       "VERDICT: prefix + reason tail",
+			resp:       "VISUAL - has a large blue title and cards\n## 1 CONTENT\nx",
+			wantVisual: true,
+			wantVerdic: "VISUAL",
+			wantBody:   "## 1 CONTENT\nx",
+		},
+		{
+			name:       "A/B habit answers still work",
+			resp:       "B\n## 1 CONTENT\nx",
+			wantVisual: true,
+			wantVerdic: "VISUAL",
+			wantBody:   "## 1 CONTENT\nx",
+		},
+		{
+			name:       "leading blank lines skipped",
+			resp:       "\n\nPLAIN\nwords here",
+			wantVisual: false,
+			wantVerdic: "PLAIN",
+			wantBody:   "words here",
+		},
+		{
+			name:       "ambiguous prose → conservative PLAIN?",
+			resp:       "这张图片看起来是视觉设计的",
+			wantVisual: false,
+			wantVerdic: "PLAIN?",
+			wantBody:   "这张图片看起来是视觉设计的",
+		},
+		{
+			name:       "empty response",
+			resp:       "",
+			wantVisual: false,
+			wantVerdic: "PLAIN?",
+			wantBody:   "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := parseRefAnalysis(c.resp)
+			if got.IsVisual != c.wantVisual || got.Verdict != c.wantVerdic || got.Body != c.wantBody {
+				t.Errorf("parseRefAnalysis(%q) = (%v, %q, %q), want (%v, %q, %q)",
+					c.resp, got.IsVisual, got.Verdict, got.Body, c.wantVisual, c.wantVerdic, c.wantBody)
+			}
+		})
+	}
+}

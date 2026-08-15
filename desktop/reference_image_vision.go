@@ -8,11 +8,15 @@ package main
 // font-size ratios, and color/style cues all come from the VLM's description.
 //
 // This is the "image → VLM → PPT" core link. It does NOT use image_understand
-// (that tool is main-session-only by design); instead it calls builtin.CallVLM
-// directly from the desktop layer, mirroring ppt_template_vision.go. The same
-// pdfPageVLMPrompt (4 sections: CONTENT/LAYOUT/FORMAT/DESIGN) is reused from
-// pdf_pages_vision.go — a reference image and a PDF page are both "describe this
-// one image in 4 sections" to the VLM.
+// (that tool is main-session-only by design); it calls the VLM directly from the
+// desktop layer. The merged analyzer prompt (pptRefAnalyzerPrompt in
+// classify_reference.go) carries the plain/visual verdict + the 4-section
+// description (CONTENT/LAYOUT/FORMAT/DESIGN) in ONE call; the structured color
+// JSON (referenceColorPrompt below) runs as a speculative parallel call.
+//
+// This file now holds the WRITE side: the three reference-style.json writers
+// (visual / plain-material / colors-only) plus the standalone public entry
+// point. PreparePPTReference orchestrates the calls and hands results here.
 //
 // Output: ~/.fairpeer/reference-style.json = {image, description, + structured
 // color fields}. ppt-auto reads `description` for layout/content/font-ratio
@@ -33,9 +37,10 @@ import (
 const referenceImageMaxBytes = 10 * 1024 * 1024
 
 // readImageForVLM reads an image file and enforces the VLM size cap. Shared by
-// the visual-analysis path (analyzeReferenceImage) and the plain-text OCR path
-// (extractImageText) so both get the same stability guard — a too-large image
-// returns an error instead of being base64-encoded into a request the VLM rejects.
+// the gate call in PreparePPTReference (which also handles PDF page-1 renders)
+// and the standalone AnalyzeReferenceImage, so both get the same stability
+// guard — a too-large image returns an error instead of being base64-encoded
+// into a request the VLM rejects.
 func readImageForVLM(imgPath string) ([]byte, error) {
 	b, err := os.ReadFile(imgPath)
 	if err != nil {
@@ -73,7 +78,7 @@ Rules:
 //   - Description: the VLM's 4-section markdown (content/layout/format/design) —
 //     ppt-auto Step 3 reads this for layout/content/font-ratio guidance.
 //   - Color fields (background/accent_colors/is_dark/text_color/...): structured
-//     hex from a 2nd VLM call — merge_vlm_style.py reads THESE (not Description)
+//     hex from the color call — merge_vlm_style.py reads THESE (not Description)
 //     and merges them into template_config.json.colors, so the deck's palette
 //     matches the reference. Without these hex fields the merge skips the
 //     reference and the deck falls back to template/default colors.
@@ -88,63 +93,91 @@ type referenceStyleResult struct {
 	BackgroundType string   `json:"background_type,omitempty"` // "solid" | "image"
 }
 
-// AnalyzeReferenceImage is the desktop entry point: read one image, ask the VLM
-// for its 4-section description (pdfPageVLMPrompt), write ~/.fairpeer/reference-style.json.
-// Intended to run when the user gives a reference image for PPT generation; ppt-auto
-// Step 0 then reads it. Failures return an error (the caller can degrade to the
-// normal topic-driven flow if the reference image can't be analyzed).
+// AnalyzeReferenceImage is the standalone desktop entry point (kept for the
+// frontend bridge contract): read one image, run the merged analyzer + color
+// calls in parallel, write ~/.fairpeer/reference-style.json. The main PPT flow
+// goes through PreparePPTReference, which shares the same writers.
 func (a *App) AnalyzeReferenceImage(imgPath string) error {
 	ctx := context.Background()
 	if a.ctx != nil {
 		ctx = a.ctx
 	}
-	return analyzeReferenceImage(ctx, imgPath)
-}
-
-func analyzeReferenceImage(ctx context.Context, imgPath string) error {
 	pptVisionDebugLog("analyzeReferenceImage start: imgPath=%s", imgPath)
 	imgBytes, err := readImageForVLM(imgPath)
 	if err != nil {
 		pptVisionDebugLog("analyzeReferenceImage readImageForVLM err: %v", err)
 		return fmt.Errorf("read reference image: %w", err)
 	}
-	pptVisionDebugLog("analyzeReferenceImage img read OK: size=%d", len(imgBytes))
 	// PNG-lossless data URL — no JPEG re-encode, no downscale. Keeps text/edges/
 	// solid-color blocks sharp for the VLM (same lesson as image_understand's
 	// format-preservation fix: JPEG q85 smears exactly what OCR/layout/color
-	// recognition need). The image was already sized by whoever produced it
-	// (screenshot/reference), so no rescale here either.
+	// recognition need).
 	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(imgBytes)
 
-	// Call 1: 4-section description (content/layout/format/design) — ppt-auto
-	// Step 3 reads Description for layout/content/font-ratio guidance.
-	desc, err := callVLMWithTimeout(ctx, dataURL, pdfPageVLMPrompt)
+	pr, err := analyzeRefParallel(ctx, dataURL)
 	if err != nil {
-		pptVisionDebugLog("analyzeReferenceImage describe CallVLM FAILED: %v", err)
-		return fmt.Errorf("reference image VLM (describe): %w", err)
+		pptVisionDebugLog("analyzeReferenceImage analyzeRefParallel FAILED: %v", err)
+		return fmt.Errorf("reference image VLM: %w", err)
 	}
-	pptVisionDebugLog("analyzeReferenceImage describe OK (len=%d)", len(desc))
+	analysis := pr.analysis
+	if analysis.IsVisual {
+		return writeReferenceStyle(filepath.Base(imgPath), analysis.Body, pr.colorResp)
+	}
+	// PLAIN from the standalone entry: same material treatment as the main flow.
+	return writePlainReference(filepath.Base(imgPath), analysis.Body)
+}
 
+// writeReferenceStyle writes the VISUAL branch: 4-section description +
+// structured colors parsed from colorResp (best-effort — an empty/unparseable
+// color response skips the color fields, and merge_vlm_style falls back to the
+// template palette).
+func writeReferenceStyle(imgName, desc, colorResp string) error {
+	result := referenceStyleResult{Image: imgName, Description: desc}
+	applyColorFields(&result, colorResp)
+	return writeRefJSON(result)
+}
+
+// writePlainReference writes the PLAIN branch: the merged call's transcription
+// as source material. There is no visual design worth replicating, but the words
+// are still useful — and ppt-auto can't read image bytes directly (refs.go
+// leaves only a text <image path> placeholder).
+func writePlainReference(imgName, transcription string) error {
 	result := referenceStyleResult{
-		Image:       filepath.Base(imgPath),
-		Description: desc,
+		Image: imgName,
+		Description: "Plain-text reference (no visual design worth replicating). Transcribed content below — use as source material:\n\n" +
+			transcription,
 	}
+	return writeRefJSON(result)
+}
 
-	// Call 2: structured colors (background/accent/text/is_dark). These hex fields
-	// are what merge_vlm_style.py reads to recolor the deck — without them the
-	// reference's palette never reaches the generated PPT. Best-effort: a color-call
-	// failure leaves Description intact; merge just skips colors (template fallback).
-	if colorResp, cerr := callVLMWithTimeout(ctx, dataURL, referenceColorPrompt); cerr == nil {
-		if cs := parseVLMStyleResponse(colorResp); cs != nil {
-			result.Background = cs.Background
-			result.IsDark = cs.IsDark
-			result.AccentColors = cs.AccentColors
-			result.TextColor = cs.TextColor
-			result.StyleKeywords = cs.StyleKeywords
-			result.BackgroundType = cs.BackgroundType
-		}
+// writeReferenceColorsOnly writes the PDF deck branch: colors without a
+// Description. The per-page layout/content guidance lives in
+// ~/.fairpeer/pdf-pages/page-N.json; this file exists so merge_vlm_style.py
+// picks up the deck-level palette (previously the PDF path had NO color
+// extraction — decks referenced against a PDF ran on template/baseline colors).
+func writeReferenceColorsOnly(imgName, colorResp string) error {
+	result := referenceStyleResult{Image: imgName}
+	applyColorFields(&result, colorResp)
+	return writeRefJSON(result)
+}
+
+// applyColorFields parses a raw color-JSON response into result's structured
+// fields. Best-effort: a nil parse (empty/failed call) leaves the fields zero.
+func applyColorFields(result *referenceStyleResult, colorResp string) {
+	cs := parseVLMStyleResponse(colorResp)
+	if cs == nil {
+		return
 	}
+	result.Background = cs.Background
+	result.IsDark = cs.IsDark
+	result.AccentColors = cs.AccentColors
+	result.TextColor = cs.TextColor
+	result.StyleKeywords = cs.StyleKeywords
+	result.BackgroundType = cs.BackgroundType
+}
 
+// writeRefJSON marshals and writes ~/.fairpeer/reference-style.json.
+func writeRefJSON(result referenceStyleResult) error {
 	home, _ := os.UserHomeDir()
 	outDir := filepath.Join(home, ".fairpeer")
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
@@ -153,46 +186,6 @@ func analyzeReferenceImage(ctx context.Context, imgPath string) error {
 	data, _ := jsonMarshal(result)
 	refPath := filepath.Join(outDir, "reference-style.json")
 	writeErr := os.WriteFile(refPath, data, 0o644)
-	pptVisionDebugLog("analyzeReferenceImage write reference-style.json: path=%s err=%v", refPath, writeErr)
+	pptVisionDebugLog("write reference-style.json: path=%s err=%v", refPath, writeErr)
 	return writeErr
-}
-
-// ocrTextPrompt transcribes the words in a plain-text image. Used when
-// ClassifyReferenceVisual judged the image PLAIN TEXT (A): such an image carries
-// no visual design worth replicating, but its words are still useful source
-// material — and ppt-auto can't read image bytes directly (refs.go leaves only a
-// text <image path> placeholder), so we OCR the words into reference-style.json
-// for ppt-auto Step 3 to pick up. Output is the raw transcribed text only.
-const ocrTextPrompt = `Transcribe ALL text visible in this image, verbatim. Preserve line breaks and the natural reading order (top-to-bottom, left-to-right). Output ONLY the transcribed text — no headings, no commentary, no markdown formatting. If the image contains no text at all, output exactly: (no text)`
-
-// extractImageText OCRs a plain-text image and writes its words to
-// ~/.fairpeer/reference-style.json (Description field), so ppt-auto can read the
-// content. This is the PLAIN-TEXT branch of PreparePPTReference for images.
-// (Plain-text PDFs are NOT handled here — refs.go already extracts their text
-// when the @PDF reference is resolved, so ppt-auto receives the words directly.)
-func (a *App) extractImageText(imgPath string) error {
-	ctx := context.Background()
-	if a.ctx != nil {
-		ctx = a.ctx
-	}
-	imgBytes, err := readImageForVLM(imgPath)
-	if err != nil {
-		return fmt.Errorf("read image for OCR: %w", err)
-	}
-	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(imgBytes)
-	text, err := callVLMWithTimeout(ctx, dataURL, ocrTextPrompt)
-	if err != nil {
-		return fmt.Errorf("image OCR: %w", err)
-	}
-	result := referenceStyleResult{
-		Image:       filepath.Base(imgPath),
-		Description: "Plain-text reference (no visual design worth replicating). Transcribed content below — use as source material:\n\n" + text,
-	}
-	home, _ := os.UserHomeDir()
-	outDir := filepath.Join(home, ".fairpeer")
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return fmt.Errorf("ensure ~/.fairpeer: %w", err)
-	}
-	data, _ := jsonMarshal(result)
-	return os.WriteFile(filepath.Join(outDir, "reference-style.json"), data, 0o644)
 }

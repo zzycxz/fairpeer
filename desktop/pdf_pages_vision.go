@@ -39,6 +39,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/docconv"
@@ -51,7 +52,8 @@ type pdfPageResult struct {
 	Page       int    `json:"page"`                  // 1-based page number
 	Image      string `json:"image"`                 // rendered PNG filename (page-N.png)
 	TotalPages int    `json:"total_pages,omitempty"` // total in the source PDF
-	Desc       string `json:"description,omitempty"` // VLM's 4-section markdown
+	Verdict    string `json:"verdict,omitempty"`     // per-page PLAIN/VISUAL — mixed PDFs (visual cover + text body) get the right treatment per page
+	Desc       string `json:"description,omitempty"` // transcription (PLAIN) or 4-section markdown (VISUAL)
 	Error      string `json:"error,omitempty"`       // per-page VLM/read error (other pages still process)
 }
 
@@ -65,7 +67,7 @@ func (a *App) AnalyzePDFPages(pdfPath string) (int, error) {
 	if a.ctx != nil {
 		ctx = a.ctx
 	}
-	n, _, err := analyzePDFPages(ctx, pdfPath)
+	n, _, err := analyzePDFPages(ctx, pdfPath, "")
 	return n, err
 }
 
@@ -74,7 +76,12 @@ func (a *App) AnalyzePDFPages(pdfPath string) (int, error) {
 // total means the render cap truncated the run and the caller should surface
 // that (ppt:reference-warning "pdf_truncated") instead of silently shipping a
 // half-reference-driven deck.
-func analyzePDFPages(ctx context.Context, pdfPath string) (int, int, error) {
+//
+// firstBody, when non-empty, is the gate call's page-1 analysis (verdict line
+// already stripped) — page 1 skips its VLM call and reuses it. Pages run through
+// a bounded concurrency pool (3): the calls are independent, and the old serial
+// loop made a 6-page PDF block the submit path for 6 full round trips.
+func analyzePDFPages(ctx context.Context, pdfPath string, firstBody string) (int, int, error) {
 	// 1. Locate the renderer script — same search path as ocr_pdf.py (both sit at
 	//    the project root and ship together).
 	script := docconv.FindScript("pdf_to_page_images.py")
@@ -120,26 +127,48 @@ func analyzePDFPages(ctx context.Context, pdfPath string) (int, int, error) {
 		return 0, 0, fmt.Errorf("parse render output: %w (stdout=%q)", err, strings.TrimSpace(stdout.String()))
 	}
 
-	// 4. Send each page PNG to the VLM and write one JSON per page. Per-page
-	//    isolation: a VLM error on page 3 still yields page-4.json.
-	prompt := pdfPageVLMPrompt
+	// 4. Describe each page and write one JSON per page. Per-page isolation: a
+	//    VLM error on page 3 still yields page-4.json. Pages run concurrently
+	//    through a bounded pool — providers rate-limit, and an unbounded fan-out
+	//    on a 6-page PDF would trip 429s.
+	const pool = 3
+	sem := make(chan struct{}, pool)
+	var wg sync.WaitGroup
 	for i, pagePath := range pages {
-		result := pdfPageResult{Page: i + 1, Image: filepath.Base(pagePath), TotalPages: total}
-		if imgBytes, rerr := os.ReadFile(pagePath); rerr == nil {
-			// PNG bytes as-is — no JPEG re-encode, no downscale (scale=2 already
-			// applied at render time; PNG keeps text/edges sharp for the VLM).
-			dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(imgBytes)
-			if resp, verr := callVLMWithTimeout(ctx, dataURL, prompt); verr == nil {
-				result.Desc = resp
-			} else {
-				result.Error = verr.Error()
-			}
-		} else {
-			result.Error = fmt.Sprintf("read png: %v", rerr)
+		pageNum := i + 1
+		if pageNum == 1 && firstBody != "" {
+			// Gate call already analyzed page 1 — reuse its body (the gate only
+			// proceeds here when it judged the page VISUAL).
+			result := pdfPageResult{Page: pageNum, Image: filepath.Base(pagePath), TotalPages: total, Verdict: "VISUAL", Desc: firstBody}
+			data, _ := jsonMarshal(result)
+			_ = os.WriteFile(filepath.Join(outDir, fmt.Sprintf("page-%d.json", pageNum)), data, 0o644)
+			continue
 		}
-		data, _ := jsonMarshal(result)
-		_ = os.WriteFile(filepath.Join(outDir, fmt.Sprintf("page-%d.json", i+1)), data, 0o644)
+		wg.Add(1)
+		go func(pageNum int, pagePath string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			result := pdfPageResult{Page: pageNum, Image: filepath.Base(pagePath), TotalPages: total}
+			if imgBytes, rerr := os.ReadFile(pagePath); rerr != nil {
+				result.Error = fmt.Sprintf("read png: %v", rerr)
+			} else {
+				// PNG bytes as-is — no JPEG re-encode, no downscale (scale=2 already
+				// applied at render time; PNG keeps text/edges sharp for the VLM).
+				dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(imgBytes)
+				if resp, verr := callVLMWithTimeout(ctx, dataURL, pptRefAnalyzerPrompt); verr == nil {
+					a := parseRefAnalysis(resp)
+					result.Verdict = a.Verdict
+					result.Desc = a.Body
+				} else {
+					result.Error = verr.Error()
+				}
+			}
+			data, _ := jsonMarshal(result)
+			_ = os.WriteFile(filepath.Join(outDir, fmt.Sprintf("page-%d.json", pageNum)), data, 0o644)
+		}(pageNum, pagePath)
 	}
+	wg.Wait()
 	return len(pages), total, nil
 }
 
@@ -168,19 +197,3 @@ func parseRenderOutput(stdout []byte) (pages []string, total int, err error) {
 	}
 	return nil, 0, fmt.Errorf("no JSON result line in render output")
 }
-
-// pdfPageVLMPrompt asks the VLM for a 4-section description of ONE PDF page,
-// structured so ppt-auto can redraw a similar slide. Text is verbatim (precise);
-// layout/format/design are approximate (VLM can't see exact pixels) — which
-// matches "redraw a similar page", not "pixel-perfect clone".
-const pdfPageVLMPrompt = `You are analyzing ONE page of a document to help recreate it as an editable PowerPoint slide. Describe it in exactly 4 markdown sections:
-## 1 CONTENT
-Transcribe ALL text verbatim — title, headings, body paragraphs, every bullet point, captions, data labels, table cells. Do NOT summarize; write the exact text on the page.
-## 2 LAYOUT
-The spatial arrangement: where the title sits (top-center / top-left / etc.), the body region, single vs multi-column, paragraphs vs bullet list, any table (give its rows and columns), image regions (position: top-left / center / right / full-bleed, and rough size share of the page).
-## 3 FORMAT
-Relative font sizing (which text is largest, what looks like body size relative to it), weight cues (bold title?), bullet style (• / - / 1.), text alignment per block (left / center / right).
-## 4 DESIGN
-Background (light / dark, hue name), accent colors (hue names, e.g. "deep blue", "orange accent"), overall style (formal / casual / minimal / illustrated / corporate), any logo or decorative elements.
-
-Text (section 1) must be exact. Positions and colors (sections 2-4) can be approximate — you cannot see exact pixels. Output ONLY the 4 sections, no preamble, no closing remarks.`

@@ -1,19 +1,21 @@
 package main
 
-// classify_reference.go — VLM gatekeeper for the PPT vision pipeline.
+// classify_reference.go — VLM gatekeeper + unified analyzer for the PPT vision
+// pipeline.
 //
-// Per ppt-vision-enhancement-spec §六.五: before running the full vision flow
-// (AnalyzeReferenceImage / AnalyzePDFPages), ask the VLM ONE lightweight question
-// — is this reference PLAIN TEXT or VISUALLY DESIGNED? Plain text → just extract
-// words as material (normal topic-driven ppt-auto); visually designed → run the
-// vision flow. The VLM (not file extension / size / page-count rules) is the
-// judge. This is what the user means by "一切都应该是 VLM 去判断".
+// Per ppt-vision-enhancement-spec §六.五: decide whether a reference is PLAIN
+// TEXT or VISUALLY DESIGNED by having the VLM look at it (never by file
+// extension / size / page-count rules). Plain text → harvest the words as
+// material (normal topic-driven ppt-auto); visually designed → the vision flow.
 //
-// Why a separate lightweight call: the full 4-section extraction
-// (pdfPageVLMPrompt) is expensive and only worth it when the reference actually
-// carries visual design. A pure-text screenshot or a body-text PDF should NOT
-// trigger layout/color/font-size extraction — it should just donate its words as
-// source material. So we ask a cheap A/B question first, then route.
+// Originally a separate lightweight A/B call preceded the expensive 4-section
+// extraction; they are now MERGED into one prompt (pptRefAnalyzerPrompt): the
+// verdict rides the first output line and the extraction follows in the same
+// response. The submit path is synchronous, so serial round trips were the
+// user-felt latency; with the speculative color call running concurrently
+// (analyzeRefParallel) a visual reference now costs ≈ ONE VLM round trip before
+// dispatch. The verdict stays VLM-judged, parseRefAnalysis just defaults
+// ambiguous answers to the cheap PLAIN path.
 
 import (
 	"bytes"
@@ -25,6 +27,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/docconv"
@@ -79,6 +82,149 @@ const classifyVisualPrompt = `Look at this image. Decide which category it falls
 (B) VISUALLY DESIGNED — has visual design elements such as: styled/large titles, a color scheme, multi-column layout, charts/diagrams, cards/boxes, icons, decorative shapes, or a slide-like layout.
 
 Answer with ONLY "A" or "B" on the FIRST line, then ONE short sentence explaining why (e.g. "B - has a large blue title and a 2-column card layout"). Do not output anything else.`
+
+// pptRefAnalyzerPrompt merges the plain/visual gate INTO the extraction call —
+// one call per image instead of a separate cheap classify followed by the
+// expensive 4-section extraction. The submit path is synchronous and the calls
+// were serial, so 3 round trips (classify → describe → colors) became the
+// user-felt latency; merging the gate costs nothing (the verdict is one extra
+// output line) and the colors call runs concurrently (analyzeRefParallel).
+//
+// Cognitive-mode discipline (anti-hallucination): one call = ONE response mode.
+// The verdict + transcription/4-sections share the "read this image" mode; the
+// strict-JSON colors call stays separate because precision formats degrade when
+// mixed with long prose. The (illegible) escape valve matters most: a VLM forced
+// to produce text it cannot actually read will confabulate — letting it say
+// "cannot read" is the cheapest hallucination reduction there is.
+const pptRefAnalyzerPrompt = `You are looking at ONE page (a reference for recreating it as an editable PowerPoint slide).
+
+FIRST LINE — the verdict, exactly one word:
+PLAIN — only words and numbers, NO visual styling, layout, or design (a plain text note, a body-text document page, a code listing, a raw data dump).
+VISUAL — has visual design: styled/large titles, a color scheme, multi-column layout, charts/diagrams, cards/boxes, icons, decorative shapes, or a slide-like layout.
+
+If PLAIN: after the first line, transcribe ALL visible text verbatim (preserve line breaks; top-to-bottom, left-to-right reading order). Output ONLY the transcription — no headings, no commentary, no markdown formatting. If the image contains no text at all, output exactly: (no text)
+
+If VISUAL: after the first line, describe the page in exactly 4 markdown sections:
+## 1 CONTENT
+Transcribe ALL text verbatim — title, headings, body paragraphs, every bullet point, captions, data labels, table cells. Do NOT summarize. Mark text you cannot read clearly as (illegible) — never guess.
+## 2 LAYOUT
+The spatial arrangement: where the title sits (top-center / top-left / etc.), the body region, single vs multi-column, paragraphs vs bullet list, any table (give its rows and columns), image regions (position and rough size share of the page).
+## 3 FORMAT
+Relative font sizing (which text is largest, what looks like body size relative to it), weight cues (bold title?), bullet style, text alignment per block (left / center / right).
+## 4 DESIGN
+Background (light / dark, hue name), accent colors (hue names), overall style (formal / casual / minimal / illustrated / corporate), any logo or decorative elements.
+
+Text (CONTENT) must be exact — use (illegible) for unreadable text instead of guessing. Positions and colors (LAYOUT/FORMAT/DESIGN) can be approximate — you cannot see exact pixels. Output ONLY the verdict line followed by the required content, no preamble, no closing remarks.`
+
+// refAnalysis is the parsed result of one pptRefAnalyzerPrompt call.
+type refAnalysis struct {
+	IsVisual bool   // true = VISUAL (4-section description in Body)
+	Verdict  string // "VISUAL" / "PLAIN" / "PLAIN?" (ambiguous → conservative cheap path)
+	Reason   string // short explanation when the model gave one ("VISUAL - has card layout" → "has card layout")
+	Body     string // transcription (PLAIN) or 4-section markdown (VISUAL), verdict line stripped
+}
+
+// parseRefAnalysis pulls the verdict off the first non-empty line and returns
+// the remainder as Body. Tolerant of a code fence, a leading '#', "VERDICT:"
+// prefixes, and A/B habit answers; ambiguous output defaults to PLAIN — the
+// cheap path — mirroring parseClassification's conservatism (never burn the
+// vision pipeline on an unclear answer).
+func parseRefAnalysis(resp string) refAnalysis {
+	var a refAnalysis
+	lines := strings.Split(strings.TrimSpace(resp), "\n")
+	verdictIdx := -1
+	var firstClean string
+	for i, raw := range lines {
+		clean := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "`"))
+		clean = strings.TrimSpace(strings.TrimPrefix(clean, "#"))
+		if clean == "" {
+			continue
+		}
+		verdictIdx = i
+		firstClean = clean
+		break
+	}
+	if verdictIdx < 0 {
+		a.Verdict = "PLAIN?"
+		a.Body = strings.TrimSpace(resp)
+		return a
+	}
+	words := strings.Fields(strings.ToUpper(firstClean))
+	w := ""
+	if len(words) > 0 {
+		w = strings.TrimSuffix(strings.TrimSuffix(words[0], ":"), ".")
+		w = strings.Trim(w, "`\"'") // tolerate a half-stripped code fence around the verdict word
+	}
+	if (w == "VERDICT" || w == "ANSWER") && len(words) > 1 {
+		w = strings.TrimSuffix(strings.TrimSuffix(words[1], ":"), ".")
+		w = strings.Trim(w, "`\"'")
+	}
+	switch w {
+	case "VISUAL", "B":
+		a.IsVisual, a.Verdict = true, "VISUAL"
+	case "PLAIN", "A":
+		a.IsVisual, a.Verdict = false, "PLAIN"
+	default:
+		// Ambiguous: no verdict line to strip — keep the whole response as Body
+		// (the model may have ignored the format but still produced content).
+		a.IsVisual, a.Verdict = false, "PLAIN?"
+		a.Body = strings.TrimSpace(resp)
+		return a
+	}
+	// Optional " - reason" tail on the verdict line.
+	if idx := strings.Index(firstClean, "-"); idx >= 0 {
+		a.Reason = firstClean[idx+1:]
+		if len(a.Reason) > 120 {
+			a.Reason = a.Reason[:120]
+		}
+	}
+	a.Body = strings.TrimSpace(strings.Join(lines[verdictIdx+1:], "\n"))
+	return a
+}
+
+// refParallelResult is the outcome of analyzeRefParallel.
+type refParallelResult struct {
+	analysis  refAnalysis
+	colorResp string // raw color-JSON response; "" when the (best-effort) call failed
+}
+
+// analyzeRefParallel runs the merged verdict+extraction call and the SPECULATIVE
+// structured-color call concurrently on the same image — wall clock ≈ one VLM
+// round trip instead of two serial ones. The color call is speculative because
+// its result is only consumed when the verdict is VISUAL; on a PLAIN verdict it
+// is discarded (one cheap wasted call on plain images — accepted: PPT
+// references are overwhelmingly visual). The merged call is load-bearing: its
+// failure fails the whole thing, a color failure just degrades colors to the
+// template fallback.
+func analyzeRefParallel(ctx context.Context, dataURL string) (*refParallelResult, error) {
+	var (
+		wg           sync.WaitGroup
+		analysisResp string
+		colorResp    string
+		analysisErr  error
+		colorErr     error
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		analysisResp, analysisErr = callVLMWithTimeout(ctx, dataURL, pptRefAnalyzerPrompt)
+	}()
+	go func() {
+		defer wg.Done()
+		colorResp, colorErr = callVLMWithTimeout(ctx, dataURL, referenceColorPrompt)
+	}()
+	wg.Wait()
+	if analysisErr != nil {
+		return nil, analysisErr
+	}
+	res := &refParallelResult{analysis: parseRefAnalysis(analysisResp)}
+	if colorErr == nil {
+		res.colorResp = colorResp
+	}
+	pptVisionDebugLog("analyzeRefParallel: verdict=%s reason=%q bodyLen=%d colorErr=%v",
+		res.analysis.Verdict, res.analysis.Reason, len(res.analysis.Body), colorErr)
+	return res, nil
+}
 
 // ReferenceClassification is the result of the VLM gatekeeper check.
 type ReferenceClassification struct {
@@ -185,15 +331,20 @@ type PrepareResult struct {
 
 // PreparePPTReference is the unified entry point the PPT request handler calls
 // when the user gives a reference file (image or PDF) with "make a PPT" intent.
-// It classifies the reference with the VLM, then routes:
+// ONE merged VLM call (verdict + extraction, pptRefAnalyzerPrompt) plus a
+// speculative structured-color call run concurrently on the first page, then:
 //
-//   - PLAIN TEXT (A) → skip the vision flow entirely. ppt-auto treats the file as
-//     ordinary source material via its normal extract_content / doc_read path.
-//     Returns IsVisual=false so the caller knows to run the topic-driven flow.
+//   - PLAIN → the merged call already transcribed the words (its PLAIN branch IS
+//     the OCR). For an image they land in reference-style.json as source
+//     material; a plain PDF falls through (refs.go extracts its text on the
+//     normal path). Returns IsVisual=false → caller runs the topic-driven flow.
 //
-//   - VISUALLY DESIGNED (B) → run the vision flow so ppt-auto can redraw a similar
-//     slide: image → AnalyzeReferenceImage (writes reference-style.json);
-//     PDF → AnalyzePDFPages (writes page-N.json).
+//   - VISUAL → the vision flow, reusing what the gate call already produced:
+//     image → writeReferenceStyle (4-section description + speculative colors →
+//     reference-style.json); PDF → analyzePDFPages reuses page 1's body and
+//     describes pages 2..N through a bounded concurrency pool, plus deck-level
+//     colors from the speculative call (the PDF path previously had NO color
+//     extraction at all).
 //
 // Vision-step errors are recorded in VisionError, not returned as a fatal error —
 // the caller can still proceed (degrade to topic-driven) if the vision step hiccups.
@@ -202,7 +353,20 @@ func (a *App) PreparePPTReference(filePath string) (*PrepareResult, error) {
 	if a.ctx != nil {
 		ctx = a.ctx
 	}
-	cls, err := a.ClassifyReferenceVisual(filePath)
+	// One image for the gate call: the file itself, or PDF page 1 rendered.
+	imgPath, cleanup, err := singleImageForVLM(ctx, filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	imgBytes, err := readImageForVLM(imgPath)
+	if err != nil {
+		return nil, fmt.Errorf("read reference image: %w", err)
+	}
+	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(imgBytes)
+
+	start := time.Now()
+	pr, err := analyzeRefParallel(ctx, dataURL)
 	if err != nil {
 		// VLM 未配置是可识别的配置错误：返回带 NeedsVLMConfig 的 result，让调用方
 		// (SubmitToTab) 告警用户去设置 VLM，而不是当普通错误静默吞掉。其他错误正常返回。
@@ -211,34 +375,43 @@ func (a *App) PreparePPTReference(filePath string) (*PrepareResult, error) {
 		}
 		return nil, err
 	}
+	analysis := pr.analysis
+	pptVisionDebugLog("PreparePPTReference: verdict=%s (%.1fs) file=%s", analysis.Verdict, time.Since(start).Seconds(), filePath)
 	result := &PrepareResult{
-		IsVisual: cls.IsVisual,
-		Verdict:  cls.Verdict,
-		Reason:   cls.Reason,
+		IsVisual: analysis.IsVisual,
+		Verdict:  analysis.Verdict,
+		Reason:   analysis.Reason,
 	}
+
 	// Route by verdict + file type.
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch {
-	case cls.IsVisual && ext == ".pdf":
-		// Visually designed PDF → per-page vision flow.
-		n, total, verr := analyzePDFPages(ctx, filePath)
+	case analysis.IsVisual && ext == ".pdf":
+		// Visually designed PDF: deck-level colors (speculative page-1 call) go
+		// to reference-style.json for merge_vlm_style; per-page guidance is
+		// page-N.json, with page 1 reusing the gate call's body.
+		if werr := writeReferenceColorsOnly(filepath.Base(filePath), pr.colorResp); werr != nil {
+			result.VisionError = werr.Error()
+		}
+		n, total, verr := analyzePDFPages(ctx, filePath, analysis.Body)
 		result.PDFPages = n
 		result.PDFTotalPages = total
 		if verr != nil {
 			result.VisionError = verr.Error()
 		}
-	case cls.IsVisual:
-		// Visually designed image → 4-section description + structured colors.
-		if verr := a.AnalyzeReferenceImage(filePath); verr != nil {
-			result.VisionError = verr.Error()
+	case analysis.IsVisual:
+		// Visually designed image → 4-section description + structured colors,
+		// both already in hand from the parallel calls.
+		if werr := writeReferenceStyle(filepath.Base(filePath), analysis.Body, pr.colorResp); werr != nil {
+			result.VisionError = werr.Error()
 		}
 	case ext != ".pdf":
-		// PLAIN-TEXT IMAGE → OCR its words into reference-style.json so ppt-auto
-		// has the content (ppt-auto can't read image bytes; refs.go only leaves a
-		// text placeholder for images). No visual flow — nothing to replicate
-		// design-wise, just harvest the words as source material.
-		if verr := a.extractImageText(filePath); verr != nil {
-			result.VisionError = verr.Error()
+		// PLAIN-TEXT IMAGE → the merged call's PLAIN branch already transcribed
+		// the words; store them as source material (ppt-auto can't read image
+		// bytes; refs.go only leaves a text placeholder for images). No visual
+		// flow — nothing to replicate design-wise.
+		if werr := writePlainReference(filepath.Base(filePath), analysis.Body); werr != nil {
+			result.VisionError = werr.Error()
 		}
 		// Plain-text PDF falls through with no action: refs.go already extracts
 		// its text when the @PDF reference is resolved, so ppt-auto receives it.
