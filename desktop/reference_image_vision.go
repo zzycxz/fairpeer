@@ -84,6 +84,7 @@ Rules:
 //     reference and the deck falls back to template/default colors.
 type referenceStyleResult struct {
 	Image          string   `json:"image"`                     // source image filename
+	SourcePath     string   `json:"source_path,omitempty"`     // absolute path of the analyzed image — qa_compare.py reads this to find the reference for post-generation comparison
 	Description    string   `json:"description,omitempty"`     // VLM 4-section markdown
 	Background     string   `json:"background,omitempty"`      // #RRGGBB — merge_vlm_style reads this
 	IsDark         bool     `json:"is_dark,omitempty"`         // background brightness < 50%
@@ -121,18 +122,20 @@ func (a *App) AnalyzeReferenceImage(imgPath string) error {
 	}
 	analysis := pr.analysis
 	if analysis.IsVisual {
-		return writeReferenceStyle(filepath.Base(imgPath), analysis.Body, pr.colorResp)
+		return writeReferenceStyle(imgPath, analysis.Body, pr.colorResp)
 	}
 	// PLAIN from the standalone entry: same material treatment as the main flow.
-	return writePlainReference(filepath.Base(imgPath), analysis.Body)
+	return writePlainReference(imgPath, analysis.Body)
 }
 
 // writeReferenceStyle writes the VISUAL branch: 4-section description +
 // structured colors parsed from colorResp (best-effort — an empty/unparseable
 // color response skips the color fields, and merge_vlm_style falls back to the
-// template palette).
-func writeReferenceStyle(imgName, desc, colorResp string) error {
-	result := referenceStyleResult{Image: imgName, Description: desc}
+// template palette). srcPath is the analyzed file's path; its absolute form is
+// stored so qa_compare.py can find the reference image later regardless of the
+// skill's working directory.
+func writeReferenceStyle(srcPath, desc, colorResp string) error {
+	result := referenceStyleResult{Image: filepath.Base(srcPath), SourcePath: absPath(srcPath), Description: desc}
 	applyColorFields(&result, colorResp)
 	return writeRefJSON(result)
 }
@@ -141,9 +144,10 @@ func writeReferenceStyle(imgName, desc, colorResp string) error {
 // as source material. There is no visual design worth replicating, but the words
 // are still useful — and ppt-auto can't read image bytes directly (refs.go
 // leaves only a text <image path> placeholder).
-func writePlainReference(imgName, transcription string) error {
+func writePlainReference(srcPath, transcription string) error {
 	result := referenceStyleResult{
-		Image: imgName,
+		Image:      filepath.Base(srcPath),
+		SourcePath: absPath(srcPath),
 		Description: "Plain-text reference (no visual design worth replicating). Transcribed content below — use as source material:\n\n" +
 			transcription,
 	}
@@ -155,10 +159,19 @@ func writePlainReference(imgName, transcription string) error {
 // ~/.fairpeer/pdf-pages/page-N.json; this file exists so merge_vlm_style.py
 // picks up the deck-level palette (previously the PDF path had NO color
 // extraction — decks referenced against a PDF ran on template/baseline colors).
-func writeReferenceColorsOnly(imgName, colorResp string) error {
-	result := referenceStyleResult{Image: imgName}
+func writeReferenceColorsOnly(srcPath, colorResp string) error {
+	result := referenceStyleResult{Image: filepath.Base(srcPath), SourcePath: absPath(srcPath)}
 	applyColorFields(&result, colorResp)
 	return writeRefJSON(result)
+}
+
+// absPath best-efforts p to an absolute path (resolved against the current
+// working directory, which on the pre-analysis path is the active workspace).
+func absPath(p string) string {
+	if ap, err := filepath.Abs(p); err == nil {
+		return ap
+	}
+	return p
 }
 
 // applyColorFields parses a raw color-JSON response into result's structured

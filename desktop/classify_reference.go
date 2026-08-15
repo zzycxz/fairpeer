@@ -390,7 +390,7 @@ func (a *App) PreparePPTReference(filePath string) (*PrepareResult, error) {
 		// Visually designed PDF: deck-level colors (speculative page-1 call) go
 		// to reference-style.json for merge_vlm_style; per-page guidance is
 		// page-N.json, with page 1 reusing the gate call's body.
-		if werr := writeReferenceColorsOnly(filepath.Base(filePath), pr.colorResp); werr != nil {
+		if werr := writeReferenceColorsOnly(filePath, pr.colorResp); werr != nil {
 			result.VisionError = werr.Error()
 		}
 		n, total, verr := analyzePDFPages(ctx, filePath, analysis.Body)
@@ -402,7 +402,7 @@ func (a *App) PreparePPTReference(filePath string) (*PrepareResult, error) {
 	case analysis.IsVisual:
 		// Visually designed image → 4-section description + structured colors,
 		// both already in hand from the parallel calls.
-		if werr := writeReferenceStyle(filepath.Base(filePath), analysis.Body, pr.colorResp); werr != nil {
+		if werr := writeReferenceStyle(filePath, analysis.Body, pr.colorResp); werr != nil {
 			result.VisionError = werr.Error()
 		}
 	case ext != ".pdf":
@@ -410,7 +410,7 @@ func (a *App) PreparePPTReference(filePath string) (*PrepareResult, error) {
 		// the words; store them as source material (ppt-auto can't read image
 		// bytes; refs.go only leaves a text placeholder for images). No visual
 		// flow — nothing to replicate design-wise.
-		if werr := writePlainReference(filepath.Base(filePath), analysis.Body); werr != nil {
+		if werr := writePlainReference(filePath, analysis.Body); werr != nil {
 			result.VisionError = werr.Error()
 		}
 		// Plain-text PDF falls through with no action: refs.go already extracts

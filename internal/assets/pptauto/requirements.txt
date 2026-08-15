@@ -14,6 +14,9 @@ python-pptx>=0.6.21
 # macOS 需额外：brew install cairo
 cairosvg>=0.5.0
 
+# TOML 解析（qa_compare.py 读 fairpeer config.toml；Python 3.11+ 用内置 tomllib）
+tomli>=2.0; python_version < '3.11' 
+
 # 图片处理（尺寸校正、水印去除、宽高比修复）
 Pillow>=9.0.0
 numpy>=1.20.0

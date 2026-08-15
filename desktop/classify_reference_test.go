@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -141,6 +142,46 @@ func TestClearStaleReferenceFilesIn(t *testing.T) {
 	}
 	// Idempotent: a second clear on the clean home must not error or panic.
 	clearStaleReferenceFilesIn(home)
+}
+
+// TestWriteReferenceStyleSourcePath verifies the writers record source_path —
+// the absolute path qa_compare.py reads to find the reference image for the
+// post-generation QA loop. Without it the QA script can only guess where the
+// original attachment lives (relative paths resolve against whatever directory
+// the skill happens to run in).
+func TestWriteReferenceStyleSourcePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
+	t.Setenv("HOME", home)        // and on unix
+
+	src := filepath.Join(t.TempDir(), "shot.png")
+	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeReferenceStyle(src, "## 1 CONTENT\nx", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".fairpeer", "reference-style.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Image      string `json:"image"`
+		SourcePath string `json:"source_path"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Image != "shot.png" {
+		t.Errorf("Image = %q, want shot.png", got.Image)
+	}
+	if !filepath.IsAbs(got.SourcePath) {
+		t.Errorf("SourcePath = %q, want an absolute path", got.SourcePath)
+	}
+	if got.SourcePath != src {
+		t.Errorf("SourcePath = %q, want %q", got.SourcePath, src)
+	}
 }
 
 // TestParseRefAnalysis verifies the merged analyzer's verdict parser: the first

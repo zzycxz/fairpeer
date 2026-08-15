@@ -247,6 +247,25 @@ check_svg 报 ERROR（exit code 2）时必须修正后重查。WARN 不阻止流
 
 > **演讲者备注**：用户明确要求时才做——在 `notes/slide_NN.md` 写每页 2-5 句备注，svg_to_pptx 会自动读取嵌入。默认不生成。
 
+### Step 6.5: 视觉 QA 回路（仅有参考图/参考 PDF 时）
+
+**触发条件**：`~/.fairpeer/reference-style.json`（单图参考）或 `~/.fairpeer/pdf-pages/page-1.json`（PDF 参考）存在；两者都没有（纯主题驱动）时**跳过本步直接进 Step 7**。
+
+把生成的 SVG 渲染成图，与参考图并排送 VLM 对比（用的是 fairpeer 配置的视觉模型，无需额外参数）：
+
+```bash
+python3 <skill_dir>/scripts/qa_compare.py <project_dir> --round 1
+```
+
+输出 JSON（同时写入 `<project_dir>/qa-report.json`）：`pages[].verdict`（PASS/MINOR/MAJOR）+ `issues` + `stop`。按以下规则执行，**不要自行发明额外轮次**：
+
+- `stop: true` → 本步结束，进入 Step 7（无论是否还有 MAJOR——脚本已判定返工到顶或无进展，继续改是空转）
+- 有 MAJOR 页且 `stop: false` → 按 `issues` 提示修复对应页 SVG（改完必须重跑该页的 fix_svg + check_svg），再以 `--round 2` 重跑本命令
+- **最多 2 轮**（round > 2 时脚本强制 stop）；第 2 轮与第 1 轮 issues 完全相同 → 脚本判 no_progress 自动 stop
+- **MINOR 一律忽略**，不触发返工——目标是"类似的"，不是像素复刻
+
+complete_step 证据：引用**最后一次** qa_compare 运行（`kind: verification` + `command`）。
+
 ### Step 7: 转换 PPTX
 
 ```bash
@@ -292,6 +311,7 @@ python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
 | 脚本 | 依赖 |
 |------|------|
 | extract_content.py | 纯 Python |
+| qa_compare.py | 纯 Python（需 cairosvg；VLM 访问读 fairpeer 配置） |
 | extract_template_colors.py | 纯 Python（需 Pillow） |
 | project_manager.py init | 纯 Python |
 | fix_svg.py | 纯 Python |
