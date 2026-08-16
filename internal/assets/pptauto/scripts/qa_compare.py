@@ -349,6 +349,7 @@ def main():
     report_path = os.path.join(args.project_dir, "qa-report.json")
 
     def emit(rep):
+        rep["done"] = True  # the resume gate treats done=false as a partial run
         with open(report_path, "w", encoding="utf-8") as f:
             json.dump(rep, f, ensure_ascii=False, indent=2)
         print(json.dumps(rep, ensure_ascii=False))
@@ -398,11 +399,38 @@ def main():
             _, _, gen_png = gen_pages[n - 1]
             pairs.append((n, ref_png, gen_png))
 
-    results = []
+    # ── Resumable rounds ──
+    # The skill's bash tool kills commands at ~2 minutes; a 32-page compare
+    # WILL be killed mid-run. So: seed verdicts from a PARTIAL report of the
+    # SAME round, compare only the missing pages, and write the report after
+    # EVERY page — a kill loses at most the in-flight page, and rerunning the
+    # same command resumes instead of restarting.
+    prior = None
+    try:
+        with open(report_path, "r", encoding="utf-8") as f:
+            prior = json.load(f)
+    except (OSError, ValueError):
+        pass
+    prev_sig = None  # captured BEFORE any writes (round>=2 no-progress baseline)
+    if prior and args.round >= 2:
+        prev_sig = [(p.get("page"), p.get("verdict"), tuple(p.get("issues") or []))
+                    for p in prior.get("pages", [])]
+    seeded = {}
+    if prior and prior.get("round") == args.round and not prior.get("done"):
+        seeded = {p.get("page"): p for p in prior.get("pages", []) if p.get("verdict")}
+
+    def persist(pages, done, stop=False, reason=""):
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(report(args.round, stop, reason, pages, note="" if done else "in_progress"),
+                      f, ensure_ascii=False, indent=2)
+
+    results = [dict(seeded[n]) for n, _, _ in pairs if n in seeded]
+    pending = [(n, ref, gen) for n, ref, gen in pairs
+               if n not in seeded or not gen]
     with concurrent.futures.ThreadPoolExecutor(max_workers=COMPARE_POOL) as pool:
         futures = {
             pool.submit(vlm_compare, vlm, data_url(ref), data_url(gen)): n
-            for n, ref, gen in pairs if gen
+            for n, ref, gen in pending if gen
         }
         for fut in concurrent.futures.as_completed(futures):
             n = futures[fut]
@@ -411,11 +439,12 @@ def main():
             except Exception as e:  # noqa: BLE001 — one page's compare failure shouldn't sink the rest
                 verdict = {"verdict": "PASS", "issues": ["QA 调用失败（按 PASS 处理）: %s" % e]}
             results.append({"page": n, **verdict})
+            persist(sorted(results, key=lambda r: r["page"]), done=False)
     # Unrenderable pages: report as MINOR (visible, but never triggers rework —
     # a rendering gap is an environment issue, not a fidelity issue).
     rendered_ns = {n for n, _, gen in pairs if gen}
     for n, _, _ in pairs:
-        if n not in rendered_ns:
+        if n not in rendered_ns and n not in seeded:
             results.append({"page": n, "verdict": "MINOR", "issues": ["SVG 渲染失败，未能对比"]})
     results.sort(key=lambda r: r["page"])
 
@@ -423,18 +452,11 @@ def main():
     # means the rework didn't move anything — stop instead of churning.
     stop = False
     reason = ""
-    if args.round >= 2:
-        try:
-            with open(report_path, "r", encoding="utf-8") as f:
-                prev = json.load(f)
-            prev_sig = [(p.get("page"), p.get("verdict"), tuple(p.get("issues") or []))
-                        for p in prev.get("pages", [])]
-            cur_sig = [(p.get("page"), p.get("verdict"), tuple(p.get("issues") or []))
-                       for p in results]
-            if prev_sig == cur_sig:
-                stop, reason = True, "no_progress"
-        except (OSError, ValueError):
-            pass
+    if prev_sig is not None:
+        cur_sig = [(p.get("page"), p.get("verdict"), tuple(p.get("issues") or []))
+                   for p in results]
+        if prev_sig == cur_sig:
+            stop, reason = True, "no_progress"
     # stop=False ⟺ there is MAJOR rework to do — keep the contract mechanical so
     # the agent never has to infer "no MAJOR means continue".
     if not stop and not any(p["verdict"] == "MAJOR" for p in results):

@@ -122,6 +122,10 @@ def main():
     ap.add_argument("--home", default=None, help="home dir containing .fairpeer/ (default: ~)")
     ap.add_argument("--pool", type=int, default=3, help="concurrent VLM calls (providers rate-limit)")
     ap.add_argument("--scale", type=int, default=2, help="page render scale")
+    ap.add_argument("--max", type=int, default=8, dest="max_batch",
+                    help="analyze at most N missing pages per run (keeps each "
+                         "invocation under the skill bash 2-minute timeout); "
+                         "rerun until remaining=0")
     args = ap.parse_args()
 
     home = args.home or os.path.expanduser("~")
@@ -132,12 +136,25 @@ def main():
                "failed": failed, "out_dir": out_dir, "note": note}
         print(json.dumps(obj, ensure_ascii=False))
 
-    if not os.path.isfile(args.pdf_path):
-        summary(0, 0, 0, 0, "PDF not found: %s" % args.pdf_path)
+    pdf_path = args.pdf_path
+    if not os.path.isfile(pdf_path):
+        # The task prompt may relay a wrong path (e.g. ~/.fairpeer/attachments
+        # instead of the workspace copy). reference-style.json's source_path is
+        # the canonical absolute path the desktop analyzed — fall back to it
+        # instead of letting the agent go searching the whole disk.
+        try:
+            with open(os.path.join(home, ".fairpeer", "reference-style.json"), "r", encoding="utf-8") as f:
+                src = str(json.load(f).get("source_path") or "")
+            if src and os.path.isfile(src):
+                pdf_path = src
+        except (OSError, ValueError):
+            pass
+    if not os.path.isfile(pdf_path):
+        summary(0, 0, 0, 0, "PDF not found: %s (reference-style.json source_path fallback also missed)" % pdf_path)
         return 0
     try:
         os.makedirs(out_dir, exist_ok=True)
-        pages, total = render_pages(args.pdf_path, out_dir, args.scale)
+        pages, total = render_pages(pdf_path, out_dir, args.scale)
         # Drop a previous longer PDF's leftovers (page-K with K > this total):
         # stale analyses must never be consumed as pages of the current one.
         import glob as _glob
@@ -180,6 +197,7 @@ def main():
         return result
 
     todo, skipped = [], 0
+    remaining_after = 0
     for n, png in pages:
         jpath = os.path.join(out_dir, "page-%d.json" % n)
         try:
@@ -191,11 +209,19 @@ def main():
             pass
         todo.append((n, png))
 
+    # Batch cap: the skill's bash tool kills commands at ~2 minutes. Analyzing
+    # all missing pages in one go WILL be killed mid-run on big PDFs; capping
+    # per-run work + idempotent reruns makes progress monotonic.
+    batch = todo[:max(0, args.max_batch)]
+    remaining_after = len(todo) - len(batch)
+    todo = batch
+
     failed = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.pool)) as pool:
         for r in pool.map(analyze, todo):
             failed += 1 if r.get("error") else 0
-    summary(total, len(todo) - failed, skipped, failed)
+    summary(total, len(todo) - failed, skipped, failed,
+            "remaining_unanalyzed=%d (rerun until 0)" % remaining_after if remaining_after else "")
     return 0
 
 

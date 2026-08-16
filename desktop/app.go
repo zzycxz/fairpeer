@@ -1199,7 +1199,7 @@ func (a *App) mayPreparePPTReference(input string) string {
 		// relay it to ppt-auto rather than re-deriving an outline from text
 		// extraction (which flattens tables — the 32-page PDF failure mode).
 		if pages > 0 {
-			input += "\n\n[system] 此 PDF 已完成逐页视觉分析，结果在 ~/.fairpeer/pdf-pages/page-N.json（每页含内容/布局/表格行列/风格描述）。生成 PPT 时请在任务参数中附上此 PDF 的引用路径，并指示 ppt-auto 读取 pdf-pages 逐页重绘、用其 scripts/analyze_pdf_pages.py 补齐未分析的页、总页数以 PDF 总页数为准。不要自行提取 PDF 文字编写大纲——纯文字提取会丢失表格结构。"
+			input += "\n\n[system] 此 PDF 已完成逐页视觉分析，结果在 ~/.fairpeer/pdf-pages/page-N.json（每页含内容/布局/表格行列/风格描述）。该 PDF 的规范绝对路径记录在 ~/.fairpeer/reference-style.json 的 source_path 字段——生成 PPT 时请把该路径附在任务参数中，并指示 ppt-auto 读取 pdf-pages 逐页重绘、用其 scripts/analyze_pdf_pages.py 分批补齐未分析的页（每次至多 8 页、被超时打断后重跑即可续传，直到 remaining=0）、总页数以 PDF 总页数为准。不要自行提取 PDF 文字编写大纲——纯文字提取会丢失表格结构。"
 		}
 		return nil
 	}); err != nil {
@@ -2409,18 +2409,24 @@ type HistoryToolCall struct {
 	SubagentRef string           `json:"subagentRef,omitempty"`
 }
 
-// PresentForTab returns the presentation event records persisted for the tab's
-// session (the rich view-only stream: tool dispatches with readOnly/profile/
-// parentId, results with durationMs/truncated/attachments, notice/phase/
-// compaction cards). Returns an empty slice when no sidecar exists (a session
-// created before Present was enabled, or a CLI-started session) — callers fall
-// back to the degraded provider.Message-only history in that case. The rewrite
-// version the sidecar was aligned to is returned alongside so the frontend can
-// detect staleness after a compaction that hasn't re-flushed.
+// PresentForTab returns the presentation event records for the tab's session
+// (the rich view-only stream: tool dispatches with readOnly/profile/parentId,
+// results with durationMs/truncated/attachments, notice/phase/compaction
+// cards). Prefers the controller's in-memory recorder — the on-disk sidecar is
+// only flushed by snapshot() (every 30s mid-turn), so a disk read during an
+// active run would drop the newest cards exactly when a reload happens. Falls
+// back to the sidecar only when no recorder exists (a session created before
+// Present was enabled, or a CLI-started one); an empty result means callers
+// degrade to the provider.Message-only history. The rewrite version the
+// records are aligned to is returned alongside so the frontend can detect
+// staleness after a compaction that hasn't re-flushed.
 func (a *App) PresentForTab(tabID string) PresentPayload {
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return PresentPayload{}
+	}
+	if records, ver, ok := ctrl.PresentRecords(); ok {
+		return PresentPayload{Records: records, RewriteVersion: ver}
 	}
 	path := present.PresentPath(ctrl.SessionPath())
 	records, ver, err := present.Load(path)

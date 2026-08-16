@@ -162,8 +162,10 @@ read_file ~/.fairpeer/reference-style.json
 
 ```bash
 python3 <skill_dir>/scripts/analyze_pdf_pages.py "<PDF路径>"
-# 输出 {"total": N, "analyzed": X, "skipped_existing": Y, "failed": Z}
+# 输出 {"total": N, "analyzed": X, "skipped_existing": Y, "failed": Z, "note": "remaining_unanalyzed=R ..."}
 ```
+
+**分批与续传**：每次调用至多分析 8 个缺失页（防 2 分钟 bash 超时）；`remaining_unanalyzed > 0` 或被超时打断时**原命令重跑即可续传**（已分析页自动跳过），循环直到 remaining=0。路径给错也不必全盘搜索——脚本会自动回退到 `reference-style.json` 的 `source_path`。
 
 **第二步：逐页重绘**：
 - 每页对应生成**一张 slide**（page-1.json → slide 1…），**总页数 = PDF 总页数**（补齐后 = page-N.json 数量，覆盖 `default_prompt.pages`）
@@ -269,6 +271,8 @@ check_svg 报 ERROR（exit code 2）时必须修正后重查。WARN 不阻止流
 ```bash
 python3 <skill_dir>/scripts/qa_compare.py <project_dir> --round 1
 ```
+
+**可续传**：页数多时单次会被 2 分钟 bash 超时打断（报告记为 `in_progress`）——**原命令重跑即从断点继续**（已完成页自动跳过），直到输出带 `done: true` 的完整报告。
 
 输出 JSON（同时写入 `<project_dir>/qa-report.json`）：`pages[].verdict`（PASS/MINOR/MAJOR）+ `issues` + `stop`。按以下规则执行，**不要自行发明额外轮次**：
 
