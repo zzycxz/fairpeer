@@ -364,6 +364,22 @@ python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
 
 ---
 
+## PPTX 输入（反解任意 .pptx）
+
+用户给出 **PPTX 文件**（要求读取内容/分析结构/基于它修改或美化）时，先反解为逐页 SVG，不要用 python-pptx 手工遍历：
+
+```bash
+python3 <skill_dir>/scripts/pptx_reverse.py <input.pptx> -o <work_dir>
+# 输出 slides=N placeholders=M + svg-flat/（自包含逐页视觉）+ svg/（母版/版式分层）+ assets/（媒体）+ conversion-report.json
+```
+
+- `svg-flat/slide_NN.svg`：每页完整视觉重建（含模板继承的背景/装饰），可渲染预览、可逐形状改写后走 svg_to_pptx 重新导出
+- `placeholders=M > 0` 表示有不支持的源构造被降级为占位框——在结果里如实告知用户
+- 文本内容在形状级 `<metadata data-pptx-part="txbody">`（base64 OOXML）与可见 `<text>` 中；改文字优先改可见层并同步
+- 完整"保内容重排版式"（Beautify）路线为后续 Phase，当前先用于读取/分析/局部修改
+
+---
+
 ## 路线 B：模板填充（不经 SVG）
 
 用户明确要求"直接模板填充"时用 `template_fill_pptx.py`。与路线 A 二选一，不混用。详细参数见脚本 `--help`。
@@ -393,6 +409,7 @@ python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
 | build_table_skeleton.py | 纯 Python |
 | build_flow_skeleton.py | 纯 Python（流程 DSL / 时间线表） |
 | image_search.py | 纯 Python（需 Pillow；百度图源免 key） |
+| pptx_reverse.py | 纯 Python（vendor 自 ppt-master，MIT） |
 | extract_template_colors.py | 纯 Python（需 Pillow） |
 | project_manager.py init | 纯 Python |
 | fix_svg.py | 纯 Python |
