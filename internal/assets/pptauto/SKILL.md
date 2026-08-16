@@ -254,6 +254,11 @@ init 创建目录结构：
     python3 <skill_dir>/scripts/build_table_skeleton.py ~/.fairpeer/pdf-pages/page-N.json --title "<页标题>" --lead "<可选导语>" --out <project_dir>/svg_output/slide_NN.svg
     ```
     返回 `overflow: true` 时用 `--rows A-B` 拆成连续两页（后续页码顺延）；生成后照常跑 fix_svg + check_svg
+13. **流程图/时间线页机械生成（禁止手画连线坐标）**：参考页是流程图（节点+连线+判断分支）时，把 CONTENT 的流程步骤整理成 DSL（节点 `[流程]` `{判断?}` `(起止)`，`[A] -> [B] |标签|` 定义连线），然后：
+    ```bash
+    python3 <skill_dir>/scripts/build_flow_skeleton.py <flow.dsl> --title "<标题>" --out <project_dir>/svg_output/slide_NN.svg
+    ```
+    时间线页：`--timeline --from-table <两列表.md>`（`日期 | 任务`）。层级>6 自动横向布局，回路画虚线箭头。海报级多子流程只画主干链，子流程细节以文字块补充（一页塞不下是物理事实）。生成后照常 fix_svg + check_svg
 
 **每页生成后，自动跑修复 + 检查**：
 ```bash
@@ -381,6 +386,7 @@ python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
 | analyze_pdf_pages.py | 纯 Python（需 PyMuPDF；VLM 访问读 fairpeer 配置） |
 | crop_ref_region.py | 纯 Python（需 Pillow） |
 | build_table_skeleton.py | 纯 Python |
+| build_flow_skeleton.py | 纯 Python（流程 DSL / 时间线表） |
 | extract_template_colors.py | 纯 Python（需 Pillow） |
 | project_manager.py init | 纯 Python |
 | fix_svg.py | 纯 Python |

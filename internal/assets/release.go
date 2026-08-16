@@ -15,7 +15,7 @@ import (
 // that should force a refresh of the released copy. Bump this when you update
 // the embedded scripts/templates/SKILL.md and want existing users to get the
 // new version on next launch.
-const SkillVersion = "37" // 37: build_table_skeleton --compact (24 rows on one slide) + --extra-md-file (append hand-shaped tables, e.g. timelines)
+const SkillVersion = "38" // 38: build_flow_skeleton.py — Phase B: flow DSL (nodes/decisions/edges, auto horizontal layout, dashed back-edges) + timeline mode
 
 // versionFileName is written into the released skill dir so we can tell whether
 // the on-disk copy matches the embedded version.
