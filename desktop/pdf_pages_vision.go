@@ -91,6 +91,12 @@ func analyzePDFPages(ctx context.Context, pdfPath string, firstBody string) (int
 
 	home, _ := os.UserHomeDir()
 	outDir := filepath.Join(home, ".fairpeer", "pdf-pages")
+	// Wipe before re-analyzing: a previous LONGER PDF's leftover page-K.json
+	// (K > this PDF's total) would linger and later be consumed as if it
+	// belonged to the current reference — cross-task contamination.
+	if err := os.RemoveAll(outDir); err != nil {
+		return 0, 0, fmt.Errorf("clear pdf-pages dir: %w", err)
+	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return 0, 0, fmt.Errorf("create pdf-pages dir: %w", err)
 	}

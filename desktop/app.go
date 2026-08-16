@@ -1085,8 +1085,10 @@ func (a *App) SubmitToTab(tabID, input string) {
 	// Image→PPT gatekeeper. Called from BOTH submit entry points (see
 	// mayPreparePPTReference) — the frontend routes here via SubmitToTab OR
 	// SubmitDisplayToTab (the latter when display≠submit, i.e. exactly when an
-	// attachment @ref is present). Best-effort; never blocks the message.
-	a.mayPreparePPTReference(input)
+	// attachment @ref is present). Best-effort; never blocks the message. The
+	// returned input may carry a system note (PDF per-page reference ready) —
+	// dispatched to the model but kept out of the display copy.
+	input = a.mayPreparePPTReference(input)
 	ctrl.SubmitDisplay(input, input)
 	slog.Info("SubmitToTab: dispatched to controller", "tabID", tabID, "inputLen", len(input))
 }
@@ -1101,9 +1103,16 @@ func (a *App) SubmitToTab(tabID, input string) {
 // Best-effort: any failure logs, emits a ppt:reference-warning so the user KNOWS
 // the reference was dropped (silent degradation used to ship decks that ignored
 // the reference with no explanation), and degrades to normal topic-driven flow.
-func (a *App) mayPreparePPTReference(input string) {
+//
+// Returns the input to dispatch: when a VISUAL PDF reference was analyzed it is
+// annotated with a system note (model-facing only — call sites keep the display
+// copy clean) steering the main model to hand the per-page reference to ppt-auto
+// instead of improvising its own outline from raw text extraction, which
+// flattens tables — the exact failure seen on a real 32-page PDF test where the
+// deck came out table-less because the model never touched pdf-pages.
+func (a *App) mayPreparePPTReference(input string) string {
 	if !hasPPTIntent(strings.ToLower(input)) {
-		return
+		return input
 	}
 	// Reference form 1: an uploaded attachment token. Form 2: an absolute local
 	// path typed/pasted into the message (e.g. C:\Users\me\Desktop\shot.png) —
@@ -1134,7 +1143,7 @@ func (a *App) mayPreparePPTReference(input string) {
 		// deck's page count per SKILL.md Step 3). Enforce the invariant:
 		// those files exist ⟺ the current task provided a reference.
 		clearStaleReferenceFiles()
-		return
+		return input
 	}
 	if err := a.withActiveWorkspaceDo(func() error {
 		res, perr := a.PreparePPTReference(refPath)
@@ -1186,11 +1195,18 @@ func (a *App) mayPreparePPTReference(input string) {
 				"pdf_pages": pages,
 			})
 		}
+		// Steer the main model: the per-page visual reference is on disk, so
+		// relay it to ppt-auto rather than re-deriving an outline from text
+		// extraction (which flattens tables — the 32-page PDF failure mode).
+		if pages > 0 {
+			input += "\n\n[system] 此 PDF 已完成逐页视觉分析，结果在 ~/.fairpeer/pdf-pages/page-N.json（每页含内容/布局/表格行列/风格描述）。生成 PPT 时请在任务参数中附上此 PDF 的引用路径，并指示 ppt-auto 读取 pdf-pages 逐页重绘、用其 scripts/analyze_pdf_pages.py 补齐未分析的页、总页数以 PDF 总页数为准。不要自行提取 PDF 文字编写大纲——纯文字提取会丢失表格结构。"
+		}
 		return nil
 	}); err != nil {
 		pptVisionDebugLog("withActiveWorkspaceDo err: %v", err)
 		slog.Warn("mayPreparePPTReference: PreparePPTReference failed (degrading to normal flow)", "err", err)
 	}
+	return input
 }
 
 // SessionListForMobile returns all tabs as SessionInfo for linkpeer's session
@@ -1267,7 +1283,9 @@ func (a *App) SubmitDisplayToTab(tabID, display, input string) {
 	// an attachment @ref is present — which is precisely the case we must catch.
 	// Without this, image references bypassed the gatekeeper entirely (the bug
 	// that caused the first test runs to hallucinate). See mayPreparePPTReference.
-	a.mayPreparePPTReference(input)
+	// Returns the input to dispatch — possibly annotated with a system note
+	// (PDF per-page reference ready); `display` stays untouched.
+	input = a.mayPreparePPTReference(input)
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return

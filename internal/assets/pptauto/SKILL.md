@@ -156,10 +156,19 @@ read_file ~/.fairpeer/reference-style.json
 
 写大纲（Step 5）和 SVG（Step 6）时参照它——目标是"画一页类似的"，不是像素复刻。
 
-**参考 PDF（若有，多页）**：若 `~/.fairpeer/pdf-pages/page-1.json` 等存在（用户给扫描/图片式 PDF 时由 desktop 的 `AnalyzePDFPages` 生成），这是**多页参考**——每个 `page-N.json` 对应一页，含同样的 4 段 `description`：
-- 每页对应生成**一张 slide**（page-1.json → slide 1，page-2.json → slide 2…）
-- 每页按各自 `description` 的 CONTENT/LAYOUT/FORMAT/DESIGN 画（同单图参考规则）
-- 总页数 = page-N.json 的数量（覆盖 `default_prompt.pages`）
+**参考 PDF（若有，多页）**：若任务参数带 PDF 参考路径（或 `~/.fairpeer/pdf-pages/` 已有分析），这是**多页参考**——每个 `page-N.json` 对应一页，含 4 段 `description`（CONTENT 含**表格的完整行列内容**——照它画表，不要丢）：
+
+**第一步：补齐分析**。桌面预分析只处理前 6 页（提交路径限速）；任务带 PDF 路径时必须先补齐全部页（幂等——已分析的页自动跳过）：
+
+```bash
+python3 <skill_dir>/scripts/analyze_pdf_pages.py "<PDF路径>"
+# 输出 {"total": N, "analyzed": X, "skipped_existing": Y, "failed": Z}
+```
+
+**第二步：逐页重绘**：
+- 每页对应生成**一张 slide**（page-1.json → slide 1…），**总页数 = PDF 总页数**（补齐后 = page-N.json 数量，覆盖 `default_prompt.pages`）
+- 每页按各自 `description` 的 CONTENT/LAYOUT/FORMAT/DESIGN 画；**description 里有表格（行列数+单元格文字）就用 SVG 表格画出来**——纯文字罗列会丢表格，这是最常见的失真
+- **不要**自行用 python 提取 PDF 文字来编大纲——文字提取丢表格结构，以 page-N.json 为准
 
 ```bash
 ls ~/.fairpeer/pdf-pages/page-*.json 2>/dev/null   # 看有几页
@@ -316,6 +325,7 @@ python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
 |------|------|
 | extract_content.py | 纯 Python |
 | qa_compare.py | 纯 Python（需 cairosvg；VLM 访问读 fairpeer 配置） |
+| analyze_pdf_pages.py | 纯 Python（需 PyMuPDF；VLM 访问读 fairpeer 配置） |
 | extract_template_colors.py | 纯 Python（需 Pillow） |
 | project_manager.py init | 纯 Python |
 | fix_svg.py | 纯 Python |

@@ -420,6 +420,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if err := assets.EnsurePPTAutoSkill(); err != nil {
 		slog.Warn("assets: failed to release embedded ppt-auto skill", "err", err)
 	}
+	// Release the embedded helper scripts (pdf_to_page_images.py etc.) to
+	// ~/.fairpeer/scripts/. Without this, a packaged binary running outside the
+	// repo tree cannot find the renderer and the whole PDF→PPT visual path dies
+	// with "pdf_to_page_images.py not found" (the exact failure seen on a real
+	// 32-page PDF test: no page-N.json, no per-page redraw, tables lost).
+	if err := assets.EnsureHelperScripts(); err != nil {
+		slog.Warn("assets: failed to release embedded helper scripts", "err", err)
+	}
 	// Restore the user's ppt_mode choice into the just-released config.
 	// EnsurePPTAutoSkill ships mode="fast"; without this, a SkillVersion bump
 	// resets the user's "validate" choice to "fast" on every launch.

@@ -247,18 +247,16 @@ COMPARE_PROMPT = """Image 1 is the REFERENCE; image 2 is a GENERATED slide meant
 Respond with ONLY a JSON object: {"verdict":"PASS"|"MINOR"|"MAJOR","issues":["short description", ...]} — list only real problems; empty list for PASS."""
 
 
-def vlm_compare(vlm, ref_url, gen_url):
+def vlm_call(vlm, prompt, image_urls, max_tokens=4096):
+    """One VLM call: a text prompt plus N images (data URLs) -> text content.
+    Shared by the QA compare below and analyze_pdf_pages' per-page analyzer."""
+    content = [{"type": "text", "text": prompt}]
+    for u in image_urls:
+        content.append({"type": "image_url", "image_url": {"url": u}})
     payload = {
         "model": vlm["model"],
-        "max_tokens": 4096,  # ceiling not target; reasoning VLMs burn hidden tokens before content
-        "messages": [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": COMPARE_PROMPT},
-                {"type": "image_url", "image_url": {"url": ref_url}},
-                {"type": "image_url", "image_url": {"url": gen_url}},
-            ],
-        }],
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": content}],
     }
     req = urllib.request.Request(
         vlm["endpoint"],
@@ -271,7 +269,14 @@ def vlm_compare(vlm, ref_url, gen_url):
     )
     with urllib.request.urlopen(req, timeout=VLM_TIMEOUT_SECONDS) as resp:
         body = json.loads(resp.read().decode("utf-8"))
-    text = body["choices"][0]["message"]["content"] or ""
+    return body["choices"][0]["message"]["content"] or ""
+
+
+def vlm_compare(vlm, ref_url, gen_url):
+    try:
+        text = vlm_call(vlm, COMPARE_PROMPT, [ref_url, gen_url], max_tokens=1024)
+    except Exception:  # noqa: BLE001 — network/HTTP failure must not block the page
+        return {"verdict": "PASS", "issues": []}
     # Pull the JSON object out of a possibly chatty response.
     m = re.search(r"\{.*\}", text, re.S)
     if m:
@@ -284,7 +289,7 @@ def vlm_compare(vlm, ref_url, gen_url):
             return {"verdict": verdict, "issues": issues}
         except ValueError:
             pass
-    return {"verdict": "PASS", "issues": []}  # unparseable → don't block the deck
+    return {"verdict": "PASS", "issues": []}  # unparseable -> don't block the deck
 
 
 # ── reference resolution ────────────────────────────────────────────────────

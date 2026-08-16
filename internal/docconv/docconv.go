@@ -61,7 +61,16 @@ func ScriptCandidates(name string) []string {
 			filepath.Join(dir, name),
 			filepath.Join(dir, "..", name),
 			filepath.Join(dir, "..", "..", name),
+			// Three levels up covers the dev layout desktop/build/bin → repo
+			// root, where pdf_to_page_images.py sits alongside main.go.
+			filepath.Join(dir, "..", "..", "..", name),
 		)
+	}
+	// ~/.fairpeer/scripts is where boot releases the EMBEDDED copies
+	// (assets.EnsureHelperScripts) — the only probe guaranteed to resolve for a
+	// packaged binary launched from an arbitrary location/cwd.
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		candidates = append(candidates, filepath.Join(home, ".fairpeer", "scripts", name))
 	}
 	return candidates
 }

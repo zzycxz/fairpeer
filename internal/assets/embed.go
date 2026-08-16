@@ -20,3 +20,15 @@ import "embed"
 //
 //go:embed all:pptauto
 var pptauto embed.FS
+
+// scripts holds helper scripts shared by Go-side subprocess callers — currently
+// pdf_to_page_images.py (PDF → per-page PNG via PyMuPDF), used by the PPT vision
+// pre-analysis (desktop/pdf_pages_vision.go) and the RAG PDF path. It used to
+// sit only at the repo root, which docconv.FindScript probes relative to the
+// exe — a packaged/installed binary runs from layouts where that probe misses,
+// so the whole PDF→PPT visual path died with "pdf_to_page_images.py not found".
+// Embedding + releasing to ~/.fairpeer/scripts/ (EnsureHelperScripts) makes it
+// available everywhere the binary runs.
+//
+//go:embed scripts
+var scripts embed.FS

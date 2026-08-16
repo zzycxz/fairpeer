@@ -15,7 +15,7 @@ import (
 // that should force a refresh of the released copy. Bump this when you update
 // the embedded scripts/templates/SKILL.md and want existing users to get the
 // new version on next launch.
-const SkillVersion = "30" // 30: qa_compare config layering — merge user config.toml + project fairpeer.toml like the Go loader (single-file read made project configs shadow the VLM keys)
+const SkillVersion = "31" // 31: analyze_pdf_pages.py (full-PDF per-page VLM completion) + Step 3 PDF wiring (draw tables from description, total = PDF pages)
 
 // versionFileName is written into the released skill dir so we can tell whether
 // the on-disk copy matches the embedded version.
@@ -186,4 +186,44 @@ func readVersion(skillDir string) (string, bool) {
 // Only the shell setup script needs the bit; .bat is a no-op on Windows.
 func shouldExec(rel string) bool {
 	return strings.HasSuffix(rel, ".sh")
+}
+
+// helperScriptsDir is where EnsureHelperScripts releases the embedded helper
+// scripts (~/.fairpeer/scripts) — a stable location probed by
+// docconv.ScriptCandidates regardless of where the binary runs from.
+func helperScriptsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "", errors.New("assets: cannot determine user home dir")
+	}
+	return filepath.Join(home, ".fairpeer", "scripts"), nil
+}
+
+// EnsureHelperScripts releases the embedded helper scripts (scripts/ tree) to
+// ~/.fairpeer/scripts/, writing each file only when missing or content differs
+// (so edits to the embedded copy propagate on upgrade). Best-effort: errors
+// surface to the caller but a missing script just means the Go-side fallback
+// probes (CWD / exe-relative) still apply.
+func EnsureHelperScripts() error {
+	dir, err := helperScriptsDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("assets: create %s: %w", dir, err)
+	}
+	return fs.WalkDir(scripts, "scripts", func(path string, d fs.DirEntry, werr error) error {
+		if werr != nil || d.IsDir() {
+			return werr
+		}
+		data, rerr := scripts.ReadFile(path)
+		if rerr != nil {
+			return rerr
+		}
+		target := filepath.Join(dir, filepath.Base(path))
+		if existing, ferr := os.ReadFile(target); ferr == nil && bytes.Equal(existing, data) {
+			return nil // unchanged — skip the write
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
 }
