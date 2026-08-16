@@ -305,6 +305,44 @@ python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
 
 ---
 
+## 修改模式（已有项目的局部修复——不重跑全流程）
+
+**触发识别**：任务参数指向一个**已存在**的 `<project_dir>`（含 `svg_output/`），要求修复 QA 问题、修改部分页面或重新导出——而非从主题/参考新生成。此时**不走** Step 0-6，按本模式执行；todo 按下面 4 步创建。
+
+### R1: 读 QA 报告定位问题页
+
+```bash
+read_file <project_dir>/qa-report.json
+```
+
+取所有 `verdict == "MAJOR"` 的页（无报告时按任务参数指定的页）。issues 字段就是每页的具体问题清单。
+
+### R2: 逐页修复
+
+对每个 MAJOR 页：
+
+1. 读该页参考描述：PDF 参考 → `~/.fairpeer/pdf-pages/page-N.json` 的 description；单图参考 → `~/.fairpeer/reference-style.json`
+2. `edit_file` 修改 `<project_dir>/svg_output/slide_NN.svg`——**只改 issues 指出的问题项**（补缺失的内容块/表格行列、修正结构、恢复被截断的文字），不要重画整页
+3. 改完跑 `fix_svg.py` + `check_svg.py`（同 Step 6 规则，ERROR 必须修）
+
+### R3: QA 复检（round 2，可续传）
+
+```bash
+python3 <skill_dir>/scripts/qa_compare.py <project_dir> --round 2
+```
+
+被超时打断就**原命令重跑续传**直到 `done: true`。结束条件（机械判定，不要自行加轮次）：`stop_reason` 为 `no_major`（修好了）、`no_progress`（两轮 issues 相同，改不动了）或到 2 轮上限——后两种情况**接受现状**，在最终结果里如实列出未修复项。
+
+### R4: 重新导出
+
+```bash
+python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
+```
+
+交付新的 `exports/*.pptx`，并列出：修复了哪些页、仍遗留哪些 MAJOR 及原因。
+
+---
+
 ## 路线 B：模板填充（不经 SVG）
 
 用户明确要求"直接模板填充"时用 `template_fill_pptx.py`。与路线 A 二选一，不混用。详细参数见脚本 `--help`。
