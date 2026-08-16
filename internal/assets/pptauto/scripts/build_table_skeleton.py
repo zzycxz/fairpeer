@@ -203,6 +203,12 @@ def main():
     ap.add_argument("--rows", default=None,
                     help="keep only rows A-B (1-based inclusive) — use to SPLIT an "
                          "overflowing table across consecutive slides")
+    ap.add_argument("--compact", action="store_true",
+                    help="dense mode: tighter rows/padding and a deeper font ladder "
+                         "(down to 9.5) — fits ~24 rows on one slide instead of splitting")
+    ap.add_argument("--extra-md-file", default=None, dest="extra_md_file",
+                    help="additional markdown file appended as MORE tables (e.g. a "
+                         "hand-shaped timeline table saved next to the page json)")
     ap.add_argument("--home", default=None)
     args = ap.parse_args()
 
@@ -214,6 +220,13 @@ def main():
         print(json.dumps({"error": "read %s: %s" % (args.page_json, e)}))
         return 1
     tables = parse_markdown_tables(desc)
+    if args.extra_md_file:
+        try:
+            with open(args.extra_md_file, "r", encoding="utf-8") as f:
+                tables += parse_markdown_tables(f.read())
+        except OSError as e:
+            print(json.dumps({"error": "read --extra-md-file: %s" % e}))
+            return 1
     if args.rows:
         a, _, b = args.rows.partition("-")
         try:
@@ -234,17 +247,20 @@ def main():
         top += LEAD_H
 
     # font-size ladder: fit all tables into the canvas, else keep going (overflow flag)
-    chosen_fs, overflow = 15.0, False
-    for fs in (15.0, 13.5, 12.5, 11.5, 10.5):
+    ladder = (13.5, 12.5, 11.5, 10.5, 10.0, 9.5) if args.compact else (15.0, 13.5, 12.5, 11.5, 10.5)
+    chosen_fs, overflow = ladder[0], False
+    for fs in ladder:
         chosen_fs = fs
         y = top
         ok = True
         for tbl in tables:
-            _, h, _ = render_table(tbl, MARGIN_X, y, avail_w, style, fs)
+            _, h, _ = render_table(tbl, MARGIN_X, y, avail_w, style, fs,
+                                min_row_h=19 if args.compact else 24,
+                                pad=4 if args.compact else 8)
             y += h + TABLE_GAP
         if y <= CANVAS_H - 12:
             break
-        overflow = y > CANVAS_H - 12 and fs == 10.5
+        overflow = y > CANVAS_H - 12 and fs == ladder[-1]
     else:
         overflow = True
 
@@ -261,7 +277,9 @@ def main():
     y = top
     stats = []
     for tbl in tables:
-        svgs, h, ncols = render_table(tbl, MARGIN_X, y, avail_w, style, chosen_fs)
+        svgs, h, ncols = render_table(tbl, MARGIN_X, y, avail_w, style, chosen_fs,
+                                       min_row_h=19 if args.compact else 24,
+                                       pad=4 if args.compact else 8)
         parts.extend(svgs)
         stats.append({"rows": len(tbl), "cols": ncols})
         y += h + TABLE_GAP
