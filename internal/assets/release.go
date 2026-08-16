@@ -15,7 +15,7 @@ import (
 // that should force a refresh of the released copy. Bump this when you update
 // the embedded scripts/templates/SKILL.md and want existing users to get the
 // new version on next launch.
-const SkillVersion = "28" // 28: color authority chain — parent-relayed hex descriptions must NOT override config (which carries the reference image real palette)
+const SkillVersion = "29" // 29: generous VLM output ceilings (boot 4096/8192, qa_compare 4096) — cap is a ceiling not a target
 
 // versionFileName is written into the released skill dir so we can tell whether
 // the on-disk copy matches the embedded version.
