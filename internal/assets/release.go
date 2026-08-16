@@ -15,7 +15,7 @@ import (
 // that should force a refresh of the released copy. Bump this when you update
 // the embedded scripts/templates/SKILL.md and want existing users to get the
 // new version on next launch.
-const SkillVersion = "42" // 42: knowledge assets — 19 visual styles + 15 palettes + slice_images (all vendored from ppt-master, MIT)
+const SkillVersion = "43" // 43: Beautify route — content lock (multiplicity-aware text diff) + B1-B6 workflow
 
 // versionFileName is written into the released skill dir so we can tell whether
 // the on-disk copy matches the embedded version.

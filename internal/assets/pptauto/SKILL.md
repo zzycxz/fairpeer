@@ -393,6 +393,42 @@ python3 <skill_dir>/scripts/pptx_reverse.py <input.pptx> -o <work_dir>
 
 ---
 
+## Beautify 路线（旧 PPT 保内容重排版式）
+
+**触发识别**：用户给出**已有 PPTX** 并要求美化/重新设计/变好看/换风格——且**不新增删改内容**。与"PPTX 反解读取"的区别：Beautify 要产出全新排版的 PPTX；与"内容修改"的区别：文字一比一保留。用户既要改内容又要美化时，先问清以哪个为准。
+
+**铁律——内容锁**：每页文字（含页码、脚注）**一个都不能丢**，由 `beautify_lock.py` 机械校验，不靠自觉。页数、页序 1:1。
+
+### B1: 反解原稿
+
+```bash
+python3 <skill_dir>/scripts/pptx_reverse.py <原.pptx> -o <work_dir>
+```
+
+### B2: 建立内容锁
+
+```bash
+python3 <skill_dir>/scripts/beautify_lock.py extract <work_dir>/svg-flat --out <project_dir>/content_lock.json
+```
+
+### B3: 逐页重排（Step 5-6 流程）
+
+对每页：读 `svg-flat/slide_NN.svg` 提取该页**全部文字**（可见 `<text>`，含隐藏副本过滤后的）与图片数——这些文字**逐字**进入新页；图片可引用 `<work_dir>/assets/` 里反解出的原图（`<image href>` + embed_images 内联）。版式/风格/配色重新设计（可用风格库，规则同 Step 3/6）。**禁止**：增删文字、并页拆页、改页序。
+
+### B4: 内容锁校验（⛔ 必须通过）
+
+```bash
+python3 <skill_dir>/scripts/beautify_lock.py check <project_dir>/svg_output --lock <project_dir>/content_lock.json
+```
+
+exit 2 或 `ok: false` → 按 `missing` 清单补回丢失文字后重查，**不过不导出**。`added` 只是提示（新增标签等需用户可解释）。
+
+### B5: QA（Step 6.5 rubric 模式——无参考，绝对标准）
+
+### B6: 导出（Step 7）+ 交付时说明：内容零丢失（附 B4 结果）、页数页序一致、版式改动点
+
+---
+
 ## 路线 B：模板填充（不经 SVG）
 
 用户明确要求"直接模板填充"时用 `template_fill_pptx.py`。与路线 A 二选一，不混用。详细参数见脚本 `--help`。
@@ -424,6 +460,7 @@ python3 <skill_dir>/scripts/pptx_reverse.py <input.pptx> -o <work_dir>
 | image_search.py | 纯 Python（需 Pillow；百度图源免 key） |
 | pptx_reverse.py | 纯 Python（vendor 自 ppt-master，MIT） |
 | slice_images.py | 纯 Python（需 Pillow；vendor 自 ppt-master，MIT） |
+| beautify_lock.py | 纯 Python |
 | extract_template_colors.py | 纯 Python（需 Pillow） |
 | project_manager.py init | 纯 Python |
 | fix_svg.py | 纯 Python |
