@@ -15,7 +15,7 @@ import (
 // that should force a refresh of the released copy. Bump this when you update
 // the embedded scripts/templates/SKILL.md and want existing users to get the
 // new version on next launch.
-const SkillVersion = "34" // 34: SKILL.md repair mode — local MAJOR-page fix workflow (R1-R4) reusing QA resume rounds
+const SkillVersion = "35" // 35: crop_ref_region.py — embed unredrawable regions (screenshots/photos/logos) as <image> crops from the reference page
 
 // versionFileName is written into the released skill dir so we can tell whether
 // the on-disk copy matches the embedded version.
