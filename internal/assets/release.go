@@ -15,7 +15,7 @@ import (
 // that should force a refresh of the released copy. Bump this when you update
 // the embedded scripts/templates/SKILL.md and want existing users to get the
 // new version on next launch.
-const SkillVersion = "29" // 29: generous VLM output ceilings (boot 4096/8192, qa_compare 4096) — cap is a ceiling not a target
+const SkillVersion = "30" // 30: qa_compare config layering — merge user config.toml + project fairpeer.toml like the Go loader (single-file read made project configs shadow the VLM keys)
 
 // versionFileName is written into the released skill dir so we can tell whether
 // the on-disk copy matches the embedded version.

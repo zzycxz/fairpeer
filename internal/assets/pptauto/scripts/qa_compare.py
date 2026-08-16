@@ -93,19 +93,39 @@ def _user_config_dir():
     return os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
 
 
+def _deep_merge(base, overlay):
+    """Dicts merge recursively; scalars/lists are replaced (later wins) — the
+    same per-field semantics as the Go loader's mergeFile chain."""
+    for k, v in overlay.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+    return base
+
+
 def load_fairpeer_config():
-    """Project ./fairpeer.toml first (same precedence as the Go loader), then the
-    user config dir. Returns (config_dict, config_dir) or (None, '')."""
-    for candidate in (
-        os.path.join(os.getcwd(), "fairpeer.toml"),
-        os.path.join(_user_config_dir(), "fairpeer", "config.toml"),
-    ):
-        if not candidate or not os.path.isfile(candidate):
-            continue
-        cfg = _toml_load(candidate)
-        if cfg is not None:
-            return cfg, os.path.dirname(candidate)
-    return None, ""
+    """Match the Go loader's layering: user config.toml as the base, the
+    project ./fairpeer.toml merged on top (per-field, later wins). Returning
+    only the FIRST existing file was a bug: a project fairpeer.toml without
+    provider/vlm keys shadowed the user config entirely, so qa_compare
+    reported vlm_not_configured while the desktop's correctly-layered
+    pre-analysis worked fine on the same machine."""
+    base = None
+    config_dir = ""
+    uc = os.path.join(_user_config_dir(), "fairpeer", "config.toml")
+    if os.path.isfile(uc):
+        base = _toml_load(uc)
+        if base is not None:
+            config_dir = os.path.dirname(uc)
+    proj = os.path.join(os.getcwd(), "fairpeer.toml")
+    if os.path.isfile(proj):
+        p = _toml_load(proj)
+        if p is not None:
+            base = _deep_merge(base, p) if base is not None else p
+            if config_dir == "":
+                config_dir = os.path.dirname(proj)
+    return base, config_dir
 
 
 def _credentials_key(config_dir, env_name):
