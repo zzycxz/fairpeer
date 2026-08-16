@@ -259,6 +259,11 @@ init 创建目录结构：
     python3 <skill_dir>/scripts/build_flow_skeleton.py <flow.dsl> --title "<标题>" --out <project_dir>/svg_output/slide_NN.svg
     ```
     时间线页：`--timeline --from-table <两列表.md>`（`日期 | 任务`）。层级>6 自动横向布局，回路画虚线箭头。海报级多子流程只画主干链，子流程细节以文字块补充（一页塞不下是物理事实）。生成后照常 fix_svg + check_svg
+14. **网络配图搜索（主题驱动的 deck 需要照片/氛围图时）**：图标库和 SVG 自绘优先；确需照片时用免 key 图搜（百度图源，无需任何注册）：
+    ```bash
+    python3 <skill_dir>/scripts/image_search.py --query "<关键词，如：数据中心 机房>" --out <project_dir>/images/hero.png --aspect landscape
+    ```
+    嵌入方式同规则 11（`<image href="../images/...">` + embed_images 内联）。**版权提示**：网络图仅供用户内部参考用途，商用需用户自行确认来源许可。
 
 **每页生成后，自动跑修复 + 检查**：
 ```bash
@@ -387,6 +392,7 @@ python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
 | crop_ref_region.py | 纯 Python（需 Pillow） |
 | build_table_skeleton.py | 纯 Python |
 | build_flow_skeleton.py | 纯 Python（流程 DSL / 时间线表） |
+| image_search.py | 纯 Python（需 Pillow；百度图源免 key） |
 | extract_template_colors.py | 纯 Python（需 Pillow） |
 | project_manager.py init | 纯 Python |
 | fix_svg.py | 纯 Python |
