@@ -248,24 +248,48 @@ def _flatten_alpha(png_path, bg_hex):
         pass
 
 
+RENDERER = os.environ.get("PPTQA_RENDERER", "auto").lower()  # auto|resvg|playwright
+
+
+def _render_playwright(svg_path, png_path):
+    """Chromium rendering — the most robust CJK font-fallback chain (ppt-master
+    rejected cairo for exactly this reason). Requires playwright + chromium;
+    ImportError propagates to the caller which falls back to resvg."""
+    from playwright.sync_api import sync_playwright
+    with open(svg_path, "r", encoding="utf-8") as f:
+        svg = f.read()
+    with sync_playwright() as pw:
+        page = pw.chromium.launch().new_page(viewport={"width": 1280, "height": 720})
+        page.set_content(svg, wait_until="load")
+        page.screenshot(path=png_path, full_page=False)
+
+
 def render_svg(svg_path, png_path):
-    """Render one slide SVG to PNG. cairosvg first (best filter/gradient
-    support), resvg-py as the Windows-friendly fallback — cairosvg needs the
-    native cairo DLL which stock Windows Pythons don't ship, while resvg-py
-    bundles its Rust renderer with zero system dependencies. On a missing DLL
-    cairosvg raises OSError at import (cairocffi dlopens cairo), so catch both.
-    Any other failure propagates and the page degrades per-page."""
+    """Render one slide SVG to PNG. Backend order: PPTQA_RENDERER env selects
+    playwright explicitly; default chain is cairosvg → resvg-py → playwright.
+    cairosvg needs the native cairo DLL (stock Windows Pythons don't ship it —
+    it raises OSError at import), resvg-py is the zero-dependency Rust fallback
+    with working CJK on this machine; playwright is the font-chain-safest last
+    resort when installed. Any failure propagates and the page degrades."""
+    if RENDERER == "playwright":
+        _render_playwright(svg_path, png_path)
+        return
     try:
         import cairosvg
         cairosvg.svg2png(url=svg_path, write_to=png_path, output_width=1280)
         return
     except (ImportError, OSError):
         pass
-    import resvg_py
-    with open(svg_path, "r", encoding="utf-8") as f:
-        svg = f.read()
-    with open(png_path, "wb") as f:
-        f.write(resvg_py.svg_to_bytes(svg_string=svg, width=1280))
+    try:
+        import resvg_py
+        with open(svg_path, "r", encoding="utf-8") as f:
+            svg = f.read()
+        with open(png_path, "wb") as f:
+            f.write(resvg_py.svg_to_bytes(svg_string=svg, width=1280))
+        return
+    except ImportError:
+        pass
+    _render_playwright(svg_path, png_path)
 
 
 # ── the compare prompt (severity-gated: only MAJOR asks for a rework) ───────
@@ -300,6 +324,32 @@ def vlm_call(vlm, prompt, image_urls, max_tokens=4096):
     with urllib.request.urlopen(req, timeout=VLM_TIMEOUT_SECONDS) as resp:
         body = json.loads(resp.read().decode("utf-8"))
     return body["choices"][0]["message"]["content"] or ""
+
+
+RUBRIC_PROMPT = """You are reviewing ONE generated presentation slide against ABSOLUTE quality standards (no reference image exists). Judge:
+- MAJOR: text overflows its container or is visibly truncated; text blocks overlap each other making content unreadable; text color contrasts too weakly with its background (dark-on-dark / light-on-light); layout is chaotically misaligned (elements at random positions); more than 40% of the content area is empty on a content page; no font-size hierarchy at all (everything the same size, no title distinction).
+- MINOR: small spacing/alignment imperfections; slightly uneven margins; minor color imbalance.
+- PASS: none of the MAJOR issues. Covers/section/ending pages are ALLOWED to be sparse — do not judge generous whitespace on them.
+Respond with ONLY a JSON object: {"verdict":"PASS"|"MINOR"|"MAJOR","issues":["short description", ...]} — empty list for PASS. Do not nitpick subjective taste."""
+
+
+def vlm_rubric(vlm, gen_url):
+    """Absolute-standard review of one generated slide (no reference)."""
+    try:
+        text = vlm_call(vlm, RUBRIC_PROMPT, [gen_url], max_tokens=1024)
+    except Exception:  # noqa: BLE001
+        return {"verdict": "PASS", "issues": []}
+    m = re.search(r"\{.*\}", text, re.S)
+    if m:
+        try:
+            obj = json.loads(m.group(0))
+            verdict = str(obj.get("verdict", "PASS")).upper()
+            if verdict not in ("PASS", "MINOR", "MAJOR"):
+                verdict = "PASS"
+            return {"verdict": verdict, "issues": [str(i) for i in (obj.get("issues") or [])][:5]}
+        except ValueError:
+            pass
+    return {"verdict": "PASS", "issues": []}
 
 
 def vlm_compare(vlm, ref_url, gen_url):
@@ -396,10 +446,7 @@ def main():
 
     home = args.home or os.path.expanduser("~")
     refs = reference_pages(home)
-    if not refs:
-        # Not an error: topic-driven decks have nothing to compare against.
-        emit(report(args.round, True, "no_reference", [], "无参考图，跳过视觉 QA"))
-        return 0
+    rubric_mode = not refs  # topic-driven decks: absolute-standard review, no reference
 
     # Render the generated slides (render errors degrade per page, not globally).
     render_dir = os.path.join(args.project_dir, "qa-render")
@@ -424,12 +471,18 @@ def main():
         emit(report(args.round, True, why_not, [], "视觉 QA 跳过：%s" % why_not))
         return 0
 
-    # Pair reference pages with generated slides (page N ↔ slide N).
+    # Pair reference pages with generated slides (page N ↔ slide N). In rubric
+    # mode there is no reference: every generated page pairs with itself only
+    # positionally (ref=None) and is judged by the absolute standard.
     pairs = []
-    for n, ref_png in refs:
-        if n <= len(gen_pages):
-            _, _, gen_png = gen_pages[n - 1]
-            pairs.append((n, ref_png, gen_png))
+    if rubric_mode:
+        for idx, _, gen_png in gen_pages:
+            pairs.append((idx, None, gen_png))
+    else:
+        for n, ref_png in refs:
+            if n <= len(gen_pages):
+                _, _, gen_png = gen_pages[n - 1]
+                pairs.append((n, ref_png, gen_png))
 
     # ── Resumable rounds ──
     # The skill's bash tool kills commands at ~2 minutes; a 32-page compare
@@ -459,9 +512,13 @@ def main():
     results = [dict(seeded[n]) for n, _, _ in pairs if n in seeded]
     pending = [(n, ref, gen) for n, ref, gen in pairs
                if n not in seeded or not gen]
+    def judge(n, ref, gen):
+        gu = data_url(gen)
+        return vlm_rubric(vlm, gu) if ref is None else vlm_compare(vlm, data_url(ref), gu)
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=COMPARE_POOL) as pool:
         futures = {
-            pool.submit(vlm_compare, vlm, data_url(ref), data_url(gen)): n
+            pool.submit(judge, n, ref, gen): n
             for n, ref, gen in pending if gen
         }
         for fut in concurrent.futures.as_completed(futures):
@@ -494,7 +551,8 @@ def main():
     if not stop and not any(p["verdict"] == "MAJOR" for p in results):
         stop, reason = True, "no_major"
 
-    emit(report(args.round, stop, reason, results))
+    emit(report(args.round, stop, reason, results,
+                note="rubric(absolute)" if rubric_mode else ""))
     return 0
 
 

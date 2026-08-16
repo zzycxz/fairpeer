@@ -283,9 +283,9 @@ check_svg 报 ERROR（exit code 2）时必须修正后重查。WARN 不阻止流
 
 ### Step 6.5: 视觉 QA 回路（**必须列入 todo**；无参考时在本步说明跳过）
 
-**本步骤必须出现在 Step 0 创建的 todo 列表中**——它是条件步骤，但"有没有参考"由本步自己判断，不许在创建 todo 时省略。无参考时仍执行本步，在 complete_step 里说明"无参考，跳过"。
+**本步骤必须出现在 Step 0 创建的 todo 列表中**——无参考也执行（走 rubric 模式），不许在创建 todo 时省略。
 
-判断条件：`~/.fairpeer/reference-style.json`（单图参考）或 `~/.fairpeer/pdf-pages/page-1.json`（PDF 参考）存在才真正对比；两者都没有（纯主题驱动）时按上述方式标记跳过。
+模式自动选择：`~/.fairpeer/reference-style.json`（单图参考）或 `~/.fairpeer/pdf-pages/page-1.json`（PDF 参考）存在 → **对比模式**（与参考图并排判定保真度）；两者都没有（纯主题驱动）→ **rubric 模式**（无参考绝对标准审查：文字溢出/重叠压字/对比度/对齐/留白/字号层级，仅 MAJOR 触发返工）。
 
 把生成的 SVG 渲染成图，与参考图并排送 VLM 对比（用的是 fairpeer 配置的视觉模型，无需额外参数）：
 
