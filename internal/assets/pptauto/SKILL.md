@@ -249,6 +249,11 @@ init 创建目录结构：
     python3 <skill_dir>/scripts/crop_ref_region.py ~/.fairpeer/pdf-pages/page-N.png --pos <位置> --share <占比> --out <project_dir>/images/pNN_desc.png
     ```
     SVG 中 `<image href="../images/pNN_desc.png" x=".." y=".." width=".." height=".."/>`（坐标按 LAYOUT 估算、宽高比用脚本输出的 aspect）；该页生成后必须跑 `python3 <skill_dir>/scripts/svg_finalize/embed_images.py <该页svg>` 把图片内联成 data URI（否则 check/QA/转换看不到图）
+12. **表格页机械生成（禁止手写表格坐标）**：page-N.json 的 CONTENT 段含 markdown 表（`|` 分隔）时，用脚本生成整页（模型可再用 edit_file 补充周边元素，但表格本体不手画）：
+    ```bash
+    python3 <skill_dir>/scripts/build_table_skeleton.py ~/.fairpeer/pdf-pages/page-N.json --title "<页标题>" --lead "<可选导语>" --out <project_dir>/svg_output/slide_NN.svg
+    ```
+    返回 `overflow: true` 时用 `--rows A-B` 拆成连续两页（后续页码顺延）；生成后照常跑 fix_svg + check_svg
 
 **每页生成后，自动跑修复 + 检查**：
 ```bash
@@ -328,7 +333,7 @@ read_file <project_dir>/qa-report.json
 对每个 MAJOR 页：
 
 1. 读该页参考描述：PDF 参考 → `~/.fairpeer/pdf-pages/page-N.json` 的 description；单图参考 → `~/.fairpeer/reference-style.json`
-2. `edit_file` 修改 `<project_dir>/svg_output/slide_NN.svg`——**只改 issues 指出的问题项**（补缺失的内容块/表格行列、修正结构、恢复被截断的文字），不要重画整页。缺失的截图/logo/照片按 Step 6 规则 11 裁剪参考页嵌入
+2. `edit_file` 修改 `<project_dir>/svg_output/slide_NN.svg`——**只改 issues 指出的问题项**（补缺失的内容块/表格行列、修正结构、恢复被截断的文字），不要重画整页。缺失的截图/logo/照片按 Step 6 规则 11 裁剪参考页嵌入；表格类内容缺失/截断按 Step 6 规则 12 用 build_table_skeleton.py 整页重建
 3. 改完跑 `fix_svg.py` + `check_svg.py`（同 Step 6 规则，ERROR 必须修）
 
 ### R3: QA 复检（round 2，可续传）
@@ -375,6 +380,7 @@ python3 <skill_dir>/scripts/svg_to_pptx.py <project_dir>
 | qa_compare.py | 纯 Python（需 cairosvg；VLM 访问读 fairpeer 配置） |
 | analyze_pdf_pages.py | 纯 Python（需 PyMuPDF；VLM 访问读 fairpeer 配置） |
 | crop_ref_region.py | 纯 Python（需 Pillow） |
+| build_table_skeleton.py | 纯 Python |
 | extract_template_colors.py | 纯 Python（需 Pillow） |
 | project_manager.py init | 纯 Python |
 | fix_svg.py | 纯 Python |

@@ -15,7 +15,7 @@ import (
 // that should force a refresh of the released copy. Bump this when you update
 // the embedded scripts/templates/SKILL.md and want existing users to get the
 // new version on next launch.
-const SkillVersion = "35" // 35: crop_ref_region.py — embed unredrawable regions (screenshots/photos/logos) as <image> crops from the reference page
+const SkillVersion = "36" // 36: build_table_skeleton.py — Phase A skeletonization: tables generate mechanically from the CONTENT markdown (no model coordinates)
 
 // versionFileName is written into the released skill dir so we can tell whether
 // the on-disk copy matches the embedded version.
