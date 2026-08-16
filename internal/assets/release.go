@@ -15,7 +15,7 @@ import (
 // that should force a refresh of the released copy. Bump this when you update
 // the embedded scripts/templates/SKILL.md and want existing users to get the
 // new version on next launch.
-const SkillVersion = "32" // 32: timeout-proof scripts — analyze_pdf_pages batches (--max 8) + source_path fallback; qa_compare resumable (incremental report, same-round seeding)
+const SkillVersion = "33" // 33: QA render composites transparent SVG canvas onto the deck background (template-mode pages rendered as false-black caused 3 phantom MAJORs)
 
 // versionFileName is written into the released skill dir so we can tell whether
 // the on-disk copy matches the embedded version.

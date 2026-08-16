@@ -218,6 +218,36 @@ def data_url(path):
     return "data:" + _mime_of(data) + ";base64," + base64.b64encode(data).decode("ascii")
 
 
+def _deck_background(home):
+    """The deck's background color: template_config.json's colors.background
+    (what merge_vlm_style last wrote). Template-mode SVGs deliberately draw NO
+    background — rendered standalone their transparent canvas shows as BLACK to
+    the VLM, which QA then misreads as an inverted background (3 false MAJORs
+    on a real 32-page run). Compositing onto the deck background fixes it."""
+    try:
+        with open(os.path.join(home, ".fairpeer", "skills", "ppt-auto",
+                               "template_config.json"), "r", encoding="utf-8") as f:
+            bg = str((json.load(f).get("colors") or {}).get("background") or "")
+        return bg if bg.startswith("#") and len(bg) == 7 else "#FFFFFF"
+    except (OSError, ValueError):
+        return "#FFFFFF"
+
+
+def _flatten_alpha(png_path, bg_hex):
+    """Composite the rendered SVG's transparent pixels onto a solid background
+    (best-effort — without Pillow the false-black risk stays, as MINOR noise)."""
+    try:
+        from PIL import Image
+        im = Image.open(png_path)
+        if im.mode == "RGBA":
+            rgb = tuple(int(bg_hex[i:i + 2], 16) for i in (1, 3, 5))
+            base = Image.new("RGB", im.size, rgb)
+            base.paste(im, mask=im.split()[-1])
+            base.save(png_path)
+    except ImportError:
+        pass
+
+
 def render_svg(svg_path, png_path):
     """Render one slide SVG to PNG. cairosvg first (best filter/gradient
     support), resvg-py as the Windows-friendly fallback — cairosvg needs the
@@ -374,11 +404,13 @@ def main():
     # Render the generated slides (render errors degrade per page, not globally).
     render_dir = os.path.join(args.project_dir, "qa-render")
     os.makedirs(render_dir, exist_ok=True)
+    deck_bg = _deck_background(home)
     gen_pages = []  # (page_no, svg_path, png_path|None)
     for idx, svg in enumerate(svgs, start=1):
         png = os.path.join(render_dir, "slide_%02d.png" % idx)
         try:
             render_svg(svg, png)
+            _flatten_alpha(png, deck_bg)
             gen_pages.append((idx, svg, png))
         except Exception as e:  # noqa: BLE001 — any render failure degrades that page
             gen_pages.append((idx, svg, None))
