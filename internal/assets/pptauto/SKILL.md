@@ -188,6 +188,14 @@ python3 <skill_dir>/scripts/autofit_fontsize.py --density <high|medium|low> --ra
 
 依据：模板基线（config）× 密度系数（密→缩小，疏→放大，±15%）× 比例保持（标题>卡片标题>正文）。这是"有判断、不瞎猜"——不靠 VLM 给 px，靠它的定性判断（密度+比例）机械算。无参考图时退回 config 默认字号。
 
+**风格库（用户提到风格词时必查）**：`<skill_dir>/references/visual-styles/` 有 19 种成体系的设计规格（swiss-minimal 瑞士极简 / editorial 杂志 / ink-wash 水墨 / dark-tech / glassmorphism / data-journalism 等，目录含 `_index.md` 总览）。用户说"做成XX风"时：
+
+```bash
+read_file <skill_dir>/references/visual-styles/<风格名>.md
+```
+
+按该 spec 的形状语言/排版纪律/留白规则/配色运用方式画页。**配色 hex 仍从 config/palette 取**（`<skill_dir>/references/image-palettes/` 有 15 套成套调色板可参考，含 `_index.md`）——风格 spec 管怎么用色，不管具体色值。
+
 ### 颜色规则（唯一来源）
 
 | 层级 | 来源 | 说明 |
@@ -264,6 +272,11 @@ init 创建目录结构：
     python3 <skill_dir>/scripts/image_search.py --query "<关键词，如：数据中心 机房>" --out <project_dir>/images/hero.png --aspect landscape
     ```
     嵌入方式同规则 11（`<image href="../images/...">` + embed_images 内联）。**版权提示**：网络图仅供用户内部参考用途，商用需用户自行确认来源许可。
+15. **拼图切分**：一张图里含**多页/多元素**（用户贴的拼图截图、多页幻灯片合图、插画素材表）先用脚本切分，不要当单页处理：
+    ```bash
+    python3 <skill_dir>/scripts/slice_images.py <拼图.png> --grid 2x3 -o <project_dir>/images/
+    ```
+    切出的页图可作为逐页参考（同 pdf-pages 用法）；切出的素材元素按普通图片嵌入（规则 11）。`--trim` 紧裁内容、`--alpha` 抠透背景
 
 **每页生成后，自动跑修复 + 检查**：
 ```bash
@@ -410,6 +423,7 @@ python3 <skill_dir>/scripts/pptx_reverse.py <input.pptx> -o <work_dir>
 | build_flow_skeleton.py | 纯 Python（流程 DSL / 时间线表） |
 | image_search.py | 纯 Python（需 Pillow；百度图源免 key） |
 | pptx_reverse.py | 纯 Python（vendor 自 ppt-master，MIT） |
+| slice_images.py | 纯 Python（需 Pillow；vendor 自 ppt-master，MIT） |
 | extract_template_colors.py | 纯 Python（需 Pillow） |
 | project_manager.py init | 纯 Python |
 | fix_svg.py | 纯 Python |
