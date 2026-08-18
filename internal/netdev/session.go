@@ -1,0 +1,304 @@
+package netdev
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
+
+	"github.com/charmbracelet/x/ansi"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/text/encoding/simplifiedchinese"
+
+	"github.com/zzycxz/fairpeer/internal/netdev/driver"
+	"github.com/zzycxz/fairpeer/internal/netdev/transport"
+)
+
+// Session is one PTY-driven interactive CLI session with a network device,
+// built on a transport.Client's SSH connection. It exists because network
+// devices generally do not support one-shot exec channels: the CLI must be
+// driven interactively (paging off, prompt detection, echo stripping) — the
+// driver layer supplies the vendor knowledge.
+type Session struct {
+	client *transport.Client
+	drv    driver.Driver
+	sess   *ssh.Session
+	stdin  io.WriteCloser
+	out    *syncBuffer // device bytes since the shell started (pre-decode)
+
+	encode func([]byte) string
+
+	mu     sync.Mutex
+	closed bool
+}
+
+// Session timing defaults.
+const (
+	defaultCommandTimeout = 30 * time.Second
+	sessionOpenTimeout    = 15 * time.Second
+)
+
+// pagerPattern matches the interactive "--More--" / "---- More ----" prompt
+// at the end of pending output. When seen, the engine sends a space.
+var pagerPattern = regexp.MustCompile(`(?:^|\n)\s*-{2,4}\s*More\s*-{2,4}\s*$`)
+
+// pagerLinePattern matches a pager marker that ended up as (part of) a line in
+// the finished output — real devices "erase" it with cursor sequences, but the
+// bytes stay in the stream once ANSI escapes are stripped, so the cleaner
+// scrubs the remnant lines explicitly (the netmiko/scrapli approach).
+var pagerLinePattern = regexp.MustCompile(`^\s*-{0,4}\s*More\s*-{0,4}\s*$`)
+
+// syncBuffer serializes the ssh mux's session writes against the engine's
+// polls — bytes.Buffer is not goroutine-safe and the mux writes concurrently.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) snapshot() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]byte(nil), b.buf.Bytes()...)
+}
+
+func (b *syncBuffer) reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}
+
+// OpenSession establishes the interactive CLI over an already-connected
+// transport.Client: requests a PTY, starts the shell, disables paging per the
+// driver, and waits for the first prompt.
+func OpenSession(ctx context.Context, client *transport.Client, drv driver.Driver, encoding string) (*Session, error) {
+	sshClient, err := client.SSH()
+	if err != nil {
+		return nil, err
+	}
+	sess, err := sshClient.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("netdev: new session: %w", err)
+	}
+	// A wide terminal avoids devices wrapping long lines into visual noise.
+	if err := sess.RequestPty("vt100", 40, 512, ssh.TerminalModes{}); err != nil {
+		sess.Close()
+		return nil, fmt.Errorf("netdev: request pty: %w", err)
+	}
+	stdin, err := sess.StdinPipe()
+	if err != nil {
+		sess.Close()
+		return nil, err
+	}
+	out := &syncBuffer{}
+	sess.Stdout = out
+	sess.Stderr = out // devices interleave diagnostics on stderr
+	if err := sess.Shell(); err != nil {
+		sess.Close()
+		return nil, fmt.Errorf("netdev: shell: %w", err)
+	}
+
+	s := &Session{
+		client: client,
+		drv:    drv,
+		sess:   sess,
+		stdin:  stdin,
+		out:    out,
+		encode: decoderFor(encoding),
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, sessionOpenTimeout)
+	defer cancel()
+	for _, cmd := range drv.PagingOff() {
+		if _, err := s.Run(ctx, cmd); err != nil {
+			s.Close()
+			return nil, fmt.Errorf("netdev: paging-off %q: %w", cmd, err)
+		}
+	}
+	return s, nil
+}
+
+// Result is one command's outcome.
+type Result struct {
+	Command string
+	Output  string // cleaned text: echo and trailing prompt removed
+	IsError bool   // a driver error pattern matched
+}
+
+// Run sends one command and returns when the device prompt reappears.
+// The command must already be classified Read by the caller — the exec tool
+// enforces that; the session layer stays classification-agnostic.
+func (s *Session) Run(ctx context.Context, cmd string) (Result, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return Result{}, errors.New("netdev: session closed")
+	}
+	cmd = strings.TrimRight(cmd, "\r\n")
+	if cmd == "" {
+		return Result{}, errors.New("netdev: empty command")
+	}
+	deadline := time.Now().Add(defaultCommandTimeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+
+	s.out.reset()
+	if _, err := io.WriteString(s.stdin, cmd+"\n"); err != nil {
+		return Result{}, fmt.Errorf("netdev: write command: %w", err)
+	}
+
+	// Poll until the driver prompt anchors at the end of the output and the
+	// echo (or at least a full output line) has arrived. Polling is bounded by
+	// the ticker; completion is decided by the prompt match, never by EOF.
+	tick := time.NewTicker(15 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		text := s.encode(s.out.snapshot())
+		if pagerPattern.MatchString(text) {
+			if _, err := io.WriteString(s.stdin, " "); err != nil {
+				return Result{}, fmt.Errorf("netdev: advance pager: %w", err)
+			}
+		} else if s.completed(cmd, text) {
+			return s.finish(cmd, text), nil
+		}
+		if time.Now().After(deadline) {
+			return Result{}, fmt.Errorf("netdev: timeout waiting for prompt after %q (partial output: %.200s)", cmd, text)
+		}
+		if ctx.Err() != nil {
+			return Result{}, ctx.Err()
+		}
+		<-tick.C
+	}
+}
+
+// completed reports whether the device finished executing: the prompt sits at
+// the end of the output AND the echoed command (or, when the device does not
+// echo, at least one output line) has been seen. The echo/line guard prevents
+// matching the leftover prompt that precedes the device's processing of the
+// command.
+func (s *Session) completed(cmd, text string) bool {
+	if !s.drv.Prompt().MatchString(text) {
+		return false
+	}
+	if strings.Contains(strings.ToLower(text), strings.ToLower(cmd)) {
+		return true
+	}
+	return strings.Count(text, "\n") >= 2
+}
+
+func (s *Session) finish(cmd, text string) Result {
+	out := cleanOutput(text, cmd, s.drv)
+	isErr := false
+	for _, line := range strings.Split(out, "\n") {
+		for _, re := range s.drv.Errors() {
+			if re.MatchString(line) {
+				isErr = true
+				break
+			}
+		}
+		if isErr {
+			break
+		}
+	}
+	return Result{Command: cmd, Output: out, IsError: isErr}
+}
+
+// cleanOutput strips ANSI sequences, normalizes newlines, removes the echoed
+// command line, the trailing prompt line, and pager remnant lines.
+func cleanOutput(text, cmd string, drv driver.Driver) string {
+	text = ansi.Strip(text)
+	text = strings.ReplaceAll(text, "\b", "")
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	lines := strings.Split(text, "\n")
+
+	// Drop pager remnants (lines that are only a More marker).
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if pagerLinePattern.MatchString(line) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	lines = kept
+
+	// Drop the echoed command: the first line that contains it (the device
+	// prefixes it with the prompt).
+	norm := strings.ToLower(cmd)
+	for i, line := range lines {
+		if strings.Contains(strings.ToLower(line), norm) {
+			lines = append(lines[:i], lines[i+1:]...)
+			break
+		}
+	}
+	// Drop the trailing prompt line.
+	if n := len(lines); n > 0 {
+		last := strings.TrimRight(lines[n-1], " ")
+		if drv.Prompt().MatchString("\n" + last) {
+			lines = lines[:n-1]
+		}
+	}
+	// Trim empty head/tail lines left by the stripping.
+	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
+		lines = lines[1:]
+	}
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// decoderFor builds the raw-bytes→text conversion per the configured
+// encoding. "auto": strict UTF-8 first, GBK when the bytes are not valid
+// UTF-8 (domestic Huawei/ZTE builds may emit GBK).
+func decoderFor(encoding string) func([]byte) string {
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
+	case "gbk":
+		return decodeGBK
+	case "utf-8":
+		return decodeUTF8
+	default: // auto
+		return func(b []byte) string {
+			if utf8.Valid(b) {
+				return string(b)
+			}
+			return decodeGBK(b)
+		}
+	}
+}
+
+func decodeUTF8(b []byte) string { return string(b) }
+
+func decodeGBK(b []byte) string {
+	// Whole-buffer decode: chunk boundaries can split multibyte sequences, and
+	// CLI outputs are small enough to re-decode per poll.
+	out, err := simplifiedchinese.GBK.NewDecoder().Bytes(b)
+	if err != nil {
+		return string(b) // best effort: show raw
+	}
+	return string(out)
+}
+
+// Close ends the session (the transport Client stays connected).
+func (s *Session) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	s.stdin.Close()
+	return s.sess.Close()
+}

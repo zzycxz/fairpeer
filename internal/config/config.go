@@ -58,13 +58,17 @@ type Config struct {
 	Sandbox           SandboxConfig       `toml:"sandbox"`
 	Network           NetworkConfig       `toml:"network"`
 	Plugins           []PluginEntry       `toml:"plugins"`
-	Skills            SkillsConfig        `toml:"skills"`
-	Codegraph         CodegraphConfig     `toml:"codegraph"`
-	BuiltInMCP        BuiltInMCPConfig    `toml:"builtin_mcp"`
-	Dream             DreamConfig         `toml:"dream"`
-	Statusline        StatuslineConfig    `toml:"statusline"`
-	LSP               LSPConfig           `toml:"lsp"`
-	Bot               BotConfig           `toml:"bot"`
+	// NetDev ([netdev]) is pinned to the USER config after the project merge
+	// (pinNetDev in LoadForRoot): a cloned repo must never inject devices, hop
+	// chains, or scan scopes. See internal/config/netdev.go and NETDEV_SPEC §7.3.
+	NetDev     NetDevConfig     `toml:"netdev"`
+	Skills     SkillsConfig     `toml:"skills"`
+	Codegraph  CodegraphConfig  `toml:"codegraph"`
+	BuiltInMCP BuiltInMCPConfig `toml:"builtin_mcp"`
+	Dream      DreamConfig      `toml:"dream"`
+	Statusline StatuslineConfig `toml:"statusline"`
+	LSP        LSPConfig        `toml:"lsp"`
+	Bot        BotConfig        `toml:"bot"`
 	// Cowork holds coWork (office) profile settings — currently just the browser
 	// path override. Empty means auto-detect; a non-empty path is tried first
 	// (and the user is guided to set it when no browser is found).
@@ -1747,6 +1751,13 @@ func LoadForRoot(root string) (*Config, error) {
 	normalizeSMTP(&cfg.Cowork.SMTP)
 	normalizeEmailAccounts(&cfg.Cowork)
 	normalizePermissionDefaults(&cfg.Permissions)
+	// [netdev] is a user-global security control: pin it back to the user
+	// config so the project merge above cannot have injected devices/hops/
+	// scopes, then validate the pinned result.
+	pinNetDev(cfg)
+	if err := ValidateNetDev(cfg.NetDev); err != nil {
+		return nil, err
+	}
 	// First run (no config file anywhere): keep CodeGraph off until the user opts
 	// in. An existing config — even one without a [codegraph] section — keeps the
 	// built-in default (on), so an upgrade never silently drops code intelligence.

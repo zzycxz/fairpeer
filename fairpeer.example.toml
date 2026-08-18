@@ -563,6 +563,53 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # extract_interval = "3s"
 # extract_concurrency = 1
 
+# ─────────────────────────────────────────────────────────────────────────────
+# netdev — 网络设备运维 profile（诊断优先；详见 docs/NETDEV_SPEC.md）
+#
+# 安全模型（全部为硬性，不随模式关闭）：
+#   1. 本节是【用户全局】安全控制：项目级 fairpeer.toml 里的 [netdev] 在合并后
+#      会被钉回用户配置——克隆的仓库无法注入设备/跳板/探测范围。
+#   2. 凭证永不写入 TOML：只写 *_env 名，真值由桌面端写入加密密钥库
+#      （netdev/password/<env 名> 命名空间）。
+#   3. 诊断手结构性只读：netdev_exec 只放行驱动分类器判定的读命令
+#      （display/show/ping/tracert…），写/危险/未知命令一律拒执行并落审计，
+#      变更走人工审批的提案流水线（P4）。
+#
+# [netdev]
+# enabled               = true
+# default_mode          = "diagnose"    # diagnose | assess
+# audit_retention       = "180d"
+# proxy_device_traffic  = false         # 设备流量默认不走系统代理
+# max_sessions_per_device = 2           # 保护设备稀缺的 VTY 线路
+#
+# [[netdev.hops]]                        # 堡垒机/跳板：只能人工注册
+# name          = "l1"
+# host          = "202.1.1.1"
+# user          = "ops"
+# password_env  = "NETDEV_PWD_L1"
+# # proxy_jump   = "l0"                  # 链式跳板（逗号分隔）
+#
+# [[netdev.groups]]                      # 设备组策略：变更窗口挂组上
+# name          = "core"
+# policy        = "read-only"            # read-only | proposal | proposal+confirm2
+# change_window = "tue,thu 22:00-24:00"
+#
+# [[netdev.devices]]
+# name         = "core-sw-1"
+# vendor       = "huawei"                # huawei | cisco（zte P2）
+# os           = "vrp8"                  # vrp8 | vrp5 | ios | iosxe
+# model        = "S5735"
+# address      = "10.0.0.1"
+# via          = ["l1"]                  # 声明式路由（顺序为跳转顺序）
+# group        = "core"
+# protocols    = ["ssh"]
+# username     = "netops"
+# password_env = "NETDEV_PWD_CORE1"
+# encoding     = "auto"                  # auto | utf-8 | gbk
+#
+# [netdev.discovery]                     # 探测范围白名单（护栏，永不关闭）
+# scopes = ["10.30.0.0/16"]
+# rate   = 50
 
 
 # ─────────────────────────────────────────────────────────────────────────────

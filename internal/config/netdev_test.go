@@ -1,0 +1,113 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestValidateNetDev(t *testing.T) {
+	ok := NetDevConfig{
+		Enabled: true,
+		Hops:    []NetDevHop{{Name: "l1", Host: "202.1.1.1"}},
+		Devices: []NetDevDevice{{
+			Name: "core", Vendor: "huawei", OS: "vrp8", Address: "10.0.0.1",
+			Via: []string{"l1"}, Group: "core",
+		}},
+		Groups:    []NetDevGroup{{Name: "core", Policy: NetDevPolicyReadOnly}},
+		Discovery: NetDevDiscovery{Scopes: []string{"10.30.0.0/16"}},
+	}
+	if err := ValidateNetDev(ok); err != nil {
+		t.Fatalf("valid config rejected: %v", err)
+	}
+
+	bad := []NetDevConfig{
+		{Enabled: true, DefaultMode: "yolo"},
+		{Enabled: true, Devices: []NetDevDevice{{Name: "", Address: "10.0.0.1"}}},
+		{Enabled: true, Devices: []NetDevDevice{{Name: "a"}}},                                       // no address
+		{Enabled: true, Devices: []NetDevDevice{{Name: "a", Address: "x", Vendor: "juniper"}}},      // unknown vendor
+		{Enabled: true, Devices: []NetDevDevice{{Name: "a", Address: "x", Encoding: "big5"}}},       // bad encoding
+		{Enabled: true, Devices: []NetDevDevice{{Name: "a", Address: "x", Via: []string{"ghost"}}}}, // unknown hop
+		{Enabled: true, Devices: []NetDevDevice{{Name: "a", Address: "x", Group: "ghost"}}},         // unknown group
+		{Enabled: true, Hops: []NetDevHop{{Name: "l1", ProxyJump: "l1"}}},                           // self jump
+		{Enabled: true, Groups: []NetDevGroup{{Name: "g", Policy: "full-access"}}},                  // bad policy
+		{Enabled: true, Discovery: NetDevDiscovery{Scopes: []string{"10.30.0.0/64"}}},               // bad CIDR
+		// Duplicate device names.
+		{Enabled: true, Devices: []NetDevDevice{
+			{Name: "a", Address: "x"}, {Name: "a", Address: "y"},
+		}},
+	}
+	for i, c := range bad {
+		if err := ValidateNetDev(c); err == nil {
+			t.Fatalf("case %d: invalid config accepted", i)
+		}
+	}
+}
+
+// TestNetDevPinnedToUserConfig is the supply-chain guard: a project
+// fairpeer.toml declaring [netdev] devices must NOT survive the merge, while
+// the user config's own [netdev] must.
+func TestNetDevPinnedToUserConfig(t *testing.T) {
+	// os.UserConfigDir on Windows = %AppData%; on Unix = $XDG_CONFIG_HOME|$HOME/.config.
+	cfgRoot := t.TempDir()
+	t.Setenv("APPDATA", cfgRoot)
+	t.Setenv("XDG_CONFIG_HOME", cfgRoot)
+	t.Setenv("USERPROFILE", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+
+	// Minimal isolated user config carrying the real [netdev].
+	userDir := filepath.Join(cfgRoot, "fairpeer")
+	if err := os.MkdirAll(userDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	userTOML := `
+[netdev]
+enabled = true
+
+[[netdev.hops]]
+name = "user-hop"
+host = "203.0.113.1"
+
+[[netdev.devices]]
+name = "user-device"
+address = "10.99.0.1"
+via = ["user-hop"]
+`
+	if err := os.WriteFile(filepath.Join(userDir, "config.toml"), []byte(userTOML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A cloned project that tries to inject its own device + scope.
+	proj := t.TempDir()
+	projectTOML := `
+[netdev]
+enabled = true
+
+[[netdev.devices]]
+name = "evil-device"
+address = "198.51.100.7"
+
+[netdev.discovery]
+scopes = ["198.51.100.0/24"]
+`
+	if err := os.WriteFile(filepath.Join(proj, "fairpeer.toml"), []byte(projectTOML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadForRoot(proj)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	if !cfg.NetDev.Enabled {
+		t.Fatal("user [netdev].enabled lost")
+	}
+	if _, ok := cfg.NetDevDeviceByName("user-device"); !ok {
+		t.Fatal("user device missing after pin")
+	}
+	if _, ok := cfg.NetDevDeviceByName("evil-device"); ok {
+		t.Fatal("project-injected device survived the pin — supply-chain hole")
+	}
+	if len(cfg.NetDev.Discovery.Scopes) != 0 {
+		t.Fatalf("project-injected scopes survived: %v", cfg.NetDev.Discovery.Scopes)
+	}
+}

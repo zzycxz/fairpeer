@@ -36,6 +36,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/lsp"
 	"github.com/zzycxz/fairpeer/internal/memory"
 	"github.com/zzycxz/fairpeer/internal/netclient"
+	"github.com/zzycxz/fairpeer/internal/netdev"
 	"github.com/zzycxz/fairpeer/internal/outputstyle"
 	"github.com/zzycxz/fairpeer/internal/permission"
 	"github.com/zzycxz/fairpeer/internal/plugin"
@@ -541,13 +542,21 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	bashTimeout := time.Duration(cfg.BashTimeoutSeconds()) * time.Second
 	addBuiltins(reg, cfg.Tools.Enabled, writeRoots, cfg.ReadRoots(), bashSpec, bashTimeout, searchSpec, stderr, root, proxySpec)
 
+	// netdev-only tools: registered ONLY in the netdev profile branch — the
+	// reverse half of the hard seal (dev/cowork registries never contain them;
+	// NETDEV_SPEC §7.1). netdev_exec is read-only by construction: the driver
+	// classifier refuses anything that is not a read command, and the profile's
+	// tool_scope already removed bash/file-write tools.
+	if config.ProfileNameKey(profileName(opts.Profile)) == config.ProfileNetDev {
+		netdev.RegisterTools(reg, cfg)
+	}
+
 	// coWork-only capabilities: desktop automation, scheduled tasks, email,
 	// RAG, PPT. These are office-specific and stay gated to the cowork profile
 	// so the dev tool list stays focused on coding. (Update: they are hidden
 	// from the main loop via reg.Hide, so registering them unconditionally
 	// doesn't pollute the dev tool list, but allows subagents to work anywhere).
-	if config.ProfileNameKey(profileName(opts.Profile)) == config.ProfileCowork {
-		// Browser automation tools (cowork only). Hidden from the main loop's
+	if config.ProfileNameKey(profileName(opts.Profile)) == config.ProfileCowork { // Browser automation tools (cowork only). Hidden from the main loop's
 		// schema: the model drives the browser through run_skill("browser-auto")
 		// or run_skill("computer-auto") subagents, which reach these via
 		// FilterRegistry. This keeps 12 browser tool schemas out of every turn.
