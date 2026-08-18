@@ -70,6 +70,22 @@ func NewManager(cfg *config.Config) *Manager {
 	return m
 }
 
+// KillAllConnections is the emergency stop: every device connection and CLI
+// session is closed immediately (freeing all VTY lines), audited as such. The
+// Manager stays usable — the next diagnostic command reconnects on demand.
+func (m *Manager) KillAllConnections() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := len(m.conns)
+	for name, c := range m.conns {
+		c.session.Close()
+		c.client.Close()
+		delete(m.conns, name)
+	}
+	_ = AppendAudit(Audit{Device: "(emergency-stop)", Command: "kill all connections", Class: "guardrail", Status: AuditOK, OutputBytes: n})
+	return n
+}
+
 // Close tears down every cached connection.
 func (m *Manager) Close() {
 	m.mu.Lock()

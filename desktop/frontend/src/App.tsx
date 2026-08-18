@@ -31,6 +31,7 @@ import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onEvent, onProjectTreeChanged, onSchedulerNotice } from "./lib/bridge";
 import { onProfileChanged } from "./lib/bridge";
 import { CoWorkLayout } from "./layouts/CoWorkLayout";
+import { NetDevLayout } from "./layouts/NetDevLayout";
 import { PreferencePanel } from "./components/cowork/PreferencePanel";
 import { Transcript } from "./components/Transcript";
 import { ExpertSessionView } from "./components/cowork/ExpertSessionView";
@@ -778,6 +779,10 @@ export default function App() {
   // emitted after a SwitchProfile rebuild. When true the standard three-pane body
   // is hidden (via the app--cowork class) and a CoWorkLayout is rendered instead.
   const [coworkActive, setCoworkActive] = useState(false);
+  // netdevActive mirrors coworkActive for the 运维 profile: when true the
+  // standard body is hidden (app--netdev) and the NetDevLayout shell renders.
+  // Purely additive — dev/cowork behavior is byte-identical.
+  const [netdevActive, setNetdevActive] = useState(false);
   // Skip the startup splash in the browser dev mock (no Wails runtime to wait
   // for) — only real desktop builds show it. Eliminates the 1.4–6s "stuck"
   // splash devs see when iterating in a browser.
@@ -1795,6 +1800,7 @@ export default function App() {
       const p = active.profile.toLowerCase();
       const isCowork = p === "cowork";
       setCoworkActive(isCowork);
+      setNetdevActive(p === "netdev");
       // Keep netdev as its own partition key: folding it to "dev" here would
       // file netdev topics into the dev session partition (P1 wiring bug).
       profileRef.current = p === "cowork" || p === "netdev" ? p : "dev";
@@ -1809,6 +1815,7 @@ export default function App() {
         const isCowork = p === "cowork";
         if (!cancelled) {
           setCoworkActive(isCowork);
+          setNetdevActive(p === "netdev");
           profileRef.current = p === "cowork" || p === "netdev" ? p : "dev";
         }
       })
@@ -3041,7 +3048,7 @@ export default function App() {
 
   return (
     <ShellExpandProvider>
-    <div ref={appRef} className={["app", `app--${desktopPlatform}`, browserPreviewChrome ? "app--browser-preview" : "", coworkActive ? "app--cowork" : ""].filter(Boolean).join(" ")}>
+    <div ref={appRef} className={["app", `app--${desktopPlatform}`, browserPreviewChrome ? "app--browser-preview" : "", coworkActive ? "app--cowork" : "", netdevActive ? "app--netdev" : ""].filter(Boolean).join(" ")}>
       <div
         className={[
           "layout",
@@ -3090,6 +3097,14 @@ export default function App() {
             sessionTokens={state.sessionTokens}
             activeTabId={activeTabId}
             dockRefreshKey={dockRefreshKey}
+          />
+        )}
+        {netdevActive && (
+          <NetDevLayout
+            headerNode={headerNode}
+            mainNode={mainNode}
+            footerNode={footerNode}
+            sessionsNode={sidebarSessionsNode}
           />
         )}
         <AppChrome
@@ -3181,7 +3196,7 @@ export default function App() {
 
         <section className="chat-pane">
           <>
-          {!coworkActive && headerNode}
+          {!coworkActive && !netdevActive && headerNode}
 
           {state.meta?.startupErr && (
             <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>

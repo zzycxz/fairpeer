@@ -241,6 +241,18 @@ func startInspectionScheduler(a *App) {
 	})
 }
 
+// NetDevEmergencyStop closes every device connection/session at once (the
+// red button; audited). Returns how many connections were dropped.
+func (a *App) NetDevEmergencyStop() (int, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return 0, err
+	}
+	n := netdev.SharedManager(cfg).KillAllConnections()
+	slog.Warn("netdev emergency stop", "connections", n)
+	return n, nil
+}
+
 // NetDevRunInspection sweeps all devices with the read battery and files one
 // Finding with the evidence (the manual 定时巡检; scheduler wiring later).
 func (a *App) NetDevRunInspection() (*netdev.Finding, error) {
