@@ -20,6 +20,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/i18n"
 	"github.com/zzycxz/fairpeer/internal/notify"
 	"github.com/zzycxz/fairpeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/secret"
 )
 
 // seedTestProvider injects a synthetic "test-provider" onto cfg so tests can
@@ -490,41 +491,48 @@ func TestConfigureKeysAllSetDefaultsToReusingInput(t *testing.T) {
 	}
 }
 
-// TestAppendEnvUpsertReplacesExistingKey covers the bug where re-running the
-// wizard with a corrected key would append a second line for the same env
-// var. loadDotEnv is first-wins, so without dedupe the stale key kept
-// authenticating, and the user saw a 401 with no obvious cause.
-func TestAppendEnvUpsertReplacesExistingKey(t *testing.T) {
+// TestStoreSecretLinesUpsertsReplacesExistingKey covers the bug where re-running
+// the wizard with a corrected key would leave the stale value in effect. The
+// store upserts by key, so the fresh key wins for every later config.Load.
+func TestStoreSecretLinesUpsertsReplacesExistingKey(t *testing.T) {
 	t.Setenv("FAIRPEER_API_KEY", "") // also covers the os.Setenv pin path
-	p := filepath.Join(t.TempDir(), ".env")
-	os.WriteFile(p, []byte("# initial\nFAIRPEER_API_KEY=stale\nFAIRPEER_API_KEY=keepme\n"), 0o600)
+	store := secret.New(filepath.Join(t.TempDir(), "secrets.enc.json"))
 
-	if err := appendEnv(p, []string{"FAIRPEER_API_KEY=fresh"}); err != nil {
-		t.Fatalf("appendEnv: %v", err)
+	if err := storeSecretLines(store, []string{"FAIRPEER_API_KEY=stale"}); err != nil {
+		t.Fatalf("storeSecretLines: %v", err)
 	}
-	got, _ := os.ReadFile(p)
-	// appendEnv deduplicates: all old FAIRPEER_API_KEY lines are replaced with the new one.
-	want := "# initial\nFAIRPEER_API_KEY=fresh\n"
-	if string(got) != want {
-		t.Errorf("after upsert =\n%s\nwant =\n%s", got, want)
+	if err := storeSecretLines(store, []string{"FAIRPEER_API_KEY=fresh"}); err != nil {
+		t.Fatalf("storeSecretLines: %v", err)
+	}
+	got, ok, err := store.Get("FAIRPEER_API_KEY")
+	if err != nil || !ok {
+		t.Fatalf("Get: ok=%v err=%v", ok, err)
+	}
+	if got != "fresh" {
+		t.Errorf("stored FAIRPEER_API_KEY = %q, want %q (upsert should replace)", got, "fresh")
 	}
 	if got := os.Getenv("FAIRPEER_API_KEY"); got != "fresh" {
 		t.Errorf("process env FAIRPEER_API_KEY = %q, want %q (upsert should pin in-process)", got, "fresh")
 	}
 }
 
-// TestAppendEnvUpsertHandlesExportPrefix proves `export FOO=...` style lines
-// also get replaced, since users might hand-edit .env in shell-friendly form.
-func TestAppendEnvUpsertHandlesExportPrefix(t *testing.T) {
-	t.Setenv("FOO", "")
-	p := filepath.Join(t.TempDir(), ".env")
-	os.WriteFile(p, []byte("export FOO=old\nKEEP=yes\n"), 0o600)
-	if err := appendEnv(p, []string{"FOO=new"}); err != nil {
-		t.Fatalf("appendEnv: %v", err)
+// TestStoreSecretLinesNoPlaintextOnDisk proves the wizard's key persistence
+// never writes a plaintext file — the whole point of the encrypted store.
+func TestStoreSecretLinesNoPlaintextOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	store := secret.New(filepath.Join(dir, "secrets.enc.json"))
+	if err := storeSecretLines(store, []string{"OPENAI_API_KEY=sk-secret-123"}); err != nil {
+		t.Fatalf("storeSecretLines: %v", err)
 	}
-	got, _ := os.ReadFile(p)
-	if !strings.Contains(string(got), "FOO=new") || strings.Contains(string(got), "FOO=old") {
-		t.Errorf("export-prefixed line not replaced:\n%s", got)
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(b), "sk-secret-123") {
+			t.Errorf("plaintext leaked into %s", e.Name())
+		}
 	}
 }
 

@@ -30,6 +30,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/agent"
 	"github.com/zzycxz/fairpeer/internal/boot"
 	"github.com/zzycxz/fairpeer/internal/bot"
+	"github.com/zzycxz/fairpeer/internal/browserlaunch"
 	"github.com/zzycxz/fairpeer/internal/browseruse"
 	"github.com/zzycxz/fairpeer/internal/builtinmcp"
 	calendarpkg "github.com/zzycxz/fairpeer/internal/calendar"
@@ -90,6 +91,12 @@ type App struct {
 	// completes during startup). Read atomically from tabEventSink.Emit's hot path.
 	mobilebridge atomic.Pointer[mobilebridge.Bridge]
 	botBridge    atomic.Pointer[botBridgeHub]
+
+	// managedBrowser is the user-facing 可控浏览器 launched by
+	// StartManagedBrowser (nil until started). Kept so a later Start can see
+	// we already own the process; we never Close it — the window stays open
+	// until the user closes it. Guarded by mu.
+	managedBrowser *browserlaunch.Handle
 
 	forceQuit           atomic.Bool
 	backgroundMaximised atomic.Bool
@@ -393,6 +400,12 @@ func (a *App) startup(ctx context.Context) {
 	if cfg, err := config.Load(); err == nil && cfg.Bot.Enabled {
 		a.startBotGateway(cfg)
 	}
+
+	// One-time upgrade sweep before any tab boots: lift the legacy plaintext
+	// credentials file (API keys, bot tokens) into the encrypted secret store.
+	// Best-effort — on failure the plaintext file keeps loading via
+	// config.loadDotEnv until a later startup succeeds.
+	migrateCredentialsFile()
 
 	go a.restoreOrBuildTabs()
 	go a.sendStartupPing()
@@ -5255,6 +5268,13 @@ var workspaceNoiseDirs = map[string]bool{
 const filePreviewLimit = 256 * 1024
 const fileRefSearchLimit = 20
 
+// Office-document preview extraction bounds: the whole pipeline (markitdown
+// subprocess or Word/WPS COM automation) must finish within the timeout, and
+// oversized files skip extraction entirely (the raw binary read still runs).
+const officeDocPreviewTimeout = 30 * time.Second
+const officeDocPreviewMaxBytes = 100 * 1024 * 1024
+const officeDocPreviewRunes = 40000
+
 var previewMediaMIMEs = map[string]string{
 	".bmp":  "image/bmp",
 	".gif":  "image/gif",
@@ -5264,6 +5284,26 @@ var previewMediaMIMEs = map[string]string{
 	".png":  "image/png",
 	".svg":  "image/svg+xml",
 	".webp": "image/webp",
+	// Audio/video stream through the media-token URL; Chromium's native
+	// decoders handle what they can (mp3/wav/ogg/m4a/flac/aac, mp4/webm;
+	// mov/mkv depend on the codecs inside the container).
+	".aac":  "audio/aac",
+	".flac": "audio/flac",
+	".m4a":  "audio/mp4",
+	".mp3":  "audio/mpeg",
+	".oga":  "audio/ogg",
+	".ogg":  "audio/ogg",
+	".opus": "audio/ogg",
+	".wav":  "audio/wav",
+	".m4v":  "video/mp4",
+	".mkv":  "video/x-matroska",
+	".mov":  "video/quicktime",
+	".mp4":  "video/mp4",
+	".webm": "video/webm",
+	// HTML previews render in a sandboxed iframe. No charset in the header so
+	// the browser honors the file's own <meta charset> (GBK pages included).
+	".htm":  "text/html",
+	".html": "text/html",
 }
 
 func trimUTF8PartialSuffix(data []byte) []byte {
@@ -5290,8 +5330,17 @@ func previewMediaKind(path string) (kind string, mime string) {
 	if strings.HasPrefix(mime, "image/") {
 		return "image", mime
 	}
-	if mime == "application/pdf" {
+	switch mime {
+	case "application/pdf":
 		return "pdf", mime
+	case "text/html":
+		return "html", mime
+	}
+	if strings.HasPrefix(mime, "audio/") {
+		return "audio", mime
+	}
+	if strings.HasPrefix(mime, "video/") {
+		return "video", mime
 	}
 	return "", ""
 }
@@ -5434,6 +5483,26 @@ func (a *App) ReadFile(rel string) FilePreview {
 		out.Mime = mime
 		out.URL = "/__fairpeer_workspace_media/" + token + "/" + url.PathEscape(info.Name())
 		return out
+	}
+	// Rich documents (docx/doc/xlsx/xls/pptx/ppt/epub/msg): extract text via
+	// the RAG document pipeline (markitdown → Go parsers → Word/WPS COM for
+	// legacy .doc) so chat/workspace previews show the document's content
+	// instead of a "binary file" hint. PDF is excluded — it previews natively
+	// via the media URL above.
+	if ragpkg.IsOfficeDoc(path) && info.Size() <= officeDocPreviewMaxBytes {
+		if text, err := ragpkg.ReadDocumentForPreview(path, officeDocPreviewTimeout); err == nil && strings.TrimSpace(text) != "" {
+			runes := []rune(text)
+			if len(runes) > officeDocPreviewRunes {
+				out.Body = string(runes[:officeDocPreviewRunes])
+				out.Truncated = true
+			} else {
+				out.Body = text
+			}
+			return out
+		}
+		// No parser available (markitdown missing, no Word/WPS, conversion
+		// failed): fall through to the raw read — the Binary flag drives the
+		// frontend's "open with system app" fallback.
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -6013,6 +6082,41 @@ func (a *App) PortraitProfile() ProfileView {
 	return ProfileView{Path: pv.Path, Content: pv.Content}
 }
 
+// ProfilePresetsPayload is the preset-panel's read/write payload: the mode's
+// preference presets plus the id in use and the file path (read-only display).
+// Items reuse memory.ProfilePreset directly (same precedent as the PPT template
+// views). On save the frontend submits Active+Items; Path is ignored.
+type ProfilePresetsPayload struct {
+	Active string                 `json:"active"`
+	Items  []memory.ProfilePreset `json:"items"`
+	Path   string                 `json:"path"`
+}
+
+// ProfilePresets returns the active mode's preference presets for the cowork
+// preference panel. A fresh install gets the factory defaults (in memory only).
+func (a *App) ProfilePresets() ProfilePresetsPayload {
+	a.mu.RLock()
+	ctrl := a.activeCtrlLocked()
+	a.mu.RUnlock()
+	if ctrl == nil {
+		return ProfilePresetsPayload{}
+	}
+	v := ctrl.ProfilePresets()
+	return ProfilePresetsPayload{Active: v.Active, Items: v.Items, Path: v.Path}
+}
+
+// SetProfilePresets saves the whole preset list and the active selection in one
+// call (the panel edits locally and commits atomically). Returns the file written.
+func (a *App) SetProfilePresets(p ProfilePresetsPayload) (string, error) {
+	a.mu.RLock()
+	ctrl := a.activeCtrlLocked()
+	a.mu.RUnlock()
+	if ctrl == nil {
+		return "", nil
+	}
+	return ctrl.SaveProfilePresets(memory.PresetFile{Active: p.Active, Items: p.Items})
+}
+
 // parseScope maps a frontend scope id to a memory.Scope, defaulting to project.
 func parseScope(s string) memory.Scope {
 	switch memory.Scope(s) {
@@ -6144,8 +6248,18 @@ func (a *App) NeedsOnboarding() bool {
 		// Can't load config — show onboarding so the user can set things up.
 		return true
 	}
+	access := providerAccessSet(cfg.Desktop.ProviderAccess)
 	for _, p := range cfg.Providers {
-		if p.APIKeyEnv != "" && strings.TrimSpace(os.Getenv(p.APIKeyEnv)) != "" {
+		if p.APIKeyEnv == "" {
+			// Keyless local provider (Ollama / llama.cpp): counts as configured
+			// only when the user added it via the wizard/settings — the built-in
+			// presets alone never finish onboarding.
+			if access[p.Name] {
+				return false
+			}
+			continue
+		}
+		if strings.TrimSpace(os.Getenv(p.APIKeyEnv)) != "" {
 			return false // at least one provider has a key
 		}
 	}
@@ -6180,7 +6294,9 @@ func (a *App) ProbeVendorKey(baseURL, apiKey string) error {
 // those roles. voiceModel picks the speech-to-text model (empty/"none" = skip).
 func (a *App) SetupProvider(template ProviderTemplate, apiKey string, defaultModel string, visionModel string, fastModel string, voiceModel string) error {
 	apiKey = strings.TrimSpace(apiKey)
-	if apiKey == "" {
+	if apiKey == "" && template.APIKeyEnv != "" {
+		// Keyless local presets (empty APIKeyEnv) skip this check — the wizard
+		// never collects a key for them.
 		return fmt.Errorf("key is required")
 	}
 	defaultModel = strings.TrimSpace(defaultModel)
@@ -6191,8 +6307,11 @@ func (a *App) SetupProvider(template ProviderTemplate, apiKey string, defaultMod
 	fastModel = strings.TrimSpace(fastModel)
 
 	// 1. Write the key to .env so FetchModels / SaveProvider can resolve it.
-	if err := upsertDotEnv(template.APIKeyEnv, apiKey); err != nil {
-		return fmt.Errorf("save key: %w", err)
+	// Keyless local templates carry no env var — nothing to persist.
+	if template.APIKeyEnv != "" {
+		if err := upsertCredential(template.APIKeyEnv, apiKey); err != nil {
+			return fmt.Errorf("save key: %w", err)
+		}
 	}
 
 	// 2. Build the model list (unique names among the picked models + template recommendations)
@@ -6303,7 +6422,7 @@ func (a *App) ConnectKey(apiKey string) error {
 			return fmt.Errorf("validate: %w", err)
 		}
 	}
-	if err := upsertDotEnv(onboardingKeyEnv, apiKey); err != nil {
+	if err := upsertCredential(onboardingKeyEnv, apiKey); err != nil {
 		return fmt.Errorf("save: %w", err)
 	}
 	if err := a.rebuild(); err != nil {

@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
-	"errors"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,77 +16,118 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/mobilebridge"
+	"github.com/zzycxz/fairpeer/internal/secret"
 )
 
 // desktop/mobilebridge_app.go wires the internal/mobilebridge Bridge into the
 // fairpeer desktop App. It provides:
-//   - a file-backed KeyStore for S's long-term Ed25519 key + paired peer pubs
+//   - a secret.Store-backed KeyStore (encrypted at rest) for S's long-term
+//     Ed25519 key + paired peer pubs
 //   - an execAdapter exposing App's existing tab methods as CommandExecutor
 //   - Wails-bound methods the frontend calls (pair / status / confirm / unpair)
 //
 // MINIMAL-INVASION design: app.go grows one field (mobilebridge atomic.Pointer)
 // and one startup line; tabs.go grows one forward line in tabEventSink.Emit.
 // Everything else lives in this file.
-//
-// TODO(M2 polish): replace fileKeyStore with a secret.Store adapter so the
-// long-term private key is DPAPI-encrypted at rest (FAIRPEER_SPEC §6). The
-// mobilebridge.KeyStore interface makes that swap local to this file.
 
-// fileKeyStore persists keys as base64 in a JSON file under ~/.fairpeer/.
-// M1 trade-off: plaintext at rest. Acceptable for the dev build; the DPAPI
-// upgrade is tracked separately and changes nothing in mobilebridge itself.
-type fileKeyStore struct {
-	path string
-	mu   sync.Mutex
-	m    map[string]string // base64-encoded values
+// secretKeyStore adapts the encrypted secret.Store (DPAPI on Windows, AES-GCM
+// elsewhere) to mobilebridge.KeyStore, so the long-term Ed25519 private key and
+// paired peer pubs are encrypted at rest (FAIRPEER_SPEC §6). It deliberately
+// uses its own store file — NOT secret.Default() — because the shared store's
+// LoadIntoEnv exports every entry into the process env, which must never happen
+// to key material.
+type secretKeyStore struct {
+	store *secret.Store
 }
 
-func newFileKeyStore() (*fileKeyStore, error) {
-	dir, err := os.UserHomeDir()
+// mobilebridgeStorePath is the encrypted keystore location, beside the other
+// fairpeer secrets in the user config dir.
+func mobilebridgeStorePath() string {
+	return filepath.Join(desktopConfigDir(), "mobilebridge.enc.json")
+}
+
+func newSecretKeyStore() (*secretKeyStore, error) {
+	if desktopConfigDir() == "" {
+		return nil, errors.New("user config dir unavailable")
+	}
+	ks := &secretKeyStore{store: secret.New(mobilebridgeStorePath())}
+	ks.migrateLegacyKeyFileAt(legacyMobilebridgeKeysPath())
+	return ks, nil
+}
+
+func (s *secretKeyStore) Get(key string) ([]byte, error) {
+	v, ok, err := s.store.Get(key)
 	if err != nil {
 		return nil, err
 	}
-	p := filepath.Join(dir, ".fairpeer", "mobilebridge_keys.json")
-	f := &fileKeyStore{path: p, m: map[string]string{}}
-	if b, err := os.ReadFile(p); err == nil {
-		_ = json.Unmarshal(b, &f.m)
-	}
-	return f, nil
-}
-
-func (f *fileKeyStore) Get(key string) ([]byte, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	v, ok := f.m[key]
 	if !ok {
 		return nil, mobilebridge.ErrNotFound
 	}
-	return base64.StdEncoding.DecodeString(v)
+	return []byte(v), nil
 }
 
-func (f *fileKeyStore) Set(key string, val []byte) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.m[key] = base64.StdEncoding.EncodeToString(val)
-	return f.saveLocked()
+func (s *secretKeyStore) Set(key string, val []byte) error {
+	return s.store.Set(key, string(val))
 }
 
-func (f *fileKeyStore) Delete(key string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	delete(f.m, key)
-	return f.saveLocked()
+func (s *secretKeyStore) Delete(key string) error {
+	return s.store.Delete(key)
 }
 
-func (f *fileKeyStore) saveLocked() error {
-	if err := os.MkdirAll(filepath.Dir(f.path), 0o700); err != nil {
-		return err
-	}
-	b, err := json.Marshal(f.m)
+// legacyMobilebridgeKeysPath is the M1 plaintext keystore (~/.fairpeer/
+// mobilebridge_keys.json, base64 values). Kept only for the one-time migration
+// below.
+func legacyMobilebridgeKeysPath() string {
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return err
+		return ""
 	}
-	return os.WriteFile(f.path, b, 0o600)
+	return filepath.Join(home, ".fairpeer", "mobilebridge_keys.json")
+}
+
+// migrateLegacyKeyFileAt lifts the M1 plaintext keystore into the encrypted
+// store once, then removes the plaintext file. The long-term key is verified to
+// decrypt before the file is dropped — a lost key means a new device identity
+// and re-pairing every phone, so only a verified migration deletes. On any
+// failure the legacy file is kept; whatever made it into the store still works.
+func (s *secretKeyStore) migrateLegacyKeyFileAt(p string) {
+	if p == "" {
+		return
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return // no legacy file — nothing to migrate
+	}
+	var legacy map[string]string
+	if err := json.Unmarshal(b, &legacy); err != nil {
+		slog.Warn("mobilebridge: legacy keystore unreadable; keeping file", "path", p, "err", err)
+		return
+	}
+	if len(legacy) == 0 {
+		_ = os.Remove(p)
+		return
+	}
+	var anyKey string
+	for k, v := range legacy {
+		raw, err := base64.StdEncoding.DecodeString(v)
+		if err != nil {
+			slog.Warn("mobilebridge: legacy keystore entry undecodable; keeping file", "path", p, "key", k, "err", err)
+			return
+		}
+		if _, ok, _ := s.store.Get(k); !ok {
+			if err := s.store.Set(k, string(raw)); err != nil {
+				slog.Warn("mobilebridge: legacy keystore migration failed; keeping file", "path", p, "err", err)
+				return
+			}
+		}
+		anyKey = k
+	}
+	// Verify a migrated entry survives a full encrypt→decrypt round trip before
+	// dropping the plaintext original.
+	if v, ok, err := s.store.Get(anyKey); err == nil && ok && len(v) > 0 {
+		_ = os.Remove(p)
+		slog.Info("mobilebridge: migrated legacy keystore into encrypted store", "from", p)
+	}
 }
 
 // loadOrCreateDeviceKey returns S's long-term Ed25519 keypair, generating +
@@ -187,6 +228,7 @@ func (e *execAdapter) SetModel(tab, model string) error {
 func (e *execAdapter) ListSessions() ([]mobilebridge.SessionInfo, error) {
 	return e.app.SessionListForMobile(), nil
 }
+
 // ModelsForMobile 返回激活 tab 可用的模型列表（list_models 回复）。
 func (e *execAdapter) ListModels() ([]mobilebridge.ModelInfo, error) {
 	return e.app.ModelsForMobile(), nil
@@ -330,7 +372,7 @@ func (e *execAdapter) LoadSession(tab string) ([]map[string]any, error) {
 // from App.startup. Safe to call when disabled — the bridge simply won't be
 // stored, and every MobileBridge* binding no-ops.
 func (a *App) ensureMobileBridge(ctx context.Context) {
-	store, err := newFileKeyStore()
+	store, err := newSecretKeyStore()
 	if err != nil {
 		slog.Warn("mobilebridge: key store unavailable, bridge disabled", "err", err)
 		return // no key store → mobile bridge stays off
@@ -341,6 +383,7 @@ func (a *App) ensureMobileBridge(ctx context.Context) {
 		return
 	}
 	cfg := mobilebridge.DefaultConfig()
+	var pairAddr string // 用户钉死的配对网卡（[mobilebridge] pair_address）
 	// Resolution order: LINKPEER_SIGNAL env > [mobilebridge] signal_url > default.
 	// The env var wins so ad-hoc `LINKPEER_SIGNAL=... wails dev` still works;
 	// the TOML section is the persistent, restart-surviving way to point fairpeer
@@ -358,6 +401,9 @@ func (a *App) ensureMobileBridge(ctx context.Context) {
 			cfg.LogLevel = c.MobileBridge.LogLevel
 		}
 		cfg.AutoConfirm = c.MobileBridge.AutoConfirm
+		pairAddr = c.MobileBridge.PairAddress
+		cfg.UDPKnock = c.MobileBridge.UDPKnock
+		cfg.KnockServer = c.MobileBridge.KnockServer
 	}
 	slog.Info("mobilebridge: starting bridge",
 		"signal_url", cfg.SignalURL, "stun", cfg.STUNServers, "log_level", cfg.LogLevel)
@@ -373,6 +419,9 @@ func (a *App) ensureMobileBridge(ctx context.Context) {
 		return tab
 	})
 	a.mobilebridge.Store(bridge)
+	if pairAddr != "" {
+		bridge.SetPairAddress(pairAddr)
+	}
 	go bridge.Start(ctx)
 }
 
@@ -399,10 +448,12 @@ func (a *App) MobileBridgeStatus() map[string]any {
 		return map[string]any{"enabled": false, "connected": false}
 	}
 	return map[string]any{
-		"enabled":    true,
-		"connected":  mb.SignalConnected(),
-		"signal_url": mb.SignalURL(),
-		"pending":    mb.PendingPairings(),
+		"enabled":      true,
+		"connected":    mb.SignalConnected(),
+		"signal_url":   mb.SignalURL(),
+		"pending":      mb.PendingPairings(),
+		"udp_knock":    mb.KnockEnabled(),
+		"knock_server": mb.KnockServer(),
 	}
 }
 
@@ -428,6 +479,54 @@ func (a *App) MobileBridgeUnpair(devC string) error {
 		return fmt.Errorf("mobile bridge not initialized")
 	}
 	mb.Unpair(devC)
+	return nil
+}
+
+// MobileBridgeListPairNics 返回 JSON：{nics:[{ip,name,label,isDefault}], pinned}。
+// 设置面板「配对网卡」下拉框数据源。
+func (a *App) MobileBridgeListPairNics() (string, error) {
+	mb := a.mobilebridge.Load()
+	if mb == nil {
+		return "", fmt.Errorf("mobile bridge not initialized")
+	}
+	pinned := ""
+	if c, err := config.Load(); err == nil {
+		pinned = c.MobileBridge.PairAddress
+	}
+	b, _ := json.Marshal(map[string]any{"nics": mb.ListPairNics(), "pinned": pinned})
+	return string(b), nil
+}
+
+// MobileBridgeSetPairNic 钉死/恢复配对网卡（"" = 自动），并持久化到
+// 用户 config.toml 的 [mobilebridge] pair_address。
+func (a *App) MobileBridgeSetPairNic(ip string) error {
+	mb := a.mobilebridge.Load()
+	if mb == nil {
+		return fmt.Errorf("mobile bridge not initialized")
+	}
+	c := config.LoadForEdit(config.UserConfigPath())
+	c.MobileBridge.PairAddress = ip
+	if err := c.WriteFile(config.UserConfigPath()); err != nil {
+		return fmt.Errorf("save pair_address: %w", err)
+	}
+	mb.SetPairAddress(ip)
+	return nil
+}
+
+// MobileBridgeSetKnock 配置 UDP 单包敲门（开关 + 远程 STUN 服务器），
+// 持久化到 [mobilebridge] udp_knock / knock_server，并即时生效于 Bridge。
+func (a *App) MobileBridgeSetKnock(enabled bool, server string) error {
+	mb := a.mobilebridge.Load()
+	if mb == nil {
+		return fmt.Errorf("mobile bridge not initialized")
+	}
+	c := config.LoadForEdit(config.UserConfigPath())
+	c.MobileBridge.UDPKnock = enabled
+	c.MobileBridge.KnockServer = server
+	if err := c.WriteFile(config.UserConfigPath()); err != nil {
+		return fmt.Errorf("save udp_knock: %w", err)
+	}
+	mb.SetKnock(enabled, server)
 	return nil
 }
 

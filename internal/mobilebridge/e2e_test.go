@@ -223,11 +223,16 @@ func TestE2EFullLink(t *testing.T) {
 		_ = dc.Send(b)
 	})
 
+	// cWS 写互斥：offer（主流程）与 ICE 候选回调（pion 的 gather goroutine）
+	// 并发写同一连接会让 gorilla/websocket panic（concurrent write）。
+	var wsMu sync.Mutex
 	cPC.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c == nil {
 			return
 		}
 		b, _ := json.Marshal(SignalMsg{Type: "ice", From: cDev, To: sDev, ConnID: "e2e", Cand: c.ToJSON().Candidate})
+		wsMu.Lock()
+		defer wsMu.Unlock()
 		_ = cWS.WriteMessage(websocket.TextMessage, b)
 	})
 
@@ -259,7 +264,10 @@ func TestE2EFullLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	ob, _ := json.Marshal(SignalMsg{Type: "offer", From: cDev, To: sDev, ConnID: "e2e", SDP: offer.SDP})
-	if err := cWS.WriteMessage(websocket.TextMessage, ob); err != nil {
+	wsMu.Lock()
+	err = cWS.WriteMessage(websocket.TextMessage, ob)
+	wsMu.Unlock()
+	if err != nil {
 		t.Fatal(err)
 	}
 

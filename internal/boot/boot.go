@@ -546,7 +546,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// so the dev tool list stays focused on coding. (Update: they are hidden
 	// from the main loop via reg.Hide, so registering them unconditionally
 	// doesn't pollute the dev tool list, but allows subagents to work anywhere).
-	if true {
+	if config.ProfileNameKey(profileName(opts.Profile)) == config.ProfileCowork {
 		// Browser automation tools (cowork only). Hidden from the main loop's
 		// schema: the model drives the browser through run_skill("browser-auto")
 		// or run_skill("computer-auto") subagents, which reach these via
@@ -589,11 +589,25 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// [cowork.smtp] and [cowork.imap]; when a side is unset, that side's
 		// tool returns a config error (the other still works).
 		//
-		// Load encrypted secrets (cowork mail passwords) into the process env
-		// before the tools can fire. The tools read passwords via
-		// os.Getenv(passwordEnv); this is the bridge that makes the encrypted
-		// store (secret.Default) usable from the CLI/TUI too, which doesn't run
-		// the desktop startup migration. Explicit user/system env still wins.
+		// Load encrypted secrets (cowork mail passwords, provider API keys) into
+		// the process env before the tools can fire. The tools read passwords and
+		// keys via os.Getenv; this is the bridge that makes the encrypted store
+		// (secret.Default) usable from the CLI/TUI too, which doesn't run the
+		// desktop startup migration. Explicit user/system env still wins.
+		//
+		// One-time upgrade sweep first: lift the legacy plaintext credentials
+		// file (the pre-encryption KEY=value store) into the encrypted secret
+		// store. Best-effort — on failure the plaintext file is kept and still
+		// loaded by config.loadDotEnv, so nothing breaks; the next successful
+		// run finishes the migration. (The desktop runs the same sweep at
+		// startup; whichever gets there first wins, the other no-ops.)
+		if p := config.UserCredentialsPath(); p != "" {
+			if n, err := secret.Default().MigrateEnvFile(p); err != nil {
+				fmt.Fprintf(stderr, "warning: credentials migration to the encrypted store failed (kept %s): %v\n", p, err)
+			} else if n > 0 {
+				fmt.Fprintf(stderr, "migrated %d credential(s) from %s into the encrypted secret store\n", n, p)
+			}
+		}
 		if _, err := secret.Default().LoadIntoEnv(); err != nil {
 			fmt.Fprintf(stderr, "warning: secret store load failed: %v\n", err)
 		}
@@ -1390,10 +1404,16 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		AllSkillStore: allSkillStore,
 		Hooks:         hookRunner,
 		Memory:        mem,
-		// Chain secret-env teardown into the controller's cleanup so injected
-		// plaintext secrets don't outlive the session in os.Environ(). Bound by
-		// the same injectedKeys list LoadIntoEnv recorded, so user/system env is
-		// never clobbered. Audit A9.
+		// Chain secret-env teardown into the controller's cleanup (audit A9:
+		// bound the plaintext secret's lifetime in os.Environ()). In practice
+		// this now no-ops: the config boot layer injects the store UNTRACKED
+		// (see config.loadDotEnvForRoot) because provider keys must outlive any
+		// single controller — the desktop scheduler, RAG extraction, and
+		// settings indicators read them outside controller lifetimes, and
+		// rebuild() closes the old controller after the new one is already
+		// running. The unload stays wired for a future per-child cmd.Env
+		// isolation architecture, where tracked injection becomes meaningful
+		// again.
 		Cleanup: func() {
 			if cleanup != nil {
 				cleanup()

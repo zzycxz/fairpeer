@@ -23,7 +23,7 @@ import (
 // resolved config and applies edits through internal/config/edit.go (the
 // purpose-built mutation API), then rebuilds the controller so the change takes
 // effect live — the same snapshot→reload→resume pattern as SetModel. Secrets are
-// the exception: they go to the global credentials file (upsertDotEnv), since
+// the exception: they go to the encrypted secret store (upsertCredential), since
 // config stores only the env-var name, not the key.
 
 // --- read ---
@@ -269,8 +269,10 @@ func providerViewFromEntry(p config.ProviderEntry, builtIn, added bool) Provider
 	return ProviderView{
 		Name: p.Name, BuiltIn: builtIn, Added: added, Kind: p.Kind, BaseURL: p.BaseURL,
 		Models: nonNil(p.ChatModelList()), ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
-		APIKeyEnv:         p.APIKeyEnv,
-		KeySet:            p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) != "",
+		APIKeyEnv: p.APIKeyEnv,
+		// KeySet doubles as "ready to use": keyless providers (local endpoints)
+		// are ready by definition, so pickers don't filter them out.
+		KeySet:            p.APIKeyEnv == "" || os.Getenv(p.APIKeyEnv) != "",
 		ContextWindow:     p.ContextWindow,
 		ReasoningProtocol: p.ReasoningProtocol,
 		SupportedEfforts:  nonNil(p.SupportedEfforts),
@@ -789,7 +791,9 @@ func selectableDesktopModelRef(c *config.Config, ref string) (string, error) {
 	if !modelProviderAccessAllowed(providerAccessSet(c.Desktop.ProviderAccess), entry.Name) {
 		return "", fmt.Errorf("model %q is not available because provider %q is not added", ref, entry.Name)
 	}
-	if !entry.Configured() {
+	// Keyless providers (empty api_key_env — local Ollama / llama.cpp endpoints)
+	// need no key; everything else still requires its env to resolve.
+	if entry.APIKeyEnv != "" && !entry.Configured() {
 		return "", fmt.Errorf("model %q is not available because provider %q has no key", ref, entry.Name)
 	}
 	return entry.Name + "/" + entry.Model, nil
@@ -920,7 +924,7 @@ func (a *App) AddOfficialProviderAccess(kind, key string) error {
 		return err
 	}
 	if strings.TrimSpace(key) != "" && keyEnv != "" {
-		if err := upsertDotEnv(keyEnv, key); err != nil {
+		if err := upsertCredential(keyEnv, key); err != nil {
 			return err
 		}
 	}
@@ -1172,26 +1176,26 @@ func (a *App) deleteProviderAndRetargetTabs(name string) error {
 	return nil
 }
 
-// SetProviderKey writes a secret to the global credentials file under the given
+// SetProviderKey writes a secret to the encrypted secret store under the given
 // env-var name (the one a provider's api_key_env points at) and rebuilds so it
 // resolves immediately.
 func (a *App) SetProviderKey(apiKeyEnv, value string) error {
 	if strings.TrimSpace(apiKeyEnv) == "" {
 		return fmt.Errorf("this provider has no api_key_env set")
 	}
-	if err := upsertDotEnv(apiKeyEnv, value); err != nil {
+	if err := upsertCredential(apiKeyEnv, value); err != nil {
 		return err
 	}
 	return a.rebuild()
 }
 
-// ClearProviderKey removes a provider secret from the global credentials file
+// ClearProviderKey removes a provider secret from the encrypted secret store
 // and rebuilds so the provider immediately becomes unauthenticated.
 func (a *App) ClearProviderKey(apiKeyEnv string) error {
 	if strings.TrimSpace(apiKeyEnv) == "" {
 		return fmt.Errorf("this provider has no api_key_env set")
 	}
-	if err := removeDotEnv(apiKeyEnv); err != nil {
+	if err := removeCredential(apiKeyEnv); err != nil {
 		return err
 	}
 	return a.rebuild()
@@ -1302,7 +1306,7 @@ func (a *App) SetBotSecret(envName, value string) error {
 	if envName == "" {
 		return fmt.Errorf("bot secret env name is empty")
 	}
-	if err := upsertDotEnv(envName, value); err != nil {
+	if err := upsertCredential(envName, value); err != nil {
 		return err
 	}
 	return nil
@@ -1313,7 +1317,7 @@ func (a *App) ClearBotSecret(envName string) error {
 	if envName == "" {
 		return fmt.Errorf("bot secret env name is empty")
 	}
-	return removeDotEnv(envName)
+	return removeCredential(envName)
 }
 
 // SetCloseBehavior updates desktop-only window close behavior without rebuilding

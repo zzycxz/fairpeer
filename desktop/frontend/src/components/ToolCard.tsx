@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { ChevronRight, Loader2, XCircle } from "lucide-react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
+import { openAttachmentViewer } from "./AttachmentViewer";
 import { useT } from "../lib/i18n";
 import { diffsFor, subjectOf } from "../lib/tools";
 import { useShellExpand } from "../lib/shellExpand";
@@ -10,6 +11,11 @@ import type { Item } from "../lib/useController";
 import { getInitialOpenState, shouldKeepMounted } from "./toolcardLogic";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
+
+function baseName(path: string): string {
+  const parts = path.split(/[/\\]/).filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : path;
+}
 
 const SUBAGENT_TOOLS = new Set(["task", "run_skill", "explore", "research"]);
 
@@ -33,6 +39,7 @@ function formatToolDuration(ms?: number): string {
 // pictures saved under .fairpeer/attachments/) directly under the tool card.
 // Paths can't be loaded by a bare <img> in the webview, so fetch a data URL via
 // the kernel — the same bridge UserMessage uses for pasted-image previews.
+// Clicking opens the shared lightbox for the full-size view.
 function ToolAttachments({ paths }: { paths: string[] }) {
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const key = paths.join("\n");
@@ -51,7 +58,16 @@ function ToolAttachments({ paths }: { paths: string[] }) {
   }, [key]);
   return (
     <div className="tool__attachments">
-      {paths.map((p) => previews[p] ? <img key={p} src={previews[p]} alt="" loading="lazy" /> : null)}
+      {paths.map((p) => previews[p] ? (
+        <button
+          type="button"
+          key={p}
+          className="tool__attachment-open"
+          onClick={() => openAttachmentViewer({ path: p, name: baseName(p), kind: "image", source: "attachment" })}
+        >
+          <img src={previews[p]} alt={baseName(p)} loading="lazy" draggable={false} />
+        </button>
+      ) : null)}
     </div>
   );
 }

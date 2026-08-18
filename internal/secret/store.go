@@ -1,12 +1,14 @@
 package secret
 
 import (
+	"bufio"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -197,7 +199,28 @@ func (s *Store) Keys() ([]string, error) {
 // that fail to decrypt — e.g. the file was copied from another Windows user —
 // are skipped silently; the caller treats them as unset and the tool reports a
 // config error, prompting re-entry.
+//
+// Loaded keys are recorded so UnloadFromEnv can clear them later (audit A9:
+// bound the plaintext secret's lifetime in os.Environ()). Only call this for
+// injection whose lifetime you intend to END with UnloadFromEnv — e.g. a
+// controller-scoped session. For process-lifetime injection (the config layer,
+// which feeds scheduler/RAG/settings/CLI one-shots that outlive any controller)
+// use LoadIntoEnvUntracked, otherwise the first controller teardown would strip
+// secrets every later consumer still needs.
 func (s *Store) LoadIntoEnv() (int, error) {
+	return s.loadIntoEnv(true)
+}
+
+// LoadIntoEnvUntracked is LoadIntoEnv without recording injectedKeys: the vars
+// stay for the process lifetime and UnloadFromEnv never clears them. The
+// intended use is the config boot layer, whose consumers (desktop scheduler,
+// RAG extraction, settings key-set indicators, CLI one-shot commands) read
+// os.Getenv outside any controller's lifetime.
+func (s *Store) LoadIntoEnvUntracked() (int, error) {
+	return s.loadIntoEnv(false)
+}
+
+func (s *Store) loadIntoEnv(tracked bool) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	doc, err := s.load()
@@ -218,9 +241,12 @@ func (s *Store) LoadIntoEnv() (int, error) {
 			continue
 		}
 		os.Setenv(key, string(plain))
-		// Record that WE injected this key (it was empty before), so UnloadFromEnv
-		// can later clear it without touching env vars the user set themselves.
-		s.injectedKeys = append(s.injectedKeys, key)
+		if tracked {
+			// Record that WE injected this key (it was empty before), so
+			// UnloadFromEnv can later clear it without touching env vars the
+			// user set themselves.
+			s.injectedKeys = append(s.injectedKeys, key)
+		}
 		n++
 	}
 	return n, nil
@@ -246,4 +272,87 @@ func (s *Store) UnloadFromEnv() int {
 	}
 	s.injectedKeys = nil
 	return n
+}
+
+// MigrateEnvFile performs a one-time migration of a legacy plaintext KEY=value
+// env file (the pre-encryption credentials file) into the encrypted store.
+// Parsing mirrors config.loadDotEnvFile — lenient: blank lines and # comments
+// skipped, optional `export ` prefix and surrounding quotes stripped. Keys
+// already present in the store are left untouched (the user may have re-entered
+// a newer value after upgrade); empty values are skipped, an empty secret is
+// meaningless. When every non-empty entry is safely stored the source file is
+// removed; on any error the file is kept so the plaintext fallback keeps
+// working and the next run finishes the migration. Returns the number of
+// secrets newly stored. A missing file is a no-op.
+func (s *Store) MigrateEnvFile(path string) (int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+
+	type kv struct{ key, val string }
+	var entries []kv
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		val = strings.Trim(strings.TrimSpace(val), `"'`)
+		if key == "" || val == "" {
+			continue
+		}
+		entries = append(entries, kv{key, val})
+	}
+	scanErr := sc.Err()
+	// Close before any store write: on Windows an open handle blocks the os.Remove
+	// that finishes a successful migration.
+	if cerr := f.Close(); cerr != nil && scanErr == nil {
+		scanErr = cerr
+	}
+	if scanErr != nil {
+		return 0, scanErr
+	}
+	if len(entries) == 0 {
+		// Comments-only or empty file: nothing secret left to protect, and the
+		// file has no reason to exist.
+		return 0, os.Remove(path)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, e := range entries {
+		// Re-load per entry so a concurrent in-process Set (the desktop settings
+		// panel writes the same store) is never clobbered by our read-modify-write.
+		doc, err := s.load()
+		if err != nil {
+			return n, err
+		}
+		if _, exists := doc.Secrets[e.key]; exists {
+			continue
+		}
+		protected, err := Protect([]byte(e.val))
+		if err != nil {
+			return n, err
+		}
+		if doc.Secrets == nil {
+			doc.Secrets = map[string]string{}
+		}
+		doc.Secrets[e.key] = base64.StdEncoding.EncodeToString(protected)
+		if err := s.saveLocked(doc); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, os.Remove(path)
 }

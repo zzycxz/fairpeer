@@ -52,10 +52,6 @@ const launchReadyTimeout = 30 * time.Second
 // readyPollInterval is the cadence at which /json/version is polled.
 const readyPollInterval = 250 * time.Millisecond
 
-// devtoolsActivePortTimeout caps how long we wait for Chrome to write its
-// DevToolsActivePort file (the ground-truth source of the bound port).
-const devtoolsActivePortTimeout = 15 * time.Second
-
 // Handle is a launched browser process plus its CDP endpoint. Close must be
 // called to release the process and temp profile.
 type Handle struct {
@@ -98,6 +94,10 @@ type LaunchOptions struct {
 	// UserDataDir is the --user-data-dir. Empty = a fresh temp dir per launch
 	// (zero pollution, zero conflict with the user's real profile).
 	UserDataDir string
+	// Port pins the remote-debugging port instead of allocating a free one.
+	// Used for the persistent "managed" browser whose endpoint is stable
+	// across restarts (so a saved attach URL keeps working). 0 = allocate.
+	Port int
 	// Headless launches with --headless=new. When the in-app screencast panel
 	// is the primary view, headless avoids a second visible window stealing
 	// focus; for local debugging set false to watch the real window.
@@ -130,10 +130,15 @@ func Launch(ctx context.Context, opts LaunchOptions) (*Handle, error) {
 	// Allocate the port ourselves so there is no probe/bind race: we hold the
 	// listener until just before spawning, then immediately pass the same port
 	// to Chrome. The window between Close and Chrome's bind is tiny and we
-	// still verify via the DevToolsActivePort file afterward.
-	port, err := allocatePort()
-	if err != nil {
-		return nil, fmt.Errorf("browserlaunch: allocate CDP port: %w", err)
+	// still verify via the DevToolsActivePort file afterward. A pinned Port
+	// (the persistent managed browser) skips allocation; a collision then
+	// surfaces as the DevToolsActivePort mismatch error below.
+	port := opts.Port
+	if port <= 0 {
+		port, err = allocatePort()
+		if err != nil {
+			return nil, fmt.Errorf("browserlaunch: allocate CDP port: %w", err)
+		}
 	}
 
 	ownTempDir := false
@@ -235,10 +240,13 @@ func startBrowser(ctx context.Context, exePath, name string, port int, userDataD
 		close(h.done)
 	}()
 
-	// Verify Chrome bound the port we asked for (spawn-integrity check). The
-	// DevToolsActivePort file is the ground truth — it's written under the
-	// user-data-dir as soon as the devtools server starts.
-	boundPort, wsPath, err := waitForDevToolsActivePort(userDataDir, devtoolsActivePortTimeout, h.done)
+	// Verify Chrome bound the port we asked for and get the browser-level WS
+	// URL. Ground truth #1 is the DevToolsActivePort file under the
+	// user-data-dir; newer Chrome builds no longer write it, so ground truth
+	// #2 is /json/version on the expected port (its webSocketDebuggerUrl
+	// carries the same WS endpoint). Either path validates the bound port so
+	// we never risk driving the wrong instance.
+	wsURL, err := waitForBrowserEndpoint(userDataDir, port, launchReadyTimeout, h.done)
 	if err != nil {
 		stderrTail := stderr.String()
 		h.killAndCleanup(ownTempDir)
@@ -247,26 +255,9 @@ func startBrowser(ctx context.Context, exePath, name string, port int, userDataD
 		}
 		return nil, fmt.Errorf("browserlaunch: %s did not expose CDP: %w", name, err)
 	}
-	if boundPort != port {
-		// Chrome bound a different port than we allocated — a collision or a
-		// stale --remote-debugging-port. Refuse to attach rather than risk
-		// driving the wrong instance.
-		h.killAndCleanup(ownTempDir)
-		return nil, fmt.Errorf("browserlaunch: %s bound CDP port %d, expected %d (collision?)", name, boundPort, port)
-	}
 
 	h.CDPURL = fmt.Sprintf("http://127.0.0.1:%d", port)
-	h.WSURL = "ws://127.0.0.1:" + strconv.Itoa(port) + wsPath
-
-	// Now race CDP readiness against process exit.
-	if err := waitForCDPReady(h.CDPURL, launchReadyTimeout, h.done); err != nil {
-		stderrTail := stderr.String()
-		h.killAndCleanup(ownTempDir)
-		if stderrTail != "" {
-			return nil, fmt.Errorf("browserlaunch: CDP not ready: %w\nstderr: %s", err, stderrTail)
-		}
-		return nil, fmt.Errorf("browserlaunch: CDP not ready: %w", err)
-	}
+	h.WSURL = wsURL
 
 	return h, nil
 }
@@ -391,33 +382,57 @@ func allocatePort() (int, error) {
 	return addr.Port, nil
 }
 
-// waitForDevToolsActivePort waits for Chrome to write DevToolsActivePort under
-// userDataDir and returns (port, websocketPath). The file format is two lines:
-// the port, then the websocket path (e.g. /devtools/browser/<id>). procDone is
-// raced so a browser that exits before writing the file fails fast.
-func waitForDevToolsActivePort(userDataDir string, timeout time.Duration, procDone <-chan struct{}) (int, string, error) {
+// waitForBrowserEndpoint waits for the spawned browser to expose its CDP
+// endpoint and returns the browser-level websocket URL. Two ground truths are
+// raced per poll:
+//
+//   - the DevToolsActivePort file under the user-data-dir (two lines: port,
+//     ws path) — written by most Chromium builds;
+//   - GET /json/version on the port we asked the browser to bind — newer
+//     Chrome builds no longer write the file, and this response's
+//     webSocketDebuggerUrl carries the same WS endpoint.
+//
+// Either path validates the bound port, so a collision (browser bound a
+// different port than requested) surfaces as an error rather than attaching
+// to the wrong instance. procDone is raced so a browser that exits first
+// fails fast.
+func waitForBrowserEndpoint(userDataDir string, port int, timeout time.Duration, procDone <-chan struct{}) (string, error) {
+	client := &http.Client{Timeout: 2 * time.Second}
+	base := fmt.Sprintf("http://127.0.0.1:%d", port)
+	portSuffix := ":" + strconv.Itoa(port) + "/"
+	file := filepath.Join(userDataDir, "DevToolsActivePort")
 	deadline := time.Now().Add(timeout)
-	path := filepath.Join(userDataDir, "DevToolsActivePort")
 	for {
-		data, err := os.ReadFile(path)
-		if err == nil && len(data) > 0 {
-			port, wsPath, perr := parseDevToolsActivePort(data)
-			if perr == nil {
-				return port, wsPath, nil
+		if data, err := os.ReadFile(file); err == nil && len(data) > 0 {
+			if bound, wsPath, perr := parseDevToolsActivePort(data); perr == nil {
+				if bound != port {
+					return "", fmt.Errorf("bound CDP port %d, expected %d (collision?)", bound, port)
+				}
+				return "ws://127.0.0.1:" + strconv.Itoa(port) + wsPath, nil
+			}
+		}
+		if resp, err := client.Get(base + "/json/version"); err == nil {
+			var info CDPVersionInfo
+			derr := json.NewDecoder(resp.Body).Decode(&info)
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			if err == nil && derr == nil && resp.StatusCode == http.StatusOK &&
+				info.WebSocketDebuggerURL != "" && strings.Contains(info.WebSocketDebuggerURL, portSuffix) {
+				return info.WebSocketDebuggerURL, nil
 			}
 		}
 		if time.Now().After(deadline) {
 			select {
 			case <-procDone:
-				return 0, "", errors.New("browser exited before exposing CDP (DevToolsActivePort not written)")
+				return "", errors.New("browser exited before exposing CDP")
 			default:
 			}
-			return 0, "", fmt.Errorf("DevToolsActivePort not written within %s", timeout)
+			return "", fmt.Errorf("CDP not ready within %s (no DevToolsActivePort file, /json/version unreachable)", timeout)
 		}
 		select {
 		case <-procDone:
-			return 0, "", errors.New("browser exited before exposing CDP")
-		case <-time.After(100 * time.Millisecond):
+			return "", errors.New("browser exited before exposing CDP")
+		case <-time.After(readyPollInterval):
 		}
 	}
 }
@@ -438,39 +453,6 @@ func parseDevToolsActivePort(data []byte) (int, string, error) {
 		wsPath = strings.TrimSpace(lines[1])
 	}
 	return port, wsPath, nil
-}
-
-// waitForCDPReady polls GET <base>/json/version until it responds 200 or the
-// process exits / the timeout elapses. This confirms the HTTP endpoint (and
-// thus the ws endpoint) is live, not just that the file was written.
-func waitForCDPReady(base string, timeout time.Duration, procDone <-chan struct{}) error {
-	client := &http.Client{Timeout: 2 * time.Second}
-	deadline := time.Now().Add(timeout)
-	url := base + "/json/version"
-	for {
-		resp, err := client.Get(url)
-		if err == nil {
-			// Drain & close so the connection can be reused.
-			_, _ = io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return nil
-			}
-		}
-		if time.Now().After(deadline) {
-			select {
-			case <-procDone:
-				return errors.New("browser process exited before CDP was ready")
-			default:
-			}
-			return fmt.Errorf("CDP /json/version not reachable within %s", timeout)
-		}
-		select {
-		case <-procDone:
-			return errors.New("browser process exited before CDP was ready")
-		case <-time.After(readyPollInterval):
-		}
-	}
 }
 
 // CDPVersionInfo is the JSON returned by /json/version. We only need the
@@ -504,6 +486,113 @@ func (h *Handle) VersionInfo(ctx context.Context) (*CDPVersionInfo, error) {
 		return nil, err
 	}
 	return &info, nil
+}
+
+// --- attach to an already-running browser ---------------------------------
+//
+// Chromium only accepts CDP connections when started with
+// --remote-debugging-port (and, since Chrome 136, only with a non-default
+// --user-data-dir). These helpers let callers drive a browser that is ALREADY
+// open — typically the persistent "managed" browser the desktop starts once —
+// instead of launching a fresh instance per task.
+
+// AttachInfo describes a reachable CDP endpoint of an already-running browser.
+type AttachInfo struct {
+	// CDPURL is the normalized HTTP endpoint, e.g. "http://127.0.0.1:9222".
+	CDPURL string
+	// WSURL is the browser-level websocket debugger URL resolved from
+	// /json/version — what connect_over_cdp / chromedp.NewRemoteAllocator /
+	// the browser-use sidecar take.
+	WSURL string
+	// BrowserName is the product name parsed from /json/version's Browser
+	// field ("Chrome/137.0.7151.68" → "Chrome").
+	BrowserName string
+	// Version is the raw Browser string from /json/version.
+	Version string
+}
+
+// NormalizeCDPEndpoint canonicalizes user input into an http://host:port base.
+// Accepts "http://h:p", "ws://h:p/devtools/...", bare "h:p", a hostname
+// (":9222" is appended — the CDP convention), or a bare port ("9222" →
+// "http://127.0.0.1:9222"). Returns "" for input that carries nothing usable.
+func NormalizeCDPEndpoint(endpoint string) string {
+	e := strings.TrimSpace(endpoint)
+	if e == "" {
+		return ""
+	}
+	if i := strings.Index(e, "://"); i >= 0 {
+		switch e[:i] {
+		case "http", "https", "ws", "wss":
+			e = e[i+3:]
+		default:
+			return ""
+		}
+	}
+	// Keep just host[:port] — drop any /devtools/... path.
+	if slash := strings.Index(e, "/"); slash >= 0 {
+		e = e[:slash]
+	}
+	if e == "" || strings.ContainsAny(e, " \t") {
+		return ""
+	}
+	if !strings.Contains(e, ":") {
+		if _, err := strconv.Atoi(e); err == nil {
+			e = "127.0.0.1:" + e // bare port → loopback
+		} else {
+			e += ":9222" // bare hostname → conventional CDP port
+		}
+	}
+	return "http://" + e
+}
+
+// ProbeAttach verifies that a CDP endpoint answers and resolves its
+// browser-level websocket URL. Timeout is bounded by the caller's ctx.
+func ProbeAttach(ctx context.Context, endpoint string) (*AttachInfo, error) {
+	base := NormalizeCDPEndpoint(endpoint)
+	if base == "" {
+		return nil, fmt.Errorf("browserlaunch: invalid CDP endpoint %q", endpoint)
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", base+"/json/version", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("browserlaunch: CDP endpoint %s not reachable: %w", base, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("browserlaunch: CDP endpoint %s answered %s (not a debug-enabled browser?)", base, resp.Status)
+	}
+	var info CDPVersionInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, fmt.Errorf("browserlaunch: parse /json/version from %s: %w", base, err)
+	}
+	if info.WebSocketDebuggerURL == "" {
+		return nil, fmt.Errorf("browserlaunch: %s returned no webSocketDebuggerUrl", base)
+	}
+	return &AttachInfo{
+		CDPURL:      base,
+		WSURL:       info.WebSocketDebuggerURL,
+		BrowserName: browserProduct(info.Browser),
+		Version:     info.Browser,
+	}, nil
+}
+
+// browserProduct extracts the product name from a /json/version Browser
+// string ("Chrome/137.0.7151.68" → "Chrome", "Edg/137.0" → "Edge").
+func browserProduct(version string) string {
+	if i := strings.IndexByte(version, '/'); i > 0 {
+		name := version[:i]
+		if strings.EqualFold(name, "edg") || strings.EqualFold(name, "edge") {
+			return "Edge"
+		}
+		if strings.EqualFold(name, "chrome") {
+			return "Chrome"
+		}
+		return name
+	}
+	return version
 }
 
 // --- browser detection ------------------------------------------------------

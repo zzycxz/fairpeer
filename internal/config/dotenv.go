@@ -5,16 +5,28 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+
+	"github.com/zzycxz/fairpeer/internal/secret"
 )
+
+// secretEnvOnce bounds the encrypted-store env injection to once per process:
+// loadDotEnvForRoot runs on every config load, but the store's contents only
+// change through explicit Set/Delete, which mirror into the process env
+// themselves (see desktop's upsertCredential and the CLI's storeSecretLines).
+var secretEnvOnce sync.Once
 
 // loadDotEnv loads KEY=value files into the process environment without
 // overriding variables that are already set (first file to set a key wins).
 // Order: a project ./.env (read-only back-compat, so a manual project override
 // takes precedence), then the fairpeer-owned global credentials file in the user
-// config dir (where `fairpeer setup` writes keys, so they resolve from any
-// directory without ever touching a project's own .env), then ~/.env as a legacy
-// fallback (the desktop app writes there). Existing environment variables always
-// win over all three.
+// config dir (legacy plaintext; boot migrates it into the encrypted secret
+// store, after which it no longer exists), then ~/.env as a legacy fallback.
+// Existing environment variables always win over all three. Finally the
+// encrypted secret store (DPAPI on Windows, AES-GCM elsewhere) is decrypted
+// into the env the same way, so every config consumer — CLI one-shots like
+// `fairpeer models`/`doctor` included, not just the chat boot path — resolves
+// provider keys exactly as before the credentials file was encrypted.
 func loadDotEnv() {
 	loadDotEnvForRoot(".")
 }
@@ -33,6 +45,20 @@ func loadDotEnvForRoot(root string) {
 	if home, err := os.UserHomeDir(); err == nil {
 		loadDotEnvFile(filepath.Join(home, ".env"))
 	}
+	secretEnvOnce.Do(func() {
+		// Best-effort, mirroring the lenient file reads above: a corrupt store
+		// must not break config loading — the affected tools report a clear
+		// "not configured" error and prompt for re-entry. boot logs a warning
+		// when its own LoadIntoEnv call hits the same failure.
+		//
+		// UNTRACKED on purpose: these secrets must live for the whole process —
+		// the desktop scheduler, RAG extraction, and settings key-set indicators
+		// read os.Getenv outside any controller's lifetime. Tracked injection
+		// would be cleared by boot's controller-teardown UnloadFromEnv (audit
+		// A9), and rebuild() builds the new controller BEFORE closing the old
+		// one, so that unload would strip keys the fresh session still needs.
+		_, _ = secret.Default().LoadIntoEnvUntracked()
+	})
 }
 
 // loadDotEnvFile reads one .env file (if present) and sets any keys not already

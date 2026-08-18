@@ -24,9 +24,10 @@ type ProviderTemplate struct {
 	VisionModel   string   `json:"visionModel"`   // recommended vision model ("" = same as default)
 	Vision        bool     `json:"vision"`        // provider supports image input
 	ContextWindow int      `json:"contextWindow"` // max context tokens
+	Local         bool     `json:"local"`         // keyless local endpoint (Ollama, llama.cpp): wizard skips the API-key step and fetches installed models live
 	CodingOnly    bool     `json:"codingOnly"`    // consumes Coding Plan subscription quota (reserved, v1.0 unused)
 	Aggregator    bool     `json:"aggregator"`    // model-aggregation platform (reserved, v1.0 unused)
-	Category      string   `json:"category"`      // "direct" (v1.0 only) or "aggregator" (future)
+	Category      string   `json:"category"`      // "direct", "aggregator", or "local"
 	DocURL        string   `json:"docUrl"`        // where to get an API key
 	Models        []string `json:"models"`        // preset model list (fallback when probe fails)
 }

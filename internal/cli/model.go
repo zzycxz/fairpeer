@@ -127,6 +127,8 @@ func (m *chatTUI) persistModel(ref string) {
 }
 
 // modelRefs returns the configured provider/model refs for slash completion.
+// Keyless providers (empty api_key_env — local Ollama / llama.cpp endpoints)
+// are always selectable; keyed ones still need their env to resolve.
 func modelRefs() []string {
 	cfg, err := config.Load()
 	if err != nil {
@@ -135,7 +137,7 @@ func modelRefs() []string {
 	var out []string
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		if !p.Configured() {
+		if p.APIKeyEnv != "" && !p.Configured() {
 			continue
 		}
 		for _, model := range p.ChatModelList() {
@@ -154,7 +156,7 @@ func providerNames() []string {
 	var out []string
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		if !p.Configured() {
+		if p.APIKeyEnv != "" && !p.Configured() {
 			continue
 		}
 		out = append(out, p.Name)

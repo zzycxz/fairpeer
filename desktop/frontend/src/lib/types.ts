@@ -488,7 +488,8 @@ export interface FilePreview {
   size: number;
   truncated: boolean;
   binary: boolean;
-  kind?: "image" | "pdf";
+  /** Media previews stream through an expiring token URL served by the kernel. */
+  kind?: "image" | "pdf" | "audio" | "video" | "html";
   mime?: string;
   url?: string;
   err?: string;
@@ -1108,6 +1109,25 @@ export interface ProfileView {
   content: string;
 }
 
+// ProfilePreset is one named preference template the cowork preference panel
+// manages ("减少AI味", "严格Excel匹配", …). The backend injects the active
+// preset's content into every turn, after the portrait files.
+export interface ProfilePreset {
+  id: string;
+  name: string;
+  content: string;
+  builtin: boolean; // factory-seeded (still fully editable/deletable)
+}
+
+// ProfilePresetsPayload is the read/write payload of the preset list: which id
+// is in use ("" = none) plus the items. Path is read-only display (the JSON
+// file on disk); on save the backend ignores it.
+export interface ProfilePresetsPayload {
+  active: string;
+  items: ProfilePreset[];
+  path: string;
+}
+
 export interface MemoryView {
   docs: MemoryDoc[];
   facts: MemoryFact[];
@@ -1171,9 +1191,10 @@ export interface ProviderTemplate {
   visionModel: string; // recommended vision model ("" = same as default)
   vision: boolean; // provider supports image input
   contextWindow: number;
+  local: boolean; // keyless local endpoint (Ollama, llama.cpp) — no API key step, models fetched live
   codingOnly: boolean; // consumes Coding Plan subscription quota
   aggregator: boolean; // model-aggregation platform
-  category: string; // "direct" | "aggregator"
+  category: string; // "direct" | "aggregator" | "local"
   docUrl: string; // where to get an API key
   models: string[]; // preset model list (fallback when probe fails)
 }
@@ -1360,6 +1381,10 @@ export interface BotSettingsView {
 // PPT-template dropdown; pptTemplateDir is where the user drops JSON templates.
 export interface CoWorkSettingsView {
   browserPath: string;
+  // browserAttachURL makes browser automation attach to an already-running
+  // debug-enabled browser (the managed 可控浏览器 on port 9222) instead of
+  // launching a fresh one per task. Empty = launch mode.
+  browserAttachURL: string;
   embeddingModel: string;
   // Knowledge-base master switch. null = unset (default → enabled); true =
   // enabled; false = fully disabled. Mirrors [cowork] rag_enabled. Distinct
@@ -1499,6 +1524,19 @@ export interface MailProbeResult {
   ok: boolean;
   status: string;
   message: string;
+}
+
+// ManagedBrowserStatus reports the state of the 可控浏览器 — the persistent
+// attachable browser window (fixed CDP port 9222 + dedicated profile) that
+// browser automation can attach to via CoWorkSettingsView.browserAttachURL.
+export interface ManagedBrowserStatus {
+  running: boolean;
+  // Attach URL to save into browserAttachURL (e.g. "http://127.0.0.1:9222").
+  url: string;
+  browser: string;
+  profile: string;
+  alreadyRunning: boolean;
+  detail?: string;
 }
 
 // InboxItem is one row in the cowork dock's "邮件" tab: a trimmed-down mail

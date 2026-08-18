@@ -18,6 +18,14 @@ type Config struct {
 	MaxConnections  int  // concurrent C connections
 	LogLevel        string
 	AutoConfirm     bool // 联调：收到 exchange 立即自动确认（不等用户点允许）
+
+	// UDPKnock 单包敲门（M3 NAT 穿透辅助，默认关）：ICE 建连前 S 从 ICE
+	// 同一 UDP socket 向 C 的 srflx 公网映射发敲门包，提前打开 S 侧 NAT，
+	// 让 C 的 connectivity check 能进来。对 cone NAT 有效；双对称 NAT 无解
+	// （PROTOCOL §7）。KnockServer 是敲门依赖的远程 STUN 服务器——两端
+	// 靠它学到各自公网映射（srflx 候选），没有它敲门无目标可敲。
+	UDPKnock    bool
+	KnockServer string // e.g. "stun:stun.example.com:3478"；空 = 不追加
 }
 
 // DefaultConfig matches FAIRPEER_SPEC §5 defaults. The SignalURL placeholder

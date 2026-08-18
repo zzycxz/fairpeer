@@ -178,10 +178,16 @@ func mergeRemote(snap ProviderTemplate, v modelsDevVendor) ProviderTemplate {
 			}
 		}
 		sort.Strings(models)
-		t.Models = models
-		t.Vision = anyVision || snap.Vision // keep snapshot's vision flag if models.dev says no
-		if maxCtx > 0 {
-			t.ContextWindow = maxCtx
+		// models.dev lists image/video-generation and other non-chat models
+		// alongside chat models (e.g. xAI's grok-imagine-*) — drop them so the
+		// wizard only ever offers chat models.
+		models = chatProviderModels(models)
+		if len(models) > 0 {
+			t.Models = models
+			t.Vision = anyVision || snap.Vision // keep snapshot's vision flag if models.dev says no
+			if maxCtx > 0 {
+				t.ContextWindow = maxCtx
+			}
 		}
 	}
 	return t

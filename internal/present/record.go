@@ -399,6 +399,19 @@ func (r *Recorder) Records() []Record {
 	return out
 }
 
+// RewriteVersion returns the rewrite version the in-memory records are aligned
+// to (0 = never saved or seeded). Pair with Records for in-process readers that
+// need to detect a stale stream after a compaction, mirroring the sidecar's
+// header line.
+func (r *Recorder) RewriteVersion() int {
+	if r == nil {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.rewriteVersion
+}
+
 // Save writes the current records to path as JSONL (one Record per line), using
 // the tmp-file-then-rename pattern from Session.Save so a crash mid-write can't
 // leave a partial sidecar. An empty path is a no-op. The rewriteVersion is written

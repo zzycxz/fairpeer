@@ -59,6 +59,7 @@ var trackedVendors = map[string]string{
 	"xfyun":         "xfyun",
 	"anthropic":     "anthropic",
 	"openai":        "openai",
+	"xai":           "xai",
 
 	// Aggregators
 	"siliconflow-cn": "siliconflow",
@@ -73,8 +74,6 @@ var trackedVendors = map[string]string{
 	"stepfun-step-plan":      "stepfun-coding",
 	"stepfun-ai-step-plan":   "stepfun-coding",
 	"tencent-coding-plan":    "tencent-coding",
-	"minimax-cn-coding-plan": "minimax-coding",
-	"minimax-coding-plan":    "minimax-coding",
 }
 
 // ModelRegistry holds the in-memory vendor list + cache metadata.

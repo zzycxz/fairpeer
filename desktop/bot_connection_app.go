@@ -374,7 +374,7 @@ func (a *App) pollFeishuConnectionInstall(installID string, session *botInstallS
 	if domain == "lark" {
 		secretEnv = "LARK_BOT_APP_SECRET"
 	}
-	if err := upsertDotEnv(secretEnv, appSecret); err != nil {
+	if err := upsertCredential(secretEnv, appSecret); err != nil {
 		return BotInstallPollResult{Status: "error", Error: err.Error()}, nil
 	}
 	label := "飞书"

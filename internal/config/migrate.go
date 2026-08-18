@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/zzycxz/fairpeer/internal/secret"
 )
 
 // legacyConfig is the subset of the v0.x (~/.fairpeer/config.json) schema this
@@ -119,7 +121,7 @@ func MigrateLegacyIfNeeded() (*MigrationResult, error) {
 		return nil, fmt.Errorf("write %s: %w", dest, err)
 	}
 	if len(envLines) > 0 {
-		if err := writeCredentialsEnv(home, envLines); err != nil {
+		if err := writeCredentialsEnv(envLines); err != nil {
 			return res, fmt.Errorf("write credentials: %w", err)
 		}
 	}
@@ -135,7 +137,7 @@ func migrateLegacyTOMLIfNeeded(dest, home string) (*MigrationResult, error) {
 			continue
 		}
 		cfg := Default()
-		if err := mergeFile(cfg, src); err != nil {
+		if _, err := mergeFile(cfg, src); err != nil {
 			return nil, fmt.Errorf("parse legacy config %s: %w", src, err)
 		}
 		cfg.ConfigVersion = Default().ConfigVersion
@@ -271,52 +273,32 @@ func mergeEnv(base, overlay map[string]string) map[string]string {
 	return out
 }
 
-// writeCredentialsEnv merges lines into the fairpeer-owned global credentials
-// file (UserCredentialsPath, e.g. %AppData%\fairpeer\credentials), replacing any
-// existing assignment of the same key, and pins them into the current process env
-// so the just-built session resolves the key without a restart. Falls back to
-// ~/.env only when the user config dir can't be resolved — never a project .env,
-// so a migration keeps secrets out of the user's project tree.
-func writeCredentialsEnv(home string, lines []string) error {
-	path := UserCredentialsPath()
-	if path == "" {
-		path = filepath.Join(home, ".env")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	target := make(map[string]bool, len(lines))
+// writeCredentialsEnv persists migrated key lines into the encrypted secret
+// store (DPAPI on Windows, AES-GCM elsewhere) and pins them into the current
+// process env so the just-built session resolves the key without a restart.
+// (Historically this wrote the plaintext credentials file; the store keeps the
+// same env-var resolution while encrypting the values at rest.)
+//
+// It binds a fresh Store via secret.New(secret.DefaultPath()) rather than the
+// Default() singleton on purpose: DefaultPath re-resolves the user config dir
+// on every call, so tests that point AppData/HOME at a temp tree (t.Setenv)
+// write there instead of the developer's real store — the singleton would stay
+// bound to the first path it saw for the whole process.
+func writeCredentialsEnv(lines []string) error {
+	store := secret.New(secret.DefaultPath())
 	for _, l := range lines {
-		if k, _, ok := strings.Cut(l, "="); ok {
-			target[strings.TrimSpace(k)] = true
+		k, v, ok := strings.Cut(l, "=")
+		if !ok {
+			continue
 		}
-	}
-	var kept []string
-	if data, err := os.ReadFile(path); err == nil {
-		for _, raw := range strings.Split(string(data), "\n") {
-			check := strings.TrimPrefix(strings.TrimSpace(raw), "export ")
-			if k, _, ok := strings.Cut(check, "="); ok && target[strings.TrimSpace(k)] {
-				continue
-			}
-			kept = append(kept, raw)
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
 		}
-		if n := len(kept); n > 0 && kept[n-1] == "" {
-			kept = kept[:n-1]
+		if err := store.Set(k, v); err != nil {
+			return err
 		}
-	} else if !os.IsNotExist(err) {
-		return err
+		os.Setenv(k, v)
 	}
-	var b strings.Builder
-	for _, l := range kept {
-		b.WriteString(l)
-		b.WriteByte('\n')
-	}
-	for _, l := range lines {
-		b.WriteString(l)
-		b.WriteByte('\n')
-		if k, v, ok := strings.Cut(l, "="); ok {
-			os.Setenv(strings.TrimSpace(k), v)
-		}
-	}
-	return os.WriteFile(path, []byte(b.String()), 0o600)
+	return nil
 }

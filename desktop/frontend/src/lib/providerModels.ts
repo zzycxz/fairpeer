@@ -28,6 +28,8 @@ export function isLikelyChatModel(model: string): boolean {
     "rerank",
     "dall",
     "transcription",
+    "imagine", // image/video generation (grok-imagine-*)
+    "video",
   ]);
   return !lower.split(/[-_./:]+/).some((token) => nonChatTokens.has(token));
 }

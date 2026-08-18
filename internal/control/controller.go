@@ -2247,9 +2247,36 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	c.mu.Lock()
 	c.sessionPath = path
 	c.mu.Unlock()
+	// Seed the presentation recorder now, not at the first snapshot: without
+	// this, a PresentRecords/Save issued during the session's first ~30s (before
+	// the mid-turn autosave runs) would see only the new turn's records and
+	// silently drop every prior turn's rich fields and cards.
+	if c.present != nil {
+		if err := c.present.SeedFromPath(present.PresentPath(path)); err != nil {
+			slog.Warn("controller: present sidecar seed on resume", "err", err)
+		}
+	}
 	c.rebindCheckpoints(path)
 	c.maybeColdResumePrune(path)
 	c.restoreModeFromMeta(path)
+}
+
+// PresentRecords returns the presentation records for the current session from
+// the in-memory recorder, so in-process consumers see every event up to the
+// call — reading the sidecar on disk instead would lag by up to the mid-turn
+// autosave interval (30s) and drop the newest tool cards exactly when a
+// frontend rebuilds mid-run. The recorder is seeded from disk on first access,
+// so turns recorded before this controller was built are included. ok is false
+// when the presentation recorder is disabled (CLI/headless); callers fall back
+// to reading the sidecar file themselves.
+func (c *Controller) PresentRecords() (records []present.Record, rewriteVersion int, ok bool) {
+	if c.present == nil {
+		return nil, 0, false
+	}
+	if err := c.present.SeedFromPath(present.PresentPath(c.SessionPath())); err != nil {
+		slog.Warn("controller: present sidecar seed on read", "err", err)
+	}
+	return c.present.Records(), c.present.RewriteVersion(), true
 }
 
 // restoreModeFromMeta reads the plan mode and tool-approval stance from the
@@ -3419,6 +3446,56 @@ func (c *Controller) Profile() ProfileView {
 		return ProfileView{}
 	}
 	return ProfileView{Path: c.mem.ProfilePath(), Content: c.mem.ProfileContent()}
+}
+
+// ProfilePresetsView is the payload the workspace preference panel reads and
+// writes for the mode's selectable preference presets (cowork-presets.json
+// under cowork): the items, the id in use, and the file path for display.
+type ProfilePresetsView struct {
+	Active string                 `json:"active"`
+	Items  []memory.ProfilePreset `json:"items"`
+	Path   string                 `json:"path"`
+}
+
+// ProfilePresets reads the active mode's preference presets. A fresh install
+// returns the factory defaults without touching disk; the file is only written
+// on the first save.
+func (c *Controller) ProfilePresets() ProfilePresetsView {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.mem == nil {
+		return ProfilePresetsView{}
+	}
+	f := memory.LoadPresets(c.mem.UserDir, c.mem.ProfileName)
+	return ProfilePresetsView{Active: f.Active, Items: f.Items, Path: c.mem.PresetsPath()}
+}
+
+// SaveProfilePresets normalizes and writes the mode's preference presets, then
+// mirrors SaveDoc's session-effect mechanics: a turn-tail note hands the model
+// the newly selected preset so it applies this session, and refreshMemoryLocked
+// re-reads the portrait (discoverProfile folds the preset into the prefix next
+// session). Returns the file written.
+func (c *Controller) SaveProfilePresets(f memory.PresetFile) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.mem == nil {
+		return "", nil
+	}
+	written, err := memory.SavePresets(c.mem.UserDir, c.mem.ProfileName, f)
+	if err != nil {
+		return "", err
+	}
+	// Re-load to echo exactly what was normalized onto disk, not what was submitted.
+	saved := memory.LoadPresets(c.mem.UserDir, c.mem.ProfileName)
+	if p := saved.ActivePreset(); p != nil {
+		c.pendingMemory = append(c.pendingMemory,
+			"The user switched the active preference preset to \""+p.Name+"\". Follow it from now on:\n"+p.Content)
+	} else {
+		c.pendingMemory = append(c.pendingMemory,
+			"The user cleared the active preference preset — no preset-specific style directive applies from now on.")
+	}
+	c.refreshMemoryLocked()
+	return written, nil
 }
 
 // refreshMemoryLocked re-discovers memory from disk so a later Memory() reflects

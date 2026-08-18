@@ -9,33 +9,51 @@ import (
 	"github.com/zzycxz/fairpeer/internal/config"
 )
 
-// TestUpsertEnvFile proves a new key is appended, an existing key is replaced in
-// place, comments/other lines survive, and the process env is updated.
-func TestUpsertEnvFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "credentials")
-	if err := os.WriteFile(path, []byte("# comment\nFOO=old\nBAR=keep\n"), 0o644); err != nil {
+// TestUpsertCredential proves a secret lands in the encrypted store, is pinned
+// into the live env, and that a lingering plaintext copy in the legacy
+// credentials file is scrubbed so the encrypted entry is the only value on disk.
+func TestUpsertCredential(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	legacy := config.UserCredentialsPath()
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("# comment\nFOO=old\nBAR=keep\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := upsertEnvFile(path, "FOO", "new"); err != nil {
-		t.Fatalf("replace: %v", err)
+	if err := upsertCredential("FOO", "new"); err != nil {
+		t.Fatalf("upsert: %v", err)
 	}
-	if err := upsertEnvFile(path, "BAZ", "added"); err != nil {
-		t.Fatalf("append: %v", err)
+	if err := upsertCredential("BAZ", "added"); err != nil {
+		t.Fatalf("upsert new key: %v", err)
 	}
 
-	b, _ := os.ReadFile(path)
-	got := string(b)
-	for _, want := range []string{"# comment", "FOO=new", "BAR=keep", "BAZ=added"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing %q in:\n%s", want, got)
+	store := credentialStore()
+	for key, want := range map[string]string{"FOO": "new", "BAZ": "added"} {
+		got, ok, err := store.Get(key)
+		if err != nil || !ok {
+			t.Errorf("store Get(%s): ok=%v err=%v", key, ok, err)
+			continue
 		}
-	}
-	if strings.Contains(got, "FOO=old") {
-		t.Errorf("old value should be replaced:\n%s", got)
+		if got != want {
+			t.Errorf("store %s = %q, want %q", key, got, want)
+		}
 	}
 	if os.Getenv("FOO") != "new" || os.Getenv("BAZ") != "added" {
 		t.Errorf("process env not updated: FOO=%q BAZ=%q", os.Getenv("FOO"), os.Getenv("BAZ"))
+	}
+	// The scrubbed key must be gone from the legacy file while unrelated lines
+	// survive.
+	b, _ := os.ReadFile(legacy)
+	got := string(b)
+	if strings.Contains(got, "FOO=") {
+		t.Errorf("upserted key must be scrubbed from the legacy file:\n%s", got)
+	}
+	for _, want := range []string{"# comment", "BAR=keep"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in legacy file:\n%s", want, got)
+		}
 	}
 }
 
@@ -65,9 +83,50 @@ func TestRemoveEnvFileDeletesKeyAndUnsetsProcessEnv(t *testing.T) {
 	}
 }
 
+// TestRemoveCredential proves a secret is gone from the encrypted store, the
+// live env, and the legacy plaintext file.
+func TestRemoveCredential(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	legacy := config.UserCredentialsPath()
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("FOO=old\nBAR=keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := upsertCredential("FOO", "secret-value"); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	if err := removeCredential("FOO"); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if _, ok, err := credentialStore().Get("FOO"); ok || err != nil {
+		t.Errorf("store still holds FOO: ok=%v err=%v", ok, err)
+	}
+	if _, ok := os.LookupEnv("FOO"); ok {
+		t.Error("process env FOO should be unset")
+	}
+	b, _ := os.ReadFile(legacy)
+	if strings.Contains(string(b), "FOO=") {
+		t.Errorf("FOO must be scrubbed from the legacy file:\n%s", b)
+	}
+}
+
+// providerKeyCfg builds a config with one provider keyed on FAIRPEER_API_KEY —
+// Default() ships no built-in presets, so promotion tests declare their own.
+func providerKeyCfg() *config.Config {
+	cfg := config.Default()
+	cfg.Providers = []config.ProviderEntry{{
+		Name: "test-model", Kind: "openai", BaseURL: "https://example.invalid",
+		Model: "x", APIKeyEnv: "FAIRPEER_API_KEY",
+	}}
+	return cfg
+}
+
 // TestPromoteProviderKeysLiftsProjectKeyAndStripsHomeEnv proves a provider key
-// that resolves only from a project .env / ~/.env is copied into the global
-// credentials store, removed from ~/.env, and that unrelated env vars are ignored.
+// that resolves only from ~/.env is copied into the encrypted store, removed
+// from ~/.env, and that unrelated env vars are ignored.
 func TestPromoteProviderKeysLiftsProjectKeyAndStripsHomeEnv(t *testing.T) {
 	home := isolateDesktopUserDirs(t)
 	homeEnv := filepath.Join(home, ".env")
@@ -77,17 +136,13 @@ func TestPromoteProviderKeysLiftsProjectKeyAndStripsHomeEnv(t *testing.T) {
 	t.Setenv("FAIRPEER_API_KEY", "sk-test")
 	t.Setenv("NPM_TOKEN", "secret")
 
-	promoteProviderKeysToCredentials(config.Default())
+	promoteProviderKeysToCredentials(providerKeyCfg())
 
-	cred, err := os.ReadFile(config.UserCredentialsPath())
-	if err != nil {
-		t.Fatalf("credentials not written: %v", err)
+	if v, ok, err := credentialStore().Get("FAIRPEER_API_KEY"); err != nil || !ok || v != "sk-test" {
+		t.Errorf("provider key not promoted into encrypted store: ok=%v err=%v val=%q", ok, err, v)
 	}
-	if !strings.Contains(string(cred), "FAIRPEER_API_KEY=sk-test") {
-		t.Errorf("provider key not promoted to credentials:\n%s", cred)
-	}
-	if strings.Contains(string(cred), "NPM_TOKEN") {
-		t.Errorf("non-provider env var must not be promoted:\n%s", cred)
+	if _, ok, _ := credentialStore().Get("NPM_TOKEN"); ok {
+		t.Error("non-provider env var must not be promoted")
 	}
 
 	rest, _ := os.ReadFile(homeEnv)
@@ -100,14 +155,11 @@ func TestPromoteProviderKeysLiftsProjectKeyAndStripsHomeEnv(t *testing.T) {
 }
 
 // TestPromoteProviderKeysLeavesExistingCredentialsKey proves promotion never
-// overwrites a key already in the credentials store and leaves ~/.env untouched.
+// overwrites a key already in the encrypted store and leaves ~/.env untouched.
 func TestPromoteProviderKeysLeavesExistingCredentialsKey(t *testing.T) {
 	home := isolateDesktopUserDirs(t)
-	if err := os.MkdirAll(filepath.Dir(config.UserCredentialsPath()), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(config.UserCredentialsPath(), []byte("FAIRPEER_API_KEY=sk-global\n"), 0o600); err != nil {
-		t.Fatal(err)
+	if err := credentialStore().Set("FAIRPEER_API_KEY", "sk-global"); err != nil {
+		t.Fatalf("seed store: %v", err)
 	}
 	homeEnv := filepath.Join(home, ".env")
 	if err := os.WriteFile(homeEnv, []byte("FAIRPEER_API_KEY=sk-stale\n"), 0o600); err != nil {
@@ -115,13 +167,33 @@ func TestPromoteProviderKeysLeavesExistingCredentialsKey(t *testing.T) {
 	}
 	t.Setenv("FAIRPEER_API_KEY", "sk-global")
 
-	promoteProviderKeysToCredentials(config.Default())
+	promoteProviderKeysToCredentials(providerKeyCfg())
 
-	cred, _ := os.ReadFile(config.UserCredentialsPath())
-	if !strings.Contains(string(cred), "FAIRPEER_API_KEY=sk-global") {
-		t.Errorf("existing credentials key was changed:\n%s", cred)
+	if v, _, _ := credentialStore().Get("FAIRPEER_API_KEY"); v != "sk-global" {
+		t.Errorf("existing store key was changed: %q", v)
 	}
 	if data, err := os.Stat(homeEnv); err != nil || data.Size() == 0 {
-		t.Errorf("~/.env should be untouched when key already global, err=%v", err)
+		t.Errorf("~/.env should be untouched when key already stored, err=%v", err)
+	}
+}
+
+// TestMigrateCredentialsFileStartup proves the startup sweep lifts the legacy
+// plaintext credentials file into the encrypted store and removes it.
+func TestMigrateCredentialsFileStartup(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	if err := os.MkdirAll(filepath.Dir(config.UserCredentialsPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.UserCredentialsPath(), []byte("# legacy\nFAIRPEER_API_KEY=sk-mig\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	migrateCredentialsFile()
+
+	if v, ok, err := credentialStore().Get("FAIRPEER_API_KEY"); err != nil || !ok || v != "sk-mig" {
+		t.Errorf("key not migrated into encrypted store: ok=%v err=%v val=%q", ok, err, v)
+	}
+	if _, err := os.Stat(config.UserCredentialsPath()); !os.IsNotExist(err) {
+		t.Errorf("legacy credentials file kept after successful migration, stat err=%v", err)
 	}
 }

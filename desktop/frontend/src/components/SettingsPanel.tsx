@@ -20,7 +20,7 @@ import {
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
 import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
-import type { BotConnectionView, BotInstallStartResult, BotSettingsView, CoWorkSettingsView, HookConfigView, HooksSettingsView, MailProbeResult, NetworkView, ProviderTemplate, ProviderView, RegistryStatus, SettingsTab, SettingsView } from "../lib/types";
+import type { BotConnectionView, BotInstallStartResult, BotSettingsView, CoWorkSettingsView, HookConfigView, HooksSettingsView, MailProbeResult, ManagedBrowserStatus, NetworkView, ProviderTemplate, ProviderView, RegistryStatus, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
@@ -301,6 +301,38 @@ function MobileSection() {
   const [code, setCode] = useState("");
   const [status, setStatus] = useState<{ enabled?: boolean; connected?: boolean; signal_url?: string; pending?: { PairID: string; DevC: string; FpC: string }[] }>({});
   const [err, setErr] = useState("");
+  // 配对网卡：候选列表 + 当前钉死值（"" = 自动，默认路由出口）
+  const [nics, setNics] = useState<{ ip: string; name: string; label: string; isDefault: boolean; reason?: string }[]>([]);
+  const [pinned, setPinned] = useState("");
+  // UDP 单包敲门：开关 + 远程 STUN 服务器
+  const [knock, setKnock] = useState(false);
+  const [knockServer, setKnockServer] = useState("");
+
+  const refreshNics = async () => {
+    try {
+      const parsed = JSON.parse((await app.MobileBridgeListPairNics()) as string);
+      setNics(parsed.nics ?? []);
+      setPinned(parsed.pinned ?? "");
+    } catch { /* ignore */ }
+  };
+
+  const refreshKnock = async () => {
+    try {
+      const st = (await app.MobileBridgeStatus()) as { udp_knock?: boolean; knock_server?: string };
+      setKnock(!!st.udp_knock);
+      setKnockServer(st.knock_server ?? "");
+    } catch { /* ignore */ }
+  };
+
+  const saveKnock = async (enabled: boolean, server: string) => {
+    setKnock(enabled); setKnockServer(server);
+    try { await app.MobileBridgeSetKnock(enabled, server); } catch (e) { setErr(String((e as Error)?.message ?? e)); }
+  };
+
+  const setNic = async (ip: string) => {
+    setPinned(ip);
+    try { await app.MobileBridgeSetPairNic(ip); } catch (e) { setErr(String((e as Error)?.message ?? e)); }
+  };
 
   const startPairing = async () => {
     setPairing(true); setErr("");
@@ -320,6 +352,8 @@ function MobileSection() {
 
   useEffect(() => {
     refreshStatus();
+    refreshNics();
+    refreshKnock();
     const id = window.setInterval(refreshStatus, 2000);
     return () => window.clearInterval(id);
   }, []);
@@ -360,6 +394,57 @@ function MobileSection() {
           <p className="mobile-pair-panel__desc">
             用 linkpeer App 扫描左侧二维码，或在 App「我的 → 扫码配对」粘贴配对链接（桌面 linkpeer 可直接复制上方链接）。两端经云端信令敲门后建立 WebRTC P2P 直连，业务流量全程端到端加密（AES-256-GCM）。
           </p>
+          {nics.length > 0 && (() => {
+            const def = nics.find((n) => n.isDefault);
+            return (
+              <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>配对网卡</span>
+                <select
+                  value={pinned}
+                  onChange={(e) => setNic(e.target.value)}
+                  style={{ flex: 1, minWidth: 160, padding: "4px 8px", fontSize: 12 }}
+                >
+                  <option value="">
+                    自动{def ? `（默认 ${def.label} ${def.ip}${def.reason ? ` · ${def.reason}` : ""}）` : ""}
+                  </option>
+                  {nics.map((n) => (
+                    <option key={n.ip} value={n.ip}>
+                      {n.label} · {n.ip}{n.isDefault ? (n.reason ? `（默认 · ${n.reason}）` : "（默认）") : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          })()}
+          {pinned && (
+            <p className="mobile-pair-panel__desc" style={{ marginTop: 6 }}>
+              已钉死使用 {pinned} 生成配对地址；换网络后如连不上，改回「自动」重新配对。
+            </p>
+          )}
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(128,128,128,0.2)" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, cursor: "pointer" }}>
+              <input type="checkbox" checked={knock} onChange={(e) => saveKnock(e.target.checked, knockServer)} />
+              <span>UDP 单包敲门<span style={{ opacity: 0.6 }}>（NAT 穿透辅助，跨网/4G 连不上时开启）</span></span>
+            </label>
+            {knock && (
+              <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center" }}>
+                <input
+                  type="text"
+                  value={knockServer}
+                  onChange={(e) => setKnockServer(e.target.value)}
+                  onBlur={() => saveKnock(knock, knockServer.trim())}
+                  placeholder="远程 STUN 服务器，如 stun:stun.example.com:3478"
+                  style={{ flex: 1, padding: "4px 8px", fontSize: 12 }}
+                />
+              </div>
+            )}
+            {knock && (
+              <p className="mobile-pair-panel__desc" style={{ marginTop: 6 }}>
+                连接建立前，桌面端从 ICE 同一 UDP 端口向手机的公网映射发敲门包，提前打开 NAT；
+                对锥形 NAT 有效，双对称 NAT 无解（此时两端需同网段）。
+              </p>
+            )}
+          </div>
           {pending.length > 0 && (
             <div className="mobile-pair-panel__pending">
               <div className="mobile-pair-panel__pending-title">待确认的设备</div>
@@ -3097,7 +3182,8 @@ function AddProviderPanel({
   }
 
   if (mode === "builtin") {
-    const direct = templates.filter(t => !t.aggregator);
+    const locals = templates.filter(t => t.local);
+    const direct = templates.filter(t => !t.aggregator && !t.local);
     const aggregators = templates.filter(t => t.aggregator);
     return (
       <div className="provider-add-panel">
@@ -3107,7 +3193,17 @@ function AddProviderPanel({
             <VendorStep
               direct={direct}
               aggregators={aggregators}
-              onPick={(tpl) => { setSelected(tpl); setStep("key"); }}
+              locals={locals}
+              onPick={(tpl) => {
+                setSelected(tpl);
+                if (tpl.local) {
+                  // Keyless local endpoint (Ollama / llama.cpp) — no key step.
+                  setApiKey("");
+                  setStep("model");
+                } else {
+                  setStep("key");
+                }
+              }}
               syncing={syncing}
               onSync={async () => {
                 setSyncing(true);
@@ -4374,7 +4470,7 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
   const refs = allRefs(s);
   const [draft, setDraft] = useState<CoWorkSettingsView>(() => {
     const base = s.cowork ?? {
-      browserPath: "", embeddingModel: "", ragEnabled: null,
+      browserPath: "", browserAttachURL: "", embeddingModel: "", ragEnabled: null,
       pptActiveTemplate: "", pptTemplates: [], pptTemplateDir: "",
       smtpPassword: "", imapPassword: "", smtpPasswordSet: false, imapPasswordSet: false, detectedBrowser: "",
       screenshotEnabled: false, screenshotHotkey: "Ctrl+Shift+Alt+W", screenshotVlmModel: "", screenshotPrompt: "",
@@ -4594,6 +4690,40 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
 
   // Derive enabled state from draft values — empty = disabled.
   const browserOn = !!(draft.detectedBrowser || draft.browserPath);
+  // --- 可控浏览器 (managed attachable browser) ------------------------------
+  // The persistent browser window browser_auto can attach to. Start launches
+  // it on the fixed CDP port with a dedicated profile; the attach URL is then
+  // autofilled + saved so automation connects to it instead of spawning a
+  // fresh temp browser per task.
+  const [managedStarting, setManagedStarting] = useState(false);
+  const [managedStatus, setManagedStatus] = useState<ManagedBrowserStatus | null>(null);
+  // Probe once on mount so the status line reflects reality (e.g. a browser
+  // kept open from an earlier session shows as already running).
+  useEffect(() => {
+    let cancelled = false;
+    app.CheckManagedBrowser()
+      .then(st => { if (!cancelled && st.running) setManagedStatus(st); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const startManagedBrowser = async () => {
+    setManagedStarting(true);
+    try {
+      const st = await app.StartManagedBrowser();
+      setManagedStatus(st);
+      if (st.running) {
+        setDraft(d => {
+          const next = { ...d, browserAttachURL: st.url };
+          commitDraft(next);
+          return next;
+        });
+      }
+    } catch (e) {
+      setManagedStatus({ running: false, url: "http://127.0.0.1:9222", browser: "", profile: "", alreadyRunning: false, detail: String(e) });
+    } finally {
+      setManagedStarting(false);
+    }
+  };
   const pptOn = !!draft.pptActiveTemplate;
   // Mail is "on" when at least one account is configured (multi-account path)
   // or the legacy single-pair SMTP/IMAP has a host.
@@ -4743,6 +4873,49 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
                 </span>
               )}
             </div>
+            {/* 可控浏览器：常驻、可附着的浏览器窗口。填了 CDP 地址后，浏览器自动化
+                会附着到这个已打开的浏览器，而不是每次新开一个临时实例。 */}
+            <div className="set-input-browse" style={{ marginTop: 10 }}>
+              <input
+                className="mem-input set-grow"
+                placeholder={t("cowork.browserAttachURL")}
+                value={draft.browserAttachURL ?? ""}
+                onChange={e => setDraft({ ...draft, browserAttachURL: e.target.value })}
+                onBlur={commitCurrent}
+                onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              />
+              <button
+                type="button"
+                className="btn btn--small set-input-browse__btn"
+                disabled={busy || managedStarting}
+                onClick={startManagedBrowser}
+                title={t("cowork.managedBrowserStartTip")}
+              >
+                {managedStarting ? <Loader2 className="spinner" size={14} /> : t("cowork.startManagedBrowser")}
+              </button>
+              {managedStatus && (
+                <span
+                  className={`managed-dot ${managedStatus.running ? "managed-dot--ok" : "managed-dot--off"}`}
+                  title={managedStatus.running ? t("cowork.managedRunning", { browser: managedStatus.browser || "?" }) : managedStatus.detail || t("cowork.managedOff")}
+                />
+              )}
+            </div>
+            <div className="mem-hint" style={{ marginTop: 6, whiteSpace: "normal", lineHeight: 1.6 }}>
+              {t("cowork.browserAttachHint")}
+            </div>
+            {managedStatus?.running && (
+              <div className="mem-hint" style={{ marginTop: 4, whiteSpace: "normal", lineHeight: 1.6 }}>
+                {managedStatus.alreadyRunning
+                  ? t("cowork.managedAlready", { browser: managedStatus.browser || "?" })
+                  : t("cowork.managedStarted", { browser: managedStatus.browser || "?" })}
+                {managedStatus.profile ? ` · ${managedStatus.profile}` : ""}
+              </div>
+            )}
+            {!managedStatus?.running && managedStatus?.detail && (
+              <div className="mem-hint mem-hint--error" style={{ marginTop: 4, whiteSpace: "normal" }}>
+                {managedStatus.detail}
+              </div>
+            )}
           </div>
         </OptionalModule>
 

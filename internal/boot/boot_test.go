@@ -26,6 +26,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/plugin"
 	"github.com/zzycxz/fairpeer/internal/provider"
 	"github.com/zzycxz/fairpeer/internal/sandbox"
+	"github.com/zzycxz/fairpeer/internal/secret"
 	"github.com/zzycxz/fairpeer/internal/tool"
 	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 
@@ -1075,8 +1076,11 @@ api_key_env = "FAIRPEER_API_KEY"
 		t.Errorf("FAIRPEER_API_KEY not pinned into env after migration: %q", got)
 	}
 
-	if data, err := os.ReadFile(config.UserCredentialsPath()); err != nil || !strings.Contains(string(data), "FAIRPEER_API_KEY=sk-e2e") {
-		t.Errorf("credentials store missing migrated key: %q (err %v)", data, err)
+	if v, ok, err := secret.New(secret.DefaultPath()).Get("FAIRPEER_API_KEY"); err != nil || !ok || v != "sk-e2e" {
+		t.Errorf("encrypted store missing migrated key: ok=%v err=%v val=%q", ok, err, v)
+	}
+	if _, err := os.Stat(config.UserCredentialsPath()); !os.IsNotExist(err) {
+		t.Errorf("migration must not write a plaintext credentials file, stat err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".env")); !os.IsNotExist(err) {
 		t.Errorf("migration must not write the user's ~/.env, stat err=%v", err)

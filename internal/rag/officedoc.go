@@ -7,8 +7,10 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -19,6 +21,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	goruntime "runtime"
 
 	pdflib "github.com/ledongthuc/pdf"
 
@@ -436,4 +440,307 @@ func parseSlideText(data []byte) string {
 		}
 	}
 	return b.String()
+}
+
+// officePreviewExts are the rich-document extensions the preview pipeline
+// extracts. PDF is absent — callers serve those natively (iframe) rather than
+// as text. Legacy binary .doc/.ppt/.rtf have no pure-Go parser and no
+// markitdown support; they go straight to Office COM automation (readDOC /
+// readPPT), as does legacy .xls when markitdown can't parse it.
+var officePreviewExts = map[string]bool{
+	"docx": true, "doc": true, "rtf": true,
+	"xlsx": true, "xls": true,
+	"pptx": true, "ppt": true,
+	"epub": true, "msg": true,
+}
+
+// IsOfficeDoc reports whether the path's extension is a rich document the
+// preview pipeline can attempt to extract.
+func IsOfficeDoc(path string) bool {
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))
+	return officePreviewExts[ext]
+}
+
+// ReadDocumentForPreview extracts preview text for a rich document using the
+// same pipeline as RAG import: markitdown first (bounded by timeout; 0 uses
+// the docconv default), then the pure-Go parsers (docx/xlsx/pptx/epub), then
+// Office/WPS COM automation for the legacy binary formats (.doc/.rtf via
+// Word, .xls via Excel, .ppt via PowerPoint). Returns an error when nothing
+// could parse the file — callers fall back to their binary/external handling.
+func ReadDocumentForPreview(path string, timeout time.Duration) (string, error) {
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))
+	if !officePreviewExts[ext] {
+		return "", fmt.Errorf(".%s is not a previewable document", ext)
+	}
+	// Formats markitdown provably can't handle — skip the subprocess (and its
+	// ~1-2s Python startup) and go straight to the fallback parser.
+	if findDocConverterScript() != "" && ext != "doc" && ext != "ppt" && ext != "rtf" {
+		if text, err := convertWithMarkitdownTimeout(path, timeout); err == nil && len(text) > 0 {
+			return text, nil
+		}
+	}
+	switch ext {
+	case "docx":
+		return readDOCX(path)
+	case "xlsx":
+		return readXLSXAsText(path)
+	case "pptx":
+		return readPPTX(path)
+	case "epub":
+		return readEPUB(path)
+	case "doc", "rtf":
+		return readDOC(path, timeout)
+	case "xls":
+		return readXLS(path, timeout)
+	case "ppt":
+		return readPPT(path, timeout)
+	default:
+		return "", fmt.Errorf(".%s requires markitdown to parse properly", ext)
+	}
+}
+
+// convertWithMarkitdownTimeout is convertWithMarkitdown with a caller-bound
+// timeout (0 → docconv default). Preview callers pass a tight bound so a
+// hanging conversion can't pin the UI wait.
+func convertWithMarkitdownTimeout(path string, timeout time.Duration) (string, error) {
+	script := findDocConverterScript()
+	if script == "" {
+		return "", errors.New("doc_converter.py not found")
+	}
+	res, err := docconv.ConvertFile(script, path, timeout)
+	if err != nil {
+		return "", err
+	}
+	return res.Text, nil
+}
+
+// comOfficePath resolves an absolute path (Office COM servers resolve relative
+// paths against their own working directory, typically system32) and escapes
+// it for a single-quoted PowerShell string literal (double the quotes).
+func comOfficePath(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	return strings.ReplaceAll(path, "'", "''")
+}
+
+// runOfficeCOM executes a PowerShell COM-extraction script and decodes its
+// base64 stdout into normalized document text. Shared by the Word/Excel/
+// PowerPoint extractors: base64 transport keeps CJK independent of console
+// code pages, and the timeout bounds a stuck Office process. Non-Windows
+// platforms — or a machine without the matching Office app — get an error and
+// the caller falls back to its "open externally" handling.
+func runOfficeCOM(script string, timeout time.Duration) (string, error) {
+	if goruntime.GOOS != "windows" {
+		return "", fmt.Errorf("office COM extraction requires Windows")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, proc.ResolvePowerShell(), "-NoProfile", "-NonInteractive", "-Command", script)
+	proc.HideWindow(cmd)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("office com: timed out after %s", timeout)
+		}
+		if stderr.Len() > 0 {
+			return "", fmt.Errorf("office com: %s", strings.TrimSpace(stderr.String()))
+		}
+		return "", fmt.Errorf("office com: %w", err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(stdout.String()))
+	if err != nil {
+		return "", fmt.Errorf("office com output: %w", err)
+	}
+	return normalizeDocText(string(raw)), nil
+}
+
+// readDOC extracts text from a legacy binary .doc (or .rtf) via Word/WPS COM
+// automation. The document opens read-only and is never written back.
+func readDOC(path string, timeout time.Duration) (string, error) {
+	script := fmt.Sprintf(`$ErrorActionPreference = 'Stop'
+$path = '%s'
+$app = $null
+foreach ($progid in @('Word.Application', 'KWPS.Application', 'wps.Application')) {
+  try { $app = New-Object -ComObject $progid; break } catch {}
+}
+if ($null -eq $app) { throw 'no Word-compatible application (Word/WPS) installed' }
+try {
+  $app.Visible = $false
+  $doc = $app.Documents.Open($path, $false, $true)
+  try {
+    $text = $doc.Content.Text
+  } finally {
+    $doc.Close($false)
+  }
+  [Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($text)))
+} finally {
+  $app.Quit()
+}
+`, comOfficePath(path))
+	return runOfficeCOM(script, timeout)
+}
+
+// readXLS extracts a legacy binary .xls as CSV text via Excel/WPS COM
+// automation. UsedRange.Value2 is marshaled in one call (fast even for large
+// sheets); sheets are separated by a "[sheet] name" header line.
+func readXLS(path string, timeout time.Duration) (string, error) {
+	script := fmt.Sprintf(`$ErrorActionPreference = 'Stop'
+$path = '%s'
+$app = $null
+foreach ($progid in @('Excel.Application', 'Ket.Application', 'et.Application')) {
+  try { $app = New-Object -ComObject $progid; break } catch {}
+}
+if ($null -eq $app) { throw 'no Excel-compatible application (Excel/WPS) installed' }
+try {
+  $app.Visible = $false
+  $app.DisplayAlerts = $false
+  $wb = $app.Workbooks.Open($path, 0, $true)
+  try {
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($ws in $wb.Worksheets) {
+      $lines.Add(('[sheet] ' + $ws.Name))
+      $used = $ws.UsedRange
+      $rows = $used.Rows.Count
+      $cols = $used.Columns.Count
+      if ($rows -lt 1 -or $cols -lt 1) { continue }
+      $vals = $used.Value2
+      if ($null -eq $vals) { continue }
+      if ($rows -eq 1 -and $cols -eq 1) {
+        $lines.Add(('' + $vals))
+        continue
+      }
+      for ($r = 1; $r -le $rows; $r++) {
+        $cells = New-Object System.Collections.Generic.List[string]
+        for ($c = 1; $c -le $cols; $c++) {
+          $v = $vals[$r, $c]
+          if ($null -eq $v) {
+            $cells.Add('')
+          } elseif ($v -is [double]) {
+            if ($v -eq [math]::Floor($v)) { $cells.Add([string][int64]$v) } else { $cells.Add([string]$v) }
+          } else {
+            $cells.Add(('"' + ('' + $v).Replace('"', '""') + '"'))
+          }
+        }
+        $lines.Add(($cells -join ','))
+      }
+    }
+    $nl = [string][char]10
+    $text = ($lines -join $nl)
+    [Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($text)))
+  } finally {
+    $wb.Close($false)
+  }
+} finally {
+  $app.Quit()
+}
+`, comOfficePath(path))
+	return runOfficeCOM(script, timeout)
+}
+
+// readPPT extracts text from a legacy binary .ppt via PowerPoint/WPS COM
+// automation: every slide's text-frame shapes plus its speaker notes,
+// prefixed by a "[slide n]" header line. The presentation opens read-only
+// with no window.
+func readPPT(path string, timeout time.Duration) (string, error) {
+	script := fmt.Sprintf(`$ErrorActionPreference = 'Stop'
+$path = '%s'
+$app = $null
+foreach ($progid in @('PowerPoint.Application', 'KWPP.Application', 'wpp.Application')) {
+  try { $app = New-Object -ComObject $progid; break } catch {}
+}
+if ($null -eq $app) { throw 'no PowerPoint-compatible application (PowerPoint/WPS) installed' }
+try {
+  $pres = $app.Presentations.Open($path, $true, $false, $false)
+  try {
+    $lines = New-Object System.Collections.Generic.List[string]
+    $i = 0
+    foreach ($slide in $pres.Slides) {
+      $i++
+      $lines.Add('')
+      $lines.Add(('[slide ' + $i + ']'))
+      foreach ($shape in $slide.Shapes) {
+        try {
+          if ($shape.HasTextFrame -and $shape.TextFrame.HasText) {
+            $lines.Add($shape.TextFrame.TextRange.Text)
+          }
+        } catch {}
+      }
+      try {
+        $nt = $slide.NotesPage.Shapes.Placeholders.Item(2).TextFrame.TextRange.Text
+        if ($nt) { $lines.Add('[notes] ' + $nt) }
+      } catch {}
+    }
+    $nl = [string][char]10
+    $text = ($lines -join $nl)
+    [Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($text)))
+  } finally {
+    $pres.Close()
+  }
+} finally {
+  $app.Quit()
+}
+`, comOfficePath(path))
+	return runOfficeCOM(script, timeout)
+}
+
+// readEPUB is the pure-Go fallback for .epub (markitdown parses it better
+// when present): the epub is a zip of XHTML chapters; each entry is
+// tag-stripped and space-joined. Entries are processed in name order — the
+// OPF spine order isn't parsed, which only matters for oddly-named chapters.
+func readEPUB(path string) (string, error) {
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		return "", fmt.Errorf("open epub (is it a valid .epub?): %w", err)
+	}
+	defer zr.Close()
+	var names []string
+	for _, f := range zr.File {
+		lower := strings.ToLower(f.Name)
+		if strings.HasSuffix(lower, ".xhtml") || strings.HasSuffix(lower, ".html") || strings.HasSuffix(lower, ".htm") {
+			names = append(names, f.Name)
+		}
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	for _, name := range names {
+		for _, f := range zr.File {
+			if f.Name != name {
+				continue
+			}
+			rc, err := f.Open()
+			if err != nil {
+				continue
+			}
+			data, err := io.ReadAll(io.LimitReader(rc, 2<<20))
+			rc.Close()
+			if err != nil {
+				continue
+			}
+			if text := strings.TrimSpace(stripHTML(string(data))); text != "" {
+				b.WriteString(text)
+				b.WriteString("\n\n")
+			}
+		}
+	}
+	out := strings.TrimSpace(b.String())
+	if out == "" {
+		return "", fmt.Errorf("epub has no readable html content")
+	}
+	return out, nil
+}
+
+// normalizeDocText converts Word's Content.Text control characters into
+// plain text: \r paragraph marks → \n, \x07 cell/row ends → tab/newline,
+// \x0b manual line breaks and \x0c page breaks → \n.
+func normalizeDocText(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\x07\r", "\n")
+	s = strings.ReplaceAll(s, "\x07", "\t")
+	s = strings.ReplaceAll(s, "\x0b", "\n")
+	s = strings.ReplaceAll(s, "\x0c", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	return strings.TrimSpace(s)
 }

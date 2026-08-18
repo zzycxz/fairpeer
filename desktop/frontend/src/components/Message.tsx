@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageS
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
 import { ProcessBrainIcon } from "./ProcessCard";
+import { openAttachmentViewer } from "./AttachmentViewer";
 import { parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
@@ -129,7 +130,20 @@ export function UserMessage({
         {orderedAttachments.length > 0 && (
           <div className="msg-attachments" aria-label={t("msg.attachments")}>
             {orderedAttachments.map((attachment, index) => (
-              <div className={`msg-attachment msg-attachment--${attachment.kind}`} key={`${attachment.path}:${index}`} title={attachment.path}>
+              <button
+                type="button"
+                className={`msg-attachment msg-attachment--${attachment.kind}`}
+                key={`${attachment.path}:${index}`}
+                title={t("msg.previewAttachment", { name: attachment.name })}
+                onClick={() =>
+                  openAttachmentViewer({
+                    path: attachment.path,
+                    name: attachment.name,
+                    kind: attachment.kind,
+                    source: attachment.source,
+                  })
+                }
+              >
                 <span className={`msg-attachment__icon msg-attachment__icon--${attachment.kind}`} aria-hidden="true">
                   {attachment.kind === "image" && imagePreviews[attachment.path] ? <img src={imagePreviews[attachment.path]} alt="" draggable={false} /> : attachmentIcon(attachment.kind)}
                 </span>
@@ -141,7 +155,7 @@ export function UserMessage({
                       : `${attachment.ext || t("msg.fileAttachment")} · ${attachment.source === "workspace" ? t("msg.workspaceReference") : attachment.kind === "image" ? t("msg.imageAttachment") : t("msg.fileAttachment")}`}
                   </span>
                 </span>
-              </div>
+              </button>
             ))}
           </div>
         )}

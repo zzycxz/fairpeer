@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zzycxz/fairpeer/internal/secret"
 )
 
 // legacyHome points HOME / config-dir / .env resolution at a fresh temp tree and
@@ -31,6 +33,7 @@ func writeLegacy(t *testing.T, src, body string) {
 
 func TestMigrateImportsKeyPluginsAndLang(t *testing.T) {
 	src, dest, home := legacyHome(t)
+	t.Setenv("FAIRPEER_API_KEY", "") // isolate from ambient env; migration pins the real value
 	writeLegacy(t, src, `{
 		"apiKey": "sk-legacy-123",
 		"lang": "zh",
@@ -51,12 +54,16 @@ func TestMigrateImportsKeyPluginsAndLang(t *testing.T) {
 		t.Errorf("result = %+v, want KeyToEnv=true Plugins=2", res)
 	}
 
-	envData, err := os.ReadFile(UserCredentialsPath())
-	if err != nil {
-		t.Fatalf("read credentials: %v", err)
+	// The key must land in the encrypted store (and the live env), never in a
+	// plaintext credentials file.
+	if got := os.Getenv("FAIRPEER_API_KEY"); got != "sk-legacy-123" {
+		t.Errorf("env FAIRPEER_API_KEY = %q, want migrated key pinned in-process", got)
 	}
-	if !strings.Contains(string(envData), "FAIRPEER_API_KEY=sk-legacy-123") {
-		t.Errorf("credentials missing key: %q", envData)
+	if v, ok, err := secret.New(secret.DefaultPath()).Get("FAIRPEER_API_KEY"); err != nil || !ok || v != "sk-legacy-123" {
+		t.Errorf("encrypted store missing key: ok=%v err=%v val=%q", ok, err, v)
+	}
+	if _, err := os.Stat(UserCredentialsPath()); !os.IsNotExist(err) {
+		t.Errorf("migration must not write a plaintext credentials file, stat err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".env")); !os.IsNotExist(err) {
 		t.Errorf("migration must not write the user's ~/.env, stat err=%v", err)
@@ -264,6 +271,7 @@ func TestMigrateNoLegacyIsNoop(t *testing.T) {
 func TestMigrateToleratesUTF8BOM(t *testing.T) {
 	src, _, _ := legacyHome(t)
 	writeLegacy(t, src, "\ufeff"+`{"apiKey":"sk-bom"}`)
+	t.Setenv("FAIRPEER_API_KEY", "")
 	res, err := MigrateLegacyIfNeeded()
 	if err != nil {
 		t.Fatalf("a BOM-prefixed legacy config must still parse: %v", err)
@@ -271,9 +279,8 @@ func TestMigrateToleratesUTF8BOM(t *testing.T) {
 	if res == nil || !res.KeyToEnv {
 		t.Fatalf("BOM-prefixed config did not migrate: %+v", res)
 	}
-	data, _ := os.ReadFile(UserCredentialsPath())
-	if !strings.Contains(string(data), "FAIRPEER_API_KEY=sk-bom") {
-		t.Errorf("key not migrated from BOM-prefixed config: %q", data)
+	if v, ok, err := secret.New(secret.DefaultPath()).Get("FAIRPEER_API_KEY"); err != nil || !ok || v != "sk-bom" {
+		t.Errorf("key not migrated from BOM-prefixed config into encrypted store: ok=%v err=%v val=%q", ok, err, v)
 	}
 }
 

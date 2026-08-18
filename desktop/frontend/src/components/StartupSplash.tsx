@@ -3,7 +3,7 @@ import logoSymbol from "../assets/logo-symbol.png";
 import { useT } from "../lib/i18n";
 
 const SPLASH_FLAG = "fairpeer.splash.shown";
-const MIN_VISIBLE_MS = 1400;
+const MIN_VISIBLE_MS = 600;
 const FADE_OUT_MS = 420;
 const MAX_HOLD_MS = 6000;
 

@@ -241,6 +241,11 @@ var globalProfileFiles = []string{"user.md", "memory.md"}
 // model sees. Missing files are silently skipped — a fresh install has no
 // portrait, and that's fine.
 //
+// After the portrait files comes the mode's selected preference preset (see
+// presets.go), rendered under its own heading: the preset is the user's
+// explicit current choice from the workspace panel, deliberately distinct from
+// the dream-maintained portrait, so both inject together.
+//
 // The combined result is hard-capped at profileMaxChars: if a portrait file has
 // grown beyond the budget, injection is truncated to the cap with a trailing
 // marker rather than bloating every turn. The full file is still on disk for
@@ -266,6 +271,15 @@ func discoverProfile(userDir, profile string) string {
 			}
 			b.WriteString(body)
 		}
+	}
+	// The selected preset rides last: it is the freshest, most deliberate
+	// guidance (just switched from the panel), so it closes the portrait and
+	// stays inside the shared profileMaxChars budget below.
+	if p := LoadPresets(userDir, profile).ActivePreset(); p != nil && p.Content != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		fmt.Fprintf(&b, "# 当前使用的偏好模板：%s\n\n%s", p.Name, p.Content)
 	}
 	out := strings.TrimSpace(b.String())
 	if r := []rune(out); len(r) > profileMaxChars {

@@ -181,7 +181,7 @@ export function CoWorkLayout({
 
           <section className="cowork-sidebar__group" style={{ marginBottom: '0px', marginTop: 'auto' }}>
             <button
-              className="cowork-sidebar__item"
+              className={`cowork-sidebar__item ${preferenceOpen ? "cowork-sidebar__item--active" : ""}`}
               onClick={() => setPreferenceOpen(true)}
             >
               <SlidersHorizontal size={14} />
@@ -301,7 +301,7 @@ export function CoWorkLayout({
       )}
 
       {preferenceOpen && (
-        <PreferencePanel onClose={() => setPreferenceOpen(false)} />
+        <PreferencePanel mode="cowork" onClose={() => setPreferenceOpen(false)} />
       )}
     </div>
   );

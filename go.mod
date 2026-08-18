@@ -19,9 +19,11 @@ require (
 	github.com/emersion/go-message v0.18.2
 	github.com/go-ole/go-ole v1.3.0
 	github.com/gorilla/websocket v1.5.0
+	github.com/huin/goupnp v1.3.0
 	github.com/larksuite/oapi-sdk-go/v3 v3.9.4
 	github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80
 	github.com/mattn/go-runewidth v0.0.24
+	github.com/pion/ice/v4 v4.4.0
 	github.com/pion/webrtc/v4 v4.2.18
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/xuri/excelize/v2 v2.11.0
@@ -55,14 +57,12 @@ require (
 	github.com/gobwas/ws v1.4.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pion/datachannel v1.6.2 // indirect
 	github.com/pion/dtls/v3 v3.1.5 // indirect
-	github.com/pion/ice/v4 v4.4.0 // indirect
 	github.com/pion/interceptor v0.1.47 // indirect
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/mdns/v2 v2.1.0 // indirect

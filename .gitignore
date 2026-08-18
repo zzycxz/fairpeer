@@ -92,3 +92,4 @@ runs_latest.json
 *_output*.xml
 *_struct.json
 *.txt.template
+%TEMP%/

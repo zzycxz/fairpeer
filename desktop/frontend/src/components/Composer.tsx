@@ -19,6 +19,7 @@ import {
 import { SlashMenu } from "./SlashMenu";
 import { ArgMenu } from "./ArgMenu";
 import { VirtualMenu } from "./VirtualMenu";
+import { openAttachmentViewer } from "./AttachmentViewer";
 import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
 import { EffortSwitcher } from "./EffortSwitcher";
 import { KnowledgeSwitcher } from "./KnowledgeSwitcher";
@@ -1884,7 +1885,20 @@ export function Composer({
               key={a.path}
             >
               <Tooltip label={a.path}>
-                <span className="composer-context__label">
+                <button
+                  type="button"
+                  className="composer-context__label composer-context__label--button"
+                  title={t("msg.previewAttachment", { name: attachmentName(a) })}
+                  onClick={() =>
+                    openAttachmentViewer({
+                      path: a.path,
+                      name: attachmentName(a),
+                      kind: a.previewUrl ? "image" : "file",
+                      source: "attachment",
+                      previewUrl: a.previewUrl,
+                    })
+                  }
+                >
                   {a.previewUrl ? (
                     <span className="composer-context__thumb">
                       <img src={a.previewUrl} alt="" draggable={false} />
@@ -1900,7 +1914,7 @@ export function Composer({
                       </span>
                     </>
                   )}
-                </span>
+                </button>
               </Tooltip>
               <Tooltip label={t("composer.removeImage")} className="composer-context__remove-trigger">
                 <button

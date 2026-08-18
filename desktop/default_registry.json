@@ -363,5 +363,52 @@
     "codingOnly": true,
     "docUrl": "https://console.xfyun.cn/services/bm4",
     "models": ["astron-code-latest"]
+  },
+  {
+    "name": "xai",
+    "displayName": "xAI (Grok)",
+    "kind": "openai",
+    "baseUrl": "https://api.x.ai/v1",
+    "apiKeyEnv": "XAI_API_KEY",
+    "defaultModel": "grok-4.6",
+    "fastModel": "grok-4.5",
+    "visionModel": "grok-4.6",
+    "vision": true,
+    "contextWindow": 500000,
+    "category": "direct",
+    "docUrl": "https://console.x.ai/",
+    "models": ["grok-4.6", "grok-4.5", "grok-4.3"]
+  },
+  {
+    "name": "ollama",
+    "displayName": "Ollama (本地)",
+    "kind": "openai",
+    "baseUrl": "http://127.0.0.1:11434/v1",
+    "apiKeyEnv": "",
+    "defaultModel": "qwen3-coder:30b",
+    "fastModel": "qwen3:8b",
+    "visionModel": "qwen3-coder:30b",
+    "vision": false,
+    "contextWindow": 8192,
+    "category": "local",
+    "local": true,
+    "docUrl": "https://ollama.com/download",
+    "models": ["qwen3-coder:30b", "qwen3:8b", "deepseek-r1:32b", "llama3.3:70b"]
+  },
+  {
+    "name": "llamacpp",
+    "displayName": "llama.cpp (本地)",
+    "kind": "openai",
+    "baseUrl": "http://127.0.0.1:8080/v1",
+    "apiKeyEnv": "",
+    "defaultModel": "local-model",
+    "fastModel": "local-model",
+    "visionModel": "local-model",
+    "vision": false,
+    "contextWindow": 8192,
+    "category": "local",
+    "local": true,
+    "docUrl": "https://github.com/ggml-org/llama.cpp/tree/master/tools/server",
+    "models": ["local-model"]
   }
 ]

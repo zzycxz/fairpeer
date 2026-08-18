@@ -66,6 +66,29 @@ func TestIsLikelyChatModel_DoesNotFilterVoiceAlone(t *testing.T) {
 	}
 }
 
+func TestIsLikelyChatModel_FiltersImageVideoGeneration(t *testing.T) {
+	// Real-world samples from models.dev's xai entry (grok-imagine-*) plus
+	// common video-generation naming; vision-capable CHAT models (vl/omni/4o)
+	// must stay.
+	for _, model := range []string{
+		"grok-imagine-video", "grok-imagine-video-1.5",
+		"grok-imagine-image", "grok-imagine-image-2.0",
+		"grok-imagine-image-quality",
+		"sora-2-video",
+	} {
+		if IsLikelyChatModel(model) {
+			t.Errorf("IsLikelyChatModel(%q) = true, want false", model)
+		}
+	}
+	for _, model := range []string{
+		"grok-4.6", "grok-4.3", "qwen3-vl-plus", "gpt-4o", "test-model-omni",
+	} {
+		if !IsLikelyChatModel(model) {
+			t.Errorf("IsLikelyChatModel(%q) = false, want true", model)
+		}
+	}
+}
+
 // ── ModelList / ChatModelList ──────────────────────────────────────────────────
 
 func TestModelList_ReturnsRawList(t *testing.T) {

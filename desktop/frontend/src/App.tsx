@@ -50,6 +50,7 @@ import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
 import { StartupSplash, shouldShowStartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
+import { AttachmentViewer } from "./components/AttachmentViewer";
 import { AppChrome } from "./components/AppChrome";
 import { ProjectTree } from "./components/ProjectTree";
 import { CopyButton } from "./components/CopyButton";
@@ -769,7 +770,12 @@ export default function App() {
   // emitted after a SwitchProfile rebuild. When true the standard three-pane body
   // is hidden (via the app--cowork class) and a CoWorkLayout is rendered instead.
   const [coworkActive, setCoworkActive] = useState(false);
-  const [startupSplashVisible, setStartupSplashVisible] = useState<boolean>(() => shouldShowStartupSplash());
+  // Skip the startup splash in the browser dev mock (no Wails runtime to wait
+  // for) — only real desktop builds show it. Eliminates the 1.4–6s "stuck"
+  // splash devs see when iterating in a browser.
+  const [startupSplashVisible, setStartupSplashVisible] = useState<boolean>(() =>
+    typeof window !== "undefined" && window.runtime ? shouldShowStartupSplash() : false,
+  );
   // null until the mount probe resolves; true shows the overlay. Probed once —
   // clearing the key mid-session is the Settings panel's job, not the gate's.
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
@@ -1747,10 +1753,13 @@ export default function App() {
   // tab and sets it active on the backend). Without this, the frontend's
   // activeTabId lags behind the backend, so the new expert tab appears in the
   // TabBar but isn't selected — the user still sees the old tab.
+  // Non-destructive sync: this event also fires when SWITCHING chats
+  // (handleOpenTopic), where the tab that is active at dispatch time may be
+  // mid-stream — resetting it there would swallow its in-flight turn.
   useEffect(() => {
     const handler = () => {
       void refreshTabMetas();
-      void syncActiveTab(true);
+      void syncActiveTab(false);
     };
     window.addEventListener("cowork:reset-panel", handler);
     return () => window.removeEventListener("cowork:reset-panel", handler);
@@ -2586,7 +2595,10 @@ export default function App() {
     setProjectRevision((value) => value + 1);
     const tabs = await refreshTabMetas();
     if (activeTabId && !tabs.some((tab) => tab.id === activeTabId)) {
-      await syncActiveTab(true);
+      // The active tab vanished (topic deleted / closed server-side); the
+      // backend promoted another tab. Reconcile it — the promoted tab may be
+      // mid-stream with valid in-memory state that a reset would swallow.
+      await syncActiveTab(false);
     }
   }, [activeTabId, refreshTabMetas, syncActiveTab]);
 
@@ -2797,7 +2809,8 @@ export default function App() {
   const mainNode = (
     <main className="main">
       {preferenceOpen && (
-        <PreferencePanel 
+        <PreferencePanel
+          mode="dev"
           title={t("preference.title") || "编码偏好"}
           onClose={() => setPreferenceOpen(false)}
         />
@@ -2940,9 +2953,9 @@ export default function App() {
           // ExpertSessionView (not the sidebar ExpertPanel).
           window.dispatchEvent(new CustomEvent("cowork:reset-panel"));
           await refreshTabMetas();
-          await syncActiveTab(true);
+          await syncActiveTab(false);
           if (meta?.id) {
-            setTimeout(() => { void refreshTabMetas(); void syncActiveTab(true); }, 1000);
+            setTimeout(() => { void refreshTabMetas(); void syncActiveTab(false); }, 1000);
           }
         } catch { /* ignore */ }
       }}
@@ -3284,6 +3297,8 @@ export default function App() {
       )}
 
       {needsOnboarding && <OnboardingOverlay onComplete={() => setNeedsOnboarding(false)} />}
+
+      <AttachmentViewer />
     </div>
     </ShellExpandProvider>
   );

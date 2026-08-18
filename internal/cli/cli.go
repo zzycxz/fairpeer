@@ -16,7 +16,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
@@ -30,6 +29,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/notify"
 	"github.com/zzycxz/fairpeer/internal/provider"
 	"github.com/zzycxz/fairpeer/internal/provider/openai"
+	"github.com/zzycxz/fairpeer/internal/secret"
 	"github.com/zzycxz/fairpeer/internal/serve"
 	"time"
 
@@ -419,7 +419,7 @@ func chatREPL(args []string) int {
 		// With a config present, fall through to the descriptive error — re-running
 		// the wizard would overwrite the user's config (#2856).
 		fmt.Fprintln(os.Stderr, i18n.M.ReconfigureOnUnknownModel)
-		if rc := interactiveSetup(defaultConfigTarget(), defaultEnvTarget()); rc != 0 {
+		if rc := interactiveSetup(defaultConfigTarget()); rc != 0 {
 			return rc
 		}
 		ctrl, err = setup(ctx, *model, *maxSteps, false, sink)
@@ -567,11 +567,11 @@ func reserveNativeScrollbackFrame(w io.Writer, rows int) {
 }
 
 // setupTargets is where the wizard writes: the TOML config and the secrets file.
-// Keys always go to the fairpeer-owned global credentials file so they never land
-// in a project's own .env; only the config location is project-local under --local.
+// Keys always go to the fairpeer-owned encrypted secret store so they never land
+// in a project's own .env or any plaintext file; only the config location is
+// project-local under --local.
 type setupTargets struct {
 	config string
-	env    string
 }
 
 // defaultConfigTarget is the user-global config file, falling back to a
@@ -583,20 +583,11 @@ func defaultConfigTarget() string {
 	return "fairpeer.toml"
 }
 
-// defaultEnvTarget is the fairpeer-owned global credentials file, falling back to
-// a project-local .env only when the user config dir can't be resolved.
-func defaultEnvTarget() string {
-	if p := config.UserCredentialsPath(); p != "" {
-		return p
-	}
-	return ".env"
-}
-
-// resolveSetupTargets picks where `fairpeer setup` writes. Keys always go to the
-// global env. The config goes to the user-global dir by default, to ./fairpeer.toml
-// under --local, or to an explicit path argument when given.
+// resolveSetupTargets picks where `fairpeer setup` writes. The config goes to the
+// user-global dir by default, to ./fairpeer.toml under --local, or to an explicit
+// path argument when given. API keys always go to the encrypted secret store.
 func resolveSetupTargets(args []string) setupTargets {
-	t := setupTargets{config: defaultConfigTarget(), env: defaultEnvTarget()}
+	t := setupTargets{config: defaultConfigTarget()}
 	for _, a := range args {
 		switch a {
 		case "--local", "-l":
@@ -639,7 +630,7 @@ func setupConfig(args []string) int {
 
 	// Interactive wizard on a TTY; fall back to the annotated default when piped.
 	if isInteractive() {
-		rc := interactiveSetup(t.config, t.env)
+		rc := interactiveSetup(t.config)
 		if rc == 0 {
 			fmt.Printf(i18n.M.TryHintFmt+"\n", bold("fairpeer chat"))
 		}
@@ -677,13 +668,14 @@ func initHint() int {
 }
 
 // interactiveSetup runs the setup wizard, then writes the config to configPath
-// and any entered API keys to envPath (the fairpeer-owned global .env, never a
-// project's own). The wizard is intentionally minimal: pick language, pick
-// provider, enter API keys. Language is asked first so every subsequent prompt
-// is already in the user's language even when env auto-detection got it wrong.
-// Two-model collaboration is left as a manual config edit (planner_model) so
-// first-run never confronts newcomers with advanced choices.
-func interactiveSetup(configPath, envPath string) int {
+// and any entered API keys to the encrypted secret store — never a plaintext
+// file, and never a project's own .env. The wizard is intentionally minimal: pick
+// language, pick provider, enter API keys. Language is asked first so every
+// subsequent prompt is already in the user's language even when env
+// auto-detection got it wrong. Two-model collaboration is left to a manual config
+// edit (planner_model) so first-run never confronts newcomers with advanced
+// choices.
+func interactiveSetup(configPath string) int {
 	// Seed from the existing config when reconfiguring, so a re-run to fix a key
 	// preserves the user's providers / agent settings instead of resetting to
 	// defaults. First run (no file) falls back to the built-in defaults.
@@ -741,11 +733,11 @@ func interactiveSetup(configPath, envPath string) int {
 	fmt.Printf("\n%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(configPath)))
 
 	if len(envLines) > 0 {
-		if err := appendEnv(envPath, envLines); err != nil {
+		if err := storeSecretLines(secret.Default(), envLines); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.WriteEnvErr, err)
 			return 1
 		}
-		fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(envPath)))
+		fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(secret.DefaultPath())))
 	}
 
 	fmt.Printf("\n%s %s\n", accent("◆"), i18n.M.SetupComplete)
@@ -1385,10 +1377,10 @@ func withBuiltinFamilies(providers []config.ProviderEntry) []config.ProviderEntr
 
 // promptMissingKeys re-runs the wizard's key-entry step for model refs that are
 // actually active and whose api_key_env is unset. Newly entered values are
-// appended to the fairpeer-owned global .env so the chat session that follows
-// picks them up via config.Load. The user can hit Enter to skip — the chat
-// banner falls back to a one-line warning so they still see what's missing.
-// Returns a non-zero exit code only when writing the env file fails.
+// stored in the encrypted secret store so the chat session that follows picks
+// them up via config.Load. The user can hit Enter to skip — the chat banner
+// falls back to a one-line warning so they still see what's missing.
+// Returns a non-zero exit code only when writing the store fails.
 func promptMissingKeys(cfg *config.Config) int {
 	missing := providersWithMissingKeys(cfg)
 	if len(missing) == 0 {
@@ -1400,12 +1392,11 @@ func promptMissingKeys(cfg *config.Config) int {
 	if len(envLines) == 0 {
 		return 0
 	}
-	envPath := defaultEnvTarget()
-	if err := appendEnv(envPath, envLines); err != nil {
+	if err := storeSecretLines(secret.Default(), envLines); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.WriteEnvErr, err)
 		return 1
 	}
-	fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(envPath)))
+	fmt.Printf("%s %s\n", green("✓"), fmt.Sprintf(i18n.M.WroteFileFmt, displayPath(secret.DefaultPath())))
 	return 0
 }
 
@@ -1521,58 +1512,28 @@ func isTTY(f *os.File) bool {
 	return term.IsTerminal(int(f.Fd()))
 }
 
-// appendEnv merges KEY=value lines into a .env file. Existing assignments of
-// any key that's about to be written are dropped first, then the new values
-// are appended — so re-running `fairpeer setup` with a corrected key replaces the
-// stale one instead of stacking duplicates (loadDotEnv is first-wins, so a
-// naive append would leave the old key in effect). The new values are also
-// pinned into the current process env so a chat session started right after
-// init picks up the fresh keys without a restart.
-func appendEnv(path string, lines []string) error {
-	target := map[string]bool{}
+// storeSecretLines persists KEY=value lines into the encrypted secret store
+// (DPAPI on Windows, AES-GCM elsewhere) and pins them into the current process
+// env so a chat session started right after setup picks up the fresh keys
+// without a restart. Store.Set upserts, so re-running `fairpeer setup` with a
+// corrected key replaces the stale one — the duplicate-line concern of the old
+// plaintext appendEnv (loadDotEnv is first-wins) disappears with the file.
+func storeSecretLines(store *secret.Store, lines []string) error {
 	for _, l := range lines {
-		if k, _, ok := strings.Cut(l, "="); ok {
-			target[strings.TrimSpace(k)] = true
+		k, v, ok := strings.Cut(l, "=")
+		if !ok {
+			continue
 		}
-	}
-
-	var kept []string
-	if data, err := os.ReadFile(path); err == nil {
-		for _, raw := range strings.Split(string(data), "\n") {
-			trimmed := strings.TrimSpace(raw)
-			check := strings.TrimPrefix(trimmed, "export ")
-			if k, _, ok := strings.Cut(check, "="); ok && target[strings.TrimSpace(k)] {
-				continue
-			}
-			kept = append(kept, raw)
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
 		}
-		// strings.Split on a string ending with \n leaves a trailing empty
-		// element; trim it so we don't grow a blank line on every rewrite.
-		if n := len(kept); n > 0 && kept[n-1] == "" {
-			kept = kept[:n-1]
-		}
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-
-	var b strings.Builder
-	for _, l := range kept {
-		b.WriteString(l)
-		b.WriteByte('\n')
-	}
-	for _, l := range lines {
-		b.WriteString(l)
-		b.WriteByte('\n')
-		if k, v, ok := strings.Cut(l, "="); ok {
-			os.Setenv(strings.TrimSpace(k), v)
-		}
-	}
-	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := store.Set(k, v); err != nil {
 			return err
 		}
+		os.Setenv(k, v)
 	}
-	return os.WriteFile(path, []byte(b.String()), 0o600)
+	return nil
 }
 
 // readStdin reads piped input if present; an interactive terminal yields "".
@@ -1602,7 +1563,7 @@ func welcome(version string) int {
 	// prompt and welcome banner so every prompt the user sees is already
 	// localized to their choice.
 	if src == "" && isInteractive() {
-		if rc := interactiveSetup(defaultConfigTarget(), defaultEnvTarget()); rc != 0 {
+		if rc := interactiveSetup(defaultConfigTarget()); rc != 0 {
 			return rc
 		}
 		// Config just written; reload so .env (and any pinned language) is

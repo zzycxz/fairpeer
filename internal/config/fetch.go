@@ -28,9 +28,11 @@ func (e *ProviderEntry) FetchModels(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("fetch models: provider %q has no base_url", e.Name)
 	}
 	key := e.APIKey()
-	if key == "" {
+	if key == "" && e.APIKeyEnv != "" {
 		return nil, fmt.Errorf("fetch models: provider %q has no API key (set %s in .env)", e.Name, e.APIKeyEnv)
 	}
+	// Keyless providers (local Ollama / llama.cpp endpoints have no api_key_env)
+	// fetch without auth — the server ignores the empty Bearer header.
 	candidates, err := BuildModelFetchURLs(e.BaseURL, e.ModelsURL)
 	if err != nil {
 		return nil, err

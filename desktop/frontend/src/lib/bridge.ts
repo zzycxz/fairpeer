@@ -7,6 +7,7 @@
 
 import type * as GeneratedApp from "../../wailsjs/go/main/App";
 
+import { builtinPresetsFor } from "./builtinPresets";
 import { t } from "./i18n";
 import { modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeToolApprovalMode, ProviderTemplate, RegistryStatus } from "./types";
 
@@ -38,6 +39,7 @@ import type {
   MobileSessionInfo,
   ModelInfo,
   ProfileView,
+  ProfilePresetsPayload,
   NetworkView,
   PresentPayload,
   ProjectNode,
@@ -81,6 +83,7 @@ import type {
   HooksSettingsView,
   HookConfigView,
   MailProbeResult,
+  ManagedBrowserStatus,
   InboxItem,
   RagExtractResultView,
   ExpertRunView,
@@ -260,6 +263,11 @@ export interface AppBindings {
   MobileBridgeStartPairing(): Promise<string>;
   MobileBridgeStatus(): Promise<Record<string, any>>;
   MobileBridgeUnpair(deviceCode: string): Promise<void>;
+  // 配对网卡：枚举可进二维码的真实网卡（isDefault=默认路由出口），钉死选择。
+  MobileBridgeListPairNics(): Promise<string>;
+  MobileBridgeSetPairNic(ip: string): Promise<void>;
+  // UDP 单包敲门（M3 NAT 穿透辅助）：开关 + 远程 STUN 服务器。
+  MobileBridgeSetKnock(enabled: boolean, server: string): Promise<void>;
   // Mobile-facing readouts (mobilebridge_app.go + tabs.go). ModelsForMobile /
   // SessionListForMobile return the trimmed mobile payloads above, NOT the
   // app-wide ModelInfo/SessionMeta. ActiveTabID feeds the current tab id to the
@@ -290,6 +298,8 @@ export interface AppBindings {
   RejectMemory(name: string): Promise<boolean>;
   SaveDoc(path: string, body: string): Promise<string>;
   PortraitProfile(): Promise<ProfileView>;
+  ProfilePresets(): Promise<ProfilePresetsPayload>;
+  SetProfilePresets(payload: ProfilePresetsPayload): Promise<string>;
   Settings(): Promise<SettingsView>;
   SetDefaultModel(ref: string): Promise<void>;
   SetSubagentModel(ref: string): Promise<void>;
@@ -331,6 +341,12 @@ export interface AppBindings {
   TrustProjectHooks(): Promise<void>;
   TrustProjectHooksForRoot(projectRoot: string): Promise<void>;
   CheckCoworkBrowser(): Promise<string>;
+  // 可控浏览器 (managed attachable browser): a persistent browser window with
+  // a fixed CDP port (9222) and dedicated profile. Start launches it (or
+  // reports it as already running); Check only probes. Pair with
+  // browserAttachURL in the cowork settings so browser_auto attaches to it.
+  StartManagedBrowser(): Promise<ManagedBrowserStatus>;
+  CheckManagedBrowser(): Promise<ManagedBrowserStatus>;
   OpenPPTTemplateDir(): Promise<void>;
   PickPPTTemplate(): Promise<string>;
   SetBotSecret(envName: string, value: string): Promise<void>;
@@ -497,6 +513,21 @@ export interface AppBindings {
   RagRenameCollection(oldName: string, newName: string): Promise<void>;
   SetDesktopMetrics(enabled: boolean): Promise<void>;
   SetPlannerModel(model: string): Promise<void>;
+  // PPT-reference VLM gate (desktop/classify_reference.go etc.). Currently
+  // invoked Go-side / not yet called by the frontend UI; declared for Wails
+  // binding parity (_CheckGenToApp) so the generated bindings stay in check.
+  AnalyzePDFPages(pdfPath: string): Promise<number>;
+  AnalyzeReferenceImage(imgPath: string): Promise<void>;
+  ClassifyReferenceVisual(filePath: string): Promise<{ is_visual: boolean; verdict: string; reason: string }>;
+  PreparePPTReference(filePath: string): Promise<{
+    is_visual: boolean;
+    verdict: string;
+    reason: string;
+    pdf_pages?: number;
+    vision_error?: string;
+    needs_vlm_config?: boolean;
+  }>;
+  RenameTabForMobile(tabID: string, title: string): Promise<void>;
 }
 
 // Compile-time drift check. Exclude<A, B> extracts keys in A that are missing
@@ -1115,6 +1146,7 @@ function makeMockApp(): AppBindings {
     agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 0, systemPrompt: "You are fairpeer, a coding agent.", rpm: 60 },
     cowork: {
       browserPath: "",
+      browserAttachURL: "",
       embeddingModel: "",
       ragEnabled: null,
       pptActiveTemplate: "",
@@ -1400,6 +1432,14 @@ function makeMockApp(): AppBindings {
           {
             role: "assistant",
             content: "我可以在桌面端帮你处理代码编写、文件操作、项目分析和问题定位。来自 IM 的请求会进入同一条聊天时间线，桌面端继续承载模型调用、工具执行和上下文管理。",
+          },
+          {
+            role: "user",
+            content: "看一下这版设计稿和需求说明 @[设计稿.png](.fairpeer/attachments/mock-clipboard.png) @[需求说明.md](.fairpeer/attachments/mock-spec.md)",
+          },
+          {
+            role: "assistant",
+            content: "收到，设计稿如下图，我先对照需求说明核对一遍再给结论：\n\n![设计稿](.fairpeer/attachments/mock-clipboard.png)",
           },
         ];
       case "topic_p3b_pd":
@@ -2570,7 +2610,9 @@ function makeMockApp(): AppBindings {
       return { kind: "attachment" as const, path: `.fairpeer/attachments/mock-${name}` };
     },
     async AttachmentDataURL(_path: string) {
-      return "data:image/png;base64,iVBORw0KGgo=";
+      // 96×64 two-tone PNG so the attachment lightbox has something visible to
+      // render in browser dev (the old 1×1 pixel was impossible to see).
+      return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAAgklEQVR4nO3QQQ2AQBDAwDWCEjwgCpUo4X0Ojid9TFIBzcx5v9o0vx/EAwQIECBA4QABAgQIUDhAgAABAhQOECBAgACFAwQIECBA4QABAgQIULg5rkebAAECBAhQOECAAAECFA4QIECAAIUDBAgQIEDhAAECBAhQOECAAAECFA7QRwuH3IoOE9YxSgAAAABJRU5ErkJggg==";
     },
     async VoiceModelConfigured() {
       return true;
@@ -2584,6 +2626,9 @@ function makeMockApp(): AppBindings {
     async MobileBridgeStartPairing() { return ""; },
     async MobileBridgeStatus() { return { paired: false, devices: [] }; },
     async MobileBridgeUnpair(_deviceCode: string) { /* mock: unpair is a no-op */ },
+    async MobileBridgeListPairNics() { return JSON.stringify({ nics: [], pinned: "" }); },
+    async MobileBridgeSetPairNic(_ip: string) { /* mock: pin nic is a no-op */ },
+    async MobileBridgeSetKnock(_enabled: boolean, _server: string) { /* mock: knock is a no-op */ },
     // Mobile-facing readouts — browser mock returns minimal data; the real
     // payloads come from mobilebridge_app.go in the Wails build.
     async ActiveTabID() { return mockTabs.find((t) => t.active)?.id ?? ""; },
@@ -2752,6 +2797,36 @@ function makeMockApp(): AppBindings {
     },
     async PortraitProfile() {
       return { path: "", content: "" };
+    },
+    // Mirrors memory.defaultPresets: the builtin list for the ACTIVE mock tab's
+    // profile, nothing selected (a fresh user has no preset in use). The real
+    // backend resolves the mode from the active tab's controller.
+    async ProfilePresets(): Promise<ProfilePresetsPayload> {
+      const mode = mockTabs.find(t => t.active)?.profile === "cowork" ? "cowork" : "dev";
+      return {
+        path: "",
+        active: "",
+        items: builtinPresetsFor(mode).map(i => ({ ...i })),
+      };
+    },
+    async SetProfilePresets(p: ProfilePresetsPayload) {
+      emit({ kind: "notice", level: "info", text: `presets saved → active=${p.active} (${p.items.length} items)` });
+      return p.path;
+    },
+    // PPT-reference VLM gate (Go-side flow): browser-dev no-ops that keep the
+    // mock shape-aligned with AppBindings.
+    async AnalyzePDFPages(_pdfPath: string) {
+      return 0;
+    },
+    async AnalyzeReferenceImage(_imgPath: string) {},
+    async ClassifyReferenceVisual(_filePath: string) {
+      return { is_visual: false, verdict: "A", reason: "browser-dev mock" };
+    },
+    async PreparePPTReference(_filePath: string) {
+      return { is_visual: false, verdict: "A", reason: "browser-dev mock" };
+    },
+    async RenameTabForMobile(tabID: string, title: string) {
+      emit({ kind: "notice", level: "info", text: `renamed ${tabID} → ${title}` });
     },
     async Settings() {
       return JSON.parse(JSON.stringify(settings)) as SettingsView;
@@ -3025,7 +3100,12 @@ function makeMockApp(): AppBindings {
     // Dev seam: drives the overlay flow in the browser until ConnectKey sets the
     // key. Matches ConnectKey on apiKeyEnv so the two stay in sync.
     async NeedsOnboarding() {
-      return !settings.providers.some((p) => p.keySet);
+      // Browser dev mock: skip the onboarding wizard — it exists to collect a
+      // real API key, which the mock doesn't need. Avoids the slow multi-step
+      // wizard (with its mock delays) devs hit on every fresh mock session.
+      // To preview the wizard UI in-browser, temporarily return the providers
+      // check: !settings.providers.some((p) => p.keySet).
+      return false;
     },
     async SetupProvider(template: ProviderTemplate, apiKey: string, defaultModel: string, _visionModel: string, _fastModel: string, _voiceModel: string) {
       if (!apiKey.trim()) throw new Error("key is required");
@@ -3617,7 +3697,13 @@ function makeMockApp(): AppBindings {
         hookSettings.project.trusted = true;
       }
     },
-    async CheckCoworkBrowser() { return "Chrome"; },
+    async CheckCoworkBrowser() { return "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"; },
+    async StartManagedBrowser() {
+      return { running: true, url: "http://127.0.0.1:9222", browser: "Chrome", profile: "~/Library/Application Support/fairpeer/browser-profile", alreadyRunning: false };
+    },
+    async CheckManagedBrowser() {
+      return { running: false, url: "http://127.0.0.1:9222", browser: "", profile: "", alreadyRunning: false, detail: "browser dev mock" };
+    },
     async OpenPPTTemplateDir() {},
     async PickPPTTemplate() { return ""; },
     async ContextPanel(_tabID: string) {

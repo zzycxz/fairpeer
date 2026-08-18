@@ -647,9 +647,11 @@ function applyEvent(s: State, e: WireEvent): State {
   }
 }
 
-// mergeRunningIntoHistory re-attaches in-flight tools (still "running") to a
-// freshly rebuilt history. Without this, a history reload issued mid-run
-// (watchdog reconcile, tab switch) silently discards the live tool card.
+// mergeRunningIntoHistory re-attaches in-flight items (tools still "running",
+// plus the live streaming assistant bubble) to a freshly rebuilt history.
+// Without this, a history reload issued mid-run (watchdog reconcile, tab
+// switch) silently discards the live tool card and the current step's
+// streamed-so-far text.
 //
 // Anchor strategy: stream-time tool ids are `a${seq}`/`call_xxx` while history
 // rebuilds assistants as `h${seq}`, so we CANNOT match by parentId (the ids are
@@ -734,13 +736,16 @@ export function reducer(s: State, a: Action): State {
     case "message_action_done": return { ...s, messageAction: undefined };
     case "history": {
       const { items: histItems, seq } = historyMessagesToItems(a.messages, "h", s.seq);
-      // Preserve in-flight tools across a history reload. historyMessagesToItems
-      // rebuilds items from persisted messages, which discards any tool that was
-      // still running when the reload was issued (e.g. 120s watchdog reconcile).
-      // Re-attach those running tools so a tab switch / background reload does
-      // not "swallow" live tool output.
+      // Preserve in-flight items across a history reload: running tools AND the
+      // live streaming assistant bubble. historyMessagesToItems rebuilds items
+      // from persisted messages, but the current LLM step's text/reasoning is
+      // only persisted when the step completes — a rebuild issued mid-step
+      // would orphan `live` (no item matches live.id anymore) and the next
+      // token would restart from an empty bubble, swallowing everything
+      // streamed so far.
+      const liveId = s.live?.id;
       const runningItems = s.items.filter(
-        (it) => it.kind === "tool" && it.status === "running",
+        (it) => (it.kind === "tool" && it.status === "running") || (it.kind === "assistant" && it.id === liveId),
       );
       if (runningItems.length === 0) {
         return { ...s, items: histItems, seq };
@@ -967,14 +972,6 @@ export function useController(getProfile?: () => string) {
     }
   }, []);
 
-  const syncActiveTabFromBackend = useCallback(async (reset = false): Promise<string | undefined> => {
-    const active = await activeTabFromBackend();
-    if (!active) return undefined;
-    setActiveTabId(active.id);
-    await loadSessionDataForTab(active.id, reset);
-    return active.id;
-  }, [activeTabFromBackend, loadSessionDataForTab]);
-
   const reconcileTabRuntime = useCallback(async (tabId: string) => {
     const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
     const tab = tabs.find((candidate) => candidate.id === tabId);
@@ -1000,6 +997,25 @@ export function useController(getProfile?: () => string) {
     if (jobs) dispatchTo(tabId, { type: "jobs", jobs: asArray(jobs) });
     if (effort) dispatchTo(tabId, { type: "effort", effort });
   }, [dispatchTo, loadSessionDataForTab]);
+
+  // reset=true forces a clean rebuild from backend data — only for callers that
+  // know the controller was replaced behind the frontend's back (profile or
+  // workspace switch, fork). reset=false reconciles instead of reloading: a tab
+  // whose in-memory state already exists keeps it, because the global event
+  // subscription kept that state current while the tab was backgrounded.
+  // Rebuilding from history mid-run would swallow the in-flight turn — the
+  // current LLM step's streaming text only persists when the step completes.
+  const syncActiveTabFromBackend = useCallback(async (reset = false): Promise<string | undefined> => {
+    const active = await activeTabFromBackend();
+    if (!active) return undefined;
+    setActiveTabId(active.id);
+    if (reset) {
+      await loadSessionDataForTab(active.id, true);
+    } else {
+      await reconcileTabRuntime(active.id);
+    }
+    return active.id;
+  }, [activeTabFromBackend, loadSessionDataForTab, reconcileTabRuntime]);
 
   useEffect(() => {
     const textBatch = createRafBatch<{ tabId: string; e: WireEvent }>((batch) => {
@@ -1345,7 +1361,11 @@ export function useController(getProfile?: () => string) {
     } catch { /* the card stays; a failure here is rare and silent */ }
   }, [activeTabId, dispatchTo]);
 
-  // Tab management: switch preserves per-tab state; open creates it.
+  // Tab management: switch preserves per-tab state; open creates it. Opening a
+  // topic whose tab already exists (backend reuses it) is also a switch: the
+  // global event subscription kept that tab's state current while it was
+  // backgrounded, so reconcile — never rebuild from history, which would
+  // swallow an in-flight turn's streaming bubbles and tool cards.
   const switchTab = useCallback(async (tabId: string) => {
     setActiveTabId(tabId);
     try {
@@ -1357,32 +1377,34 @@ export function useController(getProfile?: () => string) {
   const openProjectTab = useCallback(async (workspaceRoot: string, topicId: string): Promise<TabMeta> => {
     const meta = await app.OpenProjectTab3(workspaceRoot, topicId, profile());
     setActiveTabId(meta.id);
-    await loadSessionDataForTab(meta.id, !statesRef.current.has(meta.id));
+    await reconcileTabRuntime(meta.id);
     return meta;
-  }, [loadSessionDataForTab, getProfile]);
+  }, [getProfile, reconcileTabRuntime]);
 
   const openGlobalTab = useCallback(async (topicId: string): Promise<TabMeta> => {
     const meta = await app.OpenGlobalTab(topicId, profile());
     setActiveTabId(meta.id);
-    await loadSessionDataForTab(meta.id, !statesRef.current.has(meta.id));
+    await reconcileTabRuntime(meta.id);
     return meta;
-  }, [loadSessionDataForTab, getProfile]);
+  }, [getProfile, reconcileTabRuntime]);
 
   // Ensure a blank tab exists for the given scope — reuses an existing one
   // or creates a new tab, then loads its session data.
   const ensureBlankTab = useCallback(async (scope: string, workspaceRoot: string, profile?: string): Promise<TabMeta> => {
     const meta = await app.EnsureBlankTab(scope, workspaceRoot, profile ?? getProfile?.() ?? "");
     setActiveTabId(meta.id);
-    await loadSessionDataForTab(meta.id, !statesRef.current.has(meta.id));
+    await reconcileTabRuntime(meta.id);
     return meta;
-  }, [loadSessionDataForTab, getProfile]);
+  }, [getProfile, reconcileTabRuntime]);
 
   const closeTab = useCallback(async (tabId: string) => {
     try {
       await app.CloseTab(tabId);
       statesRef.current.delete(tabId);
       bump();
-      if (tabId === activeTabId) await syncActiveTabFromBackend(true);
+      // Closing a tab promotes another (possibly streaming, backgrounded) tab
+      // to active — reconcile it, don't reset-and-reload.
+      if (tabId === activeTabId) await syncActiveTabFromBackend();
     } catch { /* ignore */ }
   }, [activeTabId, bump, syncActiveTabFromBackend]);
 

@@ -7,16 +7,15 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
 
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 	skillassets "github.com/zzycxz/fairpeer/internal/assets"
+	"github.com/zzycxz/fairpeer/internal/browserlaunch"
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/ppttemplate"
 	"github.com/zzycxz/fairpeer/internal/secret"
 	"github.com/zzycxz/fairpeer/internal/tool/builtin"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // CoWorkSettingsView is the settings-panel view of the coWork profile config.
@@ -28,6 +27,10 @@ import (
 type CoWorkSettingsView struct {
 	BrowserPath    string `json:"browserPath"` // Chromium browser exe; "" = auto-detect
 	EmbeddingModel string `json:"embeddingModel"`
+	// BrowserAttachURL makes browser automation attach to an already-running
+	// debug-enabled browser (the managed 可控浏览器) instead of launching a
+	// fresh one per task. Empty = launch mode.
+	BrowserAttachURL string `json:"browserAttachURL"`
 	// RAGEnabled is the knowledge-base master switch. nil = enabled (default);
 	// explicit false = fully disabled (no auto-injection, no rag_* tools, expert
 	// teams skip KB context). Mirrors [cowork] rag_enabled. Distinct from
@@ -139,6 +142,7 @@ func coworkSettingsView(c config.CoworkConfig) CoWorkSettingsView {
 
 	v := CoWorkSettingsView{
 		BrowserPath:        c.BrowserPath,
+		BrowserAttachURL:   c.BrowserAttachURL,
 		EmbeddingModel:     c.EmbeddingModel,
 		RAGEnabled:         c.RAGEnabled,
 		PPTActiveTemplate:  c.PPTActiveTemplate,
@@ -354,6 +358,7 @@ func (a *App) SetCoWorkSettings(v CoWorkSettingsView) (err error) {
 	// Persist non-secret config via the standard edit pipeline.
 	if err := a.applyConfigOnly(func(c *config.Config) error {
 		c.Cowork.BrowserPath = strings.TrimSpace(v.BrowserPath)
+		c.Cowork.BrowserAttachURL = browserlaunch.NormalizeCDPEndpoint(strings.TrimSpace(v.BrowserAttachURL))
 		c.Cowork.EmbeddingModel = strings.TrimSpace(v.EmbeddingModel)
 		// Knowledge-base master switch. The front-end always sends an explicit
 		// bool from its toggle, so we copy the pointer through; nil stays nil
@@ -727,39 +732,6 @@ func loadCoworkEnv() map[string]string {
 		}
 	}
 	return out
-}
-
-var coworkMu sync.Mutex
-
-// saveCoworkEnv writes the map back as KEY=VALUE lines (atomic via tmp+rename).
-// Also updates the live process env so a save takes effect without restart.
-func saveCoworkEnv(m map[string]string) error {
-	coworkMu.Lock()
-	defer coworkMu.Unlock()
-	path := coworkEnvPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	var b strings.Builder
-	b.WriteString("# coWork secrets — managed by the settings panel. Do not edit by hand.\n")
-	// Sort keys for deterministic output so repeated saves don't produce
-	// meaningless diffs (map iteration order is randomized in Go).
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		val := m[key]
-		b.WriteString(key + "=" + val + "\n")
-		// Mirror into the live process env so tools see it immediately.
-		os.Setenv(key, val)
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }
 
 // loadCoworkEnvAtStartup is called once during desktop startup. It first lifts

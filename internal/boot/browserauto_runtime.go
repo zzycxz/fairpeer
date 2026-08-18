@@ -17,6 +17,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/zzycxz/fairpeer/internal/browserlaunch"
 	"github.com/zzycxz/fairpeer/internal/browseruse"
@@ -103,23 +105,47 @@ func runBrowserAuto(ctx context.Context, cfg *config.Config, req builtin.Browser
 		maxSteps = req.MaxSteps
 	}
 
-	// Launch the shared browser. A fresh temp profile per run keeps sessions
-	// isolated (no cross-task cookie bleed) unless the user configured a
-	// persistent BrowserUserDataDir (to keep login state). The proxy routes the
-	// browser through the user's network config so the agent reaches the same
-	// sites fairpeer's other traffic does (e.g. a CN proxy for GitHub).
-	handle, err := browserlaunch.Launch(ctx, browserlaunch.LaunchOptions{
-		Headless:    cfg.Cowork.BrowserHeadless,
-		UserDataDir: cfg.Cowork.BrowserUserDataDir,
-		Proxy:       resolveBrowserProxyURL(cfg.NetworkProxySpec()),
-		StartURL:    req.URL,
-	})
-	if err != nil {
-		return nil, "", fmt.Errorf("launch browser: %w", err)
+	// Resolve the browser to drive. Two modes:
+	//
+	//   Attach (cfg.Cowork.BrowserAttachURL set): connect to the browser the
+	//   user already has open — normally the managed browser started from
+	//   Settings → 办公, which keeps its window and login state across tasks.
+	//   We never launch or close it here; the sidecar's browser.close() only
+	//   disconnects. An unreachable endpoint is a hard error (not a silent
+	//   fallback) so a forgotten managed browser surfaces immediately with
+	//   guidance instead of surprising the user with a fresh temp browser.
+	//
+	//   Launch (default): spawn a system browser with a CDP endpoint. A fresh
+	//   temp profile per run keeps sessions isolated unless the user configured
+	//   a persistent BrowserUserDataDir (to keep login state). The proxy routes
+	//   the browser through the user's network config. Closed when the run ends.
+	var cdpURL string
+	if attach := strings.TrimSpace(cfg.Cowork.BrowserAttachURL); attach != "" {
+		probeCtx, cancelProbe := context.WithTimeout(ctx, 5*time.Second)
+		info, err := browserlaunch.ProbeAttach(probeCtx, attach)
+		cancelProbe()
+		if err != nil {
+			return nil, "", fmt.Errorf(`attach browser: %w — 可控浏览器未运行：在 设置→办公 点击"启动可控浏览器"，或清空 CDP 地址回到自动新开浏览器`, err)
+		}
+		cdpURL = info.WSURL
+		slog.Info("browser_auto: attached to running browser",
+			"cdp", info.CDPURL, "browser", info.BrowserName)
+	} else {
+		handle, err := browserlaunch.Launch(ctx, browserlaunch.LaunchOptions{
+			ExecutablePath: cfg.Cowork.BrowserPath,
+			Headless:       cfg.Cowork.BrowserHeadless,
+			UserDataDir:    cfg.Cowork.BrowserUserDataDir,
+			Proxy:          resolveBrowserProxyURL(cfg.NetworkProxySpec()),
+			StartURL:       req.URL,
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("launch browser: %w", err)
+		}
+		defer handle.Close()
+		cdpURL = handle.WSURL
+		slog.Info("browser_auto: launched shared browser",
+			"name", handle.BrowserName, "cdp", handle.CDPURL, "ws", handle.WSURL)
 	}
-	defer handle.Close()
-	slog.Info("browser_auto: launched shared browser",
-		"name", handle.BrowserName, "cdp", handle.CDPURL, "ws", handle.WSURL)
 
 	// Drive the sidecar. The cdp_url we hand it points at the browser we just
 	// launched, so there is exactly one shared instance. The model/base_url/key
@@ -130,7 +156,7 @@ func runBrowserAuto(ctx context.Context, cfg *config.Config, req builtin.Browser
 	stream, err := client.RunStream(ctx, browseruse.RunRequest{
 		Goal:         req.Goal,
 		URL:          req.URL,
-		CDPURL:       handle.WSURL,
+		CDPURL:       cdpURL,
 		MaxSteps:     maxSteps,
 		Model:        modelName,
 		ProviderKind: providerKind,

@@ -3,12 +3,16 @@ package mobilebridge
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"sync"
+	"time"
 
+	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -33,6 +37,7 @@ type Bridge struct {
 	mu      sync.Mutex
 	conns   map[string]*Conn            // connId → Conn (one per C connection)
 	byDev   map[string]*Conn            // devC → Conn (latest, for event routing)
+	knockS  map[string]*net.UDPConn     // connId → 敲门用的 ICE 共享 UDP socket
 	tabSub  map[string]map[string]bool  // tabId → set[connId]
 	ringBuf map[string]*tabRing         // tabId → 事件环形缓冲（resync 增量同步，§11.2）
 	ctx     context.Context
@@ -64,6 +69,7 @@ func NewBridge(cfg Config, sPriv ed25519.PrivateKey, sPub ed25519.PublicKey, sto
 		store: store, exec: exec, audit: audit,
 		conns:   map[string]*Conn{},
 		byDev:   map[string]*Conn{},
+		knockS:  map[string]*net.UDPConn{},
 		tabSub:  map[string]map[string]bool{},
 		ringBuf: map[string]*tabRing{},
 	}
@@ -96,10 +102,20 @@ func (b *Bridge) SignalConnected() bool { return b.signal != nil && b.signal.Con
 // SignalURL returns the configured K base URL (for display in the panel).
 func (b *Bridge) SignalURL() string { return b.cfg.SignalURL }
 
+// KnockEnabled / KnockServer expose the UDP-knock config (settings panel).
+func (b *Bridge) KnockEnabled() bool   { return b.cfg.UDPKnock }
+func (b *Bridge) KnockServer() string { return b.cfg.KnockServer }
+
 // StartPairing kicks off a new pairing session (Wails UI calls this).
 func (b *Bridge) StartPairing() (code, qrURL string, err error) {
 	return b.pairing.StartPairing()
 }
+
+// SetPairAddress 钉死二维码 relay 使用的网卡 IP（"" = 自动）。
+func (b *Bridge) SetPairAddress(ip string) { b.pairing.SetPairAddress(ip) }
+
+// ListPairNics 枚举「配对网卡」候选（含默认标记），设置面板下拉框用。
+func (b *Bridge) ListPairNics() []NicInfo { return ListPairNics() }
 
 // PendingPairings lists C's awaiting desktop confirm.
 func (b *Bridge) PendingPairings() []PendingPair { return b.pairing.Pending() }
@@ -159,9 +175,12 @@ func (b *Bridge) handleOffer(msg SignalMsg) {
 	}
 	router := NewCommandRouter(msg.From, b.exec, b.cfg.DefaultPermissions(), b.audit)
 	router.SetSubscribeHook(func(tab string) {
+		origTab := tab
 		if b.resolveTab != nil {
-			tab = b.resolveTab(tab) // "default"/"" → 激活 tab 的 UUID
+			tab = b.resolveTab(tab)
 		}
+		slog.Info("mobilebridge: subscribe_tab",
+			"origTab", origTab, "resolvedTab", tab, "connID", msg.ConnID)
 		b.setSubscription(msg.ConnID, tab)
 	})
 	router.SetListSessionsHook(func(sessions []SessionInfo) {
@@ -219,6 +238,10 @@ func (b *Bridge) handleOffer(msg SignalMsg) {
 	conn.SetOnClose(func(c *Conn) {
 		b.mu.Lock()
 		delete(b.conns, connID)
+		if kc, ok := b.knockS[connID]; ok {
+			kc.Close() // 敲门 socket 随连接关闭
+			delete(b.knockS, connID)
+		}
 		if c.DevC() != "" {
 			if cur := b.byDev[c.DevC()]; cur == c {
 				delete(b.byDev, c.DevC())
@@ -231,15 +254,47 @@ func (b *Bridge) handleOffer(msg SignalMsg) {
 	b.conns[connID] = conn
 	b.mu.Unlock()
 
-	// create PeerConnection with the configured ICE servers
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{
-		ICEServers: toICEServers(b.cfg),
-	})
+	// create PeerConnection with the configured ICE servers.
+	// UDPKnock 开启时：专用 UDP socket + UDPMux 注入 ICE——敲门包从 ICE
+	// 同一端口发出，打开的 NAT 映射对 ICE connectivity check 直接生效
+	//（换了 socket 敲门是无效的：NAT 映射按内网五元组）。
+	pcCfg := webrtc.Configuration{ICEServers: toICEServers(b.cfg)}
+	if b.cfg.UDPKnock {
+		uc, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
+		if err != nil {
+			b.audit.Error("knock_listen", msg.From, err)
+			conn.close()
+			return
+		}
+		se := webrtc.SettingEngine{}
+		se.SetICEUDPMux(ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: uc}))
+		pc, pcErr := webrtc.NewAPI(webrtc.WithSettingEngine(se)).NewPeerConnection(pcCfg)
+		if pcErr != nil {
+			uc.Close()
+			b.audit.Error("newpc", msg.From, pcErr)
+			conn.close()
+			return
+		}
+		// socket 生命周期挂在 knockS map（OnClose 时统一关闭）
+		b.mu.Lock()
+		b.knockS[connID] = uc
+		b.mu.Unlock()
+		b.attachPC(msg, conn, pc)
+		return
+	}
+	pc, err := webrtc.NewPeerConnection(pcCfg)
 	if err != nil {
 		b.audit.Error("newpc", msg.From, err)
 		conn.close()
 		return
 	}
+	b.attachPC(msg, conn, pc)
+}
+
+// attachPC 接上候选转发/状态回调、发 answer——knock 与普通两条 PC 创建
+// 路径的公共尾部。
+func (b *Bridge) attachPC(msg SignalMsg, conn *Conn, pc *webrtc.PeerConnection) {
+	connID := msg.ConnID
 	// forward our ICE candidates back to C via K
 	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c == nil {
@@ -289,6 +344,51 @@ func (b *Bridge) handleICE(msg SignalMsg) {
 		return
 	}
 	_ = conn.AddICECandidate(msg.Cand)
+	b.knockAt(msg.ConnID, msg.Cand)
+}
+
+// knockAt 单包敲门：收到 C 的 srflx 候选（C 的公网映射，经远程 STUN 探得）
+// 时，从 ICE 共享 UDP socket 向其发 3 个敲门包。关键在从同一端口发出——
+// NAT 映射按内网五元组，换 socket 敲门无效；共享后打开的映射对 ICE
+// connectivity check 直接生效。对 cone NAT 有效；双对称 NAT 无解（§7）。
+// 包体 = 魔数 LPKNOCK1|connId|nonce；C 的 ICE 对未知包静默丢弃，无副作用。
+func (b *Bridge) knockAt(connID, candStr string) {
+	b.mu.Lock()
+	enabled := b.cfg.UDPKnock
+	uc := b.knockS[connID]
+	b.mu.Unlock()
+	if !enabled || uc == nil {
+		return
+	}
+	cand, err := ice.UnmarshalCandidate(candStr)
+	if err != nil || cand.Type() != ice.CandidateTypeServerReflexive {
+		return // 只敲 srflx（公网映射）；host 候选同网段无需敲门
+	}
+	ip := net.ParseIP(cand.Address())
+	if ip == nil {
+		return
+	}
+	addr := &net.UDPAddr{IP: ip, Port: cand.Port()}
+	go func() {
+		for i := 0; i < 3; i++ {
+			nonce := make([]byte, 8)
+			_, _ = rand.Read(nonce)
+			pkt := append([]byte("LPKNOCK1|"+connID+"|"), nonce...)
+			if _, err := uc.WriteToUDP(pkt, addr); err != nil {
+				return // socket 已关（连接结束）
+			}
+			b.audit.Info("udp_knock", "connID", connID, "addr", addr.String())
+			time.Sleep(250 * time.Millisecond)
+		}
+	}()
+}
+
+// SetKnock 运行时更新单包敲门开关/服务器（设置面板；影响之后新建的连接）。
+func (b *Bridge) SetKnock(enabled bool, server string) {
+	b.mu.Lock()
+	b.cfg.UDPKnock = enabled
+	b.cfg.KnockServer = server
+	b.mu.Unlock()
 }
 
 // setSubscription records that connId wants events from tabId. Called when the
@@ -401,8 +501,20 @@ func (b *Bridge) NotifySessionListChanged() {
 
 // toICEServers builds the pion ICEServers from config (STUN always; TURN opt-in).
 func toICEServers(cfg Config) []webrtc.ICEServer {
-	servers := []webrtc.ICEServer{}
+	// 敲门依赖的远程 STUN 去重后并入——两端都要能探到 srflx，敲门才有目标。
+	seen := map[string]bool{}
+	var urls []string
 	for _, s := range cfg.STUNServers {
+		if !seen[s] {
+			seen[s] = true
+			urls = append(urls, s)
+		}
+	}
+	if cfg.KnockServer != "" && !seen[cfg.KnockServer] {
+		urls = append(urls, cfg.KnockServer)
+	}
+	servers := []webrtc.ICEServer{}
+	for _, s := range urls {
 		servers = append(servers, webrtc.ICEServer{URLs: []string{s}})
 	}
 	if cfg.TURNEnabled {

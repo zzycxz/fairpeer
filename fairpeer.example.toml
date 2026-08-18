@@ -47,8 +47,11 @@ compact_force_ratio = 0.9   # force compacting at this high-water mark
 # models reuses the same connection; no need to re-declare base_url/api_key.
 # Uncomment the providers you have an API key for. FairPeer ships NO built-in
 # provider — configure at least one before first run (or use `fairpeer setup`).
+# Keyless local presets (Ollama, llama.cpp) ship built-in for every install —
+# they need no API key and appear below under "Local models". Defining ANY
+# [[providers]] block here replaces the built-in presets wholesale.
 
-# ── Direct providers (11 vendors) ──────────────────────────────────────────
+# ── Direct providers (12 vendors) ──────────────────────────────────────────
 # Each shows the three model roles: default (main chat), fast (background
 # tasks), vision (image recognition). Adjust models as vendors release newer
 # ones — run `fairpeer setup` or the Settings "fetch models" button to
@@ -184,6 +187,43 @@ compact_force_ratio = 0.9   # force compacting at this high-water mark
 # models      = ["gpt-5.6-terra", "gpt-5.6-luna"]
 # vision      = true
 # context_window = 1050000
+
+# ── xAI (Grok) ──
+# [[providers]]
+# name        = "xai"
+# kind        = "openai"
+# base_url    = "https://api.x.ai/v1"
+# api_key_env = "XAI_API_KEY"
+# default     = "grok-4.6"
+# fast_model  = "grok-4.5"
+# models      = ["grok-4.6", "grok-4.5", "grok-4.3"]
+# vision      = true
+# context_window = 500000
+
+# ── Local models (no API key) ──────────────────────────────────────────────
+# Local OpenAI-compatible servers. No api_key_env — requests carry an empty
+# Bearer header the server ignores. Run `fairpeer setup` or the Settings
+# "fetch models" button to list what's actually installed/loaded.
+
+# ── Ollama ── `ollama serve` on the default port; models listed by `ollama list`
+# [[providers]]
+# name        = "ollama"
+# kind        = "openai"
+# base_url    = "http://127.0.0.1:11434/v1"
+# default     = "qwen3-coder:30b"
+# fast_model  = "qwen3:8b"
+# models      = ["qwen3-coder:30b", "qwen3:8b"]
+# context_window = 8192               # raise if you bump OLLAMA_CONTEXT_LENGTH/num_ctx
+
+# ── llama.cpp ── `llama-server` (add --jinja for tool calling); serves whatever
+# GGUF was loaded, the `model` field is a placeholder — fetch models to see it.
+# [[providers]]
+# name        = "llamacpp"
+# kind        = "openai"
+# base_url    = "http://127.0.0.1:8080/v1"
+# default     = "local-model"
+# models      = ["local-model"]
+# context_window = 8192               # match your --ctx-size
 
 # ── Coding Plan aggregators (7 platforms) ──────────────────────────────────
 # These are model-aggregation platforms: one endpoint+key calls multiple
@@ -384,6 +424,22 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # # → Edge → Brave. Set when your browser isn't in a standard location. The agent
 # # surfaces a clear error (and a browser_set_path tool) when nothing is found.
 # browser_path = ""
+#
+# # Run the driven browser headless (no visible window). Default false — a
+# # visible browser behaves closer to a human user and keeps login state.
+# browser_headless = false
+#
+# # Persistent user-data-dir for the driven browser. Empty = fresh temp profile
+# # per run (logins lost). Set a fixed path to keep cookies across sessions.
+# browser_user_data_dir = ""
+#
+# # ATTACH to an already-running debug-enabled browser instead of launching a
+# # fresh one per task. This is the endpoint of the "managed browser"
+# # (可控浏览器) started from Settings -> 办公: a normal browser window on a
+# # fixed CDP port (9222) with a dedicated persistent profile — log in once and
+# # every automation task reuses that window with its tabs/logins intact.
+# # Empty = launch mode (current behavior).
+# browser_attach_url = "http://127.0.0.1:9222"
 #
 # # Autonomous web browsing (browser_auto). A Python browser-use sidecar runs an
 # # agent that perceives the page and clicks/types/navigates itself to complete a

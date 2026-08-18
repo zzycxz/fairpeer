@@ -11,19 +11,19 @@ import (
 // settings panel (desktop pkg) can call them without importing the tool
 // registry (which self-registers builtins at init — undesirable from settings).
 
-// detectBrowserForSettings reports which Chromium-based browser auto-detection
-// would pick, by name ("Chrome"/"Edge"/"Brave"/…). Used by the panel's "detect"
-// button. We avoid importing tool/builtin (init side effects) and instead probe
-// the same standard locations directly.
+// detectBrowserForSettings reports which Chromium-based browser
+// auto-detection would pick, as the executable PATH ("" when nothing is
+// found). Used by the panel's "detect" button, which autofills browserPath
+// with the return value — the frontend derives the display name from the
+// path, so what gets persisted is directly usable by both browser stacks.
 func detectBrowserForSettings() string {
 	for _, c := range browserProbeCandidates() {
 		if p := firstExisting(c.Paths); p != "" {
-			return c.Display
+			return p
 		}
 		if c.Name != "" {
 			if p, err := exec.LookPath(c.Name); err == nil {
-				_ = p
-				return c.Display
+				return p
 			}
 		}
 	}

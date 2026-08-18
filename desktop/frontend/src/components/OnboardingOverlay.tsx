@@ -42,7 +42,17 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
           <VendorStep
             direct={templates.filter((t) => t.category === "direct")}
             aggregators={templates.filter((t) => t.category === "aggregator")}
-            onPick={(tpl) => { setSelected(tpl); setStep("key"); }}
+            locals={templates.filter((t) => t.category === "local")}
+            onPick={(tpl) => {
+              setSelected(tpl);
+              if (tpl.local) {
+                // Keyless local endpoint (Ollama / llama.cpp) — no key step.
+                setApiKey("");
+                setStep("model");
+              } else {
+                setStep("key");
+              }
+            }}
             syncing={syncing}
             onSync={async () => {
               setSyncing(true);
@@ -86,15 +96,16 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
 }
 
 // ── Step 1: vendor grid ───────────────────────────────────────────────────
-export function VendorStep({ direct, aggregators, onPick, syncing, onSync, t }: {
+export function VendorStep({ direct, aggregators, locals, onPick, syncing, onSync, t }: {
   direct: ProviderTemplate[];
   aggregators: ProviderTemplate[];
+  locals: ProviderTemplate[];
   onPick: (tpl: ProviderTemplate) => void;
   syncing: boolean;
   onSync: () => void;
   t: Translator;
 }) {
-  const all = [...direct, ...aggregators];
+  const all = [...direct, ...aggregators, ...locals];
   const [value, setValue] = useState("");
   const selected = all.find((x) => x.name === value) ?? null;
 
@@ -198,6 +209,28 @@ export function VendorStep({ direct, aggregators, onPick, syncing, onSync, t }: 
                 ))}
               </>
             )}
+
+            {locals.length > 0 && (
+              <>
+                <div className="onboarding__menu-group">{t("onboarding.categoryLocal")}</div>
+                {locals.map((tpl) => (
+                  <button
+                    key={tpl.name}
+                    type="button"
+                    role="option"
+                    aria-selected={value === tpl.name}
+                    className={`onboarding__menu-item ${value === tpl.name ? "onboarding__menu-item--selected" : ""}`}
+                    onClick={() => {
+                      setValue(tpl.name);
+                      closeMenu();
+                    }}
+                  >
+                    <span className="onboarding__menu-item-label">{tpl.displayName}</span>
+                    {value === tpl.name && <Check size={14} className="onboarding__menu-item-check" />}
+                  </button>
+                ))}
+              </>
+            )}
           </div>
         </AnchoredPopover>
       </div>
@@ -205,6 +238,7 @@ export function VendorStep({ direct, aggregators, onPick, syncing, onSync, t }: 
       {selected && (
         <div className="onboarding__vendor-info">
           <div className="onboarding__endpoint">{selected.baseUrl}</div>
+          {selected.local && <span className="onboarding__vendor-badge">{t("onboarding.badgeLocal")}</span>}
           {selected.vision && <span className="onboarding__vendor-badge">{t("onboarding.badgeVision")}</span>}
           {selected.codingOnly && <span className="onboarding__vendor-badge">{t("onboarding.badgeCoding")}</span>}
         </div>
@@ -328,7 +362,44 @@ export function ModelStep({ template, apiKey, onDone, t }: {
   const [state, setState] = useState<"ready" | "saving" | "error">("ready");
   const [error, setError] = useState<string | null>(null);
 
-  const models = template.models.length > 0 ? template.models : [template.defaultModel];
+  // Local templates (Ollama, llama.cpp): list the models actually installed on
+  // the running server via GET /v1/models — no key required. Falls back to the
+  // preset list when the server is unreachable.
+  const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
+  const [fetchFailed, setFetchFailed] = useState(false);
+  useEffect(() => {
+    if (!template.local) return;
+    let cancelled = false;
+    app.FetchProviderModels({
+      name: template.name,
+      builtIn: false,
+      added: false,
+      kind: template.kind,
+      baseUrl: template.baseUrl,
+      models: [],
+      modelsUrl: "",
+      default: "",
+      apiKeyEnv: template.apiKeyEnv,
+      keySet: false,
+      contextWindow: 0,
+      reasoningProtocol: "",
+      supportedEfforts: [],
+      defaultEffort: "",
+    })
+      .then((ms) => { if (!cancelled && ms.length > 0) setFetchedModels(ms); })
+      .catch(() => { if (!cancelled) setFetchFailed(true); });
+    return () => { cancelled = true; };
+  }, [template]);
+
+  const models = fetchedModels ?? (template.models.length > 0 ? template.models : [template.defaultModel]);
+
+  // Once the live list lands, retarget picks that no longer exist in it.
+  useEffect(() => {
+    if (!fetchedModels || fetchedModels.length === 0) return;
+    if (!fetchedModels.includes(defaultPick)) setDefaultPick(fetchedModels[0]);
+    if (visionPick !== "none" && !fetchedModels.includes(visionPick)) setVisionPick("none");
+    if (fastPick !== "follow" && !fetchedModels.includes(fastPick)) setFastPick("follow");
+  }, [fetchedModels, defaultPick, visionPick, fastPick]);
 
   const finish = useCallback(async () => {
     setState("saving");
@@ -345,6 +416,11 @@ export function ModelStep({ template, apiKey, onDone, t }: {
   return (
     <div className="onboarding__step">
       <div className="onboarding__tag">{t("onboarding.step3Hint")}</div>
+      {template.local && fetchFailed && (
+        <div className="onboarding__endpoint" role="status" style={{ marginTop: "0.5rem" }}>
+          {t("onboarding.localFetchFailed")}
+        </div>
+      )}
       <div className="onboarding__model-selectors" style={{ display: "flex", flexDirection: "column", gap: "1rem", margin: "1.5rem 0" }}>
         <div>
           <label className="set-label" style={{ display: "block", marginBottom: "0.25rem" }}>{t("settings.defaultModel")}</label>

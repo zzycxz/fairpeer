@@ -7,6 +7,7 @@ import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { CodeViewer } from "./CodeViewer";
 import { MermaidViewer } from "./MermaidViewer";
+import { openAttachmentViewer } from "./AttachmentViewer";
 import { normalizeMath } from "./mathNormalize";
 import { app, openExternal } from "../lib/bridge";
 
@@ -78,7 +79,8 @@ function removeStreamingCursor(container: HTMLElement): void {
 // MdImage renders markdown images. Relative `.fairpeer/attachments/...` paths
 // can't be loaded by a bare <img> (the webview has no disk base URL), so fetch
 // the data URL via the kernel — same mechanism UserMessage uses for previews.
-// http(s)/data: URLs render natively.
+// http(s)/data: URLs render natively. Clicking opens the attachment lightbox
+// (or the system browser for remote URLs) so inline images are inspectable.
 function MdImage({ src, alt }: { src?: string; alt?: string }) {
   const s = String(src ?? "");
   const [dataUrl, setDataUrl] = useState<string>("");
@@ -92,7 +94,29 @@ function MdImage({ src, alt }: { src?: string; alt?: string }) {
   }, [s]);
   const resolved = dataUrl || (s.startsWith(".fairpeer/attachments/") ? "" : s);
   if (!resolved) return null;
-  return <img className="md-img" src={resolved} alt={alt ?? ""} loading="lazy" />;
+  const name = alt?.trim() || s.split("/").filter(Boolean).pop() || s;
+  if (s.startsWith(".fairpeer/attachments/")) {
+    return (
+      <button
+        type="button"
+        className="md-img-open"
+        title={name}
+        onClick={() => openAttachmentViewer({ path: s, name, kind: "image", source: "attachment", previewUrl: dataUrl || undefined })}
+      >
+        <img className="md-img" src={resolved} alt={alt ?? ""} loading="lazy" draggable={false} />
+      </button>
+    );
+  }
+  return (
+    <img
+      className="md-img md-img--remote"
+      src={resolved}
+      alt={alt ?? ""}
+      loading="lazy"
+      draggable={false}
+      onClick={() => openExternal(s)}
+    />
+  );
 }
 
 const components: Components = {

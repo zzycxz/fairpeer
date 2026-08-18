@@ -7,6 +7,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -88,10 +89,18 @@ type Config struct {
 // the bridge actually connect — set it to your linkpeer-signal K base URL,
 // e.g. signal_url = "http://192.168.1.48:8080".
 type MobileBridgeConfig struct {
-	SignalURL   string   `toml:"signal_url"`    // linkpeer-signal K base URL; empty = DefaultConfig placeholder
-	STUNServers []string `toml:"stun_servers"`  // extra STUN servers for cross-network P2P (M3)
-	LogLevel    string   `toml:"log_level"`     // trace|debug|info|warn|error; empty = info
-	AutoConfirm bool     `toml:"auto_confirm"`  // 联调：收到 exchange 自动确认，不等用户点允许
+	SignalURL   string   `toml:"signal_url"`   // linkpeer-signal K base URL; empty = DefaultConfig placeholder
+	STUNServers []string `toml:"stun_servers"` // extra STUN servers for cross-network P2P (M3)
+	LogLevel    string   `toml:"log_level"`    // trace|debug|info|warn|error; empty = info
+	AutoConfirm bool     `toml:"auto_confirm"` // 联调：收到 exchange 自动确认，不等用户点允许
+	// PairAddress 钉死配对二维码使用哪块网卡的 IP（多网卡环境用户手选）。
+	// 空 = 自动：默认路由出口优先 + 全部真实网卡作为多候选（手机端自动匹配）。
+	PairAddress string `toml:"pair_address"`
+	// UDPKnock 单包敲门（M3 NAT 穿透辅助，默认关）：S 从 ICE 同一 UDP
+	// socket 向 C 的公网映射（srflx，经 KnockServer 探得）发敲门包，
+	// 提前打开 S 侧 NAT。双对称 NAT 无效（协议 §7）。
+	UDPKnock    bool   `toml:"udp_knock"`
+	KnockServer string `toml:"knock_server"` // 敲门依赖的远程 STUN，如 stun:host:3478
 }
 
 // UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
@@ -481,6 +490,16 @@ type CoworkConfig struct {
 	// essential for sites that require sign-in, and it reduces the "verify you
 	// are human" friction on revisit.
 	BrowserUserDataDir string `toml:"browser_user_data_dir"`
+	// BrowserAttachURL makes browser automation ATTACH to an already-running
+	// debug-enabled browser instead of launching a fresh instance per task
+	// (e.g. "http://127.0.0.1:9222" — the endpoint the desktop's managed
+	// browser uses). Chromium only accepts CDP connections when started with
+	// --remote-debugging-port (and, since Chrome 136, only with a non-default
+	// user-data-dir), so the target is normally the dedicated managed browser
+	// started from Settings → 办公, where logins persist and the window stays
+	// open between tasks. Empty = current behavior (launch + own lifecycle
+	// per browser_auto run).
+	BrowserAttachURL string `toml:"browser_attach_url"`
 	// PPTActiveTemplate is the id of the active PPT template (from the templates
 	// dir <user-config>/fairpeer/ppt-templates/<id>.json). When set, the ppt-wizard
 	// skill generates decks from that template: it opens the template's master_file
@@ -765,16 +784,16 @@ func (c CoworkConfig) EmailAccountByName(name string) (EmailAccount, bool) {
 
 // BotAllowlist 控制哪些用户可以使用 bot。
 type BotAllowlist struct {
-	Enabled      bool     `toml:"enabled"`
-	AllowAll     bool     `toml:"allow_all"`
-	Mode         string   `toml:"mode"` // "open"（默认，自动加入）| "review"（需管理员审批）
-	QQUsers       []string `toml:"qq_users"`
-	FeishuUsers   []string `toml:"feishu_users"`
-	WeixinUsers   []string `toml:"weixin_users"`
-	TelegramUsers []string `toml:"telegram_users"`
-	QQGroups      []string `toml:"qq_groups"`
-	FeishuGroups  []string `toml:"feishu_groups"`
-	WeixinGroups  []string `toml:"weixin_groups"`
+	Enabled        bool     `toml:"enabled"`
+	AllowAll       bool     `toml:"allow_all"`
+	Mode           string   `toml:"mode"` // "open"（默认，自动加入）| "review"（需管理员审批）
+	QQUsers        []string `toml:"qq_users"`
+	FeishuUsers    []string `toml:"feishu_users"`
+	WeixinUsers    []string `toml:"weixin_users"`
+	TelegramUsers  []string `toml:"telegram_users"`
+	QQGroups       []string `toml:"qq_groups"`
+	FeishuGroups   []string `toml:"feishu_groups"`
+	WeixinGroups   []string `toml:"weixin_groups"`
 	TelegramGroups []string `toml:"telegram_groups"`
 }
 
@@ -1265,6 +1284,7 @@ func IsLikelyChatModel(model string) bool {
 		"whisper": true, "embedding": true,
 		"moderation": true, "rerank": true, "dall": true,
 		"transcription": true,
+		"imagine":       true, "video": true, // image/video generation (grok-imagine-*, sora-*-video)
 	}
 	for _, tok := range tokens {
 		if nonChatTokens[tok] {
@@ -1508,11 +1528,13 @@ const LanguagePolicy = `Reply in the same language the user is using in their mo
 	`whenever they switch. Let this also guide the language you think in. Always keep code, ` +
 	`identifiers, file paths, shell commands, and technical terms in their original form — never translate them.`
 
-// Default returns the built-in default configuration. No provider is preset —
-// FairPeer is provider-agnostic, so the user configures their own via the CLI
-// setup wizard (fairpeer chat/run) or the desktop onboarding/settings panel.
-// An empty DefaultModel + empty Providers means the first run enters the setup
-// wizard (CLI) or the onboarding overlay (desktop).
+// Default returns the built-in default configuration with no providers. The
+// keyless local presets (Ollama, llama.cpp) are injected by Load/LoadForEdit
+// when no config file defines [[providers]]; cloud providers stay
+// user-configured via the CLI setup wizard (fairpeer chat/run) or the desktop
+// onboarding/settings panel. The local presets alone never suppress first-run
+// onboarding (they are skipped by Configured()-gated fallbacks and onboarding
+// checks).
 func Default() *Config {
 	return &Config{
 		ConfigVersion: 2,
@@ -1579,9 +1601,61 @@ func Default() *Config {
 		// ReserveMain=2 keeps requests in reserve for the main agent under
 		// concurrent load.
 		LLM: LLMConfig{RPM: 60, ReserveMain: 2},
-		// Providers intentionally empty — no built-in provider preset. The user
-		// configures providers via setup wizard / settings panel.
+		// Keyless local-model presets ship for every install: no API key, and
+		// they only ever talk to this machine. Cloud providers stay unset — the
+		// user configures those via setup wizard / settings panel. Defining any
+		// [[providers]] in a config file replaces this list wholesale (TOML
+		// array-of-tables semantics), so existing configs never see surprise
+		// additions.
+		// Providers stay empty here: baked-in non-nil providers would
+		// field-merge with user [[providers]] entries during TOML decode
+		// (array-of-tables decode merges by index). The keyless local presets
+		// are injected by LoadForRoot/LoadForEdit instead — only when no config
+		// file defines [[providers]].
 		Providers: nil,
+	}
+}
+
+// BuiltinLocalProviders returns fresh copies of the keyless local-model
+// presets (Ollama, llama.cpp) that ship for every install: no API key, and
+// they only ever talk to this machine. Load injects them when no config file
+// defines [[providers]] — a file that does define providers replaces them
+// wholesale, so existing setups never see surprise additions.
+func BuiltinLocalProviders() []ProviderEntry {
+	return []ProviderEntry{
+		{
+			Name:    "ollama",
+			Kind:    "openai",
+			BaseURL: "http://127.0.0.1:11434/v1",
+			Models:  []string{"qwen3-coder:30b", "qwen3:8b", "deepseek-r1:32b", "llama3.3:70b"},
+			Default: "qwen3-coder:30b",
+			// 8192 keeps history trimming conservative: Ollama's default
+			// num_ctx is 4096; raise context_window alongside OLLAMA_CONTEXT_LENGTH.
+			ContextWindow: 8192,
+			NoProxy:       true,
+		},
+		{
+			Name:    "llamacpp",
+			Kind:    "openai",
+			BaseURL: "http://127.0.0.1:8080/v1",
+			// llama-server serves whatever GGUF it was loaded with and ignores
+			// the model field unless routing; "local-model" is a placeholder the
+			// user replaces via model auto-discovery.
+			Models:        []string{"local-model"},
+			Default:       "local-model",
+			ContextWindow: 8192,
+			NoProxy:       true,
+		},
+	}
+}
+
+// appendBuiltinLocalProviders adds the keyless local presets for providers not
+// already present by name (a user-defined "ollama" entry always wins).
+func appendBuiltinLocalProviders(c *Config) {
+	for _, b := range BuiltinLocalProviders() {
+		if _, ok := c.Provider(b.Name); !ok {
+			c.Providers = append(c.Providers, b)
+		}
 	}
 }
 
@@ -1614,6 +1688,7 @@ func LoadForRoot(root string) (*Config, error) {
 	}
 	tomlSources = append(tomlSources, projectTOML)
 	sawConfigFile := false
+	providersDefined := false
 	for _, path := range tomlSources {
 		if _, err := os.Stat(path); err == nil {
 			sawConfigFile = true
@@ -1621,9 +1696,19 @@ func LoadForRoot(root string) (*Config, error) {
 				slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
 			}
 		}
-		if err := mergeFile(cfg, path); err != nil {
+		defined, err := mergeFile(cfg, path)
+		if err != nil {
 			return nil, err
 		}
+		if defined {
+			providersDefined = true
+		}
+	}
+	// Defining any [[providers]] replaces the built-in keyless local presets
+	// (Ollama, llama.cpp) wholesale; without user-defined providers the presets
+	// apply so local models work out of the box.
+	if !providersDefined {
+		appendBuiltinLocalProviders(cfg)
 	}
 	// toml.DecodeFile replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
@@ -1655,6 +1740,7 @@ func LoadForRoot(root string) (*Config, error) {
 	normalizeLegacyEffort(cfg)
 	normalizeLegacyMCPTiers(cfg)
 	normalizeLegacyProviderModels(cfg)
+	normalizeLocalProviderNoProxy(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
 	normalizeEffortConfig(cfg)
 	normalizeCoworkDefaults(cfg)
@@ -1675,6 +1761,36 @@ func resolveRoot(root string) string {
 		return "."
 	}
 	return filepath.Clean(root)
+}
+
+// normalizeLocalProviderNoProxy forces no_proxy on for providers whose
+// base_url points at this machine (Ollama, llama.cpp, LM Studio, …). Routing a
+// loopback request through an upstream proxy breaks local inference even though
+// the endpoint is otherwise correct.
+func normalizeLocalProviderNoProxy(c *Config) {
+	if c == nil {
+		return
+	}
+	for i := range c.Providers {
+		if c.Providers[i].BaseURL != "" && baseURLIsLoopback(c.Providers[i].BaseURL) {
+			c.Providers[i].NoProxy = true
+		}
+	}
+}
+
+func baseURLIsLoopback(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // normalizeLegacyEffort migrates the retired effort="off" (the old
@@ -1795,27 +1911,37 @@ func LoadForEdit(path string) *Config {
 			slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
 		}
 	}
-	if err := mergeFile(cfg, path); err != nil {
+	defined, err := mergeFile(cfg, path)
+	if err != nil {
 		slog.Warn("config: load for edit failed, using defaults", "path", path, "err", err)
+	}
+	if !defined {
+		// Mirror Load: no user-defined [[providers]] → seed the keyless local
+		// presets so the setup wizard starts from the same provider set.
+		appendBuiltinLocalProviders(cfg)
 	}
 	normalizePluginCommandLines(cfg)
 	normalizeLegacyEffort(cfg)
 	normalizeLegacyMCPTiers(cfg)
 	normalizeLegacyProviderModels(cfg)
+	normalizeLocalProviderNoProxy(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
 	normalizeEffortConfig(cfg)
 	return cfg
 }
 
-// mergeFile decodes a TOML file onto cfg if it exists. An absent file is not an error.
-func mergeFile(cfg *Config, path string) error {
+// mergeFile decodes a TOML file onto cfg if it exists. An absent file is not an
+// error. The bool reports whether the file defines [[providers]] — Load uses it
+// to decide whether the built-in local presets apply.
+func mergeFile(cfg *Config, path string) (providersDefined bool, err error) {
 	if _, err := os.Stat(path); err != nil {
-		return nil
+		return false, nil
 	}
-	if _, err := toml.DecodeFile(path, cfg); err != nil {
-		return fmt.Errorf("config %s: %w", path, err)
+	md, err := toml.DecodeFile(path, cfg)
+	if err != nil {
+		return false, fmt.Errorf("config %s: %w", path, err)
 	}
-	return nil
+	return md.IsDefined("providers"), nil
 }
 
 // normalizeLegacyMCPTiers keeps loaded legacy config files on the new product
@@ -2372,7 +2498,7 @@ func (c *Config) Validate(model string) error {
 	if e.BaseURL == "" {
 		return fmt.Errorf("provider %q: base_url is required", model)
 	}
-	if e.APIKey() == "" {
+	if e.APIKey() == "" && e.APIKeyEnv != "" {
 		return fmt.Errorf("provider %q: missing env %s", model, e.APIKeyEnv)
 	}
 	return nil
