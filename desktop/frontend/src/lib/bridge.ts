@@ -29,6 +29,7 @@ import type {
   EffortInfo,
   NetDevSettingsView,
   NetDevAuditEntryView,
+  NetDevProposal,
   NetDevSSHImportCandidate,
   FilePreview,
   HistoryMessage,
@@ -337,6 +338,11 @@ export interface AppBindings {
   // auth-failed | error.
   NetDevTestConnection(device: string): Promise<{ device: string; status: string; detail?: string; host?: string; keyType?: string; fingerprint?: string }>;
   NetDevTrustHostKey(fingerprint: string): Promise<void>;
+  // Proposal pipeline (human-only entry points; the agent can only draft).
+  NetDevProposals(): Promise<NetDevProposal[]>;
+  NetDevApproveProposal(id: string, confirm2: boolean): Promise<NetDevProposal>;
+  NetDevExecuteProposal(id: string): Promise<NetDevProposal>;
+  NetDevRollbackProposal(id: string): Promise<NetDevProposal>;
   NetDevAuditTail(n: number): Promise<NetDevAuditEntryView[]>;
   NetDevSSHImportCandidates(): Promise<NetDevSSHImportCandidate[]>;
   // ProbeMailAccount tests a saved mailbox's IMAP login by actually connecting.
@@ -1697,6 +1703,10 @@ function makeMockApp(): AppBindings {
       return { device, status: "error", detail: "browser dev mock: no device backend" };
     },
     async NetDevTrustHostKey(_fingerprint: string) {},
+    async NetDevProposals() { return [] as NetDevProposal[]; },
+    async NetDevApproveProposal(_id: string, _confirm2: boolean) { throw new Error("browser dev mock: no proposal backend"); },
+    async NetDevExecuteProposal(_id: string) { throw new Error("browser dev mock: no proposal backend"); },
+    async NetDevRollbackProposal(_id: string) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevAuditTail(_n: number) {
       return [] as NetDevAuditEntryView[];
     },

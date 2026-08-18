@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { app } from "../../lib/bridge";
+import { ProposalCenter } from "./ProposalCenter";
 import type { NetDevSettingsView, NetDevAuditEntryView, NetDevSSHImportCandidate } from "../../lib/types";
 
 // NetDevSection is the 运维 settings tab: device/hop inventory (persisted to
@@ -189,6 +190,8 @@ export function NetDevSection() {
         placeholder="例：10.30.0.0/16, 10.31.0.0/16"
         onChange={e => patch({ scopes: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })}
       />
+
+      <ProposalCenter />
 
       {/* 审计 */}
       <div className="set-label" style={{ margin: "14px 0 6px" }}>最近审计（{audit.length}）</div>

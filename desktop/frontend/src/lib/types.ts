@@ -1678,3 +1678,26 @@ export interface NetDevSSHImportCandidate {
   user: string;
   port: number;
 }
+
+export interface NetDevProposalStep {
+  device: string;
+  commands: string[];
+  rollback?: string[];
+  backup?: string;
+  applied: boolean;
+  error?: string;
+}
+
+// Mirrors the Go Proposal JSON (lowercase tags).
+export interface NetDevProposal {
+  id: string;
+  intent: string;
+  status: string;
+  steps: NetDevProposalStep[];
+  created_at: string;
+  approved_at?: string;
+  executed_at?: string;
+  approver?: string;
+  confirm2?: boolean;
+  note?: string;
+}
