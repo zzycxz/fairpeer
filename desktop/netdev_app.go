@@ -1,0 +1,295 @@
+package main
+
+// netdev_app.go bridges the 运维 (netdev) settings surface to the frontend:
+// device/hop inventory editing (persisted to the USER config — the pinned
+// global section), credential capture (secret store, netdev/* namespace),
+// audit tail for the settings page, and ~/.ssh/config import candidates.
+
+import (
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/netdev"
+	"github.com/zzycxz/fairpeer/internal/netdev/transport"
+)
+
+// NetDevDeviceView is one device row in the settings UI. Password never
+// crosses the bridge; PasswordSet tells the form whether a secret exists.
+type NetDevDeviceView struct {
+	Name        string   `json:"name"`
+	Vendor      string   `json:"vendor"`
+	OS          string   `json:"os"`
+	Model       string   `json:"model"`
+	Address     string   `json:"address"`
+	Port        int      `json:"port"`
+	Via         []string `json:"via"`
+	Group       string   `json:"group"`
+	Username    string   `json:"username"`
+	PasswordEnv string   `json:"passwordEnv"`
+	PasswordSet bool     `json:"passwordSet"`
+	IdentityFile string  `json:"identityFile"`
+	Encoding    string   `json:"encoding"`
+	AllowTelnet bool     `json:"allowTelnet"`
+	// Password is write-only from the form: blank = leave the stored secret
+	// untouched; non-blank = store it under the netdev namespace.
+	Password string `json:"password,omitempty"`
+}
+
+// NetDevHopView is one hop (bastion) row.
+type NetDevHopView struct {
+	Name         string `json:"name"`
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	User         string `json:"user"`
+	PasswordEnv  string `json:"passwordEnv"`
+	PasswordSet  bool   `json:"passwordSet"`
+	ProxyJump    string `json:"proxyJump"`
+	Password     string `json:"password,omitempty"`
+}
+
+// NetDevSettingsView is the whole settings payload.
+type NetDevSettingsView struct {
+	Enabled        bool               `json:"enabled"`
+	Devices        []NetDevDeviceView `json:"devices"`
+	Hops           []NetDevHopView    `json:"hops"`
+	Groups         []string           `json:"groups"` // group names (policy editing arrives with the proposal pipeline)
+	AuditRetention string             `json:"auditRetention"`
+	Scopes         []string           `json:"scopes"`
+}
+
+// NetDevAuditEntryView is one audit row for the settings page.
+type NetDevAuditEntryView struct {
+	Time    string `json:"time"`
+	Device  string `json:"device"`
+	Command string `json:"command"`
+	Class   string `json:"class"`
+	Status  string `json:"status"`
+	Error   string `json:"error,omitempty"`
+}
+
+// NetDevSSHImportCandidate is one concrete Host alias from ~/.ssh/config.
+type NetDevSSHImportCandidate struct {
+	Alias string `json:"alias"`
+	Host  string `json:"host"`
+	User  string `json:"user"`
+	Port  int    `json:"port"`
+}
+
+// NetDevSettings loads the pinned [netdev] section for the settings page.
+func (a *App) NetDevSettings() (NetDevSettingsView, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return NetDevSettingsView{}, err
+	}
+	v := NetDevSettingsView{
+		Enabled:        cfg.NetDev.Enabled,
+		AuditRetention: cfg.NetDev.AuditRetention,
+		Scopes:         cfg.NetDev.Discovery.Scopes,
+	}
+	for _, d := range cfg.NetDev.Devices {
+		v.Devices = append(v.Devices, NetDevDeviceView{
+			Name: d.Name, Vendor: d.Vendor, OS: d.OS, Model: d.Model,
+			Address: d.Address, Port: d.Port, Via: d.Via, Group: d.Group,
+			Username: d.Username, PasswordEnv: d.PasswordEnv,
+			PasswordSet: netdevSecretSet(netdev.SecretKindPassword, d.PasswordEnv),
+			IdentityFile: d.IdentityFile, Encoding: d.Encoding, AllowTelnet: d.AllowTelnet,
+		})
+	}
+	for _, h := range cfg.NetDev.Hops {
+		v.Hops = append(v.Hops, NetDevHopView{
+			Name: h.Name, Host: h.Host, Port: h.Port, User: h.User,
+			PasswordEnv: h.PasswordEnv,
+			PasswordSet: netdevSecretSet(netdev.SecretKindPassword, h.PasswordEnv),
+			ProxyJump:   h.ProxyJump,
+		})
+	}
+	for _, g := range cfg.NetDev.Groups {
+		v.Groups = append(v.Groups, g.Name)
+	}
+	return v, nil
+}
+
+func netdevSecretSet(kind, envName string) bool {
+	if strings.TrimSpace(envName) == "" {
+		return false
+	}
+	_, ok, err := netdev.GetSecret(kind, envName)
+	return err == nil && ok
+}
+
+// SetNetDevSettings persists the inventory: non-secret fields via the config
+// edit pipeline (which writes the USER config — [netdev] is pinned there),
+// secrets to the encrypted store under netdev/<kind>/<env-name>. Blank
+// password fields leave stored secrets untouched (standard form UX).
+func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("SetNetDevSettings panic", "panic", r)
+			err = fmt.Errorf("保存运维设置时发生内部错误：%v", r)
+		}
+	}()
+
+	// Secrets first (so a config save failure doesn't orphan a typed password).
+	for i, d := range v.Devices {
+		pwd := strings.TrimSpace(d.Password)
+		if pwd == "" {
+			continue
+		}
+		env := autoEnvName(d.PasswordEnv, "NETDEV_PWD_"+envSafe(d.Name))
+		v.Devices[i].PasswordEnv = env
+		if err := netdev.SetSecret(netdev.SecretKindPassword, env, pwd); err != nil {
+			return fmt.Errorf("save secret for device %q: %w", d.Name, err)
+		}
+	}
+	for i, h := range v.Hops {
+		pwd := strings.TrimSpace(h.Password)
+		if pwd == "" {
+			continue
+		}
+		env := autoEnvName(h.PasswordEnv, "NETDEV_PWD_"+envSafe(h.Name))
+		v.Hops[i].PasswordEnv = env
+		if err := netdev.SetSecret(netdev.SecretKindPassword, env, pwd); err != nil {
+			return fmt.Errorf("save secret for hop %q: %w", h.Name, err)
+		}
+	}
+
+	cfgErr := a.applyConfigOnly(func(c *config.Config) error {
+		nd := config.NetDevConfig{
+			Enabled:        v.Enabled,
+			AuditRetention: strings.TrimSpace(v.AuditRetention),
+			Devices:        make([]config.NetDevDevice, 0, len(v.Devices)),
+			Hops:           make([]config.NetDevHop, 0, len(v.Hops)),
+		}
+		if len(v.Scopes) > 0 {
+			nd.Discovery.Scopes = v.Scopes
+		}
+		// Preserve group definitions not editable from this form yet.
+		for _, g := range c.NetDev.Groups {
+			nd.Groups = append(nd.Groups, g)
+		}
+		if nd.AuditRetention == "" {
+			nd.AuditRetention = c.NetDev.AuditRetention
+		}
+		for _, d := range v.Devices {
+			nd.Devices = append(nd.Devices, config.NetDevDevice{
+				Name: strings.TrimSpace(d.Name), Vendor: strings.TrimSpace(d.Vendor),
+				OS: strings.TrimSpace(d.OS), Model: strings.TrimSpace(d.Model),
+				Address: strings.TrimSpace(d.Address), Port: d.Port,
+				Via: d.Via, Group: strings.TrimSpace(d.Group),
+				Username: strings.TrimSpace(d.Username), PasswordEnv: strings.TrimSpace(d.PasswordEnv),
+				IdentityFile: strings.TrimSpace(d.IdentityFile), Encoding: strings.TrimSpace(d.Encoding),
+				AllowTelnet: d.AllowTelnet,
+			})
+		}
+		for _, h := range v.Hops {
+			nd.Hops = append(nd.Hops, config.NetDevHop{
+				Name: strings.TrimSpace(h.Name), Host: strings.TrimSpace(h.Host),
+				Port: h.Port, User: strings.TrimSpace(h.User),
+				PasswordEnv: strings.TrimSpace(h.PasswordEnv),
+				ProxyJump:   strings.TrimSpace(h.ProxyJump),
+			})
+		}
+		if err := config.ValidateNetDev(nd); err != nil {
+			return err
+		}
+		c.NetDev = nd
+		return nil
+	})
+	if cfgErr != nil {
+		return cfgErr
+	}
+	slog.Info("SetNetDevSettings saved", "devices", len(v.Devices), "hops", len(v.Hops))
+	return nil
+}
+
+// NetDevDeleteSecret removes one stored credential (settings "清除密码").
+func (a *App) NetDevDeleteSecret(kind, envName string) error {
+	return netdev.DeleteSecret(kind, envName)
+}
+
+// NetDevAuditTail returns the last n audit entries (newest last).
+func (a *App) NetDevAuditTail(n int) ([]NetDevAuditEntryView, error) {
+	if n <= 0 || n > 500 {
+		n = 100
+	}
+	raw, err := os.ReadFile(netdev.AuditPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	start := len(lines) - n
+	if start < 0 {
+		start = 0
+	}
+	var out []NetDevAuditEntryView
+	for _, line := range lines[start:] {
+		if line == "" {
+			continue
+		}
+		var e struct {
+			Time    time.Time `json:"time"`
+			Device  string    `json:"device"`
+			Command string    `json:"command"`
+			Class   string    `json:"class"`
+			Status  string    `json:"status"`
+			Error   string    `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			continue
+		}
+		out = append(out, NetDevAuditEntryView{
+			Time: e.Time.Format("01-02 15:04:05"), Device: e.Device,
+			Command: e.Command, Class: e.Class, Status: e.Status, Error: e.Error,
+		})
+	}
+	return out, nil
+}
+
+// NetDevSSHImportCandidates lists concrete ~/.ssh/config Host aliases so the
+// settings form can prefill a device from an existing alias (address/user/
+// port resolved through the embedded parser; no ssh -G subprocess here).
+func (a *App) NetDevSSHImportCandidates() ([]NetDevSSHImportCandidate, error) {
+	src, err := transport.LoadUserSSHConfig()
+	if err != nil || src == nil {
+		return nil, err
+	}
+	var out []NetDevSSHImportCandidate
+	for _, h := range src.Aliases() {
+		eff := src.Effective(h.Alias)
+		out = append(out, NetDevSSHImportCandidate{
+			Alias: h.Alias, Host: eff.HostName, User: eff.User, Port: eff.Port,
+		})
+	}
+	return out, nil
+}
+
+func autoEnvName(existing, fallback string) string {
+	if s := strings.TrimSpace(existing); s != "" {
+		return s
+	}
+	return fallback
+}
+
+func envSafe(s string) string {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+		} else if r == '-' || r == ' ' {
+			b.WriteRune('_')
+		}
+	}
+	if b.Len() == 0 {
+		return "DEVICE"
+	}
+	return b.String()
+}

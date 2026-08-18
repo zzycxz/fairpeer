@@ -27,6 +27,9 @@ import type {
   DreamRunView,
   DreamStatusView,
   EffortInfo,
+  NetDevSettingsView,
+  NetDevAuditEntryView,
+  NetDevSSHImportCandidate,
   FilePreview,
   HistoryMessage,
   JobView,
@@ -323,6 +326,14 @@ export interface AppBindings {
   // button; OpenPPTTemplateDir opens the templates folder so the user can add
   // JSON templates.
   SetCoWorkSettings(v: CoWorkSettingsView): Promise<void>;
+  // netdev（运维）settings: inventory persists to the USER config ([netdev] is
+  // globally pinned); passwords go to the encrypted secret store under the
+  // netdev namespace (blank password field = keep the stored secret).
+  NetDevSettings(): Promise<NetDevSettingsView>;
+  SetNetDevSettings(v: NetDevSettingsView): Promise<void>;
+  NetDevDeleteSecret(kind: string, envName: string): Promise<void>;
+  NetDevAuditTail(n: number): Promise<NetDevAuditEntryView[]>;
+  NetDevSSHImportCandidates(): Promise<NetDevSSHImportCandidate[]>;
   // ProbeMailAccount tests a saved mailbox's IMAP login by actually connecting.
   // An empty name probes the Default account; a non-empty name probes that
   // named account. Returns ok/error/unconfigured so the mail card can show a
@@ -1661,7 +1672,24 @@ function makeMockApp(): AppBindings {
       emitMockEvent("agent:ready", { tabId: affectedId });
     }
   };
+  // NetDev mock: an in-memory settings store so the browser dev shell can
+  // exercise the netdev panel without the Go backend. Passwords/audit/ssh
+  // imports are stubbed — the real implementations live in the Go bindings.
+  let mockNetDev: NetDevSettingsView = { enabled: false, devices: [], hops: [], groups: [], auditRetention: "", scopes: [] };
   return {
+    async NetDevSettings() {
+      return mockNetDev;
+    },
+    async SetNetDevSettings(v: NetDevSettingsView) {
+      mockNetDev = { ...v, devices: [...v.devices], hops: [...v.hops], groups: [...v.groups], scopes: [...v.scopes] };
+    },
+    async NetDevDeleteSecret(_kind: string, _envName: string) {},
+    async NetDevAuditTail(_n: number) {
+      return [] as NetDevAuditEntryView[];
+    },
+    async NetDevSSHImportCandidates() {
+      return [] as NetDevSSHImportCandidate[];
+    },
     async Platform() {
       const override = browserPlatformOverride();
       if (override) return override;

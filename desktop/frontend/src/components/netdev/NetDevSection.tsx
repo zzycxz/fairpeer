@@ -1,0 +1,281 @@
+import { useCallback, useEffect, useState } from "react";
+import { app } from "../../lib/bridge";
+import type { NetDevSettingsView, NetDevAuditEntryView, NetDevSSHImportCandidate } from "../../lib/types";
+
+// NetDevSection is the 运维 settings tab: device/hop inventory (persisted to
+// the USER config — the [netdev] section is globally pinned), credentials
+// (secret store, never in TOML), scan scopes, and the audit tail. The agent
+// itself has no tool to edit any of this — inventory changes are human-only.
+
+const VENDORS = ["huawei", "cisco"];
+const OSES: Record<string, string[]> = {
+  huawei: ["vrp8", "vrp5"],
+  cisco: ["ios", "iosxe"],
+};
+
+type EditDevice = NetDevSettingsView["devices"][number];
+type EditHop = NetDevSettingsView["hops"][number];
+
+const emptyDevice = (): EditDevice => ({
+  name: "", vendor: "huawei", os: "vrp8", model: "", address: "", port: 22,
+  via: [], group: "", username: "", passwordEnv: "", passwordSet: false,
+  identityFile: "", encoding: "auto", allowTelnet: false, password: "",
+});
+
+const emptyHop = (): EditHop => ({
+  name: "", host: "", port: 22, user: "", passwordEnv: "", passwordSet: false,
+  proxyJump: "", password: "",
+});
+
+export function NetDevSection() {
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, devices: [], hops: [], groups: [], auditRetention: "", scopes: [] });
+  const [audit, setAudit] = useState<NetDevAuditEntryView[]>([]);
+  const [editingDevice, setEditingDevice] = useState<EditDevice | null>(null);
+  const [editingHop, setEditingHop] = useState<EditHop | null>(null);
+  const [sshCandidates, setSSHCandidates] = useState<NetDevSSHImportCandidate[]>([]);
+
+  const reload = useCallback(async () => {
+    try {
+      const [v, a] = await Promise.all([app.NetDevSettings(), app.NetDevAuditTail(50)]);
+      setView(v);
+      setAudit(a ?? []);
+      setErr("");
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => { void reload(); }, [reload]);
+
+  const save = useCallback(async (v: NetDevSettingsView) => {
+    setBusy(true);
+    try {
+      await app.SetNetDevSettings(v);
+      await reload();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [reload]);
+
+  const patch = (p: Partial<NetDevSettingsView>) => setView(v => ({ ...v, ...p }));
+
+  if (!loaded) return <div className="mem-hint">…</div>;
+
+  return (
+    <div>
+      {err && <div className="banner banner--error" style={{ marginBottom: 8 }}>{err}</div>}
+
+      <div className="optional-module__controls" style={{ marginBottom: 12 }}>
+        <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input type="checkbox" checked={view.enabled} onChange={e => patch({ enabled: e.target.checked })} />
+          启用运维（netdev）能力
+        </label>
+        <span className="btn btn--primary btn--small" role="button" onClick={() => void save(view)}>{busy ? "保存中…" : "保存"}</span>
+      </div>
+
+      <div className="mem-hint" style={{ marginBottom: 4 }}>
+        设备清单存于用户全局配置（项目级 fairpeer.toml 注入无效）；密码仅写入加密密钥库，绝不进 TOML。
+        诊断手结构性只读：写/危险命令一律拒执行并落审计。
+      </div>
+
+      {/* 设备清单 */}
+      <div className="set-label" style={{ margin: "14px 0 6px" }}>设备（{view.devices.length}）</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+        <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice(emptyDevice())}>+ 添加设备</span>
+        <span
+          className="btn btn--secondary btn--small" role="button"
+          onClick={async () => {
+            try {
+              const c = await app.NetDevSSHImportCandidates();
+              setSSHCandidates(c ?? []);
+            } catch (e) { setErr(String(e)); }
+          }}
+        >从 ~/.ssh/config 导入</span>
+      </div>
+      {sshCandidates.length > 0 && (
+        <div className="mem-hint" style={{ marginBottom: 6 }}>
+          {sshCandidates.slice(0, 12).map(c => (
+            <span key={c.alias}
+              className="btn btn--secondary btn--small" role="button" style={{ marginRight: 6 }}
+              onClick={() => setEditingDevice({
+                ...emptyDevice(),
+                name: c.alias, address: c.host || c.alias, username: c.user || "",
+                port: c.port || 22,
+              })}
+            >{c.alias}</span>
+          ))}
+        </div>
+      )}
+      {view.devices.length > 0 && (
+        <table className="mem-hint" style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
+          <thead>
+            <tr style={{ textAlign: "left" }}><th>名称</th><th>厂商/OS</th><th>地址</th><th>路由</th><th>凭证</th><th /></tr>
+          </thead>
+          <tbody>
+            {view.devices.map(d => (
+              <tr key={d.name}>
+                <td>{d.name}</td>
+                <td>{d.vendor}/{d.os}</td>
+                <td>{d.address}{d.port && d.port !== 22 ? `:${d.port}` : ""}</td>
+                <td>{(d.via ?? []).join("→") || "直连"}</td>
+                <td>{d.passwordSet ? "✓ 已设" : "✗ 未设"}</td>
+                <td>
+                  <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice({ ...d, password: "" })}>编辑</span>{" "}
+                  <span className="btn btn--secondary btn--small" role="button" onClick={() => {
+                    if (confirm(`删除设备 ${d.name}？（不影响已存凭证）`)) void save({ ...view, devices: view.devices.filter(x => x.name !== d.name) });
+                  }}>删除</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {/* 跳板 */}
+      <div className="set-label" style={{ margin: "14px 0 6px" }}>跳板/堡垒机（{view.hops.length}）</div>
+      <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingHop(emptyHop())}>+ 添加跳板</span>
+      {view.hops.map(h => (
+        <div key={h.name} className="mem-hint" style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <span style={{ minWidth: 120 }}>{h.name} → {h.host}{h.proxyJump ? `（经 ${h.proxyJump}）` : ""}</span>
+          <span>{h.passwordSet ? "✓ 凭证已设" : "✗ 未设"}</span>
+          <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingHop({ ...h, password: "" })}>编辑</span>
+          <span className="btn btn--secondary btn--small" role="button" onClick={() => {
+            if (confirm(`删除跳板 ${h.name}？`)) void save({ ...view, hops: view.hops.filter(x => x.name !== h.name) });
+          }}>删除</span>
+        </div>
+      ))}
+
+      {/* 探测范围 */}
+      <div className="set-label" style={{ margin: "14px 0 6px" }}>探测范围白名单（CIDR，逗号分隔）</div>
+      <input
+        className="mem-input" style={{ width: "100%" }}
+        value={(view.scopes ?? []).join(", ")}
+        placeholder="例：10.30.0.0/16, 10.31.0.0/16"
+        onChange={e => patch({ scopes: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })}
+      />
+
+      {/* 审计 */}
+      <div className="set-label" style={{ margin: "14px 0 6px" }}>最近审计（{audit.length}）</div>
+      <div className="mem-hint" style={{ maxHeight: 200, overflowY: "auto" }}>
+        {audit.length === 0 && <div>暂无记录。诊断命令执行后此处可见（命令/分类/结果）。</div>}
+        {audit.slice().reverse().map((e, i) => (
+          <div key={i} style={{ display: "flex", gap: 8 }}>
+            <span style={{ minWidth: 96, opacity: 0.7 }}>{e.time}</span>
+            <span style={{ minWidth: 90 }}>{e.device}</span>
+            <span style={{ minWidth: 64 }} className={e.class === "read" ? "" : "banner--error"}>{e.class}</span>
+            <span style={{ minWidth: 80, opacity: 0.7 }}>{e.status}</span>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{e.command}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* 设备编辑表单 */}
+      {editingDevice && (
+        <Modal title={view.devices.some(d => d.name === editingDevice.name) ? "编辑设备" : "添加设备"} onClose={() => setEditingDevice(null)}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <Field label="名称 *"><input className="mem-input" value={editingDevice.name} onChange={e => setEditingDevice({ ...editingDevice, name: e.target.value })} /></Field>
+            <Field label="厂商">
+              <select className="mem-select" value={editingDevice.vendor} onChange={e => setEditingDevice({ ...editingDevice, vendor: e.target.value, os: (OSES[e.target.value] ?? [""])[0] })}>
+                {VENDORS.map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </Field>
+            <Field label="OS">
+              <select className="mem-select" value={editingDevice.os} onChange={e => setEditingDevice({ ...editingDevice, os: e.target.value })}>
+                {(OSES[editingDevice.vendor] ?? []).map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </Field>
+            <Field label="型号"><input className="mem-input" value={editingDevice.model} onChange={e => setEditingDevice({ ...editingDevice, model: e.target.value })} /></Field>
+            <Field label="地址 *"><input className="mem-input" value={editingDevice.address} onChange={e => setEditingDevice({ ...editingDevice, address: e.target.value })} /></Field>
+            <Field label="端口"><input className="mem-input" type="number" value={editingDevice.port} onChange={e => setEditingDevice({ ...editingDevice, port: Number(e.target.value) || 22 })} /></Field>
+            <Field label="登录用户"><input className="mem-input" value={editingDevice.username} onChange={e => setEditingDevice({ ...editingDevice, username: e.target.value })} /></Field>
+            <Field label={editingDevice.passwordSet ? "密码（留空=保持不变）" : "密码"}>
+              <input className="mem-input" type="password" value={editingDevice.password} onChange={e => setEditingDevice({ ...editingDevice, password: e.target.value })} />
+            </Field>
+            <Field label="路由 via（跳板名，逗号分隔）">
+              <input className="mem-input" value={(editingDevice.via ?? []).join(",")}
+                onChange={e => setEditingDevice({ ...editingDevice, via: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })} />
+            </Field>
+            <Field label="编码">
+              <select className="mem-select" value={editingDevice.encoding || "auto"} onChange={e => setEditingDevice({ ...editingDevice, encoding: e.target.value })}>
+                {["auto", "utf-8", "gbk"].map(x => <option key={x} value={x}>{x}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice(null)}>取消</span>
+            <span
+              className="btn btn--primary btn--small" role="button"
+              onClick={() => {
+                if (!editingDevice.name.trim() || !editingDevice.address.trim()) { setErr("名称和地址必填"); return; }
+                const exists = view.devices.some(d => d.name === editingDevice.name);
+                const devices = exists ? view.devices.map(d => d.name === editingDevice.name ? editingDevice : d) : [...view.devices, editingDevice];
+                setEditingDevice(null);
+                void save({ ...view, devices });
+              }}
+            >保存设备</span>
+          </div>
+        </Modal>
+      )}
+
+      {/* 跳板编辑表单 */}
+      {editingHop && (
+        <Modal title={view.hops.some(h => h.name === editingHop.name) ? "编辑跳板" : "添加跳板"} onClose={() => setEditingHop(null)}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <Field label="名称 *"><input className="mem-input" value={editingHop.name} onChange={e => setEditingHop({ ...editingHop, name: e.target.value })} /></Field>
+            <Field label="地址 *"><input className="mem-input" value={editingHop.host} onChange={e => setEditingHop({ ...editingHop, host: e.target.value })} /></Field>
+            <Field label="端口"><input className="mem-input" type="number" value={editingHop.port} onChange={e => setEditingHop({ ...editingHop, port: Number(e.target.value) || 22 })} /></Field>
+            <Field label="用户"><input className="mem-input" value={editingHop.user} onChange={e => setEditingHop({ ...editingHop, user: e.target.value })} /></Field>
+            <Field label={editingHop.passwordSet ? "密码（留空=保持不变）" : "密码"}>
+              <input className="mem-input" type="password" value={editingHop.password} onChange={e => setEditingHop({ ...editingHop, password: e.target.value })} />
+            </Field>
+            <Field label="上级跳板（可选，名称）"><input className="mem-input" value={editingHop.proxyJump} onChange={e => setEditingHop({ ...editingHop, proxyJump: e.target.value })} /></Field>
+          </div>
+          <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingHop(null)}>取消</span>
+            <span
+              className="btn btn--primary btn--small" role="button"
+              onClick={() => {
+                if (!editingHop.name.trim() || !editingHop.host.trim()) { setErr("名称和地址必填"); return; }
+                const exists = view.hops.some(h => h.name === editingHop.name);
+                const hops = exists ? view.hops.map(h => h.name === editingHop.name ? editingHop : h) : [...view.hops, editingHop];
+                setEditingHop(null);
+                void save({ ...view, hops });
+              }}
+            >保存跳板</span>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="set-label" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div
+      role="dialog" aria-modal="true"
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{ background: "var(--bg-elevated, #23272e)", borderRadius: 8, padding: 16, minWidth: 520, maxWidth: 680, maxHeight: "80vh", overflowY: "auto" }}>
+        <div className="set-label" style={{ marginBottom: 10 }}>{title}</div>
+        {children}
+      </div>
+    </div>
+  );
+}

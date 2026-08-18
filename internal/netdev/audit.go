@@ -54,6 +54,20 @@ func auditFile() string {
 	return filepath.Join(netdevStateDir(), "audit.jsonl")
 }
 
+// AuditPath returns the audit file location (test override included).
+func AuditPath() string {
+	if p := auditPathLocked(); p != "" {
+		return p
+	}
+	return filepath.Join(netdevStateDir(), "audit.jsonl")
+}
+
+func auditPathLocked() string {
+	auditMu.Lock()
+	defer auditMu.Unlock()
+	return auditPath
+}
+
 // netdevStateDir is the netdev state directory beside secrets.enc.json.
 func netdevStateDir() string {
 	dir, err := os.UserConfigDir()

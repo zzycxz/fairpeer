@@ -714,7 +714,7 @@ export default function App() {
   // kept in sync by the coworkActive effect below and read via the getter passed
   // to useController so the controller's OpenProjectTab/OpenGlobalTab calls scope
   // the topic to the active profile without stale-closure issues.
-  const profileRef = useRef<"dev" | "cowork">("dev");
+  const profileRef = useRef<"dev" | "cowork" | "netdev">("dev");
   const {
     state,
     activeTabId,
@@ -1009,7 +1009,7 @@ export default function App() {
       });
     }
     // Frontend DOM event (e.g. dock → settings → bots). detail carries the tab.
-    const validTabs = ["general", "models", "bots", "cowork", "mcp", "skills", "memory", "permissions", "sandbox", "network", "hooks", "appearance", "updates", "mobile"];
+    const validTabs = ["general", "models", "bots", "cowork", "mcp", "skills", "memory", "permissions", "sandbox", "network", "hooks", "appearance", "updates", "mobile", "netdev"];
     const handler = (e: Event) => {
       closeTransientOverlays();
       const tab = (e as CustomEvent<string>).detail;
@@ -1459,7 +1459,8 @@ export default function App() {
   // automatically (see the active-tab-sync effect below).
   const switchProfile = useCallback(
     async (name: string) => {
-      const targetProfile = name.toLowerCase() === "cowork" ? "cowork" : "dev";
+      const rawProfile = name.toLowerCase();
+      const targetProfile: "dev" | "cowork" | "netdev" = rawProfile === "cowork" || rawProfile === "netdev" ? rawProfile : "dev";
       // Close any open modal/overlay (History panel, transient popovers) — their
       // cached content belongs to the outgoing profile's view and would be stale.
       closeTransientOverlays();

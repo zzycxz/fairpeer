@@ -1158,7 +1158,7 @@ export interface DreamStatusView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "bots" | "cowork" | "preference" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "network" | "hooks" | "appearance" | "updates" | "mobile";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "cowork" | "preference" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "network" | "hooks" | "appearance" | "updates" | "mobile" | "netdev";
 
 // Settings panel payloads (desktop/settings_app.go).
 export interface ProviderView {
@@ -1620,4 +1620,61 @@ export interface MergeCandidate {
   keepRaw?: string;
   mergeName?: string;
   mergeRaw?: string;
+}
+
+// ── netdev（运维）───────────────────────────────────────────────────────────
+// NetDevSettingsView mirrors the Go NetDevSettingsView: the pinned USER-config
+// inventory plus write-only password fields (blank = keep the stored secret).
+export interface NetDevDeviceView {
+  name: string;
+  vendor: string;
+  os: string;
+  model: string;
+  address: string;
+  port: number;
+  via: string[];
+  group: string;
+  username: string;
+  passwordEnv: string;
+  passwordSet: boolean;
+  identityFile: string;
+  encoding: string;
+  allowTelnet: boolean;
+  password?: string;
+}
+
+export interface NetDevHopView {
+  name: string;
+  host: string;
+  port: number;
+  user: string;
+  passwordEnv: string;
+  passwordSet: boolean;
+  proxyJump: string;
+  password?: string;
+}
+
+export interface NetDevSettingsView {
+  enabled: boolean;
+  devices: NetDevDeviceView[];
+  hops: NetDevHopView[];
+  groups: string[];
+  auditRetention: string;
+  scopes: string[];
+}
+
+export interface NetDevAuditEntryView {
+  time: string;
+  device: string;
+  command: string;
+  class: string;
+  status: string;
+  error?: string;
+}
+
+export interface NetDevSSHImportCandidate {
+  alias: string;
+  host: string;
+  user: string;
+  port: number;
 }

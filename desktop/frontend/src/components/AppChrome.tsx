@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CalendarDays, Code2, Minus, PanelLeft, PanelRight, Search, Square, X } from "lucide-react";
+import { CalendarDays, Code2, Minus, Network, PanelLeft, PanelRight, Search, Square, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { TabBar } from "./TabBar";
 import type { TabMeta } from "../lib/types";
@@ -201,6 +201,7 @@ const PROFILE_SEGMENTS: ReadonlyArray<{
 }> = [
   { key: "dev", labelKey: "cowork.badgeDev", titleKey: "cowork.switchToDev", Icon: Code2 },
   { key: "cowork", labelKey: "cowork.badgeCoWork", titleKey: "cowork.switchToCoWork", Icon: CalendarDays },
+  { key: "netdev", labelKey: "cowork.badgeNetDev", titleKey: "cowork.switchToNetDev", Icon: Network },
 ];
 
 function ProfileSegmented({
@@ -212,7 +213,8 @@ function ProfileSegmented({
   onSwitchProfile: (name: string) => void;
   t: (key: never, vars?: Record<string, string | number>) => string;
 }) {
-  const activeKey = profile.toLowerCase() === "cowork" ? "cowork" : "dev";
+  const p = profile.toLowerCase();
+  const activeKey = p === "cowork" || p === "netdev" ? p : "dev";
   const propIdx = Math.max(
     0,
     PROFILE_SEGMENTS.findIndex((s) => s.key === activeKey),
