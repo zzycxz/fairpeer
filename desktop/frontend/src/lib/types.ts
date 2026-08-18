@@ -1719,3 +1719,15 @@ export interface NetDevFinding {
   suggestion?: string;
   created_at: string;
 }
+
+export interface NetDevTopologyNode {
+  name: string;
+  managed: boolean;
+  device_ip?: string;
+}
+
+export interface NetDevTopologyGraph {
+  nodes: NetDevTopologyNode[];
+  edges: { local_device: string; local_port: string; remote_device: string; remote_port?: string; remote_ip?: string; source: string }[];
+  at: string;
+}

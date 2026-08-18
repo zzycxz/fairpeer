@@ -30,6 +30,7 @@ import type {
   NetDevSettingsView,
   NetDevAuditEntryView,
   NetDevFinding,
+  NetDevTopologyGraph,
   NetDevProposal,
   NetDevSSHImportCandidate,
   FilePreview,
@@ -346,6 +347,9 @@ export interface AppBindings {
   NetDevFindings(): Promise<NetDevFinding[]>;
   // Emergency stop: close every device connection at once (audited).
   NetDevEmergencyStop(): Promise<number>;
+  // UI quick-diagnose: one read-only command through the SAME sealed path.
+  NetDevQuickExec(device: string, command: string): Promise<{ device: string; command: string; class: string; output: string; is_error: boolean; refused?: boolean; refusal?: string }>;
+  NetDevTopologySnapshot(): Promise<NetDevTopologyGraph | null>;
   NetDevApproveProposal(id: string, confirm2: boolean): Promise<NetDevProposal>;
   NetDevExecuteProposal(id: string): Promise<NetDevProposal>;
   NetDevRollbackProposal(id: string): Promise<NetDevProposal>;
@@ -1713,6 +1717,10 @@ function makeMockApp(): AppBindings {
     async NetDevRunInspection() { return null; },
     async NetDevFindings() { return [] as NetDevFinding[]; },
     async NetDevEmergencyStop() { return 0; },
+    async NetDevQuickExec(device: string, command: string) {
+      return { device, command, class: "read", output: "(browser dev mock: no device backend)", is_error: false };
+    },
+    async NetDevTopologySnapshot() { return null; },
     async NetDevApproveProposal(_id: string, _confirm2: boolean) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevExecuteProposal(_id: string) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevRollbackProposal(_id: string) { throw new Error("browser dev mock: no proposal backend"); },

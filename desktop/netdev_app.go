@@ -241,6 +241,32 @@ func startInspectionScheduler(a *App) {
 	})
 }
 
+// NetDevQuickExec runs ONE read-only command from the UI (device detail
+// quick-diagnose buttons) through the SAME sealed path as the agent's
+// netdev_exec: classifier, redaction, audit — write/dangerous refused.
+func (a *App) NetDevQuickExec(device, command string) (netdev.ExecResult, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return netdev.ExecResult{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 45*time.Second)
+	defer cancel()
+	res := netdev.SharedManager(cfg).Exec(ctx, device, command)
+	return res, nil
+}
+
+// NetDevTopologySnapshot merges every device's CDP/LLDP table into one graph
+// for the layout mini-map (managed vs unmanaged nodes).
+func (a *App) NetDevTopologySnapshot() (*netdev.TopologyGraph, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Minute)
+	defer cancel()
+	return netdev.SharedManager(cfg).TopologySnapshot(ctx)
+}
+
 // NetDevEmergencyStop closes every device connection/session at once (the
 // red button; audited). Returns how many connections were dropped.
 func (a *App) NetDevEmergencyStop() (int, error) {

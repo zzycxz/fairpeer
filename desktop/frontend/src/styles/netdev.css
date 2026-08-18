@@ -153,3 +153,18 @@
 .ndv__ok { color: #7ee2a8; }
 .ndv__zero { color: #7ee2a8; font-weight: 700; }
 .ndv__warn { color: #e0a800; font-weight: 600; }
+
+.ndv__device--click { cursor: pointer; border-radius: var(--radius-sm); }
+.ndv__device--click:hover { background: var(--bg-hover, rgba(127,127,127,.12)); }
+
+.ndv__pre {
+  margin: 4px 0 0;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: var(--radius-sm);
+  max-height: 180px;
+  overflow: auto;
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

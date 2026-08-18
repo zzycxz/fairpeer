@@ -1,9 +1,11 @@
 package netdev
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Topology: parse CDP/LLDP neighbor output into device edges. Neighbors that
@@ -116,6 +118,67 @@ func parseCiscoCDP(out string) []TopologyEdge {
 		})
 	}
 	return edges
+}
+
+// TopologySnapshot runs the neighbor query on every inventory device (the
+// sealed read path, redacted) and merges the edges. Nodes not in the
+// inventory carry Unmanaged=true — visible, never connectable.
+type TopologyNode struct {
+	Name     string `json:"name"`
+	Managed  bool   `json:"managed"`
+	DeviceIP string `json:"device_ip,omitempty"`
+}
+
+// TopologyGraph is the merged snapshot for the layout's mini-map.
+type TopologyGraph struct {
+	Nodes []TopologyNode `json:"nodes"`
+	Edges []TopologyEdge `json:"edges"`
+	At    string         `json:"at"`
+}
+
+func (m *Manager) TopologySnapshot(ctx context.Context) (*TopologyGraph, error) {
+	g := &TopologyGraph{At: time.Now().Format("15:04:05")}
+	seenNode := map[string]bool{}
+	managed := map[string]bool{}
+	for _, d := range m.cfg.NetDev.Devices {
+		managed[d.Name] = true
+	}
+	for _, d := range m.cfg.NetDev.Devices {
+		drv, ok := m.driverFor(d)
+		if !ok {
+			continue
+		}
+		cmd, ok := NeighborCommand(drv.Key())
+		if !ok {
+			continue
+		}
+		res := m.Exec(ctx, d.Name, cmd)
+		if res.Refused {
+			continue
+		}
+		edges, err := parseNeighbors(drvKey(d), res.Output)
+		if err != nil {
+			continue
+		}
+		for i := range edges {
+			edges[i].LocalDevice = d.Name
+			g.Edges = append(g.Edges, edges[i])
+		}
+	}
+	// Nodes: every managed device that appears, plus unmanaged neighbors.
+	for _, d := range m.cfg.NetDev.Devices {
+		if !seenNode[d.Name] {
+			seenNode[d.Name] = true
+			g.Nodes = append(g.Nodes, TopologyNode{Name: d.Name, Managed: true, DeviceIP: d.Address})
+		}
+	}
+	for _, e := range g.Edges {
+		if !seenNode[e.RemoteDevice] {
+			seenNode[e.RemoteDevice] = true
+			g.Nodes = append(g.Nodes, TopologyNode{Name: e.RemoteDevice, Managed: managed[e.RemoteDevice], DeviceIP: e.RemoteIP})
+		}
+	}
+	return g, nil
 }
 
 // parseNeighbors dispatches on the driver key.
