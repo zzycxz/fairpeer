@@ -162,6 +162,22 @@ func (m *Manager) audit(d config.NetDevDevice, cmd string, class driver.Class, s
 	}
 }
 
+// driverFor resolves a device's driver.
+func (m *Manager) driverFor(d config.NetDevDevice) (driver.Driver, bool) {
+	if d.Name == "" && d.Vendor == "" {
+		return nil, false
+	}
+	return driver.For(d.Vendor, d.OS)
+}
+
+func drvKey(d config.NetDevDevice) string {
+	drv, ok := driver.For(d.Vendor, d.OS)
+	if !ok {
+		return ""
+	}
+	return drv.Key()
+}
+
 // runRead obtains (or establishes) the device's cached session and runs the
 // already-classified-Read command.
 func (m *Manager) runRead(ctx context.Context, d config.NetDevDevice, drv driver.Driver, command string) (Result, error) {
@@ -305,6 +321,79 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&execTool{m: m})
 	reg.Add(&devicesTool{cfg: cfg})
 	reg.Add(&discoverTool{m: m})
+	reg.Add(&topologyTool{m: m})
+}
+
+type topologyTool struct{ m *Manager }
+
+func (t *topologyTool) Name() string { return "netdev_topology" }
+
+func (t *topologyTool) Description() string {
+	return "Read one device's CDP/LLDP neighbor table and return adjacency edges (local port ↔ remote device/port/IP). " +
+		"Neighbor names not in the inventory are UNMANAGED — visible but not connectable until a human registers them. " +
+		"Call once per device to assemble a topology; correlate edges by interface name (abbreviations are normalized)."
+}
+
+func (t *topologyTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"device": {"type": "string", "description": "device name from netdev_devices"}
+		},
+		"required": ["device"]
+	}`)
+}
+
+func (t *topologyTool) ReadOnly() bool { return true }
+
+func (t *topologyTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		Device string `json:"device"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(a.Device) == "" {
+		return "", errors.New("netdev_topology: device is required")
+	}
+	res := t.m.Exec(ctx, a.Device, t.neighborCommand(a.Device))
+	if res.Refused {
+		return "", fmt.Errorf("netdev_topology: %s", res.Refusal)
+	}
+	if res.IsError {
+		return "", fmt.Errorf("netdev_topology: device reported an error for the neighbor query: %s", firstLine(res.Output))
+	}
+	device, _ := t.m.cfg.NetDevDeviceByName(a.Device)
+	edges, err := parseNeighbors(drvKey(device), res.Output)
+	if err != nil {
+		return "", err
+	}
+	for i := range edges {
+		edges[i].LocalDevice = a.Device
+	}
+	b, err := json.MarshalIndent(edges, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// neighborCommand resolves the driver's neighbor query (read-classified by
+// construction: display/show prefixes).
+func (t *topologyTool) neighborCommand(deviceName string) string {
+	device, ok := t.m.cfg.NetDevDeviceByName(deviceName)
+	if !ok {
+		return ""
+	}
+	cmd, _ := NeighborCommand(drvKey(device))
+	return cmd
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 type discoverTool struct{ m *Manager }
@@ -349,7 +438,7 @@ func (t *discoverTool) Execute(ctx context.Context, args json.RawMessage) (strin
 	}
 	if err := AppendAudit(Audit{
 		Device: "(discover)", Command: "tcp-probe " + a.CIDR + " via=" + strings.TrimSpace(a.Via),
-		Class:  "read", Status: AuditOK,
+		Class: "read", Status: AuditOK,
 	}); err != nil {
 		_ = err
 	}

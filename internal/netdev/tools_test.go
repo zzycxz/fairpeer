@@ -159,6 +159,27 @@ func TestExecUnknownDeviceRefused(t *testing.T) {
 	}
 }
 
+// TestTopologyToolEndToEnd: exec → clean → parse → edges, through the
+// simulated Huawei CLI.
+func TestTopologyToolEndToEnd(t *testing.T) {
+	sim := startSimDevice(t)
+	m, _ := testManager(t, sim)
+	res := m.Exec(context.Background(), "sw1", "display lldp neighbor")
+	if res.Refused {
+		t.Fatalf("neighbor query refused: %s", res.Refusal)
+	}
+	edges, err := parseNeighbors("huawei-vrp", res.Output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 3 {
+		t.Fatalf("edges = %d, want 3 (got %+v)", len(edges), edges)
+	}
+	if edges[0].RemoteDevice != "ACCESS-SW-2" || edges[0].RemotePort != "GigabitEthernet0/0/24" {
+		t.Fatalf("edge[0] = %+v", edges[0])
+	}
+}
+
 // TestExecSealAcrossSession: the seal holds on a live session too — after a
 // successful read, a write on the same cached session is still refused, and
 // the session stays usable afterwards.

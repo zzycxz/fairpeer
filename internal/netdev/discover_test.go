@@ -14,7 +14,7 @@ func discoverTestManager(t *testing.T, scopes ...string) *Manager {
 	t.Helper()
 	cfg := config.Default()
 	cfg.NetDev = config.NetDevConfig{
-		Enabled: true,
+		Enabled:   true,
 		Discovery: config.NetDevDiscovery{Scopes: scopes, Rate: 8},
 	}
 	m := NewManager(cfg)

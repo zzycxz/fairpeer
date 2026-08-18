@@ -153,6 +153,9 @@ func simDispatch(ch ssh.Channel, cmd string) {
 		// GBK-encoded Chinese output.
 		gbk, _ := simplifiedchinese.GBK.NewEncoder().Bytes([]byte("\n接口当前状态: UP\n线路协议状态: UP\n"))
 		ch.Write(gbk)
+	case cmd == "display lldp neighbor":
+		// The LLDP fixture from topology_test.go, verbatim device output.
+		ch.Write([]byte("\n" + huaweiLLDPFixture))
 	case cmd == "display long":
 		// 60 lines in chunks of 24 behind a More prompt. The marker's bytes
 		// stay in the stream (as on real devices whose ANSI erase sequences
