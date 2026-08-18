@@ -610,6 +610,18 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # [netdev.discovery]                     # 探测范围白名单（护栏，永不关闭）
 # scopes = ["10.30.0.0/16"]
 # rate   = 50
+#
+# [netdev.extra_read]                     # 知识生长：按厂商扩展只读命令表
+# huawei = ["display health", "display diagnostic-information"]   # 驱动 key：
+# cisco  = ["show archive"]                                        # huawei-vrp/
+# zte    = ["show processor"]                                      # cisco-ios/zte-zxr10
+#
+# inspection_interval = "1h"              # 定时巡检（空 = 关闭），只读电池落档 Finding
+#
+# [netdev.assessment]                     # 评估模式信封（激活弱口令核查等必须有效）
+# engagement_id = "ASSESS-2026-018"
+# expires       = "2026-08-25"            # 过期自动拒绝
+# approver      = "zhang@corp"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
