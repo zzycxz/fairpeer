@@ -33,7 +33,7 @@ export function NetDevSection() {
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, devices: [], hops: [], groups: [], auditRetention: "", scopes: [] });
+  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [] });
   const [audit, setAudit] = useState<NetDevAuditEntryView[]>([]);
   const [editingDevice, setEditingDevice] = useState<EditDevice | null>(null);
   const [editingHop, setEditingHop] = useState<EditHop | null>(null);
@@ -107,6 +107,10 @@ export function NetDevSection() {
         <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input type="checkbox" checked={view.enabled} onChange={e => patch({ enabled: e.target.checked })} />
           启用运维（netdev）能力
+        </label>
+        <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: 16 }}>
+          网络名称
+          <input className="mem-input" style={{ width: 180 }} value={view.networkName ?? ""} placeholder="如：总部生产网" onChange={e => patch({ networkName: e.target.value })} />
         </label>
         <span className="btn btn--primary btn--small" role="button" onClick={() => void save(view)}>{busy ? "保存中…" : "保存"}</span>
       </div>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import logoSymbol from "./assets/logo-symbol.png";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
   Activity,
@@ -40,7 +41,6 @@ import { TodoPanel } from "./components/TodoPanel";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
 import { ClearContextCard } from "./components/ClearContextCard";
-import { StatusBar } from "./components/StatusBar";
 import { SidebarFooter } from "./components/SidebarFooter";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SidebarSessions } from "./components/SidebarSessions";
@@ -69,7 +69,6 @@ import {
   type CollaborationMode,
   type ComposerInsertRequest,
   type Mode,
-  type ProjectNode,
   type SessionMeta,
   type SettingsTab,
   type SettingsView,
@@ -493,30 +492,6 @@ function SidebarImConnectionDetail({ connection, sessions, allConnections, onClo
   );
 }
 
-function activeTopicTurnsFromTree(tree: ProjectNode[], tab?: TabMeta): number | undefined {
-  if (!tab?.topicId) return undefined;
-  const targetScope = tab.scope === "global" ? "global" : "project";
-  const walk = (nodes: ProjectNode[]): number | undefined => {
-    for (const node of nodes) {
-      if (!node) continue;
-      if (node.kind === "topic" || node.kind === "global_topic") {
-        const scope = node.kind === "global_topic" ? "global" : "project";
-        if (
-          scope === targetScope &&
-          node.topicId === tab.topicId &&
-          (scope === "global" || node.root === tab.workspaceRoot)
-        ) {
-          return node.turns;
-        }
-      }
-      const found = walk(asArray(node.children));
-      if (found !== undefined) return found;
-    }
-    return undefined;
-  };
-  return walk(tree);
-}
-
 // Joint width constraint (ui-redesign §4-B7): the sidebar may never push the
 // chat pane below CHAT_MIN_WIDTH, dock or no dock — the two panels trade width
 // against each other with the conversation always protected. The right-dock
@@ -845,7 +820,6 @@ export default function App() {
   const [workspaceChangeListRequest, setWorkspaceChangeListRequest] = useState<WorkspaceChangeListRequest | null>(null);
   const [dockRefreshKey, setDockRefreshKey] = useState(0);
   const [projectRevision, setProjectRevision] = useState(0);
-  const [activeTopicTurns, setActiveTopicTurns] = useState<number | undefined>(undefined);
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
   const [transientOverlayDismissSignal, setTransientOverlayDismissSignal] = useState(0);
   const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform>(detectBrowserPlatform);
@@ -1183,30 +1157,6 @@ export default function App() {
   useEffect(() => {
     refreshSidebarSessions();
   }, [refreshSidebarSessions, activeTab]);
-  useEffect(() => {
-    let cancelled = false;
-    if (!activeTab?.topicId) {
-      setActiveTopicTurns(undefined);
-      return () => {
-        cancelled = true;
-      };
-    }
-    void app.ListProjectTree(profileRef.current)
-      .then((tree) => {
-        if (!cancelled) setActiveTopicTurns(activeTopicTurnsFromTree(asArray(tree), activeTab));
-      })
-      .catch(() => {
-        if (!cancelled) setActiveTopicTurns(undefined);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab?.scope, activeTab?.topicId, activeTab?.workspaceRoot, projectRevision]);
-  const sessionTurns = useMemo(() => {
-    const visibleUserTurns = state.items.reduce((count, item) => (item.kind === "user" ? count + 1 : count), 0);
-    const currentTabTurns = Math.max(state.checkpoints.length, visibleUserTurns);
-    return currentTabTurns > 0 ? currentTabTurns : activeTopicTurns ?? 0;
-  }, [activeTopicTurns, state.checkpoints.length, state.items]);
   const startupSplashHold = state.meta?.ready !== true && !state.meta?.startupErr;
   const legacyMode = activeTabId ? modesByTab[activeTabId] ?? "normal" : "normal";
   const goal = activeTabId ? goalsByTab[activeTabId] ?? state.meta?.goal ?? activeTab?.goal ?? "" : "";
@@ -3048,7 +2998,20 @@ export default function App() {
 
   return (
     <ShellExpandProvider>
-    <div ref={appRef} className={["app", `app--${desktopPlatform}`, browserPreviewChrome ? "app--browser-preview" : "", coworkActive ? "app--cowork" : "", netdevActive ? "app--netdev" : ""].filter(Boolean).join(" ")}>
+    <div
+      ref={appRef}
+      className={[
+        "app",
+        `app--${desktopPlatform}`,
+        browserPreviewChrome ? "app--browser-preview" : "",
+        coworkActive ? "app--cowork" : "",
+        netdevActive ? "app--netdev" : "",
+        sidebarCollapsed ? "app--sidebar-collapsed" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      style={layoutStyle}
+    >
       <div
         className={[
           "layout",
@@ -3060,7 +3023,6 @@ export default function App() {
         ]
           .filter(Boolean)
           .join(" ")}
-        style={layoutStyle}
       >
         {coworkActive && (
           <CoWorkLayout
@@ -3105,6 +3067,7 @@ export default function App() {
             mainNode={mainNode}
             footerNode={footerNode}
             sessionsNode={sidebarSessionsNode}
+            onOpenSettings={(t) => { setSettingsTarget(t as never); setSettingsPayload(null); }}
           />
         )}
         <AppChrome
@@ -3130,15 +3093,20 @@ export default function App() {
           onTabsReorder={(ids) => void handleTabsReorder(ids)}
           onNewTab={() => void handleNewTab()}
           onOpenPalette={() => void openPalette()}
+          center={!coworkActive && !netdevActive ? headerNode : null}
           profile={coworkActive ? "cowork" : "dev"}
           onSwitchProfile={(name) => void switchProfile(name).catch(() => { /* revert handled in switchProfile */ })}
         />
 
-          <aside 
-            className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`} 
+          <aside
+            className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`}
             aria-label={t("sidebar.navigation")}
             style={{ paddingBottom: '8px' }}
           >
+          <div className="sidebar__brandrow" aria-hidden="true">
+            <img src={logoSymbol} alt="" draggable={false} />
+            <span>FairPeer</span>
+          </div>
           <button
             className="sidebar__new"
             onClick={() => {
@@ -3196,7 +3164,8 @@ export default function App() {
 
         <section className="chat-pane">
           <>
-          {!coworkActive && !netdevActive && headerNode}
+          {/* Dev-profile topicbar moved into the top chrome (AppChrome center
+              slot); cowork/netdev layouts render headerNode themselves. */}
 
           {state.meta?.startupErr && (
             <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
@@ -3327,18 +3296,6 @@ export default function App() {
             closeTransientOverlays();
             setSettingsTarget("general");
           }}
-        />
-        <StatusBar
-          context={state.context}
-          usage={state.usage}
-          jobs={state.jobs}
-          running={state.running}
-          collaborationMode={collaborationMode}
-          toolApprovalMode={toolApprovalMode}
-          sessionTurns={sessionTurns}
-          sessionTokens={state.sessionTokens}
-          turnTokens={state.turnTotalTokens}
-          modelLabel={state.meta?.label}
         />
       </div>
 

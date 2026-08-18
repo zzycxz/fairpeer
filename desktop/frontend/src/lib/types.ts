@@ -1656,6 +1656,7 @@ export interface NetDevHopView {
 
 export interface NetDevSettingsView {
   enabled: boolean;
+  networkName: string;
   devices: NetDevDeviceView[];
   hops: NetDevHopView[];
   groups: string[];

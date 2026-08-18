@@ -1700,7 +1700,7 @@ function makeMockApp(): AppBindings {
   // NetDev mock: an in-memory settings store so the browser dev shell can
   // exercise the netdev panel without the Go backend. Passwords/audit/ssh
   // imports are stubbed — the real implementations live in the Go bindings.
-  let mockNetDev: NetDevSettingsView = { enabled: false, devices: [], hops: [], groups: [], auditRetention: "", scopes: [] };
+  let mockNetDev: NetDevSettingsView = { enabled: false, networkName: "我的网络", devices: [], hops: [], groups: [], auditRetention: "", scopes: [] };
   return {
     async NetDevSettings() {
       return mockNetDev;

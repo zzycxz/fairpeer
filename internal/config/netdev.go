@@ -17,22 +17,25 @@ import (
 // (NETDEV_SPEC §7.3). Secrets never live here: entries name credential env
 // vars (*_env) whose values sit in the secret store under netdev/*.
 type NetDevConfig struct {
-	Enabled              bool             `toml:"enabled"`
-	DefaultMode          string           `toml:"default_mode"` // diagnose | assess
-	AuditRetention       string           `toml:"audit_retention"`
-	ProxyDeviceTraffic   bool             `toml:"proxy_device_traffic"` // false: devices dialed directly, never via the shared HTTP proxy
-	MaxSessionsPerDevice int              `toml:"max_sessions_per_device"`
-	Devices              []NetDevDevice   `toml:"devices"`
-	Hops                 []NetDevHop      `toml:"hops"`
-	Groups               []NetDevGroup    `toml:"groups"`
-	Discovery            NetDevDiscovery  `toml:"discovery"`
+	Enabled bool `toml:"enabled"`
+	// NetworkName is the managed network's display name (e.g. "总部生产网") —
+	// the 运维 page's identity anchor, like a coding workspace's project name.
+	NetworkName          string          `toml:"network_name"`
+	DefaultMode          string          `toml:"default_mode"` // diagnose | assess
+	AuditRetention       string          `toml:"audit_retention"`
+	ProxyDeviceTraffic   bool            `toml:"proxy_device_traffic"` // false: devices dialed directly, never via the shared HTTP proxy
+	MaxSessionsPerDevice int             `toml:"max_sessions_per_device"`
+	Devices              []NetDevDevice  `toml:"devices"`
+	Hops                 []NetDevHop     `toml:"hops"`
+	Groups               []NetDevGroup   `toml:"groups"`
+	Discovery            NetDevDiscovery `toml:"discovery"`
 	// ExtraRead extends the drivers' read-command tables at runtime
 	// ([netdev.extra_read] with vendor tables — see NETDEV_SPEC B-1: the
 	// knowledge-growth path; unknown commands stay refused until classified).
-	ExtraRead            map[string][]string `toml:"extra_read"`
+	ExtraRead map[string][]string `toml:"extra_read"`
 	// InspectionInterval schedules the read-battery sweep ("1h", "30m"; "" = off).
-	InspectionInterval   string              `toml:"inspection_interval"`
-	Assessment           NetDevAssessment `toml:"assessment"`
+	InspectionInterval string           `toml:"inspection_interval"`
+	Assessment         NetDevAssessment `toml:"assessment"`
 }
 
 // NetDevDevice is one managed network device (router/switch/firewall).

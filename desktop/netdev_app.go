@@ -57,6 +57,7 @@ type NetDevHopView struct {
 // NetDevSettingsView is the whole settings payload.
 type NetDevSettingsView struct {
 	Enabled        bool               `json:"enabled"`
+	NetworkName    string             `json:"networkName"`
 	Devices        []NetDevDeviceView `json:"devices"`
 	Hops           []NetDevHopView    `json:"hops"`
 	Groups         []string           `json:"groups"` // group names (policy editing arrives with the proposal pipeline)
@@ -91,6 +92,7 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 	}
 	v := NetDevSettingsView{
 		Enabled:        cfg.NetDev.Enabled,
+		NetworkName:    cfg.NetDev.NetworkName,
 		AuditRetention: cfg.NetDev.AuditRetention,
 		Scopes:         cfg.NetDev.Discovery.Scopes,
 	}
@@ -164,6 +166,7 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 	cfgErr := a.applyConfigOnly(func(c *config.Config) error {
 		nd := config.NetDevConfig{
 			Enabled:        v.Enabled,
+			NetworkName:    strings.TrimSpace(v.NetworkName),
 			AuditRetention: strings.TrimSpace(v.AuditRetention),
 			Devices:        make([]config.NetDevDevice, 0, len(v.Devices)),
 			Hops:           make([]config.NetDevHop, 0, len(v.Hops)),
