@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { CalendarDays, Code2, Minus, Network, PanelLeft, PanelRight, Search, Square, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { CalendarDays, Code2, Minus, Network, PanelLeft, PanelRight, Square, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { TabBar } from "./TabBar";
 import type { TabMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
 
@@ -29,20 +29,24 @@ interface AppChromeProps {
   onTabsClose: (tabIds: string[], nextActiveTabId?: string) => void;
   onTabsReorder: (tabIds: string[]) => void;
   onNewTab: () => void;
-  onOpenPalette: () => void;
+  // Topicbar contents (title · workspace · model + actions) merged into the
+  // chrome's center slot — the ZCode single-header pattern. Null for profiles
+  // (cowork/netdev) whose layouts render their own header.
+  center?: ReactNode;
   // Product profile (dev/cowork). profile is the active tab's mode; onSwitchProfile
   // rebuilds the controller with the new profile's bundle.
   profile: string;
   onSwitchProfile: (name: string) => void;
+  // modeChrome (netdev): the mode's own title bar rides the CENTER slot and
+  // replaces the panel toggles + profile switcher — one header, no seams.
+  // (The 运维 tab switches back via the sidebar session list.)
+  modeChrome?: boolean;
 }
 
 export function AppChrome({
   platform,
   browserPreviewChrome,
-  tabs,
-  activeTabId,
-  revealActiveSignal,
-  commandCompact,
+  center,
   sidebarTogglePressed,
   sidebarExpandBlocked,
   sidebarCollapsed,
@@ -53,18 +57,12 @@ export function AppChrome({
   workspacePanelLabel,
   onToggleSidebar,
   onToggleWorkspacePanel,
-  onTabChange,
-  onTabClose,
-  onTabsClose,
-  onTabsReorder,
-  onNewTab,
-  onOpenPalette,
   profile,
   onSwitchProfile,
+  modeChrome,
 }: AppChromeProps) {
   const t = useT();
   const darwinChrome = platform === "darwin";
-  const detachCommand = !darwinChrome;
   const showWindowsPreviewControls = browserPreviewChrome && platform === "windows";
   const chromeClassName = [
     "app-chrome",
@@ -75,20 +73,12 @@ export function AppChrome({
     `app-chrome--platform-${platform}`,
   ].filter(Boolean).join(" ");
 
-  const tabBar = (
-    <TabBar
-      tabs={tabs}
-      activeTabId={activeTabId}
-      revealActiveSignal={revealActiveSignal}
-      onTabChange={onTabChange}
-      onTabClose={onTabClose}
-      onTabsClose={onTabsClose}
-      onTabsReorder={onTabsReorder}
-      onNewTab={onNewTab}
-      onOpenPalette={detachCommand ? undefined : onOpenPalette}
-      commandCompact={commandCompact}
-    />
-  );
+  // Tab strip removed by product decision (2026-08-18): session switching goes
+  // through the sidebar "最近" list (click resumes/switches; open sessions carry
+  // a dot), ⌘K palette, and 新建会话 for new ones. TabBar.tsx stays intact for
+  // a future opt-in setting if multi-tab power features (drag reorder, batch
+  // close, mode chips) are asked for again.
+  const tabBar = null;
 
   return (
     <header className={chromeClassName}>
@@ -100,6 +90,7 @@ export function AppChrome({
         </div>
       )}
       {darwinChrome && <span className="app-chrome__drag-rail" aria-hidden="true" />}
+      {!modeChrome && (
       <button
         className={[
           "app-chrome__panel-toggle",
@@ -115,38 +106,25 @@ export function AppChrome({
       >
         <PanelLeft size={16} />
       </button>
+      )}
 
       {darwinChrome ? (
         <div className="app-chrome__tab-strip app-chrome__tab-strip--darwin">
           {tabBar}
+          {center}
         </div>
       ) : (
         <>
           <div className="app-chrome__tab-strip app-chrome__tab-strip--native">
             {tabBar}
+            {center}
           </div>
-          {detachCommand && (
-            <div
-              className={[
-                "app-chrome__tools",
-                workspaceTogglePressed ? "app-chrome__tools--workspace-pressed" : "",
-              ].filter(Boolean).join(" ")}
-              aria-label={t("tabBar.commandSearch")}
-            >
-              <button
-                className="tabbar__command tabbar__command--compact app-chrome__command"
-                type="button"
-                onClick={onOpenPalette}
-                aria-label={t("palette.placeholder")}
-              >
-                <Search size={14} className="tabbar__command-icon" />
-              </button>
-            </div>
-          )}
+          {/* Compact search button removed (2026-08-18): it duplicated the
+              topicbar 命令 palette button — every profile's header carries one. */}
         </>
       )}
 
-      {!workspacePanelMaximized && (
+      {!modeChrome && !workspacePanelMaximized && (
         <button
           className={[
             "app-chrome__panel-toggle",
@@ -164,7 +142,7 @@ export function AppChrome({
       )}
       {/* Profile segmented switcher: a pill control with a sliding highlight
           indicator. See ProfileSegmented below. */}
-      <ProfileSegmented profile={profile} onSwitchProfile={onSwitchProfile} t={t} />
+      {!modeChrome && <ProfileSegmented profile={profile} onSwitchProfile={onSwitchProfile} t={t} />}
       {showWindowsPreviewControls && (
         <div className="app-chrome__window-controls app-chrome__window-controls--windows" aria-hidden="true">
           <span className="app-chrome__window-control app-chrome__window-control--minimize">

@@ -9,6 +9,36 @@ import "../styles/netdev.css";
 // thing is in focus at a time; zero devices shows a 3-step getting-started
 // guide. Styling is scoped to .app--netdev / .ndv-*.
 
+// NetdevTitleBar rides the global chrome's CENTER slot in netdev mode — the
+// mode's identity bar replaces panel toggles and the profile switcher, so
+// there is exactly one header (NETDEV_SPEC §10.1 sketch).
+export function NetdevTitleBar() {
+  const [name, setName] = useState("");
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    app.NetDevSettings()
+      .then(s => setName(s?.networkName?.trim() || "我的网络"))
+      .catch(e => setErr(String(e)));
+  }, []);
+  const stop = useCallback(async () => {
+    if (!confirm("紧急停止：立即断开全部设备连接（释放所有 VTY）？")) return;
+    try {
+      const n = await app.NetDevEmergencyStop();
+      alert(`已断开 ${n} 个设备连接。`);
+    } catch (e) {
+      setErr(String(e));
+    }
+  }, []);
+  return (
+    <div className="ndv__titlebar">
+      <span className="ndv__netname" title="网络名称（设置 → 运维 可修改）">{name || "…"}</span>
+      <span className="ndv__badge">诊断 · 只读 🔒</span>
+      {err && <span className="ndv__stat" style={{ color: "#ff8787" }}>{err}</span>}
+      <span className="ndv__stop" role="button" onClick={() => void stop()}>⏹ 紧急停止</span>
+    </div>
+  );
+}
+
 const SEV_COLOR: Record<string, string> = { info: "#7ab8ff", warning: "#e0a800", critical: "#ff6b6b" };
 
 const QUICK_BATTERY: Record<string, string[]> = {
@@ -43,7 +73,7 @@ export function NetDevLayout({
   const [topoBusy, setTopoBusy] = useState(false);
   const [inspBusy, setInspBusy] = useState(false);
   const [tab, setTab] = useState<DockTab>("context");
-  const [err, setErr] = useState("");
+  const [err, setErr] = useState(""); // shown in the global title bar
 
   const reload = useCallback(async () => {
     try {
@@ -67,17 +97,6 @@ export function NetDevLayout({
     void reload();
     const t = setInterval(() => void reload(), 30_000);
     return () => clearInterval(t);
-  }, [reload]);
-
-  const emergencyStop = useCallback(async () => {
-    if (!confirm("紧急停止：立即断开全部设备连接（释放所有 VTY）？")) return;
-    try {
-      const n = await app.NetDevEmergencyStop();
-      alert(`已断开 ${n} 个设备连接。`);
-      void reload();
-    } catch (e) {
-      setErr(String(e));
-    }
   }, [reload]);
 
   const runQuick = useCallback(async (device: string, command: string) => {
@@ -115,7 +134,6 @@ export function NetDevLayout({
 
   const devices = settings?.devices ?? [];
   const selectedDevice = devices.find(d => d.name === selected);
-  const networkName = settings?.networkName?.trim() || "我的网络";
   const lastInspection = findings.find(f => f.title.startsWith("巡检"));
   const pendingCount = proposals.filter(p => p.status === "draft" || p.status === "approved" || p.status === "partial").length;
 
@@ -140,13 +158,6 @@ export function NetDevLayout({
 
   return (
     <div className="ndv">
-      <div className="ndv__top">
-        <span className="ndv__netname" title="网络名称（设置 → 运维 可修改）">{networkName}</span>
-        <span className="ndv__badge">诊断 · 只读 🔒</span>
-        {err && <span className="ndv__stat" style={{ color: "#ff8787" }}>{err}</span>}
-        <span className="ndv__stop" role="button" onClick={() => void emergencyStop()}>⏹ 紧急停止</span>
-      </div>
-
       <div className="ndv__rail">
         <div className="ndv__sessions">{sessionsNode}</div>
         <div className="ndv__section">设备清单（{devices.length}，点击诊断）</div>
@@ -197,6 +208,7 @@ export function NetDevLayout({
       </div>
 
       <div className="ndv__dock">
+        {err && <div className="banner banner--error" style={{ marginBottom: 8 }}>{err}</div>}
         <div className="ndv__tabs" role="tablist">
           {TABS.map(t => (
             <button

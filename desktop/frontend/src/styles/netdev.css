@@ -19,7 +19,7 @@
   grid-row: 2 / -1;
   grid-column: 1 / -1;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   grid-template-columns: var(--ndv-sidebar-w, 250px) minmax(0, 1fr) var(--ndv-dock-w, 320px);
   min-height: 0;
   min-width: 0;
@@ -205,4 +205,14 @@
   background: var(--accent-dim, rgba(122, 184, 255, 0.2));
   border-radius: var(--radius-pill);
   padding: 1px 6px;
+}
+
+/* The netdev title bar lives INSIDE the global chrome's center slot — slim,
+   vertically centered, no second header row. */
+.ndv__titlebar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 0 8px;
 }

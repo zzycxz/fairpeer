@@ -32,7 +32,7 @@ import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onEvent, onProjectTreeChanged, onSchedulerNotice } from "./lib/bridge";
 import { onProfileChanged } from "./lib/bridge";
 import { CoWorkLayout } from "./layouts/CoWorkLayout";
-import { NetDevLayout } from "./layouts/NetDevLayout";
+import { NetDevLayout, NetdevTitleBar } from "./layouts/NetDevLayout";
 import { PreferencePanel } from "./components/cowork/PreferencePanel";
 import { Transcript } from "./components/Transcript";
 import { ExpertSessionView } from "./components/cowork/ExpertSessionView";
@@ -3092,8 +3092,8 @@ export default function App() {
           onTabsClose={(ids, nextActiveTabId) => void handleTabsClose(ids, nextActiveTabId)}
           onTabsReorder={(ids) => void handleTabsReorder(ids)}
           onNewTab={() => void handleNewTab()}
-          onOpenPalette={() => void openPalette()}
-          center={!coworkActive && !netdevActive ? headerNode : null}
+          center={netdevActive ? <NetdevTitleBar /> : !coworkActive ? headerNode : null}
+          modeChrome={netdevActive}
           profile={coworkActive ? "cowork" : "dev"}
           onSwitchProfile={(name) => void switchProfile(name).catch(() => { /* revert handled in switchProfile */ })}
         />
