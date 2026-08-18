@@ -851,11 +851,16 @@ func stripThinkingAddon(s string) string {
 }
 
 func stripTimeBlock(s string) string {
-	if i := strings.Index(s, "\n\n# 当前时间\n"); i >= 0 {
-		if j := strings.Index(s[i+2:], "\n\n"); j >= 0 {
-			return strings.TrimSpace(s[:i] + s[i+2+j:])
+	// The time block is bilingual: boot emits the header matching the resolved
+	// language, so both variants must be strippable regardless of the machine
+	// running the test.
+	for _, header := range []string{"\n\n# 当前时间\n", "\n\n# Current Time\n"} {
+		if i := strings.Index(s, header); i >= 0 {
+			if j := strings.Index(s[i+2:], "\n\n"); j >= 0 {
+				return strings.TrimSpace(s[:i] + s[i+2+j:])
+			}
+			return strings.TrimSpace(s[:i])
 		}
-		return strings.TrimSpace(s[:i])
 	}
 	return s
 }

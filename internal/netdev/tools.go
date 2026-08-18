@@ -134,8 +134,11 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 	if res.IsError {
 		status = AuditDeviceError
 	}
-	m.audit(device, command, class, status, len(res.Output), nil)
-	base.Output = res.Output
+	// Redact BEFORE the text crosses into the model context: credential lines
+	// in device output never reach the LLM (or the audit's byte count).
+	redacted := Redact(res.Output)
+	m.audit(device, command, class, status, len(redacted), nil)
+	base.Output = redacted
 	base.IsError = res.IsError
 	return base
 }
@@ -301,6 +304,63 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	m := NewManager(cfg)
 	reg.Add(&execTool{m: m})
 	reg.Add(&devicesTool{cfg: cfg})
+	reg.Add(&discoverTool{m: m})
+}
+
+type discoverTool struct{ m *Manager }
+
+func (t *discoverTool) Name() string { return "netdev_discover" }
+
+func (t *discoverTool) Description() string {
+	return "TCP-probe a CIDR for open device ports (default 22/23) and grab banners, optionally THROUGH a configured hop " +
+		"(via = hop name; empty = direct). The CIDR must be inside the configured discovery scopes — out-of-scope probes are refused. " +
+		"Tunnel mode only (no UDP/ICMP); /20+ networks are refused (use the probe for those)."
+}
+
+func (t *discoverTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"cidr": {"type": "string", "description": "target network, e.g. 10.30.2.0/24"},
+			"ports": {"type": "array", "items": {"type": "integer"}, "description": "ports to probe; default [22, 23]"},
+			"via": {"type": "string", "description": "hop name to probe through; empty = direct"}
+		},
+		"required": ["cidr"]
+	}`)
+}
+
+func (t *discoverTool) ReadOnly() bool { return true }
+
+func (t *discoverTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		CIDR  string `json:"cidr"`
+		Ports []int  `json:"ports"`
+		Via   string `json:"via"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(a.CIDR) == "" {
+		return "", errors.New("netdev_discover: cidr is required")
+	}
+	res, err := t.m.DiscoverTCP(ctx, a.Via, a.CIDR, a.Ports)
+	if err != nil {
+		return "", err
+	}
+	if err := AppendAudit(Audit{
+		Device: "(discover)", Command: "tcp-probe " + a.CIDR + " via=" + strings.TrimSpace(a.Via),
+		Class:  "read", Status: AuditOK,
+	}); err != nil {
+		_ = err
+	}
+	if len(res) == 0 {
+		return "no responsive hosts in " + a.CIDR, nil
+	}
+	b, err := json.MarshalIndent(res, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 type execTool struct{ m *Manager }
