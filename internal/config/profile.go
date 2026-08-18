@@ -44,6 +44,36 @@ type Profile struct {
 	Plugins           []string `toml:"plugins"`             // plugin name whitelist; empty = all plugins
 	HiddenTools       []string `toml:"hidden_tools"`        // tools to Hide from main loop schemas; empty = all visible. Subagents still see them via FilterRegistry.
 	WorkspaceType     string   `toml:"workspace_type"`      // "code" | "document"; frontend hint only
+
+	// ToolScope is the HARD tool seal (unlike HiddenTools, which only trims
+	// main-loop schemas): "netdev-only" removes process-exec and file-write
+	// tools from the Registry entirely, so subagents inherit the same removal
+	// and a prompt-injected model cannot reach a write path through any tool.
+	// Empty = the default full builtin surface. See NETDEV_SPEC §7.1.
+	ToolScope string `toml:"tool_scope"`
+	// LoadProjectInstructions: nil = default (load the workspace's AGENTS.md
+	// hierarchy and project memory as usual). Explicit false is for profiles
+	// whose subject is NOT the workspace (netdev: the subject is the network)
+	// — a cloned repo's instruction files must not steer device sessions.
+	LoadProjectInstructions *bool `toml:"load_project_instructions"`
+}
+
+// Tool scopes accepted in Profile.ToolScope.
+const (
+	ToolScopeDefault    = ""            // full builtin tool surface
+	ToolScopeNetDevOnly = "netdev-only" // no process-exec / file-write tools
+)
+
+// SkipProjectInstructions reports whether the workspace's project-level
+// instruction docs must be excluded from this profile's session.
+func (p *Profile) SkipProjectInstructions() bool {
+	return p != nil && p.LoadProjectInstructions != nil && !*p.LoadProjectInstructions
+}
+
+// SealsExecutionTools reports whether boot must strip process-exec and
+// file-write tools from the Registry for this profile.
+func (p *Profile) SealsExecutionTools() bool {
+	return p != nil && p.ToolScope == ToolScopeNetDevOnly
 }
 
 const (
@@ -57,6 +87,13 @@ const (
 	// SAME tool/skill/plugin set as dev. Real coWork capabilities (browser,
 	// desktop automation) arrive in later phases and turn on here.
 	ProfileCowork = "cowork"
+	// ProfileNetDev is the network-operations mode (NETDEV_SPEC). Its defining
+	// property is the hard tool seal: no bash, no file-write tools — the
+	// diagnostic hand is structurally read-only, and write operations only ever
+	// happen through the human-approved proposal pipeline (P1+). Project-level
+	// instructions are OFF: the session's subject is the network, not the
+	// workspace, so a cloned repo must not steer device sessions.
+	ProfileNetDev = "netdev"
 )
 
 // builtinProfiles are the always-available profiles. They are the floor: a
@@ -99,6 +136,16 @@ func builtinProfiles() []Profile {
 				"multi_edit",
 				"research", // code-exploration subagent — office users don't need it
 			},
+		},
+		{
+			Name:        ProfileNetDev,
+			DisplayName: "运维",
+			// Hard seal: boot strips bash / file-write tools from the Registry
+			// (subagents included). The whitelist keeps exactly one read-only
+			// exploration skill until the netdev-* diagnostic skills land (P1).
+			ToolScope:               ToolScopeNetDevOnly,
+			LoadProjectInstructions: &[]bool{false}[0],
+			EnabledSkills:           []string{"research"},
 		},
 	}
 }
@@ -191,6 +238,9 @@ func (c *Config) ResolveProfile(name string) (*Profile, error) {
 	for i := range c.Profiles {
 		if ProfileNameKey(c.Profiles[i].Name) == key {
 			p := c.Profiles[i]
+			if err := validateProfile(&p); err != nil {
+				return nil, err
+			}
 			p.Name = key
 			if p.DisplayName == "" {
 				p.DisplayName = p.Name
@@ -205,6 +255,19 @@ func (c *Config) ResolveProfile(name string) (*Profile, error) {
 		}
 	}
 	return nil, fmt.Errorf("unknown profile %q (available: %s)", name, c.profileNames())
+}
+
+// validateProfile rejects a misconfigured [[profiles]] entry loudly at resolve
+// time instead of silently not sealing (a typo in tool_scope would otherwise
+// hand the session a full write surface).
+func validateProfile(p *Profile) error {
+	switch p.ToolScope {
+	case ToolScopeDefault, ToolScopeNetDevOnly:
+	default:
+		return fmt.Errorf("profile %q: unknown tool_scope %q (want %q or %q)",
+			p.Name, p.ToolScope, ToolScopeNetDevOnly, ToolScopeDefault)
+	}
+	return nil
 }
 
 // profileNames lists the effective profile names (builtins + configured), for

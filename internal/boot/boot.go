@@ -373,7 +373,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// — they ride the controller's transient turn-injection and fold in on the
 	// next session. Profile partitions both the portrait and the store by mode
 	// (dev/cowork), so a mode switch rebuilds with a disjoint memory subtree.
-	mem := memory.Load(memory.Options{CWD: root, UserDir: config.MemoryUserDir(), Profile: profileName(opts.Profile)})
+	mem := memory.Load(memory.Options{CWD: root, UserDir: config.MemoryUserDir(), Profile: profileName(opts.Profile), SkipProjectDocs: opts.Profile.SkipProjectInstructions()})
 	projectChecks := instruction.ExtractHostChecks(mem.Docs)
 	sysPrompt = memory.Compose(sysPrompt, mem)
 
@@ -984,6 +984,17 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if opts.Profile != nil {
 		for _, name := range opts.Profile.HiddenTools {
 			reg.Hide(name)
+		}
+	}
+
+	// Profile ToolScope: the HARD seal. Unlike HiddenTools above, this removes
+	// tools from the Registry entirely, so skill subagents (which share this
+	// Registry through FilterRegistry) lose them too. This is what makes the
+	// netdev diagnostic hand structurally read-only: a prompt-injected model
+	// has no write path through any tool, in any subagent (NETDEV_SPEC §7.1).
+	if opts.Profile.SealsExecutionTools() {
+		for _, prefix := range netdevExcludedToolPrefixes {
+			reg.RemovePrefix(prefix)
 		}
 	}
 
@@ -1936,6 +1947,24 @@ func pluginSpecNames(specs []plugin.Spec) []string {
 //     custom skill into the tree expects it to work regardless of profile.
 //
 // The result preserves first spelling and dedupes by SkillNameKey.
+// netdevExcludedToolPrefixes lists the tool-name prefixes removed from the
+// Registry when a profile sets tool_scope = "netdev-only": every process-exec
+// and file-write surface. Prefix matching (Registry.RemovePrefix) also covers
+// helper variants (e.g. "bash_output", "kill_shell" under "bash"/"kill_").
+// Read-only tools (read_file, grep, glob, web_fetch, rag_search, todo…) stay:
+// the netdev diagnostic hand reads broadly and writes nothing.
+var netdevExcludedToolPrefixes = []string{
+	"bash",          // process execution (and bash_output)
+	"kill_shell",    // process management
+	"edit_file",     // file writes
+	"write_file",    // file writes
+	"multi_edit",    // file writes
+	"apply_patch",   // file writes
+	"notebook_edit", // file writes
+	"delete_range",  // file deletion
+	"move_file",     // file moves
+}
+
 func applyProfileToSkillDisabled(p *config.Profile, configDisabled []string) []string {
 	if p == nil {
 		return configDisabled

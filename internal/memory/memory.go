@@ -31,6 +31,13 @@ type Options struct {
 	CWD     string
 	UserDir string
 	Profile string
+
+	// SkipProjectDocs drops the workspace hierarchy (ancestor + project +
+	// project-local AGENTS.md/fairpeer.md) and keeps only user-global memory.
+	// Used by profiles whose subject is not the workspace (netdev: the session
+	// operates on network devices, so a cloned repo's instruction files must
+	// not steer the session). See NETDEV_SPEC §7.3.
+	SkipProjectDocs bool
 }
 
 // Load discovers all memory for a session: the hierarchical docs, the
@@ -44,8 +51,12 @@ func Load(opts Options) *Set {
 	}
 	p := NormalizeProfile(opts.Profile)
 	store := StoreFor(opts.UserDir, cwd, p)
+	docs := discoverDocs(cwd, opts.UserDir)
+	if opts.SkipProjectDocs {
+		docs = userDocsOnly(docs)
+	}
 	return &Set{
-		Docs:        discoverDocs(cwd, opts.UserDir),
+		Docs:        docs,
 		Store:       store,
 		Index:       store.Index(),
 		Profile:     discoverProfile(opts.UserDir, p),
@@ -53,6 +64,19 @@ func Load(opts Options) *Set {
 		CWD:         cwd,
 		UserDir:     opts.UserDir,
 	}
+}
+
+// userDocsOnly filters a discoverDocs result down to the user-global sources,
+// dropping everything discovered from the workspace (ancestors, project root,
+// and project-local overrides).
+func userDocsOnly(docs []Source) []Source {
+	out := make([]Source, 0, len(docs))
+	for _, d := range docs {
+		if d.Scope == ScopeUser {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // DocPath returns the doc-memory file a given scope writes to. To avoid splitting
