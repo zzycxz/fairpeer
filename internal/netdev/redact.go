@@ -50,6 +50,9 @@ var redactPatterns = []*regexp.Regexp{
 	// ── misc ───────────────────────────────────────────────────────────────
 	// Cisco key config-key password-encrypt <key>.
 	regexp.MustCompile(`(?im)^(\s*key\s+config-key\s+password-encrypt\s+)\S+`),
+	// NETCONF/XML config elements carrying secrets (line-oriented patterns
+	// above don't apply to XML replies): mask the element's text content.
+	regexp.MustCompile(`(?i)(<(?:password|passphrase|secret|community|auth-?key|privacy-?key|pre-shared-?key|key-string|shared-?key)(?:\s[^>]*)?>)[^<]*(</)`),
 	// Public/private key blobs (base64 bodies) in device config.
 	regexp.MustCompile(`(?im)^(\s*\S*(?:rsa|dsa|ecdsa|ssh)\S*\s+\S*(?:key|local-key-pair|peer-public-key|public-key)\S*(?:\s+\S+)*?\s+)[A-Za-z0-9+/=]{40,}`),
 }

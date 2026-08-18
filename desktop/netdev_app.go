@@ -232,7 +232,7 @@ func startInspectionScheduler(a *App) {
 				}
 				time.Sleep(d)
 				ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
-				if f, err := netdev.NewManager(cfg).RunInspection(ctx); err == nil && f != nil {
+				if f, err := netdev.SharedManager(cfg).RunInspection(ctx); err == nil && f != nil {
 					slog.Info("scheduled netdev inspection filed", "title", f.Title)
 				}
 				cancel()
@@ -250,7 +250,7 @@ func (a *App) NetDevRunInspection() (*netdev.Finding, error) {
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
 	defer cancel()
-	return netdev.NewManager(cfg).RunInspection(ctx)
+	return netdev.SharedManager(cfg).RunInspection(ctx)
 }
 
 // NetDevFindings lists diagnosis findings newest-first (Finding cards).
@@ -270,7 +270,7 @@ func (a *App) NetDevApproveProposal(id string, confirm2 bool) (*netdev.Proposal,
 	if err != nil {
 		return nil, err
 	}
-	return netdev.NewManager(cfg).ApproveProposal(id, confirm2)
+	return netdev.SharedManager(cfg).ApproveProposal(id, confirm2)
 }
 
 // NetDevExecuteProposal rolls the approved change device-by-device (backup →
@@ -282,7 +282,7 @@ func (a *App) NetDevExecuteProposal(id string) (*netdev.Proposal, error) {
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Minute)
 	defer cancel()
-	return netdev.NewManager(cfg).ExecuteProposal(ctx, id)
+	return netdev.SharedManager(cfg).ExecuteProposal(ctx, id)
 }
 
 // NetDevRollbackProposal runs the authored rollback plan over the applied
@@ -294,7 +294,7 @@ func (a *App) NetDevRollbackProposal(id string) (*netdev.Proposal, error) {
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Minute)
 	defer cancel()
-	return netdev.NewManager(cfg).RollbackProposal(ctx, id)
+	return netdev.SharedManager(cfg).RollbackProposal(ctx, id)
 }
 
 // NetDevTestConnection runs the first-device flow for one device: connect →
@@ -307,7 +307,7 @@ func (a *App) NetDevTestConnection(device string) (netdev.TestResult, error) {
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
 	defer cancel()
-	return netdev.NewManager(cfg).TestConnection(ctx, device), nil
+	return netdev.SharedManager(cfg).TestConnection(ctx, device), nil
 }
 
 // NetDevTrustHostKey durably trusts a first-seen host key after the user

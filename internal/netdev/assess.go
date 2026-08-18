@@ -134,9 +134,25 @@ func (m *Manager) dialAuth(ctx context.Context, d config.NetDevDevice, password 
 	if err != nil {
 		return false, err
 	}
+	// Devices behind bastions must be checked through their route too — the
+	// jump hosts authenticate with their OWN stored credentials, never with
+	// the candidate under test.
+	jumps, err := transport.ResolveJumpHosts(lookup, d.Via, nil)
+	if err != nil {
+		return false, err
+	}
+	hops := make([]transport.JumpHostOptions, 0, len(jumps))
+	for i, j := range jumps {
+		hopCfg := m.hopByRaw(d.Via[i])
+		hops = append(hops, transport.JumpHostOptions{Host: j, Auth: transport.AuthOptions{
+			Password:   secretReader(SecretKindPassword, hopCfg.PasswordEnv),
+			Passphrase: secretReader(SecretKindPassphrase, hopCfg.PassphraseEnv),
+		}})
+	}
 	client, err := transport.New(transport.Options{
 		Host:        resolved,
 		Auth:        transport.AuthOptions{Password: func() (string, error) { return password, nil }},
+		JumpHosts:   hops,
 		HostKeys:    &transport.HostKeyPolicy{Prompt: HostKeyPrompt, ManagedPath: transport.ManagedKnownHostsOverride},
 		DialTimeout: 8 * time.Second,
 	})

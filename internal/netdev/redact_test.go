@@ -126,3 +126,28 @@ func TestRedactLeavesPlainOutputIntact(t *testing.T) {
 		}
 	}
 }
+
+// NETCONF replies carry secrets as XML element text — the line-oriented CLI
+// patterns must not miss them.
+func TestRedactNetconfXML(t *testing.T) {
+	in := `<?xml version="1.0"?><rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"><data>
+<system xmlns="urn:huawei:yang:huawei-system">
+  <password>V3ryS3cretPw!</password>
+  <community>Str0ngC0mm</community>
+  <auth-key>AuthK3yVal</auth-key>
+  <privacy-key>PrivK3yVal</privacy-key>
+  <hostname>core-sw-1</hostname>
+</system>
+</data></rpc-reply>`
+	out := Redact(in)
+	for _, leak := range []string{"V3ryS3cretPw!", "Str0ngC0mm", "AuthK3yVal", "PrivK3yVal"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("XML secret leaked: %q in %.200s", leak, out)
+		}
+	}
+	for _, keep := range []string{"<password>", "<hostname>core-sw-1</hostname>"} {
+		if !strings.Contains(out, keep) {
+			t.Errorf("structure lost: %q", keep)
+		}
+	}
+}

@@ -44,6 +44,26 @@ type managedConn struct {
 // keep the TCP/SSH link alive.
 const idleAfter = 5 * time.Minute
 
+// SharedManager returns the process-wide Manager, refreshing its config.
+// The desktop bridge and the scheduler call this instead of NewManager so
+// reaper goroutines and per-device session caches exist exactly once (a
+// Manager per call would leak a reaper and re-dial VTYs needlessly).
+func SharedManager(cfg *config.Config) *Manager {
+	sharedMu.Lock()
+	defer sharedMu.Unlock()
+	if shared == nil {
+		shared = NewManager(cfg)
+	} else {
+		shared.cfg = cfg
+	}
+	return shared
+}
+
+var (
+	sharedMu sync.Mutex
+	shared   *Manager
+)
+
 func NewManager(cfg *config.Config) *Manager {
 	m := &Manager{cfg: cfg, conns: map[string]*managedConn{}}
 	go m.reaper(context.Background())
