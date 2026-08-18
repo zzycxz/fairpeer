@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/config"
@@ -83,6 +84,7 @@ type NetDevSSHImportCandidate struct {
 
 // NetDevSettings loads the pinned [netdev] section for the settings page.
 func (a *App) NetDevSettings() (NetDevSettingsView, error) {
+	startInspectionScheduler(a)
 	cfg, err := config.Load()
 	if err != nil {
 		return NetDevSettingsView{}, err
@@ -210,6 +212,34 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 
 // ── proposal pipeline (human-only entry points; the agent can only draft
 // via the netdev_propose tool) ─────────────────────────────────────────────
+
+// inspectionSchedOnce starts the periodic inspection loop the first time the
+// settings/findings surface is touched: every [netdev] inspection_interval,
+// run the read battery and file a Finding. "" or unparsable = off.
+var inspectionSchedOnce sync.Once
+
+func startInspectionScheduler(a *App) {
+	inspectionSchedOnce.Do(func() {
+		go func() {
+			for {
+				cfg, err := config.Load()
+				if err != nil || cfg == nil {
+					return
+				}
+				d, err := time.ParseDuration(strings.TrimSpace(cfg.NetDev.InspectionInterval))
+				if err != nil || d <= 0 {
+					return // scheduling disabled; a later settings save restarts the app-level loop
+				}
+				time.Sleep(d)
+				ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
+				if f, err := netdev.NewManager(cfg).RunInspection(ctx); err == nil && f != nil {
+					slog.Info("scheduled netdev inspection filed", "title", f.Title)
+				}
+				cancel()
+			}
+		}()
+	})
+}
 
 // NetDevRunInspection sweeps all devices with the read battery and files one
 // Finding with the evidence (the manual 定时巡检; scheduler wiring later).

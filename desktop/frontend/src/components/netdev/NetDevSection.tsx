@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { app } from "../../lib/bridge";
 import { ProposalCenter } from "./ProposalCenter";
+import { FindingCenter } from "./FindingCenter";
 import type { NetDevSettingsView, NetDevAuditEntryView, NetDevSSHImportCandidate } from "../../lib/types";
 
 // NetDevSection is the 运维 settings tab: device/hop inventory (persisted to
@@ -205,6 +206,8 @@ export function NetDevSection() {
           } catch (e) { setErr(String(e)); }
         }}
       >立即巡检（全部设备，只读电池，结果存 Finding）</span>
+
+      <FindingCenter />
 
       <ProposalCenter />
 

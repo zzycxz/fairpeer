@@ -1,6 +1,7 @@
 package netdev
 
 import (
+	"bufio"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -94,12 +95,16 @@ const simPrompt = "<SimSW>"
 func serveSimSession(ch ssh.Channel, reqs <-chan *ssh.Request) {
 	for req := range reqs {
 		switch req.Type {
-		case "shell", "pty-req":
+		case "shell", "pty-req", "subsystem":
 			if req.WantReply {
 				req.Reply(true, nil)
 			}
 			if req.Type == "shell" {
 				go runSimShell(ch)
+				return
+			}
+			if req.Type == "subsystem" && strings.Contains(string(req.Payload), "netconf") {
+				go runSimNetconf(ch)
 				return
 			}
 		default:
@@ -320,5 +325,35 @@ func TestSessionGBKDecode(t *testing.T) {
 	}
 	if !strings.Contains(res.Output, "接口当前状态") {
 		t.Fatalf("GBK decode failed: %q", res.Output)
+	}
+}
+
+// runSimNetconf answers a minimal NETCONF agent: hello + <get> → fixed data.
+func runSimNetconf(ch ssh.Channel) {
+	defer ch.Close()
+	write := func(doc string) {
+		_, _ = ch.Write([]byte(fmt.Sprintf("\n#%d\n", len(doc))))
+		_, _ = ch.Write([]byte(doc))
+		_, _ = ch.Write([]byte("\n##\n"))
+	}
+	write("<hello xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\"><capabilities><capability>urn:ietf:params:netconf:base:1.0</capability></capabilities></hello>")
+	sc := bufio.NewScanner(ch)
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+	var msg string
+	for sc.Scan() {
+		line := sc.Text()
+		if strings.HasPrefix(line, "#") || line == "" || line == "##" {
+			continue
+		}
+		msg += line
+		if strings.Contains(msg, "</rpc>") {
+			switch {
+			case strings.Contains(msg, "<get/>") || strings.Contains(msg, "<get>"):
+				write("<?xml version=\"1.0\"?><rpc-reply xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\" message-id=\"1\"><data><interfaces><interface><name>GE0/0/1</name><admin-status>up</admin-status></interface></interfaces></data></rpc-reply>")
+			default:
+				write("<?xml version=\"1.0\"?><rpc-reply xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\" message-id=\"1\"><rpc-error><error-tag>operation-not-supported</error-tag></rpc-error></rpc-reply>")
+			}
+			msg = ""
+		}
 	}
 }

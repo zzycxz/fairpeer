@@ -26,6 +26,12 @@ type NetDevConfig struct {
 	Hops                 []NetDevHop      `toml:"hops"`
 	Groups               []NetDevGroup    `toml:"groups"`
 	Discovery            NetDevDiscovery  `toml:"discovery"`
+	// ExtraRead extends the drivers' read-command tables at runtime
+	// ([netdev.extra_read] with vendor tables — see NETDEV_SPEC B-1: the
+	// knowledge-growth path; unknown commands stay refused until classified).
+	ExtraRead            map[string][]string `toml:"extra_read"`
+	// InspectionInterval schedules the read-battery sweep ("1h", "30m"; "" = off).
+	InspectionInterval   string              `toml:"inspection_interval"`
 	Assessment           NetDevAssessment `toml:"assessment"`
 }
 

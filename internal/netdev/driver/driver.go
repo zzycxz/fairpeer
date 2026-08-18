@@ -110,6 +110,37 @@ func resolveKey(vendor, os string) string {
 // firstWords normalizes a command line for prefix classification: collapses
 // whitespace and lowercases. Context-sensitive multiword prefixes
 // ("terminal length") are matched by the concrete drivers.
+// extraReadMu guards the runtime read-prefix extensions (per driver key).
+// This is the knowledge-growth path from NETDEV_SPEC Appendix B-1: users (and
+// later, doc imports) extend the read table instead of the agent improvising.
+var (
+	extraReadMu       sync.Mutex
+	extraReadByDriver = map[string][]string{}
+)
+
+// SetExtraRead prefixes replaces the runtime read extensions for one driver.
+// Prefixes are normalized (lowercased, whitespace-collapsed) and matched with
+// the same word-boundary rule as the built-in tables.
+func SetExtraRead(driverKey string, prefixes []string) {
+	norm := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		p = firstWords(p)
+		if p != "" {
+			norm = append(norm, p)
+		}
+	}
+	extraReadMu.Lock()
+	defer extraReadMu.Unlock()
+	extraReadByDriver[driverKey] = norm
+}
+
+// ExtraRead returns the current runtime extensions (for settings UI).
+func ExtraRead(driverKey string) []string {
+	extraReadMu.Lock()
+	defer extraReadMu.Unlock()
+	return append([]string(nil), extraReadByDriver[driverKey]...)
+}
+
 func firstWords(cmd string) string {
 	return strings.Join(strings.Fields(strings.ToLower(cmd)), " ")
 }
@@ -122,12 +153,32 @@ type classTables struct {
 	dangerous []string // whole-command prefixes
 	write     []string
 	read      []string
+	// driverKey hooks the runtime user extensions into classify.
+	driverKey string
+}
+
+// extraRead returns the runtime read extensions registered for driverKey.
+func (t classTables) extraRead() []string {
+	if t.driverKey == "" {
+		return nil
+	}
+	extraReadMu.Lock()
+	defer extraReadMu.Unlock()
+	return extraReadByDriver[t.driverKey]
 }
 
 func (t classTables) classify(cmd string) Class {
 	normalized := firstWords(cmd)
 	if normalized == "" {
 		return Unknown
+	}
+	// Runtime user extensions ride on top of the read group (never dangerous
+	// or write: a user extension can only make MORE things readable, which is
+	// theirs to decide, and never less safe than the built-ins' conservatism).
+	for _, p := range t.extraRead() {
+		if normalized == p || strings.HasPrefix(normalized, p+" ") {
+			return Read
+		}
 	}
 	// Longest-prefix-first so "reset saved-configuration" beats "reset".
 	for _, group := range []struct {

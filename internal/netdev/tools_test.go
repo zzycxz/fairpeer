@@ -267,3 +267,21 @@ func TestRunInspection(t *testing.T) {
 		t.Fatal("inspection finding not persisted")
 	}
 }
+
+func TestNetconfGet(t *testing.T) {
+	sim := startSimDevice(t)
+	m, _ := testManager(t, sim)
+
+	reply, err := m.NetconfRPC(context.Background(), "sw1", "<get/>")
+	if err != nil {
+		t.Fatalf("NetconfRPC: %v", err)
+	}
+	if !strings.Contains(reply, "GE0/0/1") || !strings.Contains(reply, "</rpc-reply>") {
+		t.Fatalf("reply = %.200s", reply)
+	}
+
+	// Write ops refused at the allowlist.
+	if _, err := m.NetconfRPC(context.Background(), "sw1", "<edit-config><target><running/></target></edit-config>"); err == nil {
+		t.Fatal("edit-config accepted")
+	}
+}

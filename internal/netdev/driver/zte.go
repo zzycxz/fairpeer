@@ -32,6 +32,7 @@ func (zteZXR10) Errors() []*regexp.Regexp {
 }
 
 var zteTables = classTables{
+	driverKey: "zte-zxr10",
 	dangerous: []string{
 		"reboot", "reload", "delete", "rm", "format", "erase",
 		"erase startup-config", "write erase", "factory", "reset",

@@ -324,6 +324,47 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&topologyTool{m: m})
 	reg.Add(&proposeTool{m: m})
 	reg.Add(&findingTool{})
+	reg.Add(&netconfTool{m: m})
+}
+
+type netconfTool struct{ m *Manager }
+
+func (t *netconfTool) Name() string { return "netdev_netconf" }
+
+func (t *netconfTool) Description() string {
+	return "Run ONE read-only NETCONF RPC (<get> or <get-config>) on a device over its SSH connection " +
+		"and return the raw <rpc-reply> XML. Write operations are refused — changes go through the proposal pipeline."
+}
+
+func (t *netconfTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"device": {"type": "string"},
+			"rpc": {"type": "string", "description": "inner element, e.g. \"<get/>\" or \"<get-config><source><running/></source></get-config>\""}
+		},
+		"required": ["device", "rpc"]
+	}`)
+}
+
+func (t *netconfTool) ReadOnly() bool { return true }
+
+func (t *netconfTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		Device string `json:"device"`
+		RPC    string `json:"rpc"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", err
+	}
+	if a.Device == "" || strings.TrimSpace(a.RPC) == "" {
+		return "", errors.New("netdev_netconf: device and rpc are required")
+	}
+	reply, err := t.m.NetconfRPC(ctx, a.Device, a.RPC)
+	if err != nil && reply == "" {
+		return "", err
+	}
+	return Redact(reply), nil
 }
 
 // findingTool records a diagnosis conclusion WITH its evidence — the unit the
