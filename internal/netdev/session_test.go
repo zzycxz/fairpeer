@@ -153,6 +153,10 @@ func simDispatch(ch ssh.Channel, cmd string) {
 		// GBK-encoded Chinese output.
 		gbk, _ := simplifiedchinese.GBK.NewEncoder().Bytes([]byte("\n接口当前状态: UP\n线路协议状态: UP\n"))
 		ch.Write(gbk)
+	case cmd == "display current-configuration":
+		ch.Write([]byte("\n# current-configuration snapshot (simulated)\n#vlan 100 simulated block\nreturn\n"))
+	case cmd == "vlan 100" || cmd == "description IoT" || cmd == "undo vlan 100" || cmd == "no-op":
+		// Simulated writes succeed silently (the executor's path).
 	case cmd == "display lldp neighbor":
 		// The LLDP fixture from topology_test.go, verbatim device output.
 		ch.Write([]byte("\n" + huaweiLLDPFixture))

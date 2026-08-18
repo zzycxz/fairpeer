@@ -322,6 +322,63 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&devicesTool{cfg: cfg})
 	reg.Add(&discoverTool{m: m})
 	reg.Add(&topologyTool{m: m})
+	reg.Add(&proposeTool{m: m})
+}
+
+// proposeTool lets the agent DRAFT a change proposal. Drafting is a read-only
+// act: nothing executes, nothing connects. Approval and execution are
+// human-only (desktop proposal UI → Manager.ApproveProposal/ExecuteProposal);
+// there is deliberately NO agent path to them.
+type proposeTool struct{ m *Manager }
+
+func (t *proposeTool) Name() string { return "netdev_propose" }
+
+func (t *proposeTool) Description() string {
+	return "Draft a change proposal (NOT executed): intent + per-device commands + a rollback plan. " +
+		"A human reviews the whole proposal and decides — approving, executing, and rolling back happen only in the 运维 proposal UI. " +
+		"Every step needs a rollback plan authored with the change; devices in read-only groups are refused."
+}
+
+func (t *proposeTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"intent": {"type": "string", "description": "what changes and why, one or two sentences the approver reads"},
+			"steps": {"type": "array", "items": {
+				"type": "object",
+				"properties": {
+					"device": {"type": "string"},
+					"commands": {"type": "array", "items": {"type": "string"}},
+					"rollback": {"type": "array", "items": {"type": "string"}, "description": "reverse commands, applied newest-first on rollback"}
+				},
+				"required": ["device", "commands", "rollback"]
+			}}
+		},
+		"required": ["intent", "steps"]
+	}`)
+}
+
+func (t *proposeTool) ReadOnly() bool { return true } // drafts change nothing on any device
+
+func (t *proposeTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		Intent string         `json:"intent"`
+		Steps  []ProposalStep `json:"steps"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", err
+	}
+	p := &Proposal{Intent: a.Intent, Steps: a.Steps, Status: ProposalDraft}
+	if err := t.m.ValidateProposal(p); err != nil {
+		return "", err
+	}
+	if err := SaveProposal(p); err != nil {
+		return "", err
+	}
+	_ = AppendAudit(Audit{Device: "(proposal)", Command: "draft " + p.ID + " (" + a.Intent + ")", Class: "proposal", Status: AuditRefused})
+	needs2 := t.m.ProposalNeedsConfirm2(p)
+	return fmt.Sprintf("proposal %s drafted (status: draft). The user reviews it in 设置 → 运维 → 提案; approval and execution are theirs, not yours.%s",
+		p.ID, map[bool]string{true: " Note: a device in this proposal is in a proposal+confirm2 group — approval demands secondary confirmation.", false: ""}[needs2]), nil
 }
 
 type topologyTool struct{ m *Manager }

@@ -59,6 +59,9 @@ func testManager(t *testing.T, sim *simDevice) (*Manager, string) {
 	HostKeyPrompt = func(ctx context.Context, q transport.HostKeyQuestion) (bool, error) { return true, nil }
 	t.Cleanup(func() { HostKeyPrompt = origPrompt })
 
+	proposalsDirOverride = filepath.Join(t.TempDir(), "proposals")
+	t.Cleanup(func() { proposalsDirOverride = "" })
+
 	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
 	SetAuditPath(auditPath)
 	t.Cleanup(func() { SetAuditPath("") })

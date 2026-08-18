@@ -22,20 +22,20 @@ import (
 // NetDevDeviceView is one device row in the settings UI. Password never
 // crosses the bridge; PasswordSet tells the form whether a secret exists.
 type NetDevDeviceView struct {
-	Name        string   `json:"name"`
-	Vendor      string   `json:"vendor"`
-	OS          string   `json:"os"`
-	Model       string   `json:"model"`
-	Address     string   `json:"address"`
-	Port        int      `json:"port"`
-	Via         []string `json:"via"`
-	Group       string   `json:"group"`
-	Username    string   `json:"username"`
-	PasswordEnv string   `json:"passwordEnv"`
-	PasswordSet bool     `json:"passwordSet"`
-	IdentityFile string  `json:"identityFile"`
-	Encoding    string   `json:"encoding"`
-	AllowTelnet bool     `json:"allowTelnet"`
+	Name         string   `json:"name"`
+	Vendor       string   `json:"vendor"`
+	OS           string   `json:"os"`
+	Model        string   `json:"model"`
+	Address      string   `json:"address"`
+	Port         int      `json:"port"`
+	Via          []string `json:"via"`
+	Group        string   `json:"group"`
+	Username     string   `json:"username"`
+	PasswordEnv  string   `json:"passwordEnv"`
+	PasswordSet  bool     `json:"passwordSet"`
+	IdentityFile string   `json:"identityFile"`
+	Encoding     string   `json:"encoding"`
+	AllowTelnet  bool     `json:"allowTelnet"`
 	// Password is write-only from the form: blank = leave the stored secret
 	// untouched; non-blank = store it under the netdev namespace.
 	Password string `json:"password,omitempty"`
@@ -43,14 +43,14 @@ type NetDevDeviceView struct {
 
 // NetDevHopView is one hop (bastion) row.
 type NetDevHopView struct {
-	Name         string `json:"name"`
-	Host         string `json:"host"`
-	Port         int    `json:"port"`
-	User         string `json:"user"`
-	PasswordEnv  string `json:"passwordEnv"`
-	PasswordSet  bool   `json:"passwordSet"`
-	ProxyJump    string `json:"proxyJump"`
-	Password     string `json:"password,omitempty"`
+	Name        string `json:"name"`
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	User        string `json:"user"`
+	PasswordEnv string `json:"passwordEnv"`
+	PasswordSet bool   `json:"passwordSet"`
+	ProxyJump   string `json:"proxyJump"`
+	Password    string `json:"password,omitempty"`
 }
 
 // NetDevSettingsView is the whole settings payload.
@@ -97,7 +97,7 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 			Name: d.Name, Vendor: d.Vendor, OS: d.OS, Model: d.Model,
 			Address: d.Address, Port: d.Port, Via: d.Via, Group: d.Group,
 			Username: d.Username, PasswordEnv: d.PasswordEnv,
-			PasswordSet: netdevSecretSet(netdev.SecretKindPassword, d.PasswordEnv),
+			PasswordSet:  netdevSecretSet(netdev.SecretKindPassword, d.PasswordEnv),
 			IdentityFile: d.IdentityFile, Encoding: d.Encoding, AllowTelnet: d.AllowTelnet,
 		})
 	}
@@ -206,6 +206,48 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 	}
 	slog.Info("SetNetDevSettings saved", "devices", len(v.Devices), "hops", len(v.Hops))
 	return nil
+}
+
+// ── proposal pipeline (human-only entry points; the agent can only draft
+// via the netdev_propose tool) ─────────────────────────────────────────────
+
+// NetDevProposals lists proposals newest-first.
+func (a *App) NetDevProposals() ([]*netdev.Proposal, error) {
+	return netdev.ListProposals()
+}
+
+// NetDevApproveProposal is the human gate: enforces group policies
+// (proposal+confirm2) and every group's change window.
+func (a *App) NetDevApproveProposal(id string, confirm2 bool) (*netdev.Proposal, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.NewManager(cfg).ApproveProposal(id, confirm2)
+}
+
+// NetDevExecuteProposal rolls the approved change device-by-device (backup →
+// apply → verify); the first failure freezes the rest as partial.
+func (a *App) NetDevExecuteProposal(id string) (*netdev.Proposal, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Minute)
+	defer cancel()
+	return netdev.NewManager(cfg).ExecuteProposal(ctx, id)
+}
+
+// NetDevRollbackProposal runs the authored rollback plan over the applied
+// steps (a human decision after a partial freeze or a completed change).
+func (a *App) NetDevRollbackProposal(id string) (*netdev.Proposal, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Minute)
+	defer cancel()
+	return netdev.NewManager(cfg).RollbackProposal(ctx, id)
 }
 
 // NetDevTestConnection runs the first-device flow for one device: connect →
