@@ -78,6 +78,11 @@ type HostKeyPolicy struct {
 	// layer bind higher-level capabilities to the peer actually authenticated by
 	// this transport without weakening HostKeyCallback authority.
 	Verified func(HostKeyQuestion)
+	// Capture observes a FIRST-SEEN key together with its raw material the
+	// moment TOFU would prompt — before any decision. The two-step UI trust
+	// flow uses this: capture the key, reject, let the human confirm the
+	// fingerprint, then TrustKey() the captured material.
+	Capture func(hostname string, remote net.Addr, key ssh.PublicKey)
 
 	mu sync.Mutex // serializes appends to ManagedPath
 }
@@ -288,6 +293,9 @@ func (p *HostKeyPolicy) loadCallback() (ssh.HostKeyCallback, string, error) {
 }
 
 func (p *HostKeyPolicy) tofu(ctx context.Context, host, hostname string, remote net.Addr, key ssh.PublicKey, managed string) error {
+	if p.Capture != nil {
+		p.Capture(hostname, remote, key)
+	}
 	if p.Prompt == nil {
 		return fmt.Errorf("%w for %s: unknown host key %s (no confirmation available)",
 			ErrHostKeyRejected, host, ssh.FingerprintSHA256(key))
@@ -359,8 +367,16 @@ func (p *HostKeyPolicy) managedPath() string {
 	if p.ManagedPath != "" {
 		return p.ManagedPath
 	}
+	if ManagedKnownHostsOverride != "" {
+		return ManagedKnownHostsOverride
+	}
 	return defaultManagedKnownHosts()
 }
+
+// ManagedKnownHostsOverride redirects the default managed known_hosts file
+// for the whole package (tests isolate here instead of touching the user's
+// real state tree). Empty = the fairpeer state dir default.
+var ManagedKnownHostsOverride string
 
 // defaultManagedKnownHosts is the netdev-managed known_hosts file under the
 // fairpeer state tree (os.UserConfigDir()/fairpeer/netdev/known_hosts), beside
@@ -372,6 +388,16 @@ func defaultManagedKnownHosts() string {
 		dir = home
 	}
 	return filepath.Join(dir, "fairpeer", "netdev", "known_hosts")
+}
+
+// TrustKey appends key to the netdev-managed known_hosts (the default
+// ManagedPath) for hostname/remoteAddr. This is the programmatic half of the
+// two-step TOFU flow: the UI captured a first-seen question, the human
+// confirmed the fingerprint, and now the key is durably recorded so the next
+// dial verifies instead of prompting.
+func TrustKey(hostname string, remoteAddr net.Addr, key ssh.PublicKey) error {
+	p := &HostKeyPolicy{}
+	return p.appendManaged(p.managedPath(), hostname, remoteAddr, key)
 }
 
 func newHostKeyMismatchError(host, presented string, e *knownhosts.KeyError) error {

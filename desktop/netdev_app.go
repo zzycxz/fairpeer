@@ -6,6 +6,7 @@ package main
 // audit tail for the settings page, and ~/.ssh/config import candidates.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -205,6 +206,25 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 	}
 	slog.Info("SetNetDevSettings saved", "devices", len(v.Devices), "hops", len(v.Hops))
 	return nil
+}
+
+// NetDevTestConnection runs the first-device flow for one device: connect →
+// TOFU capture (no interactive prompt) → CLI session. Returns ok, or the
+// first-seen host-key question for the UI to confirm, or the failure class.
+func (a *App) NetDevTestConnection(device string) (netdev.TestResult, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return netdev.TestResult{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+	return netdev.NewManager(cfg).TestConnection(ctx, device), nil
+}
+
+// NetDevTrustHostKey durably trusts a first-seen host key after the user
+// confirmed its fingerprint in the UI (two-step TOFU; one-shot per capture).
+func (a *App) NetDevTrustHostKey(fingerprint string) error {
+	return netdev.TrustHostKey(fingerprint)
 }
 
 // NetDevDeleteSecret removes one stored credential (settings "清除密码").

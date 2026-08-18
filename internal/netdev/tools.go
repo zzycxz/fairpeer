@@ -246,7 +246,7 @@ func (m *Manager) connect(ctx context.Context, d config.NetDevDevice, drv driver
 		Host:      resolved,
 		Auth:      auth,
 		JumpHosts: hops,
-		HostKeys:  &transport.HostKeyPolicy{Prompt: HostKeyPrompt},
+		HostKeys:  &transport.HostKeyPolicy{Prompt: HostKeyPrompt, ManagedPath: transport.ManagedKnownHostsOverride},
 	})
 	if err != nil {
 		return nil, nil, err

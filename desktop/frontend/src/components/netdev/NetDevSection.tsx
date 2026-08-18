@@ -66,6 +66,35 @@ export function NetDevSection() {
 
   const patch = (p: Partial<NetDevSettingsView>) => setView(v => ({ ...v, ...p }));
 
+  // First-device flow: connect → TOFU confirm (fingerprint shown verbatim) →
+  // trust → retest. Any other failure is reported as text.
+  const [testing, setTesting] = useState(false);
+  const testConnection = useCallback(async (device: string) => {
+    setTesting(true);
+    try {
+      let r = await app.NetDevTestConnection(device);
+      if (r.status === "unknown-host-key") {
+        const ok = confirm(
+          `首次连接 ${device}（${r.host}）
+主机密钥指纹：
+  ${r.keyType}  ${r.fingerprint}
+
+确认信任此密钥？（确认后写入本机 known_hosts）`,
+        );
+        if (!ok) { setErr("已拒绝主机密钥，未连接。"); return; }
+        if (!r.fingerprint) { setErr("内部错误：指纹缺失"); return; }
+        await app.NetDevTrustHostKey(r.fingerprint);
+        r = await app.NetDevTestConnection(device);
+      }
+      setErr(r.status === "ok" ? "" : `测试失败（${r.status}）：${r.detail ?? ""}`);
+      if (r.status === "ok") alert(`✓ ${device} 连接成功，CLI 会话验证通过（分页关闭已生效）`);
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setTesting(false);
+    }
+  }, []);
+
   if (!loaded) return <div className="mem-hint">…</div>;
 
   return (
@@ -209,6 +238,11 @@ export function NetDevSection() {
             </Field>
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <span
+              className="btn btn--secondary btn--small" role="button"
+              onClick={() => { if (editingDevice.name.trim()) void testConnection(editingDevice.name); }}
+              title="连接 → 主机密钥确认（首次） → CLI 会话验证"
+            >{testing ? "测试中…" : "测试连接"}</span>
             <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice(null)}>取消</span>
             <span
               className="btn btn--primary btn--small" role="button"

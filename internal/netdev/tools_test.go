@@ -47,6 +47,12 @@ func testManager(t *testing.T, sim *simDevice) (*Manager, string) {
 	}
 	t.Cleanup(func() { secretGetter = orig })
 
+	// Isolate the managed known_hosts file: tests must never append to the
+	// user's real state tree.
+	origKnownHosts := transport.ManagedKnownHostsOverride
+	transport.ManagedKnownHostsOverride = filepath.Join(t.TempDir(), "known_hosts")
+	t.Cleanup(func() { transport.ManagedKnownHostsOverride = origKnownHosts })
+
 	// TOFU auto-accept with an isolated managed file (strict mode is the
 	// production default; tests exercise the prompt path).
 	origPrompt := HostKeyPrompt

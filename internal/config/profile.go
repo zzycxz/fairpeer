@@ -146,6 +146,7 @@ func builtinProfiles() []Profile {
 			ToolScope:               ToolScopeNetDevOnly,
 			LoadProjectInstructions: &[]bool{false}[0],
 			EnabledSkills:           []string{"research"},
+			SystemPromptAddon:       netdevDefaultPromptAddon,
 		},
 	}
 }

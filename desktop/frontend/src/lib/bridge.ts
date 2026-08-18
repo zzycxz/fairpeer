@@ -332,6 +332,11 @@ export interface AppBindings {
   NetDevSettings(): Promise<NetDevSettingsView>;
   SetNetDevSettings(v: NetDevSettingsView): Promise<void>;
   NetDevDeleteSecret(kind: string, envName: string): Promise<void>;
+  // First-device flow: connect → TOFU capture → CLI session verify. Returns
+  // status ok | unknown-host-key (with fingerprint for the confirm dialog) |
+  // auth-failed | error.
+  NetDevTestConnection(device: string): Promise<{ device: string; status: string; detail?: string; host?: string; keyType?: string; fingerprint?: string }>;
+  NetDevTrustHostKey(fingerprint: string): Promise<void>;
   NetDevAuditTail(n: number): Promise<NetDevAuditEntryView[]>;
   NetDevSSHImportCandidates(): Promise<NetDevSSHImportCandidate[]>;
   // ProbeMailAccount tests a saved mailbox's IMAP login by actually connecting.
@@ -642,16 +647,20 @@ export function onFilesDropped(cb: (paths: string[]) => void): () => void {
 }
 
 // onReady subscribes to the agent:ready event fired when boot.Build completes.
-// The frontend re-fetches Meta/Context/History when this lands.
-export function onReady(cb: () => void): () => void {
+// The callback receives the tab whose controller finished building (undefined
+// for older backends that emit without a payload) — the frontend re-fetches
+// that tab's Meta/Context/History when this lands.
+export function onReady(cb: (tabId?: string) => void): () => void {
   if (realApp() && typeof window !== "undefined" && window.runtime) {
-    return window.runtime.EventsOn("agent:ready", () => cb());
+    return window.runtime.EventsOn("agent:ready", (...data: unknown[]) =>
+      cb((data[0] as { tabId?: string } | undefined)?.tabId),
+    );
   }
   // Mock fallback: fire once on subscribe (as before) AND on subsequent mock
   // agent:ready emissions (e.g. after a mock SwitchProfile), so the dev shell
   // reloads session data the same way the real app does.
   cb();
-  const wrapped = () => cb();
+  const wrapped = (payload: unknown) => cb((payload as { tabId?: string } | undefined)?.tabId);
   (mockEventListeners["agent:ready"] ??= []).push(wrapped);
   return () => {
     const arr = mockEventListeners["agent:ready"] ?? [];
@@ -1684,6 +1693,10 @@ function makeMockApp(): AppBindings {
       mockNetDev = { ...v, devices: [...v.devices], hops: [...v.hops], groups: [...v.groups], scopes: [...v.scopes] };
     },
     async NetDevDeleteSecret(_kind: string, _envName: string) {},
+    async NetDevTestConnection(device: string) {
+      return { device, status: "error", detail: "browser dev mock: no device backend" };
+    },
+    async NetDevTrustHostKey(_fingerprint: string) {},
     async NetDevAuditTail(_n: number) {
       return [] as NetDevAuditEntryView[];
     },
