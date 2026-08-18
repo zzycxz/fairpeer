@@ -235,12 +235,20 @@ func (c *Config) ResolveProfile(name string) (*Profile, error) {
 	if key == "" {
 		key = ProfileDev
 	}
-	// User config entries override builtins by name.
+	// User config entries override builtins by name — EXCEPT the security
+	// floor: a user [[profiles]] entry named netdev cannot clear the tool
+	// seal or re-enable project instructions (an accidental tool_scope=""
+	// would silently hand the session a full write surface). Everything else
+	// (model, prompt, skills, plugins) stays freely overridable.
+	floor := builtinFloor(key)
 	for i := range c.Profiles {
 		if ProfileNameKey(c.Profiles[i].Name) == key {
 			p := c.Profiles[i]
 			if err := validateProfile(&p); err != nil {
 				return nil, err
+			}
+			if floor != nil {
+				floor(&p)
 			}
 			p.Name = key
 			if p.DisplayName == "" {
@@ -363,4 +371,17 @@ func (p *Profile) ResolveSkillDisabled(configDisabled []string) map[string]bool 
 		// enforcement point is boot.go (see applyProfileToSkills).
 	}
 	return out
+}
+
+// builtinFloor returns the override-limited fields for profiles whose
+// built-in protections are a floor (netdev: the seal and the project-
+// instruction gate). nil for ordinary profiles.
+func builtinFloor(key string) func(*Profile) {
+	if key != ProfileNetDev {
+		return nil
+	}
+	return func(p *Profile) {
+		p.ToolScope = ToolScopeNetDevOnly
+		p.LoadProjectInstructions = &[]bool{false}[0]
+	}
 }

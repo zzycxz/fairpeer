@@ -3,8 +3,10 @@ import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } 
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
   Activity,
+  ChevronDown,
   Command,
   Download,
+  Search,
   SquarePen,
   FileDown,
   FileImage,
@@ -40,6 +42,7 @@ import { ClearContextCard } from "./components/ClearContextCard";
 import { StatusBar } from "./components/StatusBar";
 import { SidebarFooter } from "./components/SidebarFooter";
 import { HistoryPanel } from "./components/HistoryPanel";
+import { SidebarSessions } from "./components/SidebarSessions";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { ShortcutsCheatsheet } from "./components/ShortcutsCheatsheet";
@@ -513,8 +516,13 @@ function activeTopicTurnsFromTree(tree: ProjectNode[], tab?: TabMeta): number | 
   return walk(tree);
 }
 
-function clampSidebarWidth(width: number): number {
-  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+// Joint width constraint (ui-redesign §4-B7): the sidebar may never push the
+// chat pane below CHAT_MIN_WIDTH, dock or no dock — the two panels trade width
+// against each other with the conversation always protected. The right-dock
+// side of the constraint lives in lib/workspaceLayout.availableWorkspacePanelWidth.
+function clampSidebarWidth(width: number, dockWidth = 0, chatFloor = CHAT_MIN_WIDTH): number {
+  const viewportMax = Math.max(SIDEBAR_MIN_WIDTH, window.innerWidth - dockWidth - chatFloor);
+  return Math.min(SIDEBAR_MAX_WIDTH, viewportMax, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
 }
 
 function clampRightDockPreviewWidth(width: number): number {
@@ -1159,6 +1167,17 @@ export default function App() {
     }).catch(() => { if (!cancelled) setSidebarImSessions([]); });
     return () => { cancelled = true; };
   }, [sidebarImDetailConnection]);
+
+  // Sidebar "Recent" sessions (ui-redesign §4-B4): loaded proactively, refreshed
+  // on tab switch and after resume/rename/delete so ages stay fresh.
+  const [sidebarSessions, setSidebarSessions] = useState<SessionMeta[]>([]);
+  const [sidebarFilesOpen, setSidebarFilesOpen] = useState(true);
+  const refreshSidebarSessions = useCallback(() => {
+    listSessions().then((all) => setSidebarSessions(all)).catch(() => { /* offline: keep last list */ });
+  }, [listSessions]);
+  useEffect(() => {
+    refreshSidebarSessions();
+  }, [refreshSidebarSessions, activeTab]);
   useEffect(() => {
     let cancelled = false;
     if (!activeTab?.topicId) {
@@ -1773,9 +1792,12 @@ export default function App() {
   useEffect(() => {
     const active = tabMetas.find((m) => m.id === activeTabId);
     if (active?.profile) {
-      const isCowork = active.profile.toLowerCase() === "cowork";
+      const p = active.profile.toLowerCase();
+      const isCowork = p === "cowork";
       setCoworkActive(isCowork);
-      profileRef.current = isCowork ? "cowork" : "dev";
+      // Keep netdev as its own partition key: folding it to "dev" here would
+      // file netdev topics into the dev session partition (P1 wiring bug).
+      profileRef.current = p === "cowork" || p === "netdev" ? p : "dev";
       return;
     }
     // No tab meta yet (startup) — ask the backend directly.
@@ -1783,10 +1805,11 @@ export default function App() {
     app
       .Profile()
       .then((name) => {
-        const isCowork = (name ?? "").toLowerCase() === "cowork";
+        const p = (name ?? "").toLowerCase();
+        const isCowork = p === "cowork";
         if (!cancelled) {
           setCoworkActive(isCowork);
-          profileRef.current = isCowork ? "cowork" : "dev";
+          profileRef.current = p === "cowork" || p === "netdev" ? p : "dev";
         }
       })
       .catch(() => {
@@ -1870,12 +1893,19 @@ export default function App() {
     saveSidebarCollapsed(nextCollapsed);
   }, [anchorAppScrollToChat, closeTransientOverlays, pulseSidebarToggle, sidebarCollapsed]);
 
+  // Width the right dock currently reserves (0 when closed/maximized) — the
+  // sidebar clamp subtracts it so the chat pane never drops below CHAT_MIN_WIDTH.
+  const dockReserveWidth = useCallback(
+    () => (workspacePanelOpen && !workspacePanelMaximized ? workspacePanelRenderWidth + WORKSPACE_RESIZER_WIDTH : 0),
+    [workspacePanelOpen, workspacePanelMaximized, workspacePanelRenderWidth],
+  );
+
   const setExpandedSidebarWidth = useCallback((width: number) => {
     closeTransientOverlays();
-    const next = clampSidebarWidth(width);
+    const next = clampSidebarWidth(width, dockReserveWidth());
     setSidebarWidth(next);
     saveSidebarWidth(next);
-  }, [closeTransientOverlays]);
+  }, [closeTransientOverlays, dockReserveWidth]);
 
   const startSidebarResize = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -1885,9 +1915,10 @@ export default function App() {
       setSidebarResizing(true);
       let nextWidth = sidebarWidth;
       let lastClientX = sidebarWidth;
+      const dockWidth = dockReserveWidth();
       const onMove = (moveEvent: PointerEvent) => {
         lastClientX = moveEvent.clientX;
-        nextWidth = clampSidebarWidth(moveEvent.clientX);
+        nextWidth = clampSidebarWidth(moveEvent.clientX, dockWidth);
         setSidebarWidth(nextWidth);
       };
       const onDone = () => {
@@ -1913,7 +1944,7 @@ export default function App() {
       window.addEventListener("pointerup", onDone);
       window.addEventListener("pointercancel", onDone);
     },
-    [closeTransientOverlays, sidebarCollapsed, sidebarWidth],
+    [closeTransientOverlays, dockReserveWidth, sidebarCollapsed, sidebarWidth],
   );
 
   const resizeSidebarWithKeyboard = useCallback(
@@ -2171,11 +2202,10 @@ export default function App() {
     () =>
       ({
         "--sidebar-expanded-width": `${sidebarWidth}px`,
-        "--chat-min-width": `${chatReservedWidth}px`,
         "--workspace-width": `${workspacePanelRenderWidth}px`,
         "--workspace-resizer-width": `${WORKSPACE_RESIZER_WIDTH}px`,
       }) as CSSProperties,
-    [chatReservedWidth, sidebarWidth, workspacePanelRenderWidth],
+    [sidebarWidth, workspacePanelRenderWidth],
   );
 
   const setWorkspacePanel = useCallback((open: boolean) => {
@@ -2665,7 +2695,7 @@ export default function App() {
     ? sidebarImDetailConnection.platformLabel
     : topicbarImSource ? t("msg.fromIm", { source: topicbarImSource.label }) : "";
   const topicbarImSourcePlatform = sidebarImDetailConnection?.platform ?? topicbarImSource?.platform;
-  const topicbarSubtitleVisible = Boolean(topicbarWorkspaceLabel || topicbarImSourceLabel);
+  const topicbarSubtitleVisible = Boolean(topicbarWorkspaceLabel || topicbarImSourceLabel || state.meta?.label);
   const topicbarSubtitleTitle = sidebarImDetailConnection
     ? [topicbarWorkspaceLabel, topicbarImSourceLabel, sidebarImScopeLabel(sidebarImDetailConnection, t)].filter(Boolean).join(" · ")
     : [topicbarWorkspacePath || topicbarWorkspaceLabel, topicbarImSourceLabel].filter(Boolean).join(" · ");
@@ -2769,6 +2799,7 @@ export default function App() {
         {topicbarSubtitleVisible && (
           <div className="topicbar__subtitle" title={topicbarSubtitleTitle}>
             {topicbarWorkspaceLabel && <span>{topicbarWorkspaceLabel}</span>}
+            {state.meta?.label && <span className="topicbar__submodel">{state.meta.label}</span>}
             {topicbarImSourcePlatform && (
               <span className={`topicbar__source-chip topicbar__source-chip--${topicbarImSourcePlatform}`}>
                 {topicbarImSourceLabel}
@@ -2913,6 +2944,7 @@ export default function App() {
         modelLabel={state.meta?.label ?? t("status.connecting")}
         tabId={activeTabId}
         effort={state.effort}
+        contextInfo={state.context}
         onSend={handleSend}
         onCancel={cancel}
         onPauseToggle={pauseToggle}
@@ -2939,12 +2971,29 @@ export default function App() {
     </footer>
   ) : null;
 
+  // Sidebar search sits ABOVE the Recent sessions section and drives the
+  // project tree (hoisted out of ProjectTree, ui-redesign §4-B4 follow-up).
+  const [treeQuery, setTreeQuery] = useState("");
+  const sidebarSearchNode = (
+    <label className="project-tree__search sidebar-search">
+      <Search size={14} />
+      <input
+        value={treeQuery}
+        onChange={(e) => setTreeQuery(e.target.value)}
+        placeholder={t("projectTree.searchPlaceholder")}
+      />
+    </label>
+  );
+
   const projectTreeNode = (
     <ProjectTree
       activeScope={activeTab?.scope}
       activeWorkspaceRoot={activeTab?.workspaceRoot}
       activeTopicId={activeTab?.topicId}
       profile={coworkActive ? "cowork" : "dev"}
+      query={treeQuery}
+      onQueryChange={setTreeQuery}
+      hideSearch
       imTopicSources={imTopicSources}
       onOpenTopic={handleOpenTopic}
       onOpenExpertSession={async (teamId, teamName) => {
@@ -2971,6 +3020,25 @@ export default function App() {
     />
   );
 
+  const sidebarSessionsNode = (
+    <SidebarSessions
+      sessions={sidebarSessions}
+      onResume={(session) => {
+        void onResumeSession(session);
+        window.setTimeout(refreshSidebarSessions, 500);
+      }}
+      onRename={(path, title) => {
+        void onRenameSession(path, title);
+        window.setTimeout(refreshSidebarSessions, 300);
+      }}
+      onDelete={(path) => {
+        void onDeleteSession(path);
+        window.setTimeout(refreshSidebarSessions, 300);
+      }}
+      onOpenAll={() => { void openAllHistory(); }}
+    />
+  );
+
   return (
     <ShellExpandProvider>
     <div ref={appRef} className={["app", `app--${desktopPlatform}`, browserPreviewChrome ? "app--browser-preview" : "", coworkActive ? "app--cowork" : ""].filter(Boolean).join(" ")}>
@@ -2993,6 +3061,8 @@ export default function App() {
             mainNode={mainNode}
             footerNode={footerNode}
             projectTreeNode={projectTreeNode}
+            sessionsNode={sidebarSessionsNode}
+            searchNode={sidebarSearchNode}
             rightDockOpen={coworkDockRenderable}
             sidebarCollapsed={sidebarCollapsed}
             onNewSession={() => void handleNewTab()}
@@ -3064,8 +3134,21 @@ export default function App() {
             <span>{t("topbar.newSession")}</span>
           </button>
 
+          {sidebarSearchNode}
+
+          {sidebarSessionsNode}
+
           <section className="sidebar__section sidebar__section--projects">
-            {projectTreeNode}
+            <button
+              type="button"
+              className="sidebar-files-toggle"
+              aria-expanded={sidebarFilesOpen}
+              onClick={() => setSidebarFilesOpen((v) => !v)}
+            >
+              <span>{t("sidebar.filesLabel")}</span>
+              <ChevronDown size={13} className={sidebarFilesOpen ? undefined : "sidebar-files-toggle__chev--closed"} />
+            </button>
+            {sidebarFilesOpen && projectTreeNode}
           </section>
 
           <section className="cowork-sidebar__group" style={{ marginBottom: '0px', marginTop: 'auto' }}>

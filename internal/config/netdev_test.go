@@ -111,3 +111,29 @@ scopes = ["198.51.100.0/24"]
 		t.Fatalf("project-injected scopes survived: %v", cfg.NetDev.Discovery.Scopes)
 	}
 }
+
+// The builtin netdev profile is a FLOOR: a user [[profiles]] override can
+// retune model/skills but can NEVER clear the tool seal or re-enable project
+// instructions (an accidental tool_scope="" would silently unseal).
+func TestNetDevProfileOverrideFloored(t *testing.T) {
+	c := Default()
+	c.Profiles = []Profile{{
+		Name:                    "netdev",
+		Model:                   "some-model",
+		ToolScope:               "",               // attempted unseal
+		LoadProjectInstructions: &[]bool{true}[0], // attempted re-enable
+	}}
+	p, err := c.ResolveProfile("netdev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.SealsExecutionTools() {
+		t.Fatal("user override cleared the tool seal")
+	}
+	if !p.SkipProjectInstructions() {
+		t.Fatal("user override re-enabled project instructions")
+	}
+	if p.Model != "some-model" {
+		t.Fatal("model override should still work (floor is security-only)")
+	}
+}
