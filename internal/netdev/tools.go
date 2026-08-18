@@ -323,6 +323,56 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&discoverTool{m: m})
 	reg.Add(&topologyTool{m: m})
 	reg.Add(&proposeTool{m: m})
+	reg.Add(&findingTool{})
+}
+
+// findingTool records a diagnosis conclusion WITH its evidence — the unit the
+// user reviews. No evidence, no finding.
+type findingTool struct{}
+
+func (t *findingTool) Name() string { return "netdev_finding" }
+
+func (t *findingTool) Description() string {
+	return "Record one diagnostic finding: a conclusion backed by the command outputs that support it. " +
+		"Always attach evidence (device + command + the relevant output excerpt — outputs you saw via netdev_exec are already redacted). " +
+		"Findings are what the user reviews; end a diagnosis with findings, not prose."
+}
+
+func (t *findingTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"title": {"type": "string", "description": "one-line conclusion, e.g. \"OSPF neighbor 10.2.0.3 down: holding timer mismatch\""},
+			"severity": {"type": "string", "enum": ["info", "warning", "critical"]},
+			"devices": {"type": "array", "items": {"type": "string"}},
+			"detail": {"type": "string", "description": "reasoning: what was checked, what correlated"},
+			"evidence": {"type": "array", "items": {
+				"type": "object",
+				"properties": {
+					"device": {"type": "string"},
+					"command": {"type": "string"},
+					"output": {"type": "string", "description": "the supporting excerpt"}
+				},
+				"required": ["device", "command", "output"]
+			}},
+			"suggestion": {"type": "string", "description": "optional: the change worth drafting via netdev_propose"}
+		},
+		"required": ["title", "evidence"]
+	}`)
+}
+
+func (t *findingTool) ReadOnly() bool { return true }
+
+func (t *findingTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var f Finding
+	if err := json.Unmarshal(args, &f); err != nil {
+		return "", err
+	}
+	if err := SaveFinding(&f); err != nil {
+		return "", err
+	}
+	_ = AppendAudit(Audit{Device: "(finding)", Command: f.Title, Class: "read", Status: AuditOK})
+	return "finding " + f.ID + " recorded (" + f.Severity + ") with " + fmt.Sprint(len(f.Evidence)) + " evidence items", nil
 }
 
 // proposeTool lets the agent DRAFT a change proposal. Drafting is a read-only

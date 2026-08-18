@@ -1701,3 +1701,21 @@ export interface NetDevProposal {
   confirm2?: boolean;
   note?: string;
 }
+
+// Mirrors the Go Finding JSON (lowercase tags).
+export interface NetDevFindingEvidence {
+  device: string;
+  command: string;
+  output: string;
+}
+
+export interface NetDevFinding {
+  id: string;
+  title: string;
+  severity: "info" | "warning" | "critical";
+  devices: string[];
+  detail: string;
+  evidence: NetDevFindingEvidence[];
+  suggestion?: string;
+  created_at: string;
+}

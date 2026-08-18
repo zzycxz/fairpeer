@@ -211,6 +211,23 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 // ── proposal pipeline (human-only entry points; the agent can only draft
 // via the netdev_propose tool) ─────────────────────────────────────────────
 
+// NetDevRunInspection sweeps all devices with the read battery and files one
+// Finding with the evidence (the manual 定时巡检; scheduler wiring later).
+func (a *App) NetDevRunInspection() (*netdev.Finding, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
+	defer cancel()
+	return netdev.NewManager(cfg).RunInspection(ctx)
+}
+
+// NetDevFindings lists diagnosis findings newest-first (Finding cards).
+func (a *App) NetDevFindings() ([]*netdev.Finding, error) {
+	return netdev.ListFindings()
+}
+
 // NetDevProposals lists proposals newest-first.
 func (a *App) NetDevProposals() ([]*netdev.Proposal, error) {
 	return netdev.ListProposals()

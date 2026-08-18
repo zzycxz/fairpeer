@@ -29,6 +29,7 @@ import type {
   EffortInfo,
   NetDevSettingsView,
   NetDevAuditEntryView,
+  NetDevFinding,
   NetDevProposal,
   NetDevSSHImportCandidate,
   FilePreview,
@@ -340,6 +341,9 @@ export interface AppBindings {
   NetDevTrustHostKey(fingerprint: string): Promise<void>;
   // Proposal pipeline (human-only entry points; the agent can only draft).
   NetDevProposals(): Promise<NetDevProposal[]>;
+  // Read-battery sweep over all devices; files one Finding with evidence.
+  NetDevRunInspection(): Promise<NetDevFinding | null>;
+  NetDevFindings(): Promise<NetDevFinding[]>;
   NetDevApproveProposal(id: string, confirm2: boolean): Promise<NetDevProposal>;
   NetDevExecuteProposal(id: string): Promise<NetDevProposal>;
   NetDevRollbackProposal(id: string): Promise<NetDevProposal>;
@@ -1704,6 +1708,8 @@ function makeMockApp(): AppBindings {
     },
     async NetDevTrustHostKey(_fingerprint: string) {},
     async NetDevProposals() { return [] as NetDevProposal[]; },
+    async NetDevRunInspection() { return null; },
+    async NetDevFindings() { return [] as NetDevFinding[]; },
     async NetDevApproveProposal(_id: string, _confirm2: boolean) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevExecuteProposal(_id: string) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevRollbackProposal(_id: string) { throw new Error("browser dev mock: no proposal backend"); },

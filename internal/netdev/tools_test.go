@@ -61,6 +61,8 @@ func testManager(t *testing.T, sim *simDevice) (*Manager, string) {
 
 	proposalsDirOverride = filepath.Join(t.TempDir(), "proposals")
 	t.Cleanup(func() { proposalsDirOverride = "" })
+	findingsDirOverr = filepath.Join(t.TempDir(), "findings")
+	t.Cleanup(func() { findingsDirOverr = "" })
 
 	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
 	SetAuditPath(auditPath)
@@ -206,5 +208,62 @@ func TestExecSealAcrossSession(t *testing.T) {
 	// device flags an error — but it is NOT refused, i.e. the session works).
 	if res := m.Exec(context.Background(), "sw1", "display clock"); res.Refused {
 		t.Fatalf("session unusable after refusal: %+v", res)
+	}
+}
+
+func TestFindingRequiresEvidence(t *testing.T) {
+	startSimDevice(t) // testManager needs a sim; findings isolated anyway
+	m, _ := testManager(t, simForFindings(t))
+
+	bare := &Finding{Title: "something wrong"}
+	if err := SaveFinding(bare); err == nil || !strings.Contains(err.Error(), "evidence") {
+		t.Fatalf("evidence-less finding accepted: %v", err)
+	}
+
+	f := &Finding{
+		Title:    "OSPF neighbor 10.2.0.3 down: hello timer mismatch",
+		Severity: SeverityWarning,
+		Devices:  []string{"sw1"},
+		Evidence: []Evidence{{Device: "sw1", Command: "display ospf error", Output: "hello timer mismatch on GE0/0/1"}},
+	}
+	if err := SaveFinding(f); err != nil {
+		t.Fatalf("SaveFinding: %v", err)
+	}
+	if f.ID == "" {
+		t.Fatal("no id")
+	}
+
+	list, err := ListFindings()
+	if err != nil || len(list) != 1 || list[0].ID != f.ID {
+		t.Fatalf("list = %v err = %v", list, err)
+	}
+
+	bad := &Finding{Title: "x", Severity: "fatal", Evidence: f.Evidence}
+	if err := SaveFinding(bad); err == nil {
+		t.Fatal("bad severity accepted")
+	}
+	_ = m
+}
+
+func simForFindings(t *testing.T) *simDevice {
+	return startSimDevice(t)
+}
+
+func TestRunInspection(t *testing.T) {
+	sim := startSimDevice(t)
+	m, _ := testManager(t, sim)
+	// The simulator answers version/interface-brief; the battery's other
+	// commands fall to its unknown-command error, which must surface as
+	// problems (severity warning) — evidence still collected.
+	f, err := m.RunInspection(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Severity != SeverityWarning || len(f.Evidence) == 0 {
+		t.Fatalf("finding = %+v", f)
+	}
+	list, _ := ListFindings()
+	if len(list) == 0 {
+		t.Fatal("inspection finding not persisted")
 	}
 }

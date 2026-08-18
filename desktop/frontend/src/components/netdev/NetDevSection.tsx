@@ -191,6 +191,21 @@ export function NetDevSection() {
         onChange={e => patch({ scopes: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })}
       />
 
+      {/* 巡检 */}
+      <div className="set-label" style={{ margin: "14px 0 6px" }}>巡检</div>
+      <span
+        className="btn btn--secondary btn--small" role="button"
+        onClick={async () => {
+          try {
+            setErr("巡检中…");
+            const f = await app.NetDevRunInspection();
+            setErr("");
+            alert(f ? `巡检完成：${f.title}` : "巡检完成");
+            await reload();
+          } catch (e) { setErr(String(e)); }
+        }}
+      >立即巡检（全部设备，只读电池，结果存 Finding）</span>
+
       <ProposalCenter />
 
       {/* 审计 */}

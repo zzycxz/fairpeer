@@ -89,8 +89,8 @@ func TestForResolvesVariants(t *testing.T) {
 			t.Fatalf("For(%q,%q) unexpectedly missing", c[0], c[1])
 		}
 	}
-	if _, ok := For("zte", "zxr10"); ok {
-		t.Fatal("zte driver should not exist until P2 (spec §4.1)")
+	if _, ok := For("zte", "zxr10"); !ok {
+		t.Fatal("zte driver missing")
 	}
 }
 
@@ -176,4 +176,56 @@ func TestErrorFixtures(t *testing.T) {
 	// A bare caret continuation is output framing, not an error verdict — the
 	// engine must not rely on it, so no pattern should claim it as the
 	// deciding line. (Patterns above may match the message lines only.)
+}
+
+func TestZTEClassify(t *testing.T) {
+	drv, ok := For("zte", "zxr10")
+	if !ok {
+		t.Fatal("zte driver not found")
+	}
+	runClassCases(t, drv, []classCase{
+		{"show version", Read},
+		{"show running-config", Read},
+		{"show interface brief", Read},
+		{"ping 10.1.1.1", Read},
+		{"traceroute 10.1.1.1", Read},
+		{"terminal length 0", Read},
+		{"configure terminal", Write},
+		{"set port 1/5 disable", Write},
+		{"interface gei-1/1", Write},
+		{"no shutdown", Write},
+		{"clear counters", Write},
+		{"reboot", Dangerous},
+		{"reload", Dangerous},
+		{"delete flash:/old.cfg", Dangerous},
+		{"write erase", Dangerous},
+		{"mystery verb", Unknown},
+		{"", Unknown},
+	})
+}
+
+func TestZTEPromptFixtures(t *testing.T) {
+	drv, _ := For("zte", "zxr10")
+	for _, prompt := range []string{"ZXR10>", "ZXR10#", "ZXR10(config)#", "zxr-acc(config-if)#", "SW1(gei-1/1)#"} {
+		if !drv.Prompt().MatchString("\n" + prompt + " ") {
+			t.Errorf("zte prompt %q not matched", prompt)
+		}
+	}
+	for _, line := range []string{
+		"%Invalid input detected at '^' marker.",
+		"% Ambiguous command:  \"sh\"",
+		"%Error: invalid parameter",
+		"Error: Wrong parameter",
+	} {
+		matched := false
+		for _, re := range drv.Errors() {
+			if re.MatchString(line) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			t.Errorf("zte error line %q not matched", line)
+		}
+	}
 }
