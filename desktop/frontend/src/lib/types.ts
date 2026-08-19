@@ -1666,6 +1666,9 @@ export interface NetDevSettingsView {
   guardConfirmEach: boolean;
   guardTurnBudget: number;
   guardAllowedGroups: string[];
+  // Read-table extensions (vendor → commands) — the user-owned knowledge
+  // growth path for the classifier.
+  extraRead: Record<string, string[]>;
 }
 
 export interface NetDevAuditEntryView {

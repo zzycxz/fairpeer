@@ -65,9 +65,12 @@ type NetDevSettingsView struct {
 	Scopes         []string           `json:"scopes"`
 	// Guardrails reach into every ask / every tool call (NETDEV_SPEC §6):
 	// per-command approval, per-turn command budget, per-conversation device scope.
-	GuardConfirmEach  bool     `json:"guardConfirmEach"`
-	GuardTurnBudget   int      `json:"guardTurnBudget"`
-	GuardAllowedGroup []string `json:"guardAllowedGroups"`
+	GuardConfirmEach  bool                `json:"guardConfirmEach"`
+	GuardTurnBudget   int                 `json:"guardTurnBudget"`
+	GuardAllowedGroup []string            `json:"guardAllowedGroups"`
+	// ExtraRead is the read-table extension map (vendor → commands) so the
+	// settings page can show and edit the knowledge-growth path.
+	ExtraRead map[string][]string `json:"extraRead"`
 }
 
 // NetDevAuditEntryView is one audit row for the settings page.
@@ -103,6 +106,7 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 		GuardConfirmEach:  cfg.NetDev.Guardrails.ConfirmEachCommand,
 		GuardTurnBudget:   cfg.NetDev.Guardrails.TurnCommandBudget,
 		GuardAllowedGroup: cfg.NetDev.Guardrails.AllowedGroups,
+		ExtraRead:         cfg.NetDev.ExtraRead,
 	}
 	for _, d := range cfg.NetDev.Devices {
 		v.Devices = append(v.Devices, NetDevDeviceView{
@@ -182,6 +186,21 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 		if len(v.Scopes) > 0 {
 			nd.Discovery.Scopes = v.Scopes
 		}
+		// Preserve fields this form does not edit: a rebuild here must never
+		// wipe the user's read-table extensions, inspection scheduler, or
+		// assessment envelope (they're TOML-managed; the form used to drop
+		// them silently on every save). ExtraRead is form-owned when the
+		// frontend sends it; older payloads fall back to preserving.
+		if v.ExtraRead != nil {
+			nd.ExtraRead = v.ExtraRead
+		} else {
+			nd.ExtraRead = c.NetDev.ExtraRead
+		}
+		nd.InspectionInterval = c.NetDev.InspectionInterval
+		nd.Assessment = c.NetDev.Assessment
+		nd.DefaultMode = c.NetDev.DefaultMode
+		nd.ProxyDeviceTraffic = c.NetDev.ProxyDeviceTraffic
+		nd.MaxSessionsPerDevice = c.NetDev.MaxSessionsPerDevice
 		nd.Guardrails = config.NetDevGuardrails{
 			ConfirmEachCommand: v.GuardConfirmEach,
 			TurnCommandBudget:  v.GuardTurnBudget,
@@ -222,9 +241,52 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 	if cfgErr != nil {
 		return cfgErr
 	}
-	// The shared Manager keeps serving with the fresh guardrails immediately.
-	_ = netdev.SharedManager(func() *config.Config { c, _ := config.Load(); return c }())
+	// The shared Manager keeps serving with the fresh guardrails immediately;
+	// extra_read tables go live without a restart.
+	if fresh, err := config.Load(); err == nil && fresh != nil {
+		netdev.ApplyExtraRead(fresh)
+		_ = netdev.SharedManager(fresh)
+	}
 	slog.Info("SetNetDevSettings saved", "devices", len(v.Devices), "hops", len(v.Hops))
+	return nil
+}
+
+// NetDevAddExtraRead is the one-click knowledge-growth path: when a command
+// was refused as unknown (classifier table miss), the user can teach the read
+// table right from the refusal chip — no TOML editing. Single line only, and
+// the driver must exist for the vendor.
+func (a *App) NetDevAddExtraRead(vendor, command string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("NetDevAddExtraRead panic", "panic", r)
+			err = fmt.Errorf("添加读表条目时发生内部错误：%v", r)
+		}
+	}()
+	command = strings.TrimSpace(command)
+	vendor = strings.ToLower(strings.TrimSpace(vendor))
+	if command == "" || strings.ContainsAny(command, "\n\r") {
+		return fmt.Errorf("命令必须是非空单行")
+	}
+	cfgErr := a.applyConfigOnly(func(c *config.Config) error {
+		for _, x := range c.NetDev.ExtraRead[vendor] {
+			if x == command {
+				return nil // idempotent: already taught
+			}
+		}
+		if c.NetDev.ExtraRead == nil {
+			c.NetDev.ExtraRead = map[string][]string{}
+		}
+		c.NetDev.ExtraRead[vendor] = append(c.NetDev.ExtraRead[vendor], command)
+		return config.ValidateNetDev(c.NetDev)
+	})
+	if cfgErr != nil {
+		return cfgErr
+	}
+	if fresh, err := config.Load(); err == nil && fresh != nil {
+		netdev.ApplyExtraRead(fresh)
+		_ = netdev.SharedManager(fresh)
+	}
+	slog.Info("netdev extra_read extended", "vendor", vendor, "command", command)
 	return nil
 }
 

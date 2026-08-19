@@ -33,7 +33,7 @@ export function NetDevSection() {
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [] });
+  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {} });
   const [audit, setAudit] = useState<NetDevAuditEntryView[]>([]);
   const [editingDevice, setEditingDevice] = useState<EditDevice | null>(null);
   const [editingHop, setEditingHop] = useState<EditHop | null>(null);
@@ -228,6 +228,32 @@ export function NetDevSection() {
         <div style={{ opacity: 0.6, fontSize: 11.5 }}>
           作用域非空时，范围外的设备对 AI 完全不可见（netdev_devices 列表也过滤）——在第一个 token 花出去之前就完成控制。脱敏提醒与拒绝提醒默认常开，无需配置。
         </div>
+      </div>
+
+      {/* 读表扩展 —— 用户教知识，模型不能自我声明（B-1） */}
+      <div className="set-label" style={{ margin: "14px 0 6px" }}>读表扩展（用户教会 AI 识别更多只读命令）</div>
+      {["huawei", "cisco", "zte"].map(vendor => {
+        const list = view.extraRead?.[vendor] ?? [];
+        return (
+          <div key={vendor} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
+            <span style={{ minWidth: 60, fontWeight: 600 }}>{vendor}</span>
+            {list.map(cmd => (
+              <span key={cmd} className="btn btn--secondary btn--small" role="button" title="点击移除"
+                onClick={() => patch({ extraRead: { ...view.extraRead, [vendor]: list.filter(c => c !== cmd) } })}>
+                {cmd} ×
+              </span>
+            ))}
+            <span className="btn btn--secondary btn--small" role="button"
+              onClick={() => {
+                const cmd = prompt(`${vendor} 要加入读表的只读命令（单行）：`)?.trim();
+                if (!cmd) return;
+                patch({ extraRead: { ...view.extraRead, [vendor]: [...list, cmd] } });
+              }}>+ 添加</span>
+          </div>
+        );
+      })}
+      <div style={{ opacity: 0.6, fontSize: 11.5 }}>
+        对话中被拒绝的未知命令也会在设备卡上出现「允许此命令」一键加入。扩展只让更多命令「可读」，永远不可能放开写操作。
       </div>
 
       {/* 巡检 */}

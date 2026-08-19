@@ -1,5 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { app } from "../lib/bridge";
+import { ProposalActions } from "../components/netdev/ProposalCenter";
 import type { NetDevSettingsView, NetDevFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph } from "../lib/types";
 import "../styles/netdev.css";
 
@@ -60,7 +61,7 @@ const CFG_CMD: Record<string, string> = {
   zte: "show running-config",
 };
 
-type QuickResult = { command: string; output: string; isError: boolean; refused?: string };
+type QuickResult = { command: string; output: string; isError: boolean; refused?: string; refusedUnknown?: boolean };
 type DockTab = "context" | "topology" | "findings" | "proposals";
 
 export function NetDevLayout({
@@ -118,11 +119,29 @@ export function NetDevLayout({
   const runQuick = useCallback(async (device: string, command: string) => {
     try {
       const r = await app.NetDevQuickExec(device, command);
-      setQuick(q => ({ ...q, [command]: { command, output: r.refused ? (r.refusal ?? "已拒绝") : r.output, isError: !!r.refused || r.is_error, refused: r.refused ? "1" : undefined } }));
+      setQuick(q => ({ ...q, [command]: {
+        command,
+        output: r.refused ? (r.refusal ?? "已拒绝") : r.output,
+        isError: !!r.refused || r.is_error,
+        refused: r.refused ? "1" : undefined,
+        refusedUnknown: !!r.refused && r.class === "unknown",
+      } }));
     } catch (e) {
       setQuick(q => ({ ...q, [command]: { command, output: String(e), isError: true } }));
     }
   }, []);
+
+  // One-click knowledge growth: an unknown-but-plausibly-read command refused
+  // by the classifier gets a chip that teaches the read table — no TOML
+  // editing, no model self-declaration (B-1: only the user extends the table).
+  const teachRead = useCallback(async (vendor: string, command: string, device: string) => {
+    try {
+      await app.NetDevAddExtraRead(vendor, command);
+      await runQuick(device, command);
+    } catch (e) {
+      alert(String(e));
+    }
+  }, [runQuick]);
 
   const genTopology = useCallback(async () => {
     setTopoBusy(true);
@@ -289,6 +308,16 @@ export function NetDevLayout({
               {Object.values(quick).map(r => (
                 <div key={r.command} className="ndv__quick-result">
                   <div className="ndv__quick-cmd" style={r.isError ? { color: "#ff8787" } : undefined}>{r.command}</div>
+                  {r.refusedUnknown && selectedDevice && (
+                    <div style={{ marginBottom: 4 }}>
+                      <span
+                        className="btn btn--secondary btn--small"
+                        role="button"
+                        title="此命令不在驱动读表中（保守拒绝）。确认它只读后加入读表——只有用户能扩展知识，模型不能自我声明。"
+                        onClick={() => void teachRead(selectedDevice.vendor, r.command, selectedDevice.name)}
+                      >允许此命令（加入读表）</span>
+                    </div>
+                  )}
                   <pre className="ndv__pre">{r.output || "（无输出）"}</pre>
                 </div>
               ))}
@@ -336,8 +365,8 @@ export function NetDevLayout({
           <div className="ndv__card">
             <div className="ndv__card-title">提案（{proposals.length}）</div>
             {proposals.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>暂无。对话中让 agent 用 netdev_propose 起草。</div>}
-            {proposals.slice(0, 10).map(p => <ProposalRow key={p.id} p={p} />)}
-            <div className="ndv__hint" style={{ padding: 0 }}>批准 / 执行 / 回滚在 设置 → 运维 → 提案中心</div>
+            {proposals.slice(0, 10).map(p => <ProposalRow key={p.id} p={p} onDone={() => void reload()} />)}
+            <div className="ndv__hint" style={{ padding: 0 }}>批准 / 执行 / 回滚在行内直接操作；完整视图在 设置 → 运维 → 提案中心。</div>
           </div>
         )}
       </div>
@@ -382,8 +411,10 @@ function GettingStarted({ onOpenSettings }: { onOpenSettings: (tab: string) => v
   );
 }
 
-// ProposalRow: one queue row, expandable to steps (commands + rollback plan).
-function ProposalRow({ p }: { p: NetDevProposal }) {
+// ProposalRow: one queue row, expandable to steps (commands + rollback plan)
+// with the human actions inline — approve / execute / rollback happen where
+// the user is looking, not in a settings round-trip.
+function ProposalRow({ p, onDone }: { p: NetDevProposal; onDone: () => void }) {
   const [open, setOpen] = useState(false);
   const sev = p.status === "partial" || p.status === "failed" ? SEV_COLOR.critical : SEV_COLOR.warning;
   return (
@@ -392,6 +423,7 @@ function ProposalRow({ p }: { p: NetDevProposal }) {
         {p.id} · {p.status} {open ? "▲" : "▼"}
       </div>
       <div className="ndv__meta ndv__ellipsis">{p.intent}</div>
+      <ProposalActions p={p} onDone={onDone} />
       {open && (
         <div style={{ marginTop: 4 }}>
           {(p.steps ?? []).map((s, i) => (

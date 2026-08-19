@@ -127,6 +127,24 @@ func contains(list []string, s string) bool {
 	return false
 }
 
+// ApplyExtraRead wires the [netdev.extra_read] vendor tables into the
+// drivers' runtime read extensions — the B-1 knowledge-growth path: users
+// teach the read table (via settings or the one-click refusal chip), never
+// the model. boot's RegisterTools and the desktop settings bridge call it
+// after every config change so the tables go live without a restart.
+func ApplyExtraRead(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	for vendor, prefixes := range cfg.NetDev.ExtraRead {
+		drv, ok := driver.For(vendor, "")
+		if !ok {
+			continue
+		}
+		driver.SetExtraRead(drv.Key(), prefixes)
+	}
+}
+
 // KillAllConnections is the emergency stop: every device connection and CLI
 // session is closed immediately (freeing all VTY lines), audited as such. The
 // Manager stays usable — the next diagnostic command reconnects on demand.
@@ -188,6 +206,17 @@ type ExecResult struct {
 
 // Exec runs one command on one configured device under the read-only seal.
 func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResult {
+	// One command per call, ENFORCED (the tool description says so, but the
+	// model — or an injection riding device output — must not be able to lean
+	// on a newline: the PTY would execute the extra lines as keystrokes,
+	// bypassing the classifier entirely ("display version\nundo stp" classifies
+	// as read after whitespace collapse). Refused before anything else.
+	if strings.ContainsAny(command, "\n\r\x00\v\f") {
+		_ = AppendAudit(Audit{Device: deviceName, Command: "(multi-line command)", Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
+		return ExecResult{Device: deviceName, Command: command, Refused: true, Class: "guardrail",
+			Refusal: "multi-line command refused — one command per call, because a newline would execute unclassified lines on the device. Split it into separate calls so every line goes through the read-only classifier."}
+	}
+
 	device, ok := m.cfg.NetDevDeviceByName(deviceName)
 	if !ok {
 		return ExecResult{Device: deviceName, Command: command, Refused: true,
@@ -422,6 +451,7 @@ func secretReader(kind, envName string) func() (string, error) {
 // these tools (the reverse half of the hard seal; NETDEV_SPEC §7.1).
 func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	m := NewManager(cfg)
+	ApplyExtraRead(cfg)
 	reg.Add(&execTool{m: m})
 	reg.Add(&devicesTool{cfg: cfg})
 	reg.Add(&discoverTool{m: m})

@@ -351,6 +351,9 @@ export interface AppBindings {
   // Reset the per-turn command budget — called on every user submit in the
   // 运维 profile so turn_command_budget is a true per-ask control.
   NetDevTurnBegin(): Promise<void>;
+  // One-click read-table growth from a refusal chip (user teaches, never the
+  // model). Single-line commands only.
+  NetDevAddExtraRead(vendor: string, command: string): Promise<void>;
   // UI quick-diagnose: one read-only command through the SAME sealed path.
   NetDevQuickExec(device: string, command: string): Promise<{ device: string; command: string; class: string; output: string; is_error: boolean; refused?: boolean; refusal?: string }>;
   NetDevTopologySnapshot(): Promise<NetDevTopologyGraph | null>;
@@ -1717,7 +1720,8 @@ function makeMockApp(): AppBindings {
       { name: "ACC-01", vendor: "huawei", os: "vrp", model: "S3100", address: "10.0.2.1", port: 22, via: [], group: "接入", username: "netops", passwordEnv: "NETDEV_ACC01_PW", passwordSet: true, identityFile: "", encoding: "", allowTelnet: false },
     ],
     hops: [], groups: [], auditRetention: "", scopes: [],
-    guardConfirmEach: true, guardTurnBudget: 30, guardAllowedGroups: [],
+    guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [],
+    extraRead: {},
   };
   return {
     async NetDevSettings() {
@@ -1736,8 +1740,16 @@ function makeMockApp(): AppBindings {
     async NetDevFindings() { return [] as NetDevFinding[]; },
     async NetDevEmergencyStop() { return 0; },
     async NetDevTurnBegin() {},
+    async NetDevAddExtraRead(vendor: string, command: string) {
+      mockNetDev = { ...mockNetDev, extraRead: { ...mockNetDev.extraRead, [vendor]: [...(mockNetDev.extraRead[vendor] ?? []), command] } };
+    },
     async NetDevQuickExec(device: string, command: string) {
-      return { device, command, class: "read", output: "(browser dev mock: no device backend)", is_error: false };
+      // Dev-shell stand-in: verb-rooted reads pass, anything else is refused
+      // as unknown so the one-click "teach the read table" chip is demoable.
+      if (!/^(display|show)\s/.test(command.trim())) {
+        return { device, command, class: "unknown", output: "", is_error: true, refused: true, refusal: "unknown command — conservatively refused（演示：点「允许此命令」加入读表后立即可用）" };
+      }
+      return { device, command, class: "read", output: `(browser dev mock: ${command} 输出示意)\n\n GigabitEthernet0/0/1  current state : UP\n Line protocol state : UP`, is_error: false };
     },
     async NetDevTopologySnapshot() {
       // Browser-dev stand-in shaped like a real small campus net (FW → 2 core →
