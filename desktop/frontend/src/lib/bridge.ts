@@ -89,6 +89,8 @@ import type {
   HooksSettingsView,
   HookConfigView,
   MailProbeResult,
+  LoopConfig,
+  LoopRunStatus,
   ManagedBrowserStatus,
   InboxItem,
   RagExtractResultView,
@@ -394,6 +396,11 @@ export interface AppBindings {
   // OpenURLInManagedBrowser launches the managed browser if needed and opens
   // the URL as a new tab in it (preview pane's companion-window tier).
   OpenURLInManagedBrowser(url: string): Promise<ManagedBrowserStatus>;
+  // Loop Engineering (docs/loop-engineering-spec.md): start/stop/status of the
+  // supervised agent loop. Round updates arrive on the "loop:round" event.
+  LoopStart(config: LoopConfig): Promise<void>;
+  LoopStop(reason: string): Promise<void>;
+  LoopStatus(): Promise<LoopRunStatus | null>;
   OpenPPTTemplateDir(): Promise<void>;
   PickPPTTemplate(): Promise<string>;
   SetBotSecret(envName: string, value: string): Promise<void>;
@@ -623,6 +630,15 @@ function getMock(): AppBindings {
 }
 
 // onEvent subscribes to the agent's typed event stream; returns an unsubscribe.
+// Loop status stream (real: wails "loop:round" event; mock: simulator).
+export function onLoopStatus(cb: (s: import("./types").LoopRunStatus) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("loop:round", (payload: unknown) => cb(payload as import("./types").LoopRunStatus));
+  }
+  mockLoopListeners.add(cb);
+  return () => mockLoopListeners.delete(cb);
+}
+
 export function onEvent(cb: (e: WireEvent) => void): () => void {
   if (realApp() && typeof window !== "undefined" && window.runtime) {
     return window.runtime.EventsOn(EVENT_CHANNEL, (payload) => cb(payload as WireEvent));
@@ -910,6 +926,62 @@ function emitUpdater(p: UpdateProgress) {
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// ── Loop Engineering mock simulator ──────────────────────────────────────────
+// mockLoopState holds the simulated run; mockLoopTick advances it one round per
+// ~1.6s and notifies subscribers on a dedicated channel (polled via
+// LoopStatus by the panel).
+
+let mockLoopState: import("./types").LoopRunStatus | null = null;
+const mockLoopListeners = new Set<(s: import("./types").LoopRunStatus) => void>();
+
+function emitMockLoop() {
+  if (mockLoopState) mockLoopListeners.forEach((l) => l(structuredClone(mockLoopState!)));
+}
+
+function mockLoopTick() {
+  if (!mockLoopState || mockLoopState.state !== "running") return;
+  const maxRounds = mockLoopState.config.maxRounds || 3;
+  const round = mockLoopState.round + 1;
+  const outcomes: Array<"pass" | "fail-rolled-back" | "skipped"> =
+    mockLoopState.config.autonomy === "L1"
+      ? ["skipped", "skipped", "skipped"]
+      : ["fail-rolled-back", "pass", "pass"];
+  const verify = outcomes[(round - 1) % outcomes.length];
+  mockLoopState.round = round;
+  mockLoopState.timeline.push({
+    round,
+    verify,
+    changed: verify === "skipped" ? [] : ["src/utils/date.ts", "tests/date.spec.ts"],
+    note: verify === "fail-rolled-back" ? "验证失败,已回滚(mock)" : verify === "pass" ? "修复通过(mock)" : "L1 只读轮次",
+    durationMs: 3200,
+  });
+  const terminal =
+    round >= Math.min(maxRounds, 3) ||
+    (!mockLoopState.config.exploratory && verify === "pass") ||
+    mockLoopState.timeline.filter((r) => r.verify === "fail-rolled-back").length >= 3;
+  if (terminal) {
+    const passed = mockLoopState.timeline.filter((r) => r.verify === "pass").length;
+    const rolled = mockLoopState.timeline.filter((r) => r.verify === "fail-rolled-back").length;
+    mockLoopState.state = "done";
+    mockLoopState.stopNote = mockLoopState.config.exploratory ? "问题队列清空(mock)" : "验收通过(mock)";
+    mockLoopState.endedAt = Date.now();
+    mockLoopState.report = {
+      roundsRun: round,
+      passed,
+      rolledBack: rolled,
+      skipped: mockLoopState.timeline.filter((r) => r.verify === "skipped").length,
+      changedFiles: 2,
+      lastVerify: "通过",
+      headline: `完成(mock):${round} 轮 · 通过 ${passed} · 回滚 ${rolled}`,
+      suggestion: "这是浏览器 dev 模拟;真机由 Go 引擎驱动",
+    };
+    emitMockLoop();
+    return;
+  }
+  emitMockLoop();
+  setTimeout(mockLoopTick, 1600);
 }
 
 function baseName(path: string): string {
@@ -3903,6 +3975,30 @@ function makeMockApp(): AppBindings {
     async OpenURLInManagedBrowser(_url: string) {
       await delay(300);
       return { running: true, url: "http://127.0.0.1:9222", browser: "Chrome (mock)", profile: "~/fairpeer/browser-profile", alreadyRunning: false };
+    },
+    // Loop Engineering mock: a fast 3-round simulation so the panel's config →
+    // running → report flow is demoable without the Go backend.
+    async LoopStart(config) {
+      mockLoopState = {
+        runId: `loop-mock-${Date.now()}`,
+        config,
+        state: "running",
+        round: 0,
+        startedAt: Date.now(),
+        timeline: [],
+      };
+      mockLoopTick();
+    },
+    async LoopStop(reason) {
+      if (mockLoopState) {
+        mockLoopState.state = "aborted";
+        mockLoopState.stopNote = reason || "手动停止";
+        mockLoopState.endedAt = Date.now();
+        emitMockLoop();
+      }
+    },
+    async LoopStatus() {
+      return mockLoopState ? structuredClone(mockLoopState) : null;
     },
     async OpenPPTTemplateDir() {},
     async PickPPTTemplate() { return ""; },

@@ -1751,3 +1751,50 @@ export interface NetDevTopologyGraph {
   edges: { local_device: string; local_port: string; remote_device: string; remote_port?: string; remote_ip?: string; source: string }[];
   at: string;
 }
+
+// ── Loop Engineering (docs/loop-engineering-spec.md §4) ──────────────────────
+
+export interface LoopConfig {
+  id: string;
+  name: string;
+  goal: string;
+  sensorCommand: string;
+  verifyCommand: string;
+  exploratory: boolean;
+  autonomy: "L1" | "L2" | "L3";
+  maxRounds: number;
+  intervalSeconds: number;
+  commandAllowlist: string[];
+}
+
+export interface LoopRoundRecord {
+  round: number;
+  problem?: string;
+  changed?: string[];
+  verify: "pass" | "fail-rolled-back" | "skipped";
+  note?: string;
+  durationMs: number;
+}
+
+export interface LoopReport {
+  roundsRun: number;
+  passed: number;
+  rolledBack: number;
+  skipped: number;
+  changedFiles: number;
+  lastVerify: string;
+  headline: string;
+  suggestion?: string;
+}
+
+export interface LoopRunStatus {
+  runId: string;
+  config: LoopConfig;
+  state: "running" | "stopping" | "paused" | "done" | "aborted" | "failed";
+  round: number;
+  startedAt: number;
+  endedAt?: number;
+  stopNote?: string;
+  timeline: LoopRoundRecord[];
+  report?: LoopReport;
+}

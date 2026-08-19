@@ -14,6 +14,7 @@ import {
   Pencil,
   PanelLeft,
   Plus,
+  Repeat2,
   X,
   Trash2,
   Brain,
@@ -41,6 +42,7 @@ import { ClearContextCard } from "./components/ClearContextCard";
 import { SidebarFooter } from "./components/SidebarFooter";
 import { TerminalPanel, loadTerminalOpen, saveTerminalOpen } from "./components/TerminalPanel";
 import { ContextMenu } from "./components/ContextMenu";
+import { LoopPanel } from "./components/loop/LoopPanel";
 import { SideSessionPane } from "./components/SideSessionPane";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SidebarSessions } from "./components/SidebarSessions";
@@ -812,6 +814,8 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [preferenceOpen, setPreferenceOpen] = useState(false);
+  // 循环工程 panel (docs/loop-engineering-spec.md): sidebar entry under 编码偏好.
+  const [loopOpen, setLoopOpen] = useState(false);
   const [paletteSessions, setPaletteSessions] = useState<SessionMeta[]>([]);
   const [paletteCapabilities, setPaletteCapabilities] = useState<CapabilitiesView | null>(null);
   const { showToast } = useToast();
@@ -977,6 +981,18 @@ export default function App() {
       saveTerminalOpen(!v);
       return !v;
     });
+  }, []);
+  // Loop Engineering emergency stop (spec §2.4): Ctrl+Shift+\ kills the loop
+  // from anywhere, mirroring the netdev e-stop precedent.
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.ctrlKey && event.shiftKey && event.code === "Backslash") {
+        event.preventDefault();
+        void app.LoopStop("emergency-hotkey");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
@@ -2869,6 +2885,9 @@ export default function App() {
 
   const mainNode = (
     <main className="main">
+      {loopOpen && !preferenceOpen && (
+        <LoopPanel onClose={() => setLoopOpen(false)} />
+      )}
       {preferenceOpen && (
         <PreferencePanel
           mode="dev"
@@ -3275,11 +3294,23 @@ export default function App() {
               className={`cowork-sidebar__item ${preferenceOpen ? "cowork-sidebar__item--active" : ""}`}
               onClick={() => {
                 closeTransientOverlays();
+                setLoopOpen(false);
                 setPreferenceOpen(true);
               }}
             >
               <SlidersHorizontal size={14} />
               <span>{t("preference.title") || "编码偏好"}</span>
+            </button>
+            <button
+              className={`cowork-sidebar__item ${loopOpen ? "cowork-sidebar__item--active" : ""}`}
+              onClick={() => {
+                closeTransientOverlays();
+                setPreferenceOpen(false);
+                setLoopOpen(true);
+              }}
+            >
+              <Repeat2 size={14} />
+              <span>{t("loop.title")}</span>
             </button>
           </section>
 
