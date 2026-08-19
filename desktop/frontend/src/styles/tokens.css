@@ -108,6 +108,7 @@
   /* ── design-system tokens (unified scale, phase 1) ── */
   /* Radius scale — ui-redesign-spec §2.2. Single-value literals are build-guard
      (scripts/check-radius-tokens.mjs); multi-value bubble corners may stay literal. */
+  --radius-xs: 3px;    /* sharp technical elements: keycaps, terminal chrome */
   --radius-sm: 6px;    /* controls, inputs, small chips */
   --radius-md: 10px;   /* cards, panels */
   --radius-lg: 14px;   /* bubbles, modals */
