@@ -58,3 +58,51 @@ func TestPresentRecordsSeedsFromSidecarAndTracksLiveEvents(t *testing.T) {
 		t.Fatal("PresentRecords: expected ok=false when Present is disabled")
 	}
 }
+
+// TestPresentRecordsResetOnRebind verifies the controller-rebinds-to-another-
+// session path (resume another transcript, switch branch): the recorder's
+// records describe the OLD conversation and must not leak into the new
+// session — neither via PresentRecords (memory-first readers) nor via the next
+// Save (sidecar pollution). Rebinding the SAME path keeps the live records.
+func TestPresentRecordsResetOnRebind(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "a.jsonl")
+	pathB := filepath.Join(dir, "b.jsonl")
+
+	// Session B's sidecar: one notice with rewrite version 2.
+	recB := present.NewRecorder()
+	recB.Append(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "session B notice"})
+	recB.SyncBeforeSave(2, event.Event{})
+	if err := recB.Save(present.PresentPath(pathB)); err != nil {
+		t.Fatal(err)
+	}
+
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	sink := event.FuncSink(func(event.Event) {})
+	c := New(Options{Executor: exec, SessionDir: dir, Present: true, Sink: sink})
+
+	// Bind to A, record a live event, then rebind to B (resume/switch flow).
+	c.Resume(agent.NewSession("sys"), pathA)
+	c.notice("session A live notice")
+	c.Resume(agent.NewSession("sys"), pathB)
+
+	records, ver, ok := c.PresentRecords()
+	if !ok {
+		t.Fatal("PresentRecords: expected ok=true")
+	}
+	if len(records) != 1 || records[0].Text != "session B notice" {
+		t.Fatalf("records after rebind = %+v, want only session B's seeded notice", records)
+	}
+	if ver != 2 {
+		t.Fatalf("rewrite version after rebind = %d, want 2 (session B's header)", ver)
+	}
+
+	// Rebinding the same path again keeps live records (they belong to it).
+	c.notice("session B live notice")
+	c.Resume(agent.NewSession("sys"), pathB)
+	records, _, _ = c.PresentRecords()
+	if len(records) != 2 || records[1].Text != "session B live notice" {
+		t.Fatalf("records after same-path rebind = %+v, want seeded + live notice preserved", records)
+	}
+}

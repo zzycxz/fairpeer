@@ -97,6 +97,7 @@ type Controller struct {
 	// a user saw after a tab switch/reload/crash. nil = sidecar disabled (the
 	// degraded provider.Message-only history is used). Never feeds the LLM.
 	present            *present.Recorder
+	presentPath        string       // session path the recorder's records describe (guarded by c.mu); "" = never bound
 	lastCompactionDone *event.Event // points at the sink-wrapper's lastDone var; snapshot reads it for SyncBeforeSave
 
 	// jobs is the session-scoped background-job manager. The agent's background
@@ -137,6 +138,7 @@ type Controller struct {
 	cancel     context.CancelFunc
 	running    bool
 	autosaveWG sync.WaitGroup
+	turnWG     sync.WaitGroup // tracks the in-flight turn goroutine so a cancelling caller can drain it (WaitTurn)
 	planMode   bool
 	goal       string
 	goalStatus string
@@ -388,6 +390,7 @@ func New(opts Options) *Controller {
 		asks:             map[string]pendingAsk{},
 		granted:            map[string]bool{},
 		present:            rec,
+		presentPath:        opts.SessionPath,
 		lastCompactionDone: lastDonePtr,
 	}
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
@@ -515,7 +518,9 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		defer c.autosaveWG.Done()
 		c.autosaveWhileRunning(ctx)
 	}()
+	c.turnWG.Add(1)
 	go func() {
+		defer c.turnWG.Done()
 		defer cancel()
 		defer func() {
 			if r := recover(); r != nil {
@@ -1443,6 +1448,24 @@ func (c *Controller) Running() bool {
 	return c.running
 }
 
+// WaitTurn blocks until no turn goroutine is in flight, or the timeout elapses.
+// A caller that just cancelled a running turn uses this to let the goroutine
+// finish its final session writes BEFORE taking a closing snapshot (CloseTab,
+// shutdown) — otherwise a step completing between Cancel and Snapshot lands
+// only in memory, and with the tab/controller already gone no later snapshot
+// can ever flush it. Bounded so a stuck provider call can't block teardown.
+func (c *Controller) WaitTurn(d time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		c.turnWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(d):
+	}
+}
+
 // Pause requests a graceful pause of the in-flight turn. Unlike Cancel (which
 // aborts and discards partial work), Pause lets the current step finish, then
 // freezes the agent with full state preserved so ResumeTurn continues from the
@@ -1835,6 +1858,7 @@ func (c *Controller) NewSession() error {
 	c.startedOnce = true // NewSession fires SessionStart itself; don't re-fire on the next turn
 	path := c.sessionPath
 	c.mu.Unlock()
+	c.rebindPresent(path)
 	c.rebindCheckpoints(path)
 	c.hooks.SessionStart(context.Background())
 	return nil
@@ -1870,6 +1894,7 @@ func (c *Controller) ClearSession() error {
 	c.startedOnce = true
 	path := c.sessionPath
 	c.mu.Unlock()
+	c.rebindPresent(path)
 	c.rebindCheckpoints(path)
 	c.hooks.SessionStart(context.Background())
 	return nil
@@ -2045,6 +2070,7 @@ func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string
 		c.mu.Lock()
 		c.sessionPath = newPath
 		c.mu.Unlock()
+		c.rebindPresent(newPath)
 		c.rebindCheckpoints(newPath)
 	}
 	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
@@ -2103,6 +2129,7 @@ func (c *Controller) Branch(name string) (string, error) {
 	c.mu.Lock()
 	c.sessionPath = newPath
 	c.mu.Unlock()
+	c.rebindPresent(newPath)
 	c.rebindCheckpoints(newPath)
 	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("created branch %s", agent.BranchID(newPath))})
@@ -2149,6 +2176,7 @@ func (c *Controller) SwitchBranch(ref string) (agent.BranchInfo, error) {
 	c.mu.Lock()
 	c.sessionPath = match.Path
 	c.mu.Unlock()
+	c.rebindPresent(match.Path)
 	c.rebindCheckpoints(match.Path)
 	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("switched to branch %s", branchDisplayName(match))})
@@ -2247,18 +2275,36 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	c.mu.Lock()
 	c.sessionPath = path
 	c.mu.Unlock()
-	// Seed the presentation recorder now, not at the first snapshot: without
-	// this, a PresentRecords/Save issued during the session's first ~30s (before
-	// the mid-turn autosave runs) would see only the new turn's records and
-	// silently drop every prior turn's rich fields and cards.
-	if c.present != nil {
-		if err := c.present.SeedFromPath(present.PresentPath(path)); err != nil {
-			slog.Warn("controller: present sidecar seed on resume", "err", err)
-		}
-	}
+	c.rebindPresent(path)
 	c.rebindCheckpoints(path)
 	c.maybeColdResumePrune(path)
 	c.restoreModeFromMeta(path)
+}
+
+// rebindPresent keeps the presentation recorder aligned with the session the
+// controller just (re)bound to. When the path CHANGED, the accumulated records
+// describe the old conversation — reset and re-seed from the new session's
+// sidecar so they neither leak into the new file on the next Save nor get
+// served by PresentRecords as if they belonged to it. Rebinding the same path
+// (or the first binding) keeps the live records and just seeds, so a
+// PresentRecords/Save issued during the session's first ~30s (before the
+// mid-turn autosave flushes) still sees prior turns' rich fields and cards.
+// No-op without a recorder (CLI/headless). Best-effort: a seed read failure is
+// logged, not propagated.
+func (c *Controller) rebindPresent(path string) {
+	if c.present == nil {
+		return
+	}
+	c.mu.Lock()
+	changed := c.presentPath != "" && c.presentPath != path
+	c.presentPath = path
+	c.mu.Unlock()
+	if changed {
+		c.present.Reset()
+	}
+	if err := c.present.SeedFromPath(present.PresentPath(path)); err != nil {
+		slog.Warn("controller: present sidecar seed on rebind", "err", err)
+	}
 }
 
 // PresentRecords returns the presentation records for the current session from
@@ -2501,6 +2547,7 @@ func (c *Controller) SetSessionPath(p string) {
 	c.mu.Lock()
 	c.sessionPath = p
 	c.mu.Unlock()
+	c.rebindPresent(p)
 	c.rebindCheckpoints(p)
 }
 

@@ -187,7 +187,7 @@ func TestEmitReadyInvokesReadyHook(t *testing.T) {
 		atomic.AddInt32(&calls, 1)
 	}
 
-	app.emitReady(context.TODO())
+	app.emitReady(context.TODO(), "tab1")
 
 	if got := atomic.LoadInt32(&calls); got != 1 {
 		t.Fatalf("ready hook calls = %d, want 1", got)

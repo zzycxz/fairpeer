@@ -12,11 +12,12 @@ import (
 // cache-stable prompt prefix) stays untouched until the user picks one.
 func TestLoadPresetsSeedsDefaults(t *testing.T) {
 	dir := t.TempDir()
+	wantCount := map[string]int{"cowork": 3, "dev": 4}
 
 	for _, mode := range []string{"cowork", "dev"} {
 		f := LoadPresets(dir, mode)
-		if len(f.Items) != 3 {
-			t.Fatalf("%s defaults: want 3 items, got %d", mode, len(f.Items))
+		if len(f.Items) != wantCount[mode] {
+			t.Fatalf("%s defaults: want %d items, got %d", mode, wantCount[mode], len(f.Items))
 		}
 		if f.Active != "" || f.ActivePreset() != nil {
 			t.Fatalf("%s defaults: want no active preset, got %q", mode, f.Active)

@@ -648,7 +648,7 @@ func (a *App) rebuild() error {
 		tab.StartupErr = err.Error()
 		tab.Ready = true
 		a.mu.Unlock()
-		a.emitReady(a.ctx)
+		a.emitReady(a.ctx, tab.ID)
 		return err
 	}
 	// boot.Build (re)built the global RPM budget; rebind it into RAG extraction
@@ -686,7 +686,7 @@ func (a *App) rebuild() error {
 	tab.Ready = true
 	a.saveTabsLocked()
 	a.mu.Unlock()
-	a.emitReady(a.ctx)
+	a.emitReady(a.ctx, tab.ID)
 	ctrl.EnableInteractiveApproval()
 	applyTabModeToController(ctrl, tab.mode)
 	applyTabRagScopeToController(ctrl, tab.ragScope)

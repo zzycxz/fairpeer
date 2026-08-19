@@ -94,6 +94,12 @@ func defaultPresets(profile string) PresetFile {
 				Content: "新代码向周围代码看齐：命名、注释密度、错误处理、导入分组都模仿同文件/同包的既有写法，不引入新依赖和新风格，除非我明确要求。",
 			},
 			{
+				ID:      "universal-code",
+				Name:    "普遍适用",
+				Builtin: true,
+				Content: "写的代码要普遍适用，不针对当前一个用例写死：优先标准库和惯用写法，不依赖特定机器或环境；不硬编码绝对路径、密钥、账号；公共逻辑抽成可复用函数；处理常见边界（空输入、异常路径、超大输入）；注意跨平台差异（路径分隔符、编码、大小写）。",
+			},
+			{
 				ID:      "explain-more",
 				Name:    "多解释",
 				Builtin: true,

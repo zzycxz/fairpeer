@@ -307,7 +307,12 @@ func topicActivityStatusFromEvent(e event.Event) (string, bool) {
 	}
 }
 
-func (a *App) emitReady(ctx context.Context) {
+// emitReady signals the frontend that a tab's controller finished building.
+// The payload carries the tab's ID so the frontend reloads THAT tab — without
+// it, a background tab finishing its build triggers a reload of whatever tab
+// happens to be active (misrouted reload of a possibly streaming tab, and
+// N redundant reloads of the active tab when startup restores N tabs).
+func (a *App) emitReady(ctx context.Context, tabID string) {
 	a.mu.RLock()
 	hook := a.readyHook
 	a.mu.RUnlock()
@@ -316,7 +321,7 @@ func (a *App) emitReady(ctx context.Context) {
 		return
 	}
 	if ctx != nil {
-		runtime.EventsEmit(ctx, "agent:ready")
+		runtime.EventsEmit(ctx, "agent:ready", map[string]any{"tabId": tabID})
 	}
 }
 
@@ -987,6 +992,11 @@ func (a *App) CloseTab(tabID string) error {
 	// Tear down outside the lock.
 	if tab.Ctrl != nil {
 		tab.Ctrl.Cancel()
+		// Drain the cancelled turn BEFORE snapshotting: a step that completes
+		// between Cancel and Snapshot lands only in memory, and with the tab
+		// already deleted no later snapshot can flush it — the tail of a run
+		// would vanish from the reopened session.
+		tab.Ctrl.WaitTurn(3 * time.Second)
 		_ = tab.Ctrl.Snapshot()
 		tab.Ctrl.Close()
 		a.releaseSharedHost(tab.WorkspaceRoot) // drop this tab's shared-host reference
@@ -1016,6 +1026,35 @@ func (tab *WorkspaceTab) markBuilt() {
 	tab.readyOnce.Do(func() { close(tab.readyCh) })
 }
 
+// tabHasSelectableProvider reports whether cfg offers any model a tab could
+// boot with: a provider whose api_key_env resolves, or a keyless provider the
+// user explicitly added (ProviderAccess). Mirrors NeedsOnboarding — fresh
+// installs carrying only the built-in local presets report false.
+func tabHasSelectableProvider(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	access := map[string]bool{}
+	for _, n := range cfg.Desktop.ProviderAccess {
+		if n = strings.TrimSpace(n); n != "" {
+			access[n] = true
+		}
+	}
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		if p.APIKeyEnv == "" {
+			if access[p.Name] {
+				return true
+			}
+			continue
+		}
+		if strings.TrimSpace(os.Getenv(p.APIKeyEnv)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) buildTabController(tab *WorkspaceTab) {
 	// Reset the ready signal so a rebuild (model switch) produces a fresh edge.
 	// Callers blocked on the previous build already returned; a new wait starts
@@ -1043,7 +1082,7 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 		tab.StartupErr = err.Error()
 		tab.Ready = true
 		a.mu.Unlock()
-		a.emitReady(wailsCtx)
+		a.emitReady(wailsCtx, tab.ID)
 		return
 	}
 
@@ -1068,6 +1107,18 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 	tab.Label = model
 	a.saveTabsLocked()
 	a.mu.Unlock()
+
+	// Fresh install with no selectable model (empty tab model + empty
+	// default_model + only keyless local presets): nothing to boot yet — the
+	// onboarding overlay / Welcome state guides setup, and boot.Build would
+	// just surface "unknown model" noise as a startup error.
+	if strings.TrimSpace(model) == "" && !tabHasSelectableProvider(cfg) {
+		a.mu.Lock()
+		tab.Ready = true
+		a.mu.Unlock()
+		a.emitReady(wailsCtx, tab.ID)
+		return
+	}
 
 	// Resolve the tab's product profile (dev/cowork). Empty or "dev" yields a nil
 	// profile → boot.Build keeps the unprofiled (coding) behaviour. Any other name
@@ -1130,7 +1181,7 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 		tab.StartupErr = err.Error()
 		tab.Ready = true
 		a.mu.Unlock()
-		a.emitReady(wailsCtx)
+		a.emitReady(wailsCtx, tab.ID)
 		return
 	}
 
@@ -1208,12 +1259,22 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 	}
 
 	a.mu.Lock()
+	if tab.Ctrl != nil && tab.Ctrl != ctrl {
+		// A concurrent build won the race (async startTabControllerBuild vs
+		// the sync path in SubmitToTab) — abandon THIS controller instead of
+		// overwriting, which would leak it along with its shared-host ref.
+		// Legit rebuild flows nil tab.Ctrl before calling us.
+		a.mu.Unlock()
+		ctrl.Close()
+		a.releaseSharedHost(root)
+		return
+	}
 	tab.Ctrl = ctrl
 	tab.Label = ctrl.Label()
 	tab.Ready = true
 	tab.StartupErr = ""
 	a.mu.Unlock()
-	a.emitReady(wailsCtx)
+	a.emitReady(wailsCtx, tab.ID)
 }
 
 // --- active tab helpers -----------------------------------------------------

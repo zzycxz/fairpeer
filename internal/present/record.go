@@ -335,6 +335,25 @@ func (r *Recorder) Append(e event.Event) {
 	r.records = append(r.records, rec)
 }
 
+// Reset drops all in-memory records and version state so the recorder can be
+// re-seeded for a different session — the controller calls it when it rebinds
+// to another session file (new session, clear, fork/branch switch, resume) and
+// the accumulated records describe the OLD conversation. Without this, those
+// records would leak into the new session's sidecar on the next Save, and an
+// in-process reader (PresentRecords) would serve the old conversation's cards
+// for the new session.
+func (r *Recorder) Reset() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.records = nil
+	r.turnStartIndex = nil
+	r.rewriteVersion = 0
+	r.seeded = false
+	r.mu.Unlock()
+}
+
 // SetRewriteVersion records the session's current RewriteVersion, captured at
 // Save so a stale sidecar can be detected on load. Called by the controller
 // alongside Save.

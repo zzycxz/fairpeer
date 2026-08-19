@@ -1008,6 +1008,14 @@ func (a *App) shutdown(context.Context) {
 	a.mu.RUnlock()
 	for _, t := range tabs {
 		if t.Ctrl != nil {
+			// Cancel a still-running turn and let its goroutine finish before
+			// the closing snapshot — otherwise Close's autosave wait eats its
+			// full 5s timeout per tab (the ticker never exits uncancelled) and
+			// any step completing after Snapshot is lost.
+			if t.Ctrl.Running() {
+				t.Ctrl.Cancel()
+				t.Ctrl.WaitTurn(3 * time.Second)
+			}
 			_ = t.Ctrl.Snapshot()
 			t.Ctrl.Close()
 			a.releaseSharedHost(t.WorkspaceRoot)
@@ -2126,6 +2134,15 @@ func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) 
 	a.mu.RUnlock()
 	if ctrl == nil {
 		return []HistoryMessage{}, fmt.Errorf("tab is not ready")
+	}
+	// Refuse while a turn is running: Resume hot-swaps the executor's session
+	// object, so a mid-flight turn would append its remaining output to the
+	// RESUMED session (cross-conversation pollution) while the 30s autosave
+	// starts writing the old turn's partial state into the new file. The
+	// frontend's resume entry already guards the ACTIVE tab; this covers
+	// background tabs and non-desktop callers. Mirrors SetModelForTab.
+	if ctrl.Running() {
+		return []HistoryMessage{}, fmt.Errorf("finish or cancel the current turn before resuming another session")
 	}
 	sessionPath, _, err := validateSessionPath(controllerSessionDir(ctrl), path)
 	if err != nil {
@@ -5029,7 +5046,7 @@ func (a *App) SwitchProfileForTab(tabID, name string) error {
 	// Tell the frontend this tab's profile changed so it swaps the layout. The
 	// payload carries the tab id + normalized profile name. Emit agent:ready too
 	// so the frontend reloads (now-empty) history for the fresh session.
-	a.emitReady(a.ctx)
+	a.emitReady(a.ctx, tab.ID)
 	if a.ctx != nil {
 		runtime.EventsEmit(a.ctx, "profile:changed", map[string]string{
 			"tabId":   tab.ID,
