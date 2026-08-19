@@ -177,6 +177,8 @@ export const en = {
   "loop.state.aborted": "Aborted",
   "loop.state.failed": "Failed",
   "loop.cfg.name": "Task name",
+  "loop.cfg.target": "Target project session",
+  "loop.cfg.noProject": "No open project session (open one in a project workspace first)",
   "loop.cfg.namePh": "e.g. overnight test fixes",
   "loop.cfg.goal": "Goal",
   "loop.cfg.goalPh": "What the loop pursues… concrete beats vague",

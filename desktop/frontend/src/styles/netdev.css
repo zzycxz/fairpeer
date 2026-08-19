@@ -1,23 +1,12 @@
 /* netdev.css — the 运维 (NetOps) layout's own styles (mirrors cowork.css's
    pattern). All changes are scoped to .app--netdev: the coding/office views
-   never match these selectors. */
-
-/* ── 锋利终端皮肤（netdev-only）────────────────────────────────────
-   方角 + 1px 细边 + hover 辉光 + tab 下划线 + 等宽数字，向 TUI/终端
-   审美看齐。border-radius: 0 是 radius 检查脚本的合法值（允许 0）。
-   只影响 .app--netdev 内的元素，编码/办公页零感知。 */
-.app--netdev .ndv .btn {
-  border-radius: 0;
-}
-.app--netdev .ndv .btn:hover {
-  box-shadow: 0 0 12px -4px var(--accent, #7ab8ff);
-}
-.app--netdev .ndv .btn--primary {
-  box-shadow: inset 0 0 0 1px rgba(122, 184, 255, 0.25);
-}
+   never match these selectors. The FRAME (rail skin, brand row, dock grammar)
+   deliberately reuses the coding view's shared classes/tokens — only the
+   运维-specific content (device list, findings, proposals) is styled here. */
 
 /* When netdev is active, hide the standard layout body (same mechanism as
-   .app--cowork). AppChrome stays visible for tabs and the profile switcher. */
+   .app--cowork). AppChrome stays visible for the palette/terminal toggles and
+   the profile switcher; the netdev title bar rides its CENTER slot. */
 .app--netdev .sidebar,
 .app--netdev .sidebar-resizer,
 .app--netdev .chat-pane,
@@ -26,68 +15,39 @@
   display: none;
 }
 
-/* The chrome normally starts right of the sidebar column (grid-column: 2/-1).
-   The sidebar is hidden in netdev but its track still reserves ~200px, leaving
-   a blank notch at the top-left; the netdev title bar IS the header, so span
-   the full width. */
-.app--netdev .app-chrome { grid-column: 1 / -1; }
+/* The ndv rail renders its OWN .sidebar-resizer (same class as coding mode);
+   re-show it under .ndv — the extra class beats the hiding rule's specificity. */
+.app--netdev .ndv .sidebar-resizer {
+  display: block;
+}
 
 /* The layout is a grid ITEM inside the app's outer grid, exactly like
-   .cowork-layout: pin to row 2..end spanning all columns, or the auto row
-   collapses to content height and everything crams into the top-left. */
+   .cowork-layout: spans rows 1-2 (chrome row + body row) and all columns, so
+   the rail rises into the chrome row like the coding .sidebar and the global
+   AppChrome (a .layout sibling painted after) owns the top strip from column
+   2 on. Internal row 1 is the chrome-height strip only the rail occupies. */
 .ndv {
-  grid-row: 2 / -1;
+  grid-row: 1 / -1;
   grid-column: 1 / -1;
+  position: relative;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  grid-template-columns: var(--ndv-sidebar-w, 250px) minmax(0, 1fr) var(--ndv-dock-w, 320px);
+  /* chrome strip | body | bottom stats */
+  grid-template-rows: var(--app-chrome-height) minmax(0, 1fr) auto;
+  /* rail tracks the shared --sidebar-width (incl. the collapsed 0px state),
+     exactly like the coding sidebar. */
+  grid-template-columns: var(--sidebar-width, 250px) minmax(0, 1fr) var(--ndv-dock-w, 320px);
   min-height: 0;
   min-width: 0;
   overflow: hidden;
   background: var(--bg);
 }
 
-.ndv__brandrow {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  height: var(--app-chrome-height);
-  padding: 0 6px 0 14px;
-  border-bottom: 1px solid var(--border);
-  color: var(--fg);
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-.ndv__brandrow img {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 auto;
-}
-.ndv__brand-btn {
-  margin-left: auto;
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--fg);
-  cursor: pointer;
-  opacity: 0.65;
-}
-.ndv__brand-btn:hover { opacity: 1; background: var(--bg-hover, rgba(127, 127, 127, 0.12)); }
-
 .ndv__project {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 2px 10px;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-weight: 600;
   color: var(--accent, #7ab8ff);
@@ -97,25 +57,26 @@
   user-select: none;
   position: relative;
 }
-.ndv__project:hover { background: rgba(122, 184, 255, 0.16); box-shadow: 0 0 12px -4px var(--accent, #7ab8ff); }
+.ndv__project:hover { background: rgba(122, 184, 255, 0.16); }
 
 .ndv__project-menu {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  z-index: var(--z-local-popover);
+  z-index: var(--z-workspace-float);
   min-width: 150px;
   display: flex;
   flex-direction: column;
   background: var(--bg-elev, #232326);
   border: 1px solid var(--border);
-  border-radius: 0;
+  border-radius: var(--radius-md);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   padding: 4px;
 }
 .ndv__project-menu [role="menuitem"] {
   padding: 5px 10px;
   font-size: 12px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -126,7 +87,7 @@
   align-items: center;
   gap: 6px;
   padding: 2px 10px;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -136,7 +97,7 @@
   cursor: pointer;
   user-select: none;
 }
-.ndv__badge:hover { background: rgba(126, 226, 168, 0.16); box-shadow: 0 0 12px -4px #7ee2a8; }
+.ndv__badge:hover { background: rgba(126, 226, 168, 0.16); }
 
 .ndv__stat {
   font-size: 12px;
@@ -149,7 +110,7 @@
   align-items: center;
   gap: 6px;
   padding: 2px 10px;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   font-size: 11.5px;
   font-weight: 600;
   color: #ff8787;
@@ -159,45 +120,60 @@
 }
 .ndv__stop:hover { background: rgba(255, 87, 87, 0.18); border-color: rgba(255, 135, 135, 0.6); }
 
+/* The rail IS the coding sidebar's frame: same skin tokens (sidebar-bg /
+   border-soft), same 12px 10px padding with the bottom-bar reserve, spans the
+   chrome row (rows 1-2) so the shared sidebar__brandrow lands top-left. */
 .ndv__rail {
-  grid-row: 1;
+  grid-row: 1 / span 2;
+  grid-column: 1;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
-  background: var(--bg-raised, var(--bg));
+  border-right: 1px solid var(--border-soft);
+  background: var(--sidebar-bg);
+  padding: 12px 10px calc(12px + var(--bottom-bar-height, 36px));
+  --wails-draggable: drag;
+  user-select: none;
   min-height: 0;
   min-width: 0;
   overflow-y: auto;
 }
+.ndv__rail button,
+.ndv__rail input,
+.ndv__rail select {
+  --wails-draggable: no-drag;
+}
 
-.ndv__sessions { min-height: 80px; max-height: 32%; overflow-y: auto; border-bottom: 1px solid var(--border); }
+.ndv__sessions { min-height: 80px; max-height: 32%; overflow-y: auto; border-bottom: 1px solid var(--border-soft); }
 
+/* Section labels — the coding sidebar's grammar (side-sessions__label /
+   project-tree header): 11px/600 uppercase, no brackets. */
 .ndv__section {
-  padding: 10px 12px 4px;
+  padding: 10px 2px 4px;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  opacity: 0.55;
+  color: var(--fg-faint);
+  user-select: none;
 }
-.ndv__section::before { content: "[ "; }
-.ndv__section::after { content: " ]"; }
 
 .ndv__hint {
-  padding: 2px 12px 8px;
+  padding: 2px 2px 8px;
   font-size: 11.5px;
   line-height: 1.55;
-  opacity: 0.65;
+  color: var(--fg-faint);
 }
 
-.ndv__rail-actions { padding: 4px 12px 6px; }
+.ndv__rail-actions { padding: 4px 0 6px; }
 
-.ndv__group { padding: 2px 12px; font-size: 12px; }
-.ndv__group-row { display: flex; justify-content: space-between; opacity: 0.85; padding: 3px 0; }
+.ndv__group { padding: 2px 0; font-size: 12px; }
+.ndv__group-row { display: flex; justify-content: space-between; color: var(--fg-faint); padding: 3px 2px; font-size: 11.5px; }
+/* Device rows — the coding sidebar's row grammar (radius-sm, sidebar-hover). */
 .ndv__device {
-  padding: 4px 12px 4px 22px;
-  font-size: 12px;
-  opacity: 0.85;
+  padding: 4px 8px 4px 14px;
+  font-size: 12.5px;
+  color: var(--fg-dim);
+  border-radius: var(--radius-sm);
   display: flex;
   justify-content: space-between;
   gap: 8px;
@@ -207,7 +183,7 @@
 .ndv__device-addr { opacity: 0.55; white-space: nowrap; }
 
 .ndv__main {
-  grid-row: 1;
+  grid-row: 2;
   grid-column: 2;
   display: flex;
   flex-direction: column;
@@ -219,10 +195,10 @@
 .ndv__chat { flex: 1; min-height: 0; overflow: auto; }
 
 .ndv__dock {
-  grid-row: 1;
+  grid-row: 2;
   grid-column: 3;
-  border-left: 1px solid var(--border);
-  background: var(--bg-raised, var(--bg));
+  border-left: 1px solid var(--border-soft);
+  background: var(--bg-elev);
   min-height: 0;
   min-width: 0;
   overflow-y: auto;
@@ -234,7 +210,7 @@
 
 .ndv__card {
   border: 1px solid var(--border);
-  border-radius: 0;
+  border-radius: var(--radius-md);
   padding: 10px 12px;
   font-size: 12px;
 }
@@ -259,7 +235,7 @@
   width: 18px;
   height: 18px;
   margin-top: 2px;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   background: var(--accent-dim, rgba(122, 184, 255, 0.15));
   color: var(--accent, #7ab8ff);
   font-size: 11px;
@@ -272,30 +248,34 @@
 .ndv__step-btn { margin-left: 8px; }
 .ndv__step-detail { margin-left: 8px; margin-bottom: 6px; }
 
+/* Bottom stats row — starts at column 2: the bottom-left strip belongs to the
+   global sidebar-only bottom bar (SidebarFooter), exactly like the coding
+   view's frame. */
 .ndv__bottom {
-  grid-row: 2;
-  grid-column: 1 / -1;
+  grid-row: 3;
+  grid-column: 2 / -1;
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 5px 14px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-raised, var(--bg));
+  border-top: 1px solid var(--border-soft);
+  background: var(--bg);
   font-size: 12px;
   opacity: 0.9;
   font-variant-numeric: tabular-nums;
 }
 .ndv__bottom-item { display: inline-flex; gap: 6px; align-items: center; }
-.ndv__bottom-item + .ndv__bottom-item { border-left: 1px solid var(--border); padding-left: 16px; }
+.ndv__bottom-item + .ndv__bottom-item { border-left: 1px solid var(--border-soft); padding-left: 16px; }
 .ndv__bottom-note { margin-left: auto; opacity: 0.5; font-size: 11px; }
 .ndv__ok { color: #7ee2a8; }
 .ndv__zero { color: #7ee2a8; font-weight: 700; }
 .ndv__warn { color: #e0a800; font-weight: 600; }
 
-.ndv__device--click { cursor: pointer; border-radius: 0; }
-.ndv__device--click:hover { background: var(--bg-hover, rgba(127,127,127,.12)); }
+.ndv__device--click { cursor: pointer; }
+.ndv__device--click:hover { background: var(--sidebar-hover); color: var(--fg); }
 .ndv__device--sel {
-  background: var(--accent-dim, rgba(122, 184, 255, 0.15));
+  background: color-mix(in srgb, var(--accent, #7ab8ff) 12%, transparent);
+  color: var(--fg);
   box-shadow: inset 2px 0 0 var(--accent, #7ab8ff);
 }
 
@@ -325,21 +305,23 @@
   padding-bottom: 0;
 }
 
+/* Dock tabs — the workbench-dock tab grammar (radius-sm pill, elevated active
+   background) instead of the old square underline style. */
 .ndv__tab {
   border: none;
   background: transparent;
-  color: var(--text, #ccc);
+  color: var(--fg-dim);
   font-size: 12px;
-  padding: 5px 12px;
-  border-radius: 0;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
-.ndv__tab:hover { background: var(--bg-hover, rgba(127, 127, 127, 0.12)); }
+.ndv__tab:hover { background: var(--bg-hover, rgba(127, 127, 127, 0.12)); color: var(--fg); }
 .ndv__tab--active {
-  background: transparent;
-  color: var(--accent, #7ab8ff);
+  background: var(--bg-elev-2);
+  color: var(--fg);
   font-weight: 600;
-  box-shadow: inset 0 -2px 0 var(--accent, #7ab8ff);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 .ndv__tab-badge {

@@ -1671,12 +1671,28 @@ export interface NetDevSettingsView {
   extraRead: Record<string, string[]>;
   // Site-level scopes for the title-bar project switcher.
   projects: NetDevProjectView[];
+  // Named diagnostic batteries for the device card.
+  presets: NetDevPresetView[];
 }
 
 export interface NetDevProjectView {
   name: string;
   groups: string[];
   note: string;
+}
+
+export interface NetDevPresetView {
+  name: string;
+  commands: string[];
+  vendors: string[];
+}
+
+export interface NetDevBackupVersion {
+  id: string;
+  device: string;
+  at: string;
+  bytes: number;
+  lines: number;
 }
 
 export interface NetDevAuditEntryView {
@@ -1790,6 +1806,8 @@ export interface LoopReport {
 export interface LoopRunStatus {
   runId: string;
   config: LoopConfig;
+  workspaceRoot: string;
+  tabLabel: string;
   state: "running" | "stopping" | "paused" | "done" | "aborted" | "failed";
   round: number;
   startedAt: number;

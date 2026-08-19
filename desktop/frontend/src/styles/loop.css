@@ -157,6 +157,17 @@
 .loop-autonomy__seg + .loop-autonomy__seg { border-left: 1px solid var(--border-soft); }
 .loop-autonomy__seg--active { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); }
 .loop-autonomy__hint { font-size: 11px; color: var(--fg-faint); margin-top: 5px; }
+.loop-target {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-xs);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-size: 12.5px;
+  padding: 7px 9px;
+  outline: none;
+  max-width: 420px;
+}
+.loop-target:focus { border-color: var(--accent); }
 .loop-config__actions { display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
 
 .loop-live { display: flex; flex-direction: column; gap: 10px; }

@@ -43,10 +43,10 @@ interface AppChromeProps {
   // rebuilds the controller with the new profile's bundle.
   profile: string;
   onSwitchProfile: (name: string) => void;
-  // modeChrome (netdev): the mode's own title bar rides the CENTER slot and
-  // replaces the panel toggles + profile switcher — one header, no seams.
-  // (The 运维 tab switches back via the sidebar session list.)
-  modeChrome?: boolean;
+  // workspaceToggleHidden (netdev): the mode's right dock is intrinsic (always
+  // mounted, no open/close state), so the workspace panel toggle has nothing to
+  // drive there. Every other chrome control stays identical across profiles.
+  workspaceToggleHidden?: boolean;
 }
 
 export function AppChrome({
@@ -68,7 +68,7 @@ export function AppChrome({
   onToggleWorkspacePanel,
   profile,
   onSwitchProfile,
-  modeChrome,
+  workspaceToggleHidden,
 }: AppChromeProps) {
   const t = useT();
   const darwinChrome = platform === "darwin";
@@ -100,9 +100,9 @@ export function AppChrome({
       )}
       {darwinChrome && <span className="app-chrome__drag-rail" aria-hidden="true" />}
       {/* Sidebar-expanded: the toggle lives in the sidebar brand row
-          (App.tsx). The chrome copy only exists while the sidebar is
-          collapsed, where it anchors the chrome's left edge. */}
-      {!modeChrome && sidebarCollapsed && (
+          (App.tsx / the mode layouts). The chrome copy only exists while the
+          sidebar is collapsed, where it anchors the chrome's left edge. */}
+      {sidebarCollapsed && (
       <button
         className={[
           "app-chrome__panel-toggle",
@@ -136,8 +136,10 @@ export function AppChrome({
         </>
       )}
 
-      {/* Command palette (⌘K): icon-only, same grammar as its neighbours. */}
-      {!modeChrome && onOpenPalette && (
+      {/* Command palette (⌘K): icon-only, same grammar as its neighbours.
+          Rendered in EVERY mode — the chrome's right cluster is part of the
+          shared framework (parity with the coding view). */}
+      {onOpenPalette && (
         <button
           className="app-chrome__palette-toggle"
           type="button"
@@ -150,7 +152,7 @@ export function AppChrome({
       )}
       {/* Terminal toggle (Ctrl+`): sits left of the workspace toggle, matching
           its icon grammar (16px lucide, same hover/active treatment). */}
-      {!modeChrome && onToggleTerminal && (
+      {onToggleTerminal && (
         <button
           className={`app-chrome__terminal-toggle${terminalOpen ? " app-chrome__terminal-toggle--active" : ""}`}
           type="button"
@@ -162,7 +164,7 @@ export function AppChrome({
           <TerminalSquare size={16} />
         </button>
       )}
-      {!modeChrome && !workspacePanelMaximized && (
+      {!workspaceToggleHidden && !workspacePanelMaximized && (
         <button
           className={[
             "app-chrome__panel-toggle",
@@ -179,9 +181,9 @@ export function AppChrome({
         </button>
       )}
       {/* Profile segmented switcher: a pill control with a sliding highlight
-          indicator. See ProfileSegmented below. Rendered in EVERY mode —
-          including netdev's modeChrome — so mode navigation stays identical
-          across profiles (framework parity with the coding view). */}
+          indicator. See ProfileSegmented below. Rendered in EVERY mode so mode
+          navigation stays identical across profiles (framework parity with the
+          coding view). */}
       <ProfileSegmented profile={profile} onSwitchProfile={onSwitchProfile} t={t} />
       {showWindowsPreviewControls && (
         <div className="app-chrome__window-controls app-chrome__window-controls--windows" aria-hidden="true">

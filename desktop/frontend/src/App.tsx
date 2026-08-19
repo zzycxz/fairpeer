@@ -29,7 +29,7 @@ import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, us
 import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onEvent, onProjectTreeChanged, onSchedulerNotice } from "./lib/bridge";
 import { onProfileChanged } from "./lib/bridge";
-import { CoWorkLayout } from "./layouts/CoWorkLayout";
+import { CoWorkLayout, type CoWorkPanel } from "./layouts/CoWorkLayout";
 import { NetDevLayout, NetdevTitleBar } from "./layouts/NetDevLayout";
 import { PreferencePanel } from "./components/cowork/PreferencePanel";
 import { Transcript } from "./components/Transcript";
@@ -798,6 +798,10 @@ export default function App() {
   // standard body is hidden (app--netdev) and the NetDevLayout shell renders.
   // Purely additive — dev/cowork behavior is byte-identical.
   const [netdevActive, setNetdevActive] = useState(false);
+  // Active office panel, reported by CoWorkLayout — the chrome's center slot
+  // carries the chat topicbar only while the task center is in focus (single
+  // header, same as the coding view).
+  const [coworkPanel, setCoworkPanel] = useState<CoWorkPanel>("taskCenter");
   // Skip the startup splash in the browser dev mock (no Wails runtime to wait
   // for) — only real desktop builds show it. Eliminates the 1.4–6s "stuck"
   // splash devs see when iterating in a browser.
@@ -2886,7 +2890,7 @@ export default function App() {
   const mainNode = (
     <main className="main">
       {loopOpen && !preferenceOpen && (
-        <LoopPanel onClose={() => setLoopOpen(false)} />
+        <LoopPanel onClose={() => setLoopOpen(false)} tabs={tabMetas} activeTabId={activeTabId ?? undefined} />
       )}
       {preferenceOpen && (
         <PreferencePanel
@@ -3029,6 +3033,26 @@ export default function App() {
     </footer>
   ) : null;
 
+  // Terminal console (Ctrl+`): built once and lent to whichever surface owns
+  // the chat body — the coding-mode chat pane or the 运维 shell — so the
+  // chrome's terminal toggle works in every mode and the panel never mounts
+  // twice.
+  const terminalNode = terminalOpen && (
+    <TerminalPanel
+      onClose={toggleTerminal}
+      cwd={state.meta?.cwd}
+      sessionPane={
+        <SideSessionPane
+          tabs={tabMetas}
+          sessions={sidebarSessions}
+          activeMainTabId={activeTabId ?? undefined}
+          selectedId={sideSessionTabId}
+          onSelect={setSideSessionTabId}
+        />
+      }
+    />
+  );
+
   // Sidebar search sits ABOVE the Recent sessions section and drives the
   // project tree (hoisted out of ProjectTree, ui-redesign §4-B4 follow-up).
   const [treeQuery, setTreeQuery] = useState("");
@@ -3166,7 +3190,6 @@ export default function App() {
       >
         {coworkActive && (
           <CoWorkLayout
-            headerNode={headerNode}
             mainNode={mainNode}
             footerNode={footerNode}
             projectTreeNode={projectTreeNode}
@@ -3175,6 +3198,9 @@ export default function App() {
             rightDockOpen={coworkDockRenderable}
             sidebarCollapsed={sidebarCollapsed}
             onNewSession={() => void handleNewTab()}
+            onToggleSidebar={toggleSidebar}
+            sidebarToggleTitle={sidebarToggleTitle}
+            onPanelChange={setCoworkPanel}
             dockCwd={state.meta?.cwd}
             dockMaximized={workspacePanelMaximized}
             dockOnClose={() => closeWorkspacePanel()}
@@ -3205,10 +3231,20 @@ export default function App() {
           <NetDevLayout
             mainNode={mainNode}
             footerNode={footerNode}
+            terminalNode={terminalNode}
             sessionsNode={sidebarSessionsNode}
             onOpenSettings={(t) => { setSettingsTarget(t as never); setSettingsPayload(null); }}
             onInsertComposer={addWorkspaceTextToComposer}
             onNewSession={() => void handleNewTab()}
+            onToggleSidebar={toggleSidebar}
+            sidebarToggleTitle={sidebarToggleTitle}
+            sidebarCollapsed={sidebarCollapsed}
+            sidebarWidth={sidebarWidth}
+            sidebarMinWidth={SIDEBAR_MIN_WIDTH}
+            sidebarMaxWidth={SIDEBAR_MAX_WIDTH}
+            onSidebarResizeStart={startSidebarResize}
+            onSidebarResizeKey={resizeSidebarWithKeyboard}
+            onSidebarResetWidth={() => setExpandedSidebarWidth(defaultSidebarWidth())}
           />
         )}
         <AppChrome
@@ -3235,8 +3271,9 @@ export default function App() {
           onNewTab={() => void handleNewTab()}
           center={netdevActive
             ? <NetdevTitleBar onOpenSettings={(t) => { setSettingsTarget(t as never); setSettingsPayload(null); }} />
-            : !coworkActive ? headerNode : null}
-          modeChrome={netdevActive}
+            : coworkActive && coworkPanel !== "taskCenter" ? null
+            : headerNode}
+          workspaceToggleHidden={netdevActive}
           onOpenPalette={() => void openPalette()}
           terminalOpen={terminalOpen}
           onToggleTerminal={toggleTerminal}
@@ -3330,9 +3367,11 @@ export default function App() {
         />
 
         <section className="chat-pane">
-          <>
           {/* Dev-profile topicbar moved into the top chrome (AppChrome center
-              slot); cowork/netdev layouts render headerNode themselves. */}
+              slot). The coding chat body below is DEV-ONLY: cowork/netdev
+              render mainNode/footerNode/terminal inside their own shells, so
+              this pane (hidden via .app--cowork/.app--netdev anyway) stays
+              unmounted there — no duplicate Transcript/Composer/Terminal. */}
 
           {state.meta?.startupErr && (
             <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
@@ -3340,28 +3379,13 @@ export default function App() {
 
           <UpdateBanner enabled={startupUpdateChecksEnabled === true} />
 
-          {!coworkActive && (
+          {!coworkActive && !netdevActive && (
             <>
               {mainNode}
               {!preferenceOpen && footerNode}
-              {terminalOpen && (
-                <TerminalPanel
-                  onClose={toggleTerminal}
-                  cwd={state.meta?.cwd}
-                  sessionPane={
-                    <SideSessionPane
-                      tabs={tabMetas}
-                      sessions={sidebarSessions}
-                      activeMainTabId={activeTabId ?? undefined}
-                      selectedId={sideSessionTabId}
-                      onSelect={setSideSessionTabId}
-                    />
-                  }
-                />
-              )}
+              {terminalNode}
             </>
           )}
-          </>
         </section>
 
         {workspacePanelGridOpen && (

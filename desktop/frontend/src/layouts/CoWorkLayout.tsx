@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { BookOpen, CalendarDays, SquarePen, Users, SlidersHorizontal } from "lucide-react";
+import { BookOpen, CalendarDays, PanelLeft, SquarePen, Users, SlidersHorizontal } from "lucide-react";
 
 import { useT } from "../lib/i18n";
 import { app, onExpertsCollab } from "../lib/bridge";
+import logoSymbol from "../assets/logo-symbol.png";
 import { CalendarTaskPanel } from "../components/cowork/CalendarTaskPanel";
 import { RagPanel } from "../components/cowork/RagPanel";
 import { PreferencePanel } from "../components/cowork/PreferencePanel";
@@ -13,7 +14,6 @@ import type { ContextInfo, WireUsage } from "../lib/types";
 export type CoWorkPanel = "taskCenter" | "preference" | "calendarTask" | "rag" | "experts";
 
 export interface CoWorkLayoutProps {
-  headerNode?: ReactNode;
   mainNode?: ReactNode;
   footerNode?: ReactNode;
   projectTreeNode?: ReactNode;
@@ -26,6 +26,14 @@ export interface CoWorkLayoutProps {
   rightDockOpen?: boolean;
   sidebarCollapsed?: boolean;
   onNewSession?: () => void;
+  // Sidebar collapse — the brand-row toggle mirrors the coding view's
+  // (toggleSidebar + its title live in App.tsx).
+  onToggleSidebar?: () => void;
+  sidebarToggleTitle?: string;
+  // Reports the active office panel up so App can decide whether the chrome's
+  // center slot carries the chat topicbar (taskCenter) or goes empty (the
+  // other panels own their whole main area).
+  onPanelChange?: (panel: CoWorkPanel) => void;
   dockCwd?: string;
   dockMaximized?: boolean;
   dockOnClose?: () => void;
@@ -61,7 +69,6 @@ export interface CoWorkLayoutProps {
 }
 
 export function CoWorkLayout({
-  headerNode,
   mainNode,
   footerNode,
   projectTreeNode,
@@ -70,6 +77,9 @@ export function CoWorkLayout({
   rightDockOpen = false,
   sidebarCollapsed = false,
   onNewSession,
+  onToggleSidebar,
+  sidebarToggleTitle,
+  onPanelChange,
   dockCwd,
   dockMaximized = false,
   dockOnClose,
@@ -95,6 +105,12 @@ export function CoWorkLayout({
   const t = useT();
   const [activePanel, setActivePanel] = useState<CoWorkPanel>("taskCenter");
   const [preferenceOpen, setPreferenceOpen] = useState(false);
+
+  // Lift the active panel to App: the chrome's center slot shows the chat
+  // topicbar only while the task center (chat) is in focus.
+  useEffect(() => {
+    onPanelChange?.(activePanel);
+  }, [activePanel, onPanelChange]);
 
   // When an expert-team run kicks off from the chat (the agent called
   // expert_team_run), auto-switch to the experts panel so the user sees the
@@ -170,16 +186,38 @@ export function CoWorkLayout({
           and the aside's overflow:hidden clips its content as it collapses. */}
       <aside className="cowork-sidebar">
         <div className="cowork-sidebar__scroll">
-          <button
-            className="sidebar__new"
-            onClick={() => {
-              if (onNewSession) onNewSession();
-              setActivePanel("taskCenter");
-            }}
-          >
-            <SquarePen size={18} />
-            <span>{t("cowork.newTask") || "新建任务"}</span>
-          </button>
+          {/* Brand row — identical classes/markup to the coding view's
+              sidebar__brandrow (chrome.css styles them as one): logo, product
+              name, new-session ghost button, collapse toggle. The old
+              full-width "新建任务" CTA is retired with the coding view's
+              2026-08-19 restyle. */}
+          <div className="sidebar__brandrow" title="FairPeer">
+            <img src={logoSymbol} alt="" draggable={false} />
+            <span>FairPeer</span>
+            <button
+              type="button"
+              className="sidebar__brand-iconbtn"
+              onClick={() => {
+                if (onNewSession) onNewSession();
+                setActivePanel("taskCenter");
+              }}
+              aria-label={t("cowork.newTask") || "新建任务"}
+              title={t("cowork.newTask") || "新建任务"}
+            >
+              <SquarePen size={15} />
+            </button>
+            {onToggleSidebar && (
+              <button
+                type="button"
+                className="app-chrome__panel-toggle app-chrome__panel-toggle--left sidebar__brand-toggle"
+                onClick={onToggleSidebar}
+                aria-label={sidebarToggleTitle}
+                aria-pressed={!sidebarCollapsed}
+              >
+                <PanelLeft size={16} />
+              </button>
+            )}
+          </div>
 
           {searchNode}
 
@@ -230,15 +268,11 @@ export function CoWorkLayout({
         </div>
       </aside>
 
-      {/* Center: dynamic panel based on selection */}
+      {/* Center: dynamic panel based on selection. The chat topicbar no longer
+          renders here — it rides the global chrome's center slot (single
+          header, same as the coding view); App shows it while the task center
+          is active. */}
       <section className="cowork-main">
-        {/* Only display session header in active taskCenter (chat) mode */}
-        {activePanel === "taskCenter" && (
-          <div className="cowork-main__global-topbar" style={{ flexShrink: 0, zIndex: 10 }}>
-            {headerNode}
-          </div>
-        )}
-
         {/* taskCenter stays mounted (hidden when inactive) so an expert-session
             run's live stream (ExpertSessionView inside mainNode) isn't torn down
             when the user peeks at another panel. The backend goroutine survives

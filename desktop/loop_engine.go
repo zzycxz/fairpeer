@@ -71,6 +71,10 @@ type LoopReport struct {
 type LoopRunStatus struct {
 	RunID     string            `json:"runId"`
 	Config    LoopConfig        `json:"config"`
+	// Target anchors: the loop acts on ONE project — recorded at start so the
+	// panel can show it and audits can reproduce it even after tab switches.
+	WorkspaceRoot string `json:"workspaceRoot"`
+	TabLabel      string `json:"tabLabel"`
 	State     string            `json:"state"` // running|stopping|done|aborted|failed
 	Round     int               `json:"round"`
 	StartedAt int64             `json:"startedAt"`
@@ -104,9 +108,11 @@ const (
 	loopOutputTail     = 4096
 )
 
-// LoopStart validates and launches a run on the currently active tab. Errors
-// if a run is already active.
-func (a *App) LoopStart(cfg LoopConfig) error {
+// LoopStart validates and launches a run on the given tab ("" = the active
+// tab). The tab must be a PROJECT session — sensor/verify/rollback run in
+// that project's root, and the agent rounds submit to that tab's controller,
+// so the loop stays anchored to one project even if the user switches tabs.
+func (a *App) LoopStart(tabID string, cfg LoopConfig) error {
 	a.mu.RLock()
 	runner := a.loopRunState
 	a.mu.RUnlock()
@@ -119,24 +125,31 @@ func (a *App) LoopStart(cfg LoopConfig) error {
 	if cfg.MaxRounds <= 0 {
 		cfg.MaxRounds = 30
 	}
-	ctrl := a.activeCtrl()
+	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
-		return fmt.Errorf("没有活动会话可承载循环")
-	}
-	cwd := a.activeWorkspaceRoot()
-	if cwd == "" {
-		return fmt.Errorf("无法确定工作目录")
+		return fmt.Errorf("目标会话不存在或未就绪")
 	}
 	a.mu.RLock()
-	tabID := a.activeTabID
+	tab := a.tabLockedByID(tabID)
+	tabLabel := ""
+	cwd := ""
+	if tab != nil {
+		tabLabel = tab.Label
+		cwd = tab.WorkspaceRoot
+	}
 	a.mu.RUnlock()
+	if cwd == "" || cwd == "." {
+		return fmt.Errorf("循环工程需要项目会话作为目标(当前是全局会话,请在项目工作区下的会话中运行)")
+	}
 	run := &loopRun{
 		status: LoopRunStatus{
-			RunID:     fmt.Sprintf("loop-%d", time.Now().UnixMilli()),
-			Config:    cfg,
-			State:     "running",
-			StartedAt: time.Now().UnixMilli(),
-			Timeline:  []LoopRoundRecord{},
+			RunID:         fmt.Sprintf("loop-%d", time.Now().UnixMilli()),
+			Config:        cfg,
+			WorkspaceRoot: cwd,
+			TabLabel:      tabLabel,
+			State:         "running",
+			StartedAt:     time.Now().UnixMilli(),
+			Timeline:      []LoopRoundRecord{},
 		},
 		tabID:  tabID,
 		cwd:    cwd,
@@ -145,6 +158,14 @@ func (a *App) LoopStart(cfg LoopConfig) error {
 	a.setLoopRun(run)
 	go a.loopExecute(run, ctrl)
 	return nil
+}
+
+// tabLockedByID resolves a tab by id; callers must hold mu (read is enough).
+func (a *App) tabLockedByID(tabID string) *WorkspaceTab {
+	if tabID == "" {
+		return a.activeTabLocked()
+	}
+	return a.tabs[tabID]
 }
 
 // LoopStop requests a graceful stop: the current round finishes (and is

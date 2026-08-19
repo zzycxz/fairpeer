@@ -73,9 +73,13 @@
 }
 
 /* The cowork layout grid: left library / center task board / right artifacts.
-   It sits in the same .layout grid cell as the hidden standard body. */
+   Spans the FULL .layout (rows 1-2, all columns) so the cowork sidebar can
+   rise into the chrome row exactly like the coding view's .sidebar — brand row
+   (logo) top-left, level with the chrome. Internal row 1 (chrome height) is
+   empty except for the sidebar column; the global AppChrome (a .layout sibling
+   painted after this node) owns that strip from column 2 on. */
 .cowork-layout {
-  grid-row: 2 / -1;
+  grid-row: 1 / -1;
   grid-column: 1 / -1;
   position: relative;
   display: grid;
@@ -84,14 +88,8 @@
      mirroring coding-mode) can be dragged to resize the dock. When the dock /
      resizer are not rendered the trailing auto tracks collapse to nothing. */
   grid-template-columns: var(--sidebar-width, 260px) minmax(0, 1fr) var(--workspace-resizer-width, 8px) auto;
-  /* Pin the single row to the container's height. Without this the implicit
-     row track defaults to `auto` (sized by content), so a tall ExpertPanel or
-     ExpertSessionView stretches the row past the viewport and the inner
-     overflow-y:auto surfaces never engage — the content overflows the window
-     instead of scrolling inside its panel. minmax(0,1fr) clamps the track to
-     the grid container's height so children with min-height:0 + overflow scroll
-     correctly. */
-  grid-template-rows: minmax(0, 1fr);
+  /* chrome row + body row — mirrors .layout so the sidebar spans both. */
+  grid-template-rows: var(--app-chrome-height) minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   background: var(--bg);
@@ -156,13 +154,24 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  padding: 14px 12px 0;
-  /* Pin to grid column 1 so the main/dock columns keep their slots even when
-     the sidebar is conditionally removed from the DOM on collapse. Without an
-     explicit column, auto-placement would drop cowork-main into the 0px-wide
-     collapsed column and it would visually vanish. */
-  grid-row: 1;
+  /* Same frame padding as the coding .sidebar (12px 10px) so the shared
+     .sidebar__brandrow's negative-margin full bleed lines up exactly; the
+     bottom bar reserve lives on __scroll like the coding sections. */
+  padding: 12px 10px 0;
+  /* Full-height sidebar (spans the chrome row) = titlebar drag strip, exactly
+     like the coding .sidebar; interactive children opt out below. */
+  --wails-draggable: drag;
+  user-select: none;
+  /* Pin to grid column 1 spanning BOTH rows (chrome + body) so the brand row
+     sits in the chrome row, level with the global chrome. */
+  grid-row: 1 / -1;
   grid-column: 1;
+}
+
+:root[data-theme-style] .cowork-sidebar button,
+:root[data-theme-style] .cowork-sidebar input,
+:root[data-theme-style] .cowork-sidebar select {
+  --wails-draggable: no-drag;
 }
 
 :root[data-theme-style] .cowork-sidebar__scroll {
@@ -192,9 +201,8 @@
   background: var(--chat-bg);
   min-height: 0;
   height: 100%;
-  /* Pin to grid column 2 so it never lands in the sidebar's (possibly 0px)
-     column when the sidebar is conditionally unmounted on collapse. */
-  grid-row: 1;
+  /* Body row (below the chrome strip the global AppChrome occupies). */
+  grid-row: 2;
   grid-column: 2;
   /* Hidden, not auto: this is a layout shell (header + transcript + composer)
      whose height is already pinned by the .cowork-layout grid. Letting it
@@ -211,9 +219,9 @@
   background: var(--bg-elev);
   border-left: 1px solid var(--border-soft);
   min-height: 0;
-  /* Pin to grid column 4 (after sidebar=1, main=2, resizer=3) so it keeps its
-     slot regardless of which siblings are mounted. */
-  grid-row: 1;
+  /* Body row (below the chrome strip), column 4 after sidebar=1, main=2,
+     resizer=3 — keeps its slot regardless of which siblings are mounted. */
+  grid-row: 2;
   grid-column: 4;
   /* The dock owns its layout (tools + body); no outer padding/scroll — the
      body scrolls internally so the tab strip stays pinned. Mirrors the

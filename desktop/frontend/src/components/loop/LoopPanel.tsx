@@ -10,7 +10,7 @@ import {
 import { app, onLoopStatus } from "../../lib/bridge";
 import { LOOP_PRESETS, presetToConfig } from "../../lib/loopPresets";
 import { useT } from "../../lib/i18n";
-import type { LoopConfig, LoopRunStatus } from "../../lib/types";
+import type { LoopConfig, LoopRunStatus, TabMeta } from "../../lib/types";
 
 const QUEUE_KEY = "fairpeer.loopQueue";
 
@@ -46,7 +46,22 @@ function blankConfig(): LoopConfig {
   };
 }
 
-export function LoopPanel({ onClose }: { onClose: () => void }) {
+export function LoopPanel({
+  onClose,
+  tabs,
+  activeTabId,
+}: {
+  onClose: () => void;
+  // Target selection (2026-08-19 accuracy fix): the loop acts on ONE project
+  // session — the picker lists open project tabs, defaulting to the active.
+  tabs: TabMeta[];
+  activeTabId?: string;
+}) {
+  const projectTabs = tabs.filter((tab) => tab.tabType !== "file" && tab.scope === "project");
+  const [targetTabId, setTargetTabId] = useState<string>(
+    () => (activeTabId && projectTabs.some((tab) => tab.id === activeTabId) ? activeTabId : projectTabs[0]?.id ?? ""),
+  );
+  const targetTab = projectTabs.find((tab) => tab.id === targetTabId);
   const t = useT();
   const [status, setStatus] = useState<LoopRunStatus | null>(null);
   const [draft, setDraft] = useState<LoopConfig>(() => presetToConfig(LOOP_PRESETS[0]));
@@ -72,19 +87,19 @@ export function LoopPanel({ onClose }: { onClose: () => void }) {
     if (running || chainingRef.current || queue.length === 0) return;
     chainingRef.current = true;
     const next = queue[0];
-    void app.LoopStart(next)
+    void app.LoopStart(targetTabId, next)
       .then(() => setQueue((prev) => prev.slice(1)))
       .catch((e: unknown) => setError(String(e)))
       .finally(() => { chainingRef.current = false; });
-  }, [running, queue]);
+  }, [running, queue, targetTabId]);
 
   const start = useCallback((cfg: LoopConfig) => {
     setError("");
     setBusy(true);
-    void app.LoopStart(cfg)
+    void app.LoopStart(targetTabId, cfg)
       .catch((e: unknown) => setError(String(e)))
       .finally(() => setBusy(false));
-  }, []);
+  }, [targetTabId]);
 
   const stop = useCallback(() => {
     void app.LoopStop(t("loop.stopReason"));
@@ -171,7 +186,10 @@ export function LoopPanel({ onClose }: { onClose: () => void }) {
                   </button>
                 )}
               </div>
-              <div className="loop-live__meta">{status.config.name} · {status.config.autonomy}</div>
+              <div className="loop-live__meta">
+                {status.config.name} · {status.config.autonomy}
+                {status.workspaceRoot ? ` · ${status.workspaceRoot}` : ""}
+              </div>
               <div className="loop-timeline">
                 {status.timeline.map((rec) => (
                   <div key={rec.round} className={`loop-timeline__row loop-timeline__row--${rec.verify}`}>
@@ -191,6 +209,22 @@ export function LoopPanel({ onClose }: { onClose: () => void }) {
 
           {!running && (
             <div className="loop-config">
+              <label className="loop-field">
+                <span>{t("loop.cfg.target")}</span>
+                <select
+                  className="loop-target"
+                  value={targetTabId}
+                  onChange={(e) => setTargetTabId(e.target.value)}
+                >
+                  {projectTabs.length === 0 && <option value="">{t("loop.cfg.noProject")}</option>}
+                  {projectTabs.map((tab) => (
+                    <option key={tab.id} value={tab.id}>
+                      {tab.workspaceName || tab.label} · {tab.topicTitle || tab.label}
+                    </option>
+                  ))}
+                </select>
+                {targetTab && <div className="loop-autonomy__hint">{targetTab.workspaceRoot}</div>}
+              </label>
               <label className="loop-field">
                 <span>{t("loop.cfg.name")}</span>
                 <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder={t("loop.cfg.namePh")} />

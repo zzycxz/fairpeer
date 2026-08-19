@@ -1,5 +1,5 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { SquarePen } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { PanelLeft, SquarePen } from "lucide-react";
 import { app } from "../lib/bridge";
 import logoSymbol from "../assets/logo-symbol.png";
 import { getActiveProject, setActiveProject, subscribeActiveProject, type NetDevProjectScope } from "../lib/netdevProjectStore";
@@ -7,11 +7,11 @@ import { ProposalActions } from "../components/netdev/ProposalCenter";
 import type { NetDevSettingsView, NetDevFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph } from "../lib/types";
 import "../styles/netdev.css";
 
-// NetDevLayout is the 运维 page's shell (NETDEV_SPEC §10.1). Information
-// architecture: the network NAME anchors the identity (like a coding
-// workspace's project); the dock is TABBED (上下文/拓扑/发现/提案) so one
-// thing is in focus at a time; zero devices shows a 3-step getting-started
-// guide. Styling is scoped to .app--netdev / .ndv-*.
+// NetDevLayout is the 运维 page's shell (NETDEV_SPEC §10.1). The FRAME follows
+// the coding view exactly: a full-height left rail (spans the chrome row) with
+// the shared sidebar__brandrow at the top, the global AppChrome over the main
+// area (title bar in its center slot + the standard right control cluster),
+// and a tabbed right dock. Styling is scoped to .app--netdev / .ndv-*.
 
 // NetdevTitleBar rides the global chrome's CENTER slot in netdev mode — the
 // mode's identity bar replaces panel toggles and the profile switcher, so
@@ -99,13 +99,26 @@ type DockTab = "context" | "topology" | "findings" | "proposals";
 export function NetDevLayout({
   mainNode,
   footerNode,
+  terminalNode,
   sessionsNode,
   onOpenSettings,
   onInsertComposer,
   onNewSession,
+  onToggleSidebar,
+  sidebarToggleTitle,
+  sidebarCollapsed = false,
+  sidebarWidth,
+  sidebarMinWidth,
+  sidebarMaxWidth,
+  onSidebarResizeStart,
+  onSidebarResizeKey,
+  onSidebarResetWidth,
 }: {
   mainNode: ReactNode;
   footerNode: ReactNode;
+  // Terminal console (Ctrl+`) — App builds the panel node once and lends it to
+  // the mode layout, so the chrome's terminal toggle works in 运维 too.
+  terminalNode?: ReactNode;
   sessionsNode: ReactNode;
   onOpenSettings: (tab: string) => void;
   // Fills the chat composer with a starter prompt (the AI-配置 entry point on
@@ -113,6 +126,16 @@ export function NetDevLayout({
   onInsertComposer?: (text: string) => void;
   // New diagnostic session — mirrors the coding view's brand-row ghost button.
   onNewSession?: () => void;
+  // Sidebar collapse + resize — same affordances as the coding sidebar.
+  onToggleSidebar?: () => void;
+  sidebarToggleTitle?: string;
+  sidebarCollapsed?: boolean;
+  sidebarWidth?: number;
+  sidebarMinWidth?: number;
+  sidebarMaxWidth?: number;
+  onSidebarResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onSidebarResizeKey?: (event: ReactKeyboardEvent<HTMLButtonElement>) => void;
+  onSidebarResetWidth?: () => void;
 }) {
   const [settings, setSettings] = useState<NetDevSettingsView | null>(null);
   const [findings, setFindings] = useState<NetDevFinding[]>([]);
@@ -309,19 +332,50 @@ export function NetDevLayout({
 
   return (
     <div className="ndv">
+      {/* Rail width resizer — same class/handlers as the coding sidebar's
+          (the .app--netdev rule hides the app-level copy; this one re-shows). */}
+      {!sidebarCollapsed && onSidebarResizeStart && (
+        <button
+          className="sidebar-resizer"
+          type="button"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="拖动调整侧栏宽度"
+          aria-valuemin={sidebarMinWidth}
+          aria-valuemax={sidebarMaxWidth}
+          aria-valuenow={sidebarWidth}
+          onPointerDown={onSidebarResizeStart}
+          onKeyDown={onSidebarResizeKey}
+          onDoubleClick={onSidebarResetWidth}
+        />
+      )}
       <div className="ndv__rail">
-        <div className="ndv__brandrow" title="FairPeer">
+        {/* Brand row — identical classes/markup to the coding view's
+            sidebar__brandrow: logo + FairPeer + new-session ghost button +
+            collapse toggle. Spans the chrome row (top-left of the window). */}
+        <div className="sidebar__brandrow" title="FairPeer">
           <img src={logoSymbol} alt="" draggable={false} />
           <span>FairPeer</span>
           {onNewSession && (
             <button
               type="button"
-              className="ndv__brand-btn"
+              className="sidebar__brand-iconbtn"
               onClick={onNewSession}
               aria-label="新建诊断会话"
               title="新建诊断会话"
             >
-              <SquarePen size={15} strokeWidth={1.9} />
+              <SquarePen size={15} />
+            </button>
+          )}
+          {onToggleSidebar && (
+            <button
+              type="button"
+              className="app-chrome__panel-toggle app-chrome__panel-toggle--left sidebar__brand-toggle"
+              onClick={onToggleSidebar}
+              aria-label={sidebarToggleTitle}
+              aria-pressed={!sidebarCollapsed}
+            >
+              <PanelLeft size={16} />
             </button>
           )}
         </div>
@@ -366,6 +420,7 @@ export function NetDevLayout({
       <div className="ndv__main">
         <div className="ndv__chat">{mainNode}</div>
         {footerNode}
+        {terminalNode}
       </div>
 
       <div className="ndv__dock">

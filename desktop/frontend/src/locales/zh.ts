@@ -178,6 +178,8 @@ export const zh: Record<DictKey, string> = {
   "loop.state.aborted": "已中止",
   "loop.state.failed": "失败",
   "loop.cfg.name": "任务名称",
+  "loop.cfg.target": "目标项目会话",
+  "loop.cfg.noProject": "没有打开的项目会话(先在项目工作区开一个会话)",
   "loop.cfg.namePh": "如:夜间测试修复",
   "loop.cfg.goal": "目标描述",
   "loop.cfg.goalPh": "让循环追求什么…越具体越好",

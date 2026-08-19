@@ -349,6 +349,14 @@ export interface AppBindings {
   NetDevRunInspection(): Promise<NetDevFinding | null>;
   // Config-security baseline battery (sealed reads + local rules) → Findings.
   NetDevRunBaseline(): Promise<NetDevFinding | null>;
+  // Configuration backup vault: snapshot (sealed read, redacted-only), list,
+  // and unified diff between two versions.
+  NetDevRunBackup(device: string): Promise<NetDevBackupVersion[]>;
+  NetDevBackups(device: string): Promise<NetDevBackupVersion[]>;
+  NetDevBackupDiff(device: string, idA: string, idB: string): Promise<string>;
+  // Daily briefing: objective 24h data → designed prompt → headless netdev
+  // controller synthesizes the report (content is model-judged, not templated).
+  NetDevDailyBriefing(): Promise<string>;
   NetDevFindings(): Promise<NetDevFinding[]>;
   // Emergency stop: close every device connection at once (audited).
   NetDevEmergencyStop(): Promise<number>;
@@ -398,7 +406,7 @@ export interface AppBindings {
   OpenURLInManagedBrowser(url: string): Promise<ManagedBrowserStatus>;
   // Loop Engineering (docs/loop-engineering-spec.md): start/stop/status of the
   // supervised agent loop. Round updates arrive on the "loop:round" event.
-  LoopStart(config: LoopConfig): Promise<void>;
+  LoopStart(tabID: string, config: LoopConfig): Promise<void>;
   LoopStop(reason: string): Promise<void>;
   LoopStatus(): Promise<LoopRunStatus | null>;
   OpenPPTTemplateDir(): Promise<void>;
@@ -3978,10 +3986,12 @@ function makeMockApp(): AppBindings {
     },
     // Loop Engineering mock: a fast 3-round simulation so the panel's config →
     // running → report flow is demoable without the Go backend.
-    async LoopStart(config) {
+    async LoopStart(tabID, config) {
       mockLoopState = {
         runId: `loop-mock-${Date.now()}`,
         config,
+        workspaceRoot: "C:\dev\demo-project (mock)",
+        tabLabel: `tab:${tabID || "active"}`,
         state: "running",
         round: 0,
         startedAt: Date.now(),
