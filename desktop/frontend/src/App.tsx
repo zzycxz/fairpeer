@@ -3407,7 +3407,12 @@ export default function App() {
                 className="workbench-dock__tab-add"
                 onClick={(e) => {
                   const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                  setDockAddMenuPoint({ left: r.left, top: r.bottom + 4 });
+                  // Pre-clamp so the first paint is already on-screen — the
+                  // menu's own flip logic otherwise corrects one frame late
+                  // and the dropdown visibly jumps in from the right.
+                  const menuWidth = 176;
+                  const left = Math.max(8, Math.min(r.left, window.innerWidth - menuWidth - 8));
+                  setDockAddMenuPoint({ left, top: r.bottom + 4 });
                 }}
                 aria-label={t("dock.addTab")}
                 title={t("dock.addTab")}
