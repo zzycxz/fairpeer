@@ -130,7 +130,7 @@ const SIDEBAR_COLLAPSE_THRESHOLD = 96;
 const DOCK_CLOSE_THRESHOLD = 180;
 const RIGHT_DOCK_MAX_WIDTH = 860;
 
-type RightDockMode = "context" | "files" | "changed" | "preview";
+type RightDockMode = "context" | "files" | "changed" | "preview" | "session";
 
 const RIGHT_DOCK_MODE_KEY = "fairpeer.rightDockMode";
 const PREVIEW_URL_KEY = "fairpeer.previewUrl";
@@ -138,7 +138,7 @@ const PREVIEW_URL_KEY = "fairpeer.previewUrl";
 function loadRightDockMode(): RightDockMode {
   try {
     const v = localStorage.getItem(RIGHT_DOCK_MODE_KEY);
-    if (v === "files" || v === "changed" || v === "preview") return v;
+    if (v === "files" || v === "changed" || v === "preview" || v === "session") return v;
   } catch { /* storage unavailable */ }
   return "files";
 }
@@ -3342,6 +3342,16 @@ export default function App() {
                   <Globe size={13} />
                   <span className="workbench-dock__tab-label">{t("preview.tabTitle")}</span>
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={rightDockMode === "session"}
+                  className={`workbench-dock__tab${rightDockMode === "session" ? " workbench-dock__tab--active" : ""}`}
+                  onClick={() => openRightDockMode("session")}
+                >
+                  <MessageSquare size={13} />
+                  <span className="workbench-dock__tab-label">{t("sideSession.tabTitle")}</span>
+                </button>
               </div>
             </div>
             <div className="workbench-dock__body">
@@ -3359,6 +3369,14 @@ export default function App() {
                 />
               ) : rightDockMode === "preview" ? (
                 <PreviewPane url={previewUrl} onUrlCommit={commitPreviewUrl} />
+              ) : rightDockMode === "session" ? (
+                <SideSessionPane
+                  tabs={tabMetas}
+                  sessions={sidebarSessions}
+                  activeMainTabId={activeTabId ?? undefined}
+                  selectedId={sideSessionTabId}
+                  onSelect={setSideSessionTabId}
+                />
               ) : (
                 <WorkspacePanel
                   open={workspacePanelRenderable}
