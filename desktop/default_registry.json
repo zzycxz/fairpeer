@@ -13,7 +13,14 @@
     "category": "aggregator",
     "aggregator": true,
     "docUrl": "https://bailian.console.aliyun.com/?apiKey=1",
-    "models": ["deepseek-v3", "deepseek-r1", "qwen-max", "qwen-plus", "qwen-turbo", "qwen-vl-max"]
+    "models": [
+      "deepseek-v3",
+      "deepseek-r1",
+      "qwen-max",
+      "qwen-plus",
+      "qwen-turbo",
+      "qwen-vl-max"
+    ]
   },
   {
     "name": "bailian-token",
@@ -29,7 +36,16 @@
     "category": "aggregator",
     "aggregator": true,
     "docUrl": "https://bailian.console.aliyun.com/cn-beijing?tab=plan#/efm/subscription/overview",
-    "models": ["qwen3.8-max", "qwen3.8-max-preview", "qwen3.7-max", "qwen3.7-plus", "qwen3.6-flash", "glm-5.2", "deepseek-v4-pro", "deepseek-v4-flash-0731"]
+    "models": [
+      "qwen3.8-max",
+      "qwen3.8-max-preview",
+      "qwen3.7-max",
+      "qwen3.7-plus",
+      "qwen3.6-flash",
+      "glm-5.2",
+      "deepseek-v4-pro",
+      "deepseek-v4-flash-0731"
+    ]
   },
   {
     "name": "bailian-coding",
@@ -46,7 +62,15 @@
     "aggregator": true,
     "codingOnly": true,
     "docUrl": "https://bailian.console.aliyun.com/cn-beijing/?tab=model#/efm/coding_plan",
-    "models": ["qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "qwen3-coder-plus", "MiniMax-M2.5", "glm-5", "kimi-k2.5"]
+    "models": [
+      "qwen3.7-plus",
+      "qwen3.6-plus",
+      "qwen3.5-plus",
+      "qwen3-coder-plus",
+      "MiniMax-M2.5",
+      "glm-5",
+      "kimi-k2.5"
+    ]
   },
   {
     "name": "qwen",
@@ -61,7 +85,11 @@
     "contextWindow": 1000000,
     "category": "direct",
     "docUrl": "https://bailian.console.aliyun.com/?apiKey=1",
-    "models": ["qwen3.8-max", "qwen3.7-plus", "qwen3.7-flash"]
+    "models": [
+      "qwen3.8-max",
+      "qwen3.7-plus",
+      "qwen3.7-flash"
+    ]
   },
   {
     "name": "deepseek",
@@ -76,7 +104,10 @@
     "contextWindow": 1000000,
     "category": "direct",
     "docUrl": "https://platform.deepseek.com/api_keys",
-    "models": ["deepseek-v4-pro", "deepseek-v4-flash"]
+    "models": [
+      "deepseek-v4-pro",
+      "deepseek-v4-flash"
+    ]
   },
   {
     "name": "volcengine",
@@ -91,7 +122,10 @@
     "contextWindow": 1000000,
     "category": "direct",
     "docUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
-    "models": ["doubao-seed-evolving", "doubao-seed-2.1-turbo"]
+    "models": [
+      "doubao-seed-evolving",
+      "doubao-seed-2.1-turbo"
+    ]
   },
   {
     "name": "zhipu",
@@ -106,7 +140,11 @@
     "contextWindow": 128000,
     "category": "direct",
     "docUrl": "https://open.bigmodel.cn/usercenter/apikeys",
-    "models": ["glm-5.2", "glm-5v-turbo", "glm-4-flash"]
+    "models": [
+      "glm-5.2",
+      "glm-5v-turbo",
+      "glm-4-flash"
+    ]
   },
   {
     "name": "minimax",
@@ -120,8 +158,11 @@
     "vision": true,
     "contextWindow": 1000000,
     "category": "direct",
-    "docUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
-    "models": ["MiniMax-M3", "MiniMax-M2.7"]
+    "docUrl": "https://platform.minimaxi.com/console/access?tab=api-keys",
+    "models": [
+      "MiniMax-M3",
+      "MiniMax-M2.7"
+    ]
   },
   {
     "name": "moonshot",
@@ -136,7 +177,10 @@
     "contextWindow": 1000000,
     "category": "direct",
     "docUrl": "https://platform.moonshot.cn/console/api-keys",
-    "models": ["kimi-k3", "kimi-k2.6"]
+    "models": [
+      "kimi-k3",
+      "kimi-k2.6"
+    ]
   },
   {
     "name": "mimo",
@@ -150,8 +194,11 @@
     "vision": true,
     "contextWindow": 1000000,
     "category": "direct",
-    "docUrl": "https://mimo.mi.com",
-    "models": ["mimo-v2.5-pro", "mimo-v2.5"]
+    "docUrl": "https://platform.xiaomimimo.com/",
+    "models": [
+      "mimo-v2.5-pro",
+      "mimo-v2.5"
+    ]
   },
   {
     "name": "stepfun",
@@ -166,7 +213,10 @@
     "contextWindow": 256000,
     "category": "direct",
     "docUrl": "https://platform.stepfun.com/interface-key",
-    "models": ["step-3.7-flash", "step-3.5-flash"]
+    "models": [
+      "step-3.7-flash",
+      "step-3.5-flash"
+    ]
   },
   {
     "name": "xfyun",
@@ -180,8 +230,14 @@
     "vision": true,
     "contextWindow": 256000,
     "category": "direct",
-    "docUrl": "https://console.xfyun.cn/services/bm4",
-    "models": ["xopglm52", "xopdeepseekv4pro", "xopqwen35397b", "xopqwen36v35b", "xsparkx2agent"]
+    "docUrl": "https://console.xfyun.cn/services",
+    "models": [
+      "xopglm52",
+      "xopdeepseekv4pro",
+      "xopqwen35397b",
+      "xopqwen36v35b",
+      "xsparkx2agent"
+    ]
   },
   {
     "name": "anthropic",
@@ -196,7 +252,10 @@
     "contextWindow": 1000000,
     "category": "direct",
     "docUrl": "https://console.anthropic.com/settings/keys",
-    "models": ["claude-sonnet-5", "claude-haiku-4-5"]
+    "models": [
+      "claude-sonnet-5",
+      "claude-haiku-4-5"
+    ]
   },
   {
     "name": "openai",
@@ -211,7 +270,10 @@
     "contextWindow": 1050000,
     "category": "direct",
     "docUrl": "https://platform.openai.com/api-keys",
-    "models": ["gpt-5.6-terra", "gpt-5.6-luna"]
+    "models": [
+      "gpt-5.6-terra",
+      "gpt-5.6-luna"
+    ]
   },
   {
     "name": "siliconflow",
@@ -227,7 +289,10 @@
     "category": "aggregator",
     "aggregator": true,
     "docUrl": "https://cloud.siliconflow.cn/account/ak",
-    "models": ["deepseek-ai/DeepSeek-V3", "Qwen/Qwen-VL-Max"]
+    "models": [
+      "deepseek-ai/DeepSeek-V3",
+      "Qwen/Qwen-VL-Max"
+    ]
   },
   {
     "name": "openrouter",
@@ -243,7 +308,10 @@
     "category": "aggregator",
     "aggregator": true,
     "docUrl": "https://openrouter.ai/keys",
-    "models": ["anthropic/claude-3.5-sonnet", "anthropic/claude-3-haiku"]
+    "models": [
+      "anthropic/claude-3.5-sonnet",
+      "anthropic/claude-3-haiku"
+    ]
   },
   {
     "name": "qwen-coding",
@@ -260,7 +328,15 @@
     "aggregator": true,
     "codingOnly": true,
     "docUrl": "https://bailian.console.aliyun.com/?apiKey=1",
-    "models": ["qwen3.7-plus", "qwen3.6-plus", "kimi-k2.5", "glm-5", "minimax-m2.5", "qwen3-coder-plus", "glm-4.7"]
+    "models": [
+      "qwen3.7-plus",
+      "qwen3.6-plus",
+      "kimi-k2.5",
+      "glm-5",
+      "minimax-m2.5",
+      "qwen3-coder-plus",
+      "glm-4.7"
+    ]
   },
   {
     "name": "zhipu-coding",
@@ -277,7 +353,11 @@
     "aggregator": true,
     "codingOnly": true,
     "docUrl": "https://open.bigmodel.cn/usercenter/apikeys",
-    "models": ["glm-5.2", "glm-5.1", "glm-5"]
+    "models": [
+      "glm-5.2",
+      "glm-5.1",
+      "glm-5"
+    ]
   },
   {
     "name": "volcengine-coding",
@@ -294,7 +374,12 @@
     "aggregator": true,
     "codingOnly": true,
     "docUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
-    "models": ["doubao-seed-evolving", "doubao-seed-2.1-turbo", "deepseek-v4-pro", "kimi-k2.6"]
+    "models": [
+      "doubao-seed-evolving",
+      "doubao-seed-2.1-turbo",
+      "deepseek-v4-pro",
+      "kimi-k2.6"
+    ]
   },
   {
     "name": "baidu-coding",
@@ -311,7 +396,12 @@
     "aggregator": true,
     "codingOnly": true,
     "docUrl": "https://console.bce.baidu.com/iam/#/iam/apikey/list",
-    "models": ["ernie-5.1", "glm-5.2", "kimi-k2.6", "deepseek-v4-pro"]
+    "models": [
+      "ernie-5.1",
+      "glm-5.2",
+      "kimi-k2.6",
+      "deepseek-v4-pro"
+    ]
   },
   {
     "name": "tencent-coding",
@@ -328,7 +418,12 @@
     "aggregator": true,
     "codingOnly": true,
     "docUrl": "https://console.cloud.tencent.com/lkeap/api",
-    "models": ["deepseek-v4-pro", "glm-5.2", "kimi-k2.6", "minimax-m2.7"]
+    "models": [
+      "deepseek-v4-pro",
+      "glm-5.2",
+      "kimi-k2.6",
+      "minimax-m2.7"
+    ]
   },
   {
     "name": "stepfun-coding",
@@ -345,7 +440,10 @@
     "aggregator": true,
     "codingOnly": true,
     "docUrl": "https://platform.stepfun.com/interface-key",
-    "models": ["step-3.7-flash", "step-3.5-flash"]
+    "models": [
+      "step-3.7-flash",
+      "step-3.5-flash"
+    ]
   },
   {
     "name": "xfyun-coding",
@@ -361,8 +459,10 @@
     "category": "aggregator",
     "aggregator": true,
     "codingOnly": true,
-    "docUrl": "https://console.xfyun.cn/services/bm4",
-    "models": ["astron-code-latest"]
+    "docUrl": "https://console.xfyun.cn/services",
+    "models": [
+      "astron-code-latest"
+    ]
   },
   {
     "name": "xai",
@@ -377,7 +477,11 @@
     "contextWindow": 500000,
     "category": "direct",
     "docUrl": "https://console.x.ai/",
-    "models": ["grok-4.6", "grok-4.5", "grok-4.3"]
+    "models": [
+      "grok-4.6",
+      "grok-4.5",
+      "grok-4.3"
+    ]
   },
   {
     "name": "ollama",
@@ -393,7 +497,12 @@
     "category": "local",
     "local": true,
     "docUrl": "https://ollama.com/download",
-    "models": ["qwen3-coder:30b", "qwen3:8b", "deepseek-r1:32b", "llama3.3:70b"]
+    "models": [
+      "qwen3-coder:30b",
+      "qwen3:8b",
+      "deepseek-r1:32b",
+      "llama3.3:70b"
+    ]
   },
   {
     "name": "llamacpp",
@@ -409,6 +518,8 @@
     "category": "local",
     "local": true,
     "docUrl": "https://github.com/ggml-org/llama.cpp/tree/master/tools/server",
-    "models": ["local-model"]
+    "models": [
+      "local-model"
+    ]
   }
 ]
