@@ -125,7 +125,7 @@
   right: calc(var(--workspace-width, 320px) - 2px);
   width: calc(var(--workspace-resizer-width, 8px) + 4px);
   min-width: 0;
-  z-index: var(--z-app-chrome, 100);
+  z-index: var(--z-app-chrome);
 }
 
 /* Same situation for the left sidebar-resizer: .app--cowork hides the coding-
