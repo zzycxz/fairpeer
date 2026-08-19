@@ -108,6 +108,8 @@ export function NetDevLayout({
   bannersNode,
   terminalNode,
   sessionsNode,
+  searchNode,
+  projectTreeNode,
   onOpenSettings,
   onInsertComposer,
   onNewSession,
@@ -139,6 +141,11 @@ export function NetDevLayout({
   // the mode layout, so the chrome's terminal toggle works in 运维 too.
   terminalNode?: ReactNode;
   sessionsNode: ReactNode;
+  // Sidebar search + project tree — the same nodes the coding/office sidebars
+  // render, so the 运维 left nav carries the full grammar (search → 最近会话 →
+  // 项目工作区) on top of its device list.
+  searchNode?: ReactNode;
+  projectTreeNode?: ReactNode;
   onOpenSettings: (tab: string) => void;
   // Fills the chat composer with a starter prompt (the AI-配置 entry point on
   // the device card / topology nodes). Optional: card hides the button if absent.
@@ -239,7 +246,7 @@ export function NetDevLayout({
     try {
       const g = await app.NetDevTopologySnapshot();
       if (g) {
-        setTopo(g);
+        setTopo({ ...g, nodes: g.nodes ?? [], edges: g.edges ?? [] });
         setTopoSource("measured");
       }
     } catch (e) {
@@ -445,8 +452,18 @@ export function NetDevLayout({
         {/* Scroll lives BELOW the pinned brand row (the coding sidebar's
             structure: root never scrolls, brand row stays put). */}
         <div className="ndv__rail-scroll">
+        {searchNode}
         <div className="ndv__section-row"><div className="ndv__section">诊断会话</div></div>
         <div className="ndv__sessions">{sessionsNode}</div>
+        {/* 项目工作区 — the same ProjectTree node the coding/office sidebars
+            render (profile="netdev" partition: 运维 has its own project index,
+            empty until the user adds projects). Same left-nav grammar as the
+            coding view: search → 最近会话 → 项目工作区. */}
+        {projectTreeNode && (
+          <section className="sidebar__section sidebar__section--projects">
+            {projectTreeNode}
+          </section>
+        )}
         <div className="ndv__section-row">
           <div className="ndv__section">设备清单</div>
           <span className="ndv__section-meta">{project ? `${project.name} · ` : ""}{devices.length} 台</span>
@@ -849,16 +866,21 @@ function ProposalRow({ p, onDone }: { p: NetDevProposal; onDone: () => void }) {
 // (onPick); `selected` highlights the picked node.
 function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevTopologyGraph; selected?: string; selectedAddr?: string; onPick?: (name: string) => void }) {
   const W = 520, H = 360;
+  // Null-hardening (2026-08-19 exe crash: "e.nodes is not iterable"): the
+  // measured snapshot can arrive with null nodes/edges when no devices are
+  // configured — normalize once, never iterate raw.
+  const nodes = graph?.nodes ?? [];
+  const edges = graph?.edges ?? [];
   // Degree per node (managed nodes only drive tiering).
   const degree = new Map<string, number>();
-  for (const n of graph.nodes) degree.set(n.name, 0);
-  for (const e of graph.edges) {
+  for (const n of nodes) degree.set(n.name, 0);
+  for (const e of edges) {
     if (e.local_device !== e.remote_device) {
       degree.set(e.local_device, (degree.get(e.local_device) ?? 0) + 1);
       degree.set(e.remote_device, (degree.get(e.remote_device) ?? 0) + 1);
     }
   }
-  const managed = graph.nodes.filter(v => v.managed);
+  const managed = nodes.filter(v => v.managed);
   // Max degree for the fallback tiering.
   const maxDeg = Math.max(1, ...managed.map(v => degree.get(v.name) ?? 0));
   // Tier: the backend's local inference wins when present (IP-plan view);
@@ -873,7 +895,7 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
   };
   // Unmanaged neighbors get their own bottom band (tier 3).
   const bands: string[][] = [[], [], [], []];
-  for (const v of graph.nodes) bands[tierOfNode(v)].push(v.name);
+  for (const v of nodes) bands[tierOfNode(v)].push(v.name);
   const pos = new Map<string, { x: number; y: number }>();
   const bandY = [46, 148, 250, 322];
   bands.forEach((band, bi) => {
@@ -882,7 +904,7 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
       pos.set(name, { x: n === 1 ? W / 2 : 36 + ((W - 72) * i) / Math.max(n - 1, 1), y: bandY[bi] });
     });
   });
-  const node = (name: string) => graph.nodes.find(v => v.name === name);
+  const node = (name: string) => nodes.find(v => v.name === name);
   const TIER_LABEL = ["核心层", "汇聚层", "接入层", "未纳管邻居"];
   return (
     <div>
@@ -894,7 +916,7 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
             </text>
           ) : null,
         )}
-        {graph.edges.map((e, i) => {
+        {edges.map((e, i) => {
           const pa = pos.get(e.local_device), pb = pos.get(e.remote_device);
           if (!pa || !pb) return null;
           return (
@@ -909,7 +931,7 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
             </line>
           );
         })}
-        {graph.nodes.map(v => {
+        {nodes.map(v => {
           const p = pos.get(v.name);
           if (!p) return null;
           const tier = tierOfNode(v);
@@ -941,7 +963,7 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
         })}
       </svg>
       <div style={{ opacity: 0.6, fontSize: 11 }}>
-        {graph.nodes.filter(v => v.managed).length} 纳管 · {graph.nodes.filter(v => !v.managed).length} 未纳管（虚线框,不可连） · {graph.edges.length} 链路 · 悬停链路看端口 · {graph.at}
+        {nodes.filter(v => v.managed).length} 纳管 · {nodes.filter(v => !v.managed).length} 未纳管（虚线框,不可连） · {edges.length} 链路 · 悬停链路看端口 · {graph.at}
       </div>
     </div>
   );
