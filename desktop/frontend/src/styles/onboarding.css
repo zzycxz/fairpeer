@@ -2848,23 +2848,32 @@
   opacity: 1;
 }
 
+/* Add-tab button: anchored to the tools bar's right end — a bordered accent
+   circle so it reads as the strip's deliberate affordance (2026-08-19). */
 .workbench-dock__tab-add {
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  margin-left: 3px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg-faint);
+  width: 22px;
+  height: 22px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--accent);
   cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, transform 0.12s;
 }
 
-.workbench-dock__tab-add:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
-  color: var(--fg);
+.workbench-dock__tab-add:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-strong, var(--accent));
+  transform: scale(1.08);
+}
+
+.workbench-dock__tab-add:active {
+  transform: scale(0.96);
 }
 
 .workbench-dock__tab svg {

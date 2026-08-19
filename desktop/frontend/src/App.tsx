@@ -3401,19 +3401,19 @@ export default function App() {
                       </button>
                     </div>
                   ))}
-                <button
-                  type="button"
-                  className="workbench-dock__tab-add"
-                  onClick={(e) => {
-                    const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                    setDockAddMenuPoint({ left: r.left, top: r.bottom + 4 });
-                  }}
-                  aria-label={t("dock.addTab")}
-                  title={t("dock.addTab")}
-                >
-                  <Plus size={12} />
-                </button>
               </div>
+              <button
+                type="button"
+                className="workbench-dock__tab-add"
+                onClick={(e) => {
+                  const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                  setDockAddMenuPoint({ left: r.left, top: r.bottom + 4 });
+                }}
+                aria-label={t("dock.addTab")}
+                title={t("dock.addTab")}
+              >
+                <Plus size={13} />
+              </button>
               <ContextMenu
                 open={dockAddMenuPoint !== null}
                 point={dockAddMenuPoint}
