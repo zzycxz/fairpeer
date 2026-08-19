@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { app } from "../lib/bridge";
 import type { NetDevSettingsView, NetDevFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph } from "../lib/types";
 import "../styles/netdev.css";
@@ -47,6 +47,14 @@ const QUICK_BATTERY: Record<string, string[]> = {
   zte: ["show version", "show processor cpu", "show interface brief"],
 };
 
+// Read-only "grab the running config" command per vendor — the first step of
+// any 配置 task (backup / diff / proposal drafting).
+const CFG_CMD: Record<string, string> = {
+  huawei: "display current-configuration",
+  cisco: "show running-config",
+  zte: "show running-config",
+};
+
 type QuickResult = { command: string; output: string; isError: boolean; refused?: string };
 type DockTab = "context" | "topology" | "findings" | "proposals";
 
@@ -55,11 +63,15 @@ export function NetDevLayout({
   footerNode,
   sessionsNode,
   onOpenSettings,
+  onInsertComposer,
 }: {
   mainNode: ReactNode;
   footerNode: ReactNode;
   sessionsNode: ReactNode;
   onOpenSettings: (tab: string) => void;
+  // Fills the chat composer with a starter prompt (the AI-配置 entry point on
+  // the device card / topology nodes). Optional: card hides the button if absent.
+  onInsertComposer?: (text: string) => void;
 }) {
   const [settings, setSettings] = useState<NetDevSettingsView | null>(null);
   const [findings, setFindings] = useState<NetDevFinding[]>([]);
@@ -69,6 +81,7 @@ export function NetDevLayout({
   const [quick, setQuick] = useState<Record<string, QuickResult>>({});
   const [topo, setTopo] = useState<NetDevTopologyGraph | null>(null);
   const [topoBusy, setTopoBusy] = useState(false);
+  const [topoNotice, setTopoNotice] = useState("");
   const [inspBusy, setInspBusy] = useState(false);
   const [tab, setTab] = useState<DockTab>("context");
   const [err, setErr] = useState(""); // shown in the global title bar
@@ -116,6 +129,32 @@ export function NetDevLayout({
       setTopoBusy(false);
     }
   }, []);
+
+  // Topology node names come from LLDP sysnames, which need not equal the
+  // configured device names — match by name first, then by management IP.
+  const devicesRef = useRef<NetDevSettingsView["devices"]>([]);
+  devicesRef.current = settings?.devices ?? [];
+  const pickFromTopo = useCallback((name: string) => {
+    const node = topo?.nodes.find(v => v.name === name);
+    const hit = devicesRef.current.find(d => d.name === name || (node?.device_ip && d.address === node.device_ip));
+    if (hit) {
+      setSelected(hit.name);
+      setTab("context");
+      setTopoNotice("");
+      return;
+    }
+    setTopoNotice(`「${name}」不在设备清单——邻居表发现的节点（未纳管或无凭证），到 设置 → 运维 录入后即可点击诊断。`);
+  }, [topo]);
+
+  // Entering the 拓扑 tab auto-generates once (per mount) when devices exist,
+  // so the map is simply there after a probe instead of hiding behind a click.
+  const topoAutoFired = useRef(false);
+  useEffect(() => {
+    if (tab === "topology" && !topoAutoFired.current && !topo && !topoBusy && (settings?.devices?.length ?? 0) > 0) {
+      topoAutoFired.current = true;
+      void genTopology();
+    }
+  }, [tab, topo, topoBusy, settings, genTopology]);
 
   const runInspection = useCallback(async () => {
     setInspBusy(true);
@@ -228,6 +267,20 @@ export function NetDevLayout({
                   <span key={cmd} className="btn btn--secondary btn--small" role="button" onClick={() => void runQuick(selectedDevice.name, cmd)}>{cmd}</span>
                 ))}
               </div>
+              <div className="ndv__quick-cmds">
+                <span
+                  className="btn btn--secondary btn--small"
+                  role="button"
+                  onClick={() => void runQuick(selectedDevice.name, CFG_CMD[selectedDevice.vendor] ?? "display current-configuration")}
+                >抓取当前配置</span>
+                {onInsertComposer && (
+                  <span
+                    className="btn btn--primary btn--small"
+                    role="button"
+                    onClick={() => onInsertComposer(`帮我在 ${selectedDevice.name}（${selectedDevice.address}）上完成以下变更：\n变更内容：\n（请先用只读命令确认现状，再用 netdev_propose 起草提案——写命令必须包含对应的回滚命令，不会直接执行，需我在提案中心批准。）`)}
+                  >AI 配置变更…</span>
+                )}
+              </div>
               {Object.values(quick).map(r => (
                 <div key={r.command} className="ndv__quick-result">
                   <div className="ndv__quick-cmd" style={r.isError ? { color: "#ff8787" } : undefined}>{r.command}</div>
@@ -248,7 +301,15 @@ export function NetDevLayout({
                 {topoBusy ? "采集邻居表中…" : "生成拓扑（读取全网邻居表）"}
               </span>
             </div>
-            {topo && <TopologyMap graph={topo} />}
+            {topoNotice && (
+              <div className="ndv__hint" style={{ padding: 0, marginBottom: 8, color: "var(--accent, #7ab8ff)" }}>{topoNotice}</div>
+            )}
+            {topo && <TopologyMap graph={topo} selected={selected} selectedAddr={selectedDevice?.address} onPick={pickFromTopo} />}
+            {!topo && !topoBusy && (
+              <div className="ndv__hint" style={{ padding: 0 }}>
+                生成拓扑 = 对全部纳管设备执行只读的 LLDP/CDP 邻居表读取，按连接度自动分层为核心 / 汇聚 / 接入；未纳管邻居沉底（虚线框）。
+              </div>
+            )}
           </div>
         )}
 
@@ -341,39 +402,102 @@ function ProposalRow({ p }: { p: NetDevProposal }) {
   );
 }
 
-// TopologyMap: deterministic circular layout (hierarchical layout arrives
-// with the flowchart-engine integration).
-function TopologyMap({ graph }: { graph: NetDevTopologyGraph }) {
-  const W = 270, H = 190, R = Math.min(W, H) / 2 - 22;
-  const n = graph.nodes.length;
-  const pos = (i: number) => ({
-    x: W / 2 + R * Math.cos((2 * Math.PI * i) / Math.max(n, 1) - Math.PI / 2),
-    y: H / 2 + R * Math.sin((2 * Math.PI * i) / Math.max(n, 1) - Math.PI / 2),
+// TopologyMap: tiered layout — connection degree infers 核心/汇聚/接入 bands
+// (real ops shape), unmanaged neighbors sink to the bottom in grey. Ports ride
+// the link as a hover tooltip; clicking a managed node selects the device
+// (onPick); `selected` highlights the picked node.
+function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevTopologyGraph; selected?: string; selectedAddr?: string; onPick?: (name: string) => void }) {
+  const W = 520, H = 360;
+  // Degree per node (managed nodes only drive tiering).
+  const degree = new Map<string, number>();
+  for (const n of graph.nodes) degree.set(n.name, 0);
+  for (const e of graph.edges) {
+    if (e.local_device !== e.remote_device) {
+      degree.set(e.local_device, (degree.get(e.local_device) ?? 0) + 1);
+      degree.set(e.remote_device, (degree.get(e.remote_device) ?? 0) + 1);
+    }
+  }
+  const managed = graph.nodes.filter(v => v.managed);
+  // Tier thresholds relative to the busiest node: core ≥ 60% of max degree,
+  // aggregation ≥ 30%, rest access. Managed nodes without links join access.
+  const maxDeg = Math.max(1, ...managed.map(v => degree.get(v.name) ?? 0));
+  const tierOf = (name: string): number => {
+    const d = degree.get(name) ?? 0;
+    if (d >= maxDeg * 0.6) return 0;
+    if (d >= maxDeg * 0.3) return 1;
+    return 2;
+  };
+  // Unmanaged neighbors get their own bottom band (tier 3).
+  const bands: string[][] = [[], [], [], []];
+  for (const v of graph.nodes) bands[v.managed ? tierOf(v.name) : 3].push(v.name);
+  const pos = new Map<string, { x: number; y: number }>();
+  const bandY = [46, 148, 250, 322];
+  bands.forEach((band, bi) => {
+    const n = band.length;
+    band.forEach((name, i) => {
+      pos.set(name, { x: n === 1 ? W / 2 : 36 + ((W - 72) * i) / Math.max(n - 1, 1), y: bandY[bi] });
+    });
   });
-  const idx = new Map(graph.nodes.map((v, i) => [v.name, i]));
+  const node = (name: string) => graph.nodes.find(v => v.name === name);
+  const TIER_LABEL = ["核心层", "汇聚层", "接入层", "未纳管邻居"];
   return (
     <div>
-      <svg width={W} height={H} style={{ maxWidth: "100%", marginTop: 8 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 640, marginTop: 8, display: "block" }}>
+        {bandY.map((y, i) =>
+          bands[i].length > 0 ? (
+            <text key={i} x={10} y={y - 20} fontSize={10} fill="var(--text-dim, #888)" opacity={0.8}>
+              {TIER_LABEL[i]}
+            </text>
+          ) : null,
+        )}
         {graph.edges.map((e, i) => {
-          const a = idx.get(e.local_device), b = idx.get(e.remote_device);
-          if (a === undefined || b === undefined) return null;
-          const pa = pos(a), pb = pos(b);
-          return <line key={i} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} stroke="var(--border)" strokeWidth={1} />;
-        })}
-        {graph.nodes.map((v, i) => {
-          const p = pos(i);
+          const pa = pos.get(e.local_device), pb = pos.get(e.remote_device);
+          if (!pa || !pb) return null;
           return (
-            <g key={v.name}>
-              <circle cx={p.x} cy={p.y} r={5.5} fill={v.managed ? "var(--accent, #7ab8ff)" : "var(--text-dim, #888)"} />
-              <text x={p.x} y={p.y - 9} textAnchor="middle" fontSize={8.5} fill="var(--text, #ccc)">
-                {v.name.length > 10 ? v.name.slice(0, 10) + "…" : v.name}
+            <line
+              key={i}
+              x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
+              stroke="var(--border, #555)"
+              strokeWidth={1}
+              opacity={0.85}
+            >
+              <title>{`${e.local_device}:${e.local_port} ⇄ ${e.remote_device}${e.remote_port ? ":" + e.remote_port : ""} (${e.source})`}</title>
+            </line>
+          );
+        })}
+        {graph.nodes.map(v => {
+          const p = pos.get(v.name);
+          if (!p) return null;
+          const tier = v.managed ? tierOf(v.name) : 3;
+          const nv = node(v.name);
+          const sel = !!v.managed && (!!selected && (v.name === selected || nv?.device_ip === selectedAddr));
+          return (
+            <g
+              key={v.name}
+              style={{ cursor: v.managed && onPick ? "pointer" : "default" }}
+              onClick={() => v.managed && onPick?.(v.name)}
+            >
+              <rect
+                x={p.x - 30} y={p.y - 10} width={60} height={20} rx={5}
+                fill={sel
+                  ? "var(--accent-dim, rgba(122,184,255,.2))"
+                  : v.managed ? "var(--bg-elev, #2a2a2e)" : "transparent"}
+                stroke={sel
+                  ? "var(--accent, #7ab8ff)"
+                  : v.managed ? (tier === 0 ? "var(--accent, #7ab8ff)" : "var(--border, #555)") : "var(--border, #555)"}
+                strokeWidth={sel ? 2 : v.managed && tier === 0 ? 1.6 : 1}
+                strokeDasharray={v.managed ? undefined : "3 3"}
+              />
+              <text x={p.x} y={p.y + 3.5} textAnchor="middle" fontSize={9} fill={v.managed ? "var(--text, #ccc)" : "var(--text-dim, #888)"}>
+                {v.name.length > 9 ? v.name.slice(0, 9) + "…" : v.name}
               </text>
+              <title>{`${v.name}${nv?.device_ip ? " · " + nv.device_ip : ""}${v.managed ? " · 纳管" : " · 未纳管"} · 连接 ${degree.get(v.name) ?? 0}${v.managed && onPick ? " · 点击查看设备" : ""}`}</title>
             </g>
           );
         })}
       </svg>
       <div style={{ opacity: 0.6, fontSize: 11 }}>
-        {graph.nodes.filter(v => v.managed).length} 纳管 · {graph.nodes.filter(v => !v.managed).length} 未纳管（灰，不可连） · {graph.edges.length} 链路 · {graph.at}
+        {graph.nodes.filter(v => v.managed).length} 纳管 · {graph.nodes.filter(v => !v.managed).length} 未纳管（虚线框,不可连） · {graph.edges.length} 链路 · 悬停链路看端口 · {graph.at}
       </div>
     </div>
   );

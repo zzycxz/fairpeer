@@ -97,6 +97,7 @@ import type {
   BotDockStatusView,
   CatalogEntry,
   MarketSourceMeta,
+  NetDevTopologyNode,
 } from "./types";
 
 const GLOBAL_PROJECT_ORDER_KEY = "__global__";
@@ -1700,7 +1701,17 @@ function makeMockApp(): AppBindings {
   // NetDev mock: an in-memory settings store so the browser dev shell can
   // exercise the netdev panel without the Go backend. Passwords/audit/ssh
   // imports are stubbed — the real implementations live in the Go bindings.
-  let mockNetDev: NetDevSettingsView = { enabled: false, networkName: "我的网络", devices: [], hops: [], groups: [], auditRetention: "", scopes: [] };
+  // Two seeded devices mirror the topology mock (CORE-01/ACC-01) so the
+  // click-a-node → device card flow is demoable in the browser dev shell.
+  let mockNetDev: NetDevSettingsView = {
+    enabled: false,
+    networkName: "我的网络",
+    devices: [
+      { name: "CORE-01", vendor: "huawei", os: "vrp", model: "S5731", address: "10.0.0.2", port: 22, via: [], group: "核心", username: "netops", passwordEnv: "NETDEV_CORE01_PW", passwordSet: true, identityFile: "", encoding: "", allowTelnet: false },
+      { name: "ACC-01", vendor: "huawei", os: "vrp", model: "S3100", address: "10.0.2.1", port: 22, via: [], group: "接入", username: "netops", passwordEnv: "NETDEV_ACC01_PW", passwordSet: true, identityFile: "", encoding: "", allowTelnet: false },
+    ],
+    hops: [], groups: [], auditRetention: "", scopes: [],
+  };
   return {
     async NetDevSettings() {
       return mockNetDev;
@@ -1720,7 +1731,36 @@ function makeMockApp(): AppBindings {
     async NetDevQuickExec(device: string, command: string) {
       return { device, command, class: "read", output: "(browser dev mock: no device backend)", is_error: false };
     },
-    async NetDevTopologySnapshot() { return null; },
+    async NetDevTopologySnapshot() {
+      // Browser-dev stand-in shaped like a real small campus net (FW → 2 core →
+      // 2 aggregation → 3 access + an unmanaged neighbor) so the tiered
+      // TopologyMap is demoable without the Go backend.
+      const N = (name: string, managed: boolean, ip?: string): NetDevTopologyNode => ({ name, managed, device_ip: ip });
+      return {
+        nodes: [
+          N("FW-01", true, "10.0.0.1"),
+          N("CORE-01", true, "10.0.0.2"), N("CORE-02", true, "10.0.0.3"),
+          N("AGG-01", true, "10.0.1.1"), N("AGG-02", true, "10.0.1.2"),
+          N("ACC-01", true, "10.0.2.1"), N("ACC-02", true, "10.0.2.2"), N("ACC-03", true, "10.0.2.3"),
+          N("SRV-ESXi", false), N("IPSLA-P", false),
+        ],
+        edges: [
+          { local_device: "FW-01", local_port: "GE0/0/1", remote_device: "CORE-01", remote_port: "GE1/0/1", source: "lldp" },
+          { local_device: "FW-01", local_port: "GE0/0/2", remote_device: "CORE-02", remote_port: "GE1/0/1", source: "lldp" },
+          { local_device: "CORE-01", local_port: "GE1/0/24", remote_device: "CORE-02", remote_port: "GE1/0/24", source: "lldp" },
+          { local_device: "CORE-01", local_port: "GE1/0/2", remote_device: "AGG-01", remote_port: "GE0/0/1", source: "lldp" },
+          { local_device: "CORE-02", local_port: "GE1/0/2", remote_device: "AGG-01", remote_port: "GE0/0/2", source: "lldp" },
+          { local_device: "CORE-02", local_port: "GE1/0/3", remote_device: "AGG-02", remote_port: "GE0/0/1", source: "lldp" },
+          { local_device: "AGG-01", local_port: "GE0/0/23", remote_device: "AGG-02", remote_port: "GE0/0/23", source: "lldp" },
+          { local_device: "AGG-01", local_port: "GE0/0/3", remote_device: "ACC-01", remote_port: "GE0/0/1", source: "lldp" },
+          { local_device: "AGG-01", local_port: "GE0/0/4", remote_device: "ACC-02", remote_port: "GE0/0/1", source: "lldp" },
+          { local_device: "AGG-02", local_port: "GE0/0/3", remote_device: "ACC-03", remote_port: "GE0/0/1", source: "lldp" },
+          { local_device: "AGG-01", local_port: "GE0/0/48", remote_device: "SRV-ESXi", source: "cdp" },
+          { local_device: "ACC-03", local_port: "GE0/0/24", remote_device: "IPSLA-P", source: "cdp" },
+        ],
+        at: new Date().toISOString().slice(0, 19).replace("T", " "),
+      };
+    },
     async NetDevApproveProposal(_id: string, _confirm2: boolean) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevExecuteProposal(_id: string) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevRollbackProposal(_id: string) { throw new Error("browser dev mock: no proposal backend"); },

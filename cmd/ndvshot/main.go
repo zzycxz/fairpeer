@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/chromedp/chromedp"
@@ -145,6 +146,34 @@ func main() {
 		fatal("flowchart-svg-rendered: 0 — no visible flowchart found in DOM (err: %v)", err)
 	}
 	fmt.Printf("flowchart-svg-rendered: %d diagram(s)\n", flowCount)
+
+	// Interactive topology: open the 拓扑 tab (auto-generates), click the
+	// CORE-01 node, and assert the dock switched to that device's card.
+	if err := chromedp.Run(bctx,
+		chromedp.Click(`//button[contains(., "拓扑")]`, chromedp.BySearch),
+		chromedp.Sleep(1200*time.Millisecond),
+		chromedp.Evaluate(`(function(){var gs=document.querySelectorAll(".ndv__dock svg g"); for (var i=0;i<gs.length;i++){ if(gs[i].textContent.indexOf("CORE-01")>=0){ gs[i].dispatchEvent(new MouseEvent("click",{bubbles:true})); return "clicked"; }} return "not-found";})()`, new(string)),
+		chromedp.Sleep(800*time.Millisecond),
+		chromedp.Evaluate(visibleMermaidScrollJS, new(bool)), // no-op if no diagrams; keeps order stable
+	); err != nil {
+		fatal("topology click: %v", err)
+	}
+	var dockText string
+	if err := chromedp.Run(bctx,
+		chromedp.Text(".ndv__dock", &dockText, chromedp.ByQuery),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return saveShot(ctx, filepath.Join(*out, "ndv-5-topology.png"))
+		}),
+	); err != nil {
+		fatal("topology dock probe: %v", err)
+	}
+	fmt.Println("shot: ndv-5-topology.png")
+	dockNow := oneLine(dockText)
+	fmt.Printf("dock-after-click: %.160q\n", dockNow)
+	if !strings.Contains(dockNow, "CORE-01") || !strings.Contains(dockNow, "huawei") {
+		fatal("topology click did not open the CORE-01 device card (dock: %.120q)", dockNow)
+	}
+	fmt.Println("topology-click→device-card: OK")
 }
 
 // visibleMermaidScrollJS scrolls the last visible mermaid diagram into view,

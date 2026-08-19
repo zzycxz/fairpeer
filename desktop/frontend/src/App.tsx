@@ -3068,6 +3068,7 @@ export default function App() {
             footerNode={footerNode}
             sessionsNode={sidebarSessionsNode}
             onOpenSettings={(t) => { setSettingsTarget(t as never); setSettingsPayload(null); }}
+            onInsertComposer={addWorkspaceTextToComposer}
           />
         )}
         <AppChrome
