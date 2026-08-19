@@ -3,8 +3,7 @@ import logo from "../assets/logo.png";
 import { useT, type Translator } from "../lib/i18n";
 import { app } from "../lib/bridge";
 import type { ProviderTemplate } from "../lib/types";
-import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
-import { Check, ChevronsUpDown, Loader2, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 
 // Three-step first-run wizard: pick vendor → paste key → pick default model.
 // Replaces the old single-key-input overlay (which assumed a built-in provider
@@ -35,6 +34,11 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
       <div className="onboarding__card onboarding__card--wide">
         <img src={logo} className="onboarding__logo" alt="FairPeer" draggable={false} />
         <div className="onboarding__title">{t("onboarding.title")}</div>
+        <div className="onboarding__dots" aria-hidden="true">
+          {(["vendor", "key", "model"] as const).map((s) => (
+            <span key={s} className={`onboarding__dot${step === s ? " onboarding__dot--on" : ""}`} />
+          ))}
+        </div>
 
         {loadErr && <div className="onboarding__error" role="alert">{loadErr}</div>}
 
@@ -96,6 +100,66 @@ export function OnboardingOverlay({ onComplete }: { onComplete: () => void }) {
 }
 
 // ── Step 1: vendor grid ───────────────────────────────────────────────────
+// ── Step 1: provider card wall ────────────────────────────────────────────
+// Two-column brand cards grouped 直连 / Coding Plan / 本地 (ui-redesign §4-E2).
+// A click selects; the footer Next confirms — same contract as before, so the
+// Settings "add provider" panel (which reuses these steps) gets the wall too.
+// Brand marks are vendored from lobe-icons (MIT; see assets/providers/ATTRIBUTUTION.md);
+// vendors without an upstream icon fall back to the monogram tile.
+import anthropicSvg from "../assets/providers/anthropic.svg";
+import openaiSvg from "../assets/providers/openai.svg";
+import deepseekSvg from "../assets/providers/deepseek.svg";
+import qwenSvg from "../assets/providers/qwen.svg";
+import zhipuSvg from "../assets/providers/zhipu.svg";
+import minimaxSvg from "../assets/providers/minimax.svg";
+import moonshotSvg from "../assets/providers/moonshot.svg";
+import doubaoSvg from "../assets/providers/doubao.svg";
+import xaiSvg from "../assets/providers/xai.svg";
+import ollamaSvg from "../assets/providers/ollama.svg";
+import openrouterSvg from "../assets/providers/openrouter.svg";
+import siliconcloudSvg from "../assets/providers/siliconcloud.svg";
+import stepfunSvg from "../assets/providers/stepfun.svg";
+import sparkSvg from "../assets/providers/spark.svg";
+import wenxinSvg from "../assets/providers/wenxin.svg";
+import hunyuanSvg from "../assets/providers/hunyuan.svg";
+
+const PROVIDER_LOGOS: Record<string, string> = {
+  anthropic: anthropicSvg,
+  openai: openaiSvg,
+  deepseek: deepseekSvg,
+  qwen: qwenSvg,
+  bailian: qwenSvg,
+  "bailian-token": qwenSvg,
+  "bailian-coding": qwenSvg,
+  "qwen-coding": qwenSvg,
+  zhipu: zhipuSvg,
+  "zhipu-coding": zhipuSvg,
+  minimax: minimaxSvg,
+  moonshot: moonshotSvg,
+  volcengine: doubaoSvg,
+  "volcengine-coding": doubaoSvg,
+  xai: xaiSvg,
+  ollama: ollamaSvg,
+  openrouter: openrouterSvg,
+  siliconflow: siliconcloudSvg,
+  stepfun: stepfunSvg,
+  "stepfun-coding": stepfunSvg,
+  xfyun: sparkSvg,
+  "xfyun-coding": sparkSvg,
+  "baidu-coding": wenxinSvg,
+  "tencent-coding": hunyuanSvg,
+};
+
+function wallTileLetter(tpl: ProviderTemplate): string {
+  const source = tpl.name || tpl.displayName || "?";
+  const ascii = source.match(/[a-zA-Z]/);
+  return (ascii ? ascii[0] : source[0] || "?").toUpperCase();
+}
+
+function wallShortUrl(url: string): string {
+  return url.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+}
+
 export function VendorStep({ direct, aggregators, locals, onPick, syncing, onSync, t }: {
   direct: ProviderTemplate[];
   aggregators: ProviderTemplate[];
@@ -109,36 +173,19 @@ export function VendorStep({ direct, aggregators, locals, onPick, syncing, onSyn
   const [value, setValue] = useState("");
   const selected = all.find((x) => x.name === value) ?? null;
 
-  const [open, setOpen] = useState(false);
-  const [closing, setClosing] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const closeTimerRef = useRef<number | null>(null);
-
-  const closeMenu = useCallback(() => {
-    if (closeTimerRef.current !== null) return;
-    setClosing(true);
-    window.requestAnimationFrame(() => setOpen(false));
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    closeTimerRef.current = window.setTimeout(() => {
-      closeTimerRef.current = null;
-      setClosing(false);
-    }, reduceMotion ? 0 : ANCHORED_POPOVER_CLOSE_MS);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
-    };
-  }, []);
+  const groups = ([
+    { key: "direct", label: t("onboarding.categoryDirect"), list: direct },
+    { key: "aggregator", label: t("onboarding.categoryAggregator"), list: aggregators },
+    { key: "local", label: t("onboarding.categoryLocal"), list: locals },
+  ] as const).filter((g) => g.list.length > 0);
 
   return (
     <div className="onboarding__step">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div className="onboarding__wall-head">
         <div className="onboarding__tag">{t("onboarding.step1Hint")}</div>
-        <button 
-          type="button" 
-          className="btn btn--small" 
-          style={{ background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px", fontSize: "12px" }}
+        <button
+          type="button"
+          className="btn btn--small onboarding__sync"
           onClick={onSync}
           disabled={syncing}
         >
@@ -147,92 +194,42 @@ export function VendorStep({ direct, aggregators, locals, onPick, syncing, onSyn
         </button>
       </div>
 
-      <div className="onboarding__dropdown">
-        <button
-          ref={triggerRef}
-          type="button"
-          className="onboarding__dropdown-trigger"
-          aria-expanded={open && !closing}
-          onClick={() => (open || closing ? closeMenu() : setOpen(true))}
-        >
-          <span className="onboarding__dropdown-label">
-            {selected ? selected.displayName : t("onboarding.selectPlaceholder")}
-          </span>
-          <ChevronsUpDown size={14} className="onboarding__dropdown-icon" />
-        </button>
-
-        <AnchoredPopover
-          open={open}
-          closing={closing}
-          anchorRef={triggerRef}
-          onClose={closeMenu}
-          className="onboarding__menu onboarding__menu--portal"
-          style={{ width: triggerRef.current?.getBoundingClientRect().width ?? 280 }}
-        >
-          <div className="onboarding__menu-list" role="listbox">
-            <div className="onboarding__menu-group">{t("onboarding.categoryDirect")}</div>
-            {direct.map((tpl) => (
-              <button
-                key={tpl.name}
-                type="button"
-                role="option"
-                aria-selected={value === tpl.name}
-                className={`onboarding__menu-item ${value === tpl.name ? "onboarding__menu-item--selected" : ""}`}
-                onClick={() => {
-                  setValue(tpl.name);
-                  closeMenu();
-                }}
-              >
-                <span className="onboarding__menu-item-label">{tpl.displayName}</span>
-                {value === tpl.name && <Check size={14} className="onboarding__menu-item-check" />}
-              </button>
-            ))}
-            
-            {aggregators.length > 0 && (
-              <>
-                <div className="onboarding__menu-group">{t("onboarding.categoryAggregator")}</div>
-                {aggregators.map((tpl) => (
+      <div className="onboarding__wall" role="listbox" aria-label={t("onboarding.selectPlaceholder")}>
+        {groups.map((group) => (
+          <div key={group.key} className="onboarding__wall-group">
+            <div className="onboarding__wall-group-label">{group.label}</div>
+            <div className="onboarding__wall-grid">
+              {group.list.map((tpl) => {
+                const isSel = value === tpl.name;
+                return (
                   <button
                     key={tpl.name}
                     type="button"
                     role="option"
-                    aria-selected={value === tpl.name}
-                    className={`onboarding__menu-item ${value === tpl.name ? "onboarding__menu-item--selected" : ""}`}
-                    onClick={() => {
-                      setValue(tpl.name);
-                      closeMenu();
-                    }}
+                    aria-selected={isSel}
+                    className={[
+                      "onboarding__vcard",
+                      isSel ? "onboarding__vcard--selected" : "",
+                      tpl.local ? "onboarding__vcard--local" : "",
+                    ].filter(Boolean).join(" ")}
+                    onClick={() => setValue(tpl.name)}
                   >
-                    <span className="onboarding__menu-item-label">{tpl.displayName}</span>
-                    {value === tpl.name && <Check size={14} className="onboarding__menu-item-check" />}
+                    <span className="onboarding__vcard-tile" aria-hidden="true">
+                      {PROVIDER_LOGOS[tpl.name]
+                        ? <img src={PROVIDER_LOGOS[tpl.name]} alt="" className="onboarding__vcard-logo" draggable={false} />
+                        : wallTileLetter(tpl)}
+                    </span>
+                    <span className="onboarding__vcard-name">{tpl.displayName}</span>
+                    <span className="onboarding__vcard-status">
+                      {tpl.local ? t("onboarding.noKeyNeeded") : tpl.codingOnly ? t("onboarding.badgeCoding") : wallShortUrl(tpl.baseUrl)}
+                    </span>
+                    <span className="onboarding__vcard-go" aria-hidden="true">›</span>
                   </button>
-                ))}
-              </>
-            )}
-
-            {locals.length > 0 && (
-              <>
-                <div className="onboarding__menu-group">{t("onboarding.categoryLocal")}</div>
-                {locals.map((tpl) => (
-                  <button
-                    key={tpl.name}
-                    type="button"
-                    role="option"
-                    aria-selected={value === tpl.name}
-                    className={`onboarding__menu-item ${value === tpl.name ? "onboarding__menu-item--selected" : ""}`}
-                    onClick={() => {
-                      setValue(tpl.name);
-                      closeMenu();
-                    }}
-                  >
-                    <span className="onboarding__menu-item-label">{tpl.displayName}</span>
-                    {value === tpl.name && <Check size={14} className="onboarding__menu-item-check" />}
-                  </button>
-                ))}
-              </>
-            )}
+                );
+              })}
+            </div>
           </div>
-        </AnchoredPopover>
+        ))}
       </div>
 
       {selected && (
@@ -267,7 +264,7 @@ export function KeyStep({ template, apiKey, onApiKeyChange, onBack, onConnected,
   onConnected: () => void;
   t: Translator;
 }) {
-  const [state, setState] = useState<"idle" | "validating" | "error">("idle");
+  const [state, setState] = useState<"idle" | "validating" | "error" | "verified">("idle");
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -284,7 +281,9 @@ export function KeyStep({ template, apiKey, onApiKeyChange, onBack, onConnected,
     setError(null);
     try {
       await app.ProbeVendorKey(template.baseUrl, key);
-      onConnected();
+      // Brief inline "verified" confirmation before advancing (ui-redesign §4-E2).
+      setState("verified");
+      window.setTimeout(onConnected, 650);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (/invalid|401|403|unauthorized/i.test(msg)) {
@@ -318,20 +317,23 @@ export function KeyStep({ template, apiKey, onApiKeyChange, onBack, onConnected,
         placeholder={t("onboarding.inputPlaceholder")}
         value={apiKey}
         onChange={(e) => { onApiKeyChange(e.target.value); if (state === "error") setState("idle"); }}
-        onKeyDown={(e) => { if (e.key === "Enter" && state !== "validating") { e.preventDefault(); void submit(); } }}
-        disabled={state === "validating"}
+        onKeyDown={(e) => { if (e.key === "Enter" && state !== "validating" && state !== "verified") { e.preventDefault(); void submit(); } }}
+        disabled={state === "validating" || state === "verified"}
       />
 
+      {state === "verified" && (
+        <div className="onboarding__verified" role="status">✓ {t("onboarding.verified")}</div>
+      )}
       {state === "error" && error && (
         <div className="onboarding__error" role="alert">{error}</div>
       )}
 
       <div className="onboarding__actions">
-        <button type="button" className="onboarding__back" onClick={onBack} disabled={state === "validating"}>
+        <button type="button" className="onboarding__back" onClick={onBack} disabled={state === "validating" || state === "verified"}>
           ← {t("onboarding.back")}
         </button>
-        <button type="button" className="onboarding__submit" onClick={() => void submit()} disabled={state === "validating"}>
-          {state === "validating" ? (<><span className="onboarding__spinner" />{t("onboarding.validating")}</>) : t("onboarding.connect")}
+        <button type="button" className="onboarding__submit" onClick={() => void submit()} disabled={state === "validating" || state === "verified"}>
+          {state === "validating" ? (<><span className="onboarding__spinner" />{t("onboarding.validating")}</>) : state === "verified" ? t("onboarding.verified") : t("onboarding.connect")}
         </button>
       </div>
 

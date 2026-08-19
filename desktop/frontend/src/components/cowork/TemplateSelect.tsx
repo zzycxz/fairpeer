@@ -585,10 +585,10 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
               <span>{t("templateSelect.extractedKnowledge")}</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11 }}>
-              <span style={{ padding: "2px 7px", borderRadius: 10, background: "rgba(59, 130, 246, 0.12)", color: "#3b82f6", fontWeight: 500 }}>
+              <span style={{ padding: "2px 7px", borderRadius: 10, background: "var(--accent-soft)", color: "var(--accent)", fontWeight: 500 }}>
                 {result.entityCount} {t("templateSelect.entitiesCount").toLowerCase()}
               </span>
-              <span style={{ padding: "2px 7px", borderRadius: 10, background: "rgba(168, 85, 247, 0.12)", color: "#a855f7", fontWeight: 500 }}>
+              <span style={{ padding: "2px 7px", borderRadius: 10, background: "var(--accent-alt-soft)", color: "var(--accent-alt)", fontWeight: 500 }}>
                 {result.relationCount} {t("templateSelect.relationsCount").toLowerCase()}
               </span>
             </div>

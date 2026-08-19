@@ -9,7 +9,8 @@ import { startRecording, checkMicPermission, VoiceRecorderError, type RecordingS
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { useToast } from "../lib/toast";
-import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type DirEntry, type EffortInfo, type HistoryMessage, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode } from "../lib/types";
+import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type HistoryMessage, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode } from "../lib/types";
+import { UsageChip } from "./composer/UsageChip";
 import {
   formatWorkspaceReference,
   parseWorkspaceReference,
@@ -331,6 +332,8 @@ export function Composer({
   modelLabel,
   tabId,
   effort,
+  contextInfo,
+  runningPhase,
   onSend,
   onCancel,
   onPauseToggle,
@@ -367,6 +370,11 @@ export function Composer({
   modelLabel: string;
   tabId?: string;
   effort?: EffortInfo;
+  // Context-window meter (ui-redesign §4-C3); absent → the UsageChip stays hidden.
+  contextInfo?: ContextInfo;
+  // Live agent phase ("正在…") rendered as a slim strip inside the composer
+  // card — replaces the per-row PhaseCard lines in the transcript.
+  runningPhase?: string;
   onSend: (displayText: string, submitText?: string) => void;
   // Returns the un-sent text when cancelling before the server replied (so it can
   // be restored to the input); undefined for a normal cancel.
@@ -1722,11 +1730,11 @@ export function Composer({
           <div className="slashmenu" role="listbox">
             {loadingPastChats ? (
               <div className="slashmenu__item slashmenu__item--empty">
-                <span className="slashmenu__name">正在加载历史会话...</span>
+                <span className="slashmenu__name">{t("composer.historyLoading")}</span>
               </div>
             ) : pastChats.length === 0 ? (
               <div className="slashmenu__item slashmenu__item--empty">
-                <span className="slashmenu__name">暂无历史会话</span>
+                <span className="slashmenu__name">{t("composer.historyEmpty")}</span>
               </div>
             ) : (
               <>
@@ -1735,7 +1743,7 @@ export function Composer({
                   <input
                     className="slashmenu__search"
                     type="text"
-                    placeholder="搜索历史会话…"
+                    placeholder={t("composer.historySearchPlaceholder")}
                     value={pastChatQuery}
                     autoFocus
                     onChange={(ev) => {
@@ -1765,7 +1773,7 @@ export function Composer({
                           {preview && <div className="past-chat-hover__preview">{preview}</div>}
                           {(turns || ts) && (
                             <div className="past-chat-hover__meta">
-                              {turns && <span>{session.turns} 轮</span>}
+                              {turns && <span>{session.turns} {t("composer.turnsUnit")}</span>}
                               {ts && <span>· {fmtSessionTime(ts)}</span>}
                             </div>
                           )}
@@ -1785,7 +1793,7 @@ export function Composer({
                           <MessageSquare size={13} className="filemenu__icon" />
                           <span className="slashmenu__name slashmenu__name--file">
                             {pastChatTitle(session)}
-                            {turns ? ` (${session.turns} 轮)` : ""}
+                            {turns ? ` (${session.turns} ${t("composer.turnsUnit")})` : ""}
                           </span>
                         </button>
                       </Tooltip>
@@ -1963,11 +1971,11 @@ export function Composer({
                   <MessageSquare size={15} />
                   <span>
                     {ref.title}
-                    {typeof ref.turns === "number" ? ` (${ref.turns} 轮)` : ""}
+                    {typeof ref.turns === "number" ? ` (${ref.turns} ${t("composer.turnsUnit")})` : ""}
                   </span>
                 </span>
               </Tooltip>
-              <Tooltip label="移除引用会话">
+              <Tooltip label={t("composer.historyRemoveRef")}>
                 <button
                   type="button"
                   onClick={() => removeSessionRef(ref.path)}
@@ -2026,6 +2034,15 @@ export function Composer({
           onKeyDown={onComposerResizeKeyDown}
           onDoubleClick={resetComposerHeight}
         />
+        {/* Level-2 attention strip: only when the run needs the user (paused).
+            Background progress lives in the meta row chip below; approval
+            requests have their own modal; errors surface as tool cards. */}
+        {paused && (
+          <div className="composer-phase composer-phase--attention" role="status">
+            <Pause size={12} />
+            <span className="composer-phase__text">{t("projectTree.status.paused")}</span>
+          </div>
+        )}
         <div
           className={`composer${dragOver ? " composer--dragover" : ""}${disabled ? " composer--disabled" : ""}${shellModeActive ? " composer--shell" : ""}`}
           onDrop={onDrop}
@@ -2204,6 +2221,19 @@ export function Composer({
                 <KnowledgeSwitcher scope={ragScope} disabled={running} onPick={onPickRagScope} />
               </div>
             )}
+            {/* Level-1 background progress: latest phase as a quiet chip next
+                to the usage meter — zero extra height, never blocks typing. */}
+            {runningPhase && !paused && (
+              <div className="composer-meta__control composer-meta__control--phase">
+                <span className="composer-phase-chip" aria-live="polite">
+                  <Loader2 size={11} className="composer-phase__spin" />
+                  <span className="composer-phase-chip__text">{runningPhase}</span>
+                </span>
+              </div>
+            )}
+            <div className="composer-meta__control composer-meta__control--usage">
+              <UsageChip context={contextInfo} />
+            </div>
             {hasEffort && (
               <div className="composer-meta__control composer-meta__control--more">
                 <Tooltip label={t("composer.moreControls")} disabled={moreMenuOpen || moreMenuClosing}>

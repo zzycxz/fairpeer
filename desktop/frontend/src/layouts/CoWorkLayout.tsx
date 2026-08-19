@@ -17,6 +17,12 @@ export interface CoWorkLayoutProps {
   mainNode?: ReactNode;
   footerNode?: ReactNode;
   projectTreeNode?: ReactNode;
+  // "Recent" sessions section above the project tree (ui-redesign §4-B4) —
+  // App.tsx supplies the same SidebarSessions node used in the coding-mode
+  // sidebar so both modes share one interaction grammar. searchNode rides
+  // above it (the hoisted project-tree search box).
+  sessionsNode?: ReactNode;
+  searchNode?: ReactNode;
   rightDockOpen?: boolean;
   sidebarCollapsed?: boolean;
   onNewSession?: () => void;
@@ -59,6 +65,8 @@ export function CoWorkLayout({
   mainNode,
   footerNode,
   projectTreeNode,
+  sessionsNode,
+  searchNode,
   rightDockOpen = false,
   sidebarCollapsed = false,
   onNewSession,
@@ -172,6 +180,10 @@ export function CoWorkLayout({
             <SquarePen size={18} />
             <span>{t("cowork.newTask") || "新建任务"}</span>
           </button>
+
+          {searchNode}
+
+          {sessionsNode}
 
           <section className="sidebar__section sidebar__section--projects" style={{ marginBottom: '8px', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             {projectTreeNode}

@@ -535,7 +535,7 @@ function TodayView() {
             </div>
             <div>
               {unreadCount > 0 ? (
-                <span style={{ color: "#e84e3c", fontWeight: 600, fontSize: "12px" }}>{t("cowork.nUnread", { count: String(unreadCount) })}</span>
+                <span style={{ color: "var(--danger)", fontWeight: 600, fontSize: "12px" }}>{t("cowork.nUnread", { count: String(unreadCount) })}</span>
               ) : (
                 <span style={{ color: "var(--fg-faint)", fontSize: "12px" }}>{t("cowork.zeroUnread")}</span>
               )}

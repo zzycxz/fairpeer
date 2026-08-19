@@ -380,6 +380,9 @@ export interface AppBindings {
   // browserAttachURL in the cowork settings so browser_auto attaches to it.
   StartManagedBrowser(): Promise<ManagedBrowserStatus>;
   CheckManagedBrowser(): Promise<ManagedBrowserStatus>;
+  // OpenURLInManagedBrowser launches the managed browser if needed and opens
+  // the URL as a new tab in it (preview pane's companion-window tier).
+  OpenURLInManagedBrowser(url: string): Promise<ManagedBrowserStatus>;
   OpenPPTTemplateDir(): Promise<void>;
   PickPPTTemplate(): Promise<string>;
   SetBotSecret(envName: string, value: string): Promise<void>;
@@ -3853,6 +3856,10 @@ function makeMockApp(): AppBindings {
     },
     async CheckManagedBrowser() {
       return { running: false, url: "http://127.0.0.1:9222", browser: "", profile: "", alreadyRunning: false, detail: "browser dev mock" };
+    },
+    async OpenURLInManagedBrowser(_url: string) {
+      await delay(300);
+      return { running: true, url: "http://127.0.0.1:9222", browser: "Chrome (mock)", profile: "~/fairpeer/browser-profile", alreadyRunning: false };
     },
     async OpenPPTTemplateDir() {},
     async PickPPTTemplate() { return ""; },

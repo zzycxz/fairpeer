@@ -1,0 +1,668 @@
+/* chrome.css — app layout grid / sidebar base / topbar (ui-redesign phase A4 split; order-preserving) */
+.app {
+  position: relative;
+  /* Sidebar width lives on the root so siblings of .layout (the absolute
+     global-bottom-bar, which only covers the sidebar column) can track it,
+     including the collapsed state. */
+  --sidebar-width: var(--sidebar-expanded-width, clamp(200px, 14vw, 480px));
+  --bottom-bar-height: 36px;
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: hidden;
+}
+
+.app.app--sidebar-collapsed {
+  --sidebar-width: 0px;
+}
+
+.layout {
+  --workspace-width: 420px;
+  --workspace-resizer-width: 8px;
+  --app-chrome-height: 38px;
+  --topicbar-height: 36px;
+  --statusbar-height: 0px;
+  --chrome-toggle-size: 42px;
+  --chrome-left-safe-offset: 0px;
+  /* Chrome sits in column 2 (right of the sidebar), so the left toggle starts
+     at the chrome's own left edge. Narrow-window mode re-points this var. */
+  --chrome-left-toggle-offset: 0px;
+  --chrome-right-toggle-offset: 0px;
+  position: relative;
+  display: grid;
+  justify-content: start;
+  grid-template-rows: var(--app-chrome-height) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+  background: var(--bg);
+  transition: grid-template-columns 0.16s ease, min-width 0.16s ease;
+}
+
+.app--darwin .layout {
+  --app-chrome-height: 44px;
+  --chrome-toggle-size: 36px;
+  --chrome-left-safe-offset: 112px;
+  transition:
+    grid-template-columns 0.28s cubic-bezier(0.2, 0.72, 0.2, 1),
+    min-width 0.28s cubic-bezier(0.2, 0.72, 0.2, 1);
+}
+
+.layout--resizing {
+  cursor: col-resize;
+  transition: none;
+}
+.layout--resizing * {
+  user-select: none;
+}
+.layout--sidebar-collapsed {
+  --sidebar-width: 0px;
+  grid-template-columns: 0px minmax(0, 1fr);
+}
+.layout:not(.layout--sidebar-collapsed):not(.layout--workspace-open):not(.layout--workspace-maximized) {
+  grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr);
+}
+.layout--workspace-open {
+  /* No --chrome-right-toggle-offset here: the chrome now spans the chat AND
+     the dock (grid-column 2 / -1), so its right edge is the window edge. */
+  min-width: 0;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
+}
+.layout--workspace-open:not(.layout--sidebar-collapsed) {
+  min-width: 0;
+  grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
+}
+.layout--workspace-open.layout--sidebar-collapsed {
+  min-width: 0;
+  grid-template-columns: 0px minmax(0, 1fr) var(--workspace-resizer-width) minmax(0, var(--workspace-width));
+}
+.layout--workspace-maximized {
+  min-width: 0;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+}
+.layout--workspace-maximized.layout--sidebar-collapsed {
+  grid-template-columns: 0px minmax(0, 1fr);
+}
+.layout--workspace-maximized .chat-pane {
+  display: none;
+}
+.layout--workspace-maximized .workspace-panel-resizer {
+  display: none;
+}
+
+/* ZCode-style full-height sidebar: spans the chrome row too; the top bar only
+   covers the main area (column 2+). Brand row at the sidebar top keeps the
+   window drag strip continuous with the chrome row. */
+.sidebar {
+  --sidebar-entry-content-inset: 12px;
+  grid-row: 1 / span 2;
+  grid-column: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* Reserve room for the sidebar-only bottom bar overlaying this column. */
+  padding: 12px 10px calc(12px + var(--bottom-bar-height, 36px));
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border-soft);
+  --wails-draggable: drag;
+  user-select: none;
+  overflow: hidden;
+}
+
+.app--darwin .sidebar {
+  transform: translateX(0);
+  opacity: 1;
+  transition:
+    opacity 0.22s ease,
+    transform 0.28s cubic-bezier(0.2, 0.72, 0.2, 1),
+    padding 0.28s cubic-bezier(0.2, 0.72, 0.2, 1),
+    border-color 0.22s ease;
+}
+.sidebar button,
+.sidebar input,
+.sidebar select {
+  --wails-draggable: no-drag;
+}
+
+/* Sidebar brand row: full-bleed strip matching the chrome height so the top
+   divider runs across the window. Draggable (titlebar) since the sidebar root
+   carries --wails-draggable: drag and this is not a button/input. */
+.sidebar__brandrow {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: var(--app-chrome-height);
+  margin: -12px -10px 10px;
+  padding: 0 6px 0 14px;
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.sidebar__brandrow img {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+}
+
+.app--darwin .sidebar__brandrow {
+  padding-left: calc(var(--chrome-left-safe-offset) + 4px);
+}
+
+/* Sidebar collapse toggle in its default home: the brand row's right slot.
+   Reuses the chrome toggle markup/classes but flows inline instead of the
+   chrome's absolute 42px notch. */
+.sidebar__brandrow .app-chrome__panel-toggle {
+  position: static;
+  flex: 0 0 auto;
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+.sidebar__brandrow .app-chrome__panel-toggle:hover {
+  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
+}
+.sidebar__new,
+.sidebar__navitem {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  text-align: left;
+  transition: color 0.12s, background 0.12s;
+}
+.sidebar__new {
+  display: flex;
+  flex: 0 0 44px;
+  align-items: center;
+  gap: 9px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 var(--sidebar-entry-content-inset);
+  margin-bottom: 10px;
+  background: var(--grad);
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--accent-text);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--shadow-1);
+  /* Logo, CTA icon, and search icon share the same content inset; CTA stays visually stronger. */
+  transition:
+    color var(--dur-fast),
+    background var(--dur-fast),
+    box-shadow var(--dur-fast),
+    filter var(--dur-fast),
+    transform var(--dur-fast);
+}
+.sidebar__new:hover,
+.sidebar__navitem:hover {
+  background: var(--sidebar-hover);
+  color: var(--fg);
+}
+.sidebar__new:hover {
+  background: var(--grad);
+  color: var(--accent-text);
+  filter: saturate(1.08) brightness(1.03);
+  transform: translateY(-1px);
+}
+.sidebar__new:active {
+  transform: translateY(0) scale(0.99);
+}
+.sidebar__new:disabled,
+.sidebar__navitem:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.sidebar__new:disabled:hover,
+.sidebar__navitem:disabled:hover {
+  background: transparent;
+  color: var(--fg-dim);
+}
+.sidebar__new:disabled:hover {
+  background: var(--bg-elev);
+  color: var(--fg);
+  filter: none;
+  transform: none;
+  box-shadow: none;
+}
+.sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 0 0 auto;
+  padding: 8px 0 6px;
+  border-top: 1px solid var(--border-soft);
+}
+.sidebar__navitem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+.sidebar__section {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.sidebar-im-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--ok);
+  margin-left: auto;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 18%, transparent);
+}
+.sidebar--collapsed {
+  display: none;
+}
+
+.app--darwin .sidebar--collapsed {
+  display: flex;
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  padding-inline: 0;
+  border-right-color: transparent;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-18px);
+}
+
+.app--darwin .sidebar--collapsed > * {
+  visibility: hidden;
+}
+
+.app--darwin .sidebar--collapsed .sidebar__new,
+.app--darwin .sidebar--collapsed .sidebar__navitem {
+  justify-content: flex-start;
+  width: 100%;
+  padding: 0 10px;
+  gap: 9px;
+}
+
+.app--darwin .sidebar--collapsed .sidebar__new {
+  flex-basis: 36px;
+  height: 36px;
+  min-height: 36px;
+  border-radius: var(--radius-sm);
+}
+
+.app--darwin .sidebar--collapsed .sidebar__new span,
+.app--darwin .sidebar--collapsed .sidebar__navitem span {
+  display: inline;
+}
+
+.app--darwin .sidebar--collapsed .sidebar__nav {
+  align-items: stretch;
+  width: 100%;
+  padding: 10px 0 8px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.app--darwin .sidebar--collapsed .sidebar__section {
+  display: flex;
+}
+
+.sidebar--collapsed .sidebar__new,
+.sidebar--collapsed .sidebar__navitem {
+  justify-content: center;
+  width: 40px;
+  padding: 0;
+  gap: 0;
+}
+.sidebar--collapsed .sidebar__new {
+  flex-basis: 40px;
+  height: 40px;
+  min-height: 40px;
+  border-radius: var(--radius-md);
+}
+.sidebar--collapsed .sidebar__new span,
+.sidebar--collapsed .sidebar__navitem span {
+  display: none;
+}
+.sidebar--collapsed .sidebar__nav {
+  align-items: center;
+  width: 100%;
+  padding: 0 0 12px;
+  border-top: none;
+}
+.sidebar--collapsed .sidebar__section {
+  display: none;
+}
+.sidebar-resizer {
+  --wails-draggable: no-drag;
+  position: absolute;
+  top: 0;
+  bottom: var(--statusbar-height);
+  left: calc(var(--sidebar-width) - 4px);
+  z-index: var(--z-layout-resizer);
+  width: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+}
+.sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background 0.12s, box-shadow 0.12s;
+}
+.sidebar-resizer:hover::after,
+.sidebar-resizer:focus-visible::after,
+.layout--sidebar-resizing .sidebar-resizer::after {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.layout--sidebar-collapsed .sidebar-resizer {
+  display: none;
+}
+.workspace-panel-resizer {
+  --wails-draggable: no-drag;
+  position: relative;
+  grid-row: 2;
+  grid-column: 3;
+  align-self: stretch;
+  justify-self: stretch;
+  z-index: var(--z-layout-resizer-active);
+  width: auto;
+  min-width: var(--workspace-resizer-width);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+/* Dev layout: the grid-cell placement proved fragile (0-height/covered hit
+   area reports), so the direct-child resizer uses the same absolute anchoring
+   as the sidebar resizer, which demonstrably drags. The hit area straddles the
+   dock's left edge (2px into the dock) — that edge is the visible divider
+   users grab; anchoring to the resizer column instead misses by its full 8px.
+   Cowork renders its own copy deeper in the tree and keeps the grid behavior
+   via cowork.css. */
+.layout > .workspace-panel-resizer {
+  position: absolute;
+  grid-row: auto;
+  grid-column: auto;
+  align-self: auto;
+  justify-self: auto;
+  top: var(--app-chrome-height);
+  bottom: 0;
+  left: auto;
+  right: calc(var(--workspace-width, 420px) - 2px);
+  width: calc(var(--workspace-resizer-width, 8px) + 4px);
+  min-width: 0;
+  z-index: var(--z-app-chrome);
+}
+.workspace-panel-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* Anchor the visual line to the resizer's right edge (= the dock's left edge)
+     instead of centering it, so the line sits flush against the dock rather
+     than floating ~4px away in the middle of the 8px hit area. */
+  right: 0;
+  width: 1px;
+  background: var(--border-soft);
+  transition: background 0.12s, box-shadow 0.12s;
+}
+.workspace-panel-resizer:hover::after,
+.workspace-panel-resizer:focus-visible::after,
+.layout--workspace-resizing .workspace-panel-resizer::after {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.chat-pane {
+  position: relative;
+  grid-row: 2;
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  container-type: inline-size; /* reading column + composer padding follow the pane width (ui-redesign §4-B7) */
+  background: var(--chat-bg);
+}
+
+/* ── top bar (drag region) ───────────────────────────────────────────────── */
+.topbar {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 50px;
+  padding: 0 18px;
+  background: var(--chat-bg);
+  border-bottom: 1px solid var(--border-soft);
+  --wails-draggable: drag;
+  user-select: none;
+}
+.topbar__identity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  line-height: 1.25;
+  pointer-events: none;
+}
+.topbar__title {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+}
+.topbar__model {
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topbar__spacer {
+  flex: 1;
+}
+.topbar__actions {
+  display: none;
+  align-items: center;
+  gap: 8px;
+}
+.topbar__workspace-toggle {
+  display: inline-flex;
+}
+.chip {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: var(--button-small-height);
+  padding: 0 10px;
+  border: 1px solid var(--button-border);
+  background: var(--button-bg);
+  color: var(--button-muted-fg);
+  font: inherit;
+  font-size: var(--font-control-small);
+  font-weight: 500;
+  line-height: 1.25;
+  border-radius: var(--button-radius);
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.chip--icon {
+  width: var(--button-icon-size);
+  padding: 0;
+}
+.chip:hover {
+  color: var(--fg);
+  background: var(--button-bg-hover);
+  border-color: var(--button-border-hover);
+}
+.chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.chip:disabled:hover {
+  color: var(--button-muted-fg);
+  background: var(--button-bg);
+  border-color: var(--button-border);
+}
+.chip--on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+
+.modal-close-button {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--button-icon-size);
+  height: var(--button-icon-size);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--button-icon-radius, 8px);
+  background: transparent;
+  color: var(--fg-faint);
+  font: inherit;
+  line-height: 1;
+  transition:
+    color var(--dur-fast),
+    border-color var(--dur-fast),
+    background var(--dur-fast),
+    transform var(--dur-fast) var(--ease-out);
+}
+
+.modal-close-button:hover {
+  color: var(--fg);
+  border-color: var(--button-border);
+  background: color-mix(in srgb, var(--fg-faint) 8%, transparent);
+}
+
+.modal-close-button:active {
+  transform: scale(0.94);
+  background: color-mix(in srgb, var(--fg-faint) 14%, transparent);
+}
+
+.modal-close-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 52%, transparent);
+  outline-offset: 2px;
+}
+
+.modal-close-button:disabled {
+  opacity: 0.4;
+}
+
+.banner {
+  flex: 0 0 auto;
+  padding: 8px 16px;
+  font-size: var(--font-control-small);
+}
+.banner--error {
+  background: var(--del-bg);
+  color: var(--err);
+  border-bottom: 1px solid var(--border-soft);
+}
+.banner--success {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-soft));
+  color: var(--accent);
+  border-bottom: 1px solid var(--border-soft);
+}
+.banner--update {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--accent-soft);
+  color: var(--fg);
+  border-bottom: 1px solid var(--border-soft);
+}
+.banner--update.banner--error {
+  background: var(--del-bg);
+  color: var(--err);
+  border-bottom-color: color-mix(in srgb, var(--err) 24%, var(--border-soft));
+}
+.banner--actionable {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.banner__msg {
+  min-width: 0;
+  font-weight: 500;
+}
+.banner--actionable .banner__msg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.banner__hint {
+  color: var(--fg-dim);
+  font-size: var(--font-caption);
+}
+.banner__spacer {
+  flex: 1 1 auto;
+}
+.banner--actionable .btn {
+  flex: 0 0 auto;
+}
+.banner__progress {
+  width: 180px;
+  height: 8px;
+  accent-color: var(--accent);
+}
+
+
+/* ── sidebar recent sessions (ui-redesign §4-B4) ── */
+.side-sessions { padding: 2px 0 4px; }
+/* Head mirrors .project-tree__header / -title so both sidebar groups read as
+   one family (user direction 2026-08-18). */
+.side-sessions__label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-faint); user-select: none; }
+.side-sessions__empty { font-size: 12px; color: var(--fg-faint); padding: 2px 12px 6px; }
+.side-sessions__row { display: flex; align-items: center; gap: 7px; padding: 4px 10px 4px 12px; border-radius: var(--radius-sm); font-size: 12.5px; cursor: pointer; color: var(--fg-dim); }
+.side-sessions__row:hover { background: var(--sidebar-hover); color: var(--fg); }
+.side-sessions__row--active { color: var(--fg); }
+.side-sessions__dot { width: 5px; height: 5px; border-radius: var(--radius-pill); background: var(--accent); flex: 0 0 auto; }
+.side-sessions__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-sessions__age { font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.side-sessions__more { display: none; align-items: center; border: none; background: transparent; color: var(--fg-dim); padding: 2px; border-radius: var(--radius-sm); cursor: pointer; flex: 0 0 auto; }
+.side-sessions__row:hover .side-sessions__age { display: none; }
+.side-sessions__row:hover .side-sessions__more { display: inline-flex; }
+.side-sessions__more:hover { background: var(--bg-elev-2); color: var(--fg); }
+.side-sessions__rename { width: 100%; font: inherit; font-size: 12.5px; padding: 4px 8px; margin: 2px 0; border-radius: var(--radius-sm); border: 1px solid var(--accent); background: var(--bg-elev); color: var(--fg); outline: none; }
+/* Scrollable recent box: up to 20 rows, viewport ~11 rows tall. */
+.side-sessions__scroll { max-height: 300px; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 2px; }
+.sidebar-files-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; border: none; background: transparent; color: var(--fg-faint); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; padding: 8px 12px 4px; cursor: pointer; user-select: none; }
+.sidebar-files-toggle:hover { color: var(--fg-dim); }
+.sidebar-files-toggle__chev--closed { transform: rotate(-90deg); }
+
+.sidebar-search { margin: 0 8px 8px; }
+
+.side-sessions__head { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 20px; background: transparent; border: none; padding: 4px 8px 0; color: var(--fg-faint); cursor: pointer; }
+.side-sessions__head:hover .side-sessions__label { color: var(--fg-dim); }
+.side-sessions__chev--closed { transform: rotate(-90deg); color: var(--fg-faint); }
+.project-tree__topic-spinner { animation: tool-status-spin 0.8s linear infinite; }
+.project-tree__topic-status { display: inline-flex; align-items: center; }
+.project-tree__topic-unseen { display: inline-block; width: 6px; height: 6px; border-radius: var(--radius-pill); background: #4c8dff; flex: 0 0 auto; }

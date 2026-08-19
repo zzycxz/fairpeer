@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { CalendarDays, Code2, Minus, Network, PanelLeft, PanelRight, Square, X } from "lucide-react";
+import { CalendarDays, Code2, Command, Minus, Network, PanelLeft, PanelRight, Square, TerminalSquare, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { TabMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
@@ -33,6 +33,12 @@ interface AppChromeProps {
   // chrome's center slot — the ZCode single-header pattern. Null for profiles
   // (cowork/netdev) whose layouts render their own header.
   center?: ReactNode;
+  // Terminal console toggle (Ctrl+`) — the button rides left of the workspace
+  // toggle; the panel itself mounts under the composer in App.
+  terminalOpen?: boolean;
+  onToggleTerminal?: () => void;
+  // Command palette (⌘K / Ctrl+K) — icon button in the right cluster.
+  onOpenPalette?: () => void;
   // Product profile (dev/cowork). profile is the active tab's mode; onSwitchProfile
   // rebuilds the controller with the new profile's bundle.
   profile: string;
@@ -47,6 +53,9 @@ export function AppChrome({
   platform,
   browserPreviewChrome,
   center,
+  terminalOpen,
+  onToggleTerminal,
+  onOpenPalette,
   sidebarTogglePressed,
   sidebarExpandBlocked,
   sidebarCollapsed,
@@ -90,7 +99,10 @@ export function AppChrome({
         </div>
       )}
       {darwinChrome && <span className="app-chrome__drag-rail" aria-hidden="true" />}
-      {!modeChrome && (
+      {/* Sidebar-expanded: the toggle lives in the sidebar brand row
+          (App.tsx). The chrome copy only exists while the sidebar is
+          collapsed, where it anchors the chrome's left edge. */}
+      {!modeChrome && sidebarCollapsed && (
       <button
         className={[
           "app-chrome__panel-toggle",
@@ -124,6 +136,32 @@ export function AppChrome({
         </>
       )}
 
+      {/* Command palette (⌘K): icon-only, same grammar as its neighbours. */}
+      {!modeChrome && onOpenPalette && (
+        <button
+          className="app-chrome__palette-toggle"
+          type="button"
+          onClick={onOpenPalette}
+          aria-label={t("topicBar.command")}
+          title={t("topicBar.command")}
+        >
+          <Command size={16} />
+        </button>
+      )}
+      {/* Terminal toggle (Ctrl+`): sits left of the workspace toggle, matching
+          its icon grammar (16px lucide, same hover/active treatment). */}
+      {!modeChrome && onToggleTerminal && (
+        <button
+          className={`app-chrome__terminal-toggle${terminalOpen ? " app-chrome__terminal-toggle--active" : ""}`}
+          type="button"
+          onClick={onToggleTerminal}
+          aria-label={t("terminal.toggleTitle")}
+          title={t("terminal.toggleTitle")}
+          aria-pressed={terminalOpen}
+        >
+          <TerminalSquare size={16} />
+        </button>
+      )}
       {!modeChrome && !workspacePanelMaximized && (
         <button
           className={[

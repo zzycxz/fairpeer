@@ -183,7 +183,7 @@ function providerLabel(provider: string): string {
     case "minimax":       return "MiniMax";
     case "zai":           return "Z.ai";
     case "deepseek":      return "DeepSeek";
-    case "moonshot":      return "月之暗面";
+    case "moonshot":      return "Moonshot";
     default:              return provider;
   }
 }

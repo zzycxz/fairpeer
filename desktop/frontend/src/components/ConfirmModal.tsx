@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
+import { useT } from "../lib/i18n";
 
 // ConfirmModal is a small, app-styled confirmation dialog that replaces the
 // jarring native window.confirm(). It reuses the rag-create-overlay/modal look
@@ -11,8 +12,8 @@ import { AlertTriangle } from "lucide-react";
 export function ConfirmModal({
   title,
   message,
-  confirmLabel = "确认删除",
-  cancelLabel = "取消",
+  confirmLabel,
+  cancelLabel,
   danger = true,
   onConfirm,
   onClose,
@@ -25,6 +26,9 @@ export function ConfirmModal({
   onConfirm: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
+  const confirmText = confirmLabel ?? t("common.delete");
+  const cancelText = cancelLabel ?? t("common.cancel");
   // ESC dismisses (cancel) — mirrors ImportModal/AnchoredPopover behavior.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -54,8 +58,8 @@ export function ConfirmModal({
                 width: 32,
                 height: 32,
                 borderRadius: 8,
-                background: danger ? "rgba(239, 68, 68, 0.12)" : "rgba(59, 130, 246, 0.12)",
-                color: danger ? "#ef4444" : "#3b82f6",
+                background: danger ? "var(--danger-soft)" : "var(--accent-soft)",
+                color: danger ? "var(--danger)" : "var(--accent)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -75,7 +79,7 @@ export function ConfirmModal({
               onClick={onClose}
               style={{ fontSize: 12.5, padding: "7px 14px", borderRadius: 8 }}
             >
-              {cancelLabel}
+              {cancelText}
             </button>
             <button
               type="button"
@@ -83,7 +87,7 @@ export function ConfirmModal({
               onClick={handleConfirm}
               style={{ fontSize: 12.5, padding: "7px 14px", borderRadius: 8, fontWeight: 600 }}
             >
-              {confirmLabel}
+              {confirmText}
             </button>
           </div>
         </div>

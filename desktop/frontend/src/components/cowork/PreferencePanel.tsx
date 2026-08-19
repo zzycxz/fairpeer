@@ -14,7 +14,7 @@
 // session too, then folds it into the cache-stable prefix next session.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
+import { Ban, Check, Copy, Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
 
 import { ConfirmModal } from "../ConfirmModal";
 import { app } from "../../lib/bridge";
@@ -151,7 +151,10 @@ export function PreferencePanel({
     const gone = pendingDelete.id;
     const next = items.filter(i => i.id !== gone);
     setItems(next);
-    if (active === gone) setActive(next[0]?.id ?? "");
+    // Deleting the in-use preset clears the selection (none in use) rather than
+    // silently activating a leftover template — behaviour only changes on the
+    // user's explicit next choice.
+    if (active === gone) setActive("");
     if (selectedId === gone) setSelectedId(next[0]?.id ?? "");
     setPendingDelete(null);
   };
@@ -281,10 +284,21 @@ export function PreferencePanel({
                   />
                   <div className="preference-preset-editor__actions">
                     {selected.id === active ? (
-                      <span className="preference-preset-editor__inuse">
-                        <Check size={13} />
-                        {t("preference.inUse")}
-                      </span>
+                      <>
+                        <span className="preference-preset-editor__inuse">
+                          <Check size={13} />
+                          {t("preference.inUse")}
+                        </span>
+                        <button
+                          className="btn btn--small"
+                          onClick={() => setActive("")}
+                          type="button"
+                          title={t("preference.clearUseHint")}
+                        >
+                          <Ban size={13} />
+                          {t("preference.clearUse")}
+                        </button>
+                      </>
                     ) : (
                       <button className="btn btn--small" onClick={() => setActive(selected.id)} type="button">
                         <Check size={13} />

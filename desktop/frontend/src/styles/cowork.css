@@ -1,0 +1,6013 @@
+/* cowork.css — toast / automation / RAG / expert panel / cheatsheet (ui-redesign phase A4 split; order-preserving) */
+/* ── Toast ──────────────────────────────────────────────────────────── */
+.toast-container {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  position: relative;
+  overflow: hidden;
+  pointer-events: auto;
+  cursor: pointer;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 20px;
+  font-size: 14px;
+  color: var(--fg);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: toast-in 0.2s ease-out;
+  user-select: none;
+}
+.toast--warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.toast--error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.toast__icon {
+  flex: 0 0 auto;
+  line-height: 1;
+  font-size: 14px;
+}
+.toast__text {
+  line-height: 1.4;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* =========================================================================
+   coWork (office) mode — profile-switched layout
+   The profile toggle in the chrome flips the active tab between dev and
+   cowork. In cowork mode the standard three-pane body (sidebar + chat-pane +
+   workbench-dock) is hidden via .app--cowork, and a CoWorkLayout (three office
+   panes) renders in its place. Phase 0: the cowork panes are skeletons.
+   ========================================================================= */
+
+/* When cowork is active, hide the standard layout body. AppChrome stays visible
+   so tabs, the profile toggle, and panel toggles remain usable. The CoWorkLayout
+   component renders its own grid as a sibling of these hidden elements. */
+.app--cowork .sidebar,
+.app--cowork .sidebar-resizer,
+.app--cowork .chat-pane,
+.app--cowork .workspace-panel-resizer,
+.app--cowork .workbench-dock {
+  display: none;
+}
+
+/* The cowork layout grid: left library / center task board / right artifacts.
+   It sits in the same .layout grid cell as the hidden standard body. */
+.cowork-layout {
+  grid-row: 2 / -1;
+  grid-column: 1 / -1;
+  display: grid;
+  /* sidebar | main | resizer | dock — the resizer column sits between main and
+     the dock so the workspace-panel-resizer (a relative-positioned grid item,
+     mirroring coding-mode) can be dragged to resize the dock. When the dock /
+     resizer are not rendered the trailing auto tracks collapse to nothing. */
+  grid-template-columns: var(--sidebar-width, 260px) minmax(0, 1fr) var(--workspace-resizer-width, 8px) auto;
+  /* Pin the single row to the container's height. Without this the implicit
+     row track defaults to `auto` (sized by content), so a tall ExpertPanel or
+     ExpertSessionView stretches the row past the viewport and the inner
+     overflow-y:auto surfaces never engage — the content overflows the window
+     instead of scrolling inside its panel. minmax(0,1fr) clamps the track to
+     the grid container's height so children with min-height:0 + overflow scroll
+     correctly. */
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+  /* Mirror the coding-mode .layout: animate grid column changes so collapsing
+     / expanding the sidebar slides smoothly instead of snapping. */
+  transition: grid-template-columns 0.16s ease;
+}
+
+.cowork-layout--sidebar-collapsed {
+  grid-template-columns: 0px minmax(0, 1fr) var(--workspace-resizer-width, 8px) auto;
+}
+
+/* The workspace-panel-resizer is shared with coding mode. The .app--cowork rule
+   above hides the coding-mode resizer (display:none) along with the rest of the
+   dev layout — but the cowork dock renders its OWN resizer with the same class
+   inside .cowork-layout, so we must re-show it here. Specificity ties with the
+   .app--cowork rule (0,2,0) and this comes later in source, so it wins. */
+.cowork-layout .workspace-panel-resizer {
+  display: block;
+  grid-row: 1;
+  grid-column: 3;
+  /* align-self:stretch fills the single cowork content row — the resizer has no
+     children, so without this it collapses to ~0px height and is unclickable. */
+  align-self: stretch;
+}
+
+/* Same situation for the left sidebar-resizer: .app--cowork hides the coding-
+   mode one, so cowork renders its own (absolute-positioned, same class). Re-
+   show it; left/top still come from the shared .sidebar-resizer rule
+   (left:calc(var(--sidebar-width) - 4px), top:var(--app-chrome-height)). */
+.cowork-layout .sidebar-resizer {
+  display: block;
+}
+
+:root[data-theme-style] .cowork-dock {
+  width: var(--workspace-width, 320px);
+  background: var(--bg);
+  border-left: 1px solid var(--border-soft);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+:root[data-theme-style] .cowork-sidebar {
+  --sidebar-entry-content-inset: 12px;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border-soft);
+  min-height: 0;
+  /* min-width:0 lets the grid shrink this column to 0 on collapse (mirrors the
+     coding-mode .sidebar); otherwise min-width:auto would keep it at the
+     content's intrinsic width and break the collapse animation. */
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 12px 0;
+  /* Pin to grid column 1 so the main/dock columns keep their slots even when
+     the sidebar is conditionally removed from the DOM on collapse. Without an
+     explicit column, auto-placement would drop cowork-main into the 0px-wide
+     collapsed column and it would visually vanish. */
+  grid-row: 1;
+  grid-column: 1;
+}
+
+:root[data-theme-style] .cowork-sidebar__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  /* Reserve the sidebar-only bottom bar's strip — without this the pinned
+     办公偏好/日历/专家团/知识库 group sits under the bar (2026-08-19). */
+  padding-bottom: calc(8px + var(--bottom-bar-height, 36px));
+}
+
+:root[data-theme-style] .cowork-sidebar .sidebar__nav {
+  flex-shrink: 0;
+  padding-bottom: calc(8px + var(--bottom-bar-height, 36px));
+}
+
+/* Pinned bottom nav (办公偏好/日历/专家团/知识库): never shrink — taller
+   session/tree content must scroll inside its own section instead of
+   squeezing this group out of view (regression 2026-08-18). */
+.cowork-sidebar__scroll .cowork-sidebar__group {
+  flex: 0 0 auto;
+}
+
+:root[data-theme-style] .cowork-main {
+  background: var(--chat-bg);
+  min-height: 0;
+  height: 100%;
+  /* Pin to grid column 2 so it never lands in the sidebar's (possibly 0px)
+     column when the sidebar is conditionally unmounted on collapse. */
+  grid-row: 1;
+  grid-column: 2;
+  /* Hidden, not auto: this is a layout shell (header + transcript + composer)
+     whose height is already pinned by the .cowork-layout grid. Letting it
+     scroll stole wheel events from the inner .cowork-main__transcript (the real
+     scroll surface), so the transcript's scrollbar ignored the mouse wheel. The
+     inner region keeps overflow-y:auto + flex:1 + min-height:0 and owns the
+     scroll. */
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+:root[data-theme-style] .cowork-dock {
+  background: var(--bg-elev);
+  border-left: 1px solid var(--border-soft);
+  min-height: 0;
+  /* Pin to grid column 4 (after sidebar=1, main=2, resizer=3) so it keeps its
+     slot regardless of which siblings are mounted. */
+  grid-row: 1;
+  grid-column: 4;
+  /* The dock owns its layout (tools + body); no outer padding/scroll — the
+     body scrolls internally so the tab strip stays pinned. Mirrors the
+     coding-mode workbench-dock. */
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Tab strip — mirrors .workbench-dock__tools/__tabs/__tab so the two docks
+   read as the same control. */
+:root[data-theme-style] .cowork-dock__tools {
+  flex: 0 0 auto;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 7px 10px 3px;
+  border-bottom: 1px solid transparent;
+}
+
+:root[data-theme-style] .cowork-dock__tabs {
+  flex: 0 1 auto;
+  width: max-content;
+  max-width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+}
+
+:root[data-theme-style] .cowork-dock__tab {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: 0 1 auto;
+  min-width: 30px;
+  max-width: 118px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-faint);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 560;
+  cursor: pointer;
+}
+
+:root[data-theme-style] .cowork-dock__tab svg {
+  flex: 0 0 auto;
+}
+
+:root[data-theme-style] .cowork-dock__tab-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+:root[data-theme-style] .cowork-dock__tab:hover {
+  color: var(--fg-dim);
+}
+
+:root[data-theme-style] .cowork-dock__tab--active {
+  background: var(--bg-elev);
+  color: var(--fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+}
+
+/* Body fills the remaining height; each tab owns its own scroll. */
+:root[data-theme-style] .cowork-dock__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+:root[data-theme-style] .cowork-dock__loading {
+  padding: 16px 14px;
+  color: var(--fg-faint);
+  font-size: 13px;
+}
+
+/* --- 今日 (today) tab ---------------------------------------------------- */
+:root[data-theme-style] .cowork-today {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+:root[data-theme-style] .cowork-today__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+:root[data-theme-style] .cowork-today__heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+:root[data-theme-style] .cowork-today__heading svg {
+  flex: 0 0 auto;
+}
+
+:root[data-theme-style] .cowork-today__empty {
+  color: var(--fg-faint);
+  font-size: 12.5px;
+  padding: 2px 2px;
+}
+
+:root[data-theme-style] .cowork-today__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+:root[data-theme-style] .cowork-today__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+}
+
+:root[data-theme-style] .cowork-today__row:hover {
+  background: var(--bg);
+}
+
+:root[data-theme-style] .cowork-today__time {
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  min-width: 38px;
+}
+
+:root[data-theme-style] .cowork-today__dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+:root[data-theme-style] .cowork-today__dot--plain {
+  background: var(--fg-faint);
+  opacity: 0.5;
+}
+
+:root[data-theme-style] .cowork-today__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg-dim);
+}
+
+/* Count badge after the "今日待办" heading — shows total items at a glance. */
+:root[data-theme-style] .cowork-today__heading-count {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+  color: var(--fg-faint);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* Kind + output badges sit at the row's right edge, after the (growing) title.
+   kind distinguishes 📅 calendar events from ⚡ scheduled tasks inside the
+   unified list; out marks IM/email push routing. */
+:root[data-theme-style] .cowork-today__kind,
+:root[data-theme-style] .cowork-today__out {
+  flex: 0 0 auto;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+:root[data-theme-style] .cowork-today__mailrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  font-size: 12.5px;
+}
+
+:root[data-theme-style] .cowork-today__mailtext {
+  color: var(--fg-dim);
+}
+
+:root[data-theme-style] .cowork-today__badge {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  color: var(--fg-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme-style] .cowork-today__hint {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  color: var(--fg-faint);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Generic empty-state for dock tabs (no-workspace file tab, unconfigured mail
+   tab): centered icon + message + hint, same look as WorkspacePanel's empty. */
+:root[data-theme-style] .cowork-dock__empty-state {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 30px 20px;
+  text-align: center;
+  color: var(--fg-faint);
+}
+
+:root[data-theme-style] .cowork-dock__empty-state svg {
+  opacity: 0.5;
+}
+
+:root[data-theme-style] .cowork-dock__empty-state p {
+  margin: 0;
+  font-size: 13px;
+}
+
+:root[data-theme-style] .cowork-dock__empty-hint {
+  font-size: 11.5px !important;
+  opacity: 0.8;
+  line-height: 1.5;
+}
+
+/* --- 邮件 (mail) tab ---------------------------------------------------- */
+:root[data-theme-style] .cowork-mailtab {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+:root[data-theme-style] .cowork-mailtab__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+:root[data-theme-style] .cowork-mailtab__status {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+:root[data-theme-style] .cowork-mailtab__refresh {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+
+:root[data-theme-style] .cowork-mailtab__refresh:hover {
+  background: var(--bg);
+  color: var(--fg-dim);
+}
+/* Inbox / Sent folder switch tabs. */
+:root[data-theme-style] .cowork-mailtab__folders {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+:root[data-theme-style] .cowork-mailtab__folder {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+:root[data-theme-style] .cowork-mailtab__folder--active {
+  color: var(--fg);
+  background: var(--bg-soft);
+  border-color: var(--accent);
+}
+
+:root[data-theme-style] .cowork-mailtab__list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 6px 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+:root[data-theme-style] .cowork-mailtab__item {
+  padding: 8px 9px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+:root[data-theme-style] .cowork-mailtab__item:hover {
+  background: var(--bg);
+}
+
+:root[data-theme-style] .cowork-mailtab__item--open {
+  background: var(--bg);
+}
+
+:root[data-theme-style] .cowork-mailtab__item-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+:root[data-theme-style] .cowork-mailtab__from {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+:root[data-theme-style] .cowork-mailtab__date {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme-style] .cowork-mailtab__subject {
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+:root[data-theme-style] .cowork-mailtab__preview {
+  margin-top: 6px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+/* --- CoWork 2.0 智能行政决策卡与邮件协同操作杠 --- */
+:root[data-theme-style] .cowork-today__briefing {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, var(--bg) 0%, var(--bg-elev) 100%);
+  border: 1px solid var(--border-soft);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+:root[data-theme-style] .cowork-today__briefing-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+  gap: 6px;
+}
+
+:root[data-theme-style] .cowork-today__briefing-body {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-dim);
+  background: var(--bg);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle, var(--border-soft));
+}
+
+:root[data-theme-style] .cowork-today__briefing-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+:root[data-theme-style] .cowork-mailtab__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-soft);
+}
+
+:root[data-theme-style] .cowork-mailtab__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  color: var(--fg-dim);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+:root[data-theme-style] .cowork-mailtab__btn:hover {
+  background: var(--btn-hover-bg, var(--border-soft));
+  color: var(--fg);
+  border-color: var(--fg-faint);
+}
+
+:root[data-theme-style] .cowork-sidebar__group,
+:root[data-theme-style] .cowork-dock__group {
+  margin-bottom: 12px;
+}
+
+:root[data-theme-style] .cowork-sidebar__group h3,
+:root[data-theme-style] .cowork-dock__group h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 4px 4px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--fg-dim);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+:root[data-theme-style] .cowork-main__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+:root[data-theme-style] .cowork-main__header h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--fg-dim);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Right-aligned action group in the cowork header: screenshot + copy/export.
+   Mirrors the topicbar actions so Copy/Export are reachable in CoWork mode
+   (where .chat-pane, which holds the topicbar, is display:none). */
+:root[data-theme-style] .cowork-main__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+:root[data-theme-style] .cowork-empty {
+  color: var(--fg-faint);
+  font-size: 13px;
+}
+
+:root[data-theme-style] .cowork-sidebar__item {
+  --wails-draggable: no-drag;
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+:root[data-theme-style] .cowork-sidebar__item:hover {
+  background: var(--sidebar-hover);
+  color: var(--fg);
+}
+
+:root[data-theme-style] .cowork-sidebar__item:active {
+  transform: scale(0.97);
+}
+
+:root[data-theme-style] .cowork-sidebar__item--active {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+:root[data-theme-style] .cowork-sidebar__item--active::before {
+  display: none;
+}
+
+:root[data-theme-style] .cowork-empty-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--fg-faint);
+  text-align: center;
+}
+
+:root[data-theme-style] .cowork-empty-panel h2 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: 8px;
+}
+
+
+:root[data-theme-style] .cowork-main__analysis {
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  color: var(--fg);
+  margin: 12px 20px 0;
+}
+
+:root[data-theme-style] .cowork-main__transcript {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+:root[data-theme-style] .cowork-main__transcript > * {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+/* === coWork automation panel (定时任务) ======================================
+   Layout: AutomationPanel owns a header (title + "New Task") and a scrollable
+   body. Body has an optional template quick-pick row, then the task-card list.
+   TaskForm and RunHistory are overlays/drawers layered above. */
+
+:root[data-theme-style] .cowork-automation {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+:root[data-theme-style] .cowork-automation__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+:root[data-theme-style] .cowork-automation__templates {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+}
+
+:root[data-theme-style] .cowork-automation__templates-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--fg-faint);
+  margin-right: 4px;
+}
+
+:root[data-theme-style] .cowork-automation__template {
+  --wails-draggable: no-drag;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  border-radius: var(--radius-pill);
+  padding: 3px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: default;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+:root[data-theme-style] .cowork-automation__template:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+:root[data-theme-style] .cowork-automation__count {
+  font-size: 12px;
+  color: var(--fg-faint);
+  padding: 0 2px;
+}
+
+:root[data-theme-style] .cowork-automation__empty,
+:root[data-theme-style] .cowork-automation__loading {
+  color: var(--fg-faint);
+  font-size: 13px;
+  padding: 40px 12px;
+  text-align: center;
+}
+
+:root[data-theme-style] .cowork-automation__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* --- TaskCard -------------------------------------------------------------- */
+
+:root[data-theme-style] .cowork-task-card {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  padding: 10px 12px;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+:root[data-theme-style] .cowork-task-card:hover {
+  border-color: var(--border);
+}
+
+:root[data-theme-style] .cowork-task-card--paused {
+  opacity: 0.62;
+}
+
+:root[data-theme-style] .cowork-task-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+:root[data-theme-style] .cowork-task-card__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+:root[data-theme-style] .cowork-task-card__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+  flex-shrink: 0;
+}
+
+:root[data-theme-style] .cowork-task-card__dot--on {
+  background: var(--ok);
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.6);
+}
+
+:root[data-theme-style] .cowork-task-card__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:root[data-theme-style] .cowork-task-card__badge {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  border: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+
+:root[data-theme-style] .cowork-task-card__badge--muted {
+  color: var(--fg-faint);
+}
+.cowork-task-card__badge--calendar {
+  background: rgba(68, 136, 255, 0.12);
+  color: var(--primary, #4488ff);
+}
+
+:root[data-theme-style] .cowork-task-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+:root[data-theme-style] .cowork-task-card__btn {
+  --wails-draggable: no-drag;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  border-radius: var(--radius-sm);
+  cursor: default;
+  transition: background 0.12s, color 0.12s;
+}
+
+:root[data-theme-style] .cowork-task-card__btn:hover {
+  background: var(--bg-elev-2);
+  color: var(--fg);
+}
+
+:root[data-theme-style] .cowork-task-card__btn--danger:hover {
+  background: rgba(239, 68, 68, 0.16);
+  color: var(--danger);
+}
+
+:root[data-theme-style] .cowork-task-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  flex-wrap: wrap;
+}
+
+:root[data-theme-style] .cowork-task-card__schedule {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg);
+}
+
+:root[data-theme-style] .cowork-task-card__nextrun {
+  color: var(--accent);
+}
+:root[data-theme-style] .cowork-task-card__countdown {
+  color: var(--fg-faint);
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+:root[data-theme-style] .cowork-task-card__footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--fg-faint);
+  flex-wrap: wrap;
+}
+
+:root[data-theme-style] .cowork-task-card__lastresult {
+  cursor: default;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:root[data-theme-style] .cowork-task-card__lastresult:hover {
+  color: var(--fg-dim);
+}
+
+:root[data-theme-style] .cowork-task-card__result {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* Delivery-failure banner: agent ran but IM/email/file push failed. Amber tone
+   to distinguish from a hard run error (red) — the task itself is healthy, only
+   the destination didn't receive it. */
+:root[data-theme-style] .cowork-task-card__deliver-fail {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--warn);
+  cursor: help;
+}
+
+:root[data-theme-style] .cowork-task-card__deliver-fail-reason {
+  color: var(--fg-dim);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- TaskForm (modal) ------------------------------------------------------ */
+
+:root[data-theme-style] .cowork-taskform-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+}
+
+:root[data-theme-style] .cowork-taskform {
+  width: min(560px, 92vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+:root[data-theme-style] .cowork-taskform__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+:root[data-theme-style] .cowork-taskform__head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--fg);
+}
+
+:root[data-theme-style] .cowork-taskform__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+:root[data-theme-style] .cowork-taskform__label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+:root[data-theme-style] .cowork-taskform__label--top {
+  align-items: stretch;
+}
+
+:root[data-theme-style] .cowork-taskform__labeltext {
+  font-size: 12px;
+  color: var(--fg-dim);
+  font-weight: 500;
+}
+
+:root[data-theme-style] .cowork-taskform__input {
+  --wails-draggable: no-drag;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+:root[data-theme-style] .cowork-taskform__input:focus {
+  border-color: var(--accent);
+}
+
+:root[data-theme-style] .cowork-taskform__textarea {
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+  min-height: 90px;
+  outline: none;
+}
+
+:root[data-theme-style] .cowork-taskform__textarea:focus {
+  border-color: var(--accent);
+}
+
+:root[data-theme-style] .cowork-taskform__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+:root[data-theme-style] .cowork-taskform__templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+:root[data-theme-style] .cowork-taskform__template {
+  --wails-draggable: no-drag;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  border-radius: var(--radius-pill);
+  padding: 3px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: default;
+}
+
+:root[data-theme-style] .cowork-taskform__template:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+:root[data-theme-style] .cowork-taskform__quicks {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+:root[data-theme-style] .cowork-taskform__quick {
+  --wails-draggable: no-drag;
+  border: 1px solid var(--border-soft);
+  background: transparent;
+  color: var(--fg-dim);
+  border-radius: var(--radius-sm);
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: default;
+}
+
+:root[data-theme-style] .cowork-taskform__quick:hover {
+  background: var(--bg-elev-2);
+  color: var(--fg);
+}
+
+/* Two-column time input row: natural-language phrase (left, grows) + manual
+   datetime picker (right, fixed). Mirrors the "颜色与地点" two-column layout. */
+:root[data-theme-style] .cowork-taskform__time-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* The datetime picker inherits cowork-taskform__input theming; these extras
+   handle the disabled state (recurring tasks) and keep its width tidy. */
+:root[data-theme-style] .cowork-taskform__picker:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Hint shown when the picker is disabled for a recurring expression. */
+:root[data-theme-style] .cowork-taskform__picker-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+:root[data-theme-style] .cowork-taskform__preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  color: var(--fg-dim);
+  flex-wrap: wrap;
+}
+
+:root[data-theme-style] .cowork-taskform__preview--unknown {
+  color: var(--fg-faint);
+}
+
+:root[data-theme-style] .cowork-taskform__preview-time {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+:root[data-theme-style] .cowork-taskform__preview-note {
+  color: var(--fg-faint);
+}
+
+/* Smart-parse button — only appears in the preview row when the regex path
+   failed, as the sole on-demand trigger for the 迅捷任务模型. */
+:root[data-theme-style] .cowork-taskform__smart-btn {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+:root[data-theme-style] .cowork-taskform__smart-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+:root[data-theme-style] .cowork-taskform__smart-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 纯提醒 toggle row — a checkbox + label + dynamic hint, sitting under the
+   Action textarea. Visually compact so it doesn't dominate the form. */
+:root[data-theme-style] .cowork-taskform__plain-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  margin-top: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  cursor: pointer;
+  --wails-draggable: no-drag;
+}
+:root[data-theme-style] .cowork-taskform__plain-toggle input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+:root[data-theme-style] .cowork-taskform__plain-hint {
+  flex: 1 1 100%;
+  font-size: 11px;
+  color: var(--fg-faint);
+  line-height: 1.4;
+}
+
+/* Warning banner for the email-mode "this looks like a send-email directive"
+   case — surfaces the dual-path conflict and offers a one-click fix. */
+:root[data-theme-style] .cowork-taskform__warn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  margin-top: 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(240, 136, 62, 0.1);
+  border: 1px solid rgba(240, 136, 62, 0.4);
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+:root[data-theme-style] .cowork-taskform__warn-btn {
+  --wails-draggable: no-drag;
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 600;
+}
+:root[data-theme-style] .cowork-taskform__warn-btn:hover {
+  opacity: 0.9;
+}
+
+:root[data-theme-style] .cowork-taskform__delivery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+:root[data-theme-style] .cowork-taskform__delivery-opt {
+  --wails-draggable: no-drag;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  border-radius: var(--radius-sm);
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: default;
+}
+
+:root[data-theme-style] .cowork-taskform__delivery-opt--active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* IM / email destination pickers (task form). */
+:root[data-theme-style] .cowork-taskform__im-picker,
+:root[data-theme-style] .cowork-taskform__email-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+:root[data-theme-style] .cowork-taskform__im-row {
+  display: flex;
+  gap: 8px;
+}
+
+:root[data-theme-style] .cowork-taskform__im-row .cowork-taskform__label {
+  flex: 1;
+}
+
+:root[data-theme-style] .cowork-taskform__im-empty {
+  font-size: 12px;
+  color: var(--fg-faint);
+  padding: 6px 0;
+}
+
+:root[data-theme-style] .cowork-taskform__im-hint {
+  font-size: 11px;
+  color: var(--fg-faint);
+  line-height: 1.4;
+}
+
+:root[data-theme-style] .cowork-taskform__error {
+  font-size: 12px;
+  color: var(--danger);
+  padding: 6px 10px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: var(--radius-sm);
+}
+
+:root[data-theme-style] .cowork-taskform__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-soft);
+  gap: 8px;
+}
+
+:root[data-theme-style] .cowork-taskform__foot-right {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* --- RunHistory (drawer) --------------------------------------------------- */
+
+:root[data-theme-style] .cowork-history-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0, 0.4);
+  display: flex;
+  justify-content: flex-end;
+  z-index: var(--z-modal);
+}
+
+:root[data-theme-style] .cowork-history-drawer {
+  width: min(420px, 88vw);
+  height: 100%;
+  background: var(--bg-elev);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -12px 0 36px rgba(0, 0, 0, 0.35);
+}
+
+:root[data-theme-style] .cowork-history-drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+:root[data-theme-style] .cowork-history-drawer__head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--fg);
+}
+
+:root[data-theme-style] .cowork-history-drawer__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+:root[data-theme-style] .cowork-history-drawer__empty {
+  color: var(--fg-faint);
+  font-size: 13px;
+  text-align: center;
+  padding: 32px 12px;
+}
+
+:root[data-theme-style] .cowork-history-row {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  padding: 8px 10px;
+  cursor: default;
+}
+
+:root[data-theme-style] .cowork-history-row:hover {
+  border-color: var(--border);
+}
+
+:root[data-theme-style] .cowork-history-row__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+:root[data-theme-style] .cowork-history-row__status {
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+:root[data-theme-style] .cowork-history-row__status--ok {
+  background: rgba(74, 222, 128, 0.18);
+  color: #4ade80;
+}
+
+:root[data-theme-style] .cowork-history-row__status--error {
+  background: rgba(239, 68, 68, 0.18);
+  color: var(--danger);
+}
+
+:root[data-theme-style] .cowork-history-row__status--skipped {
+  background: var(--bg-elev-2);
+  color: var(--fg-faint);
+}
+
+:root[data-theme-style] .cowork-history-row__status--deliver_failed {
+  background: rgba(245, 158, 11, 0.18);
+  color: var(--warn);
+}
+
+:root[data-theme-style] .cowork-history-row__status--deliver_skipped {
+  background: var(--bg-elev-2);
+  color: var(--fg-faint);
+}
+
+:root[data-theme-style] .cowork-history-row__at {
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme-style] .cowork-history-row__name {
+  color: var(--fg);
+  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:root[data-theme-style] .cowork-history-row__result {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+/* === coWork RAG panel (资料库) ==============================================
+   Layout: RagPanel owns a header (import buttons + collection dropdown) and a
+   scrollable body. Body has a search bar, then the recursive file/folder tree.
+   Each file row shows FTS5 + extraction status, a progress bar (when extracting)
+   with an ETA tooltip on hover, and action buttons. */
+
+:root[data-theme-style] .cowork-rag {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+:root[data-theme-style] .cowork-rag__header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+:root[data-theme-style] .cowork-rag__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+:root[data-theme-style] .cowork-rag__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+:root[data-theme-style] .cowork-rag__select {
+  --wails-draggable: no-drag;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  max-width: 360px;
+}
+
+:root[data-theme-style] .cowork-rag__stat {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+:root[data-theme-style] .cowork-rag__search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 0 10px;
+}
+
+:root[data-theme-style] .cowork-rag__search-icon {
+  color: var(--fg-faint);
+  flex-shrink: 0;
+}
+
+:root[data-theme-style] .cowork-rag__search-input {
+  --wails-draggable: no-drag;
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 8px;
+}
+
+:root[data-theme-style] .cowork-rag__search-spinner {
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+
+:root[data-theme-style] .cowork-rag__hits {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+
+:root[data-theme-style] .cowork-rag__hits-layer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+:root[data-theme-style] .cowork-rag__hits-label {
+  font-size: 11px;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+:root[data-theme-style] .cowork-rag__entity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+:root[data-theme-style] .cowork-rag__entity-name {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+:root[data-theme-style] .cowork-rag__entity-desc {
+  color: var(--fg-dim);
+}
+
+:root[data-theme-style] .cowork-rag__snippet {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+:root[data-theme-style] .cowork-rag__snippet-path {
+  color: var(--accent);
+  font-size: 11px;
+}
+
+:root[data-theme-style] .cowork-rag__snippet-body {
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+:root[data-theme-style] .cowork-rag__empty,
+:root[data-theme-style] .cowork-rag__loading {
+  color: var(--fg-faint);
+  font-size: 13px;
+  padding: 40px 12px;
+  text-align: center;
+}
+
+:root[data-theme-style] .cowork-rag__drop-hint {
+  font-size: 11px;
+  color: var(--fg-faint);
+  margin-top: 6px;
+  opacity: 0.7;
+}
+
+:root[data-theme-style] .cowork-rag__tree {
+  display: flex;
+  flex-direction: column;
+}
+
+/* === RAG Graph-first layout ================================================ */
+
+/* Panel wrapper */
+.rag-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.rag-panel--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rag-panel__empty-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--fg-dim);
+}
+.rag-panel__empty-text {
+  font-size: 16px;
+  color: var(--fg);
+}
+.rag-panel__empty-hint {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+/* Knowledge-base Q&A */
+.rag-ask {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-soft);
+}
+.rag-ask__input-row {
+  display: flex;
+  gap: 6px;
+}
+.rag-ask__input {
+  flex: 1;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.rag-ask__input:focus {
+  border-color: var(--accent);
+}
+.rag-ask__input::placeholder {
+  color: var(--fg-faint);
+}
+.rag-ask__btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.rag-ask__answer {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--fg);
+  max-height: 280px;
+  overflow-y: auto;
+}
+.rag-ask__answer p { margin: 0 0 8px; }
+.rag-ask__answer p:last-child { margin-bottom: 0; }
+.rag-ask__answer ul, .rag-ask__answer ol { margin: 4px 0 8px; padding-left: 20px; }
+
+.rag-panel__graph {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+/* Graph canvas — the 3D force-graph requires a container with explicit
+   dimensions. Use absolute inset:0 inside the relatively-positioned
+   .rag-panel__graph parent so the viewport always has a real pixel size. */
+.rag-graph-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.rag-graph__loading,
+.rag-graph__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 8px;
+  color: var(--fg-dim);
+}
+.rag-graph__loading span::before {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border-soft);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: rag-spin 0.6s linear infinite;
+  margin-bottom: 4px;
+}
+@keyframes rag-spin {
+  to { transform: rotate(360deg); }
+}
+.rag-graph__empty-hint {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+/* sr-only: visually hidden but available to screen readers (a11y live regions). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.rag-graph__sem-hint {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 80%;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  border: 1px solid var(--border, #888);
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+  z-index: var(--z-local-handle-active);
+  pointer-events: none;
+}
+
+/* Graph node — Obsidian-style star graph: colored dot + label, minimal chrome. */
+.rag-gnode {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 2px 4px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.12s;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.rag-gnode:hover {
+  transform: scale(1.12);
+}
+.rag-gnode--hl .rag-gnode__label {
+  font-weight: 700;
+}
+.rag-gnode--hl {
+  transform: scale(1.1);
+}
+.rag-gnode--sel .rag-gnode__label {
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+}
+.rag-gnode--hub .rag-gnode__label {
+  font-weight: 600;
+  font-size: 13px;
+}
+.rag-gnode__dot {
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.rag-gnode__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+/* Toolbar */
+.rag-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border-soft);
+  flex-wrap: wrap;
+}
+.rag-toolbar__select {
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  max-width: 180px;
+}
+.rag-toolbar__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--fg-dim);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.rag-toolbar__btn:hover {
+  background: var(--bg-elev-2);
+  color: var(--fg);
+}
+.rag-toolbar__btn--active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.rag-toolbar__btn--active:hover {
+  opacity: 0.9;
+}
+.rag-toolbar__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  flex: 1;
+  min-width: 120px;
+  max-width: 240px;
+}
+.rag-toolbar__search input {
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  flex: 1;
+}
+.rag-toolbar__search input::placeholder {
+  color: var(--fg-faint);
+}
+.rag-toolbar__clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+  padding: 2px;
+}
+.rag-toolbar__clear:hover {
+  color: var(--fg);
+}
+.rag-toolbar__search-mode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--fg-faint);
+  cursor: pointer;
+  padding: 1px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  min-width: 18px;
+}
+.rag-toolbar__search-mode--active {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.rag-toolbar__search-mode:hover {
+  border-color: var(--fg-faint);
+}
+
+/* Type filter dropdown */
+.rag-toolbar__filter-wrap {
+  position: relative;
+}
+.rag-toolbar__filter-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  box-shadow: var(--shadow-2);
+  z-index: var(--z-local-popover);
+  min-width: 160px;
+}
+.rag-toolbar__filter-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+  color: var(--fg);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.rag-toolbar__filter-item:hover {
+  background: var(--bg-soft);
+}
+.rag-toolbar__filter-clear {
+  display: block;
+  width: 100%;
+  padding: 4px 6px;
+  margin-top: 4px;
+  border: none;
+  background: none;
+  color: var(--fg-faint);
+  font-size: 11px;
+  cursor: pointer;
+  text-align: center;
+}
+.rag-toolbar__filter-clear:hover {
+  color: var(--fg);
+}
+
+/* Legend */
+.rag-legend {
+  position: absolute;
+  bottom: 24px;
+  left: 72px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+  z-index: var(--z-local-raised);
+}
+.rag-legend__group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+.rag-legend__title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  width: 100%;
+}
+.rag-legend__item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.rag-legend__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.rag-legend__ring {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid;
+  background: var(--bg-elev);
+  flex: 0 0 auto;
+}
+.rag-legend__label {
+  font-size: 10px;
+  color: var(--fg-dim);
+}
+
+/* Knowledge reference bar */
+.rag-refbar {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-dock);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+  flex-wrap: wrap;
+}
+.rag-refbar__info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rag-refbar__count {
+  font-size: 12px;
+  color: var(--fg);
+}
+.rag-refbar__clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-faint);
+  font-size: 11px;
+  cursor: pointer;
+}
+.rag-refbar__clear:hover {
+  color: var(--fg);
+  background: var(--bg-soft);
+}
+.rag-refbar__tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+.rag-refbar__tag {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  background: var(--bg-soft);
+  color: var(--fg-dim);
+  border: 1px solid var(--border-soft);
+}
+.rag-refbar__tag--entity {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.rag-refbar__tag--relation {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.rag-refbar__tag--more {
+  color: var(--fg-faint);
+}
+.rag-refbar__use-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+}
+.rag-refbar__use-btn:hover {
+  opacity: 0.9;
+}
+
+/* Entity detail panel (in CoworkDock) */
+.rag-detail {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.rag-detail__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rag-detail__back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.rag-detail__back:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+.rag-detail__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.rag-detail__type-badge {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  background: var(--bg-soft);
+  color: var(--fg-dim);
+  border: 1px solid var(--border-soft);
+}
+.rag-detail__desc {
+  font-size: 13px;
+  color: var(--fg-dim);
+  line-height: 1.5;
+}
+.rag-detail__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rag-detail__section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.rag-detail__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 8px;
+  font-size: 11px;
+}
+.rag-detail__meta-item {
+  color: var(--fg-dim);
+}
+.rag-detail__community-badge {
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--bg-elev);
+}
+.rag-detail__rel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+}
+.rag-detail__rel:hover {
+  background: var(--bg-soft);
+}
+.rag-detail__rel-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rag-detail__rel-type {
+  color: var(--fg-faint);
+  font-size: 10px;
+  min-width: 40px;
+}
+.rag-detail__rel-peer {
+  color: var(--fg);
+  font-weight: 500;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rag-detail__rel-strength {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  min-width: 18px;
+  text-align: center;
+}
+.rag-detail__rel-strength--high {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.rag-detail__rel-desc {
+  color: var(--fg-faint);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rag-detail__source {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+.rag-detail__source-path {
+  color: var(--fg-dim);
+}
+.rag-detail__source-chunk {
+  color: var(--fg-faint);
+}
+.rag-detail__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.rag-detail__action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+.rag-detail__action-btn:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+.rag-detail__loading,
+.rag-detail__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--fg-faint);
+  font-size: 13px;
+}
+
+/* Edit modal */
+.rag-edit-modal {
+  max-width: 480px;
+}
+.rag-edit-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.rag-edit-modal__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.rag-edit-modal__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.rag-edit-modal__close:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+.rag-edit-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.rag-edit-modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rag-edit-modal__label {
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.rag-edit-modal__input,
+.rag-edit-modal__select,
+.rag-edit-modal__textarea {
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.rag-edit-modal__input:focus,
+.rag-edit-modal__select:focus,
+.rag-edit-modal__textarea:focus {
+  border-color: var(--accent);
+}
+.rag-edit-modal__textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+.rag-edit-modal__merge-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+.rag-edit-modal__merge-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px dashed var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+.rag-edit-modal__merge-toggle:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+.rag-edit-modal__merge-body {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rag-edit-modal__merge-hint {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+.rag-edit-modal__merge-empty {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+.rag-edit-modal__merge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.rag-edit-modal__merge-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--fg);
+  cursor: pointer;
+}
+.rag-edit-modal__merge-item:hover {
+  background: var(--bg-soft);
+}
+.rag-edit-modal__merge-score {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+}
+.rag-edit-modal__merge-score--high {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 15%, transparent);
+}
+.rag-edit-modal__merge-score--mid {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+}
+.rag-edit-modal__merge-preview {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+/* Skill select modal */
+.rag-skill-modal {
+  max-width: 440px;
+}
+.rag-skill-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.rag-skill-modal__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.rag-skill-modal__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.rag-skill-modal__close:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+.rag-skill-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.rag-skill-modal__summary {
+  font-size: 13px;
+  color: var(--fg-dim);
+}
+.rag-skill-modal__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rag-skill-modal__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.rag-skill-modal__item:hover {
+  background: var(--bg-soft);
+}
+.rag-skill-modal__item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rag-skill-modal__item-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+}
+.rag-skill-modal__item-desc {
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+.rag-skill-modal__preview {
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.rag-skill-modal__preview-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+.rag-skill-modal__preview-content {
+  font-size: 12px;
+  color: var(--fg-dim);
+  line-height: 1.5;
+}
+.rag-skill-modal__preview-section {
+  margin-bottom: 6px;
+}
+.rag-skill-modal__preview-item {
+  padding-left: 8px;
+}
+
+/* Doc preview panel (in CoworkDock) */
+.rag-docpreview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.rag-docpreview__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.rag-docpreview__back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.rag-docpreview__back:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+.rag-docpreview__title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rag-docpreview__content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+.rag-docpreview__chunk {
+  margin-bottom: 12px;
+  padding: 8px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+.rag-docpreview__chunk-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  margin-bottom: 4px;
+}
+.rag-docpreview__chunk-text {
+  font-size: 12px;
+  color: var(--fg-dim);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.rag-docpreview__raw {
+  font-size: 12px;
+  color: var(--fg-dim);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+}
+.rag-docpreview__loading,
+.rag-docpreview__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--fg-faint);
+  font-size: 13px;
+}
+
+/* RAG Dock tabs */
+.rag-dock__collections,
+.rag-dock__entities,
+.rag-dock__files {
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.rag-dock__collections--drag {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+}
+
+/* Collection tree rows — high density, left-aligned, compact standard */
+.rag-dock__collection-row {
+  --wails-draggable: no-drag;
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  border-radius: var(--tree-row-radius, 6px);
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  transition: background 0.12s, color 0.12s;
+}
+.rag-dock__collection-row:hover {
+  background: var(--tree-row-hover-bg, var(--bg-soft));
+  color: var(--fg);
+}
+.rag-dock__collection-row--active {
+  background: var(--tree-row-current-bg, color-mix(in srgb, var(--accent) 12%, transparent));
+  color: var(--tree-row-current-fg, var(--fg));
+  font-weight: 500;
+}
+.rag-dock__collection-row--active::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 5px;
+  bottom: 5px;
+  width: 2.5px;
+  border-radius: var(--radius-pill);
+  background: var(--tree-row-marker, var(--accent));
+}
+.rag-dock__collection-row--child {
+  padding-left: 26px;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+}
+/* Optical guideline for child categories instead of ASCII ascii-art */
+.rag-dock__collection-guide {
+  position: absolute;
+  left: 20px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  border-left: 1px dashed var(--border-soft);
+  pointer-events: none;
+}
+.rag-dock__collection-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  color: var(--fg-dim);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.rag-dock__collection-chevron:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.rag-dock__collection-icon {
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+}
+.rag-dock__collection-row--active .rag-dock__collection-icon {
+  color: var(--tree-row-current-icon, var(--accent));
+}
+.rag-dock__collection-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rag-dock__collection-count {
+  font-size: 10.5px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+}
+.rag-dock__collection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.rag-dock__collection-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.rag-dock__collection-actions {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+.rag-dock__collection-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: 24px;
+  padding: 0 6px;
+  font-size: 11px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.rag-dock__collection-action:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+  border-color: var(--border-soft);
+}
+/* Hover-only actions for tree items to keep resting state quiet */
+.rag-dock__collection-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.rag-dock__collection-row:hover .rag-dock__collection-item-actions,
+.rag-dock__collection-row--active .rag-dock__collection-item-actions {
+  opacity: 1;
+}
+.rag-dock__collection-action-btn,
+.rag-dock__collection-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  transition: all 0.12s;
+  flex: 0 0 auto;
+}
+.rag-dock__collection-action-btn:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.rag-dock__collection-delete:hover {
+  color: var(--err, #dc2626);
+  background: color-mix(in srgb, var(--err, #dc2626) 14%, transparent);
+}
+/* Rich Category Filter Pills for File View (replacing raw <select>) */
+.rag-dock__filter-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+.rag-dock__filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: var(--radius-md);
+  font-size: 11.5px;
+  background: var(--bg-elev);
+  color: var(--fg-dim);
+  border: 1px solid var(--border-soft);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s;
+}
+.rag-dock__filter-pill:hover {
+  color: var(--fg);
+  border-color: var(--fg-faint);
+}
+.rag-dock__filter-pill--active {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  font-weight: 500;
+}
+.rag-dock__file-select {
+  margin: 0 8px 8px;
+  width: calc(100% - 16px);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  outline: none;
+}
+.rag-dock__file-select:focus {
+  border-color: var(--accent);
+}
+.rag-dock__collection-stats {
+  color: var(--fg-faint);
+  font-size: 11px;
+  margin-left: auto;
+}
+.rag-dock__entity-group {
+  margin-bottom: 8px;
+}
+.rag-dock__entity-group-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-dim);
+  padding: 4px 8px;
+}
+.rag-dock__entity-hint {
+  font-size: 12px;
+  color: var(--fg-faint);
+  padding: 8px;
+  text-align: center;
+}
+.rag-dock__file-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 0;
+}
+/* Node type color overrides (CSS variables for theme compatibility) */
+:root {
+  --rag-node-product: var(--accent);
+  --rag-node-tech: var(--ok);
+  --rag-node-feature: #4d8df6;
+  --rag-node-person: var(--warn);
+  --rag-node-org: var(--accent);
+  --rag-node-project: var(--ok);
+  --rag-node-concept: var(--fg-dim);
+  --rag-node-event: var(--fg-faint);
+  --rag-node-location: var(--ok);
+  --rag-node-topic: var(--fg-dim);
+  --rag-node-other: var(--fg-faint);
+}
+
+/* Template select (deep extraction) */
+/* === 提取面板 (TemplateSelect) ============================================= */
+
+.rag-template {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+}
+.rag-template__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  flex: 0 0 auto;
+  background: var(--bg-elev);
+}
+.rag-template__back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.rag-template__back:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+.rag-template__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.rag-template__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 14px;
+  margin-top: 12px;
+}
+.rag-template__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.rag-template__value {
+  font-size: 13px;
+  color: var(--fg);
+}
+.rag-template__status {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+}
+.rag-template__status--ok {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 20%, transparent);
+}
+.rag-template__status--warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+.rag-template__status--info {
+  color: var(--fg-dim);
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+}
+/* Knowledge summary card */
+.rag-summary {
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin: 0 8px 4px;
+}
+.rag-summary__text {
+  font-size: 13px;
+  color: var(--fg);
+  line-height: 1.5;
+}
+.rag-summary__themes {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.rag-summary__theme {
+  font-size: 11px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.rag-summary__theme:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.rag-summary--prompt {
+  text-align: center;
+  padding: 6px;
+}
+/* Template selection card grid (replacing basic form selects) */
+.rag-template__card-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.rag-template__card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+.rag-template__card:hover {
+  border-color: var(--fg-faint);
+  background: var(--bg-soft);
+}
+.rag-template__card--active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.rag-template__card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.rag-template__card-type {
+  font-size: 10.5px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+/* Template dropdown (fallback) */
+.rag-template__select {
+  width: 100%;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  outline: none;
+  cursor: pointer;
+}
+.rag-template__select:focus {
+  border-color: var(--accent);
+}
+.rag-template__desc-card {
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rag-template__desc-text {
+  font-size: 12px;
+  color: var(--fg-dim);
+  line-height: 1.5;
+}
+.rag-template__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.rag-template__field-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.rag-template__field-label {
+  font-size: 10.5px;
+  color: var(--fg-faint);
+  font-weight: 600;
+  min-width: 28px;
+  text-transform: uppercase;
+}
+.rag-template__field-chip {
+  font-size: 11px;
+  color: var(--fg);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  cursor: help;
+  transition: border-color 0.1s;
+}
+.rag-template__field-chip:hover {
+  border-color: var(--accent);
+}
+.rag-template__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-top: 1px solid var(--border-soft);
+  margin-top: auto;
+  background: var(--bg-elev);
+}
+.rag-template__actions-sub {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.rag-template__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: all 0.15s;
+  cursor: pointer;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+.rag-template__btn--primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 600;
+  padding: 10px 16px;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.rag-template__btn--primary:hover {
+  background: var(--accent-hover, var(--accent));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.rag-template__btn:hover:not(.rag-template__btn--primary) {
+  background: var(--bg-elev);
+  border-color: var(--fg-faint);
+}
+.rag-template__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 14px 12px;
+}
+.rag-template__progress-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.rag-template__job {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  transition: border-color 0.12s;
+}
+.rag-template__job--done {
+  color: var(--ok);
+}
+.rag-template__job--running {
+  color: var(--accent);
+}
+.rag-template__job--failed {
+  color: var(--err);
+}
+.rag-template__job-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rag-template__job-status {
+  font-size: 11px;
+}
+.rag-template__retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+.rag-template__retry:hover {
+  background: var(--bg-soft);
+  color: var(--fg);
+}
+
+/* Progress summary bar */
+.rag-template__progress-summary {
+  margin-bottom: 6px;
+}
+.rag-template__progress-bar-wrap {
+  height: 4px;
+  background: var(--border-soft);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.rag-template__progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+  transition: width 0.3s ease;
+}
+.rag-template__progress-text {
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+/* Live stats during extraction */
+.rag-template__live-stats {
+  display: flex;
+  gap: 20px;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-soft));
+  border-radius: var(--radius-sm);
+  margin: 0 14px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 10%, var(--border-soft));
+}
+.rag-template__live-stat {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+.rag-template__live-stat strong {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Existing result hint */
+.rag-template__hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  margin: 0 14px 12px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.btn--link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+}
+.btn--link:hover {
+  text-decoration: underline;
+}
+.btn--danger-link {
+  color: var(--err);
+}
+.btn--danger-link:hover {
+  color: var(--err);
+  text-decoration: underline;
+}
+
+/* === Extraction result panel =============================================== */
+
+.rag-result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  overflow-y: auto;
+  flex: 1;
+}
+.rag-result__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rag-result__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.rag-result__summary {
+  display: flex;
+  gap: 16px;
+  padding: 12px;
+  background: var(--bg-soft);
+  border-radius: var(--radius-sm);
+}
+.rag-result__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+.rag-result__stat-num {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+.rag-result__stat-label {
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+.rag-result__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rag-result__section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.rag-result__distribution {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rag-result__dist-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.rag-result__dist-label {
+  width: 40px;
+  text-align: right;
+  color: var(--fg-faint);
+  flex-shrink: 0;
+}
+.rag-result__dist-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-soft);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.rag-result__dist-fill {
+  height: 100%;
+  border-radius: var(--radius-sm);
+  transition: width 0.3s ease;
+}
+.rag-result__dist-count {
+  width: 24px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
+/* Entity list */
+.rag-result__entity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rag-result__entity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-soft);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.rag-result__entity-type {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  color: #fff;
+  flex-shrink: 0;
+}
+.rag-result__entity-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.rag-result__entity-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rag-result__entity-desc {
+  color: var(--fg-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rag-result__entity-rels {
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* Relation list */
+.rag-result__relation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rag-result__relation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-soft);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.rag-result__rel-node {
+  font-weight: 500;
+  color: var(--fg);
+}
+.rag-result__rel-type {
+  padding: 1px 6px;
+  background: var(--accent-dim, rgba(59, 130, 246, 0.1));
+  color: var(--accent, #3b82f6);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+}
+.rag-result__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* === coWork Expert panel (专家团) =========================================== */
+
+:root[data-theme-style] .cowork-expert {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+:root[data-theme-style] .cowork-expert__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+:root[data-theme-style] .cowork-expert__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+:root[data-theme-style] .cowork-expert__teams {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+:root[data-theme-style] .cowork-expert__select {
+  --wails-draggable: no-drag;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+
+:root[data-theme-style] .cowork-expert__select--mode {
+  width: auto;
+}
+
+:root[data-theme-style] .cowork-expert__roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+:root[data-theme-style] .cowork-expert__expert-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  border: 1px solid var(--border-soft);
+}
+
+:root[data-theme-style] .cowork-expert__expert-model {
+  color: var(--fg-faint);
+  font-size: 10px;
+}
+
+:root[data-theme-style] .cowork-expert__controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+:root[data-theme-style] .cowork-expert__rounds {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+:root[data-theme-style] .cowork-expert__rounds input {
+  --wails-draggable: no-drag;
+  width: 42px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 4px;
+  text-align: center;
+}
+
+:root[data-theme-style] .cowork-expert__input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+:root[data-theme-style] .cowork-expert__task-input {
+  --wails-draggable: no-drag;
+  flex: 1;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  resize: none;
+  outline: none;
+}
+
+:root[data-theme-style] .cowork-expert__task-input:focus {
+  border-color: var(--accent);
+}
+
+:root[data-theme-style] .cowork-expert__stream {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+:root[data-theme-style] .cowork-expert__round {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+:root[data-theme-style] .cowork-expert__round-label {
+  font-size: 11px;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+:root[data-theme-style] .cowork-expert__round-label--synthesis {
+  color: var(--accent);
+}
+
+:root[data-theme-style] .cowork-expert__turn {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  padding: 10px 12px;
+}
+
+:root[data-theme-style] .cowork-expert__turn--streaming {
+  border-color: var(--accent);
+}
+
+:root[data-theme-style] .cowork-expert__turn-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+:root[data-theme-style] .cowork-expert__turn-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+:root[data-theme-style] .cowork-expert__turn-cursor {
+  animation: expert-blink 1s steps(2) infinite;
+  color: var(--accent);
+}
+
+@keyframes expert-blink {
+  to { opacity: 0; }
+}
+
+:root[data-theme-style] .cowork-expert__turn-body {
+  font-size: 13px;
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+}
+
+:root[data-theme-style] .cowork-expert__turn-body--synthesis {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+:root[data-theme-style] .cowork-expert__empty,
+:root[data-theme-style] .cowork-expert__loading {
+  color: var(--fg-faint);
+  font-size: 13px;
+  padding: 40px 12px;
+  text-align: center;
+}
+
+/* TeamManager expert member rows */
+:root[data-theme-style] .cowork-expert__member-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+:root[data-theme-style] .cowork-expert__member-name {
+  width: 100px;
+  flex-shrink: 0;
+}
+
+:root[data-theme-style] .cowork-expert__member-model {
+  flex: 1;
+  min-width: 0;
+}
+
+:root[data-theme-style] .cowork-expert__member-perspective {
+  flex: 2;
+  min-width: 0;
+}
+
+:root[data-theme-style] .cowork-expert__rounds-input {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+/* --- ExpertCollabCard (folded expert-team card in the main transcript) ----- */
+
+:root[data-theme-style] .expert-collab {
+  margin: 6px auto;
+  max-width: var(--maxw);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  overflow: hidden;
+}
+
+:root[data-theme-style] .expert-collab__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fg-dim);
+  text-align: left;
+  -webkit-app-region: no-drag;
+}
+
+:root[data-theme-style] .expert-collab__head:hover {
+  background: var(--bg-elev);
+}
+
+:root[data-theme-style] .expert-collab__icon {
+  flex: 0 0 auto;
+  font-size: 14px;
+}
+
+:root[data-theme-style] .expert-collab__title {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+:root[data-theme-style] .expert-collab__team {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--accent);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-theme-style] .expert-collab__mode {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Actions group (open-in-experts + discard + chevron) pinned to the head's
+   right edge. The head is a div[role=button] so the inner <button>s are valid
+   and their onClick stopPropagation keeps them from toggling the fold. */
+:root[data-theme-style] .expert-collab__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+:root[data-theme-style] .expert-collab__actions svg {
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+  transition: transform 0.15s;
+}
+
+:root[data-theme-style] .expert-collab__chevron--open {
+  transform: rotate(90deg);
+}
+
+:root[data-theme-style] .expert-collab__open-btn,
+:root[data-theme-style] .expert-collab__delete-btn {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--fg-faint);
+  border-radius: var(--radius-sm);
+  -webkit-app-region: no-drag;
+}
+
+:root[data-theme-style] .expert-collab__open-btn:hover {
+  color: var(--accent);
+  background: var(--bg-elev);
+}
+
+:root[data-theme-style] .expert-collab__delete-btn:hover {
+  color: var(--warn);
+  background: var(--bg-elev);
+}
+
+:root[data-theme-style] .expert-collab__preview {
+  padding: 0 12px 10px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Expanded body reuses cowork-expert__* stream/round/turn classes, but the
+   card wraps them in its own padding/border treatment. */
+:root[data-theme-style] .expert-collab .cowork-expert__stream {
+  padding: 4px 12px 12px;
+}
+
+/* --- ExpertSessionView (main-area group-chat for an expert-session tab) ---- */
+
+:root[data-theme-style] .expert-session {
+  /* flex:1 + min-height:0 lets this element fill .main (a flex column) and
+     pass a constrained height down to the scroll body. We use flex (not
+     height:100%) because the parent .main is flex-sized without an explicit
+     height, so height:100% wouldn't resolve. The body below uses the
+     height:0 + flex:1 trick for reliable scrolling. */
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+:root[data-theme-style] .expert-session__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border-soft);
+  flex: 0 0 auto;
+}
+
+:root[data-theme-style] .expert-session__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+:root[data-theme-style] .expert-session__subtitle {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+:root[data-theme-style] .expert-session__body {
+  /* The scroll surface. Mirrors .transcript: height:100% + overflow-y:auto on
+     a plain block (no display:flex — flex column on a scroll container can
+     suppress the scrollbar in webkit/blink). flex:1 + min-height:0 was tried
+     first but the body still didn't scroll, so we match the working Transcript
+     pattern exactly. The body sits between a fixed header and fixed composer. */
+  flex: 1 1 0;
+  min-height: 0;
+  height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 20px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+:root[data-theme-style] .expert-session__empty {
+  color: var(--fg-faint);
+  font-size: 14px;
+  text-align: center;
+  padding: 60px 20px;
+}
+
+:root[data-theme-style] .expert-session__collab {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+
+:root[data-theme-style] .expert-session__collab-task {
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-elev);
+}
+
+:root[data-theme-style] .expert-session__collab .cowork-expert__stream {
+  padding: 12px 14px;
+}
+
+:root[data-theme-style] .expert-session__live-block {
+  margin-bottom: 20px;
+}
+
+:root[data-theme-style] .expert-session__user-task {
+  padding: 8px 14px;
+  margin-bottom: 8px;
+  background: var(--bg-elev);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--fg);
+  border-left: 3px solid var(--accent);
+}
+
+:root[data-theme-style] .expert-session__starting {
+  color: var(--fg-faint);
+  font-size: 13px;
+  padding: 12px 14px;
+  text-align: center;
+}
+
+:root[data-theme-style] .expert-session__composer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border-soft);
+  padding: 10px 20px;
+  background: var(--chat-bg);
+}
+
+:root[data-theme-style] .expert-session__input {
+  width: 100%;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-size: 13px;
+  padding: 8px 10px;
+  line-height: 1.5;
+  font-family: inherit;
+}
+
+:root[data-theme-style] .expert-session__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+:root[data-theme-style] .expert-session__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+:root[data-theme-style] .expert-session__controls select,
+:root[data-theme-style] .expert-session__controls input[type="number"] {
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--fg);
+  padding: 4px 6px;
+}
+
+:root[data-theme-style] .expert-session__controls input[type="number"] {
+  width: 48px;
+}
+
+/* --- RagNode (file/folder row) --------------------------------------------- */
+
+:root[data-theme-style] .rag-node {
+  user-select: none;
+}
+
+:root[data-theme-style] .rag-node__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  font-size: 13px;
+  color: var(--fg-dim);
+  border-radius: var(--radius-sm);
+  padding: 2px 0;
+}
+
+:root[data-theme-style] .rag-node__row:hover {
+  background: var(--sidebar-hover);
+}
+
+:root[data-theme-style] .rag-node__row--folder {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+:root[data-theme-style] .rag-node__chevron {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: default;
+  flex-shrink: 0;
+}
+
+:root[data-theme-style] .rag-node__chevron--placeholder {
+  visibility: hidden;
+}
+
+:root[data-theme-style] .rag-node__chevron--open {
+  transform: rotate(90deg);
+}
+
+/* Label: takes remaining space, truncates with ellipsis when tight */
+:root[data-theme-style] .rag-node__label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Status badge: always visible, never shrinks to zero */
+:root[data-theme-style] .rag-node__badge {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+:root[data-theme-style] .rag-node__badge--indexed {
+  color: var(--ok);
+  border-color: rgba(116, 184, 122, 0.3);
+}
+
+:root[data-theme-style] .rag-node__badge--extracting {
+  color: var(--warn);
+  border-color: rgba(217, 164, 65, 0.4);
+  background: rgba(217, 164, 65, 0.1);
+}
+
+:root[data-theme-style] .rag-node__badge--enriched {
+  color: var(--accent);
+  border-color: rgba(217, 119, 87, 0.4);
+  background: var(--accent-soft);
+}
+
+:root[data-theme-style] .rag-node__badge--error {
+  color: var(--err);
+  border-color: rgba(224, 105, 106, 0.4);
+  background: rgba(224, 105, 106, 0.1);
+}
+
+:root[data-theme-style] .rag-node__badge--cancelled {
+  color: var(--fg-faint);
+}
+
+:root[data-theme-style] .rag-node__progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+:root[data-theme-style] .rag-progress-bar {
+  flex: 1;
+  min-width: 60px;
+  max-width: 180px;
+  height: 6px;
+  accent-color: var(--accent);
+}
+
+:root[data-theme-style] .rag-node__pct {
+  font-size: 11px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+:root[data-theme-style] .rag-node__eta-icon {
+  color: var(--fg-faint);
+  cursor: help;
+  flex-shrink: 0;
+}
+
+/* Action buttons: hidden by default, appear on row hover */
+:root[data-theme-style] .rag-node__actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+:root[data-theme-style] .rag-node__row:hover .rag-node__actions {
+  opacity: 1;
+}
+
+:root[data-theme-style] .rag-node__btn {
+  --wails-draggable: no-drag;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  border-radius: var(--radius-sm);
+  cursor: default;
+}
+
+:root[data-theme-style] .rag-node__btn:hover {
+  background: var(--bg-elev-2);
+  color: var(--fg);
+}
+
+:root[data-theme-style] .rag-node__btn--accent:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+:root[data-theme-style] .rag-node__btn--danger:hover {
+  background: rgba(239, 68, 68, 0.16);
+  color: var(--err);
+}
+
+:root[data-theme-style] .rag-node__children {
+  /* nested rows indent via paddingLeft on each row, not margin here */
+}
+
+/* --- RAG file tree (ragft-*) ---
+   Mirrors the coding-mode workspace tree (workspace-tree__row) exactly: same
+   row height/radius/hover/active via the shared --tree-row-* variables, same
+   chevron+icon+name structure, same <button> semantics. RAG-specific extras
+   are kept minimal: a quiet accent tint on enriched files, and an inline
+   progress bar while extracting. Extract/cancel/remove live in the right-click
+   context menu — NOT inline buttons — so the tree looks as clean as coding. */
+:root[data-theme-style] .ragft-node {
+  user-select: none;
+}
+:root[data-theme-style] .ragft-row {
+  --wails-draggable: no-drag;
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: var(--tree-row-height);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  border-radius: var(--tree-row-radius);
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  padding-right: 6px;
+}
+:root[data-theme-style] .ragft-row:hover {
+  background: var(--tree-row-hover-bg);
+  color: var(--fg);
+}
+:root[data-theme-style] .ragft-row--active {
+  background: var(--tree-row-current-bg);
+  color: var(--tree-row-current-fg);
+}
+:root[data-theme-style] .ragft-row--active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--tree-row-marker);
+}
+/* Enriched files: a quiet accent left-border to signal "already extracted",
+   without a wordy badge. Error files get a faint red tint. */
+:root[data-theme-style] .ragft-node--enriched > .ragft-row::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.55;
+}
+:root[data-theme-style] .ragft-node--error > .ragft-row::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--err);
+}
+:root[data-theme-style] .ragft-chev {
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+}
+:root[data-theme-style] .ragft-icon {
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+}
+:root[data-theme-style] .ragft-icon--dir {
+  color: var(--fg-dim);
+}
+:root[data-theme-style] .ragft-row--active .ragft-icon,
+:root[data-theme-style] .ragft-row--active .ragft-icon--dir {
+  color: var(--tree-row-current-icon);
+}
+:root[data-theme-style] .ragft-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Status text: tiny (10px), faded, right-aligned. Always visible but quiet —
+   shows entity count / error tag. Colored by status but kept subtle. */
+:root[data-theme-style] .ragft-status {
+  font-size: 10px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  margin-left: 4px;
+}
+:root[data-theme-style] .ragft-status--enriched {
+  color: var(--accent);
+  opacity: 0.75;
+}
+:root[data-theme-style] .ragft-status--error {
+  color: var(--err);
+}
+:root[data-theme-style] .ragft-status--cancelled {
+  color: var(--fg-faint);
+  opacity: 0.6;
+}
+/* When action buttons appear on hover, hide the status text so they don't
+   overlap (the status is still in the tooltip). */
+:root[data-theme-style] .ragft-row:hover .ragft-status {
+  visibility: hidden;
+}
+/* Inline progress (only while extracting): a slim bar + % + ETA icon. */
+:root[data-theme-style] .ragft-progress {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+:root[data-theme-style] .ragft-progress-bar {
+  min-width: 40px;
+  max-width: 100px;
+  width: 80px;
+  height: 4px;
+  accent-color: var(--accent);
+}
+:root[data-theme-style] .ragft-pct {
+  font-size: 10.5px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+:root[data-theme-style] .ragft-eta-icon {
+  color: var(--fg-faint);
+  cursor: help;
+  flex: 0 0 auto;
+}
+:root[data-theme-style] .ragft-children {
+  /* nested rows indent via paddingLeft on each row */
+}
+/* Folder expand/collapse chevron button (matches coding tree chevron style). */
+:root[data-theme-style] .ragft-chev-btn {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: none;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: default;
+  flex: 0 0 auto;
+  padding: 0;
+}
+:root[data-theme-style] .ragft-chev-btn:hover {
+  color: var(--fg);
+}
+/* File action buttons: hidden at rest, revealed on row hover (like the coding
+   tree's hover-only affordances). Compact ghost icons. */
+:root[data-theme-style] .ragft-actions {
+  display: flex;
+  gap: 1px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+:root[data-theme-style] .ragft-row:hover .ragft-actions {
+  opacity: 1;
+}
+/* While extracting, keep the cancel button visible so the user can stop it. */
+:root[data-theme-style] .ragft-progress ~ .ragft-actions {
+  opacity: 1;
+}
+:root[data-theme-style] .ragft-btn {
+  --wails-draggable: no-drag;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  border-radius: var(--radius-sm);
+  cursor: default;
+  padding: 0;
+}
+:root[data-theme-style] .ragft-btn:hover {
+  background: var(--bg-elev-2, var(--bg-soft));
+  color: var(--fg);
+}
+:root[data-theme-style] .ragft-btn--accent:hover {
+  background: var(--accent-soft, rgba(47, 95, 168, 0.15));
+  color: var(--accent);
+}
+:root[data-theme-style] .ragft-btn--danger:hover {
+  background: rgba(239, 68, 68, 0.16);
+  color: var(--err);
+}
+
+/* Profile segmented switcher in the chrome (dev / cowork, extensible).
+   A pill container with a sliding highlight indicator behind the active
+   segment. The indicator width is derived from --seg-count (set inline by
+   AppChrome.tsx) so adding a third segment requires no CSS change.
+   Reuses theme tokens (--accent / --accent-soft / --border / --bg-hover /
+   --text) to adapt to light/dark and all themed variants. */
+.app-chrome__profile-seg {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  margin: 0 4px;
+  padding: 2px;
+  align-self: center;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+  background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+}
+.app-chrome__profile-seg-indicator {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  /* In this project * { box-sizing: border-box } is global, so an absolutely
+     positioned element's width:100% resolves against the container's PADDING
+     box (i.e. content width + padding, border excluded). The flex:1 segments
+     share only the CONTENT box, so the indicator must subtract the 2px padding
+     on each side (4px total) before dividing by N to match one segment's
+     width exactly. Then translateX(idx*100%) — relative to that same width —
+     lands the indicator edge-to-edge under each segment with zero drift. */
+  width: calc((100% - 4px) / var(--seg-count, 2));
+  height: calc(100% - 4px);
+  border-radius: var(--radius-pill);
+  background: var(--accent, #2563eb);
+  /* Slower, slightly springy slide for a more refined feel. */
+  transition: transform 0.38s cubic-bezier(0.34, 1.2, 0.64, 1);
+  pointer-events: none;
+}
+.app-chrome__profile-seg-item {
+  position: relative;
+  z-index: var(--z-local-raised);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* flex:1 forces every segment to share the container width equally, so the
+     equally-divided indicator always lands centered under each label. */
+  flex: 1 1 0;
+  min-width: 46px;
+  height: 100%;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text, inherit);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+.app-chrome__profile-seg-item:hover {
+  background: var(--accent-soft, rgba(0, 0, 0, 0.06));
+}
+.app-chrome__profile-seg-item--active,
+.app-chrome__profile-seg-item--active:hover {
+  background: transparent;
+  color: #fff;
+}
+.app-chrome__profile-seg-icon {
+  margin-right: 5px;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+.app-chrome__profile-seg-item--active .app-chrome__profile-seg-icon {
+  opacity: 1;
+}
+
+
+/* === Keyboard shortcuts cheatsheet (Shift+?) + combo display === */
+/* Reuses .drawer / .drawer--wide / .drawer-backdrop from the shared drawer
+   system; these classes only add the cheatsheet-specific layout (section
+   groups, key-cap rows) and the kbd styling for the combo segments. */
+.shortcuts-cheatsheet__body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.shortcuts-cheatsheet__section h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-faint, #858b96);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.shortcuts-cheatsheet__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.shortcuts-cheatsheet__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.shortcuts-cheatsheet__row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.shortcuts-cheatsheet__row strong {
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--fg);
+}
+.shortcuts-cheatsheet__desc {
+  font-size: 12px;
+  color: var(--fg-faint, #858b96);
+  line-height: 1.4;
+}
+
+/* Key-cap combo segments. kbd inside the cheatsheet gets a pressed-button
+   look; the generic .shortcut-combo works inline anywhere. */
+.shortcut-combo {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.shortcut-combo__part {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--border-soft, rgba(128, 128, 128, 0.3));
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev, var(--bg));
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--fg);
+}
+.shortcut-combo__separator {
+  font-size: 11px;
+  color: var(--fg-faint, #858b96);
+}
+
+/* "System-level" badge for displayOnly shortcuts (e.g. screenshot hotkey
+   registered via Win32 RegisterHotKey, not the frontend keymap). */
+.shortcuts-cheatsheet__badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 500;
+  vertical-align: middle;
+  color: var(--accent, #d97757);
+  background: var(--accent-soft, rgba(217, 119, 87, 0.14));
+}
+
+/* --- Global Bottom Bar --- */
+/* The bottom bar holds the sidebar footer (history/trash/IM/settings) + status.
+ * It must sit ABOVE the chat transcript (which scrolls under it) but BELOW any
+ * modal overlay (history panel, settings, etc.) — otherwise it renders on top
+ * of an open modal and blocks/covers it. Using --z-onboarding (9999) was a bug:
+ * it placed the bar above every modal, so opening History/Trash from the bot
+ * detail view left the bar covering the modal and the user "couldn't reach" it.
+ * --z-raised sits above normal content but well under --z-modal (1200). The
+ * pointer-events:auto is kept so the transcript's scroll container never
+ * intercepts bar clicks. */
+.global-bottom-bar {
+  /* Sidebar-only footer strip (status row removed 2026-08-18): the bar covers
+     just the sidebar column so the chat composer can sit at the window bottom.
+     Width tracks --sidebar-width (set on .app) including the collapsed state. */
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-width, 0px);
+  height: var(--bottom-bar-height, 36px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--border-soft);
+  border-right: 1px solid var(--border-soft);
+  background: var(--bg-elev, #fff);
+  z-index: var(--z-raised);
+  flex-shrink: 0;
+  pointer-events: auto !important;
+  transition: width 0.16s ease;
+  overflow: hidden;
+}
+
+.app--darwin .global-bottom-bar {
+  transition: width 0.28s cubic-bezier(0.2, 0.72, 0.2, 1);
+}
+
+.global-bottom-bar .footer__nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-left: 16px;
+}
+
+/* Ensure tooltip triggers perfectly wrap the buttons to catch hover events */
+.global-bottom-bar .footer__nav .tooltip-trigger {
+  display: inline-flex;
+  pointer-events: auto !important;
+}
+
+.global-bottom-bar .footer__navitem {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--fg-dim);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.global-bottom-bar .footer__navitem:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--fg);
+}
+
+.global-bottom-bar .footer__navitem svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+.global-bottom-bar .sidebar-im-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  border: 1px solid var(--bg-elev, #fff);
+}
+
+.global-bottom-bar .statusbar {
+  position: static !important;
+  left: auto !important;
+  margin: 0 16px 0 auto !important;
+  flex: 0 0 auto !important;
+  justify-content: flex-end !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  max-width: none !important;
+  width: auto !important;
+  font-size: 12px !important;
+}
+
+/* Enhance accordion magic with springy bounce micro-animations */
+.global-bottom-bar .statusbar .statusbar__group:not(:first-child) {
+  max-width: 0 !important;
+  opacity: 0 !important;
+  transform: translateX(20px) scale(0.9) !important;
+  overflow: hidden !important;
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+  transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) !important; /* Apple-style spring physics */
+  white-space: nowrap !important;
+  visibility: hidden; /* Prevent focus when collapsed */
+}
+
+.global-bottom-bar .statusbar:hover .statusbar__group:not(:first-child) {
+  max-width: 250px !important; /* Plenty of room for metrics */
+  opacity: 1 !important;
+  transform: translateX(0) scale(1) !important;
+  margin-left: 14px !important; /* Restoring original group gap */
+  visibility: visible;
+}
+
+.global-bottom-bar .statusbar span,
+.global-bottom-bar .statusbar b,
+.global-bottom-bar .statusbar .stat__label {
+  font-size: 12px !important;
+  pointer-events: auto !important;
+}
+
+/* Force tooltip to absolute top layer to ensure hover expansion is visible */
+.tooltip {
+  z-index: var(--z-crash-overlay);
+}
+
+/* Bottom bar is now an absolute overlay over the sidebar column only, so the
+   layout grid owns the full window height and the composer reaches the bottom. */
+
+/* =========================================================
+   Cowork Expert Panel Redesign (Premium Card Grid)
+   ========================================================= */
+
+.cowork-expert__body {
+  padding-bottom: 32px;
+}
+
+.cowork-expert__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.cowork-expert__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev, #ffffff);
+  border: 1px solid color-mix(in srgb, var(--border, #e5e5e5) 70%, transparent);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+  min-height: 120px;
+}
+
+.cowork-expert__card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.cowork-expert__card--selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 1%, var(--bg-elev, #ffffff));
+  box-shadow: inset 0 0 0 1px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.02);
+}
+
+.cowork-expert__card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.cowork-expert__card-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elev-high);
+  color: var(--fg-dim);
+  transition: all 0.3s ease;
+}
+
+.cowork-expert__card--selected .cowork-expert__card-avatar,
+.cowork-expert__card-avatar--on {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.cowork-expert__card-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+  flex: 1;
+}
+
+/* 隐藏式操作区 */
+.cowork-expert__card-actions {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transform: translateX(10px);
+  transition: all 0.25s ease;
+  pointer-events: none;
+}
+
+.cowork-expert__card:hover .cowork-expert__card-actions {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.cowork-task-card__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--bg-elev-high);
+  color: var(--fg-dim);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.cowork-task-card__btn:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--fg);
+}
+
+.cowork-task-card__btn--danger:hover {
+  background: rgba(220, 38, 38, 0.1);
+  color: rgb(220, 38, 38);
+}
+
+.cowork-expert__card-roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.cowork-expert__expert-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-dim);
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+.cowork-expert__card-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-soft);
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.cowork-expert__card-mode {
+  font-weight: 500;
+  color: var(--fg-faint);
+}
+
+.cowork-expert__card--selected .cowork-expert__card-mode {
+  color: var(--accent);
+}
+
+/* 新建团队占位卡片 */
+.cowork-expert__card--new {
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--border-soft);
+  background: transparent;
+  color: var(--fg-dim);
+  font-weight: 500;
+  gap: 8px;
+  box-shadow: none;
+}
+
+.cowork-expert__card--new:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 3%, transparent);
+}
+
+/* =========================================================
+   Composer (Expert Task Input Area)
+   ========================================================= */
+
+.cowork-expert__composer {
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  box-shadow: none;
+}
+
+.cowork-expert__composer-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.cowork-expert__composer-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+
+.cowork-expert__composer-team {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.cowork-expert__composer-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.cowork-expert__composer-roster {
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.cowork-expert__composer-tag {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.cowork-expert__composer-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--fg);
+  resize: vertical;
+  min-height: 80px;
+  outline: none;
+  transition: border-color 0.2s;
+  margin-bottom: 16px;
+}
+
+.cowork-expert__composer-input:focus {
+  border-color: var(--accent);
+}
+
+/* TeamManager "allow web search" toggle + ExpertPanel search badge/banner.
+   These are small affordances layered onto the existing expert styles. */
+.cowork-expert__search-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fg-dim);
+}
+.cowork-expert__search-toggle input {
+  cursor: pointer;
+}
+.cowork-expert__search-toggle-label {
+  user-select: none;
+}
+.cowork-expert__search-toggle-hint {
+  font-size: 11.5px;
+  color: var(--fg-faint, var(--fg-dim));
+  margin-top: 4px;
+  line-height: 1.5;
+}
+/* Badge on a team card name when the team allows web search. */
+.cowork-expert__search-badge {
+  margin-left: 4px;
+  font-size: 11px;
+}
+/* Banner above the composer when the active team allows web search. */
+.cowork-expert__search-banner {
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  background: var(--bg-soft);
+  border-left: 2px solid var(--accent-soft);
+  padding: 4px 8px;
+  margin: 6px 0;
+  border-radius: var(--radius-sm);
+}
+
+/* Filter tabs above the team grid — scope 17 teams so the user isn't drowned.
+   Mirrors the cowork-taskform__delivery-opt pill style. */
+.cowork-expert__filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.cowork-expert__filter {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-soft);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.cowork-expert__filter:hover {
+  color: var(--fg);
+  border-color: var(--accent-soft);
+}
+.cowork-expert__filter--active {
+  color: var(--fg);
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+
+/* Search card inside the CollabStream — visually distinct from an expert's
+   spoken answer so the user sees "the expert is researching X" at a glance. */
+.cowork-expert__search-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  background: var(--bg-soft);
+  border: 1px dashed var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 3px 9px;
+  margin: 4px 0;
+}
+/* Peer identity for the collab stream — turns were a stack of identical text
+   boxes; now each expert gets a colored initial avatar so peers are visually
+   distinct (flagship "peer collaboration" visual). */
+.cowork-expert__turn-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.cowork-expert__turn-avatar {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  font-family: var(--mono);
+}
+.cowork-expert__search-card-icon {
+  font-size: 11px;
+}
+.cowork-expert__search-card-label {
+  font-style: italic;
+  color: var(--fg-faint, var(--fg-dim));
+}
+.cowork-expert__search-card-query {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+/* Run button group: cost-hint chip + run button, so a search team's "slow &
+   costly" nature is visible right next to the button, not buried in a tooltip. */
+.cowork-expert__run-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cowork-expert__cost-hint {
+  font-size: 11px;
+  color: var(--fg-faint, var(--fg-dim));
+  white-space: nowrap;
+}
+
+.cowork-expert__composer-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.cowork-expert__composer-opts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cowork-expert__composer-select {
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+}
+
+.cowork-expert__composer-rounds {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--fg-dim);
+}
+
+.cowork-expert__composer-rounds input {
+  width: 48px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: var(--bg);
+  color: var(--fg);
+  text-align: center;
+  outline: none;
+}
+
+/* --- Preference panel (portrait editor; cowork.md / dev.md) --- */
+.preference-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 16px 20px;
+  gap: 14px;
+  overflow: hidden;
+}
+.preference-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.preference-panel__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.preference-panel__hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--fg-muted, var(--fg));
+  opacity: 0.75;
+  max-width: 60ch;
+  line-height: 1.5;
+}
+.preference-panel__editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
+}
+.preference-panel__textarea {
+  flex: 1;
+  resize: none;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  line-height: 1.6;
+  outline: none;
+  min-height: 200px;
+}
+.preference-panel__textarea:focus {
+  border-color: var(--accent, #4f8cff);
+}
+.preference-panel__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--fg-muted, var(--fg));
+  opacity: 0.8;
+}
+.preference-panel__count {
+  font-variant-numeric: tabular-nums;
+}
+.preference-panel__count--over {
+  color: var(--danger, #d33);
+  opacity: 1;
+  font-weight: 600;
+}
+.preference-panel__warn {
+  color: var(--danger, #d33);
+}
+.preference-panel__path {
+  margin-left: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  opacity: 0.6;
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Office preference presets (template list + editor, cowork mode) --- */
+.preference-panel__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 14px;
+}
+.preference-preset-list {
+  display: flex;
+  flex-direction: column;
+  width: 220px;
+  flex-shrink: 0;
+  min-height: 0;
+  gap: 8px;
+}
+.preference-preset-list__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 6px;
+}
+.preference-preset-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.preference-preset-list__item:hover {
+  background: var(--accent-soft);
+}
+.preference-preset-list__item--selected {
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+.preference-preset-list__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preference-preset-list__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+}
+.preference-preset-list__empty {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--fg-muted, var(--fg));
+  opacity: 0.7;
+  line-height: 1.5;
+}
+.preference-preset-list__foot {
+  display: flex;
+  gap: 6px;
+}
+.preference-preset-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  gap: 8px;
+}
+.preference-preset-editor__name {
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 13px;
+  outline: none;
+}
+.preference-preset-editor__name:focus {
+  border-color: var(--accent);
+}
+.preference-preset-editor__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.preference-preset-editor__inuse {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* Inline preference panel (coding mode) */
+.preference-inline {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+.preference-inline__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.preference-inline__header h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+.preference-inline__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+/* ============================================================
+   CalendarTaskPanel (merged calendar + tasks)
+   ============================================================ */
+.cowork-calendar-task {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+.cowork-calendar-task .cowork-main__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.cowork-calendar-task__nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.cowork-calendar-task__title {
+  font-weight: 600;
+  font-size: 14px;
+  min-width: 100px;
+  text-align: center;
+}
+.cowork-calendar-task__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cowork-calendar-task__view-switcher {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+}
+.cowork-calendar-task__view-switcher .btn--active {
+  background: var(--bg);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+.cowork-calendar-task__search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+}
+.cowork-calendar-task__search input {
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 12px;
+  width: 100px;
+  color: var(--text);
+}
+.cowork-calendar-task__create-wrap {
+  position: relative;
+}
+.cowork-calendar-task__create-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  z-index: var(--z-dock);
+  min-width: 160px;
+  padding: 4px;
+}
+.cowork-calendar-task__create-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.1s;
+}
+.cowork-calendar-task__create-item:hover {
+  background: var(--bg-secondary);
+}
+.cowork-calendar-task__create-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+.cowork-calendar-task__create-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 4px 10px;
+}
+.cowork-calendar-task__create-tpl {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Body layout */
+.cowork-calendar-task__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.cowork-calendar-task__main {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+.cowork-calendar-task__sidebar {
+  width: 260px;
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cowork-calendar-task__sidebar-section {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.cowork-calendar-task__sidebar-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--text);
+}
+.cowork-calendar-task__task-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Calendar grid */
+.cowork-calendar-task__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: auto repeat(6, 1fr);
+  gap: 1px;
+  background: var(--border);
+  height: 100%;
+}
+.cowork-calendar-task__weekday {
+  padding: 6px 4px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg);
+}
+.cowork-calendar-task__day {
+  background: var(--bg);
+  padding: 4px;
+  min-height: 0;
+  overflow: hidden;
+  cursor: pointer;
+  transition: background 0.1s;
+  display: flex;
+  flex-direction: column;
+}
+.cowork-calendar-task__day:hover { background: var(--bg-secondary); }
+.cowork-calendar-task__day--empty { background: var(--bg-secondary); opacity: 0.3; cursor: default; }
+.cowork-calendar-task__day--today .cowork-calendar-task__day-num {
+  background: var(--primary, #4488ff);
+  color: #fff;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+.cowork-calendar-task__day--selected { outline: 2px solid var(--primary, #4488ff); outline-offset: -2px; }
+.cowork-calendar-task__day--holiday { background: rgba(255, 68, 68, 0.06); }
+.cowork-calendar-task__day-num { font-size: 12px; font-weight: 500; margin-bottom: 2px; flex-shrink: 0; }
+.cowork-calendar-task__holiday-tag { display: block; font-size: 9px; color: #e22; padding: 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cowork-calendar-task__day-events { flex: 1; overflow: hidden; display: flex; flex-direction: column; gap: 1px; }
+.cowork-calendar-task__event-dot {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  color: #fff;
+  overflow: hidden;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cowork-calendar-task__event-title { overflow: hidden; text-overflow: ellipsis; }
+.cowork-calendar-task__more { font-size: 10px; color: var(--text-secondary); padding: 0 4px; }
+
+/* Event card in sidebar */
+.cowork-calendar-task__event-card {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.cowork-calendar-task__event-card:hover { border-color: var(--primary, #4488ff); }
+.cowork-calendar-task__event-head { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.cowork-calendar-task__dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.cowork-calendar-task__event-name { font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cowork-calendar-task__event-time { font-size: 11px; color: var(--text-secondary); }
+.cowork-calendar-task__badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+.cowork-calendar-task__badge--task { background: rgba(68, 136, 255, 0.12); color: var(--primary, #4488ff); }
+.cowork-calendar-task__badge--calendar { background: rgba(68, 136, 255, 0.12); color: var(--primary, #4488ff); }
+
+/* Task filters */
+.cowork-calendar-task__task-filters { display: flex; gap: 4px; }
+.cowork-calendar-task__filter {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.cowork-calendar-task__filter:hover { border-color: var(--primary, #4488ff); color: var(--text); }
+.cowork-calendar-task__filter--active { background: var(--primary, #4488ff); color: #fff; border-color: var(--primary, #4488ff); }
+
+/* Task card */
+.cowork-calendar-task__task-card {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  transition: border-color 0.15s;
+}
+.cowork-calendar-task__task-card:hover { border-color: var(--primary, #4488ff); }
+.cowork-calendar-task__task-card--paused { opacity: 0.6; }
+.cowork-calendar-task__task-head { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.cowork-calendar-task__task-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-secondary); }
+.cowork-calendar-task__task-dot--on { background: var(--ok); }
+.cowork-calendar-task__task-name { font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cowork-calendar-task__task-meta { font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; }
+.cowork-calendar-task__task-actions { display: flex; gap: 2px; }
+.cowork-calendar-task__btn {
+  padding: 3px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s;
+}
+.cowork-calendar-task__btn:hover { background: var(--bg-secondary); color: var(--text); }
+
+/* Week view */
+.cowork-calendar-task__week { display: flex; flex-direction: column; height: 100%; }
+.cowork-calendar-task__week-header { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.cowork-calendar-task__week-time-col { width: 48px; flex-shrink: 0; font-size: 11px; color: var(--text-secondary); text-align: right; padding-right: 8px; }
+.cowork-calendar-task__week-day-header { flex: 1; text-align: center; padding: 8px 4px; font-size: 12px; }
+.cowork-calendar-task__week-day-header--today { background: rgba(68, 136, 255, 0.08); }
+.cowork-calendar-task__week-day-name { display: block; font-size: 11px; color: var(--text-secondary); }
+.cowork-calendar-task__week-day-num { display: block; font-size: 16px; font-weight: 600; }
+.cowork-calendar-task__week-day-header--today .cowork-calendar-task__week-day-num {
+  background: var(--primary, #4488ff); color: #fff; border-radius: 50%; width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.cowork-calendar-task__week-body { flex: 1; overflow-y: auto; }
+.cowork-calendar-task__week-row { display: flex; border-bottom: 1px solid var(--border); min-height: 40px; }
+.cowork-calendar-task__week-cell { flex: 1; border-left: 1px solid var(--border); padding: 2px; min-height: 40px; }
+.cowork-calendar-task__week-event { padding: 2px 6px; border-radius: var(--radius-sm); color: #fff; font-size: 11px; cursor: pointer; margin-bottom: 1px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* List view */
+.cowork-calendar-task__list { padding: 12px; overflow-y: auto; }
+.cowork-calendar-task__list-group { margin-bottom: 16px; }
+.cowork-calendar-task__list-date { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.cowork-calendar-task__list-item { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: var(--radius-sm); cursor: pointer; transition: background 0.1s; }
+.cowork-calendar-task__list-item:hover { background: var(--bg-secondary); }
+.cowork-calendar-task__list-time { font-size: 12px; color: var(--text-secondary); min-width: 48px; }
+.cowork-calendar-task__list-title { font-size: 13px; font-weight: 500; }
+.cowork-calendar-task__list-loc { font-size: 11px; color: var(--text-secondary); margin-left: auto; }
+/* Push-routing badge on calendar events (IM 💬 / email ✉️). Shows the event's
+   reminder is configured to push beyond the desktop toast. */
+.cowork-calendar-task__push-badge { font-size: 11px; cursor: help; opacity: 0.85; }
+.cowork-calendar-task__empty-day { font-size: 12px; color: var(--text-secondary); text-align: center; padding: 16px 0; }
+.cowork-calendar-task__loading { font-size: 12px; color: var(--text-secondary); text-align: center; padding: 16px 0; }
+
+/* Search results */
+.cowork-calendar-task__search-results {
+  position: absolute;
+  top: 48px;
+  right: 12px;
+  width: 280px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  z-index: var(--z-dock);
+  max-height: 300px;
+  overflow-y: auto;
+}
+.cowork-calendar-task__search-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 12px; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+.cowork-calendar-task__search-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; font-size: 13px; transition: background 0.1s; }
+.cowork-calendar-task__search-item:hover { background: var(--bg-secondary); }
+.cowork-calendar-task__search-time { margin-left: auto; font-size: 11px; color: var(--text-secondary); }
+  
+/* Cowork top bar UI alignment fix */
+.app--cowork .app-chrome__tab-strip { display: flex !important; }
+/* The left sidebar-collapse toggle (app-chrome__panel-toggle--left) is shown in
+   cowork mode too: CoWorkLayout consumes sidebarCollapsed (it adds the
+   cowork-layout--sidebar-collapsed class and conditionally renders the aside),
+   so the same control that collapses the sidebar in coding mode works here. */
+
+/* --- RAG / cowork responsive layout ---
+   The knowledge-base panels (toolbar, graph, dock) were designed for wide
+   screens. These breakpoints make them usable on tablets and narrow windows:
+   the toolbar wraps with a min-width search box and the dock narrows. */
+@media (max-width: 940px) {
+  /* Toolbar: let the collection selector shrink and give the search box room. */
+  .rag-toolbar__select { max-width: 120px; }
+  .rag-toolbar__search { min-width: 140px; flex: 1 1 140px; }
+  /* Stack the legend vertically so it doesn't overflow the narrower canvas. */
+  .rag-legend { flex-direction: column; align-items: flex-start; gap: 4px; }
+}
+
+@media (max-width: 760px) {
+  /* Hide the filter dropdown and selection-mode toggle on narrow screens —
+     they're power-user controls; the search + import buttons stay. */
+  .rag-toolbar__btn[title="筛选"],
+  .rag-toolbar__btn[title="选择模式"] { display: none; }
+  /* Dock: tighten padding so file trees and entity lists fit more content. */
+  .cowork-dock__body { padding: 6px 4px; }
+}
+
+
+/* --- RagPanel split layout (Obsidian-style) --- */
+.rag-panel--split {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.rag-tree {
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border-soft);
+  background: var(--sidebar-bg);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.rag-tree__header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 6px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.rag-tree__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rag-tree__new-btn {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rag-tree__new-btn:hover {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+
+.rag-tree__list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.rag-tree__item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  color: var(--fg-dim);
+  cursor: pointer;
+  transition: background 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rag-tree__item:hover {
+  background: var(--sidebar-hover);
+  color: var(--fg);
+}
+.rag-tree__item--active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.rag-tree__count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--fg-faint);
+  background: var(--bg-elev);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.rag-panel__main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* --- Collection create modal (matches TaskForm style) --- */
+.rag-create-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+}
+
+.rag-create-modal {
+  width: min(440px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.rag-create-modal__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.rag-create-modal__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.rag-create-modal__close {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rag-create-modal__close:hover {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.rag-create-modal__body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rag-create-modal__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rag-create-modal__label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.rag-create-modal__templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rag-create-modal__template {
+  padding: 5px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg-dim);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.rag-create-modal__template:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.rag-create-modal__template--selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.rag-create-modal__parent {
+  padding: 6px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  color: var(--fg-dim);
+}
+
+.rag-create-modal__input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font-size: 13px;
+  outline: none;
+}
+.rag-create-modal__input:focus {
+  border-color: var(--accent);
+}
+
+.rag-create-modal__preview {
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.rag-create-modal__foot {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 18px 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
+@keyframes customSelectFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+
+/* toast drain bar — remaining-time indicator synced to TOAST_AUTO_DISMISS_MS */
+.toast::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: var(--accent);
+  opacity: 0.5;
+  transform-origin: left;
+  animation: toast-drain var(--toast-drain, 2500ms) linear forwards;
+}
+.toast--warn::after { background: var(--warn); }
+.toast--error::after { background: var(--danger); }
+@keyframes toast-drain {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast::after { animation: none; opacity: 0.25; }
+}

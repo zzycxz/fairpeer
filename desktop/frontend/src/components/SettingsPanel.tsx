@@ -124,7 +124,12 @@ export function SettingsPanel({ onClose, onChanged, initialTab, initialPayload }
           <main className="settings-center__content">
             {needsSettings && err && <div className="banner banner--error">{err}</div>}
             {needsSettings && !s ? (
-              <div className="empty">{t("settings.loading")}</div>
+              <div className="skeleton" role="status" aria-label={t("settings.loading")}>
+                <div className="skeleton__line skeleton__line--w40" />
+                <div className="skeleton__line" />
+                <div className="skeleton__line" />
+                <div className="skeleton__line skeleton__line--w60" />
+              </div>
             ) : (
               <>
                 {tab === "general" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
@@ -1340,7 +1345,12 @@ function HooksSection({ onChanged }: { onChanged: () => void }) {
             {jsonMessage && <div className="hooks-json-panel__message">{jsonMessage}</div>}
           </div>
         )}
-        {!view && <div className="empty">{t("settings.loading")}</div>}
+        {!view && <div className="skeleton" role="status" aria-label={t("settings.loading")}>
+                <div className="skeleton__line skeleton__line--w40" />
+                <div className="skeleton__line" />
+                <div className="skeleton__line" />
+                <div className="skeleton__line skeleton__line--w60" />
+              </div>}
       </SettingsSection>
     </>
   );
@@ -4160,6 +4170,7 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
 // swatches + accent are read from CSS variables at render time so they always
 // reflect the live token values for the currently-resolved light/dark mode.
 const THEME_STYLE_META: Record<ThemeStyle, { name: string; zh: DictKey; note: DictKey; desc: DictKey }> = {
+  hearth: { name: "Hearth", zh: "settings.style.hearth.zh", note: "settings.style.hearth.note", desc: "settings.style.hearth.desc" },
   graphite: { name: "Graphite", zh: "settings.style.graphite.zh", note: "settings.style.graphite.note", desc: "settings.style.graphite.desc" },
   aurora: { name: "Aurora", zh: "settings.style.aurora.zh", note: "settings.style.aurora.note", desc: "settings.style.aurora.desc" },
   slate: { name: "Slate", zh: "settings.style.slate.zh", note: "settings.style.slate.note", desc: "settings.style.slate.desc" },

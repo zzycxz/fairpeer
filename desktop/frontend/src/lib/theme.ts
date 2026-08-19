@@ -18,6 +18,7 @@ export type Theme = "auto" | "light" | "dark";
 export type ResolvedTheme = Exclude<Theme, "auto">;
 
 export const THEME_STYLES = [
+  "hearth",
   "graphite",
   "aurora",
   "slate",
@@ -39,7 +40,9 @@ const LEGACY_STYLE_MAP: Record<string, ThemeStyle> = {
   glacier: "slate",
 };
 
-const DEFAULT_THEME_STYLE: ThemeStyle = "slate";
+// ui-redesign §2.1: hearth (炉温 light / 余烬 dark) is the brand-continuation
+// direction from the mockups and ships as the default for new users.
+const DEFAULT_THEME_STYLE: ThemeStyle = "hearth";
 const DEFAULT_THEME: Theme = "light";
 
 const THEME_KEY = "fairpeer-theme";

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 export interface Toast {
   id: number;
@@ -19,6 +19,9 @@ export function useToast() {
 
 let nextId = 1;
 
+// Auto-dismiss window; also drives the CSS drain bar (toast.css var --toast-drain).
+export const TOAST_AUTO_DISMISS_MS = 2500;
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
@@ -29,7 +32,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const timer = setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
       timers.current.delete(id);
-    }, 2500);
+    }, TOAST_AUTO_DISMISS_MS);
     timers.current.set(id, timer);
   }, []);
 
@@ -45,7 +48,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div className="toast-container" role="status" aria-live="polite">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast toast--${t.level}`} onClick={() => dismissToast(t.id)}>
+          <div
+            key={t.id}
+            className={`toast toast--${t.level}`}
+            style={{ "--toast-drain": `${TOAST_AUTO_DISMISS_MS}ms` } as CSSProperties}
+            onClick={() => dismissToast(t.id)}
+          >
             {t.level === "warn" && <span className="toast__icon">⚠️</span>}
             {t.level === "error" && <span className="toast__icon">❌</span>}
             <span className="toast__text">{t.text}</span>

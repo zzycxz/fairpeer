@@ -50,6 +50,13 @@ export const BUILTIN_DEV_PRESETS: ProfilePreset[] = [
     builtin: true,
   },
   {
+    id: "universal-code",
+    name: "普遍适用",
+    content:
+      "写的代码要普遍适用，不针对当前一个用例写死：优先标准库和惯用写法，不依赖特定机器或环境；不硬编码绝对路径、密钥、账号；公共逻辑抽成可复用函数；处理常见边界（空输入、异常路径、超大输入）；注意跨平台差异（路径分隔符、编码、大小写）。",
+    builtin: true,
+  },
+  {
     id: "explain-more",
     name: "多解释",
     content:

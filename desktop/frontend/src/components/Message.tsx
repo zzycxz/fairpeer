@@ -361,6 +361,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   const processWithText = Boolean(item.reasoning) && hasText;
   return (
     <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`}>
+      {!processOnly && <div className="msg__eyebrow" aria-hidden="true">{t("msg.assistantEyebrow")}</div>}
       {item.reasoning && (
         <div className="reasoning">
           <button

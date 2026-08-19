@@ -327,7 +327,7 @@ function GraphCanvasInner({
           id: n.id,
           label: n.label,
           val: Math.max(2, (n.relationCnt || 0)), // Node size based on degree
-          color: isSelected ? "#f97316" : (isDimmed ? "rgba(100,100,100,0.2)" : nodeColor(n.type)),
+          color: isSelected ? "var(--accent)" : (isDimmed ? "rgba(100,100,100,0.2)" : nodeColor(n.type)),
           collection: n.collection,
         });
       }

@@ -5,7 +5,7 @@ import type { CSSProperties, DragEvent, KeyboardEvent as ReactKeyboardEvent, Mou
 import { FileText, Plus, Search, Users, X } from "lucide-react";
 import { normalizeCollaborationMode, normalizeMode, type Mode, type TabMeta } from "../lib/types";
 import { projectColorValue } from "../lib/projectColors";
-import { useT } from "../lib/i18n";
+import { useT, t as tr } from "../lib/i18n";
 import { Tooltip } from "./Tooltip";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 
@@ -25,7 +25,7 @@ interface TabBarProps {
 type DropSide = "before" | "after";
 
 function tabDisplayTitle(tab: TabMeta): string {
-  if (tab.expertSession) return tab.expertSession.teamName || tab.topicTitle?.trim() || "专家会话";
+  if (tab.expertSession) return tab.expertSession.teamName || tab.topicTitle?.trim() || tr("tabs.expertFallback");
   if (tab.tabType === "file" || tab.scope === "file") return tab.topicTitle?.trim() || tab.filePath?.split("/").filter(Boolean).pop() || "File";
   const title = tab.topicTitle?.trim();
   if (tab.scope === "global") return title || "Global";

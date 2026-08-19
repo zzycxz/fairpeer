@@ -470,7 +470,7 @@ export function HistoryPanel({
                               {!isTrash && !s.current && s.open && <span className="hist-item__badge hist-item__badge--open">{tr("history.open")}</span>}
                               {isTrash && <span className="hist-item__badge hist-item__badge--deleted">{tr("history.deleted")}</span>}
                               {isTrash && (
-                                <span className="hist-item__badge" style={{ background: s.profile === "cowork" ? "rgba(242, 107, 49, 0.15)" : "rgba(100, 150, 255, 0.15)", color: s.profile === "cowork" ? "#f26b31" : "#80aaff", border: "none" }}>
+                                <span className="hist-item__badge" style={{ background: s.profile === "cowork" ? "var(--accent-soft)" : "var(--accent-alt-soft)", color: s.profile === "cowork" ? "var(--accent)" : "var(--accent-alt)", border: "none" }}>
                                   {s.profile === "cowork" ? "办公" : "编码"}
                                 </span>
                               )}

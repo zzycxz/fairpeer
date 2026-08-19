@@ -4,20 +4,16 @@ import logoSymbol from "./assets/logo-symbol.png";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
   Activity,
-  ChevronDown,
-  Command,
-  Download,
+  Globe,
   Search,
   SquarePen,
-  FileDown,
-  FileImage,
   FileText,
-  FileJson,
   GitBranch,
   History,
   MessageSquare,
   Settings as SettingsIcon,
   Pencil,
+  PanelLeft,
   Trash2,
   Brain,
   Cpu,
@@ -42,6 +38,8 @@ import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
 import { ClearContextCard } from "./components/ClearContextCard";
 import { SidebarFooter } from "./components/SidebarFooter";
+import { TerminalPanel, loadTerminalOpen, saveTerminalOpen } from "./components/TerminalPanel";
+import { SideSessionPane } from "./components/SideSessionPane";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SidebarSessions } from "./components/SidebarSessions";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
@@ -51,13 +49,13 @@ import { useGlobalShortcut } from "./lib/keyboardShortcuts";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ContextPanel } from "./components/ContextPanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
+import { PreviewPane } from "./components/PreviewPane";
 import { Tooltip } from "./components/Tooltip";
 import { StartupSplash, shouldShowStartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { AttachmentViewer } from "./components/AttachmentViewer";
 import { AppChrome } from "./components/AppChrome";
 import { ProjectTree } from "./components/ProjectTree";
-import { CopyButton } from "./components/CopyButton";
 import { parseTodos } from "./lib/tools";
 import { shouldShowTodoPanel } from "./lib/todoVisibility";
 import {
@@ -133,7 +131,26 @@ const SIDEBAR_COLLAPSE_THRESHOLD = 96;
 const DOCK_CLOSE_THRESHOLD = 180;
 const RIGHT_DOCK_MAX_WIDTH = 860;
 
-type RightDockMode = "context" | "files" | "changed";
+type RightDockMode = "context" | "files" | "changed" | "preview";
+
+const RIGHT_DOCK_MODE_KEY = "fairpeer.rightDockMode";
+const PREVIEW_URL_KEY = "fairpeer.previewUrl";
+
+function loadRightDockMode(): RightDockMode {
+  try {
+    const v = localStorage.getItem(RIGHT_DOCK_MODE_KEY);
+    if (v === "files" || v === "changed" || v === "preview") return v;
+  } catch { /* storage unavailable */ }
+  return "files";
+}
+
+function loadPreviewUrl(): string {
+  try {
+    return localStorage.getItem(PREVIEW_URL_KEY) || "";
+  } catch {
+    return "";
+  }
+}
 type WorkspaceRevealRequest = { id: number; path: string };
 type WorkspaceFileListRequest = { id: number; paths: string[] };
 type WorkspaceChangeListEntry = { key: string; path: string; meta: string; time: string; detail: string };
@@ -806,6 +823,9 @@ export default function App() {
     const unsub = onEvent((e) => {
       if (e.kind === "turn_done") {
         setDockRefreshKey((v) => v + 1);
+        // Changed-tab activity dot (pane-system §3.3): lit after each turn,
+        // cleared when the user visits the 改动 tab.
+        setChangedDirty(true);
       }
     });
     return unsub;
@@ -813,7 +833,53 @@ export default function App() {
 
   const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
   const [workspacePanelMaximized, setWorkspacePanelMaximized] = useState(false);
-  const [rightDockMode, setRightDockMode] = useState<RightDockMode>("context");
+  const [rightDockMode, setRightDockMode] = useState<RightDockMode>(loadRightDockMode);
+  // Pane-system P1 (docs/pane-system-spec.md §3.2/§3.3): auto-detected preview
+  // URL, manual-close suppression, and the changed-tab activity dot.
+  const [previewUrl, setPreviewUrl] = useState(loadPreviewUrl);
+  const [changedDirty, setChangedDirty] = useState(false);
+  const previewSuppressedRef = useRef("");
+
+  // Auto-detect the newest localhost URL in tool output; on a NEW url, switch
+  // to the preview tab and open the dock — unless the user manually closed it
+  // on this same url (pane-system §3.3 anti-nag guard).
+  useEffect(() => {
+    const re = /\b(?:https?:\/\/)?(?:localhost|127\.0\.0\.1)(?::\d{2,5})\b[^\s"'<>)]*/i;
+    for (let i = state.items.length - 1; i >= 0; i--) {
+      const it = state.items[i];
+      if (it.kind !== "tool") continue;
+      const m = re.exec(it.output ?? "");
+      if (!m) continue;
+      const raw = m[0];
+      const url = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
+      if (url === previewUrl) return;
+      setPreviewUrl(url);
+      if (previewSuppressedRef.current !== url) {
+        setRightDockMode("preview");
+        setWorkspacePanelOpen(true);
+      }
+      return;
+    }
+  }, [state.items, previewUrl]);
+
+  // Remember the last active dock tab (files/changed/preview).
+  useEffect(() => {
+    try {
+      if (rightDockMode !== "context") localStorage.setItem(RIGHT_DOCK_MODE_KEY, rightDockMode);
+    } catch { /* storage unavailable */ }
+  }, [rightDockMode]);
+
+  const commitPreviewUrl = useCallback((url: string) => {
+    setPreviewUrl(url);
+    try {
+      localStorage.setItem(PREVIEW_URL_KEY, url);
+    } catch { /* storage unavailable */ }
+  }, []);
+
+  // Visiting the 改动 tab clears its activity dot.
+  useEffect(() => {
+    if (rightDockMode === "changed") setChangedDirty(false);
+  }, [rightDockMode]);
   const [workspaceRevealRequest, setWorkspaceRevealRequest] = useState<WorkspaceRevealRequest | null>(null);
   const [workspaceChangeRevealRequest, setWorkspaceChangeRevealRequest] = useState<WorkspaceRevealRequest | null>(null);
   const [workspaceFileListRequest, setWorkspaceFileListRequest] = useState<WorkspaceFileListRequest | null>(null);
@@ -826,7 +892,6 @@ export default function App() {
   const [expandThinking, setExpandThinking] = useState(false);
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
-  const [topicExportOpen, setTopicExportOpen] = useState(false);
   const [sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
   const [workspaceTogglePressed, setWorkspaceTogglePressed] = useState(false);
   const [clearContextPending, setClearContextPending] = useState(false);
@@ -845,6 +910,31 @@ export default function App() {
 
   const closeTransientOverlays = useCallback(() => {
     setTransientOverlayDismissSignal((signal) => signal + 1);
+  }, []);
+
+  // Toggleable terminal console under the composer (ZCode-style Ctrl+`).
+  const [terminalOpen, setTerminalOpen] = useState(loadTerminalOpen);
+  // Bottom axis's side session (pane-system §3.5): which open tab the mini
+  // composer talks to; null → auto-pick the first non-active session tab.
+  const [sideSessionTabId, setSideSessionTabId] = useState<string | null>(null);
+  const toggleTerminal = useCallback(() => {
+    setTerminalOpen((v) => {
+      saveTerminalOpen(!v);
+      return !v;
+    });
+  }, []);
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.ctrlKey && event.code === "Backquote") {
+        event.preventDefault();
+        setTerminalOpen((v) => {
+          saveTerminalOpen(!v);
+          return !v;
+        });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   const reloadSidebarImConnections = useCallback(async () => {
@@ -1150,7 +1240,6 @@ export default function App() {
   // Sidebar "Recent" sessions (ui-redesign §4-B4): loaded proactively, refreshed
   // on tab switch and after resume/rename/delete so ages stay fresh.
   const [sidebarSessions, setSidebarSessions] = useState<SessionMeta[]>([]);
-  const [sidebarFilesOpen, setSidebarFilesOpen] = useState(true);
   const refreshSidebarSessions = useCallback(() => {
     listSessions().then((all) => setSidebarSessions(all)).catch(() => { /* offline: keep last list */ });
   }, [listSessions]);
@@ -1527,20 +1616,9 @@ export default function App() {
     [sessionTitle, state.items, state.live],
   );
 
-  useEffect(() => {
-    if (!topicExportOpen) return;
-    const onDown = (event: MouseEvent) => {
-      const target = event.target as Element | null;
-      if (!target?.closest(".topicbar__export")) setTopicExportOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [topicExportOpen]);
-
   const exportSession = useCallback(
     async (format: "markdown" | "json" | "pdf" | "image") => {
       const base = safeFilename(sessionTitle);
-      setTopicExportOpen(false);
       try {
         if (format === "json") {
           const path = await app.PickExportFile(`${base}.json`, "application/json");
@@ -1892,11 +1970,15 @@ export default function App() {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onDone);
         window.removeEventListener("pointercancel", onDone);
+        if (event.currentTarget && event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
       };
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
+      event.currentTarget.setPointerCapture(event.pointerId);
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onDone);
       window.addEventListener("pointercancel", onDone);
@@ -1992,11 +2074,15 @@ export default function App() {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onDone);
         window.removeEventListener("pointercancel", onDone);
+        if (event.currentTarget && event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
       };
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
+      event.currentTarget.setPointerCapture(event.pointerId);
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onDone);
       window.addEventListener("pointercancel", onDone);
@@ -2051,9 +2137,12 @@ export default function App() {
     if (!workspacePanelOpen) {
       return;
     }
+    // Pane-system §3.3: a manual close suppresses auto-reopening for THIS url —
+    // a NEW dev-server url still triggers the preview tab.
+    previewSuppressedRef.current = previewUrl;
     setWorkspacePanelMaximized(false);
     setWorkspacePanelOpen(false);
-  }, [closeTransientOverlays, workspacePanelOpen]);
+  }, [closeTransientOverlays, previewUrl, workspacePanelOpen]);
 
   const toggleWorkspacePanel = useCallback(() => {
     pulseWorkspaceToggle();
@@ -2164,14 +2253,6 @@ export default function App() {
       }) as CSSProperties,
     [sidebarWidth, workspacePanelRenderWidth],
   );
-
-  const setWorkspacePanel = useCallback((open: boolean) => {
-    if (open) {
-      openWorkspacePanel();
-    } else {
-      closeWorkspacePanel();
-    }
-  }, [closeWorkspacePanel, openWorkspacePanel]);
 
   const addWorkspaceTextToComposer = useCallback((text: string) => {
     setComposerInsertRequest({ id: Date.now(), text });
@@ -2659,60 +2740,9 @@ export default function App() {
   const sidebarImConnectedCount = sidebarImConnections.filter((connection) => connection.status === "connected").length;
   const sidebarImOnline = sidebarImConnectedCount > 0;
 
-  // sessionActions is the Copy + Export control block. It is shared by two
-  // render sites: the dev-mode topicbar (App.tsx below) and the CoWork header
-  // (passed to CoWorkLayout as a prop). Both are in this render scope, so all
-  // dependencies (getSessionMarkdown, exportSession, topicExportOpen,
-  // sessionHasContent) close over the same state. Defining it once keeps the
-  // two surfaces in sync and fixes the bug where Copy/Export were unreachable
-  // in CoWork mode (the topicbar lives in .chat-pane, which is display:none
-  // under .app--cowork). The .topicbar__export class is preserved so the
-  // outside-click handler (App.tsx ~1313) keeps closing the dropdown.
-  const sessionActions = (
-    <>
-      <CopyButton
-        getText={getSessionMarkdown}
-        label={t("topicBar.copyAll")}
-        showLabel={false}
-        className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
-      />
-      <div className={`topicbar__export${topicExportOpen ? " topicbar__export--open" : ""}`}>
-        <Tooltip label={t("topicBar.export")}>
-          <button
-            className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
-            type="button"
-            disabled={!sessionHasContent}
-            aria-label={t("topicBar.export")}
-            aria-haspopup="menu"
-            aria-expanded={topicExportOpen}
-            onClick={() => setTopicExportOpen((open) => !open)}
-          >
-            <Download size={14} />
-          </button>
-        </Tooltip>
-        {topicExportOpen && (
-          <div className="topicbar__export-menu" role="menu">
-            <button type="button" role="menuitem" onClick={() => void exportSession("markdown")}>
-              <FileText size={13} />
-              <span>{t("topicBar.exportMarkdown")}</span>
-            </button>
-            <button type="button" role="menuitem" onClick={() => void exportSession("json")}>
-              <FileJson size={13} />
-              <span>{t("topicBar.exportJson")}</span>
-            </button>
-            <button type="button" role="menuitem" onClick={() => void exportSession("pdf")}>
-              <FileDown size={13} />
-              <span>{t("topicBar.exportPdf")}</span>
-            </button>
-            <button type="button" role="menuitem" onClick={() => void exportSession("image")}>
-              <FileImage size={13} />
-              <span>{t("topicBar.exportImage")}</span>
-            </button>
-          </div>
-        )}
-      </div>
-    </>
-  );
+  // (sessionActions block removed 2026-08-18: Copy / Export relocated to the
+  // project-tree topic context menu; exportSession/getSessionMarkdown below
+  // remain the implementation and are wired through ProjectTree props.)
 
   const headerNode = !preferenceOpen && (
     <header className="topicbar">
@@ -2756,7 +2786,8 @@ export default function App() {
         {topicbarSubtitleVisible && (
           <div className="topicbar__subtitle" title={topicbarSubtitleTitle}>
             {topicbarWorkspaceLabel && <span>{topicbarWorkspaceLabel}</span>}
-            {state.meta?.label && <span className="topicbar__submodel">{state.meta.label}</span>}
+            {/* Model label dropped from the header (2026-08-18): it already
+                lives on the composer's model selector. */}
             {topicbarImSourcePlatform && (
               <span className={`topicbar__source-chip topicbar__source-chip--${topicbarImSourcePlatform}`}>
                 {topicbarImSourceLabel}
@@ -2766,32 +2797,10 @@ export default function App() {
         )}
       </div>
       <div className="topicbar__spacer" />
-      <div className="topicbar__actions">
-        {sessionActions}
-        <Tooltip label={t("workspace.changedTab")}>
-          <button
-            className="topicbar__action-btn topicbar__action-btn--label"
-            type="button"
-            aria-label={t("workspace.changedTab")}
-            aria-pressed={workspacePanelRenderable && rightDockMode === "changed"}
-            onClick={() => openRightDockMode("changed")}
-          >
-            <GitBranch size={14} />
-            <span>{t("workspace.changedTab")}</span>
-          </button>
-        </Tooltip>
-        <Tooltip label={t("topicBar.command")}>
-          <button
-            className="topicbar__action-btn topicbar__action-btn--label topicbar__action-btn--accent"
-            type="button"
-            aria-label={t("topicBar.command")}
-            onClick={() => void openPalette()}
-          >
-            <Command size={14} />
-            <span>{t("topicBar.command")}</span>
-          </button>
-        </Tooltip>
-      </div>
+      {/* All topic actions relocated (2026-08-19): copy/export/改动 live in the
+          project-tree context menu; the palette button moved to the chrome's
+          right icon cluster next to the terminal/workspace toggles. The
+          topicbar is now a pure title/info row. */}
     </header>
   );
 
@@ -2903,6 +2912,14 @@ export default function App() {
         tabId={activeTabId}
         effort={state.effort}
         contextInfo={state.context}
+        runningPhase={(() => {
+          if (!state.running) return undefined;
+          for (let i = state.items.length - 1; i >= 0; i--) {
+            const it = state.items[i];
+            if (it.kind === "phase") return it.text;
+          }
+          return undefined;
+        })()}
         onSend={handleSend}
         onCancel={cancel}
         onPauseToggle={pauseToggle}
@@ -2971,6 +2988,30 @@ export default function App() {
       onCreateTopic={(scope, workspaceRoot) => openBlankSession(scope, scope === "project" ? workspaceRoot : "")}
       onTopicsChanged={refreshProjectsAndTabs}
       onRenameTopic={renameTopic}
+      onCopyActiveSession={() => {
+        void navigator.clipboard
+          .writeText(getSessionMarkdown())
+          .then(() => showToast(t("msg.copied"), "info"))
+          .catch(() => { /* clipboard denied */ });
+      }}
+      onExportActiveSession={
+        sessionHasContent ? (format) => void exportSession(format) : undefined
+      }
+      onOpenChangedDock={() => openRightDockMode("changed")}
+      onCopyTopicPath={async (topicId) => {
+        try {
+          const sessions = await app.ListSessions();
+          const hit = sessions.find((s) => s.topicId === topicId);
+          if (!hit?.path) {
+            showToast(t("projectTree.pathMissing"), "warn");
+            return;
+          }
+          await navigator.clipboard.writeText(hit.path);
+          showToast(t("msg.copied"), "info");
+        } catch {
+          /* clipboard unavailable */
+        }
+      }}
       refreshSignal={projectRevision}
       onAddProject={async () => {
         await switchFolder();
@@ -2993,7 +3034,6 @@ export default function App() {
         void onDeleteSession(path);
         window.setTimeout(refreshSidebarSessions, 300);
       }}
-      onOpenAll={() => { void openAllHistory(); }}
     />
   );
 
@@ -3140,16 +3180,9 @@ export default function App() {
           {sidebarSessionsNode}
 
           <section className="sidebar__section sidebar__section--projects">
-            <button
-              type="button"
-              className="sidebar-files-toggle"
-              aria-expanded={sidebarFilesOpen}
-              onClick={() => setSidebarFilesOpen((v) => !v)}
-            >
-              <span>{t("sidebar.filesLabel")}</span>
-              <ChevronDown size={13} className={sidebarFilesOpen ? undefined : "sidebar-files-toggle__chev--closed"} />
-            </button>
-            {sidebarFilesOpen && projectTreeNode}
+            {/* No "文件" toggle: this section IS the project workspace — the
+                tree is always present (user decision 2026-08-18). */}
+            {projectTreeNode}
           </section>
 
           <section className="cowork-sidebar__group" style={{ marginBottom: '0px', marginTop: 'auto' }}>
@@ -3195,6 +3228,21 @@ export default function App() {
             <>
               {mainNode}
               {!preferenceOpen && footerNode}
+              {terminalOpen && (
+                <TerminalPanel
+                  onClose={toggleTerminal}
+                  cwd={state.meta?.cwd}
+                  sessionPane={
+                    <SideSessionPane
+                      tabs={tabMetas}
+                      sessions={sidebarSessions}
+                      activeMainTabId={activeTabId ?? undefined}
+                      selectedId={sideSessionTabId}
+                      onSelect={setSideSessionTabId}
+                    />
+                  }
+                />
+              )}
             </>
           )}
           </>
@@ -3257,13 +3305,25 @@ export default function App() {
                 >
                   <GitBranch size={13} />
                   <span className="workbench-dock__tab-label">{t("workspace.changedTab")}</span>
+                  {changedDirty && rightDockMode !== "changed" && (
+                    <span className="workbench-dock__tab-dot" aria-hidden="true" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={rightDockMode === "preview"}
+                  className={`workbench-dock__tab${rightDockMode === "preview" ? " workbench-dock__tab--active" : ""}`}
+                  onClick={() => openRightDockMode("preview")}
+                >
+                  <Globe size={13} />
+                  <span className="workbench-dock__tab-label">{t("preview.tabTitle")}</span>
                 </button>
               </div>
             </div>
             <div className="workbench-dock__body">
               {rightDockMode === "context" ? (
-                <ContextPanel
-                  tabId={activeTabId}
+                <ContextPanel                  tabId={activeTabId}
                   context={state.context}
                   usage={state.usage}
                   sessionTokens={state.sessionTokens}
@@ -3274,13 +3334,15 @@ export default function App() {
                   onOpenWorkspaceChangeList={openRightDockChangeList}
                   onOpenWorkspaceChangeFile={openRightDockChangeFile}
                 />
+              ) : rightDockMode === "preview" ? (
+                <PreviewPane url={previewUrl} onUrlCommit={commitPreviewUrl} />
               ) : (
                 <WorkspacePanel
                   open={workspacePanelRenderable}
                   cwd={state.meta?.cwd}
                   maximized={workspacePanelMaximized}
                   panelWidth={workspacePanelRenderWidth}
-                  onClose={() => setWorkspacePanel(false)}
+                  onClose={closeWorkspacePanel}
                   onToggleMaximized={() => {
                     closeTransientOverlays();
                     setWorkspacePanelMaximized((value) => !value);

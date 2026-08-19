@@ -658,8 +658,11 @@ function applyEvent(s: State, e: WireEvent): State {
 // disjoint namespaces). Instead:
 //  1. If history already has the same tool id at a terminal state, the turn has
 //     finished and been persisted — keep the history (final) version.
-//  2. Otherwise the tool has not been persisted yet — insert it after the last
-//     assistant in history (its likely parent) or append at the end.
+//  2. Otherwise append the survivors at the END of history. They all belong to
+//     the current, still-unpersisted step, which is chronologically after every
+//     persisted message — inserting "after the last assistant" instead would
+//     misplace them before tool results that were persisted after that
+//     assistant (mid-batch snapshot).
 export function mergeRunningIntoHistory(histItems: Item[], runningItems: Item[]): Item[] {
   const terminal = new Set(
     histItems
@@ -668,18 +671,7 @@ export function mergeRunningIntoHistory(histItems: Item[], runningItems: Item[])
   );
   const survivors = runningItems.filter((it) => !terminal.has(it.id));
   if (survivors.length === 0) return histItems;
-
-  // Find the index just past the last assistant item (the natural spot for the
-  // in-flight tools of the current, still-unpersisted turn).
-  let insertIdx = -1;
-  for (let i = histItems.length - 1; i >= 0; i--) {
-    if (histItems[i].kind === "assistant") { insertIdx = i + 1; break; }
-  }
-  if (insertIdx < 0) return [...histItems, ...survivors];
-
-  const before = histItems.slice(0, insertIdx);
-  const after = histItems.slice(insertIdx);
-  return [...before, ...survivors, ...after];
+  return [...histItems, ...survivors];
 }
 
 export function reducer(s: State, a: Action): State {
@@ -873,7 +865,11 @@ async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, acti
 
 export function useController(getProfile?: () => string) {
   const statesRef = useRef<TabStates>(new Map());
-  const lastTokenAt = useRef(0);
+  // Per-tab last-token timestamp for the stale-stream watchdog. A single global
+  // value would cross-talk between tabs: tokens from a background tab's stream
+  // would keep the ACTIVE tab's watchdog fed (a dead stream never reconciles),
+  // and vice versa.
+  const lastTokenAt = useRef(new Map<string, number>());
   const [activeTabId, setActiveTabId] = useState<string | undefined>();
   const activeTabIdRef = useRef<string | undefined>(undefined);
   // Read the active product profile ("dev"|"cowork") via the getter supplied by
@@ -1025,7 +1021,7 @@ export function useController(getProfile?: () => string) {
       const targetTabId = e.tabId || activeTabIdRef.current;
       if (!targetTabId) return;
       if (e.kind === "turn_started" || e.kind === "text" || e.kind === "reasoning") {
-        lastTokenAt.current = Date.now();
+        lastTokenAt.current.set(targetTabId, Date.now());
       }
       if (e.kind === "text" || e.kind === "reasoning") {
         textBatch.push({ tabId: targetTabId, e });
@@ -1047,10 +1043,12 @@ export function useController(getProfile?: () => string) {
       }
     });
 
-    const offReady = onReady(() => {
-      const readyTabId = activeTabIdRef.current;
-      if (readyTabId) {
-        void loadSessionDataForTab(readyTabId);
+    const offReady = onReady((readyTabId) => {
+      // Prefer the tab the event names — a background tab finishing its build
+      // must not trigger a reload of the ACTIVE (possibly streaming) tab.
+      const target = readyTabId || activeTabIdRef.current;
+      if (target) {
+        void loadSessionDataForTab(target);
         return;
       }
       void syncActiveTabFromBackend();
@@ -1079,14 +1077,15 @@ export function useController(getProfile?: () => string) {
     if (!activeTabId) return;
     const s = statesRef.current.get(activeTabId);
     if (!s?.running || !s.live) return;
-    const since = Date.now() - lastTokenAt.current;
+    const lastToken = lastTokenAt.current.get(activeTabId) ?? 0;
+    const since = Date.now() - lastToken;
     if (since >= 120_000) {
       void reconcileTabRuntime(activeTabId);
       return;
     }
     const timer = window.setTimeout(() => {
       const cur = statesRef.current.get(activeTabId);
-      if (cur?.running && cur.live && Date.now() - lastTokenAt.current >= 120_000) {
+      if (cur?.running && cur.live && Date.now() - (lastTokenAt.current.get(activeTabId) ?? 0) >= 120_000) {
         void reconcileTabRuntime(activeTabId);
       }
     }, 120_000 - since);
@@ -1244,6 +1243,16 @@ export function useController(getProfile?: () => string) {
     if (messages.length === 0) return;
     dispatchTo(targetTabId, { type: "reset" });
     dispatchTo(targetTabId, { type: "history", messages });
+    // Rich view-only fields (durations, cards, attachments) live in the present
+    // stream, not provider.Message — fetch it so a resumed transcript keeps
+    // them instead of degrading to plain text.
+    void app.PresentForTab(targetTabId)
+      .then((payload) => {
+        if (payload && Array.isArray(payload.records) && payload.records.length) {
+          dispatchTo(targetTabId, { type: "present", records: payload.records });
+        }
+      })
+      .catch(() => {});
     app.ContextUsageForTab(targetTabId).then((context) => dispatchTo(targetTabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(targetTabId);
   }, [activeTabId, dispatchTo, refreshCheckpoints, waitForTabReady]);

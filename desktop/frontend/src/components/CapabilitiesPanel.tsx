@@ -1441,8 +1441,8 @@ function AddServerForm({
 
   return (
     <div className="prov-card prov-card--edit">
-      <div style={{ padding: "12px", backgroundColor: "var(--bg-2)", borderRadius: "6px", marginBottom: "16px", fontSize: "13px", lineHeight: "1.5", color: "var(--fg-2)" }}>
-        💡 寻找更多工具？推荐前往 <a href="https://smithery.ai" target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "none" }}>Smithery.ai</a> 或 <a href="https://mcpmarket.cn" target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "none" }}>mcpmarket.cn</a> 发现数以万计的 MCP 插件，只需复制启动命令填入下方即可使用。
+      <div style={{ padding: "12px", backgroundColor: "var(--bg-2)", borderRadius: "var(--radius-md)", marginBottom: "16px", fontSize: "13px", lineHeight: "1.5", color: "var(--fg-2)" }}>
+        {t("caps.mcpMarketTipBefore")} <a href="https://smithery.ai" target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "none" }}>Smithery.ai</a> / <a href="https://mcpmarket.cn" target="_blank" rel="noreferrer" style={{ color: "var(--accent)", textDecoration: "none" }}>mcpmarket.cn</a> {t("caps.mcpMarketTipAfter")}
       </div>
       <input className="mem-input" placeholder={t("caps.namePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} />
       <label className="set-label">{t("caps.transport")}</label>

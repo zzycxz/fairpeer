@@ -115,7 +115,7 @@ export function ImportModal({
         {/* 头部导航与标题 */}
         <div className="rag-create-modal__head" style={{ borderBottom: "1px solid var(--border-soft)", padding: "14px 18px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 28, height: 28, borderRadius: 8, background: "rgba(59, 130, 246, 0.12)", color: "#3b82f6", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: 28, height: 28, borderRadius: 8, background: "var(--accent-soft)", color: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <FolderUp size={16} />
             </div>
             <h3 className="rag-create-modal__title" style={{ fontSize: 15, fontWeight: 600 }}>导入知识库资产</h3>
@@ -139,14 +139,14 @@ export function ImportModal({
                   gap: 6,
                   padding: "12px 14px",
                   borderRadius: 10,
-                  border: importType === "folder" ? "2px solid #3b82f6" : "1px solid var(--border-soft)",
+                  border: importType === "folder" ? "2px solid var(--accent)" : "1px solid var(--border-soft)",
                   background: importType === "folder" ? "rgba(59, 130, 246, 0.05)" : "var(--bg-soft)",
                   cursor: "pointer",
                   transition: "all 0.15s ease",
                   textAlign: "left",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 6, color: importType === "folder" ? "#3b82f6" : "var(--fg)", fontWeight: 600, fontSize: 13 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, color: importType === "folder" ? "var(--accent)" : "var(--fg)", fontWeight: 600, fontSize: 13 }}>
                   <FolderUp size={16} />
                   <span>批量导入文件夹</span>
                 </div>
@@ -165,14 +165,14 @@ export function ImportModal({
                   gap: 6,
                   padding: "12px 14px",
                   borderRadius: 10,
-                  border: importType === "files" ? "2px solid #a855f7" : "1px solid var(--border-soft)",
+                  border: importType === "files" ? "2px solid var(--accent-alt)" : "1px solid var(--border-soft)",
                   background: importType === "files" ? "rgba(168, 85, 247, 0.05)" : "var(--bg-soft)",
                   cursor: "pointer",
                   transition: "all 0.15s ease",
                   textAlign: "left",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 6, color: importType === "files" ? "#a855f7" : "var(--fg)", fontWeight: 600, fontSize: 13 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, color: importType === "files" ? "var(--accent-alt)" : "var(--fg)", fontWeight: 600, fontSize: 13 }}>
                   <FilePlus size={16} />
                   <span>添加指定文件</span>
                 </div>
@@ -235,12 +235,12 @@ export function ImportModal({
               transition: "all 0.15s",
             }}
           >
-            <div style={{ color: autoExtract ? "#eab308" : "var(--fg-dim)", marginTop: 2 }}>
+            <div style={{ color: autoExtract ? "var(--warn)" : "var(--fg-dim)", marginTop: 2 }}>
               {autoExtract ? <CheckSquare size={16} /> : <Square size={16} />}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 600, color: autoExtract ? "#ca8a04" : "var(--fg)" }}>
-                <Sparkles size={14} style={{ color: "#eab308" }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 600, color: autoExtract ? "var(--warn)" : "var(--fg)" }}>
+                <Sparkles size={14} style={{ color: "var(--warn)" }} />
                 <span>导入后立即开启智能分析与建库 (自研推荐)</span>
               </div>
               <span style={{ fontSize: 11, color: "var(--fg-faint)", lineHeight: 1.4 }}>

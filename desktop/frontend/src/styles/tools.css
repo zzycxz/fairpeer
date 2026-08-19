@@ -1,0 +1,862 @@
+/* tools.css — tool card extras / live task list / composer run status (ui-redesign phase A4 split; order-preserving) */
+/* ── tool card extras: outcome line, nested sub-agent, multi-edit labels ───── */
+.tool__summary {
+  margin: 0 0 12px 14px;
+  padding: 10px 16px 0;
+  border-left: 3px solid color-mix(in srgb, var(--ok) 45%, transparent);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--fg-faint);
+}
+.tool__summary::before {
+  content: "⎿ ";
+  opacity: 0.6;
+}
+.tool__difflabel {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+  margin: 6px 0 2px;
+}
+.tool__body + .tool__body .tool__difflabel {
+  margin-top: 2px;
+}
+/* sub-agent calls render indented under their parent task card */
+.tool__nested {
+  margin: 0 11px 8px 22px;
+  padding-left: 11px;
+  border-left: 1px solid var(--border);
+}
+.tool__nested .tool {
+  margin: 6px 0;
+  background: var(--bg);
+}
+
+/* ── live task list, pinned above the composer ─────────────────────────────── */
+.todobar {
+  max-width: var(--maxw);
+  margin: 0 auto 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+  overflow: hidden;
+  animation: todobar-in var(--dur-base) var(--ease-out) both;
+}
+@keyframes todobar-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-rise));
+  }
+}
+.todobar__head {
+  display: flex;
+  align-items: center;
+  padding: 0 7px 0 11px;
+}
+.todobar__toggle {
+  --wails-draggable: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  padding: 7px 0;
+  background: none;
+  border: none;
+  color: var(--fg-dim);
+  font: inherit;
+  text-align: left;
+}
+.todobar__toggle > svg {
+  color: var(--fg-faint);
+  flex-shrink: 0;
+}
+.todobar__close {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 4px;
+  background: none;
+  border: none;
+  color: var(--fg-faint);
+  border-radius: var(--radius-sm);
+}
+.todobar__close:hover {
+  color: var(--fg);
+  background: var(--bg-elev);
+}
+.todobar__title {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-dim);
+  flex-shrink: 0;
+}
+.todobar__count {
+  font-family: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+  flex-shrink: 0;
+}
+.todobar__current {
+  margin-left: 4px;
+  font-size: 12px;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.todobar__list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 11px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 168px;
+  overflow-y: auto;
+  animation: todo-list-in var(--dur-base) var(--ease-out) both;
+}
+@keyframes todo-list-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+.todobar__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.todobar__ico {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--fg-faint);
+}
+.todobar__ico--done {
+  color: var(--ok);
+}
+.todobar__ico--active {
+  color: var(--accent);
+}
+.todobar__text {
+  min-width: 0;
+}
+.todobar__item--completed .todobar__text {
+  color: var(--fg-faint);
+  text-decoration: line-through;
+}
+.todobar__item--in_progress .todobar__text {
+  color: var(--fg);
+  font-weight: 500;
+}
+.todobar__item--pending .todobar__text {
+  color: var(--fg-dim);
+}
+.todobar__item--sub {
+  padding-left: 20px;
+}
+
+/* ── composer run status ──────────────────────────────────────────────────── */
+.composer-toolbar {
+  --wails-draggable: no-drag;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: var(--maxw);
+  margin: 0 auto 8px;
+}
+
+.composer-toolbar--status-only {
+  justify-content: flex-end;
+}
+
+.composer-runstatus {
+  --wails-draggable: no-drag;
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  height: 34px;
+  padding: 0 5px 0 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-elev));
+  color: var(--accent);
+  font-family: var(--sans);
+  font-size: 12px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
+}
+
+.composer-runstatus__dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.composer-runstatus__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.composer-runstatus__stop {
+  --wails-draggable: no-drag;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--err) 42%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--err) 14%, var(--bg-elev-2));
+  color: var(--err);
+  font: inherit;
+  font-weight: 620;
+}
+
+.composer-runstatus__stop:hover,
+.composer-runstatus__stop:focus-visible {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--err) 38%, var(--bg-elev-2));
+  border-color: color-mix(in srgb, var(--err) 70%, var(--border));
+}
+.composer-runstatus__stop:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  color: var(--fg-faint);
+  background: var(--button-bg);
+  border-color: var(--border-soft);
+}
+.composer-runstatus__stop:disabled:hover,
+.composer-runstatus__stop:disabled:focus-visible {
+  color: var(--fg-faint);
+  background: var(--button-bg);
+  border-color: var(--border-soft);
+}
+
+/* Pause/Resume button — sits next to Stop in the run-status bar. Uses the
+ * warn (amber) accent for Pause and turns to a success (green) accent when
+ * active (i.e. paused → the button now offers Resume), so the two states are
+ * visually distinct at a glance. Shares Stop's layout so they line up. */
+.composer-runstatus__pause {
+  --wails-draggable: no-drag;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--warn, var(--accent)) 42%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warn, var(--accent)) 14%, var(--bg-elev-2));
+  color: var(--warn, var(--accent));
+  font: inherit;
+  font-weight: 620;
+}
+.composer-runstatus__pause:hover,
+.composer-runstatus__pause:focus-visible {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--warn, var(--accent)) 38%, var(--bg-elev-2));
+  border-color: color-mix(in srgb, var(--warn, var(--accent)) 70%, var(--border));
+}
+/* Active (paused) state: green resume affordance. */
+.composer-runstatus__pause--active {
+  border-color: color-mix(in srgb, var(--ok, #3fb950) 48%, transparent);
+  background: color-mix(in srgb, var(--ok, #3fb950) 16%, var(--bg-elev-2));
+  color: var(--ok, #3fb950);
+}
+.composer-runstatus__pause--active:hover,
+.composer-runstatus__pause--active:focus-visible {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--ok, #3fb950) 38%, var(--bg-elev-2));
+  border-color: color-mix(in srgb, var(--ok, #3fb950) 72%, var(--border));
+}
+.composer-runstatus__pause:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  color: var(--fg-faint);
+  background: var(--button-bg);
+  border-color: var(--border-soft);
+}
+.composer-runstatus__pause:disabled:hover,
+.composer-runstatus__pause:disabled:focus-visible {
+  color: var(--fg-faint);
+  background: var(--button-bg);
+  border-color: var(--border-soft);
+}
+
+.composer-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.composer-context__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  position: relative;
+  width: 196px;
+  height: 64px;
+  padding: 8px 30px 8px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--fg-dim);
+  font-size: 12.5px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-elev) 70%, transparent);
+}
+.composer-context__item--image {
+  width: 64px;
+  padding: 4px;
+  justify-content: center;
+}
+.composer-context__item--image-only {
+  width: 76px;
+  height: 76px;
+}
+.composer-context__item--workspace {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+}
+.composer-context__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  width: 100%;
+}
+.composer-context__label--button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: zoom-in;
+}
+.composer-context__label--button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.composer-context__label > svg {
+  flex-shrink: 0;
+  color: var(--fg-faint);
+}
+.composer-context__item--workspace .composer-context__label > svg {
+  color: var(--accent);
+}
+.composer-context__thumb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+}
+.composer-context__item--image-only .composer-context__thumb {
+  width: 68px;
+  height: 68px;
+}
+.composer-context__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+.composer-context__fileicon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-sm);
+  color: var(--fg-dim);
+  background: var(--bg-elev);
+}
+.composer-context__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.composer-context__name,
+.composer-context__meta,
+.composer-context__label span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-context__name {
+  color: var(--fg);
+  font-weight: 560;
+  line-height: 1.25;
+}
+.composer-context__meta {
+  color: var(--fg-faint);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.composer-context__remove-trigger,
+.composer-context__item > .tooltip-trigger:last-child {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: var(--z-local-raised);
+  line-height: 0;
+}
+.composer-context__item--image .composer-context__remove-trigger,
+.composer-context__item--image > .tooltip-trigger:last-child {
+  top: 2px;
+  right: 2px;
+}
+.composer-context__item--image-only .composer-context__remove-trigger,
+.composer-context__item--image-only > .tooltip-trigger:last-child {
+  top: 3px;
+  right: 3px;
+}
+.composer-context__remove,
+.composer-context__item > .tooltip-trigger:last-child button {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, #000 78%, transparent);
+  color: #fff;
+}
+.composer-context__remove:hover,
+.composer-context__item > .tooltip-trigger:last-child button:hover {
+  color: #fff;
+  background: color-mix(in srgb, #000 88%, transparent);
+}
+.composer-context__item--session {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+}
+.composer-context__item--session .composer-context__label > svg {
+  color: var(--accent);
+}
+.slashmenu__item--special {
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+}
+.slashmenu__item--special:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+}
+.slashmenu__item--back {
+  border-top: 1px solid var(--border);
+  color: var(--fg-dim);
+}
+.slashmenu__item--back:hover {
+  background: var(--hover);
+}
+.slashmenu__item--empty {
+  color: var(--fg-faint);
+  cursor: default;
+}
+.slashmenu__item--empty:hover {
+  background: transparent;
+}
+.composer__pasted {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.composer__pasted-block {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  overflow: hidden;
+}
+.composer__pasted-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 5px 6px 5px 9px;
+  color: var(--fg-dim);
+  font-size: 12.5px;
+}
+.composer__pasted-head > svg {
+  flex-shrink: 0;
+  color: var(--fg-faint);
+}
+.composer__pasted-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer__pasted-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+.composer__pasted-head button {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-faint);
+  font: inherit;
+  font-size: 12px;
+}
+.composer__pasted-head button:hover {
+  color: var(--fg);
+  background: var(--hover);
+}
+.composer__pasted-preview {
+  max-height: 180px;
+  margin: 0;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border-soft);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 820px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    /* Full-width bottom bar in narrow mode; content must not scroll under it. */
+    padding-bottom: var(--bottom-bar-height, 36px);
+  }
+  .app {
+    --sidebar-width: 0px;
+  }
+  .app .global-bottom-bar {
+    width: 100%;
+    border-right: 0;
+  }
+  /* Single-column grid: the chrome (normally column 2) must fall back to the
+     only column, same as the chat pane. */
+  .app-chrome {
+    grid-column: 1;
+  }
+  .sidebar {
+    display: none;
+  }
+  .sidebar-resizer {
+    display: none;
+  }
+  .layout {
+    --chrome-left-toggle-offset: var(--chrome-left-safe-offset);
+  }
+  .app--darwin .layout {
+    --chrome-left-toggle-offset: 94px;
+  }
+  .chat-pane {
+    grid-column: 1;
+  }
+  .topbar {
+    padding: 0 12px 0 82px; /* clear macOS inset traffic lights when the sidebar is hidden */
+  }
+  .topbar__identity {
+    max-width: 42%;
+  }
+  .topbar__title {
+    display: none;
+  }
+  .topbar__actions {
+    display: flex;
+  }
+  .transcript {
+    padding: 18px 16px 28px;
+  }
+  .jump-bar {
+    display: none;
+  }
+  .footer {
+    padding: 10px 16px 8px;
+  }
+  .prompt-shelf__bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .prompt-shelf__summary {
+    min-width: 0;
+    flex-basis: auto;
+  }
+  .prompt-shelf__actions {
+    flex-wrap: wrap;
+    justify-content: stretch;
+  }
+  .prompt-action {
+    flex: 1 1 auto;
+    max-width: none;
+  }
+  .prompt-action--quiet,
+  .prompt-detail-toggle {
+    max-width: none;
+  }
+  .ask-shelf__custom-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .ask-shelf__panel-actions {
+    flex-wrap: wrap;
+  }
+  .ask-shelf__detail {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+  .welcome__hints {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
+
+#crash-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-crash-overlay);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+  background: #1a1a2e;
+  color: #e6e6f0;
+  overflow: auto;
+}
+.crash-overlay__title {
+  color: #ff6b6b;
+  font-size: 15px;
+  font-weight: 700;
+}
+.crash-overlay__body {
+  margin: 0;
+  font-family: var(--mono, monospace);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.crash-overlay__actions {
+  display: flex;
+  gap: 8px;
+}
+.crash-overlay__copy,
+.crash-overlay__send {
+  padding: 6px 12px;
+  border: 1px solid #444;
+  border-radius: var(--radius-sm);
+  background: #2a2a40;
+  color: inherit;
+}
+.crash-overlay__send[disabled] {
+  opacity: 0.65;
+}
+.crash-overlay__note {
+  color: #8a8aa3;
+  font-size: 12px;
+}
+
+/* onboarding — first-run gate covering the whole window. Sits above every
+   other layer; the card is centered, terminal-styled, with a faint scanline
+   accent so it reads as "stop and paste a key" rather than a generic modal. */
+.onboarding {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-onboarding);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(
+      ellipse at top,
+      rgba(217, 119, 87, 0.06) 0%,
+      transparent 60%
+    ),
+    rgba(7, 8, 10, 0.92);
+  backdrop-filter: none;
+  --wails-draggable: drag;
+}
+.onboarding__card {
+  --wails-draggable: no-drag;
+  width: min(440px, calc(100vw - 48px));
+  padding: 32px 32px 28px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(217, 119, 87, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.onboarding__logo {
+  width: 36px;
+  height: 36px;
+  align-self: flex-start;
+  margin-bottom: 4px;
+}
+.onboarding__title {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--fg);
+}
+.onboarding__tag {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg-dim);
+  margin-bottom: 6px;
+}
+.onboarding__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.onboarding__input {
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.onboarding__input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.18);
+}
+.onboarding__input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.onboarding__error {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #ff8b7a;
+  background: rgba(255, 70, 70, 0.08);
+  border: 1px solid rgba(255, 70, 70, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+.onboarding__submit {
+  margin-top: 4px;
+  padding: 10px 14px;
+  background: var(--accent);
+  color: #1a0e08;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background 120ms ease, transform 80ms ease;
+}
+.onboarding__submit:hover:not(:disabled) {
+  background: #e08868;
+}
+.onboarding__submit:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.onboarding__submit:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+.onboarding__spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(26, 14, 8, 0.3);
+  border-top-color: #1a0e08;
+  border-radius: 50%;
+  animation: onboarding-spin 0.7s linear infinite;
+}
+@keyframes onboarding-spin {
+  to { transform: rotate(360deg); }
+}
+.onboarding__links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  margin-top: 4px;
+}
+.onboarding__link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.onboarding__link:hover {
+  color: #e08868;
+}
+.onboarding__sep {
+  opacity: 0.5;
+}
+.onboarding__privacy {
+  opacity: 0.8;
+}
+.onboarding__skip {
+  background: none;
+  border: none;
+  padding: 4px 0;
+  margin-top: 2px;
+  color: var(--fg-dim);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: center;
+  transition: color 120ms ease;
+}
+.onboarding__skip:hover:not(:disabled) {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.onboarding__skip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+

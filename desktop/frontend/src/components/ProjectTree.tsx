@@ -4,11 +4,12 @@
 // new topic.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ChevronRight, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare, Users } from "lucide-react";
+import { Archive, ClipboardCopy, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FileDown, FileImage, FileJson, FileText, FolderOpen, GitBranch, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare, Users, Loader2 } from "lucide-react";
 import { asArray } from "../lib/array";
+import { compactSessionAge } from "./SidebarSessions";
 import { app } from "../lib/bridge";
 import type { ProjectNode, ProjectTopicStatus } from "../lib/types";
-import { getLocale, useT, type DictKey, type Translator } from "../lib/i18n";
+import { useT, type DictKey, type Translator } from "../lib/i18n";
 import { PROJECT_COLOR_OPTIONS, projectColorValue } from "../lib/projectColors";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import { Tooltip } from "./Tooltip";
@@ -17,6 +18,12 @@ interface ProjectTreeProps {
   activeScope?: string;
   activeWorkspaceRoot?: string;
   activeTopicId?: string;
+  // Controlled search (ui-redesign §4-B4): the sidebar hoists the search box
+  // above the "最近" sessions section and drives the tree through these. When
+  // query is undefined the tree keeps its own internal state (old contract).
+  query?: string;
+  onQueryChange?: (q: string) => void;
+  hideSearch?: boolean;
   // The active product profile ("dev"|"cowork"); scopes ListProjectTree/
   // CreateTopic/ReorderProjects to the profile so each profile shows its own
   // project/topic set.
@@ -28,6 +35,15 @@ interface ProjectTreeProps {
   onAddProject: () => Promise<void>;
   onCreateTopic?: (scope: string, workspaceRoot: string) => Promise<void> | void;
   onRenameTopic?: (topicId: string, title: string) => Promise<void> | void;
+  // Session actions relocated from the topicbar into the topic context menu
+  // (2026-08-18). Copy/export target the ACTIVE session's row (they operate on
+  // the loaded transcript); the changed-dock toggle is global.
+  onCopyActiveSession?: () => void;
+  onExportActiveSession?: (format: "markdown" | "json" | "pdf" | "image") => void;
+  onOpenChangedDock?: () => void;
+  // Copies the topic's on-disk session (.jsonl) path to the clipboard — the
+  // backend resolves topicId → path via ListSessions.
+  onCopyTopicPath?: (topicId: string) => Promise<void> | void;
   onTopicsChanged?: () => Promise<void> | void;
   refreshSignal?: number;
 }
@@ -53,14 +69,14 @@ function topicIsActive(node: ProjectNode, activeScope?: string, activeWorkspaceR
   );
 }
 
+const TOPIC_SEEN_KEY = "fairpeer.topicSeen";
+
 function topicMetaLine(node: ProjectNode, t: Translator): string {
-  const parts: string[] = [];
-  const turns = node.turns ?? 0;
-  if (turns > 0) parts.push(t(turns === 1 ? "history.turnOne" : "history.turnOther", { n: turns }));
+  // Sidebar-parity meta (2026-08-18): compact age only — the turns badge was
+  // noise; the Recent list next to the tree already shows this format.
   const activityAt = node.lastActivityAt || node.createdAt || 0;
-  if (activityAt) parts.push(topicActivityLabel(activityAt, t));
-  if (parts.length === 0) parts.push(t("projectTree.justNow"));
-  return parts.join(" · ");
+  if (!activityAt) return t("projectTree.justNow");
+  return compactSessionAge(activityAt);
 }
 
 const topicStatusLabels: Record<ProjectTopicStatus, DictKey> = {
@@ -88,20 +104,6 @@ function topicStatusLabel(node: ProjectNode, t: Translator): string {
   return status ? t(topicStatusLabels[status]) : "";
 }
 
-function topicActivityLabel(ms: number, t: Translator): string {
-  if (ms <= 0) return "";
-  const delta = Date.now() - ms;
-  const locale = getLocale();
-  const rtf = new Intl.RelativeTimeFormat(locale === "zh" ? "zh-CN" : "en", { numeric: "auto" });
-  const minute = 60_000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-  if (delta < minute) return t("projectTree.justNow");
-  if (delta < hour) return rtf.format(-Math.max(1, Math.round(delta / minute)), "minute");
-  if (delta < day) return rtf.format(-Math.round(delta / hour), "hour");
-  if (delta < 7 * day) return rtf.format(-Math.round(delta / day), "day");
-  return new Date(ms).toLocaleDateString();
-}
 
 type ProjectDropPosition = "before" | "after";
 
@@ -204,6 +206,9 @@ export function ProjectTree({
   activeScope,
   activeWorkspaceRoot,
   activeTopicId,
+  query: queryProp,
+  onQueryChange,
+  hideSearch = false,
   profile = "",
   imTopicSources = {},
   onOpenTopic,
@@ -212,6 +217,10 @@ export function ProjectTree({
   onAddProject,
   onCreateTopic,
   onRenameTopic,
+  onCopyActiveSession,
+  onExportActiveSession,
+  onOpenChangedDock,
+  onCopyTopicPath,
   onTopicsChanged,
   refreshSignal,
 }: ProjectTreeProps) {
@@ -220,7 +229,48 @@ export function ProjectTree({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [manuallyCollapsed, setManuallyCollapsed] = useState<Set<string>>(new Set());
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  // Unseen-activity markers (2026-08-18): a topic glows blue when it produced
+  // output after we last opened it; opening clears it. Seeded once so existing
+  // sessions do not all light up on the first run of this feature.
+  const [topicSeen, setTopicSeen] = useState<Record<string, number>>(() => {
+    try { return JSON.parse(localStorage.getItem(TOPIC_SEEN_KEY) || "{}"); } catch { return {}; }
+  });
+  const seededSeen = useRef(false);
+  useEffect(() => {
+    if (seededSeen.current || tree.length === 0) return;
+    seededSeen.current = true;
+    if (localStorage.getItem(TOPIC_SEEN_KEY)) return;
+    const stamp = Date.now();
+    const next: Record<string, number> = {};
+    const walkAll = (nodes: ProjectNode[]) => {
+      for (const n of nodes) {
+        if (n.topicId) next[n.topicId] = stamp;
+        if (n.children) walkAll(asArray(n.children));
+      }
+    };
+    walkAll(tree);
+    setTopicSeen(next);
+    try { localStorage.setItem(TOPIC_SEEN_KEY, JSON.stringify(next)); } catch { /* quota */ }
+  }, [tree]);
+  const markTopicSeen = useCallback((topicId: string) => {
+    if (!topicId) return;
+    setTopicSeen((cur) => {
+      const now = Date.now();
+      if ((cur[topicId] ?? 0) > now - 2000) return cur;
+      const next = { ...cur, [topicId]: now };
+      try { localStorage.setItem(TOPIC_SEEN_KEY, JSON.stringify(next)); } catch { /* quota */ }
+      return next;
+    });
+  }, []);
+
+  // Search is hoistable: the sidebar renders the search box itself (above the
+  // Recent sessions section) and drives this via query/onQueryChange.
+  const [innerQuery, setInnerQuery] = useState("");
+  const query = queryProp ?? innerQuery;
+  const setQuery = (next: string) => {
+    setInnerQuery(next);
+    onQueryChange?.(next);
+  };
   const [editingTopic, setEditingTopic] = useState<string | null>(null);
   const [topicDraft, setTopicDraft] = useState("");
   const [menuTopic, setMenuTopic] = useState<string | null>(null);
@@ -263,6 +313,7 @@ export function ProjectTree({
       setExpanded((prev) => {
         const next = new Set(prev);
         const collapsed = manuallyCollapsedRef.current;
+        for (const collapsedKey of collapsed) next.delete(collapsedKey);
         for (const node of list) {
           if (node?.key && !collapsed.has(node.key)) next.add(node.key);
         }
@@ -518,7 +569,7 @@ export function ProjectTree({
 
   const visibleTree = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return tree;
+    if (!q) return tree.filter((n) => n.kind !== "global_folder");
     const matches = (node: ProjectNode) =>
       [node.label, node.root, node.topicId].some((value) => (value ?? "").toLowerCase().includes(q));
     const filterNode = (node: ProjectNode): ProjectNode | null => {
@@ -529,6 +580,7 @@ export function ProjectTree({
       return null;
     };
     return tree
+      .filter((n) => n.kind !== "global_folder")
       .map(filterNode)
       .filter((node): node is ProjectNode => node !== null);
   }, [query, tree]);
@@ -600,7 +652,9 @@ export function ProjectTree({
     if (!node) return null;
     const key = projectNodeKey(node, depth);
     const children = asArray(node.children);
-    const isExpanded = query.trim() ? true : expanded.has(key);
+    // Manual collapse is authoritative: even if some refresh/auto-expand path
+    // re-adds the key to `expanded`, a folder the user collapsed stays closed.
+    const isExpanded = query.trim() ? true : expanded.has(key) && !manuallyCollapsed.has(key);
     const hasChildren = children.length > 0;
 
     if (node.kind === "expert_topic" && node.expertTeamId) {
@@ -682,6 +736,66 @@ export function ProjectTree({
         setConfirmAction(null);
       };
       const topicMenuItems: ContextMenuItem[] = [
+        ...(onOpenChangedDock
+          ? [
+              {
+                key: "changed-dock",
+                icon: <GitBranch size={13} />,
+                label: t("workspace.changedTab"),
+                onSelect: onOpenChangedDock,
+              },
+            ]
+          : []),
+        ...(active && onCopyActiveSession
+          ? [
+              {
+                key: "copy-session",
+                icon: <Copy size={13} />,
+                label: t("topicBar.copyAll"),
+                onSelect: onCopyActiveSession,
+              },
+            ]
+          : []),
+        ...(active && onExportActiveSession
+          ? ([
+              { type: "separator", key: "sep-export" },
+              {
+                key: "export-markdown",
+                icon: <FileText size={13} />,
+                label: t("topicBar.exportMarkdown"),
+                onSelect: () => onExportActiveSession("markdown"),
+              },
+              {
+                key: "export-json",
+                icon: <FileJson size={13} />,
+                label: t("topicBar.exportJson"),
+                onSelect: () => onExportActiveSession("json"),
+              },
+              {
+                key: "export-pdf",
+                icon: <FileDown size={13} />,
+                label: t("topicBar.exportPdf"),
+                onSelect: () => onExportActiveSession("pdf"),
+              },
+              {
+                key: "export-image",
+                icon: <FileImage size={13} />,
+                label: t("topicBar.exportImage"),
+                onSelect: () => onExportActiveSession("image"),
+              },
+            ] as ContextMenuItem[])
+          : []),
+        { type: "separator", key: "sep-topic" },
+        ...(onCopyTopicPath
+          ? [
+              {
+                key: "copy-topic-path",
+                icon: <ClipboardCopy size={13} />,
+                label: t("projectTree.copyTopicPath"),
+                onSelect: () => void onCopyTopicPath(topicId),
+              },
+            ]
+          : []),
         {
           key: "rename",
           icon: <Pencil size={13} />,
@@ -732,7 +846,10 @@ export function ProjectTree({
             className="project-tree__topic-main"
             title={title}
             style={{ paddingLeft: 14 + depth * 16 }}
-            onClick={() => onOpenTopic(scope, node.root ?? "", topicId)}
+            onClick={() => {
+              markTopicSeen(topicId);
+              onOpenTopic(scope, node.root ?? "", topicId);
+            }}
             onKeyDown={(event) => {
               if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
                 openTopicMenu(event);
@@ -752,7 +869,21 @@ export function ProjectTree({
                     <span>{imSourceLabel}</span>
                   </span>
                 )}
-                {statusLabel && <span className={`project-tree__topic-status project-tree__topic-status--${status}`}>{statusLabel}</span>}
+                {status && status !== "error" ? (
+                  <span
+                    className={`project-tree__topic-status project-tree__topic-status--${status}`}
+                    title={statusLabel}
+                    aria-label={statusLabel}
+                  >
+                    <Loader2 size={11} className="project-tree__topic-spinner" />
+                  </span>
+                ) : statusLabel ? (
+                  <span className={`project-tree__topic-status project-tree__topic-status--${status}`}>{statusLabel}</span>
+                ) : (
+                  (node.lastActivityAt || 0) > (topicSeen[topicId] ?? 0) && !active && (
+                    <span className="project-tree__topic-unseen" aria-hidden="true" />
+                  )
+                )}
               </span>
               {meta && (
                 <span className="project-tree__topic-meta">
@@ -958,15 +1089,10 @@ export function ProjectTree({
             }}
             aria-expanded={hasChildren ? isExpanded : undefined}
           >
-            {hasChildren ? (
-              <span className={`project-tree__chevron${isExpanded ? " project-tree__chevron--open" : ""}`}>
-                <ChevronRight size={12} />
-              </span>
-            ) : (
-              <span style={{ width: 12 }} />
-            )}
-            <Folder size={12} />
-            <span className="project-tree__folder-color" aria-hidden="true" />
+            {/* Folder icon doubles as the expand state: open folder = expanded,
+                closed folder = collapsed (replaces the old chevron+folder pair
+                that ate horizontal space; user direction 2026-08-18). */}
+            {isExpanded ? <FolderOpen size={14} className="project-tree__folder-icon" /> : <Folder size={14} className="project-tree__folder-icon" />}
             <span className="project-tree__folder-label">{projectLabel}</span>
           </button>
           <Tooltip label={t("projectTree.newTopicTooltip")} className="project-tree__action-slot">
@@ -1004,14 +1130,16 @@ export function ProjectTree({
 
   return (
     <div className="project-tree">
-      <label className="project-tree__search">
-        <Search size={14} />
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder={t("projectTree.searchPlaceholder")}
-        />
-      </label>
+      {!hideSearch && (
+        <label className="project-tree__search">
+          <Search size={14} />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t("projectTree.searchPlaceholder")}
+          />
+        </label>
+      )}
       <div className="project-tree__header">
         <span className="project-tree__header-title">
           <BriefcaseBusiness className="project-tree__header-icon" size={13} />

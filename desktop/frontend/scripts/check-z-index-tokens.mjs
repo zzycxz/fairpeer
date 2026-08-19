@@ -5,7 +5,19 @@ import { fileURLToPath } from "node:url";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const frontendRoot = path.resolve(scriptDir, "..");
 const targets = process.argv.slice(2);
-const files = targets.length > 0 ? targets : ["src/styles.css"];
+function listCssFiles(dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...listCssFiles(p));
+    else if (entry.name.endsWith(".css")) out.push(p);
+  }
+  return out;
+}
+const stylesDir = path.join(frontendRoot, "src", "styles");
+const defaultFiles = ["src/styles.css",
+  ...(fs.existsSync(stylesDir) ? listCssFiles(stylesDir).map((p) => path.relative(frontendRoot, p).split(path.sep).join("/")) : [])];
+const files = targets.length > 0 ? targets : defaultFiles;
 const zIndexDecl = /z-index\s*:\s*([^;]+);/g;
 const tokenValue = /^var\(--z-[a-z0-9-]+\)$/;
 
