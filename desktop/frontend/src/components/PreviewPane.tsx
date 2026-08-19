@@ -1,11 +1,11 @@
-// PreviewPane — the right dock's "预览" tab (pane-system spec §3.2, P1).
+// PreviewPane — the right dock's "预览" tab (pane-system spec §3.2).
 // Renders a local dev-server page in an iframe: zero native code, identical on
 // WebView2 / WKWebView / WebKitGTK. The URL is normally auto-detected from the
-// agent's tool output (App.tsx) and may also be entered manually; sites that
-// refuse embedding (X-Frame-Options) show the browser's own blank/refused
-// state — the toolbar's external-open button is the escape hatch.
+// agent's tool output (App.tsx) and may also be entered manually; back/forward
+// navigate the pane-local history; the managed-browser button hands the URL to
+// the attachable Chrome (companion tier, §3.6).
 import { useEffect, useState } from "react";
-import { ExternalLink, Globe, Loader2, MonitorPlay, RefreshCw } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Globe, Loader2, MonitorPlay, RefreshCw } from "lucide-react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 
@@ -16,24 +16,60 @@ function normalizeUrl(raw: string): string {
   return `http://${trimmed}`;
 }
 
+// Navigation history, cached in-module so it survives the pane unmounting when
+// the dock closes (same pattern as TerminalPanel's terminal cache).
+let historyStack: string[] = [];
+let historyIndex = -1;
+
+function pushHistory(url: string) {
+  if (historyStack[historyIndex] === url) return;
+  historyStack = [...historyStack.slice(0, historyIndex + 1), url];
+  if (historyStack.length > 30) historyStack = historyStack.slice(historyStack.length - 30);
+  historyIndex = historyStack.length - 1;
+}
+
 export function PreviewPane({ url, onUrlCommit }: { url: string; onUrlCommit?: (url: string) => void }) {
   const t = useT();
+  // `current` is the pane-local URL: it follows the App-detected url but can
+  // also move within the history stack without touching App state.
+  const [current, setCurrent] = useState(() => {
+    if (url) pushHistory(url);
+    return url;
+  });
   const [draft, setDraft] = useState(url);
   const [nonce, setNonce] = useState(0);
   const [managedBusy, setManagedBusy] = useState(false);
 
   useEffect(() => {
-    setDraft(url);
+    if (url && url !== current) {
+      pushHistory(url);
+      setCurrent(url);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url]);
+
+  useEffect(() => {
+    setDraft(current);
+  }, [current]);
 
   const commit = (raw: string) => {
     const next = normalizeUrl(raw);
     if (!next) return;
+    pushHistory(next);
+    setCurrent(next);
     setNonce((v) => v + 1);
     onUrlCommit?.(next);
   };
 
-  if (!url) {
+  const step = (delta: -1 | 1) => {
+    const nextIndex = historyIndex + delta;
+    if (nextIndex < 0 || nextIndex >= historyStack.length) return;
+    historyIndex = nextIndex;
+    setCurrent(historyStack[historyIndex]);
+    setNonce((v) => v + 1);
+  };
+
+  if (!current) {
     return (
       <div className="preview-pane preview-pane--empty">
         <Globe size={22} />
@@ -66,6 +102,26 @@ export function PreviewPane({ url, onUrlCommit }: { url: string; onUrlCommit?: (
         <button
           type="button"
           className="preview-pane__btn"
+          onClick={() => step(-1)}
+          disabled={historyIndex <= 0}
+          aria-label={t("preview.back")}
+          title={t("preview.back")}
+        >
+          <ArrowLeft size={12} />
+        </button>
+        <button
+          type="button"
+          className="preview-pane__btn"
+          onClick={() => step(1)}
+          disabled={historyIndex >= historyStack.length - 1}
+          aria-label={t("preview.forward")}
+          title={t("preview.forward")}
+        >
+          <ArrowRight size={12} />
+        </button>
+        <button
+          type="button"
+          className="preview-pane__btn"
           onClick={() => setNonce((v) => v + 1)}
           aria-label={t("preview.refresh")}
           title={t("preview.refresh")}
@@ -94,7 +150,7 @@ export function PreviewPane({ url, onUrlCommit }: { url: string; onUrlCommit?: (
           onClick={() => {
             if (managedBusy) return;
             setManagedBusy(true);
-            void app.OpenURLInManagedBrowser(url)
+            void app.OpenURLInManagedBrowser(current)
               .catch(() => { /* surfaced by the settings panel's browser state */ })
               .finally(() => setManagedBusy(false));
           }}
@@ -107,7 +163,7 @@ export function PreviewPane({ url, onUrlCommit }: { url: string; onUrlCommit?: (
         <button
           type="button"
           className="preview-pane__btn"
-          onClick={() => window.open(url, "_blank", "noopener")}
+          onClick={() => window.open(current, "_blank", "noopener")}
           aria-label={t("preview.openExternal")}
           title={t("preview.openExternal")}
         >
@@ -117,7 +173,7 @@ export function PreviewPane({ url, onUrlCommit }: { url: string; onUrlCommit?: (
       <iframe
         key={nonce}
         className="preview-pane__frame"
-        src={url}
+        src={current}
         title={t("preview.tabTitle")}
       />
     </div>

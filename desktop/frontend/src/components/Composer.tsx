@@ -334,6 +334,7 @@ export function Composer({
   effort,
   contextInfo,
   runningPhase,
+  jobs,
   onSend,
   onCancel,
   onPauseToggle,
@@ -372,6 +373,10 @@ export function Composer({
   effort?: EffortInfo;
   // Context-window meter (ui-redesign §4-C3); absent → the UsageChip stays hidden.
   contextInfo?: ContextInfo;
+  // Background jobs (bash/task) — compact chip next to the usage meter; the
+  // tooltip lists the job labels. Restores the surface lost with the status
+  // bar removal (pane-system decision log).
+  jobs?: { id: string; label: string; status: string }[];
   // Live agent phase ("正在…") rendered as a slim strip inside the composer
   // card — replaces the per-row PhaseCard lines in the transcript.
   runningPhase?: string;
@@ -2229,6 +2234,16 @@ export function Composer({
                   <Loader2 size={11} className="composer-phase__spin" />
                   <span className="composer-phase-chip__text">{runningPhase}</span>
                 </span>
+              </div>
+            )}
+            {jobs && jobs.length > 0 && (
+              <div className="composer-meta__control composer-meta__control--jobs">
+                <Tooltip label={jobs.map((j) => j.label).join(" · ")}>
+                  <span className="composer-jobs-chip" aria-live="polite">
+                    <Loader2 size={11} className="composer-phase__spin" />
+                    <span>{t("composer.jobsRunning", { n: String(jobs.length) })}</span>
+                  </span>
+                </Tooltip>
               </div>
             )}
             <div className="composer-meta__control composer-meta__control--usage">

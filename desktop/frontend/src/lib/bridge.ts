@@ -348,6 +348,9 @@ export interface AppBindings {
   NetDevFindings(): Promise<NetDevFinding[]>;
   // Emergency stop: close every device connection at once (audited).
   NetDevEmergencyStop(): Promise<number>;
+  // Reset the per-turn command budget — called on every user submit in the
+  // 运维 profile so turn_command_budget is a true per-ask control.
+  NetDevTurnBegin(): Promise<void>;
   // UI quick-diagnose: one read-only command through the SAME sealed path.
   NetDevQuickExec(device: string, command: string): Promise<{ device: string; command: string; class: string; output: string; is_error: boolean; refused?: boolean; refusal?: string }>;
   NetDevTopologySnapshot(): Promise<NetDevTopologyGraph | null>;
@@ -1714,13 +1717,14 @@ function makeMockApp(): AppBindings {
       { name: "ACC-01", vendor: "huawei", os: "vrp", model: "S3100", address: "10.0.2.1", port: 22, via: [], group: "接入", username: "netops", passwordEnv: "NETDEV_ACC01_PW", passwordSet: true, identityFile: "", encoding: "", allowTelnet: false },
     ],
     hops: [], groups: [], auditRetention: "", scopes: [],
+    guardConfirmEach: true, guardTurnBudget: 30, guardAllowedGroups: [],
   };
   return {
     async NetDevSettings() {
       return mockNetDev;
     },
     async SetNetDevSettings(v: NetDevSettingsView) {
-      mockNetDev = { ...v, devices: [...v.devices], hops: [...v.hops], groups: [...v.groups], scopes: [...v.scopes] };
+      mockNetDev = { ...v, devices: [...v.devices], hops: [...v.hops], groups: [...v.groups], scopes: [...v.scopes], guardAllowedGroups: [...(v.guardAllowedGroups ?? [])] };
     },
     async NetDevDeleteSecret(_kind: string, _envName: string) {},
     async NetDevTestConnection(device: string) {
@@ -1731,6 +1735,7 @@ function makeMockApp(): AppBindings {
     async NetDevRunInspection() { return null; },
     async NetDevFindings() { return [] as NetDevFinding[]; },
     async NetDevEmergencyStop() { return 0; },
+    async NetDevTurnBegin() {},
     async NetDevQuickExec(device: string, command: string) {
       return { device, command, class: "read", output: "(browser dev mock: no device backend)", is_error: false };
     },

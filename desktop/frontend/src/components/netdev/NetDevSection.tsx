@@ -33,7 +33,7 @@ export function NetDevSection() {
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [] });
+  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [] });
   const [audit, setAudit] = useState<NetDevAuditEntryView[]>([]);
   const [editingDevice, setEditingDevice] = useState<EditDevice | null>(null);
   const [editingHop, setEditingHop] = useState<EditHop | null>(null);
@@ -195,6 +195,40 @@ export function NetDevSection() {
         placeholder="例：10.30.0.0/16, 10.31.0.0/16"
         onChange={e => patch({ scopes: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })}
       />
+
+      {/* 护栏 —— 控制到每次询问/每次工具调用 */}
+      <div className="set-label" style={{ margin: "14px 0 6px" }}>护栏（控制到每一次询问与每一条工具命令）</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
+        <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={!!view.guardConfirmEach}
+            onChange={e => patch({ guardConfirmEach: e.target.checked })}
+          />
+          每条命令确认：netdev_exec / netdev_netconf 执行前弹审批卡（优先级压过全自动模式，"记住允许"也无效）
+        </label>
+        <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          每轮命令预算
+          <input
+            className="mem-input" style={{ width: 70 }} type="number" min={0}
+            value={view.guardTurnBudget ?? 0}
+            onChange={e => patch({ guardTurnBudget: Math.max(0, Number(e.target.value) || 0) })}
+          />
+          条（0 = 不限；每次你发送消息预算重置，超出后 agent 收到提醒并停下汇总）
+        </label>
+        <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          设备组作用域
+          <input
+            className="mem-input" style={{ width: "50%" }}
+            value={(view.guardAllowedGroups ?? []).join(", ")}
+            placeholder="留空 = 全部组；例：核心, 汇聚"
+            onChange={e => patch({ guardAllowedGroups: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })}
+          />
+        </label>
+        <div style={{ opacity: 0.6, fontSize: 11.5 }}>
+          作用域非空时，范围外的设备对 AI 完全不可见（netdev_devices 列表也过滤）——在第一个 token 花出去之前就完成控制。脱敏提醒与拒绝提醒默认常开，无需配置。
+        </div>
+      </div>
 
       {/* 巡检 */}
       <div className="set-label" style={{ margin: "14px 0 6px" }}>巡检</div>

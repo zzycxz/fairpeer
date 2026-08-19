@@ -1763,6 +1763,9 @@ export default function App() {
       await setControllerCollaborationMode(controllerCollaborationMode({ collaborationMode, goal }));
       await setControllerToolApprovalMode(toolApprovalMode);
       if (goal.trim()) await setControllerGoal(goal);
+      // netdev guardrail: each user ask buys a fresh per-turn command budget
+      // ([netdev.guardrails] turn_command_budget — a true per-ask control).
+      if (netdevActive) void app.NetDevTurnBegin().catch(() => { /* budget reset is best-effort */ });
       send(trimmed, submitText.trim());
     },
     [applyGoal, closeTransientOverlays, collaborationMode, goal, send, runShell, notice, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, steer, switchModel, t, toolApprovalMode],
@@ -2912,6 +2915,7 @@ export default function App() {
         tabId={activeTabId}
         effort={state.effort}
         contextInfo={state.context}
+        jobs={state.jobs}
         runningPhase={(() => {
           if (!state.running) return undefined;
           for (let i = state.items.length - 1; i >= 0; i--) {

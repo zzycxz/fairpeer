@@ -2220,3 +2220,18 @@
   color: var(--accent);
 }
 .side-session__send:disabled { opacity: 0.4; cursor: default; }
+
+/* Compact markdown inside the side-session mini transcript */
+.side-session__msg--assistant .md {
+  font-size: 12px;
+  line-height: 1.55;
+}
+.side-session__msg--assistant .md pre {
+  margin: 4px 0;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+.side-session__msg--assistant .md p { margin: 4px 0; }
+.side-session__msg--assistant .md h1,
+.side-session__msg--assistant .md h2,
+.side-session__msg--assistant .md h3 { font-size: 12.5px; margin: 6px 0 4px; }

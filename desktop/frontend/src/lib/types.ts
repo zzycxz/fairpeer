@@ -1662,6 +1662,10 @@ export interface NetDevSettingsView {
   groups: string[];
   auditRetention: string;
   scopes: string[];
+  // [netdev.guardrails] — per-ask / per-tool-call controls.
+  guardConfirmEach: boolean;
+  guardTurnBudget: number;
+  guardAllowedGroups: string[];
 }
 
 export interface NetDevAuditEntryView {

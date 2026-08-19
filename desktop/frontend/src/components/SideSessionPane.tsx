@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, MessageSquare, SendHorizontal } from "lucide-react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
+import { Markdown } from "./Markdown";
 import type { HistoryMessage, SessionMeta, TabMeta } from "../lib/types";
 
 const POLL_WHILE_RUNNING_MS = 2500;
@@ -133,11 +134,17 @@ export function SideSessionPane({
         ) : (messages ?? []).length === 0 ? (
           <div className="side-session__loading">{t("sideSession.noMessages")}</div>
         ) : (
-          (messages ?? []).map((m, i) => (
-            <div key={i} className={`side-session__msg side-session__msg--${m.role}`}>
-              {m.role === "user" ? `❯ ${messageText(m)}` : messageText(m)}
-            </div>
-          ))
+          (messages ?? []).map((m, i) =>
+            m.role === "assistant" ? (
+              <div key={i} className="side-session__msg side-session__msg--assistant">
+                <Markdown text={messageText(m)} />
+              </div>
+            ) : (
+              <div key={i} className={`side-session__msg side-session__msg--${m.role === "user" ? "user" : "tool"}`}>
+                {m.role === "user" ? `❯ ${messageText(m)}` : messageText(m)}
+              </div>
+            ),
+          )
         )}
       </div>
       <div className="side-session__inputrow">

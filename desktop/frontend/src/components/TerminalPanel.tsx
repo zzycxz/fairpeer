@@ -52,6 +52,13 @@ function newTerm(): TermState {
   return { id: ++termSeq, lines: [], running: false };
 }
 
+// In-memory cache: terminals survive the panel being collapsed (Ctrl+`) and
+// reopened within the app session — closing the panel no longer wipes their
+// histories. Deliberately not localStorage: output text can be large and
+// stale across restarts.
+let cachedTerms: TermState[] | null = null;
+let cachedActiveId: number | typeof SESSION_TAB_ID | null = null;
+
 export function TerminalPanel({
   onClose,
   cwd,
@@ -64,8 +71,12 @@ export function TerminalPanel({
   sessionPane?: ReactNode;
 }) {
   const t = useT();
-  const [terms, setTerms] = useState<TermState[]>(() => [newTerm()]);
-  const [activeId, setActiveId] = useState<number | typeof SESSION_TAB_ID>(() => terms[0].id);
+  const [terms, setTerms] = useState<TermState[]>(() => cachedTerms ?? [newTerm()]);
+  const [activeId, setActiveId] = useState<number | typeof SESSION_TAB_ID>(() => cachedActiveId ?? terms[0].id);
+  useEffect(() => {
+    cachedTerms = terms;
+    cachedActiveId = activeId;
+  }, [terms, activeId]);
   const [value, setValue] = useState("");
   const termsRef = useRef(terms);
   const scrollRef = useRef<HTMLDivElement | null>(null);
