@@ -11,6 +11,37 @@ const negativeClaimRule = `When you claim something does NOT exist (no caller, n
 // tuiFormatting nudges concise, terminal-friendly output.
 const tuiFormatting = `Keep the final answer compact and terminal-friendly: short paragraphs or bullets, no walls of text, no restating the question.`
 
+// builtinNetdevHelpBody is the 运维 quick-reference card the agent carries:
+// the vetted source list (mirrors docs/NETDEV_HELP.md) plus the provenance
+// rules. Inline + zero AllowedTools — pure reference, nothing executable.
+const builtinNetdevHelpBody = `This skill is INLINED — a reference card, no tools. Consult it whenever a netdev question needs an authoritative source, a syntax you are not 100% sure of, or a place to send the user.
+
+## 查证顺序
+本地读表/规格 → 厂商官方 → 社区。不确定就明说，并给出下面的查证入口。
+
+## 官方命令/告警/文档
+- 华为 Info-Finder: https://info.support.huawei.com/info-finder/tool/zh/enterprise/commands （按产品/版本查命令、告警、日志、MIB；工具注明"以产品文档为准"）
+- 华为支持站搜索: https://support.huawei.com/enterprise/zh/search?keyword=<kw>
+- Cisco: https://www.cisco.com/site/us/en/support/index.html → 产品 Command Reference / Configuration Guide
+- ZTE: https://support.zte.com.cn （产品手册在线浏览，命令参考分册）
+
+## 标准 / 安全
+- RFC: https://www.rfc-editor.org/ （协议名→RFC 号，如 OSPF→2328/5340）
+- OID: https://oid-info.com/get/<oid>
+- CVE: https://nvd.nist.gov/vuln/search/results?query=<kw>&search_type=all
+- 厂商安全公告: 华为 https://www.huawei.com/cn/psirt ；Cisco 官网 PSIRT 页
+
+## 真机实测（免费）
+- RouteViews 真路由器: telnet route-views.routeviews.org（用户 rviews 无密码）；Web: https://www.routeviews.org/routeviews/
+- 公共路由服务器目录: https://www.routeservers.org/
+- Cisco DevNet 沙箱: https://developer.cisco.com/sandbox/
+
+## 溯源规则（不可妥协）
+1. 不编造厂商语法——不确定的命令不进建议正文，交给用户的 extra_read 决策。
+2. 建议配置时给出"在哪个官方文档可验证"，版本敏感（VRP5/8、IOS/IOS-XE 差异要标注）。
+3. 告警/错误码给用户可点击的查询入口（Info-Finder 告警页签 / Error Message Decoder）。
+4. 人类版完整指引在仓库 docs/NETDEV_HELP.md（含发帖模板与搜索技巧）。`
+
 const builtinExploreBody = `You are running as an exploration subagent. Investigate the codebase the parent pointed you at, then return one focused, distilled answer.
 
 How to operate:
@@ -368,6 +399,14 @@ func builtinSkills() []Skill {
 	readCodeTools := append([]string{"read_file", "grep", "bash"}, extraReadTools...)
 	reviewTools := append([]string(nil), readCodeTools...)
 	return []Skill{
+		{
+			Name:        "netdev-help",
+			Description: "运维速查卡：权威参考源列表（华为 Info-Finder / Cisco 文档 / ZTE 手册 / RFC / NVD / 免费真机环境）与溯源规则。当命令语法不确定、需要给用户查证入口、或要验证某说法时使用。纯参考，无工具。",
+			Body:        builtinNetdevHelpBody,
+			Scope:       ScopeBuiltin,
+			Path:        "(builtin)",
+			RunAs:       RunInline,
+		},
 		{
 			Name:        "init",
 			Description: "Bootstrap or refresh this project's AGENTS.md — analyze the codebase (structure, build/test commands, architecture, conventions) and write a concise memory file loaded into every future session. Inlined — runs in the main loop so you see and approve the write.",
