@@ -135,14 +135,20 @@ export function SideSessionPane({
           <div className="side-session__loading">{t("sideSession.noMessages")}</div>
         ) : (
           (messages ?? []).map((m, i) =>
-            m.role === "assistant" ? (
-              <div key={i} className="side-session__msg side-session__msg--assistant">
-                <Markdown text={messageText(m)} />
+            m.role === "user" ? (
+              <div key={i} className="msg msg--user">
+                <div className="msg__body">
+                  <div className="msg__text">{messageText(m)}</div>
+                </div>
+              </div>
+            ) : m.role === "assistant" ? (
+              <div key={i} className="msg msg--assistant">
+                <div className="msg__body">
+                  <Markdown text={messageText(m)} />
+                </div>
               </div>
             ) : (
-              <div key={i} className={`side-session__msg side-session__msg--${m.role === "user" ? "user" : "tool"}`}>
-                {m.role === "user" ? `❯ ${messageText(m)}` : messageText(m)}
-              </div>
+              <div key={i} className="side-session__sysline">{messageText(m)}</div>
             ),
           )
         )}
