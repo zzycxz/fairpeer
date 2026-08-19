@@ -87,6 +87,10 @@ type App struct {
 	// SetDesktopMetrics so the toggle takes effect without a restart.
 	metrics atomic.Pointer[metricsAggregator]
 
+	// loopRunState is the active Loop Engineering run (nil when idle); see
+	// loop_engine.go. Guarded by mu.
+	loopRunState *loopRun
+
 	// mobilebridge is the linkpeer P2P bridge (nil until ensureMobileBridge
 	// completes during startup). Read atomically from tabEventSink.Emit's hot path.
 	mobilebridge atomic.Pointer[mobilebridge.Bridge]
