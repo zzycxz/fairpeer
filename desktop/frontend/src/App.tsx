@@ -3397,7 +3397,7 @@ export default function App() {
                         aria-label={t("dock.closeTab")}
                         title={t("dock.closeTab")}
                       >
-                        <X size={10} />
+                        <X size={13} />
                       </button>
                     </div>
                   ))}

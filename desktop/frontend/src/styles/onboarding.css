@@ -2809,7 +2809,7 @@
   gap: 5px;
   min-width: 30px;
   height: 26px;
-  padding: 0 22px 0 14px;
+  padding: 0 26px 0 14px;
   border: 0;
   background: transparent;
   color: var(--fg-faint);
@@ -2822,26 +2822,31 @@
 
 .workbench-dock__tab-close {
   position: absolute;
-  right: 3px;
+  right: 2px;
   top: 50%;
   transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 15px;
-  height: 15px;
+  width: 19px;
+  height: 19px;
   border: 0;
+  border-radius: var(--radius-xs);
   background: transparent;
-  color: var(--fg-faint);
+  color: var(--fg-dim);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.1s;
+  transition: opacity 0.1s, background 0.1s, color 0.1s;
 }
 
 .workbench-dock__tabwrap:hover .workbench-dock__tab-close,
-.workbench-dock__tabwrap--active .workbench-dock__tab-close { opacity: 0.8; }
+.workbench-dock__tabwrap--active .workbench-dock__tab-close { opacity: 0.9; }
 
-.workbench-dock__tab-close:hover { color: var(--fg); opacity: 1; }
+.workbench-dock__tab-close:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg-faint) 14%, transparent);
+  opacity: 1;
+}
 
 .workbench-dock__tab-add {
   display: inline-flex;
