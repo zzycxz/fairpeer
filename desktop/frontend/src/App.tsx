@@ -5,7 +5,6 @@ import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
   Activity,
   Globe,
-  Search,
   SquarePen,
   FileText,
   GitBranch,
@@ -2953,14 +2952,30 @@ export default function App() {
   // Sidebar search sits ABOVE the Recent sessions section and drives the
   // project tree (hoisted out of ProjectTree, ui-redesign §4-B4 follow-up).
   const [treeQuery, setTreeQuery] = useState("");
+  const sidebarSearchRef = useRef<HTMLLabelElement | null>(null);
+  // Geek touch: "/" anywhere (outside editable fields) focuses the sidebar
+  // search — mirrors terminal UIs' filter affordance.
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey) return;
+      const el = event.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      event.preventDefault();
+      sidebarSearchRef.current?.querySelector("input")?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const sidebarSearchNode = (
-    <label className="project-tree__search sidebar-search">
-      <Search size={13} />
+    <label className="project-tree__search sidebar-search" ref={sidebarSearchRef}>
+      <span className="sidebar-search__prompt" aria-hidden="true">❯</span>
       <input
         value={treeQuery}
         onChange={(e) => setTreeQuery(e.target.value)}
         placeholder={t("projectTree.searchPlaceholder")}
       />
+      <kbd className="sidebar-search__kbd" aria-hidden="true">/</kbd>
     </label>
   );
 
