@@ -176,7 +176,7 @@
     "vision": true,
     "contextWindow": 1000000,
     "category": "direct",
-    "docUrl": "https://platform.moonshot.cn/console/api-keys",
+    "docUrl": "https://platform.kimi.com/console/api-keys",
     "models": [
       "kimi-k3",
       "kimi-k2.6"
