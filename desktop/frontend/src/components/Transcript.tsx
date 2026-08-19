@@ -4,7 +4,7 @@ import type { CheckpointMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
 import { replaceAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
 import { AssistantMessage, TurnActions, UserMessage } from "./Message";
-import { ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
+import { ProcessCompactIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
 import { AlertTriangle, ChevronRight, Info } from "lucide-react";
 import { Welcome } from "./Welcome";
@@ -168,8 +168,9 @@ export function Transcript({
   defaultExpandThinking?: boolean;
   // profile + onInsert drive the cowork empty-state "starter" bubbles (see
   // Welcome). When profile is "cowork", starter bubbles fill the composer via
-  // onInsert instead of sending immediately. Omitted → dev behavior (send now).
-  profile?: "dev" | "cowork";
+  // onInsert instead of sending immediately. "netdev" → 运维 examples. Omitted
+  // → dev behavior (send now).
+  profile?: "dev" | "cowork" | "netdev";
   onInsert?: (text: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -498,7 +499,6 @@ export function Transcript({
               if (it.name === "exit_plan_mode") break;
               out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
               break;
-            case "phase": out.push(<PhaseCard key={it.id} text={it.text} />); break;
             case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
             case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
           }
@@ -534,7 +534,6 @@ export function Transcript({
             if (it.name === "exit_plan_mode") break;
             out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
             break;
-          case "phase": out.push(<PhaseCard key={it.id} text={it.text} />); break;
           case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
           case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
         }
@@ -816,7 +815,6 @@ function WarmTurnItems({
         nodes.push(<ToolCard key={it.id} item={it} subcalls={subcalls.get(it.id)} />);
         break;
       }
-      case "phase": nodes.push(<PhaseCard key={it.id} text={it.text} />); break;
       case "notice": nodes.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
       case "compaction": nodes.push(<CompactionCard key={it.id} item={it} />); break;
     }
@@ -883,9 +881,20 @@ function ReadOnlyBatch({ items, subcalls }: ReadOnlyBatchProps) {
   const readCount = items.filter((it) => it.name === "read_file" || it.name === "ls").length;
   const searchCount = items.filter((it) => it.name === "grep" || it.name === "glob" || it.name === "web_fetch").length;
 
-  const parts: string[] = [];
+  // TurnGroup-style summary head (ui-redesign §4-D): total steps counts nested
+  // sub-agent calls too; duration sums what the tool events reported.
+  let subcallTotal = 0;
+  let durationMs = 0;
+  for (const it of items) {
+    subcallTotal += subcalls.get(it.id)?.length ?? 0;
+    durationMs += it.durationMs ?? 0;
+  }
+  const steps = items.length + subcallTotal;
+
+  const parts: string[] = [t("tool.stepsCount", { n: steps })];
   if (readCount > 0) parts.push(t("tool.readCount", { n: readCount }));
   if (searchCount > 0) parts.push(t("tool.searchCount", { n: searchCount }));
+  if (durationMs > 0) parts.push(`${(durationMs / 1000).toFixed(1)}s`);
   const label = parts.join(" · ");
 
   return (
@@ -931,7 +940,7 @@ function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) 
         if (it.text.trim() !== "") return true;
         return mode !== "minimal" && Boolean(it.reasoning);
       }
-      if (it.kind === "phase") return mode !== "minimal";
+      if (it.kind === "phase") return false;
       if (it.kind !== "tool") return false;
       if (it.parentId || it.name === "todo_write" || it.name === "exit_plan_mode") return false;
       if (mode === "minimal") return !it.readOnly || Boolean(it.attachments && it.attachments.length);
@@ -965,7 +974,6 @@ function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) 
         if (it.name === "exit_plan_mode") break;
         body.push(<ToolCard key={it.id} item={it as ToolItem} subcalls={subcalls.get(it.id)} />);
         break;
-      case "phase": body.push(<PhaseCard key={it.id} text={it.text} />); break;
       case "assistant": {
         const displayItem = mode === "minimal" ? { ...it, reasoning: "" } : it;
         body.push(<AssistantMessage key={it.id} item={displayItem as AssistantItem} />);
@@ -1125,10 +1133,6 @@ function QuestionJumpBar({ questions, onJump }: { questions: QuestionAnchor[]; o
 
 type CompactionItem = Extract<Item, { kind: "compaction" }>;
 type NoticeItem = Extract<Item, { kind: "notice" }>;
-
-function PhaseCard({ text }: { text: string }) {
-  return <div className="phase"><ProcessPhaseIcon size={12} /><span>{text}</span></div>;
-}
 
 function NoticeCard({ level, text }: { level: NoticeItem["level"]; text: string }) {
   return (

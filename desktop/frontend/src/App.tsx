@@ -2840,7 +2840,7 @@ export default function App() {
           actionPending={state.messageAction != null}
           rewindDisabled={state.running || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
           defaultExpandThinking={expandThinking}
-          profile={coworkActive ? "cowork" : "dev"}
+          profile={coworkActive ? "cowork" : netdevActive ? "netdev" : "dev"}
           onInsert={addWorkspaceTextToComposer}
         />
       )}
