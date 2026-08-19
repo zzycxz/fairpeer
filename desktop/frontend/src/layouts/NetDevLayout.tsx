@@ -1,9 +1,10 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { PanelLeft, SquarePen } from "lucide-react";
+import { Activity, AlertTriangle, ClipboardCheck, Network, PanelLeft, SquarePen } from "lucide-react";
 import { app } from "../lib/bridge";
 import logoSymbol from "../assets/logo-symbol.png";
 import { getActiveProject, setActiveProject, subscribeActiveProject, type NetDevProjectScope } from "../lib/netdevProjectStore";
 import { ProposalActions } from "../components/netdev/ProposalCenter";
+import { DockTabs, useDockTabState } from "../components/DockTabs";
 import type { NetDevSettingsView, NetDevFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph, NetDevBackupVersion } from "../lib/types";
 import { Markdown } from "../components/Markdown";
 import "../styles/netdev.css";
@@ -98,6 +99,8 @@ const CFG_CMD: Record<string, string> = {
 
 type QuickResult = { command: string; output: string; isError: boolean; refused?: string; refusedUnknown?: boolean };
 type DockTab = "context" | "topology" | "findings" | "proposals";
+const DOCK_TAB_CATALOG: readonly DockTab[] = ["context", "topology", "findings", "proposals"];
+const NETDEV_DOCK_TABS_KEY = "fairpeer.netdevDockTabs";
 
 export function NetDevLayout({
   mainNode,
@@ -117,6 +120,14 @@ export function NetDevLayout({
   onSidebarResizeStart,
   onSidebarResizeKey,
   onSidebarResetWidth,
+  dockOpen = true,
+  dockOnClose,
+  dockWidth,
+  dockMinWidth,
+  dockMaxAriaWidth,
+  onDockResizeStart,
+  onDockResizeKey,
+  onDockResetWidth,
 }: {
   mainNode: ReactNode;
   footerNode: ReactNode;
@@ -144,6 +155,17 @@ export function NetDevLayout({
   onSidebarResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onSidebarResizeKey?: (event: ReactKeyboardEvent<HTMLButtonElement>) => void;
   onSidebarResetWidth?: () => void;
+  // Right dock open/close + width resize — the coding workbench-dock's exact
+  // affordances (chrome workspace toggle, drag resizer, drag-to-edge close).
+  // dockOnClose also fires when the last strip tab is closed.
+  dockOpen?: boolean;
+  dockOnClose?: () => void;
+  dockWidth?: number;
+  dockMinWidth?: number;
+  dockMaxAriaWidth?: number;
+  onDockResizeStart?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onDockResizeKey?: (event: ReactKeyboardEvent<HTMLButtonElement>) => void;
+  onDockResetWidth?: () => void;
 }) {
   const [settings, setSettings] = useState<NetDevSettingsView | null>(null);
   const [findings, setFindings] = useState<NetDevFinding[]>([]);
@@ -156,6 +178,9 @@ export function NetDevLayout({
   const [topoNotice, setTopoNotice] = useState("");
   const [inspBusy, setInspBusy] = useState(false);
   const [tab, setTab] = useState<DockTab>("context");
+  // Browser-style dock tabs (coding workbench-dock pattern): only OPEN tabs
+  // show, each closable, "+" re-opens from the catalog, order persists.
+  const [openTabs, setOpenTabs] = useDockTabState(NETDEV_DOCK_TABS_KEY, DOCK_TAB_CATALOG);
   const [err, setErr] = useState(""); // shown in the global title bar
 
   const reload = useCallback(async () => {
@@ -234,6 +259,7 @@ export function NetDevLayout({
     if (hit) {
       setSelected(hit.name);
       setTab("context");
+      setOpenTabs((prev) => (prev.includes("context") ? prev : [...prev, "context"]));
       setTopoNotice("");
       return;
     }
@@ -332,12 +358,42 @@ export function NetDevLayout({
     return { ...topo, nodes: topo.nodes.filter(n => nameIn(n.name) || (!n.managed && touched.has(n.name))), edges };
   }, [project, topo, scopedDeviceNames]);
 
-  const TABS: { key: DockTab; label: string; badge?: number }[] = [
-    { key: "context", label: "上下文" },
-    { key: "topology", label: "拓扑" },
-    { key: "findings", label: "发现", badge: scopedFindings.length || undefined },
-    { key: "proposals", label: "提案", badge: pendingCount || undefined },
+  const TABS: { key: DockTab; label: string; badge?: number; icon: React.ReactNode }[] = [
+    { key: "context", label: "上下文", icon: <Activity size={13} /> },
+    { key: "topology", label: "拓扑", icon: <Network size={13} /> },
+    { key: "findings", label: "发现", badge: scopedFindings.length || undefined, icon: <AlertTriangle size={13} /> },
+    { key: "proposals", label: "提案", badge: pendingCount || undefined, icon: <ClipboardCheck size={13} /> },
   ];
+
+  // Active tab closed (or restored state desyncs) → fall back to the last
+  // open one — the coding dock's dockTabs effect.
+  useEffect(() => {
+    if (!openTabs.includes(tab)) {
+      setTab(openTabs[openTabs.length - 1] ?? "context");
+    }
+  }, [openTabs, tab]);
+
+  const closeDockTabFn = (key: DockTab) => {
+    setOpenTabs((prev) => {
+      const next = prev.filter((m) => m !== key);
+      if (next.length === 0) {
+        // Closing the last tab closes the whole dock (coding-dock behavior).
+        dockOnClose?.();
+        return prev;
+      }
+      setTab((active) => (active === key ? next[next.length - 1] : active));
+      return next;
+    });
+  };
+
+  // Strip click / "+" catalog pick: ensure the tab is open and focus it.
+  const openDockTabFn = (key: DockTab) => {
+    setOpenTabs((prev) => (prev.includes(key) ? prev : [...prev, key]));
+    setTab(key);
+  };
+
+  // Programmatic switches (device click, topology pick) ensure the target tab.
+  const gotoDockTab = openDockTabFn;
 
   return (
     <div className="ndv">
@@ -362,9 +418,10 @@ export function NetDevLayout({
         {/* Brand row — identical classes/markup to the coding view's
             sidebar__brandrow: logo + FairPeer + new-session ghost button +
             collapse toggle. Spans the chrome row (top-left of the window). */}
-        <div className="sidebar__brandrow" title="FairPeer">
+        <div className="sidebar__brandrow" title="运维模式">
           <img src={logoSymbol} alt="" draggable={false} />
-          <span>FairPeer</span>
+          {/* Mode name, mirroring the coding/office sidebars (2026-08-19). */}
+          <span>运维模式</span>
           {onNewSession && (
             <button
               type="button"
@@ -405,7 +462,7 @@ export function NetDevLayout({
                 key={d.name}
                 className={`ndv__device ndv__device--click${selected === d.name ? " ndv__device--sel" : ""}`}
                 role="button"
-                onClick={() => { setSelected(d.name); setTab("context"); setQuick({}); }}
+                onClick={() => { setSelected(d.name); setTab("context"); setOpenTabs((prev) => (prev.includes("context") ? prev : [...prev, "context"])); setQuick({}); }}
               ><span className="ndv__device-name">{d.name}</span><span className="ndv__device-addr">{d.address}</span></div>
             ))}
           </div>
@@ -436,22 +493,40 @@ export function NetDevLayout({
         {terminalNode}
       </div>
 
+      {/* Right dock width resizer — same class/handlers as the coding
+          workbench-dock's (the .app--netdev rule hides the app-level copy;
+          this one re-shows). */}
+      {dockOpen && onDockResizeStart && (
+        <button
+          className="workspace-panel-resizer"
+          type="button"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="拖动调整右栏宽度"
+          aria-valuemin={dockMinWidth}
+          aria-valuemax={dockMaxAriaWidth}
+          aria-valuenow={dockWidth}
+          onPointerDown={onDockResizeStart}
+          onKeyDown={onDockResizeKey}
+          onDoubleClick={onDockResetWidth}
+        />
+      )}
+      {dockOpen && (
       <div className="ndv__dock">
+        {/* The coding workbench-dock's tab strip, verbatim (DockTabs): only
+            open tabs show, each closable, "+" offers the catalog. */}
+        <DockTabs
+          tabs={TABS}
+          openTabs={openTabs}
+          active={tab}
+          onSelect={openDockTabFn}
+          onClose={closeDockTabFn}
+          listLabel="运维视图"
+          closeLabel="关闭页签"
+          addLabel="打开页签"
+        />
+        <div className="ndv__dock-body">
         {err && <div className="banner banner--error" style={{ marginBottom: 8 }}>{err}</div>}
-        <div className="ndv__tabs" role="tablist">
-          {TABS.map(t => (
-            <button
-              key={t.key}
-              type="button"
-              role="tab"
-              aria-selected={tab === t.key}
-              className={`ndv__tab${tab === t.key ? " ndv__tab--active" : ""}`}
-              onClick={() => setTab(t.key)}
-            >
-              {t.label}{t.badge ? <span className="ndv__tab-badge">{t.badge}</span> : null}
-            </button>
-          ))}
-        </div>
 
         {tab === "context" && (
           allDevices.length === 0 ? <GettingStarted onOpenSettings={onOpenSettings} /> :
@@ -579,7 +654,9 @@ export function NetDevLayout({
             <div className="ndv__hint" style={{ padding: 0 }}>批准 / 执行 / 回滚在行内直接操作；完整视图在 设置 → 运维 → 提案中心。</div>
           </div>
         )}
+        </div>
       </div>
+      )}
 
       <div className="ndv__bottom">
         <span className="ndv__bottom-item"><span className="ndv__ok">今日只读</span> {readCount}</span>
