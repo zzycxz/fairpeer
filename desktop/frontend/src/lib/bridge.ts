@@ -1745,18 +1745,40 @@ function makeMockApp(): AppBindings {
       const trimmedInput = input.trim().toLowerCase();
       // Browser dev-shell demo: reply with a mermaid diagram so the rendering
       // pipeline (Markdown → MermaidViewer → SVG in the chat bubble) can be
-      // verified without the Go backend.
+      // verified without the Go backend. 流程 → decision flowchart, otherwise a
+      // topology graph.
       if (trimmedInput.startsWith("mermaid") || trimmedInput.includes("画")) {
-        const chart = [
-          "graph LR",
-          "  CORE1[核心 SW1] --- AGG1[汇聚 SW1]",
-          "  CORE1 --- AGG2[汇聚 SW2]",
-          "  AGG1 --- ACC1[接入 SW1]",
-          "  AGG1 --- ACC2[接入 SW2]",
-          "  AGG2 --- ACC3[接入 SW3]",
-          "  FW[防火墙] --- CORE1",
-        ].join("\n");
-        const reply = "全网拓扑示意（mermaid 渲染演示）：\n\n```mermaid\n" + chart + "\n```\n";
+        let chart: string;
+        let caption: string;
+        if (trimmedInput.includes("流程")) {
+          chart = [
+            "flowchart TD",
+            "  AL[端口 down 告警] --> Q1{链路灯亮?}",
+            "  Q1 -- 不亮 --> HW[检查光模块/线缆并更换]",
+            "  HW --> Q2{恢复?}",
+            "  Q2 -- 否 --> RMA[报硬件更换]",
+            "  Q1 -- 亮 --> Q3{对端 MAC 学习?}",
+            "  Q3 -- 无 --> CFG[查端口配置 shutdown/VLAN]",
+            "  Q3 -- 有 --> STP[查 STP 状态/环路]",
+            "  Q2 -- 是 --> OK[业务恢复 关闭工单]",
+            "  CFG --> OK",
+            "  STP --> OK",
+            "  RMA --> OK",
+          ].join("\n");
+          caption = "端口故障排查流程（mermaid flowchart 演示）";
+        } else {
+          chart = [
+            "graph LR",
+            "  CORE1[核心 SW1] --- AGG1[汇聚 SW1]",
+            "  CORE1 --- AGG2[汇聚 SW2]",
+            "  AGG1 --- ACC1[接入 SW1]",
+            "  AGG1 --- ACC2[接入 SW2]",
+            "  AGG2 --- ACC3[接入 SW3]",
+            "  FW[防火墙] --- CORE1",
+          ].join("\n");
+          caption = "全网拓扑示意（mermaid 渲染演示）";
+        }
+        const reply = caption + "：\n\n```mermaid\n" + chart + "\n```\n";
         await delay(400);
         if (cancelled) return;
         emit({ kind: "message", text: reply });

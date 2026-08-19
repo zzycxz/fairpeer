@@ -106,7 +106,7 @@ func main() {
 		chromedp.Sleep(400*time.Millisecond),
 		chromedp.SendKeys("textarea", "\r", chromedp.ByQuery),
 		chromedp.Sleep(3500*time.Millisecond),
-		chromedp.Evaluate(`(function(){var s=document.querySelectorAll("svg[id^='mermaid-']"); var vis=[]; s.forEach(function(el){ if(el.getBoundingClientRect().width>0) vis.push(el); }); if(vis.length){ vis[vis.length-1].scrollIntoView({block:"center"}); } return true;})()`, new(bool)),
+		chromedp.Evaluate(visibleMermaidScrollJS, new(bool)),
 		chromedp.Sleep(600*time.Millisecond),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			return saveShot(ctx, filepath.Join(*out, "ndv-3-mermaid.png"))
@@ -117,12 +117,42 @@ func main() {
 	fmt.Println("shot: ndv-3-mermaid.png")
 	var svgCount int
 	if err := chromedp.Run(bctx,
-		chromedp.Evaluate(`(function(){var n=0; document.querySelectorAll("svg[id^='mermaid-']").forEach(function(el){ if(el.getBoundingClientRect().width>0) n++; }); return n;})()`, &svgCount),
+		chromedp.Evaluate(countVisibleMermaidJS, &svgCount),
 	); err != nil || svgCount == 0 {
 		fatal("mermaid-svg-rendered: 0 — no visible diagram found in DOM (err: %v)", err)
 	}
 	fmt.Printf("mermaid-svg-rendered: %d diagram(s)\n", svgCount)
+
+	// Same pipeline with a flowchart (decision diamonds + labelled branches).
+	if err := chromedp.Run(bctx,
+		chromedp.SendKeys("textarea", "画一张端口故障排查流程图", chromedp.ByQuery, chromedp.NodeVisible),
+		chromedp.Sleep(400*time.Millisecond),
+		chromedp.SendKeys("textarea", "\r", chromedp.ByQuery),
+		chromedp.Sleep(3500*time.Millisecond),
+		chromedp.Evaluate(visibleMermaidScrollJS, new(bool)),
+		chromedp.Sleep(600*time.Millisecond),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return saveShot(ctx, filepath.Join(*out, "ndv-4-flowchart.png"))
+		}),
+	); err != nil {
+		fatal("flowchart shot: %v", err)
+	}
+	fmt.Println("shot: ndv-4-flowchart.png")
+	var flowCount int
+	if err := chromedp.Run(bctx,
+		chromedp.Evaluate(countVisibleMermaidJS, &flowCount),
+	); err != nil || flowCount == 0 {
+		fatal("flowchart-svg-rendered: 0 — no visible flowchart found in DOM (err: %v)", err)
+	}
+	fmt.Printf("flowchart-svg-rendered: %d diagram(s)\n", flowCount)
 }
+
+// visibleMermaidScrollJS scrolls the last visible mermaid diagram into view,
+// skipping the hidden duplicate transcript's 0×0 copies.
+const visibleMermaidScrollJS = `(function(){var s=document.querySelectorAll("svg[id^='mermaid-']"); var vis=[]; s.forEach(function(el){ if(el.getBoundingClientRect().width>0) vis.push(el); }); if(vis.length){ vis[vis.length-1].scrollIntoView({block:"center"}); } return true;})()`
+
+// countVisibleMermaidJS counts rendered mermaid diagrams with non-zero size.
+const countVisibleMermaidJS = `(function(){var n=0; document.querySelectorAll("svg[id^='mermaid-']").forEach(function(el){ if(el.getBoundingClientRect().width>0) n++; }); return n;})()`
 
 // saveShot captures a full-page screenshot into path.
 func saveShot(ctx context.Context, path string) error {
