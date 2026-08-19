@@ -147,11 +147,38 @@ func main() {
 	}
 	fmt.Printf("flowchart-svg-rendered: %d diagram(s)\n", flowCount)
 
-	// Interactive topology: open the 拓扑 tab (auto-generates), click the
-	// CORE-01 node, and assert the dock switched to that device's card.
+	// Interactive topology: open the 拓扑 tab — the LOCAL IP-plan view must be
+	// there instantly (badge), the measured LLDP sweep only on explicit click
+	// (badge flips), then click the CORE-01 node → device card.
 	if err := chromedp.Run(bctx,
 		chromedp.Click(`//button[contains(., "拓扑")]`, chromedp.BySearch),
 		chromedp.Sleep(1200*time.Millisecond),
+	); err != nil {
+		fatal("topology tab: %v", err)
+	}
+	var planDock string
+	if err := chromedp.Run(bctx, chromedp.Text(".ndv__dock", &planDock, chromedp.ByQuery)); err != nil {
+		fatal("plan probe: %v", err)
+	}
+	if planBadge := oneLine(planDock); !strings.Contains(planBadge, "IP 规划推断") {
+		fatal("local IP-plan view not shown on tab open (dock: %.120q)", planBadge)
+	}
+	fmt.Println("topology-local-plan: OK (instant, no device dialing)")
+	if err := chromedp.Run(bctx,
+		chromedp.Click(`//span[contains(., "LLDP 实测校准")]`, chromedp.BySearch),
+		chromedp.Sleep(1200*time.Millisecond),
+	); err != nil {
+		fatal("lldp calibrate click: %v", err)
+	}
+	var measuredDock string
+	if err := chromedp.Run(bctx, chromedp.Text(".ndv__dock", &measuredDock, chromedp.ByQuery)); err != nil {
+		fatal("measured probe: %v", err)
+	}
+	if m := oneLine(measuredDock); !strings.Contains(m, "LLDP/CDP 实测") {
+		fatal("measured badge missing after calibrate click (dock: %.120q)", m)
+	}
+	fmt.Println("topology-measured-calibrate: OK")
+	if err := chromedp.Run(bctx,
 		chromedp.Evaluate(`(function(){var gs=document.querySelectorAll(".ndv__dock svg g"); for (var i=0;i<gs.length;i++){ if(gs[i].textContent.indexOf("CORE-01")>=0){ gs[i].dispatchEvent(new MouseEvent("click",{bubbles:true})); return "clicked"; }} return "not-found";})()`, new(string)),
 		chromedp.Sleep(800*time.Millisecond),
 		chromedp.Evaluate(visibleMermaidScrollJS, new(bool)), // no-op if no diagrams; keeps order stable

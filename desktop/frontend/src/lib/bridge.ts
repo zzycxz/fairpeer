@@ -357,6 +357,9 @@ export interface AppBindings {
   // UI quick-diagnose: one read-only command through the SAME sealed path.
   NetDevQuickExec(device: string, command: string): Promise<{ device: string; command: string; class: string; output: string; is_error: boolean; refused?: boolean; refusal?: string }>;
   NetDevTopologySnapshot(): Promise<NetDevTopologyGraph | null>;
+  // LOCAL IP-plan view: pure computation over the inventory (zero device
+  // sessions, zero model calls) — the 拓扑 tab's instant default.
+  NetDevTopologyPlan(): Promise<NetDevTopologyGraph | null>;
   NetDevApproveProposal(id: string, confirm2: boolean): Promise<NetDevProposal>;
   NetDevExecuteProposal(id: string): Promise<NetDevProposal>;
   NetDevRollbackProposal(id: string): Promise<NetDevProposal>;
@@ -1778,6 +1781,22 @@ function makeMockApp(): AppBindings {
           { local_device: "AGG-01", local_port: "GE0/0/48", remote_device: "SRV-ESXi", source: "cdp" },
           { local_device: "ACC-03", local_port: "GE0/0/24", remote_device: "IPSLA-P", source: "cdp" },
         ],
+        at: new Date().toISOString().slice(0, 19).replace("T", " "),
+      };
+    },
+    async NetDevTopologyPlan() {
+      // Browser-dev stand-in for the LOCAL IP-plan view: managed devices only,
+      // tiers/subnets inferred from the inventory, zero edges (links are never
+      // invented from IPs — only the measured sweep draws them).
+      const P = (name: string, ip: string, tier: number, subnet: string): NetDevTopologyNode => ({ name, managed: true, device_ip: ip, tier, subnet });
+      return {
+        nodes: [
+          P("FW-01", "10.0.0.1", 0, "10.0.0.0/24"),
+          P("CORE-01", "10.0.0.2", 0, "10.0.0.0/24"), P("CORE-02", "10.0.0.3", 0, "10.0.0.0/24"),
+          P("AGG-01", "10.0.1.1", 1, "10.0.1.0/24"), P("AGG-02", "10.0.1.2", 1, "10.0.1.0/24"),
+          P("ACC-01", "10.0.2.1", 2, "10.0.2.0/24"), P("ACC-02", "10.0.2.2", 2, "10.0.2.0/24"), P("ACC-03", "10.0.2.3", 2, "10.0.2.0/24"),
+        ],
+        edges: [],
         at: new Date().toISOString().slice(0, 19).replace("T", " "),
       };
     },

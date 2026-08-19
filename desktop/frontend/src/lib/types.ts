@@ -1732,6 +1732,10 @@ export interface NetDevTopologyNode {
   name: string;
   managed: boolean;
   device_ip?: string;
+  // IP-plan view only: the /24 the address lives in and the locally inferred
+  // band (0 core / 1 agg / 2 access / 3 unmanaged; -1 = not inferred).
+  subnet?: string;
+  tier?: number;
 }
 
 export interface NetDevTopologyGraph {

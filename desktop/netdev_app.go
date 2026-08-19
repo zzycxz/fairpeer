@@ -358,6 +358,20 @@ func (a *App) NetDevTopologySnapshot() (*netdev.TopologyGraph, error) {
 	return netdev.SharedManager(cfg).TopologySnapshot(ctx)
 }
 
+// NetDevTopologyPlan is the LOCAL topology view: pure computation over the
+// inventory (groups, name conventions, the intranet IP plan) — zero device
+// sessions, zero model calls. The 拓扑 tab shows it on open; the measured
+// LLDP/CDP sweep (NetDevTopologySnapshot) only runs when the user clicks for
+// it. Never mixed silently: the frontend badges which view it is showing.
+func (a *App) NetDevTopologyPlan() (*netdev.TopologyGraph, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	g := netdev.InferTopology(cfg)
+	return &g, nil
+}
+
 // NetDevEmergencyStop closes every device connection/session at once (the
 // red button; audited). Returns how many connections were dropped.
 func (a *App) NetDevEmergencyStop() (int, error) {

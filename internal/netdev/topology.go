@@ -127,6 +127,13 @@ type TopologyNode struct {
 	Name     string `json:"name"`
 	Managed  bool   `json:"managed"`
 	DeviceIP string `json:"device_ip,omitempty"`
+	// Subnet annotates the local IP-plan view (the /24 the address lives in).
+	Subnet string `json:"subnet,omitempty"`
+	// Tier is the LOCAL inference's band (0 core / 1 agg / 2 access / 3
+	// unmanaged) from group words, name conventions, or subnet ordering —
+	// present only in the IP-plan view; the LLDP snapshot leaves it at -1
+	// and the map falls back to its degree heuristic.
+	Tier int `json:"tier"`
 }
 
 // TopologyGraph is the merged snapshot for the layout's mini-map.
@@ -166,16 +173,22 @@ func (m *Manager) TopologySnapshot(ctx context.Context) (*TopologyGraph, error) 
 		}
 	}
 	// Nodes: every managed device that appears, plus unmanaged neighbors.
+	// Tier stays -1 here: the measured view has no local inference; the map's
+	// degree heuristic assigns bands.
 	for _, d := range m.cfg.NetDev.Devices {
 		if !seenNode[d.Name] {
 			seenNode[d.Name] = true
-			g.Nodes = append(g.Nodes, TopologyNode{Name: d.Name, Managed: true, DeviceIP: d.Address})
+			g.Nodes = append(g.Nodes, TopologyNode{Name: d.Name, Managed: true, DeviceIP: d.Address, Tier: -1})
 		}
 	}
 	for _, e := range g.Edges {
 		if !seenNode[e.RemoteDevice] {
 			seenNode[e.RemoteDevice] = true
-			g.Nodes = append(g.Nodes, TopologyNode{Name: e.RemoteDevice, Managed: managed[e.RemoteDevice], DeviceIP: e.RemoteIP})
+			tier := -1
+			if !managed[e.RemoteDevice] {
+				tier = 3
+			}
+			g.Nodes = append(g.Nodes, TopologyNode{Name: e.RemoteDevice, Managed: managed[e.RemoteDevice], DeviceIP: e.RemoteIP, Tier: tier})
 		}
 	}
 	return g, nil

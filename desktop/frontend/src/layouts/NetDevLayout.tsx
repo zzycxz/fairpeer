@@ -146,7 +146,11 @@ export function NetDevLayout({
   const genTopology = useCallback(async () => {
     setTopoBusy(true);
     try {
-      setTopo(await app.NetDevTopologySnapshot());
+      const g = await app.NetDevTopologySnapshot();
+      if (g) {
+        setTopo(g);
+        setTopoSource("measured");
+      }
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -170,15 +174,29 @@ export function NetDevLayout({
     setTopoNotice(`「${name}」不在设备清单——邻居表发现的节点（未纳管或无凭证），到 设置 → 运维 录入后即可点击诊断。`);
   }, [topo]);
 
-  // Entering the 拓扑 tab auto-generates once (per mount) when devices exist,
-  // so the map is simply there after a probe instead of hiding behind a click.
+  // Rendering doctrine for the map: click-to-render, program-computed, IP
+  // plan first. Entering the 拓扑 tab loads the LOCAL view instantly (pure
+  // computation over the inventory — zero device sessions, zero model calls);
+  // the measured LLDP/CDP sweep only runs on the explicit 校准 click.
+  const [topoSource, setTopoSource] = useState<"plan" | "measured">("plan");
+  const loadPlan = useCallback(async () => {
+    try {
+      const g = await app.NetDevTopologyPlan();
+      if (g) {
+        setTopo(g);
+        setTopoSource("plan");
+      }
+    } catch (e) {
+      setErr(String(e));
+    }
+  }, []);
   const topoAutoFired = useRef(false);
   useEffect(() => {
-    if (tab === "topology" && !topoAutoFired.current && !topo && !topoBusy && (settings?.devices?.length ?? 0) > 0) {
+    if (tab === "topology" && !topoAutoFired.current) {
       topoAutoFired.current = true;
-      void genTopology();
+      void loadPlan();
     }
-  }, [tab, topo, topoBusy, settings, genTopology]);
+  }, [tab, loadPlan]);
 
   const runInspection = useCallback(async () => {
     setInspBusy(true);
@@ -329,10 +347,17 @@ export function NetDevLayout({
 
         {tab === "topology" && (
           <div className="ndv__card">
-            <div className="ndv__card-title">拓扑</div>
-            <div className="ndv__rail-actions" style={{ padding: 0, marginBottom: 8 }}>
+            <div className="ndv__card-title">
+              拓扑 <span style={{ fontWeight: 400, fontSize: 11, color: topoSource === "measured" ? "#7ee2a8" : "var(--accent, #7ab8ff)" }}>
+                {topoSource === "measured" ? "[ LLDP/CDP 实测 ]" : "[ IP 规划推断（本地计算，未连接设备） ]"}
+              </span>
+            </div>
+            <div className="ndv__rail-actions" style={{ padding: 0, marginBottom: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <span className="btn btn--secondary btn--small" role="button" onClick={() => void loadPlan()}>
+                刷新 IP 规划视图
+              </span>
               <span className="btn btn--secondary btn--small" role="button" onClick={() => void genTopology()}>
-                {topoBusy ? "采集邻居表中…" : "生成拓扑（读取全网邻居表）"}
+                {topoBusy ? "采集邻居表中…" : "LLDP 实测校准（逐台读取邻居表）"}
               </span>
             </div>
             {topoNotice && (
@@ -341,7 +366,7 @@ export function NetDevLayout({
             {topo && <TopologyMap graph={topo} selected={selected} selectedAddr={selectedDevice?.address} onPick={pickFromTopo} />}
             {!topo && !topoBusy && (
               <div className="ndv__hint" style={{ padding: 0 }}>
-                生成拓扑 = 对全部纳管设备执行只读的 LLDP/CDP 邻居表读取，按连接度自动分层为核心 / 汇聚 / 接入；未纳管邻居沉底（虚线框）。
+                IP 规划视图按设备分组 / 命名惯例 / 网段聚类推断层级（核心/汇聚/接入），纯本地计算、零 AI 请求；连线只画真实数据——点「LLDP 实测校准」逐台读取邻居表补全链路。
               </div>
             )}
           </div>
@@ -455,18 +480,21 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
     }
   }
   const managed = graph.nodes.filter(v => v.managed);
-  // Tier thresholds relative to the busiest node: core ≥ 60% of max degree,
-  // aggregation ≥ 30%, rest access. Managed nodes without links join access.
+  // Max degree for the fallback tiering.
   const maxDeg = Math.max(1, ...managed.map(v => degree.get(v.name) ?? 0));
-  const tierOf = (name: string): number => {
-    const d = degree.get(name) ?? 0;
+  // Tier: the backend's local inference wins when present (IP-plan view);
+  // otherwise fall back to the degree heuristic (measured view).
+  const tierOfNode = (v: { name: string; managed: boolean; tier?: number }): number => {
+    if (v.tier !== undefined && v.tier >= 0) return v.tier;
+    if (!v.managed) return 3;
+    const d = degree.get(v.name) ?? 0;
     if (d >= maxDeg * 0.6) return 0;
     if (d >= maxDeg * 0.3) return 1;
     return 2;
   };
   // Unmanaged neighbors get their own bottom band (tier 3).
   const bands: string[][] = [[], [], [], []];
-  for (const v of graph.nodes) bands[v.managed ? tierOf(v.name) : 3].push(v.name);
+  for (const v of graph.nodes) bands[tierOfNode(v)].push(v.name);
   const pos = new Map<string, { x: number; y: number }>();
   const bandY = [46, 148, 250, 322];
   bands.forEach((band, bi) => {
@@ -505,7 +533,7 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
         {graph.nodes.map(v => {
           const p = pos.get(v.name);
           if (!p) return null;
-          const tier = v.managed ? tierOf(v.name) : 3;
+          const tier = tierOfNode(v);
           const nv = node(v.name);
           const sel = !!v.managed && (!!selected && (v.name === selected || nv?.device_ip === selectedAddr));
           return (
@@ -528,7 +556,7 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
               <text x={p.x} y={p.y + 3.5} textAnchor="middle" fontSize={9} fill={v.managed ? "var(--text, #ccc)" : "var(--text-dim, #888)"}>
                 {v.name.length > 9 ? v.name.slice(0, 9) + "…" : v.name}
               </text>
-              <title>{`${v.name}${nv?.device_ip ? " · " + nv.device_ip : ""}${v.managed ? " · 纳管" : " · 未纳管"} · 连接 ${degree.get(v.name) ?? 0}${v.managed && onPick ? " · 点击查看设备" : ""}`}</title>
+              <title>{`${v.name}${nv?.device_ip ? " · " + nv.device_ip : ""}${v.subnet ? " · " + v.subnet : ""}${v.managed ? " · 纳管" : " · 未纳管"}${v.tier !== undefined && v.tier >= 0 ? " · 分层为本地推断" : ` · 连接 ${degree.get(v.name) ?? 0}`}${v.managed && onPick ? " · 点击查看设备" : ""}`}</title>
             </g>
           );
         })}
