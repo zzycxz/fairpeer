@@ -388,9 +388,12 @@ export function NetDevLayout({
             </button>
           )}
         </div>
-        <div className="ndv__section">诊断会话</div>
+        <div className="ndv__section-row"><div className="ndv__section">诊断会话</div></div>
         <div className="ndv__sessions">{sessionsNode}</div>
-        <div className="ndv__section">设备清单（{devices.length}{project ? ` · ${project.name}` : ""}，点击诊断）</div>
+        <div className="ndv__section-row">
+          <div className="ndv__section">设备清单</div>
+          <span className="ndv__section-meta">{project ? `${project.name} · ` : ""}{devices.length} 台</span>
+        </div>
         {devices.length === 0 && (
           <div className="ndv__hint">还没有设备。右栏「开始使用」三步录入。</div>
         )}
@@ -409,15 +412,15 @@ export function NetDevLayout({
         ))}
         {(settings?.hops?.length ?? 0) > 0 && (
           <>
-            <div className="ndv__section">堡垒链（{settings?.hops.length}）</div>
+            <div className="ndv__section-row"><div className="ndv__section">堡垒链</div><span className="ndv__section-meta">{settings?.hops.length} 跳</span></div>
             {(settings?.hops ?? []).map(h => (
               <div key={h.name} className="ndv__device"><span className="ndv__device-name">{h.name}</span><span className="ndv__device-addr">{h.host}</span></div>
             ))}
           </>
         )}
-        <div className="ndv__section">巡检</div>
-        <div className="ndv__rail-actions">
-          <span className="btn btn--secondary btn--small" role="button" onClick={() => void runInspection()}>
+        <div className="ndv__section-row">
+          <div className="ndv__section">巡检</div>
+          <span className="btn btn--secondary btn--small ndv__section-btn" role="button" onClick={() => void runInspection()}>
             {inspBusy ? "巡检中…" : "立即巡检"}
           </span>
         </div>

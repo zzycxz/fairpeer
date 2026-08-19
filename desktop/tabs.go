@@ -1055,6 +1055,34 @@ func tabHasSelectableProvider(cfg *config.Config) bool {
 	return false
 }
 
+// cfgModelResolvable reports whether a persisted "provider/model" reference
+// still exists in the current config. Tabs outlive config edits: a model picked
+// months ago (e.g. a provider later removed) must fall back to default_model,
+// not brick startup with "unknown model".
+func cfgModelResolvable(cfg *config.Config, ref string) bool {
+	if cfg == nil {
+		return false
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return true
+	}
+	prov, model, _ := strings.Cut(ref, "/")
+	p, ok := cfg.Provider(prov)
+	if !ok {
+		return false
+	}
+	if model == "" || model == p.Default {
+		return true
+	}
+	for _, m := range p.Models {
+		if m == model {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) buildTabController(tab *WorkspaceTab) {
 	// Reset the ready signal so a rebuild (model switch) produces a fresh edge.
 	// Callers blocked on the previous build already returned; a new wait starts
@@ -3024,10 +3052,10 @@ func (a *App) TrashTopic(topicID string) error {
 // ListProjectTree builds the sidebar tree: project folders each containing
 // their topics, plus a Global section.
 // ListProjectTree returns the project-tree sidebar model. The profile argument
-// routes the projects index to the per-profile file so dev/cowork show only
-// their own conversations. An empty profile ("") reads the legacy un-profiled
-// index (backward compatible). Wails binds this as a 1-arg method; the frontend
-// always passes a profile ("dev"/"cowork").
+// routes the projects index to the per-profile file so dev/cowork/netdev show
+// only their own conversations. An empty profile ("") reads the legacy
+// un-profiled index (backward compatible). Wails binds this as a 1-arg method;
+// the frontend always passes a profile ("dev"/"cowork"/"netdev").
 func (a *App) ListProjectTree(profile string) []ProjectNode {
 	migrateLegacySessionsIntoGlobalTopics(config.SessionDir(), profile)
 	f := loadProjectsFile(profile)

@@ -182,6 +182,22 @@
   user-select: none;
 }
 
+.ndv__section-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px 4px;
+}
+.ndv__section-row .ndv__section { padding: 0; }
+.ndv__section-meta {
+  font-size: 11px;
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ndv__section-btn { margin-right: 12px; }
+
 .ndv__hint {
   padding: 2px 2px 8px;
   font-size: 11.5px;

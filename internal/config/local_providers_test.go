@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -129,5 +130,21 @@ func TestNormalizeLocalProviderNoProxy(t *testing.T) {
 	}
 	if e, _ := cfg.Provider("remote"); e.NoProxy {
 		t.Error("remote endpoint must not be touched")
+	}
+}
+
+// A stale tab model (provider since removed) with only keyless local providers
+// configured must fall back to the local preset instead of returning ok=false
+// (which surfaced as the desktop's "unknown model" startup error).
+func TestResolveModelWithFallbackKeylessLocal(t *testing.T) {
+	c := Default()
+	c.DefaultModel = ""
+	c.Providers = BuiltinLocalProviders()
+	resolved, fallback, ok := c.ResolveModelWithFallback("mimo/mimo-v2.5-pro")
+	if !ok || !fallback {
+		t.Fatalf("ok=%v fallback=%v — keyless local providers must be valid fallbacks", ok, fallback)
+	}
+	if !strings.HasPrefix(resolved, "ollama/") {
+		t.Fatalf("resolved = %q, want the first local preset", resolved)
 	}
 }

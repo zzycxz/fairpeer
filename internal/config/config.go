@@ -105,6 +105,16 @@ type MobileBridgeConfig struct {
 	// 提前打开 S 侧 NAT。双对称 NAT 无效（协议 §7）。
 	UDPKnock    bool   `toml:"udp_knock"`
 	KnockServer string `toml:"knock_server"` // 敲门依赖的远程 STUN，如 stun:host:3478
+	// CloudSignalURL 公网跳板 K（跨网配对/信令候选）：非空时 S 维持第二条
+	// 出站 WSS 长连到该云 K，二维码 relay 追加它为末位候选——手机同网自动
+	// 选局域网直连，跨网回退到云 K 打洞。空 = 关（纯局域网/单 K，零云）。
+	CloudSignalURL string `toml:"cloud_signal_url"`
+	// TURN 中转兜底（跨网打洞全败时经 coturn 中继；ICE 仍优先直连）。
+	// 凭据为 coturn use-auth-secret（REST）模式：user=时间戳，pass=HMAC。
+	TURNEnabled bool     `toml:"turn_enabled"`
+	TURNServers []string `toml:"turn_servers"` // 如 ["turn:signal.example.com:3478?transport=udp"]
+	TURNUser    string   `toml:"turn_user"`
+	TURNPass    string   `toml:"turn_pass"`
 }
 
 // UIConfig controls CLI presentation-only settings. Desktop appearance is kept in
@@ -2455,13 +2465,23 @@ func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallb
 			return e.Name + "/" + e.Model, true, true
 		}
 	}
+	// The final loop serves two very different callers and must keep them apart:
+	// an EMPTY ref (fresh install / onboarding) must never auto-select keyless
+	// local presets (TestResolveModelWithFallbackNeverAutoSelectsLocalPresets),
+	// but a NON-EMPTY stale ref (a persisted tab model whose provider was since
+	// removed) prefers any working local preset over bricking startup with
+	// "unknown model" — desktop-tabs.json regularly outlives config edits.
+	staleRef := ref != ""
 	for i := range c.Providers {
 		p := &c.Providers[i]
-		// Skip providers with no models or no API key: falling back onto a keyless
-		// provider just boots the tab onto something that fails on first use. Mirrors
-		// the Configured() gate the provider-removal/selection paths already apply.
-		if len(p.ModelList()) == 0 || !p.Configured() {
+		if len(p.ModelList()) == 0 {
 			continue
+		}
+		if p.APIKeyEnv != "" && !p.Configured() {
+			continue // keyed provider without its key can't serve
+		}
+		if p.APIKeyEnv == "" && !staleRef {
+			continue // fresh install: keyless local presets never auto-select
 		}
 		return p.Name + "/" + p.DefaultModel(), true, true
 	}
