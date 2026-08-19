@@ -12,6 +12,12 @@
   display: none;
 }
 
+/* The chrome normally starts right of the sidebar column (grid-column: 2/-1).
+   The sidebar is hidden in netdev but its track still reserves ~200px, leaving
+   a blank notch at the top-left; the netdev title bar IS the header, so span
+   the full width. */
+.app--netdev .app-chrome { grid-column: 1 / -1; }
+
 /* The layout is a grid ITEM inside the app's outer grid, exactly like
    .cowork-layout: pin to row 2..end spanning all columns, or the auto row
    collapses to content height and everything crams into the top-left. */
@@ -25,16 +31,6 @@
   min-width: 0;
   overflow: hidden;
   background: var(--bg);
-}
-
-.ndv__top {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-raised, var(--bg));
 }
 
 .ndv__badge {
@@ -72,7 +68,7 @@
 .ndv__stop:hover { background: rgba(255, 87, 87, 0.18); border-color: rgba(255, 135, 135, 0.6); }
 
 .ndv__rail {
-  grid-row: 2;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border);
@@ -117,7 +113,7 @@
 .ndv__device-addr { opacity: 0.55; white-space: nowrap; }
 
 .ndv__main {
-  grid-row: 2;
+  grid-row: 1;
   grid-column: 2;
   display: flex;
   flex-direction: column;
@@ -129,7 +125,7 @@
 .ndv__chat { flex: 1; min-height: 0; overflow: auto; }
 
 .ndv__dock {
-  grid-row: 2;
+  grid-row: 1;
   grid-column: 3;
   border-left: 1px solid var(--border);
   background: var(--bg-raised, var(--bg));
@@ -183,6 +179,7 @@
 .ndv__step-detail { margin-left: 8px; margin-bottom: 6px; }
 
 .ndv__bottom {
+  grid-row: 2;
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
