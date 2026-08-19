@@ -3475,3 +3475,15 @@
   background: #4c8dff;
   flex: 0 0 auto;
 }
+/* Numeric count chip riding a dock tab (netdev 发现/提案 pending counts).
+   Same slot as the activity dot; only rendered by DockTabs consumers. */
+.workbench-dock__tab-badge {
+  margin-left: 2px;
+  padding: 1px 5px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-dim, rgba(122, 184, 255, 0.2));
+  color: var(--fg-dim);
+  font-size: 10px;
+  line-height: 1.4;
+  flex: 0 0 auto;
+}
