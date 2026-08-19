@@ -3323,8 +3323,12 @@
   max-height: 88vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
-.onboarding__card--wide .onboarding__step { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Every step scrolls INSIDE the fixed-height card (2026-08-19): key/model
+   steps previously grew past the card bottom and pushed the 完成 button out
+   of bounds. */
+.onboarding__card--wide .onboarding__step { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
 .onboarding__dots { display: flex; justify-content: center; gap: 6px; margin: 10px 0 4px; }
 .onboarding__dot { width: 6px; height: 6px; border-radius: var(--radius-pill); background: var(--border); transition: background var(--dur-fast), width var(--dur-fast); }
 .onboarding__dot--on { background: var(--accent); width: 18px; }
