@@ -351,6 +351,16 @@ func buildChromeArgs(port int, userDataDir string, opts LaunchOptions) []string 
 		// Disable the "Chrome is being controlled by automated software" banner
 		// and reduce obvious automation fingerprints without full stealth.
 		"--disable-features=Translate",
+		// Keep a minimized/occluded window fully live: by default Chromium
+		// throttles rendering and timers for hidden windows, which freezes
+		// CDP screenshots on a stale frame and slows page scripts — breaking
+		// screenshot-driven automation while the user keeps the managed
+		// browser in the background. CDP input still works minimized (it's
+		// synthesized in-browser, not via OS focus), these flags keep
+		// perception (capture) working too.
+		"--disable-backgrounding-occluded-windows",
+		"--disable-background-timer-throttling",
+		"--disable-renderer-backgrounding",
 	}
 	if opts.Proxy != "" {
 		// Route the browser through the user's configured proxy so the agent
@@ -778,4 +788,49 @@ func (b *lineBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return strings.TrimSpace(string(b.buf))
+}
+
+// OpenTab opens target as a new tab in the browser behind the CDP endpoint.
+// Chrome 111+ rejects GET on /json/new, so this issues a PUT. It is the
+// companion-window tier of the preview pane (pane-system spec §3.6): the
+// managed browser keeps the user's logins while the pane hands a URL over.
+func OpenTab(ctx context.Context, endpoint, target string) error {
+	base := NormalizeCDPEndpoint(endpoint)
+	if base == "" {
+		return fmt.Errorf("browserlaunch: invalid CDP endpoint %q", endpoint)
+	}
+	if !strings.Contains(target, "://") && !strings.HasPrefix(target, "localhost") && !strings.HasPrefix(target, "127.0.0.1") {
+		return fmt.Errorf("browserlaunch: refusing non-http target %q", target)
+	}
+	u := base + "/json/new?" + urlQueryEscape(target)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("browserlaunch: /json/new on %s failed: %w", base, err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8*1024))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("browserlaunch: /json/new on %s answered %s", base, resp.Status)
+	}
+	return nil
+}
+
+// urlQueryEscape is net/url.QueryEscape, kept local to avoid widening the
+// package's import surface in this hot file.
+func urlQueryEscape(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+			c == '-' || c == '_' || c == '.' || c == '~' {
+			b.WriteByte(c)
+			continue
+		}
+		fmt.Fprintf(&b, "%%%02X", c)
+	}
+	return b.String()
 }

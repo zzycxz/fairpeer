@@ -88,6 +88,27 @@ func (a *App) CheckManagedBrowser() ManagedBrowserStatus {
 	return status
 }
 
+// OpenURLInManagedBrowser ensures the managed browser is running (launching it
+// if needed) and opens target as a new tab in it. The preview pane's
+// companion-window tier (pane-system spec §3.6): full browser — logins,
+// devtools, extensions — in the persistent managed profile, on every OS
+// without any window-embedding native code.
+func (a *App) OpenURLInManagedBrowser(target string) (ManagedBrowserStatus, error) {
+	status, err := a.StartManagedBrowser()
+	if err != nil {
+		return status, err
+	}
+	if !status.Running {
+		return status, fmt.Errorf("可控浏览器未就绪")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	if err := browserlaunch.OpenTab(ctx, managedBrowserURL(), target); err != nil {
+		return status, fmt.Errorf("在可控浏览器中打开失败: %w", err)
+	}
+	return status, nil
+}
+
 // StartManagedBrowser launches (or reports) the managed attachable browser:
 // headed, fixed port 9222, persistent profile. It keeps running after the
 // call returns — we deliberately never call Handle.Close, so the window stays
