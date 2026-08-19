@@ -363,8 +363,9 @@
 .sidebar__section--projects {
   flex: 1 1 auto;
   min-height: 120px;
-  /* The tree scrolls INSIDE its section so the pinned bottom group (编码偏好)
-     never gets squeezed to 0 by taller 最近/sessions content above. */
+  /* ~6 rows visible, the rest scrolls (2026-08-19 density pass); flex-grow
+     still lets shorter trees breathe and keeps the pinned bottom group clear. */
+  max-height: 188px;
   overflow-y: auto;
   overflow-x: hidden;
 }

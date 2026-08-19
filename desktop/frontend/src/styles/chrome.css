@@ -672,8 +672,9 @@
 .side-sessions__row:hover .side-sessions__more { display: inline-flex; }
 .side-sessions__more:hover { background: var(--bg-elev-2); color: var(--fg); }
 .side-sessions__rename { width: 100%; font: inherit; font-size: 12.5px; padding: 4px 8px; margin: 2px 0; border-radius: var(--radius-sm); border: 1px solid var(--accent); background: var(--bg-elev); color: var(--fg); outline: none; }
-/* Scrollable recent box: up to 20 rows, viewport ~11 rows tall. */
-.side-sessions__scroll { max-height: 300px; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 2px; }
+/* Scrollable recent box: up to 20 rows, viewport ~6 rows tall (2026-08-19
+   density pass) — the rest scrolls. */
+.side-sessions__scroll { max-height: 166px; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 2px; }
 .sidebar-files-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; border: none; background: transparent; color: var(--fg-faint); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; padding: 8px 12px 4px; cursor: pointer; user-select: none; }
 .sidebar-files-toggle:hover { color: var(--fg-dim); }
 .sidebar-files-toggle__chev--closed { transform: rotate(-90deg); }

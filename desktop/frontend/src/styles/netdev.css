@@ -164,6 +164,10 @@
   --wails-draggable: no-drag;
 }
 
+/* Collapsed: hide outright — the same guarantee the coding sidebar's
+   .sidebar--collapsed gives (a 0px track + hidden element leaves no sliver). */
+.app--sidebar-collapsed .ndv__rail { display: none; }
+
 .ndv__sessions { min-height: 80px; max-height: 32%; overflow-y: auto; border-bottom: 1px solid var(--border-soft); }
 
 /* Section labels — the coding sidebar's grammar (side-sessions__label /
@@ -354,8 +358,10 @@
 }
 
 /* The netdev title bar lives INSIDE the global chrome's center slot — slim,
-   vertically centered, no second header row. flex:1 fills the strip so the
-   emergency stop's margin-left:auto can push it to the far right. */
+   vertically centered, no second header row. It LEADS with the coding view's
+   topicbar (flex:1 via the shared .app .app-chrome .topicbar rule, so the
+   session title owns the left and its spacer pushes the chips right); the
+   运维 chips never shrink under long titles. */
 .ndv__titlebar {
   display: flex;
   align-items: center;
@@ -363,4 +369,11 @@
   flex: 1;
   min-width: 0;
   padding: 0 8px;
+}
+.ndv__titlebar > .ndv__netname,
+.ndv__titlebar > .ndv__project,
+.ndv__titlebar > .ndv__badge,
+.ndv__titlebar > .ndv__stat,
+.ndv__titlebar > .ndv__stop {
+  flex: 0 0 auto;
 }
