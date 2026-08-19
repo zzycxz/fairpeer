@@ -640,7 +640,7 @@ export const en = {
 
   // project tree
   "projectTree.workspaceTitle": "Project workspace",
-  "projectTree.searchPlaceholder": "Search projects or sessions",
+  "projectTree.searchPlaceholder": "Search",
   "projectTree.newTopic": "New session",
   "projectTree.renameTopic": "Rename session",
   "projectTree.renameProject": "Rename display name",

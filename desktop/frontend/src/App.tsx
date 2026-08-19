@@ -2955,7 +2955,7 @@ export default function App() {
   const [treeQuery, setTreeQuery] = useState("");
   const sidebarSearchNode = (
     <label className="project-tree__search sidebar-search">
-      <Search size={14} />
+      <Search size={13} />
       <input
         value={treeQuery}
         onChange={(e) => setTreeQuery(e.target.value)}
@@ -3159,6 +3159,19 @@ export default function App() {
           <div className="sidebar__brandrow">
             <img src={logoSymbol} alt="" draggable={false} />
             <span>FairPeer</span>
+            {/* New session rides the brand row as a ghost icon button (2026-08-19
+                restyle) — the old full-width tinted button is gone. */}
+            <button
+              type="button"
+              className="sidebar__brand-iconbtn"
+              onClick={() => {
+                void handleNewTab();
+              }}
+              aria-label={t("topbar.newSession")}
+              title={t("topbar.newSession")}
+            >
+              <SquarePen size={15} />
+            </button>
             <button
               type="button"
               className="app-chrome__panel-toggle app-chrome__panel-toggle--left sidebar__brand-toggle"
@@ -3169,15 +3182,6 @@ export default function App() {
               <PanelLeft size={16} />
             </button>
           </div>
-          <button
-            className="sidebar__new"
-            onClick={() => {
-              void handleNewTab();
-            }}
-          >
-            <SquarePen size={18} />
-            <span>{t("topbar.newSession")}</span>
-          </button>
 
           {sidebarSearchNode}
 

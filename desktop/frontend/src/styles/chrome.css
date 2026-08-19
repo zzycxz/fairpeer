@@ -154,11 +154,11 @@
 
 /* Sidebar collapse toggle in its default home: the brand row's right slot.
    Reuses the chrome toggle markup/classes but flows inline instead of the
-   chrome's absolute 42px notch. */
+   chrome's absolute 42px notch. The new-session ghost button carries the
+   margin-left:auto that anchors the whole right cluster. */
 .sidebar__brandrow .app-chrome__panel-toggle {
   position: static;
   flex: 0 0 auto;
-  margin-left: auto;
   width: 28px;
   height: 28px;
   border: 0;
@@ -166,6 +166,27 @@
 }
 
 .sidebar__brandrow .app-chrome__panel-toggle:hover {
+  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
+}
+
+/* Ghost icon button (new session) — same grammar as the collapse toggle. */
+.sidebar__brand-iconbtn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+
+.sidebar__brand-iconbtn:hover {
+  color: var(--fg);
   background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
 }
 .sidebar__new,

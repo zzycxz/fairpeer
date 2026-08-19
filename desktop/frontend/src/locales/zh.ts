@@ -640,7 +640,7 @@ export const zh: Record<DictKey, string> = {
 
   // 项目树
   "projectTree.workspaceTitle": "项目工作区",
-  "projectTree.searchPlaceholder": "搜索项目或会话",
+  "projectTree.searchPlaceholder": "搜索",
   "projectTree.newTopic": "新会话",
   "projectTree.renameTopic": "重命名会话",
   "projectTree.renameProject": "修改显示名称",

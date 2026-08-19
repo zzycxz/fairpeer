@@ -1970,19 +1970,26 @@
   overflow-x: hidden;
 }
 
+/* Quiet search field (2026-08-19 restyle): no idle border, soft elevated
+   base, focus lights the accent — matches the sidebar's compact rows. */
 .project-tree__search {
   display: flex;
-  flex: 0 0 40px;
+  flex: 0 0 28px;
   align-items: center;
-  gap: 9px;
-  height: 40px;
-  min-height: 40px;
+  gap: 7px;
+  height: 28px;
+  min-height: 28px;
   margin: 0 var(--project-tree-edge-gap);
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-elev) 72%, var(--bg-soft));
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
   color: var(--fg-faint);
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.project-tree__search:focus-within {
+  border-color: var(--accent);
 }
 
 .project-tree__search input {
