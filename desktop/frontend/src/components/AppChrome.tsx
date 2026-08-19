@@ -179,8 +179,10 @@ export function AppChrome({
         </button>
       )}
       {/* Profile segmented switcher: a pill control with a sliding highlight
-          indicator. See ProfileSegmented below. */}
-      {!modeChrome && <ProfileSegmented profile={profile} onSwitchProfile={onSwitchProfile} t={t} />}
+          indicator. See ProfileSegmented below. Rendered in EVERY mode —
+          including netdev's modeChrome — so mode navigation stays identical
+          across profiles (framework parity with the coding view). */}
+      <ProfileSegmented profile={profile} onSwitchProfile={onSwitchProfile} t={t} />
       {showWindowsPreviewControls && (
         <div className="app-chrome__window-controls app-chrome__window-controls--windows" aria-hidden="true">
           <span className="app-chrome__window-control app-chrome__window-control--minimize">

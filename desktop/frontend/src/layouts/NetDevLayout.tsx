@@ -1,5 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SquarePen } from "lucide-react";
 import { app } from "../lib/bridge";
+import logoSymbol from "../assets/logo-symbol.png";
 import { getActiveProject, setActiveProject, subscribeActiveProject, type NetDevProjectScope } from "../lib/netdevProjectStore";
 import { ProposalActions } from "../components/netdev/ProposalCenter";
 import type { NetDevSettingsView, NetDevFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph } from "../lib/types";
@@ -100,6 +102,7 @@ export function NetDevLayout({
   sessionsNode,
   onOpenSettings,
   onInsertComposer,
+  onNewSession,
 }: {
   mainNode: ReactNode;
   footerNode: ReactNode;
@@ -108,6 +111,8 @@ export function NetDevLayout({
   // Fills the chat composer with a starter prompt (the AI-配置 entry point on
   // the device card / topology nodes). Optional: card hides the button if absent.
   onInsertComposer?: (text: string) => void;
+  // New diagnostic session — mirrors the coding view's brand-row ghost button.
+  onNewSession?: () => void;
 }) {
   const [settings, setSettings] = useState<NetDevSettingsView | null>(null);
   const [findings, setFindings] = useState<NetDevFinding[]>([]);
@@ -305,6 +310,21 @@ export function NetDevLayout({
   return (
     <div className="ndv">
       <div className="ndv__rail">
+        <div className="ndv__brandrow" title="FairPeer">
+          <img src={logoSymbol} alt="" draggable={false} />
+          <span>FairPeer</span>
+          {onNewSession && (
+            <button
+              type="button"
+              className="ndv__brand-btn"
+              onClick={onNewSession}
+              aria-label="新建诊断会话"
+              title="新建诊断会话"
+            >
+              <SquarePen size={15} strokeWidth={1.9} />
+            </button>
+          )}
+        </div>
         <div className="ndv__section">诊断会话</div>
         <div className="ndv__sessions">{sessionsNode}</div>
         <div className="ndv__section">设备清单（{devices.length}{project ? ` · ${project.name}` : ""}，点击诊断）</div>

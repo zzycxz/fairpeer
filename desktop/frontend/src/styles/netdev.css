@@ -47,6 +47,41 @@
   background: var(--bg);
 }
 
+.ndv__brandrow {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: var(--app-chrome-height);
+  padding: 0 6px 0 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.ndv__brandrow img {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+}
+.ndv__brand-btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  opacity: 0.65;
+}
+.ndv__brand-btn:hover { opacity: 1; background: var(--bg-hover, rgba(127, 127, 127, 0.12)); }
+
 .ndv__project {
   display: inline-flex;
   align-items: center;

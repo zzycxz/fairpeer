@@ -3189,6 +3189,7 @@ export default function App() {
             sessionsNode={sidebarSessionsNode}
             onOpenSettings={(t) => { setSettingsTarget(t as never); setSettingsPayload(null); }}
             onInsertComposer={addWorkspaceTextToComposer}
+            onNewSession={() => void handleNewTab()}
           />
         )}
         <AppChrome
@@ -3220,7 +3221,7 @@ export default function App() {
           onOpenPalette={() => void openPalette()}
           terminalOpen={terminalOpen}
           onToggleTerminal={toggleTerminal}
-          profile={coworkActive ? "cowork" : "dev"}
+          profile={netdevActive ? "netdev" : coworkActive ? "cowork" : "dev"}
           onSwitchProfile={(name) => void switchProfile(name).catch(() => { /* revert handled in switchProfile */ })}
         />
 
