@@ -1,6 +1,11 @@
 /* loop.css — 循环工程 panel (docs/loop-engineering-spec.md §2.2). Sharp
    technical grammar: xs radii, mono inputs, bordered fields. */
 
+.loop-modal {
+  width: min(1000px, calc(100vw - 80px));
+  height: min(680px, calc(100vh - 80px));
+}
+
 .loop-panel {
   flex: 1 1 auto;
   min-height: 0;

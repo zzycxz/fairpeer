@@ -30,10 +30,6 @@ export interface CoWorkLayoutProps {
   // (toggleSidebar + its title live in App.tsx).
   onToggleSidebar?: () => void;
   sidebarToggleTitle?: string;
-  // Reports the active office panel up so App can decide whether the chrome's
-  // center slot carries the chat topicbar (taskCenter) or goes empty (the
-  // other panels own their whole main area).
-  onPanelChange?: (panel: CoWorkPanel) => void;
   dockCwd?: string;
   dockMaximized?: boolean;
   dockOnClose?: () => void;
@@ -79,7 +75,6 @@ export function CoWorkLayout({
   onNewSession,
   onToggleSidebar,
   sidebarToggleTitle,
-  onPanelChange,
   dockCwd,
   dockMaximized = false,
   dockOnClose,
@@ -105,12 +100,6 @@ export function CoWorkLayout({
   const t = useT();
   const [activePanel, setActivePanel] = useState<CoWorkPanel>("taskCenter");
   const [preferenceOpen, setPreferenceOpen] = useState(false);
-
-  // Lift the active panel to App: the chrome's center slot shows the chat
-  // topicbar only while the task center (chat) is in focus.
-  useEffect(() => {
-    onPanelChange?.(activePanel);
-  }, [activePanel, onPanelChange]);
 
   // When an expert-team run kicks off from the chat (the agent called
   // expert_team_run), auto-switch to the experts panel so the user sees the
@@ -269,9 +258,9 @@ export function CoWorkLayout({
       </aside>
 
       {/* Center: dynamic panel based on selection. The chat topicbar no longer
-          renders here — it rides the global chrome's center slot (single
-          header, same as the coding view); App shows it while the task center
-          is active. */}
+          renders here — it rides the global chrome's center slot and stays up
+          across ALL office panels (always-on single header, same as the coding
+          view). */}
       <section className="cowork-main">
         {/* taskCenter stays mounted (hidden when inactive) so an expert-session
             run's live stream (ExpertSessionView inside mainNode) isn't torn down

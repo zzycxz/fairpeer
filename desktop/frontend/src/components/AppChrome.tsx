@@ -30,8 +30,9 @@ interface AppChromeProps {
   onTabsReorder: (tabIds: string[]) => void;
   onNewTab: () => void;
   // Topicbar contents (title · workspace · model + actions) merged into the
-  // chrome's center slot — the ZCode single-header pattern. Null for profiles
-  // (cowork/netdev) whose layouts render their own header.
+  // chrome's center slot — the ZCode single-header pattern, now shared by every
+  // profile: dev's topicbar, cowork's topicbar (task center only), or netdev's
+  // title bar. Null when a mode has nothing to show there.
   center?: ReactNode;
   // Terminal console toggle (Ctrl+`) — the button rides left of the workspace
   // toggle; the panel itself mounts under the composer in App.

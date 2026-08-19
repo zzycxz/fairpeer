@@ -29,7 +29,7 @@ import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, us
 import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onEvent, onProjectTreeChanged, onSchedulerNotice } from "./lib/bridge";
 import { onProfileChanged } from "./lib/bridge";
-import { CoWorkLayout, type CoWorkPanel } from "./layouts/CoWorkLayout";
+import { CoWorkLayout } from "./layouts/CoWorkLayout";
 import { NetDevLayout, NetdevTitleBar } from "./layouts/NetDevLayout";
 import { PreferencePanel } from "./components/cowork/PreferencePanel";
 import { Transcript } from "./components/Transcript";
@@ -798,10 +798,6 @@ export default function App() {
   // standard body is hidden (app--netdev) and the NetDevLayout shell renders.
   // Purely additive — dev/cowork behavior is byte-identical.
   const [netdevActive, setNetdevActive] = useState(false);
-  // Active office panel, reported by CoWorkLayout — the chrome's center slot
-  // carries the chat topicbar only while the task center is in focus (single
-  // header, same as the coding view).
-  const [coworkPanel, setCoworkPanel] = useState<CoWorkPanel>("taskCenter");
   // Skip the startup splash in the browser dev mock (no Wails runtime to wait
   // for) — only real desktop builds show it. Eliminates the 1.4–6s "stuck"
   // splash devs see when iterating in a browser.
@@ -1957,6 +1953,10 @@ export default function App() {
       // Close any open History panel — its cached session list belongs to the
       // previous profile and would show the wrong conversations until reopened.
       setHistView(null);
+      // Profiles are independent surfaces (user direction 2026-08-19): the
+      // Loop modal belongs to the coding profile and must not linger into
+      // cowork/netdev.
+      setLoopOpen(false);
     });
   }, [activeTabId, syncActiveTab]);
 
@@ -2889,9 +2889,6 @@ export default function App() {
 
   const mainNode = (
     <main className="main">
-      {loopOpen && !preferenceOpen && (
-        <LoopPanel onClose={() => setLoopOpen(false)} tabs={tabMetas} activeTabId={activeTabId ?? undefined} />
-      )}
       {preferenceOpen && (
         <PreferencePanel
           mode="dev"
@@ -3200,7 +3197,6 @@ export default function App() {
             onNewSession={() => void handleNewTab()}
             onToggleSidebar={toggleSidebar}
             sidebarToggleTitle={sidebarToggleTitle}
-            onPanelChange={setCoworkPanel}
             dockCwd={state.meta?.cwd}
             dockMaximized={workspacePanelMaximized}
             dockOnClose={() => closeWorkspacePanel()}
@@ -3270,8 +3266,7 @@ export default function App() {
           onTabsReorder={(ids) => void handleTabsReorder(ids)}
           onNewTab={() => void handleNewTab()}
           center={netdevActive
-            ? <NetdevTitleBar onOpenSettings={(t) => { setSettingsTarget(t as never); setSettingsPayload(null); }} />
-            : coworkActive && coworkPanel !== "taskCenter" ? null
+            ? <NetdevTitleBar leading={headerNode} onOpenSettings={(t) => { setSettingsTarget(t as never); setSettingsPayload(null); }} />
             : headerNode}
           workspaceToggleHidden={netdevActive}
           onOpenPalette={() => void openPalette()}
@@ -3570,6 +3565,14 @@ export default function App() {
           }}
         />
       </div>
+
+      {loopOpen && (
+        <div className="management-modal-backdrop" onClick={() => setLoopOpen(false)}>
+          <div className="management-modal loop-modal" onClick={(e) => e.stopPropagation()}>
+            <LoopPanel onClose={() => setLoopOpen(false)} tabs={tabMetas} activeTabId={activeTabId ?? undefined} />
+          </div>
+        </div>
+      )}
 
       {histView !== null && (
         <HistoryPanel

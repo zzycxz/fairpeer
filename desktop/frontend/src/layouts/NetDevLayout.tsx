@@ -14,10 +14,11 @@ import "../styles/netdev.css";
 // area (title bar in its center slot + the standard right control cluster),
 // and a tabbed right dock. Styling is scoped to .app--netdev / .ndv-*.
 
-// NetdevTitleBar rides the global chrome's CENTER slot in netdev mode — the
-// mode's identity bar replaces panel toggles and the profile switcher, so
-// there is exactly one header (NETDEV_SPEC §10.1 sketch).
-export function NetdevTitleBar({ onOpenSettings }: { onOpenSettings?: (tab: string) => void }) {
+// NetdevTitleBar rides the global chrome's CENTER slot in netdev mode. To keep
+// the header identical to the coding view's, it LEADS with the same topicbar
+// (session title · rename · workspace subtitle, supplied by App) and appends
+// the 运维-specific chips after it — title on the left, mode bits on the right.
+export function NetdevTitleBar({ leading, onOpenSettings }: { leading?: ReactNode; onOpenSettings?: (tab: string) => void }) {
   const [name, setName] = useState("");
   const [projects, setProjects] = useState<{ name: string; groups: string[]; note?: string }[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -45,6 +46,7 @@ export function NetdevTitleBar({ onOpenSettings }: { onOpenSettings?: (tab: stri
   }, []);
   return (
     <div className="ndv__titlebar">
+      {leading}
       <span className="ndv__netname" title="网络名称（设置 → 运维 可修改）">{name || "…"}</span>
       {projects.length > 0 && (
         <span
