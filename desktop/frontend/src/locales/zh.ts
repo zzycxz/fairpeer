@@ -349,7 +349,7 @@ export const zh: Record<DictKey, string> = {
   "caps.envPlaceholder": "KEY=VALUE，每行一个",
   "caps.mcpMarketTipBefore": "💡 寻找更多工具？推荐前往",
   "caps.mcpMarketTipAfter": "发现数以万计的 MCP 插件，只需复制启动命令填入下方即可使用。",
-  "sidebar.sessionsLabel": "最近",
+  "sidebar.sessionsLabel": "最近会话",
   "sidebar.sessionsEmpty": "暂无会话",
   "sidebar.sessionRename": "重命名",
   "sidebar.sessionDelete": "删除",

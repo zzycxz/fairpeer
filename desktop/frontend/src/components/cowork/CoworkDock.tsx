@@ -445,7 +445,7 @@ function TodayView() {
           </div>
           <div className="cowork-today__briefing-body" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             <div>1. <CalendarClock size={13} style={{ color: "var(--fg-faint)", margin: "0 2px", verticalAlign: "middle" }} />{t("cowork.todayItems", { count: String(todayItems.length) })}</div>
-            <div>2. <Mail size={13} style={{ color: "var(--accent)", margin: "0 2px", verticalAlign: "middle" }} />{t("cowork.unreadMails", { count: String(unreadCount) })}</div>
+            <div>2. <Mail size={13} style={{ color: "var(--fg-faint)", margin: "0 2px", verticalAlign: "middle" }} />{t("cowork.unreadMails", { count: String(unreadCount) })}</div>
             <div>3. <Coffee size={13} style={{ margin: "0 2px", verticalAlign: "middle" }} /> {t("cowork.noUrgenda")}</div>
             <div>4. <Bot size={13} style={{ margin: "0 2px", verticalAlign: "middle" }} /> {t("cowork.clickForSummary")}</div>
             {todayHoliday && (
