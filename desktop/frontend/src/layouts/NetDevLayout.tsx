@@ -392,9 +392,6 @@ export function NetDevLayout({
     setTab(key);
   };
 
-  // Programmatic switches (device click, topology pick) ensure the target tab.
-  const gotoDockTab = openDockTabFn;
-
   return (
     <div className="ndv">
       {/* Rail width resizer — same class/handlers as the coding sidebar's
@@ -445,6 +442,9 @@ export function NetDevLayout({
             </button>
           )}
         </div>
+        {/* Scroll lives BELOW the pinned brand row (the coding sidebar's
+            structure: root never scrolls, brand row stays put). */}
+        <div className="ndv__rail-scroll">
         <div className="ndv__section-row"><div className="ndv__section">诊断会话</div></div>
         <div className="ndv__sessions">{sessionsNode}</div>
         <div className="ndv__section-row">
@@ -484,6 +484,7 @@ export function NetDevLayout({
         {lastInspection && (
           <div className="ndv__hint">上次：{lastInspection.title}（{String(lastInspection.created_at ?? "").slice(5, 16).replace("T", " ")}）</div>
         )}
+        </div>
       </div>
 
       <div className="ndv__main">

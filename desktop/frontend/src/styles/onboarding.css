@@ -3338,13 +3338,14 @@
    sections, cowork panels) instead of overflowing and clipping the card
    mid-name — the card always fits whatever column it lands in. */
 .onboarding__wall-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 8px; }
+/* Flex layout (2026-08-19 WebView2 hardening): the old 3-column grid relied
+   on auto-placement that could clip the text column to zero in some engines —
+   flex with an explicit min-width text block cannot collapse. */
 .onboarding__vcard {
   min-width: 0;
-  display: grid;
-  grid-template-columns: 30px 1fr 14px;
-  grid-template-rows: auto auto;
-  column-gap: 10px;
+  display: flex;
   align-items: center;
+  gap: 10px;
   text-align: left;
   padding: 9px 10px;
   border: 1px solid var(--border-soft);
@@ -3353,11 +3354,18 @@
   cursor: pointer;
   transition: border-color var(--dur-fast), background var(--dur-fast);
 }
+.onboarding__vcard-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .onboarding__vcard:hover { border-color: var(--accent); }
 .onboarding__vcard--selected { border-color: var(--accent); background: var(--accent-soft); }
 .onboarding__vcard--selected .onboarding__vcard-tile { border-color: var(--accent); }
 .onboarding__vcard-tile {
-  grid-row: 1 / span 2;
+  flex: 0 0 30px;
   width: 30px; height: 30px;
   display: flex; align-items: center; justify-content: center;
   border-radius: var(--radius-sm);
@@ -3373,7 +3381,7 @@
 .onboarding__vcard-name { font-size: 12.5px; font-weight: 600; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .onboarding__vcard-status { font-size: 10.5px; color: var(--fg-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .onboarding__vcard--local .onboarding__vcard-status { color: var(--ok); }
-.onboarding__vcard-go { grid-row: 1 / span 2; color: var(--fg-faint); font-size: 14px; }
+.onboarding__vcard-go { flex: 0 0 auto; color: var(--fg-faint); font-size: 14px; }
 .onboarding__verified {
   display: inline-flex; align-items: center; gap: 4px;
   margin-top: 8px;

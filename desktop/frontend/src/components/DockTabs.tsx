@@ -4,9 +4,35 @@
 // the remaining catalog in a dropdown). The markup/classes are identical to
 // App.tsx's inline strip (workbench-dock__tools/__tabs/__tabwrap/__tab/...),
 // so all three docks read as one control; the coding view itself stays as-is.
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Plus, X } from "lucide-react";
 import { ContextMenu } from "./ContextMenu";
+
+// loadDockTabState reads a persisted open-tab list, falling back to the full
+// catalog when absent/corrupt — the coding dock's DOCK_TABS_KEY pattern.
+export function loadDockTabState<K extends string>(key: string, catalog: readonly K[]): K[] {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [...catalog];
+    const v = JSON.parse(raw);
+    if (Array.isArray(v)) {
+      const filtered = v.filter((x): x is K => catalog.includes(x));
+      if (filtered.length > 0) return filtered;
+    }
+  } catch { /* storage unavailable */ }
+  return [...catalog];
+}
+
+// useDockTabState: open-tab list persisted to localStorage under `key`.
+export function useDockTabState<K extends string>(key: string, catalog: readonly K[]) {
+  const [openTabs, setOpenTabs] = useState<K[]>(() => loadDockTabState(key, catalog));
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(openTabs));
+    } catch { /* storage unavailable */ }
+  }, [key, openTabs]);
+  return [openTabs, setOpenTabs] as const;
+}
 
 export interface DockTabDef<K extends string> {
   key: K;

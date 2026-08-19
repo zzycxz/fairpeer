@@ -44,10 +44,6 @@ interface AppChromeProps {
   // rebuilds the controller with the new profile's bundle.
   profile: string;
   onSwitchProfile: (name: string) => void;
-  // workspaceToggleHidden (netdev): the mode's right dock is intrinsic (always
-  // mounted, no open/close state), so the workspace panel toggle has nothing to
-  // drive there. Every other chrome control stays identical across profiles.
-  workspaceToggleHidden?: boolean;
 }
 
 export function AppChrome({
@@ -69,7 +65,6 @@ export function AppChrome({
   onToggleWorkspacePanel,
   profile,
   onSwitchProfile,
-  workspaceToggleHidden,
 }: AppChromeProps) {
   const t = useT();
   const darwinChrome = platform === "darwin";
@@ -165,7 +160,9 @@ export function AppChrome({
           <TerminalSquare size={16} />
         </button>
       )}
-      {!workspaceToggleHidden && !workspacePanelMaximized && (
+      {/* Workspace panel toggle: identical in EVERY mode — cowork and netdev
+          docks ride the same toggle via their own open states (App.tsx). */}
+      {!workspacePanelMaximized && (
         <button
           className={[
             "app-chrome__panel-toggle",

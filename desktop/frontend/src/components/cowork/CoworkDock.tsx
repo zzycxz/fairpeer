@@ -44,6 +44,7 @@ import { app, onRagChanged, onRagProgress } from "../../lib/bridge";
 import { useToast } from "../../lib/toast";
 import { CustomSelect } from "./CustomSelect";
 import { ContextPanel } from "../ContextPanel";
+import { DockTabs, useDockTabState } from "../DockTabs";
 
 // realApp mirrors bridge.ts's private helper: returns the Wails binding only
 // when window.go.main.App is present (i.e. we are inside the desktop shell).
@@ -164,7 +165,7 @@ export function CoworkDock({
   dockRefreshKey,
 }: CoworkDockProps) {
   return mode === "rag" ? (
-    <RagDock onEntityClick={onEntityClick} onFileClick={onFileClick} />
+    <RagDock onClose={onClose} onEntityClick={onEntityClick} onFileClick={onFileClick} />
   ) : (
     <DefaultDock
       cwd={cwd}
@@ -180,11 +181,16 @@ export function CoworkDock({
   );
 }
 
+// loadDockTabState/useDockTabState live in DockTabs.tsx (shared with the
+// netdev dock).
+
 // ===========================================================================
-// DefaultDock (Kp) — 今日 / 邮件 / 文件
+// DefaultDock (Kp) — 今日 / 邮件 / 文件 / 概览
 // ===========================================================================
 
 type DefaultTab = "today" | "mail" | "files" | "overview";
+const DEFAULT_TAB_CATALOG: readonly DefaultTab[] = ["today", "mail", "files", "overview"];
+const COWORK_DOCK_TABS_KEY = "fairpeer.coworkDockTabs";
 
 function DefaultDock({
   cwd,
@@ -209,57 +215,53 @@ function DefaultDock({
 }) {
   const t = useT();
   const [tab, setTab] = useState<DefaultTab>("today");
+  const [openTabs, setOpenTabs] = useDockTabState(COWORK_DOCK_TABS_KEY, DEFAULT_TAB_CATALOG);
+
+  // Active tab closed (or restored state desyncs) → fall back to the last
+  // open one, exactly like the coding dock's dockTabs effect.
+  useEffect(() => {
+    if (!openTabs.includes(tab)) {
+      setTab(openTabs[openTabs.length - 1] ?? "today");
+    }
+  }, [openTabs, tab]);
+
+  const closeTab = (key: DefaultTab) => {
+    setOpenTabs((prev) => {
+      const next = prev.filter((m) => m !== key);
+      if (next.length === 0) {
+        // Closing the last tab closes the whole dock (coding-dock behavior).
+        onClose();
+        return prev;
+      }
+      setTab((active) => (active === key ? next[next.length - 1] : active));
+      return next;
+    });
+  };
+
+  const openTab = (key: DefaultTab) => {
+    setOpenTabs((prev) => (prev.includes(key) ? prev : [...prev, key]));
+    setTab(key);
+  };
+
+  const TAB_DEFS: { key: DefaultTab; label: string; icon: React.ReactNode }[] = [
+    { key: "today", label: t("coworkDock.today"), icon: <CalendarDays size={13} /> },
+    { key: "mail", label: t("coworkDock.mail"), icon: <Mail size={13} /> },
+    { key: "files", label: t("coworkDock.files"), icon: <FileText size={13} /> },
+    { key: "overview", label: t("coworkDock.overview"), icon: <Activity size={13} /> },
+  ];
 
   return (
     <aside className="cowork-dock" aria-label={t("coworkDock.label")}>
-      <div className="workbench-dock__tools">
-        <div className="workbench-dock__tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "today"}
-            className={"workbench-dock__tab" + (tab === "today" ? " workbench-dock__tab--active" : "")}
-            onClick={() => setTab("today")}
-            title={t("coworkDock.today")}
-          >
-            <CalendarDays size={13} />
-            <span className="workbench-dock__tab-label">{t("coworkDock.today")}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "mail"}
-            className={"workbench-dock__tab" + (tab === "mail" ? " workbench-dock__tab--active" : "")}
-            onClick={() => setTab("mail")}
-            title={t("coworkDock.mail")}
-          >
-            <Mail size={13} />
-            <span className="workbench-dock__tab-label">{t("coworkDock.mail")}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "files"}
-            className={"workbench-dock__tab" + (tab === "files" ? " workbench-dock__tab--active" : "")}
-            onClick={() => setTab("files")}
-            title={t("coworkDock.files")}
-          >
-            <FileText size={13} />
-            <span className="workbench-dock__tab-label">{t("coworkDock.files")}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "overview"}
-            className={"workbench-dock__tab" + (tab === "overview" ? " workbench-dock__tab--active" : "")}
-            onClick={() => setTab("overview")}
-            title={t("coworkDock.overview")}
-          >
-            <Activity size={13} />
-            <span className="workbench-dock__tab-label">{t("coworkDock.overview")}</span>
-          </button>
-        </div>
-      </div>
+      <DockTabs
+        tabs={TAB_DEFS}
+        openTabs={openTabs}
+        active={tab}
+        onSelect={openTab}
+        onClose={closeTab}
+        listLabel={t("coworkDock.label")}
+        closeLabel={t("dock.closeTab")}
+        addLabel={t("dock.addTab")}
+      />
 
       <div className="cowork-dock__body">
         {tab === "today" && <TodayView />}
@@ -767,15 +769,44 @@ function filterRagTree(nodes: RagNodeView[], q: string): RagNodeView[] {
 // ===========================================================================
 
 type RagTab = "collections" | "files" | "extract";
+const RAG_TAB_CATALOG: readonly RagTab[] = ["collections", "files", "extract"];
+const COWORK_RAG_DOCK_TABS_KEY = "fairpeer.coworkRagDockTabs";
 
 function RagDock({
+  onClose,
   onEntityClick,
   onFileClick,
 }: {
+  // Closing the last strip tab closes the whole dock (coding-dock behavior).
+  onClose: () => void;
   onEntityClick?: (name: string) => void;
   onFileClick?: (path: string) => void;
 }) {
   const [tab, setTab] = useState<RagTab>("collections");
+  const [openTabs, setOpenTabs] = useDockTabState(COWORK_RAG_DOCK_TABS_KEY, RAG_TAB_CATALOG);
+
+  useEffect(() => {
+    if (!openTabs.includes(tab)) {
+      setTab(openTabs[openTabs.length - 1] ?? "collections");
+    }
+  }, [openTabs, tab]);
+
+  const closeTab = (key: RagTab) => {
+    setOpenTabs((prev) => {
+      const next = prev.filter((m) => m !== key);
+      if (next.length === 0) {
+        onClose();
+        return prev;
+      }
+      setTab((active) => (active === key ? next[next.length - 1] : active));
+      return next;
+    });
+  };
+
+  const openTab = (key: RagTab) => {
+    setOpenTabs((prev) => (prev.includes(key) ? prev : [...prev, key]));
+    setTab(key);
+  };
   const [collections, setCollections] = useState<RagCollectionView[]>([]);
   const [activeCollection, setActiveCollection] = useState("");
   // activeCollections: null = "all selected", string[] = explicit subset.
@@ -982,43 +1013,20 @@ function RagDock({
   // --- main tabbed body (2 tabs: 分类 + 文件) -----------------------------
   return (
     <aside className="cowork-dock" aria-label={t("cowork.knowledgeNav")}>
-      <div className="workbench-dock__tools">
-        <div className="workbench-dock__tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "collections"}
-            className={"workbench-dock__tab" + (tab === "collections" ? " workbench-dock__tab--active" : "")}
-            onClick={() => setTab("collections")}
-            title={t("cowork.categories")}
-          >
-            <Folder size={13} />
-            <span className="workbench-dock__tab-label">{t("cowork.categories")}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "files"}
-            className={"workbench-dock__tab" + (tab === "files" ? " workbench-dock__tab--active" : "")}
-            onClick={() => setTab("files")}
-            title={t("cowork.files")}
-          >
-            <FileText size={13} />
-            <span className="workbench-dock__tab-label">{t("cowork.files")}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "extract"}
-            className={"workbench-dock__tab" + (tab === "extract" ? " workbench-dock__tab--active" : "")}
-            onClick={() => setTab("extract")}
-            title={t("cowork.deepExtract")}
-          >
-            <Zap size={13} />
-            <span className="workbench-dock__tab-label">{t("cowork.deepExtract")}</span>
-          </button>
-        </div>
-      </div>
+      <DockTabs
+        tabs={[
+          { key: "collections", label: t("cowork.categories"), icon: <Folder size={13} /> },
+          { key: "files", label: t("cowork.files"), icon: <FileText size={13} /> },
+          { key: "extract", label: t("cowork.deepExtract"), icon: <Zap size={13} /> },
+        ]}
+        openTabs={openTabs}
+        active={tab}
+        onSelect={openTab}
+        onClose={closeTab}
+        listLabel={t("cowork.knowledgeNav")}
+        closeLabel={t("dock.closeTab")}
+        addLabel={t("dock.addTab")}
+      />
 
       <div className="cowork-dock__body">
         {/* === 分类 tab === */}

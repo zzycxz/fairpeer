@@ -179,40 +179,40 @@ export function CoWorkLayout({
           cowork-layout--sidebar-collapsed class (mirroring coding-mode .layout),
           and the aside's overflow:hidden clips its content as it collapses. */}
       <aside className="cowork-sidebar">
-        <div className="cowork-sidebar__scroll">
-          {/* Brand row — identical classes/markup to the coding view's
-              sidebar__brandrow (chrome.css styles them as one): logo, product
-              name, new-session ghost button, collapse toggle. The old
-              full-width "新建任务" CTA is retired with the coding view's
-              2026-08-19 restyle. */}
-          <div className="sidebar__brandrow" title="FairPeer">
-            <img src={logoSymbol} alt="" draggable={false} />
-            <span>FairPeer</span>
+        {/* Brand row — identical classes/markup to the coding view's
+            sidebar__brandrow (chrome.css styles them as one): logo, product
+            name, new-session ghost button, collapse toggle. Sits OUTSIDE the
+            scroll layer so it stays pinned while the sidebar content scrolls
+            (the coding .sidebar's structure). */}
+        <div className="sidebar__brandrow" title={t("sidebar.modeCowork")}>
+          <img src={logoSymbol} alt="" draggable={false} />
+          {/* Mode name, mirroring the coding sidebar (2026-08-19). */}
+          <span>{t("sidebar.modeCowork")}</span>
+          <button
+            type="button"
+            className="sidebar__brand-iconbtn"
+            onClick={() => {
+              if (onNewSession) onNewSession();
+              setActivePanel("taskCenter");
+            }}
+            aria-label={t("cowork.newTask") || "新建任务"}
+            title={t("cowork.newTask") || "新建任务"}
+          >
+            <SquarePen size={15} />
+          </button>
+          {onToggleSidebar && (
             <button
               type="button"
-              className="sidebar__brand-iconbtn"
-              onClick={() => {
-                if (onNewSession) onNewSession();
-                setActivePanel("taskCenter");
-              }}
-              aria-label={t("cowork.newTask") || "新建任务"}
-              title={t("cowork.newTask") || "新建任务"}
+              className="app-chrome__panel-toggle app-chrome__panel-toggle--left sidebar__brand-toggle"
+              onClick={onToggleSidebar}
+              aria-label={sidebarToggleTitle}
+              aria-pressed={!sidebarCollapsed}
             >
-              <SquarePen size={15} />
+              <PanelLeft size={16} />
             </button>
-            {onToggleSidebar && (
-              <button
-                type="button"
-                className="app-chrome__panel-toggle app-chrome__panel-toggle--left sidebar__brand-toggle"
-                onClick={onToggleSidebar}
-                aria-label={sidebarToggleTitle}
-                aria-pressed={!sidebarCollapsed}
-              >
-                <PanelLeft size={16} />
-              </button>
-            )}
-          </div>
-
+          )}
+        </div>
+        <div className="cowork-sidebar__scroll">
           {searchNode}
 
           {sessionsNode}

@@ -219,9 +219,11 @@ export function VendorStep({ direct, aggregators, locals, onPick, syncing, onSyn
                         ? <img src={PROVIDER_LOGOS[tpl.name]} alt="" className="onboarding__vcard-logo" draggable={false} />
                         : wallTileLetter(tpl)}
                     </span>
-                    <span className="onboarding__vcard-name">{tpl.displayName}</span>
-                    <span className="onboarding__vcard-status">
-                      {tpl.local ? t("onboarding.noKeyNeeded") : tpl.codingOnly ? t("onboarding.badgeCoding") : wallShortUrl(tpl.baseUrl)}
+                    <span className="onboarding__vcard-copy">
+                      <span className="onboarding__vcard-name">{tpl.displayName}</span>
+                      <span className="onboarding__vcard-status">
+                        {tpl.local ? t("onboarding.noKeyNeeded") : tpl.codingOnly ? t("onboarding.badgeCoding") : wallShortUrl(tpl.baseUrl)}
+                      </span>
                     </span>
                     <span className="onboarding__vcard-go" aria-hidden="true">›</span>
                   </button>

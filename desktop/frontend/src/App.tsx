@@ -839,6 +839,10 @@ export default function App() {
   // state leaked coding-mode preferences into cowork (a user who collapsed the
   // dev dock would arrive at cowork with no right column at all).
   const [coworkDockOpen, setCoworkDockOpen] = useState(true);
+  // Netdev dock follows the same pattern (own open state, defaults open like
+  // the mode's intrinsic right column, driven by the chrome workspace toggle
+  // and the shared resizer's drag-to-edge close).
+  const [netdevDockOpen, setNetdevDockOpen] = useState(true);
   const [rightDockTreeWidth, setRightDockTreeWidth] = useState(loadRightDockTreeWidth);
   const [rightDockPreviewWidth, setRightDockPreviewWidth] = useState(loadRightDockPreviewWidth);
   const [workspacePreviewActive, setWorkspacePreviewActive] = useState(false);
@@ -1251,7 +1255,7 @@ export default function App() {
   const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
   const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
   
-  const activeDockOpen = coworkActive ? coworkDockOpen : workspacePanelOpen;
+  const activeDockOpen = coworkActive ? coworkDockOpen : netdevActive ? netdevDockOpen : workspacePanelOpen;
   const chatReservedWidth = coworkActive ? 0 : (workspacePanelOpen && !workspacePanelMaximized ? CHAT_COMFORT_MIN_WIDTH : CHAT_MIN_WIDTH);
   
   const workspacePanelAvailableWidth = availableWorkspacePanelWidth({
@@ -2116,8 +2120,9 @@ export default function App() {
       // Cowork mode tracks its own dock open state (coworkDockOpen) separately
       // from the coding-mode workspacePanelOpen — accept either so the resizer
       // works in both layouts (previously cowork's resizer was dead because
-      // workspacePanelOpen is always false in cowork).
-      const dockOpen = coworkActive ? coworkDockOpen : workspacePanelOpen;
+      // workspacePanelOpen is always false in cowork). Netdev mirrors cowork
+      // (netdevDockOpen).
+      const dockOpen = coworkActive ? coworkDockOpen : netdevActive ? netdevDockOpen : workspacePanelOpen;
       if (!dockOpen) return;
       event.preventDefault();
       closeTransientOverlays();
@@ -2144,6 +2149,8 @@ export default function App() {
         if (rawDockWidth < DOCK_CLOSE_THRESHOLD) {
           if (coworkActive) {
             setCoworkDockOpen(false);
+          } else if (netdevActive) {
+            setNetdevDockOpen(false);
           } else {
             setWorkspacePanelMaximized(false);
             setWorkspacePanelOpen(false);
@@ -2168,7 +2175,7 @@ export default function App() {
       window.addEventListener("pointerup", onDone);
       window.addEventListener("pointercancel", onDone);
     },
-    [closeTransientOverlays, coworkActive, coworkDockOpen, rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelOpen, workspacePanelRenderWidth],
+    [closeTransientOverlays, coworkActive, coworkDockOpen, netdevActive, netdevDockOpen, rightDockDetailActive, setSavedWorkspacePanelWidth, workspacePanelOpen, workspacePanelRenderWidth],
   );
 
   const resizeWorkspacePanelWithKeyboard = useCallback(
@@ -2215,6 +2222,7 @@ export default function App() {
   const closeWorkspacePanel = useCallback(() => {
     closeTransientOverlays();
     setCoworkDockOpen(false);
+    setNetdevDockOpen(false);
     if (!workspacePanelOpen) {
       return;
     }
@@ -2228,10 +2236,14 @@ export default function App() {
 
   const toggleWorkspacePanel = useCallback(() => {
     pulseWorkspaceToggle();
-    // In cowork mode toggle the cowork-specific dock state, not the shared
+    // Cowork and netdev each track their own dock open state, not the shared
     // coding-mode workspacePanelOpen — see coworkDockOpen comment above.
     if (coworkActive) {
       setCoworkDockOpen((open) => !open);
+      return;
+    }
+    if (netdevActive) {
+      setNetdevDockOpen((open) => !open);
       return;
     }
     if (workspacePanelRenderable) {
@@ -2239,7 +2251,7 @@ export default function App() {
       return;
     }
     openWorkspacePanel("context");
-  }, [closeWorkspacePanel, coworkActive, openWorkspacePanel, pulseWorkspaceToggle, workspacePanelRenderable]);
+  }, [closeWorkspacePanel, coworkActive, netdevActive, openWorkspacePanel, pulseWorkspaceToggle, workspacePanelRenderable]);
 
   const openRightDockMode = useCallback(
     (mode: RightDockMode) => {
@@ -3257,6 +3269,14 @@ export default function App() {
             onSidebarResizeStart={startSidebarResize}
             onSidebarResizeKey={resizeSidebarWithKeyboard}
             onSidebarResetWidth={() => setExpandedSidebarWidth(defaultSidebarWidth())}
+            dockOpen={netdevDockOpen}
+            dockOnClose={() => closeWorkspacePanel()}
+            dockWidth={workspacePanelRenderWidth}
+            dockMinWidth={workspacePanelResizeMinWidth}
+            dockMaxAriaWidth={Math.max(workspacePanelMaxWidth, workspacePanelRenderWidth)}
+            onDockResizeStart={startWorkspacePanelResize}
+            onDockResizeKey={resizeWorkspacePanelWithKeyboard}
+            onDockResetWidth={() => setSavedWorkspacePanelWidth(workspacePanelResetWidth)}
           />
         )}
         <AppChrome
@@ -3271,9 +3291,9 @@ export default function App() {
           sidebarCollapsed={sidebarCollapsed}
           sidebarToggleTitle={sidebarToggleTitle}
           workspacePanelMaximized={workspacePanelMaximized}
-          workspacePanelRenderable={coworkActive ? coworkDockRenderable : workspacePanelRenderable}
+          workspacePanelRenderable={coworkActive ? coworkDockRenderable : netdevActive ? netdevDockOpen : workspacePanelRenderable}
           workspaceTogglePressed={workspaceTogglePressed}
-          workspacePanelLabel={(coworkActive ? coworkDockRenderable : workspacePanelRenderable) ? t("rightDock.collapse") : t("rightDock.expand")}
+          workspacePanelLabel={(coworkActive ? coworkDockRenderable : netdevActive ? netdevDockOpen : workspacePanelRenderable) ? t("rightDock.collapse") : t("rightDock.expand")}
           onToggleSidebar={toggleSidebar}
           onToggleWorkspacePanel={toggleWorkspacePanel}
           onTabChange={(id) => void handleTabChange(id)}
@@ -3284,7 +3304,6 @@ export default function App() {
           center={netdevActive
             ? <NetdevTitleBar leading={headerNode} onOpenSettings={(t) => { setSettingsTarget(t as never); setSettingsPayload(null); }} />
             : headerNode}
-          workspaceToggleHidden={netdevActive}
           onOpenPalette={() => void openPalette()}
           terminalOpen={terminalOpen}
           onToggleTerminal={toggleTerminal}
