@@ -229,6 +229,20 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	entry, ok := cfg.ResolveModel(modelName)
 	if !ok {
+		// A stale explicit model (a persisted tab/session outliving its
+		// provider — e.g. desktop-tabs.json after a config edit) must never
+		// brick startup. Fall back through the same chain the desktop uses
+		// (default_model, then any usable provider — keyless local presets
+		// included, since this was an explicit request, not onboarding), and
+		// surface the switch as a warning instead of an error. Only a request
+		// that names default_model itself (nothing left to try) still errors.
+		if fallback, _, fok := cfg.ResolveModelWithFallback(modelName); fok && fallback != modelName {
+			slog.Warn("boot: unknown model, falling back", "requested", modelName, "fallback", fallback)
+			modelName = fallback
+			entry, ok = cfg.ResolveModel(modelName)
+		}
+	}
+	if !ok {
 		return nil, fmt.Errorf("%w %q (configured: %s); note: defining [[providers]] replaces the built-in presets, so add a [[providers]] entry for it or use a configured name, or run `fairpeer setup` to reconfigure", ErrUnknownModel, modelName, providerNames(cfg))
 	}
 	if opts.EffortOverride != nil {
