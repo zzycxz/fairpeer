@@ -3093,20 +3093,37 @@ export default function App() {
           onTabsClose={(ids, nextActiveTabId) => void handleTabsClose(ids, nextActiveTabId)}
           onTabsReorder={(ids) => void handleTabsReorder(ids)}
           onNewTab={() => void handleNewTab()}
-          center={netdevActive ? <NetdevTitleBar /> : !coworkActive ? headerNode : null}
+          center={netdevActive
+            ? <NetdevTitleBar onOpenSettings={(t) => { setSettingsTarget(t as never); setSettingsPayload(null); }} />
+            : !coworkActive ? headerNode : null}
           modeChrome={netdevActive}
+          onOpenPalette={() => void openPalette()}
+          terminalOpen={terminalOpen}
+          onToggleTerminal={toggleTerminal}
           profile={coworkActive ? "cowork" : "dev"}
           onSwitchProfile={(name) => void switchProfile(name).catch(() => { /* revert handled in switchProfile */ })}
         />
 
+          {/* No inline paddingBottom on the sidebar: the stylesheet's
+              calc(12px + --bottom-bar-height) reserve must survive — an inline
+              8px override let the sidebar-only bottom bar cover the pinned
+              编码偏好 button (2026-08-19). */}
           <aside
             className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`}
             aria-label={t("sidebar.navigation")}
-            style={{ paddingBottom: '8px' }}
           >
-          <div className="sidebar__brandrow" aria-hidden="true">
+          <div className="sidebar__brandrow">
             <img src={logoSymbol} alt="" draggable={false} />
             <span>FairPeer</span>
+            <button
+              type="button"
+              className="app-chrome__panel-toggle app-chrome__panel-toggle--left sidebar__brand-toggle"
+              onClick={toggleSidebar}
+              aria-label={sidebarToggleTitle}
+              aria-pressed={!sidebarCollapsed}
+            >
+              <PanelLeft size={16} />
+            </button>
           </div>
           <button
             className="sidebar__new"

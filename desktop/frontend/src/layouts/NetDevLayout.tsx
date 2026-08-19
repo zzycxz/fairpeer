@@ -12,7 +12,7 @@ import "../styles/netdev.css";
 // NetdevTitleBar rides the global chrome's CENTER slot in netdev mode — the
 // mode's identity bar replaces panel toggles and the profile switcher, so
 // there is exactly one header (NETDEV_SPEC §10.1 sketch).
-export function NetdevTitleBar() {
+export function NetdevTitleBar({ onOpenSettings }: { onOpenSettings?: (tab: string) => void }) {
   const [name, setName] = useState("");
   const [err, setErr] = useState("");
   useEffect(() => {
@@ -32,7 +32,12 @@ export function NetdevTitleBar() {
   return (
     <div className="ndv__titlebar">
       <span className="ndv__netname" title="网络名称（设置 → 运维 可修改）">{name || "…"}</span>
-      <span className="ndv__badge">诊断 · 只读 🔒</span>
+      <span
+        className="ndv__badge"
+        role="button"
+        title="安全策略入口：结构性只读（无开关，地板）· 设备组策略（只读/提案/双确认）· 提案审批与变更窗口 · 安全评估 engagement · 点击打开设置"
+        onClick={() => onOpenSettings?.("netdev")}
+      >[ 诊断·只读 ]</span>
       {err && <span className="ndv__stat" style={{ color: "#ff8787" }}>{err}</span>}
       <span className="ndv__stop" role="button" onClick={() => void stop()}>⏹ 紧急停止</span>
     </div>
