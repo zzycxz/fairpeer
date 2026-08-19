@@ -155,6 +155,8 @@ export const en = {
   "workspace.filesTab": "Files",
   "workspace.changedTab": "Changes",
   "preview.tabTitle": "Preview",
+  "dock.addTab": "Add tab",
+  "dock.closeTab": "Close tab",
   "preview.emptyHint": "Waiting for a local server — opens automatically when the agent starts one, or enter an address manually",
   "preview.addressPlaceholder": "http://localhost:5173",
   "preview.manualOpen": "Open",

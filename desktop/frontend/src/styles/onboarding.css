@@ -2783,26 +2783,83 @@
   padding: 0 10px;
 }
 
+.workbench-dock__tabwrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  clip-path: polygon(9px 0, calc(100% - 9px) 0, 100% 100%, 0 100%);
+  background: color-mix(in srgb, var(--fg-faint) 6%, transparent);
+  transition: background 0.12s;
+}
+
+.workbench-dock__tabwrap:hover {
+  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
+}
+
+.workbench-dock__tabwrap--active,
+.workbench-dock__tabwrap--active:hover {
+  background: var(--workspace-files-bg);
+}
+
 .workbench-dock__tab {
   --wails-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  flex: 0 1 auto;
   min-width: 30px;
-  max-width: 118px;
   height: 26px;
-  padding: 0 14px;
+  padding: 0 22px 0 14px;
   border: 0;
-  border-radius: 0;
-  clip-path: polygon(9px 0, calc(100% - 9px) 0, 100% 100%, 0 100%);
-  background: color-mix(in srgb, var(--fg-faint) 6%, transparent);
+  background: transparent;
   color: var(--fg-faint);
   font: inherit;
   font-size: 11.5px;
   font-weight: 560;
-  transition: background 0.12s, color 0.12s;
+}
+
+.workbench-dock__tabwrap--active .workbench-dock__tab { color: var(--fg); }
+
+.workbench-dock__tab-close {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.workbench-dock__tabwrap:hover .workbench-dock__tab-close,
+.workbench-dock__tabwrap--active .workbench-dock__tab-close { opacity: 0.8; }
+
+.workbench-dock__tab-close:hover { color: var(--fg); opacity: 1; }
+
+.workbench-dock__tab-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 3px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+
+.workbench-dock__tab-add:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
+  color: var(--fg);
 }
 
 .workbench-dock__tab svg {
@@ -2816,16 +2873,7 @@
   text-overflow: ellipsis;
 }
 
-.workbench-dock__tab:hover {
-  color: var(--fg-dim);
-  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
-}
-
-.workbench-dock__tab--active {
-  /* Same paint as the dock body — the tab visually pours into the content. */
-  background: var(--workspace-files-bg);
-  color: var(--fg);
-}
+.workbench-dock__tab:hover { color: var(--fg-dim); }
 
 @container (max-width: 520px) {
   .workbench-dock__tabs {

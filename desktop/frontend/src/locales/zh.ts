@@ -156,6 +156,8 @@ export const zh: Record<DictKey, string> = {
   "workspace.filesTab": "文件",
   "workspace.changedTab": "改动",
   "preview.tabTitle": "预览",
+  "dock.addTab": "添加页卡",
+  "dock.closeTab": "关闭页卡",
   "preview.emptyHint": "等待本地服务——AI 启动 dev server 后自动显示,也可以输入地址手动打开",
   "preview.addressPlaceholder": "http://localhost:5173",
   "preview.manualOpen": "打开",

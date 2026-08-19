@@ -13,6 +13,8 @@ import {
   Settings as SettingsIcon,
   Pencil,
   PanelLeft,
+  Plus,
+  X,
   Trash2,
   Brain,
   Cpu,
@@ -38,6 +40,7 @@ import { AskCard } from "./components/AskCard";
 import { ClearContextCard } from "./components/ClearContextCard";
 import { SidebarFooter } from "./components/SidebarFooter";
 import { TerminalPanel, loadTerminalOpen, saveTerminalOpen } from "./components/TerminalPanel";
+import { ContextMenu } from "./components/ContextMenu";
 import { SideSessionPane } from "./components/SideSessionPane";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SidebarSessions } from "./components/SidebarSessions";
@@ -119,7 +122,7 @@ function isThemeMode(value: string): value is Theme {
 }
 const RIGHT_DOCK_TREE_DEFAULT_WIDTH = 260;
 const RIGHT_DOCK_TREE_MIN_WIDTH = 260;
-const RIGHT_DOCK_TREE_MAX_WIDTH = 680;
+const RIGHT_DOCK_TREE_MAX_WIDTH = 1200;
 const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 660;
 const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
 const RIGHT_DOCK_MIN_RENDER_WIDTH = 240;
@@ -134,6 +137,25 @@ type RightDockMode = "context" | "files" | "changed" | "preview" | "session";
 
 const RIGHT_DOCK_MODE_KEY = "fairpeer.rightDockMode";
 const PREVIEW_URL_KEY = "fairpeer.previewUrl";
+const DOCK_TABS_KEY = "fairpeer.dockTabs";
+
+// All tabs the dock's "+" menu can open, in canonical order.
+const DOCK_TAB_CATALOG: RightDockMode[] = ["context", "files", "changed", "preview", "session"];
+
+const DEFAULT_DOCK_TABS: RightDockMode[] = ["files", "changed", "preview"];
+
+function loadDockTabs(): RightDockMode[] {
+  try {
+    const raw = localStorage.getItem(DOCK_TABS_KEY);
+    if (raw) {
+      const list = (JSON.parse(raw) as string[]).filter(
+        (v): v is RightDockMode => DOCK_TAB_CATALOG.includes(v as RightDockMode),
+      );
+      if (list.length > 0) return list;
+    }
+  } catch { /* storage unavailable */ }
+  return [...DEFAULT_DOCK_TABS];
+}
 
 function loadRightDockMode(): RightDockMode {
   try {
@@ -833,6 +855,39 @@ export default function App() {
   const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
   const [workspacePanelMaximized, setWorkspacePanelMaximized] = useState(false);
   const [rightDockMode, setRightDockMode] = useState<RightDockMode>(loadRightDockMode);
+  // Browser-style dock tabs (user request 2026-08-19): the strip shows only
+  // OPEN tabs; each is closable, "+" offers the catalog in a dropdown, order
+  // persists. Programmatic opens (auto-preview, tree menu) auto-add the tab.
+  const [dockTabs, setDockTabs] = useState<RightDockMode[]>(loadDockTabs);
+  const [dockAddMenuPoint, setDockAddMenuPoint] = useState<{ left: number; top: number } | null>(null);
+  // closeWorkspacePanel is defined below (after its dependencies); the tab
+  // closer needs it, hence this forward bridge.
+  const closeWorkspacePanelRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    try {
+      localStorage.setItem(DOCK_TABS_KEY, JSON.stringify(dockTabs));
+    } catch { /* storage unavailable */ }
+  }, [dockTabs]);
+  const ensureDockTab = useCallback((mode: RightDockMode) => {
+    setDockTabs((prev) => (prev.includes(mode) ? prev : [...prev, mode]));
+  }, []);
+  // If the active tab was closed (or restored state desyncs), fall back.
+  useEffect(() => {
+    if (!dockTabs.includes(rightDockMode)) {
+      setRightDockMode(dockTabs[dockTabs.length - 1] ?? "files");
+    }
+  }, [dockTabs, rightDockMode]);
+  const closeDockTab = useCallback((mode: RightDockMode) => {
+    setDockTabs((prev) => {
+      const next = prev.filter((m) => m !== mode);
+      if (next.length === 0) {
+        closeWorkspacePanelRef.current();
+        return prev;
+      }
+      setRightDockMode((active) => (active === mode ? next[next.length - 1] : active));
+      return next;
+    });
+  }, []);
   // Pane-system P1 (docs/pane-system-spec.md §3.2/§3.3): auto-detected preview
   // URL, manual-close suppression, and the changed-tab activity dot.
   const [previewUrl, setPreviewUrl] = useState(loadPreviewUrl);
@@ -854,6 +909,7 @@ export default function App() {
       if (url === previewUrl) return;
       setPreviewUrl(url);
       if (previewSuppressedRef.current !== url) {
+        ensureDockTab("preview");
         setRightDockMode("preview");
         setWorkspacePanelOpen(true);
       }
@@ -1178,7 +1234,10 @@ export default function App() {
   const rightDockDetailActive = rightDockMode !== "context" && workspacePreviewActive;
   const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
   const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
-  const chatReservedWidth = workspacePanelOpen && !workspacePanelMaximized ? CHAT_COMFORT_MIN_WIDTH : CHAT_MIN_WIDTH;
+  
+  const activeDockOpen = coworkActive ? coworkDockOpen : workspacePanelOpen;
+  const chatReservedWidth = coworkActive ? 0 : (workspacePanelOpen && !workspacePanelMaximized ? CHAT_COMFORT_MIN_WIDTH : CHAT_MIN_WIDTH);
+  
   const workspacePanelAvailableWidth = availableWorkspacePanelWidth({
     viewportWidth,
     sidebarCollapsed,
@@ -1188,7 +1247,7 @@ export default function App() {
   });
 
   const resolvedWorkspacePanelWidth = resolveWorkspacePanelWidth({
-    open: workspacePanelOpen,
+    open: activeDockOpen,
     maximized: workspacePanelMaximized,
     preferredWidth: preferredWorkspacePanelWidth,
     minWidth: workspacePanelMinWidth,
@@ -2145,6 +2204,7 @@ export default function App() {
     setWorkspacePanelMaximized(false);
     setWorkspacePanelOpen(false);
   }, [closeTransientOverlays, previewUrl, workspacePanelOpen]);
+  closeWorkspacePanelRef.current = closeWorkspacePanel;
 
   const toggleWorkspacePanel = useCallback(() => {
     pulseWorkspaceToggle();
@@ -2163,13 +2223,14 @@ export default function App() {
 
   const openRightDockMode = useCallback(
     (mode: RightDockMode) => {
+      ensureDockTab(mode);
       setWorkspaceRevealRequest(null);
       setWorkspaceChangeRevealRequest(null);
       setWorkspaceFileListRequest(null);
       setWorkspaceChangeListRequest(null);
       openWorkspacePanel(mode);
     },
-    [openWorkspacePanel],
+    [ensureDockTab, openWorkspacePanel],
   );
 
   const openRightDockFile = useCallback(
@@ -3296,63 +3357,92 @@ export default function App() {
             aria-label={t("rightDock.workbench")}
           >
             <div className="workbench-dock__tools">
+              {/* Browser-style tab management (2026-08-19): only OPEN tabs show,
+                  each closable; "+" offers the full catalog in a dropdown. */}
               <div className="workbench-dock__tabs" role="tablist" aria-label={t("rightDock.views")}>
-                {SHOW_CONTEXT_DOCK && (
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={rightDockMode === "context"}
-                    className={`workbench-dock__tab${rightDockMode === "context" ? " workbench-dock__tab--active" : ""}`}
-                    onClick={() => openRightDockMode("context")}
-                  >
-                    <Activity size={13} />
-                    <span className="workbench-dock__tab-label">{t("rightDock.overview")}</span>
-                  </button>
-                )}
+                {dockTabs
+                  .filter((mode) => mode !== "context" || SHOW_CONTEXT_DOCK)
+                  .map((mode) => (
+                    <div
+                      key={mode}
+                      className={`workbench-dock__tabwrap${rightDockMode === mode ? " workbench-dock__tabwrap--active" : ""}`}
+                    >
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={rightDockMode === mode}
+                        className={`workbench-dock__tab${rightDockMode === mode ? " workbench-dock__tab--active" : ""}`}
+                        onClick={() => openRightDockMode(mode)}
+                      >
+                        {mode === "context" ? <Activity size={13} />
+                          : mode === "files" ? <FileText size={13} />
+                          : mode === "changed" ? <GitBranch size={13} />
+                          : mode === "preview" ? <Globe size={13} />
+                          : <MessageSquare size={13} />}
+                        <span className="workbench-dock__tab-label">
+                          {mode === "context" ? t("rightDock.overview")
+                            : mode === "files" ? t("workspace.filesTab")
+                            : mode === "changed" ? t("workspace.changedTab")
+                            : mode === "preview" ? t("preview.tabTitle")
+                            : t("sideSession.tabTitle")}
+                        </span>
+                        {mode === "changed" && changedDirty && rightDockMode !== "changed" && (
+                          <span className="workbench-dock__tab-dot" aria-hidden="true" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="workbench-dock__tab-close"
+                        onClick={() => closeDockTab(mode)}
+                        aria-label={t("dock.closeTab")}
+                        title={t("dock.closeTab")}
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))}
                 <button
                   type="button"
-                  role="tab"
-                  aria-selected={rightDockMode === "files"}
-                  className={`workbench-dock__tab${rightDockMode === "files" ? " workbench-dock__tab--active" : ""}`}
-                  onClick={() => openRightDockMode("files")}
+                  className="workbench-dock__tab-add"
+                  onClick={(e) => {
+                    const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                    setDockAddMenuPoint({ left: r.left, top: r.bottom + 4 });
+                  }}
+                  aria-label={t("dock.addTab")}
+                  title={t("dock.addTab")}
                 >
-                  <FileText size={13} />
-                  <span className="workbench-dock__tab-label">{t("workspace.filesTab")}</span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={rightDockMode === "changed"}
-                  className={`workbench-dock__tab${rightDockMode === "changed" ? " workbench-dock__tab--active" : ""}`}
-                  onClick={() => openRightDockMode("changed")}
-                >
-                  <GitBranch size={13} />
-                  <span className="workbench-dock__tab-label">{t("workspace.changedTab")}</span>
-                  {changedDirty && rightDockMode !== "changed" && (
-                    <span className="workbench-dock__tab-dot" aria-hidden="true" />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={rightDockMode === "preview"}
-                  className={`workbench-dock__tab${rightDockMode === "preview" ? " workbench-dock__tab--active" : ""}`}
-                  onClick={() => openRightDockMode("preview")}
-                >
-                  <Globe size={13} />
-                  <span className="workbench-dock__tab-label">{t("preview.tabTitle")}</span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={rightDockMode === "session"}
-                  className={`workbench-dock__tab${rightDockMode === "session" ? " workbench-dock__tab--active" : ""}`}
-                  onClick={() => openRightDockMode("session")}
-                >
-                  <MessageSquare size={13} />
-                  <span className="workbench-dock__tab-label">{t("sideSession.tabTitle")}</span>
+                  <Plus size={12} />
                 </button>
               </div>
+              <ContextMenu
+                open={dockAddMenuPoint !== null}
+                point={dockAddMenuPoint}
+                minWidth={160}
+                ariaLabel={t("dock.addTab")}
+                onClose={() => setDockAddMenuPoint(null)}
+                items={DOCK_TAB_CATALOG
+                  .filter((mode) => !dockTabs.includes(mode))
+                  .filter((mode) => mode !== "context" || SHOW_CONTEXT_DOCK)
+                  .map((mode) => ({
+                    key: mode,
+                    icon:
+                      mode === "context" ? <Activity size={13} />
+                      : mode === "files" ? <FileText size={13} />
+                      : mode === "changed" ? <GitBranch size={13} />
+                      : mode === "preview" ? <Globe size={13} />
+                      : <MessageSquare size={13} />,
+                    label:
+                      mode === "context" ? t("rightDock.overview")
+                      : mode === "files" ? t("workspace.filesTab")
+                      : mode === "changed" ? t("workspace.changedTab")
+                      : mode === "preview" ? t("preview.tabTitle")
+                      : t("sideSession.tabTitle"),
+                    onSelect: () => {
+                      setDockAddMenuPoint(null);
+                      openRightDockMode(mode);
+                    },
+                  }))}
+              />
             </div>
             <div className="workbench-dock__body">
               {rightDockMode === "context" ? (

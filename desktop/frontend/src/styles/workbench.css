@@ -2389,6 +2389,23 @@
   background: transparent;
 }
 
+:root[data-theme-style] .workbench-dock__tabwrap {
+  position: relative;
+  flex: 0 0 auto;
+  clip-path: polygon(9px 0, calc(100% - 9px) 0, 100% 100%, 0 100%);
+  background: color-mix(in srgb, var(--fg-faint) 6%, transparent);
+  transition: background 0.12s;
+}
+
+:root[data-theme-style] .workbench-dock__tabwrap:hover {
+  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
+}
+
+:root[data-theme-style] .workbench-dock__tabwrap--active,
+:root[data-theme-style] .workbench-dock__tabwrap--active:hover {
+  background: var(--workspace-files-bg);
+}
+
 :root[data-theme-style] .workbench-dock__tab {
   position: relative;
   flex: 0 0 auto;
@@ -2396,17 +2413,15 @@
   max-width: none;
   height: 27px;
   width: auto;
-  padding: 0 14px;
+  padding: 0 22px 0 14px;
   border: 0;
   border-radius: 0;
-  clip-path: polygon(9px 0, calc(100% - 9px) 0, 100% 100%, 0 100%);
   justify-content: flex-start;
   gap: 6px;
   color: var(--fg-faint);
   font-size: 12px;
   font-weight: 600;
-  background: color-mix(in srgb, var(--fg-faint) 6%, transparent);
-  transition: background 0.12s, color 0.12s;
+  background: transparent;
 }
 
 :root[data-theme-style] .workbench-dock__tab svg {
@@ -2423,14 +2438,11 @@
 
 :root[data-theme-style] .workbench-dock__tab--active {
   color: var(--fg);
-  /* Same paint as the dock body — the tab reads as part of the content. */
-  background: var(--workspace-files-bg);
   box-shadow: none;
 }
 
 :root[data-theme-style] .workbench-dock__tab:hover {
   color: var(--fg-dim);
-  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
 }
 
 :root[data-theme-style] .workspace-panel,
