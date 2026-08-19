@@ -60,16 +60,16 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 11.5px;
+  font-weight: 600;
   color: #ff8787;
-  background: rgba(255, 87, 87, 0.12);
-  border: 1px solid rgba(255, 87, 87, 0.45);
+  background: transparent;
+  border: 1px solid rgba(255, 135, 135, 0.3);
   cursor: pointer;
 }
-.ndv__stop:hover { background: rgba(255, 87, 87, 0.25); }
+.ndv__stop:hover { background: rgba(255, 87, 87, 0.18); border-color: rgba(255, 135, 135, 0.6); }
 
 .ndv__rail {
   grid-row: 2;
@@ -82,10 +82,10 @@
   overflow-y: auto;
 }
 
-.ndv__sessions { min-height: 120px; max-height: 40%; overflow-y: auto; }
+.ndv__sessions { min-height: 80px; max-height: 32%; overflow-y: auto; border-bottom: 1px solid var(--border); }
 
 .ndv__section {
-  padding: 8px 12px 4px;
+  padding: 10px 12px 4px;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -93,16 +93,28 @@
   opacity: 0.55;
 }
 
+.ndv__hint {
+  padding: 2px 12px 8px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  opacity: 0.65;
+}
+
+.ndv__rail-actions { padding: 4px 12px 6px; }
+
 .ndv__group { padding: 2px 12px; font-size: 12px; }
-.ndv__group-row { display: flex; justify-content: space-between; opacity: 0.85; }
+.ndv__group-row { display: flex; justify-content: space-between; opacity: 0.85; padding: 3px 0; }
 .ndv__device {
-  padding: 2px 12px 2px 22px;
+  padding: 4px 12px 4px 22px;
   font-size: 12px;
-  opacity: 0.75;
+  opacity: 0.85;
   display: flex;
   justify-content: space-between;
+  gap: 8px;
   cursor: default;
 }
+.ndv__device-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ndv__device-addr { opacity: 0.55; white-space: nowrap; }
 
 .ndv__main {
   grid-row: 2;
@@ -113,6 +125,8 @@
   min-height: 0;
   background: var(--bg);
 }
+
+.ndv__chat { flex: 1; min-height: 0; overflow: auto; }
 
 .ndv__dock {
   grid-row: 2;
@@ -131,12 +145,42 @@
 .ndv__card {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 8px 10px;
+  padding: 10px 12px;
   font-size: 12px;
 }
+.ndv__card--dim { opacity: 0.7; line-height: 1.6; }
 
-.ndv__finding { border-left: 3px solid var(--sev, #7ab8ff); margin-bottom: 6px; }
+.ndv__card-title { font-weight: 700; font-size: 12px; margin-bottom: 8px; }
+
+.ndv__meta { opacity: 0.6; font-size: 11.5px; line-height: 1.5; margin-bottom: 6px; }
+.ndv__ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ndv__quick-cmds { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.ndv__quick-result { margin-bottom: 8px; }
+.ndv__quick-cmd { font-weight: 600; }
+
+.ndv__finding { border-left: 3px solid var(--sev, #7ab8ff); padding-left: 8px; margin-bottom: 8px; }
 .ndv__finding-title { font-weight: 600; }
+.ndv__finding-suggestion { color: #e0a800; margin-top: 2px; font-size: 11.5px; }
+
+.ndv__step { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; font-size: 12px; line-height: 1.6; }
+.ndv__step-n {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-dim, rgba(122, 184, 255, 0.15));
+  color: var(--accent, #7ab8ff);
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ndv__step-body { min-width: 0; }
+.ndv__step-btn { margin-left: 8px; }
+.ndv__step-detail { margin-left: 8px; margin-bottom: 6px; }
 
 .ndv__bottom {
   grid-column: 1 / -1;
@@ -150,12 +194,18 @@
   opacity: 0.9;
 }
 .ndv__bottom-item { display: inline-flex; gap: 6px; align-items: center; }
+.ndv__bottom-item + .ndv__bottom-item { border-left: 1px solid var(--border); padding-left: 16px; }
+.ndv__bottom-note { margin-left: auto; opacity: 0.5; font-size: 11px; }
 .ndv__ok { color: #7ee2a8; }
 .ndv__zero { color: #7ee2a8; font-weight: 700; }
 .ndv__warn { color: #e0a800; font-weight: 600; }
 
 .ndv__device--click { cursor: pointer; border-radius: var(--radius-sm); }
 .ndv__device--click:hover { background: var(--bg-hover, rgba(127,127,127,.12)); }
+.ndv__device--sel {
+  background: var(--accent-dim, rgba(122, 184, 255, 0.15));
+  box-shadow: inset 2px 0 0 var(--accent, #7ab8ff);
+}
 
 .ndv__pre {
   margin: 4px 0 0;
@@ -188,7 +238,7 @@
   background: transparent;
   color: var(--text, #ccc);
   font-size: 12px;
-  padding: 4px 10px;
+  padding: 5px 12px;
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
@@ -208,11 +258,13 @@
 }
 
 /* The netdev title bar lives INSIDE the global chrome's center slot — slim,
-   vertically centered, no second header row. */
+   vertically centered, no second header row. flex:1 fills the strip so the
+   emergency stop's margin-left:auto can push it to the far right. */
 .ndv__titlebar {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex: 1;
   min-width: 0;
   padding: 0 8px;
 }

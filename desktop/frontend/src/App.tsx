@@ -2890,11 +2890,12 @@ export default function App() {
         />
       )}
       <Composer
-        key={`composer-${coworkActive ? "cowork" : "dev"}`}
+        key={`composer-${coworkActive ? "cowork" : netdevActive ? "netdev" : "dev"}`}
         running={state.running}
         paused={state.paused}
         collaborationMode={collaborationMode}
         showKnowledge={coworkActive}
+        placeholderOverride={netdevActive ? "描述故障现象或要查的状态，如「core-sw-1 的 OSPF 邻居一直 down」…" : undefined}
         toolApprovalMode={toolApprovalMode}
         goal={goal}
         cwd={state.meta?.cwd}
@@ -3063,7 +3064,6 @@ export default function App() {
         )}
         {netdevActive && (
           <NetDevLayout
-            headerNode={headerNode}
             mainNode={mainNode}
             footerNode={footerNode}
             sessionsNode={sidebarSessionsNode}

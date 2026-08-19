@@ -51,13 +51,11 @@ type QuickResult = { command: string; output: string; isError: boolean; refused?
 type DockTab = "context" | "topology" | "findings" | "proposals";
 
 export function NetDevLayout({
-  headerNode,
   mainNode,
   footerNode,
   sessionsNode,
   onOpenSettings,
 }: {
-  headerNode: ReactNode;
   mainNode: ReactNode;
   footerNode: ReactNode;
   sessionsNode: ReactNode;
@@ -159,12 +157,11 @@ export function NetDevLayout({
   return (
     <div className="ndv">
       <div className="ndv__rail">
+        <div className="ndv__section">诊断会话</div>
         <div className="ndv__sessions">{sessionsNode}</div>
         <div className="ndv__section">设备清单（{devices.length}，点击诊断）</div>
         {devices.length === 0 && (
-          <div style={{ padding: "2px 12px 8px", opacity: 0.7, fontSize: 12 }}>
-            还没有设备。右栏「开始使用」三步录入。
-          </div>
+          <div className="ndv__hint">还没有设备。右栏「开始使用」三步录入。</div>
         )}
         {[...groups.entries()].map(([g, list]) => (
           <div key={g} className="ndv__group">
@@ -172,11 +169,10 @@ export function NetDevLayout({
             {list.map(d => (
               <div
                 key={d.name}
-                className="ndv__device ndv__device--click"
-                style={selected === d.name ? { background: "var(--accent-dim, rgba(122,184,255,.15))" } : undefined}
+                className={`ndv__device ndv__device--click${selected === d.name ? " ndv__device--sel" : ""}`}
                 role="button"
                 onClick={() => { setSelected(d.name); setTab("context"); setQuick({}); }}
-              ><span>{d.name}</span><span style={{ opacity: 0.6 }}>{d.address}</span></div>
+              ><span className="ndv__device-name">{d.name}</span><span className="ndv__device-addr">{d.address}</span></div>
             ))}
           </div>
         ))}
@@ -184,26 +180,23 @@ export function NetDevLayout({
           <>
             <div className="ndv__section">堡垒链（{settings?.hops.length}）</div>
             {(settings?.hops ?? []).map(h => (
-              <div key={h.name} className="ndv__device"><span>{h.name}</span><span style={{ opacity: 0.6 }}>{h.host}</span></div>
+              <div key={h.name} className="ndv__device"><span className="ndv__device-name">{h.name}</span><span className="ndv__device-addr">{h.host}</span></div>
             ))}
           </>
         )}
         <div className="ndv__section">巡检</div>
-        <div style={{ padding: "4px 12px" }}>
+        <div className="ndv__rail-actions">
           <span className="btn btn--secondary btn--small" role="button" onClick={() => void runInspection()}>
             {inspBusy ? "巡检中…" : "立即巡检"}
           </span>
-          {lastInspection && (
-            <div style={{ marginTop: 6, opacity: 0.6, fontSize: 12 }}>
-              上次：{lastInspection.title}（{String(lastInspection.created_at ?? "").slice(5, 16).replace("T", " ")}）
-            </div>
-          )}
         </div>
+        {lastInspection && (
+          <div className="ndv__hint">上次：{lastInspection.title}（{String(lastInspection.created_at ?? "").slice(5, 16).replace("T", " ")}）</div>
+        )}
       </div>
 
       <div className="ndv__main">
-        {headerNode}
-        <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>{mainNode}</div>
+        <div className="ndv__chat">{mainNode}</div>
         {footerNode}
       </div>
 
@@ -228,46 +221,46 @@ export function NetDevLayout({
           devices.length === 0 ? <GettingStarted onOpenSettings={onOpenSettings} /> :
           selectedDevice ? (
             <div className="ndv__card">
-              <div className="ndv__section" style={{ padding: "0 0 6px" }}>
-                {selectedDevice.name} · {selectedDevice.vendor}/{selectedDevice.os}
-              </div>
-              <div style={{ opacity: 0.65, marginBottom: 8 }}>{selectedDevice.address} · {(selectedDevice.via ?? []).join("→") || "直连"}</div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+              <div className="ndv__card-title">{selectedDevice.name} · {selectedDevice.vendor}/{selectedDevice.os}</div>
+              <div className="ndv__meta">{selectedDevice.address} · {(selectedDevice.via ?? []).join("→") || "直连"}</div>
+              <div className="ndv__quick-cmds">
                 {(QUICK_BATTERY[selectedDevice.vendor] ?? ["display version"]).map(cmd => (
                   <span key={cmd} className="btn btn--secondary btn--small" role="button" onClick={() => void runQuick(selectedDevice.name, cmd)}>{cmd}</span>
                 ))}
               </div>
               {Object.values(quick).map(r => (
-                <div key={r.command} style={{ marginBottom: 8 }}>
-                  <div style={{ fontWeight: 600, color: r.isError ? "#ff8787" : undefined }}>{r.command}</div>
+                <div key={r.command} className="ndv__quick-result">
+                  <div className="ndv__quick-cmd" style={r.isError ? { color: "#ff8787" } : undefined}>{r.command}</div>
                   <pre className="ndv__pre">{r.output || "（无输出）"}</pre>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="ndv__card" style={{ opacity: 0.7 }}>点击左栏设备查看详情与快捷诊断（只读，走与 agent 相同的密封路径）；或在对话里直接描述故障现象。</div>
+            <div className="ndv__card ndv__card--dim">点击左栏设备查看详情与快捷诊断（只读，走与 agent 相同的密封路径）；或在对话里直接描述故障现象。</div>
           )
         )}
 
         {tab === "topology" && (
           <div className="ndv__card">
-            <div className="ndv__section" style={{ padding: "0 0 6px" }}>拓扑</div>
-            <span className="btn btn--secondary btn--small" role="button" onClick={() => void genTopology()}>
-              {topoBusy ? "采集邻居表中…" : "生成拓扑（读取全网邻居表）"}
-            </span>
+            <div className="ndv__card-title">拓扑</div>
+            <div className="ndv__rail-actions" style={{ padding: 0, marginBottom: 8 }}>
+              <span className="btn btn--secondary btn--small" role="button" onClick={() => void genTopology()}>
+                {topoBusy ? "采集邻居表中…" : "生成拓扑（读取全网邻居表）"}
+              </span>
+            </div>
             {topo && <TopologyMap graph={topo} />}
           </div>
         )}
 
         {tab === "findings" && (
           <div className="ndv__card">
-            <div className="ndv__section" style={{ padding: "0 0 6px" }}>发现（{findings.length}）</div>
-            {findings.length === 0 && <div style={{ opacity: 0.6 }}>暂无。诊断结论由 agent 通过 netdev_finding 记录（必带证据）；巡检结果也在此。</div>}
+            <div className="ndv__card-title">发现（{findings.length}）</div>
+            {findings.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>暂无。诊断结论由 agent 通过 netdev_finding 记录（必带证据）；巡检结果也在此。</div>}
             {findings.slice(0, 20).map(f => (
               <div key={f.id} className="ndv__finding" style={{ "--sev": SEV_COLOR[f.severity] ?? SEV_COLOR.info } as React.CSSProperties}>
                 <div className="ndv__finding-title">{f.title}</div>
-                <div style={{ opacity: 0.65 }}>{(f.devices ?? []).join("、")} · 证据 {f.evidence?.length ?? 0} 条</div>
-                {f.suggestion && <div style={{ color: "#e0a800", marginTop: 2 }}>建议：{f.suggestion}</div>}
+                <div className="ndv__meta">{(f.devices ?? []).join("、")} · 证据 {f.evidence?.length ?? 0} 条</div>
+                {f.suggestion && <div className="ndv__finding-suggestion">建议：{f.suggestion}</div>}
               </div>
             ))}
           </div>
@@ -275,10 +268,10 @@ export function NetDevLayout({
 
         {tab === "proposals" && (
           <div className="ndv__card">
-            <div className="ndv__section" style={{ padding: "0 0 6px" }}>提案（{proposals.length}）</div>
-            {proposals.length === 0 && <div style={{ opacity: 0.6 }}>暂无。对话中让 agent 用 netdev_propose 起草。</div>}
+            <div className="ndv__card-title">提案（{proposals.length}）</div>
+            {proposals.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>暂无。对话中让 agent 用 netdev_propose 起草。</div>}
             {proposals.slice(0, 10).map(p => <ProposalRow key={p.id} p={p} />)}
-            <div style={{ opacity: 0.55, marginTop: 4 }}>批准 / 执行 / 回滚在 设置 → 运维 → 提案中心</div>
+            <div className="ndv__hint" style={{ padding: 0 }}>批准 / 执行 / 回滚在 设置 → 运维 → 提案中心</div>
           </div>
         )}
       </div>
@@ -289,7 +282,7 @@ export function NetDevLayout({
         <span className="ndv__bottom-item">
           提案 {pendingCount > 0 ? <span className="ndv__warn">{pendingCount} 待处理</span> : <span className="ndv__zero">0</span>}
         </span>
-        <span style={{ marginLeft: "auto", opacity: 0.5 }}>结构性只读：写命令无执行路径 · 全量审计中</span>
+        <span className="ndv__bottom-note">结构性只读：写命令无执行路径 · 全量审计中</span>
       </div>
     </div>
   );
@@ -297,20 +290,26 @@ export function NetDevLayout({
 
 // GettingStarted: the zero-device onboarding — the answer to "从哪里开始".
 function GettingStarted({ onOpenSettings }: { onOpenSettings: (tab: string) => void }) {
+  const steps: { text: string; action?: { label: string; run: () => void } }[] = [
+    { text: "录入设备：地址 / 厂商 / 登录凭证", action: { label: "打开 设置 → 运维", run: () => onOpenSettings("netdev") } },
+    { text: "设备编辑里点「测试连接」——首次弹出主机密钥指纹，确认即信任（TOFU）" },
+    { text: "左栏点设备快捷诊断，或在对话里描述故障现象（如「core-sw-1 的 OSPF 邻居一直 down」）" },
+  ];
   return (
-    <div className="ndv__card">
-      <div className="ndv__section" style={{ padding: "0 0 6px" }}>开始使用（三步）</div>
-      <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 2 }}>
-        <li>
-          录入设备：填写地址/厂商/登录凭证
-          <span className="btn btn--primary btn--small" role="button" style={{ marginLeft: 8 }} onClick={() => onOpenSettings("netdev")}>
-            打开 设置 → 运维
-          </span>
-        </li>
-        <li>在设备编辑里点「测试连接」——首次会弹出主机密钥指纹，确认即信任（TOFU）</li>
-        <li>回到本页：点左栏设备快捷诊断，或直接在对话里描述故障现象（如「core-sw-1 的 OSPF 邻居一直 down」）</li>
-      </ol>
-      <div style={{ marginTop: 8, opacity: 0.6, fontSize: 11.5 }}>
+    <div className="ndv__card ndv__gs">
+      <div className="ndv__card-title">开始使用（三步）</div>
+      {steps.map((s, i) => (
+        <div key={i} className="ndv__step">
+          <span className="ndv__step-n">{i + 1}</span>
+          <div className="ndv__step-body">
+            {s.text}
+            {s.action && (
+              <span className="btn btn--primary btn--small ndv__step-btn" role="button" onClick={s.action.run}>{s.action.label}</span>
+            )}
+          </div>
+        </div>
+      ))}
+      <div className="ndv__hint" style={{ padding: 0, marginTop: 4 }}>
         网络名称、探测范围、提案审批策略都在 设置 → 运维。写操作永远走人工审批的提案，agent 只有只读权限。
       </div>
     </div>
@@ -326,14 +325,14 @@ function ProposalRow({ p }: { p: NetDevProposal }) {
       <div className="ndv__finding-title" role="button" onClick={() => setOpen(!open)}>
         {p.id} · {p.status} {open ? "▲" : "▼"}
       </div>
-      <div style={{ opacity: 0.65, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.intent}</div>
+      <div className="ndv__meta ndv__ellipsis">{p.intent}</div>
       {open && (
         <div style={{ marginTop: 4 }}>
           {(p.steps ?? []).map((s, i) => (
-            <div key={i} style={{ marginLeft: 8, marginBottom: 4 }}>
+            <div key={i} className="ndv__step-detail">
               <div>{s.device} — {s.applied ? "✅ 已下发" : s.error ? "❌ " + s.error : "⬜ 未执行"}</div>
-              <div style={{ opacity: 0.7 }}>变更：{(s.commands ?? []).join("；")}</div>
-              <div style={{ opacity: 0.7 }}>回滚：{(s.rollback ?? []).join("；") || "（无）"}</div>
+              <div className="ndv__meta">变更：{(s.commands ?? []).join("；")}</div>
+              <div className="ndv__meta">回滚：{(s.rollback ?? []).join("；") || "（无）"}</div>
             </div>
           ))}
         </div>

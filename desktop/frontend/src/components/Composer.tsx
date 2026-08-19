@@ -353,6 +353,7 @@ export function Composer({
   turnTokens,
   retry,
   transientDismissSignal,
+  placeholderOverride,
 }: {
   running: boolean;
   // paused is true while the in-flight turn is frozen on a graceful pause.
@@ -396,6 +397,8 @@ export function Composer({
   turnTokens?: number;
   retry?: { attempt: number; max: number };
   transientDismissSignal?: number;
+  // Mode-specific placeholder (netdev): falls back to composer.placeholder.
+  placeholderOverride?: string;
 }) {
   const { t, locale } = useI18n();
   const { showToast } = useToast();
@@ -2052,7 +2055,7 @@ export function Composer({
               lastCompositionEndAt.current = Date.now();
             }}
             style={textareaStyle}
-            placeholder={disabled ? t("common.loading") : goalModeOn && !activeGoal ? t("composer.goalInputPlaceholder") : t("composer.placeholder")}
+            placeholder={disabled ? t("common.loading") : goalModeOn && !activeGoal ? t("composer.goalInputPlaceholder") : placeholderOverride ?? t("composer.placeholder")}
             rows={1}
             disabled={disabled}
           />
