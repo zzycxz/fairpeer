@@ -30,7 +30,7 @@ func main() {
 		fatal("mkdir: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
 	handle, err := browserlaunch.Launch(ctx, browserlaunch.LaunchOptions{
@@ -230,6 +230,57 @@ func main() {
 		fatal("in-project device missing (rail: %.160q)", railNow)
 	}
 	fmt.Println("project-switch-filter: OK")
+
+	// Backup vault: back to 全部 + select ACC-01's card is overkill — the
+	// project switch left CORE-01 selected. Snapshot, pick two versions, diff.
+	var backupClick string
+	if err := chromedp.Run(bctx,
+		chromedp.Evaluate(`(function(){var els=[...document.querySelectorAll(".ndv__dock span[role=button], .ndv__dock button")]; var b=els.find(e=>e.textContent.indexOf("备份配置")>=0); if(!b) return "no-btn"; b.scrollIntoView({block:"center"}); b.click(); return "clicked";})()`, &backupClick),
+		chromedp.Sleep(900*time.Millisecond),
+		chromedp.Evaluate(`(function(){var rows=document.querySelectorAll(".ndv__backup-row"); if(rows.length<2) return "rows:"+rows.length; rows[0].click(); rows[1].click(); return "picked";})()`, new(string)),
+		chromedp.Sleep(300*time.Millisecond),
+		chromedp.Evaluate(`(function(){var els=[...document.querySelectorAll(".ndv__dock span[role=button], .ndv__dock button")]; var b=els.find(e=>e.textContent.indexOf("对比所选版本")>=0); if(!b) return "no-diff-btn"; b.scrollIntoView({block:"center"}); b.click(); return "clicked";})()`, new(string)),
+		chromedp.Sleep(500*time.Millisecond),
+	); err != nil {
+		fatal("backup flow (%s): %v", backupClick, err)
+	}
+	var diffLines int
+	if err := chromedp.Run(bctx,
+		chromedp.Evaluate(`document.querySelectorAll(".ndv__diff .ndv__dl-add, .ndv__diff .ndv__dl-del").length`, &diffLines),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return saveShot(ctx, filepath.Join(*out, "ndv-7-backup-diff.png"))
+		}),
+	); err != nil || diffLines == 0 {
+		fatal("backup diff not rendered (lines=%d err=%v)", diffLines, err)
+	}
+	fmt.Printf("shot: ndv-7-backup-diff.png (colored diff lines: %d)\n", diffLines)
+	fmt.Println("backup-vault-diff: OK")
+
+	// Daily briefing: reload, re-enter 运维 — the context tab with NO device
+	// selected shows the briefing card; generate (mock) and capture.
+	if err := chromedp.Run(bctx,
+		chromedp.Reload(),
+		chromedp.WaitReady("body", chromedp.ByQuery),
+		chromedp.Sleep(2500*time.Millisecond),
+		chromedp.Click(`//button[contains(., "运维")]`, chromedp.BySearch),
+		chromedp.WaitReady(".ndv", chromedp.ByQuery),
+		chromedp.Sleep(1500*time.Millisecond),
+		chromedp.Evaluate(`(function(){var els=[...document.querySelectorAll(".ndv__dock span[role=button], .ndv__dock button")]; var b=els.find(e=>e.textContent.indexOf("生成今日简报")>=0); if(!b) return "no-btn"; b.scrollIntoView({block:"center"}); b.click(); return "clicked";})()`, new(string)),
+		chromedp.Sleep(900*time.Millisecond),
+	); err != nil {
+		fatal("briefing flow: %v", err)
+	}
+	var briefOK bool
+	if err := chromedp.Run(bctx,
+		chromedp.Evaluate(`(function(){return !!document.querySelector(".ndv__md") && document.querySelector(".ndv__md").textContent.indexOf("总体判断")>=0;})()`, &briefOK),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return saveShot(ctx, filepath.Join(*out, "ndv-8-briefing.png"))
+		}),
+	); err != nil || !briefOK {
+		fatal("briefing card not rendered (ok=%v err=%v)", briefOK, err)
+	}
+	fmt.Println("shot: ndv-8-briefing.png")
+	fmt.Println("daily-briefing: OK")
 }
 
 // visibleMermaidScrollJS scrolls the last visible mermaid diagram into view,

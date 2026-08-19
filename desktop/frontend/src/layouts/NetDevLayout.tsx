@@ -287,19 +287,6 @@ export function NetDevLayout({
     }
   }, [reload]);
 
-  // Backup vault: snapshot via sealed read (backupBusy gates the card button).
-  const [backupBusy, setBackupBusy] = useState(false);
-  const runBackup = useCallback(async (device: string) => {
-    setBackupBusy(true);
-    try {
-      const vers = await app.NetDevRunBackup(device);
-      if (vers.length === 0) alert("备份失败：命令被拒绝或设备错误（详情见审计）");
-    } catch (e) {
-      setErr(String(e));
-    } finally {
-      setBackupBusy(false);
-    }
-  }, []);
 
   // Active project scope (site switcher in the title bar): null = 全部.
   const [project, setProject] = useState<NetDevProjectScope>(getActiveProject());
@@ -484,12 +471,6 @@ export function NetDevLayout({
                     onClick={() => onInsertComposer(`帮我在 ${selectedDevice.name}（${selectedDevice.address}）上完成以下变更：\n变更内容：\n（请先用只读命令确认现状，再用 netdev_propose 起草提案——写命令必须包含对应的回滚命令，不会直接执行，需我在提案中心批准。）`)}
                   >AI 配置变更…</span>
                 )}
-                <span
-                  className="btn btn--secondary btn--small"
-                  role="button"
-                  title="经密封路径读取 running-config，脱敏后存为版本；可与任意历史版本 diff。"
-                  onClick={() => void runBackup(selectedDevice.name)}
-                >{backupBusy ? "备份中…" : "备份配置"}</span>
               </div>
               {(settings?.presets ?? []).filter(p => (p.vendors ?? []).length === 0 || (p.vendors ?? []).includes(selectedDevice.vendor)).length > 0 && (
                 <div className="ndv__quick-cmds">
@@ -675,6 +656,7 @@ function BackupHistory({ device }: { device: string }) {
   const [pick, setPick] = useState<string[]>([]);
   const [diff, setDiff] = useState("");
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
     try {
       setVersions(await app.NetDevBackups(device));
@@ -686,7 +668,18 @@ function BackupHistory({ device }: { device: string }) {
     }
   }, [device]);
   useEffect(() => { void load(); }, [load]);
-  if (versions.length === 0 && !err) return null;
+  const runBackup = useCallback(async () => {
+    setBusy(true);
+    try {
+      const vers = await app.NetDevRunBackup(device);
+      if (vers.length === 0) alert("备份失败：命令被拒绝或设备错误（详情见审计）");
+      await load();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [device, load]);
   const toggle = (id: string) => {
     setPick(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id].slice(-2));
     setDiff("");
@@ -702,7 +695,15 @@ function BackupHistory({ device }: { device: string }) {
   };
   return (
     <div style={{ marginTop: 8 }}>
-      <div className="ndv__meta" style={{ marginBottom: 2 }}>备份版本（{versions.length}，勾选两个看 diff）</div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+        <span
+          className="btn btn--secondary btn--small"
+          role="button"
+          title="经密封路径读取 running-config，脱敏后存为版本；可与任意历史版本 diff。"
+          onClick={() => void runBackup()}
+        >{busy ? "备份中…" : "备份配置"}</span>
+        <span className="ndv__meta" style={{ marginBottom: 0 }}>版本 {versions.length}，勾选两个看 diff</span>
+      </div>
       {err && <div className="ndv__meta" style={{ color: "#ff8787" }}>{err}</div>}
       {versions.slice(0, 8).map(v => (
         <div key={v.id} className="ndv__backup-row" role="button" onClick={() => toggle(v.id)}>
