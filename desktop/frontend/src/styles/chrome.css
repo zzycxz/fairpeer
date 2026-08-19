@@ -17,8 +17,7 @@
 }
 
 .layout {
-  --workspace-width: 420px;
-  --workspace-resizer-width: 8px;
+
   --app-chrome-height: 38px;
   --topicbar-height: 36px;
   --statusbar-height: 0px;

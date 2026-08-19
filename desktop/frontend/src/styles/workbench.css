@@ -693,9 +693,9 @@
 }
 
 .workbench-dock__tools {
-  height: 52px;
-  padding: 10px 12px 8px;
-  border-bottom-color: var(--border-soft);
+  height: 44px;
+  padding: 8px 12px 0;
+  border-bottom-color: transparent;
 }
 
 .workbench-dock__tabs {
@@ -2370,7 +2370,8 @@
 :root[data-theme-style] .workbench-dock__tools {
   height: 40px;
   padding: 0 12px;
-  border-bottom: 1px solid var(--border-soft);
+  /* No divider: folder tabs rise straight out of the dock body (2026-08-19). */
+  border-bottom: 0;
 }
 
 :root[data-theme-style] .workbench-dock__tabs {
@@ -2379,7 +2380,7 @@
   height: 100%;
   flex: 0 0 auto;
   display: flex;
-  align-items: stretch;
+  align-items: flex-end;
   justify-content: flex-start;
   gap: 2px;
   padding: 0;
@@ -2393,17 +2394,19 @@
   flex: 0 0 auto;
   min-width: auto;
   max-width: none;
-  height: 40px;
+  height: 27px;
   width: auto;
-  padding: 0 12px 1px;
+  padding: 0 14px;
   border: 0;
   border-radius: 0;
+  clip-path: polygon(9px 0, calc(100% - 9px) 0, 100% 100%, 0 100%);
   justify-content: flex-start;
   gap: 6px;
   color: var(--fg-faint);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
-  background: transparent;
+  background: color-mix(in srgb, var(--fg-faint) 6%, transparent);
+  transition: background 0.12s, color 0.12s;
 }
 
 :root[data-theme-style] .workbench-dock__tab svg {
@@ -2420,25 +2423,14 @@
 
 :root[data-theme-style] .workbench-dock__tab--active {
   color: var(--fg);
-  background: transparent;
+  /* Same paint as the dock body — the tab reads as part of the content. */
+  background: var(--workspace-files-bg);
   box-shadow: none;
 }
 
 :root[data-theme-style] .workbench-dock__tab:hover {
   color: var(--fg-dim);
-  background: transparent;
-}
-
-:root[data-theme-style] .workbench-dock__tab--active::after {
-  content: "";
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: -1px;
-  height: 2px;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  animation: graphite-tab-underline var(--dur-base) var(--ease-out) both;
+  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
 }
 
 :root[data-theme-style] .workspace-panel,

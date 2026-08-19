@@ -1951,14 +1951,17 @@
   flex: 0 0 auto;
   height: 30px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 7px;
   padding: 0 8px 0 12px;
   color: var(--fg-faint);
   font-size: 11px;
-  border-bottom: 1px solid var(--border-soft);
   user-select: none;
 }
+.terminal-panel__head .terminal-panel__tabs { align-self: flex-end; }
+.terminal-panel__head > .terminal-panel__cwd,
+.terminal-panel__head > .terminal-panel__spacer,
+.terminal-panel__head > .terminal-panel__btn { align-self: center; }
 /* Tab strip (ZCode grammar: tabs + add + per-tab close) */
 .terminal-panel__tabs {
   display: flex;
@@ -1970,21 +1973,26 @@
   scrollbar-width: none;
 }
 .terminal-panel__tabs::-webkit-scrollbar { display: none; }
+/* Folder-tab grammar (matches the right dock's tabs, 2026-08-19). */
 .terminal-panel__tab {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  height: 22px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
+  height: 24px;
+  border: 0;
+  border-radius: 0;
+  clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 100%, 0 100%);
+  background: color-mix(in srgb, var(--fg-faint) 6%, transparent);
   color: var(--fg-faint);
   font-size: 11px;
+  transition: background 0.12s, color 0.12s;
 }
-.terminal-panel__tab:hover { color: var(--fg-dim); }
+.terminal-panel__tab:hover {
+  color: var(--fg-dim);
+  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
+}
 .terminal-panel__tab--active {
-  border-color: var(--border-soft);
-  background: color-mix(in srgb, var(--accent) 7%, var(--bg-elev));
+  background: var(--bg-elev);
   color: var(--fg);
 }
 .terminal-panel__tab-btn {
@@ -1999,7 +2007,7 @@
   cursor: pointer;
   white-space: nowrap;
 }
-.terminal-panel__tab--active .terminal-panel__tab-btn { color: var(--accent); }
+.terminal-panel__tab--active .terminal-panel__tab-btn { color: var(--fg); }
 .terminal-panel__tab-close {
   display: inline-flex;
   align-items: center;

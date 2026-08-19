@@ -77,6 +77,7 @@
 .cowork-layout {
   grid-row: 2 / -1;
   grid-column: 1 / -1;
+  position: relative;
   display: grid;
   /* sidebar | main | resizer | dock — the resizer column sits between main and
      the dock so the workspace-panel-resizer (a relative-positioned grid item,
@@ -110,11 +111,21 @@
    .app--cowork rule (0,2,0) and this comes later in source, so it wins. */
 .cowork-layout .workspace-panel-resizer {
   display: block;
-  grid-row: 1;
-  grid-column: 3;
-  /* align-self:stretch fills the single cowork content row — the resizer has no
-     children, so without this it collapses to ~0px height and is unclickable. */
-  align-self: stretch;
+  /* Switch from fragile grid-cell placement to absolute anchoring to reliably capture
+     drag events and perfectly straddle the dock's left border (matching chrome.css fix).
+     This bypasses the 0-height/covered hit area grid bugs. */
+  position: absolute;
+  grid-row: auto;
+  grid-column: auto;
+  align-self: auto;
+  justify-self: auto;
+  top: var(--app-chrome-height);
+  bottom: 0;
+  left: auto;
+  right: calc(var(--workspace-width, 320px) - 2px);
+  width: calc(var(--workspace-resizer-width, 8px) + 4px);
+  min-width: 0;
+  z-index: var(--z-app-chrome, 100);
 }
 
 /* Same situation for the left sidebar-resizer: .app--cowork hides the coding-
