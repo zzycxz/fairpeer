@@ -1743,6 +1743,26 @@ function makeMockApp(): AppBindings {
           cancelled = false;
       emitMockTurnStarted();
       const trimmedInput = input.trim().toLowerCase();
+      // Browser dev-shell demo: reply with a mermaid diagram so the rendering
+      // pipeline (Markdown → MermaidViewer → SVG in the chat bubble) can be
+      // verified without the Go backend.
+      if (trimmedInput.startsWith("mermaid") || trimmedInput.includes("画")) {
+        const chart = [
+          "graph LR",
+          "  CORE1[核心 SW1] --- AGG1[汇聚 SW1]",
+          "  CORE1 --- AGG2[汇聚 SW2]",
+          "  AGG1 --- ACC1[接入 SW1]",
+          "  AGG1 --- ACC2[接入 SW2]",
+          "  AGG2 --- ACC3[接入 SW3]",
+          "  FW[防火墙] --- CORE1",
+        ].join("\n");
+        const reply = "全网拓扑示意（mermaid 渲染演示）：\n\n```mermaid\n" + chart + "\n```\n";
+        await delay(400);
+        if (cancelled) return;
+        emit({ kind: "message", text: reply });
+        emitMockTurnDone();
+        return;
+      }
       const goalMatch = /^\/goal(?:\s+([\s\S]*))?$/.exec(input.trim());
       if (goalMatch) {
         const arg = (goalMatch[1] ?? "").trim();

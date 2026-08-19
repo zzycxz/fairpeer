@@ -97,6 +97,31 @@ func main() {
 	}
 	fmt.Printf("stop: %q\n", oneLine(stop))
 	fmt.Printf("rail: %.160q\n", oneLine(rail))
+	// Send a chat message and capture the mermaid-rendered reply (dev mock).
+	// The dev shell keeps a second, hidden .chat-pane transcript mounted under
+	// DIV.layout, so "any svg[id^=mermaid-]" matches a 0×0 duplicate — always
+	// filter to the visible diagram before scrolling or counting.
+	if err := chromedp.Run(bctx,
+		chromedp.SendKeys("textarea", "画一张全网拓扑示意图", chromedp.ByQuery, chromedp.NodeVisible),
+		chromedp.Sleep(400*time.Millisecond),
+		chromedp.SendKeys("textarea", "\r", chromedp.ByQuery),
+		chromedp.Sleep(3500*time.Millisecond),
+		chromedp.Evaluate(`(function(){var s=document.querySelectorAll("svg[id^='mermaid-']"); var vis=[]; s.forEach(function(el){ if(el.getBoundingClientRect().width>0) vis.push(el); }); if(vis.length){ vis[vis.length-1].scrollIntoView({block:"center"}); } return true;})()`, new(bool)),
+		chromedp.Sleep(600*time.Millisecond),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return saveShot(ctx, filepath.Join(*out, "ndv-3-mermaid.png"))
+		}),
+	); err != nil {
+		fatal("mermaid shot: %v", err)
+	}
+	fmt.Println("shot: ndv-3-mermaid.png")
+	var svgCount int
+	if err := chromedp.Run(bctx,
+		chromedp.Evaluate(`(function(){var n=0; document.querySelectorAll("svg[id^='mermaid-']").forEach(function(el){ if(el.getBoundingClientRect().width>0) n++; }); return n;})()`, &svgCount),
+	); err != nil || svgCount == 0 {
+		fatal("mermaid-svg-rendered: 0 — no visible diagram found in DOM (err: %v)", err)
+	}
+	fmt.Printf("mermaid-svg-rendered: %d diagram(s)\n", svgCount)
 }
 
 // saveShot captures a full-page screenshot into path.
