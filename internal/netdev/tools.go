@@ -459,6 +459,31 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&proposeTool{m: m})
 	reg.Add(&findingTool{})
 	reg.Add(&netconfTool{m: m})
+	reg.Add(&baselineTool{m: m})
+}
+
+// baselineTool exposes the config-security baseline battery to the agent —
+// read-only (configs come through the sealed Exec path, rules run locally).
+type baselineTool struct{ m *Manager }
+
+func (t *baselineTool) Name() string { return "netdev_baseline" }
+
+func (t *baselineTool) Description() string {
+	return "Run the configuration security baseline check over every managed device: reads each running-config (read-only, redacted) and evaluates precise local rules (telnet/SNMPv1v2c/plaintext passwords/SSHv1/NTP/syslog). Violations are filed as Findings with evidence. Use it when asked to audit security posture."
+}
+
+func (t *baselineTool) Schema() json.RawMessage {
+	return json.RawMessage(`{"type": "object", "properties": {}, "required": []}`)
+}
+
+func (t *baselineTool) ReadOnly() bool { return true }
+
+func (t *baselineTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	f, err := t.m.RunBaseline(ctx)
+	if err != nil {
+		return "", err
+	}
+	return f.Title + "。逐项结果见「发现」（每条命中都带脱敏证据与修复建议，修复变更请起草提案）。", nil
 }
 
 type netconfTool struct{ m *Manager }

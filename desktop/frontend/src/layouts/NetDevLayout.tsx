@@ -241,6 +241,21 @@ export function NetDevLayout({
     }
   }, [reload]);
 
+  // Security posture: sealed config reads + local rule battery → Findings.
+  const [baseBusy, setBaseBusy] = useState(false);
+  const runBaseline = useCallback(async () => {
+    setBaseBusy(true);
+    try {
+      const f = await app.NetDevRunBaseline();
+      if (f) alert(f.title);
+      await reload();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBaseBusy(false);
+    }
+  }, [reload]);
+
   // Active project scope (site switcher in the title bar): null = 全部.
   const [project, setProject] = useState<NetDevProjectScope>(getActiveProject());
   useEffect(() => subscribeActiveProject(() => setProject(getActiveProject())), []);
@@ -429,7 +444,17 @@ export function NetDevLayout({
 
         {tab === "findings" && (
           <div className="ndv__card">
-            <div className="ndv__card-title">发现（{scopedFindings.length}）{project && <span style={{ fontWeight: 400, fontSize: 11 }}> · {project.name}</span>}</div>
+            <div className="ndv__card-title">
+              发现（{scopedFindings.length}）{project && <span style={{ fontWeight: 400, fontSize: 11 }}> · {project.name}</span>}
+            </div>
+            <div className="ndv__rail-actions" style={{ padding: 0, marginBottom: 8 }}>
+              <span
+                className="btn btn--secondary btn--small"
+                role="button"
+                title="逐台读取 running-config（只读密封路径，已脱敏）并用本地规则核查：Telnet/SNMPv1v2c/明文密码/SSHv1/NTP/Syslog。命中项进入发现，附证据与修复建议（修复走提案）。"
+                onClick={() => void runBaseline()}
+              >{baseBusy ? "核查中…" : "安全基线核查"}</span>
+            </div>
             {scopedFindings.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>{project ? `项目「${project.name}」内暂无发现。` : "暂无。诊断结论由 agent 通过 netdev_finding 记录（必带证据）；巡检结果也在此。"}</div>}
             {scopedFindings.slice(0, 20).map(f => (
               <div key={f.id} className="ndv__finding" style={{ "--sev": SEV_COLOR[f.severity] ?? SEV_COLOR.info } as React.CSSProperties}>

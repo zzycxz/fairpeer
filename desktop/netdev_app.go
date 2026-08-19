@@ -396,6 +396,19 @@ func (a *App) NetDevTopologyPlan() (*netdev.TopologyGraph, error) {
 	return &g, nil
 }
 
+// NetDevRunBaseline runs the config-security baseline battery (sealed reads +
+// local rules) and files Findings. Human entry point; the agent has the
+// read-only netdev_baseline tool.
+func (a *App) NetDevRunBaseline() (*netdev.Finding, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 3*time.Minute)
+	defer cancel()
+	return netdev.SharedManager(cfg).RunBaseline(ctx)
+}
+
 // NetDevEmergencyStop closes every device connection/session at once (the
 // red button; audited). Returns how many connections were dropped.
 func (a *App) NetDevEmergencyStop() (int, error) {

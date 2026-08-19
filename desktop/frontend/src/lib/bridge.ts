@@ -343,8 +343,10 @@ export interface AppBindings {
   NetDevTrustHostKey(fingerprint: string): Promise<void>;
   // Proposal pipeline (human-only entry points; the agent can only draft).
   NetDevProposals(): Promise<NetDevProposal[]>;
-  // Read-battery sweep over all devices; files one Finding with evidence.
+  // One-click read-battery sweep; files a Finding with evidence.
   NetDevRunInspection(): Promise<NetDevFinding | null>;
+  // Config-security baseline battery (sealed reads + local rules) → Findings.
+  NetDevRunBaseline(): Promise<NetDevFinding | null>;
   NetDevFindings(): Promise<NetDevFinding[]>;
   // Emergency stop: close every device connection at once (audited).
   NetDevEmergencyStop(): Promise<number>;
@@ -1744,6 +1746,7 @@ function makeMockApp(): AppBindings {
     async NetDevTrustHostKey(_fingerprint: string) {},
     async NetDevProposals() { return [] as NetDevProposal[]; },
     async NetDevRunInspection() { return null; },
+    async NetDevRunBaseline() { return null; },
     async NetDevFindings() { return [] as NetDevFinding[]; },
     async NetDevEmergencyStop() { return 0; },
     async NetDevTurnBegin() {},
