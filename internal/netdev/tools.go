@@ -28,8 +28,9 @@ var HostKeyPrompt transport.HostKeyPrompt
 type Manager struct {
 	cfg *config.Config
 
-	mu    sync.Mutex
-	conns map[string]*managedConn
+	mu           sync.Mutex
+	conns        map[string]*managedConn
+	turnCommands int // read commands spent in the current user turn (TurnBegin resets)
 }
 
 type managedConn struct {
@@ -68,6 +69,62 @@ func NewManager(cfg *config.Config) *Manager {
 	m := &Manager{cfg: cfg, conns: map[string]*managedConn{}}
 	go m.reaper(context.Background())
 	return m
+}
+
+// TurnBegin resets the per-turn command budget. The desktop bridge calls it
+// on every user submit (netdev mode), making turn_command_budget a true
+// per-ask control: each question the user asks buys a fresh budget of read
+// commands, and nothing carries over.
+func (m *Manager) TurnBegin() {
+	m.mu.Lock()
+	m.turnCommands = 0
+	m.mu.Unlock()
+}
+
+// guardrailCheck enforces the [netdev.guardrails] controls that gate BEFORE
+// anything else — device-group scope and the per-turn command budget. Both
+// refuse locally (zero TCP) and audit the refusal as a guardrail event.
+func (m *Manager) guardrailCheck(deviceName, command string) (ExecResult, bool) {
+	g := m.cfg.NetDev.Guardrails
+	if len(g.AllowedGroups) > 0 {
+		if d, ok := m.cfg.NetDevDeviceByName(deviceName); ok {
+			if !contains(g.AllowedGroups, d.Group) {
+				r := ExecResult{Device: deviceName, Command: command, Refused: true, Class: "guardrail",
+					Refusal: fmt.Sprintf("device %q is outside this conversation's allowed device groups (%s) — adjust [netdev.guardrails].allowed_groups in the 运维 settings. Do not retry.", deviceName, strings.Join(g.AllowedGroups, ", "))}
+				_ = AppendAudit(Audit{Device: deviceName, Command: command, Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
+				return r, false
+			}
+		}
+	}
+	if g.TurnCommandBudget > 0 {
+		m.mu.Lock()
+		spent := m.turnCommands
+		m.mu.Unlock()
+		if spent >= g.TurnCommandBudget {
+			r := ExecResult{Device: deviceName, Command: command, Refused: true, Class: "guardrail",
+				Refusal: fmt.Sprintf("turn command budget exhausted (%d/%d read commands this turn) — a guardrail against runaway loops. Summarize what you have and ask the user before continuing.", spent, g.TurnCommandBudget)}
+			_ = AppendAudit(Audit{Device: deviceName, Command: command, Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
+			return r, false
+		}
+	}
+	return ExecResult{}, true
+}
+
+// turnSpend consumes one unit of the per-turn budget (called only after a
+// command actually ran).
+func (m *Manager) turnSpend() {
+	m.mu.Lock()
+	m.turnCommands++
+	m.mu.Unlock()
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // KillAllConnections is the emergency stop: every device connection and CLI
@@ -137,6 +194,12 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 			Refusal: fmt.Sprintf("device %q is not in the user-global netdev inventory (add it in the 运维 settings; the agent cannot add devices itself)", deviceName)}
 	}
 
+	// [netdev.guardrails] gate: group scope + per-turn budget, refused BEFORE
+	// any driver work (and long before a socket opens).
+	if r, allow := m.guardrailCheck(deviceName, command); !allow {
+		return r
+	}
+
 	drv, ok := driver.For(device.Vendor, device.OS)
 	if !ok {
 		return ExecResult{Device: deviceName, Command: command, Refused: true,
@@ -170,11 +233,16 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 	if res.IsError {
 		status = AuditDeviceError
 	}
+	m.turnSpend()
 	// Redact BEFORE the text crosses into the model context: credential lines
-	// in device output never reach the LLM (or the audit's byte count).
-	redacted := Redact(res.Output)
+	// in device output never reach the LLM (or the audit's byte count). The
+	// count becomes a visible reminder — the user sees that masking happened.
+	redacted, redactedN := RedactCounted(res.Output)
 	m.audit(device, command, class, status, len(redacted), nil)
 	base.Output = redacted
+	if redactedN > 0 {
+		base.Output += fmt.Sprintf("\n\n[安全提醒] 输出中 %d 处敏感字段（密码/密钥/团体字）已脱敏后才进入上下文与审计；原文只存在于内存会话缓冲。", redactedN)
+	}
 	base.IsError = res.IsError
 	return base
 }
@@ -396,11 +464,19 @@ func (t *netconfTool) Execute(ctx context.Context, args json.RawMessage) (string
 	if a.Device == "" || strings.TrimSpace(a.RPC) == "" {
 		return "", errors.New("netdev_netconf: device and rpc are required")
 	}
+	if r, allow := t.m.guardrailCheck(a.Device, "netconf: "+a.RPC); !allow {
+		b, _ := json.Marshal(r)
+		return string(b), nil
+	}
 	reply, err := t.m.NetconfRPC(ctx, a.Device, a.RPC)
 	if err != nil && reply == "" {
 		return "", err
 	}
-	return Redact(reply), nil
+	out, n := RedactCounted(reply)
+	if n > 0 {
+		out += fmt.Sprintf("\n\n[安全提醒] 输出中 %d 处敏感字段（密码/密钥/团体字）已脱敏后才进入上下文与审计。", n)
+	}
+	return out, nil
 }
 
 // findingTool records a diagnosis conclusion WITH its evidence — the unit the
@@ -696,11 +772,21 @@ func (t *devicesTool) Execute(ctx context.Context, args json.RawMessage) (string
 		Name, Vendor, OS, Model, Address, Group string
 		Via                                     []string
 	}
+	// Scope the model's world: when allowed_groups is set, devices outside it
+	// are invisible to the agent entirely (not just unexecutable) — the ask
+	// itself is controlled before the first token is spent.
+	allow := t.cfg.NetDev.Guardrails.AllowedGroups
 	rows := make([]row, 0, len(t.cfg.NetDev.Devices))
 	for _, d := range t.cfg.NetDev.Devices {
+		if len(allow) > 0 && !contains(allow, d.Group) {
+			continue
+		}
 		rows = append(rows, row{d.Name, d.Vendor, d.OS, d.Model, d.Address, d.Group, d.Via})
 	}
 	if len(rows) == 0 {
+		if len(t.cfg.NetDev.Devices) > 0 && len(allow) > 0 {
+			return "all devices are outside this conversation's allowed groups (" + strings.Join(allow, ", ") + ") — adjust [netdev.guardrails].allowed_groups in the 运维 settings", nil
+		}
 		return "no devices configured — add them (and their credentials) in the 运维 settings; [netdev] lives in the USER config only", nil
 	}
 	b, err := json.MarshalIndent(rows, "", "  ")

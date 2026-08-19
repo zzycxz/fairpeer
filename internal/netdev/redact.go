@@ -1,6 +1,9 @@
 package netdev
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // Redact masks credential-bearing text in device output before it reaches the
 // model context or any on-disk store (NETDEV_SPEC §8.1 / Appendix B-3). The
@@ -63,8 +66,20 @@ const redactedToken = "<redacted>"
 // Redact applies every pattern; later patterns see earlier replacements, so a
 // line can only lose more, never regain, secret material.
 func Redact(s string) string {
+	out, _ := RedactCounted(s)
+	return out
+}
+
+// RedactCounted is Redact plus the number of substitutions it made. The count
+// powers the transparency reminder appended to tool output ("N 处敏感字段已
+// 脱敏") and the audit entry's redacted field — the user can see redaction
+// happened without ever seeing what it hid.
+func RedactCounted(s string) (string, int) {
+	total := 0
 	for _, re := range redactPatterns {
-		s = re.ReplaceAllString(s, "${1}"+redactedToken)
+		out := re.ReplaceAllString(s, "${1}"+redactedToken)
+		total += strings.Count(out, redactedToken) - strings.Count(s, redactedToken)
+		s = out
 	}
-	return s
+	return s, total
 }

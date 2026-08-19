@@ -36,6 +36,28 @@ type NetDevConfig struct {
 	// InspectionInterval schedules the read-battery sweep ("1h", "30m"; "" = off).
 	InspectionInterval string           `toml:"inspection_interval"`
 	Assessment         NetDevAssessment `toml:"assessment"`
+	// Guardrails are the per-ask / per-tool-call controls (NETDEV_SPEC §6):
+	// they reach DOWN into every LLM turn, not just the mode level.
+	Guardrails NetDevGuardrails `toml:"guardrails"`
+}
+
+// NetDevGuardrails — fine-grained, per-interaction controls:
+//
+//   - ConfirmEachCommand: every netdev_exec / netdev_netconf call pops an
+//     approval card BEFORE it runs (boot installs permission Ask rules; Ask
+//     outranks both readOnly-allow and YOLO mode, so even full-access mode
+//     keeps asking). The one knob that makes every tool call a control point.
+//   - TurnCommandBudget: max read commands per user turn (0 = unlimited).
+//     The frontend resets the counter on each submit; beyond the budget the
+//     tool refuses with a reminder instead of executing — runaway-loop
+//     protection at the turn level.
+//   - AllowedGroups: when non-empty, the agent may only see and touch devices
+//     in these groups (netdev_devices output is filtered too, so the model's
+//     world is scoped before the first token is spent).
+type NetDevGuardrails struct {
+	ConfirmEachCommand bool     `toml:"confirm_each_command"`
+	TurnCommandBudget  int      `toml:"turn_command_budget"`
+	AllowedGroups      []string `toml:"allowed_groups"`
 }
 
 // NetDevDevice is one managed network device (router/switch/firewall).
@@ -155,6 +177,19 @@ func ValidateNetDev(nd NetDevConfig) error {
 	case "", "diagnose", "assess":
 	default:
 		return fmt.Errorf("netdev: default_mode must be diagnose or assess")
+	}
+	if nd.Guardrails.TurnCommandBudget < 0 {
+		return fmt.Errorf("netdev guardrails: turn_command_budget must be >= 0 (0 = unlimited)")
+	}
+	if len(nd.Guardrails.AllowedGroups) > 0 {
+		for _, g := range nd.Guardrails.AllowedGroups {
+			if strings.TrimSpace(g) == "" {
+				return fmt.Errorf("netdev guardrails: allowed_groups contains an empty name")
+			}
+			if _, ok := ndGroupByName(nd, g); !ok {
+				return fmt.Errorf("netdev guardrails: allowed_groups references unknown group %q", g)
+			}
+		}
 	}
 	seenDevices := map[string]bool{}
 	for _, d := range nd.Devices {

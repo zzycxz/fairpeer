@@ -1064,6 +1064,20 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Sub-agents always run headless: they have no UI to answer a prompt, so they
 	// inherit this same gate.
 	policy := permission.New(cfg.Permissions.Mode, cfg.Permissions.Allow, cfg.Permissions.Ask, cfg.Permissions.Deny)
+	// [netdev.guardrails].confirm_each_command: install Ask rules for the
+	// netdev tool family so EVERY netdev_exec / netdev_netconf call pops an
+	// approval card before it runs. Ask rules outrank both the readOnly
+	// fallback and YOLO/full-access mode (permission.DecideSubject checks Ask
+	// before Allow), so this guardrail survives "skip all approvals" — by
+	// design: the network is the one place every command stays a control
+	// point. Netdev tools only register in the netdev profile, so the rules
+	// are inert elsewhere.
+	if cfg.NetDev.Guardrails.ConfirmEachCommand {
+		policy.Ask = append(policy.Ask,
+			permission.Rule{Tool: "netdev_exec"},
+			permission.Rule{Tool: "netdev_netconf"},
+		)
+	}
 	riskOverrides := buildRiskOverrides(cfg.Plugins)
 	headlessGate := permission.NewGate(policy, nil)
 	headlessGate.RiskOverrides = riskOverrides

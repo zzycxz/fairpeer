@@ -63,6 +63,11 @@ type NetDevSettingsView struct {
 	Groups         []string           `json:"groups"` // group names (policy editing arrives with the proposal pipeline)
 	AuditRetention string             `json:"auditRetention"`
 	Scopes         []string           `json:"scopes"`
+	// Guardrails reach into every ask / every tool call (NETDEV_SPEC §6):
+	// per-command approval, per-turn command budget, per-conversation device scope.
+	GuardConfirmEach  bool     `json:"guardConfirmEach"`
+	GuardTurnBudget   int      `json:"guardTurnBudget"`
+	GuardAllowedGroup []string `json:"guardAllowedGroups"`
 }
 
 // NetDevAuditEntryView is one audit row for the settings page.
@@ -91,10 +96,13 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 		return NetDevSettingsView{}, err
 	}
 	v := NetDevSettingsView{
-		Enabled:        cfg.NetDev.Enabled,
-		NetworkName:    cfg.NetDev.NetworkName,
-		AuditRetention: cfg.NetDev.AuditRetention,
-		Scopes:         cfg.NetDev.Discovery.Scopes,
+		Enabled:           cfg.NetDev.Enabled,
+		NetworkName:       cfg.NetDev.NetworkName,
+		AuditRetention:    cfg.NetDev.AuditRetention,
+		Scopes:            cfg.NetDev.Discovery.Scopes,
+		GuardConfirmEach:  cfg.NetDev.Guardrails.ConfirmEachCommand,
+		GuardTurnBudget:   cfg.NetDev.Guardrails.TurnCommandBudget,
+		GuardAllowedGroup: cfg.NetDev.Guardrails.AllowedGroups,
 	}
 	for _, d := range cfg.NetDev.Devices {
 		v.Devices = append(v.Devices, NetDevDeviceView{
@@ -174,6 +182,11 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 		if len(v.Scopes) > 0 {
 			nd.Discovery.Scopes = v.Scopes
 		}
+		nd.Guardrails = config.NetDevGuardrails{
+			ConfirmEachCommand: v.GuardConfirmEach,
+			TurnCommandBudget:  v.GuardTurnBudget,
+			AllowedGroups:      v.GuardAllowedGroup,
+		}
 		// Preserve group definitions not editable from this form yet.
 		for _, g := range c.NetDev.Groups {
 			nd.Groups = append(nd.Groups, g)
@@ -209,8 +222,21 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 	if cfgErr != nil {
 		return cfgErr
 	}
+	// The shared Manager keeps serving with the fresh guardrails immediately.
+	_ = netdev.SharedManager(func() *config.Config { c, _ := config.Load(); return c }())
 	slog.Info("SetNetDevSettings saved", "devices", len(v.Devices), "hops", len(v.Hops))
 	return nil
+}
+
+// NetDevTurnBegin resets the per-turn command budget. The frontend calls it
+// on every user submit while in the 运维 profile, so [netdev.guardrails]
+// turn_command_budget is a true per-ask control.
+func (a *App) NetDevTurnBegin() {
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return
+	}
+	netdev.SharedManager(cfg).TurnBegin()
 }
 
 // ── proposal pipeline (human-only entry points; the agent can only draft
