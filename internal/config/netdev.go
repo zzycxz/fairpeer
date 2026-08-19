@@ -39,6 +39,9 @@ type NetDevConfig struct {
 	// Guardrails are the per-ask / per-tool-call controls (NETDEV_SPEC §6):
 	// they reach DOWN into every LLM turn, not just the mode level.
 	Guardrails NetDevGuardrails `toml:"guardrails"`
+	// Projects are site-level scopes (collections of device groups) for the
+	// title-bar switcher — see NetDevProject.
+	Projects []NetDevProject `toml:"projects"`
 }
 
 // NetDevGuardrails — fine-grained, per-interaction controls:
@@ -101,6 +104,17 @@ type NetDevGroup struct {
 	Name         string `toml:"name"`
 	Policy       string `toml:"policy"`        // read-only | proposal | proposal+confirm2
 	ChangeWindow string `toml:"change_window"` // e.g. "tue,thu 22:00-24:00"; "" = any time
+}
+
+// NetDevProject is a SITE-level scope (the Mist "site" / industry
+// site-first pattern): a named collection of device groups — one 机房 / 园区 /
+// 客户网络. The 运维 title bar carries a project switcher; rail, findings and
+// proposals filter to the active project so the operator thinks "which site"
+// first, exactly like every mainstream NMS console.
+type NetDevProject struct {
+	Name   string   `toml:"name"`
+	Groups []string `toml:"groups"`
+	Note   string   `toml:"note"`
 }
 
 // NetDevDiscovery bounds network probing (the scope whitelist is one of the
@@ -180,6 +194,21 @@ func ValidateNetDev(nd NetDevConfig) error {
 	}
 	if nd.Guardrails.TurnCommandBudget < 0 {
 		return fmt.Errorf("netdev guardrails: turn_command_budget must be >= 0 (0 = unlimited)")
+	}
+	seenProjects := map[string]bool{}
+	for _, p := range nd.Projects {
+		if strings.TrimSpace(p.Name) == "" {
+			return fmt.Errorf("netdev project: name is required")
+		}
+		if seenProjects[p.Name] {
+			return fmt.Errorf("netdev project %q: duplicate name", p.Name)
+		}
+		seenProjects[p.Name] = true
+		for _, g := range p.Groups {
+			if _, ok := ndGroupByName(nd, g); !ok {
+				return fmt.Errorf("netdev project %q: references unknown group %q", p.Name, g)
+			}
+		}
 	}
 	if len(nd.Guardrails.AllowedGroups) > 0 {
 		for _, g := range nd.Guardrails.AllowedGroups {

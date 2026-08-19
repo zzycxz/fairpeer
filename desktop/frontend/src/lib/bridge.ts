@@ -1725,13 +1725,17 @@ function makeMockApp(): AppBindings {
     hops: [], groups: [], auditRetention: "", scopes: [],
     guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [],
     extraRead: {},
+    projects: [
+      { name: "一号机房", groups: ["核心"], note: "核心机房——CORE 与防火墙所在站点" },
+      { name: "接入园区", groups: ["接入"], note: "办公楼接入层" },
+    ],
   };
   return {
     async NetDevSettings() {
       return mockNetDev;
     },
     async SetNetDevSettings(v: NetDevSettingsView) {
-      mockNetDev = { ...v, devices: [...v.devices], hops: [...v.hops], groups: [...v.groups], scopes: [...v.scopes], guardAllowedGroups: [...(v.guardAllowedGroups ?? [])] };
+      mockNetDev = { ...v, devices: [...v.devices], hops: [...v.hops], groups: [...v.groups], scopes: [...v.scopes], guardAllowedGroups: [...(v.guardAllowedGroups ?? [])], projects: v.projects ? [...v.projects] : mockNetDev.projects };
     },
     async NetDevDeleteSecret(_kind: string, _envName: string) {},
     async NetDevTestConnection(device: string) {

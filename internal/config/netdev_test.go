@@ -137,3 +137,30 @@ func TestNetDevProfileOverrideFloored(t *testing.T) {
 		t.Fatal("model override should still work (floor is security-only)")
 	}
 }
+
+// Projects are site-level scopes; validation must catch duplicate names and
+// references to groups that don't exist (the title-bar switcher trusts them).
+func TestValidateNetDevProjects(t *testing.T) {
+	base := func() NetDevConfig {
+		return NetDevConfig{
+			Enabled: true,
+			Groups:  []NetDevGroup{{Name: "核心"}, {Name: "接入"}},
+			Projects: []NetDevProject{
+				{Name: "一号机房", Groups: []string{"核心"}},
+			},
+		}
+	}
+	if err := ValidateNetDev(base()); err != nil {
+		t.Fatalf("valid project rejected: %v", err)
+	}
+	dup := base()
+	dup.Projects = append(dup.Projects, NetDevProject{Name: "一号机房"})
+	if err := ValidateNetDev(dup); err == nil {
+		t.Fatal("duplicate project name accepted")
+	}
+	ghost := base()
+	ghost.Projects = append(ghost.Projects, NetDevProject{Name: "二号机房", Groups: []string{"不存在"}})
+	if err := ValidateNetDev(ghost); err == nil {
+		t.Fatal("project referencing unknown group accepted")
+	}
+}

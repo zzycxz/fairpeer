@@ -201,6 +201,35 @@ func main() {
 		fatal("topology click did not open the CORE-01 device card (dock: %.120q)", dockNow)
 	}
 	fmt.Println("topology-click→device-card: OK")
+
+	// Project (site) switcher: pick 一号机房 in the title bar → the rail's
+	// device list must drop ACC-01 (接入组 not in that project).
+	if err := chromedp.Run(bctx,
+		chromedp.Evaluate(`(function(){var el=[...document.querySelectorAll(".ndv__project")].pop(); if(!el) return "no-switcher"; el.click(); return "opened";})()`, new(string)),
+		chromedp.Sleep(400*time.Millisecond),
+		chromedp.Evaluate(`(function(){var items=[...document.querySelectorAll(".ndv__project-menu [role=menuitem]")]; var it=items.find(i=>i.textContent.indexOf("一号机房")>=0); if(!it) return "no-item"; it.click(); return "picked";})()`, new(string)),
+		chromedp.Sleep(1000*time.Millisecond),
+	); err != nil {
+		fatal("project switch: %v", err)
+	}
+	var railAfter string
+	if err := chromedp.Run(bctx,
+		chromedp.Text(".ndv__rail", &railAfter, chromedp.ByQuery),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return saveShot(ctx, filepath.Join(*out, "ndv-6-project.png"))
+		}),
+	); err != nil {
+		fatal("project rail probe: %v", err)
+	}
+	fmt.Println("shot: ndv-6-project.png")
+	railNow := oneLine(railAfter)
+	if !strings.Contains(railNow, "一号机房") || strings.Contains(railNow, "ACC-01") {
+		fatal("project filter wrong (rail: %.160q)", railNow)
+	}
+	if !strings.Contains(railNow, "CORE-01") {
+		fatal("in-project device missing (rail: %.160q)", railNow)
+	}
+	fmt.Println("project-switch-filter: OK")
 }
 
 // visibleMermaidScrollJS scrolls the last visible mermaid diagram into view,

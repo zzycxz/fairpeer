@@ -33,7 +33,7 @@ export function NetDevSection() {
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {} });
+  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {}, projects: [] });
   const [audit, setAudit] = useState<NetDevAuditEntryView[]>([]);
   const [editingDevice, setEditingDevice] = useState<EditDevice | null>(null);
   const [editingHop, setEditingHop] = useState<EditHop | null>(null);
@@ -254,6 +254,47 @@ export function NetDevSection() {
       })}
       <div style={{ opacity: 0.6, fontSize: 11.5 }}>
         对话中被拒绝的未知命令也会在设备卡上出现「允许此命令」一键加入。扩展只让更多命令「可读」，永远不可能放开写操作。
+      </div>
+
+      {/* 项目 —— 站点级作用域（标题栏切换器） */}
+      <div className="set-label" style={{ margin: "14px 0 6px" }}>项目（站点/机房——标题栏可快速切换范围）</div>
+      {(view.projects ?? []).map((p, i) => (
+        <div key={p.name + i} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
+          <input
+            className="mem-input" style={{ width: 120 }}
+            value={p.name}
+            onChange={e => { const projects = [...(view.projects ?? [])]; projects[i] = { ...p, name: e.target.value }; patch({ projects }); }}
+          />
+          <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+            {(view.groups ?? []).map(g => (
+              <span
+                key={g}
+                className="btn btn--secondary btn--small"
+                role="button"
+                style={(p.groups ?? []).includes(g) ? { borderColor: "var(--accent, #7ab8ff)", color: "var(--accent, #7ab8ff)" } : { opacity: 0.55 }}
+                onClick={() => {
+                  const projects = [...(view.projects ?? [])];
+                  const gs = new Set(p.groups ?? []);
+                  if (gs.has(g)) gs.delete(g); else gs.add(g);
+                  projects[i] = { ...p, groups: [...gs] };
+                  patch({ projects });
+                }}
+              >{g}</span>
+            ))}
+            {(view.groups ?? []).length === 0 && <span style={{ opacity: 0.55, fontSize: 11.5 }}>先在设备编辑里建立分组</span>}
+          </span>
+          <input
+            className="mem-input" style={{ width: 200 }} placeholder="备注（悬停可见）"
+            value={p.note ?? ""}
+            onChange={e => { const projects = [...(view.projects ?? [])]; projects[i] = { ...p, note: e.target.value }; patch({ projects }); }}
+          />
+          <span className="btn btn--secondary btn--small" role="button"
+            onClick={() => patch({ projects: (view.projects ?? []).filter((_, j) => j !== i) })}>删除</span>
+        </div>
+      ))}
+      <div>
+        <span className="btn btn--secondary btn--small" role="button"
+          onClick={() => patch({ projects: [...(view.projects ?? []), { name: "新项目", groups: [], note: "" }] })}>+ 新建项目</span>
       </div>
 
       {/* 巡检 */}

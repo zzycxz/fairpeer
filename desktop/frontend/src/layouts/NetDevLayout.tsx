@@ -1,5 +1,6 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { app } from "../lib/bridge";
+import { getActiveProject, setActiveProject, subscribeActiveProject, type NetDevProjectScope } from "../lib/netdevProjectStore";
 import { ProposalActions } from "../components/netdev/ProposalCenter";
 import type { NetDevSettingsView, NetDevFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph } from "../lib/types";
 import "../styles/netdev.css";
@@ -15,11 +16,20 @@ import "../styles/netdev.css";
 // there is exactly one header (NETDEV_SPEC §10.1 sketch).
 export function NetdevTitleBar({ onOpenSettings }: { onOpenSettings?: (tab: string) => void }) {
   const [name, setName] = useState("");
+  const [projects, setProjects] = useState<{ name: string; groups: string[]; note?: string }[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [active, setActive] = useState<{ name: string; groups: string[] } | null>(null);
   const [err, setErr] = useState("");
   useEffect(() => {
     app.NetDevSettings()
-      .then(s => setName(s?.networkName?.trim() || "我的网络"))
+      .then(s => {
+        setName(s?.networkName?.trim() || "我的网络");
+        setProjects(s?.projects ?? []);
+      })
       .catch(e => setErr(String(e)));
+    const sync = () => setActive(getActiveProject());
+    sync();
+    return subscribeActiveProject(sync);
   }, []);
   const stop = useCallback(async () => {
     if (!confirm("紧急停止：立即断开全部设备连接（释放所有 VTY）？")) return;
@@ -33,6 +43,26 @@ export function NetdevTitleBar({ onOpenSettings }: { onOpenSettings?: (tab: stri
   return (
     <div className="ndv__titlebar">
       <span className="ndv__netname" title="网络名称（设置 → 运维 可修改）">{name || "…"}</span>
+      {projects.length > 0 && (
+        <span
+          className="ndv__project"
+          role="button"
+          title={active ? `当前项目：${active.name}（设备组：${active.groups.join("、")}）` : "当前范围：全部设备。点击切换项目（站点/机房）。"}
+          onClick={() => setMenuOpen(o => !o)}
+        >项目：{active ? active.name : "全部"} ▾</span>
+      )}
+      {menuOpen && (
+        <span className="ndv__project-menu" role="menu">
+          <span role="menuitem" onClick={() => { setActiveProject(null); setMenuOpen(false); }}>全部设备</span>
+          {projects.map(p => (
+            <span key={p.name} role="menuitem" title={p.note || `设备组：${p.groups.join("、")}`}
+              onClick={() => { setActiveProject({ name: p.name, groups: p.groups }); setMenuOpen(false); }}>
+              {p.name}{active?.name === p.name ? " ✓" : ""}
+            </span>
+          ))}
+          <span role="menuitem" onClick={() => { setMenuOpen(false); onOpenSettings?.("netdev"); }}>管理项目…</span>
+        </span>
+      )}
       <span
         className="ndv__badge"
         role="button"
@@ -211,10 +241,22 @@ export function NetDevLayout({
     }
   }, [reload]);
 
-  const devices = settings?.devices ?? [];
+  // Active project scope (site switcher in the title bar): null = 全部.
+  const [project, setProject] = useState<NetDevProjectScope>(getActiveProject());
+  useEffect(() => subscribeActiveProject(() => setProject(getActiveProject())), []);
+
+  const allDevices = settings?.devices ?? [];
+  const inScope = useCallback((group: string | undefined) => {
+    if (!project || project.groups.length === 0) return true;
+    return project.groups.includes(group?.trim() || "未分组");
+  }, [project]);
+  const devices = allDevices.filter(d => inScope(d.group));
+  const scopedDeviceNames = new Set(devices.map(d => d.name));
   const selectedDevice = devices.find(d => d.name === selected);
-  const lastInspection = findings.find(f => f.title.startsWith("巡检"));
-  const pendingCount = proposals.filter(p => p.status === "draft" || p.status === "approved" || p.status === "partial").length;
+  const scopedFindings = findings.filter(f => !project || (f.devices ?? []).some(n => scopedDeviceNames.has(n)));
+  const scopedProposals = proposals.filter(p => !project || (p.steps ?? []).some(s => scopedDeviceNames.has(s.device)));
+  const lastInspection = scopedFindings.find(f => f.title.startsWith("巡检"));
+  const pendingCount = scopedProposals.filter(p => p.status === "draft" || p.status === "approved" || p.status === "partial").length;
 
   const groups = new Map<string, { name: string; address: string; vendor: string }[]>();
   for (const d of devices) {
@@ -228,10 +270,20 @@ export function NetDevLayout({
   const readCount = todayAudit.filter(a => a.class === "read").length;
   const writeCount = todayAudit.filter(a => a.class === "write" || a.class === "proposal-write").length;
 
+  // Topology filtered to the active project: managed nodes must be in scope;
+  // unmanaged neighbors survive only while an in-scope edge touches them.
+  const scopedTopo = useMemo(() => {
+    if (!project || !topo) return topo;
+    const nameIn = (n: string) => scopedDeviceNames.has(n);
+    const edges = topo.edges.filter(e => nameIn(e.local_device) || nameIn(e.remote_device));
+    const touched = new Set<string>(edges.flatMap(e => [e.local_device, e.remote_device]));
+    return { ...topo, nodes: topo.nodes.filter(n => nameIn(n.name) || (!n.managed && touched.has(n.name))), edges };
+  }, [project, topo, scopedDeviceNames]);
+
   const TABS: { key: DockTab; label: string; badge?: number }[] = [
     { key: "context", label: "上下文" },
     { key: "topology", label: "拓扑" },
-    { key: "findings", label: "发现", badge: findings.length || undefined },
+    { key: "findings", label: "发现", badge: scopedFindings.length || undefined },
     { key: "proposals", label: "提案", badge: pendingCount || undefined },
   ];
 
@@ -240,7 +292,7 @@ export function NetDevLayout({
       <div className="ndv__rail">
         <div className="ndv__section">诊断会话</div>
         <div className="ndv__sessions">{sessionsNode}</div>
-        <div className="ndv__section">设备清单（{devices.length}，点击诊断）</div>
+        <div className="ndv__section">设备清单（{devices.length}{project ? ` · ${project.name}` : ""}，点击诊断）</div>
         {devices.length === 0 && (
           <div className="ndv__hint">还没有设备。右栏「开始使用」三步录入。</div>
         )}
@@ -299,7 +351,10 @@ export function NetDevLayout({
         </div>
 
         {tab === "context" && (
-          devices.length === 0 ? <GettingStarted onOpenSettings={onOpenSettings} /> :
+          allDevices.length === 0 ? <GettingStarted onOpenSettings={onOpenSettings} /> :
+          devices.length === 0 ? (
+            <div className="ndv__card ndv__card--dim">项目「{project?.name}」的设备组（{project?.groups.join("、")}）内还没有设备——标题栏可切回「全部」，或在 设置 → 运维 给设备分组。</div>
+          ) :
           selectedDevice ? (
             <div className="ndv__card">
               <div className="ndv__card-title">{selectedDevice.name} · {selectedDevice.vendor}/{selectedDevice.os}</div>
@@ -363,7 +418,7 @@ export function NetDevLayout({
             {topoNotice && (
               <div className="ndv__hint" style={{ padding: 0, marginBottom: 8, color: "var(--accent, #7ab8ff)" }}>{topoNotice}</div>
             )}
-            {topo && <TopologyMap graph={topo} selected={selected} selectedAddr={selectedDevice?.address} onPick={pickFromTopo} />}
+            {topo && <TopologyMap graph={scopedTopo ?? topo} selected={selected} selectedAddr={selectedDevice?.address} onPick={pickFromTopo} />}
             {!topo && !topoBusy && (
               <div className="ndv__hint" style={{ padding: 0 }}>
                 IP 规划视图按设备分组 / 命名惯例 / 网段聚类推断层级（核心/汇聚/接入），纯本地计算、零 AI 请求；连线只画真实数据——点「LLDP 实测校准」逐台读取邻居表补全链路。
@@ -374,9 +429,9 @@ export function NetDevLayout({
 
         {tab === "findings" && (
           <div className="ndv__card">
-            <div className="ndv__card-title">发现（{findings.length}）</div>
-            {findings.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>暂无。诊断结论由 agent 通过 netdev_finding 记录（必带证据）；巡检结果也在此。</div>}
-            {findings.slice(0, 20).map(f => (
+            <div className="ndv__card-title">发现（{scopedFindings.length}）{project && <span style={{ fontWeight: 400, fontSize: 11 }}> · {project.name}</span>}</div>
+            {scopedFindings.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>{project ? `项目「${project.name}」内暂无发现。` : "暂无。诊断结论由 agent 通过 netdev_finding 记录（必带证据）；巡检结果也在此。"}</div>}
+            {scopedFindings.slice(0, 20).map(f => (
               <div key={f.id} className="ndv__finding" style={{ "--sev": SEV_COLOR[f.severity] ?? SEV_COLOR.info } as React.CSSProperties}>
                 <div className="ndv__finding-title">{f.title}</div>
                 <div className="ndv__meta">{(f.devices ?? []).join("、")} · 证据 {f.evidence?.length ?? 0} 条</div>
@@ -388,9 +443,9 @@ export function NetDevLayout({
 
         {tab === "proposals" && (
           <div className="ndv__card">
-            <div className="ndv__card-title">提案（{proposals.length}）</div>
-            {proposals.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>暂无。对话中让 agent 用 netdev_propose 起草。</div>}
-            {proposals.slice(0, 10).map(p => <ProposalRow key={p.id} p={p} onDone={() => void reload()} />)}
+            <div className="ndv__card-title">提案（{scopedProposals.length}）{project && <span style={{ fontWeight: 400, fontSize: 11 }}> · {project.name}</span>}</div>
+            {scopedProposals.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>{project ? `项目「${project.name}」内暂无提案。` : "暂无。对话中让 agent 用 netdev_propose 起草。"}</div>}
+            {scopedProposals.slice(0, 10).map(p => <ProposalRow key={p.id} p={p} onDone={() => void reload()} />)}
             <div className="ndv__hint" style={{ padding: 0 }}>批准 / 执行 / 回滚在行内直接操作；完整视图在 设置 → 运维 → 提案中心。</div>
           </div>
         )}

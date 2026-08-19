@@ -71,6 +71,17 @@ type NetDevSettingsView struct {
 	// ExtraRead is the read-table extension map (vendor → commands) so the
 	// settings page can show and edit the knowledge-growth path.
 	ExtraRead map[string][]string `json:"extraRead"`
+	// Projects are site-level scopes (name + device groups) for the 运维
+	// title-bar switcher — the industry site-first navigation pattern.
+	Projects []NetDevProjectView `json:"projects"`
+}
+
+// NetDevProjectView is one site/project for the settings editor and the
+// title-bar switcher.
+type NetDevProjectView struct {
+	Name   string   `json:"name"`
+	Groups []string `json:"groups"`
+	Note   string   `json:"note"`
 }
 
 // NetDevAuditEntryView is one audit row for the settings page.
@@ -107,6 +118,9 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 		GuardTurnBudget:   cfg.NetDev.Guardrails.TurnCommandBudget,
 		GuardAllowedGroup: cfg.NetDev.Guardrails.AllowedGroups,
 		ExtraRead:         cfg.NetDev.ExtraRead,
+	}
+	for _, p := range cfg.NetDev.Projects {
+		v.Projects = append(v.Projects, NetDevProjectView{Name: p.Name, Groups: p.Groups, Note: p.Note})
 	}
 	for _, d := range cfg.NetDev.Devices {
 		v.Devices = append(v.Devices, NetDevDeviceView{
@@ -195,6 +209,16 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 			nd.ExtraRead = v.ExtraRead
 		} else {
 			nd.ExtraRead = c.NetDev.ExtraRead
+		}
+		// Projects are form-owned when sent; older payloads preserve.
+		if v.Projects != nil {
+			for _, p := range v.Projects {
+				nd.Projects = append(nd.Projects, config.NetDevProject{
+					Name: strings.TrimSpace(p.Name), Groups: p.Groups, Note: strings.TrimSpace(p.Note),
+				})
+			}
+		} else {
+			nd.Projects = c.NetDev.Projects
 		}
 		nd.InspectionInterval = c.NetDev.InspectionInterval
 		nd.Assessment = c.NetDev.Assessment

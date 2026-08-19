@@ -1669,6 +1669,14 @@ export interface NetDevSettingsView {
   // Read-table extensions (vendor → commands) — the user-owned knowledge
   // growth path for the classifier.
   extraRead: Record<string, string[]>;
+  // Site-level scopes for the title-bar project switcher.
+  projects: NetDevProjectView[];
+}
+
+export interface NetDevProjectView {
+  name: string;
+  groups: string[];
+  note: string;
 }
 
 export interface NetDevAuditEntryView {
