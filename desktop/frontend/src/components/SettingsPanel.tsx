@@ -314,6 +314,9 @@ function MobileSection() {
   // UDP 单包敲门：开关 + 远程 STUN 服务器
   const [knock, setKnock] = useState(false);
   const [knockServer, setKnockServer] = useState("");
+  // 公网跳板：开关 + 云 K 地址（跨网时手机经云 K 打洞/中继；同网仍走局域网）
+  const [cloudRelay, setCloudRelay] = useState(false);
+  const [cloudURL, setCloudURL] = useState("");
 
   const refreshNics = async () => {
     try {
@@ -325,15 +328,22 @@ function MobileSection() {
 
   const refreshKnock = async () => {
     try {
-      const st = (await app.MobileBridgeStatus()) as { udp_knock?: boolean; knock_server?: string };
+      const st = (await app.MobileBridgeStatus()) as { udp_knock?: boolean; knock_server?: string; cloud_relay?: string };
       setKnock(!!st.udp_knock);
       setKnockServer(st.knock_server ?? "");
+      setCloudRelay(!!st.cloud_relay);
+      setCloudURL(st.cloud_relay ?? "");
     } catch { /* ignore */ }
   };
 
   const saveKnock = async (enabled: boolean, server: string) => {
     setKnock(enabled); setKnockServer(server);
     try { await app.MobileBridgeSetKnock(enabled, server); } catch (e) { setErr(String((e as Error)?.message ?? e)); }
+  };
+
+  const saveCloudRelay = async (enabled: boolean, url: string) => {
+    setCloudRelay(enabled); setCloudURL(url);
+    try { await app.MobileBridgeSetCloudRelay(enabled, url); } catch (e) { setErr(String((e as Error)?.message ?? e)); }
   };
 
   const setNic = async (ip: string) => {
@@ -449,6 +459,35 @@ function MobileSection() {
               <p className="mobile-pair-panel__desc" style={{ marginTop: 6 }}>
                 连接建立前，桌面端从 ICE 同一 UDP 端口向手机的公网映射发敲门包，提前打开 NAT；
                 对锥形 NAT 有效，双对称 NAT 无解（此时两端需同网段）。
+              </p>
+            )}
+          </div>
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(128,128,128,0.2)" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={cloudRelay}
+                onChange={(e) => saveCloudRelay(e.target.checked, cloudURL)}
+              />
+              <span>公网跳板<span style={{ opacity: 0.6 }}>（跨网/4G 配对时经云 K 打洞+中转兜底；同 WiFi 仍走局域网直连）</span></span>
+            </label>
+            {cloudRelay && (
+              <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center" }}>
+                <input
+                  type="text"
+                  value={cloudURL}
+                  onChange={(e) => setCloudURL(e.target.value)}
+                  onBlur={() => saveCloudRelay(true, cloudURL.trim())}
+                  placeholder="云 K 地址，如 https://signal.example.com"
+                  style={{ flex: 1, padding: "4px 8px", fontSize: 12 }}
+                />
+              </div>
+            )}
+            {cloudRelay && (
+              <p className="mobile-pair-panel__desc" style={{ marginTop: 6 }}>
+                二维码会追加云 K 作末位候选：手机同网自动选局域网（零云），跨网回退到云 K 走
+                STUN 打洞 + TURN 中继（中继只转发加密包，服务器无法解密）。需在云 K 的
+                [mobilebridge] 配置 turn_user/turn_pass 并部署 coturn（deploy/linkpeer-signal）。
               </p>
             )}
           </div>

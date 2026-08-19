@@ -278,6 +278,8 @@ export interface AppBindings {
   MobileBridgeSetPairNic(ip: string): Promise<void>;
   // UDP 单包敲门（M3 NAT 穿透辅助）：开关 + 远程 STUN 服务器。
   MobileBridgeSetKnock(enabled: boolean, server: string): Promise<void>;
+  // 公网跳板（跨网配对/信令）：开关 + 云 K 地址（enabled=false 关闭并清空）。
+  MobileBridgeSetCloudRelay(enabled: boolean, url: string): Promise<void>;
   // Mobile-facing readouts (mobilebridge_app.go + tabs.go). ModelsForMobile /
   // SessionListForMobile return the trimmed mobile payloads above, NOT the
   // app-wide ModelInfo/SessionMeta. ActiveTabID feeds the current tab id to the
@@ -2921,6 +2923,7 @@ function makeMockApp(): AppBindings {
     async MobileBridgeUnpair(_deviceCode: string) { /* mock: unpair is a no-op */ },
     async MobileBridgeListPairNics() { return JSON.stringify({ nics: [], pinned: "" }); },
     async MobileBridgeSetPairNic(_ip: string) { /* mock: pin nic is a no-op */ },
+    async MobileBridgeSetCloudRelay(_enabled: boolean, _url: string) { /* mock: cloud relay is a no-op */ },
     async MobileBridgeSetKnock(_enabled: boolean, _server: string) { /* mock: knock is a no-op */ },
     // Mobile-facing readouts — browser mock returns minimal data; the real
     // payloads come from mobilebridge_app.go in the Wails build.

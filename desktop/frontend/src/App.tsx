@@ -3050,6 +3050,20 @@ export default function App() {
     />
   );
 
+  // Global banners (startup error / update notice): built once and lent to
+  // whichever surface owns the main area — the coding chat pane, the office
+  // main, or the 运维 shell. They used to live only inside the chat pane,
+  // which display:none hides in cowork/netdev, so the notices were invisible
+  // there; each mode now renders them at the top of its main column.
+  const bannersNode = (
+    <>
+      {state.meta?.startupErr && (
+        <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
+      )}
+      <UpdateBanner enabled={startupUpdateChecksEnabled === true} />
+    </>
+  );
+
   // Sidebar search sits ABOVE the Recent sessions section and drives the
   // project tree (hoisted out of ProjectTree, ui-redesign §4-B4 follow-up).
   const [treeQuery, setTreeQuery] = useState("");
@@ -3085,7 +3099,7 @@ export default function App() {
       activeScope={activeTab?.scope}
       activeWorkspaceRoot={activeTab?.workspaceRoot}
       activeTopicId={activeTab?.topicId}
-      profile={coworkActive ? "cowork" : "dev"}
+      profile={netdevActive ? "netdev" : coworkActive ? "cowork" : "dev"}
       query={treeQuery}
       onQueryChange={setTreeQuery}
       hideSearch
@@ -3189,6 +3203,7 @@ export default function App() {
           <CoWorkLayout
             mainNode={mainNode}
             footerNode={footerNode}
+            bannersNode={bannersNode}
             projectTreeNode={projectTreeNode}
             sessionsNode={sidebarSessionsNode}
             searchNode={sidebarSearchNode}
@@ -3227,6 +3242,7 @@ export default function App() {
           <NetDevLayout
             mainNode={mainNode}
             footerNode={footerNode}
+            bannersNode={bannersNode}
             terminalNode={terminalNode}
             sessionsNode={sidebarSessionsNode}
             onOpenSettings={(t) => { setSettingsTarget(t as never); setSettingsPayload(null); }}
@@ -3286,7 +3302,9 @@ export default function App() {
           >
           <div className="sidebar__brandrow">
             <img src={logoSymbol} alt="" draggable={false} />
-            <span>FairPeer</span>
+            {/* Brand row carries the ACTIVE MODE name (2026-08-19): each
+                profile's sidebar announces itself — 编码/办公/运维模式. */}
+            <span>{netdevActive ? t("sidebar.modeNetdev") : coworkActive ? t("sidebar.modeCowork") : t("sidebar.modeDev")}</span>
             {/* New session rides the brand row as a ghost icon button (2026-08-19
                 restyle) — the old full-width tinted button is gone. */}
             <button
@@ -3364,18 +3382,12 @@ export default function App() {
         <section className="chat-pane">
           {/* Dev-profile topicbar moved into the top chrome (AppChrome center
               slot). The coding chat body below is DEV-ONLY: cowork/netdev
-              render mainNode/footerNode/terminal inside their own shells, so
-              this pane (hidden via .app--cowork/.app--netdev anyway) stays
-              unmounted there — no duplicate Transcript/Composer/Terminal. */}
-
-          {state.meta?.startupErr && (
-            <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
-          )}
-
-          <UpdateBanner enabled={startupUpdateChecksEnabled === true} />
-
+              render mainNode/footerNode/terminal/banners inside their own
+              shells, so this pane (hidden via .app--cowork/.app--netdev
+              anyway) stays unmounted there — no duplicate mounts. */}
           {!coworkActive && !netdevActive && (
             <>
+              {bannersNode}
               {mainNode}
               {!preferenceOpen && footerNode}
               {terminalNode}

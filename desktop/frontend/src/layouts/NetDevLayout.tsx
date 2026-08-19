@@ -102,6 +102,7 @@ type DockTab = "context" | "topology" | "findings" | "proposals";
 export function NetDevLayout({
   mainNode,
   footerNode,
+  bannersNode,
   terminalNode,
   sessionsNode,
   onOpenSettings,
@@ -119,6 +120,10 @@ export function NetDevLayout({
 }: {
   mainNode: ReactNode;
   footerNode: ReactNode;
+  // Global banners (startup error / update notice) — rendered at the top of
+  // the 运维 main so they stay visible here too (the coding chat pane that
+  // used to host them is display:none under .app--netdev).
+  bannersNode?: ReactNode;
   // Terminal console (Ctrl+`) — App builds the panel node once and lends it to
   // the mode layout, so the chrome's terminal toggle works in 运维 too.
   terminalNode?: ReactNode;
@@ -422,6 +427,7 @@ export function NetDevLayout({
       </div>
 
       <div className="ndv__main">
+        {bannersNode}
         <div className="ndv__chat">{mainNode}</div>
         {footerNode}
         {terminalNode}

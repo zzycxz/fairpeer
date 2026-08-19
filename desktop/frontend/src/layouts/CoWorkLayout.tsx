@@ -16,6 +16,10 @@ export type CoWorkPanel = "taskCenter" | "preference" | "calendarTask" | "rag" |
 export interface CoWorkLayoutProps {
   mainNode?: ReactNode;
   footerNode?: ReactNode;
+  // Global banners (startup error / update notice) — rendered at the top of
+  // the office main so they stay visible in this mode too (the coding chat
+  // pane that used to host them is display:none under .app--cowork).
+  bannersNode?: ReactNode;
   projectTreeNode?: ReactNode;
   // "Recent" sessions section above the project tree (ui-redesign §4-B4) —
   // App.tsx supplies the same SidebarSessions node used in the coding-mode
@@ -67,6 +71,7 @@ export interface CoWorkLayoutProps {
 export function CoWorkLayout({
   mainNode,
   footerNode,
+  bannersNode,
   projectTreeNode,
   sessionsNode,
   searchNode,
@@ -262,6 +267,7 @@ export function CoWorkLayout({
           across ALL office panels (always-on single header, same as the coding
           view). */}
       <section className="cowork-main">
+        {bannersNode}
         {/* taskCenter stays mounted (hidden when inactive) so an expert-session
             run's live stream (ExpertSessionView inside mainNode) isn't torn down
             when the user peeks at another panel. The backend goroutine survives
