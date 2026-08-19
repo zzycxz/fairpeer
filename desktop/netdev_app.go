@@ -74,6 +74,15 @@ type NetDevSettingsView struct {
 	// Projects are site-level scopes (name + device groups) for the 运维
 	// title-bar switcher — the industry site-first navigation pattern.
 	Projects []NetDevProjectView `json:"projects"`
+	// Presets are named diagnostic batteries for the device card.
+	Presets []NetDevPresetView `json:"presets"`
+}
+
+// NetDevPresetView is one saved diagnostic battery.
+type NetDevPresetView struct {
+	Name     string   `json:"name"`
+	Commands []string `json:"commands"`
+	Vendors  []string `json:"vendors"`
 }
 
 // NetDevProjectView is one site/project for the settings editor and the
@@ -121,6 +130,9 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 	}
 	for _, p := range cfg.NetDev.Projects {
 		v.Projects = append(v.Projects, NetDevProjectView{Name: p.Name, Groups: p.Groups, Note: p.Note})
+	}
+	for _, p := range cfg.NetDev.Presets {
+		v.Presets = append(v.Presets, NetDevPresetView{Name: p.Name, Commands: p.Commands, Vendors: p.Vendors})
 	}
 	for _, d := range cfg.NetDev.Devices {
 		v.Devices = append(v.Devices, NetDevDeviceView{
@@ -219,6 +231,15 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 			}
 		} else {
 			nd.Projects = c.NetDev.Projects
+		}
+		if v.Presets != nil {
+			for _, p := range v.Presets {
+				nd.Presets = append(nd.Presets, config.NetDevPreset{
+					Name: strings.TrimSpace(p.Name), Commands: p.Commands, Vendors: p.Vendors,
+				})
+			}
+		} else {
+			nd.Presets = c.NetDev.Presets
 		}
 		nd.InspectionInterval = c.NetDev.InspectionInterval
 		nd.Assessment = c.NetDev.Assessment
@@ -407,6 +428,107 @@ func (a *App) NetDevRunBaseline() (*netdev.Finding, error) {
 	ctx, cancel := context.WithTimeout(a.ctx, 3*time.Minute)
 	defer cancel()
 	return netdev.SharedManager(cfg).RunBaseline(ctx)
+}
+
+// ── configuration backup vault ─────────────────────────────────────────────
+
+// NetDevRunBackup snapshots running-configs (sealed reads, redacted text
+// only). device "" sweeps every managed device.
+func (a *App) NetDevRunBackup(device string) ([]netdev.BackupVersion, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 3*time.Minute)
+	defer cancel()
+	return netdev.SharedManager(cfg).RunBackup(ctx, device)
+}
+
+// NetDevBackups lists a device's backup versions, newest first ("" = all).
+func (a *App) NetDevBackups(device string) ([]netdev.BackupVersion, error) {
+	return netdev.ListBackups(device), nil
+}
+
+// NetDevBackupDiff returns the unified diff between two of a device's versions.
+func (a *App) NetDevBackupDiff(device, idA, idB string) (string, error) {
+	return netdev.DiffBackups(device, idA, idB)
+}
+
+// NetDevDailyBriefing gathers the last 24h of objective data (findings, audit
+// classes, proposals, backups) and asks a THROWAWAY headless netdev controller
+// to synthesize the briefing — the content is model-judged from data via a
+// designed prompt, never a hardcoded template (user direction).
+func (a *App) NetDevDailyBriefing() (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	findings, _ := a.NetDevFindings()
+	proposals, _ := a.NetDevProposals()
+	audit, _ := a.NetDevAuditTail(400)
+	dayAgo := time.Now().AddDate(0, 0, -1)
+	recent := func(s string) bool { return s >= dayAgo.Format("2006-01-02T15:04") }
+	var fLines []string
+	for _, f := range findings {
+		if recent(StringOrEmpty(f.CreatedAt)) {
+			fLines = append(fLines, fmt.Sprintf("- [%s] %s（设备：%s，证据 %d 条）", f.Severity, f.Title, strings.Join(f.Devices, ","), len(f.Evidence)))
+		}
+	}
+	readN, writeN, refusedN := 0, 0, 0
+	for _, e := range audit {
+		if !recent(StringOrEmpty(e.Time)) {
+			continue
+		}
+		switch e.Class {
+		case "read":
+			readN++
+		case "write", "proposal-write":
+			writeN++
+		case "guardrail":
+			refusedN++
+		}
+	}
+	var pLines []string
+	for _, p := range proposals {
+		pLines = append(pLines, fmt.Sprintf("- %s [%s] %s", p.ID, p.Status, p.Intent))
+	}
+	backups := netdev.ListBackups("")
+	prompt := fmt.Sprintf(`你是运维晨报助手。以下是过去 24 小时本网络（%s）的客观数据。请基于数据输出晨报，不要编造数据之外的事实；如需核实可用只读工具抽查，但不要发起任何变更。
+
+数据：
+今日发现：
+%s
+今日命令：只读 %d 条，写/提案写 %d 条，护栏拒绝 %d 条
+提案队列：
+%s
+备份版本总数：%d
+
+输出格式（markdown，简短）：
+1. 一句话总体判断 + 风险等级（低/中/高）
+2. 需要关注的三件事（按优先级；每件标注依据来自哪条数据）
+3. 建议动作（区分：只读核查可直接做 / 变更需起草提案）`,
+		cfg.NetDev.NetworkName,
+		strings.Join(fLines, "\n"),
+		readN, writeN, refusedN,
+		strings.Join(pLines, "\n"),
+		len(backups))
+	if len(fLines) == 0 && readN == 0 && len(pLines) == 0 {
+		return "过去 24 小时没有可汇总的数据——先跑一次巡检或基线核查，明天的晨报就有料了。", nil
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 4*time.Minute)
+	defer cancel()
+	return a.runHeadlessScheduled(ctx, "netdev", prompt)
+}
+
+// StringOrEmpty formats a time-ish value defensively.
+func StringOrEmpty(t any) string {
+	if s, ok := t.(string); ok {
+		return s
+	}
+	if tv, ok := t.(time.Time); ok {
+		return tv.Format("2006-01-02T15:04")
+	}
+	return ""
 }
 
 // NetDevEmergencyStop closes every device connection/session at once (the

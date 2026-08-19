@@ -33,7 +33,7 @@ export function NetDevSection() {
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {}, projects: [] });
+  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {}, projects: [], presets: [] });
   const [audit, setAudit] = useState<NetDevAuditEntryView[]>([]);
   const [editingDevice, setEditingDevice] = useState<EditDevice | null>(null);
   const [editingHop, setEditingHop] = useState<EditHop | null>(null);
@@ -295,6 +295,30 @@ export function NetDevSection() {
       <div>
         <span className="btn btn--secondary btn--small" role="button"
           onClick={() => patch({ projects: [...(view.projects ?? []), { name: "新项目", groups: [], note: "" }] })}>+ 新建项目</span>
+      </div>
+
+      {/* 诊断命令组合 */}
+      <div className="set-label" style={{ margin: "14px 0 6px" }}>诊断命令组合（设备卡一键逐条执行，走密封路径）</div>
+      {(view.presets ?? []).map((p, i) => (
+        <div key={p.name + i} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
+          <input
+            className="mem-input" style={{ width: 130 }}
+            value={p.name}
+            onChange={e => { const presets = [...(view.presets ?? [])]; presets[i] = { ...p, name: e.target.value }; patch({ presets }); }}
+          />
+          <input
+            className="mem-input" style={{ flex: 1, minWidth: 240 }}
+            value={(p.commands ?? []).join("; ")}
+            placeholder="命令用分号分隔，如 display ospf peer; display ospf lsdb"
+            onChange={e => { const presets = [...(view.presets ?? [])]; presets[i] = { ...p, commands: e.target.value.split(/[;；]/).map(c => c.trim()).filter(Boolean) }; patch({ presets }); }}
+          />
+          <span className="btn btn--secondary btn--small" role="button"
+            onClick={() => patch({ presets: (view.presets ?? []).filter((_, j) => j !== i) })}>删除</span>
+        </div>
+      ))}
+      <div>
+        <span className="btn btn--secondary btn--small" role="button"
+          onClick={() => patch({ presets: [...(view.presets ?? []), { name: "新组合", commands: [], vendors: [] }] })}>+ 新建组合</span>
       </div>
 
       {/* 巡检 */}

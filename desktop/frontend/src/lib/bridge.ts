@@ -100,6 +100,7 @@ import type {
   CatalogEntry,
   MarketSourceMeta,
   NetDevTopologyNode,
+  NetDevBackupVersion,
 } from "./types";
 
 const GLOBAL_PROJECT_ORDER_KEY = "__global__";
@@ -1797,6 +1798,7 @@ function makeMockApp(): AppBindings {
   // imports are stubbed — the real implementations live in the Go bindings.
   // Two seeded devices mirror the topology mock (CORE-01/ACC-01) so the
   // click-a-node → device card flow is demoable in the browser dev shell.
+  let mockBackups: { id: string; device: string; at: string; bytes: number; lines: number }[] = [];
   let mockNetDev: NetDevSettingsView = {
     enabled: false,
     networkName: "我的网络",
@@ -1811,13 +1813,16 @@ function makeMockApp(): AppBindings {
       { name: "一号机房", groups: ["核心"], note: "核心机房——CORE 与防火墙所在站点" },
       { name: "接入园区", groups: ["接入"], note: "办公楼接入层" },
     ],
+    presets: [
+      { name: "OSPF 邻居全套", commands: ["display ospf peer", "display ospf lsdb", "display interface brief"], vendors: [] },
+    ],
   };
   return {
     async NetDevSettings() {
       return mockNetDev;
     },
     async SetNetDevSettings(v: NetDevSettingsView) {
-      mockNetDev = { ...v, devices: [...v.devices], hops: [...v.hops], groups: [...v.groups], scopes: [...v.scopes], guardAllowedGroups: [...(v.guardAllowedGroups ?? [])], projects: v.projects ? [...v.projects] : mockNetDev.projects };
+      mockNetDev = { ...v, devices: [...v.devices], hops: [...v.hops], groups: [...v.groups], scopes: [...v.scopes], guardAllowedGroups: [...(v.guardAllowedGroups ?? [])], projects: v.projects ? [...v.projects] : mockNetDev.projects, presets: v.presets ? [...v.presets] : mockNetDev.presets };
     },
     async NetDevDeleteSecret(_kind: string, _envName: string) {},
     async NetDevTestConnection(device: string) {
@@ -1827,6 +1832,18 @@ function makeMockApp(): AppBindings {
     async NetDevProposals() { return [] as NetDevProposal[]; },
     async NetDevRunInspection() { return null; },
     async NetDevRunBaseline() { return null; },
+    async NetDevRunBackup(device: string) {
+      mockBackups = [{ id: `${device}@${Date.now() - 3600_000}`, device, at: "08-19 09:00:00", bytes: 4210, lines: 180 },
+        { id: `${device}@${Date.now() - 86_400_000}`, device, at: "08-18 09:00:00", bytes: 4180, lines: 178 }].concat(mockBackups);
+      return mockBackups.filter(v => v.device === device);
+    },
+    async NetDevBackups(device: string) { return mockBackups.filter(v => !device || v.device === device); },
+    async NetDevBackupDiff(device: string, _a: string, _b: string) {
+      return `--- ${device} running-config\n+++ ${device} running-config\n@@ -12,4 +12,5 @@\n vlan 10\n- description office\n+ description office-floor2\n+ stp edged-port enable\n ntp-service unicast-server 10.0.0.253`;
+    },
+    async NetDevDailyBriefing() {
+      return "**总体判断**：网络平稳，风险等级 **低**。\n\n**需要关注**\n1. ACC-01 上行口错包增长（依据：今日发现）\n2. 基线：2 台设备仍在用 SNMP v2c（依据：基线核查）\n\n**建议动作**\n- 只读核查：ACC-01 接口错包计数（可直接做）\n- 变更：SNMPv3 迁移（需起草提案）";
+    },
     async NetDevFindings() { return [] as NetDevFinding[]; },
     async NetDevEmergencyStop() { return 0; },
     async NetDevTurnBegin() {},

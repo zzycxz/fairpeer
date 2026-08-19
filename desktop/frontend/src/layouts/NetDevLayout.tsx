@@ -4,7 +4,8 @@ import { app } from "../lib/bridge";
 import logoSymbol from "../assets/logo-symbol.png";
 import { getActiveProject, setActiveProject, subscribeActiveProject, type NetDevProjectScope } from "../lib/netdevProjectStore";
 import { ProposalActions } from "../components/netdev/ProposalCenter";
-import type { NetDevSettingsView, NetDevFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph } from "../lib/types";
+import type { NetDevSettingsView, NetDevFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph, NetDevBackupVersion } from "../lib/types";
+import { Markdown } from "../components/Markdown";
 import "../styles/netdev.css";
 
 // NetDevLayout is the 运维 page's shell (NETDEV_SPEC §10.1). The FRAME follows
@@ -284,6 +285,20 @@ export function NetDevLayout({
     }
   }, [reload]);
 
+  // Backup vault: snapshot via sealed read (backupBusy gates the card button).
+  const [backupBusy, setBackupBusy] = useState(false);
+  const runBackup = useCallback(async (device: string) => {
+    setBackupBusy(true);
+    try {
+      const vers = await app.NetDevRunBackup(device);
+      if (vers.length === 0) alert("备份失败：命令被拒绝或设备错误（详情见审计）");
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBackupBusy(false);
+    }
+  }, []);
+
   // Active project scope (site switcher in the title bar): null = 全部.
   const [project, setProject] = useState<NetDevProjectScope>(getActiveProject());
   useEffect(() => subscribeActiveProject(() => setProject(getActiveProject())), []);
@@ -467,7 +482,27 @@ export function NetDevLayout({
                     onClick={() => onInsertComposer(`帮我在 ${selectedDevice.name}（${selectedDevice.address}）上完成以下变更：\n变更内容：\n（请先用只读命令确认现状，再用 netdev_propose 起草提案——写命令必须包含对应的回滚命令，不会直接执行，需我在提案中心批准。）`)}
                   >AI 配置变更…</span>
                 )}
+                <span
+                  className="btn btn--secondary btn--small"
+                  role="button"
+                  title="经密封路径读取 running-config，脱敏后存为版本；可与任意历史版本 diff。"
+                  onClick={() => void runBackup(selectedDevice.name)}
+                >{backupBusy ? "备份中…" : "备份配置"}</span>
               </div>
+              {(settings?.presets ?? []).filter(p => (p.vendors ?? []).length === 0 || (p.vendors ?? []).includes(selectedDevice.vendor)).length > 0 && (
+                <div className="ndv__quick-cmds">
+                  {(settings?.presets ?? []).filter(p => (p.vendors ?? []).length === 0 || (p.vendors ?? []).includes(selectedDevice.vendor)).map(p => (
+                    <span
+                      key={p.name}
+                      className="btn btn--secondary btn--small"
+                      role="button"
+                      title={`${p.commands.join("；")}（逐条经密封路径执行）`}
+                      onClick={() => { for (const c of p.commands) void runQuick(selectedDevice.name, c); }}
+                    >▶ {p.name}</span>
+                  ))}
+                </div>
+              )}
+              <BackupHistory device={selectedDevice.name} />
               {Object.values(quick).map(r => (
                 <div key={r.command} className="ndv__quick-result">
                   <div className="ndv__quick-cmd" style={r.isError ? { color: "#ff8787" } : undefined}>{r.command}</div>
@@ -486,7 +521,10 @@ export function NetDevLayout({
               ))}
             </div>
           ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div className="ndv__card ndv__card--dim">点击左栏设备查看详情与快捷诊断（只读，走与 agent 相同的密封路径）；或在对话里直接描述故障现象。</div>
+            <DailyBriefing />
+          </div>
           )
         )}
 
@@ -587,6 +625,102 @@ function GettingStarted({ onOpenSettings }: { onOpenSettings: (tab: string) => v
       <div className="ndv__hint" style={{ padding: 0, marginTop: 4 }}>
         网络名称、探测范围、提案审批策略都在 设置 → 运维。写操作永远走人工审批的提案，agent 只有只读权限。
       </div>
+    </div>
+  );
+}
+
+// DailyBriefing: objective 24h data in, model-judged report out — the
+// content comes from one designed prompt on a headless netdev controller,
+// never a hardcoded template (user direction). Falls back to a nudge when
+// there is nothing to summarize yet.
+function DailyBriefing() {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const run = useCallback(async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      setText(await app.NetDevDailyBriefing());
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+  return (
+    <div className="ndv__card">
+      <div className="ndv__card-title">今日简报</div>
+      <div style={{ display: "flex", gap: 6, marginBottom: text || err ? 8 : 0 }}>
+        <span className="btn btn--secondary btn--small" role="button" onClick={() => void run()}>
+          {busy ? "汇总中…" : "生成今日简报"}
+        </span>
+      </div>
+      {err && <div className="ndv__meta" style={{ color: "#ff8787" }}>{err}</div>}
+      {text && (
+        <div className="ndv__md">
+          <Markdown text={text} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// BackupHistory: the device card's version vault — newest versions first,
+// pick any two to see the redacted unified diff (变更↔故障关联的入口).
+function BackupHistory({ device }: { device: string }) {
+  const [versions, setVersions] = useState<NetDevBackupVersion[]>([]);
+  const [pick, setPick] = useState<string[]>([]);
+  const [diff, setDiff] = useState("");
+  const [err, setErr] = useState("");
+  const load = useCallback(async () => {
+    try {
+      setVersions(await app.NetDevBackups(device));
+      setPick([]);
+      setDiff("");
+      setErr("");
+    } catch (e) {
+      setErr(String(e));
+    }
+  }, [device]);
+  useEffect(() => { void load(); }, [load]);
+  if (versions.length === 0 && !err) return null;
+  const toggle = (id: string) => {
+    setPick(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id].slice(-2));
+    setDiff("");
+  };
+  const showDiff = async () => {
+    if (pick.length !== 2) return;
+    try {
+      // pick[0] is newer, pick[1] older → diff(old → new)
+      setDiff(await app.NetDevBackupDiff(device, pick[1], pick[0]));
+    } catch (e) {
+      setErr(String(e));
+    }
+  };
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div className="ndv__meta" style={{ marginBottom: 2 }}>备份版本（{versions.length}，勾选两个看 diff）</div>
+      {err && <div className="ndv__meta" style={{ color: "#ff8787" }}>{err}</div>}
+      {versions.slice(0, 8).map(v => (
+        <div key={v.id} className="ndv__backup-row" role="button" onClick={() => toggle(v.id)}>
+          <span style={{ opacity: pick.includes(v.id) ? 1 : 0.45 }}>{pick.includes(v.id) ? "☑" : "☐"}</span>
+          <span>{v.at}</span>
+          <span style={{ opacity: 0.6 }}>{v.lines} 行</span>
+        </div>
+      ))}
+      {pick.length === 2 && (
+        <div style={{ margin: "4px 0" }}>
+          <span className="btn btn--secondary btn--small" role="button" onClick={() => void showDiff()}>对比所选版本</span>
+        </div>
+      )}
+      {diff && (
+        <pre className="ndv__pre ndv__diff">
+          {diff.split("\n").map((l, i) => (
+            <span key={i} className={l.startsWith("+") ? "ndv__dl-add" : l.startsWith("-") ? "ndv__dl-del" : undefined}>{l}{"\n"}</span>
+          ))}
+        </pre>
+      )}
     </div>
   );
 }

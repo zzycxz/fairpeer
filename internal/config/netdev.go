@@ -42,6 +42,17 @@ type NetDevConfig struct {
 	// Projects are site-level scopes (collections of device groups) for the
 	// title-bar switcher — see NetDevProject.
 	Projects []NetDevProject `toml:"projects"`
+	// Presets are named diagnostic command batteries ("OSPF 邻居全套") the
+	// device card can run in one click — each command still goes through the
+	// sealed Exec path one by one.
+	Presets []NetDevPreset `toml:"presets"`
+}
+
+// NetDevPreset is one saved diagnostic battery.
+type NetDevPreset struct {
+	Name    string   `toml:"name"`
+	Commands []string `toml:"commands"`
+	Vendors []string `toml:"vendors"` // empty = all vendors
 }
 
 // NetDevGuardrails — fine-grained, per-interaction controls:
@@ -207,6 +218,24 @@ func ValidateNetDev(nd NetDevConfig) error {
 		for _, g := range p.Groups {
 			if _, ok := ndGroupByName(nd, g); !ok {
 				return fmt.Errorf("netdev project %q: references unknown group %q", p.Name, g)
+			}
+		}
+	}
+	seenPresets := map[string]bool{}
+	for _, p := range nd.Presets {
+		if strings.TrimSpace(p.Name) == "" {
+			return fmt.Errorf("netdev preset: name is required")
+		}
+		if seenPresets[p.Name] {
+			return fmt.Errorf("netdev preset %q: duplicate name", p.Name)
+		}
+		seenPresets[p.Name] = true
+		if len(p.Commands) == 0 {
+			return fmt.Errorf("netdev preset %q: needs at least one command", p.Name)
+		}
+		for _, c := range p.Commands {
+			if strings.ContainsAny(c, "\n\r") {
+				return fmt.Errorf("netdev preset %q: commands must be single-line", p.Name)
 			}
 		}
 	}
