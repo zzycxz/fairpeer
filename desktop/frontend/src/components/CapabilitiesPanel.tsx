@@ -1919,8 +1919,9 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 	// (email/rag/schedule were dumped into "coding") and broke when a skill was
 	// shadowed by a global override (ppt-auto showed as both builtin-office and
 	// global). Grouping by `active` reflects the real prompt the model sees.
-	const OFFICIAL_SKILLS = useMemo(() => new Set(["init", "explore", "research", "install-capability", "review", "security-review", "test", "document-auto", "email-auto", "schedule-auto", "rag-auto", "expert-auto", "browser-auto", "computer-auto", "ppt-auto"]), []);
-	const OFFICE_SKILLS = useMemo(() => new Set(["document-auto", "email-auto", "schedule-auto", "rag-auto", "expert-auto", "browser-auto", "computer-auto", "ppt-auto"]), []);
+	const OFFICIAL_SKILLS = useMemo(() => new Set(["init", "explore", "research", "install-capability", "review", "security-review", "test", "document-auto", "email-auto", "schedule-auto", "rag-auto", "expert-auto", "browser-auto", "desktop-auto", "ppt-auto"]), []);
+	const OFFICE_SKILLS = useMemo(() => new Set(["document-auto", "email-auto", "schedule-auto", "rag-auto", "expert-auto", "browser-auto", "desktop-auto", "ppt-auto"]), []);
+	const OPS_SKILLS = useMemo(() => new Set(["netdev-help"]), []);
 
 	const officialSkills = useMemo(
 		() => filteredSkills.filter((sk) => sk.scope === "builtin" || OFFICIAL_SKILLS.has(sk.name)),
@@ -1939,9 +1940,13 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 		() => activeOfficialSkills.filter((sk) => OFFICE_SKILLS.has(sk.name)),
 		[activeOfficialSkills, OFFICE_SKILLS],
 	);
+	const opsSkills = useMemo(
+		() => activeOfficialSkills.filter((sk) => OPS_SKILLS.has(sk.name)),
+		[activeOfficialSkills, OPS_SKILLS],
+	);
 	const generalSkills = useMemo(
-		() => activeOfficialSkills.filter((sk) => !OFFICE_SKILLS.has(sk.name)),
-		[activeOfficialSkills, OFFICE_SKILLS],
+		() => activeOfficialSkills.filter((sk) => !OFFICE_SKILLS.has(sk.name) && !OPS_SKILLS.has(sk.name)),
+		[activeOfficialSkills, OFFICE_SKILLS, OPS_SKILLS],
 	);
 	const userSkills = useMemo(
 		() => filteredSkills.filter((sk) => sk.scope !== "builtin" && !OFFICIAL_SKILLS.has(sk.name)),
@@ -2045,6 +2050,32 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 					</div>
 					<div className="cap-skills">
 						{officeSkills.map((sk) => (
+							<SkillRow
+								key={sk.name}
+								skill={sk}
+								busy={busy}
+								expanded={expandedSkills.has(sk.name)}
+								onToggle={() => toggleSkill(sk.name)}
+								onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
+							/>
+						))}
+					</div>
+				</div>
+			)}
+
+			{/* Ops skills (netdev quick-reference card — active in netdev mode). */}
+			{opsSkills.length > 0 && (
+				<div className="cap-market">
+					<div className="cap-skills-head">
+						<div className="cap-skills-head__copy">
+							<div className="cap-skills-head__title">{t("caps.skillCategoryOps")}</div>
+							<div className="cap-skills-head__summary">
+								{t("caps.marketSummary", { on: opsSkills.filter((s) => s.enabled).length, total: opsSkills.length })}
+							</div>
+						</div>
+					</div>
+					<div className="cap-skills">
+						{opsSkills.map((sk) => (
 							<SkillRow
 								key={sk.name}
 								skill={sk}

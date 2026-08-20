@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { BookOpen, CalendarDays, PanelLeft, SquarePen, Users, SlidersHorizontal } from "lucide-react";
 
+import { WorkspacePill } from "../components/WorkspacePill";
 import { useT } from "../lib/i18n";
 import { app, onExpertsCollab } from "../lib/bridge";
 import { CalendarTaskPanel } from "../components/cowork/CalendarTaskPanel";
@@ -29,6 +30,7 @@ export interface CoWorkLayoutProps {
   rightDockOpen?: boolean;
   sidebarCollapsed?: boolean;
   onNewSession?: () => void;
+  onSwitchMode?: (mode: "dev" | "cowork" | "netdev") => void;
   // Sidebar collapse — the brand-row toggle mirrors the coding view's
   // (toggleSidebar + its title live in App.tsx).
   onToggleSidebar?: () => void;
@@ -77,6 +79,7 @@ export function CoWorkLayout({
   rightDockOpen = false,
   sidebarCollapsed = false,
   onNewSession,
+  onSwitchMode,
   onToggleSidebar,
   sidebarToggleTitle,
   dockCwd,
@@ -196,7 +199,12 @@ export function CoWorkLayout({
               <PanelLeft size={16} />
             </button>
           )}
-          <span className="sidebar__modename">{t("sidebar.modeCowork")}</span>
+          <WorkspacePill
+            state="static"
+            label={t("sidebar.pillOffice")}
+            currentMode="cowork"
+            {...(onSwitchMode ? { onSwitchMode } : {})}
+          />
           <button
             type="button"
             className="sidebar__brand-iconbtn"

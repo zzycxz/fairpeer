@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { AlertTriangle, BookOpen, ClipboardCheck, Network, PanelLeft, SquarePen } from "lucide-react";
 import { app } from "../lib/bridge";
+import { WorkspacePill } from "../components/WorkspacePill";
 import { useConfirm } from "../lib/confirm";
 import { getActiveProject, setActiveProject, subscribeActiveProject, type NetDevProjectScope } from "../lib/netdevProjectStore";
 import { ProposalActions } from "../components/netdev/ProposalCenter";
@@ -121,6 +122,7 @@ export function NetDevLayout({
   onInsertComposer,
   onNewSession,
   onToggleSidebar,
+  onSwitchMode,
   sidebarToggleTitle,
   sidebarCollapsed = false,
   sidebarWidth,
@@ -161,6 +163,7 @@ export function NetDevLayout({
   onNewSession?: () => void;
   // Sidebar collapse + resize — same affordances as the coding sidebar.
   onToggleSidebar?: () => void;
+  onSwitchMode?: (mode: "dev" | "cowork" | "netdev") => void;
   sidebarToggleTitle?: string;
   sidebarCollapsed?: boolean;
   sidebarWidth?: number;
@@ -443,7 +446,12 @@ export function NetDevLayout({
               <PanelLeft size={16} />
             </button>
           )}
-          <span className="sidebar__modename">运维模式</span>
+          <WorkspacePill
+            state="static"
+            label={settings?.networkName?.trim() || "我的网络"}
+            currentMode="netdev"
+            {...(onSwitchMode ? { onSwitchMode } : {})}
+          />
           {onNewSession && (
             <button
               type="button"

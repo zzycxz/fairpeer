@@ -42,6 +42,7 @@ import { SidebarFooter } from "./components/SidebarFooter";
 import { TerminalPanel, loadTerminalOpen, saveTerminalOpen } from "./components/TerminalPanel";
 import { ContextMenu } from "./components/ContextMenu";
 import { LoopPanel } from "./components/loop/LoopPanel";
+import { WorkspacePill, type PillProject } from "./components/WorkspacePill";
 import { SideSessionPane } from "./components/SideSessionPane";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SidebarSessions } from "./components/SidebarSessions";
@@ -132,7 +133,7 @@ const RIGHT_DOCK_MIN_RENDER_WIDTH = 240;
 // (VS Code-style edge-hide). Sidebar uses viewport-x; dock uses raw dragged width.
 const SIDEBAR_COLLAPSE_THRESHOLD = 96;
 const DOCK_CLOSE_THRESHOLD = 180;
-const RIGHT_DOCK_MAX_WIDTH = 860;
+const RIGHT_DOCK_MAX_WIDTH = 3840;
 
 type RightDockMode = "context" | "files" | "changed" | "preview" | "session";
 
@@ -615,8 +616,17 @@ function saveRightDockTreeWidth(width: number): void {
   saveLayoutSize("rightDockTreeWidth", width, clampRightDockTreeWidth);
 }
 
+function defaultRightDockPreviewWidth(): number {
+  if (typeof window !== "undefined") {
+    // 根据屏幕宽度动态分配：让它占据视口的近 50%，但保证有一个保底体验，且上限为 1200
+    const half = window.innerWidth * 0.5;
+    return Math.max(RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH, Math.min(1200, half));
+  }
+  return RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH;
+}
+
 function loadRightDockPreviewWidth(): number {
-  return loadLayoutSize("rightDockPreviewWidth", RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH, clampRightDockPreviewWidth);
+  return loadLayoutSize("rightDockPreviewWidth", defaultRightDockPreviewWidth(), clampRightDockPreviewWidth);
 }
 
 function saveRightDockPreviewWidth(width: number): void {
@@ -948,6 +958,20 @@ export default function App() {
   const [workspaceChangeListRequest, setWorkspaceChangeListRequest] = useState<WorkspaceChangeListRequest | null>(null);
   const [dockRefreshKey, setDockRefreshKey] = useState(0);
   const [projectRevision, setProjectRevision] = useState(0);
+  // WorkspacePill's project catalog (2026-08-19 design A): the known projects
+  // list, refreshed with the tree so the pill's dropdown stays current.
+  const [pillProjects, setPillProjects] = useState<PillProject[]>([]);
+  useEffect(() => {
+    void app.ListProjectTree("dev")
+      .then((tree) => {
+        setPillProjects(
+          asArray(tree)
+            .filter((n) => n?.kind === "project")
+            .map((n) => ({ label: n.label || "Untitled", root: n.root ?? "", color: n.projectColor })),
+        );
+      })
+      .catch(() => { /* pill falls back to choose/open states */ });
+  }, [projectRevision]);
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
   const [transientOverlayDismissSignal, setTransientOverlayDismissSignal] = useState(0);
   const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform>(detectBrowserPlatform);
@@ -3212,6 +3236,7 @@ export default function App() {
       >
         {coworkActive && (
           <CoWorkLayout
+          onSwitchMode={(mode) => { void switchProfile(mode).catch(() => { /* revert handled in switchProfile */ }); }}
             mainNode={mainNode}
             footerNode={footerNode}
             bannersNode={bannersNode}
@@ -3251,6 +3276,7 @@ export default function App() {
         )}
         {netdevActive && (
           <NetDevLayout
+          onSwitchMode={(mode) => { void switchProfile(mode).catch(() => { /* revert handled in switchProfile */ }); }}
             mainNode={mainNode}
             footerNode={footerNode}
             bannersNode={bannersNode}
@@ -3332,7 +3358,39 @@ export default function App() {
             >
               <PanelLeft size={16} />
             </button>
-            <span className="sidebar__modename">{netdevActive ? t("sidebar.modeNetdev") : coworkActive ? t("sidebar.modeCowork") : t("sidebar.modeDev")}</span>
+            {/* Workspace pill (design A): WHERE am I working, plus project
+                switching and the mode switcher in its dropdown. */}
+            <WorkspacePill
+              state={
+                activeTab?.scope === "project" && activeTab.workspaceRoot
+                  ? "project"
+                  : activeTab?.scope === "global"
+                    ? "global"
+                    : pillProjects.length > 0
+                      ? "choose"
+                      : "open"
+              }
+              label={
+                activeTab?.scope === "project"
+                  ? (activeTab.workspaceName || "Project")
+                  : activeTab?.scope === "global"
+                    ? t("sidebar.pillGlobal")
+                    : pillProjects.length > 0
+                      ? t("sidebar.pillChoose")
+                      : t("sidebar.pillOpenProject")
+              }
+              dotColor={pillProjects.find((p) => p.root === activeTab?.workspaceRoot)?.color}
+              projects={pillProjects}
+              currentMode="dev"
+              onPickProject={(root) => {
+                void openBlankSession("project", root);
+              }}
+              onPickGlobal={() => {
+                void openBlankSession("global", "");
+              }}
+              onAddProject={() => { void switchFolder(); }}
+              onSwitchMode={(mode) => { void switchProfile(mode).catch(() => { /* revert handled in switchProfile */ }); }}
+            />
             <button
               type="button"
               className="sidebar__brand-iconbtn"

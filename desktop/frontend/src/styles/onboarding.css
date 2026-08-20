@@ -3470,12 +3470,19 @@
   background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
   color: var(--fg);
 }
-.preview-pane__frame {
+.preview-pane__viewport {
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
+  overflow: auto;
+  background: var(--bg-sunken, #f5f5f5);
+}
+.preview-pane__frame {
+  width: 1366px;
+  height: 768px;
   border: 0;
   background: #fff;
+  display: block;
 }
 /* Changed-tab activity dot (pane-system §3.3) */
 .workbench-dock__tab-dot {

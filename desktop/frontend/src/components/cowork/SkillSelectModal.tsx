@@ -12,8 +12,8 @@ export interface SkillSelectModalProps {
 }
 
 const SKILLS = [
-  { name: "ppt-auto", label: "PPT 生成", description: "基于选中知识生成演示文稿" },
-  { name: "document-auto", label: "Word 文档撰写", description: "基于选中知识撰写文档" },
+  { name: "ppt-auto", label: "PPT 生成", description: "从主题/参考资料/旧 PPT 生成或美化演示文稿" },
+  { name: "document-auto", label: "文档处理", description: "基于选中知识撰写、填充或转换 Word/Excel 等文档" },
 ];
 
 export function SkillSelectModal({

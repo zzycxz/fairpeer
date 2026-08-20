@@ -170,12 +170,14 @@ export function PreviewPane({ url, onUrlCommit }: { url: string; onUrlCommit?: (
           <ExternalLink size={12} />
         </button>
       </div>
-      <iframe
-        key={nonce}
-        className="preview-pane__frame"
-        src={current}
-        title={t("preview.tabTitle")}
-      />
+      <div className="preview-pane__viewport">
+        <iframe
+          key={nonce}
+          className="preview-pane__frame"
+          src={current}
+          title={t("preview.tabTitle")}
+        />
+      </div>
     </div>
   );
 }
