@@ -109,6 +109,14 @@ const CFG_CMD: Record<string, string> = {
   vmware: "esxcli system version get",
 };
 
+// BMC quick queries for the device card (vendor=redfish): label → resource.
+const REDFISH_QUICK: { label: string; path: string }[] = [
+  { label: "BMC 概览", path: "/redfish/v1/Managers" },
+  { label: "系统/硬件清单", path: "/redfish/v1/Systems" },
+  { label: "机箱（温度/电源）", path: "/redfish/v1/Chassis" },
+  { label: "事件日志 SEL", path: "/redfish/v1/Managers/1/LogServices" },
+];
+
 type QuickResult = { command: string; output: string; isError: boolean; refused?: string; refusedUnknown?: boolean };
 type DockTab = "devices" | "context" | "topology" | "findings" | "proposals" | "audit";
 // Fresh installs open a curated trio — the dock stays calm; the rest join via
@@ -258,6 +266,16 @@ export function NetDevLayout({
       } }));
     } catch (e) {
       setQuick(q => ({ ...q, [command]: { command, output: String(e), isError: true } }));
+    }
+  }, []);
+
+  // BMC panel: quick Redfish GETs land in the same result area as CLI runs.
+  const runRedfish = useCallback(async (device: string, label: string, path: string) => {
+    try {
+      const out = await app.NetDevRedfishQuery(device, path);
+      setQuick(q => ({ ...q, [label]: { command: `GET ${path}`, output: out, isError: false } }));
+    } catch (e) {
+      setQuick(q => ({ ...q, [label]: { command: `GET ${path}`, output: String(e), isError: true } }));
     }
   }, []);
 
@@ -627,11 +645,19 @@ export function NetDevLayout({
             <div className="ndv__card">
               <div className="ndv__card-title">{selectedDevice.name} <span className="ndv__card-sub">· {selectedDevice.vendor}/{selectedDevice.os} · {selectedDevice.address}{(selectedDevice.via ?? []).length ? " · 经 " + (selectedDevice.via ?? []).join("→") : ""}</span></div>
               <div className="ndv__group-label">快捷诊断</div>
-              <div className="ndv__quick-cmds">
-                {(QUICK_BATTERY[selectedDevice.vendor] ?? ["display version"]).map(cmd => (
-                  <span key={cmd} className="btn btn--secondary btn--small" role="button" onClick={() => void runQuick(selectedDevice.name, cmd)}>{cmd}</span>
-                ))}
-              </div>
+              {selectedDevice.vendor === "redfish" ? (
+                <div className="ndv__quick-cmds">
+                  {REDFISH_QUICK.map(q => (
+                    <span key={q.label} className="btn btn--secondary btn--small" role="button" title={q.path} onClick={() => void runRedfish(selectedDevice.name, q.label, q.path)}>{q.label}</span>
+                  ))}
+                </div>
+              ) : (
+                <div className="ndv__quick-cmds">
+                  {(QUICK_BATTERY[selectedDevice.vendor] ?? ["display version"]).map(cmd => (
+                    <span key={cmd} className="btn btn--secondary btn--small" role="button" onClick={() => void runQuick(selectedDevice.name, cmd)}>{cmd}</span>
+                  ))}
+                </div>
+              )}
               <div className="ndv__group-label">诊断组合</div>
               {(settings?.presets ?? []).filter(p => (p.vendors ?? []).length === 0 || (p.vendors ?? []).includes(selectedDevice.vendor)).length > 0 && (
                 <div className="ndv__quick-cmds">

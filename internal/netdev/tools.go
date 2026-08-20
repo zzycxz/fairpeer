@@ -450,7 +450,12 @@ func secretReader(kind, envName string) func() (string, error) {
 // ONLY inside the netdev profile branch, so dev/cowork sessions never see
 // these tools (the reverse half of the hard seal; NETDEV_SPEC §7.1).
 func RegisterTools(reg *tool.Registry, cfg *config.Config) {
-	m := NewManager(cfg)
+	// Same instance the desktop bridge uses: NetDevTurnBegin's budget reset
+	// and NetDevEmergencyStop's KillAllConnections must reach the Manager the
+	// agent's tools actually hold (NETDEV_SPEC §6.5/§6.6). A private Manager
+	// here would leave the tool-side budget counter accumulating forever and
+	// emergency stop leaving the agent's device sessions alive.
+	m := SharedManager(cfg)
 	ApplyExtraRead(cfg)
 	reg.Add(&execTool{m: m})
 	reg.Add(&devicesTool{cfg: cfg})
@@ -460,6 +465,38 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&findingTool{})
 	reg.Add(&netconfTool{m: m})
 	reg.Add(&baselineTool{m: m})
+	reg.Add(&redfishTool{m: m})
+}
+
+// redfishTool — the BMC channel: ONE GET-only Redfish request against a
+// vendor=redfish device. Sealed at the transport (no write verb exists in the
+// client) and the path allowlist (Systems/Chassis/Managers/...).
+type redfishTool struct{ m *Manager }
+
+func (t *redfishTool) Name() string { return "netdev_redfish" }
+
+func (t *redfishTool) Description() string {
+	return "Run ONE read-only Redfish GET on a device's BMC (vendor=redfish): hardware inventory, thermal/power sensors, and the System Event Log. Paths are allowlisted to read-only resources (/redfish/v1/Systems, /Chassis, /Managers, /Managers/1/LogServices/SEL/Entries …); there is no write path at all."
+}
+
+func (t *redfishTool) Schema() json.RawMessage {
+	return json.RawMessage(`{"type": "object", "properties": {"device": {"type": "string"}, "path": {"type": "string", "description": "resource path, e.g. /redfish/v1/Chassis/1/Thermal"}}, "required": ["device", "path"]}`)
+}
+
+func (t *redfishTool) ReadOnly() bool { return true }
+
+func (t *redfishTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		Device string `json:"device"`
+		Path   string `json:"path"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", err
+	}
+	if a.Device == "" || strings.TrimSpace(a.Path) == "" {
+		return "", errors.New("netdev_redfish: device and path are required")
+	}
+	return t.m.RedfishGet(ctx, a.Device, a.Path)
 }
 
 // baselineTool exposes the config-security baseline battery to the agent —

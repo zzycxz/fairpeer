@@ -191,7 +191,11 @@ export interface AppBindings {
   SummarizeFrom(turn: number): Promise<void>;
   SummarizeUpTo(turn: number): Promise<void>;
   ListSessions(): Promise<SessionMeta[]>;
+  // Profile-scoped variant ("dev"/"cowork"/"netdev"; empty = all profiles).
+  ListSessionsForProfile(profile: string): Promise<SessionMeta[]>;
   ListTrashedSessions(): Promise<SessionMeta[]>;
+  // Profile-scoped variant, matching ListSessionsForProfile.
+  ListTrashedSessionsForProfile(profile: string): Promise<SessionMeta[]>;
   ResumeSession(path: string): Promise<HistoryMessage[]>;
   ResumeSessionForTab(tabID: string, path: string): Promise<HistoryMessage[]>;
   PreviewSession(path: string): Promise<HistoryMessage[]>;
@@ -224,6 +228,7 @@ export interface AppBindings {
   RemoveSkillPath(path: string): Promise<void>;
   RefreshSkills(): Promise<void>;
   SetSkillEnabled(name: string, enabled: boolean): Promise<void>;
+  DeriveEditableSkill(name: string): Promise<string>;
   SkillMarketBrowse(): Promise<CatalogEntry[]>;
   SkillMarketSources(): Promise<MarketSourceMeta[]>;
   SkillMarketSearch(query: string, source?: string): Promise<CatalogEntry[]>;
@@ -360,6 +365,8 @@ export interface AppBindings {
   // Daily briefing: objective 24h data → designed prompt → headless netdev
   // controller synthesizes the report (content is model-judged, not templated).
   NetDevDailyBriefing(): Promise<string>;
+  // One GET-only Redfish query for the device card's BMC panel.
+  NetDevRedfishQuery(device: string, path: string): Promise<string>;
   NetDevFindings(): Promise<NetDevFinding[]>;
   // Emergency stop: close every device connection at once (audited).
   NetDevEmergencyStop(): Promise<number>;
@@ -1833,6 +1840,9 @@ function makeMockApp(): AppBindings {
     async NetDevBackupDiff(device: string, _a: string, _b: string) {
       return `--- ${device} running-config\n+++ ${device} running-config\n@@ -12,4 +12,5 @@\n vlan 10\n- description office\n+ description office-floor2\n+ stp edged-port enable\n ntp-service unicast-server 10.0.0.253`;
     },
+    async NetDevRedfishQuery(_device: string, _path: string) {
+      return JSON.stringify({ "@odata.type": "#Chassis.v1_20.Chassis", Id: "1", Name: "Mock Chassis", Thermal: { Fans: [{ Name: "Fan1", Reading: 2400, Status: { Health: "OK" } }] } }, null, 2);
+    },
     async NetDevDailyBriefing() {
       return "**总体判断**：网络平稳，风险等级 **低**。\n\n**需要关注**\n1. ACC-01 上行口错包增长（依据：今日发现）\n2. 基线：2 台设备仍在用 SNMP v2c（依据：基线核查）\n\n**建议动作**\n- 只读核查：ACC-01 接口错包计数（可直接做）\n- 变更：SNMPv3 迁移（需起草提案）";
     },
@@ -2376,8 +2386,18 @@ function makeMockApp(): AppBindings {
     async ListSessions() {
       return sessions.map((s) => ({ ...s }));
     },
+    async ListSessionsForProfile(profile?: string) {
+      const key = (profile ?? "").trim().toLowerCase();
+      if (!key) return sessions.map((s) => ({ ...s }));
+      return sessions.filter((s) => ((s.profile ?? "dev").toLowerCase() === key)).map((s) => ({ ...s }));
+    },
     async ListTrashedSessions() {
       return trashedSessions.map((s) => ({ ...s }));
+    },
+    async ListTrashedSessionsForProfile(profile?: string) {
+      const key = (profile ?? "").trim().toLowerCase();
+      if (!key) return trashedSessions.map((s) => ({ ...s }));
+      return trashedSessions.filter((s) => ((s.profile ?? "dev").toLowerCase() === key)).map((s) => ({ ...s }));
     },
     async ResumeSession(path: string) {
       sessions.forEach((s) => {
@@ -2636,6 +2656,9 @@ function makeMockApp(): AppBindings {
     async SetSkillEnabled(name: string, enabled: boolean) {
       const skill = capSkills.find((s) => s.name === name);
       if (skill) skill.enabled = enabled;
+    },
+    async DeriveEditableSkill(_name: string): Promise<string> {
+      return "";
     },
     async SkillMarketBrowse(): Promise<CatalogEntry[]> {
       return [

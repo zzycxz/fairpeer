@@ -471,6 +471,18 @@ func (a *App) NetDevBackupDiff(device, idA, idB string) (string, error) {
 	return netdev.DiffBackups(device, idA, idB)
 }
 
+// NetDevRedfishQuery runs one GET-only Redfish request for the device card's
+// BMC quick queries (same sealed path as the agent's netdev_redfish tool).
+func (a *App) NetDevRedfishQuery(device, path string) (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+	return netdev.SharedManager(cfg).RedfishGet(ctx, device, path)
+}
+
 // NetDevDailyBriefing gathers the last 24h of objective data (findings, audit
 // classes, proposals, backups) and asks a THROWAWAY headless netdev controller
 // to synthesize the briefing — the content is model-judged from data via a
