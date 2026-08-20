@@ -100,6 +100,12 @@ func main() {
 		// against the --wails-drop-target element instead.
 		DragAndDrop: &options.DragAndDrop{EnableFileDrop: true},
 
+		// Browser-native context menu in production (2026-08-19): without this,
+		// Wails disables right-click entirely in packaged builds — users lost
+		// copy/paste/select-all in every input and message text. Custom menus
+		// (tree/sessions/dock) call preventDefault and keep overriding it.
+		EnableDefaultContextMenu: true,
+
 		// --- per-platform adaptation (see desktop/README.md for the rationale) ---
 		Mac: &mac.Options{
 			// Inset traffic-lights over a frameless-feeling header; the frontend
