@@ -1,7 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Activity, AlertTriangle, ClipboardCheck, Network, PanelLeft, SquarePen } from "lucide-react";
+import { AlertTriangle, BookOpen, ClipboardCheck, Network, PanelLeft, SquarePen } from "lucide-react";
 import { app } from "../lib/bridge";
-import logoSymbol from "../assets/logo-symbol.png";
+import { useConfirm } from "../lib/confirm";
 import { getActiveProject, setActiveProject, subscribeActiveProject, type NetDevProjectScope } from "../lib/netdevProjectStore";
 import { ProposalActions } from "../components/netdev/ProposalCenter";
 import { DockTabs, useDockTabState } from "../components/DockTabs";
@@ -29,22 +29,29 @@ export function NetdevTitleBar({ leading, onOpenSettings }: { leading?: ReactNod
     app.NetDevSettings()
       .then(s => {
         setName(s?.networkName?.trim() || "我的网络");
-        setProjects(s?.projects ?? []);
+        setProjects((s?.projects ?? []).map((p: any) => ({ ...p, groups: p.groups ?? [] })));
       })
       .catch(e => setErr(String(e)));
     const sync = () => setActive(getActiveProject());
     sync();
     return subscribeActiveProject(sync);
   }, []);
+  const confirm = useConfirm();
   const stop = useCallback(async () => {
-    if (!confirm("紧急停止：立即断开全部设备连接（释放所有 VTY）？")) return;
+    const ok = await confirm({
+      title: "SYSTEM HALT",
+      message: "中止所有挂起的运维任务、断开代理会话并锁定守护进程？",
+      danger: true,
+      confirmLabel: "立即中止",
+    });
+    if (!ok) return;
     try {
-      const n = await app.NetDevEmergencyStop();
-      alert(`已断开 ${n} 个设备连接。`);
+      await app.NetDevEmergencyStop();
+      setErr("[SYS] STOP SIGNAL SENT");
     } catch (e) {
       setErr(String(e));
     }
-  }, []);
+  }, [confirm]);
   return (
     <div className="ndv__titlebar">
       {leading}
@@ -237,7 +244,7 @@ export function NetDevLayout({
       await app.NetDevAddExtraRead(vendor, command);
       await runQuick(device, command);
     } catch (e) {
-      alert(String(e));
+      setErr(String(e));
     }
   }, [runQuick]);
 
@@ -301,7 +308,7 @@ export function NetDevLayout({
     setInspBusy(true);
     try {
       const f = await app.NetDevRunInspection();
-      if (f) alert(`巡检完成：${f.title}`);
+      if (f) setErr(`[SYS] INSPECTION COMPLETE: ${f.title}`);
       await reload();
     } catch (e) {
       setErr(String(e));
@@ -316,7 +323,7 @@ export function NetDevLayout({
     setBaseBusy(true);
     try {
       const f = await app.NetDevRunBaseline();
-      if (f) alert(f.title);
+      if (f) setErr(`[SYS] BASELINE COMPLETE: ${f.title}`);
       await reload();
     } catch (e) {
       setErr(String(e));
@@ -360,13 +367,14 @@ export function NetDevLayout({
   const scopedTopo = useMemo(() => {
     if (!project || !topo) return topo;
     const nameIn = (n: string) => scopedDeviceNames.has(n);
-    const edges = topo.edges.filter(e => nameIn(e.local_device) || nameIn(e.remote_device));
+    const nodes = topo.nodes ?? [];
+    const edges = (topo.edges ?? []).filter(e => nameIn(e.local_device) || nameIn(e.remote_device));
     const touched = new Set<string>(edges.flatMap(e => [e.local_device, e.remote_device]));
-    return { ...topo, nodes: topo.nodes.filter(n => nameIn(n.name) || (!n.managed && touched.has(n.name))), edges };
+    return { ...topo, nodes: nodes.filter(n => nameIn(n.name) || (!n.managed && touched.has(n.name))), edges };
   }, [project, topo, scopedDeviceNames]);
 
   const TABS: { key: DockTab; label: string; badge?: number; icon: React.ReactNode }[] = [
-    { key: "context", label: "上下文", icon: <Activity size={13} /> },
+    { key: "context", label: "手册", icon: <BookOpen size={13} /> },
     { key: "topology", label: "拓扑", icon: <Network size={13} /> },
     { key: "findings", label: "发现", badge: scopedFindings.length || undefined, icon: <AlertTriangle size={13} /> },
     { key: "proposals", label: "提案", badge: pendingCount || undefined, icon: <ClipboardCheck size={13} /> },
@@ -423,9 +431,19 @@ export function NetDevLayout({
             sidebar__brandrow: logo + FairPeer + new-session ghost button +
             collapse toggle. Spans the chrome row (top-left of the window). */}
         <div className="sidebar__brandrow" title="运维模式">
-          <img src={logoSymbol} alt="" draggable={false} />
-          {/* Mode name, mirroring the coding/office sidebars (2026-08-19). */}
-          <span>运维模式</span>
+          {/* Logo retired; collapse toggle leads, mode name follows (2026-08-19). */}
+          {onToggleSidebar && (
+            <button
+              type="button"
+              className="app-chrome__panel-toggle app-chrome__panel-toggle--left sidebar__brand-toggle sidebar__brand-toggle--lead"
+              onClick={onToggleSidebar}
+              aria-label={sidebarToggleTitle}
+              aria-pressed={!sidebarCollapsed}
+            >
+              <PanelLeft size={16} />
+            </button>
+          )}
+          <span className="sidebar__modename">运维模式</span>
           {onNewSession && (
             <button
               type="button"
@@ -435,17 +453,6 @@ export function NetDevLayout({
               title="新建诊断会话"
             >
               <SquarePen size={15} />
-            </button>
-          )}
-          {onToggleSidebar && (
-            <button
-              type="button"
-              className="app-chrome__panel-toggle app-chrome__panel-toggle--left sidebar__brand-toggle"
-              onClick={onToggleSidebar}
-              aria-label={sidebarToggleTitle}
-              aria-pressed={!sidebarCollapsed}
-            >
-              <PanelLeft size={16} />
             </button>
           )}
         </div>
@@ -607,7 +614,7 @@ export function NetDevLayout({
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div className="ndv__card ndv__card--dim">点击左栏设备查看详情与快捷诊断（只读，走与 agent 相同的密封路径）；或在对话里直接描述故障现象。</div>
+            <div className="ndv__card ndv__card--dim">&gt;&gt; SYS.READY: 选中目标节点获取实时遥测。支持全封闭沙箱通道执行靶向诊断。或在交互终端直接下达自然语言指令。</div>
             <DailyBriefing />
           </div>
           )
@@ -634,7 +641,7 @@ export function NetDevLayout({
             {topo && <TopologyMap graph={scopedTopo ?? topo} selected={selected} selectedAddr={selectedDevice?.address} onPick={pickFromTopo} />}
             {!topo && !topoBusy && (
               <div className="ndv__hint" style={{ padding: 0 }}>
-                IP 规划视图按设备分组 / 命名惯例 / 网段聚类推断层级（核心/汇聚/接入），纯本地计算、零 AI 请求；连线只画真实数据——点「LLDP 实测校准」逐台读取邻居表补全链路。
+                &gt;&gt; TOPO.ENGINE: 基于 IP 规划/命名/网段的本地聚类推演 (AI-Free)。拓扑链路强制数据保真——未证实链路不予绘制。请求全景态势，请执行 LLDP/CDP 靶向实测校准。
               </div>
             )}
           </div>
@@ -653,7 +660,7 @@ export function NetDevLayout({
                 onClick={() => void runBaseline()}
               >{baseBusy ? "核查中…" : "安全基线核查"}</span>
             </div>
-            {scopedFindings.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>{project ? `项目「${project.name}」内暂无发现。` : "暂无。诊断结论由 agent 通过 netdev_finding 记录（必带证据）；巡检结果也在此。"}</div>}
+            {scopedFindings.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>{project ? `>> 项目「${project.name}」暂无数据。` : <>&gt;&gt; NULL_DATA: 证据池为空。Agent 诊断输出及全量巡检报告将在此落盘 (Enforced Evidence-Based)。</>}</div>}
             {scopedFindings.slice(0, 20).map(f => (
               <div key={f.id} className="ndv__finding" style={{ "--sev": SEV_COLOR[f.severity] ?? SEV_COLOR.info } as React.CSSProperties}>
                 <div className="ndv__finding-title">{f.title}</div>
@@ -667,7 +674,7 @@ export function NetDevLayout({
         {tab === "proposals" && (
           <div className="ndv__card">
             <div className="ndv__card-title">提案（{scopedProposals.length}）{project && <span style={{ fontWeight: 400, fontSize: 11 }}> · {project.name}</span>}</div>
-            {scopedProposals.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>{project ? `项目「${project.name}」内暂无提案。` : "暂无。对话中让 agent 用 netdev_propose 起草。"}</div>}
+            {scopedProposals.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>{project ? `>> 项目「${project.name}」暂无提案。` : <>&gt;&gt; NULL_DATA: 无挂起提案。在交互终端向 Agent 下达变更意图 (netdev_propose) 进入审批流。</>}</div>}
             {scopedProposals.slice(0, 10).map(p => <ProposalRow key={p.id} p={p} onDone={() => void reload()} />)}
             <div className="ndv__hint" style={{ padding: 0 }}>批准 / 执行 / 回滚在行内直接操作；完整视图在 设置 → 运维 → 提案中心。</div>
           </div>
@@ -776,7 +783,7 @@ function BackupHistory({ device }: { device: string }) {
     setBusy(true);
     try {
       const vers = await app.NetDevRunBackup(device);
-      if (vers.length === 0) alert("备份失败：命令被拒绝或设备错误（详情见审计）");
+      if (vers.length === 0) setErr("[SYS] BACKUP FAILED: ACCESS DENIED OR DEVICE ERROR");
       await load();
     } catch (e) {
       setErr(String(e));

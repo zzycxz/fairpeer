@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { app } from "../../lib/bridge";
 import { ProposalCenter } from "./ProposalCenter";
 import { FindingCenter } from "./FindingCenter";
+import { useConfirm } from "../../lib/confirm";
 import type { NetDevSettingsView, NetDevAuditEntryView, NetDevSSHImportCandidate } from "../../lib/types";
 
 // NetDevSection is the 运维 settings tab: device/hop inventory (persisted to
@@ -30,6 +31,7 @@ const emptyHop = (): EditHop => ({
 });
 
 export function NetDevSection() {
+  const confirm = useConfirm();
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -42,7 +44,15 @@ export function NetDevSection() {
   const reload = useCallback(async () => {
     try {
       const [v, a] = await Promise.all([app.NetDevSettings(), app.NetDevAuditTail(50)]);
-      setView(v);
+      setView({
+        ...v,
+        devices: v.devices ?? [],
+        hops: v.hops ?? [],
+        groups: v.groups ?? [],
+        scopes: v.scopes ?? [],
+        projects: v.projects ?? [],
+        presets: v.presets ?? [],
+      });
       setAudit(a ?? []);
       setErr("");
     } catch (e) {
@@ -76,20 +86,17 @@ export function NetDevSection() {
     try {
       let r = await app.NetDevTestConnection(device);
       if (r.status === "unknown-host-key") {
-        const ok = confirm(
-          `首次连接 ${device}（${r.host}）
-主机密钥指纹：
-  ${r.keyType}  ${r.fingerprint}
-
-确认信任此密钥？（确认后写入本机 known_hosts）`,
-        );
-        if (!ok) { setErr("已拒绝主机密钥，未连接。"); return; }
-        if (!r.fingerprint) { setErr("内部错误：指纹缺失"); return; }
+        const ok = await confirm({
+          title: "UNTRUSTED HOST KEY",
+          message: `首次连接 ${device}（${r.host}）\n主机密钥指纹：\n  ${r.keyType}  ${r.fingerprint}\n\n确认信任此密钥？（确认后写入本机 known_hosts）`,
+          danger: true
+        });
+        if (!ok) { setErr("[SYS] KEY REJECTED"); return; }
+        if (!r.fingerprint) { setErr("[SYS] INTERNAL ERROR: NO FINGERPRINT"); return; }
         await app.NetDevTrustHostKey(r.fingerprint);
         r = await app.NetDevTestConnection(device);
       }
-      setErr(r.status === "ok" ? "" : `测试失败（${r.status}）：${r.detail ?? ""}`);
-      if (r.status === "ok") alert(`✓ ${device} 连接成功，CLI 会话验证通过（分页关闭已生效）`);
+      setErr(r.status === "ok" ? "[SYS] TARGET VERIFIED (VTY SESSION OPEN)" : `测试失败（${r.status}）：${r.detail ?? ""}`);
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -163,9 +170,8 @@ export function NetDevSection() {
                 <td>{d.passwordSet ? "✓ 已设" : "✗ 未设"}</td>
                 <td>
                   <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice({ ...d, password: "" })}>编辑</span>{" "}
-                  <span className="btn btn--secondary btn--small" role="button" onClick={() => {
-                    if (confirm(`删除设备 ${d.name}？（不影响已存凭证）`)) void save({ ...view, devices: view.devices.filter(x => x.name !== d.name) });
-                  }}>删除</span>
+                  <span className="btn btn--secondary btn--small" role="button" title="删除"
+                    onClick={async () => { if (await confirm({ title: "DELETE DEVICE", message: `删除设备 ${d.name}？（不影响已存凭证）`, danger: true })) void save({ ...view, devices: view.devices.filter(x => x.name !== d.name) }); }}>×</span>
                 </td>
               </tr>
             ))}
@@ -181,9 +187,8 @@ export function NetDevSection() {
           <span style={{ minWidth: 120 }}>{h.name} → {h.host}{h.proxyJump ? `（经 ${h.proxyJump}）` : ""}</span>
           <span>{h.passwordSet ? "✓ 凭证已设" : "✗ 未设"}</span>
           <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingHop({ ...h, password: "" })}>编辑</span>
-          <span className="btn btn--secondary btn--small" role="button" onClick={() => {
-            if (confirm(`删除跳板 ${h.name}？`)) void save({ ...view, hops: view.hops.filter(x => x.name !== h.name) });
-          }}>删除</span>
+          <span className="btn btn--secondary btn--small" role="button" title="删除"
+            onClick={async () => { if (await confirm({ title: "DELETE HOP", message: `删除跳板 ${h.name}？`, danger: true })) void save({ ...view, hops: view.hops.filter(x => x.name !== h.name) }); }}>×</span>
         </div>
       ))}
 
@@ -329,8 +334,7 @@ export function NetDevSection() {
           try {
             setErr("巡检中…");
             const f = await app.NetDevRunInspection();
-            setErr("");
-            alert(f ? `巡检完成：${f.title}` : "巡检完成");
+            setErr(f ? `[SYS] INSPECTION COMPLETE: ${f.title}` : "[SYS] INSPECTION COMPLETE");
             await reload();
           } catch (e) { setErr(String(e)); }
         }}

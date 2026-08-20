@@ -168,6 +168,20 @@
   background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
 }
 
+/* Leading collapse toggle: sits first in the row (the logo's old slot),
+   slightly inset so the ghost grammar matches the trailing new button. */
+.sidebar__brand-toggle--lead {
+  margin-left: -4px;
+}
+
+/* Mode name: plain label between the leading toggle and the trailing actions. */
+.sidebar__modename {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Ghost icon button (new session) — same grammar as the collapse toggle. */
 .sidebar__brand-iconbtn {
   margin-left: auto;

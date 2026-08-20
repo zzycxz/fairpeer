@@ -363,9 +363,7 @@
 .sidebar__section--projects {
   flex: 1 1 auto;
   min-height: 120px;
-  /* ~6 rows visible, the rest scrolls (2026-08-19 density pass); flex-grow
-     still lets shorter trees breathe and keeps the pinned bottom group clear. */
-  max-height: 188px;
+  /* flex-grow lets the tree breathe and keeps the pinned bottom group clear. */
   overflow-y: auto;
   overflow-x: hidden;
 }

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import logoSymbol from "./assets/logo-symbol.png";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
   Activity,
@@ -3257,6 +3256,8 @@ export default function App() {
             bannersNode={bannersNode}
             terminalNode={terminalNode}
             sessionsNode={sidebarSessionsNode}
+            searchNode={sidebarSearchNode}
+            projectTreeNode={projectTreeNode}
             onOpenSettings={(t) => { setSettingsTarget(t as never); setSettingsPayload(null); }}
             onInsertComposer={addWorkspaceTextToComposer}
             onNewSession={() => void handleNewTab()}
@@ -3320,12 +3321,18 @@ export default function App() {
             aria-label={t("sidebar.navigation")}
           >
           <div className="sidebar__brandrow">
-            <img src={logoSymbol} alt="" draggable={false} />
-            {/* Brand row carries the ACTIVE MODE name (2026-08-19): each
-                profile's sidebar announces itself — 编码/办公/运维模式. */}
-            <span>{netdevActive ? t("sidebar.modeNetdev") : coworkActive ? t("sidebar.modeCowork") : t("sidebar.modeDev")}</span>
-            {/* New session rides the brand row as a ghost icon button (2026-08-19
-                restyle) — the old full-width tinted button is gone. */}
+            {/* Logo retired (2026-08-19): the collapse toggle takes the leftmost
+                slot, the mode name follows it; new-session stays right. */}
+            <button
+              type="button"
+              className="app-chrome__panel-toggle app-chrome__panel-toggle--left sidebar__brand-toggle sidebar__brand-toggle--lead"
+              onClick={toggleSidebar}
+              aria-label={sidebarToggleTitle}
+              aria-pressed={!sidebarCollapsed}
+            >
+              <PanelLeft size={16} />
+            </button>
+            <span className="sidebar__modename">{netdevActive ? t("sidebar.modeNetdev") : coworkActive ? t("sidebar.modeCowork") : t("sidebar.modeDev")}</span>
             <button
               type="button"
               className="sidebar__brand-iconbtn"
@@ -3337,18 +3344,12 @@ export default function App() {
             >
               <SquarePen size={15} />
             </button>
-            <button
-              type="button"
-              className="app-chrome__panel-toggle app-chrome__panel-toggle--left sidebar__brand-toggle"
-              onClick={toggleSidebar}
-              aria-label={sidebarToggleTitle}
-              aria-pressed={!sidebarCollapsed}
-            >
-              <PanelLeft size={16} />
-            </button>
           </div>
 
-          {sidebarSearchNode}
+          {/* Search renders ONLY here in dev mode — cowork/netdev render the
+              same node inside their layouts, and the "/" hotkey ref must land
+              on the VISIBLE instance (a hidden duplicate would steal focus). */}
+          {!coworkActive && !netdevActive && sidebarSearchNode}
 
           {sidebarSessionsNode}
 

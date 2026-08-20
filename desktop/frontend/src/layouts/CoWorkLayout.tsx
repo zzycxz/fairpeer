@@ -3,7 +3,6 @@ import { BookOpen, CalendarDays, PanelLeft, SquarePen, Users, SlidersHorizontal 
 
 import { useT } from "../lib/i18n";
 import { app, onExpertsCollab } from "../lib/bridge";
-import logoSymbol from "../assets/logo-symbol.png";
 import { CalendarTaskPanel } from "../components/cowork/CalendarTaskPanel";
 import { RagPanel } from "../components/cowork/RagPanel";
 import { PreferencePanel } from "../components/cowork/PreferencePanel";
@@ -185,9 +184,19 @@ export function CoWorkLayout({
             scroll layer so it stays pinned while the sidebar content scrolls
             (the coding .sidebar's structure). */}
         <div className="sidebar__brandrow" title={t("sidebar.modeCowork")}>
-          <img src={logoSymbol} alt="" draggable={false} />
-          {/* Mode name, mirroring the coding sidebar (2026-08-19). */}
-          <span>{t("sidebar.modeCowork")}</span>
+          {/* Logo retired; collapse toggle leads, mode name follows (2026-08-19). */}
+          {onToggleSidebar && (
+            <button
+              type="button"
+              className="app-chrome__panel-toggle app-chrome__panel-toggle--left sidebar__brand-toggle sidebar__brand-toggle--lead"
+              onClick={onToggleSidebar}
+              aria-label={sidebarToggleTitle}
+              aria-pressed={!sidebarCollapsed}
+            >
+              <PanelLeft size={16} />
+            </button>
+          )}
+          <span className="sidebar__modename">{t("sidebar.modeCowork")}</span>
           <button
             type="button"
             className="sidebar__brand-iconbtn"
@@ -200,17 +209,6 @@ export function CoWorkLayout({
           >
             <SquarePen size={15} />
           </button>
-          {onToggleSidebar && (
-            <button
-              type="button"
-              className="app-chrome__panel-toggle app-chrome__panel-toggle--left sidebar__brand-toggle"
-              onClick={onToggleSidebar}
-              aria-label={sidebarToggleTitle}
-              aria-pressed={!sidebarCollapsed}
-            >
-              <PanelLeft size={16} />
-            </button>
-          )}
         </div>
         <div className="cowork-sidebar__scroll">
           {searchNode}

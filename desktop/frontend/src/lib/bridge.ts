@@ -1801,23 +1801,13 @@ function makeMockApp(): AppBindings {
   // Two seeded devices mirror the topology mock (CORE-01/ACC-01) so the
   // click-a-node → device card flow is demoable in the browser dev shell.
   let mockBackups: { id: string; device: string; at: string; bytes: number; lines: number }[] = [];
-  let mockNetDev: NetDevSettingsView = {
+  let mockNetDev: any = {
     enabled: false,
     networkName: "我的网络",
-    devices: [
-      { name: "CORE-01", vendor: "huawei", os: "vrp", model: "S5731", address: "10.0.0.2", port: 22, via: [], group: "核心", username: "netops", passwordEnv: "NETDEV_CORE01_PW", passwordSet: true, identityFile: "", encoding: "", allowTelnet: false },
-      { name: "ACC-01", vendor: "huawei", os: "vrp", model: "S3100", address: "10.0.2.1", port: 22, via: [], group: "接入", username: "netops", passwordEnv: "NETDEV_ACC01_PW", passwordSet: true, identityFile: "", encoding: "", allowTelnet: false },
-    ],
-    hops: [], groups: [], auditRetention: "", scopes: [],
-    guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [],
-    extraRead: {},
-    projects: [
-      { name: "一号机房", groups: ["核心"], note: "核心机房——CORE 与防火墙所在站点" },
-      { name: "接入园区", groups: ["接入"], note: "办公楼接入层" },
-    ],
-    presets: [
-      { name: "OSPF 邻居全套", commands: ["display ospf peer", "display ospf lsdb", "display interface brief"], vendors: [] },
-    ],
+    devices: null,
+    hops: null, groups: null, auditRetention: "", scopes: null,
+    guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: null,
+    extraRead: null, projects: null, presets: null,
   };
   return {
     async NetDevSettings() {
