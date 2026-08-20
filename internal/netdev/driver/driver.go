@@ -102,6 +102,8 @@ func resolveKey(vendor, os string) string {
 		}
 	case "zte":
 		return "zte-zxr10"
+	case "vmware":
+		return "vmware-esxi"
 	default:
 		return v + "-" + o
 	}

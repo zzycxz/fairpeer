@@ -97,6 +97,7 @@ const QUICK_BATTERY: Record<string, string[]> = {
   huawei: ["display version", "display cpu-usage", "display interface brief"],
   cisco: ["show version", "show processes cpu", "show interfaces status"],
   zte: ["show version", "show processor cpu", "show interface brief"],
+  vmware: ["esxcli system version get", "esxcli network nic list", "esxcfg-vswitch -l", "vim-cmd vmsvc/getallvms"],
 };
 
 // Read-only "grab the running config" command per vendor — the first step of
@@ -105,12 +106,17 @@ const CFG_CMD: Record<string, string> = {
   huawei: "display current-configuration",
   cisco: "show running-config",
   zte: "show running-config",
+  vmware: "esxcli system version get",
 };
 
 type QuickResult = { command: string; output: string; isError: boolean; refused?: string; refusedUnknown?: boolean };
 type DockTab = "devices" | "context" | "topology" | "findings" | "proposals" | "audit";
-const DOCK_TAB_CATALOG: readonly DockTab[] = ["devices", "context", "topology", "findings", "proposals"];
+// Fresh installs open a curated trio — the dock stays calm; the rest join via
+// the "+" dropdown or the bottom-nav entries (拓扑/审计) on demand. Stored
+// state always wins after the user customizes.
+const DOCK_TAB_DEFAULT_OPEN: readonly DockTab[] = ["devices", "findings", "proposals"];
 const NETDEV_DOCK_TABS_KEY = "fairpeer.netdevDockTabs";
+const NETDEV_DOCK_TABS_SEEDED = "fairpeer.netdevDockTabs.seeded";
 
 export function NetDevLayout({
   mainNode,
@@ -203,7 +209,17 @@ export function NetDevLayout({
   const [tab, setTab] = useState<DockTab>("context");
   // Browser-style dock tabs (coding workbench-dock pattern): only OPEN tabs
   // show, each closable, "+" re-opens from the catalog, order persists.
-  const [openTabs, setOpenTabs] = useDockTabState(NETDEV_DOCK_TABS_KEY, DOCK_TAB_CATALOG);
+  // Seed the curated default ONCE (localStorage flag); afterwards the user's
+  // own open/close set is authoritative.
+  const [openTabs, setOpenTabs] = useDockTabState(NETDEV_DOCK_TABS_KEY, (() => {
+    try {
+      if (!localStorage.getItem(NETDEV_DOCK_TABS_SEEDED)) {
+        localStorage.setItem(NETDEV_DOCK_TABS_SEEDED, "1");
+        localStorage.setItem(NETDEV_DOCK_TABS_KEY, JSON.stringify(DOCK_TAB_DEFAULT_OPEN));
+      }
+    } catch { /* storage unavailable */ }
+    return DOCK_TAB_DEFAULT_OPEN;
+  })());
   const [err, setErr] = useState(""); // shown in the global title bar
 
   const reload = useCallback(async () => {
@@ -609,13 +625,28 @@ export function NetDevLayout({
           ) :
           selectedDevice ? (
             <div className="ndv__card">
-              <div className="ndv__card-title">{selectedDevice.name} · {selectedDevice.vendor}/{selectedDevice.os}</div>
-              <div className="ndv__meta">{selectedDevice.address} · {(selectedDevice.via ?? []).join("→") || "直连"}</div>
+              <div className="ndv__card-title">{selectedDevice.name} <span className="ndv__card-sub">· {selectedDevice.vendor}/{selectedDevice.os} · {selectedDevice.address}{(selectedDevice.via ?? []).length ? " · 经 " + (selectedDevice.via ?? []).join("→") : ""}</span></div>
+              <div className="ndv__group-label">快捷诊断</div>
               <div className="ndv__quick-cmds">
                 {(QUICK_BATTERY[selectedDevice.vendor] ?? ["display version"]).map(cmd => (
                   <span key={cmd} className="btn btn--secondary btn--small" role="button" onClick={() => void runQuick(selectedDevice.name, cmd)}>{cmd}</span>
                 ))}
               </div>
+              <div className="ndv__group-label">诊断组合</div>
+              {(settings?.presets ?? []).filter(p => (p.vendors ?? []).length === 0 || (p.vendors ?? []).includes(selectedDevice.vendor)).length > 0 && (
+                <div className="ndv__quick-cmds">
+                  {(settings?.presets ?? []).filter(p => (p.vendors ?? []).length === 0 || (p.vendors ?? []).includes(selectedDevice.vendor)).map(p => (
+                    <span
+                      key={p.name}
+                      className="btn btn--secondary btn--small"
+                      role="button"
+                      title={`${p.commands.join("；")}（逐条经密封路径执行）`}
+                      onClick={() => { for (const c of p.commands) void runQuick(selectedDevice.name, c); }}
+                    >▶ {p.name}</span>
+                  ))}
+                </div>
+              )}
+              <div className="ndv__group-label">配置与备份</div>
               <div className="ndv__quick-cmds">
                 <span
                   className="btn btn--secondary btn--small"
@@ -630,19 +661,6 @@ export function NetDevLayout({
                   >AI 配置变更…</span>
                 )}
               </div>
-              {(settings?.presets ?? []).filter(p => (p.vendors ?? []).length === 0 || (p.vendors ?? []).includes(selectedDevice.vendor)).length > 0 && (
-                <div className="ndv__quick-cmds">
-                  {(settings?.presets ?? []).filter(p => (p.vendors ?? []).length === 0 || (p.vendors ?? []).includes(selectedDevice.vendor)).map(p => (
-                    <span
-                      key={p.name}
-                      className="btn btn--secondary btn--small"
-                      role="button"
-                      title={`${p.commands.join("；")}（逐条经密封路径执行）`}
-                      onClick={() => { for (const c of p.commands) void runQuick(selectedDevice.name, c); }}
-                    >▶ {p.name}</span>
-                  ))}
-                </div>
-              )}
               <BackupHistory device={selectedDevice.name} />
               {Object.values(quick).map(r => (
                 <div key={r.command} className="ndv__quick-result">

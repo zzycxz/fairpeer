@@ -111,4 +111,5 @@ func (ciscoIOS) Classify(cmd string) Class { return ciscoTables.classify(cmd) }
 func init() {
 	register(huaweiVRP{})
 	register(ciscoIOS{})
+	register(vmwareESXi{})
 }

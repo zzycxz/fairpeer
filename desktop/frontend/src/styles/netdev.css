@@ -406,3 +406,15 @@
 .ndv__titlebar > .ndv__stop {
   flex: 0 0 auto;
 }
+
+/* Device-card group labels: quiet section dividers inside the card. */
+.ndv__group-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.45;
+  margin: 10px 0 5px;
+}
+.ndv__group-label:first-of-type { margin-top: 6px; }
+.ndv__card-sub { font-weight: 400; font-size: 11.5px; opacity: 0.65; }
