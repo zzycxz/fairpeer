@@ -144,7 +144,7 @@ type TopologyGraph struct {
 }
 
 func (m *Manager) TopologySnapshot(ctx context.Context) (*TopologyGraph, error) {
-	g := &TopologyGraph{At: time.Now().Format("15:04:05")}
+	g := &TopologyGraph{At: time.Now().Format("15:04:05"), Nodes: []TopologyNode{}, Edges: []TopologyEdge{}}
 	seenNode := map[string]bool{}
 	managed := map[string]bool{}
 	for _, d := range m.cfg.NetDev.Devices {

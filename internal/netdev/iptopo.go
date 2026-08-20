@@ -28,7 +28,10 @@ import (
 // structure (bands + subnet clusters); edges exist only from real neighbor
 // data or an explicit bastion (via) chain.
 func InferTopology(cfg *config.Config) TopologyGraph {
-	g := TopologyGraph{At: time.Now().Format("15:04:05")}
+	// Nodes/Edges start as EMPTY slices, never nil: the bridge serializes nil
+	// as JSON null and the map's stats line reads graph.edges.length — a nil
+	// slice crashed the packaged app on first open (mock always sent []).
+	g := TopologyGraph{At: time.Now().Format("15:04:05"), Nodes: []TopologyNode{}, Edges: []TopologyEdge{}}
 	if cfg == nil {
 		return g
 	}

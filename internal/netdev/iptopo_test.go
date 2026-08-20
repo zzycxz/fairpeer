@@ -63,3 +63,13 @@ func TestInferTopologyEmpty(t *testing.T) {
 		t.Fatalf("expected empty graph, got %+v", g)
 	}
 }
+
+// Serialization contract: the bridge JSON-encodes these graphs, and the UI
+// reads .length on nodes/edges — nil slices become JSON null and crashed the
+// packaged app (mocks always sent arrays, so dev never caught it).
+func TestInferTopologyNonNilCollections(t *testing.T) {
+	g := InferTopology(config.Default())
+	if g.Nodes == nil || g.Edges == nil {
+		t.Fatalf("nil collection: nodes=%v edges=%v", g.Nodes == nil, g.Edges == nil)
+	}
+}

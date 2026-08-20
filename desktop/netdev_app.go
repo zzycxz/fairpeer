@@ -118,6 +118,9 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 	if err != nil {
 		return NetDevSettingsView{}, err
 	}
+	// Every collection starts non-nil: Go nil slices serialize as JSON null
+	// and the UI (built against the always-array dev mocks) reads .length on
+	// them — null crashed the packaged app. The view contract is arrays.
 	v := NetDevSettingsView{
 		Enabled:           cfg.NetDev.Enabled,
 		NetworkName:       cfg.NetDev.NetworkName,
@@ -127,6 +130,20 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 		GuardTurnBudget:   cfg.NetDev.Guardrails.TurnCommandBudget,
 		GuardAllowedGroup: cfg.NetDev.Guardrails.AllowedGroups,
 		ExtraRead:         cfg.NetDev.ExtraRead,
+		Devices:           []NetDevDeviceView{},
+		Hops:              []NetDevHopView{},
+		Groups:            []string{},
+		Projects:          []NetDevProjectView{},
+		Presets:           []NetDevPresetView{},
+	}
+	if v.Scopes == nil {
+		v.Scopes = []string{}
+	}
+	if v.GuardAllowedGroup == nil {
+		v.GuardAllowedGroup = []string{}
+	}
+	if v.ExtraRead == nil {
+		v.ExtraRead = map[string][]string{}
 	}
 	for _, p := range cfg.NetDev.Projects {
 		v.Projects = append(v.Projects, NetDevProjectView{Name: p.Name, Groups: p.Groups, Note: p.Note})
