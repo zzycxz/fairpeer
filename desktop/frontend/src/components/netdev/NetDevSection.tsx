@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { app } from "../../lib/bridge";
-import { ProposalCenter } from "./ProposalCenter";
-import { FindingCenter } from "./FindingCenter";
 import { useConfirm } from "../../lib/confirm";
-import type { NetDevSettingsView, NetDevAuditEntryView, NetDevSSHImportCandidate } from "../../lib/types";
+import type { NetDevSettingsView, NetDevSSHImportCandidate } from "../../lib/types";
 
 // NetDevSection is the 运维 settings tab: device/hop inventory (persisted to
 // the USER config — the [netdev] section is globally pinned), credentials
@@ -36,14 +34,13 @@ export function NetDevSection() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {}, projects: [], presets: [] });
-  const [audit, setAudit] = useState<NetDevAuditEntryView[]>([]);
   const [editingDevice, setEditingDevice] = useState<EditDevice | null>(null);
   const [editingHop, setEditingHop] = useState<EditHop | null>(null);
   const [sshCandidates, setSSHCandidates] = useState<NetDevSSHImportCandidate[]>([]);
 
   const reload = useCallback(async () => {
     try {
-      const [v, a] = await Promise.all([app.NetDevSettings(), app.NetDevAuditTail(50)]);
+      const v = await app.NetDevSettings();
       setView({
         ...v,
         devices: v.devices ?? [],
@@ -53,7 +50,6 @@ export function NetDevSection() {
         projects: v.projects ?? [],
         presets: v.presets ?? [],
       });
-      setAudit(a ?? []);
       setErr("");
     } catch (e) {
       setErr(String(e));
@@ -326,37 +322,10 @@ export function NetDevSection() {
           onClick={() => patch({ presets: [...(view.presets ?? []), { name: "新组合", commands: [], vendors: [] }] })}>+ 新建组合</span>
       </div>
 
-      {/* 巡检 */}
-      <div className="set-label" style={{ margin: "14px 0 6px" }}>巡检</div>
-      <span
-        className="btn btn--secondary btn--small" role="button"
-        onClick={async () => {
-          try {
-            setErr("巡检中…");
-            const f = await app.NetDevRunInspection();
-            setErr(f ? `[SYS] INSPECTION COMPLETE: ${f.title}` : "[SYS] INSPECTION COMPLETE");
-            await reload();
-          } catch (e) { setErr(String(e)); }
-        }}
-      >立即巡检（全部设备，只读电池，结果存 Finding）</span>
-
-      <FindingCenter />
-
-      <ProposalCenter />
-
-      {/* 审计 */}
-      <div className="set-label" style={{ margin: "14px 0 6px" }}>最近审计（{audit.length}）</div>
-      <div className="mem-hint" style={{ maxHeight: 200, overflowY: "auto" }}>
-        {audit.length === 0 && <div>暂无记录。诊断命令执行后此处可见（命令/分类/结果）。</div>}
-        {audit.slice().reverse().map((e, i) => (
-          <div key={i} style={{ display: "flex", gap: 8 }}>
-            <span style={{ minWidth: 96, opacity: 0.7 }}>{e.time}</span>
-            <span style={{ minWidth: 90 }}>{e.device}</span>
-            <span style={{ minWidth: 64 }} className={e.class === "read" ? "" : "banner--error"}>{e.class}</span>
-            <span style={{ minWidth: 80, opacity: 0.7 }}>{e.status}</span>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{e.command}</span>
-          </div>
-        ))}
+      {/* 日常操作入口 — 操作在运维页，设置只留配置 */}
+      <div className="set-label" style={{ margin: "14px 0 6px" }}>日常操作</div>
+      <div className="mem-hint" style={{ marginBottom: 6 }}>
+        巡检、审计、发现（含证据链）、提案审批都在 运维页 的左下角与右栏——本页只放配置：设备、堡垒机、分组/项目、护栏、读表、组合、探测范围。
       </div>
 
       {/* 设备编辑表单 */}

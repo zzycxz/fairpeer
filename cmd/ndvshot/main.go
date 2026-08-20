@@ -34,7 +34,8 @@ func main() {
 	defer cancel()
 
 	handle, err := browserlaunch.Launch(ctx, browserlaunch.LaunchOptions{
-		Headless: true,
+		Headless:  true,
+		ExtraArgs: []string{"--proxy-server=direct://", "--proxy-bypass-list=*"},
 	})
 	if err != nil {
 		fatal("launch browser: %v (is Chrome/Edge installed?)", err)
@@ -61,13 +62,8 @@ func main() {
 	fmt.Println("shot: ndv-1-initial.png")
 
 	// Click the 运维 profile segment (third tab in the top switcher).
-	if err := chromedp.Run(bctx,
-		chromedp.Click(".app-chrome__profile-seg-item >> text=运维", chromedp.ByQueryAll, chromedp.NodeVisible),
-	); err != nil {
-		// Fallback: any segment button containing 运维.
-		if err2 := chromedp.Run(bctx, chromedp.Click(`//button[contains(., "运维")]`, chromedp.BySearch)); err2 != nil {
-			fatal("click 运维 segment: %v / fallback %v", err, err2)
-		}
+	if err := chromedp.Run(bctx, jsClick("运维")); err != nil {
+		fatal("click 运维 segment: %v", err)
 	}
 
 	// Wait for the netdev shell to mount, then capture it and probe its key
@@ -151,7 +147,7 @@ func main() {
 	// there instantly (badge), the measured LLDP sweep only on explicit click
 	// (badge flips), then click the CORE-01 node → device card.
 	if err := chromedp.Run(bctx,
-		chromedp.Click(`//button[contains(., "拓扑")]`, chromedp.BySearch),
+		jsClick("拓扑"),
 		chromedp.Sleep(1200*time.Millisecond),
 	); err != nil {
 		fatal("topology tab: %v", err)
@@ -165,7 +161,7 @@ func main() {
 	}
 	fmt.Println("topology-local-plan: OK (instant, no device dialing)")
 	if err := chromedp.Run(bctx,
-		chromedp.Click(`//span[contains(., "LLDP 实测校准")]`, chromedp.BySearch),
+		jsClick("LLDP 实测校准"),
 		chromedp.Sleep(1200*time.Millisecond),
 	); err != nil {
 		fatal("lldp calibrate click: %v", err)
@@ -262,7 +258,7 @@ func main() {
 		chromedp.Reload(),
 		chromedp.WaitReady("body", chromedp.ByQuery),
 		chromedp.Sleep(2500*time.Millisecond),
-		chromedp.Click(`//button[contains(., "运维")]`, chromedp.BySearch),
+		jsClick("运维"),
 		chromedp.WaitReady(".ndv", chromedp.ByQuery),
 		chromedp.Sleep(1500*time.Millisecond),
 		chromedp.Evaluate(`(function(){var els=[...document.querySelectorAll(".ndv__dock span[role=button], .ndv__dock button")]; var b=els.find(e=>e.textContent.indexOf("生成今日简报")>=0); if(!b) return "no-btn"; b.scrollIntoView({block:"center"}); b.click(); return "clicked";})()`, new(string)),
@@ -290,11 +286,28 @@ const visibleMermaidScrollJS = `(function(){var s=document.querySelectorAll("svg
 // countVisibleMermaidJS counts rendered mermaid diagrams with non-zero size.
 const countVisibleMermaidJS = `(function(){var n=0; document.querySelectorAll("svg[id^='mermaid-']").forEach(function(el){ if(el.getBoundingClientRect().width>0) n++; }); return n;})()`
 
-// saveShot captures a full-page screenshot into path.
+
+// jsClick dispatches a real click via Runtime.evaluate — immune to the CDP
+// domains (DOM.performSearch, Page.captureScreenshot) that hang on some
+// system graphics states.
+func jsClick(text string) chromedp.Action {
+	return chromedp.Evaluate(`(function(){var els=[...document.querySelectorAll("button, span[role=button]")]; var b=els.find(e=>e.textContent.indexOf("`+text+`")>=0); if(!b) return "not-found"; b.scrollIntoView({block:"center"}); b.click(); return "clicked";})()`, new(string))
+}
+
+// saveShot captures a full-page screenshot into path. Screenshot capture is
+// system-state dependent (it has hung machine-wide after graphics-driver
+// changes); a capture failure downgrades to a warning so the DOM assertions —
+// the actual regression signal — still run.
 func saveShot(ctx context.Context, path string) error {
 	var buf []byte
-	if err := chromedp.FullScreenshot(&buf, 90).Do(ctx); err != nil {
-		return err
+	if err := func() error {
+		// Bounded sub-context: a hung capture must not eat the probe's budget.
+		sctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		defer cancel()
+		return chromedp.FullScreenshot(&buf, 90).Do(sctx)
+	}(); err != nil {
+		fmt.Fprintf(os.Stderr, "ndvshot: shot unavailable (%s): %v\n", filepath.Base(path), err)
+		return nil
 	}
 	return os.WriteFile(path, buf, 0o644)
 }

@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { AlertTriangle, BookOpen, ClipboardCheck, Network, PanelLeft, SquarePen } from "lucide-react";
+import { AlertTriangle, BookOpen, ClipboardCheck, Network, PanelLeft, ScanSearch, ScrollText, Server, SlidersHorizontal, SquarePen } from "lucide-react";
 import { app } from "../lib/bridge";
 import { WorkspacePill } from "../components/WorkspacePill";
 import { useConfirm } from "../lib/confirm";
@@ -83,13 +83,15 @@ export function NetdevTitleBar({ leading, onOpenSettings }: { leading?: ReactNod
         title="安全策略入口：结构性只读（无开关，地板）· 设备组策略（只读/提案/双确认）· 提案审批与变更窗口 · 安全评估 engagement · 点击打开设置"
         onClick={() => onOpenSettings?.("netdev")}
       >[ 诊断·只读 ]</span>
-      {err && <span className="ndv__stat" style={{ color: "#ff8787" }}>{err}</span>}
+      {err && <span className="ndv__stat" style={{ color: "var(--err)" }}>{err}</span>}
       <span className="ndv__stop" role="button" onClick={() => void stop()}>⏹ 紧急停止</span>
     </div>
   );
 }
 
-const SEV_COLOR: Record<string, string> = { info: "#7ab8ff", warning: "#e0a800", critical: "#ff6b6b" };
+// Severity colors ride the THEME TOKENS (accent/warn/danger) — never literal
+// hexes, so every theme reads consistently (user direction: 配色跟随全局).
+const SEV_COLOR: Record<string, string> = { info: "var(--accent)", warning: "var(--warn)", critical: "var(--danger)" };
 
 const QUICK_BATTERY: Record<string, string[]> = {
   huawei: ["display version", "display cpu-usage", "display interface brief"],
@@ -106,8 +108,8 @@ const CFG_CMD: Record<string, string> = {
 };
 
 type QuickResult = { command: string; output: string; isError: boolean; refused?: string; refusedUnknown?: boolean };
-type DockTab = "context" | "topology" | "findings" | "proposals";
-const DOCK_TAB_CATALOG: readonly DockTab[] = ["context", "topology", "findings", "proposals"];
+type DockTab = "devices" | "context" | "topology" | "findings" | "proposals" | "audit";
+const DOCK_TAB_CATALOG: readonly DockTab[] = ["devices", "context", "topology", "findings", "proposals"];
 const NETDEV_DOCK_TABS_KEY = "fairpeer.netdevDockTabs";
 
 export function NetDevLayout({
@@ -133,6 +135,7 @@ export function NetDevLayout({
   onSidebarResetWidth,
   dockOpen = true,
   dockOnClose,
+  onDockOpen,
   dockWidth,
   dockMinWidth,
   dockMaxAriaWidth,
@@ -177,6 +180,9 @@ export function NetDevLayout({
   // dockOnClose also fires when the last strip tab is closed.
   dockOpen?: boolean;
   dockOnClose?: () => void;
+  // Re-opens a closed dock (the bottom-left 设备清单 nav entry) — App owns the
+  // open state.
+  onDockOpen?: () => void;
   dockWidth?: number;
   dockMinWidth?: number;
   dockMaxAriaWidth?: number;
@@ -377,10 +383,12 @@ export function NetDevLayout({
   }, [project, topo, scopedDeviceNames]);
 
   const TABS: { key: DockTab; label: string; badge?: number; icon: React.ReactNode }[] = [
+    { key: "devices", label: "设备", badge: devices.length || undefined, icon: <Server size={13} /> },
     { key: "context", label: "手册", icon: <BookOpen size={13} /> },
     { key: "topology", label: "拓扑", icon: <Network size={13} /> },
     { key: "findings", label: "发现", badge: scopedFindings.length || undefined, icon: <AlertTriangle size={13} /> },
     { key: "proposals", label: "提案", badge: pendingCount || undefined, icon: <ClipboardCheck size={13} /> },
+    { key: "audit", label: "审计", icon: <ScrollText size={13} /> },
   ];
 
   // Active tab closed (or restored state desyncs) → fall back to the last
@@ -479,43 +487,43 @@ export function NetDevLayout({
             {projectTreeNode}
           </section>
         )}
-        <div className="ndv__section-row">
-          <div className="ndv__section">设备清单</div>
-          <span className="ndv__section-meta">{project ? `${project.name} · ` : ""}{devices.length} 台</span>
-        </div>
-        {devices.length === 0 && (
-          <div className="ndv__hint">还没有设备。右栏「开始使用」三步录入。</div>
-        )}
-        {[...groups.entries()].map(([g, list]) => (
-          <div key={g} className="ndv__group">
-            <div className="ndv__group-row"><span>▸ {g}</span><span>{list.length}</span></div>
-            {list.map(d => (
-              <div
-                key={d.name}
-                className={`ndv__device ndv__device--click${selected === d.name ? " ndv__device--sel" : ""}`}
-                role="button"
-                onClick={() => { setSelected(d.name); setTab("context"); setOpenTabs((prev) => (prev.includes("context") ? prev : [...prev, "context"])); setQuick({}); }}
-              ><span className="ndv__device-name">{d.name}</span><span className="ndv__device-addr">{d.address}</span></div>
-            ))}
-          </div>
-        ))}
-        {(settings?.hops?.length ?? 0) > 0 && (
-          <>
-            <div className="ndv__section-row"><div className="ndv__section">堡垒链</div><span className="ndv__section-meta">{settings?.hops.length} 跳</span></div>
-            {(settings?.hops ?? []).map(h => (
-              <div key={h.name} className="ndv__device"><span className="ndv__device-name">{h.name}</span><span className="ndv__device-addr">{h.host}</span></div>
-            ))}
-          </>
-        )}
-        <div className="ndv__section-row">
-          <div className="ndv__section">巡检</div>
-          <span className="btn btn--secondary btn--small ndv__section-btn" role="button" onClick={() => void runInspection()}>
-            {inspBusy ? "巡检中…" : "立即巡检"}
-          </span>
-        </div>
-        {lastInspection && (
-          <div className="ndv__hint">上次：{lastInspection.title}（{String(lastInspection.created_at ?? "").slice(5, 16).replace("T", " ")}）</div>
-        )}
+        {/* 运维专属导航 — the pinned bottom-left group, mirroring the
+            coding/office sidebars' bottom nav (编码偏好 / 办公偏好…). The
+            device inventory itself lives in the right dock's 设备 tab;
+            巡检 is a direct action; 运维偏好 opens settings. */}
+        <section className="cowork-sidebar__group" style={{ marginBottom: '0px', marginTop: 'auto' }}>
+          <button
+            className={`cowork-sidebar__item ${dockOpen && tab === "devices" ? "cowork-sidebar__item--active" : ""}`}
+            onClick={() => {
+              onDockOpen?.();
+              openDockTabFn("devices");
+            }}
+          >
+            <Server size={14} />
+            <span>设备清单</span>
+          </button>
+          <button
+            className="cowork-sidebar__item"
+            onClick={() => void runInspection()}
+          >
+            <ScanSearch size={14} />
+            <span>{inspBusy ? "巡检中…" : "立即巡检"}</span>
+          </button>
+          <button
+            className={`cowork-sidebar__item ${dockOpen && tab === "audit" ? "cowork-sidebar__item--active" : ""}`}
+            onClick={() => { onDockOpen?.(); openDockTabFn("audit"); }}
+          >
+            <ScrollText size={14} />
+            <span>审计（{todayAudit.length}）</span>
+          </button>
+          <button
+            className="cowork-sidebar__item"
+            onClick={() => onOpenSettings("netdev")}
+          >
+            <SlidersHorizontal size={14} />
+            <span>运维偏好</span>
+          </button>
+        </section>
         </div>
       </div>
 
@@ -560,6 +568,39 @@ export function NetDevLayout({
         />
         <div className="ndv__dock-body">
         {err && <div className="banner banner--error" style={{ marginBottom: 8 }}>{err}</div>}
+
+        {tab === "devices" && (
+          <div className="ndv__card">
+            <div className="ndv__card-title">设备清单{project ? <span style={{ fontWeight: 400, fontSize: 11 }}> · {project.name}</span> : ""}（{devices.length}）</div>
+            {lastInspection && (
+              <div className="ndv__meta">上次巡检：{lastInspection.title}（{String(lastInspection.created_at ?? "").slice(5, 16).replace("T", " ")}）</div>
+            )}
+            {devices.length === 0 && (
+              <div className="ndv__hint">还没有设备。「手册」页签的 开始使用 三步录入，或 设置 → 运维。</div>
+            )}
+            {[...groups.entries()].map(([g, list]) => (
+              <div key={g} className="ndv__group">
+                <div className="ndv__group-row"><span>▸ {g}</span><span>{list.length}</span></div>
+                {list.map(d => (
+                  <div
+                    key={d.name}
+                    className={`ndv__device ndv__device--click${selected === d.name ? " ndv__device--sel" : ""}`}
+                    role="button"
+                    onClick={() => { setSelected(d.name); setTab("context"); setOpenTabs((prev) => (prev.includes("context") ? prev : [...prev, "context"])); setQuick({}); }}
+                  ><span className="ndv__device-name">{d.name}</span><span className="ndv__device-addr">{d.address}</span></div>
+                ))}
+              </div>
+            ))}
+            {(settings?.hops?.length ?? 0) > 0 && (
+              <>
+                <div className="ndv__section-row"><div className="ndv__section">堡垒链</div><span className="ndv__section-meta">{settings?.hops.length} 跳</span></div>
+                {(settings?.hops ?? []).map(h => (
+                  <div key={h.name} className="ndv__device"><span className="ndv__device-name">{h.name}</span><span className="ndv__device-addr">{h.host}</span></div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
 
         {tab === "context" && (
           allDevices.length === 0 ? <GettingStarted onOpenSettings={onOpenSettings} /> :
@@ -631,7 +672,7 @@ export function NetDevLayout({
         {tab === "topology" && (
           <div className="ndv__card">
             <div className="ndv__card-title">
-              拓扑 <span style={{ fontWeight: 400, fontSize: 11, color: topoSource === "measured" ? "#7ee2a8" : "var(--accent, #7ab8ff)" }}>
+              拓扑 <span style={{ fontWeight: 400, fontSize: 11, color: topoSource === "measured" ? "var(--ok)" : "var(--accent)" }}>
                 {topoSource === "measured" ? "[ LLDP/CDP 实测 ]" : "[ IP 规划推断（本地计算，未连接设备） ]"}
               </span>
             </div>
@@ -644,7 +685,7 @@ export function NetDevLayout({
               </span>
             </div>
             {topoNotice && (
-              <div className="ndv__hint" style={{ padding: 0, marginBottom: 8, color: "var(--accent, #7ab8ff)" }}>{topoNotice}</div>
+              <div className="ndv__hint" style={{ padding: 0, marginBottom: 8, color: "var(--accent)" }}>{topoNotice}</div>
             )}
             {topo && <TopologyMap graph={scopedTopo ?? topo} selected={selected} selectedAddr={selectedDevice?.address} onPick={pickFromTopo} />}
             {!topo && !topoBusy && (
@@ -669,13 +710,7 @@ export function NetDevLayout({
               >{baseBusy ? "核查中…" : "安全基线核查"}</span>
             </div>
             {scopedFindings.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>{project ? `>> 项目「${project.name}」暂无数据。` : <>&gt;&gt; NULL_DATA: 证据池为空。Agent 诊断输出及全量巡检报告将在此落盘 (Enforced Evidence-Based)。</>}</div>}
-            {scopedFindings.slice(0, 20).map(f => (
-              <div key={f.id} className="ndv__finding" style={{ "--sev": SEV_COLOR[f.severity] ?? SEV_COLOR.info } as React.CSSProperties}>
-                <div className="ndv__finding-title">{f.title}</div>
-                <div className="ndv__meta">{(f.devices ?? []).join("、")} · 证据 {f.evidence?.length ?? 0} 条</div>
-                {f.suggestion && <div className="ndv__finding-suggestion">建议：{f.suggestion}</div>}
-              </div>
-            ))}
+            {scopedFindings.slice(0, 20).map(f => <FindingRow key={f.id} f={f} />)}
           </div>
         )}
 
@@ -684,7 +719,7 @@ export function NetDevLayout({
             <div className="ndv__card-title">提案（{scopedProposals.length}）{project && <span style={{ fontWeight: 400, fontSize: 11 }}> · {project.name}</span>}</div>
             {scopedProposals.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>{project ? `>> 项目「${project.name}」暂无提案。` : <>&gt;&gt; NULL_DATA: 无挂起提案。在交互终端向 Agent 下达变更意图 (netdev_propose) 进入审批流。</>}</div>}
             {scopedProposals.slice(0, 10).map(p => <ProposalRow key={p.id} p={p} onDone={() => void reload()} />)}
-            <div className="ndv__hint" style={{ padding: 0 }}>批准 / 执行 / 回滚在行内直接操作；完整视图在 设置 → 运维 → 提案中心。</div>
+            <div className="ndv__hint" style={{ padding: 0 }}>批准 / 执行 / 回滚在行内直接操作；agent 只能起草，执行权永远在人。</div>
           </div>
         )}
         </div>
@@ -708,7 +743,7 @@ function GettingStarted({ onOpenSettings }: { onOpenSettings: (tab: string) => v
   const steps: { text: string; action?: { label: string; run: () => void } }[] = [
     { text: "录入设备：地址 / 厂商 / 登录凭证", action: { label: "打开 设置 → 运维", run: () => onOpenSettings("netdev") } },
     { text: "设备编辑里点「测试连接」——首次弹出主机密钥指纹，确认即信任（TOFU）" },
-    { text: "左栏点设备快捷诊断，或在对话里描述故障现象（如「core-sw-1 的 OSPF 邻居一直 down」）" },
+    { text: "「设备」页签点设备快捷诊断，或在对话里描述故障现象（如「core-sw-1 的 OSPF 邻居一直 down」）" },
   ];
   return (
     <div className="ndv__card ndv__gs">
@@ -758,7 +793,7 @@ function DailyBriefing() {
           {busy ? "汇总中…" : "生成今日简报"}
         </span>
       </div>
-      {err && <div className="ndv__meta" style={{ color: "#ff8787" }}>{err}</div>}
+      {err && <div className="ndv__meta" style={{ color: "var(--err)" }}>{err}</div>}
       {text && (
         <div className="ndv__md">
           <Markdown text={text} />
@@ -823,7 +858,7 @@ function BackupHistory({ device }: { device: string }) {
         >{busy ? "备份中…" : "备份配置"}</span>
         <span className="ndv__meta" style={{ marginBottom: 0 }}>版本 {versions.length}，勾选两个看 diff</span>
       </div>
-      {err && <div className="ndv__meta" style={{ color: "#ff8787" }}>{err}</div>}
+      {err && <div className="ndv__meta" style={{ color: "var(--err)" }}>{err}</div>}
       {versions.slice(0, 8).map(v => (
         <div key={v.id} className="ndv__backup-row" role="button" onClick={() => toggle(v.id)}>
           <span style={{ opacity: pick.includes(v.id) ? 1 : 0.45 }}>{pick.includes(v.id) ? "☑" : "☐"}</span>
@@ -842,6 +877,37 @@ function BackupHistory({ device }: { device: string }) {
             <span key={i} className={l.startsWith("+") ? "ndv__dl-add" : l.startsWith("-") ? "ndv__dl-del" : undefined}>{l}{"\n"}</span>
           ))}
         </pre>
+      )}
+    </div>
+  );
+}
+
+// FindingRow: one diagnosis conclusion with its expandable evidence chain
+// (device ▸ command ▸ output) — the review surface, ported from the settings
+// FindingCenter so operations never leave the 运维 page.
+const SEV_LABEL: Record<string, string> = { info: "ℹ 提示", warning: "⚠ 警告", critical: "🔴 严重" };
+function FindingRow({ f }: { f: NetDevFinding }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="ndv__finding" style={{ "--sev": SEV_COLOR[f.severity] ?? SEV_COLOR.info } as React.CSSProperties}>
+      <div className="ndv__finding-title" role="button" onClick={() => setOpen(!open)}>
+        <span style={{ color: SEV_COLOR[f.severity] ?? SEV_COLOR.info, marginRight: 6 }}>{SEV_LABEL[f.severity] ?? SEV_LABEL.info}</span>
+        {f.title} <span style={{ fontWeight: 400, opacity: 0.7 }}>证据 {f.evidence?.length ?? 0} 条 {open ? "▲" : "▼"}</span>
+      </div>
+      <div className="ndv__meta">{(f.devices ?? []).join("、")}{f.suggestion ? "" : ""}</div>
+      {f.suggestion && !open && <div className="ndv__finding-suggestion">建议：{f.suggestion}</div>}
+      {open && (
+        <div style={{ marginTop: 4 }}>
+          {f.detail && <div className="ndv__meta">{f.detail}</div>}
+          {(f.evidence ?? []).map((e, i) => (
+            <div key={i} style={{ marginBottom: 6, marginLeft: 8 }}>
+              <div style={{ opacity: 0.8, fontSize: 11.5 }}>{e.device} ▸ <code>{e.command}</code></div>
+              <pre className="ndv__pre" style={{ maxHeight: 140 }}>{e.output}</pre>
+            </div>
+          ))}
+          {f.suggestion && <div className="ndv__finding-suggestion">建议：{f.suggestion}（可让 agent 起草提案）</div>}
+          <div className="ndv__meta">{String(f.created_at ?? "").slice(0, 19).replace("T", " ")}</div>
+        </div>
       )}
     </div>
   );
@@ -926,7 +992,7 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 640, marginTop: 8, display: "block" }}>
         {bandY.map((y, i) =>
           bands[i].length > 0 ? (
-            <text key={i} x={10} y={y - 20} fontSize={10} fill="var(--text-dim, #888)" opacity={0.8}>
+            <text key={i} x={10} y={y - 20} fontSize={10} fill="var(--fg-faint)" opacity={0.8}>
               {TIER_LABEL[i]}
             </text>
           ) : null,
@@ -938,7 +1004,7 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
             <line
               key={i}
               x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
-              stroke="var(--border, #555)"
+              stroke="var(--border)"
               strokeWidth={1}
               opacity={0.85}
             >
@@ -961,15 +1027,15 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
               <rect
                 x={p.x - 30} y={p.y - 10} width={60} height={20} rx={5}
                 fill={sel
-                  ? "var(--accent-dim, rgba(122,184,255,.2))"
-                  : v.managed ? "var(--bg-elev, #2a2a2e)" : "transparent"}
+                  ? "var(--accent-soft)"
+                  : v.managed ? "var(--bg-elev)" : "transparent"}
                 stroke={sel
-                  ? "var(--accent, #7ab8ff)"
-                  : v.managed ? (tier === 0 ? "var(--accent, #7ab8ff)" : "var(--border, #555)") : "var(--border, #555)"}
+                  ? "var(--accent)"
+                  : v.managed ? (tier === 0 ? "var(--accent)" : "var(--border)") : "var(--border)"}
                 strokeWidth={sel ? 2 : v.managed && tier === 0 ? 1.6 : 1}
                 strokeDasharray={v.managed ? undefined : "3 3"}
               />
-              <text x={p.x} y={p.y + 3.5} textAnchor="middle" fontSize={9} fill={v.managed ? "var(--text, #ccc)" : "var(--text-dim, #888)"}>
+              <text x={p.x} y={p.y + 3.5} textAnchor="middle" fontSize={9} fill={v.managed ? "var(--fg)" : "var(--fg-faint)"}>
                 {v.name.length > 9 ? v.name.slice(0, 9) + "…" : v.name}
               </text>
               <title>{`${v.name}${nv?.device_ip ? " · " + nv.device_ip : ""}${v.subnet ? " · " + v.subnet : ""}${v.managed ? " · 纳管" : " · 未纳管"}${v.tier !== undefined && v.tier >= 0 ? " · 分层为本地推断" : ` · 连接 ${degree.get(v.name) ?? 0}`}${v.managed && onPick ? " · 点击查看设备" : ""}`}</title>
