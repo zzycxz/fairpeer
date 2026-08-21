@@ -361,6 +361,10 @@ func (a *App) startup(ctx context.Context) {
 	// linkpeer mobile bridge: loads device key, connects to signaling K.
 	// Runs async — never blocks GUI startup. No-op if the key store can't init.
 	go a.ensureMobileBridge(ctx)
+	// ppt-auto: preinstall the skill's Python deps (pip install) in the
+	// background so the first PPT generation doesn't pay the setup cliff
+	// mid-task. Marker-guarded; failure retries next launch. Never blocks.
+	go ensurePPTAutoDeps()
 	// Route slog to a file in the config dir so diagnostic logs (mail save,
 	// probe, panic traces) are visible in a packaged GUI build, where stdout/
 	// stderr are not attached. Truncates on each launch to avoid unbounded
@@ -679,25 +683,46 @@ func (p schedulerIMPusher) Push(ctx context.Context, dest, text string) error {
 	return gw.Push(ctx, dest, text)
 }
 
-// schedulerRunner implements scheduler.Runner by running a prompt in the active
-// cowork tab's controller. A scheduled task fires headlessly into the agent
-// loop; the result text (or error) is returned to the scheduler, which stores it
-// on the task for schedule_list inspection. If no cowork tab is active, the run
-// is skipped with a clear message.
+// schedulerRunner implements scheduler.Runner by running a prompt in a tab of
+// the task's profile. A scheduled task fires headlessly into the agent loop;
+// the result text (or error) is returned to the scheduler, which stores it on
+// the task for schedule_list inspection. The profiles are independent
+// surfaces: the interactive path only uses a tab whose profile MATCHES the
+// task's (a cowork prompt must not execute inside a netdev-sealed or dev tab),
+// preferring the active tab, then any ready tab of that profile.
 type schedulerRunner struct{ app *App }
+
+// scheduledTargetTabLocked returns the tab a scheduled task of the given profile
+// should run in: the active tab when it belongs to the task's profile, else any
+// ready tab of that profile. The profiles are independent surfaces — a cowork
+// task must never execute inside a dev or netdev (sealed) tab, and vice versa.
+// Callers must hold a.mu (a read lock is enough).
+func scheduledTargetTabLocked(a *App, profile string) *WorkspaceTab {
+	want := normalizeProfileName(profile)
+	if tab := a.tabs[a.activeTabID]; tab != nil && tab.Ctrl != nil && tab.Ready && normalizeProfileName(tab.profile) == want {
+		return tab
+	}
+	for _, t := range a.tabs {
+		if t.Ctrl != nil && t.Ready && normalizeProfileName(t.profile) == want {
+			return t
+		}
+	}
+	return nil
+}
 
 func (r schedulerRunner) Run(ctx context.Context, profile, prompt string) (string, error) {
 	r.app.mu.RLock()
-	tab := r.app.tabs[r.app.activeTabID]
+	tab := scheduledTargetTabLocked(r.app, profile)
 	r.app.mu.RUnlock()
-	if tab != nil && tab.Ctrl != nil && tab.Ready {
+	if tab != nil {
 		return runScheduledPrompt(ctx, tab.Ctrl, prompt)
 	}
-	// No usable active tab — previously this returned an error and the scheduled
-	// task silently failed (scheduler.runOne records the error but does not
-	// retry, so the prompt was lost). The scheduler package comment explicitly
-	// promises tasks "must fire even when no chat tab is open"; build a temporary
-	// headless cowork controller so the task still runs. See audit finding C7.
+	// No usable tab of the task's profile — previously this returned an error
+	// and the scheduled task silently failed (scheduler.runOne records the
+	// error but does not retry, so the prompt was lost). The scheduler package
+	// comment explicitly promises tasks "must fire even when no chat tab is
+	// open"; build a temporary headless controller in the task's profile so the
+	// task still runs. See audit finding C7.
 	//
 	// Headless mode is STRICTER than interactive: boot installs a headless
 	// permission gate (deny-by-default for unconfigured writers), so email_send
@@ -1920,8 +1945,67 @@ func (a *App) activeSessionDir() string {
 // Directories returned by knownSessionDirs may overlap (the same dir added via
 // different paths), so entries are deduped by session file path.
 func (a *App) ListSessions() []SessionMeta {
+	return a.listSessions("")
+}
+
+// ListSessionsForProfile returns saved sessions newest-first, restricted to the
+// given profile's partition ("dev"/"cowork"/"netdev"). The three workspaces are
+// independent surfaces: the ops sidebar must not list coding or office
+// conversations, and vice versa, so the frontend session lists pass the active
+// tab's profile here instead of relying on ListSessions' cross-profile union.
+func (a *App) ListSessionsForProfile(profile string) []SessionMeta {
+	return a.listSessions(normalizeProfileName(profile))
+}
+
+// namedPartitionDirs returns the exact session directories that belong to the
+// NAMED (non-dev) profile partitions, global and per-project, across every
+// profile's projects index. Computed from config.SessionDirFor/
+// ProjectSessionDirFor rather than path-pattern matching so a workspace
+// literally named "cowork" is not misclassified.
+func (a *App) namedPartitionDirs() map[string]string {
+	dirs := map[string]string{}
+	roots := []string{globalWorkspaceRoot()}
+	for _, key := range []string{config.ProfileDev, config.ProfileCowork, config.ProfileNetDev} {
+		for _, p := range loadProjectsFile(key).Projects {
+			if root := strings.TrimSpace(p.Root); root != "" {
+				roots = append(roots, root)
+			}
+		}
+	}
+	for _, key := range []string{config.ProfileCowork, config.ProfileNetDev} {
+		if d := config.SessionDirFor(key); d != "" {
+			dirs[d] = key
+		}
+		for _, root := range roots {
+			if d := config.ProjectSessionDirFor(root, key); d != "" {
+				dirs[d] = key
+			}
+		}
+	}
+	return dirs
+}
+
+// classifySessionProfile attributes a session listed from dir to a profile
+// key. The directory partition is the reliable signal (named profiles live in
+// their own dirs); the session's .meta Profile stamp breaks ties for legacy
+// unpartitioned dirs, which otherwise count as dev.
+func classifySessionProfile(dir, metaProfile string, namedDirs map[string]string) string {
+	if key, ok := namedDirs[dir]; ok && key != "" {
+		return key
+	}
+	if p := config.ProfileNameKey(metaProfile); p != "" {
+		return p
+	}
+	return config.ProfileDev
+}
+
+func (a *App) listSessions(onlyProfile string) []SessionMeta {
 	out := []SessionMeta{}
 	seen := map[string]bool{} // dedupe by session file path; same dir can be listed more than once
+	namedDirs := map[string]string{}
+	if onlyProfile != "" {
+		namedDirs = a.namedPartitionDirs()
+	}
 	// The "current"/"open" markers are per-directory: a session is only current
 	// relative to the dir its tab writes to, so resolve them once per dir.
 	activeDir := a.activeSessionDir()
@@ -1938,6 +2022,9 @@ func (a *App) ListSessions() []SessionMeta {
 				continue
 			}
 			seen[s.Path] = true
+			if onlyProfile != "" && classifySessionProfile(dir, s.Profile, namedDirs) != onlyProfile {
+				continue
+			}
 			_, isOpen := open[s.Path]
 			meta := sessionMetaFromInfo(s, titles[filepath.Base(s.Path)], s.Path == activePath, isOpen, 0)
 			out = append(out, meta)
@@ -1957,7 +2044,21 @@ func (a *App) ListSessions() []SessionMeta {
 // ListTrashedSessions returns sessions that were moved to the local trash,
 // newest-deleted first. These can be previewed, restored, or permanently purged.
 func (a *App) ListTrashedSessions() []SessionMeta {
+	return a.listTrashedSessions("")
+}
+
+// ListTrashedSessionsForProfile is the profile-scoped trash list, matching
+// ListSessionsForProfile's partition attribution.
+func (a *App) ListTrashedSessionsForProfile(profile string) []SessionMeta {
+	return a.listTrashedSessions(normalizeProfileName(profile))
+}
+
+func (a *App) listTrashedSessions(onlyProfile string) []SessionMeta {
 	out := []SessionMeta{}
+	namedDirs := map[string]string{}
+	if onlyProfile != "" {
+		namedDirs = a.namedPartitionDirs()
+	}
 	for _, dir := range a.knownSessionDirs() {
 		paths, err := listTrashedSessionFiles(dir)
 		if err != nil {
@@ -1967,6 +2068,9 @@ func (a *App) ListTrashedSessions() []SessionMeta {
 		for _, path := range paths {
 			infos, err := agent.ListSessions(filepath.Dir(path))
 			if err != nil || len(infos) == 0 {
+				continue
+			}
+			if onlyProfile != "" && classifySessionProfile(dir, infos[0].Profile, namedDirs) != onlyProfile {
 				continue
 			}
 			deletedAt := trashedSessionDeletedAt(path)
@@ -2092,7 +2196,8 @@ func (a *App) RestoreSession(path string) error {
 	if err := restoreTrashedSessionFile(dir, path); err != nil {
 		return err
 	}
-	if err := restoreSessionTopicIndex(dir, filepath.Join(dir, key), a.activeProfileKey()); err != nil {
+	// Folder layout (2026-08-21): restore lands at <dir>/<stem>/<key>.
+	if err := restoreSessionTopicIndex(dir, filepath.Join(dir, strings.TrimSuffix(key, ".jsonl"), key), a.activeProfileKey()); err != nil {
 		return err
 	}
 	a.emitProjectTreeChanged()
@@ -2764,12 +2869,23 @@ func firstNonEmpty(values ...string) string {
 }
 
 // ContextInfo is the prompt-vs-window gauge payload plus session totals. Used
-// and Window both zero means no context-window data yet.
+// and Window both zero means no context-window data yet. The Session* fields
+// are session-cumulative telemetry (same numbers the right-dock context panel
+// reads) so the composer usage chip's hover detail can show aggregate cache
+// hit-rate and token splits without extra polling.
 type ContextInfo struct {
 	Used          int     `json:"used"`
 	Window        int     `json:"window"`
 	SessionTokens int     `json:"sessionTokens"`
 	CompactRatio  float64 `json:"compactRatio,omitempty"`
+
+	SessionPromptTokens     int `json:"sessionPromptTokens,omitempty"`
+	SessionCompletionTokens int `json:"sessionCompletionTokens,omitempty"`
+	SessionReasoningTokens  int `json:"sessionReasoningTokens,omitempty"`
+	SessionCacheHitTokens   int `json:"sessionCacheHitTokens,omitempty"`
+	SessionCacheMissTokens  int `json:"sessionCacheMissTokens,omitempty"`
+	SessionCacheWriteTokens int `json:"sessionCacheWriteTokens,omitempty"`
+	RequestCount            int `json:"requestCount,omitempty"`
 }
 
 // ContextUsage returns the latest context-window gauge numbers.
@@ -2786,15 +2902,26 @@ func (a *App) ContextUsageForTab(tabID string) ContextInfo {
 	}
 	a.mu.RUnlock()
 
-	var sessionTokens int
+	info := ContextInfo{}
 	if tab != nil {
-		sessionTokens = tab.telemetrySnapshot().Usage.TotalTokens
+		telemetry := tab.telemetrySnapshot().Usage
+		info.SessionTokens = telemetry.TotalTokens
+		info.SessionPromptTokens = telemetry.PromptTokens
+		info.SessionCompletionTokens = telemetry.CompletionTokens
+		info.SessionReasoningTokens = telemetry.ReasoningTokens
+		info.SessionCacheHitTokens = telemetry.CacheHitTokens
+		info.SessionCacheMissTokens = telemetry.CacheMissTokens
+		info.SessionCacheWriteTokens = telemetry.CacheWriteTokens
+		info.RequestCount = telemetry.RequestCount
 	}
 	if ctrl == nil {
-		return ContextInfo{SessionTokens: sessionTokens}
+		return info
 	}
 	used, window := ctrl.ContextSnapshot()
-	return ContextInfo{Used: used, Window: window, SessionTokens: sessionTokens, CompactRatio: ctrl.CompactRatio()}
+	info.Used = used
+	info.Window = window
+	info.CompactRatio = ctrl.CompactRatio()
+	return info
 }
 
 // JobView is one running background job (bash/task started with
@@ -3180,6 +3307,10 @@ type ServerView struct {
 	AuthStatus     string     `json:"authStatus,omitempty"`
 	AuthURL        string     `json:"authUrl,omitempty"`
 	AuthConfigured bool       `json:"authConfigured,omitempty"`
+	// ProfileHidden: the ACTIVE tab's profile gates this server out (netdev
+	// allowlist / named HiddenPlugins). The settings page shows it as hidden in
+	// this mode instead of a misleading initializing/deferred status.
+	ProfileHidden bool `json:"profileHidden,omitempty"`
 }
 
 type ToolView struct {
@@ -3224,6 +3355,30 @@ type SkillRootView struct {
 	Skills     int                  `json:"skills"`
 	SkillItems []SkillRootSkillView `json:"skillItems,omitempty"`
 	Warning    string               `json:"warning,omitempty"`
+}
+
+// capabilitiesProfile resolves the active tab's profile for per-mode MCP
+// visibility annotation. Returns nil for dev (the superset — nothing hidden)
+// and when the profile can't be resolved (annotation is best-effort; the boot
+// and hot-connect gates are the enforcement, not this view).
+func (a *App) capabilitiesProfile(loadedCfg *config.Config, profileName string) *config.Profile {
+	if profileName == "" || strings.EqualFold(strings.TrimSpace(profileName), config.ProfileDev) {
+		return nil
+	}
+	cfg := loadedCfg
+	if cfg == nil {
+		if c, err := config.Load(); err == nil {
+			cfg = c
+		}
+	}
+	if cfg == nil {
+		return nil
+	}
+	p, err := cfg.ResolveProfile(profileName)
+	if err != nil {
+		return nil
+	}
+	return p
 }
 
 // Capabilities projects the session's MCP servers (connected + failed) and skills
@@ -3370,6 +3525,17 @@ func (a *App) Capabilities() CapabilitiesView {
 		}
 	}
 	out.Servers = orderServerViews(out.Servers, order)
+
+	// Annotate per-profile visibility (mirrors the skills tab's Active flag):
+	// a server gated out by the ACTIVE tab's profile shows as hidden in this
+	// mode. dev is the superset and skips annotation.
+	if prof := a.capabilitiesProfile(loadedCfg, profileName); prof != nil {
+		for i := range out.Servers {
+			if !config.PluginAllowedByProfile(prof, out.Servers[i].Name) || config.PluginHiddenByProfile(prof, out.Servers[i].Name) {
+				out.Servers[i].ProfileHidden = true
+			}
+		}
+	}
 
 	a.mu.Lock()
 	if tab := a.activeTabLocked(); tab != nil {
@@ -3739,6 +3905,67 @@ func (a *App) SetSkillEnabled(name string, enabled bool) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		return c.SetSkillEnabled(name, enabled)
 	})
+}
+
+// DeriveEditableSkill writes an editable file copy of a BUILT-IN skill to
+// ~/.fairpeer/skills/<name>/SKILL.md. File skills shadow built-ins by name
+// (store precedence: project → custom → global → builtin), so the copy takes
+// effect on the rebuild below and the user can edit the prompt in place;
+// deleting the file restores the built-in. Returns the written path.
+func (a *App) DeriveEditableSkill(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("skill name is required")
+	}
+	cwd, _ := os.Getwd()
+	st := skill.New(skill.Options{ProjectRoot: cwd, MaxDepth: 3, Stderr: io.Discard})
+	sk, ok := st.Read(name)
+	if !ok {
+		return "", fmt.Errorf("skill %q not found", name)
+	}
+	if sk.Scope != skill.ScopeBuiltin {
+		return "", fmt.Errorf("%q is already a file skill — edit %s directly", name, sk.Path)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(home, ".fairpeer", "skills", name)
+	target := filepath.Join(dir, skill.SkillFile)
+	if _, err := os.Stat(target); err == nil {
+		return "", fmt.Errorf("an editable copy already exists: %s — edit it directly", target)
+	}
+	var b strings.Builder
+	b.WriteString("---\n")
+	fmt.Fprintf(&b, "name: %s\n", sk.Name)
+	if d := strings.TrimSpace(sk.Description); d != "" {
+		fmt.Fprintf(&b, "description: %s\n", strings.ReplaceAll(d, "\n", " "))
+	}
+	fmt.Fprintf(&b, "runAs: %s\n", sk.RunAs)
+	if sk.Model != "" {
+		fmt.Fprintf(&b, "model: %s\n", sk.Model)
+	}
+	if sk.Effort != "" {
+		fmt.Fprintf(&b, "effort: %s\n", sk.Effort)
+	}
+	if sk.MaxSteps > 0 {
+		fmt.Fprintf(&b, "max-steps: %d\n", sk.MaxSteps)
+	}
+	if len(sk.AllowedTools) > 0 {
+		fmt.Fprintf(&b, "allowed-tools: %s\n", strings.Join(sk.AllowedTools, ", "))
+	}
+	b.WriteString("---\n\n")
+	b.WriteString(sk.Body)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(target, []byte(b.String()), 0o644); err != nil {
+		return "", err
+	}
+	if err := a.rebuild(); err != nil {
+		return target, fmt.Errorf("editable copy written but controller rebuild failed: %w", err)
+	}
+	return target, nil
 }
 
 func normalizeSkillPath(path string) string {

@@ -16,7 +16,9 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/fileutil"
 	"github.com/zzycxz/fairpeer/internal/provider"
-)
+
+	"crypto/rand"
+	"encoding/hex")
 
 // executorHandoffMarker is the header the (now-removed) two-model Coordinator
 // stamped on the message handing a task from planner to executor. HandoffTask
@@ -302,6 +304,11 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 		return nil, err
 	}
 	var out []SessionInfo
+	addSession := func(full string, info os.FileInfo) {
+		if si, ok := sessionInfoFromPath(full, info); ok {
+			out = append(out, si)
+		}
+	}
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
 			continue
@@ -310,77 +317,30 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 		if err != nil {
 			continue
 		}
-		full := filepath.Join(dir, e.Name())
-		// Read the sidecar once; it carries branch/scope/topic metadata AND the
-		// cached turn-count + preview (refreshed by Session.Save). When the cache
-		// is present, skip the expensive .jsonl decode that previewSession does —
-		// a session list with hundreds of files otherwise re-decodes them all on
-		// every render.
-		meta, metaOK, _ := LoadBranchMeta(full)
-		var preview string
-		var turns int
-		if metaOK && (meta.CachedTurns > 0 || meta.CachedPreview != "") {
-			preview, turns = meta.CachedPreview, meta.CachedTurns
-		} else {
-			preview, turns = previewSession(full)
-		}
-		if turns == 0 {
-			// Skip sessions that have never had user interaction — they are
-			// empty conversations that should not appear in the history panel
-			// or the resume picker.
+		addSession(filepath.Join(dir, e.Name()), info)
+	}
+	// Per-session folder layout (2026-08-21): <dir>/<id>/<id>.jsonl — scan one
+	// level of subdirectories that contain a transcript. Subdirs without a
+	// .jsonl (e.g. assets) are skipped silently.
+	for _, e := range entries {
+		if !e.IsDir() {
 			continue
 		}
-		createdAt := info.ModTime()
-		lastActivityAt := info.ModTime()
-		scope := "global"
-		workspaceRoot := ""
-		topicID := ""
-		topicTitle := ""
-		profile := ""
-		expertTeamID := ""
-		platform := ""
-		remoteID := ""
-		chatType := ""
-		chatID := ""
-		mode := ""
-		if metaOK {
-			if !meta.CreatedAt.IsZero() {
-				createdAt = meta.CreatedAt
-			}
-			if !meta.UpdatedAt.IsZero() {
-				lastActivityAt = meta.UpdatedAt
-			}
-			scope = meta.DefaultScope()
-			workspaceRoot = meta.WorkspaceRoot
-			topicID = meta.TopicID
-			topicTitle = meta.TopicTitle
-			profile = meta.Profile
-			expertTeamID = meta.ExpertTeamID
-			platform = meta.Platform
-			remoteID = meta.RemoteID
-			chatType = meta.ChatType
-			chatID = meta.ChatID
-			mode = meta.Mode
+		sub := filepath.Join(dir, e.Name())
+		files, err := os.ReadDir(sub)
+		if err != nil {
+			continue
 		}
-		out = append(out, SessionInfo{
-			Path:           full,
-			CreatedAt:      createdAt,
-			LastActivityAt: lastActivityAt,
-			ModTime:        lastActivityAt,
-			Preview:        preview,
-			Turns:          turns,
-			Scope:          scope,
-			WorkspaceRoot:  workspaceRoot,
-			TopicID:        topicID,
-			TopicTitle:     topicTitle,
-			Profile:        profile,
-			ExpertTeamID:   expertTeamID,
-			Platform:       platform,
-			RemoteID:       remoteID,
-			ChatType:       chatType,
-			ChatID:         chatID,
-			Mode:           mode,
-		})
+		for _, f := range files {
+			if f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
+				continue
+			}
+			info, err := f.Info()
+			if err != nil {
+				continue
+			}
+			addSession(filepath.Join(sub, f.Name()), info)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].LastActivityAt.Equal(out[j].LastActivityAt) {
@@ -389,6 +349,79 @@ func ListSessions(dir string) ([]SessionInfo, error) {
 		return out[i].LastActivityAt.After(out[j].LastActivityAt)
 	})
 	return out, nil
+}
+
+// sessionInfoFromPath loads one transcript (flat or folder layout — both are
+// just file paths) into a SessionInfo. ok=false for sessions with zero user
+// turns: they never had interaction and must not clutter lists/pickers.
+func sessionInfoFromPath(full string, info os.FileInfo) (SessionInfo, bool) {
+	// Read the sidecar once; it carries branch/scope/topic metadata AND the
+	// cached turn-count + preview (refreshed by Session.Save). When the cache
+	// is present, skip the expensive .jsonl decode that previewSession does —
+	// a session list with hundreds of files otherwise re-decodes them all on
+	// every render.
+	meta, metaOK, _ := LoadBranchMeta(full)
+	var preview string
+	var turns int
+	if metaOK && (meta.CachedTurns > 0 || meta.CachedPreview != "") {
+		preview, turns = meta.CachedPreview, meta.CachedTurns
+	} else {
+		preview, turns = previewSession(full)
+	}
+	if turns == 0 {
+		return SessionInfo{}, false
+	}
+	createdAt := info.ModTime()
+	lastActivityAt := info.ModTime()
+	scope := "global"
+	workspaceRoot := ""
+	topicID := ""
+	topicTitle := ""
+	profile := ""
+	expertTeamID := ""
+	platform := ""
+	remoteID := ""
+	chatType := ""
+	chatID := ""
+	mode := ""
+	if metaOK {
+		if !meta.CreatedAt.IsZero() {
+			createdAt = meta.CreatedAt
+		}
+		if !meta.UpdatedAt.IsZero() {
+			lastActivityAt = meta.UpdatedAt
+		}
+		scope = meta.DefaultScope()
+		workspaceRoot = meta.WorkspaceRoot
+		topicID = meta.TopicID
+		topicTitle = meta.TopicTitle
+		profile = meta.Profile
+		expertTeamID = meta.ExpertTeamID
+		platform = meta.Platform
+		remoteID = meta.RemoteID
+		chatType = meta.ChatType
+		chatID = meta.ChatID
+		mode = meta.Mode
+	}
+	return SessionInfo{
+		Path:           full,
+		CreatedAt:      createdAt,
+		LastActivityAt: lastActivityAt,
+		ModTime:        lastActivityAt,
+		Preview:        preview,
+		Turns:          turns,
+		Scope:          scope,
+		WorkspaceRoot:  workspaceRoot,
+		TopicID:        topicID,
+		TopicTitle:     topicTitle,
+		Profile:        profile,
+		ExpertTeamID:   expertTeamID,
+		Platform:       platform,
+		RemoteID:       remoteID,
+		ChatType:       chatType,
+		ChatID:         chatID,
+		Mode:           mode,
+	}, true
 }
 
 // SetSessionIMSource writes the IM origin (platform/remoteID/chatType/chatID)
@@ -461,13 +494,29 @@ func ContinueSessionPath(prevPath, dir, model string) string {
 	return NewSessionPath(dir, model)
 }
 
-// NewSessionPath returns the path to use for a fresh session, namespaced by
-// the model so the filename hints at what the conversation was with. dir is
-// typically config.SessionDir().
+// NewSessionPath returns the path for a fresh session using the per-session
+// folder layout (2026-08-21 redesign): <dir>/<yyyymmdd-hhmmss-xxxx>/<same>.jsonl
+// — the transcript plus its .meta/.ckpt/.present siblings all live inside the
+// folder, keeping every session self-contained and the parent dir navigable by
+// date. The transcript FILE NAME equals the folder name so BranchID (filename
+// stem) stays unique. model is no longer encoded in the name — the meta
+// sidecar carries it. Falls back to the legacy flat layout only when the
+// folder cannot be created.
 func NewSessionPath(dir, model string) string {
-	safe := strings.NewReplacer("/", "-", "\\", "-").Replace(model)
-	if safe == "" {
-		safe = "session"
+	id := fmt.Sprintf("%s-%s", time.Now().Local().Format("20060102-150405"), shortSessionID())
+	folder := filepath.Join(dir, id)
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		return filepath.Join(dir, id+".jsonl")
 	}
-	return filepath.Join(dir, fmt.Sprintf("%s-%s.jsonl", time.Now().UTC().Format("20060102-150405.000000000"), safe))
+	return filepath.Join(folder, id+".jsonl")
+}
+
+// shortSessionID returns 4 hex chars of entropy — enough to disambiguate
+// sessions created within the same second.
+func shortSessionID() string {
+	var b [2]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "0000"
+	}
+	return hex.EncodeToString(b[:])
 }

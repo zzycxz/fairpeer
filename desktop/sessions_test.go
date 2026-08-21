@@ -244,13 +244,15 @@ func TestRestoreTrashedSessionFile(t *testing.T) {
 		t.Fatalf("restore: %v", err)
 	}
 
-	if _, err := os.Stat(sessionPath); err != nil {
-		t.Fatalf("session file should be restored: %v", err)
+	// Folder-layout restore (2026-08-21): <dir>/<stem>/<stem>.jsonl.
+	restored := filepath.Join(dir, "session", "session.jsonl")
+	if _, err := os.Stat(restored); err != nil {
+		t.Fatalf("session file should be restored into its folder: %v", err)
 	}
-	if _, err := os.Stat(sessionPath + ".meta"); err != nil {
+	if _, err := os.Stat(restored + ".meta"); err != nil {
 		t.Fatalf("session meta should be restored: %v", err)
 	}
-	if _, err := os.Stat(ckptDir); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "session", "session.ckpt")); err != nil {
 		t.Fatalf("session checkpoints should be restored: %v", err)
 	}
 	if _, err := os.Stat(filepath.Dir(trashPath)); !os.IsNotExist(err) {

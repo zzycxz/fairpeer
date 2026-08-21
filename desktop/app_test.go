@@ -40,6 +40,35 @@ func (a *App) setTestCtrl(ctrl *control.Controller, model string) {
 	tab.model = model
 }
 
+// seedTestProviderConfig writes the standard test-provider user config. The
+// provider-agnostic architecture ships NO providers in Default() and a fresh
+// install intentionally has no selectable model (onboarding guides setup), so
+// any test that needs a bootable model / effort surface seeds one explicitly
+// — the "test-provider-only" convention the skipped legacy tests reference.
+// Effort follows the unified vocabulary (auto/low/medium/high); legacy values
+// like "max" migrate to "high" on write (config.NormalizeEffort).
+func seedTestProviderConfig(t *testing.T) {
+	t.Helper()
+	isolateDesktopUserDirs(t)
+	t.Setenv("FAIRPEER_API_KEY", "sk-test")
+	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(config.UserConfigPath(), []byte(`
+default_model = "test-provider/test-model-a"
+
+[[providers]]
+name = "test-provider"
+kind = "openai"
+base_url = "https://api.example.com"
+models = ["test-model-a", "test-model-b"]
+default = "test-model-a"
+api_key_env = "FAIRPEER_API_KEY"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+}
+
 func isolateDesktopUserDirs(t *testing.T) string {
 	t.Helper()
 	home := robustTempDir(t)
@@ -85,11 +114,22 @@ func TestCommandsIncludesEffortNotThinking(t *testing.T) {
 }
 
 func TestEffortDefaultsBeforeStartup(t *testing.T) {
+	// Fresh install: no providers, no default model — onboarding owns setup and
+	// Effort() reports the neutral not-supported shape (Current stays "auto").
 	isolateDesktopUserDirs(t)
+	if got := NewApp().Effort(); got.Supported || got.Current != "auto" {
+		t.Fatalf("fresh-install Effort() = %+v, want unsupported with current auto", got)
+	}
 
+	// With a seeded provider (the test-provider-only convention), the pre-startup
+	// Effort() surface is the unified capability: auto/low/medium/high, default auto.
+	seedTestProviderConfig(t)
 	got := NewApp().Effort()
-	if !got.Supported || got.Current != "auto" || got.Default != "high" || !hasLevel(got.Levels, "auto") {
-		t.Fatalf("pre-startup Effort() = %+v, want auto with test-provider default high", got)
+	if !got.Supported || got.Current != "auto" || got.Default != "auto" {
+		t.Fatalf("pre-startup Effort() = %+v, want supported auto with unified default auto", got)
+	}
+	if !hasLevel(got.Levels, "auto") || !hasLevel(got.Levels, "low") || !hasLevel(got.Levels, "medium") || !hasLevel(got.Levels, "high") {
+		t.Fatalf("pre-startup Effort() levels = %v, want the unified auto/low/medium/high set", got.Levels)
 	}
 }
 
@@ -195,14 +235,15 @@ func TestEmitReadyInvokesReadyHook(t *testing.T) {
 }
 
 func TestSetEffortPersistsAndAutoClears(t *testing.T) {
-	isolateDesktopUserDirs(t)
+	seedTestProviderConfig(t)
 
 	app := NewApp()
+	// "max" is a legacy level: NormalizeEffort migrates it to the unified "high".
 	if err := app.SetEffort("max"); err != nil {
 		t.Fatalf("SetEffort(max): %v", err)
 	}
-	if got := app.Effort().Current; got != "max" {
-		t.Fatalf("Effort current = %q, want max", got)
+	if got := app.Effort().Current; got != "high" {
+		t.Fatalf("Effort current = %q, want high (max migrates to high)", got)
 	}
 	if err := app.SetEffort("auto"); err != nil {
 		t.Fatalf("SetEffort(auto): %v", err)
@@ -214,8 +255,8 @@ func TestSetEffortPersistsAndAutoClears(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read saved config: %v", err)
 	}
-	if strings.Contains(string(body), `effort      = "max"`) {
-		t.Fatalf("auto should clear explicit max effort:\n%s", body)
+	if strings.Contains(string(body), `effort      = "high"`) || strings.Contains(string(body), `effort      = "max"`) {
+		t.Fatalf("auto should clear explicit effort:\n%s", body)
 	}
 }
 
@@ -325,16 +366,17 @@ api_key_env = "FAIRPEER_API_KEY"
 	if err := app.SetSubagentModel("test-provider/test-model-b"); err != nil {
 		t.Fatalf("SetSubagentModel: %v", err)
 	}
+	// "max" migrates to the unified "high" vocabulary on write.
 	if err := app.SetSubagentEffort("max"); err != nil {
 		t.Fatalf("SetSubagentEffort: %v", err)
 	}
 
 	got := app.Settings()
-	if got.SubagentModel != "test-provider/test-model-b" || got.SubagentEffort != "max" {
+	if got.SubagentModel != "test-provider/test-model-b" || got.SubagentEffort != "high" {
 		t.Fatalf("subagent settings = model:%q effort:%q", got.SubagentModel, got.SubagentEffort)
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
-	if cfg.Agent.SubagentModel != "test-provider/test-model-b" || cfg.Agent.SubagentEffort != "max" {
+	if cfg.Agent.SubagentModel != "test-provider/test-model-b" || cfg.Agent.SubagentEffort != "high" {
 		t.Fatalf("saved config = model:%q effort:%q", cfg.Agent.SubagentModel, cfg.Agent.SubagentEffort)
 	}
 }
@@ -462,9 +504,19 @@ func TestModelsForTabListsTestProviderAPIPaidAccess(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Setenv("FAIRPEER_API_KEY", "sk-test")
 
+	// Default() ships no providers — seed the test-provider entry explicitly
+	// (test-provider-only convention) so Models() has something to list.
 	cfg := config.Default()
 	cfg.DefaultModel = "test-provider/test-model-a"
 	cfg.Desktop.ProviderAccess = []string{"test-provider"}
+	cfg.Providers = append(cfg.Providers, config.ProviderEntry{
+		Name:       "test-provider",
+		Kind:       "openai",
+		BaseURL:    "https://api.example.com",
+		Models:     []string{"test-model-a", "test-model-b"},
+		Default:    "test-model-a",
+		APIKeyEnv:  "FAIRPEER_API_KEY",
+	})
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
@@ -516,6 +568,16 @@ func TestSetDefaultModelRejectsProviderWithoutKey(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Desktop.ProviderAccess = []string{"test-provider"}
+	// Seed the provider entry itself (keyless) — the guard under test fires on
+	// a KNOWN provider without a key, not on an unknown-model lookup.
+	cfg.Providers = append(cfg.Providers, config.ProviderEntry{
+		Name:      "test-provider",
+		Kind:      "openai",
+		BaseURL:   "https://api.example.com",
+		Models:    []string{"test-model-a", "test-model-b"},
+		Default:   "test-model-a",
+		APIKeyEnv: "FAIRPEER_API_KEY",
+	})
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
@@ -679,7 +741,7 @@ func TestMigrateDesktopPreferencesDoesNotOverwriteExistingConfig(t *testing.T) {
 }
 
 func TestSetEffortRebuildsController(t *testing.T) {
-	isolateDesktopUserDirs(t)
+	seedTestProviderConfig(t)
 
 	app := NewApp()
 	app.ctx = context.Background()
@@ -692,6 +754,7 @@ func TestSetEffortRebuildsController(t *testing.T) {
 		}
 	}()
 
+	// "max" migrates to the unified "high" level; the rebuild is the point.
 	if err := app.SetEffort("max"); err != nil {
 		t.Fatalf("SetEffort(max): %v", err)
 	}
@@ -701,8 +764,8 @@ func TestSetEffortRebuildsController(t *testing.T) {
 	if c := app.activeCtrl(); c == old {
 		t.Fatal("SetEffort should rebuild the active controller so the provider sees the new effort")
 	}
-	if got := app.Effort().Current; got != "max" {
-		t.Fatalf("Effort current = %q, want max", got)
+	if got := app.Effort().Current; got != "high" {
+		t.Fatalf("Effort current = %q, want high (max migrates to high)", got)
 	}
 }
 
@@ -1176,15 +1239,11 @@ func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 	}
 
 	var forkPath string
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read session dir: %v", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		candidate := filepath.Join(dir, entry.Name())
+	// Dual-layout scan (2026-08-21): the fork may be a flat sibling or live in
+	// its own session folder.
+	candidates := sessionTranscriptCandidates(dir)
+	for _, candidate := range candidates {
+		{
 		if candidate == path {
 			continue
 		}
@@ -1200,6 +1259,7 @@ func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 			if m.Scope != "project" || m.WorkspaceRoot != workspace || m.TopicTitle != "Source topic · 分叉" {
 				t.Fatalf("fork topic meta = %+v", m)
 			}
+		}
 		}
 	}
 	if forkPath == "" {

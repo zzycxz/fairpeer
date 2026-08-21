@@ -154,6 +154,10 @@ func trashSessionArtifacts(dir, sessionPath, key string) error {
 	if err := trashSubagentArtifacts(dir, sessionPath, itemDir); err != nil {
 		return err
 	}
+	// Per-session-folder layout (2026-08-21): all artifacts lived inside the
+	// session folder, which is now empty — drop it. os.Remove is a no-op for
+	// non-empty dirs, so flat-layout sessions are unaffected.
+	_ = os.Remove(filepath.Dir(sessionPath))
 	meta := trashedSessionMeta{Key: key, DeletedAt: time.Now().UnixMilli()}
 	b, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
@@ -212,13 +216,17 @@ func restoreTrashedSessionFile(dir, path string) error {
 	if err != nil {
 		return err
 	}
-	target := filepath.Join(dir, key)
+	// Restore into the per-session-folder layout (2026-08-21): <dir>/<id>/<id>.jsonl.
+	// Legacy flat trash items restore into folders too — uniform going forward.
+	stem := strings.TrimSuffix(key, ".jsonl")
+	targetDir := filepath.Join(dir, stem)
+	target := filepath.Join(targetDir, key)
 	if _, err := os.Stat(target); err == nil {
 		return fmt.Errorf("session already exists: %s", key)
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return err
 	}
 	if err := checkRestoreSubagentConflicts(dir, itemDir); err != nil {
@@ -231,13 +239,13 @@ func restoreTrashedSessionFile(dir, path string) error {
 		return err
 	}
 	ckptName := strings.TrimSuffix(key, ".jsonl") + ".ckpt"
-	if err := movePathIfExists(filepath.Join(itemDir, ckptName), filepath.Join(dir, ckptName)); err != nil {
+	if err := movePathIfExists(filepath.Join(itemDir, ckptName), filepath.Join(targetDir, ckptName)); err != nil {
 		return err
 	}
 	// Restore the presentation sidecar alongside its session (see
 	// trashSessionArtifacts for the matching move).
 	presentName := key + ".present.jsonl"
-	if err := movePathIfExists(filepath.Join(itemDir, presentName), filepath.Join(dir, presentName)); err != nil {
+	if err := movePathIfExists(filepath.Join(itemDir, presentName), filepath.Join(targetDir, presentName)); err != nil {
 		return err
 	}
 	if err := restoreSubagentArtifacts(dir, itemDir); err != nil {

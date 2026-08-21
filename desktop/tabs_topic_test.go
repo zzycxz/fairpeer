@@ -349,7 +349,9 @@ func TestLegacySessionTopicIDsKeepNormalizedNameCollisionsDistinct(t *testing.T)
 }
 
 func TestDefaultGlobalTabGetsMigratedTopicID(t *testing.T) {
-	isolateDesktopUserDirs(t)
+	// A bootable model is required: fresh installs intentionally skip building
+	// a controller (onboarding owns setup), so seed the test provider.
+	seedTestProviderConfig(t)
 
 	dir := config.SessionDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -391,7 +393,7 @@ func TestDefaultGlobalTabGetsMigratedTopicID(t *testing.T) {
 }
 
 func TestBuildTabControllerRestoresPinnedSessionBeforeTopicFallback(t *testing.T) {
-	isolateDesktopUserDirs(t)
+	seedTestProviderConfig(t)
 
 	dir := config.SessionDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -431,7 +433,7 @@ func TestBuildTabControllerRestoresPinnedSessionBeforeTopicFallback(t *testing.T
 }
 
 func TestBuildTabControllerKeepsMissingPinnedSessionPath(t *testing.T) {
-	isolateDesktopUserDirs(t)
+	seedTestProviderConfig(t)
 
 	dir := config.SessionDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {

@@ -864,7 +864,7 @@ func (a *App) blankTabMatchesTargetLocked(tab *WorkspaceTab, scope, workspaceRoo
 // but not open in any tab — for reusing without creating a new topic.
 func (a *App) indexedBlankTopicIDLocked(scope, workspaceRoot, profile string) string {
 	titleRoot := topicTitleRoot(scope, workspaceRoot)
-	titles := loadTopicTitles(titleRoot)
+	titles := loadTopicTitles(titleRoot, normalizeProfileName(profile))
 	f := loadProjectsFile(normalizeProfileName(profile))
 
 	var topicIDs []string
@@ -1128,6 +1128,12 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 			a.noticeForTab(tab.ID, fmt.Sprintf("model %q is no longer available; switched to %s", requestedModel, resolved))
 		}
 		model = resolved
+	} else if strings.TrimSpace(model) != "" {
+		// Dead ref with nothing legal to fall back to — typically a tab left on
+		// an injected local preset the user never added. Drop it so the Welcome
+		// guard below takes over, instead of booting an "unknown model" error.
+		a.noticeForTab(tab.ID, fmt.Sprintf("model %q is no longer available; add a provider to continue", requestedModel))
+		model = ""
 	}
 
 	a.mu.Lock()
@@ -1271,7 +1277,7 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 		if path != "" {
 			a.persistTabSessionPath(tab, path)
 			if strings.TrimSpace(tab.TopicID) != "" {
-				if err := ensureTopicIndexed(tab.Scope, tab.WorkspaceRoot, tab.TopicID, tab.TopicTitle, loadTopicTitleSource(topicTitleRoot(tab.Scope, tab.WorkspaceRoot), tab.TopicID)); err == nil {
+				if err := ensureTopicIndexed(tab.Scope, tab.WorkspaceRoot, normalizeProfileName(tab.profile), tab.TopicID, tab.TopicTitle, loadTopicTitleSource(topicTitleRoot(tab.Scope, tab.WorkspaceRoot), normalizeProfileName(tab.profile), tab.TopicID)); err == nil {
 					a.emitProjectTreeChanged()
 				}
 			}
@@ -2012,30 +2018,49 @@ const (
 	topicTitleSourceManual = "manual"
 )
 
-func topicTitlesPath(workspaceRoot string) string {
-	if workspaceRoot == "" {
-		return filepath.Join(desktopConfigDir(), "global", topicTitlesFile)
+// topicSidecarFile suffixes a topic sidecar filename with the profile key for
+// NAMED profiles (cowork/netdev) — topic titles must not cross modes. The
+// default profile keeps the legacy unsuffixed filename so existing disks and
+// the one-time legacy merge keep working unchanged.
+func topicSidecarFile(base string, profileKey ...string) string {
+	if len(profileKey) == 0 {
+		return base
 	}
-	return filepath.Join(workspaceRoot, ".fairpeer", topicTitlesFile)
+	k := config.ProfileNameKey(profileKey[0])
+	if k == "" || k == config.ProfileDev || k == "default" {
+		return base
+	}
+	ext := filepath.Ext(base)
+	return strings.TrimSuffix(base, ext) + "-" + k + ext
 }
 
-func topicTitleSourcesPath(workspaceRoot string) string {
+func topicTitlesPath(workspaceRoot string, profileKey ...string) string {
+	name := topicSidecarFile(topicTitlesFile, profileKey...)
 	if workspaceRoot == "" {
-		return filepath.Join(desktopConfigDir(), "global", topicTitleSourcesFile)
+		return filepath.Join(desktopConfigDir(), "global", name)
 	}
-	return filepath.Join(workspaceRoot, ".fairpeer", topicTitleSourcesFile)
+	return filepath.Join(workspaceRoot, ".fairpeer", name)
 }
 
-func topicCreatedAtsPath(workspaceRoot string) string {
+func topicTitleSourcesPath(workspaceRoot string, profileKey ...string) string {
+	name := topicSidecarFile(topicTitleSourcesFile, profileKey...)
 	if workspaceRoot == "" {
-		return filepath.Join(desktopConfigDir(), "global", topicCreatedAtsFile)
+		return filepath.Join(desktopConfigDir(), "global", name)
 	}
-	return filepath.Join(workspaceRoot, ".fairpeer", topicCreatedAtsFile)
+	return filepath.Join(workspaceRoot, ".fairpeer", name)
 }
 
-func loadTopicTitles(workspaceRoot string) map[string]string {
+func topicCreatedAtsPath(workspaceRoot string, profileKey ...string) string {
+	name := topicSidecarFile(topicCreatedAtsFile, profileKey...)
+	if workspaceRoot == "" {
+		return filepath.Join(desktopConfigDir(), "global", name)
+	}
+	return filepath.Join(workspaceRoot, ".fairpeer", name)
+}
+
+func loadTopicTitles(workspaceRoot string, profileKey ...string) map[string]string {
 	m := map[string]string{}
-	b, err := os.ReadFile(topicTitlesPath(workspaceRoot))
+	b, err := os.ReadFile(topicTitlesPath(workspaceRoot, profileKey...))
 	if err != nil {
 		return m
 	}
@@ -2043,9 +2068,9 @@ func loadTopicTitles(workspaceRoot string) map[string]string {
 	return m
 }
 
-func loadTopicTitleSources(workspaceRoot string) map[string]string {
+func loadTopicTitleSources(workspaceRoot string, profileKey ...string) map[string]string {
 	m := map[string]string{}
-	b, err := os.ReadFile(topicTitleSourcesPath(workspaceRoot))
+	b, err := os.ReadFile(topicTitleSourcesPath(workspaceRoot, profileKey...))
 	if err != nil {
 		return m
 	}
@@ -2053,9 +2078,9 @@ func loadTopicTitleSources(workspaceRoot string) map[string]string {
 	return m
 }
 
-func loadTopicCreatedAts(workspaceRoot string) map[string]int64 {
+func loadTopicCreatedAts(workspaceRoot string, profileKey ...string) map[string]int64 {
 	m := map[string]int64{}
-	b, err := os.ReadFile(topicCreatedAtsPath(workspaceRoot))
+	b, err := os.ReadFile(topicCreatedAtsPath(workspaceRoot, profileKey...))
 	if err != nil {
 		return m
 	}
@@ -2063,12 +2088,12 @@ func loadTopicCreatedAts(workspaceRoot string) map[string]int64 {
 	return m
 }
 
-func saveTopicTitles(workspaceRoot string, m map[string]string) error {
+func saveTopicTitles(workspaceRoot string, m map[string]string, profileKey ...string) error {
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	path := topicTitlesPath(workspaceRoot)
+	path := topicTitlesPath(workspaceRoot, profileKey...)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -2079,12 +2104,12 @@ func saveTopicTitles(workspaceRoot string, m map[string]string) error {
 	return os.Rename(tmp, path)
 }
 
-func saveTopicTitleSources(workspaceRoot string, m map[string]string) error {
+func saveTopicTitleSources(workspaceRoot string, m map[string]string, profileKey ...string) error {
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	path := topicTitleSourcesPath(workspaceRoot)
+	path := topicTitleSourcesPath(workspaceRoot, profileKey...)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -2095,12 +2120,12 @@ func saveTopicTitleSources(workspaceRoot string, m map[string]string) error {
 	return os.Rename(tmp, path)
 }
 
-func saveTopicCreatedAts(workspaceRoot string, m map[string]int64) error {
+func saveTopicCreatedAts(workspaceRoot string, m map[string]int64, profileKey ...string) error {
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	path := topicCreatedAtsPath(workspaceRoot)
+	path := topicCreatedAtsPath(workspaceRoot, profileKey...)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -2111,33 +2136,33 @@ func saveTopicCreatedAts(workspaceRoot string, m map[string]int64) error {
 	return os.Rename(tmp, path)
 }
 
-func loadTopicTitle(workspaceRoot, topicID string) string {
-	return loadTopicTitles(workspaceRoot)[topicID]
+func loadTopicTitle(workspaceRoot, topicID string, profileKey ...string) string {
+	return loadTopicTitles(workspaceRoot, profileKey...)[topicID]
 }
 
 // loadTopicTitleSource returns the title source ("auto"/"manual") for a topic.
-// The profile-aware form takes (workspaceRoot, profile, topicID); the legacy
-// form takes (workspaceRoot, topicID). The profile is currently unused (titles
-// are global per-workspace, not per-profile) but the argument is accepted so
-// callers can pass it without a separate code path.
+// The profile-aware form takes (workspaceRoot, profile, topicID) and reads the
+// profile's sidecar bucket; the legacy form takes (workspaceRoot, topicID) and
+// reads the default (unsuffixed) bucket.
 func loadTopicTitleSource(workspaceRoot string, rest ...string) string {
 	topicID := ""
+	var profileKey []string
 	if len(rest) == 1 {
 		topicID = rest[0]
 	} else if len(rest) >= 2 {
-		// rest[0] is profile (ignored for now), rest[1] is topicID.
+		profileKey = []string{rest[0]}
 		topicID = rest[1]
 	}
-	return loadTopicTitleSources(workspaceRoot)[topicID]
+	return loadTopicTitleSources(workspaceRoot, profileKey...)[topicID]
 }
 
-func loadTopicCreatedAt(workspaceRoot, topicID string) int64 {
-	return loadTopicCreatedAts(workspaceRoot)[topicID]
+func loadTopicCreatedAt(workspaceRoot, topicID string, profileKey ...string) int64 {
+	return loadTopicCreatedAts(workspaceRoot, profileKey...)[topicID]
 }
 
-func topicTitleForTab(scope, workspaceRoot, topicID string) string {
+func topicTitleForTab(scope, workspaceRoot, topicID string, profileKey ...string) string {
 	titleRoot := topicTitleRoot(scope, workspaceRoot)
-	if title := strings.TrimSpace(loadTopicTitle(titleRoot, topicID)); title != "" {
+	if title := strings.TrimSpace(loadTopicTitle(titleRoot, topicID, profileKey...)); title != "" {
 		return title
 	}
 	if scope == "global" {
@@ -2164,45 +2189,45 @@ func forkTopicTitle(title string) string {
 	return base + " · 分叉"
 }
 
-func setTopicTitle(workspaceRoot, topicID, title string) error {
-	return setTopicTitleWithSource(workspaceRoot, topicID, title, topicTitleSourceManual)
+func setTopicTitle(workspaceRoot, topicID, title string, profileKey ...string) error {
+	return setTopicTitleWithSource(workspaceRoot, topicID, title, topicTitleSourceManual, profileKey...)
 }
 
-func setTopicTitleWithSource(workspaceRoot, topicID, title, source string) error {
-	m := loadTopicTitles(workspaceRoot)
+func setTopicTitleWithSource(workspaceRoot, topicID, title, source string, profileKey ...string) error {
+	m := loadTopicTitles(workspaceRoot, profileKey...)
 	if strings.TrimSpace(title) == "" {
 		delete(m, topicID)
 	} else {
 		m[topicID] = strings.TrimSpace(title)
 	}
-	if err := saveTopicTitles(workspaceRoot, m); err != nil {
+	if err := saveTopicTitles(workspaceRoot, m, profileKey...); err != nil {
 		return err
 	}
 
-	sources := loadTopicTitleSources(workspaceRoot)
+	sources := loadTopicTitleSources(workspaceRoot, profileKey...)
 	if strings.TrimSpace(title) == "" || strings.TrimSpace(source) == "" {
 		delete(sources, topicID)
 	} else {
 		sources[topicID] = strings.TrimSpace(source)
 	}
-	return saveTopicTitleSources(workspaceRoot, sources)
+	return saveTopicTitleSources(workspaceRoot, sources, profileKey...)
 }
 
-func setTopicCreatedAt(workspaceRoot, topicID string, createdAt int64) error {
-	created := loadTopicCreatedAts(workspaceRoot)
+func setTopicCreatedAt(workspaceRoot, topicID string, createdAt int64, profileKey ...string) error {
+	created := loadTopicCreatedAts(workspaceRoot, profileKey...)
 	topicID = strings.TrimSpace(topicID)
 	if topicID == "" || createdAt <= 0 {
 		delete(created, topicID)
 	} else {
 		created[topicID] = createdAt
 	}
-	return saveTopicCreatedAts(workspaceRoot, created)
+	return saveTopicCreatedAts(workspaceRoot, created, profileKey...)
 }
 
-func deleteTopicCreatedAt(workspaceRoot, topicID string) {
-	created := loadTopicCreatedAts(workspaceRoot)
+func deleteTopicCreatedAt(workspaceRoot, topicID string, profileKey ...string) {
+	created := loadTopicCreatedAts(workspaceRoot, profileKey...)
 	delete(created, topicID)
-	_ = saveTopicCreatedAts(workspaceRoot, created)
+	_ = saveTopicCreatedAts(workspaceRoot, created, profileKey...)
 }
 
 // topicIndexMu serializes recovery writes to desktop-projects.json and topic
@@ -2244,7 +2269,7 @@ func ensureTopicIndexed(args ...string) error {
 	if source == "" {
 		source = topicTitleSourceManual
 	}
-	if err := setTopicTitleWithSource(workspaceRoot, topicID, title, source); err != nil {
+	if err := setTopicTitleWithSource(workspaceRoot, topicID, title, source, profile); err != nil {
 		return err
 	}
 	f := loadProjectsFile(profile)
@@ -2750,9 +2775,9 @@ func (a *App) RenameTopic(topicID, title string) error {
 	// Find which workspace this topic belongs to by scanning all project topic titles.
 	f := loadProjectsFile(profileKey)
 	for _, p := range f.Projects {
-		m := loadTopicTitles(p.Root)
+		m := loadTopicTitles(p.Root, profileKey)
 		if _, ok := m[topicID]; ok {
-			if err := setTopicTitle(p.Root, topicID, trimmed); err != nil {
+			if err := setTopicTitle(p.Root, topicID, trimmed, profileKey); err != nil {
 				return err
 			}
 			a.updateOpenTopicTitle(topicID, trimmed)
@@ -2762,9 +2787,9 @@ func (a *App) RenameTopic(topicID, title string) error {
 		}
 	}
 	// Check global.
-	m := loadTopicTitles("")
+	m := loadTopicTitles("", profileKey)
 	if _, ok := m[topicID]; ok {
-		if err := setTopicTitle("", topicID, trimmed); err != nil {
+		if err := setTopicTitle("", topicID, trimmed, profileKey); err != nil {
 			return err
 		}
 		a.updateOpenTopicTitle(topicID, trimmed)
@@ -2773,7 +2798,7 @@ func (a *App) RenameTopic(topicID, title string) error {
 		return nil
 	}
 	if scope, workspaceRoot, ok := a.findTopicLocation(topicID); ok {
-		if err := ensureTopicIndexed(scope, workspaceRoot, topicID, trimmed, topicTitleSourceManual); err != nil {
+		if err := ensureTopicIndexed(scope, workspaceRoot, profileKey, topicID, trimmed, topicTitleSourceManual); err != nil {
 			return err
 		}
 		a.updateOpenTopicTitle(topicID, trimmed)
@@ -3126,8 +3151,8 @@ func (a *App) ListProjectTree(profile string) []ProjectNode {
 	a.mu.RUnlock()
 
 	// Global section.
-	globalTitleMap := loadTopicTitles("")
-	globalCreatedMap := loadTopicCreatedAts("")
+	globalTitleMap := loadTopicTitles("", profile)
+	globalCreatedMap := loadTopicCreatedAts("", profile)
 	if len(globalTitleMap) > 0 || len(f.Projects) == 0 {
 		globalTitle := strings.TrimSpace(f.GlobalTitle)
 		if globalTitle == "" {
@@ -3188,8 +3213,8 @@ func (a *App) ListProjectTree(profile string) []ProjectNode {
 		}
 
 		// Gather topics: explicit topic list + all known topic titles.
-		titleMap := loadTopicTitles(p.Root)
-		createdMap := loadTopicCreatedAts(p.Root)
+		titleMap := loadTopicTitles(p.Root, profile)
+		createdMap := loadTopicCreatedAts(p.Root, profile)
 		topicIDs := orderedTopicIDs(p.Topics, titleMap)
 
 		children := make([]ProjectNode, 0, len(topicIDs))
@@ -3592,6 +3617,13 @@ func saveTabSessionMeta(tab *WorkspaceTab, path string) error {
 	m.WorkspaceRoot = tab.WorkspaceRoot
 	m.TopicID = tab.TopicID
 	m.TopicTitle = tab.TopicTitle
+	// Stamp the profile so sidecar readers (ListSessions, findTopic*) can
+	// attribute the session without consulting the directory partition —
+	// previously only Fork and the one-time migration wrote this field, leaving
+	// most live cowork/netdev sessions unattributed.
+	if p := normalizeProfileName(tab.profile); p != "" {
+		m.Profile = p
+	}
 	if tab.IsExpertSession {
 		m.ExpertTeamID = strings.TrimSpace(tab.ExpertTeamID)
 	} else if m.Scope != "expert" {
@@ -3675,17 +3707,10 @@ func findTopicSession(dir, topicID string) string {
 	if topicID == "" || dir == "" {
 		return ""
 	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return ""
-	}
+	paths := sessionTranscriptCandidates(dir)
 	var bestPath string
 	var bestTime time.Time
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
-			continue
-		}
-		path := filepath.Join(dir, e.Name())
+	for _, path := range paths {
 		meta, ok, err := agent.LoadBranchMeta(path)
 		if err != nil || !ok {
 			continue
@@ -3699,6 +3724,37 @@ func findTopicSession(dir, topicID string) string {
 		}
 	}
 	return bestPath
+}
+
+// sessionTranscriptCandidates lists candidate transcript paths in a session
+// dir: flat legacy *.jsonl plus per-session-folder subdirs' *.jsonl (one
+// level, newest-name order within a folder is irrelevant — findTopicSession
+// picks by meta.UpdatedAt).
+func sessionTranscriptCandidates(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	for _, e := range entries {
+		if e.IsDir() {
+			sub := filepath.Join(dir, e.Name())
+			files, err := os.ReadDir(sub)
+			if err != nil {
+				continue
+			}
+			for _, f := range files {
+				if !f.IsDir() && filepath.Ext(f.Name()) == ".jsonl" {
+					paths = append(paths, filepath.Join(sub, f.Name()))
+				}
+			}
+			continue
+		}
+		if filepath.Ext(e.Name()) == ".jsonl" {
+			paths = append(paths, filepath.Join(dir, e.Name()))
+		}
+	}
+	return paths
 }
 
 func (a *App) findKnownTopicSession(topicID string) (string, string) {
