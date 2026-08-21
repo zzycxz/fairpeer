@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **侧栏顶部换新**：新建会话并入品牌行（幽灵图标钮，退役全宽渐变大按钮）、搜索改静默条（mono ❯ 提示符 + / 键帽、全局 / 键聚焦）
 - **底部状态栏退役**：状态行（模型名/缓存%/轮次）整体移除，输入框贴到窗口底缘；底部条收窄为只盖侧栏列（宽随 `--sidebar-width` 同步动画），历史/回收站/设置等图标迁入；侧栏底预留 36px 防遮挡
 - **上下文用量条（UsageChip）**：输入框参数行 46px 填充条 + `会话token · 已用/窗口`（≥85% 警示色），替代原悬浮提示
+- **用量条悬浮详情**（08-21）：悬浮/键盘聚焦展开面板——上下文精确值+压缩线、**平均缓存命中率**（Σhit/Σ(hit+miss)，telemetry 会话聚合，覆盖所有供应商）+ 本轮命中率（实时 wire 事件）+ 缓存读/写、会话累计输入/输出/思考/请求数；后端 `ContextInfo` 顺手带出 7 个 telemetry 聚合字段（零额外轮询），Tooltip 新增 `bodyClassName` 支持富面板
 - **两级运行状态**：背景运行（phase"嘎吱嘎吱"）收进参数行小 chip 不占行高；需要介入（已暂停）才在输入框上方亮警示条——PhaseCard 逐行渲染退役
 
 ### 循环工程（loop）— 08-19
@@ -56,6 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **实用能力三连**：备份版本库 + diff、诊断命令组合、每日简报；备份后版本列表自刷新
 - **崩溃根治 ×2**：拓扑图空值加固（无设备时实测快照 null 致 exe 崩溃）；真包根因——Go nil 切片 = JSON null 的序列化契约
 - 界面对齐编码侧（品牌行 + 常显三档切换器，详见"三界面统一"节）；设置页减负（操作回运维页、配置留设置）
+
+### 会话存储重构 — 08-21
+
+- **每会话独立目录**（按用户决策：历史数据可弃，重规划不迁移）：`<sessions>/<yyyymmdd-hhmmss-xxxx>/<同id>.jsonl`，同名 `.meta/.ckpt/.present` 全部收进会话目录；全局（dev=`sessions/`、cowork/netdev 分区子目录）与项目（`projects/<slug>/sessions/…`）**完全同构**；日期前缀天然时间序、文件名=目录名保 BranchID 唯一、目录永不会挤满几千个文件
+- **全局目录固定化**（前置修复）：空根会话统一落 `<userDir>/sessions[/<profile>]`——根除 dev 全局曾按进程 CWD 漂移落进随机项目目录的缺陷；`desktopSessionDir("")` 删除 Getwd 回退
+- **双布局兼容读取**：ListSessions/findTopicSession 同时扫描平铺旧布局与会话目录（旧数据仍可见，无需迁移）；回收站 flatten 入 `<trash>/<id>.jsonl/`、恢复统一落目录布局；RestoreSession 话题索引指向新路径（修复恢复后项目树断链）
+- 测试：新布局生成/双布局列举/回收往返 3 个新测试 + 旧断言升级；附 `TestGlobalSessionDirFixedPerProfile` 防 CWD 回归
 
 ### 桌面体验 — 08-19 ~ 08-20
 
@@ -103,8 +111,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **打包教训成文**（08-19）：桌面产物必须 `wails build`，裸 `go build` 不可分发（窗口不出现 + 体积 +17MB）
 - **双分发模式**：Windows 同发 NSIS 安装器 + 免安装便携 exe（原 CI 会丢弃便携版，已改双产物）；**manifest 钉死 installer**——Windows 更新器对下载物直接当安装器启动，matchPlatform 跳过 `-portable.`（与 .deb 同款先例），防便携版随机抢占更新通道
 
+### 环境预设护栏（ambient presets）— 08-21
+
+- **修复"没选 Ollama 却被 Ollama 接管"**：`config.toml` 无任何 `[[providers]]` 时注入的 keyless 本地预设（Ollama / llama.cpp）此前可被陈旧页签引用的回退链捕获——所有页签静默变成 `ollama/qwen3-coder:30b`，聊天实际发往本机 11434。引入 **ambient 语义**：注入时打运行时标记（`injectedLocalPresets`，不落盘），未进 `desktop.provider_access` 的预设**只可见、不可被选**——`ResolveModelWithFallback` 直接解析与回退循环双双跳过，页签持有此类死引用时置空并停入 Welcome（附通知），不再报 "unknown model" 启动错误
+- **保存不再固化预设**：渲染器跳过 ambient 预设——此前在"纯预设配置"上任何一次设置保存都会把 Ollama/llama.cpp 写成永久 `[[providers]]`（并使其脱离 ambient 语义）；用户在向导/设置里显式添加（进 provider_access）后照常落盘
+- **边界保持**：用户手写 `[[providers]]` 的 keyless 供应商（非注入、无标记）回退照旧（240faf1 的防砖语义保留）；CLI `--model ollama/...` 显式点名走 `ResolveModel` 直达不受影响；向导添加过的预设（在 access 内）回退/解析均正常。测试：`TestResolveModelWithFallbackSkipsAmbientLocalPresets`、`TestRenderSkipsAmbientLocalPresets`、`TestStaleTabModelWithOnlyAmbientPresetsParksInWelcome` 等
+
 ### 兼容性
 
+- **陈旧页签模型回退语义收窄**：仅剩环境预设（未添加的 Ollama/llama.cpp）可用时，陈旧页签不再落到本地预设，而是清空模型停入 Welcome 引导用户显式选择——已有被"污染"页签（`desktop-tabs.json` 里存了 `ollama/...`）会在下次启动收到一条通知并被置空；显式添加过本地预设或手写 `[[providers]]` 的用户不受影响
 - **codegraph 默认开关变更**：由"默认开（存量配置继承）"改为 **opt-in 默认关**（与 context7 统一）。存量用户若从未显式写 `[codegraph]` 段，升级后 codegraph 关闭——在设置或配置中开启一次即恢复；显式配置过的用户不受影响
 - 白名单旧名 `computer-auto` 自动映射 `desktop-auto`；用户自装文件技能与 MCP 不受域门控影响；`hidden_plugins` 等新配置字段零值兼容
 
