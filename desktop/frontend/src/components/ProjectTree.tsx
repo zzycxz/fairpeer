@@ -32,7 +32,7 @@ interface ProjectTreeProps {
   imTopicSources?: Record<string, ProjectTreeImTopicSource>;
   onOpenTopic: (scope: string, workspaceRoot: string, topicId: string) => Promise<void> | void;
   onOpenExpertSession?: (teamId: string, teamName: string) => Promise<void> | void;
-  onOpenProjectHistory: (scope: "global" | "project", workspaceRoot: string) => Promise<void> | void;
+  onOpenProjectHistory: (scope: "project", workspaceRoot: string) => Promise<void> | void;
   onAddProject: () => Promise<void>;
   onCreateTopic?: (scope: string, workspaceRoot: string) => Promise<void> | void;
   onRenameTopic?: (topicId: string, title: string) => Promise<void> | void;
@@ -61,13 +61,8 @@ function projectNodeKey(node: ProjectNode, depth: number): string {
 }
 
 function topicIsActive(node: ProjectNode, activeScope?: string, activeWorkspaceRoot?: string, activeTopicId?: string): boolean {
-  if (node.kind !== "topic" && node.kind !== "global_topic") return false;
-  const scope = node.kind === "global_topic" ? "global" : "project";
-  return (
-    activeTopicId === node.topicId &&
-    activeScope === scope &&
-    (scope === "global" || activeWorkspaceRoot === node.root)
-  );
+  if (node.kind !== "topic") return false;
+  return activeTopicId === node.topicId && activeScope === "project" && activeWorkspaceRoot === node.root;
 }
 
 const TOPIC_SEEN_KEY = "fairpeer.topicSeen";
@@ -113,10 +108,7 @@ type CollapseSnapshot = {
   manuallyCollapsed: Set<string>;
 };
 
-const GLOBAL_PROJECT_ORDER_KEY = "__global__";
-
 function projectOrderKey(node: ProjectNode): string {
-  if (node.kind === "global_folder") return GLOBAL_PROJECT_ORDER_KEY;
   if (node.kind === "project" && node.root) return node.root;
   return "";
 }
@@ -132,7 +124,7 @@ function collapsibleFolderKeys(nodes: ProjectNode[], depth = 0): string[] {
   for (const node of nodes) {
     if (!node) continue;
     const children = asArray(node.children);
-    if ((node.kind === "project" || node.kind === "global_folder" || node.kind === "expert_folder") && children.length > 0) {
+    if ((node.kind === "project" || node.kind === "expert_folder") && children.length > 0) {
       keys.push(projectNodeKey(node, depth));
     }
     keys.push(...collapsibleFolderKeys(children, depth + 1));
@@ -277,7 +269,7 @@ export function ProjectTree({
   const [editingTopic, setEditingTopic] = useState<string | null>(null);
   const [topicDraft, setTopicDraft] = useState("");
   const [menuTopic, setMenuTopic] = useState<string | null>(null);
-  const [menuProject, setMenuProject] = useState<{ key: string; root: string; path: string; scope: "global" | "project"; label: string } | null>(null);
+  const [menuProject, setMenuProject] = useState<{ key: string; root: string; path: string; scope: "project"; label: string } | null>(null);
   const [menuPoint, setMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [editingProject, setEditingProject] = useState<{ key: string; root: string } | null>(null);
   const [projectDraft, setProjectDraft] = useState("");
@@ -572,7 +564,7 @@ export function ProjectTree({
 
   const visibleTree = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return tree.filter((n) => n.kind !== "global_folder");
+    if (!q) return tree;
     const matches = (node: ProjectNode) =>
       [node.label, node.root, node.topicId].some((value) => (value ?? "").toLowerCase().includes(q));
     const filterNode = (node: ProjectNode): ProjectNode | null => {
@@ -583,7 +575,6 @@ export function ProjectTree({
       return null;
     };
     return tree
-      .filter((n) => n.kind !== "global_folder")
       .map(filterNode)
       .filter((node): node is ProjectNode => node !== null);
   }, [query, tree]);
@@ -713,17 +704,17 @@ export function ProjectTree({
       );
     }
 
-    if (node.kind === "topic" || node.kind === "global_topic") {
-      const scope = node.kind === "global_topic" ? "global" : "project";
-      const scopeClass = scope === "global" ? " project-tree__topic--global" : " project-tree__topic--project";
-      const accentStyle = projectAccentStyle(node.projectColor, scope === "global" ? "var(--project-tree-global-accent)" : undefined);
+    if (node.kind === "topic") {
+      const scope = "project";
+      const scopeClass = " project-tree__topic--project";
+      const accentStyle = projectAccentStyle(node.projectColor);
       const active = topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId);
       const label = (node.label || node.topicId || "Untitled").replace(/^●\s*/, "");
       const meta = topicMetaLine(node, t);
       const status = topicStatus(node);
       const statusLabel = topicStatusLabel(node, t);
       const topicId = node.topicId ?? "";
-      const imSource = scope === "global" && topicId ? imTopicSources[topicId] : undefined;
+      const imSource = topicId ? imTopicSources[topicId] : undefined;
       const imSourceLabel = imSource?.label || "";
       const imSourceTitle = imSourceLabel ? t("msg.fromIm", { source: imSourceLabel }) : "";
       const imSourcePlatform = (imSource?.platform || "im").replace(/[^a-z0-9_-]/gi, "").toLowerCase() || "im";
@@ -907,15 +898,15 @@ export function ProjectTree({
       );
     }
 
-    const scope = node.kind === "global_folder" ? "global" : "project";
-    const scopeClass = scope === "global" ? " project-tree__folder--global" : " project-tree__folder--project";
-    const accentStyle = projectAccentStyle(node.projectColor, scope === "global" ? "var(--project-tree-global-accent)" : undefined);
-    const projectRoot = scope === "global" ? "" : node.root ?? "";
-    const projectDragKey = scope === "global" ? GLOBAL_PROJECT_ORDER_KEY : projectRoot;
+    const scope = "project";
+    const scopeClass = " project-tree__folder--project";
+    const accentStyle = projectAccentStyle(node.projectColor);
+    const projectRoot = node.root ?? "";
+    const projectDragKey = projectRoot;
     const projectPath = node.root ?? "";
-    const colorTargetRoot = scope === "global" ? "" : projectPath;
-    const projectLabel = node.label || (scope === "global" ? "Global" : "Untitled");
-    const projectActive = activeScope === scope && (scope === "global" || activeWorkspaceRoot === node.root);
+    const colorTargetRoot = projectPath;
+    const projectLabel = node.label || "Untitled";
+    const projectActive = activeScope === "project" && activeWorkspaceRoot === node.root;
     const draggableProject = projectDragEnabled && depth === 0 && Boolean(projectDragKey) && editingProject?.key !== key;
     const projectDropPosition = dropProject?.root === projectDragKey ? dropProject.position : null;
     const handleProjectDragStart = (event: ReactDragEvent<HTMLElement>) => {
@@ -967,19 +958,15 @@ export function ProjectTree({
           void handleCreateTopic(scope, projectRoot, key);
         },
       },
-      ...(scope === "project"
-        ? [
-            {
-              key: "project-history",
-              icon: <History size={13} />,
-              label: t("projectTree.projectHistory"),
-              onSelect: () => {
-                closeMenu();
-                void onOpenProjectHistory(scope, projectRoot);
-              },
-            },
-          ]
-        : []),
+      {
+        key: "project-history",
+        icon: <History size={13} />,
+        label: t("projectTree.projectHistory"),
+        onSelect: () => {
+          closeMenu();
+          void onOpenProjectHistory(scope, projectRoot);
+        },
+      },
       {
         key: "rename",
         icon: <Pencil size={13} />,

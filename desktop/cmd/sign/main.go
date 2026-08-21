@@ -215,6 +215,13 @@ func matchPlatform(name string) string {
 	if strings.HasSuffix(name, ".deb") {
 		return ""
 	}
+	// The portable (-portable.exe) build is a human-download variant alongside the
+	// installer; the Windows updater LAUNCHES the NSIS installer it downloads, so
+	// the platform key must deterministically pin the installer. Skip portable
+	// exes — otherwise whichever of the two iterated last would win the map slot.
+	if strings.Contains(name, "-portable.") {
+		return ""
+	}
 	for _, p := range platforms {
 		if strings.Contains(name, p) {
 			return p

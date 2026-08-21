@@ -6,6 +6,7 @@ import { ProcessBrainIcon } from "./ProcessCard";
 import { openAttachmentViewer } from "./AttachmentViewer";
 import { parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
 import { app } from "../lib/bridge";
+import { UnifiedDiff } from "./editors/UnifiedDiff";
 import { useT } from "../lib/i18n";
 import type { Item, MessageActionScope } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
@@ -185,6 +186,10 @@ export function TurnActions({
 }) {
   const t = useT();
   const [confirmScope, setConfirmScope] = useState<MessageActionScope | null>(null);
+  // Rewind diff preview (upgrade spec 3-6): fetched on demand from the
+  // checkpoint store; null = closed.
+  const [rewindPreview, setRewindPreview] = useState<{ path: string; kind: string; added: number; removed: number; diff: string }[] | null>(null);
+  useEffect(() => { setRewindPreview(null); }, [openMenu]);
   const canAct = onRewind != null && turn != null;
   const actionDisabledReason = (scope: string): string => {
     if (rewindDisabled || actionPending) return t("rewind.disabledRunning");
@@ -335,6 +340,37 @@ export function TurnActions({
                 {renderAction("conversation")}
                 {renderAction("code")}
                 {renderAction("both", true)}
+                {!!checkpoint?.files?.length && (
+                  <button
+                    className="rewind__menu-item"
+                    type="button"
+                    onClick={() => {
+                      if (rewindPreview) { setRewindPreview(null); return; }
+                      app.CheckpointDiffForTab("", turn as number)
+                        .then((files) => setRewindPreview(files ?? []))
+                        .catch(() => setRewindPreview([]));
+                    }}
+                  >
+                    <span>{rewindPreview === null ? "预览改动" : "收起预览"}</span>
+                    <span className="rewind__menu-meta">{checkpoint.files.length} files</span>
+                  </button>
+                )}
+                {rewindPreview && rewindPreview.length > 0 && (
+                  <div className="rewind__preview">
+                    {rewindPreview.map((f) => (
+                      <div key={f.path} className="rewind__preview-file">
+                        <div className="rewind__preview-path">
+                          <span>{f.path}</span>
+                          {f.kind !== "binary" && <span className="rewind__preview-stat">+{f.added} -{f.removed}</span>}
+                        </div>
+                        {f.diff && <UnifiedDiff value={f.diff} maxHeight={200} showToggle={false} />}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {rewindPreview && rewindPreview.length === 0 && (
+                  <div className="rewind__menu-hint">文件与当前状态一致</div>
+                )}
               </div>
             )}
           </div>
@@ -377,7 +413,9 @@ export const AssistantMessage = memo(function AssistantMessage({
             <ChevronRight className={`reasoning__chevron${reasoningOpen ? " reasoning__chevron--open" : ""}`} size={12} />
           </button>
           {reasoningOpen && (
-            <div className="reasoning__body">{item.reasoning}</div>
+            <div className="reasoning__body">
+              <Markdown text={item.reasoning} />
+            </div>
           )}
         </div>
       )}

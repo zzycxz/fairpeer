@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -212,29 +213,48 @@ func TestListWorkspacesUsesProjectRegistryTitles(t *testing.T) {
 func TestListWorkspacesMigratesLegacyWorkspaceList(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
+	// Plant the pre-profile shared list directly (its writer is retired).
 	legacyRoot := t.TempDir()
-	rememberWorkspace(legacyRoot)
+	p := workspaceListPath()
+	if p == "" {
+		t.Skip("workspace list path unavailable")
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal([]string{legacyRoot})
+	if err := os.WriteFile(p, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
-	// Call ListWorkspaces to trigger migration
-	app := NewApp()
-	app.ListWorkspaces()
+	// The one-time drain (startup) absorbs the list into dev and retires it.
+	migrateLegacyWorkspacesIntoDevOnce()
 
-	// Verify the legacy workspace was migrated to projects file
 	f := loadProjectsFile("dev")
 	found := false
-	for _, p := range f.Projects {
-		if p.Root == normalizeProjectRoot(legacyRoot) {
+	for _, proj := range f.Projects {
+		if proj.Root == normalizeProjectRoot(legacyRoot) {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("legacy workspace not migrated to projects file")
+		t.Fatalf("legacy workspace not migrated to projects file: %+v", f.Projects)
 	}
-	projects := loadProjectsFile("dev").Projects
-	if len(projects) != 1 || projects[0].Root != legacyRoot {
-		t.Fatalf("legacy workspace was not migrated into projects: %+v", projects)
+}
+
+
+// findTreeProject returns the tree node for a workspace root (the always-
+// present home project 工作台 means tests must locate nodes by root, not by
+// position).
+func findTreeProject(nodes []ProjectNode, root string) *ProjectNode {
+	want := normalizeProjectRoot(root)
+	for i := range nodes {
+		if nodes[i].Kind == "project" && normalizeProjectRoot(nodes[i].Root) == want {
+			return &nodes[i]
+		}
 	}
+	return nil
 }
 
 func TestLegacySessionsMigrateIntoGlobalTopics(t *testing.T) {
@@ -248,11 +268,12 @@ func TestLegacySessionsMigrateIntoGlobalTopics(t *testing.T) {
 	newer := writeLegacySession(t, dir, "newer.jsonl", "newer imported prompt", time.Now().Add(-time.Hour))
 
 	nodes := NewApp().ListProjectTree("dev")
-	if len(nodes) != 1 || nodes[0].Kind != "global_folder" {
-		t.Fatalf("project tree = %#v, want global folder", nodes)
+	home := normalizeProjectRoot(profileHomeRoot("dev"))
+	if len(nodes) != 1 || nodes[0].Kind != "project" || normalizeProjectRoot(nodes[0].Root) != home {
+		t.Fatalf("project tree = %#v, want home project %s", nodes, home)
 	}
 	if got := len(nodes[0].Children); got != 2 {
-		t.Fatalf("global migrated topics = %d, want 2: %#v", got, nodes[0].Children)
+		t.Fatalf("home migrated topics = %d, want 2: %#v", got, nodes[0].Children)
 	}
 	if got, want := nodes[0].Children[0].TopicID, legacySessionTopicID(newer); got != want {
 		t.Fatalf("newest topic first = %q, want %q", got, want)
@@ -265,13 +286,13 @@ func TestLegacySessionsMigrateIntoGlobalTopics(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("load migrated meta: ok=%v err=%v", ok, err)
 	}
-	if meta.Scope != "global" || meta.WorkspaceRoot != "" || meta.TopicID != legacySessionTopicID(newer) {
+	if meta.Scope != "project" || normalizeProjectRoot(meta.WorkspaceRoot) != home || meta.TopicID != legacySessionTopicID(newer) {
 		t.Fatalf("migrated meta = %+v", meta)
 	}
 
 	nodes = NewApp().ListProjectTree("dev")
 	if got := len(nodes[0].Children); got != 2 {
-		t.Fatalf("migration should be idempotent, global topics = %d", got)
+		t.Fatalf("migration should be idempotent, home topics = %d", got)
 	}
 }
 
@@ -301,17 +322,18 @@ func TestV05LegacyEventSessionsImportIntoGlobalTopic(t *testing.T) {
 	}
 
 	nodes := NewApp().ListProjectTree("dev")
-	if len(nodes) != 1 || nodes[0].Kind != "global_folder" {
-		t.Fatalf("project tree = %#v, want global folder", nodes)
+	homeRoot := normalizeProjectRoot(profileHomeRoot("dev"))
+	if len(nodes) != 1 || nodes[0].Kind != "project" || normalizeProjectRoot(nodes[0].Root) != homeRoot {
+		t.Fatalf("project tree = %#v, want home project %s", nodes, homeRoot)
 	}
 	if len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != wantTopicID {
-		t.Fatalf("global topics = %#v, want imported v0.5 topic %q", nodes[0].Children, wantTopicID)
+		t.Fatalf("home topics = %#v, want imported v0.5 topic %q", nodes[0].Children, wantTopicID)
 	}
 	meta, ok, err := agent.LoadBranchMeta(migratedSession)
 	if err != nil || !ok {
 		t.Fatalf("load imported v0.5 meta: ok=%v err=%v", ok, err)
 	}
-	if meta.Scope != "global" || meta.TopicID != wantTopicID {
+	if meta.Scope != "project" || meta.TopicID != wantTopicID {
 		t.Fatalf("imported v0.5 meta = %+v", meta)
 	}
 }
@@ -333,18 +355,19 @@ func TestLegacySessionTopicIDsKeepNormalizedNameCollisionsDistinct(t *testing.T)
 	}
 
 	nodes := NewApp().ListProjectTree("dev")
-	if len(nodes) != 1 || nodes[0].Kind != "global_folder" {
-		t.Fatalf("project tree = %#v, want global folder", nodes)
+	home := normalizeProjectRoot(profileHomeRoot("dev"))
+	if len(nodes) != 1 || nodes[0].Kind != "project" || normalizeProjectRoot(nodes[0].Root) != home {
+		t.Fatalf("project tree = %#v, want home project %s", nodes, home)
 	}
 	if got := len(nodes[0].Children); got != 2 {
-		t.Fatalf("global migrated topics = %d, want 2: %#v", got, nodes[0].Children)
+		t.Fatalf("home migrated topics = %d, want 2: %#v", got, nodes[0].Children)
 	}
 	seen := map[string]bool{}
 	for _, child := range nodes[0].Children {
 		seen[child.TopicID] = true
 	}
 	if !seen[dottedTopic] || !seen[underscoredTopic] {
-		t.Fatalf("global topics = %#v, want %q and %q", nodes[0].Children, dottedTopic, underscoredTopic)
+		t.Fatalf("home topics = %#v, want %q and %q", nodes[0].Children, dottedTopic, underscoredTopic)
 	}
 }
 
@@ -513,20 +536,21 @@ func TestReorderProjectsPersistsGlobalSidebarOrder(t *testing.T) {
 	}
 
 	app := NewApp()
-	if _, err := app.CreateTopic("global", "", "dev", "Global note"); err != nil {
-		t.Fatalf("create global topic: %v", err)
+	home := ensureProfileHomeRoot("dev")
+	if _, err := app.CreateTopic("global", "", "dev", "Home note"); err != nil {
+		t.Fatalf("create home topic: %v", err)
 	}
-	if err := app.ReorderProjects([]string{second, desktopGlobalOrderToken, first}, "dev"); err != nil {
-		t.Fatalf("ReorderProjects with global: %v", err)
+	if err := app.ReorderProjects([]string{second, home, first}, "dev"); err != nil {
+		t.Fatalf("ReorderProjects with home: %v", err)
 	}
 
 	// Verify the order was persisted in the projects file
 	f := loadProjectsFile("dev")
-	if len(f.Projects) != 2 {
-		t.Fatalf("projects file has %d projects, want 2", len(f.Projects))
+	if len(f.Projects) != 3 {
+		t.Fatalf("projects file has %d projects, want 3", len(f.Projects))
 	}
-	if got := []string{f.Projects[0].Root, f.Projects[1].Root}; got[0] != second || got[1] != first {
-		t.Fatalf("projects file order = %v, want %v", got, []string{second, first})
+	if got := []string{f.Projects[0].Root, f.Projects[1].Root, f.Projects[2].Root}; got[0] != second || got[1] != home || got[2] != first {
+		t.Fatalf("projects file order = %v, want %v", got, []string{second, home, first})
 	}
 }
 
@@ -584,8 +608,9 @@ func TestRemoveWorkspaceUsesSharedProjectRegistryForCurrentProject(t *testing.T)
 	if got := app.ListWorkspaces(); len(got) != 0 {
 		t.Fatalf("workspaces after remove = %+v, want empty", got)
 	}
-	if got := app.ListProjectTree("dev"); len(got) != 1 || got[0].Kind != "global_folder" || len(got[0].Children) != 0 {
-		t.Fatalf("project tree after remove = %+v, want empty Global folder", got)
+	home := normalizeProjectRoot(profileHomeRoot("dev"))
+	if got := app.ListProjectTree("dev"); len(got) != 1 || got[0].Kind != "project" || normalizeProjectRoot(got[0].Root) != home || len(got[0].Children) != 0 {
+		t.Fatalf("project tree after remove = %+v, want empty home project %s", got, home)
 	}
 }
 
@@ -615,10 +640,11 @@ func TestRestoredProjectTabUsesStoredTopicTitle(t *testing.T) {
 		t.Fatalf("tab title = %q, want 你是谁", got)
 	}
 	nodes := app.ListProjectTree("dev")
-	if len(nodes) != 1 || len(nodes[0].Children) != 1 {
-		t.Fatalf("project tree = %#v, want one project with one topic", nodes)
+	project := findTreeProject(nodes, projectRoot)
+	if project == nil || len(project.Children) != 1 {
+		t.Fatalf("project tree = %#v, want project %s with one topic", nodes, projectRoot)
 	}
-	if got := nodes[0].Children[0].Label; got != tabs[0].TopicTitle {
+	if got := project.Children[0].Label; got != tabs[0].TopicTitle {
 		t.Fatalf("tree title = %q, want same as tab title %q", got, tabs[0].TopicTitle)
 	}
 }
@@ -649,10 +675,11 @@ func TestUntitledProjectTopicUsesSameFallbackEverywhere(t *testing.T) {
 		t.Fatalf("tab title = %q, want %q", got, defaultTopicTitle)
 	}
 	nodes := app.ListProjectTree("dev")
-	if len(nodes) != 1 || len(nodes[0].Children) != 1 {
-		t.Fatalf("project tree = %#v, want one project with one topic", nodes)
+	project := findTreeProject(nodes, projectRoot)
+	if project == nil || len(project.Children) != 1 {
+		t.Fatalf("project tree = %#v, want project %s with one topic", nodes, projectRoot)
 	}
-	if got := nodes[0].Children[0].Label; got != defaultTopicTitle {
+	if got := project.Children[0].Label; got != defaultTopicTitle {
 		t.Fatalf("tree title = %q, want %q", got, defaultTopicTitle)
 	}
 }
@@ -680,10 +707,11 @@ func TestCreateTopicDefaultsToAutoNewSessionTitle(t *testing.T) {
 		t.Fatalf("createdAt = %d, want between %d and %d", got, before, after)
 	}
 	nodes := NewApp().ListProjectTree("dev")
-	if len(nodes) != 1 || len(nodes[0].Children) != 1 {
-		t.Fatalf("project tree = %#v, want one project with one topic", nodes)
+	project := findTreeProject(nodes, projectRoot)
+	if project == nil || len(project.Children) != 1 {
+		t.Fatalf("project tree = %#v, want project %s with one topic", nodes, projectRoot)
 	}
-	if got := nodes[0].Children[0].CreatedAt; got != topic.CreatedAt {
+	if got := project.Children[0].CreatedAt; got != topic.CreatedAt {
 		t.Fatalf("project tree createdAt = %d, want %d", got, topic.CreatedAt)
 	}
 }
@@ -703,13 +731,14 @@ func TestCreateTopicAppearsFirstInProjectTree(t *testing.T) {
 	}
 
 	nodes := app.ListProjectTree("dev")
-	if len(nodes) != 1 || len(nodes[0].Children) != 2 {
-		t.Fatalf("project tree = %#v, want one project with two topics", nodes)
+	project := findTreeProject(nodes, projectRoot)
+	if project == nil || len(project.Children) != 2 {
+		t.Fatalf("project tree = %#v, want project %s with two topics", nodes, projectRoot)
 	}
-	if got := nodes[0].Children[0].TopicID; got != second.ID {
+	if got := project.Children[0].TopicID; got != second.ID {
 		t.Fatalf("first visible topic = %q, want newest %q", got, second.ID)
 	}
-	if got := nodes[0].Children[1].TopicID; got != first.ID {
+	if got := project.Children[1].TopicID; got != first.ID {
 		t.Fatalf("second visible topic = %q, want older %q", got, first.ID)
 	}
 }
@@ -717,37 +746,43 @@ func TestCreateTopicAppearsFirstInProjectTree(t *testing.T) {
 func TestCreateGlobalTopicAppearsFirstInProjectTree(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
+	// Global scope retired: legacy CreateTopic("global") lands on the profile
+	// home project 工作台 and still appears first there.
 	app := NewApp()
 	first, err := app.CreateTopic("global", "", "dev", "")
 	if err != nil {
-		t.Fatalf("create first global topic: %v", err)
+		t.Fatalf("create first home topic: %v", err)
 	}
 	second, err := app.CreateTopic("global", "", "dev", "")
 	if err != nil {
-		t.Fatalf("create second global topic: %v", err)
+		t.Fatalf("create second home topic: %v", err)
 	}
 
+	home := normalizeProjectRoot(profileHomeRoot("dev"))
 	nodes := app.ListProjectTree("dev")
-	if len(nodes) != 1 || nodes[0].Kind != "global_folder" || len(nodes[0].Children) != 2 {
-		t.Fatalf("project tree = %#v, want Global with two topics", nodes)
+	if len(nodes) != 1 || nodes[0].Kind != "project" || normalizeProjectRoot(nodes[0].Root) != home || len(nodes[0].Children) != 2 {
+		t.Fatalf("project tree = %#v, want home project %s with two topics", nodes, home)
 	}
 	if got := nodes[0].Children[0].TopicID; got != second.ID {
-		t.Fatalf("first visible global topic = %q, want newest %q", got, second.ID)
+		t.Fatalf("first visible home topic = %q, want newest %q", got, second.ID)
 	}
 	if got := nodes[0].Children[1].TopicID; got != first.ID {
-		t.Fatalf("second visible global topic = %q, want older %q", got, first.ID)
+		t.Fatalf("second visible home topic = %q, want older %q", got, first.ID)
 	}
 }
 
 func TestListProjectTreeShowsEmptyGlobalWhenNoProjects(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
+	// With no user projects the tree shows the always-present home project
+	// 工作台 (the retired Global folder's replacement).
 	nodes := NewApp().ListProjectTree("dev")
 	if len(nodes) != 1 {
-		t.Fatalf("project tree = %#v, want one Global folder", nodes)
+		t.Fatalf("project tree = %#v, want one home project", nodes)
 	}
-	if nodes[0].Kind != "global_folder" || nodes[0].Label != "Global" || len(nodes[0].Children) != 0 {
-		t.Fatalf("project tree = %#v, want empty Global folder", nodes)
+	home := normalizeProjectRoot(profileHomeRoot("dev"))
+	if nodes[0].Kind != "project" || normalizeProjectRoot(nodes[0].Root) != home || nodes[0].Label != homeProjectTitle || len(nodes[0].Children) != 0 {
+		t.Fatalf("project tree = %#v, want empty home project %s", nodes, home)
 	}
 }
 
@@ -763,16 +798,14 @@ func TestSwitchWorkspaceRegistersDefaultTopicInProjectTree(t *testing.T) {
 	}
 
 	nodes := app.ListProjectTree("dev")
-	if len(nodes) != 1 {
-		t.Fatalf("project tree len = %d, want 1: %+v", len(nodes), nodes)
+	project := findTreeProject(nodes, projectRoot)
+	if project == nil {
+		t.Fatalf("project tree missing project %s: %+v", projectRoot, nodes)
 	}
-	if got := nodes[0].Root; got != projectRoot {
-		t.Fatalf("project root = %q, want %q", got, projectRoot)
+	if len(project.Children) != 1 {
+		t.Fatalf("project children len = %d, want 1: %+v", len(project.Children), project.Children)
 	}
-	if len(nodes[0].Children) != 1 {
-		t.Fatalf("project children len = %d, want 1: %+v", len(nodes[0].Children), nodes[0].Children)
-	}
-	child := nodes[0].Children[0]
+	child := project.Children[0]
 	if got := child.Label; got != defaultTopicTitle {
 		t.Fatalf("default topic label = %q, want %q", got, defaultTopicTitle)
 	}
@@ -863,7 +896,7 @@ func TestRenameTopicRecreatesDeletedProjectTitleIndexFromOpenTab(t *testing.T) {
 		t.Fatalf("restored topic title = %q, want 恢复标题", got)
 	}
 	nodes := app.ListProjectTree("dev")
-	if len(nodes) != 1 || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topic.ID {
+	if project := findTreeProject(nodes, projectRoot); project == nil || len(project.Children) != 1 || project.Children[0].TopicID != topic.ID {
 		t.Fatalf("project tree should still contain topic, got %#v", nodes)
 	}
 }
@@ -898,7 +931,7 @@ func TestRenameTopicRecreatesDeletedProjectTitleIndexFromSessionMeta(t *testing.
 		t.Fatalf("restored topic title = %q, want 恢复标题", got)
 	}
 	nodes := NewApp().ListProjectTree("dev")
-	if len(nodes) != 1 || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
+	if project := findTreeProject(nodes, projectRoot); project == nil || len(project.Children) != 1 || project.Children[0].TopicID != topicID {
 		t.Fatalf("project tree should contain restored topic, got %#v", nodes)
 	}
 }
@@ -1021,30 +1054,31 @@ func TestRestoreGlobalTopicSessionReindexesProjectTree(t *testing.T) {
 	topicID := legacySessionTopicID(sessionPath)
 	app := NewApp()
 
+	home := normalizeProjectRoot(profileHomeRoot("dev"))
 	nodes := app.ListProjectTree("dev")
-	if len(nodes) != 1 || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
-		t.Fatalf("legacy session should start in Global, got %#v", nodes)
+	if len(nodes) != 1 || normalizeProjectRoot(nodes[0].Root) != home || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
+		t.Fatalf("legacy session should start in home project, got %#v", nodes)
 	}
 	if err := app.TrashTopic(topicID); err != nil {
-		t.Fatalf("trash global topic: %v", err)
+		t.Fatalf("trash home topic: %v", err)
 	}
 	trashPath := filepath.Join(dir, sessionTrashDir, "restore-global.jsonl", "restore-global.jsonl")
 	if _, err := os.Stat(trashPath); err != nil {
-		t.Fatalf("global session should be in trash: %v", err)
+		t.Fatalf("home session should be in trash: %v", err)
 	}
-	if got := app.ListProjectTree("dev"); len(got) != 1 || got[0].Kind != "global_folder" || len(got[0].Children) != 0 {
-		t.Fatalf("trashed global topic should leave empty Global folder, got %#v", got)
+	if got := app.ListProjectTree("dev"); len(got) != 1 || got[0].Kind != "project" || len(got[0].Children) != 0 {
+		t.Fatalf("trashed home topic should leave empty home project, got %#v", got)
 	}
 
 	if err := app.RestoreSession(trashPath); err != nil {
-		t.Fatalf("restore global session: %v", err)
+		t.Fatalf("restore home session: %v", err)
 	}
 	if got := app.ListTrashedSessions(); len(got) != 0 {
 		t.Fatalf("trash should be empty after restore, got %#v", got)
 	}
 	nodes = app.ListProjectTree("dev")
-	if len(nodes) != 1 || nodes[0].Kind != "global_folder" || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
-		t.Fatalf("restored global session should reappear in Global, got %#v", nodes)
+	if len(nodes) != 1 || normalizeProjectRoot(nodes[0].Root) != home || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
+		t.Fatalf("restored home session should reappear in home project, got %#v", nodes)
 	}
 }
 
@@ -1081,7 +1115,7 @@ func TestRestoreProjectTopicSessionReindexesProjectTree(t *testing.T) {
 		t.Fatalf("restore project session: %v", err)
 	}
 	nodes := app.ListProjectTree("dev")
-	if len(nodes) != 1 || nodes[0].Kind != "project" || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
+	if project := findTreeProject(nodes, projectRoot); project == nil || len(project.Children) != 1 || project.Children[0].TopicID != topicID {
 		t.Fatalf("restored project session should reappear in project tree, got %#v", nodes)
 	}
 	if got := loadTopicTitle(projectRoot, topicID); got != "Project restore" {
@@ -1110,9 +1144,10 @@ func TestRestoreSessionWithoutTopicMetadataFallsBackToGlobal(t *testing.T) {
 	if err := app.RestoreSession(trashPath); err != nil {
 		t.Fatalf("restore orphan session: %v", err)
 	}
+	home := normalizeProjectRoot(profileHomeRoot("dev"))
 	nodes := app.ListProjectTree("dev")
-	if len(nodes) != 1 || nodes[0].Kind != "global_folder" || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
-		t.Fatalf("restored orphan session should fall back to Global, got %#v", nodes)
+	if len(nodes) != 1 || normalizeProjectRoot(nodes[0].Root) != home || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
+		t.Fatalf("restored orphan session should fall back to home project, got %#v", nodes)
 	}
 }
 
@@ -1255,19 +1290,27 @@ func TestLegacyMigrationConcurrentRunsHaveNoLostUpdates(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			migrateLegacySessionsIntoGlobalTopics(dir)
+			migrateLegacySessionsIntoGlobalTopics(dir, "dev")
 		}()
 	}
 	wg.Wait()
 
 	gotSet := map[string]bool{}
-	// Migration writes to the un-profiled projects file (no profileKey)
-	for _, id := range loadProjectsFile().GlobalTopics {
+	// Migration indexes into the dev home project (global scope retired).
+	home := normalizeProjectRoot(profileHomeRoot("dev"))
+	var homeTopics []string
+	for _, p := range loadProjectsFile("dev").Projects {
+		if normalizeProjectRoot(p.Root) == home {
+			homeTopics = p.Topics
+			break
+		}
+	}
+	for _, id := range homeTopics {
 		gotSet[id] = true
 	}
 	for id := range want {
 		if !gotSet[id] {
-			t.Fatalf("concurrent migration lost topic %q; GlobalTopics=%v", id, loadProjectsFile().GlobalTopics)
+			t.Fatalf("concurrent migration lost topic %q; home topics=%v", id, homeTopics)
 		}
 	}
 }

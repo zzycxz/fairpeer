@@ -97,35 +97,6 @@ func loadWorkspaces() []string {
 	return out
 }
 
-func rememberWorkspace(dir string) {
-	dir = strings.TrimSpace(dir)
-	if dir == "" {
-		return
-	}
-	if abs, err := filepath.Abs(dir); err == nil {
-		dir = abs
-	}
-	paths := []string{dir}
-	for _, path := range loadWorkspaces() {
-		if path != dir {
-			paths = append(paths, path)
-		}
-		if len(paths) >= 12 {
-			break
-		}
-	}
-	p := workspaceListPath()
-	if p == "" {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return
-	}
-	if b, err := json.MarshalIndent(paths, "", "  "); err == nil {
-		_ = os.WriteFile(p, b, 0o644)
-	}
-}
-
 func forgetWorkspace(dir string) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {

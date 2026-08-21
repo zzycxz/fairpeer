@@ -574,8 +574,12 @@ func (a *App) OpenProjectTab(args ...string) (TabMeta, error) {
 	if abs, err := filepath.Abs(workspaceRoot); err == nil {
 		workspaceRoot = abs
 	}
+	// Strict profile isolation: the root belongs to another profile's index.
+	if rootOwnedByOtherProfile(workspaceRoot, profile) {
+		return TabMeta{}, fmt.Errorf("项目 %s 属于其他模式，三模式项目互相隔离", workspaceRoot)
+	}
 	saveWorkspace(workspaceRoot)
-	_ = addProject(workspaceRoot, "", profile)
+	addProjectTitled(workspaceRoot, profile)
 
 	a.mu.Lock()
 	// If already open, just activate.
@@ -627,55 +631,13 @@ func (a *App) OpenProjectTab3(workspaceRoot, topicID, profile string) (TabMeta, 
 	return a.OpenProjectTab(workspaceRoot, topicID, profile)
 }
 
-// OpenGlobalTab opens a new global-scope tab (no project root). The global
-// workspace root is the fairpeer user config directory.
-// OpenGlobalTab opens (or activates) a global-scope tab. The profile-aware form
-// takes (topicID, profile); the legacy form takes (topicID) and defaults profile
-// to "". The profile routes the new tab into the right partition (dev/cowork)
-// and is stamped on the WorkspaceTab so the controller builds correctly.
+// OpenGlobalTab is the RETIRED global scope's entry point, kept as a shim for
+// persisted frontend state and history entries: it now opens the topic on the
+// profile's home project (工作台), where all former global topics live after
+// migration.
 func (a *App) OpenGlobalTab(topicID, profile string) (TabMeta, error) {
 	profile = strings.TrimSpace(profile)
-	globalRoot := globalWorkspaceRoot()
-	if err := os.MkdirAll(globalRoot, 0o755); err != nil {
-		return TabMeta{}, fmt.Errorf("create global workspace: %w", err)
-	}
-
-	a.mu.Lock()
-	for _, tab := range a.tabs {
-		if tab.Scope == "global" && tab.TopicID == topicID {
-			a.activeTabID = tab.ID
-			meta := a.tabMeta(tab, true)
-			a.saveTabsLocked()
-			a.mu.Unlock()
-			return meta, nil
-		}
-	}
-
-	tabID := a.newUniqueTabIDLocked()
-	topicTitle := topicTitleForTab("global", "", topicID)
-	tab := &WorkspaceTab{
-		ID:               tabID,
-		Scope:            "global",
-		WorkspaceRoot:    globalRoot,
-		TopicID:          topicID,
-		TopicTitle:       topicTitle,
-		mode:             "normal",
-		toolApprovalMode: control.ToolApprovalAsk,
-		disabledMCP:      map[string]ServerView{},
-		profile:          profile,
-	}
-	tab.sink = &tabEventSink{tabID: tabID, app: a}
-
-	a.tabs[tabID] = tab
-	a.tabOrder = append(a.tabOrder, tabID)
-	a.activeTabID = tabID
-	a.saveTabsLocked()
-	// Snapshot tabMeta under the lock (same TOCTOU guard as OpenProjectTab).
-	meta := a.tabMeta(tab, true)
-	a.mu.Unlock()
-
-	a.startTabControllerBuild(tab)
-	return meta, nil
+	return a.OpenProjectTab(ensureProfileHomeRoot(profile), topicID, profile)
 }
 
 // OpenExpertSessionTab opens (or activates) a dedicated tab for an expert
@@ -744,28 +706,26 @@ func (a *App) OpenExpertSessionTab(teamID, teamName string) (TabMeta, error) {
 func (a *App) EnsureBlankTab(scope, workspaceRoot, profile string) (TabMeta, error) {
 	profile = strings.TrimSpace(profile)
 	scope = strings.TrimSpace(scope)
-	if scope != "project" {
-		scope = "global"
+	// The global scope is retired (2026-08-21): every session belongs to a
+	// project. Legacy global callers (scope ""/"global" or an empty root)
+	// land on the profile's home project 工作台 — a real project root whose
+	// sessions resolve to the former global partition.
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	if scope != "project" || workspaceRoot == "" {
+		scope = "project"
+		workspaceRoot = ensureProfileHomeRoot(profile)
 	}
-
-	globalRoot := ""
-	if scope == "project" {
-		workspaceRoot = strings.TrimSpace(workspaceRoot)
-		if workspaceRoot == "" {
-			return TabMeta{}, fmt.Errorf("workspaceRoot is required")
-		}
-		if abs, err := filepath.Abs(workspaceRoot); err == nil {
-			workspaceRoot = abs
-		}
-		saveWorkspace(workspaceRoot)
-		_ = addProject(workspaceRoot, "", profile)
-	} else {
-		workspaceRoot = ""
-		globalRoot = globalWorkspaceRoot()
-		if err := os.MkdirAll(globalRoot, 0o755); err != nil {
-			return TabMeta{}, fmt.Errorf("create global workspace: %w", err)
-		}
+	if abs, err := filepath.Abs(workspaceRoot); err == nil {
+		workspaceRoot = abs
 	}
+	// Strict profile isolation: a root owned by another profile (e.g. the
+	// coding workspace carried across a mode switch) never opens here — the
+	// session lands on this profile's home project instead.
+	if rootOwnedByOtherProfile(workspaceRoot, profile) {
+		workspaceRoot = ensureProfileHomeRoot(profile)
+	}
+	saveWorkspace(workspaceRoot)
+	addProjectTitled(workspaceRoot, profile)
 
 	var created *WorkspaceTab
 	a.mu.Lock()
@@ -782,9 +742,6 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot, profile string) (TabMeta, err
 
 	if topicID := a.indexedBlankTopicIDLocked(scope, workspaceRoot, profile); topicID != "" {
 		a.mu.Unlock()
-		if scope == "global" {
-			return a.OpenGlobalTab(topicID, profile)
-		}
 		return a.OpenProjectTab(workspaceRoot, topicID, profile)
 	}
 
@@ -795,28 +752,19 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot, profile string) (TabMeta, err
 		return TabMeta{}, err
 	}
 	f := loadProjectsFile(profile)
-	if workspaceRoot == "" {
-		f.GlobalTopics = prependUniqueString(f.GlobalTopics, topicID)
-		_ = saveProjectsFile(f, profile)
-	} else {
-		for i, p := range f.Projects {
-			if p.Root == workspaceRoot {
-				f.Projects[i].Topics = prependUniqueString(p.Topics, topicID)
-				_ = saveProjectsFile(f, profile)
-				break
-			}
+	for i, p := range f.Projects {
+		if p.Root == workspaceRoot {
+			f.Projects[i].Topics = prependUniqueString(p.Topics, topicID)
+			_ = saveProjectsFile(f, profile)
+			break
 		}
 	}
 
 	tabID := a.newUniqueTabIDLocked()
-	actualRoot := workspaceRoot
-	if scope == "global" {
-		actualRoot = globalRoot
-	}
 	created = &WorkspaceTab{
 		ID:               tabID,
 		Scope:            scope,
-		WorkspaceRoot:    actualRoot,
+		WorkspaceRoot:    workspaceRoot,
 		TopicID:          topicID,
 		TopicTitle:       topicTitleForTab(scope, workspaceRoot, topicID),
 		mode:             "normal",
@@ -868,14 +816,10 @@ func (a *App) indexedBlankTopicIDLocked(scope, workspaceRoot, profile string) st
 	f := loadProjectsFile(normalizeProfileName(profile))
 
 	var topicIDs []string
-	if scope == "global" {
-		topicIDs = orderedTopicIDs(f.GlobalTopics, titles)
-	} else {
-		for _, project := range f.Projects {
-			if project.Root == workspaceRoot {
-				topicIDs = orderedTopicIDs(project.Topics, titles)
-				break
-			}
+	for _, project := range f.Projects {
+		if project.Root == workspaceRoot {
+			topicIDs = orderedTopicIDs(project.Topics, titles)
+			break
 		}
 	}
 	if len(topicIDs) == 0 {
@@ -899,7 +843,7 @@ func (a *App) indexedBlankTopicIDLocked(scope, workspaceRoot, profile string) st
 		if topicTitleForTab(scope, workspaceRoot, topicID) != defaultTopicTitle {
 			continue
 		}
-		if findTopicSession(config.SessionDir(), topicID) != "" {
+		if findTopicSession(desktopSessionDirFor(workspaceRoot, normalizeProfileName(profile)), topicID) != "" {
 			continue
 		}
 		return topicID
@@ -1174,7 +1118,7 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 	sessionDir := tabSessionDir(tab)
 	topicID := strings.TrimSpace(tab.TopicID)
 	if tab.Scope == "global" {
-		migratedTopics := migrateLegacySessionsIntoGlobalTopics(config.SessionDir(), a.activeProfileKey())
+		migratedTopics := migrateLegacySessionsIntoGlobalTopics(desktopSessionDirFor("", a.activeProfileKey()), a.activeProfileKey())
 		if len(migratedTopics) > 0 {
 			a.emitProjectTreeChanged()
 		}
@@ -1943,6 +1887,18 @@ func addProject(root, title string, profileKey ...string) error {
 	if root == "" {
 		return fmt.Errorf("project root is required")
 	}
+	// Registration gate (generation-level isolation): a root already claimed
+	// by another profile is never written into this profile's index. With
+	// per-profile generation (no shared sources, no root carry-over) this is
+	// unreachable in normal flows — it exists so no future caller can produce
+	// cross-profile content even by mistake.
+	profile := ""
+	if len(profileKey) > 0 {
+		profile = strings.TrimSpace(profileKey[0])
+	}
+	if rootOwnedByOtherProfile(root, profile) {
+		return nil
+	}
 	title = strings.TrimSpace(title)
 	f := loadProjectsFile(profileKey...)
 	for i, p := range f.Projects {
@@ -2256,10 +2212,18 @@ func ensureTopicIndexed(args ...string) error {
 	}
 	projectsMu.Lock()
 	defer projectsMu.Unlock()
-	if strings.TrimSpace(scope) == "global" {
-		workspaceRoot = ""
+	// Global scope retired (2026-08-21): global/empty-root topics index into
+	// the profile home project 工作台.
+	if strings.TrimSpace(scope) == "global" || strings.TrimSpace(workspaceRoot) == "" {
+		scope = "project"
+		workspaceRoot = ensureProfileHomeRoot(profile)
 	} else {
 		workspaceRoot = normalizeProjectRoot(workspaceRoot)
+	}
+	// Strict profile isolation: skip (without error) when the tab's root is
+	// owned by another profile — the topic stays indexed under its owner.
+	if rootOwnedByOtherProfile(workspaceRoot, profile) {
+		return nil
 	}
 	title = strings.TrimSpace(title)
 	if title == "" {
@@ -2273,10 +2237,6 @@ func ensureTopicIndexed(args ...string) error {
 		return err
 	}
 	f := loadProjectsFile(profile)
-	if workspaceRoot == "" {
-		f.GlobalTopics = prependUniqueString(f.GlobalTopics, topicID)
-		return saveProjectsFile(f, profile)
-	}
 	for i, p := range f.Projects {
 		if p.Root == workspaceRoot {
 			f.Projects[i].Topics = prependUniqueString(p.Topics, topicID)
@@ -2441,9 +2401,16 @@ func migrateLegacySessionsIntoGlobalTopics(dir string, profileKey ...string) []s
 	if err != nil || len(infos) == 0 {
 		return nil
 	}
+	profile := ""
+	if len(profileKey) > 0 {
+		profile = strings.TrimSpace(profileKey[0])
+	}
+	// Global scope retired (2026-08-21): legacy unscoped sessions are adopted
+	// by the profile's home project 工作台 instead of a global topic section.
+	home := ensureProfileHomeRoot(profile)
 	titles := loadSessionTitles(dir)
-	topicTitles := loadTopicTitles("")
-	topicSources := loadTopicTitleSources("")
+	topicTitles := loadTopicTitles(home, profile)
+	topicSources := loadTopicTitleSources(home, profile)
 	f := loadProjectsFile(profileKey...)
 
 	var migratedTopicIDs []string
@@ -2477,14 +2444,14 @@ func migrateLegacySessionsIntoGlobalTopics(dir string, profileKey ...string) []s
 		if err != nil {
 			continue
 		}
-		// Only adopt genuinely-global, unscoped legacy sessions. A session that
-		// already carries a project scope or workspace root is not legacy — never
-		// strip its binding into Global.
+		// Only adopt genuinely-unscoped legacy sessions. A session that already
+		// carries a project scope or workspace root is not legacy — never strip
+		// its binding into its project.
 		if meta.Scope == "project" || strings.TrimSpace(meta.WorkspaceRoot) != "" {
 			continue
 		}
-		meta.Scope = "global"
-		meta.WorkspaceRoot = ""
+		meta.Scope = "project"
+		meta.WorkspaceRoot = home
 		meta.TopicID = topicID
 		meta.TopicTitle = title
 		if err := agent.SaveBranchMetaPreserveUpdated(info.Path, meta); err != nil {
@@ -2500,10 +2467,21 @@ func migrateLegacySessionsIntoGlobalTopics(dir string, profileKey ...string) []s
 		_ = os.WriteFile(markerPath, []byte(time.Now().UTC().Format(time.RFC3339)), 0o644)
 		return nil
 	}
-	f.GlobalTopics = uniqueStrings(append(migratedTopicIDs, f.GlobalTopics...))
+	homeIdx := -1
+	for i := range f.Projects {
+		if normalizeProjectRoot(f.Projects[i].Root) == normalizeProjectRoot(home) {
+			homeIdx = i
+			break
+		}
+	}
+	if homeIdx < 0 {
+		f.Projects = append([]desktopProject{{Root: home, Title: homeProjectTitle}}, f.Projects...)
+		homeIdx = 0
+	}
+	f.Projects[homeIdx].Topics = uniqueStrings(append(migratedTopicIDs, f.Projects[homeIdx].Topics...))
 	_ = saveProjectsFile(f, profileKey...)
-	_ = saveTopicTitles("", topicTitles)
-	_ = saveTopicTitleSources("", topicSources)
+	_ = saveTopicTitles(home, topicTitles, profile)
+	_ = saveTopicTitleSources(home, topicSources, profile)
 	// Mark as done after a successful migration pass.
 	_ = os.WriteFile(markerPath, []byte(time.Now().UTC().Format(time.RFC3339)), 0o644)
 	return migratedTopicIDs
@@ -2526,20 +2504,20 @@ func restoreSessionTopicIndex(dir, sessionPath string, profileKey ...string) err
 	topicID := strings.TrimSpace(meta.TopicID)
 	scope := strings.TrimSpace(meta.Scope)
 	workspaceRoot := strings.TrimSpace(meta.WorkspaceRoot)
-	if scope != "global" && scope != "project" {
-		if workspaceRoot == "" {
-			scope = "global"
-		} else {
-			scope = "project"
-		}
+	profile := ""
+	if len(profileKey) > 0 {
+		profile = strings.TrimSpace(profileKey[0])
 	}
-	if scope == "global" {
-		workspaceRoot = ""
-	} else {
-		workspaceRoot = normalizeProjectRoot(workspaceRoot)
-		if workspaceRoot == "" {
-			scope = "global"
-		}
+	// Global scope retired (2026-08-21): legacy global sessions (scope
+	// "global" or unscoped with no root) are adopted by the profile's home
+	// project 工作台. Session files stay put — the home project resolves to
+	// the former global partition.
+	if scope != "project" {
+		scope = "project"
+	}
+	workspaceRoot = normalizeProjectRoot(workspaceRoot)
+	if workspaceRoot == "" {
+		workspaceRoot = ensureProfileHomeRoot(profile)
 	}
 
 	title := restoredSessionTopicTitle(dir, sessionPath, meta)
@@ -2551,29 +2529,28 @@ func restoreSessionTopicIndex(dir, sessionPath string, profileKey ...string) err
 	}
 
 	f := loadProjectsFile(profileKey...)
-	if scope == "global" {
-		f.GlobalTopics = prependUniqueString(f.GlobalTopics, topicID)
-		meta.Scope = "global"
-		meta.WorkspaceRoot = ""
-	} else {
-		found := false
-		for i, p := range f.Projects {
-			if p.Root != workspaceRoot {
-				continue
-			}
-			f.Projects[i].Topics = prependUniqueString(p.Topics, topicID)
-			found = true
-			break
+	found := false
+	for i, p := range f.Projects {
+		if p.Root != workspaceRoot {
+			continue
 		}
-		if !found {
-			f.Projects = append(f.Projects, desktopProject{
-				Root:   workspaceRoot,
-				Topics: []string{topicID},
-			})
-		}
-		meta.Scope = "project"
-		meta.WorkspaceRoot = workspaceRoot
+		f.Projects[i].Topics = prependUniqueString(p.Topics, topicID)
+		found = true
+		break
 	}
+	if !found {
+		title := ""
+		if _, ok := profileKeyForHomeRoot(workspaceRoot); ok {
+			title = homeProjectTitle
+		}
+		f.Projects = append(f.Projects, desktopProject{
+			Root:   workspaceRoot,
+			Title:  title,
+			Topics: []string{topicID},
+		})
+	}
+	meta.Scope = "project"
+	meta.WorkspaceRoot = workspaceRoot
 	meta.TopicID = topicID
 	meta.TopicTitle = title
 	if err := saveProjectsFile(f, profileKey...); err != nil {
@@ -2659,15 +2636,21 @@ func (a *App) CreateTopic(args ...string) (TopicMeta, error) {
 	}
 	topicID := newTopicID()
 	createdAt := time.Now().UnixMilli()
-	if scope == "global" {
-		workspaceRoot = ""
+	// Global scope retired (2026-08-21): global/empty-root topics land on the
+	// profile home project 工作台.
+	if scope != "project" || strings.TrimSpace(workspaceRoot) == "" {
+		scope = "project"
+		workspaceRoot = ensureProfileHomeRoot(profile)
 	}
-	if workspaceRoot != "" {
-		if abs, err := filepath.Abs(workspaceRoot); err == nil {
-			workspaceRoot = abs
-		}
-		_ = addProject(workspaceRoot, "", profile)
+	if abs, err := filepath.Abs(workspaceRoot); err == nil {
+		workspaceRoot = abs
 	}
+	// Strict profile isolation: refuse creating a topic on another profile's
+	// project root.
+	if rootOwnedByOtherProfile(workspaceRoot, profile) {
+		return TopicMeta{}, fmt.Errorf("项目 %s 属于其他模式，三模式项目互相隔离", workspaceRoot)
+	}
+	addProjectTitled(workspaceRoot, profile)
 	if err := setTopicTitleWithSource(workspaceRoot, topicID, trimmedTitle, titleSource); err != nil {
 		return TopicMeta{}, err
 	}
@@ -3082,7 +3065,14 @@ func (a *App) TrashTopic(topicID string) error {
 // un-profiled index (backward compatible). Wails binds this as a 1-arg method;
 // the frontend always passes a profile ("dev"/"cowork"/"netdev").
 func (a *App) ListProjectTree(profile string) []ProjectNode {
-	migrateLegacySessionsIntoGlobalTopics(config.SessionDir(), profile)
+	// Legacy adoption reads ONLY this profile's partition: the dev partition
+	// (config.SessionDir) must never feed a cowork/netdev tree (generation-
+	// level isolation — cross-profile content is not produced in the first
+	// place).
+	migrateLegacySessionsIntoGlobalTopics(desktopSessionDirFor("", profile), profile)
+	// Global scope retired (2026-08-21): fold any remaining global topics into
+	// the profile home project and make sure the home entry exists.
+	migrateGlobalIntoHome(profile)
 	f := loadProjectsFile(profile)
 	out := []ProjectNode{}
 	type topicSummary struct {
@@ -3150,55 +3140,8 @@ func (a *App) ListProjectTree(profile string) []ProjectNode {
 	}
 	a.mu.RUnlock()
 
-	// Global section.
-	globalTitleMap := loadTopicTitles("", profile)
-	globalCreatedMap := loadTopicCreatedAts("", profile)
-	if len(globalTitleMap) > 0 || len(f.Projects) == 0 {
-		globalTitle := strings.TrimSpace(f.GlobalTitle)
-		if globalTitle == "" {
-			globalTitle = "Global"
-		}
-		globalColor := normalizeProjectColor(f.GlobalColor)
-		globalTopicIDs := orderedTopicIDs(f.GlobalTopics, globalTitleMap)
-		children := make([]ProjectNode, 0, len(globalTopicIDs))
-		for _, id := range globalTopicIDs {
-			title := globalTitleMap[id]
-			summary := topicSummaries[topicSummaryKey("global", "", id)]
-			effSummary := summary.profile
-			if effSummary == "" {
-				effSummary = config.ProfileDev
-			}
-			effProfile := profile
-			if effProfile == "" {
-				effProfile = config.ProfileDev
-			}
-			if effSummary != effProfile {
-				continue
-			}
-			status := openTopics[topicSummaryKey("global", "", id)]
-			children = append(children, ProjectNode{
-				Key:            "global_topic_" + id,
-				Kind:           "global_topic",
-				Label:          title,
-				TopicID:        id,
-				ProjectColor:   globalColor,
-				Turns:          summary.turns,
-				CreatedAt:      globalCreatedMap[id],
-				LastActivityAt: summary.lastActivityAt,
-				Open:           status.open,
-				Running:        status.running,
-				Status:         status.status,
-			})
-		}
-		out = append(out, ProjectNode{
-			Key:          "global_folder",
-			Kind:         "global_folder",
-			Label:        globalTitle,
-			Root:         globalWorkspaceRoot(),
-			ProjectColor: globalColor,
-			Children:     children,
-		})
-	}
+	// Project sections. (The global section is retired — former global topics
+	// live in the profile home project 工作台 after migrateGlobalIntoHome.)
 
 	// Project sections.
 	for _, p := range f.Projects {
@@ -3224,6 +3167,18 @@ func (a *App) ListProjectTree(profile string) []ProjectNode {
 				topicTitle = topicTitleForTab("project", p.Root, tid)
 			}
 			summary := topicSummaries[topicSummaryKey("project", p.Root, tid)]
+			if legacy, ok := topicSummaries[topicSummaryKey("global", "", tid)]; ok {
+				// Legacy global sessions of a migrated topic keep their old
+				// "global::" summary key until the topic is reopened and its
+				// meta re-stamped; merge so turns/activity stay visible.
+				summary.turns += legacy.turns
+				if legacy.lastActivityAt > summary.lastActivityAt {
+					summary.lastActivityAt = legacy.lastActivityAt
+				}
+				if summary.profile == "" {
+					summary.profile = legacy.profile
+				}
+			}
 			effSummary := summary.profile
 			if effSummary == "" {
 				effSummary = config.ProfileDev
@@ -3252,7 +3207,11 @@ func (a *App) ListProjectTree(profile string) []ProjectNode {
 			})
 		}
 		if len(children) == 0 && !openRoots[normalizeProjectRoot(p.Root)] {
-			continue
+			// The home project always renders — it is the profile's landing
+			// workspace (the retired Global folder's replacement).
+			if _, isHome := profileKeyForHomeRoot(p.Root); !isHome {
+				continue
+			}
 		}
 		node.Label = title
 		node.ProjectColor = p.Color

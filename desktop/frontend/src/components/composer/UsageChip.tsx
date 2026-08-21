@@ -9,7 +9,7 @@
 // (extended with session telemetry) plus the latest-turn WireUsage.
 import { Tooltip } from "../Tooltip";
 import { useT } from "../../lib/i18n";
-import type { ContextInfo, WireUsage } from "../../lib/types";
+import type { BudgetStatusView, ContextInfo, WireUsage } from "../../lib/types";
 
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
@@ -47,7 +47,12 @@ function Row({ label, value, tone }: { label: string; value: string; tone?: stri
   );
 }
 
-export function UsageChip({ context, usage }: { context?: ContextInfo; usage?: WireUsage }) {
+function fmtCost(cost: number, currency?: string): string {
+  const sym = currency || "$";
+  return `${sym}${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(3)}`;
+}
+
+export function UsageChip({ context, usage, budget }: { context?: ContextInfo; usage?: WireUsage; budget?: BudgetStatusView }) {
   const t = useT();
   if (!context || !context.window || context.window <= 0) return null;
   const pct = Math.min(100, Math.round((context.used / context.window) * 100));
@@ -90,6 +95,15 @@ export function UsageChip({ context, usage }: { context?: ContextInfo; usage?: W
       />
       <div className="usage-pop__sep" />
       <div className="usage-pop__title">{t("composer.usageDetail.session")}</div>
+      {!!usage?.cost && usage.cost > 0 && (
+        <Row label={t("composer.usageDetail.cost")} value={fmtCost(usage.cost, usage.currency)} />
+      )}
+      {!!budget?.rpm && budget.rpm > 0 && (
+        <Row
+          label={t("composer.usageDetail.rpm")}
+          value={`${budget.used}/${budget.rpm}${budget.windowSecs > 0 ? ` · ${Math.round(budget.windowSecs)}s` : ""}`}
+        />
+      )}
       <Row label={t("composer.usageDetail.requests")} value={requests > 0 ? String(requests) : "—"} />
       <Row label={t("composer.usageDetail.input")} value={fmtFull(context.sessionPromptTokens ?? 0)} />
       <Row label={t("composer.usageDetail.output")} value={fmtFull(context.sessionCompletionTokens ?? 0)} />
@@ -108,6 +122,7 @@ export function UsageChip({ context, usage }: { context?: ContextInfo; usage?: W
         </span>
         <span className="composer-usage__text">
           {fmtTokens(session)} · {fmtTokens(context.used)}/{fmtTokens(context.window)}
+          {!!budget?.rpm && budget.rpm > 0 && ` · ${budget.used}/${budget.rpm} rpm`}
         </span>
       </div>
     </Tooltip>

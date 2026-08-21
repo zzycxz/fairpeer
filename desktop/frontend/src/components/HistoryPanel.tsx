@@ -10,7 +10,7 @@ import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type Cont
 import { useDeferredClose } from "../lib/useMountTransition";
 import { ModalCloseButton } from "./ModalCloseButton";
 
-type HistoryScopeFilter = "all" | "project" | "global";
+type HistoryScopeFilter = "all" | "project";
 type HistoryStatusFilter = "all" | "current" | "open";
 type HistoryDateFilter = "all" | "today" | "yesterday" | "older";
 
@@ -100,7 +100,6 @@ export function HistoryPanel({
     () => ({
       all: sessions.length,
       project: sessions.filter((s) => sessionScope(s) === "project").length,
-      global: sessions.filter((s) => sessionScope(s) === "global").length,
     }),
     [sessions],
   );
@@ -120,8 +119,7 @@ export function HistoryPanel({
 
   useEffect(() => {
     if (scopeFilter === "project" && scopeCounts.project === 0) setScopeFilter("all");
-    if (scopeFilter === "global" && scopeCounts.global === 0) setScopeFilter("all");
-  }, [scopeCounts.global, scopeCounts.project, scopeFilter]);
+  }, [scopeCounts.project, scopeFilter]);
 
   useEffect(() => {
     if (isTrash) return;
@@ -385,7 +383,6 @@ export function HistoryPanel({
             options={[
               { id: "all", label: tr("history.filterAll"), count: scopeCounts.all },
               { id: "project", label: tr("history.filterProject"), count: scopeCounts.project },
-              { id: "global", label: tr("history.filterGlobal"), count: scopeCounts.global },
             ]}
             value={scopeFilter}
             onChange={(next) => setScopeFilter(next as HistoryScopeFilter)}
@@ -599,8 +596,8 @@ function sessionTimeForGrouping(s: SessionMeta, isTrash: boolean): number {
   return isTrash ? s.deletedAt || sessionActivityTime(s) : sessionActivityTime(s);
 }
 
-function sessionScope(s: SessionMeta): "project" | "global" {
-  return s.scope === "project" ? "project" : "global";
+function sessionScope(_s: SessionMeta): "project" {
+  return "project";
 }
 
 function sessionLocation(s: SessionMeta, tr: ReturnType<typeof useT>): string {
@@ -609,7 +606,7 @@ function sessionLocation(s: SessionMeta, tr: ReturnType<typeof useT>): string {
     const parts = s.workspaceRoot.split(/[\\/]/).filter(Boolean);
     return parts[parts.length - 1] || s.workspaceRoot;
   }
-  return sessionScope(s) === "project" ? tr("history.filterProject") : tr("history.filterGlobal");
+  return tr("history.filterProject");
 }
 
 function sessionDisplayTitle(s: SessionMeta, fallback: string): string {

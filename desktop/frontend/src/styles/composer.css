@@ -380,129 +380,74 @@
 }
 
 .composer-meta__control--approval {
-  flex: 0 0 232px;
-  min-width: 216px;
-  max-width: min(232px, 34vw);
-}
-
-.composer-modebar {
-  --wails-draggable: no-drag;
-  --composer-modebar-index: 0;
-  --composer-modebar-active-bg: var(--bg-elev);
-  --composer-modebar-active-border: var(--border);
-  --composer-modebar-active-fg: var(--fg);
-  position: relative;
-  isolation: isolate;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: center;
-  width: 100%;
-  height: 32px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--surface-2);
-  box-shadow: var(--app-graphite-shadow);
-  overflow: hidden;
-}
-
-.composer-modebar[data-mode="auto"],
-.composer-modebar[data-mode="plan"] {
-  --composer-modebar-index: 1;
-}
-
-.composer-modebar[data-mode="yolo"],
-.composer-modebar[data-mode="goal"] {
-  --composer-modebar-index: 2;
-}
-
-.composer-modebar--approval {
-  --composer-modebar-active-bg: var(--mode-auto-bg);
-  --composer-modebar-active-border: var(--mode-auto-border);
-  --composer-modebar-active-fg: var(--mode-auto-fg);
-}
-
-.composer-modebar--approval[data-mode="auto"] {
-  --composer-modebar-active-bg: color-mix(in srgb, var(--ok) 58%, #0b3d24);
-  --composer-modebar-active-border: color-mix(in srgb, var(--ok) 76%, #0b3d24);
-  --composer-modebar-active-fg: #fff;
-}
-
-.composer-modebar--approval[data-mode="yolo"] {
-  --composer-modebar-active-bg: var(--mode-yolo-bg);
-  --composer-modebar-active-border: var(--mode-yolo-border);
-  --composer-modebar-active-fg: var(--mode-yolo-fg);
-}
-
-.composer-modebar__thumb {
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  left: 2px;
-  width: calc((100% - 4px) / 3);
-  border: 1px solid var(--composer-modebar-active-border);
-  border-radius: var(--radius-pill);
-  background: var(--composer-modebar-active-bg);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent),
-    0 1px 3px color-mix(in srgb, #000 28%, transparent);
-  transform: translateX(calc(var(--composer-modebar-index) * 100%));
-  transition: transform 0.16s var(--ease-out), border-color 0.16s, background 0.16s, box-shadow 0.16s;
-  pointer-events: none;
-}
-
-.composer-modebar__item {
-  position: relative;
-  z-index: var(--z-local-raised);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-width: 0;
-  height: 26px;
-  padding: 0 6px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--fg-dim);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 620;
-  line-height: 14px;
-  transition: color 0.12s, transform 0.12s;
-}
-
-.composer-modebar__item span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: center;
-  line-height: 14px;
-}
-
-.composer-modebar__item svg {
   flex: 0 0 auto;
+  min-width: 0;
+  max-width: min(168px, 26vw);
 }
 
-.composer-modebar__item:hover:not(:disabled) {
-  color: var(--fg);
-  transform: translateY(-1px);
+/* Tool-access dropdown (ApprovalModeSwitcher): trigger reuses .modelsw__trigger
+   inside .composer-meta; the mode class tints it so the active posture — in
+   particular full access — is legible without opening the menu. Selectors are
+   prefixed with .composer-meta to outrank the generic .composer-meta
+   .modelsw__trigger wash; --mode-*-fg is solid-fill white, so the text color is
+   derived from the mode bg instead to stay readable on light themes. */
+.approvalsw {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
-.composer-modebar__item:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+.approvalsw__trigger {
+  gap: 6px;
 }
 
-.composer-modebar__item--active {
-  color: var(--composer-modebar-active-fg);
+.composer-meta .approvalsw--auto .approvalsw__trigger {
+  color: color-mix(in srgb, var(--mode-auto-bg) 78%, var(--fg));
+  border-color: color-mix(in srgb, var(--mode-auto-bg) 46%, var(--border));
+  background: color-mix(in srgb, var(--mode-auto-bg) 14%, var(--surface-2));
 }
 
-.composer-modebar__item:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-  transform: none;
+.composer-meta .approvalsw--auto .approvalsw__trigger:hover:not(:disabled),
+.composer-meta .approvalsw--auto .approvalsw__trigger:focus-visible {
+  color: color-mix(in srgb, var(--mode-auto-bg) 82%, var(--fg));
+  border-color: color-mix(in srgb, var(--mode-auto-bg) 62%, var(--border));
+  background: color-mix(in srgb, var(--mode-auto-bg) 22%, var(--surface-2));
+}
+
+.composer-meta .approvalsw--yolo .approvalsw__trigger {
+  color: color-mix(in srgb, var(--mode-yolo-bg) 80%, var(--fg));
+  border-color: color-mix(in srgb, var(--mode-yolo-bg) 52%, var(--border));
+  background: color-mix(in srgb, var(--mode-yolo-bg) 16%, var(--surface-2));
+}
+
+.composer-meta .approvalsw--yolo .approvalsw__trigger:hover:not(:disabled),
+.composer-meta .approvalsw--yolo .approvalsw__trigger:focus-visible {
+  color: color-mix(in srgb, var(--mode-yolo-bg) 84%, var(--fg));
+  border-color: color-mix(in srgb, var(--mode-yolo-bg) 68%, var(--border));
+  background: color-mix(in srgb, var(--mode-yolo-bg) 26%, var(--surface-2));
+}
+
+.approvalsw__menu {
+  width: min(216px, calc(100vw - 16px));
+}
+
+/* Compact one-line options; the per-mode explanation rides on hover (Tooltip)
+   so the open menu stays scannable. */
+.approvalsw__item {
+  height: 34px;
+  min-height: 34px;
+  gap: 8px;
+  padding: 0 9px;
+}
+
+.approvalsw__item .approvalsw__label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.approvalsw__check {
+  flex: 0 0 auto;
+  color: var(--fg-dim);
 }
 
 .composer-action-trigger {
@@ -731,20 +676,14 @@
   }
 
   .composer-meta__control--approval {
-    flex-basis: 178px;
-    min-width: 164px;
-    max-width: 178px;
+    flex-basis: auto;
+    min-width: 0;
+    max-width: 148px;
   }
 
   .composer-mode-chip {
     gap: 5px;
     padding-inline: 8px;
-  }
-
-  .composer-modebar__item {
-    gap: 4px;
-    padding-inline: 4px;
-    font-size: 11.5px;
   }
 
   .composer-meta__control--effort {
@@ -776,9 +715,9 @@
   }
 
   .composer-meta__control--approval {
-    flex-basis: 148px;
-    min-width: 144px;
-    max-width: 148px;
+    flex-basis: auto;
+    min-width: 0;
+    max-width: 132px;
   }
 
   .composer-meta__control--effort {
@@ -797,12 +736,6 @@
 
   .composer-more-trigger span {
     display: none;
-  }
-
-  .composer-modebar__item {
-    gap: 3px;
-    padding-inline: 3px;
-    font-size: 11px;
   }
 
   .composer-meta .modelsw__trigger {
@@ -1848,6 +1781,86 @@
   gap: 8px;
   margin-top: 8px;
   flex-wrap: wrap;
+}
+/* Queued steer / follow-up strip (upgrade spec 2-3/2-4) */
+.composer-queue {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-self: flex-start;
+  max-width: 100%;
+}
+.composer-queue__chip {
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 8px;
+  font-size: 11.5px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-soft);
+  opacity: 0.8;
+}
+.composer-queue__chip--steer { border-style: solid; }
+.composer-queue__chip--next { font-style: italic; }
+
+/* Approval card: previewed file changes (upgrade spec 0-4) */
+.approval-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.approval-changes__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 132px;
+  overflow: auto;
+}
+.approval-changes__file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+.approval-changes__file--selected {
+  background: var(--bg-soft);
+}
+.approval-changes__mark {
+  font-family: var(--mono);
+  font-weight: 600;
+  width: 1.1em;
+  flex: none;
+}
+.approval-changes__mark--create { color: var(--ok, #3fb950); }
+.approval-changes__mark--delete { color: var(--danger, #f85149); }
+.approval-changes__path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+.approval-changes__stat {
+  flex: none;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+.approval-changes__workdir {
+  font-family: var(--mono);
+  font-size: 12px;
+  opacity: 0.75;
 }
 .approval-subject {
   margin: 0;

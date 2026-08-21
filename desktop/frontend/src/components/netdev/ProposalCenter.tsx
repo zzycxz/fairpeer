@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { app } from "../../lib/bridge";
+import { useConfirm } from "../../lib/confirm";
 import type { NetDevProposal } from "../../lib/types";
 
 // ProposalCenter is the human half of the write path: the agent drafts
@@ -20,6 +21,7 @@ const STATUS_LABEL: Record<string, string> = {
 // confirm dialogs. Shared by the settings 提案中心 and the 运维 dock's 提案
 // tab — the human half of the write path lives wherever the human is looking.
 export function ProposalActions({ p, onDone }: { p: NetDevProposal; onDone: () => void }) {
+  const confirmDlg = useConfirm();
   const [busy, setBusy] = useState("");
   const act = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label);
@@ -36,11 +38,14 @@ export function ProposalActions({ p, onDone }: { p: NetDevProposal; onDone: () =
     <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
       {p.status === "draft" && (
         <span className="btn btn--primary btn--small" role="button" onClick={() => void act(`approve:${p.id}`, async () => {
-          const ok = confirm(
-            `批准提案 ${p.id}？\n\n${p.intent}\n\n` +
-            (p.steps ?? []).map(s => `· ${s.device}: ${(s.commands ?? []).join("; ")}`).join("\n") +
-            `\n\n回滚计划已随提案起草，批准后仍需手动点击执行。`,
-          );
+          const ok = await confirmDlg({
+            title: `批准提案 ${p.id}`,
+            message:
+              `${p.intent}\n\n` +
+              (p.steps ?? []).map((s) => `· ${s.device}: ${(s.commands ?? []).join("; ")}`).join("\n") +
+              "\n\n回滚计划已随提案起草，批准后仍需手动点击执行。",
+            confirmLabel: "批准",
+          });
           if (!ok) return;
           await app.NetDevApproveProposal(p.id, true);
         })}>
@@ -49,7 +54,11 @@ export function ProposalActions({ p, onDone }: { p: NetDevProposal; onDone: () =
       )}
       {p.status === "approved" && (
         <span className="btn btn--primary btn--small" role="button" onClick={() => void act(`exec:${p.id}`, async () => {
-          if (!confirm(`执行提案 ${p.id}？将逐台下发（先备份），任一台失败即冻结。`)) return;
+          if (!(await confirmDlg({
+            title: `执行提案 ${p.id}`,
+            message: "将逐台下发（先备份），任一台失败即冻结。",
+            confirmLabel: "执行",
+          }))) return;
           await app.NetDevExecuteProposal(p.id);
         })}>
           {busy === `exec:${p.id}` ? "执行中…" : "执行"}
@@ -57,7 +66,12 @@ export function ProposalActions({ p, onDone }: { p: NetDevProposal; onDone: () =
       )}
       {(p.status === "partial" || p.status === "done") && (
         <span className="btn btn--secondary btn--small" role="button" onClick={() => void act(`rb:${p.id}`, async () => {
-          if (!confirm(`按已起草的回滚计划回滚 ${p.id} 的已执行步骤？`)) return;
+          if (!(await confirmDlg({
+            title: `回滚提案 ${p.id}`,
+            message: "按已起草的回滚计划回滚已执行步骤。",
+            confirmLabel: "回滚",
+            danger: false,
+          }))) return;
           await app.NetDevRollbackProposal(p.id);
         })}>
           {busy === `rb:${p.id}` ? "…" : p.status === "partial" ? "回滚已执行" : "回滚"}
@@ -68,6 +82,7 @@ export function ProposalActions({ p, onDone }: { p: NetDevProposal; onDone: () =
 }
 
 export function ProposalCenter() {
+  const confirmDlg = useConfirm();
   const [items, setItems] = useState<NetDevProposal[]>([]);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState("");
@@ -99,22 +114,34 @@ export function ProposalCenter() {
   }, [reload]);
 
   const approve = (p: NetDevProposal) => act(`approve:${p.id}`, async () => {
-    const confirm2 = confirm(
-      `批准提案 ${p.id}？\n\n${p.intent}\n\n` +
-      p.steps.map(s => `· ${s.device}: ${s.commands.join("; ")}`).join("\n") +
-      `\n\n回滚计划已随提案起草，批准后仍需手动点击执行。`,
-    );
-    if (!confirm2) return;
+    const ok = await confirmDlg({
+      title: `批准提案 ${p.id}`,
+      message:
+        `${p.intent}\n\n` +
+        p.steps.map((s) => `· ${s.device}: ${s.commands.join("; ")}`).join("\n") +
+        "\n\n回滚计划已随提案起草，批准后仍需手动点击执行。",
+      confirmLabel: "批准",
+    });
+    if (!ok) return;
     await app.NetDevApproveProposal(p.id, true);
   });
 
   const execute = (p: NetDevProposal) => act(`exec:${p.id}`, async () => {
-    if (!confirm(`执行提案 ${p.id}？将逐台下发（先备份），任一台失败即冻结。`)) return;
+    if (!(await confirmDlg({
+      title: `执行提案 ${p.id}`,
+      message: "将逐台下发（先备份），任一台失败即冻结。",
+      confirmLabel: "执行",
+    }))) return;
     await app.NetDevExecuteProposal(p.id);
   });
 
   const rollback = (p: NetDevProposal) => act(`rb:${p.id}`, async () => {
-    if (!confirm(`按已起草的回滚计划回滚 ${p.id} 的已执行步骤？`)) return;
+    if (!(await confirmDlg({
+      title: `回滚提案 ${p.id}`,
+      message: "按已起草的回滚计划回滚已执行步骤。",
+      confirmLabel: "回滚",
+      danger: false,
+    }))) return;
     await app.NetDevRollbackProposal(p.id);
   });
 

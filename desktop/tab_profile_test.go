@@ -24,7 +24,9 @@ func testTab(id, root string) *WorkspaceTab {
 }
 
 func TestSetEffortForTabIsTabLocal(t *testing.T) {
-	isolateDesktopUserDirs(t)
+	// The tabs' test-provider model must resolve against a seeded config —
+	// a fresh install has no providers by design.
+	seedTestProviderConfig(t)
 
 	rootA := t.TempDir()
 	rootB := t.TempDir()
@@ -46,11 +48,12 @@ func TestSetEffortForTabIsTabLocal(t *testing.T) {
 		}
 	}()
 
+	// "max" migrates to the unified "high"; the tab-local isolation is the point.
 	if err := app.SetEffortForTab(tabA.ID, "max"); err != nil {
 		t.Fatalf("SetEffortForTab: %v", err)
 	}
-	if got := app.EffortForTab(tabA.ID).Current; got != "max" {
-		t.Fatalf("tab A effort = %q, want max", got)
+	if got := app.EffortForTab(tabA.ID).Current; got != "high" {
+		t.Fatalf("tab A effort = %q, want high (max migrates to high)", got)
 	}
 	if got := app.EffortForTab(tabB.ID).Current; got != "auto" {
 		t.Fatalf("tab B effort = %q, want auto", got)
@@ -101,9 +104,9 @@ func TestEffortForTabUsesKnownModelRegistry(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	projectRoot := t.TempDir()
-	// Thinking capability is now declared explicitly via reasoning_protocol
-	// rather than auto-detected from a model allowlist, so the provider
-	// declares reasoning_protocol = "test-provider" to expose the test-provider effort levels.
+	// Reasoning capability is provider-universal now (unified effort
+	// vocabulary); the reasoning_protocol key remains load-bearing only when
+	// set to "none" to opt a provider out.
 	configBody := `default_model = "project-provider/test-provider/test-model-a"
 [[providers]]
 name = "project-provider"
@@ -111,7 +114,6 @@ kind = "openai"
 base_url = "https://proxy.example.com/v1"
 model = "test-provider/test-model-a"
 api_key_env = "PROJECT_API_KEY"
-reasoning_protocol = "test-provider"
 `
 	if err := os.WriteFile(filepath.Join(projectRoot, "fairpeer.toml"), []byte(configBody), 0o644); err != nil {
 		t.Fatal(err)
@@ -125,10 +127,10 @@ reasoning_protocol = "test-provider"
 	defer tab.Ctrl.Close()
 
 	got := app.EffortForTab(tab.ID)
-	if !got.Supported || got.Current != "auto" || got.Default != "high" {
-		t.Fatalf("EffortForTab model registry = %+v, want supported auto/high", got)
+	if !got.Supported || got.Current != "auto" || got.Default != "auto" {
+		t.Fatalf("EffortForTab model registry = %+v, want supported auto/auto", got)
 	}
-	wantLevels := []string{"auto", "high", "max"}
+	wantLevels := []string{"auto", "low", "medium", "high"}
 	if len(got.Levels) != len(wantLevels) {
 		t.Fatalf("levels = %v, want %v", got.Levels, wantLevels)
 	}

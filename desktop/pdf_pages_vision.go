@@ -42,9 +42,11 @@ import (
 	"sync"
 	"time"
 
+	skillassets "github.com/zzycxz/fairpeer/internal/assets"
 	"github.com/zzycxz/fairpeer/internal/docconv"
 	"github.com/zzycxz/fairpeer/internal/proc"
 	runtimepkg "github.com/zzycxz/fairpeer/internal/runtime"
+	"log/slog"
 )
 
 // pdfPageResult is one page's VLM description, written to page-{N}.json.
@@ -202,4 +204,48 @@ func parseRenderOutput(stdout []byte) (pages []string, total int, err error) {
 		return res.Pages, res.Total, nil
 	}
 	return nil, 0, fmt.Errorf("no JSON result line in render output")
+}
+
+// completePDFPagesInBackground finishes the per-page VLM analysis for pages the
+// synchronous submit-path pass skipped (analyzePDFPages caps at 6 pages so
+// SubmitToTab stays responsive). It runs the ppt-auto skill's own idempotent
+// analyzer (analyze_pdf_pages.py) with --max 999 — there is no bash 2-minute
+// budget on this path — so by the time the model dispatches to ppt-auto,
+// ~/.fairpeer/pdf-pages/ usually holds EVERY page and the skill's in-task
+// batching finds nothing left to do. Best-effort: errors only log.
+func completePDFPagesInBackground(pdfPath string) {
+	dir, err := skillassets.PPTAutoSkillDir()
+	if err != nil || dir == "" {
+		return
+	}
+	script := filepath.Join(dir, "scripts", "analyze_pdf_pages.py")
+	if _, err := os.Stat(script); err != nil {
+		return
+	}
+	pyCmd, pyPrefix, _ := runtimepkg.ResolvePython()
+	if pyCmd == "" {
+		pyCmd = "python3"
+		if runtime.GOOS == "windows" {
+			pyCmd = "python"
+		}
+	}
+	args := append(append([]string{}, pyPrefix...), script, pdfPath, "--max", "999")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, pyCmd, args...)
+	proc.HideWindow(cmd)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Run(); err != nil {
+		slog.Warn("ppt reference: background completion of pdf page analysis failed",
+			"pdf", filepath.Base(pdfPath), "err", err, "out", strings.TrimSpace(out.String()))
+		return
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	tail := ""
+	if len(lines) > 0 {
+		tail = lines[len(lines)-1]
+	}
+	slog.Info("ppt reference: background pdf page analysis finished",
+		"pdf", filepath.Base(pdfPath), "summary", tail)
 }

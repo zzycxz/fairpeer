@@ -16,6 +16,7 @@ export type CoWorkPanel = "taskCenter" | "preference" | "calendarTask" | "rag" |
 export interface CoWorkLayoutProps {
   mainNode?: ReactNode;
   footerNode?: ReactNode;
+  terminalNode?: ReactNode;
   // Global banners (startup error / update notice) — rendered at the top of
   // the office main so they stay visible in this mode too (the coding chat
   // pane that used to host them is display:none under .app--cowork).
@@ -32,10 +33,8 @@ export interface CoWorkLayoutProps {
   onNewSession?: () => void;
   onSwitchMode?: (mode: "dev" | "cowork" | "netdev") => void;
   pillProjects?: import("../components/WorkspacePill").PillProject[];
-  onOpenDevProject?: (root: string) => void;
-  onOpenDevGlobal?: () => void;
+  onPickProject?: (root: string) => void;
   onAddProject?: () => void;
-  globalSessionDirHint?: string;
   // Sidebar collapse — the brand-row toggle mirrors the coding view's
   // (toggleSidebar + its title live in App.tsx).
   onToggleSidebar?: () => void;
@@ -77,6 +76,7 @@ export interface CoWorkLayoutProps {
 export function CoWorkLayout({
   mainNode,
   footerNode,
+  terminalNode,
   bannersNode,
   projectTreeNode,
   sessionsNode,
@@ -86,10 +86,8 @@ export function CoWorkLayout({
   onNewSession,
   onSwitchMode,
   pillProjects,
-  onOpenDevProject,
-  onOpenDevGlobal,
+  onPickProject,
   onAddProject,
-  globalSessionDirHint,
   onToggleSidebar,
   sidebarToggleTitle,
   dockCwd,
@@ -214,10 +212,8 @@ export function CoWorkLayout({
             label={t("sidebar.pillOffice")}
             currentMode="cowork"
             projects={pillProjects}
-            onPickProject={onOpenDevProject}
-            onPickGlobal={onOpenDevGlobal}
+            onPickProject={onPickProject}
             onAddProject={onAddProject}
-            globalHint={globalSessionDirHint ? `${t("sidebar.pillGlobalStore")}: ${globalSessionDirHint}` : undefined}
             {...(onSwitchMode ? { onSwitchMode } : {})}
           />
           <button
@@ -300,6 +296,7 @@ export function CoWorkLayout({
         <div style={{ display: activePanel === "taskCenter" ? "contents" : "none" }}>
           <div className="cowork-main__transcript">{mainNode}</div>
           <div className="cowork-main__composer">{footerNode}</div>
+          {terminalNode}
         </div>
 
 

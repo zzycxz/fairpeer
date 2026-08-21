@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -44,6 +45,30 @@ func TestProviderViewFlagsKeylessProviderReady(t *testing.T) {
 	keyed := config.ProviderEntry{Name: "x", APIKeyEnv: "FAIRPEER_TEST_MISSING_KEY", Models: []string{"m"}}
 	if providerViewFromEntry(keyed, false, true).KeySet {
 		t.Error("provider with unresolved key must not report KeySet")
+	}
+}
+
+// Tabs must never boot on an ambient local preset: a persisted tab model that
+// only resolves against the injected ollama preset (the bug that silently
+// turned every tab into "qwen3-coder:30b" though the user never chose ollama)
+// counts as dead — resolution fails and buildTabController drops it to the
+// Welcome state instead of chatting on an unselected local endpoint.
+func TestAmbientPresetTabModelIsDead(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	cfg := config.LoadForEdit(filepath.Join(t.TempDir(), "absent.toml"))
+	if !cfg.AmbientLocalPreset("ollama") {
+		t.Fatal("the injected ollama preset must be ambient until the user adds it")
+	}
+	if _, _, ok := cfg.ResolveModelWithFallback("ollama/qwen3-coder:30b"); ok {
+		t.Fatal("an ambient preset's model must not resolve for tabs")
+	}
+	if tabHasSelectableProvider(cfg) {
+		t.Fatal("ambient presets alone must not make a tab bootable")
+	}
+
+	cfg.Desktop.ProviderAccess = []string{"ollama"}
+	if _, _, ok := cfg.ResolveModelWithFallback("ollama/qwen3-coder:30b"); !ok {
+		t.Fatal("an added preset's model must resolve for tabs")
 	}
 }
 

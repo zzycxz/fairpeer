@@ -107,18 +107,23 @@ func migrateToProfilePartition() {
 }
 
 // profileForSession determines the profile partition a session belongs in by
-// reading its sibling .meta. Profile=="cowork" routes to cowork; anything else
-// (empty/unknown/legacy) routes to dev. sessionPath is the path to the .jsonl.
-// A missing or unreadable .meta defaults to dev (correct for legacy data).
+// reading its sibling .meta. Profile=="cowork"/"netdev" routes to that
+// partition; anything else (empty/unknown/legacy) routes to dev. sessionPath
+// is the path to the .jsonl. A missing or unreadable .meta defaults to dev
+// (correct for legacy data).
 func profileForSession(sessionPath string) string {
 	m, ok, err := agent.LoadBranchMeta(sessionPath)
 	if err != nil || !ok {
 		return config.ProfileDev
 	}
-	if strings.EqualFold(strings.TrimSpace(m.Profile), config.ProfileCowork) {
+	switch strings.ToLower(strings.TrimSpace(m.Profile)) {
+	case config.ProfileCowork:
 		return config.ProfileCowork
+	case config.ProfileNetDev:
+		return config.ProfileNetDev
+	default:
+		return config.ProfileDev
 	}
-	return config.ProfileDev
 }
 
 // sessionCompanions returns the paths of every file/dir that travels with a
@@ -190,6 +195,7 @@ func migrateGlobalSessionsByProfile(userDir string) {
 	}
 	devDir := config.SessionDirFor(config.ProfileDev)
 	coworkDir := config.SessionDirFor(config.ProfileCowork)
+	netdevDir := config.SessionDirFor(config.ProfileNetDev)
 	// Two passes so a session's .meta companion is consumed together with its
 	// .jsonl (and routed by that .meta's Profile) rather than being orphaned to
 	// dev if dir iteration happened to visit the .meta first. Pass 1: .jsonl
@@ -206,15 +212,18 @@ func migrateGlobalSessionsByProfile(userDir string) {
 		srcSession := filepath.Join(sessionsDir, name)
 		profile := profileForSession(srcSession)
 		dstDir := devDir
-		if profile == config.ProfileCowork {
+		switch profile {
+		case config.ProfileCowork:
 			dstDir = coworkDir
+		case config.ProfileNetDev:
+			dstDir = netdevDir
 		}
 		moveSessionWithCompanions(name, sessionsDir, dstDir)
 	}
 	for _, e := range entries {
 		name := e.Name()
 		// Leave the profile subdirs the partitioned layout created in place.
-		if e.IsDir() && (name == config.ProfileDev || name == config.ProfileCowork) {
+		if e.IsDir() && (name == config.ProfileDev || name == config.ProfileCowork || name == config.ProfileNetDev) {
 			continue
 		}
 		// .jsonl files were handled in pass 1; skip them here.
@@ -545,7 +554,7 @@ func knownWorkspaceRoots() []string {
 		}
 	}
 	// Partitioned indexes.
-	for _, profileKey := range []string{config.ProfileDev, config.ProfileCowork} {
+	for _, profileKey := range []string{config.ProfileDev, config.ProfileCowork, config.ProfileNetDev} {
 		f := loadProjectsFile(profileKey)
 		for _, p := range f.Projects {
 			add(p.Root)
@@ -554,16 +563,20 @@ func knownWorkspaceRoots() []string {
 	return roots
 }
 
-// backfillBranchMetaProfile stamps Profile="dev" on every .meta sidecar under
-// the global dev AND cowork session dirs and each project's per-profile
-// session dirs whose Profile field is EMPTY. An existing non-empty Profile
-// (e.g. "cowork") is PRESERVED — this is the fix for BUG M2 where all sessions
-// were blanket-stamped to dev. Best-effort: a failed load/save for one sidecar
-// is logged and skipped.
+// backfillBranchMetaProfile stamps the owning profile key on every .meta
+// sidecar under the global dev/cowork/netdev session dirs and each project's
+// per-profile session dirs whose Profile field is EMPTY. An existing non-empty
+// Profile (e.g. "cowork") is PRESERVED — this is the fix for BUG M2 where all
+// sessions were blanket-stamped to dev. Best-effort: a failed load/save for
+// one sidecar is logged and skipped.
 func backfillBranchMetaProfile(userDir, devSessionsDir string) {
-	dirs := []string{
-		devSessionsDir,
-		config.SessionDirFor(config.ProfileCowork),
+	dirs := []struct {
+		dir     string
+		profile string
+	}{
+		{devSessionsDir, config.ProfileDev},
+		{config.SessionDirFor(config.ProfileCowork), config.ProfileCowork},
+		{config.SessionDirFor(config.ProfileNetDev), config.ProfileNetDev},
 	}
 	// Each project's per-profile session dir:
 	// <userDir>/projects/<slug>/<profile>/sessions.
@@ -573,20 +586,23 @@ func backfillBranchMetaProfile(userDir, devSessionsDir string) {
 			if !slug.IsDir() {
 				continue
 			}
-			for _, profileKey := range []string{config.ProfileDev, config.ProfileCowork} {
-				dirs = append(dirs, filepath.Join(projectsDir, slug.Name(), profileKey, "sessions"))
+			for _, profileKey := range []string{config.ProfileDev, config.ProfileCowork, config.ProfileNetDev} {
+				dirs = append(dirs, struct {
+					dir     string
+					profile string
+				}{filepath.Join(projectsDir, slug.Name(), profileKey, "sessions"), profileKey})
 			}
 		}
 	}
-	for _, dir := range dirs {
-		backfillBranchMetaProfileInDir(dir)
+	for _, d := range dirs {
+		backfillBranchMetaProfileInDir(d.dir, d.profile)
 	}
 }
 
 // backfillBranchMetaProfileInDir globs *.meta under dir and stamps Profile on
 // any whose field is EMPTY (legacy sidecars predate the field), preserving
 // UpdatedAt via SaveBranchMetaPreserveUpdated. Non-empty profiles are untouched.
-func backfillBranchMetaProfileInDir(dir string) {
+func backfillBranchMetaProfileInDir(dir, profileKey string) {
 	metas, err := filepath.Glob(filepath.Join(dir, "*.meta"))
 	if err != nil || len(metas) == 0 {
 		return
@@ -601,7 +617,7 @@ func backfillBranchMetaProfileInDir(dir string) {
 		if strings.TrimSpace(m.Profile) != "" {
 			continue // preserve existing (e.g. cowork) — never overwrite.
 		}
-		m.Profile = config.ProfileDev
+		m.Profile = profileKey
 		if err := agent.SaveBranchMetaPreserveUpdated(sessionPath, m); err != nil {
 			slog.Warn("profile migration: backfill branch meta profile", "path", metaPath, "err", err)
 		}
@@ -627,11 +643,12 @@ func rewriteTabSessionPaths(userDir string) {
 		return
 	}
 
-	// Gather every candidate destination dir: global dev/cowork sessions and
-	// each project's per-profile sessions dir.
+	// Gather every candidate destination dir: global dev/cowork/netdev
+	// sessions and each project's per-profile sessions dir.
 	candidateDirs := []string{
 		config.SessionDirFor(config.ProfileDev),
 		config.SessionDirFor(config.ProfileCowork),
+		config.SessionDirFor(config.ProfileNetDev),
 	}
 	projectsDir := filepath.Join(userDir, "projects")
 	if slugs, err := os.ReadDir(projectsDir); err == nil {
@@ -639,7 +656,7 @@ func rewriteTabSessionPaths(userDir string) {
 			if !slug.IsDir() {
 				continue
 			}
-			for _, profileKey := range []string{config.ProfileDev, config.ProfileCowork} {
+			for _, profileKey := range []string{config.ProfileDev, config.ProfileCowork, config.ProfileNetDev} {
 				candidateDirs = append(candidateDirs, filepath.Join(projectsDir, slug.Name(), profileKey, "sessions"))
 			}
 		}
@@ -715,7 +732,7 @@ func pruneGhostProjects() {
 	// .jsonl), but they clutter the disk and confuse manual inspection.
 	pruneOrphanMetaFiles()
 
-	for _, profileKey := range []string{config.ProfileDev, config.ProfileCowork} {
+	for _, profileKey := range []string{config.ProfileDev, config.ProfileCowork, config.ProfileNetDev} {
 		f := loadProjectsFile(profileKey)
 		if len(f.Projects) == 0 {
 			continue

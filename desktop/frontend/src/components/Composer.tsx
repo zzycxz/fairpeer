@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowUp, Check, Eye, FileText, Folder, Gauge, List, Loader2, MessageSquare, Mic, MoreHorizontal, Pause, Play, Search, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, Eye, FileText, Folder, Gauge, List, Loader2, MessageSquare, Mic, MoreHorizontal, Pause, Play, Search, SlidersHorizontal, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
 import { startRecording, checkMicPermission, VoiceRecorderError, type RecordingSession } from "../lib/voiceRecorder";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
+import { pushHistory, snapshot } from "../lib/composerHistory";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { useToast } from "../lib/toast";
-import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type HistoryMessage, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode, type WireUsage } from "../lib/types";
+import { type BudgetStatusView, type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type HistoryMessage, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode, type WireUsage } from "../lib/types";
 import { UsageChip } from "./composer/UsageChip";
 import {
   formatWorkspaceReference,
@@ -22,10 +23,12 @@ import { ArgMenu } from "./ArgMenu";
 import { VirtualMenu } from "./VirtualMenu";
 import { openAttachmentViewer } from "./AttachmentViewer";
 import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
+import { ApprovalModeSwitcher } from "./ApprovalModeSwitcher";
 import { EffortSwitcher } from "./EffortSwitcher";
 import { KnowledgeSwitcher } from "./KnowledgeSwitcher";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { Tooltip } from "./Tooltip";
+import { ProcessBrainIcon } from "./ProcessCard";
 
 interface Attachment {
   path: string;
@@ -333,8 +336,12 @@ export function Composer({
   tabId,
   effort,
   contextInfo,
+  budget,
   usage,
   runningPhase,
+  thinkingTitle,
+  queued,
+  onQueueFollowUp,
   jobs,
   onSend,
   onCancel,
@@ -378,6 +385,9 @@ export function Composer({
   // Latest-turn wire usage — feeds the usage chip's hover detail with the
   // current-turn cache hit-rate while a turn is still streaming.
   usage?: WireUsage;
+  // Main-provider rate-limit window (upgrade spec 0-8): rpm used/total plus
+  // seconds until the window resets; undefined/zero rpm hides the indicator.
+  budget?: BudgetStatusView;
   // Background jobs (bash/task) — compact chip next to the usage meter; the
   // tooltip lists the job labels. Restores the surface lost with the status
   // bar removal (pane-system decision log).
@@ -385,6 +395,15 @@ export function Composer({
   // Live agent phase ("正在…") rendered as a slim strip inside the composer
   // card — replaces the per-row PhaseCard lines in the transcript.
   runningPhase?: string;
+  // First bold line of the streaming reasoning (spec 2-2) — shown as the
+  // thinking status next to the tool phase chip.
+  thinkingTitle?: string;
+  // Queued mid-turn guidance / follow-up prompts (spec 2-3/2-4), rendered as
+  // a strip above the editor: steer guides the current task, follow-up starts
+  // as an independent next turn.
+  queued?: { steer: string[]; followUp: string[] };
+  // Queue a prompt as an independent next turn (Alt+Enter / busy-send).
+  onQueueFollowUp?: (text: string) => void;
   onSend: (displayText: string, submitText?: string) => void;
   // Returns the un-sent text when cancelling before the server replied (so it can
   // be restored to the input); undefined for a normal cancel.
@@ -469,6 +488,12 @@ export function Composer({
   const consumedInsertIdRef = useRef(0);
   const lastTransientDismissSignal = useRef(transientDismissSignal);
   const submittingRef = useRef(false);
+  // Prompt-history navigation state (upgrade spec 0-9): index into the
+  // per-profile history (null = not browsing, showing the live draft), plus
+  // the draft saved when browsing starts so Alt+↓ back past the newest
+  // restores what the user was typing.
+  const histIndexRef = useRef<number | null>(null);
+  const histDraftRef = useRef<string>("");
   const nativeClipboardPasteTimerRef = useRef<number | null>(null);
   // Snapshot of the current cwd so async callbacks (openPastChats) can detect
   // workspace switches and discard stale responses (issue #3601).
@@ -1002,6 +1027,9 @@ export function Composer({
     const sessionContext = sessionRefs.length === 0 ? "" : await buildSessionContext(sessionRefs);
     const baseSubmitText = [expandPastedBlocks(trimmedText), refs].filter(Boolean).join(trimmedText && refs ? " " : "");
     const submitText = sessionContext ? `${sessionContext}${baseSubmitText}` : baseSubmitText;
+    pushHistory(baseSubmitText);
+    histIndexRef.current = null;
+    histDraftRef.current = "";
     onSend(displayText, submitText);
     setText("");
     clearAttachments();
@@ -1525,6 +1553,43 @@ export function Composer({
     if (e.key === "Tab" && e.shiftKey && !composing) {
       e.preventDefault();
       onCycleMode();
+      return;
+    }
+
+    // Alt+Enter queues the prompt as an independent next turn (spec 2-4) —
+    // the pi semantics: keep watching the current run, this one goes to the
+    // backlog. Plain Enter still submits/steers per the parent's policy.
+    if (!composing && e.altKey && e.key === "Enter") {
+      const txt = text.trim();
+      if (txt && onQueueFollowUp) {
+        e.preventDefault();
+        onQueueFollowUp(txt);
+        setText("");
+      }
+      return;
+    }
+
+    // Alt+↑/Alt+↓ recall previously sent prompts (shell-style). Plain arrows
+    // are left untouched — they move the caret (and drive the @/ menus).
+    if (!composing && e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      const hist = snapshot();
+      if (hist.length === 0) return;
+      e.preventDefault();
+      if (histIndexRef.current === null) {
+        if (e.key === "ArrowDown") return; // not browsing yet — nothing newer
+        histDraftRef.current = text;
+        histIndexRef.current = 0;
+      } else if (e.key === "ArrowUp") {
+        histIndexRef.current = Math.min(histIndexRef.current + 1, hist.length - 1);
+      } else {
+        histIndexRef.current -= 1;
+        if (histIndexRef.current < 0) {
+          histIndexRef.current = null;
+          setText(histDraftRef.current);
+          return;
+        }
+      }
+      setText(hist[histIndexRef.current].text);
       return;
     }
 
@@ -2064,6 +2129,20 @@ export function Composer({
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
         >
+          {(queued?.steer?.length || queued?.followUp?.length) && (
+            <div className="composer-queue" aria-live="polite">
+              {queued!.steer.map((q, i) => (
+                <span key={`s${i}`} className="composer-queue__chip composer-queue__chip--steer" title={q}>
+                  {"⤷ "}{q.length > 60 ? q.slice(0, 59) + "…" : q}
+                </span>
+              ))}
+              {queued!.followUp.map((q, i) => (
+                <span key={`f${i}`} className="composer-queue__chip composer-queue__chip--next" title={q}>
+                  {"⏳ "}{q.length > 60 ? q.slice(0, 59) + "…" : q}
+                </span>
+              ))}
+            </div>
+          )}
           <span className="composer__caret">{shellModeActive ? "$" : "›"}</span>
           <textarea
             ref={taRef}
@@ -2186,42 +2265,7 @@ export function Composer({
               )}
             </div>
             <div className="composer-meta__control composer-meta__control--approval">
-              <div className="composer-modebar composer-modebar--approval" data-mode={toolApprovalMode} title={t("composer.accessMenuTitle")}>
-                <span className="composer-modebar__thumb" aria-hidden="true" />
-                <button
-                  type="button"
-                  className={`composer-modebar__item composer-modebar__item--ask${toolApprovalMode === "ask" ? " composer-modebar__item--active" : ""}`}
-                  onClick={() => chooseApprovalMode("ask")}
-                  disabled={disabled}
-                  aria-pressed={toolApprovalMode === "ask"}
-                  title={t("composer.accessAskTitle")}
-                >
-                  <Shield size={14} />
-                  <span>{t("composer.modeAsk")}</span>
-                </button>
-                <button
-                  type="button"
-                  className={`composer-modebar__item composer-modebar__item--auto${toolApprovalMode === "auto" ? " composer-modebar__item--active" : ""}`}
-                  onClick={() => chooseApprovalMode("auto")}
-                  disabled={disabled}
-                  aria-pressed={toolApprovalMode === "auto"}
-                  title={t("composer.accessAutoTitle")}
-                >
-                  <ShieldCheck size={14} />
-                  <span>{t("composer.modeNormal")}</span>
-                </button>
-                <button
-                  type="button"
-                  className={`composer-modebar__item composer-modebar__item--yolo${toolApprovalMode === "yolo" ? " composer-modebar__item--active" : ""}`}
-                  onClick={() => chooseApprovalMode("yolo")}
-                  disabled={disabled}
-                  aria-pressed={toolApprovalMode === "yolo"}
-                  title={t("composer.accessYoloTitle")}
-                >
-                  <ShieldAlert size={14} />
-                  <span>{t("composer.modeYolo")}</span>
-                </button>
-              </div>
+              <ApprovalModeSwitcher mode={toolApprovalMode} disabled={disabled} onPick={chooseApprovalMode} />
             </div>
             <div className="composer-meta__control composer-meta__control--model">
               <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />
@@ -2238,6 +2282,14 @@ export function Composer({
             )}
             {/* Level-1 background progress: latest phase as a quiet chip next
                 to the usage meter — zero extra height, never blocks typing. */}
+            {thinkingTitle && !paused && (
+              <div className="composer-meta__control composer-meta__control--phase">
+                <span className="composer-phase-chip" aria-live="polite">
+                  <ProcessBrainIcon size={11} />
+                  <span className="composer-phase-chip__text">{thinkingTitle}</span>
+                </span>
+              </div>
+            )}
             {runningPhase && !paused && (
               <div className="composer-meta__control composer-meta__control--phase">
                 <span className="composer-phase-chip" aria-live="polite">
@@ -2257,7 +2309,7 @@ export function Composer({
               </div>
             )}
             <div className="composer-meta__control composer-meta__control--usage">
-              <UsageChip context={contextInfo} usage={usage} />
+              <UsageChip context={contextInfo} usage={usage} budget={budget} />
             </div>
             {hasEffort && (
               <div className="composer-meta__control composer-meta__control--more">

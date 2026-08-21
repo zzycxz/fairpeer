@@ -35,6 +35,10 @@ export function TodoPanel({ todos, onDismiss }: { todos: Todo[]; onDismiss: () =
           <span className="todobar__count">
             {done}/{todos.length}
           </span>
+          <span className="todobar__progress" aria-hidden="true">
+            <i style={{ width: `${Math.round((done / todos.length) * 100)}%` }} />
+          </span>
+          <span className="todobar__pct">{Math.round((done / todos.length) * 100)}%</span>
           {!open && current && (
             <span className="todobar__current">{current.activeForm || current.content}</span>
           )}

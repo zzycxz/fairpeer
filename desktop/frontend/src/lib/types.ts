@@ -67,6 +67,13 @@ export interface WireTool {
   parentId?: string; // set on a sub-agent's calls — the parent `task` call's id
   profile?: WireProfile; // subagent model/effort resolved for this call
   attachments?: WireAttachment[]; // files the tool produced (e.g. generated images)
+  fileDiff?: WireFileDiff; // server-side preview on writer dispatches (authoritative — covers apply_patch)
+}
+
+export interface WireFileDiff {
+  diff: string;
+  added: number;
+  removed: number;
 }
 
 export interface WireAttachment {
@@ -87,12 +94,25 @@ export interface WireUsage {
   // Some providers currently do not report these fields, so they remain 0.
   sessionCacheHitTokens: number;
   sessionCacheMissTokens: number;
+  cost?: number; // this turn's cost per the model's pricing table (omitted when unknown)
+  currency?: string;
+  costUsd?: number;
 }
 
 export interface WireApproval {
   id: string;
   tool: string;
   subject: string;
+  args?: string; // raw JSON of the call being approved (bash command, target path…)
+  changes?: WireFileChange[]; // previewed per-file diffs for writer tools
+}
+
+export interface WireFileChange {
+  path: string;
+  kind: "create" | "modify" | "delete" | string;
+  added: number;
+  removed: number;
+  diff: string;
 }
 
 export interface WireAskOption {
@@ -133,6 +153,7 @@ export interface WireEvent {
   err?: string;
   retryAttempt?: number;
   retryMax?: number;
+  retryAfterMs?: number; // backoff before the retry attempt (0/undefined = immediate)
   // Tab routing: set by the Go-side tabEventSink so multi-tab frontends
   // route each event to the correct per-tab reducer.
   tabId?: string;
@@ -308,6 +329,7 @@ export interface PresentTool {
   parentId?: string;
   attachments?: { path?: string; kind?: string }[];
   profile?: { model?: string; effort?: string };
+  fileDiff?: WireFileDiff; // server-side preview persisted for replay
 }
 
 export interface PresentCompaction {
@@ -1716,6 +1738,51 @@ export interface NetDevAuditEntryView {
   class: string;
   status: string;
   error?: string;
+}
+
+// ── 操作实况 (live ops panel) ────────────────────────────────────────────────
+
+export interface NetDevLiveEvent {
+  kind: "conn" | "cmd_start" | "cmd_output" | "cmd_end" | "cmd_refused" | "turn";
+  device: string;
+  time: number; // unix millis
+  state?: string; // conn: connected | connecting | reconnecting | stopped | idle-closed
+  vtyUse?: number;
+  vtyCap?: number;
+  command?: string;
+  class?: string; // read | write | dangerous | unknown | guardrail
+  chunk?: string; // cmd_output: cleaned + redacted incremental text
+  status?: string; // cmd_end: ok | device-error | failure
+  ms?: number;
+  bytes?: number;
+  reason?: string;
+}
+
+export interface NetDevLiveDeviceState {
+  device: string;
+  vendor: string;
+  os?: string;
+  group?: string;
+  connected: boolean;
+  vtyUse: number;
+  vtyCap: number;
+}
+
+export interface NetDevLiveSnapshot {
+  devices: NetDevLiveDeviceState[];
+  spent: number; // commands spent this turn
+  budget: number; // turn_command_budget (0 = unlimited)
+}
+
+// Assessment-mode weak-credential check result (netdev_assess /
+// NetDevWeakCredCheck; NETDEV_SPEC §6.2).
+export interface NetDevWeakCredResult {
+  device: string;
+  tier: string; // basic | dictionary
+  weak: boolean;
+  attempts: number;
+  budget: number;
+  detail?: string;
 }
 
 export interface NetDevSSHImportCandidate {

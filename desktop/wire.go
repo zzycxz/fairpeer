@@ -27,6 +27,7 @@ type wireEvent struct {
 	Err          string          `json:"err,omitempty"`
 	RetryAttempt int             `json:"retryAttempt,omitempty"`
 	RetryMax     int             `json:"retryMax,omitempty"`
+	RetryAfterMs int64           `json:"retryAfterMs,omitempty"`
 }
 
 // wireCompaction is the JSON form of an event.Compaction. On a compaction_started
@@ -70,6 +71,17 @@ type wireTool struct {
 	ParentID    string           `json:"parentId,omitempty"`
 	Profile     *wireProfile     `json:"profile,omitempty"`
 	Attachments []wireAttachment `json:"attachments,omitempty"`
+	// FileDiff carries the previewed change on a writer tool's dispatch, so the
+	// card renders the server-side diff (authoritative, covers apply_patch and
+	// encoding-aware previews) instead of re-deriving one from the args.
+	FileDiff *wireFileDiff `json:"fileDiff,omitempty"`
+}
+
+// wireFileDiff is the JSON form of event.FileDiff (empty Diff = nothing to show).
+type wireFileDiff struct {
+	Diff    string `json:"diff"`
+	Added   int    `json:"added"`
+	Removed int    `json:"removed"`
 }
 
 type wireAttachment struct {
@@ -96,6 +108,11 @@ type wireUsage struct {
 	// some providers do not report cache tokens, so these stay at 0.
 	SessionCacheHitTokens  int `json:"sessionCacheHitTokens"`
 	SessionCacheMissTokens int `json:"sessionCacheMissTokens"`
+	// Cost of this turn per the model's pricing table (nil = pricing unknown /
+	// not configured, in which case the UI omits the amount). Mirrors serve.
+	Cost     float64 `json:"cost,omitempty"`
+	Currency string  `json:"currency,omitempty"`
+	CostUSD  float64 `json:"costUsd,omitempty"`
 }
 
 type wireCacheDiagnostics struct {
@@ -114,6 +131,21 @@ type wireApproval struct {
 	ID      string `json:"id"`
 	Tool    string `json:"tool"`
 	Subject string `json:"subject"`
+	// Args is the raw JSON of the call being approved, so the card can show
+	// specifics (bash command, target path) itself. Changes carries the
+	// previewed per-file diffs for writer tools — the approval is no longer a
+	// blind sign-off on a one-line subject.
+	Args    string           `json:"args,omitempty"`
+	Changes []wireFileChange `json:"changes,omitempty"`
+}
+
+// wireFileChange is one file within a previewed multi-file approval.
+type wireFileChange struct {
+	Path    string `json:"path"`
+	Kind    string `json:"kind"` // "create" | "modify" | "delete"
+	Added   int    `json:"added"`
+	Removed int    `json:"removed"`
+	Diff    string `json:"diff"`
 }
 
 // kindNames maps the event.Kind enum to stable wire strings.
@@ -178,6 +210,9 @@ func toWire(e event.Event) wireEvent {
 		if e.Tool.Profile != nil {
 			wt.Profile = &wireProfile{Model: e.Tool.Profile.Model, Effort: e.Tool.Profile.Effort}
 		}
+		if e.Tool.FileDiff.Diff != "" || e.Tool.FileDiff.Added != 0 || e.Tool.FileDiff.Removed != 0 {
+			wt.FileDiff = &wireFileDiff{Diff: e.Tool.FileDiff.Diff, Added: e.Tool.FileDiff.Added, Removed: e.Tool.FileDiff.Removed}
+		}
 		w.Tool = wt
 	case event.Usage:
 		if u := e.Usage; u != nil {
@@ -187,12 +222,25 @@ func toWire(e event.Event) wireEvent {
 				CacheMissTokens: u.CacheMissTokens, CacheWriteTokens: u.CacheWriteTokens, ReasoningTokens: u.ReasoningTokens,
 				SessionCacheHitTokens: e.SessionHit, SessionCacheMissTokens: e.SessionMiss,
 			}
+			if e.Pricing != nil {
+				cost := e.Pricing.Cost(u)
+				w.Usage.Cost = cost
+				w.Usage.Currency = e.Pricing.Symbol()
+				w.Usage.CostUSD = cost
+			}
 			if e.CacheDiagnostics != nil {
 				w.Usage.CacheDiagnostics = toWireCacheDiagnostics(e.CacheDiagnostics)
 			}
 		}
 	case event.ApprovalRequest:
-		w.Approval = &wireApproval{ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject}
+		wa := &wireApproval{ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject, Args: e.Approval.Args}
+		if len(e.Approval.Changes) > 0 {
+			wa.Changes = make([]wireFileChange, len(e.Approval.Changes))
+			for i, ch := range e.Approval.Changes {
+				wa.Changes[i] = wireFileChange{Path: ch.Path, Kind: ch.Kind, Added: ch.Added, Removed: ch.Removed, Diff: ch.Diff}
+			}
+		}
+		w.Approval = wa
 	case event.AskRequest:
 		w.Ask = toWireAsk(e.Ask)
 	case event.CompactionStarted, event.CompactionDone:
@@ -207,6 +255,7 @@ func toWire(e event.Event) wireEvent {
 	case event.Retrying:
 		w.RetryAttempt = e.RetryAttempt
 		w.RetryMax = e.RetryMax
+		w.RetryAfterMs = e.RetryAfterMs
 	case event.Message:
 		// Strip goal protocol markers ([goal:complete]/[goal:continue]/[goal:blocked])
 		// from the live display path so users see natural language. The session

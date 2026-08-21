@@ -30,7 +30,9 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/control"
+	"github.com/zzycxz/fairpeer/internal/proc"
 )
 
 // ── wire types (JSON to/from the frontend) ──────────────────────────────────
@@ -136,6 +138,15 @@ func (a *App) LoopStart(tabID string, cfg LoopConfig) error {
 	if tab != nil {
 		tabLabel = tab.Label
 		cwd = tab.WorkspaceRoot
+		// Loop is a CODING-profile facility: sensor/verify/rollback run raw
+		// shell in the project root (loopCommand bypasses the tool registry),
+		// which would punch through the netdev structural read-only seal and
+		// the cowork tool policy. Frontend hides the entry outside dev; this
+		// is the hard backend refusal.
+		if normalizeProfileName(tab.profile) != config.ProfileDev {
+			a.mu.RUnlock()
+			return fmt.Errorf("循环工程仅在编码模式可用(目标会话属于%s模式)", profileDisplayName(tab.profile))
+		}
 	}
 	a.mu.RUnlock()
 	if cwd == "" || cwd == "." {
@@ -381,6 +392,7 @@ func (a *App) loopCommand(run *loopRun, command string) (string, error) {
 	var cmd *exec.Cmd
 	if goruntime.GOOS == "windows" {
 		cmd = exec.CommandContext(ctx, "cmd", "/C", command)
+		proc.HideWindow(cmd)
 	} else {
 		cmd = exec.CommandContext(ctx, "sh", "-c", command)
 	}

@@ -399,6 +399,12 @@ func (a *App) PreparePPTReference(filePath string) (*PrepareResult, error) {
 		if verr != nil {
 			result.VisionError = verr.Error()
 		}
+		// The synchronous pass caps at 6 pages (submit-path latency); finish the
+		// REST in the background via the skill's idempotent analyzer so ppt-auto
+		// usually finds every page-N.json already there. Never blocks submit.
+		if n < total {
+			go completePDFPagesInBackground(filePath)
+		}
 	case analysis.IsVisual:
 		// Visually designed image → 4-section description + structured colors,
 		// both already in hand from the parallel calls.

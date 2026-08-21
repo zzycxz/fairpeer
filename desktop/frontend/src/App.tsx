@@ -47,6 +47,7 @@ import { SideSessionPane } from "./components/SideSessionPane";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SidebarSessions } from "./components/SidebarSessions";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
+import { AgentDashboard } from "./components/AgentDashboard";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { ShortcutsCheatsheet } from "./components/ShortcutsCheatsheet";
 import { useGlobalShortcut } from "./lib/keyboardShortcuts";
@@ -67,6 +68,7 @@ import {
   normalizeMode,
   normalizeToolApprovalMode,
   type BotConnectionView,
+  type BudgetStatusView,
   type BotSettingsView,
   type CollaborationMode,
   type ComposerInsertRequest,
@@ -638,22 +640,20 @@ function saveRightDockPreviewWidth(width: number): void {
 }
 
 function tabWorkspaceTitle(tab?: TabMeta): string {
-  if (!tab) return "Global";
-  if (tab.scope === "project") return tab.workspaceName || tab.workspaceRoot || "Project";
-  if (tab.scope === "global") return tab.workspaceName || "Global";
-  return tab.workspaceName || tab.workspaceRoot || "Global";
+  if (!tab) return "Project";
+  return tab.workspaceName || tab.workspaceRoot || "Project";
 }
 
 function topicTitle(tab?: TabMeta): string {
-  if (!tab) return "Global";
+  if (!tab) return "Untitled";
   const workspaceTitle = tabWorkspaceTitle(tab);
-  const topic = tab.topicTitle || (tab.scope === "global" ? workspaceTitle : "Untitled");
+  const topic = tab.topicTitle || "Untitled";
   return topic === workspaceTitle ? workspaceTitle : `${workspaceTitle} / ${topic}`;
 }
 
 function topicDisplayTitle(tab?: TabMeta): string {
-  if (!tab) return "Global";
-  return tab.topicTitle || (tab.scope === "global" ? tabWorkspaceTitle(tab) : "Untitled");
+  if (!tab) return "Untitled";
+  return tab.topicTitle || "Untitled";
 }
 
 function sessionsForScope(sessions: SessionMeta[], filter: HistoryScopeFilter): SessionMeta[] {
@@ -967,10 +967,14 @@ export default function App() {
   const [projectRevision, setProjectRevision] = useState(0);
 
   // WorkspacePill's project catalog (2026-08-19 design A): the known projects
-  // list, refreshed with the tree so the pill's dropdown stays current.
+  // list of the ACTIVE profile. Profiles are strictly isolated — dev/cowork/
+  // netdev each load and open only their own projects (08-21 isolation rule:
+  // the office pill never lists coding projects). Refreshed with the tree so
+  // the pill's dropdown stays current.
   const [pillProjects, setPillProjects] = useState<PillProject[]>([]);
+  const pillProfile = netdevActive ? "netdev" : coworkActive ? "cowork" : "dev";
   useEffect(() => {
-    void app.ListProjectTree("dev")
+    void app.ListProjectTree(pillProfile)
       .then((tree) => {
         setPillProjects(
           asArray(tree)
@@ -979,7 +983,7 @@ export default function App() {
         );
       })
       .catch(() => { /* pill falls back to choose/open states */ });
-  }, [projectRevision]);
+  }, [projectRevision, pillProfile]);
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
   const [transientOverlayDismissSignal, setTransientOverlayDismissSignal] = useState(0);
   const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform>(detectBrowserPlatform);
@@ -1226,7 +1230,7 @@ export default function App() {
 
   // Global scheduler notice: when a scheduled task with output_mode="notify"
   // fires, the backend emits "scheduler:notice". This listener is registered at
-  // the app root (not inside AutomationPanel/CalendarTaskPanel) so the toast
+  // the app root (not inside CalendarTaskPanel) so the toast
   // surfaces regardless of which panel the user is currently viewing —
   // previously the notice was only visible while the automation/calendar panel
   // was mounted, and switching to experts/rag/chat silently swallowed it.
@@ -1282,6 +1286,32 @@ export default function App() {
   const footerHeightRef = useRef(0);
   const footerRef = useRef<HTMLElement>(null);
   const runningRef = useRef(state.running);
+  // Retry-last-failed-turn (upgrade spec 1-7): the NoticeCard's 重试 button
+  // emits a DOM event; we answer it by resending the newest user prompt that
+  // precedes a retryable failure notice. A ref mirrors state so the listener
+  // always sees the current items without re-subscribing.
+  const itemsRef = useRef(state.items);
+  itemsRef.current = state.items;
+  // Assigned after handleSend is declared below (it is defined later in the
+  // component); the listener reads through the ref so ordering doesn't matter.
+  const retrySendRef = useRef<((text: string) => void) | null>(null);
+  useEffect(() => {
+    const onRetry = () => {
+      const items = itemsRef.current;
+      for (let i = items.length - 1; i >= 0; i--) {
+        const it = items[i];
+        if (it.kind === "notice" && it.retryable) continue;
+        if (it.kind === "user" && it.text.trim()) {
+          retrySendRef.current?.(it.text);
+          return;
+        }
+        if (it.kind === "assistant" || it.kind === "turn_summary") continue;
+        return; // a tool/notice boundary without a trailing user message — nothing safe to resend
+      }
+    };
+    window.addEventListener("fairpeer:retry-turn", onRetry);
+    return () => window.removeEventListener("fairpeer:retry-turn", onRetry);
+  }, []);
   const rightDockDetailActive = rightDockMode !== "context" && workspacePreviewActive;
   const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
   const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
@@ -1637,16 +1667,10 @@ export default function App() {
       // cached content belongs to the outgoing profile's view and would be stale.
       closeTransientOverlays();
       setHistView(null);
-      // Prefer a tab matching the active tab's scope/workspaceRoot so the view
-      // switch lands in the same project; fall back to any tab of that profile.
-      const curScope = activeTab?.scope === "project" ? "project" : "global";
-      const curRoot = activeTab?.scope === "project" ? (activeTab.workspaceRoot ?? "") : "";
-      const match = tabMetas.find(
-        (t) => (t.profile ?? "dev").toLowerCase() === targetProfile &&
-          t.scope === curScope &&
-          (curScope === "global" || t.workspaceRoot === curRoot),
-      );
-      const anyMatch = match ?? tabMetas.find(
+      // Strict profile isolation (08-21): a mode switch NEVER carries the
+      // workspace root across profiles — landing picks an existing tab of the
+      // target profile, else its home project 工作台 (empty root home-fills).
+      const anyMatch = tabMetas.find(
         (t) => (t.profile ?? "dev").toLowerCase() === targetProfile,
       );
       try {
@@ -1659,7 +1683,7 @@ export default function App() {
           // No tab of the target profile exists yet — create a blank one. The
           // explicit profile arg ensures it boots in the target mode regardless
           // of the current tab's profile.
-          await ensureBlankTab(curScope, curRoot, targetProfile);
+          await ensureBlankTab("project", "", targetProfile);
         }
         // Optimistically flip the layout so the view swaps immediately, without
         // waiting for the backend's profile:changed event to round-trip. The
@@ -1871,7 +1895,10 @@ export default function App() {
         notice(t("settings.themeUnknown", { name: arg }), "warn");
         return;
       }
-      if (runningRef.current) { steer(submitText.trim()); return; }
+      // Busy: queue as an independent NEXT turn (spec 2-4) — steering would
+      // demote a fresh request to "guidance for the current task". Explicit
+      // mid-turn guidance stays available via the Steer command.
+      if (runningRef.current) { void app.FollowUpForTab(activeTabId ?? "", submitText.trim()); return; }
       await setControllerCollaborationMode(controllerCollaborationMode({ collaborationMode, goal }));
       await setControllerToolApprovalMode(toolApprovalMode);
       if (goal.trim()) await setControllerGoal(goal);
@@ -1882,6 +1909,7 @@ export default function App() {
     },
     [applyGoal, closeTransientOverlays, collaborationMode, goal, send, runShell, notice, setControllerCollaborationMode, setControllerGoal, setControllerToolApprovalMode, steer, switchModel, t, toolApprovalMode],
   );
+  retrySendRef.current = handleSend;
 
   const refreshTabMetas = useCallback(async (): Promise<TabMeta[]> => {
     const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
@@ -1890,10 +1918,12 @@ export default function App() {
   }, []);
 
   const blankSessionTarget = useCallback(() => {
-    const activeWorkspaceRoot = activeTab?.scope === "project" ? activeTab.workspaceRoot || "" : "";
-    const scope = activeWorkspaceRoot ? "project" : "global";
-    return { scope, workspaceRoot: activeWorkspaceRoot };
-  }, [activeTab?.scope, activeTab?.workspaceRoot]);
+    // Global scope retired (2026-08-21): new sessions land on the active tab's
+    // project; with no active project the backend routes to the profile home
+    // project 工作台 (EnsureBlankTab normalizes empty roots).
+    const activeWorkspaceRoot = activeTab?.workspaceRoot || "";
+    return { scope: "project", workspaceRoot: activeWorkspaceRoot };
+  }, [activeTab?.workspaceRoot]);
 
   const openBlankSession = useCallback(async (scope: string, workspaceRoot: string) => {
     window.dispatchEvent(new CustomEvent("cowork:reset-panel"));
@@ -1908,6 +1938,50 @@ export default function App() {
     const id = window.setInterval(() => void refreshTabMetas(), 2000);
     return () => window.clearInterval(id);
   }, [refreshTabMetas]);
+
+  // Steer / follow-up queue strip (upgrade spec 2-3/2-4): polled while a turn
+  // runs so the strip reflects both backend queues without new event kinds.
+  const [queuedMsgs, setQueuedMsgs] = useState<{ steer?: string[]; followUp?: string[] }>({});
+  const queuedActiveRef = useRef(false);
+  queuedActiveRef.current = state.running;
+  useEffect(() => {
+    let cancelled = false;
+    const poll = () => {
+      app.QueuedMessages()
+        .then((q) => { if (!cancelled) setQueuedMsgs(q ?? {}); })
+        .catch(() => {});
+    };
+    poll();
+    const id = window.setInterval(poll, 1500);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+  useEffect(() => {
+    if (!state.running) setQueuedMsgs({});
+  }, [state.running]);
+  const queueFollowUp = useCallback((text: string) => {
+    void app.FollowUpForTab(activeTabId ?? "", text);
+  }, [activeTabId]);
+
+  // Agents overview (upgrade spec 2-7): Ctrl/Cmd+I opens the multi-tab
+  // dashboard; metas are already polled every 2s by refreshTabMetas.
+  const [agentsOpen, setAgentsOpen] = useState(false);
+  useGlobalShortcut("agents.dashboard", () => setAgentsOpen((v) => !v));
+
+  // Main-provider rate-limit window for the usage chip (upgrade spec 0-8).
+  // Polled: the budget drains as requests flow, not on events. rpm=0 (limiting
+  // disabled) leaves the indicator hidden — fetch is cheap either way.
+  const [budget, setBudget] = useState<BudgetStatusView | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    const poll = () => {
+      app.BudgetStatus()
+        .then((b) => { if (!cancelled) setBudget(b); })
+        .catch(() => {});
+    };
+    poll();
+    const id = window.setInterval(poll, 5000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
 
   useEffect(() => {
     return onProjectTreeChanged(() => {
@@ -2809,28 +2883,14 @@ export default function App() {
 
   // Workspace: open the folder chooser and switch projects. The hook resets the
   // transcript and refreshes meta on a pick. A cancel is a no-op.
-  // Storage hint for the pill's 全局 entry: the directory of any known global
-  // session (answers "global files live where?").
-  const globalSessionDirHint = useMemo(() => {
-    const sample = sidebarSessions.find((x) => x.scope === "global" && x.path);
-    if (!sample) return undefined;
-    const dir = sample.path.replace(/[\/][^\/]+$/, "");
-    return dir || undefined;
-  }, [sidebarSessions]);
 
-  // Cross-mode funnel: picking a project/全局 from the office or netdev pill
-  // lands the user in the coding profile with that workspace open — the pill
-  // dropdown is identical everywhere (2026-08-21).
-  const openDevProject = useCallback((root: string) => {
-    void switchProfile("dev")
-      .then(() => openBlankSession("project", root))
-      .catch(() => { /* revert handled in switchProfile */ });
-  }, [openBlankSession, switchProfile]);
-  const openDevGlobal = useCallback(() => {
-    void switchProfile("dev")
-      .then(() => openBlankSession("global", ""))
-      .catch(() => { /* revert handled in switchProfile */ });
-  }, [openBlankSession, switchProfile]);
+  // Same-profile open: the office/netdev pill lists only that profile's own
+  // projects (pillProfile catalog above); picking one opens it IN PLACE —
+  // openBlankSession files the topic under the active tab's profile. No
+  // cross-profile funnel (08-21 strict isolation rule).
+  const openProfileProject = useCallback((root: string) => {
+    void openBlankSession("project", root);
+  }, [openBlankSession]);
 
 
   const switchFolder = useCallback(async (path?: string) => {
@@ -2910,7 +2970,7 @@ export default function App() {
   const topicbarTitle = sidebarImDetailConnection ? t("botDetail.title", { name: sidebarImDetailConnection.title }) : topicDisplayTitle(activeTab);
   const topicbarWorkspaceLabel = sidebarImDetailConnection ? t("botDetail.subtitle") : activeTab ? tabWorkspaceTitle(activeTab) : "";
   const topicbarWorkspacePath = activeTab?.scope === "project" ? activeTab.workspaceRoot || state.meta?.cwd : "";
-  const topicbarImSource = activeTab?.scope === "global" && activeTab.topicId ? imTopicSources[activeTab.topicId] : undefined;
+  const topicbarImSource = activeTab?.topicId ? imTopicSources[activeTab.topicId] : undefined;
   const topicbarImSourceLabel = sidebarImDetailConnection
     ? sidebarImDetailConnection.platformLabel
     : topicbarImSource ? t("msg.fromIm", { source: topicbarImSource.label }) : "";
@@ -3098,15 +3158,30 @@ export default function App() {
         effort={state.effort}
         contextInfo={state.context}
         usage={state.usage}
+        budget={budget}
         jobs={state.jobs}
         runningPhase={(() => {
           if (!state.running) return undefined;
+          // Compaction in flight outranks the last tool phase (spec 2-5) —
+          // "compacting…" answers "what is it doing" better than a stale
+          // tool name while the summarizer runs.
           for (let i = state.items.length - 1; i >= 0; i--) {
             const it = state.items[i];
+            if (it.kind === "compaction" && it.pending) return t("compaction.working");
             if (it.kind === "phase") return it.text;
           }
           return undefined;
         })()}
+        thinkingTitle={(() => {
+          // First bold line of the streaming reasoning, codex-style (spec
+          // 2-2): the model usually opens with "Examining the config…" — that
+          // is the status the user wants, not a spinner word.
+          if (!state.running || !state.live) return undefined;
+          const m = /\*\*([^*]+)\*\*/.exec(state.live.reasoning);
+          return m ? m[1].slice(0, 80) : undefined;
+        })()}
+        queued={{ steer: queuedMsgs.steer ?? [], followUp: queuedMsgs.followUp ?? [] }}
+        onQueueFollowUp={queueFollowUp}
         onSend={handleSend}
         onCancel={cancel}
         onPauseToggle={pauseToggle}
@@ -3308,14 +3383,13 @@ export default function App() {
         {coworkActive && (
           <CoWorkLayout
           pillProjects={pillProjects}
-          onOpenDevProject={openDevProject}
-          onOpenDevGlobal={openDevGlobal}
+          onPickProject={openProfileProject}
           onAddProject={() => { void switchFolder(); }}
-          globalSessionDirHint={globalSessionDirHint}
           onSwitchMode={(mode) => { void switchProfile(mode).catch(() => { /* revert handled in switchProfile */ }); }}
             mainNode={mainNode}
             footerNode={footerNode}
             bannersNode={bannersNode}
+            terminalNode={terminalNode}
             projectTreeNode={projectTreeNode}
             sessionsNode={sidebarSessionsNode}
             searchNode={sidebarSearchNode}
@@ -3353,10 +3427,8 @@ export default function App() {
         {netdevActive && (
           <NetDevLayout
           pillProjects={pillProjects}
-          onOpenDevProject={openDevProject}
-          onOpenDevGlobal={openDevGlobal}
+          onPickProject={openProfileProject}
           onAddProject={() => { void switchFolder(); }}
-          globalSessionDirHint={globalSessionDirHint}
           onSwitchMode={(mode) => { void switchProfile(mode).catch(() => { /* revert handled in switchProfile */ }); }}
             mainNode={mainNode}
             footerNode={footerNode}
@@ -3446,20 +3518,16 @@ export default function App() {
               state={
                 activeTab?.scope === "project" && activeTab.workspaceRoot
                   ? "project"
-                  : activeTab?.scope === "global"
-                    ? "global"
-                    : pillProjects.length > 0
-                      ? "choose"
-                      : "open"
+                  : pillProjects.length > 0
+                    ? "choose"
+                    : "open"
               }
               label={
                 activeTab?.scope === "project"
                   ? (activeTab.workspaceName || "Project")
-                  : activeTab?.scope === "global"
-                    ? t("sidebar.pillGlobal")
-                    : pillProjects.length > 0
-                      ? t("sidebar.pillChoose")
-                      : t("sidebar.pillOpenProject")
+                  : pillProjects.length > 0
+                    ? t("sidebar.pillChoose")
+                    : t("sidebar.pillOpenProject")
               }
               dotColor={pillProjects.find((p) => p.root === activeTab?.workspaceRoot)?.color}
               projects={pillProjects}
@@ -3467,12 +3535,8 @@ export default function App() {
               onPickProject={(root) => {
                 void openBlankSession("project", root);
               }}
-              onPickGlobal={() => {
-                void openBlankSession("global", "");
-              }}
               onAddProject={() => { void switchFolder(); }}
               onSwitchMode={(mode) => { void switchProfile(mode).catch(() => { /* revert handled in switchProfile */ }); }}
-              globalHint={globalSessionDirHint}
             />
             <button
               type="button"
@@ -3793,6 +3857,22 @@ export default function App() {
         />
       )}
 
+
+      <AgentDashboard
+
+        open={agentsOpen}
+
+        onClose={() => setAgentsOpen(false)}
+
+        tabs={tabMetas}
+
+        activeTabId={activeTabId}
+
+        onSwitch={(id: string) => { void switchTab(id); }}
+
+        onStop={(id: string) => { void app.CancelTab(id); }}
+
+      />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}

@@ -751,10 +751,10 @@ func runScheduledPrompt(ctx context.Context, ctrl *control.Controller, prompt st
 
 // runHeadlessScheduled builds a throwaway headless cowork controller, runs the
 // prompt, then tears the controller down (releasing the shared plugin host).
-// WorkspaceRoot is the global cowork root (~/.fairpeer) since scheduled tasks
-// are not bound to a specific project. See C7.
+// WorkspaceRoot is the cowork home project 工作台 since scheduled tasks are not
+// bound to a specific project. See C7.
 func (a *App) runHeadlessScheduled(ctx context.Context, profileName, prompt string) (string, error) {
-	root := globalTabWorkspaceRoot()
+	root := ensureProfileHomeRoot(config.ProfileCowork)
 	cfg, err := config.LoadForRoot(root)
 	if err != nil {
 		return "", fmt.Errorf("scheduled task: load config: %w", err)
@@ -903,6 +903,20 @@ func (a *App) restoreOrBuildTabs() {
 		i18n.DetectLanguage(lang)
 	}
 
+	// Global scope retired (2026-08-21): fold every profile's remaining global
+	// topics into its home project 工作台 before restoring tabs, so restored
+	// global entries reopen as home-project tabs.
+	for _, key := range []string{config.ProfileDev, config.ProfileCowork, config.ProfileNetDev} {
+		migrateGlobalIntoHome(key)
+	}
+	// Strict profile isolation: drop project entries a foreign profile
+	// acquired before the guard existed (mode switching once carried the
+	// coding workspace into the ops index).
+	pruneForeignProjects()
+	// Retire the pre-profile shared workspace list into dev — per-profile
+	// project generation reads nothing shared afterwards.
+	migrateLegacyWorkspacesIntoDevOnce()
+
 	f := loadTabsFile()
 	if len(f.Tabs) > 0 {
 		toBuild := make([]*WorkspaceTab, 0, len(f.Tabs))
@@ -915,10 +929,17 @@ func (a *App) restoreOrBuildTabs() {
 			if entry.IsExpertSession {
 				// Expert-session tabs are their own scope; restore verbatim.
 				tab = a.createTabEntryWithID("expert", "", entry.Profile, "", id)
-			} else if entry.Scope == "project" {
+			} else if entry.Scope == "project" && !rootOwnedByOtherProfile(entry.WorkspaceRoot, entry.Profile) {
 				tab = a.createTabEntryWithID(entry.Scope, entry.WorkspaceRoot, entry.Profile, entry.TopicID, id)
+			} else if entry.Scope == "project" {
+				// Foreign-root tab (pre-isolation carry-over): re-land on this
+				// tab's profile home as a blank tab; the root stays with its
+				// owning profile.
+				tab = a.createTabEntryWithID("project", ensureProfileHomeRoot(entry.Profile), entry.Profile, "", id)
 			} else {
-				tab = a.createTabEntryWithID("global", globalTabWorkspaceRoot(), entry.Profile, entry.TopicID, id)
+				// Retired global tabs reopen on the profile's home project;
+				// the home root resolves to the former global session partition.
+				tab = a.createTabEntryWithID("project", ensureProfileHomeRoot(entry.Profile), entry.Profile, entry.TopicID, id)
 			}
 			tab.model = entry.Model
 			tab.effort = cloneStringPtr(entry.Effort)
@@ -957,10 +978,12 @@ func (a *App) restoreOrBuildTabs() {
 		return
 	}
 
-	// First launch: create a default Global tab.
-	tab := a.createTabEntry("global", globalTabWorkspaceRoot(), "", "")
+	// First launch: open the dev home project 工作台 (the global scope's
+	// replacement) so there is always a concrete landing workspace.
+	tab := a.createTabEntry("project", ensureProfileHomeRoot(""), "", "")
 	tab.sink = &tabEventSink{tabID: tab.ID, app: a, ctx: ctx}
-	tab.TopicTitle = "Global"
+	tab.TopicTitle = homeProjectTitle
+	addProjectTitled(tab.WorkspaceRoot, "")
 	a.mu.Lock()
 	a.tabs[tab.ID] = tab
 	a.tabOrder = append(a.tabOrder, tab.ID)
@@ -1391,6 +1414,38 @@ func (a *App) SteerForTab(tabID, text string) {
 	}
 }
 
+// FollowUp queues a prompt to run as an independent next turn once the active
+// tab's current turn finishes (upgrade spec 2-4); when idle it runs now.
+func (a *App) FollowUp(text string) {
+	a.FollowUpForTab("", text)
+}
+
+// FollowUpForTab queues a follow-up prompt on a specific tab.
+func (a *App) FollowUpForTab(tabID, text string) {
+	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
+		ctrl.FollowUp(text)
+	}
+}
+
+// QueuedMessagesView is the wire form of the live steer/follow-up queues.
+type QueuedMessagesView struct {
+	Steer    []string `json:"steer,omitempty"`
+	FollowUp []string `json:"followUp,omitempty"`
+}
+
+// QueuedMessages reports the active tab's queued mid-turn guidance and
+// follow-up prompts for the composer queue strip (upgrade spec 2-3/2-4).
+func (a *App) QueuedMessages() QueuedMessagesView {
+	a.mu.RLock()
+	tab := a.tabByIDLocked("")
+	a.mu.RUnlock()
+	if tab == nil || tab.Ctrl == nil {
+		return QueuedMessagesView{}
+	}
+	s, f := tab.Ctrl.QueuedMessages()
+	return QueuedMessagesView{Steer: s, FollowUp: f}
+}
+
 // Pause requests a graceful pause of the active tab's in-flight turn. The agent
 // finishes its current step, then freezes with full state preserved. Contrast
 // Cancel, which aborts and discards partial work. No-op when nothing is running.
@@ -1711,6 +1766,39 @@ func (a *App) Checkpoints() []CheckpointMeta {
 	return a.CheckpointsForTab("")
 }
 
+// CheckpointFileChange is one file's previewed rewind change (spec 3-6).
+type CheckpointFileChange struct {
+	Path    string `json:"path"`
+	Kind    string `json:"kind"` // create | modify | delete
+	Added   int    `json:"added"`
+	Removed int    `json:"removed"`
+	Diff    string `json:"diff"`
+}
+
+// CheckpointDiffForTab previews what a code-scope rewind of `turn` would
+// restore, per file — the rewind menu renders it instead of a bare count.
+func (a *App) CheckpointDiffForTab(tabID string, turn int) []CheckpointFileChange {
+	a.mu.RLock()
+	var ctrl *control.Controller
+	if tab := a.tabByIDLocked(tabID); tab != nil {
+		ctrl = tab.Ctrl
+	}
+	a.mu.RUnlock()
+	if ctrl == nil {
+		return []CheckpointFileChange{}
+	}
+	changes := ctrl.CheckpointDiff(turn)
+	out := make([]CheckpointFileChange, 0, len(changes))
+	for _, ch := range changes {
+		if ch.Binary {
+			out = append(out, CheckpointFileChange{Path: ch.Path, Kind: "binary"})
+			continue
+		}
+		out = append(out, CheckpointFileChange{Path: ch.Path, Kind: string(ch.Kind), Added: ch.Added, Removed: ch.Removed, Diff: ch.Diff})
+	}
+	return out
+}
+
 func (a *App) CheckpointsForTab(tabID string) []CheckpointMeta {
 	a.mu.RLock()
 	var ctrl *control.Controller
@@ -1964,7 +2052,11 @@ func (a *App) ListSessionsForProfile(profile string) []SessionMeta {
 // literally named "cowork" is not misclassified.
 func (a *App) namedPartitionDirs() map[string]string {
 	dirs := map[string]string{}
-	roots := []string{globalWorkspaceRoot()}
+	roots := []string{
+		profileHomeRoot(config.ProfileDev),
+		profileHomeRoot(config.ProfileCowork),
+		profileHomeRoot(config.ProfileNetDev),
+	}
 	for _, key := range []string{config.ProfileDev, config.ProfileCowork, config.ProfileNetDev} {
 		for _, p := range loadProjectsFile(key).Projects {
 			if root := strings.TrimSpace(p.Root); root != "" {
@@ -2392,7 +2484,6 @@ func nearestExistingDirectory(path string) string {
 
 func (a *App) ListWorkspaces() []WorkspaceMeta {
 	profileKey := a.activeProfileKey()
-	migrateLegacyWorkspacesIntoProjects(profileKey)
 	activeRoot := ""
 	a.mu.RLock()
 	if tab := a.activeTabLocked(); tab != nil && tab.WorkspaceRoot != "" {
@@ -2453,12 +2544,19 @@ func (a *App) RemoveWorkspace(dir string) error {
 	return nil
 }
 
-func migrateLegacyWorkspacesIntoProjects(profileKey string) {
+// migrateLegacyWorkspacesIntoDevOnce drains the pre-profile
+// desktop-workspaces.json list into the DEV index and deletes the file.
+// That list predates profiles (it only ever recorded coding-era roots), and
+// under strict three-profile isolation it must never feed a non-dev profile's
+// project generation — formerly ListWorkspaces injected it into whatever
+// profile asked first, which is how a coding workspace appeared in a fresh
+// ops interface. Startup-only; the file's deletion makes it self-retiring.
+func migrateLegacyWorkspacesIntoDevOnce() {
 	legacy := loadWorkspaces()
 	if len(legacy) == 0 {
 		return
 	}
-	f := loadProjectsFile(profileKey)
+	f := loadProjectsFile(config.ProfileDev)
 	seen := make(map[string]bool, len(f.Projects)+len(legacy))
 	for _, p := range f.Projects {
 		seen[p.Root] = true
@@ -2474,8 +2572,9 @@ func migrateLegacyWorkspacesIntoProjects(profileKey string) {
 		changed = true
 	}
 	if changed {
-		_ = saveProjectsFile(f, profileKey)
+		_ = saveProjectsFile(f, config.ProfileDev)
 	}
+	_ = os.Remove(workspaceListPath())
 }
 
 func workspaceName(path string) string {
@@ -2510,6 +2609,11 @@ func (a *App) SwitchWorkspace(dir string) (string, error) {
 	// immediately instead of only existing as an in-memory tab. New workspaces
 	// open in the active tab's profile (dev by default).
 	profile := a.activeProfileKey()
+	// Strict profile isolation: refuse opening a workspace that belongs to
+	// another profile's index.
+	if rootOwnedByOtherProfile(dir, profile) {
+		return "", fmt.Errorf("项目 %s 属于其他模式，三模式项目互相隔离", dir)
+	}
 	topic, err := a.CreateTopic("project", dir, profile, "")
 	if err != nil {
 		return "", err
@@ -2891,6 +2995,13 @@ type ContextInfo struct {
 // ContextUsage returns the latest context-window gauge numbers.
 func (a *App) ContextUsage() ContextInfo {
 	return a.ContextUsageForTab("")
+}
+
+// BudgetStatus reports the main provider's rate-limit window (rpm used /
+// remaining + seconds until reset) for the composer status row. Zeroed (RPM=0)
+// when limiting is disabled — the frontend hides the indicator then.
+func (a *App) BudgetStatus() provider.BudgetStatus {
+	return boot.GlobalBudget().MainStatus()
 }
 
 func (a *App) ContextUsageForTab(tabID string) ContextInfo {

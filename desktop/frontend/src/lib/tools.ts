@@ -40,17 +40,41 @@ export function subjectOf(name: string, args: string): string {
     case "glob":
       return str(a, "pattern") || str(a, "path");
     case "web_fetch":
-      return str(a, "url");
+    case "web_search":
+      return str(a, "url") || str(a, "query");
     case "task":
       return str(a, "description") || str(a, "prompt");
     case "remember":
       return str(a, "name") || str(a, "description");
+    case "netdev_exec":
+    case "netdev_netconf":
+      // 运维卡：设备 · 命令（去掉换行后的多行命令显示首行）
+      return [str(a, "device"), firstLine(str(a, "command"))].filter(Boolean).join(" · ");
+    case "email_send":
+      return [firstLine(recipientsOf(a)), str(a, "subject")].filter(Boolean).join(" · ");
     case "todo_write":
     case "exit_plan_mode":
       return ""; // these get dedicated cards, not a subject line
     default:
-      return str(a, "path") || str(a, "file_path");
+      // Browser/desktop automation: url or selector/target is the action's
+      // object; fall through to path for the rest.
+      return firstLine(str(a, "url") || str(a, "selector") || str(a, "target") || str(a, "text") || str(a, "path") || str(a, "file_path"));
   }
+}
+
+// firstLine keeps the subject a single line even for multi-line values.
+function firstLine(s: string): string {
+  if (!s) return "";
+  const i = s.indexOf("\n");
+  return (i === -1 ? s : s.slice(0, i)).trim();
+}
+
+// recipientsOf flattens email `to` (string or array) into a display list.
+function recipientsOf(a: Record<string, unknown>): string {
+  const to = a.to;
+  if (typeof to === "string") return to;
+  if (Array.isArray(to)) return to.filter((x) => typeof x === "string").join(", ");
+  return "";
 }
 
 // diffsFor returns the before/after pairs a writer tool's card renders inline:

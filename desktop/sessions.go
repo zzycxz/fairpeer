@@ -42,6 +42,13 @@ func desktopSessionDir(root string) string {
 		// from the process CWD: launch location must not decide storage.
 		return config.SessionDir()
 	}
+	// The profile home project (工作台) stores sessions in the former global
+	// partition so migrated global transcripts stay in place.
+	if homeKey, ok := profileKeyForHomeRoot(root); ok {
+		if dir := config.SessionDirFor(homeKey); dir != "" {
+			return dir
+		}
+	}
 	if dir := config.ProjectSessionDir(root); dir != "" {
 		return dir
 	}

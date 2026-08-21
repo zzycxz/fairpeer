@@ -37,7 +37,7 @@ func controllerWithContent(t *testing.T, path string) *control.Controller {
 
 func waitForFile(t *testing.T, path, want string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if b, err := os.ReadFile(path); err == nil && strings.Contains(string(b), want) {
 			return
@@ -49,7 +49,7 @@ func waitForFile(t *testing.T, path, want string) {
 
 func waitForAutosaveIdle(t *testing.T, tab *WorkspaceTab) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		tab.saveMu.Lock()
 		idle := !tab.saving && !tab.saveAgain

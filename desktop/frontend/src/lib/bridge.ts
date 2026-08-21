@@ -101,9 +101,13 @@ import type {
   MarketSourceMeta,
   NetDevTopologyNode,
   NetDevBackupVersion,
+  NetDevLiveEvent,
+  NetDevLiveSnapshot,
+  NetDevWeakCredResult,
+
+  BudgetStatusView,
 } from "./types";
 
-const GLOBAL_PROJECT_ORDER_KEY = "__global__";
 
 // AppBindings is derived from the Wails-generated Go → TS method signatures, so
 // the compiler catches drift between the Go binding surface and the frontend mock.
@@ -145,6 +149,9 @@ export interface AppBindings {
   RunShellForTab(tabID: string, command: string): Promise<void>;
   Steer(text: string): Promise<void>;
   SteerForTab(tabID: string, text: string): Promise<void>;
+  FollowUp(text: string): Promise<void>;
+  FollowUpForTab(tabID: string, text: string): Promise<void>;
+  QueuedMessages(): Promise<{ steer?: string[]; followUp?: string[] }>;
   Cancel(): Promise<void>;
   CancelTab(tabID: string): Promise<void>;
   Pause(): Promise<void>;
@@ -186,6 +193,7 @@ export interface AppBindings {
   PresentForTab(tabID: string): Promise<PresentPayload>;
   Checkpoints(): Promise<CheckpointMeta[]>;
   CheckpointsForTab(tabID: string): Promise<CheckpointMeta[]>;
+  CheckpointDiffForTab(tabID: string, turn: number): Promise<{ path: string; kind: string; added: number; removed: number; diff: string }[]>;
   Rewind(turn: number, scope: string): Promise<void>;
   Fork(turn: number): Promise<TabMeta>;
   SummarizeFrom(turn: number): Promise<void>;
@@ -369,6 +377,12 @@ export interface AppBindings {
   NetDevRedfishQuery(device: string, path: string): Promise<string>;
   // One allowlisted SNMP get/walk for the device card's metrics panel.
   NetDevSnmpQuery(device: string, oid: string, mode: string): Promise<string>;
+  // Assessment-mode weak-credential check (engagement-envelope gated; every
+  // attempt audited). basic tier only from the UI.
+  NetDevWeakCredCheck(device: string, tier: string): Promise<NetDevWeakCredResult>;
+  // 操作实况 mount-time snapshot; live updates arrive on the
+  // "netdev:live" channel (see onNetdevLive).
+  NetDevLiveSnapshot(): Promise<NetDevLiveSnapshot>;
   // Import a user-run nmap -oX dump: hosts + open ports → one Finding; hosts
   // outside the inventory are flagged 待确认 (nothing dials).
   NetDevImportNmap(xmlText: string): Promise<NetDevFinding | null>;
@@ -378,6 +392,8 @@ export interface AppBindings {
   // Reset the per-turn command budget — called on every user submit in the
   // 运维 profile so turn_command_budget is a true per-ask control.
   NetDevTurnBegin(): Promise<void>;
+  // Rate-limit budget window status for live UI display (rpm/used/remaining).
+  BudgetStatus(): Promise<BudgetStatusView>;
   // One-click read-table growth from a refusal chip (user teaches, never the
   // model). Single-line commands only.
   NetDevAddExtraRead(vendor: string, command: string): Promise<void>;
@@ -680,6 +696,51 @@ export function onUpdaterProgress(cb: (p: UpdateProgress) => void): () => void {
   return () => {
     updaterListeners.delete(cb);
   };
+}
+
+// onNetdevLive subscribes to the 操作实况 batch stream ("netdev:live" —
+// desktop/netdev_app.go coalesces ~40ms batches of NetDevLiveEvent). In the
+// browser dev mock a demo sequence plays so the panel is testable standalone.
+const netdevLiveListeners = new Set<(events: NetDevLiveEvent[]) => void>();
+export function onNetdevLive(cb: (events: NetDevLiveEvent[]) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("netdev:live", (batch) => cb(batch as NetDevLiveEvent[]));
+  }
+  netdevLiveListeners.add(cb);
+  return () => {
+    netdevLiveListeners.delete(cb);
+  };
+}
+
+function emitNetdevLiveMock(events: NetDevLiveEvent[]) {
+  for (const cb of netdevLiveListeners) cb(events);
+}
+
+// playNetdevLiveMockDemo feeds a scripted command lifecycle + a guardrail
+// refusal into the mock live stream so the 操作实况 panel demos standalone.
+// Once per page load: the panel's effect can run several times (React
+// StrictMode double-mount, dock remounts) and each NetDevLiveSnapshot call
+// schedules a play — unguarded, the folds stack into visibly duplicated
+// tail/chips/guardrail rows.
+let netdevLiveDemoPlayed = false;
+function playNetdevLiveMockDemo() {
+  if (netdevLiveDemoPlayed) return;
+  netdevLiveDemoPlayed = true;
+  const t = () => Date.now();
+  const dev = "core-sw-1";
+  const script: [number, NetDevLiveEvent[]][] = [
+    [0, [{ kind: "cmd_start", device: dev, command: "display ospf peer", class: "read", time: t() }]],
+    [300, [{ kind: "cmd_output", device: dev, chunk: " Area 0.0.0.0 neighbors\n", time: t() }]],
+    [600, [{ kind: "cmd_output", device: dev, chunk: " RouterID       State   DeadTime  Interface\n 10.0.0.2       Full    32s       GE0/0/1\n 10.0.0.3       Full    35s       GE0/0/2\n", time: t() }]],
+    [900, [
+      { kind: "cmd_output", device: dev, chunk: "<HUAWEI>", time: t() },
+      { kind: "cmd_end", device: dev, command: "display ospf peer", class: "read", status: "ok", ms: 880, bytes: 168, time: t() },
+    ]],
+    [1400, [{ kind: "cmd_refused", device: dev, command: "save", class: "write", time: t(), reason: "写命令——运维会话结构性只读；变更走人工审批的提案。" }]],
+  ];
+  for (const [delay, events] of script) {
+    window.setTimeout(() => emitNetdevLiveMock(events), delay);
+  }
 }
 
 // onFilesDropped subscribes to native OS file drops landing on the composer (the
@@ -1025,6 +1086,15 @@ function mockScenario(): "demo" | "fresh" | "running" {
   return "demo";
 }
 
+// mockInitialProfile: ?profile=netdev|cowork boots the dev mock straight into
+// that mode (the active tab carries the profile) — GUI smoke tests for the
+// mode layouts don't have to drive the header switcher first.
+function mockInitialProfile(): "dev" | "cowork" | "netdev" {
+  if (typeof window === "undefined") return "dev";
+  const value = new URLSearchParams(window.location.search).get("profile")?.trim().toLowerCase();
+  return value === "cowork" || value === "netdev" ? value : "dev";
+}
+
 function makeMockApp(): AppBindings {
   const scenario = mockScenario();
   const freshMock = scenario === "fresh";
@@ -1032,8 +1102,9 @@ function makeMockApp(): AppBindings {
   let cancelled = false;
   let pendingAskPreview = false;
   let pendingApprovalPreview = false;
-  const globalWorkspaceRoot = "~/Library/Application Support/fairpeer/global-workspace";
-  let cwd = freshMock ? globalWorkspaceRoot : "~/projects/web-app"; // mutable so PickWorkspace is visible in dev
+  // Global scope retired (08-21): the mock home project 工作台 replaces it.
+  const mockHomeRoot = "~/Library/Application Support/fairpeer/home-dev";
+  let cwd = freshMock ? mockHomeRoot : "~/projects/web-app"; // mutable so PickWorkspace is visible in dev
   let workspaces = freshMock ? [] : ["~/projects/web-app", "~/projects/api-server", "~/projects/docs", "~/projects/mobile"];
   let mockEffort = "auto";
   // In-memory RAG state for browser dev. Seeded with one file mid-extraction so
@@ -1472,35 +1543,18 @@ function makeMockApp(): AppBindings {
       ],
     },
     {
-      key: "global_folder",
-      kind: "global_folder",
-      label: "Global",
-      root: globalWorkspaceRoot,
+      key: "project_home",
+      kind: "project",
+      label: "工作台",
+      root: mockHomeRoot,
       children: [
-        { key: "global_topic_product", kind: "global_topic", label: t("mock.topicProduct"), topicId: "topic_product", turns: 5, lastActivityAt: mockNow - 8 * 24 * 60 * 60_000 },
-        { key: "global_topic_ai", kind: "global_topic", label: t("mock.topicAi"), topicId: "topic_ai", turns: 8, lastActivityAt: mockNow - 10 * 24 * 60 * 60_000 },
-        { key: "global_topic_lab", kind: "global_topic", label: t("mock.topicLab"), topicId: "topic_lab", turns: 2, lastActivityAt: mockNow - 12 * 24 * 60 * 60_000 },
+        { key: "home_topic_product", kind: "topic", label: t("mock.topicProduct"), root: mockHomeRoot, topicId: "topic_product", turns: 5, lastActivityAt: mockNow - 8 * 24 * 60 * 60_000 },
+        { key: "home_topic_ai", kind: "topic", label: t("mock.topicAi"), root: mockHomeRoot, topicId: "topic_ai", turns: 8, lastActivityAt: mockNow - 10 * 24 * 60 * 60_000 },
+        { key: "home_topic_lab", kind: "topic", label: t("mock.topicLab"), root: mockHomeRoot, topicId: "topic_lab", turns: 2, lastActivityAt: mockNow - 12 * 24 * 60 * 60_000 },
       ],
     },
   ];
-  const ensureMockGlobalFolder = (): ProjectNode => {
-    let node = mockProjectTree.find((item) => item.kind === "global_folder");
-    if (!node) {
-      node = {
-        key: "global_folder",
-        kind: "global_folder",
-        label: "Global",
-        root: globalWorkspaceRoot,
-        children: [],
-      };
-      mockProjectTree.push(node);
-    }
-    return node;
-  };
-  const cloneProjectTree = () => {
-    if (mockProjectTree.length === 0) ensureMockGlobalFolder();
-    return JSON.parse(JSON.stringify(mockProjectTree)) as ProjectNode[];
-  };
+  const cloneProjectTree = () => JSON.parse(JSON.stringify(mockProjectTree)) as ProjectNode[];
   const projectChildren = (node: ProjectNode): ProjectNode[] => Array.isArray(node.children) ? node.children : [];
   const findMockTopic = (topicId: string): ProjectNode | null => {
     for (const parent of mockProjectTree) {
@@ -1690,12 +1744,12 @@ function makeMockApp(): AppBindings {
   };
   let mockTabs: TabMeta[] = freshMock ? [
     {
-      id: "tab_global",
-      scope: "global",
-      workspaceRoot: globalWorkspaceRoot,
-      workspaceName: "Global",
+      id: "tab_home",
+      scope: "project",
+      workspaceRoot: mockHomeRoot,
+      workspaceName: "工作台",
       topicId: "",
-      topicTitle: "Global",
+      topicTitle: "工作台",
       label: "gpt-4o",
       ready: true,
       running: false,
@@ -1703,7 +1757,7 @@ function makeMockApp(): AppBindings {
       collaborationMode: "normal",
       toolApprovalMode: "ask",
       active: true,
-      cwd: globalWorkspaceRoot,
+      cwd: mockHomeRoot,
     },
   ] : [
     {
@@ -1722,6 +1776,7 @@ function makeMockApp(): AppBindings {
       toolApprovalMode: "ask",
       active: true,
       cwd: "~/projects/web-app",
+      profile: mockInitialProfile(),
     },
     {
       id: "tab_api_server",
@@ -1741,12 +1796,12 @@ function makeMockApp(): AppBindings {
       cwd: "~/projects/api-server",
     },
     {
-      id: "tab_global",
-      scope: "global",
-      workspaceRoot: "",
-      workspaceName: "Global",
-      topicId: "topic_global",
-      topicTitle: "Global",
+      id: "tab_home",
+      scope: "project",
+      workspaceRoot: mockHomeRoot,
+      workspaceName: "工作台",
+      topicId: "topic_ai",
+      topicTitle: t("mock.topicAi"),
       label: "",
       ready: true,
       running: false,
@@ -1754,7 +1809,7 @@ function makeMockApp(): AppBindings {
       collaborationMode: "normal",
       toolApprovalMode: "ask",
       active: false,
-      cwd: "~/projects/web-app",
+      cwd: mockHomeRoot,
     },
   ];
   const mockModelCatalog = [
@@ -1849,6 +1904,22 @@ function makeMockApp(): AppBindings {
     async NetDevImportNmap(_xml: string) { return null; },
     async NetDevSnmpQuery(_device: string, _oid: string, _mode: string) {
       return "1.3.6.1.2.1.1.1.0 = Linux mock 6.1 (browser dev mock)\n1.3.6.1.2.1.1.3.0 = 3691200 (ticks)";
+    },
+    async NetDevWeakCredCheck(device: string, _tier: string): Promise<NetDevWeakCredResult> {
+      return { device, tier: "basic", weak: false, attempts: 3, budget: 3, detail: "browser dev mock: no weak credential in 3 attempt(s) (budget 3)" };
+    },
+    async NetDevLiveSnapshot(): Promise<NetDevLiveSnapshot> {
+      // Demo snapshot: one connected switch, one idle router; then play a
+      // scripted command lifecycle so the panel is visible in the browser mock.
+      queueMicrotask(() => playNetdevLiveMockDemo());
+      return {
+        devices: [
+          { device: "core-sw-1", vendor: "huawei", os: "vrp8", group: "core", connected: true, vtyUse: 1, vtyCap: 2 },
+          { device: "edge-r-2", vendor: "cisco", os: "ios", group: "edge", connected: false, vtyUse: 0, vtyCap: 2 },
+        ],
+        spent: 2,
+        budget: 30,
+      };
     },
     async NetDevRedfishQuery(_device: string, _path: string) {
       return JSON.stringify({ "@odata.type": "#Chassis.v1_20.Chassis", Id: "1", Name: "Mock Chassis", Thermal: { Fans: [{ Name: "Fan1", Reading: 2400, Status: { Health: "OK" } }] } }, null, 2);
@@ -2213,6 +2284,11 @@ function makeMockApp(): AppBindings {
         async SteerForTab(_tabID, _text) {
           await this.Steer(_text);
         },
+        async FollowUp() {},
+        async FollowUpForTab() {},
+        async QueuedMessages() {
+          return { steer: [], followUp: [] };
+        },
         async Cancel() {
           cancelled = true;
           emitMockTurnDone();
@@ -2366,6 +2442,9 @@ function makeMockApp(): AppBindings {
     async CheckpointsForTab() {
       return this.Checkpoints();
     },
+    async CheckpointDiffForTab() {
+      return [];
+    },
     async Rewind() {},
     async Fork() {
       const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];
@@ -2496,6 +2575,9 @@ function makeMockApp(): AppBindings {
       const index = mockProjectTree.findIndex((node) => node.root === path);
       if (index >= 0) mockProjectTree.splice(index, 1);
     },
+        async BudgetStatus() {
+          return { rpm: 0, used: 0, remaining: 0, reserveMain: 0, windowSecs: 0 };
+        },
         async ContextUsage() {
           return {
             used: 42124,
@@ -3529,47 +3611,25 @@ function makeMockApp(): AppBindings {
       return this.OpenProjectTab(workspaceRoot, topicID, profile);
     },
     async OpenGlobalTab(_topicID: string, profile?: string) {
-      const existing = mockTabs.find((tab) => tab.scope === "global" && tab.topicId === _topicID);
-      if (existing) {
-        setMockActiveTab(existing.id);
-        return { ...existing, active: true };
-      }
-      const tab: TabMeta = {
-        id: "tab_" + Date.now(),
-        scope: "global",
-        workspaceRoot: "",
-        workspaceName: "Global",
-        topicId: _topicID,
-        topicTitle: topicLabel(_topicID, "Global"),
-        label: "",
-        ready: true,
-        running: false,
-        mode: "normal",
-        collaborationMode: "normal",
-        toolApprovalMode: "ask",
-        active: true,
-        cwd: "",
-        profile: (profile || "dev").toLowerCase(),
-      };
-      mockTabs = [...mockTabs.map((item) => ({ ...item, active: false })), tab];
-      return { ...tab };
+      // Global scope retired: legacy calls land on the profile home project.
+      const homeProfile = profile || "dev";
+      return this.OpenProjectTab(mockHomeRoot, _topicID, homeProfile);
     },
     async EnsureBlankTab(scope: string, workspaceRoot: string, profile: string) {
-      const targetScope = scope === "project" && workspaceRoot ? "project" : "global";
-      const targetRoot = targetScope === "project" ? workspaceRoot : "";
+      const targetRoot = scope === "project" && workspaceRoot ? workspaceRoot : mockHomeRoot;
       const targetProfile = (profile || "dev").toLowerCase();
       const existing = mockTabs.find((tab) =>
-        tab.scope === targetScope &&
+        tab.scope === "project" &&
         (tab.profile ?? "dev").toLowerCase() === targetProfile &&
-        (targetScope === "global" || tab.workspaceRoot === targetRoot) &&
+        tab.workspaceRoot === targetRoot &&
         !tab.running
       );
       if (existing) {
         setMockActiveTab(existing.id);
         return { ...existing, active: true };
       }
-      const topic = await this.CreateTopic(targetScope, targetRoot, targetProfile, "");
-      return targetScope === "global" ? this.OpenGlobalTab(topic.id, targetProfile) : this.OpenProjectTab(targetRoot, topic.id, targetProfile);
+      const topic = await this.CreateTopic("project", targetRoot, targetProfile, "");
+      return this.OpenProjectTab(targetRoot, topic.id, targetProfile);
     },
     async OpenExpertSessionTab(teamId: string, teamName: string) {
       const existing = mockTabs.find((t) => t.expertSession?.teamId === teamId);
@@ -3608,62 +3668,50 @@ function makeMockApp(): AppBindings {
     async RenameProject(workspaceRoot: string, title: string) {
       const node = workspaceRoot
         ? mockProjectTree.find((item) => item.root === workspaceRoot)
-        : mockProjectTree.find((item) => item.kind === "global_folder");
-      if (node) node.label = title.trim() || (node.kind === "global_folder" ? "Global" : node.label);
+        : undefined;
+      if (node) node.label = title.trim() || node.label;
     },
     async SetProjectColor(workspaceRoot: string, color: string) {
-      const node = workspaceRoot
-        ? mockProjectTree.find((item) => item.root === workspaceRoot)
-        : mockProjectTree.find((item) => item.kind === "global_folder");
+      if (!workspaceRoot) return;
+      const node = mockProjectTree.find((item) => item.root === workspaceRoot);
       if (!node) return;
       node.projectColor = color || undefined;
       for (const child of projectChildren(node)) child.projectColor = node.projectColor;
       mockTabs = mockTabs.map((tab) =>
-        (workspaceRoot ? tab.workspaceRoot === workspaceRoot : tab.scope === "global")
+        tab.workspaceRoot === workspaceRoot
           ? { ...tab, projectColor: node.projectColor }
           : tab,
       );
     },
     async ReorderProjects(_profile: string, workspaceRoots: string[]) {
       const projects = mockProjectTree.filter((node) => node.kind === "project");
-      const globals = mockProjectTree.filter((node) => node.kind === "global_folder");
-      if (!workspaceRoots.includes(GLOBAL_PROJECT_ORDER_KEY)) {
-        if (workspaceRoots.length !== projects.length) return;
-        const byRoot = new Map(projects.map((node) => [node.root, node]));
-        const ordered = workspaceRoots.map((root) => byRoot.get(root)).filter((node): node is ProjectNode => Boolean(node));
-        if (ordered.length !== projects.length) return;
-        mockProjectTree.splice(0, mockProjectTree.length, ...globals, ...ordered);
-        return;
-      }
-      const byKey = new Map<string, ProjectNode>();
-      for (const node of projects) {
-        if (node.root) byKey.set(node.root, node);
-      }
-      for (const node of globals) byKey.set(GLOBAL_PROJECT_ORDER_KEY, node);
+      if (workspaceRoots.length !== projects.length) return;
+      const byRoot = new Map(projects.map((node) => [node.root, node]));
       const seen = new Set<string>();
       const ordered: ProjectNode[] = [];
       for (const key of workspaceRoots) {
         if (seen.has(key)) return;
-        const node = byKey.get(key);
+        const node = byRoot.get(key);
         if (!node) return;
         seen.add(key);
         ordered.push(node);
       }
-      if (ordered.length !== projects.length + globals.length) return;
       mockProjectTree.splice(0, mockProjectTree.length, ...ordered);
     },
     async CreateTopic(_scope: string, _workspaceRoot: string, _profile: string, title: string) {
       const now = Date.now();
       const id = "topic_" + now;
       const topicTitle = title.trim() || t("mock.newSession");
-      const parent = _scope === "global"
-        ? ensureMockGlobalFolder()
-        : mockProjectTree.find((node) => node.root === _workspaceRoot);
+      const root = _scope === "global" || !_workspaceRoot ? mockHomeRoot : _workspaceRoot;
+      const parent = mockProjectTree.find((node) => node.root === root)
+        ?? (root === mockHomeRoot
+          ? (mockProjectTree.push({ key: "project_home", kind: "project", label: "工作台", root: mockHomeRoot, children: [] }),
+             mockProjectTree.find((node) => node.root === root))
+          : undefined);
       if (parent) {
-        const global = parent.kind === "global_folder";
         parent.children = [{
-          key: parent.kind === "global_folder" ? "global_topic_" + id : "topic_" + id,
-          kind: global ? "global_topic" : "topic",
+          key: "topic_" + id,
+          kind: "topic",
           label: topicTitle,
           root: parent.root,
           topicId: id,

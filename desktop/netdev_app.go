@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/netdev"
 	"github.com/zzycxz/fairpeer/internal/netdev/transport"
@@ -120,6 +122,9 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 	if err != nil {
 		return NetDevSettingsView{}, err
 	}
+	// The settings page load is the reliable earliest entry point — make sure
+	// the live observer is installed before any agent/tool activity.
+	a.startNetDevLiveForwarding(cfg)
 	// Every collection starts non-nil: Go nil slices serialize as JSON null
 	// and the UI (built against the always-array dev mocks) reads .length on
 	// them — null crashed the packaged app. The view contract is arrays.
@@ -376,8 +381,16 @@ func (a *App) NetDevTurnBegin() {
 
 // inspectionSchedOnce starts the periodic inspection loop the first time the
 // settings/findings surface is touched: every [netdev] inspection_interval,
-// run the read battery and file a Finding. "" or unparsable = off.
-var inspectionSchedOnce sync.Once
+// run the read battery and file a Finding. "" or unparsable = off, but the
+// loop keeps POLLING (once a minute) so a settings save that turns the
+// interval on takes effect without an app restart — the goroutine never
+// exits on a parse/read failure. NOTE: its own sync.Once — sharing one with
+// the backup scheduler meant whichever started first silently suppressed the
+// other's loop entirely.
+var (
+	inspectionSchedOnce sync.Once
+	backupSchedOnce     sync.Once
+)
 
 func startInspectionScheduler(a *App) {
 	inspectionSchedOnce.Do(func() {
@@ -385,11 +398,13 @@ func startInspectionScheduler(a *App) {
 			for {
 				cfg, err := config.Load()
 				if err != nil || cfg == nil {
-					return
+					time.Sleep(time.Minute) // transient read failure — retry, never die
+					continue
 				}
 				d, err := time.ParseDuration(strings.TrimSpace(cfg.NetDev.InspectionInterval))
 				if err != nil || d <= 0 {
-					return // scheduling disabled; a later settings save restarts the app-level loop
+					time.Sleep(time.Minute) // off/unparsable — re-check so saves apply live
+					continue
 				}
 				time.Sleep(d)
 				ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
@@ -404,18 +419,20 @@ func startInspectionScheduler(a *App) {
 
 // startBackupScheduler mirrors the inspection loop for the config vault:
 // every [netdev] backup_interval, snapshot every device (sealed reads,
-// redacted text only). Shares the once-guard's lifetime.
+// redacted text only). Own Once (see the note on inspectionSchedOnce).
 func startBackupScheduler(a *App) {
-	inspectionSchedOnce.Do(func() {
+	backupSchedOnce.Do(func() {
 		go func() {
 			for {
 				cfg, err := config.Load()
 				if err != nil || cfg == nil {
-					return
+					time.Sleep(time.Minute)
+					continue
 				}
 				d, err := time.ParseDuration(strings.TrimSpace(cfg.NetDev.BackupInterval))
 				if err != nil || d <= 0 {
-					return
+					time.Sleep(time.Minute)
+					continue
 				}
 				time.Sleep(d)
 				ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
@@ -436,10 +453,95 @@ func (a *App) NetDevQuickExec(device, command string) (netdev.ExecResult, error)
 	if err != nil {
 		return netdev.ExecResult{}, err
 	}
+	a.startNetDevLiveForwarding(cfg)
 	ctx, cancel := context.WithTimeout(a.ctx, 45*time.Second)
 	defer cancel()
 	res := netdev.SharedManager(cfg).Exec(ctx, device, command)
 	return res, nil
+}
+
+// NetDevSnmpQuery runs one sealed SNMP query from the UI quick panel — the
+// same path as the agent's netdev_snmp tool (OID allowlist, redaction,
+// audit). The frontend quick buttons call this directly.
+func (a *App) NetDevSnmpQuery(device, oid, mode string) (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+	return netdev.SharedManager(cfg).SnmpQuery(ctx, device, oid, mode)
+}
+
+// NetDevWeakCredCheck runs the engagement-gated weak-credential check from
+// the UI (设置 → 运维 的评估区块). Same sealed path as the agent's
+// netdev_assess tool: envelope gate, tiered budgets, every attempt audited.
+func (a *App) NetDevWeakCredCheck(device, tier string) (netdev.WeakCredResult, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return netdev.WeakCredResult{}, err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
+	defer cancel()
+	return netdev.SharedManager(cfg).WeakCredCheck(ctx, device, tier, "")
+}
+
+// ── 操作实况 (live ops panel) ─────────────────────────────────────────────────
+//
+// The right-dock panel subscribes to the "netdev:live" Wails channel and
+// paints commands/output/connection state as they happen. Events are
+// coalesced Go-side (~40ms batches) so a chatty session never floods the
+// event bridge; the payload is a []netdev.LiveEvent.
+
+var (
+	netdevLiveOnce    sync.Once
+	netdevLiveMu      sync.Mutex
+	netdevLivePending []netdev.LiveEvent
+)
+
+// startNetDevLiveForwarding installs the SharedManager observer (once) and
+// starts the batching forwarder. Called from the netdev bridge entry points.
+func (a *App) startNetDevLiveForwarding(cfg *config.Config) {
+	netdevLiveOnce.Do(func() {
+		netdev.SharedManager(cfg).SetLiveObserver(func(ev netdev.LiveEvent) {
+			netdevLiveMu.Lock()
+			netdevLivePending = append(netdevLivePending, ev)
+			// Bound the queue: if the window is down (or nobody drains), keep
+			// the newest 500 events rather than growing without limit.
+			if len(netdevLivePending) > 500 {
+				netdevLivePending = netdevLivePending[len(netdevLivePending)-500:]
+			}
+			netdevLiveMu.Unlock()
+		})
+		go func() {
+			t := time.NewTicker(40 * time.Millisecond)
+			defer t.Stop()
+			for range t.C {
+				netdevLiveMu.Lock()
+				batch := netdevLivePending
+				netdevLivePending = nil
+				netdevLiveMu.Unlock()
+				if len(batch) == 0 || a.ctx == nil {
+					continue
+				}
+				runtime.EventsEmit(a.ctx, "netdev:live", batch)
+			}
+		}()
+	})
+}
+
+// NetDevLiveSnapshot returns the panel's mount-time state: per-device
+// connection/VTY state and the per-turn budget counters. Live updates then
+// arrive on the "netdev:live" channel.
+func (a *App) NetDevLiveSnapshot() (netdev.LiveSnapshot, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return netdev.LiveSnapshot{}, err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	return netdev.SharedManager(cfg).LiveState(), nil
 }
 
 // NetDevTopologySnapshot merges every device's CDP/LLDP table into one graph

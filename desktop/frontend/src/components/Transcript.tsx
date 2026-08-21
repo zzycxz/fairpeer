@@ -1,4 +1,6 @@
 import { createContext, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { subjectOf } from "../lib/tools";
+import { UnifiedDiff } from "./editors/UnifiedDiff";
 import type { Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
@@ -6,7 +8,7 @@ import { replaceAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
 import { AssistantMessage, TurnActions, UserMessage } from "./Message";
 import { ProcessCompactIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
-import { AlertTriangle, ChevronRight, Info } from "lucide-react";
+import { AlertTriangle, ChevronRight, FileDiff, Info, RotateCcw } from "lucide-react";
 import { Welcome } from "./Welcome";
 import { getDisplayMode, onDisplayModeChange, type DisplayMode } from "../lib/displayMode";
 
@@ -499,7 +501,8 @@ export function Transcript({
               if (it.name === "exit_plan_mode") break;
               out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
               break;
-            case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
+            case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} retryable={it.retryable} />); break;
+            case "turn_summary": out.push(<TurnSummaryCard key={it.id} item={it} />); break;
             case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
           }
         }
@@ -534,7 +537,8 @@ export function Transcript({
             if (it.name === "exit_plan_mode") break;
             out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
             break;
-          case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
+          case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} retryable={it.retryable} />); break;
+          case "turn_summary": out.push(<TurnSummaryCard key={it.id} item={it} />); break;
           case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
         }
       }
@@ -891,6 +895,14 @@ function ReadOnlyBatch({ items, subcalls }: ReadOnlyBatchProps) {
   }
   const steps = items.length + subcallTotal;
 
+  // Codex-style "Exploring: Read a.go, b.go · Searched foo" — the first few
+  // subjects tell the user WHAT was explored, not just how much (upgrade spec
+  // 1-3). Long lists cap at three plus an ellipsis count.
+  const subjects = items.map((it) => subjectOf(it.name, it.args)).filter(Boolean);
+  const shown = subjects.slice(0, 3).map((s) => (s.length > 40 ? `${s.slice(0, 39)}…` : s));
+  const subjectText =
+    subjects.length > 0 ? shown.join(", ") + (subjects.length > 3 ? ` +${subjects.length - 3}` : "") : "";
+
   const parts: string[] = [t("tool.stepsCount", { n: steps })];
   if (readCount > 0) parts.push(t("tool.readCount", { n: readCount }));
   if (searchCount > 0) parts.push(t("tool.searchCount", { n: searchCount }));
@@ -902,6 +914,7 @@ function ReadOnlyBatch({ items, subcalls }: ReadOnlyBatchProps) {
       <button type="button" className="reasoning__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
         <span className="readonly-batch__label">{label}</span>
+        {subjectText && <span className="readonly-batch__subjects">{subjectText}</span>}
       </button>
       {open && (
         <div className="readonly-batch__body">
@@ -1131,14 +1144,74 @@ function QuestionJumpBar({ questions, onJump }: { questions: QuestionAnchor[]; o
   );
 }
 
+// retryFailedTurn asks the app shell to resend the last failed turn's prompt
+// (upgrade spec 1-7). A DOM event keeps the NoticeCard decoupled from the
+// send pipeline; App owns what "the failed prompt" was and how to resend it.
+function retryFailedTurn(): void {
+  window.dispatchEvent(new CustomEvent("fairpeer:retry-turn"));
+}
+
 type CompactionItem = Extract<Item, { kind: "compaction" }>;
 type NoticeItem = Extract<Item, { kind: "notice" }>;
+type TurnSummaryItem = Extract<Item, { kind: "turn_summary" }>;
 
-function NoticeCard({ level, text }: { level: NoticeItem["level"]; text: string }) {
+function NoticeCard({ level, text, retryable }: { level: NoticeItem["level"]; text: string; retryable?: boolean }) {
+  const onRetry = retryFailedTurn;
   return (
     <div className={`notice-line notice-line--${level}`}>
       <span className="notice-line__icon">{level === "warn" ? <AlertTriangle size={13} /> : <Info size={13} />}</span>
       <span className="notice-line__text">{text}</span>
+      {retryable && onRetry && (
+        <button type="button" className="notice-line__retry" onClick={onRetry}>
+          <RotateCcw size={12} />
+          <span>重试</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+// TurnSummaryCard is the end-of-turn review surface (upgrade spec 1-4): one
+// collapsed row — "Edited N files · +X -Y" — expanding to the per-file list
+// and the selected file's diff. Built live from dispatch fileDiffs; on
+// reload, the persistent per-session review lives in the WorkspacePanel.
+function TurnSummaryCard({ item }: { item: TurnSummaryItem }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState(0);
+  const added = item.files.reduce((a, f) => a + f.added, 0);
+  const removed = item.files.reduce((a, f) => a + f.removed, 0);
+  const sel = item.files[Math.min(selected, item.files.length - 1)];
+  return (
+    <div className="turnsummary">
+      <button type="button" className="reasoning__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <FileDiff size={12} />
+        <span>
+          {item.files.length === 1 ? item.files[0].path : t("tool.editedFiles", { n: item.files.length })}
+        </span>
+        <span className="turnsummary__stat">+{added} -{removed}</span>
+        <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
+      </button>
+      {open && (
+        <div className="turnsummary__body">
+          {item.files.length > 1 && (
+            <div className="approval-changes__list">
+              {item.files.map((f, i) => (
+                <button
+                  type="button"
+                  key={f.path}
+                  className={`approval-changes__file${i === selected ? " approval-changes__file--selected" : ""}`}
+                  onClick={() => setSelected(i)}
+                >
+                  <span className="approval-changes__path">{f.path}</span>
+                  <span className="approval-changes__stat">+{f.added} -{f.removed}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {sel && <UnifiedDiff value={sel.diff} maxHeight={320} showToggle={false} />}
+        </div>
+      )}
     </div>
   );
 }

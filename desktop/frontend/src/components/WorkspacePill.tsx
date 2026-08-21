@@ -1,11 +1,12 @@
 // WorkspacePill — the sidebar's top-left identity slot (2026-08-19 design A).
 // Replaces the static mode wordmark with the highest-value fact for that
-// pixel: WHERE am I working. State machine (dev): active project → 全局 →
+// pixel: WHERE am I working. State machine (dev): active project →
 // 选择项目 (known list) → 打开项目 (fresh); office/netdev are static labels.
 // The dropdown doubles as the mode switcher, retiring the top-right segmented
-// control's monopoly on profile switching.
+// control's monopoly on profile switching. Projects are strictly per-profile
+// (08-21): every UI lists and opens only its own profile's projects.
 import { useState } from "react";
-import { CalendarDays, ChevronDown, Code2, FolderPlus, Globe2, Network } from "lucide-react";
+import { CalendarDays, ChevronDown, Code2, FolderPlus, Network } from "lucide-react";
 import { useT } from "../lib/i18n";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 
@@ -15,7 +16,7 @@ export interface PillProject {
   color?: string;
 }
 
-export type WorkspacePillState = "project" | "global" | "choose" | "open" | "static";
+export type WorkspacePillState = "project" | "choose" | "open" | "static";
 
 export function WorkspacePill({
   state,
@@ -24,10 +25,8 @@ export function WorkspacePill({
   projects = [],
   currentMode,
   onPickProject,
-  onPickGlobal,
   onAddProject,
   onSwitchMode,
-  globalHint,
 }: {
   state: WorkspacePillState;
   label: string;
@@ -35,11 +34,8 @@ export function WorkspacePill({
   projects?: PillProject[];
   currentMode: "dev" | "cowork" | "netdev";
   onPickProject?: (root: string) => void;
-  onPickGlobal?: () => void;
   onAddProject?: () => void;
   onSwitchMode?: (mode: "dev" | "cowork" | "netdev") => void;
-  // Storage-location tooltip for the 全局 entry (answers "files live where?").
-  globalHint?: string;
 }) {
   const t = useT();
   const [point, setPoint] = useState<{ left: number; top: number } | null>(null);
@@ -53,9 +49,10 @@ export function WorkspacePill({
 
   const items: ContextMenuItem[] = [];
   {
-    // The dropdown is mode-independent (2026-08-21): projects/global/add show
-    // wherever handlers exist — picking one from office/netdev funnels the
-    // user into the coding profile with that workspace open.
+    // Strict profile isolation (2026-08-21): the dropdown lists only the
+    // CURRENT profile's projects — the catalog is loaded per active profile
+    // and picking one opens it in place (no cross-profile funnel). 全局/
+    // 添加项目 likewise act on the current profile's index.
     for (const p of projects) {
       items.push({
         key: `p-${p.root}`,
@@ -64,13 +61,10 @@ export function WorkspacePill({
         onSelect: () => onPickProject?.(p.root),
       });
     }
-    if (onPickGlobal) {
-      items.push({ key: "global", icon: <Globe2 size={13} />, label: t("sidebar.pillGlobal"), title: globalHint, onSelect: onPickGlobal });
-    }
     if (onAddProject) {
       items.push({ key: "add-project", icon: <FolderPlus size={13} />, label: t("sidebar.pillAddProject"), onSelect: onAddProject });
     }
-    if (onSwitchMode && (projects.length > 0 || onPickGlobal || onAddProject)) {
+    if (onSwitchMode && (projects.length > 0 || onAddProject)) {
       items.push({ type: "separator", key: "sep-modes" });
     }
   }
@@ -105,7 +99,6 @@ export function WorkspacePill({
         {state === "project" && (
           <span className="workspace-pill__dot" style={{ background: dotColor || "var(--accent)" }} aria-hidden="true" />
         )}
-        {state === "global" && <Globe2 size={11} className="workspace-pill__globe" aria-hidden="true" />}
         <span className="workspace-pill__label">{label}</span>
         {items.length > 0 && <ChevronDown size={11} className="workspace-pill__chev" aria-hidden="true" />}
       </button>

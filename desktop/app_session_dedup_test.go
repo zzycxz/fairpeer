@@ -102,7 +102,8 @@ func TestEnsureBlankTabCreatesOneBlankPerProject(t *testing.T) {
 }
 
 // EnsureBlankTab picks up an existing blank topic created in the sidebar
-// instead of creating a fresh topic, for global scope.
+// instead of creating a fresh topic. Global scope is retired (08-21): legacy
+// global callers land on the profile home project 工作台.
 
 func TestEnsureBlankTabOpensExistingSidebarBlankTopic(t *testing.T) {
 	isolateDesktopUserDirs(t)
@@ -120,8 +121,21 @@ func TestEnsureBlankTabOpensExistingSidebarBlankTopic(t *testing.T) {
 	if meta.TopicID != topic.ID {
 		t.Fatalf("EnsureBlankTab opened topic %q, want existing blank topic %q", meta.TopicID, topic.ID)
 	}
-	if topics := loadProjectsFile().GlobalTopics; len(topics) != 1 {
-		t.Fatalf("global topics length = %d, want 1: %v", len(topics), topics)
+	if topics := loadProjectsFile("dev").GlobalTopics; len(topics) != 0 {
+		t.Fatalf("global topics length = %d, want 0 (retired): %v", len(topics), topics)
+	}
+	home := profileHomeRoot("dev")
+	nodes := app.ListProjectTree("dev")
+	found := false
+	if project := findTreeProject(nodes, home); project != nil {
+		for _, child := range project.Children {
+			if child.TopicID == topic.ID {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("blank topic %q not visible under home project %s: %#v", topic.ID, home, nodes)
 	}
 }
 

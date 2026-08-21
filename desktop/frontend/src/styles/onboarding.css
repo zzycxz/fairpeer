@@ -1964,7 +1964,6 @@
 .project-tree {
   --project-tree-action-column: 36px;
   --project-tree-edge-gap: 6px;
-  --project-tree-global-accent: color-mix(in srgb, var(--fg-faint) 68%, var(--accent));
   --project-tree-row-radius: 4px;
   flex: 1 1 auto;
   min-height: 0;
@@ -2246,11 +2245,6 @@
 .project-tree__folder-icon {
   flex: 0 0 auto;
   color: var(--fg-faint);
-}
-
-.project-tree__folder--global,
-.project-tree__topic--global {
-  --project-accent: var(--project-tree-global-accent);
 }
 
 .project-tree__folder-color {

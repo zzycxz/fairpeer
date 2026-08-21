@@ -404,9 +404,17 @@ func (a *App) ensureMobileBridge(ctx context.Context) {
 		pairAddr = c.MobileBridge.PairAddress
 		cfg.UDPKnock = c.MobileBridge.UDPKnock
 		cfg.KnockServer = c.MobileBridge.KnockServer
+		// 公网跳板：云 K 第二长连 + TURN 中转兜底（跨网时手机经云候选
+		// 打洞/中继；同网仍走局域网直连，零云）。
+		cfg.CloudSignalURL = c.MobileBridge.CloudSignalURL
+		cfg.TURNEnabled = c.MobileBridge.TURNEnabled
+		cfg.TURNServers = c.MobileBridge.TURNServers
+		cfg.TURNUser = c.MobileBridge.TURNUser
+		cfg.TURNPass = c.MobileBridge.TURNPass
 	}
 	slog.Info("mobilebridge: starting bridge",
-		"signal_url", cfg.SignalURL, "stun", cfg.STUNServers, "log_level", cfg.LogLevel)
+		"signal_url", cfg.SignalURL, "stun", cfg.STUNServers, "log_level", cfg.LogLevel,
+		"cloud_signal_url", cfg.CloudSignalURL, "turn_enabled", cfg.TURNEnabled)
 	bridge := mobilebridge.NewBridge(cfg, priv, pub, store, &execAdapter{app: a, fdFiles: map[string]*os.File{}}, mobilebridge.NewAudit(cfg.LogLevel))
 	// 注入 tab 别名解析：linkpeer 发 "default"/""，fairpeer 需要 UUID tab id。
 	// 映射到当前激活 tab，手机就能接入桌面正在用的会话。
@@ -448,12 +456,14 @@ func (a *App) MobileBridgeStatus() map[string]any {
 		return map[string]any{"enabled": false, "connected": false}
 	}
 	return map[string]any{
-		"enabled":      true,
-		"connected":    mb.SignalConnected(),
-		"signal_url":   mb.SignalURL(),
-		"pending":      mb.PendingPairings(),
-		"udp_knock":    mb.KnockEnabled(),
-		"knock_server": mb.KnockServer(),
+		"enabled":        true,
+		"connected":      mb.SignalConnected(),
+		"signal_url":     mb.SignalURL(),
+		"pending":        mb.PendingPairings(),
+		"udp_knock":      mb.KnockEnabled(),
+		"knock_server":   mb.KnockServer(),
+		"cloud_relay":    mb.CloudRelayURL(),
+		"cloud_connected": mb.CloudConnected(),
 	}
 }
 
@@ -527,6 +537,27 @@ func (a *App) MobileBridgeSetKnock(enabled bool, server string) error {
 		return fmt.Errorf("save udp_knock: %w", err)
 	}
 	mb.SetKnock(enabled, server)
+	return nil
+}
+
+// MobileBridgeSetCloudRelay 配置公网跳板（开关 + 云 K 地址），持久化到
+// [mobilebridge] cloud_signal_url，并即时生效于 Bridge（开/关云 K 第二长连、
+// 二维码云候选与 turn= 字段）。enabled=false 时清空地址。
+func (a *App) MobileBridgeSetCloudRelay(enabled bool, url string) error {
+	mb := a.mobilebridge.Load()
+	if mb == nil {
+		return fmt.Errorf("mobile bridge not initialized")
+	}
+	c := config.LoadForEdit(config.UserConfigPath())
+	if enabled {
+		c.MobileBridge.CloudSignalURL = url
+	} else {
+		c.MobileBridge.CloudSignalURL = ""
+	}
+	if err := c.WriteFile(config.UserConfigPath()); err != nil {
+		return fmt.Errorf("save cloud_signal_url: %w", err)
+	}
+	mb.SetCloudRelay(c.MobileBridge.CloudSignalURL)
 	return nil
 }
 

@@ -1,13 +1,15 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { AlertTriangle, BookOpen, ClipboardCheck, Network, PanelLeft, ScanSearch, ScrollText, Server, SlidersHorizontal, SquarePen } from "lucide-react";
+import { AlertTriangle, Activity, BookOpen, ClipboardCheck, Network, PanelLeft, ScanSearch, ScrollText, Server, SlidersHorizontal, SquarePen } from "lucide-react";
 import { app } from "../lib/bridge";
 import { WorkspacePill } from "../components/WorkspacePill";
 import { useConfirm } from "../lib/confirm";
 import { getActiveProject, setActiveProject, subscribeActiveProject, type NetDevProjectScope } from "../lib/netdevProjectStore";
 import { ProposalActions } from "../components/netdev/ProposalCenter";
+import { LiveOpsPanel } from "../components/netdev/LiveOpsPanel";
 import { DockTabs, useDockTabState } from "../components/DockTabs";
 import type { NetDevSettingsView, NetDevFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph, NetDevBackupVersion } from "../lib/types";
 import { Markdown } from "../components/Markdown";
+import { UnifiedDiff } from "../components/editors/UnifiedDiff";
 import "../styles/netdev.css";
 
 // NetDevLayout is the 运维 page's shell (NETDEV_SPEC §10.1). The FRAME follows
@@ -93,6 +95,16 @@ export function NetdevTitleBar({ leading, onOpenSettings }: { leading?: ReactNod
 // hexes, so every theme reads consistently (user direction: 配色跟随全局).
 const SEV_COLOR: Record<string, string> = { info: "var(--accent)", warning: "var(--warn)", critical: "var(--danger)" };
 
+// Audit table helpers — same class vocabulary as the live panel.
+function auditClassLabel(cls: string): string {
+  return { read: "读", write: "写", dangerous: "危险", unknown: "未知", guardrail: "护栏", assess: "评估", proposal: "提案", "proposal-write": "提案写", "proposal-rollback": "提案回滚" }[cls] ?? cls;
+}
+function classColorForAudit(cls: string): string {
+  if (cls === "read" || cls === "proposal") return "var(--accent)";
+  if (cls === "guardrail") return "var(--danger)";
+  return "var(--warn)";
+}
+
 const QUICK_BATTERY: Record<string, string[]> = {
   huawei: ["display version", "display cpu-usage", "display interface brief"],
   cisco: ["show version", "show processes cpu", "show interfaces status"],
@@ -128,13 +140,14 @@ const REDFISH_QUICK: { label: string; path: string }[] = [
 ];
 
 type QuickResult = { command: string; output: string; isError: boolean; refused?: string; refusedUnknown?: boolean };
-type DockTab = "devices" | "context" | "topology" | "findings" | "proposals" | "audit";
-// Fresh installs open a curated trio — the dock stays calm; the rest join via
-// the "+" dropdown or the bottom-nav entries (拓扑/审计) on demand. Stored
+type DockTab = "live" | "devices" | "context" | "topology" | "findings" | "proposals" | "audit";
+// Fresh installs open a curated set — 操作实况 leads (supervision first), the
+// rest join via the "+" dropdown or the bottom-nav entries on demand. Stored
 // state always wins after the user customizes.
-const DOCK_TAB_DEFAULT_OPEN: readonly DockTab[] = ["devices", "findings", "proposals"];
+const DOCK_TAB_DEFAULT_OPEN: readonly DockTab[] = ["live", "findings", "proposals"];
 const NETDEV_DOCK_TABS_KEY = "fairpeer.netdevDockTabs";
 const NETDEV_DOCK_TABS_SEEDED = "fairpeer.netdevDockTabs.seeded";
+const NETDEV_DOCK_TABS_LIVE_SEEDED = "fairpeer.netdevDockTabs.live-seeded";
 
 export function NetDevLayout({
   mainNode,
@@ -150,10 +163,8 @@ export function NetDevLayout({
   onToggleSidebar,
   onSwitchMode,
   pillProjects,
-  onOpenDevProject,
-  onOpenDevGlobal,
+  onPickProject,
   onAddProject,
-  globalSessionDirHint,
   sidebarToggleTitle,
   sidebarCollapsed = false,
   sidebarWidth,
@@ -197,10 +208,8 @@ export function NetDevLayout({
   onToggleSidebar?: () => void;
   onSwitchMode?: (mode: "dev" | "cowork" | "netdev") => void;
   pillProjects?: import("../components/WorkspacePill").PillProject[];
-  onOpenDevProject?: (root: string) => void;
-  onOpenDevGlobal?: () => void;
+  onPickProject?: (root: string) => void;
   onAddProject?: () => void;
-  globalSessionDirHint?: string;
   sidebarToggleTitle?: string;
   sidebarCollapsed?: boolean;
   sidebarWidth?: number;
@@ -234,16 +243,34 @@ export function NetDevLayout({
   const [topoBusy, setTopoBusy] = useState(false);
   const [topoNotice, setTopoNotice] = useState("");
   const [inspBusy, setInspBusy] = useState(false);
-  const [tab, setTab] = useState<DockTab>("context");
+  // ?live=1 (browser dev mock only — same affordance as bridge.ts's
+  // ?profile=) boots the dock with 操作实况 focused so the panel is
+  // screenshot-testable without driving the tab strip first.
+  const initialDockTab = (): DockTab => {
+    try {
+      if (typeof window !== "undefined" && !window.runtime &&
+        new URLSearchParams(window.location.search).get("live") === "1") return "live";
+    } catch { /* not a browser */ }
+    return "context";
+  };
+  const [tab, setTab] = useState<DockTab>(initialDockTab);
   // Browser-style dock tabs (coding workbench-dock pattern): only OPEN tabs
   // show, each closable, "+" re-opens from the catalog, order persists.
   // Seed the curated default ONCE (localStorage flag); afterwards the user's
-  // own open/close set is authoritative.
+  // own open/close set is authoritative. A second one-time flag back-fills
+  // the 实况 tab for installs that seeded BEFORE it existed — the stored set
+  // wins afterwards, so closing it again sticks.
   const [openTabs, setOpenTabs] = useDockTabState(NETDEV_DOCK_TABS_KEY, (() => {
     try {
       if (!localStorage.getItem(NETDEV_DOCK_TABS_SEEDED)) {
         localStorage.setItem(NETDEV_DOCK_TABS_SEEDED, "1");
         localStorage.setItem(NETDEV_DOCK_TABS_KEY, JSON.stringify(DOCK_TAB_DEFAULT_OPEN));
+      } else if (!localStorage.getItem(NETDEV_DOCK_TABS_LIVE_SEEDED)) {
+        localStorage.setItem(NETDEV_DOCK_TABS_LIVE_SEEDED, "1");
+        const stored: string[] = JSON.parse(localStorage.getItem(NETDEV_DOCK_TABS_KEY) || "[]");
+        if (Array.isArray(stored) && !stored.includes("live")) {
+          localStorage.setItem(NETDEV_DOCK_TABS_KEY, JSON.stringify(["live", ...stored]));
+        }
       }
     } catch { /* storage unavailable */ }
     return DOCK_TAB_DEFAULT_OPEN;
@@ -447,6 +474,7 @@ export function NetDevLayout({
   }, [project, topo, scopedDeviceNames]);
 
   const TABS: { key: DockTab; label: string; badge?: number; icon: React.ReactNode }[] = [
+    { key: "live", label: "实况", icon: <Activity size={13} /> },
     { key: "devices", label: "设备", badge: devices.length || undefined, icon: <Server size={13} /> },
     { key: "context", label: "手册", icon: <BookOpen size={13} /> },
     { key: "topology", label: "拓扑", icon: <Network size={13} /> },
@@ -523,10 +551,8 @@ export function NetDevLayout({
             label={settings?.networkName?.trim() || "我的网络"}
             currentMode="netdev"
             projects={pillProjects}
-            onPickProject={onOpenDevProject}
-            onPickGlobal={onOpenDevGlobal}
+            onPickProject={onPickProject}
             onAddProject={onAddProject}
-            globalHint={globalSessionDirHint ? `全局会话存储于: ${globalSessionDirHint}` : undefined}
             {...(onSwitchMode ? { onSwitchMode } : {})}
           />
           {onNewSession && (
@@ -637,6 +663,8 @@ export function NetDevLayout({
         />
         <div className="ndv__dock-body">
         {err && <div className="banner banner--error" style={{ marginBottom: 8 }}>{err}</div>}
+
+        {tab === "live" && <LiveOpsPanel />}
 
         {tab === "devices" && (
           <div className="ndv__card">
@@ -807,6 +835,28 @@ export function NetDevLayout({
             <div className="ndv__hint" style={{ padding: 0 }}>批准 / 执行 / 回滚在行内直接操作；agent 只能起草，执行权永远在人。</div>
           </div>
         )}
+
+        {tab === "audit" && (
+          <div className="ndv__card">
+            <div className="ndv__card-title">审计（最近 {audit.length} 条）</div>
+            {audit.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>&gt;&gt; NULL_DATA: 还没有操作记录。每条设备命令（含拒绝）都会落审计。</div>}
+            <div className="ndv__audit-table">
+              <div className="ndv__audit-row ndv__audit-row--head">
+                <span>时间</span><span>设备</span><span>命令</span><span>分类</span><span>状态</span>
+              </div>
+              {audit.slice(0, 100).map((a, i) => (
+                <div key={`${a.time}-${i}`} className="ndv__audit-row" title={a.error || a.command}>
+                  <span className="ndv__audit-time">{String(a.time ?? "").slice(11, 19) || String(a.time ?? "").slice(5, 16)}</span>
+                  <span className="ndv__audit-dev">{a.device}</span>
+                  <span className="ndv__audit-cmd">{a.command}</span>
+                  <span style={{ color: classColorForAudit(a.class) }}>{auditClassLabel(a.class)}</span>
+                  <span style={{ color: a.status === "ok" ? "var(--ok)" : a.status === "refused" ? "var(--danger)" : "var(--warn)" }}>{a.status}</span>
+                </div>
+              ))}
+            </div>
+            <div className="ndv__hint" style={{ padding: 0 }}>审计只记命令与字节数，输出原文不入档（脱敏在进入上下文之前完成）。</div>
+          </div>
+        )}
         </div>
       </div>
       )}
@@ -957,11 +1007,7 @@ function BackupHistory({ device }: { device: string }) {
         </div>
       )}
       {diff && (
-        <pre className="ndv__pre ndv__diff">
-          {diff.split("\n").map((l, i) => (
-            <span key={i} className={l.startsWith("+") ? "ndv__dl-add" : l.startsWith("-") ? "ndv__dl-del" : undefined}>{l}{"\n"}</span>
-          ))}
-        </pre>
+        <UnifiedDiff value={diff} maxHeight={360} showToggle={false} />
       )}
     </div>
   );

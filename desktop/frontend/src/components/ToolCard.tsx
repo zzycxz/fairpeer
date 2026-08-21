@@ -2,9 +2,11 @@ import { memo, useEffect, useRef, useState } from "react";
 import { ChevronRight, Loader2, XCircle } from "lucide-react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
+import { UnifiedDiff } from "./editors/UnifiedDiff";
 import { openAttachmentViewer } from "./AttachmentViewer";
 import { useT } from "../lib/i18n";
-import { diffsFor, subjectOf } from "../lib/tools";
+import { diffsFor, subjectOf, summarize } from "../lib/tools";
+import { toolCardSpec } from "../lib/toolCards";
 import { useShellExpand } from "../lib/shellExpand";
 import { app } from "../lib/bridge";
 import type { Item } from "../lib/useController";
@@ -19,8 +21,10 @@ function baseName(path: string): string {
 
 const SUBAGENT_TOOLS = new Set(["task", "run_skill", "explore", "research"]);
 
-/** Lines shown by default in a shell output block before the "show all" button. */
-const SHELL_PREVIEW_LINES = 10;
+/** Lines shown by default in a shell output block: head + tail around the
+ *  "… +N lines" marker (codex-style — errors live at the END of a log). */
+const SHELL_HEAD_LINES = 5;
+const SHELL_TAIL_LINES = 5;
 
 function pretty(json: string): string {
   try {
@@ -72,12 +76,15 @@ function ToolAttachments({ paths }: { paths: string[] }) {
   );
 }
 
-/** Returns the first n lines of text and the total line count. */
-function splitPreview(text: string, n: number): { preview: string; total: number; hasMore: boolean } {
+/** Splits long output into head+tail around a "… +N lines" marker line; short
+ *  output passes through unchanged. hasMore drives the show-all toggle. */
+function splitPreview(text: string, head: number, tail: number): { preview: string; total: number; hasMore: boolean } {
   const lines = text.split("\n");
   const total = lines.length;
-  if (total <= n) return { preview: text, total, hasMore: false };
-  return { preview: lines.slice(0, n).join("\n"), total, hasMore: true };
+  if (total <= head + tail + 1) return { preview: text, total, hasMore: false };
+  const hidden = total - head - tail;
+  const marker = `… +${hidden} lines`;
+  return { preview: [...lines.slice(0, head), marker, ...lines.slice(-tail)].join("\n"), total, hasMore: true };
 }
 
 // ToolCard renders one tool call. `subcalls` are sub-agent calls nested under a
@@ -85,7 +92,15 @@ function splitPreview(text: string, n: number): { preview: string; total: number
 // the sub-agent's work is visible as it happens.
 export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolItem; subcalls?: ToolItem[] }) {
   const t = useT();
-  const diffs = diffsFor(item.name, item.args);
+  // Per-tool spec (registry, upgrade spec 1-1): a registered body replaces the
+  // generic args/output body; forceOpen/noQuiet tune the shared shell.
+  const spec = toolCardSpec(item.name);
+  const customBody = spec?.body?.(item);
+  // Server-side diff is authoritative (covers apply_patch and encoding-aware
+  // previews); the args-derived diffsFor pairs stay as the fallback for
+  // replayed sessions whose sidecar predates the field.
+  const serverDiff = item.fileDiff?.diff ? item.fileDiff : undefined;
+  const diffs = serverDiff ? [] : diffsFor(item.name, item.args);
   const subject = subjectOf(item.name, item.args);
   const nested = subcalls ?? [];
   const hasNested = nested.length > 0;
@@ -93,6 +108,13 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
     SUBAGENT_TOOLS.has(item.name) && item.profile
       ? [item.profile.model, item.profile.effort ? `effort ${item.profile.effort}` : ""].filter(Boolean).join(" · ")
       : "";
+  // Header meta line: line tallies for writers (server preview first), output
+  // shape for read tools (N matches / N lines), once the call has settled.
+  const statText = serverDiff
+    ? `+${serverDiff.added} -${serverDiff.removed}`
+    : item.status === "running"
+      ? ""
+      : summarize(item.name, item.args, item.output, item.error);
 
   // A task's summary is its step count; everything else derives from the result.
   const summary =
@@ -104,18 +126,21 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
 
   // edit diffs are the point of the card, so they're shown inline; everything
   // else folds its args/output away by default.  Open while running so the
-  // user sees progress; closed by default once settled.
-  const hasArgsOrOutput = diffs.length === 0 && (!!item.args || !!item.output);
+  // user sees progress; closed by default once settled (registry forceOpen
+  // tools — netdev evidence — stay open).
+  const hasDiffBody = Boolean(serverDiff) || diffs.length > 0;
+  const hasCustomBody = customBody !== undefined && customBody !== null;
+  const hasArgsOrOutput = !hasDiffBody && !hasCustomBody && (!!item.args || !!item.output);
 
-  // Shell output: split into preview + "show all" toggle.
+  // Shell output: head+tail preview + "show all" toggle.
   const shellOutput = item.isShell && item.output ? item.output : null;
-  const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_PREVIEW_LINES) : null;
+  const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_HEAD_LINES, SHELL_TAIL_LINES) : null;
   const hasAttachments = Boolean(item.attachments && item.attachments.some((a) => a.kind === "image"));
-  const hasBody = Boolean(summary || diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error || hasAttachments);
+  const hasBody = Boolean(summary || hasDiffBody || hasCustomBody || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error || hasAttachments);
   // Open while running so the user sees live progress; closed once settled.
   // Shell cards (incl. agent-initiated bash) follow the same rule so streamed
   // stdout stays visible during a long command and auto-collapses on finish.
-  const [open, setOpen] = useState(getInitialOpenState(item.status, hasNested, item.isShell ?? false));
+  const [open, setOpen] = useState(getInitialOpenState(item.status, hasNested, item.isShell ?? false) || (spec?.forceOpen ?? false));
   const [hasBeenOpened, setHasBeenOpened] = useState(open);
   const [showAll, setShowAll] = useState(false);
   
@@ -159,9 +184,10 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
 
   // Read-only "research" calls (read/grep/web_fetch) are hidden after
   // completion so they don't clutter the transcript. During execution they still
-  // render so the user sees progress.
+  // render so the user sees progress. Registry noQuiet tools (netdev evidence)
+  // keep full contrast.
   const quiet =
-    item.readOnly && !hasNested && item.status !== "error" && item.status !== "stopped";
+    item.readOnly && !hasNested && !spec?.noQuiet && item.status !== "error" && item.status !== "stopped";
 
   const duration = item.status === "running" ? "" : formatToolDuration(item.durationMs);
 
@@ -184,6 +210,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
           <span className="tool__name">{item.name}</span>
           {subject && <span className="tool__subject">{subject}</span>}
         </span>
+        {statText && <span className="tool__stat">{statText}</span>}
         {profileText && <span className="tool__profile">{profileText}</span>}
         {duration && <span className="tool__duration">{duration}</span>}
         {hasBody && (
@@ -197,6 +224,12 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         {shouldKeepMounted(hasBeenOpened, open) && (
           <div className="tool__body">
             {summary && <div className="tool__summary">{summary}</div>}
+
+        {hasCustomBody && customBody}
+
+        {serverDiff && (
+          <UnifiedDiff value={serverDiff.diff} maxHeight={320} />
+        )}
 
         {diffs.map((d, i) => (
           <div key={i}>

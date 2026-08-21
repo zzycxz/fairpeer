@@ -654,19 +654,6 @@
   margin-bottom: 8px;
 }
 
-.composer-modebar {
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--bg-elev-2) 72%, transparent);
-}
-
-.composer-modebar__thumb {
-  border-radius: var(--radius-sm);
-}
-
-.composer-modebar__item {
-  border-radius: var(--radius-sm);
-}
-
 .composer-context__item,
 .meta-chip,
 .composer-meta .modelsw__trigger {
@@ -1326,7 +1313,6 @@
 :root[data-theme-style] .project-tree {
   --project-tree-action-column: 24px;
   --project-tree-edge-gap: 0px;
-  --project-tree-global-accent: color-mix(in srgb, var(--fg-faint) 70%, var(--accent));
   --project-tree-row-radius: var(--r-s);
   gap: 12px;
   overflow-x: hidden;
@@ -1980,7 +1966,6 @@
   color: var(--fg-dim);
 }
 
-:root[data-theme-style] .composer-modebar,
 :root[data-theme-style] .composer-mode-chip,
 :root[data-theme-style] .meta-chip,
 :root[data-theme-style] .composer-more-trigger,
@@ -2029,47 +2014,33 @@
   box-shadow: none;
 }
 
-:root[data-theme-style] .composer-modebar__thumb,
-:root[data-theme-style] .composer-modebar__item {
-  border-radius: var(--radius-sm);
+/* Tool-access dropdown mode tints: the generic trigger wash above must not
+   erase them — the active posture (auto-edit / full access) is safety-relevant
+   state that stays visible on the closed trigger. */
+:root[data-theme-style] .composer-meta .approvalsw--auto .approvalsw__trigger {
+  color: color-mix(in srgb, var(--mode-auto-bg) 78%, var(--fg));
+  border-color: color-mix(in srgb, var(--mode-auto-bg) 46%, var(--border));
+  background: color-mix(in srgb, var(--mode-auto-bg) 16%, var(--bg-elev-2));
 }
 
-:root[data-theme-style] .composer-modebar {
-  padding: 2px;
-  border-radius: var(--radius-pill);
-  background: var(--surface-3);
-  box-shadow: none;
+:root[data-theme-style] .composer-meta .approvalsw--auto .approvalsw__trigger:hover:not(:disabled),
+:root[data-theme-style] .composer-meta .approvalsw--auto .approvalsw__trigger:focus-visible {
+  color: color-mix(in srgb, var(--mode-auto-bg) 82%, var(--fg));
+  border-color: color-mix(in srgb, var(--mode-auto-bg) 62%, var(--border));
+  background: color-mix(in srgb, var(--mode-auto-bg) 24%, var(--bg-elev));
 }
 
-:root[data-theme-style] .composer-modebar__thumb {
-  border: 1px solid var(--composer-modebar-active-border);
-  border-radius: var(--radius-pill);
-  background: var(--composer-modebar-active-bg);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent),
-    0 1px 3px color-mix(in srgb, #000 28%, transparent);
+:root[data-theme-style] .composer-meta .approvalsw--yolo .approvalsw__trigger {
+  color: color-mix(in srgb, var(--mode-yolo-bg) 80%, var(--fg));
+  border-color: color-mix(in srgb, var(--mode-yolo-bg) 52%, var(--border));
+  background: color-mix(in srgb, var(--mode-yolo-bg) 18%, var(--bg-elev-2));
 }
 
-:root[data-theme-style] .composer-modebar__item {
-  height: 26px;
-  border-radius: var(--radius-pill);
-  color: var(--text-3);
-  transition: color var(--dur-fast), background var(--dur-fast), transform var(--dur-fast) var(--ease-out);
-}
-
-:root[data-theme-style] .composer-modebar__item:hover:not(:disabled) {
-  color: var(--text-2);
-  background: transparent;
-  transform: translateY(-1px);
-}
-
-:root[data-theme-style] .composer-modebar__item--active,
-:root[data-theme-style] .composer-modebar__item--active:hover:not(:disabled),
-:root[data-theme-style] .composer-modebar__item--active:focus-visible {
-  color: var(--composer-modebar-active-fg);
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
+:root[data-theme-style] .composer-meta .approvalsw--yolo .approvalsw__trigger:hover:not(:disabled),
+:root[data-theme-style] .composer-meta .approvalsw--yolo .approvalsw__trigger:focus-visible {
+  color: color-mix(in srgb, var(--mode-yolo-bg) 84%, var(--fg));
+  border-color: color-mix(in srgb, var(--mode-yolo-bg) 68%, var(--border));
+  background: color-mix(in srgb, var(--mode-yolo-bg) 28%, var(--bg-elev));
 }
 
 :root[data-theme-style] .statusbar {

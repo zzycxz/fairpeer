@@ -27,10 +27,20 @@ import type {
   WireAttachment,
   WireCollab,
   WireEvent,
+  WireFileDiff,
   WireUsage,
 } from "./types";
 
 export type ToolStatus = "running" | "done" | "error" | "stopped";
+
+// TurnSummaryFile is one file's change within a turn's end-of-turn summary
+// card (upgrade spec 1-4): the diff section text plus its tallies.
+export interface TurnSummaryFile {
+  path: string;
+  added: number;
+  removed: number;
+  diff: string;
+}
 
 export type LiveStream = { id: string; text: string; reasoning: string };
 export type MessageActionScope = "fork" | "summ-from" | "summ-upto" | "conversation" | "code" | "both";
@@ -40,7 +50,8 @@ export type Item =
   | { kind: "user"; id: string; text: string; failed?: boolean }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean }
   | { kind: "phase"; id: string; text: string }
-  | { kind: "notice"; id: string; level: "info" | "warn"; text: string }
+  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; retryable?: boolean }
+  | { kind: "turn_summary"; id: string; files: TurnSummaryFile[] }
   | {
       kind: "compaction";
       id: string;
@@ -66,6 +77,7 @@ export type Item =
       parentId?: string; // a sub-agent call nests under the `task` call with this id
       profile?: { model?: string; effort?: string }; // subagent model/effort from tool event
       attachments?: WireAttachment[]; // files the tool produced (e.g. generated images)
+      fileDiff?: WireFileDiff; // server-side preview (live dispatch or replayed sidecar)
     };
 
 interface State {
@@ -94,7 +106,8 @@ interface State {
   turnTokens: number;
   turnTotalTokens: number;
   sessionTokens: number;
-  retry?: { attempt: number; max: number };
+  retry?: { attempt: number; max: number; afterMs?: number };
+  turnItemStart: number; // items index where the current turn began (1-4 summary scoping)
   seq: number;
 }
 
@@ -111,6 +124,7 @@ export const initialState: State = {
   turnTotalTokens: 0,
   sessionTokens: 0,
   seq: 0,
+  turnItemStart: 0,
 };
 
 // isShellTool decides whether a tool card should render in the "live shell"
@@ -384,6 +398,7 @@ function presentRecordsToOverlays(
         if (r.tool.readOnly !== undefined) ov.readOnly = r.tool.readOnly;
         if (r.tool.parentId !== undefined) ov.parentId = r.tool.parentId;
         if (r.tool.profile) ov.profile = r.tool.profile;
+        if (r.tool.fileDiff) ov.fileDiff = r.tool.fileDiff;
         break;
       }
       case "tool_progress": {
@@ -481,10 +496,52 @@ interface ToolOverlay {
   attachments?: WireAttachment[];
   output?: string;
   error?: string;
+  fileDiff?: WireFileDiff;
 }
 
-function ensureAssistant(s: State): { items: Item[]; id: string; seq: number } {
-  if (s.currentAssistant) {
+// splitDiffSections splits a (possibly multi-file) unified diff string into
+// per-file sections — everything from one '--- a/path' header to the next —
+// with +/- tallies counted per section. Bare-hunk input (no headers) comes
+// back as a single anonymous section.
+function splitDiffSections(text: string): TurnSummaryFile[] {
+  const out: TurnSummaryFile[] = [];
+  let cur: TurnSummaryFile | null = null;
+  for (const line of text.split("\n")) {
+    if (line.startsWith("--- a/")) {
+      cur = { path: line.slice(6).trim(), added: 0, removed: 0, diff: "" };
+      out.push(cur);
+      cur.diff = line + "\n";
+      continue;
+    }
+    if (!cur) {
+      if (line.startsWith("@@")) {
+        cur = { path: "", added: 0, removed: 0, diff: "" };
+        out.push(cur);
+      } else continue;
+    }
+    cur.diff += line + "\n";
+    if (line.startsWith("+")) cur.added++;
+    else if (line.startsWith("-")) cur.removed++;
+  }
+  return out;
+}
+
+// turnSummaryCard folds the turn's writer fileDiffs (from dispatches at or
+// after startIdx) into one end-of-turn review card; null when the turn made
+// no previewable file changes. Same path later in the turn wins (the final
+// state is what a review wants).
+function turnSummaryCard(items: Item[], startIdx: number, seq: number): Item | null {
+  const files = new Map<string, TurnSummaryFile>();
+  for (let i = Math.max(0, startIdx); i < items.length; i++) {
+    const it = items[i];
+    if (it.kind !== "tool" || !it.fileDiff?.diff) continue;
+    for (const f of splitDiffSections(it.fileDiff.diff)) files.set(f.path, f);
+  }
+  if (files.size === 0) return null;
+  return { kind: "turn_summary", id: `ts${seq}`, files: [...files.values()] };
+}
+
+function ensureAssistant(s: State): { items: Item[]; id: string; seq: number } {  if (s.currentAssistant) {
     const exists = s.items.some((it) => it.id === s.currentAssistant && it.kind === "assistant");
     if (exists) return { items: s.items, id: s.currentAssistant, seq: s.seq };
   }
@@ -516,7 +573,7 @@ function applyEvent(s: State, e: WireEvent): State {
     s = flushPendingUser(s);
   }
   if (e.kind === "retrying") {
-    return { ...s, retry: { attempt: e.retryAttempt ?? 0, max: e.retryMax ?? 0 } };
+    return { ...s, retry: { attempt: e.retryAttempt ?? 0, max: e.retryMax ?? 0, afterMs: e.retryAfterMs } };
   }
   if (s.retry) s = { ...s, retry: undefined };
   switch (e.kind) {
@@ -528,7 +585,7 @@ function applyEvent(s: State, e: WireEvent): State {
       let cur: State = s;
       if (cur.pendingUser !== undefined) cur = flushPendingUser(cur);
       const { items, id, seq } = ensureAssistant(cur);
-      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "" }, running: true, turnActive: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0 };
+      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "" }, running: true, turnActive: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0, turnItemStart: items.length };
     }
     case "text":
     case "reasoning": {
@@ -555,10 +612,10 @@ function applyEvent(s: State, e: WireEvent): State {
       if (idx >= 0) {
         const next = [...s.items];
         const it = next[idx];
-        if (it.kind === "tool") next[idx] = { ...it, name: t.name, args: t.args ? t.args : it.args, readOnly: t.readOnly, profile: t.profile ?? it.profile };
+        if (it.kind === "tool") next[idx] = { ...it, name: t.name, args: t.args ? t.args : it.args, readOnly: t.readOnly, profile: t.profile ?? it.profile, fileDiff: t.fileDiff ?? it.fileDiff };
         return { ...s, items: next };
       }
-      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "tool", id, name: t.name, args: t.args ?? "", readOnly: t.readOnly, status: "running", isShell: isShellTool(t.name, id), parentId: t.parentId, profile: t.profile }] };
+      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "tool", id, name: t.name, args: t.args ?? "", readOnly: t.readOnly, status: "running", isShell: isShellTool(t.name, id), parentId: t.parentId, profile: t.profile, fileDiff: t.fileDiff }] };
     }
     case "tool_result": {
       const t = e.tool;
@@ -632,7 +689,16 @@ function applyEvent(s: State, e: WireEvent): State {
         if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const };
         return it;
       });
-      const items: Item[] = e.err ? [...finalized, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err }] : finalized;
+      // Turn change summary (upgrade spec 1-4): fold this turn's writer diffs
+      // into one reviewable card ("Edited N files +X −Y"). Built from the
+      // server-side fileDiff on dispatches since the turn started; subagent
+      // edits nest in (their cards carry parentId but their diffs count).
+      const summaryCard = e.err ? null : turnSummaryCard(finalized, s.turnItemStart, s.seq);
+      const items: Item[] = e.err
+        ? [...finalized, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err, retryable: true }]
+        : summaryCard
+          ? [...finalized, summaryCard]
+          : finalized;
       return { ...s, items, live: undefined, running: false, turnActive: false, paused: false, currentAssistant: undefined, approval: undefined, ask: undefined, seq: s.seq + 1 };
     }
     case "expert_collab": {
@@ -775,6 +841,7 @@ export function reducer(s: State, a: Action): State {
               ...(ov.profile !== undefined ? { profile: ov.profile } : {}),
               ...(ov.parentId !== undefined ? { parentId: ov.parentId } : {}),
               ...(ov.attachments !== undefined ? { attachments: ov.attachments } : {}),
+              ...(ov.fileDiff !== undefined ? { fileDiff: ov.fileDiff } : {}),
               ...(ov.output !== undefined ? { output: ov.output } : {}),
               ...(ov.error !== undefined ? { error: ov.error } : {}),
             });
