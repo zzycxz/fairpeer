@@ -527,4 +527,6 @@ Go（root+desktop）构建全绿；`internal/tool`(含 builtin)、`internal/evid
 
 **4-3 会话分支树导航完成（第五批次）**：BranchesForTab/SwitchBranchForTab 桌面绑定 + BranchTree 模态（ParentID 树形缩进、当前分支标记、名称/轮次/时间、空态引导到 Fork/Rewind 入口），Ctrl/Cmd+Shift+B 呼出；切换走既有 Controller.SwitchBranch（免运行中约束由其自守），前端 syncActiveTab reset 重载转录——"Fork 创建 → 树中跳转 → rewind 组合"的分支工作流自此有 UI 闭环（此前仅 /switch 命令可达）。
 
+**阶段 5 首批完成（第六批次）**：5-4 行号跳编辑器（OpenInEditorAt vscode://file/ 绑定 + ToolCard/TurnSummary/rewind 三处入口）；5-5 会话 HTML 导出（复用导出离屏渲染面序列化自包含单文件，菜单新增项）；5-1 会话成本聚合（Pricing 逐轮累积持久化 + UsageChip 会话累计行）；5-6 内置 image_generate（OpenAI 兼容 images API，产物走既有附件管线，ConfineWriters 收编）；5-3 本地模型预设补 LM Studio。**5-2 崩溃恢复依赖 4-1、5-7 权限粒度为设计级**——随深水批次处理。
+
 **批次收尾（同日）**：全部改动已按 4 个 commit 落在 `feat/mindmap-read-loop`（chore 遗留收口 / feat(core) M0+M3 后端 / feat(desktop) M0-M3 前端 / docs(spec)），`sign.exe`/`ndvshot.exe`/`dist-crash/` 三个产物刻意未入库（待 gitignore）。下一批建议顺序：3-3（流式补丁预览，先查 provider 层是否暴露 tool-call 参数 delta）→ 3-7①（按上方勘察实施）→ 3-11（中间件化）。
