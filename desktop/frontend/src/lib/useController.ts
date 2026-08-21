@@ -78,6 +78,7 @@ export type Item =
       profile?: { model?: string; effort?: string }; // subagent model/effort from tool event
       attachments?: WireAttachment[]; // files the tool produced (e.g. generated images)
       fileDiff?: WireFileDiff; // server-side preview (live dispatch or replayed sidecar)
+      argsDiff?: string; // live partial patch while the model streams apply_patch args (3-3)
     };
 
 interface State {
@@ -612,7 +613,7 @@ function applyEvent(s: State, e: WireEvent): State {
       if (idx >= 0) {
         const next = [...s.items];
         const it = next[idx];
-        if (it.kind === "tool") next[idx] = { ...it, name: t.name, args: t.args ? t.args : it.args, readOnly: t.readOnly, profile: t.profile ?? it.profile, fileDiff: t.fileDiff ?? it.fileDiff };
+        if (it.kind === "tool") next[idx] = { ...it, name: t.name, args: t.args ? t.args : it.args, readOnly: t.readOnly, profile: t.profile ?? it.profile, fileDiff: t.fileDiff ?? it.fileDiff, argsDiff: t.args ? undefined : it.argsDiff };
         return { ...s, items: next };
       }
       return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "tool", id, name: t.name, args: t.args ?? "", readOnly: t.readOnly, status: "running", isShell: isShellTool(t.name, id), parentId: t.parentId, profile: t.profile, fileDiff: t.fileDiff }] };
@@ -630,7 +631,26 @@ function applyEvent(s: State, e: WireEvent): State {
       }
       if (idx >= 0) {
         const it = next[idx];
-        if (it.kind === "tool") next[idx] = { ...it, status: t.err ? "error" : "done", output: t.output, error: t.err, truncated: t.truncated, durationMs: t.durationMs, attachments: t.attachments };
+        if (it.kind === "tool") next[idx] = { ...it, status: t.err ? "error" : "done", output: t.output, error: t.err, truncated: t.truncated, durationMs: t.durationMs, attachments: t.attachments, argsDiff: undefined };
+      }
+      return { ...s, items: next };
+    }
+    case "tool_args_delta": {
+      // Live patch preview (spec 3-3): attach the partial patch to the
+      // running tool card created by the Partial dispatch.
+      const t = e.tool;
+      if (!t) return s;
+      const next = [...s.items];
+      let idx = t.id ? next.findIndex((it) => it.kind === "tool" && it.id === t.id) : -1;
+      if (idx < 0) {
+        for (let i = next.length - 1; i >= 0; i--) {
+          const it = next[i];
+          if (it.kind === "tool" && it.status === "running") { idx = i; break; }
+        }
+      }
+      if (idx >= 0) {
+        const it = next[idx];
+        if (it.kind === "tool") next[idx] = { ...it, argsDiff: e.text ?? "", name: t.name || it.name };
       }
       return { ...s, items: next };
     }

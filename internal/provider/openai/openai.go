@@ -482,6 +482,12 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				emitted = true
 				out <- provider.Chunk{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: cur.ID, Name: cur.Name}}
 			}
+			// Forward the raw fragment (upgrade spec 3-3): the agent layer turns
+			// apply_patch deltas into a live diff preview. Cheap — one channel
+			// send per SSE tool fragment, which is already flowing.
+			if tc.Function.Arguments != "" {
+				out <- provider.Chunk{Type: provider.ChunkToolArgsDelta, Text: tc.Function.Arguments, ToolCall: &provider.ToolCall{ID: cur.ID, Name: cur.Name}}
+			}
 		}
 	}
 

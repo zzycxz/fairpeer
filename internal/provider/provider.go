@@ -458,6 +458,7 @@ const (
 	ChunkText          ChunkType = iota // text delta
 	ChunkReasoning                      // thinking-mode reasoning delta (before the visible answer)
 	ChunkToolCallStart                  // a tool call has begun (ToolCall: ID+Name; args still streaming)
+	ChunkToolArgsDelta                  // tool-call argument fragment (Text: raw args delta; ToolCall: ID+Name) — for live patch previews
 	ChunkToolCall                       // one complete tool call
 	ChunkUsage                          // token usage for the completion
 	ChunkDone                           // completion finished normally

@@ -147,6 +147,7 @@ var kindNames = map[event.Kind]string{
 	event.Message:           "message",
 	event.ToolDispatch:      "tool_dispatch",
 	event.ToolResult:        "tool_result",
+	event.ToolArgsDelta:     "tool_args_delta",
 	event.Usage:             "usage",
 	event.Notice:            "notice",
 	event.Phase:             "phase",
@@ -184,6 +185,9 @@ func toWire(e event.Event) wireEvent {
 		} else {
 			w.Level = "info"
 		}
+	case event.ToolArgsDelta:
+		w.Text = e.Text
+		w.Tool = &wireTool{ID: e.Tool.ID, Name: e.Tool.Name, ReadOnly: true}
 	case event.ToolDispatch, event.ToolResult, event.ToolProgress:
 		wt := &wireTool{
 			ID: e.Tool.ID, Name: e.Tool.Name, Args: e.Tool.Args,

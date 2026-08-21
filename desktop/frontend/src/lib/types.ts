@@ -8,6 +8,7 @@ export type EventKind =
   | "message"
   | "tool_dispatch"
   | "tool_result"
+  | "tool_args_delta"
   | "tool_progress"
   | "usage"
   | "notice"

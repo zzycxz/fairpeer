@@ -138,7 +138,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   // else folds its args/output away by default.  Open while running so the
   // user sees progress; closed by default once settled (registry forceOpen
   // tools — netdev evidence — stay open).
-  const hasDiffBody = Boolean(serverDiff) || diffs.length > 0;
+  const hasDiffBody = Boolean(serverDiff || item.argsDiff) || diffs.length > 0;
   const hasCustomBody = customBody !== undefined && customBody !== null;
   const hasArgsOrOutput = !hasDiffBody && !hasCustomBody && (!!item.args || !!item.output);
 
@@ -249,6 +249,16 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
 
         {serverDiff && (
           <UnifiedDiff value={serverDiff.diff} maxHeight={320} />
+        )}
+
+        {item.argsDiff && (
+          <div className="tool__argsdiff">
+            <div className="tool__argsdiff-head">
+              <Loader2 size={11} className="tool__status--running" />
+              <span>补丁生成中——实时预览</span>
+            </div>
+            <UnifiedDiff value={item.argsDiff} maxHeight={280} showToggle={false} />
+          </div>
         )}
 
         {diffs.map((d, i) => (

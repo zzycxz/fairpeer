@@ -38,6 +38,10 @@ const (
 	ToolDispatch
 	// ToolResult reports a finished tool call (Tool: Output/Err/Truncated set).
 	ToolResult
+	// ToolArgsDelta streams a tool call's raw argument fragment while the model
+	// is still generating it (Tool: ID/Name; Text: the fragment) — apply_patch
+	// previews render a live diff from these. Transient: not persisted.
+	ToolArgsDelta
 	// Usage carries per-turn token telemetry (Usage; Pricing optional, for cost).
 	Usage
 	// Notice is an out-of-band message — a warning, truncation, block, or

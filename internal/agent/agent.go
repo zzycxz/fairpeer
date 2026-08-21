@@ -1303,6 +1303,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 	transformReasoning := a.hooks != nil && a.hooks.HasPostLLMCall()
 
 	var text, reasoning strings.Builder
+	var argsAccums map[string]*argsPreviewAccum
 	var signature string // provider-issued proof for the reasoning (Anthropic thinking)
 	var calls []provider.ToolCall
 	var usage *provider.Usage
@@ -1357,6 +1358,31 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 		case provider.ChunkToolCall:
 			partialToolStarted = true
 			calls = append(calls, *chunk.ToolCall)
+		case provider.ChunkToolArgsDelta:
+			partialToolStarted = true
+			// Live patch preview (upgrade spec 3-3): accumulate the raw args
+			// and, for apply_patch, emit the partial patchText throttled —
+			// the frontend renders an incomplete-but-live diff while the
+			// model is still writing.
+			if tc := chunk.ToolCall; tc != nil && tc.Name == "apply_patch" && chunk.Text != "" {
+				acc := argsAccums[tc.ID]
+				if acc == nil {
+					acc = &argsPreviewAccum{}
+					if argsAccums == nil {
+						argsAccums = map[string]*argsPreviewAccum{}
+					}
+					argsAccums[tc.ID] = acc
+				}
+				acc.raw.WriteString(chunk.Text)
+				now := time.Now().UnixMilli()
+				if now-acc.lastEmit >= minPreviewIntervalMs {
+					acc.lastEmit = now
+					if patch, ok := patchFromArgs(acc.raw.String()); ok && patch != "" {
+						a.sink.Emit(event.Event{Kind: event.ToolArgsDelta, Text: patch,
+							Tool: event.Tool{ID: tc.ID, Name: tc.Name}})
+					}
+				}
+			}
 		case provider.ChunkUsage:
 			usage = chunk.Usage
 			a.lastUsage.Store(chunk.Usage)
