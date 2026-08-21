@@ -523,4 +523,6 @@ Go（root+desktop）构建全绿；`internal/tool`(含 builtin)、`internal/evid
 
 **4-7 结构化输出完成（第五批次）**：provider.Request 增 ResponseSchema/SchemaName → openai response_format(json_schema, strict=false)；首个消费者=auto_plan 分类器（schema 约束优先，供应商拒绝 response_format 时按错误特征自动回退自由文本路径——18 家兼容厂商零 400 风险，花括号提取保留为兜底）；wire 测试同时断言 4-6 的 prompt_cache_key 64 截断与未设置时两字段均不泄漏。后续消费者（Loop verify、RAG extractor 从 json_object 升级）按同模式接入。
 
+**4-4 观测性完成（第五批次）**：tabEventSink 事件流累积每轮事实（时长/重试/工具调用数与失败数/token 拆分/缓存命中/终止错误，环 50 轮，与既有 telemetry 持久化同域）→ TurnFactsForTab 绑定 → ContextPanel「最近轮次」表（最近 8 轮倒序，3s 刷新，失败轮红标、重试↻N、工具失败!N）——每轮"实际发生了什么"在上下文面板一眼可见，为后续 OTEL 导出预留了同源数据。
+
 **批次收尾（同日）**：全部改动已按 4 个 commit 落在 `feat/mindmap-read-loop`（chore 遗留收口 / feat(core) M0+M3 后端 / feat(desktop) M0-M3 前端 / docs(spec)），`sign.exe`/`ndvshot.exe`/`dist-crash/` 三个产物刻意未入库（待 gitignore）。下一批建议顺序：3-3（流式补丁预览，先查 provider 层是否暴露 tool-call 参数 delta）→ 3-7①（按上方勘察实施）→ 3-11（中间件化）。
