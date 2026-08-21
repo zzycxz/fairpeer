@@ -529,4 +529,6 @@ Go（root+desktop）构建全绿；`internal/tool`(含 builtin)、`internal/evid
 
 **阶段 5 首批完成（第六批次）**：5-4 行号跳编辑器（OpenInEditorAt vscode://file/ 绑定 + ToolCard/TurnSummary/rewind 三处入口）；5-5 会话 HTML 导出（复用导出离屏渲染面序列化自包含单文件，菜单新增项）；5-1 会话成本聚合（Pricing 逐轮累积持久化 + UsageChip 会话累计行）；5-6 内置 image_generate（OpenAI 兼容 images API，产物走既有附件管线，ConfineWriters 收编）；5-3 本地模型预设补 LM Studio。**5-2 崩溃恢复依赖 4-1、5-7 权限粒度为设计级**——随深水批次处理。
 
+**3-3 流式补丁预览完成（第六批次）**：provider 层新增 ChunkToolArgsDelta（SSE 工具碎片原样转发）→ agent stream 循环按 apply_patch 过滤、partialJSONString 逐字符增量解码 JSON 转义（换行/Unicode 转义/悬空反斜杠全容忍，12 例截断点单测）、500ms 每调用节流发 ToolArgsDelta → desktop+serve 双 wire 透传 → 前端 reducer 挂到 Partial dispatch 建的运行卡片，ToolCard 渲染「补丁生成中——实时预览」UnifiedDiff（复用 M1 组件，天然容忍不完整 hunk）；dispatch 带完整 args / result 时清除预览。**这是对 codex 体验感知的反超点：模型写补丁时 GUI 逐行滚出 diff。**
+
 **批次收尾（同日）**：全部改动已按 4 个 commit 落在 `feat/mindmap-read-loop`（chore 遗留收口 / feat(core) M0+M3 后端 / feat(desktop) M0-M3 前端 / docs(spec)），`sign.exe`/`ndvshot.exe`/`dist-crash/` 三个产物刻意未入库（待 gitignore）。下一批建议顺序：3-3（流式补丁预览，先查 provider 层是否暴露 tool-call 参数 delta）→ 3-7①（按上方勘察实施）→ 3-11（中间件化）。
