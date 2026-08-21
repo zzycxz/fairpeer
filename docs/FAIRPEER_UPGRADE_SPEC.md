@@ -531,4 +531,6 @@ Go（root+desktop）构建全绿；`internal/tool`(含 builtin)、`internal/evid
 
 **3-3 流式补丁预览完成（第六批次）**：provider 层新增 ChunkToolArgsDelta（SSE 工具碎片原样转发）→ agent stream 循环按 apply_patch 过滤、partialJSONString 逐字符增量解码 JSON 转义（换行/Unicode 转义/悬空反斜杠全容忍，12 例截断点单测）、500ms 每调用节流发 ToolArgsDelta → desktop+serve 双 wire 透传 → 前端 reducer 挂到 Partial dispatch 建的运行卡片，ToolCard 渲染「补丁生成中——实时预览」UnifiedDiff（复用 M1 组件，天然容忍不完整 hunk）；dispatch 带完整 args / result 时清除预览。**这是对 codex 体验感知的反超点：模型写补丁时 GUI 逐行滚出 diff。**
 
+**3-10 审批桥接完成（第七批次）**：boot 层 SubagentApprover（全局桥，线程安全读写锁）替换 headlessGate 的 nil Approver——无桥时保持 headless 语义（普通工具放行、外险拒绝）；桌面 EnableInteractiveApproval 后同步 SetSubagentApprover(Controller.GateApprover())，Ask 级写操作在子代理内弹出带 [sub-agent] 前缀的审批卡。以 boot 层全局桥+Controller 导出 GateApprover 破解 boot↔control import 环。CLI/TUI/serve 保持 headless 不变。
+
 **批次收尾（同日）**：全部改动已按 4 个 commit 落在 `feat/mindmap-read-loop`（chore 遗留收口 / feat(core) M0+M3 后端 / feat(desktop) M0-M3 前端 / docs(spec)），`sign.exe`/`ndvshot.exe`/`dist-crash/` 三个产物刻意未入库（待 gitignore）。下一批建议顺序：3-3（流式补丁预览，先查 provider 层是否暴露 tool-call 参数 delta）→ 3-7①（按上方勘察实施）→ 3-11（中间件化）。
