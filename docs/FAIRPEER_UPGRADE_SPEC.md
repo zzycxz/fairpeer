@@ -519,4 +519,6 @@ Go（root+desktop）构建全绿；`internal/tool`(含 builtin)、`internal/evid
 
 **4-5 会话全文搜索 + 3-7② elicitation 实施完成（第四批次）**：4-5——agent.SearchSessions 线性扫 transcripts（大小写不敏感、50 会话/2 摘录上限、rune 边界截窗），hit 携带路由元数据（title/topicId/scope/workspaceRoot），历史面板搜索框 250ms 防抖接入正文匹配的会话分区（元数据过滤命中的去重），点击按真实 SessionMeta 路由打开；含单测。3-7②——stdio transport 识别服务器 elicitation/create 请求，经 callProgressive 注册的桥接器交给 agent ctx 的 Asker（桌面端即 AskCard），决策回写 wire（allow / -32002 declined）；修复决策回写抢 callMu 与 call() 的死锁（改为无锁单行写）；端到端测试覆盖问-答往返与进度并存。plugin 包全绿。
 
+**4-6 prompt cache 主动化完成（第四批次）**：复核发现 Anthropic cache_control 断点（system/tools 双标记 + 消息前缀增量）已随上会话遗留收口入库——4-6 剩余为 OpenAI 侧：新增 Request.CacheKey（controller 从会话路径派生 FNV-64 哈希，避免上传用户路径明文，跨重启保持分片亲和）→ openai chatRequest.prompt_cache_key（64 字符 rune 截断）；空值省略字段保持旧行为。**有意不做并记录**：Anthropic 1h 长缓存（写入计费 2×，需计价决策后配置化）；codex 式启动预热 warmup（每个会话起点多花一次真实 API 请求，应做 opt-in 配置而非默认）——收益可由既有 cache_shape 诊断在真实负载下量化后再决定。
+
 **批次收尾（同日）**：全部改动已按 4 个 commit 落在 `feat/mindmap-read-loop`（chore 遗留收口 / feat(core) M0+M3 后端 / feat(desktop) M0-M3 前端 / docs(spec)），`sign.exe`/`ndvshot.exe`/`dist-crash/` 三个产物刻意未入库（待 gitignore）。下一批建议顺序：3-3（流式补丁预览，先查 provider 层是否暴露 tool-call 参数 delta）→ 3-7①（按上方勘察实施）→ 3-11（中间件化）。
