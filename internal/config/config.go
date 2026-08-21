@@ -1658,6 +1658,16 @@ func BuiltinLocalProviders() []ProviderEntry {
 			NoProxy:       true,
 		},
 		{
+			Name:    "lmstudio",
+			Kind:    "openai",
+			BaseURL: "http://127.0.0.1:1234/v1",
+			// LM Studio serves whatever is loaded; discovery replaces this.
+			Models:        []string{"local-model"},
+			Default:       "local-model",
+			ContextWindow: 8192,
+			NoProxy:       true,
+		},
+		{
 			Name:    "llamacpp",
 			Kind:    "openai",
 			BaseURL: "http://127.0.0.1:8080/v1",
