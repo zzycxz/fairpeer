@@ -319,6 +319,17 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	if req.CacheKey != "" {
 		out.PromptCacheKey = truncateRunes(req.CacheKey, 64)
 	}
+	// Constrained JSON output (upgrade spec 4-7) when the caller asked for it.
+	if len(req.ResponseSchema) > 0 {
+		name := req.SchemaName
+		if name == "" {
+			name = "result"
+		}
+		out.ResponseFormat = &chatResponseFormat{
+			Type:       "json_schema",
+			JSONSchema: chatJSONSchemaFmt{Name: name, Schema: req.ResponseSchema},
+		}
+	}
 	switch {
 	case c.minimax:
 		// M3 uses a single `thinking.type` field with two valid values:
@@ -556,6 +567,20 @@ type chatRequest struct {
 	// PromptCacheKey routes same-conversation requests to one cache shard
 	// (OpenAI prefix caching). Clamped to the API's 64-char limit upstream.
 	PromptCacheKey  string `json:"prompt_cache_key,omitempty"`
+	// ResponseFormat constrains output to the given JSON schema (upgrade spec
+	// 4-7). Only set when the caller passed one.
+	ResponseFormat  *chatResponseFormat `json:"response_format,omitempty"`
+}
+
+type chatResponseFormat struct {
+	Type       string           `json:"type"` // "json_schema"
+	JSONSchema chatJSONSchemaFmt `json:"json_schema"`
+}
+
+type chatJSONSchemaFmt struct {
+	Name   string          `json:"name"`
+	Schema json.RawMessage `json:"schema"`
+	Strict bool            `json:"strict"`
 }
 
 type thinkingMode struct {

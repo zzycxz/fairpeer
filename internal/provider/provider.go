@@ -293,6 +293,15 @@ type Request struct {
 	// shard, so a session's turns keep hitting each other's prefix cache even
 	// across process restarts. Empty = omit the field (provider default).
 	CacheKey string
+	// ResponseSchema (upgrade spec 4-7) requests constrained JSON output from
+	// providers that support it (OpenAI response_format/json_schema). Callers
+	// must tolerate a provider ignoring or rejecting it — keep a free-text
+	// fallback path. Providers without structured-output support simply never
+	// read the field.
+	ResponseSchema json.RawMessage
+	// SchemaName labels the schema in the wire format (required by OpenAI's
+	// json_schema response format; defaults to "result").
+	SchemaName string
 }
 
 // interruptedToolResult stands in for a tool result that never landed — an
