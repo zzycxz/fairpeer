@@ -45,6 +45,11 @@ type stdioTransport struct {
 	// sink by the progressToken that call injected into its params (upgrade
 	// spec 3-7①). Other server notifications are still dropped.
 	progress map[string]func(string)
+	// elicit holds the in-flight call's elicitation handler (upgrade spec
+	// 3-7②): when the server sends an elicitation/create REQUEST mid-call,
+	// readLoop asks it and writes the decision back on the wire. At most one
+	// call runs per transport at a time (callMu), so one slot suffices.
+	elicit func(id json.RawMessage, params json.RawMessage)
 	readErr  error // set once the reader goroutine exits; further calls fail fast
 
 	waitOnce sync.Once
@@ -433,9 +438,19 @@ func (t *stdioTransport) readLoop() {
 			continue
 		}
 		var probe struct {
-			Method string `json:"method"`
+			Method string          `json:"method"`
+			ID     json.RawMessage `json:"id"`
 		}
 		_ = json.Unmarshal(line, &probe)
+		if probe.Method == "elicitation/create" && len(probe.ID) > 0 {
+			t.mu.Lock()
+			fn := t.elicit
+			t.mu.Unlock()
+			if fn != nil {
+				fn(probe.ID, line) // handler writes the decision back itself
+			}
+			continue
+		}
 		if probe.Method != "" {
 			if probe.Method == "notifications/progress" {
 				var n struct {
@@ -481,6 +496,44 @@ func (t *stdioTransport) registerProgress(token string, fn func(string)) {
 	}
 	t.progress[token] = fn
 	t.mu.Unlock()
+}
+
+// setElicitation installs (fn non-nil) or removes the elicitation handler
+// for the duration of one call.
+func (t *stdioTransport) setElicitation(fn func(id json.RawMessage, params json.RawMessage)) {
+	t.mu.Lock()
+	t.elicit = fn
+	t.mu.Unlock()
+}
+
+// writeElicitationDecision answers a server elicitation/create request on the
+// wire. allow=true → result.behavior "allow"; false → the conventional
+// -32002 "declined" error the MCP spec expects for a user rejection.
+func (t *stdioTransport) writeElicitationDecision(id json.RawMessage, allow bool, message string) {
+	type wire struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Result  *struct {
+			Behavior string `json:"behavior"`
+			Message  string `json:"message,omitempty"`
+		} `json:"result,omitempty"`
+		Error *rpcError `json:"error,omitempty"`
+	}
+	w := wire{JSONRPC: "2.0", ID: id}
+	if allow {
+		r := &struct {
+			Behavior string `json:"behavior"`
+			Message  string `json:"message,omitempty"`
+		}{Behavior: "allow", Message: message}
+		w.Result = r
+	} else {
+		w.Error = &rpcError{Code: -32002, Message: "user declined elicitation"}
+	}
+	// No callMu here: the in-flight call() holds it for its whole round
+	// trip, and readLoop invokes this handler synchronously mid-call —
+	// taking the lock would deadlock the transport. The decision is one
+	// single-line Write; the OS serializes concurrent pipe writes.
+	_ = t.write(w)
 }
 
 func (t *stdioTransport) unregisterProgress(token string) {

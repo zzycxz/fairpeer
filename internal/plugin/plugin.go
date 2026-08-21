@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/agent"
 	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
@@ -90,6 +91,15 @@ type transport interface {
 	call(ctx context.Context, method string, params any) (json.RawMessage, error)
 	notify(ctx context.Context, method string, params any) error
 	close()
+}
+
+// elicitationTransport is an optional transport capability (upgrade spec
+// 3-7②): the in-flight call installs a handler; server elicitation/create
+// requests are surfaced to the user (via the agent's Asker) and the decision
+// is answered on the wire.
+type elicitationTransport interface {
+	setElicitation(fn func(id json.RawMessage, params json.RawMessage))
+	writeElicitationDecision(id json.RawMessage, allow bool, message string)
 }
 
 // progressRouter is an optional transport capability (upgrade spec 3-7①):
@@ -880,7 +890,49 @@ func (c *Client) callProgressive(ctx context.Context, method string, params map[
 	params["_meta"] = meta
 	pr.registerProgress(token, sink)
 	defer pr.unregisterProgress(token)
+	// Elicitation (3-7②): surface the server's questions through the agent's
+	// Ask UI and answer on the wire. Registered only when both the transport
+	// supports it and the ctx carries an interactive asker — headless calls
+	// keep the old drop behaviour.
+	if et, ok := c.t.(elicitationTransport); ok {
+		if _, _, asker, hasAsker := agent.CallContext(ctx); hasAsker && asker != nil {
+			et.setElicitation(func(id json.RawMessage, raw json.RawMessage) {
+				allow, msg := answerElicitation(ctx, asker, raw)
+				et.writeElicitationDecision(id, allow, msg)
+			})
+			defer et.setElicitation(nil)
+		}
+	}
 	return c.call(ctx, method, params)
+}
+
+// answerElicitation turns an MCP elicitation/create request into one Ask
+// question and back into the allow/deny the protocol expects.
+func answerElicitation(ctx context.Context, asker agent.Asker, raw json.RawMessage) (bool, string) {
+	var req struct {
+		Params struct {
+			Message string `json:"message"`
+		} `json:"params"`
+	}
+	_ = json.Unmarshal(raw, &req)
+	q := event.AskQuestion{
+		ID:     "mcp-elicitation",
+		Header: "MCP Server",
+		Prompt: req.Params.Message,
+		Options: []event.AskOption{
+			{Label: "允许", Description: "把回复发回服务器"},
+			{Label: "拒绝"},
+		},
+	}
+	answers, err := asker.Ask(ctx, []event.AskQuestion{q})
+	if err != nil || len(answers) == 0 {
+		return false, ""
+	}
+	sel := answers[0].Selected
+	if len(sel) == 0 {
+		return false, ""
+	}
+	return sel[0] == "允许", ""
 }
 
 func (c *Client) call(ctx context.Context, method string, params any) (json.RawMessage, error) {

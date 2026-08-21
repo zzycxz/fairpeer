@@ -38,7 +38,28 @@ func (f *fakeProgressServer) serve() {
 		if json.Unmarshal(line, &req) != nil {
 			continue
 		}
-		// Progress notification first (token from the request), then result.
+		// 3-7②: elicitation/create REQUEST first — the transport must surface
+		// it to the registered handler and write our decision back here.
+		elicit, _ := json.Marshal(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      9001,
+			"method":  "elicitation/create",
+			"params":  map[string]any{"message": "allow file access?"},
+		})
+		f.w.Write(append(elicit, '\n'))
+		decisionLine, derr := f.r.ReadBytes('\n')
+		behavior := "missing"
+		if derr == nil {
+			var d struct {
+				Result struct {
+					Behavior string `json:"behavior"`
+				} `json:"result"`
+			}
+			if json.Unmarshal(decisionLine, &d) == nil && d.Result.Behavior != "" {
+				behavior = d.Result.Behavior
+			}
+		}
+		// Progress notification next (token from the request), then result.
 		notif, _ := json.Marshal(map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "notifications/progress",
@@ -48,7 +69,7 @@ func (f *fakeProgressServer) serve() {
 		resp, _ := json.Marshal(map[string]any{
 			"jsonrpc": "2.0",
 			"id":      req.ID,
-			"result":  map[string]any{"content": []any{map[string]any{"type": "text", "text": "done"}}},
+			"result":  map[string]any{"content": []any{map[string]any{"type": "text", "text": "done elicit=" + behavior}}},
 		})
 		f.w.Write(append(resp, '\n'))
 	}
@@ -82,6 +103,14 @@ func TestStdioProgressRoutesByToken(t *testing.T) {
 	defer bw.Close()
 	defer br.Close()
 
+	tr.setElicitation(func(id json.RawMessage, _ json.RawMessage) {
+		if string(id) != "9001" {
+			tr.writeElicitationDecision(id, false, "")
+			return
+		}
+		tr.writeElicitationDecision(id, true, "ok")
+	})
+
 	var mu sync.Mutex
 	var chunks []string
 	ctx := tool.WithProgress(context.Background(), func(chunk string) {
@@ -98,7 +127,7 @@ func TestStdioProgressRoutesByToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("callProgressive: %v", err)
 	}
-	if !strings.Contains(string(res), "done") {
+	if !strings.Contains(string(res), "done elicit=allow") {
 		t.Fatalf("unexpected result: %s", res)
 	}
 	// The notification is written before the response; by the time the call
