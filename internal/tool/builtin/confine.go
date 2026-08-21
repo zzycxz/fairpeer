@@ -59,6 +59,7 @@ func ConfineWriters(roots []string) []tool.Tool {
 		// are confined here too — without this they'd only do filepath.Abs and could
 		// write anywhere (e.g. ~/.ssh/authorized_keys), bypassing [sandbox] workspace_root.
 		docWrite{roots: rs},
+		imageGenerate{roots: rs},
 		csvWrite{roots: rs},
 		xlsxWrite{roots: rs},
 		docConvert{roots: rs},
