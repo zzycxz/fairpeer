@@ -521,4 +521,6 @@ Go（root+desktop）构建全绿；`internal/tool`(含 builtin)、`internal/evid
 
 **4-6 prompt cache 主动化完成（第四批次）**：复核发现 Anthropic cache_control 断点（system/tools 双标记 + 消息前缀增量）已随上会话遗留收口入库——4-6 剩余为 OpenAI 侧：新增 Request.CacheKey（controller 从会话路径派生 FNV-64 哈希，避免上传用户路径明文，跨重启保持分片亲和）→ openai chatRequest.prompt_cache_key（64 字符 rune 截断）；空值省略字段保持旧行为。**有意不做并记录**：Anthropic 1h 长缓存（写入计费 2×，需计价决策后配置化）；codex 式启动预热 warmup（每个会话起点多花一次真实 API 请求，应做 opt-in 配置而非默认）——收益可由既有 cache_shape 诊断在真实负载下量化后再决定。
 
+**4-7 结构化输出完成（第五批次）**：provider.Request 增 ResponseSchema/SchemaName → openai response_format(json_schema, strict=false)；首个消费者=auto_plan 分类器（schema 约束优先，供应商拒绝 response_format 时按错误特征自动回退自由文本路径——18 家兼容厂商零 400 风险，花括号提取保留为兜底）；wire 测试同时断言 4-6 的 prompt_cache_key 64 截断与未设置时两字段均不泄漏。后续消费者（Loop verify、RAG extractor 从 json_object 升级）按同模式接入。
+
 **批次收尾（同日）**：全部改动已按 4 个 commit 落在 `feat/mindmap-read-loop`（chore 遗留收口 / feat(core) M0+M3 后端 / feat(desktop) M0-M3 前端 / docs(spec)），`sign.exe`/`ndvshot.exe`/`dist-crash/` 三个产物刻意未入库（待 gitignore）。下一批建议顺序：3-3（流式补丁预览，先查 provider 层是否暴露 tool-call 参数 delta）→ 3-7①（按上方勘察实施）→ 3-11（中间件化）。
