@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log/slog"
 	"os"
@@ -2609,6 +2610,22 @@ func (c *Controller) SetSessionPath(p string) {
 	c.mu.Unlock()
 	c.rebindPresent(p)
 	c.rebindCheckpoints(p)
+	// Cache-affinity key (upgrade spec 4-6): derived from the session path so
+	// the same conversation keeps its provider cache shard across restarts.
+	if c.executor != nil {
+		c.executor.SetCacheKey(sessionCacheKey(p))
+	}
+}
+
+// sessionCacheKey hashes a session path into a short stable cache-affinity key
+// (paths contain user names we'd rather not ship to the provider verbatim).
+func sessionCacheKey(p string) string {
+	if p == "" {
+		return ""
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(p))
+	return fmt.Sprintf("%x", h.Sum64())
 }
 
 // SessionDir reports the directory new session files land in ("" disables

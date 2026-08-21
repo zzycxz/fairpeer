@@ -221,6 +221,10 @@ type Agent struct {
 	// reach it. nil leaves those tools to degrade gracefully.
 	jobs *jobs.Manager
 
+	// cacheKey routes provider prefix-cache affinity for this conversation
+	// (OpenAI prompt_cache_key). Set from the session path by the controller.
+	cacheKey string
+
 	// steerQueue holds mid-turn user messages queued while the agent is
 	// running. Each is consumed once per loop iteration, persisted to the
 	// session for history replay, and sent to the model as guidance (not a
@@ -465,6 +469,10 @@ const midTurnSteerPrefix = "[Mid-turn steer queued by the user. Do not treat thi
 func midTurnSteerMessage(text string) string {
 	return midTurnSteerPrefix + "\n" + text
 }
+
+// SetCacheKey installs the provider cache-affinity key (hash of the session
+// path); empty disables explicit routing.
+func (a *Agent) SetCacheKey(key string) { a.cacheKey = key }
 
 // Steer queues a message for mid-turn injection.
 func (a *Agent) Steer(text string) {
@@ -1282,6 +1290,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 		Messages:    msgs,
 		Tools:       a.tools.Schemas(),
 		Temperature: a.temperature,
+		CacheKey:    a.cacheKey,
 	})
 	if err != nil {
 		return "", "", "", nil, nil, false, false, err

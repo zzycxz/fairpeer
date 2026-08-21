@@ -314,6 +314,11 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		Temperature:   req.Temperature,
 		MaxTokens:     req.MaxTokens,
 	}
+	// Cache-affinity routing (upgrade spec 4-6): same conversation → same
+	// shard. The API caps the key at 64 chars; truncate by runes to stay valid.
+	if req.CacheKey != "" {
+		out.PromptCacheKey = truncateRunes(req.CacheKey, 64)
+	}
 	switch {
 	case c.minimax:
 		// M3 uses a single `thinking.type` field with two valid values:
@@ -548,6 +553,9 @@ type chatRequest struct {
 	MaxTokens       int            `json:"max_tokens,omitempty"`
 	ReasoningEffort string         `json:"reasoning_effort,omitempty"` // OpenAI standard
 	Thinking        *thinkingMode  `json:"thinking,omitempty"`
+	// PromptCacheKey routes same-conversation requests to one cache shard
+	// (OpenAI prefix caching). Clamped to the API's 64-char limit upstream.
+	PromptCacheKey  string `json:"prompt_cache_key,omitempty"`
 }
 
 type thinkingMode struct {
@@ -706,3 +714,15 @@ func hasAudioParts(parts []provider.ContentPart) bool {
 // imageUnderstandPrompt and the in-conversation legacy image-degradation path were
 // removed (WP-2.6). Public-network users now use each vendor's native vision
 // capability instead of the a vision-model fallback.
+
+// truncateRunes cuts s to at most n runes (no mid-rune split).
+func truncateRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}

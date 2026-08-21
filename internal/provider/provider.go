@@ -288,6 +288,11 @@ type Request struct {
 	Tools       []ToolSchema
 	Temperature float64
 	MaxTokens   int
+	// CacheKey identifies the conversation for providers with explicit
+	// cache-affinity routing (OpenAI prompt_cache_key): same key → same cache
+	// shard, so a session's turns keep hitting each other's prefix cache even
+	// across process restarts. Empty = omit the field (provider default).
+	CacheKey string
 }
 
 // interruptedToolResult stands in for a tool result that never landed — an
