@@ -29,6 +29,9 @@ func NewRateLimitedProvider(inner Provider, budget *RequestBudget, key string, p
 	if budget == nil || budget.rpm <= 0 {
 		return inner // limiting disabled — pass through unwrapped
 	}
+	if priority {
+		budget.NoteMainKey(key) // UI indicator points at the main window
+	}
 	return &RateLimitedProvider{inner: inner, budget: budget, key: key, priority: priority}
 }
 

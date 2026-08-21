@@ -34,8 +34,23 @@ type Session struct {
 
 	encode func([]byte) string
 
+	// onLive, when set, receives incremental CLEANED+REDACTED output text as
+	// it arrives during Run (the 操作实况 tap). Line-aligned: a chunk is
+	// emitted only once its trailing newline has arrived, so redaction (which
+	// is line-scoped) never misses a secret split across ticks. The trailing
+	// prompt line is flushed when the command completes.
+	onLive func(string)
+
 	mu     sync.Mutex
 	closed bool
+}
+
+// SetOutputObserver installs the live output tap (nil removes it). Callers
+// own the callback's thread-safety; Manager's observer coalesces off-thread.
+func (s *Session) SetOutputObserver(fn func(string)) {
+	s.mu.Lock()
+	s.onLive = fn
+	s.mu.Unlock()
 }
 
 // Session timing defaults.
@@ -155,6 +170,35 @@ func (s *Session) Run(ctx context.Context, cmd string) (Result, error) {
 	}
 
 	s.out.reset()
+	// Live tap bookkeeping: prevText is the decoded output already accounted
+	// for; each tick emits the newly-arrived COMPLETE lines (sanitized), and
+	// the trailing partial (usually the prompt) flushes on completion.
+	prevText := ""
+	emitLive := func(all bool) {
+		if s.onLive == nil {
+			return
+		}
+		text := s.encode(s.out.snapshot())
+		if len(text) < len(prevText) || !strings.HasPrefix(text, prevText) {
+			// Buffer reset or rewrite (should not happen inside one Run) —
+			// resync silently rather than replay output.
+			prevText = text
+			return
+		}
+		delta := text[len(prevText):]
+		prevText = text
+		cut := len(delta)
+		if !all {
+			if i := strings.LastIndexByte(delta, '\n'); i >= 0 {
+				cut = i + 1
+			} else {
+				return // no complete new line yet
+			}
+		}
+		if chunk := sanitizeLiveChunk(delta[:cut]); chunk != "" {
+			s.onLive(chunk)
+		}
+	}
 	if _, err := io.WriteString(s.stdin, cmd+"\n"); err != nil {
 		return Result{}, fmt.Errorf("netdev: write command: %w", err)
 	}
@@ -171,8 +215,10 @@ func (s *Session) Run(ctx context.Context, cmd string) (Result, error) {
 				return Result{}, fmt.Errorf("netdev: advance pager: %w", err)
 			}
 		} else if s.completed(cmd, text) {
+			emitLive(true) // flush the trailing prompt line
 			return s.finish(cmd, text), nil
 		}
+		emitLive(false)
 		if time.Now().After(deadline) {
 			return Result{}, fmt.Errorf("netdev: timeout waiting for prompt after %q (partial output: %.200s)", cmd, text)
 		}

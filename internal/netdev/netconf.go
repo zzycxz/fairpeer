@@ -47,8 +47,23 @@ func (m *Manager) NetconfRPC(ctx context.Context, deviceName, inner string) (str
 		strings.Contains(trimmed, "kill-session") || strings.Contains(trimmed, "commit") ||
 		strings.Contains(trimmed, "lock") {
 		_ = AppendAudit(Audit{Device: deviceName, Command: "netconf " + trimmed, Class: "write", Status: AuditRefused})
+		m.liveCmdRefused(deviceName, "netconf "+trimmed, "write", "netconf is read-only: only <get>/<get-config> are allowed")
 		return "", errors.New("netdev netconf is read-only: only <get> and <get-config> are allowed; changes go through the proposal pipeline")
 	}
+
+	// Command lifecycle for the live panel: netconf is one-shot (no mid-flight
+	// output stream), so start/end brackets the whole RPC.
+	start := m.liveCmdStart(deviceName, "netconf "+trimmed, "read")
+	status := "failure"
+	defer func() { m.liveCmdEnd(deviceName, "netconf "+trimmed, "read", status, start, 0, "") }()
+
+	// VTY guard: this RPC opens a SECOND session on the device while the CLI
+	// session may hold one — enforce max_sessions_per_device before the
+	// subsystem request (NETDEV_SPEC §6.5/B-6).
+	if err := m.acquireNetconfVTY(deviceName); err != nil {
+		return "", err
+	}
+	defer m.releaseNetconfVTY(deviceName)
 
 	d, ok := m.cfg.NetDevDeviceByName(deviceName)
 	if !ok {
@@ -110,15 +125,46 @@ func (m *Manager) NetconfRPC(ctx context.Context, deviceName, inner string) (str
 		return "", fmt.Errorf("netconf: rpc: %w", err)
 	}
 	reply := string(doc)
-	status := AuditOK
 	if isRPCError(reply) {
 		status = AuditDeviceError
+	} else {
+		status = AuditOK
 	}
 	_ = AppendAudit(Audit{Device: deviceName, Command: "netconf " + trimmed, Class: "read", Status: status, OutputBytes: len(reply)})
 	if isRPCError(reply) {
 		return reply, fmt.Errorf("netdev netconf: device returned rpc-error (see reply)")
 	}
 	return reply, nil
+}
+
+// acquireNetconfVTY claims one in-flight NETCONF subsystem session against the
+// device's max_sessions_per_device cap (the CLI session and concurrent RPCs
+// share the same VTY budget). Refused pre-dial with audit + a live refusal.
+func (m *Manager) acquireNetconfVTY(deviceName string) error {
+	m.mu.Lock()
+	use := m.vtySnapshotLocked(deviceName)
+	cap := m.vtyCap()
+	if use >= cap {
+		m.mu.Unlock()
+		reason := fmt.Sprintf("device %q is at its session cap (%d/%d, max_sessions_per_device) — the CLI session and concurrent NETCONF RPCs share the device's VTY lines", deviceName, use, cap)
+		_ = AppendAudit(Audit{Device: deviceName, Command: "(netconf)", Class: "guardrail", Status: AuditRefused})
+		m.liveCmdRefused(deviceName, "(netconf)", "guardrail", reason)
+		return errors.New(reason)
+	}
+	m.netconfInflight[deviceName]++
+	m.mu.Unlock()
+	return nil
+}
+
+// releaseNetconfVTY drops one in-flight NETCONF session claim.
+func (m *Manager) releaseNetconfVTY(deviceName string) {
+	m.mu.Lock()
+	if n := m.netconfInflight[deviceName]; n > 1 {
+		m.netconfInflight[deviceName] = n - 1
+	} else {
+		delete(m.netconfInflight, deviceName)
+	}
+	m.mu.Unlock()
 }
 
 // sshFor returns the device's connected ssh.Client, dialing if needed.

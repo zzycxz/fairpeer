@@ -83,7 +83,7 @@ func TestPreToolUseHookBlocks(t *testing.T) {
 	h := &stubHooks{blockPre: map[string]bool{"bash": true}}
 	a := New(nil, reg, NewSession(""), Options{Hooks: h}, event.Discard)
 
-	blocked := a.executeOne(context.Background(), provider.ToolCall{Name: "bash", Arguments: `{"command":"x"}`})
+	blocked := a.executeOne(context.Background(), provider.ToolCall{Name: "bash", Arguments: `{"command":"x"}`}, nil)
 	if !blocked.blocked || !strings.HasPrefix(blocked.output, "blocked:") {
 		t.Errorf("PreToolUse block should yield a blocked result, got %+v", blocked)
 	}
@@ -91,7 +91,7 @@ func TestPreToolUseHookBlocks(t *testing.T) {
 		t.Errorf("block reason should be surfaced to the model, got %q", blocked.output)
 	}
 
-	ok := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/a"}`})
+	ok := a.executeOne(context.Background(), provider.ToolCall{Name: "read_file", Arguments: `{"path":"/a"}`}, nil)
 	if ok.blocked || !strings.Contains(ok.output, "done") {
 		t.Errorf("unblocked call should run, got %+v", ok)
 	}

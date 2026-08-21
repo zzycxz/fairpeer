@@ -71,6 +71,7 @@ func (m *Manager) SnmpQuery(ctx context.Context, deviceName, oid, mode string) (
 		return "", fmt.Errorf("snmp: malformed OID")
 	}
 	if r, allow := m.guardrailCheck(deviceName, label); !allow {
+		m.liveCmdRefused(deviceName, label, "guardrail", r.Refusal)
 		b, _ := json.Marshal(r.Refusal)
 		return string(b), nil
 	}
@@ -83,8 +84,13 @@ func (m *Manager) SnmpQuery(ctx context.Context, deviceName, oid, mode string) (
 	}
 	if !snmpOIDAllowed(oid) {
 		_ = AppendAudit(Audit{Device: deviceName, Command: label, Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
+		m.liveCmdRefused(deviceName, label, "guardrail", fmt.Sprintf("OID %q is outside the read-only MIB-2 allowlist", oid))
 		return "", fmt.Errorf("snmp: OID %q is outside the read-only MIB-2 allowlist (system/interfaces/ip/icmp/tcp/udp/host-resources/ifMIB)", oid)
 	}
+	// Live lifecycle: SNMP is a UDP one-shot — start/end only, no stream.
+	start := m.liveCmdStart(deviceName, label, "read")
+	status := "failure"
+	defer func() { m.liveCmdEnd(deviceName, label, "read", status, start, 0, "") }()
 	community := "public"
 	if device.PasswordEnv != "" {
 		if v, ok, _ := secretGetter(SecretKindPassword, device.PasswordEnv); ok && v != "" {
@@ -144,6 +150,7 @@ func (m *Manager) SnmpQuery(ctx context.Context, deviceName, oid, mode string) (
 	out := strings.Join(lines, "\n")
 	out2, n := RedactCounted(out)
 	m.audit(device, label, driver.Read, AuditOK, len(out2), nil)
+	status = AuditOK
 	if n > 0 {
 		out2 += fmt.Sprintf("\n\n[安全提醒] 输出中 %d 处敏感字段已脱敏后才进入上下文与审计。", n)
 	}

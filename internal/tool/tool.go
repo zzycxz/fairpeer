@@ -42,11 +42,21 @@ type Previewer interface {
 	Preview(args json.RawMessage) (diff.Change, error)
 }
 
+// MultiPreviewer is the multi-file form of Previewer, for writer tools whose
+// single call touches several files (apply_patch). It returns one Change per
+// file so the checkpoint hook can snapshot each and an approval card can list
+// them individually; a move is expressed as a delete of the source plus a
+// create of the destination. Tools implementing only Previewer are wrapped
+// into a one-element slice by PreviewChanges.
+type MultiPreviewer interface {
+	PreviewFiles(args json.RawMessage) ([]diff.Change, error)
+}
+
 // ReadOnlyCallChecker is an optional capability a Tool may implement to give a
 // per-call read-only vote, overriding its static ReadOnly()=false. This exists
 // for tools whose side effects depend on the arguments and can't be classified
 // statically — bash is the canonical case: "git log" is read-only, "rm" is not.
-// Under plan mode the agent consults this to let a specific read-only invocation
+// Under plan mode the agent consults it to let a specific read-only invocation
 // through without unconditionally admitting the tool. Tools that don't implement
 // it fall back to their static ReadOnly() value.
 type ReadOnlyCallChecker interface {
@@ -69,6 +79,36 @@ func PreviewChange(t Tool, args json.RawMessage) (diff.Change, bool) {
 		return diff.Change{}, false
 	}
 	return ch, true
+}
+
+// PreviewChanges returns the per-file changes a writer tool would make for
+// args, or ok=false under the same conditions as PreviewChange. MultiPreviewer
+// tools return their per-file list (binary entries dropped); plain Previewer
+// tools are wrapped into a one-element slice. One computation serves both the
+// dispatch event's diff preview and the checkpoint hook — the caller computes
+// once and passes the result through instead of re-previewing.
+func PreviewChanges(t Tool, args json.RawMessage) ([]diff.Change, bool) {
+	if t == nil || t.ReadOnly() {
+		return nil, false
+	}
+	if mp, ok := t.(MultiPreviewer); ok {
+		chs, err := mp.PreviewFiles(args)
+		if err != nil {
+			return nil, false
+		}
+		keep := make([]diff.Change, 0, len(chs))
+		for _, ch := range chs {
+			if !ch.Binary {
+				keep = append(keep, ch)
+			}
+		}
+		return keep, len(keep) > 0
+	}
+	ch, ok := PreviewChange(t, args)
+	if !ok {
+		return nil, false
+	}
+	return []diff.Change{ch}, true
 }
 
 // --- process-global built-in set (populated by builtin subpackage init) ---
@@ -129,7 +169,7 @@ func NewRegistry() *Registry {
 // resolves it, so subagents and explicit calls work) but is omitted from
 // Schemas() so the main-loop model never sees it in its tool list. Used when a
 // tool is meant to be driven only through a subagent skill (e.g. browser tools
-// via run_skill("computer-auto")) rather than advertised to the top-level model.
+	// via run_skill("desktop-auto")) rather than advertised to the top-level model.
 // Hiding a name that isn't registered is a no-op.
 func (r *Registry) Hide(name string) {
 	r.mu.Lock()

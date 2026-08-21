@@ -230,6 +230,14 @@ type Agent struct {
 	steerQueue    []string
 	steerConsumed bool
 
+	// followUpQueue holds prompts queued while running that should run as
+	// INDEPENDENT next turns once the current one finishes (upgrade spec 2-4)
+	// — the pi "followUp" semantics, in contrast to steer's "guide the current
+	// task". The controller drains it between turns: when a Run ends, the
+	// first queued prompt starts a fresh turn automatically.
+	followUpMu    sync.Mutex
+	followUpQueue []string
+
 	// pauseState drives graceful pause/resume. Pause closes pauseCh (non-nil =>
 	// a pause is requested); the run loop blocks on resumeCh at the top of each
 	// step until Resume closes it. Both are recreated per Run so a stale signal
@@ -373,6 +381,18 @@ func (a *Agent) SetMemoryQueue(q memory.Queue) { a.memQueue = q }
 // controller wires it to its per-session checkpoint store; nil disables capture.
 func (a *Agent) SetPreEditHook(fn func(diff.Change)) { a.onPreEdit = fn }
 
+// PreviewToolCall computes the per-file changes the named tool call would make,
+// for the approval card a frontend renders before the permission decision.
+// ok is false for read-only, unknown, or unpreviewable tools — callers render
+// the plain subject in that case. It never writes.
+func (a *Agent) PreviewToolCall(name string, args json.RawMessage) ([]diff.Change, bool) {
+	t, ok := a.tools.Get(name)
+	if !ok {
+		return nil, false
+	}
+	return tool.PreviewChanges(t, args)
+}
+
 // SetContextFilter installs a read-side transform applied to session messages
 // before they're sent to the model. It lets a caller (e.g. the experts engine)
 // keep a full-fidelity message in the transcript while showing the model a
@@ -459,6 +479,45 @@ func (a *Agent) SteerConsumed() bool {
 	a.steerMu.Lock()
 	defer a.steerMu.Unlock()
 	return a.steerConsumed
+}
+
+// FollowUp queues a prompt to run as an independent next turn once the current
+// Run finishes (contrast Steer, which guides the in-flight task). The
+// controller drains the queue between turns.
+func (a *Agent) FollowUp(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	a.followUpMu.Lock()
+	defer a.followUpMu.Unlock()
+	a.followUpQueue = append(a.followUpQueue, text)
+}
+
+// DrainFollowUp pops the oldest queued follow-up prompt, if any.
+func (a *Agent) DrainFollowUp() (string, bool) {
+	a.followUpMu.Lock()
+	defer a.followUpMu.Unlock()
+	if len(a.followUpQueue) == 0 {
+		return "", false
+	}
+	next := a.followUpQueue[0]
+	a.followUpQueue = a.followUpQueue[1:]
+	return next, true
+}
+
+// FollowUps peeks the queued follow-up prompts (for the UI's queue strip).
+func (a *Agent) FollowUps() []string {
+	a.followUpMu.Lock()
+	defer a.followUpMu.Unlock()
+	return append([]string(nil), a.followUpQueue...)
+}
+
+// Steers peeks the queued steer messages (for the UI's queue strip).
+func (a *Agent) Steers() []string {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	return append([]string(nil), a.steerQueue...)
 }
 
 func (a *Agent) consumeSteer() (string, bool) {
@@ -1184,7 +1243,8 @@ func streamRecoveryMessage(hasPartialText, hadPartialTool bool) string {
 // reasoning on the next turn.
 func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, []provider.ToolCall, *provider.Usage, bool, bool, error) {
 	ctx = provider.WithRetryNotify(ctx, func(info provider.RetryInfo) {
-		a.sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max})
+		a.sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max,
+			RetryAfterMs: info.Delay.Milliseconds()})
 	})
 	// Build the context: the stored session messages, optionally projected by
 	// a read-side filter (e.g. expert-collab messages reduced to their synthesis
@@ -1350,12 +1410,39 @@ func (a *Agent) systemPrompt() string {
 // after the batch in call order, so emission stays serial even when execution
 // parallelised.
 func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []string {
-	for _, c := range calls {
+	// Tool-progress status line (upgrade spec 2-2): the composer strip shows
+	// which tool is running and how far through the batch it is
+	// ("edit_file 2/5"). Phase items don't render in the transcript — the
+	// composer consumes the latest one — so one event per call is cheap.
+	for i, c := range calls {
+		a.sink.Emit(event.Event{Kind: event.Phase, Text: fmt.Sprintf("%s %d/%d", c.Name, i+1, len(calls))})
+	}
+	// Previews are computed once here — before anything in the batch runs — and
+	// handed to executeOne, which feeds them to the checkpoint hook. Computing
+	// at dispatch time is also the freshest correct restore baseline: the
+	// checkpoint store dedupes per path, so the first writer of a path in the
+	// batch snapshots its pre-batch content, which is exactly what a rewind
+	// needs. (The old flow previewed twice — once for the event, once for the
+	// snapshot — reading and diffing every file twice per writer call.)
+	previews := make([][]diff.Change, len(calls))
+	for i, c := range calls {
 		t, ok := a.tools.Get(c.Name)
 		ev := event.Tool{ID: c.ID, Name: c.Name, Args: c.Arguments, ReadOnly: ok && t.ReadOnly()}
 		if ok {
-			if ch, ok := tool.PreviewChange(t, json.RawMessage(c.Arguments)); ok {
-				ev.FileDiff = event.FileDiff{Diff: ch.Diff, Added: ch.Added, Removed: ch.Removed}
+			if chs, pok := tool.PreviewChanges(t, json.RawMessage(c.Arguments)); pok {
+				previews[i] = chs
+				if len(chs) == 1 {
+					ev.FileDiff = event.FileDiff{Diff: chs[0].Diff, Added: chs[0].Added, Removed: chs[0].Removed}
+				} else {
+					var added, removed int
+					parts := make([]string, 0, len(chs))
+					for _, ch := range chs {
+						parts = append(parts, strings.TrimRight(ch.Diff, "\n"))
+						added += ch.Added
+						removed += ch.Removed
+					}
+					ev.FileDiff = event.FileDiff{Diff: strings.Join(parts, "\n"), Added: added, Removed: removed}
+				}
 			}
 			if pr, ok := t.(interface {
 				ResolveProfile(json.RawMessage) *event.Profile
@@ -1371,12 +1458,12 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 	durations := make([]int64, len(calls))
 	run := func(i int) {
 		start := time.Now()
-		outcomes[i] = a.executeOne(ctx, calls[i])
+		outcomes[i] = a.executeOne(ctx, calls[i], previews[i])
 		durations[i] = time.Since(start).Milliseconds()
 		results[i] = outcomes[i].output
 	}
 
-	for _, batch := range partitionToolCalls(a.tools, calls) {
+	for _, batch := range partitionToolCalls(a.tools, calls, previews) {
 		if batch.parallel && batch.end-batch.start > 1 {
 			runParallel(batch.start, batch.end, run)
 			continue
@@ -1420,9 +1507,10 @@ type toolCallBatch struct {
 // complete_step and todo_write are read-only but never join a parallel run: they
 // read the turn's evidence ledger, so every prior call's receipt must be recorded
 // before they run.
-func partitionToolCalls(r *tool.Registry, calls []provider.ToolCall) []toolCallBatch {
+func partitionToolCalls(r *tool.Registry, calls []provider.ToolCall, previews [][]diff.Change) []toolCallBatch {
 	var batches []toolCallBatch
-	for i := 0; i < len(calls); {
+	i := 0
+	for i < len(calls) {
 		if parallelisable(r, calls[i].Name) {
 			start := i
 			i++
@@ -1432,10 +1520,66 @@ func partitionToolCalls(r *tool.Registry, calls []provider.ToolCall) []toolCallB
 			batches = append(batches, toolCallBatch{start: start, end: i, parallel: true})
 			continue
 		}
+		// Writer run (upgrade spec 3-1): consecutive writer calls fan out
+		// when their previewed file sets are disjoint — same-path edits stay
+		// ordered, different-file edits stop queueing behind each other. A
+		// writer whose preview carries no paths (bash, plugin tools) can't
+		// prove disjointness and runs alone; complete_step/todo_write never
+		// join because they read the evidence ledger the others write.
+		previewAt := func(idx int) []diff.Change {
+			if idx < len(previews) {
+				return previews[idx]
+			}
+			return nil
+		}
+		if paths := writerPaths(previewAt(i)); len(paths) > 0 {
+			start := i
+			claimed := make(map[string]bool, len(paths))
+			for _, p := range paths {
+				claimed[p] = true
+			}
+			i++
+			for i < len(calls) && !parallelisable(r, calls[i].Name) &&
+				calls[i].Name != "complete_step" && calls[i].Name != "todo_write" {
+				next := writerPaths(previewAt(i))
+				if len(next) == 0 {
+					break
+				}
+				overlap := false
+				for _, p := range next {
+					if claimed[p] {
+						overlap = true
+						break
+					}
+				}
+				if overlap {
+					break
+				}
+				for _, p := range next {
+					claimed[p] = true
+				}
+				i++
+			}
+			batches = append(batches, toolCallBatch{start: start, end: i, parallel: i-start > 1})
+			continue
+		}
 		batches = append(batches, toolCallBatch{start: i, end: i + 1})
 		i++
 	}
 	return batches
+}
+
+// writerPaths returns the paths a writer call would touch, from its
+// precomputed preview; nil when there is no preview (unknown footprint).
+func writerPaths(preview []diff.Change) []string {
+	if len(preview) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(preview))
+	for _, ch := range preview {
+		paths = append(paths, ch.Path)
+	}
+	return paths
 }
 
 func parallelisable(r *tool.Registry, name string) bool {
@@ -1556,13 +1700,24 @@ type toolOutcome struct {
 
 // executeOne runs a single tool call. It is pure with respect to the event sink
 // — the caller emits ToolDispatch/ToolResult — so it is safe to invoke from
-// parallel goroutines.
-func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutcome {
+// parallel goroutines. preview carries the per-file changes computed by the
+// caller's dispatch loop (nil for read-only or unpreviewable calls); the
+// checkpoint hook consumes it instead of re-previewing, so each writer call
+// reads and diffs its files once per turn.
+func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall, preview []diff.Change) toolOutcome {
 	t, ok := a.tools.Get(call.Name)
 	if !ok {
 		return toolOutcome{
 			output: fmt.Sprintf("error: unknown tool %q", call.Name),
 			errMsg: fmt.Sprintf("unknown tool %q", call.Name),
+		}
+	}
+	// Central required-args check (upgrade spec 3-2): fails fast with one
+	// uniform message before any hook or gate observes the call.
+	if verr := tool.ValidateArgs(t, json.RawMessage(call.Arguments)); verr != nil {
+		return toolOutcome{
+			output: fmt.Sprintf("error: %s: %v", call.Name, verr),
+			errMsg: verr.Error(),
 		}
 	}
 	if out, blocked := a.repeatedSuccessBlock(call, t); blocked {
@@ -1627,14 +1782,13 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		}
 	}
 	// Checkpoint the file this writer is about to change, so the turn can be
-	// rewound. Fires after all gating (the edit is cleared to run) and only for
-	// tools that can describe their change; a Preview error means the edit will
-	// likely fail anyway, so we skip rather than snapshot a stale state.
+	// rewound. Fires after all gating (the edit is cleared to run) using the
+	// preview the dispatch loop already computed; a nil preview means the tool
+	// can't describe its change or the preview errored (the edit will likely
+	// fail anyway), so we skip rather than snapshot a stale state.
 	if a.onPreEdit != nil && !t.ReadOnly() {
-		if pv, ok := t.(tool.Previewer); ok {
-			if change, perr := pv.Preview(json.RawMessage(call.Arguments)); perr == nil {
-				a.onPreEdit(change)
-			}
+		for _, change := range preview {
+			a.onPreEdit(change)
 		}
 	}
 	cctx := withCallContext(ctx, call.ID, a.sink, a.asker)

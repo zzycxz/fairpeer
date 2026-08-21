@@ -18,6 +18,11 @@ type wireEvent struct {
 	Ask        *wireAsk        `json:"ask,omitempty"`
 	Compaction *wireCompaction `json:"compaction,omitempty"`
 	Err        string          `json:"err,omitempty"`
+	// Retrying: which attempt is about to be made, of how many, after what
+	// backoff (0 = immediate) — enough for a client to render a countdown.
+	RetryAttempt int   `json:"retryAttempt,omitempty"`
+	RetryMax     int   `json:"retryMax,omitempty"`
+	RetryAfterMs int64 `json:"retryAfterMs,omitempty"`
 }
 
 // wireCompaction is the JSON form of an event.Compaction. On a compaction_started
@@ -66,6 +71,16 @@ type wireTool struct {
 	ParentID    string           `json:"parentId,omitempty"`
 	Profile     *wireProfile     `json:"profile,omitempty"`
 	Attachments []wireAttachment `json:"attachments,omitempty"`
+	// FileDiff carries the previewed change on a writer tool's dispatch (kept
+	// in step with desktop/wire.go).
+	FileDiff *wireFileDiff `json:"fileDiff,omitempty"`
+}
+
+// wireFileDiff is the JSON form of event.FileDiff.
+type wireFileDiff struct {
+	Diff    string `json:"diff"`
+	Added   int    `json:"added"`
+	Removed int    `json:"removed"`
 }
 
 type wireAttachment struct {
@@ -109,6 +124,19 @@ type wireApproval struct {
 	ID      string `json:"id"`
 	Tool    string `json:"tool"`
 	Subject string `json:"subject"`
+	// Raw call args and previewed per-file diffs, so an approval card shows
+	// what the call would do (kept in step with desktop/wire.go).
+	Args    string           `json:"args,omitempty"`
+	Changes []wireFileChange `json:"changes,omitempty"`
+}
+
+// wireFileChange is one file within a previewed multi-file approval.
+type wireFileChange struct {
+	Path    string `json:"path"`
+	Kind    string `json:"kind"`
+	Added   int    `json:"added"`
+	Removed int    `json:"removed"`
+	Diff    string `json:"diff"`
 }
 
 // kindNames maps the event.Kind enum to stable wire strings.
@@ -129,6 +157,7 @@ var kindNames = map[event.Kind]string{
 	event.CompactionDone:    "compaction_done",
 	event.ToolProgress:      "tool_progress",
 	event.MCPSurfaceReady:   "mcp_surface_ready",
+	event.Retrying:          "retrying",
 	event.Steer:             "steer",
 }
 
@@ -172,6 +201,9 @@ func toWire(e event.Event) wireEvent {
 		if e.Tool.Profile != nil {
 			wt.Profile = &wireProfile{Model: e.Tool.Profile.Model, Effort: e.Tool.Profile.Effort}
 		}
+		if e.Tool.FileDiff.Diff != "" || e.Tool.FileDiff.Added != 0 || e.Tool.FileDiff.Removed != 0 {
+			wt.FileDiff = &wireFileDiff{Diff: e.Tool.FileDiff.Diff, Added: e.Tool.FileDiff.Added, Removed: e.Tool.FileDiff.Removed}
+		}
 		w.Tool = wt
 	case event.Usage:
 		if u := e.Usage; u != nil {
@@ -192,7 +224,14 @@ func toWire(e event.Event) wireEvent {
 			}
 		}
 	case event.ApprovalRequest:
-		w.Approval = &wireApproval{ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject}
+		wa := &wireApproval{ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject, Args: e.Approval.Args}
+		if len(e.Approval.Changes) > 0 {
+			wa.Changes = make([]wireFileChange, len(e.Approval.Changes))
+			for i, ch := range e.Approval.Changes {
+				wa.Changes[i] = wireFileChange{Path: ch.Path, Kind: ch.Kind, Added: ch.Added, Removed: ch.Removed, Diff: ch.Diff}
+			}
+		}
+		w.Approval = wa
 	case event.AskRequest:
 		w.Ask = toWireAsk(e.Ask)
 	case event.CompactionStarted, event.CompactionDone:
@@ -204,6 +243,10 @@ func toWire(e event.Event) wireEvent {
 		if e.Err != nil {
 			w.Err = e.Err.Error()
 		}
+	case event.Retrying:
+		w.RetryAttempt = e.RetryAttempt
+		w.RetryMax = e.RetryMax
+		w.RetryAfterMs = e.RetryAfterMs
 	}
 	return w
 }

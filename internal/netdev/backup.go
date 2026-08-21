@@ -108,12 +108,32 @@ func (m *Manager) RunBackup(ctx context.Context, device string) ([]BackupVersion
 	return out, nil
 }
 
+// backupIDMu + lastBackupNanos keep backup IDs strictly increasing: clock
+// granularity on Windows (and rapid successive saves anywhere) can hand two
+// saves the same nanosecond — identical IDs would silently overwrite the
+// older version and empty the diff.
+var (
+	backupIDMu      sync.Mutex
+	lastBackupNanos int64
+)
+
+func nextBackupNanos() int64 {
+	backupIDMu.Lock()
+	defer backupIDMu.Unlock()
+	nanos := time.Now().UnixNano()
+	if nanos <= lastBackupNanos {
+		nanos = lastBackupNanos + 1
+	}
+	lastBackupNanos = nanos
+	return nanos
+}
+
 func saveBackup(device, text string) (BackupVersion, error) {
 	dir := backupsDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return BackupVersion{}, err
 	}
-	nanos := time.Now().UnixNano()
+	nanos := nextBackupNanos()
 	sb := storedBackup{Device: device, Nanos: nanos, Text: text}
 	b, err := json.Marshal(sb)
 	if err != nil {

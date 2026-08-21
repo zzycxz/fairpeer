@@ -28,9 +28,12 @@ var HostKeyPrompt transport.HostKeyPrompt
 type Manager struct {
 	cfg *config.Config
 
-	mu           sync.Mutex
-	conns        map[string]*managedConn
-	turnCommands int // read commands spent in the current user turn (TurnBegin resets)
+	mu               sync.Mutex
+	conns            map[string]*managedConn
+	turnCommands     int // read commands spent in the current user turn (TurnBegin resets)
+	netconfInflight  map[string]int
+	liveMu           sync.Mutex
+	liveFn           func(LiveEvent)
 }
 
 type managedConn struct {
@@ -66,7 +69,7 @@ var (
 )
 
 func NewManager(cfg *config.Config) *Manager {
-	m := &Manager{cfg: cfg, conns: map[string]*managedConn{}}
+	m := &Manager{cfg: cfg, conns: map[string]*managedConn{}, netconfInflight: map[string]int{}}
 	go m.reaper(context.Background())
 	return m
 }
@@ -79,6 +82,9 @@ func (m *Manager) TurnBegin() {
 	m.mu.Lock()
 	m.turnCommands = 0
 	m.mu.Unlock()
+	// The live panel's budget meter follows the per-ask reset (§6.6: the
+	// frontend calls this on every user submit).
+	m.emitLive(LiveEvent{Kind: LiveTurnBegin, Device: "(turn)"})
 }
 
 // guardrailCheck enforces the [netdev.guardrails] controls that gate BEFORE
@@ -150,12 +156,17 @@ func ApplyExtraRead(cfg *config.Config) {
 // Manager stays usable — the next diagnostic command reconnects on demand.
 func (m *Manager) KillAllConnections() int {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	n := len(m.conns)
+	names := make([]string, 0, n)
 	for name, c := range m.conns {
 		c.session.Close()
 		c.client.Close()
 		delete(m.conns, name)
+		names = append(names, name)
+	}
+	m.mu.Unlock()
+	for _, name := range names {
+		m.emitConnLive(name, LiveConnStopped)
 	}
 	_ = AppendAudit(Audit{Device: "(emergency-stop)", Command: "kill all connections", Class: "guardrail", Status: AuditOK, OutputBytes: n})
 	return n
@@ -163,12 +174,19 @@ func (m *Manager) KillAllConnections() int {
 
 // Close tears down every cached connection.
 func (m *Manager) Close() {
+	// Same lock discipline as the reaper: collect under the lock, close
+	// outside it (client.Close waits for the supervisor goroutine, whose
+	// status publish feeds the live observer — closing under m.mu deadlocks).
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	conns := make([]*managedConn, 0, len(m.conns))
 	for name, c := range m.conns {
+		conns = append(conns, c)
+		delete(m.conns, name)
+	}
+	m.mu.Unlock()
+	for _, c := range conns {
 		c.session.Close()
 		c.client.Close()
-		delete(m.conns, name)
 	}
 }
 
@@ -180,15 +198,29 @@ func (m *Manager) reaper(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			// Collect under the lock, close OUTSIDE it: client.Close waits on
+			// the supervisor goroutine, whose status publish feeds our live
+			// observer — closing under m.mu would deadlock the two.
 			m.mu.Lock()
+			var idled []*managedConn
+			var names []string
 			for name, c := range m.conns {
 				if time.Since(c.lastUse) > idleAfter {
-					c.session.Close()
-					c.client.Close()
+					idled = append(idled, c)
+					names = append(names, name)
 					delete(m.conns, name)
 				}
 			}
 			m.mu.Unlock()
+			for _, c := range idled {
+				c.session.Close()
+				c.client.Close()
+			}
+			// Idle-close frees the device's scarce VTY line — visible in the
+			// live panel as the status dot going grey.
+			for _, name := range names {
+				m.emitConnLive(name, LiveConnIdleClosed)
+			}
 		}
 	}
 }
@@ -213,6 +245,7 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 	// as read after whitespace collapse). Refused before anything else.
 	if strings.ContainsAny(command, "\n\r\x00\v\f") {
 		_ = AppendAudit(Audit{Device: deviceName, Command: "(multi-line command)", Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
+		m.liveCmdRefused(deviceName, "(multi-line command)", "guardrail", "one command per call — a newline would execute unclassified lines")
 		return ExecResult{Device: deviceName, Command: command, Refused: true, Class: "guardrail",
 			Refusal: "multi-line command refused — one command per call, because a newline would execute unclassified lines on the device. Split it into separate calls so every line goes through the read-only classifier."}
 	}
@@ -226,6 +259,7 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 	// [netdev.guardrails] gate: group scope + per-turn budget, refused BEFORE
 	// any driver work (and long before a socket opens).
 	if r, allow := m.guardrailCheck(deviceName, command); !allow {
+		m.liveCmdRefused(deviceName, command, "guardrail", r.Refusal)
 		return r
 	}
 
@@ -241,6 +275,7 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 	// exempt — their `| include` is a device-side filter, not a chain.
 	if driver.IsShellMetacharDriver(drv.Key()) && strings.ContainsAny(command, driver.ShellMetachars) {
 		_ = AppendAudit(Audit{Device: deviceName, Command: "(shell metacharacters)", Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
+		m.liveCmdRefused(deviceName, "(shell metacharacters)", "guardrail", "shell metacharacters would chain unclassified commands")
 		return ExecResult{Device: deviceName, Command: command, Refused: true, Class: "guardrail",
 			Refusal: "shell metacharacters refused — this device runs a general shell, and ; | & ` $ ( ) < > would chain commands the classifier never examined. Run ONE plain command per call (no pipes/redirects/substitutions)."}
 	}
@@ -258,12 +293,15 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 			base.Refusal = "unknown command — conservatively treated as write and not executed. Ask the user to confirm whether it is a read-only diagnostic; if so they can add it to the driver's read table (知识库归类)."
 		}
 		m.audit(device, command, class, AuditRefused, 0, nil)
+		m.liveCmdRefused(deviceName, command, class.String(), base.Refusal)
 		return base
 	}
 
+	start := m.liveCmdStart(deviceName, command, class.String())
 	res, err := m.runRead(ctx, device, drv, command)
 	if err != nil {
 		m.audit(device, command, class, AuditFailure, 0, err)
+		m.liveCmdEnd(deviceName, command, class.String(), "failure", start, 0, err.Error())
 		base.Refused = true
 		base.Refusal = "connection/session failure: " + err.Error()
 		return base
@@ -278,6 +316,7 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 	// count becomes a visible reminder — the user sees that masking happened.
 	redacted, redactedN := RedactCounted(res.Output)
 	m.audit(device, command, class, status, len(redacted), nil)
+	m.liveCmdEnd(deviceName, command, class.String(), status, start, len(redacted), "")
 	base.Output = redacted
 	if redactedN > 0 {
 		base.Output += fmt.Sprintf("\n\n[安全提醒] 输出中 %d 处敏感字段（密码/密钥/团体字）已脱敏后才进入上下文与审计；原文只存在于内存会话缓冲。", redactedN)
@@ -348,7 +387,9 @@ func (m *Manager) runRead(ctx context.Context, d config.NetDevDevice, drv driver
 		return other.session.Run(ctx, command)
 	}
 	m.conns[d.Name] = &managedConn{client: client, session: session, drv: drv, lastUse: time.Now()}
+	use := m.vtySnapshotLocked(d.Name)
 	m.mu.Unlock()
+	m.emitLive(LiveEvent{Kind: LiveConn, Device: d.Name, State: LiveConnConnected, VTYUse: use, VTYCap: m.vtyCap()})
 	return session.Run(ctx, command)
 }
 
@@ -398,11 +439,17 @@ func (m *Manager) connect(ctx context.Context, d config.NetDevDevice, drv driver
 		client.Close()
 		return nil, nil, err
 	}
+	m.subscribeConnState(d.Name, client)
 	session, err := OpenSession(ctx, client, drv, d.Encoding)
 	if err != nil {
 		client.Close()
 		return nil, nil, err
 	}
+	// Live tap: route this session's incremental output to the observer as
+	// this device's 操作实况 stream (sanitized inside the session layer).
+	session.SetOutputObserver(func(chunk string) {
+		m.emitLive(LiveEvent{Kind: LiveCmdOutput, Device: d.Name, Chunk: chunk})
+	})
 	return client, session, nil
 }
 
@@ -474,6 +521,8 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&proposeTool{m: m})
 	reg.Add(&findingTool{})
 	reg.Add(&netconfTool{m: m})
+	reg.Add(&snmpTool{m: m})
+	reg.Add(&assessTool{m: m})
 	reg.Add(&baselineTool{m: m})
 	reg.Add(&redfishTool{m: m})
 }
@@ -534,6 +583,48 @@ func (t *baselineTool) Execute(ctx context.Context, args json.RawMessage) (strin
 }
 
 type netconfTool struct{ m *Manager }
+
+// snmpTool exposes the sealed one-shot SNMP query to the agent (vendor=snmp
+// devices): v2c GET or bounded WALK over the MIB-2 allowlist, secrets from the
+// secret store, output redacted. No set/write path exists at all.
+type snmpTool struct{ m *Manager }
+
+func (t *snmpTool) Name() string { return "netdev_snmp" }
+
+func (t *snmpTool) Description() string {
+	return "Run ONE read-only SNMP v2c query on a vendor=snmp device: GET a single OID or WALK a subtree (bounded to 120 variables). " +
+		"OIDs are allowlisted to standard MIB-2 subtrees (system/interfaces/ip/icmp/tcp/udp/host-resources/ifMIB) — interface counters, uptime, " +
+		"IP stats. Community comes from the device's password_env credential; output is redacted. There is no SNMP set path."
+}
+
+func (t *snmpTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"device": {"type": "string", "description": "vendor=snmp device name from netdev_devices"},
+			"oid": {"type": "string", "description": "dotted OID, e.g. 1.3.6.1.2.1.1.3.0 (sysUpTime) or a subtree root for walk"},
+			"mode": {"type": "string", "enum": ["get", "walk"], "description": "get = one OID (default), walk = bounded subtree sweep"}
+		},
+		"required": ["device", "oid"]
+	}`)
+}
+
+func (t *snmpTool) ReadOnly() bool { return true }
+
+func (t *snmpTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		Device string `json:"device"`
+		OID    string `json:"oid"`
+		Mode   string `json:"mode"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(a.Device) == "" || strings.TrimSpace(a.OID) == "" {
+		return "", errors.New("netdev_snmp: device and oid are required")
+	}
+	return t.m.SnmpQuery(ctx, a.Device, a.OID, a.Mode)
+}
 
 func (t *netconfTool) Name() string { return "netdev_netconf" }
 

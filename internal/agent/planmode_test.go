@@ -21,12 +21,12 @@ func TestPlanModeBlocksWriters(t *testing.T) {
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
 	a.SetPlanMode(true)
 
-	ro := a.executeOne(context.Background(), provider.ToolCall{Name: "read_only_tool"})
+	ro := a.executeOne(context.Background(), provider.ToolCall{Name: "read_only_tool"}, nil)
 	if !strings.Contains(ro.output, "done") {
 		t.Errorf("read-only tool in plan mode should still run: %q", ro.output)
 	}
 
-	wr := a.executeOne(context.Background(), provider.ToolCall{Name: "writer_tool"})
+	wr := a.executeOne(context.Background(), provider.ToolCall{Name: "writer_tool"}, nil)
 	if !strings.HasPrefix(wr.output, "blocked:") {
 		t.Errorf("writer tool in plan mode should return a 'blocked:' result, got: %q", wr.output)
 	}

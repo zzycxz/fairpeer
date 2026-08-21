@@ -228,9 +228,19 @@ func resolveRAGScope(explicit string) string {
 
 func requireRAG() (*rag.Store, error) {
 	if globalRAGStore == nil {
-		return nil, errors.New("RAG store is offline (only available under the cowork profile)")
+		return nil, errors.New("RAG store is offline (knowledge base not enabled)")
 	}
 	return globalRAGStore, nil
+}
+
+// refuseNetDevNamespace enforces NETDEV_SPEC §7.2 from the cowork surface: the
+// ops knowledge namespace ("netdev:*" collections) is invisible to dev/cowork
+// sessions — searching, listing, importing into, or deleting it is refused.
+func refuseNetDevNamespace(collection string) error {
+	if rag.IsNetDevCollection(collection) {
+		return fmt.Errorf("collection %q belongs to the ops (netdev) knowledge namespace and is not visible in this mode", collection)
+	}
+	return nil
 }
 
 // RAGTools returns the knowledge-base tools for cowork registration.
@@ -280,6 +290,9 @@ func (ragImport) Execute(ctx context.Context, args json.RawMessage) (string, err
 	}
 	if p.Collection == "" {
 		p.Collection = "default"
+	}
+	if err := refuseNetDevNamespace(p.Collection); err != nil {
+		return "", err
 	}
 	s, err := requireRAG()
 	if err != nil {
@@ -340,7 +353,25 @@ func (ragSearch) Execute(ctx context.Context, args json.RawMessage) (string, err
 	// is active). This bridges the UI "activate collection" control to the
 	// agent's rag_search calls.
 	collection := resolveRAGScope(p.Collection)
+	// NETDEV_SPEC §7.2: the ops knowledge namespace is invisible to the
+	// cowork surface — refuse an explicitly-named netdev: collection (the
+	// store already excludes it from empty-scope searches).
+	if err := refuseNetDevNamespace(collection); err != nil {
+		return "", err
+	}
+	return runRAGSearch(ctx, s, p.Query, collection, p.TopK)
+}
 
+// runRAGSearch is the shared two-layer search body behind rag_search and the
+// netdev namespace's rag_search variant: structured entities/relations (when
+// deep-extracted) + FTS5 snippets (with semantic rerank when configured).
+// collection is the ALREADY-resolved scope; the §7.2 namespace boundary is
+// enforced by the store (empty scope excludes it) and by the callers.
+func runRAGSearch(ctx context.Context, s *rag.Store, query, collection string, topK int) (string, error) {
+	p := struct {
+		Query string
+		TopK  int
+	}{Query: query, TopK: topK}
 	// Layer 1: structured entities + relations (only if this collection has been
 	// deep-extracted). This is the high-precision layer — direct fact hits with
 	// no chunk-boundary noise.
@@ -348,10 +379,11 @@ func (ragSearch) Execute(ctx context.Context, args json.RawMessage) (string, err
 	var entities []rag.Entity
 	var relations []rag.Relation
 	if hasEntities {
-		entities, err = s.SearchEntities(p.Query, collection, p.TopK)
+		es, err := s.SearchEntities(p.Query, collection, p.TopK)
 		if err != nil {
 			return "", err
 		}
+		entities = es
 		for _, e := range entities {
 			rels, _ := s.RelationsOf(collection, e.Name, true)
 			relations = append(relations, rels...)
@@ -555,6 +587,9 @@ func (ragGraph) Execute(ctx context.Context, args json.RawMessage) (string, erro
 	if err != nil {
 		return "", err
 	}
+	if err := refuseNetDevNamespace(p.Collection); err != nil {
+		return "", err
+	}
 	has, _ := s.HasEntities(p.Collection)
 	if !has {
 		return "no entities in this collection — run deep extraction first (or use rag_search for FTS5-only)", nil
@@ -645,6 +680,9 @@ func (ragMindMap) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 	s, err := requireRAG()
 	if err != nil {
+		return "", err
+	}
+	if err := refuseNetDevNamespace(p.Collection); err != nil {
 		return "", err
 	}
 	has, _ := s.HasEntities(p.Collection)
@@ -742,6 +780,9 @@ func (ragList) Execute(ctx context.Context, args json.RawMessage) (string, error
 	if len(args) > 0 {
 		_ = json.Unmarshal(args, &p)
 	}
+	if err := refuseNetDevNamespace(p.Collection); err != nil {
+		return "", err
+	}
 	s, err := requireRAG()
 	if err != nil {
 		return "", err
@@ -750,6 +791,14 @@ func (ragList) Execute(ctx context.Context, args json.RawMessage) (string, error
 	if err != nil {
 		return "", err
 	}
+	// §7.2: the ops namespace never shows up in the cowork collection list.
+	filtered := cols[:0]
+	for _, c := range cols {
+		if !rag.IsNetDevCollection(c.Name) {
+			filtered = append(filtered, c)
+		}
+	}
+	cols = filtered
 	if len(cols) == 0 {
 		return "no collections (import documents with rag_import)", nil
 	}
@@ -794,6 +843,9 @@ func (ragDelete) Execute(ctx context.Context, args json.RawMessage) (string, err
 	}
 	if strings.TrimSpace(p.Collection) == "" {
 		return "", errors.New("collection is required")
+	}
+	if err := refuseNetDevNamespace(p.Collection); err != nil {
+		return "", err
 	}
 	s, err := requireRAG()
 	if err != nil {

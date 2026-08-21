@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zzycxz/fairpeer/internal/diff"
 	fileenc "github.com/zzycxz/fairpeer/internal/fileutil/encoding"
 	"github.com/zzycxz/fairpeer/internal/tool"
 	"github.com/zzycxz/fairpeer/internal/validation"
@@ -516,4 +517,83 @@ func (a applyPatch) Execute(ctx context.Context, args json.RawMessage) (string, 
 	}
 
 	return fmt.Sprintf("apply_patch: %d files changed\n%s", len(summary), strings.Join(summary, "\n")), nil
+}
+
+// PreviewFiles computes the per-file changes apply_patch would make, mirroring
+// Execute's Phase-1 validation (parse, resolve, confine, read, derive) without
+// writing anything — a preview error here means the patch wouldn't apply
+// cleanly either. A move is expressed as delete-of-source + create-of-dest so
+// both the checkpoint hook (which snapshots per Change) and an approval card
+// see each affected path; an Add onto an existing path previews as a modify so
+// the diff shows what the overwrite would clobber.
+func (a applyPatch) PreviewFiles(args json.RawMessage) ([]diff.Change, error) {
+	var p struct {
+		PatchText string `json:"patchText"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid args: %w", err)
+	}
+	if p.PatchText == "" {
+		return nil, fmt.Errorf("patchText is required")
+	}
+	hunks, err := parsePatch(p.PatchText)
+	if err != nil {
+		return nil, fmt.Errorf("apply_patch parse failed: %w", err)
+	}
+
+	var changes []diff.Change
+	for _, hunk := range hunks {
+		filePath := resolveIn(a.workDir, hunk.path)
+		if err := confine(a.roots, filePath); err != nil {
+			return nil, err
+		}
+
+		switch hunk.typ {
+		case hunkAdd:
+			if data, err := os.ReadFile(filePath); err == nil {
+				enc, _ := fileenc.Detect(data)
+				changes = append(changes, diff.Build(filePath, string(fileenc.Decode(data, enc)), hunk.contents, diff.Modify))
+			} else {
+				changes = append(changes, diff.Build(filePath, "", hunk.contents, diff.Create))
+			}
+
+		case hunkDelete:
+			if _, err := os.Stat(filePath); err != nil {
+				return nil, fmt.Errorf("apply_patch verify: cannot delete %s: %w", filePath, err)
+			}
+			oldContent, _, err := readFileEncoded(filePath)
+			if err != nil {
+				return nil, fmt.Errorf("apply_patch verify: read %s: %w", filePath, err)
+			}
+			changes = append(changes, diff.Build(filePath, oldContent, "", diff.Delete))
+
+		case hunkUpdate:
+			if _, err := os.Stat(filePath); err != nil {
+				return nil, fmt.Errorf("apply_patch verify: cannot update %s: %w", filePath, err)
+			}
+			oldContent, _, err := readFileEncoded(filePath)
+			if err != nil {
+				return nil, fmt.Errorf("apply_patch verify: read %s: %w", filePath, err)
+			}
+			newContent, err := deriveNewContent(oldContent, hunk.chunks)
+			if err != nil {
+				return nil, fmt.Errorf("apply_patch verify: %w", err)
+			}
+
+			if hunk.movePath == "" {
+				changes = append(changes, diff.Build(filePath, oldContent, newContent, diff.Modify))
+				continue
+			}
+			movePath := resolveIn(a.workDir, hunk.movePath)
+			if err := confine(a.roots, movePath); err != nil {
+				return nil, err
+			}
+			changes = append(changes, diff.Build(filePath, oldContent, "", diff.Delete))
+			changes = append(changes, diff.Build(movePath, "", newContent, diff.Create))
+		}
+	}
+	if len(changes) == 0 {
+		return nil, fmt.Errorf("no hunks found in patch")
+	}
+	return changes, nil
 }

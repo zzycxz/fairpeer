@@ -29,7 +29,7 @@ func TestExecuteOne_OpGateStopsFailingOp(t *testing.T) {
 	// the threshold and appends the op-recovery guidance to the output.
 	seenGuidance := false
 	for i := 1; i <= opFailureThreshold; i++ {
-		out := a.executeOne(context.Background(), call)
+		out := a.executeOne(context.Background(), call, nil)
 		if out.blocked {
 			t.Fatalf("attempt %d: should run (below/at threshold), not be pre-blocked", i)
 		}
@@ -46,7 +46,7 @@ func TestExecuteOne_OpGateStopsFailingOp(t *testing.T) {
 
 	// 4th attempt: the op is now stopped — executeOne must block BEFORE running
 	// the tool (beforeMutation refuses), so the tool's err is irrelevant.
-	out := a.executeOne(context.Background(), call)
+	out := a.executeOne(context.Background(), call, nil)
 	if !out.blocked {
 		t.Errorf("4th attempt of the same failing op should be blocked by the op-recovery gate")
 	}
@@ -55,7 +55,7 @@ func TestExecuteOne_OpGateStopsFailingOp(t *testing.T) {
 	}
 
 	// A DIFFERENT write tool must still run — the gate stops only the failing op.
-	other := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/b"}`})
+	other := a.executeOne(context.Background(), provider.ToolCall{Name: "edit_file", Arguments: `{"path":"/b"}`}, nil)
 	if other.blocked {
 		t.Errorf("unrelated write tool should still run after one op is stopped, got blocked: %q", other.output)
 	}
@@ -72,7 +72,7 @@ func TestExecuteOne_OpGateReadOnlyFailureIgnored(t *testing.T) {
 	call := provider.ToolCall{Name: "grep", Arguments: `{"pattern":"x"}`}
 
 	for i := 0; i < opFailureThreshold+2; i++ {
-		out := a.executeOne(context.Background(), call)
+		out := a.executeOne(context.Background(), call, nil)
 		if out.blocked {
 			t.Fatalf("attempt %d: read-only failure must never be blocked by the op-recovery gate", i+1)
 		}
@@ -92,7 +92,7 @@ func TestExecuteOne_OpGatePermissionBlockIgnored(t *testing.T) {
 	call := provider.ToolCall{Name: "write_file", Arguments: `{"path":"/a"}`}
 
 	for i := 0; i < opFailureThreshold+2; i++ {
-		out := a.executeOne(context.Background(), call)
+		out := a.executeOne(context.Background(), call, nil)
 		if !out.blocked {
 			t.Fatalf("attempt %d: permission gate should block the call", i+1)
 		}
@@ -101,7 +101,7 @@ func TestExecuteOne_OpGatePermissionBlockIgnored(t *testing.T) {
 	// stop — blocks don't count. Verify by removing the deny and confirming the
 	// tool runs (not op-recovery-blocked).
 	stub.deny = map[string]bool{}
-	out := a.executeOne(context.Background(), call)
+	out := a.executeOne(context.Background(), call, nil)
 	if strings.Contains(out.output, "op-recovery") || strings.Contains(out.output, "已被停止") {
 		t.Errorf("permission blocks must not arm the op-recovery gate; got %q", out.output)
 	}
@@ -120,14 +120,14 @@ func TestExecuteOne_OpGateSuccessClears(t *testing.T) {
 	okCall := provider.ToolCall{Name: "write_file", Arguments: `{"path":"/a","content":"ok"}`}
 
 	// Two failures (below threshold).
-	a.executeOne(context.Background(), failCall)
-	a.executeOne(context.Background(), failCall)
+	a.executeOne(context.Background(), failCall, nil)
+	a.executeOne(context.Background(), failCall, nil)
 	// A success clears the count (different content → different op too, but the
 	// fingerprint differs here; this mainly checks the success path is wired).
-	a.executeOne(context.Background(), okCall)
+	a.executeOne(context.Background(), okCall, nil)
 	// The failCall again: only 1 failure now in its own fingerprint bucket, so
 	// it must NOT be blocked.
-	out := a.executeOne(context.Background(), failCall)
+	out := a.executeOne(context.Background(), failCall, nil)
 	if out.blocked {
 		t.Errorf("failCall after a success must not be blocked yet (count restarted); got %q", out.output)
 	}

@@ -36,7 +36,7 @@ import (
 // the VLM prompt around its current task.
 //
 // `image_understand` is referenced across browser.go, screen_*.go and
-// skill/builtins.go (the computer-auto skill lists it in AllowedTools) but was
+// skill/builtins.go (the desktop-auto skill lists it in AllowedTools) but was
 // never registered — this is that long-missing implementation.
 
 func init() { tool.RegisterBuiltin(imageUnderstand{}) }

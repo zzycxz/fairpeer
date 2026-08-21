@@ -19,15 +19,15 @@ func TestFailedCallsSurfaceError(t *testing.T) {
 	reg.Add(fakeTool{name: "writer", readOnly: false})
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
 
-	if o := a.executeOne(context.Background(), provider.ToolCall{Name: "ok_tool"}); o.errMsg != "" {
+	if o := a.executeOne(context.Background(), provider.ToolCall{Name: "ok_tool"}, nil); o.errMsg != "" {
 		t.Errorf("successful call should have empty errMsg, got %q", o.errMsg)
 	}
-	if o := a.executeOne(context.Background(), provider.ToolCall{Name: "find"}); o.errMsg == "" {
+	if o := a.executeOne(context.Background(), provider.ToolCall{Name: "find"}, nil); o.errMsg == "" {
 		t.Errorf("unknown tool should surface an errMsg (renders as failed), got %+v", o)
 	}
 
 	a.SetPlanMode(true)
-	if o := a.executeOne(context.Background(), provider.ToolCall{Name: "writer"}); o.errMsg == "" {
+	if o := a.executeOne(context.Background(), provider.ToolCall{Name: "writer"}, nil); o.errMsg == "" {
 		t.Errorf("plan-mode-blocked writer should surface an errMsg, got %+v", o)
 	}
 }

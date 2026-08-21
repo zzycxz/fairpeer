@@ -3,6 +3,7 @@ package netdev
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -189,4 +190,76 @@ func readDict(path string) ([]string, error) {
 		return nil, fmt.Errorf("dictionary %s has no candidates", path)
 	}
 	return out, sc.Err()
+}
+
+// ── agent tool surface ───────────────────────────────────────────────────────
+
+// assessTool exposes the engagement-gated weak-credential check to the agent.
+// NOT read-only in effect: every candidate is a full SSH auth dial (devices
+// may lock accounts), so the tool reports ReadOnly=false and conservative
+// approval surfaces treat it as an active operation.
+type assessTool struct{ m *Manager }
+
+func (t *assessTool) Name() string { return "netdev_assess" }
+
+func (t *assessTool) Description() string {
+	return "Assessment-mode weak-credential check (NETDEV_SPEC §6.2): test a device's SSH login against the tier's candidate passwords. " +
+		"Gated on the [netdev.assessment] engagement envelope (engagement_id + expires) — refused without an ACTIVE engagement; the user configures it in 设置 → 运维. " +
+		"basic tier = fixed ≤3 candidates (empty/username/admin); dictionary tier = a user-supplied file, hard-capped at 10 (lockout guard). " +
+		"Every attempt is a full auth dial and is audited (passwords never logged). A confirmed weak credential is reported for the user to fix VIA A PROPOSAL — never changed directly."
+}
+
+func (t *assessTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"device": {"type": "string", "description": "device name from netdev_devices"},
+			"tier": {"type": "string", "enum": ["basic", "dictionary"], "description": "basic = fixed ≤3 candidates (default); dictionary = user-supplied dict_path, capped at 10"},
+			"dict_path": {"type": "string", "description": "dictionary file path (tier=dictionary only; one candidate per line, # comments)"}
+		},
+		"required": ["device"]
+	}`)
+}
+
+func (t *assessTool) ReadOnly() bool { return false }
+
+func (t *assessTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		Device   string `json:"device"`
+		Tier     string `json:"tier"`
+		DictPath string `json:"dict_path"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(a.Device) == "" {
+		return "", errors.New("netdev_assess: device is required")
+	}
+	label := "assess weak-cred (" + a.Tier + ") " + a.Device
+	// Live-panel lifecycle: one-shot (attempts are audited individually inside
+	// WeakCredCheck), so start/end brackets the whole check.
+	start := t.m.liveCmdStart(a.Device, label, "assess")
+	status := "failure"
+	defer func() { t.m.liveCmdEnd(a.Device, label, "assess", status, start, 0, "") }()
+
+	// The envelope gate doubles here so the tool refusal (not just the manager
+	// error) lands as a VISIBLE live refusal in the panel.
+	if err := AssessmentActive(t.m.cfg.NetDev); err != nil {
+		t.m.liveCmdRefused(a.Device, label, "assess", err.Error())
+		return "", fmt.Errorf("netdev_assess: %w", err)
+	}
+
+	res, err := t.m.WeakCredCheck(ctx, a.Device, a.Tier, a.DictPath)
+	if err != nil {
+		return "", err
+	}
+	status = AuditOK
+	if res.Weak {
+		status = AuditDeviceError
+	}
+	out := fmt.Sprintf("%s: tier=%s, %d/%d attempt(s) — %s", res.Device, res.Tier, res.Attempts, res.Budget, res.Detail)
+	if res.Weak {
+		out += "\n已确认弱口令：请起草变更提案修复（不要直接改密码——评估手不下发配置）。"
+	}
+	return out, nil
 }

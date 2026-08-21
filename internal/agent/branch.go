@@ -31,10 +31,11 @@ type BranchMeta struct {
 	// to. Empty for normal (global/project) sessions. Lets ListSessions tag the
 	// session as an expert-team collaboration so the frontend can group it.
 	ExpertTeamID string `json:"expert_team_id,omitempty"`
-	// Profile records the product mode ("dev"|"cowork") this session was created
-	// under. Empty (on legacy sidecars) is treated as "dev". It lets findTopic*
-	// scope its scan so a dev session is never matched as a cowork one and vice
-	// versa, even before topic storage is fully partitioned.
+	// Profile records the product mode ("dev"|"cowork"|"netdev") this session
+	// was created under. Empty (on legacy sidecars) is treated as "dev". It
+	// lets findTopic* scope its scan so a dev session is never matched as a
+	// cowork/netdev one and vice versa, even before topic storage is fully
+	// partitioned.
 	Profile string `json:"profile,omitempty"`
 	// CachedTurns/CachedPreview mirror what previewSession computes by decoding
 	// the .jsonl. Session.Save refreshes them so ListSessions reads the sidecar

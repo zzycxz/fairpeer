@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,4 +98,42 @@ func TestWeakCredDictBudgetCap(t *testing.T) {
 	if res.Attempts > weakBudgetDictMax {
 		t.Fatalf("hard cap exceeded: %d attempts", res.Attempts)
 	}
+}
+
+// The agent tool surface (netdev_assess) refuses without an engagement
+// envelope BEFORE any dial, and the refusal lands as a VISIBLE live event —
+// the 操作实况 panel must show the agent being stopped.
+func TestAssessToolRefusesWithoutEnvelope(t *testing.T) {
+	sim := startSimDevice(t)
+	m, _ := testManager(t, sim) // no assessment envelope
+
+	col := &liveCollector{}
+	m.SetLiveObserver(col.on)
+
+	tool := &assessTool{m: m}
+	out, err := tool.Execute(context.Background(), []byte(`{"device":"sw1"}`))
+	if err == nil {
+		t.Fatalf("tool must refuse without an envelope; got output %q", out)
+	}
+	if !strings.Contains(err.Error(), "engagement") {
+		t.Fatalf("tool error = %v, want engagement-envelope refusal", err)
+	}
+	col.waitKind(t, LiveCmdRefused, 1)
+
+	// With the envelope, the tool runs the sealed path end to end and
+	// brackets it with live lifecycle events.
+	m.cfg.NetDev.Assessment = config.NetDevAssessment{
+		EngagementID: "ASSESS-TOOL-TEST",
+		Expires:      time.Now().AddDate(0, 0, 1).Format("2006-01-02"),
+		Approver:     "tester",
+	}
+	out, err = tool.Execute(context.Background(), []byte(`{"device":"sw1","tier":"basic"}`))
+	if err != nil {
+		t.Fatalf("tool with envelope: %v", err)
+	}
+	if !strings.Contains(out, "no weak credential") {
+		t.Fatalf("tool output = %q", out)
+	}
+	col.waitKind(t, LiveCmdStart, 1)
+	col.waitKind(t, LiveCmdEnd, 1)
 }

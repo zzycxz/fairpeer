@@ -170,6 +170,24 @@ type Approval struct {
 	ID      string
 	Tool    string
 	Subject string
+	// Args is the raw JSON arguments of the call being approved, so a card can
+	// show specifics itself (the bash command, target paths). Empty for
+	// synthetic approvals (plan/replan) that have no tool args.
+	Args string
+	// Changes carries the previewed per-file changes for writer tools (via the
+	// tool's Previewer, computed at request time — before the permission
+	// decision). Nil for tools that can't describe their change.
+	Changes []FileChange
+}
+
+// FileChange is one file within a previewed multi-file change (the Approval
+// payload). Kind mirrors diff.Kind: "create" | "modify" | "delete".
+type FileChange struct {
+	Path    string
+	Kind    string
+	Added   int
+	Removed int
+	Diff    string
 }
 
 // AskOption is one choice the user can pick for an AskQuestion.
@@ -275,6 +293,7 @@ type Event struct {
 	Compaction   Compaction // Compaction
 	RetryAttempt int        // Retrying: 1-based attempt about to be made
 	RetryMax     int        // Retrying: total attempts before giving up
+	RetryAfterMs int64      // Retrying: backoff delay before the attempt (0 = immediate)
 	Collab       Collab     // ExpertCollab
 }
 

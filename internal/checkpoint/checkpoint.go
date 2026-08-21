@@ -375,3 +375,42 @@ func safePath(root, p string) (string, error) {
 	}
 	return abs, nil
 }
+
+// DiffForTurn (upgrade spec 3-6) renders what a code-scope rewind of `turn`
+// would restore: one change per snapshotted file, old side = current on-disk
+// content, new side = the snapshotted pre-edit state — so the preview reads as
+// "these are the changes the rewind will revert". A create snapshot (nil
+// Content) previews as a delete of the current file; a file removed since the
+// snapshot previews as a recreate.
+func (s *Store) DiffForTurn(turn int) []diff.Change {
+	s.mu.Lock()
+	var files []FileSnap
+	for _, c := range s.all() {
+		if c.Turn == turn {
+			files = append(files, c.Files...)
+		}
+	}
+	s.mu.Unlock()
+
+	out := make([]diff.Change, 0, len(files))
+	for _, f := range files {
+		snap := ""
+		if f.Content != nil {
+			snap = *f.Content
+		}
+		data, err := os.ReadFile(f.Path)
+		if err != nil {
+			// Gone since the snapshot — the rewind would bring it back.
+			out = append(out, diff.Build(f.Path, "", snap, diff.Create))
+			continue
+		}
+		enc, _ := fileenc.Detect(data)
+		cur := string(fileenc.Decode(data, enc))
+		if f.Content == nil {
+			out = append(out, diff.Build(f.Path, cur, "", diff.Delete))
+			continue
+		}
+		out = append(out, diff.Build(f.Path, cur, snap, diff.Modify))
+	}
+	return out
+}

@@ -33,6 +33,7 @@ type RequestBudget struct {
 	reserveMain int
 	mu          sync.Mutex
 	buckets     map[string]*rateBucket
+	mainKey     string // budget key of the main-agent provider (UI indicator)
 }
 
 type rateBucket struct {
@@ -153,4 +154,31 @@ func (b *RequestBudget) Status(key string) BudgetStatus {
 		secs = 0
 	}
 	return BudgetStatus{RPM: b.rpm, Used: bk.count, Remaining: remaining, ReserveMain: b.reserveMain, WindowSecs: secs}
+}
+
+// NoteMainKey records the budget key of the main-agent provider, so a UI can
+// query "the" rate-limit window without knowing endpoint+API-key internals.
+// Last registration wins (a model switch re-points the indicator).
+func (b *RequestBudget) NoteMainKey(key string) {
+	if b == nil || b.rpm <= 0 {
+		return
+	}
+	b.mu.Lock()
+	b.mainKey = key
+	b.mu.Unlock()
+}
+
+// MainStatus reports the main-agent provider's budget window — the status line
+// indicator. Zeroed when limiting is disabled or no main provider registered.
+func (b *RequestBudget) MainStatus() BudgetStatus {
+	if b == nil || b.rpm <= 0 {
+		return BudgetStatus{}
+	}
+	b.mu.Lock()
+	key := b.mainKey
+	b.mu.Unlock()
+	if key == "" {
+		return BudgetStatus{}
+	}
+	return b.Status(key)
 }

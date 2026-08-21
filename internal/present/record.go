@@ -86,6 +86,16 @@ type Tool struct {
 	ParentID    string       `json:"parentId,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
 	Profile     *Profile     `json:"profile,omitempty"`
+	// FileDiff preserves a writer dispatch's server-side preview so a replayed
+	// session shows the same diff cards the live one did.
+	FileDiff *FileDiff `json:"fileDiff,omitempty"`
+}
+
+// FileDiff mirrors event.FileDiff on a Tool record.
+type FileDiff struct {
+	Diff    string `json:"diff"`
+	Added   int    `json:"added"`
+	Removed int    `json:"removed"`
 }
 
 // Usage carries the per-turn token telemetry, mirroring the subset of
@@ -193,6 +203,9 @@ func toolFromEvent(t event.Tool) *Tool {
 		ID: t.ID, Name: t.Name, Args: t.Args, Output: t.Output, Err: t.Err,
 		ReadOnly: t.ReadOnly, Truncated: t.Truncated, DurationMs: t.DurationMs,
 		ParentID: t.ParentID,
+	}
+	if t.FileDiff.Diff != "" || t.FileDiff.Added != 0 || t.FileDiff.Removed != 0 {
+		out.FileDiff = &FileDiff{Diff: t.FileDiff.Diff, Added: t.FileDiff.Added, Removed: t.FileDiff.Removed}
 	}
 	if len(t.Attachments) > 0 {
 		out.Attachments = make([]Attachment, len(t.Attachments))

@@ -33,7 +33,10 @@ func TestReplayPendingPromptsReEmitsBlockedApproval(t *testing.T) {
 	c.ReplayPendingPrompts()
 
 	replayed := <-reqs
-	if replayed != first {
+	// Approval now carries a []FileChange, so the struct isn't directly
+	// comparable — compare the fields the replay contract actually promises.
+	if replayed.ID != first.ID || replayed.Tool != first.Tool || replayed.Subject != first.Subject ||
+		replayed.Args != first.Args || len(replayed.Changes) != len(first.Changes) {
 		t.Fatalf("replayed = %+v, want identical re-emit of %+v", replayed, first)
 	}
 

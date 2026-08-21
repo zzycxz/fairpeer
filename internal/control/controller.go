@@ -545,7 +545,57 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 			err = nil
 		}
 		c.sink.Emit(event.Event{Kind: event.TurnDone, Err: explainError(err)})
+		// Follow-up drain (upgrade spec 2-4): prompts queued while the agent
+		// was busy start as independent next turns. Only on natural completion
+		// — a user-initiated Stop empties nothing (they asked for a halt, not
+		// for the backlog to run). Submitted after running was cleared, so
+		// runGuarded accepts the new turn.
+		if ctx.Err() == nil && c.executor != nil {
+			if next, ok := c.executor.DrainFollowUp(); ok {
+				c.submit(next, next)
+			}
+		}
 	}()
+}
+
+// FollowUp queues a prompt to run as an independent next turn once the current
+// one finishes (upgrade spec 2-4). When the controller is idle it just runs
+// now. Contrast Steer, which guides the in-flight task instead.
+func (c *Controller) FollowUp(input string) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return
+	}
+	c.mu.Lock()
+	running := c.running
+	c.mu.Unlock()
+	if running && c.executor != nil {
+		c.executor.FollowUp(trimmed)
+		c.notice("queued (next turn): " + truncateForNotice(trimmed))
+		return
+	}
+	c.submit(trimmed, trimmed)
+}
+
+// QueuedMessages reports the live steer and follow-up queues for the UI's
+// queue strip (upgrade spec 2-3/2-4): steer entries guide the current task,
+// follow-up entries will start as independent turns.
+func (c *Controller) QueuedMessages() (steer []string, followUp []string) {
+	if c.executor == nil {
+		return nil, nil
+	}
+	return c.executor.Steers(), c.executor.FollowUps()
+}
+
+// truncateForNotice keeps a queue notice to one glanceable line.
+func truncateForNotice(s string) string {
+	if len(s) <= 80 {
+		return s
+	}
+	if i := strings.IndexByte(s[:80], '\n'); i >= 0 {
+		return s[:i] + "…"
+	}
+	return s[:80] + "…"
 }
 
 // Send starts a turn with an uncomposed message. The controller applies
@@ -722,7 +772,7 @@ func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input any, raw, 
 	}
 	// The plan is already visible as the assistant's answer, so the request
 	// carries no subject — it's purely the gate.
-	allow, _, err := c.requestApproval(ctx, PlanApprovalTool, "")
+	allow, _, err := c.requestApproval(ctx, PlanApprovalTool, "", nil)
 	if err != nil {
 		return err
 	}
@@ -751,7 +801,7 @@ func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input any, raw, 
 			func() string { return lastAssistantText(c.History()) },
 			PlanApprovedMessage,
 			func(ctx context.Context, reason string) (bool, error) {
-				allow, _, err := c.requestApproval(ctx, composeReplanTool, reason)
+				allow, _, err := c.requestApproval(ctx, composeReplanTool, reason, nil)
 				return allow, err
 			},
 		)
@@ -1937,6 +1987,16 @@ func (c *Controller) Checkpoints() []checkpoint.Meta {
 	return c.cp.List()
 }
 
+// CheckpointDiff (upgrade spec 3-6) returns the per-file changes a code-scope
+// rewind of `turn` would make, so the rewind UI can preview instead of asking
+// the user to trust a file count.
+func (c *Controller) CheckpointDiff(turn int) []diff.Change {
+	if c.cp == nil {
+		return nil
+	}
+	return c.cp.DiffForTurn(turn)
+}
+
 // rewindFail emits the error as a Warn notice (so a frontend that swallows the
 // returned error — e.g. the desktop bridge's .catch — still shows the user why
 // the rewind did nothing) and returns it.
@@ -2985,6 +3045,9 @@ func (c *Controller) connectMCPServer(e config.PluginEntry) (int, error) {
 }
 
 func (c *Controller) connectMCPSpec(s plugin.Spec) (int, error) {
+	if !c.profileAllowsMCP(s.Name) {
+		return 0, fmt.Errorf("MCP server %q is not allowed in the %q profile (plugin allowlist/hidden filter)", s.Name, c.profileForDream())
+	}
 	if c.host == nil {
 		c.host = plugin.NewHost()
 	}
@@ -2999,6 +3062,27 @@ func (c *Controller) connectMCPSpec(s plugin.Spec) (int, error) {
 		}
 	}
 	return len(tools), nil
+}
+
+// profileAllowsMCP enforces the profile plugin gates on HOT connects. Boot
+// already filters the startup spec list (netdev PluginAllowlist hides every
+// external MCP); this closes the runtime paths (ConnectMCPServer /
+// ConnectConfiguredMCPServer / AddMCPServer / import) so a sealed profile
+// cannot gain registry tools mid-session — MCP tool names sit outside the
+// tool_scope RemovePrefix seal, so a write/exec MCP would otherwise punch
+// straight through it. Fails closed for named profiles when config can't be
+// read (the seal must hold even on a broken config), open for dev.
+func (c *Controller) profileAllowsMCP(name string) bool {
+	profileName := c.profileForDream()
+	cfg, err := config.Load()
+	if err != nil {
+		return profileName == "" || profileName == config.ProfileDev
+	}
+	p, err := cfg.ResolveProfile(profileName)
+	if err != nil || p == nil {
+		return profileName == "" || profileName == config.ProfileDev
+	}
+	return config.PluginAllowedByProfile(p, name) && !config.PluginHiddenByProfile(p, name)
 }
 
 // ImportMCPEntries persists selected MCP entries and attempts to connect them
@@ -3572,7 +3656,7 @@ func (g gateApprover) Approve(ctx context.Context, tool, subject string, args js
 	if auto {
 		return true, false, nil
 	}
-	return g.c.requestApproval(ctx, tool, subject)
+	return g.c.requestApproval(ctx, tool, subject, args)
 }
 
 type seedTodo struct {
@@ -3768,8 +3852,11 @@ func parseRewind(args string, cps []checkpoint.Meta) (int, RewindScope, error) {
 
 // requestApproval emits an ApprovalRequest and blocks until Approve(ID, …)
 // answers or ctx is cancelled. A prior session grant for the same approval scope
-// short-circuits. promptMu serialises outstanding prompts.
-func (c *Controller) requestApproval(ctx context.Context, tool, subject string) (bool, bool, error) {
+// short-circuits. promptMu serialises outstanding prompts. args is the raw
+// tool-call arguments (nil for synthetic plan/replan approvals); writer tools
+// get a per-file preview attached so the approval card can show the diff
+// instead of a blind subject line.
+func (c *Controller) requestApproval(ctx context.Context, tool, subject string, args json.RawMessage) (bool, bool, error) {
 	c.mu.Lock()
 	// YOLO/full access and the just-approved-plan execution window auto-allow
 	// approval-gated tools without prompting. Plan approval is a user decision,
@@ -3796,7 +3883,25 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string) 
 	c.approvals[id] = pendingApproval{tool: tool, subject: subject, autoDrain: c.autoApprovalWouldAllowLocked(tool, subject), reply: reply}
 	c.mu.Unlock()
 
-	c.sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: id, Tool: tool, Subject: subject}})
+	// Rich approval context: raw args plus the previewed file changes (when the
+	// tool can describe them), so the frontend card shows what the call would
+	// actually do. Preview runs before any permission decision and never writes.
+	ap := event.Approval{ID: id, Tool: tool, Subject: subject}
+	if len(args) > 0 {
+		ap.Args = string(args)
+		if c.executor != nil {
+			if chs, ok := c.executor.PreviewToolCall(tool, args); ok {
+				ap.Changes = make([]event.FileChange, len(chs))
+				for i, ch := range chs {
+					ap.Changes[i] = event.FileChange{
+						Path: ch.Path, Kind: string(ch.Kind),
+						Added: ch.Added, Removed: ch.Removed, Diff: ch.Diff,
+					}
+				}
+			}
+		}
+	}
+	c.sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: ap})
 	// The agent now needs the user's attention; a Notification hook can ping an
 	// external channel (desktop notice, phone) while the run blocks on the reply.
 	// Tracked on autosaveWG so Close drains it instead of leaving a hook
