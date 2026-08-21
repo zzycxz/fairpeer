@@ -517,4 +517,6 @@ Go（root+desktop）构建全绿；`internal/tool`(含 builtin)、`internal/evid
 
 **3-7① 实施完成（同日第三批次）**：progressToken 路由按勘察落地——stdioTransport 增 progress 注册表，readLoop 解析 notifications/progress 按 token 派发；Client.callProgressive 在 ctx 带 progress sink 且 transport 支持时注入 _meta.progressToken（不支持则回退普通调用，HTTP transport 暂未实现路由、自然降级）；tools/call 走 callProgressive，服务器进度消息直达工具卡。端到端假服务器测试 TestStdioProgressRoutesByToken 证明通知先于响应到达 sink。plugin 包 61 测试全绿。
 
+**4-5 会话全文搜索 + 3-7② elicitation 实施完成（第四批次）**：4-5——agent.SearchSessions 线性扫 transcripts（大小写不敏感、50 会话/2 摘录上限、rune 边界截窗），hit 携带路由元数据（title/topicId/scope/workspaceRoot），历史面板搜索框 250ms 防抖接入正文匹配的会话分区（元数据过滤命中的去重），点击按真实 SessionMeta 路由打开；含单测。3-7②——stdio transport 识别服务器 elicitation/create 请求，经 callProgressive 注册的桥接器交给 agent ctx 的 Asker（桌面端即 AskCard），决策回写 wire（allow / -32002 declined）；修复决策回写抢 callMu 与 call() 的死锁（改为无锁单行写）；端到端测试覆盖问-答往返与进度并存。plugin 包全绿。
+
 **批次收尾（同日）**：全部改动已按 4 个 commit 落在 `feat/mindmap-read-loop`（chore 遗留收口 / feat(core) M0+M3 后端 / feat(desktop) M0-M3 前端 / docs(spec)），`sign.exe`/`ndvshot.exe`/`dist-crash/` 三个产物刻意未入库（待 gitignore）。下一批建议顺序：3-3（流式补丁预览，先查 provider 层是否暴露 tool-call 参数 delta）→ 3-7①（按上方勘察实施）→ 3-11（中间件化）。
