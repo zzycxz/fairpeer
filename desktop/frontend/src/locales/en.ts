@@ -475,6 +475,7 @@ export const en = {
   "composer.usageDetail.output": "Output",
   "composer.usageDetail.reasoning": "Reasoning",
   "composer.usageDetail.cost": "Last turn cost",
+  "composer.usageDetail.sessionCost": "Session cost so far",
   "composer.usageDetail.rpm": "Rate limit (main)",
   "composer.jobsRunning": "{n} background jobs",
   "projectTree.copyTopicPath": "Copy session path",

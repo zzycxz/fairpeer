@@ -98,6 +98,12 @@ export function UsageChip({ context, usage, budget }: { context?: ContextInfo; u
       {!!usage?.cost && usage.cost > 0 && (
         <Row label={t("composer.usageDetail.cost")} value={fmtCost(usage.cost, usage.currency)} />
       )}
+      {!!context.sessionCost && context.sessionCost > 0 && (
+        <Row
+          label={t("composer.usageDetail.sessionCost")}
+          value={fmtCost(context.sessionCost, context.sessionCostCurrency)}
+        />
+      )}
       {!!budget?.rpm && budget.rpm > 0 && (
         <Row
           label={t("composer.usageDetail.rpm")}

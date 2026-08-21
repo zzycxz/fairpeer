@@ -110,6 +110,8 @@ type readFileRecord struct {
 }
 
 type sessionUsageStats struct {
+	Cost     float64 `json:"cost"`
+	Currency string  `json:"currency,omitempty"`
 	PromptTokens     int   `json:"promptTokens"`
 	CompletionTokens int   `json:"completionTokens"`
 	TotalTokens      int   `json:"totalTokens"`
@@ -274,6 +276,10 @@ func (t *WorkspaceTab) recordUsage(e event.Event) {
 		return
 	}
 	u := e.Usage
+	if e.Pricing != nil {
+		t.usageTelemetry.Cost += e.Pricing.Cost(u)
+		t.usageTelemetry.Currency = e.Pricing.Symbol()
+	}
 	t.telemMu.Lock()
 	t.usageTelemetry.PromptTokens += u.PromptTokens
 	t.usageTelemetry.CompletionTokens += u.CompletionTokens

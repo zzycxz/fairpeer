@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"io"
 	"log/slog"
 	"mime"
@@ -3123,8 +3124,10 @@ type ContextInfo struct {
 	SessionReasoningTokens  int `json:"sessionReasoningTokens,omitempty"`
 	SessionCacheHitTokens   int `json:"sessionCacheHitTokens,omitempty"`
 	SessionCacheMissTokens  int `json:"sessionCacheMissTokens,omitempty"`
-	SessionCacheWriteTokens int `json:"sessionCacheWriteTokens,omitempty"`
-	RequestCount            int `json:"requestCount,omitempty"`
+	SessionCacheWriteTokens int     `json:"sessionCacheWriteTokens,omitempty"`
+	RequestCount            int     `json:"requestCount,omitempty"`
+	SessionCost             float64 `json:"sessionCost,omitempty"`
+	SessionCostCurrency     string  `json:"sessionCostCurrency,omitempty"`
 }
 
 // ContextUsage returns the latest context-window gauge numbers.
@@ -3158,6 +3161,10 @@ func (a *App) ContextUsageForTab(tabID string) ContextInfo {
 		info.SessionCacheHitTokens = telemetry.CacheHitTokens
 		info.SessionCacheMissTokens = telemetry.CacheMissTokens
 		info.SessionCacheWriteTokens = telemetry.CacheWriteTokens
+		if telemetry.Cost > 0 {
+			info.SessionCost = math.Round(telemetry.Cost*10000) / 10000
+			info.SessionCostCurrency = telemetry.Currency
+		}
 		info.RequestCount = telemetry.RequestCount
 	}
 	if ctrl == nil {

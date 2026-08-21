@@ -475,6 +475,7 @@ export const zh: Record<DictKey, string> = {
   "composer.usageDetail.output": "输出",
   "composer.usageDetail.reasoning": "思考",
   "composer.usageDetail.cost": "本轮成本",
+  "composer.usageDetail.sessionCost": "本会话累计成本",
   "composer.usageDetail.rpm": "限流（主）",
   "composer.jobsRunning": "{n} 个后台任务",
   "projectTree.copyTopicPath": "复制任务路径",

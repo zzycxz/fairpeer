@@ -424,6 +424,8 @@ export interface ContextInfo {
   sessionCacheHitTokens?: number;
   sessionCacheMissTokens?: number;
   sessionCacheWriteTokens?: number;
+  sessionCost?: number;
+  sessionCostCurrency?: string;
   requestCount?: number;
 }
 
