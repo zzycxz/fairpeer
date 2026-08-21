@@ -65,6 +65,10 @@ type WorkspaceTab struct {
 	usageTelemetry sessionUsageStats
 	telemMu        sync.Mutex
 
+	// Per-turn lifecycle facts (upgrade spec 4-4).
+	turnFacts   []turnFact
+	turnActive  activeTurn
+
 	model            string // active model ref (for meta)
 	effort           *string
 	mode             string // "normal" | "plan" | "yolo" | "plan-yolo"; yolo/full access is runtime-only
@@ -125,6 +129,37 @@ type tabTelemetrySnapshot struct {
 	Usage     sessionUsageStats `json:"usage"`
 }
 
+// turnFact is one completed turn's lifecycle record (upgrade spec 4-4):
+// duration, retry/recovery counts, tool volume, token split, and failure.
+// Kept as a small ring (last turnFactsCap) per tab for the diagnostics view.
+type turnFact struct {
+	Seq              int    `json:"seq"`
+	DurationMs       int64  `json:"durationMs"`
+	Retries          int    `json:"retries"`
+	ToolCalls        int    `json:"toolCalls"`
+	ToolErrors       int    `json:"toolErrors"`
+	PromptTokens     int    `json:"promptTokens"`
+	CompletionTokens int    `json:"completionTokens"`
+	CacheHitTokens   int    `json:"cacheHitTokens"`
+	CacheMissTokens  int    `json:"cacheMissTokens"`
+	Err              string `json:"err,omitempty"`
+}
+
+// activeTurn accumulates the in-flight turn's facts from the event stream.
+type activeTurn struct {
+	seq        int
+	startedAt  int64
+	retries    int
+	toolCalls  int
+	toolErrors int
+	prompt     int
+	completion int
+	hit        int
+	miss       int
+}
+
+const turnFactsCap = 50
+
 func cloneStringPtr(v *string) *string {
 	if v == nil {
 		return nil
@@ -175,16 +210,63 @@ func (t *WorkspaceTab) recordTurnStarted(now int64) {
 	if t.usageTelemetry.activeTurnStartedAt == 0 {
 		t.usageTelemetry.activeTurnStartedAt = now
 	}
+	t.turnActive = activeTurn{seq: len(t.turnFacts) + 1, startedAt: now}
 	t.telemMu.Unlock()
 }
 
-func (t *WorkspaceTab) recordTurnDone(now int64) {
+func (t *WorkspaceTab) recordTurnDone(now int64, err string) {
 	t.telemMu.Lock()
 	if started := t.usageTelemetry.activeTurnStartedAt; started > 0 && now >= started {
 		t.usageTelemetry.ElapsedMs += now - started
 		t.usageTelemetry.activeTurnStartedAt = 0
 	}
+	a := t.turnActive
+	if a.startedAt > 0 {
+		fact := turnFact{
+			Seq: a.seq, DurationMs: now - a.startedAt, Retries: a.retries,
+			ToolCalls: a.toolCalls, ToolErrors: a.toolErrors,
+			PromptTokens: a.prompt, CompletionTokens: a.completion,
+			CacheHitTokens: a.hit, CacheMissTokens: a.miss, Err: err,
+		}
+		t.turnFacts = append(t.turnFacts, fact)
+		if len(t.turnFacts) > turnFactsCap {
+			t.turnFacts = t.turnFacts[len(t.turnFacts)-turnFactsCap:]
+		}
+	}
+	t.turnActive = activeTurn{}
 	t.telemMu.Unlock()
+}
+
+// recordTurnEvent folds one lifecycle event into the active turn's facts.
+func (t *WorkspaceTab) recordTurnEvent(e event.Event) {
+	t.telemMu.Lock()
+	defer t.telemMu.Unlock()
+	switch e.Kind {
+	case event.Retrying:
+		t.turnActive.retries++
+	case event.ToolDispatch:
+		t.turnActive.toolCalls++
+	case event.ToolResult:
+		if e.Tool.Err != "" {
+			t.turnActive.toolErrors++
+		}
+	case event.Usage:
+		if u := e.Usage; u != nil {
+			t.turnActive.prompt += u.PromptTokens
+			t.turnActive.completion += u.CompletionTokens
+			t.turnActive.hit += u.CacheHitTokens
+			t.turnActive.miss += u.CacheMissTokens
+		}
+	}
+}
+
+// TurnFacts copies the recorded per-turn facts, newest last.
+func (t *WorkspaceTab) TurnFacts() []turnFact {
+	t.telemMu.Lock()
+	defer t.telemMu.Unlock()
+	out := make([]turnFact, len(t.turnFacts))
+	copy(out, t.turnFacts)
+	return out
 }
 
 func (t *WorkspaceTab) recordUsage(e event.Event) {
@@ -240,8 +322,11 @@ func (s *tabEventSink) Emit(e event.Event) {
 			s.recordTurnStarted()
 		case event.Usage:
 			s.recordUsageTelemetry(e)
+			s.recordTurnFactsEvent(e)
+		case event.Retrying, event.ToolDispatch, event.ToolResult:
+			s.recordTurnFactsEvent(e)
 		case event.TurnDone:
-			s.recordTurnDone()
+			s.recordTurnDoneEvent(e)
 		}
 		if m := s.app.metrics.Load(); m != nil {
 			m.observe(e)
@@ -389,16 +474,30 @@ func (s *tabEventSink) recordTurnStarted() {
 	}
 }
 
-func (s *tabEventSink) recordTurnDone() {
+// recordTurnDoneEvent finalizes the turn on both accumulators: session
+// elapsed-time telemetry and the per-turn facts ring (upgrade spec 4-4).
+func (s *tabEventSink) recordTurnDoneEvent(e event.Event) {
 	tab, sp := s.telemetryTab()
 	if tab == nil {
 		return
 	}
-	tab.recordTurnDone(time.Now().UnixMilli())
+	errText := ""
+	if e.Err != nil {
+		errText = e.Err.Error()
+	}
+	tab.recordTurnDone(time.Now().UnixMilli(), errText)
 	if sp != "" {
 		_ = saveTelemetry(sp+".telemetry.json", tab.telemetrySnapshot())
 	}
 }
+
+func (s *tabEventSink) recordTurnFactsEvent(e event.Event) {
+	if tab, _ := s.telemetryTab(); tab != nil {
+		tab.recordTurnEvent(e)
+	}
+}
+
+
 
 func (s *tabEventSink) recordUsageTelemetry(e event.Event) {
 	tab, sp := s.telemetryTab()

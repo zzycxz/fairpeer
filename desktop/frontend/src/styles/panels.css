@@ -3396,3 +3396,9 @@
   opacity: 0.5;
 }
 
+/* Per-turn lifecycle facts (upgrade spec 4-4) */
+.ctx-facts { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
+.ctx-facts__head { font-size: 11.5px; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+.ctx-facts__row { display: grid; grid-template-columns: 2em 4em 3em 4em 1fr 3em; gap: 6px; font-variant-numeric: tabular-nums; font-size: 12px; padding: 1px 2px; }
+.ctx-facts__row--head { opacity: 0.5; font-size: 11px; }
+.ctx-facts__row--err { color: var(--danger, #f85149); }

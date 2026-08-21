@@ -1778,6 +1778,47 @@ type SessionSearchHit struct {
 	Profile  string   `json:"profile,omitempty"`
 }
 
+// TurnFactsView mirrors tabs.turnFact on the wire.
+type TurnFactsView struct {
+	Seq              int    `json:"seq"`
+	DurationMs       int64  `json:"durationMs"`
+	Retries          int    `json:"retries"`
+	ToolCalls        int    `json:"toolCalls"`
+	ToolErrors       int    `json:"toolErrors"`
+	PromptTokens     int    `json:"promptTokens"`
+	CompletionTokens int    `json:"completionTokens"`
+	CacheHitTokens   int    `json:"cacheHitTokens"`
+	CacheMissTokens  int    `json:"cacheMissTokens"`
+	Err              string `json:"err,omitempty"`
+}
+
+// TurnFactsForTab returns the active tab's per-turn lifecycle records
+// (upgrade spec 4-4), oldest first, last 50 turns.
+func (a *App) TurnFactsForTab(tabID string) []TurnFactsView {
+	a.mu.RLock()
+	var tab *WorkspaceTab
+	if t, ok := a.tabs[tabID]; ok {
+		tab = t
+	} else {
+		tab = a.activeTabLocked()
+	}
+	a.mu.RUnlock()
+	if tab == nil {
+		return []TurnFactsView{}
+	}
+	facts := tab.TurnFacts()
+	out := make([]TurnFactsView, 0, len(facts))
+	for _, f := range facts {
+		out = append(out, TurnFactsView{
+			Seq: f.Seq, DurationMs: f.DurationMs, Retries: f.Retries,
+			ToolCalls: f.ToolCalls, ToolErrors: f.ToolErrors,
+			PromptTokens: f.PromptTokens, CompletionTokens: f.CompletionTokens,
+			CacheHitTokens: f.CacheHitTokens, CacheMissTokens: f.CacheMissTokens, Err: f.Err,
+		})
+	}
+	return out
+}
+
 // SearchSessionText full-text searches the active tab's session directory.
 func (a *App) SearchSessionText(query string) []SessionSearchHit {
 	a.mu.RLock()

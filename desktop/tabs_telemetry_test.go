@@ -52,7 +52,7 @@ func TestWorkspaceTabAggregatesSessionUsageTelemetry(t *testing.T) {
 		SessionHit:  70,
 		SessionMiss: 30,
 	})
-	tab.recordTurnDone(start + 1500)
+	tab.recordTurnDone(start + 1500, "")
 
 	got := tab.telemetrySnapshot().Usage
 	if got.RequestCount != 1 || got.PromptTokens != 100 || got.CompletionTokens != 40 || got.TotalTokens != 140 || got.ReasoningTokens != 10 {

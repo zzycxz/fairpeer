@@ -175,6 +175,22 @@ export function ContextPanel({
     return () => window.clearInterval(id);
   }, [refresh]);
 
+  // Per-turn lifecycle facts (upgrade spec 4-4): duration / retries / tool
+  // volume / cache split for the last few turns.
+  const [turnFacts, setTurnFacts] = useState<{ seq: number; durationMs: number; retries: number; toolCalls: number; toolErrors: number; promptTokens: number; completionTokens: number; cacheHitTokens: number; cacheMissTokens: number; err?: string }[]>([]);
+  useEffect(() => {
+    if (!tabId) return;
+    let cancelled = false;
+    const load = () => {
+      app.TurnFactsForTab(tabId)
+        .then((f) => { if (!cancelled) setTurnFacts((f ?? []).slice(-8).reverse()); })
+        .catch(() => {});
+    };
+    load();
+    const id = window.setInterval(load, 3000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, [tabId, refreshKey]);
+
   useEffect(() => {
     void refresh();
   }, [refresh, refreshKey]);
@@ -325,6 +341,30 @@ export function ContextPanel({
         </section>
       </div>
 
+      {turnFacts.length > 0 && (
+        <section className="ctx-facts">
+          <div className="ctx-facts__head">最近轮次</div>
+          <div className="ctx-facts__row ctx-facts__row--head">
+            <span>#</span><span>耗时</span><span>重试</span><span>工具</span><span>tokens</span><span>缓存</span>
+          </div>
+          {turnFacts.map((f) => {
+            const cachePct = f.cacheHitTokens + f.cacheMissTokens > 0
+              ? Math.round((f.cacheHitTokens / (f.cacheHitTokens + f.cacheMissTokens)) * 100)
+              : null;
+            return (
+              <div key={f.seq} className={`ctx-facts__row${f.err ? " ctx-facts__row--err" : ""}`} title={f.err || undefined}>
+                <span>{f.seq}</span>
+                <span>{(f.durationMs / 1000).toFixed(1)}s</span>
+                <span>{f.retries > 0 ? `↻${f.retries}` : "—"}</span>
+                <span>{f.toolCalls}{f.toolErrors > 0 ? ` !${f.toolErrors}` : ""}</span>
+                <span>{fmtTokensShort(f.promptTokens)}/{fmtTokensShort(f.completionTokens)}</span>
+                <span>{cachePct === null ? "—" : `${cachePct}%`}</span>
+              </div>
+            );
+          })}
+        </section>
+      )}
+
     </div>
   );
 }
@@ -436,6 +476,13 @@ function FileTable({
           </div>
         );
       })}
+
     </div>
   );
+}
+
+function fmtTokensShort(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
 }
