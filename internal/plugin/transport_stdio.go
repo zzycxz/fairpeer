@@ -41,7 +41,11 @@ type stdioTransport struct {
 	mu      sync.Mutex
 	nextID  int
 	pending map[int]chan rpcResponse
-	readErr error // set once the reader goroutine exits; further calls fail fast
+	// progress routes server "notifications/progress" to the waiting call's
+	// sink by the progressToken that call injected into its params (upgrade
+	// spec 3-7①). Other server notifications are still dropped.
+	progress map[string]func(string)
+	readErr  error // set once the reader goroutine exits; further calls fail fast
 
 	waitOnce sync.Once
 }
@@ -433,6 +437,22 @@ func (t *stdioTransport) readLoop() {
 		}
 		_ = json.Unmarshal(line, &probe)
 		if probe.Method != "" {
+			if probe.Method == "notifications/progress" {
+				var n struct {
+					Params struct {
+						ProgressToken any    `json:"progressToken"`
+						Message       string `json:"message"`
+					} `json:"params"`
+				}
+				if json.Unmarshal(line, &n) == nil {
+					t.mu.Lock()
+					fn := t.progress[fmt.Sprint(n.Params.ProgressToken)]
+					t.mu.Unlock()
+					if fn != nil && n.Params.Message != "" {
+						fn(n.Params.Message)
+					}
+				}
+			}
 			continue // server notification/request, not a response to one of our calls
 		}
 		var resp rpcResponse
@@ -452,6 +472,23 @@ func (t *stdioTransport) readLoop() {
 // failAll records the terminal read error and unblocks every pending call by
 // closing its channel; a caller distinguishes this from a real response by the
 // closed-channel receive.
+// registerProgress routes progress notifications for the given token to fn
+// until the matching call finishes and unregisters it.
+func (t *stdioTransport) registerProgress(token string, fn func(string)) {
+	t.mu.Lock()
+	if t.progress == nil {
+		t.progress = map[string]func(string){}
+	}
+	t.progress[token] = fn
+	t.mu.Unlock()
+}
+
+func (t *stdioTransport) unregisterProgress(token string) {
+	t.mu.Lock()
+	delete(t.progress, token)
+	t.mu.Unlock()
+}
+
 func (t *stdioTransport) failAll(err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

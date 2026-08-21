@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/event"
@@ -89,6 +90,15 @@ type transport interface {
 	call(ctx context.Context, method string, params any) (json.RawMessage, error)
 	notify(ctx context.Context, method string, params any) error
 	close()
+}
+
+// progressRouter is an optional transport capability (upgrade spec 3-7①):
+// the caller injects a progressToken into params._meta, registers a sink,
+// and the transport routes the server's "notifications/progress" back by
+// token. Transports without it simply don't stream progress.
+type progressRouter interface {
+	registerProgress(token string, fn func(string))
+	unregisterProgress(token string)
 }
 
 // Host owns the running plugin connections and closes them together. It also
@@ -847,6 +857,32 @@ func newTransport(ctx context.Context, s Spec) (transport, error) {
 	}
 }
 
+// progressSeq mints unique progress tokens for callProgressive.
+var progressSeq atomic.Int64
+
+// callProgressive is call plus MCP progress streaming (upgrade spec 3-7①):
+// when the ctx carries a progress sink (tool.WithProgress, set per call by
+// the agent) and the transport can route notifications, a progressToken is
+// injected into params._meta and server progress messages flow to the tool
+// card while the call runs. Falls back to a plain call otherwise.
+func (c *Client) callProgressive(ctx context.Context, method string, params map[string]any) (json.RawMessage, error) {
+	pr, canRoute := c.t.(progressRouter)
+	sink, hasSink := tool.ProgressFrom(ctx)
+	if !canRoute || !hasSink {
+		return c.call(ctx, method, params)
+	}
+	token := fmt.Sprintf("fp-%d", progressSeq.Add(1))
+	meta, _ := params["_meta"].(map[string]any)
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta["progressToken"] = token
+	params["_meta"] = meta
+	pr.registerProgress(token, sink)
+	defer pr.unregisterProgress(token)
+	return c.call(ctx, method, params)
+}
+
 func (c *Client) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	res, err := c.t.call(ctx, method, params)
 	if err == nil {
@@ -1049,7 +1085,7 @@ func (t *remoteTool) Execute(ctx context.Context, args json.RawMessage) (string,
 			return "", fmt.Errorf("invalid args: %w", err)
 		}
 	}
-	res, err := t.client.call(ctx, "tools/call", map[string]any{
+	res, err := t.client.callProgressive(ctx, "tools/call", map[string]any{
 		"name":      t.rawName,
 		"arguments": argMap,
 	})
