@@ -216,14 +216,28 @@ func ListBranches(dir string) ([]BranchInfo, error) {
 	}
 	var out []BranchInfo
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
+		var path string
+		var info os.FileInfo
+		if e.IsDir() {
+			// Per-session folder layout (<sessions>/<id>/<id>.jsonl): the
+			// session is the directory; resolve the jsonl inside it. Anything
+			// else a directory might be (stray subfolder) is skipped.
+			inner := filepath.Join(dir, e.Name(), e.Name()+".jsonl")
+			st, err := os.Stat(inner)
+			if err != nil {
+				continue
+			}
+			path, info = inner, st
+		} else if filepath.Ext(e.Name()) == ".jsonl" {
+			// Legacy flat layout (<sessions>/<id>.jsonl) still lists.
+			var err error
+			if info, err = e.Info(); err != nil {
+				continue
+			}
+			path = filepath.Join(dir, e.Name())
+		} else {
 			continue
 		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		path := filepath.Join(dir, e.Name())
 		meta, ok, err := LoadBranchMeta(path)
 		if err != nil {
 			continue

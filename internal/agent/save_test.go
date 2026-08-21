@@ -203,8 +203,9 @@ func TestContinueSessionPathReusesPriorFile(t *testing.T) {
 func TestContinueSessionPathMintsFreshWhenNoPrior(t *testing.T) {
 	dir := t.TempDir()
 	got := ContinueSessionPath("", dir, "test-provider")
-	if filepath.Dir(got) != dir || !strings.HasSuffix(got, ".jsonl") {
-		t.Fatalf("fresh path = %q, want a .jsonl under %q", got, dir)
+	// Per-session-folder layout: the jsonl sits one level under dir.
+	if filepath.Dir(filepath.Dir(got)) != dir || !strings.HasSuffix(got, ".jsonl") {
+		t.Fatalf("fresh path = %q, want a .jsonl in its own folder under %q", got, dir)
 	}
 }
 

@@ -16,8 +16,10 @@ func TestEmbeddedPublicKeyParses(t *testing.T) {
 	if err := key.UnmarshalText([]byte(publicKey)); err != nil {
 		t.Fatalf("embedded public key does not parse: %v", err)
 	}
-	if got := fmt.Sprintf("%016X", key.ID()); got != "1123CC6D2198A9D5" {
-		t.Fatalf("embedded public key ID = %s, want 1123CC6D2198A9D5", got)
+	// Key rotated 2026-08-21 (re-signing pass); the constant pins whichever
+	// key is currently embedded so a copy-paste slip still fails here.
+	if got := fmt.Sprintf("%016X", key.ID()); got != "DAEB1C7D5B320F6C" {
+		t.Fatalf("embedded public key ID = %s, want DAEB1C7D5B320F6C", got)
 	}
 }
 

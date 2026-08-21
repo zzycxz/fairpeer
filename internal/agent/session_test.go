@@ -290,34 +290,36 @@ func TestPreviewSessionMalformed(t *testing.T) {
 
 // --- NewSessionPath ---
 
+// The per-session-folder layout (storage refactor, CHANGELOG 08-21) is
+// deliberate: <dir>/<yyyymmdd-hhmmss-xxxx>/<same-id>.jsonl, model no longer in
+// the name. These tests assert that shape; the model parameter is accepted for
+// call-site compatibility and ignored.
 func TestNewSessionPath(t *testing.T) {
 	dir := t.TempDir()
 	path := NewSessionPath(dir, "test-provider-chat")
 	if !strings.HasSuffix(path, ".jsonl") {
 		t.Errorf("should end with .jsonl: %s", path)
 	}
-	if !strings.Contains(path, "test-provider-chat") {
-		t.Errorf("should contain model name: %s", path)
-	}
+	folder := filepath.Base(filepath.Dir(path))
 	if !strings.HasPrefix(path, dir) {
 		t.Errorf("should be under dir: %s", path)
+	}
+	if filepath.Base(path) != folder+".jsonl" {
+		t.Errorf("file should be <folder>/<folder>.jsonl, got %s", path)
 	}
 }
 
 func TestNewSessionPathSanitizesSlashes(t *testing.T) {
 	path := NewSessionPath("/dir", "provider/model")
 	base := filepath.Base(path)
-	if strings.Contains(base, "/") {
-		t.Errorf("filename should not contain /: %s", base)
-	}
-	if !strings.Contains(base, "provider-model") {
-		t.Errorf("slashes should be replaced: %s", base)
+	if strings.ContainsAny(base, "/\\") {
+		t.Errorf("filename should not contain separators: %s", base)
 	}
 }
 
 func TestNewSessionPathEmptyModel(t *testing.T) {
 	path := NewSessionPath("/dir", "")
-	if !strings.Contains(path, "session") {
-		t.Errorf("empty model should use 'session' fallback: %s", path)
+	if !strings.HasSuffix(path, ".jsonl") || filepath.Base(filepath.Dir(path))+".jsonl" != filepath.Base(path) {
+		t.Errorf("empty model should still mint the standard layout: %s", path)
 	}
 }
