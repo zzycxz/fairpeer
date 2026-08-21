@@ -1163,7 +1163,16 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		)
 	}
 	riskOverrides := buildRiskOverrides(cfg.Plugins)
-	headlessGate := permission.NewGate(policy, nil)
+	// Sub-agent gate (upgrade spec 3-10): same policy as the main gate but
+	// headless — the sub-agent runs unattended inside the main agent's turn.
+	// Ask-level writers pass through to preserve autonomy (the main agent
+	// already approved the task that spawned this sub-agent); external-risk
+	// operations are denied because there is no human to confirm. When a
+	// bridge approver is installed (interactive desktop), Ask-level calls
+	// surface to the user through the main agent's approval card instead of
+	// silently passing — closing the gap where a doc_write ran unapproved
+	// inside a sub-agent while the same call in the main loop would prompt.
+	headlessGate := permission.NewGate(policy, subagentApprover)
 	headlessGate.RiskOverrides = riskOverrides
 
 	// Hooks: load the global settings.json plus the project's (only when trusted —

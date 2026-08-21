@@ -1597,6 +1597,7 @@ func (c *Controller) EnableInteractiveApproval() {
 	if c.executor != nil {
 		c.executor.SetGate(c.newInteractiveGate())
 		c.executor.SetAsker(c)
+
 	}
 }
 
@@ -3671,6 +3672,13 @@ func (c *Controller) refreshMemoryLocked() {
 // gateApprover adapts the Controller to permission.Approver. It is distinct
 // from the public Approve command (different signature, different direction).
 type gateApprover struct{ c *Controller }
+
+// GateApprover returns the controller's interactive approver for external
+// bridging (upgrade spec 3-10: the desktop wires it into boot's sub-agent
+// gate). Nil when the controller has no interactive approval.
+func (c *Controller) GateApprover() permission.Approver {
+	return gateApprover{c}
+}
 
 func (g gateApprover) Approve(ctx context.Context, tool, subject string, args json.RawMessage) (bool, bool, error) {
 	// Auto-allow without prompting while executing a just-approved plan (the plan

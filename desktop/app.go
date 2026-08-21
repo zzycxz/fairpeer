@@ -30,6 +30,7 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/agent"
 	"github.com/zzycxz/fairpeer/internal/boot"
+	"github.com/zzycxz/fairpeer/internal/permission"
 	"github.com/zzycxz/fairpeer/internal/bot"
 	"github.com/zzycxz/fairpeer/internal/browserlaunch"
 	"github.com/zzycxz/fairpeer/internal/browseruse"
@@ -6934,4 +6935,10 @@ func (a *App) ConnectKey(apiKey string) error {
 		a.mu.Unlock()
 	}
 	return nil
+}
+
+// gateApproverForSubagents adapts the controller to boot's sub-agent bridge
+// (spec 3-10). Defined here to avoid the boot→control import cycle.
+func gateApproverForSubagents(ctrl *control.Controller) permission.Approver {
+	return ctrl.GateApprover()
 }
