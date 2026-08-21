@@ -515,4 +515,6 @@ Go（root+desktop）构建全绿；`internal/tool`(含 builtin)、`internal/evid
 
 **3-7① 实施前勘察（同日，未实施）**：MCP 进度透传的断点在 `transport_stdio.go` readLoop 的 `probe.Method != "" → continue`（HTTP transport 同构）。正确做法不是加全局回调（通知无调用上下文），而是 **progressToken 路由**：`Call()` 发请求时登记 `token→onProgress` 回调；readLoop 解析 `notifications/progress`（params 含 progressToken/message）按 token 派发；plugin 工具包装层把 `tool.FromContext` 的 progress sink 桥给该回调，事件即自动走 agent 的 ToolProgress 通道到前端流式输出。两个 transport（stdio/HTTP）各需 ~40 行，plugin.go 调用点 ~20 行。
 
+**3-7① 实施完成（同日第三批次）**：progressToken 路由按勘察落地——stdioTransport 增 progress 注册表，readLoop 解析 notifications/progress 按 token 派发；Client.callProgressive 在 ctx 带 progress sink 且 transport 支持时注入 _meta.progressToken（不支持则回退普通调用，HTTP transport 暂未实现路由、自然降级）；tools/call 走 callProgressive，服务器进度消息直达工具卡。端到端假服务器测试 TestStdioProgressRoutesByToken 证明通知先于响应到达 sink。plugin 包 61 测试全绿。
+
 **批次收尾（同日）**：全部改动已按 4 个 commit 落在 `feat/mindmap-read-loop`（chore 遗留收口 / feat(core) M0+M3 后端 / feat(desktop) M0-M3 前端 / docs(spec)），`sign.exe`/`ndvshot.exe`/`dist-crash/` 三个产物刻意未入库（待 gitignore）。下一批建议顺序：3-3（流式补丁预览，先查 provider 层是否暴露 tool-call 参数 delta）→ 3-7①（按上方勘察实施）→ 3-11（中间件化）。
