@@ -9,6 +9,8 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,16 +33,21 @@ type Bridge struct {
 	store   KeyStore
 	exec    CommandExecutor
 	pairing *Pairing
-	signal  *SignalClient
+	signal  *SignalClient // 主链路：嵌入式/本地 K（LAN 模式）或公网 K（单 K 模式）
+	cloud   *SignalClient // 云跳板长连（公网 K 第二链路）；nil = 未启用
 	audit   *Audit
 
-	mu      sync.Mutex
-	conns   map[string]*Conn            // connId → Conn (one per C connection)
-	byDev   map[string]*Conn            // devC → Conn (latest, for event routing)
-	knockS  map[string]*net.UDPConn     // connId → 敲门用的 ICE 共享 UDP socket
-	tabSub  map[string]map[string]bool  // tabId → set[connId]
-	ringBuf map[string]*tabRing         // tabId → 事件环形缓冲（resync 增量同步，§11.2）
-	ctx     context.Context
+	mu       sync.Mutex
+	conns    map[string]*Conn            // connId → Conn (one per C connection)
+	byDev    map[string]*Conn            // devC → Conn (latest, for event routing)
+	connLink map[string]*SignalClient    // connId → offer 到达的信令链路（answer/ice 原路返回）
+	knockS   map[string]*net.UDPConn     // connId → 敲门用的 ICE 共享 UDP socket
+	tabSub   map[string]map[string]bool  // tabId → set[connId]
+	ringBuf  map[string]*tabRing         // tabId → 事件环形缓冲（resync 增量同步，§11.2）
+	cloudMu  sync.Mutex                  // cloud 链路的启停互斥（SetCloudRelay 热切换）
+	cloudCtx context.Context             // cloud 长连的运行 ctx（Close 用）
+	cloudCancel context.CancelFunc
+	ctx      context.Context
 
 	onReady func(*Conn) // 全局 onReady hook（debug-server 注册，发测试 wireEvent）
 
@@ -67,24 +74,134 @@ func NewBridge(cfg Config, sPriv ed25519.PrivateKey, sPub ed25519.PublicKey, sto
 	b := &Bridge{
 		cfg: cfg, sPriv: sPriv, sPub: sPub, devS: DevID(sPub),
 		store: store, exec: exec, audit: audit,
-		conns:   map[string]*Conn{},
-		byDev:   map[string]*Conn{},
-		knockS:  map[string]*net.UDPConn{},
-		tabSub:  map[string]map[string]bool{},
-		ringBuf: map[string]*tabRing{},
+		conns:    map[string]*Conn{},
+		byDev:    map[string]*Conn{},
+		connLink: map[string]*SignalClient{},
+		knockS:   map[string]*net.UDPConn{},
+		tabSub:   map[string]map[string]bool{},
+		ringBuf:  map[string]*tabRing{},
 	}
 	b.pairing = NewPairing(cfg.SignalURL, sPub, store, audit)
-	// SignalClient needs a SignalHandler — Bridge itself.
-	b.signal = NewSignalClient(cfg.SignalURL, sPub, sPriv, b, audit)
+	b.signal = b.newLink(cfg.SignalURL)
 	return b
 }
 
-// Start connects the SignalClient to K and keeps it connected. Blocks until
-// ctx is done. Call in a goroutine.
+// newLink 建一条带来源标签的信令长连：消息到达时带上链路指针 + K 地址，
+// answer/ice 原路返回、pair_exchange 记源。主链路（signal）与云跳板链路
+// （cloud）都从这里构造。
+func (b *Bridge) newLink(url string) *SignalClient {
+	route := &linkRoute{b: b, url: url}
+	sc := NewSignalClient(url, b.sPub, b.sPriv, route, b.audit)
+	route.sc = sc
+	return sc
+}
+
+// linkRoute 是挂在一条 SignalClient 上的 SignalHandler：把到达消息连同
+// 来源链路转发给 Bridge.onSignalMsg。
+type linkRoute struct {
+	b   *Bridge
+	sc  *SignalClient
+	url string
+}
+
+func (l *linkRoute) OnSignalMsg(msg SignalMsg) { l.b.onSignalMsg(msg, l.sc, l.url) }
+
+// Start connects the SignalClients to their Ks and keeps them connected.
+// Blocks until ctx is done. Call in a goroutine.
 func (b *Bridge) Start(ctx context.Context) error {
 	b.ctx = ctx
 	b.pairing.SetAutoConfirm(b.cfg.AutoConfirm)
+	if b.cfg.CloudSignalURL != "" {
+		b.SetCloudRelay(b.cfg.CloudSignalURL)
+	}
 	return b.signal.Run(ctx)
+}
+
+// SetCloudRelay 热切换云跳板长连（设置面板「公网跳板」开关）。url 为空 =
+// 关闭并断开云链路，回到纯局域网/单 K 行为。turnParam 为进二维码 turn=
+// 字段的凭据串（"user:pass@host:port"，空 = 不带 TURN）。
+func (b *Bridge) SetCloudRelay(url string) {
+	b.cloudMu.Lock()
+	defer b.cloudMu.Unlock()
+	if b.cloudCancel != nil {
+		b.cloudCancel()
+		b.cloud.Close()
+		b.cloudCancel = nil
+	}
+	b.cloud = nil
+	b.cfg.CloudSignalURL = url
+	b.pairing.SetCloudRelay(url, b.turnQRParam())
+	if url == "" {
+		b.audit.Info("cloud_relay_off", b.devS, nil)
+		return
+	}
+	var ctx context.Context
+	if b.ctx != nil {
+		ctx, b.cloudCancel = context.WithCancel(b.ctx)
+	} else {
+		// Start 未调（测试路径）：独立 ctx，Start 后由下一次 SetCloudRelay 接管。
+		ctx, b.cloudCancel = context.WithCancel(context.Background())
+	}
+	b.cloud = b.newLink(url)
+	b.audit.Info("cloud_relay_on", b.devS, "url", url, "turn", b.turnQRParam() != "")
+	go b.cloud.Run(ctx)
+}
+
+// CloudRelayURL 返回当前云跳板配置（状态面板显示）。
+func (b *Bridge) CloudRelayURL() string {
+	b.cloudMu.Lock()
+	defer b.cloudMu.Unlock()
+	return b.cfg.CloudSignalURL
+}
+
+// CloudConnected 报告云跳板长连是否在线（状态面板）。
+func (b *Bridge) CloudConnected() bool {
+	b.cloudMu.Lock()
+	sc := b.cloud
+	b.cloudMu.Unlock()
+	return sc != nil && sc.Connected()
+}
+
+// turnQRParam 从 Config 拼二维码 turn= 字段（取第一个 TURN 服务器的
+// host:port + REST 凭据）。未启用 TURN 或缺凭据 → 空。
+func (b *Bridge) turnQRParam() string {
+	if !b.cfg.TURNEnabled || len(b.cfg.TURNServers) == 0 ||
+		b.cfg.TURNUser == "" || b.cfg.TURNPass == "" {
+		return ""
+	}
+	host := b.cfg.TURNServers[0]
+	// "turn:host:port[?transport=x]" → "host:port"
+	if i := strings.LastIndex(host, ":"); i >= 0 {
+		host = host[:i]
+	}
+	host = strings.TrimPrefix(strings.TrimPrefix(host, "turn:"), "stun:")
+	return b.cfg.TURNUser + ":" + b.cfg.TURNPass + "@" + host
+}
+
+// isLoopbackSignal：主链路是否为嵌入式/本地 K（LAN 模式）。
+func isLoopbackSignal(signalURL string) bool {
+	u, err := url.Parse(signalURL)
+	if err != nil {
+		return false
+	}
+	switch u.Hostname() {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	}
+	return false
+}
+
+// linkIsCloud：offer 经公网路径到达（云跳板链路，或主链路本身就是公网 K）。
+// 决定该连接的 ICE 配置：云路径 → STUN+TURN（跨网打洞 + 中转兜底）；
+// 本地路径 → 纯 host candidate（同网直连，零云）。
+func (b *Bridge) linkIsCloud(sc *SignalClient) bool {
+	if sc == nil {
+		return false
+	}
+	if sc == b.signal {
+		return !isLoopbackSignal(b.cfg.SignalURL)
+	}
+	return true
 }
 
 // SetOnReady 注册全局 onReady hook：每个 Conn 握手完成时回调（debug-server 用它
@@ -140,15 +257,21 @@ func (b *Bridge) Unpair(devC string) {
 
 // --- SignalHandler (K → S inbound) ---
 
+// OnSignalMsg 是主链路的入口（兼容旧调用方/测试）。带来源的分发在
+// onSignalMsg —— 云跳板链路也走那里。
 func (b *Bridge) OnSignalMsg(msg SignalMsg) {
+	b.onSignalMsg(msg, b.signal, b.cfg.SignalURL)
+}
+
+func (b *Bridge) onSignalMsg(msg SignalMsg, from *SignalClient, fromURL string) {
 	b.audit.Info("signal_msg", "type", msg.Type, "from", msg.From, "to", msg.To, "connId", msg.ConnID)
 	switch msg.Type {
 	case "offer":
-		b.handleOffer(msg)
+		b.handleOffer(msg, from)
 	case "ice":
 		b.handleICE(msg)
 	case "pair_exchange":
-		b.pairing.OnExchange(msg)
+		b.pairing.OnExchangeFrom(msg, fromURL)
 	case "unavailable":
 		// our target wasn't online; nothing to do (we're S, we don't initiate)
 	default:
@@ -156,21 +279,48 @@ func (b *Bridge) OnSignalMsg(msg SignalMsg) {
 	}
 }
 
-func (b *Bridge) handleOffer(msg SignalMsg) {
+func (b *Bridge) handleOffer(msg SignalMsg, from *SignalClient) {
 	if msg.ConnID == "" {
 		return
 	}
-	// one Conn per connId; ignore duplicate offers on the same connId
-	b.mu.Lock()
-	if _, exists := b.conns[msg.ConnID]; exists {
-		b.mu.Unlock()
-		return
+	// P2-2: 入站 offer 验签（C 出站已签名，双端闭环）。明确不符 → 丢弃；
+	// 无签名（旧客户端）放行——AEAD 握手才是身份硬门槛，这层是纵深防御。
+	if msg.Sig != "" {
+		if !b.verifyPeerSig(msg.From,
+			"offer|"+msg.ConnID+"|"+msg.From+"|"+b.devS+"|"+msg.SDP, msg.Sig) {
+			b.audit.Error("offer_bad_sig", msg.From, errors.New("ed25519 mismatch"))
+			return
+		}
+	} else {
+		b.audit.Info("offer_unsigned", msg.From, "")
 	}
-	// S2: max_connections 强制（§11.3）—— 达上限拒绝新 C（第 N+1 个）
-	if b.cfg.MaxConnections > 0 && len(b.conns) >= b.cfg.MaxConnections {
+	// one Conn per connId; a SECOND offer on an existing connId is an ICE
+	// restart（重协商：换网络/中转升级直连/failed 自愈）。DataChannel 与应用层
+	// 加密会话不受影响（同 DTLS 证书，SCTP 保留），只换传输路径。
+	b.mu.Lock()
+	existing := b.conns[msg.ConnID]
+	if existing == nil && b.cfg.MaxConnections > 0 && len(b.conns) >= b.cfg.MaxConnections {
 		b.mu.Unlock()
 		b.audit.Info("max_connections_reached", "devC", msg.From,
 			"current", len(b.conns), "max", b.cfg.MaxConnections)
+		return
+	}
+	b.mu.Unlock()
+	if existing != nil {
+		answerSDP, err := existing.HandleOffer(msg.SDP)
+		if err != nil {
+			b.audit.Error("ice_restart_offer", msg.From, err)
+			return
+		}
+		ansSigMsg := "answer|" + msg.ConnID + "|" + b.devS + "|" + msg.From + "|" + answerSDP
+		ansSig := ed25519.Sign(b.sPriv, []byte(ansSigMsg))
+		_ = b.linkSend(msg.ConnID, SignalMsg{
+			Type: "answer", ConnID: msg.ConnID,
+			From: b.devS, To: msg.From,
+			SDP:  answerSDP,
+			Sig: base64.URLEncoding.EncodeToString(ansSig),
+		})
+		b.audit.Info("ice_restart_answered", msg.From, "connId", msg.ConnID)
 		return
 	}
 	router := NewCommandRouter(msg.From, b.exec, b.cfg.DefaultPermissions(), b.audit)
@@ -238,6 +388,7 @@ func (b *Bridge) handleOffer(msg SignalMsg) {
 	conn.SetOnClose(func(c *Conn) {
 		b.mu.Lock()
 		delete(b.conns, connID)
+		delete(b.connLink, connID)
 		if kc, ok := b.knockS[connID]; ok {
 			kc.Close() // 敲门 socket 随连接关闭
 			delete(b.knockS, connID)
@@ -251,14 +402,18 @@ func (b *Bridge) handleOffer(msg SignalMsg) {
 		b.mu.Unlock()
 		b.audit.ConnClose(c.DevC())
 	})
+	b.mu.Lock()
 	b.conns[connID] = conn
+	b.connLink[connID] = from // answer/ice 原路返回（哪条链路来的 offer）
 	b.mu.Unlock()
 
-	// create PeerConnection with the configured ICE servers.
+	// create PeerConnection with the per-link ICE servers:
+	// 云路径（云跳板链路 / 主链路即公网 K）→ STUN+TURN 跨网打洞 + 中转兜底；
+	// 本地路径（嵌入式 K 同网）→ 纯 host candidate，零云。
 	// UDPKnock 开启时：专用 UDP socket + UDPMux 注入 ICE——敲门包从 ICE
 	// 同一端口发出，打开的 NAT 映射对 ICE connectivity check 直接生效
 	//（换了 socket 敲门是无效的：NAT 映射按内网五元组）。
-	pcCfg := webrtc.Configuration{ICEServers: toICEServers(b.cfg)}
+	pcCfg := webrtc.Configuration{ICEServers: toICEServers(b.cfg, b.linkIsCloud(from))}
 	if b.cfg.UDPKnock {
 		uc, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
 		if err != nil {
@@ -279,7 +434,7 @@ func (b *Bridge) handleOffer(msg SignalMsg) {
 		b.mu.Lock()
 		b.knockS[connID] = uc
 		b.mu.Unlock()
-		b.attachPC(msg, conn, pc)
+		b.attachPC(msg, conn, pc, from)
 		return
 	}
 	pc, err := webrtc.NewPeerConnection(pcCfg)
@@ -288,14 +443,14 @@ func (b *Bridge) handleOffer(msg SignalMsg) {
 		conn.close()
 		return
 	}
-	b.attachPC(msg, conn, pc)
+	b.attachPC(msg, conn, pc, from)
 }
 
 // attachPC 接上候选转发/状态回调、发 answer——knock 与普通两条 PC 创建
-// 路径的公共尾部。
-func (b *Bridge) attachPC(msg SignalMsg, conn *Conn, pc *webrtc.PeerConnection) {
+// 路径的公共尾部。answer/ice 经 linkSend 原路返回（offer 从哪条链路来）。
+func (b *Bridge) attachPC(msg SignalMsg, conn *Conn, pc *webrtc.PeerConnection, from *SignalClient) {
 	connID := msg.ConnID
-	// forward our ICE candidates back to C via K
+	// forward our ICE candidates back to C via K（原路返回）
 	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c == nil {
 			return
@@ -304,7 +459,7 @@ func (b *Bridge) attachPC(msg SignalMsg, conn *Conn, pc *webrtc.PeerConnection) 
 		// P2-2: 签名 ICE（防信令伪造）
 		sigMsg := "ice|" + connID + "|" + b.devS + "|" + msg.From + "|" + candJSON
 		sig := ed25519.Sign(b.sPriv, []byte(sigMsg))
-		_ = b.signal.Send(SignalMsg{
+		_ = b.linkSend(connID, SignalMsg{
 			Type: "ice", ConnID: connID,
 			From: b.devS, To: msg.From,
 			Cand: candJSON,
@@ -328,7 +483,7 @@ func (b *Bridge) attachPC(msg SignalMsg, conn *Conn, pc *webrtc.PeerConnection) 
 	// P2-2: 签名 answer（防信令伪造）
 	ansSigMsg := "answer|" + connID + "|" + b.devS + "|" + msg.From + "|" + answerSDP
 	ansSig := ed25519.Sign(b.sPriv, []byte(ansSigMsg))
-	_ = b.signal.Send(SignalMsg{
+	_ = b.linkSend(connID, SignalMsg{
 		Type: "answer", ConnID: connID,
 		From: b.devS, To: msg.From,
 		SDP:  answerSDP,
@@ -336,7 +491,28 @@ func (b *Bridge) attachPC(msg SignalMsg, conn *Conn, pc *webrtc.PeerConnection) 
 	})
 }
 
+// linkSend 原路返回：answer/ice 从 offer 到达的信令链路发回（嵌入式 K 的
+// answer 不会跑到云 K 去，反之亦然）。connId 未知时退回主链路。
+func (b *Bridge) linkSend(connID string, msg SignalMsg) error {
+	b.mu.Lock()
+	sc := b.connLink[connID]
+	b.mu.Unlock()
+	if sc == nil {
+		sc = b.signal
+	}
+	return sc.Send(msg)
+}
+
 func (b *Bridge) handleICE(msg SignalMsg) {
+	// P2-2: 入站 ice 验签（假候选是信令层注入面）。明确不符 → 丢弃；
+	// 无法验证/无签名放行（同 offer 的纵深防御取舍）。
+	if msg.Sig != "" {
+		if !b.verifyPeerSig(msg.From,
+			"ice|"+msg.ConnID+"|"+msg.From+"|"+b.devS+"|"+msg.Cand, msg.Sig) {
+			b.audit.Error("ice_bad_sig", msg.From, errors.New("ed25519 mismatch"))
+			return
+		}
+	}
 	b.mu.Lock()
 	conn := b.conns[msg.ConnID]
 	b.mu.Unlock()
@@ -345,6 +521,23 @@ func (b *Bridge) handleICE(msg SignalMsg) {
 	}
 	_ = conn.AddICECandidate(msg.Cand)
 	b.knockAt(msg.ConnID, msg.Cand)
+}
+
+// verifyPeerSig 验 C 的信令签名（P2-2）。签名串布局与 C 端出站签名同构：
+// "<type>|<connId>|<devC>|<devS>|<payload>"。返回 false 仅在「明确不符」；
+// pub 未知（配对确认异步进行中）放行——AEAD 握手才是身份硬门槛，这层是
+// 信令伪造的纵深防御，不为时序竞争误伤正常配对。
+func (b *Bridge) verifyPeerSig(devC, signed, sigB64 string) bool {
+	pub, ok := b.pairing.PeerPub(devC)
+	if !ok {
+		b.audit.Info("sig_verify_skip_no_pub", devC, "")
+		return true
+	}
+	sig, err := b64uAny(sigB64)
+	if err != nil {
+		return false
+	}
+	return ed25519.Verify(ed25519.PublicKey(pub), []byte(signed), sig)
 }
 
 // knockAt 单包敲门：收到 C 的 srflx 候选（C 的公网映射，经远程 STUN 探得）
@@ -499,8 +692,16 @@ func (b *Bridge) NotifySessionListChanged() {
 	}
 }
 
-// toICEServers builds the pion ICEServers from config (STUN always; TURN opt-in).
-func toICEServers(cfg Config) []webrtc.ICEServer {
+// toICEServers builds the pion ICEServers for ONE connection.
+// cloud=false（offer 经本地 K 到达，同网）：nil —— 纯 host candidate，
+// 零云（局域网会话连 STUN 都不碰）。
+// cloud=true（offer 经公网路径到达，跨网）：STUN 打洞 + TURN 中转兜底；
+// TURN 带 REST 凭据（turnservers 配了 user/pass 才进，缺凭据的 TURN
+// 会被 coturn 拒绝，宁可不配也别白试）。
+func toICEServers(cfg Config, cloud bool) []webrtc.ICEServer {
+	if !cloud {
+		return nil
+	}
 	// 敲门依赖的远程 STUN 去重后并入——两端都要能探到 srflx，敲门才有目标。
 	seen := map[string]bool{}
 	var urls []string
@@ -519,7 +720,15 @@ func toICEServers(cfg Config) []webrtc.ICEServer {
 	}
 	if cfg.TURNEnabled {
 		for _, s := range cfg.TURNServers {
-			servers = append(servers, webrtc.ICEServer{URLs: []string{s}})
+			if cfg.TURNUser != "" && cfg.TURNPass != "" {
+				servers = append(servers, webrtc.ICEServer{
+					URLs:       []string{s},
+					Username:   cfg.TURNUser,
+					Credential: cfg.TURNPass,
+				})
+			} else {
+				servers = append(servers, webrtc.ICEServer{URLs: []string{s}})
+			}
 		}
 	}
 	return servers

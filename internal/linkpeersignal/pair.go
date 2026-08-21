@@ -40,6 +40,7 @@ var (
 	ErrCodeConflict = errors.New("code_conflict")
 	ErrCapacityFull = errors.New("capacity_full")
 	ErrFpMismatch   = errors.New("fp_mismatch")
+	ErrPairIDTaken  = errors.New("pair_id_conflict")
 )
 
 // PairStore holds all in-flight pairs. Memory-only.
@@ -79,9 +80,20 @@ func (s *PairStore) GenCode() (string, error) {
 	return string(b), nil
 }
 
-// Register creates a pair for S. Validates fp self-consistency (fpS must equal
-// fingerprint(pubS)), code uniqueness, per-dev concurrency, and global capacity.
+// Register creates a pair for S with a server-generated pairID.
 func (s *PairStore) Register(code, devS string, pubS []byte, fpS string) (string, error) {
+	pid := make([]byte, 16)
+	if _, err := s.rng(pid); err != nil {
+		return "", err
+	}
+	return s.RegisterWithID(b32.EncodeToString(pid), code, devS, pubS, fpS)
+}
+
+// RegisterWithID creates a pair under a caller-chosen pairID. The dual-K
+// register flow (S registers the SAME pairId+code on its local K and the cloud
+// K so the QR's single pid works via either) needs this; a random collision
+// with a live pairID errors instead of silently shadowing.
+func (s *PairStore) RegisterWithID(pairID, code, devS string, pubS []byte, fpS string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sweepLocked()
@@ -104,11 +116,9 @@ func (s *PairStore) Register(code, devS string, pubS []byte, fpS string) (string
 	if _, exists := s.byCode[code]; exists {
 		return "", ErrCodeConflict
 	}
-	pid := make([]byte, 16)
-	if _, err := s.rng(pid); err != nil {
-		return "", err
+	if _, exists := s.pairs[pairID]; exists {
+		return "", ErrPairIDTaken
 	}
-	pairID := b32.EncodeToString(pid)
 	now := s.now()
 	p := &Pair{
 		PairID: pairID, Code: code,

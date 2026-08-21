@@ -8,14 +8,17 @@ type Config struct {
 	Enabled         bool
 	SignalURL       string   // e.g. "wss://signal.example.com"
 	STUNServers     []string // e.g. ["stun:signal.example.com:3478"]
+	CloudSignalURL  string   // 公网跳板 K（跨网候选信令）；空 = 关（纯局域网/单 K）
 	TURNEnabled     bool     // opt-in relay (default off, pure-P2P)
 	TURNServers     []string
+	TURNUser        string // coturn REST 凭据（use-auth-secret 模式）
+	TURNPass        string
 	UPnP            bool // probe router for port mapping
 	ReadOnlyDefault bool // new peers default to read-only
 	RequireApproval bool // mobile submits require desktop approval
 	AllowFileDrop   bool // allow phone→desktop file delivery
 	AllowHighRisk   bool // allow triggering shell/exec via mobile
-	MaxConnections  int  // concurrent C connections
+	MaxConnections  int
 	LogLevel        string
 	AutoConfirm     bool // 联调：收到 exchange 立即自动确认（不等用户点允许）
 

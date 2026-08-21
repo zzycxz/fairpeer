@@ -63,8 +63,16 @@ type Pairing struct {
 	// 空 = 自动（默认路由优先 + 全部真实网卡多候选）。
 	pairAddr string
 
+	// cloudURL 云跳板 K（跨网候选信令）。非空时：二维码 relay 追加它作
+	// 末位候选（手机同网自动选 LAN，跨网回退到云），StartPairing 把同一
+	// pairId+code 注册到两台 K（QR 的单个 pid 经任一 K 都能 exchange）。
+	// turnParam 进二维码 turn= 字段（"user:pass@host:port"），空 = 不带。
+	cloudURL  string
+	turnParam string
+
 	mu      sync.Mutex
 	pending map[string]*PendingPair
+	origin  map[string]string // pairID → exchange 发生的 K（Confirm 回源 POST）
 
 	autoConfirm bool // 联调：OnExchange 后立即 Confirm（不等用户点允许）
 }
@@ -78,6 +86,7 @@ func NewPairing(signalURL string, pub ed25519.PublicKey, store KeyStore, audit *
 		httpc:     &http.Client{Timeout: 15 * time.Second},
 		audit:     audit,
 		pending:   map[string]*PendingPair{},
+		origin:    map[string]string{},
 	}
 }
 
@@ -91,6 +100,15 @@ func (p *Pairing) SetAutoConfirm(v bool) { p.autoConfirm = v }
 
 // SetPairAddress 钉死配对二维码使用的网卡 IP（"" 恢复自动）。设置面板调。
 func (p *Pairing) SetPairAddress(ip string) { p.pairAddr = ip }
+
+// SetCloudRelay 配置云跳板 K + 二维码 TURN 凭据参数（Bridge.SetCloudRelay
+// 热切换时同步到这里）。url 空 = 关闭。
+func (p *Pairing) SetCloudRelay(url, turnParam string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.cloudURL = url
+	p.turnParam = turnParam
+}
 
 // NicInfo 是设置面板「配对网卡」下拉框的一条候选。
 type NicInfo struct {
@@ -180,12 +198,27 @@ func httpURL(signalURL string) string {
 }
 
 // relayCandidates 计算二维码 relay 字段：用户钉死的网卡优先（单候选），
-// 否则自动多候选（默认路由出口优先 + 其余真实网卡）。
+// 否则自动多候选（默认路由出口优先 + 其余真实网卡）；云跳板开启时把云 K
+// 追加为末位候选（手机同网自动选 LAN，跨网回退到云）。
 func (p *Pairing) relayCandidates() []string {
+	var out []string
 	if p.pairAddr != "" {
-		return lanRelayURLsFor(p.signalURL, p.pairAddr)
+		out = lanRelayURLsFor(p.signalURL, p.pairAddr)
+	} else {
+		out = lanRelayURLs(p.signalURL)
 	}
-	return lanRelayURLs(p.signalURL)
+	p.mu.Lock()
+	cloud := p.cloudURL
+	p.mu.Unlock()
+	if cloud != "" {
+		for _, r := range out { // 主信令已是该云 K（单 K 模式）时不重复
+			if r == cloud {
+				return out
+			}
+		}
+		out = append(out, cloud)
+	}
+	return out
 }
 
 // lanRelayURLsFor 构造「指定 IP」的单候选（钉死模式）。非 loopback 的
@@ -415,15 +448,25 @@ func isVirtualIface(name string) bool {
 	return false
 }
 
-// StartPairing generates a code, registers with K, returns the QR payload
+// StartPairing generates a code, registers with K(s), returns the QR payload
 // (linkpeer://pair?...). The QR carries the fingerprint out-of-band so C can
 // defeat a MITM'd K at the exchange step.
+//
+// 云跳板开启时双 K 注册：S 自己生成 pairId，把同一 pairId+code 注册到主 K
+// 与云 K —— QR 里的单个 pid 经任一 K 都能 exchange。云 K 注册失败（VPS
+// 挂了/断网）不阻塞局域网配对：候选里去掉云地址即可。
 func (p *Pairing) StartPairing() (code, qrURL string, err error) {
 	code = genPairCode()
 	pubSB64 := b64(p.longPub)
 	fp := Fingerprint(p.longPub)
+	pid := make([]byte, 16)
+	if _, err := rand.Read(pid); err != nil {
+		return "", "", err
+	}
+	pairID := b32.EncodeToString(pid)
 	body, _ := json.Marshal(map[string]string{
-		"code": code, "devS": p.devID, "pubS": pubSB64, "fpS": fp,
+		"pairId": pairID,
+		"code":   code, "devS": p.devID, "pubS": pubSB64, "fpS": fp,
 	})
 	resp, err := p.httpc.Post(httpURL(p.signalURL)+"/pair/register", "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -444,8 +487,51 @@ func (p *Pairing) StartPairing() (code, qrURL string, err error) {
 	if r.PairID == "" {
 		return "", "", errors.New("register: empty pairId")
 	}
+	// 旧版主 K 忽略请求里的 pairId 自行生成——云注册跟随实际生效的 pid，
+	// 保证 QR 的单个 pid 经两台 K 都有效。
+	if r.PairID != pairID {
+		pairID = r.PairID
+		body, _ = json.Marshal(map[string]string{
+			"pairId": pairID,
+			"code":   code, "devS": p.devID, "pubS": pubSB64, "fpS": fp,
+		})
+	}
+	// 云 K 同码注册（失败降级：二维码不带云候选，局域网配对不受影响）
+	p.mu.Lock()
+	cloud, turnParam := p.cloudURL, p.turnParam
+	p.mu.Unlock()
+	if cloud != "" && cloud != p.signalURL {
+		cResp, cErr := p.httpc.Post(httpURL(cloud)+"/pair/register", "application/json", bytes.NewReader(body))
+		if cErr != nil {
+			p.audit.Info("cloud_register_failed", p.devID, "err", cErr.Error())
+			cloud = ""
+		} else {
+			io.Copy(io.Discard, cResp.Body)
+			cResp.Body.Close()
+			if cResp.StatusCode != 200 {
+				p.audit.Info("cloud_register_rejected", p.devID, "status", cResp.StatusCode)
+				cloud = ""
+			}
+		}
+	}
+	relays := p.relayCandidates()
+	if cloud == "" { // 云注册失败：从候选里剔除云地址（手机不用白等超时）
+		kept := relays[:0]
+		p.mu.Lock()
+		cloudCfg := p.cloudURL
+		p.mu.Unlock()
+		for _, r := range relays {
+			if r != cloudCfg {
+				kept = append(kept, r)
+			}
+		}
+		relays = kept
+	}
 	qrURL = fmt.Sprintf("linkpeer://pair?pid=%s&code=%s&fp=%s&dev=%s&relay=%s",
-		r.PairID, code, fp, p.devID, strings.Join(p.relayCandidates(), ","))
+		r.PairID, code, fp, p.devID, strings.Join(relays, ","))
+	if turnParam != "" && cloud != "" { // TURN 只在云路径存在时有意义
+		qrURL += "&turn=" + url.QueryEscape(turnParam)
+	}
 	p.audit.PairStart(p.devID)
 	return code, qrURL, nil
 }
@@ -453,6 +539,12 @@ func (p *Pairing) StartPairing() (code, qrURL string, err error) {
 // OnExchange handles a pair_exchange notice pushed from K (delivered by the
 // SignalClient). Records C as pending and fires the UI hook.
 func (p *Pairing) OnExchange(msg SignalMsg) {
+	p.OnExchangeFrom(msg, p.signalURL)
+}
+
+// OnExchangeFrom 带 exchange 发生源 K 的通知入口（Bridge 双链路分别传入）。
+// Confirm 必须回源 POST——pair 记录（含 PubC）存在 exchange 发生的那台 K 上。
+func (p *Pairing) OnExchangeFrom(msg SignalMsg, kURL string) {
 	pubC, err := b64d(msg.PubC)
 	if err != nil || len(pubC) != ed25519.PublicKeySize {
 		p.audit.Error("pair_exchange_bad_pubc", msg.DevC, err)
@@ -465,6 +557,9 @@ func (p *Pairing) OnExchange(msg SignalMsg) {
 	}
 	p.mu.Lock()
 	p.pending[msg.PairID] = pp
+	if kURL != "" {
+		p.origin[msg.PairID] = kURL
+	}
 	auto := p.autoConfirm
 	p.mu.Unlock()
 	if p.onExchange != nil {
@@ -494,12 +589,16 @@ func (p *Pairing) Pending() []PendingPair {
 func (p *Pairing) Confirm(pairID string) error {
 	p.mu.Lock()
 	pp := p.pending[pairID]
+	kURL := p.origin[pairID]
 	p.mu.Unlock()
 	if pp == nil {
 		return ErrNoPending
 	}
+	if kURL == "" {
+		kURL = p.signalURL // 未知来源（老流程/测试）：回主 K
+	}
 	body, _ := json.Marshal(map[string]string{"pairId": pairID, "devS": p.devID})
-	resp, err := p.httpc.Post(httpURL(p.signalURL)+"/pair/confirm", "application/json", bytes.NewReader(body))
+	resp, err := p.httpc.Post(httpURL(kURL)+"/pair/confirm", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -512,6 +611,7 @@ func (p *Pairing) Confirm(pairID string) error {
 	}
 	p.mu.Lock()
 	delete(p.pending, pairID)
+	delete(p.origin, pairID)
 	p.mu.Unlock()
 	p.audit.PairConfirmed(pp.DevC, p.devID)
 	return nil
@@ -521,6 +621,7 @@ func (p *Pairing) Confirm(pairID string) error {
 func (p *Pairing) Reject(pairID string) {
 	p.mu.Lock()
 	delete(p.pending, pairID)
+	delete(p.origin, pairID)
 	p.mu.Unlock()
 }
 

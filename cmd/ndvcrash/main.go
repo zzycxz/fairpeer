@@ -21,7 +21,7 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	handle, err := browserlaunch.Launch(ctx, browserlaunch.LaunchOptions{Headless: true})
+	handle, err := browserlaunch.Launch(ctx, browserlaunch.LaunchOptions{Headless: true, ExtraArgs: []string{"--proxy-server=direct://", "--proxy-bypass-list=*"}})
 	if err != nil {
 		die("launch: %v", err)
 	}

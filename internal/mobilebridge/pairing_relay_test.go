@@ -93,3 +93,80 @@ func TestDefaultLanIPInfoReturnsReason(t *testing.T) {
 	}
 	t.Logf("default=%s reason=%s", ip, reason)
 }
+
+// TestRelayCandidatesCloudAppend：云跳板开启时二维码 relay 追加云 K 为末位
+// 候选；主信令已是该云 K（单 K 模式）不重复。
+func TestRelayCandidatesCloudAppend(t *testing.T) {
+	pub, _, err := GenerateLongTerm()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := NewPairing("http://127.0.0.1:8080", pub, NewMemoryKeyStore(), NewAudit("error"))
+	base := p.relayCandidates()
+	if len(base) == 0 {
+		t.Fatal("no LAN candidates")
+	}
+	p.SetCloudRelay("https://signal.example.com", "")
+	got := p.relayCandidates()
+	if len(got) != len(base)+1 || got[len(got)-1] != "https://signal.example.com" {
+		t.Fatalf("cloud not appended last: %v", got)
+	}
+	// 单 K 模式：主信令即公网 K，不重复追加
+	p2 := NewPairing("https://signal.example.com", pub, NewMemoryKeyStore(), NewAudit("error"))
+	p2.SetCloudRelay("https://signal.example.com", "")
+	if got := p2.relayCandidates(); len(got) != 1 {
+		t.Fatalf("cloud duplicated in single-K mode: %v", got)
+	}
+}
+
+// TestLinkIsCloud：offer 到达链路决定 ICE 分流——云跳板链路 true、
+// 嵌入式 K 主链路 false、公网主链路（单 K 模式）true。
+func TestLinkIsCloud(t *testing.T) {
+	pub, _, err := GenerateLongTerm()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge := NewBridge(Config{SignalURL: "http://127.0.0.1:8080"}, nil, pub, NewMemoryKeyStore(), nil, NewAudit("error"))
+	if bridge.linkIsCloud(bridge.signal) {
+		t.Fatal("loopback primary link must be LAN")
+	}
+	bridge.SetCloudRelay("https://signal.example.com")
+	if !bridge.linkIsCloud(bridge.cloud) {
+		t.Fatal("cloud link must be cloud")
+	}
+	bridge.SetCloudRelay("") // 关闭后 cloud=nil → 非 cloud
+	if bridge.linkIsCloud(bridge.cloud) {
+		t.Fatal("nil cloud link must not be cloud")
+	}
+
+	bridge2 := NewBridge(Config{SignalURL: "https://signal.example.com"}, nil, pub, NewMemoryKeyStore(), nil, NewAudit("error"))
+	if !bridge2.linkIsCloud(bridge2.signal) {
+		t.Fatal("public primary link (single-K mode) must be cloud")
+	}
+}
+
+// TestTurnQRParam：二维码 turn= 字段从 TURNServers[0] + 凭据拼装。
+func TestTurnQRParam(t *testing.T) {
+	pub, _, err := GenerateLongTerm()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := NewBridge(Config{
+		SignalURL:   "http://127.0.0.1:8080",
+		TURNEnabled: true,
+		TURNServers: []string{"turn:signal.example.com:3478?transport=udp"},
+		TURNUser:    "u1",
+		TURNPass:    "p1",
+	}, nil, pub, NewMemoryKeyStore(), nil, NewAudit("error"))
+	if got := b.turnQRParam(); got != "u1:p1@signal.example.com" {
+		t.Fatalf("turnQRParam = %q", got)
+	}
+	// 缺凭据 → 空（宁可不带 TURN 也别给个必被 coturn 拒的配置）
+	b2 := NewBridge(Config{
+		TURNEnabled: true,
+		TURNServers: []string{"turn:signal.example.com:3478"},
+	}, nil, pub, NewMemoryKeyStore(), nil, NewAudit("error"))
+	if got := b2.turnQRParam(); got != "" {
+		t.Fatalf("turnQRParam without creds = %q, want empty", got)
+	}
+}

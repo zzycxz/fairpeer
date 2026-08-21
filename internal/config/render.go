@@ -224,6 +224,13 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 
 	if shouldRenderProviders(c, defaults, scope) {
 		for _, p := range c.Providers {
+			// Ambient injected presets are runtime-only: writing them out would
+			// turn "nothing selected yet" into a permanent [[providers]] entry
+			// the user never wrote (and flip them out of ambient semantics).
+			// They render once the user adds them via provider_access.
+			if c.AmbientLocalPreset(p.Name) {
+				continue
+			}
 			b.WriteString("[[providers]]\n")
 			fmt.Fprintf(&b, "name        = %q\n", p.Name)
 			fmt.Fprintf(&b, "kind        = %q\n", p.Kind)
@@ -285,7 +292,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	fmt.Fprintf(&b, "bash_timeout_seconds = %d   # foreground safety cap; set 0 for no tool-local cap\n\n", c.BashTimeoutSeconds())
 
 	b.WriteString("[codegraph]\n")
-	fmt.Fprintf(&b, "enabled      = %v   # built-in MCP server; off by default for first-run sessions\n", c.Codegraph.Enabled)
+	fmt.Fprintf(&b, "enabled      = %v   # built-in MCP server; opt-in — enable here or in Settings\n", c.Codegraph.Enabled)
 	fmt.Fprintf(&b, "auto_install = %v   # fetch the runtime when CodeGraph is enabled but missing\n", c.Codegraph.AutoInstall)
 	if c.Codegraph.Path != "" {
 		fmt.Fprintf(&b, "path         = %q   # optional launcher override\n", c.Codegraph.Path)

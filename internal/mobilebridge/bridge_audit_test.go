@@ -2,7 +2,10 @@ package mobilebridge
 
 import (
 	"errors"
+	"strings"
 	"testing"
+
+	"github.com/pion/webrtc/v4"
 )
 
 func TestAuditAllMethods(t *testing.T) {
@@ -80,8 +83,26 @@ func TestBridgeToICEServers(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.TURNEnabled = true
 	cfg.TURNServers = []string{"turn:example.com:5349"}
-	got := toICEServers(cfg)
+	cfg.TURNUser = "u"
+	cfg.TURNPass = "p"
+	// 本地路径（offer 经嵌入式 K 到达）：纯 host candidate，零云
+	if got := toICEServers(cfg, false); got != nil {
+		t.Fatalf("expected nil ICE servers for LAN link, got %v", got)
+	}
+	// 云路径：STUN + TURN（带凭据）
+	got := toICEServers(cfg, true)
 	if len(got) < 2 {
 		t.Fatalf("expected STUN+TURN, got %d", len(got))
+	}
+	var turn webrtc.ICEServer
+	for _, s := range got {
+		for _, u := range s.URLs {
+			if strings.HasPrefix(u, "turn:") {
+				turn = s
+			}
+		}
+	}
+	if turn.Username != "u" || turn.Credential != "p" {
+		t.Fatalf("expected TURN credentials, got %q/%v", turn.Username, turn.Credential)
 	}
 }

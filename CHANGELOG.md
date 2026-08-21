@@ -65,6 +65,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **双布局兼容读取**：ListSessions/findTopicSession 同时扫描平铺旧布局与会话目录（旧数据仍可见，无需迁移）；回收站 flatten 入 `<trash>/<id>.jsonl/`、恢复统一落目录布局；RestoreSession 话题索引指向新路径（修复恢复后项目树断链）
 - 测试：新布局生成/双布局列举/回收往返 3 个新测试 + 旧断言升级；附 `TestGlobalSessionDirFixedPerProfile` 防 CWD 回归
 
+### 全局域退役（三模式项目严格隔离）— 08-21
+
+- **决策**：全局（scope=global）"又麻烦又容易出问题"，三模式全部取消——每个会话必须属于一个项目，dev/cowork/netdev 项目互相严格隔离
+- **工作台项目取代全局**：每 profile 一个真实项目根 `<configDir>/fairpeer/home-<profile>`（标题"工作台"），常显于项目树/胶囊目录；新建会话/首启/定时任务/移动端全部落工作台
+- **会话零迁移**：工作台的会话目录路由覆盖到原全局分区（`desktopSessionDir(For)` 识别 home 根 → `SessionDirFor(profile)`），旧全局 transcript 原地可达；索引/标题/创建时间一次性迁入工作台（`migrateGlobalIntoHome`，启动+树构建双触发、幂等）
+- **旧入口全垫片**：`OpenGlobalTab`→工作台项目页签；`EnsureBlankTab`/`CreateTopic`/`ensureTopicIndexed`/`restoreSessionTopicIndex` 把 global/空根统一归一为工作台项目；持久化 global 页签恢复时改挂工作台（topicID 保留）；历史会话恢复/legacy 迁移收编进工作台
+- **前端摘除**：胶囊去"全局"入口与 global 态（三模式统一）；历史面板范围筛选只剩全部/项目；blankSessionTarget 恒 project；locale/mock 同步收敛
+- 兼容性：旧 `global_topic` 侧车与 `GlobalTopics` 索引字段保留解析（迁移后置空）；IM bot 无根映射经垫片落工作台
+- 测试：11 个全局行为断言重写为工作台语义（迁移/恢复/重排/空树/并发），全套通过
+- **跨 profile 项目污染生成级根治**（同日续修，fairbox 事件）：两个生成源头——①pre-profile 时代的共享最近项目列表（desktop-workspaces.json）被 ListWorkspaces 灌进"当前 profile"（新开运维界面第一跳就吸进编码根）；②模式切换携带激活项目根跨 profile。修复在生成端：共享列表一次性归入它所属的 dev 索引后**删除文件**（RememberWorkspace 死代码一并退役），三 profile 的项目生成从此只读各自索引、无任何共享源；模式切换不再携带根（目标模式落本模式工作台）。归属判定=有真实使用（非默认标题话题或分区会话文件）；启动 `pruneForeignProjects` 归一化存量污染、外来根持久页签恢复落本 profile 工作台——这些只处理 pre-isolation 遗留数据，正常运行中无可拦截之物（隔离是不变量，不是防御层）；新增 5 个隔离回归测试
+- **全路径隔离审计**（同日）：逐条核验所有写索引/建页签/收编会话的生成路径——**修补一处**：legacy 无 scope 会话收编原传 dev 分区目录（config.SessionDir）给任意 profile（新开运维界面会把编码时代旧会话吸进运维工作台），改为只读本 profile 分区；`addProject` 本体成为注册门（外来根结构上不可写入索引，未来任何调用方都无法生成跨 profile 内容）。核验无问题：`pruneGhostProjects`（按 profile 判留存）、bot 无根映射（垫片落配对 profile 家）、`listSessions`/回收站（partition 归属过滤）、loop（强制 dev）、netdev 站点项目（自有设置存储）、页签恢复（外来根改挂本 profile 家）、移动端 NewTab（走 EnsureBlankTab 归一）；新增分区纪律回归测试
+- **全局死代码清扫**（同日收尾）：ProjectTree 的 global_folder/global_topic 渲染分支、`__global__` 排序 token、global 主题色 CSS、TabBar/标题助手的 global 回退全部摘除（后端已不产出该类节点，属纯死代码）；IM 来源徽章改为按 topicId 直查；autosave 时序测试（TestTurnDonePersistsSession）等待上限 2s→10s，根除全量高负载下的偶发超时
+
 ### 桌面体验 — 08-19 ~ 08-20
 
 - **生产构建原生右键菜单**：打包后所有输入区/正文恢复复制粘贴等右键功能
@@ -116,6 +129,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **修复"没选 Ollama 却被 Ollama 接管"**：`config.toml` 无任何 `[[providers]]` 时注入的 keyless 本地预设（Ollama / llama.cpp）此前可被陈旧页签引用的回退链捕获——所有页签静默变成 `ollama/qwen3-coder:30b`，聊天实际发往本机 11434。引入 **ambient 语义**：注入时打运行时标记（`injectedLocalPresets`，不落盘），未进 `desktop.provider_access` 的预设**只可见、不可被选**——`ResolveModelWithFallback` 直接解析与回退循环双双跳过，页签持有此类死引用时置空并停入 Welcome（附通知），不再报 "unknown model" 启动错误
 - **保存不再固化预设**：渲染器跳过 ambient 预设——此前在"纯预设配置"上任何一次设置保存都会把 Ollama/llama.cpp 写成永久 `[[providers]]`（并使其脱离 ambient 语义）；用户在向导/设置里显式添加（进 provider_access）后照常落盘
 - **边界保持**：用户手写 `[[providers]]` 的 keyless 供应商（非注入、无标记）回退照旧（240faf1 的防砖语义保留）；CLI `--model ollama/...` 显式点名走 `ResolveModel` 直达不受影响；向导添加过的预设（在 access 内）回退/解析均正常。测试：`TestResolveModelWithFallbackSkipsAmbientLocalPresets`、`TestRenderSkipsAmbientLocalPresets`、`TestStaleTabModelWithOnlyAmbientPresetsParksInWelcome` 等
+
+### 输入框工具权限改下拉框 — 08-21
+
+- **三连钮退役**：输入框底部"询问 / 自动 / YOLO"三段式切换（滑块 modebar）改为与模型/力度/知识库同款的**下拉框**（`ApprovalModeSwitcher`）
+- **命名直白化**：`询问 → 变更询问`、`自动 → 自动编辑`、`YOLO → 完全访问`——中文统一四字对齐（英文 Ask first / Auto-edit / Full access）；状态栏徽标、设置页、快捷键提示（Ctrl/Cmd+Y 切换完全访问）全量同步，"YOLO批准"等旧叫法清除
+- **菜单紧凑、说明悬浮**：下拉项为单行（图标 + 名称 + 勾选），每档的完整说明悬浮显示（Tooltip），打开即可扫读、悬停即见全义；闭合触发钮同样悬浮显示当前档说明
+- **安全态可视化**：闭合触发钮按档位着色——自动编辑淡蓝、完全访问红系警示（浅色主题下前景色由模式色派生保证可读；theme-style 变体下同样生效），不点开也能一眼看到当前授权姿态
+- 行为零变化：三档语义（ask / auto / yolo）与后端 `SetToolApprovalMode` 通道、Ctrl/Cmd+Y 快捷键、页签持久化全部保持；未新增档位（"计划"只读属协作方式轴，与权限轴正交，重复添加反而混淆）
 
 ### 兼容性
 

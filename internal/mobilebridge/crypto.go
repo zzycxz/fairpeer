@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"strings"
 
 	"golang.org/x/crypto/hkdf"
 )
@@ -49,6 +50,16 @@ func ConstantTimeEqual(a, b []byte) bool {
 // commands). Note: WS-auth URL params use URLEncoding instead — see signal_client.
 func b64(b []byte) string  { return base64.StdEncoding.EncodeToString(b) }
 func b64d(s string) ([]byte, error) { return base64.StdEncoding.DecodeString(s) }
+
+// b64uAny decodes URL-safe base64 tolerating missing padding — the inbound
+// signal sig field: C signs with no-padding encoding, S's own outbound uses
+// padded URLEncoding (P2-2 double-side sig verify).
+func b64uAny(s string) ([]byte, error) {
+	if m := len(s) % 4; m != 0 {
+		s += strings.Repeat("=", 4-m)
+	}
+	return base64.URLEncoding.DecodeString(s)
+}
 
 // Random fills n bytes from crypto/rand.
 func Random(n int) ([]byte, error) {

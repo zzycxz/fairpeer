@@ -236,3 +236,74 @@ func TestWSRoutingOfflinePeer(t *testing.T) {
 		t.Fatalf("want unavailable, got %s", raw)
 	}
 }
+
+// TestHTTPRegisterWithExplicitPairID：双 K 同码注册——S 自带 pairId 注册
+// （本地 K + 云 K 同 pid/code），K 必须按 S 给的 pid 建档，且同一 pid 在
+// 两台 K 上各自独立 exchange/confirm。坏 pid（非法字符/过短）拒绝。
+func TestHTTPRegisterWithExplicitPairID(t *testing.T) {
+	pubS, _ := mustKey(t)
+	pubC, _ := mustKey(t)
+	pubSStr, fpS := b64(pubS), fingerprint(pubS)
+	pubCStr, fpC := b64(pubC), fingerprint(pubC)
+	const pid = "0123456789ABCDEFG" // Crockford b32 合法（含 0/1/8/9）
+
+	tryRegister := func(ts *httptest.Server, pairID string) int {
+		body, _ := json.Marshal(map[string]string{
+			"pairId": pairID, "code": "CODE9", "devS": "dS", "pubS": pubSStr, "fpS": fpS,
+		})
+		resp, err := http.Post(ts.URL+"/pair/register", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var reg struct {
+			PairID string `json:"pairId"`
+		}
+		json.NewDecoder(resp.Body).Decode(&reg)
+		if resp.StatusCode == 200 && pairID != "" && reg.PairID != pairID {
+			t.Fatalf("K 没有用 S 提供的 pairId：want %s got %s", pairID, reg.PairID)
+		}
+		return resp.StatusCode
+	}
+
+	// 两台独立 K，同一 pid+code 各自注册成功（模拟本地 K + 云 K）
+	srvA, tsA := newTestServer(t)
+	_ = srvA
+	_, tsB := newTestServer(t)
+	if got := tryRegister(tsA, pid); got != 200 {
+		t.Fatalf("K-A register status %d", got)
+	}
+	if got := tryRegister(tsB, pid); got != 200 {
+		t.Fatalf("K-B register status %d", got)
+	}
+	// 同一台 K 重复注册同 pid → pair_id_conflict
+	if got := tryRegister(tsA, pid); got != 409 {
+		t.Fatalf("want 409 pair_id_conflict, got %d", got)
+	}
+	// 非法 pid：小写/特殊字符/过短 → 400 bad_pair_id
+	for _, bad := range []string{"abcdefg", "ABC!DEF", "SHORT"} {
+		if got := tryRegister(tsA, bad); got != 400 {
+			t.Fatalf("bad pid %q: want 400, got %d", bad, got)
+		}
+	}
+
+	// K-B 上 exchange + confirm 用同一 pid 正常走通（手机经云 K 配对的路径）
+	exBody, _ := json.Marshal(map[string]string{"pairId": pid, "code": "CODE9", "devC": "dC", "pubC": pubCStr, "fpC": fpC})
+	resp, err := http.Post(tsB.URL+"/pair/exchange", "application/json", bytes.NewReader(exBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("exchange status %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	cfBody, _ := json.Marshal(map[string]string{"pairId": pid, "devS": "dS"})
+	resp, err = http.Post(tsB.URL+"/pair/confirm", "application/json", bytes.NewReader(cfBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("confirm status %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}

@@ -56,6 +56,33 @@ jobs:
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
 
+      # Stage the CodeGraph runtime for embedding: the matching platform asset
+      # is fetched once here (CI has GitHub access) and embedded via the
+      # codegraph_embed build tag, so shipped binaries install the runtime with
+      # ZERO network on first run — the "can't download" failure class dies.
+      # CG_VERSION must stay in sync with Version in internal/codegraph/install.go;
+      # asset names must match assetName() (codegraph-<win32|darwin|linux>-<x64|arm64>).
+      # The app verifies the bytes against its compile-time SHA256 table at
+      # install, so a wrong fetch can't ship a wrong runtime.
+      - name: Fetch CodeGraph runtime (embed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          CG_VERSION="v1.0.0"
+          case "${{ matrix.platform }}" in
+            windows/amd64) CG_ASSET="codegraph-win32-x64.zip" ;;
+            windows/arm64) CG_ASSET="codegraph-win32-arm64.zip" ;;
+            darwin/amd64)  CG_ASSET="codegraph-darwin-x64.tar.gz" ;;
+            darwin/arm64)  CG_ASSET="codegraph-darwin-arm64.tar.gz" ;;
+            linux/amd64)   CG_ASSET="codegraph-linux-x64.tar.gz" ;;
+            linux/arm64)   CG_ASSET="codegraph-linux-arm64.tar.gz" ;;
+            *) echo "unknown platform ${{ matrix.platform }}"; exit 1 ;;
+          esac
+          mkdir -p internal/codegraph/assets
+          curl -fL --retry 3 -o internal/codegraph/assets/codegraph_runtime.bin \
+            "https://github.com/colbymchenry/codegraph/releases/download/${CG_VERSION}/${CG_ASSET}"
+          echo "staged ${CG_ASSET} ($(wc -c < internal/codegraph/assets/codegraph_runtime.bin) bytes)"
+
       - name: Build Frontend
         working-directory: desktop/frontend
         run: npm install
@@ -65,11 +92,11 @@ jobs:
         shell: bash
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
-            wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-X main.version=${{ github.ref_name }}" -webview2 embed -nsis
+            wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-X main.version=${{ github.ref_name }}" -tags codegraph_embed -webview2 embed -nsis
           elif [ "${{ runner.os }}" = "Linux" ]; then
-            wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-X main.version=${{ github.ref_name }}" -tags webkit2_41
+            wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-X main.version=${{ github.ref_name }}" -tags codegraph_embed,webkit2_41
           else
-            wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-X main.version=${{ github.ref_name }}"
+            wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-X main.version=${{ github.ref_name }}" -tags codegraph_embed
           fi
 
       - name: Package Artifact
@@ -78,9 +105,13 @@ jobs:
         run: |
           PLAT_NAME=$(echo "${{ matrix.platform }}" | tr '/' '-')
           if [ "${{ runner.os }}" = "Windows" ]; then
-            if ls *-installer.exe 1> /dev/null 2>&1; then
-              mv *-installer.exe fairpeer-${PLAT_NAME}.exe
-              rm -f fairpeer.exe
+            # Publish BOTH distribution modes: the NSIS installer and the
+            # portable (installation-free) exe. Both come from the same
+            # -tags codegraph_embed build, so both carry the embedded
+            # CodeGraph runtime — the portable exe has no other channel.
+            if ls *-installer.exe 1>/dev/null 2>&1; then
+              mv *-installer.exe fairpeer-${PLAT_NAME}-installer.exe
+              mv fairpeer.exe fairpeer-${PLAT_NAME}-portable.exe
             else
               mv fairpeer.exe fairpeer-${PLAT_NAME}.exe
             fi

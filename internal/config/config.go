@@ -85,6 +85,14 @@ type Config struct {
 	// phone P2P). Empty means mobilebridge uses its built-in defaults; the
 	// LINKPEER_SIGNAL env var still overrides signal_url for ad-hoc dev.
 	MobileBridge MobileBridgeConfig `toml:"mobilebridge"`
+
+	// injectedLocalPresets records which keyless local presets (Ollama,
+	// llama.cpp) load injected because no config file defines [[providers]].
+	// Injected-but-not-added entries are "ambient" (see AmbientLocalPreset):
+	// visible in Settings, but never an implicit model choice. Unexported on
+	// purpose — it is load-time state, never decoded from or rendered to TOML,
+	// and a config whose file defines [[providers]] simply has none.
+	injectedLocalPresets map[string]bool
 }
 
 // MobileBridgeConfig is the user-facing [mobilebridge] section. Only the
@@ -325,15 +333,16 @@ type StatuslineConfig struct {
 
 // CodegraphConfig governs the built-in CodeGraph MCP server — symbol/call-graph
 // code intelligence (tree-sitter + SQLite) that gives the agent codegraph_*
-// search / context / explore / trace / node tools. Enabled defaults to true so
-// upgrades keep it for existing configs; first-run scaffolds write enabled =
-// false so only brand-new users start without it. AutoInstall (default true)
-// lets fairpeer fetch the CodeGraph runtime into its cache when CodeGraph is
-// enabled but missing; set false to require an explicit `fairpeer codegraph
-// install` (e.g. for air-gapped or headless runs). Path overrides binary
-// resolution; empty resolves the cache, then a `codegraph` on PATH, then a
-// bundle beside the executable. CodeGraph always starts in the background when
-// enabled; legacy tier values are ignored and removed during config load.
+// search / context / explore / trace / node tools. Enabled is opt-in (default
+// false, same policy as context7): users turn it on in Settings or by writing
+// [codegraph] enabled = true; an explicit value always wins. AutoInstall
+// (default true) lets fairpeer fetch the CodeGraph runtime into its cache when
+// CodeGraph is enabled but missing; set false to require an explicit
+// `fairpeer codegraph install` (e.g. for air-gapped or headless runs). Path
+// overrides binary resolution; empty resolves the cache, then a `codegraph` on
+// PATH, then a bundle beside the executable. CodeGraph always starts in the
+// background when enabled; legacy tier values are ignored and removed during
+// config load.
 type CodegraphConfig struct {
 	Enabled     bool   `toml:"enabled"`
 	AutoInstall bool   `toml:"auto_install"`
@@ -1588,11 +1597,11 @@ func Default() *Config {
 		// so an absent [sandbox] in a user's file keeps egress (zero value would
 		// wrongly deny it).
 		Sandbox: SandboxConfig{Bash: "enforce", Network: true},
-		// CodeGraph code-intelligence defaults on so existing configs (which never
-		// wrote a [codegraph] section) keep it after an upgrade. First-run scaffolds
-		// write enabled = false instead, so only brand-new users start without it.
-		// AutoInstall fetches the runtime into the cache when enabled and missing.
-		Codegraph: CodegraphConfig{Enabled: true, AutoInstall: true},
+		// CodeGraph is opt-in everywhere (same policy as context7): default off,
+		// users enable it in Settings or via [codegraph] enabled = true. Explicit
+		// config keeps the user's choice. AutoInstall fetches the runtime into
+		// the cache when enabled and missing.
+		Codegraph: CodegraphConfig{Enabled: false, AutoInstall: true},
 		// BuiltInMCP configuration
 		BuiltInMCP: BuiltInMCPConfig{},
 		// Background self-evolution (Dream/Distill) on by default; 7/30 day cadence.
@@ -1664,13 +1673,37 @@ func BuiltinLocalProviders() []ProviderEntry {
 }
 
 // appendBuiltinLocalProviders adds the keyless local presets for providers not
-// already present by name (a user-defined "ollama" entry always wins).
+// already present by name (a user-defined "ollama" entry always wins) and marks
+// the injected names so AmbientLocalPreset can tell them apart from entries the
+// user actually wrote or added.
 func appendBuiltinLocalProviders(c *Config) {
 	for _, b := range BuiltinLocalProviders() {
 		if _, ok := c.Provider(b.Name); !ok {
 			c.Providers = append(c.Providers, b)
+			if c.injectedLocalPresets == nil {
+				c.injectedLocalPresets = map[string]bool{}
+			}
+			c.injectedLocalPresets[b.Name] = true
 		}
 	}
+}
+
+// AmbientLocalPreset reports whether name is a keyless local preset that load
+// auto-injected (no config file defines [[providers]]) and that the user has
+// NOT explicitly added via desktop provider_access. Ambient presets exist so
+// local models are one click away in Settings, but they must never become an
+// implicit model choice: ResolveModelWithFallback skips them, and the desktop
+// drops persisted tab models that resolve only to them. Clearing is opt-in per
+// name — adding "ollama" leaves a sibling "llamacpp" ambient.
+func (c *Config) AmbientLocalPreset(name string) bool {
+	if c == nil || len(c.injectedLocalPresets) == 0 {
+		return false
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || !c.injectedLocalPresets[name] {
+		return false
+	}
+	return !desktopProviderAccessMap(c.Desktop.ProviderAccess)[name]
 }
 
 // Load builds the configuration: defaults, then user config, then project
@@ -1701,11 +1734,9 @@ func LoadForRoot(root string) (*Config, error) {
 		tomlSources = append(tomlSources, uc)
 	}
 	tomlSources = append(tomlSources, projectTOML)
-	sawConfigFile := false
 	providersDefined := false
 	for _, path := range tomlSources {
 		if _, err := os.Stat(path); err == nil {
-			sawConfigFile = true
 			if err := migrateLegacyMCPTiersFile(path); err != nil {
 				slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
 			}
@@ -1767,12 +1798,6 @@ func LoadForRoot(root string) (*Config, error) {
 	pinNetDev(cfg)
 	if err := ValidateNetDev(cfg.NetDev); err != nil {
 		return nil, err
-	}
-	// First run (no config file anywhere): keep CodeGraph off until the user opts
-	// in. An existing config — even one without a [codegraph] section — keeps the
-	// built-in default (on), so an upgrade never silently drops code intelligence.
-	if !sawConfigFile {
-		cfg.Codegraph.Enabled = false
 	}
 	return cfg, nil
 }
@@ -2449,10 +2474,14 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 // "provider/model" form used by the desktop runtime. If ref is stale or empty,
 // it tries the user's configured default_model before falling back to the first
 // configured provider — so preference isn't overwritten by iteration order.
+// Ambient local presets (injected, never added via provider_access) never
+// resolve here: an explicit CLI --model still reaches them through
+// ResolveModel, but tabs and fallbacks must not land on a provider the user
+// never chose.
 func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallback bool, ok bool) {
 	ref = strings.TrimSpace(ref)
 	if ref != "" {
-		if e, found := c.ResolveModel(ref); found {
+		if e, found := c.ResolveModel(ref); found && !c.AmbientLocalPreset(e.Name) {
 			return e.Name + "/" + e.Model, false, true
 		}
 	}
@@ -2468,9 +2497,13 @@ func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallb
 	// The final loop serves two very different callers and must keep them apart:
 	// an EMPTY ref (fresh install / onboarding) must never auto-select keyless
 	// local presets (TestResolveModelWithFallbackNeverAutoSelectsLocalPresets),
-	// but a NON-EMPTY stale ref (a persisted tab model whose provider was since
-	// removed) prefers any working local preset over bricking startup with
-	// "unknown model" — desktop-tabs.json regularly outlives config edits.
+	// while a NON-EMPTY stale ref (a persisted tab model whose provider was since
+	// removed) prefers a working provider over bricking startup with "unknown
+	// model" — desktop-tabs.json regularly outlives config edits. Keyless
+	// entries qualify only when the user chose them: ambient injected presets
+	// are skipped in both cases, so a dead tab ref surfaces as ok=false and the
+	// desktop shows its Welcome state instead of silently chatting on an
+	// unselected local endpoint.
 	staleRef := ref != ""
 	for i := range c.Providers {
 		p := &c.Providers[i]
@@ -2480,8 +2513,8 @@ func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallb
 		if p.APIKeyEnv != "" && !p.Configured() {
 			continue // keyed provider without its key can't serve
 		}
-		if p.APIKeyEnv == "" && !staleRef {
-			continue // fresh install: keyless local presets never auto-select
+		if p.APIKeyEnv == "" && (!staleRef || c.AmbientLocalPreset(p.Name)) {
+			continue // keyless: never on a fresh install, and ambient presets never
 		}
 		return p.Name + "/" + p.DefaultModel(), true, true
 	}

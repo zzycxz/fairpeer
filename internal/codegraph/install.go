@@ -23,9 +23,8 @@ const (
 	Version = "v1.0.0"
 	cgRepo  = "colbymchenry/codegraph"
 
-	officialMirrorBase         = "" // No CDN mirror; download directly from GitHub
-	officialMainlandMirrorBase = "https://ghproxy.net/https://github.com/colbymchenry/codegraph/releases/download"
-	perSourceDownloadTimeout   = 60 * time.Second
+	officialMirrorBase = "" // No CDN mirror; download directly from GitHub
+	perSourceDownloadTimeout = 60 * time.Second
 
 	renameAttempts = 5
 	renameBackoff  = 200 * time.Millisecond
@@ -117,11 +116,27 @@ func InstallWithClient(ctx context.Context, client *http.Client, log func(string
 		return "", fmt.Errorf("codegraph: no cache directory available")
 	}
 	asset := assetName()
-	logf(log, "codegraph: downloading %s (%s, one-time)…", asset, Version)
 
-	data, err := downloadAsset(ctx, client, asset, log)
-	if err != nil {
-		return "", err
+	// Embedded runtime first (release builds): zero network, zero mirrors. The
+	// bytes pass the same SHA256 table as downloads — a wrong pipeline fetch
+	// falls through to the mirror chain instead of extracting garbage.
+	var data []byte
+	if emb, ok := embeddedBundle(); ok {
+		got := fmt.Sprintf("%x", sha256.Sum256(emb))
+		if want := expectedAssetSHA256(asset); want != "" && got != want {
+			logf(log, "codegraph: embedded runtime checksum mismatch — falling back to download")
+		} else {
+			data = emb
+			logf(log, "codegraph: installing embedded runtime %s (%s, no download)", asset, Version)
+		}
+	}
+	if data == nil {
+		logf(log, "codegraph: downloading %s (%s, one-time)…", asset, Version)
+		var err error
+		data, err = downloadAsset(ctx, client, asset, log)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	parent := filepath.Dir(dir)
@@ -204,17 +219,17 @@ func expectedAssetSHA256(asset string) string {
 }
 
 func downloadBases() []string {
+	// Policy (SKILL_ARCHITECTURE_SPEC, codegraph 分发可靠性): release builds
+	// EMBED the runtime (tag codegraph_embed) and never touch the network; this
+	// fallback chain serves dev builds only, and by deliberate policy it is
+	// custom mirror → GitHub direct and NOTHING else. Public ghproxy-style
+	// proxies were rejected: unknown operators, rotating ownership — even with
+	// SHA256 guarding content, each install would expose metadata to
+	// untrusted endpoints and hang availability on them. Intranaet/China
+	// deployments set [codegraph].download_url to a mirror THEY control.
 	var bases []string
-	// Custom intranet/mirror download source takes highest priority — set via
-	// [codegraph].download_url for air-gapped deployments.
 	if customDownloadBase != "" {
 		bases = append(bases, strings.TrimRight(customDownloadBase, "/")+"/"+Version)
-	}
-	if strings.TrimSpace(officialMirrorBase) != "" {
-		bases = append(bases, strings.TrimRight(officialMirrorBase, "/")+"/"+Version)
-	}
-	if strings.TrimSpace(officialMainlandMirrorBase) != "" {
-		bases = append(bases, strings.TrimRight(officialMainlandMirrorBase, "/")+"/"+Version)
 	}
 	bases = append(bases, fmt.Sprintf("https://github.com/%s/releases/download/%s", cgRepo, Version))
 	return dedupeStrings(bases)

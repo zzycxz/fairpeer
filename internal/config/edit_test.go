@@ -608,10 +608,10 @@ func TestAutoStartPlugins(t *testing.T) {
 	}
 }
 
-func TestCodegraphDefaultEnabledForUpgrades(t *testing.T) {
+func TestCodegraphDefaultDisabledOptIn(t *testing.T) {
 	c := Default()
-	if !c.Codegraph.Enabled {
-		t.Fatal("default codegraph enabled = false; existing configs without a [codegraph] section would lose it on upgrade")
+	if c.Codegraph.Enabled {
+		t.Fatal("default codegraph enabled = true; it is opt-in (same policy as context7) and must default off")
 	}
 	if !c.Codegraph.AutoInstall {
 		t.Fatal("default codegraph auto_install = false, want true")
@@ -621,14 +621,22 @@ func TestCodegraphDefaultEnabledForUpgrades(t *testing.T) {
 	}
 }
 
-func TestLoadForEditPreservesCodegraphWithoutSection(t *testing.T) {
+func TestLoadForEditCodegraphOptIn(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "fairpeer.toml")
+	// A config omitting [codegraph] gets the opt-in default: disabled.
 	if err := os.WriteFile(path, []byte("default_model = \"x\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if c := LoadForEdit(path); c.Codegraph.Enabled {
+		t.Fatal("a config omitting [codegraph] enabled codegraph; it is opt-in and must default off")
+	}
+	// An explicit enabled = true keeps the user's choice.
+	if err := os.WriteFile(path, []byte("[codegraph]\nenabled = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if c := LoadForEdit(path); !c.Codegraph.Enabled {
-		t.Fatal("a config omitting [codegraph] disabled codegraph; an upgrade must keep it on")
+		t.Fatal("explicit [codegraph] enabled = true was not honored")
 	}
 }
 
@@ -644,7 +652,7 @@ func TestLoadFirstRunDisablesCodegraph(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.Codegraph.Enabled {
-		t.Fatal("first run (no config file anywhere) left codegraph enabled; new users should start without it")
+		t.Fatal("first run (no config file anywhere) left codegraph enabled; it is opt-in and must default off")
 	}
 }
 

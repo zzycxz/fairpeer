@@ -27,6 +27,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/provider"
 	"github.com/zzycxz/fairpeer/internal/sandbox"
 	"github.com/zzycxz/fairpeer/internal/secret"
+	"github.com/zzycxz/fairpeer/internal/skill"
 	"github.com/zzycxz/fairpeer/internal/tool"
 	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 
@@ -1677,4 +1678,43 @@ func main() {
 		t.Fatalf("build codegraph helper: %v\n%s", err, out)
 	}
 	return path
+}
+
+// TestBuiltinSkillNamesCoverCodeBuiltins guards the sync between
+// builtinBuiltinSkillNames (the whitelist-enforcement roster) and the actual
+// code builtins in internal/skill. Historically the roster drifted — it lacked
+// explore and netdev-help, so those skills escaped every EnabledSkills
+// whitelist (SKILL_ARCHITECTURE_SPEC 4.3). If this test fails, add the new
+// skill to builtinBuiltinSkillNames.
+func TestBuiltinSkillNamesCoverCodeBuiltins(t *testing.T) {
+	roster := map[string]bool{}
+	for _, n := range builtinBuiltinSkillNames {
+		roster[config.SkillNameKey(n)] = true
+	}
+	for _, name := range skill.BuiltinNames() {
+		if !roster[config.SkillNameKey(name)] {
+			t.Errorf("builtin skill %q missing from builtinBuiltinSkillNames — it will escape every profile whitelist", name)
+		}
+	}
+}
+
+// TestLegacySkillRenameAppliedToWhitelist verifies a user config whitelist
+// written with the pre-rename skill name (computer-auto) still governs the
+// renamed skill (desktop-auto): the alias counts as whitelisting desktop-auto,
+// so the rename must not silently disable a skill the user opted into.
+func TestLegacySkillRenameAppliedToWhitelist(t *testing.T) {
+	p := &config.Profile{
+		Name:          "custom",
+		EnabledSkills: []string{"computer-auto"},
+	}
+	out := applyProfileToSkillDisabled(p, nil)
+	for _, name := range out {
+		key := config.SkillNameKey(name)
+		if key == "computer-auto" {
+			t.Fatalf("stale name computer-auto survived normalization: %v", out)
+		}
+		if key == "desktop-auto" {
+			t.Fatal("renamed skill desktop-auto disabled despite stale-alias whitelist — the alias must keep governing it")
+		}
+	}
 }

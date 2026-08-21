@@ -1,8 +1,9 @@
 ---
 name: ppt-auto
-description: 使用PPT模板生成演示文稿。根据用户主题，通过SVG路径生成专业PPT，输出.pptx文件。
+description: 演示文稿专项技能：从主题/参考图/参考 PDF 生成 PPT、美化旧 PPT（保内容重排版式）、反解读取 .pptx、或修改已有项目（传 project_dir 走局部修复）。输出可编辑 .pptx。从零生成或美化 PPT 用本技能；仅读取/转换已有文档归 document-auto。
 runAs: subagent
 effort: high
+max-steps: 80
 allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, complete_step, web_search, web_fetch
 ---
 
@@ -91,34 +92,24 @@ write_file 写的文件用 files：
 
 ## 路线 A：SVG 生成（8 步）
 
-### Step 0: 提取模板配色（关键！）
-
-检查固定位置的模板文件：
+### Step 0: preflight（模板配色 + 视觉合并 + 配置 + 项目初始化，一次完成）
 
 ```bash
-ls ~/.fairpeer/ppt-template.pptx 2>/dev/null
+python3 <skill_dir>/scripts/preflight.py <project_name>
 ```
 
-- **文件存在** → 有模板：提取配色（用于内容着色）。模板的背景/装饰/logo 由 PPTX 继承自动透出，SVG 不需要画背景
-- **文件不存在** → 无模板：SVG 自己画背景色
+一个脚本做完原来五步：检查 `~/.fairpeer/ppt-template.pptx` 是否存在 → 有则提取配色（extract_template_colors）→ 合并视觉配色（merge_vlm_style，把 `ppt-template-style.json` / `reference-style.json` 的颜色机械写进 config，reference 优先 > 模板视觉 > extract 基线）→ 初始化项目（project_manager init）→ 打印**合并 JSON 摘要**。
 
-**如果有模板，提取配色**（纯 Python + PIL，不依赖 Office）：
+输出的 JSON 就是你需要的全部配置（**不需要再 read_file template_config.json，也不需要单独跑 Step 3/Step 4**）：
 
-```bash
-python3 <skill_dir>/scripts/extract_template_colors.py ~/.fairpeer/ppt-template.pptx <skill_dir>/template_config.json
-```
+- `has_template`：有无模板。**有模板 → SVG 不画任何全屏背景**（模板的背景/装饰/logo 由 PPTX 继承自动透出）；无模板 → SVG 自己画背景色
+- `colors`：最终生效配色（background/accent/text/card_bg 等）——后续写大纲、生成 SVG 时**只能用这些颜色，禁止凭主题名推断品牌色**
+- `fonts.family`：模板字体 + 跨平台降级链，SVG 文字用此字体
+- `mode`：fast / validate（设置面板控制）
+- `reference_style` / `pdf_pages`：参考物存在性（决定 Step 3 读什么）
+- `project_dir`：创建好的项目目录（`<project_dir>/svg_output/` 等）
 
-提取后 `template_config.json` 被更新：
-- `colors`：模板真实配色（background/accent/text 等），用于内容着色
-- `fonts.family`：模板字体 + 跨平台降级链（如 `"等线", "Microsoft YaHei", "PingFang SC", sans-serif`），SVG 文字用此字体
-
-**合并视觉配色（机械步骤，必须执行）**：extract 之后运行 merge，把 VLM 提取的颜色真正写进 config（不合并则视觉配色只是文件摆在那、不生效）：
-
-```bash
-python3 <skill_dir>/scripts/merge_vlm_style.py <skill_dir>/template_config.json
-```
-
-此脚本读 `~/.fairpeer/ppt-template-style.json`（选模板时视觉模型生成）和 `~/.fairpeer/reference-style.json`（参考图分析生成，若有），把颜色**机械合并进** `template_config.json`（reference 优先 > 模板视觉 > extract 基线，含 is_dark 派生 secondary/muted/card_bg/line）。合并后 config 的 `colors` 即最终生效值——Step 3 只读它，无需再单独读 ppt-template-style.json。
+无项目名时 `preflight.py` 也可不带参数运行（只做配色与配置，不 init）。
 
 ### Step 1: 提取源文档（如有）
 
@@ -133,15 +124,9 @@ python3 <skill_dir>/scripts/extract_content.py <file.pdf> source_content.json
 web_search(query="<主题相关关键词>")
 ```
 
-### Step 3: 读取配置（关键！必须在写大纲之前读）
+### Step 3: 读参考物（配置已由 Step 0 preflight 给出）
 
-```bash
-read_file <skill_dir>/template_config.json
-```
-
-`template_config.json` 是**配色、字号、布局规则的唯一事实源**。牢记其中的 `colors`（background/accent/text 等）——后续写大纲、生成 SVG 时**只能用这些颜色，禁止凭主题名推断品牌色**。
-
-（视觉配色已由 Step 0 的 `merge_vlm_style.py` 机械合并进 `template_config.json`，无需另读 `ppt-template-style.json`）
+配色/字号/布局的唯一事实源是 `template_config.json`，但**其关键内容（colors/fonts/mode）已由 Step 0 preflight 的 JSON 摘要给出**——正常流程直接用那份摘要，只有跳过了 preflight 或需要布局规则细节时才 `read_file <skill_dir>/template_config.json`。同样记住：**只能用已读到的颜色，禁止凭主题名推断品牌色**。
 
 **参考图（若有）**：若 `~/.fairpeer/reference-style.json` 存在（用户给参考图时由 desktop 的 `AnalyzeReferenceImage` 生成），读它的 `description`——VLM 对参考图的 4 段描述：
 
@@ -208,7 +193,9 @@ read_file <skill_dir>/references/visual-styles/<风格名>.md
 
 **⚠️ 有参考图时的颜色权威链**：`~/.fairpeer/reference-style.json` 带颜色字段时，桌面预分析已把参考图真实配色（hex）机械合并进 `template_config.json`——config 的 colors 即参考图的真实颜色。**任务参数里转述的颜色描述**（如"主色调为深蓝色(#1a3c6e)"）是**上游模型看图后的转述，不是用户原话**，hex 常有偏差（实测把 #0078D4 亮蓝转述成 #1a3c6e 暗藏青），**不得作为用户输入覆盖 config**。仅当消息中明确出现"用户要求/用户指定"字样时才按用户输入处理。
 
-### Step 4: 初始化项目
+### Step 4: 初始化项目（已由 Step 0 preflight 完成）
+
+preflight 已创建目录结构（`project_dir` 见其 JSON 输出）。只有跳过了 preflight 才需要手动：
 
 ```bash
 python3 <skill_dir>/scripts/project_manager.py init <project_name> --format ppt169
@@ -223,19 +210,36 @@ init 创建目录结构：
 | `exports/` | 最终 PPTX |
 | `images/` | 图片资源 |
 
-### Step 5: 写大纲 + design_spec
+### Step 5: 写大纲 + design_spec + pages.json
 
-规划每页：页面类型（封面/目录/内容/结尾）、标题、要点（3-6 条）、布局选型（参考 `references/layout_templates.md`）。
+规划每页：页面类型（封面/目录/章节/内容/结尾）、标题、要点（3-6 条）、布局选型（参考 `references/layout_templates.md`）。
 
 **内容必须来自用户主题和素材，不要套固定结构。**
 
-**⚠️ 配色方案必须直接引用 Step 3 读到的 config colors 值，不得自创。**
+**⚠️ 配色方案必须直接引用 Step 0 读到的 config colors 值，不得自创。**
 
-把大纲写入 `<project_dir>/design_spec.md`（完整性校验必需）。
+把大纲写入 `<project_dir>/design_spec.md`（完整性校验必需）。**同时（关键提速）**：凡页面属于骨架类型——`cover`（封面）/`toc`（目录）/`section`（章节过渡）/`cards`（2-4 卡片）/`columns`（两栏对比）/`bullets`（要点列表）/`ending`（结尾）——把该页写成 pages.json 里的一条紧凑 spec（见 Step 6），不要手写这些页的 SVG；表格页/流程页走规则 12/13 的骨架脚本；只有骨架覆盖不了的定制版式才手写 SVG。
 
 ### Step 6: 逐页生成 SVG
 
-每页写入 `<project_dir>/svg_output/slide_01.svg`…。
+**首选：骨架生成器（pages.json → 一次生成全部骨架页）**。Step 5 已把 cover/toc/section/cards/columns/bullets/ending 类页面写成 pages.json——一条 spec 约 300 token，替代手写 5K token 的整页 SVG：
+
+```json
+{"pages": [
+  {"type": "cover", "title": "企业数字化转型", "subtitle": "从线上化到数据驱动", "footer": "2026-08"},
+  {"type": "toc", "title": "目录", "items": ["背景", "架构", "场景", "收益"]},
+  {"type": "cards", "title": "整体架构", "lead": "一套底座三层能力",
+   "items": [{"icon": "tabler-outline/server", "head": "基础设施", "lines": ["混合云", "统一运维"]}]}
+]}
+```
+
+```bash
+python3 <skill_dir>/scripts/build_page_skeleton.py <project_dir>/pages.json --project <project_dir>
+```
+
+一次调用生成所有骨架页（输出 `slide_NN_<type>.svg`，保持页序）。生成器读 template_config.json 自动执行配色/半透明卡片/背景规则/字体链，图标用规则 14 的占位符，文字自动换行——**你不需要管坐标**。JSON 摘要会报 `lines_dropped`（spec 太长装不下，删行后重新生成）和稀疏页警告（封面/结尾给足 title+subtitle+footer 三条文字）。生成后可用 edit_file 微调个别页，再跑批量检查。
+
+**兜底：手写 SVG**（骨架覆盖不了的定制版式）。每页写入 `<project_dir>/svg_output/slide_NN.svg`…。
 
 每页 SVG 必须：
 
@@ -267,30 +271,38 @@ init 创建目录结构：
     python3 <skill_dir>/scripts/build_flow_skeleton.py <flow.dsl> --title "<标题>" --out <project_dir>/svg_output/slide_NN.svg
     ```
     时间线页：`--timeline --from-table <两列表.md>`（`日期 | 任务`）。层级>6 自动横向布局，回路画虚线箭头。海报级多子流程只画主干链，子流程细节以文字块补充（一页塞不下是物理事实）。生成后照常 fix_svg + check_svg
-14. **网络配图搜索（主题驱动的 deck 需要照片/氛围图时）**：图标库和 SVG 自绘优先；确需照片时用免 key 图搜（百度图源，无需任何注册）：
+14. **图标用占位符，禁止手画 icon path**：`<skill_dir>/templates/icons/` 有 11600+ 现成图标（5 个库，每个 deck 选一个风格库，simple-icons 是品牌 logo 库可并用）。SVG 里写占位符引用，不要自己拼 `<path d="...">`：
+    ```svg
+    <use data-icon="tabler-outline/server" x="960" y="200" width="48" height="48" fill="#0076A8"/>
+    ```
+    库选型见 `templates/icons/README.md`；描边类库（tabler-outline）可加 `stroke-width="1.5"`（细）或 `"3"`（粗）。页面生成后跑 `python3 <skill_dir>/scripts/svg_finalize/embed_icons.py <该页svg>` 把占位符替换为真实图标（可与 embed_images 同批处理）
+15. **网络配图搜索（主题驱动的 deck 需要照片/氛围图时）**：确需照片时用免 key 图搜（百度图源，无需任何注册）：
     ```bash
     python3 <skill_dir>/scripts/image_search.py --query "<关键词，如：数据中心 机房>" --out <project_dir>/images/hero.png --aspect landscape
     ```
     嵌入方式同规则 11（`<image href="../images/...">` + embed_images 内联）。**版权提示**：网络图仅供用户内部参考用途，商用需用户自行确认来源许可。
-15. **拼图切分**：一张图里含**多页/多元素**（用户贴的拼图截图、多页幻灯片合图、插画素材表）先用脚本切分，不要当单页处理：
+16. **拼图切分**：一张图里含**多页/多元素**（用户贴的拼图截图、多页幻灯片合图、插画素材表）先用脚本切分，不要当单页处理：
     ```bash
     python3 <skill_dir>/scripts/slice_images.py <拼图.png> --grid 2x3 -o <project_dir>/images/
     ```
     切出的页图可作为逐页参考（同 pdf-pages 用法）；切出的素材元素按普通图片嵌入（规则 11）。`--trim` 紧裁内容、`--alpha` 抠透背景
 
-**每页生成后，自动跑修复 + 检查**：
+**修复 + 检查：批量跑，不逐页**。写完所有页面（或一批）后跑**一次**——单解释器循环处理全部页，替代每页两条命令两个回合：
+
 ```bash
-# 修复常见 XML 错误（markdown 标记、未闭合标签等）
-python3 <skill_dir>/scripts/fix_svg.py <project_dir>/svg_output/slide_01.svg <project_dir>/svg_output/slide_01.svg
-# 质量检查（模式由 template_config.json 的 mode 字段控制，设置面板可切换）
-python3 <skill_dir>/scripts/check_svg.py <project_dir>/svg_output/slide_01.svg --config <skill_dir>/template_config.json
+python3 <skill_dir>/scripts/batch_check.py <project_dir>
 ```
 
-**不传 `--mode`**——check_svg 自动从 `template_config.json` 的 `mode` 字段读取（由设置面板的"快速/校验模式"控制）：
+检查模式由 `template_config.json` 的 `mode` 字段控制（设置面板的"快速/校验模式"可切换）：
 - `fast`：只跑基础检查（XML 格式、背景规则、禁止元素）——快
 - `validate`：全量检查（额外检查密度/溢出/重叠/覆盖/对齐）——全面。WARN 是建议性的，不阻止流程
 
-check_svg 报 ERROR（exit code 2）时必须修正后重查。WARN 不阻止流程。
+batch 摘要末尾列出 ERROR 页（exit code 2）——**只修列出的页**，改完对该页单独复检：
+
+```bash
+python3 <skill_dir>/scripts/fix_svg.py <project_dir>/svg_output/slide_05.svg <project_dir>/svg_output/slide_05.svg
+python3 <skill_dir>/scripts/check_svg.py <project_dir>/svg_output/slide_05.svg --config <skill_dir>/template_config.json
+```
 
 > **演讲者备注**：用户明确要求时才做——在 `notes/slide_NN.md` 写每页 2-5 句备注，svg_to_pptx 会自动读取嵌入。默认不生成。
 
@@ -304,6 +316,12 @@ check_svg 报 ERROR（exit code 2）时必须修正后重查。WARN 不阻止流
 
 ```bash
 python3 <skill_dir>/scripts/qa_compare.py <project_dir> --round 1
+```
+
+**fast 模式加 `--sample 3`**（封面 + 2 个等距页）——QA 的 VLM 调用是主要耗时，快速模式没必要全量；`validate` 模式才全页：
+
+```bash
+python3 <skill_dir>/scripts/qa_compare.py <project_dir> --round 1 --sample 3   # mode=fast 时
 ```
 
 **可续传**：页数多时单次会被 2 分钟 bash 超时打断（报告记为 `in_progress`）——**原命令重跑即从断点继续**（已完成页自动跳过），直到输出带 `done: true` 的完整报告。
@@ -451,6 +469,9 @@ exit 2 或 `ok: false` → 按 `missing` 清单补回丢失文字后重查，**�
 
 | 脚本 | 依赖 |
 |------|------|
+| preflight.py | 纯 Python（编排 extract/merge/init 并输出合并 JSON 摘要） |
+| batch_check.py | 纯 Python（单解释器批量 fix + check 全部页） |
+| build_page_skeleton.py | 纯 Python（pages.json → 骨架页 SVG，7 种类型） |
 | extract_content.py | 纯 Python |
 | qa_compare.py | 纯 Python（需 cairosvg；VLM 访问读 fairpeer 配置） |
 | analyze_pdf_pages.py | 纯 Python（需 PyMuPDF；VLM 访问读 fairpeer 配置） |

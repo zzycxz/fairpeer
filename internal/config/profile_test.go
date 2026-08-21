@@ -80,6 +80,92 @@ func TestPluginAllowedByProfile(t *testing.T) {
 	if PluginAllowedByProfile(cw, "codegraph") {
 		t.Fatal("non-whitelisted plugin must be hidden under cowork")
 	}
+	// Case-insensitive match (the boot comment documents this contract).
+	if !PluginAllowedByProfile(cw, "WPS-PPT") {
+		t.Fatal("plugin whitelist matching should be case-insensitive")
+	}
+}
+
+// The netdev MCP seal: PluginAllowlist turns an empty Plugins list from "all
+// allowed" into "NONE allowed", so no external MCP (whose write/exec tools sit
+// outside the tool_scope RemovePrefix seal) is visible by default. builtinFloor
+// pins the flag so a [[profiles]] override can add names but cannot open the
+// floodgates.
+func TestPluginAllowlistSealsNetDev(t *testing.T) {
+	sealed := &Profile{Name: "netdev", PluginAllowlist: true}
+	if PluginAllowedByProfile(sealed, "feishu-bot") {
+		t.Fatal("allowlist with empty Plugins must hide every external MCP")
+	}
+	if PluginAllowedByProfile(sealed, "codegraph") {
+		t.Fatal("allowlist must hide coding MCPs too")
+	}
+	named := &Profile{Name: "netdev", PluginAllowlist: true, Plugins: []string{"my-nms"}}
+	if !PluginAllowedByProfile(named, "my-nms") {
+		t.Fatal("explicitly named server must be admitted")
+	}
+	if PluginAllowedByProfile(named, "anything-else") {
+		t.Fatal("allowlist must still hide unnamed servers")
+	}
+	// Unrelated profiles keep the "empty = all" default.
+	if !PluginAllowedByProfile(&Profile{Name: "dev"}, "codegraph") {
+		t.Fatal("dev without allowlist flag keeps empty-list-allows-all")
+	}
+	// The builtin netdev profile resolves with the floor applied even when a
+	// user override tries to disable the allowlist.
+	cfg := Default()
+	cfg.Profiles = []Profile{
+		{Name: "netdev", DisplayName: "运维", PluginAllowlist: false, Plugins: nil},
+	}
+	p, err := cfg.ResolveProfile(ProfileNetDev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.PluginAllowlist {
+		t.Fatal("builtinFloor must pin netdev PluginAllowlist against user override")
+	}
+	if p.SealsExecutionTools() != true || !p.SkipProjectInstructions() {
+		t.Fatal("builtin floor must keep the tool seal and instruction gate")
+	}
+	if PluginAllowedByProfile(p, "feishu-bot") {
+		t.Fatal("user-installed MCP must stay hidden under the netdev allowlist")
+	}
+}
+
+func TestPluginHiddenByProfile(t *testing.T) {
+	// nil profile and empty HiddenPlugins hide nothing.
+	if PluginHiddenByProfile(nil, "codegraph") {
+		t.Fatal("nil profile should hide no plugins")
+	}
+	if PluginHiddenByProfile(&Profile{Name: "dev"}, "codegraph") {
+		t.Fatal("empty hidden list should hide nothing")
+	}
+	// Builtin office/netdev profiles hide the coding-domain MCPs…
+	for _, p := range builtinProfiles() {
+		if p.Name == ProfileCowork || p.Name == ProfileNetDev {
+			for _, name := range []string{"codegraph", "context7"} {
+				if !PluginHiddenByProfile(&p, name) {
+					t.Fatalf("%s profile must hide coding-domain MCP %q", p.Name, name)
+				}
+			}
+		}
+	}
+	// …while dev must NOT hide them.
+	dev := builtinProfiles()[0]
+	if dev.Name != ProfileDev {
+		t.Fatalf("expected first builtin profile to be dev, got %s", dev.Name)
+	}
+	if PluginHiddenByProfile(&dev, "codegraph") || PluginHiddenByProfile(&dev, "context7") {
+		t.Fatal("dev profile must not hide coding-domain MCPs")
+	}
+	// User-installed servers are unaffected — the whole point of HiddenPlugins
+	// over a Plugins whitelist.
+	if PluginHiddenByProfile(&Profile{Name: "cowork", HiddenPlugins: []string{"codegraph"}}, "feishu-bot") {
+		t.Fatal("user-installed server must stay visible under HiddenPlugins")
+	}
+	// Case-insensitive and whitespace-tolerant.
+	if !PluginHiddenByProfile(&Profile{HiddenPlugins: []string{" CodeGraph "}}, "codegraph") {
+		t.Fatal("hidden matching should be case-insensitive and trimmed")
+	}
 }
 
 func TestProfileResolveSkillDisabled(t *testing.T) {

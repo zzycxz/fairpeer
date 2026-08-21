@@ -422,14 +422,27 @@ def main():
     ap.add_argument("project_dir", help="ppt-auto project dir containing svg_output/")
     ap.add_argument("--round", type=int, default=1, help="rework round (1-based); script hard-caps at 2")
     ap.add_argument("--home", default=None, help="home dir containing .fairpeer/ (default: ~)")
+    ap.add_argument("--sample", type=int, default=None,
+                    help="QA only a subset of pages: the cover + N-1 evenly-spaced pages "
+                         "(fast mode). Deterministic spacing so round-over-round no-progress "
+                         "comparison stays meaningful. Default: all pages.")
     args = ap.parse_args()
 
     svg_dir = os.path.join(args.project_dir, "svg_output")
     svgs = sorted(glob.glob(os.path.join(svg_dir, "slide_*.svg")))
     report_path = os.path.join(args.project_dir, "qa-report.json")
+    sampled = False
+    keep = None
+    if args.sample and args.sample > 0 and len(svgs) > args.sample:
+        keep = {1}
+        step = (len(svgs) - 1) / max(args.sample - 1, 1)
+        for i in range(1, args.sample):
+            keep.add(min(len(svgs), max(2, round(1 + i * step))))
+        sampled = True
 
     def emit(rep):
         rep["done"] = True  # the resume gate treats done=false as a partial run
+        rep["sampled"] = sampled
         with open(report_path, "w", encoding="utf-8") as f:
             json.dump(rep, f, ensure_ascii=False, indent=2)
         print(json.dumps(rep, ensure_ascii=False))
@@ -454,6 +467,8 @@ def main():
     deck_bg = _deck_background(home)
     gen_pages = []  # (page_no, svg_path, png_path|None)
     for idx, svg in enumerate(svgs, start=1):
+        if keep is not None and idx not in keep:
+            continue
         png = os.path.join(render_dir, "slide_%02d.png" % idx)
         try:
             render_svg(svg, png)

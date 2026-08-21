@@ -482,11 +482,25 @@ func (s *Store) SearchEntities(query, collection string, limit int) ([]Entity, e
 	like := "%" + strings.ToLower(strings.TrimSpace(query)) + "%"
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Collection scope follows the §7.2 namespace boundary (see
+	// collectionScopeSQL in store.go): empty = all EXCEPT netdev:, "netdev:" =
+	// the namespace only, otherwise exact + "/" sub-collections.
+	var scope string
+	var scopeArgs []any
+	switch {
+	case collection == "":
+		scope = " AND collection NOT LIKE 'netdev:%'"
+	case collection == NetDevNamespace:
+		scope = " AND collection LIKE 'netdev:%'"
+	default:
+		scope = " AND (collection = ? OR collection LIKE ?)"
+		scopeArgs = []any{collection, collection + "/%"}
+	}
 	rows, err := s.db.Query(`SELECT id, collection, name, name_raw, COALESCE(type,''), COALESCE(description,''), COALESCE(sources,''), COALESCE(relation_cnt,0), COALESCE(community,-1)
 		FROM rag_entities
-		WHERE (? = '' OR collection = ?) AND (name LIKE ? OR description LIKE ? OR name_raw LIKE ?)
+		WHERE (name LIKE ? OR description LIKE ? OR name_raw LIKE ?)`+scope+`
 		ORDER BY length(description) DESC LIMIT ?`,
-		collection, collection, like, like, like, limit)
+		append([]any{like, like, like}, append(scopeArgs, limit)...)...)
 	if err != nil {
 		return nil, err
 	}

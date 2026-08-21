@@ -87,6 +87,29 @@ type pairRegisterReq struct {
 	DevS string `json:"devS"`
 	PubS string `json:"pubS"`
 	FpS  string `json:"fpS"`
+	// PairID is optional: S-supplied pairID for the dual-K register flow
+	// (same pair registered on the local K and the cloud K so one QR pid
+	// works via either). Empty = server generates.
+	PairID string `json:"pairId"`
+}
+
+// validPairID：S 自带 pairId 只允许 Crockford base32 字符集（0-9 +
+// ABCDEFGHJKMNPQRSTVWXYZ，与 K/两端 b32 同字母表），长度 8-64 —— 防任意
+// 字符串当 key 塞进内存表。
+func validPairID(s string) bool {
+	if len(s) < 8 || len(s) > 64 {
+		return false
+	}
+	for _, c := range s {
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'A' && c <= 'H', c == 'J', c == 'K':
+		case c >= 'M' && c <= 'N', c >= 'P' && c <= 'T', c >= 'V' && c <= 'Z':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) handlePairRegister(w http.ResponseWriter, r *http.Request) {
@@ -111,13 +134,24 @@ func (s *Server) handlePairRegister(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "bad_pub")
 		return
 	}
-	pairID, err := s.pairs.Register(req.Code, req.DevS, pubS, req.FpS)
+	if req.PairID != "" && !validPairID(req.PairID) {
+		writeErr(w, 400, "bad_pair_id")
+		return
+	}
+	var pairID string
+	if req.PairID != "" {
+		pairID, err = s.pairs.RegisterWithID(req.PairID, req.Code, req.DevS, pubS, req.FpS)
+	} else {
+		pairID, err = s.pairs.Register(req.Code, req.DevS, pubS, req.FpS)
+	}
 	if err != nil {
 		s.metrics.Pair(errResult(err))
 		s.audit.Error("pair_register", req.DevS, err)
 		switch {
 		case errors.Is(err, ErrCodeConflict):
 			writeErr(w, 409, "code_conflict")
+		case errors.Is(err, ErrPairIDTaken):
+			writeErr(w, 409, "pair_id_conflict")
 		case errors.Is(err, ErrCapacityFull):
 			writeErr(w, 503, "capacity_full")
 		case errors.Is(err, ErrFpMismatch):

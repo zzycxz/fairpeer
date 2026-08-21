@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/agent"
@@ -48,6 +49,11 @@ import (
 	"github.com/zzycxz/fairpeer/internal/skill"
 	"github.com/zzycxz/fairpeer/internal/tool"
 	"github.com/zzycxz/fairpeer/internal/tool/builtin"
+)
+
+var (
+	sandboxEnforceWarnOnce sync.Once
+	powershellWarnOnce     sync.Once
 )
 
 // ErrUnknownModel is returned by Build when the configured model can't be
@@ -232,10 +238,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// A stale explicit model (a persisted tab/session outliving its
 		// provider — e.g. desktop-tabs.json after a config edit) must never
 		// brick startup. Fall back through the same chain the desktop uses
-		// (default_model, then any usable provider — keyless local presets
-		// included, since this was an explicit request, not onboarding), and
-		// surface the switch as a warning instead of an error. Only a request
-		// that names default_model itself (nothing left to try) still errors.
+		// (default_model, then any usable provider — keyless local endpoints
+		// the user actually added, since this was an explicit request, not
+		// onboarding; ambient injected presets stay out), and surface the
+		// switch as a warning instead of an error. Only a request that names
+		// default_model itself (nothing left to try) still errors.
 		if fallback, _, fok := cfg.ResolveModelWithFallback(modelName); fok && fallback != modelName {
 			slog.Warn("boot: unknown model, falling back", "requested", modelName, "fallback", fallback)
 			modelName = fallback
@@ -338,16 +345,22 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			sysPrompt = strings.TrimSpace(string(b))
 		}
 		if addon := strings.TrimSpace(opts.Profile.SystemPromptAddon); addon != "" {
-			// For the cowork profile, drop capability-routing rows that target
-			// disabled skills so the prompt doesn't instruct the model to call a
-			// skill the user turned off (otherwise the model retries the disabled
-			// skill instead of telling the user to re-enable it). disabledNames is
-			// computed below for the skill store; we recompute the effective set
-			// here (cheap, config-local) since the prompt is assembled before that.
-			if config.ProfileNameKey(opts.Profile.Name) == config.ProfileCowork {
+			// For the cowork/netdev profiles, drop capability-routing rows that
+			// target disabled skills so the prompt doesn't instruct the model to
+			// call a skill the user turned off (otherwise the model retries the
+			// disabled skill instead of telling the user to re-enable it).
+			// disabledNames is computed below for the skill store; we recompute
+			// the effective set here (cheap, config-local) since the prompt is
+			// assembled before that.
+			switch config.ProfileNameKey(opts.Profile.Name) {
+			case config.ProfileCowork:
 				effective := cfg.DisabledSkillNames()
 				effective = applyProfileToSkillDisabled(opts.Profile, effective)
 				addon = config.CoworkPromptAddon(effective)
+			case config.ProfileNetDev:
+				effective := cfg.DisabledSkillNames()
+				effective = applyProfileToSkillDisabled(opts.Profile, effective)
+				addon = config.NetdevPromptAddon(effective)
 			}
 			if strings.TrimSpace(addon) != "" {
 				sysPrompt += "\n\n" + addon
@@ -543,14 +556,18 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: writeRoots, Network: cfg.Sandbox.Network, RequireAvailable: cfg.Sandbox.RequireAvailable, StrictWrites: cfg.Sandbox.StrictWrites}
 	if bashSpec.Mode == "enforce" && !sandbox.Available() {
-		if cfg.Sandbox.RequireAvailable {
-			fmt.Fprintln(stderr, "warning: bash sandbox 'enforce' requested with require_available=true, but no OS sandbox is available on this platform. bash commands will be REFUSED (fail-closed) until an OS sandbox is available or require_available is disabled.")
-		} else {
-			fmt.Fprintln(stderr, "warning: bash sandbox requested but unavailable on this platform; running bash unconfined (set [sandbox] require_available = true to refuse instead)")
-		}
+		sandboxEnforceWarnOnce.Do(func() {
+			if cfg.Sandbox.RequireAvailable {
+				fmt.Fprintln(stderr, "warning: bash sandbox 'enforce' requested with require_available=true, but no OS sandbox is available on this platform. bash commands will be REFUSED (fail-closed) until an OS sandbox is available or require_available is disabled.")
+			} else {
+				fmt.Fprintln(stderr, "warning: bash sandbox requested but unavailable on this platform; running bash unconfined (set [sandbox] require_available = true to refuse instead)")
+			}
+		})
 	}
 	if sandbox.ResolveShell().Kind == sandbox.ShellPowerShell {
-		fmt.Fprintln(stderr, "warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash.")
+		powershellWarnOnce.Do(func() {
+			fmt.Fprintln(stderr, "warning: bash not found on PATH; the shell tool will run commands under Windows PowerShell. Install Git for Windows or WSL to use bash.")
+		})
 	}
 	searchSpec := builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, stderr)
 	bashTimeout := time.Duration(cfg.BashTimeoutSeconds()) * time.Second
@@ -563,6 +580,16 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// tool_scope already removed bash/file-write tools.
 	if config.ProfileNameKey(profileName(opts.Profile)) == config.ProfileNetDev {
 		netdev.RegisterTools(reg, cfg)
+		// Ops knowledge namespace (§7.1/§7.2): a rag_search/rag_import pair
+		// PINNED to the "netdev:" collections (vendor docs, config backups).
+		// The store enforces the boundary both ways — cowork rag_* cannot see
+		// the namespace, and these tools cannot leave it. Gated by the same
+		// knowledge-base master switch as cowork ([cowork] rag_enabled).
+		if cfg.Cowork.RAGEnabledOrDefault() {
+			for _, t := range builtin.NetDevRAGTools() {
+				reg.Add(t)
+			}
+		}
 	}
 
 	// coWork-only capabilities: desktop automation, scheduled tasks, email,
@@ -572,7 +599,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// doesn't pollute the dev tool list, but allows subagents to work anywhere).
 	if config.ProfileNameKey(profileName(opts.Profile)) == config.ProfileCowork { // Browser automation tools (cowork only). Hidden from the main loop's
 		// schema: the model drives the browser through run_skill("browser-auto")
-		// or run_skill("computer-auto") subagents, which reach these via
+		// or run_skill("desktop-auto") subagents, which reach these via
 		// FilterRegistry. This keeps 12 browser tool schemas out of every turn.
 		builtin.SetConfiguredBrowserPath(cfg.Cowork.BrowserPath)
 		for _, t := range builtin.BrowserTools() {
@@ -583,8 +610,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// get_ui_tree). Windows-native (Win32 BitBlt/SendInput); on other
 		// platforms ScreenTools returns nil so nothing registers and cowork
 		// still works minus desktop control. Hidden from the main loop's schema:
-		// the model drives desktop ops through run_skill("computer-auto") or
-		// run_skill("ppt-auto") subagents, which reach these via FilterRegistry.
+		// the model drives desktop ops through run_skill("desktop-auto")
+		// subagents, which reach these via FilterRegistry.
 		for _, t := range builtin.ScreenTools() {
 			reg.Add(t)
 			reg.Hide(t.Name())
@@ -774,14 +801,30 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// type) — NOT via COM automation. There are no ppt_* tools; the agent
 	// drives WPS演示 like any other desktop window.
 	// A profile plugin whitelist hides MCP servers not named in it. Empty list =
-	// all plugins (dev default). We filter after AppendEnabled so built-in MCPs
+	// all plugins (dev default) — unless PluginAllowlist is set (netdev seal),
+	// where empty means NONE: an MCP carrying write/exec tools would punch
+	// through the profile's tool_scope seal because MCP tool names are outside
+	// RemovePrefix's reach. We filter after AppendEnabled so built-in MCPs
 	// (time, …) and session ExtraPlugins are also subject to the whitelist — a
 	// coWork profile that lists only its office servers should not quietly expose
 	// the dev codegraph server. Names match case-insensitively via PluginAllowedByProfile.
-	if opts.Profile != nil && len(opts.Profile.Plugins) > 0 {
+	if opts.Profile != nil && (len(opts.Profile.Plugins) > 0 || opts.Profile.PluginAllowlist) {
 		kept := autoStartEntries[:0]
 		for _, e := range autoStartEntries {
 			if config.PluginAllowedByProfile(opts.Profile, e.Name) {
+				kept = append(kept, e)
+			}
+		}
+		autoStartEntries = kept
+	}
+	// NAMED plugin hiding (Profile.HiddenPlugins): unlike the whitelist above,
+	// this removes only the servers the profile names — builtin profiles use it
+	// to keep coding-domain MCPs (codegraph, context7) out of office/netdev
+	// modes without hiding the user-installed servers those modes exist for.
+	if opts.Profile != nil {
+		kept := autoStartEntries[:0]
+		for _, e := range autoStartEntries {
+			if !config.PluginHiddenByProfile(opts.Profile, e.Name) {
 				kept = append(kept, e)
 			}
 		}
@@ -822,7 +865,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	//
 	// CodeGraph is fixed to background startup. Legacy tier values are ignored so
 	// enabling it never blocks chat startup.
-	if cfg.Codegraph.Enabled {
+	//
+	// Domain gate: this injection happens AFTER the autoStartEntries filters
+	// above, so it must check them itself — otherwise the coding-domain server
+	// leaks into office/netdev profiles even when they filter it by name (the
+	// historical behavior the whitelist comment claimed to prevent but didn't).
+	codegraphAllowed := config.PluginAllowedByProfile(opts.Profile, "codegraph") &&
+		!config.PluginHiddenByProfile(opts.Profile, "codegraph")
+	if cfg.Codegraph.Enabled && codegraphAllowed {
 		// Honor a custom download mirror for air-gapped/intranet deployments
 		// before any Resolve/Install attempt.
 		codegraph.SetDownloadBase(cfg.Codegraph.DownloadURL)
@@ -876,7 +926,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			} else {
 				go func() {
 					if _, err := codegraph.InstallWithClient(context.WithoutCancel(ctx), codegraphClient, nil); err != nil {
-						notify("codegraph: install failed (" + err.Error() + ") — using grep/glob; retries next session")
+						notify("codegraph: install failed (" + err.Error() + ") — using grep/glob; retries next session. " +
+							"If your network blocks GitHub, set [codegraph] download_url to a reachable mirror " +
+							"or place the runtime in the codegraph cache manually.")
 					} else {
 						notify("codegraph: installed — symbol-graph tools available next session")
 					}
@@ -903,7 +955,17 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}()
 	}
 
-	eagerSpecs = append(eagerSpecs, opts.ExtraPlugins...)
+	// ExtraPlugins (host-supplied session servers) are appended AFTER the
+	// entry filters above, so re-apply the profile gates here — otherwise a
+	// netdev allowlist could be bypassed by exactly the path meant to be
+	// covered by it.
+	for _, spec := range opts.ExtraPlugins {
+		if opts.Profile != nil &&
+			(!config.PluginAllowedByProfile(opts.Profile, spec.Name) || config.PluginHiddenByProfile(opts.Profile, spec.Name)) {
+			continue
+		}
+		eagerSpecs = append(eagerSpecs, spec)
+	}
 
 	// Deduplicate specs across all tiers by name. This prevents duplicated startup
 	// attempts when a built-in spec (like codegraph) overlaps with an entry loaded
@@ -1069,7 +1131,15 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if opts.MaxSteps > 0 {
 		maxSteps = opts.MaxSteps
 	}
-	subagentStore := newSubagentStore(config.SessionDir())
+	// Subagent transcripts follow the session partition (opts.SessionDir —
+	// already profile-routed by the desktop), so netdev/cowork subagent runs
+	// don't land in the shared default bucket. Callers without a session dir
+	// (headless run) fall back to the default partition.
+	subagentSessionDir := opts.SessionDir
+	if strings.TrimSpace(subagentSessionDir) == "" {
+		subagentSessionDir = config.SessionDir()
+	}
+	subagentStore := newSubagentStore(subagentSessionDir)
 
 	// Permission policy gates every tool call. The headless gate (no Approver)
 	// resolves "ask" to allow — preserving `fairpeer run` autonomy — while deny
@@ -1238,13 +1308,19 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				return "", prepErr
 			}
 		}
-		defer run.Release()
-		steps := maxSteps
-		if steps > 0 {
-			if steps /= 2; steps < 5 {
-				steps = 5
-			}
+	defer run.Release()
+	// Step budget: a skill may declare its own cap (frontmatter max-steps:) for
+	// heavy subagents (ppt-auto); otherwise default to half the main loop's
+	// MaxSteps (floor 5), as before.
+	steps := maxSteps
+	if steps > 0 {
+		if steps /= 2; steps < 5 {
+			steps = 5
 		}
+	}
+	if sk.MaxSteps > 0 {
+		steps = sk.MaxSteps
+	}
 		answer, err := agent.RunSubAgentWithSession(sctx, prov, subReg, run.Session, task, agent.Options{
 			MaxSteps:      steps,
 			Temperature:   cfg.Agent.Temperature,
@@ -2002,6 +2078,23 @@ var netdevExcludedToolPrefixes = []string{
 	"move_file",     // file moves
 }
 
+// legacySkillRenames maps retired skill names to their successors, applied to
+// user config (EnabledSkills/DisabledSkills) and skill-disable lists so a
+// whitelist written before a rename keeps working instead of silently losing
+// its grip on the renamed skill.
+var legacySkillRenames = map[string]string{
+	"computer-auto": "desktop-auto", // renamed 2026-08: GUI-only scope
+}
+
+// normalizeSkillName applies legacySkillRenames (case-insensitive) and returns
+// the empty string for unrenamed names.
+func normalizeSkillName(name string) string {
+	if v, ok := legacySkillRenames[strings.ToLower(strings.TrimSpace(name))]; ok {
+		return v
+	}
+	return ""
+}
+
 func applyProfileToSkillDisabled(p *config.Profile, configDisabled []string) []string {
 	if p == nil {
 		return configDisabled
@@ -2012,6 +2105,9 @@ func applyProfileToSkillDisabled(p *config.Profile, configDisabled []string) []s
 		name = strings.TrimSpace(name)
 		if !config.IsValidSkillName(name) {
 			return
+		}
+		if renamed := normalizeSkillName(name); renamed != "" {
+			name = renamed
 		}
 		key := config.SkillNameKey(name)
 		if seen[key] {
@@ -2033,6 +2129,9 @@ func applyProfileToSkillDisabled(p *config.Profile, configDisabled []string) []s
 	if len(p.EnabledSkills) > 0 {
 		allowed := make(map[string]bool, len(p.EnabledSkills))
 		for _, n := range p.EnabledSkills {
+			if renamed := normalizeSkillName(n); renamed != "" {
+				n = renamed
+			}
 			allowed[config.SkillNameKey(n)] = true
 		}
 		for _, name := range builtinBuiltinSkillNames {
@@ -2044,17 +2143,23 @@ func applyProfileToSkillDisabled(p *config.Profile, configDisabled []string) []s
 	return out
 }
 
-// builtinBuiltinSkillNames is the fixed list of shipped skill names. Used by
-// applyProfileToSkillDisabled to enumerate which builtins a whitelist hides —
-// the skill store hasn't been built yet at the point that function runs, so we
-// can't ask it for the list. Keep in sync with internal/skill/builtins.go;
-// drift only causes a skill to remain visible when it shouldn't (cosmetic).
+// builtinBuiltinSkillNames is the fixed list of shipped skill names: the 15
+// code builtins (internal/skill/builtins.go) plus ppt-auto (embedded file
+// skill, released to ~/.fairpeer/skills — listed so profile whitelists govern
+// it too). Used by applyProfileToSkillDisabled to enumerate which shipped
+// skills a whitelist hides — the skill store hasn't been built yet at the
+// point that function runs, so we can't ask it for the list. Keep in sync
+// with builtinSkills(); drift lets a skill escape every whitelist (it stays
+// enabled in dev/cowork/netdev regardless of the profile's domain).
 var builtinBuiltinSkillNames = []string{
 	"init", "install-capability", "test",
-	"research", "review", "security-review",
-	"browser-auto", "computer-auto", "ppt-auto",
+	"explore", "research", "review", "security-review",
+	"browser-auto", "desktop-auto", "ppt-auto",
 	"email-auto", "rag-auto", "schedule-auto",
 	"document-auto", "expert-auto",
+	"netdev-help",
+	"netdev-playbook",
+	"netdev-diag-ospf", "netdev-diag-bgp", "netdev-diag-interface",
 }
 
 // profileSkillWhitelist returns the profile's EnabledSkills as a SkillNameKey set,

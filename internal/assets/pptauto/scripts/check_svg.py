@@ -357,6 +357,10 @@ def check_svg(svg_path, config=None, mode="fast"):
     # and the legacy 01_cover.svg / 10_ending.svg (underscore after).
     is_cover = "cover" in filename or "01_" in filename or "_01." in filename
     is_ending = "ending" in filename or "10_" in filename or "_10." in filename
+    # Section (chapter divider) pages are transitional like cover/ending: a big
+    # number + title + optional lead is their DESIGN, not missing content.
+    is_section = "section" in filename
+    is_sparse_ok = is_cover or is_ending or is_section
 
     errors = []
     warnings = []
@@ -440,7 +444,7 @@ def check_svg(svg_path, config=None, mode="fast"):
         min_text = density_config.get("min_text_elements", 6)
         min_rect = density_config.get("min_rect_elements", 2)
 
-        if is_cover or is_ending:
+        if is_sparse_ok:
             if text_count < 3:
                 errors.append(f"内容严重不足: {text_count} 个文字")
         else:
@@ -462,14 +466,14 @@ def check_svg(svg_path, config=None, mode="fast"):
         for level, msg in overlap_issues:
             errors.append(msg)
 
-        # 7. 垂直覆盖 — 封面/结尾页只有标题和致谢，内容天然少，跳过密度检查
-        if not is_cover and not is_ending:
+        # 7. 垂直覆盖 — 封面/结尾/章节页只有标题和致谢，内容天然少，跳过密度检查
+        if not is_sparse_ok:
             vc_issues = check_vertical_coverage(texts, rects, config)
             for level, msg in vc_issues:
                 errors.append(msg)
 
-        # 8. 空间覆盖 — 同上，封面/结尾页不受空间覆盖率约束
-        if not is_cover and not is_ending:
+        # 8. 空间覆盖 — 同上，封面/结尾/章节页不受空间覆盖率约束
+        if not is_sparse_ok:
             sc_issues = check_spatial_coverage(texts, rects, config)
             for level, msg in sc_issues:
                 if level == "error":

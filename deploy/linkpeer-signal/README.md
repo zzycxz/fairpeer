@@ -8,13 +8,16 @@ linkpeer × fairpeer 的**无状态信令路由器**：配对撮合、公钥交�
 ```
 公网 443 (WSS) ──→ Caddy (自动 TLS + /metrics 拦截) ──→ signal:8080 (Go HTTP)
                          │
-                         └── coturn:3478/udp (STUN-only，纯打洞不中继)
+                         └── coturn:3478/udp+tcp (STUN 打洞) + 49160-65535/udp (TURN relay)
 ```
 
 - **signal**：纯 Go 静态二进制（distroless nonroot），5 个端点
   `/pair/register` `/pair/exchange` `/pair/confirm` `/session/ws` `/healthz` + `/metrics`
 - **caddy**：自动 Let's Encrypt TLS + WSS 反代 + JSON 访问日志（100mb×7 滚动）+ `/metrics` 公网拦截
-- **coturn**：`no-udp-relay` + `no-tcp-relay` 强制 STUN-only（绝不中继业务流量）
+- **coturn**：STUN 打洞 + opt-in TURN 中转兜底（`use-auth-secret` REST 凭据）。
+  TURN 只转发 DTLS 加密包——**中继无法解密业务流量**；ICE 优先直连候选，
+  relay 仅在打洞全败（双对称 NAT）时启用。要回到纯 STUN：turnserver.conf
+  加回 `no-udp-relay` + `no-tcp-relay` 并关掉 relay 端口段。
 
 ## 独立编译（不依赖 fairpeer 主体）
 
@@ -37,7 +40,9 @@ CGO_ENABLED=0 go build -o linkpeer-signal ./cmd/linkpeer-signal
   22/tcp      # SSH（建议密钥 + 限源 IP）
   80/tcp      # ACME 挑战
   443/tcp     # WSS
-  3478/udp    # STUN
+  3478/udp    # STUN / TURN
+  3478/tcp    # TURN over TCP（封 UDP 网络的兜底）
+  49160:65535/udp  # TURN relay 端口段（turnserver.conf min/max-port）
   ```
 
 ### 2. 域名

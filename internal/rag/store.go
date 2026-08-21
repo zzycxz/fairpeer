@@ -610,8 +610,52 @@ type Result struct {
 	Score      float64
 }
 
-// Search runs an FTS5 MATCH query scoped to collection (empty = all). Returns
-// ranked results (BM25, higher = better) up to limit.
+// NetDevNamespace is the collection-name prefix reserved for the ops knowledge
+// namespace (vendor docs, config backups — NETDEV_SPEC §7.2). It is a
+// data-partition boundary enforced at the store's search layer:
+//   - an EMPTY search scope (all collections) never returns namespace rows, so
+//     dev/cowork rag_search cannot see ops knowledge;
+//   - a scope of exactly NetDevNamespace searches ONLY the namespace;
+//   - a "netdev:<sub>" scope searches that sub-collection, as any other scope.
+const NetDevNamespace = "netdev:"
+
+// IsNetDevCollection reports whether a collection belongs to the ops namespace.
+func IsNetDevCollection(name string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(name)), NetDevNamespace)
+}
+
+// NetDevSubCollection builds the namespaced name of an ops sub-collection
+// ("" → the whole-namespace marker, "vrp8" → "netdev:vrp8"). An
+// already-prefixed name passes through unchanged.
+func NetDevSubCollection(sub string) string {
+	sub = strings.ToLower(strings.TrimSpace(sub))
+	if sub == "" {
+		return NetDevNamespace
+	}
+	if IsNetDevCollection(sub) {
+		return sub
+	}
+	return NetDevNamespace + sub
+}
+
+// collectionScopeSQL returns the collection filter clause (space-prefixed) and
+// its bind args for search paths, implementing the §7.2 boundary described on
+// NetDevNamespace.
+func collectionScopeSQL(collection string) (string, []any) {
+	switch {
+	case collection == "":
+		return " AND collection NOT LIKE 'netdev:%'", nil
+	case collection == NetDevNamespace:
+		return " AND collection LIKE 'netdev:%'", nil
+	default:
+		// Path-prefix matching: selecting "工作" also searches "工作/领导材料".
+		return " AND (collection = ? OR collection LIKE ?)", []any{collection, collection + "/%"}
+	}
+}
+
+// Search runs an FTS5 MATCH query scoped to collection (empty = all EXCLUDING
+// the netdev namespace; "netdev:" = the whole namespace). Returns ranked
+// results (BM25, higher = better) up to limit.
 func (s *Store) Search(query, collection string, limit int) ([]Result, error) {
 	collection = normalizeCollection(collection)
 	if limit <= 0 {
@@ -629,29 +673,17 @@ func (s *Store) Search(query, collection string, limit int) ([]Result, error) {
 	// give a collection at least one FTS5 entry so it shows up in the list.
 	const placeholderFilter = ` AND path NOT LIKE 'placeholder://%'`
 
-	var rows *sql.Rows
-	var err error
-	if collection == "" {
-		rows, err = s.db.Query(`
-			SELECT collection, path, chunk,
-				snippet(rag_fts, 4, '<<', '>>', '...', 40) AS snip,
-				bm25(rag_fts) AS score
-			FROM rag_fts
-			WHERE rag_fts MATCH ?`+placeholderFilter+`
-			ORDER BY score
-			LIMIT ?`, ftsQuery, limit)
-	} else {
-		// Path-prefix matching: selecting "工作" should also search "工作/领导材料".
-		// We match collection = ? OR collection LIKE ? || '/%'.
-		rows, err = s.db.Query(`
-			SELECT collection, path, chunk,
-				snippet(rag_fts, 4, '<<', '>>', '...', 40) AS snip,
-				bm25(rag_fts) AS score
-			FROM rag_fts
-			WHERE rag_fts MATCH ?`+placeholderFilter+` AND (collection = ? OR collection LIKE ?)
-			ORDER BY score
-			LIMIT ?`, ftsQuery, collection, collection+"/%", limit)
-	}
+	scope, scopeArgs := collectionScopeSQL(collection)
+	args := append([]any{ftsQuery}, scopeArgs...)
+	args = append(args, limit)
+	rows, err := s.db.Query(`
+		SELECT collection, path, chunk,
+			snippet(rag_fts, 4, '<<', '>>', '...', 40) AS snip,
+			bm25(rag_fts) AS score
+		FROM rag_fts
+		WHERE rag_fts MATCH ?`+placeholderFilter+scope+`
+		ORDER BY score
+		LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("rag search: %w", err)
 	}

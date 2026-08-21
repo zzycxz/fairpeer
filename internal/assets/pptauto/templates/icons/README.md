@@ -14,17 +14,18 @@ This directory provides **11,600+ high-quality SVG icons** across five libraries
 
 ---
 
-## Per-project icons folder
+## Resolution
 
-This directory is the **global library**. At selection time the Strategist copies the chosen icons into the deck's own `<project>/icons/<lib>/` with `icon_sync.py`:
+This directory is the **global library** — icons are referenced by placeholder
+(`data-icon`) directly against it; there is no per-project copy step. The
+resolver lives in `scripts/svg_finalize/embed_icons.py`, which replaces every
+`<use data-icon="...">` placeholder with the icon's real paths at finalize time.
+An unknown name is reported per-icon at embed time — verify names with the
+search commands below BEFORE generating pages, not after.
 
-```bash
-python3 skills/ppt-auto/scripts/icon_sync.py <project_path> chunk-filled/home tabler-outline/bulb
-```
-
-A name the library does not have is reported and the command exits non-zero — re-pick a real one then, not at export. `finalize_svg.py embed-icons` embeds **project-first** (from `<project>/icons/`), falling back to this global library per-icon.
-
-**Custom icons**: drop your own `.svg` into `<project>/icons/<lib>/` (any `<lib>`, e.g. `custom/`) and reference it as `data-icon="<lib>/<name>"` — it embeds like any library icon.
+**Custom icons**: drop your own `.svg` into `<project>/icons/<lib>/` (any
+`<lib>`, e.g. `custom/`) and reference it as `data-icon="<lib>/<name>"` — the
+resolver checks the project folder first, falling back to this global library.
 
 ## Usage
 
@@ -53,10 +54,10 @@ Use placeholder syntax **during SVG generation**:
 - `width`, `height` — Size (recommend 32–48px for legibility)
 - `fill` — Color
 
-`finalize_svg.py` auto-embeds all placeholders during post-processing. To run manually:
+`svg_finalize/embed_icons.py` embeds all placeholders. Run it per page after generation:
 
 ```bash
-python3 scripts/svg_finalize/embed_icons.py svg_output/*.svg
+python3 <skill_dir>/scripts/svg_finalize/embed_icons.py <project_dir>/svg_output/slide_01.svg
 ```
 
 ---
@@ -66,11 +67,11 @@ python3 scripts/svg_finalize/embed_icons.py svg_output/*.svg
 Use `ls | grep` — zero token cost:
 
 ```bash
-ls skills/ppt-auto/templates/icons/chunk-filled/ | grep home
-ls skills/ppt-auto/templates/icons/tabler-filled/ | grep home
-ls skills/ppt-auto/templates/icons/tabler-outline/ | grep chart
-ls skills/ppt-auto/templates/icons/phosphor-duotone/ | grep house
-ls skills/ppt-auto/templates/icons/simple-icons/ | grep github
+ls <skill_dir>/templates/icons/chunk-filled/ | grep home
+ls <skill_dir>/templates/icons/tabler-filled/ | grep home
+ls <skill_dir>/templates/icons/tabler-outline/ | grep chart
+ls <skill_dir>/templates/icons/phosphor-duotone/ | grep house
+ls <skill_dir>/templates/icons/simple-icons/ | grep github
 ```
 
 ---

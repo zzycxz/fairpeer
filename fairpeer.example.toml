@@ -577,10 +577,12 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 #
 # [netdev]
 # enabled               = true
+# network_name          = "我的网络"     # 运维标题栏显示的网络名（设置 → 运维 可改）
 # default_mode          = "diagnose"    # diagnose | assess
 # audit_retention       = "180d"
 # proxy_device_traffic  = false         # 设备流量默认不走系统代理
-# max_sessions_per_device = 2           # 保护设备稀缺的 VTY 线路
+# max_sessions_per_device = 2           # 保护设备稀缺的 VTY 线路（CLI + NETCONF 共享预算）
+# backup_interval       = "24h"         # 定时配置备份（空 = 关闭）；巡检另见 inspection_interval
 #
 # [[netdev.hops]]                        # 堡垒机/跳板：只能人工注册
 # name          = "l1"
@@ -594,18 +596,36 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # policy        = "read-only"            # read-only | proposal | proposal+confirm2
 # change_window = "tue,thu 22:00-24:00"
 #
+# [[netdev.projects]]                    # 站点级范围（ Mist site 模式）：一组设备组
+# name   = "一号机房"                     # = 一个机房/园区/客户网络；标题栏可切换，
+# groups = ["core", "edge"]              # 侧栏/发现/提案随站点过滤
+# note   = "核心机房，双核心"
+#
+# [[netdev.presets]]                     # 设备卡的一键诊断电池（按厂商生效，空 = 全部）
+# name     = "接口体检"
+# commands = ["display interface brief", "display interface description"]
+# vendors  = ["huawei"]
+#
 # [[netdev.devices]]
 # name         = "core-sw-1"
 # vendor       = "huawei"                # huawei | cisco（zte P2）
 # os           = "vrp8"                  # vrp8 | vrp5 | ios | iosxe
 # model        = "S5735"
 # address      = "10.0.0.1"
+# # port        = 22                     # 0/省略 => 22
 # via          = ["l1"]                  # 声明式路由（顺序为跳转顺序）
 # group        = "core"
-# protocols    = ["ssh"]
+# protocols    = ["ssh"]                 # 前向声明：当前仅实现 SSH 传输（telnet/netconf 未接线）
 # username     = "netops"
 # password_env = "NETDEV_PWD_CORE1"
+# # identity_file  = "~/.ssh/id_ed25519" # 密钥认证（与密码二选一）
+# # passphrase_env = "NETDEV_PP_CORE1"
 # encoding     = "auto"                  # auto | utf-8 | gbk
+# # allow_telnet  = false                # 前向声明：解析并在设置里可见，拨号路径未消费（无 telnet 传输）
+#
+# # [netdev.devices.snmp]                 # SNMP 采集凭证（仅 v2c 已实现；v3 字段为前向声明）
+# # version        = "v2c"
+# # community_env  = "NETDEV_SNMP_CORE1"  # 真值在密钥库，永不入 TOML
 #
 # [netdev.discovery]                     # 探测范围白名单（护栏，永不关闭）
 # scopes = ["10.30.0.0/16"]
@@ -622,6 +642,11 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # engagement_id = "ASSESS-2026-018"
 # expires       = "2026-08-25"            # 过期自动拒绝
 # approver      = "zhang@corp"
+#
+# [netdev.guardrails]                     # 运行时护栏（§6；boot 与执行路径双侧强制）
+# confirm_each_command = true             # 每条网络命令先问（Ask 规则优先级高于 YOLO）
+# turn_command_budget  = 30               # 每次提问的读命令预算（0 = 不限；前端每轮重置）
+# allowed_groups      = ["core", "edge"]  # 空组列表 = 仅按组策略；未列组的设备拒连
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -640,6 +665,9 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # stun_servers     = ["stun:signal.example.com:3478"]
 # turn_enabled     = false                           # opt-in relay (default off; pure P2P)
 # turn_servers     = ["turn:signal.example.com:5349"]
+# turn_user        = ""                              # coturn REST 凭据（use-auth-secret）
+# turn_pass        = ""
+# cloud_signal_url = ""                              # 公网跳板 K（跨网配对；空 = 纯局域网/单 K）
 # upnp             = true                            # auto port-map on home routers
 # readonly_default = false                           # new phones default to read-only
 # require_approval = false                           # mobile submits need desktop OK
@@ -647,3 +675,39 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # allow_high_risk  = false                           # mobile may trigger shell/exec
 # max_connections  = 4                               # concurrent phone clients
 # log_level        = "info"
+#
+# 跨网连接（公网跳板）最小配置——signal_url 指本地 K（局域网直连），另配：
+#   cloud_signal_url = "https://signal.yourdomain.com"   # 云 K（deploy/linkpeer-signal）
+#   turn_enabled     = true
+#   turn_servers     = ["turn:signal.yourdomain.com:3478?transport=udp"]
+#   turn_user / turn_pass = coturn 的 REST 凭据（与 turnserver.conf
+#   static-auth-secret 派生的一致；详见 deploy/linkpeer-signal/README.md）
+# 效果：手机同 WiFi → 局域网直连（零云）；跨网/4G → 经云 K 信令 + STUN 打洞，
+# 打不通（双对称 NAT）时 TURN 中转兜底（中继只转发加密包，无法解密）。
+
+# ── Profiles (mode domains) ──────────────────────────────────────────────────
+# Built-in profiles: dev (编码) / cowork (办公) / netdev (运维). A [[profiles]]
+# entry with the same name overrides the built-in. Skill/MCP domain gating:
+#   enabled_skills   whitelist of SHIPPED skills visible in this mode (empty = all)
+#   hidden_plugins   NAMED MCP servers hidden in this mode (user-installed
+#                    servers are unaffected — override this list to re-show one)
+#   plugins          MCP name whitelist; combined with plugin_allowlist (below)
+#   plugin_allowlist treat plugins as a STRICT allowlist: empty list hides ALL
+#                    external MCPs. Pinned ON for netdev by the builtin floor —
+#                    an MCP carrying write/exec tools would punch through the
+#                    ops tool_scope seal, so servers must be named to appear.
+#   hidden_tools     tools hidden from the main loop's schemas
+# The built-ins already set sensible domains; uncomment to customize:
+#
+# [[profiles]]
+# name = "cowork"
+# enabled_skills = ["install-capability", "browser-auto", "desktop-auto", "ppt-auto", "email-auto", "rag-auto", "schedule-auto", "document-auto", "expert-auto"]
+# hidden_plugins = ["codegraph", "context7"]
+#
+# netdev 默认继承编码技能全集 + netdev-help，且 MCP 走严格白名单（默认全隐藏）。
+# 要在运维模式放行某个 MCP，必须在此点名（plugin_allowlist 钉死不可关）：
+#
+# [[profiles]]
+# name = "netdev"
+# plugins = ["my-nms-server"]             # 显式点名的 MCP 才会出现在运维模式
+# enabled_skills = ["init", "install-capability", "test", "explore", "research", "review", "security-review", "netdev-help"]

@@ -15,7 +15,7 @@ import (
 // that should force a refresh of the released copy. Bump this when you update
 // the embedded scripts/templates/SKILL.md and want existing users to get the
 // new version on next launch.
-const SkillVersion = "43" // 43: Beautify route — content lock (multiplicity-aware text diff) + B1-B6 workflow
+const SkillVersion = "45" // 45: page-skeleton generator (7 types, pages.json → SVG) + check_svg section-page exemption
 
 // versionFileName is written into the released skill dir so we can tell whether
 // the on-disk copy matches the embedded version.

@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/zzycxz/fairpeer/internal/config"
@@ -63,6 +64,11 @@ type Skill struct {
 	RunAs        RunAs  // inline | subagent
 	Model        string // optional model override for runAs=subagent (frontmatter `model:`)
 	Effort       string // optional effort for runAs=subagent (frontmatter `effort:`)
+	// MaxSteps, when > 0, caps the subagent's agent-loop steps for THIS skill
+	// (frontmatter `max-steps:`), overriding the default budget (half the main
+	// loop's MaxSteps). Heavy skills (ppt-auto) declare an explicit budget so a
+	// run can't go unbounded; light skills leave it unset.
+	MaxSteps int
 	// Disabled marks a skill the user turned off. It stays in the pinned skills
 	// index (so the model knows it exists and can suggest re-enabling) but is
 	// not callable via run_skill until re-enabled. Set by callers building the
@@ -472,6 +478,7 @@ func (s *Store) parse(path, stem string, scope Scope) (Skill, bool) {
 		RunAs:        parseRunAs(fm["runas"], fm["context"], fm["agent"]),
 		Model:        strings.TrimSpace(fm["model"]),
 		Effort:       strings.TrimSpace(fm["effort"]),
+		MaxSteps:     parseIntFrontmatter(fm["max-steps"], fm["max_steps"]),
 	}, true
 }
 
@@ -620,6 +627,18 @@ func parseAllowedTools(raw string) []string {
 		}
 	}
 	return out
+}
+
+// parseIntFrontmatter returns the first key that parses as a positive int
+// (0 otherwise). Accepts both hyphen and underscore spellings so SKILL.md
+// authors can write either.
+func parseIntFrontmatter(keys ...string) int {
+	for _, raw := range keys {
+		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
 }
 
 // parseRunAs maps frontmatter to a run mode. An unknown value defaults to the
