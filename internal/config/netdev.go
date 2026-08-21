@@ -34,7 +34,11 @@ type NetDevConfig struct {
 	// knowledge-growth path; unknown commands stay refused until classified).
 	ExtraRead map[string][]string `toml:"extra_read"`
 	// InspectionInterval schedules the read-battery sweep ("1h", "30m"; "" = off).
-	InspectionInterval string           `toml:"inspection_interval"`
+	InspectionInterval string `toml:"inspection_interval"`
+	// BackupInterval schedules the config-backup sweep ("1h", "24h"; "" = off):
+	// every tick snapshots every managed device's running-config into the
+	// versioned vault — the drift/history backbone.
+	BackupInterval string `toml:"backup_interval"`
 	Assessment         NetDevAssessment `toml:"assessment"`
 	// Guardrails are the per-ask / per-tool-call controls (NETDEV_SPEC §6):
 	// they reach DOWN into every LLM turn, not just the mode level.

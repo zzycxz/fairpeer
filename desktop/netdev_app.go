@@ -56,6 +56,7 @@ type NetDevHopView struct {
 
 // NetDevSettingsView is the whole settings payload.
 type NetDevSettingsView struct {
+	BackupInterval string             `json:"backupInterval"`
 	Enabled        bool               `json:"enabled"`
 	NetworkName    string             `json:"networkName"`
 	Devices        []NetDevDeviceView `json:"devices"`
@@ -114,6 +115,7 @@ type NetDevSSHImportCandidate struct {
 // NetDevSettings loads the pinned [netdev] section for the settings page.
 func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 	startInspectionScheduler(a)
+	startBackupScheduler(a)
 	cfg, err := config.Load()
 	if err != nil {
 		return NetDevSettingsView{}, err
@@ -125,6 +127,7 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 		Enabled:           cfg.NetDev.Enabled,
 		NetworkName:       cfg.NetDev.NetworkName,
 		AuditRetention:    cfg.NetDev.AuditRetention,
+		BackupInterval:    cfg.NetDev.BackupInterval,
 		Scopes:            cfg.NetDev.Discovery.Scopes,
 		GuardConfirmEach:  cfg.NetDev.Guardrails.ConfirmEachCommand,
 		GuardTurnBudget:   cfg.NetDev.Guardrails.TurnCommandBudget,
@@ -259,6 +262,11 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 			nd.Presets = c.NetDev.Presets
 		}
 		nd.InspectionInterval = c.NetDev.InspectionInterval
+		if strings.TrimSpace(v.BackupInterval) != "" {
+			nd.BackupInterval = strings.TrimSpace(v.BackupInterval)
+		} else {
+			nd.BackupInterval = c.NetDev.BackupInterval
+		}
 		nd.Assessment = c.NetDev.Assessment
 		nd.DefaultMode = c.NetDev.DefaultMode
 		nd.ProxyDeviceTraffic = c.NetDev.ProxyDeviceTraffic
@@ -394,6 +402,32 @@ func startInspectionScheduler(a *App) {
 	})
 }
 
+// startBackupScheduler mirrors the inspection loop for the config vault:
+// every [netdev] backup_interval, snapshot every device (sealed reads,
+// redacted text only). Shares the once-guard's lifetime.
+func startBackupScheduler(a *App) {
+	inspectionSchedOnce.Do(func() {
+		go func() {
+			for {
+				cfg, err := config.Load()
+				if err != nil || cfg == nil {
+					return
+				}
+				d, err := time.ParseDuration(strings.TrimSpace(cfg.NetDev.BackupInterval))
+				if err != nil || d <= 0 {
+					return
+				}
+				time.Sleep(d)
+				ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
+				if vers, err := netdev.SharedManager(cfg).RunBackup(ctx, ""); err == nil {
+					slog.Info("scheduled netdev backup filed", "versions", len(vers))
+				}
+				cancel()
+			}
+		}()
+	})
+}
+
 // NetDevQuickExec runs ONE read-only command from the UI (device detail
 // quick-diagnose buttons) through the SAME sealed path as the agent's
 // netdev_exec: classifier, redaction, audit — write/dangerous refused.
@@ -469,6 +503,27 @@ func (a *App) NetDevBackups(device string) ([]netdev.BackupVersion, error) {
 // NetDevBackupDiff returns the unified diff between two of a device's versions.
 func (a *App) NetDevBackupDiff(device, idA, idB string) (string, error) {
 	return netdev.DiffBackups(device, idA, idB)
+}
+
+// NetDevImportNmap parses a user-run nmap -oX dump into a Finding (hosts +
+// open ports; hosts outside the inventory flagged 待确认 — nothing dials).
+func (a *App) NetDevImportNmap(xmlText string) (*netdev.Finding, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	addrs := make([]string, 0, len(cfg.NetDev.Devices))
+	for _, d := range cfg.NetDev.Devices {
+		addrs = append(addrs, d.Address)
+	}
+	f, err := netdev.ImportNmapForConfig(xmlText, addrs)
+	if err != nil {
+		return nil, err
+	}
+	if err := netdev.SaveFinding(f); err != nil {
+		return nil, err
+	}
+	return f, nil
 }
 
 // NetDevRedfishQuery runs one GET-only Redfish request for the device card's

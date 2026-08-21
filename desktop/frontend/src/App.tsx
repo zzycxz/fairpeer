@@ -93,6 +93,7 @@ import {
 } from "./lib/toolApprovalMode";
 import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
 import { hydrateDisplayMode } from "./lib/displayMode";
+import { getScopedItem, setActiveStorageProfile, setScopedItem } from "./lib/profileScopedStorage";
 import { blobToBase64, renderSessionImageBlob, renderSessionPdfBlob } from "./lib/sessionExport";
 import { sessionActivityTime } from "./lib/session";
 import {
@@ -124,6 +125,9 @@ function isThemeMode(value: string): value is Theme {
 }
 const RIGHT_DOCK_TREE_DEFAULT_WIDTH = 260;
 const RIGHT_DOCK_TREE_MIN_WIDTH = 260;
+// 运维 dock 的下限：设备卡/发现卡的内容（命令按钮、证据链）在更窄的栏里
+// 会折行成灾——编码 dock 的 260 下限对它不够用。
+const NETDEV_DOCK_MIN_WIDTH = 340;
 const RIGHT_DOCK_TREE_MAX_WIDTH = 1200;
 const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 660;
 const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
@@ -148,7 +152,7 @@ const DEFAULT_DOCK_TABS: RightDockMode[] = ["files", "changed", "preview"];
 
 function loadDockTabs(): RightDockMode[] {
   try {
-    const raw = localStorage.getItem(DOCK_TABS_KEY);
+    const raw = getScopedItem(DOCK_TABS_KEY, true);
     if (raw) {
       const list = (JSON.parse(raw) as string[]).filter(
         (v): v is RightDockMode => DOCK_TAB_CATALOG.includes(v as RightDockMode),
@@ -161,7 +165,7 @@ function loadDockTabs(): RightDockMode[] {
 
 function loadRightDockMode(): RightDockMode {
   try {
-    const v = localStorage.getItem(RIGHT_DOCK_MODE_KEY);
+    const v = getScopedItem(RIGHT_DOCK_MODE_KEY, true);
     if (v === "files" || v === "changed" || v === "preview" || v === "session") return v;
   } catch { /* storage unavailable */ }
   return "files";
@@ -169,7 +173,7 @@ function loadRightDockMode(): RightDockMode {
 
 function loadPreviewUrl(): string {
   try {
-    return localStorage.getItem(PREVIEW_URL_KEY) || "";
+    return getScopedItem(PREVIEW_URL_KEY, true) || "";
   } catch {
     return "";
   }
@@ -882,7 +886,7 @@ export default function App() {
   const closeWorkspacePanelRef = useRef<() => void>(() => {});
   useEffect(() => {
     try {
-      localStorage.setItem(DOCK_TABS_KEY, JSON.stringify(dockTabs));
+      setScopedItem(DOCK_TABS_KEY, JSON.stringify(dockTabs));
     } catch { /* storage unavailable */ }
   }, [dockTabs]);
   const ensureDockTab = useCallback((mode: RightDockMode) => {
@@ -913,8 +917,11 @@ export default function App() {
 
   // Auto-detect the newest localhost URL in tool output; on a NEW url, switch
   // to the preview tab and open the dock — unless the user manually closed it
-  // on this same url (pane-system §3.3 anti-nag guard).
+  // on this same url (pane-system §3.3 anti-nag guard). Dev-profile only: the
+  // preview dock belongs to the coding view, and a netdev/cowork transcript
+  // mentioning localhost must not mutate the hidden dev dock's state.
   useEffect(() => {
+    if (coworkActive || netdevActive) return;
     const re = /\b(?:https?:\/\/)?(?:localhost|127\.0\.0\.1)(?::\d{2,5})\b[^\s"'<>)]*/i;
     for (let i = state.items.length - 1; i >= 0; i--) {
       const it = state.items[i];
@@ -932,19 +939,19 @@ export default function App() {
       }
       return;
     }
-  }, [state.items, previewUrl]);
+  }, [state.items, previewUrl, coworkActive, netdevActive]);
 
   // Remember the last active dock tab (files/changed/preview).
   useEffect(() => {
     try {
-      if (rightDockMode !== "context") localStorage.setItem(RIGHT_DOCK_MODE_KEY, rightDockMode);
+      if (rightDockMode !== "context") setScopedItem(RIGHT_DOCK_MODE_KEY, rightDockMode);
     } catch { /* storage unavailable */ }
   }, [rightDockMode]);
 
   const commitPreviewUrl = useCallback((url: string) => {
     setPreviewUrl(url);
     try {
-      localStorage.setItem(PREVIEW_URL_KEY, url);
+      setScopedItem(PREVIEW_URL_KEY, url);
     } catch { /* storage unavailable */ }
   }, []);
 
@@ -1655,13 +1662,16 @@ export default function App() {
         }
         // Optimistically flip the layout so the view swaps immediately, without
         // waiting for the backend's profile:changed event to round-trip. The
-        // active-tab-sync effect re-confirms (or corrects) coworkActive once the
-        // new tab's profile field arrives; this just removes the dead time. In
-        // the browser dev mock (no Go backend) this flip is what makes the
-        // CoWorkLayout actually render, since the event never fires.
-        const nextCowork = targetProfile === "cowork";
-        setCoworkActive(nextCowork);
-        profileRef.current = nextCowork ? "cowork" : "dev";
+        // active-tab-sync effect re-confirms (or corrects) coworkActive/
+        // netdevActive once the new tab's profile field arrives; this just
+        // removes the dead time. In the browser dev mock (no Go backend) this
+        // flip is what makes the CoWorkLayout/NetDevLayout actually render,
+        // since the event never fires. All three profiles flip here — folding
+        // netdev to dev would scope any interim topic creation to the wrong
+        // session partition.
+        setCoworkActive(targetProfile === "cowork");
+        setNetdevActive(targetProfile === "netdev");
+        profileRef.current = targetProfile;
         setProjectRevision((v) => v + 1);
       } catch (err) {
         console.error("[switchProfile] failed:", err);
@@ -1962,15 +1972,20 @@ export default function App() {
   useEffect(() => {
     return onProfileChanged((e) => {
       const isActive = e.tabId === activeTabId || !e.tabId;
+      const p = e.profile.toLowerCase();
+      const next: "dev" | "cowork" | "netdev" = p === "cowork" || p === "netdev" ? p : "dev";
       // Only adopt the change if it concerns the active tab — a background tab's
       // profile switch should not flip the visible layout.
-      setCoworkActive((prev) => {
-        if (e.profile.toLowerCase() === "cowork") return true;
-        return prev && isActive ? false : prev;
-      });
+      if (isActive) {
+        setCoworkActive(next === "cowork");
+        setNetdevActive(next === "netdev");
+      }
       // Keep the profile getter (handed to useController) live so subsequent
-      // OpenProjectTab/OpenGlobalTab calls scope to the new profile.
-      profileRef.current = e.profile.toLowerCase() === "cowork" ? "cowork" : "dev";
+      // OpenProjectTab/OpenGlobalTab calls scope to the new profile. All three
+      // profiles map here — folding netdev to dev would file new topics into
+      // the dev session partition (the P1 wiring bug the active-tab-sync
+      // effect guards against; this event path must not reintroduce it).
+      profileRef.current = next;
       // A profile switch rebuilds the active tab's controller, so the backend
       // re-emits agent:ready. The ready handler reloads with reset=false, which
       // leaves the previous profile's messages on screen when the new history is
@@ -1981,11 +1996,26 @@ export default function App() {
       // previous profile and would show the wrong conversations until reopened.
       setHistView(null);
       // Profiles are independent surfaces (user direction 2026-08-19): the
-      // Loop modal belongs to the coding profile and must not linger into
-      // cowork/netdev.
+      // Loop modal and the coding preference panel belong to the coding
+      // profile and must not linger into cowork/netdev.
       setLoopOpen(false);
+      setPreferenceOpen(false);
     });
   }, [activeTabId, syncActiveTab]);
+
+  // Profile-scoped dock layout: register the active profile with the storage
+  // helper and swap the per-profile dock arrangement (widths/tabs/mode/preview
+  // URL) at every mode boundary, so no profile inherits another's dock state.
+  // Maximized is transient and resets at the boundary.
+  useEffect(() => {
+    setActiveStorageProfile(coworkActive ? "cowork" : netdevActive ? "netdev" : "dev");
+    setRightDockTreeWidth(loadRightDockTreeWidth());
+    setRightDockPreviewWidth(loadRightDockPreviewWidth());
+    setDockTabs(loadDockTabs());
+    setRightDockMode(loadRightDockMode());
+    setPreviewUrl(loadPreviewUrl());
+    setWorkspacePanelMaximized(false);
+  }, [coworkActive, netdevActive]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2244,8 +2274,17 @@ export default function App() {
 
   const closeWorkspacePanel = useCallback(() => {
     closeTransientOverlays();
-    setCoworkDockOpen(false);
-    setNetdevDockOpen(false);
+    // Close only the ACTIVE surface's dock — the three profiles are
+    // independent, so closing the ops dock must not also close the office
+    // dock (or vice versa) the user may have open in the other view.
+    if (netdevActive) {
+      setNetdevDockOpen(false);
+      return;
+    }
+    if (coworkActive) {
+      setCoworkDockOpen(false);
+      return;
+    }
     if (!workspacePanelOpen) {
       return;
     }
@@ -2254,7 +2293,7 @@ export default function App() {
     previewSuppressedRef.current = previewUrl;
     setWorkspacePanelMaximized(false);
     setWorkspacePanelOpen(false);
-  }, [closeTransientOverlays, previewUrl, workspacePanelOpen]);
+  }, [closeTransientOverlays, coworkActive, netdevActive, previewUrl, workspacePanelOpen]);
   closeWorkspacePanelRef.current = closeWorkspacePanel;
 
   const toggleWorkspacePanel = useCallback(() => {
@@ -2366,10 +2405,10 @@ export default function App() {
     () =>
       ({
         "--sidebar-expanded-width": `${sidebarWidth}px`,
-        "--workspace-width": `${workspacePanelRenderWidth}px`,
+        "--workspace-width": `${Math.max(workspacePanelRenderWidth, netdevActive ? NETDEV_DOCK_MIN_WIDTH : 0)}px`,
         "--workspace-resizer-width": `${WORKSPACE_RESIZER_WIDTH}px`,
       }) as CSSProperties,
-    [sidebarWidth, workspacePanelRenderWidth],
+    [sidebarWidth, workspacePanelRenderWidth, netdevActive],
   );
 
   const addWorkspaceTextToComposer = useCallback((text: string) => {
@@ -2924,7 +2963,10 @@ export default function App() {
 
   const mainNode = (
     <main className="main">
-      {preferenceOpen && (
+      {/* Coding-profile preference surface: rendered only in dev so the dev
+          sidebar's button can never bleed the panel into cowork/netdev shells
+          (mainNode is embedded in all three layouts). */}
+      {preferenceOpen && !coworkActive && !netdevActive && (
         <PreferencePanel
           mode="dev"
           title={t("preference.title") || "编码偏好"}
@@ -3030,6 +3072,7 @@ export default function App() {
         tabId={activeTabId}
         effort={state.effort}
         contextInfo={state.context}
+        usage={state.usage}
         jobs={state.jobs}
         runningPhase={(() => {
           if (!state.running) return undefined;
@@ -3166,7 +3209,10 @@ export default function App() {
       onExportActiveSession={
         sessionHasContent ? (format) => void exportSession(format) : undefined
       }
-      onOpenChangedDock={() => openRightDockMode("changed")}
+      // The changed-files dock is a coding-view surface; the node is shared
+      // with the cowork/netdev rails, where opening the hidden dev dock would
+      // only mutate invisible state.
+      onOpenChangedDock={() => { if (!coworkActive && !netdevActive) openRightDockMode("changed"); }}
       onCopyTopicPath={async (topicId) => {
         try {
           const sessions = await app.ListSessions();
@@ -3298,8 +3344,9 @@ export default function App() {
             onSidebarResetWidth={() => setExpandedSidebarWidth(defaultSidebarWidth())}
             dockOpen={netdevDockOpen}
             dockOnClose={() => closeWorkspacePanel()}
-            dockWidth={workspacePanelRenderWidth}
-            dockMinWidth={workspacePanelResizeMinWidth}
+            onDockOpen={() => setNetdevDockOpen(true)}
+            dockWidth={Math.max(workspacePanelRenderWidth, NETDEV_DOCK_MIN_WIDTH)}
+            dockMinWidth={Math.max(workspacePanelResizeMinWidth, NETDEV_DOCK_MIN_WIDTH)}
             dockMaxAriaWidth={Math.max(workspacePanelMaxWidth, workspacePanelRenderWidth)}
             onDockResizeStart={startWorkspacePanelResize}
             onDockResizeKey={resizeWorkspacePanelWithKeyboard}
@@ -3409,38 +3456,47 @@ export default function App() {
               on the VISIBLE instance (a hidden duplicate would steal focus). */}
           {!coworkActive && !netdevActive && sidebarSearchNode}
 
-          {sidebarSessionsNode}
+          {/* Same single-mount rule for the session list and project tree: the
+              hidden sidebar's copies would double-fetch ListProjectTree /
+              ListSessions and double-write topic-seen state while the
+              cowork/netdev rails render their own visible copies. */}
+          {!coworkActive && !netdevActive && sidebarSessionsNode}
 
           <section className="sidebar__section sidebar__section--projects">
             {/* No "文件" toggle: this section IS the project workspace — the
                 tree is always present (user decision 2026-08-18). */}
-            {projectTreeNode}
+            {!coworkActive && !netdevActive && projectTreeNode}
           </section>
 
-          <section className="cowork-sidebar__group" style={{ marginBottom: '0px', marginTop: 'auto' }}>
-            <button
-              className={`cowork-sidebar__item ${preferenceOpen ? "cowork-sidebar__item--active" : ""}`}
-              onClick={() => {
-                closeTransientOverlays();
-                setLoopOpen(false);
-                setPreferenceOpen(true);
-              }}
-            >
-              <SlidersHorizontal size={14} />
-              <span>{t("preference.title") || "编码偏好"}</span>
-            </button>
-            <button
-              className={`cowork-sidebar__item ${loopOpen ? "cowork-sidebar__item--active" : ""}`}
-              onClick={() => {
-                closeTransientOverlays();
-                setPreferenceOpen(false);
-                setLoopOpen(true);
-              }}
-            >
-              <Repeat2 size={14} />
-              <span>{t("loop.title")}</span>
-            </button>
-          </section>
+          {/* Coding-profile bottom group: both surfaces are dev-only (loop is
+              backend-refused elsewhere), so skip the buttons entirely instead
+              of leaving dead (CSS-hidden) state toggles mounted. */}
+          {!coworkActive && !netdevActive && (
+            <section className="cowork-sidebar__group" style={{ marginBottom: '0px', marginTop: 'auto' }}>
+              <button
+                className={`cowork-sidebar__item ${preferenceOpen ? "cowork-sidebar__item--active" : ""}`}
+                onClick={() => {
+                  closeTransientOverlays();
+                  setLoopOpen(false);
+                  setPreferenceOpen(true);
+                }}
+              >
+                <SlidersHorizontal size={14} />
+                <span>{t("preference.title") || "编码偏好"}</span>
+              </button>
+              <button
+                className={`cowork-sidebar__item ${loopOpen ? "cowork-sidebar__item--active" : ""}`}
+                onClick={() => {
+                  closeTransientOverlays();
+                  setPreferenceOpen(false);
+                  setLoopOpen(true);
+                }}
+              >
+                <Repeat2 size={14} />
+                <span>{t("loop.title")}</span>
+              </button>
+            </section>
+          )}
 
         </aside>
         <button
@@ -3656,7 +3712,10 @@ export default function App() {
         />
       </div>
 
-      {loopOpen && (
+      {/* Loop is a coding-profile facility (raw-shell sensor/verify/rollback);
+          the profile-switch effect closes it, and this render gate keeps it
+          from ever mounting over the cowork/netdev shells. */}
+      {loopOpen && !coworkActive && !netdevActive && (
         <div className="management-modal-backdrop" onClick={() => setLoopOpen(false)}>
           <div className="management-modal loop-modal" onClick={(e) => e.stopPropagation()}>
             <LoopPanel onClose={() => setLoopOpen(false)} tabs={tabMetas} activeTabId={activeTabId ?? undefined} />

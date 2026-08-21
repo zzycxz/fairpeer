@@ -394,6 +394,15 @@ export interface ContextInfo {
   window: number;
   sessionTokens: number;
   compactRatio?: number;
+  // Session-cumulative telemetry for the usage chip's hover detail
+  // (zero/absent when the backend hasn't aggregated any turn yet).
+  sessionPromptTokens?: number;
+  sessionCompletionTokens?: number;
+  sessionReasoningTokens?: number;
+  sessionCacheHitTokens?: number;
+  sessionCacheMissTokens?: number;
+  sessionCacheWriteTokens?: number;
+  requestCount?: number;
 }
 
 export interface Meta {
@@ -551,6 +560,8 @@ export interface ServerView {
   authStatus?: "none" | "possible" | "required" | string;
   authUrl?: string;
   authConfigured?: boolean;
+  /** Hidden by the ACTIVE tab's profile gates (netdev allowlist / named hidden). */
+  profileHidden?: boolean;
 }
 export interface MCPToolView {
   name: string;
@@ -1671,6 +1682,9 @@ export interface NetDevSettingsView {
   extraRead: Record<string, string[]>;
   // Site-level scopes for the title-bar project switcher.
   projects: NetDevProjectView[];
+  // Scheduled sweeps ("1h"/"24h"; empty = off).
+  inspectionInterval: string;
+  backupInterval: string;
   // Named diagnostic batteries for the device card.
   presets: NetDevPresetView[];
 }

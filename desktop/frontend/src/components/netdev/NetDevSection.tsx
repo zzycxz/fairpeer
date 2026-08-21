@@ -39,7 +39,7 @@ export function NetDevSection() {
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {}, projects: [], presets: [] });
+  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {}, projects: [], presets: [], inspectionInterval: "", backupInterval: "" });
   const [editingDevice, setEditingDevice] = useState<EditDevice | null>(null);
   const [editingHop, setEditingHop] = useState<EditHop | null>(null);
   const [sshCandidates, setSSHCandidates] = useState<NetDevSSHImportCandidate[]>([]);
@@ -327,6 +327,37 @@ export function NetDevSection() {
         <span className="btn btn--secondary btn--small" role="button"
           onClick={() => patch({ presets: [...(view.presets ?? []), { name: "新组合", commands: [], vendors: [] }] })}>+ 新建组合</span>
       </div>
+
+      {/* 定时任务 */}
+      <div className="set-label" style={{ margin: "14px 0 6px" }}>定时任务</div>
+      <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        巡检周期
+        <input className="mem-input" style={{ width: 90 }} placeholder="如 1h / 30m，留空=关"
+          value={view.inspectionInterval ?? ""}
+          onChange={e => patch({ inspectionInterval: e.target.value })} />
+      </label>
+      <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        备份周期
+        <input className="mem-input" style={{ width: 90 }} placeholder="如 24h，留空=关"
+          value={view.backupInterval ?? ""}
+          onChange={e => patch({ backupInterval: e.target.value })} />
+      </label>
+      <div className="mem-hint" style={{ marginBottom: 4 }}>
+        到点自动巡检/全量配置备份（密封读+脱敏落版本）；结果分别进「发现」和设备卡的备份历史。
+      </div>
+
+      {/* 扫描导入 */}
+      <div className="set-label" style={{ margin: "14px 0 6px" }}>扫描导入</div>
+      <span className="btn btn--secondary btn--small" role="button"
+        onClick={async () => {
+          const xml = prompt("粘贴 nmap -oX 输出（XML 全文）：");
+          if (!xml) return;
+          try {
+            const f = await app.NetDevImportNmap(xml);
+            alert(f ? f.title : "导入完成");
+          } catch (e) { setErr(String(e)); }
+        }}
+      >导入 nmap XML（主机+开放端口 → 发现，清单外标待确认）</span>
 
       {/* 日常操作入口 — 操作在运维页，设置只留配置 */}
       <div className="set-label" style={{ margin: "14px 0 6px" }}>日常操作</div>

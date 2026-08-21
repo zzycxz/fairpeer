@@ -369,6 +369,9 @@ export interface AppBindings {
   NetDevRedfishQuery(device: string, path: string): Promise<string>;
   // One allowlisted SNMP get/walk for the device card's metrics panel.
   NetDevSnmpQuery(device: string, oid: string, mode: string): Promise<string>;
+  // Import a user-run nmap -oX dump: hosts + open ports → one Finding; hosts
+  // outside the inventory are flagged 待确认 (nothing dials).
+  NetDevImportNmap(xmlText: string): Promise<NetDevFinding | null>;
   NetDevFindings(): Promise<NetDevFinding[]>;
   // Emergency stop: close every device connection at once (audited).
   NetDevEmergencyStop(): Promise<number>;
@@ -1816,6 +1819,7 @@ function makeMockApp(): AppBindings {
     devices: null,
     hops: null, groups: null, auditRetention: "", scopes: null,
     guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: null,
+    inspectionInterval: "", backupInterval: "",
     extraRead: null, projects: null, presets: null,
   };
   return {
@@ -1842,6 +1846,7 @@ function makeMockApp(): AppBindings {
     async NetDevBackupDiff(device: string, _a: string, _b: string) {
       return `--- ${device} running-config\n+++ ${device} running-config\n@@ -12,4 +12,5 @@\n vlan 10\n- description office\n+ description office-floor2\n+ stp edged-port enable\n ntp-service unicast-server 10.0.0.253`;
     },
+    async NetDevImportNmap(_xml: string) { return null; },
     async NetDevSnmpQuery(_device: string, _oid: string, _mode: string) {
       return "1.3.6.1.2.1.1.1.0 = Linux mock 6.1 (browser dev mock)\n1.3.6.1.2.1.1.3.0 = 3691200 (ticks)";
     },
@@ -2492,7 +2497,19 @@ function makeMockApp(): AppBindings {
       if (index >= 0) mockProjectTree.splice(index, 1);
     },
         async ContextUsage() {
-          return { used: 42124, window: 128000, sessionTokens: 34479, compactRatio: 0.8 };
+          return {
+            used: 42124,
+            window: 128000,
+            sessionTokens: 34479,
+            compactRatio: 0.8,
+            sessionPromptTokens: 28120,
+            sessionCompletionTokens: 6359,
+            sessionReasoningTokens: 1840,
+            sessionCacheHitTokens: 26480,
+            sessionCacheMissTokens: 1640,
+            sessionCacheWriteTokens: 2100,
+            requestCount: 12,
+          };
         },
         async ContextUsageForTab() {
           return this.ContextUsage();
