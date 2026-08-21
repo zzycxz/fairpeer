@@ -1766,6 +1766,40 @@ func (a *App) Checkpoints() []CheckpointMeta {
 	return a.CheckpointsForTab("")
 }
 
+// SessionSearchHit is one session whose transcript matched a full-text query
+// (upgrade spec 4-5), with short excerpts around the matches.
+type SessionSearchHit struct {
+	Path     string   `json:"path"`
+	Excerpts []string `json:"excerpts"`
+	Title    string   `json:"title,omitempty"`
+	TopicID  string   `json:"topicId,omitempty"`
+	Scope    string   `json:"scope,omitempty"`
+	WorkspaceRoot string `json:"workspaceRoot,omitempty"`
+	Profile  string   `json:"profile,omitempty"`
+}
+
+// SearchSessionText full-text searches the active tab's session directory.
+func (a *App) SearchSessionText(query string) []SessionSearchHit {
+	a.mu.RLock()
+	var ctrl *control.Controller
+	if tab := a.tabByIDLocked(""); tab != nil {
+		ctrl = tab.Ctrl
+	}
+	a.mu.RUnlock()
+	if ctrl == nil {
+		return []SessionSearchHit{}
+	}
+	hits := ctrl.SearchSessionText(query)
+	out := make([]SessionSearchHit, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, SessionSearchHit{
+			Path: h.Path, Excerpts: h.Excerpts, Title: h.Title, TopicID: h.TopicID,
+			Scope: h.Scope, WorkspaceRoot: h.WorkspaceRoot, Profile: h.Profile,
+		})
+	}
+	return out
+}
+
 // CheckpointFileChange is one file's previewed rewind change (spec 3-6).
 type CheckpointFileChange struct {
 	Path    string `json:"path"`

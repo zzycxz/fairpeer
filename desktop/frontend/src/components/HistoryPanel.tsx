@@ -3,6 +3,7 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import { Archive, Pencil, Search, Trash2, RotateCcw } from "lucide-react";
 import { t, useT } from "../lib/i18n";
 import { sessionActivityTime } from "../lib/session";
+import { app } from "../lib/bridge";
 import type { HistoryMessage, SessionMeta } from "../lib/types";
 import { historyMessagesToItems, type Item } from "../lib/useController";
 import { Transcript } from "./Transcript";
@@ -17,6 +18,12 @@ type HistoryDateFilter = "all" | "today" | "yesterday" | "older";
 // HistoryPanel lists saved sessions newest-first. In the wide management modal,
 // a single click selects a read-only preview; explicit actions resume, restore,
 // rename, or delete the selected session.
+// baseName strips directories for a session path chip.
+function baseName(p: string): string {
+  const parts = p.split(/[\/]/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : p;
+}
+
 export function HistoryPanel({
   kind = "history",
   sessions,
@@ -142,6 +149,32 @@ export function HistoryPanel({
       return [s.title, s.preview, s.path, s.topicTitle, s.workspaceRoot].some((part) => (part ?? "").toLowerCase().includes(q));
     });
   }, [dateFilter, isTrash, query, scopeFilter, sessions, statusFilter]);
+
+  // Full-text hits (upgrade spec 4-5): when the query is long enough, also
+  // search session CONTENTS via the kernel (the meta filter above only sees
+  // titles/previews). Sessions matched by content but not by metadata are
+  // appended below the filtered list, excerpt first.
+  type TextHit = { path: string; excerpts: string[]; title?: string; topicId?: string; scope?: string; workspaceRoot?: string; profile?: string };
+  const [textHits, setTextHits] = useState<TextHit[]>([]);
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setTextHits([]);
+      return;
+    }
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      app.SearchSessionText(q)
+        .then((hits) => { if (!cancelled) setTextHits(hits ?? []); })
+        .catch(() => { if (!cancelled) setTextHits([]); });
+    }, 250); // debounce while typing
+    return () => { cancelled = true; window.clearTimeout(t); };
+  }, [query]);
+  const extraHits = useMemo(() => {
+    if (textHits.length === 0) return [];
+    const known = new Set(filteredSessions.map((s) => s.path));
+    return textHits.filter((h) => !known.has(h.path));
+  }, [textHits, filteredSessions]);
 
   // Sessions arrive newest-first; bucket consecutive ones under a day heading
   // (Today / Yesterday / a date) while preserving that order.
@@ -419,7 +452,7 @@ export function HistoryPanel({
                 {isTrash && <Trash2 size={22} />}
                 <span>{tr(isTrash ? "history.trashEmpty" : "history.empty")}</span>
               </div>
-            ) : filteredSessions.length === 0 ? (
+            ) : filteredSessions.length === 0 && extraHits.length === 0 ? (
               <div className="mem-empty">{tr("history.noResults")}</div>
             ) : (
               groups.map((g) => (
@@ -491,6 +524,35 @@ export function HistoryPanel({
                   })}
                 </section>
               ))
+            )}
+            {extraHits.length > 0 && (
+              <section className="mem-section">
+                <div className="mem-section__title hist-group__title">
+                  <span>{tr("history.contentMatches")}</span>
+                  <span className="hist-group__count">{extraHits.length}</span>
+                </div>
+                {extraHits.map((h) => (
+                  <button
+                    key={h.path}
+                    className="hist-item__main hist-item__main--texthit"
+                    onClick={() => onResume({
+                          path: h.path,
+                          title: h.title || baseName(h.path),
+                          topicId: h.topicId || "",
+                          scope: h.scope || (h.workspaceRoot ? "project" : "global"),
+                          workspaceRoot: h.workspaceRoot || "",
+                        } as SessionMeta)}
+                    title={h.path}
+                  >
+                    <div className="hist-texthit">
+                      <div className="hist-texthit__path">{baseName(h.path)}</div>
+                      {h.excerpts.map((e, i) => (
+                        <div key={i} className="hist-texthit__excerpt">{e}</div>
+                      ))}
+                    </div>
+                  </button>
+                ))}
+              </section>
             )}
           </div>
 

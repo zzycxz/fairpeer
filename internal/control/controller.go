@@ -2615,6 +2615,15 @@ func (c *Controller) SetSessionPath(p string) {
 // persistence), so the caller can decide whether to mint a path.
 func (c *Controller) SessionDir() string { return c.sessionDir }
 
+// SearchSessionText (upgrade spec 4-5) full-text searches this session
+// directory's transcripts and returns hits with excerpts.
+func (c *Controller) SearchSessionText(query string) []agent.SearchHit {
+	if c.sessionDir == "" {
+		return nil
+	}
+	return agent.SearchSessions(c.sessionDir, query)
+}
+
 // SessionPath reports the file the current conversation auto-saves to ("" when
 // persistence is disabled), so a history view can mark the active session.
 func (c *Controller) SessionPath() string {

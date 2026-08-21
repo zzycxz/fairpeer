@@ -686,6 +686,7 @@ export const en = {
   "history.filterActivity": "Activity",
   "history.filterDeletedAt": "Deleted",
   "history.noResults": "No matching sessions.",
+  "history.contentMatches": "Matched in session content",
   "history.today": "Today",
   "history.yesterday": "Yesterday",
   "history.older": "Older",

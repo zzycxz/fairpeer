@@ -686,6 +686,7 @@ export const zh: Record<DictKey, string> = {
   "history.filterActivity": "活动时间",
   "history.filterDeletedAt": "删除时间",
   "history.noResults": "没有匹配的会话。",
+  "history.contentMatches": "正文匹配的会话",
   "history.today": "今天",
   "history.yesterday": "昨天",
   "history.older": "更早",
