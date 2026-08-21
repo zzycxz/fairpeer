@@ -1,12 +1,15 @@
 // UsageChip — compact context-window meter for the composer param row
 // (ui-redesign spec §4-C3): a 46px fill bar plus inline token readings. The
-// chip itself carries the numbers (session tokens · used/window), so no hover
-// tooltip is needed; aria-label keeps the reading screen-reader friendly. The
-// fill turns warn-coloured past 85% so compaction pressure is visible at a
-// glance. Data comes from App state (ContextInfo), the same source StatusBar
-// reads.
+// chip itself carries the numbers (session tokens · used/window); aria-label
+// keeps the reading screen-reader friendly. The fill turns warn-coloured past
+// 85% so compaction pressure is visible at a glance. Hovering (or keyboard
+// focus) opens a detail panel: precise context fill, average prompt-cache
+// hit-rate (Σhit/Σ(hit+miss) across the session), current-turn rate, and
+// session-cumulative token splits. Data comes from App state — ContextInfo
+// (extended with session telemetry) plus the latest-turn WireUsage.
+import { Tooltip } from "../Tooltip";
 import { useT } from "../../lib/i18n";
-import type { ContextInfo } from "../../lib/types";
+import type { ContextInfo, WireUsage } from "../../lib/types";
 
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
@@ -14,23 +17,99 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
-export function UsageChip({ context }: { context?: ContextInfo }) {
+function fmtFull(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+function hitRate(hit: number, miss: number): number | null {
+  const denom = hit + miss;
+  if (denom <= 0) return null;
+  return (hit / denom) * 100;
+}
+
+function rateTone(rate: number | null): string {
+  if (rate === null) return "";
+  if (rate >= 80) return "usage-pop__value--good";
+  if (rate >= 50) return "usage-pop__value--notice";
+  return "usage-pop__value--critical";
+}
+
+function fmtRate(rate: number | null): string {
+  return rate === null ? "—" : `${rate.toFixed(1)}%`;
+}
+
+function Row({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="usage-pop__row">
+      <span>{label}</span>
+      <b className={tone || undefined}>{value}</b>
+    </div>
+  );
+}
+
+export function UsageChip({ context, usage }: { context?: ContextInfo; usage?: WireUsage }) {
   const t = useT();
   if (!context || !context.window || context.window <= 0) return null;
   const pct = Math.min(100, Math.round((context.used / context.window) * 100));
   const hot = pct >= 85;
   const session = context.sessionTokens > 0 ? context.sessionTokens : context.used;
-  return (
-    <div
-      className={`composer-usage${hot ? " composer-usage--hot" : ""}`}
-      aria-label={`${t("composer.contextUsage")} ${pct}% · ${t("composer.sessionTokens")} ${fmtTokens(session)}`}
-    >
-      <span className="composer-usage__bar" aria-hidden="true">
-        <i style={{ width: `${pct}%` }} />
-      </span>
-      <span className="composer-usage__text">
-        {fmtTokens(session)} · {fmtTokens(context.used)}/{fmtTokens(context.window)}
-      </span>
+
+  // Aggregate cache rate prefers the telemetry totals (works for every
+  // provider); the wire event's session fields are the live per-request
+  // fallback while a turn is still streaming.
+  const telHit = context.sessionCacheHitTokens ?? 0;
+  const telMiss = context.sessionCacheMissTokens ?? 0;
+  const wireHit = usage?.sessionCacheHitTokens ?? 0;
+  const wireMiss = usage?.sessionCacheMissTokens ?? 0;
+  const avgRate = telHit + telMiss > 0
+    ? hitRate(telHit, telMiss)
+    : hitRate(wireHit, wireMiss);
+  const nowRate = usage ? hitRate(usage.cacheHitTokens, usage.cacheMissTokens) : null;
+  const cacheWrite = context.sessionCacheWriteTokens ?? 0;
+  const requests = context.requestCount ?? 0;
+
+  const panel = (
+    <div className="usage-pop">
+      <div className="usage-pop__title">{t("composer.usageDetail.title")}</div>
+      <div className="usage-pop__bar" aria-hidden="true">
+        <i style={{ width: `${Math.min(100, (context.used / context.window) * 100)}%` }} />
+      </div>
+      <Row label={`${fmtFull(context.used)} / ${fmtFull(context.window)}`} value={`${((context.used / context.window) * 100).toFixed(1)}%`} />
+      {!!context.compactRatio && context.compactRatio > 0 && context.compactRatio < 1 && (
+        <Row label={t("composer.usageDetail.compactLine")} value={`${Math.round(context.compactRatio * 100)}%`} />
+      )}
+      <div className="usage-pop__sep" />
+      <div className="usage-pop__row usage-pop__row--hero">
+        <span>{t("composer.usageDetail.avgHitRate")}</span>
+        <b className={rateTone(avgRate)}>{fmtRate(avgRate)}</b>
+      </div>
+      <Row label={t("composer.usageDetail.nowHitRate")} value={fmtRate(nowRate)} tone={rateTone(nowRate)} />
+      <Row
+        label={t("composer.usageDetail.cacheRW")}
+        value={`${fmtTokens(telHit)} / ${fmtTokens(cacheWrite)}`}
+      />
+      <div className="usage-pop__sep" />
+      <div className="usage-pop__title">{t("composer.usageDetail.session")}</div>
+      <Row label={t("composer.usageDetail.requests")} value={requests > 0 ? String(requests) : "—"} />
+      <Row label={t("composer.usageDetail.input")} value={fmtFull(context.sessionPromptTokens ?? 0)} />
+      <Row label={t("composer.usageDetail.output")} value={fmtFull(context.sessionCompletionTokens ?? 0)} />
+      <Row label={t("composer.usageDetail.reasoning")} value={fmtFull(context.sessionReasoningTokens ?? 0)} />
     </div>
+  );
+
+  return (
+    <Tooltip label={panel} bodyClassName="usage-pop-body" side="top">
+      <div
+        className={`composer-usage${hot ? " composer-usage--hot" : ""}`}
+        aria-label={`${t("composer.contextUsage")} ${pct}% · ${t("composer.sessionTokens")} ${fmtTokens(session)}`}
+      >
+        <span className="composer-usage__bar" aria-hidden="true">
+          <i style={{ width: `${pct}%` }} />
+        </span>
+        <span className="composer-usage__text">
+          {fmtTokens(session)} · {fmtTokens(context.used)}/{fmtTokens(context.window)}
+        </span>
+      </div>
+    </Tooltip>
   );
 }

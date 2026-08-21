@@ -1231,8 +1231,23 @@ export function useController(getProfile?: () => string) {
     if (tabId) dispatchTo(tabId, { type: "reset" });
   }, [activeTabId, bumpCheckpointRefreshSeq, dispatchTo]);
 
-  const listSessions = useCallback(async (): Promise<SessionMeta[]> => asArray<SessionMeta>(await app.ListSessions().catch(() => [])), []);
-  const listTrashedSessions = useCallback(async (): Promise<SessionMeta[]> => asArray<SessionMeta>(await app.ListTrashedSessions().catch(() => [])), []);
+  // Session lists are profile-scoped: the sidebar/history/palette surfaces of
+  // dev/cowork/netdev are independent, so a mode never lists another mode's
+  // conversations. Falls back to the unscoped list when the backend is older.
+  const listSessions = useCallback(async (): Promise<SessionMeta[]> => {
+    try {
+      return asArray<SessionMeta>(await app.ListSessionsForProfile(profile()));
+    } catch {
+      return asArray<SessionMeta>(await app.ListSessions().catch(() => []));
+    }
+  }, [getProfile]);
+  const listTrashedSessions = useCallback(async (): Promise<SessionMeta[]> => {
+    try {
+      return asArray<SessionMeta>(await app.ListTrashedSessionsForProfile(profile()));
+    } catch {
+      return asArray<SessionMeta>(await app.ListTrashedSessions().catch(() => []));
+    }
+  }, [getProfile]);
   const resumeSession = useCallback(async (path: string, tabId?: string) => {
     const targetTabId = tabId || activeTabId;
     if (!targetTabId) return;

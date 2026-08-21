@@ -252,6 +252,9 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
               {(tab.profile ?? "").toLowerCase() === "cowork" && (
                 <span className="tabbar__mode-badge tabbar__mode-badge--cowork">{t("cowork.badgeCoWork")}</span>
               )}
+              {(tab.profile ?? "").toLowerCase() === "netdev" && (
+                <span className="tabbar__mode-badge tabbar__mode-badge--netdev">{t("cowork.badgeNetDev")}</span>
+              )}
               {((tab.profile ?? "").toLowerCase() === "dev" || !(tab.profile ?? "")) && (
                 <span className="tabbar__mode-badge tabbar__mode-badge--dev">{t("cowork.badgeDev") || "编码"}</span>
               )}

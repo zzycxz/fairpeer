@@ -1769,6 +1769,12 @@
   background: var(--ok);
 }
 
+/* Ops-profile badge — amber signals the sealed network-device surface. */
+.tabbar__mode-badge--netdev {
+  color: #1c1c1c;
+  background: #f5a623;
+}
+
 .tabbar__spacer {
   flex: 1 1 auto;
   min-width: 12px;

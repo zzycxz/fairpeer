@@ -5,7 +5,25 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
-const styles = readFileSync(resolve(testDir, "../styles.css"), "utf8");
+
+// styles.css is an @import hub (content lives in src/styles/*). Recursively
+// inline the imports so the cascade checks below see the FULL stylesheet —
+// the palette rules moved into panels.css during the styles split.
+function loadStyles(path: string, seen = new Set<string>()): string {
+  if (seen.has(path)) return "";
+  seen.add(path);
+  let css: string;
+  try {
+    css = readFileSync(path, "utf8");
+  } catch {
+    return "";
+  }
+  return css.replace(/^\s*@import\s+"([^"]+)"\s*;?\s*$/gm, (_m, rel: string) =>
+    loadStyles(resolve(dirname(path), rel), seen),
+  );
+}
+
+const styles = loadStyles(resolve(testDir, "../styles.css"));
 
 let passed = 0;
 let failed = 0;
@@ -75,9 +93,17 @@ eq(
 
 for (const selector of [".palette__title", ".palette__hint"]) {
   eq(finalDeclaration(selector, "overflow"), "hidden", `${selector} clips overflow inside the row`);
-  eq(finalDeclaration(selector, "text-overflow"), "ellipsis", `${selector} uses ellipsis for long text`);
-  eq(finalDeclaration(selector, "white-space"), "nowrap", `${selector} stays on one measured line`);
 }
+
+// The hint row became a flex container (hint-text + meta + badge): the
+// ellipsis discipline moved onto the .palette__hint-text child — assert it
+// there instead of on the container.
+for (const prop of ["text-overflow", "white-space"]) {
+  const expected = prop === "text-overflow" ? "ellipsis" : "nowrap";
+  eq(finalDeclaration(".palette__hint-text", prop), expected, `.palette__hint-text ${prop}: ${expected} (child carries the ellipsis)`);
+}
+eq(finalDeclaration(".palette__title", "text-overflow"), "ellipsis", ".palette__title uses ellipsis for long text");
+eq(finalDeclaration(".palette__title", "white-space"), "nowrap", ".palette__title stays on one measured line");
 
 ok(
   !matchingBlocks(".palette__item").some((block) => /(?:^|;)\s*flex-direction\s*:\s*column\s*(?:;|$)/.test(block)),

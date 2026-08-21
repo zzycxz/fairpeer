@@ -10,6 +10,7 @@ export type ContextMenuItem =
       key: string;
       icon?: ReactNode;
       label: ReactNode;
+      title?: string;
       disabled?: boolean;
       danger?: boolean;
       onSelect: () => void;
@@ -116,6 +117,7 @@ export function ContextMenu({
             key={item.key}
             type="button"
             role="menuitem"
+            title={item.title}
             disabled={item.disabled}
             className={`context-menu__item${item.danger ? " context-menu__item--danger" : ""}`}
             onClick={(event) => {

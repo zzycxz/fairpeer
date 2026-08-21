@@ -31,6 +31,11 @@ export interface CoWorkLayoutProps {
   sidebarCollapsed?: boolean;
   onNewSession?: () => void;
   onSwitchMode?: (mode: "dev" | "cowork" | "netdev") => void;
+  pillProjects?: import("../components/WorkspacePill").PillProject[];
+  onOpenDevProject?: (root: string) => void;
+  onOpenDevGlobal?: () => void;
+  onAddProject?: () => void;
+  globalSessionDirHint?: string;
   // Sidebar collapse — the brand-row toggle mirrors the coding view's
   // (toggleSidebar + its title live in App.tsx).
   onToggleSidebar?: () => void;
@@ -80,6 +85,11 @@ export function CoWorkLayout({
   sidebarCollapsed = false,
   onNewSession,
   onSwitchMode,
+  pillProjects,
+  onOpenDevProject,
+  onOpenDevGlobal,
+  onAddProject,
+  globalSessionDirHint,
   onToggleSidebar,
   sidebarToggleTitle,
   dockCwd,
@@ -203,6 +213,11 @@ export function CoWorkLayout({
             state="static"
             label={t("sidebar.pillOffice")}
             currentMode="cowork"
+            projects={pillProjects}
+            onPickProject={onOpenDevProject}
+            onPickGlobal={onOpenDevGlobal}
+            onAddProject={onAddProject}
+            globalHint={globalSessionDirHint ? `${t("sidebar.pillGlobalStore")}: ${globalSessionDirHint}` : undefined}
             {...(onSwitchMode ? { onSwitchMode } : {})}
           />
           <button

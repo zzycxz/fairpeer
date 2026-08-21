@@ -1,14 +1,18 @@
 // composerHistory is a tiny ring buffer of the user's last sent prompts with
-// ⌥↑/⌥↓ navigation. The history is shared across all sessions (the same way
-// a shell history is — having "fix the lint errors" only available in the
-// session it was first sent in would defeat the point), capped at 200 entries
-// to bound localStorage, and deduped to keep the most recent occurrence of any
+// ⌥↑/⌥↓ navigation. The history is shared across all sessions OF A PROFILE
+// (like a shell history — having "fix the lint errors" only available in the
+// session it was first sent in would defeat the point), but scoped per product
+// mode: recalling an ops prompt inside coding (or vice versa) is cross-surface
+// leakage, and the three workspaces are independent. Capped at 200 entries to
+// bound localStorage, and deduped to keep the most recent occurrence of any
 // repeated prompt at the top (mirroring the .bash_history "HISTCONTROL=
 // erasedups" convention).
 //
 // We don't try to do prefix-search navigation (Ctrl-R in bash) — that needs a
 // search UI and a keybinding the OS doesn't already take. The arrow
 // navigation is the common case and is the smallest useful addition.
+
+import { getScopedItem, setScopedItem } from "./profileScopedStorage";
 
 const KEY = "fairpeer.composer.history";
 const CAP = 200;
@@ -29,7 +33,7 @@ export interface HistoryEntry {
 function readAll(): HistoryEntry[] {
   if (typeof localStorage === "undefined") return [];
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = getScopedItem(KEY);
     if (!raw) return [];
     const v = JSON.parse(raw);
     if (!Array.isArray(v)) return [];
@@ -42,7 +46,7 @@ function readAll(): HistoryEntry[] {
 function writeAll(list: HistoryEntry[]): void {
   if (typeof localStorage === "undefined") return;
   try {
-    localStorage.setItem(KEY, JSON.stringify(list));
+    setScopedItem(KEY, JSON.stringify(list));
   } catch {
     /* private mode — fine to forget */
   }

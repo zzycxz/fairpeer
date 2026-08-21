@@ -5,7 +5,7 @@
 // The dropdown doubles as the mode switcher, retiring the top-right segmented
 // control's monopoly on profile switching.
 import { useState } from "react";
-import { ChevronDown, FolderPlus, Globe2, Network } from "lucide-react";
+import { CalendarDays, ChevronDown, Code2, FolderPlus, Globe2, Network } from "lucide-react";
 import { useT } from "../lib/i18n";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 
@@ -27,6 +27,7 @@ export function WorkspacePill({
   onPickGlobal,
   onAddProject,
   onSwitchMode,
+  globalHint,
 }: {
   state: WorkspacePillState;
   label: string;
@@ -37,6 +38,8 @@ export function WorkspacePill({
   onPickGlobal?: () => void;
   onAddProject?: () => void;
   onSwitchMode?: (mode: "dev" | "cowork" | "netdev") => void;
+  // Storage-location tooltip for the 全局 entry (answers "files live where?").
+  globalHint?: string;
 }) {
   const t = useT();
   const [point, setPoint] = useState<{ left: number; top: number } | null>(null);
@@ -49,7 +52,10 @@ export function WorkspacePill({
   };
 
   const items: ContextMenuItem[] = [];
-  if (state !== "static") {
+  {
+    // The dropdown is mode-independent (2026-08-21): projects/global/add show
+    // wherever handlers exist — picking one from office/netdev funnels the
+    // user into the coding profile with that workspace open.
     for (const p of projects) {
       items.push({
         key: `p-${p.root}`,
@@ -59,19 +65,19 @@ export function WorkspacePill({
       });
     }
     if (onPickGlobal) {
-      items.push({ key: "global", icon: <Globe2 size={13} />, label: t("sidebar.pillGlobal"), onSelect: onPickGlobal });
+      items.push({ key: "global", icon: <Globe2 size={13} />, label: t("sidebar.pillGlobal"), title: globalHint, onSelect: onPickGlobal });
     }
     if (onAddProject) {
       items.push({ key: "add-project", icon: <FolderPlus size={13} />, label: t("sidebar.pillAddProject"), onSelect: onAddProject });
     }
-    if (onSwitchMode && (projects.length > 0 || onPickGlobal)) {
+    if (onSwitchMode && (projects.length > 0 || onPickGlobal || onAddProject)) {
       items.push({ type: "separator", key: "sep-modes" });
     }
   }
   if (onSwitchMode) {
     const modes: Array<{ id: "dev" | "cowork" | "netdev"; label: string; icon: React.ReactNode }> = [
-      { id: "dev", label: t("sidebar.modeDev"), icon: <span className="workspace-pill__menu-dot" aria-hidden="true" /> },
-      { id: "cowork", label: t("sidebar.modeCowork"), icon: <span className="workspace-pill__menu-dot" aria-hidden="true" /> },
+      { id: "dev", label: t("sidebar.modeDev"), icon: <Code2 size={13} /> },
+      { id: "cowork", label: t("sidebar.modeCowork"), icon: <CalendarDays size={13} /> },
       { id: "netdev", label: t("sidebar.modeNetdev"), icon: <Network size={13} /> },
     ];
     for (const m of modes) {

@@ -857,7 +857,9 @@ function ServerRow({
   const actionLabel = serverActionLabel(s, t);
   const tools = s.toolList ?? [];
   let sub =
-    s.status === "failed"
+    s.profileHidden
+      ? t("caps.profileHidden")
+      : s.status === "failed"
       ? s.error || t("caps.failed")
       : s.status === "initializing"
         ? t("caps.initializing")
@@ -1317,6 +1319,7 @@ function SkillRow({
   onToggle,
   onToggleEnabled,
   onUninstall,
+  onDerive,
 }: {
   skill: SkillView;
   busy: boolean;
@@ -1324,6 +1327,7 @@ function SkillRow({
   onToggle: () => void;
   onToggleEnabled: (enabled: boolean) => void;
   onUninstall?: () => void;
+  onDerive?: () => void;
 }) {
   const t = useT();
   const summary = summarizeSkillDescription(skill.description);
@@ -1361,6 +1365,13 @@ function SkillRow({
           <button className="btn btn--small btn--danger" style={{ marginLeft: "8px" }} disabled={busy} onClick={(e) => { e.stopPropagation(); onUninstall(); }}>
             {t("caps.uninstall")}
           </button>
+        )}
+        {onDerive && (
+          <Tooltip label={t("caps.deriveSkillHint")}>
+            <button className="btn btn--small" style={{ marginLeft: "8px" }} disabled={busy} onClick={(e) => { e.stopPropagation(); onDerive(); }}>
+              {t("caps.deriveSkill")}
+            </button>
+          </Tooltip>
         )}
       </div>
       <div className="cap-skill-card__desc">
@@ -1958,6 +1969,13 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 		return skillListSummary(userSkills, filteredSkills.filter((sk) => sk.scope !== "builtin"), skillQuery.trim().length > 0, t);
 	}, [filteredSkills, skillQuery, t, view, userSkills]);
 
+	const deriveSkill = useCallback((name: string) => {
+		void mutate(async () => {
+			const path = await app.DeriveEditableSkill(name);
+			if (path) window.alert(t("caps.deriveSkillDone", { path }));
+		});
+	}, [mutate, t]);
+
 	const toggleSkill = useCallback((name: string) => {
 		setExpandedSkills((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
 	}, []);
@@ -2031,6 +2049,7 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 								expanded={expandedSkills.has(sk.name)}
 								onToggle={() => toggleSkill(sk.name)}
 								onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
+								onDerive={sk.scope === "builtin" ? () => deriveSkill(sk.name) : undefined}
 							/>
 						))}
 					</div>
@@ -2057,6 +2076,7 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 								expanded={expandedSkills.has(sk.name)}
 								onToggle={() => toggleSkill(sk.name)}
 								onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
+								onDerive={sk.scope === "builtin" ? () => deriveSkill(sk.name) : undefined}
 							/>
 						))}
 					</div>
@@ -2083,6 +2103,7 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 								expanded={expandedSkills.has(sk.name)}
 								onToggle={() => toggleSkill(sk.name)}
 								onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
+								onDerive={sk.scope === "builtin" ? () => deriveSkill(sk.name) : undefined}
 							/>
 						))}
 					</div>
@@ -2111,6 +2132,7 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 								expanded={expandedSkills.has(sk.name)}
 								onToggle={() => toggleSkill(sk.name)}
 								onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
+								onDerive={sk.scope === "builtin" ? () => deriveSkill(sk.name) : undefined}
 							/>
 						))}
 					</div>

@@ -49,7 +49,7 @@ eq(
 
 eq(
   providerModelCandidates(["qwen3-max"], ["qwen-vl-plus", "qwen-tts-1", "qwen3.5", "qwen3-max"]),
-  ["qwen3-max", "qwen3.5"],
+  ["qwen3-max", "qwen-vl-plus", "qwen3.5"],
   "manual access refresh filters non-chat candidates before saving",
 );
 
@@ -60,7 +60,10 @@ eq(
     isLikelyChatModel("qwen-tts-1"),
     isLikelyChatModel("text-embedding-3-small"),
   ],
-  [true, false, false, false],
+  // Vision-capable CHAT models stay (qwen-vl-plus), matching the backend
+  // contract in internal/config/chat_model_test.go — only TTS/STT/embedding/
+  // image-video-generation families are non-chat.
+  [true, true, false, false],
   "matches backend non-chat model heuristic",
 );
 

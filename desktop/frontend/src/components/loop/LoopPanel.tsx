@@ -57,7 +57,12 @@ export function LoopPanel({
   tabs: TabMeta[];
   activeTabId?: string;
 }) {
-  const projectTabs = tabs.filter((tab) => tab.tabType !== "file" && tab.scope === "project");
+  // Loop is coding-profile only (its sensor/verify/rollback run raw shell —
+  // see LoopStart's backend refusal), so only dev-profile project tabs are
+  // valid targets.
+  const projectTabs = tabs.filter(
+    (tab) => tab.tabType !== "file" && tab.scope === "project" && ((tab.profile ?? "dev").toLowerCase() === "dev"),
+  );
   const [targetTabId, setTargetTabId] = useState<string>(
     () => (activeTabId && projectTabs.some((tab) => tab.id === activeTabId) ? activeTabId : projectTabs[0]?.id ?? ""),
   );

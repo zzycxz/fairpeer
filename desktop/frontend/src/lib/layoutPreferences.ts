@@ -1,3 +1,5 @@
+import { activeStorageProfile, scopedStorageKey } from "./profileScopedStorage";
+
 export type LayoutSizeKey =
   | "sidebarWidth"
   | "sidebarWidthGraphite"
@@ -16,6 +18,23 @@ type LayoutPreferences = {
 
 const STORAGE_KEY = "fairpeer.layoutPreferences.v1";
 
+// Keys that belong to a PROFILE-SPECIFIC surface (the right dock / composer of
+// dev vs cowork vs netdev): each profile gets its own bucket, seeded from the
+// global (dev) values on first read. Chrome-level keys (sidebar, drawers) are
+// shared surfaces and stay global.
+const PROFILE_SCOPED_KEYS: Partial<Record<LayoutSizeKey, boolean>> = {
+  rightDockWidth: true,
+  rightDockTreeWidth: true,
+  rightDockPreviewWidth: true,
+  workspaceFileTreePanelWidth: true,
+  workspaceTreeWidth: true,
+  composerHeight: true,
+};
+
+function scopedPrefsKey(): string {
+  return scopedStorageKey(STORAGE_KEY);
+}
+
 const LEGACY_SIZE_KEYS: Record<LayoutSizeKey, string[]> = {
   sidebarWidth: ["fairpeer.sidebar.width"],
   sidebarWidthGraphite: [],
@@ -33,6 +52,30 @@ type ClampSize = (value: number) => number;
 
 function readPrefs(): LayoutPreferences {
   if (typeof window === "undefined") return {};
+  const readBucket = (key: string): LayoutPreferences => {
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw) as LayoutPreferences;
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+  const global = readPrefsGlobal();
+  const scoped = readBucket(scopedPrefsKey());
+  // Effective view: global sizes with the active profile's scoped sizes
+  // layered on top (scoped buckets only carry the profile-specific keys, so
+  // the first visit of a named profile inherits dev's dimensions).
+  const sizes = { ...global.sizes };
+  for (const k of Object.keys(scoped.sizes ?? {}) as LayoutSizeKey[]) {
+    if (PROFILE_SCOPED_KEYS[k]) sizes[k] = scoped.sizes![k];
+  }
+  return { sizes };
+}
+
+function readPrefsGlobal(): LayoutPreferences {
+  if (typeof window === "undefined") return {};
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return {};
@@ -45,8 +88,34 @@ function readPrefs(): LayoutPreferences {
 
 function writePrefs(prefs: LayoutPreferences): void {
   if (typeof window === "undefined") return;
+  // Split the write: profile-specific keys go to the ACTIVE profile's bucket,
+  // everything else to the global one. Scoped buckets keep working even if the
+  // key catalog above changes (unknown scoped keys are preserved verbatim).
+  const global = readPrefsGlobal();
+  const globalSizes = { ...(global.sizes ?? {}) };
+  const scopedRaw = (() => {
+    try {
+      const raw = window.localStorage.getItem(scopedPrefsKey());
+      if (!raw) return {};
+      const parsed = JSON.parse(raw) as LayoutPreferences;
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  })();
+  const scopedSizes = { ...(scopedRaw.sizes ?? {}) };
+  for (const [k, v] of Object.entries(prefs.sizes ?? {}) as [LayoutSizeKey, number][]) {
+    if (PROFILE_SCOPED_KEYS[k]) {
+      scopedSizes[k] = v;
+    } else {
+      globalSizes[k] = v;
+    }
+  }
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ sizes: prefs.sizes ?? {} }));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ sizes: globalSizes }));
+    if (activeStorageProfile() !== "dev") {
+      window.localStorage.setItem(scopedPrefsKey(), JSON.stringify({ sizes: scopedSizes }));
+    }
   } catch {
     /* ignore storage failures */
   }

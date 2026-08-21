@@ -149,6 +149,11 @@ export function NetDevLayout({
   onNewSession,
   onToggleSidebar,
   onSwitchMode,
+  pillProjects,
+  onOpenDevProject,
+  onOpenDevGlobal,
+  onAddProject,
+  globalSessionDirHint,
   sidebarToggleTitle,
   sidebarCollapsed = false,
   sidebarWidth,
@@ -191,6 +196,11 @@ export function NetDevLayout({
   // Sidebar collapse + resize — same affordances as the coding sidebar.
   onToggleSidebar?: () => void;
   onSwitchMode?: (mode: "dev" | "cowork" | "netdev") => void;
+  pillProjects?: import("../components/WorkspacePill").PillProject[];
+  onOpenDevProject?: (root: string) => void;
+  onOpenDevGlobal?: () => void;
+  onAddProject?: () => void;
+  globalSessionDirHint?: string;
   sidebarToggleTitle?: string;
   sidebarCollapsed?: boolean;
   sidebarWidth?: number;
@@ -512,6 +522,11 @@ export function NetDevLayout({
             state="static"
             label={settings?.networkName?.trim() || "我的网络"}
             currentMode="netdev"
+            projects={pillProjects}
+            onPickProject={onOpenDevProject}
+            onPickGlobal={onOpenDevGlobal}
+            onAddProject={onAddProject}
+            globalHint={globalSessionDirHint ? `全局会话存储于: ${globalSessionDirHint}` : undefined}
             {...(onSwitchMode ? { onSwitchMode } : {})}
           />
           {onNewSession && (

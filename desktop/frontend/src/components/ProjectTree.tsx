@@ -10,6 +10,7 @@ import { compactSessionAge } from "./SidebarSessions";
 import { app } from "../lib/bridge";
 import type { ProjectNode, ProjectTopicStatus } from "../lib/types";
 import { useT, type DictKey, type Translator } from "../lib/i18n";
+import { getScopedItem, setScopedItem } from "../lib/profileScopedStorage";
 import { PROJECT_COLOR_OPTIONS, projectColorValue } from "../lib/projectColors";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import { Tooltip } from "./Tooltip";
@@ -231,15 +232,17 @@ export function ProjectTree({
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
   // Unseen-activity markers (2026-08-18): a topic glows blue when it produced
   // output after we last opened it; opening clears it. Seeded once so existing
-  // sessions do not all light up on the first run of this feature.
+  // sessions do not all light up on the first run of this feature. Storage is
+  // profile-scoped — topics belong to a mode, and the visible tree's markers
+  // must not be cleared by a hidden instance of another profile.
   const [topicSeen, setTopicSeen] = useState<Record<string, number>>(() => {
-    try { return JSON.parse(localStorage.getItem(TOPIC_SEEN_KEY) || "{}"); } catch { return {}; }
+    try { return JSON.parse(getScopedItem(TOPIC_SEEN_KEY) || "{}"); } catch { return {}; }
   });
   const seededSeen = useRef(false);
   useEffect(() => {
     if (seededSeen.current || tree.length === 0) return;
     seededSeen.current = true;
-    if (localStorage.getItem(TOPIC_SEEN_KEY)) return;
+    if (getScopedItem(TOPIC_SEEN_KEY)) return;
     const stamp = Date.now();
     const next: Record<string, number> = {};
     const walkAll = (nodes: ProjectNode[]) => {
@@ -250,7 +253,7 @@ export function ProjectTree({
     };
     walkAll(tree);
     setTopicSeen(next);
-    try { localStorage.setItem(TOPIC_SEEN_KEY, JSON.stringify(next)); } catch { /* quota */ }
+    try { setScopedItem(TOPIC_SEEN_KEY, JSON.stringify(next)); } catch { /* quota */ }
   }, [tree]);
   const markTopicSeen = useCallback((topicId: string) => {
     if (!topicId) return;
@@ -258,7 +261,7 @@ export function ProjectTree({
       const now = Date.now();
       if ((cur[topicId] ?? 0) > now - 2000) return cur;
       const next = { ...cur, [topicId]: now };
-      try { localStorage.setItem(TOPIC_SEEN_KEY, JSON.stringify(next)); } catch { /* quota */ }
+      try { setScopedItem(TOPIC_SEEN_KEY, JSON.stringify(next)); } catch { /* quota */ }
       return next;
     });
   }, []);

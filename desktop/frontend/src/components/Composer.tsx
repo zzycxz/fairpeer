@@ -9,7 +9,7 @@ import { startRecording, checkMicPermission, VoiceRecorderError, type RecordingS
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { useToast } from "../lib/toast";
-import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type HistoryMessage, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode } from "../lib/types";
+import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type HistoryMessage, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type ToolApprovalMode, type WireUsage } from "../lib/types";
 import { UsageChip } from "./composer/UsageChip";
 import {
   formatWorkspaceReference,
@@ -333,6 +333,7 @@ export function Composer({
   tabId,
   effort,
   contextInfo,
+  usage,
   runningPhase,
   jobs,
   onSend,
@@ -358,6 +359,7 @@ export function Composer({
   retry,
   transientDismissSignal,
   placeholderOverride,
+  profile,
 }: {
   running: boolean;
   // paused is true while the in-flight turn is frozen on a graceful pause.
@@ -373,6 +375,9 @@ export function Composer({
   effort?: EffortInfo;
   // Context-window meter (ui-redesign §4-C3); absent → the UsageChip stays hidden.
   contextInfo?: ContextInfo;
+  // Latest-turn wire usage — feeds the usage chip's hover detail with the
+  // current-turn cache hit-rate while a turn is still streaming.
+  usage?: WireUsage;
   // Background jobs (bash/task) — compact chip next to the usage meter; the
   // tooltip lists the job labels. Restores the surface lost with the status
   // bar removal (pane-system decision log).
@@ -412,6 +417,9 @@ export function Composer({
   transientDismissSignal?: number;
   // Mode-specific placeholder (netdev): falls back to composer.placeholder.
   placeholderOverride?: string;
+  // Active product profile — scopes the past:chats session list so a mode only
+  // references its own conversations (bridge falls back to the global list).
+  profile?: string;
 }) {
   const { t, locale } = useI18n();
   const { showToast } = useToast();
@@ -1370,7 +1378,9 @@ export function Composer({
     setPastChatQuery("");
     setLoadingPastChats(true);
     try {
-      const sessions = await app.ListSessions();
+      const sessions = await (profile
+        ? app.ListSessionsForProfile(profile).catch(() => app.ListSessions())
+        : app.ListSessions());
       // Discard stale response if workspace changed while the request was in-flight.
       if (cwdRef.current !== snapshotCwd) return;
       const sorted = asArray(sessions)
@@ -2247,7 +2257,7 @@ export function Composer({
               </div>
             )}
             <div className="composer-meta__control composer-meta__control--usage">
-              <UsageChip context={contextInfo} />
+              <UsageChip context={contextInfo} usage={usage} />
             </div>
             {hasEffort && (
               <div className="composer-meta__control composer-meta__control--more">

@@ -965,6 +965,7 @@ export default function App() {
   const [workspaceChangeListRequest, setWorkspaceChangeListRequest] = useState<WorkspaceChangeListRequest | null>(null);
   const [dockRefreshKey, setDockRefreshKey] = useState(0);
   const [projectRevision, setProjectRevision] = useState(0);
+
   // WorkspacePill's project catalog (2026-08-19 design A): the known projects
   // list, refreshed with the tree so the pill's dropdown stays current.
   const [pillProjects, setPillProjects] = useState<PillProject[]>([]);
@@ -2808,6 +2809,30 @@ export default function App() {
 
   // Workspace: open the folder chooser and switch projects. The hook resets the
   // transcript and refreshes meta on a pick. A cancel is a no-op.
+  // Storage hint for the pill's 全局 entry: the directory of any known global
+  // session (answers "global files live where?").
+  const globalSessionDirHint = useMemo(() => {
+    const sample = sidebarSessions.find((x) => x.scope === "global" && x.path);
+    if (!sample) return undefined;
+    const dir = sample.path.replace(/[\/][^\/]+$/, "");
+    return dir || undefined;
+  }, [sidebarSessions]);
+
+  // Cross-mode funnel: picking a project/全局 from the office or netdev pill
+  // lands the user in the coding profile with that workspace open — the pill
+  // dropdown is identical everywhere (2026-08-21).
+  const openDevProject = useCallback((root: string) => {
+    void switchProfile("dev")
+      .then(() => openBlankSession("project", root))
+      .catch(() => { /* revert handled in switchProfile */ });
+  }, [openBlankSession, switchProfile]);
+  const openDevGlobal = useCallback(() => {
+    void switchProfile("dev")
+      .then(() => openBlankSession("global", ""))
+      .catch(() => { /* revert handled in switchProfile */ });
+  }, [openBlankSession, switchProfile]);
+
+
   const switchFolder = useCallback(async (path?: string) => {
     const picked = path === undefined ? await pickWorkspace() : await switchWorkspace(path);
     if (picked) {
@@ -3282,6 +3307,11 @@ export default function App() {
       >
         {coworkActive && (
           <CoWorkLayout
+          pillProjects={pillProjects}
+          onOpenDevProject={openDevProject}
+          onOpenDevGlobal={openDevGlobal}
+          onAddProject={() => { void switchFolder(); }}
+          globalSessionDirHint={globalSessionDirHint}
           onSwitchMode={(mode) => { void switchProfile(mode).catch(() => { /* revert handled in switchProfile */ }); }}
             mainNode={mainNode}
             footerNode={footerNode}
@@ -3322,6 +3352,11 @@ export default function App() {
         )}
         {netdevActive && (
           <NetDevLayout
+          pillProjects={pillProjects}
+          onOpenDevProject={openDevProject}
+          onOpenDevGlobal={openDevGlobal}
+          onAddProject={() => { void switchFolder(); }}
+          globalSessionDirHint={globalSessionDirHint}
           onSwitchMode={(mode) => { void switchProfile(mode).catch(() => { /* revert handled in switchProfile */ }); }}
             mainNode={mainNode}
             footerNode={footerNode}
@@ -3437,6 +3472,7 @@ export default function App() {
               }}
               onAddProject={() => { void switchFolder(); }}
               onSwitchMode={(mode) => { void switchProfile(mode).catch(() => { /* revert handled in switchProfile */ }); }}
+              globalHint={globalSessionDirHint}
             />
             <button
               type="button"

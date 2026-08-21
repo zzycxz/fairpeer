@@ -11,6 +11,7 @@ import { ChevronDown, Eraser, MessageSquare, Plus, TerminalSquare, X } from "luc
 import { app, onEvent } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type { WireEvent, WireTool } from "../lib/types";
+import { getScopedItem, setScopedItem } from "../lib/profileScopedStorage";
 
 const TERMINAL_OPEN_KEY = "fairpeer.terminalOpen";
 const MAX_LINES = 500;
@@ -19,7 +20,7 @@ const SESSION_TAB_ID = "__side_session__";
 
 export function loadTerminalOpen(): boolean {
   try {
-    return localStorage.getItem(TERMINAL_OPEN_KEY) === "1";
+    return getScopedItem(TERMINAL_OPEN_KEY, true) === "1";
   } catch {
     return false;
   }
@@ -27,7 +28,7 @@ export function loadTerminalOpen(): boolean {
 
 export function saveTerminalOpen(open: boolean): void {
   try {
-    localStorage.setItem(TERMINAL_OPEN_KEY, open ? "1" : "0");
+    setScopedItem(TERMINAL_OPEN_KEY, open ? "1" : "0");
   } catch {
     /* storage unavailable */
   }

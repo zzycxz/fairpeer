@@ -41,6 +41,7 @@ export function Tooltip({
   block = false,
   disabled = false,
   className,
+  bodyClassName,
 }: {
   label?: ReactNode;
   children: ReactNode;
@@ -49,6 +50,9 @@ export function Tooltip({
   block?: boolean;
   disabled?: boolean;
   className?: string;
+  // Appended to the portal body (not the trigger) — for rich panels that need
+  // their own width/padding, overriding the compact text-tooltip defaults.
+  bodyClassName?: string;
 }) {
   const id = useId();
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -167,7 +171,7 @@ export function Tooltip({
           <div
             id={id}
             ref={tooltipRef}
-            className={`tooltip tooltip--${position.side}`}
+            className={`tooltip tooltip--${position.side}${bodyClassName ? ` ${bodyClassName}` : ""}`}
             role="tooltip"
             style={{
               left: position.left,

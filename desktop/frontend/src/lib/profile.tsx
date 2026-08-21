@@ -2,11 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 
 import { app, onProfileChanged } from "./bridge";
 
-// A product profile switches the whole app between product modes: "dev" (coding)
-// and "cowork" (office). It is per-tab — switching rebuilds that tab's controller
-// with the profile's model/prompt/skill/plugin bundle (see app.SwitchProfileForTab
-// in desktop/app.go). This provider tracks the ACTIVE tab's profile so the layout
-// can branch on it, and exposes switchProfile to trigger a rebuild.
+// A product profile switches the whole app between product modes: "dev" (coding),
+// "cowork" (office) and "netdev" (ops). It is per-tab — switching rebuilds that
+// tab's controller with the profile's model/prompt/skill/plugin bundle (see
+// app.SwitchProfileForTab in desktop/app.go). This provider tracks the ACTIVE
+// tab's profile so the layout can branch on it, and exposes switchProfile to
+// trigger a rebuild.
 //
 // The active-tab contract: app.Profile() returns the current tab's profile, and
 // the "profile:changed" event fires with {tabId, profile}. We refresh whenever
@@ -14,7 +15,7 @@ import { app, onProfileChanged } from "./bridge";
 // App re-mounting this provider under the active-tab subtree — see App.tsx). To
 // stay simple and robust we also poll-free re-fetch on tab-switch via a key prop.
 
-export type ProfileName = "dev" | "cowork";
+export type ProfileName = "dev" | "cowork" | "netdev";
 
 export interface ProfileContextValue {
   profile: ProfileName;
@@ -29,7 +30,7 @@ const ProfileContext = createContext<ProfileContextValue | null>(null);
 
 function normalizeProfile(name: string | undefined | null): ProfileName {
   const n = (name ?? "").trim().toLowerCase();
-  return n === "cowork" ? "cowork" : "dev";
+  return n === "cowork" || n === "netdev" ? n : "dev";
 }
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
