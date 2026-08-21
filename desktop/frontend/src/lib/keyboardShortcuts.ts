@@ -31,6 +31,7 @@ const DEFAULT_BINDINGS: Record<string, ShortcutCombo> = {
   "app.newSession": { key: "n", ctrl: true },
   "shell.toggle": { key: "b", ctrl: true },
   "agents.dashboard": { key: "i", ctrl: true },
+  "branches.show": { key: "b", ctrl: true, shift: true },
 };
 
 export function registerShortcut(_shortcut: KeyboardShortcut) {

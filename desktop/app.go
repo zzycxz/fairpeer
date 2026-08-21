@@ -1778,6 +1778,51 @@ type SessionSearchHit struct {
 	Profile  string   `json:"profile,omitempty"`
 }
 
+// BranchView is one session-branch node for the tree navigator (upgrade spec 4-3).
+type BranchView struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	ParentID  string `json:"parentId,omitempty"`
+	Path      string `json:"path"`
+	Preview   string `json:"preview,omitempty"`
+	Turns     int    `json:"turns,omitempty"`
+	UpdatedAt int64  `json:"updatedAt"`
+	Current   bool   `json:"current,omitempty"`
+}
+
+// BranchesForTab lists the tab's session branches for the tree view.
+func (a *App) BranchesForTab(tabID string) []BranchView {
+	ctrl := a.ctrlByTabID(tabID)
+	if ctrl == nil {
+		return []BranchView{}
+	}
+	infos, err := ctrl.Branches()
+	if err != nil {
+		return []BranchView{}
+	}
+	current := agent.BranchID(ctrl.SessionPath())
+	out := make([]BranchView, 0, len(infos))
+	for _, b := range infos {
+		out = append(out, BranchView{
+			ID: b.ID, Name: b.Name, ParentID: b.ParentID, Path: b.Path,
+			Preview: b.Preview, Turns: b.Turns, UpdatedAt: b.ModTime.UnixMilli(),
+			Current: b.ID == current,
+		})
+	}
+	return out
+}
+
+// SwitchBranchForTab navigates the tab to another branch; the frontend
+// refreshes the transcript afterwards (syncActiveTab).
+func (a *App) SwitchBranchForTab(tabID, ref string) error {
+	ctrl := a.ctrlByTabID(tabID)
+	if ctrl == nil {
+		return fmt.Errorf("no active controller")
+	}
+	_, err := ctrl.SwitchBranch(ref)
+	return err
+}
+
 // TurnFactsView mirrors tabs.turnFact on the wire.
 type TurnFactsView struct {
 	Seq              int    `json:"seq"`

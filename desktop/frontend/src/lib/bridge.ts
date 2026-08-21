@@ -195,6 +195,8 @@ export interface AppBindings {
   CheckpointsForTab(tabID: string): Promise<CheckpointMeta[]>;
   SearchSessionText(query: string): Promise<{ path: string; excerpts: string[]; title?: string; topicId?: string; scope?: string; workspaceRoot?: string; profile?: string }[]>;
   TurnFactsForTab(tabID: string): Promise<{ seq: number; durationMs: number; retries: number; toolCalls: number; toolErrors: number; promptTokens: number; completionTokens: number; cacheHitTokens: number; cacheMissTokens: number; err?: string }[]>;
+  BranchesForTab(tabID: string): Promise<{ id: string; name?: string; parentId?: string; path: string; preview?: string; turns?: number; updatedAt: number; current?: boolean }[]>;
+  SwitchBranchForTab(tabID: string, ref: string): Promise<void>;
   CheckpointDiffForTab(tabID: string, turn: number): Promise<{ path: string; kind: string; added: number; removed: number; diff: string }[]>;
   Rewind(turn: number, scope: string): Promise<void>;
   Fork(turn: number): Promise<TabMeta>;
@@ -2450,6 +2452,10 @@ function makeMockApp(): AppBindings {
         async TurnFactsForTab() {
           return [];
         },
+        async BranchesForTab() {
+          return [];
+        },
+        async SwitchBranchForTab() {},
     async CheckpointDiffForTab() {
       return [];
     },

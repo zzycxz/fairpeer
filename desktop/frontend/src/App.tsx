@@ -48,6 +48,7 @@ import { HistoryPanel } from "./components/HistoryPanel";
 import { SidebarSessions } from "./components/SidebarSessions";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { AgentDashboard } from "./components/AgentDashboard";
+import { BranchTree } from "./components/BranchTree";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { ShortcutsCheatsheet } from "./components/ShortcutsCheatsheet";
 import { useGlobalShortcut } from "./lib/keyboardShortcuts";
@@ -1967,6 +1968,12 @@ export default function App() {
   const [agentsOpen, setAgentsOpen] = useState(false);
   useGlobalShortcut("agents.dashboard", () => setAgentsOpen((v) => !v));
 
+  // Session-branch tree navigator (upgrade spec 4-3): Ctrl/Cmd+Shift+B.
+  // After a switch the backend has swapped the session in place — pull the
+  // fresh transcript via syncActiveTab (reset reload).
+  const [branchesOpen, setBranchesOpen] = useState(false);
+  useGlobalShortcut("branches.show", () => setBranchesOpen((v) => !v));
+
   // Main-provider rate-limit window for the usage chip (upgrade spec 0-8).
   // Polled: the budget drains as requests flow, not on events. rpm=0 (limiting
   // disabled) leaves the indicator hidden — fetch is cheap either way.
@@ -3857,6 +3864,21 @@ export default function App() {
         />
       )}
 
+
+
+      <BranchTree
+
+
+        open={branchesOpen}
+
+
+        onClose={() => setBranchesOpen(false)}
+
+
+        onSwitched={() => { void syncActiveTab(); }}
+
+
+      />
 
       <AgentDashboard
 
