@@ -22,10 +22,13 @@ func desktopSessionDirFor(workspaceRoot, profile string) string {
 			return dir
 		}
 	}
-	if key != "" && key != config.ProfileDev && key != "default" {
-		if dir := config.SessionDirFor(key); dir != "" {
-			return dir
-		}
+	// GLOBAL sessions (empty root) have ONE fixed, profile-partitioned home:
+	// <userDir>/sessions for dev, <userDir>/sessions/<key> for named profiles
+	// (cowork/netdev). This deliberately bypasses desktopSessionDir — its empty
+	// root fallback used to resolve the process CWD, scattering dev globals
+	// into CWD-derived project dirs (2026-08-21 fix).
+	if dir := config.SessionDirFor(key); dir != "" {
+		return dir
 	}
 	return desktopSessionDir(root)
 }
@@ -76,4 +79,17 @@ func (a *App) activeProfileKeyLocked() string {
 		return config.ProfileDev
 	}
 	return key
+}
+
+// profileDisplayName maps a profile key to its Chinese product name for error
+// messages shown to the user; unknown keys pass through as-is.
+func profileDisplayName(profile string) string {
+	switch config.ProfileNameKey(profile) {
+	case config.ProfileCowork:
+		return "办公"
+	case config.ProfileNetDev:
+		return "运维"
+	default:
+		return "编码"
+	}
 }

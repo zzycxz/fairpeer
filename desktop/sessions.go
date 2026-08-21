@@ -38,11 +38,9 @@ func sessionTrashPath(dir string) string   { return filepath.Join(dir, sessionTr
 func desktopSessionDir(root string) string {
 	root = strings.TrimSpace(root)
 	if root == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return config.SessionDir()
-		}
-		root = cwd
+		// Empty root = GLOBAL scope → the canonical sessions dir. Never derive
+		// from the process CWD: launch location must not decide storage.
+		return config.SessionDir()
 	}
 	if dir := config.ProjectSessionDir(root); dir != "" {
 		return dir
