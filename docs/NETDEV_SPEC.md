@@ -208,11 +208,26 @@ draft → approved → executing → done
 
 - 凭证：secret store `netdev/*` 命名空间，仅 netdev 会话传输层内部解密；dev/cowork 的 bash 沙箱 `forbid_read` 覆盖凭证库路径
 - 会话分区：profile 体系自带（设备配置全文不出 netdev 分区）
-- RAG：`netdev` 命名空间（厂商文档、配置备份），dev/cowork 的 rag_search 不可见
+- RAG：`netdev:` collection 命名空间（厂商文档、配置备份）。边界在 Store 检索层强制（空域搜索排除该命名空间；`"netdev:"` 整域查询只搜该命名空间），工具层双侧钉死——netdev 会话只有 `netdev_rag_search`/`netdev_rag_import`（作用域锁死在命名空间内，无法用参数逃逸），dev/cowork 的 rag_search/rag_list/rag_graph/rag_mindmap/rag_import/rag_delete 显式点名 `netdev:` 前缀一律拒绝。有回归测试钉住（TestNetDevRAGNamespaceIsolation）
 
 ### 7.3 配置面
 
 `[netdev]` 全局钉死；netdev 会话 `load_project_instructions = false`——不加载项目级 instruction/skills/hooks（运维对象是设备不是仓库，恶意仓库的 AGENTS.md 不得影响设备会话）。
+
+### 7.4 MCP 面（plugin_allowlist 严格白名单）
+
+外部 MCP 服务器是密封的工具面之外的旁路：MCP 工具名不在 `tool_scope` 的 RemovePrefix 剥除清单内，一个带写/exec 能力的 MCP 会直接穿透 §7.1 的只读封印。因此 netdev 采用 **`plugin_allowlist = true`**（builtin floor 钉死，用户不可关）：
+
+- `plugins` 列表作为严格白名单：**空列表 = 全部外部 MCP 隐藏**（内置 web_search/web_fetch 等非 MCP 工具不受影响）。
+- 用户要用某个 MCP，必须在 `[[profiles]] name="netdev"` 里显式点名——只能加名字，不能关白名单。
+- 执行点双侧强制：boot 的启动 spec 过滤（含 ExtraPlugins）+ 热连接路径（`ConnectMCPServer` / `ConnectConfiguredMCPServer` / `AddMCPServer` / 导入，统一在 `connectMCPSpec` 汇合点拒绝）。配置读不出来时对命名 profile **fail-closed**。
+- 设置页 MCP 列表按当前模式标注「当前模式已隐藏」（`Capabilities` 的 `profileHidden`），与技能页同体验。
+
+### 7.5 技能面（继承编码全集）
+
+netdev 的技能白名单 = 编码全集（init/install-capability/test/explore/research/review/security-review）+ `netdev-help`（用户方向 2026-08-20：运维先把编码内容全部拿过来）。分工原则：**白名单管可见性，封印管行为**——需要 shell/写路径的技能（test、init）在封印下降级为只读分析，这是预期效果而非缺陷。prompt addon 携带技能路由表，且与 cowork 共用「被禁技能的路由行自动裁剪」逻辑（`NetdevPromptAddon`/`CoworkPromptAddon` → `pruneSkillRoutingRows`）。
+
+诊断 playbook 技能库（OSPF/BGP/接口，§P2 规划）与 rag 接入 netdev 命名空间（§7.2）为后续批次。
 
 ---
 
@@ -327,13 +342,33 @@ approver      = "zhang@corp"
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 10.2 七视图
+### 10.2 八视图
 
-对话流（ToolCard + Finding 卡片）│拓扑图（可交互，故障域高亮）│设备清单页│提案审阅页（逐台 diff/风险/回滚 + 批准/导出手动执行/驳回）│审计回放│巡检报告│TOFU/凭证对话框（移植 Reasonix 三件套）
+对话流（ToolCard + Finding 卡片）│**操作实况**（右栏实时监视，见 §10.4）│拓扑图（可交互，故障域高亮）│设备清单页│提案审阅页（逐台 diff/风险/回滚 + 批准/导出手动执行/驳回）│审计回放│巡检报告│TOFU/凭证对话框（移植 Reasonix 三件套）
 
 ### 10.3 UI 不变量
 
 模式徽章常驻顶栏；写操作永远以提案卡片出现、绝不以「已执行」出现；每条 Finding 证据可追溯至原始回显（脱敏后视图 + 本地密文原件）。
+
+### 10.4 操作实况（live ops panel，已实施 2026-08-21）
+
+聊天界面保持不动；右栏首屏页签「实况」把 agent 在设备上的每个动作实时呈现给人——监督权在人，先看得见才谈管得住。四层显示：
+
+1. **预算条**：本轮命令 n/预算（`turn_command_budget`）、活动设备数、拦截/写计数——节奏与风险一眼可感。
+2. **设备操作卡**（仅有活动的设备，空闲折叠）：连接状态灯（跟随 transport 状态机：连接中/已连接/重连中/空闲回收/断开）、VTY 占用 n/cap、执行中命令（耗时 + 读/写/危险徽章）、**终端质感输出尾随**（等宽字体、`[时刻] 设备#` 命令分隔行、流式上屏、悬停暂停、点击展开）、最近命令 chips（分类色 + 状态图标）。
+3. **护栏事件行**：guardrail/分类器拒绝单独成行（红色），拒绝原因可见——「被拦下来」必须显眼。
+4. **空态引导**。
+
+数据面：`internal/netdev/live.go` 观察者（cmd_start/cmd_output/cmd_end/cmd_refused/conn），输出差量在 `Session.Run` 的 15ms 轮询里按行对齐发射，**出包前 ANSI 剥离 + 脱敏**（密码永不上屏）；`max_sessions_per_device` 在 NETCONF 路径强制（CLI 会话 + 并发 RPC 共享 VTY 预算，超限拒绝并审计）；桌面层 `netdev:live` 专用 Wails 通道 ~40ms 合帧；SNMP/NETCONF 一次性操作只有 start/end 生命周期。回归测试：`TestLiveObserverCommandLifecycle` / `TestLiveChunkSanitization` / `TestLiveVTYCapEnforced` / `TestLiveStateSnapshot`。
+
+### 10.5 长任务与管控路线图（B-E 批）
+
+「监控级管控」的分批路径（每批独立可验收）：
+
+- **B 批·审计可信**：审计 JSONL 哈希链（每条带 prev/hash，SHA-256，追加式防篡改、启动校验、损坏点告警 Finding）；`audit_retention` 真正生效（按天滚动+过期清理）；审计回放视图（§10.2 既有规划）。
+- **C 批·长任务 harness**：多步骤 Job 引擎（步骤带 expect/timeout/retry/on-fail，断点续跑，watchdog：断连暂停恢复 + 墙钟/命令数/熔断预算）；诊断 playbook（netdev-diag-*）升级为可执行 runbook；提案执行失败自动验证 + 可选自动回滚。
+- **D 批·监控级**：SNMP 轮询循环（snmp.go 地基已就）→ 设备/接口/邻居状态入实况面板（状态灯升级为健康度）；Syslog 被动接收；告警规则 → 自动 Finding → 护栏内 AI 诊断。
+- **E 批·AI 起草**：聊天里自然语言 → 命令起草（分类徽章；读类一键执行，写类走组策略/变更窗口/confirm2 人工确认）——AI 的手永远比人的确认慢一步。
 
 ---
 
@@ -343,7 +378,7 @@ approver      = "zhang@corp"
 |------|------|--------------|
 | P0 地基（1-2 周） | transport 移植、`ProfileNetDev` + `tool_scope` + `load_project_instructions`、secret 命名空间 + 沙箱 deny | 注入测试集通过：dev 会话无 netdev 工具、netdev 会话无 bash |
 | P1 第一台设备（2-3 周） | 驱动框架 + huawei-vrp8 + cisco-ios、`netdev_*` 工具 + 分类器、`[netdev]` 配置、TOFU/凭证对话框、Layout 骨架 + 模式徽章 + 紧急停止、审计、设置页 v1 | 首台设备 <2 分钟接入；display/show 稳定结构化 |
-| P2 诊断闭环（2 周） | 脱敏器、Finding + 证据链、RAG 命名空间 + 文档导入、诊断技能（OSPF/BGP/接口） | 真实故障现象 → 带证据 Finding |
+| P2 诊断闭环（2 周） | 脱敏器、Finding + 证据链、RAG 命名空间 + 文档导入、诊断技能（OSPF/BGP/接口）、**操作实况面板 + live 观察者 + VTY 强制** | 真实故障现象 → 带证据 Finding；右栏实时可见 agent 每条命令与输出 |
 | P3 发现与拓扑（2-3 周） | 隧道扫描 + netprobe、scopes + 待确认区、CDP/LLDP 拓扑 | 扫 /24 出清单，一键转正 |
 | P4 提案与巡检（2-3 周） | 提案流水线 + 组策略 + 变更窗口、巡检 + 报告导出 | 双设备提案全流程含回滚演练 |
 | P5 评估与深化（后续） | engagement、等保基线审计、默认/空口令核查、zte driver、NETCONF、SNMP 采集 | 基线审计报告导出 |

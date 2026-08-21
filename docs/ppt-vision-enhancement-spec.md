@@ -223,7 +223,7 @@ python -c "import ast; ast.parse(open('pdf_to_page_images.py').read())"  # 脚�
 | 决策 | 理由 |
 |---|---|
 | 先图片后 PDF | 图片→PPT 是核心链，PDF 只是加"PDF→图"前置；核心不通预处理无意义 |
-| 不用 image_understand | 它会抢占专门 VLM 封装路径（前期的 computer-auto 教训）；PPT 场景走 desktop 直接调 CallVLM |
+| 不用 image_understand | 它会抢占专门 VLM 封装路径（前期的 desktop-auto 教训）；PPT 场景走 desktop 直接调 CallVLM |
 | 背景/画布固定 | 用户选 default.pptx，VLM 不瞎提取；简化范围 |
 | 字号自适应不取 exact px | VLM 看不到像素，瞎猜不可靠；用密度+比例+基线有判断 |
 | merge 步骤优先 | 调研发现"提取了不 merge"是真瓶颈，不补这个，扩再多提取项也没用 |

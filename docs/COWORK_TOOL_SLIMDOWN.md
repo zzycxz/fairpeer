@@ -16,7 +16,7 @@
 | tools 是 per-request | agent 每次 Stream 带 `Tools` | provider 接受工具集，无需配合 |
 | browser 注册在 cowork 门外 | `internal/boot/boot.go:340-343` | browser 属 **universal**，dev/cowork 都有 |
 | skill 有 inline/subagent 两态 | `internal/skill/skill.go:39-44, tools.go:98` | inline 仅注入正文文本、**不暴露工具**；subagent 在子代理用 scoped 工具 |
-| 内置 skill 已能包工具族 | `internal/skill/builtins.go:382,391` | browser_auto/computer_auto 已把 screen_\*/browser_\* 包成 skill——能力即 skill 是现成模式 |
+| 内置 skill 已能包工具族 | `internal/skill/builtins.go:382,391` | browser_auto/desktop_auto 已把 screen_\*/browser_\* 包成 skill——能力即 skill 是现成模式 |
 
 ## 2. 工具三桶分解（核心洞察）
 
@@ -65,7 +65,7 @@
                        │  email·schedule·rag·document      │
                        │  media·ppt·office_expert·memory   │
                        │  + research·review·ppt_wizard     │
-                       │  + computer_auto·browser_auto     │
+                       │  + desktop_auto·browser_auto     │
                        │  + 后续新增 / 应用市场下载的 skill │
                        └───────────────────────────────────┘
                         底层工具 scoped 进子代理，主 prompt 零成本
@@ -133,7 +133,7 @@ type Profile struct {
 
 ### 5.2 能力 = `runAs: subagent` skill（开世界，复用现成模式）
 
-每个能力做成一个 skill（照 `browser_auto`/`computer_auto` 写法，[builtins.go:382,391](fairpeer/internal/skill/builtins.go#L382)）：声明 `allowed-tools`（底层工具，scoped 进子代理），落进 skill 目录即自动发现、自动进技能索引。**`run_skill` 是唯一门户**——不手工枚举组、闭世界 GroupMap 已弃用。
+每个能力做成一个 skill（照 `browser_auto`/`desktop_auto` 写法，[builtins.go:382,391](fairpeer/internal/skill/builtins.go#L382)）：声明 `allowed-tools`（底层工具，scoped 进子代理），落进 skill 目录即自动发现、自动进技能索引。**`run_skill` 是唯一门户**——不手工枚举组、闭世界 GroupMap 已弃用。
 
 内置能力 skill（在 `internal/skill/builtins.go` 声明 `runAs: subagent` + `allowed-tools`）：
 | skill | 底层工具（allowed-tools） |
@@ -176,7 +176,7 @@ ref "s*" 或 scope=desktop  → screen_click/type/key/scroll   (物理屏坐标)
 ref "b*" 或 scope=web      → browser_click/type/scroll       (视口坐标)
 无 ref、纯 x/y + scope=visual → screen 点击(经 VLM 坐标)
 ```
-原始 screen_\*/browser_\*/window_\* 实现留 `reg`，经 computer_auto/browser_auto 技能可达（回退/裸用）；image_understand 并入 perceive 作 visual 通道。
+原始 screen_\*/browser_\*/window_\* 实现留 `reg`，经 desktop_auto/browser_auto 技能可达（回退/裸用）；image_understand 并入 perceive 作 visual 通道。
 
 ### 5.6 扩展性（开世界：加 skill / 应用市场）
 
@@ -244,7 +244,7 @@ dev 与 cowork **共用同一框架**（`Profile.EnabledTools` 可见层 + `run_
 | | cowork（办公） | dev（编码） |
 |---|---|---|
 | 扁平核 | perceive/act/window + universal 文件 | apply_patch/multi_edit/delete_\* + universal 文件 |
-| run_skill 能力 | email/schedule/rag/document/media/ppt/office_expert/memory + research/review/ppt_wizard/computer_auto/browser_auto | code/codegraph/notebook + explore/research/review/security_review/test/init/install_capability |
+| run_skill 能力 | email/schedule/rag/document/media/ppt/office_expert/memory + research/review/ppt_wizard/desktop_auto/browser_auto | code/codegraph/notebook + explore/research/review/security_review/test/init/install_capability |
 | 不含 | coding 重构层 | perceive/act + office 全套 |
 
 ## 8. Step 0 — 实测基线（先做，gating）
@@ -296,7 +296,7 @@ dev 与 cowork **共用同一框架**（`Profile.EnabledTools` 可见层 + `run_
 | R2: `Keyboard shortcuts go through screen_key…` | R2: `Shortcuts via act({action:"key", text:"ctrl+s", scope:"desktop"})…` |
 | 通道选择: `browser_snapshot for web, screen_perceive for desktop` | `perceive(scope:"web"|"desktop"|"visual") — pick by what you're operating` |
 
-原则：增量改、保 raw 工具经 computer_auto/browser_auto 可达作回退、每改一条跑 cua demo 回归。
+原则：增量改、保 raw 工具经 desktop_auto/browser_auto 可达作回退、每改一条跑 cua demo 回归。
 
 ## 11. 边界与异常处理
 

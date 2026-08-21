@@ -177,7 +177,7 @@ dev（编码）和 cowork（办公）**共用同一个工具注册池**——所
 | 技能 | AllowedTools |
 |------|-------------|
 | `browser-auto` | browser_*（12 个）+ web_search + web_fetch + read_file + write_file |
-| `computer-auto` | screen_* + screenshot + get_ui_tree + image_understand + window_*（5 个）+ read_file + write_file |
+| `desktop-auto` | screen_* + screenshot + get_ui_tree + image_understand + window_*（5 个）+ read_file + write_file |
 | `ppt-auto` | screen_* + screenshot + get_ui_tree + image_understand + window_* + read_file + write_file |
 | `email-auto` | email_send + email_read + email_search + read_file |
 | `rag-auto` | rag_import + rag_search + rag_list + rag_delete + read_file |

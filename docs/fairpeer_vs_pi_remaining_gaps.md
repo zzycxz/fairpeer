@@ -287,7 +287,7 @@ func ValidateArgs(schema, args json.RawMessage) error {
 | 6 | 中流重连 | 断流后自动重放（未产出 token 时），最多 3 次 | PI 无 |
 | 7 | Retry 10 次 + 指数退避 | 408/429/5xx/529 自动重试，尊重 Retry-After | PI 有 retry 但策略较简单 |
 | 8 | VLM 桌面视觉 | UIA + VLM 融合感知，屏幕截图→标注→语义选择 | PI 无桌面自动化 |
-| 9 | 14 个内置 Skill | explore/review/security-review/browser-auto/computer-auto/email-auto 等 | PI 内置少 |
+| 9 | 14 个内置 Skill | explore/review/security-review/browser-auto/desktop-auto/email-auto 等 | PI 内置少 |
 | 10 | 证据链 Todo | `complete_step` 需要证据才能标记完成，防幻觉 | PI 是纯状态列表 |
 | 11 | 风暴检测 + 重复守卫 | 检测重复失败/重复成功，自动重定向 LLM | PI 无 |
 | 12 | 系统 prompt 9 层架构 | base + profile + model-family + time + output-style + language + memory + skill-index + codegraph | PI 较简单 |

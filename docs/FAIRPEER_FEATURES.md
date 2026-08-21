@@ -156,7 +156,7 @@
 
 - **screen_perceive**：UIA + VLM 融合感知，返回带元素 ID 标注的截图 + 坐标
 - **窗口管理**：focus / maximize / restore / move / close
-- **computer-auto 技能**：感知 → 操作 → 验证循环，驱动 WPS/Excel 等原生应用
+- **desktop-auto 技能**：感知 → 操作 → 验证循环，驱动 WPS/Excel 等原生应用
 
 ### 快捷截屏解题（考试助手）
 
@@ -311,7 +311,7 @@
 │  │  security-review│ 安全审查                        │   │
 │  │  test           │ 测试运行 + 修复                 │   │
 │  │  browser-auto   │ 浏览器自动化                    │   │
-│  │  computer-auto  │ 桌面应用自动化                  │   │
+│  │  desktop-auto   │ 桌面应用自动化                  │   │
 │  │  email-auto     │ 邮件收发                        │   │
 │  │  rag-auto       │ 知识库操作                      │   │
 │  │  schedule-auto  │ 定时任务管理                    │   │

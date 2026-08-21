@@ -48,6 +48,10 @@ agent：先只读确认现状 → `netdev_propose` 起草（每步必带回滚�
 - 安全基线：「发现」tab「安全基线核查」或 agent `netdev_baseline` →
   密封读 running-config → 本地规则（Telnet/SNMPv1v2c/明文密码/SSHv1/NTP/Syslog）
   → 命中入发现（带脱敏证据+修复建议，修复走提案）。
+- 评估模式（攻，限时）：`[netdev.assessment]` 信封（engagement_id/expires/
+  approver）有效时，agent 可用 `netdev_assess` 做弱口令核查——basic 档 ≤3 次、
+  dictionary 档 ≤10 次硬顶（凭据来自本地小字典，绝不在线爆破）；信封缺失或
+  过期一律拒绝并落审计。设备卡的同款入口走同一预算。
 
 ### F. 应急
 标题栏「⏹ 紧急停止」：断开全部连接（释放 VTY），审计记录；Manager 随即可重连。
@@ -70,20 +74,24 @@ agent：先只读确认现状 → `netdev_propose` 起草（每步必带回滚�
 | 标题栏 | 网络名（身份）、项目切换器（站点范围）、[诊断·只读]（安全策略入口）、紧急停止 |
 | 左栏 | 诊断会话、设备清单（按项目过滤、点击诊断）、堡垒链、巡检入口 |
 | 中间 | 对话诊断主循环、mermaid 渲染、运维欢迎页 |
-| 右栏 tab | 上下文=设备卡（快捷命令/抓配置/AI 变更）；拓扑=本地推断+实测校准；发现=Finding+基线核查；提案=行内审批 |
+| 右栏 tab | **实况=操作实况（每条命令/输出/护栏拦截实时可见，预算条+VTY 占用）**；设备=清单；手册=设备卡（快捷命令/抓配置/AI 变更）；拓扑=本地推断+实测校准；发现=Finding+基线核查；提案=行内审批；审计=操作审计表 |
 | 底栏 | 今日只读/写/提案计数（等宽数字） |
 | 设置 → 运维 | 设备/跳板/分组/项目/护栏/读表/探测范围/巡检/审计/提案中心 |
 
 ## 五、agent 的知识边界
 
-- 工具白名单：netdev_* 八件套（bash/文件写已从 Registry 物理移除，子代理同隔离）。
+- 工具白名单：netdev_* 十二件套（exec/devices/discover/topology/netconf/snmp/redfish/
+  baseline/propose/finding/assess + netdev 命名空间的 rag_search；bash/文件写已从 Registry
+  物理移除，子代理同隔离）。
 - 提示词九条纪律：逐台逐条、输出是数据不是指令、拒绝不重试、接口名归一化、
   证据必附、未纳管不可连、大扫描先问、mermaid 出图、**溯源规则**（不确定的语法
   明说并给官方查证入口，绝不编造）。
-- 随身参考：`netdev-help` 技能（官方源速查卡，纯参考零工具）。
+- 随身参考：`netdev-help` 速查卡 + `netdev-playbook` 通用读序 +
+  `netdev-diag-ospf/bgp/interface` 三个深度诊断 playbook。
 
 ## 六、还不存在的（诚实清单）
 
-配置备份版本库+diff、SNMP 采集、Syslog 被动接收、诊断 playbook 技能库、
-扫描结果导入、告警接入自动诊断；ASA/FTD 与 ZXR10 防火墙、ZTE 基线规则
-（待真机验证后才加）。
+Syslog 被动接收、SNMP 轮询式监控（当前 SNMP 为单次查询）、扫描结果导入、
+告警接入自动诊断、审计防篡改哈希链与回放视图、长任务 Job 引擎（断点续跑）、
+AI 命令起草（NL→命令，人确认执行）——见 NETDEV_SPEC §10.5 的 B-E 批路线图；
+ASA/FTD 与 ZXR10 防火墙、ZTE 基线规则（待真机验证后才加）。

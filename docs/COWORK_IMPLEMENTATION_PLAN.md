@@ -56,7 +56,7 @@ acquireSharedHost  →  snapshot 历史  →  Ctrl.Close()
 | 既有 | `image_understand`/`web_search`/`web_fetch`/`task`/`parallel_tasks`/`read_file`/`write_file`/`bash`...| 全平台 |
 | IM bot | 飞书/QQ/微信（`internal/bot/`，含 `gw.Push` 出站推送）| 已有，3 套真实适配器 |
 
-**技能**：`browser-auto` / `computer-auto` / `ppt-wizard`（3 个 cowork 专属 subagent/inline）+ 既有 `explore`/`research`/`review`/`test` 等。
+**技能**：`browser-auto` / `desktop-auto` / `ppt-wizard`（3 个 cowork 专属 subagent/inline）+ 既有 `explore`/`research`/`review`/`test` 等。
 
 ---
 
@@ -100,7 +100,7 @@ acquireSharedHost  →  snapshot 历史  →  Ctrl.Close()
 - `screen_click`/`type`/`scroll`：SetCursorPos + SendInput（鼠标按键/双击/Unicode 键盘/滚轮）
 - `get_ui_tree`：EnumWindows + GetWindowRect + GetWindowText，返回可见窗口的标题/类名/精确矩形（VLM 定位辅助）
 - 跨平台：非 Windows `ScreenTools()` 返回 nil，cowork 仍可用（浏览器+VLM），仅缺桌面控制
-- `computer-auto` skill（截图→image_understand→get_ui_tree 精确定位→操作→再截图验证）
+- `desktop-auto` skill（截图→image_understand→get_ui_tree 精确定位→操作→再截图验证）
 - 3 个测试（roster/readOnly/absInt）
 
 **路线决定**：弃 robotgo（CGO 构建脆弱），用 Win32 syscall（`golang.org/x/sys/windows` 已直接依赖，go-ole 已 indirect）。元素级 UIA COM 留作后续（当前做窗口级树，覆盖主要痛点）。
