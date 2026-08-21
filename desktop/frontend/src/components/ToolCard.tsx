@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { ChevronRight, Loader2, XCircle } from "lucide-react";
+import { ChevronRight, Loader2, XCircle , ExternalLink } from "lucide-react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
 import { UnifiedDiff } from "./editors/UnifiedDiff";
@@ -102,6 +102,16 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   const serverDiff = item.fileDiff?.diff ? item.fileDiff : undefined;
   const diffs = serverDiff ? [] : diffsFor(item.name, item.args);
   const subject = subjectOf(item.name, item.args);
+  // First path-ish arg for the "open in editor" affordance (spec 5-4).
+  const editPath = (() => {
+    try {
+      const a = JSON.parse(item.args || "{}");
+      const p = typeof a.path === "string" ? a.path : typeof a.file_path === "string" ? a.file_path : "";
+      return p && !p.includes("\n") ? p : "";
+    } catch {
+      return "";
+    }
+  })();
   const nested = subcalls ?? [];
   const hasNested = nested.length > 0;
   const profileText =
@@ -211,6 +221,16 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
           {subject && <span className="tool__subject">{subject}</span>}
         </span>
         {statText && <span className="tool__stat">{statText}</span>}
+        {editPath && (
+          <button
+            type="button"
+            className="tool__editor-open"
+            title={`${editPath} — 在编辑器中打开`}
+            onClick={(e) => { e.stopPropagation(); void app.OpenInEditorAt(editPath, 0).catch(() => {}); }}
+          >
+            <ExternalLink size={11} />
+          </button>
+        )}
         {profileText && <span className="tool__profile">{profileText}</span>}
         {duration && <span className="tool__duration">{duration}</span>}
         {hasBody && (

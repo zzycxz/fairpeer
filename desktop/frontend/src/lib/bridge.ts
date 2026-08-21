@@ -266,6 +266,7 @@ export interface AppBindings {
   WorkspaceGitHistory(path: string): Promise<GitCommitView[]>;
   WorkspaceGitCommitDetail(hash: string, path: string): Promise<GitCommitDetailView>;
   OpenWorkspacePath(rel: string): Promise<void>;
+  OpenInEditorAt(path: string, line: number): Promise<void>;
   RevealWorkspacePath(rel: string): Promise<void>;
   RevealPath(path: string): Promise<void>;
   SavePastedImage(dataUrl: string): Promise<string>;
@@ -2998,6 +2999,7 @@ function makeMockApp(): AppBindings {
     async OpenWorkspacePath(rel: string) {
       console.info("mock OpenWorkspacePath", rel);
     },
+        async OpenInEditorAt() {},
     async RevealWorkspacePath(rel: string) {
       console.info("mock RevealWorkspacePath", rel);
     },

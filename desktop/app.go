@@ -1778,6 +1778,21 @@ type SessionSearchHit struct {
 	Profile  string   `json:"profile,omitempty"`
 }
 
+// OpenInEditorAt opens a file (optionally at a line) in the user's editor via
+// the vscode:// URL scheme — VS Code / Cursor / VSCodium register it. Falls
+// back to the OS default handler for the path when the scheme is absent.
+func (a *App) OpenInEditorAt(path string, line int) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("path is required")
+	}
+	if line <= 0 {
+		line = 1
+	}
+	url := fmt.Sprintf("vscode://file/%s:%d", strings.ReplaceAll(filepath.ToSlash(path), " ", "%20"), line)
+	return openWorkspacePath(url)
+}
+
 // BranchView is one session-branch node for the tree navigator (upgrade spec 4-3).
 type BranchView struct {
 	ID        string `json:"id"`

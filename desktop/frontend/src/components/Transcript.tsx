@@ -4,11 +4,12 @@ import { UnifiedDiff } from "./editors/UnifiedDiff";
 import type { Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
+import { app } from "../lib/bridge";
 import { replaceAttachmentRefsForDisplay } from "../lib/attachmentDisplay";
 import { AssistantMessage, TurnActions, UserMessage } from "./Message";
 import { ProcessCompactIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
-import { AlertTriangle, ChevronRight, FileDiff, Info, RotateCcw } from "lucide-react";
+import { AlertTriangle, ChevronRight, FileDiff, Info, RotateCcw , ExternalLink } from "lucide-react";
 import { Welcome } from "./Welcome";
 import { getDisplayMode, onDisplayModeChange, type DisplayMode } from "../lib/displayMode";
 
@@ -1205,6 +1206,14 @@ function TurnSummaryCard({ item }: { item: TurnSummaryItem }) {
                 >
                   <span className="approval-changes__path">{f.path}</span>
                   <span className="approval-changes__stat">+{f.added} -{f.removed}</span>
+                  <span
+                    role="button"
+                    className="approval-changes__open"
+                    title="在编辑器中打开"
+                    onClick={(e) => { e.stopPropagation(); void app.OpenInEditorAt(f.path, 0).catch(() => {}); }}
+                  >
+                    <ExternalLink size={11} />
+                  </span>
                 </button>
               ))}
             </div>

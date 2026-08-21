@@ -1877,6 +1877,25 @@
   opacity: 0.7;
   flex: none;
 }
+.tool__editor-open {
+  flex: none;
+  display: inline-flex;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  opacity: 0.45;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.tool__editor-open:hover { opacity: 1; }
+.approval-changes__open {
+  flex: none;
+  display: inline-flex;
+  opacity: 0.45;
+  cursor: pointer;
+}
+.approval-changes__open:hover { opacity: 1; }
+
 /* UnifiedDiff — server-diff renderer (upgrade spec 1-2) */
 .udiff {
   display: flex;
