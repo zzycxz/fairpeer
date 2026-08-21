@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [编码体验升级 M0–M3] — 2026-08-21
+
+对标 Codex CLI / Pi 的三方合流升级（规格书 `docs/FAIRPEER_UPGRADE_SPEC.md`，51 任务首批落地 32 + 测试清零），7 个 commit 自 `ff965a2` 起。
+
+- **M0 断链清零**：FileDiff wire 透传（wireTool/wireApproval/wireUsage 补字段，desktop+serve 双传输同步）、apply_patch/doc 族 Previewer、审批富上下文（逐文件 diff + bash 命令 + j/k/e 导航）、reasoning Markdown、成本/RPM 显示（激活 netdev 区死接口）、⌘K 真实现、输入历史（Alt+↑/↓）、删除 4 个孤立组件
+- **M1 展示重构**：UnifiedDiff（词级 intra-line、行号、Unified/Split 切换，服务端 diff 为准）、工具卡注册表、web_search/netdev 专用卡、只读分组显示 subject、Turn 改动汇总卡、失败重试、备份 diff 统一、bash 头尾折叠
+- **M2 进度队列**：Phase 事件带工具名序号、thinking 标题提取、FollowUp 队列（Alt+Enter / 忙时默认排队为独立下一 turn + 自动排水）、队列条可视化、TodoPanel 进度条、AgentDashboard（Ctrl/Cmd+I）
+- **M3 循环补课**：写工具按路径集合并行（同路径串行）、集中参数校验、办公产物可 rewind（还原点 Previewer）、rewind 前逐文件 diff 预览、Proposal 应用内审批对话框、cowork 终端接入
+- **预存失败清零**：ListBranches 适配每会话目录布局（真 bug：新布局下分支列表恒空）、会话路径测试对齐存储重构、签名公钥期望 ID 更新——**测试套件首次全绿**
+- 遗留与勘察：3-3 流式补丁预览、3-7① MCP 进度透传（勘察就绪）、3-4/3-10/3-11 及阶段 4/5 详见 spec 附录 G
+
 ## [0.1.9] — 2026-08-19 ~ 2026-08-21
 
 三天四线并进：**编码/办公/运维三界面框架统一**、**循环工程上线**、**运维模式能力大批次（安全护栏 → 连接扩展收官）**、**技能体系架构重整 + ppt-auto 提速 + codegraph 分发根治**（后者为 08-21 架构专项，设计全记录于 `docs/SKILL_ARCHITECTURE_SPEC.md`）。无破坏性配置变更；codegraph 默认开关语义有一处显式调整（见兼容性）。

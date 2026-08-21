@@ -93,3 +93,8 @@ runs_latest.json
 *_struct.json
 *.txt.template
 %TEMP%/
+
+# local build/sign artifacts (upgrade batch 08-21)
+desktop/sign.exe
+ndvshot.exe
+desktop/frontend/dist-crash/
