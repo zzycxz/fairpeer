@@ -525,4 +525,6 @@ Go（root+desktop）构建全绿；`internal/tool`(含 builtin)、`internal/evid
 
 **4-4 观测性完成（第五批次）**：tabEventSink 事件流累积每轮事实（时长/重试/工具调用数与失败数/token 拆分/缓存命中/终止错误，环 50 轮，与既有 telemetry 持久化同域）→ TurnFactsForTab 绑定 → ContextPanel「最近轮次」表（最近 8 轮倒序，3s 刷新，失败轮红标、重试↻N、工具失败!N）——每轮"实际发生了什么"在上下文面板一眼可见，为后续 OTEL 导出预留了同源数据。
 
+**4-3 会话分支树导航完成（第五批次）**：BranchesForTab/SwitchBranchForTab 桌面绑定 + BranchTree 模态（ParentID 树形缩进、当前分支标记、名称/轮次/时间、空态引导到 Fork/Rewind 入口），Ctrl/Cmd+Shift+B 呼出；切换走既有 Controller.SwitchBranch（免运行中约束由其自守），前端 syncActiveTab reset 重载转录——"Fork 创建 → 树中跳转 → rewind 组合"的分支工作流自此有 UI 闭环（此前仅 /switch 命令可达）。
+
 **批次收尾（同日）**：全部改动已按 4 个 commit 落在 `feat/mindmap-read-loop`（chore 遗留收口 / feat(core) M0+M3 后端 / feat(desktop) M0-M3 前端 / docs(spec)），`sign.exe`/`ndvshot.exe`/`dist-crash/` 三个产物刻意未入库（待 gitignore）。下一批建议顺序：3-3（流式补丁预览，先查 provider 层是否暴露 tool-call 参数 delta）→ 3-7①（按上方勘察实施）→ 3-11（中间件化）。
