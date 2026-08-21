@@ -112,4 +112,6 @@ func init() {
 	register(huaweiVRP{})
 	register(ciscoIOS{})
 	register(vmwareESXi{})
+	register(linuxShell{})
+	register(windowsPowerShell{})
 }

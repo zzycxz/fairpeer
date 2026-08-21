@@ -265,7 +265,7 @@ func ValidateNetDev(nd NetDevConfig) error {
 			return fmt.Errorf("netdev device %q: port %d out of range", d.Name, d.Port)
 		}
 		switch d.Vendor {
-		case "huawei", "cisco", "zte", "vmware", "redfish", "":
+		case "huawei", "cisco", "zte", "vmware", "redfish", "linux", "windows", "snmp", "":
 		default:
 			return fmt.Errorf("netdev device %q: unknown vendor %q (huawei|cisco|zte)", d.Name, d.Vendor)
 		}

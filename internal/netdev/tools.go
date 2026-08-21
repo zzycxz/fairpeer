@@ -235,6 +235,16 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 			Refusal: fmt.Sprintf("no driver for %s/%s (available: %s)", device.Vendor, device.OS, strings.Join(driver.Keys(), ", "))}
 	}
 
+	// Shell-driver metacharacter guard: a pipe, semicolon, backtick or
+	// redirect would smuggle unclassified commands past the word-prefix
+	// classifier into the PTY ("ps aux | sh -c 'reboot'"). Network CLIs are
+	// exempt — their `| include` is a device-side filter, not a chain.
+	if driver.IsShellMetacharDriver(drv.Key()) && strings.ContainsAny(command, driver.ShellMetachars) {
+		_ = AppendAudit(Audit{Device: deviceName, Command: "(shell metacharacters)", Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
+		return ExecResult{Device: deviceName, Command: command, Refused: true, Class: "guardrail",
+			Refusal: "shell metacharacters refused — this device runs a general shell, and ; | & ` $ ( ) < > would chain commands the classifier never examined. Run ONE plain command per call (no pipes/redirects/substitutions)."}
+	}
+
 	class := drv.Classify(command)
 	base := ExecResult{Device: deviceName, Command: command, Class: class.String()}
 	if class != driver.Read {

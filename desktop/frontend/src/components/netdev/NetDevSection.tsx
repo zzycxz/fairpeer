@@ -8,13 +8,16 @@ import type { NetDevSettingsView, NetDevSSHImportCandidate } from "../../lib/typ
 // (secret store, never in TOML), scan scopes, and the audit tail. The agent
 // itself has no tool to edit any of this — inventory changes are human-only.
 
-const VENDORS = ["huawei", "cisco", "zte", "vmware", "redfish"];
+const VENDORS = ["huawei", "cisco", "zte", "vmware", "redfish", "linux", "windows", "snmp"];
 const OSES: Record<string, string[]> = {
   huawei: ["vrp8", "vrp5"],
   cisco: ["ios", "iosxe"],
   zte: ["zxr10"],
   vmware: ["esxi8", "esxi7"],
   redfish: ["bmc"],
+  linux: ["ubuntu", "debian", "centos", "rocky", ""],
+  windows: ["win11", "ws2022", ""],
+  snmp: ["v2c"],
 };
 
 type EditDevice = NetDevSettingsView["devices"][number];

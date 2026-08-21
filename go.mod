@@ -19,7 +19,9 @@ require (
 	github.com/emersion/go-message v0.18.2
 	github.com/go-ole/go-ole v1.3.0
 	github.com/gorilla/websocket v1.5.0
+	github.com/gosnmp/gosnmp v1.38.0
 	github.com/huin/goupnp v1.3.0
+	github.com/kevinburke/ssh_config v1.6.0
 	github.com/larksuite/oapi-sdk-go/v3 v3.9.4
 	github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80
 	github.com/mattn/go-runewidth v0.0.24
@@ -57,7 +59,6 @@ require (
 	github.com/gobwas/ws v1.4.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/kevinburke/ssh_config v1.6.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect

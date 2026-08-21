@@ -104,6 +104,10 @@ func resolveKey(vendor, os string) string {
 		return "zte-zxr10"
 	case "vmware":
 		return "vmware-esxi"
+	case "linux":
+		return "linux-shell"
+	case "windows":
+		return "windows-powershell"
 	default:
 		return v + "-" + o
 	}
@@ -169,6 +173,27 @@ func (t classTables) extraRead() []string {
 	return extraReadByDriver[t.driverKey]
 }
 
+// prefixMatches reports whether normalized starts with the (normalized)
+// table prefix at a word boundary. Boundaries are SPACE (a new word), "/"
+// (a path continues the same argument: "cat /proc" + "/net/dev"), and "-"
+// (a suffix joins the same token: "get-" + "netadapter") — the last two let
+// host-shell drivers scope reads by path- and cmdlet-prefix.
+func prefixMatches(normalized, rawPrefix string) bool {
+	p := firstWords(rawPrefix)
+	if p == "" {
+		return false
+	}
+	if normalized == p {
+		return true
+	}
+	for _, b := range []string{" ", "/", "-"} {
+		if strings.HasPrefix(normalized, p+b) {
+			return true
+		}
+	}
+	return false
+}
+
 func (t classTables) classify(cmd string) Class {
 	normalized := firstWords(cmd)
 	if normalized == "" {
@@ -178,7 +203,7 @@ func (t classTables) classify(cmd string) Class {
 	// or write: a user extension can only make MORE things readable, which is
 	// theirs to decide, and never less safe than the built-ins' conservatism).
 	for _, p := range t.extraRead() {
-		if normalized == p || strings.HasPrefix(normalized, p+" ") {
+		if prefixMatches(normalized, p) {
 			return Read
 		}
 	}
@@ -192,7 +217,7 @@ func (t classTables) classify(cmd string) Class {
 		{t.read, Read},
 	} {
 		for _, p := range sortedByLen(group.prefixes) {
-			if normalized == p || strings.HasPrefix(normalized, p+" ") {
+			if prefixMatches(normalized, p) {
 				return group.class
 			}
 		}

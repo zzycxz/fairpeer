@@ -98,7 +98,17 @@ const QUICK_BATTERY: Record<string, string[]> = {
   cisco: ["show version", "show processes cpu", "show interfaces status"],
   zte: ["show version", "show processor cpu", "show interface brief"],
   vmware: ["esxcli system version get", "esxcli network nic list", "esxcfg-vswitch -l", "vim-cmd vmsvc/getallvms"],
+  linux: ["ip addr", "ss -tlnp", "systemctl --failed", "df -h", "cat /proc/net/dev"],
+  windows: ["Get-NetAdapter", "Get-NetTCPConnection", "Get-Service", "systeminfo"],
 };
+
+// SNMP quick queries for the device card (vendor=snmp): label → (oid, mode).
+const SNMP_QUICK: { label: string; oid: string; mode: string }[] = [
+  { label: "系统描述", oid: "1.3.6.1.2.1.1.1.0", mode: "get" },
+  { label: "运行时长", oid: "1.3.6.1.2.1.1.3.0", mode: "get" },
+  { label: "接口状态表", oid: "1.3.6.1.2.1.2.2.1.8", mode: "walk" },
+  { label: "接口流量计数", oid: "1.3.6.1.2.1.31.1.1.1.6", mode: "walk" },
+];
 
 // Read-only "grab the running config" command per vendor — the first step of
 // any 配置 task (backup / diff / proposal drafting).
@@ -266,6 +276,16 @@ export function NetDevLayout({
       } }));
     } catch (e) {
       setQuick(q => ({ ...q, [command]: { command, output: String(e), isError: true } }));
+    }
+  }, []);
+
+  // SNMP panel: quick allowlisted queries land in the same result area.
+  const runSnmp = useCallback(async (device: string, label: string, oid: string, mode: string) => {
+    try {
+      const out = await app.NetDevSnmpQuery(device, oid, mode);
+      setQuick(q => ({ ...q, [label]: { command: `SNMP ${mode} ${oid}`, output: out, isError: false } }));
+    } catch (e) {
+      setQuick(q => ({ ...q, [label]: { command: `SNMP ${mode} ${oid}`, output: String(e), isError: true } }));
     }
   }, []);
 
@@ -649,6 +669,12 @@ export function NetDevLayout({
                 <div className="ndv__quick-cmds">
                   {REDFISH_QUICK.map(q => (
                     <span key={q.label} className="btn btn--secondary btn--small" role="button" title={q.path} onClick={() => void runRedfish(selectedDevice.name, q.label, q.path)}>{q.label}</span>
+                  ))}
+                </div>
+              ) : selectedDevice.vendor === "snmp" ? (
+                <div className="ndv__quick-cmds">
+                  {SNMP_QUICK.map(q => (
+                    <span key={q.label} className="btn btn--secondary btn--small" role="button" title={`${q.mode} ${q.oid}`} onClick={() => void runSnmp(selectedDevice.name, q.label, q.oid, q.mode)}>{q.label}</span>
                   ))}
                 </div>
               ) : (

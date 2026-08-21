@@ -367,6 +367,8 @@ export interface AppBindings {
   NetDevDailyBriefing(): Promise<string>;
   // One GET-only Redfish query for the device card's BMC panel.
   NetDevRedfishQuery(device: string, path: string): Promise<string>;
+  // One allowlisted SNMP get/walk for the device card's metrics panel.
+  NetDevSnmpQuery(device: string, oid: string, mode: string): Promise<string>;
   NetDevFindings(): Promise<NetDevFinding[]>;
   // Emergency stop: close every device connection at once (audited).
   NetDevEmergencyStop(): Promise<number>;
@@ -1839,6 +1841,9 @@ function makeMockApp(): AppBindings {
     async NetDevBackups(device: string) { return mockBackups.filter(v => !device || v.device === device); },
     async NetDevBackupDiff(device: string, _a: string, _b: string) {
       return `--- ${device} running-config\n+++ ${device} running-config\n@@ -12,4 +12,5 @@\n vlan 10\n- description office\n+ description office-floor2\n+ stp edged-port enable\n ntp-service unicast-server 10.0.0.253`;
+    },
+    async NetDevSnmpQuery(_device: string, _oid: string, _mode: string) {
+      return "1.3.6.1.2.1.1.1.0 = Linux mock 6.1 (browser dev mock)\n1.3.6.1.2.1.1.3.0 = 3691200 (ticks)";
     },
     async NetDevRedfishQuery(_device: string, _path: string) {
       return JSON.stringify({ "@odata.type": "#Chassis.v1_20.Chassis", Id: "1", Name: "Mock Chassis", Thermal: { Fans: [{ Name: "Fan1", Reading: 2400, Status: { Health: "OK" } }] } }, null, 2);
