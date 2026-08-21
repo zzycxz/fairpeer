@@ -97,7 +97,7 @@ import {
 import { loadLayoutSize, saveLayoutSize } from "./lib/layoutPreferences";
 import { hydrateDisplayMode } from "./lib/displayMode";
 import { getScopedItem, setActiveStorageProfile, setScopedItem } from "./lib/profileScopedStorage";
-import { blobToBase64, renderSessionImageBlob, renderSessionPdfBlob } from "./lib/sessionExport";
+import { blobToBase64, renderSessionHtml, renderSessionImageBlob, renderSessionPdfBlob } from "./lib/sessionExport";
 import { sessionActivityTime } from "./lib/session";
 import {
   applyTheme,
@@ -1754,7 +1754,7 @@ export default function App() {
   );
 
   const exportSession = useCallback(
-    async (format: "markdown" | "json" | "pdf" | "image") => {
+    async (format: "markdown" | "json" | "pdf" | "image" | "html") => {
       const base = safeFilename(sessionTitle);
       try {
         if (format === "json") {
@@ -1765,6 +1765,11 @@ export default function App() {
           if (!path) return;
           const blob = await renderSessionPdfBlob(getSessionMarkdown(), sessionTitle);
           await app.SaveExportFile(path, await blobToBase64(blob), true);
+        } else if (format === "html") {
+          const path = await app.PickExportFile(`${base}.html`, "text/html");
+          if (!path) return;
+          const html = await renderSessionHtml(getSessionMarkdown(), sessionTitle);
+          await app.SaveExportFile(path, html, false);
         } else if (format === "image") {
           const path = await app.PickExportFile(`${base}.png`, "image/png");
           if (!path) return;

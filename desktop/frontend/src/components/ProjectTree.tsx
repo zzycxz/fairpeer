@@ -40,7 +40,7 @@ interface ProjectTreeProps {
   // (2026-08-18). Copy/export target the ACTIVE session's row (they operate on
   // the loaded transcript); the changed-dock toggle is global.
   onCopyActiveSession?: () => void;
-  onExportActiveSession?: (format: "markdown" | "json" | "pdf" | "image") => void;
+  onExportActiveSession?: (format: "markdown" | "json" | "pdf" | "image" | "html") => void;
   onOpenChangedDock?: () => void;
   // Copies the topic's on-disk session (.jsonl) path to the clipboard — the
   // backend resolves topicId → path via ListSessions.
@@ -776,6 +776,12 @@ export function ProjectTree({
                 icon: <FileImage size={13} />,
                 label: t("topicBar.exportImage"),
                 onSelect: () => onExportActiveSession("image"),
+              },
+              {
+                key: "export-html",
+                icon: <FileImage size={13} />,
+                label: t("topicBar.exportHtml"),
+                onSelect: () => onExportActiveSession("html"),
               },
             ] as ContextMenuItem[])
           : []),

@@ -446,6 +446,33 @@ export function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
+// renderSessionHtml (upgrade spec 5-5) produces a standalone, self-contained
+// HTML document: the same offscreen surface the PDF/PNG exports rasterize,
+// serialized with its embedded <style> — opens anywhere, no assets needed.
+export async function renderSessionHtml(markdown: string, title: string): Promise<string> {
+  const rendered = await renderExportSurface(markdown);
+  try {
+    const body = rendered.surface.outerHTML;
+    const safeTitle = title.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c] ?? c);
+    return [
+      "<!doctype html>",
+      '<html lang="zh-CN">',
+      "<head>",
+      '<meta charset="utf-8">',
+      '<meta name="viewport" content="width=device-width, initial-scale=1">',
+      `<title>${safeTitle}</title>`,
+      "<style>body{margin:0;background:#f3f4f6;display:flex;justify-content:center;}.session-export-page{box-shadow:0 1px 8px rgba(0,0,0,.12);margin:24px 0;}</style>",
+      "</head>",
+      "<body>",
+      body,
+      "</body>",
+      "</html>",
+    ].join("\n");
+  } finally {
+    disposeExport(rendered);
+  }
+}
+
 export async function renderSessionImageBlob(markdown: string): Promise<Blob> {
   const rendered = await renderExportSurface(markdown);
   try {
