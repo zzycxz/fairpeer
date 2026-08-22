@@ -106,6 +106,9 @@ const (
 	// synthesis). Collab payload. Appended last to keep the Kind values before
 	// it wire-stable.
 	ExpertCollab
+	// Item is the synthetic kind for the 4-1 item model (dual-track with
+	// the flat kinds above). Item payload carries the structured form.
+	Item
 )
 
 // Level classifies a Notice so sinks can style or filter it.
@@ -299,6 +302,9 @@ type Event struct {
 	RetryMax     int        // Retrying: total attempts before giving up
 	RetryAfterMs int64      // Retrying: backoff delay before the attempt (0 = immediate)
 	Collab       Collab     // ExpertCollab
+	// Item carries the item-model payload (4-1 dual-track). Non-nil only on
+	// the synthetic "Item" Kind; old sinks skip it naturally.
+	Item *ItemEvent
 }
 
 // ReadinessAuditSink is an optional sink capability. Sinks that do not care

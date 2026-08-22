@@ -743,7 +743,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		maxStepsKey:       maxStepsKey,
 		temperature:       opts.Temperature,
 		pricing:           opts.Pricing,
-		sink:              sink,
+		// 4-1 dual-track: the agent's sink IS the item adapter, which
+		// forwards to the real sink AND emits structured ItemEvents. Every
+		// a.sink.Emit call produces both forms — old sinks see zero
+		// difference, new consumers render from Item.
+		sink:              event.NewItemAdapter(sink),
 		gate:              gate,
 		hooks:             hooks,
 		jobs:              opts.Jobs,
