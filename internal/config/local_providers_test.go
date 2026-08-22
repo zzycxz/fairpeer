@@ -43,8 +43,8 @@ func TestAppendBuiltinLocalProvidersKeepsUserOverrides(t *testing.T) {
 	})
 	appendBuiltinLocalProviders(c)
 
-	if len(c.Providers) != 2 {
-		t.Fatalf("providers = %d, want 2 (user ollama kept + llamacpp preset appended)", len(c.Providers))
+	if len(c.Providers) != 3 {
+		t.Fatalf("providers = %d, want 3 (user ollama kept + lmstudio/llamacpp presets appended)", len(c.Providers))
 	}
 	e, _ := c.Provider("ollama")
 	if e.BaseURL != "http://192.168.1.10:11434/v1" || len(e.ModelList()) != 1 {
