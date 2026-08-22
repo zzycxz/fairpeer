@@ -1836,7 +1836,7 @@
 }
 
 /* AgentDashboard (upgrade spec 2-7) */
-.agd { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; background: color-mix(in srgb, var(--bg) 55%, transparent); }
+.agd { position: fixed; inset: 0; z-index: var(--z-modal); display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; background: color-mix(in srgb, var(--bg) 55%, transparent); }
 .agd__card { width: min(560px, 92vw); background: var(--bg); border: 1px solid var(--border-soft); border-radius: var(--radius-md); box-shadow: 0 12px 40px rgba(0,0,0,0.25); overflow: hidden; }
 .agd__head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border-soft); }
 .agd__title { font-weight: 600; }
@@ -1860,7 +1860,7 @@
 .todobar__progress {
   width: 72px;
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--bg-soft);
   overflow: hidden;
   flex: none;
@@ -2010,8 +2010,8 @@
   min-width: 0;
   font-family: inherit;
 }
-.udiff__tok--add { background: color-mix(in srgb, var(--ok, #3fb950) 32%, transparent); border-radius: 2px; }
-.udiff__tok--del { background: color-mix(in srgb, var(--danger, #f85149) 32%, transparent); border-radius: 2px; text-decoration: line-through; }
+.udiff__tok--add { background: color-mix(in srgb, var(--ok, #3fb950) 32%, transparent); border-radius: var(--radius-xs); }
+.udiff__tok--del { background: color-mix(in srgb, var(--danger, #f85149) 32%, transparent); border-radius: var(--radius-xs); text-decoration: line-through; }
 .tool__stat {
   color: inherit;
   opacity: 0.75;
