@@ -539,4 +539,6 @@ Go（root+desktop）构建全绿；`internal/tool`(含 builtin)、`internal/evid
 
 **3-4 PTY 后端 + 3-7③ OAuth 完成（第七/八批次）**：3-4——desktop/pty_windows.go 完整 ConPTY 封装（CreatePseudoConsole/ResizePseudoConsole/ClosePseudoConsole + x/sys StartupInfoEx 属性列表 + cmd.exe 子进程管理 + 管道读写/resize/存活检测/优雅关闭）+ ptyManager 会话池 + 6 个 Wails 绑定。**前端 xterm.js 接入待下一批**（需 npm 依赖引入+TerminalPanel v2 重写，独立排期）。3-7③——OAuth PKCE 完整流程+transport 接入。3-11——拦截器链。plugin/desktop 全绿。
 
+**全部 51 任务处置完毕（终批）**：3-4 前端 TerminalSession（xterm.js canvas + ConPTY 桥接 + resize/keyboard/exit）完成。4-1 事件 item 化、4-2 快照+增量协议、5-2 崩溃恢复、5-7 权限粒度——完整架构设计规格书已写入 （含新事件模型/迁移策略/快照布局/恢复流程/决策粒度/实施顺序），待独立会话按规格实施。**最终计数：47 完整实现 + 4 设计定稿待实施 = 51/51 全部处置**。构建全绿（Go 双模块 + 前端 tsc/vite + 测试零失败），全部推送。
+
 **批次收尾（同日）**：全部改动已按 4 个 commit 落在 `feat/mindmap-read-loop`（chore 遗留收口 / feat(core) M0+M3 后端 / feat(desktop) M0-M3 前端 / docs(spec)），`sign.exe`/`ndvshot.exe`/`dist-crash/` 三个产物刻意未入库（待 gitignore）。下一批建议顺序：3-3（流式补丁预览，先查 provider 层是否暴露 tool-call 参数 delta）→ 3-7①（按上方勘察实施）→ 3-11（中间件化）。
