@@ -537,4 +537,6 @@ Go（root+desktop）构建全绿；`internal/tool`(含 builtin)、`internal/evid
 
 **3-7③ OAuth PKCE + 3-11 中间件化完成（第七批次）**：3-7③——internal/plugin/oauth.go 完整 OAuth 2.0 授权码 + PKCE S256 流程（本地回调服务器、token 交换/自动刷新、configDir/mcp-oauth/ 持久化）；httpTransport 增加 oauthCfg/oauthToken/tokenStore 三字段，请求时注入 Bearer 头。3-11——interceptors.go 拦截器链（readiness/emptyAnswer/truncation），Run 回归纯状态机，行为等价零回归。plugin 包全绿。
 
+**3-4 PTY 后端 + 3-7③ OAuth 完成（第七/八批次）**：3-4——desktop/pty_windows.go 完整 ConPTY 封装（CreatePseudoConsole/ResizePseudoConsole/ClosePseudoConsole + x/sys StartupInfoEx 属性列表 + cmd.exe 子进程管理 + 管道读写/resize/存活检测/优雅关闭）+ ptyManager 会话池 + 6 个 Wails 绑定。**前端 xterm.js 接入待下一批**（需 npm 依赖引入+TerminalPanel v2 重写，独立排期）。3-7③——OAuth PKCE 完整流程+transport 接入。3-11——拦截器链。plugin/desktop 全绿。
+
 **批次收尾（同日）**：全部改动已按 4 个 commit 落在 `feat/mindmap-read-loop`（chore 遗留收口 / feat(core) M0+M3 后端 / feat(desktop) M0-M3 前端 / docs(spec)），`sign.exe`/`ndvshot.exe`/`dist-crash/` 三个产物刻意未入库（待 gitignore）。下一批建议顺序：3-3（流式补丁预览，先查 provider 层是否暴露 tool-call 参数 delta）→ 3-7①（按上方勘察实施）→ 3-11（中间件化）。
