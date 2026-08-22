@@ -14,7 +14,7 @@ func TestKindConstants(t *testing.T) {
 	// Verify the iota sequence is stable and sequential.
 	kinds := []Kind{
 		TurnStarted, Reasoning, Text, Message, ToolDispatch, ToolResult,
-		Usage, Notice, Phase, ApprovalRequest, AskRequest, TurnDone,
+		ToolArgsDelta, Usage, Notice, Phase, ApprovalRequest, AskRequest, TurnDone,
 	}
 	for i, k := range kinds {
 		if int(k) != i {

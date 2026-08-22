@@ -171,12 +171,29 @@ type FileDiff struct {
 	Removed int
 }
 
+// Decision is one option the user can pick on an approval card (spec 5-7).
+// The default 3 (once/session/always) stay unchanged; fine-grained options
+// appear only when the tool carries path or network restrictions.
+type Decision struct {
+	Label       string       `json:"label"`
+	Scope       string       `json:"scope"`  // once | session | always | path | host
+	Restrictions *Restrictions `json:"restrictions,omitempty"`
+}
+
+// Restrictions narrows a grant to specific paths or hosts (spec 5-7).
+type Restrictions struct {
+	AllowedPaths []string `json:"allowed_paths,omitempty"` // glob patterns
+	AllowedHosts []string `json:"allowed_hosts,omitempty"` // host[:port]
+}
+
 // Approval identifies a pending tool-call approval for an ApprovalRequest
 // event. ID correlates the request with the controller's Approve(ID, …) reply.
 type Approval struct {
 	ID      string
 	Tool    string
 	Subject string
+	// Decisions (spec 5-7) are the selectable options; nil = default 3.
+	Decisions []Decision
 	// Args is the raw JSON arguments of the call being approved, so a card can
 	// show specifics itself (the bash command, target paths). Empty for
 	// synthetic approvals (plan/replan) that have no tool args.
