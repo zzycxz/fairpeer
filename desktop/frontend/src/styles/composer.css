@@ -428,16 +428,38 @@
 }
 
 .approvalsw__menu {
-  width: min(216px, calc(100vw - 16px));
+  width: min(168px, calc(100vw - 16px));
+  padding: 5px;
+}
+
+/* Override the shared access-menu item sizing: the approval switcher is a
+   3-option picker, not a settings panel — match the composer param-row
+   controls (12px text, 28px rows) instead of the 56px model rows. */
+.approvalsw__menu .composer-access-menu__label {
+  padding: 2px 6px 4px;
+  font-size: 10px;
+}
+
+.approvalsw__menu .composer-access-menu__item {
+  height: 28px;
+  min-height: 28px;
+  gap: 7px;
+  padding: 0 7px;
+  font-size: 12px;
+}
+
+.approvalsw__menu .composer-access-menu__item > svg {
+  width: 13px;
+  height: 13px;
 }
 
 /* Compact one-line options; the per-mode explanation rides on hover (Tooltip)
    so the open menu stays scannable. */
 .approvalsw__item {
-  height: 34px;
-  min-height: 34px;
-  gap: 8px;
-  padding: 0 9px;
+  height: 28px;
+  min-height: 28px;
+  gap: 7px;
+  padding: 0 7px;
 }
 
 .approvalsw__item .approvalsw__label {
