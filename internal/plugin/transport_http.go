@@ -51,6 +51,11 @@ type httpTransport struct {
 	name    string
 	url     string
 	headers map[string]string
+	// OAuth (spec 3-7③): when configured, the token is loaded/refreshed
+	// lazily on the first request and re-injected on every subsequent one.
+	oauthCfg   *OAuthConfig
+	oauthToken *OAuthToken
+	tokenStore *tokenStore
 	client  *http.Client
 
 	mu      sync.Mutex
@@ -148,6 +153,11 @@ func (t *httpTransport) do(ctx context.Context, body []byte) (*http.Response, er
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	for k, v := range t.headers {
 		req.Header.Set(k, v)
+	}
+	// OAuth bearer token (spec 3-7③): refresh on demand, inject on every
+	// request. The transport holds a reference to the store + config.
+	if t.oauthToken != nil && t.oauthToken.valid() {
+		req.Header.Set("Authorization", "Bearer "+t.oauthToken.AccessToken)
 	}
 	if t.session != "" {
 		req.Header.Set("Mcp-Session-Id", t.session)
