@@ -533,4 +533,6 @@ Go（root+desktop）构建全绿；`internal/tool`(含 builtin)、`internal/evid
 
 **3-10 审批桥接完成（第七批次）**：boot 层 SubagentApprover（全局桥，线程安全读写锁）替换 headlessGate 的 nil Approver——无桥时保持 headless 语义（普通工具放行、外险拒绝）；桌面 EnableInteractiveApproval 后同步 SetSubagentApprover(Controller.GateApprover())，Ask 级写操作在子代理内弹出带 [sub-agent] 前缀的审批卡。以 boot 层全局桥+Controller 导出 GateApprover 破解 boot↔control import 环。CLI/TUI/serve 保持 headless 不变。
 
+**3-11 中间件化完成（第七批次）**：就绪检查/空答重试/截断安全剥离为 interceptors.go 拦截器链——readinessInterceptor（todo/project-check 执行）、emptyAnswerInterceptor（无可见终答）、truncationInterceptor（截断参数全拒）；Run 主循环回归纯状态机（stream→tools→loop），截断内联 20 行压缩为 1 行调用、就绪+空答走 checkAll 链（首个 block 胜出、Applies 全链传播供审计）。行为等价——全量 agent/control 测试零回归（含 ReadinessAudit/TruncationSafety/MalformedToolArgs 等 12 个相关测试全绿）。
+
 **批次收尾（同日）**：全部改动已按 4 个 commit 落在 `feat/mindmap-read-loop`（chore 遗留收口 / feat(core) M0+M3 后端 / feat(desktop) M0-M3 前端 / docs(spec)），`sign.exe`/`ndvshot.exe`/`dist-crash/` 三个产物刻意未入库（待 gitignore）。下一批建议顺序：3-3（流式补丁预览，先查 provider 层是否暴露 tool-call 参数 delta）→ 3-7①（按上方勘察实施）→ 3-11（中间件化）。
