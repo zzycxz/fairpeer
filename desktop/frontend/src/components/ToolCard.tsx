@@ -22,9 +22,11 @@ function baseName(path: string): string {
 const SUBAGENT_TOOLS = new Set(["task", "run_skill", "explore", "research"]);
 
 /** Lines shown by default in a shell output block: head + tail around the
- *  "… +N lines" marker (codex-style — errors live at the END of a log). */
-const SHELL_HEAD_LINES = 5;
-const SHELL_TAIL_LINES = 5;
+ *  "… +N lines" marker. Errors live at the END of a log, but build steps
+ *  (compile progress, test names) live in the middle — 20+20 keeps the
+ *  working context visible without dumping the entire log. */
+const SHELL_HEAD_LINES = 20;
+const SHELL_TAIL_LINES = 20;
 
 function pretty(json: string): string {
   try {
@@ -150,7 +152,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   // Open while running so the user sees live progress; closed once settled.
   // Shell cards (incl. agent-initiated bash) follow the same rule so streamed
   // stdout stays visible during a long command and auto-collapses on finish.
-  const [open, setOpen] = useState(getInitialOpenState(item.status, hasNested, item.isShell ?? false) || (spec?.forceOpen ?? false));
+  const [open, setOpen] = useState(getInitialOpenState(item.status, hasNested, item.isShell ?? false, Boolean(item.output)) || (spec?.forceOpen ?? false));
   const [hasBeenOpened, setHasBeenOpened] = useState(open);
   const [showAll, setShowAll] = useState(false);
   
@@ -248,7 +250,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         {hasCustomBody && customBody}
 
         {serverDiff && (
-          <UnifiedDiff value={serverDiff.diff} maxHeight={320} />
+          <UnifiedDiff value={serverDiff.diff} maxHeight={480} />
         )}
 
         {item.argsDiff && (
@@ -278,7 +280,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
 
         {shellPreview && (
           <div ref={shellBodyRef}>
-            <CodeViewer value={showAll ? shellOutput! : shellPreview.preview} maxHeight={showAll ? 480 : 260} />
+            <CodeViewer value={showAll ? shellOutput! : shellPreview.preview} maxHeight={showAll ? 640 : 400} />
             {shellPreview.hasMore && !showAll && (
               <button className="tool__showall" onClick={() => setShowAll(true)}>
                 {t("tool.showAllLines", { n: shellPreview.total })}
@@ -293,7 +295,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
             {item.args && <CodeViewer value={pretty(item.args)} language="json" maxHeight={180} />}
             {item.output && (
               <>
-                <CodeViewer value={item.output} maxHeight={280} />
+                <CodeViewer value={item.output} maxHeight={400} />
                 {item.truncated && <div className="tool__note">{t("tool.truncated")}</div>}
               </>
             )}
