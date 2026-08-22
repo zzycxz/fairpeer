@@ -869,25 +869,10 @@ func (a *Agent) Run(ctx context.Context, input any) error {
 		// every call in the turn instead, persist the tool-role messages so the next
 		// round re-injects the failure, and loop so the model retries. content_filter
 		// is excluded: the call args are complete, only the text was filtered.
-		if truncated := usage != nil && (usage.FinishReason == "length" || usage.FinishReason == "repetition_truncation"); truncated && len(calls) > 0 {
-			const skipMsg = "tool call skipped: response was truncated (output ended mid-token), arguments may be incomplete. Re-issue the call in full."
-			for _, call := range calls {
-				ev := event.Tool{ID: call.ID, Name: call.Name, Args: call.Arguments}
-				a.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: ev})
-				a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
-					ID:     call.ID,
-					Name:   call.Name,
-					Args:   call.Arguments,
-					Output: skipMsg,
-					Err:    "skipped: response truncated",
-				}})
-				a.session.Add(provider.Message{
-					Role:       provider.RoleTool,
-					Content:    skipMsg,
-					ToolCallID: call.ID,
-					Name:       call.Name,
-				})
-			}
+		// Truncation safety interceptor (spec 3-11): a "length" finish means
+		// tool-call args are truncated mid-token. Fail every call, persist the
+		// tool-role messages, and loop so the model retries.
+		if (truncationInterceptor{agent: a}).intercepted(calls, usage) {
 			a.maybeCompact(ctx, usage)
 			continue
 		}
@@ -905,33 +890,39 @@ func (a *Agent) Run(ctx context.Context, input any) error {
 		})
 
 		if len(calls) == 0 {
-			readiness := a.finalReadinessCheck()
-			if readiness.reason != "" {
-				finalReadinessBlocks++
-				result := evidence.ReadinessBlocked
-				if finalReadinessBlocks >= maxFinalReadinessBlocks {
-					result = evidence.ReadinessErrored
-					event.RecordReadinessAudit(a.sink, readiness.audit(result, false))
-					return fmt.Errorf("final-answer readiness failed %d times: %s", finalReadinessBlocks, readiness.reason)
+			// Pre-answer interceptor chain (spec 3-11): readiness (todo/
+			// project-check enforcement) then empty-answer, each with its own
+			// retry budget. The first block wins; a clean pass means the model
+			// produced a verified final answer.
+			chain := newInterceptorChain(a)
+			verdict := chain.checkAll(preAnswerState{
+				Text: text, Reasoning: reasoning, Usage: usage, Step: step,
+				finalBlocks: finalReadinessBlocks, emptyBlocks: emptyFinalBlocks,
+			})
+			if verdict.BlockReason != "" {
+				if verdict.BlockReason == "empty-final" {
+					emptyFinalBlocks++
+					if emptyFinalBlocks >= maxEmptyFinalBlocks {
+						return fmt.Errorf("model finished without a visible final answer %d times", emptyFinalBlocks)
+					}
+				} else {
+					finalReadinessBlocks++
+					r := a.finalReadinessCheck() // same state the chain just saw
+					if finalReadinessBlocks >= maxFinalReadinessBlocks {
+						event.RecordReadinessAudit(a.sink, r.audit(evidence.ReadinessErrored, false))
+						return fmt.Errorf("final-answer readiness failed %d times: %s", finalReadinessBlocks, verdict.BlockReason)
+					}
+					event.RecordReadinessAudit(a.sink, r.audit(evidence.ReadinessBlocked, false))
 				}
-				event.RecordReadinessAudit(a.sink, readiness.audit(result, false))
-				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "final-answer readiness blocked: " + readiness.reason})
-				a.session.Add(provider.Message{Role: provider.RoleUser, Content: finalReadinessRetryMessage(readiness.reason)})
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+					Text: blockNotice(verdict.BlockReason, usage, a.prov.Name(), len(reasoning))})
+				a.session.Add(provider.Message{Role: provider.RoleUser,
+					Content: nudgeFor(verdict.BlockReason, usage, a.prov.Name(), len(reasoning))})
 				a.maybeCompact(ctx, usage)
 				continue
 			}
-			if !hasVisibleFinalAnswer(text) {
-				emptyFinalBlocks++
-				if emptyFinalBlocks >= maxEmptyFinalBlocks {
-					return fmt.Errorf("model finished without a visible final answer %d times", emptyFinalBlocks)
-				}
-				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: emptyFinalNotice(a.prov.Name(), usage, len(reasoning))})
-				a.session.Add(provider.Message{Role: provider.RoleUser, Content: emptyFinalRetryMessage()})
-				a.maybeCompact(ctx, usage)
-				continue
-			}
-			if readiness.applies {
-				event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessAllowed, finalReadinessBlocks > 0))
+			if verdict.Applies {
+				event.RecordReadinessAudit(a.sink, a.finalReadinessCheck().audit(evidence.ReadinessAllowed, finalReadinessBlocks > 0))
 			}
 			if a.steerQueueLen() > 0 {
 				continue
