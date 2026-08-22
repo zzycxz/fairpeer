@@ -3108,6 +3108,7 @@ export default function App() {
           defaultExpandThinking={expandThinking}
           profile={coworkActive ? "cowork" : netdevActive ? "netdev" : "dev"}
           onInsert={addWorkspaceTextToComposer}
+          modelLabel={state.meta?.label}
         />
       )}
     </main>

@@ -21,10 +21,10 @@ type QuestionAnchor = { id: string; text: string; turn: number };
 const QUESTION_NAV_MIN_COUNT = 2;
 const LiveStreamContext = createContext<LiveStream | undefined>(undefined);
 
-const LiveAssistantMessage = memo(function LiveAssistantMessage({ item, defaultExpanded = false, expandWhileStreaming = true }: { item: AssistantItem; defaultExpanded?: boolean; expandWhileStreaming?: boolean }) {
+const LiveAssistantMessage = memo(function LiveAssistantMessage({ item, defaultExpanded = false, expandWhileStreaming = true, modelLabel }: { item: AssistantItem; defaultExpanded?: boolean; expandWhileStreaming?: boolean; modelLabel?: string }) {
   const live = useContext(LiveStreamContext);
   const shown = live && live.id === item.id ? { ...item, text: live.text, reasoning: live.reasoning, streaming: true } : item;
-  return <AssistantMessage item={shown} defaultExpanded={defaultExpanded} expandWhileStreaming={expandWhileStreaming} />;
+  return <AssistantMessage item={shown} defaultExpanded={defaultExpanded} expandWhileStreaming={expandWhileStreaming} modelLabel={modelLabel} />;
 });
 
 // ── Layer budgets ─────────────────────────────────────────────────────────────
@@ -158,6 +158,7 @@ export function Transcript({
   defaultExpandThinking = false,
   profile,
   onInsert,
+  modelLabel,
 }: {
   items: Item[];
   live?: LiveStream;
@@ -169,6 +170,9 @@ export function Transcript({
   rewindDisabled?: boolean;
   questionNavigator?: boolean;
   defaultExpandThinking?: boolean;
+  // Active model name shown as the assistant message eyebrow (e.g.
+  // "deepseek/deepseek-chat" instead of the generic "助手").
+  modelLabel?: string;
   // profile + onInsert drive the cowork empty-state "starter" bubbles (see
   // Welcome). When profile is "cowork", starter bubbles fill the composer via
   // onInsert instead of sending immediately. "netdev" → 运维 examples. Omitted
@@ -433,6 +437,7 @@ export function Transcript({
         const dur = collapseBatch.reduce((ms, it) => ms + (it.kind === "tool" ? it.durationMs ?? 0 : 0), 0);
         out.push(
           <TurnCollapse
+          modelLabel={modelLabel}
             key={`step-batch-${collapseBatchStart}`}
             items={collapseBatch}
             durationMs={dur}
@@ -490,7 +495,7 @@ export function Transcript({
           flushReadOnlyBatch();
           switch (it.kind) {
             case "assistant":
-              out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={defaultExpandThinking} expandWhileStreaming={false} />);
+              out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={defaultExpandThinking} expandWhileStreaming={false} modelLabel={modelLabel} />);
               if (!it.streaming && it.text.trim() !== "") {
                 actionText = it.text;
                 actionReady = true;
@@ -526,7 +531,7 @@ export function Transcript({
             break;
           }
           case "assistant":
-            out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={defaultExpandThinking} />);
+            out.push(<LiveAssistantMessage key={it.id} item={it as AssistantItem} defaultExpanded={defaultExpandThinking} modelLabel={modelLabel} />);
             if (!it.streaming && it.text.trim() !== "") {
               actionText = it.text;
               actionReady = true;
@@ -582,6 +587,7 @@ export function Transcript({
             warmOnRewind={onRewind}
             warmSetOpenAction={setOpenAction}
             defaultExpandThinking={defaultExpandThinking}
+            modelLabel={modelLabel}
             onToggleColdPage={() => setColdPage((p) => p + 1)}
             onToggleWarmTurn={(g, expand) => {
               setExpandedWarmTurns((prev) => {
@@ -618,6 +624,7 @@ const WarmZone = memo(function WarmZone({
   warmOnRewind,
   warmSetOpenAction,
   defaultExpandThinking = false,
+  modelLabel,
   onToggleColdPage,
   onToggleWarmTurn,
 }: {
@@ -636,6 +643,7 @@ const WarmZone = memo(function WarmZone({
   warmOnRewind: ((turn: number, scope: string) => void) | undefined;
   warmSetOpenAction: (action: OpenTurnAction | null) => void;
   defaultExpandThinking?: boolean;
+  modelLabel?: string;
   onToggleColdPage: () => void;
   onToggleWarmTurn: (g: number, expand: boolean) => void;
 }) {
@@ -691,6 +699,7 @@ const WarmZone = memo(function WarmZone({
               onRewind={warmOnRewind}
               setOpenAction={warmSetOpenAction}
               defaultExpandThinking={defaultExpandThinking}
+              modelLabel={modelLabel}
             />
           </WarmTurnCard>,
         );
@@ -735,6 +744,7 @@ function WarmTurnItems({
   onRewind,
   setOpenAction,
   defaultExpandThinking = false,
+  modelLabel,
 }: {
   startIdx: number;
   endIdx: number;
@@ -748,6 +758,7 @@ function WarmTurnItems({
   onRewind: ((turn: number, scope: string) => void) | undefined;
   setOpenAction: (action: OpenTurnAction | null) => void;
   defaultExpandThinking?: boolean;
+  modelLabel?: string;
 }) {
   const nodes: React.ReactNode[] = [];
   let actionText = "";
@@ -806,7 +817,7 @@ function WarmTurnItems({
         break;
       }
       case "assistant": {
-        nodes.push(<AssistantMessage key={it.id} item={it} defaultExpanded={defaultExpandThinking} />);
+        nodes.push(<AssistantMessage key={it.id} item={it} defaultExpanded={defaultExpandThinking} modelLabel={modelLabel} />);
         if (!it.streaming && it.text.trim() !== "") {
           actionText = it.text;
           actionReady = true;
@@ -935,9 +946,10 @@ type TurnCollapseProps = {
   durationMs: number;  // summed tool execution time across the batch; 0 when unknown
   mode: DisplayMode;
   subcalls: Map<string, ToolItem[]>;
+  modelLabel?: string;
 };
 
-function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) {
+function TurnCollapse({ items, durationMs, mode, subcalls, modelLabel }: TurnCollapseProps) {
   const t = useT();
   // A turn that produced viewable attachments (e.g. an image_generate picture)
   // defaults to open so the result stays visible instead of being hidden in
@@ -990,7 +1002,7 @@ function TurnCollapse({ items, durationMs, mode, subcalls }: TurnCollapseProps) 
         break;
       case "assistant": {
         const displayItem = mode === "minimal" ? { ...it, reasoning: "" } : it;
-        body.push(<AssistantMessage key={it.id} item={displayItem as AssistantItem} />);
+        body.push(<AssistantMessage key={it.id} item={displayItem as AssistantItem} modelLabel={modelLabel} />);
         break;
       }
     }

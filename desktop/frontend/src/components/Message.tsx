@@ -384,20 +384,24 @@ export const AssistantMessage = memo(function AssistantMessage({
   item,
   defaultExpanded = false,
   expandWhileStreaming = true,
+  modelLabel,
 }: {
   item: AssistantItem;
   defaultExpanded?: boolean;
   /** false in compact/minimal: completed steps fold away, so auto-open + fold reads as flicker. */
   expandWhileStreaming?: boolean;
+  /** the active model name (e.g. "deepseek/deepseek-chat"); falls back to the generic label. */
+  modelLabel?: string;
 }) {
   const t = useT();
   const [reasoningOpen, setReasoningOpen] = useState((expandWhileStreaming && item.streaming) || defaultExpanded);
   const hasText = item.streaming || item.text.trim() !== "";
   const processOnly = Boolean(item.reasoning) && !hasText;
   const processWithText = Boolean(item.reasoning) && hasText;
+  const eyebrowText = modelLabel || t("msg.assistantEyebrow");
   return (
     <div className={`msg msg--assistant${processOnly ? " msg--process-only" : ""}${processWithText ? " msg--process-with-text" : ""}`}>
-      {!processOnly && <div className="msg__eyebrow" aria-hidden="true">{t("msg.assistantEyebrow")}</div>}
+      {!processOnly && <div className="msg__eyebrow" aria-hidden="true">{eyebrowText}</div>}
       {item.reasoning && (
         <div className="reasoning">
           <button
