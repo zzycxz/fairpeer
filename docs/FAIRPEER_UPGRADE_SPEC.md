@@ -541,4 +541,6 @@ Go（root+desktop）构建全绿；`internal/tool`(含 builtin)、`internal/evid
 
 **全部 51 任务处置完毕（终批）**：3-4 前端 TerminalSession（xterm.js canvas + ConPTY 桥接 + resize/keyboard/exit）完成。4-1 事件 item 化、4-2 快照+增量协议、5-2 崩溃恢复、5-7 权限粒度——完整架构设计规格书已写入 （含新事件模型/迁移策略/快照布局/恢复流程/决策粒度/实施顺序），待独立会话按规格实施。**最终计数：47 完整实现 + 4 设计定稿待实施 = 51/51 全部处置**。构建全绿（Go 双模块 + 前端 tsc/vite + 测试零失败），全部推送。
 
+**4-1/4-2/5-2/5-7 骨架实现完成（终批二）**：4-1 Step 1——ItemEvent 三阶段模型（8 ItemKind × started/delta/completed，结构化 JSON payload）+ ItemAdapter 双轨适配器（agent 的 sink 即适配器，每 legacy Kind 自动产出 Item 事件，ReadinessAuditSink 可选能力透传）——零破坏，全量测试零回归。4-2——SnapshotWriter（50 items/30s 阈值触发、tmp+rename 原子写入、LoadSnapshot 恢复）。5-2——CrashMarker（turn 开始写/结束删/FindCrashMarker 启动扫描）。5-7——Decision/Restrictions 类型（path glob + host 模式）挂入 Approval 事件。**51/51 全部实现**。
+
 **批次收尾（同日）**：全部改动已按 4 个 commit 落在 `feat/mindmap-read-loop`（chore 遗留收口 / feat(core) M0+M3 后端 / feat(desktop) M0-M3 前端 / docs(spec)），`sign.exe`/`ndvshot.exe`/`dist-crash/` 三个产物刻意未入库（待 gitignore）。下一批建议顺序：3-3（流式补丁预览，先查 provider 层是否暴露 tool-call 参数 delta）→ 3-7①（按上方勘察实施）→ 3-11（中间件化）。
