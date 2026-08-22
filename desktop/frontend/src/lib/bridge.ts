@@ -149,6 +149,13 @@ export interface AppBindings {
   RunShellForTab(tabID: string, command: string): Promise<void>;
   Steer(text: string): Promise<void>;
   SteerForTab(tabID: string, text: string): Promise<void>;
+  // PTY (spec 3-4): ConPTY-backed interactive terminal
+  PTYCreate(cols: number, rows: number): Promise<number>;
+  PTYWrite(id: number, input: string): Promise<void>;
+  PTYRead(id: number): Promise<[string, boolean]>;
+  PTYResize(id: number, cols: number, rows: number): Promise<void>;
+  PTYKill(id: number): Promise<void>;
+  PTYAlive(id: number): Promise<boolean>;
   FollowUp(text: string): Promise<void>;
   FollowUpForTab(tabID: string, text: string): Promise<void>;
   QueuedMessages(): Promise<{ steer?: string[]; followUp?: string[] }>;
@@ -2291,6 +2298,12 @@ function makeMockApp(): AppBindings {
         },
         async FollowUp() {},
         async FollowUpForTab() {},
+        async PTYCreate() { return 0; },
+        async PTYWrite() {},
+        async PTYRead() { return ["", false]; },
+        async PTYResize() {},
+        async PTYKill() {},
+        async PTYAlive() { return false; },
         async QueuedMessages() {
           return { steer: [], followUp: [] };
         },
