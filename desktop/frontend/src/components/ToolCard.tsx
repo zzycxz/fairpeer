@@ -25,8 +25,13 @@ const SUBAGENT_TOOLS = new Set(["task", "run_skill", "explore", "research"]);
  *  "… +N lines" marker. Errors live at the END of a log, but build steps
  *  (compile progress, test names) live in the middle — 20+20 keeps the
  *  working context visible without dumping the entire log. */
-const SHELL_HEAD_LINES = 20;
-const SHELL_TAIL_LINES = 20;
+/** Codex-style output display (spec 1-5 refinement): outputs under
+ *  SHELL_FULL_THRESHOLD lines render in full — no fold, no "show more"
+ *  button, the card IS the output. Only truly massive logs (verbose build
+ *  flags, huge test suites) fold to head+tail. */
+const SHELL_FULL_THRESHOLD = 500;
+const SHELL_HEAD_LINES = 50;
+const SHELL_TAIL_LINES = 50;
 
 function pretty(json: string): string {
   try {
@@ -80,9 +85,10 @@ function ToolAttachments({ paths }: { paths: string[] }) {
 
 /** Splits long output into head+tail around a "… +N lines" marker line; short
  *  output passes through unchanged. hasMore drives the show-all toggle. */
-function splitPreview(text: string, head: number, tail: number): { preview: string; total: number; hasMore: boolean } {
+function splitPreview(text: string, head: number, tail: number, fullThreshold = Infinity): { preview: string; total: number; hasMore: boolean } {
   const lines = text.split("\n");
   const total = lines.length;
+  if (total <= fullThreshold) return { preview: text, total, hasMore: false };
   if (total <= head + tail + 1) return { preview: text, total, hasMore: false };
   const hidden = total - head - tail;
   const marker = `… +${hidden} lines`;
@@ -146,7 +152,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
 
   // Shell output: head+tail preview + "show all" toggle.
   const shellOutput = item.isShell && item.output ? item.output : null;
-  const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_HEAD_LINES, SHELL_TAIL_LINES) : null;
+  const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_HEAD_LINES, SHELL_TAIL_LINES, SHELL_FULL_THRESHOLD) : null;
   const hasAttachments = Boolean(item.attachments && item.attachments.some((a) => a.kind === "image"));
   const hasBody = Boolean(summary || hasDiffBody || hasCustomBody || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error || hasAttachments);
   // Open while running so the user sees live progress; closed once settled.
@@ -280,7 +286,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
 
         {shellPreview && (
           <div ref={shellBodyRef}>
-            <CodeViewer value={showAll ? shellOutput! : shellPreview.preview} maxHeight={showAll ? 640 : 400} />
+            <CodeViewer value={showAll ? shellOutput! : shellPreview.preview} maxHeight={showAll ? 800 : 600} />
             {shellPreview.hasMore && !showAll && (
               <button className="tool__showall" onClick={() => setShowAll(true)}>
                 {t("tool.showAllLines", { n: shellPreview.total })}
@@ -295,7 +301,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
             {item.args && <CodeViewer value={pretty(item.args)} language="json" maxHeight={180} />}
             {item.output && (
               <>
-                <CodeViewer value={item.output} maxHeight={400} />
+                <CodeViewer value={item.output} maxHeight={600} />
                 {item.truncated && <div className="tool__note">{t("tool.truncated")}</div>}
               </>
             )}
