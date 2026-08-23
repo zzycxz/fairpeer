@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ArrowUp, Check, Eye, FileText, Folder, Gauge, List, Loader2, MessageSquare, Mic, MoreHorizontal, Pause, Play, Search, SlidersHorizontal, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
+import { cjkWordEnd, cjkWordStart } from "../lib/cjk";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
@@ -1591,6 +1592,32 @@ export function Composer({
       }
       setText(hist[histIndexRef.current].text);
       return;
+    }
+
+    // Ctrl+←/→: CJK-aware word jump (gap analysis §2). Latin text falls back
+    // to the browser's native word boundary; CJK text uses Intl.Segmenter to
+    // jump by word/phrase instead of by character.
+    if (!composing && !e.altKey && (e.ctrlKey || e.metaKey) &&
+        (e.key === "ArrowLeft" || e.key === "ArrowRight") && !menuMode) {
+      const ta = e.currentTarget;
+      const pos = ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd;
+      if (e.key === "ArrowLeft") {
+        const next = cjkWordStart(text, pos);
+        if (next !== pos) {
+          e.preventDefault();
+          ta.setSelectionRange(next, next);
+          return;
+        }
+      } else {
+        const next = cjkWordEnd(text, pos);
+        if (next !== pos) {
+          e.preventDefault();
+          ta.setSelectionRange(next, next);
+          return;
+        }
+      }
+      // If the CJK boundary equals the current position (e.g. pure Latin),
+      // let the browser handle it natively.
     }
 
     if (isYoloToggleShortcut(e) && !composing) {

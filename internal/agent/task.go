@@ -213,9 +213,16 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		}
 	}
 
+	// Worktree isolation (gap §5): when the sub-agent has writer tools and
+	// the workspace is a git repo, run it in its own worktree so parallel
+	// sub-agents never write the same file. The diff is returned to the
+	// model afterwards for explicit application (approval flow intact).
 	subReg := t.buildSubReg(p.Tools)
-	modelRef, effortRef := t.effectiveProfile(p.Model, p.Effort)
 	parentID, parent, _, _ := CallContext(ctx)
+	wt := CreateWorktree(t.workspaceRoot, parentID, subRegHasWriter(subReg))
+	defer wt.Cleanup()
+
+	modelRef, effortRef := t.effectiveProfile(p.Model, p.Effort)
 	run, err := t.prepareTranscriptRun(subReg, modelRef, effortRef, ParentSession(ctx), parentID, p.ContinueFrom, p.ForkFrom)
 	if err != nil {
 		return "", err
@@ -271,6 +278,16 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 	answer, err := t.runSubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, run.Session)
 	if err != nil {
 		return "", errors.Join(err, t.transcripts.SaveFailed(run))
+	}
+	// Worktree isolation: the sub-agent's changes live in its worktree. Report
+	// them as a diff the model can apply to the main workspace (the parent
+	// decides — apply_patch, review, or discard).
+	if wt.Active() {
+		if diff := wt.Diff(); diff != "" {
+			answer += "\n\n[sub-agent changes (isolated worktree, not yet applied to the main workspace):]\n" + diff
+		} else {
+			answer += "\n[sub-agent ran in an isolated worktree and made no file changes]"
+		}
 	}
 	if t.transcripts != nil && run.Ref != "" {
 		if err := t.transcripts.SaveCompleted(run); err != nil {
