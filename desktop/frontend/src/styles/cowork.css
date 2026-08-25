@@ -4469,14 +4469,15 @@
   position: relative;
   display: flex;
   flex: 1;
+  order: -1;
   align-items: center;
-  height: 28px;
-  margin: 0 0 0 8px;
-  padding: 2px;
+  height: 32px;
+  margin: 0;
+  padding: 3px;
   align-self: center;
-  border-radius: var(--radius-xs);
-  border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
-  background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--bg-hover) 60%, transparent);
   --wails-draggable: no-drag;
 }
 
@@ -4494,20 +4495,21 @@
   border: none;
   border-radius: var(--radius-xs);
   background: transparent;
-  color: var(--text, inherit);
+  color: var(--fg-dim);
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
-  transition: color 0.35s ease, background 0.35s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .app-chrome__profile-seg-item:hover {
-  background: var(--accent-soft, rgba(0, 0, 0, 0.06));
+  color: var(--fg);
 }
 .app-chrome__profile-seg-item--active,
 .app-chrome__profile-seg-item--active:hover {
-  background: var(--accent, #2563eb);
-  color: #fff;
+  background: var(--bg-elev);
+  color: var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 .app-chrome__profile-seg-label {
   display: inline-flex;

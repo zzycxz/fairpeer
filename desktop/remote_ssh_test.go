@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,21 @@ func TestSSHTransportE2E(t *testing.T) {
 		Host: host, Port: port, User: user,
 		AuthMethod: "password", Password: password,
 	}}
+
+	// Trust flow: an unknown key must be REJECTED by the transport (no silent
+	// TOFU), then accepted once sshTrustHostKey has pinned it.
+	managed := filepath.Join(t.TempDir(), "known_hosts")
+	untrusted := &sshTransport{creds: tr.creds, managedPath: managed}
+	ctx0, cancel0 := context.WithTimeout(context.Background(), time.Minute)
+	if _, _, _, err := untrusted.Dial(ctx0, ref); err == nil {
+		cancel0()
+		t.Fatal("dial with untrusted host key should fail (strict prompt)")
+	}
+	cancel0()
+	if err := sshTrustHostKey(host, port, managed); err != nil {
+		t.Fatalf("trust host key: %v", err)
+	}
+	tr.managedPath = managed
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()

@@ -2620,12 +2620,21 @@ export default function App() {
     await app.RunExpertTeam(teamId, task, mode, rounds);
   }, [t]);
 
-  const handleOpenTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string) => {
+  const handleOpenTopic = useCallback(async (
+    scope: string,
+    workspaceRoot: string,
+    topicId: string,
+    remote?: { kind: string; target: string; user?: string; tls?: boolean } | null,
+    sessionPath?: string,
+    title?: string,
+  ) => {
     window.dispatchEvent(new CustomEvent("cowork:reset-panel"));
     closeTransientOverlays();
     setSidebarImDetailConnectionId("");
     try {
-      if (scope === "global") {
+      if (remote) {
+        await app.OpenRemoteTopicTab(remote.kind, remote.target, remote.user ?? "", Boolean(remote.tls), workspaceRoot, topicId, title ?? "", sessionPath ?? "");
+      } else if (scope === "global") {
         await openGlobalTab(topicId);
       } else {
         await openProjectTab(workspaceRoot, topicId);

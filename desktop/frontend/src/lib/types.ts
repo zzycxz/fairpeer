@@ -208,6 +208,8 @@ export interface ProjectNode {
   label: string;
   root?: string;
   topicId?: string;
+  remote?: { kind: string; target: string; user?: string; label?: string; keyPath?: string; tls?: boolean } | null;
+  sessionPath?: string;
   projectColor?: string;
   turns?: number;
   createdAt?: number;

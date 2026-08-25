@@ -143,6 +143,8 @@ func splitHostPort(target string) (string, string, bool) {
 
 type sshTransport struct {
 	creds *sshCredentials
+	// managedPath overrides the managed known_hosts location (tests).
+	managedPath string
 }
 
 // sshProc owns the session and the underlying ssh client.
@@ -160,6 +162,14 @@ func (p *sshProc) Wait() error {
 	return p.sess.Wait()
 }
 
+// sshManagedPathOr is Dial's managed-path resolver (override-aware).
+func sshManagedPathOr(t *sshTransport) string {
+	if t.managedPath != "" {
+		return t.managedPath
+	}
+	return remoteSSHKnownHostsPath()
+}
+
 // Dial resolves, authenticates, provisions the host binary, and spawns it.
 func (t *sshTransport) Dial(ctx context.Context, ref RemoteRef) (io.Reader, io.Writer, remoteProcess, error) {
 	creds := t.creds
@@ -175,13 +185,13 @@ func (t *sshTransport) Dial(ctx context.Context, ref RemoteRef) (io.Reader, io.W
 		Host: resolved,
 		Auth: *auth,
 		HostKeys: &transport.HostKeyPolicy{
-			// TOFU into a fairpeer-managed file; a conflicting key still fails
-			// hard inside the callback. First-seen keys are auto-accepted for
-			// P1 (the wizard shows connection logs; a fingerprint-confirm step
-			// can slot into the Prompt later).
-			ManagedPath: remoteSSHKnownHostsPath(),
+			// System known_hosts + the fairpeer-managed file; unknown keys are
+			// REJECTED (no silent TOFU) — the wizard confirms the fingerprint
+			// first (SSHInspectHost/SSHTrustHost), which writes the managed
+			// file, and this dial then accepts. A conflicting key fails hard.
+			ManagedPath: sshManagedPathOr(t),
 			Prompt: func(context.Context, transport.HostKeyQuestion) (bool, error) {
-				return true, nil
+				return false, fmt.Errorf("host key not trusted yet — confirm the fingerprint in the remote-connect wizard")
 			},
 		},
 		DialTimeout: 15 * time.Second,

@@ -155,7 +155,10 @@ export interface AppBindings {
   ListWSLDistros(): Promise<Array<{ name: string; state: string; version: number; default: boolean }>>;
   ListDockerContainers(): Promise<Array<{ ID: string; Image: string; Names: string; State: string; Status: string }>>;
   SSHConnect(host: string, port: string, user: string, authMethod: string, password: string, keyPath: string, passphrase: string): Promise<{ version: string; goos: string; arch: string; homeDir: string }>;
-  ServerConnect(address: string, token: string): Promise<{ version: string; goos: string; arch: string; homeDir: string }>;
+  ServerConnect(address: string, token: string, useTLS: boolean): Promise<{ version: string; goos: string; arch: string; homeDir: string }>;
+  SSHInspectHost(host: string, port: string, user: string): Promise<{ fingerprint: string; trusted: boolean }>;
+  SSHTrustHost(host: string, port: string): Promise<void>;
+  OpenRemoteTopicTab(kind: string, target: string, user: string, tls: boolean, root: string, topicId: string, title: string, sessionPath: string): Promise<TabMeta | null>;
   RemoteConnectProbe(kind: string, target: string, user: string): Promise<{ version: string; goos: string; arch: string; homeDir: string }>;
   RemoteBrowseList(path: string): Promise<Array<{ name: string; dir: boolean }>>;
   RemoteWizardClose(): Promise<void>;
@@ -2324,6 +2327,9 @@ function makeMockApp(): AppBindings {
         async ListDockerContainers() { return []; },
         async SSHConnect() { throw new Error("ssh connect unavailable in browser mode"); },
         async ServerConnect() { throw new Error("server connect unavailable in browser mode"); },
+        async SSHInspectHost() { throw new Error("ssh unavailable in browser mode"); },
+        async SSHTrustHost() {},
+        async OpenRemoteTopicTab() { return null; },
         async RemoteConnectProbe() { throw new Error("remote connect unavailable in browser mode"); },
         async RemoteBrowseList() { return []; },
         async RemoteWizardClose() {},

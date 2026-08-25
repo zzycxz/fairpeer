@@ -2430,6 +2430,12 @@ type ProjectNode struct {
 	Running        bool          `json:"running,omitempty"`
 	Status         string        `json:"status,omitempty"`
 	Children       []ProjectNode `json:"children,omitempty"`
+	// Remote marks a project/topic node whose workspace lives on a remote
+	// host; Root is the remote-side path. Clicks route to OpenRemoteTopicTab.
+	Remote *RemoteRef `json:"remote,omitempty"`
+	// SessionPath on a remote topic node pins the host-side transcript to
+	// continue when the topic is clicked.
+	SessionPath string `json:"sessionPath,omitempty"`
 	// ExpertTeamID is set when Kind=="expert_topic" — the team this expert
 	// session belongs to. The frontend uses it to open/activate the expert tab
 	// on click and to render the 🤝 icon. Empty for non-expert nodes.
@@ -3347,6 +3353,42 @@ func (a *App) ListProjectTree(profile string) []ProjectNode {
 		node.Label = title
 		node.ProjectColor = p.Color
 		node.Children = children
+		out = append(out, node)
+	}
+
+	// Remote-workspace nodes: one per registered remote project (registry in
+	// remote-projects.json), with host-side topics merged in when a link is
+	// live. Offline remote projects still render (bare node) so the workspace
+	// stays reachable from the tree.
+	for _, entry := range loadRemoteProjects() {
+		if strings.TrimSpace(config.ProfileNameKey(profile)) != "" && entry.Ref.Kind == "" {
+			continue
+		}
+		ref := entry.Ref
+		node := ProjectNode{
+			Key:    "remote_" + entry.Slug,
+			Kind:   "project",
+			Label:  entry.Title,
+			Root:   entry.Root,
+			Remote: &ref,
+		}
+		for _, t := range remoteTopicsForRef(a.remoteManager, ref, entry.Root) {
+			label := t.Title
+			if label == "" {
+				label = topicTitleForTab("project", entry.Root, t.TopicID)
+			}
+			node.Children = append(node.Children, ProjectNode{
+				Key:            "remote_topic_" + entry.Slug + "_" + t.TopicID,
+				Kind:           "topic",
+				Label:          label,
+				Root:           entry.Root,
+				TopicID:        t.TopicID,
+				Remote:         &ref,
+				SessionPath:    t.NewestSession,
+				Turns:          t.Turns,
+				LastActivityAt: t.LastActivityMs,
+			})
+		}
 		out = append(out, node)
 	}
 

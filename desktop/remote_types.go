@@ -20,6 +20,9 @@ type RemoteRef struct {
 	User string `json:"user,omitempty"`
 	// KeyPath is an SSH private key path (not secret — the path only).
 	KeyPath string `json:"keyPath,omitempty"`
+	// TLS marks a Server connection upgraded to TLS (self-signed cert pinned
+	// by the desktop on first connect).
+	TLS bool `json:"tls,omitempty"`
 	// Label is the human display name (e.g. "Ubuntu · /home/me/proj").
 	Label string `json:"label,omitempty"`
 }

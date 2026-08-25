@@ -1347,7 +1347,7 @@
   margin: 0;
   padding: 0 var(--sidebar-entry-content-inset);
   gap: 9px;
-  border: 1px solid transparent;
+  border: 1px dashed transparent;
   border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--bg-soft) 82%, var(--bg-elev));
   color: var(--fg-faint);
@@ -1355,9 +1355,12 @@
   line-height: 1.45;
 }
 
-:root[data-theme-style] .project-tree__search:focus-within,
 :root[data-theme-style] .project-tree__search:hover {
   border-color: var(--border-strong, var(--border));
+}
+
+:root[data-theme-style] .project-tree__search:focus-within {
+  border: 1px solid var(--accent);
 }
 
 :root[data-theme-style] .project-tree__header {

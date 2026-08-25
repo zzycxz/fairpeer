@@ -32,7 +32,14 @@ interface ProjectTreeProps {
   // project/topic set.
   profile?: string;
   imTopicSources?: Record<string, ProjectTreeImTopicSource>;
-  onOpenTopic: (scope: string, workspaceRoot: string, topicId: string) => Promise<void> | void;
+  onOpenTopic: (
+    scope: string,
+    workspaceRoot: string,
+    topicId: string,
+    remote?: { kind: string; target: string; user?: string; tls?: boolean } | null,
+    sessionPath?: string,
+    title?: string,
+  ) => Promise<void> | void;
   onOpenExpertSession?: (teamId: string, teamName: string) => Promise<void> | void;
   onOpenProjectHistory: (scope: "project", workspaceRoot: string) => Promise<void> | void;
   onAddProject: () => Promise<void>;

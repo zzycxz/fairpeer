@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **前端徽标**：TabBar 远程 tab 显示方式徽标（WSL/Docker/SSH/Srv，离线态红删线）；订阅 `remote:status` 事件刷新 TabMeta
 - **生命周期补漏**：应用退出时统一关闭全部 host 进程；向导重试/放弃时回收无会话的空闲连接（不残留 WSL/Docker/SSH 进程）
 - **收尾件**：`scripts/build-hosts.sh`（交叉编译 linux amd64/arm64 host 二进制入缓存）；`TabMeta` 增加 `remote`/`remoteState` 字段
+- **安全闭环（+1）**：SSH 首连从静默 TOFU 改为**显式指纹确认**——向导新增「验证主机」步骤（SSHInspectHost 取 SHA256 指纹 → 用户确认 → SSHTrustHost 写入本地 known_hosts），传输层对未信任密钥一律拒绝、指纹冲突硬失败；Server 新增 `--tls`（自签证书持久化于 config 目录，指纹跨重启稳定），桌面端 TLS 拨号**首连锁定证书指纹**、此后强校验（`ServerForget` 清除令牌+指纹）。e2e：未信任拒连 ✓ 信任后连通 ✓ 错误指纹拒绝 ✓
+- **远程话题侧栏枚举（+1）**：host `session/list` 富化（.meta 侧车的 turns/topicID/标题/预览）；新 `remote-projects.json` 注册表；ListProjectTree 合并远程项目节点（在线时按话题聚合 turns/最近活动，离线显示裸节点）；点击远程话题经 `OpenRemoteTopicTab` 打开并 pin 最新会话。远程工作区在侧栏的行为与本地项目对齐
+- 附带：cowork/onboarding 遗漏的圆角令牌化补齐（regex 全量）
 - 已知边界（P1）：远程 tab 的记忆/技能/MCP 热插拔/专家协作为本地特性暂不可用（接口返回 not-supported）；远程会话离线时不在侧栏枚举（重连后恢复）；ExpertCollab/Item 事件不在 wire 上（与桌面本地 toWire 行为一致）
 - **测试套件修复（配合分支 WIP「0 轮话题在树中隐藏」的新行为）**：新增 `seedTopicTurn` 测试助手（写一条 user 消息 + `.meta` 侧车使话题计 1 轮），9 个 topic 可见性测试按新行为对齐；修复 WIP 中 `reviveParkedTabs` 的死过滤条件（停靠态 `Ready=true`，原 `!Ready` 永不匹配——改为 `Ctrl==nil && StartupErr==""`），`TestSetDefaultModelRevivesParkedTabs` 转绿；**desktop 全量测试套件自 WIP 以来首次全绿（142s ok）**
 

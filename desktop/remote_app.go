@@ -208,6 +208,7 @@ func registerRemoteProject(ref RemoteRef, root, title, profile string) {
 	}
 	f.Projects = append(f.Projects, desktopProject{Root: key, Title: title})
 	_ = saveProjectsFile(f, profile)
+	upsertRemoteProject(ref, root, title)
 }
 
 // --- local-FS assumption branches ----------------------------------------------
@@ -441,7 +442,7 @@ func (a *App) remoteConnectProbe(ref RemoteRef) (RemoteProbeResult, error) {
 
 // ServerConnect is the wizard's Server entry: record the token (manager cache
 // + secret store), then run the standard probe against the running host.
-func (a *App) ServerConnect(address, token string) (RemoteProbeResult, error) {
+func (a *App) ServerConnect(address, token string, useTLS bool) (RemoteProbeResult, error) {
 	address = strings.TrimSpace(address)
 	if address == "" {
 		return RemoteProbeResult{}, fmt.Errorf("server address is required")
@@ -457,6 +458,90 @@ func (a *App) ServerConnect(address, token string) (RemoteProbeResult, error) {
 		a.remoteManager = &remoteHostManager{app: a}
 	}
 	a.remoteManager.saveServerToken(address, token)
-	ref := RemoteRef{Kind: "server", Target: address, Label: "server · " + address}
+	ref := RemoteRef{Kind: "server", Target: address, TLS: useTLS, Label: "server · " + address}
 	return a.remoteConnectProbe(ref)
+}
+
+// ServerForget clears a Server connection's stored token and TLS certificate
+// pin (after a server re-provisioned its certificate, or to retire a host).
+func (a *App) ServerForget(address string) error {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return fmt.Errorf("server address is required")
+	}
+	if _, _, err := net.SplitHostPort(address); err != nil {
+		address = address + ":8787"
+	}
+	if store := desktopSecretStore(); store != nil {
+		_ = store.Delete(serverTokenKey(address))
+		_ = store.Delete(serverPinKey(address))
+	}
+	if a.remoteManager != nil {
+		a.remoteManager.mu.Lock()
+		delete(a.remoteManager.serverTokens, remoteRefKey(RemoteRef{Kind: "server", Target: address}))
+		a.remoteManager.mu.Unlock()
+	}
+	return nil
+}
+
+// OpenRemoteTopicTab opens a remote workspace tab pinned to a specific topic's
+// newest host-side session (the project tree's remote topic click).
+func (a *App) OpenRemoteTopicTab(kind, target, user string, tls bool, root, topicID, title, sessionPath string) (TabMeta, error) {
+	ref := RemoteRef{
+		Kind:   strings.TrimSpace(kind),
+		Target: strings.TrimSpace(target),
+		User:   strings.TrimSpace(user),
+		TLS:    tls,
+	}
+	root = strings.TrimSpace(root)
+	if ref.Kind == "" || ref.Target == "" || root == "" {
+		return TabMeta{}, fmt.Errorf("kind, target and root are required")
+	}
+	if ref.Label == "" {
+		ref.Label = ref.Target + " · " + root
+	}
+	// Resolve the newest session for the topic when the caller didn't pin one.
+	if sessionPath == "" {
+		for _, t := range remoteTopicsForRef(a.remoteManager, ref, root) {
+			if t.TopicID == topicID {
+				sessionPath = t.NewestSession
+				break
+			}
+		}
+	}
+	profile := a.activeProfileKey()
+
+	a.mu.Lock()
+	// Reuse an open tab on the same ref+root+topic.
+	for _, tab := range a.tabs {
+		if tab.Remote != nil && remoteRefKey(*tab.Remote) == remoteRefKey(ref) && tab.WorkspaceRoot == root && tab.TopicID == topicID {
+			a.activeTabID = tab.ID
+			meta := a.tabMeta(tab, true)
+			a.mu.Unlock()
+			return meta, nil
+		}
+	}
+	tabID := a.newUniqueTabIDLocked()
+	tab := &WorkspaceTab{
+		ID:               tabID,
+		Scope:            "project",
+		WorkspaceRoot:    root,
+		Remote:           &ref,
+		TopicID:          strings.TrimSpace(topicID),
+		TopicTitle:       strings.TrimSpace(title),
+		SessionPath:      strings.TrimSpace(sessionPath),
+		profile:          profile,
+		mode:             "normal",
+		toolApprovalMode: control.ToolApprovalAsk,
+		disabledMCP:      map[string]ServerView{},
+	}
+	tab.sink = &tabEventSink{tabID: tabID, app: a, ctx: a.ctx}
+	a.tabs[tabID] = tab
+	a.tabOrder = append(a.tabOrder, tabID)
+	a.activeTabID = tabID
+	a.saveTabsLocked()
+	meta := a.tabMeta(tab, true)
+	a.mu.Unlock()
+	a.startTabControllerBuild(tab)
+	return meta, nil
 }

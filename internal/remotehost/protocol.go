@@ -274,6 +274,14 @@ type SessionListParams struct {
 type SessionEntry struct {
 	Path      string `json:"path"`
 	ModTimeMs int64  `json:"modTimeMs"`
+	// Enriched from the .meta sidecar when present (the same metadata the
+	// desktop's local tree reads from its own session dirs).
+	Turns         int    `json:"turns,omitempty"`
+	TopicID       string `json:"topicId,omitempty"`
+	TopicTitle    string `json:"topicTitle,omitempty"`
+	WorkspaceRoot string `json:"workspaceRoot,omitempty"`
+	Scope         string `json:"scope,omitempty"`
+	Preview       string `json:"preview,omitempty"`
 }
 
 type SessionListResult struct {

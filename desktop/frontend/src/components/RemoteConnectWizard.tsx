@@ -2,7 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { app } from "../lib/bridge";
 import { useT, type DictKey } from "../lib/i18n";
 
-const stepKeys = ["remote.step.kind", "remote.step.config", "remote.step.connecting", "remote.step.directory"] as const;
+const stepKeysOrder: Step[] = ["kind", "config", "hostkey", "connecting", "directory"];
+const stepLabelKeys = {
+  kind: "remote.step.kind",
+  config: "remote.step.config",
+  hostkey: "remote.step.hostkey",
+  connecting: "remote.step.connecting",
+  directory: "remote.step.directory",
+} as const;
 
 // RemoteConnectWizard — the 远程连接 flow: pick a connection kind (WSL live in
 // P1; Docker/SSH/Server reserved), configure it, connect (binary provisioning
@@ -16,7 +23,7 @@ type SSHAlias = { alias: string; host: string; user: string; port: number };
 type FsEntry = { name: string; dir: boolean };
 type ProbeResult = { version: string; goos: string; arch: string; homeDir: string };
 
-type Step = "kind" | "config" | "connecting" | "directory";
+type Step = "kind" | "config" | "hostkey" | "connecting" | "directory";
 
 const KINDS = [
   { id: "wsl", available: true },
@@ -43,6 +50,8 @@ export function RemoteConnectWizard({ onClose }: { onClose: () => void }) {
   const [sshAliases, setSSHAliases] = useState<SSHAlias[] | null>(null);
   const [serverAddr, setServerAddr] = useState("");
   const [serverToken, setServerToken] = useState("");
+  const [serverTLS, setServerTLS] = useState(false);
+  const [hostFingerprint, setHostFingerprint] = useState("");
   const [logs, setLogs] = useState<string[]>([]);
   const [probe, setProbe] = useState<ProbeResult | null>(null);
   const [cwd, setCwd] = useState<string[]>([]);
@@ -95,10 +104,25 @@ export function RemoteConnectWizard({ onClose }: { onClose: () => void }) {
   const connectUser = kind === "docker" || kind === "ssh" || kind === "server" ? "" : user.trim();
 
   const startConnect = useCallback(async () => {
-    setStep("connecting");
     setError("");
-    setLogs([]);
     setEntries(null);
+    if (kind === "ssh") {
+      // First-connect fingerprint confirmation (no silent TOFU): unknown keys
+      // are rejected by the transport until the user trusts them here.
+      try {
+        const info = await app.SSHInspectHost(sshHost.trim(), sshPort.trim(), sshUser.trim());
+        setHostFingerprint(info.fingerprint);
+        if (!info.trusted) {
+          setStep("hostkey");
+          return;
+        }
+      } catch (err) {
+        setError(String(err));
+        return;
+      }
+    }
+    setStep("connecting");
+    setLogs([]);
     await app.RemoteWizardClose().catch(() => {});
     log(t("remote.logDialing", { kind, target }));
     try {
@@ -106,7 +130,7 @@ export function RemoteConnectWizard({ onClose }: { onClose: () => void }) {
         kind === "ssh"
           ? await app.SSHConnect(sshHost.trim(), sshPort.trim(), sshUser.trim(), sshAuth, sshPassword, sshKeyPath.trim(), "")
           : kind === "server"
-          ? await app.ServerConnect(serverAddr.trim(), serverToken)
+          ? await app.ServerConnect(serverAddr.trim(), serverToken, serverTLS)
           : await app.RemoteConnectProbe(kind, target, connectUser);
       setProbe(res);
       log(t("remote.logConnected", { version: res.version, goos: res.goos, arch: res.arch }));
@@ -117,7 +141,28 @@ export function RemoteConnectWizard({ onClose }: { onClose: () => void }) {
       setError(String(err));
       log(t("remote.logFailed", { error: String(err) }));
     }
-  }, [kind, target, connectUser, sshHost, sshPort, sshUser, sshAuth, sshPassword, sshKeyPath, serverAddr, serverToken, log]);
+  }, [kind, target, connectUser, sshHost, sshPort, sshUser, sshAuth, sshPassword, sshKeyPath, serverAddr, serverToken, serverTLS, log]);
+
+  const trustAndConnect = useCallback(async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await app.SSHTrustHost(sshHost.trim(), sshPort.trim());
+      setStep("connecting");
+      setLogs([]);
+      log(t("remote.logDialing", { kind, target }));
+      const res = await app.SSHConnect(sshHost.trim(), sshPort.trim(), sshUser.trim(), sshAuth, sshPassword, sshKeyPath.trim(), "");
+      setProbe(res);
+      const startDir = res.homeDir && res.homeDir !== "/" ? res.homeDir : "";
+      setCwd(startDir ? startDir.replace(/^\/+/, "").split("/").filter(Boolean) : []);
+      setStep("directory");
+    } catch (err) {
+      setError(String(err));
+      log(t("remote.logFailed", { error: String(err) }));
+    } finally {
+      setBusy(false);
+    }
+  }, [kind, target, sshHost, sshPort, sshUser, sshAuth, sshPassword, sshKeyPath, log]);
 
   const browse = useCallback(
     async (next: string[]) => {
@@ -173,9 +218,9 @@ export function RemoteConnectWizard({ onClose }: { onClose: () => void }) {
           <button className="remote-wizard-close" onClick={close} aria-label="close">✕</button>
         </header>
         <ol className="remote-wizard-steps">
-          {(["kind", "config", "connecting", "directory"] as Step[]).map((s, i) => (
+          {(stepKeysOrder.filter((k) => k !== "hostkey" || kind === "ssh") as Step[]).map((s, i) => (
             <li key={s} data-state={step === s ? "current" : stepIndex(step) > i ? "done" : "todo"}>
-              {t(stepKeys[i])}
+              {t(stepLabelKeys[s])}
             </li>
           ))}
         </ol>
@@ -241,7 +286,11 @@ export function RemoteConnectWizard({ onClose }: { onClose: () => void }) {
                   <span>{t("remote.token")}</span>
                   <input type="password" value={serverToken} onChange={(e) => setServerToken(e.target.value)} placeholder={t("remote.tokenPlaceholder")} />
                 </label>
-                <p className="remote-hint">{t("remote.serverHint")}</p>
+                <label className="remote-check">
+                  <input type="checkbox" checked={serverTLS} onChange={(e) => setServerTLS(e.target.checked)} />
+                  <span>{t("remote.useTLS")}</span>
+                </label>
+                <p className="remote-hint">{serverTLS ? t("remote.tlsHint") : t("remote.serverHint")}</p>
               </>
             ) : kind === "ssh" ? (
               <>
@@ -325,6 +374,22 @@ export function RemoteConnectWizard({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
+        {step === "hostkey" && (
+          <div className="remote-wizard-body">
+            <p className="remote-hint">{t("remote.hostkeyBody")}</p>
+            <div className="remote-fingerprint">
+              <code>{hostFingerprint}</code>
+            </div>
+            <p className="remote-hint">{t("remote.hostkeyHint")}</p>
+            <footer className="remote-wizard-foot">
+              <button className="remote-btn" onClick={() => setStep("config")}>{t("remote.back")}</button>
+              <button className="remote-btn primary" onClick={() => void trustAndConnect()} disabled={busy}>
+                {t("remote.trustAndConnect")}
+              </button>
+            </footer>
+          </div>
+        )}
+
         {step === "connecting" && (
           <div className="remote-wizard-body">
             <div className="remote-log" ref={logRef}>
@@ -378,5 +443,5 @@ export function RemoteConnectWizard({ onClose }: { onClose: () => void }) {
 }
 
 function stepIndex(s: Step): number {
-  return ["kind", "config", "connecting", "directory"].indexOf(s);
+  return stepKeysOrder.indexOf(s);
 }

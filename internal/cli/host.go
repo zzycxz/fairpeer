@@ -29,6 +29,7 @@ func hostCommand(args []string, version string) int {
 	fs := flag.NewFlagSet("host", flag.ContinueOnError)
 	listen := fs.String("listen", "", "serve over TCP on this address (Server connection kind) instead of stdio")
 	token := fs.String("token", "", "TCP mode: shared secret required from each client (mandatory with -listen)")
+	useTLS := fs.Bool("tls", false, "TCP mode: upgrade the listener to TLS with a self-signed certificate (pinned by the desktop on first connect)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -47,7 +48,11 @@ func hostCommand(args []string, version string) int {
 	}
 	var err error
 	if strings.TrimSpace(*listen) != "" {
-		err = remotehost.ListenServe(ctx, *listen, *token, factory, info, configureRemote, hasUsableProvider)
+		certDir := ""
+		if *useTLS {
+			certDir = filepath.Join(filepath.Dir(config.UserConfigPath()), "remote-host-tls")
+		}
+		err = remotehost.ListenServe(ctx, *listen, *token, certDir, factory, info, configureRemote, hasUsableProvider)
 	} else {
 		err = remotehost.Serve(ctx, os.Stdin, os.Stdout, factory, info, configureRemote, hasUsableProvider)
 	}

@@ -9,6 +9,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,6 +37,21 @@ func (p *serverProc) Wait() error {
 			return nil
 		}
 	}
+}
+
+// serverPinKey derives the TLS certificate-pin key for a server address.
+func serverPinKey(addr string) string {
+	return serverTokenKey(addr) + "_PIN"
+}
+
+// pinnedFingerprint reads the stored TLS pin ("" = not pinned yet).
+func (t *serverTransport) pinnedFingerprint(addr string) string {
+	if store := desktopSecretStore(); store != nil {
+		if v, ok, _ := store.Get(serverPinKey(addr)); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // serverTokenKey derives the secret-store key for a server address.
@@ -84,7 +100,11 @@ func (m *remoteHostManager) loadServerToken(addr string) string {
 	return ""
 }
 
-// Dial connects to the running server and performs the token handshake.
+// Dial connects to the running server and performs the token handshake. With
+// ref.TLS the connection upgrades to TLS: the self-signed leaf certificate is
+// fingerprint-pinned in the secret store on first connect and must match ever
+// after (a regenerated server certificate is an identity change — clear the
+// pin via ServerForget and re-confirm).
 func (t *serverTransport) Dial(ctx context.Context, ref RemoteRef) (io.Reader, io.Writer, remoteProcess, error) {
 	addr := strings.TrimSpace(ref.Target)
 	if addr == "" {
@@ -97,10 +117,42 @@ func (t *serverTransport) Dial(ctx context.Context, ref RemoteRef) (io.Reader, i
 	if token == "" {
 		return nil, nil, nil, fmt.Errorf("server: missing token")
 	}
-	d := net.Dialer{Timeout: 15 * time.Second}
-	conn, err := d.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("server: %w", err)
+	var conn net.Conn
+	if ref.TLS {
+		pinned := t.pinnedFingerprint(addr)
+		var presented string
+		tlsConn, err := tls.DialWithDialer(&net.Dialer{Timeout: 15 * time.Second}, "tcp", addr, &tls.Config{
+			// Self-signed server cert: identity comes from the fingerprint pin,
+			// not a CA chain.
+			InsecureSkipVerify: true,
+			VerifyConnection: func(cs tls.ConnectionState) error {
+				if cs.PeerCertificates == nil || len(cs.PeerCertificates) == 0 {
+					return fmt.Errorf("server: no certificate presented")
+				}
+				presented = sha256FingerprintHex(cs.PeerCertificates[0].Raw)
+				return nil
+			},
+		})
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("server: tls: %w", err)
+		}
+		if pinned != "" && pinned != presented {
+			tlsConn.Close()
+			return nil, nil, nil, fmt.Errorf("server: certificate fingerprint changed (pinned %s, got %s) — server identity changed; run ServerForget and re-confirm", shortFP(pinned), shortFP(presented))
+		}
+		if pinned == "" && presented != "" {
+			if store := desktopSecretStore(); store != nil {
+				_ = store.Set(serverPinKey(addr), presented)
+			}
+		}
+		conn = tlsConn
+	} else {
+		d := net.Dialer{Timeout: 15 * time.Second}
+		var err error
+		conn, err = d.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("server: %w", err)
+		}
 	}
 	auth, _ := json.Marshal(remotehost.AuthParams{Token: token})
 	if _, err := conn.Write(append(auth, '\n')); err != nil {
@@ -127,4 +179,13 @@ func (t *serverTransport) Dial(ctx context.Context, ref RemoteRef) (io.Reader, i
 	}
 	_ = conn.SetReadDeadline(time.Time{})
 	return br, conn, &serverProc{conn: conn}, nil
+}
+
+
+// shortFP renders a fingerprint prefix for error messages.
+func shortFP(fp string) string {
+	if len(fp) <= 12 {
+		return fp
+	}
+	return fp[:12] + "…"
 }

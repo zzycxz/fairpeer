@@ -4,12 +4,19 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/subtle"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -79,14 +86,27 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, factory Factory, info 
 // one-line token handshake. Sessions are shared across connections, so a
 // desktop can reconnect without losing state. An empty token refuses the
 // handshake (Server mode requires one).
-func ListenServe(ctx context.Context, addr, token string, factory Factory, info HelloInfo, configure ConfigureFunc, hasModel HasModelConfigFunc) error {
+//
+// certDir non-empty upgrades the listener to TLS with a self-signed
+// certificate persisted there (generated on first start, reused afterwards so
+// the desktop's pinned fingerprint survives restarts).
+func ListenServe(ctx context.Context, addr, token, certDir string, factory Factory, info HelloInfo, configure ConfigureFunc, hasModel HasModelConfigFunc) error {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return errors.New("listen mode requires --token")
 	}
+	var ln net.Listener
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
+	}
+	if certDir != "" {
+		tlsCfg, cerr := selfSignedTLSConfig(certDir)
+		if cerr != nil {
+			ln.Close()
+			return cerr
+		}
+		ln = tls.NewListener(ln, tlsCfg)
 	}
 	defer ln.Close()
 	go func() {
@@ -994,10 +1014,19 @@ func (h *host) sessionList(_ context.Context, raw json.RawMessage) (any, error) 
 		if err != nil {
 			continue
 		}
-		out.Sessions = append(out.Sessions, SessionEntry{
+		entry := SessionEntry{
 			Path:      filepath.Join(dir, e.Name()),
 			ModTimeMs: info.ModTime().UnixMilli(),
-		})
+		}
+		if meta, ok, _ := agent.LoadBranchMeta(entry.Path); ok {
+			entry.Turns = meta.CachedTurns
+			entry.TopicID = meta.TopicID
+			entry.TopicTitle = meta.TopicTitle
+			entry.WorkspaceRoot = meta.WorkspaceRoot
+			entry.Scope = meta.Scope
+			entry.Preview = meta.CachedPreview
+		}
+		out.Sessions = append(out.Sessions, entry)
 	}
 	// Newest first.
 	for i := 1; i < len(out.Sessions); i++ {
@@ -1118,4 +1147,48 @@ func (s *hostSink) roundTripAsk(e event.Event) {
 		wire[i] = event.AskAnswer{QuestionID: a.QuestionID, Selected: a.Selected}
 	}
 	s.answer(e.Ask.ID, wire)
+}
+
+
+// selfSignedTLSConfig loads (or generates on first start) a self-signed
+// server certificate from dir and returns the TLS config for the listener.
+func selfSignedTLSConfig(dir string) (*tls.Config, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	certPath := filepath.Join(dir, "remote-host-tls.crt")
+	keyPath := filepath.Join(dir, "remote-host-tls.key")
+	if _, err := tls.LoadX509KeyPair(certPath, keyPath); err != nil {
+		key, kerr := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if kerr != nil {
+			return nil, kerr
+		}
+		serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+		tmpl := x509.Certificate{
+			SerialNumber: serial,
+			Subject:      pkix.Name{CommonName: "fairpeer-remote-host"},
+			NotBefore:    time.Now().Add(-time.Hour),
+			NotAfter:     time.Now().AddDate(10, 0, 0),
+			KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+			ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		}
+		der, cerr := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+		if cerr != nil {
+			return nil, cerr
+		}
+		keyDER, _ := x509.MarshalECPrivateKey(key)
+		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+		keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+		if werr := os.WriteFile(certPath, certPEM, 0o600); werr != nil {
+			return nil, werr
+		}
+		if werr := os.WriteFile(keyPath, keyPEM, 0o600); werr != nil {
+			return nil, werr
+		}
+	}
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		return nil, err
+	}
+	return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}, nil
 }

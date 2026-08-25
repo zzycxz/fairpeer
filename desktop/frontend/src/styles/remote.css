@@ -130,3 +130,11 @@
 
 .remote-field-row { display: flex; gap: 10px; }
 .remote-field-row .remote-field { flex: 1; }
+
+.remote-fingerprint {
+  padding: 12px 14px; border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border-1, #262c38);
+  font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 13px;
+  user-select: text; word-break: break-all;
+}
+.remote-check { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
