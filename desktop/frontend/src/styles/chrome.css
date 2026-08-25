@@ -135,6 +135,7 @@
   height: var(--app-chrome-height);
   margin: -12px -10px 8px;
   padding: 0 6px 0 10px;
+  width: calc(100% + 20px);
   color: var(--fg);
   font-size: 15px;
   font-weight: 700;
@@ -158,6 +159,7 @@
 .sidebar__brandrow .app-chrome__panel-toggle {
   position: static;
   flex: 0 0 auto;
+  order: 1;
   width: 28px;
   height: 28px;
   border: 0;
@@ -731,7 +733,8 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 4px 10px 4px 18px; /* matched to topic indentation roughly */
+  margin-left: 4px;
+  padding: 4px 9px 4px 12px;
   border-radius: var(--r-s, 4px);
   font-size: 12.5px;
   cursor: pointer;
@@ -803,8 +806,8 @@
 }
 
 
-.sidebar-search { margin: 0 8px 8px; }
-.side-sessions__head { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 28px; background: transparent; border: none; padding: 2px 8px 0; color: var(--fg-faint); cursor: pointer; }
+.sidebar-search { margin: 0 0 8px; }
+.side-sessions__head { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 28px; background: transparent; border: none; padding: 2px 12px 0 8px; color: var(--fg-faint); cursor: pointer; }
 .side-sessions__head:hover .side-sessions__label { color: var(--fg-dim); }
 .side-sessions__chev--closed { transform: rotate(-90deg); color: var(--fg-faint); }
 .project-tree__topic-spinner { animation: tool-status-spin 0.8s linear infinite; }

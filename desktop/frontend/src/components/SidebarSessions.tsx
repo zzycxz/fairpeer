@@ -39,7 +39,25 @@ export function SidebarSessions({
   const [menuPoint, setMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [confirmPath, setConfirmPath] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(() => {
+    try {
+      const saved = localStorage.getItem("fairpeer.sidebarSessions.open");
+      return saved ? saved === "true" : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleOpen = () => {
+    setOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("fairpeer.sidebarSessions.open", String(next));
+      } catch {}
+      return next;
+    });
+  };
+
   const [draft, setDraft] = useState("");
 
   const closeMenu = () => {
@@ -88,7 +106,7 @@ export function SidebarSessions({
 
   return (
     <section className="side-sessions" aria-label={t("sidebar.sessionsLabel")}>
-      <button type="button" className="side-sessions__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+      <button type="button" className="side-sessions__head" onClick={toggleOpen} aria-expanded={open}>
         <span className="side-sessions__label">{t("sidebar.sessionsLabel")}</span>
         <ChevronDown size={12} className={open ? undefined : "side-sessions__chev--closed"} />
       </button>

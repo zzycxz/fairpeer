@@ -7,6 +7,10 @@
 /* When netdev is active, hide the standard layout body (same mechanism as
    .app--cowork). AppChrome stays visible for the palette/terminal toggles and
    the profile switcher; the netdev title bar rides its CENTER slot. */
+.app--netdev {
+  --sidebar-entry-content-inset: 12px;
+}
+
 .app--netdev .sidebar,
 .app--netdev .sidebar-resizer,
 .app--netdev .chat-pane,
@@ -37,7 +41,7 @@
      exactly like the coding sidebar. Column 3 is the dock's dedicated
      resizer track (grid-placed like .layout--workspace-open), column 4 the
      dock; both are `auto` so they collapse to 0 when unmounted. */
-  grid-template-columns: var(--sidebar-width, 250px) minmax(0, 1fr) auto auto;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) auto auto;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
@@ -163,7 +167,7 @@
   flex-direction: column;
   border-right: 1px solid var(--border-soft);
   background: var(--sidebar-bg);
-  padding: 12px 10px calc(12px + var(--bottom-bar-height, 36px));
+  padding: 14px 12px calc(8px + var(--bottom-bar-height, 36px));
   --wails-draggable: drag;
   user-select: none;
   min-height: 0;
@@ -177,6 +181,8 @@
   display: flex;
   flex-direction: column;
 }
+
+
 .ndv__rail button,
 .ndv__rail input,
 .ndv__rail select {
@@ -187,7 +193,6 @@
    .sidebar--collapsed gives (a 0px track + hidden element leaves no sliver). */
 .app--sidebar-collapsed .ndv__rail { display: none; }
 
-.ndv__sessions { min-height: 80px; max-height: 32%; overflow-y: auto; border-bottom: 1px solid var(--border-soft); }
 
 /* Section labels — the coding sidebar's grammar (side-sessions__label /
    project-tree header): 11px/600 uppercase, no brackets. */

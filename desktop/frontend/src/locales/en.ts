@@ -443,6 +443,7 @@ export const en = {
   "welcome.hintCommands": "commands",
   "welcome.hintFiles": "reference files",
   "welcome.hintSend": "send",
+  "welcome.remoteConnect": "远程连接… Open a WSL / Docker / SSH / Server workspace",
   "welcome.ex1": "Explain this codebase's architecture",
   "welcome.ex2": "Summarize the recent git changes",
   "welcome.ex3": "Where is the agent run loop, and what does it do?",

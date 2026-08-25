@@ -40,7 +40,6 @@ export function SidebarFooter({
     <nav className="footer__nav">
       <Tooltip
         label={imConnectionCount === 0 ? t("sidebar.imEmpty") : t("sidebar.im")}
-        fill
         side="top"
         disabled={tooltipDisabled}
       >
@@ -53,7 +52,7 @@ export function SidebarFooter({
           {imOnline && <span className="sidebar-im-dot" />}
         </button>
       </Tooltip>
-      <Tooltip label={t("sidebar.allHistory")} fill side="top" disabled={tooltipDisabled}>
+      <Tooltip label={t("sidebar.allHistory")} side="top" disabled={tooltipDisabled}>
         <button
           className="footer__navitem"
           type="button"
@@ -62,7 +61,7 @@ export function SidebarFooter({
           <History size={16} />
         </button>
       </Tooltip>
-      <Tooltip label={t("sidebar.trash")} fill side="top" disabled={tooltipDisabled}>
+      <Tooltip label={t("sidebar.trash")} side="top" disabled={tooltipDisabled}>
         <button
           className="footer__navitem"
           type="button"
@@ -71,7 +70,7 @@ export function SidebarFooter({
           <Trash2 size={16} />
         </button>
       </Tooltip>
-      <Tooltip label={t("topbar.settings")} fill side="top" disabled={tooltipDisabled}>
+      <Tooltip label={t("topbar.settings")} side="top" disabled={tooltipDisabled}>
         <button
           className="footer__navitem"
           type="button"

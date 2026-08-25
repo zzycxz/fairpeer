@@ -571,18 +571,17 @@ export function NetDevLayout({
         {/* Scroll lives BELOW the pinned brand row (the coding sidebar's
             structure: root never scrolls, brand row stays put). */}
         <div className="ndv__rail-scroll">
-        {searchNode}
-        <div className="ndv__section-row"><div className="ndv__section">诊断会话</div></div>
-        <div className="ndv__sessions">{sessionsNode}</div>
-        {/* 项目工作区 — the same ProjectTree node the coding/office sidebars
-            render (profile="netdev" partition: 运维 has its own project index,
-            empty until the user adds projects). Same left-nav grammar as the
-            coding view: search → 最近会话 → 项目工作区. */}
-        {projectTreeNode && (
-          <section className="sidebar__section sidebar__section--projects">
-            {projectTreeNode}
-          </section>
-        )}
+          {searchNode}
+          {sessionsNode}
+          {/* 项目工作区 — the same ProjectTree node the coding/office sidebars
+              render (profile="netdev" partition: 运维 has its own project index,
+              empty until the user adds projects). Same left-nav grammar as the
+              coding view: search → 最近会话 → 项目工作区. */}
+          {projectTreeNode && (
+            <section className="sidebar__section sidebar__section--projects" style={{ marginBottom: '8px', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              {projectTreeNode}
+            </section>
+          )}
         {/* 运维专属导航 — the pinned bottom-left group, mirroring the
             coding/office sidebars' bottom nav (编码偏好 / 办公偏好…). The
             device inventory itself lives in the right dock's 设备 tab;

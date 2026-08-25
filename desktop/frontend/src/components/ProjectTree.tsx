@@ -218,9 +218,24 @@ export function ProjectTree({
   const t = useT();
   const [tree, setTree] = useState<ProjectNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [workspaceExpanded, setWorkspaceExpanded] = useState(true);
+  const [workspaceExpanded, setWorkspaceExpanded] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`fairpeer.projectTree.workspaceExpanded.${profile}`);
+      return saved ? saved === "true" : true;
+    } catch {
+      return true;
+    }
+  });
+  const toggleWorkspace = useCallback(() => {
+    setWorkspaceExpanded(v => {
+      const next = !v;
+      try {
+        localStorage.setItem(`fairpeer.projectTree.workspaceExpanded.${profile}`, String(next));
+      } catch {}
+      return next;
+    });
+  }, [profile]);
   const [manuallyCollapsed, setManuallyCollapsed] = useState<Set<string>>(new Set());
-  const toggleWorkspace = useCallback(() => setWorkspaceExpanded(v => !v), []);
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
   // Unseen-activity markers (2026-08-18): a topic glows blue when it produced
   // output after we last opened it; opening clears it. Seeded once so existing

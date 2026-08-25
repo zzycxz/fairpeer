@@ -221,23 +221,13 @@ export function CoWorkLayout({
           </section>
         </div>
 
-        <section className="cowork-sidebar__group" style={{ marginBottom: '0px', marginTop: 'auto' }}>
+        <section className="cowork-sidebar__group" style={{ marginBottom: 'calc(8px + var(--bottom-bar-height, 36px))', marginTop: 'auto' }}>
           <button
             className={`cowork-sidebar__item ${preferenceOpen ? "cowork-sidebar__item--active" : ""}`}
             onClick={() => setPreferenceOpen(true)}
           >
             <SlidersHorizontal size={14} />
             <span>{t("cowork.preference") || "办公偏好"}</span>
-          </button>
-          <button
-            className={`cowork-sidebar__item ${activePanel === "calendarTask" ? "cowork-sidebar__item--active" : ""}`}
-            onClick={() => {
-              setActivePanel("calendarTask");
-              if (dockOnClose) dockOnClose();
-            }}
-          >
-            <CalendarDays size={14} />
-            <span>{t("cowork.calendarAndTasks")}</span>
           </button>
           <button
             className={`cowork-sidebar__item ${activePanel === "experts" ? "cowork-sidebar__item--active" : ""}`}
@@ -248,6 +238,16 @@ export function CoWorkLayout({
           >
             <Users size={14} />
             <span>{t("cowork.expert") || "专家团"}</span>
+          </button>
+          <button
+            className={`cowork-sidebar__item ${activePanel === "calendarTask" ? "cowork-sidebar__item--active" : ""}`}
+            onClick={() => {
+              setActivePanel("calendarTask");
+              if (dockOnClose) dockOnClose();
+            }}
+          >
+            <CalendarDays size={14} />
+            <span>{t("cowork.calendarAndTasks")}</span>
           </button>
           <button
             className={`cowork-sidebar__item ${activePanel === "rag" ? "cowork-sidebar__item--active" : ""}`}

@@ -19,25 +19,17 @@ export function Welcome({
   onPrompt,
   profile,
   onInsert,
+  onRemoteConnect,
 }: {
   onPrompt: (text: string) => void;
   profile?: "dev" | "cowork" | "netdev";
   onInsert?: (text: string) => void;
+  onRemoteConnect?: () => void;
 }) {
   const t = useT();
 
   // Dev profile: the classic 4 immediate-send examples.
   const devExamples = [t("welcome.ex1"), t("welcome.ex2"), t("welcome.ex3"), t("welcome.ex4")];
-
-  // Netdev profile: 运维 examples — plain-text strings (no locale key churn);
-  // each maps to a real netdev read-only capability (netdev_exec battery,
-  // inspection summary, mermaid topology drawing).
-  const netdevExamples = [
-    "core-sw-1 的 OSPF 邻居一直 down，帮我排查",
-    "看看全网设备的 CPU 和内存状态",
-    "把当前全网拓扑画成图",
-    "汇总今天的巡检结果",
-  ];
 
   // Cowork profile: 6 office starter bubbles (4 office + 2 generic). Each
   // references a real cowork capability so a first-time user discovers what the
@@ -54,7 +46,12 @@ export function Welcome({
 
   const isCowork = profile === "cowork";
   const isNetdev = profile === "netdev";
-  const examples = isCowork ? coworkExamples : isNetdev ? netdevExamples : devExamples;
+  
+  if (isNetdev) {
+    return null;
+  }
+
+  const examples = isCowork ? coworkExamples : devExamples;
   // Cowork bubbles fill the composer (editable before send); dev bubbles send
   // immediately (the original fast-start behavior). Fall back to onPrompt if the
   // cowork caller forgot to wire onInsert, so a click never dead-ends.
@@ -67,38 +64,25 @@ export function Welcome({
   };
 
   return (
-    <div className={`welcome welcome--brand${isCowork ? " welcome--cowork" : ""}${isNetdev ? " welcome--netdev" : ""}`}>
+    <div className={`welcome welcome--brand${isCowork ? " welcome--cowork" : ""}`}>
       <span className="welcome__brand">
         <img src={logoWordmark} className="welcome__brand-logo" alt="FairPeer" draggable={false} />
       </span>
-      <h2 className="welcome__title">{isNetdev ? "描述故障，我来诊断" : t("welcome.title")}</h2>
+      <h2 className="welcome__title">{t("welcome.title")}</h2>
       <div className="welcome__tag">
-        {isNetdev ? "只读诊断 · 写操作走人工审批的提案 · 全程审计" : t("welcome.tagline")}
+        {t("welcome.tagline")}
       </div>
 
       <div className="welcome__hints">
-        {isNetdev ? (
-          <>
-            <span>
-              <kbd>/</kbd> {t("welcome.hintCommands")}
-            </span>
-            <span>
-              <kbd>⏎</kbd> {t("welcome.hintSend")}
-            </span>
-          </>
-        ) : (
-          <>
-            <span>
-              <kbd>/</kbd> {t("welcome.hintCommands")}
-            </span>
-            <span>
-              <kbd>@</kbd> {t("welcome.hintFiles")}
-            </span>
-            <span>
-              <kbd>⏎</kbd> {t("welcome.hintSend")}
-            </span>
-          </>
-        )}
+        <span>
+          <kbd>/</kbd> {t("welcome.hintCommands")}
+        </span>
+        <span>
+          <kbd>@</kbd> {t("welcome.hintFiles")}
+        </span>
+        <span>
+          <kbd>⏎</kbd> {t("welcome.hintSend")}
+        </span>
       </div>
 
       <div className="welcome__examples">
@@ -108,6 +92,12 @@ export function Welcome({
           </button>
         ))}
       </div>
+
+      {onRemoteConnect && (
+        <button className="welcome__remote" onClick={onRemoteConnect}>
+          {t("welcome.remoteConnect")}
+        </button>
+      )}
     </div>
   );
 }

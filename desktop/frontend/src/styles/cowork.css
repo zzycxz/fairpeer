@@ -87,7 +87,7 @@
      the dock so the workspace-panel-resizer (a relative-positioned grid item,
      mirroring coding-mode) can be dragged to resize the dock. When the dock /
      resizer are not rendered the trailing auto tracks collapse to nothing. */
-  grid-template-columns: var(--sidebar-width, 260px) minmax(0, 1fr) var(--workspace-resizer-width, 8px) auto;
+  grid-template-columns: var(--sidebar-expanded-width, 260px) minmax(0, 1fr) var(--workspace-resizer-width, 8px) auto;
   /* chrome row + body row — mirrors .layout so the sidebar spans both. */
   grid-template-rows: var(--app-chrome-height) minmax(0, 1fr);
   min-height: 0;
@@ -154,10 +154,10 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  /* Same frame padding as the coding .sidebar (12px 10px) so the shared
+  /* Same frame padding as the coding .sidebar (14px 12px) so the shared
      .sidebar__brandrow's negative-margin full bleed lines up exactly; the
      bottom bar reserve lives on __scroll like the coding sections. */
-  padding: 12px 10px 0;
+  padding: 14px 12px 0;
   /* Full-height sidebar (spans the chrome row) = titlebar drag strip, exactly
      like the coding .sidebar; interactive children opt out below. */
   --wails-draggable: drag;
@@ -180,9 +180,6 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  /* Reserve the sidebar-only bottom bar's strip — without this the pinned
-     办公偏好/日历/专家团/知识库 group sits under the bar (2026-08-19). */
-  padding-bottom: calc(8px + var(--bottom-bar-height, 36px));
 }
 
 :root[data-theme-style] .cowork-sidebar .sidebar__nav {
@@ -194,7 +191,8 @@
    session/tree content must scroll inside its own section instead of
    squeezing this group out of view (regression 2026-08-18). */
 .sidebar .cowork-sidebar__group,
-.ndv__rail .cowork-sidebar__group {
+.ndv__rail .cowork-sidebar__group,
+.cowork-sidebar .cowork-sidebar__group {
   flex: 0 0 auto;
   position: relative;
   z-index: var(--z-local-raised);
@@ -711,7 +709,18 @@
   border-color: var(--fg-faint);
 }
 
-:root[data-theme-style] .cowork-sidebar__group,
+:root[data-theme-style] .cowork-sidebar__group {
+  margin-bottom: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  /* Create 1px hairline inner dividers */
+  gap: 1px;
+  background: var(--border-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
 :root[data-theme-style] .cowork-dock__group {
   margin-bottom: 12px;
 }
@@ -765,20 +774,21 @@
   position: relative;
   width: 100%;
   min-width: 0;
-  height: 36px;
+  height: 32px;
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 0 12px;
+  justify-content: center;
+  gap: 6px;
+  padding: 0;
   border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
+  border-radius: 0;
+  background: var(--sidebar-bg);
   color: var(--fg-dim);
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 :root[data-theme-style] .cowork-sidebar__item:hover {
@@ -787,7 +797,8 @@
 }
 
 :root[data-theme-style] .cowork-sidebar__item:active {
-  transform: scale(0.97);
+  transform: none;
+  background: color-mix(in srgb, var(--fg) 6%, var(--sidebar-bg));
 }
 
 :root[data-theme-style] .cowork-sidebar__item--active {
@@ -4469,7 +4480,7 @@
   position: relative;
   display: flex;
   flex: 1;
-  order: -1;
+  order: 2;
   align-items: center;
   height: 32px;
   margin: 0;
@@ -4507,7 +4518,7 @@
 }
 .app-chrome__profile-seg-item--active,
 .app-chrome__profile-seg-item--active:hover {
-  background: var(--bg-elev);
+  background: var(--bg);
   color: var(--accent);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
@@ -4665,8 +4676,10 @@
 .global-bottom-bar .footer__nav {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding-left: 16px;
+  justify-content: center;
+  gap: 24px;
+  flex: 1;
+  padding: 0 24px;
 }
 
 /* Ensure tooltip triggers perfectly wrap the buttons to catch hover events */

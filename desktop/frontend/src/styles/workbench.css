@@ -1215,6 +1215,11 @@
   border-right: 1px solid var(--border-soft);
 }
 
+:root[data-theme-style] .sidebar__brandrow {
+  margin: -14px -12px 8px;
+  width: calc(100% + 24px);
+}
+
 :root[data-theme-style] .sidebar__nav {
   padding-bottom: 0;
 }
@@ -1347,20 +1352,23 @@
   margin: 0;
   padding: 0 var(--sidebar-entry-content-inset);
   gap: 9px;
-  border: 1px dashed transparent;
-  border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--bg-soft) 82%, var(--bg-elev));
+  border: 1px dashed var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--fg-faint);
   font-size: 13px;
   line-height: 1.45;
+  transition: all 0.15s ease;
 }
 
 :root[data-theme-style] .project-tree__search:hover {
-  border-color: var(--border-strong, var(--border));
+  border: 1px solid var(--border-strong, var(--border));
+  background: var(--bg-hover, rgba(128, 128, 128, 0.08));
 }
 
 :root[data-theme-style] .project-tree__search:focus-within {
-  border: 1px solid var(--accent);
+  border-color: var(--accent);
+  background: var(--bg);
 }
 
 :root[data-theme-style] .project-tree__header {
@@ -1383,8 +1391,14 @@
   display: none;
 }
 
-/* Match the "最近会话" label to the themed project-tree header title so both
-   sidebar section headings read as the same visual weight. */
+/* Match the "最近会话" label and container to the themed project-tree header title so both
+   sidebar section headings read as the same visual weight and height. */
+:root[data-theme-style] .side-sessions__head {
+  height: 28px;
+  min-height: 28px;
+  padding: 4px 12px 0 8px;
+}
+
 :root[data-theme-style] .side-sessions__label {
   font-size: 13px;
   font-weight: 600;
@@ -1461,7 +1475,7 @@
 
 :root[data-theme-style] .project-tree__topic {
   min-height: 28px;
-  margin-left: 10px;
+  margin-left: 4px;
   margin-right: 0;
   border: 0;
   border-radius: var(--project-tree-row-radius);
@@ -1495,7 +1509,7 @@
 
 :root[data-theme-style] .project-tree__topic-main {
   min-height: 28px;
-  padding-left: 16px !important;
+  padding-left: 12px !important;
   padding-right: 9px;
 }
 
@@ -1549,6 +1563,10 @@
   gap: 10px;
   background: color-mix(in srgb, var(--chat-bg) 96%, var(--bg-elev));
   border-bottom: 1px solid var(--border-soft);
+}
+
+:root[data-theme-style] .topicbar__identity {
+  padding-left: 8px;
 }
 
 :root[data-theme-style] .topicbar__action-btn--label {

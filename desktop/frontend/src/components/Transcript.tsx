@@ -150,6 +150,7 @@ export function Transcript({
   live,
   footerHeight = 0,
   onPrompt,
+  onRemoteConnect,
   onRewind,
   checkpoints = [],
   actionPending = false,
@@ -164,6 +165,7 @@ export function Transcript({
   live?: LiveStream;
   footerHeight?: number;
   onPrompt: (text: string) => void;
+  onRemoteConnect?: () => void;
   onRewind?: (turn: number, scope: string) => void;
   checkpoints?: CheckpointMeta[];
   actionPending?: boolean;
@@ -563,7 +565,7 @@ export function Transcript({
       ref={scrollRef}
       onScroll={onScroll}
     >
-      {empty && <Welcome onPrompt={onPrompt} profile={profile} onInsert={onInsert} />}
+      {empty && <Welcome onPrompt={onPrompt} profile={profile} onInsert={onInsert} onRemoteConnect={onRemoteConnect} />}
 
       {!empty && showQuestionNav && (
         <QuestionJumpBar questions={questions} onJump={handleJumpToQuestion} />

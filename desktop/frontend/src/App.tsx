@@ -42,7 +42,7 @@ import { AskCard } from "./components/AskCard";
 import { ClearContextCard } from "./components/ClearContextCard";
 import { SidebarFooter } from "./components/SidebarFooter";
 import { TerminalPanel, loadTerminalOpen, saveTerminalOpen } from "./components/TerminalPanel";
-import { ContextMenu } from "./components/ContextMenu";
+import { ContextMenu, type ContextMenuPoint } from "./components/ContextMenu";
 import { LoopPanel } from "./components/loop/LoopPanel";
 import { ProfileSegmented } from "./components/AppChrome";
 import { SideSessionPane } from "./components/SideSessionPane";
@@ -826,6 +826,7 @@ export default function App() {
   // clearing the key mid-session is the Settings panel's job, not the gate's.
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
   const [remoteWizardOpen, setRemoteWizardOpen] = useState(false);
+  const [newTaskMenuPoint, setNewTaskMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTab | null>(null);
   const [settingsPayload, setSettingsPayload] = useState<string | null>(null);
   const [startupUpdateChecksEnabled, setStartupUpdateChecksEnabled] = useState<boolean | null>(null);
@@ -2793,6 +2794,7 @@ export default function App() {
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const cmds: PaletteItem[] = [
       { id: "cmd-new", group: t("palette.group.commands"), title: t("palette.cmd.newSession"), icon: <SquarePen size={15} />, compact: true, keywords: ["new", "新建"], run: () => void handleNewTab() },
+      { id: "cmd-remote-connect", group: t("palette.group.commands"), title: t("remote.trigger"), icon: <Server size={15} />, compact: true, keywords: ["remote", "ssh", "wsl", "docker", "远程"], run: () => setRemoteWizardOpen(true) },
       { id: "cmd-history", group: t("palette.group.commands"), title: t("palette.cmd.history"), icon: <History size={15} />, compact: true, keywords: ["history", "历史"], run: () => void openAllHistory() },
       { id: "cmd-trash", group: t("palette.group.commands"), title: t("palette.cmd.trash"), icon: <Trash2 size={15} />, compact: true, keywords: ["trash", "回收站"], run: () => void openTrash() },
       { id: "cmd-settings", group: t("palette.group.commands"), title: t("palette.cmd.settings"), icon: <SettingsIcon size={15} />, compact: true, keywords: ["settings", "设置"], run: () => setSettingsTarget("general") },
@@ -3133,6 +3135,7 @@ ${t("remote.uncPromptBody", { path: picked })}
           live={state.live}
           footerHeight={footerHeight}
           onPrompt={send}
+          onRemoteConnect={() => setRemoteWizardOpen(true)}
           onRewind={handleMessageAction}
           checkpoints={state.checkpoints}
           actionPending={state.messageAction != null}
@@ -3315,13 +3318,39 @@ ${t("remote.uncPromptBody", { path: picked })}
       <button
         type="button"
         className="sidebar-new-session-bar-btn"
-        onClick={() => { void handleNewTab(); }}
+        onClick={(event) => {
+          // ZCode-style new-task flow: offer local vs remote from the primary
+          // entry instead of only opening a blank local session.
+          const rect = event.currentTarget.getBoundingClientRect();
+          setNewTaskMenuPoint({ left: rect.left, top: rect.bottom + 6 });
+        }}
         aria-label={t("topbar.newTask" as never)}
         title={t("topbar.newTask" as never)}
       >
         <Plus size={14} />
         <span>{t("topbar.newTask" as never)}</span>
       </button>
+      <ContextMenu
+        open={newTaskMenuPoint !== null}
+        point={newTaskMenuPoint}
+        onClose={() => setNewTaskMenuPoint(null)}
+        ariaLabel={t("topbar.newTask" as never)}
+        items={[
+          {
+            key: "new-session",
+            icon: <Plus size={14} />,
+            label: t("topbar.newSession"),
+            title: "Ctrl+N",
+            onSelect: () => { setNewTaskMenuPoint(null); void handleNewTab(); },
+          },
+          {
+            key: "remote-connect",
+            icon: <Server size={14} />,
+            label: t("remote.trigger"),
+            onSelect: () => { setNewTaskMenuPoint(null); setRemoteWizardOpen(true); },
+          },
+        ]}
+      />
       <label className="project-tree__search sidebar-search" ref={sidebarSearchRef}>
         <span className="sidebar-search__prompt" aria-hidden="true">❯</span>
         <input
