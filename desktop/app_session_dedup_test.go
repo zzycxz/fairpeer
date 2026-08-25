@@ -125,6 +125,7 @@ func TestEnsureBlankTabOpensExistingSidebarBlankTopic(t *testing.T) {
 		t.Fatalf("global topics length = %d, want 0 (retired): %v", len(topics), topics)
 	}
 	home := profileHomeRoot("dev")
+	seedTopicTurn(t, "project", home, topic.ID, "dev")
 	nodes := app.ListProjectTree("dev")
 	found := false
 	if project := findTreeProject(nodes, home); project != nil {

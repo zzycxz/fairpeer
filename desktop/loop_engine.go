@@ -31,7 +31,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/zzycxz/fairpeer/internal/config"
-	"github.com/zzycxz/fairpeer/internal/control"
 	"github.com/zzycxz/fairpeer/internal/proc"
 )
 
@@ -223,7 +222,7 @@ func (a *App) setLoopRun(run *loopRun) {
 
 // ── execution ────────────────────────────────────────────────────────────────
 
-func (a *App) loopExecute(run *loopRun, ctrl *control.Controller) {
+func (a *App) loopExecute(run *loopRun, ctrl tabSession) {
 	cfg := run.status.Config
 	defer func() {
 		run.mu.Lock()
@@ -349,7 +348,7 @@ func (a *App) loopExecute(run *loopRun, ctrl *control.Controller) {
 
 // loopWaitTurn blocks until the controller's turn ends, the stop signal
 // arrives, or the per-round timeout trips. Returns false when stopped.
-func (a *App) loopWaitTurn(run *loopRun, ctrl *control.Controller) bool {
+func (a *App) loopWaitTurn(run *loopRun, ctrl tabSession) bool {
 	// Give the turn a moment to register as running before we poll for idle.
 	time.Sleep(2 * time.Second)
 	deadline := time.Now().Add(loopRoundTimeout)

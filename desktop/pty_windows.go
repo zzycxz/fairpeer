@@ -14,6 +14,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -50,9 +51,11 @@ type ptySession struct {
 	cols, rows int
 }
 
-// newPTY creates a pseudoconsole, spawns cmd.exe attached to it, and starts a
-// background goroutine that pumps output to the caller-provided channel.
-func newPTY(cols, rows int) (*ptySession, error) {
+// newPTY creates a pseudoconsole, spawns cmd.exe (or the given raw command
+// line — e.g. "wsl.exe -d Ubuntu --cd /home/me/proj" for a remote tab's
+// bridged terminal) attached to it, and starts a background goroutine that
+// pumps output to the caller-provided channel.
+func newPTY(cols, rows int, commandLine string) (*ptySession, error) {
 	if cols <= 0 {
 		cols = 120
 	}
@@ -116,13 +119,23 @@ func newPTY(cols, rows int) (*ptySession, error) {
 		return nil, fmt.Errorf("attribute update: %w", err)
 	}
 
-	// Spawn cmd.exe attached to the pseudoconsole via StartupInfoEx.
+	// Spawn the shell attached to the pseudoconsole via StartupInfoEx. An
+	// empty commandLine keeps the historical plain cmd.exe; a custom line
+	// (remote tabs) is resolved through the shell-less CreateProcess command
+	// line, so the executable must be findable on PATH (wsl.exe always is).
 	siEx := &windows.StartupInfoEx{}
 	siEx.Cb = uint32(unsafe.Sizeof(*siEx))
 	siEx.ProcThreadAttributeList = attrList.List()
 	pi := &windows.ProcessInformation{}
-	cmdPath, _ := windows.UTF16PtrFromString(`cmd.exe`)
-	cmdArgs, _ := windows.UTF16PtrFromString(`cmd.exe`)
+	var cmdPath *uint16
+	cmdLine := strings.TrimSpace(commandLine)
+	if cmdLine == "" {
+		cmdLine = `cmd.exe`
+	} else {
+		// lpApplicationName must stay nil for a mixed command line.
+		cmdPath = nil
+	}
+	cmdArgs, _ := windows.UTF16PtrFromString(cmdLine)
 	err = windows.CreateProcess(
 		cmdPath, cmdArgs, nil, nil, false,
 		windows.EXTENDED_STARTUPINFO_PRESENT,
@@ -236,7 +249,11 @@ type ptyManager struct {
 var ptys = &ptyManager{sessions: map[int]*ptySession{}}
 
 func (m *ptyManager) create(cols, rows int) (int, error) {
-	s, err := newPTY(cols, rows)
+	return m.createCmd(cols, rows, "")
+}
+
+func (m *ptyManager) createCmd(cols, rows int, commandLine string) (int, error) {
+	s, err := newPTY(cols, rows, commandLine)
 	if err != nil {
 		return 0, err
 	}
@@ -275,6 +292,55 @@ func (m *ptyManager) kill(id int) {
 // PTYCreate spawns a new pseudoconsole running cmd.exe and returns its id.
 func (a *App) PTYCreate(cols, rows int) (int, error) {
 	return ptys.create(cols, rows)
+}
+
+// PTYCreateForTab spawns the terminal a tab's workspace calls for: cmd.exe
+// locally, or `wsl.exe -d <distro> --cd <root>` for a remote (WSL) tab, so the
+// integrated terminal lands inside the same environment the agent works in
+// without any remote PTY protocol.
+func (a *App) PTYCreateForTab(tabID string, cols, rows int) (int, error) {
+	a.mu.RLock()
+	tab := a.tabByIDLocked(tabID)
+	a.mu.RUnlock()
+	if tab == nil || tab.Remote == nil {
+		return ptys.create(cols, rows)
+	}
+	ref := *tab.Remote
+	var parts []string
+	switch ref.Kind {
+	case "wsl":
+		parts = []string{"wsl.exe", "-d", ref.Target}
+		if u := strings.TrimSpace(ref.User); u != "" {
+			parts = append(parts, "-u", u)
+		}
+		if root := strings.TrimSpace(tab.WorkspaceRoot); root != "" {
+			parts = append(parts, "--cd", root)
+		}
+	case "docker":
+		parts = []string{"docker", "exec", "-it", ref.Target, "sh"}
+		if root := strings.TrimSpace(tab.WorkspaceRoot); root != "" {
+			parts = append(parts, "-c", "cd "+root+" && exec sh")
+		}
+	case "ssh":
+		host, port := splitSSHTarget(ref.Target)
+		parts = []string{"ssh", "-o", "BatchMode=yes"}
+		if u := strings.TrimSpace(ref.User); u != "" {
+			parts = append(parts, u+"@"+host)
+		} else {
+			parts = append(parts, host)
+		}
+		if port != "" {
+			parts = append(parts, "-p", port)
+		}
+		if root := strings.TrimSpace(tab.WorkspaceRoot); root != "" {
+			parts = append(parts, "cd "+root+" && exec $SHELL -l")
+		} else {
+			parts = append(parts, "$SHELL -l")
+		}
+	default:
+		return ptys.create(cols, rows)
+	}
+	return ptys.createCmd(cols, rows, strings.Join(parts, " "))
 }
 
 // PTYWrite sends bytes to the pseudoconsole's stdin.

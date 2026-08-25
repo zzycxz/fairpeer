@@ -21,7 +21,7 @@
   --app-chrome-height: 38px;
   --topicbar-height: 36px;
   --statusbar-height: 0px;
-  --chrome-toggle-size: 42px;
+  --chrome-toggle-size: 32px;
   --chrome-left-safe-offset: 0px;
   /* Chrome sits in column 2 (right of the sidebar), so the left toggle starts
      at the chrome's own left edge. Narrow-window mode re-points this var. */
@@ -41,7 +41,7 @@
 
 .app--darwin .layout {
   --app-chrome-height: 44px;
-  --chrome-toggle-size: 36px;
+  --chrome-toggle-size: 32px;
   --chrome-left-safe-offset: 112px;
   transition:
     grid-template-columns 0.28s cubic-bezier(0.2, 0.72, 0.2, 1),
@@ -131,10 +131,10 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 5px;
   height: var(--app-chrome-height);
-  margin: -12px -10px 10px;
-  padding: 0 6px 0 14px;
+  margin: -12px -10px 8px;
+  padding: 0 6px 0 10px;
   color: var(--fg);
   font-size: 15px;
   font-weight: 700;
@@ -185,37 +185,31 @@
 /* ── workspace pill (design A, 2026-08-19) ── */
 .workspace-pill {
   min-width: 0;
-  max-width: 60%;
+  flex: 1 1 auto;
+  max-width: none;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 26px;
   padding: 0 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--fg-faint) 5%, transparent);
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs); /* sharp corners */
+  background: color-mix(in srgb, var(--fg-faint) 12%, transparent);
   color: var(--fg);
   font-size: 12px;
-  font-weight: 620;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
+  transition: all 0.12s ease-out;
 }
-.workspace-pill:hover {
-  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
-  border-color: var(--accent);
+.workspace-pill:hover, .workspace-pill--open {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev));
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: color-mix(in srgb, var(--accent) 90%, var(--fg)); /* subtle accent tint on text */
 }
-.workspace-pill--empty {
-  border-style: dashed;
-  color: var(--fg-faint);
-  font-weight: 560;
+.workspace-pill:hover .workspace-pill__chev, .workspace-pill--open .workspace-pill__chev {
+  color: var(--accent);
 }
-.workspace-pill--static {
-  cursor: default;
-}
-.workspace-pill--static:hover {
-  border-color: var(--border-soft);
-  background: color-mix(in srgb, var(--fg-faint) 5%, transparent);
-}
+
 .workspace-pill__dot {
   flex: 0 0 7px;
   width: 7px;
@@ -229,13 +223,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.workspace-pill__chev { color: var(--fg-faint); flex: 0 0 auto; }
+.workspace-pill__chev { color: var(--fg-faint); flex: 0 0 auto; margin-left: auto; }
 .workspace-pill__menu-dot {
   display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-pill);
-  background: var(--fg-faint);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  opacity: 0.5;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
 /* Ghost icon button (new session) — same grammar as the collapse toggle. */
@@ -726,15 +721,46 @@
 
 
 /* ── sidebar recent sessions (ui-redesign §4-B4) ── */
-.side-sessions { padding: 2px 0 4px; }
+.side-sessions { margin-top: 12px; padding: 0 0 8px; }
 /* Head mirrors .project-tree__header / -title so both sidebar groups read as
    one family (user direction 2026-08-18). */
-.side-sessions__label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-faint); user-select: none; }
+.side-sessions__label { font-size: 13px; font-weight: 650; color: var(--fg-faint); user-select: none; }
 .side-sessions__empty { font-size: 12px; color: var(--fg-faint); padding: 2px 12px 6px; }
-.side-sessions__row { display: flex; align-items: center; gap: 7px; padding: 4px 10px 4px 12px; border-radius: var(--radius-sm); font-size: 12.5px; cursor: pointer; color: var(--fg-dim); }
-.side-sessions__row:hover { background: var(--sidebar-hover); color: var(--fg); }
-.side-sessions__row--active { color: var(--fg); }
-.side-sessions__dot { width: 5px; height: 5px; border-radius: var(--radius-pill); background: var(--accent); flex: 0 0 auto; }
+.side-sessions__row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px 4px 18px; /* matched to topic indentation roughly */
+  border-radius: var(--r-s, 4px);
+  font-size: 12.5px;
+  cursor: pointer;
+  color: var(--fg-dim);
+  min-height: 28px;
+  border: 1px solid transparent;
+}
+.side-sessions__row:hover {
+  background: var(--sidebar-hover);
+  color: var(--fg);
+}
+.side-sessions__row--active {
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-elev));
+  color: var(--fg);
+}
+.side-sessions__row--active::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent) 88%, var(--accent));
+  pointer-events: none;
+}
+.side-sessions__row--active .side-sessions__title {
+  font-weight: 600;
+}
 .side-sessions__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-sessions__age { font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
 .side-sessions__more { display: none; align-items: center; border: none; background: transparent; color: var(--fg-dim); padding: 2px; border-radius: var(--radius-sm); cursor: pointer; flex: 0 0 auto; }
@@ -744,16 +770,58 @@
 .side-sessions__rename { width: 100%; font: inherit; font-size: 12.5px; padding: 4px 8px; margin: 2px 0; border-radius: var(--radius-sm); border: 1px solid var(--accent); background: var(--bg-elev); color: var(--fg); outline: none; }
 /* Scrollable recent box: up to 20 rows, viewport ~6 rows tall (2026-08-19
    density pass) — the rest scrolls. */
-.side-sessions__scroll { max-height: 166px; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 2px; }
+.side-sessions__scroll { max-height: 166px; overflow-y: auto; overscroll-behavior: contain; padding: 8px 0 2px; }
 .sidebar-files-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; border: none; background: transparent; color: var(--fg-faint); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; padding: 8px 12px 4px; cursor: pointer; user-select: none; }
 .sidebar-files-toggle:hover { color: var(--fg-dim); }
 .sidebar-files-toggle__chev--closed { transform: rotate(-90deg); }
 
-.sidebar-search { margin: 0 8px 8px; }
+.sidebar-new-session-bar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex: 0 0 28px;
+  box-sizing: border-box;
+  gap: 6px;
+  margin: 0 var(--project-tree-edge-gap, 0px) 12px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--fg-dim);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.sidebar-new-session-bar-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.sidebar-new-session-bar-btn:active {
+  background: var(--bg-elev);
+}
 
-.side-sessions__head { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 20px; background: transparent; border: none; padding: 4px 8px 0; color: var(--fg-faint); cursor: pointer; }
+
+.sidebar-search { margin: 0 8px 8px; }
+.side-sessions__head { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 28px; background: transparent; border: none; padding: 2px 8px 0; color: var(--fg-faint); cursor: pointer; }
 .side-sessions__head:hover .side-sessions__label { color: var(--fg-dim); }
 .side-sessions__chev--closed { transform: rotate(-90deg); color: var(--fg-faint); }
 .project-tree__topic-spinner { animation: tool-status-spin 0.8s linear infinite; }
 .project-tree__topic-status { display: inline-flex; align-items: center; }
 .project-tree__topic-unseen { display: inline-block; width: 6px; height: 6px; border-radius: var(--radius-pill); background: #4c8dff; flex: 0 0 auto; }
+
+/* Remote-workspace badge (TabBar): kind label + offline state. */
+.tabbar__remote-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  letter-spacing: 0.3px;
+  background: rgba(124, 134, 150, 0.22);
+  color: var(--text-2, #9aa4b5);
+}
+.tabbar__remote-badge--offline {
+  background: rgba(229, 72, 77, 0.16);
+  color: #f0878a;
+  text-decoration: line-through;
+}

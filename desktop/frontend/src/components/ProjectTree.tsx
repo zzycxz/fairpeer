@@ -4,7 +4,9 @@
 // new topic.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ClipboardCopy, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FileDown, FileImage, FileJson, FileText, FolderOpen, GitBranch, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare, Users, Loader2 } from "lucide-react";
+import { Archive, ClipboardCopy, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FileDown, FileImage, FileJson, FileText, FolderOpen, GitBranch, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare, Users, Loader2,
+  Server,
+} from "lucide-react";
 import { asArray } from "../lib/array";
 import { compactSessionAge } from "./SidebarSessions";
 import { app } from "../lib/bridge";
@@ -34,6 +36,7 @@ interface ProjectTreeProps {
   onOpenExpertSession?: (teamId: string, teamName: string) => Promise<void> | void;
   onOpenProjectHistory: (scope: "project", workspaceRoot: string) => Promise<void> | void;
   onAddProject: () => Promise<void>;
+  onOpenRemote?: () => void;
   onCreateTopic?: (scope: string, workspaceRoot: string) => Promise<void> | void;
   onRenameTopic?: (topicId: string, title: string) => Promise<void> | void;
   // Session actions relocated from the topicbar into the topic context menu
@@ -47,6 +50,9 @@ interface ProjectTreeProps {
   onCopyTopicPath?: (topicId: string) => Promise<void> | void;
   onTopicsChanged?: () => Promise<void> | void;
   refreshSignal?: number;
+  // Called when the tree data is loaded/refreshed, passing the set of topic IDs
+  // currently visible in the project tree. Used to dedupe the "Recent" list.
+  onTopicIdsChanged?: (topicIds: Set<string>) => void;
 }
 
 type ProjectTreeImTopicSource = {
@@ -103,11 +109,6 @@ function topicStatusLabel(node: ProjectNode, t: Translator): string {
 
 type ProjectDropPosition = "before" | "after";
 
-type CollapseSnapshot = {
-  expanded: Set<string>;
-  manuallyCollapsed: Set<string>;
-};
-
 function projectOrderKey(node: ProjectNode): string {
   if (node.kind === "project" && node.root) return node.root;
   return "";
@@ -119,18 +120,6 @@ function projectRoots(nodes: ProjectNode[]): string[] {
     .filter((key) => key !== "");
 }
 
-function collapsibleFolderKeys(nodes: ProjectNode[], depth = 0): string[] {
-  const keys: string[] = [];
-  for (const node of nodes) {
-    if (!node) continue;
-    const children = asArray(node.children);
-    if ((node.kind === "project" || node.kind === "expert_folder") && children.length > 0) {
-      keys.push(projectNodeKey(node, depth));
-    }
-    keys.push(...collapsibleFolderKeys(children, depth + 1));
-  }
-  return keys;
-}
 
 function reorderedProjectRoots(nodes: ProjectNode[], draggedRoot: string, targetRoot: string, position: ProjectDropPosition): string[] {
   const roots = projectRoots(nodes);
@@ -208,6 +197,7 @@ export function ProjectTree({
   onOpenExpertSession,
   onOpenProjectHistory,
   onAddProject,
+  onOpenRemote,
   onCreateTopic,
   onRenameTopic,
   onCopyActiveSession,
@@ -216,11 +206,14 @@ export function ProjectTree({
   onCopyTopicPath,
   onTopicsChanged,
   refreshSignal,
+  onTopicIdsChanged,
 }: ProjectTreeProps) {
   const t = useT();
   const [tree, setTree] = useState<ProjectNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [workspaceExpanded, setWorkspaceExpanded] = useState(true);
   const [manuallyCollapsed, setManuallyCollapsed] = useState<Set<string>>(new Set());
+  const toggleWorkspace = useCallback(() => setWorkspaceExpanded(v => !v), []);
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
   // Unseen-activity markers (2026-08-18): a topic glows blue when it produced
   // output after we last opened it; opening clears it. Seeded once so existing
@@ -278,7 +271,6 @@ export function ProjectTree({
   const [confirmRemoveProject, setConfirmRemoveProject] = useState<string | null>(null);
   const [dragProjectRoot, setDragProjectRoot] = useState<string | null>(null);
   const [dropProject, setDropProject] = useState<{ root: string; position: ProjectDropPosition } | null>(null);
-  const [collapseSnapshot, setCollapseSnapshot] = useState<CollapseSnapshot | null>(null);
   const [platform, setPlatform] = useState("");
   const creatingRef = useRef(false);
   const manuallyCollapsedRef = useRef(manuallyCollapsed);
@@ -314,10 +306,22 @@ export function ProjectTree({
         }
         return next;
       });
+      // Extract topic IDs for deduplication with the "Recent" list.
+      if (onTopicIdsChanged) {
+        const ids = new Set<string>();
+        const walk = (nodes: ProjectNode[]) => {
+          for (const n of nodes) {
+            if (n.topicId) ids.add(n.topicId);
+            if (n.children) walk(asArray(n.children));
+          }
+        };
+        walk(list);
+        onTopicIdsChanged(ids);
+      }
     } catch {
       /* bridge unavailable */
     }
-  }, [profile, t]);
+  }, [profile, t, onTopicIdsChanged]);
 
   useEffect(() => {
     manuallyCollapsedRef.current = manuallyCollapsed;
@@ -352,60 +356,6 @@ export function ProjectTree({
       return next;
     });
   };
-
-  const folderKeys = useMemo(() => collapsibleFolderKeys(tree), [tree]);
-  const searchActive = query.trim().length > 0;
-  const hasExpandedFolders = !searchActive && folderKeys.some((key) => expanded.has(key));
-  const canRestoreCollapsedView = collapseSnapshot !== null;
-  const canToggleCollapsedView = !searchActive && folderKeys.length > 0 && (hasExpandedFolders || canRestoreCollapsedView);
-  const collapseToggleLabel = t(canRestoreCollapsedView ? "projectTree.restoreCollapsedTooltip" : "projectTree.collapseAllTooltip");
-
-  const toggleCollapsedView = useCallback(() => {
-    if (searchActive || folderKeys.length === 0) return;
-    if (collapseSnapshot) {
-      const currentFolderKeys = new Set(folderKeys);
-      setExpanded(() => {
-        const next = new Set<string>();
-        for (const key of collapseSnapshot.expanded) {
-          if (currentFolderKeys.has(key)) next.add(key);
-        }
-        return next;
-      });
-      updateManuallyCollapsed(() => {
-        const next = new Set<string>();
-        for (const key of collapseSnapshot.manuallyCollapsed) {
-          if (currentFolderKeys.has(key)) next.add(key);
-        }
-        return next;
-      });
-      setCollapseSnapshot(null);
-      return;
-    }
-    if (!hasExpandedFolders) return;
-    setCollapseSnapshot({
-      expanded: new Set(expanded),
-      manuallyCollapsed: new Set(manuallyCollapsed),
-    });
-    setExpanded((prev) => {
-      let changed = false;
-      const next = new Set(prev);
-      for (const key of folderKeys) {
-        if (next.delete(key)) changed = true;
-      }
-      return changed ? next : prev;
-    });
-    updateManuallyCollapsed((prev) => {
-      let changed = false;
-      const next = new Set(prev);
-      for (const key of folderKeys) {
-        if (!next.has(key)) {
-          next.add(key);
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [collapseSnapshot, expanded, folderKeys, hasExpandedFolders, manuallyCollapsed, searchActive, updateManuallyCollapsed]);
 
   const handleAddProject = async () => {
     if (addingProject) return;
@@ -1137,21 +1087,20 @@ export function ProjectTree({
         </label>
       )}
       <div className="project-tree__header">
-        <span className="project-tree__header-title">
+        <span className="project-tree__header-title" role="button" aria-expanded={workspaceExpanded} onClick={toggleWorkspace}>
           <BriefcaseBusiness className="project-tree__header-icon" size={13} />
           {t("projectTree.workspaceTitle")}
         </span>
         <span className="project-tree__header-actions">
-          <Tooltip label={collapseToggleLabel} className="project-tree__action-slot project-tree__header-action-slot project-tree__action-slot--collapse">
+          <Tooltip label={!workspaceExpanded ? t("projectTree.restoreExpanded") : t("projectTree.collapseAll")} className="project-tree__action-slot project-tree__header-action-slot project-tree__action-slot--collapse">
             <button
               type="button"
-              className={`project-tree__collapse-all${canRestoreCollapsedView ? " project-tree__collapse-all--restore" : ""}`}
-              aria-label={collapseToggleLabel}
-              aria-pressed={canRestoreCollapsedView}
-              disabled={!canToggleCollapsedView}
-              onClick={toggleCollapsedView}
+              className={`project-tree__collapse-all${!workspaceExpanded ? " project-tree__collapse-all--restore" : ""}`}
+              aria-label={!workspaceExpanded ? t("projectTree.restoreExpanded") : t("projectTree.collapseAll")}
+              aria-pressed={!workspaceExpanded}
+              onClick={() => setWorkspaceExpanded((v) => !v)}
             >
-              {canRestoreCollapsedView ? <ListRestart size={14} /> : <ListCollapse size={14} />}
+              {!workspaceExpanded ? <ListRestart size={14} /> : <ListCollapse size={14} />}
             </button>
           </Tooltip>
           <Tooltip label={t("projectTree.addProjectTooltip")} className="project-tree__action-slot project-tree__header-action-slot project-tree__action-slot--add">
@@ -1165,30 +1114,44 @@ export function ProjectTree({
               <FolderPlus size={14} />
             </button>
           </Tooltip>
-        </span>
-      </div>
-      <div className="project-tree__list">
-        {visibleTree.length === 0 ? (
-          query.trim() ? (
-            <div className="project-tree__empty">{t("projectTree.emptyNoMatch")}</div>
-          ) : (
-            <div className="project-tree__empty-state">
-              <div className="project-tree__empty project-tree__empty--subtle">{t("projectTree.emptyNoProjects")}</div>
+          {onOpenRemote && (
+            <Tooltip label={t("remote.trigger")} className="project-tree__action-slot project-tree__header-action-slot">
               <button
                 type="button"
-                className="project-tree__empty-primary"
-                onClick={() => void handleAddProject()}
-                disabled={addingProject}
+                className="project-tree__add-project"
+                aria-label={t("remote.trigger")}
+                onClick={onOpenRemote}
               >
-                <FolderPlus size={14} />
-                <span>{t("projectTree.addProjectTooltip")}</span>
+                <Server size={14} />
               </button>
-            </div>
-          )
-        ) : (
-          visibleTree.map((node) => renderNode(node, 0))
-        )}
+            </Tooltip>
+          )}
+        </span>
       </div>
+      {workspaceExpanded && (
+        <div className="project-tree__list">
+          {visibleTree.length === 0 ? (
+            query.trim() ? (
+              <div className="project-tree__empty">{t("projectTree.emptyNoMatch")}</div>
+            ) : (
+              <div className="project-tree__empty-state">
+                <div className="project-tree__empty project-tree__empty--subtle">{t("projectTree.emptyNoProjects")}</div>
+                <button
+                  type="button"
+                  className="project-tree__empty-primary"
+                  onClick={() => void handleAddProject()}
+                  disabled={addingProject}
+                >
+                  <FolderPlus size={14} />
+                  <span>{t("projectTree.addProjectTooltip")}</span>
+                </button>
+              </div>
+            )
+          ) : (
+            visibleTree.map((node) => renderNode(node, 0))
+          )}
+        </div>
+      )}
     </div>
   );
 }

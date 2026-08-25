@@ -21,7 +21,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/zzycxz/fairpeer/internal/control"
 	"github.com/zzycxz/fairpeer/internal/event"
 	"github.com/zzycxz/fairpeer/internal/experts"
 	"github.com/zzycxz/fairpeer/internal/provider"
@@ -293,7 +292,7 @@ func toEventCollab(r experts.CollabRecord) event.Collab {
 // (boot.Build runs async in a goroutine), up to a timeout. The build signals
 // completion by closing tab.readyCh, so this is a pure blocking wait — no poll
 // loop. Returns the controller or nil (timeout / build failure).
-func (a *App) waitForExpertTab(tabID string, timeout time.Duration) *control.Controller {
+func (a *App) waitForExpertTab(tabID string, timeout time.Duration) tabSession {
 	a.mu.RLock()
 	tab := a.tabs[tabID]
 	ch := tab.readyCh
@@ -325,7 +324,7 @@ func (a *App) waitForExpertTab(tabID string, timeout time.Duration) *control.Con
 // tokens into the task prompt.
 const maxPriorRuns = 5
 
-func (a *App) priorExpertRuns(ctrl *control.Controller) []experts.PriorRun {
+func (a *App) priorExpertRuns(ctrl tabSession) []experts.PriorRun {
 	if ctrl == nil {
 		return nil
 	}

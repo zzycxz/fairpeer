@@ -246,6 +246,14 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
                 />
               )}
               <span className="tabbar__tab-label">{displayTitle}</span>
+              {tab.remote && (
+                <span
+                  className={["tabbar__mode-badge", "tabbar__remote-badge", tab.remoteState === "offline" ? "tabbar__remote-badge--offline" : ""].filter(Boolean).join(" ")}
+                  title={`${tab.remote.kind === "wsl" ? "WSL" : tab.remote.kind === "docker" ? "Docker" : tab.remote.kind === "ssh" ? "SSH" : "Server"} · ${tab.remote.target}${tab.remoteState === "offline" ? " · offline" : ""}`}
+                >
+                  {tab.remote.kind === "wsl" ? "WSL" : tab.remote.kind === "docker" ? "Docker" : tab.remote.kind === "ssh" ? "SSH" : "Srv"}
+                </span>
+              )}
               {planMode && <span className="tabbar__mode-badge tabbar__mode-badge--plan">plan</span>}
               {goalMode && <span className="tabbar__mode-badge tabbar__mode-badge--plan">goal</span>}
               {/* Profile badges */}

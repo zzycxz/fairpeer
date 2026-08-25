@@ -1939,7 +1939,7 @@ func (r *blockingRunner) Run(ctx context.Context, _ any) error {
 	}
 }
 
-func waitNotRunning(t *testing.T, ctrl *control.Controller) {
+func waitNotRunning(t *testing.T, ctrl tabSession) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for ctrl.Running() {

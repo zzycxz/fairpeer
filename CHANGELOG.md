@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [远程工作区 P1（WSL）] — 2026-08-24
+
+对标 ZCode 远程连接的四步向导（选择方式 → 填写配置 → 连接中 → 选择目录），P1 交付 **WSL** 一种连接方式，Docker/SSH/Server 复用同一协议后续补。核心架构：**controller 跑在远端 headless host 进程里，桌面端经 stdio NDJSON JSON-RPC attach**——agent 工具、文件、git、会话存储全部在 WSL 内执行，桌面只是 UI 与转发。
+
+- **WP0 host 协议**：新包 `internal/remotehost`（复用 `internal/acp` 的双向 JSON-RPC Conn）+ CLI 子命令 `fairpeer host`。方法面覆盖桌面驱动本地 controller 的全部操作（submit/steer/approve/rewind/fork/setModel 重建等 ~40 个）+ 文件/git（fs/list、fs/read 支持 dataURL 媒体、fs/search、git/status）；事件以共享 wire 形状回推（新包 `internal/eventwire` 双向编解码，与 desktop/serve 现有 wire 字段级一致）；审批/ask 以 host→desktop 出站请求回程（照抄 acp 模式，30 分钟超时拒识防挂死）。管道测试覆盖握手/configure/会话/fs/越界防护
+- **WP1 桌面端接线**：`WorkspaceTab.Ctrl` 字段类型换为 `tabSession` 接口（字段名不变，`*control.Controller` 结构化满足，编译器裁定方法面 ~90 个）；新 `remoteSession` 全量实现（运行态/模式/上下文用量本地缓存 + 事件流回灌 `tabEventSink`，遥测/自动快照/mobilebridge 转发原样工作）；`RemoteRef` 持久化进 desktop-tabs.json 与项目索引（slug 前缀 `remote-wsl-<distro>-<user>-` 防撞本地路径）；`@` 引用/文件预览/git 面板/reveal 在远程 tab 分支走 RPC（reveal 打开 `\\wsl$` UNC）
+- **WP2 WSL transport**：发行版探测（`wsl -l -v` UTF-16 输出嗅探解码）；Linux host 二进制下发（`%LOCALAPPDATA%\fairpeer\hosts` → distro 内 `~/.fairpeer/bin/fairpeer`，字节级比对免重复拷贝 + chmod）；`wsl.exe --exec` 拉起接管；断线 4 秒自动重连（按 pin 的 transcript 路径 reattach）；首连自动推送桌面端模型配置（仅远端无可用 provider 时落盘，不覆盖手工配置——密钥入远端 secret store + 进程 env）
+- **WP2 终端桥接**：`PTYCreateForTab`——远程 tab 的 ConPTY 直接跑 `wsl.exe -d <distro> --cd <root>`，终端 day 1 进 Linux 环境，无需远程 PTY 协议
+- **WP3 向导 UI**：`RemoteConnectWizard` 四步弹层（发行版下拉 + Linux 用户 + 实时连接日志 + 远程目录树选择）；项目树新增「远程连接」入口；文件夹选择器选到 `\\wsl$` 路径时提示改走 WSL 连接（对齐 ZCode wsl-unc prompt）；zh/en 文案
+- **端到端验证**：真实 WSL Ubuntu 冒烟全绿（下发 87MB 二进制 → host/hello linux/amd64 → configure 推送 → 开会话 → fs/read 返回远端文件内容 → git/status → 干净退出）
+- **Docker transport（+1，同协议复用）**：`docker ps --format json` 容器检测（NDJSON 解析 + 单测）、`docker cp` 下发 host 二进制 + `docker exec -i` 拉起；向导第二方式（容器下拉，镜像/状态展示）；连接管理器按 kind 分发 transport（wsl/docker，ssh/server 预留）。alpine 临时容器真机冒烟全绿（cp → exec → hello → configure → 会话 → fs/read "hi-docker" → 干净退出）
+- **SSH transport（+1，同协议复用）**：复用 `internal/netdev/transport`（密码/私钥/ssh-agent 认证、`~/.ssh/config` 别名解析与向导入、系统 known_hosts + TOFU 落 `remote-known-hosts`、指纹冲突硬失败）；host 二进制经 exec stdin 流式上传（按字节数比对免重复传）；`fairpeer host` 跑在普通 session 的管道 stdio 上。凭据：RemoteRef 只持久化主机/用户/私钥路径（非机密），密码/口令入桌面端加密密钥库，重连自动取回；向导表单含别名导入下拉（复用 NetDevSSHImportCandidates）。真机 e2e 通过（alpine sshd 容器：认证 → TOFU → 上传 → host 拉起 → hello → configure → 会话 → fs/read，2.2s）
+- **Server transport（+1，收官）**：`fairpeer host --listen <addr> --token <t>` TCP 模式（每连接 token 握手 `host/auth`，常数时间比对；**会话注册表跨连接共享**——桌面断线重连后按 id 找回会话）；桌面端 `serverTransport` 拨号 + 握手探测（错误 token 干净报错），token 入加密密钥库；向导第四种方式（地址 + token）。本机 e2e 通过（错误 token 拒绝 ✓ 断线重连会话存活 ✓）
+- **终端桥接补全**：`PTYCreateForTab` 现覆盖三种远程——WSL `wsl.exe --cd`、Docker `docker exec -it`、SSH `ssh`（BatchMode，需密钥/agent 认证）
+- **前端徽标**：TabBar 远程 tab 显示方式徽标（WSL/Docker/SSH/Srv，离线态红删线）；订阅 `remote:status` 事件刷新 TabMeta
+- **生命周期补漏**：应用退出时统一关闭全部 host 进程；向导重试/放弃时回收无会话的空闲连接（不残留 WSL/Docker/SSH 进程）
+- **收尾件**：`scripts/build-hosts.sh`（交叉编译 linux amd64/arm64 host 二进制入缓存）；`TabMeta` 增加 `remote`/`remoteState` 字段
+- 已知边界（P1）：远程 tab 的记忆/技能/MCP 热插拔/专家协作为本地特性暂不可用（接口返回 not-supported）；远程会话离线时不在侧栏枚举（重连后恢复）；ExpertCollab/Item 事件不在 wire 上（与桌面本地 toWire 行为一致）
+- **测试套件修复（配合分支 WIP「0 轮话题在树中隐藏」的新行为）**：新增 `seedTopicTurn` 测试助手（写一条 user 消息 + `.meta` 侧车使话题计 1 轮），9 个 topic 可见性测试按新行为对齐；修复 WIP 中 `reviveParkedTabs` 的死过滤条件（停靠态 `Ready=true`，原 `!Ready` 永不匹配——改为 `Ctrl==nil && StartupErr==""`），`TestSetDefaultModelRevivesParkedTabs` 转绿；**desktop 全量测试套件自 WIP 以来首次全绿（142s ok）**
+
 ## [编码体验升级 M0–M3] — 2026-08-21
 
 对标 Codex CLI / Pi 的三方合流升级（规格书 `docs/FAIRPEER_UPGRADE_SPEC.md`，51 任务首批落地 32 + 测试清零），7 个 commit 自 `ff965a2` 起。
@@ -134,12 +154,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **打包教训成文**（08-19）：桌面产物必须 `wails build`，裸 `go build` 不可分发（窗口不出现 + 体积 +17MB）
 - **双分发模式**：Windows 同发 NSIS 安装器 + 免安装便携 exe（原 CI 会丢弃便携版，已改双产物）；**manifest 钉死 installer**——Windows 更新器对下载物直接当安装器启动，matchPlatform 跳过 `-portable.`（与 .deb 同款先例），防便携版随机抢占更新通道
+- **更新检查失败不再骚扰**（08-21）：GitHub 与镜像均不可达时（典型：受限网络每次启动），启动自动检查曾把整串原始错误（多端点 URL + transport 错误链）甩成顶部横幅"更新失败：…"。现拆分 `checkError`（检查失败）与 `error`（安装失败）：自动检查失败**完全静默**（网络状况非用户可行动项），手动检查仍在设置面板内联显示；后端 `fetchManifest` 错误缩短为一句话（"N 个端点不可达，详见日志"），完整逐端点明细写入日志
 
 ### 环境预设护栏（ambient presets）— 08-21
 
 - **修复"没选 Ollama 却被 Ollama 接管"**：`config.toml` 无任何 `[[providers]]` 时注入的 keyless 本地预设（Ollama / llama.cpp）此前可被陈旧页签引用的回退链捕获——所有页签静默变成 `ollama/qwen3-coder:30b`，聊天实际发往本机 11434。引入 **ambient 语义**：注入时打运行时标记（`injectedLocalPresets`，不落盘），未进 `desktop.provider_access` 的预设**只可见、不可被选**——`ResolveModelWithFallback` 直接解析与回退循环双双跳过，页签持有此类死引用时置空并停入 Welcome（附通知），不再报 "unknown model" 启动错误
 - **保存不再固化预设**：渲染器跳过 ambient 预设——此前在"纯预设配置"上任何一次设置保存都会把 Ollama/llama.cpp 写成永久 `[[providers]]`（并使其脱离 ambient 语义）；用户在向导/设置里显式添加（进 provider_access）后照常落盘
 - **边界保持**：用户手写 `[[providers]]` 的 keyless 供应商（非注入、无标记）回退照旧（240faf1 的防砖语义保留）；CLI `--model ollama/...` 显式点名走 `ResolveModel` 直达不受影响；向导添加过的预设（在 access 内）回退/解析均正常。测试：`TestResolveModelWithFallbackSkipsAmbientLocalPresets`、`TestRenderSkipsAmbientLocalPresets`、`TestStaleTabModelWithOnlyAmbientPresetsParksInWelcome` 等
+- **设置默认模型唤醒全部停驻页签**（08-21）：`SetDefaultModel` 此前只更新活动页签——其他项目页签停在 Welcome（模型/Label 为空），输入框不显示默认模型，直到发出第一条消息才按需重建。新增 `reviveParkedTabs()`：设置默认模型成功后扫描所有"Ready 且无控制器且无启动错误"的页签逐个重建，空模型自动解析为新默认值；向导（SetupProvider → SetDefaultModel）与设置面板两条路径一并覆盖。测试：`TestSetDefaultModelRevivesParkedTabs`
 
 ### 输入框工具权限改下拉框 — 08-21
 

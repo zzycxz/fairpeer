@@ -66,6 +66,61 @@ func TestStaleTabModelFallsBackInsteadOfStartupError(t *testing.T) {
 	}
 }
 
+// Setting the default model must revive EVERY tab parked in the Welcome
+// state, not just the active one: parked tabs carry an empty model/Label, so
+// their composers showed no model at all until the first message rebuilt them
+// on demand. Reproduction: a fresh install parks all tabs; configuring a
+// provider + default then left the non-active project tab modelless.
+func TestSetDefaultModelRevivesParkedTabs(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := &App{tabs: map[string]*WorkspaceTab{}}
+	newTab := func(id, root string) *WorkspaceTab {
+		tab := &WorkspaceTab{ID: id, Scope: "global", WorkspaceRoot: root, disabledMCP: map[string]ServerView{}}
+		app.tabs[id] = tab
+		app.tabOrder = append(app.tabOrder, id)
+		return tab
+	}
+	tabA := newTab("tab_a", globalTabWorkspaceRoot())
+	tabB := newTab("tab_b", t.TempDir())
+	app.activeTabID = "tab_a"
+
+	// Park both tabs: preset-only config offers nothing selectable.
+	app.buildTabController(tabA)
+	app.buildTabController(tabB)
+	for _, tab := range []*WorkspaceTab{tabA, tabB} {
+		if tab.Ctrl != nil || tab.model != "" || !tab.Ready {
+			t.Fatalf("precondition: tab %s should be parked in Welcome, got ctrl=%v model=%q ready=%v", tab.ID, tab.Ctrl != nil, tab.model, tab.Ready)
+		}
+	}
+
+	// A hand-written keyless provider (never ambient), then pick its model as
+	// the default — the settings/wizard flow.
+	cfg := config.Default()
+	cfg.Providers = []config.ProviderEntry{{
+		Name: "mylocal", Kind: "openai", BaseURL: "http://127.0.0.1:9000/v1",
+		Models: []string{"m"}, Default: "m",
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.SetDefaultModel("mylocal/m"); err != nil {
+		t.Fatalf("set default model: %v", err)
+	}
+
+	for _, tab := range []*WorkspaceTab{tabA, tabB} {
+		if tab.Ctrl == nil {
+			t.Fatalf("tab %s not revived after SetDefaultModel", tab.ID)
+		}
+		// Label mirrors the controller's short model name (no provider prefix) —
+		// that non-empty label is exactly what the composer's model chip shows.
+		if tab.model != "mylocal/m" || tab.Label != "m" {
+			t.Fatalf("tab %s model/label = %q/%q, want mylocal/m and a non-empty short label", tab.ID, tab.model, tab.Label)
+		}
+		tab.Ctrl.Close()
+	}
+}
+
 // The same stale tab with ONLY ambient presets (injected, never added): the
 // tab must not silently land on local ollama either. The dead model is dropped
 // and the tab parks in the Welcome state — no controller, no startup error —

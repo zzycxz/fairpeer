@@ -1,0 +1,132 @@
+/* remote.css — 远程连接向导（RemoteConnectWizard）。样式与 onboarding overlay
+   同族：暗色弹层 + 步骤条 + 表单与目录选择器。 */
+
+.remote-wizard-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: rgba(6, 8, 12, 0.62);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.remote-wizard {
+  width: min(680px, calc(100vw - 48px));
+  max-height: min(600px, calc(100vh - 64px));
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1, #161a22);
+  color: var(--text-1, #e6e9ef);
+  border: 1px solid var(--border-1, #262c38);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.remote-wizard-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--border-1, #262c38);
+}
+.remote-wizard-head h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+.remote-wizard-head p { margin: 0; font-size: 12px; opacity: 0.65; line-height: 1.5; }
+.remote-wizard-close {
+  background: none; border: none; color: inherit; opacity: 0.5;
+  font-size: 14px; cursor: pointer; padding: 4px 6px; border-radius: var(--radius-sm);
+}
+.remote-wizard-close:hover { opacity: 1; background: rgba(255, 255, 255, 0.06); }
+
+.remote-wizard-steps {
+  display: flex; gap: 4px; list-style: none; margin: 0; padding: 10px 20px;
+  border-bottom: 1px solid var(--border-1, #262c38); font-size: 11px;
+}
+.remote-wizard-steps li { display: flex; align-items: center; gap: 6px; opacity: 0.45; }
+.remote-wizard-steps li::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor;
+}
+.remote-wizard-steps li[data-state="current"] { opacity: 1; color: var(--accent, #4c8dff); }
+.remote-wizard-steps li[data-state="done"] { opacity: 0.8; }
+.remote-wizard-steps li[data-state="done"]::before { background: var(--accent, #4c8dff); }
+.remote-wizard-steps li + li::after {
+  content: "›"; margin: 0 4px 0 6px; opacity: 0.4;
+}
+
+.remote-wizard-body { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 16px 20px; gap: 12px; }
+
+.remote-wizard-error {
+  margin: 10px 20px 0; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 12px;
+  background: rgba(229, 72, 77, 0.12); color: #f0878a; border: 1px solid rgba(229, 72, 77, 0.25);
+  white-space: pre-wrap; word-break: break-all;
+}
+
+.remote-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.remote-kind {
+  display: flex; flex-direction: column; gap: 6px; text-align: left;
+  padding: 14px; border-radius: var(--radius-md); cursor: pointer;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-1, #262c38);
+  color: inherit; font: inherit;
+}
+.remote-kind:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); }
+.remote-kind[data-selected="true"] { border-color: var(--accent, #4c8dff); background: rgba(76, 141, 255, 0.10); }
+.remote-kind:disabled { opacity: 0.4; cursor: not-allowed; }
+.remote-kind-name { font-weight: 600; font-size: 13px; }
+.remote-kind-desc { font-size: 11px; opacity: 0.6; }
+
+.remote-field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.remote-field span { opacity: 0.7; }
+.remote-field select, .remote-field input {
+  padding: 8px 10px; border-radius: var(--radius-sm); font-size: 13px;
+  background: rgba(255, 255, 255, 0.04); color: inherit;
+  border: 1px solid var(--border-1, #262c38);
+}
+.remote-hint { margin: 0; font-size: 11px; opacity: 0.5; line-height: 1.5; }
+
+.remote-log {
+  flex: 1; min-height: 120px; overflow-y: auto; padding: 10px 12px;
+  border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.35);
+  font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 11.5px;
+  line-height: 1.6; white-space: pre-wrap; word-break: break-all;
+}
+
+.remote-picker { }
+.remote-path { display: flex; flex-wrap: wrap; gap: 2px; font-size: 12px; }
+.remote-crumb {
+  background: none; border: none; color: var(--accent, #4c8dff); cursor: pointer;
+  font: inherit; padding: 2px 4px; border-radius: var(--radius-xs);
+}
+.remote-crumb:hover { background: rgba(76, 141, 255, 0.12); }
+.remote-crumb::after { content: "/"; opacity: 0.4; }
+.remote-entries {
+  flex: 1; min-height: 160px; overflow-y: auto; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-1, #262c38); background: rgba(255, 255, 255, 0.02);
+  display: flex; flex-direction: column;
+}
+.remote-entry {
+  text-align: left; padding: 7px 12px; background: none; border: none;
+  color: inherit; font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.remote-entry:hover { background: rgba(255, 255, 255, 0.05); }
+.remote-empty { padding: 16px; font-size: 12px; opacity: 0.5; }
+
+.remote-wizard-foot {
+  display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px;
+}
+.remote-btn {
+  padding: 7px 16px; border-radius: var(--radius-sm); font-size: 12.5px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.05); color: inherit;
+  border: 1px solid var(--border-1, #262c38);
+}
+.remote-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); }
+.remote-btn.primary {
+  background: var(--accent, #4c8dff); border-color: transparent; color: #fff;
+}
+.remote-btn.primary:disabled { opacity: 0.45; cursor: not-allowed; }
+.remote-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.remote-field-row { display: flex; gap: 10px; }
+.remote-field-row .remote-field { flex: 1; }

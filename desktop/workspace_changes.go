@@ -24,6 +24,9 @@ type workspaceChangeAccumulator struct {
 }
 
 func (a *App) WorkspaceChanges() WorkspaceChangesView {
+	if rs := a.activeRemoteSession(); rs != nil {
+		return a.remoteWorkspaceChanges(rs)
+	}
 	out := WorkspaceChangesView{GitAvailable: true}
 	base, err := a.activeWorkspaceBase()
 	if err != nil {

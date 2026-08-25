@@ -26,7 +26,9 @@ import { useConfirm } from "./lib/confirm";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, useT, type Translator } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
-import { app, onEvent, onProjectTreeChanged, onSchedulerNotice } from "./lib/bridge";
+import { app, onEvent, onProjectTreeChanged, onSchedulerNotice,
+  onRemoteStatus,
+} from "./lib/bridge";
 import { onProfileChanged } from "./lib/bridge";
 import { CoWorkLayout } from "./layouts/CoWorkLayout";
 import { NetDevLayout, NetdevTitleBar } from "./layouts/NetDevLayout";
@@ -42,7 +44,7 @@ import { SidebarFooter } from "./components/SidebarFooter";
 import { TerminalPanel, loadTerminalOpen, saveTerminalOpen } from "./components/TerminalPanel";
 import { ContextMenu } from "./components/ContextMenu";
 import { LoopPanel } from "./components/loop/LoopPanel";
-import { WorkspacePill, type PillProject } from "./components/WorkspacePill";
+import { ProfileSegmented } from "./components/AppChrome";
 import { SideSessionPane } from "./components/SideSessionPane";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SidebarSessions } from "./components/SidebarSessions";
@@ -59,6 +61,7 @@ import { PreviewPane } from "./components/PreviewPane";
 import { Tooltip } from "./components/Tooltip";
 import { StartupSplash, shouldShowStartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
+import { RemoteConnectWizard } from "./components/RemoteConnectWizard";
 import { AttachmentViewer } from "./components/AttachmentViewer";
 import { AppChrome } from "./components/AppChrome";
 import { ProjectTree } from "./components/ProjectTree";
@@ -753,6 +756,7 @@ export default function App() {
   // to useController so the controller's OpenProjectTab/OpenGlobalTab calls scope
   // the topic to the active profile without stale-closure issues.
   const profileRef = useRef<"dev" | "cowork" | "netdev">("dev");
+  const getProfile = useCallback(() => profileRef.current, []);
   const {
     state,
     activeTabId,
@@ -791,7 +795,7 @@ export default function App() {
     reorderTabs,
     syncActiveTab,
     ensureBlankTab,
-  } = useController(() => profileRef.current);
+  } = useController(getProfile);
   const { locale, setPref: setLocalePref } = useI18n();
   const t = useT();
   const [modesByTab, setModesByTab] = useState<Record<string, Mode>>({});
@@ -821,6 +825,7 @@ export default function App() {
   // null until the mount probe resolves; true shows the overlay. Probed once —
   // clearing the key mid-session is the Settings panel's job, not the gate's.
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
+  const [remoteWizardOpen, setRemoteWizardOpen] = useState(false);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTab | null>(null);
   const [settingsPayload, setSettingsPayload] = useState<string | null>(null);
   const [startupUpdateChecksEnabled, setStartupUpdateChecksEnabled] = useState<boolean | null>(null);
@@ -967,24 +972,6 @@ export default function App() {
   const [dockRefreshKey, setDockRefreshKey] = useState(0);
   const [projectRevision, setProjectRevision] = useState(0);
 
-  // WorkspacePill's project catalog (2026-08-19 design A): the known projects
-  // list of the ACTIVE profile. Profiles are strictly isolated — dev/cowork/
-  // netdev each load and open only their own projects (08-21 isolation rule:
-  // the office pill never lists coding projects). Refreshed with the tree so
-  // the pill's dropdown stays current.
-  const [pillProjects, setPillProjects] = useState<PillProject[]>([]);
-  const pillProfile = netdevActive ? "netdev" : coworkActive ? "cowork" : "dev";
-  useEffect(() => {
-    void app.ListProjectTree(pillProfile)
-      .then((tree) => {
-        setPillProjects(
-          asArray(tree)
-            .filter((n) => n?.kind === "project")
-            .map((n) => ({ label: n.label || "Untitled", root: n.root ?? "", color: n.projectColor })),
-        );
-      })
-      .catch(() => { /* pill falls back to choose/open states */ });
-  }, [projectRevision, pillProfile]);
   const [composerInsertRequest, setComposerInsertRequest] = useState<ComposerInsertRequest | null>(null);
   const [transientOverlayDismissSignal, setTransientOverlayDismissSignal] = useState(0);
   const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform>(detectBrowserPlatform);
@@ -1386,6 +1373,15 @@ export default function App() {
   useEffect(() => {
     refreshSidebarSessions();
   }, [refreshSidebarSessions, activeTab]);
+  // Also refresh sidebar sessions when the profile changes (dev/cowork/netdev).
+  // profileRef.current is updated synchronously but listSessions reads it at
+  // call-time, so a manual trigger keyed on the profile flags is needed.
+  useEffect(() => {
+    refreshSidebarSessions();
+  }, [coworkActive, netdevActive, refreshSidebarSessions]);
+  // Project tree topic IDs for deduplication: sessions already visible in the
+  // tree are hidden from the "Recent" list to avoid showing the same entry twice.
+  const [projectTreeTopicIds, setProjectTreeTopicIds] = useState<Set<string>>(new Set());
   const startupSplashHold = state.meta?.ready !== true && !state.meta?.startupErr;
   const legacyMode = activeTabId ? modesByTab[activeTabId] ?? "normal" : "normal";
   const goal = activeTabId ? goalsByTab[activeTabId] ?? state.meta?.goal ?? activeTab?.goal ?? "" : "";
@@ -1919,6 +1915,7 @@ export default function App() {
 
   const refreshTabMetas = useCallback(async (): Promise<TabMeta[]> => {
     const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
+
     setTabMetas(tabs);
     return tabs;
   }, []);
@@ -1938,6 +1935,11 @@ export default function App() {
     await refreshTabMetas();
     setTabRevealSignal((signal) => signal + 1);
   }, [ensureBlankTab, refreshTabMetas]);
+
+  useEffect(() => {
+    const offRemote = onRemoteStatus(() => { void refreshTabMetas(); });
+    return () => offRemote();
+  }, [refreshTabMetas]);
 
   useEffect(() => {
     void refreshTabMetas();
@@ -2906,7 +2908,28 @@ export default function App() {
 
 
   const switchFolder = useCallback(async (path?: string) => {
-    const picked = path === undefined ? await pickWorkspace() : await switchWorkspace(path);
+    let picked = path === undefined ? await pickWorkspace() : await switchWorkspace(path);
+    if (picked && /^\\wsl($|\.localhost)\\/i.test(picked)) {
+      // WSL UNC path: the agent would run Windows-side against a slow 9P
+      // share. Offer the remote connection instead (parity with ZCode's
+      // wsl-unc prompt).
+      const rest = picked.replace(/^\\wsl(\.localhost)?\\/i, "");
+      const [distro, ...segs] = rest.split("\\");
+      const linuxRoot = "/" + segs.filter(Boolean).join("/");
+      const useRemote = window.confirm(
+        `${t("remote.uncPromptTitle")}
+${t("remote.uncPromptBody", { path: picked })}
+
+[1] ${t("remote.uncPromptOpen")}
+[2] ${t("remote.uncPromptContinue")}`
+      );
+      if (useRemote && distro && linuxRoot !== "/") {
+        await app.OpenRemoteTab("wsl", distro, "", linuxRoot, "").catch(() => null);
+        setProjectRevision((value) => value + 1);
+        await refreshTabMetas();
+        return "";
+      }
+    }
     if (picked) {
       setProjectRevision((value) => value + 1);
       await refreshTabMetas();
@@ -3221,6 +3244,11 @@ export default function App() {
     </footer>
   ) : null;
 
+  // Filter out sessions already visible in the project tree to avoid duplicates.
+  const dedupedSidebarSessions = sidebarSessions.filter(
+    (s) => !s.topicId || !projectTreeTopicIds.has(s.topicId),
+  );
+
   // Terminal console (Ctrl+`): built once and lent to whichever surface owns
   // the chat body — the coding-mode chat pane or the 运维 shell — so the
   // chrome's terminal toggle works in every mode and the panel never mounts
@@ -3232,7 +3260,7 @@ export default function App() {
       sessionPane={
         <SideSessionPane
           tabs={tabMetas}
-          sessions={sidebarSessions}
+          sessions={dedupedSidebarSessions}
           activeMainTabId={activeTabId ?? undefined}
           selectedId={sideSessionTabId}
           onSelect={setSideSessionTabId}
@@ -3274,15 +3302,27 @@ export default function App() {
   }, []);
 
   const sidebarSearchNode = (
-    <label className="project-tree__search sidebar-search" ref={sidebarSearchRef}>
-      <span className="sidebar-search__prompt" aria-hidden="true">❯</span>
-      <input
-        value={treeQuery}
-        onChange={(e) => setTreeQuery(e.target.value)}
-        placeholder={t("projectTree.searchPlaceholder")}
-      />
-      <kbd className="sidebar-search__kbd" aria-hidden="true">/</kbd>
-    </label>
+    <>
+      <button
+        type="button"
+        className="sidebar-new-session-bar-btn"
+        onClick={() => { void handleNewTab(); }}
+        aria-label={t("topbar.newTask" as never)}
+        title={t("topbar.newTask" as never)}
+      >
+        <Plus size={14} />
+        <span>{t("topbar.newTask" as never)}</span>
+      </button>
+      <label className="project-tree__search sidebar-search" ref={sidebarSearchRef}>
+        <span className="sidebar-search__prompt" aria-hidden="true">❯</span>
+        <input
+          value={treeQuery}
+          onChange={(e) => setTreeQuery(e.target.value)}
+          placeholder={t("projectTree.searchPlaceholder")}
+        />
+        <kbd className="sidebar-search__kbd" aria-hidden="true">/</kbd>
+      </label>
+    </>
   );
 
   const projectTreeNode = (
@@ -3296,6 +3336,7 @@ export default function App() {
       hideSearch
       imTopicSources={imTopicSources}
       onOpenTopic={handleOpenTopic}
+      onOpenRemote={() => setRemoteWizardOpen(true)}
       onOpenExpertSession={async (teamId, teamName) => {
         try {
           const meta = await app.OpenExpertSessionTab(teamId, teamName);
@@ -3344,12 +3385,13 @@ export default function App() {
       onAddProject={async () => {
         await switchFolder();
       }}
+      onTopicIdsChanged={setProjectTreeTopicIds}
     />
   );
 
   const sidebarSessionsNode = (
     <SidebarSessions
-      sessions={sidebarSessions}
+      sessions={dedupedSidebarSessions}
       onResume={(session) => {
         void onResumeSession(session);
         window.setTimeout(refreshSidebarSessions, 500);
@@ -3395,7 +3437,6 @@ export default function App() {
       >
         {coworkActive && (
           <CoWorkLayout
-          pillProjects={pillProjects}
           onPickProject={openProfileProject}
           onAddProject={() => { void switchFolder(); }}
           onSwitchMode={(mode) => { void switchProfile(mode).catch(() => { /* revert handled in switchProfile */ }); }}
@@ -3439,7 +3480,6 @@ export default function App() {
         )}
         {netdevActive && (
           <NetDevLayout
-          pillProjects={pillProjects}
           onPickProject={openProfileProject}
           onAddProject={() => { void switchFolder(); }}
           onSwitchMode={(mode) => { void switchProfile(mode).catch(() => { /* revert handled in switchProfile */ }); }}
@@ -3525,43 +3565,12 @@ export default function App() {
             >
               <PanelLeft size={16} />
             </button>
-            {/* Workspace pill (design A): WHERE am I working, plus project
-                switching and the mode switcher in its dropdown. */}
-            <WorkspacePill
-              state={
-                activeTab?.scope === "project" && activeTab.workspaceRoot
-                  ? "project"
-                  : pillProjects.length > 0
-                    ? "choose"
-                    : "open"
-              }
-              label={
-                activeTab?.scope === "project"
-                  ? (activeTab.workspaceName || "Project")
-                  : pillProjects.length > 0
-                    ? t("sidebar.pillChoose")
-                    : t("sidebar.pillOpenProject")
-              }
-              dotColor={pillProjects.find((p) => p.root === activeTab?.workspaceRoot)?.color}
-              projects={pillProjects}
-              currentMode="dev"
-              onPickProject={(root) => {
-                void openBlankSession("project", root);
-              }}
-              onAddProject={() => { void switchFolder(); }}
-              onSwitchMode={(mode) => { void switchProfile(mode).catch(() => { /* revert handled in switchProfile */ }); }}
+            <ProfileSegmented
+              profile={netdevActive ? "netdev" : coworkActive ? "cowork" : "dev"}
+              onSwitchProfile={(mode) => { void switchProfile(mode).catch(() => {}); }}
+              t={t}
             />
-            <button
-              type="button"
-              className="sidebar__brand-iconbtn"
-              onClick={() => {
-                void handleNewTab();
-              }}
-              aria-label={t("topbar.newSession")}
-              title={t("topbar.newSession")}
-            >
-              <SquarePen size={15} />
-            </button>
+
           </div>
 
           {/* Search renders ONLY here in dev mode — cowork/netdev render the
@@ -3777,7 +3786,7 @@ export default function App() {
               ) : rightDockMode === "session" ? (
                 <SideSessionPane
                   tabs={tabMetas}
-                  sessions={sidebarSessions}
+                  sessions={dedupedSidebarSessions}
                   activeMainTabId={activeTabId ?? undefined}
                   selectedId={sideSessionTabId}
                   onSelect={setSideSessionTabId}
@@ -3921,6 +3930,7 @@ export default function App() {
       )}
 
       {needsOnboarding && <OnboardingOverlay onComplete={() => setNeedsOnboarding(false)} />}
+      {remoteWizardOpen && <RemoteConnectWizard onClose={() => setRemoteWizardOpen(false)} />}
 
       <AttachmentViewer />
     </div>

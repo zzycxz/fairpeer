@@ -151,6 +151,15 @@ export interface AppBindings {
   SteerForTab(tabID: string, text: string): Promise<void>;
   // PTY (spec 3-4): ConPTY-backed interactive terminal
   PTYCreate(cols: number, rows: number): Promise<number>;
+  PTYCreateForTab(tabID: string, cols: number, rows: number): Promise<number>;
+  ListWSLDistros(): Promise<Array<{ name: string; state: string; version: number; default: boolean }>>;
+  ListDockerContainers(): Promise<Array<{ ID: string; Image: string; Names: string; State: string; Status: string }>>;
+  SSHConnect(host: string, port: string, user: string, authMethod: string, password: string, keyPath: string, passphrase: string): Promise<{ version: string; goos: string; arch: string; homeDir: string }>;
+  ServerConnect(address: string, token: string): Promise<{ version: string; goos: string; arch: string; homeDir: string }>;
+  RemoteConnectProbe(kind: string, target: string, user: string): Promise<{ version: string; goos: string; arch: string; homeDir: string }>;
+  RemoteBrowseList(path: string): Promise<Array<{ name: string; dir: boolean }>>;
+  RemoteWizardClose(): Promise<void>;
+  OpenRemoteTab(kind: string, target: string, user: string, root: string, label: string): Promise<TabMeta | null>;
   PTYWrite(id: number, input: string): Promise<void>;
   PTYRead(id: number): Promise<[string, boolean]>;
   PTYResize(id: number, cols: number, rows: number): Promise<void>;
@@ -688,6 +697,14 @@ export function onLoopStatus(cb: (s: import("./types").LoopRunStatus) => void): 
   }
   mockLoopListeners.add(cb);
   return () => mockLoopListeners.delete(cb);
+}
+
+// onRemoteStatus subscribes to remote-host connection changes.
+export function onRemoteStatus(cb: (s: { kind: string; target: string; state: string }) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("remote:status", (payload: unknown) => cb(payload as { kind: string; target: string; state: string }));
+  }
+  return () => {};
 }
 
 export function onEvent(cb: (e: WireEvent) => void): () => void {
@@ -1707,12 +1724,14 @@ function makeMockApp(): AppBindings {
             emit({ kind: "text", text: ch });
             await delay(5);
           }
+          emitMockTurnDone();
           return;
         }
         if (tab.topicId === "topic_p3a_pd") {
           emit({ kind: "reasoning", text: "我正在对比 p3a 和 p3b 的差异：先看约束，再看变更风险，最后判断是否需要拆成独立任务。\n\n" });
           await delay(220);
           emit({ kind: "reasoning", text: "当前倾向：先保留 p3a 的兼容路径，不急于删除旧逻辑。" });
+          emitMockTurnDone();
           return;
         }
         if (tab.topicId === "topic_hotfix") {
@@ -1720,6 +1739,7 @@ function makeMockApp(): AppBindings {
           emit({ kind: "tool_dispatch", tool: { id, name: "bash", args: JSON.stringify({ command: "git status --short && npm test" }), readOnly: true } });
           await delay(180);
           emit({ kind: "tool_progress", tool: { id, name: "bash", readOnly: true, output: "$ git status --short\n M internal/sys/runner.go\n\n$ npm test\nrunning targeted regression tests...\n" } });
+          emitMockTurnDone();
           return;
         }
         if (tab.topicId === "topic_sys_coord") {
@@ -2299,6 +2319,15 @@ function makeMockApp(): AppBindings {
         async FollowUp() {},
         async FollowUpForTab() {},
         async PTYCreate() { return 0; },
+        async PTYCreateForTab() { return 0; },
+        async ListWSLDistros() { return []; },
+        async ListDockerContainers() { return []; },
+        async SSHConnect() { throw new Error("ssh connect unavailable in browser mode"); },
+        async ServerConnect() { throw new Error("server connect unavailable in browser mode"); },
+        async RemoteConnectProbe() { throw new Error("remote connect unavailable in browser mode"); },
+        async RemoteBrowseList() { return []; },
+        async RemoteWizardClose() {},
+        async OpenRemoteTab() { return null; },
         async PTYWrite() {},
         async PTYRead() { return ["", false]; },
         async PTYResize() {},

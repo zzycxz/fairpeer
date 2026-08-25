@@ -33,17 +33,21 @@ import (
 // memory, permissions) scoped to a workspace root, so multiple projects and
 // topics can be active concurrently without interfering.
 type WorkspaceTab struct {
-	ID            string              // stable random id
-	Scope         string              // "project" | "global"
-	WorkspaceRoot string              // project root dir (empty for global)
-	TopicID       string              // topic within the project
-	TopicTitle    string              // display title
-	SessionPath   string              // exact .jsonl file this tab continues
-	Ctrl          *control.Controller // nil while booting / on error
-	Label         string              // model label (for the tab badge)
-	Ready         bool                // true once boot.Build completes
-	StartupErr    string              // build error, surfaced to the frontend
-	sink          *tabEventSink       // routes events with this tab's ID
+	ID            string     // stable random id
+	Scope         string     // "project" | "global"
+	WorkspaceRoot string     // project root dir (empty for global); remote tabs carry the remote-side path
+	TopicID       string     // topic within the project
+	TopicTitle    string     // display title
+	SessionPath   string     // exact .jsonl file this tab continues (remote-side path for remote tabs)
+	Ctrl          tabSession // nil while booting / on error; *control.Controller locally, remoteSession for remote tabs
+	// Remote, when non-nil, marks this tab's workspace as living on a remote
+	// host (P1: WSL). The controller runs in the host process over RPC;
+	// WorkspaceRoot and SessionPath above are remote-side strings.
+	Remote     *RemoteRef
+	Label      string        // model label (for the tab badge)
+	Ready      bool          // true once boot.Build (or the remote session attach) completes
+	StartupErr string        // build error, surfaced to the frontend
+	sink       *tabEventSink // routes events with this tab's ID
 	// readyCh is closed when the current build attempt finishes (success or
 	// failure). It replaces the 100ms poll loop that waitForExpertTab used to
 	// spin while waiting for boot.Build: callers now block on <-readyCh and wake
@@ -66,8 +70,8 @@ type WorkspaceTab struct {
 	telemMu        sync.Mutex
 
 	// Per-turn lifecycle facts (upgrade spec 4-4).
-	turnFacts   []turnFact
-	turnActive  activeTurn
+	turnFacts  []turnFact
+	turnActive activeTurn
 
 	model            string // active model ref (for meta)
 	effort           *string
@@ -110,17 +114,17 @@ type readFileRecord struct {
 }
 
 type sessionUsageStats struct {
-	Cost     float64 `json:"cost"`
-	Currency string  `json:"currency,omitempty"`
-	PromptTokens     int   `json:"promptTokens"`
-	CompletionTokens int   `json:"completionTokens"`
-	TotalTokens      int   `json:"totalTokens"`
-	ReasoningTokens  int   `json:"reasoningTokens"`
-	CacheHitTokens   int   `json:"cacheHitTokens"`
-	CacheMissTokens  int   `json:"cacheMissTokens"`
-	CacheWriteTokens int   `json:"cacheWriteTokens"`
-	RequestCount     int   `json:"requestCount"`
-	ElapsedMs        int64 `json:"elapsedMs"`
+	Cost             float64 `json:"cost"`
+	Currency         string  `json:"currency,omitempty"`
+	PromptTokens     int     `json:"promptTokens"`
+	CompletionTokens int     `json:"completionTokens"`
+	TotalTokens      int     `json:"totalTokens"`
+	ReasoningTokens  int     `json:"reasoningTokens"`
+	CacheHitTokens   int     `json:"cacheHitTokens"`
+	CacheMissTokens  int     `json:"cacheMissTokens"`
+	CacheWriteTokens int     `json:"cacheWriteTokens"`
+	RequestCount     int     `json:"requestCount"`
+	ElapsedMs        int64   `json:"elapsedMs"`
 
 	activeTurnStartedAt int64
 }
@@ -422,7 +426,7 @@ func (s *tabEventSink) recordReadTelemetry(e event.Event) {
 	}
 	s.app.mu.RLock()
 	tab, ok := s.app.tabs[s.tabID]
-	var ctrl *control.Controller
+	var ctrl tabSession
 	if ok && tab != nil {
 		ctrl = tab.Ctrl
 	}
@@ -503,8 +507,6 @@ func (s *tabEventSink) recordTurnFactsEvent(e event.Event) {
 	}
 }
 
-
-
 func (s *tabEventSink) recordUsageTelemetry(e event.Event) {
 	tab, sp := s.telemetryTab()
 	if tab == nil {
@@ -522,7 +524,7 @@ func (s *tabEventSink) telemetryTab() (*WorkspaceTab, string) {
 	}
 	s.app.mu.RLock()
 	tab, ok := s.app.tabs[s.tabID]
-	var ctrl *control.Controller
+	var ctrl tabSession
 	if ok && tab != nil {
 		ctrl = tab.Ctrl
 	}
@@ -589,6 +591,12 @@ type TabMeta struct {
 	// the frontend layout selection. Read alongside the per-tab "profile:changed"
 	// event so a switch updates the active tab immediately.
 	Profile string `json:"profile,omitempty"`
+	// Remote describes the remote connection a tab's workspace lives on
+	// (nil for local tabs): kind + target (WSL distro / container) + label.
+	// RemoteState is the connection health the frontend badges:
+	// "connecting" | "connected" | "offline".
+	Remote      *RemoteRef `json:"remote,omitempty"`
+	RemoteState string     `json:"remoteState,omitempty"`
 	// IsExpertSession marks a tab hosting an expert-team collaboration run
 	// (Scope=="expert"). The frontend uses this to render the tab differently
 	// (🤝 icon, team name as title) and to route expert_collab events.
@@ -620,6 +628,8 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		GoalStatus:        currentTabGoalStatus(tab),
 		StartupErr:        tab.StartupErr,
 		Active:            active,
+		Remote:            tab.Remote,
+		RemoteState:       remoteStateForTab(a, tab),
 		Cwd:               tab.WorkspaceRoot,
 		Profile:           normalizeProfileName(tab.profile),
 	}
@@ -1152,6 +1162,11 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 		}
 	}
 
+	if tab.Remote != nil {
+		a.buildRemoteTabController(tab, root, wailsCtx)
+		return
+	}
+
 	// Load config for this tab's workspace root.
 	cfg, err := config.LoadForRoot(root)
 	if err != nil {
@@ -1385,14 +1400,14 @@ func (a *App) activeTabLocked() *WorkspaceTab {
 
 // activeCtrl returns the controller of the active tab, or nil.
 // Self-locking; safe to call from any goroutine without external lock.
-func (a *App) activeCtrl() *control.Controller {
+func (a *App) activeCtrl() tabSession {
 	ctrl, _ := a.activeCtrlAndRoot()
 	return ctrl
 }
 
 // activeCtrlAndRoot returns the controller and workspace root of the active tab
 // in a single RLock snapshot, eliminating TOCTOU between ctrl and root reads.
-func (a *App) activeCtrlAndRoot() (*control.Controller, string) {
+func (a *App) activeCtrlAndRoot() (tabSession, string) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	t := a.activeTabLocked()
@@ -1403,7 +1418,7 @@ func (a *App) activeCtrlAndRoot() (*control.Controller, string) {
 }
 
 // activeCtrlLocked is like activeCtrl but assumes the caller already holds a.mu.
-func (a *App) activeCtrlLocked() *control.Controller {
+func (a *App) activeCtrlLocked() tabSession {
 	t := a.activeTabLocked()
 	if t == nil {
 		return nil
@@ -1424,7 +1439,7 @@ func (a *App) tabByIDLocked(tabID string) *WorkspaceTab {
 	return a.tabs[tabID]
 }
 
-func (a *App) ctrlByTabID(tabID string) *control.Controller {
+func (a *App) ctrlByTabID(tabID string) tabSession {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	tab := a.tabByIDLocked(tabID)
@@ -1570,7 +1585,9 @@ func topicTitleFromText(text string) string {
 	if text == "" {
 		return ""
 	}
-	const maxRunes = 18
+	// 24 runes: enough for a meaningful Chinese/English snippet while still
+	// fitting a single sidebar line at 12.5px.
+	const maxRunes = 24
 	runes := []rune(text)
 	if len(runes) > maxRunes {
 		text = strings.TrimRightFunc(string(runes[:maxRunes]), unicode.IsPunct) + "…"
@@ -1603,21 +1620,22 @@ type desktopProjectFile struct {
 }
 
 type desktopTabEntry struct {
-	ID               string  `json:"id"`
-	Scope            string  `json:"scope"`
-	WorkspaceRoot    string  `json:"workspaceRoot"`
-	TopicID          string  `json:"topicId"`
-	SessionPath      string  `json:"sessionPath,omitempty"`
-	Model            string  `json:"model,omitempty"`
-	Effort           *string `json:"effort,omitempty"`
-	Mode             string  `json:"mode,omitempty"`
-	Goal             string  `json:"goal,omitempty"`
-	ToolApprovalMode string  `json:"toolApprovalMode,omitempty"`
-	RagScope         string  `json:"ragScope,omitempty"`
-	Profile          string  `json:"profile,omitempty"`
-	IsExpertSession  bool    `json:"isExpertSession,omitempty"`
-	ExpertTeamID     string  `json:"expertTeamId,omitempty"`
-	ExpertTeamName   string  `json:"expertTeamName,omitempty"`
+	ID               string     `json:"id"`
+	Scope            string     `json:"scope"`
+	WorkspaceRoot    string     `json:"workspaceRoot"`
+	TopicID          string     `json:"topicId"`
+	SessionPath      string     `json:"sessionPath,omitempty"`
+	Model            string     `json:"model,omitempty"`
+	Effort           *string    `json:"effort,omitempty"`
+	Mode             string     `json:"mode,omitempty"`
+	Goal             string     `json:"goal,omitempty"`
+	ToolApprovalMode string     `json:"toolApprovalMode,omitempty"`
+	RagScope         string     `json:"ragScope,omitempty"`
+	Profile          string     `json:"profile,omitempty"`
+	Remote           *RemoteRef `json:"remote,omitempty"`
+	IsExpertSession  bool       `json:"isExpertSession,omitempty"`
+	ExpertTeamID     string     `json:"expertTeamId,omitempty"`
+	ExpertTeamName   string     `json:"expertTeamName,omitempty"`
 }
 
 type desktopTabsFile struct {
@@ -1656,6 +1674,7 @@ func (a *App) saveTabsLocked() {
 				ToolApprovalMode: persistedToolApprovalMode(currentTabToolApprovalMode(tab)),
 				RagScope:         tab.ragScope,
 				Profile:          tab.profile,
+				Remote:           tab.Remote,
 			})
 		}
 	}
@@ -3054,7 +3073,7 @@ func (a *App) TrashTopic(topicID string) error {
 	type topicTab struct {
 		id            string
 		tab           *WorkspaceTab
-		ctrl          *control.Controller
+		ctrl          tabSession
 		sink          *tabEventSink
 		scope         string
 		workspaceRoot string
@@ -3296,6 +3315,13 @@ func (a *App) ListProjectTree(profile string) []ProjectNode {
 				continue
 			}
 			status := openTopics[topicSummaryKey("project", p.Root, tid)]
+			// Skip empty topics: a session record only appears in the project
+			// tree after at least one completed conversation turn.  Brand-new
+			// tabs that haven't exchanged any messages yet stay invisible,
+			// even if the tab is currently open.
+			if summary.turns == 0 {
+				continue
+			}
 			children = append(children, ProjectNode{
 				Key:            "topic_" + tid,
 				Kind:           "topic",
@@ -3403,7 +3429,7 @@ type ChangedFileInfo struct {
 func (a *App) ContextPanel(tabID string) ContextPanelInfo {
 	a.mu.RLock()
 	tab, ok := a.tabs[tabID]
-	var ctrl *control.Controller
+	var ctrl tabSession
 	if ok && tab != nil {
 		ctrl = tab.Ctrl
 	}
@@ -3828,4 +3854,24 @@ func (a *App) findKnownTopicSession(topicID string) (string, string) {
 		}
 	}
 	return "", ""
+}
+
+// reviveParkedTabs rebuilds controllers for tabs that were parked in the
+// Welcome state after a model change. Called by SetDefaultModel so every tab
+// picks up the new default. Parked means "the build finished but left no
+// controller and no error" — Ready is true in that state too, and the active
+// tab carries the new model ref by the time this runs, so neither Ready nor
+// model can be part of the filter.
+func (a *App) reviveParkedTabs() {
+	a.mu.Lock()
+	var parked []*WorkspaceTab
+	for _, tab := range a.tabs {
+		if tab.Ctrl == nil && tab.StartupErr == "" && !tab.IsExpertSession {
+			parked = append(parked, tab)
+		}
+	}
+	a.mu.Unlock()
+	for _, tab := range parked {
+		a.buildTabController(tab)
+	}
 }

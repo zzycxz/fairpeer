@@ -14,7 +14,6 @@ import (
 	"github.com/zzycxz/fairpeer/internal/agent"
 	"github.com/zzycxz/fairpeer/internal/boot"
 	"github.com/zzycxz/fairpeer/internal/config"
-	"github.com/zzycxz/fairpeer/internal/control"
 	"github.com/zzycxz/fairpeer/internal/installsource"
 	"github.com/zzycxz/fairpeer/internal/provider"
 )
@@ -730,6 +729,8 @@ func withFreshSystemPrompt(messages []provider.Message, system string) []provide
 }
 
 // SetDefaultModel sets the config default and switches the live model to it.
+// Tabs parked in the Welcome state are revived afterwards so EVERY composer
+// shows the new default, not just the active tab's.
 func (a *App) SetDefaultModel(ref string) error {
 	tab := a.activeTab()
 	if tab == nil {
@@ -749,6 +750,7 @@ func (a *App) SetDefaultModel(ref string) error {
 		tab.model = prev
 		return err
 	}
+	a.reviveParkedTabs()
 	return nil
 }
 
@@ -987,7 +989,7 @@ func (a *App) RemoveProviderAccess(name string) error {
 
 type providerRemovalTab struct {
 	id   string
-	ctrl *control.Controller
+	ctrl tabSession
 }
 
 func providerAccessFallbackRef(c *config.Config, name string) string {

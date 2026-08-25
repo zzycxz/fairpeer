@@ -87,6 +87,8 @@ func Run(args []string, version string) int {
 	case "acp":
 		configureCLIThemeFromConfigNoProbe()
 		return acpCommand(rest, version)
+	case "host":
+		return hostCommand(rest, version)
 	case "mcp":
 		configureCLIThemeFromConfigNoProbe()
 		return mcpCommand(rest)

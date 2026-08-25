@@ -9,9 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"io"
 	"log/slog"
+	"math"
 	"mime"
 	"net/http"
 	"net/url"
@@ -30,7 +30,6 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/agent"
 	"github.com/zzycxz/fairpeer/internal/boot"
-	"github.com/zzycxz/fairpeer/internal/permission"
 	"github.com/zzycxz/fairpeer/internal/bot"
 	"github.com/zzycxz/fairpeer/internal/browserlaunch"
 	"github.com/zzycxz/fairpeer/internal/browseruse"
@@ -47,6 +46,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/mcpregistry"
 	"github.com/zzycxz/fairpeer/internal/memory"
 	"github.com/zzycxz/fairpeer/internal/mobilebridge"
+	"github.com/zzycxz/fairpeer/internal/permission"
 	"github.com/zzycxz/fairpeer/internal/plugin"
 	"github.com/zzycxz/fairpeer/internal/present"
 	"github.com/zzycxz/fairpeer/internal/provider"
@@ -97,6 +97,9 @@ type App struct {
 	// completes during startup). Read atomically from tabEventSink.Emit's hot path.
 	mobilebridge atomic.Pointer[mobilebridge.Bridge]
 	botBridge    atomic.Pointer[botBridgeHub]
+	// remoteManager owns the live remote-host links (one per WSL distro/user
+	// in P1). Lazily initialized on the first remote tab build.
+	remoteManager *remoteHostManager
 
 	// managedBrowser is the user-facing 可控浏览器 launched by
 	// StartManagedBrowser (nil until started). Kept so a later Start can see
@@ -736,7 +739,7 @@ func (r schedulerRunner) Run(ctx context.Context, profile, prompt string) (strin
 // runScheduledPrompt runs a prompt on the given controller and returns a short
 // summary of the result (the last assistant message text), shared by the
 // active-tab and headless paths.
-func runScheduledPrompt(ctx context.Context, ctrl *control.Controller, prompt string) (string, error) {
+func runScheduledPrompt(ctx context.Context, ctrl tabSession, prompt string) (string, error) {
 	if err := ctrl.Run(ctx, prompt); err != nil {
 		return "", err
 	}
@@ -928,7 +931,12 @@ func (a *App) restoreOrBuildTabs() {
 			a.mu.Unlock()
 
 			var tab *WorkspaceTab
-			if entry.IsExpertSession {
+			if entry.Remote != nil {
+				// Remote-workspace tab: root and session path are remote-side
+				// strings; the controller attaches over the host link at build.
+				tab = a.createTabEntryWithID("project", entry.WorkspaceRoot, entry.Profile, entry.TopicID, id)
+				tab.Remote = entry.Remote
+			} else if entry.IsExpertSession {
 				// Expert-session tabs are their own scope; restore verbatim.
 				tab = a.createTabEntryWithID("expert", "", entry.Profile, "", id)
 			} else if entry.Scope == "project" && !rootOwnedByOtherProfile(entry.WorkspaceRoot, entry.Profile) {
@@ -1030,6 +1038,10 @@ func (a *App) snapshotAllTabs() {
 func (a *App) shutdown(context.Context) {
 	a.stopBotGateway()
 	a.stopTray()
+	// Tear down remote host processes (WSL/Docker/SSH/Server links).
+	if m := a.remoteManager; m != nil {
+		m.closeAll()
+	}
 	// Stop the screenshot hotkey loop so its goroutine exits cleanly instead of
 	// leaking (it now uses non-blocking PeekMessage + stopCh, so this returns
 	// within one tick).
@@ -1566,7 +1578,7 @@ func (a *App) SetModeForTab(tabID, mode string) {
 	a.mu.Unlock()
 }
 
-func applyTabModeToController(ctrl *control.Controller, mode string) {
+func applyTabModeToController(ctrl tabSession, mode string) {
 	if ctrl == nil {
 		return
 	}
@@ -1582,7 +1594,7 @@ func applyTabModeToController(ctrl *control.Controller, mode string) {
 	}
 }
 
-func applyTabToolApprovalModeToController(ctrl *control.Controller, mode string) {
+func applyTabToolApprovalModeToController(ctrl tabSession, mode string) {
 	if ctrl == nil {
 		return
 	}
@@ -1591,7 +1603,7 @@ func applyTabToolApprovalModeToController(ctrl *control.Controller, mode string)
 
 // applyTabRagScopeToController pushes the tab's knowledge-base auto-injection
 // scope onto a (re)built controller. Mirrors applyTabToolApprovalModeToController.
-func applyTabRagScopeToController(ctrl *control.Controller, scope string) {
+func applyTabRagScopeToController(ctrl tabSession, scope string) {
 	if ctrl == nil {
 		return
 	}
@@ -1771,13 +1783,13 @@ func (a *App) Checkpoints() []CheckpointMeta {
 // SessionSearchHit is one session whose transcript matched a full-text query
 // (upgrade spec 4-5), with short excerpts around the matches.
 type SessionSearchHit struct {
-	Path     string   `json:"path"`
-	Excerpts []string `json:"excerpts"`
-	Title    string   `json:"title,omitempty"`
-	TopicID  string   `json:"topicId,omitempty"`
-	Scope    string   `json:"scope,omitempty"`
-	WorkspaceRoot string `json:"workspaceRoot,omitempty"`
-	Profile  string   `json:"profile,omitempty"`
+	Path          string   `json:"path"`
+	Excerpts      []string `json:"excerpts"`
+	Title         string   `json:"title,omitempty"`
+	TopicID       string   `json:"topicId,omitempty"`
+	Scope         string   `json:"scope,omitempty"`
+	WorkspaceRoot string   `json:"workspaceRoot,omitempty"`
+	Profile       string   `json:"profile,omitempty"`
 }
 
 // OpenInEditorAt opens a file (optionally at a line) in the user's editor via
@@ -1884,7 +1896,7 @@ func (a *App) TurnFactsForTab(tabID string) []TurnFactsView {
 // SearchSessionText full-text searches the active tab's session directory.
 func (a *App) SearchSessionText(query string) []SessionSearchHit {
 	a.mu.RLock()
-	var ctrl *control.Controller
+	var ctrl tabSession
 	if tab := a.tabByIDLocked(""); tab != nil {
 		ctrl = tab.Ctrl
 	}
@@ -1916,7 +1928,7 @@ type CheckpointFileChange struct {
 // restore, per file — the rewind menu renders it instead of a bare count.
 func (a *App) CheckpointDiffForTab(tabID string, turn int) []CheckpointFileChange {
 	a.mu.RLock()
-	var ctrl *control.Controller
+	var ctrl tabSession
 	if tab := a.tabByIDLocked(tabID); tab != nil {
 		ctrl = tab.Ctrl
 	}
@@ -1938,7 +1950,7 @@ func (a *App) CheckpointDiffForTab(tabID string, turn int) []CheckpointFileChang
 
 func (a *App) CheckpointsForTab(tabID string) []CheckpointMeta {
 	a.mu.RLock()
-	var ctrl *control.Controller
+	var ctrl tabSession
 	if tab := a.tabByIDLocked(tabID); tab != nil {
 		ctrl = tab.Ctrl
 	}
@@ -2124,7 +2136,7 @@ type WorkspaceMeta struct {
 	Current bool   `json:"current"`
 }
 
-func controllerSessionDir(ctrl *control.Controller) string {
+func controllerSessionDir(ctrl tabSession) string {
 	if ctrl != nil {
 		if dir := ctrl.SessionDir(); dir != "" {
 			return dir
@@ -2252,6 +2264,13 @@ func (a *App) listSessions(onlyProfile string) []SessionMeta {
 			}
 			seen[s.Path] = true
 			if onlyProfile != "" && classifySessionProfile(dir, s.Profile, namedDirs) != onlyProfile {
+				continue
+			}
+			// Skip sessions with no completed turns — these are brand-new
+			// tabs that haven't exchanged any messages yet.  They should not
+			// appear in the "Recent Sessions" sidebar until at least one
+			// conversation has taken place.
+			if s.Turns == 0 {
 				continue
 			}
 			_, isOpen := open[s.Path]
@@ -3120,11 +3139,11 @@ type ContextInfo struct {
 	SessionTokens int     `json:"sessionTokens"`
 	CompactRatio  float64 `json:"compactRatio,omitempty"`
 
-	SessionPromptTokens     int `json:"sessionPromptTokens,omitempty"`
-	SessionCompletionTokens int `json:"sessionCompletionTokens,omitempty"`
-	SessionReasoningTokens  int `json:"sessionReasoningTokens,omitempty"`
-	SessionCacheHitTokens   int `json:"sessionCacheHitTokens,omitempty"`
-	SessionCacheMissTokens  int `json:"sessionCacheMissTokens,omitempty"`
+	SessionPromptTokens     int     `json:"sessionPromptTokens,omitempty"`
+	SessionCompletionTokens int     `json:"sessionCompletionTokens,omitempty"`
+	SessionReasoningTokens  int     `json:"sessionReasoningTokens,omitempty"`
+	SessionCacheHitTokens   int     `json:"sessionCacheHitTokens,omitempty"`
+	SessionCacheMissTokens  int     `json:"sessionCacheMissTokens,omitempty"`
 	SessionCacheWriteTokens int     `json:"sessionCacheWriteTokens,omitempty"`
 	RequestCount            int     `json:"requestCount,omitempty"`
 	SessionCost             float64 `json:"sessionCost,omitempty"`
@@ -3146,7 +3165,7 @@ func (a *App) BudgetStatus() provider.BudgetStatus {
 func (a *App) ContextUsageForTab(tabID string) ContextInfo {
 	a.mu.RLock()
 	tab := a.tabByIDLocked(tabID)
-	var ctrl *control.Controller
+	var ctrl tabSession
 	if tab != nil {
 		ctrl = tab.Ctrl
 	}
@@ -3202,7 +3221,7 @@ func (a *App) JobsForTab(tabID string) []JobView {
 	return a.jobsForCtrl(ctrl, out)
 }
 
-func (a *App) jobsForCtrl(ctrl *control.Controller, out []JobView) []JobView {
+func (a *App) jobsForCtrl(ctrl tabSession, out []JobView) []JobView {
 	if ctrl == nil {
 		return out
 	}
@@ -3642,7 +3661,7 @@ func (a *App) Capabilities() CapabilitiesView {
 	// Snapshot all tab fields we need under the read lock, THEN release. Reading
 	// tab.disabledMCP (a map) outside the lock races with RemoveMCPServer's
 	// delete() under a write lock — that is a concurrent map read/write crash.
-	var ctrl *control.Controller
+	var ctrl tabSession
 	disabled := map[string]ServerView{}
 	var order []string
 	var workspaceRoot string
@@ -4520,7 +4539,7 @@ func (a *App) ReconnectMCPServer(name string) error {
 	// the lock races rebuild() → nil panic (TOCTOU, same class as RemoveMCPServer).
 	a.mu.RLock()
 	tab := a.activeTabLocked()
-	ctrl := (*control.Controller)(nil)
+	var ctrl tabSession
 	root := ""
 	if tab != nil {
 		ctrl = tab.Ctrl
@@ -4617,7 +4636,7 @@ func (a *App) SetMCPServerEnabled(name string, enabled bool) error {
 // connectConfiguredMCPServer connects a configured MCP server using an
 // already-snapshotted controller + workspace root, so callers avoid holding a
 // *WorkspaceTab (and its TOCTOU-prone tab.Ctrl) across the call.
-func (a *App) connectConfiguredMCPServer(ctrl *control.Controller, root, name string) (int, error) {
+func (a *App) connectConfiguredMCPServer(ctrl tabSession, root, name string) (int, error) {
 	if ctrl == nil {
 		return 0, fmt.Errorf("no active session")
 	}
@@ -4950,7 +4969,7 @@ func normalizeMCPTransport(transport string) string {
 	}
 }
 
-func mcpConnected(ctrl *control.Controller, name string) bool {
+func mcpConnected(ctrl tabSession, name string) bool {
 	if ctrl == nil || ctrl.Host() == nil {
 		return false
 	}
@@ -4962,7 +4981,7 @@ func mcpConnected(ctrl *control.Controller, name string) bool {
 	return false
 }
 
-func mcpFailed(ctrl *control.Controller, name string) bool {
+func mcpFailed(ctrl tabSession, name string) bool {
 	if ctrl == nil || ctrl.Host() == nil {
 		return false
 	}
@@ -4974,7 +4993,7 @@ func mcpFailed(ctrl *control.Controller, name string) bool {
 	return false
 }
 
-func recordMCPFailure(ctrl *control.Controller, e config.PluginEntry, err error) {
+func recordMCPFailure(ctrl tabSession, e config.PluginEntry, err error) {
 	if ctrl == nil || ctrl.Host() == nil || err == nil {
 		return
 	}
@@ -4990,7 +5009,7 @@ func recordMCPFailure(ctrl *control.Controller, e config.PluginEntry, err error)
 	}, err)
 }
 
-func recordCodegraphFailure(ctrl *control.Controller, c config.CodegraphConfig, err error) {
+func recordCodegraphFailure(ctrl tabSession, c config.CodegraphConfig, err error) {
 	if ctrl == nil || ctrl.Host() == nil || err == nil {
 		return
 	}
@@ -5006,7 +5025,7 @@ func recordCodegraphFailure(ctrl *control.Controller, c config.CodegraphConfig, 
 	}, err)
 }
 
-func findMCPServerView(ctrl *control.Controller, name string) (ServerView, bool) {
+func findMCPServerView(ctrl tabSession, name string) (ServerView, bool) {
 	if ctrl == nil || ctrl.Host() == nil {
 		return ServerView{}, false
 	}
@@ -5906,6 +5925,9 @@ func workspacePathForBase(base, rel string) (string, bool, error) {
 // tab workspace. The menu navigates one level at a time, never recursively —
 // bounded for huge trees.
 func (a *App) ListDir(rel string) []DirEntry {
+	if rs := a.activeRemoteSession(); rs != nil {
+		return a.remoteListDir(rs, rel)
+	}
 	base, err := a.activeWorkspaceBase()
 	if err != nil {
 		return []DirEntry{}
@@ -5945,6 +5967,9 @@ func (a *App) ListDir(rel string) []DirEntry {
 
 // SearchFileRefs finds workspace files by basename for bare "@token" completion.
 func (a *App) SearchFileRefs(query string) []DirEntry {
+	if rs := a.activeRemoteSession(); rs != nil {
+		return a.remoteSearchFileRefs(rs, query)
+	}
 	base, err := a.activeWorkspaceBase()
 	if err != nil {
 		return nil
@@ -5959,6 +5984,9 @@ func (a *App) SearchFileRefs(query string) []DirEntry {
 
 // ReadFile returns a small text preview for a file under the current workspace.
 func (a *App) ReadFile(rel string) FilePreview {
+	if rs := a.activeRemoteSession(); rs != nil {
+		return a.remoteReadFile(rs, rel)
+	}
 	out := FilePreview{Path: rel}
 	path, ok, err := a.workspacePath(rel)
 	if err != nil || !ok {
@@ -6073,6 +6101,9 @@ func (a *App) OpenWorkspacePath(rel string) error {
 
 // RevealWorkspacePath shows a workspace file in the native file manager.
 func (a *App) RevealWorkspacePath(rel string) error {
+	if rs := a.activeRemoteSession(); rs != nil {
+		return a.remoteReveal(rs, rel)
+	}
 	path, ok, err := a.workspacePath(rel)
 	if err != nil || !ok {
 		return os.ErrInvalid

@@ -16,8 +16,10 @@ import { useT } from "../lib/i18n";
 
 export function TerminalSession({
   onClose,
+  tabId,
 }: {
   onClose: () => void;
+  tabId?: string;
 }) {
   const t = useT();
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -50,7 +52,10 @@ export function TerminalSession({
       try {
         const cols = term.cols || 120;
         const rows = term.rows || 30;
-        const ptyId = await app.PTYCreate(cols, rows);
+        const scopeTabId = typeof tabId === "string" ? tabId : "";
+        const ptyId = scopeTabId
+          ? await app.PTYCreateForTab(scopeTabId, cols, rows).catch(() => app.PTYCreate(cols, rows))
+          : await app.PTYCreate(cols, rows);
         if (!alive) {
           void app.PTYKill(ptyId).catch(() => {});
           return;

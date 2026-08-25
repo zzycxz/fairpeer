@@ -165,6 +165,8 @@ export interface WireEvent {
 // Tab management types (desktop/tabs.go).
 export interface TabMeta {
   id: string;
+  remote?: { kind: string; target: string; user?: string; label?: string } | null;
+  remoteState?: string;
   tabType?: "session" | "file";
   scope: string;
   workspaceRoot: string;

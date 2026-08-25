@@ -625,6 +625,7 @@ func TestRestoredProjectTabUsesStoredTopicTitle(t *testing.T) {
 	if err := setTopicTitle(projectRoot, topicID, "你是谁"); err != nil {
 		t.Fatalf("set topic title: %v", err)
 	}
+	seedTopicTurn(t, "project", projectRoot, topicID, "dev")
 
 	app := NewApp()
 	tab := app.createTabEntryWithID("project", projectRoot, "dev", topicID, "tab1")
@@ -674,6 +675,8 @@ func TestUntitledProjectTopicUsesSameFallbackEverywhere(t *testing.T) {
 	if got := tabs[0].TopicTitle; got != defaultTopicTitle {
 		t.Fatalf("tab title = %q, want %q", got, defaultTopicTitle)
 	}
+	seedTopicTurn(t, "project", projectRoot, "topic_without_title", "dev")
+
 	nodes := app.ListProjectTree("dev")
 	project := findTreeProject(nodes, projectRoot)
 	if project == nil || len(project.Children) != 1 {
@@ -706,6 +709,7 @@ func TestCreateTopicDefaultsToAutoNewSessionTitle(t *testing.T) {
 	if got := loadTopicCreatedAt(projectRoot, topic.ID); got < before || got > after {
 		t.Fatalf("createdAt = %d, want between %d and %d", got, before, after)
 	}
+	seedTopicTurn(t, "project", projectRoot, topic.ID, "dev")
 	nodes := NewApp().ListProjectTree("dev")
 	project := findTreeProject(nodes, projectRoot)
 	if project == nil || len(project.Children) != 1 {
@@ -729,6 +733,8 @@ func TestCreateTopicAppearsFirstInProjectTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create second topic: %v", err)
 	}
+	seedTopicTurn(t, "project", projectRoot, first.ID, "dev")
+	seedTopicTurn(t, "project", projectRoot, second.ID, "dev")
 
 	nodes := app.ListProjectTree("dev")
 	project := findTreeProject(nodes, projectRoot)
@@ -757,6 +763,9 @@ func TestCreateGlobalTopicAppearsFirstInProjectTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create second home topic: %v", err)
 	}
+	homeSeedRoot := profileHomeRoot("dev")
+	seedTopicTurn(t, "project", homeSeedRoot, first.ID, "dev")
+	seedTopicTurn(t, "project", homeSeedRoot, second.ID, "dev")
 
 	home := normalizeProjectRoot(profileHomeRoot("dev"))
 	nodes := app.ListProjectTree("dev")
@@ -796,6 +805,12 @@ func TestSwitchWorkspaceRegistersDefaultTopicInProjectTree(t *testing.T) {
 	} else if got != projectRoot {
 		t.Fatalf("SwitchWorkspace root = %q, want %q", got, projectRoot)
 	}
+
+	f := loadProjectsFile("dev")
+	if len(f.Projects) == 0 || len(f.Projects[0].Topics) == 0 {
+		t.Fatalf("projects file missing default topic: %+v", f.Projects)
+	}
+	seedTopicTurn(t, "project", projectRoot, f.Projects[0].Topics[0], "dev")
 
 	nodes := app.ListProjectTree("dev")
 	project := findTreeProject(nodes, projectRoot)
@@ -882,6 +897,7 @@ func TestRenameTopicRecreatesDeletedProjectTitleIndexFromOpenTab(t *testing.T) {
 		t.Fatalf("open project tab: %v", err)
 	}
 	waitForTabReady(t, app, tab.ID)
+	seedTopicTurn(t, "project", projectRoot, topic.ID, "dev")
 	if err := os.Remove(topicTitlesPath(projectRoot)); err != nil {
 		t.Fatalf("remove topic titles: %v", err)
 	}
