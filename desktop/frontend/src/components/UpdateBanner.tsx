@@ -8,9 +8,10 @@ const mb = (n: number) => (n / MB).toFixed(1);
 // UpdateBanner checks for an update once on mount and, when one is available, shows
 // a dismissible top banner that drives the download → verify → install flow (or, on
 // macOS, links out to the download page). It renders nothing while idle, checking,
-// or already current — a quiet auto-check that only surfaces when actionable. A
-// failed check can be dismissed here (network blips shouldn't pin the UI); the
-// Settings panel is where a manual check shows errors inline.
+// already current, or when the check itself fails — an unreachable update server is
+// a network condition, not something the user can act on from a banner; the
+// Settings panel is where a manual check surfaces errors inline. Apply/download
+// failures still show here because the user just clicked "install".
 export function UpdateBanner({ enabled = true }: { enabled?: boolean }) {
   const t = useT();
   const { status, check, apply, reset } = useUpdater();
@@ -59,6 +60,10 @@ export function UpdateBanner({ enabled = true }: { enabled?: boolean }) {
       return <div className="banner banner--update">{t("updater.applying")}</div>;
     case "done":
       return <div className="banner banner--update">{t("updater.done")}</div>;
+    case "checkError":
+      // Silent: the auto-check couldn't reach the update server. Not actionable
+      // from a banner; Settings > Updates shows the error on a manual check.
+      return null;
     case "error":
       const failedMessage = t("updater.failed", { msg: status.message });
       return (

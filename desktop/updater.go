@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -112,11 +113,13 @@ func normalizeVersion(v string) (string, bool) {
 	return semver.Canonical(v), true
 }
 
-// fetchManifest pulls latest.json from Gitee API first, then GitHub endpoints, and decodes it.
+// fetchManifest pulls latest.json from the release endpoints and decodes it.
+// The returned error is deliberately short — it surfaces verbatim in the UI
+// ("更新失败：…"), where a full per-endpoint URL chain is noise. The complete
+// failure detail (every URL + transport error) goes to the log instead.
 func fetchManifest(ctx context.Context, c *http.Client) (*update.Manifest, error) {
 	var errs []string
 
-	// Try GitHub endpoints
 	for _, url := range manifestEndpoints() {
 		b, err := fetchBytes(ctx, c, url)
 		if err != nil {
@@ -130,7 +133,8 @@ func fetchManifest(ctx context.Context, c *http.Client) (*update.Manifest, error
 		}
 		return &m, nil
 	}
-	return nil, fmt.Errorf("update: fetch manifest failed: %s", strings.Join(errs, "; "))
+	slog.Warn("update: manifest fetch failed", "endpoints", len(errs), "errors", errs)
+	return nil, fmt.Errorf("update: manifest fetch failed (%d endpoints unreachable; see log for detail)", len(errs))
 }
 
 // evaluate compares the running version against the manifest and builds the

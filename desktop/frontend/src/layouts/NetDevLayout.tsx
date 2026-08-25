@@ -1,13 +1,14 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { AlertTriangle, Activity, BookOpen, ClipboardCheck, Network, PanelLeft, ScanSearch, ScrollText, Server, SlidersHorizontal, SquarePen } from "lucide-react";
+import { AlertTriangle, Activity, BookOpen, ClipboardCheck, Network, PanelLeft, ScanSearch, ScrollText, Server, SlidersHorizontal } from "lucide-react";
 import { app } from "../lib/bridge";
-import { WorkspacePill } from "../components/WorkspacePill";
+import { ProfileSegmented } from "../components/AppChrome";
 import { useConfirm } from "../lib/confirm";
 import { getActiveProject, setActiveProject, subscribeActiveProject, type NetDevProjectScope } from "../lib/netdevProjectStore";
 import { ProposalActions } from "../components/netdev/ProposalCenter";
 import { LiveOpsPanel } from "../components/netdev/LiveOpsPanel";
 import { DockTabs, useDockTabState } from "../components/DockTabs";
 import type { NetDevSettingsView, NetDevFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph, NetDevBackupVersion } from "../lib/types";
+import { useT } from "../lib/i18n";
 import { Markdown } from "../components/Markdown";
 import { UnifiedDiff } from "../components/editors/UnifiedDiff";
 import "../styles/netdev.css";
@@ -149,6 +150,23 @@ const NETDEV_DOCK_TABS_KEY = "fairpeer.netdevDockTabs";
 const NETDEV_DOCK_TABS_SEEDED = "fairpeer.netdevDockTabs.seeded";
 const NETDEV_DOCK_TABS_LIVE_SEEDED = "fairpeer.netdevDockTabs.live-seeded";
 
+// ?dock=<tab> (browser dev mock only — same affordance as bridge.ts's
+// ?profile=) boots the dock with a given tab focused (e.g. ?dock=live,
+// ?dock=audit) so panels are screenshot-testable without driving the tab
+// strip first. ?live=1 stays as a ?dock=live alias. The open-tabs correction
+// effect OPENs this tab instead of correcting away from it.
+const DOCK_PARAM_KEYS: readonly string[] = ["live", "devices", "context", "topology", "findings", "proposals", "audit"];
+function dockParam(): DockTab | null {
+  try {
+    if (typeof window !== "undefined" && !window.runtime) {
+      const q = new URLSearchParams(window.location.search);
+      const v = q.get("dock") ?? (q.get("live") === "1" ? "live" : "");
+      if (DOCK_PARAM_KEYS.includes(v)) return v as DockTab;
+    }
+  } catch { /* not a browser */ }
+  return null;
+}
+
 export function NetDevLayout({
   mainNode,
   footerNode,
@@ -159,12 +177,9 @@ export function NetDevLayout({
   projectTreeNode,
   onOpenSettings,
   onInsertComposer,
-  onNewSession,
   onToggleSidebar,
   onSwitchMode,
-  pillProjects,
-  onPickProject,
-  onAddProject,
+
   sidebarToggleTitle,
   sidebarCollapsed = false,
   sidebarWidth,
@@ -207,7 +222,7 @@ export function NetDevLayout({
   // Sidebar collapse + resize — same affordances as the coding sidebar.
   onToggleSidebar?: () => void;
   onSwitchMode?: (mode: "dev" | "cowork" | "netdev") => void;
-  pillProjects?: import("../components/WorkspacePill").PillProject[];
+
   onPickProject?: (root: string) => void;
   onAddProject?: () => void;
   sidebarToggleTitle?: string;
@@ -233,6 +248,7 @@ export function NetDevLayout({
   onDockResizeKey?: (event: ReactKeyboardEvent<HTMLButtonElement>) => void;
   onDockResetWidth?: () => void;
 }) {
+  const t = useT();
   const [settings, setSettings] = useState<NetDevSettingsView | null>(null);
   const [findings, setFindings] = useState<NetDevFinding[]>([]);
   const [proposals, setProposals] = useState<NetDevProposal[]>([]);
@@ -243,17 +259,10 @@ export function NetDevLayout({
   const [topoBusy, setTopoBusy] = useState(false);
   const [topoNotice, setTopoNotice] = useState("");
   const [inspBusy, setInspBusy] = useState(false);
-  // ?live=1 (browser dev mock only — same affordance as bridge.ts's
-  // ?profile=) boots the dock with 操作实况 focused so the panel is
-  // screenshot-testable without driving the tab strip first.
-  const initialDockTab = (): DockTab => {
-    try {
-      if (typeof window !== "undefined" && !window.runtime &&
-        new URLSearchParams(window.location.search).get("live") === "1") return "live";
-    } catch { /* not a browser */ }
-    return "context";
-  };
-  const [tab, setTab] = useState<DockTab>(initialDockTab);
+  // ?dock=<tab> boots the dock with a given tab focused (see dockParam at
+  // module scope); the open-tabs correction effect OPENs that tab instead of
+  // correcting away from it.
+  const [tab, setTab] = useState<DockTab>(() => dockParam() ?? "context");
   // Browser-style dock tabs (coding workbench-dock pattern): only OPEN tabs
   // show, each closable, "+" re-opens from the catalog, order persists.
   // Seed the curated default ONCE (localStorage flag); afterwards the user's
@@ -484,9 +493,15 @@ export function NetDevLayout({
   ];
 
   // Active tab closed (or restored state desyncs) → fall back to the last
-  // open one — the coding dock's dockTabs effect.
+  // open one — the coding dock's dockTabs effect. The ?dock= deep link is the
+  // one initializer allowed to OPEN a not-yet-open tab instead of correcting
+  // away from it (dev-mock smoke entry).
   useEffect(() => {
     if (!openTabs.includes(tab)) {
+      if (tab === dockParam()) {
+        setOpenTabs((prev) => (prev.includes(tab) ? prev : [...prev, tab]));
+        return;
+      }
       setTab(openTabs[openTabs.length - 1] ?? "context");
     }
   }, [openTabs, tab]);
@@ -546,26 +561,12 @@ export function NetDevLayout({
               <PanelLeft size={16} />
             </button>
           )}
-          <WorkspacePill
-            state="static"
-            label={settings?.networkName?.trim() || "我的网络"}
-            currentMode="netdev"
-            projects={pillProjects}
-            onPickProject={onPickProject}
-            onAddProject={onAddProject}
-            {...(onSwitchMode ? { onSwitchMode } : {})}
+          <ProfileSegmented
+            profile="netdev"
+            onSwitchProfile={onSwitchMode || (() => {})}
+            t={t}
           />
-          {onNewSession && (
-            <button
-              type="button"
-              className="sidebar__brand-iconbtn"
-              onClick={onNewSession}
-              aria-label="新建诊断会话"
-              title="新建诊断会话"
-            >
-              <SquarePen size={15} />
-            </button>
-          )}
+
         </div>
         {/* Scroll lives BELOW the pinned brand row (the coding sidebar's
             structure: root never scrolls, brand row stays put). */}
@@ -586,6 +587,7 @@ export function NetDevLayout({
             coding/office sidebars' bottom nav (编码偏好 / 办公偏好…). The
             device inventory itself lives in the right dock's 设备 tab;
             巡检 is a direct action; 运维偏好 opens settings. */}
+        </div>
         <section className="cowork-sidebar__group" style={{ marginBottom: '0px', marginTop: 'auto' }}>
           <button
             className={`cowork-sidebar__item ${dockOpen && tab === "devices" ? "cowork-sidebar__item--active" : ""}`}
@@ -619,7 +621,6 @@ export function NetDevLayout({
             <span>运维偏好</span>
           </button>
         </section>
-        </div>
       </div>
 
       <div className="ndv__main">

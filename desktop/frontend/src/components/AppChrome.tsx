@@ -63,8 +63,6 @@ export function AppChrome({
   workspacePanelLabel,
   onToggleSidebar,
   onToggleWorkspacePanel,
-  profile,
-  onSwitchProfile,
 }: AppChromeProps) {
   const t = useT();
   const darwinChrome = platform === "darwin";
@@ -178,11 +176,7 @@ export function AppChrome({
           <PanelRight size={16} />
         </button>
       )}
-      {/* Profile segmented switcher: a pill control with a sliding highlight
-          indicator. See ProfileSegmented below. Rendered in EVERY mode so mode
-          navigation stays identical across profiles (framework parity with the
-          coding view). */}
-      <ProfileSegmented profile={profile} onSwitchProfile={onSwitchProfile} t={t} />
+      {/* Profile segmented switcher was moved to the sidebar */}
       {showWindowsPreviewControls && (
         <div className="app-chrome__window-controls app-chrome__window-controls--windows" aria-hidden="true">
           <span className="app-chrome__window-control app-chrome__window-control--minimize">
@@ -222,13 +216,21 @@ const PROFILE_SEGMENTS: ReadonlyArray<{
   { key: "netdev", labelKey: "cowork.badgeNetDev", titleKey: "cowork.switchToNetDev", Icon: Network },
 ];
 
-function ProfileSegmented({
+// Tracks the last known active index across component remounts.
+// When switching between top-level layouts (e.g. from Dev to CoWork), the entire
+// CoWorkLayout mounts a fresh instance of ProfileSegmented. By initializing with
+// this global state, the new instance renders its first frame in the OLD state,
+// and then immediately updates to the NEW state, ensuring CSS transitions trigger
+// flawlessly across layout boundaries.
+let globalLastProfileIdx = -1;
+
+export function ProfileSegmented({
   profile,
   onSwitchProfile,
   t,
 }: {
   profile: string;
-  onSwitchProfile: (name: string) => void;
+  onSwitchProfile: (name: "cowork" | "netdev" | "dev") => void;
   t: (key: never, vars?: Record<string, string | number>) => string;
 }) {
   const p = profile.toLowerCase();
@@ -237,24 +239,29 @@ function ProfileSegmented({
     0,
     PROFILE_SEGMENTS.findIndex((s) => s.key === activeKey),
   );
-  // Optimistic local index — updates instantly on click; re-synced from prop.
-  const [activeIdx, setActiveIdx] = useState(propIdx);
+  // Initialize to the global last index if available, so fresh mounts can animate.
+  const [activeIdx, setActiveIdx] = useState(globalLastProfileIdx >= 0 ? globalLastProfileIdx : propIdx);
+
   useEffect(() => {
-    setActiveIdx(propIdx);
-  }, [propIdx]);
+    if (activeIdx !== propIdx) {
+      // If we mounted in a stale state to allow animation, wait 1 frame for the
+      // DOM to paint, then update to the target state so CSS transitions fire.
+      const frame = requestAnimationFrame(() => {
+        setActiveIdx(propIdx);
+        globalLastProfileIdx = propIdx;
+      });
+      return () => cancelAnimationFrame(frame);
+    } else {
+      globalLastProfileIdx = propIdx;
+    }
+  }, [propIdx, activeIdx]);
 
   return (
     <div
       className="app-chrome__profile-seg"
       role="tablist"
       aria-label="Profile"
-      style={{ "--seg-count": PROFILE_SEGMENTS.length } as Record<string, number>}
     >
-      <span
-        className="app-chrome__profile-seg-indicator"
-        style={{ transform: `translateX(${activeIdx * 100}%)` }}
-        aria-hidden="true"
-      />
       {PROFILE_SEGMENTS.map((seg, i) => (
         <button
           key={seg.key}
@@ -266,14 +273,16 @@ function ProfileSegmented({
             i === activeIdx ? "app-chrome__profile-seg-item--active" : "",
           ].filter(Boolean).join(" ")}
           onClick={() => {
-            // Optimistic: move highlight immediately for instant feedback.
-            setActiveIdx(i);
-            onSwitchProfile(seg.key);
+            onSwitchProfile(seg.key as "cowork" | "netdev" | "dev");
           }}
           title={t(seg.titleKey as never)}
         >
-          <seg.Icon size={13} className="app-chrome__profile-seg-icon" />
-          {t(seg.labelKey as never)}
+          <span className="app-chrome__profile-seg-label">
+            <span className="app-chrome__profile-seg-icon-wrapper">
+              <seg.Icon size={14} className="app-chrome__profile-seg-icon" />
+            </span>
+            {t(seg.labelKey as never)}
+          </span>
         </button>
       ))}
     </div>

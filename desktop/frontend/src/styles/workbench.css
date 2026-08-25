@@ -263,6 +263,8 @@
 }
 
 .app-chrome__panel-toggle,
+.app-chrome__palette-toggle,
+.app-chrome__terminal-toggle,
 .app--darwin .app-chrome--tabs .app-chrome__panel-toggle {
   top: 7px;
   height: 30px;
@@ -271,7 +273,13 @@
   border-radius: var(--radius-sm);
 }
 
+.app-chrome__panel-toggle--right {
+  top: 0; /* override the absolute top 7px so flex alignment works */
+}
+
 .app-chrome__panel-toggle:hover,
+.app-chrome__palette-toggle:hover,
+.app-chrome__terminal-toggle:hover,
 .app--darwin .app-chrome--tabs .app-chrome__panel-toggle:hover {
   border-color: var(--border);
   background: var(--bg-elev);
@@ -279,6 +287,8 @@
 }
 
 .app-chrome__panel-toggle--active,
+.app-chrome__palette-toggle--active,
+.app-chrome__terminal-toggle--active,
 .app--darwin .app-chrome--tabs .app-chrome__panel-toggle--active {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 22%, transparent);
@@ -378,32 +388,32 @@
 
 .project-tree {
   --project-tree-edge-gap: 0px;
-  gap: 10px;
+  gap: 4px;
   overflow-x: hidden;
   overflow-x: hidden;
 }
 
 .project-tree__search {
-  flex-basis: 40px;
-  height: 40px;
-  min-height: 40px;
+  flex-basis: 28px;
+  height: 28px;
+  min-height: 28px;
   margin: 0;
   padding: 0 var(--sidebar-entry-content-inset);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--bg-elev) 72%, var(--bg-soft));
 }
 
 .project-tree__header {
-  min-height: 25px;
-  padding: 4px 4px 0;
+  min-height: 24px;
+  padding: 2px 4px 0;
   color: var(--fg-faint);
-  font-size: var(--text-xs);
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .project-tree__folder {
-  min-height: 34px;
-  height: 34px;
+  min-height: 26px;
+  height: 26px;
   border-radius: var(--project-tree-row-radius);
 }
 
@@ -805,7 +815,7 @@
      (user direction 2026-08-18). The collapsed-sidebar toggle clearance lives
      on the tab strip, not here. */
   padding-left: 0;
-  padding-right: 48px;
+  padding-right: 138px;
   background: color-mix(in srgb, var(--chat-bg) 96%, var(--bg-elev));
   transition: background var(--dur-fast), border-color var(--dur-fast);
 }
@@ -873,6 +883,8 @@
 }
 
 :root[data-theme-style] .app-chrome__panel-toggle,
+:root[data-theme-style] .app-chrome__palette-toggle,
+:root[data-theme-style] .app-chrome__terminal-toggle,
 :root[data-theme-style] .app--darwin .app-chrome--tabs .app-chrome__panel-toggle {
   top: 8px;
   width: 30px;
@@ -893,7 +905,14 @@
   right: 8px;
 }
 
+:root[data-theme-style] .app-chrome__panel-toggle--right {
+  top: 0;
+  position: relative;
+}
+
 :root[data-theme-style] .app-chrome__panel-toggle:hover,
+:root[data-theme-style] .app-chrome__palette-toggle:hover,
+:root[data-theme-style] .app-chrome__terminal-toggle:hover,
 :root[data-theme-style] .app--darwin .app-chrome--tabs .app-chrome__panel-toggle:hover {
   color: var(--fg);
   border-color: var(--border);
@@ -901,6 +920,8 @@
 }
 
 :root[data-theme-style] .app-chrome__panel-toggle--active,
+:root[data-theme-style] .app-chrome__palette-toggle--active,
+:root[data-theme-style] .app-chrome__terminal-toggle--active,
 :root[data-theme-style] .app--darwin .app-chrome--tabs .app-chrome__panel-toggle--active {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 24%, transparent);
@@ -1314,20 +1335,20 @@
   --project-tree-action-column: 24px;
   --project-tree-edge-gap: 0px;
   --project-tree-row-radius: var(--r-s);
-  gap: 12px;
+  gap: 4px;
   overflow-x: hidden;
   overflow-x: hidden;
 }
 
 :root[data-theme-style] .project-tree__search {
-  flex-basis: 40px;
-  height: 40px;
-  min-height: 40px;
+  flex-basis: 28px;
+  height: 28px;
+  min-height: 28px;
   margin: 0;
   padding: 0 var(--sidebar-entry-content-inset);
   gap: 9px;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--bg-soft) 82%, var(--bg-elev));
   color: var(--fg-faint);
   font-size: 13px;
@@ -1340,16 +1361,16 @@
 }
 
 :root[data-theme-style] .project-tree__header {
-  min-height: 20px;
+  min-height: 28px;
   padding: 4px 8px 0;
   color: var(--fg-faint);
-  font-size: var(--text-xs);
-  font-weight: 560;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 :root[data-theme-style] .project-tree__header-title {
   gap: 0;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1357,6 +1378,15 @@
 
 :root[data-theme-style] .project-tree__header-icon {
   display: none;
+}
+
+/* Match the "最近会话" label to the themed project-tree header title so both
+   sidebar section headings read as the same visual weight. */
+:root[data-theme-style] .side-sessions__label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 :root[data-theme-style] .project-tree__header-action-slot {
@@ -1378,9 +1408,9 @@
 }
 
 :root[data-theme-style] .project-tree__folder {
-  min-height: 34px;
-  height: 34px;
-  margin-bottom: 4px;
+  min-height: 26px;
+  height: 26px;
+  margin-bottom: 1px;
   border-radius: var(--project-tree-row-radius);
   color: var(--fg-dim);
   font-size: 12.5px;
@@ -2653,12 +2683,18 @@
 :root[data-theme-style] .workspace-note,
 :root[data-theme-style] .workspace-recent-menu,
 :root[data-theme-style] .floating-menu,
-:root[data-theme-style] .context-menu,
 :root[data-theme-style] .modelsw__menu {
   border-color: var(--app-graphite-hairline-strong);
   border-radius: var(--radius-sm);
   background: var(--bg-elev);
   box-shadow: var(--app-graphite-shadow-float);
+}
+
+:root[data-theme-style] .context-menu {
+  border-color: var(--app-graphite-hairline-strong);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-elev) 80%, transparent);
+  box-shadow: var(--app-graphite-shadow-float), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 :root[data-theme-style] .modelsw__item:hover,

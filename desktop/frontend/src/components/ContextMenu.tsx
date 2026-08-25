@@ -13,6 +13,7 @@ export type ContextMenuItem =
       title?: string;
       disabled?: boolean;
       danger?: boolean;
+      rightElement?: ReactNode;
       onSelect: () => void;
     }
   | {
@@ -108,28 +109,31 @@ export function ContextMenu({
         event.stopPropagation();
       }}
     >
-      {items.map((item) => {
-        if (item.type === "separator") {
-          return <div key={item.key} className="context-menu__separator" role="separator" />;
-        }
-        return (
-          <button
-            key={item.key}
-            type="button"
-            role="menuitem"
-            title={item.title}
-            disabled={item.disabled}
-            className={`context-menu__item${item.danger ? " context-menu__item--danger" : ""}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              if (!item.disabled) item.onSelect();
-            }}
-          >
-            {item.icon}
-            <span>{item.label}</span>
-          </button>
-        );
-      })}
+      <div className="context-menu__viewport">
+        {items.map((item) => {
+          if (item.type === "separator") {
+            return <div key={item.key} className="context-menu__separator" role="separator" />;
+          }
+          return (
+            <button
+              key={item.key}
+              type="button"
+              role="menuitem"
+              title={item.title}
+              disabled={item.disabled}
+              className={`context-menu__item${item.danger ? " context-menu__item--danger" : ""}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!item.disabled) item.onSelect();
+              }}
+            >
+              {item.icon}
+              <span className="context-menu__item-label">{item.label}</span>
+              {item.rightElement && <span className="context-menu__item-right">{item.rightElement}</span>}
+            </button>
+          );
+        })}
+      </div>
     </div>,
     document.body,
   );

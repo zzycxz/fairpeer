@@ -17,6 +17,10 @@ export type UpdateStatus =
   | { kind: "verifying"; info: UpdateInfo }
   | { kind: "applying"; info: UpdateInfo }
   | { kind: "done" }
+  // checkError: the manifest CHECK could not reach the network. Distinct from
+  // `error` (an apply/download failure) so the startup auto-check can stay
+  // silent — an unreachable update server is not actionable for the user.
+  | { kind: "checkError"; message: string }
   | { kind: "error"; message: string };
 
 export interface Updater {
@@ -68,12 +72,12 @@ export function useUpdater(): Updater {
         return;
       }
       if (info.err) {
-        setStatus({ kind: "error", message: info.err });
+        setStatus({ kind: "checkError", message: info.err });
         return;
       }
       setStatus(info.available ? { kind: "available", info } : { kind: "upToDate", current: info.current });
     } catch (e) {
-      setStatus({ kind: "error", message: errMsg(e) });
+      setStatus({ kind: "checkError", message: errMsg(e) });
     }
   }, []);
 

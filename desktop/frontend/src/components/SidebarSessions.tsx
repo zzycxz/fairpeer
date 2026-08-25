@@ -99,7 +99,7 @@ export function SidebarSessions({
           ) : (
             rows.map((s) => {
           const title = s.title || s.preview || s.path;
-          const active = s.current || s.open;
+          const active = s.current;
           if (editing === s.path) {
             return (
               <input
@@ -134,7 +134,6 @@ export function SidebarSessions({
               }}
               title={title}
             >
-              {active && <span className="side-sessions__dot" aria-hidden="true" />}
               <span className="side-sessions__title">{title}</span>
               <span className="side-sessions__age">{compactSessionAge(s.lastActivityAt)}</span>
               <button

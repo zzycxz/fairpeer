@@ -441,9 +441,8 @@
 }
 
 .app-chrome__panel-toggle--right {
-  right: var(--chrome-right-toggle-offset);
-  border-left: 1px solid var(--border-soft);
-  border-right: 1px solid var(--border-soft);
+  position: relative;
+  right: auto;
 }
 
 /* Terminal toggle (Ctrl+`): in-flow sibling left of the workspace toggle,
@@ -720,7 +719,7 @@
 }
 
 .app--darwin .app-chrome--tabs .app-chrome__panel-toggle--right {
-  right: var(--chrome-right-toggle-offset);
+  margin-right: 8px;
 }
 
 .app--darwin .app-chrome--tabs .app-chrome__panel-toggle:hover {
@@ -950,7 +949,7 @@
 .app--linux .app-chrome--native-tabs {
   align-items: center;
   gap: 12px;
-  padding: 0 calc(var(--chrome-toggle-size) + 10px) 0 calc(var(--chrome-toggle-size) + 10px);
+  padding: 0 12px 0 calc(var(--chrome-toggle-size) + 10px);
   background: var(--bg-soft);
 }
 
@@ -960,7 +959,7 @@
 }
 
 .app--browser-preview.app--windows .app-chrome--native-tabs {
-  padding-right: calc(var(--windows-preview-controls-width) + 48px);
+  padding-right: calc(var(--windows-preview-controls-width) + 12px);
 }
 
 .app--linux .app-chrome--native-tabs {
@@ -1018,13 +1017,9 @@
 
 .app--windows .app-chrome--native-tabs .app-chrome__panel-toggle--right,
 .app--linux .app-chrome--native-tabs .app-chrome__panel-toggle--right {
-  right: 8px;
   border-left: 1px solid transparent;
   border-right: 1px solid transparent;
-}
-
-.app--browser-preview.app--windows .app-chrome--native-tabs .app-chrome__panel-toggle--right {
-  right: calc(var(--windows-preview-controls-width) + 8px);
+  margin-right: 8px;
 }
 
 .app--windows .app-chrome--native-tabs .app-chrome__panel-toggle::before,
@@ -1969,7 +1964,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 11px;
+  gap: 4px;
   overflow-x: hidden;
   overflow-x: hidden;
 }
@@ -1979,30 +1974,30 @@
    tight padding, xs radius — utilitarian, not friendly. */
 .project-tree__search {
   display: flex;
-  flex: 0 0 24px;
+  flex: 0 0 28px;
   align-items: center;
   gap: 6px;
-  height: 24px;
-  min-height: 24px;
+  height: 28px;
+  min-height: 28px;
   margin: 0 var(--project-tree-edge-gap);
-  padding: 0 6px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-xs);
-  background: var(--bg-elev);
+  padding: 0 8px;
+  border: none;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
   color: var(--fg-faint);
-  font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 12px;
   transition: border-color 0.12s, background 0.12s;
 }
 
 .project-tree__search:focus-within {
-  border-color: var(--accent);
+  border-bottom-color: var(--accent);
 }
-
 .sidebar-search__prompt {
   flex: 0 0 auto;
   color: var(--accent);
   font-size: 11px;
+  margin-right: 6px;
   line-height: 1;
   opacity: 0.55;
   transition: opacity 0.12s;
@@ -2019,10 +2014,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0 2px;
-  border: 1px solid var(--border-soft);
+  padding: 0 4px;
+  border: none;
   border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--bg-soft) 60%, transparent);
+  background: var(--bg-hover);
   color: var(--fg-faint);
   font-family: var(--mono);
   font-size: 9.5px;
@@ -2042,7 +2037,7 @@
   background: transparent;
   color: var(--fg);
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .project-tree__search input::placeholder {
@@ -2069,6 +2064,11 @@
   gap: 7px;
   min-width: 0;
   flex: 1 1 auto;
+  cursor: pointer;
+}
+
+.project-tree__header-title:hover {
+  color: var(--fg);
 }
 
 .project-tree__header-icon {
@@ -2168,7 +2168,7 @@
 
 .project-tree__folder {
   position: relative;
-  height: 34px;
+  height: 26px;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -2564,6 +2564,13 @@
   overflow: hidden;
 }
 
+/* Show scrollbar when a project has more than 5 topics (5 × 28px = 140px). */
+.project-tree__children--expanded .project-tree__children-inner {
+  max-height: 140px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 /* Chevron rotates 90° on expand; single icon keeps the rotation smooth. */
 .project-tree__chevron {
   display: inline-flex;
@@ -2591,60 +2598,78 @@
   --wails-draggable: no-drag;
   position: fixed;
   z-index: var(--z-overlay-backdrop);
+  border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-elev) 85%, transparent);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: 0 4px 24px -6px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transform-origin: top left;
+  animation: menu-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.context-menu__viewport {
   max-height: calc(100vh - 16px);
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 5px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-elev);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.36);
-  transform-origin: top left;
-  animation: menu-pop-in var(--dur-base) var(--ease-out) both;
+  padding: 6px;
 }
 @keyframes menu-pop-in {
   from {
     opacity: 0;
-    transform: scale(var(--motion-pop-scale)) translateY(calc(-0.5 * var(--motion-rise)));
+    transform: scale(0.96) translateY(-4px);
   }
 }
 
 .context-menu__item {
   width: 100%;
-  min-height: 30px;
+  min-height: 32px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--fg-dim);
+  color: var(--fg-faint);
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 400;
   text-align: left;
-  padding: 0 8px;
+  padding: 0 10px;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.context-menu__item-label {
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.context-menu__item-right {
+  flex: 0 0 auto;
 }
 
 .context-menu__item:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  opacity: 0.3;
 }
 
 .context-menu__item:not(:disabled):hover,
 .context-menu__item:not(:disabled):focus-visible {
-  background: var(--sidebar-hover);
-  color: var(--fg);
+  background: color-mix(in srgb, var(--sidebar-hover) 60%, transparent);
+  color: var(--fg-dim);
+  transform: translateX(2px);
   outline: none;
 }
 
 .context-menu__separator {
   height: 1px;
-  margin: 5px 4px;
+  margin: 6px 4px;
   background: var(--border-soft);
 }
 
 .context-menu__item--danger:not(:disabled):hover,
 .context-menu__item--danger:not(:disabled):focus-visible {
+  background: color-mix(in srgb, #e5534b 15%, transparent) !important;
   color: #e5534b !important;
 }
 

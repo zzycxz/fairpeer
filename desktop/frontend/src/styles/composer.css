@@ -803,6 +803,10 @@
   background: var(--bg-elev);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
 }
+.approvalsw__menu.composer-access-menu {
+  width: max-content;
+  min-width: 160px;
+}
 .composer-access-menu__section {
   display: flex;
   flex-direction: column;

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { BookOpen, CalendarDays, PanelLeft, SquarePen, Users, SlidersHorizontal } from "lucide-react";
+import { BookOpen, CalendarDays, PanelLeft, Users, SlidersHorizontal } from "lucide-react";
 
-import { WorkspacePill } from "../components/WorkspacePill";
+import { ProfileSegmented } from "../components/AppChrome";
 import { useT } from "../lib/i18n";
 import { app, onExpertsCollab } from "../lib/bridge";
 import { CalendarTaskPanel } from "../components/cowork/CalendarTaskPanel";
@@ -32,7 +32,7 @@ export interface CoWorkLayoutProps {
   sidebarCollapsed?: boolean;
   onNewSession?: () => void;
   onSwitchMode?: (mode: "dev" | "cowork" | "netdev") => void;
-  pillProjects?: import("../components/WorkspacePill").PillProject[];
+
   onPickProject?: (root: string) => void;
   onAddProject?: () => void;
   // Sidebar collapse — the brand-row toggle mirrors the coding view's
@@ -83,11 +83,8 @@ export function CoWorkLayout({
   searchNode,
   rightDockOpen = false,
   sidebarCollapsed = false,
-  onNewSession,
   onSwitchMode,
-  pillProjects,
-  onPickProject,
-  onAddProject,
+
   onToggleSidebar,
   sidebarToggleTitle,
   dockCwd,
@@ -207,27 +204,12 @@ export function CoWorkLayout({
               <PanelLeft size={16} />
             </button>
           )}
-          <WorkspacePill
-            state="static"
-            label={t("sidebar.pillOffice")}
-            currentMode="cowork"
-            projects={pillProjects}
-            onPickProject={onPickProject}
-            onAddProject={onAddProject}
-            {...(onSwitchMode ? { onSwitchMode } : {})}
+          <ProfileSegmented
+            profile="cowork"
+            onSwitchProfile={onSwitchMode || (() => {})}
+            t={t}
           />
-          <button
-            type="button"
-            className="sidebar__brand-iconbtn"
-            onClick={() => {
-              if (onNewSession) onNewSession();
-              setActivePanel("taskCenter");
-            }}
-            aria-label={t("cowork.newTask") || "新建任务"}
-            title={t("cowork.newTask") || "新建任务"}
-          >
-            <SquarePen size={15} />
-          </button>
+
         </div>
         <div className="cowork-sidebar__scroll">
           {searchNode}
@@ -237,46 +219,44 @@ export function CoWorkLayout({
           <section className="sidebar__section sidebar__section--projects" style={{ marginBottom: '8px', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             {projectTreeNode}
           </section>
-
-
-
-          <section className="cowork-sidebar__group" style={{ marginBottom: '0px', marginTop: 'auto' }}>
-            <button
-              className={`cowork-sidebar__item ${preferenceOpen ? "cowork-sidebar__item--active" : ""}`}
-              onClick={() => setPreferenceOpen(true)}
-            >
-              <SlidersHorizontal size={14} />
-              <span>{t("cowork.preference") || "办公偏好"}</span>
-            </button>
-            <button
-              className={`cowork-sidebar__item ${activePanel === "calendarTask" ? "cowork-sidebar__item--active" : ""}`}
-              onClick={() => {
-                setActivePanel("calendarTask");
-                if (dockOnClose) dockOnClose();
-              }}
-            >
-              <CalendarDays size={14} />
-              <span>{t("cowork.calendarAndTasks")}</span>
-            </button>
-            <button
-              className={`cowork-sidebar__item ${activePanel === "experts" ? "cowork-sidebar__item--active" : ""}`}
-              onClick={() => {
-                setActivePanel("experts");
-                if (dockOnClose) dockOnClose();
-              }}
-            >
-              <Users size={14} />
-              <span>{t("cowork.expert") || "专家团"}</span>
-            </button>
-            <button
-              className={`cowork-sidebar__item ${activePanel === "rag" ? "cowork-sidebar__item--active" : ""}`}
-              onClick={() => setActivePanel("rag")}
-            >
-              <BookOpen size={14} />
-              <span>{t("cowork.knowledgeBase") || "知识库"}</span>
-            </button>
-          </section>
         </div>
+
+        <section className="cowork-sidebar__group" style={{ marginBottom: '0px', marginTop: 'auto' }}>
+          <button
+            className={`cowork-sidebar__item ${preferenceOpen ? "cowork-sidebar__item--active" : ""}`}
+            onClick={() => setPreferenceOpen(true)}
+          >
+            <SlidersHorizontal size={14} />
+            <span>{t("cowork.preference") || "办公偏好"}</span>
+          </button>
+          <button
+            className={`cowork-sidebar__item ${activePanel === "calendarTask" ? "cowork-sidebar__item--active" : ""}`}
+            onClick={() => {
+              setActivePanel("calendarTask");
+              if (dockOnClose) dockOnClose();
+            }}
+          >
+            <CalendarDays size={14} />
+            <span>{t("cowork.calendarAndTasks")}</span>
+          </button>
+          <button
+            className={`cowork-sidebar__item ${activePanel === "experts" ? "cowork-sidebar__item--active" : ""}`}
+            onClick={() => {
+              setActivePanel("experts");
+              if (dockOnClose) dockOnClose();
+            }}
+          >
+            <Users size={14} />
+            <span>{t("cowork.expert") || "专家团"}</span>
+          </button>
+          <button
+            className={`cowork-sidebar__item ${activePanel === "rag" ? "cowork-sidebar__item--active" : ""}`}
+            onClick={() => setActivePanel("rag")}
+          >
+            <BookOpen size={14} />
+            <span>{t("cowork.knowledgeBase") || "知识库"}</span>
+          </button>
+        </section>
       </aside>
 
       {/* Center: dynamic panel based on selection. The chat topicbar no longer

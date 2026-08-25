@@ -4437,7 +4437,11 @@ function UpdatesSection({
       {status.kind === "verifying" && <div className="mem-hint">{t("updater.verifying")}</div>}
       {status.kind === "applying" && <div className="mem-hint">{t("updater.applying")}</div>}
       {status.kind === "done" && <div className="mem-hint">{t("updater.done")}</div>}
-      {status.kind === "error" && <div className="banner banner--error">{t("updater.failed", { msg: status.message })}</div>}
+      {(status.kind === "error" || status.kind === "checkError") && (
+        <div className="banner banner--error" title={status.message}>
+          {t("updater.failed", { msg: status.message })}
+        </div>
+      )}
       {configPath && (
         <Tooltip label={configPath} fill block className="mem-hint settings-config-path">
           {t("settings.config", { path: configPath })}
