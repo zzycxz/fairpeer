@@ -167,11 +167,11 @@ read_file ~/.fairpeer/pdf-pages/page-1.json         # 逐页读其 description
 **字号自适应（有参考图时）**：参考图能看出"密度"和"标题/正文比例"，但 VLM 看不到 exact px——不要让它瞎给字号数值。改为从 reference-style 的 LAYOUT（密度）+ FORMAT（比例）推断 density（high/medium/low）和 title/body ratio，套模板基线机械算：
 
 ```bash
-python3 <skill_dir>/scripts/autofit_fontsize.py --density <high|medium|low> --ratio <标题是正文的几倍>
-# 输出 {"title": N, "card_title": N, "body": N}，生成 SVG 时用这套字号（覆盖 config 的硬编码 26/18/14）
+python3 <skill_dir>/scripts/autofit_fontsize.py --density <high|medium|low> --ratio <标题是正文的几倍> > <project_dir>/output/autofit_result.json
+# 输出 {"title": N, "card_title": N, "body": N} 落盘；骨架生成用 --autofit 传入，手写页直接采用这套字号
 ```
 
-依据：模板基线（config）× 密度系数（密→缩小，疏→放大，±15%）× 比例保持（标题>卡片标题>正文）。这是"有判断、不瞎猜"——不靠 VLM 给 px，靠它的定性判断（密度+比例）机械算。无参考图时退回 config 默认字号。
+依据：模板基线（config）× 密度系数（密→缩小，疏→放大，±15%）× 比例保持（标题>卡片标题>正文）。这是"有判断、不瞎猜"——不靠 VLM 给 px，靠它的定性判断（密度+比例）机械算。无参考图时退回 config 默认字号。字号优先级（低→高）：config `font_sizes` < autofit 结果 < pages.json 每页 `fonts`。
 
 **风格库（用户提到风格词时必查）**：`<skill_dir>/references/visual-styles/` 有 19 种成体系的设计规格（swiss-minimal 瑞士极简 / editorial 杂志 / ink-wash 水墨 / dark-tech / glassmorphism / data-journalism 等，目录含 `_index.md` 总览）。用户说"做成XX风"时：
 
@@ -234,8 +234,10 @@ init 创建目录结构：
 ```
 
 ```bash
-python3 <skill_dir>/scripts/build_page_skeleton.py <project_dir>/pages.json --project <project_dir>
+python3 <skill_dir>/scripts/build_page_skeleton.py <project_dir>/pages.json --project <project_dir> [--autofit <project_dir>/output/autofit_result.json]
 ```
+
+有参考图时传 `--autofit`（Step 3 落盘的字号结果）；字号链：config `font_sizes` < `--autofit` < pages.json 每页 `fonts`。
 
 一次调用生成所有骨架页（输出 `slide_NN_<type>.svg`，保持页序）。生成器读 template_config.json 自动执行配色/半透明卡片/背景规则/字体链，图标用规则 14 的占位符，文字自动换行——**你不需要管坐标**。JSON 摘要会报 `lines_dropped`（spec 太长装不下，删行后重新生成）和稀疏页警告（封面/结尾给足 title+subtitle+footer 三条文字）。生成后可用 edit_file 微调个别页，再跑批量检查。
 
@@ -462,6 +464,8 @@ exit 2 或 `ok: false` → 按 `missing` 清单补回丢失文字后重查，**�
 | "深色风格" / "用绿色主色" | style / colors |
 | "快速模式" / "校验模式" | mode = fast / validate |
 | "要动画" | 参考 references/animations.md |
+
+> 垂直覆盖为建议项而非强制：3/4 区域有内容即通过；2/4 仅 WARN 不阻塞流程；≤1/4 才是 ERROR。
 
 ---
 

@@ -58,6 +58,40 @@ var redactPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(<(?:password|passphrase|secret|community|auth-?key|privacy-?key|pre-shared-?key|key-string|shared-?key)(?:\s[^>]*)?>)[^<]*(</)`),
 	// Public/private key blobs (base64 bodies) in device config.
 	regexp.MustCompile(`(?im)^(\s*\S*(?:rsa|dsa|ecdsa|ssh)\S*\s+\S*(?:key|local-key-pair|peer-public-key|public-key)\S*(?:\s+\S+)*?\s+)[A-Za-z0-9+/=]{40,}`),
+
+	// ── server logs & app/db config (the log-source read path) ───────────────
+	// These fire the moment the agent reads Linux/app/database logs: that text
+	// is the secret-densest surface in the whole inventory, and it must be
+	// masked BEFORE it enters the model context (same rule as §8.1).
+	//
+	// env-style assignments: DB_PASSWORD=x, MYSQL_PWD=x, export API_KEY=x.
+	// The value runs to the first whitespace so line structure survives.
+	regexp.MustCompile(`(?im)^(\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|CREDENTIALS?)[A-Za-z0-9_]*=)[^\s#]+`),
+	// key: value secret lines (YAML/JSON-ish app config, `password: x`).
+	regexp.MustCompile(`(?im)^(\s*["']?[A-Za-z0-9_.-]*(?:password|passwd|secret|token|api_?key)[A-Za-z0-9_.-]*["']?\s*:\s*)\S+`),
+	// URL-embedded credentials: scheme://user:pass@host (mysql/postgres/
+	// mongodb/redis/amqp/http basic auth — the scheme and user stay visible
+	// so the connection target is still readable).
+	regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://[^\s:@/"'<>]+:)[^\s@/"'<>]*(@)`),
+	// Authorization headers and Bearer tokens.
+	regexp.MustCompile(`(?im)^(\s*authorization\s*:\s*(?:basic|bearer)\s+)\S+`),
+	regexp.MustCompile(`(?i)(\bbearer\s+)\S+`),
+	// JWTs (three base64url segments, dot-separated).
+	regexp.MustCompile(`(?i)\b(eyJ)[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}`),
+	// Well-known API key shapes: OpenAI-style sk-, AWS AKIA, GitHub ghp_/gho_,
+	// Slack xox?-.
+	regexp.MustCompile(`(?i)\b(sk-)[A-Za-z0-9_-]{16,}`),
+	regexp.MustCompile(`(?i)\b(AKIA)[0-9A-Z]{16}`),
+	regexp.MustCompile(`(?i)\b(ghp_|gho_|github_pat_)[A-Za-z0-9_]{20,}`),
+	regexp.MustCompile(`(?i)\b(xox[baprs]-)[A-Za-z0-9-]{10,}`),
+	// SQL account statements: IDENTIFIED BY '<pw>', SET PASSWORD = 'x',
+	// password='x' in connection strings/queries.
+	regexp.MustCompile(`(?i)(\bidentified\s+by\s+(?:password\s+)?)[^\s;,]+`),
+	regexp.MustCompile(`(?i)(\bset\s+password(?:\s+for\s+\S+\s*)?\s*=\s*)[^\s;,]+`),
+	regexp.MustCompile(`(?i)(\bpassword\s*=\s*')[^']*`),
+	// Redis AUTH lines — either at line start or after a syslog-style `# `
+	// prefix (redis monitor output); `auth.log` never matches (no space+token).
+	regexp.MustCompile(`(?im)^(?:.*#\s+)?(\s*(?:redis-cli\s+)?auth\s+)\S+`),
 }
 
 // redactedToken replaces the captured secret.
@@ -77,7 +111,7 @@ func Redact(s string) string {
 func RedactCounted(s string) (string, int) {
 	total := 0
 	for _, re := range redactPatterns {
-		out := re.ReplaceAllString(s, "${1}"+redactedToken)
+		out := re.ReplaceAllString(s, "${1}"+redactedToken+"${2}")
 		total += strings.Count(out, redactedToken) - strings.Count(s, redactedToken)
 		s = out
 	}

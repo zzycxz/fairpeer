@@ -35,7 +35,15 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
+
+
+def _is_hex(value):
+    """Strict #RRGGBB check — anything else (hue names, rgb(), short hex) is
+    ignored so an off-format VLM reply can't pollute the config with values
+    that would end up verbatim in SVG fill attributes (S-11)."""
+    return isinstance(value, str) and re.match(r'^#[0-9a-fA-F]{6}$', value) is not None
 
 
 def _dark_palette(is_dark):
@@ -68,21 +76,30 @@ def _dark_palette(is_dark):
     }
 
 
-def _apply_vlm_style(config, vlm_style):
+def _apply_vlm_style(config, vlm_style, allow_background_type=True):
     """Merge one VLM style dict (ppt-template-style.json shape) into config['colors'].
 
     Maps the VLM result fields (background / is_dark / accent_colors / text_color /
     background_type) onto config's color keys, deriving the secondary/muted/card_bg/
     line palette from is_dark. Tolerates missing fields (Phase 2's reference-style.json
     may carry only a subset).
+
+    allow_background_type: only ppt-template-style.json (a REAL .pptx template)
+    may set background_type — it flips the whole pipeline into "template mode"
+    (no background in SVG, master shows through). reference-style.json's
+    background_type describes the reference PAGE's look, not a template's
+    existence; copying it made template-less decks lose their background.
     """
     colors = config.setdefault("colors", {})
 
     bg = vlm_style.get("background")
     if bg:
-        colors["background"] = bg
+        if _is_hex(bg):
+            colors["background"] = bg
+        else:
+            print(f"[merge_vlm_style] WARN non-hex background ignored: {bg!r}", file=sys.stderr)
     bt = vlm_style.get("background_type")
-    if bt:
+    if bt and allow_background_type:
         colors["background_type"] = bt
 
     # is_dark-derived palette — overrides baseline so text/secondary match the VLM bg.
@@ -92,11 +109,18 @@ def _apply_vlm_style(config, vlm_style):
     # VLM text_color (if given) overrides the is_dark default for text/primary.
     tc = vlm_style.get("text_color")
     if tc:
-        colors["text"] = tc
-        colors["primary"] = tc
+        if _is_hex(tc):
+            colors["text"] = tc
+            colors["primary"] = tc
+        else:
+            print(f"[merge_vlm_style] WARN non-hex text_color ignored: {tc!r}", file=sys.stderr)
 
-    # accent: first accent_color wins; leave existing if none.
-    accents = vlm_style.get("accent_colors") or []
+    # accent: first valid hex accent wins; leave existing if none.
+    raw_accents = vlm_style.get("accent_colors") or []
+    accents = [a for a in raw_accents if _is_hex(a)]
+    if len(accents) < len(raw_accents):
+        print(f"[merge_vlm_style] WARN non-hex accent_colors ignored: "
+              f"{raw_accents!r}", file=sys.stderr)
     if accents:
         colors["accent"] = accents[0]
 
@@ -110,18 +134,21 @@ def merge(config_path, home_dir):
     fairpeer = os.path.join(home_dir, ".fairpeer")
     # Apply LOWEST priority first so higher priority overwrites.
     # (reference-style wins over template-style wins over baseline.)
+    # allow_background_type only for the template source — see
+    # _apply_vlm_style for why a reference's background_type must not
+    # flip a template-less deck into template mode.
     sources = [
-        ("ppt-template-style.json", os.path.join(fairpeer, "ppt-template-style.json")),
-        ("reference-style.json", os.path.join(fairpeer, "reference-style.json")),
+        ("ppt-template-style.json", os.path.join(fairpeer, "ppt-template-style.json"), True),
+        ("reference-style.json", os.path.join(fairpeer, "reference-style.json"), False),
     ]
     applied = []
-    for name, path in sources:
+    for name, path, allow_bt in sources:
         if not os.path.isfile(path):
             continue
         try:
             with open(path, "r", encoding="utf-8") as sf:
                 style = json.load(sf)
-            _apply_vlm_style(config, style)
+            _apply_vlm_style(config, style, allow_background_type=allow_bt)
             applied.append(name)
         except (OSError, ValueError) as e:
             print(f"[merge_vlm_style] WARN skipping {name}: {e}", file=sys.stderr)

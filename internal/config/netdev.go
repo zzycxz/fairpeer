@@ -97,6 +97,12 @@ type NetDevDevice struct {
 	Encoding      string      `toml:"encoding"` // auto | utf-8 | gbk
 	AllowTelnet   bool        `toml:"allow_telnet"`
 	SNMP          *NetDevSNMP `toml:"snmp"`
+	// LogPaths whitelists additional log-directory roots for this device
+	// (e.g. "/opt/app/logs", "/usr/local/tomcat/logs"). tail/head/grep/wc on
+	// paths under /var/log or one of these roots classify as read — the
+	// log-source path whitelist that feeds netdev_log_read and the classifier
+	// bypass. Human-registered only, like every inventory field.
+	LogPaths []string `toml:"log_paths"`
 }
 
 // NetDevHop is a bastion/jump host on the route to devices. Hops are
@@ -288,6 +294,11 @@ func ValidateNetDev(nd NetDevConfig) error {
 				return fmt.Errorf("netdev device %q: unknown group %q", d.Name, d.Group)
 			}
 		}
+		for _, lp := range d.LogPaths {
+			if err := validateLogPath(d.Name, lp); err != nil {
+				return err
+			}
+		}
 	}
 	seenHops := map[string]bool{}
 	for _, h := range nd.Hops {
@@ -341,6 +352,24 @@ func ndGroupByName(nd NetDevConfig, name string) (NetDevGroup, bool) {
 		}
 	}
 	return NetDevGroup{}, false
+}
+
+// validateLogPath enforces the shape a log whitelist root must have: absolute,
+// lexically clean, and free of whitespace/shell metacharacters — the root is
+// spliced into commands verbatim, so a space or `;` here would be an injection
+// vector, not a path.
+func validateLogPath(device, lp string) error {
+	lp = strings.TrimSpace(lp)
+	if lp == "" {
+		return nil
+	}
+	if !strings.HasPrefix(lp, "/") {
+		return fmt.Errorf("netdev device %q: log_paths entries must be absolute (%q)", device, lp)
+	}
+	if strings.Contains(lp, "..") || strings.ContainsAny(lp, " \t\n\r;|&`$()<>\"'") {
+		return fmt.Errorf("netdev device %q: log_paths entry %q must be clean (no .., whitespace, or shell metacharacters)", device, lp)
+	}
+	return nil
 }
 
 func splitNDJumpChain(s string) []string {

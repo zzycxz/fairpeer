@@ -102,6 +102,7 @@ def load_style(config_path):
             pass
     colors = cfg.get("colors") or {}
     fonts = cfg.get("fonts") or {}
+    font_sizes = cfg.get("font_sizes") or {}
     return {
         "background": colors.get("background") or "#FFFFFF",
         "background_type": colors.get("background_type") or "",
@@ -112,13 +113,21 @@ def load_style(config_path):
         "card_bg": colors.get("card_bg") or "rgba(255,255,255,0.75)",
         "font": fonts.get("family") or '"Microsoft YaHei", sans-serif',
         "has_template": colors.get("background_type") in ("image", "solid"),
+        # D-02: 结构化默认字号——替代 Page 里的硬编码；autofit 在其上覆盖
+        "font_sizes": {k: font_sizes.get(k) for k in ("title", "card_title", "body")
+                       if isinstance(font_sizes.get(k), (int, float))},
     }
 
 
 class Page:
-    def __init__(self, style, fonts_override):
+    def __init__(self, style, fonts_override, autofit=None):
         self.s = style
+        # 字号优先级（低→高）：内置兜底 < config font_sizes（D-02）
+        # < --autofit 结果（S-01）< pages.json 每页 fonts
         f = {"title": 26, "card_title": 18, "body": 14}
+        f.update(style.get("font_sizes") or {})
+        if autofit:
+            f.update({k: autofit[k] for k in f if isinstance(autofit.get(k), (int, float))})
         f.update(fonts_override or {})
         self.f = f
         self.el = []
@@ -317,12 +326,25 @@ def main():
     ap.add_argument("pages_json", help="pages.json file (or '-' for stdin)")
     ap.add_argument("--project", required=True, help="ppt-auto project dir (writes svg_output/)")
     ap.add_argument("--config", default=None, help="template_config.json (default: skill dir)")
+    ap.add_argument("--autofit", default=None,
+                    help="autofit_fontsize.py 输出 JSON 路径（S-01：覆盖 config font_sizes；"
+                         "pages.json 每页 fonts 仍最高优先）。Step 5 生成："
+                         "autofit_fontsize.py ... > <project>/output/autofit_result.json")
     args = ap.parse_args()
 
     raw = sys.stdin.read() if args.pages_json == "-" else open(args.pages_json, "r", encoding="utf-8").read()
     doc = json.loads(raw)
     specs = doc["pages"] if isinstance(doc, dict) else doc
     style = load_style(args.config)
+
+    autofit_data = None
+    if args.autofit:
+        try:
+            with open(args.autofit, "r", encoding="utf-8") as f:
+                autofit_data = json.load(f)
+        except (OSError, ValueError) as e:
+            print(f"[build_page_skeleton] WARN: cannot read --autofit {args.autofit}: {e}",
+                  file=sys.stderr)
 
     svg_dir = os.path.join(args.project, "svg_output")
     os.makedirs(svg_dir, exist_ok=True)
@@ -333,7 +355,7 @@ def main():
         if ptype not in BUILDERS:
             out_pages.append({"index": i, "type": ptype, "error": "unknown type (skipped)"})
             continue
-        p = Page(style, spec.get("fonts"))
+        p = Page(style, spec.get("fonts"), autofit=autofit_data)
         BUILDERS[ptype](p, spec)
         # Default name carries the type suffix: keeps slide_* sort order (and
         # svg_to_pptx/QA pairing) while check_svg's filename heuristics exempt

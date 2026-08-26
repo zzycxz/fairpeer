@@ -16,61 +16,11 @@ from console_encoding import configure_utf8_stdio
 
 configure_utf8_stdio()
 
-# Canvas format definitions (unified source)
-try:
-    from config import CANVAS_FORMATS
-except ImportError:
-    # Fallback: maintain minimal usable configuration to avoid runtime crashes
-    CANVAS_FORMATS = {
-        'ppt169': {
-            'name': 'PPT 16:9',
-            'dimensions': '1280×720',
-            'viewbox': '0 0 1280 720',
-            'aspect_ratio': '16:9'
-        },
-        'ppt43': {
-            'name': 'PPT 4:3',
-            'dimensions': '1024×768',
-            'viewbox': '0 0 1024 768',
-            'aspect_ratio': '4:3'
-        },
-        'wechat': {
-            'name': 'WeChat Article Header',
-            'dimensions': '900×383',
-            'viewbox': '0 0 900 383',
-            'aspect_ratio': '2.35:1'
-        },
-        'xiaohongshu': {
-            'name': '小红书',
-            'dimensions': '1242×1660',
-            'viewbox': '0 0 1242 1660',
-            'aspect_ratio': '3:4'
-        },
-        'moments': {
-            'name': 'Moments/Instagram',
-            'dimensions': '1080×1080',
-            'viewbox': '0 0 1080 1080',
-            'aspect_ratio': '1:1'
-        },
-        'story': {
-            'name': 'Story/Vertical',
-            'dimensions': '1080×1920',
-            'viewbox': '0 0 1080 1920',
-            'aspect_ratio': '9:16'
-        },
-        'banner': {
-            'name': 'Horizontal Banner',
-            'dimensions': '1920×1080',
-            'viewbox': '0 0 1920 1080',
-            'aspect_ratio': '16:9'
-        },
-        'a4': {
-            'name': 'A4 Print',
-            'dimensions': '1240×1754',
-            'viewbox': '0 0 1240 1754',
-            'aspect_ratio': '√2:1'
-        }
-    }
+# Canvas format definitions — config.py is the single authoritative source
+# (S-17). The old ImportError fallback copy here had drifted (no width/height
+# keys) and silently degraded when config.py was unreachable; a hard import
+# fails loudly instead.
+from config import CANVAS_FORMATS
 
 CANVAS_FORMAT_ALIASES = {
     'xhs': 'xiaohongshu',
@@ -79,6 +29,26 @@ CANVAS_FORMAT_ALIASES = {
     '朋友圈': 'moments',
     '小红书': 'xiaohongshu',
 }
+
+
+def find_page_svgs(svg_dir):
+    """All page SVGs under a project's svg_output — both naming generations the
+    skill has produced: slide_NN(_type).svg and the legacy NN_type.svg (S-10).
+    Deduplicated by resolved path and ordered by page number.
+
+    READ-ONLY enumeration by design: callers that MUTATE files in place
+    (batch_check's fix_svg pass) keep their own narrower scope so legacy files
+    are never rewritten just because they were enumerated here."""
+    svg_dir = Path(svg_dir)
+    seen = {}
+    for p in list(svg_dir.glob('slide_*.svg')) + list(svg_dir.glob('[0-9]*.svg')):
+        seen.setdefault(p.resolve(), p)
+
+    def page_key(p):
+        m = re.search(r'(\d+)', p.stem)
+        return (int(m.group(1)) if m else 9999, p.name)
+
+    return sorted(seen.values(), key=page_key)
 
 
 def normalize_canvas_format(format_key: str) -> str:

@@ -221,6 +221,10 @@ def _relax_output_permissions(output_path: Path) -> list[str]:
             ['icacls', str(output_path), '/grant', '*S-1-5-32-545:R'],
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',  # icacls emits GBK on Chinese Windows — a strict
+                               # UTF-8 decode (PYTHONUTF8=1) kills the reader
+                               # thread and loses the warning (S-22)
             check=False,
         )
     except OSError as exc:
@@ -800,8 +804,10 @@ def create_pptx_with_native_svg(
                 if rId:
                     try:
                         prs.part.drop_rel(rId)
-                    except Exception:
-                        pass
+                    except KeyError:
+                        pass  # rel already absent — nothing to drop
+                    except Exception as exc:  # noqa: BLE001 — surface, don't bury
+                        print(f"[WARN] drop_rel {rId} failed: {exc}")
             # Use the template's first layout (typically the main content layout).
             # The layout carries the background image/decoration via inheritance.
             chosen_layout = prs.slide_layouts[0]
@@ -1221,6 +1227,14 @@ def create_pptx_with_native_svg(
                     content_types = content_types.replace('</Types>', override + '\n</Types>')
             with open(content_types_path, 'w', encoding='utf-8') as f:
                 f.write(content_types)
+
+        # Surface skew-dropped trace events (S-08): the conversion succeeds but
+        # skewed shapes come out un-skewed — the user should know.
+        if conversion_trace and any(
+                ev.get('type') == 'skew_dropped'
+                for sl in conversion_trace for ev in (sl.get('events') or [])):
+            print("[WARN] skew transforms dropped: not representable as native "
+                  "PPTX shapes — affected slides render un-skewed", file=sys.stderr)
 
         rels_problems = _verify_internal_rels_targets(extract_dir)
         if rels_problems:

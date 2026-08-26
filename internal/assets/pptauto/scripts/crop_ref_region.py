@@ -4,7 +4,7 @@
 Usage:
     python crop_ref_region.py <source.png> --pos center-right --share 0.3 \
         --out <project>/images/p25_shot.png [--pad 0.05]
-    python crop_ref_region.py <source.png> --x 0.05 --y 0.30 --w 0.45 --h 0.55 --out crop.png
+    python crop_ref_region.py <source.png> --rx 0.05 --ry 0.30 --rw 0.45 --rh 0.55 --out crop.png
 
 WHY: some reference regions (UI screenshots, photos, logos) cannot be redrawn
 with the 6-shape SVG vocabulary — they used to be silently DROPPED, which QA
@@ -63,7 +63,6 @@ def main():
                     help="qualitative position from the LAYOUT section (3x3 grid, e.g. top-left/center-right/full)")
     ap.add_argument("--share", type=float, default=0.2,
                     help="rough share of the PAGE AREA the region occupies (0-1); side = sqrt(share)")
-    ap.add_argument("--x", "--y", type=float, dest="unused", default=None, help=argparse.SUPPRESS)
     ap.add_argument("--rx", type=float, default=None, help="explicit normalized rect x (overrides --pos/--share)")
     ap.add_argument("--ry", type=float, default=None, help="explicit normalized rect y")
     ap.add_argument("--rw", type=float, default=None, help="explicit normalized rect width")

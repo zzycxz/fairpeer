@@ -15,7 +15,7 @@ import (
 // that should force a refresh of the released copy. Bump this when you update
 // the embedded scripts/templates/SKILL.md and want existing users to get the
 // new version on next launch.
-const SkillVersion = "45" // 45: page-skeleton generator (7 types, pages.json → SVG) + check_svg section-page exemption
+const SkillVersion = "46" // 46: issues-batch — preflight merge without template (S-21), fix_svg targeted XML repairs + pattern/mask safe-fill (S-07/13/14), check_svg canvas/CJK-shadow/patterns/graded coverage (S-03~S-06), skeleton --autofit + font_sizes (S-01/D-02), embed_images xlink/svg/downscale/quality (S-09/16/20), QA all-pages + bg fallback (D-01/D-04), CANVAS_FORMATS dedupe (S-17)
 
 // versionFileName is written into the released skill dir so we can tell whether
 // the on-disk copy matches the embedded version.

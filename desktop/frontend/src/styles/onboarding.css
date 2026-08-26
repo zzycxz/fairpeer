@@ -2809,6 +2809,8 @@
 .workbench-dock__tabs {
   align-self: flex-end;
   padding: 0 10px;
+  display: flex;
+  gap: 0;
 }
 
 .workbench-dock__tabwrap {
@@ -2817,18 +2819,46 @@
   flex: 1 1 auto;
   min-width: 40px;
   max-width: 140px;
-  border-radius: 6px 6px 0 0;
-  background: color-mix(in srgb, var(--fg-faint) 13%, transparent);
-  transition: background 0.15s ease, transform 0.1s ease;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  border: none;
+  transition: background 0.1s ease;
+}
+
+/* Chrome-style vertical separator for inactive tabs */
+.workbench-dock__tabwrap:not(.workbench-dock__tabwrap--active)::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 16px;
+  background: var(--border-soft);
+  transition: opacity 0.1s;
+}
+
+/* Hide separator on hover, on active tab, and on the tab immediately preceding them */
+.workbench-dock__tabwrap:hover::after,
+.workbench-dock__tabwrap--active::after,
+.workbench-dock__tabwrap:has(+ .workbench-dock__tabwrap--active)::after,
+.workbench-dock__tabwrap:has(+ .workbench-dock__tabwrap:hover)::after,
+.workbench-dock__tabwrap:last-child::after {
+  opacity: 0;
 }
 
 .workbench-dock__tabwrap:hover {
-  background: color-mix(in srgb, var(--fg-faint) 19%, transparent);
+  background: color-mix(in srgb, var(--fg-faint) 12%, transparent);
 }
 
 .workbench-dock__tabwrap--active,
 .workbench-dock__tabwrap--active:hover {
   background: var(--workspace-files-bg);
+  z-index: 1;
+  box-shadow: 
+    -1px 0 0 0 var(--border-soft),
+    1px 0 0 0 var(--border-soft),
+    0 -1px 0 0 var(--border-soft);
 }
 
 .workbench-dock__tab {
@@ -2840,7 +2870,7 @@
   min-width: 0;
   width: 100%;
   height: 26px;
-  padding: 0 12px;
+  padding: 0 28px 0 12px;
   border: 0;
   background: transparent;
   color: var(--fg-faint);
@@ -2857,21 +2887,22 @@
 
 .workbench-dock__tab-close {
   position: absolute;
-  right: 6px;
+  right: 4px;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border: 0;
   background: transparent;
-  color: inherit;
+  color: var(--fg-dim);
   border-radius: 50%;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s, background 0.15s;
+  z-index: 2;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
 }
 
 .workbench-dock__tab-close:hover {
@@ -3547,3 +3578,16 @@
   cursor: pointer;
 }
 .welcome__remote:hover { color: var(--text-1, #e6e9ef); border-color: var(--accent, #4c8dff); }
+
+/* 远程项目标记：仅项目行显示方式徽标（话题不加）。 */
+.project-tree__remote-badge {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: var(--radius-xs);
+  font-size: 9px;
+  line-height: 16px;
+  letter-spacing: 0.3px;
+  background: rgba(124, 134, 150, 0.22);
+  color: var(--text-2, #9aa4b5);
+}

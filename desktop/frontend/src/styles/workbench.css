@@ -2417,18 +2417,44 @@
   flex: 1 1 auto;
   min-width: 40px;
   max-width: 140px;
-  border-radius: 6px 6px 0 0;
-  background: color-mix(in srgb, var(--fg-faint) 13%, transparent);
-  transition: background 0.15s ease, transform 0.1s ease;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  border: none;
+  transition: background 0.1s ease;
+}
+
+:root[data-theme-style] .workbench-dock__tabwrap:not(.workbench-dock__tabwrap--active)::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 16px;
+  background: var(--border-soft);
+  transition: opacity 0.1s;
+}
+
+:root[data-theme-style] .workbench-dock__tabwrap:hover::after,
+:root[data-theme-style] .workbench-dock__tabwrap--active::after,
+:root[data-theme-style] .workbench-dock__tabwrap:has(+ .workbench-dock__tabwrap--active)::after,
+:root[data-theme-style] .workbench-dock__tabwrap:has(+ .workbench-dock__tabwrap:hover)::after,
+:root[data-theme-style] .workbench-dock__tabwrap:last-child::after {
+  opacity: 0;
 }
 
 :root[data-theme-style] .workbench-dock__tabwrap:hover {
-  background: color-mix(in srgb, var(--fg-faint) 19%, transparent);
+  background: color-mix(in srgb, var(--fg-faint) 12%, transparent);
 }
 
 :root[data-theme-style] .workbench-dock__tabwrap--active,
 :root[data-theme-style] .workbench-dock__tabwrap--active:hover {
   background: var(--workspace-files-bg);
+  z-index: 1;
+  box-shadow: 
+    -1px 0 0 0 var(--border-soft),
+    1px 0 0 0 var(--border-soft),
+    0 -1px 0 0 var(--border-soft);
 }
 
 :root[data-theme-style] .workbench-dock__tab {
@@ -2440,7 +2466,7 @@
   width: 100%;
   max-width: none;
   height: 27px;
-  padding: 0 12px;
+  padding: 0 28px 0 12px;
   border: 0;
   border-radius: 0;
   gap: 6px;

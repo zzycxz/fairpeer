@@ -7,18 +7,13 @@ import sys
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-# Import project utility modules
+# Import project utility modules. config.py is the single authoritative
+# CANVAS_FORMATS source (S-17) — the old fallback stub (a single ppt169 entry)
+# silently degraded format detection when config.py was unreachable; a hard
+# import fails loudly instead.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-try:
-    from project_utils import get_project_info
-    from config import CANVAS_FORMATS
-except ImportError:
-    CANVAS_FORMATS = {
-        'ppt169': {'name': 'PPT 16:9', 'dimensions': '1280×720', 'viewbox': '0 0 1280 720'},
-    }
-
-    def get_project_info(path: str) -> dict:
-        return {'format': 'unknown', 'name': Path(path).name}
+from project_utils import get_project_info  # noqa: E402
+from config import CANVAS_FORMATS  # noqa: E402
 
 # EMU conversion constants
 EMU_PER_INCH = 914400

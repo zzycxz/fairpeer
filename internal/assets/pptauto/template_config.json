@@ -42,6 +42,11 @@
   "fonts": {
     "family": "\"Microsoft YaHei\", \"微软雅黑\", \"PingFang SC\", \"Noto Sans CJK SC\", sans-serif"
   },
+  "font_sizes": {
+    "title": 26,
+    "card_title": 18,
+    "body": 14
+  },
   "mode": "fast",
   "rules": {
     "alignment": "同类元素必须对齐，间距均匀，不要参差不齐",
@@ -84,8 +89,8 @@
           "y_end": 620,
           "y_start": 90
         },
-        "description": "将内容区域(y=90~620)等分为4个纵向区域，4个区域都必须有内容元素",
-        "min_zones_with_content": 4,
+        "description": "将内容区域(y=90~620)等分为4个纵向区域，建议至少3个区域有内容元素（3/4 通过；2/4 仅 WARN 不阻塞；≤1/4 为 ERROR）",
+        "min_zones_with_content": 3,
         "zone_count": 4
       }
     },
@@ -96,6 +101,18 @@
       "pattern",
       "mask",
       "foreignObject"
+    ],
+    "forbidden_patterns": [
+      "@font-face",
+      "@import\\s+",
+      "<g[^>]*\\sopacity\\s*=",
+      "on\\w+\\s*="
+    ],
+    "forbidden_attributes": [
+      "class",
+      "onclick",
+      "onload",
+      "onmouseover"
     ],
     "text_in_box": "文字必须在框体内部，垂直居中公式：text_y = box_y + box_h/2 + font_size/3",
     "text_length": "单行不超过20个中文字符"

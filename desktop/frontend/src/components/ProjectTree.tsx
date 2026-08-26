@@ -69,6 +69,17 @@ type ProjectTreeImTopicSource = {
   remoteId?: string;
 };
 
+// remoteKindLabel shortens a remote connection kind for the project-row badge.
+function remoteKindLabel(kind: string): string {
+  switch ((kind || "").toLowerCase()) {
+    case "wsl": return "WSL";
+    case "docker": return "Docker";
+    case "ssh": return "SSH";
+    case "server": return "Srv";
+    default: return kind;
+  }
+}
+
 function projectNodeKey(node: ProjectNode, depth: number): string {
   return node.key || `${node.kind}-${node.root ?? ""}-${node.topicId ?? ""}-${depth}`;
 }
@@ -1062,6 +1073,14 @@ export function ProjectTree({
                 that ate horizontal space; user direction 2026-08-18). */}
             {isExpanded ? <FolderOpen size={14} className="project-tree__folder-icon" /> : <Folder size={14} className="project-tree__folder-icon" />}
             <span className="project-tree__folder-label">{projectLabel}</span>
+            {node.remote && (
+              <span
+                className="project-tree__remote-badge"
+                title={`${remoteKindLabel(node.remote.kind)} · ${node.remote.target}${node.remote.user ? " · " + node.remote.user : ""}`}
+              >
+                {remoteKindLabel(node.remote.kind)}
+              </span>
+            )}
           </button>
           <Tooltip label={t("projectTree.newTopicTooltip")} className="project-tree__action-slot">
             <button

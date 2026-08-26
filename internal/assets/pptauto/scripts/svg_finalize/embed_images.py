@@ -64,7 +64,8 @@ def get_file_size_str(size_bytes: int) -> str:
 
 def _optimize_image_bytes(img_bytes: bytes, mime_type: str,
                           compress: bool = False,
-                          max_dimension: int | None = None) -> bytes:
+                          max_dimension: int | None = None,
+                          quality: int = 85) -> bytes:
     """Optionally compress and/or downscale image bytes.
 
     Returns the (possibly optimized) image bytes. Falls back to the
@@ -101,7 +102,7 @@ def _optimize_image_bytes(img_bytes: bytes, mime_type: str,
         if mime_type == 'image/jpeg':
             if img.mode in ('RGBA', 'P'):
                 img = img.convert('RGB')
-            img.save(buf, format='JPEG', quality=85, optimize=True)
+            img.save(buf, format='JPEG', quality=quality, optimize=True)
         elif mime_type == 'image/png':
             img.save(buf, format='PNG', optimize=True)
         else:
@@ -117,37 +118,59 @@ def _optimize_image_bytes(img_bytes: bytes, mime_type: str,
     return img_bytes
 
 
+# Embedded-size cap (S-16). Oversized images are force-downscaled until they
+# fit — they are never left as external refs, which legacy-mode PPTX export
+# cannot resolve inside the package (broken image in modern Office).
+MAX_EMBED_SIZE = 5 * 1024 * 1024  # 5MB
+
+
+def _downscale_to_fit(img_bytes: bytes, mime_type: str, quality: int = 85) -> bytes | None:
+    """Step down max_dimension until the re-encoded bytes fit under
+    MAX_EMBED_SIZE. Returns None when even the smallest step stays over."""
+    for dim in (2560, 1920, 1280, 1024):
+        fitted = _optimize_image_bytes(img_bytes, mime_type,
+                                       compress=True, max_dimension=dim,
+                                       quality=quality)
+        if len(fitted) <= MAX_EMBED_SIZE:
+            return fitted
+    return None
+
+
 def embed_images_in_svg(svg_path: str, dry_run: bool = False,
                         compress: bool = False,
-                        max_dimension: int | None = None) -> tuple[int, int]:
+                        max_dimension: int | None = None,
+                        quality: int = 85) -> tuple[int, int]:
     """
     Convert externally referenced images in an SVG file to Base64 inline format.
 
     Args:
         svg_path: SVG file path
         dry_run: If True, only show which images would be processed without modifying the file
-        compress: If True, compress images before embedding (JPEG quality=85, PNG optimize)
+        compress: If True, compress images before embedding (JPEG uses --quality, PNG optimize)
         max_dimension: If set, downscale images exceeding this dimension on either axis
+        quality: JPEG quality for compression (S-20; mirrors svg_to_pptx --image-quality)
 
     Returns:
         tuple: (number of images processed, file size after embedding)
     """
     svg_dir = os.path.dirname(os.path.abspath(svg_path))
-    
+
     with open(svg_path, 'r', encoding='utf-8') as f:
         content = f.read()
-    
+
     original_size = len(content.encode('utf-8'))
-    
-    # Match href="xxx.png" or href="xxx.jpg" etc. (exclude those already using data:)
-    pattern = r'href="(?!data:)([^"]+\.(png|jpg|jpeg|gif|webp))"'
-    
+
+    # Match href="x.png" / xlink:href="x.png" (SVG 1.1 and SVG 2 spellings),
+    # excluding values already using data: (S-09).
+    pattern = r'((?:xlink:)?href)="(?!data:)([^"]+\.(png|jpg|jpeg|gif|webp|svg))"'
+
     images_found = []
     images_embedded = 0
-    
+
     def replace_with_base64(match):
         nonlocal images_embedded
-        img_path = match.group(1)
+        attr = match.group(1)  # keep the original attribute name (href / xlink:href)
+        img_path = match.group(2)
         
         # Decode XML/HTML entities (e.g., &amp; -> &)
         import html
@@ -174,8 +197,21 @@ def embed_images_in_svg(svg_path: str, dry_run: bool = False,
             img_bytes = img_file.read()
 
         mime_type = get_mime_type(img_path, img_bytes)
+
+        if len(img_bytes) > MAX_EMBED_SIZE:
+            print(f"   [WARN] {img_path} is {get_file_size_str(len(img_bytes))} "
+                  f"(cap {get_file_size_str(MAX_EMBED_SIZE)}) — force-downscaling before embed")
+            fitted = _downscale_to_fit(img_bytes, mime_type, quality=quality)
+            if fitted is None:
+                print(f"   [WARN] {img_path} cannot be shrunk under the cap — kept as "
+                      f"external reference (legacy-mode PPTX export will NOT embed it)")
+                images_found.append((img_path, "TOO LARGE (kept external)", img_size, None))
+                return match.group(0)
+            img_bytes = fitted
+
         optimized_bytes = _optimize_image_bytes(
-            img_bytes, mime_type, compress=compress, max_dimension=max_dimension)
+            img_bytes, mime_type, compress=compress, max_dimension=max_dimension,
+            quality=quality)
         b64_data = base64.b64encode(optimized_bytes).decode('utf-8')
 
         images_embedded += 1
@@ -187,7 +223,7 @@ def embed_images_in_svg(svg_path: str, dry_run: bool = False,
         else:
             images_found.append((img_path, "EMBEDDED", img_size, None))
 
-        return f'href="data:{mime_type};base64,{b64_data}"'
+        return f'{attr}="data:{mime_type};base64,{b64_data}"'
     
     new_content = re.sub(pattern, replace_with_base64, content)
     
@@ -233,16 +269,18 @@ Examples:
     parser.add_argument('--dry-run', '-n', action='store_true',
                         help='Only show which images would be processed, without modifying files')
     parser.add_argument('--compress', action='store_true',
-                        help='Compress images before embedding (JPEG quality=85, PNG optimize)')
+                        help='Compress images before embedding (JPEG uses --quality, PNG optimize)')
     parser.add_argument('--max-dimension', type=int, default=None,
                         help='Downscale images exceeding this dimension on either axis (e.g., 2560)')
+    parser.add_argument('--quality', type=int, default=85,
+                        help='JPEG quality when compressing (default 85; mirrors svg_to_pptx --image-quality)')
 
     args = parser.parse_args()
 
     if args.dry_run:
         print("[INFO] Dry-run mode: only preview, no modification\n")
     if args.compress:
-        print("[INFO] Compression enabled: JPEG quality=85, PNG optimize")
+        print(f"[INFO] Compression enabled: JPEG quality={args.quality}, PNG optimize")
     if args.max_dimension:
         print(f"[INFO] Max dimension: {args.max_dimension}px")
     
@@ -260,7 +298,8 @@ Examples:
         
         images, _ = embed_images_in_svg(svg_file, dry_run=args.dry_run,
                                         compress=args.compress,
-                                        max_dimension=args.max_dimension)
+                                        max_dimension=args.max_dimension,
+                                        quality=args.quality)
         if images > 0:
             total_images += images
             total_files += 1

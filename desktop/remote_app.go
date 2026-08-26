@@ -188,26 +188,16 @@ func (a *App) OpenRemoteTab(kind, target, user, root, label string) (TabMeta, er
 	return meta, nil
 }
 
-// registerRemoteProject adds the remote workspace to the profile's project
-// index under a slug key (bypassing addProject, whose normalizeProjectRoot
-// would absolutize the remote path against the local drive).
+// registerRemoteProject records the remote workspace in the remote registry
+// (remote-projects.json). The profile's projects.json is deliberately NOT
+// written: its entries are local roots, and a slug key there renders nowhere
+// (the tree's empty-project guard filters it) — stale slug entries from older
+// builds are equally inert, so no cleanup migration is needed.
 func registerRemoteProject(ref RemoteRef, root, title, profile string) {
-	key := remoteProjectSlugKey(ref, root)
+	_ = profile
 	if title == "" {
 		title = ref.Label
 	}
-	f := loadProjectsFile(profile)
-	for i, p := range f.Projects {
-		if p.Root == key {
-			if title != "" {
-				f.Projects[i].Title = title
-			}
-			_ = saveProjectsFile(f, profile)
-			return
-		}
-	}
-	f.Projects = append(f.Projects, desktopProject{Root: key, Title: title})
-	_ = saveProjectsFile(f, profile)
 	upsertRemoteProject(ref, root, title)
 }
 

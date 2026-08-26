@@ -514,6 +514,19 @@ def convert_svg_to_slide_shapes(
         trace_events=trace_events,
     )
 
+    # Skew transforms silently collapse in parse_transform's 5-tuple (S-08):
+    # record it so the builder can warn instead of mangling the shape quietly.
+    if trace_events is not None:
+        skew_transforms = [el.get('transform') for el in root.iter()
+                           if el.get('transform') and re.search(r'\bskew[XY]\s*\(', el.get('transform'))]
+        if skew_transforms:
+            trace_events.append({
+                'type': 'skew_dropped',
+                'count': len(skew_transforms),
+                'sample': skew_transforms[0],
+                'note': 'skew transforms are not representable as native DrawingML and were dropped',
+            })
+
     shapes: list[str] = []
     converted = 0
     skipped = 0

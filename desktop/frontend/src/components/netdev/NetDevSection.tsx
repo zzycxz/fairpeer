@@ -26,7 +26,7 @@ type EditHop = NetDevSettingsView["hops"][number];
 const emptyDevice = (): EditDevice => ({
   name: "", vendor: "huawei", os: "vrp8", model: "", address: "", port: 22,
   via: [], group: "", username: "", passwordEnv: "", passwordSet: false,
-  identityFile: "", encoding: "auto", allowTelnet: false, password: "",
+  identityFile: "", encoding: "auto", allowTelnet: false, password: "", logPaths: [],
 });
 
 const emptyHop = (): EditHop => ({
@@ -395,6 +395,13 @@ export function NetDevSection() {
               <select className="mem-select" value={editingDevice.encoding || "auto"} onChange={e => setEditingDevice({ ...editingDevice, encoding: e.target.value })}>
                 {["auto", "utf-8", "gbk"].map(x => <option key={x} value={x}>{x}</option>)}
               </select>
+            </Field>
+            <Field label="日志路径白名单（逗号分隔）">
+              <input
+                className="mem-input" placeholder="/var/log 已默认放行；如 /opt/app/logs、/usr/local/tomcat/logs"
+                value={(editingDevice.logPaths ?? []).join(",")}
+                onChange={e => setEditingDevice({ ...editingDevice, logPaths: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })}
+              />
             </Field>
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>

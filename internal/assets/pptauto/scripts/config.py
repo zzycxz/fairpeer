@@ -529,7 +529,10 @@ SVG_CONSTRAINTS = {
     # Forbidden patterns (regex matching)
     'forbidden_patterns': [
         r'@font-face',  # Web fonts
-        r'rgba\s*\(',   # rgba colors (PPT incompatible)
+        # rgba() is NOT banned: the native converter maps it to
+        # <a:solidFill><a:srgbClr><a:alpha> and the PNG fallback rasterizes it
+        # (S-02); template_config.json and SKILL.md rule 4 both prescribe rgba
+        # for semi-transparent card backgrounds.
         r'<\?xml-stylesheet\b',  # External CSS
         r'<link[^>]*rel\s*=\s*["\']stylesheet["\']',
         r'@import\s+',  # External CSS

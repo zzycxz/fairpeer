@@ -24,7 +24,7 @@ import "../styles/netdev.css";
 // (session title · rename · workspace subtitle, supplied by App) and appends
 // the 运维-specific chips after it — title on the left, mode bits on the right.
 export function NetdevTitleBar({ leading, onOpenSettings }: { leading?: ReactNode; onOpenSettings?: (tab: string) => void }) {
-  const [name, setName] = useState("");
+  const [, setName] = useState("");
   const [projects, setProjects] = useState<{ name: string; groups: string[]; note?: string }[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [active, setActive] = useState<{ name: string; groups: string[] } | null>(null);

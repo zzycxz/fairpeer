@@ -281,6 +281,14 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 	}
 
 	class := drv.Classify(command)
+	if class != driver.Read {
+		// Log-whitelist bypass (logsource.go): tail/head/grep/wc with one path
+		// inside the device's log roots (/var/log + log_paths) is read even off
+		// the built-in table. Still one plain metachar-free line at this point.
+		if c, ok := logPathReadOverride(device, drv, command); ok {
+			class = c
+		}
+	}
 	base := ExecResult{Device: deviceName, Command: command, Class: class.String()}
 	if class != driver.Read {
 		base.Refused = true
@@ -525,6 +533,7 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&assessTool{m: m})
 	reg.Add(&baselineTool{m: m})
 	reg.Add(&redfishTool{m: m})
+	reg.Add(&logReadTool{m: m})
 }
 
 // redfishTool — the BMC channel: ONE GET-only Redfish request against a
@@ -906,6 +915,58 @@ func (t *discoverTool) Execute(ctx context.Context, args json.RawMessage) (strin
 }
 
 type execTool struct{ m *Manager }
+
+// logReadTool — the structured log-source read: the agent names a log source
+// (file:/journal:/docker:) instead of free-handing shell; the composed command
+// still rides the sealed Exec path (classifier, budget, redaction, audit).
+type logReadTool struct{ m *Manager }
+
+func (t *logReadTool) Name() string { return "netdev_log_read" }
+
+func (t *logReadTool) Description() string {
+	return "Read ONE log source on a configured device (usually vendor=linux). " +
+		"Source forms: file:/var/log/nginx/error.log (path must be under /var/log or the device's log_paths whitelist), " +
+		"journal:nginx (a systemd unit, use since/grep for time windows), docker:<container>. " +
+		"Returns the last tail_n lines (default 100, max 1000), optionally filtered by since (ISO date-time or -1h style) and grep (regex), " +
+		"with secrets redacted before they reach the context. Runs through the same read-only seal as netdev_exec."
+}
+
+func (t *logReadTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"device": {"type": "string", "description": "device name from netdev_devices"},
+			"source": {"type": "string", "description": "file:/abs/path | journal:<unit> | docker:<container>"},
+			"tail_n": {"type": "integer", "description": "lines to return (default 100, max 1000)"},
+			"since":  {"type": "string", "description": "keep lines from this time on: 2026-08-27 10:00:00 or -1h (journal sources pass it server-side)"},
+			"grep":   {"type": "string", "description": "regex filter applied to lines"}
+		},
+		"required": ["device", "source"]
+	}`)
+}
+
+func (t *logReadTool) ReadOnly() bool { return true }
+
+func (t *logReadTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		Device string `json:"device"`
+		Source string `json:"source"`
+		TailN  int    `json:"tail_n"`
+		Since  string `json:"since"`
+		Grep   string `json:"grep"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", err
+	}
+	if a.Device == "" || strings.TrimSpace(a.Source) == "" {
+		return "", errors.New("netdev_log_read: device and source are required")
+	}
+	b, err := json.Marshal(t.m.LogRead(ctx, a.Device, strings.TrimSpace(a.Source), a.TailN, strings.TrimSpace(a.Since), strings.TrimSpace(a.Grep)))
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
 
 func (t *execTool) Name() string { return "netdev_exec" }
 

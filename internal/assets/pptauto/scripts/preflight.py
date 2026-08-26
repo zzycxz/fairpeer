@@ -49,6 +49,12 @@ def main():
     if tpl.exists():
         rc, out = run([py, str(SCRIPTS / "extract_template_colors.py"), str(tpl), str(cfg_path)])
         summary["steps"].append({"step": "extract_template_colors", "rc": rc, "out": out[-400:]})
+    # Merge runs whenever ANY VLM style file exists — a reference image's
+    # colors must reach the config even when the user picked no template
+    # (S-21: the merge used to be gated on the template and silently skipped).
+    has_style = any((FAIRPEER_DIR / name).exists()
+                    for name in ("ppt-template-style.json", "reference-style.json"))
+    if tpl.exists() or has_style:
         rc, out = run([py, str(SCRIPTS / "merge_vlm_style.py"), str(cfg_path)])
         summary["steps"].append({"step": "merge_vlm_style", "rc": rc, "out": out[-400:]})
 

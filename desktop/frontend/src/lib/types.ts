@@ -1680,6 +1680,8 @@ export interface NetDevDeviceView {
   identityFile: string;
   encoding: string;
   allowTelnet: boolean;
+  // Extra log-directory whitelist roots (outside /var/log) for log-source reads.
+  logPaths: string[];
   password?: string;
 }
 

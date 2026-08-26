@@ -84,6 +84,7 @@ def probe_audio_duration(audio_path: Path) -> float | None:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="replace",  # localized ffprobe messages may not be UTF-8 (S-22)
         )
         data = json.loads(result.stdout or "{}")
         duration = float(data.get("format", {}).get("duration", 0))

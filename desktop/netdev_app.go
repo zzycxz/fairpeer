@@ -39,6 +39,9 @@ type NetDevDeviceView struct {
 	IdentityFile string   `json:"identityFile"`
 	Encoding     string   `json:"encoding"`
 	AllowTelnet  bool     `json:"allowTelnet"`
+	// LogPaths whitelists extra log roots (outside /var/log) for this device —
+	// the file: log-source whitelist (netdev_log_read / the classifier bypass).
+	LogPaths []string `json:"logPaths"`
 	// Password is write-only from the form: blank = leave the stored secret
 	// untouched; non-blank = store it under the netdev namespace.
 	Password string `json:"password,omitempty"`
@@ -166,6 +169,7 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 			Username: d.Username, PasswordEnv: d.PasswordEnv,
 			PasswordSet:  netdevSecretSet(netdev.SecretKindPassword, d.PasswordEnv),
 			IdentityFile: d.IdentityFile, Encoding: d.Encoding, AllowTelnet: d.AllowTelnet,
+			LogPaths: d.LogPaths,
 		})
 	}
 	for _, h := range cfg.NetDev.Hops {
@@ -180,6 +184,19 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 		v.Groups = append(v.Groups, g.Name)
 	}
 	return v, nil
+}
+
+// cleanLogPaths trims/normalizes the form's log_paths before persisting; the
+// config validator does the strict rejection, the form just avoids whitespace
+// noise from comma-separated input.
+func cleanLogPaths(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func netdevSecretSet(kind, envName string) bool {
@@ -297,6 +314,7 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 				Username: strings.TrimSpace(d.Username), PasswordEnv: strings.TrimSpace(d.PasswordEnv),
 				IdentityFile: strings.TrimSpace(d.IdentityFile), Encoding: strings.TrimSpace(d.Encoding),
 				AllowTelnet: d.AllowTelnet,
+				LogPaths:    cleanLogPaths(d.LogPaths),
 			})
 		}
 		for _, h := range v.Hops {

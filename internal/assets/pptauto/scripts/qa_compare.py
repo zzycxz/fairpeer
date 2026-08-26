@@ -219,18 +219,28 @@ def data_url(path):
 
 
 def _deck_background(home):
-    """The deck's background color: template_config.json's colors.background
-    (what merge_vlm_style last wrote). Template-mode SVGs deliberately draw NO
-    background — rendered standalone their transparent canvas shows as BLACK to
-    the VLM, which QA then misreads as an inverted background (3 false MAJORs
-    on a real 32-page run). Compositing onto the deck background fixes it."""
+    """The deck's background color (D-04 fallback chain):
+    template_config.json's colors.background (what merge_vlm_style last wrote)
+    → reference-style.json's TOP-LEVEL background (flat field, not colors.*)
+    → #FFFFFF. Template-mode SVGs deliberately draw NO background — rendered
+    standalone their transparent canvas shows as BLACK to the VLM, which QA
+    then misreads as an inverted background. Compositing onto the deck
+    background fixes it."""
+    bg = ""
     try:
         with open(os.path.join(home, ".fairpeer", "skills", "ppt-auto",
                                "template_config.json"), "r", encoding="utf-8") as f:
             bg = str((json.load(f).get("colors") or {}).get("background") or "")
-        return bg if bg.startswith("#") and len(bg) == 7 else "#FFFFFF"
     except (OSError, ValueError):
-        return "#FFFFFF"
+        pass
+    if not (bg.startswith("#") and len(bg) == 7):
+        try:
+            with open(os.path.join(home, ".fairpeer", "reference-style.json"),
+                      "r", encoding="utf-8") as f:
+                bg = str(json.load(f).get("background") or "")
+        except (OSError, ValueError):
+            bg = ""
+    return bg if bg.startswith("#") and len(bg) == 7 else "#FFFFFF"
 
 
 def _flatten_alpha(png_path, bg_hex):
@@ -429,7 +439,13 @@ def main():
     args = ap.parse_args()
 
     svg_dir = os.path.join(args.project_dir, "svg_output")
-    svgs = sorted(glob.glob(os.path.join(svg_dir, "slide_*.svg")))
+    # S-10: 统一枚举两种命名世代（slide_NN*.svg 与旧版 NN_type.svg）；
+    # 只读用途——batch_check 的 fix 原地改写不在此扩围
+    try:
+        from project_utils import find_page_svgs
+        svgs = find_page_svgs(svg_dir)
+    except ImportError:
+        svgs = sorted(glob.glob(os.path.join(svg_dir, "slide_*.svg")))
     report_path = os.path.join(args.project_dir, "qa-report.json")
     sampled = False
     keep = None
@@ -461,6 +477,16 @@ def main():
     refs = reference_pages(home)
     rubric_mode = not refs  # topic-driven decks: absolute-standard review, no reference
 
+    # VLM availability check BEFORE rendering (M-6): rendering every page and
+    # then discovering there is no key wastes the whole render pass.
+    cfg, config_dir = load_fairpeer_config()
+    vlm, why_not = (None, "vlm_config_missing")
+    if cfg is not None:
+        vlm, why_not = resolve_vlm(cfg, config_dir)
+    if vlm is None:
+        emit(report(args.round, True, why_not, [], "视觉 QA 跳过：%s" % why_not))
+        return 0
+
     # Render the generated slides (render errors degrade per page, not globally).
     render_dir = os.path.join(args.project_dir, "qa-render")
     os.makedirs(render_dir, exist_ok=True)
@@ -477,15 +503,6 @@ def main():
         except Exception as e:  # noqa: BLE001 — any render failure degrades that page
             gen_pages.append((idx, svg, None))
 
-    # VLM access: any failure here is a QA-skip, never a deck blocker.
-    cfg, config_dir = load_fairpeer_config()
-    vlm, why_not = (None, "vlm_config_missing")
-    if cfg is not None:
-        vlm, why_not = resolve_vlm(cfg, config_dir)
-    if vlm is None:
-        emit(report(args.round, True, why_not, [], "视觉 QA 跳过：%s" % why_not))
-        return 0
-
     # Pair reference pages with generated slides (page N ↔ slide N). In rubric
     # mode there is no reference: every generated page pairs with itself only
     # positionally (ref=None) and is judged by the absolute standard.
@@ -494,10 +511,18 @@ def main():
         for idx, _, gen_png in gen_pages:
             pairs.append((idx, None, gen_png))
     else:
+        covered = set()
         for n, ref_png in refs:
             if n <= len(gen_pages):
+                covered.add(n)
                 _, _, gen_png = gen_pages[n - 1]
                 pairs.append((n, ref_png, gen_png))
+        # Single-image reference (D-01): only page 1 resembles the reference;
+        # the rest of the deck still gets QA via the absolute-standard rubric
+        # instead of silently skipping visual review.
+        for idx, _, gen_png in gen_pages:
+            if idx not in covered:
+                pairs.append((idx, None, gen_png))
 
     # ── Resumable rounds ──
     # The skill's bash tool kills commands at ~2 minutes; a 32-page compare

@@ -68,6 +68,17 @@ def load_config(config_path=None, svg_path=None):
     return config
 
 
+def cjk_char_units(ch):
+    """CJK 字符约占 1em、Latin 约 0.55em——与 build_page_skeleton.cjk_w 一致。"""
+    return 1.0 if ord(ch) > 0x2E80 else 0.55
+
+
+def estimate_text_width(text, font_size):
+    """CJK 感知的文字宽度估算（S-05）。旧的 len*0.6 对中文偏小（漏报溢出）、
+    对英文偏大（误报溢出）。"""
+    return sum(cjk_char_units(c) for c in text) * font_size
+
+
 def parse_text_elements(content):
     """解析所有 text 元素"""
     texts = []
@@ -89,7 +100,8 @@ def parse_text_elements(content):
             texts.append({
                 "x": x, "y": y, "size": font_size,
                 "content": text_content,
-                "width": len(text_content) * font_size * 0.6
+                "width": len(text_content) * font_size * 0.6,
+                "width_cjk": estimate_text_width(text_content, font_size),
             })
     except ET.ParseError:
         for match in re.finditer(
@@ -99,7 +111,8 @@ def parse_text_elements(content):
             texts.append({
                 "x": int(match.group(1)), "y": int(match.group(2)),
                 "size": int(match.group(3)), "content": match.group(4),
-                "width": len(match.group(4)) * int(match.group(3)) * 0.6
+                "width": len(match.group(4)) * int(match.group(3)) * 0.6,
+                "width_cjk": estimate_text_width(match.group(4), int(match.group(3))),
             })
     return texts
 
@@ -160,16 +173,22 @@ def parse_rect_elements(content):
     return rects
 
 
-def check_text_overflow(texts, rects):
+def check_text_overflow(texts, rects, canvas_w=1280, canvas_h=720):
     """检查文字溢出边界（精确版）"""
     issues = []
     for text in texts:
         # 右边界
-        if text["x"] + text["width"] > 1280:
-            overflow = text["x"] + text["width"] - 1280
+        if text["x"] + text["width"] > canvas_w:
+            overflow = text["x"] + text["width"] - canvas_w
             issues.append(("error", f"文字 '{text['content'][:20]}' 超出右边界 {overflow:.0f}px"))
+        # CJK 影子检查（S-05 影子模式）：CJK 估算已溢出而旧公式未报 → WARN 不阻塞；
+        # 观察一轮真实误报后与 S-04 的分级同批切换为 error
+        elif text["x"] + text.get("width_cjk", text["width"]) > canvas_w:
+            overflow = text["x"] + text["width_cjk"] - canvas_w
+            issues.append(("warn", f"[shadow] CJK 估算下文字 '{text['content'][:20]}' "
+                                   f"可能超出右边界 ~{overflow:.0f}px（影子模式，不阻塞）"))
         # 下边界
-        if text["y"] > 720:
+        if text["y"] > canvas_h:
             issues.append(("error", f"文字 '{text['content'][:20]}' 超出下边界 (y={text['y']})"))
         # 左边界
         if text["x"] < 0:
@@ -293,11 +312,16 @@ def check_vertical_coverage(texts, rects, config):
     filled_count = len(zones_with_content)
     if filled_count < min_zones:
         empty_zones = [i for i in range(zone_count) if i not in zones_with_content]
-        return [("error", f"垂直覆盖不足: {zone_count}个区域仅{filled_count}个有内容")]
+        # 分级（S-04）：严重不足（≤ min_zones-2，如 4 区只有 0-1 个）→ ERROR；
+        # 轻度不足（如 4 区只有 2 个）→ WARN 不阻塞。垂直覆盖是建议而非强制。
+        if filled_count <= max(0, min_zones - 2):
+            return [("error", f"垂直覆盖不足: {zone_count}个区域仅{filled_count}个有内容")]
+        return [("warn", f"垂直覆盖偏低: {zone_count}个区域仅{filled_count}个有内容"
+                         f"（建议 {min_zones}/{zone_count}，不阻塞）")]
     return []
 
 
-def check_spatial_coverage(texts, rects, config):
+def check_spatial_coverage(texts, rects, config, canvas_w=1280):
     """检查空间覆盖率"""
     density_config = config.get("rules", {}).get("content_density", {})
     vc_config = density_config.get("vertical_coverage", {})
@@ -306,7 +330,7 @@ def check_spatial_coverage(texts, rects, config):
     y_end = vc_config.get("content_area", {}).get("y_end", 620)
     min_ratio = sc_config.get("min_coverage_ratio", 0.45)
 
-    total_area = 1160 * (y_end - y_start)
+    total_area = (canvas_w - 120) * (y_end - y_start)
     if total_area <= 0:
         return []
 
@@ -348,6 +372,14 @@ def check_svg(svg_path, config=None, mode="fast"):
     if config is None:
         config = load_config()
 
+    # 画布尺寸来自 config（S-03）——默认兜底 1280×720
+    canvas_cfg = config.get("canvas") or {}
+    try:
+        canvas_w = int(canvas_cfg.get("width") or 1280)
+        canvas_h = int(canvas_cfg.get("height") or 720)
+    except (TypeError, ValueError):
+        canvas_w, canvas_h = 1280, 720
+
     with open(svg_path, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -386,7 +418,7 @@ def check_svg(svg_path, config=None, mode="fast"):
     # 2. 背景
     try:
         root = ET.fromstring(content)
-        vb = root.get("viewBox", "0 0 1280 720").split()
+        vb = root.get("viewBox", "0 0 %d %d" % (canvas_w, canvas_h)).split()
         vb_w, vb_h = float(vb[2]), float(vb[3])
         # 检测全屏 rect 或 image（覆盖 ≥90% viewBox）
         full_screen_elem = None
@@ -431,6 +463,27 @@ def check_svg(svg_path, config=None, mode="fast"):
         if f"<{elem}" in content:
             errors.append(f"包含禁止元素: <{elem}>")
 
+    # 3b. 禁止模式/属性（S-06）——WARN 级别，不阻塞。
+    # 注意 id 不在 forbidden_attributes：native 模式的动画编组与渐变/<use>
+    # 引用都依赖 id，WARN 会被返工循环当待办"修"掉而断动画/渐变。
+    for pat in config.get("rules", {}).get("forbidden_patterns", []):
+        try:
+            if re.search(pat, content):
+                warnings.append(f"包含禁止模式: {pat}")
+        except re.error:
+            continue
+    forbidden_attrs = config.get("rules", {}).get("forbidden_attributes", [])
+    if forbidden_attrs:
+        try:
+            rule_root = ET.fromstring(content)
+        except ET.ParseError:
+            rule_root = None
+        if rule_root is not None:
+            for el in rule_root.iter():
+                for attr in forbidden_attrs:
+                    if attr in el.attrib:
+                        warnings.append(f"禁止属性 {attr} 于 <{el.tag.split('}')[-1]}>")
+
     # === 深度检查（内容密度/溢出/重叠/覆盖/对齐/间距）——仅 validate 模式 ===
     # fast 模式只跑上面的基础检查（XML/背景/禁止元素），跳过耗时的深度检查
     if mode == "validate":
@@ -454,7 +507,7 @@ def check_svg(svg_path, config=None, mode="fast"):
                 warnings.append(f"内容偏少: {text_count} 个文字 (建议 {min_text}+)")
 
         # 5. 文字溢出（精确检测）
-        overflow_issues = check_text_overflow(texts, rects)
+        overflow_issues = check_text_overflow(texts, rects, canvas_w, canvas_h)
         for level, msg in overflow_issues:
             if level == "error":
                 errors.append(msg)
@@ -470,11 +523,14 @@ def check_svg(svg_path, config=None, mode="fast"):
         if not is_sparse_ok:
             vc_issues = check_vertical_coverage(texts, rects, config)
             for level, msg in vc_issues:
-                errors.append(msg)
+                if level == "error":
+                    errors.append(msg)
+                else:
+                    warnings.append(msg)
 
         # 8. 空间覆盖 — 同上，封面/结尾/章节页不受空间覆盖率约束
         if not is_sparse_ok:
-            sc_issues = check_spatial_coverage(texts, rects, config)
+            sc_issues = check_spatial_coverage(texts, rects, config, canvas_w)
             for level, msg in sc_issues:
                 if level == "error":
                     errors.append(msg)
