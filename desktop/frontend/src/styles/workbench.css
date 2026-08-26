@@ -2413,10 +2413,13 @@
 
 :root[data-theme-style] .workbench-dock__tabwrap {
   position: relative;
-  flex: 0 0 auto;
-  clip-path: polygon(9px 0, calc(100% - 9px) 0, 100% 100%, 0 100%);
+  display: inline-flex;
+  flex: 1 1 auto;
+  min-width: 40px;
+  max-width: 140px;
+  border-radius: 6px 6px 0 0;
   background: color-mix(in srgb, var(--fg-faint) 13%, transparent);
-  transition: background 0.12s;
+  transition: background 0.15s ease, transform 0.1s ease;
 }
 
 :root[data-theme-style] .workbench-dock__tabwrap:hover {
@@ -2430,20 +2433,22 @@
 
 :root[data-theme-style] .workbench-dock__tab {
   position: relative;
-  flex: 0 0 auto;
-  min-width: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+  width: 100%;
   max-width: none;
   height: 27px;
-  width: auto;
-  padding: 0 28px 0 14px;
+  padding: 0 12px;
   border: 0;
   border-radius: 0;
-  justify-content: flex-start;
   gap: 6px;
   color: var(--fg-faint);
   font-size: 12px;
   font-weight: 600;
   background: transparent;
+  cursor: pointer;
 }
 
 :root[data-theme-style] .workbench-dock__tab svg {

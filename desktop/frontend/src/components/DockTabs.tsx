@@ -129,11 +129,10 @@ export function DockTabs<K extends string>({
         ariaLabel={addLabel}
         onClose={() => setAddPoint(null)}
         items={tabs
-          .filter((def) => !isOpen(def.key))
           .map((def) => ({
             key: def.key,
             icon: def.icon,
-            label: def.label,
+            label: isOpen(def.key) ? `${def.label} (打开)` : def.label,
             onSelect: () => {
               setAddPoint(null);
               onSelect(def.key);

@@ -59,7 +59,6 @@ export function NetdevTitleBar({ leading, onOpenSettings }: { leading?: ReactNod
   return (
     <div className="ndv__titlebar">
       {leading}
-      <span className="ndv__netname" title="网络名称（设置 → 运维 可修改）">{name || "…"}</span>
       {projects.length > 0 && (
         <span
           className="ndv__project"
@@ -80,12 +79,7 @@ export function NetdevTitleBar({ leading, onOpenSettings }: { leading?: ReactNod
           <span role="menuitem" onClick={() => { setMenuOpen(false); onOpenSettings?.("netdev"); }}>管理项目…</span>
         </span>
       )}
-      <span
-        className="ndv__badge"
-        role="button"
-        title="安全策略入口：结构性只读（无开关，地板）· 设备组策略（只读/提案/双确认）· 提案审批与变更窗口 · 安全评估 engagement · 点击打开设置"
-        onClick={() => onOpenSettings?.("netdev")}
-      >[ 诊断·只读 ]</span>
+
       {err && <span className="ndv__stat" style={{ color: "var(--err)" }}>{err}</span>}
       <span className="ndv__stop" role="button" onClick={() => void stop()}>⏹ 紧急停止</span>
     </div>
@@ -839,6 +833,16 @@ export function NetDevLayout({
         {tab === "audit" && (
           <div className="ndv__card">
             <div className="ndv__card-title">审计（最近 {audit.length} 条）</div>
+            
+            <div style={{ display: "flex", alignItems: "center", gap: "16px", paddingBottom: "12px", marginBottom: "12px", borderBottom: "1px solid var(--border-soft)", fontSize: "12px", opacity: 0.9, fontVariantNumeric: "tabular-nums" }}>
+              <span className="ndv__bottom-item"><span className="ndv__ok">今日只读</span> {readCount}</span>
+              <span className="ndv__bottom-item"><span className="ndv__ok">写操作(直连)</span> <span className="ndv__zero">{writeCount}</span></span>
+              <span className="ndv__bottom-item">
+                提案 {pendingCount > 0 ? <span className="ndv__warn">{pendingCount} 待处理</span> : <span className="ndv__zero">0</span>}
+              </span>
+              <span className="ndv__bottom-note">结构性只读：写命令无执行路径 · 全量审计中</span>
+            </div>
+
             {audit.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>&gt;&gt; NULL_DATA: 还没有操作记录。每条设备命令（含拒绝）都会落审计。</div>}
             <div className="ndv__audit-table">
               <div className="ndv__audit-row ndv__audit-row--head">
@@ -860,15 +864,6 @@ export function NetDevLayout({
         </div>
       </div>
       )}
-
-      <div className="ndv__bottom">
-        <span className="ndv__bottom-item"><span className="ndv__ok">今日只读</span> {readCount}</span>
-        <span className="ndv__bottom-item"><span className="ndv__ok">写操作(直连)</span> <span className="ndv__zero">{writeCount}</span></span>
-        <span className="ndv__bottom-item">
-          提案 {pendingCount > 0 ? <span className="ndv__warn">{pendingCount} 待处理</span> : <span className="ndv__zero">0</span>}
-        </span>
-        <span className="ndv__bottom-note">结构性只读：写命令无执行路径 · 全量审计中</span>
-      </div>
     </div>
   );
 }

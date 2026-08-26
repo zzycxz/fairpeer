@@ -404,7 +404,8 @@
   gap: 12px;
   flex: 1;
   min-width: 0;
-  padding: 0 8px;
+  height: 100%;
+  padding-right: 12px;
 }
 .ndv__titlebar > .ndv__netname,
 .ndv__titlebar > .ndv__project,
