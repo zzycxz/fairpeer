@@ -18,6 +18,7 @@ spec 定稿见 `docs/NETDEV_SPEC_V2.md`（675 行，含 UI 契约与 15 条裁�
 - **R3 事件与时序**：`netdev_locate`（IP/MAC 全网 ARP 扇出定位，清单页签顶部入口）；通知出口（webhook + 飞书/钉钉/企微原生模板 + 严重度过滤 + `fairpeer://` 深链）；时序面 v1（JSONL 零依赖 + SNMP 轮询采集 + 设备卡 Sparkline）；报告族四件（值班交接/周报/凭证盘点 + 既有晨报）
 - **设置三级导航（§10.9）**：表单进三级页、弹框只留阻塞确认——L3 翻页动画（reduced-motion 降级）+ 六表单迁移 + 未保存确认 + kind 选择题表单
 - **含上会话在途 P2 收口**：syslog 被动接收/告警规则/审计哈希链/日志 follow/DB 只读诊断源（mysql/pg/redis 白名单）
+- **数据库引擎扩展（0.1.10 增补）**：新增 mongodb（canonical-JSON 命令白名单，$-操作符结构性拒绝）/ mssql（sys.dm_* 视图精确语句白名单）/ clickhouse（HTTP GET 接口，URL 编码天然防注入）/ elasticsearch（GET 端点路径白名单）——共 7 引擎；TiDB/OceanBase（MySQL 模式）直接用 mysql 类型；Oracle/达梦待驱动评估
 - 验证：go 双模块 + `internal/netdev` 全量测试 + 前端构建全绿；**真机冒烟待做**（三个 API 客户端目前仅 httptest 验证）
 
 
@@ -42,6 +43,13 @@ spec 定稿见 `docs/NETDEV_SPEC_V2.md`（675 行，含 UI 契约与 15 条裁�
 - 附带：cowork/onboarding 遗漏的圆角令牌化补齐（regex 全量）
 - 已知边界（P1）：远程 tab 的记忆/技能/MCP 热插拔/专家协作为本地特性暂不可用（接口返回 not-supported）；远程会话离线时不在侧栏枚举（重连后恢复）；ExpertCollab/Item 事件不在 wire 上（与桌面本地 toWire 行为一致）
 - **测试套件修复（配合分支 WIP「0 轮话题在树中隐藏」的新行为）**：新增 `seedTopicTurn` 测试助手（写一条 user 消息 + `.meta` 侧车使话题计 1 轮），9 个 topic 可见性测试按新行为对齐；修复 WIP 中 `reviveParkedTabs` 的死过滤条件（停靠态 `Ready=true`，原 `!Ready` 永不匹配——改为 `Ctrl==nil && StartupErr==""`），`TestSetDefaultModelRevivesParkedTabs` 转绿；**desktop 全量测试套件自 WIP 以来首次全绿（142s ok）**
+
+### 歧义收口 + dream 泄漏修复 — 08-27
+
+- **context7 整体撤除**：`internal/builtinmcp` 包删除（含测试）；config/render/profiles/boot/control/desktop 全链路清空——`[builtin_mcp]` 段不再渲染、`HiddenPlugins` 只留 codegraph、ccswitch 文档 MCP 表去项；`UpsertPlugin` 预留名守卫（feishu/lark/qq/weixin/telegram + codegraph/context7）拒绝混名安装并给可操作指引（机器人网关不是 MCP server），存量守卫前条目仍可替换；3 个守卫测试
+- **dream 任务书泄漏根治**：后台自进化子代理原先复用宿主 tab sink，任务书正文流进转写/输入框（ppt-capability-upgrade-spec P3 根因 agent.go:721）——新增 `quietDreamSink` 只放行 Usage/Notice/TurnDone（完全隐藏；DreamRunView 另行报告状态）+ 2 个测试
+- **TestTurnDone 确定性重构**：改为先等自动保存循环 idle 再读文件一次——写者仍在飞行时轮询读文件正是全量负载下偶发失败的窗口；连过 3 轮
+- **UsageChip 悬浮面板验收 + 补键**：无头 Edge 悬停 mock 截图确认面板（42,124/128,000 · 32.9% · 平均缓存命中率 94.2% hero 行 · 会话累计分区，证据 `gui-test-screenshots/usage-hover-panel.png`）；验收抓出并补齐 zh/en 缺失的 5 个键——elapsed（用时行曾裸显键名 `composer.usageDetail.elapsed`）/compactLabel/compactHint/compactDone/compactFail
 
 ## [编码体验升级 M0–M3] — 2026-08-21
 

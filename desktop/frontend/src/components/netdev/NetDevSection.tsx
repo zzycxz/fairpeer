@@ -686,9 +686,10 @@ export function NetDevSection() {
             <Field label="类型">
               <select className="mem-select" value={editingDB.type} onChange={e => {
                 const t = e.target.value;
-                setEditingDB({ ...editingDB, type: t, port: t === "mysql" ? 3306 : t === "postgres" ? 5432 : 6379 });
+                const DEF_PORTS: Record<string, number> = { mysql: 3306, postgres: 5432, redis: 6379, mongodb: 27017, mssql: 1433, clickhouse: 8123, elasticsearch: 9200 };
+                setEditingDB({ ...editingDB, type: t, port: DEF_PORTS[t] ?? 3306 });
               }}>
-                {["mysql", "postgres", "redis"].map(x => <option key={x} value={x}>{x}</option>)}
+                {["mysql", "postgres", "redis", "mongodb", "mssql", "clickhouse", "elasticsearch"].map(x => <option key={x} value={x}>{x}</option>)}
               </select>
             </Field>
             <Field label="地址 *"><input className="mem-input" value={editingDB.host} onChange={e => setEditingDB({ ...editingDB, host: e.target.value })} /></Field>

@@ -29,6 +29,15 @@ const DB_QUICK: Record<string, string[]> = {
     "SELECT * FROM pg_stat_replication",
   ],
   redis: ["slowlog get 10", "info", "info memory", "dbsize", "client list"],
+  mongodb: ['{"ping":1}', '{"serverStatus":1}', '{"dbStats":1}', '{"listDatabases":1}', '{"currentOp":1}'],
+  mssql: [
+    "SELECT * FROM sys.dm_exec_requests",
+    "SELECT session_id, status, login_name FROM sys.dm_exec_sessions",
+    "SELECT name, state_desc FROM sys.databases",
+    "SELECT * FROM sys.dm_os_sys_info",
+  ],
+  clickhouse: ["SHOW PROCESSLIST", "SHOW TABLES", "SELECT * FROM system.metrics LIMIT 50", "SELECT database, name, total_bytes FROM system.parts LIMIT 20"],
+  elasticsearch: ["/_cluster/health", "/_cat/indices", "/_cat/shards", "/_nodes/stats"],
 };
 
 const levelClass = (line: string): string => {

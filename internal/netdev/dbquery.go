@@ -12,12 +12,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/microsoft/go-mssqldb"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/zzycxz/fairpeer/internal/config"
@@ -93,6 +95,16 @@ func (m *Manager) DBQuery(ctx context.Context, sourceName, query string) (string
 			m.dbAuditRefuse(src, query, "not in the redis diagnostic command set")
 			return "", fmt.Errorf("netdev_db_query: %q is not an allowlisted redis diagnostic command", dbNormalize(query))
 		}
+	} else if src.Type == "mongodb" {
+		if !mongoCmdAllowed(query, src.Allowlist) {
+			m.dbAuditRefuse(src, query, "not in the source's canonical-JSON command allowlist")
+			return "", fmt.Errorf("netdev_db_query: %q is not in source %q's allowlist (canonical JSON commands like {\"serverStatus\":1})", strings.TrimSpace(query), src.Name)
+		}
+	} else if src.Type == "elasticsearch" {
+		if !esPathAllowed(query, src.Allowlist) {
+			m.dbAuditRefuse(src, query, "not in the source's endpoint-path allowlist")
+			return "", fmt.Errorf("netdev_db_query: %q is not in source %q's allowlist (GET endpoint paths like /_cluster/health)", strings.TrimSpace(query), src.Name)
+		}
 	} else if !dbQueryAllowed(query, src.Allowlist) {
 		m.dbAuditRefuse(src, query, "not in the source's exact-statement allowlist")
 		return "", fmt.Errorf("netdev_db_query: %q is not in source %q's allowlist (exact statements only — adjust [[netdev.db_sources]] in the 运维 settings if this is a legitimate read)", dbNormalize(query), src.Name)
@@ -112,10 +124,12 @@ func (m *Manager) DBQuery(ctx context.Context, sourceName, query string) (string
 	var out string
 	var err error
 	switch src.Type {
-	case "mysql", "postgres":
+	case "mysql", "postgres", "mssql":
 		out, err = dbSQLQuery(ctx, src, dbNormalize(query))
 	case "redis":
 		out, err = m.redisQuery(ctx, src, dbNormalize(query))
+	case "mongodb", "clickhouse", "elasticsearch":
+		out, err = dbMoreQuery(ctx, src, dbNormalize(query), m)
 	default:
 		err = fmt.Errorf("unknown db type %q", src.Type)
 	}
@@ -163,6 +177,13 @@ func dbDSN(src config.NetDevDBSource, password string) string {
 			db = "information_schema"
 		}
 		return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?timeout=5s&readTimeout=8s&charset=utf8mb4", src.Username, password, src.Host, dbPort(src, 3306), db)
+	case "mssql":
+		db := src.Database
+		if db == "" {
+			db = "master"
+		}
+		return fmt.Sprintf("sqlserver://%s:%s@%s:%d?database=%s&connection+timeout=5",
+			url.QueryEscape(src.Username), url.QueryEscape(password), src.Host, dbPort(src, 1433), url.QueryEscape(db))
 	default: // postgres
 		db := src.Database
 		if db == "" {
@@ -188,6 +209,8 @@ func dbSQLQuery(ctx context.Context, src config.NetDevDBSource, query string) (s
 	driverName := "pgx"
 	if src.Type == "mysql" {
 		driverName = "mysql"
+	} else if src.Type == "mssql" {
+		driverName = "sqlserver"
 	}
 	db, err := sql.Open(driverName, dbDSN(src, pass))
 	if err != nil {
