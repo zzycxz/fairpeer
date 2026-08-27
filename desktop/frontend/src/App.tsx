@@ -51,7 +51,7 @@ import { SidebarSessions } from "./components/SidebarSessions";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { AgentDashboard } from "./components/AgentDashboard";
 import { BranchTree } from "./components/BranchTree";
-import { SettingsPanel } from "./components/SettingsPanel";
+import { SettingsPanel, SETTINGS_TABS } from "./components/SettingsPanel";
 import { ShortcutsCheatsheet } from "./components/ShortcutsCheatsheet";
 import { useGlobalShortcut } from "./lib/keyboardShortcuts";
 import { UpdateBanner } from "./components/UpdateBanner";
@@ -65,6 +65,7 @@ import { RemoteConnectWizard } from "./components/RemoteConnectWizard";
 import { AttachmentViewer } from "./components/AttachmentViewer";
 import { AppChrome } from "./components/AppChrome";
 import { ProjectTree } from "./components/ProjectTree";
+import { PaneErrorBoundary } from "./components/ErrorBoundary";
 import { parseTodos } from "./lib/tools";
 import { shouldShowTodoPanel } from "./lib/todoVisibility";
 import {
@@ -131,9 +132,10 @@ function isThemeMode(value: string): value is Theme {
 }
 const RIGHT_DOCK_TREE_DEFAULT_WIDTH = 260;
 const RIGHT_DOCK_TREE_MIN_WIDTH = 260;
-// 运维 dock 的下限：设备卡/发现卡的内容（命令按钮、证据链）在更窄的栏里
-// 会折行成灾——编码 dock 的 260 下限对它不够用。
-const NETDEV_DOCK_MIN_WIDTH = 340;
+// 运维 dock 的下限：设备卡/发现卡的内容（命令按钮、证据链）与审计表
+// 五列在更窄的栏里会折行成灾——编码 dock 的 260 下限对它远远不够；
+// 380 起步让终端尾随/命令 chips 不再挤（2026-08-27 舒展化调整）。
+const NETDEV_DOCK_MIN_WIDTH = 380;
 const RIGHT_DOCK_TREE_MAX_WIDTH = 1200;
 const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 660;
 const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
@@ -827,7 +829,19 @@ export default function App() {
   const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
   const [remoteWizardOpen, setRemoteWizardOpen] = useState(false);
   const [newTaskMenuPoint, setNewTaskMenuPoint] = useState<ContextMenuPoint | null>(null);
-  const [settingsTarget, setSettingsTarget] = useState<SettingsTab | null>(null);
+  // ?settings=<tab> (browser dev mock only — same affordance family as
+  // bridge.ts's ?profile= and NetDevLayout's ?dock=) boots with that settings
+  // tab open, so settings GUI smoke tests don't depend on clicking the gear.
+  const initialSettingsTarget = (): SettingsTab | null => {
+    try {
+      if (typeof window !== "undefined" && !window.runtime) {
+        const v = new URLSearchParams(window.location.search).get("settings");
+        if (v && (SETTINGS_TABS as string[]).includes(v)) return v as SettingsTab;
+      }
+    } catch { /* not a browser */ }
+    return null;
+  };
+  const [settingsTarget, setSettingsTarget] = useState<SettingsTab | null>(initialSettingsTarget);
   const [settingsPayload, setSettingsPayload] = useState<string | null>(null);
   const [startupUpdateChecksEnabled, setStartupUpdateChecksEnabled] = useState<boolean | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
@@ -3591,6 +3605,7 @@ ${t("remote.uncPromptBody", { path: picked })}
             className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`}
             aria-label={t("sidebar.navigation")}
           >
+          <PaneErrorBoundary label="侧栏">
           <div className="sidebar__brandrow">
             {/* Logo retired (2026-08-19): the collapse toggle takes the leftmost
                 slot, the mode name follows it; new-session stays right. */}
@@ -3658,7 +3673,8 @@ ${t("remote.uncPromptBody", { path: picked })}
             </section>
           )}
 
-        </aside>
+        </PaneErrorBoundary>
+</aside>
         <button
           className="sidebar-resizer"
           type="button"
@@ -3673,7 +3689,8 @@ ${t("remote.uncPromptBody", { path: picked })}
           onDoubleClick={() => setExpandedSidebarWidth(defaultSidebarWidth())}
         />
 
-        <section className="chat-pane">
+        <PaneErrorBoundary label="对话区">
+          <section className="chat-pane">
           {/* Dev-profile topicbar moved into the top chrome (AppChrome center
               slot). The coding chat body below is DEV-ONLY: cowork/netdev
               render mainNode/footerNode/terminal/banners inside their own
@@ -3688,6 +3705,7 @@ ${t("remote.uncPromptBody", { path: picked })}
             </>
           )}
         </section>
+        </PaneErrorBoundary>
 
         {workspacePanelGridOpen && (
           <button

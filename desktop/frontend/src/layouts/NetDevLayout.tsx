@@ -1117,7 +1117,7 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
   const TIER_LABEL = ["核心层", "汇聚层", "接入层", "未纳管邻居"];
   return (
     <div>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: 640, marginTop: 8, display: "block" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", marginTop: 8, display: "block" }}>
         {bandY.map((y, i) =>
           bands[i].length > 0 ? (
             <text key={i} x={10} y={y - 20} fontSize={10} fill="var(--fg-faint)" opacity={0.8}>
