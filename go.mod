@@ -9,6 +9,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.7
 	charm.land/lipgloss/v2 v2.0.3
 	github.com/BurntSushi/toml v1.6.0
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/alecthomas/chroma/v2 v2.26.1
 	github.com/arran4/golang-ical v0.3.5
 	github.com/atotto/clipboard v0.1.4
@@ -18,15 +19,18 @@ require (
 	github.com/emersion/go-imap v1.2.1
 	github.com/emersion/go-message v0.18.2
 	github.com/go-ole/go-ole v1.3.0
+	github.com/go-sql-driver/mysql v1.10.0
 	github.com/gorilla/websocket v1.5.0
 	github.com/gosnmp/gosnmp v1.38.0
 	github.com/huin/goupnp v1.3.0
+	github.com/jackc/pgx/v5 v5.10.0
 	github.com/kevinburke/ssh_config v1.6.0
 	github.com/larksuite/oapi-sdk-go/v3 v3.9.4
 	github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80
 	github.com/mattn/go-runewidth v0.0.24
 	github.com/pion/ice/v4 v4.4.0
 	github.com/pion/webrtc/v4 v4.2.18
+	github.com/redis/go-redis/v9 v9.22.0
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/xuri/excelize/v2 v2.11.0
 	github.com/yuin/goldmark v1.8.2
@@ -38,10 +42,13 @@ require (
 	golang.org/x/sys v0.46.0
 	golang.org/x/term v0.44.0
 	golang.org/x/text v0.39.0
+	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.52.0
 )
 
 require (
+	filippo.io/edwards25519 v1.2.0 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260601155805-6cf7526a1b3f // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
@@ -59,6 +66,9 @@ require (
 	github.com/gobwas/ws v1.4.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
@@ -81,11 +91,13 @@ require (
 	github.com/richardlehane/mscfb v1.0.7 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
+	github.com/rogpeppe/go-internal v1.16.0 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/xuri/efp v0.0.1 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

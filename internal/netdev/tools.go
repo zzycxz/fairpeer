@@ -60,6 +60,7 @@ func SharedManager(cfg *config.Config) *Manager {
 	} else {
 		shared.cfg = cfg
 	}
+	EnsureNotifier(cfg)
 	return shared
 }
 
@@ -534,7 +535,55 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&baselineTool{m: m})
 	reg.Add(&redfishTool{m: m})
 	reg.Add(&logReadTool{m: m})
+	reg.Add(&logSearchTool{m: m})
+	reg.Add(&triageTool{m: m})
+	reg.Add(&dockerTool{m: m})
+	reg.Add(&kubeTool{m: m})
+	reg.Add(&firewallTool{m: m})
+	reg.Add(&locateTool{m: m})
+	reg.Add(&dbQueryTool{m: m})
 }
+
+// dbQueryTool — read-only database diagnostics against a configured
+// [[netdev.db_sources]] entry: exact-statement allowlist + least-privilege
+// account. Connection-count, slow-query, replication-lag class questions.
+type dbQueryTool struct{ m *Manager }
+
+func (t *dbQueryTool) Name() string { return "netdev_db_query" }
+
+func (t *dbQueryTool) Description() string {
+	return "Run ONE allowlisted read-only diagnostic query on a configured database source (mysql|postgres|redis). " +
+		"The source's allowlist (exact statements like SHOW PROCESSLIST / SELECT * FROM information_schema.processlist) is the seal — anything else is refused before connecting. " +
+		"Use for connection counts, slow queries, replication lag, lock waits. NOT a data browser."
+}
+
+func (t *dbQueryTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"source": {"type": "string", "description": "db source name from the 运维 settings"},
+			"query":  {"type": "string", "description": "one plain statement; must match the source's allowlist"}
+		},
+		"required": ["source", "query"]
+	}`)
+}
+
+func (t *dbQueryTool) ReadOnly() bool { return true }
+
+func (t *dbQueryTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		Source string `json:"source"`
+		Query  string `json:"query"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(a.Source) == "" || strings.TrimSpace(a.Query) == "" {
+		return "", errors.New("netdev_db_query: source and query are required")
+	}
+	return t.m.DBQuery(ctx, strings.TrimSpace(a.Source), a.Query)
+}
+
 
 // redfishTool — the BMC channel: ONE GET-only Redfish request against a
 // vendor=redfish device. Sealed at the transport (no write verb exists in the

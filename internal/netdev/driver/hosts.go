@@ -62,12 +62,16 @@ var linuxTables = classTables{
 		// system state
 		"ps ", "ps", "top -b", "df ", "df", "free ", "free", "du -sh", "du -s",
 		"uname ", "uname", "uptime", "date", "hostname", "hostname ", "id", "who", "w",
-		"last ", "lastlog", "vmstat ", "iostat ", "dstat ", "lscpu", "lsblk", "lsusb", "lspci",
-		"cat /proc", "cat /sys", "cat /etc/os-release", "cat /etc/hostname",
+		"last ", "lastlog", "lastb", "vmstat ", "iostat ", "dstat ", "lscpu", "lsblk", "lsusb", "lspci",
+		"cat /proc", "cat /sys", "cat /etc/os-release", "cat /etc/hostname", "cat /etc/passwd", "timedatectl",
 		// services & logs
 		"systemctl status", "systemctl list-units", "systemctl list-unit-files",
 		"systemctl is-active", "systemctl is-enabled", "systemctl is-failed",
 		"systemctl show", "systemctl cat", "journalctl", "dmesg",
+		"crontab -l", // read-only listing; crontab -r stays dangerous
+		// web server diagnostics (NETDEV_SPEC_V2 §2.5 web-kind presets)
+		"nginx -t", "nginx -T", "apache2ctl -M", "apache2ctl -S", "apache2ctl -t",
+		"apachectl -M", "apachectl -S", "apachectl -t",
 		"tail /var/log", "tail -n", "tail --lines", "head /var/log", "head -n",
 		"grep /var/log", "grep -c /var/log", "grep -i /var/log", "wc -l /var/log",
 		"ls ", "ls", "stat ", "file ", "which ", "whereis ",

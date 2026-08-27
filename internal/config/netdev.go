@@ -18,6 +18,11 @@ import (
 // vars (*_env) whose values sit in the secret store under netdev/*.
 type NetDevConfig struct {
 	Enabled bool `toml:"enabled"`
+	// NotifyWebhook is the Finding notification outlet (NETDEV_SPEC_V2 §5.2):
+	// generic JSON POST; empty = off. min severity: info|warning|critical.
+	NotifyWebhook       string `toml:"notify_webhook"`
+	NotifyMinSeverity   string `toml:"notify_min_severity"`
+	NotifyFormat        string `toml:"notify_format"` // generic | feishu | dingtalk | wecom
 	// NetworkName is the managed network's display name (e.g. "总部生产网") —
 	// the 运维 page's identity anchor, like a coding workspace's project name.
 	NetworkName          string          `toml:"network_name"`
@@ -50,6 +55,75 @@ type NetDevConfig struct {
 	// device card can run in one click — each command still goes through the
 	// sealed Exec path one by one.
 	Presets []NetDevPreset `toml:"presets"`
+	// LogFollow bounds the streaming tail -F follows (hard caps: lines, bytes,
+	// duration — an unbounded follow streaming into the UI is an incident).
+	LogFollow NetDevLogFollow `toml:"log_follow"`
+	// DBSources are read-only database diagnostic endpoints (netdev_db_query):
+	// the allowlist is exact-statement-prefix, the account itself must be
+	// least-privilege (the real structural seal lives in the DB grants).
+	DBSources []NetDevDBSource `toml:"db_sources"`
+	// PollIntervalSeconds schedules the SNMP health sweep (0 = off): every
+	// device carrying an [netdev.devices.*.snmp] block is polled for
+	// reachability/uptime/interface status into the health snapshot.
+	PollIntervalSeconds int `toml:"poll_interval_seconds"`
+	// AlertRules turn health/syslog signals into auto-Findings (active →
+	// resolved lifecycle). Evaluated on every health poll.
+	AlertRules []NetDevAlertRule `toml:"alert_rules"`
+	// Syslog is the passive receiver (UDP): devices point their syslog here;
+	// lines aggregate per device and known-bad patterns auto-escalate to
+	// Findings. Port 0 = off.
+	Syslog NetDevSyslogConfig `toml:"syslog"`
+}
+
+// NetDevAlertRule is one threshold rule over the health snapshot.
+type NetDevAlertRule struct {
+	Name     string `toml:"name"`
+	Metric   string `toml:"metric"`   // reachable | if_down_count | uptime_reset
+	Op       string `toml:"op"`       // >= | <= | ==
+	Value    int64  `toml:"value"`    // reachable: 1=up 0=down; uptime_reset: 1=reboot detected
+	Severity string `toml:"severity"` // info | warning | critical
+	Enabled  bool   `toml:"enabled"`
+}
+
+// NetDevSyslogConfig bounds the passive syslog receiver.
+type NetDevSyslogConfig struct {
+	Port     int  `toml:"port"`      // UDP listen port; 0 = off
+	RatePerMin int `toml:"rate_per_min"` // per-device ingest cap (0 => 600)
+}
+
+// NetDevLogFollow caps one streaming log follow.
+type NetDevLogFollow struct {
+	MaxLines   int `toml:"max_lines"`   // 0 => 500
+	MaxBytes   int `toml:"max_bytes"`   // 0 => 256 KiB
+	MaxSeconds int `toml:"max_seconds"` // 0 => 600
+}
+
+// Capped returns the follow caps with defaults filled in.
+func (f NetDevLogFollow) Capped() NetDevLogFollow {
+	if f.MaxLines <= 0 {
+		f.MaxLines = 500
+	}
+	if f.MaxBytes <= 0 {
+		f.MaxBytes = 256 * 1024
+	}
+	if f.MaxSeconds <= 0 {
+		f.MaxSeconds = 600
+	}
+	return f
+}
+
+// NetDevDBSource is one read-only database diagnostic endpoint. PasswordEnv
+// names the secret-store entry; the allowlist is exact-statement prefixes
+// ("SHOW PROCESSLIST" style) — no wildcards, no table-name patterns.
+type NetDevDBSource struct {
+	Name        string   `toml:"name"`
+	Type        string   `toml:"type"` // mysql | postgres | redis
+	Host        string   `toml:"host"`
+	Port        int      `toml:"port"`
+	Username    string   `toml:"username"`
+	PasswordEnv string   `toml:"password_env"`
+	Database    string   `toml:"database"`
+	Allowlist   []string `toml:"allowlist"`
 }
 
 // NetDevPreset is one saved diagnostic battery.
@@ -103,6 +177,40 @@ type NetDevDevice struct {
 	// log-source path whitelist that feeds netdev_log_read and the classifier
 	// bypass. Human-registered only, like every inventory field.
 	LogPaths []string `toml:"log_paths"`
+	// Kind is the DATA-PLANE discriminator (NETDEV_SPEC_V2 §2.1): "" derives
+	// from vendor (backward compatible — existing devices unchanged);
+	// "docker" / "k8s" enable their API clients below. vendor stays the CLI
+	// driver story for network gear.
+	Kind   string              `toml:"kind"` // "" | docker | k8s | firewall
+	Docker *NetDevDockerConfig `toml:"docker,omitempty"`
+	K8s    *NetDevK8sConfig    `toml:"k8s,omitempty"`
+	Fw     *NetDevFirewallConfig `toml:"firewall,omitempty"`
+}
+
+// NetDevDockerConfig is the kind=docker data plane: one Docker Engine
+// endpoint, GET-only API paths (NETDEV_SPEC_V2 §2.2 — no client-side code
+// path for POST/DELETE exists at all).
+type NetDevDockerConfig struct {
+	// Socket: npipe:////./pipe/docker_engine (Windows local) |
+	// unix:///var/run/docker.sock | tcp://host:2375 (inventory hosts only).
+	Socket string `toml:"socket"`
+}
+
+// NetDevK8sConfig is the kind=k8s data plane: one kubeconfig (secret store)
+// + a pinned context (NETDEV_SPEC_V2 §2.3 / appendix B-7: the tool layer
+// accepts the TARGET NAME only — no kubeconfig content, context or server
+// overrides, so no SSRF/context-escape surface).
+type NetDevK8sConfig struct {
+	KubeconfigEnv string   `toml:"kubeconfig_env"` // secret-store key holding the kubeconfig YAML
+	Context       string   `toml:"context"`        // pinned; "" = kubeconfig's current-context
+	Namespaces    []string `toml:"namespaces"`    // allowed namespaces; empty = all
+}
+
+// NetDevFirewallConfig is the kind=firewall data plane (NETDEV_SPEC_V2 §2.6):
+// vendor REST monitor endpoints, GET-only. v1 vendor: fortinet (FortiOS
+// /api/v2/monitor/* + read-only /api/v2/cmdb/* GETs).
+type NetDevFirewallConfig struct {
+	ApiTokenEnv string `toml:"api_token_env"` // secret-store key holding the REST API token
 }
 
 // NetDevHop is a bastion/jump host on the route to devices. Hops are
@@ -331,6 +439,69 @@ func ValidateNetDev(nd NetDevConfig) error {
 	for _, scope := range nd.Discovery.Scopes {
 		if _, _, err := net.ParseCIDR(strings.TrimSpace(scope)); err != nil {
 			return fmt.Errorf("netdev discovery scope %q: invalid CIDR", scope)
+		}
+	}
+	if nd.PollIntervalSeconds < 0 || nd.PollIntervalSeconds > 86400 {
+		return fmt.Errorf("netdev: poll_interval_seconds must be 0..86400 (0 = off)")
+	}
+	if nd.Syslog.Port < 0 || nd.Syslog.Port > 65535 {
+		return fmt.Errorf("netdev syslog: port out of range")
+	}
+	if nd.Syslog.Port > 0 && nd.Syslog.Port < 1024 {
+		return fmt.Errorf("netdev syslog: privileged ports (<1024) are not supported — use a high port and forward from the device (e.g. 5140)")
+	}
+	seenRules := map[string]bool{}
+	for _, r := range nd.AlertRules {
+		if strings.TrimSpace(r.Name) == "" {
+			return fmt.Errorf("netdev alert_rule: name is required")
+		}
+		if seenRules[r.Name] {
+			return fmt.Errorf("netdev alert_rule %q: duplicate name", r.Name)
+		}
+		seenRules[r.Name] = true
+		switch r.Metric {
+		case "reachable", "if_down_count", "uptime_reset":
+		default:
+			return fmt.Errorf("netdev alert_rule %q: metric must be reachable|if_down_count|uptime_reset", r.Name)
+		}
+		switch r.Op {
+		case "", ">=", "<=", "==":
+		default:
+			return fmt.Errorf("netdev alert_rule %q: op must be >=|<=|==", r.Name)
+		}
+		switch r.Severity {
+		case "", "info", "warning", "critical":
+		default:
+			return fmt.Errorf("netdev alert_rule %q: severity must be info|warning|critical", r.Name)
+		}
+	}
+	seenDB := map[string]bool{}
+	for _, s := range nd.DBSources {
+		if strings.TrimSpace(s.Name) == "" {
+			return fmt.Errorf("netdev db_source: name is required")
+		}
+		if seenDB[s.Name] {
+			return fmt.Errorf("netdev db_source %q: duplicate name", s.Name)
+		}
+		seenDB[s.Name] = true
+		if strings.TrimSpace(s.Host) == "" {
+			return fmt.Errorf("netdev db_source %q: host is required", s.Name)
+		}
+		switch s.Type {
+		case "mysql", "postgres", "redis":
+		default:
+			return fmt.Errorf("netdev db_source %q: type must be mysql|postgres|redis", s.Name)
+		}
+		if s.Port < 0 || s.Port > 65535 {
+			return fmt.Errorf("netdev db_source %q: port %d out of range", s.Name, s.Port)
+		}
+		if len(s.Allowlist) == 0 {
+			return fmt.Errorf("netdev db_source %q: allowlist must have at least one statement (exact prefixes — this is the seal)", s.Name)
+		}
+		for _, q := range s.Allowlist {
+			if strings.ContainsAny(q, "\n\r;") || strings.Contains(q, "--") || strings.Contains(q, "/*") {
+				return fmt.Errorf("netdev db_source %q: allowlist entries must be single plain statements (no ;, no comments)", s.Name)
+			}
 		}
 	}
 	return nil

@@ -1,12 +1,28 @@
 package netdev
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 )
+
+// auditChainHash computes one entry's chain hash: sha256(prevHash + canonical
+// JSON of the entry with its hash field empty).
+func auditChainHash(prev string, e Audit) (string, error) {
+	e.Hash = ""
+	b, err := json.Marshal(e)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(append([]byte(prev), b...))
+	return hex.EncodeToString(sum[:]), nil
+}
 
 // Audit records every device interaction in an append-only JSONL file under
 // <user config>/fairpeer/netdev/audit.jsonl — one of the never-off guardrails
@@ -23,6 +39,12 @@ type Audit struct {
 	Status      string    `json:"status"` // ok | device-error | refused | failure
 	OutputBytes int       `json:"output_bytes,omitempty"`
 	Error       string    `json:"error,omitempty"`
+	// Hash chains entries (B-batch): sha256 over the previous entry's hash and
+	// this entry's canonical JSON (hash field excluded). Any tampering with an
+	// old line — or a line removed — breaks every later hash. Entries written
+	// before the chain landed have empty hashes; the chain starts at the first
+	// hashed entry.
+	Hash string `json:"hash,omitempty"`
 }
 
 // Audit statuses.
@@ -86,6 +108,16 @@ func AppendAudit(e Audit) error {
 	if e.Time.IsZero() {
 		e.Time = time.Now()
 	}
+	// Chain: hash = sha256(prevHash + canonical(entry without hash)).
+	prev, err := lastAuditHash()
+	if err != nil {
+		return err
+	}
+	h, err := auditChainHash(prev, e)
+	if err != nil {
+		return err
+	}
+	e.Hash = h
 	b, err := json.Marshal(e)
 	if err != nil {
 		return err
@@ -104,6 +136,97 @@ func AppendAudit(e Audit) error {
 		return err
 	}
 	defer f.Close()
-	_, err = f.Write(append(b, '\n'))
-	return err
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		return err
+	}
+	auditLastHash = h
+	return nil
+}
+
+// auditLastHash caches the chain head (the last written entry's hash).
+var auditLastHash string
+
+// lastAuditHash returns the chain head, reading the file's last line on a
+// cold cache.
+func lastAuditHash() (string, error) {
+	auditMu.Lock()
+	cached := auditLastHash
+	auditMu.Unlock()
+	if cached != "" {
+		return cached, nil
+	}
+	lines, err := readAuditLines()
+	if err != nil {
+		return "", err
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		var e Audit
+		if json.Unmarshal(lines[i], &e) == nil && e.Hash != "" {
+			return e.Hash, nil
+		}
+	}
+	return "", nil
+}
+
+func readAuditLines() ([][]byte, error) {
+	path := AuditPath()
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out [][]byte
+	for _, l := range bytes.Split(b, []byte("\n")) {
+		if len(l) > 0 {
+			out = append(out, l)
+		}
+	}
+	return out, nil
+}
+
+// AuditChainStatus is the verification verdict for the audit tab's badge.
+type AuditChainStatus struct {
+	Total      int    `json:"total"`
+	Chained    int    `json:"chained"`
+	OK         bool   `json:"ok"`
+	FirstBroken string `json:"firstBroken,omitempty"`
+}
+
+// VerifyAuditChain re-computes every hashed entry's hash in sequence. Legacy
+// entries without hashes are skipped (the chain starts at the first hashed
+// entry); a mismatch marks the chain broken from that entry on.
+func VerifyAuditChain() AuditChainStatus {
+	lines, err := readAuditLines()
+	if err != nil {
+		return AuditChainStatus{OK: false, FirstBroken: "读取审计文件失败: " + err.Error()}
+	}
+	st := AuditChainStatus{Total: len(lines), OK: true}
+	prev := ""
+	for i, l := range lines {
+		var e Audit
+		if json.Unmarshal(l, &e) != nil {
+			st.OK = false
+			st.FirstBroken = fmt.Sprintf("第 %d 行无法解析", i+1)
+			return st
+		}
+		if e.Hash == "" {
+			continue // legacy pre-chain entry
+		}
+		want, err := auditChainHash(prev, e)
+		if err != nil {
+			st.OK = false
+			st.FirstBroken = fmt.Sprintf("第 %d 行哈希计算失败", i+1)
+			return st
+		}
+		if want != e.Hash {
+			st.OK = false
+			st.FirstBroken = fmt.Sprintf("第 %d 行哈希不匹配（审计可能被篡改）", i+1)
+			return st
+		}
+		prev = e.Hash
+		st.Chained++
+	}
+	return st
 }

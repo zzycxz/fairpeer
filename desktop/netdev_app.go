@@ -42,6 +42,29 @@ type NetDevDeviceView struct {
 	// LogPaths whitelists extra log roots (outside /var/log) for this device —
 	// the file: log-source whitelist (netdev_log_read / the classifier bypass).
 	LogPaths []string `json:"logPaths"`
+	// Kind is the data-plane discriminator (NETDEV_SPEC_V2 §2.1): ""(=按厂商)
+	// | docker | k8s. DockerSocket / K8s* apply per kind.
+	Kind         string `json:"kind"`
+	DockerSocket string `json:"dockerSocket"`
+	// kind=k8s: kubeconfig CONTENT lives in the secret store (write-only paste
+	// here); env is the secret-store key, pinned context + namespace allowlist.
+	K8sKubeconfigEnv string   `json:"k8sKubeconfigEnv"`
+	K8sKubeconfigSet bool     `json:"k8sKubeconfigSet"`
+	K8sKubeconfig    string   `json:"k8sKubeconfig,omitempty"`
+	K8sContext       string   `json:"k8sContext"`
+	K8sNamespaces    []string `json:"k8sNamespaces"`
+	// kind=firewall: vendor REST token (secret store, write-only paste).
+	FwApiTokenEnv string `json:"fwApiTokenEnv"`
+	FwApiTokenSet bool   `json:"fwApiTokenSet"`
+	FwApiToken    string `json:"fwApiToken,omitempty"`
+	// Protocols is the dial-priority order (ssh, telnet, netconf).
+	Protocols []string `json:"protocols"`
+	// SNMP collector credentials (v2c community lives in the secret store).
+	SnmpVersion      string `json:"snmpVersion"`
+	SnmpCommunityEnv string `json:"snmpCommunityEnv"`
+	SnmpCommunitySet bool   `json:"snmpCommunitySet"`
+	SnmpCommunity    string `json:"snmpCommunity,omitempty"` // write-only
+
 	// Password is write-only from the form: blank = leave the stored secret
 	// untouched; non-blank = store it under the netdev namespace.
 	Password string `json:"password,omitempty"`
@@ -71,9 +94,9 @@ type NetDevSettingsView struct {
 	Scopes         []string           `json:"scopes"`
 	// Guardrails reach into every ask / every tool call (NETDEV_SPEC §6):
 	// per-command approval, per-turn command budget, per-conversation device scope.
-	GuardConfirmEach  bool                `json:"guardConfirmEach"`
-	GuardTurnBudget   int                 `json:"guardTurnBudget"`
-	GuardAllowedGroup []string            `json:"guardAllowedGroups"`
+	GuardConfirmEach  bool     `json:"guardConfirmEach"`
+	GuardTurnBudget   int      `json:"guardTurnBudget"`
+	GuardAllowedGroup []string `json:"guardAllowedGroups"`
 	// ExtraRead is the read-table extension map (vendor → commands) so the
 	// settings page can show and edit the knowledge-growth path.
 	ExtraRead map[string][]string `json:"extraRead"`
@@ -82,6 +105,52 @@ type NetDevSettingsView struct {
 	Projects []NetDevProjectView `json:"projects"`
 	// Presets are named diagnostic batteries for the device card.
 	Presets []NetDevPresetView `json:"presets"`
+	// DBSources are read-only database diagnostic endpoints (netdev_db_query).
+	DBSources []NetDevDBSourceView `json:"dbSources"`
+	// PollIntervalSeconds schedules the SNMP health sweep (0 = off).
+	PollIntervalSeconds int `json:"pollIntervalSeconds"`
+	// AlertRules: health thresholds → auto-Findings (active → resolved).
+	AlertRules []NetDevAlertRuleView `json:"alertRules"`
+	// SyslogPort: passive syslog UDP receiver (0 = off).
+	SyslogPort int `json:"syslogPort"`
+	// P3 gap closure: config fields previously TOML-only.
+	DefaultMode          string               `json:"defaultMode"` // diagnose | assess
+	MaxSessionsPerDevice int                  `json:"maxSessionsPerDevice"`
+	DiscoveryRate        int                  `json:"discoveryRate"`
+	DiscoveryMode        string               `json:"discoveryMode"` // tunnel | probe | auto
+	ProbeFallback        string               `json:"probeFallback"`
+	GroupDefs            []NetDevGroupDefView `json:"groupDefs"`
+}
+
+// NetDevGroupDefView carries a group's policy + maintenance window.
+type NetDevGroupDefView struct {
+	Name         string `json:"name"`
+	Policy       string `json:"policy"`       // read-only | proposal | proposal+confirm2
+	ChangeWindow string `json:"changeWindow"` // e.g. "tue,thu 22:00-24:00"; "" = any time
+}
+
+// NetDevAlertRuleView is one alert rule row for the settings editor.
+type NetDevAlertRuleView struct {
+	Name     string `json:"name"`
+	Metric   string `json:"metric"`
+	Op       string `json:"op"`
+	Value    int64  `json:"value"`
+	Severity string `json:"severity"`
+	Enabled  bool   `json:"enabled"`
+}
+
+// NetDevDBSourceView is one database source row; Password is write-only.
+type NetDevDBSourceView struct {
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Host        string   `json:"host"`
+	Port        int      `json:"port"`
+	Username    string   `json:"username"`
+	PasswordEnv string   `json:"passwordEnv"`
+	PasswordSet bool     `json:"passwordSet"`
+	Database    string   `json:"database"`
+	Allowlist   []string `json:"allowlist"`
+	Password    string   `json:"password,omitempty"`
 }
 
 // NetDevPresetView is one saved diagnostic battery.
@@ -128,24 +197,35 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 	// The settings page load is the reliable earliest entry point — make sure
 	// the live observer is installed before any agent/tool activity.
 	a.startNetDevLiveForwarding(cfg)
+	ensureSyslogReceiver(cfg)
 	// Every collection starts non-nil: Go nil slices serialize as JSON null
 	// and the UI (built against the always-array dev mocks) reads .length on
 	// them — null crashed the packaged app. The view contract is arrays.
 	v := NetDevSettingsView{
-		Enabled:           cfg.NetDev.Enabled,
-		NetworkName:       cfg.NetDev.NetworkName,
-		AuditRetention:    cfg.NetDev.AuditRetention,
-		BackupInterval:    cfg.NetDev.BackupInterval,
-		Scopes:            cfg.NetDev.Discovery.Scopes,
-		GuardConfirmEach:  cfg.NetDev.Guardrails.ConfirmEachCommand,
-		GuardTurnBudget:   cfg.NetDev.Guardrails.TurnCommandBudget,
-		GuardAllowedGroup: cfg.NetDev.Guardrails.AllowedGroups,
-		ExtraRead:         cfg.NetDev.ExtraRead,
-		Devices:           []NetDevDeviceView{},
-		Hops:              []NetDevHopView{},
-		Groups:            []string{},
-		Projects:          []NetDevProjectView{},
-		Presets:           []NetDevPresetView{},
+		Enabled:              cfg.NetDev.Enabled,
+		NetworkName:          cfg.NetDev.NetworkName,
+		AuditRetention:       cfg.NetDev.AuditRetention,
+		BackupInterval:       cfg.NetDev.BackupInterval,
+		Scopes:               cfg.NetDev.Discovery.Scopes,
+		GuardConfirmEach:     cfg.NetDev.Guardrails.ConfirmEachCommand,
+		GuardTurnBudget:      cfg.NetDev.Guardrails.TurnCommandBudget,
+		GuardAllowedGroup:    cfg.NetDev.Guardrails.AllowedGroups,
+		ExtraRead:            cfg.NetDev.ExtraRead,
+		Devices:              []NetDevDeviceView{},
+		Hops:                 []NetDevHopView{},
+		Groups:               []string{},
+		Projects:             []NetDevProjectView{},
+		Presets:              []NetDevPresetView{},
+		DBSources:            []NetDevDBSourceView{},
+		PollIntervalSeconds:  cfg.NetDev.PollIntervalSeconds,
+		AlertRules:           []NetDevAlertRuleView{},
+		SyslogPort:           cfg.NetDev.Syslog.Port,
+		DefaultMode:          cfg.NetDev.DefaultMode,
+		MaxSessionsPerDevice: cfg.NetDev.MaxSessionsPerDevice,
+		DiscoveryRate:        cfg.NetDev.Discovery.Rate,
+		DiscoveryMode:        cfg.NetDev.Discovery.Mode,
+		ProbeFallback:        cfg.NetDev.Discovery.ProbeFallback,
+		GroupDefs:            []NetDevGroupDefView{},
 	}
 	if v.Scopes == nil {
 		v.Scopes = []string{}
@@ -162,6 +242,23 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 	for _, p := range cfg.NetDev.Presets {
 		v.Presets = append(v.Presets, NetDevPresetView{Name: p.Name, Commands: p.Commands, Vendors: p.Vendors})
 	}
+	for _, g := range cfg.NetDev.Groups {
+		v.GroupDefs = append(v.GroupDefs, NetDevGroupDefView{Name: g.Name, Policy: g.Policy, ChangeWindow: g.ChangeWindow})
+	}
+	for _, r := range cfg.NetDev.AlertRules {
+		v.AlertRules = append(v.AlertRules, NetDevAlertRuleView{
+			Name: r.Name, Metric: r.Metric, Op: r.Op, Value: r.Value,
+			Severity: r.Severity, Enabled: r.Enabled,
+		})
+	}
+	for _, s := range cfg.NetDev.DBSources {
+		v.DBSources = append(v.DBSources, NetDevDBSourceView{
+			Name: s.Name, Type: s.Type, Host: s.Host, Port: s.Port,
+			Username: s.Username, PasswordEnv: s.PasswordEnv,
+			PasswordSet: netdevSecretSet(netdev.SecretKindPassword, s.PasswordEnv),
+			Database:    s.Database, Allowlist: s.Allowlist,
+		})
+	}
 	for _, d := range cfg.NetDev.Devices {
 		v.Devices = append(v.Devices, NetDevDeviceView{
 			Name: d.Name, Vendor: d.Vendor, OS: d.OS, Model: d.Model,
@@ -169,7 +266,19 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 			Username: d.Username, PasswordEnv: d.PasswordEnv,
 			PasswordSet:  netdevSecretSet(netdev.SecretKindPassword, d.PasswordEnv),
 			IdentityFile: d.IdentityFile, Encoding: d.Encoding, AllowTelnet: d.AllowTelnet,
-			LogPaths: d.LogPaths,
+			LogPaths:         d.LogPaths,
+			Protocols:        d.Protocols,
+			Kind:             d.Kind,
+			DockerSocket:     dockerSocketOf(d),
+			K8sKubeconfigEnv: k8sKubeconfigEnvOf(d),
+			K8sKubeconfigSet: netdevSecretSet(netdev.SecretKindKubeconfig, k8sKubeconfigEnvOf(d)),
+			K8sContext:       k8sContextOf(d),
+			K8sNamespaces:    k8sNamespacesOf(d),
+			FwApiTokenEnv:    fwApiTokenEnvOf(d),
+			FwApiTokenSet:    netdevSecretSet(netdev.SecretKindAPIToken, fwApiTokenEnvOf(d)),
+			SnmpVersion:      snmpVersionOf(d),
+			SnmpCommunityEnv: snmpCommunityEnvOf(d),
+			SnmpCommunitySet: netdevSecretSet(netdev.SecretKindPassword, snmpCommunityEnvOf(d)),
 		})
 	}
 	for _, h := range cfg.NetDev.Hops {
@@ -197,6 +306,57 @@ func cleanLogPaths(in []string) []string {
 		}
 	}
 	return out
+}
+
+func snmpVersionOf(d config.NetDevDevice) string {
+	if d.SNMP != nil && d.SNMP.Version != "" {
+		return d.SNMP.Version
+	}
+	return ""
+}
+
+// ── kind=docker / kind=k8s view helpers ─────────────────────────────────────
+
+func dockerSocketOf(d config.NetDevDevice) string {
+	if d.Docker != nil {
+		return d.Docker.Socket
+	}
+	return ""
+}
+
+func k8sKubeconfigEnvOf(d config.NetDevDevice) string {
+	if d.K8s != nil {
+		return d.K8s.KubeconfigEnv
+	}
+	return ""
+}
+
+func k8sContextOf(d config.NetDevDevice) string {
+	if d.K8s != nil {
+		return d.K8s.Context
+	}
+	return ""
+}
+
+func k8sNamespacesOf(d config.NetDevDevice) []string {
+	if d.K8s != nil {
+		return d.K8s.Namespaces
+	}
+	return nil
+}
+
+func fwApiTokenEnvOf(d config.NetDevDevice) string {
+	if d.Fw != nil {
+		return d.Fw.ApiTokenEnv
+	}
+	return ""
+}
+
+func snmpCommunityEnvOf(d config.NetDevDevice) string {
+	if d.SNMP != nil {
+		return d.SNMP.CommunityEnv
+	}
+	return ""
 }
 
 func netdevSecretSet(kind, envName string) bool {
@@ -240,6 +400,53 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 		v.Hops[i].PasswordEnv = env
 		if err := netdev.SetSecret(netdev.SecretKindPassword, env, pwd); err != nil {
 			return fmt.Errorf("save secret for hop %q: %w", h.Name, err)
+		}
+	}
+	for i, d := range v.Devices {
+		comm := strings.TrimSpace(d.SnmpCommunity)
+		if comm == "" {
+			continue
+		}
+		env := autoEnvName(d.SnmpCommunityEnv, "NETDEV_SNMP_"+envSafe(d.Name))
+		v.Devices[i].SnmpCommunityEnv = env
+		if err := netdev.SetSecret(netdev.SecretKindPassword, env, comm); err != nil {
+			return fmt.Errorf("save snmp community for device %q: %w", d.Name, err)
+		}
+	}
+	// kind=firewall: the pasted vendor REST token goes to the secret store.
+	for i, d := range v.Devices {
+		tok := strings.TrimSpace(d.FwApiToken)
+		if tok == "" {
+			continue
+		}
+		env := autoEnvName(d.FwApiTokenEnv, "NETDEV_FW_TOKEN_"+envSafe(d.Name))
+		v.Devices[i].FwApiTokenEnv = env
+		if err := netdev.SetSecret(netdev.SecretKindAPIToken, env, tok); err != nil {
+			return fmt.Errorf("save api token for device %q: %w", d.Name, err)
+		}
+	}
+	// kind=k8s: the pasted kubeconfig YAML goes to the secret store under the
+	// kubeconfig kind (content never enters TOML — NETDEV_SPEC_V2 §2.3).
+	for i, d := range v.Devices {
+		kc := strings.TrimSpace(d.K8sKubeconfig)
+		if kc == "" {
+			continue
+		}
+		env := autoEnvName(d.K8sKubeconfigEnv, "NETDEV_KUBECONFIG_"+envSafe(d.Name))
+		v.Devices[i].K8sKubeconfigEnv = env
+		if err := netdev.SetSecret(netdev.SecretKindKubeconfig, env, kc); err != nil {
+			return fmt.Errorf("save kubeconfig for device %q: %w", d.Name, err)
+		}
+	}
+	for i, s := range v.DBSources {
+		pwd := strings.TrimSpace(s.Password)
+		if pwd == "" {
+			continue
+		}
+		env := autoEnvName(s.PasswordEnv, "NETDEV_DB_PWD_"+envSafe(s.Name))
+		v.DBSources[i].PasswordEnv = env
+		if err := netdev.SetSecret(netdev.SecretKindPassword, env, pwd); err != nil {
+			return fmt.Errorf("save secret for db source %q: %w", s.Name, err)
 		}
 	}
 
@@ -293,14 +500,73 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 		nd.DefaultMode = c.NetDev.DefaultMode
 		nd.ProxyDeviceTraffic = c.NetDev.ProxyDeviceTraffic
 		nd.MaxSessionsPerDevice = c.NetDev.MaxSessionsPerDevice
+		nd.LogFollow = c.NetDev.LogFollow
+		// DBSources are form-owned when sent; older payloads preserve.
+		if v.DBSources != nil {
+			for _, s := range v.DBSources {
+				nd.DBSources = append(nd.DBSources, config.NetDevDBSource{
+					Name: strings.TrimSpace(s.Name), Type: strings.TrimSpace(s.Type),
+					Host: strings.TrimSpace(s.Host), Port: s.Port,
+					Username: strings.TrimSpace(s.Username), PasswordEnv: strings.TrimSpace(s.PasswordEnv),
+					Database: strings.TrimSpace(s.Database), Allowlist: s.Allowlist,
+				})
+			}
+		} else {
+			nd.DBSources = c.NetDev.DBSources
+		}
+		// Health poll interval: form-owned (0 = off); the shipped frontend
+		// always sends the field.
+		nd.PollIntervalSeconds = v.PollIntervalSeconds
+		nd.Syslog.Port = v.SyslogPort
+		nd.DefaultMode = strings.TrimSpace(v.DefaultMode)
+		nd.MaxSessionsPerDevice = v.MaxSessionsPerDevice
+		nd.Discovery.Rate = v.DiscoveryRate
+		nd.Discovery.Mode = strings.TrimSpace(v.DiscoveryMode)
+		nd.Discovery.ProbeFallback = strings.TrimSpace(v.ProbeFallback)
+		if v.AlertRules != nil {
+			for _, r := range v.AlertRules {
+				nd.AlertRules = append(nd.AlertRules, config.NetDevAlertRule{
+					Name: strings.TrimSpace(r.Name), Metric: strings.TrimSpace(r.Metric),
+					Op: strings.TrimSpace(r.Op), Value: r.Value,
+					Severity: strings.TrimSpace(r.Severity), Enabled: r.Enabled,
+				})
+			}
+		} else {
+			nd.AlertRules = c.NetDev.AlertRules
+		}
 		nd.Guardrails = config.NetDevGuardrails{
 			ConfirmEachCommand: v.GuardConfirmEach,
 			TurnCommandBudget:  v.GuardTurnBudget,
 			AllowedGroups:      v.GuardAllowedGroup,
 		}
-		// Preserve group definitions not editable from this form yet.
-		for _, g := range c.NetDev.Groups {
-			nd.Groups = append(nd.Groups, g)
+		// Group definitions: preserve existing rows, apply policy/changeWindow
+		// edits from the form (matched by name); unknown form rows appended.
+		if v.GroupDefs != nil {
+			edited := map[string]NetDevGroupDefView{}
+			for _, g := range v.GroupDefs {
+				edited[strings.TrimSpace(g.Name)] = g
+			}
+			for _, g := range c.NetDev.Groups {
+				ng := config.NetDevGroup{Name: g.Name, Policy: g.Policy, ChangeWindow: g.ChangeWindow}
+				if e, ok := edited[g.Name]; ok {
+					ng.Policy = strings.TrimSpace(e.Policy)
+					ng.ChangeWindow = strings.TrimSpace(e.ChangeWindow)
+					delete(edited, g.Name)
+				}
+				nd.Groups = append(nd.Groups, ng)
+			}
+			for name := range edited {
+				e := edited[name]
+				nd.Groups = append(nd.Groups, config.NetDevGroup{
+					Name:         strings.TrimSpace(name),
+					Policy:       strings.TrimSpace(e.Policy),
+					ChangeWindow: strings.TrimSpace(e.ChangeWindow),
+				})
+			}
+		} else {
+			for _, g := range c.NetDev.Groups {
+				nd.Groups = append(nd.Groups, g)
+			}
 		}
 		if nd.AuditRetention == "" {
 			nd.AuditRetention = c.NetDev.AuditRetention
@@ -315,7 +581,32 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 				IdentityFile: strings.TrimSpace(d.IdentityFile), Encoding: strings.TrimSpace(d.Encoding),
 				AllowTelnet: d.AllowTelnet,
 				LogPaths:    cleanLogPaths(d.LogPaths),
+				Protocols:   d.Protocols,
+				Kind:        strings.TrimSpace(d.Kind),
 			})
+			if strings.TrimSpace(d.Kind) == "docker" {
+				nd.Devices[len(nd.Devices)-1].Docker = &config.NetDevDockerConfig{
+					Socket: strings.TrimSpace(d.DockerSocket),
+				}
+			}
+			if strings.TrimSpace(d.Kind) == "k8s" {
+				nd.Devices[len(nd.Devices)-1].K8s = &config.NetDevK8sConfig{
+					KubeconfigEnv: strings.TrimSpace(d.K8sKubeconfigEnv),
+					Context:       strings.TrimSpace(d.K8sContext),
+					Namespaces:    cleanLogPaths(d.K8sNamespaces),
+				}
+			}
+			if strings.TrimSpace(d.Kind) == "firewall" {
+				nd.Devices[len(nd.Devices)-1].Fw = &config.NetDevFirewallConfig{
+					ApiTokenEnv: strings.TrimSpace(d.FwApiTokenEnv),
+				}
+			}
+			if d.SnmpVersion != "" || d.SnmpCommunityEnv != "" {
+				nd.Devices[len(nd.Devices)-1].SNMP = &config.NetDevSNMP{
+					Version:      strings.TrimSpace(d.SnmpVersion),
+					CommunityEnv: strings.TrimSpace(d.SnmpCommunityEnv),
+				}
+			}
 		}
 		for _, h := range v.Hops {
 			nd.Hops = append(nd.Hops, config.NetDevHop{
@@ -907,4 +1198,227 @@ func envSafe(s string) string {
 		return "DEVICE"
 	}
 	return b.String()
+}
+
+// ── 日志源读取 / 流式跟踪 / 数据库只读诊断 / 健康快照 ─────────────────────────
+
+// NetDevLogRead reads one log source (file:/journal:/docker:) from the UI's
+// 日志 dock tab through the same sealed path as the agent's netdev_log_read.
+func (a *App) NetDevLogRead(device, source string, tailN int, since, grep string) (netdev.ExecResult, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return netdev.ExecResult{}, err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
+	defer cancel()
+	return netdev.SharedManager(cfg).LogRead(ctx, device, source, tailN, since, grep), nil
+}
+
+// NetDevTriageRun runs the one-click host checkup battery on one device from
+// the UI (巡检家族菜单) — same sealed path as the agent's netdev_triage.
+func (a *App) NetDevTriageRun(device string) (netdev.TriageReport, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return netdev.TriageReport{}, err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	ctx, cancel := context.WithTimeout(a.ctx, 180*time.Second)
+	defer cancel()
+	return netdev.SharedManager(cfg).Triage(ctx, device), nil
+}
+
+// NetDevDockerGet answers one whitelisted GET against a kind=docker target
+// (the 设备卡's Docker quick actions).
+func (a *App) NetDevDockerGet(device, what, container string, tailN int) (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+	return netdev.SharedManager(cfg).DockerGet(ctx, device, what, container, tailN)
+}
+
+// NetDevK8sGet answers one whitelisted GET against a kind=k8s target.
+func (a *App) NetDevK8sGet(device, what, namespace, name string, tailN int) (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+	return netdev.SharedManager(cfg).KubeGet(ctx, device, what, namespace, name, tailN)
+}
+
+// NetDevSeries returns one device's timeline points (§5.3 sparkline data).
+func (a *App) NetDevSeries(device string, hours int) (map[string][]netdev.SeriesPoint, error) {
+	if hours <= 0 {
+		hours = 24
+	}
+	return netdev.SeriesRead(device, time.Duration(hours)*time.Hour), nil
+}
+
+// NetDevWeeklyReport builds the weekly ops digest (§5.5).
+func (a *App) NetDevWeeklyReport() (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	return netdev.SharedManager(cfg).WeeklyReport(), nil
+}
+
+// NetDevCredentialInventory builds the credential-health page (§5.5).
+func (a *App) NetDevCredentialInventory() (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	return netdev.SharedManager(cfg).CredentialInventory(), nil
+}
+
+// NetDevHandoffReport builds the shift-handoff markdown (§5.5).
+func (a *App) NetDevHandoffReport() (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	return netdev.SharedManager(cfg).HandoffReport(time.Now().Add(-12 * time.Hour)), nil
+}
+
+// NetDevLocate fans one IP/MAC across the inventory's ARP surfaces (§4.11).
+func (a *App) NetDevLocate(target string) (netdev.LocateResult, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return netdev.LocateResult{}, err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	ctx, cancel := context.WithTimeout(a.ctx, 90*time.Second)
+	defer cancel()
+	return netdev.SharedManager(cfg).Locate(ctx, target), nil
+}
+
+// NetDevFirewallGet answers one whitelisted GET against a kind=firewall target.
+func (a *App) NetDevFirewallGet(device, what string) (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+	return netdev.SharedManager(cfg).FirewallGet(ctx, device, what)
+}
+
+// NetDevLogSearch fans one pattern across hosts' logs (the IOC sweep) from
+// the UI — the same sealed per-(device,source) reads as netdev_log_search,
+// with coverage reporting when the pair cap or turn budget stops early.
+func (a *App) NetDevLogSearch(pattern string, devices, sources []string, since string) (netdev.LogSearchResult, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return netdev.LogSearchResult{}, err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	ctx, cancel := context.WithTimeout(a.ctx, 120*time.Second)
+	defer cancel()
+	return netdev.SharedManager(cfg).LogSearch(ctx, pattern, devices, sources, since), nil
+}
+
+// netdevFollowOnce installs the log-follow event forwarder (chunks stream as
+// "netdev:logfollow" Wails events; the final Done event carries the reason).
+var netdevFollowOnce sync.Once
+
+// NetDevLogFollowStart starts (or replaces) the device's streaming follow.
+func (a *App) NetDevLogFollowStart(device, source string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	m := netdev.SharedManager(cfg)
+	netdevFollowOnce.Do(func() {
+		// Nothing to install server-side: LogFollow's callback IS the forwarder.
+		_ = m
+	})
+	return m.LogFollow(device, source, func(ev netdev.LogFollowEvent) {
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "netdev:logfollow", ev)
+		}
+	})
+}
+
+// NetDevLogFollowStop stops the device's active follow.
+func (a *App) NetDevLogFollowStop(device string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	netdev.SharedManager(cfg).LogFollowStop(device)
+	return nil
+}
+
+// NetDevDBQuery runs one allowlisted read-only database diagnostic from the
+// UI — the same sealed path as the agent's netdev_db_query tool.
+func (a *App) NetDevDBQuery(source, query string) (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+	return netdev.SharedManager(cfg).DBQuery(ctx, source, query)
+}
+
+// netdevHealthOnce installs the health observer + poller (the snapshot is
+// pulled by the 健康 dock tab; changes stream as "netdev:health" events).
+var netdevHealthOnce sync.Once
+
+// NetDevHealthSnapshot returns the fleet's latest SNMP health state,
+// starting the poller on first call.
+func (a *App) NetDevHealthSnapshot() (netdev.HealthSnapshot, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return netdev.HealthSnapshot{}, err
+	}
+	m := netdev.SharedManager(cfg)
+	netdevHealthOnce.Do(func() {
+		netdev.SetHealthObserver(func(h netdev.DeviceHealth) {
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "netdev:health", h)
+			}
+		})
+		m.EnsureHealthPoller()
+	})
+	return m.HealthSnapshot(), nil
+}
+
+// ── P2: syslog 接收 / 告警规则 / 审计链校验 ─────────────────────────────────
+
+// NetDevSyslogTail reads a device's passive-syslog ring buffer (newest last).
+func (a *App) NetDevSyslogTail(device string, tailN int, grep string) ([]string, error) {
+	return netdev.SyslogTail(device, tailN, grep), nil
+}
+
+// NetDevSyslogStatus reports the UDP receiver state for the 日志/设置 UI.
+func (a *App) NetDevSyslogStatus() (netdev.SyslogStatusView, error) {
+	listening, port, buffered := netdev.SyslogReceiverStatus()
+	return netdev.SyslogStatusView{Listening: listening, Port: port, Buffered: buffered}, nil
+}
+
+// NetDevAuditVerify re-computes the audit hash chain (the 审计 tab's badge).
+func (a *App) NetDevAuditVerify() (netdev.AuditChainStatus, error) {
+	return netdev.VerifyAuditChain(), nil
+}
+
+// NetDevResolveFinding manually resolves one active auto-finding.
+func (a *App) NetDevResolveFinding(id string) error {
+	return netdev.ResolveFindingByID(id)
+}
+
+// ensureSyslogReceiverOnce starts the receiver at the first settings touch;
+// a restart is needed if the port changes (the UI notes this).
+var ensureSyslogOnce sync.Once
+
+func ensureSyslogReceiver(cfg *config.Config) {
+	ensureSyslogOnce.Do(func() { netdev.EnsureSyslogReceiver(cfg) })
 }

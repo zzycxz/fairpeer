@@ -40,6 +40,13 @@ type Finding struct {
 	Evidence   []Evidence `json:"evidence"`
 	Suggestion string     `json:"suggestion,omitempty"` // what change to draft (netdev_propose), if any
 	CreatedAt  time.Time  `json:"created_at"`
+	// Source marks the automatic origin ("alert:<rule>:<device>",
+	// "syslog:<device>:<class>") — auto-findings dedup and auto-resolve by it;
+	// human/AI findings leave it empty.
+	Source string `json:"source,omitempty"`
+	// Status is the alert lifecycle: "" (human/AI finding) | active | resolved.
+	Status     string     `json:"status,omitempty"`
+	ResolvedAt *time.Time `json:"resolvedAt,omitempty"`
 }
 
 var (
@@ -79,6 +86,7 @@ func SaveFinding(f *Finding) error {
 	if err := findingValid(f); err != nil {
 		return err
 	}
+	defer notifyFindingAsync(f) // §5.2 通知出口：配置了 webhook 且严重度过线才发
 	findingsMu.Lock()
 	defer findingsMu.Unlock()
 	if f.ID == "" {

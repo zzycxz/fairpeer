@@ -24,6 +24,8 @@ const (
 	SecretKindPassphrase = "passphrase" // private-key passphrases
 	SecretKindSNMPAuth   = "snmp-auth"  // SNMPv3 auth passwords
 	SecretKindSNMPPriv   = "snmp-priv"  // SNMPv3 privacy passwords
+	SecretKindKubeconfig = "kubeconfig" // kind=k8s targets: the whole kubeconfig YAML
+	SecretKindAPIToken   = "api-token"  // kind=firewall targets: vendor REST API tokens
 )
 
 // SecretKey builds the namespaced store key for one credential. name is the

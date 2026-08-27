@@ -130,6 +130,38 @@ func (m *Manager) LogRead(ctx context.Context, deviceName, source string, tailN 
 	if tailN > logTailMax {
 		tailN = logTailMax
 	}
+	// kind targets answer their own source forms through the API clients —
+	// no SSH session exists for them (NETDEV_SPEC_V2 §3.1). linux hosts keep
+	// the composed-command path below unchanged.
+	if device.Kind == "k8s" {
+		if rest, ok := strings.CutPrefix(source, "k8s:"); ok && rest != "" {
+			ns, pod := rest, ""
+			if i := strings.Index(rest, "/"); i >= 0 {
+				ns, pod = rest[:i], rest[i+1:]
+			} else {
+				ns = "" // context default namespace
+				pod = rest
+			}
+			out, err := m.KubeGet(ctx, deviceName, "podlog", ns, pod, tailN)
+			if err != nil {
+				return ExecResult{Device: deviceName, Command: "log " + source, Refused: true, Class: "guardrail", Refusal: err.Error()}
+			}
+			return ExecResult{Device: deviceName, Command: "log " + source, Class: "read", Output: out}
+		}
+		return ExecResult{Device: deviceName, Command: "log " + source, Refused: true, Class: "guardrail",
+			Refusal: "kind=k8s targets read logs as k8s:<namespace>/<pod> (or k8s:<pod> for the context default)"}
+	}
+	if device.Kind == "docker" {
+		if container, ok := strings.CutPrefix(source, "docker:"); ok && container != "" {
+			out, err := m.DockerGet(ctx, deviceName, "logs", container, tailN)
+			if err != nil {
+				return ExecResult{Device: deviceName, Command: "log " + source, Refused: true, Class: "guardrail", Refusal: err.Error()}
+			}
+			return ExecResult{Device: deviceName, Command: "log " + source, Class: "read", Output: out}
+		}
+		return ExecResult{Device: deviceName, Command: "log " + source, Refused: true, Class: "guardrail",
+			Refusal: "kind=docker targets read logs as docker:<container> (via the read-only Engine API)"}
+	}
 	fetchN := tailN
 	if grep != "" || since != "" {
 		// Widen the fetch so filtering has material to keep tailN lines; still
