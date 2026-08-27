@@ -369,10 +369,30 @@ func remoteStateForTab(a *App, tab *WorkspaceTab) string {
 	return "connected"
 }
 
-// SSHConnect is the wizard's SSH entry: it records the credentials (manager
-// cache + secret store for the secrets), then runs the standard probe flow
-// (dial, provision, hello). Alias targets expand through ~/.ssh/config.
-func (a *App) SSHConnect(host, port, user, authMethod, password, keyPath, passphrase string) (RemoteProbeResult, error) {
+// SetSSHSecret stores an SSH credential secret (password or passphrase) in
+// the encrypted secret store BEFORE SSHConnect is called — secrets never ride
+// the bridge as SSHConnect parameters (2026-08-21 security hardening).
+func (a *App) SetSSHSecret(authField, host, port, user, value string) error {
+	authField = strings.ToLower(strings.TrimSpace(authField))
+	if authField != "password" && authField != "passphrase" {
+		return fmt.Errorf("authField must be password or passphrase")
+	}
+	store := desktopSecretStore()
+	if store == nil {
+		return fmt.Errorf("secret store unavailable")
+	}
+	passwordKey, passphraseKey := sshCredsSecretKeys(host, port, user)
+	key := passwordKey
+	if authField == "passphrase" {
+		key = passphraseKey
+	}
+	return store.Set(key, value)
+}
+
+// SSHConnect is the wizard's SSH entry. Secrets (password/passphrase) are read
+// from the secret store — the frontend calls SetSSHSecret first; they never
+// arrive as plain parameters over the bridge.
+func (a *App) SSHConnect(host, port, user, authMethod, keyPath string) (RemoteProbeResult, error) {
 	host = strings.TrimSpace(host)
 	if host == "" {
 		return RemoteProbeResult{}, fmt.Errorf("ssh host is required")
@@ -383,6 +403,18 @@ func (a *App) SSHConnect(host, port, user, authMethod, password, keyPath, passph
 	}
 	if authMethod == "privatekey" {
 		authMethod = "privateKey"
+	}
+	// Read secrets from the encrypted store — absent entries mean "" (the
+	// caller may have skipped the secret step for key-only auth).
+	password, passphrase := "", ""
+	if store := desktopSecretStore(); store != nil {
+		passwordKey, passphraseKey := sshCredsSecretKeys(host, port, user)
+		if v, _, err := store.Get(passwordKey); err == nil {
+			password = v
+		}
+		if v, _, err := store.Get(passphraseKey); err == nil {
+			passphrase = v
+		}
 	}
 	creds := &sshCredentials{
 		Host: host, Port: strings.TrimSpace(port), User: strings.TrimSpace(user),

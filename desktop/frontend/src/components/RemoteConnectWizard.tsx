@@ -128,7 +128,12 @@ export function RemoteConnectWizard({ onClose }: { onClose: () => void }) {
     try {
       const res =
         kind === "ssh"
-          ? await app.SSHConnect(sshHost.trim(), sshPort.trim(), sshUser.trim(), sshAuth, sshPassword, sshKeyPath.trim(), "")
+          ? await (async () => {
+              if (sshPassword) {
+                await app.SetSSHSecret("password", sshHost.trim(), sshPort.trim(), sshUser.trim(), sshPassword);
+              }
+              return app.SSHConnect(sshHost.trim(), sshPort.trim(), sshUser.trim(), sshAuth, sshKeyPath.trim());
+            })()
           : kind === "server"
           ? await app.ServerConnect(serverAddr.trim(), serverToken, serverTLS)
           : await app.RemoteConnectProbe(kind, target, connectUser);
@@ -151,7 +156,10 @@ export function RemoteConnectWizard({ onClose }: { onClose: () => void }) {
       setStep("connecting");
       setLogs([]);
       log(t("remote.logDialing", { kind, target }));
-      const res = await app.SSHConnect(sshHost.trim(), sshPort.trim(), sshUser.trim(), sshAuth, sshPassword, sshKeyPath.trim(), "");
+      if (sshPassword) {
+        await app.SetSSHSecret("password", sshHost.trim(), sshPort.trim(), sshUser.trim(), sshPassword);
+      }
+      const res = await app.SSHConnect(sshHost.trim(), sshPort.trim(), sshUser.trim(), sshAuth, sshKeyPath.trim());
       setProbe(res);
       const startDir = res.homeDir && res.homeDir !== "/" ? res.homeDir : "";
       setCwd(startDir ? startDir.replace(/^\/+/, "").split("/").filter(Boolean) : []);

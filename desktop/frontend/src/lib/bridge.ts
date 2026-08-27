@@ -154,8 +154,10 @@ export interface AppBindings {
   PTYCreateForTab(tabID: string, cols: number, rows: number): Promise<number>;
   ListWSLDistros(): Promise<Array<{ name: string; state: string; version: number; default: boolean }>>;
   ListDockerContainers(): Promise<Array<{ ID: string; Image: string; Names: string; State: string; Status: string }>>;
-  SSHConnect(host: string, port: string, user: string, authMethod: string, password: string, keyPath: string, passphrase: string): Promise<{ version: string; goos: string; arch: string; homeDir: string }>;
+  SSHConnect(host: string, port: string, user: string, authMethod: string, keyPath: string): Promise<{ version: string; goos: string; arch: string; homeDir: string }>;
+  SetSSHSecret(authField: "password" | "passphrase", host: string, port: string, user: string, value: string): Promise<void>;
   ServerConnect(address: string, token: string, useTLS: boolean): Promise<{ version: string; goos: string; arch: string; homeDir: string }>;
+  ServerForget(address: string): Promise<void>;
   SSHInspectHost(host: string, port: string, user: string): Promise<{ fingerprint: string; trusted: boolean }>;
   SSHTrustHost(host: string, port: string): Promise<void>;
   OpenRemoteTopicTab(kind: string, target: string, user: string, tls: boolean, root: string, topicId: string, title: string, sessionPath: string): Promise<TabMeta | null>;
@@ -2326,7 +2328,9 @@ function makeMockApp(): AppBindings {
         async ListWSLDistros() { return []; },
         async ListDockerContainers() { return []; },
         async SSHConnect() { throw new Error("ssh connect unavailable in browser mode"); },
+        async SetSSHSecret() { /* browser mock: no secret store */ },
         async ServerConnect() { throw new Error("server connect unavailable in browser mode"); },
+        async ServerForget() {},
         async SSHInspectHost() { throw new Error("ssh unavailable in browser mode"); },
         async SSHTrustHost() {},
         async OpenRemoteTopicTab() { return null; },
