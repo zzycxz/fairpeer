@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { app } from "../../lib/bridge";
+import { useToast } from "../../lib/toast";
 import { useConfirm } from "../../lib/confirm";
 import type { NetDevProposal } from "../../lib/types";
 
@@ -20,7 +21,9 @@ const STATUS_LABEL: Record<string, string> = {
 // ProposalActions: the approve / execute / rollback buttons with their
 // confirm dialogs. Shared by the settings 提案中心 and the 运维 dock's 提案
 // tab — the human half of the write path lives wherever the human is looking.
-export function ProposalActions({ p, onDone }: { p: NetDevProposal; onDone: () => void }) {
+export function
+ ProposalActions({ p, onDone }: { p: NetDevProposal; onDone: () => void }) {
+  const { showToast } = useToast();
   const confirmDlg = useConfirm();
   const [busy, setBusy] = useState("");
   const act = async (label: string, fn: () => Promise<unknown>) => {
@@ -29,7 +32,7 @@ export function ProposalActions({ p, onDone }: { p: NetDevProposal; onDone: () =
       await fn();
       await onDone();
     } catch (e) {
-      alert(String(e));
+      showToast(String(e), "error");
     } finally {
       setBusy("");
     }

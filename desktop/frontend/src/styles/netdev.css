@@ -229,6 +229,20 @@
   line-height: 1.55;
   color: var(--fg-faint);
 }
+/* Hints that already sit inside a card's own spacing (panel footnotes,
+   empty states) drop their own padding instead of every call site
+   carrying style={{ padding: 0 }}. */
+.ndv__hint--flush { padding: 0; }
+
+/* Button/action rows inside a panel card (拓扑/发现/提案 header rows) —
+   replaces the per-tab inline style={{ display:flex, gap, padding:0 }} hacks. */
+.ndv__panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
 
 .ndv__rail-actions { padding: 4px 0 6px; }
 
@@ -236,7 +250,7 @@
 .ndv__group-row { display: flex; justify-content: space-between; color: var(--fg-faint); padding: 3px 2px; font-size: 11.5px; }
 /* Device rows — the coding sidebar's row grammar (radius-sm, sidebar-hover). */
 .ndv__device {
-  padding: 4px 8px 4px 14px;
+  padding: 6px 8px 6px 14px;
   font-size: 12.5px;
   color: var(--fg-dim);
   border-radius: var(--radius-sm);
@@ -299,10 +313,19 @@
 
 .ndv__card {
   border: 1px solid var(--border-soft);
-  border-radius: var(--radius-xs);
-  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
   font-size: 12px;
   background: rgba(0, 0, 0, 0.15);
+}
+/* A tab whose body is exactly ONE card (live/devices/topology/findings/
+   proposals/audit) stretches the card to the full dock height — short content
+   leaves card-colored space instead of a dead gray void below. */
+.ndv__dock-body > .ndv__card:only-child {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .ndv__card--dim { opacity: 0.7; line-height: 1.6; }
 
@@ -478,11 +501,11 @@
 }
 .ndv__live-tail-chev { transform: rotate(-90deg); }
 .ndv__live-tail-box {
-  max-height: 110px; overflow: auto; padding: 2px 8px 6px;
+  max-height: 170px; overflow: auto; padding: 2px 8px 6px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; line-height: 1.45;
   white-space: pre; background: color-mix(in srgb, var(--fg) 3%, transparent);
 }
-.ndv__live-tail--expanded .ndv__live-tail-box { max-height: 340px; }
+.ndv__live-tail--expanded .ndv__live-tail-box { max-height: min(60vh, 520px); }
 .ndv__live-tail-line { color: var(--fg); opacity: 0.85; }
 .ndv__live-tail-line--cmd { color: var(--accent); opacity: 1; }
 
@@ -508,13 +531,28 @@
 .ndv__live-guardrail-reason { opacity: 0.65; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── 审计表 (dock audit tab) ──────────────────────────────────────────────── */
+/* The audit card fills the dock (single-card rule) and the ROW region owns
+   the scroll, so the stats header + footnote stay anchored while the table
+   uses the panel's full height. */
+.ndv__audit-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
+.ndv__audit-stats {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding-bottom: 12px; margin-bottom: 12px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 12px; opacity: 0.9; font-variant-numeric: tabular-nums;
+}
 .ndv__audit-table { display: flex; flex-direction: column; font-size: 11px; }
 .ndv__audit-row {
   display: grid; grid-template-columns: 62px 90px 1fr 52px 74px; gap: 6px;
   padding: 3px 4px; align-items: baseline;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
 }
-.ndv__audit-row--head { font-weight: 700; opacity: 0.55; position: sticky; top: 0; background: var(--bg); }
+/* Sticky inside .ndv__audit-scroll; the background equals the card's composite
+   (rgba(0,0,0,.15) over --bg-elev) so scrolled rows vanish beneath it cleanly. */
+.ndv__audit-row--head {
+  font-weight: 700; opacity: 0.55; position: sticky; top: 0;
+  background: color-mix(in srgb, #000 15%, var(--bg-elev));
+}
 .ndv__audit-time { font-variant-numeric: tabular-nums; opacity: 0.7; }
 .ndv__audit-dev { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ndv__audit-cmd {

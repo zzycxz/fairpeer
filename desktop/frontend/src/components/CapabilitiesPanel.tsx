@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { asArray } from "../lib/array";
 import { app, openExternal } from "../lib/bridge";
+import { useToast } from "../lib/toast";
 import { useT } from "../lib/i18n";
 import type { CapabilitiesView, CatalogEntry, MCPServerInput, ServerView, SkillRootSkillView, SkillRootView, SkillView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
@@ -1969,12 +1970,13 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 		return skillListSummary(userSkills, filteredSkills.filter((sk) => sk.scope !== "builtin"), skillQuery.trim().length > 0, t);
 	}, [filteredSkills, skillQuery, t, view, userSkills]);
 
+	const { showToast } = useToast();
 	const deriveSkill = useCallback((name: string) => {
 		void mutate(async () => {
 			const path = await app.DeriveEditableSkill(name);
-			if (path) window.alert(t("caps.deriveSkillDone", { path }));
+			if (path) showToast(t("caps.deriveSkillDone", { path }), "info");
 		});
-	}, [mutate, t]);
+	}, [mutate, showToast, t]);
 
 	const toggleSkill = useCallback((name: string) => {
 		setExpandedSkills((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });

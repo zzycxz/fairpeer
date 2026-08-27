@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { app } from "../../lib/bridge";
 import { useConfirm } from "../../lib/confirm";
+import { useToast } from "../../lib/toast";
 import type { NetDevSettingsView, NetDevSSHImportCandidate } from "../../lib/types";
 
 // NetDevSection is the 运维 settings tab: device/hop inventory (persisted to
@@ -36,6 +37,7 @@ const emptyHop = (): EditHop => ({
 
 export function NetDevSection() {
   const confirm = useConfirm();
+  const { showToast } = useToast();
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -354,7 +356,7 @@ export function NetDevSection() {
           if (!xml) return;
           try {
             const f = await app.NetDevImportNmap(xml);
-            alert(f ? f.title : "导入完成");
+            showToast(f ? f.title : "导入完成", "success");
           } catch (e) { setErr(String(e)); }
         }}
       >导入 nmap XML（主机+开放端口 → 发现，清单外标待确认）</span>

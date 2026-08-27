@@ -783,7 +783,7 @@ export function NetDevLayout({
                 {topoSource === "measured" ? "[ LLDP/CDP 实测 ]" : "[ IP 规划推断（本地计算，未连接设备） ]"}
               </span>
             </div>
-            <div className="ndv__rail-actions" style={{ padding: 0, marginBottom: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <div className="ndv__panel-actions">
               <span className="btn btn--secondary btn--small" role="button" onClick={() => void loadPlan()}>
                 刷新 IP 规划视图
               </span>
@@ -792,11 +792,11 @@ export function NetDevLayout({
               </span>
             </div>
             {topoNotice && (
-              <div className="ndv__hint" style={{ padding: 0, marginBottom: 8, color: "var(--accent)" }}>{topoNotice}</div>
+              <div className="ndv__hint ndv__hint--flush" style={{ marginBottom: 8, color: "var(--accent)" }}>{topoNotice}</div>
             )}
             {topo && <TopologyMap graph={scopedTopo ?? topo} selected={selected} selectedAddr={selectedDevice?.address} onPick={pickFromTopo} />}
             {!topo && !topoBusy && (
-              <div className="ndv__hint" style={{ padding: 0 }}>
+              <div className="ndv__hint ndv__hint--flush">
                 &gt;&gt; TOPO.ENGINE: 基于 IP 规划/命名/网段的本地聚类推演 (AI-Free)。拓扑链路强制数据保真——未证实链路不予绘制。请求全景态势，请执行 LLDP/CDP 靶向实测校准。
               </div>
             )}
@@ -808,7 +808,7 @@ export function NetDevLayout({
             <div className="ndv__card-title">
               发现（{scopedFindings.length}）{project && <span style={{ fontWeight: 400, fontSize: 11 }}> · {project.name}</span>}
             </div>
-            <div className="ndv__rail-actions" style={{ padding: 0, marginBottom: 8 }}>
+            <div className="ndv__panel-actions">
               <span
                 className="btn btn--secondary btn--small"
                 role="button"
@@ -816,7 +816,7 @@ export function NetDevLayout({
                 onClick={() => void runBaseline()}
               >{baseBusy ? "核查中…" : "安全基线核查"}</span>
             </div>
-            {scopedFindings.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>{project ? `>> 项目「${project.name}」暂无数据。` : <>&gt;&gt; NULL_DATA: 证据池为空。Agent 诊断输出及全量巡检报告将在此落盘 (Enforced Evidence-Based)。</>}</div>}
+            {scopedFindings.length === 0 && <div className="ndv__hint ndv__hint--flush">{project ? `>> 项目「${project.name}」暂无数据。` : <>&gt;&gt; NULL_DATA: 证据池为空。Agent 诊断输出及全量巡检报告将在此落盘 (Enforced Evidence-Based)。</>}</div>}
             {scopedFindings.slice(0, 20).map(f => <FindingRow key={f.id} f={f} />)}
           </div>
         )}
@@ -824,9 +824,9 @@ export function NetDevLayout({
         {tab === "proposals" && (
           <div className="ndv__card">
             <div className="ndv__card-title">提案（{scopedProposals.length}）{project && <span style={{ fontWeight: 400, fontSize: 11 }}> · {project.name}</span>}</div>
-            {scopedProposals.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>{project ? `>> 项目「${project.name}」暂无提案。` : <>&gt;&gt; NULL_DATA: 无挂起提案。在交互终端向 Agent 下达变更意图 (netdev_propose) 进入审批流。</>}</div>}
+            {scopedProposals.length === 0 && <div className="ndv__hint ndv__hint--flush">{project ? `>> 项目「${project.name}」暂无提案。` : <>&gt;&gt; NULL_DATA: 无挂起提案。在交互终端向 Agent 下达变更意图 (netdev_propose) 进入审批流。</>}</div>}
             {scopedProposals.slice(0, 10).map(p => <ProposalRow key={p.id} p={p} onDone={() => void reload()} />)}
-            <div className="ndv__hint" style={{ padding: 0 }}>批准 / 执行 / 回滚在行内直接操作；agent 只能起草，执行权永远在人。</div>
+            <div className="ndv__hint ndv__hint--flush">批准 / 执行 / 回滚在行内直接操作；agent 只能起草，执行权永远在人。</div>
           </div>
         )}
 
@@ -834,7 +834,7 @@ export function NetDevLayout({
           <div className="ndv__card">
             <div className="ndv__card-title">审计（最近 {audit.length} 条）</div>
             
-            <div style={{ display: "flex", alignItems: "center", gap: "16px", paddingBottom: "12px", marginBottom: "12px", borderBottom: "1px solid var(--border-soft)", fontSize: "12px", opacity: 0.9, fontVariantNumeric: "tabular-nums" }}>
+            <div className="ndv__audit-stats">
               <span className="ndv__bottom-item"><span className="ndv__ok">今日只读</span> {readCount}</span>
               <span className="ndv__bottom-item"><span className="ndv__ok">写操作(直连)</span> <span className="ndv__zero">{writeCount}</span></span>
               <span className="ndv__bottom-item">
@@ -843,22 +843,24 @@ export function NetDevLayout({
               <span className="ndv__bottom-note">结构性只读：写命令无执行路径 · 全量审计中</span>
             </div>
 
-            {audit.length === 0 && <div className="ndv__hint" style={{ padding: 0 }}>&gt;&gt; NULL_DATA: 还没有操作记录。每条设备命令（含拒绝）都会落审计。</div>}
-            <div className="ndv__audit-table">
-              <div className="ndv__audit-row ndv__audit-row--head">
-                <span>时间</span><span>设备</span><span>命令</span><span>分类</span><span>状态</span>
-              </div>
-              {audit.slice(0, 100).map((a, i) => (
-                <div key={`${a.time}-${i}`} className="ndv__audit-row" title={a.error || a.command}>
-                  <span className="ndv__audit-time">{String(a.time ?? "").slice(11, 19) || String(a.time ?? "").slice(5, 16)}</span>
-                  <span className="ndv__audit-dev">{a.device}</span>
-                  <span className="ndv__audit-cmd">{a.command}</span>
-                  <span style={{ color: classColorForAudit(a.class) }}>{auditClassLabel(a.class)}</span>
-                  <span style={{ color: a.status === "ok" ? "var(--ok)" : a.status === "refused" ? "var(--danger)" : "var(--warn)" }}>{a.status}</span>
+            {audit.length === 0 && <div className="ndv__hint ndv__hint--flush" style={{ marginBottom: 8 }}>&gt;&gt; NULL_DATA: 还没有操作记录。每条设备命令（含拒绝）都会落审计。</div>}
+            <div className="ndv__audit-scroll">
+              <div className="ndv__audit-table">
+                <div className="ndv__audit-row ndv__audit-row--head">
+                  <span>时间</span><span>设备</span><span>命令</span><span>分类</span><span>状态</span>
                 </div>
-              ))}
+                {audit.slice(0, 100).map((a, i) => (
+                  <div key={`${a.time}-${i}`} className="ndv__audit-row" title={a.error || a.command}>
+                    <span className="ndv__audit-time">{String(a.time ?? "").slice(11, 19) || String(a.time ?? "").slice(5, 16)}</span>
+                    <span className="ndv__audit-dev">{a.device}</span>
+                    <span className="ndv__audit-cmd">{a.command}</span>
+                    <span style={{ color: classColorForAudit(a.class) }}>{auditClassLabel(a.class)}</span>
+                    <span style={{ color: a.status === "ok" ? "var(--ok)" : a.status === "refused" ? "var(--danger)" : "var(--warn)" }}>{a.status}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="ndv__hint" style={{ padding: 0 }}>审计只记命令与字节数，输出原文不入档（脱敏在进入上下文之前完成）。</div>
+            <div className="ndv__hint ndv__hint--flush" style={{ marginTop: 8 }}>审计只记命令与字节数，输出原文不入档（脱敏在进入上下文之前完成）。</div>
           </div>
         )}
         </div>
