@@ -21,7 +21,6 @@ import type {
   CoWorkSettingsView,
   CommandInfo,
   ContextInfo,
-  ContextPanelInfo,
   DirEntry,
   DroppedItem,
   DreamRunView,
@@ -30,6 +29,10 @@ import type {
   NetDevSettingsView,
   NetDevExecResult,
   NetDevLogFollowEvent,
+  NetDevLogSearchResult,
+  NetDevTriageReport,
+  NetDevLocateResult,
+  NetDevSeriesPoint,
   NetDevDeviceHealth,
   NetDevHealthSnapshot,
   NetDevSyslogStatusView,
@@ -445,6 +448,17 @@ export interface AppBindings {
   // diagnostics / SNMP health snapshot. Follow chunks + health changes stream
   // on the "netdev:logfollow" / "netdev:health" channels.
   NetDevLogRead(device: string, source: string, tailN: number, since: string, grep: string): Promise<NetDevExecResult>;
+  NetDevLogSearch(pattern: string, devices: string[], sources: string[], since: string): Promise<NetDevLogSearchResult>;
+  NetDevTriageRun(device: string): Promise<NetDevTriageReport>;
+  // kind=docker / kind=k8s read-only API targets (NETDEV_SPEC_V2 §2.2/§2.3).
+  NetDevDockerGet(device: string, what: string, container: string, tailN: number): Promise<string>;
+  NetDevK8sGet(device: string, what: string, namespace: string, name: string, tailN: number): Promise<string>;
+  NetDevFirewallGet(device: string, what: string): Promise<string>;
+  NetDevLocate(target: string): Promise<NetDevLocateResult>;
+  NetDevSeries(device: string, hours: number): Promise<Record<string, NetDevSeriesPoint[]>>;
+  NetDevHandoffReport(): Promise<string>;
+  NetDevWeeklyReport(): Promise<string>;
+  NetDevCredentialInventory(): Promise<string>;
   NetDevLogFollowStart(device: string, source: string): Promise<void>;
   NetDevLogFollowStop(device: string): Promise<void>;
   NetDevDBQuery(source: string, query: string): Promise<string>;
@@ -553,7 +567,6 @@ export interface AppBindings {
   DeleteTopic(topicID: string): Promise<void>;
   TrashTopic(topicID: string): Promise<void>;
   TrashExpertSession(teamID: string): Promise<void>;
-  ContextPanel(tabID: string): Promise<ContextPanelInfo>;
   // New native-feel bindings (added with the desktop native-feel plan).
   ConfirmAction(req: NativeConfirmRequest): Promise<boolean>;
   SaveWindowState(state: DesktopWindowState): Promise<void>;
@@ -1267,32 +1280,6 @@ function makeMockApp(): AppBindings {
         { name: "node", description: "Inspect a specific graph node." },
       ],
     },
-    { name: "github", transport: "stdio", status: "connected", configured: true, autoStart: true, tier: "background", command: "npx", args: ["-y", "@modelcontextprotocol/server-github"], tools: 12, prompts: 2, resources: 0 },
-    {
-      name: "linear",
-      transport: "http",
-      status: "initializing",
-      configured: true,
-      autoStart: true,
-      tier: "background",
-      url: "https://mcp.linear.app/mcp",
-      authStatus: "possible",
-      authUrl: "https://mcp.linear.app/mcp",
-      tools: 8,
-      prompts: 0,
-      resources: 0,
-      toolList: [
-        { name: "list_issues", description: "List and filter Linear issues." },
-        { name: "get_issue", description: "Fetch a Linear issue by id or key." },
-        { name: "create_issue", description: "Create a Linear issue." },
-        { name: "update_issue", description: "Update status, assignee, priority, or labels." },
-        { name: "list_projects", description: "List Linear projects." },
-        { name: "get_project", description: "Fetch project details." },
-        { name: "list_teams", description: "List Linear teams." },
-        { name: "search", description: "Search Linear workspace objects." },
-      ],
-    },
-    { name: "figma", transport: "http", status: "failed", configured: true, autoStart: true, tier: "background", url: "https://mcp.figma.com/mcp", authStatus: "required", authUrl: "https://mcp.figma.com/mcp", tools: 0, prompts: 0, resources: 0, error: "connect: 401 unauthorized" },
   ];
   const capSkills: SkillView[] = [
     { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "builtin", runAs: "subagent", enabled: true },
@@ -1994,6 +1981,61 @@ function makeMockApp(): AppBindings {
       }, 1000);
     },
     async NetDevLogFollowStop(_device: string) {},
+    async NetDevSeries(_device: string, _hours: number): Promise<Record<string, NetDevSeriesPoint[]>> {
+      return {};
+    },
+    async NetDevHandoffReport(): Promise<string> {
+      return "# 值班交接报告（browser dev mock）";
+    },
+    async NetDevWeeklyReport(): Promise<string> {
+      return "# 运维周报（browser dev mock）";
+    },
+    async NetDevCredentialInventory(): Promise<string> {
+      return "# 凭证盘点（browser dev mock）";
+    },
+    async NetDevLocate(_target: string): Promise<NetDevLocateResult> {
+      return { target: _target, hits: [], searched: [], covered_devices: 0, total_devices: 0, budget_stopped: false, note: "browser dev mock" };
+    },
+    async NetDevFirewallGet(_device: string, what: string): Promise<string> {
+      return what === "conns"
+        ? '{"http_status":0,"results":[{"src":"10.1.0.5","dst":"8.8.8.8"}]}'
+        : `(browser dev mock: no firewall for "${what}")`;
+    },
+    async NetDevDockerGet(_device: string, what: string, _container: string, _tailN: number): Promise<string> {
+      return what === "ps"
+        ? '[{"Id":"abc123","Names":["/web"],"State":"running"}]'
+        : `(browser dev mock: no docker engine for "${what}")`;
+    },
+    async NetDevK8sGet(_device: string, what: string, _namespace: string, _name: string, _tailN: number): Promise<string> {
+      return what === "pods"
+        ? '{"items":[{"metadata":{"name":"web-1"}}]}'
+        : `(browser dev mock: no cluster for "${what}")`;
+    },
+    async NetDevTriageRun(device: string): Promise<NetDevTriageReport> {
+      return {
+        device, vendor: "linux",
+        sections: [
+          { name: "失败登录", command: "lastb -n 100", ok: true, lines: ["btmp begins", "(browser dev mock)"] },
+          { name: "磁盘水位", command: "df -h", ok: true, lines: ["/dev/sda1  91G  78G  8G  91% /"] },
+        ],
+        anomalies: ["磁盘使用率最高 91%（≥85% 水位）"],
+        summary: "体检 2 项，1 项异常（browser dev mock）",
+        created_at: new Date().toISOString(),
+      };
+    },
+    async NetDevLogSearch(pattern: string, _devices: string[], _sources: string[], since: string): Promise<NetDevLogSearchResult> {
+      return {
+        pattern,
+        hits: [{
+          device: "mock-host", source: "file:/var/log/auth.log",
+          line: `Aug 27 10:00:02 host sshd[2]: Failed password for root from 10.6.6.6 (${since || "no window"})`,
+          context: ["Aug 27 10:00:01 host cron[1]: (root) CMD (/usr/bin/backup)"],
+        }],
+        devices_searched: ["mock-host"], skipped: [],
+        covered_devices: 1, total_devices: 1, devices_with_hits: 1,
+        budget_stopped: false, note: "browser dev mock: no device backend",
+      };
+    },
     async NetDevDBQuery(_source: string, query: string) {
       return `(browser dev mock: no db backend for "${query}")`;
     },
@@ -2750,6 +2792,7 @@ function makeMockApp(): AppBindings {
             sessionCacheMissTokens: 1640,
             sessionCacheWriteTokens: 2100,
             requestCount: 12,
+            sessionElapsedMs: 33 * 60 * 1000,
           };
         },
         async ContextUsageForTab() {
@@ -4278,32 +4321,6 @@ function makeMockApp(): AppBindings {
     },
     async OpenPPTTemplateDir() {},
     async PickPPTTemplate() { return ""; },
-    async ContextPanel(_tabID: string) {
-      const now = Date.now();
-      return {
-        usedTokens: 42124,
-        windowTokens: 128000,
-        promptTokens: 22134,
-        completionTokens: 12345,
-        totalTokens: 34479,
-        reasoningTokens: 7521,
-        cacheHitTokens: 0,
-        cacheMissTokens: 0,
-        requestCount: 6,
-        elapsedMs: 33 * 60 * 1000,
-        mock: true,
-        readFiles: [
-          { path: "README.md", turn: 2, time: now - 34 * 60 * 1000 },
-          { path: "go.mod", turn: 3, time: now - 30 * 60 * 1000 },
-          { path: "desktop/file.go", turn: 5, time: now - 13 * 60 * 1000, offset: 0, limit: 180 },
-          { path: "internal/event.go", turn: 6, time: now - 4 * 60 * 1000, offset: 120, limit: 80, truncated: true },
-        ],
-        changedFiles: [
-          { path: t("mock.changedFile1Path"), sources: ["session"], gitStatus: "modified", turns: [5, 6], latestPrompt: t("mock.changedFile1Prompt"), latestTime: now - 2 * 60 * 1000 },
-          { path: t("mock.changedFile2Path"), sources: ["session"], gitStatus: "added", turns: [6], latestPrompt: t("mock.changedFile2Prompt"), latestTime: now - 60 * 1000 },
-        ],
-      };
-    },
     async RagCreateCollection(_name: string) {},
     async RagDeleteCollection(_name: string) {},
     async RagRenameCollection(_oldName: string, _newName: string) {},

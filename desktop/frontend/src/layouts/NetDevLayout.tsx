@@ -7,6 +7,7 @@ import { getActiveProject, setActiveProject, subscribeActiveProject, type NetDev
 import { ProposalActions } from "../components/netdev/ProposalCenter";
 import { LiveOpsPanel } from "../components/netdev/LiveOpsPanel";
 import { LogPanel } from "../components/netdev/LogPanel";
+import { LogWorkbench } from "../components/netdev/LogWorkbench";
 import { HealthPanel } from "../components/netdev/HealthPanel";
 import { JobsPanel } from "../components/netdev/JobsPanel";
 import { DockTabs, useDockTabState } from "../components/DockTabs";
@@ -89,6 +90,26 @@ export function NetdevTitleBar({ leading, onOpenSettings }: { leading?: ReactNod
   );
 }
 
+// Sparkline — 24h 迷你趋势图（§5.3）：时序面数据的设备卡呈现。无数据不渲染
+// （渐进披露），有则一条 60x16 的折线。
+function Sparkline({ points, bad }: { points: { t: number; v: number }[]; bad?: boolean }) {
+  if (points.length < 2) return null;
+  const vs = points.map(p => p.v);
+  const min = Math.min(...vs), max = Math.max(...vs);
+  const span = max - min || 1;
+  const w = 60, h = 16;
+  const d = points.map((p, i) => {
+    const x = (i / (points.length - 1)) * w;
+    const y = h - ((p.v - min) / span) * h;
+    return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return (
+    <svg width={w} height={h} style={{ verticalAlign: "middle", marginLeft: 6 }} aria-hidden>
+      <path d={d} fill="none" stroke={bad ? "var(--danger)" : "var(--ok)"} strokeWidth="1.3" />
+    </svg>
+  );
+}
+
 // Severity colors ride the THEME TOKENS (accent/warn/danger) — never literal
 // hexes, so every theme reads consistently (user direction: 配色跟随全局).
 const SEV_COLOR: Record<string, string> = { info: "var(--accent)", warning: "var(--warn)", critical: "var(--danger)" };
@@ -111,6 +132,33 @@ const QUICK_BATTERY: Record<string, string[]> = {
   linux: ["ip addr", "ss -tlnp", "systemctl --failed", "df -h", "cat /proc/net/dev"],
   windows: ["Get-NetAdapter", "Get-NetTCPConnection", "Get-Service", "systeminfo"],
 };
+
+// Web 服务器只读预设（NETDEV_SPEC_V2 §2.5 v1）：nginx/apache 的配置自检与
+// 模块/虚拟机清单——web kind 的先头部队，全部在既有读表白名单内。
+const WEB_QUICK = ["nginx -t", "nginx -T", "apache2ctl -M", "apache2ctl -S"];
+
+// kind=docker / kind=k8s 设备卡快捷（NETDEV_SPEC_V2 §2.2/§2.3 + §10.5 矩阵）。
+const DOCKER_QUICK: { what: string; label: string }[] = [
+  { what: "ping", label: "引擎连通" },
+  { what: "ps", label: "容器列表" },
+  { what: "images", label: "镜像" },
+  { what: "info", label: "引擎信息" },
+];
+const K8S_QUICK: { what: string; label: string }[] = [
+  { what: "version", label: "集群版本" },
+  { what: "nodes", label: "节点" },
+  { what: "pods", label: "Pods" },
+  { what: "deployments", label: "Deployments" },
+  { what: "events", label: "事件" },
+];
+const FW_QUICK: { what: string; label: string }[] = [
+  { what: "status", label: "系统状态" },
+  { what: "resource", label: "资源" },
+  { what: "interfaces", label: "接口" },
+  { what: "conns", label: "会话表" },
+  { what: "policies", label: "策略（只读）" },
+  { what: "routes", label: "路由" },
+];
 
 // SNMP quick queries for the device card (vendor=snmp): label → (oid, mode).
 const SNMP_QUICK: { label: string; oid: string; mode: string }[] = [
@@ -138,6 +186,14 @@ const REDFISH_QUICK: { label: string; path: string }[] = [
 ];
 
 type QuickResult = { command: string; output: string; isError: boolean; refused?: string; refusedUnknown?: boolean };
+// ?bench=<workbench> deep-links the main-area workbench (mirror of ?dock=).
+function benchParam(): "logs" | null {
+  try {
+    const v = new URLSearchParams(window.location.search).get("bench");
+    return v === "logs" ? "logs" : null;
+  } catch { return null; }
+}
+
 type DockTab = "live" | "devices" | "context" | "topology" | "findings" | "proposals" | "audit" | "logs" | "health" | "jobs";
 // Fresh installs open a curated set — 操作实况 leads (supervision first), the
 // rest join via the "+" dropdown or the bottom-nav entries on demand. Stored
@@ -283,6 +339,26 @@ export function NetDevLayout({
   })());
   const [err, setErr] = useState(""); // shown in the global title bar
 
+  // Main-area workbenches (NETDEV_SPEC_V2 §10.2): 对话 is the default view and
+  // the return anchor; the 日志 workbench opens on demand and STAYS MOUNTED
+  // once opened (closing = switching back to chat, state survives — §10.2).
+  // The switch bar renders only after the first workbench open, so a
+  // chat-only session keeps the exact v1.1 layout (§10.8: 单工作台零新增 chrome).
+  const [bench, setBench] = useState<"chat" | "logs">(() => (benchParam() ? "logs" : "chat"));
+  const [logsBenchEverOpened, setLogsBenchEverOpened] = useState(() => benchParam() === "logs");
+
+  useEffect(() => {
+    if (bench === "chat") return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setBench("chat"); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [bench]);
+
+  const openLogsBench = useCallback(() => {
+    setLogsBenchEverOpened(true);
+    setBench("logs");
+  }, []);
+
   const reload = useCallback(async () => {
     try {
       const [s, f, p, a] = await Promise.all([
@@ -296,6 +372,7 @@ export function NetDevLayout({
       setProposals(p ?? []);
       setAudit(a ?? []);
       setErr("");
+      setReloadTick(t => t + 1);
     } catch (e) {
       setErr(String(e));
     }
@@ -306,6 +383,8 @@ export function NetDevLayout({
     const t = setInterval(() => void reload(), 30_000);
     return () => clearInterval(t);
   }, [reload]);
+
+  const [reloadTick, setReloadTick] = useState(0);
 
   const runQuick = useCallback(async (device: string, command: string) => {
     try {
@@ -438,6 +517,113 @@ export function NetDevLayout({
     }
   }, [reload]);
 
+  // 巡检家族（NETDEV_SPEC_V2 §10.6）：一个家四件事——网络巡检 / 主机体检 /
+  // 基线核查 / 弱口令核查（弱口令后端早已就绪，这里补 UI 接线）。
+  const [inspMenuOpen, setInspMenuOpen] = useState(false);
+  const [triageBusy, setTriageBusy] = useState(false);
+  const [weakBusy, setWeakBusy] = useState(false);
+  const [triageOneBusy, setTriageOneBusy] = useState("");
+  const [cardSeries, setCardSeries] = useState<Record<string, { t: number; v: number }[]>>({});
+
+  // 设备卡打开时拉 24h 时序（有数据才显示 sparkline，§10.5 渐进披露）。
+  useEffect(() => {
+    if (!selected) { setCardSeries({}); return; }
+    let alive = true;
+    app.NetDevSeries(selected, 24).then(m => {
+      if (!alive) return;
+      const out: Record<string, { t: number; v: number }[]> = {};
+      for (const [metric, pts] of Object.entries(m ?? {})) out[metric] = (pts ?? []).map(p => ({ t: p.t, v: p.v }));
+      setCardSeries(out);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [selected, reloadTick]);
+  const [locateTarget, setLocateTarget] = useState("");
+  const [handoffMd, setHandoffMd] = useState("");
+  const [handoffBusy, setHandoffBusy] = useState(false);
+  const [locateBusy, setLocateBusy] = useState(false);
+
+  // 「这个 IP 接在哪」——清单内 ARP 扇出定位（§4.11）。
+  const runLocate = useCallback(async () => {
+    const t = locateTarget.trim();
+    if (!t) return;
+    setLocateBusy(true);
+    try {
+      const r = await app.NetDevLocate(t);
+      const where = r.hits.map(h => `${h.device}${h.interface ? ":" + h.interface : ""}`).join("、");
+      setErr(`[SYS] LOCATE ${t}: 覆盖 ${r.covered_devices}/${r.total_devices} 台，命中 ${r.hits.length} 处${where ? "——" + where : ""}${r.budget_stopped ? "（中途停止，未覆盖≠不存在）" : ""}`);
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setLocateBusy(false);
+    }
+  }, [locateTarget]);
+
+  // kind=docker / kind=k8s 的设备卡快捷：结果落进与 CLI 快捷同一个展示区。
+  const runApiQuick = useCallback(async (label: string, run: () => Promise<string>) => {
+    try {
+      const out = await run();
+      setQuick(q => ({ ...q, [label]: { command: label, output: out, isError: false } }));
+    } catch (e) {
+      setQuick(q => ({ ...q, [label]: { command: label, output: String(e), isError: true } }));
+    }
+  }, []);
+
+  // 设备卡的「一键体检」：单台跑电池，摘要直接回报，异常进「发现」。
+  const runTriageOne = useCallback(async (device: string) => {
+    setTriageOneBusy(device);
+    try {
+      const rep = await app.NetDevTriageRun(device);
+      const anoms = rep.anomalies ?? [];
+      setErr(`[SYS] TRIAGE ${device}: ${rep.summary}${anoms.length ? "——" + anoms.join("；") : ""}`);
+      await reload();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setTriageOneBusy("");
+    }
+  }, [reload]);
+
+  const runTriageAll = useCallback(async () => {
+    const hosts = (settings?.devices ?? []).filter(d => d.vendor === "linux" || d.vendor === "windows");
+    if (hosts.length === 0) { setErr("清单里没有 linux/windows 主机——先在 设置 → 运维 录入"); return; }
+    setTriageBusy(true);
+    let anomalies = 0;
+    try {
+      for (const h of hosts) {
+        const rep = await app.NetDevTriageRun(h.name);
+        anomalies += (rep.anomalies ?? []).length;
+      }
+      setErr(`[SYS] TRIAGE COMPLETE: ${hosts.length} 台主机体检完成，${anomalies} 项异常（见「发现」）`);
+      await reload();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setTriageBusy(false);
+    }
+  }, [settings, reload]);
+
+  const runWeakCredAll = useCallback(async () => {
+    const targets = (settings?.devices ?? []).filter(d => d.vendor !== "snmp");
+    if (targets.length === 0) { setErr("清单里没有可核查的设备"); return; }
+    setWeakBusy(true);
+    const weak: string[] = [];
+    let failed = 0;
+    try {
+      for (const d of targets) {
+        try {
+          const r = await app.NetDevWeakCredCheck(d.name, "basic");
+          if (r.weak) weak.push(d.name);
+        } catch {
+          failed++; // 无凭证/不可达的设备计入未完成，不中断全队
+        }
+      }
+      setErr(`[SYS] WEAK-CRED COMPLETE: ${weak.length}/${targets.length} 台命中默认/空口令${weak.length ? "：" + weak.join("、") : ""}${failed ? `；${failed} 台未完成` : ""}`);
+      await reload();
+    } finally {
+      setWeakBusy(false);
+    }
+  }, [settings, reload]);
+
 
   // Active project scope (site switcher in the title bar): null = 全部.
   const [project, setProject] = useState<NetDevProjectScope>(getActiveProject());
@@ -456,11 +642,11 @@ export function NetDevLayout({
   const lastInspection = scopedFindings.find(f => f.title.startsWith("巡检"));
   const pendingCount = scopedProposals.filter(p => p.status === "draft" || p.status === "approved" || p.status === "partial").length;
 
-  const groups = new Map<string, { name: string; address: string; vendor: string }[]>();
+  const groups = new Map<string, { name: string; address: string; vendor: string; kind: string }[]>();
   for (const d of devices) {
     const g = d.group?.trim() || "未分组";
     if (!groups.has(g)) groups.set(g, []);
-    groups.get(g)!.push({ name: d.name, address: d.address, vendor: d.vendor });
+    groups.get(g)!.push({ name: d.name, address: d.address, vendor: d.vendor, kind: d.kind ?? "" });
   }
 
   const today = new Date().toISOString().slice(5, 10);
@@ -598,13 +784,24 @@ export function NetDevLayout({
             <Server size={14} />
             <span>设备清单</span>
           </button>
-          <button
-            className="cowork-sidebar__item"
-            onClick={() => void runInspection()}
-          >
-            <ScanSearch size={14} />
-            <span>{inspBusy ? "巡检中…" : "立即巡检"}</span>
-          </button>
+          <div style={{ position: "relative" }}>
+            <button
+              className="cowork-sidebar__item"
+              onClick={() => setInspMenuOpen(o => !o)}
+              title="网络巡检 / 主机体检 / 基线核查 / 弱口令核查"
+            >
+              <ScanSearch size={14} />
+              <span>{inspBusy || triageBusy ? "体检中…" : weakBusy ? "核查中…" : baseBusy ? "基线核查中…" : "立即巡检"}</span>
+            </button>
+            {inspMenuOpen && (
+              <span className="ndv__project-menu" role="menu" style={{ position: "absolute", left: "calc(100% + 6px)", bottom: 0, minWidth: 200, zIndex: 40 }}>
+                <span role="menuitem" onClick={() => { setInspMenuOpen(false); void runInspection(); }}>网络巡检（只读电池）</span>
+                <span role="menuitem" onClick={() => { setInspMenuOpen(false); void runTriageAll(); }}>主机体检（登录/持久化/水位）</span>
+                <span role="menuitem" onClick={() => { setInspMenuOpen(false); void runBaseline(); }}>基线核查（配置合规）</span>
+                <span role="menuitem" onClick={() => { setInspMenuOpen(false); void runWeakCredAll(); }}>弱口令核查（默认档）</span>
+              </span>
+            )}
+          </div>
           <button
             className={`cowork-sidebar__item ${dockOpen && tab === "audit" ? "cowork-sidebar__item--active" : ""}`}
             onClick={() => { onDockOpen?.(); openDockTabFn("audit"); }}
@@ -624,8 +821,16 @@ export function NetDevLayout({
 
       <div className="ndv__main">
         {bannersNode}
-        <div className="ndv__chat">{mainNode}</div>
-        {footerNode}
+        {logsBenchEverOpened && (
+          <div className="ndv-bench__bar" role="tablist" aria-label="主区工作台">
+            <span role="tab" aria-selected={bench === "chat"} className={`ndv-bench__chip${bench === "chat" ? " ndv-bench__chip--on" : ""}`} onClick={() => setBench("chat")}>对话</span>
+            <span role="tab" aria-selected={bench === "logs"} className={`ndv-bench__chip${bench === "logs" ? " ndv-bench__chip--on" : ""}`} onClick={openLogsBench}>日志</span>
+            <span className="ndv-bench__hint">Esc 返回对话</span>
+          </div>
+        )}
+        <div className="ndv__chat" style={bench !== "chat" ? { display: "none" } : undefined}>{mainNode}</div>
+        {logsBenchEverOpened && <LogWorkbench devices={settings?.devices ?? []} onInsertComposer={onInsertComposer} hidden={bench !== "logs"} />}
+        <div style={bench !== "chat" ? { display: "none" } : { display: "contents" }}>{footerNode}</div>
         {terminalNode}
       </div>
 
@@ -664,9 +869,21 @@ export function NetDevLayout({
         <div className="ndv__dock-body">
         {err && <div className="banner banner--error" style={{ marginBottom: 8 }}>{err}</div>}
 
+        {tab === "audit" && (
+          <div style={{ marginBottom: 8 }}>
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => void (async () => {
+              setHandoffBusy(true);
+              try { setHandoffMd(await app.NetDevHandoffReport()); } catch (e) { setErr(String(e)); } finally { setHandoffBusy(false); }
+            })()}>{handoffBusy ? "生成中…" : "生成值班交接报告"}</span>
+            <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: 6 }} onClick={() => void (async () => { try { setHandoffMd(await app.NetDevWeeklyReport()); } catch (e) { setErr(String(e)); } })()}>周报</span>
+            <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: 6 }} onClick={() => void (async () => { try { setHandoffMd(await app.NetDevCredentialInventory()); } catch (e) { setErr(String(e)); } })()}>凭证盘点</span>
+            {handoffMd && <div className="ndv__card" style={{ marginTop: 8, maxHeight: 300, overflow: "auto" }}><Markdown text={handoffMd} /></div>}
+          </div>
+        )}
+
         {tab === "live" && <LiveOpsPanel />}
 
-        {tab === "logs" && <LogPanel devices={settings?.devices ?? []} dbSources={settings?.dbSources ?? []} onInsertComposer={onInsertComposer} />}
+        {tab === "logs" && <LogPanel devices={settings?.devices ?? []} dbSources={settings?.dbSources ?? []} onInsertComposer={onInsertComposer} onOpenWorkbench={openLogsBench} />}
 
         {tab === "health" && <HealthPanel />}
 
@@ -675,6 +892,12 @@ export function NetDevLayout({
         {tab === "devices" && (
           <div className="ndv__card">
             <div className="ndv__card-title">设备清单{project ? <span style={{ fontWeight: 400, fontSize: 11 }}> · {project.name}</span> : ""}（{devices.length}）</div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              <input className="mem-input" style={{ flex: 1, minWidth: 0 }} value={locateTarget}
+                onChange={e => setLocateTarget(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void runLocate(); }}
+                placeholder="定位 IP / MAC —— 接在哪台设备哪个端口（全网 ARP 扇出）" />
+              <span className="btn btn--secondary btn--small" role="button" onClick={() => void runLocate()}>{locateBusy ? "定位中…" : "定位"}</span>
+            </div>
             {lastInspection && (
               <div className="ndv__meta">上次巡检：{lastInspection.title}（{String(lastInspection.created_at ?? "").slice(5, 16).replace("T", " ")}）</div>
             )}
@@ -694,7 +917,7 @@ export function NetDevLayout({
                     className={`ndv__device ndv__device--click${selected === d.name ? " ndv__device--sel" : ""}`}
                     role="button"
                     onClick={() => { setSelected(d.name); setTab("context"); setOpenTabs((prev) => (prev.includes("context") ? prev : [...prev, "context"])); setQuick({}); }}
-                  ><span className="ndv__device-name">{d.name}</span><span className="ndv__device-addr">{d.address}</span></div>
+                  ><span className="ndv__device-name">{d.name}{d.kind ? <span style={{ opacity: 0.65, fontSize: 10, marginLeft: 4 }}>·{d.kind}</span> : ""}</span><span className="ndv__device-addr">{d.address}</span></div>
                 ))}
               </div>
             ))}
@@ -717,7 +940,10 @@ export function NetDevLayout({
           ) :
           selectedDevice ? (
             <div className="ndv__card">
-              <div className="ndv__card-title">{selectedDevice.name} <span className="ndv__card-sub">· {selectedDevice.vendor}/{selectedDevice.os} · {selectedDevice.address}{(selectedDevice.via ?? []).length ? " · 经 " + (selectedDevice.via ?? []).join("→") : ""}</span></div>
+              <div className="ndv__card-title">{selectedDevice.name}
+                {(cardSeries["if_down"] ?? []).length > 1 && <Sparkline points={cardSeries["if_down"]} bad />}
+                {(cardSeries["reachable"] ?? []).length > 1 && <Sparkline points={cardSeries["reachable"]} />}
+                <span className="ndv__card-sub">· {selectedDevice.vendor}/{selectedDevice.os} · {selectedDevice.address}{(selectedDevice.via ?? []).length ? " · 经 " + (selectedDevice.via ?? []).join("→") : ""}</span></div>
               <div className="ndv__group-label">快捷诊断</div>
               {selectedDevice.vendor === "redfish" ? (
                 <div className="ndv__quick-cmds">
@@ -737,6 +963,55 @@ export function NetDevLayout({
                     <span key={cmd} className="btn btn--secondary btn--small" role="button" onClick={() => void runQuick(selectedDevice.name, cmd)}>{cmd}</span>
                   ))}
                 </div>
+              )}
+              {(selectedDevice.vendor === "linux" || selectedDevice.vendor === "windows") && (
+                <>
+                  <div className="ndv__group-label">主机体检与 Web 服务</div>
+                  <div className="ndv__quick-cmds">
+                    <span
+                      className="btn btn--primary btn--small"
+                      role="button"
+                      title="一键体检电池（登录/持久化/水位/时钟），异常自动进「发现」"
+                      onClick={() => void runTriageOne(selectedDevice.name)}
+                    >{triageOneBusy === selectedDevice.name ? "体检中…" : "一键体检"}</span>
+                    {selectedDevice.vendor === "linux" && WEB_QUICK.map(cmd => (
+                      <span key={cmd} className="btn btn--secondary btn--small" role="button" onClick={() => void runQuick(selectedDevice.name, cmd)}>{cmd}</span>
+                    ))}
+                  </div>
+                </>
+              )}
+              {(selectedDevice.kind ?? "") === "docker" && (
+                <>
+                  <div className="ndv__group-label">Docker（只读 API）</div>
+                  <div className="ndv__quick-cmds">
+                    {DOCKER_QUICK.map(q => (
+                      <span key={q.what} className="btn btn--secondary btn--small" role="button"
+                        onClick={() => void runApiQuick(q.label, () => app.NetDevDockerGet(selectedDevice.name, q.what, "", 100))}>{q.label}</span>
+                    ))}
+                  </div>
+                </>
+              )}
+              {(selectedDevice.kind ?? "") === "k8s" && (
+                <>
+                  <div className="ndv__group-label">Kubernetes（只读 API）</div>
+                  <div className="ndv__quick-cmds">
+                    {K8S_QUICK.map(q => (
+                      <span key={q.what} className="btn btn--secondary btn--small" role="button"
+                        onClick={() => void runApiQuick(q.label, () => app.NetDevK8sGet(selectedDevice.name, q.what, "", "", 100))}>{q.label}</span>
+                    ))}
+                  </div>
+                </>
+              )}
+              {(selectedDevice.kind ?? "") === "firewall" && (
+                <>
+                  <div className="ndv__group-label">防火墙（FortiOS REST 只读）</div>
+                  <div className="ndv__quick-cmds">
+                    {FW_QUICK.map(q => (
+                      <span key={q.what} className="btn btn--secondary btn--small" role="button"
+                        onClick={() => void runApiQuick(q.label, () => app.NetDevFirewallGet(selectedDevice.name, q.what))}>{q.label}</span>
+                    ))}
+                  </div>
+                </>
               )}
               <div className="ndv__group-label">诊断组合</div>
               {(settings?.presets ?? []).filter(p => (p.vendors ?? []).length === 0 || (p.vendors ?? []).includes(selectedDevice.vendor)).length > 0 && (

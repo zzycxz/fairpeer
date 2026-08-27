@@ -616,3 +616,39 @@
   margin-left: auto; font-size: 10px; color: var(--warn);
   border: 1px solid var(--warn); border-radius: var(--radius-pill); padding: 0 6px;
 }
+
+/* ── 主区工作台（NETDEV_SPEC_V2 §10.2/§10.3）────────────────────────────
+   对话是默认视图，工作台按需打开。切换条只在首个工作台打开后出现
+   （§10.8：纯对话会话零新增 chrome）。 */
+.ndv-bench__bar{display:flex;align-items:center;gap:4px;padding:3px 10px;border-bottom:1px solid var(--border);flex:none;}
+.ndv-bench__chip{padding:2px 10px;border-radius:var(--radius-sm,6px);font-size:11.5px;cursor:pointer;color:var(--fg);border:1px solid transparent;user-select:none;}
+.ndv-bench__chip--on{background:var(--accent);color:var(--bg);font-weight:600;}
+.ndv-bench__hint{margin-left:auto;font-size:10.5px;opacity:.6;}
+
+.ndv-logwb{display:flex;flex:1;min-height:0;}
+.ndv-logwb__srcs{width:232px;flex:none;overflow:auto;border-right:1px solid var(--border);padding:8px;display:flex;flex-direction:column;gap:6px;}
+.ndv-logwb__src{display:flex;align-items:center;gap:4px;font-size:11px;min-width:0;}
+.ndv-logwb__src span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ndv-logwb__src small{color:var(--fg);opacity:.7;font-size:10px;}
+.ndv-logwb__main{flex:1;min-width:0;display:flex;flex-direction:column;padding:8px;gap:6px;}
+.ndv-logwb__rows{flex:1;min-height:80px;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm,6px);padding:8px;font-size:11.5px;font-family:var(--font-mono,monospace);line-height:1.55;}
+.ndv-logwb__row{white-space:pre-wrap;word-break:break-all;}
+.ndv-logwb__row .ts{color:var(--fg);opacity:.55;}
+.ndv-logwb__row .src{color:var(--accent);opacity:.85;}
+.ndv-logwb__search{border-top:1px solid var(--border);padding-top:6px;display:flex;flex-direction:column;gap:6px;flex:none;}
+.ndv-logwb__hits{max-height:190px;overflow:auto;font-size:11px;font-family:var(--font-mono,monospace);}
+.ndv-logwb__hits summary{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+/* ── 设置三级导航 L3（NETDEV_SPEC_V2 §10.9）──────────────────────────────
+   表单进三级页：由右向左翻页动画进入整页表单；reduced-motion 退化淡入。 */
+.ndv-l3{position:fixed;inset:0;z-index:var(--z-drawer-backdrop);background:var(--bg);display:flex;flex-direction:column;animation:ndvL3In .2s cubic-bezier(.2,0,0,1);}
+@keyframes ndvL3In{from{transform:translateX(100%);}to{transform:translateX(0);}}
+.ndv-l3__head{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);flex:none;}
+.ndv-l3__crumbs{font-size:11.5px;opacity:.75;letter-spacing:.02em;}
+.ndv-l3__body{flex:1;min-height:0;overflow:auto;padding:14px;}
+@media (prefers-reduced-motion:reduce){.ndv-l3{animation:ndvL3Fade .15s ease;}@keyframes ndvL3Fade{from{opacity:0;}to{opacity:1;}}}
+
+/* 时间线虚拟滚动（零 JS 方案）：content-visibility 让浏览器跳过视口外行的
+   渲染，2000 行上限下滚动保持顺滑（§10.3 v1.1）。 */
+.ndv-logwb__rows .ndv-logwb__row{content-visibility:auto;contain-intrinsic-size:auto 18px;}
+.ndv-log__box .ndv-log__line{content-visibility:auto;contain-intrinsic-size:auto 17px;}

@@ -552,7 +552,7 @@ export function NetDevSection() {
 
       {/* 设备编辑表单 */}
       {editingDevice && (
-        <Modal title={view.devices.some(d => d.name === editingDevice.name) ? "编辑设备" : "添加设备"} onClose={() => setEditingDevice(null)}>
+        <L3Panel crumbs={["运维 / 设备与跳板", view.devices.some(d => d.name === editingDevice.name) ? `编辑 ${editingDevice.name}` : "添加设备"]} onBack={() => setEditingDevice(null)} confirmDiscard>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <Field label="名称 *"><input className="mem-input" value={editingDevice.name} onChange={e => setEditingDevice({ ...editingDevice, name: e.target.value })} /></Field>
             <Field label="厂商">
@@ -614,6 +614,48 @@ export function NetDevSection() {
                 value={(editingDevice.protocols ?? []).join(", ")}
                 onChange={e => setEditingDevice({ ...editingDevice, protocols: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })} />
             </Field>
+            <Field label="数据面 kind">
+              <select className="mem-select" value={editingDevice.kind ?? ""} onChange={e => setEditingDevice({ ...editingDevice, kind: e.target.value })}>
+                <option value="">自动（按厂商——网络设备/主机 CLI）</option>
+                <option value="docker">docker（Docker Engine API 只读）</option>
+                <option value="k8s">k8s（Kubernetes API 只读）</option>
+                <option value="firewall">firewall（FortiOS REST 只读）</option>
+              </select>
+            </Field>
+            {(editingDevice.kind ?? "") === "docker" && (
+              <Field label="Docker socket">
+                <input className="mem-input" placeholder="留空 = 本地默认（Windows npipe / Linux unix sock）；或 tcp://10.0.0.9:2375"
+                  value={editingDevice.dockerSocket ?? ""}
+                  onChange={e => setEditingDevice({ ...editingDevice, dockerSocket: e.target.value })} />
+              </Field>
+            )}
+            {(editingDevice.kind ?? "") === "k8s" && (
+              <>
+                <Field label={editingDevice.k8sKubeconfigSet ? "kubeconfig（密钥库已存；粘贴 = 替换）" : "kubeconfig（粘贴全文，存密钥库）"}>
+                  <textarea className="mem-input" rows={4} style={{ width: "100%", fontFamily: "var(--font-mono, monospace)", fontSize: 11 }}
+                    placeholder="apiVersion: v1&#10;kind: Config&#10;…"
+                    value={editingDevice.k8sKubeconfig ?? ""}
+                    onChange={e => setEditingDevice({ ...editingDevice, k8sKubeconfig: e.target.value })} />
+                </Field>
+                <Field label="固定 context（可空）">
+                  <input className="mem-input" placeholder="留空 = kubeconfig 的 current-context"
+                    value={editingDevice.k8sContext ?? ""}
+                    onChange={e => setEditingDevice({ ...editingDevice, k8sContext: e.target.value })} />
+                </Field>
+                <Field label="命名空间白名单（逗号分隔，空 = 全部）">
+                  <input className="mem-input" placeholder="prod, kube-system"
+                    value={(editingDevice.k8sNamespaces ?? []).join(", ")}
+                    onChange={e => setEditingDevice({ ...editingDevice, k8sNamespaces: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })} />
+                </Field>
+              </>
+            )}
+            {(editingDevice.kind ?? "") === "firewall" && (
+              <Field label={editingDevice.fwApiTokenSet ? "REST API token（密钥库已存；粘贴 = 替换）" : "REST API token（粘贴，存密钥库）"}>
+                <input className="mem-input" type="password" placeholder="FortiOS REST API token"
+                  value={editingDevice.fwApiToken ?? ""}
+                  onChange={e => setEditingDevice({ ...editingDevice, fwApiToken: e.target.value })} />
+              </Field>
+            )}
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <span
@@ -633,12 +675,12 @@ export function NetDevSection() {
               }}
             >保存设备</span>
           </div>
-        </Modal>
+        </L3Panel>
       )}
 
       {/* 数据库源编辑表单 */}
       {editingDB && (
-        <Modal title={view.dbSources?.some(s => s.name === editingDB.name) ? "编辑数据库源" : "添加数据库源"} onClose={() => setEditingDB(null)}>
+        <L3Panel crumbs={["运维", view.dbSources?.some(s => s.name === editingDB.name) ? "编辑数据库源" : "添加数据库源"]} onBack={() => setEditingDB(null)} confirmDiscard>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <Field label="名称 *"><input className="mem-input" value={editingDB.name} onChange={e => setEditingDB({ ...editingDB, name: e.target.value })} /></Field>
             <Field label="类型">
@@ -680,12 +722,12 @@ export function NetDevSection() {
               }}
             >保存源</span>
           </div>
-        </Modal>
+        </L3Panel>
       )}
 
       {/* 告警规则编辑表单 */}
       {editingRule && (
-        <Modal title={(view.alertRules ?? []).some(r => r.name === editingRule.name) ? "编辑告警规则" : "添加告警规则"} onClose={() => setEditingRule(null)}>
+        <L3Panel crumbs={["运维", (view.alertRules ?? []).some(r => r.name === editingRule.name) ? "编辑告警规则" : "添加告警规则"]} onBack={() => setEditingRule(null)} confirmDiscard>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <Field label="名称 *"><input className="mem-input" value={editingRule.name} onChange={e => setEditingRule({ ...editingRule, name: e.target.value })} /></Field>
             <Field label="指标">
@@ -726,12 +768,12 @@ export function NetDevSection() {
               }}
             >保存规则</span>
           </div>
-        </Modal>
+        </L3Panel>
       )}
 
       {/* 跳板编辑表单 */}
       {editingHop && (
-        <Modal title={view.hops.some(h => h.name === editingHop.name) ? "编辑跳板" : "添加跳板"} onClose={() => setEditingHop(null)}>
+        <L3Panel crumbs={["运维", view.hops.some(h => h.name === editingHop.name) ? "编辑跳板" : "添加跳板"]} onBack={() => setEditingHop(null)} confirmDiscard>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <Field label="名称 *"><input className="mem-input" value={editingHop.name} onChange={e => setEditingHop({ ...editingHop, name: e.target.value })} /></Field>
             <Field label="地址 *"><input className="mem-input" value={editingHop.host} onChange={e => setEditingHop({ ...editingHop, host: e.target.value })} /></Field>
@@ -755,12 +797,12 @@ export function NetDevSection() {
               }}
             >保存跳板</span>
           </div>
-        </Modal>
+        </L3Panel>
       )}
 
       {/* 项目编辑表单 */}
       {editingProject && (
-        <Modal title={editingProject.index >= 0 ? "编辑项目" : "新建项目"} onClose={() => setEditingProject(null)}>
+        <L3Panel crumbs={["运维", editingProject.index >= 0 ? "编辑项目" : "新建项目"]} onBack={() => setEditingProject(null)} confirmDiscard>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <Field label="名称 *">
               <input className="mem-input" placeholder="如：一号机房 / 总部生产网" value={editingProject.draft.name}
@@ -803,12 +845,12 @@ export function NetDevSection() {
               }}
             >保存项目</span>
           </div>
-        </Modal>
+        </L3Panel>
       )}
 
       {/* 诊断组合编辑表单 */}
       {editingPreset && (
-        <Modal title={editingPreset.index >= 0 ? "编辑组合" : "新建组合"} onClose={() => setEditingPreset(null)}>
+        <L3Panel crumbs={["运维", editingPreset.index >= 0 ? "编辑组合" : "新建组合"]} onBack={() => setEditingPreset(null)} confirmDiscard>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <Field label="名称 *">
               <input className="mem-input" placeholder="如：接口体检" value={editingPreset.draft.name}
@@ -854,7 +896,7 @@ export function NetDevSection() {
               }}
             >保存组合</span>
           </div>
-        </Modal>
+        </L3Panel>
       )}
 
       {/* 扫描导入弹框 */}
@@ -914,6 +956,34 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span>{label}</span>
       {children}
     </label>
+  );
+}
+
+// L3Panel — 设置三级导航的第三级（NETDEV_SPEC_V2 §10.9）：表单类配置不再用
+// 弹框，而是由右向左翻页进入的整页表单（面包屑 + 返回 + Esc）。弹框从此只
+// 留给阻塞确认类。confirmDiscard 的表单在返回/Esc 前确认丢弃未保存修改。
+function L3Panel({ crumbs, onBack, confirmDiscard, children }: { crumbs: string[]; onBack: () => void; confirmDiscard?: boolean; children: React.ReactNode }) {
+  const confirm = useConfirm();
+  const back = useCallback(async () => {
+    if (confirmDiscard) {
+      const ok = await confirm({ title: "放弃未保存的修改？", message: "返回将丢弃表单里未保存的修改。", danger: true, confirmLabel: "放弃并返回" });
+      if (!ok) return;
+    }
+    onBack();
+  }, [confirm, confirmDiscard, onBack]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") void back(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [back]);
+  return (
+    <div className="ndv-l3" role="dialog" aria-label={crumbs.join(" / ")}>
+      <div className="ndv-l3__head">
+        <button className="btn btn--secondary btn--small" onClick={() => void back()}>← 返回</button>
+        <span className="ndv-l3__crumbs">{crumbs.join(" / ")}</span>
+      </div>
+      <div className="ndv-l3__body">{children}</div>
+    </div>
   );
 }
 

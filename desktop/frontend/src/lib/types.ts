@@ -230,42 +230,6 @@ export interface TopicMeta {
   createdAt: number;
 }
 
-export interface ContextPanelInfo {
-  usedTokens: number;
-  windowTokens: number;
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  reasoningTokens: number;
-  cacheHitTokens: number;
-  cacheMissTokens: number;
-  cacheWriteTokens?: number;
-  requestCount?: number;
-  elapsedMs?: number;
-  mock?: boolean;
-  readFiles: ReadFileRecord[];
-  changedFiles: ChangedFileInfo[];
-}
-
-export interface ReadFileRecord {
-  path: string;
-  turn: number;
-  time: number;
-  offset?: number;
-  limit?: number;
-  truncated?: boolean;
-}
-
-export interface ChangedFileInfo {
-  path: string;
-  oldPath?: string;
-  sources: string[];
-  gitStatus?: string;
-  turns: number[];
-  latestPrompt?: string;
-  latestTime?: number;
-}
-
 // Bound-method payloads (desktop/app.go).
 export interface HistoryMessage {
   role: string;
@@ -421,8 +385,10 @@ export interface ContextInfo {
   window: number;
   sessionTokens: number;
   compactRatio?: number;
-  // Session-cumulative telemetry for the usage chip's hover detail
-  // (zero/absent when the backend hasn't aggregated any turn yet).
+  // Session-cumulative telemetry for the usage chip's hover detail and the
+  // right-dock turns tab (zero/absent when the backend hasn't aggregated any
+  // turn yet). sessionElapsedMs is the sum of turn durations, not wall-clock
+  // session age.
   sessionPromptTokens?: number;
   sessionCompletionTokens?: number;
   sessionReasoningTokens?: number;
@@ -432,6 +398,7 @@ export interface ContextInfo {
   sessionCost?: number;
   sessionCostCurrency?: string;
   requestCount?: number;
+  sessionElapsedMs?: number;
 }
 
 export interface Meta {
@@ -1682,6 +1649,17 @@ export interface NetDevDeviceView {
   passwordEnv: string;
   passwordSet: boolean;
   identityFile: string;
+  // Data-plane discriminator (NETDEV_SPEC_V2 §2.1): ""(按厂商) | docker | k8s.
+  kind?: string;
+  dockerSocket?: string;
+  k8sKubeconfigEnv?: string;
+  k8sKubeconfigSet?: boolean;
+  k8sKubeconfig?: string;
+  k8sContext?: string;
+  k8sNamespaces?: string[];
+  fwApiTokenEnv?: string;
+  fwApiTokenSet?: boolean;
+  fwApiToken?: string;
   encoding: string;
   allowTelnet: boolean;
   // Extra log-directory whitelist roots (outside /var/log) for log-source reads.
@@ -1810,6 +1788,69 @@ export interface NetDevLogFollowEvent {
   chunk?: string;
   done?: boolean;
   reason?: string;
+}
+
+// Cross-device fan-out search (netdev_log_search / App.NetDevLogSearch) — the
+// IOC sweep. Coverage is explicit: a budget-stopped sweep never implies the
+// uncovered devices are clean.
+export interface NetDevLogSearchHit {
+  device: string;
+  source: string;
+  line: string;
+  context?: string[];
+}
+
+export interface NetDevLogSearchResult {
+  pattern: string;
+  hits: NetDevLogSearchHit[];
+  devices_searched: string[];
+  skipped: string[];
+  covered_devices: number;
+  total_devices: number;
+  devices_with_hits: number;
+  budget_stopped: boolean;
+  note?: string;
+}
+
+// Timeline point (App.NetDevSeries, NETDEV_SPEC_V2 §5.3).
+export interface NetDevSeriesPoint {
+  t: number; d: string; m: string; v: number;
+}
+
+// IP/MAC locate fan-out (netdev_locate / App.NetDevLocate, NETDEV_SPEC_V2 §4.11).
+export interface NetDevLocateHit {
+  device: string;
+  interface?: string;
+  line: string;
+}
+
+export interface NetDevLocateResult {
+  target: string;
+  hits: NetDevLocateHit[];
+  searched: string[];
+  skipped?: string[];
+  covered_devices: number;
+  total_devices: number;
+  budget_stopped: boolean;
+  note?: string;
+}
+
+// One-click host triage battery (netdev_triage / App.NetDevTriageRun).
+export interface NetDevTriageSection {
+  name: string;
+  command: string;
+  ok: boolean;
+  refused?: string;
+  lines?: string[];
+}
+
+export interface NetDevTriageReport {
+  device: string;
+  vendor: string;
+  sections: NetDevTriageSection[];
+  anomalies?: string[];
+  summary: string;
+  created_at: string;
 }
 
 // ── SNMP 健康快照 ("netdev:health" changes) ─────────────────────────────────

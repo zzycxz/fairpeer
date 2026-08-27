@@ -38,20 +38,23 @@ const levelClass = (line: string): string => {
   return "";
 };
 
-export function LogPanel({ devices, dbSources, onInsertComposer }: {
+export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench }: {
   devices: NetDevDeviceView[];
   dbSources: NetDevDBSourceView[];
   onInsertComposer?: (text: string) => void;
+  onOpenWorkbench?: () => void;
 }) {
-  const hosts = useMemo(() => devices.filter(d => d.vendor === "linux" || d.vendor === "windows" || d.vendor === "vmware"), [devices]);
+  const hosts = useMemo(() => devices.filter(d => d.vendor === "linux" || d.vendor === "windows" || d.vendor === "vmware" || d.kind === "docker" || d.kind === "k8s"), [devices]);
   const [device, setDevice] = useState(hosts[0]?.name ?? "");
   const dev = hosts.find(h => h.name === device);
 
-  // Source selection: kind + free-form target (unit / path / container).
-  const [kind, setKind] = useState<"file" | "journal" | "docker" | "db" | "syslog">("file");
+  // Source selection: kind + free-form target (unit / path / container / ns+pod).
+  const [kind, setKind] = useState<"file" | "journal" | "docker" | "k8s" | "db" | "syslog">("file");
   const [target, setTarget] = useState("/var/log/syslog");
   const [unit, setUnit] = useState("nginx");
   const [container, setContainer] = useState("");
+  const [k8sNs, setK8sNs] = useState("");
+  const [k8sPod, setK8sPod] = useState("");
   const [dbSource, setDbSource] = useState(dbSources[0]?.name ?? "");
   const dbSrc = dbSources.find(s => s.name === dbSource);
 
@@ -70,7 +73,7 @@ export function LogPanel({ devices, dbSources, onInsertComposer }: {
     if (!dbSource && dbSources[0]) setDbSource(dbSources[0].name);
   }, [hosts, dbSources, device, dbSource]);
 
-  const source = kind === "db" ? `db:${dbSource}` : kind === "journal" ? `journal:${unit}` : kind === "docker" ? `docker:${container}` : `file:${target}`;
+  const source = kind === "db" ? `db:${dbSource}` : kind === "journal" ? `journal:${unit}` : kind === "docker" ? `docker:${container}` : kind === "k8s" ? `k8s:${k8sNs.trim() ? k8sNs.trim() + "/" : ""}${k8sPod.trim()}` : `file:${target}`;
   const allowlisted = (q: string): boolean => {
     if (!dbSrc) return false;
     const norm = (s: string) => s.trim().replace(/\s+/g, " ").replace(/;$/, "").toLowerCase();
@@ -104,7 +107,7 @@ export function LogPanel({ devices, dbSources, onInsertComposer }: {
 
   const read = async () => {
     if (kind === "db") return; // db reads go through the quick-query buttons
-    if (!device || (kind === "docker" && !container.trim())) { setNote("请先选择设备/填好源"); return; }
+    if (!device || (kind === "docker" && !container.trim()) || (kind === "k8s" && !k8sPod.trim())) { setNote("请先选择设备/填好源"); return; }
     setBusy(true); setNote("");
     try {
       if (following) { await app.NetDevLogFollowStop(device); setFollowing(false); }
@@ -167,20 +170,32 @@ export function LogPanel({ devices, dbSources, onInsertComposer }: {
 
   return (
     <div className="ndv__card" style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1 }}>
-      <div className="ndv__card-title">日志{following ? <span style={{ color: "var(--ok)" }}> · 跟踪中</span> : ""}</div>
+      <div className="ndv__card-title">日志{following ? <span style={{ color: "var(--ok)" }}> · 跟踪中</span> : ""}
+        {onOpenWorkbench && <span className="ndv__chip" role="button" style={{ marginLeft: 8, fontWeight: 400 }} title="多源合并时间线与跨设备搜索在主区工作台" onClick={onOpenWorkbench}>⟶ 工作台 · 多源合并</span>}
+      </div>
 
       {/* Source bar: device + kind + target + params, one row-ish grid. */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-        <select className="mem-select" value={device} onChange={e => { setDevice(e.target.value); setFollowing(false); }} disabled={kind === "db"}>
-          {hosts.map(h => <option key={h.name} value={h.name}>{h.name}</option>)}
+        <select className="mem-select" value={device} onChange={e => {
+          setDevice(e.target.value); setFollowing(false);
+          const nd = hosts.find(h => h.name === e.target.value);
+          if (nd?.kind === "k8s") setKind("k8s");
+          else if (nd?.kind === "docker") setKind("docker");
+          else setKind("file");
+        }} disabled={kind === "db"}>
+          {hosts.map(h => <option key={h.name} value={h.name}>{h.name}{h.kind ? `（${h.kind}）` : ""}</option>)}
           {hosts.length === 0 && <option value="">（无服务器设备）</option>}
         </select>
-        <select className="mem-select" value={kind} onChange={e => { setKind(e.target.value as typeof kind); setFollowing(false); }}>
-          <option value="file">文件</option>
-          <option value="journal">journald 单元</option>
-          <option value="docker">容器</option>
-          {dbSources.length > 0 && <option value="db">数据库</option>}
-          <option value="syslog">syslog（被动）</option>
+        <select className="mem-select" value={kind} onChange={e => setKind(e.target.value as typeof kind)}>
+          {dev?.kind !== "k8s" && dev?.kind !== "docker" && <>
+            <option value="file">文件</option>
+            <option value="journal">journald 单元</option>
+            <option value="docker">容器（SSH docker logs）</option>
+            {dbSources.length > 0 && <option value="db">数据库</option>}
+            <option value="syslog">syslog（被动）</option>
+          </>}
+          {dev?.kind === "k8s" && <option value="k8s">K8s Pod（只读 API）</option>}
+          {dev?.kind === "docker" && <option value="docker">容器（只读 API）</option>}
         </select>
         {kind === "file" && (
           <input className="mem-input" style={{ flex: 1, minWidth: 180 }} list="ndv-log-paths" value={target} onChange={e => setTarget(e.target.value)} placeholder="/var/log/nginx/error.log" />
@@ -191,6 +206,12 @@ export function LogPanel({ devices, dbSources, onInsertComposer }: {
         {kind === "docker" && (
           <input className="mem-input" style={{ flex: 1, minWidth: 120 }} value={container} onChange={e => setContainer(e.target.value)} placeholder="容器名" />
         )}
+        {kind === "k8s" && (
+          <>
+            <input className="mem-input" style={{ width: 120 }} value={k8sNs} onChange={e => setK8sNs(e.target.value)} placeholder="命名空间（空=默认）" />
+            <input className="mem-input" style={{ flex: 1, minWidth: 120 }} value={k8sPod} onChange={e => setK8sPod(e.target.value)} placeholder="Pod 名" />
+          </>
+        )}
         {kind === "db" && (
           <select className="mem-select" value={dbSource} onChange={e => setDbSource(e.target.value)}>
             {dbSources.map(s => <option key={s.name} value={s.name}>{s.name}（{s.type}）</option>)}
@@ -198,6 +219,8 @@ export function LogPanel({ devices, dbSources, onInsertComposer }: {
         )}
         <datalist id="ndv-log-paths">
           {["/var/log/syslog", "/var/log/auth.log", "/var/log/messages", "/var/log/secure", "/var/log/dmesg",
+            "/var/log/nginx/access.log", "/var/log/nginx/error.log",
+            "/var/log/apache2/access.log", "/var/log/httpd/access_log",
             ...(dev?.logPaths ?? []).map(p => `${p.replace(/\/$/, "")}/`)].map(p => <option key={p} value={p} />)}
         </datalist>
       </div>
@@ -225,7 +248,7 @@ export function LogPanel({ devices, dbSources, onInsertComposer }: {
             <label className="ndv__meta">过滤</label>
             <input className="mem-input" style={{ width: 110 }} value={grep} onChange={e => setGrep(e.target.value)} placeholder="正则" />
             <span className="btn btn--secondary btn--small" role="button" onClick={() => void read()}>{busy ? "读取中…" : "读取"}</span>
-            {kind !== "syslog" && (
+            {kind !== "syslog" && dev?.kind !== "k8s" && dev?.kind !== "docker" && (
               <span className={`btn btn--small ${following ? "btn--primary" : "btn--secondary"}`} role="button" onClick={() => void toggleFollow()}>{following ? "停止跟踪" : "跟踪"}</span>
             )}
           </>
