@@ -41,8 +41,11 @@ function blankConfig(): LoopConfig {
     exploratory: false,
     autonomy: "L2",
     maxRounds: 15,
+    maxTokens: 600_000,
     intervalSeconds: 0,
     commandAllowlist: [],
+    startAt: "",
+    endTime: "",
   };
 }
 
@@ -184,6 +187,9 @@ export function LoopPanel({
             <div className="loop-live">
               <div className="loop-live__topline">
                 <span className="loop-live__round">{t("loop.round", { n: String(status.round), max: String(status.config.maxRounds) })}</span>
+                {status.config.maxTokens > 0 && (
+                  <span className="loop-live__tokens">_tokens: {status.tokensUsed ?? 0}/{status.config.maxTokens}_</span>
+                )}
                 <span className={`loop-live__state loop-live__state--${status.state}`}>{t(`loop.state.${status.state}`)}</span>
                 {status.state === "running" && (
                   <button type="button" className="btn btn--small" onClick={stop}>
@@ -258,8 +264,16 @@ export function LoopPanel({
                   <input type="number" min={1} max={200} value={draft.maxRounds} onChange={(e) => setDraft({ ...draft, maxRounds: Number(e.target.value) || 1 })} />
                 </label>
                 <label className="loop-field">
+                  <span>{t("loop.cfg.maxTokens")}</span>
+                  <input className="loop-input--mono" type="number" min={0} step={50000} value={draft.maxTokens} onChange={(e) => setDraft({ ...draft, maxTokens: Number(e.target.value) || 0 })} placeholder="600000" />
+                </label>
+                <label className="loop-field">
                   <span>{t("loop.cfg.interval")}(s)</span>
                   <input type="number" min={0} max={3600} value={draft.intervalSeconds} onChange={(e) => setDraft({ ...draft, intervalSeconds: Number(e.target.value) || 0 })} />
+                </label>
+                <label className="loop-field">
+                  <span>{t("loop.cfg.endTime")}</span>
+                  <input className="loop-input--mono" type="text" value={draft.endTime ?? ""} onChange={(e) => setDraft({ ...draft, endTime: e.target.value })} placeholder="07:00" />
                 </label>
               </div>
               <div className="loop-field">

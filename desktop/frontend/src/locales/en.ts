@@ -188,6 +188,8 @@ export const en = {
   "loop.cfg.verify": "Verify command",
   "loop.cfg.exploratory": "Exploratory (sensor discovers new problems)",
   "loop.cfg.rounds": "Max rounds",
+  "loop.cfg.maxTokens": "Token budget",
+  "loop.cfg.endTime": "End time (e.g. 07:00)",
   "loop.cfg.interval": "Interval",
   "loop.cfg.autonomy": "Autonomy",
   "loop.autonomy.L1": "L1 Inspect",

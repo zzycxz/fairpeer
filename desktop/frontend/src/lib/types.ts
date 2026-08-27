@@ -1987,8 +1987,11 @@ export interface LoopConfig {
   exploratory: boolean;
   autonomy: "L1" | "L2" | "L3";
   maxRounds: number;
+  maxTokens: number;
   intervalSeconds: number;
   commandAllowlist: string[];
+  startAt?: string;
+  endTime?: string;
 }
 
 export interface LoopRoundRecord {
@@ -2021,6 +2024,7 @@ export interface LoopRunStatus {
   startedAt: number;
   endedAt?: number;
   stopNote?: string;
+  tokensUsed: number;
   timeline: LoopRoundRecord[];
   report?: LoopReport;
 }

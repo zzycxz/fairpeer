@@ -45,8 +45,14 @@ type LoopConfig struct {
 	Exploratory      bool     `json:"exploratory"`      // sensor feeds the problem queue
 	Autonomy         string   `json:"autonomy"`         // "L1" | "L2" | "L3"
 	MaxRounds        int      `json:"maxRounds"`        // budget: rounds
+	MaxTokens        int      `json:"maxTokens"`        // budget: total tokens (0 = unlimited)
 	IntervalSeconds  int      `json:"intervalSeconds"`  // pause between rounds (0 = none)
-	CommandAllowlist []string `json:"commandAllowlist"` // L3 only (MVP: unused)
+	CommandAllowlist []string `json:"commandAllowlist"` // L3: allowed command prefixes; empty = built-in safe set
+	// Schedule: deferred start (P2, 2026-08-21). Both are wall-clock local time
+	// in "HH:MM" (24h). TimeWindow bounds the run: past EndTime the loop stops.
+	// StartAt schedules the first round (empty = start immediately).
+	StartAt   string `json:"startAt,omitempty"`   // "23:00" — defer until this time
+	EndTime   string `json:"endTime,omitempty"`   // "07:00" — hard stop at this time
 }
 
 type LoopRoundRecord struct {
@@ -81,6 +87,7 @@ type LoopRunStatus struct {
 	StartedAt int64             `json:"startedAt"`
 	EndedAt   int64             `json:"endedAt,omitempty"`
 	StopNote  string            `json:"stopNote,omitempty"`
+	TokensUsed int              `json:"tokensUsed"` // cumulative across rounds (P2)
 	Timeline  []LoopRoundRecord `json:"timeline"`
 	Report    *LoopReport       `json:"report,omitempty"`
 }
@@ -98,6 +105,11 @@ type loopRun struct {
 	noProgress int
 	// consecutive clean exploratory scans — 2 ⇒ natural completion.
 	cleanScans int
+	// token accumulator (P2): each round's LastUsage().TotalTokens is added;
+	// MaxTokens > 0 stops the loop when exceeded.
+	tokensUsed int
+	// endTime, when non-zero, is the hard wall-clock stop (P2 time window).
+	endTime time.Time
 }
 
 const (
@@ -164,6 +176,17 @@ func (a *App) LoopStart(tabID string, cfg LoopConfig) error {
 		tabID:  tabID,
 		cwd:    cwd,
 		stopCh: make(chan struct{}),
+	}
+	// P2 time window: parse "HH:MM" end time into the hard stop deadline.
+	if cfg.EndTime != "" {
+		if t, err := time.ParseInLocation("15:04", cfg.EndTime, time.Local); err == nil {
+			now := time.Now()
+			end := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, time.Local)
+			if end.Before(now) {
+				end = end.Add(24 * time.Hour) // e.g. 23:00→07:00 crosses midnight
+			}
+			run.endTime = end
+		}
 	}
 	a.setLoopRun(run)
 	go a.loopExecute(run, ctrl)
@@ -238,6 +261,22 @@ func (a *App) loopExecute(run *loopRun, ctrl tabSession) {
 
 	for round := 1; round <= cfg.MaxRounds; round++ {
 		if a.loopShouldStop(run) {
+			return
+		}
+		// P2 time window: past endTime, stop with a clear note.
+		if !run.endTime.IsZero() && time.Now().After(run.endTime) {
+			run.mu.Lock()
+			run.status.State = "done"
+			run.status.StopNote = fmt.Sprintf("时间窗结束(%s)", cfg.EndTime)
+			run.mu.Unlock()
+			return
+		}
+		// P2 token budget: exceeded → stop with a clear note.
+		if cfg.MaxTokens > 0 && run.tokensUsed >= cfg.MaxTokens {
+			run.mu.Lock()
+			run.status.State = "done"
+			run.status.StopNote = fmt.Sprintf("token 预算耗尽(%d/%d)", run.tokensUsed, cfg.MaxTokens)
+			run.mu.Unlock()
 			return
 		}
 		started := time.Now()
@@ -320,6 +359,14 @@ func (a *App) loopExecute(run *loopRun, ctrl tabSession) {
 				}
 			}
 		}
+		// P2 token budget: accumulate this round's usage.
+		if lu := ctrl.LastUsage(); lu != nil && lu.TotalTokens > 0 {
+			run.mu.Lock()
+			run.tokensUsed += lu.TotalTokens
+			run.status.TokensUsed = run.tokensUsed
+			run.mu.Unlock()
+		}
+
 		a.loopAppend(run, rec, started)
 
 		// 5) Goal-driven loops stop at the first full pass.
@@ -438,13 +485,21 @@ func loopRoundPrompt(cfg LoopConfig, round int, sensorOut string) string {
 	if sensorOut != "" {
 		b.WriteString("\n本轮传感器输出(问题源,挑最值得处理的一项):\n" + tailLoop(sensorOut, 3000) + "\n")
 	}
-	if strings.TrimSpace(cfg.VerifyCommand) != "" && cfg.Autonomy != "L1" {
-		b.WriteString("\n纪律:\n" +
-			"1. 只处理选定问题,顺手小改可以,禁止无关重构;\n" +
-			"2. 完成后必须运行验收命令:`" + cfg.VerifyCommand + "`,并贴出关键输出;\n" +
-			"3. 若验收不过且你判断无法本轮解决,说明卡点后结束本轮(外部会回滚你的改动并记录);\n" +
-			"4. 结尾用一行总结:本轮做了什么、验收结果。\n")
-	} else {
+		if strings.TrimSpace(cfg.VerifyCommand) != "" && cfg.Autonomy != "L1" {
+			b.WriteString("\n纪律:\n" +
+				"1. 只处理选定问题,顺手小改可以,禁止无关重构;\n" +
+				"2. 完成后必须运行验收命令:`" + cfg.VerifyCommand + "`,并贴出关键输出;\n" +
+				"3. 若验收不过且你判断无法本轮解决,说明卡点后结束本轮(外部会回滚你的改动并记录);\n" +
+				"4. 结尾用一行总结:本轮做了什么、验收结果。\n")
+			// L3: command allowlist narrows the agent's shell surface (spec §6.5).
+			if cfg.Autonomy == "L3" && len(cfg.CommandAllowlist) > 0 {
+				b.WriteString("\n命令白名单(L3 隔夜档,仅允许这些前缀的命令):\n")
+				for _, prefix := range cfg.CommandAllowlist {
+					b.WriteString("  - " + prefix + "\n")
+				}
+				b.WriteString("白名单外的命令会被外部拦截并记录,请勿尝试。\n")
+			}
+		} else {
 		b.WriteString("\n纪律:结束时给出一行总结(发现了什么/建议下一步)。\n")
 	}
 	return b.String()

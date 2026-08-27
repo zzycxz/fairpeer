@@ -189,6 +189,8 @@ export const zh: Record<DictKey, string> = {
   "loop.cfg.verify": "验收命令",
   "loop.cfg.exploratory": "探索驱动(传感器自动发现新问题)",
   "loop.cfg.rounds": "最大轮次",
+  "loop.cfg.maxTokens": "token 预算",
+  "loop.cfg.endTime": "结束时间(如 07:00)",
   "loop.cfg.interval": "轮间隔",
   "loop.cfg.autonomy": "自治级别",
   "loop.autonomy.L1": "L1 巡检",

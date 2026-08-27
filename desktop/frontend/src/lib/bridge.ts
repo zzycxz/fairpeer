@@ -4260,6 +4260,7 @@ function makeMockApp(): AppBindings {
         state: "running",
         round: 0,
         startedAt: Date.now(),
+        tokensUsed: 0,
         timeline: [],
       };
       mockLoopTick();
