@@ -887,6 +887,12 @@ export function NetDevLayout({
             })()}>{handoffBusy ? "生成中…" : "生成值班交接报告"}</span>
             <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: 6 }} onClick={() => void (async () => { try { setHandoffMd(await app.NetDevWeeklyReport()); } catch (e) { setErr(String(e)); } })()}>周报</span>
             <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: 6 }} onClick={() => void (async () => { try { setHandoffMd(await app.NetDevCredentialInventory()); } catch (e) { setErr(String(e)); } })()}>凭证盘点</span>
+            <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: 6 }} onClick={() => void (async () => {
+              try {
+                const p = await app.NetDevExportState();
+                setErr(`[SYS] EXPORT: 状态包已导出 → ${p}`);
+              } catch (e) { setErr(String(e)); }
+            })()}>导出状态包</span>
             {handoffMd && <div className="ndv__card" style={{ marginTop: 8, maxHeight: 300, overflow: "auto" }}><Markdown text={handoffMd} /></div>}
           </div>
         )}

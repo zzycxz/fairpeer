@@ -1759,7 +1759,7 @@ export interface NetDevAuditChainStatus {
 // One [[netdev.db_sources]] entry; password is write-only (blank = keep).
 export interface NetDevDBSourceView {
   name: string;
-  type: string; // mysql | postgres | redis
+  type: string; // mysql | postgres | redis | mongodb | mssql | clickhouse | elasticsearch
   host: string;
   port: number;
   username: string;
@@ -1768,6 +1768,7 @@ export interface NetDevDBSourceView {
   database: string;
   allowlist: string[];
   password?: string;
+  via?: string[];
 }
 
 // One sealed log read (netdev_log_read / App.NetDevLogRead).

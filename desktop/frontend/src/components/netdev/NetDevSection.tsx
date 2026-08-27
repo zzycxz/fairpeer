@@ -709,6 +709,15 @@ export function NetDevSection() {
               onChange={e => setEditingDB({ ...editingDB, allowlist: e.target.value.split("\n").map(s => s.trim()).filter(Boolean) })}
             />
           </div>
+          <div style={{ marginTop: 8 }}>
+            <div className="set-label" style={{ marginBottom: 4 }}>经跳板（可选——填堡垒名；生产库在堡垒后面的正解）</div>
+            <input
+              className="mem-input" style={{ width: "100%" }}
+              placeholder="留空 = 直连；如 l1"
+              value={(editingDB.via ?? []).join(", ")}
+              onChange={e => setEditingDB({ ...editingDB, via: e.target.value.split(/[,，]/).map(x => x.trim()).filter(Boolean) })}
+            />
+          </div>
           <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDB(null)}>取消</span>
             <span

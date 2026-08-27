@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.10] — 2026-08-27
 
+### 右栏「概览」下线——独有内容分流至用量条 / 轮次 tab
+
+背景：composer 用量条的悬浮面板已覆盖概览的绝大部分内容（窗口占用/压缩比/命中率/费用/RPM/请求数/会话 token 细分），概览信息重复度高。三项独有内容分流后，编码模式 dock 的「概览」tab 改为「轮次」；办公模式概览同步瘦身（那边没有用量条，保留统计条兜底）。
+
+- **UsageChip 补齐两项独有能力**：悬浮面板 Session 区新增「用时」行；用量 ≥85%（hot 态）时芯片尾部出现小号「压缩」按钮——编码模式的主压缩入口，点击触发 `app.Compact()` 并 toast 反馈（Tooltip 是纯 hover 非交互，按钮只能放芯片本体）；精简 ContextPanel 统计卡下方也保留一个常驻「压缩」按钮，作为办公模式（无用量条）的唯一入口、编码「轮次」tab 的顺手入口，两种模式压缩能力均不缺席
+- **死 CSS 顺手清理**：`.context-inspector` 两处选择器（先于本次改动即无任何组件引用）移除
+- **ContextInfo 新增 `sessionElapsedMs`**（Go+TS）：取自遥测累计活跃轮次时长（含在途轮次，非墙上时钟），驱动用量条与统计条；`ContextUsageForTab` 赋值，`tabs_telemetry_test` 补断言
+- **ContextPanel 重写为「统计条 + 轮次表」**：4 张 MetricCard（会话 tokens/请求数/缓存命中率/用时，全部来自 ContextInfo props，**不再 2s 轮询 `app.ContextPanel`**）+ 最近 8 轮事实表（TurnFactsForTab 3s 轮询保留）；轮次表表头硬编码中文顺手 i18n 化（`turns.*`）
+- **dock 模式 `"context"` → `"turns"`**：类型/目录/持久化过滤/渲染分支全量改名；旧持久化 dockTabs 里的 `"context"` 被 catalog 静默过滤；`SHOW_CONTEXT_DOCK` 开关删除；dock 默认打开模式改 `"files"`；tab 标签「概览」→「轮次」（Activity 图标不变）
+- **死代码链清理**：Go 端删 `ContextPanel` 处理器 + `ContextPanelInfo`/`ChangedFileInfo` 结构体（契约测试同步收编）；前端删 bridge `ContextPanel` 接口/类型/mock、`ContextPanelInfo`/`ReadFileRecord`/`ChangedFileInfo` 类型；App 删四个 `openRightDock*` 处理器与 reveal/list 请求态（唯二赋值方就是被删处理器，reveal 链一并死亡）；WorkspacePanel 删 scoped 过滤视图全套机制（引用文件/会话变更过滤 + 相关 refs/effects/props）——该视图唯一入口是被删的概览预览按钮；useController 死回调 `compact` 移除
+- **i18n/CSS/测试收尾**：context.* 块从 41 键瘦到 5 键（changedMeta 等仍有消费方的保留）；新增 `turns.*`/`rightDock.turns`；删 `workspace.filterReferencedFiles`/`clearFileScope`/`clearChangeScope`/`mock.changedFile*`；onboarding.css 的 `.context-panel` 大块裁到骨架（root/body/section/stats/metric）、misc.css compact-btn 删除、workbench.css 主题覆盖裁剪、panels.css `workspace-files__scope` 删除；删 `context-panel-breakdown.test.ts`（donut 配比测试，对象已不存在）及 package.json 条目
+- **压缩按钮运行态收敛**：两处压缩入口（用量条热态按钮、精简面板常驻按钮）在活动 tab 流式进行中禁用（`state.running` 经 `dockBusy` 穿 CoWorkLayout→CoworkDock），避免压缩写了一半的上下文；`fmtDuration` 提取到 `lib/duration.ts` 双处共用
+- 验证：`go build/vet/test`（desktop 全量）+ 前端 `build`（css 检查 + tsc + vite）+ `test:all` 全绿；vitest 曾现一次 worker 超时（Windows jsdom 抖动，单跑即过，非代码问题）；dev 服务器模块探针（7 个改动文件 transform 全 200）。**真机交互冒烟仍待做**：热态按钮（需真实 ≥85% 上下文）、「轮次」tab 轮次表（dev mock 的 TurnFacts 为空，需真实会话）、办公模式新概览
+- 已知取舍：「用时」= 累计轮次耗时非会话墙上时钟（后端本就无 session start 追踪，如实命名）；办公模式概览降级为统计条 + 轮次表（用户裁定，压缩入口经统计卡区按钮保留）
+
+## [0.1.10] — 2026-08-27
+
 ### 运维能力扩展 R1-R3（NETDEV_SPEC v2.0 落地）
 
 spec 定稿见 `docs/NETDEV_SPEC_V2.md`（675 行，含 UI 契约与 15 条裁决）；本批落地前三批核心，全部密封路径（结构性只读不变）。
@@ -18,6 +35,7 @@ spec 定稿见 `docs/NETDEV_SPEC_V2.md`（675 行，含 UI 契约与 15 条裁�
 - **R3 事件与时序**：`netdev_locate`（IP/MAC 全网 ARP 扇出定位，清单页签顶部入口）；通知出口（webhook + 飞书/钉钉/企微原生模板 + 严重度过滤 + `fairpeer://` 深链）；时序面 v1（JSONL 零依赖 + SNMP 轮询采集 + 设备卡 Sparkline）；报告族四件（值班交接/周报/凭证盘点 + 既有晨报）
 - **设置三级导航（§10.9）**：表单进三级页、弹框只留阻塞确认——L3 翻页动画（reduced-motion 降级）+ 六表单迁移 + 未保存确认 + kind 选择题表单
 - **含上会话在途 P2 收口**：syslog 被动接收/告警规则/审计哈希链/日志 follow/DB 只读诊断源（mysql/pg/redis 白名单）
+- **功能补全（0.1.10 增补二）**：DB 源 **Via 跳板链**（本地转发穿 SSH direct-tcpip，七引擎通用，生产库在堡垒后的正解）；SNMP **trap 接收器**（v2c/v1，link-down/cold-start 自动 Finding + 10 分钟去重）；**SMTP 通知出口**（与 webhook 并行）；**状态导出**（审计页签一键，JSON 快照不含密钥）
 - **数据库引擎扩展（0.1.10 增补）**：新增 mongodb（canonical-JSON 命令白名单，$-操作符结构性拒绝）/ mssql（sys.dm_* 视图精确语句白名单）/ clickhouse（HTTP GET 接口，URL 编码天然防注入）/ elasticsearch（GET 端点路径白名单）——共 7 引擎；TiDB/OceanBase（MySQL 模式）直接用 mysql 类型；Oracle/达梦待驱动评估
 - 验证：go 双模块 + `internal/netdev` 全量测试 + 前端构建全绿；**真机冒烟待做**（三个 API 客户端目前仅 httptest 验证）
 

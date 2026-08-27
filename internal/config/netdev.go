@@ -18,11 +18,19 @@ import (
 // vars (*_env) whose values sit in the secret store under netdev/*.
 type NetDevConfig struct {
 	Enabled bool `toml:"enabled"`
+	Trap               NetDevTrapConfig `toml:"trap"`
 	// NotifyWebhook is the Finding notification outlet (NETDEV_SPEC_V2 §5.2):
 	// generic JSON POST; empty = off. min severity: info|warning|critical.
 	NotifyWebhook       string `toml:"notify_webhook"`
 	NotifyMinSeverity   string `toml:"notify_min_severity"`
 	NotifyFormat        string `toml:"notify_format"` // generic | feishu | dingtalk | wecom
+	// SMTP 通知出口（§5.2 追加）：与 webhook 并行；密码入 secret store。
+	NotifySMTPHost    string   `toml:"notify_smtp_host"`
+	NotifySMTPPort    int      `toml:"notify_smtp_port"`
+	NotifySMTPUser    string   `toml:"notify_smtp_user"`
+	NotifySMTPPassEnv string   `toml:"notify_smtp_pass_env"`
+	NotifySMTPFrom    string   `toml:"notify_smtp_from"`
+	NotifySMTPTo      []string `toml:"notify_smtp_to"`
 	// NetworkName is the managed network's display name (e.g. "总部生产网") —
 	// the 运维 page's identity anchor, like a coding workspace's project name.
 	NetworkName          string          `toml:"network_name"`
@@ -85,6 +93,11 @@ type NetDevAlertRule struct {
 	Enabled  bool   `toml:"enabled"`
 }
 
+// NetDevTrapConfig bounds the passive SNMP trap receiver (v2c).
+type NetDevTrapConfig struct {
+	Port int `toml:"port"` // UDP listen port; 0 = off
+}
+
 // NetDevSyslogConfig bounds the passive syslog receiver.
 type NetDevSyslogConfig struct {
 	Port     int  `toml:"port"`      // UDP listen port; 0 = off
@@ -117,13 +130,16 @@ func (f NetDevLogFollow) Capped() NetDevLogFollow {
 // ("SHOW PROCESSLIST" style) — no wildcards, no table-name patterns.
 type NetDevDBSource struct {
 	Name        string   `toml:"name"`
-	Type        string   `toml:"type"` // mysql | postgres | redis
+	Type        string   `toml:"type"` // mysql | postgres | redis | mongodb | mssql | clickhouse | elasticsearch
 	Host        string   `toml:"host"`
 	Port        int      `toml:"port"`
 	Username    string   `toml:"username"`
 	PasswordEnv string   `toml:"password_env"`
 	Database    string   `toml:"database"`
 	Allowlist   []string `toml:"allowlist"`
+	// Via tunnels the connection through the first named hop's SSH chain
+	// (local forward; production DBs behind bastions, NETDEV_SPEC_V2 追加).
+	Via []string `toml:"via"`
 }
 
 // NetDevPreset is one saved diagnostic battery.

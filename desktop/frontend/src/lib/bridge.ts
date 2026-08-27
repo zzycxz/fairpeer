@@ -459,6 +459,8 @@ export interface AppBindings {
   NetDevHandoffReport(): Promise<string>;
   NetDevWeeklyReport(): Promise<string>;
   NetDevCredentialInventory(): Promise<string>;
+  NetDevTrapStatus(): Promise<{ listening: boolean; port: number; buffered: number }>;
+  NetDevExportState(): Promise<string>;
   NetDevLogFollowStart(device: string, source: string): Promise<void>;
   NetDevLogFollowStop(device: string): Promise<void>;
   NetDevDBQuery(source: string, query: string): Promise<string>;
@@ -1992,6 +1994,12 @@ function makeMockApp(): AppBindings {
     },
     async NetDevCredentialInventory(): Promise<string> {
       return "# 凭证盘点（browser dev mock）";
+    },
+    async NetDevTrapStatus(): Promise<{ listening: boolean; port: number; buffered: number }> {
+      return { listening: false, port: 0, buffered: 0 };
+    },
+    async NetDevExportState(): Promise<string> {
+      return "(browser dev mock)";
     },
     async NetDevLocate(_target: string): Promise<NetDevLocateResult> {
       return { target: _target, hits: [], searched: [], covered_devices: 0, total_devices: 0, budget_stopped: false, note: "browser dev mock" };

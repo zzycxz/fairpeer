@@ -117,6 +117,17 @@ func (m *Manager) DBQuery(ctx context.Context, sourceName, query string) (string
 	ctx, cancel := context.WithTimeout(ctx, dbQueryTimeout)
 	defer cancel()
 
+	// Via: 本地转发穿跳板链（dbtunnel.go）——生产库在堡垒后面的正解。
+	if len(src.Via) > 0 {
+		t, closer, terr := m.dbTunnel(ctx, src)
+		if terr != nil {
+			m.dbAudit(src, query, AuditFailure, terr)
+			return "", fmt.Errorf("netdev_db_query: %w", terr)
+		}
+		defer closer()
+		src = t
+	}
+
 	start := m.liveCmdStart("(db:"+src.Name+")", label, "read")
 	status := AuditFailure
 	defer func() { m.liveCmdEnd("(db:"+src.Name+")", label, "read", status, start, 0, "") }()

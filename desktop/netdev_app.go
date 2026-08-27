@@ -151,6 +151,7 @@ type NetDevDBSourceView struct {
 	Database    string   `json:"database"`
 	Allowlist   []string `json:"allowlist"`
 	Password    string   `json:"password,omitempty"`
+	Via         []string `json:"via"`
 }
 
 // NetDevPresetView is one saved diagnostic battery.
@@ -256,7 +257,7 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 			Name: s.Name, Type: s.Type, Host: s.Host, Port: s.Port,
 			Username: s.Username, PasswordEnv: s.PasswordEnv,
 			PasswordSet: netdevSecretSet(netdev.SecretKindPassword, s.PasswordEnv),
-			Database:    s.Database, Allowlist: s.Allowlist,
+			Database:    s.Database, Allowlist: s.Allowlist, Via: s.Via,
 		})
 	}
 	for _, d := range cfg.NetDev.Devices {
@@ -508,7 +509,7 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 					Name: strings.TrimSpace(s.Name), Type: strings.TrimSpace(s.Type),
 					Host: strings.TrimSpace(s.Host), Port: s.Port,
 					Username: strings.TrimSpace(s.Username), PasswordEnv: strings.TrimSpace(s.PasswordEnv),
-					Database: strings.TrimSpace(s.Database), Allowlist: s.Allowlist,
+					Database: strings.TrimSpace(s.Database), Allowlist: s.Allowlist, Via: s.Via,
 				})
 			}
 		} else {
@@ -1420,5 +1421,23 @@ func (a *App) NetDevResolveFinding(id string) error {
 var ensureSyslogOnce sync.Once
 
 func ensureSyslogReceiver(cfg *config.Config) {
-	ensureSyslogOnce.Do(func() { netdev.EnsureSyslogReceiver(cfg) })
+	ensureSyslogOnce.Do(func() {
+		netdev.EnsureSyslogReceiver(cfg)
+		netdev.EnsureTrapReceiver(cfg)
+	})
+}
+
+// NetDevTrapStatus reports the SNMP trap receiver state.
+func (a *App) NetDevTrapStatus() (bool, int, int, error) {
+	l, p, b := netdev.TrapReceiverStatus()
+	return l, p, b, nil
+}
+
+// NetDevExportState writes the netdev state snapshot and returns its path.
+func (a *App) NetDevExportState() (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	return netdev.SharedManager(cfg).ExportState()
 }
