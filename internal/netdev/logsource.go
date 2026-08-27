@@ -109,8 +109,15 @@ func composeLogCommand(d config.NetDevDevice, source string, fetchN int, since s
 			return "", fmt.Errorf("invalid container name %q (single plain token only)", rest)
 		}
 		return fmt.Sprintf("docker logs --tail %d %s", fetchN, rest), nil
+	case "winevt":
+		// Windows 事件日志（NETDEV_SPEC_V2 §3.1）：channel 单 token；PowerShell
+		// cmdlet 大小写不敏感，get- 前缀命中 windows 读表。
+		if !logUnitRe.MatchString(rest) {
+			return "", fmt.Errorf("invalid event channel %q (single plain token like Security)", rest)
+		}
+		return fmt.Sprintf("get-winevent -logname %s -maxevents %d", rest, fetchN), nil
 	default:
-		return "", fmt.Errorf("unknown log source kind %q (file|journal|docker)", kind)
+		return "", fmt.Errorf("unknown log source kind %q (file|journal|docker|winevt)", kind)
 	}
 }
 

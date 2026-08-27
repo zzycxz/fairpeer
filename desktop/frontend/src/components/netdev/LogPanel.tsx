@@ -58,12 +58,16 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
   const dev = hosts.find(h => h.name === device);
 
   // Source selection: kind + free-form target (unit / path / container / ns+pod).
-  const [kind, setKind] = useState<"file" | "journal" | "docker" | "k8s" | "db" | "syslog">("file");
+  const [kind, setKind] = useState<"file" | "journal" | "docker" | "k8s" | "db" | "syslog" | "winevt">("file");
   const [target, setTarget] = useState("/var/log/syslog");
   const [unit, setUnit] = useState("nginx");
   const [container, setContainer] = useState("");
   const [k8sNs, setK8sNs] = useState("");
   const [k8sPod, setK8sPod] = useState("");
+  const [evtChannel, setEvtChannel] = useState("Security");
+  const [podList, setPodList] = useState<{ value: string; label: string }[]>([]);
+  const [ctrList, setCtrList] = useState<{ value: string; label: string }[]>([]);
+  const [listBusy, setListBusy] = useState(false);
   const [dbSource, setDbSource] = useState(dbSources[0]?.name ?? "");
   const dbSrc = dbSources.find(s => s.name === dbSource);
 
@@ -82,7 +86,35 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
     if (!dbSource && dbSources[0]) setDbSource(dbSources[0].name);
   }, [hosts, dbSources, device, dbSource]);
 
-  const source = kind === "db" ? `db:${dbSource}` : kind === "journal" ? `journal:${unit}` : kind === "docker" ? `docker:${container}` : kind === "k8s" ? `k8s:${k8sNs.trim() ? k8sNs.trim() + "/" : ""}${k8sPod.trim()}` : `file:${target}`;
+  const source = kind === "db" ? `db:${dbSource}` : kind === "journal" ? `journal:${unit}` : kind === "docker" ? `docker:${container}` : kind === "k8s" ? `k8s:${k8sNs.trim() ? k8sNs.trim() + "/" : ""}${k8sPod.trim()}` : kind === "winevt" ? `winevt:${evtChannel.trim()}` : `file:${target}`;
+
+  // Pod/容器选择器：k8s/docker 目标一键列出再挑，不再手拼名字。列表只是
+  // 选择辅助——密封在读路径上，与选择器无关。
+  const loadPods = async () => {
+    if (!device) return;
+    setListBusy(true);
+    try {
+      const out = await app.NetDevK8sGet(device, "pods", "", "", 0);
+      const doc = JSON.parse(out || "{}");
+      setPodList(((doc.items ?? []) as any[]).slice(0, 200).map(it => {
+        const ns = it?.metadata?.namespace ?? "";
+        const name = it?.metadata?.name ?? "";
+        return { value: ns ? `${ns}/${name}` : name, label: ns ? `${ns}/${name}` : name };
+      }).filter(x => x.value));
+    } catch (e) { setNote(String(e)); } finally { setListBusy(false); }
+  };
+  const loadContainers = async () => {
+    if (!device) return;
+    setListBusy(true);
+    try {
+      const out = await app.NetDevDockerGet(device, "ps", "", 0);
+      const arr = JSON.parse(out || "[]") as any[];
+      setCtrList(arr.slice(0, 200).map(c => {
+        const name = String(c?.Names?.[0] ?? "").replace(/^\//, "") || String(c?.Id ?? "").slice(0, 12);
+        return { value: name, label: `${name}（${c?.State ?? "?"}）` };
+      }).filter(x => x.value));
+    } catch (e) { setNote(String(e)); } finally { setListBusy(false); }
+  };
   const allowlisted = (q: string): boolean => {
     if (!dbSrc) return false;
     const norm = (s: string) => s.trim().replace(/\s+/g, " ").replace(/;$/, "").toLowerCase();
@@ -116,7 +148,7 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
 
   const read = async () => {
     if (kind === "db") return; // db reads go through the quick-query buttons
-    if (!device || (kind === "docker" && !container.trim()) || (kind === "k8s" && !k8sPod.trim())) { setNote("请先选择设备/填好源"); return; }
+    if (!device || (kind === "docker" && !container.trim()) || (kind === "k8s" && !k8sPod.trim()) || (kind === "winevt" && !evtChannel.trim())) { setNote("请先选择设备/填好源"); return; }
     setBusy(true); setNote("");
     try {
       if (following) { await app.NetDevLogFollowStop(device); setFollowing(false); }
@@ -171,6 +203,20 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
     }
   };
 
+  // DB 结果表格化：每行都是 JSON 对象时按表格渲染（列取并集，≤60 行 × ≤12 列）。
+  const { jsonCols, jsonRows } = useMemo(() => {
+    const empty = { jsonCols: [] as string[], jsonRows: [] as Record<string, unknown>[] };
+    if (lines.length === 0 || lines.length > 60) return empty;
+    const rows: Record<string, unknown>[] = [];
+    for (const l of lines.slice(0, 60)) {
+      if (!l.startsWith("{")) return empty;
+      try { rows.push(JSON.parse(l) as Record<string, unknown>); } catch { return empty; }
+    }
+    const cols: string[] = [];
+    for (const r of rows) for (const k of Object.keys(r)) if (!cols.includes(k)) cols.push(k);
+    return { jsonCols: cols.slice(0, 12), jsonRows: rows };
+  }, [lines]);
+
   const sendToAI = () => {
     if (!onInsertComposer || lines.length === 0) return;
     const excerpt = lines.slice(-80).join("\n");
@@ -205,6 +251,7 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
           </>}
           {dev?.kind === "k8s" && <option value="k8s">K8s Pod（只读 API）</option>}
           {dev?.kind === "docker" && <option value="docker">容器（只读 API）</option>}
+          {dev?.vendor === "windows" && !dev?.kind && <option value="winevt">Windows 事件</option>}
         </select>
         {kind === "file" && (
           <input className="mem-input" style={{ flex: 1, minWidth: 180 }} list="ndv-log-paths" value={target} onChange={e => setTarget(e.target.value)} placeholder="/var/log/nginx/error.log" />
@@ -213,13 +260,41 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
           <input className="mem-input" style={{ flex: 1, minWidth: 120 }} value={unit} onChange={e => setUnit(e.target.value)} placeholder="服务名，如 nginx" />
         )}
         {kind === "docker" && (
-          <input className="mem-input" style={{ flex: 1, minWidth: 120 }} value={container} onChange={e => setContainer(e.target.value)} placeholder="容器名" />
+          <>
+            <input className="mem-input" style={{ flex: 1, minWidth: 100 }} value={container} onChange={e => setContainer(e.target.value)} placeholder="容器名" />
+            {dev?.kind === "docker" && (
+              <>
+                <span className="btn btn--secondary btn--small" role="button" onClick={() => void loadContainers()}>{listBusy ? "…" : "列出容器"}</span>
+                {ctrList.length > 0 && (
+                  <select className="mem-select" style={{ maxWidth: 200 }} value={container} onChange={e => setContainer(e.target.value)}>
+                    <option value="">选择容器（{ctrList.length}）</option>
+                    {ctrList.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
+                  </select>
+                )}
+              </>
+            )}
+          </>
         )}
         {kind === "k8s" && (
           <>
             <input className="mem-input" style={{ width: 120 }} value={k8sNs} onChange={e => setK8sNs(e.target.value)} placeholder="命名空间（空=默认）" />
-            <input className="mem-input" style={{ flex: 1, minWidth: 120 }} value={k8sPod} onChange={e => setK8sPod(e.target.value)} placeholder="Pod 名" />
+            <input className="mem-input" style={{ flex: 1, minWidth: 100 }} value={k8sPod} onChange={e => setK8sPod(e.target.value)} placeholder="Pod 名" />
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => void loadPods()}>{listBusy ? "…" : "列出 Pods"}</span>
+            {podList.length > 0 && (
+              <select className="mem-select" style={{ maxWidth: 220 }} value="" onChange={e => {
+                const v = e.target.value;
+                if (!v) return;
+                const i = v.indexOf("/");
+                if (i > 0) { setK8sNs(v.slice(0, i)); setK8sPod(v.slice(i + 1)); } else { setK8sNs(""); setK8sPod(v); }
+              }}>
+                <option value="">选择 Pod（{podList.length}）</option>
+                {podList.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
+              </select>
+            )}
           </>
+        )}
+        {kind === "winevt" && (
+          <input className="mem-input" style={{ flex: 1, minWidth: 120 }} value={evtChannel} onChange={e => setEvtChannel(e.target.value)} placeholder="通道：Security / System / Application" />
         )}
         {kind === "db" && (
           <select className="mem-select" value={dbSource} onChange={e => setDbSource(e.target.value)}>
@@ -273,7 +348,12 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
       {/* Viewer. */}
       <div ref={boxRef} className="ndv-log__box" style={{ flex: 1, minHeight: 120, overflow: "auto", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 8, fontSize: 11.5, fontFamily: "var(--font-mono, monospace)", lineHeight: 1.5 }}>
         {lines.length === 0 && !following && <span className="ndv__hint">选择源后「读取」最近日志，或「跟踪」实时流。文件路径限 /var/log 与设备 log_paths 白名单。</span>}
-        {lines.map((l, i) => <div key={i} className={`ndv-log__line ${levelClass(l)}`}>{l}</div>)}
+        {jsonCols.length > 0 ? (
+          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <thead><tr>{jsonCols.map(c => <th key={c} style={{ textAlign: "left", borderBottom: "1px solid var(--border)", padding: "2px 6px", position: "sticky", top: 0, background: "var(--bg)", whiteSpace: "nowrap" }}>{c}</th>)}</tr></thead>
+            <tbody>{jsonRows.map((r, i) => <tr key={i}>{jsonCols.map(c => <td key={c} style={{ padding: "2px 6px", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis" }} title={String(r[c] ?? "")}>{String(r[c] ?? "")}</td>)}</tr>)}</tbody>
+          </table>
+        ) : lines.map((l, i) => <div key={i} className={`ndv-log__line ${levelClass(l)}`}>{l}</div>)}
         {following && <div className="ndv-log__line" style={{ color: "var(--accent)" }}>▍</div>}
       </div>
     </div>

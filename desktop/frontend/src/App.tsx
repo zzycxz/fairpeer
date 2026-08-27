@@ -147,14 +147,16 @@ const SIDEBAR_COLLAPSE_THRESHOLD = 96;
 const DOCK_CLOSE_THRESHOLD = 180;
 const RIGHT_DOCK_MAX_WIDTH = 3840;
 
-type RightDockMode = "context" | "files" | "changed" | "preview" | "session";
+type RightDockMode = "turns" | "files" | "changed" | "preview" | "session";
 
 const RIGHT_DOCK_MODE_KEY = "fairpeer.rightDockMode";
 const PREVIEW_URL_KEY = "fairpeer.previewUrl";
 const DOCK_TABS_KEY = "fairpeer.dockTabs";
 
-// All tabs the dock's "+" menu can open, in canonical order.
-const DOCK_TAB_CATALOG: RightDockMode[] = ["context", "files", "changed", "preview", "session"];
+// All tabs the dock's "+" menu can open, in canonical order. Persisted dock
+// tab lists are filtered against this, so entries saved before the 2026-08-27
+// rename (the old "context" overview tab) are dropped on load.
+const DOCK_TAB_CATALOG: RightDockMode[] = ["turns", "files", "changed", "preview", "session"];
 
 const DEFAULT_DOCK_TABS: RightDockMode[] = ["files", "changed", "preview"];
 
@@ -174,7 +176,7 @@ function loadDockTabs(): RightDockMode[] {
 function loadRightDockMode(): RightDockMode {
   try {
     const v = getScopedItem(RIGHT_DOCK_MODE_KEY, true);
-    if (v === "files" || v === "changed" || v === "preview" || v === "session") return v;
+    if (v === "turns" || v === "files" || v === "changed" || v === "preview" || v === "session") return v;
   } catch { /* storage unavailable */ }
   return "files";
 }
@@ -186,11 +188,6 @@ function loadPreviewUrl(): string {
     return "";
   }
 }
-type WorkspaceRevealRequest = { id: number; path: string };
-type WorkspaceFileListRequest = { id: number; paths: string[] };
-type WorkspaceChangeListEntry = { key: string; path: string; meta: string; time: string; detail: string };
-type WorkspaceChangeListRequest = { id: number; changes: WorkspaceChangeListEntry[] };
-const SHOW_CONTEXT_DOCK = true;
 type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string };
 type DesktopPlatform = "darwin" | "windows" | "linux";
 type HistoryViewState =
@@ -246,7 +243,9 @@ function sidebarImPlatformLabel(platform: SidebarImPlatform, translate: Translat
   if (platform === "telegram") return translate("settings.botTelegram");
   if (platform === "lark") return "Lark";
   if (platform === "weixin") return translate("settings.botWeixin");
-  return translate("settings.botFeishu");
+  if (platform === "feishu") return translate("settings.botFeishu");
+  // Unknown/future platform: verbatim, never relabeled as Feishu.
+  return platform || translate("settings.botChannelUnknown");
 }
 
 function botMappingScope(mapping: BotConnectionView["sessionMappings"][number] | null | undefined, connectionWorkspaceRoot: string): "global" | "project" {
@@ -962,10 +961,10 @@ export default function App() {
     }
   }, [state.items, previewUrl, coworkActive, netdevActive]);
 
-  // Remember the last active dock tab (files/changed/preview).
+  // Remember the last active dock tab.
   useEffect(() => {
     try {
-      if (rightDockMode !== "context") setScopedItem(RIGHT_DOCK_MODE_KEY, rightDockMode);
+      setScopedItem(RIGHT_DOCK_MODE_KEY, rightDockMode);
     } catch { /* storage unavailable */ }
   }, [rightDockMode]);
 
@@ -980,10 +979,6 @@ export default function App() {
   useEffect(() => {
     if (rightDockMode === "changed") setChangedDirty(false);
   }, [rightDockMode]);
-  const [workspaceRevealRequest, setWorkspaceRevealRequest] = useState<WorkspaceRevealRequest | null>(null);
-  const [workspaceChangeRevealRequest, setWorkspaceChangeRevealRequest] = useState<WorkspaceRevealRequest | null>(null);
-  const [workspaceFileListRequest, setWorkspaceFileListRequest] = useState<WorkspaceFileListRequest | null>(null);
-  const [workspaceChangeListRequest, setWorkspaceChangeListRequest] = useState<WorkspaceChangeListRequest | null>(null);
   const [dockRefreshKey, setDockRefreshKey] = useState(0);
   const [projectRevision, setProjectRevision] = useState(0);
 
@@ -1315,7 +1310,7 @@ export default function App() {
     window.addEventListener("fairpeer:retry-turn", onRetry);
     return () => window.removeEventListener("fairpeer:retry-turn", onRetry);
   }, []);
-  const rightDockDetailActive = rightDockMode !== "context" && workspacePreviewActive;
+  const rightDockDetailActive = rightDockMode !== "turns" && workspacePreviewActive;
   const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
   const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
   
@@ -2264,12 +2259,11 @@ export default function App() {
   const ensureWorkspacePanelWidth = useCallback(
     (width: number) => {
       closeTransientOverlays();
-      if (rightDockMode === "context") return;
       const next = clampRightDockPreviewWidth(width);
       setRightDockPreviewWidth(next);
       saveRightDockPreviewWidth(next);
     },
-    [closeTransientOverlays, rightDockMode],
+    [closeTransientOverlays],
   );
 
   const startWorkspacePanelResize = useCallback(
@@ -2354,21 +2348,14 @@ export default function App() {
   const openWorkspacePanel = useCallback(
     (mode: RightDockMode = rightDockMode) => {
       closeTransientOverlays();
-      if (mode === "context" || mode !== rightDockMode) {
+      if (mode !== rightDockMode) {
         setWorkspacePreviewActive(false);
       }
       setRightDockMode(mode);
-      let nextMaximized = workspacePanelMaximized;
-      if (mode === "context") {
-        nextMaximized = false;
-        setWorkspacePanelMaximized(false);
-      } else {
-        // Keep file/change views docked; the rendered dock width is clamped to
-        // the viewport so opening it reflows instead of forcing maximize.
-        nextMaximized = false;
-        setWorkspacePanelMaximized(false);
-      }
-      if (workspacePanelOpen && workspacePanelMaximized === nextMaximized) {
+      // Keep the docked views docked; the rendered dock width is clamped to
+      // the viewport so opening it reflows instead of forcing maximize.
+      setWorkspacePanelMaximized(false);
+      if (workspacePanelOpen && !workspacePanelMaximized) {
         return;
       }
       setWorkspacePanelOpen(true);
@@ -2416,84 +2403,15 @@ export default function App() {
       closeWorkspacePanel();
       return;
     }
-    openWorkspacePanel("context");
+    openWorkspacePanel("files");
   }, [closeWorkspacePanel, coworkActive, netdevActive, openWorkspacePanel, pulseWorkspaceToggle, workspacePanelRenderable]);
 
   const openRightDockMode = useCallback(
     (mode: RightDockMode) => {
       ensureDockTab(mode);
-      setWorkspaceRevealRequest(null);
-      setWorkspaceChangeRevealRequest(null);
-      setWorkspaceFileListRequest(null);
-      setWorkspaceChangeListRequest(null);
       openWorkspacePanel(mode);
     },
     [ensureDockTab, openWorkspacePanel],
-  );
-
-  const openRightDockFile = useCallback(
-    (path: string) => {
-      const nextPath = path.trim();
-      if (!nextPath) return;
-      setWorkspaceFileListRequest(null);
-      setWorkspaceChangeListRequest(null);
-      setWorkspaceChangeRevealRequest(null);
-      setWorkspaceRevealRequest((current) => ({ id: (current?.id ?? 0) + 1, path: nextPath }));
-      openWorkspacePanel("files");
-    },
-    [openWorkspacePanel],
-  );
-
-  const openRightDockFileList = useCallback(
-    (paths: string[]) => {
-      const normalized = Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)));
-      setWorkspaceRevealRequest(null);
-      setWorkspaceChangeRevealRequest(null);
-      setWorkspaceChangeListRequest(null);
-      setWorkspaceFileListRequest((current) =>
-        normalized.length > 0
-          ? { id: (current?.id ?? 0) + 1, paths: normalized }
-          : null,
-      );
-      openWorkspacePanel("files");
-    },
-    [openWorkspacePanel],
-  );
-
-  const openRightDockChangeFile = useCallback(
-    (path: string) => {
-      const nextPath = path.trim();
-      if (!nextPath) return;
-      setWorkspaceRevealRequest(null);
-      setWorkspaceFileListRequest(null);
-      setWorkspaceChangeListRequest(null);
-      setWorkspaceChangeRevealRequest((current) => ({ id: (current?.id ?? 0) + 1, path: nextPath }));
-      openWorkspacePanel("changed");
-    },
-    [openWorkspacePanel],
-  );
-
-  const openRightDockChangeList = useCallback(
-    (changes: WorkspaceChangeListEntry[]) => {
-      const seen = new Set<string>();
-      const normalized = changes
-        .map((change) => ({ ...change, path: change.path.trim() }))
-        .filter((change) => {
-          if (!change.path || seen.has(change.path)) return false;
-          seen.add(change.path);
-          return true;
-      });
-      setWorkspaceRevealRequest(null);
-      setWorkspaceChangeRevealRequest(null);
-      setWorkspaceFileListRequest(null);
-      setWorkspaceChangeListRequest((current) =>
-        normalized.length > 0
-          ? { id: (current?.id ?? 0) + 1, changes: normalized }
-          : null,
-      );
-      openWorkspacePanel("changed");
-    },
-    [openWorkspacePanel],
   );
 
   const handleWorkspacePreviewModeChange = useCallback(
@@ -2809,6 +2727,7 @@ export default function App() {
     const cmds: PaletteItem[] = [
       { id: "cmd-new", group: t("palette.group.commands"), title: t("palette.cmd.newSession"), icon: <SquarePen size={15} />, compact: true, keywords: ["new", "新建"], run: () => void handleNewTab() },
       { id: "cmd-remote-connect", group: t("palette.group.commands"), title: t("remote.trigger"), icon: <Server size={15} />, compact: true, keywords: ["remote", "ssh", "wsl", "docker", "远程"], run: () => setRemoteWizardOpen(true) },
+      ...(netdevActive ? [{ id: "cmd-netdev-logs", group: t("palette.group.commands"), title: "日志工作台（多源合并时间线）", icon: <FileText size={15} />, compact: true, keywords: ["logs", "日志", "时间线", "ioc"], run: () => { window.dispatchEvent(new CustomEvent("fairpeer:netdev-bench", { detail: "logs" })); } }] : []),
       { id: "cmd-history", group: t("palette.group.commands"), title: t("palette.cmd.history"), icon: <History size={15} />, compact: true, keywords: ["history", "历史"], run: () => void openAllHistory() },
       { id: "cmd-trash", group: t("palette.group.commands"), title: t("palette.cmd.trash"), icon: <Trash2 size={15} />, compact: true, keywords: ["trash", "回收站"], run: () => void openTrash() },
       { id: "cmd-settings", group: t("palette.group.commands"), title: t("palette.cmd.settings"), icon: <SettingsIcon size={15} />, compact: true, keywords: ["settings", "设置"], run: () => setSettingsTarget("general") },
@@ -3524,7 +3443,6 @@ ${t("remote.uncPromptBody", { path: picked })}
             onSidebarResizeKey={resizeSidebarWithKeyboard}
             onSidebarResetWidth={() => setExpandedSidebarWidth(defaultSidebarWidth())}
             contextInfo={state.context}
-            usage={state.usage}
             sessionTokens={state.sessionTokens}
             activeTabId={activeTabId}
             dockRefreshKey={dockRefreshKey}
@@ -3736,7 +3654,6 @@ ${t("remote.uncPromptBody", { path: picked })}
                   each closable; "+" offers the full catalog in a dropdown. */}
               <div className="workbench-dock__tabs" role="tablist" aria-label={t("rightDock.views")}>
                 {dockTabs
-                  .filter((mode) => mode !== "context" || SHOW_CONTEXT_DOCK)
                   .map((mode) => (
                     <div
                       key={mode}
@@ -3749,13 +3666,13 @@ ${t("remote.uncPromptBody", { path: picked })}
                         className={`workbench-dock__tab${rightDockMode === mode ? " workbench-dock__tab--active" : ""}`}
                         onClick={() => openRightDockMode(mode)}
                       >
-                        {mode === "context" ? <Activity size={13} />
+                        {mode === "turns" ? <Activity size={13} />
                           : mode === "files" ? <FileText size={13} />
                           : mode === "changed" ? <GitBranch size={13} />
                           : mode === "preview" ? <Globe size={13} />
                           : <MessageSquare size={13} />}
                         <span className="workbench-dock__tab-label">
-                          {mode === "context" ? t("rightDock.overview")
+                          {mode === "turns" ? t("rightDock.turns")
                             : mode === "files" ? t("workspace.filesTab")
                             : mode === "changed" ? t("workspace.changedTab")
                             : mode === "preview" ? t("preview.tabTitle")
@@ -3802,17 +3719,16 @@ ${t("remote.uncPromptBody", { path: picked })}
                 onClose={() => setDockAddMenuPoint(null)}
                 items={DOCK_TAB_CATALOG
                   .filter((mode) => !dockTabs.includes(mode))
-                  .filter((mode) => mode !== "context" || SHOW_CONTEXT_DOCK)
                   .map((mode) => ({
                     key: mode,
                     icon:
-                      mode === "context" ? <Activity size={13} />
+                      mode === "turns" ? <Activity size={13} />
                       : mode === "files" ? <FileText size={13} />
                       : mode === "changed" ? <GitBranch size={13} />
                       : mode === "preview" ? <Globe size={13} />
                       : <MessageSquare size={13} />,
                     label:
-                      mode === "context" ? t("rightDock.overview")
+                      mode === "turns" ? t("rightDock.turns")
                       : mode === "files" ? t("workspace.filesTab")
                       : mode === "changed" ? t("workspace.changedTab")
                       : mode === "preview" ? t("preview.tabTitle")
@@ -3825,17 +3741,12 @@ ${t("remote.uncPromptBody", { path: picked })}
               />
             </div>
             <div className="workbench-dock__body">
-              {rightDockMode === "context" ? (
-                <ContextPanel                  tabId={activeTabId}
+              {rightDockMode === "turns" ? (
+                <ContextPanel
+                  tabId={activeTabId}
                   context={state.context}
-                  usage={state.usage}
                   sessionTokens={state.sessionTokens}
                   refreshKey={dockRefreshKey}
-                  onOpenWorkspaceMode={openRightDockMode}
-                  onOpenWorkspaceFile={openRightDockFile}
-                  onOpenWorkspaceFileList={openRightDockFileList}
-                  onOpenWorkspaceChangeList={openRightDockChangeList}
-                  onOpenWorkspaceChangeFile={openRightDockChangeFile}
                 />
               ) : rightDockMode === "preview" ? (
                 <PreviewPane url={previewUrl} onUrlCommit={commitPreviewUrl} />
@@ -3863,10 +3774,6 @@ ${t("remote.uncPromptBody", { path: picked })}
                   onRequestPanelWidth={ensureWorkspacePanelWidth}
                   refreshKey={dockRefreshKey}
                   initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
-                  revealPathRequest={workspaceRevealRequest}
-                  changeRevealRequest={workspaceChangeRevealRequest}
-                  fileListRequest={workspaceFileListRequest}
-                  changeListRequest={workspaceChangeListRequest}
                   showViewTabs={false}
                 />
               )}

@@ -359,6 +359,16 @@ export function NetDevLayout({
     setBench("logs");
   }, []);
 
+  // 命令面板入口（§10.7 第 5 层）：palette 在 App 层，经自定义事件抵达——
+  // 与 ?bench= 深链同效，不做状态提升。
+  useEffect(() => {
+    const onBench = (e: Event) => {
+      if ((e as CustomEvent<string>).detail === "logs") openLogsBench();
+    };
+    window.addEventListener("fairpeer:netdev-bench", onBench);
+    return () => window.removeEventListener("fairpeer:netdev-bench", onBench);
+  }, [openLogsBench]);
+
   const reload = useCallback(async () => {
     try {
       const [s, f, p, a] = await Promise.all([

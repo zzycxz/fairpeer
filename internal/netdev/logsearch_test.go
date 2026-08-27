@@ -3,6 +3,8 @@ package netdev
 import (
 	"regexp"
 	"testing"
+
+	"github.com/zzycxz/fairpeer/internal/config"
 )
 
 // matchLogLines is the pure half of the fan-out search: pattern matching over
@@ -66,6 +68,20 @@ func TestLogSearchDefaultSourcesShape(t *testing.T) {
 		}
 		if !logPathAllowed(src[5:], []string{"/var/log"}) {
 			t.Fatalf("default source %q must sit under /var/log", src)
+		}
+	}
+}
+
+// winevt: sources compose a plain, metachar-free command (the seal's
+// precondition) with the channel as a single token.
+func TestComposeWinevtCommand(t *testing.T) {
+	cmd, err := composeLogCommand(config.NetDevDevice{Vendor: "windows"}, "winevt:Security", 200, "")
+	if err != nil || cmd != "get-winevent -logname Security -maxevents 200" {
+		t.Fatalf("winevt compose: %v %q", err, cmd)
+	}
+	for _, bad := range []string{"winevt:Security -m", "winevt:a;b", "winevt:", "winevt:../x"} {
+		if _, err := composeLogCommand(config.NetDevDevice{Vendor: "windows"}, bad, 100, ""); err == nil {
+			t.Fatalf("%q must be refused", bad)
 		}
 	}
 }
