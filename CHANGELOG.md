@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [远程工作区 P1（WSL）] — 2026-08-24
+## [0.1.10] — 2026-08-27
+
+### 运维能力扩展 R1-R3（NETDEV_SPEC v2.0 落地）
+
+spec 定稿见 `docs/NETDEV_SPEC_V2.md`（675 行，含 UI 契约与 15 条裁决）；本批落地前三批核心，全部密封路径（结构性只读不变）。
+
+- **R1 日志与体检**：主区「日志工作台」（多源勾选 → 时间戳合并时间线，无时间戳行吸附前一条；底栏跨设备 IOC 搜索，预算耗尽如实报覆盖 N/M 台）；`netdev_triage` 主机体检电池（linux 11 项/windows 5 项，失败登录爆发/磁盘水位/uid0/时钟未同步四类保守异常自动进「发现」）；巡检家族菜单四件套（网络巡检/主机体检/基线核查/**弱口令核查**——后端闲置能力正式接线）；`crontab -l`/`lastb`/`nginx -t`/`apache2ctl` 等入读表
+- **R2 容器与数据目标**：设备新增 `kind` 判别式（存量零迁移）——`docker`（只读 Engine API，npipe/unix/tcp，POST 无代码路径）、`k8s`（kubeconfig 入密钥库 + 固定 context + 命名空间白名单 + 防 SSRF）、`firewall`（FortiOS REST 只读，token/Basic）；日志源 `k8s:`/`docker:` 经 API 路由——VM journal、容器日志、Pod 日志可合并进同一条时间线；三客户端密封行为均被 httptest 假服务钉死
+- **R3 事件与时序**：`netdev_locate`（IP/MAC 全网 ARP 扇出定位，清单页签顶部入口）；通知出口（webhook + 飞书/钉钉/企微原生模板 + 严重度过滤 + `fairpeer://` 深链）；时序面 v1（JSONL 零依赖 + SNMP 轮询采集 + 设备卡 Sparkline）；报告族四件（值班交接/周报/凭证盘点 + 既有晨报）
+- **设置三级导航（§10.9）**：表单进三级页、弹框只留阻塞确认——L3 翻页动画（reduced-motion 降级）+ 六表单迁移 + 未保存确认 + kind 选择题表单
+- **含上会话在途 P2 收口**：syslog 被动接收/告警规则/审计哈希链/日志 follow/DB 只读诊断源（mysql/pg/redis 白名单）
+- 验证：go 双模块 + `internal/netdev` 全量测试 + 前端构建全绿；**真机冒烟待做**（三个 API 客户端目前仅 httptest 验证）
+
 
 对标 ZCode 远程连接的四步向导（选择方式 → 填写配置 → 连接中 → 选择目录），P1 交付 **WSL** 一种连接方式，Docker/SSH/Server 复用同一协议后续补。核心架构：**controller 跑在远端 headless host 进程里，桌面端经 stdio NDJSON JSON-RPC attach**——agent 工具、文件、git、会话存储全部在 WSL 内执行，桌面只是 UI 与转发。
 
@@ -41,6 +53,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **M3 循环补课**：写工具按路径集合并行（同路径串行）、集中参数校验、办公产物可 rewind（还原点 Previewer）、rewind 前逐文件 diff 预览、Proposal 应用内审批对话框、cowork 终端接入
 - **预存失败清零**：ListBranches 适配每会话目录布局（真 bug：新布局下分支列表恒空）、会话路径测试对齐存储重构、签名公钥期望 ID 更新——**测试套件首次全绿**
 - 遗留与勘察：3-3 流式补丁预览、3-7① MCP 进度透传（勘察就绪）、3-4/3-10/3-11 及阶段 4/5 详见 spec 附录 G
+
+### 模型理解路由层收敛（非智能体层）— 08-21
+
+设计定稿 `docs/MODEL_ROUTING_SPEC.md`：两键正交（模型 ID→行为纠正、端点 BaseURL→线格式方言，`reasoning_protocol`=人工覆盖逃生口），五站点职责表 + 六条受保护不变量（非智能体/Build 期一次定型/切模型=全量重建/addon 只对实测失效模式开/协议错字必报/方言嗅探保持精确主机名）。落地修复：
+
+- **家族嗅探精度**（`instruction/family.go`）：子串 Contains 改两级匹配——供应商前缀精确（qwen/ deepseek/ z.ai/ moonshot(ai)/ minimax(i)/ openai/ anthropic/）+ token 边界整词（`glmw-v2` 不再误判 glm）+ 数字融合规则（`qwen3-max`→qwen）；家族表补 anthropic(claude)、o1/o3/o4
+- **端点方言逃生口**：`reasoning_protocol` 新增 `"minimax"` 显式值——代理/网关 BaseURL 防不住主机名嗅探，显式声明强制 thinking.type 方言；未知值不再静默吞为 auto，构建期报错并列出合法值（boot 统一校验覆盖 anthropic 路径）
+- **注册表每模型数据保留**：`mergeRemote` 不再丢弃 models.dev 的每模型 `Reasoning` 标志（`ProviderTemplate.ReasoningModels`，仅 UI 展示，行为层不读——依赖方向约束写入 spec）
+- 测试：family 碰撞表扩充、协议显式 minimax/未知值拒绝、既有全量绿；boot/desktop/wails 打包通过
+- **推理标记接 UI**（C 项收尾）：设置页"发现的模型"候选列表与引导页模型下拉对 models.dev 标记的推理模型显示"推理"徽章（`ProviderView.ReasoningModels` 由注册表按供应商名关联下发；网格三列布局容纳徽章）；mock/类型/locale 同步
+
+### 命名/描述歧义清理（skill + MCP）— 08-27
+
+审计结论：browser↔desktop、document↔ppt 两对边界是互斥声明的范本；实修 5 处真歧义 + 1 处改名 + feishu 同名异物根治：
+
+- **feishu 同名异物根治**：MCP 安装三路（市集/AddMCPServer、install_source、配置直写）全部汇于 `config.UpsertPlugin`，新增保留名守卫——IM 机器人通道名（feishu/lark/qq/weixin/telegram）与内置运行时名（codegraph/context7）不可用作新 MCP 名，报错附改名建议（如 feishu-docs）；守卫前的存量条目仍可原地编辑不被砖死；机器人网关设置页文案明确"通道=IM 消息网关，与 MCP 服务器无关"
+- **skill 描述五处**：research 首句立判别（EXTERNAL 库/文档问题 vs explore 的 OUR 代码勘察，双向互指）；review 去掉裸 security 一词并指向 security-review；netdev-playbook 定位总纲入口、netdev-diag-* 三张专项卡回指总纲（领域重叠但层级声明了）；codegraph SteerText 增补双身份说明（codegraph_* 工具与插件列表 codegraph 是同一运行时的两种模式）；install-capability 与设置页市集互指（技能=任意来源+卸载，市集=官方注册表浏览）
+- **rag-auto → knowledge-auto 改名**：名字说技术（RAG）不说职责（知识库）；legacySkillRenames 保留旧名兼容（白名单/禁用表继续生效），roster/办公白名单/办公路由表/UI 官方集/测试全量同步
+- mock 清理：figma/github/linear 三个假"随包发行"服务器移出浏览器 dev mock（从未真实存在，误导开发者）
+- 测试：保留名守卫 3 个新测试（拒绝+改名提示/存量可编辑/大小写），全套绿；wails 打包通过
+- **"feishu 顶替 IM bot"错位清扫**（同日续修）：审计全部 feishu 出现点——配置结构层（FeishuBotView/QQBotView/WeixinBotView 按通道各归各、allowlist 的 feishuUsers 等为通道专属）本就诚实；真错位在三处 label 回落（连接表/安装目标/侧栏 IM 平台的 default 分支把未知平台显示成"飞书"）改为显式 feishu 分支 + 未知平台原样显示（新 `settings.botChannelUnknown` 兜底），未来新增平台永不冒名飞书；顺带移除六个已无渲染点的 legacy 飞书表单文案键
 
 ## [0.1.9] — 2026-08-19 ~ 2026-08-21
 
