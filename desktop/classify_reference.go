@@ -109,6 +109,10 @@ If VISUAL: after the first line, describe the page in exactly 4 markdown section
 Transcribe ALL text verbatim — title, headings, body paragraphs, every bullet point, captions, data labels, table cells. Do NOT summarize. Mark text you cannot read clearly as (illegible) — never guess.
 ## 2 LAYOUT
 The spatial arrangement: where the title sits (top-center / top-left / etc.), the body region, single vs multi-column, paragraphs vs bullet list, any table (give its rows and columns), image regions (position and rough size share of the page).
+End this section with one fenced json block of rough region boxes — pixel estimates on a 1280x720 canvas, 4-8 regions, rough is fine:
+` + "```json" + `
+[{"type":"text|card|image|table|chart","bbox":[x,y,w,h],"content":"key text or short label"}]
+` + "```" + `
 ## 3 FORMAT
 Relative font sizing (which text is largest, what looks like body size relative to it), weight cues (bold title?), bullet style, text alignment per block (left / center / right).
 ## 4 DESIGN

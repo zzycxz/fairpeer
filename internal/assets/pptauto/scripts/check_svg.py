@@ -7,20 +7,16 @@ SVG 质量检查脚本（增强版）
 ERROR（致命，必须修复）：
   - XML 格式错误
   - 禁止元素
-  - 内容严重不足
-  - 文字溢出边界
-  - 文字重叠
+  - 内容严重不足（硬底线，fast/validate 都查）
+  - 文字溢出边界 / 文字重叠（fast/validate 都查）
 
-WARN（警告，建议修复）：
-  - 缺少背景图
-  - viewBox 不正确
-  - 配色不一致
-  - 内容偏少
-  - 对齐偏差
-  - 间距不均匀
-  - 字体不匹配
+WARN（警告，建议修复；不阻塞）：
+  - 缺少背景图 / viewBox 不正确
+  - 禁止模式 / 禁止属性（S-06）
+  - 配色/内容偏少/对齐偏差/间距不均（仅 validate）
 
-返回：0=通过, 1=有警告, 2=有错误
+输出契约（S-19）：stdout = 单个 JSON 结果对象；stderr = 人类可读报告。
+返回：0=通过或仅 WARN，2=有 ERROR（退出码语义冻结，desktop op_gate 依赖）
 """
 import json, re, sys, os
 import xml.etree.ElementTree as ET
@@ -34,6 +30,15 @@ except ImportError:
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+try:
+    from text_utils import estimate_text_width
+except ImportError:
+    import os as _os
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    if _here not in sys.path:
+        sys.path.insert(0, _here)
+    from text_utils import estimate_text_width
 
 
 def load_config(config_path=None, svg_path=None):
@@ -68,17 +73,6 @@ def load_config(config_path=None, svg_path=None):
     return config
 
 
-def cjk_char_units(ch):
-    """CJK 字符约占 1em、Latin 约 0.55em——与 build_page_skeleton.cjk_w 一致。"""
-    return 1.0 if ord(ch) > 0x2E80 else 0.55
-
-
-def estimate_text_width(text, font_size):
-    """CJK 感知的文字宽度估算（S-05）。旧的 len*0.6 对中文偏小（漏报溢出）、
-    对英文偏大（误报溢出）。"""
-    return sum(cjk_char_units(c) for c in text) * font_size
-
-
 def parse_text_elements(content):
     """解析所有 text 元素"""
     texts = []
@@ -100,8 +94,9 @@ def parse_text_elements(content):
             texts.append({
                 "x": x, "y": y, "size": font_size,
                 "content": text_content,
-                "width": len(text_content) * font_size * 0.6,
-                "width_cjk": estimate_text_width(text_content, font_size),
+                # CJK 感知宽度（S-05 已转正为唯一依据）：CJK≈1em / Latin≈0.55em，
+                # 与 build_page_skeleton 的换行公式同源——骨架页数学上不会溢出
+                "width": estimate_text_width(text_content, font_size),
             })
     except ET.ParseError:
         for match in re.finditer(
@@ -111,8 +106,7 @@ def parse_text_elements(content):
             texts.append({
                 "x": int(match.group(1)), "y": int(match.group(2)),
                 "size": int(match.group(3)), "content": match.group(4),
-                "width": len(match.group(4)) * int(match.group(3)) * 0.6,
-                "width_cjk": estimate_text_width(match.group(4), int(match.group(3))),
+                "width": estimate_text_width(match.group(4), int(match.group(3))),
             })
     return texts
 
@@ -177,16 +171,10 @@ def check_text_overflow(texts, rects, canvas_w=1280, canvas_h=720):
     """检查文字溢出边界（精确版）"""
     issues = []
     for text in texts:
-        # 右边界
+        # 右边界（宽度即 CJK 感知估算——S-05 影子期结束，转正为唯一判据）
         if text["x"] + text["width"] > canvas_w:
             overflow = text["x"] + text["width"] - canvas_w
             issues.append(("error", f"文字 '{text['content'][:20]}' 超出右边界 {overflow:.0f}px"))
-        # CJK 影子检查（S-05 影子模式）：CJK 估算已溢出而旧公式未报 → WARN 不阻塞；
-        # 观察一轮真实误报后与 S-04 的分级同批切换为 error
-        elif text["x"] + text.get("width_cjk", text["width"]) > canvas_w:
-            overflow = text["x"] + text["width_cjk"] - canvas_w
-            issues.append(("warn", f"[shadow] CJK 估算下文字 '{text['content'][:20]}' "
-                                   f"可能超出右边界 ~{overflow:.0f}px（影子模式，不阻塞）"))
         # 下边界
         if text["y"] > canvas_h:
             issues.append(("error", f"文字 '{text['content'][:20]}' 超出下边界 (y={text['y']})"))
@@ -361,13 +349,33 @@ def check_element_variety(content, config):
     return []
 
 
-def check_svg(svg_path, config=None, mode="fast"):
-    """检查 SVG 质量
+def _read_ppt_auto(content):
+    """D-03/D-06：读 <metadata><ppt-auto .../>。返回 (page_type, is_region)，
+    无元数据时 (None, False)——调用方退回文件名猜测。is_region 标记
+    --region 拼装块（部分页），内容底线检查对其豁免。"""
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError:
+        return None, False
+    for el in root.iter():
+        if el.tag.split("}")[-1] == "ppt-auto":
+            page_type = (el.get("page-type") or "").strip().lower() or None
+            is_region = (el.get("region") or "").strip().lower() not in ("", "0", "false", "none")
+            return page_type, is_region
+    return None, False
+
+
+def run_check(svg_path, config=None, mode="fast"):
+    """全部检查的纯计算入口（S-19）：返回结果 dict，不打印。
 
     Args:
         svg_path: SVG 文件路径
         config: 配置字典
         mode: "fast"（宽松）或 "validate"（严格）
+
+    Returns:
+        {"file", "mode", "errors", "warnings", "exit"}——exit 语义冻结：
+        2 = ERROR（必须修），0 = OK 或仅 WARN（op_gate 依赖此约定）。
     """
     if config is None:
         config = load_config()
@@ -384,14 +392,22 @@ def check_svg(svg_path, config=None, mode="fast"):
         content = f.read()
 
     filename = os.path.basename(svg_path).lower()
-    # Detect page type from filename. Supports both naming conventions the
-    # skill produces: slide_01.svg / slide_10.svg (underscore before number)
-    # and the legacy 01_cover.svg / 10_ending.svg (underscore after).
-    is_cover = "cover" in filename or "01_" in filename or "_01." in filename
-    is_ending = "ending" in filename or "10_" in filename or "_10." in filename
-    # Section (chapter divider) pages are transitional like cover/ending: a big
-    # number + title + optional lead is their DESIGN, not missing content.
-    is_section = "section" in filename
+    # Detect page type: embedded <ppt-auto page-type/> metadata wins (D-03);
+    # the filename heuristics below are the fallback for files without it and
+    # support both naming conventions the skill produces: slide_01.svg /
+    # slide_10.svg (underscore before number) and the legacy 01_cover.svg /
+    # 10_ending.svg (underscore after).
+    page_type, is_region_block = _read_ppt_auto(content)
+    if page_type:
+        # Section (chapter divider) pages are transitional like cover/ending:
+        # a big number + title + optional lead is their DESIGN.
+        is_cover = page_type == "cover"
+        is_ending = page_type == "ending"
+        is_section = page_type == "section"
+    else:
+        is_cover = "cover" in filename or "01_" in filename or "_01." in filename
+        is_ending = "ending" in filename or "10_" in filename or "_10." in filename
+        is_section = "section" in filename
     is_sparse_ok = is_cover or is_ending or is_section
 
     errors = []
@@ -484,40 +500,46 @@ def check_svg(svg_path, config=None, mode="fast"):
                     if attr in el.attrib:
                         warnings.append(f"禁止属性 {attr} 于 <{el.tag.split('}')[-1]}>")
 
-    # === 深度检查（内容密度/溢出/重叠/覆盖/对齐/间距）——仅 validate 模式 ===
-    # fast 模式只跑上面的基础检查（XML/背景/禁止元素），跳过耗时的深度检查
-    if mode == "validate":
-        texts = parse_text_elements(content)
-        rects = parse_rect_elements(content)
-        text_count = len(texts)
-        rect_count = len(rects)
+    # === 核心内容检查——两种模式都跑（决策 2026-08-27：M-3/M-4 证明这些是
+    # 默认流水线必须兜底的真缺陷；均为纯数学检查，毫秒级） ===
+    texts = parse_text_elements(content)
+    rects = parse_rect_elements(content)
+    text_count = len(texts)
 
-        # 4. 内容密度
-        density_config = config.get("rules", {}).get("content_density", {})
-        min_text = density_config.get("min_text_elements", 6)
-        min_rect = density_config.get("min_rect_elements", 2)
-
+    # 4. 内容硬底线（--region 拼装块是部分页，豁免；"偏少"建议仍在 validate）
+    if not is_region_block:
         if is_sparse_ok:
             if text_count < 3:
                 errors.append(f"内容严重不足: {text_count} 个文字")
-        else:
-            if text_count < 5:
-                errors.append(f"内容严重不足: {text_count} 个文字")
-            elif text_count < min_text:
-                warnings.append(f"内容偏少: {text_count} 个文字 (建议 {min_text}+)")
+        elif text_count < 5:
+            errors.append(f"内容严重不足: {text_count} 个文字")
 
-        # 5. 文字溢出（精确检测）
-        overflow_issues = check_text_overflow(texts, rects, canvas_w, canvas_h)
-        for level, msg in overflow_issues:
-            if level == "error":
-                errors.append(msg)
-            else:
-                warnings.append(msg)
-
-        # 6. 文字重叠（精确检测）
-        overlap_issues = check_text_overlap(texts)
-        for level, msg in overlap_issues:
+    # 5. 文字溢出（精确检测；region 块的坐标是变换前的整页坐标，天然在界内）
+    overflow_issues = check_text_overflow(texts, rects, canvas_w, canvas_h)
+    for level, msg in overflow_issues:
+        if level == "error":
             errors.append(msg)
+        else:
+            warnings.append(msg)
+
+    # 6. 文字重叠（精确检测）
+    overlap_issues = check_text_overlap(texts)
+    for level, msg in overlap_issues:
+        if level == "error":
+            errors.append(msg)
+        else:
+            warnings.append(msg)
+
+    # === 建议级深度检查（密度建议/覆盖/对齐/间距/多样性）——仅 validate 模式 ===
+    # fast 模式到此为止：底线上面的三项已兜住"空页出厂/文字出界/文字压字"
+    if mode == "validate":
+        rect_count = len(rects)
+        density_config = config.get("rules", {}).get("content_density", {})
+        min_text = density_config.get("min_text_elements", 6)
+
+        # 内容偏少建议（硬底线已在两模式共用段处理）
+        if not is_sparse_ok and 5 <= text_count < min_text:
+            warnings.append(f"内容偏少: {text_count} 个文字 (建议 {min_text}+)")
 
         # 7. 垂直覆盖 — 封面/结尾/章节页只有标题和致谢，内容天然少，跳过密度检查
         if not is_sparse_ok:
@@ -552,22 +574,38 @@ def check_svg(svg_path, config=None, mode="fast"):
         for level, msg in variety_issues:
             warnings.append(msg)
 
-    # === 输出结果 ===
-    print(f"=== {os.path.basename(svg_path)} ===")
-    if errors:
-        print(f"  [ERROR] ({len(errors)}):")
-        for e in errors:
-            print(f"    - {e}")
-    if warnings:
-        print(f"  [WARN] ({len(warnings)}):")
-        for w in warnings:
-            print(f"    - {w}")
-    if not errors and not warnings:
-        print(f"  [OK]")
+    # === 结果（S-19：不在此打印；打印归 check_svg 包装/调用方） ===
+    return {
+        "file": os.path.basename(svg_path),
+        "mode": mode,
+        "errors": errors,
+        "warnings": warnings,
+        # Exit code: 2 = ERROR（必须修），0 = OK 或只有 WARN（可以继续）。
+        # WARN 不阻止流程（返回 0），否则 complete_step 会因非零退出码拒绝。
+        "exit": 2 if errors else 0,
+    }
 
-    # Exit code: 2 = ERROR（必须修），0 = OK 或只有 WARN（可以继续）。
-    # WARN 不阻止流程（返回 0），否则 complete_step 会因非零退出码拒绝。
-    return 2 if errors else 0
+
+def check_svg(svg_path, config=None, mode="fast", emit_json=True):
+    """向后兼容包装（S-19）：人类可读报告 → stderr，JSON 结果 → stdout。
+
+    batch_check 直接用 run_check 聚合，避免每页一行 JSON 破坏其单对象输出。
+    """
+    result = run_check(svg_path, config, mode)
+    print(f"=== {result['file']} ===", file=sys.stderr)
+    if result["errors"]:
+        print(f"  [ERROR] ({len(result['errors'])}):", file=sys.stderr)
+        for e in result["errors"]:
+            print(f"    - {e}", file=sys.stderr)
+    if result["warnings"]:
+        print(f"  [WARN] ({len(result['warnings'])}):", file=sys.stderr)
+        for w in result["warnings"]:
+            print(f"    - {w}", file=sys.stderr)
+    if not result["errors"] and not result["warnings"]:
+        print("  [OK]", file=sys.stderr)
+    if emit_json:
+        print(json.dumps(result, ensure_ascii=False))
+    return result["exit"]
 
 
 if __name__ == "__main__":

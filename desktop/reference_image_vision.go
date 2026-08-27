@@ -26,9 +26,12 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
 
 // referenceImageMaxBytes caps the image size sent to the VLM. VLM providers reject
@@ -83,15 +86,37 @@ Rules:
 //     matches the reference. Without these hex fields the merge skips the
 //     reference and the deck falls back to template/default colors.
 type referenceStyleResult struct {
-	Image          string   `json:"image"`                     // source image filename
-	SourcePath     string   `json:"source_path,omitempty"`     // absolute path of the analyzed image — qa_compare.py reads this to find the reference for post-generation comparison
-	Description    string   `json:"description,omitempty"`     // VLM 4-section markdown
-	Background     string   `json:"background,omitempty"`      // #RRGGBB — merge_vlm_style reads this
-	IsDark         bool     `json:"is_dark,omitempty"`         // background brightness < 50%
-	AccentColors   []string `json:"accent_colors,omitempty"`   // top accent hexes
-	TextColor      string   `json:"text_color,omitempty"`      // recommended text color
-	StyleKeywords  []string `json:"style_keywords,omitempty"`  // style descriptors
-	BackgroundType string   `json:"background_type,omitempty"` // "solid" | "image"
+	Image          string          `json:"image"`                     // source image filename
+	SourcePath     string          `json:"source_path,omitempty"`     // absolute path of the analyzed image — qa_compare.py reads this to find the reference for post-generation comparison
+	Description    string          `json:"description,omitempty"`     // VLM 4-section markdown
+	Regions        json.RawMessage `json:"regions,omitempty"`         // D-05: [{type,bbox,content},...] extracted from Description's fenced json block — rough 1280x720 boxes for mechanical placement
+	Background     string          `json:"background,omitempty"`      // #RRGGBB — merge_vlm_style reads this
+	IsDark         bool            `json:"is_dark,omitempty"`         // background brightness < 50%
+	AccentColors   []string        `json:"accent_colors,omitempty"`   // top accent hexes
+	TextColor      string          `json:"text_color,omitempty"`      // recommended text color
+	StyleKeywords  []string        `json:"style_keywords,omitempty"`  // style descriptors
+	BackgroundType string          `json:"background_type,omitempty"` // "solid" | "image"
+}
+
+// regionsFenceRe matches a fenced ```json [ {...}, ... ] ``` block. The array
+// form (not an object) keeps the regex anchored; the "bbox" probe below makes
+// sure we grabbed the regions block and not some other fenced array.
+var regionsFenceRe = regexp.MustCompile("(?s)```(?:json)?\\s*(\\[\\s*\\{.*?\\}\\s*\\])\\s*```")
+
+// extractRegionsJSON pulls the optional regions block out of a VISUAL
+// description (D-05). The analyzer prompt asks the VLM to append it to the
+// LAYOUT section as rough 1280x720 pixel boxes; Description keeps the prose
+// for the LLM while this structured copy lets tooling consume positions
+// mechanically. Returns nil when absent/invalid — callers treat that as
+// "text-only description" (fully backward compatible).
+func extractRegionsJSON(desc string) json.RawMessage {
+	for _, m := range regionsFenceRe.FindAllStringSubmatch(desc, -1) {
+		raw := []byte(m[1])
+		if json.Valid(raw) && strings.Contains(m[1], `"bbox"`) {
+			return json.RawMessage(raw)
+		}
+	}
+	return nil
 }
 
 // AnalyzeReferenceImage is the standalone desktop entry point (kept for the
@@ -136,6 +161,7 @@ func (a *App) AnalyzeReferenceImage(imgPath string) error {
 // skill's working directory.
 func writeReferenceStyle(srcPath, desc, colorResp string) error {
 	result := referenceStyleResult{Image: filepath.Base(srcPath), SourcePath: absPath(srcPath), Description: desc}
+	result.Regions = extractRegionsJSON(desc)
 	applyColorFields(&result, colorResp)
 	return writeRefJSON(result)
 }

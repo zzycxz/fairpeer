@@ -13,6 +13,7 @@ SVG 修复脚本：修复模型生成的 SVG 中的常见错误。
 5. 修复常见 XML 错误（<br>、路径数据里的 ·、未转义 &、未闭合 text/tspan）
 6. 兜底：截断到最后一个可解析位置（有损，打 WARN 记录丢弃行数）
 """
+import json
 import os
 import re
 import sys
@@ -93,8 +94,12 @@ def _close_unclosed_tags(content):
 
 
 def fix_svg(input_path, output_path):
+    """修复并落盘。返回结果 dict（S-19：stdout JSON 由 CLI 打印，
+    WARN 走 stderr，退出码恒 0——修复失败会抛异常）。"""
     with open(input_path, "r", encoding="utf-8") as f:
         content = f.read()
+    truncated = False
+    dropped_lines = 0
 
     # 1. 去掉 markdown 代码块
     if "```" in content:
@@ -161,16 +166,25 @@ def fix_svg(input_path, output_path):
             print("[fix_svg] WARN: 无法修复的 XML 错误，兜底截断丢弃了 %d 行内容" % dropped,
                   file=sys.stderr)
             content = candidate
+            truncated = True
+            dropped_lines = dropped
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    print(f"Fixed: {output_path} ({len(content)} chars)")
-    return output_path
+    return {
+        "status": "ok",
+        "file": output_path,
+        "chars": len(content),
+        "truncated": truncated,
+        "dropped_lines": dropped_lines,
+    }
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python fix_svg.py <input_svg> <output_svg>")
+        print("Usage: python fix_svg.py <input_svg> <output_svg>", file=sys.stderr)
         sys.exit(1)
-    fix_svg(sys.argv[1], sys.argv[2])
+    info = fix_svg(sys.argv[1], sys.argv[2])
+    print("Fixed: %s (%d chars)" % (info["file"], info["chars"]), file=sys.stderr)
+    print(json.dumps(info, ensure_ascii=False))

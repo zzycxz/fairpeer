@@ -486,68 +486,14 @@ LAYOUT_MARGINS = {
 
 
 # ============================================================
-# SVG Technical Specifications
+# SVG rules — REMOVED (决策 2026-08-27)
+# ------------------------------------------------------------
+# The old SVG_CONSTRAINTS dict (forbidden elements/attributes/patterns) had
+# zero consumers in the whole repo (validate_svg_element was never called and
+# is deleted with it). The live rule source is template_config.json's `rules`
+# node, read and enforced by check_svg.py — see docs/image-to-ppt-issues.md
+# 附录. svg_quality_checker.py keeps its own self-contained checks.
 # ============================================================
-
-SVG_CONSTRAINTS = {
-    # Forbidden elements - PPT incompatible
-    'forbidden_elements': [
-        # Clipping / Masking
-        # Note: `clipPath` on <image> elements is conditionally allowed — the
-        # converter maps qualifying clip shapes to DrawingML picture geometry.
-        # See references/shared-standards.md §1.2. It is NOT listed here
-        # because this flat list has no per-parent-element semantics; the
-        # actual validation is in svg_quality_checker._check_forbidden_elements.
-        'mask',
-        # Style system
-        'style',
-        # Structure / Nesting
-        'foreignObject',
-        # Text / Fonts
-        'textPath',
-        # Animation / Interaction
-        'animate',
-        'animateMotion',
-        'animateTransform',
-        'animateColor',
-        'set',
-        'script',
-        # Others
-        'iframe',
-    ],
-    # Forbidden attributes
-    # Note: marker-start / marker-end are NOT banned — they are conditionally
-    # allowed (see references/shared-standards.md §1.1). The svg_to_pptx
-    # converter maps qualifying <marker> defs to native DrawingML
-    # <a:headEnd>/<a:tailEnd>.
-    'forbidden_attributes': [
-        'class',
-        'id',
-        'onclick', 'onload', 'onmouseover', 'onmouseout',
-        'onfocus', 'onblur', 'onchange',
-    ],
-    # Forbidden patterns (regex matching)
-    'forbidden_patterns': [
-        r'@font-face',  # Web fonts
-        # rgba() is NOT banned: the native converter maps it to
-        # <a:solidFill><a:srgbClr><a:alpha> and the PNG fallback rasterizes it
-        # (S-02); template_config.json and SKILL.md rule 4 both prescribe rgba
-        # for semi-transparent card backgrounds.
-        r'<\?xml-stylesheet\b',  # External CSS
-        r'<link[^>]*rel\s*=\s*["\']stylesheet["\']',
-        r'@import\s+',  # External CSS
-        r'<g[^>]*\sopacity\s*=',  # Group opacity
-        r'<image[^>]*\sopacity\s*=',  # Image opacity
-        r'\bon\w+\s*=',  # Event attributes
-        r'(?s)(?=.*<symbol)(?=.*<use\b)',  # <symbol> + <use> complex usage (order-independent)
-    ],
-    'recommended_fonts': [
-        'system-ui',
-        '-apple-system',
-        'BlinkMacSystemFont',
-        'Segoe UI'
-    ]
-}
 
 
 # ============================================================
@@ -646,19 +592,6 @@ class Config:
         return FONT_SIZES.get(size_name, FONT_SIZES['body'])
 
     @staticmethod
-    def validate_svg_element(element_name: str) -> bool:
-        """
-        Validate whether an SVG element is allowed.
-
-        Args:
-            element_name: Element name
-
-        Returns:
-            Whether the element is allowed
-        """
-        return element_name.lower() not in [e.lower() for e in SVG_CONSTRAINTS['forbidden_elements']]
-
-    @staticmethod
     def get_project_path(subdir: str = '') -> Path:
         """
         Get project path.
@@ -686,8 +619,7 @@ class Config:
             'design_colors': DESIGN_COLORS,
             'industry_colors': INDUSTRY_COLORS,
             'fonts': FONTS,
-            'font_sizes': FONT_SIZES,
-            'svg_constraints': SVG_CONSTRAINTS
+            'font_sizes': FONT_SIZES
         }
 
         with open(output_file, 'w', encoding='utf-8') as f:

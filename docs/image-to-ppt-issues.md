@@ -2,11 +2,13 @@
 
 > **日期**：2026-08-26
 > **范围**：ppt-auto 主题生成 + image-to-PPT 两条工作流
-> **状态**：部分实施（2026-08-27 批次一：S-01~S-17、S-20~S-22、D-01、D-02、D-04 + M-6；延后：S-18、S-19、D-03、D-05、D-06——见文末实施记录）
+> **状态**：已全部实施（批次一 2026-08-27：S-01~S-17、S-20~S-22、D-01、D-02、D-04 + M-6；批次二 2026-08-27：S-18、S-19、S-10 全部、D-03、D-05、D-06——见文末实施记录）
 > **修订**：2026-08-26 核实修正（S-01/S-02/S-07/S-08/S-09/S-14/S-17/S-18/S-19/D-01/D-03/D-06/附录；编号为修订前旧编号）
 > **修订 2**：2026-08-26 兼容性审查（两不变量：生成链路不被破坏、产出的 PPTX 在 PowerPoint 真实可用）——S-04/S-05 上线策略、S-06 去 id、S-10 fix 改写范围、S-13 pattern 兜底改安全底色、S-16 改强制降采样、S-19 exit code 冻结（编号为本版编号）
 > **修订 3**：2026-08-27 沙箱模拟运行——新增 S-21（无模板+参考图颜色断链，P1）、S-22（icacls 解码崩溃，P2），修正 S-05 上线策略"无设置入口"表述（cowork_settings.go:515 存在入口），附模拟运行记录（第七节末）
 > **修订 4**：2026-08-27 批次一实施——22 项落地 + 2 项实施中发现的新缺陷修复（fix_svg 贪心截断捷径、merge 误写 background_type），SkillVersion 45→46，见文末实施记录
+> **修订 5**：2026-08-27 批次二实施——收尾 S-18/S-19/S-10 全部/D-03/D-05/D-06，SkillVersion 46→47；D-05 实施中修正了 prompt 示例与提取正则的形状不一致（对象 vs 裸数组）
+> **修订 6**：2026-08-27 三项遗留决策全部裁定并落地（见文末「决策记录」），SkillVersion 47→48
 
 ---
 
@@ -124,6 +126,8 @@ def estimate_text_width(text: str, font_size: float) -> float:
 - 混合 "Test测试" → 按字符分别计算
 
 **上线策略（影子模式先行）**：
+
+> **已裁定（2026-08-27，决策记录①）**：影子期取消，CJK 估算已直接转正为唯一溢出判据——骨架生成器与检查器共用同一套 `cjk_w` 公式，骨架页数学上不可能误报（沙箱 6 页实测零误报），观察轮失去必要性。以下原文保留作背景。
 
 1. **前置事实**：溢出/重叠/覆盖等深度检查全部在 `check_svg.py` 的 `if mode == "validate"` 分支（line 436），而 `template_config.json` 默认 `"mode": "fast"`、`batch_check.py:46` 从 config 读取——**默认流水线不执行这些检查**。设置面板**有**切换入口（`desktop/cowork_settings.go:515` 经 `updatePPTSkillConfig("mode", ...)` 写入已安装 skill 副本的 config），但默认 fast、普通用户不会主动切换。因此本条（及 S-04）默认只影响 validate 模式；是否把溢出/重叠挪入 fast、或 batch_check 默认 validate，需先做决策，属本条前置
 2. CJK 系数 0.6 → 1.0 是大幅收紧（30 字标题 ×26px：468px → 780px）。骨架页安全（`build_page_skeleton.py` 用同一套 `cjk_w` 预换行），但**手写 SVG 页可能集中报 ERROR**，直接以 ERROR 上线会卡死生成-返工循环
@@ -788,3 +792,38 @@ ppt-auto 内部存在**三处独立的规则定义**，内容不一致，且消�
 2. **S-21 修复引出的连锁缺陷**：merge 原把 reference-style.json 的 `background_type:"solid"` 一并写入 config，导致"无模板+参考图"场景被翻转成模板模式——骨架不再画背景、check_svg 报"禁止画全屏背景"、最终 PPTX 背景变白。已修复：`_apply_vlm_style` 新增 `allow_background_type` 参数，只有 ppt-template-style.json（真实 .pptx 模板的视觉提取）可写 background_type；参考图只贡献颜色值。
 
 **沙箱回归记录**：T1 无模板颜色合并（bg=#EDF8FC/accent=#0078D4）✅ / T2 autofit 24/15/12 进入骨架 ✅ / T3 坏 SVG 保 4/5 段 ✅ / T4 pattern→card_bg 底色、mask 移除、gradient 保留 ✅ / T5 CJK 影子 WARN ✅ / T6 class+g-opacity 告警、id 不告警 ✅ / T8 非 hex 跳过+WARN ✅ / T9 `--x` 移除 ✅ / T10 960×540 画布边界生效 ✅ / T11 双命名枚举去重 ✅ / T12 垂直覆盖 2/4→WARN ✅ / M-6 无 key 不再白渲染 ✅ / S-16 11.3MB 图强制降采样嵌入（4.8MB）✅ / 无模板+有模板两轮全链路 PPTX 产出正常、导出零 Traceback ✅ / 仓库侧导入冒烟（svg_quality_checker/batch_check/pptx_dimensions/find_page_svgs）✅
+
+### 实施记录（2026-08-27 批次二）
+
+**收尾 6 项**：
+
+1. **S-18 + S-05③**：新建 `scripts/text_utils.py` 共享模块（`cjk_char_units`/`estimate_text_width`/`normalize_color`），check_svg 与 build_page_skeleton 改为共用（消除两份 cjk 系数副本）；svg_quality_checker 的 spec_lock 漂移检查接入 `normalize_color`——短 hex（#FFF==#FFFFFF）、8 位 hex（丢 alpha）、命名色（white==#FFFFFF）两侧归一化，SVG 扫描正则同时捕获 hex 与命名色
+2. **S-10 全部**：batch_check 增加 `--fix-legacy` 显式开关——默认旧格式 `NN_type.svg` 只在 JSON 的 `skipped_legacy` 里列出（不被 fix_svg 原地改写），传开关才纳入 fix+check
+3. **S-19**：check_svg 拆出纯计算入口 `run_check()`（返回 dict 不打印）；CLI 与 batch_check 的输出契约为 **stdout=JSON / stderr=人类可读报告**，batch_check 输出单 JSON 对象（含 failed/skipped_legacy/results）。**退出码语义冻结未动**（0/2，op_gate 依赖）；fix_svg 返回结果 dict（含 truncated/dropped_lines），CLI 同样 JSON stdout。SKILL.md 对应段落已同步（"解析 JSON 而不是读文本"）
+4. **D-03**：骨架输出在 `<svg>` 后首行嵌入 `<metadata><ppt-auto page-type="..." slide-number="..."/></metadata>`；check_svg 新增 `_read_page_type()` 优先读元数据、文件名猜测降为兜底；转换器 `_NON_VISUAL_TAGS` 已含 metadata（无需改动，已核实）；SKILL.md 指示手写 SVG 也嵌入
+5. **D-06**：`--region x,y,w,h`（CLI 全局或 pages.json 每页 `"region"`）——整页内容经 `translate+scale` 线性变换映射进目标区域（生成器布局逻辑零改动，多块拼装天然不重叠不留缝），区域模式不画背景；SKILL.md 给出两块拼装的完整组合规则（拼装页跑 fast 检查，跨块深度检查按原始坐标会误报）
+6. **D-05**：两侧 analyzer prompt（Go `pptRefAnalyzerPrompt` + Python `ANALYZER_PROMPT`，保持同步契约）的 LAYOUT 段新增可选 fenced json regions 块（0-1280×0-720 粗略 bbox，4-8 区域）；Go 侧 `extractRegionsJSON()` 从 description 提取写入 reference-style.json 顶层 `regions` 字段（`json.RawMessage`，VLM 不输出时整链降级为纯文本，向后兼容）；SKILL.md 指示 LLM 优先参考 bbox 定位
+
+**批次二实施中修正的缺陷**：D-05 初版 prompt 示例给的是对象 `{"regions":[...]}` 而提取正则匹配裸数组 `[{...}]`——VLM 照示例输出必然提取失败。沙箱正则测试抓到后统一改为裸数组（两侧 prompt + 验证含 3 区域用例与纯文本降级用例）。
+
+**批次二沙箱回归**：T13 S-19（check_svg stdout JSON+stderr 报告、fix_svg JSON 含 truncated、batch 单对象）✅ / T14 S-10（默认 skipped_legacy 列出、--fix-legacy 纳入 7 页）✅ / T15 D-03（骨架首行 metadata；同内容同文件名，cover 元数据 0 错 vs cards 元数据报内容不足——元数据优先级生效）✅ / T16 D-06（上下两块 transform 正确 0.6/0.4、双文件合法 XML）✅ / T17 S-18（normalize_color 5 用例）✅ / T18 D-05（正则提取 3 区域 + 纯文本降级 + Go 模式串一致性）✅ / 全链路两轮（无模板+有模板）batch ok、导出 exit 0 零 Traceback、PPTX 6 页内容/layout 正确 ✅
+
+**遗留决策（非代码）**：① S-05 影子模式观察一轮后把 `[shadow]` WARN 升为 error（一行改动）；② 深度检查默认启用策略（fast/validate 决策，见 S-05 上线策略）；③ svg_quality_checker.py 的最终处置（纳入工作流或删除）——S-18 的归一化已就位，两条路都不阻塞。
+
+### 决策记录（2026-08-27，三项全部裁定）
+
+**决策 ① S-05 影子转正——CJK 估算成为唯一溢出判据**（不再等观察轮）
+
+理由：骨架生成器用同一套 `cjk_w` 公式预换行，骨架页在数学上不可能被新公式误报（T21 实测 6 页零误报）；1.0em 系数对 CJK 是物理事实（全角字符即 1em 宽），旧的 0.6 不是"保守"而是错误。影子期本为防误报，而唯一的系统性误报源（骨架自身）已被同源公式排除。改动：`parse_text_elements` 的 `width` 直接取 `estimate_text_width`，删除 `width_cjk` 影子分支。
+
+**决策 ② fast/validate 分层——硬底线三项进 fast**
+
+fast 模式新增（始终执行）：内容硬底线（非稀疏页 <5 段文字、稀疏页 <3 → ERROR）、文字超出画布、文字压字。密度建议/垂直与空间覆盖/对齐/间距/多样性留在 validate。理由：M-3（空页静默出厂）与 M-4（CJK 溢出漏报）都发生在默认 fast 流水线里，这三项是纯数学毫秒级检查、针对的是真缺陷而非风格偏好——"快"不应等于"不设底线"。配套：`--region` 拼装块在 metadata 里带 `region="1"`，内容底线对其豁免（它是部分页）；SKILL.md 的 fast/validate 描述已同步。风险已验证：骨架 6 页 fast 零误报，双轮全链路 batch ok。
+
+**决策 ③ 规则体系收敛——删 config.py 死代码，svg_quality_checker 定位为可选工具**
+
+`SVG_CONSTRAINTS` + `validate_svg_element` + export 条目从 config.py 删除（全仓零消费者，grep 复核；留注释指路 template_config.json）。`svg_quality_checker.py` **保留**（2106 行自包含审计器，spec_lock 漂移检查独此一家，S-18 归一化已接入），定位为可选手动深度审计工具，已写入 SKILL.md 脚本一览（明确标注不在生成流水线内）。至此规则体系收敛为：`template_config.json` → `rules`（活跃，check_svg 执行）+ svg_quality_checker 自带审计规则（可选）两处，config.py 不再承载规则。
+
+**决策批沙箱回归**：T19 M-4 溢出用例在 fast 报 ERROR ✅ / T20 稀疏页 fast 报"内容严重不足" ✅ / T21 骨架 6 页 fast 零误报（转正关键风险排除）✅ / T22 region 块带 `region="1"` 元数据且豁免生效 ✅ / T23 config.py 手术后导入链完整、SVG_CONSTRAINTS 已删、CANVAS_FORMATS 8 项无损 ✅ / 无模板+有模板双轮全链路 batch ok、导出 exit 0 零 Traceback、PPTX 正常 ✅
+
+**至此全部 28 项规格 + 3 项决策落地完毕，无遗留代码项。**

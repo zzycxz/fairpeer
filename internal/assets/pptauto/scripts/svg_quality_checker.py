@@ -32,6 +32,19 @@ except ImportError:
     ErrorHelper = None
 
 try:
+    from text_utils import normalize_color as _normalize_color
+except ImportError:
+    import os as _os
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    if _here not in sys.path:
+        sys.path.insert(0, _here)
+    try:
+        from text_utils import normalize_color as _normalize_color
+    except ImportError:
+        def _normalize_color(c):
+            return c.upper() if isinstance(c, str) else ""
+
+try:
     from update_spec import parse_lock as _parse_spec_lock
 except ImportError:
     _parse_spec_lock = None  # spec_lock drift check will be skipped
@@ -821,11 +834,13 @@ class SVGQualityChecker:
         if lock is None:
             return
 
-        # Build allow-sets from the lock
+        # Build allow-sets from the lock. normalize_color (S-18) so a lock's
+        # short hex (#FFF) or named color (white) matches the SVG's spelling.
         allowed_colors = set()
         for v in lock.get('colors', {}).values():
-            if HEX_VALUE_RE.fullmatch(v):
-                allowed_colors.add(v.upper())
+            norm = _normalize_color(v)
+            if norm.startswith('#'):
+                allowed_colors.add(norm)
 
         typo = lock.get('typography', {})
         numeric_size_re = re.compile(r'^(?:\d+(?:\.\d+)?|\.\d+)$')
@@ -875,13 +890,15 @@ class SVGQualityChecker:
                 except (ValueError, TypeError):
                     body_px = None
 
-        # Scan SVG for used values
+        # Scan SVG for used values. Hex AND common named colors are captured,
+        # both normalized (S-18: #FFF == #FFFFFF, white == #FFFFFF).
         color_drifts = set()
         for attr in ('fill', 'stroke', 'stop-color'):
-            pattern = re.compile(rf'\b{attr}\s*=\s*["\'](#[0-9A-Fa-f]{{3,8}})["\']')
+            pattern = re.compile(
+                rf'\b{attr}\s*=\s*["\'](#[0-9A-Fa-f]{{3,8}}|[A-Za-z]+)["\']')
             for m in pattern.finditer(content):
-                val = m.group(1).upper()
-                if val not in allowed_colors:
+                val = _normalize_color(m.group(1))
+                if val and val not in allowed_colors:
                     color_drifts.add(val)
 
         font_drifts = set()

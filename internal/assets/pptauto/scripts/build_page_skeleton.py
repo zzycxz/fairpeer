@@ -51,20 +51,21 @@ except ImportError:
 if configure_utf8_stdio is not None:
     configure_utf8_stdio()
 
+try:
+    from text_utils import cjk_char_units as cjk_w, estimate_text_width as text_width
+except ImportError:
+    def cjk_w(ch):
+        return 1.0 if ord(ch) > 0x2E80 else 0.55
+
+    def text_width(s, fs):
+        return sum(cjk_w(c) for c in s) * fs
+
 CANVAS_W, CANVAS_H = 1280, 720
 MARGIN_X = 50
 TITLE_Y = 56
 CONTENT_TOP = 180
 
 PAGE_TYPES = ("cover", "toc", "section", "cards", "columns", "bullets", "ending")
-
-
-def cjk_w(ch):
-    return 1.0 if ord(ch) > 0x2E80 else 0.55
-
-
-def text_width(s, fs):
-    return sum(cjk_w(c) for c in s) * fs
 
 
 def wrap_text(s, fs, max_units):
@@ -132,6 +133,8 @@ class Page:
         self.f = f
         self.el = []
         self.dropped = 0
+        self.meta = {}   # D-03: 嵌入 <metadata><ppt-auto .../></metadata>
+        self.region = None  # D-06: [x, y, w, h] 复合布局区域
 
     def text(self, x, y, content, size, color, anchor="start", weight=""):
         w = ' font-weight="%s"' % weight if weight else ""
@@ -170,9 +173,25 @@ class Page:
                            % (CANVAS_W, CANVAS_H, self.s["background"]))
 
     def svg(self):
+        head = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d">\n'
+                % (CANVAS_W, CANVAS_H))
+        meta = ""
+        if self.meta:  # D-03: check_svg 与后续工具优先读它判断页型
+            attrs = " ".join('%s="%s"' % (k.replace("_", "-"), esc(str(v)))
+                             for k, v in self.meta.items())
+            meta = "<metadata><ppt-auto %s/></metadata>\n" % attrs
+        if self.region:
+            # D-06 复合布局：整页内容经线性变换映射进目标区域——等价于把
+            # 1280×720 的排版缩放进 region 的视口，生成器布局逻辑零改动，
+            # 多个 region 拼装时天然不重叠、不留缝。区域模式不画背景
+            # （整页背景由拼装方统一处理）。
+            rx, ry, rw, rh = self.region
+            body = ('<g transform="translate(%g,%g) scale(%.5f,%.5f)">\n%s\n</g>\n'
+                    % (rx, ry, rw / float(CANVAS_W), rh / float(CANVAS_H),
+                       "\n".join(self.el)))
+            return head + meta + body + "</svg>\n"
         self.background()
-        return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d">\n'
-                % (CANVAS_W, CANVAS_H)) + "\n".join(self.el) + "\n</svg>\n"
+        return head + meta + "\n".join(self.el) + "\n</svg>\n"
 
 
 def build_cover(p, spec):
@@ -330,6 +349,10 @@ def main():
                     help="autofit_fontsize.py 输出 JSON 路径（S-01：覆盖 config font_sizes；"
                          "pages.json 每页 fonts 仍最高优先）。Step 5 生成："
                          "autofit_fontsize.py ... > <project>/output/autofit_result.json")
+    ap.add_argument("--region", default=None,
+                    help="复合布局（D-06）：x,y,w,h——整页内容线性映射进该区域（不画背景），"
+                         "多个 region 的输出由 LLM 拼装成整页；pages.json 每页可用 "
+                         "\"region\": [x,y,w,h] 单独指定")
     args = ap.parse_args()
 
     raw = sys.stdin.read() if args.pages_json == "-" else open(args.pages_json, "r", encoding="utf-8").read()
@@ -346,6 +369,18 @@ def main():
             print(f"[build_page_skeleton] WARN: cannot read --autofit {args.autofit}: {e}",
                   file=sys.stderr)
 
+    cli_region = None
+    if args.region:
+        try:
+            vals = [float(v) for v in args.region.split(",")]
+            if len(vals) == 4 and all(v >= 0 for v in vals):
+                cli_region = vals
+            else:
+                raise ValueError("need x,y,w,h")
+        except ValueError as e:
+            print(f"[build_page_skeleton] WARN: bad --region {args.region!r} ({e}); ignored",
+                  file=sys.stderr)
+
     svg_dir = os.path.join(args.project, "svg_output")
     os.makedirs(svg_dir, exist_ok=True)
 
@@ -356,6 +391,14 @@ def main():
             out_pages.append({"index": i, "type": ptype, "error": "unknown type (skipped)"})
             continue
         p = Page(style, spec.get("fonts"), autofit=autofit_data)
+        p.meta = {"page_type": ptype, "slide_number": i}  # D-03
+        region = spec.get("region") or cli_region
+        if isinstance(region, (list, tuple)) and len(region) == 4:
+            try:
+                p.region = [float(v) for v in region]  # D-06
+                p.meta["region"] = 1  # 拼装块标记：check_svg 豁免整页内容底线
+            except (TypeError, ValueError):
+                pass
         BUILDERS[ptype](p, spec)
         # Default name carries the type suffix: keeps slide_* sort order (and
         # svg_to_pptx/QA pairing) while check_svg's filename heuristics exempt
@@ -365,6 +408,8 @@ def main():
         with open(path, "w", encoding="utf-8") as f:
             f.write(p.svg())
         entry = {"index": i, "type": ptype, "out": name}
+        if p.region:
+            entry["region"] = p.region
         n_texts = sum(1 for e in p.el if e.startswith("<text"))
         if ptype in ("cover", "ending") and n_texts < 3:
             entry["warning"] = "sparse page has <3 texts (checker floor even for cover/ending) — add subtitle/footer"

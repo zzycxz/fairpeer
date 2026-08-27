@@ -135,7 +135,7 @@ read_file ~/.fairpeer/reference-style.json
 ```
 
 - **CONTENT**：参考图文字内容（若用户要"照这个内容"，以此为准）
-- **LAYOUT**：版式 + 内容密度（选 `references/layout_templates.md` 对应布局，密度指导元素数）
+- **LAYOUT**：版式 + 内容密度（选 `references/layout_templates.md` 对应布局，密度指导元素数）。LAYOUT 段末尾可能带一个 ```json regions``` 块（`[{"type","bbox":[x,y,w,h],"content"}]`，0-1280×0-720 粗略像素估算）——定位元素时优先参考 bbox，没有就按文字描述估
 - **FORMAT**：字号相对比例（标题/正文 谁大谁小，喂字号选择）
 - **DESIGN**：颜色/风格（辅助；精确颜色仍以 `template_config.json` 为准）
 
@@ -239,11 +239,26 @@ python3 <skill_dir>/scripts/build_page_skeleton.py <project_dir>/pages.json --pr
 
 有参考图时传 `--autofit`（Step 3 落盘的字号结果）；字号链：config `font_sizes` < `--autofit` < pages.json 每页 `fonts`。
 
+**复合布局（D-06）**：一页要拼两种骨架（如上 60% 时间线 + 下 40% 卡片）时，每块单独生成再拼装——骨架内容会经线性变换缩放进目标区域，各块天然不重叠：
+
+```bash
+# 块 A：上半部（0,0,1280,432）
+python3 <skill_dir>/scripts/build_page_skeleton.py <project_dir>/pages_a.json --project <project_dir> --region 0,0,1280,432
+# 块 B：下半部（0,432,1280,288），或每页 spec 里写 "region": [0,432,1280,288]
+```
+
+拼装：新建整页 SVG（含全屏背景 rect，规则 1），把各块文件里 `<g transform=...>...</g>` 的内容原样并入；各块先单独 check 再拼，拼好的整页跑 fast 模式 check（深度检查按原始坐标算，跨块会误报）。
+
 一次调用生成所有骨架页（输出 `slide_NN_<type>.svg`，保持页序）。生成器读 template_config.json 自动执行配色/半透明卡片/背景规则/字体链，图标用规则 14 的占位符，文字自动换行——**你不需要管坐标**。JSON 摘要会报 `lines_dropped`（spec 太长装不下，删行后重新生成）和稀疏页警告（封面/结尾给足 title+subtitle+footer 三条文字）。生成后可用 edit_file 微调个别页，再跑批量检查。
 
 **兜底：手写 SVG**（骨架覆盖不了的定制版式）。每页写入 `<project_dir>/svg_output/slide_NN.svg`…。
 
 每页 SVG 必须：
+
+0. **嵌入页型元数据**（check_svg 优先读它判断封面/章节/结尾豁免，文件名只是兜底）：
+   ```xml
+   <metadata><ppt-auto page-type="cards" slide-number="4"/></metadata>
+   ```
 
 1. **背景**（取决于 Step 0 是否有模板）：
    - **有模板**（`~/.fairpeer/ppt-template.pptx` 存在）：**不要画任何全屏背景**（不要 rect、不要 image）。模板的背景/渐变/装饰/logo 会通过 PPTX layout 继承自动透出。SVG 只画内容（卡片、文字、图标）。画全屏 rect 会盖住模板背景！check_svg.py 会报错。
@@ -296,10 +311,10 @@ python3 <skill_dir>/scripts/batch_check.py <project_dir>
 ```
 
 检查模式由 `template_config.json` 的 `mode` 字段控制（设置面板的"快速/校验模式"可切换）：
-- `fast`：只跑基础检查（XML 格式、背景规则、禁止元素）——快
-- `validate`：全量检查（额外检查密度/溢出/重叠/覆盖/对齐）——全面。WARN 是建议性的，不阻止流程
+- `fast`：基础检查（XML 格式、背景规则、禁止元素/模式）+ **核心内容检查**（内容硬底线：非封面/章节/结尾页 <5 段文字即 ERROR；文字超出画布；文字压字）——快而兜底，空页/溢出页不会再静默出厂
+- `validate`：额外检查密度建议/垂直与空间覆盖/对齐/间距——全面。WARN 是建议性的，不阻止流程
 
-batch 摘要末尾列出 ERROR 页（exit code 2）——**只修列出的页**，改完对该页单独复检：
+batch 的 **stdout 是一个 JSON 对象**（`failed` 列出 ERROR 页，`skipped_legacy` 列出未处理的旧格式页；exit code 2 = 有 ERROR）——解析 JSON 而不是读文本；人类可读的逐页报告走 stderr。**只修 `failed` 列出的页**，改完对该页单独复检：
 
 ```bash
 python3 <skill_dir>/scripts/fix_svg.py <project_dir>/svg_output/slide_05.svg <project_dir>/svg_output/slide_05.svg
@@ -478,6 +493,7 @@ exit 2 或 `ok: false` → 按 `missing` 清单补回丢失文字后重查，**�
 | build_page_skeleton.py | 纯 Python（pages.json → 骨架页 SVG，7 种类型） |
 | extract_content.py | 纯 Python |
 | qa_compare.py | 纯 Python（需 cairosvg；VLM 访问读 fairpeer 配置） |
+| svg_quality_checker.py | 纯 Python（**可选**手动深度审计：spec_lock 漂移/字号层级/逐元素检查；不在生成流水线内，需要逐项审计报告时手动跑） |
 | analyze_pdf_pages.py | 纯 Python（需 PyMuPDF；VLM 访问读 fairpeer 配置） |
 | crop_ref_region.py | 纯 Python（需 Pillow） |
 | build_table_skeleton.py | 纯 Python |
