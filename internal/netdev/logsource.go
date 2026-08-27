@@ -255,29 +255,38 @@ func logPathReadOverride(d config.NetDevDevice, drv driver.Driver, command strin
 		return driver.Unknown, false
 	}
 	roots := LogAllowedRoots(d)
-	pathTokens, extra := 0, 0
-	for _, f := range fields[1:] {
-		switch {
-		case strings.HasPrefix(f, "/"):
-			pathTokens++
-			if !logPathAllowed(f, roots) {
-				return driver.Unknown, false
-			}
-		case strings.HasPrefix(f, "-"):
-			// flag — fine
-		default:
-			extra++ // a bare word: grep's pattern, or something we refuse to guess at
-		}
-	}
-	// Exactly one path argument: two "/"-tokens is either a grep with a
-	// pattern that looks like a path or multiple files — refuse both. Only
-	// grep may carry one bare word (the pattern); tail/head/wc take flags and
-	// one path, nothing else.
-	if pathTokens != 1 {
+	// The path must be the FINAL token — the actual grammar of
+	// `tail -n 100 PATH` and `grep [-flags] PATTERN PATH`. Between the verb
+	// and it: flags (leading -), grep's single pattern word, and numeric
+	// arguments (-n's count) for the tail/head/wc family.
+	if last := fields[len(fields)-1]; !strings.HasPrefix(last, "/") || !logPathAllowed(last, roots) {
 		return driver.Unknown, false
+	}
+	extra := 0
+	for _, f := range fields[1 : len(fields)-1] {
+		switch {
+		case strings.HasPrefix(f, "-"):
+			// flag
+		case isAllDigits(f):
+			// -n's numeric argument
+		default:
+			extra++ // a bare word: at most one, and only as grep's pattern
+		}
 	}
 	if extra > 0 && (fields[0] != "grep" || extra > 1) {
 		return driver.Unknown, false
 	}
 	return driver.Read, true
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
