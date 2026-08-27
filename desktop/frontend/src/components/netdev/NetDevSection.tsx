@@ -3,6 +3,8 @@ import { app } from "../../lib/bridge";
 import { useConfirm } from "../../lib/confirm";
 import { useToast } from "../../lib/toast";
 import type {
+  NetDevAlertRuleView,
+  NetDevDBSourceView,
   NetDevPresetView,
   NetDevProjectView,
   NetDevSettingsView,
@@ -38,7 +40,7 @@ type SubTab = "inventory" | "guardrails" | "sites" | "advanced";
 const emptyDevice = (): EditDevice => ({
   name: "", vendor: "huawei", os: "vrp8", model: "", address: "", port: 22,
   via: [], group: "", username: "", passwordEnv: "", passwordSet: false,
-  identityFile: "", encoding: "auto", allowTelnet: false, password: "", logPaths: [],
+  identityFile: "", encoding: "auto", allowTelnet: false, password: "", logPaths: [], protocols: [], snmpVersion: "", snmpCommunityEnv: "", snmpCommunitySet: false, snmpCommunity: "",
 });
 
 const emptyHop = (): EditHop => ({
@@ -52,9 +54,11 @@ export function NetDevSection() {
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {}, projects: [], presets: [], inspectionInterval: "", backupInterval: "" });
+  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {}, projects: [], presets: [], inspectionInterval: "", backupInterval: "", dbSources: [], pollIntervalSeconds: 0, alertRules: [], syslogPort: 0, defaultMode: "", maxSessionsPerDevice: 0, discoveryRate: 0, discoveryMode: "", probeFallback: "", groupDefs: [] });
   const [sub, setSub] = useState<SubTab>("inventory");
   const [editingDevice, setEditingDevice] = useState<EditDevice | null>(null);
+  const [editingDB, setEditingDB] = useState<NetDevDBSourceView | null>(null);
+  const [editingRule, setEditingRule] = useState<NetDevAlertRuleView | null>(null);
   const [editingHop, setEditingHop] = useState<EditHop | null>(null);
   const [editingProject, setEditingProject] = useState<{ draft: NetDevProjectView; index: number } | null>(null);
   const [editingPreset, setEditingPreset] = useState<{ draft: NetDevPresetView; index: number } | null>(null);
@@ -141,18 +145,18 @@ export function NetDevSection() {
         <h2 className="settings-page__title">运维</h2>
         <p className="settings-page__desc">
           设备清单与凭证存于用户全局配置（项目级 fairpeer.toml 注入无效）；密码只写入加密密钥库，绝不进 TOML。
-          诊断手结构性只读：写/危险命令一律拒执行并落审计。
+          诊断能力结构性只读：写/危险命令一律拒执行并落审计。
         </p>
       </div>
 
       {err && <div className="banner banner--error" style={{ marginBottom: 8 }}>{err}</div>}
 
-      <div className="optional-module__controls" style={{ marginBottom: 12 }}>
+      <div className="optional-module__controls optional-module__controls--inline" style={{ marginBottom: 12 }}>
         <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input type="checkbox" checked={view.enabled} onChange={e => patch({ enabled: e.target.checked })} />
           启用运维（netdev）能力
         </label>
-        <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: 16 }}>
+        <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
           网络名称
           <input className="mem-input" style={{ width: 180 }} value={view.networkName ?? ""} placeholder="如：总部生产网" onChange={e => patch({ networkName: e.target.value })} />
         </label>
@@ -242,7 +246,7 @@ export function NetDevSection() {
             desc="跳板只能人工注册——探测结果永远不会自动晋升为路由。"
             actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingHop(emptyHop())}>+ 添加跳板</span>}
           >
-            {view.hops.length === 0 && <div className="mem-hint">暂无跳板。设备直连即可。</div>}
+            {view.hops.length === 0 && <div className="mem-hint">暂无跳板。大多数设备直连即可——只有需要先登录堡垒机再跳转时才配置。</div>}
             {view.hops.map(h => (
               <div key={h.name} className="mem-hint" style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
                 <span style={{ minWidth: 160 }}>{h.name} → {h.host}{h.proxyJump ? `（经 ${h.proxyJump}）` : ""}</span>
@@ -300,6 +304,23 @@ export function NetDevSection() {
               placeholder="例：10.30.0.0/16, 10.31.0.0/16"
               onChange={e => patch({ scopes: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })}
             />
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8, fontSize: 12, alignItems: "center" }}>
+              <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                发现模式
+                <select className="mem-select" value={view.discoveryMode || "auto"}
+                  onChange={e => patch({ discoveryMode: e.target.value })}>
+                  <option value="auto">auto</option>
+                  <option value="tunnel">tunnel</option>
+                  <option value="probe">probe</option>
+                </select>
+              </label>
+              <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                并发上限
+                <input className="mem-input" type="number" style={{ width: 70 }} placeholder="0=默认"
+                  value={view.discoveryRate ?? 0}
+                  onChange={e => patch({ discoveryRate: Math.max(0, Number(e.target.value) || 0) })} />
+              </label>
+            </div>
           </Section>
 
           <Section title="读表扩展" desc="用户教会 AI 识别更多只读命令——模型永远不能自我声明。">
@@ -400,7 +421,102 @@ export function NetDevSection() {
                   value={view.backupInterval ?? ""}
                   onChange={e => patch({ backupInterval: e.target.value })} />
               </label>
+              <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                SNMP 健康轮询
+                <input className="mem-input" type="number" style={{ width: 90 }} placeholder="秒，0=关"
+                  value={view.pollIntervalSeconds ?? 0}
+                  onChange={e => patch({ pollIntervalSeconds: Math.max(0, Number(e.target.value) || 0) })} />
+              </label>
+              <div className="mem-hint">轮询所有带 [snmp] 块的设备（可达性/uptime/接口状态）→ 运维页「健康」页卡。设备编辑表单里配团体字。</div>
+              <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                syslog 接收端口
+                <input className="mem-input" type="number" style={{ width: 90 }} placeholder="0=关，如 5140"
+                  value={view.syslogPort ?? 0}
+                  onChange={e => patch({ syslogPort: Math.max(0, Number(e.target.value) || 0) })} />
+              </label>
+              <div className="mem-hint">设备 syslog 指向本机该端口（UDP）；按设备聚合进「日志」页卡的 syslog 源，链路翻动/认证失败等模式自动升级为发现。改端口需重启应用。</div>
+              <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                默认模式
+                <select className="mem-select" value={view.defaultMode || "diagnose"}
+                  onChange={e => patch({ defaultMode: e.target.value })}>
+                  <option value="diagnose">diagnose（诊断）</option>
+                  <option value="assess">assess（评估）</option>
+                </select>
+              </label>
+              <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                每设备最大会话数
+                <input className="mem-input" type="number" style={{ width: 70 }} placeholder="0=默认"
+                  value={view.maxSessionsPerDevice ?? 0}
+                  onChange={e => patch({ maxSessionsPerDevice: Math.max(0, Number(e.target.value) || 0) })} />
+              </label>
             </div>
+          </Section>
+
+          <Section
+            title="分组策略"
+            desc="分组的提案策略与维护窗口：窗口外的写提案需二次确认或拒绝；read-only 组的写提案直接拒绝。"
+          >
+            {(() => {
+              const defs = view.groupDefs && view.groupDefs.length > 0
+                ? view.groupDefs
+                : [...new Set((view.devices ?? []).map(d => d.group).filter(Boolean))].map(n => ({ name: n, policy: "", changeWindow: "" }));
+              if (defs.length === 0) return <div className="mem-hint">还没有分组——设备编辑里给设备填分组后，这里可配策略与维护窗口。</div>;
+              return defs.map((g, i) => (
+                <div key={g.name} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, marginBottom: 6 }}>
+                  <span style={{ minWidth: 90, fontWeight: 600 }}>{g.name}</span>
+                  <select className="mem-select" style={{ width: 170 }} value={g.policy || "read-only"}
+                    onChange={e => patch({ groupDefs: defs.map((x, j) => j === i ? { ...x, policy: e.target.value } : x) })}>
+                    <option value="read-only">read-only（拒绝写提案）</option>
+                    <option value="proposal">proposal（人工签核）</option>
+                    <option value="proposal+confirm2">proposal+confirm2（二次确认）</option>
+                  </select>
+                  <input className="mem-input" style={{ flex: 1 }} placeholder="维护窗口，如 tue,thu 22:00-24:00，空=不限"
+                    value={g.changeWindow ?? ""}
+                    onChange={e => patch({ groupDefs: defs.map((x, j) => j === i ? { ...x, changeWindow: e.target.value } : x) })} />
+                </div>
+              ));
+            })()}
+          </Section>
+
+          <Section
+            title="告警规则"
+            desc="健康轮询的阈值规则：命中自动生成「发现」（带告警中徽标），条件清除后自动标记已恢复；也可在发现卡手动标记已处理。"
+            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingRule({ name: "", metric: "reachable", op: "==", value: 0, severity: "warning", enabled: true })}>添加规则</span>}
+          >
+            {(view.alertRules ?? []).length === 0 && (
+              <div className="mem-hint">还没有规则。常用：「设备不可达」（reachable == 0, critical）、「接口掉线 ≥1」（if_down_count &gt;= 1, warning）、「设备重启」（uptime_reset == 1, warning）。</div>
+            )}
+            {(view.alertRules ?? []).map((r, i) => (
+              <div key={r.name} className="ndv__device">
+                <span className={`ndv__dot ${r.enabled ? "ndv__dot--ok" : "ndv__dot--down"}`} />
+                <span className="ndv__device-name">{r.name}</span>
+                <span className="ndv__device-addr">{r.metric} {r.op} {r.value} · {r.severity}</span>
+                <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: "auto" }}
+                  onClick={() => setEditingRule({ ...r })}>编辑</span>
+                <span className="btn btn--secondary btn--small" role="button"
+                  onClick={() => patch({ alertRules: (view.alertRules ?? []).filter((_, j) => j !== i) })}>删除</span>
+              </div>
+            ))}
+          </Section>
+
+          <Section
+            title="数据库源（只读诊断）"
+            desc="连接数/慢查询/主从延迟类诊断。硬边界有两条：账号本身必须只读授权；白名单是精确语句（如 SHOW PROCESSLIST），不含的语句在连接前即被拒绝。"
+            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDB({ name: "", type: "mysql", host: "", port: 3306, username: "", passwordEnv: "", passwordSet: false, database: "", allowlist: ["SHOW PROCESSLIST"], password: "" })}>添加源</span>}
+          >
+            {(view.dbSources ?? []).length === 0 && (
+              <div className="mem-hint">还没有数据库源。密码进加密存储，白名单语句逐条列出（一行一条）。</div>
+            )}
+            {(view.dbSources ?? []).map((s, i) => (
+              <div key={s.name} className="ndv__device">
+                <span className="ndv__device-name">{s.name}</span>
+                <span className="ndv__device-addr">{s.type} · {s.host}{s.passwordSet ? " · 密码已存" : ""}</span>
+                <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: "auto" }}
+                  onClick={() => setEditingDB({ ...s, password: "" })}>编辑</span>
+                <span className="btn btn--secondary btn--small" role="button"
+                  onClick={() => patch({ dbSources: (view.dbSources ?? []).filter((_, j) => j !== i) })}>删除</span>
+              </div>
+            ))}
           </Section>
         </>
       )}
@@ -482,6 +598,22 @@ export function NetDevSection() {
                 onChange={e => setEditingDevice({ ...editingDevice, logPaths: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })}
               />
             </Field>
+            <Field label="SNMP（健康轮询）">
+              <select className="mem-select" value={editingDevice.snmpVersion ?? ""}
+                onChange={e => setEditingDevice({ ...editingDevice, snmpVersion: e.target.value })}>
+                <option value="">（不启用）</option>
+                <option value="v2c">v2c</option>
+              </select>
+            </Field>
+            <Field label={editingDevice.snmpCommunitySet ? "SNMP 团体字（留空=保持不变）" : "SNMP 团体字"}>
+              <input className="mem-input" type="password" value={editingDevice.snmpCommunity ?? ""}
+                onChange={e => setEditingDevice({ ...editingDevice, snmpCommunity: e.target.value })} />
+            </Field>
+            <Field label="协议优先级（逗号分隔）">
+              <input className="mem-input" placeholder="ssh, telnet, netconf"
+                value={(editingDevice.protocols ?? []).join(", ")}
+                onChange={e => setEditingDevice({ ...editingDevice, protocols: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })} />
+            </Field>
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <span
@@ -500,6 +632,99 @@ export function NetDevSection() {
                 void save({ ...view, devices });
               }}
             >保存设备</span>
+          </div>
+        </Modal>
+      )}
+
+      {/* 数据库源编辑表单 */}
+      {editingDB && (
+        <Modal title={view.dbSources?.some(s => s.name === editingDB.name) ? "编辑数据库源" : "添加数据库源"} onClose={() => setEditingDB(null)}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <Field label="名称 *"><input className="mem-input" value={editingDB.name} onChange={e => setEditingDB({ ...editingDB, name: e.target.value })} /></Field>
+            <Field label="类型">
+              <select className="mem-select" value={editingDB.type} onChange={e => {
+                const t = e.target.value;
+                setEditingDB({ ...editingDB, type: t, port: t === "mysql" ? 3306 : t === "postgres" ? 5432 : 6379 });
+              }}>
+                {["mysql", "postgres", "redis"].map(x => <option key={x} value={x}>{x}</option>)}
+              </select>
+            </Field>
+            <Field label="地址 *"><input className="mem-input" value={editingDB.host} onChange={e => setEditingDB({ ...editingDB, host: e.target.value })} /></Field>
+            <Field label="端口"><input className="mem-input" type="number" value={editingDB.port} onChange={e => setEditingDB({ ...editingDB, port: Number(e.target.value) || 3306 })} /></Field>
+            <Field label="只读账号 *"><input className="mem-input" value={editingDB.username} onChange={e => setEditingDB({ ...editingDB, username: e.target.value })} /></Field>
+            <Field label={editingDB.passwordSet ? "密码（留空=保持不变）" : "密码"}>
+              <input className="mem-input" type="password" value={editingDB.password} onChange={e => setEditingDB({ ...editingDB, password: e.target.value })} />
+            </Field>
+            <Field label="默认库（可空）"><input className="mem-input" value={editingDB.database} onChange={e => setEditingDB({ ...editingDB, database: e.target.value })} /></Field>
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <div className="set-label" style={{ marginBottom: 4 }}>语句白名单（一行一条，精确语句——这是硬边界）</div>
+            <textarea
+              className="mem-input" rows={5} style={{ width: "100%", fontFamily: "var(--font-mono, monospace)", fontSize: 11.5 }}
+              placeholder={editingDB.type === "redis" ? "redis 无需白名单（内置只读诊断命令集）" : "SHOW PROCESSLIST\nSHOW ENGINE INNODB STATUS\nSELECT * FROM information_schema.processlist"}
+              value={(editingDB.allowlist ?? []).join("\n")}
+              onChange={e => setEditingDB({ ...editingDB, allowlist: e.target.value.split("\n").map(s => s.trim()).filter(Boolean) })}
+            />
+          </div>
+          <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDB(null)}>取消</span>
+            <span
+              className="btn btn--primary btn--small" role="button"
+              onClick={() => {
+                if (!editingDB.name.trim() || !editingDB.host.trim()) { setErr("名称和地址必填"); return; }
+                if (editingDB.type !== "redis" && (editingDB.allowlist ?? []).length === 0) { setErr("mysql/postgres 源至少一条白名单语句"); return; }
+                const exists = (view.dbSources ?? []).some(s => s.name === editingDB.name);
+                const dbSources = exists ? (view.dbSources ?? []).map(s => s.name === editingDB.name ? editingDB : s) : [...(view.dbSources ?? []), editingDB];
+                setEditingDB(null);
+                void save({ ...view, dbSources });
+              }}
+            >保存源</span>
+          </div>
+        </Modal>
+      )}
+
+      {/* 告警规则编辑表单 */}
+      {editingRule && (
+        <Modal title={(view.alertRules ?? []).some(r => r.name === editingRule.name) ? "编辑告警规则" : "添加告警规则"} onClose={() => setEditingRule(null)}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <Field label="名称 *"><input className="mem-input" value={editingRule.name} onChange={e => setEditingRule({ ...editingRule, name: e.target.value })} /></Field>
+            <Field label="指标">
+              <select className="mem-select" value={editingRule.metric} onChange={e => setEditingRule({ ...editingRule, metric: e.target.value, value: e.target.value === "reachable" || e.target.value === "uptime_reset" ? 0 : 1 })}>
+                <option value="reachable">设备可达（1=在线 0=不可达）</option>
+                <option value="if_down_count">掉线接口数</option>
+                <option value="uptime_reset">重启检测（uptime 回绕）</option>
+              </select>
+            </Field>
+            <Field label="比较">
+              <select className="mem-select" value={editingRule.op || ">="} onChange={e => setEditingRule({ ...editingRule, op: e.target.value })}>
+                {["==", ">=", "<="].map(x => <option key={x} value={x}>{x}</option>)}
+              </select>
+            </Field>
+            <Field label="阈值"><input className="mem-input" type="number" value={editingRule.value} onChange={e => setEditingRule({ ...editingRule, value: Number(e.target.value) || 0 })} /></Field>
+            <Field label="严重度">
+              <select className="mem-select" value={editingRule.severity || "warning"} onChange={e => setEditingRule({ ...editingRule, severity: e.target.value })}>
+                {["info", "warning", "critical"].map(x => <option key={x} value={x}>{x}</option>)}
+              </select>
+            </Field>
+            <Field label="启用">
+              <select className="mem-select" value={editingRule.enabled ? "1" : "0"} onChange={e => setEditingRule({ ...editingRule, enabled: e.target.value === "1" })}>
+                <option value="1">启用</option>
+                <option value="0">停用</option>
+              </select>
+            </Field>
+          </div>
+          <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingRule(null)}>取消</span>
+            <span
+              className="btn btn--primary btn--small" role="button"
+              onClick={() => {
+                if (!editingRule.name.trim()) { setErr("规则名必填"); return; }
+                const exists = (view.alertRules ?? []).some(r => r.name === editingRule.name);
+                const alertRules = exists ? (view.alertRules ?? []).map(r => r.name === editingRule.name ? editingRule : r) : [...(view.alertRules ?? []), editingRule];
+                setEditingRule(null);
+                void save({ ...view, alertRules });
+              }}
+            >保存规则</span>
           </div>
         </Modal>
       )}

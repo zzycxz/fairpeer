@@ -1213,9 +1213,12 @@ export interface ProviderView {
   apiKeyEnv: string;
   keySet: boolean; // the env var currently resolves to a value
   contextWindow: number;
-  reasoningProtocol: string; // auto|openai|none; empty = auto/model registry
+  reasoningProtocol: string; // auto|openai|minimax|none; empty = auto (endpoint auto-detect)
   supportedEfforts: string[]; // custom /effort levels; empty = use built-in Kind/BaseURL default
   defaultEffort: string; // /effort level when user picks "auto" or unset; "" = supportedEfforts[0]
+  // models.dev-flagged reasoning-capable models among `models` — display-only
+  // badge in pickers (MODEL_ROUTING_SPEC §5); the behaviour layer never reads it.
+  reasoningModels?: string[];
 }
 
 // ProviderTemplate is a built-in vendor preset for the onboarding wizard and
@@ -1237,6 +1240,7 @@ export interface ProviderTemplate {
   category: string; // "direct" | "aggregator" | "local"
   docUrl: string; // where to get an API key
   models: string[]; // preset model list (fallback when probe fails)
+  reasoningModels?: string[]; // models.dev-flagged reasoning-capable model IDs (display-only)
 }
 
 // RegistryStatus reports the provider-template registry freshness for Settings.
@@ -1682,6 +1686,13 @@ export interface NetDevDeviceView {
   allowTelnet: boolean;
   // Extra log-directory whitelist roots (outside /var/log) for log-source reads.
   logPaths: string[];
+  // Dial-priority order (ssh, telnet, netconf).
+  protocols?: string[];
+  // SNMP collector credentials (community write-only, blank = keep).
+  snmpVersion?: string;
+  snmpCommunityEnv?: string;
+  snmpCommunitySet?: boolean;
+  snmpCommunity?: string;
   password?: string;
 }
 
@@ -1718,6 +1729,108 @@ export interface NetDevSettingsView {
   backupInterval: string;
   // Named diagnostic batteries for the device card.
   presets: NetDevPresetView[];
+  // Read-only database diagnostic endpoints (netdev_db_query).
+  dbSources: NetDevDBSourceView[];
+  // SNMP health sweep cadence (seconds; 0 = off).
+  pollIntervalSeconds: number;
+  // Health threshold rules → auto-Findings.
+  alertRules: NetDevAlertRuleView[];
+  // Passive syslog UDP receiver port (0 = off).
+  syslogPort: number;
+  // P3 gap closure: previously TOML-only fields.
+  defaultMode: string;
+  maxSessionsPerDevice: number;
+  discoveryRate: number;
+  discoveryMode: string;
+  probeFallback: string;
+  groupDefs: NetDevGroupDefView[];
+}
+
+// One group's policy + maintenance window.
+export interface NetDevGroupDefView {
+  name: string;
+  policy: string;       // "" | read-only | proposal | proposal+confirm2
+  changeWindow: string; // e.g. "tue,thu 22:00-24:00"; "" = any time
+}
+
+// One [[netdev.alert_rules]] entry.
+export interface NetDevAlertRuleView {
+  name: string;
+  metric: string; // reachable | if_down_count | uptime_reset
+  op: string;     // >= | <= | ==
+  value: number;
+  severity: string; // info | warning | critical
+  enabled: boolean;
+}
+
+// Passive syslog receiver state.
+export interface NetDevSyslogStatusView {
+  listening: boolean;
+  port: number;
+  buffered: number;
+}
+
+// Audit hash-chain verification verdict (the 审计 tab badge).
+export interface NetDevAuditChainStatus {
+  total: number;
+  chained: number;
+  ok: boolean;
+  firstBroken?: string;
+}
+
+// One [[netdev.db_sources]] entry; password is write-only (blank = keep).
+export interface NetDevDBSourceView {
+  name: string;
+  type: string; // mysql | postgres | redis
+  host: string;
+  port: number;
+  username: string;
+  passwordEnv: string;
+  passwordSet: boolean;
+  database: string;
+  allowlist: string[];
+  password?: string;
+}
+
+// One sealed log read (netdev_log_read / App.NetDevLogRead).
+export interface NetDevExecResult {
+  device: string;
+  command: string;
+  class: string;
+  output: string;
+  is_error: boolean;
+  refused?: boolean;
+  refusal?: string;
+}
+
+// One streaming follow event ("netdev:logfollow" channel).
+export interface NetDevLogFollowEvent {
+  device: string;
+  source: string;
+  chunk?: string;
+  done?: boolean;
+  reason?: string;
+}
+
+// ── SNMP 健康快照 ("netdev:health" changes) ─────────────────────────────────
+export interface NetDevIfHealth {
+  name: string;
+  adminUp: boolean;
+  operUp: boolean;
+}
+
+export interface NetDevDeviceHealth {
+  device: string;
+  time: string;
+  reachable: boolean;
+  uptimeSec: number;
+  interfaces: NetDevIfHealth[];
+  lastError?: string;
+}
+
+export interface NetDevHealthSnapshot {
+  pollIntervalSeconds: number;
+  devices: NetDevDeviceHealth[];
 }
 
 export interface NetDevProjectView {
@@ -1840,6 +1953,11 @@ export interface NetDevFinding {
   evidence: NetDevFindingEvidence[];
   suggestion?: string;
   created_at: string;
+  // Auto-origin marker (alert:/syslog:) — such findings auto-resolve; the
+  // 发现 card offers a manual resolve button while status === "active".
+  source?: string;
+  status?: string; // "" | active | resolved
+  resolvedAt?: string;
 }
 
 export interface NetDevTopologyNode {

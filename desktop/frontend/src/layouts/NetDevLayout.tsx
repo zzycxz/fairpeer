@@ -1,11 +1,14 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { AlertTriangle, Activity, BookOpen, ClipboardCheck, Network, PanelLeft, ScanSearch, ScrollText, Server, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, Activity, BookOpen, CalendarClock, ClipboardCheck, FileText, HeartPulse, Network, PanelLeft, ScanSearch, ScrollText, Server, SlidersHorizontal } from "lucide-react";
 import { app } from "../lib/bridge";
 import { ProfileSegmented } from "../components/AppChrome";
 import { useConfirm } from "../lib/confirm";
 import { getActiveProject, setActiveProject, subscribeActiveProject, type NetDevProjectScope } from "../lib/netdevProjectStore";
 import { ProposalActions } from "../components/netdev/ProposalCenter";
 import { LiveOpsPanel } from "../components/netdev/LiveOpsPanel";
+import { LogPanel } from "../components/netdev/LogPanel";
+import { HealthPanel } from "../components/netdev/HealthPanel";
+import { JobsPanel } from "../components/netdev/JobsPanel";
 import { DockTabs, useDockTabState } from "../components/DockTabs";
 import type { NetDevSettingsView, NetDevFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph, NetDevBackupVersion } from "../lib/types";
 import { useT } from "../lib/i18n";
@@ -135,7 +138,7 @@ const REDFISH_QUICK: { label: string; path: string }[] = [
 ];
 
 type QuickResult = { command: string; output: string; isError: boolean; refused?: string; refusedUnknown?: boolean };
-type DockTab = "live" | "devices" | "context" | "topology" | "findings" | "proposals" | "audit";
+type DockTab = "live" | "devices" | "context" | "topology" | "findings" | "proposals" | "audit" | "logs" | "health" | "jobs";
 // Fresh installs open a curated set — 操作实况 leads (supervision first), the
 // rest join via the "+" dropdown or the bottom-nav entries on demand. Stored
 // state always wins after the user customizes.
@@ -149,7 +152,7 @@ const NETDEV_DOCK_TABS_LIVE_SEEDED = "fairpeer.netdevDockTabs.live-seeded";
 // ?dock=audit) so panels are screenshot-testable without driving the tab
 // strip first. ?live=1 stays as a ?dock=live alias. The open-tabs correction
 // effect OPENs this tab instead of correcting away from it.
-const DOCK_PARAM_KEYS: readonly string[] = ["live", "devices", "context", "topology", "findings", "proposals", "audit"];
+const DOCK_PARAM_KEYS: readonly string[] = ["live", "devices", "context", "topology", "findings", "proposals", "audit", "logs", "health", "jobs"];
 function dockParam(): DockTab | null {
   try {
     if (typeof window !== "undefined" && !window.runtime) {
@@ -484,6 +487,9 @@ export function NetDevLayout({
     { key: "findings", label: "发现", badge: scopedFindings.length || undefined, icon: <AlertTriangle size={13} /> },
     { key: "proposals", label: "提案", badge: pendingCount || undefined, icon: <ClipboardCheck size={13} /> },
     { key: "audit", label: "审计", icon: <ScrollText size={13} /> },
+    { key: "logs", label: "日志", icon: <FileText size={13} /> },
+    { key: "health", label: "健康", icon: <HeartPulse size={13} /> },
+    { key: "jobs", label: "作业", icon: <CalendarClock size={13} /> },
   ];
 
   // Active tab closed (or restored state desyncs) → fall back to the last
@@ -660,6 +666,12 @@ export function NetDevLayout({
 
         {tab === "live" && <LiveOpsPanel />}
 
+        {tab === "logs" && <LogPanel devices={settings?.devices ?? []} dbSources={settings?.dbSources ?? []} onInsertComposer={onInsertComposer} />}
+
+        {tab === "health" && <HealthPanel />}
+
+        {tab === "jobs" && <JobsPanel />}
+
         {tab === "devices" && (
           <div className="ndv__card">
             <div className="ndv__card-title">设备清单{project ? <span style={{ fontWeight: 400, fontSize: 11 }}> · {project.name}</span> : ""}（{devices.length}）</div>
@@ -667,7 +679,11 @@ export function NetDevLayout({
               <div className="ndv__meta">上次巡检：{lastInspection.title}（{String(lastInspection.created_at ?? "").slice(5, 16).replace("T", " ")}）</div>
             )}
             {devices.length === 0 && (
-              <div className="ndv__hint">还没有设备。「手册」页签的 开始使用 三步录入，或 设置 → 运维。</div>
+              <div className="ndv__empty">
+                <div className="ndv__empty-title">还没有设备</div>
+                <div className="ndv__empty-desc">录入设备后这里按分组展示全网资产——未录入的地址 AI 不可见、不可连。</div>
+                <span className="btn btn--primary btn--small" role="button" onClick={() => onOpenSettings("netdev")}>打开 设置 → 运维</span>
+              </div>
             )}
             {[...groups.entries()].map(([g, list]) => (
               <div key={g} className="ndv__group">
@@ -690,6 +706,7 @@ export function NetDevLayout({
                 ))}
               </>
             )}
+            {selected && <BackupTimeline device={selected} />}
           </div>
         )}
 
@@ -817,7 +834,7 @@ export function NetDevLayout({
               >{baseBusy ? "核查中…" : "安全基线核查"}</span>
             </div>
             {scopedFindings.length === 0 && <div className="ndv__hint ndv__hint--flush">{project ? `>> 项目「${project.name}」暂无数据。` : <>&gt;&gt; NULL_DATA: 证据池为空。Agent 诊断输出及全量巡检报告将在此落盘 (Enforced Evidence-Based)。</>}</div>}
-            {scopedFindings.slice(0, 20).map(f => <FindingRow key={f.id} f={f} />)}
+            {scopedFindings.slice(0, 20).map(f => <FindingRow key={f.id} f={f} onResolved={() => void reload()} />)}
           </div>
         )}
 
@@ -832,7 +849,7 @@ export function NetDevLayout({
 
         {tab === "audit" && (
           <div className="ndv__card">
-            <div className="ndv__card-title">审计（最近 {audit.length} 条）</div>
+            <div className="ndv__card-title">审计（最近 {audit.length} 条）<AuditChainBadge /></div>
             
             <div className="ndv__audit-stats">
               <span className="ndv__bottom-item"><span className="ndv__ok">今日只读</span> {readCount}</span>
@@ -840,16 +857,19 @@ export function NetDevLayout({
               <span className="ndv__bottom-item">
                 提案 {pendingCount > 0 ? <span className="ndv__warn">{pendingCount} 待处理</span> : <span className="ndv__zero">0</span>}
               </span>
-              <span className="ndv__bottom-note">结构性只读：写命令无执行路径 · 全量审计中</span>
             </div>
 
-            {audit.length === 0 && <div className="ndv__hint ndv__hint--flush" style={{ marginBottom: 8 }}>&gt;&gt; NULL_DATA: 还没有操作记录。每条设备命令（含拒绝）都会落审计。</div>}
             <div className="ndv__audit-scroll">
               <div className="ndv__audit-table">
                 <div className="ndv__audit-row ndv__audit-row--head">
                   <span>时间</span><span>设备</span><span>命令</span><span>分类</span><span>状态</span>
                 </div>
-                {audit.slice(0, 100).map((a, i) => (
+                {audit.length === 0 ? (
+                  <div className="ndv__audit-empty">
+                    还没有操作记录。<br />
+                    每条设备命令（含拒绝）都会在这里留下时间、命令与字节数。
+                  </div>
+                ) : audit.slice(0, 100).map((a, i) => (
                   <div key={`${a.time}-${i}`} className="ndv__audit-row" title={a.error || a.command}>
                     <span className="ndv__audit-time">{String(a.time ?? "").slice(11, 19) || String(a.time ?? "").slice(5, 16)}</span>
                     <span className="ndv__audit-dev">{a.device}</span>
@@ -860,13 +880,92 @@ export function NetDevLayout({
                 ))}
               </div>
             </div>
-            <div className="ndv__hint ndv__hint--flush" style={{ marginTop: 8 }}>审计只记命令与字节数，输出原文不入档（脱敏在进入上下文之前完成）。</div>
+            <div className="ndv__hint ndv__hint--flush" style={{ marginTop: 8 }}>结构性只读：写命令无执行路径 · 全量审计中。审计只记命令与字节数，输出原文不入档（脱敏在进入上下文之前完成）。</div>
           </div>
         )}
         </div>
       </div>
       )}
     </div>
+  );
+}
+
+// BackupTimeline: the selected device's config version vault — list, one-click
+// backup now, and a two-pick diff. Restore stays proposal-shaped on purpose:
+// "从此版本恢复" hands the version to the agent as DRAFT context (the human
+// approves the actual change in the 提案 pipeline).
+function BackupTimeline({ device }: { device: string }) {
+  const [versions, setVersions] = useState<{ id: string; at: string; bytes: number; lines: number }[] | null>(null);
+  const [pick, setPick] = useState<string[]>([]);
+  const [diff, setDiff] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const reload = useCallback(async () => {
+    try {
+      setVersions(await app.NetDevBackups(device));
+      setErr("");
+    } catch (e) {
+      setErr(String(e));
+    }
+  }, [device]);
+  useEffect(() => { setVersions(null); setPick([]); setDiff(""); void reload(); }, [reload]);
+  const togglePick = (id: string) => {
+    setDiff("");
+    setPick(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id].slice(-2));
+  };
+  const showDiff = async () => {
+    if (pick.length !== 2) return;
+    setBusy(true);
+    try {
+      setDiff(await app.NetDevBackupDiff(device, pick[0], pick[1]));
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="ndv__section-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+      <div className="ndv__section-row">
+        <div className="ndv__section">配置版本 · {device}</div>
+        <span className="btn btn--secondary btn--small ndv__section-btn" role="button"
+          onClick={() => { setBusy(true); void app.NetDevRunBackup(device).then(() => reload()).finally(() => setBusy(false)); }}>
+          {busy ? "执行中…" : "立即备份"}
+        </span>
+      </div>
+      {err && <div className="ndv__hint">{err}</div>}
+      {(versions ?? []).length === 0 && <div className="ndv__hint">暂无版本——「立即备份」或等备份周期（设置 → 定时任务）。</div>}
+      {(versions ?? []).slice(0, 10).map(v => (
+        <div key={v.id} className="ndv__device" role="button" onClick={() => togglePick(v.id)}
+          style={{ cursor: "pointer", outline: pick.includes(v.id) ? "1px solid var(--accent)" : "none" }}>
+          <span className="ndv__device-addr">{String(v.at ?? "").slice(5, 16).replace("T", " ")}</span>
+          <span className="ndv__device-addr">{v.lines} 行 · {v.bytes} B</span>
+          {pick.includes(v.id) && <span className="ndv__meta" style={{ marginLeft: "auto" }}>已选 {pick.indexOf(v.id) + 1}/2</span>}
+        </div>
+      ))}
+      {pick.length === 2 && (
+        <>
+          <span className="btn btn--secondary btn--small" role="button" onClick={() => void showDiff()}>{busy ? "对比中…" : "对比两个版本"}</span>
+          {diff && <pre className="ndv__diff ndv__pre" style={{ maxHeight: 220 }}>{diff}</pre>}
+        </>
+      )}
+    </div>
+  );
+}
+
+// AuditChainBadge: hash-chain integrity verdict (B-batch) — one query on
+// mount; green = chain intact, red = tampering suspected (firstBroken says where).
+function AuditChainBadge() {
+  const [st, setSt] = useState<{ total: number; chained: number; ok: boolean; firstBroken?: string } | null>(null);
+  useEffect(() => {
+    app.NetDevAuditVerify().then(setSt).catch(() => setSt(null));
+  }, []);
+  if (!st) return null;
+  if (st.chained === 0) return <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, opacity: 0.7 }}>链校验：尚无链式条目（新条目自动上链）</span>;
+  return (
+    <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: st.ok ? "var(--ok)" : "var(--danger)" }} title={st.firstBroken ?? ""}>
+      {st.ok ? `链校验通过（${st.chained} 条已上链）` : `链校验失败：${st.firstBroken}`}
+    </span>
   );
 }
 
@@ -1014,14 +1113,20 @@ function BackupHistory({ device }: { device: string }) {
 // (device ▸ command ▸ output) — the review surface, ported from the settings
 // FindingCenter so operations never leave the 运维 page.
 const SEV_LABEL: Record<string, string> = { info: "ℹ 提示", warning: "⚠ 警告", critical: "🔴 严重" };
-function FindingRow({ f }: { f: NetDevFinding }) {
+function FindingRow({ f, onResolved }: { f: NetDevFinding; onResolved?: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="ndv__finding" style={{ "--sev": SEV_COLOR[f.severity] ?? SEV_COLOR.info } as React.CSSProperties}>
       <div className="ndv__finding-title" role="button" onClick={() => setOpen(!open)}>
         <span style={{ color: SEV_COLOR[f.severity] ?? SEV_COLOR.info, marginRight: 6 }}>{SEV_LABEL[f.severity] ?? SEV_LABEL.info}</span>
         {f.title} <span style={{ fontWeight: 400, opacity: 0.7 }}>证据 {f.evidence?.length ?? 0} 条 {open ? "▲" : "▼"}</span>
+        {f.status === "active" && <span className="ndv__badge ndv__badge--warn" style={{ marginLeft: 6 }}>告警中</span>}
+        {f.status === "resolved" && <span style={{ marginLeft: 6, fontSize: 10, color: "var(--ok)", border: "1px solid var(--ok)", borderRadius: "var(--radius-pill)", padding: "0 6px" }}>已恢复</span>}
       </div>
+      {f.status === "active" && (
+        <span className="btn btn--secondary btn--small" role="button" style={{ alignSelf: "flex-end", marginBottom: 4 }}
+          onClick={() => { void app.NetDevResolveFinding(f.id).then(() => onResolved?.()); }}>标记已处理</span>
+      )}
       <div className="ndv__meta">{(f.devices ?? []).join("、")}{f.suggestion ? "" : ""}</div>
       {f.suggestion && !open && <div className="ndv__finding-suggestion">建议：{f.suggestion}</div>}
       {open && (
@@ -1074,7 +1179,7 @@ function ProposalRow({ p, onDone }: { p: NetDevProposal; onDone: () => void }) {
 // the link as a hover tooltip; clicking a managed node selects the device
 // (onPick); `selected` highlights the picked node.
 function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevTopologyGraph; selected?: string; selectedAddr?: string; onPick?: (name: string) => void }) {
-  const W = 520, H = 360;
+  const W = 520, H_MAX = 360;
   // Null-hardening (2026-08-19 exe crash: "e.nodes is not iterable"): the
   // measured snapshot can arrive with null nodes/edges when no devices are
   // configured — normalize once, never iterate raw.
@@ -1113,6 +1218,11 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
       pos.set(name, { x: n === 1 ? W / 2 : 36 + ((W - 72) * i) / Math.max(n - 1, 1), y: bandY[bi] });
     });
   });
+  // Height ends at the last USED band — unused bottom bands must not inflate
+  // the viewBox (the SVG scales to dock width, so excess height magnifies the
+  // empty tail below the graph).
+  const lastUsedBand = bands.reduce((acc, b, i) => (b.length > 0 ? i : acc), -1);
+  const H = lastUsedBand >= 0 ? Math.min(H_MAX, Math.max(150, bandY[lastUsedBand] + 34)) : 110;
   const node = (name: string) => nodes.find(v => v.name === name);
   const TIER_LABEL = ["核心层", "汇聚层", "接入层", "未纳管邻居"];
   return (
@@ -1132,9 +1242,9 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
             <line
               key={i}
               x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
-              stroke="var(--border)"
-              strokeWidth={1}
-              opacity={0.85}
+              stroke="var(--fg-faint)"
+              strokeWidth={1.2}
+              opacity={0.4}
             >
               <title>{`${e.local_device}:${e.local_port} ⇄ ${e.remote_device}${e.remote_port ? ":" + e.remote_port : ""} (${e.source})`}</title>
             </line>
@@ -1156,11 +1266,11 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
                 x={p.x - 30} y={p.y - 10} width={60} height={20} rx={5}
                 fill={sel
                   ? "var(--accent-soft)"
-                  : v.managed ? "var(--bg-elev)" : "transparent"}
+                  : v.managed ? "color-mix(in srgb, var(--fg) 5%, var(--bg-elev))" : "transparent"}
                 stroke={sel
                   ? "var(--accent)"
-                  : v.managed ? (tier === 0 ? "var(--accent)" : "var(--border)") : "var(--border)"}
-                strokeWidth={sel ? 2 : v.managed && tier === 0 ? 1.6 : 1}
+                  : v.managed ? (tier === 0 ? "var(--accent)" : "var(--fg-faint)") : "var(--border)"}
+                strokeWidth={sel ? 1.6 : v.managed && tier === 0 ? 1.5 : 1}
                 strokeDasharray={v.managed ? undefined : "3 3"}
               />
               <text x={p.x} y={p.y + 3.5} textAnchor="middle" fontSize={9} fill={v.managed ? "var(--fg)" : "var(--fg-faint)"}>

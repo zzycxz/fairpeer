@@ -28,6 +28,12 @@ import type {
   DreamStatusView,
   EffortInfo,
   NetDevSettingsView,
+  NetDevExecResult,
+  NetDevLogFollowEvent,
+  NetDevDeviceHealth,
+  NetDevHealthSnapshot,
+  NetDevSyslogStatusView,
+  NetDevAuditChainStatus,
   NetDevAuditEntryView,
   NetDevFinding,
   NetDevTopologyGraph,
@@ -250,6 +256,7 @@ export interface AppBindings {
   MetaForTab(tabID: string): Promise<Meta>;
   Commands(): Promise<CommandInfo[]>;
   Capabilities(): Promise<CapabilitiesView>;
+  ImportMCPServersJSON(jsonText: string): Promise<number>;
   AddMCPServer(input: MCPServerInput): Promise<number>;
   UpdateMCPServer(name: string, input: MCPServerInput): Promise<void>;
   RemoveMCPServer(name: string): Promise<void>;
@@ -434,6 +441,19 @@ export interface AppBindings {
   NetDevRollbackProposal(id: string): Promise<NetDevProposal>;
   NetDevAuditTail(n: number): Promise<NetDevAuditEntryView[]>;
   NetDevSSHImportCandidates(): Promise<NetDevSSHImportCandidate[]>;
+  // P0/P1 运维感知侧: structured log read / streaming follow / read-only db
+  // diagnostics / SNMP health snapshot. Follow chunks + health changes stream
+  // on the "netdev:logfollow" / "netdev:health" channels.
+  NetDevLogRead(device: string, source: string, tailN: number, since: string, grep: string): Promise<NetDevExecResult>;
+  NetDevLogFollowStart(device: string, source: string): Promise<void>;
+  NetDevLogFollowStop(device: string): Promise<void>;
+  NetDevDBQuery(source: string, query: string): Promise<string>;
+  NetDevHealthSnapshot(): Promise<NetDevHealthSnapshot>;
+  // P2: passive syslog ring buffer + audit hash-chain verify + alert resolve.
+  NetDevSyslogTail(device: string, tailN: number, grep: string): Promise<string[]>;
+  NetDevSyslogStatus(): Promise<NetDevSyslogStatusView>;
+  NetDevAuditVerify(): Promise<NetDevAuditChainStatus>;
+  NetDevResolveFinding(id: string): Promise<void>;
   // ProbeMailAccount tests a saved mailbox's IMAP login by actually connecting.
   // An empty name probes the Default account; a non-empty name probes that
   // named account. Returns ok/error/unconfigured so the mail card can show a
@@ -749,6 +769,38 @@ export function onNetdevLive(cb: (events: NetDevLiveEvent[]) => void): () => voi
 function emitNetdevLiveMock(events: NetDevLiveEvent[]) {
   for (const cb of netdevLiveListeners) cb(events);
 }
+
+// onNetdevLogFollow subscribes to the streaming log-follow channel
+// ("netdev:logfollow": chunks + the terminal done event with the stop reason).
+export function onNetdevLogFollow(cb: (ev: NetDevLogFollowEvent) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("netdev:logfollow", (ev) => cb(ev as NetDevLogFollowEvent));
+  }
+  netdevLogFollowListeners.add(cb);
+  return () => {
+    netdevLogFollowListeners.delete(cb);
+  };
+}
+
+const netdevLogFollowListeners = new Set<(ev: NetDevLogFollowEvent) => void>();
+
+export function emitNetdevLogFollowMock(ev: NetDevLogFollowEvent) {
+  for (const cb of netdevLogFollowListeners) cb(ev);
+}
+
+// onNetdevHealth subscribes to health change events ("netdev:health": one
+// device's reachability/interface state changed since the previous poll).
+export function onNetdevHealth(cb: (h: NetDevDeviceHealth) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("netdev:health", (h) => cb(h as NetDevDeviceHealth));
+  }
+  netdevHealthListeners.add(cb);
+  return () => {
+    netdevHealthListeners.delete(cb);
+  };
+}
+
+const netdevHealthListeners = new Set<(h: NetDevDeviceHealth) => void>();
 
 // playNetdevLiveMockDemo feeds a scripted command lifecycle + a guardrail
 // refusal into the mock live stream so the 操作实况 panel demos standalone.
@@ -1918,6 +1970,46 @@ function makeMockApp(): AppBindings {
     async NetDevSettings() {
       return mockNetDev;
     },
+    async NetDevLogRead(device: string, source: string, tailN: number) {
+      const out: NetDevExecResult = {
+        device, command: `tail -n ${tailN || 100} ${source}`, class: "read",
+        output: [
+          "2026-08-27 10:00:01 [error] upstream connect failed (111 refused)",
+          "2026-08-27 10:00:02 [warn] retrying in 2s",
+          "2026-08-27 10:00:04 [info] upstream recovered",
+          "(browser dev mock: no device backend)",
+        ].join("\n"), is_error: false,
+      };
+      return out;
+    },
+    async NetDevLogFollowStart(device: string, source: string) {
+      let n = 0;
+      const t = setInterval(() => {
+        n++;
+        emitNetdevLogFollowMock({ device, source, chunk: `${new Date().toISOString().slice(11, 19)} [info] mock follow line ${n}\n` });
+        if (n >= 20) {
+          clearInterval(t);
+          emitNetdevLogFollowMock({ device, source, done: true, reason: "mock cap reached (20 lines)" });
+        }
+      }, 1000);
+    },
+    async NetDevLogFollowStop(_device: string) {},
+    async NetDevDBQuery(_source: string, query: string) {
+      return `(browser dev mock: no db backend for "${query}")`;
+    },
+    async NetDevHealthSnapshot(): Promise<NetDevHealthSnapshot> {
+      return { pollIntervalSeconds: 0, devices: [] };
+    },
+    async NetDevSyslogTail(_device: string, _tailN: number, _grep: string): Promise<string[]> {
+      return ["(browser dev mock: syslog receiver off)"];
+    },
+    async NetDevSyslogStatus(): Promise<NetDevSyslogStatusView> {
+      return { listening: false, port: 0, buffered: 0 };
+    },
+    async NetDevAuditVerify(): Promise<NetDevAuditChainStatus> {
+      return { total: 0, chained: 0, ok: true };
+    },
+    async NetDevResolveFinding(_id: string): Promise<void> {},
     async SetNetDevSettings(v: NetDevSettingsView) {
       mockNetDev = { ...v, devices: [...v.devices], hops: [...v.hops], groups: [...v.groups], scopes: [...v.scopes], guardAllowedGroups: [...(v.guardAllowedGroups ?? [])], projects: v.projects ? [...v.projects] : mockNetDev.projects, presets: v.presets ? [...v.presets] : mockNetDev.presets };
     },
@@ -2720,6 +2812,7 @@ function makeMockApp(): AppBindings {
         skillRoots: capSkillRoots.map((s) => ({ ...s })),
       };
     },
+    async ImportMCPServersJSON(_jsonText: string) { return 0; },
     async AddMCPServer(input: MCPServerInput) {
       const tools = input.transport === "stdio" ? 3 : 5;
       capServers.push({
@@ -3619,7 +3712,8 @@ function makeMockApp(): AppBindings {
           visionModel: "deepseek-v4-pro", vision: true, contextWindow: 1000000,
           codingOnly: false, aggregator: false, category: "direct",
           docUrl: "https://platform.deepseek.com/api_keys",
-          models: ["deepseek-v4-pro", "deepseek-v4-flash"] },
+          models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+          reasoningModels: ["deepseek-v4-pro"] },
         { name: "zhipu", displayName: "智谱 AI (GLM)", kind: "openai",
           baseUrl: "https://open.bigmodel.cn/api/paas/v4", apiKeyEnv: "ZHIPU_API_KEY",
           defaultModel: "glm-5.2", fastModel: "glm-4.7-flash",

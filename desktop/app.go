@@ -6973,3 +6973,62 @@ func (a *App) ConnectKey(apiKey string) error {
 func gateApproverForSubagents(ctrl *control.Controller) permission.Approver {
 	return ctrl.GateApprover()
 }
+
+// ImportMCPServersJSON parses a standard `mcpServers` JSON block (Claude
+// Desktop / Cursor / Codex paste format) and imports every entry. Returns the
+// count imported; entries with invalid shape are skipped silently (the caller
+// shows the count; users can fix leftovers manually). Existing servers with
+// the same name are updated in place.
+func (a *App) ImportMCPServersJSON(jsonText string) (int, error) {
+	var block struct {
+		Servers map[string]struct {
+			Type    string            `json:"type"`
+			Command string            `json:"command"`
+			Args    []string          `json:"args"`
+			Env     map[string]string `json:"env"`
+			URL     string            `json:"url"`
+			Headers map[string]string `json:"headers"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(jsonText), &block); err != nil {
+		return 0, fmt.Errorf("invalid JSON: %w", err)
+	}
+	if len(block.Servers) == 0 {
+		return 0, fmt.Errorf("no mcpServers entries found")
+	}
+	ctrl := a.activeCtrl()
+	if ctrl == nil {
+		return 0, fmt.Errorf("no active session")
+	}
+	count := 0
+	for name, s := range block.Servers {
+		transport := strings.ToLower(strings.TrimSpace(s.Type))
+		if transport == "" {
+			if s.URL != "" {
+				transport = "http"
+			} else {
+				transport = "stdio"
+			}
+		}
+		// Map "streamable-http"/"streamable_http" → "http" (fairpeer's canonical).
+		if transport == "streamable-http" || transport == "streamable_http" {
+			transport = "http"
+		}
+		entry := config.PluginEntry{
+			Name:    name,
+			Type:    transport,
+			Command: s.Command,
+			Args:    s.Args,
+			Env:     s.Env,
+			URL:     s.URL,
+			Headers: s.Headers,
+		}
+		entry, _ = config.NormalizePluginCommandLine(entry)
+		if err := a.saveDesktopMCPServer(entry); err != nil {
+			continue // skip failures; count only successes
+		}
+		_, _ = ctrl.ConnectMCPServer(entry)
+		count++
+	}
+	return count, nil
+}

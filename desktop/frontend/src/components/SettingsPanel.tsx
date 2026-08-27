@@ -3433,6 +3433,7 @@ function ProviderAccessCard({
       {modelDraft && (
         <ProviderModelDraftPicker
           draft={modelDraft}
+          reasoningModels={editableProvider?.reasoningModels}
           busy={busy}
           fetching={fetching}
           onToggle={onToggleDraftModel}
@@ -3482,6 +3483,7 @@ function ProviderAccessCard({
 
 function ProviderModelDraftPicker({
   draft,
+  reasoningModels,
   busy,
   fetching,
   onToggle,
@@ -3491,6 +3493,7 @@ function ProviderModelDraftPicker({
   onSave,
 }: {
   draft: ProviderModelDraft;
+  reasoningModels?: string[];
   busy: boolean;
   fetching: boolean;
   onToggle: (model: string) => void;
@@ -3502,6 +3505,7 @@ function ProviderModelDraftPicker({
   const t = useT();
   const [query, setQuery] = useState("");
   const selected = new Set(draft.selected);
+  const reasoning = reasoningModels && reasoningModels.length > 0 ? new Set(reasoningModels) : undefined;
   const q = query.trim().toLowerCase();
   const visibleCandidates = q
     ? draft.candidates.filter((model) => model.toLowerCase().includes(q))
@@ -3541,6 +3545,7 @@ function ProviderModelDraftPicker({
               onChange={() => onToggle(model)}
             />
             <span>{model}</span>
+            {reasoning?.has(model) && <em className="provider-model-draft__reasoning">{t("settings.reasoningBadge")}</em>}
           </label>
         )) : (
           <div className="provider-model-draft__empty">{t("settings.noMatchingCandidateModels")}</div>

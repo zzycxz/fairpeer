@@ -396,6 +396,11 @@ export function ModelStep({ template, apiKey, onDone, t }: {
   }, [template]);
 
   const models = fetchedModels ?? (template.models.length > 0 ? template.models : [template.defaultModel]);
+  // models.dev-flagged reasoning models get a "推理" suffix in option labels.
+  const reasoningSet = template.reasoningModels && template.reasoningModels.length > 0
+    ? new Set(template.reasoningModels)
+    : undefined;
+  const modelLabel = (m: string) => (reasoningSet?.has(m) ? `${m} · ${t("settings.reasoningBadge")}` : m);
 
   // Once the live list lands, retarget picks that no longer exist in it.
   useEffect(() => {
@@ -430,7 +435,7 @@ export function ModelStep({ template, apiKey, onDone, t }: {
           <label className="set-label" style={{ display: "block", marginBottom: "0.25rem" }}>{t("settings.defaultModel")}</label>
           <select className="mem-select" style={{ width: "100%" }} value={defaultPick} onChange={(e) => setDefaultPick(e.target.value)}>
             {models.map((m) => (
-              <option key={m} value={m}>{m}</option>
+              <option key={m} value={m}>{modelLabel(m)}</option>
             ))}
           </select>
         </div>
@@ -440,7 +445,7 @@ export function ModelStep({ template, apiKey, onDone, t }: {
           <select className="mem-select" style={{ width: "100%" }} value={visionPick} onChange={(e) => setVisionPick(e.target.value)}>
             <option value="none">{t("settings.screenshotVlmNone") || "未配置"}</option>
             {models.map((m) => (
-              <option key={m} value={m}>{m}</option>
+              <option key={m} value={m}>{modelLabel(m)}</option>
             ))}
           </select>
         </div>
@@ -450,7 +455,7 @@ export function ModelStep({ template, apiKey, onDone, t }: {
           <select className="mem-select" style={{ width: "100%" }} value={voicePick} onChange={(e) => setVoicePick(e.target.value)}>
             <option value="none">{t("settings.voiceModelNone") || "未配置"}</option>
             {models.map((m) => (
-              <option key={m} value={m}>{m}</option>
+              <option key={m} value={m}>{modelLabel(m)}</option>
             ))}
           </select>
         </div>
@@ -460,7 +465,7 @@ export function ModelStep({ template, apiKey, onDone, t }: {
           <select className="mem-select" style={{ width: "100%" }} value={fastPick} onChange={(e) => setFastPick(e.target.value)}>
             <option value="follow">{t("settings.fastTaskNone") || "跟随默认"}</option>
             {models.map((m) => (
-              <option key={m} value={m}>{m}</option>
+              <option key={m} value={m}>{modelLabel(m)}</option>
             ))}
           </select>
         </div>

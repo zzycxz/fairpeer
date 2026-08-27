@@ -234,6 +234,17 @@
    carrying style={{ padding: 0 }}. */
 .ndv__hint--flush { padding: 0; }
 
+/* Centered empty state for a stretched dock card (设备/审计 with zero rows):
+   flex-grows inside the card column so the guidance sits in the leftover
+   space instead of clinging to the title with a void below. */
+.ndv__empty {
+  flex: 1 1 auto; min-height: 180px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; text-align: center; padding: 20px 8px;
+}
+.ndv__empty-title { font-size: 12.5px; font-weight: 600; color: var(--fg); }
+.ndv__empty-desc { font-size: 11px; line-height: 1.55; color: var(--fg-faint); max-width: 260px; }
+
 /* Button/action rows inside a panel card (拓扑/发现/提案 header rows) —
    replaces the per-tab inline style={{ display:flex, gap, padding:0 }} hacks. */
 .ndv__panel-actions {
@@ -243,6 +254,18 @@
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
+
+/* The netdev settings page uses .optional-module__controls as a page-level
+   bar (checkbox + network name + save) — the shared class stacks vertically
+   and full-width-stretches the save button into a giant CTA. This modifier
+   lays the same widgets out as one inline row. */
+.optional-module__controls--inline {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+.optional-module__controls--inline > .btn { width: auto; }
 
 .ndv__rail-actions { padding: 4px 0 6px; }
 
@@ -469,6 +492,16 @@
 .ndv__live-budget-sep { opacity: 0.4; }
 
 .ndv__live-card { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 8px; }
+/* Active device cards share the panel's leftover height and their output
+   tails grow with it — a streaming panel shouldn't end in a dead void under
+   the cards. (All cards grow: which one is "last" is DOM-order dependent
+   once idle/guardrail rows render after them.) */
+.ndv__live-card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.ndv__live-tail { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.ndv__live-tail-box { flex: 1 1 auto; }
+/* No activity at all: vertically center the onboarding hint in the leftover
+   space instead of pinning it under the budget bar. */
+.ndv__live-empty { flex: 1 1 auto; min-height: 140px; display: flex; align-items: center; justify-content: center; }
 .ndv__live-card-head { display: flex; align-items: center; gap: 7px; font-size: 12px; }
 .ndv__live-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
 .ndv__live-dev { font-weight: 700; }
@@ -494,18 +527,15 @@
 
 .ndv__live-tail { margin-top: 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
 .ndv__live-tail-head {
-  display: flex; align-items: center; gap: 4px; width: 100%;
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em;
-  padding: 3px 8px; background: transparent; border: 0; cursor: pointer;
-  opacity: 0.65; text-align: left;
+  padding: 3px 8px;
+  opacity: 0.65;
 }
-.ndv__live-tail-chev { transform: rotate(-90deg); }
 .ndv__live-tail-box {
-  max-height: 170px; overflow: auto; padding: 2px 8px 6px;
+  min-height: 64px; overflow: auto; padding: 2px 8px 6px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; line-height: 1.45;
   white-space: pre; background: color-mix(in srgb, var(--fg) 3%, transparent);
 }
-.ndv__live-tail--expanded .ndv__live-tail-box { max-height: min(60vh, 520px); }
 .ndv__live-tail-line { color: var(--fg); opacity: 0.85; }
 .ndv__live-tail-line--cmd { color: var(--accent); opacity: 1; }
 
@@ -534,7 +564,10 @@
 /* The audit card fills the dock (single-card rule) and the ROW region owns
    the scroll, so the stats header + footnote stay anchored while the table
    uses the panel's full height. */
-.ndv__audit-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
+.ndv__audit-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0 -6px; padding: 0 6px; display: flex; flex-direction: column; }
+/* Zero-row state: centered where the rows would be — not as a stray hint
+   wedged between the stats row and the table header. */
+.ndv__audit-empty { flex: 1 1 auto; display: grid; place-items: center; padding: 28px 8px; font-size: 11.5px; line-height: 1.6; color: var(--fg-faint); text-align: center; }
 .ndv__audit-stats {
   display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
   padding-bottom: 12px; margin-bottom: 12px;
@@ -553,9 +586,33 @@
   font-weight: 700; opacity: 0.55; position: sticky; top: 0;
   background: color-mix(in srgb, #000 15%, var(--bg-elev));
 }
+/* Header cells never wrap — a two-glyph column label broken across lines
+   reads as a rendering bug. */
+.ndv__audit-row--head span { white-space: nowrap; }
 .ndv__audit-time { font-variant-numeric: tabular-nums; opacity: 0.7; }
 .ndv__audit-dev { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ndv__audit-cmd {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── 日志页卡 (LogPanel) ─────────────────────────────────────────────── */
+.ndv-log__box { white-space: pre-wrap; word-break: break-all; }
+.ndv-log__line { color: var(--text); }
+.ndv-log__line--error { color: var(--danger); }
+.ndv-log__line--warn { color: var(--warn); }
+.ndv__chip {
+  display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border); background: var(--bg-soft); color: var(--text);
+  font-size: 11px; cursor: pointer; user-select: none;
+}
+.ndv__chip:hover { border-color: var(--accent); }
+
+/* ── 健康页卡 (HealthPanel) ──────────────────────────────────────────── */
+.ndv__dot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
+.ndv__dot--ok { background: var(--ok); }
+.ndv__dot--down { background: var(--danger); }
+.ndv__badge--warn {
+  margin-left: auto; font-size: 10px; color: var(--warn);
+  border: 1px solid var(--warn); border-radius: var(--radius-pill); padding: 0 6px;
 }

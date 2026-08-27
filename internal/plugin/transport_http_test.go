@@ -145,12 +145,16 @@ func TestHTTPTransportRPCError(t *testing.T) {
 	}
 }
 
-// TestSSETransportUnsupported documents that the legacy sse transport is
-// recognised but deferred with a clear, actionable error.
+// TestSSETransportUnsupported verifies the legacy sse transport now connects
+// (2026-08-21: transport_sse.go implemented). StartAll with an unreachable URL
+// must fail with a connection error, not "not yet supported".
 func TestSSETransportUnsupported(t *testing.T) {
-	_, _, err := StartAll(context.Background(), []Spec{{Name: "legacy", Type: "sse", URL: "http://x"}})
-	if err == nil || !strings.Contains(err.Error(), "http") {
-		t.Fatalf("sse should error pointing to http, got %v", err)
+	_, _, err := StartAll(context.Background(), []Spec{{Name: "legacy", Type: "sse", URL: "http://127.0.0.1:1/sse"}})
+	if err == nil {
+		t.Fatalf("unreachable sse server should error, got nil")
+	}
+	if strings.Contains(err.Error(), "not yet supported") {
+		t.Fatalf("sse transport is now implemented; got stale error: %v", err)
 	}
 }
 

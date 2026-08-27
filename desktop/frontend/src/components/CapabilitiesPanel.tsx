@@ -188,9 +188,28 @@ export function CapabilitiesPanel({
                   <>
                 <div className="cap-mcp-toolbar cap-mcp-toolbar--drawer">
                   {!adding && (
-                    <button className="btn btn--small" disabled={busy} onClick={() => setAdding(true)}>
-                      {t("caps.addServer")}
-                    </button>
+                    <>
+                      <button className="btn btn--small" disabled={busy} onClick={() => setAdding(true)}>
+                        {t("caps.addServer")}
+                      </button>
+                      <button
+                        className="btn btn--small"
+                        disabled={busy}
+                        onClick={async () => {
+                          const text = prompt(t("caps.pasteMCPJSON"));
+                          if (!text?.trim()) return;
+                          try {
+                            const n = await app.ImportMCPServersJSON(text.trim());
+                            useToast().showToast(t("caps.mcpImported", { n: String(n) }), "info");
+                            void reload();
+                          } catch (e) {
+                            useToast().showToast(String(e), "error");
+                          }
+                        }}
+                      >
+                        {t("caps.pasteImport")}
+                      </button>
+                    </>
                   )}
                 </div>
                 {serverGroups.failed.length > 0 && (

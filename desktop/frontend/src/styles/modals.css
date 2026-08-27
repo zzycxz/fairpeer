@@ -1860,7 +1860,7 @@
 .provider-model-draft__option {
   min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
   min-height: 32px;
@@ -1878,6 +1878,20 @@
 .provider-model-draft__option span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* models.dev-flagged reasoning-capable model badge (display-only; see
+   docs/MODEL_ROUTING_SPEC.md §5). */
+.provider-model-draft__reasoning {
+  padding: 1px 6px;
+  border-radius: var(--radius-pill, 999px);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 560;
+  line-height: 1.5;
 }
 .provider-model-draft__empty {
   color: var(--fg-faint);

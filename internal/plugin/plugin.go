@@ -857,11 +857,9 @@ func newTransport(ctx context.Context, s Spec) (transport, error) {
 	case "http", "streamable-http", "streamable_http":
 		return newHTTPTransport(s)
 	case "sse":
-		// The legacy 2024-11-05 HTTP+SSE transport needs a persistent GET stream
-		// with a background dispatcher — deprecated upstream ("avoid for new
-		// work"). Use type="http" (Streamable HTTP), which most remote servers
-		// now speak. Tracked for later (SPEC §9).
-		return nil, fmt.Errorf("plugin %q: legacy sse transport not yet supported — use type=\"http\" (Streamable HTTP)", s.Name)
+		// The legacy 2024-11-05 HTTP+SSE transport — deprecated upstream, kept
+		// for older remote servers. New configs should use type="http".
+		return newSSETransport(ctx, s)
 	default:
 		return nil, fmt.Errorf("unknown transport type %q (want stdio|http|sse)", s.Type)
 	}

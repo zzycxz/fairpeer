@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, ChevronDown } from "lucide-react";
+import { Activity } from "lucide-react";
 import { app, onNetdevLive } from "../../lib/bridge";
 import type { NetDevLiveEvent, NetDevLiveSnapshot } from "../../lib/types";
 import {
@@ -113,10 +113,12 @@ export function LiveOpsPanel() {
       </div>
 
       {active.length === 0 && state.guardrails.length === 0 && (
-        <div className="ndv__hint" style={{ padding: 0 }}>
-          {ready
-            ? "AI 在设备上执行命令时，这里实时显示每条命令与输出——供你随时检查。设备状态灯也会跟随连接/重连变化。"
-            : "正在连接实况通道…"}
+        <div className="ndv__live-empty">
+          <div className="ndv__hint ndv__hint--flush" style={{ maxWidth: 260 }}>
+            {ready
+              ? "AI 在设备上执行命令时，这里实时显示每条命令与输出——供你随时检查。设备状态灯也会跟随连接/重连变化。"
+              : "正在连接实况通道…"}
+          </div>
         </div>
       )}
 
@@ -195,9 +197,9 @@ function applyLiveBatch(state: LiveOpsState, events: NetDevLiveEvent[]) {
 }
 
 // TailView — the terminal-textured output tail. Sticks to the bottom unless
-// the user scrolls up (hover pauses auto-scroll); click the header to expand.
+// the user scrolls up (hover pauses auto-scroll). The box flexes to fill the
+// device card's leftover height (netdev.css .ndv__live-card chain).
 function TailView({ lines, device }: { lines: string[]; device: string }) {
-  const [expanded, setExpanded] = useState(false);
   const [pinned, setPinned] = useState(true);
   const boxRef = useRef<HTMLDivElement>(null);
   const prevCount = useRef(0);
@@ -212,16 +214,8 @@ function TailView({ lines, device }: { lines: string[]; device: string }) {
   }, [lines, pinned]);
 
   return (
-    <div className={`ndv__live-tail${expanded ? " ndv__live-tail--expanded" : ""}`}>
-      <button
-        type="button"
-        className="ndv__live-tail-head"
-        onClick={() => setExpanded((v) => !v)}
-        title={expanded ? "收起" : "展开"}
-      >
-        <ChevronDown size={11} className={expanded ? "" : "ndv__live-tail-chev"} />
-        输出尾随 · {device}
-      </button>
+    <div className="ndv__live-tail">
+      <div className="ndv__live-tail-head">输出尾随 · {device}</div>
       <div
         ref={boxRef}
         className="ndv__live-tail-box"
