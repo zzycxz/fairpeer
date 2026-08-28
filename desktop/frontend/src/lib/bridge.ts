@@ -484,6 +484,13 @@ export interface AppBindings {
   NetDevImportCVEs(feedJSON: string): Promise<number>;
   NetDevCVEMatches(): Promise<{ device: string; cve_id: string; desc: string; severity: string; product: string }[]>;
   NetDevCVESweep(): Promise<NetDevFinding | null>;
+  // Human terminal (§6.1) + SFTP read-only download (§6.2)
+  NetDevHumanTTYStart(device: string): Promise<{ device: string; connected: boolean; startedAt: string; bytes: number }>;
+  NetDevHumanTTYWrite(device: string, input: string): Promise<void>;
+  NetDevHumanTTYStop(device: string): Promise<void>;
+  NetDevHumanTTYStatus(): Promise<{ device: string; connected: boolean; startedAt: string; bytes: number }[]>;
+  NetDevSFTPDownload(device: string, remotePath: string): Promise<string>;
+  NetDevSFTPBrowse(device: string, dirPath: string): Promise<string[]>;
   NetDevLogFollowStart(device: string, source: string): Promise<void>;
   NetDevLogFollowStop(device: string): Promise<void>;
   NetDevDBQuery(source: string, query: string): Promise<string>;
@@ -2078,6 +2085,20 @@ function makeMockApp(): AppBindings {
     },
     async NetDevCVESweep(): Promise<NetDevFinding | null> {
       return null;
+    },
+    async NetDevHumanTTYStart(_d: string): Promise<{ device: string; connected: boolean; startedAt: string; bytes: number }> {
+      return { device: _d, connected: true, startedAt: new Date().toISOString(), bytes: 0 };
+    },
+    async NetDevHumanTTYWrite(_d: string, _i: string): Promise<void> {},
+    async NetDevHumanTTYStop(_d: string): Promise<void> {},
+    async NetDevHumanTTYStatus(): Promise<{ device: string; connected: boolean; startedAt: string; bytes: number }[]> {
+      return [];
+    },
+    async NetDevSFTPDownload(_d: string, _p: string): Promise<string> {
+      return "(browser dev mock)";
+    },
+    async NetDevSFTPBrowse(_d: string, _p: string): Promise<string[]> {
+      return [];
     },
     async NetDevLocate(_target: string): Promise<NetDevLocateResult> {
       return { target: _target, hits: [], searched: [], covered_devices: 0, total_devices: 0, budget_stopped: false, note: "browser dev mock" };
