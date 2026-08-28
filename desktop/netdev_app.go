@@ -1544,6 +1544,38 @@ func (a *App) NetDevTrapStatus() (bool, int, int, error) {
 	return l, p, b, nil
 }
 
+// NetDevCases lists investigation cases (newest first).
+func (a *App) NetDevCases() ([]netdev.IncidentCase, error) {
+	cases, err := netdev.ListCases()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]netdev.IncidentCase, 0, len(cases))
+	for _, c := range cases {
+		out = append(out, *c)
+	}
+	return out, nil
+}
+
+// NetDevCaseSave persists one case (entries/iocs are edited client-side and
+// saved whole).
+func (a *App) NetDevCaseSave(c netdev.IncidentCase) (netdev.IncidentCase, error) {
+	if err := netdev.SaveCase(&c); err != nil {
+		return netdev.IncidentCase{}, err
+	}
+	return c, nil
+}
+
+// NetDevCaseDelete removes one case.
+func (a *App) NetDevCaseDelete(id string) error {
+	return netdev.DeleteCase(id)
+}
+
+// NetDevCaseBundle writes the case report bundle and returns its path.
+func (a *App) NetDevCaseBundle(id string) (string, error) {
+	return netdev.CaseBundle(id)
+}
+
 // NetDevTimeline assembles the correlation stream (changes/findings/events)
 // for the 实体360° source family in the log workbench (§5.4).
 func (a *App) NetDevTimeline(device string, hours int) ([]netdev.TimelineEvent, error) {

@@ -1853,6 +1853,33 @@ export interface NetDevLogSearchResult {
   note?: string;
 }
 
+// 案例（安全工作台 / §4.6）。
+export interface NetDevCaseIOC {
+  value: string;
+  type: string;
+  note?: string;
+  added_at: string;
+}
+
+export interface NetDevCaseEntry {
+  time: string;
+  kind: string; // finding | log | audit | triage | note
+  device?: string;
+  text: string;
+  ref?: string;
+}
+
+export interface NetDevIncidentCase {
+  id: string;
+  title: string;
+  status: string;
+  devices?: string[];
+  entries?: NetDevCaseEntry[];
+  iocs?: NetDevCaseIOC[];
+  created_at: string;
+  updated_at: string;
+}
+
 // 时间关联层（App.NetDevTimeline / §5.4）：变更/发现/事件统一事件流。
 export interface NetDevTimelineEvent {
   time: string;

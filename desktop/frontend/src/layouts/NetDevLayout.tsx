@@ -8,6 +8,7 @@ import { ProposalActions } from "../components/netdev/ProposalCenter";
 import { LiveOpsPanel } from "../components/netdev/LiveOpsPanel";
 import { LogPanel } from "../components/netdev/LogPanel";
 import { LogWorkbench } from "../components/netdev/LogWorkbench";
+import { SecWorkbench } from "../components/netdev/SecWorkbench";
 import { HealthPanel } from "../components/netdev/HealthPanel";
 import { JobsPanel } from "../components/netdev/JobsPanel";
 import { AlertSetupWizard } from "../components/netdev/AlertSetupWizard";
@@ -189,10 +190,10 @@ const REDFISH_QUICK: { label: string; path: string }[] = [
 
 type QuickResult = { command: string; output: string; isError: boolean; refused?: string; refusedUnknown?: boolean };
 // ?bench=<workbench> deep-links the main-area workbench (mirror of ?dock=).
-function benchParam(): "logs" | null {
+function benchParam(): "logs" | "sec" | null {
   try {
     const v = new URLSearchParams(window.location.search).get("bench");
-    return v === "logs" ? "logs" : null;
+    return v === "logs" || v === "sec" ? v : null;
   } catch { return null; }
 }
 
@@ -371,8 +372,9 @@ export function NetDevLayout({
   // once opened (closing = switching back to chat, state survives — §10.2).
   // The switch bar renders only after the first workbench open, so a
   // chat-only session keeps the exact v1.1 layout (§10.8: 单工作台零新增 chrome).
-  const [bench, setBench] = useState<"chat" | "logs">(() => (benchParam() ? "logs" : "chat"));
+  const [bench, setBench] = useState<"chat" | "logs" | "sec">(() => (benchParam() === "sec" ? "sec" : benchParam() ? "logs" : "chat"));
   const [logsBenchEverOpened, setLogsBenchEverOpened] = useState(() => benchParam() === "logs");
+  const [secBenchEverOpened, setSecBenchEverOpened] = useState(() => benchParam() === "sec");
 
   useEffect(() => {
     if (bench === "chat") return;
@@ -386,11 +388,18 @@ export function NetDevLayout({
     setBench("logs");
   }, []);
 
+  const openSecBench = useCallback(() => {
+    setSecBenchEverOpened(true);
+    setBench("sec");
+  }, []);
+
   // 命令面板入口（§10.7 第 5 层）：palette 在 App 层，经自定义事件抵达——
   // 与 ?bench= 深链同效，不做状态提升。
   useEffect(() => {
     const onBench = (e: Event) => {
-      if ((e as CustomEvent<string>).detail === "logs") openLogsBench();
+      const d = (e as CustomEvent<string>).detail;
+      if (d === "logs") openLogsBench();
+      if (d === "sec") openSecBench();
     };
     window.addEventListener("fairpeer:netdev-bench", onBench);
     return () => window.removeEventListener("fairpeer:netdev-bench", onBench);
@@ -890,11 +899,13 @@ export function NetDevLayout({
           <div className="ndv-bench__bar" role="tablist" aria-label="主区工作台">
             <span role="tab" aria-selected={bench === "chat"} className={`ndv-bench__chip${bench === "chat" ? " ndv-bench__chip--on" : ""}`} onClick={() => setBench("chat")}>对话</span>
             <span role="tab" aria-selected={bench === "logs"} className={`ndv-bench__chip${bench === "logs" ? " ndv-bench__chip--on" : ""}`} onClick={openLogsBench}>日志</span>
+            <span role="tab" aria-selected={bench === "sec"} className={`ndv-bench__chip${bench === "sec" ? " ndv-bench__chip--on" : ""}`} onClick={openSecBench}>安全</span>
             <span className="ndv-bench__hint"><kbd>Esc</kbd> 返回对话</span>
           </div>
         )}
         <div className="ndv__chat" style={bench !== "chat" ? { display: "none" } : undefined}>{mainNode}</div>
         {logsBenchEverOpened && <LogWorkbench devices={settings?.devices ?? []} onInsertComposer={onInsertComposer} hidden={bench !== "logs"} />}
+        {secBenchEverOpened && <SecWorkbench devices={settings?.devices ?? []} hidden={bench !== "sec"} />}
         <div style={bench !== "chat" ? { display: "none" } : { display: "contents" }}>{footerNode}</div>
         {terminalNode}
       </div>
@@ -1543,10 +1554,17 @@ function FindingRow({ f, onResolved }: { f: NetDevFinding; onResolved?: () => vo
         {f.status === "active" && <span className="ndv__badge ndv__badge--warn" style={{ marginLeft: 6 }}>告警中</span>}
         {f.status === "resolved" && <span style={{ marginLeft: 6, fontSize: 10, color: "var(--ok)", border: "1px solid var(--ok)", borderRadius: "var(--radius-pill)", padding: "0 6px" }}>已恢复</span>}
       </div>
-      {f.status === "active" && (
-        <span className="btn btn--secondary btn--small" role="button" style={{ alignSelf: "flex-end", marginBottom: 4 }}
-          onClick={() => { void app.NetDevResolveFinding(f.id).then(() => onResolved?.()); }}>标记已处理</span>
-      )}
+      <div style={{ display: "flex", gap: 6, alignSelf: "flex-end", marginBottom: 4 }}>
+        <span className="btn btn--secondary btn--small" role="button" title="以此 Finding 为首条时间线条目开一个排查案例"
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent("fairpeer:netdev-case", { detail: { title: f.title, device: (f.devices ?? [])[0] ?? "", text: `${f.severity}｜${f.title}｜${(f.detail ?? "").slice(0, 120)}`, ref: f.id } }));
+            window.dispatchEvent(new CustomEvent("fairpeer:netdev-bench", { detail: "sec" }));
+          }}>建案例</span>
+        {f.status === "active" && (
+          <span className="btn btn--secondary btn--small" role="button"
+            onClick={() => { void app.NetDevResolveFinding(f.id).then(() => onResolved?.()); }}>标记已处理</span>
+        )}
+      </div>
       <div className="ndv__meta">{(f.devices ?? []).join("、")}{f.suggestion ? "" : ""}</div>
       {f.suggestion && !open && <div className="ndv__finding-suggestion">建议：{f.suggestion}</div>}
       {open && (

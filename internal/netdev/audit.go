@@ -91,7 +91,12 @@ func auditPathLocked() string {
 }
 
 // netdevStateDir is the netdev state directory beside secrets.enc.json.
+var netdevStateDirOverr string
+
 func netdevStateDir() string {
+	if netdevStateDirOverr != "" {
+		return netdevStateDirOverr
+	}
 	dir, err := os.UserConfigDir()
 	if err != nil || dir == "" {
 		home, _ := os.UserHomeDir()

@@ -35,6 +35,7 @@ import type {
   NetDevSeriesPoint,
   NetDevTimelineEvent,
   NetDevExpectedStateView,
+  NetDevIncidentCase,
   NetDevDeviceHealth,
   NetDevHealthSnapshot,
   NetDevSyslogStatusView,
@@ -472,6 +473,10 @@ export interface AppBindings {
   NetDevExportState(): Promise<string>;
   NetDevTimeline(device: string, hours: number): Promise<NetDevTimelineEvent[]>;
   NetDevExpectedState(): Promise<NetDevExpectedStateView>;
+  NetDevCases(): Promise<NetDevIncidentCase[]>;
+  NetDevCaseSave(c: NetDevIncidentCase): Promise<NetDevIncidentCase>;
+  NetDevCaseDelete(id: string): Promise<void>;
+  NetDevCaseBundle(id: string): Promise<string>;
   NetDevLogFollowStart(device: string, source: string): Promise<void>;
   NetDevLogFollowStop(device: string): Promise<void>;
   NetDevDBQuery(source: string, query: string): Promise<string>;
@@ -2042,6 +2047,16 @@ function makeMockApp(): AppBindings {
     },
     async NetDevExpectedState(): Promise<NetDevExpectedStateView> {
       return { total: 0, reachable: 0, missing: [], noProbe: [] };
+    },
+    async NetDevCases(): Promise<NetDevIncidentCase[]> {
+      return [];
+    },
+    async NetDevCaseSave(c: NetDevIncidentCase): Promise<NetDevIncidentCase> {
+      return { ...c, id: c.id || "C-mock", created_at: c.created_at || new Date().toISOString(), updated_at: new Date().toISOString() };
+    },
+    async NetDevCaseDelete(_id: string): Promise<void> {},
+    async NetDevCaseBundle(_id: string): Promise<string> {
+      return "(browser dev mock)";
     },
     async NetDevLocate(_target: string): Promise<NetDevLocateResult> {
       return { target: _target, hits: [], searched: [], covered_devices: 0, total_devices: 0, budget_stopped: false, note: "browser dev mock" };
