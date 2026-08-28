@@ -1582,6 +1582,29 @@ func (a *App) NetDevFalsePositiveFinding(id string) error {
 	return netdev.FalsePositiveFindingByID(id)
 }
 
+// NetDevImportCVEs caches a user-supplied simplified-NVD feed (§4.5).
+func (a *App) NetDevImportCVEs(feedJSON string) (int, error) {
+	return netdev.ImportCVEFeed(feedJSON)
+}
+
+// NetDevCVEMatches runs the inventory against the cached feed.
+func (a *App) NetDevCVEMatches() ([]netdev.CVEMatch, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).MatchCVEs()
+}
+
+// NetDevCVESweep matches and files the summary Finding.
+func (a *App) NetDevCVESweep() (*netdev.Finding, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).MatchCVEsToFindings()
+}
+
 // NetDevAggregatedFindings returns the collapsed queue view (同类聚合).
 func (a *App) NetDevAggregatedFindings() ([]netdev.AggregatedFinding, error) {
 	return netdev.AggregateFindings(), nil

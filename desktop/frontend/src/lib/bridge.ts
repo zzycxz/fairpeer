@@ -481,6 +481,9 @@ export interface AppBindings {
   NetDevAckFinding(id: string): Promise<void>;
   NetDevFalsePositiveFinding(id: string): Promise<void>;
   NetDevAggregatedFindings(): Promise<NetDevAggregatedFinding[]>;
+  NetDevImportCVEs(feedJSON: string): Promise<number>;
+  NetDevCVEMatches(): Promise<{ device: string; cve_id: string; desc: string; severity: string; product: string }[]>;
+  NetDevCVESweep(): Promise<NetDevFinding | null>;
   NetDevLogFollowStart(device: string, source: string): Promise<void>;
   NetDevLogFollowStop(device: string): Promise<void>;
   NetDevDBQuery(source: string, query: string): Promise<string>;
@@ -2066,6 +2069,15 @@ function makeMockApp(): AppBindings {
     async NetDevFalsePositiveFinding(_id: string): Promise<void> {},
     async NetDevAggregatedFindings(): Promise<NetDevAggregatedFinding[]> {
       return [];
+    },
+    async NetDevImportCVEs(_f: string): Promise<number> {
+      return 0;
+    },
+    async NetDevCVEMatches(): Promise<{ device: string; cve_id: string; desc: string; severity: string; product: string }[]> {
+      return [];
+    },
+    async NetDevCVESweep(): Promise<NetDevFinding | null> {
+      return null;
     },
     async NetDevLocate(_target: string): Promise<NetDevLocateResult> {
       return { target: _target, hits: [], searched: [], covered_devices: 0, total_devices: 0, budget_stopped: false, note: "browser dev mock" };

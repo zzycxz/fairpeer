@@ -1222,6 +1222,19 @@ export function NetDevLayout({
                 title="逐台读取 running-config（只读密封路径，已脱敏）并用本地规则核查：Telnet/SNMPv1v2c/明文密码/SSHv1/NTP/Syslog。命中项进入发现，附证据与修复建议（修复走提案）。"
                 onClick={() => void runBaseline()}
               >{baseBusy ? "核查中…" : "安全基线核查"}</span>
+              <span
+                className="btn btn--secondary btn--small"
+                role="button"
+                title="清单 vendor/os/model × 已导入 CVE feed → 命中 Finding（feed 在设置 → 运维 高级页粘贴导入，产品不分发）"
+                onClick={() => void (async () => {
+                  setBaseBusy(true);
+                  try {
+                    const f = await app.NetDevCVESweep();
+                    if (f) setErr(`[SYS] CVE SWEEP: ${f.title}`);
+                    await reload();
+                  } catch (e) { setErr(String(e)); } finally { setBaseBusy(false); }
+                })()}
+              >CVE 匹配</span>
             </div>
             {scopedFindings.length === 0 && <div className="ndv__hint ndv__hint--flush">{project ? `>> 项目「${project.name}」暂无数据。` : <>&gt;&gt; NULL_DATA: 证据池为空。Agent 诊断输出及全量巡检报告将在此落盘 (Enforced Evidence-Based)。</>}</div>}
             {aggView && aggs.length > 0 ? aggs.map(a => <AggRow key={a.key} a={a} onChanged={() => void reload()} />) : scopedFindings.slice(0, 20).map(f => <FindingRow key={f.id} f={f} onResolved={() => void reload()} />)}
