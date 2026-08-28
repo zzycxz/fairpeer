@@ -214,15 +214,24 @@ func syslogEscalate(device, line string) {
 		if seen && time.Since(last) < 10*time.Minute {
 			return
 		}
+		// 误报学习（§4.10）：此键被标记误报 ≥2 次后自动降级为 info。
+		key0 := device + ":" + c.class
+		sev, degraded := suppressedSeverity("syslog:"+key0, c.severity)
 		now := time.Now()
 		f := &Finding{
 			Title:    fmt.Sprintf("[syslog] %s @ %s", c.class, device),
-			Severity: c.severity,
+			Severity: sev,
 			Devices:  []string{device},
 			Detail:   fmt.Sprintf("被动 syslog 命中模式 %q（class %s，10 分钟去重）。", c.pattern, c.class),
 			Evidence: []Evidence{{Device: device, Command: "syslog (被动接收)", Output: truncateRunes(line, 500)}},
 			Source:   "syslog:" + key,
 			Status:   "active",
+			Suggestion: func() string {
+				if degraded {
+					return "此前被标记误报 ≥2 次，已自动降级为 info（误报学习）。"
+				}
+				return ""
+			}(),
 		}
 		f.CreatedAt = now
 		_ = SaveFinding(f)

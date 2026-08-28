@@ -1853,6 +1853,19 @@ export interface NetDevLogSearchResult {
   note?: string;
 }
 
+// 告警队列聚合视图（App.NetDevAggregatedFindings / §4.10）。
+export interface NetDevAggregatedFinding {
+  key: string;
+  count: number;
+  open: number;
+  severity: string;
+  devices: string[];
+  title: string;
+  newest: string;
+  members?: NetDevFinding[];
+  suppressed: number;
+}
+
 // 案例（安全工作台 / §4.6）。
 export interface NetDevCaseIOC {
   value: string;

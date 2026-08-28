@@ -1571,6 +1571,22 @@ func (a *App) NetDevCaseDelete(id string) error {
 	return netdev.DeleteCase(id)
 }
 
+// NetDevAckFinding acknowledges one finding (§4.10 queue).
+func (a *App) NetDevAckFinding(id string) error {
+	return netdev.AckFindingByID(id)
+}
+
+// NetDevFalsePositiveFinding marks a finding false-positive and learns the
+// suppression key (误报学习).
+func (a *App) NetDevFalsePositiveFinding(id string) error {
+	return netdev.FalsePositiveFindingByID(id)
+}
+
+// NetDevAggregatedFindings returns the collapsed queue view (同类聚合).
+func (a *App) NetDevAggregatedFindings() ([]netdev.AggregatedFinding, error) {
+	return netdev.AggregateFindings(), nil
+}
+
 // NetDevCaseBundle writes the case report bundle and returns its path.
 func (a *App) NetDevCaseBundle(id string) (string, error) {
 	return netdev.CaseBundle(id)

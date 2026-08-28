@@ -13,7 +13,7 @@ import { HealthPanel } from "../components/netdev/HealthPanel";
 import { JobsPanel } from "../components/netdev/JobsPanel";
 import { AlertSetupWizard } from "../components/netdev/AlertSetupWizard";
 import { DockTabs, useDockTabState } from "../components/DockTabs";
-import type { NetDevSettingsView, NetDevDeviceHealth, NetDevFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph, NetDevBackupVersion } from "../lib/types";
+import type { NetDevSettingsView, NetDevDeviceHealth, NetDevFinding, NetDevAggregatedFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph, NetDevBackupVersion } from "../lib/types";
 import { useT } from "../lib/i18n";
 import logoSymbol from "../assets/logo-symbol.png";
 import { Markdown } from "../components/Markdown";
@@ -430,6 +430,11 @@ export function NetDevLayout({
     return () => clearInterval(t);
   }, [reload]);
 
+  // 聚合视图随 reload 刷新（告警队列，§4.10）——reload 闭包内拉取，避免声明序依赖。
+  useEffect(() => {
+    app.NetDevAggregatedFindings().then(list => setAggs(list ?? [])).catch(() => {});
+  }, [findings]);
+
   const [reloadTick, setReloadTick] = useState(0);
 
   const runQuick = useCallback(async (device: string, command: string) => {
@@ -586,6 +591,8 @@ export function NetDevLayout({
   const [locateTarget, setLocateTarget] = useState("");
   const [expBusy, setExpBusy] = useState(false);
   const [handoffMd, setHandoffMd] = useState("");
+  const [aggView, setAggView] = useState(true); // 聚合视图开关（§4.10）
+  const [aggs, setAggs] = useState<NetDevAggregatedFinding[]>([]);
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [locateBusy, setLocateBusy] = useState(false);
 
@@ -1204,6 +1211,12 @@ export function NetDevLayout({
             </div>
             <div className="ndv__panel-actions">
               <span
+                className={`btn btn--small ${aggView ? "btn--primary" : "btn--secondary"}`}
+                role="button"
+                title="同根因键收拢成一条队列项（syslog:设备:类 / triage:设备…），展开看成员；误报学习计数 ≥2 显示降级徽标"
+                onClick={() => setAggView(v => !v)}
+              >{aggView ? "聚合队列" : "平铺列表"}</span>
+              <span
                 className="btn btn--secondary btn--small"
                 role="button"
                 title="逐台读取 running-config（只读密封路径，已脱敏）并用本地规则核查：Telnet/SNMPv1v2c/明文密码/SSHv1/NTP/Syslog。命中项进入发现，附证据与修复建议（修复走提案）。"
@@ -1211,7 +1224,7 @@ export function NetDevLayout({
               >{baseBusy ? "核查中…" : "安全基线核查"}</span>
             </div>
             {scopedFindings.length === 0 && <div className="ndv__hint ndv__hint--flush">{project ? `>> 项目「${project.name}」暂无数据。` : <>&gt;&gt; NULL_DATA: 证据池为空。Agent 诊断输出及全量巡检报告将在此落盘 (Enforced Evidence-Based)。</>}</div>}
-            {scopedFindings.slice(0, 20).map(f => <FindingRow key={f.id} f={f} onResolved={() => void reload()} />)}
+            {aggView && aggs.length > 0 ? aggs.map(a => <AggRow key={a.key} a={a} onChanged={() => void reload()} />) : scopedFindings.slice(0, 20).map(f => <FindingRow key={f.id} f={f} onResolved={() => void reload()} />)}
           </div>
         )}
 
@@ -1544,6 +1557,29 @@ function BackupHistory({ device }: { device: string }) {
 // (device ▸ command ▸ output) — the review surface, ported from the settings
 // FindingCenter so operations never leave the 运维 page.
 const SEV_LABEL: Record<string, string> = { info: "ℹ 提示", warning: "⚠ 警告", critical: "🔴 严重" };
+// AggRow — 聚合队列行（§4.10 同类聚合）：「link-flap ×17（3 台）」一条队列项
+// 展开看成员；ack/误报操作直达成员 Finding。
+function AggRow({ a, onChanged }: { a: NetDevAggregatedFinding; onChanged?: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="ndv__finding" style={{ "--sev": SEV_COLOR[a.severity] ?? SEV_COLOR.info } as React.CSSProperties}>
+      <div className="ndv__finding-title" role="button" onClick={() => setOpen(!open)}>
+        <span style={{ color: SEV_COLOR[a.severity] ?? SEV_COLOR.info, marginRight: 6 }}>{SEV_LABEL[a.severity] ?? SEV_LABEL.info}</span>
+        {a.title} <span style={{ fontWeight: 700 }}>×{a.count}</span>
+        <span style={{ fontWeight: 400, opacity: 0.7 }}>{a.devices.length} 台 · 未闭环 {a.open}{open ? " ▲" : " ▼"}</span>
+        {a.suppressed >= 2 && <span className="ndv__badge ndv__badge--warn" style={{ marginLeft: 6 }} title={`已被误报学习 ${a.suppressed} 次，新告警自动降级`}>已降级</span>}
+      </div>
+      {open && (
+        <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 4 }}>
+          {(a.members ?? []).map(f => (
+            <FindingRow key={f.id} f={f} onResolved={onChanged} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FindingRow({ f, onResolved }: { f: NetDevFinding; onResolved?: () => void }) {
   const [open, setOpen] = useState(false);
   return (
@@ -1555,6 +1591,14 @@ function FindingRow({ f, onResolved }: { f: NetDevFinding; onResolved?: () => vo
         {f.status === "resolved" && <span style={{ marginLeft: 6, fontSize: 10, color: "var(--ok)", border: "1px solid var(--ok)", borderRadius: "var(--radius-pill)", padding: "0 6px" }}>已恢复</span>}
       </div>
       <div style={{ display: "flex", gap: 6, alignSelf: "flex-end", marginBottom: 4 }}>
+        {f.status === "active" && (
+          <span className="btn btn--secondary btn--small" role="button" title="确认收到，进入处理中（§4.10 状态机）"
+            onClick={() => { void app.NetDevAckFinding(f.id).then(() => onResolved?.()); }}>确认</span>
+        )}
+        {(f.status === "active" || f.status === "ack") && (
+          <span className="btn btn--secondary btn--small" role="button" title="标记误报：登记抑制键，同类自动告警此后降级（误报学习）"
+            onClick={() => { void app.NetDevFalsePositiveFinding(f.id).then(() => onResolved?.()); }}>误报</span>
+        )}
         <span className="btn btn--secondary btn--small" role="button" title="以此 Finding 为首条时间线条目开一个排查案例"
           onClick={() => {
             window.dispatchEvent(new CustomEvent("fairpeer:netdev-case", { detail: { title: f.title, device: (f.devices ?? [])[0] ?? "", text: `${f.severity}｜${f.title}｜${(f.detail ?? "").slice(0, 120)}`, ref: f.id } }));

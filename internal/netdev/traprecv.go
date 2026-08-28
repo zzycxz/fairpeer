@@ -162,15 +162,17 @@ func trapEscalate(device, oid, text string) {
 	if seen && time.Since(last) < 10*time.Minute {
 		return
 	}
+	sev, degraded := suppressedSeverity("trap:"+key, c.severity)
 	_ = SaveFinding(&Finding{
 		Title:    fmt.Sprintf("[trap] %s @ %s", c.class, device),
-		Severity: c.severity,
+		Severity: sev,
 		Devices:  []string{device},
 		Detail:   fmt.Sprintf("被动 SNMP trap 命中 %s（10 分钟去重）。", oid),
 		Evidence: []Evidence{{Device: device, Command: "snmptrap (被动接收)", Output: truncateRunes(text, 500)}},
 		Source:   "trap:" + key,
 		Status:   "active",
 	})
+	_ = degraded
 }
 
 // TrapEventsSince returns one device's trap ring entries since t.

@@ -36,6 +36,7 @@ import type {
   NetDevTimelineEvent,
   NetDevExpectedStateView,
   NetDevIncidentCase,
+  NetDevAggregatedFinding,
   NetDevDeviceHealth,
   NetDevHealthSnapshot,
   NetDevSyslogStatusView,
@@ -477,6 +478,9 @@ export interface AppBindings {
   NetDevCaseSave(c: NetDevIncidentCase): Promise<NetDevIncidentCase>;
   NetDevCaseDelete(id: string): Promise<void>;
   NetDevCaseBundle(id: string): Promise<string>;
+  NetDevAckFinding(id: string): Promise<void>;
+  NetDevFalsePositiveFinding(id: string): Promise<void>;
+  NetDevAggregatedFindings(): Promise<NetDevAggregatedFinding[]>;
   NetDevLogFollowStart(device: string, source: string): Promise<void>;
   NetDevLogFollowStop(device: string): Promise<void>;
   NetDevDBQuery(source: string, query: string): Promise<string>;
@@ -2057,6 +2061,11 @@ function makeMockApp(): AppBindings {
     async NetDevCaseDelete(_id: string): Promise<void> {},
     async NetDevCaseBundle(_id: string): Promise<string> {
       return "(browser dev mock)";
+    },
+    async NetDevAckFinding(_id: string): Promise<void> {},
+    async NetDevFalsePositiveFinding(_id: string): Promise<void> {},
+    async NetDevAggregatedFindings(): Promise<NetDevAggregatedFinding[]> {
+      return [];
     },
     async NetDevLocate(_target: string): Promise<NetDevLocateResult> {
       return { target: _target, hits: [], searched: [], covered_devices: 0, total_devices: 0, budget_stopped: false, note: "browser dev mock" };
