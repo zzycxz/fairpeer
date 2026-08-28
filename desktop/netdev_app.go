@@ -1582,6 +1582,39 @@ func (a *App) NetDevFalsePositiveFinding(id string) error {
 	return netdev.FalsePositiveFindingByID(id)
 }
 
+// Human terminal (§6.1): device PTY for humans, full audit trail.
+func (a *App) NetDevHumanTTYStart(device string) (netdev.HumanTTYState, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return netdev.HumanTTYState{}, err
+	}
+	state, err := netdev.SharedManager(cfg).HumanTTYStart(device, func(chunk string) {
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "netdev:humantty", map[string]string{"device": device, "chunk": chunk})
+		}
+	})
+	if err != nil {
+		return netdev.HumanTTYState{}, err
+	}
+	return *state, nil
+}
+
+func (a *App) NetDevHumanTTYWrite(device, input string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	return netdev.SharedManager(cfg).HumanTTYWrite(device, input)
+}
+
+func (a *App) NetDevHumanTTYStop(device string) {
+	netdev.HumanTTYStop(device)
+}
+
+func (a *App) NetDevHumanTTYStatus() ([]netdev.HumanTTYState, error) {
+	return netdev.HumanTTYStatus(), nil
+}
+
 // NetDevImportCVEs caches a user-supplied simplified-NVD feed (§4.5).
 func (a *App) NetDevImportCVEs(feedJSON string) (int, error) {
 	return netdev.ImportCVEFeed(feedJSON)
