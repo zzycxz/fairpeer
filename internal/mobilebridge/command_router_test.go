@@ -46,6 +46,7 @@ func (e *recordingExec) SetModel(tab, m string) error          { e.mark("setmode
 func (e *recordingExec) ListSessions() ([]SessionInfo, error)  { e.mark("list"); return nil, nil }
 func (e *recordingExec) DeleteSession(string) error            { e.mark("deletesession"); return nil }
 func (e *recordingExec) ListModels() ([]ModelInfo, error)      { e.mark("listmodels"); return nil, nil }
+func (e *recordingExec) ListTemplates() ([]TemplateInfo, error) { e.mark("listtemplates"); return nil, nil }
 func (e *recordingExec) NewTab(_, _ string) (string, error)    { e.mark("newtab"); return "", nil }
 func (e *recordingExec) RenameSession(string, string) error    { e.mark("renamesession"); return nil }
 func (e *recordingExec) OfficeRun(string, string, map[string]string) error {

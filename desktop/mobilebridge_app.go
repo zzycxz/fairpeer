@@ -20,6 +20,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/linkpeersignal"
 	"github.com/zzycxz/fairpeer/internal/mobilebridge"
+	"github.com/zzycxz/fairpeer/internal/scheduler"
 	"github.com/zzycxz/fairpeer/internal/secret"
 )
 
@@ -161,6 +162,7 @@ func loadOrCreateDeviceKey(store mobilebridge.KeyStore) (ed25519.PrivateKey, ed2
 // is never blocked by a long Controller operation.
 type execAdapter struct {
 	app     *App
+	bridge  atomic.Pointer[mobilebridge.Bridge] // Pause/Resume 回显发射用（ensureMobileBridge 注入）
 	fdMu    sync.Mutex
 	fdFiles map[string]*os.File // file_drop 接收中的文件（name → handle）
 }
@@ -194,6 +196,18 @@ func (e *execAdapter) Cancel(tab string) error {
 	return nil
 }
 
+// emitState 向订阅了该 tab 的手机端发一条状态回执（AUDIT P1-10：本地
+// 乐观显示 → 服务端真值）。ForwardEvent 兼入 ring，重连 resync 可补。
+func (e *execAdapter) emitState(tab, kind string) {
+	if tab == "" {
+		return
+	}
+	if mb := e.bridge.Load(); mb != nil {
+		wire, _ := json.Marshal(map[string]any{"kind": kind})
+		go mb.ForwardEvent(tab, wire)
+	}
+}
+
 func (e *execAdapter) Steer(tab, text string) error {
 	if tab = e.app.resolveMobileTab(tab); tab != "" {
 		go e.app.SteerForTab(tab, text)
@@ -204,6 +218,7 @@ func (e *execAdapter) Steer(tab, text string) error {
 func (e *execAdapter) Pause(tab string) error {
 	if tab = e.app.resolveMobileTab(tab); tab != "" {
 		go e.app.PauseTab(tab)
+		e.emitState(tab, "paused") // P1-10: 手机端暂停态由服务端真值驱动
 	}
 	return nil
 }
@@ -211,6 +226,7 @@ func (e *execAdapter) Pause(tab string) error {
 func (e *execAdapter) Resume(tab string) error {
 	if tab = e.app.resolveMobileTab(tab); tab != "" {
 		go e.app.ResumeTurnTab(tab)
+		e.emitState(tab, "resumed")
 	}
 	return nil
 }
@@ -236,6 +252,18 @@ func (e *execAdapter) ListSessions() ([]mobilebridge.SessionInfo, error) {
 // ModelsForMobile 返回激活 tab 可用的模型列表（list_models 回复）。
 func (e *execAdapter) ListModels() ([]mobilebridge.ModelInfo, error) {
 	return e.app.ModelsForMobile(), nil
+}
+
+// ListTemplates 返回办公模板目录（list_templates 回复，UX M5 W14）。
+// 源 = scheduler.BuiltinTemplates（桌面定时任务同一份目录，单一真源）。
+func (e *execAdapter) ListTemplates() ([]mobilebridge.TemplateInfo, error) {
+	out := make([]mobilebridge.TemplateInfo, 0, len(scheduler.BuiltinTemplates))
+	for _, t := range scheduler.BuiltinTemplates {
+		out = append(out, mobilebridge.TemplateInfo{
+			ID: t.ID, Name: t.Name, Category: t.Category, Desc: t.Desc,
+		})
+	}
+	return out, nil
 }
 
 // NewTab 在桌面创建一个新会话 tab，返回它的 ID（new_tab 命令）。
@@ -460,7 +488,9 @@ func (a *App) ensureMobileBridge(ctx context.Context) {
 		"signal_url", cfg.SignalURL, "stun", cfg.STUNServers, "log_level", cfg.LogLevel,
 		"cloud_signal_url", cfg.CloudSignalURL, "turn_enabled", cfg.TURNEnabled,
 		"udp_knock", cfg.UDPKnock, "knock_server", cfg.KnockServer)
-	bridge := mobilebridge.NewBridge(cfg, priv, pub, store, &execAdapter{app: a, fdFiles: map[string]*os.File{}}, mobilebridge.NewAudit(cfg.LogLevel))
+	adapter := &execAdapter{app: a, fdFiles: map[string]*os.File{}}
+	bridge := mobilebridge.NewBridge(cfg, priv, pub, store, adapter, mobilebridge.NewAudit(cfg.LogLevel))
+	adapter.bridge.Store(bridge)
 	// 注入 tab 别名解析：linkpeer 发 "default"/""，fairpeer 需要 UUID tab id。
 	// 映射到当前激活 tab，手机就能接入桌面正在用的会话。
 	bridge.SetResolveTab(func(tab string) string {

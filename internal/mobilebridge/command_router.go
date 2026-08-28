@@ -27,6 +27,7 @@ type CommandExecutor interface {
 	SetModel(tab, model string) error
 	ListSessions() ([]SessionInfo, error)
 	ListModels() ([]ModelInfo, error)
+	ListTemplates() ([]TemplateInfo, error)
 	NewTab(workspaceRoot, profile string) (string, error)
 	RenameSession(tab, title string) error
 	DeleteSession(tab string) error
@@ -49,6 +50,15 @@ type ModelInfo struct {
 	Label string `json:"label"`
 }
 
+// TemplateInfo is one row of the office template list sent to C
+// (list_templates reply; source = scheduler.BuiltinTemplates).
+type TemplateInfo struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Desc     string `json:"desc"`
+}
+
 // CommandRouter validates per-connection permissions and dispatches to the
 // executor. One router per Conn (each Conn carries its own PerConnPermissions).
 type CommandRouter struct {
@@ -61,7 +71,8 @@ type CommandRouter struct {
 	// exposes the latest subscription via this callback.
 	onSubscribeTab func(tab string)
 	onListSessions func(sessions []SessionInfo)
-	onListModels   func(models []ModelInfo)
+	onListModels    func(models []ModelInfo)
+	onListTemplates func(templates []TemplateInfo)
 	onNewTab       func(tabID string)
 	onResync       func(tabID string, sinceSeq uint64)
 	onLoadSession  func(tab string, history []map[string]any)
@@ -97,6 +108,11 @@ func (r *CommandRouter) SetListSessionsHook(fn func([]SessionInfo)) {
 // list back over the encrypted Conn.
 func (r *CommandRouter) SetListModelsHook(fn func([]ModelInfo)) {
 	r.onListModels = fn
+}
+
+// SetListTemplatesHook lets the Bridge reply to list_templates (UX M5 W14).
+func (r *CommandRouter) SetListTemplatesHook(fn func([]TemplateInfo)) {
+	r.onListTemplates = fn
 }
 
 // SetNewTabHook lets the Bridge reply to new_tab with the new tab ID so C can
@@ -221,6 +237,12 @@ func (r *CommandRouter) Route(plaintext []byte) error {
 		models, _ := r.exec.ListModels()
 		if r.onListModels != nil {
 			r.onListModels(models)
+		}
+		return nil
+	case proto.CmdListTemplates:
+		templates, _ := r.exec.ListTemplates()
+		if r.onListTemplates != nil {
+			r.onListTemplates(templates)
 		}
 		return nil
 	case proto.CmdNewTab:

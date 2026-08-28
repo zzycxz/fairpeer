@@ -660,6 +660,10 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # through it. Deploy your own: see deploy/linkpeer-signal/docker-compose.yml.
 # ─────────────────────────────────────────────────────────────────────────────
 [mobilebridge]
+# ── 信令模式（零配置上手，2026-08 起）──
+# signal_url 留空 = 内嵌 K：fairpeer 进程内自动起 linkpeersignal
+#（0.0.0.0:8080），装完扫码即通（局域网直连零云）——新装机器的默认形态。
+# 填地址 = 外部 K；与 cloud_signal_url 相同 = 仅云模式。
 # enabled          = false                          # master switch (default off)
 # signal_url       = "wss://signal.example.com"     # your self-hosted signaling K
 # stun_servers     = ["stun:signal.example.com:3478"]
@@ -711,3 +715,22 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # name = "netdev"
 # plugins = ["my-nms-server"]             # 显式点名的 MCP 才会出现在运维模式
 # enabled_skills = ["init", "install-capability", "test", "explore", "research", "review", "security-review", "netdev-help"]
+
+# ── Trust Domain (私有网信任域账本) ────────────────────────────────────────────
+# 设计: docs/TRUSTDOMAIN_SPEC.md。跨 profile 的基础设施，默认关闭；无代币无挖矿，
+# 许可链 = quorum 签名复制日志。链上只放控制面元数据（成员/撤销/令牌/审计锚/自证）。
+#
+# CLI: fairpeer trustdomain init|status|attest|admit|revoke|token|run
+#
+# [trustdomain]
+# enabled  = false
+# signal_url = "wss://signal.yourdomain.com/knock"   # 撮合点(不可信，只撮合不鉴权)
+# domain_id  = ""                                    # 创世块哈希=域ID；空=未入域(init 后生成)
+# data_dir   = ""                                    # 账本/身份密钥目录；空=<用户配置根>/trustdomain
+# bootstrap_peers = ["10.0.0.21:7123"]               # mDNS 不可用时的首连回退(服务器场景默认)
+# admins = ["<base64 ed25519 公钥>"]                  # 展示用；权威集合在链上
+# quorum_m = 3                                       # 展示用；权威值在链上
+# attest_interval_sec      = 60                      # 自证摘要节奏
+# checkpoint_every_blocks  = 0                       # >0 时自动出检查点
+# tick_interval_sec        = 5                       # 节点 gossip 循环节奏
+# listen_addr = "0.0.0.0:7123"                       # 入站对等节点监听（默认 :7123）

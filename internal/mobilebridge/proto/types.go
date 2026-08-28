@@ -70,6 +70,7 @@ const (
 	CmdPing          = "ping"
 	CmdPong          = "pong"
 	CmdListModels    = "list_models"
+	CmdListTemplates = "list_templates"
 	CmdRenameSession = "rename_session"
 	CmdDeleteSession = "delete_session"
 )

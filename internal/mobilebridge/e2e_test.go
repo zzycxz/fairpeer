@@ -41,7 +41,8 @@ func (m *mockExecutor) Answer(string, string, []string) error             { retu
 func (m *mockExecutor) SetPlan(string, bool) error                        { return nil }
 func (m *mockExecutor) SetModel(string, string) error                     { return nil }
 func (m *mockExecutor) ListSessions() ([]SessionInfo, error)              { return nil, nil }
-func (m *mockExecutor) ListModels() ([]ModelInfo, error)                  { return nil, nil }
+func (m *mockExecutor) ListModels() ([]ModelInfo, error) { return nil, nil }
+func (m *mockExecutor) ListTemplates() ([]TemplateInfo, error) { return nil, nil }
 func (m *mockExecutor) NewTab(_, _ string) (string, error)                { return "", nil }
 func (m *mockExecutor) RenameSession(string, string) error                { return nil }
 func (m *mockExecutor) DeleteSession(string) error                        { return nil }

@@ -346,6 +346,12 @@ func (b *Bridge) handleOffer(msg SignalMsg, from *SignalClient) {
 			_ = conn.SendEvent(wire)
 		}
 	})
+	router.SetListTemplatesHook(func(templates []TemplateInfo) {
+		if conn := b.conns[msg.ConnID]; conn != nil {
+			wire, _ := json.Marshal(map[string]any{"kind": "templates_list", "templates": templates})
+			_ = conn.SendEvent(wire)
+		}
+	})
 	router.SetNewTabHook(func(tabID string) {
 		if conn := b.conns[msg.ConnID]; conn != nil {
 			wire, _ := json.Marshal(map[string]any{"kind": "new_tab_result", "tabId": tabID})
@@ -645,11 +651,16 @@ func (b *Bridge) ForwardEvent(tabID string, wireEventJSON []byte) {
 		b.ringBuf[tabID] = r
 	}
 	r.seq++
-	r.entries = append(r.entries, ringEntry{seq: r.seq, json: wireEventJSON})
+	// NR/AUDIT-4: seq 盖进事件本体——C 侧据此记录每 tab 的最新序号，
+	// resync 发 sinceSeq 才能落在同一序号空间（此前 C 用本地计数器，
+	// 两个空间对不上导致永远 resync_full 全量拉）。
+	stamped := stampSeq(wireEventJSON, r.seq)
+	r.entries = append(r.entries, ringEntry{seq: r.seq, json: stamped})
 	if len(r.entries) > ringCap {
 		r.entries = r.entries[len(r.entries)-ringCap:]
 	}
 	b.mu.Unlock()
+	wireEventJSON = stamped
 	slog.Info("mobilebridge: forward_event",
 		"tabID", tabID, "subscribers", len(subs), "targets", len(conns), "eventLen", len(wireEventJSON))
 	if len(conns) == 0 {
@@ -748,3 +759,18 @@ func toICEServers(cfg Config, cloud bool) []webrtc.ICEServer {
 var ErrNotStarted = errors.New("bridge not started")
 
 var _ SignalHandler = (*Bridge)(nil)
+
+// stampSeq 把 ring seq 写进 wireEvent JSON 的顶层 "seq" 字段（原值保留
+// 兼容）。事件体 ≤32KB，chat 频率下 decode/encode 成本可忽略。
+func stampSeq(wire []byte, seq uint64) []byte {
+	var m map[string]any
+	if json.Unmarshal(wire, &m) != nil {
+		return wire // 非 JSON（不应发生）：原样转发不阻塞
+	}
+	m["seq"] = seq
+	out, err := json.Marshal(m)
+	if err != nil {
+		return wire
+	}
+	return out
+}
