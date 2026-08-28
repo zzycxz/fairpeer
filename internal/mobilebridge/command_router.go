@@ -77,6 +77,10 @@ func NewCommandRouter(devC string, exec CommandExecutor, perm PerConnPermissions
 	}
 }
 
+// Perms 返回该连接的权限快照（UX_ONBOARDING W11：握手后经 permissions
+// wireEvent 下发给 C 端展示——权限执法在 S 端，C 端只读显示真实生效值）。
+func (r *CommandRouter) Perms() PerConnPermissions { return r.perm }
+
 // SetSubscribeHook lets the Bridge learn tab-subscription changes so it can
 // route wireEvents to the right Conn (FAIRPEER_SPEC §11.1).
 func (r *CommandRouter) SetSubscribeHook(fn func(tab string)) {

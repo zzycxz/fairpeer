@@ -381,6 +381,16 @@ func (b *Bridge) handleOffer(msg SignalMsg, from *SignalClient) {
 		b.mu.Lock()
 		b.byDev[c.DevC()] = c
 		b.mu.Unlock()
+		// W11: 下发真实生效权限（C 端设置页只读展示；执法在本端 router）
+		if permWire, err := json.Marshal(map[string]any{
+			"kind": "permissions",
+			"readonly": router.Perms().ReadOnly,
+			"require_approval": router.Perms().RequireApproval,
+			"allow_file_drop": router.Perms().AllowFileDrop,
+			"allow_high_risk": router.Perms().AllowHighRisk,
+		}); err == nil {
+			_ = c.SendEvent(permWire)
+		}
 		if b.onReady != nil {
 			b.onReady(c)
 		}

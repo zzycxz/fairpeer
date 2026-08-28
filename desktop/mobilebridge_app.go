@@ -296,13 +296,22 @@ func (e *execAdapter) FileStart(_ string, name string, size int64) error {
 	if size > maxFileSize {
 		return errors.New("file too large (max 50MB)")
 	}
-	// 扩展名白名单（§11.2③ 安全沙箱）
+	// 扩展名白名单（§11.2③ 安全沙箱）。UX_ONBOARDING W12：补代码类扩展名
+	//（linkpeer 定位开发者伴侣，传 .go/.py/.ts 是最主场景，原名单全挡）。
 	ext := strings.ToLower(filepath.Ext(clean))
 	allowed := map[string]bool{
 		".txt": true, ".md": true, ".pdf": true, ".doc": true, ".docx": true,
 		".xls": true, ".xlsx": true, ".ppt": true, ".pptx": true,
 		".csv": true, ".json": true, ".png": true, ".jpg": true, ".jpeg": true,
 		".gif": true, ".zip": true, ".mp3": true, ".mp4": true,
+		// 代码/配置（W12 默认集扩充）
+		".go": true, ".py": true, ".ts": true, ".tsx": true, ".js": true,
+		".jsx": true, ".rs": true, ".java": true, ".kt": true, ".c": true,
+		".h": true, ".cpp": true, ".cs": true, ".rb": true, ".php": true,
+		".sh": true, ".ps1": true, ".bat": true, ".sql": true,
+		".yaml": true, ".yml": true, ".toml": true, ".xml": true, ".html": true,
+		".css": true, ".dart": true, ".swift": true, ".vue": true, ".svelte": true,
+		".proto": true, ".lock": true, ".ini": true, ".conf": true, ".env": true,
 	}
 	if !allowed[ext] {
 		return errors.New("file type not allowed: " + ext)
