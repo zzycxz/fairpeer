@@ -106,3 +106,49 @@ func TestBridgeToICEServers(t *testing.T) {
 		t.Fatalf("expected TURN credentials, got %q/%v", turn.Username, turn.Credential)
 	}
 }
+
+// TestApplyKnockDefault（UX_ONBOARDING W4）：敲门开启且未填 STUN 时取云 K
+// 域名拼 coturn；已填/无云 K/未开启均保持原样。
+func TestApplyKnockDefault(t *testing.T) {
+	base := Config{UDPKnock: true, CloudSignalURL: "https://signal.example.com"}
+	if got := ApplyKnockDefault(base); got.KnockServer != "stun:signal.example.com:3478" {
+		t.Fatalf("want derived knock server, got %q", got.KnockServer)
+	}
+	if got := ApplyKnockDefault(Config{UDPKnock: false, CloudSignalURL: "https://x.com"}); got.KnockServer != "" {
+		t.Fatalf("knock off should not derive, got %q", got.KnockServer)
+	}
+	if got := ApplyKnockDefault(Config{UDPKnock: true, KnockServer: "stun:a:1"}); got.KnockServer != "stun:a:1" {
+		t.Fatalf("explicit server must win, got %q", got.KnockServer)
+	}
+	if got := ApplyKnockDefault(Config{UDPKnock: true}); got.KnockServer != "" {
+		t.Fatalf("no cloud URL should stay empty, got %q", got.KnockServer)
+	}
+}
+
+// TestParseTurnCred（UX_ONBOARDING W3）：从 turn-cred.sh 输出片段提取凭据。
+func TestParseTurnCred(t *testing.T) {
+	u, p, h, port, ok := ParseTurnCred("turn_user        = \"1893456000\"\nturn_pass        = \"ULFtTEb7+k63cHTlVfN6QlJyZUQ=\"")
+	if ok || h != "" {
+		t.Fatalf("toml lines without host should not parse, got %v %q", ok, h)
+	}
+	// 完整凭据串（在任意粘贴文本中）
+	u, p, h, port, ok = ParseTurnCred(`粘贴以下内容：
+[mobilebridge]
+turn_user = "u1"
+turn_pass = "p1"
+1893456000:p1@turn.example.com:3478 ← 用这个`)
+	if !ok || u != "1893456000" || p != "p1" || h != "turn.example.com" || port != 3478 {
+		t.Fatalf("want 1893456000/p1/turn.example.com/3478, got %q %q %q %d %v", u, p, h, port, ok)
+	}
+	// 默认端口
+	_, _, h, port, ok = ParseTurnCred("u:p@turn.example.com")
+	if !ok || h != "turn.example.com" || port != 3478 {
+		t.Fatalf("default port 3478 expected, got %q %d %v", h, port, ok)
+	}
+	// 坏输入
+	for _, bad := range []string{"", "nopassword@", "@host", "a:b@", "u:p@"} {
+		if _, _, _, _, ok := ParseTurnCred(bad); ok {
+			t.Fatalf("bad input %q should not parse", bad)
+		}
+	}
+}

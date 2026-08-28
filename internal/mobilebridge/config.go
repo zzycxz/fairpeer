@@ -1,5 +1,12 @@
 package mobilebridge
 
+import (
+	"net"
+	"net/url"
+	"regexp"
+	"strconv"
+)
+
 // Config is the [mobilebridge] section of fairpeer.toml. The desktop
 // integration layer (desktop/app.go) fills this from fairpeer's config load
 // and passes it to Bridge — mobilebridge itself never reads TOML, keeping it
@@ -42,6 +49,43 @@ func DefaultConfig() Config {
 		MaxConnections: 4,
 		LogLevel:       "info",
 	}
+}
+
+// ApplyKnockDefault 补齐 knock_server 智能默认（UX_ONBOARDING W4）：开了
+// 单包敲门但没填 STUN 地址时，取云 K 域名拼 coturn（云跳板同机部署）。
+// 没配云 K 则保持空（调用方 UI 提示需手填）。返回最终生效值。
+func ApplyKnockDefault(cfg Config) Config {
+	if !cfg.UDPKnock || cfg.KnockServer != "" || cfg.CloudSignalURL == "" {
+		return cfg
+	}
+	u, err := url.Parse(cfg.CloudSignalURL)
+	if err != nil || u.Hostname() == "" {
+		return cfg
+	}
+	cfg.KnockServer = "stun:" + net.JoinHostPort(u.Hostname(), "3478")
+	return cfg
+}
+
+// turnCredRe 在任意粘贴文本中提取 `user:pass@host[:port]`——user 收敛为
+// URL/TOML 安全字符（时间戳凭据、base64 pass 都覆盖），多行粘贴取第一个
+// 匹配（turn-cred.sh 输出里凭据串唯一）。
+var turnCredRe = regexp.MustCompile(
+	`([A-Za-z0-9._%+-]{1,128}):([A-Za-z0-9+/=_-]{1,256})@([A-Za-z0-9.-]+)(?::(\d{1,5}))?`)
+
+// ParseTurnCred 从 turn-cred.sh 输出（或任意包含凭据串的粘贴文本）解析
+// `user:pass@host[:port]`（UX_ONBOARDING W3）。返回归一化的 TURN 配置；
+// 解析不到返回 ok=false。
+func ParseTurnCred(paste string) (user, pass, host string, port int, ok bool) {
+	m := turnCredRe.FindStringSubmatch(paste)
+	if m == nil || m[3] == "" {
+		return "", "", "", 0, false
+	}
+	user, pass, host = m[1], m[2], m[3]
+	port = 3478
+	if p, err := strconv.Atoi(m[4]); err == nil && p > 0 && p < 65536 {
+		port = p
+	}
+	return user, pass, host, port, true
 }
 
 // PerConnPermissions is what one connected C may do, derived from Config

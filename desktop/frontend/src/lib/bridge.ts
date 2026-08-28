@@ -37,6 +37,8 @@ import type {
   NetDevHealthSnapshot,
   NetDevSyslogStatusView,
   NetDevAuditChainStatus,
+  NetDevGoldenInfo,
+  NetDevMetricPoint,
   NetDevAuditEntryView,
   NetDevFinding,
   NetDevTopologyGraph,
@@ -329,6 +331,11 @@ export interface AppBindings {
   MobileBridgeSetKnock(enabled: boolean, server: string): Promise<void>;
   // 公网跳板（跨网配对/信令）：开关 + 云 K 地址（enabled=false 关闭并清空）。
   MobileBridgeSetCloudRelay(enabled: boolean, url: string): Promise<void>;
+  // 信令模式切换（embedded 零配置内嵌 K / external 外部 K / cloud 仅云），
+  // 持久化后重启 fairpeer 生效，返回最终模式。
+  MobileBridgeSetKMode(mode: string, externalURL: string): Promise<string>;
+  // 粘贴 turn-cred.sh 输出一键解析回填 TURN 四项，返回 {host,port,user}。
+  MobileBridgeParseTurnCred(paste: string): Promise<string>;
   // Mobile-facing readouts (mobilebridge_app.go + tabs.go). ModelsForMobile /
   // SessionListForMobile return the trimmed mobile payloads above, NOT the
   // app-wide ModelInfo/SessionMeta. ActiveTabID feeds the current tab id to the
@@ -470,6 +477,11 @@ export interface AppBindings {
   NetDevSyslogStatus(): Promise<NetDevSyslogStatusView>;
   NetDevAuditVerify(): Promise<NetDevAuditChainStatus>;
   NetDevResolveFinding(id: string): Promise<void>;
+  // Golden Config: baseline from a backup version + drift check.
+  NetDevMetricHistory(device: string): Promise<NetDevMetricPoint[]>;
+  NetDevSetGoldenFromBackup(device: string, versionID: string): Promise<void>;
+  NetDevGoldenInfo(device: string): Promise<NetDevGoldenInfo>;
+  NetDevGoldenCheck(device: string): Promise<string>;
   // ProbeMailAccount tests a saved mailbox's IMAP login by actually connecting.
   // An empty name probes the Default account; a non-empty name probes that
   // named account. Returns ok/error/unconfigured so the mail card can show a
@@ -801,6 +813,25 @@ const netdevLogFollowListeners = new Set<(ev: NetDevLogFollowEvent) => void>();
 
 export function emitNetdevLogFollowMock(ev: NetDevLogFollowEvent) {
   for (const cb of netdevLogFollowListeners) cb(ev);
+}
+
+// onBrowserMirror subscribes to the browser-mirror frame stream
+// ("browser:mirror": lifecycle status + post-action screenshots from the
+// browser tools and browser_auto — desktop/app.go forwards the kernel sink).
+export function onBrowserMirror(cb: (f: import("./types").BrowserMirrorFrame) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("browser:mirror", (f) => cb(f as import("./types").BrowserMirrorFrame));
+  }
+  browserMirrorListeners.add(cb);
+  return () => {
+    browserMirrorListeners.delete(cb);
+  };
+}
+
+const browserMirrorListeners = new Set<(f: import("./types").BrowserMirrorFrame) => void>();
+
+export function emitBrowserMirrorMock(f: import("./types").BrowserMirrorFrame) {
+  for (const cb of browserMirrorListeners) cb(f);
 }
 
 // onNetdevHealth subscribes to health change events ("netdev:health": one
@@ -2060,6 +2091,16 @@ function makeMockApp(): AppBindings {
       return { total: 0, chained: 0, ok: true };
     },
     async NetDevResolveFinding(_id: string): Promise<void> {},
+    async NetDevSetGoldenFromBackup(_device: string, _versionID: string): Promise<void> {},
+    async NetDevMetricHistory(_device: string): Promise<NetDevMetricPoint[]> {
+      return [];
+    },
+    async NetDevGoldenInfo(_device: string): Promise<NetDevGoldenInfo> {
+      return { set: false, at: "", lines: 0 };
+    },
+    async NetDevGoldenCheck(_device: string): Promise<string> {
+      return "(browser dev mock: golden check off)";
+    },
     async SetNetDevSettings(v: NetDevSettingsView) {
       mockNetDev = { ...v, devices: [...v.devices], hops: [...v.hops], groups: [...v.groups], scopes: [...v.scopes], guardAllowedGroups: [...(v.guardAllowedGroups ?? [])], projects: v.projects ? [...v.projects] : mockNetDev.projects, presets: v.presets ? [...v.presets] : mockNetDev.presets };
     },
@@ -3253,6 +3294,8 @@ function makeMockApp(): AppBindings {
     async MobileBridgeListPairNics() { return JSON.stringify({ nics: [], pinned: "" }); },
     async MobileBridgeSetPairNic(_ip: string) { /* mock: pin nic is a no-op */ },
     async MobileBridgeSetCloudRelay(_enabled: boolean, _url: string) { /* mock: cloud relay is a no-op */ },
+    async MobileBridgeSetKMode(mode: string, _externalURL: string) { return mode; },
+    async MobileBridgeParseTurnCred(_paste: string) { return ""; },
     async MobileBridgeSetKnock(_enabled: boolean, _server: string) { /* mock: knock is a no-op */ },
     // Mobile-facing readouts — browser mock returns minimal data; the real
     // payloads come from mobilebridge_app.go in the Wails build.

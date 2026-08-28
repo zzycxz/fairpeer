@@ -8,13 +8,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/linkpeersignal"
 	"github.com/zzycxz/fairpeer/internal/mobilebridge"
 	"github.com/zzycxz/fairpeer/internal/secret"
 )
@@ -388,11 +392,14 @@ func (a *App) ensureMobileBridge(ctx context.Context) {
 	// The env var wins so ad-hoc `LINKPEER_SIGNAL=... wails dev` still works;
 	// the TOML section is the persistent, restart-surviving way to point fairpeer
 	// at your linkpeer-signal K during normal use.
+	signalConfigured := false
 	if s := os.Getenv("LINKPEER_SIGNAL"); s != "" {
 		cfg.SignalURL = s
+		signalConfigured = true
 	} else if c, cerr := config.Load(); cerr == nil {
 		if c.MobileBridge.SignalURL != "" {
 			cfg.SignalURL = c.MobileBridge.SignalURL
+			signalConfigured = true
 		}
 		if len(c.MobileBridge.STUNServers) > 0 {
 			cfg.STUNServers = append(cfg.STUNServers, c.MobileBridge.STUNServers...)
@@ -412,9 +419,38 @@ func (a *App) ensureMobileBridge(ctx context.Context) {
 		cfg.TURNUser = c.MobileBridge.TURNUser
 		cfg.TURNPass = c.MobileBridge.TURNPass
 	}
+	// 零配置上手（UX_ONBOARDING W1）：没配 signal_url 时进程内起嵌入式 K
+	//（0.0.0.0:8080，手机经 LAN 地址直达），装完即用；8080 被占（外部 K
+	// 已在跑）不随机换端口——会毁掉手机已保存的 relay 候选——降级提示。
+	if !signalConfigured {
+		if ln, lerr := net.Listen("tcp", "0.0.0.0:8080"); lerr == nil {
+			ksrv := linkpeersignal.NewServer(linkpeersignal.DefaultConfig(), linkpeersignal.NewAudit("error"))
+			hsrv := &http.Server{Handler: ksrv.Routes()}
+			go func() {
+				<-ctx.Done()
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				_ = hsrv.Shutdown(shutdownCtx)
+			}()
+			go func() {
+				if serr := hsrv.Serve(ln); serr != nil && serr != http.ErrServerClosed {
+					slog.Warn("mobilebridge: embedded K exited", "err", serr)
+				}
+			}()
+			cfg.SignalURL = "http://127.0.0.1:8080"
+			mobilebridgeEmbedded = true
+			slog.Info("mobilebridge: embedded K listening on 0.0.0.0:8080 (zero-config LAN mode)")
+		} else {
+			slog.Warn("mobilebridge: :8080 occupied — embedded K disabled; "+
+				"set [mobilebridge] signal_url to your external K", "err", lerr)
+		}
+	}
+	// W4：knock_server 智能默认（云 K 同机 coturn）
+	cfg = mobilebridge.ApplyKnockDefault(cfg)
 	slog.Info("mobilebridge: starting bridge",
 		"signal_url", cfg.SignalURL, "stun", cfg.STUNServers, "log_level", cfg.LogLevel,
-		"cloud_signal_url", cfg.CloudSignalURL, "turn_enabled", cfg.TURNEnabled)
+		"cloud_signal_url", cfg.CloudSignalURL, "turn_enabled", cfg.TURNEnabled,
+		"udp_knock", cfg.UDPKnock, "knock_server", cfg.KnockServer)
 	bridge := mobilebridge.NewBridge(cfg, priv, pub, store, &execAdapter{app: a, fdFiles: map[string]*os.File{}}, mobilebridge.NewAudit(cfg.LogLevel))
 	// 注入 tab 别名解析：linkpeer 发 "default"/""，fairpeer 需要 UUID tab id。
 	// 映射到当前激活 tab，手机就能接入桌面正在用的会话。
@@ -459,6 +495,7 @@ func (a *App) MobileBridgeStatus() map[string]any {
 		"enabled":        true,
 		"connected":      mb.SignalConnected(),
 		"signal_url":     mb.SignalURL(),
+		"embedded":       mobilebridgeEmbedded,
 		"pending":        mb.PendingPairings(),
 		"udp_knock":      mb.KnockEnabled(),
 		"knock_server":   mb.KnockServer(),
@@ -561,9 +598,72 @@ func (a *App) MobileBridgeSetCloudRelay(enabled bool, url string) error {
 	return nil
 }
 
+// MobileBridgeSetKMode 切换信令模式（UX_ONBOARDING W2，重启生效）：
+//   - "embedded"：清空 signal_url → 下次启动进程内起嵌入式 K（零配置默认）
+//   - "external"：写入手填的外部 K 地址（独立 K / debug-server）
+//   - "cloud"：signal_url = cloud_signal_url（纯跨网，无本地 K）
+// 返回最终模式供面板回显。当前运行中的 Bridge 不热切（信令重建复杂，
+// 重启 fairpeer 生效——面板有提示文案）。
+func (a *App) MobileBridgeSetKMode(mode, externalURL string) (string, error) {
+	switch mode {
+	case "embedded", "external", "cloud":
+	default:
+		return "", fmt.Errorf("mode must be embedded|external|cloud")
+	}
+	c := config.LoadForEdit(config.UserConfigPath())
+	switch mode {
+	case "embedded":
+		c.MobileBridge.SignalURL = ""
+	case "external":
+		if strings.TrimSpace(externalURL) == "" {
+			return "", fmt.Errorf("external 模式需要 K 地址")
+		}
+		c.MobileBridge.SignalURL = strings.TrimSpace(externalURL)
+	case "cloud":
+		if c.MobileBridge.CloudSignalURL == "" {
+			return "", fmt.Errorf("cloud 模式需要先配置公网跳板地址")
+		}
+		c.MobileBridge.SignalURL = c.MobileBridge.CloudSignalURL
+	}
+	if err := c.WriteFile(config.UserConfigPath()); err != nil {
+		return "", fmt.Errorf("save k_mode: %w", err)
+	}
+	return mode, nil
+}
+
+// MobileBridgeParseTurnCred 粘贴 turn-cred.sh 输出一键解析（UX_ONBOARDING
+// W3）：从任意粘贴文本提取 user:pass@host[:port]，回填 turn 四项并持久化。
+// 返回 JSON {host,port,user} 供面板回显；解析不到返回 error。
+func (a *App) MobileBridgeParseTurnCred(paste string) (string, error) {
+	user, pass, host, port, ok := mobilebridge.ParseTurnCred(paste)
+	if !ok {
+		return "", fmt.Errorf("未找到凭据（需含 user:pass@host[:port]）")
+	}
+	c := config.LoadForEdit(config.UserConfigPath())
+	c.MobileBridge.TURNEnabled = true
+	c.MobileBridge.TURNServers = []string{
+		fmt.Sprintf("turn:%s:%d?transport=udp", host, port),
+		fmt.Sprintf("turn:%s:%d?transport=tcp", host, port),
+	}
+	c.MobileBridge.TURNUser = user
+	c.MobileBridge.TURNPass = pass
+	if err := c.WriteFile(config.UserConfigPath()); err != nil {
+		return "", fmt.Errorf("save turn creds: %w", err)
+	}
+	// 即时生效：重开云跳板链路让 turnQRParam 带新凭据（二维码即刻可用）
+	if mb := a.mobilebridge.Load(); mb != nil && c.MobileBridge.CloudSignalURL != "" {
+		mb.SetCloudRelay(c.MobileBridge.CloudSignalURL)
+	}
+	b, _ := json.Marshal(map[string]any{"host": host, "port": port, "user": user})
+	return string(b), nil
+}
+
 // keep sync/atomic referenced (the field lives in app.go but the import is
 // grouped here for the adapter's awareness; app.go itself also imports it).
 var _ atomic.Pointer[mobilebridge.Bridge]
+
+// mobilebridgeEmbedded 记录本次启动是否用内嵌 K（状态面板显示模式用）。
+var mobilebridgeEmbedded bool
 
 // ensure App has the field — this is a compile-time check; the actual field
 // declaration is in app.go (added by the desktop-integration edit).

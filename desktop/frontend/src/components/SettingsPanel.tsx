@@ -317,6 +317,11 @@ function MobileSection() {
   // 公网跳板：开关 + 云 K 地址（跨网时手机经云 K 打洞/中继；同网仍走局域网）
   const [cloudRelay, setCloudRelay] = useState(false);
   const [cloudURL, setCloudURL] = useState("");
+  // 信令模式（embedded=零配置内嵌 K / external=外部 K / cloud=仅云）
+  const [kMode, setKMode] = useState<"embedded" | "external" | "cloud">("embedded");
+  const [externalKURL, setExternalKURL] = useState("");
+  const [turnPaste, setTurnPaste] = useState("");
+  const [turnParsed, setTurnParsed] = useState("");
 
   const refreshNics = async () => {
     try {
@@ -328,11 +333,20 @@ function MobileSection() {
 
   const refreshKnock = async () => {
     try {
-      const st = (await app.MobileBridgeStatus()) as { udp_knock?: boolean; knock_server?: string; cloud_relay?: string };
+      const st = (await app.MobileBridgeStatus()) as { udp_knock?: boolean; knock_server?: string; cloud_relay?: string; embedded?: boolean; signal_url?: string };
       setKnock(!!st.udp_knock);
       setKnockServer(st.knock_server ?? "");
       setCloudRelay(!!st.cloud_relay);
       setCloudURL(st.cloud_relay ?? "");
+      // 模式回显：embedded 标记优先；否则 signal_url==cloud → cloud，其余 external
+      if (st.embedded) {
+        setKMode("embedded");
+      } else if (st.cloud_relay && st.signal_url === st.cloud_relay) {
+        setKMode("cloud");
+      } else {
+        setKMode("external");
+        setExternalKURL(st.signal_url ?? "");
+      }
     } catch { /* ignore */ }
   };
 
@@ -344,6 +358,23 @@ function MobileSection() {
   const saveCloudRelay = async (enabled: boolean, url: string) => {
     setCloudRelay(enabled); setCloudURL(url);
     try { await app.MobileBridgeSetCloudRelay(enabled, url); } catch (e) { setErr(String((e as Error)?.message ?? e)); }
+  };
+
+  const saveKMode = async (mode: "embedded" | "external" | "cloud") => {
+    setKMode(mode);
+    try {
+      await app.MobileBridgeSetKMode(mode, externalKURL);
+      setErr("信令模式已保存，重启 fairpeer 后生效");
+    } catch (e) { setErr(String((e as Error)?.message ?? e)); }
+  };
+
+  const parseTurn = async () => {
+    try {
+      const raw = await app.MobileBridgeParseTurnCred(turnPaste);
+      const j = JSON.parse(raw) as { host: string; port: number };
+      setTurnParsed(`${j.host}:${j.port}`);
+      setErr("");
+    } catch (e) { setErr(String((e as Error)?.message ?? e)); }
   };
 
   const setNic = async (ip: string) => {
@@ -463,6 +494,33 @@ function MobileSection() {
             )}
           </div>
           <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(128,128,128,0.2)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+              <span style={{ opacity: 0.7 }}>信令模式</span>
+              <select
+                value={kMode}
+                onChange={(e) => saveKMode(e.target.value as "embedded" | "external" | "cloud")}
+                style={{ flex: 1, padding: "4px 8px", fontSize: 12 }}
+              >
+                <option value="embedded">内嵌 K（零配置，默认）</option>
+                <option value="external">外部 K</option>
+                <option value="cloud">仅云 K</option>
+              </select>
+            </div>
+            {kMode === "external" && (
+              <input
+                type="text"
+                value={externalKURL}
+                onChange={(e) => setExternalKURL(e.target.value)}
+                onBlur={() => saveKMode("external")}
+                placeholder="外部 K 地址，如 http://127.0.0.1:8080"
+                style={{ marginTop: 6, width: "100%", padding: "4px 8px", fontSize: 12 }}
+              />
+            )}
+            <p className="mobile-pair-panel__desc" style={{ marginTop: 6 }}>
+              内嵌 K 开箱即用（装完扫码就通，局域网直连零云）；改动重启 fairpeer 生效。
+            </p>
+          </div>
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(128,128,128,0.2)" }}>
             <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, cursor: "pointer" }}>
               <input
                 type="checkbox"
@@ -486,8 +544,30 @@ function MobileSection() {
             {cloudRelay && (
               <p className="mobile-pair-panel__desc" style={{ marginTop: 6 }}>
                 二维码会追加云 K 作末位候选：手机同网自动选局域网（零云），跨网回退到云 K 走
-                STUN 打洞 + TURN 中继（中继只转发加密包，服务器无法解密）。需在云 K 的
-                [mobilebridge] 配置 turn_user/turn_pass 并部署 coturn（deploy/linkpeer-signal）。
+                STUN 打洞 + TURN 中继（中继只转发加密包，服务器无法解密）。
+              </p>
+            )}
+            {cloudRelay && (
+              <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
+                <input
+                  type="text"
+                  value={turnPaste}
+                  onChange={(e) => setTurnPaste(e.target.value)}
+                  placeholder="粘贴 VPS 上 ./scripts/turn-cred.sh 的输出，一键配置 TURN"
+                  style={{ flex: 1, padding: "4px 8px", fontSize: 12 }}
+                />
+                <button
+                  onClick={parseTurn}
+                  disabled={turnPaste.trim() === ""}
+                  style={{ padding: "4px 10px", fontSize: 12 }}
+                >
+                  解析
+                </button>
+              </div>
+            )}
+            {turnParsed && (
+              <p className="mobile-pair-panel__desc" style={{ marginTop: 6 }}>
+                ✓ TURN 已配置（{turnParsed}），重新生成二维码即携带新凭据。
               </p>
             )}
           </div>
