@@ -1066,6 +1066,17 @@ export function NetDevLayout({
                       title="一键体检电池（登录/持久化/水位/时钟），异常自动进「发现」"
                       onClick={() => void runTriageOne(selectedDevice.name)}
                     >{triageOneBusy === selectedDevice.name ? "体检中…" : "一键体检"}</span>
+                    <span
+                      className="btn btn--secondary btn--small"
+                      role="button"
+                      title="人工终端（§6.1）：PTY 直达设备，全程审计——SSH CLI 设备专用"
+                      onClick={() => void (async () => {
+                        try {
+                          await app.NetDevHumanTTYStart(selectedDevice.name);
+                          setErr(`[SYS] TTY ${selectedDevice.name}: 已连接（xterm 渲染随下批）`);
+                        } catch (e) { setErr(String(e)); }
+                      })()}
+                    >⌨ 终端</span>
                     {selectedDevice.vendor === "linux" && WEB_QUICK.map(cmd => (
                       <span key={cmd} className="btn btn--secondary btn--small" role="button" onClick={() => void runQuick(selectedDevice.name, cmd)}>{cmd}</span>
                     ))}
