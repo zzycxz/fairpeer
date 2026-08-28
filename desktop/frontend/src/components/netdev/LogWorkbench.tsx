@@ -239,13 +239,19 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
               )}
             </div>
           )}
-          {shown.map((r, i) => (
-            <div key={i} className={`ndv-logwb__row ${levelClass(r.line)}`}>
-              {r.tsText && <span className="ts">{r.tsText} </span>}
-              <span className="src">{r.device}·{r.source.replace(/^(file|journal|docker):/, "")} </span>
-              {r.line}
-            </div>
-          ))}
+          {shown.map((r, i) => {
+            // 源徽标按类型着色：file 灰 / journal 紫 / docker 青绿 / k8s 赤陶
+            // ——合并时间线上一眼分清每行的出处（全部 token 色）。
+            const k = r.source.split(":")[0];
+            const srcColor = k === "docker" ? "var(--shell-accent)" : k === "journal" ? "var(--accent-alt)" : k === "k8s" ? "var(--accent)" : "var(--fg-dim)";
+            return (
+              <div key={i} className={`ndv-logwb__row ${levelClass(r.line)}`}>
+                {r.tsText && <span className="ts">{r.tsText} </span>}
+                <span className="src" style={{ color: srcColor }}>{r.device}·{r.source.replace(/^(file|journal|docker|k8s):/, "")} </span>
+                {r.line}
+              </div>
+            );
+          })}
         </div>
 
         {/* 底栏：跨设备搜索（§3.3——一个 IP 搜全网的家） */}
