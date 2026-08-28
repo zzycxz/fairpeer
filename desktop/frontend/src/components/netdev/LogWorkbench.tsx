@@ -77,6 +77,9 @@ const levelClass = (line: string): string => {
   return "";
 };
 
+// 关联源（§5.4 实体360°）：变更/发现/事件合并进同一条时间线。
+const KIND_LABEL: Record<string, string> = { change: "变更", finding: "发现", event: "事件" };
+
 const sourceOf = (e: SrcEntry) => e.kind === "k8s" ? `k8s:${e.target.trim()}` : `${e.kind}:${e.target.trim()}`;
 
 export function LogWorkbench({ devices, onInsertComposer, hidden }: {
@@ -99,6 +102,7 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
   const [since, setSince] = useState("");
   const [viewGrep, setViewGrep] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
+  const [rel, setRel] = useState<{ change: boolean; finding: boolean; event: boolean }>({ change: true, finding: true, event: false });
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -133,8 +137,30 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
         else if (r.is_error) notes.push(`${e.device} ${sourceOf(e)}：设备返回错误（可能文件不存在）`);
         else parts.push({ device: e.device, source: sourceOf(e), lines: (r.output ?? "").split("\n") });
       }
-      setRows(mergeRows(parts));
-      setNote(notes.length ? notes.join("；") : (parts.length ? `已合并 ${parts.length} 个源、${rowsCount(parts)} 行` : "没有可用输出"));
+      // 关联源：拉时间线（失败不阻塞日志），按开关与设备集过滤后并入。
+      let tlRows: Row[] = [];
+      if (rel.change || rel.finding || rel.event) {
+        try {
+          const tl = await app.NetDevTimeline("", 24);
+          const devSet = new Set(act.map(e => e.device));
+          tlRows = (tl ?? [])
+            .filter(e => (e.kind === "change" && rel.change) || (e.kind === "finding" && rel.finding) || (e.kind === "event" && rel.event))
+            .filter(e => devSet.size === 0 || [...devSet].some(d => e.device.includes(d)))
+            .map(e => {
+              const t = new Date(e.time);
+              return {
+                ts: t.getTime(),
+                tsText: t.toTimeString().slice(0, 8),
+                device: e.device,
+                source: e.kind,
+                line: e.title + (e.detail ? `（${e.detail}）` : ""),
+              };
+            });
+        } catch { /* 关联源拉取失败：日志照常 */ }
+      }
+      const merged = [...mergeRows(parts), ...tlRows].sort((a, b) => a.ts - b.ts).slice(-MAX_ROWS);
+      setRows(merged);
+      setNote(notes.length ? notes.join("；") : (parts.length ? `已合并 ${parts.length} 个源、${rowsCount(parts)} 行${tlRows.length ? ` + 关联事件 ${tlRows.length} 条` : ""}` : (tlRows.length ? `关联事件 ${tlRows.length} 条` : "没有可用输出")));
     } catch (e) {
       setNote(String(e));
     } finally {
@@ -217,6 +243,12 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
           <label className="ndv__meta">起于</label>
           <input className="mem-input" style={{ width: 128 }} value={since} onChange={e => setSince(e.target.value)} placeholder="2026-08-27 10:00 或 -1h" />
           <span className={`btn btn--small ${busy ? "" : "btn--primary"}`} role="button" onClick={() => void fetchAll()}>{busy ? "读取中…" : "读取并合并"}</span>
+          <span className="ndv__meta" style={{ marginLeft: 6 }}>关联源</span>
+          {(["change", "finding", "event"] as const).map(k => (
+            <span key={k} className={`ndv__chip ndv-logwb__rel${rel[k] ? " ndv-logwb__rel--on" : ""}`} role="button"
+              title={k === "change" ? "审计写路径（提案执行/配置变更）" : k === "finding" ? "发现队列" : "syslog/trap 被动事件"}
+              onClick={() => setRel(r => ({ ...r, [k]: !r[k] }))}>{KIND_LABEL[k]}</span>
+          ))}
           <label className="ndv__meta" style={{ marginLeft: 8 }}>过滤</label>
           <input className="mem-input" style={{ width: 120 }} value={viewGrep} onChange={e => setViewGrep(e.target.value)} placeholder="正则（仅视图）" />
           <span className="ndv__meta">{shown.length} 行</span>
@@ -230,7 +262,7 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
           {entries.length === 0 && rows.length === 0 && (
             <div className="ndv__hint" style={{ padding: 8 }}>
               多源合并时间线：添加多个 (设备,源) 后「读取并合并」，按时间戳排成一条线。
-              journal 与 docker 日志无需配置，填服务名/容器名即可；自定义文件路径需先加入设备的 log_paths 白名单（/var/log 始终放行）。
+              journal 与 docker 日志无需配置，填服务名/容器名即可；自定义文件路径需先加入设备的 log_paths 白名单（/var/log 始终放行）。勾选「关联源」后，变更/发现/事件会并进同一条时间线（实体 360°）。
               {hosts[0] && (
                 <span style={{ display: "inline-flex", gap: 6, marginLeft: 8 }}>
                   <span className="ndv__chip" role="button" onClick={() => addEntry(hosts[0].name, "file", "/var/log/syslog")}>＋ {hosts[0].name} /var/log/syslog</span>
@@ -243,11 +275,18 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
             // 源徽标按类型着色：file 灰 / journal 紫 / docker 青绿 / k8s 赤陶
             // ——合并时间线上一眼分清每行的出处（全部 token 色）。
             const k = r.source.split(":")[0];
-            const srcColor = k === "docker" ? "var(--shell-accent)" : k === "journal" ? "var(--accent-alt)" : k === "k8s" ? "var(--accent)" : "var(--fg-dim)";
+            const srcColor =
+              k === "docker" ? "var(--shell-accent)" :
+              k === "journal" ? "var(--accent-alt)" :
+              k === "k8s" ? "var(--accent)" :
+              k === "change" ? "var(--accent-alt)" :
+              k === "finding" ? "var(--warn)" :
+              k === "event" ? "var(--fg-dim)" : "var(--fg-dim)";
+            const srcText = KIND_LABEL[k] ? `${KIND_LABEL[k]}·${r.device}` : `${r.device}·${r.source.replace(/^(file|journal|docker|k8s):/, "")}`;
             return (
               <div key={i} className={`ndv-logwb__row ${levelClass(r.line)}`}>
                 {r.tsText && <span className="ts">{r.tsText} </span>}
-                <span className="src" style={{ color: srcColor }}>{r.device}·{r.source.replace(/^(file|journal|docker|k8s):/, "")} </span>
+                <span className="src" style={{ color: srcColor }}>{srcText} </span>
                 {r.line}
               </div>
             );

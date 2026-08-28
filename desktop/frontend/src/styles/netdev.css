@@ -884,3 +884,11 @@
 @media (prefers-reduced-motion: reduce) {
   .ndv-log__cursor, .ndv__stop, .ndv__live-dot { animation: none; }
 }
+
+/* 关联源切换（§5.4 实体360°）：on 态 accent 软底。 */
+.ndv-logwb__rel--on {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}

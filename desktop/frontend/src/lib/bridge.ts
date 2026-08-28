@@ -33,6 +33,8 @@ import type {
   NetDevTriageReport,
   NetDevLocateResult,
   NetDevSeriesPoint,
+  NetDevTimelineEvent,
+  NetDevExpectedStateView,
   NetDevDeviceHealth,
   NetDevHealthSnapshot,
   NetDevSyslogStatusView,
@@ -468,6 +470,8 @@ export interface AppBindings {
   NetDevCredentialInventory(): Promise<string>;
   NetDevTrapStatus(): Promise<{ listening: boolean; port: number; buffered: number }>;
   NetDevExportState(): Promise<string>;
+  NetDevTimeline(device: string, hours: number): Promise<NetDevTimelineEvent[]>;
+  NetDevExpectedState(): Promise<NetDevExpectedStateView>;
   NetDevLogFollowStart(device: string, source: string): Promise<void>;
   NetDevLogFollowStop(device: string): Promise<void>;
   NetDevDBQuery(source: string, query: string): Promise<string>;
@@ -482,6 +486,7 @@ export interface AppBindings {
   NetDevSetGoldenFromBackup(device: string, versionID: string): Promise<void>;
   NetDevGoldenInfo(device: string): Promise<NetDevGoldenInfo>;
   NetDevGoldenCheck(device: string): Promise<string>;
+  NetDevNotifyTest(): Promise<void>;
   // ProbeMailAccount tests a saved mailbox's IMAP login by actually connecting.
   // An empty name probes the Default account; a non-empty name probes that
   // named account. Returns ok/error/unconfigured so the mail card can show a
@@ -2032,6 +2037,12 @@ function makeMockApp(): AppBindings {
     async NetDevExportState(): Promise<string> {
       return "(browser dev mock)";
     },
+    async NetDevTimeline(_device: string, _hours: number): Promise<NetDevTimelineEvent[]> {
+      return [];
+    },
+    async NetDevExpectedState(): Promise<NetDevExpectedStateView> {
+      return { total: 0, reachable: 0, missing: [], noProbe: [] };
+    },
     async NetDevLocate(_target: string): Promise<NetDevLocateResult> {
       return { target: _target, hits: [], searched: [], covered_devices: 0, total_devices: 0, budget_stopped: false, note: "browser dev mock" };
     },
@@ -2101,6 +2112,7 @@ function makeMockApp(): AppBindings {
     async NetDevGoldenCheck(_device: string): Promise<string> {
       return "(browser dev mock: golden check off)";
     },
+    async NetDevNotifyTest(): Promise<void> {},
     async SetNetDevSettings(v: NetDevSettingsView) {
       mockNetDev = { ...v, devices: [...v.devices], hops: [...v.hops], groups: [...v.groups], scopes: [...v.scopes], guardAllowedGroups: [...(v.guardAllowedGroups ?? [])], projects: v.projects ? [...v.projects] : mockNetDev.projects, presets: v.presets ? [...v.presets] : mockNetDev.presets };
     },

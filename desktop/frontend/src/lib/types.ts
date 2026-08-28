@@ -1588,6 +1588,16 @@ export interface SettingsView {
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
   autoApproveTools: boolean;
   bypass: boolean; // legacy JSON key for live YOLO/full-access tool auto-approval
+  secretStore?: SecretStoreStatus; // at-rest encryption backend of the credential store
+}
+
+// Mirrors desktop.SecretStoreView (secret.Store.SecurityMode). backend is one
+// of dpapi/keychain/secret-service/passphrase/machine, or "unavailable" when an
+// existing store's KEK cannot be reached (keystore locked/reset). degraded
+// marks the machine-bound fallback whose key any local process can recompute.
+export interface SecretStoreStatus {
+  backend: string;
+  degraded: boolean;
 }
 
 // Auto-updater payloads (desktop/updater.go). UpdateInfo drives the update banner;
@@ -1722,6 +1732,20 @@ export interface NetDevSettingsView {
   discoveryMode: string;
   probeFallback: string;
   groupDefs: NetDevGroupDefView[];
+  // 通知出口（§5.2）：webhook / SMTP / IM 直推，任选组合。
+  notifyWebhook: string;
+  notifyFormat: string;      // generic | feishu | dingtalk | wecom
+  notifyMinSeverity: string; // info | warning | critical
+  notifyBotDest: string;     // e.g. feishu:oc_xxx；空=关
+  notifySMTPHost: string;
+  notifySMTPPort: number;
+  notifySMTPUser: string;
+  notifySMTPFrom: string;
+  notifySMTPTo: string[];
+  notifySMTPPassSet: boolean;
+  notifySMTPPassword?: string; // write-only
+  // Daily briefing push time (local HH:MM; empty = off).
+  briefingPushTime: string;
 }
 
 // One group's policy + maintenance window.
@@ -1746,6 +1770,22 @@ export interface NetDevSyslogStatusView {
   listening: boolean;
   port: number;
   buffered: number;
+}
+
+// One health-poll rollup (metrics.db history, newest first).
+export interface NetDevMetricPoint {
+  time: string;
+  up: boolean;
+  us: number;
+  iu: number;
+  id: number;
+}
+
+// Golden Config baseline state (the 备份时间线 header).
+export interface NetDevGoldenInfo {
+  set: boolean;
+  at: string;
+  lines: number;
 }
 
 // Audit hash-chain verification verdict (the 审计 tab badge).
@@ -1811,6 +1851,23 @@ export interface NetDevLogSearchResult {
   devices_with_hits: number;
   budget_stopped: boolean;
   note?: string;
+}
+
+// 时间关联层（App.NetDevTimeline / §5.4）：变更/发现/事件统一事件流。
+export interface NetDevTimelineEvent {
+  time: string;
+  kind: string; // change | finding | event
+  device: string;
+  title: string;
+  detail?: string;
+}
+
+// 期望状态对比（App.NetDevExpectedState / §5.4）。
+export interface NetDevExpectedStateView {
+  total: number;
+  reachable: number;
+  missing: NetDevDeviceHealth[];
+  noProbe: string[];
 }
 
 // Timeline point (App.NetDevSeries, NETDEV_SPEC_V2 §5.3).
@@ -1920,6 +1977,19 @@ export interface NetDevLiveEvent {
   ms?: number;
   bytes?: number;
   reason?: string;
+}
+
+// ── 浏览器镜像 (browser mirror panel) ────────────────────────────────────────
+
+// One update from the kernel's browser-panel sink ("browser:mirror" Wails
+// event; desktop/app.go forwards internal/tool/builtin.BrowserPanelFrame).
+export interface BrowserMirrorFrame {
+  kind: "frame" | "status";
+  source: "tool" | "auto"; // chromedp tools | browser-use sidecar
+  phase?: "start" | "end" | "step"; // status only
+  text?: string;
+  url?: string;
+  image?: string; // data URL (frame only)
 }
 
 export interface NetDevLiveDeviceState {

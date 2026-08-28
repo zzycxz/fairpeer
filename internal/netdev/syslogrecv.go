@@ -30,6 +30,10 @@ var (
 	syslogMu       sync.Mutex
 	syslogRings    = map[string][]syslogLine{}
 	syslogConn     net.PacketConn
+	// syslogCfg is the receiver's CURRENT view of the inventory, refreshed by
+	// every EnsureSyslogReceiver call — device-name matching must not ride on
+	// a config snapshot captured at listener startup.
+	syslogCfg       *config.Config
 	syslogLastFire = map[string]time.Time{} // device:class → last auto-Finding
 )
 
@@ -52,12 +56,15 @@ var syslogClasses = []struct {
 
 // EnsureSyslogReceiver starts (or stops on port 0 / config change) the UDP
 // listener. Idempotent; called from the desktop bridge on settings load/save.
+// Every call also refreshes the receiver's view of the inventory, so devices
+// added after startup still map by address.
 func EnsureSyslogReceiver(cfg *config.Config) {
 	port := 0
 	if cfg != nil {
 		port = cfg.NetDev.Syslog.Port
 	}
 	syslogMu.Lock()
+	syslogCfg = cfg
 	current := syslogConn
 	syslogMu.Unlock()
 	if port <= 0 {
@@ -76,7 +83,7 @@ func EnsureSyslogReceiver(cfg *config.Config) {
 	syslogMu.Lock()
 	syslogConn = pc
 	syslogMu.Unlock()
-	go syslogLoop(pc, cfg)
+	go syslogLoop(pc)
 }
 
 // SyslogReceiverStatus reports the listener state for the UI.
@@ -102,7 +109,7 @@ type SyslogStatusView struct {
 	Buffered  int  `json:"buffered"`
 }
 
-func syslogLoop(pc net.PacketConn, cfg *config.Config) {
+func syslogLoop(pc net.PacketConn) {
 	buf := make([]byte, 8192)
 	for {
 		n, addr, err := pc.ReadFrom(buf)
@@ -116,6 +123,9 @@ func syslogLoop(pc net.PacketConn, cfg *config.Config) {
 		if line == "" {
 			continue
 		}
+		syslogMu.Lock()
+		cfg := syslogCfg
+		syslogMu.Unlock()
 		device := syslogDeviceFor(addr, cfg)
 		now := time.Now()
 		syslogMu.Lock()
@@ -167,6 +177,20 @@ func SyslogTail(device string, tailN int, grep string) []string {
 	}
 	if len(out) > tailN {
 		out = out[len(out)-tailN:]
+	}
+	return out
+}
+
+// SyslogEventsSince returns one device's ring entries (structured) since t.
+func SyslogEventsSince(device string, since time.Time) []NetDevEvent {
+	syslogMu.Lock()
+	ring := append([]syslogLine(nil), syslogRings[device]...)
+	syslogMu.Unlock()
+	var out []NetDevEvent
+	for _, l := range ring {
+		if l.Time.After(since) {
+			out = append(out, NetDevEvent{Time: l.Time, Text: l.Text})
+		}
 	}
 	return out
 }

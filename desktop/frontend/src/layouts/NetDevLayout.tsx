@@ -575,6 +575,7 @@ export function NetDevLayout({
     return () => { alive = false; };
   }, [selected, reloadTick]);
   const [locateTarget, setLocateTarget] = useState("");
+  const [expBusy, setExpBusy] = useState(false);
   const [handoffMd, setHandoffMd] = useState("");
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [locateBusy, setLocateBusy] = useState(false);
@@ -594,6 +595,20 @@ export function NetDevLayout({
       setLocateBusy(false);
     }
   }, [locateTarget]);
+
+  // 期望状态对比（§5.4）：清单声明 vs 健康采集——「掉电恢复后缺的 13 台是谁」。
+  const runExpected = useCallback(async () => {
+    setExpBusy(true);
+    try {
+      const v = await app.NetDevExpectedState();
+      const miss = (v.missing ?? []).map(m => m.device).join("、");
+      setErr(`[SYS] 期望状态: 采集面 ${v.total} 台，可达 ${v.reachable}${miss ? `，缺失：${miss}` : "，无缺失"}${(v.noProbe ?? []).length ? `；${v.noProbe.length} 台无采集面` : ""}`);
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setExpBusy(false);
+    }
+  }, []);
 
   // kind=docker / kind=k8s 的设备卡快捷：结果落进与 CLI 快捷同一个展示区。
   const runApiQuick = useCallback(async (label: string, run: () => Promise<string>) => {
@@ -953,6 +968,7 @@ export function NetDevLayout({
                 onChange={e => setLocateTarget(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void runLocate(); }}
                 placeholder="定位 IP / MAC —— 接在哪台设备哪个端口（全网 ARP 扇出）" />
               <span className="btn btn--secondary btn--small" role="button" onClick={() => void runLocate()}>{locateBusy ? "定位中…" : "定位"}</span>
+              <span className="btn btn--secondary btn--small" role="button" title="清单期望 vs 健康采集：缺谁一眼可见" onClick={() => void runExpected()}>{expBusy ? "比对中…" : "期望状态"}</span>
             </div>
             {lastInspection && (
               <div className="ndv__meta">上次巡检：{lastInspection.title}（{String(lastInspection.created_at ?? "").slice(5, 16).replace("T", " ")}）</div>

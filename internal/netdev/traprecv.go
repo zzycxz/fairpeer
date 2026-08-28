@@ -173,6 +173,20 @@ func trapEscalate(device, oid, text string) {
 	})
 }
 
+// TrapEventsSince returns one device's trap ring entries since t.
+func TrapEventsSince(device string, since time.Time) []NetDevEvent {
+	trapMu.Lock()
+	ring := append([]syslogLine(nil), trapRings[device]...)
+	trapMu.Unlock()
+	var out []NetDevEvent
+	for _, l := range ring {
+		if l.Time.After(since) {
+			out = append(out, NetDevEvent{Time: l.Time, Text: l.Text})
+		}
+	}
+	return out
+}
+
 // TrapTail reads a device's trap ring (newest last).
 func TrapTail(device string, tailN int) []string {
 	if tailN <= 0 || tailN > trapRingCap {

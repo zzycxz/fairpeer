@@ -113,6 +113,21 @@ type NetDevSettingsView struct {
 	AlertRules []NetDevAlertRuleView `json:"alertRules"`
 	// SyslogPort: passive syslog UDP receiver (0 = off).
 	SyslogPort int `json:"syslogPort"`
+	// 通知出口（§5.2）：webhook / SMTP / 内嵌 IM 直推，任选组合。
+	NotifyWebhook     string   `json:"notifyWebhook"`
+	NotifyFormat      string   `json:"notifyFormat"`
+	NotifyMinSeverity string   `json:"notifyMinSeverity"`
+	NotifyBotDest     string   `json:"notifyBotDest"`
+	NotifySMTPHost    string   `json:"notifySMTPHost"`
+	NotifySMTPPort    int      `json:"notifySMTPPort"`
+	NotifySMTPUser    string   `json:"notifySMTPUser"`
+	NotifySMTPFrom    string   `json:"notifySMTPFrom"`
+	NotifySMTPTo      []string `json:"notifySMTPTo"`
+	NotifySMTPPassSet bool     `json:"notifySMTPPassSet"`
+	// NotifySMTPPassword is write-only (blank = keep the stored secret).
+	NotifySMTPPassword string `json:"notifySMTPPassword,omitempty"`
+	// BriefingPushTime schedules the daily briefing push ("" = off).
+	BriefingPushTime string `json:"briefingPushTime"`
 	// P3 gap closure: config fields previously TOML-only.
 	DefaultMode          string               `json:"defaultMode"` // diagnose | assess
 	MaxSessionsPerDevice int                  `json:"maxSessionsPerDevice"`
@@ -191,6 +206,7 @@ type NetDevSSHImportCandidate struct {
 func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 	startInspectionScheduler(a)
 	startBackupScheduler(a)
+	startBriefingScheduler(a)
 	cfg, err := config.Load()
 	if err != nil {
 		return NetDevSettingsView{}, err
@@ -227,6 +243,17 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 		DiscoveryMode:        cfg.NetDev.Discovery.Mode,
 		ProbeFallback:        cfg.NetDev.Discovery.ProbeFallback,
 		GroupDefs:            []NetDevGroupDefView{},
+		NotifyWebhook:        cfg.NetDev.NotifyWebhook,
+		NotifyFormat:         cfg.NetDev.NotifyFormat,
+		NotifyMinSeverity:    cfg.NetDev.NotifyMinSeverity,
+		NotifyBotDest:        cfg.NetDev.NotifyBotDest,
+		NotifySMTPHost:       cfg.NetDev.NotifySMTPHost,
+		NotifySMTPPort:       cfg.NetDev.NotifySMTPPort,
+		NotifySMTPUser:       cfg.NetDev.NotifySMTPUser,
+		NotifySMTPFrom:       cfg.NetDev.NotifySMTPFrom,
+		NotifySMTPTo:         orEmptyStrings(cfg.NetDev.NotifySMTPTo),
+		NotifySMTPPassSet:    netdevSecretSet(netdev.SecretKindPassword, strings.TrimSpace(cfg.NetDev.NotifySMTPPassEnv)),
+		BriefingPushTime:     cfg.NetDev.BriefingPushTime,
 	}
 	if v.Scopes == nil {
 		v.Scopes = []string{}
@@ -307,6 +334,13 @@ func cleanLogPaths(in []string) []string {
 		}
 	}
 	return out
+}
+
+func orEmptyStrings(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }
 
 func snmpVersionOf(d config.NetDevDevice) string {
@@ -401,6 +435,11 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 		v.Hops[i].PasswordEnv = env
 		if err := netdev.SetSecret(netdev.SecretKindPassword, env, pwd); err != nil {
 			return fmt.Errorf("save secret for hop %q: %w", h.Name, err)
+		}
+	}
+	if pwd := strings.TrimSpace(v.NotifySMTPPassword); pwd != "" {
+		if err := netdev.SetSecret(netdev.SecretKindPassword, "NETDEV_NOTIFY_SMTP_PASS", pwd); err != nil {
+			return fmt.Errorf("save notify smtp password: %w", err)
 		}
 	}
 	for i, d := range v.Devices {
@@ -519,6 +558,20 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 		// always sends the field.
 		nd.PollIntervalSeconds = v.PollIntervalSeconds
 		nd.Syslog.Port = v.SyslogPort
+		nd.NotifyWebhook = strings.TrimSpace(v.NotifyWebhook)
+		nd.NotifyFormat = strings.TrimSpace(v.NotifyFormat)
+		nd.NotifyMinSeverity = strings.TrimSpace(v.NotifyMinSeverity)
+		nd.NotifyBotDest = strings.TrimSpace(v.NotifyBotDest)
+		nd.NotifySMTPHost = strings.TrimSpace(v.NotifySMTPHost)
+		nd.NotifySMTPPort = v.NotifySMTPPort
+		nd.NotifySMTPUser = strings.TrimSpace(v.NotifySMTPUser)
+		nd.NotifySMTPFrom = strings.TrimSpace(v.NotifySMTPFrom)
+		nd.NotifySMTPTo = v.NotifySMTPTo
+		nd.NotifySMTPPassEnv = c.NetDev.NotifySMTPPassEnv
+		if v.NotifySMTPPassword != "" {
+			nd.NotifySMTPPassEnv = "NETDEV_NOTIFY_SMTP_PASS"
+		}
+		nd.BriefingPushTime = strings.TrimSpace(v.BriefingPushTime)
 		nd.DefaultMode = strings.TrimSpace(v.DefaultMode)
 		nd.MaxSessionsPerDevice = v.MaxSessionsPerDevice
 		nd.Discovery.Rate = v.DiscoveryRate
@@ -631,6 +684,9 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 	if fresh, err := config.Load(); err == nil && fresh != nil {
 		netdev.ApplyExtraRead(fresh)
 		_ = netdev.SharedManager(fresh)
+		// Refresh the syslog receiver's inventory view (device-name matching
+		// rides on the current config, not the startup snapshot).
+		netdev.EnsureSyslogReceiver(fresh)
 	}
 	slog.Info("SetNetDevSettings saved", "devices", len(v.Devices), "hops", len(v.Hops))
 	return nil
@@ -721,6 +777,16 @@ func startInspectionScheduler(a *App) {
 				if f, err := netdev.SharedManager(cfg).RunInspection(ctx); err == nil && f != nil {
 					slog.Info("scheduled netdev inspection filed", "title", f.Title)
 				}
+				// Golden drift rides the inspection sweep: every baselined
+				// device gets a sealed snapshot + baseline diff; drift
+				// fires/resolves its Finding like the alert engine.
+				if drifts, err := netdev.SharedManager(cfg).RunGoldenCheck(ctx, ""); err == nil {
+					for _, dr := range drifts {
+						if len(dr.Extra) > 0 || len(dr.Missing) > 0 {
+							slog.Warn("scheduled golden drift", "device", dr.Device, "extra", len(dr.Extra), "missing", len(dr.Missing))
+						}
+					}
+				}
 				cancel()
 			}
 		}()
@@ -754,6 +820,51 @@ func startBackupScheduler(a *App) {
 		}()
 	})
 }
+
+// startBriefingScheduler pushes the daily briefing at [netdev]
+// briefing_push_time (local time, "" = off) through the notify outlets —
+// the "FDE 会主动开口" leg. Same Once+loop discipline as inspection/backup.
+func startBriefingScheduler(a *App) {
+	briefingSchedOnce.Do(func() {
+		go func() {
+			for {
+				cfg, err := config.Load()
+				if err != nil || cfg == nil {
+					time.Sleep(time.Minute)
+					continue
+				}
+				t := strings.TrimSpace(cfg.NetDev.BriefingPushTime)
+				var h, m int
+				if t == "" || func() bool { n, _ := fmt.Sscanf(t, "%d:%d", &h, &m); return n != 2 }() {
+					time.Sleep(time.Minute) // off/unparsable — re-check so saves apply live
+					continue
+				}
+				now := time.Now()
+				next := time.Date(now.Year(), now.Month(), now.Day(), h, m, 0, 0, now.Location())
+				if !next.After(now) {
+					next = next.Add(24 * time.Hour)
+				}
+				select {
+				case <-time.After(next.Sub(now)):
+				case <-a.ctx.Done():
+					return
+				}
+				// Re-read at fire time: the user may have turned it off while
+				// we slept.
+				if fresh, err := config.Load(); err == nil && fresh != nil && strings.TrimSpace(fresh.NetDev.BriefingPushTime) != "" {
+					if report, err := a.NetDevDailyBriefing(); err == nil && strings.TrimSpace(report) != "" {
+						netdev.NotifyPushText("briefing", "[fairpeer 运维] 每日早报", report)
+						slog.Info("scheduled netdev briefing pushed", "bytes", len(report))
+					} else if err != nil {
+						slog.Warn("scheduled netdev briefing failed", "err", err)
+					}
+				}
+			}
+		}()
+	})
+}
+
+var briefingSchedOnce sync.Once
 
 // NetDevQuickExec runs ONE read-only command from the UI (device detail
 // quick-diagnose buttons) through the SAME sealed path as the agent's
@@ -1433,6 +1544,25 @@ func (a *App) NetDevTrapStatus() (bool, int, int, error) {
 	return l, p, b, nil
 }
 
+// NetDevTimeline assembles the correlation stream (changes/findings/events)
+// for the 实体360° source family in the log workbench (§5.4).
+func (a *App) NetDevTimeline(device string, hours int) ([]netdev.TimelineEvent, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).Timeline(device, hours), nil
+}
+
+// NetDevExpectedState diffs inventory vs latest health sweep (§5.4).
+func (a *App) NetDevExpectedState() (netdev.ExpectedStateView, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return netdev.ExpectedStateView{}, err
+	}
+	return netdev.SharedManager(cfg).ExpectedState(), nil
+}
+
 // NetDevExportState writes the netdev state snapshot and returns its path.
 func (a *App) NetDevExportState() (string, error) {
 	cfg, err := config.Load()
@@ -1440,4 +1570,65 @@ func (a *App) NetDevExportState() (string, error) {
 		return "", err
 	}
 	return netdev.SharedManager(cfg).ExportState()
+}
+
+// ── Golden Config 基线与漂移 ────────────────────────────────────────────────
+
+// NetDevSetGoldenFromBackup marks one backup version as the device's golden
+// baseline (human action from the 备份时间线).
+func (a *App) NetDevSetGoldenFromBackup(device, versionID string) error {
+	return netdev.SetGoldenFromBackup(device, versionID)
+}
+
+// NetDevGoldenInfo reports the device's baseline state for the timeline.
+func (a *App) NetDevGoldenInfo(device string) (netdev.GoldenInfo, error) {
+	return netdev.GoldenInfoOf(device), nil
+}
+
+// NetDevGoldenCheck diffs the running config against the baseline (device=""
+// sweeps all baselined devices) — drift fires/resolves the golden Finding.
+func (a *App) NetDevGoldenCheck(device string) (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
+	defer cancel()
+	drifts, err := netdev.SharedManager(cfg).RunGoldenCheck(ctx, device)
+	if err != nil {
+		return "", err
+	}
+	var sb strings.Builder
+	for _, d := range drifts {
+		if len(d.Extra) == 0 && len(d.Missing) == 0 {
+			sb.WriteString(fmt.Sprintf("%s：与基线一致%s\n", d.Device, d.Note))
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("%s：意外 %d 行 / 丢失 %d 行%s → 已生成漂移发现\n", d.Device, len(d.Extra), len(d.Missing), d.Note))
+	}
+	return sb.String(), nil
+}
+
+// NetDevMetricHistory returns one device's health-metric history (newest
+// first) for the 健康 tab's sparklines.
+func (a *App) NetDevMetricHistory(device string) ([]netdev.MetricPoint, error) {
+	return netdev.MetricHistory(device, 720), nil
+}
+
+// NetDevNotifyTest pushes one test message through every configured outlet
+// (the 通知出口 section's 发送测试 button) — a wiring check, not a Finding.
+func (a *App) NetDevNotifyTest() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	// Refresh the outlets from this config first: a just-saved webhook must
+	// be live before the test fires.
+	_ = netdev.SharedManager(cfg)
+	if !netdev.NotifyConfigured() {
+		return fmt.Errorf("还没有配置任何通知出口——先填 Webhook、IM 直推或 SMTP 任意一项并保存")
+	}
+	netdev.NotifyPushText("test", "[fairpeer 运维] 通知测试", "这是一条测试消息——看到它说明告警推送链路畅通。真正的告警会带设备、证据与「回复 /netdev 详情 <编号>」提示。")
+	return nil
 }
