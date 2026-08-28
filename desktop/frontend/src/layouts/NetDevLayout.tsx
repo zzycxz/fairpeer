@@ -1,6 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { AlertTriangle, Activity, BookOpen, CalendarClock, ClipboardCheck, FileText, HeartPulse, Network, PanelLeft, ScanSearch, ScrollText, Server, SlidersHorizontal } from "lucide-react";
-import { app } from "../lib/bridge";
+import { app, onNetdevHealth, onNetdevLive } from "../lib/bridge";
 import { ProfileSegmented } from "../components/AppChrome";
 import { useConfirm } from "../lib/confirm";
 import { getActiveProject, setActiveProject, subscribeActiveProject, type NetDevProjectScope } from "../lib/netdevProjectStore";
@@ -10,9 +10,11 @@ import { LogPanel } from "../components/netdev/LogPanel";
 import { LogWorkbench } from "../components/netdev/LogWorkbench";
 import { HealthPanel } from "../components/netdev/HealthPanel";
 import { JobsPanel } from "../components/netdev/JobsPanel";
+import { AlertSetupWizard } from "../components/netdev/AlertSetupWizard";
 import { DockTabs, useDockTabState } from "../components/DockTabs";
-import type { NetDevSettingsView, NetDevFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph, NetDevBackupVersion } from "../lib/types";
+import type { NetDevSettingsView, NetDevDeviceHealth, NetDevFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph, NetDevBackupVersion } from "../lib/types";
 import { useT } from "../lib/i18n";
+import logoSymbol from "../assets/logo-symbol.png";
 import { Markdown } from "../components/Markdown";
 import { UnifiedDiff } from "../components/editors/UnifiedDiff";
 import "../styles/netdev.css";
@@ -198,7 +200,7 @@ type DockTab = "live" | "devices" | "context" | "topology" | "findings" | "propo
 // Fresh installs open a curated set — 操作实况 leads (supervision first), the
 // rest join via the "+" dropdown or the bottom-nav entries on demand. Stored
 // state always wins after the user customizes.
-const DOCK_TAB_DEFAULT_OPEN: readonly DockTab[] = ["live", "findings", "proposals"];
+const DOCK_TAB_DEFAULT_OPEN: readonly DockTab[] = ["live", "health", "findings"];
 const NETDEV_DOCK_TABS_KEY = "fairpeer.netdevDockTabs";
 const NETDEV_DOCK_TABS_SEEDED = "fairpeer.netdevDockTabs.seeded";
 const NETDEV_DOCK_TABS_LIVE_SEEDED = "fairpeer.netdevDockTabs.live-seeded";
@@ -306,6 +308,11 @@ export function NetDevLayout({
   const [findings, setFindings] = useState<NetDevFinding[]>([]);
   const [proposals, setProposals] = useState<NetDevProposal[]>([]);
   const [audit, setAudit] = useState<NetDevAuditEntryView[]>([]);
+  // 健康快照联动：设备页卡/拓扑/健康 tab 共用一份 live 数据；
+  // hotTabs 是右栏 tab 的活动点信号（实况有流、健康有变更、发现有新条）。
+  const [healthMap, setHealthMap] = useState<Record<string, NetDevDeviceHealth>>({});
+
+  const healthDownCount = Object.values(healthMap).filter(h => !h.reachable || (h.interfaces ?? []).some(i => i.adminUp && !i.operUp)).length;
   const [selected, setSelected] = useState<string>("");
   const [quick, setQuick] = useState<Record<string, QuickResult>>({});
   const [topo, setTopo] = useState<NetDevTopologyGraph | null>(null);
@@ -316,6 +323,26 @@ export function NetDevLayout({
   // module scope); the open-tabs correction effect OPENs that tab instead of
   // correcting away from it.
   const [tab, setTab] = useState<DockTab>(() => dockParam() ?? "context");
+  const [hotTabs, setHotTabs] = useState<Partial<Record<DockTab, boolean>>>({});
+  const [alertWizardOpen, setAlertWizardOpen] = useState(false);
+  const markHot = useCallback((k: DockTab) => setHotTabs(prev => ({ ...prev, [k]: true })), []);
+  // Visiting a tab clears its activity dot.
+  useEffect(() => { setHotTabs(prev => (prev[tab] ? { ...prev, [tab]: false } : prev)); }, [tab]);
+  useEffect(() => {
+    let alive = true;
+    app.NetDevHealthSnapshot().then(snap => {
+      if (!alive) return;
+      const m: Record<string, NetDevDeviceHealth> = {};
+      for (const d of snap?.devices ?? []) m[d.device] = d;
+      setHealthMap(m);
+    }).catch(() => {});
+    const off1 = onNetdevHealth(h => {
+      setHealthMap(prev => ({ ...prev, [h.device]: h }));
+      markHot("health");
+    });
+    const off2 = onNetdevLive(() => markHot("live"));
+    return () => { alive = false; off1(); off2(); };
+  }, [markHot]);
   // Browser-style dock tabs (coding workbench-dock pattern): only OPEN tabs
   // show, each closable, "+" re-opens from the catalog, order persists.
   // Seed the curated default ONCE (localStorage flag); afterwards the user's
@@ -675,17 +702,27 @@ export function NetDevLayout({
     return { ...topo, nodes: nodes.filter(n => nameIn(n.name) || (!n.managed && touched.has(n.name))), edges };
   }, [project, topo, scopedDeviceNames]);
 
-  const TABS: { key: DockTab; label: string; badge?: number; icon: React.ReactNode }[] = [
-    { key: "live", label: "实况", icon: <Activity size={13} /> },
-    { key: "devices", label: "设备", badge: devices.length || undefined, icon: <Server size={13} /> },
-    { key: "context", label: "手册", icon: <BookOpen size={13} /> },
-    { key: "topology", label: "拓扑", icon: <Network size={13} /> },
-    { key: "findings", label: "发现", badge: scopedFindings.length || undefined, icon: <AlertTriangle size={13} /> },
-    { key: "proposals", label: "提案", badge: pendingCount || undefined, icon: <ClipboardCheck size={13} /> },
-    { key: "audit", label: "审计", icon: <ScrollText size={13} /> },
-    { key: "logs", label: "日志", icon: <FileText size={13} /> },
-    { key: "health", label: "健康", icon: <HeartPulse size={13} /> },
-    { key: "jobs", label: "作业", icon: <CalendarClock size={13} /> },
+  const findingsCountRef = useRef(0);
+  useEffect(() => {
+    if (scopedFindings.length > findingsCountRef.current && findingsCountRef.current > 0) markHot("findings");
+    findingsCountRef.current = scopedFindings.length;
+  }, [scopedFindings, markHot]);
+  const liveHot = !!hotTabs.live;
+  const healthHot = !!hotTabs.health;
+  const findingsHot = !!hotTabs.findings;
+  // Tab order = the operator's workflow (正在发生 → 什么状态 → 需要我决策
+  // → 留档备查); the "+" catalog renders the same grouping as headers.
+  const TABS: { key: DockTab; label: string; badge?: number; dot?: boolean; group: string; icon: React.ReactNode }[] = [
+    { key: "live", label: "实况", group: "正在发生", dot: liveHot, icon: <Activity size={13} /> },
+    { key: "logs", label: "日志", group: "正在发生", icon: <FileText size={13} /> },
+    { key: "health", label: "健康", group: "什么状态", dot: healthHot, badge: healthDownCount || undefined, icon: <HeartPulse size={13} /> },
+    { key: "devices", label: "设备", group: "什么状态", badge: devices.length || undefined, icon: <Server size={13} /> },
+    { key: "topology", label: "拓扑", group: "什么状态", icon: <Network size={13} /> },
+    { key: "context", label: "手册", group: "什么状态", icon: <BookOpen size={13} /> },
+    { key: "findings", label: "发现", group: "需要我决策", dot: findingsHot, badge: scopedFindings.length || undefined, icon: <AlertTriangle size={13} /> },
+    { key: "proposals", label: "提案", group: "需要我决策", badge: pendingCount || undefined, icon: <ClipboardCheck size={13} /> },
+    { key: "audit", label: "审计", group: "留档备查", icon: <ScrollText size={13} /> },
+    { key: "jobs", label: "作业", group: "留档备查", icon: <CalendarClock size={13} /> },
   ];
 
   // Active tab closed (or restored state desyncs) → fall back to the last
@@ -754,7 +791,10 @@ export function NetDevLayout({
               aria-label={sidebarToggleTitle}
               aria-pressed={!sidebarCollapsed}
             >
-              <PanelLeft size={16} />
+              <div className="brand-toggle-group">
+                <img src={logoSymbol} alt="" className="brand-toggle-logo" draggable={false} />
+                <PanelLeft size={16} className="brand-toggle-icon" />
+              </div>
             </button>
           )}
           <ProfileSegmented
@@ -835,7 +875,7 @@ export function NetDevLayout({
           <div className="ndv-bench__bar" role="tablist" aria-label="主区工作台">
             <span role="tab" aria-selected={bench === "chat"} className={`ndv-bench__chip${bench === "chat" ? " ndv-bench__chip--on" : ""}`} onClick={() => setBench("chat")}>对话</span>
             <span role="tab" aria-selected={bench === "logs"} className={`ndv-bench__chip${bench === "logs" ? " ndv-bench__chip--on" : ""}`} onClick={openLogsBench}>日志</span>
-            <span className="ndv-bench__hint">Esc 返回对话</span>
+            <span className="ndv-bench__hint"><kbd>Esc</kbd> 返回对话</span>
           </div>
         )}
         <div className="ndv__chat" style={bench !== "chat" ? { display: "none" } : undefined}>{mainNode}</div>
@@ -901,7 +941,7 @@ export function NetDevLayout({
 
         {tab === "logs" && <LogPanel devices={settings?.devices ?? []} dbSources={settings?.dbSources ?? []} onInsertComposer={onInsertComposer} onOpenWorkbench={openLogsBench} />}
 
-        {tab === "health" && <HealthPanel />}
+        {tab === "health" && <HealthPanel onOpenSettings={onOpenSettings} />}
 
         {tab === "jobs" && <JobsPanel />}
 
@@ -933,7 +973,9 @@ export function NetDevLayout({
                     className={`ndv__device ndv__device--click${selected === d.name ? " ndv__device--sel" : ""}`}
                     role="button"
                     onClick={() => { setSelected(d.name); setTab("context"); setOpenTabs((prev) => (prev.includes("context") ? prev : [...prev, "context"])); setQuick({}); }}
-                  ><span className="ndv__device-name">{d.name}{d.kind ? <span style={{ opacity: 0.65, fontSize: 10, marginLeft: 4 }}>·{d.kind}</span> : ""}</span><span className="ndv__device-addr">{d.address}</span></div>
+                  >{healthMap[d.name] && (
+                    <span className={`ndv__dot ${!healthMap[d.name].reachable ? "ndv__dot--down" : (healthMap[d.name].interfaces ?? []).some(i => i.adminUp && !i.operUp) ? "ndv__dot--warn" : "ndv__dot--ok"}`} title={healthMap[d.name].reachable ? "健康轮询：在线" : "健康轮询：不可达"} />
+                  )}<span className="ndv__device-name">{d.name}{d.kind ? <span style={{ opacity: 0.65, fontSize: 10, marginLeft: 4 }}>·{d.kind}</span> : ""}</span><span className="ndv__device-addr">{d.address}</span></div>
                 ))}
               </div>
             ))}
@@ -1078,6 +1120,23 @@ export function NetDevLayout({
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <ScenarioHub
+              onOpenAlertWizard={() => setAlertWizardOpen(true)}
+              onDiagnose={() => { onInsertComposer?.("请对以下故障现象做诊断，先给结论再给证据链："); openDockTabFn("live"); }}
+              onInspect={() => { void runInspection(); openDockTabFn("findings"); }}
+              onLogs={() => openDockTabFn("logs")}
+              onBaseline={() => { void runBaseline(); openDockTabFn("findings"); }}
+              onGolden={() => openDockTabFn("devices")}
+            />
+            {alertWizardOpen && settings && (
+              <AlertSetupWizard
+                settings={settings}
+                onClose={() => setAlertWizardOpen(false)}
+                onSaved={() => void reload()}
+                onOpenSettings={onOpenSettings}
+                onFinish={() => openDockTabFn("health")}
+              />
+            )}
             <div className="ndv__card ndv__card--dim">&gt;&gt; SYS.READY: 选中目标节点获取实时遥测。支持全封闭沙箱通道执行靶向诊断。或在交互终端直接下达自然语言指令。</div>
             <DailyBriefing />
           </div>
@@ -1102,7 +1161,7 @@ export function NetDevLayout({
             {topoNotice && (
               <div className="ndv__hint ndv__hint--flush" style={{ marginBottom: 8, color: "var(--accent)" }}>{topoNotice}</div>
             )}
-            {topo && <TopologyMap graph={scopedTopo ?? topo} selected={selected} selectedAddr={selectedDevice?.address} onPick={pickFromTopo} />}
+            {topo && <TopologyMap graph={scopedTopo ?? topo} selected={selected} selectedAddr={selectedDevice?.address} onPick={pickFromTopo} health={healthMap} />}
             {!topo && !topoBusy && (
               <div className="ndv__hint ndv__hint--flush">
                 &gt;&gt; TOPO.ENGINE: 基于 IP 规划/命名/网段的本地聚类推演 (AI-Free)。拓扑链路强制数据保真——未证实链路不予绘制。请求全景态势，请执行 LLDP/CDP 靶向实测校准。
@@ -1191,15 +1250,18 @@ function BackupTimeline({ device }: { device: string }) {
   const [diff, setDiff] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [golden, setGolden] = useState<{ set: boolean; at: string; lines: number } | null>(null);
+  const [driftNote, setDriftNote] = useState("");
   const reload = useCallback(async () => {
     try {
       setVersions(await app.NetDevBackups(device));
+      setGolden(await app.NetDevGoldenInfo(device));
       setErr("");
     } catch (e) {
       setErr(String(e));
     }
   }, [device]);
-  useEffect(() => { setVersions(null); setPick([]); setDiff(""); void reload(); }, [reload]);
+  useEffect(() => { setVersions(null); setPick([]); setDiff(""); setDriftNote(""); void reload(); }, [reload]);
   const togglePick = (id: string) => {
     setDiff("");
     setPick(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id].slice(-2));
@@ -1223,7 +1285,18 @@ function BackupTimeline({ device }: { device: string }) {
           onClick={() => { setBusy(true); void app.NetDevRunBackup(device).then(() => reload()).finally(() => setBusy(false)); }}>
           {busy ? "执行中…" : "立即备份"}
         </span>
+        {golden?.set && (
+          <span className="btn btn--secondary btn--small ndv__section-btn" role="button"
+            title="现场拉取运行配置并与基线对比；漂移自动生成/恢复「发现」"
+            onClick={() => { setBusy(true); setDriftNote(""); void app.NetDevGoldenCheck(device).then(r => setDriftNote(r)).catch(e => setErr(String(e))).finally(() => setBusy(false)); }}>
+            {busy ? "对比中…" : "检查漂移"}
+          </span>
+        )}
       </div>
+      {golden?.set && (
+        <div className="ndv__meta">基线：{String(golden.at).slice(0, 16).replace("T", " ")} · {golden.lines} 行（从下方任一版本「设为基线」可更换）</div>
+      )}
+      {driftNote && <div className="ndv__meta" style={{ whiteSpace: "pre-wrap" }}>{driftNote}</div>}
       {err && <div className="ndv__hint">{err}</div>}
       {(versions ?? []).length === 0 && <div className="ndv__hint">暂无版本——「立即备份」或等备份周期（设置 → 定时任务）。</div>}
       {(versions ?? []).slice(0, 10).map(v => (
@@ -1232,6 +1305,11 @@ function BackupTimeline({ device }: { device: string }) {
           <span className="ndv__device-addr">{String(v.at ?? "").slice(5, 16).replace("T", " ")}</span>
           <span className="ndv__device-addr">{v.lines} 行 · {v.bytes} B</span>
           {pick.includes(v.id) && <span className="ndv__meta" style={{ marginLeft: "auto" }}>已选 {pick.indexOf(v.id) + 1}/2</span>}
+          <span className="btn btn--secondary btn--small" role="button"
+            title="以此版本为期望配置（golden），后续「检查漂移」以它为准"
+            onClick={() => { setBusy(true); void app.NetDevSetGoldenFromBackup(device, v.id).then(() => reload()).catch(e => setErr(String(e))).finally(() => setBusy(false)); }}>
+            设为基线
+          </span>
         </div>
       ))}
       {pick.length === 2 && (
@@ -1257,6 +1335,41 @@ function AuditChainBadge() {
     <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: st.ok ? "var(--ok)" : "var(--danger)" }} title={st.firstBroken ?? ""}>
       {st.ok ? `链校验通过（${st.chained} 条已上链）` : `链校验失败：${st.firstBroken}`}
     </span>
+  );
+}
+
+// ScenarioHub — 场景引导中心：每个场景一句话说明 + 一个动作，动作要么打开
+// 向导（告警接入）、要么填好提示词并打开对应页卡（诊断/巡检/基线）。
+function ScenarioHub({ onOpenAlertWizard, onDiagnose, onInspect, onLogs, onBaseline, onGolden }: {
+  onOpenAlertWizard: () => void;
+  onDiagnose: () => void;
+  onInspect: () => void;
+  onLogs: () => void;
+  onBaseline: () => void;
+  onGolden: () => void;
+}) {
+  const cards: { icon: string; title: string; desc: string; action: string; primary?: boolean; run: () => void }[] = [
+    { icon: "⏰", title: "告警接入", desc: "五步向导：轮询 → 规则 → 通知 → 测试。设备出事，群里收到消息。", action: "开始向导", primary: true, run: onOpenAlertWizard },
+    { icon: "🔍", title: "故障诊断", desc: "描述现象，AI 用只读命令收集证据给出结论；变更走提案。", action: "开始诊断", run: onDiagnose },
+    { icon: "🧪", title: "全网巡检", desc: "对全部设备跑只读电池，汇总成一条带证据的发现。", action: "立即巡检", run: onInspect },
+    { icon: "📜", title: "日志排查", desc: "六源日志（文件/journald/容器/K8s/数据库/syslog）读取与实时跟踪。", action: "打开日志", run: onLogs },
+    { icon: "🛡", title: "安全基线", desc: "核查 Telnet/明文密码/SSHv1 等弱配置，命中进发现附修复建议。", action: "运行核查", run: onBaseline },
+    { icon: "📐", title: "配置漂移", desc: "把某个备份设为基线，巡检自动对比运行配置，漂移即告警。", action: "设备页卡设置", run: onGolden },
+  ];
+  return (
+    <div className="ndv__card">
+      <div className="ndv__card-title">场景引导</div>
+      <div className="mem-hint" style={{ marginBottom: 8 }}>从这里开始——每张卡是一个完整场景，点动作直达。</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        {cards.map(c => (
+          <div key={c.title} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600 }}>{c.icon} {c.title}</div>
+            <div style={{ fontSize: 11, opacity: 0.75, flex: 1 }}>{c.desc}</div>
+            <span className={`btn btn--small ${c.primary ? "btn--primary" : "btn--secondary"}`} role="button" style={{ alignSelf: "flex-start" }} onClick={c.run}>{c.action}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1407,7 +1520,7 @@ const SEV_LABEL: Record<string, string> = { info: "ℹ 提示", warning: "⚠ �
 function FindingRow({ f, onResolved }: { f: NetDevFinding; onResolved?: () => void }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="ndv__finding" style={{ "--sev": SEV_COLOR[f.severity] ?? SEV_COLOR.info } as React.CSSProperties}>
+    <div className="ndv__finding" style={{ "--sev": SEV_COLOR[f.severity] ?? SEV_COLOR.info, opacity: f.status === "resolved" ? 0.5 : 1 } as React.CSSProperties}>
       <div className="ndv__finding-title" role="button" onClick={() => setOpen(!open)}>
         <span style={{ color: SEV_COLOR[f.severity] ?? SEV_COLOR.info, marginRight: 6 }}>{SEV_LABEL[f.severity] ?? SEV_LABEL.info}</span>
         {f.title} <span style={{ fontWeight: 400, opacity: 0.7 }}>证据 {f.evidence?.length ?? 0} 条 {open ? "▲" : "▼"}</span>
@@ -1469,7 +1582,7 @@ function ProposalRow({ p, onDone }: { p: NetDevProposal; onDone: () => void }) {
 // (real ops shape), unmanaged neighbors sink to the bottom in grey. Ports ride
 // the link as a hover tooltip; clicking a managed node selects the device
 // (onPick); `selected` highlights the picked node.
-function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevTopologyGraph; selected?: string; selectedAddr?: string; onPick?: (name: string) => void }) {
+function TopologyMap({ graph, selected, selectedAddr, onPick, health }: { graph: NetDevTopologyGraph; selected?: string; selectedAddr?: string; onPick?: (name: string) => void; health?: Record<string, NetDevDeviceHealth> }) {
   const W = 520, H_MAX = 360;
   // Null-hardening (2026-08-19 exe crash: "e.nodes is not iterable"): the
   // measured snapshot can arrive with null nodes/edges when no devices are
@@ -1558,16 +1671,21 @@ function TopologyMap({ graph, selected, selectedAddr, onPick }: { graph: NetDevT
                 fill={sel
                   ? "var(--accent-soft)"
                   : v.managed ? "color-mix(in srgb, var(--fg) 5%, var(--bg-elev))" : "transparent"}
-                stroke={sel
-                  ? "var(--accent)"
-                  : v.managed ? (tier === 0 ? "var(--accent)" : "var(--fg-faint)") : "var(--border)"}
+                stroke={(() => {
+                  const hv = v.managed ? health?.[v.name] : undefined;
+                  if (hv && !hv.reachable) return "var(--danger)";
+                  if (hv && (hv.interfaces ?? []).some(i => i.adminUp && !i.operUp)) return "var(--warn)";
+                  return sel
+                    ? "var(--accent)"
+                    : v.managed ? (tier === 0 ? "var(--accent)" : "var(--fg-faint)") : "var(--border)";
+                })()}
                 strokeWidth={sel ? 1.6 : v.managed && tier === 0 ? 1.5 : 1}
                 strokeDasharray={v.managed ? undefined : "3 3"}
               />
               <text x={p.x} y={p.y + 3.5} textAnchor="middle" fontSize={9} fill={v.managed ? "var(--fg)" : "var(--fg-faint)"}>
                 {v.name.length > 9 ? v.name.slice(0, 9) + "…" : v.name}
               </text>
-              <title>{`${v.name}${nv?.device_ip ? " · " + nv.device_ip : ""}${v.subnet ? " · " + v.subnet : ""}${v.managed ? " · 纳管" : " · 未纳管"}${v.tier !== undefined && v.tier >= 0 ? " · 分层为本地推断" : ` · 连接 ${degree.get(v.name) ?? 0}`}${v.managed && onPick ? " · 点击查看设备" : ""}`}</title>
+              <title>{`${v.name}${nv?.device_ip ? " · " + nv.device_ip : ""}${v.subnet ? " · " + v.subnet : ""}${v.managed ? " · 纳管" : " · 未纳管"}${health?.[v.name] ? (health[v.name].reachable ? " · 健康在线" : " · 不可达") : ""}${v.tier !== undefined && v.tier >= 0 ? " · 分层为本地推断" : ` · 连接 ${degree.get(v.name) ?? 0}`}${v.managed && onPick ? " · 点击查看设备" : ""}`}</title>
             </g>
           );
         })}

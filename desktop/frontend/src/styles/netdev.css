@@ -815,3 +815,72 @@
   .ndv__device, .ndv-logwb__src { transition: none; }
   .ndv__chip:hover, .ndv__quick-cmds .btn--secondary:hover { transform: none; }
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   科技感层（v2.1）——克制回归：终端标记、扫描线、状态辉光、光标闪烁、
+   键帽提示。全部 token 色；reduced-motion 全量尊重。
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* 1. 终端提示符：卡片标题带 ▸ 标记（手册/清单/日志卡的统一铬框语言） */
+.ndv__card-title::before { content: "▸ "; color: var(--accent); }
+
+/* 2. 扫描线底纹：日志/时间线输出区的极淡横纹（终端质感，2% 前景色） */
+.ndv-logwb__rows,
+.ndv-log__box,
+.ndv__live-tail-box {
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent 0px, transparent 2px,
+    color-mix(in srgb, var(--fg) 2.5%, transparent) 2px,
+    color-mix(in srgb, var(--fg) 2.5%, transparent) 3px
+  );
+}
+
+/* 3. 状态辉光（克制版）：选中设备行与激活 chips 的 accent 光晕 */
+.ndv__device--sel {
+  box-shadow: inset 2px 0 0 var(--accent), 0 0 10px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.ndv-bench__chip--on {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent),
+    0 0 10px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+/* 4. 光标闪烁：跟踪中的 ▍ 与紧急停止的呼吸感 */
+.ndv-log__cursor { color: var(--accent); animation: ndv-blink 1.1s steps(2, start) infinite; }
+@keyframes ndv-blink { to { visibility: hidden; } }
+.ndv__stop { animation: ndv-breathe 2.4s ease-in-out infinite; }
+@keyframes ndv-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 25%, transparent); }
+  50%      { box-shadow: 0 0 12px 1px color-mix(in srgb, var(--danger) 30%, transparent); }
+}
+
+/* 5. 键帽（ZCode 式键盘提示）：bench hint 等处的 kbd */
+.ndv kbd, .ndv-bench__bar kbd, .ndv-l3 kbd {
+  display: inline-block;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  line-height: 14px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+}
+
+/* 6. 数字读数一律等宽表格数字（预算条/统计/审计） */
+.ndv__stat, .ndv__live-budget-num, .ndv__audit-time, .ndv__meta { font-variant-numeric: tabular-nums; }
+
+/* 7. 实况设备卡：状态灯微脉冲（在线感）——极淡，不抢戏 */
+.ndv__live-dot { animation: ndv-dot 2.2s ease-in-out infinite; }
+@keyframes ndv-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.72; } }
+
+/* 8. 时间线行左缘对齐线：合并视图的读 Guiding 线（终端列感） */
+.ndv-logwb__rows { position: relative; }
+.ndv-logwb__row { border-left: 2px solid transparent; }
+.ndv-logwb__row:hover { border-left-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+
+/* 9. reduced-motion：动画全关（辉光保留静态，闪烁/脉冲/呼吸停） */
+@media (prefers-reduced-motion: reduce) {
+  .ndv-log__cursor, .ndv__stop, .ndv__live-dot { animation: none; }
+}

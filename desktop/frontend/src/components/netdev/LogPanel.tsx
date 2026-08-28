@@ -79,6 +79,10 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const [following, setFollowing] = useState(false);
+  // 筛选收纳：行数/起于/过滤 默认收起（320px dock 里常驻太挤），点「筛选」展开；
+  // 有非默认参数时按钮带摘要。levelFilter 是查看器侧的等级过滤（仅显示层）。
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [levelFilter, setLevelFilter] = useState<"" | "error" | "warn">("");
   const boxRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -117,6 +121,9 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
   };
   const allowlisted = (q: string): boolean => {
     if (!dbSrc) return false;
+    // redis has no per-source allowlist — the seal is the server-side builtin
+    // diagnostic command set, so every offered quick query is allowed.
+    if (dbSrc.type === "redis") return true;
     const norm = (s: string) => s.trim().replace(/\s+/g, " ").replace(/;$/, "").toLowerCase();
     return dbSrc.allowlist.some(a => {
       const na = norm(a);
@@ -146,10 +153,16 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
     if (following && boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight;
   }, [lines, following]);
 
+  const errCount = lines.filter(l => levelClass(l) === "ndv-log__line--error").length;
+  const warnCount = lines.filter(l => levelClass(l) === "ndv-log__line--warn").length;
+  const shownLines = levelFilter
+    ? lines.filter(l => levelClass(l) === `ndv-log__line--${levelFilter}`)
+    : lines;
+  const filterActive = tailN !== 100 || since.trim() !== "" || grep.trim() !== "";
+
   const read = async () => {
     if (kind === "db") return; // db reads go through the quick-query buttons
-    if (!device || (kind === "docker" && !container.trim()) || (kind === "k8s" && !k8sPod.trim()) || (kind === "winevt" && !evtChannel.trim())) { setNote("请先选择设备/填好源"); return; }
-    setBusy(true); setNote("");
+    if (!device || (kind === "docker" && !container.trim()) || (kind === "k8s" && !k8sPod.trim()) || (kind === "winevt" && !evtChannel.trim())) { setNote("请先选择设备/填好源"); return; }    setBusy(true); setNote("");
     try {
       if (following) { await app.NetDevLogFollowStop(device); setFollowing(false); }
       if (kind === "syslog") {
@@ -188,6 +201,14 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
         setNote(String(e));
       }
     }
+  };
+
+  // Switching device/kind must STOP the server-side stream too — flipping the
+  // UI flag alone would leave the old follow pulling lines until its caps.
+  const stopFollow = async () => {
+    if (!following || !device) return;
+    try { await app.NetDevLogFollowStop(device); } catch { /* already gone */ }
+    setFollowing(false);
   };
 
   const dbQuery = async (q: string) => {
@@ -232,7 +253,8 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
       {/* Source bar: device + kind + target + params, one row-ish grid. */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
         <select className="mem-select" value={device} onChange={e => {
-          setDevice(e.target.value); setFollowing(false);
+          void stopFollow();
+          setDevice(e.target.value);
           const nd = hosts.find(h => h.name === e.target.value);
           if (nd?.kind === "k8s") setKind("k8s");
           else if (nd?.kind === "docker") setKind("docker");
@@ -241,7 +263,7 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
           {hosts.map(h => <option key={h.name} value={h.name}>{h.name}{h.kind ? `（${h.kind}）` : ""}</option>)}
           {hosts.length === 0 && <option value="">（无服务器设备）</option>}
         </select>
-        <select className="mem-select" value={kind} onChange={e => setKind(e.target.value as typeof kind)}>
+        <select className="mem-select" value={kind} onChange={e => { void stopFollow(); setKind(e.target.value as typeof kind); }}>
           {dev?.kind !== "k8s" && dev?.kind !== "docker" && <>
             <option value="file">文件</option>
             <option value="journal">journald 单元</option>
@@ -321,16 +343,29 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
         </div>
       )}
 
-      {/* Read params + actions. */}
+      {/* Read params (collapsed) + actions. */}
+      {kind !== "db" && (
+        <div style={{ marginBottom: 8 }}>
+          <span className={`btn btn--small ${filtersOpen || filterActive ? "btn--primary" : "btn--secondary"}`} role="button"
+            title="行数 / 起始时间 / 正则过滤"
+            onClick={() => setFiltersOpen(o => !o)}>
+            筛选{filterActive ? ` · ${tailN}行${since.trim() ? ` · ${since.trim()}` : ""}${grep.trim() ? ` · /${grep.trim()}/` : ""}` : ""}
+          </span>
+          {filtersOpen && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6, alignItems: "center" }}>
+              <label className="ndv__meta">行数</label>
+              <input className="mem-input" type="number" style={{ width: 64 }} value={tailN} min={1} max={1000} onChange={e => setTailN(Math.min(1000, Math.max(1, Number(e.target.value) || 100)))} />
+              <label className="ndv__meta">起于</label>
+              <input className="mem-input" style={{ width: 130 }} value={since} onChange={e => setSince(e.target.value)} placeholder="2026-08-27 10:00 或 -1h" />
+              <label className="ndv__meta">过滤</label>
+              <input className="mem-input" style={{ width: 110 }} value={grep} onChange={e => setGrep(e.target.value)} placeholder="正则" />
+            </div>
+          )}
+        </div>
+      )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8, alignItems: "center" }}>
         {kind !== "db" && (
           <>
-            <label className="ndv__meta">行数</label>
-            <input className="mem-input" type="number" style={{ width: 64 }} value={tailN} min={1} max={1000} onChange={e => setTailN(Math.min(1000, Math.max(1, Number(e.target.value) || 100)))} />
-            <label className="ndv__meta">起于</label>
-            <input className="mem-input" style={{ width: 130 }} value={since} onChange={e => setSince(e.target.value)} placeholder="2026-08-27 10:00 或 -1h" />
-            <label className="ndv__meta">过滤</label>
-            <input className="mem-input" style={{ width: 110 }} value={grep} onChange={e => setGrep(e.target.value)} placeholder="正则" />
             <span className="btn btn--secondary btn--small" role="button" onClick={() => void read()}>{busy ? "读取中…" : "读取"}</span>
             {kind !== "syslog" && dev?.kind !== "k8s" && dev?.kind !== "docker" && (
               <span className={`btn btn--small ${following ? "btn--primary" : "btn--secondary"}`} role="button" onClick={() => void toggleFollow()}>{following ? "停止跟踪" : "跟踪"}</span>
@@ -345,6 +380,23 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
 
       {note && <div className="ndv__hint" style={{ marginBottom: 6 }}>{note}</div>}
 
+      {/* Level summary chips: counts double as one-click view filters. */}
+      {jsonCols.length === 0 && lines.length > 0 && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+          <span className={`ndv__chip ${levelFilter === "error" ? "" : "ndv__chip--off"}`} role="button"
+            style={levelFilter === "error" ? { borderColor: "var(--danger)", color: "var(--danger)" } : undefined}
+            onClick={() => setLevelFilter(f => (f === "error" ? "" : "error"))}>
+            错误 {errCount}
+          </span>
+          <span className={`ndv__chip ${levelFilter === "warn" ? "" : "ndv__chip--off"}`} role="button"
+            style={levelFilter === "warn" ? { borderColor: "var(--warn)", color: "var(--warn)" } : undefined}
+            onClick={() => setLevelFilter(f => (f === "warn" ? "" : "warn"))}>
+            警告 {warnCount}
+          </span>
+          {levelFilter && <span className="ndv__meta">显示 {shownLines.length}/{lines.length} 行（仅显示层过滤，「交给 AI」仍取完整缓冲）</span>}
+        </div>
+      )}
+
       {/* Viewer. */}
       <div ref={boxRef} className="ndv-log__box" style={{ flex: 1, minHeight: 120, overflow: "auto", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 8, fontSize: 11.5, fontFamily: "var(--font-mono, monospace)", lineHeight: 1.5 }}>
         {lines.length === 0 && !following && <span className="ndv__hint">选择源后「读取」最近日志，或「跟踪」实时流。文件路径限 /var/log 与设备 log_paths 白名单。</span>}
@@ -353,8 +405,8 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
             <thead><tr>{jsonCols.map(c => <th key={c} style={{ textAlign: "left", borderBottom: "1px solid var(--border)", padding: "2px 6px", position: "sticky", top: 0, background: "var(--bg)", whiteSpace: "nowrap" }}>{c}</th>)}</tr></thead>
             <tbody>{jsonRows.map((r, i) => <tr key={i}>{jsonCols.map(c => <td key={c} style={{ padding: "2px 6px", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis" }} title={String(r[c] ?? "")}>{String(r[c] ?? "")}</td>)}</tr>)}</tbody>
           </table>
-        ) : lines.map((l, i) => <div key={i} className={`ndv-log__line ${levelClass(l)}`}>{l}</div>)}
-        {following && <div className="ndv-log__line" style={{ color: "var(--accent)" }}>▍</div>}
+        ) : shownLines.map((l, i) => <div key={i} className={`ndv-log__line ${levelClass(l)}`}>{l}</div>)}
+        {following && <div className="ndv-log__line ndv-log__cursor">▍</div>}
       </div>
     </div>
   );
