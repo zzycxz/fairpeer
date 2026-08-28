@@ -23,11 +23,26 @@ import (
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/mobilebridge"
+	"github.com/zzycxz/fairpeer/internal/scheduler"
 )
 
 // replyExec 模拟 fairpeer 真实对话：submit 后回 reasoning + text + 工具卡 + turn_done，
 // 让 linkpeer 对话页有真实的双向交互（不只是 [CMD] 打印）。
-type replyExec struct{ conn atomic.Pointer[mobilebridge.Conn] }
+type replyExec struct {
+	conn atomic.Pointer[mobilebridge.Conn]
+	bri  atomic.Pointer[mobilebridge.Bridge] // 回复走 ForwardEvent：盖 seq 入 ring（真增量 resync 可测）
+}
+
+// sendTab 优先经 Bridge.ForwardEvent（seq 盖章 + 环形缓冲，对齐真实桌面
+// tabs.go 的注入点）；bridge 未就绪时退回 conn 直发。
+func (e *replyExec) sendTab(tab, evt string, d time.Duration) {
+	time.Sleep(d)
+	if b := e.bri.Load(); b != nil {
+		b.ForwardEvent(tab, []byte(evt))
+		return
+	}
+	_ = e.conn.Load().SendEvent([]byte(evt))
+}
 
 func (e *replyExec) Submit(tab, input, _ string) error {
 	fmt.Printf("[CMD] ✓ submit  tab=%s input=%q\n", tab, input)
@@ -41,10 +56,8 @@ func (e *replyExec) reply(tab, input string) {
 	if c == nil {
 		return
 	}
-	send := func(evt string, d time.Duration) {
-		time.Sleep(d)
-		_ = c.SendEvent([]byte(evt))
-	}
+	_ = c // sendTab 优先走 bridge；conn 仅兜底
+	send := func(evt string, d time.Duration) { e.sendTab(tab, evt, d) }
 	if strings.HasPrefix(tab, "office") {
 		// 办公任务：模拟生成文件
 		send(`{"kind":"reasoning","reasoning":"办公任务：「`+input+`」。我来生成对应文档……"}`, 300*time.Millisecond)
@@ -78,6 +91,16 @@ func (e *replyExec) ListSessions() ([]mobilebridge.SessionInfo, error) { return 
 func (e *replyExec) ListModels() ([]mobilebridge.ModelInfo, error) {
 	return []mobilebridge.ModelInfo{{ID: "mock/model", Label: "模拟模型"}}, nil
 }
+
+// ListTemplates 下发真实 scheduler 模板目录（与桌面端同一来源）。
+func (e *replyExec) ListTemplates() ([]mobilebridge.TemplateInfo, error) {
+	out := make([]mobilebridge.TemplateInfo, 0, len(scheduler.BuiltinTemplates))
+	for _, t := range scheduler.BuiltinTemplates {
+		out = append(out, mobilebridge.TemplateInfo{
+			ID: t.ID, Name: t.Name, Category: t.Category, Desc: t.Desc})
+	}
+	return out, nil
+}
 func (e *replyExec) NewTab(string, string) (string, error) { return "tab_mock", nil }
 func (e *replyExec) RenameSession(string, string) error     { return nil }
 func (e *replyExec) DeleteSession(string) error             { return nil }
@@ -107,6 +130,7 @@ func main() {
 	audit := mobilebridge.NewAudit("info")
 	exec := &replyExec{}
 	bridge := mobilebridge.NewBridge(cfg, priv, pub, store, exec, audit)
+	exec.bri.Store(bridge)
 
 	// onReady：存 conn（供 replyExec 模拟回复）+ 发欢迎 wireEvent
 	bridge.SetOnReady(func(c *mobilebridge.Conn) {
