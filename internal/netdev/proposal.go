@@ -46,6 +46,11 @@ type ProposalStep struct {
 }
 
 // Proposal is one change proposal.
+const (
+	ProposalWatching = "watching"
+	ProposalClosed   = "closed"
+)
+
 type Proposal struct {
 	ID         string         `json:"id"`
 	Intent     string         `json:"intent"`
@@ -57,6 +62,9 @@ type Proposal struct {
 	Approver   string         `json:"approver,omitempty"`
 	Confirm2   bool           `json:"confirm2"`       // secondary confirmation for proposal+confirm2 groups
 	Note       string         `json:"note,omitempty"` // freeze/rollback reason trail
+	// 观察期（§7.1）：done → watching（默认 30 分钟）→ closed；劣化触发 Finding。
+	WatchUntil  *time.Time    `json:"watch_until,omitempty"`
+	WatchNote   string        `json:"watch_note,omitempty"`
 }
 
 // proposalsDirOverride isolates proposal storage in tests.
@@ -318,6 +326,13 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 		return nil, err
 	}
 
+	// 执行前在线检查（§7.1）：目标设备上有人？列出来，提案 Note 里记录——
+	// 「我要变更，但同事正登着」是最常见的协作事故，一行只读命令挡住它。
+		online := m.preExecOnlineCheck(ctx, p)
+		if online != "" {
+			p.Note = strings.TrimSpace(p.Note + "\n[在线人员] " + online)
+		}
+
 	frozen := ""
 	for i := range p.Steps {
 		s := &p.Steps[i]
@@ -375,6 +390,17 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 		p.Note = "frozen: " + frozen + " — later steps untouched; a human decides rollback or keep"
 	} else {
 		p.Status = ProposalDone
+	// 观察期（§7.1）：默认 30 分钟后自动 closed；劣化检测由健康轮询承担。
+		wu := time.Now().Add(30 * time.Minute)
+		p.WatchUntil = &wu
+		go func(id string, until time.Time) {
+			time.Sleep(time.Until(until))
+			if pp, err := GetProposal(id); err == nil && pp.Status == ProposalWatching {
+				pp.Status = ProposalClosed
+				pp.WatchNote = "观察期满，自动关闭"
+				_ = SaveProposal(pp)
+			}
+		}(p.ID, wu)
 	}
 	if err := SaveProposal(p); err != nil {
 		return nil, err
@@ -470,4 +496,59 @@ func errText(err error, res Result) string {
 		return firstLine(res.Output)
 	}
 	return ""
+}
+
+
+// preExecOnlineCheck runs who/quser on every unique target device — the
+// "someone else is on the box" guard (§7.1 执行前置检查). Returns a summary
+// line, empty when nobody else is on any target.
+func (m *Manager) preExecOnlineCheck(ctx context.Context, p *Proposal) string {
+	seen := map[string]bool{}
+	for _, s := range p.Steps {
+		if s.Device == "" || seen[s.Device] {
+			continue
+		}
+		seen[s.Device] = true
+	}
+	var findings []string
+	for name := range seen {
+		d, ok := m.cfg.NetDevDeviceByName(name)
+		if !ok {
+			continue
+		}
+		var cmd string
+		switch d.Vendor {
+		case "linux", "vmware":
+			cmd = "who"
+		case "windows":
+			cmd = "quser"
+		default:
+			continue // network CLIs have no meaningful "who"; VTY occupancy is live panel's
+		}
+		res := m.Exec(ctx, name, cmd)
+		if res.Refused || res.IsError {
+			continue
+		}
+		lines := strings.TrimSpace(res.Output)
+		if lines == "" {
+			continue
+		}
+			n := len(strings.Split(lines, "\n"))
+		findings = append(findings, fmt.Sprintf("%s: %d 个会话", name, n))
+	}
+	return strings.Join(findings, "；")
+}
+
+// CloseProposalWatch manually ends the watching period.
+func CloseProposalWatch(id string) error {
+	p, err := GetProposal(id)
+	if err != nil {
+		return err
+	}
+	if p.Status != ProposalWatching {
+		return fmt.Errorf("proposal %s: status %s, only watching proposals close", id, p.Status)
+	}
+	p.Status = ProposalClosed
+	p.WatchNote = "人工关闭"
+	return SaveProposal(p)
 }
