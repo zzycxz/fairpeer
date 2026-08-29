@@ -6,6 +6,7 @@ import katexCss from "katex/dist/katex.min.css?inline";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { highlightToHtml } from "./highlight";
+import { inlineMermaidFences } from "./mermaidExport";
 import { normalizeMath } from "../components/mathNormalize";
 
 const EXPORT_WIDTH = 920;
@@ -90,6 +91,10 @@ ${katexCss}
 .session-export-page .md a {
   color: var(--accent);
   text-decoration: none;
+}
+.session-export-page .md img {
+  max-width: 100%;
+  height: auto;
 }
 .session-export-page .md blockquote {
   margin: 0 0 14px;
@@ -243,6 +248,11 @@ function nextFrame(): Promise<void> {
 }
 
 async function renderExportSurface(markdown: string): Promise<RenderedExport> {
+  // Mermaid fences become rasterized data-URL images BEFORE the surface
+  // mounts, so all three formats (PNG/PDF/HTML) show diagrams instead of
+  // fenced source; fences that fail to rasterize keep the code-text fallback.
+  const withDiagrams = await inlineMermaidFences(markdown);
+
   const host = document.createElement("div");
   host.style.position = "fixed";
   host.style.left = "-100000px";
@@ -253,7 +263,7 @@ async function renderExportSurface(markdown: string): Promise<RenderedExport> {
   document.body.appendChild(host);
 
   const root = createRoot(host);
-  root.render(<ExportSurface markdown={markdown} />);
+  root.render(<ExportSurface markdown={withDiagrams} />);
 
   await nextFrame();
   await nextFrame();
