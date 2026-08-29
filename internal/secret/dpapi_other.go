@@ -12,11 +12,13 @@ import (
 	"os"
 )
 
-// Non-Windows fallback for Protect/Unprotect. FairPeer targets Windows for the
-// email/desktop features (Win32 automation), so this path exists only so the
-// package compiles and runs its tests on macOS/Linux/CI. It derives a static
-// AES-256 key from machine identity (hostname + home dir) — far weaker than
-// DPAPI's user-bound key, but acceptable as a stand-in off Windows.
+// Legacy v1 Protect/Unprotect and the machine-key source for the degraded
+// KEK fallback (see kek_machine.go). The derived key is NOT secret — any local
+// process can recompute it from hostname + home dir — which is why v2 stores
+// use an OS-keystore KEK (Keychain/Secret Service/passphrase) instead, and
+// this key material survives only to (a) decrypt pre-v2 files during the
+// one-time upgrade and (b) keep headless machines without any keystore
+// working, flagged as degraded via SecurityMode.
 
 func machineKey() []byte {
 	host, _ := os.Hostname()
