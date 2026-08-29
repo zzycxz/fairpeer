@@ -50,7 +50,7 @@ type kubeConfigFile struct {
 	Users []struct {
 		Name string `yaml:"name"`
 		User struct {
-			Token                string `yaml:"token"`
+			Token                 string `yaml:"token"`
 			ClientCertificateData string `yaml:"client-certificate-data"`
 			ClientKeyData         string `yaml:"client-key-data"`
 		} `yaml:"user"`
@@ -166,84 +166,91 @@ func (m *Manager) kubeTarget(deviceName string) (*kubeTarget, error) {
 
 // KubeGet answers ONE whitelisted GET against the device's pinned context.
 // what ∈ version | pods | pod | podlog | events | deployments | nodes.
+// Sealed by sealAPIGet (guardrails + live + audit + redaction).
 func (m *Manager) KubeGet(ctx context.Context, deviceName, what, namespace, name string, tailN int) (string, error) {
-	t, err := m.kubeTarget(deviceName)
-	if err != nil {
-		return "", err
+	label := "k8s " + what
+	if name != "" {
+		label += " " + name
 	}
-	d, _ := m.cfg.NetDevDeviceByName(deviceName)
-
-	if namespace == "" {
-		namespace = t.namespace
-	}
-	if what != "version" && what != "nodes" {
-		if !kubeNameRe.MatchString(namespace) {
-			return "", fmt.Errorf("invalid namespace %q", namespace)
+	return m.sealAPIGet(deviceName, label, func() (string, error) {
+		t, err := m.kubeTarget(deviceName)
+		if err != nil {
+			return "", err
 		}
-		// Namespace allowlist from the device's k8s config (empty = all).
-		if d.K8s != nil && len(d.K8s.Namespaces) > 0 {
-			allowed := false
-			for _, ns := range d.K8s.Namespaces {
-				if ns == namespace {
-					allowed = true
-					break
+		d, _ := m.cfg.NetDevDeviceByName(deviceName)
+
+		if namespace == "" {
+			namespace = t.namespace
+		}
+		if what != "version" && what != "nodes" {
+			if !kubeNameRe.MatchString(namespace) {
+				return "", fmt.Errorf("invalid namespace %q", namespace)
+			}
+			// Namespace allowlist from the device's k8s config (empty = all).
+			if d.K8s != nil && len(d.K8s.Namespaces) > 0 {
+				allowed := false
+				for _, ns := range d.K8s.Namespaces {
+					if ns == namespace {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					return "", fmt.Errorf("namespace %q is outside this target's allowlist %v", namespace, d.K8s.Namespaces)
 				}
 			}
-			if !allowed {
-				return "", fmt.Errorf("namespace %q is outside this target's allowlist %v", namespace, d.K8s.Namespaces)
-			}
 		}
-	}
 
-	var path string
-	switch what {
-	case "version":
-		path = "/version"
-	case "nodes":
-		path = "/api/v1/nodes"
-	case "pods":
-		path = "/api/v1/namespaces/" + namespace + "/pods?limit=200"
-	case "events":
-		path = "/api/v1/namespaces/" + namespace + "/events?limit=200"
-	case "deployments":
-		path = "/apis/apps/v1/namespaces/" + namespace + "/deployments?limit=200"
-	case "pod", "podlog":
-		if !kubeNameRe.MatchString(name) {
-			return "", fmt.Errorf("invalid pod name %q", name)
-		}
-		if what == "pod" {
-			path = "/api/v1/namespaces/" + namespace + "/pods/" + name
-		} else {
-			if tailN <= 0 || tailN > 1000 {
-				tailN = 100
+		var path string
+		switch what {
+		case "version":
+			path = "/version"
+		case "nodes":
+			path = "/api/v1/nodes"
+		case "pods":
+			path = "/api/v1/namespaces/" + namespace + "/pods?limit=200"
+		case "events":
+			path = "/api/v1/namespaces/" + namespace + "/events?limit=200"
+		case "deployments":
+			path = "/apis/apps/v1/namespaces/" + namespace + "/deployments?limit=200"
+		case "pod", "podlog":
+			if !kubeNameRe.MatchString(name) {
+				return "", fmt.Errorf("invalid pod name %q", name)
 			}
-			path = fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/log?tailLines=%d", namespace, name, tailN)
+			if what == "pod" {
+				path = "/api/v1/namespaces/" + namespace + "/pods/" + name
+			} else {
+				if tailN <= 0 || tailN > 1000 {
+					tailN = 100
+				}
+				path = fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/log?tailLines=%d", namespace, name, tailN)
+			}
+		default:
+			return "", errors.New("what must be version|pods|pod|podlog|events|deployments|nodes")
 		}
-	default:
-		return "", errors.New("what must be version|pods|pod|podlog|events|deployments|nodes")
-	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.server+path, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Accept", "application/json")
-	if t.token != "" {
-		req.Header.Set("Authorization", "Bearer "+t.token)
-	}
-	res, err := t.client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer res.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(res.Body, kubeBodyCap))
-	if err != nil {
-		return "", err
-	}
-	if res.StatusCode != http.StatusOK {
-		return string(body), fmt.Errorf("kube API %s → HTTP %d", path, res.StatusCode)
-	}
-	return compactKubeJSON(path, string(body)), nil
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.server+path, nil)
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("Accept", "application/json")
+		if t.token != "" {
+			req.Header.Set("Authorization", "Bearer "+t.token)
+		}
+		res, err := t.client.Do(req)
+		if err != nil {
+			return "", err
+		}
+		defer res.Body.Close()
+		body, err := io.ReadAll(io.LimitReader(res.Body, kubeBodyCap))
+		if err != nil {
+			return "", err
+		}
+		if res.StatusCode != http.StatusOK {
+			return string(body), fmt.Errorf("kube API %s → HTTP %d", path, res.StatusCode)
+		}
+		return compactKubeJSON(path, string(body)), nil
+	})
 }
 
 // compactKubeJSON prunes the noisiest fields (managedFields) so a pod list

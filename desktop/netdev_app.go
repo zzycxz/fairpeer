@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -38,10 +40,14 @@ type NetDevDeviceView struct {
 	PasswordSet  bool     `json:"passwordSet"`
 	IdentityFile string   `json:"identityFile"`
 	Encoding     string   `json:"encoding"`
-	AllowTelnet  bool     `json:"allowTelnet"`
 	// LogPaths whitelists extra log roots (outside /var/log) for this device —
 	// the file: log-source whitelist (netdev_log_read / the classifier bypass).
 	LogPaths []string `json:"logPaths"`
+	// ConfigPaths whitelists server config-file roots (§7.3 配置文件管理):
+	// snapshot/diff/drift reads + restore-verify proposals live under these.
+	ConfigPaths []string `json:"configPaths"`
+	// OOBURL is the 带外启动器 deep link (§6.3): ESXi/堡垒/BMC Web UI.
+	OOBURL string `json:"oobUrl"`
 	// Kind is the data-plane discriminator (NETDEV_SPEC_V2 §2.1): ""(=按厂商)
 	// | docker | k8s. DockerSocket / K8s* apply per kind.
 	Kind         string `json:"kind"`
@@ -293,8 +299,10 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 			Address: d.Address, Port: d.Port, Via: d.Via, Group: d.Group,
 			Username: d.Username, PasswordEnv: d.PasswordEnv,
 			PasswordSet:  netdevSecretSet(netdev.SecretKindPassword, d.PasswordEnv),
-			IdentityFile: d.IdentityFile, Encoding: d.Encoding, AllowTelnet: d.AllowTelnet,
+			IdentityFile: d.IdentityFile, Encoding: d.Encoding,
 			LogPaths:         d.LogPaths,
+			ConfigPaths:      d.ConfigPaths,
+			OOBURL:           d.OOBURL,
 			Protocols:        d.Protocols,
 			Kind:             d.Kind,
 			DockerSocket:     dockerSocketOf(d),
@@ -633,8 +641,9 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 				Via: d.Via, Group: strings.TrimSpace(d.Group),
 				Username: strings.TrimSpace(d.Username), PasswordEnv: strings.TrimSpace(d.PasswordEnv),
 				IdentityFile: strings.TrimSpace(d.IdentityFile), Encoding: strings.TrimSpace(d.Encoding),
-				AllowTelnet: d.AllowTelnet,
 				LogPaths:    cleanLogPaths(d.LogPaths),
+				ConfigPaths: cleanLogPaths(d.ConfigPaths),
+				OOBURL:      strings.TrimSpace(d.OOBURL),
 				Protocols:   d.Protocols,
 				Kind:        strings.TrimSpace(d.Kind),
 			})
@@ -1613,6 +1622,277 @@ func (a *App) NetDevHumanTTYStop(device string) {
 
 func (a *App) NetDevHumanTTYStatus() ([]netdev.HumanTTYState, error) {
 	return netdev.HumanTTYStatus(), nil
+}
+
+// NetDevHumanTTYResize forwards frontend xterm resizes to the device PTY.
+func (a *App) NetDevHumanTTYResize(device string, cols, rows int) error {
+	return netdev.HumanTTYResize(device, cols, rows)
+}
+
+// NetDevSFTPDownload pulls one whitelisted remote file (§6.2 只读下载) and
+// saves it where the user picks. Returns the saved path ("" if cancelled).
+func (a *App) NetDevSFTPDownload(device, remotePath string) (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	content, err := netdev.SharedManager(cfg).SFTPDownload(context.Background(), device, remotePath)
+	if err != nil {
+		return "", err
+	}
+	if a.ctx == nil {
+		return "", fmt.Errorf("app not ready")
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "保存下载文件",
+		DefaultFilename: filepath.Base(strings.ReplaceAll(remotePath, "\\", "/")),
+	})
+	if err != nil {
+		return "", err
+	}
+	if path == "" {
+		return "", nil // user cancelled
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// NetDevSFTPBrowse lists one whitelisted remote directory (§6.2 目录浏览).
+func (a *App) NetDevSFTPBrowse(device, dirPath string) ([]string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).SFTPBrowse(context.Background(), device, dirPath)
+}
+
+// NetDevOOBLaunch is the 带外启动器 (§6.3): launch the LOCAL browser or RDP
+// client at the device's out-of-band entry — no RDP/VNC protocol in-product.
+// Every click is audited. Returns what was launched (UI toast text).
+func (a *App) NetDevOOBLaunch(device string) (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	d, ok := cfg.NetDevDeviceByName(device)
+	if !ok {
+		return "", fmt.Errorf("device %q is not in the inventory", device)
+	}
+	what := ""
+	switch {
+	case strings.TrimSpace(d.OOBURL) != "":
+		u := strings.TrimSpace(d.OOBURL)
+		if !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
+			return "", fmt.Errorf("oob_url %q must be an http(s) link", u)
+		}
+		if a.ctx == nil {
+			return "", fmt.Errorf("app not ready")
+		}
+		runtime.BrowserOpenURL(a.ctx, u)
+		what = "浏览器 " + u
+	case d.Vendor == "windows":
+		// The wails runtime import shadows stdlib runtime, so detect the local
+		// RDP client by lookup instead of GOOS — absent on mac/linux hosts.
+		if _, err := exec.LookPath("mstsc"); err != nil {
+			what = fmt.Sprintf("请在本地 RDP 客户端打开 %s", d.Address)
+		} else {
+			if err := exec.Command("mstsc", "/v:"+d.Address).Start(); err != nil {
+				return "", fmt.Errorf("mstsc: %w", err)
+			}
+			what = "mstsc /v:" + d.Address
+		}
+	case d.Vendor == "vmware":
+		if a.ctx == nil {
+			return "", fmt.Errorf("app not ready")
+		}
+		url := "https://" + d.Address + "/ui"
+		runtime.BrowserOpenURL(a.ctx, url)
+		what = "浏览器 " + url
+	case d.Vendor == "redfish":
+		if a.ctx == nil {
+			return "", fmt.Errorf("app not ready")
+		}
+		url := "https://" + d.Address
+		runtime.BrowserOpenURL(a.ctx, url)
+		what = "浏览器 " + url + "（BMC Web）"
+	default:
+		return "", fmt.Errorf("device %q has no out-of-band entry — configure oob_url in the 运维 settings (§6.3)", device)
+	}
+	_ = netdev.AppendAudit(netdev.Audit{Time: time.Now(), Device: device, Command: "oob-launch " + what, Class: "oob", Status: netdev.AuditOK})
+	return what, nil
+}
+
+// ── Job 引擎（v1 C 批 → SPEC_V2 §九 R4）───────────────────────────────────
+
+func (a *App) NetDevJobStart(def netdev.Job) (*netdev.Job, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).JobStart(&def)
+}
+
+func (a *App) NetDevJobs() ([]*netdev.Job, error) {
+	return netdev.ListJobs()
+}
+
+func (a *App) NetDevJobGet(id string) (*netdev.Job, error) {
+	return netdev.GetJob(id)
+}
+
+func (a *App) NetDevJobPause(id string) error {
+	return netdev.JobPause(id)
+}
+
+func (a *App) NetDevJobResume(id string) (*netdev.Job, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).JobResume(id)
+}
+
+func (a *App) NetDevJobAbort(id string) (*netdev.Job, error) {
+	return netdev.JobAbort(id)
+}
+
+// ── 割接模式（§7.2）──────────────────────────────────────────────────────
+
+func (a *App) NetDevCutoverStart(def netdev.CutoverRun) (*netdev.CutoverRun, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).CutoverStart(&def)
+}
+
+func (a *App) NetDevCutovers() ([]*netdev.CutoverRun, error) {
+	return netdev.ListCutovers()
+}
+
+func (a *App) NetDevCutoverGet(id string) (*netdev.CutoverRun, error) {
+	return netdev.GetCutover(id)
+}
+
+func (a *App) NetDevCutoverContinue(id string) (*netdev.CutoverRun, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).CutoverContinue(id)
+}
+
+func (a *App) NetDevCutoverRollback(id string) (*netdev.CutoverRun, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).CutoverRollback(context.Background(), id)
+}
+
+func (a *App) NetDevCutoverAbort(id string) (*netdev.CutoverRun, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).CutoverAbort(id)
+}
+
+// NetDevCutoverReport saves the before/after report where the user picks.
+func (a *App) NetDevCutoverReport(id string) (string, error) {
+	c, err := netdev.GetCutover(id)
+	if err != nil {
+		return "", err
+	}
+	if c.Report == "" {
+		return "", fmt.Errorf("cutover %s has no report yet", id)
+	}
+	if a.ctx == nil {
+		return "", fmt.Errorf("app not ready")
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "保存割接对比报告",
+		DefaultFilename: "cutover-" + id + ".md",
+		Filters:         []runtime.FileFilter{{DisplayName: "Markdown (*.md)", Pattern: "*.md"}},
+	})
+	if err != nil {
+		return "", err
+	}
+	if path == "" {
+		return "", nil
+	}
+	return path, os.WriteFile(path, []byte(c.Report), 0o600)
+}
+
+// ── 批量模板（§7.2）──────────────────────────────────────────────────────
+
+func (a *App) NetDevTemplates() ([]*netdev.Template, error) {
+	return netdev.ListTemplates()
+}
+
+func (a *App) NetDevTemplateSave(t netdev.Template) (*netdev.Template, error) {
+	if err := netdev.SaveTemplate(&t); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+func (a *App) NetDevTemplateDelete(id string) error {
+	return netdev.DeleteTemplate(id)
+}
+
+// NetDevTemplateRender is the 逐台 dry-run（§7.2）：no side effects.
+func (a *App) NetDevTemplateRender(id string, vars map[string]string) ([]netdev.TemplatePreviewDevice, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	t, err := netdev.GetTemplate(id)
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).TemplateRender(t, vars)
+}
+
+// NetDevTemplateApply renders + creates the draft proposal (approve flow follows).
+func (a *App) NetDevTemplateApply(id string, vars map[string]string) (*netdev.Proposal, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	t, err := netdev.GetTemplate(id)
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).TemplateApply(t, vars)
+}
+
+// ── 服务器配置文件管理（§7.3）───────────────────────────────────────────
+
+func (a *App) NetDevSrvConfSnapshot(device, path string) (*netdev.SrvConfVersion, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).SrvConfSnapshot(context.Background(), device, path)
+}
+
+func (a *App) NetDevSrvConfVersions(device, path string) ([]netdev.SrvConfVersion, error) {
+	return netdev.SrvConfVersions(device, path), nil
+}
+
+func (a *App) NetDevSrvConfDiff(idA, idB string) (string, error) {
+	return netdev.SrvConfDiff(idA, idB)
+}
+
+func (a *App) NetDevSrvConfDrift(path string, devices []string) ([]netdev.SrvConfDriftRow, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).SrvConfDrift(context.Background(), path, devices)
 }
 
 // NetDevImportCVEs caches a user-supplied simplified-NVD feed (§4.5).

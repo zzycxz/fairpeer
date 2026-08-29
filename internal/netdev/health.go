@@ -19,12 +19,12 @@ import (
 
 // DeviceHealth is one device's latest poll result.
 type DeviceHealth struct {
-	Device    string          `json:"device"`
-	Time      time.Time       `json:"time"`
-	Reachable bool            `json:"reachable"`
-	UptimeSec int64           `json:"uptimeSec"`
-	Interfaces []IfHealth     `json:"interfaces"`
-	LastError string          `json:"lastError,omitempty"`
+	Device     string     `json:"device"`
+	Time       time.Time  `json:"time"`
+	Reachable  bool       `json:"reachable"`
+	UptimeSec  int64      `json:"uptimeSec"`
+	Interfaces []IfHealth `json:"interfaces"`
+	LastError  string     `json:"lastError,omitempty"`
 }
 
 // IfHealth is one interface row (ifDescr/ifAdminStatus/ifOperStatus).
@@ -35,18 +35,34 @@ type IfHealth struct {
 }
 
 // UpCount/DownCount helpers for the UI (oper-down among admin-up = real alarms).
-func (h DeviceHealth) IfUp() int    { n := 0; for _, i := range h.Interfaces { if i.OperUp { n++ } }; return n }
-func (h DeviceHealth) IfDown() int  { n := 0; for _, i := range h.Interfaces { if i.AdminUp && !i.OperUp { n++ } }; return n }
+func (h DeviceHealth) IfUp() int {
+	n := 0
+	for _, i := range h.Interfaces {
+		if i.OperUp {
+			n++
+		}
+	}
+	return n
+}
+func (h DeviceHealth) IfDown() int {
+	n := 0
+	for _, i := range h.Interfaces {
+		if i.AdminUp && !i.OperUp {
+			n++
+		}
+	}
+	return n
+}
 
 // HealthSnapshot is the whole fleet's latest state.
 type HealthSnapshot struct {
-	PollIntervalSeconds int           `json:"pollIntervalSeconds"`
+	PollIntervalSeconds int            `json:"pollIntervalSeconds"`
 	Devices             []DeviceHealth `json:"devices"`
 }
 
 var (
-	healthMu      sync.Mutex
-	healthState   = map[string]DeviceHealth{}
+	healthMu       sync.Mutex
+	healthState    = map[string]DeviceHealth{}
 	healthLastPoll time.Time
 	healthPollOnce sync.Once
 )
@@ -146,6 +162,14 @@ func (m *Manager) PollHealthOnce(ctx context.Context) {
 			freshMu.Lock()
 			fresh[name] = h
 			freshMu.Unlock()
+			_ = RecordMetricPoint(name, MetricPoint{
+				Time: h.Time, Reachable: h.Reachable, UptimeSec: h.UptimeSec,
+				IfUp: h.IfUp(), IfDown: h.IfDown(),
+			})
+			_ = RecordMetricPoint(name, MetricPoint{
+				Time: h.Time, Reachable: h.Reachable, UptimeSec: h.UptimeSec,
+				IfUp: h.IfUp(), IfDown: h.IfDown(),
+			})
 			if !had || prev.Reachable != h.Reachable || prev.IfDown() != h.IfDown() {
 				notifyHealth(h)
 				recordHealthSeries(h)
@@ -157,6 +181,8 @@ func (m *Manager) PollHealthOnce(ctx context.Context) {
 	healthLastPoll = time.Now()
 	healthMu.Unlock()
 	m.evaluateAlerts(fresh)
+	// 观察期劣化检测（§7.1）：watching 提案的目标与 watch 起点基线对比。
+	m.checkWatchingProposals(fresh)
 }
 
 // pollDeviceHealth runs one device's MIB-2 battery: sysUpTime + the ifTable

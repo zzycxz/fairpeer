@@ -3,6 +3,7 @@ import { app } from "../../lib/bridge";
 import { useToast } from "../../lib/toast";
 import { useConfirm } from "../../lib/confirm";
 import type { NetDevProposal } from "../../lib/types";
+import { STEP_TYPE_LABEL, stepSummary, k8sRef } from "./proposalStepFormat";
 
 // ProposalCenter is the human half of the write path: the agent drafts
 // (netdev_propose), and ONLY here can a human approve, execute, or roll back.
@@ -16,7 +17,17 @@ const STATUS_LABEL: Record<string, string> = {
   done: "已完成",
   partial: "⚠ 部分执行（已冻结）",
   failed: "🔴 回滚失败（需人工处理）",
+  watching: "👁 观察期（§7.1）",
+  closed: "已关闭",
 };
+
+// 结构化步骤（§7.1）：类型徽标（labels live in proposalStepFormat）。
+export function StepTypeBadge({ type }: { type?: string }) {
+  if (type && type !== "cli") {
+    return <span className="ndv__badge" style={{ marginLeft: 6 }}>{STEP_TYPE_LABEL[type] ?? type}</span>;
+  }
+  return null;
+}
 
 // ProposalActions: the approve / execute / rollback buttons with their
 // confirm dialogs. Shared by the settings 提案中心 and the 运维 dock's 提案
@@ -121,7 +132,8 @@ export function ProposalCenter() {
       title: `批准提案 ${p.id}`,
       message:
         `${p.intent}\n\n` +
-        p.steps.map((s) => `· ${s.device}: ${s.commands.join("; ")}`).join("\n") +
+        p.steps.map((s) => `· ${stepSummary(s)}`).join("\n") +
+        (p.steps.some(s => s.dangerous) ? "\n\n⚠ 含危险动词步骤——已强制二次确认。" : "") +
         "\n\n回滚计划已随提案起草，批准后仍需手动点击执行。",
       confirmLabel: "批准",
     });
@@ -186,12 +198,48 @@ export function ProposalCenter() {
               {p.note && <div style={{ marginBottom: 6, color: "var(--text-warn, #e0a800)" }}>{p.note}</div>}
               {p.steps.map((s, i) => (
                 <div key={i} style={{ marginBottom: 6 }}>
-                  <div>{s.device} — {s.applied ? "✅ 已下发" : s.error ? "❌ " + s.error : "⬜ 未执行"}</div>
-                  <div style={{ marginLeft: 12 }}>变更：{s.commands.join("；")}</div>
-                  <div style={{ marginLeft: 12 }}>回滚：{(s.rollback ?? []).join("；") || "（无）"}</div>
-                  {s.backup && <div style={{ marginLeft: 12, opacity: 0.7 }}>备份已存档（{s.backup.length} 字符，脱敏后）</div>}
+                  <div>
+                    {s.device} — {s.applied ? "✅ 已下发" : s.error ? "❌ " + s.error : "⬜ 未执行"}
+                    <StepTypeBadge type={s.type} />
+                    {s.dangerous && <span className="ndv__badge ndv__badge--warn" style={{ marginLeft: 6 }}>⚠ 危险动词 · 已强制二次确认</span>}
+                  </div>
+                  {(!s.type || s.type === "cli") && (
+                    <>
+                      <div style={{ marginLeft: 12 }}>变更：{(s.commands ?? []).join("；")}</div>
+                      <div style={{ marginLeft: 12 }}>回滚：{(s.rollback ?? []).join("；") || "（无）"}</div>
+                    </>
+                  )}
+                  {s.type === "k8s-apply" && (
+                    <div style={{ marginLeft: 12 }}>
+                      变更：server-side apply — <code>{k8sRef(s.yaml)}</code>
+                      <pre style={{ margin: "4px 0", opacity: 0.75, maxHeight: 120, overflow: "auto" }}>{s.yaml}</pre>
+                      回滚依据：apply 前的 live 对象备份（resourceVersion 钉住）
+                    </div>
+                  )}
+                  {s.type === "sql-migration" && (
+                    <div style={{ marginLeft: 12 }}>
+                      <div>变更（Up）：<pre style={{ margin: "4px 0", opacity: 0.75, maxHeight: 120, overflow: "auto" }}>{s.up_sql}</pre></div>
+                      <div>回滚（Down{s.down_sql ? "" : " ⚠ 缺失——该类型不可提交"}）：
+                        <pre style={{ margin: "4px 0", opacity: 0.75, maxHeight: 120, overflow: "auto" }}>{s.down_sql || "（无）"}</pre>
+                      </div>
+                    </div>
+                  )}
+                  {(s.type === "file-upload" || s.type === "cert-replace") && (
+                    <div style={{ marginLeft: 12 }}>
+                      变更：{s.local_path} → {s.remote_path}
+                      {s.type === "cert-replace" && <>；私钥 {s.key_local_path} → {s.key_remote_path}；reload <code>{s.reload_cmd}</code></>}
+                      {s.checksum && <>；sha256 <code>{s.checksum.slice(0, 12)}…</code></>}
+                      <div style={{ opacity: 0.75 }}>回滚依据：目标现文件备份（上传前自动抓取）</div>
+                    </div>
+                  )}
+                  {s.backup && <div style={{ marginLeft: 12, opacity: 0.7 }}>备份已存档（{s.backup.length} 字符）</div>}
                 </div>
               ))}
+              {p.status === "watching" && p.watch_until && (
+                <div style={{ marginBottom: 6, color: "var(--text-warn, #e0a800)" }}>
+                  👁 观察期至 {String(p.watch_until).slice(11, 19)}（§7.1：劣化触发 Finding + 一键回滚提案）
+                </div>
+              )}
               <div style={{ opacity: 0.6 }}>
                 创建 {p.created_at ? String(p.created_at).slice(0, 19).replace("T", " ") : "-"}
                 {p.approved_at ? ` · 批准 ${String(p.approved_at).slice(0, 19).replace("T", " ")}` : ""}

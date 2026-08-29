@@ -172,6 +172,14 @@ type ExecResult struct {
 // (Network devices usually need a PTY-driven interactive CLI session instead —
 // that is the driver layer's job, built on SSH(); Exec serves Linux hops.)
 func (c *Client) Exec(ctx context.Context, cmd string) (ExecResult, error) {
+	return c.ExecInput(ctx, cmd, nil)
+}
+
+// ExecInput is Exec with bytes fed to the session's stdin (closed after the
+// write). The proposal executor's file-upload path (§7.1 file-upload / §6.2
+// upload-only-in-proposals) uses it to stream file content through
+// `base64 -d > path`; the read-only diagnostic surface never calls it.
+func (c *Client) ExecInput(ctx context.Context, cmd string, input []byte) (ExecResult, error) {
 	cl, err := c.SSH()
 	if err != nil {
 		return ExecResult{}, err
@@ -188,6 +196,17 @@ func (c *Client) Exec(ctx context.Context, cmd string) (ExecResult, error) {
 			return
 		}
 		defer sess.Close()
+		if input != nil {
+			stdin, perr := sess.StdinPipe()
+			if perr != nil {
+				ch <- res{err: perr}
+				return
+			}
+			go func() {
+				_, _ = stdin.Write(input)
+				stdin.Close()
+			}()
+		}
 		var stdout, stderr bytes.Buffer
 		sess.Stdout = &stdout
 		sess.Stderr = &stderr

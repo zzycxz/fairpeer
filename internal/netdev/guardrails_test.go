@@ -3,8 +3,8 @@ package netdev
 import (
 	"context"
 	"encoding/json"
-	"net"
 	"fmt"
+	"net"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,7 +35,7 @@ func guardrailManager(t *testing.T, g config.NetDevGuardrails) (*Manager, string
 			Address: "127.0.0.1", Port: 1, Username: "admin",
 			PasswordEnv: "TEST_ENV", Group: "core",
 		}},
-		Groups: []config.NetDevGroup{{Name: "edge"}, {Name: "core"}},
+		Groups:     []config.NetDevGroup{{Name: "edge"}, {Name: "core"}},
 		Guardrails: g,
 	}
 

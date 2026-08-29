@@ -20,12 +20,12 @@ import (
 
 // Live event kinds.
 const (
-	LiveConn        = "conn"        // connection/session state change
-	LiveCmdStart    = "cmd_start"   // a command began (classified, about to run)
-	LiveCmdOutput   = "cmd_output"  // incremental cleaned+redacted output text
-	LiveCmdEnd      = "cmd_end"     // command finished (ok / device-error / failure)
-	LiveCmdRefused  = "cmd_refused" // a guardrail/classifier refusal (visible!)
-	LiveTurnBegin   = "turn"        // a new user turn: per-turn budget counters reset
+	LiveConn       = "conn"        // connection/session state change
+	LiveCmdStart   = "cmd_start"   // a command began (classified, about to run)
+	LiveCmdOutput  = "cmd_output"  // incremental cleaned+redacted output text
+	LiveCmdEnd     = "cmd_end"     // command finished (ok / device-error / failure)
+	LiveCmdRefused = "cmd_refused" // a guardrail/classifier refusal (visible!)
+	LiveTurnBegin  = "turn"        // a new user turn: per-turn budget counters reset
 )
 
 // Connection states for LiveConn events.
@@ -105,13 +105,14 @@ func (m *Manager) vtyCap() int {
 
 // vtySnapshot reports the device's current session use under m.mu. The CLI
 // session counts as 1 while cached; each in-flight NETCONF subsystem session
-// adds 1.
+// adds 1; an open human terminal adds 1 (§6.1 共享 VTY 预算).
 func (m *Manager) vtySnapshotLocked(device string) int {
 	use := 0
 	if _, ok := m.conns[device]; ok {
 		use++ // persistent CLI session
 	}
 	use += m.netconfInflight[device]
+	use += humanTTYCount(device)
 	return use
 }
 
@@ -200,7 +201,7 @@ type LiveDeviceState struct {
 // state plus the per-turn budget counters.
 type LiveSnapshot struct {
 	Devices []LiveDeviceState `json:"devices"`
-	Spent   int               `json:"spent"` // commands spent this turn
+	Spent   int               `json:"spent"`  // commands spent this turn
 	Budget  int               `json:"budget"` // turn_command_budget (0 = unlimited)
 }
 

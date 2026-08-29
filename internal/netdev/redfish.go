@@ -29,15 +29,15 @@ import (
 // collections (e.g. /redfish/v1/Chassis/1/Thermal) inherit the collection's
 // allowance.
 var redfishReadPaths = []string{
-	"",            // the service root itself
-	"/Systems",    // compute: inventory, power state, boot, memory summaries
-	"/Chassis",    // enclosures: thermal, power, network adapters
-	"/Managers",   // the BMC's own identity, firmware, EthernetInterfaces
-	"/TaskService", // read-only task status (long ops started elsewhere)
-	"/EventService", // event subscription visibility (read-only view)
-	"/Registries", // message registries (decoding SEL entries)
+	"",               // the service root itself
+	"/Systems",       // compute: inventory, power state, boot, memory summaries
+	"/Chassis",       // enclosures: thermal, power, network adapters
+	"/Managers",      // the BMC's own identity, firmware, EthernetInterfaces
+	"/TaskService",   // read-only task status (long ops started elsewhere)
+	"/EventService",  // event subscription visibility (read-only view)
+	"/Registries",    // message registries (decoding SEL entries)
 	"/UpdateService", // firmware inventory view
-	"/Sessions",   // session listing is manager-visible diagnostics
+	"/Sessions",      // session listing is manager-visible diagnostics
 }
 
 // redfishPathAllowed reports whether a Redfish request path is inside the

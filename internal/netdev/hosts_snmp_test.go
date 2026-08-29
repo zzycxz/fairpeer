@@ -95,20 +95,20 @@ func TestShellMetacharGuard(t *testing.T) {
 // and credential-bearing subtrees refuse BEFORE any UDP dial.
 func TestSnmpOIDAllowlistAndRefusal(t *testing.T) {
 	for _, oid := range []string{
-		"1.3.6.1.2.1.1.3.0",             // sysUpTime
-		"1.3.6.1.2.1.2.2.1.8",           // ifOperStatus column
-		"1.3.6.1.2.1.4.22.1.2",          // ipNetToMediaTable (ARP)
-		"1.3.6.1.2.1.31.1.1.1.6",        // ifHCInOctets
-		"1.3.6.1.2.1.25.3.3.1.2",        // hrProcessorLoad
+		"1.3.6.1.2.1.1.3.0",      // sysUpTime
+		"1.3.6.1.2.1.2.2.1.8",    // ifOperStatus column
+		"1.3.6.1.2.1.4.22.1.2",   // ipNetToMediaTable (ARP)
+		"1.3.6.1.2.1.31.1.1.1.6", // ifHCInOctets
+		"1.3.6.1.2.1.25.3.3.1.2", // hrProcessorLoad
 	} {
 		if !snmpOIDAllowed(oid) {
 			t.Errorf("OID %q should be allowed", oid)
 		}
 	}
 	for _, oid := range []string{
-		"1.3.6.1.4.1.9.9.109",           // CISCO-PROCESS-MIB (enterprise)
-		"1.3.6.1.4.1.2011.2.23",         // HUAWEI enterprise
-		"1.3.6.1.3",                     // experimental
+		"1.3.6.1.4.1.9.9.109",   // CISCO-PROCESS-MIB (enterprise)
+		"1.3.6.1.4.1.2011.2.23", // HUAWEI enterprise
+		"1.3.6.1.3",             // experimental
 		"",
 		"1.3.6.1.2.1.9999",
 	} {

@@ -67,6 +67,12 @@ var redactPatterns = []*regexp.Regexp{
 	// env-style assignments: DB_PASSWORD=x, MYSQL_PWD=x, export API_KEY=x.
 	// The value runs to the first whitespace so line structure survives.
 	regexp.MustCompile(`(?im)^(\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|CREDENTIALS?)[A-Za-z0-9_]*=)[^\s#]+`),
+	// INLINE env-style (docker inspect Config.Env / k8s pod JSON / log lines
+	// where the assignment is mid-line): value ends at whitespace, comma,
+	// quote, or bracket so JSON arrays stay parseable.
+	regexp.MustCompile(`(?i)(\b[A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_?KEY)[A-Za-z0-9_]*=)[^\s,"'\]}]+`),
+	// INLINE key:value secrets ("DB_PASSWORD":"hunter2" inside one-line JSON).
+	regexp.MustCompile(`(?i)(["']?[A-Za-z_][A-Za-z0-9_.-]*(?:password|passwd|secret|token|api_?key)[A-Za-z0-9_.-]*["']?\s*:\s*")[^"]*(")`),
 	// key: value secret lines (YAML/JSON-ish app config, `password: x`).
 	regexp.MustCompile(`(?im)^(\s*["']?[A-Za-z0-9_.-]*(?:password|passwd|secret|token|api_?key)[A-Za-z0-9_.-]*["']?\s*:\s*)\S+`),
 	// URL-embedded credentials: scheme://user:pass@host (mysql/postgres/

@@ -39,6 +39,23 @@ func ruleMetricValue(metric string, h DeviceHealth, prevUptime int64) int64 {
 		return 0
 	case "if_down_count":
 		return int64(h.IfDown())
+	case "flap_count":
+		// Reachability up↔down transitions in the last hour — a flapping
+		// device answers most polls yet is clearly unhealthy.
+		return int64(FlapCount(h.Device, time.Hour))
+	case "if_down_above_p90":
+		// Current down interfaces minus the historical 90th percentile:
+		// "worse than usual" instead of a static threshold. Thin history →
+		// no baseline → 0, never fires.
+		p90, ok := P90IfDown(h.Device, 24*time.Hour)
+		if !ok {
+			return 0
+		}
+		v := int64(h.IfDown() - p90)
+		if v < 0 {
+			return 0
+		}
+		return v
 	case "uptime_reset":
 		// A reboot: uptime dropped since the previous poll (and the device
 		// is still up). prevUptime 0 = no baseline yet → never fire.
@@ -122,6 +139,10 @@ func ruleTitle(metric string) string {
 		return "设备不可达"
 	case "if_down_count":
 		return "接口掉线"
+	case "flap_count":
+		return "链路抖动（一小时翻转）"
+	case "if_down_above_p90":
+		return "掉线口数偏离基线（>P90）"
 	case "uptime_reset":
 		return "设备重启（uptime 回绕）"
 	}

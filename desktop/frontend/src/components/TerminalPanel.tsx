@@ -5,13 +5,18 @@
 // ZCode grammar: a tab strip with add ("+") and per-tab close ("×"); closing
 // the last tab collapses the panel. A full interactive PTY (ConPTY + xterm.js)
 // can later replace the transport without changing this component's contract.
+//
+// R4 §10.5: 设备页签 — device terminal tabs (DeviceTerminal/xterm) live in the
+// SAME strip, visually distinct (route badge + REC dot), added via the
+// `openDevice` prop (App routes the "fairpeer:netdev-terminal" event here).
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronDown, Eraser, MessageSquare, Plus, TerminalSquare, X } from "lucide-react";
+import { ChevronDown, Eraser, MessageSquare, Plus, Route, TerminalSquare, X } from "lucide-react";
 import { app, onEvent } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type { WireEvent, WireTool } from "../lib/types";
 import { getScopedItem, setScopedItem } from "../lib/profileScopedStorage";
+import { DeviceTerminal } from "./DeviceTerminal";
 
 const TERMINAL_OPEN_KEY = "fairpeer.terminalOpen";
 const MAX_LINES = 500;
@@ -44,6 +49,9 @@ interface TermState {
   id: number;
   lines: TermLine[];
   running: boolean;
+  // §10.5 设备页签: a device terminal tab renders DeviceTerminal instead of
+  // the local console (the PTY lives Go-side; state survives remounts).
+  device?: string;
 }
 
 let termSeq = 0;
@@ -64,12 +72,16 @@ export function TerminalPanel({
   onClose,
   cwd,
   sessionPane,
+  openDevice,
 }: {
   onClose: () => void;
   cwd?: string;
   // Bottom axis's second pane (副会话): rendered inside a pinned tab
   // (pane-system spec §3.5). Absent → terminal-only bar.
   sessionPane?: ReactNode;
+  // 设备页签入口（§10.5）: App bumps `seq` per "fairpeer:netdev-terminal"
+  // event; the panel opens (or reactivates) that device's tab.
+  openDevice?: { device: string; seq: number };
 }) {
   const t = useT();
   const [terms, setTerms] = useState<TermState[]>(() => cachedTerms ?? [newTerm()]);
@@ -90,6 +102,24 @@ export function TerminalPanel({
   useEffect(() => {
     inputRef.current?.focus();
   }, [activeId]);
+
+  // 设备页签（§10.5）: open or reactivate the device's tab; the terminal
+  // itself (PTY attach, xterm, recording) is DeviceTerminal's business.
+  useEffect(() => {
+    if (!openDevice || !openDevice.seq || !openDevice.device) return;
+    setTerms((prev) => {
+      const existing = prev.find((t) => t.device === openDevice.device);
+      if (existing) {
+        setActiveId(existing.id);
+        return prev;
+      }
+      if (prev.length >= MAX_TERMINALS + 3) return prev; // device tabs get a little headroom
+      const term = newTerm();
+      term.device = openDevice.device;
+      setActiveId(term.id);
+      return [...prev, term];
+    });
+  }, [openDevice?.seq, openDevice?.device]);
 
   const active = terms.find((term) => term.id === activeId);
   const sessionTabActive = activeId === SESSION_TAB_ID;
@@ -179,34 +209,63 @@ export function TerminalPanel({
     <section className="terminal-panel" aria-label={t("terminal.title")}>
       <div className="terminal-panel__head">
         <div className="terminal-panel__tabs" role="tablist">
-          {terms.map((term, index) => (
-            <div
-              key={term.id}
-              className={`terminal-panel__tab${term.id === activeId ? " terminal-panel__tab--active" : ""}`}
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={term.id === activeId}
-                className="terminal-panel__tab-btn"
-                onClick={() => setActiveId(term.id)}
-                title={t("terminal.title")}
+          {terms.map((term, index) =>
+            term.device ? (
+              <div
+                key={term.id}
+                className={`terminal-panel__tab terminal-panel__tab--device${term.id === activeId ? " terminal-panel__tab--active" : ""}`}
               >
-                <TerminalSquare size={11} />
-                <span>{t("terminal.tabTitle", { n: String(index + 1) })}</span>
-                {term.running && <span className="terminal-panel__tab-run" aria-hidden="true" />}
-              </button>
-              <button
-                type="button"
-                className="terminal-panel__tab-close"
-                onClick={() => closeTerminal(term.id)}
-                aria-label={t("terminal.closeTab")}
-                title={t("terminal.closeTab")}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={term.id === activeId}
+                  className="terminal-panel__tab-btn"
+                  onClick={() => setActiveId(term.id)}
+                  title={`人工终端 ${term.device}（§6.1 全程审计录制）`}
+                >
+                  <Route size={11} />
+                  <span>{term.device}</span>
+                  <span className="terminal-panel__tab-rec" aria-label="录制中" title="录制中（审计回放见「审计」页签）" />
+                </button>
+                <button
+                  type="button"
+                  className="terminal-panel__tab-close"
+                  onClick={() => closeTerminal(term.id)}
+                  aria-label={t("terminal.closeTab")}
+                  title={t("terminal.closeTab")}
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            ) : (
+              <div
+                key={term.id}
+                className={`terminal-panel__tab${term.id === activeId ? " terminal-panel__tab--active" : ""}`}
               >
-                <X size={10} />
-              </button>
-            </div>
-          ))}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={term.id === activeId}
+                  className="terminal-panel__tab-btn"
+                  onClick={() => setActiveId(term.id)}
+                  title={t("terminal.title")}
+                >
+                  <TerminalSquare size={11} />
+                  <span>{t("terminal.tabTitle", { n: String(index + 1) })}</span>
+                  {term.running && <span className="terminal-panel__tab-run" aria-hidden="true" />}
+                </button>
+                <button
+                  type="button"
+                  className="terminal-panel__tab-close"
+                  onClick={() => closeTerminal(term.id)}
+                  aria-label={t("terminal.closeTab")}
+                  title={t("terminal.closeTab")}
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            ),
+          )}
           <button
             type="button"
             className="terminal-panel__tab-add"
@@ -233,9 +292,9 @@ export function TerminalPanel({
             </div>
           )}
         </div>
-        {cwd && !sessionTabActive && <span className="terminal-panel__cwd" title={cwd}>{cwd}</span>}
+        {cwd && !sessionTabActive && !active?.device && <span className="terminal-panel__cwd" title={cwd}>{cwd}</span>}
         <span className="terminal-panel__spacer" />
-        {!sessionTabActive && active && (
+        {!sessionTabActive && active && !active.device && (
           <button type="button" className="terminal-panel__btn" onClick={() => patchTerm(active.id, (term) => ({ ...term, lines: [] }))} aria-label={t("terminal.clear")} title={t("terminal.clear")}>
             <Eraser size={12} />
           </button>
@@ -246,6 +305,10 @@ export function TerminalPanel({
       </div>
       {sessionTabActive ? (
         <div className="terminal-panel__session">{sessionPane}</div>
+      ) : active?.device ? (
+        <div className="terminal-panel__device">
+          <DeviceTerminal device={active.device} />
+        </div>
       ) : (
         <>
       <div className="terminal-panel__out" ref={scrollRef}>

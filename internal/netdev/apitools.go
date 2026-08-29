@@ -41,10 +41,10 @@ func (t *dockerTool) ReadOnly() bool { return true }
 
 func (t *dockerTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var a struct {
-		Device   string `json:"device"`
-		What     string `json:"what"`
+		Device    string `json:"device"`
+		What      string `json:"what"`
 		Container string `json:"container"`
-		TailN    int    `json:"tail_n"`
+		TailN     int    `json:"tail_n"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err

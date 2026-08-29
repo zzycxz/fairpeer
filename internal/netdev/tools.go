@@ -28,12 +28,12 @@ var HostKeyPrompt transport.HostKeyPrompt
 type Manager struct {
 	cfg *config.Config
 
-	mu               sync.Mutex
-	conns            map[string]*managedConn
-	turnCommands     int // read commands spent in the current user turn (TurnBegin resets)
-	netconfInflight  map[string]int
-	liveMu           sync.Mutex
-	liveFn           func(LiveEvent)
+	mu              sync.Mutex
+	conns           map[string]*managedConn
+	turnCommands    int // read commands spent in the current user turn (TurnBegin resets)
+	netconfInflight map[string]int
+	liveMu          sync.Mutex
+	liveFn          func(LiveEvent)
 }
 
 type managedConn struct {
@@ -155,6 +155,7 @@ func ApplyExtraRead(cfg *config.Config) {
 // KillAllConnections is the emergency stop: every device connection and CLI
 // session is closed immediately (freeing all VTY lines), audited as such. The
 // Manager stays usable — the next diagnostic command reconnects on demand.
+// Human terminals die with it too (§6.1 紧急停止同样杀人工终端).
 func (m *Manager) KillAllConnections() int {
 	m.mu.Lock()
 	n := len(m.conns)
@@ -169,7 +170,8 @@ func (m *Manager) KillAllConnections() int {
 	for _, name := range names {
 		m.emitConnLive(name, LiveConnStopped)
 	}
-	_ = AppendAudit(Audit{Device: "(emergency-stop)", Command: "kill all connections", Class: "guardrail", Status: AuditOK, OutputBytes: n})
+	human := HumanTTYKillAll()
+	_ = AppendAudit(Audit{Device: "(emergency-stop)", Command: fmt.Sprintf("kill all connections (+%d human terminals)", human), Class: "guardrail", Status: AuditOK, OutputBytes: n})
 	return n
 }
 
@@ -405,17 +407,40 @@ func (m *Manager) runRead(ctx context.Context, d config.NetDevDevice, drv driver
 // connect resolves the route (device + via hop chain), credentials, and host
 // key policy, then establishes a supervised transport client and CLI session.
 func (m *Manager) connect(ctx context.Context, d config.NetDevDevice, drv driver.Driver) (*transport.Client, *Session, error) {
+	client, err := m.dialDeviceClient(ctx, d)
+	if err != nil {
+		return nil, nil, err
+	}
+	m.subscribeConnState(d.Name, client)
+	session, err := OpenSession(ctx, client, drv, d.Encoding)
+	if err != nil {
+		client.Close()
+		return nil, nil, err
+	}
+	// Live tap: route this session's incremental output to the observer as
+	// this device's 操作实况 stream (sanitized inside the session layer).
+	session.SetOutputObserver(func(chunk string) {
+		m.emitLive(LiveEvent{Kind: LiveCmdOutput, Device: d.Name, Chunk: chunk})
+	})
+	return client, session, nil
+}
+
+// dialDeviceClient establishes a supervised transport client WITHOUT the
+// driver CLI session. Callers that need a raw channel of their own (human
+// terminal §6.1, proposal file-upload §7.1) dial this so their lifecycle is
+// independent of the cached diagnostic session (and its idle reaper).
+func (m *Manager) dialDeviceClient(ctx context.Context, d config.NetDevDevice) (*transport.Client, error) {
 	if !m.cfg.NetDev.Enabled {
-		return nil, nil, errors.New("[netdev] is disabled in the user config")
+		return nil, errors.New("[netdev] is disabled in the user config")
 	}
 	lookup := m.lookupEntry()
 	resolved, err := transport.ResolveHost(lookup, d.Name, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolve device: %w", err)
+		return nil, fmt.Errorf("resolve device: %w", err)
 	}
 	jumps, err := transport.ResolveJumpHosts(lookup, d.Via, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolve route: %w", err)
+		return nil, fmt.Errorf("resolve route: %w", err)
 	}
 
 	auth := transport.AuthOptions{
@@ -423,7 +448,7 @@ func (m *Manager) connect(ctx context.Context, d config.NetDevDevice, drv driver
 		Passphrase: secretReader(SecretKindPassphrase, d.PassphraseEnv),
 	}
 	if d.PasswordEnv == "" && d.IdentityFile == "" {
-		return nil, nil, fmt.Errorf("device %q has no credentials configured (set password_env or identity_file)", d.Name)
+		return nil, fmt.Errorf("device %q has no credentials configured (set password_env or identity_file)", d.Name)
 	}
 	hops := make([]transport.JumpHostOptions, 0, len(jumps))
 	for i, j := range jumps {
@@ -442,24 +467,13 @@ func (m *Manager) connect(ctx context.Context, d config.NetDevDevice, drv driver
 		HostKeys:  &transport.HostKeyPolicy{Prompt: HostKeyPrompt, ManagedPath: transport.ManagedKnownHostsOverride},
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if err := client.Start(ctx); err != nil {
 		client.Close()
-		return nil, nil, err
+		return nil, err
 	}
-	m.subscribeConnState(d.Name, client)
-	session, err := OpenSession(ctx, client, drv, d.Encoding)
-	if err != nil {
-		client.Close()
-		return nil, nil, err
-	}
-	// Live tap: route this session's incremental output to the observer as
-	// this device's 操作实况 stream (sanitized inside the session layer).
-	session.SetOutputObserver(func(chunk string) {
-		m.emitLive(LiveEvent{Kind: LiveCmdOutput, Device: d.Name, Chunk: chunk})
-	})
-	return client, session, nil
+	return client, nil
 }
 
 // lookupEntry adapts the pinned config into transport's name→entry lookup.
@@ -542,6 +556,13 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&firewallTool{m: m})
 	reg.Add(&locateTool{m: m})
 	reg.Add(&dbQueryTool{m: m})
+	// Trust-domain fleet surface (TRUSTDOMAIN_SPEC §15): agent tools exist
+	// only when the host joined a domain — invisible otherwise.
+	if cfg.TrustDomain.Enabled {
+		reg.Add(&fleetTool{cfg: cfg})
+		reg.Add(&remoteTool{cfg: cfg})
+		InitAuditAnchoring(cfg) // audit chain head cross-anchors (spec §八)
+	}
 }
 
 // dbQueryTool — read-only database diagnostics against a configured
@@ -583,7 +604,6 @@ func (t *dbQueryTool) Execute(ctx context.Context, args json.RawMessage) (string
 	}
 	return t.m.DBQuery(ctx, strings.TrimSpace(a.Source), a.Query)
 }
-
 
 // redfishTool — the BMC channel: ONE GET-only Redfish request against a
 // vendor=redfish device. Sealed at the transport (no write verb exists in the

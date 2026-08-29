@@ -5,11 +5,15 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,9 +31,17 @@ import (
 type simDevice struct {
 	addr     string
 	password string
+	prompt   string // shell prompt the simulator emits (driver-specific)
 }
 
 func startSimDevice(t *testing.T) *simDevice {
+	return startSimDeviceWithPrompt(t, simPrompt)
+}
+
+// startSimDeviceWithPrompt boots the sim with a custom shell prompt — e.g. a
+// bash-style prompt for vendor=linux devices (the linux driver's prompt
+// pattern differs from the VRP one).
+func startSimDeviceWithPrompt(t *testing.T, prompt string) *simDevice {
 	t.Helper()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -39,7 +51,7 @@ func startSimDevice(t *testing.T) *simDevice {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sim := &simDevice{password: "pw"}
+	sim := &simDevice{password: "pw", prompt: prompt}
 	cfg := &ssh.ServerConfig{
 		PasswordCallback: func(conn ssh.ConnMetadata, pw []byte) (*ssh.Permissions, error) {
 			if string(pw) == sim.password {
@@ -63,13 +75,13 @@ func startSimDevice(t *testing.T) *simDevice {
 			if err != nil {
 				return
 			}
-			go serveSimConn(conn, cfg)
+			go serveSimConn(conn, cfg, prompt)
 		}
 	}()
 	return sim
 }
 
-func serveSimConn(conn net.Conn, cfg *ssh.ServerConfig) {
+func serveSimConn(conn net.Conn, cfg *ssh.ServerConfig, prompt string) {
 	sconn, chans, reqs, err := ssh.NewServerConn(conn, cfg)
 	if err != nil {
 		conn.Close()
@@ -85,14 +97,40 @@ func serveSimConn(conn net.Conn, cfg *ssh.ServerConfig) {
 		if err != nil {
 			continue
 		}
-		go serveSimSession(ch, chReqs)
+		go serveSimSession(ch, chReqs, prompt)
 	}
 	_ = sconn.Close()
 }
 
 const simPrompt = "<SimSW>"
 
-func serveSimSession(ch ssh.Channel, reqs <-chan *ssh.Request) {
+// simFS backs the sim's exec-channel file commands (cat/base64 -d/sha256sum/
+// rm) — the e2e surface for the proposal file-upload path.
+var (
+	simFSMu sync.Mutex
+	simFS   = map[string][]byte{}
+)
+
+func simFSGet(path string) ([]byte, bool) {
+	simFSMu.Lock()
+	defer simFSMu.Unlock()
+	b, ok := simFS[path]
+	return append([]byte(nil), b...), ok
+}
+
+func simFSPut(path string, b []byte) {
+	simFSMu.Lock()
+	simFS[path] = append([]byte(nil), b...)
+	simFSMu.Unlock()
+}
+
+func simFSDel(path string) {
+	simFSMu.Lock()
+	delete(simFS, path)
+	simFSMu.Unlock()
+}
+
+func serveSimSession(ch ssh.Channel, reqs <-chan *ssh.Request, prompt string) {
 	for req := range reqs {
 		switch req.Type {
 		case "shell", "pty-req", "subsystem":
@@ -100,13 +138,20 @@ func serveSimSession(ch ssh.Channel, reqs <-chan *ssh.Request) {
 				req.Reply(true, nil)
 			}
 			if req.Type == "shell" {
-				go runSimShell(ch)
+				go runSimShell(ch, prompt)
 				return
 			}
 			if req.Type == "subsystem" && strings.Contains(string(req.Payload), "netconf") {
 				go runSimNetconf(ch)
 				return
 			}
+		case "exec":
+			cmd := parseSimExec(req.Payload)
+			if req.WantReply {
+				req.Reply(true, nil)
+			}
+			runSimExec(ch, cmd)
+			return
 		default:
 			if req.WantReply {
 				req.Reply(false, nil)
@@ -115,11 +160,75 @@ func serveSimSession(ch ssh.Channel, reqs <-chan *ssh.Request) {
 	}
 }
 
-func runSimShell(ch ssh.Channel) {
+// parseSimExec decodes the RFC 4254 §6.5 exec payload (uint32 len + command).
+func parseSimExec(payload []byte) string {
+	if len(payload) < 4 {
+		return ""
+	}
+	n := int(payload[0])<<24 | int(payload[1])<<16 | int(payload[2])<<8 | int(payload[3])
+	if n > len(payload)-4 || n < 0 {
+		return ""
+	}
+	return string(payload[4 : 4+n])
+}
+
+func simExit(ch ssh.Channel, code uint32) {
+	_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{code}))
+	_ = ch.Close()
+}
+
+// runSimExec serves the exec-channel commands the proposal upload path issues.
+// Everything else exits 127 — the sim is deliberately minimal.
+func runSimExec(ch ssh.Channel, cmd string) {
+	cmd = strings.TrimSpace(cmd)
+	unquote := func(s string) string { return strings.Trim(s, "'\"") }
+	switch {
+	case strings.HasPrefix(cmd, "cat "):
+		path := unquote(strings.TrimSpace(strings.TrimPrefix(cmd, "cat ")))
+		if b, ok := simFSGet(path); ok {
+			_, _ = ch.Write(b)
+			simExit(ch, 0)
+			return
+		}
+		simExit(ch, 1)
+	case strings.HasPrefix(cmd, "base64 -d > "):
+		path := unquote(strings.TrimSpace(strings.TrimPrefix(cmd, "base64 -d > ")))
+		all, _ := io.ReadAll(ch) // stdin until the client's CloseWrite EOF
+		dec, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(all)))
+		if err != nil {
+			_, _ = ch.Write([]byte("base64: " + err.Error() + "\n"))
+			simExit(ch, 1)
+			return
+		}
+		simFSPut(path, dec)
+		simExit(ch, 0)
+	case strings.HasPrefix(cmd, "sha256sum "):
+		path := unquote(strings.TrimSpace(strings.TrimPrefix(cmd, "sha256sum ")))
+		if b, ok := simFSGet(path); ok {
+			sum := sha256.Sum256(b)
+			fmt.Fprintf(ch, "%x  %s\n", sum, path)
+			simExit(ch, 0)
+			return
+		}
+		simExit(ch, 1)
+	case strings.HasPrefix(cmd, "rm -f "):
+		path := unquote(strings.TrimSpace(strings.TrimPrefix(cmd, "rm -f ")))
+		simFSDel(path)
+		simExit(ch, 0)
+	case strings.HasPrefix(cmd, "sh -c "):
+		// reload commands just succeed — the sim has no services.
+		simExit(ch, 0)
+	default:
+		_, _ = ch.Write([]byte("sim: unsupported exec\n"))
+		simExit(ch, 127)
+	}
+}
+
+func runSimShell(ch ssh.Channel, prompt string) {
 	defer ch.Close()
 	write := func(s string) { _, _ = ch.Write([]byte(s)) }
 	write("Welcome to the simulated VRP.\n")
-	write(simPrompt)
+	write(prompt)
 
 	line := make([]byte, 0, 256)
 	buf := make([]byte, 256)
@@ -134,7 +243,7 @@ func runSimShell(ch ssh.Channel) {
 						write(cmd + "\n") // CLI echo of the completed line
 						simDispatch(ch, cmd)
 					}
-					write(simPrompt)
+					write(prompt)
 					continue
 				}
 				line = append(line, b)
@@ -152,6 +261,9 @@ func simDispatch(ch ssh.Channel, cmd string) {
 		// acknowledged silently; caller prints the next prompt.
 	case cmd == "display version":
 		ch.Write([]byte("\nHuawei Versatile Routing Platform Software\nVRP (R) Software, Version 8.180 (S5735 V200R019C10)\nCopyright (C) 2000-2019 Huawei Technologies Co., Ltd.\n"))
+	case cmd == "who":
+		// One logged-in session — the §7.1 pre-execution online check's datum.
+		ch.Write([]byte("\nroot     pts/0        2026-08-29 09:00 (10.1.0.50)\n"))
 	case cmd == "display interface brief":
 		ch.Write([]byte("\nPHY: Physical\n*down: administratively down\n(l): loopback\n(s): spoofing\nInUti/OutUti: input utility/output utility\n"))
 	case cmd == "display gbk":

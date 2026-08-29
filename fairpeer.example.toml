@@ -621,7 +621,6 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # # identity_file  = "~/.ssh/id_ed25519" # 密钥认证（与密码二选一）
 # # passphrase_env = "NETDEV_PP_CORE1"
 # encoding     = "auto"                  # auto | utf-8 | gbk
-# # allow_telnet  = false                # 前向声明：解析并在设置里可见，拨号路径未消费（无 telnet 传输）
 #
 # # [netdev.devices.snmp]                 # SNMP 采集凭证（仅 v2c 已实现；v3 字段为前向声明）
 # # version        = "v2c"
@@ -734,3 +733,5 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # checkpoint_every_blocks  = 0                       # >0 时自动出检查点
 # tick_interval_sec        = 5                       # 节点 gossip 循环节奏
 # listen_addr = "0.0.0.0:7123"                       # 入站对等节点监听（默认 :7123）
+# discover = true                                       # UDP 广播局域网发现（信标签名+域过滤；地址仅供连线，信任仍由握手建立）
+# discovery_port = 7125                                 # UDP 信标端口

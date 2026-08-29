@@ -32,7 +32,7 @@ var logSearchDefaultSources = []string{
 }
 
 const (
-	logSearchMaxPairs = 24 // hard cap on (device, source) fetches per sweep
+	logSearchMaxPairs = 24  // hard cap on (device, source) fetches per sweep
 	logSearchTail     = 200 // lines fetched per source; matching is client-side
 	logSearchMaxHits  = 60  // reported hits cap (note explains truncation)
 	logSearchCtx      = 2   // context lines each side of a hit
@@ -49,15 +49,15 @@ type LogSearchHit struct {
 // LogSearchResult is the sweep outcome. Covered/Total + Skipped make partial
 // coverage explicit — a budget-stopped sweep reports exactly what it missed.
 type LogSearchResult struct {
-	Pattern   string         `json:"pattern"`
-	Hits      []LogSearchHit `json:"hits"`
-	Devices   []string       `json:"devices_searched"`
-	Skipped   []string       `json:"skipped"` // device — reason strings
-	Covered   int            `json:"covered_devices"`
-	Total     int            `json:"total_devices"`
-	HitDevice int            `json:"devices_with_hits"`
-	BudgetStop bool          `json:"budget_stopped"`
-	Note      string         `json:"note,omitempty"`
+	Pattern    string         `json:"pattern"`
+	Hits       []LogSearchHit `json:"hits"`
+	Devices    []string       `json:"devices_searched"`
+	Skipped    []string       `json:"skipped"` // device — reason strings
+	Covered    int            `json:"covered_devices"`
+	Total      int            `json:"total_devices"`
+	HitDevice  int            `json:"devices_with_hits"`
+	BudgetStop bool           `json:"budget_stopped"`
+	Note       string         `json:"note,omitempty"`
 }
 
 // LogSearch fans pattern across devices (empty = every linux host in the

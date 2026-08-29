@@ -141,7 +141,24 @@ func OpenSession(ctx context.Context, client *transport.Client, drv driver.Drive
 			return nil, fmt.Errorf("netdev: paging-off %q: %w", cmd, err)
 		}
 	}
-	return s, nil
+	// Drain the shell's pre-command bytes (banner + first prompt) so the
+	// FIRST Run's output is clean — line-counting consumers (§7.1 who/quser
+	// online check) must not see the banner as a session row. Drivers without
+	// paging-off (linux) never waited for a prompt; wait for it now, then
+	// flush whatever preceded it.
+	deadline := time.Now().Add(sessionOpenTimeout)
+	for {
+		if drv.Prompt().MatchString(s.encode(s.out.snapshot())) {
+			s.out.reset()
+			return s, nil
+		}
+		if time.Now().After(deadline) {
+			// No prompt seen (some devices are slow/bannerless) — return the
+			// session as-is; the first Run tolerates the leftover bytes.
+			return s, nil
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
 }
 
 // Result is one command's outcome.

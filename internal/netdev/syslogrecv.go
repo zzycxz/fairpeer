@@ -27,13 +27,13 @@ type syslogLine struct {
 }
 
 var (
-	syslogMu       sync.Mutex
-	syslogRings    = map[string][]syslogLine{}
-	syslogConn     net.PacketConn
+	syslogMu    sync.Mutex
+	syslogRings = map[string][]syslogLine{}
+	syslogConn  net.PacketConn
 	// syslogCfg is the receiver's CURRENT view of the inventory, refreshed by
 	// every EnsureSyslogReceiver call — device-name matching must not ride on
 	// a config snapshot captured at listener startup.
-	syslogCfg       *config.Config
+	syslogCfg      *config.Config
 	syslogLastFire = map[string]time.Time{} // device:class → last auto-Finding
 )
 

@@ -214,5 +214,5 @@ func CaseBundle(caseID string) (string, error) {
 	return path, nil
 }
 
-func jsonUnmarshal(raw []byte, v any) error   { return json.Unmarshal(raw, v) }
-func jsonMarshal(v any) ([]byte, error)        { b, err := json.MarshalIndent(v, "", "  "); return b, err }
+func jsonUnmarshal(raw []byte, v any) error { return json.Unmarshal(raw, v) }
+func jsonMarshal(v any) ([]byte, error)     { b, err := json.MarshalIndent(v, "", "  "); return b, err }

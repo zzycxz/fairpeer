@@ -93,7 +93,7 @@ func ImportNmapXML(xmlText string, cfg inventory) (*Finding, error) {
 	f := &Finding{
 		Title:    fmt.Sprintf("扫描导入：%d 台主机，其中 %d 台待确认（不在清单）", total, unknown),
 		Severity: severityForUnknown(unknown),
-		Detail:  "来自用户 nmap 导出的发现；待确认主机不自动连接——录入设备清单后才可诊断。",
+		Detail:   "来自用户 nmap 导出的发现；待确认主机不自动连接——录入设备清单后才可诊断。",
 		Evidence: ev,
 	}
 	return f, nil

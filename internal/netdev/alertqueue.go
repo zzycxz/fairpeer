@@ -16,10 +16,10 @@ import (
 
 // Finding lifecycle states (beyond "" for human/AI findings).
 const (
-	FindingActive       = "active"
-	FindingAck          = "ack"
-	FindingResolved     = "resolved"
-	FindingFalsePos     = "false-positive"
+	FindingActive   = "active"
+	FindingAck      = "ack"
+	FindingResolved = "resolved"
+	FindingFalsePos = "false-positive"
 )
 
 var (
@@ -127,15 +127,15 @@ func transitionFinding(id, to string, learn bool) error {
 // AggregatedFinding is the queue's collapsed view: one row per 根因键
 // (Source；人工/AI Finding 用 Title), with the member findings hidden inside.
 type AggregatedFinding struct {
-	Key       string      `json:"key"`                 // Source or title
-	Count     int         `json:"count"`
-	Open      int         `json:"open"`                // active+ack
-	Severity  string      `json:"severity"`            // highest among members
-	Devices   []string    `json:"devices"`
-	Title     string      `json:"title"`               // representative title
-	Newest    time.Time   `json:"newest"`
-	Members   []*Finding  `json:"members,omitempty"`   // newest first, capped
-	Suppressed int        `json:"suppressed"`          // ≥2 = 此键已被误报学习降级
+	Key        string     `json:"key"` // Source or title
+	Count      int        `json:"count"`
+	Open       int        `json:"open"`     // active+ack
+	Severity   string     `json:"severity"` // highest among members
+	Devices    []string   `json:"devices"`
+	Title      string     `json:"title"` // representative title
+	Newest     time.Time  `json:"newest"`
+	Members    []*Finding `json:"members,omitempty"` // newest first, capped
+	Suppressed int        `json:"suppressed"`        // ≥2 = 此键已被误报学习降级
 }
 
 const aggregateMembersCap = 20

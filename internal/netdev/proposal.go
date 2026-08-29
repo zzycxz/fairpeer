@@ -35,14 +35,53 @@ const (
 	ProposalFailed    = "failed"  // rollback attempted and failed — alert
 )
 
+// Structured step types (§7.1): the proposal step grew from a CLI command
+// string into a discriminated union. Type "" behaves as cli everywhere — old
+// proposals deserialize unchanged.
+const (
+	StepCLI           = "cli"
+	StepK8sApply      = "k8s-apply"
+	StepSQLMigration  = "sql-migration"
+	StepFileUpload    = "file-upload"
+	StepCertReplace   = "cert-replace"
+	StepRestoreVerify = "restore-verify" // §7.3 备份恢复演练
+)
+
 // ProposalStep is one device's slice of a change.
 type ProposalStep struct {
 	Device   string   `json:"device"`
-	Commands []string `json:"commands"`           // the change, in order
-	Rollback []string `json:"rollback,omitempty"` // reverse commands, authored with the change
-	Backup   string   `json:"backup,omitempty"`   // captured pre-change config (redacted)
-	Applied  bool     `json:"applied"`
-	Error    string   `json:"error,omitempty"`
+	Type     string   `json:"type,omitempty"`     // "" | cli | k8s-apply | sql-migration | file-upload | cert-replace
+	Commands []string `json:"commands"`           // cli: the change, in order
+	Rollback []string `json:"rollback,omitempty"` // cli: reverse commands, authored with the change
+
+	// Structured payloads (§7.1) — only the fields of the step's type matter.
+	YAML          string `json:"yaml,omitempty"`           // k8s-apply: full manifest
+	UpSQL         string `json:"up_sql,omitempty"`         // sql-migration
+	DownSQL       string `json:"down_sql,omitempty"`       // sql-migration — REQUIRED (missing ⇒ not submittable)
+	LocalPath     string `json:"local_path,omitempty"`     // file-upload / cert-replace: local cert file
+	RemotePath    string `json:"remote_path,omitempty"`    // file-upload / cert-replace: absolute target path
+	KeyLocalPath  string `json:"key_local_path,omitempty"` // cert-replace: local private key file
+	KeyRemotePath string `json:"key_remote_path,omitempty"`
+	Checksum      string `json:"checksum,omitempty"`   // optional sha256 the uploaded bytes must match
+	ReloadCmd     string `json:"reload_cmd,omitempty"` // cert-replace: service reload after the swap
+	// restore-verify（§7.3 备份恢复演练）: restore a config snapshot to a
+	// STAGING target and run the verify read. Device = receiver.
+	RestoreDevice  string `json:"restore_device,omitempty"`  // snapshot source device
+	RestoreVersion string `json:"restore_version,omitempty"` // snapshot id; "" = latest at execute time
+	VerifyCmd      string `json:"verify_cmd,omitempty"`      // e.g. `nginx -t`
+
+	Backup    string `json:"backup,omitempty"` // captured pre-change state (redacted)
+	Applied   bool   `json:"applied"`
+	Error     string `json:"error,omitempty"`
+	Dangerous bool   `json:"dangerous,omitempty"` // destructive verb scan ⇒ forces confirm2 (§7.1)
+}
+
+// stepType normalizes the discriminator.
+func stepType(s *ProposalStep) string {
+	if s.Type == "" {
+		return StepCLI
+	}
+	return s.Type
 }
 
 // Proposal is one change proposal.
@@ -63,8 +102,12 @@ type Proposal struct {
 	Confirm2   bool           `json:"confirm2"`       // secondary confirmation for proposal+confirm2 groups
 	Note       string         `json:"note,omitempty"` // freeze/rollback reason trail
 	// 观察期（§7.1）：done → watching（默认 30 分钟）→ closed；劣化触发 Finding。
-	WatchUntil  *time.Time    `json:"watch_until,omitempty"`
-	WatchNote   string        `json:"watch_note,omitempty"`
+	WatchUntil *time.Time `json:"watch_until,omitempty"`
+	WatchNote  string     `json:"watch_note,omitempty"`
+	// HealthBase is the ifDown count per target device at watch start（-1 =
+	// 当时不可达）——观察期劣化检测（健康轮询对比）的基线。仅 SNMP 配置
+	// 设备有信号；其余设备跳过对比。
+	HealthBase map[string]int `json:"health_base,omitempty"`
 }
 
 // proposalsDirOverride isolates proposal storage in tests.
@@ -151,9 +194,10 @@ func newProposalID() string {
 // ── policy gate ─────────────────────────────────────────────────────────────
 
 // ValidateProposal checks a draft against the inventory policies: every step's
-// device must exist, and no step may target a read-only group. Group policy
-// `proposal+confirm2` is legal but flags ApproveProposal for the secondary
-// confirmation.
+// device must exist, no step may target a read-only group, and each structured
+// type's own contract must hold (§7.1 — e.g. sql-migration without a down
+// script is not submittable). Group policy `proposal+confirm2` is legal but
+// flags ApproveProposal for the secondary confirmation.
 func (m *Manager) ValidateProposal(p *Proposal) error {
 	if strings.TrimSpace(p.Intent) == "" {
 		return errors.New("proposal: intent is required (what & why)")
@@ -161,30 +205,95 @@ func (m *Manager) ValidateProposal(p *Proposal) error {
 	if len(p.Steps) == 0 {
 		return errors.New("proposal: no steps")
 	}
-	for _, s := range p.Steps {
+	for i := range p.Steps {
+		s := &p.Steps[i]
 		d, ok := m.cfg.NetDevDeviceByName(s.Device)
-		if !ok {
+		if !ok && stepType(s) != StepSQLMigration {
 			return fmt.Errorf("proposal: step device %q not in inventory", s.Device)
 		}
-		if d.Group != "" {
+		if ok && d.Group != "" {
 			if g, ok := m.cfg.NetDevGroupByName(d.Group); ok && g.Policy == config.NetDevPolicyReadOnly {
 				return fmt.Errorf("proposal: device %q is in read-only group %q — proposals are not allowed", s.Device, d.Group)
 			}
 		}
+		if err := m.validateStep(s, d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateStep enforces one step's type contract (§7.1 表：载荷与回滚依据).
+func (m *Manager) validateStep(s *ProposalStep, d config.NetDevDevice) error {
+	s.Dangerous = dangerScan(s)
+	switch stepType(s) {
+	case StepCLI:
 		if len(s.Commands) == 0 {
 			return fmt.Errorf("proposal: step for %q has no commands", s.Device)
 		}
 		if len(s.Rollback) == 0 {
 			return fmt.Errorf("proposal: step for %q has no rollback plan (authored with the change)", s.Device)
 		}
+	case StepK8sApply:
+		if d.Kind != "k8s" {
+			return fmt.Errorf("proposal: k8s-apply step for %q requires a kind=k8s target", s.Device)
+		}
+		if strings.TrimSpace(s.YAML) == "" {
+			return fmt.Errorf("proposal: k8s-apply step for %q has no manifest", s.Device)
+		}
+		if _, err := kubeResourcePath(s.YAML, "default"); err != nil {
+			return fmt.Errorf("proposal: k8s-apply step for %q: %v", s.Device, err)
+		}
+	case StepSQLMigration:
+		src, ok := m.dbSourceByName(s.Device)
+		if !ok {
+			return fmt.Errorf("proposal: sql-migration step target %q is not a [[netdev.db_sources]] entry", s.Device)
+		}
+		switch src.Type {
+		case "mysql", "postgres", "mssql":
+		default:
+			return fmt.Errorf("proposal: sql-migration on %q: engine %q not supported (v1: mysql/postgres/mssql)", s.Device, src.Type)
+		}
+		if strings.TrimSpace(s.UpSQL) == "" {
+			return fmt.Errorf("proposal: sql-migration step for %q has no up script", s.Device)
+		}
+		if strings.TrimSpace(s.DownSQL) == "" {
+			return fmt.Errorf("proposal: sql-migration step for %q has no down script — the type is not submittable without one (§7.1)", s.Device)
+		}
+	case StepFileUpload, StepCertReplace:
+		if d.Vendor != "linux" {
+			return fmt.Errorf("proposal: %s step for %q requires a linux SSH target (v1: exec-channel upload)", stepType(s), s.Device)
+		}
+		if err := validateUploadPaths(s.Device, s.LocalPath, s.RemotePath); err != nil {
+			return err
+		}
+		if stepType(s) == StepCertReplace {
+			if err := validateUploadPaths(s.Device, s.KeyLocalPath, s.KeyRemotePath); err != nil {
+				return fmt.Errorf("proposal: cert-replace step for %q key pair: %v", s.Device, err)
+			}
+			if strings.TrimSpace(s.ReloadCmd) == "" {
+				return fmt.Errorf("proposal: cert-replace step for %q has no reload command (rollback must be able to restore + reload)", s.Device)
+			}
+		}
+	case StepRestoreVerify:
+		if err := m.validateRestoreVerify(s, d); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("proposal: step for %q has unknown type %q", s.Device, s.Type)
 	}
 	return nil
 }
 
-// ProposalNeedsConfirm2 reports whether any step's group demands the secondary
-// confirmation.
+// ProposalNeedsConfirm2 reports whether any step demands the secondary
+// confirmation: a proposal+confirm2 group (§6.3) OR a step whose verbs scanned
+// as destructive (§7.1 — delete/scale-down 类动词落 dangerous + confirm2).
 func (m *Manager) ProposalNeedsConfirm2(p *Proposal) bool {
-	for _, s := range p.Steps {
+	for i := range p.Steps {
+		s := &p.Steps[i]
+		if s.Dangerous || dangerScan(s) {
+			return true
+		}
 		if d, ok := m.cfg.NetDevDeviceByName(s.Device); ok && d.Group != "" {
 			if g, ok := m.cfg.NetDevGroupByName(d.Group); ok && g.Policy == config.NetDevPolicyProposalConf {
 				return true
@@ -320,66 +429,108 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 	if p.Status != ProposalApproved {
 		return nil, fmt.Errorf("proposal %s: status %s, only approved proposals execute", id, p.Status)
 	}
+
+	// 执行前在线检查（§7.1）：发现其他在线人员则**暂停并列出会话**，人确
+	// 认后才继续——「我要变更，但同事正登着」是最常见的协作事故。确认语
+	// 义 = 再次点击执行：本次会话清单已记入 Note，下一次执行看到同样的清
+	// 单即视为已确认（会话有变化则重新要求确认）。
+	online := m.preExecOnlineCheck(ctx, p)
+	if online != "" && !strings.Contains(p.Note, "[在线人员] "+online) {
+		p.Note = strings.TrimSpace(p.Note + "\n[在线人员] " + online)
+		_ = SaveProposal(p)
+		return p, fmt.Errorf("执行前确认：目标设备上有其他在线人员（%s）——确认没人正操作后再次点击「执行」（清单已记入提案备注；会话有变化会再次要求确认）", online)
+	}
+
 	p.Status = ProposalExecuting
 	p.ExecutedAt = time.Now()
 	if err := SaveProposal(p); err != nil {
 		return nil, err
 	}
 
-	// 执行前在线检查（§7.1）：目标设备上有人？列出来，提案 Note 里记录——
-	// 「我要变更，但同事正登着」是最常见的协作事故，一行只读命令挡住它。
-		online := m.preExecOnlineCheck(ctx, p)
-		if online != "" {
-			p.Note = strings.TrimSpace(p.Note + "\n[在线人员] " + online)
-		}
-
 	frozen := ""
 	for i := range p.Steps {
 		s := &p.Steps[i]
-		d, ok := m.cfg.NetDevDeviceByName(s.Device)
-		if !ok {
-			s.Error = "device vanished from inventory"
-			frozen = s.Error
-			break
-		}
-		drv, ok := m.driverFor(d)
-		if !ok {
-			s.Error = "no driver"
-			frozen = s.Error
-			break
-		}
 
-		// Backup (redacted; stored with the proposal for human recovery).
-		if bc := backupCommand(drv.Key()); bc != "" {
-			if res, err := m.runUnclassified(ctx, d, drv, bc); err == nil && !res.IsError {
-				s.Backup = Redact(res.Output)
+		// Structured types carry their own backup/apply/verify semantics
+		// (§7.1); cli keeps the classic driver path.
+		switch stepType(s) {
+		case StepSQLMigration:
+			if err := m.execSQLMigration(ctx, s); err != nil {
+				s.Error = err.Error()
+				frozen = s.Error
 			} else {
-				s.Error = "backup failed: " + firstLine(errText(err, res))
+				s.Applied = true
+			}
+		case StepK8sApply, StepFileUpload, StepCertReplace, StepRestoreVerify:
+			d, ok := m.cfg.NetDevDeviceByName(s.Device)
+			if !ok {
+				s.Error = "device vanished from inventory"
 				frozen = s.Error
 				break
 			}
-		}
-
-		// Apply (the only write path in netdev; audited per command).
-		failed := false
-		for _, cmd := range s.Commands {
-			res, err := m.runUnclassified(ctx, d, drv, cmd)
-			_ = AppendAudit(Audit{
-				Device: s.Device, Via: d.Via, Command: cmd, Class: "proposal-write",
-				Status: auditStatus(res, err), OutputBytes: len(res.Output),
-				Error: errText(err, res),
-			})
-			if err != nil || res.IsError {
-				s.Error = fmt.Sprintf("command %q failed: %s", cmd, firstLine(errText(err, res)))
-				failed = true
+			var err error
+			switch stepType(s) {
+			case StepK8sApply:
+				err = m.execK8sApply(ctx, s)
+			case StepFileUpload:
+				err = m.execFileUpload(ctx, d, s)
+			case StepCertReplace:
+				err = m.execCertReplace(ctx, d, s)
+			case StepRestoreVerify:
+				err = m.execRestoreVerify(ctx, d, s)
+			}
+			if err != nil {
+				s.Error = err.Error()
+				frozen = s.Error
+			} else {
+				s.Applied = true
+			}
+		default: // cli
+			d, ok := m.cfg.NetDevDeviceByName(s.Device)
+			if !ok {
+				s.Error = "device vanished from inventory"
+				frozen = s.Error
 				break
 			}
+			drv, ok := m.driverFor(d)
+			if !ok {
+				s.Error = "no driver"
+				frozen = s.Error
+				break
+			}
+
+			// Backup (redacted; stored with the proposal for human recovery).
+			if bc := backupCommand(drv.Key()); bc != "" {
+				if res, err := m.runUnclassified(ctx, d, drv, bc); err == nil && !res.IsError {
+					s.Backup = Redact(res.Output)
+				} else {
+					s.Error = "backup failed: " + firstLine(errText(err, res))
+					frozen = s.Error
+					break
+				}
+			}
+
+			// Apply (the only write path in netdev; audited per command).
+			for _, cmd := range s.Commands {
+				res, err := m.runUnclassified(ctx, d, drv, cmd)
+				_ = AppendAudit(Audit{
+					Device: s.Device, Via: d.Via, Command: cmd, Class: "proposal-write",
+					Status: auditStatus(res, err), OutputBytes: len(res.Output),
+					Error: errText(err, res),
+				})
+				if err != nil || res.IsError {
+					s.Error = fmt.Sprintf("command %q failed: %s", cmd, firstLine(errText(err, res)))
+					frozen = s.Error
+					break
+				}
+			}
+			if frozen == "" {
+				s.Applied = true
+			}
 		}
-		if failed {
-			frozen = s.Error
+		if frozen != "" {
 			break
 		}
-		s.Applied = true
 		if err := SaveProposal(p); err != nil {
 			return nil, err
 		}
@@ -390,9 +541,12 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 		p.Note = "frozen: " + frozen + " — later steps untouched; a human decides rollback or keep"
 	} else {
 		p.Status = ProposalDone
-	// 观察期（§7.1）：默认 30 分钟后自动 closed；劣化检测由健康轮询承担。
+		// 观察期（§7.1）：默认 30 分钟后自动 closed；观察期内的劣化检测由
+		// 健康轮询承担（checkWatchingProposals——与 watch 起点基线对比，
+		// 劣化即最高级 Finding + 回滚提示，回滚仍需人批准）。
 		wu := time.Now().Add(30 * time.Minute)
 		p.WatchUntil = &wu
+		p.HealthBase = watchHealthBase(p)
 		go func(id string, until time.Time) {
 			time.Sleep(time.Until(until))
 			if pp, err := GetProposal(id); err == nil && pp.Status == ProposalWatching {
@@ -425,28 +579,52 @@ func (m *Manager) RollbackProposal(ctx context.Context, id string) (*Proposal, e
 		if !s.Applied {
 			continue
 		}
-		d, ok := m.cfg.NetDevDeviceByName(s.Device)
-		if !ok {
-			continue
-		}
-		drv, ok := m.driverFor(d)
-		if !ok {
-			continue
-		}
-		for _, cmd := range s.Rollback {
-			res, err := m.runUnclassified(ctx, d, drv, cmd)
-			_ = AppendAudit(Audit{
-				Device: s.Device, Via: d.Via, Command: cmd, Class: "proposal-rollback",
-				Status: auditStatus(res, err), Error: errText(err, res),
-			})
-			if err != nil || res.IsError {
-				p.Status = ProposalFailed
-				p.Note = "rollback FAILED on " + s.Device + ": " + firstLine(errText(err, res)) + " — manual recovery required; backups are stored in the proposal"
-				if err := SaveProposal(p); err != nil {
-					return nil, err
-				}
-				return p, nil
+		var rerr error
+		switch stepType(s) {
+		case StepSQLMigration:
+			rerr = m.execSQLRollback(ctx, s)
+		case StepK8sApply:
+			rerr = m.execK8sRestore(ctx, s)
+		case StepFileUpload:
+			if d, ok := m.cfg.NetDevDeviceByName(s.Device); ok {
+				rerr = m.execFileRestore(ctx, d, s.RemotePath, s.Backup)
 			}
+		case StepCertReplace:
+			if d, ok := m.cfg.NetDevDeviceByName(s.Device); ok {
+				rerr = m.execCertRestore(ctx, d, s)
+			}
+		case StepRestoreVerify:
+			if d, ok := m.cfg.NetDevDeviceByName(s.Device); ok {
+				rerr = m.execFileRestore(ctx, d, s.RemotePath, s.Backup)
+			}
+		default: // cli
+			d, ok := m.cfg.NetDevDeviceByName(s.Device)
+			if !ok {
+				continue
+			}
+			drv, ok := m.driverFor(d)
+			if !ok {
+				continue
+			}
+			for _, cmd := range s.Rollback {
+				res, err := m.runUnclassified(ctx, d, drv, cmd)
+				_ = AppendAudit(Audit{
+					Device: s.Device, Via: d.Via, Command: cmd, Class: "proposal-rollback",
+					Status: auditStatus(res, err), Error: errText(err, res),
+				})
+				if err != nil || res.IsError {
+					rerr = fmt.Errorf("%q: %s", cmd, firstLine(errText(err, res)))
+					break
+				}
+			}
+		}
+		if rerr != nil {
+			p.Status = ProposalFailed
+			p.Note = "rollback FAILED on " + s.Device + ": " + firstLine(rerr.Error()) + " — manual recovery required; backups are stored in the proposal"
+			if err := SaveProposal(p); err != nil {
+				return nil, err
+			}
+			return p, nil
 		}
 		s.Applied = false
 	}
@@ -498,7 +676,6 @@ func errText(err error, res Result) string {
 	return ""
 }
 
-
 // preExecOnlineCheck runs who/quser on every unique target device — the
 // "someone else is on the box" guard (§7.1 执行前置检查). Returns a summary
 // line, empty when nobody else is on any target.
@@ -533,7 +710,7 @@ func (m *Manager) preExecOnlineCheck(ctx context.Context, p *Proposal) string {
 		if lines == "" {
 			continue
 		}
-			n := len(strings.Split(lines, "\n"))
+		n := len(strings.Split(lines, "\n"))
 		findings = append(findings, fmt.Sprintf("%s: %d 个会话", name, n))
 	}
 	return strings.Join(findings, "；")
@@ -551,4 +728,106 @@ func CloseProposalWatch(id string) error {
 	p.Status = ProposalClosed
 	p.WatchNote = "人工关闭"
 	return SaveProposal(p)
+}
+
+// ── 观察期劣化检测（§7.1）─────────────────────────────────────────────────
+
+// watchHealthBase snapshots each step device's ifDown count from the LAST
+// health poll (-1 = unreachable). Devices without SNMP health have no signal
+// and are simply absent — the comparison skips them.
+func watchHealthBase(p *Proposal) map[string]int {
+	seen := map[string]bool{}
+	for _, s := range p.Steps {
+		if s.Device != "" {
+			seen[s.Device] = true
+		}
+	}
+	base := map[string]int{}
+	healthMu.Lock()
+	for name := range seen {
+		h, ok := healthState[name]
+		if !ok {
+			continue
+		}
+		if !h.Reachable {
+			base[name] = -1
+		} else {
+			base[name] = h.IfDown()
+		}
+	}
+	healthMu.Unlock()
+	if len(base) == 0 {
+		return nil
+	}
+	return base
+}
+
+// watchDegraded reports the devices whose health degraded vs the watch base:
+// was reachable → now down, or ifDown grew.
+func watchDegraded(p *Proposal, fresh map[string]DeviceHealth) []string {
+	var worse []string
+	for dev, base := range p.HealthBase {
+		h, ok := fresh[dev]
+		if !ok || !h.Reachable && base == -1 {
+			continue // no fresh signal / already down at base
+		}
+		if base >= 0 && !h.Reachable {
+			worse = append(worse, dev+"（失联）")
+			continue
+		}
+		if h.Reachable && h.IfDown() > base {
+			worse = append(worse, fmt.Sprintf("%s（down 口 %d→%d）", dev, base, h.IfDown()))
+		}
+	}
+	sort.Strings(worse)
+	return worse
+}
+
+// checkWatchingProposals compares every watching proposal's targets against
+// the fresh health sweep; the FIRST degradation raises a top-severity Finding
+// with the rollback hint (回滚仍需人批准——AI 的手永远慢一步) and marks the
+// WatchNote so the alert fires once per proposal.
+func (m *Manager) checkWatchingProposals(fresh map[string]DeviceHealth) {
+	props, err := ListProposals()
+	if err != nil {
+		return
+	}
+	for _, p := range props {
+		if p.Status != ProposalWatching || len(p.HealthBase) == 0 {
+			continue
+		}
+		if strings.Contains(p.WatchNote, "劣化") {
+			continue // already alerted
+		}
+		worse := watchDegraded(p, fresh)
+		if len(worse) == 0 {
+			continue
+		}
+		p.WatchNote = "观察期劣化：" + strings.Join(worse, "；") + " — 可回滚（提案页签「回滚」，仍需人按）"
+		_ = SaveProposal(p)
+		_ = SaveFinding(&Finding{
+			Title:      "变更观察期劣化：" + p.Intent,
+			Severity:   SeverityCritical,
+			Devices:    p.stepDevices(),
+			Detail:     fmt.Sprintf("提案 %s 执行后观察期内健康劣化：%s。基线（watch 起点）若与变更相关，回滚是第一优先动作。", p.ID, strings.Join(worse, "；")),
+			Evidence:   []Evidence{{Device: "(watch)", Command: "proposal " + p.ID, Output: p.WatchNote}},
+			Suggestion: "在「提案」页签对 " + p.ID + " 按「回滚」执行已起草的回滚计划（回滚仍需人批准）",
+			Source:     "watch:" + p.ID,
+			Status:     FindingActive,
+		})
+		_ = AppendAudit(Audit{Device: "(proposal)", Command: "watch-degraded " + p.ID, Class: "proposal", Status: AuditFailure, Error: strings.Join(worse, "；")})
+	}
+}
+
+// stepDevices lists the proposal's unique step target devices.
+func (p *Proposal) stepDevices() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range p.Steps {
+		if s.Device != "" && !seen[s.Device] {
+			seen[s.Device] = true
+			out = append(out, s.Device)
+		}
+	}
+	return out
 }

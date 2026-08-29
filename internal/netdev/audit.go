@@ -145,7 +145,20 @@ func AppendAudit(e Audit) error {
 		return err
 	}
 	auditLastHash = h
+	// Pass the just-written head: reading it back via AuditChainHead would
+	// re-lock auditMu while we still hold it (non-reentrant deadlock).
+	maybeAnchorAudit(h)
 	return nil
+}
+
+// AuditChainHead returns the local audit chain head ("" when nothing is
+// chained yet) — the value cross-anchored to the trust domain (spec §八).
+func AuditChainHead() string {
+	h, err := lastAuditHash()
+	if err != nil {
+		return ""
+	}
+	return h
 }
 
 // auditLastHash caches the chain head (the last written entry's hash).
@@ -193,9 +206,9 @@ func readAuditLines() ([][]byte, error) {
 
 // AuditChainStatus is the verification verdict for the audit tab's badge.
 type AuditChainStatus struct {
-	Total      int    `json:"total"`
-	Chained    int    `json:"chained"`
-	OK         bool   `json:"ok"`
+	Total       int    `json:"total"`
+	Chained     int    `json:"chained"`
+	OK          bool   `json:"ok"`
 	FirstBroken string `json:"firstBroken,omitempty"`
 }
 

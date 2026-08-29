@@ -70,12 +70,12 @@ var redisAllowed = []struct {
 	cmd  string
 	args int // exact arg count (-1 = any)
 }{
-	{"slowlog", -1},     // SLOWLOG GET [n]
-	{"info", -1},       // INFO [section]
+	{"slowlog", -1}, // SLOWLOG GET [n]
+	{"info", -1},    // INFO [section]
 	{"dbsize", 0},
-	{"client", -1},     // CLIENT LIST / CLIENT INFO
-	{"latency", -1},    // LATENCY HISTORY/STATUS/DOCTOR
-	{"config", -1},     // CONFIG GET (writes like CONFIG SET land in the write table below)
+	{"client", -1},  // CLIENT LIST / CLIENT INFO
+	{"latency", -1}, // LATENCY HISTORY/STATUS/DOCTOR
+	{"config", -1},  // CONFIG GET (writes like CONFIG SET land in the write table below)
 	{"lastsave", 0},
 	{"time", 0},
 }

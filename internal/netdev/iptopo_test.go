@@ -15,10 +15,10 @@ func TestInferTopology(t *testing.T) {
 		Enabled: true,
 		Devices: []config.NetDevDevice{
 			{Name: "core-sw-1", Address: "10.0.0.2", Group: "核心"},
-			{Name: "AGG-SW-9", Address: "10.0.1.9"},  // name convention
-			{Name: "acc-sw-3", Address: "10.0.2.3"},  // name convention
-			{Name: "plain-1", Address: "10.0.2.11"},  // subnet heuristic → access
-			{Name: "plain-0", Address: "10.0.0.51"},  // subnet heuristic → core band
+			{Name: "AGG-SW-9", Address: "10.0.1.9"}, // name convention
+			{Name: "acc-sw-3", Address: "10.0.2.3"}, // name convention
+			{Name: "plain-1", Address: "10.0.2.11"}, // subnet heuristic → access
+			{Name: "plain-0", Address: "10.0.0.51"}, // subnet heuristic → core band
 			{Name: "edge-fw", Address: "10.0.9.9", Via: []string{"jumphost"}},
 		},
 		Hops: []config.NetDevHop{{Name: "jumphost", Host: "10.9.9.9"}},

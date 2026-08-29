@@ -111,15 +111,15 @@ func TestComposeLogCommand(t *testing.T) {
 func TestComposeLogCommandRefusals(t *testing.T) {
 	d := devWithLogPaths("/opt/app/logs")
 	for _, bad := range []struct{ source, since string }{
-		{"file:/etc/shadow", ""},                        // outside whitelist
-		{"file:/opt/other/x.log", ""},                   // outside this device's roots
-		{"file:/opt/app/logs/../../etc/x", ""},          // traversal
-		{"journal:nginx; reboot", ""},                   // unit with metachars
-		{"docker:web; rm -rf /", ""},                    // container with metachars
-		{"journal:nginx", `--since "; reboot"`},         // since with quotes/metachars
-		{"journal:nginx", "yesterday; ls"},              // since trailing junk
-		{"whatever:x", ""},                              // unknown kind
-		{"file:", ""},                                   // empty
+		{"file:/etc/shadow", ""},                // outside whitelist
+		{"file:/opt/other/x.log", ""},           // outside this device's roots
+		{"file:/opt/app/logs/../../etc/x", ""},  // traversal
+		{"journal:nginx; reboot", ""},           // unit with metachars
+		{"docker:web; rm -rf /", ""},            // container with metachars
+		{"journal:nginx", `--since "; reboot"`}, // since with quotes/metachars
+		{"journal:nginx", "yesterday; ls"},      // since trailing junk
+		{"whatever:x", ""},                      // unknown kind
+		{"file:", ""},                           // empty
 	} {
 		if _, err := composeLogCommand(d, bad.source, 100, bad.since); err == nil {
 			t.Errorf("expected refusal for %q since=%q", bad.source, bad.since)
@@ -159,12 +159,12 @@ func TestLogPathReadOverride(t *testing.T) {
 		}
 	}
 	bad := []string{
-		"cat /opt/app/logs/app.log",              // verb outside the log bypass
-		"tail -n 100 /etc/shadow",                // outside roots
-		"grep /var/log/x error",                  // two path-shaped tokens
-		"tail -n 100 /opt/app/logs/a /etc/b",     // two paths, one not allowed
-		"tail -n 100",                            // no path
-		"systemctl restart nginx",                // write verb
+		"cat /opt/app/logs/app.log",          // verb outside the log bypass
+		"tail -n 100 /etc/shadow",            // outside roots
+		"grep /var/log/x error",              // two path-shaped tokens
+		"tail -n 100 /opt/app/logs/a /etc/b", // two paths, one not allowed
+		"tail -n 100",                        // no path
+		"systemctl restart nginx",            // write verb
 	}
 	for _, cmd := range bad {
 		if _, yes := logPathReadOverride(d, drv, cmd); yes {

@@ -36,17 +36,17 @@ func TestDBQueryAllowed(t *testing.T) {
 	}
 	ok := []string{
 		"SHOW PROCESSLIST",
-		"show  processlist ;",              // normalized
+		"show  processlist ;", // normalized
 		"SELECT * FROM information_schema.processlist",
 		"select * from information_schema.processlist", // case-insensitive? NO — see below
 	}
 	bad := []string{
 		"",
-		"SHOW PROCESSLIST; SELECT 1",         // multi-statement
-		"SHOW PROCESSLIST -- comment",        // comment
-		"SHOW GRANTS",                        // not in list
+		"SHOW PROCESSLIST; SELECT 1",  // multi-statement
+		"SHOW PROCESSLIST -- comment", // comment
+		"SHOW GRANTS",                 // not in list
 		"SELECT * FROM information_schema.tables", // prefix of nothing allowed
-		"DROP TABLE users",                   // obviously
+		"DROP TABLE users",                        // obviously
 		"SELECT * FROM information_schema.processlist; DELETE FROM users",
 	}
 	for _, q := range ok {

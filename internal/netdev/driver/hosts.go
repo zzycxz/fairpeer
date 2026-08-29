@@ -140,8 +140,8 @@ func (windowsPowerShell) Classify(cmd string) Class { return windowsTables.class
 // device-side filter, not a command chain — so only these drivers need the
 // metacharacter refusal in Exec.
 var metacharDrivers = map[string]bool{
-	"linux-shell":       true,
-	"vmware-esxi":       true,
+	"linux-shell":        true,
+	"vmware-esxi":        true,
 	"windows-powershell": true,
 }
 

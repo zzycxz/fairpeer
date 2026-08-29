@@ -60,7 +60,8 @@ func dockerTransport(socket string) (*http.Transport, error) {
 }
 
 // DockerGet answers ONE whitelisted GET against the device's Docker Engine.
-// what ∈ ping | version | info | ps | inspect | logs | images.
+// what ∈ ping | version | info | ps | inspect | logs | images. Sealed by
+// sealAPIGet (guardrails + live + audit + redaction).
 func (m *Manager) DockerGet(ctx context.Context, deviceName, what, arg string, tailN int) (string, error) {
 	d, ok := m.cfg.NetDevDeviceByName(deviceName)
 	if !ok {
@@ -69,57 +70,76 @@ func (m *Manager) DockerGet(ctx context.Context, deviceName, what, arg string, t
 	if d.Kind != "docker" || d.Docker == nil {
 		return "", fmt.Errorf("device %q is not a kind=docker target", deviceName)
 	}
-	tr, err := dockerTransport(d.Docker.Socket)
-	if err != nil {
-		return "", err
-	}
-	client := &http.Client{Transport: tr, Timeout: 30 * time.Second}
-
-	var path string
-	switch what {
-	case "ping":
-		path = "/_ping"
-	case "version":
-		path = "/version"
-	case "info":
-		path = "/info"
-	case "ps":
-		path = "/containers/json"
-	case "images":
-		path = "/images/json"
-	case "inspect", "logs":
-		if !dockerIDRe.MatchString(arg) {
-			return "", fmt.Errorf("invalid container id/name %q (one plain token)", arg)
+	// tcp:// endpoints must match the registered device address — the socket
+	// field is human-configured, but a mismatch is still refused rather than
+	// dialed (defense in depth against config mistakes).
+	socket := strings.TrimSpace(d.Docker.Socket)
+	if strings.HasPrefix(socket, "tcp://") && strings.TrimSpace(d.Address) != "" {
+		host := strings.TrimPrefix(socket, "tcp://")
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
 		}
-		if what == "inspect" {
-			path = "/containers/" + arg + "/json"
-		} else {
-			if tailN <= 0 || tailN > 1000 {
-				tailN = 100
+		if !strings.EqualFold(host, strings.TrimSpace(d.Address)) {
+			return "", fmt.Errorf("docker socket tcp host %q does not match the device address %q", host, d.Address)
+		}
+	}
+	label := "docker " + what
+	if arg != "" {
+		label += " " + arg
+	}
+	return m.sealAPIGet(deviceName, label, func() (string, error) {
+		tr, err := dockerTransport(d.Docker.Socket)
+		if err != nil {
+			return "", err
+		}
+		client := &http.Client{Transport: tr, Timeout: 30 * time.Second}
+
+		var path string
+		switch what {
+		case "ping":
+			path = "/_ping"
+		case "version":
+			path = "/version"
+		case "info":
+			path = "/info"
+		case "ps":
+			path = "/containers/json"
+		case "images":
+			path = "/images/json"
+		case "inspect", "logs":
+			if !dockerIDRe.MatchString(arg) {
+				return "", fmt.Errorf("invalid container id/name %q (one plain token)", arg)
 			}
-			path = fmt.Sprintf("/containers/%s/logs?stdout=1&stderr=1&tail=%d", arg, tailN)
+			if what == "inspect" {
+				path = "/containers/" + arg + "/json"
+			} else {
+				if tailN <= 0 || tailN > 1000 {
+					tailN = 100
+				}
+				path = fmt.Sprintf("/containers/%s/logs?stdout=1&stderr=1&tail=%d", arg, tailN)
+			}
+		default:
+			return "", errors.New("what must be ping|version|info|ps|inspect|logs|images")
 		}
-	default:
-		return "", errors.New("what must be ping|version|info|ps|inspect|logs|images")
-	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker"+path, nil)
-	if err != nil {
-		return "", err
-	}
-	res, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer res.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(res.Body, dockerBodyCap))
-	if err != nil {
-		return "", err
-	}
-	if res.StatusCode != http.StatusOK {
-		return string(body), fmt.Errorf("docker API %s → HTTP %d", path, res.StatusCode)
-	}
-	return string(body), nil
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker"+path, nil)
+		if err != nil {
+			return "", err
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			return "", err
+		}
+		defer res.Body.Close()
+		body, err := io.ReadAll(io.LimitReader(res.Body, dockerBodyCap))
+		if err != nil {
+			return "", err
+		}
+		if res.StatusCode != http.StatusOK {
+			return string(body), fmt.Errorf("docker API %s → HTTP %d", path, res.StatusCode)
+		}
+		return string(body), nil
+	})
 }
 
 // kindDocker quick check for the tools layer.

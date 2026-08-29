@@ -74,4 +74,3 @@ func (m *Manager) HandoffReport(since time.Time) string {
 	b.WriteString("\n---\n交接人确认以上内容后交给下一班；未闭环项请继续跟进或转入案例。\n")
 	return b.String()
 }
-

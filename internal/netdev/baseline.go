@@ -67,10 +67,10 @@ var baselineRules = map[string][]baselineRule{
 			hint:    "关闭 SSH v1 兼容：undo ssh server compatible sshv1 enable"},
 		{id: "no-ntp", title: "未配置 NTP 时间同步", severity: "info",
 			absence: true, presence: regexp.MustCompile(`(?im)^\s*ntp-service\s+`),
-			hint:    "配置 ntp-service unicast-server；日志与审计的时间戳才有取证价值"},
+			hint: "配置 ntp-service unicast-server；日志与审计的时间戳才有取证价值"},
 		{id: "no-syslog", title: "未配置日志外发", severity: "info",
 			absence: true, presence: regexp.MustCompile(`(?im)^\s*info-center\s+loghost\b`),
-			hint:    "配置 info-center loghost 指向日志服务器"},
+			hint: "配置 info-center loghost 指向日志服务器"},
 	},
 	"cisco-ios": {
 		{id: "telnet-enabled", title: "VTY 线路允许 Telnet 接入", severity: "warning",
@@ -87,10 +87,10 @@ var baselineRules = map[string][]baselineRule{
 			hint:    "ip ssh version 2"},
 		{id: "no-ntp", title: "未配置 NTP 时间同步", severity: "info",
 			absence: true, presence: regexp.MustCompile(`(?im)^\s*ntp\s+(server|peer)\b`),
-			hint:    "配置 ntp server；日志与审计的时间戳才有取证价值"},
+			hint: "配置 ntp server；日志与审计的时间戳才有取证价值"},
 		{id: "no-syslog", title: "未配置日志外发", severity: "info",
 			absence: true, presence: regexp.MustCompile(`(?im)^\s*logging\s+host\b`),
-			hint:    "配置 logging host 指向日志服务器"},
+			hint: "配置 logging host 指向日志服务器"},
 	},
 }
 
@@ -137,10 +137,10 @@ type BaselineViolation struct {
 
 // BaselineSummary is the aggregate the UI and the agent tool see.
 type BaselineSummary struct {
-	Devices int `json:"devices"`
-	Checked int `json:"checked"` // devices whose config was actually read
-	Rules   int `json:"rules"`   // applicable rule count across devices
-	Hits    int `json:"hits"`    // total violations
+	Devices int    `json:"devices"`
+	Checked int    `json:"checked"` // devices whose config was actually read
+	Rules   int    `json:"rules"`   // applicable rule count across devices
+	Hits    int    `json:"hits"`    // total violations
 	At      string `json:"at"`
 }
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"os"
 	"path/filepath"
 	"testing"
@@ -162,5 +163,36 @@ func TestValidateNetDevProjects(t *testing.T) {
 	ghost.Projects = append(ghost.Projects, NetDevProject{Name: "二号机房", Groups: []string{"不存在"}})
 	if err := ValidateNetDev(ghost); err == nil {
 		t.Fatal("project referencing unknown group accepted")
+	}
+}
+
+// Inventory names become file names in the backup/golden vaults — path
+// separators and ".." must be rejected at the door.
+func TestValidateNetDevRejectsPathLikeNames(t *testing.T) {
+	base := func() NetDevConfig {
+		return NetDevConfig{
+			Enabled: true,
+			Devices: []NetDevDevice{{Name: "core-sw-1", Vendor: "huawei", Address: "10.0.0.1"}},
+			Hops:    []NetDevHop{{Name: "bastion", Host: "1.2.3.4"}},
+		}
+	}
+	for _, bad := range []string{"../evil", "a/b", `a\b`, "a b", ".hidden", strings.Repeat("x", 65)} {
+		nd := base()
+		nd.Devices[0].Name = bad
+		if err := ValidateNetDev(nd); err == nil {
+			t.Errorf("device name %q should be rejected", bad)
+		}
+		nd = base()
+		nd.Hops[0].Name = bad
+		if err := ValidateNetDev(nd); err == nil {
+			t.Errorf("hop name %q should be rejected", bad)
+		}
+	}
+	for _, good := range []string{"core-sw-1", "SW_2.Edge@bj"} {
+		nd := base()
+		nd.Devices[0].Name = good
+		if err := ValidateNetDev(nd); err != nil {
+			t.Errorf("device name %q should pass: %v", good, err)
+		}
 	}
 }

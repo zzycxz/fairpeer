@@ -21,10 +21,10 @@ import (
 // "what changed" backbone for diagnosis (变更↔故障关联) and drift detection.
 
 type BackupVersion struct {
-	ID     string `json:"id"`     // <device>@<unixnano>
+	ID     string `json:"id"` // <device>@<unixnano>
 	Device string `json:"device"`
-	At     string `json:"at"`     // 01-02 15:04:05
-	Bytes  int    `json:"bytes"`  // redacted text length
+	At     string `json:"at"`    // 01-02 15:04:05
+	Bytes  int    `json:"bytes"` // redacted text length
 	Lines  int    `json:"lines"`
 }
 

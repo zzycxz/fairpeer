@@ -93,10 +93,10 @@ func containsStr(list []string, s string) bool {
 
 // ExpectedStateView — 期望状态对比（§5.4 第三件）：清单声明 vs 健康采集。
 type ExpectedStateView struct {
-	Total     int            `json:"total"`     // 有采集面的设备数
+	Total     int            `json:"total"` // 有采集面的设备数
 	Reachable int            `json:"reachable"`
-	Missing   []DeviceHealth `json:"missing"`   // 期望在线但不可达
-	NoProbe   []string       `json:"noProbe"`   // 清单里暂无健康采集面的设备
+	Missing   []DeviceHealth `json:"missing"` // 期望在线但不可达
+	NoProbe   []string       `json:"noProbe"` // 清单里暂无健康采集面的设备
 }
 
 // ExpectedState diffs the inventory against the latest SNMP health sweep.

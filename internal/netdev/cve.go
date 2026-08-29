@@ -15,7 +15,7 @@ import (
 
 // CVEEntry is one simplified feed item.
 type CVEEntry struct {
-	ID       string   `json:"id"`       // CVE-2024-xxxx
+	ID       string   `json:"id"` // CVE-2024-xxxx
 	Desc     string   `json:"desc"`
 	Products []string `json:"products"` // lowercase vendor/product substrings
 	Severity string   `json:"severity"` // critical | high | medium | low
@@ -99,7 +99,7 @@ func (m *Manager) MatchCVEsToFindings() (*Finding, error) {
 	}
 	if len(matches) == 0 {
 		return &Finding{Title: "CVE 匹配：无命中", Severity: SeverityInfo,
-			Detail: "清单与已导入 feed 无交集（注意：匹配依赖 vendor/os/model 字段完整）。",
+			Detail:  "清单与已导入 feed 无交集（注意：匹配依赖 vendor/os/model 字段完整）。",
 			Devices: []string{"(all)"}, Evidence: nil, Source: "cve:sweep",
 			Status: "active", CreatedAt: time.Now()}, nil
 	}
@@ -122,14 +122,14 @@ func (m *Manager) MatchCVEsToFindings() (*Finding, error) {
 		summary.WriteString("\n")
 	}
 	f := &Finding{
-		Title:    fmt.Sprintf("CVE 匹配：%d 台命中", len(devs)),
-		Severity: maxSev(matches),
-		Devices:  devs,
-		Detail:   summary.String(),
-		Evidence: []Evidence{{Device: "(cve-feed)", Command: "cve match", Output: fmt.Sprintf("feed %d 条 / 命中 %d", len(matches), len(matches))}},
+		Title:      fmt.Sprintf("CVE 匹配：%d 台命中", len(devs)),
+		Severity:   maxSev(matches),
+		Devices:    devs,
+		Detail:     summary.String(),
+		Evidence:   []Evidence{{Device: "(cve-feed)", Command: "cve match", Output: fmt.Sprintf("feed %d 条 / 命中 %d", len(matches), len(matches))}},
 		Suggestion: "逐条核对版本范围（匹配是 vendor+model 粗匹配，不是精确版本比对）；修复走提案。",
-		Source:   "cve:sweep",
-		Status:   "active",
+		Source:     "cve:sweep",
+		Status:     "active",
 	}
 	f.CreatedAt = time.Now()
 	if err := SaveFinding(f); err != nil {

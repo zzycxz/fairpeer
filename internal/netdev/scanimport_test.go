@@ -28,7 +28,13 @@ func TestImportNmapXML(t *testing.T) {
 	if f.Severity != "warning" {
 		t.Fatalf("unknown host must warn, severity=%s", f.Severity)
 	}
-	joined := strings.Join(func() []string { var o []string; for _, e := range f.Evidence { o = append(o, e.Output) }; return o }(), "\n")
+	joined := strings.Join(func() []string {
+		var o []string
+		for _, e := range f.Evidence {
+			o = append(o, e.Output)
+		}
+		return o
+	}(), "\n")
 	if !strings.Contains(joined, "core-sw-1 [已纳管]") || !strings.Contains(joined, "22/tcp(ssh)") {
 		t.Fatalf("managed host line malformed:\n%s", joined)
 	}

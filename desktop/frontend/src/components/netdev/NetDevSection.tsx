@@ -40,7 +40,7 @@ type SubTab = "inventory" | "guardrails" | "sites" | "advanced";
 const emptyDevice = (): EditDevice => ({
   name: "", vendor: "huawei", os: "vrp8", model: "", address: "", port: 22,
   via: [], group: "", username: "", passwordEnv: "", passwordSet: false,
-  identityFile: "", encoding: "auto", allowTelnet: false, password: "", logPaths: [], protocols: [], snmpVersion: "", snmpCommunityEnv: "", snmpCommunitySet: false, snmpCommunity: "",
+  identityFile: "", encoding: "auto", password: "", logPaths: [], configPaths: [], oobUrl: "", protocols: [], snmpVersion: "", snmpCommunityEnv: "", snmpCommunitySet: false, snmpCommunity: "",
 });
 
 const emptyHop = (): EditHop => ({
@@ -54,11 +54,26 @@ export function NetDevSection() {
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {}, projects: [], presets: [], inspectionInterval: "", backupInterval: "", dbSources: [], pollIntervalSeconds: 0, alertRules: [], syslogPort: 0, defaultMode: "", maxSessionsPerDevice: 0, discoveryRate: 0, discoveryMode: "", probeFallback: "", groupDefs: [] });
+  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {}, projects: [], presets: [], inspectionInterval: "", backupInterval: "", dbSources: [], pollIntervalSeconds: 0, alertRules: [], syslogPort: 0, defaultMode: "", maxSessionsPerDevice: 0, discoveryRate: 0, discoveryMode: "", probeFallback: "", groupDefs: [], notifyWebhook: "", notifyFormat: "", notifyMinSeverity: "", notifyBotDest: "", notifySMTPHost: "", notifySMTPPort: 587, notifySMTPUser: "", notifySMTPFrom: "", notifySMTPTo: [], notifySMTPPassSet: false, briefingPushTime: "" });
   const [sub, setSub] = useState<SubTab>("inventory");
   const [editingDevice, setEditingDevice] = useState<EditDevice | null>(null);
   const [editingDB, setEditingDB] = useState<NetDevDBSourceView | null>(null);
   const [editingRule, setEditingRule] = useState<NetDevAlertRuleView | null>(null);
+  // notifySMTPPassword lives outside `view`: write-only, never round-trips.
+  const [notifySMTPPassword, setNotifySMTPPassword] = useState("");
+  const [notifyTesting, setNotifyTesting] = useState(false);
+  const [syslogStatus, setSyslogStatus] = useState<{ listening: boolean; port: number; buffered: number } | null>(null);
+  const testNotify = async () => {
+    setNotifyTesting(true);
+    try {
+      await app.NetDevNotifyTest();
+      setErr("");
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setNotifyTesting(false);
+    }
+  };
   const [editingHop, setEditingHop] = useState<EditHop | null>(null);
   const [editingProject, setEditingProject] = useState<{ draft: NetDevProjectView; index: number } | null>(null);
   const [editingPreset, setEditingPreset] = useState<{ draft: NetDevPresetView; index: number } | null>(null);
@@ -89,6 +104,7 @@ export function NetDevSection() {
   }, []);
 
   useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => { app.NetDevSyslogStatus().then(setSyslogStatus).catch(() => {}); }, [view.syslogPort]);
 
   const save = useCallback(async (v: NetDevSettingsView) => {
     setBusy(true);
@@ -434,7 +450,7 @@ export function NetDevSection() {
                   value={view.syslogPort ?? 0}
                   onChange={e => patch({ syslogPort: Math.max(0, Number(e.target.value) || 0) })} />
               </label>
-              <div className="mem-hint">设备 syslog 指向本机该端口（UDP）；按设备聚合进「日志」页卡的 syslog 源，链路翻动/认证失败等模式自动升级为发现。改端口需重启应用。</div>
+              <div className="mem-hint">设备 syslog 指向本机该端口（UDP）；按设备聚合进「日志」页卡的 syslog 源，链路翻动/认证失败等模式自动升级为发现。改端口需重启应用。{syslogStatus ? ` 当前：${syslogStatus.listening ? `监听中 :${syslogStatus.port} · 缓冲 ${syslogStatus.buffered} 行` : "未监听"}` : ""}</div>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 默认模式
                 <select className="mem-select" value={view.defaultMode || "diagnose"}
@@ -449,6 +465,13 @@ export function NetDevSection() {
                   value={view.maxSessionsPerDevice ?? 0}
                   onChange={e => patch({ maxSessionsPerDevice: Math.max(0, Number(e.target.value) || 0) })} />
               </label>
+              <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                每日早报推送
+                <input className="mem-input" style={{ width: 80 }} placeholder="08:00，空=关"
+                  value={view.briefingPushTime ?? ""}
+                  onChange={e => patch({ briefingPushTime: e.target.value })} />
+              </label>
+              <div className="mem-hint">到点合成 24h 早报（发现/审计/提案/备份概览）并经上方「通知出口」推送——IM/邮件/webhook 配了哪个走哪个。</div>
             </div>
           </Section>
 
@@ -479,8 +502,65 @@ export function NetDevSection() {
           </Section>
 
           <Section
+            title="通知出口"
+            desc="告警 Finding 推送到人：webhook（飞书/钉钉/企微自定义机器人或通用 JSON）、SMTP 邮件、内嵌 IM 网关直推——任选组合。同一告警源 5 分钟内自动合并，防轰炸。"
+            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => void testNotify()}>{notifyTesting ? "发送中…" : "发送测试消息"}</span>}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
+              <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                严重度门槛
+                <select className="mem-select" value={view.notifyMinSeverity || "warning"}
+                  onChange={e => patch({ notifyMinSeverity: e.target.value })}>
+                  <option value="info">info 及以上</option>
+                  <option value="warning">warning 及以上（默认）</option>
+                  <option value="critical">仅 critical</option>
+                </select>
+              </label>
+              <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                Webhook
+                <input className="mem-input" style={{ flex: 1 }} placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…"
+                  value={view.notifyWebhook ?? ""} onChange={e => patch({ notifyWebhook: e.target.value })} />
+              </label>
+              <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                格式
+                <select className="mem-select" value={view.notifyFormat || "generic"}
+                  onChange={e => patch({ notifyFormat: e.target.value })}>
+                  <option value="generic">generic（JSON）</option>
+                  <option value="feishu">feishu</option>
+                  <option value="dingtalk">dingtalk</option>
+                  <option value="wecom">wecom</option>
+                </select>
+              </label>
+              <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                IM 直推
+                <input className="mem-input" style={{ flex: 1 }} placeholder="feishu:oc_xxx / weixin:wxid_xxx（需先在 设置→Bot 启用网关）"
+                  value={view.notifyBotDest ?? ""} onChange={e => patch({ notifyBotDest: e.target.value })} />
+              </label>
+              <div className="set-label" style={{ marginBottom: -2 }}>SMTP 邮件（可选）</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <input className="mem-input" style={{ flex: 2, minWidth: 140 }} placeholder="SMTP 主机"
+                  value={view.notifySMTPHost ?? ""} onChange={e => patch({ notifySMTPHost: e.target.value })} />
+                <input className="mem-input" type="number" style={{ width: 70 }} placeholder="587"
+                  value={view.notifySMTPPort || 587} onChange={e => patch({ notifySMTPPort: Number(e.target.value) || 587 })} />
+                <input className="mem-input" style={{ flex: 1, minWidth: 100 }} placeholder="用户"
+                  value={view.notifySMTPUser ?? ""} onChange={e => patch({ notifySMTPUser: e.target.value })} />
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <input className="mem-input" type={view.notifySMTPPassSet ? "password" : "text"} style={{ flex: 1, minWidth: 120 }}
+                  placeholder={view.notifySMTPPassSet ? "密码（留空=保持不变）" : "密码"}
+                  value={notifySMTPPassword} onChange={e => setNotifySMTPPassword(e.target.value)} />
+                <input className="mem-input" style={{ flex: 1, minWidth: 120 }} placeholder="发件人 from@"
+                  value={view.notifySMTPFrom ?? ""} onChange={e => patch({ notifySMTPFrom: e.target.value })} />
+                <input className="mem-input" style={{ flex: 2, minWidth: 160 }} placeholder="收件人，逗号分隔"
+                  value={(view.notifySMTPTo ?? []).join(", ")}
+                  onChange={e => patch({ notifySMTPTo: e.target.value.split(/[,，]/).map(x => x.trim()).filter(Boolean) })} />
+              </div>
+            </div>
+          </Section>
+
+          <Section
             title="告警规则"
-            desc="健康轮询的阈值规则：命中自动生成「发现」（带告警中徽标），条件清除后自动标记已恢复；也可在发现卡手动标记已处理。"
+            desc="随 SNMP 健康轮询评估（需先在上面开启轮询间隔）：命中自动生成「发现」（带告警中徽标），条件清除后自动标记已恢复；也可在发现卡手动标记已处理。"
             actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingRule({ name: "", metric: "reachable", op: "==", value: 0, severity: "warning", enabled: true })}>添加规则</span>}
           >
             {(view.alertRules ?? []).length === 0 && (
@@ -598,6 +678,20 @@ export function NetDevSection() {
                 onChange={e => setEditingDevice({ ...editingDevice, logPaths: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })}
               />
             </Field>
+            <Field label="配置路径白名单（§7.3，逗号分隔）">
+              <input
+                className="mem-input" placeholder="配置文件管理：快照/diff/drift 与 restore-verify 限这些根；如 /etc/nginx"
+                value={(editingDevice.configPaths ?? []).join(",")}
+                onChange={e => setEditingDevice({ ...editingDevice, configPaths: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })}
+              />
+            </Field>
+            <Field label="带外入口 oob_url（§6.3）">
+              <input
+                className="mem-input" placeholder="ESXi/堡垒/BMC Web UI 深链（https://…）——设备卡「带外」一键直达，点击入审计"
+                value={editingDevice.oobUrl ?? ""}
+                onChange={e => setEditingDevice({ ...editingDevice, oobUrl: e.target.value })}
+              />
+            </Field>
             <Field label="SNMP（健康轮询）">
               <select className="mem-select" value={editingDevice.snmpVersion ?? ""}
                 onChange={e => setEditingDevice({ ...editingDevice, snmpVersion: e.target.value })}>
@@ -610,7 +704,7 @@ export function NetDevSection() {
                 onChange={e => setEditingDevice({ ...editingDevice, snmpCommunity: e.target.value })} />
             </Field>
             <Field label="协议优先级（逗号分隔）">
-              <input className="mem-input" placeholder="ssh, telnet, netconf"
+              <input className="mem-input" placeholder="ssh, netconf"
                 value={(editingDevice.protocols ?? []).join(", ")}
                 onChange={e => setEditingDevice({ ...editingDevice, protocols: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })} />
             </Field>
@@ -671,7 +765,7 @@ export function NetDevSection() {
                 const exists = view.devices.some(d => d.name === editingDevice.name);
                 const devices = exists ? view.devices.map(d => d.name === editingDevice.name ? editingDevice : d) : [...view.devices, editingDevice];
                 setEditingDevice(null);
-                void save({ ...view, devices });
+                void save({ ...view, devices, notifySMTPPassword });
               }}
             >保存设备</span>
           </div>
@@ -728,7 +822,7 @@ export function NetDevSection() {
                 const exists = (view.dbSources ?? []).some(s => s.name === editingDB.name);
                 const dbSources = exists ? (view.dbSources ?? []).map(s => s.name === editingDB.name ? editingDB : s) : [...(view.dbSources ?? []), editingDB];
                 setEditingDB(null);
-                void save({ ...view, dbSources });
+                void save({ ...view, dbSources, notifySMTPPassword });
               }}
             >保存源</span>
           </div>
@@ -745,6 +839,8 @@ export function NetDevSection() {
                 <option value="reachable">设备可达（1=在线 0=不可达）</option>
                 <option value="if_down_count">掉线接口数</option>
                 <option value="uptime_reset">重启检测（uptime 回绕）</option>
+                <option value="flap_count">链路抖动（1 小时内可达性翻转，动态）</option>
+                <option value="if_down_above_p90">掉线口数偏离基线（&gt;24h P90，动态）</option>
               </select>
             </Field>
             <Field label="比较">
@@ -774,7 +870,7 @@ export function NetDevSection() {
                 const exists = (view.alertRules ?? []).some(r => r.name === editingRule.name);
                 const alertRules = exists ? (view.alertRules ?? []).map(r => r.name === editingRule.name ? editingRule : r) : [...(view.alertRules ?? []), editingRule];
                 setEditingRule(null);
-                void save({ ...view, alertRules });
+                void save({ ...view, alertRules, notifySMTPPassword });
               }}
             >保存规则</span>
           </div>

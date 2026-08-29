@@ -41,49 +41,51 @@ func (m *Manager) FirewallGet(ctx context.Context, deviceName, what string) (str
 	if d.Kind != "firewall" || d.Fw == nil {
 		return "", fmt.Errorf("device %q is not a kind=firewall target", deviceName)
 	}
-	path, ok := fwPaths[what]
-	if !ok {
-		return "", errors.New("what must be status|resource|interfaces|conns|policies|routes")
-	}
-	if strings.TrimSpace(d.Address) == "" {
-		return "", fmt.Errorf("device %q has no address", deviceName)
-	}
-	client := &http.Client{
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, //nolint:gosec — self-signed mgmt certs, same call as redfish
-		Timeout:   30 * time.Second,
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+d.Address+path, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Accept", "application/json")
-	// Token auth first; fall back to the device's Basic credentials.
-	if strings.TrimSpace(d.Fw.ApiTokenEnv) != "" {
-		if tok, ok, _ := secretGetter(SecretKindAPIToken, d.Fw.ApiTokenEnv); ok && tok != "" {
-			req.Header.Set("Authorization", "Bearer "+tok)
+	return m.sealAPIGet(deviceName, "fw "+what, func() (string, error) {
+		path, ok := fwPaths[what]
+		if !ok {
+			return "", errors.New("what must be status|resource|interfaces|conns|policies|routes")
 		}
-	}
-	if req.Header.Get("Authorization") == "" && d.Username != "" {
-		if pwd, ok, _ := secretGetter(SecretKindPassword, d.PasswordEnv); ok {
-			req.SetBasicAuth(d.Username, pwd)
+		if strings.TrimSpace(d.Address) == "" {
+			return "", fmt.Errorf("device %q has no address", deviceName)
 		}
-	}
-	if req.Header.Get("Authorization") == "" {
-		return "", fmt.Errorf("device %q: no API token (firewall.api_token_env) nor device credentials", deviceName)
-	}
-	res, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer res.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(res.Body, fwBodyCap))
-	if err != nil {
-		return "", err
-	}
-	if res.StatusCode != http.StatusOK {
-		return string(body), fmt.Errorf("fortios %s → HTTP %d", path, res.StatusCode)
-	}
-	return string(body), nil
+		client := &http.Client{
+			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, //nolint:gosec — self-signed mgmt certs, same call as redfish
+			Timeout:   30 * time.Second,
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+d.Address+path, nil)
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("Accept", "application/json")
+		// Token auth first; fall back to the device's Basic credentials.
+		if strings.TrimSpace(d.Fw.ApiTokenEnv) != "" {
+			if tok, ok, _ := secretGetter(SecretKindAPIToken, d.Fw.ApiTokenEnv); ok && tok != "" {
+				req.Header.Set("Authorization", "Bearer "+tok)
+			}
+		}
+		if req.Header.Get("Authorization") == "" && d.Username != "" {
+			if pwd, ok, _ := secretGetter(SecretKindPassword, d.PasswordEnv); ok {
+				req.SetBasicAuth(d.Username, pwd)
+			}
+		}
+		if req.Header.Get("Authorization") == "" {
+			return "", fmt.Errorf("device %q: no API token (firewall.api_token_env) nor device credentials", deviceName)
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			return "", err
+		}
+		defer res.Body.Close()
+		body, err := io.ReadAll(io.LimitReader(res.Body, fwBodyCap))
+		if err != nil {
+			return "", err
+		}
+		if res.StatusCode != http.StatusOK {
+			return string(body), fmt.Errorf("fortios %s → HTTP %d", path, res.StatusCode)
+		}
+		return string(body), nil
+	})
 }
 
 // ── Agent tool ───────────────────────────────────────────────────────────────

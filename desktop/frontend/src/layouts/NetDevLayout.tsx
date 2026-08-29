@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { AlertTriangle, Activity, BookOpen, CalendarClock, ClipboardCheck, FileText, HeartPulse, Network, PanelLeft, ScanSearch, ScrollText, Server, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, Activity, BookOpen, CalendarClock, ClipboardCheck, FileText, HeartPulse, MousePointerClick, Network, PanelLeft, ScanSearch, ScrollText, Server, SlidersHorizontal } from "lucide-react";
 import { app, onNetdevHealth, onNetdevLive } from "../lib/bridge";
 import { ProfileSegmented } from "../components/AppChrome";
 import { useConfirm } from "../lib/confirm";
@@ -9,11 +9,15 @@ import { LiveOpsPanel } from "../components/netdev/LiveOpsPanel";
 import { LogPanel } from "../components/netdev/LogPanel";
 import { LogWorkbench } from "../components/netdev/LogWorkbench";
 import { SecWorkbench } from "../components/netdev/SecWorkbench";
+import { CutoverView } from "../components/netdev/CutoverView";
+import { TemplateCard } from "../components/netdev/TemplateCard";
+import { SrvConfCard } from "../components/netdev/SrvConfCard";
 import { HealthPanel } from "../components/netdev/HealthPanel";
+import { BrowserConsolePanel } from "../components/netdev/BrowserConsolePanel";
 import { JobsPanel } from "../components/netdev/JobsPanel";
 import { AlertSetupWizard } from "../components/netdev/AlertSetupWizard";
 import { DockTabs, useDockTabState } from "../components/DockTabs";
-import type { NetDevSettingsView, NetDevDeviceHealth, NetDevFinding, NetDevAggregatedFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph, NetDevBackupVersion } from "../lib/types";
+import type { NetDevSettingsView, NetDevDeviceHealth, NetDevFinding, NetDevAggregatedFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph, NetDevBackupVersion, NetDevCutoverRun } from "../lib/types";
 import { useT } from "../lib/i18n";
 import logoSymbol from "../assets/logo-symbol.png";
 import { Markdown } from "../components/Markdown";
@@ -119,7 +123,7 @@ const SEV_COLOR: Record<string, string> = { info: "var(--accent)", warning: "var
 
 // Audit table helpers — same class vocabulary as the live panel.
 function auditClassLabel(cls: string): string {
-  return { read: "读", write: "写", dangerous: "危险", unknown: "未知", guardrail: "护栏", assess: "评估", proposal: "提案", "proposal-write": "提案写", "proposal-rollback": "提案回滚" }[cls] ?? cls;
+  return { read: "读", write: "写", dangerous: "危险", unknown: "未知", guardrail: "护栏", assess: "评估", proposal: "提案", "proposal-write": "提案写", "proposal-rollback": "提案回滚", job: "作业", cutover: "割接", oob: "带外" }[cls] ?? cls;
 }
 function classColorForAudit(cls: string): string {
   if (cls === "read" || cls === "proposal") return "var(--accent)";
@@ -197,7 +201,7 @@ function benchParam(): "logs" | "sec" | null {
   } catch { return null; }
 }
 
-type DockTab = "live" | "devices" | "context" | "topology" | "findings" | "proposals" | "audit" | "logs" | "health" | "jobs";
+type DockTab = "live" | "devices" | "context" | "topology" | "findings" | "proposals" | "audit" | "logs" | "health" | "jobs" | "browser";
 // Fresh installs open a curated set — 操作实况 leads (supervision first), the
 // rest join via the "+" dropdown or the bottom-nav entries on demand. Stored
 // state always wins after the user customizes.
@@ -211,7 +215,7 @@ const NETDEV_DOCK_TABS_LIVE_SEEDED = "fairpeer.netdevDockTabs.live-seeded";
 // ?dock=audit) so panels are screenshot-testable without driving the tab
 // strip first. ?live=1 stays as a ?dock=live alias. The open-tabs correction
 // effect OPENs this tab instead of correcting away from it.
-const DOCK_PARAM_KEYS: readonly string[] = ["live", "devices", "context", "topology", "findings", "proposals", "audit", "logs", "health", "jobs"];
+const DOCK_PARAM_KEYS: readonly string[] = ["live", "devices", "context", "topology", "findings", "proposals", "audit", "logs", "health", "jobs", "browser"];
 function dockParam(): DockTab | null {
   try {
     if (typeof window !== "undefined" && !window.runtime) {
@@ -375,13 +379,23 @@ export function NetDevLayout({
   const [bench, setBench] = useState<"chat" | "logs" | "sec">(() => (benchParam() === "sec" ? "sec" : benchParam() ? "logs" : "chat"));
   const [logsBenchEverOpened, setLogsBenchEverOpened] = useState(() => benchParam() === "logs");
   const [secBenchEverOpened, setSecBenchEverOpened] = useState(() => benchParam() === "sec");
+  // 割接视图（§7.2）：对话主区里的任务过程视图（不开第四个工作台）。
+  // null = 关闭；"" = 创建表单；其余 = 正在查看的 run id。
+  const [cutoverId, setCutoverId] = useState<string | null>(null);
+  const [cutovers, setCutovers] = useState<NetDevCutoverRun[]>([]);
 
   useEffect(() => {
-    if (bench === "chat") return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setBench("chat"); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (bench !== "chat") {
+        setBench("chat");
+        return;
+      }
+      if (cutoverId !== null) setCutoverId(null);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [bench]);
+  }, [bench, cutoverId]);
 
   const openLogsBench = useCallback(() => {
     setLogsBenchEverOpened(true);
@@ -407,16 +421,18 @@ export function NetDevLayout({
 
   const reload = useCallback(async () => {
     try {
-      const [s, f, p, a] = await Promise.all([
+      const [s, f, p, a, cs] = await Promise.all([
         app.NetDevSettings(),
         app.NetDevFindings(),
         app.NetDevProposals(),
         app.NetDevAuditTail(200),
+        app.NetDevCutovers().catch(() => [] as NetDevCutoverRun[]),
       ]);
       setSettings(s);
       setFindings(f ?? []);
       setProposals(p ?? []);
       setAudit(a ?? []);
+      setCutovers(cs ?? []);
       setErr("");
       setReloadTick(t => t + 1);
     } catch (e) {
@@ -574,6 +590,12 @@ export function NetDevLayout({
   const [triageBusy, setTriageBusy] = useState(false);
   const [weakBusy, setWeakBusy] = useState(false);
   const [triageOneBusy, setTriageOneBusy] = useState("");
+  // §6.2/§10.5 文件下载对话框：设备卡「文件」打开的瞬时对话框（无常驻面板）。
+  const [filePicker, setFilePicker] = useState("");
+  const [filePath, setFilePath] = useState("/var/log");
+  const [fileListing, setFileListing] = useState<string[] | null>(null);
+  const [fileBusy, setFileBusy] = useState("");
+  const [fileNote, setFileNote] = useState("");
   const [cardSeries, setCardSeries] = useState<Record<string, { t: number; v: number }[]>>({});
 
   // 设备卡打开时拉 24h 时序（有数据才显示 sparkline，§10.5 渐进披露）。
@@ -754,6 +776,7 @@ export function NetDevLayout({
     { key: "proposals", label: "提案", group: "需要我决策", badge: pendingCount || undefined, icon: <ClipboardCheck size={13} /> },
     { key: "audit", label: "审计", group: "留档备查", icon: <ScrollText size={13} /> },
     { key: "jobs", label: "作业", group: "留档备查", icon: <CalendarClock size={13} /> },
+    { key: "browser", label: "浏览器", group: "什么状态", icon: <MousePointerClick size={13} /> },
   ];
 
   // Active tab closed (or restored state desyncs) → fall back to the last
@@ -910,7 +933,18 @@ export function NetDevLayout({
             <span className="ndv-bench__hint"><kbd>Esc</kbd> 返回对话</span>
           </div>
         )}
-        <div className="ndv__chat" style={bench !== "chat" ? { display: "none" } : undefined}>{mainNode}</div>
+        <div className="ndv__chat" style={bench !== "chat" ? { display: "none" } : undefined}>
+          {cutoverId !== null ? (
+            <CutoverView
+              runId={cutoverId}
+              proposals={scopedProposals}
+              devices={(settings?.devices ?? []).map(d => ({ name: d.name, vendor: d.vendor }))}
+              onClose={() => setCutoverId(null)}
+            />
+          ) : (
+            mainNode
+          )}
+        </div>
         {logsBenchEverOpened && <LogWorkbench devices={settings?.devices ?? []} onInsertComposer={onInsertComposer} hidden={bench !== "logs"} />}
         {secBenchEverOpened && <SecWorkbench devices={settings?.devices ?? []} hidden={bench !== "sec"} />}
         <div style={bench !== "chat" ? { display: "none" } : { display: "contents" }}>{footerNode}</div>
@@ -975,6 +1009,7 @@ export function NetDevLayout({
         {tab === "logs" && <LogPanel devices={settings?.devices ?? []} dbSources={settings?.dbSources ?? []} onInsertComposer={onInsertComposer} onOpenWorkbench={openLogsBench} />}
 
         {tab === "health" && <HealthPanel onOpenSettings={onOpenSettings} />}
+        {tab === "browser" && <BrowserConsolePanel onInsertComposer={onInsertComposer} />}
 
         {tab === "jobs" && <JobsPanel />}
 
@@ -1056,6 +1091,25 @@ export function NetDevLayout({
                   ))}
                 </div>
               )}
+              {/* 带外启动器（§6.3）：只启动本地浏览器/RDP 客户端，点击入审计。 */}
+              {(selectedDevice.vendor === "windows" || selectedDevice.vendor === "vmware" || selectedDevice.vendor === "redfish" || (selectedDevice.oobUrl ?? "") !== "") && (
+                <>
+                  <div className="ndv__group-label">带外（§6.3）</div>
+                  <div className="ndv__quick-cmds">
+                    <span
+                      className="btn btn--secondary btn--small"
+                      role="button"
+                      title="启动本地工具/浏览器直达带外面（产品内不实现 RDP/VNC）；点击入审计"
+                      onClick={() => void app.NetDevOOBLaunch(selectedDevice.name).then(what => setErr(`[SYS] 带外已启动：${what}`)).catch(e => setErr(String(e)))}
+                    >
+                      {selectedDevice.vendor === "windows" ? "🖥 RDP 直达"
+                        : selectedDevice.vendor === "vmware" ? "ESXi Web UI"
+                        : selectedDevice.vendor === "redfish" ? "BMC Web 控制台"
+                        : "Web 控制台"}
+                    </span>
+                  </div>
+                </>
+              )}
               {(selectedDevice.vendor === "linux" || selectedDevice.vendor === "windows") && (
                 <>
                   <div className="ndv__group-label">主机体检与 Web 服务</div>
@@ -1069,18 +1123,77 @@ export function NetDevLayout({
                     <span
                       className="btn btn--secondary btn--small"
                       role="button"
-                      title="人工终端（§6.1）：PTY 直达设备，全程审计——SSH CLI 设备专用"
-                      onClick={() => void (async () => {
-                        try {
-                          await app.NetDevHumanTTYStart(selectedDevice.name);
-                          setErr(`[SYS] TTY ${selectedDevice.name}: 已连接（xterm 渲染随下批）`);
-                        } catch (e) { setErr(String(e)); }
-                      })()}
+                      title="人工终端（§6.1）：PTY 直达设备，全程审计录制——在主区终端面板开设备页签"
+                      onClick={() => {
+                        // §10.5：设备卡「终端」→ 主区终端面板设备页签。App 层监听
+                        // 该事件并打开面板；PTY 生命周期由 DeviceTerminal 管理。
+                        window.dispatchEvent(new CustomEvent("fairpeer:netdev-terminal", { detail: { device: selectedDevice.name } }));
+                      }}
                     >⌨ 终端</span>
+                    {selectedDevice.vendor === "linux" && (
+                      <span
+                        className="btn btn--secondary btn--small"
+                        role="button"
+                        title="文件下载（§6.2 只读）：白名单路径浏览 + 拉取落盘，全程审计"
+                        onClick={() => setFilePicker(filePicker === selectedDevice.name ? "" : selectedDevice.name)}
+                      >📁 文件</span>
+                    )}
                     {selectedDevice.vendor === "linux" && WEB_QUICK.map(cmd => (
                       <span key={cmd} className="btn btn--secondary btn--small" role="button" onClick={() => void runQuick(selectedDevice.name, cmd)}>{cmd}</span>
                     ))}
                   </div>
+                  {filePicker === selectedDevice.name && (
+                    <div className="ndv__card" style={{ marginTop: 6 }}>
+                      <div className="ndv__card-title">
+                        📁 文件下载（只读） — {selectedDevice.name}
+                        <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: "auto" }} onClick={() => { setFilePicker(""); setFileListing(null); setFileNote(""); }}>关闭</span>
+                      </div>
+                      <div className="ndv__hint">路径限白名单（/var/log 与设备 log_paths 配置项）；拉取后选位置落盘，全程审计。</div>
+                      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                        <input
+                          className="mem-input"
+                          value={filePath}
+                          onChange={(e) => setFilePath(e.target.value)}
+                          placeholder="/var/log 或白名单内目录"
+                          spellCheck={false}
+                          style={{ flex: 1 }}
+                        />
+                        <span className="btn btn--secondary btn--small" role="button" onClick={() => void (async () => {
+                          setFileBusy("browse");
+                          try {
+                            setFileListing(await app.NetDevSFTPBrowse(selectedDevice.name, filePath));
+                            setFileNote("");
+                          } catch (e) { setFileNote(String(e)); }
+                          finally { setFileBusy(""); }
+                        })()}>{fileBusy === "browse" ? "浏览中…" : "浏览"}</span>
+                        <span className="btn btn--primary btn--small" role="button" onClick={() => void (async () => {
+                          setFileBusy("download");
+                          try {
+                            const saved = await app.NetDevSFTPDownload(selectedDevice.name, filePath);
+                            setFileNote(saved ? `已保存到 ${saved}` : "已取消");
+                          } catch (e) { setFileNote(String(e)); }
+                          finally { setFileBusy(""); }
+                        })()}>{fileBusy === "download" ? "下载中…" : "下载"}</span>
+                      </div>
+                      {fileListing && fileListing.length > 0 && (
+                        <div className="ndv__audit-scroll" style={{ maxHeight: 140, marginTop: 6 }}>
+                          {fileListing.map(f => (
+                            <div key={f} className="ndv__audit-row" role="button" style={{ cursor: "pointer" }} onClick={() => setFilePath(f)}>
+                              <span className="ndv__audit-cmd">{f}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {fileNote && <div className="ndv__hint" style={{ marginTop: 6 }}>{fileNote}</div>}
+                    </div>
+                  )}
+                  {/* 配置文件管理（§7.3）：变更区——快照/两版本 diff/环境 Drift；修改走 file-upload 提案。 */}
+                  {selectedDevice.vendor === "linux" && (
+                    <>
+                      <div className="ndv__group-label" style={{ marginTop: 10 }}>配置文件管理（§7.3）</div>
+                      <SrvConfCard device={selectedDevice} peers={(settings?.devices ?? []).filter(d => (d.configPaths ?? []).length > 0)} />
+                    </>
+                  )}
                 </>
               )}
               {(selectedDevice.kind ?? "") === "docker" && (
@@ -1253,12 +1366,40 @@ export function NetDevLayout({
         )}
 
         {tab === "proposals" && (
+          <>
           <div className="ndv__card">
             <div className="ndv__card-title">提案（{scopedProposals.length}）{project && <span style={{ fontWeight: 400, fontSize: 11 }}> · {project.name}</span>}</div>
             {scopedProposals.length === 0 && <div className="ndv__hint ndv__hint--flush">{project ? `>> 项目「${project.name}」暂无提案。` : <>&gt;&gt; NULL_DATA: 无挂起提案。在交互终端向 Agent 下达变更意图 (netdev_propose) 进入审批流。</>}</div>}
             {scopedProposals.slice(0, 10).map(p => <ProposalRow key={p.id} p={p} onDone={() => void reload()} />)}
             <div className="ndv__hint ndv__hint--flush">批准 / 执行 / 回滚在行内直接操作；agent 只能起草，执行权永远在人。</div>
           </div>
+          <div className="ndv__card">
+            <div className="ndv__card-title">
+              🌗 割接（§7.2）{cutovers.some(c => c.status === "running" || c.status === "hold") && <span className="ndv__warn"> · 进行中</span>}
+              <span
+                className="btn btn--secondary btn--small"
+                role="button"
+                style={{ marginLeft: "auto" }}
+                title="倒计时 runbook + 语义验证门 + 回退决策点（步骤引用已批准提案）"
+                onClick={() => { setCutoverId(""); setBench("chat"); }}
+              >发起割接</span>
+            </div>
+            {cutovers.length === 0 && <div className="ndv__hint ndv__hint--flush">把深夜割接从「Word 文档 + 对讲机」变成可执行、可回退、可复盘的流程——结束后自动出前后基线对比报告。</div>}
+            {cutovers.slice(0, 5).map(c => (
+              <div key={c.id} className="ndv__device" style={{ gap: 8, alignItems: "center" }}>
+                <span className={`ndv__dot ${c.status === "running" ? "ndv__dot--warn" : c.status === "done" ? "ndv__dot--ok" : c.status === "hold" ? "ndv__dot--down" : ""}`} style={{ background: c.status === "hold" ? "var(--warn)" : undefined }} />
+                <span className="ndv__device-name" role="button" onClick={() => { setCutoverId(c.id); setBench("chat"); }}>{c.name}</span>
+                <span className="ndv__device-addr">
+                  {c.status === "running" || c.status === "hold"
+                    ? `⏱ ${Math.max(0, Math.round((new Date(c.deadline).getTime() - Date.now()) / 60000))} 分钟`
+                    : c.status}
+                  {(c.steps ?? []).length > 0 ? ` · ${(c.steps ?? []).length} 步` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+          <TemplateCard devices={devices} onDrafted={() => void reload()} />
+          </>
         )}
 
         {tab === "audit" && (

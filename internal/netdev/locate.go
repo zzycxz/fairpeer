@@ -23,14 +23,14 @@ type LocateHit struct {
 
 // LocateResult is the fan-out outcome.
 type LocateResult struct {
-	Target   string       `json:"target"`
-	Hits     []LocateHit  `json:"hits"`
-	Devices  []string     `json:"searched"`
-	Skipped  []string     `json:"skipped,omitempty"`
-	Covered  int          `json:"covered_devices"`
-	Total    int          `json:"total_devices"`
-	BudgetStop bool       `json:"budget_stopped"`
-	Note     string       `json:"note,omitempty"`
+	Target     string      `json:"target"`
+	Hits       []LocateHit `json:"hits"`
+	Devices    []string    `json:"searched"`
+	Skipped    []string    `json:"skipped,omitempty"`
+	Covered    int         `json:"covered_devices"`
+	Total      int         `json:"total_devices"`
+	BudgetStop bool        `json:"budget_stopped"`
+	Note       string      `json:"note,omitempty"`
 }
 
 const locateMaxDevices = 50

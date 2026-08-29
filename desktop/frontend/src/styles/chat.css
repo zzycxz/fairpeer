@@ -2310,6 +2310,23 @@
   background: var(--accent);
   margin-right: 3px;
 }
+/* 设备页签（NETDEV_SPEC_V2 §10.5）：路由徽标配色 + 常亮录制红点。 */
+.terminal-panel__tab--device .terminal-panel__tab-btn { color: var(--accent); }
+.terminal-panel__tab-rec {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: #e5484d;
+  margin-left: 5px;
+  box-shadow: 0 0 4px rgba(229, 72, 77, 0.7);
+}
+.terminal-panel__device {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 6px;
+  background: #12131a;
+}
 .terminal-panel__cwd {
   min-width: 0;
   max-width: 40%;

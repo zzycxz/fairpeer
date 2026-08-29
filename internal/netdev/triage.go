@@ -61,6 +61,10 @@ var windowsTriageBattery = []struct{ name, cmd string }{
 }
 
 // Triage runs the battery on one host and returns the structured report.
+// §4.1 runbook 升级：电池作为 Job 引擎 runbook 执行——每步 30s 超时、
+// on-fail=continue（诊断电池要尽量收全）、预算封顶（墙钟 10 分钟 / 命令数
+// = 电池长度），全程留 job 轨迹（jobs 目录可见、可审计）；步骤语义（expect
+// /retry/断点）对电池默认关闭但引擎已具备——R5 入侵排查向导直接复用。
 func (m *Manager) Triage(ctx context.Context, deviceName string) TriageReport {
 	rep := TriageReport{Device: deviceName, CreatedAt: time.Now()}
 	d, ok := m.cfg.NetDevDeviceByName(deviceName)
@@ -79,35 +83,71 @@ func (m *Manager) Triage(ctx context.Context, deviceName string) TriageReport {
 		rep.Summary = fmt.Sprintf("triage v1 covers linux/windows hosts (vendor=%s)", d.Vendor)
 		return rep
 	}
+
+	def := &Job{
+		Name:      "triage:" + deviceName,
+		CreatedBy: "triage",
+		Budget:    JobBudget{MaxWallSec: 600, MaxCommands: len(battery) + 2, FailStreak: len(battery) + 1},
+	}
 	for _, b := range battery {
-		res := m.Exec(ctx, deviceName, b.cmd)
+		def.Steps = append(def.Steps, JobStep{
+			Name: b.name, Device: deviceName, Command: b.cmd,
+			TimeoutSec: 30, OnFail: JobOnFailContinue, // 收全优先：单项失败不拦电池
+		})
+	}
+	job, err := m.RunJobSync(ctx, def)
+	if err != nil {
+		rep.Summary = "体检 runbook 启动失败：" + err.Error()
+		return rep
+	}
+	for i, b := range battery {
 		s := TriageSection{Name: b.name, Command: b.cmd}
-		if res.Refused {
-			s.Refused = res.Refusal
-		} else {
-			s.Ok = !res.IsError
-			lines := strings.Split(res.Output, "\n")
-			if len(lines) > 400 {
-				lines = lines[:400]
+		if i < len(job.StepState) {
+			st := job.StepState[i]
+			switch {
+			case st.Status == JobStepOK:
+				s.Ok = true
+				s.Lines = capTriageLines(st.Output)
+			case strings.HasPrefix(st.Error, "refused: "):
+				s.Refused = strings.TrimPrefix(st.Error, "refused: ")
+			case st.Status == JobStepFailed:
+				s.Ok = false
+				s.Lines = capTriageLines(st.Output)
+			default: // skipped/pending (watchdog trip mid-battery)
+				note := "电池未跑完（job " + job.Status
+				if job.PauseNote != "" {
+					note += "：" + job.PauseNote
+				}
+				s.Refused = note + "）"
 			}
-			s.Lines = lines
 		}
 		rep.Sections = append(rep.Sections, s)
 	}
 	rep.Anomalies = analyzeTriage(rep)
 	rep.Summary = fmt.Sprintf("体检 %d 项，%d 项异常", len(rep.Sections), len(rep.Anomalies))
+	if job.Status != JobDone {
+		rep.Summary += "；电池未完整跑完（job " + job.Status + "）"
+	}
 	if len(rep.Anomalies) > 0 {
 		_ = SaveFinding(&Finding{
-			Title:    "主机体检：" + deviceName,
-			Severity: "warning",
-			Devices:  []string{deviceName},
-			Detail:   strings.Join(rep.Anomalies, "\n"),
-			Evidence: sectionsEvidence(rep),
+			Title:      "主机体检：" + deviceName,
+			Severity:   "warning",
+			Devices:    []string{deviceName},
+			Detail:     strings.Join(rep.Anomalies, "\n"),
+			Evidence:   sectionsEvidence(rep),
 			Suggestion: "结合「实况」输出复核异常项；若持续恶化，用日志工作台的跨设备搜索追 IOC，必要时走提案隔离。",
-			Source:   "triage:" + deviceName,
+			Source:     "triage:" + deviceName,
 		})
 	}
 	return rep
+}
+
+func capTriageLines(out string) []string {
+	lines := strings.Split(out, "\n")
+	if len(lines) > 400 {
+		lines = lines[:400]
+	}
+	return lines
 }
 
 var triageIPRe = regexp.MustCompile(`(\d{1,3}(?:\.\d{1,3}){3})`)

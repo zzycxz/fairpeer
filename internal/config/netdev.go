@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -17,13 +18,13 @@ import (
 // (NETDEV_SPEC §7.3). Secrets never live here: entries name credential env
 // vars (*_env) whose values sit in the secret store under netdev/*.
 type NetDevConfig struct {
-	Enabled bool `toml:"enabled"`
-	Trap               NetDevTrapConfig `toml:"trap"`
+	Enabled bool             `toml:"enabled"`
+	Trap    NetDevTrapConfig `toml:"trap"`
 	// NotifyWebhook is the Finding notification outlet (NETDEV_SPEC_V2 §5.2):
 	// generic JSON POST; empty = off. min severity: info|warning|critical.
-	NotifyWebhook       string `toml:"notify_webhook"`
-	NotifyMinSeverity   string `toml:"notify_min_severity"`
-	NotifyFormat        string `toml:"notify_format"` // generic | feishu | dingtalk | wecom
+	NotifyWebhook     string `toml:"notify_webhook"`
+	NotifyMinSeverity string `toml:"notify_min_severity"`
+	NotifyFormat      string `toml:"notify_format"` // generic | feishu | dingtalk | wecom
 	// SMTP 通知出口（§5.2 追加）：与 webhook 并行；密码入 secret store。
 	NotifySMTPHost    string   `toml:"notify_smtp_host"`
 	NotifySMTPPort    int      `toml:"notify_smtp_port"`
@@ -31,6 +32,12 @@ type NetDevConfig struct {
 	NotifySMTPPassEnv string   `toml:"notify_smtp_pass_env"`
 	NotifySMTPFrom    string   `toml:"notify_smtp_from"`
 	NotifySMTPTo      []string `toml:"notify_smtp_to"`
+	// NotifyBotDest pushes through the embedded IM gateway (feishu:oc_xxx /
+	// weixin:wxid_xxx / qq:group / telegram:chat) — empty = off.
+	NotifyBotDest string `toml:"notify_bot_dest"`
+	// BriefingPushTime schedules the daily briefing push ("08:00" local;
+	// "" = off) through the notify outlets.
+	BriefingPushTime string `toml:"briefing_push_time"`
 	// NetworkName is the managed network's display name (e.g. "总部生产网") —
 	// the 运维 page's identity anchor, like a coding workspace's project name.
 	NetworkName          string          `toml:"network_name"`
@@ -51,8 +58,8 @@ type NetDevConfig struct {
 	// BackupInterval schedules the config-backup sweep ("1h", "24h"; "" = off):
 	// every tick snapshots every managed device's running-config into the
 	// versioned vault — the drift/history backbone.
-	BackupInterval string `toml:"backup_interval"`
-	Assessment         NetDevAssessment `toml:"assessment"`
+	BackupInterval string           `toml:"backup_interval"`
+	Assessment     NetDevAssessment `toml:"assessment"`
 	// Guardrails are the per-ask / per-tool-call controls (NETDEV_SPEC §6):
 	// they reach DOWN into every LLM turn, not just the mode level.
 	Guardrails NetDevGuardrails `toml:"guardrails"`
@@ -86,7 +93,7 @@ type NetDevConfig struct {
 // NetDevAlertRule is one threshold rule over the health snapshot.
 type NetDevAlertRule struct {
 	Name     string `toml:"name"`
-	Metric   string `toml:"metric"`   // reachable | if_down_count | uptime_reset
+	Metric   string `toml:"metric"`   // reachable | if_down_count | uptime_reset | flap_count | if_down_above_p90
 	Op       string `toml:"op"`       // >= | <= | ==
 	Value    int64  `toml:"value"`    // reachable: 1=up 0=down; uptime_reset: 1=reboot detected
 	Severity string `toml:"severity"` // info | warning | critical
@@ -100,7 +107,7 @@ type NetDevTrapConfig struct {
 
 // NetDevSyslogConfig bounds the passive syslog receiver.
 type NetDevSyslogConfig struct {
-	Port     int  `toml:"port"`      // UDP listen port; 0 = off
+	Port       int `toml:"port"`         // UDP listen port; 0 = off
 	RatePerMin int `toml:"rate_per_min"` // per-device ingest cap (0 => 600)
 }
 
@@ -144,9 +151,9 @@ type NetDevDBSource struct {
 
 // NetDevPreset is one saved diagnostic battery.
 type NetDevPreset struct {
-	Name    string   `toml:"name"`
+	Name     string   `toml:"name"`
 	Commands []string `toml:"commands"`
-	Vendors []string `toml:"vendors"` // empty = all vendors
+	Vendors  []string `toml:"vendors"` // empty = all vendors
 }
 
 // NetDevGuardrails — fine-grained, per-interaction controls:
@@ -170,36 +177,45 @@ type NetDevGuardrails struct {
 
 // NetDevDevice is one managed network device (router/switch/firewall).
 type NetDevDevice struct {
-	Name          string      `toml:"name"`
-	Vendor        string      `toml:"vendor"` // huawei | cisco | zte
-	OS            string      `toml:"os"`     // vrp8 | vrp5 | ios | iosxe | zxr10 …
-	Model         string      `toml:"model"`
-	Address       string      `toml:"address"`
-	Port          int         `toml:"port"` // 0 => 22
-	Via           []string    `toml:"via"`  // ordered hop names (route to the device)
-	Group         string      `toml:"group"`
-	Protocols     []string    `toml:"protocols"` // priority order: ssh, telnet, netconf
-	Username      string      `toml:"username"`
-	PasswordEnv   string      `toml:"password_env"`
-	IdentityFile  string      `toml:"identity_file"`
-	PassphraseEnv string      `toml:"passphrase_env"`
-	UseSSHConfig  bool        `toml:"use_ssh_config"`
-	Encoding      string      `toml:"encoding"` // auto | utf-8 | gbk
-	AllowTelnet   bool        `toml:"allow_telnet"`
-	SNMP          *NetDevSNMP `toml:"snmp"`
+	Name          string   `toml:"name"`
+	Vendor        string   `toml:"vendor"` // huawei | cisco | zte
+	OS            string   `toml:"os"`     // vrp8 | vrp5 | ios | iosxe | zxr10 …
+	Model         string   `toml:"model"`
+	Address       string   `toml:"address"`
+	Port          int      `toml:"port"` // 0 => 22
+	Via           []string `toml:"via"`  // ordered hop names (route to the device)
+	Group         string   `toml:"group"`
+	Protocols     []string `toml:"protocols"` // priority order: ssh, netconf（telnet 已裁决删除，§6.4）
+	Username      string   `toml:"username"`
+	PasswordEnv   string   `toml:"password_env"`
+	IdentityFile  string   `toml:"identity_file"`
+	PassphraseEnv string   `toml:"passphrase_env"`
+	UseSSHConfig  bool     `toml:"use_ssh_config"`
+	Encoding      string   `toml:"encoding"` // auto | utf-8 | gbk
+	// OOBURL is the 带外启动器 deep link (NETDEV_SPEC_V2 §6.3): ESXi/堡垒/BMC
+	// Web UI entry. FairPeer only launches the local browser/RDP client — no
+	// RDP/VNC protocol in-product; the click is audited.
+	OOBURL string      `toml:"oob_url"`
+	SNMP   *NetDevSNMP `toml:"snmp"`
 	// LogPaths whitelists additional log-directory roots for this device
 	// (e.g. "/opt/app/logs", "/usr/local/tomcat/logs"). tail/head/grep/wc on
 	// paths under /var/log or one of these roots classify as read — the
 	// log-source path whitelist that feeds netdev_log_read and the classifier
 	// bypass. Human-registered only, like every inventory field.
 	LogPaths []string `toml:"log_paths"`
+	// ConfigPaths whitelists server config-file roots for §7.3 配置文件管理
+	// (e.g. "/etc/nginx"): snapshot/diff/drift reads and restore-verify
+	// proposal steps are confined to these roots — same authorization model as
+	// LogPaths, human-registered only. Edits NEVER happen in-product: change
+	// products are submitted as file-upload proposal steps.
+	ConfigPaths []string `toml:"config_paths"`
 	// Kind is the DATA-PLANE discriminator (NETDEV_SPEC_V2 §2.1): "" derives
 	// from vendor (backward compatible — existing devices unchanged);
 	// "docker" / "k8s" enable their API clients below. vendor stays the CLI
 	// driver story for network gear.
-	Kind   string              `toml:"kind"` // "" | docker | k8s | firewall
-	Docker *NetDevDockerConfig `toml:"docker,omitempty"`
-	K8s    *NetDevK8sConfig    `toml:"k8s,omitempty"`
+	Kind   string                `toml:"kind"` // "" | docker | k8s | firewall
+	Docker *NetDevDockerConfig   `toml:"docker,omitempty"`
+	K8s    *NetDevK8sConfig      `toml:"k8s,omitempty"`
 	Fw     *NetDevFirewallConfig `toml:"firewall,omitempty"`
 }
 
@@ -219,7 +235,7 @@ type NetDevDockerConfig struct {
 type NetDevK8sConfig struct {
 	KubeconfigEnv string   `toml:"kubeconfig_env"` // secret-store key holding the kubeconfig YAML
 	Context       string   `toml:"context"`        // pinned; "" = kubeconfig's current-context
-	Namespaces    []string `toml:"namespaces"`    // allowed namespaces; empty = all
+	Namespaces    []string `toml:"namespaces"`     // allowed namespaces; empty = all
 }
 
 // NetDevFirewallConfig is the kind=firewall data plane (NETDEV_SPEC_V2 §2.6):
@@ -388,6 +404,9 @@ func ValidateNetDev(nd NetDevConfig) error {
 		if strings.TrimSpace(d.Name) == "" {
 			return fmt.Errorf("netdev device: name is required")
 		}
+		if !ndNameValid(d.Name) {
+			return fmt.Errorf("netdev device %q: name must be one plain token (letters/digits/_ . @ -, ≤64 chars) — it becomes file names in the backup/golden vaults", d.Name)
+		}
 		if seenDevices[d.Name] {
 			return fmt.Errorf("netdev device %q: duplicate name", d.Name)
 		}
@@ -423,11 +442,27 @@ func ValidateNetDev(nd NetDevConfig) error {
 				return err
 			}
 		}
+		switch d.Kind {
+		case "", "docker", "k8s", "firewall":
+		default:
+			return fmt.Errorf("netdev device %q: kind must be docker|k8s|firewall (empty = derive from vendor)", d.Name)
+		}
+		if d.Kind == "k8s" {
+			if d.K8s == nil || strings.TrimSpace(d.K8s.KubeconfigEnv) == "" {
+				return fmt.Errorf("netdev device %q: kind=k8s needs k8s.kubeconfig_env (secret-store key holding the kubeconfig)", d.Name)
+			}
+		}
+		if d.Kind == "firewall" && d.Fw == nil {
+			return fmt.Errorf("netdev device %q: kind=firewall needs a [firewall] block (api_token_env)", d.Name)
+		}
 	}
 	seenHops := map[string]bool{}
 	for _, h := range nd.Hops {
 		if strings.TrimSpace(h.Name) == "" {
 			return fmt.Errorf("netdev hop: name is required")
+		}
+		if !ndNameValid(h.Name) {
+			return fmt.Errorf("netdev hop %q: name must be one plain token (letters/digits/_ . @ -, ≤64 chars)", h.Name)
 		}
 		if seenHops[h.Name] {
 			return fmt.Errorf("netdev hop %q: duplicate name", h.Name)
@@ -463,6 +498,22 @@ func ValidateNetDev(nd NetDevConfig) error {
 	if nd.Syslog.Port < 0 || nd.Syslog.Port > 65535 {
 		return fmt.Errorf("netdev syslog: port out of range")
 	}
+	if nd.BriefingPushTime != "" {
+		var h, m int
+		if n, _ := fmt.Sscanf(nd.BriefingPushTime, "%d:%d", &h, &m); n != 2 || h < 0 || h > 23 || m < 0 || m > 59 {
+			return fmt.Errorf("netdev: briefing_push_time must be HH:MM (e.g. 08:00), got %q", nd.BriefingPushTime)
+		}
+	}
+	switch nd.NotifyFormat {
+	case "", "generic", "feishu", "dingtalk", "wecom":
+	default:
+		return fmt.Errorf("netdev notify: format must be generic|feishu|dingtalk|wecom")
+	}
+	switch nd.NotifyMinSeverity {
+	case "", "info", "warning", "critical":
+	default:
+		return fmt.Errorf("netdev notify: min_severity must be info|warning|critical")
+	}
 	if nd.Syslog.Port > 0 && nd.Syslog.Port < 1024 {
 		return fmt.Errorf("netdev syslog: privileged ports (<1024) are not supported — use a high port and forward from the device (e.g. 5140)")
 	}
@@ -476,7 +527,7 @@ func ValidateNetDev(nd NetDevConfig) error {
 		}
 		seenRules[r.Name] = true
 		switch r.Metric {
-		case "reachable", "if_down_count", "uptime_reset":
+		case "reachable", "if_down_count", "uptime_reset", "flap_count", "if_down_above_p90":
 		default:
 			return fmt.Errorf("netdev alert_rule %q: metric must be reachable|if_down_count|uptime_reset", r.Name)
 		}
@@ -504,9 +555,9 @@ func ValidateNetDev(nd NetDevConfig) error {
 			return fmt.Errorf("netdev db_source %q: host is required", s.Name)
 		}
 		switch s.Type {
-		case "mysql", "postgres", "redis":
+		case "mysql", "postgres", "redis", "mongodb", "mssql", "clickhouse", "elasticsearch":
 		default:
-			return fmt.Errorf("netdev db_source %q: type must be mysql|postgres|redis", s.Name)
+			return fmt.Errorf("netdev db_source %q: type must be mysql|postgres|redis|mongodb|mssql|clickhouse|elasticsearch", s.Name)
 		}
 		if s.Port < 0 || s.Port > 65535 {
 			return fmt.Errorf("netdev db_source %q: port %d out of range", s.Name, s.Port)
@@ -522,6 +573,13 @@ func ValidateNetDev(nd NetDevConfig) error {
 	}
 	return nil
 }
+
+// ndNameRe bounds inventory entry names: they are spliced into FILE PATHS
+// (backups/<name>@<nanos>.json, golden/<name>.conf) — slashes, "..", and
+// separators must never reach the filesystem layer.
+var ndNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$`)
+
+func ndNameValid(name string) bool { return ndNameRe.MatchString(strings.TrimSpace(name)) }
 
 func ndHopByName(nd NetDevConfig, name string) (NetDevHop, bool) {
 	for _, h := range nd.Hops {

@@ -161,7 +161,7 @@ func TestProposalPartialFreeze(t *testing.T) {
 		Intent: "two devices, second fails",
 		Steps: []ProposalStep{
 			{Device: "sw1", Commands: []string{"vlan 100"}, Rollback: []string{"undo vlan 100"}},
-			{Device: "sw1", Commands: []string{"reboot"}, Rollback: []string{"no-op"}}, // simulator rejects: error output
+			{Device: "sw1", Commands: []string{"reboot"}, Rollback: []string{"no-op"}}, // simulator rejects: error output; §7.1 dangerous verb ⇒ confirm2
 		},
 	}
 	if err := m.ValidateProposal(p); err != nil {
@@ -170,7 +170,7 @@ func TestProposalPartialFreeze(t *testing.T) {
 	if err := SaveProposal(p); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.ApproveProposal(p.ID, false); err != nil {
+	if _, err := m.ApproveProposal(p.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	part, err := m.ExecuteProposal(context.Background(), p.ID)
