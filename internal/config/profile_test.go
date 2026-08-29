@@ -142,7 +142,7 @@ func TestPluginHiddenByProfile(t *testing.T) {
 	// Builtin office/netdev profiles hide the coding-domain MCPs…
 	for _, p := range builtinProfiles() {
 		if p.Name == ProfileCowork || p.Name == ProfileNetDev {
-			for _, name := range []string{"codegraph", "context7"} {
+			for _, name := range []string{"codegraph"} {
 				if !PluginHiddenByProfile(&p, name) {
 					t.Fatalf("%s profile must hide coding-domain MCP %q", p.Name, name)
 				}
@@ -154,7 +154,7 @@ func TestPluginHiddenByProfile(t *testing.T) {
 	if dev.Name != ProfileDev {
 		t.Fatalf("expected first builtin profile to be dev, got %s", dev.Name)
 	}
-	if PluginHiddenByProfile(&dev, "codegraph") || PluginHiddenByProfile(&dev, "context7") {
+	if PluginHiddenByProfile(&dev, "codegraph") {
 		t.Fatal("dev profile must not hide coding-domain MCPs")
 	}
 	// User-installed servers are unaffected — the whole point of HiddenPlugins
@@ -205,7 +205,7 @@ func TestCoworkPromptAddonDropsDisabledRows(t *testing.T) {
 	if strings.Contains(filtered, `run_skill("ppt-auto"`) {
 		t.Fatal("disabled skill ppt-auto still has a routing row in the filtered add-on")
 	}
-	for _, name := range []string{"email-auto", "browser-auto", "rag-auto"} {
+	for _, name := range []string{"email-auto", "browser-auto", "knowledge-auto"} {
 		if !strings.Contains(filtered, `run_skill("`+name+`"`) {
 			t.Fatalf("filtering ppt-auto wrongly removed unrelated routing row for %q", name)
 		}

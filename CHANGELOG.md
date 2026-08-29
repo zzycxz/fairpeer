@@ -7,6 +7,115 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### 修复：模板/提案渲染层空数组崩溃（null.length）
+
+- **现象**：打开「提案」页签即 React 崩溃 `TypeError: Cannot read properties of null (reading 'length')`。**根因**：Go 的 nil 切片序列化为 JSON `null`（非 `[]`）——只用设备属性变量、无用户变量的模板 `vars` 为 null，`TemplateCard` 的 `t.vars.length` 直接崩；同类隐患：结构化提案步骤（k8s-apply 等）`commands` 为 null 时 `s.commands.join` 崩。**修复**：前端全部可空数组访问加 `?? []` 守卫（TemplateCard 变量表/预览、ProposalCenter 详情、stepSummary、CutoverView 步骤清单、提案页签割接卡步数），Go 侧 `Template.Vars` 补 `omitempty`（无键 + 前端兜底双保险）；前端 dist 已重建（新 hash 资产），桌面 `go build` 嵌入验证通过
+- 工程：`.gitignore` 增 `/desktop/e2e-*.log` 与 `/desktop/*-e2e.exe`（e2e 调试产物防再入状态）；`desktop/test.exe` 仍在 git 跟踪中（历史遗留，建议下个提交 `git rm --cached`）
+
+### 测试套件接线：11 个孤儿测试文件接入 `npm run test`
+
+审计发现 `src/__tests__/` 有 11 个测试文件从未接入测试脚本——`npm run test` 不会跑到它们（其中 graph-toolbar-filter 等 5 个 import 自 vitest，被 tsx 直跑会直接崩）。已按运行器正确接线：6 个 tsx 脚本式（at-matches/browser-mirror/mermaid-export-logic/mermaid-logic/skill-doc/toolcard-state）进 tsx 链，5 个 vitest 式（graph-toolbar-filter/import-modal/rag-panel-layout/template-asset-card/template-empty）进 vitest 列表。`test` 与 `test:all` 同步更新；全量 22 个 tsx 套件 + 8 个 vitest 文件（37 测试）通过、退出码 0
+
+### 稳定性修复：启动恢复崩溃守卫 + 退出 panic 恢复
+
+- **恢复标签页时 React 崩溃**（`state.items` 在 `useController` 水合期间短暂为 null，预览自动检测 effect 直接读 `.length` 即崩——真机 E2E 复现一次）：effect 加空值守卫
+- **退出时 Go panic**：窗口销毁与 `saveWindowStateSync` 竞态时 winc `ScaleToDefaultDPI` 除零（DPI 为 0）导致整个进程 panic 退出。几何持久化为 best-effort：recover 守卫 + 警告日志，保留上次保存的状态
+
+### Mermaid 图导出：单图 PNG/SVG + 会话导出成图
+
+对话流里的 mermaid 以前只能屏幕上看——单图无导出按钮，会话导出（PNG/PDF/HTML）时 mermaid 围栏按高亮源码文本处理，与线上渲染不一致。
+
+- **单图导出**：MermaidViewer 头部加 PNG/SVG 按钮。核心在 `lib/mermaidExport.ts`：导出前以 `htmlLabels:false` 指令重渲染一版（HTML 标签走 foreignObject，经 `<img>` 落 canvas 在 Chromium 下整体空白；纯 SVG text 则稳定），光栅化前钉死显式宽高并剥 `max-width`（否则 SVG 按 0×0 加载画不出任何东西）；PNG 2x 缩放，SVG 插底色矩形；背景读自屏幕卡片（WYSIWYG）
+- **会话导出成图**：`renderExportSurface` 前把 mermaid 围栏预光栅化为 data-URL 图片（`inlineMermaidFences`），PNG/PDF/HTML 三格式同时受益；失败回退原代码文本形态
+- 测试：`mermaidLogic`（围栏收集/替换/SVG 尺寸解析/文件名清洗）+ `mermaidExport`（内容规范化校验/朴素回退）纯逻辑单测
+
+### 浏览器镜像面板：办公 dock 实时呈现 agent 驱动的浏览器
+
+补上"注释里设计了、代码从未实现"的断链：browseruse 边车本就在 SSE 里流式发截图事件，Go 侧收到即丢、镜像面板不存在。
+
+- **内核帧源**（browser.go）：所有 chromedp 动作经 `runBrowserAction` 咽喉点，成功后 `mirrorAfterAction` 截视口图（PNG data URL + 当前 URL）；会话 open/attach/close 发生命周期状态；`browser_auto` 转发边车截图帧与 run 起止（含失败路径）
+- **传输**：desktop 注册 `SetBrowserPanelSink` → Wails 事件 `browser:mirror`
+- **前端**：`lib/browserMirror.ts` 模块级 store（纯 reducer + `useSyncExternalStore`，订阅挂 App 顶层——面板关着不丢流）；CoworkDock 新「浏览器」tab（MonitorPlay 图标），显示来源徽章（浏览器工具/自主浏览）、运行呼吸灯、当前 URL、最新截图；活动开始自动开 dock，手动关闭后同轮不再弹（anti-nag，复用预览 dock 模式），新 run 重置
+- 测试：store 状态机 22 断言（生命周期/帧更新/活动起点判定）；内核 sink 转发 nil 安全测试
+
+### 运维「浏览器」控制台：手动驱动 + 录制操作沉淀为技能（skill ⊃ 工作流）
+
+右侧栏产物轴新成员：运维 dock「浏览器」页卡（ZCode 胶囊风子页卡 **交互/录制**）；办公 dock 的实时镜像见上条。工作流的容器不另建引擎——录制的操作经 AI 理解直接生成 SKILL.md 落入技能目录（步骤表=工作流，skill ⊃ 工作流），`/名称` 即刻调用，CapabilitiesPanel 统一管理。
+
+- **交互子页**：会话开/关（独立可见 Chrome tab，支持 CDP 附加）· URL 前往 · 无障碍树元素列表（ref/CSS 双目标，点选即用）· 目标+文本输入（回车开关）/点击 · 提取（复制/交给 AI 走 `onInsertComposer`）· 操作日志 · 折叠画面预览（复用镜像流）。11 种原语（navigate/click/type/key/scroll/select/upload/wait/extract/screenshot/evaluate）全部直调既有 agent 工具——`internal/tool/builtin/browserconsole.go` 单例会话槽包装，零改动现有路径；boot 使 netdev profile 也注册浏览器工具
+- **录制子页**：CDP `AddBinding`+注入脚本录制手动操作（跨导航/iframe 持久；CSS+AX 双目标；密码占位不落盘），实时"动词+元素名"步骤流 + 计时/计数；停止后**三道去噪**（页面级输入去抖 → 确定性规则：同目标连点折叠/无效点击丢弃/A→B→A 往返折叠，纯函数单测 → AI 语义归纳）且**过滤透明**（「已过滤 N 条」可展开核对）→ AI 理解生成**四段式 SKILL.md**（何时使用/步骤表/注意事项/验证；借 Hermes 反思模板与通用性规则：{{参数}}化、无用户名/密钥/绝对路径），模型不可用自动退化朴素转换并明示
+- **技能编辑器**（草稿与已有技能共用）：结构化⇄源码双模式——**防丢失护栏**：解析失败或有不可往返内容时拒绝切换、保持源码模式（绝不静默覆盖手改）；步骤行内联编辑（类型/目标/值/上移下移/删除/插入）· {{参数}}默认值 · 原始录制对照 · **试运行**（逐步 ✓/⟳/✕，失败即停）· 保存校验（frontmatter/同名覆盖需确认）
+- **真机 E2E 驱动的修复**（界面自动化全链路验收：打开浏览器→录制百度搜索→生成→编辑→落盘）：① chromedp `ListenTarget` handler 持锁死锁事件循环（录制安装 60s 超时并堵死会话全部命令）→ 原子标志+专用短锁+Run 出锁+15s 快失败；② AI 草稿 markdown 围栏/前导文字致编辑器拒收 → 生成侧规范化+合规校验回退；③ 朴素模板空 name（中文提示清洗为空）→ 兜底名；④ 模型解析链增「活动标签当前模型」与 `ResolveModelWithFallback("")` 终端回退两级（静态配置全空而会话在跑/恢复标签无 model 字段的场景）；⑤ 录制 label 对表单控件 name 属性优先于 placeholder（百度动态热搜词污染步骤名）。桌面层 `browser_console_app.go`：24 个绑定 + 生成器 + 试运行事件 `browser:trial`
+- 验证：内核/桌面 build/vet/test 全绿（过滤规则/内容规范化/朴素模板/技能释放纯逻辑测试）；前端 tsc/CSS 校验/vite build；SKILL.md⇄结构化往返 26 断言；技能落盘 `~/.fairpeer/skills/browser-skill/SKILL.md` 真机确认
+
+### netdev R4 尾项：§4.1 体检电池升级为 Job 引擎 runbook
+
+- **「作业」页签新增「诊断作业」卡**：R4 Job 引擎此前只有桥方法无前端入口——暂停的 runbook（断点/熔断/on-fail=pause 冻结）无处可见也无法恢复。现在作业页签第二卡展示 netdev runbook 轨迹（体检电池等）：状态/步骤进度（✅❌⬜）/活跃时长/暂停原因，running 可暂停/终止、paused 可**从断点继续**或终止；进行中 3s 自轮询。JobsPanel 拆为双卡组件（定时任务 + 诊断作业）
+
+- **Triage 电池走 Job 引擎**（§4.1 原文「v1 为顺序执行；R4 的 Job 引擎落地后升级为带 expect/timeout/断点的 runbook」）：主机体检（linux 11 项 / windows 5 项电池）改为构造 Job runbook 经引擎执行——每步 30s 超时、on-fail=continue（诊断电池要尽量收全，单项失败不拦整体）、预算封顶（墙钟 10 分钟、命令数=电池长度、熔断阈值=电池长度+1），**每次体检留 job 轨迹**（jobs 目录持久化，`triage:<设备>` 命名、CreatedBy=triage，审计可见）；expect/retry/断点语义电池默认关闭但引擎已具备（R5 入侵排查向导直接复用同一路径）；报告组装从 job 步骤状态映射——refused/设备错误/未跑完（watchdog 中断）三态分段呈现，Summary 标注电池完整性
+- **Job 引擎增 `RunJobSync`**：启动 runbook 并阻塞至 runner 退出（终态/暂停/ctx 取消时 abort）——同步调用方（体检、巡检类）骑上引擎获得全部步骤语义与预算，无需异步交互；runner 增加 done 通道支撑同步等待
+- 测试：真 SSH 全链路（bash 提示符 sim 上跑完 11 项电池、job 轨迹落盘、on-fail=continue 收全、报告分段与电池一一对应）；jobs 引擎全量回归绿
+
+### netdev R4 对账补差：§7.1 两处规格偏差修正
+
+- **执行前在线检查改「暂停等人确认」**（§7.1 原文：发现其他在线人员则**暂停**并列出会话，人确认后才继续——此前实现只记 Note 便继续执行）：发现会话即拦下执行（状态保持 approved、无半执行），会话清单记入提案备注并提示再次点击「执行」确认；再次执行看到**同样清单**视为确认，会话有变化则重新要求确认。配套修复一个会话层陈年毛刺：`OpenSession` 建立后**排空 shell 横幅再返回**（此前首条命令输出混入 banner——`who` 的行数统计首跑/次跑不一致）。测试：真 SSH 全链路（首次拦截/二次放行/状态不落 executing）+ 网络设备不受影响的回归
+- **观察期劣化检测真正接线**（§7.1 原文：观察期内持续对比健康信号，劣化超阈值 → 最高级 Finding + 附「一键发起回滚提案」——此前注释声称由健康轮询承担但无接线）：提案 done→watching 时采集目标设备健康基线（ifDown 计数/-1 不可达，仅 SNMP 设备有信号），健康轮询每周期对比 watching 提案——可达→失联或 down 口增长即最高级 Finding（Source=watch:\<提案ID\>，附回滚指引——回滚仍需人按）+ WatchNote 只告警一次；基线即不可达不误报「仍不可达」。测试：劣化触发/不重复告警/恢复不告警/坏基线豁免
+
+### netdev R4 完全收官：批量模板 + 服务器配置文件管理 + 带外启动器 + Telnet 裁决
+
+R4 行剩余四小件落地——至此 §九 R4 批次 10 项全部完成。
+
+- **批量模板**（§7.2，`internal/netdev/template.go`）：模板 = 步骤序列 + 变量（`{{name}}/{{address}}/{{hostname}}/{{vendor}}/{{group}}` 设备属性免填）；`TemplateRender` 逐台 dry-run 预览——每条渲染产物标注分类器判定与危险动词，**无任何副作用**；`TemplateApply` 生成一份多设备步骤的提案草稿，滚动执行/首败冻结/回滚矩阵（每台一行 applied/rolled/pending）全部沿用提案既有管线；**变量值白名单字符集**（附录 B-10：Unicode 字母数字 + `_.:/@%+()-` 与空格——中文描述合法，`;|&`$\` 等元字符与换行全拒）；未知占位符在预览标不可用、apply 整批拒绝（不静默空渲染）；只读组目标拒收。前端 `TemplateCard` 落「提案」页签（§10.6 家 = 提案页签内模板入口）：新建表单（变量/命令/回滚/目标勾选）→ 变量填充 → 逐台预览 → 生成草稿进既有审批流
+- **服务器配置文件管理**（§7.3，`internal/netdev/srvconf.go`）：设备新增 `config_paths` 白名单（log_paths 同款授权模式，仅人工登记）；快照（`SrvConfSnapshot`，版本入 `srvconf/` 备份库，路径哈希分组）→ 两版本 UnifiedDiff（复用 internaldiff）→ **环境 Drift**（`SrvConfDrift`：同路径跨设备逐一读取对比，same/drift/absent/error 四态）；**修改不发生在产品内**——编辑产物以 file-upload 提案提交（§7.1 已落地）；**restore-verify 提案步骤类型**：把快照恢复到指定 staging 目标并跑验证读（`nginx -t` 类）证明「备份真的能恢复」——**生产目标（与备份源同组/同设备）拒绝作为演练接收方**，接收方须在自己的 config_paths 白名单该路径，回滚恢复接收方原文件。测试 4 组全绿（快照 diff/白名单拒绝/Drift 判读/恢复演练 e2e 含回滚/安全门）。前端设备卡「变更」区 `SrvConfCard`：拍快照/点选两版本 diff/勾选对照设备跑 Drift，附「修改走提案」指引
+- **带外启动器**（§6.3，轻量）：设备新增 `oob_url` 深链字段；`NetDevOOBLaunch` 桥——windows 目标启动 `mstsc /v:`（非 Windows 宿主降级为提示）、vmware→`https://addr/ui`、redfish→BMC Web、任意设备可配 oob_url；**产品内不实现 RDP/VNC 协议**，只启动本地工具与浏览器，点击入审计（class=oob，审计表新增「带外」标签）；设备卡新增「带外」区按钮
+- **Telnet 裁决执行**（§6.4，默认「删」）：`allow_telnet` 字段从 config/桌面视图/前端类型/表单/示例 TOML 全链路移除；protocols 注释更新为 ssh/netconf——现代环境 telnet 管理面收敛而非纵容，确需带外走 §6.3 启动器
+- 设置设备表单同步新增「配置路径白名单」与「带外入口」两个字段；bridge/mocks 全量补齐（Template*/SrvConf*/OOBLaunch）
+- 验证：netdev+config 全量 `--count=1`、desktop build/vet/test、前端 tsc/`npm run test` 全绿
+
+### netdev R4 收官：Job 引擎 + 结构化提案步骤 + 人工终端全链路 + 割接模式
+
+R4 剩余四件（规格 `docs/NETDEV_SPEC_V2.md` §7.1/§7.2/§6.1 + v1 §10.5 C 批）一次落地；至此 R4 验收线全通（设备卡点开终端直接敲命令且可审计回放；提案执行前自动提示在线人员（e2adee8 已落）；割接 runbook 以倒计时+验证门跑完全程；nginx.conf 变更走 file-upload 提案含备份一键回滚）。
+
+- **Job 引擎**（`internal/netdev/job.go`，v1 C 批）：多步骤诊断 runbook harness——步骤带 `expect`（正则门）/`timeout`/`retries`/`on_fail`（pause|abort|continue，默认 pause 冻结等人）与 `pause_before` 断点（恢复经 `BreakpointOK` 不重复拦截）；watchdog 三预算（墙钟默认 30m、命令数默认 200、连续失败熔断默认 3）超限即暂停；全部执行走 `m.Exec` 只读密封（Job 不给分类器开任何旁路，写动作仍只存在于提案）；持久化 jobs 目录可断点续跑；测试 6 项（完成/断点/失败暂停+终止/预算熔断/expect 失配/校验）全绿
+- **结构化提案步骤**（§7.1，`proposal_steps.go` + `proposal.go` 判别联合）：`cli`（现状，向后兼容）之外四种——`k8s-apply`（yaml 全文 → server-side apply PATCH；备份 = apply 前 live 对象 JSON，回滚 PUT 时 resourceVersion 钉住漂移即拒；Secret 对象与白名单外 Kind 拒收）、`sql-migration`（目标 = `[[netdev.db_sources]]`，**down 脚本必填缺则不可提交**；逐句执行逐句审计，v1 限 mysql/postgres/mssql）、`file-upload`（linux SSH 目标；备份现文件 → `base64 -d` 流式上传 → sha256 校验；声明 checksum 拨号前即核验；回滚恢复备份或删除新增文件）、`cert-replace`（证书对上传 + reload 命令，回滚恢复旧对 + reload）；**危险动词扫描**（delete/drop/truncate/undo/reboot/scale-down… 命中即强制 confirm2，回滚计划豁免）——旧 `undo vlan` 回滚不再误报；执行/回滚循环按类型分发，全部动作审计 `proposal-write`/`proposal-rollback`；注入防线：上传路径白名单字符集（发布门禁 #2）+ 测试覆盖引号/`$()` 走私
+- **人工终端 v2**（§6.1，`humantty.go` 重写）：真 SSH shell 通道——独立 transport client（不随诊断会话 idle reaper 抖动）+ PTY（xterm-256color 120×30，`WindowChange` 支持 resize）；输出流式回前端（`netdev:humantty` Wails 事件），UTF-8 截断序列跨 chunk 保全（GBK 回退同诊断会话策略）；**共享 VTY 预算**（`vtySnapshotLocked` 计入人工终端，占满即拒）；全程录制（8MB 尾环 → ANSI 剥离 + 脱敏落 `netdev/humantty/*.txt`）+ 起止审计（含字节量与录制路径）；紧急停止联动（`KillAllConnections` 杀人工终端）；e2e 三测（真 SSH 全链路：输出流/按键/录制；预算拒绝；解码器）
+- **人工终端前端**（§10.5）：`DeviceTerminal`（@xterm/xterm，重挂先查 status 不重复开 PTY）挂进主区终端面板**设备页签**（路由徽标 + 常亮 REC 红点，与本地页签同条可共存）——App 层 `fairpeer:netdev-terminal` 事件路由（与 `netdev-bench` 同款），设备卡「⌨ 终端」按钮直达；bridge 增 `onNetdevHumanTTY` 订阅 helper + 全套 mock（浏览器开发可独立渲染）
+- **割接模式**（§7.2，`internal/netdev/cutover.go`）：runbook = 已批准提案步骤 + 只读命令步骤，每步可挂**语义验证门**（正则须**持续** SustainSec 连续匹配，中断重计窗）与 `decision_point` 回退决策点；**总倒计时**耗尽即 hold 不再执行；割接前后自动各拍一次基线快照（复用配置备份库），结束产出前后 unified diff 对比报告（可导出 .md）；决策永远人按——hold 时 [继续] [回退] 并排，回滚走提案回滚全链路（首败冻结/备份恢复/审计）；测试 5 项（全链路/决策点回退/门失败/倒计时耗尽/未批准提案拒启动）全绿；前端 `CutoverView`（对话主区任务过程视图，不开第四工作台，Esc 返回；秒级倒计时 + 步骤清单 + hold 决策条 + 报告导出），入口在「提案」页签「🌗 割接」卡
+- **文件通道 UI 收口**（§6.2/§10.5）：补 `NetDevSFTPDownload/Browse` 桌面桥（b4ba7e8 前端已声明、后端欠账——下载走系统保存对话框 + 审计）；设备卡「📁 文件」下载对话框（白名单路径浏览/拉取/落盘位置选择，无常驻面板）
+- **提案中心结构化展示**：步骤类型徽标 + 按类型的载荷详情（k8s manifest/Up-Down SQL/上传路径与 reload/down 缺失⚠警示/危险动词强制确认标记）+ 观察期（watching）状态行；纯逻辑抽 `proposalStepFormat.ts` 进 tsx 测试（10 断言：类型摘要/降级/标签）
+- 验证：netdev+transport 全量 `--count=1`、desktop 模块 build、前端 tsc + `npm run test`（含新增 proposal-step-summary）全绿；已知 v1 边界：迁移脚本不支持存储过程体（分号切分）、k8s apply Kind 白名单（20 种常见）、file-upload 仅 linux 目标、割接创建表单为提案挑选式（自由 runbook 编辑器随批量模板批次）
+
+### 私有网信任域（Trust Domain）：fleet 级信任基础设施全量落地
+
+设计文档 `docs/TRUSTDOMAIN_SPEC.md`（v0.13）：经完整排除法收敛，fairpeer 唯一立项的区块链能力——**许可链 = quorum 签名复制日志**，无代币无挖矿，链上只放控制面元数据（成员/撤销/令牌/审计锚/自证摘要）。账本"骑"在成员间 E2E 加密信道上，信任面由链本身驱动。
+
+- **账本核心**（`internal/trustdomain`，9+ 文件，30 测试）：八类记录（成员/撤销/令牌/审计锚/自证/策略/终止/暂停/继任）+ quorum 写入权限矩阵（日常零控制、权力变更强控制）+ 哈希链连续性（删块/重排/替换皆可定位检出）+ 检查点分叉裁决（最近检查点优先→长度→哈希）+ 规则版本化 + 反滥用上限；对抗验收全过（spec §14.2：伪造签名/不足 quorum/删块检测/终止后延长/分叉收敛/撤销见即生效）
+- **传输层**（`internal/trustdomain/nettrans`）：TCP + mobilebridge 同款握手（Ed25519 签名 + X25519 ECDH + HKDF + AES-256-GCM + 帧防重放，全部复用既有代码）——**握手双方各自从本地账本解析对方公钥**（未准入/已撤销静默断连）；`join <addr> <域ID>` 跨进程入域（域 ID 带外锚定 + 服务端签名事后验证）；**UDP 广播局域网发现**（信标签名/域过滤/±120s 新鲜度，零依赖三平台统一，mDNS 可后补）
+- **授权与执行**：能力令牌四态验证 + **令牌委托链**（深度 1/范围子集/寿命更短/只有持有者可授；撤销授予者即杀死全部下级）+ `Delegation` 委托执行五关闸（新鲜度/身份/载荷哈希绑定/令牌/范围）——执行端 `WorkHandler` 只见已验证工作
+- **治理闭环**：PAUSE 紧急刹车（quorum 签名，生效即停全部委托含只读——刹车从严）+ **失联继任**（dead-man 时钟用"记录签名时间戳 − 链内最后管理员活动"，确定性无本地钟依赖；继任记录无需 quorum）+ quorum 棘轮（只升不降）+ 终止/转生/归档三形态
+- **审计互锚**（spec §八）：netdev 本地审计链头（B 批既有哈希链）经阈值/时限双触发自动上链（每 16 条或 10 分钟；失败保待重试，绝不阻塞诊断手）+ 手动 `anchor`；三层防篡改（本地哈希链→域账本互锚→跨网络副本）
+- **CLI 十六命令**（`fairpeer trustdomain`）：init/identity/join/status/attest/admit/revoke/token/delegate/exec/sync/quorum/succession/promote/pause/resume/anchor/run（--listen/--bootstrap/--discover/--executor netdev）
+- **Agent 工具**（AI 首次成为信任域一等用户，netdev 模式）：`netdev_fleet`（本地公告板：成员/自证/暂停态）+ `netdev_remote`（agent 表达意图，自动选择覆盖 (资源,操作) 的令牌——精确优先通配；无覆盖即拒并提示补签命令）；仅 `[trustdomain] enabled` 时注册
+- **首个真实消费者**：netdev 只读诊断接入委托执行（`netdev/health` 健康面板、`netdev/triage` 主机体检电池——词汇表无法表达写操作，能力隔离）；双进程冒烟全链路（init→admit→join→token→sync→exec 跨机拉取 HealthSnapshot→越权本地即拒）
+- **桌面面板**（设置新页签「信任域」）：域状态/成员卡（管理员高亮、撤销置灰）/本机令牌（含转授来源）/失联继任时钟 + 紧急刹车与互锚按钮；未启用/未入域给引导文案；i18n 双语
+- **工程性**：账本热重载（mtime/size 监测，CLI 与守护共享数据目录的单写者冲突实践解除）；加载时全量重验证（磁盘不可信）；`--count=1` 全绿（trustdomain 30 + nettrans 8 + config 6 + cli/netdev 若干），tsc/CSS 令牌检查/双模块 build 通过
+- 已知边界（spec §16 未决问题）：多管理员域的 UI 变更需经 CLI 网络节点（联署）；账本文件锁与控制端口为长期项；真机（Linux 无头优先）/VPS 验证待做
+
+
+### 密钥存储统一升级：Win/Mac/Linux 同级加密（KEK + OS 密钥库）
+
+背景：mac/Linux 桌面端此前用「主机名+home 目录派生密钥」的 AES-GCM 兜底（代码注释自称仅测试替身，但 release 实际发布全平台），任何本机进程都能重建密钥解密 `secrets.enc.json`——保护强度接近混淆。本次改造让三平台都达到「OS 用户凭据绑定」级别，`Store` 对外 API 与语义完全不变。
+
+- **v2 文件格式**：`{"version":2, "kekId", "kek", "secrets": base64(nonce‖AES-256-GCM)}`——全条目 AES-GCM 于一个随机 KEK 之下；kekId 兼作派生盐与密钥库账户名，主存储与 `mobilebridge.enc.json` 各自独立 KEK
+- **KEK 保管按平台分治**（`internal/secret/kek_*.go`，遵循仓库 build-tag 惯例）：Windows=随机 KEK 经 DPAPI 包裹存文件内（自包含）；macOS=Keychain、Linux=Secret Service（`zalando/go-keyring` v0.2.6，零 CGO，root go.mod 新增直接依赖）；无密钥库环境（headless Linux serve/acp/bot）优先 `FAIRPEER_SECRET_PASSPHRASE[_FILE]` argon2id 派生，仍无则降级机器绑定并显式告警（sync.Once stderr + 设置面板 `banner--warn` 徽标 + doctor secrets 段；`SecurityMode()`/`SecretStoreView` 三处消费）
+- **KEK 解析带真伪校验**：候选 KEK 须实际解开已知条目（GCM 认证标签天然防错键）才被接受，口令/机器等确定性后端与密钥库后端可安全共存于一条优先级链；密钥库丢失时读路径维持「视为未设置、提示重录」旧语义，写路径报错而非静默换键搁浅旧数据（空存储例外，允许重建）
+- **v1→v2 透明迁移**：旧每条独立加密的文件永久可读，任意写入触发一次性整体重加密；迁移中不可解密的条目（如跨用户拷贝的死数据）丢弃并 slog 告警
+- **可见性**：boot 降级一次性告警（含口令设置指引）；`loadIntoEnv` 跳过不可解密条目时 slog 计数（原先全静默）；`fairpeer doctor` 新增 secrets 段（backend/降级/存储路径脱敏）；设置面板「更新」页尾三态显示（正常=安静提示 / 降级=警告横幅 / 密钥库不可达=错误横幅），en/zh 双语键同步
+- 依赖：root go.mod + `github.com/zalando/go-keyring`（MIT；macOS 走 `/usr/bin/security` CLI，已知取舍是写入瞬间 KEK 经 argv 短暂可见，仅一次性生成时刻，代码注释说明）
+- 验证：`internal/secret` 16 测试全绿（9 存量不动 + 7 新增：v1→v2 迁移 / KEK 丢失 / 空存储重建 / 错误确定性键拒绝 / 口令派生确定性 / 降级标志 / 双存储 KEK 隔离，经 `newWithKekProvider` 钩子注入 fake 后端做到 CI 无密钥库环境可测）；win/darwin/linux/freebsd 交叉编译通过；root+desktop 双模块 build/vet/test 全绿（cli/config/boot/doctor/mobilebridge）；前端 tsc 通过（`CoWorkLayout.tsx` 有一处并行改动遗留的未使用导入报错，非本次引入）；**真机冒烟待做**：macOS Keychain 授权弹窗体验、Linux 桌面 Secret Service 首次写入、headless 口令模式实测
+
 ## [0.1.10] — 2026-08-27
 
 ### 右栏「概览」下线——独有内容分流至用量条 / 轮次 tab

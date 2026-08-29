@@ -16,6 +16,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/installsource"
 	"github.com/zzycxz/fairpeer/internal/provider"
+	"github.com/zzycxz/fairpeer/internal/secret"
 )
 
 // settings_app.go is the desktop Settings panel's command surface: it reads the
@@ -42,6 +43,10 @@ type ProviderView struct {
 	ReasoningProtocol string   `json:"reasoningProtocol"`
 	SupportedEfforts  []string `json:"supportedEfforts"`
 	DefaultEffort     string   `json:"defaultEffort"`
+	// ReasoningModels are this provider's chat models that the models.dev
+	// registry flags reasoning-capable. Display-only (pickers show a badge);
+	// never consulted by the behaviour layer (MODEL_ROUTING_SPEC §5).
+	ReasoningModels []string `json:"reasoningModels,omitempty"`
 }
 
 type PermissionsView struct {
@@ -179,6 +184,23 @@ type SettingsView struct {
 	AutoApproveTools bool `json:"autoApproveTools"`
 	// Bypass is the legacy JSON key for the same live state.
 	Bypass bool `json:"bypass"`
+	// SecretStore reports the at-rest encryption backend of the credential
+	// store so the panel can badge a degraded (machine-bound) mode or an
+	// unreachable keystore.
+	SecretStore SecretStoreView `json:"secretStore"`
+}
+
+// SecretStoreView mirrors secret.Store.SecurityMode: backend is one of
+// dpapi/keychain/secret-service/passphrase/machine, or "unavailable" when an
+// existing store's KEK cannot be reached (keystore locked/reset).
+type SecretStoreView struct {
+	Backend  string `json:"backend"`
+	Degraded bool   `json:"degraded"`
+}
+
+func secretStoreView() SecretStoreView {
+	backend, degraded := secret.Default().SecurityMode()
+	return SecretStoreView{Backend: backend, Degraded: degraded}
 }
 
 func nonNil(s []string) []string {
@@ -265,9 +287,10 @@ func removeProviderAccess(c *config.Config, names ...string) {
 }
 
 func providerViewFromEntry(p config.ProviderEntry, builtIn, added bool) ProviderView {
+	models := nonNil(p.ChatModelList())
 	return ProviderView{
 		Name: p.Name, BuiltIn: builtIn, Added: added, Kind: p.Kind, BaseURL: p.BaseURL,
-		Models: nonNil(p.ChatModelList()), ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
+		Models: models, ModelsURL: p.ModelsURL, Default: p.DefaultModel(),
 		APIKeyEnv: p.APIKeyEnv,
 		// KeySet doubles as "ready to use": keyless providers (local endpoints)
 		// are ready by definition, so pickers don't filter them out.
@@ -276,6 +299,9 @@ func providerViewFromEntry(p config.ProviderEntry, builtIn, added bool) Provider
 		ReasoningProtocol: p.ReasoningProtocol,
 		SupportedEfforts:  nonNil(p.SupportedEfforts),
 		DefaultEffort:     p.DefaultEffort,
+		// Registry-flagged reasoning models among the enabled chat models
+		// (display-only badge; unknown providers yield nil).
+		ReasoningModels: registryReasoningAmong(p.Name, models),
 	}
 }
 
@@ -336,6 +362,7 @@ func (a *App) Settings() SettingsView {
 			Telemetry:         true,
 			Metrics:           false,
 			ExpandThinking:    false,
+			SecretStore:       secretStoreView(),
 		}
 	}
 	ctrl := a.activeCtrl()
@@ -408,6 +435,7 @@ func (a *App) Settings() SettingsView {
 		ProviderKinds:     nonNil(provider.Kinds()),
 		AutoApproveTools:  ctrl != nil && ctrl.AutoApproveTools(),
 		Bypass:            ctrl != nil && ctrl.AutoApproveTools(),
+		SecretStore:       secretStoreView(),
 	}
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
 	v.OfficialProviders = officialProviderViews(officialProviderAddedSet(cfg))

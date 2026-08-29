@@ -697,8 +697,7 @@
 
 .workbench-dock__tabs {
   width: 100%;
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  background: transparent;
 }
 
 .workbench-dock__tab {
@@ -2398,24 +2397,18 @@
 
 :root[data-theme-style] .workbench-dock__tabs {
   position: relative;
-  width: auto;
-  height: 100%;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  width: 100%;
   display: flex;
   align-items: flex-end;
   justify-content: flex-start;
-  gap: 2px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
 }
 
 :root[data-theme-style] .workbench-dock__tabwrap {
   position: relative;
   display: inline-flex;
   flex: 1 1 auto;
-  min-width: 40px;
+  min-width: 24px;
   max-width: 140px;
   border-radius: 8px 8px 0 0;
   background: transparent;
@@ -2781,41 +2774,17 @@
   background: var(--accent-soft);
 }
 
-:root[data-theme-style] .context-panel__file-turn {
-  border-color: var(--border);
-  background: var(--bg-soft);
-  color: var(--fg-dim);
-}
-
-:root[data-theme-style] .context-panel__usage,
 :root[data-theme-style] .context-panel__section,
-:root[data-theme-style] .context-panel__stats,
-:root[data-theme-style] .context-panel__preview {
+:root[data-theme-style] .context-panel__stats {
   animation: graphite-message-in var(--dur-slow) var(--ease-out) both;
 }
 
 :root[data-theme-style] .context-panel__metric,
-:root[data-theme-style] .context-panel__section,
-:root[data-theme-style] .context-panel__preview {
+:root[data-theme-style] .context-panel__section {
   border-color: var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-elev);
   box-shadow: var(--app-graphite-shadow);
-}
-
-:root[data-theme-style] .context-panel__donut-core {
-  background: var(--bg-elev);
-  box-shadow: inset 0 0 0 1px var(--border);
-}
-
-:root[data-theme-style] .context-panel__file-row {
-  border-radius: var(--radius-sm);
-  transition: background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast) var(--ease-out);
-}
-
-:root[data-theme-style] .context-panel__file-row:hover {
-  background: var(--workspace-files-hover);
-  transform: translateX(2px);
 }
 
 :root[data-theme-style] .workspace-tree-resizer::after {

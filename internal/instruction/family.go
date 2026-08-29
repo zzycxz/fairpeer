@@ -6,30 +6,77 @@ import "strings"
 // (config.go) is model-agnostic; ForModel (instruction.go) layers on top of it.
 //
 // Family addons target the specific failure modes observed in testing — they are
-// concise, surgical nudges, not full prompt rewrites.
+// concise, surgical nudges, not full prompt rewrites. Addons exist ONLY for
+// families with a measured failure mode; recognising a family without an addon
+// is normal and expected.
 
-// ModelFamily detects the vendor family from a model ID like "openai/gpt-4o"
-// or "qwen/qwen3-max" or bare "gpt-4o".
+// vendorPrefixes maps canonical provider prefixes ("vendor/model") to families.
+// Prefix matches win over token matches: a provider namespace is the strongest
+// identity signal a model ref carries.
+var vendorPrefixes = []struct{ prefix, family string }{
+	{"qwen/", "qwen"},
+	{"deepseek/", "deepseek"},
+	{"z.ai/", "glm"},
+	{"moonshotai/", "kimi"},
+	{"moonshot/", "kimi"},
+	{"minimax/", "minimax"},
+	{"minimaxi/", "minimax"},
+	{"openai/", "gpt"},
+	{"anthropic/", "anthropic"},
+}
+
+// familyTokens maps whole model-name tokens to families. The ID is split on
+// separators (- _ . / :) and a token must match EXACTLY — substring hits inside
+// a larger token ("glmw" contains "glm") must not classify. Version suffixes
+// sit in their own tokens ("GLM-4.6" → glm, 4, 6) so bare model names classify
+// without a provider prefix.
+var familyTokens = map[string]string{
+	"qwen":     "qwen",
+	"qwq":      "qwen",
+	"deepseek": "deepseek",
+	"glm":      "glm",
+	"kimi":     "kimi",
+	"minimax":  "minimax",
+	"gpt":      "gpt",
+	"chatgpt":  "gpt",
+	"o1":       "gpt",
+	"o3":       "gpt",
+	"o4":       "gpt",
+	"claude":   "anthropic",
+}
+
+// ModelFamily detects the vendor family from a model ID like "openai/gpt-4o",
+// "qwen/qwen3-max" or bare "gpt-4o". Two-stage deterministic match (no
+// substring Contains): vendor prefix first, then exact whole-token match on
+// the split model name. Unknown → "" (caller applies no addon).
 func ModelFamily(modelID string) string {
 	id := strings.ToLower(strings.TrimSpace(modelID))
-
-	// Check vendor prefixes in order of specificity.
-	switch {
-	case strings.HasPrefix(id, "qwen/") || strings.Contains(id, "qwen"):
-		return "qwen"
-	case strings.HasPrefix(id, "deepseek/") || strings.Contains(id, "deepseek"):
-		return "deepseek"
-	case strings.HasPrefix(id, "z.ai/") || strings.Contains(id, "glm"):
-		return "glm"
-	case strings.HasPrefix(id, "moonshotai/") || strings.Contains(id, "kimi"):
-		return "kimi"
-	case strings.HasPrefix(id, "minimax/") || strings.Contains(id, "minimax"):
-		return "minimax"
-	case strings.HasPrefix(id, "openai/") || strings.Contains(id, "gpt"):
-		return "gpt"
-	default:
+	if id == "" {
 		return ""
 	}
+
+	for _, vp := range vendorPrefixes {
+		if strings.HasPrefix(id, vp.prefix) {
+			return vp.family
+		}
+	}
+
+	for _, tok := range strings.FieldsFunc(id, func(r rune) bool {
+		return r == '-' || r == '_' || r == '.' || r == '/' || r == ':'
+	}) {
+		if family, ok := familyTokens[tok]; ok {
+			return family
+		}
+		// Version-digit suffixes fuse into one token in some catalog names
+		// ("qwen3-max" → token "qwen3"): accept key + digit-run only — a
+		// letter suffix ("glmw") is a different name and must not classify.
+		for key, family := range familyTokens {
+			if len(tok) > len(key) && strings.HasPrefix(tok, key) && tok[len(key)] >= '0' && tok[len(key)] <= '9' {
+				return family
+			}
+		}
+	}
+	return ""
 }
 
 // FamilyAddon returns a model-family-specific prompt nudge, or "" when the

@@ -878,6 +878,14 @@ export function Composer({
 
   useEffect(() => () => clearMoreCloseTimer(), [clearMoreCloseTimer]);
 
+  // UsageChip's hot-state compact button (context ≥85%): triggers context
+  // compaction on the active tab and confirms via toast.
+  const compactContext = useCallback(() => {
+    app.Compact()
+      .then(() => showToast(t("composer.usageDetail.compactDone")))
+      .catch(() => showToast(t("composer.usageDetail.compactFail"), "error"));
+  }, [showToast, t]);
+
   const fileDedupKey = async (file: File): Promise<AttachmentDedupKey> => ({
     hash: await sha256(file),
     source: `file:${file.name}:${file.size}:${file.lastModified}`,
@@ -2336,7 +2344,7 @@ export function Composer({
               </div>
             )}
             <div className="composer-meta__control composer-meta__control--usage">
-              <UsageChip context={contextInfo} usage={usage} budget={budget} />
+              <UsageChip context={contextInfo} usage={usage} budget={budget} onCompact={compactContext} disabled={disabled || running} />
             </div>
             {hasEffort && (
               <div className="composer-meta__control composer-meta__control--more">

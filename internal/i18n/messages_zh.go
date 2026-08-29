@@ -348,6 +348,7 @@ var Chinese = Messages{
   fairpeer mcp <add|remove|list>                        管理 fairpeer.toml 里的 MCP 服务器
   fairpeer doctor [--json]                              输出脱敏的本地诊断信息
   fairpeer bot start|doctor|weixin-login                多渠道 IM bot 网关
+  fairpeer trustdomain <init|status|run|...>           私有网信任域账本（docs/TRUSTDOMAIN_SPEC.md）
   fairpeer version
   fairpeer help
 

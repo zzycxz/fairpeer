@@ -6048,3 +6048,102 @@
 @media (prefers-reduced-motion: reduce) {
   .toast::after { animation: none; opacity: 0.25; }
 }
+
+/* ── 浏览器镜像 panel (BrowserMirrorPanel) ────────────────────────────────── */
+
+.browser-mirror {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--space-3);
+}
+.browser-mirror--empty {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--fg-faint);
+  font-size: var(--font-control-small);
+}
+.browser-mirror--empty p {
+  margin: var(--space-2) 0 0;
+  max-width: 220px;
+}
+.browser-mirror__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-control-small);
+  color: var(--fg-dim);
+  flex-shrink: 0;
+}
+.browser-mirror__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full, 50%);
+  background: var(--fg-faint);
+  flex-shrink: 0;
+}
+.browser-mirror__dot--live {
+  background: var(--accent);
+  animation: browser-mirror-pulse 1.6s ease-in-out infinite;
+}
+.browser-mirror__source {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.browser-mirror__state--live {
+  color: var(--accent);
+}
+.browser-mirror__url {
+  font-family: var(--mono);
+  font-size: var(--font-control-small);
+  color: var(--fg-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.browser-mirror__viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.browser-mirror__img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.browser-mirror__placeholder {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--fg-faint);
+  font-size: var(--font-control-small);
+  padding: var(--space-3);
+}
+.browser-mirror__text {
+  font-size: var(--font-control-small);
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+@keyframes browser-mirror-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .browser-mirror__dot--live { animation: none; }
+}

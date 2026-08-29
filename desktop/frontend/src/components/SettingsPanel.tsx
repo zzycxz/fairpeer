@@ -20,17 +20,18 @@ import {
 import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
 import { FONT_FAMILIES, applyFontFamily, getFontFamily, type FontFamily } from "../lib/fontFamily";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
-import type { BotConnectionView, BotInstallStartResult, BotSettingsView, CoWorkSettingsView, HookConfigView, HooksSettingsView, MailProbeResult, ManagedBrowserStatus, NetworkView, ProviderTemplate, ProviderView, RegistryStatus, SettingsTab, SettingsView } from "../lib/types";
+import type { BotConnectionView, BotInstallStartResult, BotSettingsView, CoWorkSettingsView, HookConfigView, HooksSettingsView, MailProbeResult, ManagedBrowserStatus, NetworkView, ProviderTemplate, ProviderView, RegistryStatus, SecretStoreStatus, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { VendorStep, KeyStep, ModelStep } from "./OnboardingOverlay";
 import { MCPServersSettingsPage, SkillsSettingsPage } from "./CapabilitiesPanel";
 import { NetDevSection } from "./netdev/NetDevSection";
+import { TrustDomainPanel } from "./TrustDomainPanel";
 import { MemorySettingsPage } from "./MemoryPanel";
 import { ModalCloseButton } from "./ModalCloseButton";
 
-export const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "cowork", "mcp", "skills", "memory", "permissions", "sandbox", "network", "hooks", "appearance", "updates", "mobile", "netdev"];
+export const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "cowork", "mcp", "skills", "memory", "permissions", "sandbox", "network", "hooks", "appearance", "updates", "mobile", "netdev", "trustdomain"];
 
 // SettingsPanel is the desktop settings centre — a centred modal with left
 // navigation and a right content area. It hosts all settings pages plus MCP,
@@ -137,6 +138,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab, initialPayload }
                 {tab === "bots" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "cowork" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><CoWorkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "netdev" && <NetDevSection />}
+                {tab === "trustdomain" && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><TrustDomainPanel /></SettingsPageShell>}
                 {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy ?? false} apply={apply}><MCPServersSettingsPage initialHighlight={initialPayload} />{s && <WebSearchSection s={s} busy={busy} apply={apply} />}</SettingsPageShell>}
                 {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><SkillsSettingsPage initialHighlight={initialPayload} /></SettingsPageShell>}
                 {tab === "memory" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><MemorySettingsPage /></SettingsPageShell>}
@@ -176,6 +178,7 @@ export function SettingsPanel({ onClose, onChanged, initialTab, initialPayload }
                   <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}>
                     <UpdatesSection
                       configPath={s.configPath}
+                      secretStore={s.secretStore}
                       checkUpdates={s.checkUpdates}
                       telemetry={s.telemetry !== false}
                       settingsBusy={busy}
@@ -629,6 +632,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
     case "cowork":
       return t("settings.tab.cowork");
     case "netdev":
+    case "trustdomain":
+      return t("settings.tab.trustdomain");
       return t("settings.tab.netdev");
     case "mobile":
       return "移动端";
@@ -2190,11 +2195,12 @@ function BotsSection({ s, busy, apply }: SectionProps) {
 
 function botTargetLabel(target: BotInstallTarget, t: ReturnType<typeof useT>): string {
   switch (target) {
+    case "feishu": return t("settings.botFeishu");
     case "qq": return "QQ";
     case "lark": return "Lark";
     case "weixin": return t("settings.botWeixin");
     case "telegram": return t("settings.botTelegram");
-    default: return t("settings.botFeishu");
+    default: return t("settings.botChannelUnknown");
   }
 }
 
@@ -2230,10 +2236,13 @@ function formatInstallTimeLeft(seconds: number): string {
 
 function botConnectionLabel(connection: BotConnectionView, t: ReturnType<typeof useT>): string {
   if (connection.domain === "lark") return "Lark";
+  if (connection.provider === "feishu") return t("settings.botFeishu");
   if (connection.provider === "weixin") return t("settings.botWeixin");
   if (connection.provider === "qq") return "QQ";
   if (connection.provider === "telegram") return t("settings.botTelegram");
-  return t("settings.botFeishu");
+  // Unknown/future provider: show it verbatim instead of masquerading as
+  // Feishu — the channel list must never silently relabel a platform.
+  return connection.provider || t("settings.botChannelUnknown");
 }
 
 function firstConnectionRemote(connection: BotConnectionView): string {
@@ -4449,12 +4458,14 @@ const mb = (n: number) => (n / MB).toFixed(1);
 // progress and errors inline.
 function UpdatesSection({
   configPath,
+  secretStore,
   checkUpdates,
   telemetry,
   settingsBusy,
   applySettings,
 }: {
   configPath: string;
+  secretStore?: SecretStoreStatus;
   checkUpdates: boolean;
   telemetry: boolean;
   settingsBusy: boolean;
@@ -4531,6 +4542,15 @@ function UpdatesSection({
         <Tooltip label={configPath} fill block className="mem-hint settings-config-path">
           {t("settings.config", { path: configPath })}
         </Tooltip>
+      )}
+      {secretStore && secretStore.backend === "unavailable" && (
+        <div className="banner banner--error">{t("settings.secretStoreUnavailable")}</div>
+      )}
+      {secretStore && secretStore.degraded && secretStore.backend !== "unavailable" && (
+        <div className="banner banner--warn">{t("settings.secretStoreDegraded", { backend: secretStore.backend })}</div>
+      )}
+      {secretStore && !secretStore.degraded && secretStore.backend !== "unavailable" && secretStore.backend !== "none" && (
+        <div className="mem-hint">{t("settings.secretStore", { backend: secretStore.backend })}</div>
       )}
     </SettingsSection>
   );

@@ -2,13 +2,17 @@
 // (ui-redesign spec §4-C3): a 46px fill bar plus inline token readings. The
 // chip itself carries the numbers (session tokens · used/window); aria-label
 // keeps the reading screen-reader friendly. The fill turns warn-coloured past
-// 85% so compaction pressure is visible at a glance. Hovering (or keyboard
-// focus) opens a detail panel: precise context fill, average prompt-cache
-// hit-rate (Σhit/Σ(hit+miss) across the session), current-turn rate, and
-// session-cumulative token splits. Data comes from App state — ContextInfo
-// (extended with session telemetry) plus the latest-turn WireUsage.
+// 85% so compaction pressure is visible at a glance — and in that hot state a
+// small inline "compact" button appears on the chip (the sole Compact entry
+// point since the right-dock overview tab was slimmed down). Hovering (or
+// keyboard focus) opens a detail panel: precise context fill, average
+// prompt-cache hit-rate (Σhit/Σ(hit+miss) across the session), current-turn
+// rate, and session-cumulative token splits + active-turn time. Data comes
+// from App state — ContextInfo (extended with session telemetry) plus the
+// latest-turn WireUsage.
 import { Tooltip } from "../Tooltip";
 import { useT } from "../../lib/i18n";
+import { fmtDuration } from "../../lib/duration";
 import type { BudgetStatusView, ContextInfo, WireUsage } from "../../lib/types";
 
 function fmtTokens(n: number): string {
@@ -52,7 +56,7 @@ function fmtCost(cost: number, currency?: string): string {
   return `${sym}${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(3)}`;
 }
 
-export function UsageChip({ context, usage, budget }: { context?: ContextInfo; usage?: WireUsage; budget?: BudgetStatusView }) {
+export function UsageChip({ context, usage, budget, onCompact, disabled }: { context?: ContextInfo; usage?: WireUsage; budget?: BudgetStatusView; onCompact?: () => void; disabled?: boolean }) {
   const t = useT();
   if (!context || !context.window || context.window <= 0) return null;
   const pct = Math.min(100, Math.round((context.used / context.window) * 100));
@@ -111,6 +115,9 @@ export function UsageChip({ context, usage, budget }: { context?: ContextInfo; u
         />
       )}
       <Row label={t("composer.usageDetail.requests")} value={requests > 0 ? String(requests) : "—"} />
+      {!!context.sessionElapsedMs && context.sessionElapsedMs > 0 && (
+        <Row label={t("composer.usageDetail.elapsed")} value={fmtDuration(context.sessionElapsedMs)} />
+      )}
       <Row label={t("composer.usageDetail.input")} value={fmtFull(context.sessionPromptTokens ?? 0)} />
       <Row label={t("composer.usageDetail.output")} value={fmtFull(context.sessionCompletionTokens ?? 0)} />
       <Row label={t("composer.usageDetail.reasoning")} value={fmtFull(context.sessionReasoningTokens ?? 0)} />
@@ -130,6 +137,18 @@ export function UsageChip({ context, usage, budget }: { context?: ContextInfo; u
           {fmtTokens(session)} · {fmtTokens(context.used)}/{fmtTokens(context.window)}
           {!!budget?.rpm && budget.rpm > 0 && ` · ${budget.used}/${budget.rpm} rpm`}
         </span>
+        {hot && onCompact && (
+          <button
+            type="button"
+            className="composer-usage__compact"
+            onClick={onCompact}
+            disabled={disabled}
+            title={t("composer.usageDetail.compactHint")}
+            aria-label={t("composer.usageDetail.compactHint")}
+          >
+            {t("composer.usageDetail.compactLabel")}
+          </button>
+        )}
       </div>
     </Tooltip>
   );

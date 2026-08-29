@@ -611,9 +611,35 @@ func CanonicalSkillPath(path string) string {
 	return path
 }
 
+// reservedPluginNames are MCP server names that would collide with a
+// non-MCP concept on the settings surface — the IM bot gateway channels
+// ([bot.feishu] etc. are message-gateway configs, not MCP servers) and the
+// built-in runtimes. Installing an MCP under one of these names creates two
+// unrelated things with the same string (the bots tab and the MCP tab would
+// both show a bare "feishu"), so NEW registrations are rejected with an
+// actionable hint. Legacy entries created before the guard may still be
+// replaced/edited in place.
+var reservedPluginNames = map[string]string{
+	"feishu":   "IM bot channel [bot.feishu]",
+	"lark":     "IM bot channel [bot.feishu] (lark domain)",
+	"qq":       "IM bot channel [bot.qq]",
+	"weixin":   "IM bot channel [bot.weixin]",
+	"telegram": "IM bot channel [bot.telegram]",
+	"codegraph": "built-in code-intelligence runtime",
+	"context7":  "built-in MCP server",
+}
+
+// IsReservedPluginName reports whether name may not be used for a NEW MCP
+// server, plus the human-readable reason (case-insensitive).
+func IsReservedPluginName(name string) (string, bool) {
+	reason, ok := reservedPluginNames[strings.ToLower(strings.TrimSpace(name))]
+	return reason, ok
+}
+
 // UpsertPlugin adds e, or replaces an MCP server with the same name (preserving
 // position). The transport-specific required fields are validated: stdio needs
-// a command, http/sse need a url.
+// a command, http/sse need a url. Reserved names (bot channels / builtins) are
+// rejected for NEW entries.
 func (c *Config) UpsertPlugin(e PluginEntry) error {
 	e, _ = NormalizePluginCommandLine(e)
 	if err := validatePlugin(e); err != nil {
@@ -624,6 +650,9 @@ func (c *Config) UpsertPlugin(e PluginEntry) error {
 			c.Plugins[i] = e
 			return nil
 		}
+	}
+	if reason, reserved := IsReservedPluginName(e.Name); reserved {
+		return fmt.Errorf("plugin name %q is reserved: %s — the bot gateway is not an MCP server; install the MCP under a distinct name (e.g. feishu-docs)", e.Name, reason)
 	}
 	c.Plugins = append(c.Plugins, e)
 	return nil

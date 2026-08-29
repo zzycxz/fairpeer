@@ -166,10 +166,14 @@ func mergeRemote(snap ProviderTemplate, v modelsDevVendor) ProviderTemplate {
 	// (map iteration is random). Sort for stable UI ordering.
 	if len(v.Models) > 0 {
 		models := make([]string, 0, len(v.Models))
+		reasoning := make([]string, 0, len(v.Models))
 		anyVision := false
 		maxCtx := 0
 		for id, m := range v.Models {
 			models = append(models, id)
+			if m.Reasoning {
+				reasoning = append(reasoning, id)
+			}
 			if m.Attachment {
 				anyVision = true
 			}
@@ -188,6 +192,20 @@ func mergeRemote(snap ProviderTemplate, v modelsDevVendor) ProviderTemplate {
 			if maxCtx > 0 {
 				t.ContextWindow = maxCtx
 			}
+			// Preserve the per-model reasoning flags (UI display; the
+			// behaviour layer stays ID-sniffing — see MODEL_ROUTING_SPEC).
+			reasoningSet := map[string]bool{}
+			for _, id := range reasoning {
+				reasoningSet[id] = true
+			}
+			kept := reasoning[:0]
+			for _, id := range models {
+				if reasoningSet[id] {
+					kept = append(kept, id)
+				}
+			}
+			sort.Strings(kept)
+			t.ReasoningModels = kept
 		}
 	}
 	return t

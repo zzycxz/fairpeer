@@ -1950,8 +1950,8 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 	// (email/rag/schedule were dumped into "coding") and broke when a skill was
 	// shadowed by a global override (ppt-auto showed as both builtin-office and
 	// global). Grouping by `active` reflects the real prompt the model sees.
-	const OFFICIAL_SKILLS = useMemo(() => new Set(["init", "explore", "research", "install-capability", "review", "security-review", "test", "document-auto", "email-auto", "schedule-auto", "rag-auto", "expert-auto", "browser-auto", "desktop-auto", "ppt-auto"]), []);
-	const OFFICE_SKILLS = useMemo(() => new Set(["document-auto", "email-auto", "schedule-auto", "rag-auto", "expert-auto", "browser-auto", "desktop-auto", "ppt-auto"]), []);
+	const OFFICIAL_SKILLS = useMemo(() => new Set(["init", "explore", "research", "install-capability", "review", "security-review", "test", "document-auto", "email-auto", "schedule-auto", "knowledge-auto", "expert-auto", "browser-auto", "desktop-auto", "ppt-auto"]), []);
+	const OFFICE_SKILLS = useMemo(() => new Set(["document-auto", "email-auto", "schedule-auto", "knowledge-auto", "expert-auto", "browser-auto", "desktop-auto", "ppt-auto"]), []);
 	const OPS_SKILLS = useMemo(() => new Set(["netdev-help"]), []);
 
 	const officialSkills = useMemo(

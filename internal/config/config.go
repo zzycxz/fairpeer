@@ -64,7 +64,6 @@ type Config struct {
 	NetDev     NetDevConfig     `toml:"netdev"`
 	Skills     SkillsConfig     `toml:"skills"`
 	Codegraph  CodegraphConfig  `toml:"codegraph"`
-	BuiltInMCP BuiltInMCPConfig `toml:"builtin_mcp"`
 	Dream      DreamConfig      `toml:"dream"`
 	Statusline StatuslineConfig `toml:"statusline"`
 	LSP        LSPConfig        `toml:"lsp"`
@@ -85,6 +84,10 @@ type Config struct {
 	// phone P2P). Empty means mobilebridge uses its built-in defaults; the
 	// LINKPEER_SIGNAL env var still overrides signal_url for ad-hoc dev.
 	MobileBridge MobileBridgeConfig `toml:"mobilebridge"`
+	// TrustDomain ([trustdomain]) is the private-network trust domain
+	// ledger (docs/TRUSTDOMAIN_SPEC.md): cross-profile infrastructure,
+	// off by default. Independent of agent profiles and providers.
+	TrustDomain TrustDomainConfig `toml:"trustdomain"`
 
 	// injectedLocalPresets records which keyless local presets (Ollama,
 	// llama.cpp) load injected because no config file defines [[providers]].
@@ -334,7 +337,7 @@ type StatuslineConfig struct {
 // CodegraphConfig governs the built-in CodeGraph MCP server — symbol/call-graph
 // code intelligence (tree-sitter + SQLite) that gives the agent codegraph_*
 // search / context / explore / trace / node tools. Enabled is opt-in (default
-// false, same policy as context7): users turn it on in Settings or by writing
+// false): users turn it on in Settings or by writing
 // [codegraph] enabled = true; an explicit value always wins. AutoInstall
 // (default true) lets fairpeer fetch the CodeGraph runtime into its cache when
 // CodeGraph is enabled but missing; set false to require an explicit
@@ -357,13 +360,6 @@ func (c CodegraphConfig) ShouldAutoStart() bool {
 
 func (c CodegraphConfig) ResolvedTier() string {
 	return "background"
-}
-
-// BuiltInMCPConfig controls which built-in MCP servers are enabled. Each
-// server has a corresponding *_enabled boolean. Default is off for servers
-// that require external dependencies (e.g. npx for Context7).
-type BuiltInMCPConfig struct {
-	Context7Enabled bool `toml:"context7_enabled"`
 }
 
 // DreamConfig controls the background self-evolution agents: Dream consolidates
@@ -435,37 +431,6 @@ func (d DreamConfig) DistillIntervalDays() int {
 		return d.DistillInterval
 	}
 	return DefaultDistillInterval
-}
-
-// Enabled reports whether the named built-in MCP server is enabled.
-func (c BuiltInMCPConfig) Enabled(name string) bool {
-	switch name {
-	case "context7":
-		return c.Context7Enabled
-	default:
-		return false
-	}
-}
-
-// SetEnabled sets the enabled flag for the named built-in MCP server.
-// Returns false if the name is unknown.
-func (c *BuiltInMCPConfig) SetEnabled(name string, enabled bool) bool {
-	switch name {
-	case "context7":
-		c.Context7Enabled = enabled
-		return true
-	default:
-		return false
-	}
-}
-
-// EnabledNames returns the names of all enabled built-in MCP servers.
-func (c BuiltInMCPConfig) EnabledNames() []string {
-	var out []string
-	if c.Context7Enabled {
-		out = append(out, "context7")
-	}
-	return out
 }
 
 // BotConfig 控制多渠道 IM bot 消息网关。
@@ -1281,6 +1246,12 @@ func (e *ProviderEntry) ModelList() []string {
 //
 // "voice" is intentionally absent from the non-chat set because it is too
 // broad — legitimate future chat models may include it in their name.
+// IsLikelyChatModel filters non-chat models (TTS/STT/embedding/rerank/image/
+// video…) out of the chat model picker. BLACKLIST-BY-TOKEN maintenance model:
+// when a provider ships a NEW non-chat modality, its token must be added here
+// manually (last additions: grok-imagine / sora → "imagine", "video").
+// Allowlist-style classification lives in the registry layer instead
+// (ProviderTemplate.ReasoningModels); this function must stay zero-dependency.
 func IsLikelyChatModel(model string) bool {
 	model = strings.TrimSpace(model)
 	if model == "" {
@@ -1602,8 +1573,6 @@ func Default() *Config {
 		// config keeps the user's choice. AutoInstall fetches the runtime into
 		// the cache when enabled and missing.
 		Codegraph: CodegraphConfig{Enabled: false, AutoInstall: true},
-		// BuiltInMCP configuration
-		BuiltInMCP: BuiltInMCPConfig{},
 		// Background self-evolution (Dream/Distill) on by default; 7/30 day cadence.
 		Dream: DreamConfig{Enabled: true, DreamInterval: DefaultDreamInterval, DistillInterval: DefaultDistillInterval, SkillColdDays: DefaultSkillColdDays},
 		// LSP tools on by default, but dormant until a language server is on PATH;

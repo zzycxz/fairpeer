@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { CalendarDays, Code2, Command, Minus, Network, PanelLeft, PanelRight, Square, TerminalSquare, X } from "lucide-react";
+import { CalendarDays, Code2, Command, Minus, Network, PanelLeft, PanelRight, Square, TerminalSquare, X, Copy } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { TabMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
+import logoSymbol from "../assets/logo-symbol.png";
+import { WindowMinimise, WindowToggleMaximise, Quit, WindowIsMaximised } from "../../wailsjs/runtime/runtime";
 
 type DesktopPlatform = "darwin" | "windows" | "linux";
 
@@ -76,6 +78,17 @@ export function AppChrome({
     `app-chrome--platform-${platform}`,
   ].filter(Boolean).join(" ");
 
+  const [isMaximized, setIsMaximized] = useState(false);
+  useEffect(() => {
+    if (platform !== "windows" || !(window as any).runtime) return;
+    const checkMax = () => {
+      WindowIsMaximised().then(setIsMaximized).catch(() => {});
+    };
+    checkMax();
+    window.addEventListener("resize", checkMax);
+    return () => window.removeEventListener("resize", checkMax);
+  }, [platform]);
+
   // Tab strip removed by product decision (2026-08-18): session switching goes
   // through the sidebar "最近" list (click resumes/switches; open sessions carry
   // a dot), ⌘K palette, and 新建会话 for new ones. TabBar.tsx stays intact for
@@ -110,7 +123,10 @@ export function AppChrome({
         aria-pressed={!sidebarCollapsed}
         aria-disabled={sidebarExpandBlocked}
       >
-        <PanelLeft size={16} />
+        <div className="brand-toggle-group">
+          <img src={logoSymbol} alt="" className="brand-toggle-logo" draggable={false} />
+          <PanelLeft size={16} className="brand-toggle-icon" />
+        </div>
       </button>
       )}
 
@@ -177,15 +193,18 @@ export function AppChrome({
         </button>
       )}
       {/* Profile segmented switcher was moved to the sidebar */}
-      {showWindowsPreviewControls && (
-        <div className="app-chrome__window-controls app-chrome__window-controls--windows" aria-hidden="true">
-          <span className="app-chrome__window-control app-chrome__window-control--minimize">
+      {platform === "windows" && (
+        <div 
+          className="app-chrome__window-controls app-chrome__window-controls--windows" 
+          aria-hidden="true"
+        >
+          <span className="app-chrome__window-control app-chrome__window-control--minimize" onClick={WindowMinimise}>
             <Minus size={12} strokeWidth={1.9} />
           </span>
-          <span className="app-chrome__window-control app-chrome__window-control--maximize">
-            <Square size={10} strokeWidth={1.8} />
+          <span className="app-chrome__window-control app-chrome__window-control--maximize" onClick={WindowToggleMaximise}>
+            {isMaximized ? <Copy size={10} strokeWidth={1.8} /> : <Square size={10} strokeWidth={1.8} />}
           </span>
-          <span className="app-chrome__window-control app-chrome__window-control--close">
+          <span className="app-chrome__window-control app-chrome__window-control--close" onClick={Quit}>
             <X size={12} strokeWidth={1.9} />
           </span>
         </div>

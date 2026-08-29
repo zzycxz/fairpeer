@@ -58,7 +58,16 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	}
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	protocol = normalizeReasoningProtocol(protocol)
-	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
+	switch protocol {
+	case "", "openai", "none", "minimax":
+		// valid — dialect resolved below
+	default:
+		return nil, fmt.Errorf("openai: provider %q: unknown reasoning_protocol %q (valid: auto|openai|minimax|none)", name, protocol)
+	}
+	// Endpoint dialect: an explicit "minimax" forces the MiniMax thinking knob
+	// regardless of host (gateway/proxy BaseURLs defeat host sniffing); with
+	// auto, the canonical MiniMax hosts opt in by hostname.
+	minimax := protocol == "minimax" || (protocol == "" && IsMiniMax(cfg.BaseURL))
 	switch {
 	case protocol == "none":
 		effort = ""
@@ -147,11 +156,15 @@ func (c *client) Name() string { return c.name }
 func (c *client) SetOnReplay(fn func(ctx context.Context) error) { c.onReplay = fn }
 
 func normalizeReasoningProtocol(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "openai", "none":
-		return strings.ToLower(strings.TrimSpace(raw))
+	v := strings.ToLower(strings.TrimSpace(raw))
+	switch v {
+	case "openai", "minimax", "none":
+		return v
 	default:
-		return ""
+		// "" (auto) passes through; UNKNOWN values pass through verbatim so
+		// New() rejects them with the valid-value list — silently mapping a
+		// typo to auto would hide the misconfiguration from the user.
+		return v
 	}
 }
 

@@ -611,7 +611,7 @@ func TestAutoStartPlugins(t *testing.T) {
 func TestCodegraphDefaultDisabledOptIn(t *testing.T) {
 	c := Default()
 	if c.Codegraph.Enabled {
-		t.Fatal("default codegraph enabled = true; it is opt-in (same policy as context7) and must default off")
+		t.Fatal("default codegraph enabled = true; it is opt-in and must default off")
 	}
 	if !c.Codegraph.AutoInstall {
 		t.Fatal("default codegraph auto_install = false, want true")

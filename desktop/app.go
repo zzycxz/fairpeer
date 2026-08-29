@@ -33,7 +33,6 @@ import (
 	"github.com/zzycxz/fairpeer/internal/bot"
 	"github.com/zzycxz/fairpeer/internal/browserlaunch"
 	"github.com/zzycxz/fairpeer/internal/browseruse"
-	"github.com/zzycxz/fairpeer/internal/builtinmcp"
 	calendarpkg "github.com/zzycxz/fairpeer/internal/calendar"
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/control"
@@ -360,9 +359,18 @@ func (a *App) Platform() string {
 // off the initialization in a background goroutine so the webview loads immediately.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// browser console record stream: forward kernel recorder events to the
+	// ops panel's live step feed ("browser:record").
+	a.initBrowserConsoleForwarders()
 	// bot desktop bridge: observe every tab's approval/ask/turn-done events and
 	// forward to subscribed IM chats. Sync init — only loads the watcher list.
 	a.botBridge.Store(newBotBridge(a))
+	// netdev schedulers (inspection / backup / briefing push): start at app
+	// launch, not on first settings-page open — a user who never opens 设置
+	// still gets the sweeps. Each loop re-reads config; off = idle 1-min polls.
+	startInspectionScheduler(a)
+	startBackupScheduler(a)
+	startBriefingScheduler(a)
 	// linkpeer mobile bridge: loads device key, connects to signaling K.
 	// Runs async — never blocks GUI startup. No-op if the key store can't init.
 	go a.ensureMobileBridge(ctx)
@@ -595,6 +603,17 @@ func (a *App) initRAG() {
 			return nil
 		}
 		return a.buService.Client()
+	})
+
+	// Browser mirror panel (pane-system §3.6): forward every lifecycle/frame
+	// emission from the browser tools + browser_auto to the frontend dock.
+	// EventsEmit is goroutine-safe; a.ctx is nil only before startup, and no
+	// browser tool can run before then (controllers don't exist yet).
+	builtin.SetBrowserPanelSink(func(f builtin.BrowserPanelFrame) {
+		if a.ctx == nil {
+			return
+		}
+		runtime.EventsEmit(a.ctx, "browser:mirror", f)
 	})
 
 	// Try to wire the global RPM budget into the extractor now. restoreOrBuildTabs
@@ -3130,9 +3149,10 @@ func firstNonEmpty(values ...string) string {
 
 // ContextInfo is the prompt-vs-window gauge payload plus session totals. Used
 // and Window both zero means no context-window data yet. The Session* fields
-// are session-cumulative telemetry (same numbers the right-dock context panel
-// reads) so the composer usage chip's hover detail can show aggregate cache
-// hit-rate and token splits without extra polling.
+// are session-cumulative telemetry so the composer usage chip's hover detail
+// and the right-dock turns tab can show aggregate cache hit-rate, token
+// splits, and active-turn time without extra polling. SessionElapsedMs is the
+// sum of turn durations (in-flight turn included), not wall-clock session age.
 type ContextInfo struct {
 	Used          int     `json:"used"`
 	Window        int     `json:"window"`
@@ -3148,6 +3168,7 @@ type ContextInfo struct {
 	RequestCount            int     `json:"requestCount,omitempty"`
 	SessionCost             float64 `json:"sessionCost,omitempty"`
 	SessionCostCurrency     string  `json:"sessionCostCurrency,omitempty"`
+	SessionElapsedMs        int64   `json:"sessionElapsedMs,omitempty"`
 }
 
 // ContextUsage returns the latest context-window gauge numbers.
@@ -3186,6 +3207,7 @@ func (a *App) ContextUsageForTab(tabID string) ContextInfo {
 			info.SessionCostCurrency = telemetry.Currency
 		}
 		info.RequestCount = telemetry.RequestCount
+		info.SessionElapsedMs = telemetry.ElapsedMs
 	}
 	if ctrl == nil {
 		return info
@@ -3777,25 +3799,6 @@ func (a *App) Capabilities() CapabilitiesView {
 			}
 			seen["codegraph"] = true
 		}
-		for _, p := range builtinmcp.Entries() {
-			if configured[p.Name].Name != "" || seen[p.Name] {
-				continue
-			}
-			enabled := builtInMCPEnabled(loadedCfg, p.Name)
-			if s, ok := disabled[p.Name]; ok {
-				s.Status = "disabled"
-				s = withBuiltInMCPConfig(s, p, enabled)
-				s.Error = ""
-				out.Servers = append(out.Servers, s)
-				retainedDisabled[p.Name] = s
-				delete(disabled, p.Name)
-			} else if enabled {
-				out.Servers = append(out.Servers, withBuiltInMCPConfig(ServerView{Name: p.Name, Status: "deferred"}, p, true))
-			} else {
-				out.Servers = append(out.Servers, withBuiltInMCPConfig(ServerView{Name: p.Name, Status: "disabled"}, p, false))
-			}
-			seen[p.Name] = true
-		}
 	}
 	out.Servers = orderServerViews(out.Servers, order)
 
@@ -4007,20 +4010,6 @@ func withCodegraphConfig(v ServerView, c config.CodegraphConfig) ServerView {
 	v.Tier = c.ResolvedTier()
 	v.AuthStatus = mcpdiag.AuthNone
 	return v
-}
-
-func withBuiltInMCPConfig(v ServerView, p config.PluginEntry, enabled bool) ServerView {
-	v = withPluginConfig(v, p)
-	v.Name = p.Name
-	v.BuiltIn = true
-	v.Configured = true
-	v.AutoStart = enabled
-	v.AuthStatus = mcpdiag.AuthNone
-	return v
-}
-
-func builtInMCPEnabled(cfg *config.Config, name string) bool {
-	return cfg != nil && cfg.BuiltInMCP.Enabled(name)
 }
 
 func skillRootsView() []SkillRootView {
@@ -4601,14 +4590,9 @@ func (a *App) SetMCPServerEnabled(name string, enabled bool) error {
 	if name == "codegraph" {
 		return a.setCodegraphEnabled(enabled)
 	}
-	configuredEntry, hasConfiguredEntry, err := a.desktopMCPServerForEdit(name)
-	if err != nil {
+	if _, _, err := a.desktopMCPServerForEdit(name); err != nil {
 		return err
 	}
-	if builtinmcp.IsBuiltIn(name) && !hasConfiguredEntry {
-		return a.setBuiltinMCPEnabled(name, enabled)
-	}
-	_ = configuredEntry
 	if enabled {
 		_, err := a.connectConfiguredMCPServer(ctrl, root, name)
 		if err == nil {
@@ -4739,80 +4723,6 @@ func (a *App) setCodegraphEnabled(enabled bool) error {
 	tab.mcpOrder = mergeServerOrder(tab.mcpOrder, []ServerView{s})
 	a.mu.Unlock()
 	return nil
-}
-
-// setBuiltinMCPEnabled toggles a built-in MCP server (e.g. context7) on or off.
-// It persists the change to the user config and connects/disconnects for the
-// current session, following the same pattern as setCodegraphEnabled.
-func (a *App) setBuiltinMCPEnabled(name string, enabled bool) error {
-	entry, ok := builtinmcp.Entry(name)
-	if !ok {
-		return fmt.Errorf("no built-in MCP server named %q", name)
-	}
-	cfg, path, err := a.loadDesktopUserConfigForEdit()
-	if err != nil {
-		return err
-	}
-	if !cfg.BuiltInMCP.SetEnabled(name, enabled) {
-		return fmt.Errorf("no built-in MCP server named %q", name)
-	}
-	ctrl, _ := a.activeCtrlAndRoot()
-	if ctrl == nil {
-		return fmt.Errorf("no active session")
-	}
-	tab := a.activeTab()
-	if tab == nil {
-		return fmt.Errorf("no active session")
-	}
-	if err := cfg.SaveTo(path); err != nil {
-		return err
-	}
-	if err := a.syncProjectBuiltInMCPOverride(cfg.BuiltInMCP); err != nil {
-		return err
-	}
-	if enabled {
-		a.mu.Lock()
-		delete(tab.disabledMCP, name)
-		a.mu.Unlock()
-		if !mcpConnected(ctrl, name) {
-			_, err := ctrl.ConnectMCPServer(entry)
-			if err != nil {
-				recordMCPFailure(ctrl, entry, err)
-				return nil
-			}
-		}
-		return nil
-	}
-	if h := ctrl.Host(); h != nil {
-		h.ClearFailure(name)
-	}
-	ctrl.DisconnectMCPServer(name)
-	s := withBuiltInMCPConfig(ServerView{Name: name, Status: "disabled"}, entry, false)
-	a.mu.Lock()
-	if tab.disabledMCP == nil {
-		tab.disabledMCP = map[string]ServerView{}
-	}
-	tab.disabledMCP[name] = s
-	tab.mcpOrder = mergeServerOrder(tab.mcpOrder, []ServerView{s})
-	a.mu.Unlock()
-	return nil
-}
-
-func (a *App) syncProjectBuiltInMCPOverride(c config.BuiltInMCPConfig) error {
-	path := projectConfigPathForRoot(a.activeWorkspaceRoot())
-	userPath := config.UserConfigPath()
-	if path == "" || sameConfigPath(path, userPath) {
-		return nil
-	}
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	cfg := config.LoadForEdit(path)
-	cfg.BuiltInMCP = c
-	return cfg.SaveTo(path)
 }
 
 func (a *App) setCodegraphTier(_ string) error {

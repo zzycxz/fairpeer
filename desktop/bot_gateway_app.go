@@ -12,6 +12,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/bot/telegram"
 	"github.com/zzycxz/fairpeer/internal/bot/weixin"
 	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/netdev"
 	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
@@ -172,6 +173,8 @@ func (a *App) startBotGateway(cfg *config.Config) {
 	if hub := a.botBridge.Load(); hub != nil {
 		gwCfg.Desktop = hub
 	}
+	// 运维回话侧：/netdev 发现 | /netdev 详情 <编号>（告警/早报推送的延伸）。
+	gwCfg.Netdev = netdevIMBridge{}
 
 	gw := bot.NewGateway(gwCfg, adapters, logger)
 	if err := gw.Start(a.ctx); err != nil {
@@ -180,6 +183,8 @@ func (a *App) startBotGateway(cfg *config.Config) {
 	}
 
 	a.botGW.Store(gw)
+	// 运维通知出口共用这个网关：告警 Finding 直推 notify_bot_dest。
+	netdev.SetNotifyPusher(gw)
 	// Inject the live gateway into the builtin tool package so im_send can push
 	// through it (mirrors SetRAGStore / SetScheduler). restartBotGateway calls
 	// stop (which clears this) then start, so the tool always reflects the
@@ -194,6 +199,7 @@ func (a *App) startBotGateway(cfg *config.Config) {
 // stopBotGateway 停止内嵌的 bot gateway。
 func (a *App) stopBotGateway() {
 	gw := a.botGW.Swap(nil)
+	netdev.SetNotifyPusher(nil)
 	if gw != nil {
 		gw.Stop()
 	}
@@ -325,4 +331,41 @@ func botChannelConfigsFromConnections(connections []config.BotConnectionConfig) 
 		return nil
 	}
 	return out
+}
+
+// netdevIMBridge adapts the netdev findings store into the bot gateway's
+// /netdev commands (read-only; the store text is already redacted at capture).
+type netdevIMBridge struct{}
+
+func (netdevIMBridge) NetdevActiveFindings() []bot.NetdevFindingSummary {
+	fs, err := netdev.ListFindings()
+	if err != nil {
+		return nil
+	}
+	var out []bot.NetdevFindingSummary
+	for _, f := range fs {
+		if f.Status == "resolved" {
+			continue
+		}
+		out = append(out, bot.NetdevFindingSummary{ID: f.ID, Severity: f.Severity, Title: f.Title, Devices: f.Devices, Status: f.Status})
+	}
+	return out
+}
+
+func (netdevIMBridge) NetdevFindingByID(id string) bot.NetdevFindingDetail {
+	fs, err := netdev.ListFindings()
+	if err != nil {
+		return bot.NetdevFindingDetail{NotFound: true}
+	}
+	for _, f := range fs {
+		if f.ID != id {
+			continue
+		}
+		d := bot.NetdevFindingDetail{ID: f.ID, Severity: f.Severity, Title: f.Title, Devices: f.Devices, Detail: f.Detail, Status: f.Status}
+		for _, e := range f.Evidence {
+			d.Evidence = append(d.Evidence, bot.NetdevEvidenceView{Device: e.Device, Command: e.Command, Output: e.Output})
+		}
+		return d
+	}
+	return bot.NetdevFindingDetail{NotFound: true}
 }

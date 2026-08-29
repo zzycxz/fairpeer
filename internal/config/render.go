@@ -301,10 +301,6 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	b.WriteString("\n")
 
-	b.WriteString("[builtin_mcp]\n")
-	fmt.Fprintf(&b, "context7_enabled = %v   # built-in Context7 MCP; off until manually enabled\n", c.BuiltInMCP.Context7Enabled)
-	b.WriteString("\n")
-
 	// [dream] toggles the background self-evolution agents. Without this section
 	// in the rendered file, SetDreamEnabled/Intervals writes were silently dropped
 	// (LoadForRoot fell back to defaults), so the master switch never persisted.

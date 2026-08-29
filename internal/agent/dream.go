@@ -466,6 +466,21 @@ func ShouldAutoDistill(sessionDir string) bool {
 // apply the master switch for manual runs, take the inFlight lock, run, and
 // record. Returns the run record (including any error) and whether a run
 // actually executed.
+// quietDreamSink hides a background dream/distill turn from the hosting tab's
+// UI: only accounting (Usage), persistence (TurnDone), and toasts (Notice)
+// pass through. Content events (the task brief, reasoning, tool traffic)
+// stay invisible.
+type quietDreamSink struct{ inner event.Sink }
+
+func (q quietDreamSink) Emit(e event.Event) {
+	switch e.Kind {
+	case event.Usage, event.Notice, event.TurnDone:
+		if q.inner != nil {
+			q.inner.Emit(e)
+		}
+	}
+}
+
 func runKind(ctx context.Context, sessionDir string, kind DreamKind, task string, timeout time.Duration, prov provider.Provider, reg *tool.Registry, sess *Session, sink event.Sink, trigger DreamTrigger) (DreamRun, bool) {
 	run := DreamRun{Kind: kind, Trigger: trigger, StartedAt: time.Now()}
 
@@ -498,7 +513,14 @@ func runKind(ctx context.Context, sessionDir string, kind DreamKind, task string
 
 	bgCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	sub := New(prov, reg, sess, Options{}, sink)
+	// 完全隐藏 (ppt-capability-upgrade-spec P3): the background self-evolution
+	// turn runs on the shared session but must never render in the tab's
+	// transcript or composer — the task brief leaking into the input box was
+	// the reported bug. The quiet sink drops all content/streaming events;
+	// Usage keeps the tab's token accounting honest, TurnDone keeps the
+	// autosave, Notice keeps the distill-completion toast. Dream status is
+	// surfaced separately via DreamRunView.
+	sub := New(prov, reg, sess, Options{}, quietDreamSink{inner: sink})
 	err := sub.Run(bgCtx, task)
 	run.Duration = time.Since(run.StartedAt).Truncate(time.Second).String()
 	switch err {

@@ -29,6 +29,7 @@ import {
   Mail,
   Coffee,
   MessageSquare,
+  MonitorPlay,
   PartyPopper,
 
   RefreshCw,
@@ -41,10 +42,12 @@ import {
 } from "lucide-react";
 
 import { app, onRagChanged, onRagProgress } from "../../lib/bridge";
+import { subscribeBrowserMirrorFocus } from "../../lib/browserMirror";
 import { useToast } from "../../lib/toast";
 import { CustomSelect } from "./CustomSelect";
 import { ContextPanel } from "../ContextPanel";
 import { DockTabs, useDockTabState } from "../DockTabs";
+import { BrowserMirrorPanel } from "./BrowserMirrorPanel";
 
 // realApp mirrors bridge.ts's private helper: returns the Wails binding only
 // when window.go.main.App is present (i.e. we are inside the desktop shell).
@@ -62,7 +65,6 @@ import type {
   RagNodeView,
   TaskView,
   BotDockStatusView,
-  WireUsage,
 } from "../../lib/types";
 import { WorkspacePanel } from "../WorkspacePanel";
 import { EntityDetail } from "./EntityDetail";
@@ -141,13 +143,13 @@ export interface CoworkDockProps {
   onEntityClick?: (name: string) => void;
   onFileClick?: (path: string) => void;
   // Context overview tab data — forwarded to DefaultDock's "概览" (Overview)
-  // tab, which renders ContextPanel. Optional; ContextPanel degrades to its
-  // own app.ContextPanel fetch when these are absent.
+  // tab, which renders the slim ContextPanel (stats strip + turn facts).
+  // busy disables the compact button while the active tab is streaming.
   contextInfo?: ContextInfo;
-  usage?: WireUsage;
   sessionTokens?: number;
   activeTabId?: string;
   dockRefreshKey?: number;
+  busy?: boolean;
 }
 
 export function CoworkDock({
@@ -159,10 +161,10 @@ export function CoworkDock({
   onEntityClick,
   onFileClick,
   contextInfo,
-  usage,
   sessionTokens,
   activeTabId,
   dockRefreshKey,
+  busy,
 }: CoworkDockProps) {
   return mode === "rag" ? (
     <RagDock onClose={onClose} onEntityClick={onEntityClick} onFileClick={onFileClick} />
@@ -173,10 +175,10 @@ export function CoworkDock({
       onClose={onClose}
       onToggleMaximized={onToggleMaximized}
       contextInfo={contextInfo}
-      usage={usage}
       sessionTokens={sessionTokens}
       activeTabId={activeTabId}
       refreshKey={dockRefreshKey}
+      busy={busy}
     />
   );
 }
@@ -188,7 +190,10 @@ export function CoworkDock({
 // DefaultDock (Kp) — 今日 / 邮件 / 文件 / 概览
 // ===========================================================================
 
-type DefaultTab = "today" | "mail" | "files" | "overview";
+type DefaultTab = "today" | "mail" | "files" | "overview" | "browser";
+// "browser" (the agent-browser mirror) is deliberately NOT in the default
+// open set: per the pane-system's context-driven principle the tab appears
+// when browsing activity starts (or via the "+" menu), not by default.
 const DEFAULT_TAB_CATALOG: readonly DefaultTab[] = ["today", "mail", "files", "overview"];
 const COWORK_DOCK_TABS_KEY = "fairpeer.coworkDockTabs";
 
@@ -198,20 +203,20 @@ function DefaultDock({
   onClose,
   onToggleMaximized,
   contextInfo,
-  usage,
   sessionTokens,
   activeTabId,
   refreshKey,
+  busy,
 }: {
   cwd?: string;
   maximized: boolean;
   onClose: () => void;
   onToggleMaximized: () => void;
   contextInfo?: ContextInfo;
-  usage?: WireUsage;
   sessionTokens?: number;
   activeTabId?: string;
   refreshKey?: number;
+  busy?: boolean;
 }) {
   const t = useT();
   const [tab, setTab] = useState<DefaultTab>("today");
@@ -243,11 +248,24 @@ function DefaultDock({
     setTab(key);
   };
 
+  // Mirror-tab focus requests come from App (browser activity onset): ensure
+  // the tab exists and switch to it. Setters are stable, so an empty dep list
+  // keeps one subscription per dock mount.
+  useEffect(
+    () =>
+      subscribeBrowserMirrorFocus(() => {
+        setOpenTabs((prev) => (prev.includes("browser") ? prev : [...prev, "browser"]));
+        setTab("browser");
+      }),
+    [],
+  );
+
   const TAB_DEFS: { key: DefaultTab; label: string; icon: React.ReactNode }[] = [
     { key: "today", label: t("coworkDock.today"), icon: <CalendarDays size={13} /> },
     { key: "mail", label: t("coworkDock.mail"), icon: <Mail size={13} /> },
     { key: "files", label: t("coworkDock.files"), icon: <FileText size={13} /> },
     { key: "overview", label: t("coworkDock.overview"), icon: <Activity size={13} /> },
+    { key: "browser", label: t("coworkDock.browser"), icon: <MonitorPlay size={13} /> },
   ];
 
   return (
@@ -291,11 +309,12 @@ function DefaultDock({
           <ContextPanel
             tabId={activeTabId}
             context={contextInfo}
-            usage={usage}
             sessionTokens={sessionTokens}
             refreshKey={refreshKey}
+            busy={busy}
           />
         )}
+        {tab === "browser" && <BrowserMirrorPanel />}
       </div>
     </aside>
   );

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -78,6 +79,16 @@ func (a *App) saveWindowStateSync() {
 	if a.ctx == nil {
 		return
 	}
+	// WindowGetSize can panic in winc (ScaleToDefaultDPI divides by a DPI that
+	// is zero once the window is destroyed — observed 2026-08-29 when shutdown
+	// races the native destroy). Geometry persistence is best-effort; a
+	// shutdown-time panic takes the whole process down with a nonzero exit and
+	// a scary dialog, so recover and keep the last saved state instead.
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Warn("window-state: save skipped (window already destroyed)")
+		}
+	}()
 	w, h := runtime.WindowGetSize(a.ctx)
 	x, y := runtime.WindowGetPosition(a.ctx)
 	max := runtime.WindowIsMaximised(a.ctx)

@@ -29,7 +29,6 @@ import (
 	"unicode"
 
 	"github.com/zzycxz/fairpeer/internal/agent"
-	"github.com/zzycxz/fairpeer/internal/builtinmcp"
 	"github.com/zzycxz/fairpeer/internal/checkpoint"
 	"github.com/zzycxz/fairpeer/internal/codegraph"
 	"github.com/zzycxz/fairpeer/internal/command"
@@ -3202,9 +3201,6 @@ func (c *Controller) ConnectConfiguredMCPServer(name string) (int, error) {
 		if p.Name == name {
 			return c.connectMCPServer(p)
 		}
-	}
-	if p, ok := builtinmcp.Entry(name); ok {
-		return c.connectMCPServer(p)
 	}
 	if name == "codegraph" {
 		return c.connectCodegraphMCPServer(cfg)

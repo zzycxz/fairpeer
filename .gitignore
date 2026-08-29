@@ -50,6 +50,8 @@ __pycache__/
 /desktop/build/obj/
 /desktop/desktop
 /desktop/desktop.exe
+/desktop/e2e-*.log
+/desktop/*-e2e.exe
 /desktop/frontend/dist/*
 /desktop/frontend/package.json.md5
 /desktop/frontend/wailsjs/

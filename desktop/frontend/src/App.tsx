@@ -27,8 +27,9 @@ import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, useT, type Translator } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onEvent, onProjectTreeChanged, onSchedulerNotice,
-  onRemoteStatus,
+  onRemoteStatus, onBrowserMirror,
 } from "./lib/bridge";
+import { browserMirrorSnapshot, pushBrowserMirrorFrame, requestBrowserMirrorFocus } from "./lib/browserMirror";
 import { onProfileChanged } from "./lib/bridge";
 import { CoWorkLayout } from "./layouts/CoWorkLayout";
 import { NetDevLayout, NetdevTitleBar } from "./layouts/NetDevLayout";
@@ -42,6 +43,7 @@ import { AskCard } from "./components/AskCard";
 import { ClearContextCard } from "./components/ClearContextCard";
 import { SidebarFooter } from "./components/SidebarFooter";
 import { TerminalPanel, loadTerminalOpen, saveTerminalOpen } from "./components/TerminalPanel";
+import logoSymbol from "./assets/logo-symbol.png";
 import { ContextMenu, type ContextMenuPoint } from "./components/ContextMenu";
 import { LoopPanel } from "./components/loop/LoopPanel";
 import { ProfileSegmented } from "./components/AppChrome";
@@ -135,7 +137,7 @@ const RIGHT_DOCK_TREE_MIN_WIDTH = 260;
 // 运维 dock 的下限：设备卡/发现卡的内容（命令按钮、证据链）与审计表
 // 五列在更窄的栏里会折行成灾——编码 dock 的 260 下限对它远远不够；
 // 380 起步让终端尾随/命令 chips 不再挤（2026-08-27 舒展化调整）。
-const NETDEV_DOCK_MIN_WIDTH = 380;
+const NETDEV_DOCK_MIN_WIDTH = 280;
 const RIGHT_DOCK_TREE_MAX_WIDTH = 1200;
 const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 660;
 const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
@@ -942,6 +944,10 @@ export default function App() {
   // mentioning localhost must not mutate the hidden dev dock's state.
   useEffect(() => {
     if (coworkActive || netdevActive) return;
+    // state.items can be null transiently while useController hydrates a
+    // restored tab — reading .length then crashes the restored view (one-off
+    // startup React error observed 2026-08-29 E2E).
+    if (!state.items) return;
     const re = /\b(?:https?:\/\/)?(?:localhost|127\.0\.0\.1)(?::\d{2,5})\b[^\s"'<>)]*/i;
     for (let i = state.items.length - 1; i >= 0; i--) {
       const it = state.items[i];
@@ -967,6 +973,27 @@ export default function App() {
       setScopedItem(RIGHT_DOCK_MODE_KEY, rightDockMode);
     } catch { /* storage unavailable */ }
   }, [rightDockMode]);
+
+  // Browser mirror (pane-system §3.6 companion): forward every kernel frame
+  // into the module store (always-on — the stream survives dock/tab closes),
+  // and on activity onset auto-open the cowork dock on the 浏览器 tab. Browser
+  // tools are cowork-profile only, so other profiles just record frames.
+  // Anti-nag mirrors the preview dock: closing the dock mid-run suppresses
+  // reopening until the next run/session start.
+  const browserMirrorSuppressedRef = useRef(false);
+  useEffect(
+    () =>
+      onBrowserMirror((frame) => {
+        if (frame.kind === "status" && frame.phase === "start") {
+          browserMirrorSuppressedRef.current = false;
+        }
+        const startedActivity = pushBrowserMirrorFrame(frame);
+        if (!startedActivity || !coworkActive || browserMirrorSuppressedRef.current) return;
+        requestBrowserMirrorFocus();
+        setCoworkDockOpen(true);
+      }),
+    [coworkActive],
+  );
 
   const commitPreviewUrl = useCallback((url: string) => {
     setPreviewUrl(url);
@@ -1013,6 +1040,22 @@ export default function App() {
   // Bottom axis's side session (pane-system §3.5): which open tab the mini
   // composer talks to; null → auto-pick the first non-active session tab.
   const [sideSessionTabId, setSideSessionTabId] = useState<string | null>(null);
+  // 人工终端设备页签（NETDEV_SPEC_V2 §10.5）：设备卡「终端」经
+  // "fairpeer:netdev-terminal" 事件抵达——面板打开并新增该设备的页签。
+  const [openDeviceTerm, setOpenDeviceTerm] = useState<{ device: string; seq: number }>({ device: "", seq: 0 });
+  useEffect(() => {
+    const onOpenDevice = (e: Event) => {
+      const d = (e as CustomEvent<{ device: string }>).detail;
+      if (!d?.device) return;
+      setTerminalOpen((v) => {
+        if (!v) saveTerminalOpen(true);
+        return true;
+      });
+      setOpenDeviceTerm((prev) => ({ device: d.device, seq: prev.seq + 1 }));
+    };
+    window.addEventListener("fairpeer:netdev-terminal", onOpenDevice);
+    return () => window.removeEventListener("fairpeer:netdev-terminal", onOpenDevice);
+  }, []);
   const toggleTerminal = useCallback(() => {
     setTerminalOpen((v) => {
       saveTerminalOpen(!v);
@@ -2373,6 +2416,11 @@ export default function App() {
       return;
     }
     if (coworkActive) {
+      // Mirror anti-nag (§3.3 pattern): a manual close mid-browsing-run
+      // suppresses the dock's auto-reopen until the next run/session starts.
+      if (browserMirrorSnapshot().running) {
+        browserMirrorSuppressedRef.current = true;
+      }
       setCoworkDockOpen(false);
       return;
     }
@@ -3202,6 +3250,7 @@ ${t("remote.uncPromptBody", { path: picked })}
     <TerminalPanel
       onClose={toggleTerminal}
       cwd={state.meta?.cwd}
+      openDevice={openDeviceTerm}
       sessionPane={
         <SideSessionPane
           tabs={tabMetas}
@@ -3446,6 +3495,7 @@ ${t("remote.uncPromptBody", { path: picked })}
             sessionTokens={state.sessionTokens}
             activeTabId={activeTabId}
             dockRefreshKey={dockRefreshKey}
+            dockBusy={state.running}
           />
         )}
         {netdevActive && (
@@ -3534,7 +3584,10 @@ ${t("remote.uncPromptBody", { path: picked })}
               aria-label={sidebarToggleTitle}
               aria-pressed={!sidebarCollapsed}
             >
-              <PanelLeft size={16} />
+              <div className="brand-toggle-group">
+                <img src={logoSymbol} alt="" className="brand-toggle-logo" draggable={false} />
+                <PanelLeft size={16} className="brand-toggle-icon" />
+              </div>
             </button>
             <ProfileSegmented
               profile={netdevActive ? "netdev" : coworkActive ? "cowork" : "dev"}
@@ -3747,6 +3800,7 @@ ${t("remote.uncPromptBody", { path: picked })}
                   context={state.context}
                   sessionTokens={state.sessionTokens}
                   refreshKey={dockRefreshKey}
+                  busy={state.running}
                 />
               ) : rightDockMode === "preview" ? (
                 <PreviewPane url={previewUrl} onUrlCommit={commitPreviewUrl} />

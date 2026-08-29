@@ -673,54 +673,6 @@
 .workspace-search input::placeholder {
   color: var(--fg-faint);
 }
-.workspace-files__scope {
-  flex: 0 0 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 0 10px 8px;
-  padding: 5px 6px 5px 9px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm);
-  background: var(--bg-soft);
-  color: var(--fg-dim);
-  font-size: 11.5px;
-  line-height: 1.2;
-}
-.workspace-files__scope-title,
-.workspace-files__scope-meta {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.workspace-files__scope-title {
-  flex: 1 1 auto;
-  color: var(--fg);
-  font-weight: 580;
-}
-.workspace-files__scope-meta {
-  flex: 0 1 auto;
-  color: var(--fg-faint);
-}
-.workspace-files__scope button {
-  --wails-draggable: no-drag;
-  flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg-faint);
-}
-.workspace-files__scope button:hover {
-  background: var(--tree-row-hover-bg);
-  color: var(--fg);
-}
 .workspace-tree {
   flex: 1 1 auto;
   min-height: 0;
@@ -3399,6 +3351,21 @@
 /* Per-turn lifecycle facts (upgrade spec 4-4) */
 .ctx-facts { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
 .ctx-facts__head { font-size: 11.5px; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
-.ctx-facts__row { display: grid; grid-template-columns: 2em 4em 3em 4em 1fr 3em; gap: 6px; font-variant-numeric: tabular-nums; font-size: 12px; padding: 1px 2px; }
+.ctx-facts__row { display: grid; grid-template-columns: 2em 4.5em 3.5em 4em 1fr 3.5em; gap: 6px; font-variant-numeric: tabular-nums; font-size: 12px; padding: 1px 2px; }
 .ctx-facts__row--head { opacity: 0.5; font-size: 11px; }
 .ctx-facts__row--err { color: var(--danger, #f85149); }
+
+/* td-panel — trust domain settings section (TRUSTDOMAIN_SPEC §15.3). Scoped
+   to .td-panel; reuses the settings modals' shared tokens. */
+.td-panel{display:flex;flex-direction:column;gap:14px;}
+.td-panel__head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.td-panel__head code{font-size:11px;color:var(--fg-faint);}
+.td-panel__meta{font-size:11px;color:var(--fg-faint);}
+.td-panel__actions{display:flex;gap:8px;}
+.td-panel__actions .danger{color:var(--danger,var(--fg));}
+.td-panel__members,.td-panel__tokens{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;}
+.td-panel__members li,.td-panel__tokens li{display:flex;align-items:center;gap:10px;padding:6px 8px;border:1px solid color-mix(in srgb,var(--fg) 12%,transparent);border-radius:var(--radius-md);font-size:12px;}
+.td-panel__members code,.td-panel__tokens code{font-size:11px;}
+.td-panel__member--admin{border-left:2px solid var(--accent);}
+.td-panel__member--revoked{opacity:.55;border-left:2px solid var(--danger,currentColor);}
+.td-panel__members em,.td-panel__tokens small{font-style:normal;color:var(--fg-faint);font-size:10.5px;}

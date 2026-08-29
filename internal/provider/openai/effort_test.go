@@ -96,3 +96,44 @@ func TestReasoningProtocolExplicit(t *testing.T) {
 		t.Fatalf("effort=%q, want empty for none protocol", c.effort)
 	}
 }
+
+func TestReasoningProtocolMiniMaxForcesDialect(t *testing.T) {
+	// reasoning_protocol = "minimax" forces the MiniMax thinking knob even on
+	// an unrelated host — the escape hatch for gateway/proxy BaseURLs where
+	// host sniffing can't see minimaxi.com.
+	p, err := New(provider.Config{
+		Name:    "gatewayed-minimax",
+		BaseURL: "https://my-gateway.example.com/v1",
+		Model:   "minimax-m2.7",
+		APIKey:  "k",
+		Extra:   map[string]any{"reasoning_protocol": "minimax", "effort": "high"},
+	})
+	if err != nil {
+		t.Fatalf("New minimax protocol: %v", err)
+	}
+	c := p.(*client)
+	if !c.minimax {
+		t.Fatalf("minimax dialect not forced by explicit protocol")
+	}
+	if c.effort != "adaptive" {
+		t.Fatalf("effort=%q, want adaptive (high maps to adaptive under MiniMax)", c.effort)
+	}
+}
+
+func TestReasoningProtocolUnknownRejected(t *testing.T) {
+	// A typo must surface as a build error listing valid values — not
+	// silently degrade to auto.
+	_, err := New(provider.Config{
+		Name:    "typo-protocol",
+		BaseURL: "https://example.com",
+		Model:   "test-model-a",
+		APIKey:  "k",
+		Extra:   map[string]any{"reasoning_protocol": "opena1"},
+	})
+	if err == nil {
+		t.Fatalf("unknown reasoning_protocol accepted, want error")
+	}
+	if !strings.Contains(err.Error(), "auto|openai|minimax|none") {
+		t.Fatalf("error should list valid values, got: %v", err)
+	}
+}

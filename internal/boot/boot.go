@@ -24,7 +24,6 @@ import (
 	"github.com/zzycxz/fairpeer/internal/agent"
 	"github.com/zzycxz/fairpeer/internal/apihelper"
 	"github.com/zzycxz/fairpeer/internal/assets"
-	"github.com/zzycxz/fairpeer/internal/builtinmcp"
 	"github.com/zzycxz/fairpeer/internal/codegraph"
 	"github.com/zzycxz/fairpeer/internal/command"
 	"github.com/zzycxz/fairpeer/internal/config"
@@ -54,7 +53,24 @@ import (
 var (
 	sandboxEnforceWarnOnce sync.Once
 	powershellWarnOnce     sync.Once
+	secretDegradedOnce     sync.Once
 )
+
+// warnDegradedSecretStore emits a one-time notice when the secret store falls
+// back to machine-bound encryption (no OS keystore and no passphrase
+// configured — typically headless Linux without a session keyring). The
+// ciphertext is then recomputable by any local process, so the user should
+// know and optionally set FAIRPEER_SECRET_PASSPHRASE(_FILE).
+func warnDegradedSecretStore(stderr io.Writer, store *secret.Store) {
+	backend, degraded := store.SecurityMode()
+	if !degraded {
+		return
+	}
+	secretDegradedOnce.Do(func() {
+		fmt.Fprintf(stderr, "warning: secret store is using degraded machine-bound encryption (backend %q); "+
+			"set FAIRPEER_SECRET_PASSPHRASE or run on a system with a keychain/secret service for user-bound encryption\n", backend)
+	})
+}
 
 // ErrUnknownModel is returned by Build when the configured model can't be
 // resolved to a provider — e.g. a default_model left over from a renamed or
@@ -368,6 +384,10 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 	}
 	// Model-specific prompt addon (thinking encouragement, serial constraint, etc.)
+	// Built once per Build — cache-stable for the session. Model switches go
+	// through SetModelForTab's full boot.Build, so this addon is recomputed
+	// with the new family; never add a model-swap path that skips the rebuild
+	// (MODEL_ROUTING_SPEC invariant 3).
 	if addon := instruction.ForModel(entry.Model); addon != "" {
 		sysPrompt += "\n\n" + addon
 	}
@@ -597,15 +617,26 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// so the dev tool list stays focused on coding. (Update: they are hidden
 	// from the main loop via reg.Hide, so registering them unconditionally
 	// doesn't pollute the dev tool list, but allows subagents to work anywhere).
-	if config.ProfileNameKey(profileName(opts.Profile)) == config.ProfileCowork { // Browser automation tools (cowork only). Hidden from the main loop's
-		// schema: the model drives the browser through run_skill("browser-auto")
-		// or run_skill("desktop-auto") subagents, which reach these via
-		// FilterRegistry. This keeps 12 browser tool schemas out of every turn.
+	profileKey := config.ProfileNameKey(profileName(opts.Profile))
+	if profileKey == config.ProfileCowork || profileKey == config.ProfileNetDev { // Browser automation tools (cowork + netdev: the ops console's
+		// browser tab shares this session infrastructure, and netdev skills
+		// may drive browsers too). Hidden from the main loop's schema: the
+		// model drives the browser through run_skill("browser-auto")
+		// subagents, which reach these via FilterRegistry. This keeps 12
+		// browser tool schemas out of every turn.
 		builtin.SetConfiguredBrowserPath(cfg.Cowork.BrowserPath)
 		for _, t := range builtin.BrowserTools() {
 			reg.Add(t)
 			reg.Hide(t.Name())
 		}
+		// Browser launch options must be wired for netdev too — the ops
+		// console's spawned sessions read the same global config (visible
+		// window + persistent profile + proxy). The proxy URL is resolved
+		// from the network spec; auto/env modes fall back to a probe via
+		// ProxyURLFor (chromedp needs one concrete --proxy-server URL).
+		builtin.SetBrowserLaunchOptions(cfg.Cowork.BrowserHeadless, cfg.Cowork.BrowserUserDataDir, resolveBrowserProxyURL(proxySpec))
+	}
+	if profileKey == config.ProfileCowork {
 		// Desktop automation tools (screenshot, screen_click/type/scroll,
 		// get_ui_tree). Windows-native (Win32 BitBlt/SendInput); on other
 		// platforms ScreenTools returns nil so nothing registers and cowork
@@ -661,6 +692,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if _, err := secret.Default().LoadIntoEnv(); err != nil {
 			fmt.Fprintf(stderr, "warning: secret store load failed: %v\n", err)
 		}
+		warnDegradedSecretStore(stderr, secret.Default())
 		builtin.SetEmailAccounts(cfg.Cowork.EmailAccounts)
 		for _, t := range builtin.EmailTools() {
 			reg.Add(t)
@@ -736,12 +768,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		builtin.SetProviderChatRunner(func(ctx context.Context, modelRef string, msgs []provider.Message) ([]provider.Message, error) {
 			return runProviderVLMChat(ctx, cfg, modelRef, msgs)
 		})
-		// Browser launch options: visible browser + persistent profile + proxy, so
-		// the driven browser behaves like a human user and reaches sites the same
-		// way fairpeer's other HTTP traffic does. The proxy URL is resolved from
-		// the network spec; auto/env modes fall back to a probe via ProxyURLFor
-		// (chromedp needs one concrete --proxy-server URL, not a per-request func).
-		builtin.SetBrowserLaunchOptions(cfg.Cowork.BrowserHeadless, cfg.Cowork.BrowserUserDataDir, resolveBrowserProxyURL(proxySpec))
+		// Browser launch options: set above in the shared cowork+netdev
+		// section (the ops console reads the same globals).
 		// Autonomous browsing (browser_auto): inject a runtime that launches the
 		// shared browser, mirrors it to the in-app panel (if a desktop sink is
 		// registered), and drives the Python browser-use sidecar. The sidecar
@@ -790,12 +818,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Partition configured plugins by tier so eager/lazy/background can each
 	// take the path that fits them. User entries default to background: the
 	// session starts immediately while enabled MCP servers warm up.
-	autoStartEntries := builtinmcp.AppendEnabled(
-		cfg.AutoStartPlugins(),
-		cfg.Plugins,
-		cfg.BuiltInMCP.EnabledNames(),
-		pluginSpecNames(opts.ExtraPlugins)...,
-	)
+	autoStartEntries := cfg.AutoStartPlugins()
 	// PPT and other office-app operations are done the SAME way a human does
 	// them: via the screen_* CUA tools (open the app, perceive the UI, click,
 	// type) — NOT via COM automation. There are no ppt_* tools; the agent
@@ -819,7 +842,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	// NAMED plugin hiding (Profile.HiddenPlugins): unlike the whitelist above,
 	// this removes only the servers the profile names — builtin profiles use it
-	// to keep coding-domain MCPs (codegraph, context7) out of office/netdev
+	// to keep coding-domain MCPs (codegraph) out of office/netdev
 	// modes without hiding the user-installed servers those modes exist for.
 	if opts.Profile != nil {
 		kept := autoStartEntries[:0]
@@ -1952,6 +1975,12 @@ func NewProvider(e *config.ProviderEntry) (provider.Provider, error) {
 // VLM, etc.) pass false. mainProvider is threaded explicitly so concurrent
 // boot.Build calls don't race on a process-global "which provider is main" flag.
 func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec, mainProvider bool) (provider.Provider, error) {
+	// Reject reasoning_protocol typos up front (anthropic ignores the knob, so
+	// the openai wire layer alone would not catch it there). Surface the valid
+	// values instead of silently degrading to auto.
+	if e != nil && !config.ReasoningProtocolValid(e.ReasoningProtocol) {
+		return nil, fmt.Errorf("provider %q: unknown reasoning_protocol %q (valid: auto|openai|minimax|none)", e.Name, e.ReasoningProtocol)
+	}
 	p, err := provider.New(e.Kind, provider.Config{
 		Name:    e.Name,
 		BaseURL: e.BaseURL,
@@ -2093,6 +2122,7 @@ var netdevExcludedToolPrefixes = []string{
 // its grip on the renamed skill.
 var legacySkillRenames = map[string]string{
 	"computer-auto": "desktop-auto", // renamed 2026-08: GUI-only scope
+	"rag-auto":      "knowledge-auto", // renamed 2026-08: name said the tech (RAG), not the job (knowledge base)
 }
 
 // normalizeSkillName applies legacySkillRenames (case-insensitive) and returns
@@ -2164,7 +2194,7 @@ var builtinBuiltinSkillNames = []string{
 	"init", "install-capability", "test",
 	"explore", "research", "review", "security-review",
 	"browser-auto", "desktop-auto", "ppt-auto",
-	"email-auto", "rag-auto", "schedule-auto",
+	"email-auto", "knowledge-auto", "schedule-auto",
 	"document-auto", "expert-auto",
 	"netdev-help",
 	"netdev-playbook",

@@ -44,33 +44,43 @@ export function Welcome({
     t("welcome.coworkEx6"),
   ];
 
+  // Netdev profile: ops-oriented starters. Like cowork they FILL the composer
+  // (onInsert) instead of sending — ops prompts name devices/paths the user
+  // must first adapt to their own inventory, and an immediate send would
+  // dead-end on an empty inventory.
+  const netdevExamples = [
+    t("welcome.netdevEx1"),
+    t("welcome.netdevEx2"),
+    t("welcome.netdevEx3"),
+    t("welcome.netdevEx4"),
+  ];
+
   const isCowork = profile === "cowork";
   const isNetdev = profile === "netdev";
-  
-  if (isNetdev) {
-    return null;
-  }
 
-  const examples = isCowork ? coworkExamples : devExamples;
-  // Cowork bubbles fill the composer (editable before send); dev bubbles send
-  // immediately (the original fast-start behavior). Fall back to onPrompt if the
-  // cowork caller forgot to wire onInsert, so a click never dead-ends.
+  const examples = isNetdev ? netdevExamples : isCowork ? coworkExamples : devExamples;
+  // Cowork/netdev bubbles fill the composer (editable before send); dev
+  // bubbles send immediately (the original fast-start behavior). Fall back to
+  // onPrompt if the caller forgot to wire onInsert, so a click never dead-ends.
   const handlePick = (text: string) => {
-    if (isCowork && onInsert) {
+    if ((isCowork || isNetdev) && onInsert) {
       onInsert(text);
     } else {
       onPrompt(text);
     }
   };
 
+  const title = isNetdev ? t("welcome.netdevTitle") : t("welcome.title");
+  const tagline = isNetdev ? t("welcome.netdevTagline") : t("welcome.tagline");
+
   return (
-    <div className={`welcome welcome--brand${isCowork ? " welcome--cowork" : ""}`}>
+    <div className={`welcome welcome--brand${isCowork ? " welcome--cowork" : ""}${isNetdev ? " welcome--netdev" : ""}`}>
       <span className="welcome__brand">
         <img src={logoWordmark} className="welcome__brand-logo" alt="FairPeer" draggable={false} />
       </span>
-      <h2 className="welcome__title">{t("welcome.title")}</h2>
+      <h2 className="welcome__title">{title}</h2>
       <div className="welcome__tag">
-        {t("welcome.tagline")}
+        {tagline}
       </div>
 
       <div className="welcome__hints">

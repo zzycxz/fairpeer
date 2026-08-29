@@ -5,11 +5,12 @@ import { ProfileSegmented } from "../components/AppChrome";
 import { useT } from "../lib/i18n";
 import { app, onExpertsCollab } from "../lib/bridge";
 import { CalendarTaskPanel } from "../components/cowork/CalendarTaskPanel";
+import logoSymbol from "../assets/logo-symbol.png";
 import { RagPanel } from "../components/cowork/RagPanel";
 import { PreferencePanel } from "../components/cowork/PreferencePanel";
 import { ExpertPanel } from "../components/cowork/ExpertPanel";
 import { CoworkDock } from "../components/cowork/CoworkDock";
-import type { ContextInfo, WireUsage } from "../lib/types";
+import type { ContextInfo } from "../lib/types";
 
 export type CoWorkPanel = "taskCenter" | "preference" | "calendarTask" | "rag" | "experts";
 
@@ -63,14 +64,13 @@ export interface CoWorkLayoutProps {
   onSidebarResizeKey?: (event: ReactKeyboardEvent<HTMLButtonElement>) => void;
   onSidebarResetWidth?: () => void;
   // Context overview tab data — forwarded to CoworkDock's "概览" (Overview) tab,
-  // which renders ContextPanel. Mirrors the coding-mode ContextPanel wiring
-  // (App.tsx:2940); these props are optional because the dock still works
-  // without them (ContextPanel falls back to its own app.ContextPanel fetch).
+  // which renders the slim ContextPanel (stats strip + turn facts). dockBusy
+  // disables the compact button while the active tab is streaming.
   contextInfo?: ContextInfo;
-  usage?: WireUsage;
   sessionTokens?: number;
   activeTabId?: string;
   dockRefreshKey?: number;
+  dockBusy?: boolean;
 }
 
 export function CoWorkLayout({
@@ -104,10 +104,10 @@ export function CoWorkLayout({
   onSidebarResizeKey,
   onSidebarResetWidth,
   contextInfo,
-  usage,
   sessionTokens,
   activeTabId,
   dockRefreshKey,
+  dockBusy,
 }: CoWorkLayoutProps) {
   const t = useT();
   const [activePanel, setActivePanel] = useState<CoWorkPanel>("taskCenter");
@@ -201,7 +201,10 @@ export function CoWorkLayout({
               aria-label={sidebarToggleTitle}
               aria-pressed={!sidebarCollapsed}
             >
-              <PanelLeft size={16} />
+              <div className="brand-toggle-group">
+                <img src={logoSymbol} alt="" className="brand-toggle-logo" draggable={false} />
+                <PanelLeft size={16} className="brand-toggle-icon" />
+              </div>
             </button>
           )}
           <ProfileSegmented
@@ -332,10 +335,10 @@ export function CoWorkLayout({
             window.dispatchEvent(new CustomEvent("rag:open-file", { detail: { path } }));
           }}
           contextInfo={contextInfo}
-          usage={usage}
           sessionTokens={sessionTokens}
           activeTabId={activeTabId}
           dockRefreshKey={dockRefreshKey}
+          busy={dockBusy}
         />
       )}
 

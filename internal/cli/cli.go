@@ -104,6 +104,9 @@ func Run(args []string, version string) int {
 	case "bot":
 		configureCLIThemeFromConfigNoProbe()
 		return botCommand(rest, version)
+	case "trustdomain":
+		configureCLIThemeFromConfigNoProbe()
+		return trustdomainCommand(rest, version)
 	case "version", "--version", "-v":
 		fmt.Println("fairpeer", version)
 		return 0
@@ -119,7 +122,7 @@ func Run(args []string, version string) int {
 
 func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 	switch cmd {
-	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor", "bot":
+	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "codegraph", "doctor", "bot", "trustdomain":
 		return true
 	default:
 		return false

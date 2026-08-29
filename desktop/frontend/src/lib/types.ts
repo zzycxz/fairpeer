@@ -1165,7 +1165,7 @@ export interface DreamStatusView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "bots" | "cowork" | "preference" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "network" | "hooks" | "appearance" | "updates" | "mobile" | "netdev";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "cowork" | "preference" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "network" | "hooks" | "appearance" | "updates" | "mobile" | "netdev" | "trustdomain";
 
 // Settings panel payloads (desktop/settings_app.go).
 export interface ProviderView {
@@ -1671,10 +1671,13 @@ export interface NetDevDeviceView {
   fwApiTokenSet?: boolean;
   fwApiToken?: string;
   encoding: string;
-  allowTelnet: boolean;
   // Extra log-directory whitelist roots (outside /var/log) for log-source reads.
   logPaths: string[];
-  // Dial-priority order (ssh, telnet, netconf).
+  // Server config-file whitelist roots (§7.3): snapshot/diff/drift + restore-verify.
+  configPaths?: string[];
+  // 带外启动器 deep link (§6.3): ESXi/堡垒/BMC Web UI.
+  oobUrl?: string;
+  // Dial-priority order (ssh, netconf).
   protocols?: string[];
   // SNMP collector credentials (community write-only, blank = keep).
   snmpVersion?: string;
@@ -2032,6 +2035,89 @@ export interface BrowserMirrorFrame {
   image?: string; // data URL (frame only)
 }
 
+// ── 浏览器控制台 (ops browser console) ───────────────────────────────────────
+
+export interface BrowserConsoleState {
+  open: boolean;
+  session_id: string;
+  browser: string;
+  attached: boolean;
+  url: string;
+}
+
+export interface BrowserConsoleElement {
+  ref: string;
+  role: string;
+  name: string;
+  value?: string;
+}
+
+export interface BrowserConsoleRecordEvent {
+  type: string; // click|input|change|submit|navigate|effect
+  selector?: string;
+  role?: string;
+  name?: string;
+  value?: string;
+  url?: string;
+  time: number;
+  effective?: boolean;
+  password?: boolean;
+}
+
+export interface BrowserConsoleTraceFilter {
+  kept: BrowserConsoleRecordEvent[];
+  dropped: BrowserConsoleRecordEvent[];
+}
+
+export interface BrowserSkillDraft {
+  name: string;
+  content: string;
+  fallback: boolean;
+  detail?: string;
+}
+
+export interface BrowserConsoleSkill {
+  name: string;
+  description: string;
+  browser: boolean;
+}
+
+// Editor step vocabulary (values parameter-substituted before trial runs).
+export type BrowserConsoleStepType =
+  | "navigate"
+  | "click"
+  | "type"
+  | "key"
+  | "scroll"
+  | "select"
+  | "upload"
+  | "wait"
+  | "extract"
+  | "screenshot"
+  | "evaluate";
+
+export interface BrowserConsoleStep {
+  type: BrowserConsoleStepType;
+  target?: string;
+  url?: string;
+  text?: string;
+  value?: string;
+  direction?: string;
+  amount?: number;
+  condition?: string;
+  timeout_sec?: number;
+  files?: string[];
+  expression?: string;
+  label?: string;
+}
+
+export interface BrowserConsoleTrialStatus {
+  index: number; // -1 = run terminal event
+  status: "running" | "done" | "failed";
+  output?: string;
+  error?: string;
+}
+
 export interface NetDevLiveDeviceState {
   device: string;
   vendor: string;
@@ -2068,11 +2154,23 @@ export interface NetDevSSHImportCandidate {
 
 export interface NetDevProposalStep {
   device: string;
+  /** 判别联合（§7.1）: "" | cli | k8s-apply | sql-migration | file-upload | cert-replace */
+  type?: string;
   commands: string[];
   rollback?: string[];
+  yaml?: string;
+  up_sql?: string;
+  down_sql?: string;
+  local_path?: string;
+  remote_path?: string;
+  key_local_path?: string;
+  key_remote_path?: string;
+  checksum?: string;
+  reload_cmd?: string;
   backup?: string;
   applied: boolean;
   error?: string;
+  dangerous?: boolean;
 }
 
 // Mirrors the Go Proposal JSON (lowercase tags).
@@ -2087,6 +2185,139 @@ export interface NetDevProposal {
   approver?: string;
   confirm2?: boolean;
   note?: string;
+  watch_until?: string;
+  watch_note?: string;
+}
+
+// ── Job 引擎（R4，v1 C 批）─────────────────────────────────────────────────
+
+export interface NetDevJobStep {
+  name: string;
+  device: string;
+  command: string;
+  expect?: string;
+  timeout_sec?: number;
+  retries?: number;
+  on_fail?: string; // pause | abort | continue
+  pause_before?: boolean;
+}
+
+export interface NetDevJobStepState {
+  status: string; // pending | running | ok | failed | skipped
+  attempts?: number;
+  output?: string;
+  error?: string;
+  started_at?: string;
+  ended_at?: string;
+}
+
+export interface NetDevJob {
+  id: string;
+  name: string;
+  steps: NetDevJobStep[];
+  step_state: NetDevJobStepState[];
+  status: string; // running | paused | done | failed | aborted
+  budget?: { max_wall_sec?: number; max_commands?: number; fail_streak?: number };
+  created_at: string;
+  started_at?: string;
+  ended_at?: string;
+  active_ms: number;
+  commands: number;
+  cursor: number;
+  breakpoint_ok: number;
+  pause_note?: string;
+}
+
+// ── 割接模式（§7.2）────────────────────────────────────────────────────────
+
+export interface NetDevCutoverGate {
+  device: string;
+  command: string;
+  expect: string;
+  sustain_sec?: number;
+  timeout_sec?: number;
+}
+
+export interface NetDevCutoverStep {
+  label: string;
+  est_sec?: number;
+  proposal_id?: string;
+  device?: string;
+  command?: string;
+  gate?: NetDevCutoverGate;
+  decision_point?: boolean;
+  impact?: string;
+  status: string; // pending | running | gating | done | failed | approved | rolled-back | skipped
+  started_at?: string;
+  ended_at?: string;
+  output?: string;
+  error?: string;
+}
+
+export interface NetDevCutoverRun {
+  id: string;
+  name: string;
+  deadline: string;
+  steps: NetDevCutoverStep[];
+  status: string; // running | hold | done | failed | aborted
+  hold_note?: string;
+  cursor: number;
+  pre_snapshot?: Record<string, string>;
+  post_snapshot?: Record<string, string>;
+  report?: string;
+  created_at: string;
+  started_at?: string;
+  ended_at?: string;
+}
+
+// ── 批量模板（§7.2）────────────────────────────────────────────────────────
+
+export interface NetDevTemplateStep {
+  commands: string[]; // {{var}} placeholders
+  rollback: string[];
+}
+
+export interface NetDevTemplate {
+  id: string;
+  name: string;
+  intent: string;
+  vars: string[];
+  steps: NetDevTemplateStep[];
+  targets: string[];
+  created_at: string;
+}
+
+export interface NetDevTemplatePreviewStep {
+  commands: string[];
+  rollback: string[];
+  classes: string[]; // per rendered command: read|write|dangerous|unknown
+  dangerous: boolean;
+}
+
+export interface NetDevTemplatePreviewDevice {
+  device: string;
+  available: boolean;
+  reason?: string;
+  steps: NetDevTemplatePreviewStep[];
+}
+
+// ── 服务器配置文件管理（§7.3）───────────────────────────────────────────────
+
+export interface NetDevSrvConfVersion {
+  id: string;
+  device: string;
+  path: string;
+  at: string;
+  bytes: number;
+  lines: number;
+}
+
+export interface NetDevSrvConfDriftRow {
+  device: string;
+  group: string;
+  status: string; // same | drift | error | absent
+  diff?: string;
+  error?: string;
 }
 
 // Mirrors the Go Finding JSON (lowercase tags).

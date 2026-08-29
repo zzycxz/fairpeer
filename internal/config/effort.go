@@ -6,9 +6,10 @@ import (
 )
 
 const (
-	ReasoningProtocolAuto   = "auto"
-	ReasoningProtocolOpenAI = "openai"
-	ReasoningProtocolNone   = "none"
+	ReasoningProtocolAuto    = "auto"
+	ReasoningProtocolOpenAI  = "openai"
+	ReasoningProtocolMiniMax = "minimax"
+	ReasoningProtocolNone    = "none"
 )
 
 // Canonical effort levels. All providers use this unified vocabulary.
@@ -162,15 +163,38 @@ func explicitReasoningProtocol(e *ProviderEntry) string {
 	return protocol
 }
 
+// ValidReasoningProtocols lists every accepted reasoning_protocol value —
+// used for error messages so typos surface instead of silently degrading to
+// auto (the old behaviour swallowed unknown values).
+var ValidReasoningProtocols = []string{ReasoningProtocolAuto, ReasoningProtocolOpenAI, ReasoningProtocolMiniMax, ReasoningProtocolNone}
+
+// normalizeReasoningProtocol maps "" and "auto" to "" (endpoint auto-detect).
+// A recognized explicit protocol is lowercased and returned verbatim; an
+// UNKNOWN value is returned as-is (lowercased) so callers can reject it —
+// silent fallback would hide config typos from the user.
 func normalizeReasoningProtocol(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	switch v {
 	case "", ReasoningProtocolAuto:
 		return ""
-	case ReasoningProtocolOpenAI, ReasoningProtocolNone:
-		return strings.ToLower(strings.TrimSpace(raw))
+	case ReasoningProtocolOpenAI, ReasoningProtocolMiniMax, ReasoningProtocolNone:
+		return v
 	default:
-		return ""
+		return v
 	}
+}
+
+// ReasoningProtocolValid reports whether raw is one of the accepted values.
+func ReasoningProtocolValid(raw string) bool {
+	v := normalizeReasoningProtocol(raw)
+	if v == "" {
+		return true
+	}
+	switch v {
+	case ReasoningProtocolOpenAI, ReasoningProtocolMiniMax, ReasoningProtocolNone:
+		return true
+	}
+	return false
 }
 
 func effortNotConfigurableError(e *ProviderEntry) error {

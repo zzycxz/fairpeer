@@ -47,6 +47,12 @@ import type {
   NetDevFinding,
   NetDevTopologyGraph,
   NetDevProposal,
+  NetDevJob,
+  NetDevCutoverRun,
+  NetDevTemplate,
+  NetDevTemplatePreviewDevice,
+  NetDevSrvConfVersion,
+  NetDevSrvConfDriftRow,
   NetDevSSHImportCandidate,
   FilePreview,
   HistoryMessage,
@@ -131,6 +137,22 @@ import type {
 //
 // Types for the new native-feel bindings — kept inline since they are
 // bridge-specific and only used in AppBindings / the dev mock.
+
+// Trust domain panel view (desktop/trustdomain_app.go mirrors this shape).
+export interface TrustDomainMemberView {
+  id: string; name: string; role: string; attestation?: string; admittedAt: number;
+}
+export interface TrustDomainTokenView {
+  id: string; resource: string; ops: string[]; expires: number; parent?: string;
+}
+export interface TrustDomainView {
+  enabled: boolean; joined: boolean; detail?: string;
+  domain?: string; height: number; head?: string; paused: boolean;
+  quorum?: string; me?: string;
+  members?: TrustDomainMemberView[]; revoked?: string[]; tokens?: TrustDomainTokenView[];
+  successionConfigured: boolean; successionAfterSec: number;
+  successionMembers?: string[]; successionLastActive: number; successionDue: boolean;
+}
 interface NativeConfirmRequest {
   title: string;
   message: string;
@@ -489,12 +511,46 @@ export interface AppBindings {
   NetDevHumanTTYWrite(device: string, input: string): Promise<void>;
   NetDevHumanTTYStop(device: string): Promise<void>;
   NetDevHumanTTYStatus(): Promise<{ device: string; connected: boolean; startedAt: string; bytes: number }[]>;
+  NetDevHumanTTYResize(device: string, cols: number, rows: number): Promise<void>;
   NetDevSFTPDownload(device: string, remotePath: string): Promise<string>;
   NetDevSFTPBrowse(device: string, dirPath: string): Promise<string[]>;
+  // Job 引擎（R4，v1 C 批）——诊断 runbook 的多步骤 harness
+  NetDevJobStart(def: NetDevJob): Promise<NetDevJob>;
+  NetDevJobs(): Promise<NetDevJob[]>;
+  NetDevJobGet(id: string): Promise<NetDevJob>;
+  NetDevJobPause(id: string): Promise<void>;
+  NetDevJobResume(id: string): Promise<NetDevJob>;
+  NetDevJobAbort(id: string): Promise<NetDevJob>;
+  // 割接模式（§7.2）——倒计时 runbook + 验证门 + 回退决策点
+  NetDevCutoverStart(def: NetDevCutoverRun): Promise<NetDevCutoverRun>;
+  NetDevCutovers(): Promise<NetDevCutoverRun[]>;
+  NetDevCutoverGet(id: string): Promise<NetDevCutoverRun>;
+  NetDevCutoverContinue(id: string): Promise<NetDevCutoverRun>;
+  NetDevCutoverRollback(id: string): Promise<NetDevCutoverRun>;
+  NetDevCutoverAbort(id: string): Promise<NetDevCutoverRun>;
+  NetDevCutoverReport(id: string): Promise<string>;
+  // 批量模板（§7.2）——渲染预览无副作用；apply 生成提案草稿
+  NetDevTemplates(): Promise<NetDevTemplate[]>;
+  NetDevTemplateSave(t: NetDevTemplate): Promise<NetDevTemplate>;
+  NetDevTemplateDelete(id: string): Promise<void>;
+  NetDevTemplateRender(id: string, vars: Record<string, string>): Promise<NetDevTemplatePreviewDevice[]>;
+  NetDevTemplateApply(id: string, vars: Record<string, string>): Promise<NetDevProposal>;
+  // 服务器配置文件管理（§7.3）
+  NetDevSrvConfSnapshot(device: string, path: string): Promise<NetDevSrvConfVersion>;
+  NetDevSrvConfVersions(device: string, path: string): Promise<NetDevSrvConfVersion[]>;
+  NetDevSrvConfDiff(idA: string, idB: string): Promise<string>;
+  NetDevSrvConfDrift(path: string, devices: string[]): Promise<NetDevSrvConfDriftRow[]>;
+  // 带外启动器（§6.3）
+  NetDevOOBLaunch(device: string): Promise<string>;
   NetDevLogFollowStart(device: string, source: string): Promise<void>;
   NetDevLogFollowStop(device: string): Promise<void>;
   NetDevDBQuery(source: string, query: string): Promise<string>;
   NetDevHealthSnapshot(): Promise<NetDevHealthSnapshot>;
+  // Trust domain (docs/TRUSTDOMAIN_SPEC.md §15.3): read-mostly panel + brake.
+  TrustDomainStatus(): Promise<TrustDomainView>;
+  TrustDomainPause(reason: string): Promise<void>;
+  TrustDomainResume(): Promise<void>;
+  TrustDomainAnchor(): Promise<void>;
   // P2: passive syslog ring buffer + audit hash-chain verify + alert resolve.
   NetDevSyslogTail(device: string, tailN: number, grep: string): Promise<string[]>;
   NetDevSyslogStatus(): Promise<NetDevSyslogStatusView>;
@@ -533,6 +589,33 @@ export interface AppBindings {
   // OpenURLInManagedBrowser launches the managed browser if needed and opens
   // the URL as a new tab in it (preview pane's companion-window tier).
   OpenURLInManagedBrowser(url: string): Promise<ManagedBrowserStatus>;
+  // 浏览器控制台 (ops browser console): manual primitives over the kernel's
+  // console session slot, recording, and the record→SKILL.md generator.
+  // Progress streams: "browser:record" (live events) / "browser:trial"
+  // (per-step trial-run status).
+  BrowserConsoleOpen(cdpURL: string, url: string): Promise<import("./types").BrowserConsoleState>;
+  BrowserConsoleState(): Promise<import("./types").BrowserConsoleState>;
+  BrowserConsoleClose(): Promise<void>;
+  BrowserConsoleNavigate(url: string): Promise<string>;
+  BrowserConsoleElements(): Promise<import("./types").BrowserConsoleElement[]>;
+  BrowserConsoleClick(target: string): Promise<string>;
+  BrowserConsoleType(target: string, text: string): Promise<string>;
+  BrowserConsoleKey(key: string): Promise<void>;
+  BrowserConsoleScroll(direction: string, amount: number): Promise<string>;
+  BrowserConsoleSelectOption(target: string, value: string): Promise<string>;
+  BrowserConsoleUploadFile(target: string, files: string[]): Promise<string>;
+  BrowserConsoleWait(condition: string, timeoutSec: number): Promise<string>;
+  BrowserConsoleExtract(selector: string): Promise<string>;
+  BrowserConsoleScreenshot(): Promise<string>;
+  BrowserConsoleEvaluate(expression: string): Promise<string>;
+  BrowserConsoleRecordStart(): Promise<void>;
+  BrowserConsoleRecordStop(): Promise<import("./types").BrowserConsoleRecordEvent[]>;
+  BrowserConsoleFilterTrace(events: import("./types").BrowserConsoleRecordEvent[]): Promise<import("./types").BrowserConsoleTraceFilter>;
+  BrowserConsoleGenerateSkill(nameHint: string, events: import("./types").BrowserConsoleRecordEvent[]): Promise<import("./types").BrowserSkillDraft>;
+  BrowserConsoleSaveSkill(content: string, overwrite: boolean): Promise<string>;
+  BrowserConsoleListSkills(): Promise<import("./types").BrowserConsoleSkill[]>;
+  BrowserConsoleReadSkill(name: string): Promise<string>;
+  BrowserConsoleTrialRun(steps: import("./types").BrowserConsoleStep[]): Promise<void>;
   // Loop Engineering (docs/loop-engineering-spec.md): start/stop/status of the
   // supervised agent loop. Round updates arrive on the "loop:round" event.
   LoopStart(tabID: string, config: LoopConfig): Promise<void>;
@@ -821,6 +904,30 @@ function emitNetdevLiveMock(events: NetDevLiveEvent[]) {
   for (const cb of netdevLiveListeners) cb(events);
 }
 
+// onNetdevHumanTTY subscribes to the human-terminal output stream
+// ("netdev:humantty": {device, chunk} — desktop/netdev_app.go forwards the
+// Go-side PTY tap). Device tabs filter by device name.
+export interface NetDevHumanTTYChunk {
+  device: string;
+  chunk: string;
+}
+
+const netdevHumanTTYListeners = new Set<(ev: NetDevHumanTTYChunk) => void>();
+
+export function onNetdevHumanTTY(cb: (ev: NetDevHumanTTYChunk) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("netdev:humantty", (ev) => cb(ev as NetDevHumanTTYChunk));
+  }
+  netdevHumanTTYListeners.add(cb);
+  return () => {
+    netdevHumanTTYListeners.delete(cb);
+  };
+}
+
+export function emitNetdevHumanTTYMock(ev: NetDevHumanTTYChunk) {
+  for (const cb of netdevHumanTTYListeners) cb(ev);
+}
+
 // onNetdevLogFollow subscribes to the streaming log-follow channel
 // ("netdev:logfollow": chunks + the terminal done event with the stop reason).
 export function onNetdevLogFollow(cb: (ev: NetDevLogFollowEvent) => void): () => void {
@@ -856,6 +963,42 @@ const browserMirrorListeners = new Set<(f: import("./types").BrowserMirrorFrame)
 
 export function emitBrowserMirrorMock(f: import("./types").BrowserMirrorFrame) {
   for (const cb of browserMirrorListeners) cb(f);
+}
+
+// onBrowserRecord subscribes to the browser console's live recording stream
+// ("browser:record": one event per captured click/input/navigation).
+export function onBrowserRecord(cb: (ev: import("./types").BrowserConsoleRecordEvent) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("browser:record", (ev) => cb(ev as import("./types").BrowserConsoleRecordEvent));
+  }
+  browserRecordListeners.add(cb);
+  return () => {
+    browserRecordListeners.delete(cb);
+  };
+}
+
+const browserRecordListeners = new Set<(ev: import("./types").BrowserConsoleRecordEvent) => void>();
+
+export function emitBrowserRecordMock(ev: import("./types").BrowserConsoleRecordEvent) {
+  for (const cb of browserRecordListeners) cb(ev);
+}
+
+// onBrowserTrial subscribes to the skill editor's trial-run progress
+// ("browser:trial": per-step running/done/failed; index -1 is terminal).
+export function onBrowserTrial(cb: (st: import("./types").BrowserConsoleTrialStatus) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("browser:trial", (st) => cb(st as import("./types").BrowserConsoleTrialStatus));
+  }
+  browserTrialListeners.add(cb);
+  return () => {
+    browserTrialListeners.delete(cb);
+  };
+}
+
+const browserTrialListeners = new Set<(st: import("./types").BrowserConsoleTrialStatus) => void>();
+
+export function emitBrowserTrialMock(st: import("./types").BrowserConsoleTrialStatus) {
+  for (const cb of browserTrialListeners) cb(st);
 }
 
 // onNetdevHealth subscribes to health change events ("netdev:health": one
@@ -2001,6 +2144,11 @@ function makeMockApp(): AppBindings {
   // Two seeded devices mirror the topology mock (CORE-01/ACC-01) so the
   // click-a-node → device card flow is demoable in the browser dev shell.
   let mockBackups: { id: string; device: string; at: string; bytes: number; lines: number }[] = [];
+  // Job 引擎 / 割接 mock state (R4) — in-memory, mock-run scoped.
+  const mockNetDevJobs: NetDevJob[] = [];
+  const mockNetDevCutovers: NetDevCutoverRun[] = [];
+  const mockNetDevTemplates: NetDevTemplate[] = [];
+
   let mockNetDev: any = {
     enabled: false,
     networkName: "我的网络",
@@ -2087,18 +2235,130 @@ function makeMockApp(): AppBindings {
       return null;
     },
     async NetDevHumanTTYStart(_d: string): Promise<{ device: string; connected: boolean; startedAt: string; bytes: number }> {
+      // Browser dev: a short banner plays so the device tab renders standalone.
+      setTimeout(() => emitNetdevHumanTTYMock({ device: _d, chunk: "\r\n[mock] 人工终端（浏览器开发模拟）——真实会话在桌面端\r\n" }), 100);
       return { device: _d, connected: true, startedAt: new Date().toISOString(), bytes: 0 };
     },
-    async NetDevHumanTTYWrite(_d: string, _i: string): Promise<void> {},
+    async NetDevHumanTTYWrite(d: string, input: string): Promise<void> {
+      emitNetdevHumanTTYMock({ device: d, chunk: input });
+    },
     async NetDevHumanTTYStop(_d: string): Promise<void> {},
     async NetDevHumanTTYStatus(): Promise<{ device: string; connected: boolean; startedAt: string; bytes: number }[]> {
       return [];
     },
+    async NetDevHumanTTYResize(_d: string, _c: number, _r: number): Promise<void> {},
     async NetDevSFTPDownload(_d: string, _p: string): Promise<string> {
       return "(browser dev mock)";
     },
     async NetDevSFTPBrowse(_d: string, _p: string): Promise<string[]> {
       return [];
+    },
+    async NetDevJobStart(def: NetDevJob): Promise<NetDevJob> {
+      const j: NetDevJob = { ...def, id: "J-mock-1", status: "paused", pause_note: "browser dev mock", commands: def.steps.length, breakpoint_ok: 0, active_ms: 0, step_state: def.steps.map(() => ({ status: "pending" })) };
+      mockNetDevJobs.length = 0;
+      mockNetDevJobs.push(j);
+      return j;
+    },
+    async NetDevJobs(): Promise<NetDevJob[]> {
+      return mockNetDevJobs;
+    },
+    async NetDevJobGet(id: string): Promise<NetDevJob> {
+      const j = mockNetDevJobs.find(x => x.id === id);
+      if (!j) throw new Error("browser dev mock: no such job");
+      return j;
+    },
+    async NetDevJobPause(_id: string): Promise<void> {},
+    async NetDevJobResume(id: string): Promise<NetDevJob> {
+      const j = mockNetDevJobs.find(x => x.id === id);
+      if (!j) throw new Error("browser dev mock: no such job");
+      j.status = "done";
+      j.pause_note = "";
+      return j;
+    },
+    async NetDevJobAbort(id: string): Promise<NetDevJob> {
+      const j = mockNetDevJobs.find(x => x.id === id);
+      if (!j) throw new Error("browser dev mock: no such job");
+      j.status = "aborted";
+      return j;
+    },
+    async NetDevCutoverStart(def: NetDevCutoverRun): Promise<NetDevCutoverRun> {
+      const c: NetDevCutoverRun = { ...def, id: "C-mock-1", status: "hold", hold_note: "决策点（浏览器模拟）：变更已下发", cursor: 1, created_at: new Date().toISOString(), steps: def.steps.map(s => ({ ...s, status: s.decision_point ? "approved" : "done" })) };
+      mockNetDevCutovers.length = 0;
+      mockNetDevCutovers.push(c);
+      return c;
+    },
+    async NetDevCutovers(): Promise<NetDevCutoverRun[]> {
+      return mockNetDevCutovers;
+    },
+    async NetDevCutoverGet(id: string): Promise<NetDevCutoverRun> {
+      const c = mockNetDevCutovers.find(x => x.id === id);
+      if (!c) throw new Error("browser dev mock: no such cutover");
+      return c;
+    },
+    async NetDevCutoverContinue(id: string): Promise<NetDevCutoverRun> {
+      const c = mockNetDevCutovers.find(x => x.id === id);
+      if (!c) throw new Error("browser dev mock: no such cutover");
+      c.status = "done";
+      c.hold_note = "";
+      c.report = "# 割接对比报告（浏览器模拟）\n\n无变化\n";
+      return c;
+    },
+    async NetDevCutoverRollback(id: string): Promise<NetDevCutoverRun> {
+      const c = mockNetDevCutovers.find(x => x.id === id);
+      if (!c) throw new Error("browser dev mock: no such cutover");
+      c.status = "aborted";
+      c.hold_note = "已按决策点回退（浏览器模拟）";
+      return c;
+    },
+    async NetDevCutoverAbort(id: string): Promise<NetDevCutoverRun> {
+      const c = mockNetDevCutovers.find(x => x.id === id);
+      if (!c) throw new Error("browser dev mock: no such cutover");
+      c.status = "aborted";
+      return c;
+    },
+    async NetDevCutoverReport(_id: string): Promise<string> {
+      return "cutover-mock.md";
+    },
+    async NetDevTemplates(): Promise<NetDevTemplate[]> {
+      return mockNetDevTemplates;
+    },
+    async NetDevTemplateSave(t: NetDevTemplate): Promise<NetDevTemplate> {
+      const saved: NetDevTemplate = { ...t, id: t.id || "T-mock-1", created_at: t.created_at || new Date().toISOString() };
+      mockNetDevTemplates.length = 0;
+      mockNetDevTemplates.push(saved);
+      return saved;
+    },
+    async NetDevTemplateDelete(_id: string): Promise<void> {},
+    async NetDevTemplateRender(id: string, vars: Record<string, string>): Promise<NetDevTemplatePreviewDevice[]> {
+      const tpl = mockNetDevTemplates.find(t => t.id === id);
+      return (tpl?.targets ?? []).map(dev => ({
+        device: dev,
+        available: true,
+        steps: (tpl?.steps ?? []).map(s => ({
+          commands: s.commands.map(c => c.replace(/\{\{(\w+)\}\}/g, (_m, k) => vars[k] ?? `{{${k}}}`)),
+          rollback: s.rollback.map(c => c.replace(/\{\{(\w+)\}\}/g, (_m, k) => vars[k] ?? `{{${k}}}`)),
+          classes: s.commands.map(() => "write"),
+          dangerous: false,
+        })),
+      }));
+    },
+    async NetDevTemplateApply(_id: string, _vars: Record<string, string>): Promise<NetDevProposal> {
+      throw new Error("browser dev mock: no proposal backend");
+    },
+    async NetDevSrvConfSnapshot(_d: string, _p: string): Promise<NetDevSrvConfVersion> {
+      return { id: "sc@mock@hash@1", device: _d, path: _p, at: new Date().toISOString().slice(5, 16), bytes: 128, lines: 8 };
+    },
+    async NetDevSrvConfVersions(_d: string, _p: string): Promise<NetDevSrvConfVersion[]> {
+      return [];
+    },
+    async NetDevSrvConfDiff(_a: string, _b: string): Promise<string> {
+      return "";
+    },
+    async NetDevSrvConfDrift(_p: string, devices: string[]): Promise<NetDevSrvConfDriftRow[]> {
+      return devices.map(d => ({ device: d, group: "", status: "same" }));
+    },
+    async NetDevOOBLaunch(_d: string): Promise<string> {
+      return "(browser dev mock) 带外启动仅桌面端可用";
     },
     async NetDevLocate(_target: string): Promise<NetDevLocateResult> {
       return { target: _target, hits: [], searched: [], covered_devices: 0, total_devices: 0, budget_stopped: false, note: "browser dev mock" };
@@ -2149,6 +2409,12 @@ function makeMockApp(): AppBindings {
     async NetDevHealthSnapshot(): Promise<NetDevHealthSnapshot> {
       return { pollIntervalSeconds: 0, devices: [] };
     },
+    async TrustDomainStatus(): Promise<TrustDomainView> {
+      return { enabled: false, joined: false, height: 0, paused: false, successionConfigured: false, successionAfterSec: 0, successionLastActive: 0, successionDue: false };
+    },
+    async TrustDomainPause(_reason: string): Promise<void> {},
+    async TrustDomainResume(): Promise<void> {},
+    async TrustDomainAnchor(): Promise<void> {},
     async NetDevSyslogTail(_device: string, _tailN: number, _grep: string): Promise<string[]> {
       return ["(browser dev mock: syslog receiver off)"];
     },
@@ -4411,6 +4677,88 @@ function makeMockApp(): AppBindings {
     async OpenURLInManagedBrowser(_url: string) {
       await delay(300);
       return { running: true, url: "http://127.0.0.1:9222", browser: "Chrome (mock)", profile: "~/fairpeer/browser-profile", alreadyRunning: false };
+    },
+    // 浏览器控制台 mock：browser dev 模式下的桩——交互原语返回模拟输出，
+    // 录制/生成给出一条示例轨迹转朴素草稿，试运行模拟三步进度。
+    async BrowserConsoleOpen(_cdpURL: string, url: string) {
+      await delay(400);
+      return { open: true, session_id: "br_mock", browser: "Chrome (mock)", attached: false, url: url || "about:blank" };
+    },
+    async BrowserConsoleState() {
+      return { open: false, session_id: "", browser: "", attached: false, url: "" };
+    },
+    async BrowserConsoleClose() {},
+    async BrowserConsoleNavigate(url: string) { await delay(300); return `已导航到 ${url} (mock)`; },
+    async BrowserConsoleElements() {
+      return [
+        { ref: "e1", role: "textbox", name: "用户名", value: "" },
+        { ref: "e2", role: "textbox", name: "密码", value: "" },
+        { ref: "e3", role: "button", name: "登录" },
+      ];
+    },
+    async BrowserConsoleClick(target: string) { await delay(200); return `已点击 ${target} (mock)`; },
+    async BrowserConsoleType(target: string, text: string) { await delay(200); return `已在 ${target} 输入 ${text.length} 字符 (mock)`; },
+    async BrowserConsoleKey(_key: string) { await delay(150); },
+    async BrowserConsoleScroll(_direction: string, _amount: number) { await delay(150); return "已滚动 (mock)"; },
+    async BrowserConsoleSelectOption(target: string, value: string) { return `已在 ${target} 选择 ${value} (mock)`; },
+    async BrowserConsoleUploadFile(target: string, files: string[]) { return `已向 ${target} 上传 ${files.length} 个文件 (mock)`; },
+    async BrowserConsoleWait(_condition: string, _timeoutSec: number) { await delay(300); return "waited (mock)"; },
+    async BrowserConsoleExtract(selector: string) { return selector ? `提取 ${selector} 的内容 (mock)` : "提取整页内容 (mock)"; },
+    async BrowserConsoleScreenshot() { await delay(300); return "data:image/png;base64,"; },
+    async BrowserConsoleEvaluate(_expression: string) { return "undefined (mock)"; },
+    async BrowserConsoleRecordStart() { await delay(200); },
+    async BrowserConsoleRecordStop() {
+      return [
+        { type: "navigate", url: "https://ops.portal.local/", time: Date.now() },
+        { type: "input", selector: "#user", role: "textbox", name: "用户名", value: "admin", time: Date.now() + 900 },
+        { type: "click", selector: "button[type=submit]", role: "button", name: "登录", time: Date.now() + 1600 },
+      ];
+    },
+    async BrowserConsoleFilterTrace(events) {
+      return { kept: events.filter((e) => e.type !== "effect"), dropped: events.filter((e) => e.type === "effect") };
+    },
+    async BrowserConsoleGenerateSkill(nameHint: string, events) {
+      const content = [
+        "---",
+        `name: ${nameHint || "mock-skill"}`,
+        "description: 浏览器操作技能（mock）。",
+        "runAs: subagent",
+        "allowed-tools: browser_open, browser_navigate, browser_click, browser_type, browser_wait, browser_extract",
+        "---",
+        "",
+        `# ${nameHint || "mock 技能"}`,
+        "",
+        "## 何时使用",
+        "",
+        "（mock 草稿）",
+        "",
+        "## 步骤",
+        "",
+        "| # | 操作 | 目标 | 值 |",
+        "|---|------|------|------|",
+        ...events.map((e, i) => `| ${i + 1} | ${e.type} | \`${e.selector ?? e.url ?? ""}\` | ${e.value ?? ""} |`),
+        "",
+        "## 注意事项",
+        "",
+        "- mock",
+        "",
+        "## 验证",
+        "",
+        "- mock",
+        "",
+      ].join("\n");
+      return { name: nameHint || "mock-skill", content, fallback: true, detail: "browser dev mock" };
+    },
+    async BrowserConsoleSaveSkill(_content: string, _overwrite: boolean) { return "~/.fairpeer/skills/mock/SKILL.md (mock)"; },
+    async BrowserConsoleListSkills() { return [{ name: "mock-skill", description: "浏览器操作技能（mock）", browser: true }]; },
+    async BrowserConsoleReadSkill(_name: string) { return "---\nname: mock-skill\ndescription: mock\n---\n\n# mock\n"; },
+    async BrowserConsoleTrialRun(steps) {
+      for (let i = 0; i < steps.length; i++) {
+        emitBrowserTrialMock({ index: i, status: "running" });
+        await delay(400);
+        emitBrowserTrialMock({ index: i, status: "done", output: "(mock)" });
+      }
+      emitBrowserTrialMock({ index: -1, status: "done" });
     },
     // Loop Engineering mock: a fast 3-round simulation so the panel's config →
     // running → report flow is demoable without the Go backend.

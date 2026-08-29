@@ -123,6 +123,21 @@ func (r *ModelRegistry) Get() []ProviderTemplate {
 	return loadEmbedSnapshot()
 }
 
+// Find returns the template for a provider name, or nil when unknown.
+// Same initialization fallback as Get (embed snapshot on startup race).
+func (r *ModelRegistry) Find(providerName string) *ProviderTemplate {
+	if providerName == "" {
+		return nil
+	}
+	ts := r.Get()
+	for i := range ts {
+		if ts[i].Name == providerName {
+			return &ts[i]
+		}
+	}
+	return nil
+}
+
 // UpdatedAt returns the last successful remote/cache load time.
 func (r *ModelRegistry) UpdatedAt() time.Time {
 	r.mu.RLock()
@@ -166,6 +181,33 @@ func userConfigDir() string {
 // GetProviderTemplates returns the current vendor templates for the onboarding
 // wizard and Settings "add provider" picker. Returns the in-memory registry if
 // initialized, otherwise the embed snapshot (so the UI always renders).
+// registryReasoningAmong filters models down to the ones models.dev flags
+// reasoning-capable for this provider. Display-only (UI badges); the
+// behaviour layer never reads registry data (MODEL_ROUTING_SPEC §5).
+func registryReasoningAmong(providerName string, models []string) []string {
+	if providerName == "" || len(models) == 0 {
+		return nil
+	}
+	tmpl := globalRegistry.Find(providerName)
+	if tmpl == nil || len(tmpl.ReasoningModels) == 0 {
+		return nil
+	}
+	flags := make(map[string]bool, len(tmpl.ReasoningModels))
+	for _, m := range tmpl.ReasoningModels {
+		flags[m] = true
+	}
+	out := make([]string, 0, len(models))
+	for _, m := range models {
+		if flags[m] {
+			out = append(out, m)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func (a *App) GetProviderTemplates() []ProviderTemplate {
 	return globalRegistry.Get()
 }

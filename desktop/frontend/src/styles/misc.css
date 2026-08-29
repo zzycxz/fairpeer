@@ -13,12 +13,6 @@
 }
 
 
-/* Compact-now button in ContextPanel session-status section */
-.context-panel__compact-btn {
-  margin-top: 8px;
-  width: 100%;
-}
-
 /* ── Frontend UX Enhancements (V2) ─────────────────────────────── */
 /* Button active press feedback */
 .button:active, .btn:active, .list-row:active {

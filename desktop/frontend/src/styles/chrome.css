@@ -673,6 +673,11 @@
   color: var(--err);
   border-bottom: 1px solid var(--border-soft);
 }
+.banner--warn {
+  background: color-mix(in srgb, var(--err) 12%, var(--bg-soft));
+  color: var(--err);
+  border-bottom: 1px solid var(--border-soft);
+}
 .banner--success {
   background: color-mix(in srgb, var(--accent) 10%, var(--bg-soft));
   color: var(--accent);
@@ -827,4 +832,36 @@
   background: rgba(229, 72, 77, 0.16);
   color: #f0878a;
   text-decoration: line-through;
+}
+/* ── brand toggle with logo / icon hover swap ── */
+.brand-toggle-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+}
+.brand-toggle-logo {
+  position: absolute;
+  width: 26px !important;
+  height: 26px !important;
+  opacity: 1;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+}
+.brand-toggle-icon {
+  position: absolute;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+}
+button:hover .brand-toggle-logo {
+  opacity: 0;
+  transform: scale(0.9);
+}
+button:hover .brand-toggle-icon {
+  opacity: 1;
+  transform: scale(1);
 }

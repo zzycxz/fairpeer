@@ -27,6 +27,7 @@ require (
 )
 
 require (
+	al.essio.dev/pkg/shellescape v1.5.1 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -39,6 +40,7 @@ require (
 	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
+	github.com/danieljoos/wincred v1.2.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emersion/go-imap v1.2.1 // indirect
 	github.com/emersion/go-message v0.18.2 // indirect
@@ -118,6 +120,7 @@ require (
 	github.com/xuri/excelize/v2 v2.11.0 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
+	github.com/zalando/go-keyring v0.2.6 // indirect
 	go.mongodb.org/mongo-driver v1.17.4 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/net v0.56.0 // indirect

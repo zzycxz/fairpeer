@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/zzycxz/fairpeer/internal/event"
 )
 
 // TestDreamStateRecordAndRead verifies the run history round-trips through
@@ -89,4 +91,58 @@ func TestWorkspaceOldEnough(t *testing.T) {
 	if workspaceOldEnough(dir, 3*time.Hour) {
 		t.Fatalf("dir with a 2h-old session should NOT be old enough for a 3h interval")
 	}
+}
+
+type recordingSink struct{ events []event.Event }
+
+func (r *recordingSink) Emit(e event.Event) { r.events = append(r.events, e) }
+
+func (r *recordingSink) kinds() []event.Kind {
+	out := make([]event.Kind, 0, len(r.events))
+	for _, e := range r.events {
+		out = append(out, e.Kind)
+	}
+	return out
+}
+
+func hasKind(r *recordingSink, kind event.Kind) bool {
+	for _, e := range r.events {
+		if e.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// The background self-evolution turn must be INVISIBLE in the hosting tab:
+// the dream task brief used to stream into the transcript/input box because
+// the sub-agent shared the tab sink (完全隐藏 — ppt-capability-upgrade-spec
+// P3). The quiet sink passes only accounting/persistence/toast events.
+func TestQuietDreamSinkDropsContentEvents(t *testing.T) {
+	rec := &recordingSink{}
+	q := quietDreamSink{inner: rec}
+	for _, kind := range []event.Kind{event.TurnStarted, event.Text, event.Message, event.Reasoning, event.ToolDispatch, event.ToolResult, event.ToolProgress, event.Phase, event.Steer, event.CompactionStarted, event.CompactionDone} {
+		q.Emit(event.Event{Kind: kind})
+	}
+	q.Emit(event.Event{Kind: event.Usage})
+	q.Emit(event.Event{Kind: event.Notice, Text: "distill done"})
+	q.Emit(event.Event{Kind: event.TurnDone})
+
+	for _, leaked := range []event.Kind{event.TurnStarted, event.Text, event.Message, event.Reasoning, event.ToolDispatch, event.ToolResult} {
+		if hasKind(rec, leaked) {
+			t.Fatalf("content event %v leaked through quietDreamSink: %v", leaked, rec.kinds())
+		}
+	}
+	for _, want := range []event.Kind{event.Usage, event.Notice, event.TurnDone} {
+		if !hasKind(rec, want) {
+			t.Fatalf("expected %v to pass through quietDreamSink, got %v", want, rec.kinds())
+		}
+	}
+}
+
+// A nil inner sink must not panic (DefensiveSink contract of event.Sink).
+func TestQuietDreamSinkNilInner(t *testing.T) {
+	q := quietDreamSink{}
+	q.Emit(event.Event{Kind: event.Text})
+	q.Emit(event.Event{Kind: event.TurnDone})
 }

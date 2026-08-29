@@ -38,7 +38,9 @@ You have codegraph tools for symbol-level code intelligence. For architecture qu
 - codegraph_impact — what breaks if I change X
 - codegraph_trace — full call path between two symbols
 - codegraph_files — project file tree with symbol counts
-Use grep/read_file for content search (comments, strings, config values) and when codegraph is not available.`
+Use grep/read_file for content search (comments, strings, config values) and when codegraph is not available.
+
+The codegraph_* tools above and the "codegraph" entry in the MCP/plugin list are the SAME code-intelligence runtime (built-in tool mode vs 'codegraph serve --mcp' server mode) — disabling or uninstalling one side affects both.`
 
 // BundleDirName is the optional directory, beside the fairpeer executable, where
 // an operator can place an unpacked CodeGraph bundle for offline use. Its

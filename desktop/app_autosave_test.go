@@ -85,14 +85,20 @@ func appWithTab(t *testing.T, path string) (*App, *WorkspaceTab) {
 // TestTurnDonePersistsSession proves a completed turn is written to disk without
 // any explicit Snapshot call — the desktop autosave the data-loss fix adds. A
 // nil sink ctx (no webview) must not disable persistence.
+//
+// Determinism: wait for the autosave loop to go IDLE first, then read the file
+// once. Polling the file while the writer goroutine may still be in flight is
+// the timing window that made this test flaky under full-suite load.
 func TestTurnDonePersistsSession(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
-	_ = path
 	a, tab := appWithTab(t, path)
 
 	tab.sink.Emit(event.Event{Kind: event.TurnDone})
 
-	waitForFile(t, path, "remember this turn")
+	waitForAutosaveIdle(t, tab)
+	if b, err := os.ReadFile(path); err != nil || !strings.Contains(string(b), "remember this turn") {
+		t.Fatalf("after autosave went idle, session file %q should contain the turn (err=%v)", path, err)
+	}
 	_ = a
 }
 

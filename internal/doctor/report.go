@@ -15,6 +15,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/netclient"
 	runtimepkg "github.com/zzycxz/fairpeer/internal/runtime"
 	"github.com/zzycxz/fairpeer/internal/sandbox"
+	"github.com/zzycxz/fairpeer/internal/secret"
 )
 
 type Options struct {
@@ -37,7 +38,19 @@ type Report struct {
 	Network    NetworkReport    `json:"network"`
 	Permission PermissionReport `json:"permission"`
 	Runtime    RuntimeReport    `json:"runtime"`
+	Secrets    SecretsReport    `json:"secrets"`
 	Warnings   []string         `json:"warnings,omitempty"`
+}
+
+// SecretsReport shows the at-rest encryption backend of the secret store
+// (dpapi/keychain/secret-service/passphrase) and whether it fell back to the
+// degraded machine-bound mode — the case where any local process can
+// recompute the key. "unavailable" means an existing store's KEK cannot be
+// reached (keystore locked/reset): reads come back as unset until restored.
+type SecretsReport struct {
+	Backend  string `json:"backend"`
+	Degraded bool   `json:"degraded"`
+	Path     string `json:"path,omitempty"`
 }
 
 // RuntimeReport shows the availability of Python/Node/uv runtimes.
@@ -167,6 +180,7 @@ func Collect(opts Options) Report {
 			AskRules:   len(cfg.Permissions.Ask),
 			DenyRules:  len(cfg.Permissions.Deny),
 		},
+		Secrets:  collectSecrets(),
 		Warnings: warnings,
 	}
 	report.Sessions.Dir = redactHome(report.Sessions.Dir)
@@ -315,7 +329,27 @@ func RenderText(r Report) string {
 	fmt.Fprintf(&b, "\npermissions\n")
 	fmt.Fprintf(&b, "  mode         %s\n", valueOr(r.Permission.Mode, "ask"))
 	fmt.Fprintf(&b, "  rules        allow:%d ask:%d deny:%d\n", r.Permission.AllowRules, r.Permission.AskRules, r.Permission.DenyRules)
+
+	fmt.Fprintf(&b, "\nsecrets\n")
+	backendLine := r.Secrets.Backend
+	switch {
+	case r.Secrets.Backend == "unavailable":
+		backendLine += " (keystore locked or reset: stored secrets read as unset until it is restored)"
+	case r.Secrets.Degraded:
+		backendLine += " (degraded: machine-bound encryption recomputable by any local process; set FAIRPEER_SECRET_PASSPHRASE or use a system with a keychain/secret service)"
+	}
+	fmt.Fprintf(&b, "  backend      %s\n", backendLine)
+	fmt.Fprintf(&b, "  store        %s\n", valueOr(r.Secrets.Path, "unavailable"))
 	return b.String()
+}
+
+func collectSecrets() SecretsReport {
+	backend, degraded := secret.Default().SecurityMode()
+	return SecretsReport{
+		Backend:  backend,
+		Degraded: degraded,
+		Path:     redactHome(secret.DefaultPath()),
+	}
 }
 
 func collectSessions(dir string) SessionsReport {

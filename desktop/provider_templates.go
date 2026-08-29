@@ -30,4 +30,9 @@ type ProviderTemplate struct {
 	Category      string   `json:"category"`      // "direct", "aggregator", or "local"
 	DocURL        string   `json:"docUrl"`        // where to get an API key
 	Models        []string `json:"models"`        // preset model list (fallback when probe fails)
+	// ReasoningModels lists models.dev-flagged reasoning-capable model IDs
+	// (per-model data the merge used to discard). Display-only for now — the
+	// boot-time behaviour layer (internal/instruction, effort routing) never
+	// reads this; see docs/MODEL_ROUTING_SPEC.md for the boundary.
+	ReasoningModels []string `json:"reasoningModels,omitempty"`
 }

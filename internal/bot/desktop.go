@@ -73,7 +73,9 @@ const desktopCommandUsage = "用法:\n" +
 	"/desktop watch on|off|status - 订阅/退订桌面事件推送(审批请求、任务完成/出错)\n" +
 	"/desktop approve <id> - 批准桌面会话的待审批操作\n" +
 	"/desktop deny <id> - 拒绝桌面会话的待审批操作\n" +
-	"/desktop answer <id> <选项编号或文本> - 回答桌面会话的提问"
+	"/desktop answer <id> <选项编号或文本> - 回答桌面会话的提问\n" +
+	"/netdev 发现 - 列出未处理的运维发现\n" +
+	"/netdev 详情 <编号> - 查看某条发现的证据（编号见告警消息尾部）"
 
 // handleDesktopCommand 处理 /desktop 系列命令(上帝视角：观察 + 遥控审批)。
 func (gw *BotGateway) handleDesktopCommand(msg InboundMessage) string {

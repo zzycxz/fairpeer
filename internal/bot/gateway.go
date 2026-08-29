@@ -40,6 +40,9 @@ type GatewayConfig struct {
 	// 群里的对话才能分开。放在 turn 结束后是因为 sessionPath 要等首轮 RunTurn 才确定
 	// （prewarm 时为空）。nil 表示不回写。
 	OnTurnFinished func(src SessionSource, sessionPath string)
+	// Netdev，非 nil 时启用 /netdev 系列命令（发现列表 / 证据详情）——
+	// 运维告警与早报推送的回话侧（FDE 的耳朵）。
+	Netdev NetdevBridge
 	// Desktop，非 nil 时启用 /desktop 系列命令（远程观察 + 审批桌面 live 会话）。
 	// 由桌面端进程注入；独立 bot 进程（无桌面）保持 nil，/desktop 会提示不可用。
 	Desktop DesktopBridge
@@ -524,6 +527,8 @@ func chatUsesGroupAllowlist(chatType ChatType) bool {
 
 func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, key string, msg InboundMessage) {
 	switch {
+	case strings.HasPrefix(msg.Text, "/netdev"):
+		_ = gw.sendText(ctx, adapter, msg, gw.handleNetdevCommand(msg))
 	case strings.HasPrefix(msg.Text, "/stop"):
 		gw.mu.Lock()
 		state, ok := gw.controllers[key]

@@ -675,7 +675,7 @@ api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 	// The whole point: hidden skills must not appear in the prompt at all (no
 	// description, no [关闭] tag) — unlike user-disabled skills which stay as
 	// [关闭] hints. Check a representative hidden office skill.
-	for _, name := range []string{"browser-auto", "email-auto", "rag-auto", "schedule-auto", "document-auto", "expert-auto"} {
+	for _, name := range []string{"browser-auto", "email-auto", "knowledge-auto", "schedule-auto", "document-auto", "expert-auto"} {
 		if strings.Contains(sys, name) {
 			t.Fatalf("profile-hidden skill %q must NOT appear in system prompt:\n%s", name, sys)
 		}

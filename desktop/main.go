@@ -77,6 +77,7 @@ func main() {
 		Height:    height,
 		MinWidth:  760,
 		MinHeight: 480,
+		Frameless: true,
 		// Match the light UI shell so the initial webview background doesn't flash
 		// dark before CSS loads — particularly visible on WebKitGTK.
 		BackgroundColour:   &options.RGBA{R: 244, G: 243, B: 239, A: 255},

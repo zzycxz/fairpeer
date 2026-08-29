@@ -347,6 +347,7 @@ Usage:
   fairpeer mcp <add|remove|list>                        manage MCP servers in fairpeer.toml
   fairpeer doctor [--json]                              print redacted local diagnostics
   fairpeer bot start|doctor|weixin-login                multi-channel IM bot gateway
+  fairpeer trustdomain <init|status|run|...>           private-network trust domain ledger (docs/TRUSTDOMAIN_SPEC.md)
   fairpeer version
   fairpeer help
 

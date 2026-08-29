@@ -563,7 +563,7 @@ func builtinSkills() []Skill {
 	return []Skill{
 		{
 			Name:        "netdev-playbook",
-			Description: "Network diagnosis playbooks: standard read-orders for the classic failure classes (port down / OSPF neighbor down / slow network / segment outage) — what to read and what each output rules in/out. Knowledge only, no tools.",
+			Description: "Umbrella diagnosis playbook: the standard read-order matrix for the classic failure classes (port down / OSPF neighbor down / slow network / segment outage) — what to read and what each output rules in/out. Knowledge only, no tools. This is the entry point; for protocol-deep triage prefer netdev-diag-ospf / netdev-diag-bgp / netdev-diag-interface.",
 			Body:        builtinNetdevPlaybookBody,
 			Scope:       ScopeBuiltin,
 			Path:        "(builtin)",
@@ -579,7 +579,7 @@ func builtinSkills() []Skill {
 		},
 		{
 			Name:        "netdev-diag-ospf",
-			Description: "OSPF 故障排查 playbook（运维）: neighbor stuck in Down/Init/ExStart, flapping peers, missing routes. State-first triage with Huawei/Cisco command tables, evidence into netdev_finding. Inline — runs in the main loop with the netdev_* tools.",
+			Description: "OSPF 故障排查 playbook（运维）: neighbor stuck in Down/Init/ExStart, flapping peers, missing routes. State-first triage with Huawei/Cisco command tables, evidence into netdev_finding. Inline — runs in the main loop with the netdev_* tools. For the general read-order matrix and other failure classes see netdev-playbook.",
 			Body:        builtinNetdevDiagOSPFBody,
 			Scope:       ScopeBuiltin,
 			Path:        "(builtin)",
@@ -587,7 +587,7 @@ func builtinSkills() []Skill {
 		},
 		{
 			Name:        "netdev-diag-bgp",
-			Description: "BGP 故障排查 playbook（运维）: session stuck in Idle/Active/OpenSent, flapping sessions, established but routes missing. Per-state triage (routability, TCP 179, AS/auth mismatch, import policy, next-hop), evidence into netdev_finding. Inline.",
+			Description: "BGP 故障排查 playbook（运维）: session stuck in Idle/Active/OpenSent, flapping sessions, established but routes missing. Per-state triage (routability, TCP 179, AS/auth mismatch, import policy, next-hop), evidence into netdev_finding. Inline. For the general read-order matrix and other failure classes see netdev-playbook.",
 			Body:        builtinNetdevDiagBGPBody,
 			Scope:       ScopeBuiltin,
 			Path:        "(builtin)",
@@ -595,7 +595,7 @@ func builtinSkills() []Skill {
 		},
 		{
 			Name:        "netdev-diag-interface",
-			Description: "接口故障排查 playbook（运维）: link down (physical vs protocol), CRC/error counters, optical transceiver power, congestion drops. Splits layer-1 from layer-2 symptoms, compares both ends' counters, evidence into netdev_finding. Inline.",
+			Description: "接口故障排查 playbook（运维）: link down (physical vs protocol), CRC/error counters, optical transceiver power, congestion drops. Splits layer-1 from layer-2 symptoms, compares both ends' counters, evidence into netdev_finding. Inline. For the general read-order matrix and other failure classes see netdev-playbook.",
 			Body:        builtinNetdevDiagInterfaceBody,
 			Scope:       ScopeBuiltin,
 			Path:        "(builtin)",
@@ -611,7 +611,7 @@ func builtinSkills() []Skill {
 		},
 		{
 			Name:         "explore",
-			Description:  "Explore the codebase in an isolated subagent — wide-net read-only investigation that returns one distilled answer. Best for: 'find all places that...', 'how does X work across the project', 'survey the code for Y'. For reviewing the current branch diff use the review / security-review skills instead.",
+			Description:  "Explore OUR codebase in an isolated subagent — wide-net read-only investigation that returns one distilled answer. Best for: 'find all places that...', 'how does X work across the project', 'survey the code for Y'. External questions (third-party libraries, docs, APIs) belong to research instead; for reviewing the current branch diff use the review / security-review skills.",
 			Body:         builtinExploreBody,
 			Scope:        ScopeBuiltin,
 			Path:         "(builtin)",
@@ -620,7 +620,7 @@ func builtinSkills() []Skill {
 		},
 		{
 			Name:         "research",
-			Description:  "Research a question by combining web_fetch + code reading in an isolated subagent. Best for: 'is X supported by lib Y', 'what's the canonical way to do Z', 'compare our impl against the spec'.",
+			Description:  "Research an EXTERNAL library/framework question (docs, API behavior, versions, best practice) in an isolated subagent — web_fetch for the authoritative answer, our code read only to compare against it. Best for: 'is X supported by lib Y', 'what's the canonical way to use Z', 'compare our impl against the spec'. For surveying OUR codebase use explore.",
 			Body:         builtinResearchBody,
 			Scope:        ScopeBuiltin,
 			Path:         "(builtin)",
@@ -629,7 +629,7 @@ func builtinSkills() []Skill {
 		},
 		{
 			Name:        "install-capability",
-			Description: "Install or uninstall fairpeer capabilities — a capability is either a skill or an MCP server. Sources: URL, GitHub/raw file, local path/folder, .mcp.json, executable, or package name. Plans with install_source (op=install or op=uninstall) before applying, surfacing per-action riskLevel.",
+			Description: "Install or uninstall fairpeer capabilities — a capability is either a skill or an MCP server. Sources: URL, GitHub/raw file, local path/folder, .mcp.json, executable, or package name (ANY source, plus uninstall; for browsing the official MCP Registry use Settings → MCP 与工具 → 远程市场). Plans with install_source (op=install or op=uninstall) before applying, surfacing per-action riskLevel.",
 			Body:        builtinInstallCapabilityBody,
 			Scope:       ScopeBuiltin,
 			Path:        "(builtin)",
@@ -637,7 +637,7 @@ func builtinSkills() []Skill {
 		},
 		{
 			Name:         "review",
-			Description:  "Review the pending changes (current branch diff by default) in an isolated subagent — flags correctness, security, missing tests, hidden behavior changes; reports a verdict + per-issue file:line. Read-only.",
+			Description:  "Review the pending changes (current branch diff by default) in an isolated subagent — flags correctness, regressions, missing tests, hidden behavior changes; reports a verdict + per-issue file:line. Read-only. For a security-focused pass use security-review.",
 			Body:         builtinReviewBody,
 			Scope:        ScopeBuiltin,
 			Path:         "(builtin)",
@@ -695,7 +695,7 @@ func builtinSkills() []Skill {
 			AllowedTools: []string{"email_send", "email_read", "email_search", "read_file"},
 		},
 		{
-			Name:         "rag-auto",
+			Name:         "knowledge-auto",
 			Description:  "Search, import, or manage the local knowledge base (FTS5 + entities). Use to find info in imported docs, import new files, or list collections. Faster than re-reading source files every time.",
 			Body:         builtinRAGAutoBody,
 			Scope:        ScopeBuiltin,

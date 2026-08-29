@@ -1388,8 +1388,6 @@ export function useController(getProfile?: () => string) {
     return refreshWorkspaceState(next);
   }, [refreshWorkspaceState]);
 
-  const compact = useCallback(() => { app.Compact().catch(() => {}); }, []);
-
   const setModel = useCallback(async (name: string) => {
     if (!activeTabId) return;
     try {
@@ -1530,7 +1528,7 @@ export function useController(getProfile?: () => string) {
     activeTabId,
     send, runShell, steer, notice, cancel, pauseToggle, approve, answerQuestion, setCollaborationMode, setToolApprovalMode, setGoal, clearGoal, setRagScope,
     newSession, clearSession, listSessions, listTrashedSessions, resumeSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
-    refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, deleteExpertCollab, setModel, setEffort,
+    refreshMeta, pickWorkspace, switchWorkspace, rewind, deleteExpertCollab, setModel, setEffort,
     fetchMemory, remember, forget, saveDoc,
     switchTab, openProjectTab, openGlobalTab, ensureBlankTab, closeTab, reorderTabs,
     syncActiveTab: syncActiveTabFromBackend,

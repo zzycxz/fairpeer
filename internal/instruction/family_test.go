@@ -23,6 +23,25 @@ func TestModelFamily(t *testing.T) {
 		{"openai/gpt-oss-120b", "gpt"},
 		{"unknown-model", ""},
 		{"", ""},
+
+		// Token-boundary precision: substrings inside a larger token must NOT
+		// classify (the old Contains matcher hit these).
+		{"glmw-v2", ""},            // "glmw" is one token, not glm
+		{"myqwenite", ""},          // "myqwenite" is one token, not qwen
+		{"mintmax-pro", ""},        // not minimax
+		{"gptwrapper-llama", ""},    // "gptwrapper" is one token, not gpt
+
+		// Fused version-digit tokens classify ("qwen3", "glm4").
+		{"test-provider/qwen3-max", "qwen"},
+		{"glm4-air", "glm"},
+		{"gpt4o-mini", "gpt"},
+
+		// Claude / anthropic family (recognised, no addon — see TestFamilyAddon).
+		{"anthropic/claude-sonnet-4-5", "anthropic"},
+		{"test-provider/claude-haiku-4.5", "anthropic"},
+
+		// Vendor prefix beats token order.
+		{"openai/qwen-turbo", "gpt"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.model, func(t *testing.T) {

@@ -1720,6 +1720,48 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
+.mermaid-viewer__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.mermaid-viewer__header .mermaid-viewer__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mermaid-viewer__actions {
+  display: flex;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.mermaid-viewer__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.mermaid-viewer__action:hover:not([disabled]) {
+  color: var(--fg);
+  border-color: var(--fg-faint);
+}
+.mermaid-viewer__action[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+.mermaid-viewer__export-error {
+  font-size: var(--text-xs);
+  color: var(--err);
+}
 .mermaid-viewer__svg-container {
   display: flex;
   justify-content: center;
@@ -2089,6 +2131,11 @@
 .composer-usage__bar i { display: block; height: 100%; border-radius: var(--radius-pill); background: var(--accent); transition: width var(--dur-base); }
 .composer-usage--hot .composer-usage__bar i { background: var(--warn); }
 .composer-usage--hot .composer-usage__text { color: var(--warn); }
+/* Hot-state compact affordance (85%+ fill): tiny warn-tinted text button on
+   the chip — the only Compact entry point now the overview tab is gone. */
+.composer-usage__compact { appearance: none; border: 1px solid var(--warn); background: transparent; color: var(--warn); border-radius: var(--radius-pill, 999px); padding: 0 6px; font-family: inherit; font-size: 10px; font-weight: 600; line-height: 16px; cursor: pointer; }
+.composer-usage__compact:hover { background: var(--warn); color: var(--bg, #fff); }
+.composer-usage__compact:active { transform: translateY(0.5px); }
 .composer-meta__control--usage { margin-left: auto; }
 
 /* ── usage chip hover detail panel (2026-08-21) ──
