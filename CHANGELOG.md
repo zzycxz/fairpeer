@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### docs(netdev): SPEC v2.1——原 R6 批次改组为「按需停车场」
+
+R1-R5 落地后原「R6 规模化与战略批」以功能菜单式批次呈现，读起来像排期承诺，实则多数条目无需求牵引。§八重写：**每条目挂启动条件 + 最小可用面**（真启动时先交付的一小块，按使用证据再加，不照菜单全做）——规模化（>200 台实测触发）、gNMI（轮询成为实测瓶颈且设备真支持）、sFlow/NetFlow（ISP 真实用户）、GPU 面（dogfooding 痛点清单驱动，原七项菜单降级为素材库）、BGP/光层（骨干网需求）；**拓扑人工覆盖层与 CSV 批量导入摘出为 §8.7 小件池**（自动布局出错第一天就有用、首次批量上架 20 台就疼——都不该锁在战略批门槛后，无门槛随时可做）；§九路线图行与全文 9 处 R6 引用同步改写，不设批次验收（立项时按最小可用面定当期验收）。规格版本 v2.0 → v2.1。
+
+### 运维补全 SPEC C3/C4 收官：提案驳回 + 升级链 + 导入向导 + 14 卡 + 快捷键
+
+- **提案驳回**（§4.1，本批最高优先）：`RejectProposal`/`DeleteProposal` 后端方法（draft/approved 可驳、原因随提案持久化——agent 下一轮读到提案即见被拒原因；删除限 draft/已终结态，活跃管线必须留档）+ `ProposalActions` 行内「驳回…」（内联原因输入框）与「删除」按钮 + dock 提案页签去 `slice(0,10)` 硬顶改状态筛选 chips（待办/全部/草稿/已批准/已驳回/已终结）+ 加载更多分页。测试：reject/delete 状态守卫/原因持久化/活跃管线拒绝全链路
+- **通知升级链最小版**（§5.2/裁决 #8）：critical Finding 超 15 分钟未 resolve → 自动重发升级通知（全出口：SMTP+bot+webhook，每条 Finding 只升级一次），EnsureNotifier 时启动巡检协程（进程单次）。测试：注入时钟的老 critical 升级/resolved·young·warning 不升/只升一次
+- **迁移导入向导**（§5.6/裁决 #11）：`ImportPreview`（读导出 JSON → 新增/同名冲突/DB 源三段 diff，无副作用）+ `ImportApply`（勾选项合并骨架——凭证不迁移，历史 findings 只读引用不覆盖）+ `ImportStageFile`（浏览器读文件内容暂存到状态目录，桥接 Wails 无文件路径的限制）+ 前端 `ImportWizardCard`（复选框逐项勾选 → 合并，凭证补录提示）；审计页「导出状态包」旁增「导入状态包…」按钮
+- **ScenarioHub 扩容 6→14 卡**（§3.2）：新增 IP/MAC 定位、主机体检、弱口令核查、CVE 清单匹配、入侵排查向导、变更-故障关联、报告族、容器/K8s 诊断（每卡一句话+一个直达动作）；网格双列→三列
+- **快捷键最小集**（§4.10）：`r` 刷新当前页签、`/` 聚焦当前面板搜索框（均限无输入焦点时生效，不吞命令字符）；Esc 层级退出为原有
+- **规格修订**：NETDEV_SPEC_V2 §10.1 dock 页签目录恒为 10→11（浏览器页卡经评审裁决纳入）；发布门禁断言行同步
+- i18n 全量（§4.9）**未做**——硬编码中文量大（页签/面板/设备卡/场景卡全量），留待独立批次
+- 验证：netdev/desktop 两模块 build+test 全绿（驳回/升级链/导入新增测试）；前端 tsc/CSS/vite build 通过
+
 ### 修复：模板/提案渲染层空数组崩溃（null.length）
 
 - **现象**：打开「提案」页签即 React 崩溃 `TypeError: Cannot read properties of null (reading 'length')`。**根因**：Go 的 nil 切片序列化为 JSON `null`（非 `[]`）——只用设备属性变量、无用户变量的模板 `vars` 为 null，`TemplateCard` 的 `t.vars.length` 直接崩；同类隐患：结构化提案步骤（k8s-apply 等）`commands` 为 null 时 `s.commands.join` 崩。**修复**：前端全部可空数组访问加 `?? []` 守卫（TemplateCard 变量表/预览、ProposalCenter 详情、stepSummary、CutoverView 步骤清单、提案页签割接卡步数），Go 侧 `Template.Vars` 补 `omitempty`（无键 + 前端兜底双保险）；前端 dist 已重建（新 hash 资产），桌面 `go build` 嵌入验证通过
