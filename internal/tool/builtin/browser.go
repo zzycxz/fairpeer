@@ -75,6 +75,39 @@ func BrowserTools() []tool.Tool {
 	}
 }
 
+// --- in-app browser mirror (pane-system §3.6 companion tier) -----------------
+//
+// The driven browser is a real OS window (spawned or attached), but the app
+// mirrors it in the cowork dock: every session-lifecycle transition and every
+// post-action screenshot is forwarded through a desktop-registered sink to the
+// frontend panel. CLI runs register no sink and pay nothing beyond a nil check.
+
+// BrowserPanelFrame is one update for the desktop's browser-mirror panel.
+// Kind "frame" carries a screenshot (Image as data URL); kind "status" carries
+// a lifecycle transition (Phase "start"|"end"). The frontend owns all labels —
+// Text stays machine-ish (browser name, summary) rather than localized prose.
+type BrowserPanelFrame struct {
+	Kind   string `json:"kind"`
+	Source string `json:"source"`          // "tool" (chromedp tools) | "auto" (browser-use sidecar)
+	Phase  string `json:"phase,omitempty"` // status only: "start" | "end"
+	Text   string `json:"text,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Image  string `json:"image,omitempty"` // data URL (frame only)
+}
+
+var browserPanelSink func(BrowserPanelFrame)
+
+// SetBrowserPanelSink registers the desktop's mirror forwarder (Wails event
+// emitter). Set once at startup; nil (CLI) disables emission entirely.
+func SetBrowserPanelSink(fn func(BrowserPanelFrame)) { browserPanelSink = fn }
+
+// EmitBrowserPanel forwards a frame when a sink is registered.
+func EmitBrowserPanel(f BrowserPanelFrame) {
+	if browserPanelSink != nil {
+		browserPanelSink(f)
+	}
+}
+
 const (
 	// browserIdleTimeout closes a browser session after this long without a tool
 	// call, so a forgotten browser_open doesn't leak a Chromium process forever.
@@ -494,6 +527,7 @@ func closeBrowserSession(id string) {
 	}
 	delete(browserSessions, id)
 	browserMu.Unlock()
+	EmitBrowserPanel(BrowserPanelFrame{Kind: "status", Source: "tool", Phase: "end"})
 	// Cancelling the tab context closes the CDP target; the allocator stays up.
 	if s.ctxCancel != nil {
 		s.ctxCancel()
@@ -572,6 +606,7 @@ func newBrowserSession() (*browserSession, error) {
 	startDownloadsHandler(s)
 	// Phase 6: Start WebSocket keepalive.
 	startSessionKeepalive(s)
+	EmitBrowserPanel(BrowserPanelFrame{Kind: "status", Source: "tool", Phase: "start", Text: s.browser})
 	return s, nil
 }
 
@@ -632,6 +667,7 @@ func newAttachedSession(cdpURL string) (*browserSession, error) {
 	startDialogHandler(s)
 	startDownloadsHandler(s)
 	startSessionKeepalive(s)
+	EmitBrowserPanel(BrowserPanelFrame{Kind: "status", Source: "tool", Phase: "start", Text: s.browser})
 	return s, nil
 }
 
@@ -687,7 +723,45 @@ func runBrowserAction(ctx context.Context, s *browserSession, actions ...chromed
 	}
 	actx, cancel := actionCtx(ctx, s)
 	defer cancel()
-	return chromedp.Run(actx, actions...)
+	err := chromedp.Run(actx, actions...)
+	if err == nil {
+		mirrorAfterAction(s)
+	}
+	return err
+}
+
+// mirrorAfterAction pushes a post-action viewport screenshot to the in-app
+// mirror panel. Best-effort by design: a capture failure (downloads, PDF
+// viewers, detached sessions) never fails the tool call, and with no sink
+// registered (CLI) the whole hook is one map lookup. Sessions not in the
+// registry are skipped — newAttachedSession probes with a throwaway session
+// before registering, and that pre-registration screenshot is noise.
+func mirrorAfterAction(s *browserSession) {
+	if browserPanelSink == nil {
+		return
+	}
+	browserMu.Lock()
+	_, registered := browserSessions[s.id]
+	browserMu.Unlock()
+	if !registered {
+		return
+	}
+	mctx, cancel := context.WithTimeout(s.ctx, 3*time.Second)
+	defer cancel()
+	var buf []byte
+	var url string
+	if err := chromedp.Run(mctx,
+		chromedp.CaptureScreenshot(&buf),
+		chromedp.Location(&url),
+	); err != nil {
+		return
+	}
+	EmitBrowserPanel(BrowserPanelFrame{
+		Kind:   "frame",
+		Source: "tool",
+		URL:    url,
+		Image:  "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf),
+	})
 }
 
 // waitForBodyContent blocks until the <body> has meaningful content (SPA apps

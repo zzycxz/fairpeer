@@ -120,6 +120,7 @@ func runBrowserAuto(ctx context.Context, cfg *config.Config, req builtin.Browser
 	//   a persistent BrowserUserDataDir (to keep login state). The proxy routes
 	//   the browser through the user's network config. Closed when the run ends.
 	var cdpURL string
+	var browserLabel string
 	if attach := strings.TrimSpace(cfg.Cowork.BrowserAttachURL); attach != "" {
 		probeCtx, cancelProbe := context.WithTimeout(ctx, 5*time.Second)
 		info, err := browserlaunch.ProbeAttach(probeCtx, attach)
@@ -128,6 +129,7 @@ func runBrowserAuto(ctx context.Context, cfg *config.Config, req builtin.Browser
 			return nil, "", fmt.Errorf(`attach browser: %w — 可控浏览器未运行：在 设置→办公 点击"启动可控浏览器"，或清空 CDP 地址回到自动新开浏览器`, err)
 		}
 		cdpURL = info.WSURL
+		browserLabel = info.BrowserName
 		slog.Info("browser_auto: attached to running browser",
 			"cdp", info.CDPURL, "browser", info.BrowserName)
 	} else {
@@ -143,8 +145,27 @@ func runBrowserAuto(ctx context.Context, cfg *config.Config, req builtin.Browser
 		}
 		defer handle.Close()
 		cdpURL = handle.WSURL
+		browserLabel = handle.BrowserName
 		slog.Info("browser_auto: launched shared browser",
 			"name", handle.BrowserName, "cdp", handle.CDPURL, "ws", handle.WSURL)
+	}
+
+	// Mirror panel: mark the run live before the first step, so the panel can
+	// auto-open before any screenshot arrives (a long first page load would
+	// otherwise leave it blank). runEnded keeps the end emission on ALL exit
+	// paths (success, error, sidecar failure) without duplicating it below.
+	builtin.EmitBrowserPanel(builtin.BrowserPanelFrame{
+		Kind: "status", Source: "auto", Phase: "start", Text: browserLabel,
+	})
+	runEnded := false
+	emitRunEnd := func(text string) {
+		if runEnded {
+			return
+		}
+		runEnded = true
+		builtin.EmitBrowserPanel(builtin.BrowserPanelFrame{
+			Kind: "status", Source: "auto", Phase: "end", Text: text,
+		})
 	}
 
 	// Drive the sidecar. The cdp_url we hand it points at the browser we just
@@ -165,6 +186,7 @@ func runBrowserAuto(ctx context.Context, cfg *config.Config, req builtin.Browser
 		Proxy:        llmProxy,
 	})
 	if err != nil {
+		emitRunEnd("error: sidecar /run: " + err.Error())
 		return nil, "", fmt.Errorf("sidecar /run: %w", err)
 	}
 
@@ -188,6 +210,22 @@ func runBrowserAuto(ctx context.Context, cfg *config.Config, req builtin.Browser
 	var steps []builtin.BrowserAutoStep
 	var summary string
 	for ev := range stream {
+		// Screenshots never enter the tool output (context bloat); the mirror
+		// panel is their consumer. Forward every frame as-is, plus a text line
+		// for actions so the panel can show what the agent is doing between
+		// frames without a second event channel.
+		switch ev.Type {
+		case browseruse.EventScreenshot:
+			if ev.Image != "" {
+				builtin.EmitBrowserPanel(builtin.BrowserPanelFrame{
+					Kind: "frame", Source: "auto", Text: lastAutoAction(steps), Image: ev.Image,
+				})
+			}
+		case browseruse.EventAction:
+			builtin.EmitBrowserPanel(builtin.BrowserPanelFrame{
+				Kind: "status", Source: "auto", Phase: "step", Text: ev.Text,
+			})
+		}
 		step := builtin.BrowserAutoStep{
 			Type: string(ev.Type),
 			Step: ev.Step,
@@ -199,11 +237,25 @@ func runBrowserAuto(ctx context.Context, cfg *config.Config, req builtin.Browser
 			switch ev.Type {
 			case "done":
 				summary = ev.Text
+				emitRunEnd(ev.Text)
 			case "error":
+				emitRunEnd("error: " + ev.Text)
 				// Return the steps taken + a clear error; the tool wraps it.
 				return steps, "", fmt.Errorf("agent run failed: %s", ev.Text)
 			}
 		}
 	}
+	emitRunEnd(summary)
 	return steps, summary, nil
+}
+
+// lastAutoAction returns the most recent action text for a screenshot frame,
+// so the mirror panel can caption each image with what produced it.
+func lastAutoAction(steps []builtin.BrowserAutoStep) string {
+	for i := len(steps) - 1; i >= 0; i-- {
+		if steps[i].Type == "action" {
+			return strings.TrimSpace(steps[i].Text)
+		}
+	}
+	return ""
 }
