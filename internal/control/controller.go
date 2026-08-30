@@ -396,14 +396,22 @@ func New(opts Options) *Controller {
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
 	c.rebindCheckpoints(opts.SessionPath)
 	if c.executor != nil {
-		c.executor.SetPreEditHook(func(ch diff.Change) {
-			if c.cp != nil {
-				c.cp.Snapshot(ch)
-			}
-		})
+		c.executor.SetPreEditHook(c.PreEditSnapshotter())
 		c.executor.SetMemoryQueue(c)
 	}
 	return c
+}
+
+// PreEditSnapshotter returns the checkpoint snapshot closure for sub-agent
+// spawn sites (task / run_skill): boot threads it into a SharedPreEditHook so
+// sub-agent writer tools snapshot into this controller's store — their edits
+// rewind exactly like main-loop edits.
+func (c *Controller) PreEditSnapshotter() func(diff.Change) {
+	return func(ch diff.Change) {
+		if c.cp != nil {
+			c.cp.Snapshot(ch)
+		}
+	}
 }
 
 // SetContextFilter installs a read-side transform applied to session messages

@@ -724,6 +724,9 @@
 .workspace-tree__row--search.workspace-tree__row--active {
   color: var(--fg);
 }
+.workspace-change-row {
+  position: relative;
+}
 .workspace-change {
   --wails-draggable: no-drag;
   width: 100%;
@@ -739,6 +742,40 @@
   color: var(--fg-dim);
   font: inherit;
   text-align: left;
+}
+/* Per-turn checkpoint diff toggle: quiet until the row is hovered, then sits
+   left of the git badge column. */
+.workspace-change__diffbtn {
+  --wails-draggable: no-drag;
+  position: absolute;
+  right: 40px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--tree-row-hover-bg);
+  color: var(--fg-faint);
+  opacity: 0;
+  transition: opacity var(--dur-fast, 0.12s) ease;
+}
+.workspace-change-row:hover .workspace-change__diffbtn,
+.workspace-change__diffbtn:focus-visible,
+.workspace-change__diffbtn--on {
+  opacity: 1;
+}
+.workspace-change__diffbtn:hover,
+.workspace-change__diffbtn--on {
+  color: var(--accent);
+}
+.workspace-change__diff {
+  margin: 0 4px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  overflow: hidden;
 }
 .workspace-change:hover {
   background: var(--tree-row-hover-bg);
@@ -863,6 +900,147 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+/* Branch + "+N -N ?N" summary line at the top of the changed tab. Colors match
+   the CLI status bar: green added, red removed, yellow untracked. */
+.workspace-git-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 2px;
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+.workspace-git-summary__branch {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-dim);
+  font-weight: 500;
+}
+.workspace-git-summary__unavailable {
+  color: var(--fg-faint);
+  font-style: italic;
+}
+.workspace-git-summary__stats {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+}
+.workspace-git-summary__added { color: var(--ok, #3fb950); }
+.workspace-git-summary__removed { color: var(--danger, #f85149); }
+.workspace-git-summary__untracked { color: #d29922; }
+/* Branch switcher trigger + dropdown (reuses the recent-files popover sizing) */
+.workspace-git-summary__branch--btn {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 160px;
+  padding: 1px 4px 1px 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-dim);
+  font: inherit;
+  font-weight: 500;
+}
+.workspace-git-summary__branch--btn:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--bg-elev);
+}
+.workspace-git-summary__branch--btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.workspace-git-summary__branchname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-branch-menu__title {
+  padding: 6px 10px 4px;
+  font-size: 11.5px;
+  color: var(--fg-faint);
+}
+.workspace-branch-menu__filter {
+  --wails-draggable: no-drag;
+  width: calc(100% - 16px);
+  margin: 0 8px 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+}
+.workspace-branch-menu__list {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 0 4px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.workspace-branch-menu__item {
+  --wails-draggable: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+}
+.workspace-branch-menu__item:hover {
+  background: var(--tree-row-hover-bg);
+  color: var(--fg);
+}
+.workspace-branch-menu__item--active {
+  color: var(--accent);
+}
+.workspace-branch-menu__dot {
+  width: 13px;
+  flex: none;
+}
+.workspace-branch-menu__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-branch-menu__confirm {
+  padding: 10px 12px;
+  max-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.workspace-branch-menu__confirm-q {
+  font-size: 12.5px;
+  color: var(--fg);
+}
+.workspace-branch-menu__confirm-warn {
+  font-size: 11.5px;
+  color: #d29922;
+}
+.workspace-branch-menu__confirm-err {
+  font-size: 11.5px;
+  color: var(--danger, #f85149);
+  word-break: break-all;
+}
+.workspace-branch-menu__confirm-row {
+  display: flex;
+  gap: 8px;
 }
 .workspace-git-history__list {
   display: flex;

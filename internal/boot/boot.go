@@ -1256,12 +1256,18 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	taskModel := firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel)
 	taskEffort := firstNonEmpty(cfg.Agent.SubagentEfforts["task"], cfg.Agent.SubagentEffort)
+	// Sub-agent writer pre-edits feed the controller's checkpoint store through
+	// this shared hook — boot creates it before the controller exists, both
+	// spawn sites (task tool, run_skill runner) fire through it, and the
+	// concrete snapshotter is installed after control.New (below).
+	subagentPreEdit := agent.NewSharedPreEditHook()
 	taskTool := agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
 		entry.ContextWindow, cfg.Agent.SoftCompactRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
 		cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
 		taskModel, taskEffort, resolveSubagentProvider).
 		WithTranscripts(subagentStore, root, modelName, entry.Effort).
-		WithTranscriptIdentityResolver(subagentIdentity)
+		WithTranscriptIdentityResolver(subagentIdentity).
+		WithPreEditHook(subagentPreEdit.Fire)
 	reg.Add(taskTool)
 
 	// The `remember` tool lets the model persist durable facts to the project's
@@ -1360,6 +1366,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			Gate:          headlessGate,
 			ContextWindow: ctxWin,
 			ArchiveDir:    config.ArchiveDir(),
+			PreEditHook:   subagentPreEdit.Fire,
 		}, agent.NestedSink(sctx, event.Discard))
 		if err != nil {
 			return "", errors.Join(err, subagentStore.SaveFailed(run))
@@ -1617,6 +1624,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		ctrlOpts.Classifier = classifier
 	}
 	ctrl := control.New(ctrlOpts)
+	// Route sub-agent writer pre-edits (task / run_skill) into the controller's
+	// checkpoint store, so skill-driven file writes rewind like main-loop edits.
+	subagentPreEdit.Set(ctrl.PreEditSnapshotter())
 	// Inject the per-tool risk-class overrides (SPEC v2 §3.2A) so the interactive
 	// gate honors [[plugins]] risk config the same way the headless gate does.
 	ctrl.SetRiskOverrides(riskOverrides)

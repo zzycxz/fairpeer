@@ -3816,6 +3816,16 @@ ${t("remote.uncPromptBody", { path: picked })}
                 <WorkspacePanel
                   open={workspacePanelRenderable}
                   cwd={state.meta?.cwd}
+                  tabId={activeTabId ?? undefined}
+                  branchSwitch={
+                    activeTab?.remote
+                      ? { enabled: false, blockedReason: t("workspace.branchSwitchRemote") }
+                      : state.running
+                        ? { enabled: true, blockedReason: t("workspace.branchSwitchBlockedRun") }
+                        : state.approval
+                          ? { enabled: true, blockedReason: t("workspace.branchSwitchBlockedApproval") }
+                          : { enabled: true }
+                  }
                   maximized={workspacePanelMaximized}
                   panelWidth={workspacePanelRenderWidth}
                   onClose={closeWorkspacePanel}

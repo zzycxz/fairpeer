@@ -1176,6 +1176,17 @@ func (a *App) NetDevFindings() ([]*netdev.Finding, error) {
 	return netdev.ListFindings()
 }
 
+// NetDevFindingDismiss deletes one finding (the queue row's ×).
+func (a *App) NetDevFindingDismiss(id string) error {
+	return netdev.DismissFinding(id)
+}
+
+// NetDevFindingsClear deletes every finding and returns the count, so the
+// confirmation toast can say how many went away.
+func (a *App) NetDevFindingsClear() (int, error) {
+	return netdev.ClearFindings()
+}
+
 // NetDevProposals lists proposals newest-first.
 func (a *App) NetDevProposals() ([]*netdev.Proposal, error) {
 	return netdev.ListProposals()

@@ -322,7 +322,13 @@ func (a *App) remoteWorkspaceChanges(rs *remoteSession) WorkspaceChangesView {
 	if res.Detached {
 		branch = res.Branch + " (detached)"
 	}
-	return WorkspaceChangesView{GitAvailable: true, GitBranch: branch, Files: changes}
+	untracked := 0
+	for _, e := range res.Entries {
+		if strings.HasPrefix(e.Change, "?") {
+			untracked++
+		}
+	}
+	return WorkspaceChangesView{GitAvailable: true, GitBranch: branch, Files: changes, Added: res.Added, Removed: res.Removed, Untracked: untracked}
 }
 
 // remoteReveal opens the remote path's Windows UNC form in Explorer (WSL only).

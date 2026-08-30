@@ -81,6 +81,46 @@ func findingValid(f *Finding) error {
 	return nil
 }
 
+// DismissFinding deletes one finding by id — the findings queue's per-item ×.
+// An unknown id is an error so the UI can tell "already gone" from "deleted".
+func DismissFinding(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" || strings.ContainsAny(id, `/\`+string(filepath.Separator)) {
+		return fmt.Errorf("finding: invalid id")
+	}
+	findingsMu.Lock()
+	defer findingsMu.Unlock()
+	if err := os.Remove(filepath.Join(FindingsDir(), id+".json")); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ClearFindings deletes every persisted finding and returns how many — the
+// queue's "clear all" (double-confirmed in the UI). Dev/test droppings are the
+// main payload; real queues rebuild from the next inspection run.
+func ClearFindings() (int, error) {
+	findingsMu.Lock()
+	defer findingsMu.Unlock()
+	entries, err := os.ReadDir(FindingsDir())
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(FindingsDir(), e.Name())); err == nil {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // SaveFinding validates and persists one finding.
 func SaveFinding(f *Finding) error {
 	if err := findingValid(f); err != nil {

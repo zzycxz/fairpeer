@@ -515,6 +515,11 @@ export interface WorkspaceChangesView {
   gitAvailable: boolean;
   gitErr?: string;
   gitBranch?: string;
+  // Tracked-file line deltas (git diff --numstat HEAD) plus untracked count —
+  // the changed-tab summary "+N -N ?N". Zero/absent when git or numstat fails.
+  added?: number;
+  removed?: number;
+  untracked?: number;
 }
 
 export interface GitCommitView {

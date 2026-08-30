@@ -691,6 +691,13 @@ type Options struct {
 	// disables hook firing.
 	Hooks ToolHooks
 
+	// PreEditHook, when set, receives each writer tool's previewed change just
+	// before it runs — the seam the checkpoint store uses to snapshot pre-edit
+	// file state. The controller installs it on the main loop via
+	// SetPreEditHook; passing the same function here extends checkpoint capture
+	// to sub-agents (run_skill/task), whose file writes must rewind the same way.
+	PreEditHook func(diff.Change)
+
 	// Jobs is the session's background-job manager (nil disables background tools).
 	Jobs *jobs.Manager
 
@@ -750,6 +757,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		sink:              event.NewItemAdapter(sink),
 		gate:              gate,
 		hooks:             hooks,
+		onPreEdit:         opts.PreEditHook,
 		jobs:              opts.Jobs,
 		evidence:          evidence.NewLedger(),
 		projectChecks:     append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),

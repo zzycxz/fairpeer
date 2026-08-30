@@ -456,6 +456,9 @@ export interface AppBindings {
   // outside the inventory are flagged 待确认 (nothing dials).
   NetDevImportNmap(xmlText: string): Promise<NetDevFinding | null>;
   NetDevFindings(): Promise<NetDevFinding[]>;
+  // Findings queue hygiene: per-row dismiss and double-confirmed clear-all.
+  NetDevFindingDismiss(id: string): Promise<void>;
+  NetDevFindingsClear(): Promise<number>;
   // Emergency stop: close every device connection at once (audited).
   NetDevEmergencyStop(): Promise<number>;
   // Reset the per-turn command budget — called on every user submit in the
@@ -2483,6 +2486,8 @@ function makeMockApp(): AppBindings {
       return "**总体判断**：网络平稳，风险等级 **低**。\n\n**需要关注**\n1. ACC-01 上行口错包增长（依据：今日发现）\n2. 基线：2 台设备仍在用 SNMP v2c（依据：基线核查）\n\n**建议动作**\n- 只读核查：ACC-01 接口错包计数（可直接做）\n- 变更：SNMPv3 迁移（需起草提案）";
     },
     async NetDevFindings() { return [] as NetDevFinding[]; },
+    async NetDevFindingDismiss(_id: string) { console.info("mock NetDevFindingDismiss", _id); },
+    async NetDevFindingsClear() { return 0; },
     async NetDevEmergencyStop() { return 0; },
     async NetDevTurnBegin() {},
     async NetDevAddExtraRead(vendor: string, command: string) {

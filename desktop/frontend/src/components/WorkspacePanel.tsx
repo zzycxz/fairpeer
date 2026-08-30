@@ -10,6 +10,8 @@ import type {
 import {
   ChevronDown,
   ChevronRight,
+  Check,
+  FileDiff,
   FileText,
   Folder,
   FolderOpen,
@@ -26,7 +28,7 @@ import {
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { loadLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
-import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView, WorkspaceChangeView } from "../lib/types";
+import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView, WorkspaceChangeView, WorkspaceChangesView } from "../lib/types";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
 import { cleanGitDiff } from "../lib/diff";
 import { CodeViewer } from "./CodeViewer";
@@ -189,6 +191,8 @@ export function WorkspacePanel({
   refreshKey,
   initialViewMode = "files",
   showViewTabs = true,
+  tabId,
+  branchSwitch,
 }: {
   open: boolean;
   cwd?: string;
@@ -202,6 +206,13 @@ export function WorkspacePanel({
   refreshKey?: number;
   initialViewMode?: "files" | "changed";
   showViewTabs?: boolean;
+  // Active chat tab id — enables the per-turn checkpoint diff on session-change
+  // rows (CheckpointDiffForTab is tab-scoped). Absent (e.g. cowork dock, where
+  // the changed tab is not reachable) hides the diff affordance.
+  tabId?: string;
+  // Branch switcher gate: enabled only for local workspaces whose tab isn't
+  // mid-turn; blockedReason surfaces as the disabled button's tooltip.
+  branchSwitch?: { enabled: boolean; blockedReason?: string };
 }) {
   const t = useT();
   const panelRef = useRef<HTMLElement>(null);
@@ -216,11 +227,28 @@ export function WorkspacePanel({
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [viewMode, setViewMode] = useState<"files" | "changed">(initialViewMode);
   const [gitHistory, setGitHistory] = useState<GitCommitView[]>([]);
-  const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceChangeView[] | null>(null);
+  // Full view (branch + line stats + files), not just files: the changed-tab
+  // summary line renders branch and +N/-N/?N from it.
+  const [changesView, setChangesView] = useState<WorkspaceChangesView | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
   const [commitDetail, setCommitDetail] = useState<GitCommitDetailView | null>(null);
   const [loadingCommit, setLoadingCommit] = useState(false);
+  // Session-change row expansion: path → the file's diff from its last touched
+  // turn's checkpoint (null = fetched but no snapshot survived; undefined while
+  // loading). Keyed per path so toggling rows doesn't refetch.
+  const [turnDiffPath, setTurnDiffPath] = useState<string | null>(null);
+  const [turnDiffs, setTurnDiffs] = useState<Map<string, string | null>>(new Map());
+  // Branch switcher (G3): popover listing GitBranches(), a confirm step, and
+  // the post-checkout refresh. switchTarget holds the branch awaiting confirm.
+  const branchAnchorRef = useRef<HTMLButtonElement>(null);
+  const [branchMenu, setBranchMenu] = useState(false);
+  const [branches, setBranches] = useState<string[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchFilter, setBranchFilter] = useState("");
+  const [switchTarget, setSwitchTarget] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
+  const [switchErr, setSwitchErr] = useState("");
   const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string; path: string } | null>(null);
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
   const [treeBlankMenuPoint, setTreeBlankMenuPoint] = useState<ContextMenuPoint | null>(null);
@@ -257,11 +285,55 @@ export function WorkspacePanel({
   const loadWorkspaceChanges = useCallback(async () => {
     try {
       const result = await app.WorkspaceChanges();
-      setWorkspaceChanges(result.files && result.files.length > 0 ? result.files : null);
+      setChangesView(result.files && result.files.length > 0 ? result : { ...result, files: [] });
     } catch {
-      setWorkspaceChanges(null);
+      setChangesView(null);
     }
   }, []);
+
+  // Branch switcher (G3). Open → GitBranches; confirm → GitCheckout then a
+  // three-way refresh (changes + history + file tree) so the panel reflects
+  // the new worktree. A dirty tree that git refuses to carry over surfaces as
+  // switchErr inside the confirm step.
+  const openBranchMenu = useCallback(async () => {
+    if (branchSwitch?.blockedReason) return;
+    setBranchMenu(true);
+    setSwitchTarget(null);
+    setSwitchErr("");
+    setBranchFilter("");
+    setBranchesLoading(true);
+    try {
+      setBranches((await app.GitBranches()) ?? []);
+    } catch {
+      setBranches([]);
+    } finally {
+      setBranchesLoading(false);
+    }
+  }, [branchSwitch]);
+
+  const confirmBranchSwitch = useCallback(
+    async (target: string) => {
+      setSwitching(true);
+      setSwitchErr("");
+      try {
+        await app.GitCheckout(target);
+        setBranchMenu(false);
+        setSwitchTarget(null);
+        // New worktree: drop cached dir listings, re-root the tree, and
+        // re-pull both git surfaces.
+        setEntriesByDir({});
+        setOpenDirs(new Set([""]));
+        void loadDir("");
+        void loadGitHistory();
+        await loadWorkspaceChanges();
+      } catch (e) {
+        setSwitchErr(String(e));
+      } finally {
+        setSwitching(false);
+      }
+    },
+    [loadDir, loadGitHistory, loadWorkspaceChanges],
+  );
 
   const toggleCommit = useCallback((hash: string) => {
     setExpandedCommit((prev) => {
@@ -270,6 +342,34 @@ export function WorkspacePanel({
       return next;
     });
   }, [onRequestPanelWidth]);
+
+  // Toggle a session-change row's checkpoint diff: fetch once (the last turn
+  // the file was touched in), cache, then expand/collapse. Falls through to a
+  // "no snapshot" note when the checkpoint has been pruned or the tab is gone.
+  const toggleTurnDiff = useCallback(
+    async (change: WorkspaceChangeView) => {
+      const path = change.path;
+      if (turnDiffPath === path) {
+        setTurnDiffPath(null);
+        return;
+      }
+      setTurnDiffPath(path);
+      if (turnDiffs.has(path) || !tabId) return;
+      const turn = change.turns?.[change.turns.length - 1];
+      if (turn === undefined) {
+        setTurnDiffs((prev) => new Map(prev).set(path, null));
+        return;
+      }
+      try {
+        const changes = await app.CheckpointDiffForTab(tabId, turn);
+        const hit = (changes ?? []).find((c) => c.path === path);
+        setTurnDiffs((prev) => new Map(prev).set(path, hit?.diff ?? null));
+      } catch {
+        setTurnDiffs((prev) => new Map(prev).set(path, null));
+      }
+    },
+    [tabId, turnDiffPath, turnDiffs],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -332,6 +432,8 @@ export function WorkspacePanel({
     setViewMode(initialViewMode);
     setExpandedCommit(null);
     setCommitDetail(null);
+    setTurnDiffPath(null);
+    setTurnDiffs(new Map());
     setSelectionMenu(null);
     setTreeMenu(null);
     setRecentOpen(false);
@@ -466,8 +568,8 @@ export function WorkspacePanel({
   const breadcrumbDirs = selectedPath ? parentDirs(selectedPath) : [""];
   const pathParts = selectedPath?.split("/").filter(Boolean) ?? [];
   const sessionChanges = useMemo(
-    () => workspaceChanges?.filter((c) => c.sources.includes("session")) ?? null,
-    [workspaceChanges],
+    () => changesView?.files.filter((c) => c.sources.includes("session")) ?? null,
+    [changesView],
   );
 
   const changedMode = viewMode === "changed";
@@ -866,6 +968,105 @@ export function WorkspacePanel({
         <div className="workspace-preview__body" ref={previewBodyRef} onContextMenu={openSelectionMenu}>
           {viewMode === "changed" && !selectedPath ? (
             <div className="workspace-git-history">
+              {(changesView?.gitBranch || changesView?.gitAvailable === false) && (
+                <div className="workspace-git-summary">
+                  <GitBranch size={13} />
+                  {changesView.gitAvailable === false ? (
+                    <span className="workspace-git-summary__unavailable">{t("workspace.gitUnavailable")}</span>
+                  ) : branchSwitch?.enabled ? (
+                    <>
+                      <Tooltip label={branchSwitch.blockedReason || t("workspace.branchSwitch")}>
+                        <button
+                          ref={branchAnchorRef}
+                          type="button"
+                          className="workspace-git-summary__branch workspace-git-summary__branch--btn"
+                          disabled={!!branchSwitch.blockedReason}
+                          aria-expanded={branchMenu}
+                          onClick={() => void openBranchMenu()}
+                        >
+                          <span className="workspace-git-summary__branchname">{changesView.gitBranch}</span>
+                          <ChevronDown size={12} />
+                        </button>
+                      </Tooltip>
+                      <AnchoredPopover
+                        open={branchMenu}
+                        anchorRef={branchAnchorRef}
+                        onClose={() => { setBranchMenu(false); setSwitchTarget(null); }}
+                        className="workspace-branch-menu"
+                        align="start"
+                        offset={6}
+                        placement="bottom"
+                      >
+                        {switchTarget ? (
+                          <div className="workspace-branch-menu__confirm">
+                            <div className="workspace-branch-menu__confirm-q">{t("workspace.branchSwitchConfirm", { branch: switchTarget })}</div>
+                            {(sessionChanges?.length ?? 0) > 0 && (
+                              <div className="workspace-branch-menu__confirm-warn">{t("workspace.branchSwitchWarn", { n: sessionChanges?.length ?? 0 })}</div>
+                            )}
+                            {switchErr && <div className="workspace-branch-menu__confirm-err">{switchErr}</div>}
+                            <div className="workspace-branch-menu__confirm-row">
+                              <button type="button" className="btn btn--primary btn--small" disabled={switching} onClick={() => void confirmBranchSwitch(switchTarget)}>
+                                {switching ? t("workspace.loading") : t("workspace.branchSwitchGo")}
+                              </button>
+                              <button type="button" className="btn btn--secondary btn--small" disabled={switching} onClick={() => { setSwitchTarget(null); setSwitchErr(""); }}>
+                                {t("workspace.branchSwitchCancel")}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="workspace-branch-menu__title">{t("workspace.branchSwitchTitle")}</div>
+                            {branches.length > 12 && (
+                              <input
+                                className="workspace-branch-menu__filter"
+                                value={branchFilter}
+                                onChange={(e) => setBranchFilter(e.target.value)}
+                                placeholder={t("workspace.branchSwitchFilter")}
+                              />
+                            )}
+                            <div className="workspace-branch-menu__list">
+                              {branchesLoading ? (
+                                <div className="workspace-empty">{t("workspace.loading")}</div>
+                              ) : (
+                                branches
+                                  .filter((b) => !branchFilter || b.toLowerCase().includes(branchFilter.toLowerCase()))
+                                  .map((b) => (
+                                    <button
+                                      key={b}
+                                      type="button"
+                                      className={`workspace-branch-menu__item${b === changesView.gitBranch ? " workspace-branch-menu__item--active" : ""}`}
+                                      onClick={() => b === changesView.gitBranch ? setBranchMenu(false) : setSwitchTarget(b)}
+                                    >
+                                      {b === changesView.gitBranch ? <Check size={13} /> : <span className="workspace-branch-menu__dot" />}
+                                      <span className="workspace-branch-menu__name">{b}</span>
+                                    </button>
+                                  ))
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </AnchoredPopover>
+                    </>
+                  ) : (
+                    <span className="workspace-git-summary__branch" title={t("workspace.branchTip", { branch: changesView.gitBranch ?? "" })}>
+                      {changesView.gitBranch}
+                    </span>
+                  )}
+                  {(() => {
+                    const added = changesView.added ?? 0;
+                    const removed = changesView.removed ?? 0;
+                    const untracked = changesView.untracked ?? 0;
+                    if (added <= 0 && removed <= 0 && untracked <= 0) return null;
+                    return (
+                      <span className="workspace-git-summary__stats">
+                        {added > 0 && <span className="workspace-git-summary__added">+{added}</span>}
+                        {removed > 0 && <span className="workspace-git-summary__removed">-{removed}</span>}
+                        {untracked > 0 && <span className="workspace-git-summary__untracked">?{untracked}</span>}
+                      </span>
+                    );
+                  })()}
+                </div>
+              )}
               {sessionChanges && sessionChanges.length > 0 && (
                 <div className="workspace-change-scope">
                   <div className="workspace-change-scope__head">
@@ -875,23 +1076,48 @@ export function WorkspacePanel({
                   <div className="workspace-change-scope__list">
                     {sessionChanges.map((change) => {
                       const dir = parentPath(change.path);
+                      const canDiff = !!tabId && (change.turns?.length ?? 0) > 0;
                       return (
-                        <button
-                          key={change.path}
-                          className="workspace-change"
-                          type="button"
-                          onClick={() => selectFile(change.path)}
-                        >
-                          <FileText size={14} />
-                          <span className="workspace-change__body">
-                            <span className="workspace-change__name">{basename(change.path)}</span>
-                            {dir && <span className="workspace-change__path">{dir}</span>}
-                            {change.latestPrompt && <span className="workspace-change__detail">{change.latestPrompt}</span>}
-                          </span>
-                          <span className="workspace-change__meta">
-                            {change.gitStatus && <span className="workspace-change__badge workspace-change__badge--git">{change.gitStatus}</span>}
-                          </span>
-                        </button>
+                        <div key={change.path} className="workspace-change-row">
+                          <button
+                            className="workspace-change"
+                            type="button"
+                            onClick={() => selectFile(change.path)}
+                          >
+                            <FileText size={14} />
+                            <span className="workspace-change__body">
+                              <span className="workspace-change__name">{basename(change.path)}</span>
+                              {dir && <span className="workspace-change__path">{dir}</span>}
+                              {change.latestPrompt && <span className="workspace-change__detail">{change.latestPrompt}</span>}
+                            </span>
+                            <span className="workspace-change__meta">
+                              {change.gitStatus && <span className="workspace-change__badge workspace-change__badge--git">{change.gitStatus}</span>}
+                            </span>
+                          </button>
+                          {canDiff && (
+                            <Tooltip label={t("workspace.turnDiff")}>
+                              <button
+                                className={`workspace-change__diffbtn${turnDiffPath === change.path ? " workspace-change__diffbtn--on" : ""}`}
+                                type="button"
+                                aria-label={t("workspace.turnDiff")}
+                                onClick={() => void toggleTurnDiff(change)}
+                              >
+                                <FileDiff size={13} />
+                              </button>
+                            </Tooltip>
+                          )}
+                          {turnDiffPath === change.path && (
+                            <div className="workspace-change__diff">
+                              {!turnDiffs.has(change.path) ? (
+                                <div className="workspace-empty">{t("workspace.loading")}</div>
+                              ) : turnDiffs.get(change.path) ? (
+                                <CodeViewer value={cleanGitDiff(turnDiffs.get(change.path) ?? "")} language="diff" />
+                              ) : (
+                                <div className="workspace-empty">{t("workspace.turnDiffGone")}</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       );
                     })}
                   </div>

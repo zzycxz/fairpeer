@@ -328,11 +328,15 @@ type FsSearchResult struct {
 }
 
 type GitStatusResult struct {
-	Root     string        `json:"root"`
-	Branch   string        `json:"branch"` // "" + Detached on detached HEAD; empty repo → IsRepo=false
-	Detached bool          `json:"detached"`
-	IsRepo   bool          `json:"isRepo"`
-	Entries  []GitEntry    `json:"entries"`
+	Root     string     `json:"root"`
+	Branch   string     `json:"branch"` // "" + Detached on detached HEAD; empty repo → IsRepo=false
+	Detached bool       `json:"detached"`
+	IsRepo   bool       `json:"isRepo"`
+	Entries  []GitEntry `json:"entries"`
+	// Added/Removed are `git diff --numstat HEAD` line totals (binary "-"
+	// columns skipped); a failed probe leaves both zero.
+	Added   int `json:"added,omitempty"`
+	Removed int `json:"removed,omitempty"`
 }
 
 type GitEntry struct {

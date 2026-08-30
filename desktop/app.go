@@ -5668,6 +5668,12 @@ type WorkspaceChangesView struct {
 	GitAvailable bool                  `json:"gitAvailable"`
 	GitErr       string                `json:"gitErr,omitempty"`
 	GitBranch    string                `json:"gitBranch,omitempty"`
+	// Added/Removed are tracked-file line deltas (git diff --numstat HEAD) and
+	// Untracked the untracked-file count — the changed-tab "+N -N ?N" summary.
+	// Omitted when git or the numstat probe fails; gitAvailable stays true then.
+	Added     int `json:"added,omitempty"`
+	Removed   int `json:"removed,omitempty"`
+	Untracked int `json:"untracked,omitempty"`
 }
 
 // workspaceNoiseNames are local cache/vendor entries hidden from the file tree

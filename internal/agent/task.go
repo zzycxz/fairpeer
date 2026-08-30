@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/zzycxz/fairpeer/internal/diff"
 	"github.com/zzycxz/fairpeer/internal/event"
 	"github.com/zzycxz/fairpeer/internal/jobs"
 	"github.com/zzycxz/fairpeer/internal/provider"
@@ -73,6 +74,10 @@ type TaskTool struct {
 	baseModel         string
 	baseEffort        string
 	identityProfile   func(modelRef, effort string) (string, string)
+	// preEdit, when set, is installed as the sub-agent's PreEditHook so its
+	// writer tools feed the parent's checkpoint store (sub-agent edits must
+	// rewind like main-loop edits). Wired via WithPreEditHook.
+	preEdit func(diff.Change)
 }
 
 // NewTaskTool wires a task tool to the parent agent's environment so its
@@ -119,6 +124,14 @@ func (t *TaskTool) WithTranscripts(store *SubagentStore, workspaceRoot, baseMode
 
 func (t *TaskTool) WithTranscriptIdentityResolver(resolve func(modelRef, effort string) (string, string)) *TaskTool {
 	t.identityProfile = resolve
+	return t
+}
+
+// WithPreEditHook routes sub-agent writer pre-edits into the caller's
+// checkpoint seam (typically a SharedPreEditHook owned by boot). nil (the
+// default) keeps sub-agent edits un-checkpointed, as before.
+func (t *TaskTool) WithPreEditHook(fn func(diff.Change)) *TaskTool {
+	t.preEdit = fn
 	return t
 }
 
@@ -458,6 +471,7 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 		CompactRatio:      t.compactRatio,
 		CompactForceRatio: t.compactForceRatio,
 		ArchiveDir:        t.archiveDir,
+		PreEditHook:       t.preEdit,
 	}, sink)
 }
 

@@ -106,6 +106,24 @@ interface TurnGroup {
   endIdx: number;   // exclusive end
 }
 
+// collapseNoticeRuns merges a run of adjacent identical notices into one card
+// (the kernel re-emits "resumed session …" on every resume, so a session opened
+// and resumed four times shows the same English line four times). The kept item
+// carries `repeat` so NoticeCard can badge it ×N; everything else passes through.
+function collapseNoticeRuns(items: Item[]): Item[] {
+  const out: Item[] = [];
+  for (const it of items) {
+    const prev = out[out.length - 1];
+    if (it.kind === "notice" && prev?.kind === "notice" && prev.text === it.text && prev.level === it.level) {
+      prev.repeat = (prev.repeat ?? 1) + 1;
+      continue;
+    }
+    // Clone notices so the repeat mutation never touches controller state items.
+    out.push(it.kind === "notice" ? { ...it } : it);
+  }
+  return out;
+}
+
 function buildTurnGroups(items: Item[], questions: QuestionAnchor[]): TurnGroup[] {
   const groups: TurnGroup[] = [];
   let turnIdx = 0;
@@ -146,7 +164,7 @@ function buildTurnGroups(items: Item[], questions: QuestionAnchor[]): TurnGroup[
 // ── Transcript component ──────────────────────────────────────────────────────
 
 export function Transcript({
-  items,
+  items: rawItems,
   live,
   footerHeight = 0,
   onPrompt,
@@ -177,7 +195,7 @@ export function Transcript({
   modelLabel?: string;
   // profile + onInsert drive the cowork empty-state "starter" bubbles (see
   // Welcome). When profile is "cowork", starter bubbles fill the composer via
-  // onInsert instead of sending immediately. "netdev" → 运维 examples. Omitted
+  // onInsert instead of sending immediately. "netdev" → 运维示例. Omitted
   // → dev behavior (send now).
   profile?: "dev" | "cowork" | "netdev";
   onInsert?: (text: string) => void;
@@ -187,6 +205,10 @@ export function Transcript({
   const resizeFrame = useRef<number | null>(null);
   const lastClientHeight = useRef<number | null>(null);
   const lastFooterHeight = useRef<number | null>(null);
+
+  // Raw items get notice-run collapsing once here; every downstream consumer
+  // (turn groups, warm zone, flat list) then renders from the collapsed list.
+  const items = useMemo(() => collapseNoticeRuns(rawItems), [rawItems]);
 
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => getDisplayMode());
   useEffect(() => onDisplayModeChange((mode) => setDisplayMode(mode)), []);
@@ -509,7 +531,7 @@ export function Transcript({
               if (it.name === "exit_plan_mode") break;
               out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
               break;
-            case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} retryable={it.retryable} />); break;
+            case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} retryable={it.retryable} repeat={it.repeat} />); break;
             case "turn_summary": out.push(<TurnSummaryCard key={it.id} item={it} />); break;
             case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
           }
@@ -545,7 +567,7 @@ export function Transcript({
             if (it.name === "exit_plan_mode") break;
             out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
             break;
-          case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} retryable={it.retryable} />); break;
+          case "notice": out.push(<NoticeCard key={it.id} level={it.level} text={it.text} retryable={it.retryable} repeat={it.repeat} />); break;
           case "turn_summary": out.push(<TurnSummaryCard key={it.id} item={it} />); break;
           case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
         }
@@ -833,7 +855,7 @@ function WarmTurnItems({
         nodes.push(<ToolCard key={it.id} item={it} subcalls={subcalls.get(it.id)} />);
         break;
       }
-      case "notice": nodes.push(<NoticeCard key={it.id} level={it.level} text={it.text} />); break;
+      case "notice": nodes.push(<NoticeCard key={it.id} level={it.level} text={it.text} repeat={it.repeat} />); break;
       case "compaction": nodes.push(<CompactionCard key={it.id} item={it} />); break;
     }
   }
@@ -1170,12 +1192,26 @@ type CompactionItem = Extract<Item, { kind: "compaction" }>;
 type NoticeItem = Extract<Item, { kind: "notice" }>;
 type TurnSummaryItem = Extract<Item, { kind: "turn_summary" }>;
 
-function NoticeCard({ level, text, retryable }: { level: NoticeItem["level"]; text: string; retryable?: boolean }) {
+// localizeNoticeText maps the kernel's fixed English notice strings to UI copy
+// at render time. The notice channel is free-text protocol (errors, dynamic
+// parts), so only stable phrasings are mapped; anything else shows verbatim.
+function localizeNoticeText(text: string, t: ReturnType<typeof useT>): string {
+  const resumed = /^resumed session with (.+) still active$/.exec(text);
+  if (resumed) return t("notice.resumed", { modes: resumed[1] });
+  if (text === "compacted") return t("notice.compacted");
+  if (text === "context cleared") return t("notice.contextCleared");
+  if (text === "new session") return t("notice.newSession");
+  return text;
+}
+
+function NoticeCard({ level, text, retryable, repeat }: { level: NoticeItem["level"]; text: string; retryable?: boolean; repeat?: number }) {
+  const t = useT();
   const onRetry = retryFailedTurn;
   return (
     <div className={`notice-line notice-line--${level}`}>
       <span className="notice-line__icon">{level === "warn" ? <AlertTriangle size={13} /> : <Info size={13} />}</span>
-      <span className="notice-line__text">{text}</span>
+      <span className="notice-line__text">{localizeNoticeText(text, t)}</span>
+      {(repeat ?? 1) > 1 && <span className="notice-line__count">×{repeat}</span>}
       {retryable && onRetry && (
         <button type="button" className="notice-line__retry" onClick={onRetry}>
           <RotateCcw size={12} />

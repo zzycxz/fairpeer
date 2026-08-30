@@ -50,7 +50,7 @@ export type Item =
   | { kind: "user"; id: string; text: string; failed?: boolean }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean }
   | { kind: "phase"; id: string; text: string }
-  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; retryable?: boolean }
+  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; retryable?: boolean; repeat?: number }
   | { kind: "turn_summary"; id: string; files: TurnSummaryFile[] }
   | {
       kind: "compaction";

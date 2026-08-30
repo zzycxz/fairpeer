@@ -19,6 +19,20 @@ export function TodoPanel({ todos, onDismiss }: { todos: Todo[]; onDismiss: () =
   const done = todos.filter((t) => t.status === "completed").length;
   const current = todos.find((t) => t.status === "in_progress");
 
+  // Auto-collapse when the list reaches 100% (a fully struck-through list pinned
+  // over the composer is dead weight), and re-open when a fresh todo_write with
+  // unfinished items arrives. Manual toggling still wins in between.
+  const allDone = todos.length > 0 && done === todos.length;
+  const prevAllDoneRef = useRef(allDone);
+  useEffect(() => {
+    if (allDone && !prevAllDoneRef.current) setOpen(false);
+    prevAllDoneRef.current = allDone;
+  }, [allDone]);
+  useEffect(() => {
+    if (done < todos.length) setOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todos]);
+
   useEffect(() => {
     if (!open) return;
     currentRef.current?.scrollIntoView({ block: "nearest" });

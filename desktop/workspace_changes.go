@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/zzycxz/fairpeer/internal/proc"
@@ -84,7 +85,13 @@ func (a *App) WorkspaceChanges() WorkspaceChangesView {
 		acc.hasGit = true
 		acc.view.GitStatus = entry.Status
 		acc.view.OldPath = normalizeWorkspaceRelPath(base, entry.OldPath)
+		if strings.HasPrefix(entry.Status, "??") {
+			out.Untracked++
+		}
 	}
+	// Line-delta summary from numstat; a failed probe leaves the counters at
+	// zero (gitAvailable is unaffected — porcelain already succeeded above).
+	out.Added, out.Removed = workspaceGitNumstat(base)
 
 	out.Files = make([]WorkspaceChangeView, 0, len(changes))
 	for _, acc := range changes {
@@ -113,6 +120,43 @@ func workspaceGit(args ...string) *exec.Cmd {
 	cmd := exec.Command("git", append([]string{"-c", "core.fsmonitor=false", "-c", "maintenance.auto=false"}, args...)...)
 	proc.HideWindow(cmd)
 	return cmd
+}
+
+// workspaceGitNumstat summarizes tracked-file line deltas via
+// `git diff --numstat HEAD` — the +N/-N half of the changed-tab summary (the
+// CLI status bar runs the same probe; see internal/cli/gitstatus.go). Binary
+// files report "-" for a column and are skipped. Any failure returns 0/0;
+// callers keep rendering branch/files from the porcelain result.
+func workspaceGitNumstat(base string) (added, removed int) {
+	cmd := workspaceGit("-C", base, "diff", "--numstat", "HEAD", "--")
+	raw, err := cmd.Output()
+	if err != nil {
+		return 0, 0
+	}
+	return parseGitNumstat(string(raw))
+}
+
+func parseGitNumstat(out string) (added, removed int) {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		if fields[0] != "-" {
+			if n, err := strconv.Atoi(fields[0]); err == nil {
+				added += n
+			}
+		}
+		if fields[1] != "-" {
+			if n, err := strconv.Atoi(fields[1]); err == nil {
+				removed += n
+			}
+		}
+	}
+	return added, removed
 }
 
 func workspaceGitStatus(base string) ([]gitStatusEntry, error) {
@@ -217,7 +261,12 @@ func workspaceGitBranch(base string) string {
 }
 
 // GitBranches returns all local git branches for the active workspace's repo.
+// Remote tabs are refused: the local git probe cannot reach the remote repo,
+// and switching a remote workspace's branch has no write path by design.
 func (a *App) GitBranches() ([]string, error) {
+	if rs := a.activeRemoteSession(); rs != nil {
+		return nil, fmt.Errorf("branch list is local-workspace only")
+	}
 	base, err := a.activeWorkspaceBase()
 	if err != nil {
 		return nil, err
@@ -232,8 +281,12 @@ func (a *App) GitBranches() ([]string, error) {
 }
 
 // GitCheckout switches the active workspace's git branch and returns the
-// current branch name, or an error when git is unavailable.
+// current branch name, or an error when git is unavailable. Local workspaces
+// only — the caller (UI) double-confirms and blocks it while a turn runs.
 func (a *App) GitCheckout(branch string) error {
+	if rs := a.activeRemoteSession(); rs != nil {
+		return fmt.Errorf("branch switch is local-workspace only")
+	}
 	base, err := a.activeWorkspaceBase()
 	if err != nil {
 		return err

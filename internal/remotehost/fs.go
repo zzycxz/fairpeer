@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -225,7 +226,33 @@ func (h *host) gitStatus(_ context.Context, raw json.RawMessage) (any, error) {
 		path := strings.TrimSpace(line[3:])
 		out.Entries = append(out.Entries, GitEntry{Path: path, Change: code})
 	}
+	out.Added, out.Removed = parseNumstat(gitOutput(root, "diff", "--numstat", "HEAD", "--"))
 	return out, nil
+}
+
+// parseNumstat totals a `git diff --numstat` report, skipping binary files
+// (their columns are "-"). Mirrors the desktop/CLI parsers.
+func parseNumstat(out string) (added, removed int) {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		if fields[0] != "-" {
+			if n, err := strconv.Atoi(fields[0]); err == nil {
+				added += n
+			}
+		}
+		if fields[1] != "-" {
+			if n, err := strconv.Atoi(fields[1]); err == nil {
+				removed += n
+			}
+		}
+	}
+	return added, removed
 }
 
 func isGitRepo(root string) bool {
