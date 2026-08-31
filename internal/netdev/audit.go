@@ -60,11 +60,14 @@ var (
 	auditPath string // overridden in tests
 )
 
-// SetAuditPath overrides the audit file location (tests).
+// SetAuditPath overrides the audit file location (tests). Switching files
+// invalidates the cached chain head — chaining a fresh file off the previous
+// file's head would break verification at its very first line.
 func SetAuditPath(p string) {
 	auditMu.Lock()
 	defer auditMu.Unlock()
 	auditPath = p
+	auditLastHash = ""
 }
 
 func auditFile() string {
@@ -113,8 +116,13 @@ func AppendAudit(e Audit) error {
 	if e.Time.IsZero() {
 		e.Time = time.Now()
 	}
-	// Chain: hash = sha256(prevHash + canonical(entry without hash)).
-	prev, err := lastAuditHash()
+	auditMu.Lock()
+	defer auditMu.Unlock()
+	// Chain: hash = sha256(prevHash + canonical(entry without hash)). The whole
+	// read-prev → hash → append → cache-update sequence is one critical section:
+	// computing the hash before taking the lock let two concurrent appends chain
+	// off the same prev, silently breaking VerifyAuditChain.
+	prev, err := lastAuditHashLocked()
 	if err != nil {
 		return err
 	}
@@ -127,8 +135,6 @@ func AppendAudit(e Audit) error {
 	if err != nil {
 		return err
 	}
-	auditMu.Lock()
-	defer auditMu.Unlock()
 	path := auditPath
 	if path == "" {
 		path = filepath.Join(netdevStateDir(), "audit.jsonl")
@@ -168,12 +174,18 @@ var auditLastHash string
 // cold cache.
 func lastAuditHash() (string, error) {
 	auditMu.Lock()
-	cached := auditLastHash
-	auditMu.Unlock()
-	if cached != "" {
-		return cached, nil
+	defer auditMu.Unlock()
+	return lastAuditHashLocked()
+}
+
+// lastAuditHashLocked is lastAuditHash with the caller holding auditMu.
+func lastAuditHashLocked() (string, error) {
+	if auditLastHash != "" {
+		return auditLastHash, nil
 	}
-	lines, err := readAuditLines()
+	// The cold-cache read must NOT go through AuditPath()/readAuditLines() —
+	// both re-lock auditMu (non-reentrant) and would deadlock under AppendAudit.
+	lines, err := readAuditLinesAt(currentAuditPathLocked())
 	if err != nil {
 		return "", err
 	}
@@ -186,8 +198,21 @@ func lastAuditHash() (string, error) {
 	return "", nil
 }
 
+// currentAuditPathLocked resolves the audit file path from the guarded field
+// directly; caller holds auditMu (or accepts racing a concurrent SetAuditPath,
+// which only tests perform).
+func currentAuditPathLocked() string {
+	if auditPath != "" {
+		return auditPath
+	}
+	return filepath.Join(netdevStateDir(), "audit.jsonl")
+}
+
 func readAuditLines() ([][]byte, error) {
-	path := AuditPath()
+	return readAuditLinesAt(AuditPath())
+}
+
+func readAuditLinesAt(path string) ([][]byte, error) {
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil, nil

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/agent"
@@ -519,25 +520,26 @@ func botDomainOrDefault(domain string) string {
 
 // --- apply (write config, then rebuild the controller so it's live) ---
 
+// configApplyMu serializes the load→mutate→save read-modify-write over the
+// user config TOML. The file write itself is atomic (temp+rename), but two
+// concurrent settings saves (e.g. netdev vs bot) reading before either wrote
+// would silently drop the other's section.
+var configApplyMu sync.Mutex
+
 // applyConfigChange mutates the user-global config and rebuilds the controller so
 // the change takes effect this session. Desktop settings such as providers and
 // keys are account-level, not per-project: writing them to the global config
 // rather than the cwd's fairpeer.toml is what lets them survive a workspace switch.
 func (a *App) applyConfigChange(mutate func(*config.Config) error) error {
-	cfg, path, err := a.loadDesktopUserConfigForEdit()
-	if err != nil {
-		return err
-	}
-	if err := mutate(cfg); err != nil {
-		return err
-	}
-	if err := cfg.SaveTo(path); err != nil {
+	if err := a.applyConfigOnly(mutate); err != nil {
 		return err
 	}
 	return a.rebuild()
 }
 
 func (a *App) applyConfigOnly(mutate func(*config.Config) error) error {
+	configApplyMu.Lock()
+	defer configApplyMu.Unlock()
 	cfg, path, err := a.loadDesktopUserConfigForEdit()
 	if err != nil {
 		return err
