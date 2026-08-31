@@ -104,12 +104,12 @@ export function HealthPanel({ onOpenSettings }: { onOpenSettings?: (tab: string)
     return t("ndv.uptimeMins", { m });
   };
 
-  const ifUp = (d: NetDevDeviceHealth) => d.interfaces.filter(i => i.operUp).length;
-  const ifDown = (d: NetDevDeviceHealth) => d.interfaces.filter(i => i.adminUp && !i.operUp).length;
+  const ifUp = (d: NetDevDeviceHealth) => (d.interfaces ?? []).filter(i => i.operUp).length;
+  const ifDown = (d: NetDevDeviceHealth) => (d.interfaces ?? []).filter(i => i.adminUp && !i.operUp).length;
   const isBad = (d: NetDevDeviceHealth) => !d.reachable || ifDown(d) > 0;
 
   const shown = snap
-    ? (onlyBad ? snap.devices.filter(isBad) : snap.devices)
+    ? (onlyBad ? (snap.devices ?? []).filter(isBad) : (snap.devices ?? []))
       // 异常置顶：不可达最前，其次掉线口多者，稳定序兜底按名。
       .slice().sort((a, b) => Number(isBad(b)) - Number(isBad(a)) || ifDown(b) - ifDown(a) || a.device.localeCompare(b.device))
     : [];

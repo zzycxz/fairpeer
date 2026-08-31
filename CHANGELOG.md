@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(desktop/netdev): 全新环境下启动崩溃——Go nil 切片序列化成 JSON null 被前端直用
+
+真实后端（非 mock）首启即崩 `TypeError: Cannot read properties of null (reading 'slice')`：mock 壳数据恒非空掩盖了该问题。
+
+- **根因 1**：`HealthSnapshot`（health.go）在无 SNMP 设备时 `Devices` 保持 nil、`pollDeviceHealth` 各失败路径 `Interfaces` nil——Go nil 切片 → JSON `null` → HealthPanel `snap.devices.filter(...).slice()` 崩。修复：生产端 `Devices`/`Interfaces` 全路径保非 nil（空数组），组件侧再加 `?? []` 双保险
+- **根因 2**：`NetDevAuditTail` 审计文件不存在时 `return nil, nil` → 审计表 `audit.slice(0,100)` 同崩。修复：返回空切片
+- 复核其余默认页签路径（实时/日志/发现）：均有 `.length` 前置守卫或 `?? []`，无同类隐患
+
 ### feat(netdev/desktop): 大屏家族 + 发现指纹管线 + 导入向导 + 驳回提案 + ndv i18n 全量翻译
 
 运维侧多批在途工作合并落地（143 文件，含状态历史批次织入宿主函数的挂点与锁加固随批生效）。

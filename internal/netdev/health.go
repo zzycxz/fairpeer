@@ -133,7 +133,7 @@ func (m *Manager) EnsureHealthPoller() {
 func (m *Manager) HealthSnapshot() HealthSnapshot {
 	healthMu.Lock()
 	defer healthMu.Unlock()
-	out := HealthSnapshot{PollIntervalSeconds: m.cfg.NetDev.PollIntervalSeconds}
+	out := HealthSnapshot{PollIntervalSeconds: m.cfg.NetDev.PollIntervalSeconds, Devices: []DeviceHealth{}}
 	for _, d := range m.cfg.NetDev.Devices {
 		if d.SNMP == nil {
 			continue
@@ -141,7 +141,7 @@ func (m *Manager) HealthSnapshot() HealthSnapshot {
 		if h, ok := healthState[d.Name]; ok {
 			out.Devices = append(out.Devices, h)
 		} else {
-			out.Devices = append(out.Devices, DeviceHealth{Device: d.Name, LastError: "尚未轮询"})
+			out.Devices = append(out.Devices, DeviceHealth{Device: d.Name, LastError: "尚未轮询", Interfaces: []IfHealth{}})
 		}
 	}
 	return out
@@ -191,7 +191,9 @@ func (m *Manager) PollHealthOnce(ctx context.Context) {
 // pollDeviceHealth runs one device's MIB-2 battery: sysUpTime + the ifTable
 // (ifDescr / ifAdminStatus / ifOperStatus). Bounded to snmpMaxVars rows.
 func (m *Manager) pollDeviceHealth(ctx context.Context, deviceName string) DeviceHealth {
-	h := DeviceHealth{Device: deviceName, Time: time.Now().UTC()}
+	// Interfaces stays non-nil on every path: a nil slice marshals to JSON
+	// null and the frontend health table filters it unguarded.
+	h := DeviceHealth{Device: deviceName, Time: time.Now().UTC(), Interfaces: []IfHealth{}}
 	device, ok := m.cfg.NetDevDeviceByName(deviceName)
 	if !ok {
 		h.LastError = "not in inventory"

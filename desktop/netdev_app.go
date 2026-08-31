@@ -1519,7 +1519,9 @@ func (a *App) NetDevAuditTail(n int) ([]NetDevAuditEntryView, error) {
 	raw, err := os.ReadFile(netdev.AuditPath())
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			// A fresh install has no audit file yet; null here crashes the
+			// frontend audit table (null.slice) — hand back an empty array.
+			return []NetDevAuditEntryView{}, nil
 		}
 		return nil, err
 	}
