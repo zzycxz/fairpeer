@@ -1259,15 +1259,19 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Sub-agent writer pre-edits feed the controller's checkpoint store through
 	// this shared hook — boot creates it before the controller exists, both
 	// spawn sites (task tool, run_skill runner) fire through it, and the
-	// concrete snapshotter is installed after control.New (below).
+	// concrete snapshotter is installed after control.New (below). The post-edit
+	// twin carries the post-edit hash recorder for the rewind safety
+	// classification.
 	subagentPreEdit := agent.NewSharedPreEditHook()
+	subagentPostEdit := agent.NewSharedPostEditHook()
 	taskTool := agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
 		entry.ContextWindow, cfg.Agent.SoftCompactRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
 		cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
 		taskModel, taskEffort, resolveSubagentProvider).
 		WithTranscripts(subagentStore, root, modelName, entry.Effort).
 		WithTranscriptIdentityResolver(subagentIdentity).
-		WithPreEditHook(subagentPreEdit.Fire)
+		WithPreEditHook(subagentPreEdit.Fire).
+		WithPostEditHook(subagentPostEdit.Fire)
 	reg.Add(taskTool)
 
 	// The `remember` tool lets the model persist durable facts to the project's
@@ -1367,6 +1371,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			ContextWindow: ctxWin,
 			ArchiveDir:    config.ArchiveDir(),
 			PreEditHook:   subagentPreEdit.Fire,
+			PostEditHook:  subagentPostEdit.Fire,
 		}, agent.NestedSink(sctx, event.Discard))
 		if err != nil {
 			return "", errors.Join(err, subagentStore.SaveFailed(run))
@@ -1627,6 +1632,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Route sub-agent writer pre-edits (task / run_skill) into the controller's
 	// checkpoint store, so skill-driven file writes rewind like main-loop edits.
 	subagentPreEdit.Set(ctrl.PreEditSnapshotter())
+	subagentPostEdit.Set(ctrl.PostEditHasher())
 	// Inject the per-tool risk-class overrides (SPEC v2 §3.2A) so the interactive
 	// gate honors [[plugins]] risk config the same way the headless gate does.
 	ctrl.SetRiskOverrides(riskOverrides)

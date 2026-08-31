@@ -118,6 +118,12 @@ func saveCutover(c *CutoverRun) error {
 	}
 	cutoverMu.Lock()
 	defer cutoverMu.Unlock()
+	return saveCutoverLocked(c)
+}
+
+// saveCutoverLocked is saveCutover with the caller holding cutoverMu — the
+// write half of an atomic load→check→set→save transition.
+func saveCutoverLocked(c *CutoverRun) error {
 	b, err := json.Marshal(c)
 	if err != nil {
 		return err
@@ -230,6 +236,7 @@ func (m *Manager) CutoverStart(def *CutoverRun) (*CutoverRun, error) {
 	}
 
 	def.ID = newCutoverID()
+	StateEventSnap(StateEventCutoverStart, def.ID, StateActorUser, filepath.Join(cutoversDir(), def.ID+".json"))
 	def.Status = CutoverRunning
 	def.CreatedAt = time.Now()
 	now := time.Now()
@@ -274,18 +281,24 @@ func (m *Manager) cutoverLaunch(id string) {
 
 // CutoverContinue presses 继续 at a hold.
 func (m *Manager) CutoverContinue(id string) (*CutoverRun, error) {
+	cutoverMu.Lock()
 	c, err := GetCutover(id)
 	if err != nil {
+		cutoverMu.Unlock()
 		return nil, err
 	}
 	if c.Status != CutoverHold {
+		cutoverMu.Unlock()
 		return nil, fmt.Errorf("cutover %s: status %s — only held cutovers continue", id, c.Status)
 	}
+	StateEventSnap(StateEventCutoverGo, id, StateActorUser, filepath.Join(cutoversDir(), id+".json"))
 	c.Status = CutoverRunning
 	c.HoldNote = ""
-	if err := saveCutover(c); err != nil {
+	if err := saveCutoverLocked(c); err != nil {
+		cutoverMu.Unlock()
 		return nil, err
 	}
+	cutoverMu.Unlock()
 	_ = AppendAudit(Audit{Device: "(cutover)", Command: "continue " + id, Class: "cutover", Status: AuditOK})
 	m.cutoverLaunch(id)
 	return c, nil
@@ -301,6 +314,7 @@ func (m *Manager) CutoverRollback(ctx context.Context, id string) (*CutoverRun, 
 	if c.Status != CutoverHold {
 		return nil, fmt.Errorf("cutover %s: status %s — rollback happens at a decision point", id, c.Status)
 	}
+	StateEventSnap(StateEventCutoverBack, id, StateActorUser, filepath.Join(cutoversDir(), id+".json"))
 	failed := ""
 	for i := len(c.Steps) - 1; i >= 0; i-- {
 		s := &c.Steps[i]
@@ -332,13 +346,17 @@ func (m *Manager) CutoverRollback(ctx context.Context, id string) (*CutoverRun, 
 
 // CutoverAbort stops everything for good (running or held).
 func (m *Manager) CutoverAbort(id string) (*CutoverRun, error) {
+	cutoverMu.Lock()
 	c, err := GetCutover(id)
 	if err != nil {
+		cutoverMu.Unlock()
 		return nil, err
 	}
 	if c.Status != CutoverRunning && c.Status != CutoverHold {
+		cutoverMu.Unlock()
 		return nil, fmt.Errorf("cutover %s: status %s", id, c.Status)
 	}
+	StateEventSnap(StateEventCutoverAbort, id, StateActorUser, filepath.Join(cutoversDir(), id+".json"))
 	cutoverRunsMu.Lock()
 	if cancel, ok := cutoverRuns[id]; ok {
 		cancel()
@@ -353,9 +371,11 @@ func (m *Manager) CutoverAbort(id string) (*CutoverRun, error) {
 	}
 	now := time.Now()
 	c.EndedAt = &now
-	if err := saveCutover(c); err != nil {
+	if err := saveCutoverLocked(c); err != nil {
+		cutoverMu.Unlock()
 		return nil, err
 	}
+	cutoverMu.Unlock()
 	_ = AppendAudit(Audit{Device: "(cutover)", Command: "abort " + id, Class: "cutover", Status: AuditFailure})
 	return c, nil
 }
@@ -435,7 +455,7 @@ func (m *Manager) cutoverExecStep(ctx context.Context, c *CutoverRun, step Cutov
 	step.Error = ""
 
 	if step.ProposalID != "" {
-		p, err := m.ExecuteProposal(ctx, step.ProposalID)
+		p, err := m.ExecuteProposal(CtxStateActor(ctx, StateActorSystem), step.ProposalID)
 		if err != nil {
 			step.Status = CutoverStepFailed
 			step.Error = err.Error()
@@ -534,13 +554,16 @@ func (m *Manager) gateWait(ctx context.Context, g *CutoverGate) error {
 }
 
 func (m *Manager) cutoverHold(id, note string) {
+	cutoverMu.Lock()
+	defer cutoverMu.Unlock()
 	c, err := GetCutover(id)
 	if err != nil || c.Status != CutoverRunning {
 		return
 	}
+	StateEventSnap(StateEventCutoverHold, id, StateActorSystem, filepath.Join(cutoversDir(), id+".json"))
 	c.Status = CutoverHold
 	c.HoldNote = note
-	_ = saveCutover(c)
+	_ = saveCutoverLocked(c)
 	_ = AppendAudit(Audit{Device: "(cutover)", Command: "hold " + id, Class: "cutover", Status: AuditFailure, Error: note})
 }
 

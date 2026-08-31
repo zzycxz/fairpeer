@@ -99,6 +99,7 @@ func SaveCase(c *IncidentCase) error {
 		c.CreatedAt = now
 	}
 	c.UpdatedAt = now
+	StateEventSnap(StateEventCaseSave, c.ID, StateActorUser, filepath.Join(CasesDir(), c.ID+".json"))
 	if err := os.MkdirAll(CasesDir(), 0o700); err != nil {
 		return err
 	}
@@ -114,6 +115,7 @@ func DeleteCase(id string) error {
 	if id == "" || strings.ContainsAny(id, `/\`) {
 		return fmt.Errorf("case: bad id")
 	}
+	StateEventSnap(StateEventCaseDelete, id, StateActorUser, filepath.Join(CasesDir(), id+".json"))
 	return os.Remove(filepath.Join(CasesDir(), id+".json"))
 }
 

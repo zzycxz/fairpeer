@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -846,6 +847,8 @@ func (t *proposeTool) Execute(ctx context.Context, args json.RawMessage) (string
 	if err := t.m.ValidateProposal(p); err != nil {
 		return "", err
 	}
+	p.ID = newProposalID() // pre-assigned so the state-history create-marker knows the path
+	StateEventSnap(StateEventPropose, p.ID, StateActorAgent, filepath.Join(ProposalsDir(), p.ID+".json"))
 	if err := SaveProposal(p); err != nil {
 		return "", err
 	}

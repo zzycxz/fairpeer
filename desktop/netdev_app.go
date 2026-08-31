@@ -498,6 +498,9 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 		}
 	}
 
+	// State-history snapshot: the whole [netdev] section rides config.toml, so
+	// the TOML rewrite is revertible as one event.
+	netdev.StateEventSnap(netdev.StateEventSettings, "", netdev.StateActorUser, config.UserConfigPath())
 	cfgErr := a.applyConfigOnly(func(c *config.Config) error {
 		nd := config.NetDevConfig{
 			Enabled:        v.Enabled,
@@ -2026,4 +2029,92 @@ func (a *App) NetDevNotifyTest() error {
 	}
 	netdev.NotifyPushText("test", "[fairpeer 运维] 通知测试", "这是一条测试消息——看到它说明告警推送链路畅通。真正的告警会带设备、证据与「回复 /netdev 详情 <编号>」提示。")
 	return nil
+}
+
+// ── 状态历史（三层回退之"状态回退"）────────────────────────────────────────
+// Local-record rewind for the ops mode (Claude Code/ZCode-aligned): snapshots
+// are taken before every state transition (see internal/netdev/statehist.go).
+// This restores FILES ONLY — device rollback stays on the proposal/cutover path.
+
+// NetDevStateEventView is one timeline entry.
+type NetDevStateEventView struct {
+	ID         int                      `json:"id"`
+	Time       int64                    `json:"time"` // unix ms
+	Kind       string                   `json:"kind"`
+	Entity     string                   `json:"entity"`
+	Actor      string                   `json:"actor"`
+	Paths      []string                 `json:"paths"`
+	Live       []netdev.StateLiveEntity `json:"live"`
+	CanRestore bool                     `json:"canRestore"`
+	CanRedo    bool                     `json:"canRedo"`
+}
+
+// NetDevStateFileDiff is one file's previewed restore change.
+type NetDevStateFileDiff struct {
+	Path    string `json:"path"`
+	Kind    string `json:"kind"` // create | modify | delete | binary
+	Added   int    `json:"added"`
+	Removed int    `json:"removed"`
+	Diff    string `json:"diff"`
+}
+
+// NetDevStateRestoreResultView reports what a restore wrote back/deleted and
+// the reverse event id that enables redo.
+type NetDevStateRestoreResultView struct {
+	Written        []string `json:"written"`
+	Deleted        []string `json:"deleted"`
+	ReverseEventID int      `json:"reverseEventId"`
+}
+
+// NetDevStateEvents lists state-history events (newest first) with the
+// ZCode-style safety classification.
+func (a *App) NetDevStateEvents() []NetDevStateEventView {
+	metas := netdev.StateEventMetas()
+	out := make([]NetDevStateEventView, 0, len(metas))
+	for _, m := range metas {
+		paths := m.Paths
+		if paths == nil {
+			paths = []string{}
+		}
+		live := m.Live
+		if live == nil {
+			live = []netdev.StateLiveEntity{}
+		}
+		out = append(out, NetDevStateEventView{
+			ID: m.ID, Time: m.Time.UnixMilli(), Kind: m.Kind, Entity: m.Entity, Actor: m.Actor,
+			Paths: paths, Live: live, CanRestore: m.CanRestore, CanRedo: m.CanRedo,
+		})
+	}
+	return out
+}
+
+// NetDevStateEventDiff previews what a rewind to before event id would revert.
+func (a *App) NetDevStateEventDiff(id int) []NetDevStateFileDiff {
+	changes := netdev.StateEventDiff(id)
+	out := make([]NetDevStateFileDiff, 0, len(changes))
+	for _, ch := range changes {
+		if ch.Binary {
+			out = append(out, NetDevStateFileDiff{Path: ch.Path, Kind: "binary"})
+			continue
+		}
+		out = append(out, NetDevStateFileDiff{Path: ch.Path, Kind: string(ch.Kind), Added: ch.Added, Removed: ch.Removed, Diff: ch.Diff})
+	}
+	return out
+}
+
+// NetDevStateRestore rewinds local state records to before event id (human
+// click, double-confirmed in the UI; local files only — devices untouched).
+func (a *App) NetDevStateRestore(id int) (NetDevStateRestoreResultView, error) {
+	res, err := netdev.StateRestore(id, netdev.StateActorUser)
+	view := NetDevStateRestoreResultView{Written: res.Written, Deleted: res.Deleted, ReverseEventID: res.ReverseEventID}
+	if view.Written == nil {
+		view.Written = []string{}
+	}
+	if view.Deleted == nil {
+		view.Deleted = []string{}
+	}
+	if err != nil {
+		return view, err
+	}
+	return view, nil
 }

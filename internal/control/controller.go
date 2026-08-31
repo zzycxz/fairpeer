@@ -397,6 +397,7 @@ func New(opts Options) *Controller {
 	c.rebindCheckpoints(opts.SessionPath)
 	if c.executor != nil {
 		c.executor.SetPreEditHook(c.PreEditSnapshotter())
+		c.executor.SetPostEditHook(c.PostEditHasher())
 		c.executor.SetMemoryQueue(c)
 	}
 	return c
@@ -410,6 +411,18 @@ func (c *Controller) PreEditSnapshotter() func(diff.Change) {
 	return func(ch diff.Change) {
 		if c.cp != nil {
 			c.cp.Snapshot(ch)
+		}
+	}
+}
+
+// PostEditHasher returns the post-edit hash closure for sub-agent spawn sites
+// (mirrors PreEditSnapshotter): after a writer tool completes, the touched
+// file's on-disk hash is recorded so RewindPreview can tell agent edits from
+// external changes made since.
+func (c *Controller) PostEditHasher() func(string) {
+	return func(path string) {
+		if c.cp != nil {
+			c.cp.NotePostEdit(path)
 		}
 	}
 }
@@ -2006,6 +2019,50 @@ func (c *Controller) CheckpointDiff(turn int) []diff.Change {
 	return c.cp.DiffForTurn(turn)
 }
 
+// RewindFileClass is one path's ZCode-style safety verdict for a code rewind:
+// safe (unchanged since the agent's last write — rewinding loses nothing
+// external), unsafe (modified or removed outside the agent since — the rewind
+// would clobber that), ignored (no hash provenance — legacy snapshots — it
+// will be restored but can't be vouched for).
+type RewindFileClass struct {
+	Path  string
+	Class string // "safe" | "unsafe" | "ignored"
+}
+
+// RewindPreview classifies every file a code-scope rewind of `turn` would
+// restore, comparing the current on-disk hash against the last hash the
+// agent's own writes produced.
+func (c *Controller) RewindPreview(turn int) []RewindFileClass {
+	if c.cp == nil {
+		return nil
+	}
+	out := []RewindFileClass{}
+	for _, fi := range c.cp.SuffixInfo(turn) {
+		cur := c.cp.CurrentHash(fi.Path)
+		switch {
+		case fi.PostHash != "":
+			if cur == fi.PostHash {
+				out = append(out, RewindFileClass{Path: fi.Path, Class: "safe"})
+			} else {
+				out = append(out, RewindFileClass{Path: fi.Path, Class: "unsafe"})
+			}
+		case fi.PreHash != "":
+			if cur == fi.PreHash {
+				out = append(out, RewindFileClass{Path: fi.Path, Class: "safe"})
+			} else {
+				out = append(out, RewindFileClass{Path: fi.Path, Class: "ignored"})
+			}
+		default:
+			out = append(out, RewindFileClass{Path: fi.Path, Class: "ignored"})
+		}
+	}
+	return out
+}
+
+// rewindKeepPrefix marks the synthetic reverse checkpoint a code rewind leaves
+// behind; restoring back to it replays (reapplies) the rewound edits.
+const rewindKeepPrefix = "rewind-keep"
+
 // rewindFail emits the error as a Warn notice (so a frontend that swallows the
 // returned error — e.g. the desktop bridge's .catch — still shows the user why
 // the rewind did nothing) and returns it.
@@ -2032,14 +2089,6 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 		return c.rewindFail(fmt.Errorf("cannot rewind while a turn is running"))
 	}
 
-	if scope == RewindCode || scope == RewindBoth {
-		written, deleted, err := c.cp.RestoreCode(turn)
-		if err != nil {
-			return c.rewindFail(fmt.Errorf("rewind code: %w", err))
-		}
-		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
-			Text: fmt.Sprintf("rewound code to turn %d — %d file(s) restored, %d removed", turn, len(written), len(deleted))})
-	}
 	if scope == RewindConversation || scope == RewindBoth {
 		if !hasBound {
 			return c.rewindFail(fmt.Errorf("conversation rewind unavailable for turn %d (resumed session)", turn))
@@ -2065,6 +2114,21 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 		}
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 			Text: fmt.Sprintf("rewound conversation to turn %d", turn)})
+	}
+	if scope == RewindCode || scope == RewindBoth {
+		// Reverse keep (reapply support): capture the CURRENT values of every
+		// suffix path as a synthetic checkpoint BEFORE restoring, so the rewind
+		// itself is replayable. After the conversation branch above so the
+		// synthetic turn's boundary matches the post-truncation log.
+		if paths := c.cp.SuffixPaths(turn); len(paths) > 0 {
+			c.cp.KeepCurrent(fmt.Sprintf("%s → %d", rewindKeepPrefix, turn), len(c.executor.Session().Messages), paths)
+		}
+		written, deleted, err := c.cp.RestoreCode(turn)
+		if err != nil {
+			return c.rewindFail(fmt.Errorf("rewind code: %w", err))
+		}
+		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+			Text: fmt.Sprintf("rewound code to turn %d — %d file(s) restored, %d removed", turn, len(written), len(deleted))})
 	}
 	return nil
 }

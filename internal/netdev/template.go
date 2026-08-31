@@ -96,6 +96,7 @@ func SaveTemplate(t *Template) error {
 	if t.CreatedAt.IsZero() {
 		t.CreatedAt = time.Now()
 	}
+	StateEventSnap(StateEventTplSave, t.ID, StateActorUser, filepath.Join(templatesDir(), t.ID+".json"))
 	if err := os.MkdirAll(templatesDir(), 0o700); err != nil {
 		return err
 	}
@@ -172,6 +173,7 @@ func ListTemplates() ([]*Template, error) {
 
 // DeleteTemplate removes one template.
 func DeleteTemplate(id string) error {
+	StateEventSnap(StateEventTplDelete, id, StateActorUser, filepath.Join(templatesDir(), id+".json"))
 	return os.Remove(filepath.Join(templatesDir(), id+".json"))
 }
 
@@ -292,6 +294,8 @@ func (m *Manager) TemplateApply(t *Template, userVars map[string]string) (*Propo
 	if err := m.ValidateProposal(p); err != nil {
 		return nil, fmt.Errorf("渲染产物未过校验：%w", err)
 	}
+	p.ID = newProposalID() // pre-assigned so the state-history create-marker knows the path
+	StateEventSnap(StateEventTplApply, t.ID, StateActorUser, filepath.Join(ProposalsDir(), p.ID+".json"))
 	if err := SaveProposal(p); err != nil {
 		return nil, err
 	}

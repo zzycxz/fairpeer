@@ -88,6 +88,7 @@ func DismissFinding(id string) error {
 	if id == "" || strings.ContainsAny(id, `/\`+string(filepath.Separator)) {
 		return fmt.Errorf("finding: invalid id")
 	}
+	StateEventSnap(StateEventFindDismiss, id, StateActorUser, filepath.Join(FindingsDir(), id+".json"))
 	findingsMu.Lock()
 	defer findingsMu.Unlock()
 	if err := os.Remove(filepath.Join(FindingsDir(), id+".json")); err != nil {
@@ -110,6 +111,16 @@ func ClearFindings() (int, error) {
 		return 0, err
 	}
 	n := 0
+	var snapPaths []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		snapPaths = append(snapPaths, filepath.Join(FindingsDir(), e.Name()))
+	}
+	if len(snapPaths) > 0 {
+		StateEventSnap(StateEventFindClear, fmt.Sprintf("%d findings", len(snapPaths)), StateActorUser, snapPaths...)
+	}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
@@ -130,7 +141,14 @@ func SaveFinding(f *Finding) error {
 	findingsMu.Lock()
 	defer findingsMu.Unlock()
 	if f.ID == "" {
-		f.ID = fmt.Sprintf("F%s-%d", time.Now().Format("20060102"), time.Now().UnixNano()%10000)
+		// Collision-safe: the %10000 suffix can collide on back-to-back saves
+		// (seen in CI) — re-roll until the file name is free.
+		for {
+			f.ID = fmt.Sprintf("F%s-%d", time.Now().Format("20060102"), time.Now().UnixNano()%10000)
+			if _, err := os.Stat(filepath.Join(FindingsDir(), f.ID+".json")); os.IsNotExist(err) {
+				break
+			}
+		}
 	}
 	if f.CreatedAt.IsZero() {
 		f.CreatedAt = time.Now()

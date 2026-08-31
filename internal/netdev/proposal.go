@@ -124,6 +124,9 @@ func ProposalsDir() string {
 var (
 	proposalMu  sync.Mutex
 	proposalSeq int
+	// proposalInflight marks ids with a long-running transition (execute,
+	// rollback) so a concurrent delete can't yank the file mid-flight.
+	proposalInflight = map[string]struct{}{}
 )
 
 // SaveProposal persists p (create or update).
@@ -147,6 +150,37 @@ func SaveProposal(p *Proposal) error {
 	proposalMu.Lock()
 	defer proposalMu.Unlock()
 	return os.WriteFile(filepath.Join(ProposalsDir(), p.ID+".json"), b, 0o600)
+}
+
+// saveProposalLocked is SaveProposal with the caller holding proposalMu — the
+// write half of an atomic load→check→set→save transition.
+func saveProposalLocked(p *Proposal) error {
+	if err := os.MkdirAll(ProposalsDir(), 0o700); err != nil {
+		return err
+	}
+	b, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(ProposalsDir(), p.ID+".json"), b, 0o600)
+}
+
+// claimProposalInflight reserves id for a long-running transition. false
+// means one is already running.
+func claimProposalInflight(id string) bool {
+	proposalMu.Lock()
+	defer proposalMu.Unlock()
+	if _, busy := proposalInflight[id]; busy {
+		return false
+	}
+	proposalInflight[id] = struct{}{}
+	return true
+}
+
+func releaseProposalInflight(id string) {
+	proposalMu.Lock()
+	delete(proposalInflight, id)
+	proposalMu.Unlock()
 }
 
 // GetProposal loads one proposal.
@@ -361,8 +395,12 @@ func atoi(s string) int { n, _ := strconv.Atoi(s); return n }
 // ApproveProposal is the human gate. It enforces: current status draft, group
 // policies (confirm2 when demanded), and the change window of every involved
 // group. The agent has NO path here — approval arrives only from the desktop
-// bridge with the human's click.
+// bridge with the human's click. The load→check→set→save runs as one critical
+// section so a racing reject/execute can't interleave (last-write-wins used
+// to silently drop a transition).
 func (m *Manager) ApproveProposal(id string, confirm2 bool) (*Proposal, error) {
+	proposalMu.Lock()
+	defer proposalMu.Unlock()
 	p, err := GetProposal(id)
 	if err != nil {
 		return nil, err
@@ -394,11 +432,12 @@ func (m *Manager) ApproveProposal(id string, confirm2 bool) (*Proposal, error) {
 			return nil, fmt.Errorf("proposal %s: group %q change window (%s) is closed — approval blocked", id, d.Group, g.ChangeWindow)
 		}
 	}
+	StateEventSnap(StateEventApprove, id, StateActorUser, filepath.Join(ProposalsDir(), id+".json"))
 	p.Status = ProposalApproved
 	p.ApprovedAt = time.Now()
 	p.Approver = "local-user"
 	p.Confirm2 = confirm2
-	if err := SaveProposal(p); err != nil {
+	if err := saveProposalLocked(p); err != nil {
 		return nil, err
 	}
 	_ = AppendAudit(Audit{Device: "(proposal)", Command: "approve " + id, Class: "proposal", Status: AuditOK})
@@ -429,6 +468,7 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 	if p.Status != ProposalApproved {
 		return nil, fmt.Errorf("proposal %s: status %s, only approved proposals execute", id, p.Status)
 	}
+	StateEventSnap(StateEventExecute, id, stateActorFromCtx(ctx), filepath.Join(ProposalsDir(), id+".json"))
 
 	// 执行前在线检查（§7.1）：发现其他在线人员则**暂停并列出会话**，人确
 	// 认后才继续——「我要变更，但同事正登着」是最常见的协作事故。确认语
@@ -441,11 +481,33 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 		return p, fmt.Errorf("执行前确认：目标设备上有其他在线人员（%s）——确认没人正操作后再次点击「执行」（清单已记入提案备注；会话有变化会再次要求确认）", online)
 	}
 
-	p.Status = ProposalExecuting
-	p.ExecutedAt = time.Now()
-	if err := SaveProposal(p); err != nil {
+	// Claim approved→executing atomically: a racing approve/reject used to
+	// interleave with this write (last-write-wins dropped a transition), and
+	// the in-flight mark keeps delete away for the run's duration.
+	proposalMu.Lock()
+	p, err = GetProposal(id) // reload: the online check may have persisted a Note
+	if err != nil {
+		proposalMu.Unlock()
 		return nil, err
 	}
+	if p.Status != ProposalApproved {
+		proposalMu.Unlock()
+		return nil, fmt.Errorf("proposal %s: status %s, only approved proposals execute", id, p.Status)
+	}
+	if _, busy := proposalInflight[id]; busy {
+		proposalMu.Unlock()
+		return nil, fmt.Errorf("proposal %s: a transition is already running", id)
+	}
+	proposalInflight[id] = struct{}{}
+	p.Status = ProposalExecuting
+	p.ExecutedAt = time.Now()
+	if err := saveProposalLocked(p); err != nil {
+		delete(proposalInflight, id)
+		proposalMu.Unlock()
+		return nil, err
+	}
+	proposalMu.Unlock()
+	defer releaseProposalInflight(id)
 
 	frozen := ""
 	for i := range p.Steps {
@@ -547,14 +609,17 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 		wu := time.Now().Add(30 * time.Minute)
 		p.WatchUntil = &wu
 		p.HealthBase = watchHealthBase(p)
-		go func(id string, until time.Time) {
-			time.Sleep(time.Until(until))
-			if pp, err := GetProposal(id); err == nil && pp.Status == ProposalWatching {
-				pp.Status = ProposalClosed
-				pp.WatchNote = "观察期满，自动关闭"
-				_ = SaveProposal(pp)
-			}
-		}(p.ID, wu)
+			go func(id string, until time.Time) {
+				time.Sleep(time.Until(until))
+				proposalMu.Lock()
+				defer proposalMu.Unlock()
+				if pp, err := GetProposal(id); err == nil && pp.Status == ProposalWatching {
+					StateEventSnap(StateEventCloseWatch, id, StateActorSystem, filepath.Join(ProposalsDir(), id+".json"))
+					pp.Status = ProposalClosed
+					pp.WatchNote = "观察期满，自动关闭"
+					_ = saveProposalLocked(pp)
+				}
+			}(p.ID, wu)
 	}
 	if err := SaveProposal(p); err != nil {
 		return nil, err
@@ -567,6 +632,18 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 // only, oldest-last so state unwinds in reverse. Frozen/failed proposals only.
 // A rollback failure marks the proposal failed (alert) and stops.
 func (m *Manager) RollbackProposal(ctx context.Context, id string) (*Proposal, error) {
+	// The rollback loop runs device I/O for minutes — claim the proposal so a
+	// concurrent rollback or delete can't interleave (double-rollback would run
+	// the reverse commands twice).
+	proposalMu.Lock()
+	if _, busy := proposalInflight[id]; busy {
+		proposalMu.Unlock()
+		return nil, fmt.Errorf("proposal %s: a transition is already running", id)
+	}
+	proposalInflight[id] = struct{}{}
+	proposalMu.Unlock()
+	defer releaseProposalInflight(id)
+
 	p, err := GetProposal(id)
 	if err != nil {
 		return nil, err
@@ -574,6 +651,7 @@ func (m *Manager) RollbackProposal(ctx context.Context, id string) (*Proposal, e
 	if p.Status != ProposalPartial && p.Status != ProposalDone {
 		return nil, fmt.Errorf("proposal %s: status %s — only partial/done proposals roll back", id, p.Status)
 	}
+	StateEventSnap(StateEventRollback, id, stateActorFromCtx(ctx), filepath.Join(ProposalsDir(), id+".json"))
 	for i := len(p.Steps) - 1; i >= 0; i-- {
 		s := &p.Steps[i]
 		if !s.Applied {
@@ -718,6 +796,8 @@ func (m *Manager) preExecOnlineCheck(ctx context.Context, p *Proposal) string {
 
 // CloseProposalWatch manually ends the watching period.
 func CloseProposalWatch(id string) error {
+	proposalMu.Lock()
+	defer proposalMu.Unlock()
 	p, err := GetProposal(id)
 	if err != nil {
 		return err
@@ -725,9 +805,10 @@ func CloseProposalWatch(id string) error {
 	if p.Status != ProposalWatching {
 		return fmt.Errorf("proposal %s: status %s, only watching proposals close", id, p.Status)
 	}
+	StateEventSnap(StateEventCloseWatch, id, StateActorUser, filepath.Join(ProposalsDir(), id+".json"))
 	p.Status = ProposalClosed
 	p.WatchNote = "人工关闭"
-	return SaveProposal(p)
+	return saveProposalLocked(p)
 }
 
 // ── 观察期劣化检测（§7.1）─────────────────────────────────────────────────
@@ -803,8 +884,17 @@ func (m *Manager) checkWatchingProposals(fresh map[string]DeviceHealth) {
 		if len(worse) == 0 {
 			continue
 		}
-		p.WatchNote = "观察期劣化：" + strings.Join(worse, "；") + " — 可回滚（提案页签「回滚」，仍需人按）"
-		_ = SaveProposal(p)
+		// Re-check-and-write under the lock: a concurrent watch-close or
+		// auto-close used to interleave with this save.
+		proposalMu.Lock()
+		cur, err := GetProposal(p.ID)
+		if err != nil || cur.Status != ProposalWatching || strings.Contains(cur.WatchNote, "劣化") {
+			proposalMu.Unlock()
+			continue
+		}
+		cur.WatchNote = "观察期劣化：" + strings.Join(worse, "；") + " — 可回滚（提案页签「回滚」，仍需人按）"
+		_ = saveProposalLocked(cur)
+		proposalMu.Unlock()
 		_ = SaveFinding(&Finding{
 			Title:      "变更观察期劣化：" + p.Intent,
 			Severity:   SeverityCritical,

@@ -7,6 +7,7 @@ package netdev
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -175,6 +176,7 @@ func ResolveFindingByID(id string) error {
 			now := time.Now()
 			f.Status = "resolved"
 			f.ResolvedAt = &now
+			StateEventSnap(StateEventFindResolve, id, StateActorUser, filepath.Join(FindingsDir(), id+".json"))
 			return SaveFinding(f)
 		}
 	}

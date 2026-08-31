@@ -126,6 +126,12 @@ func saveJob(j *Job) error {
 	}
 	jobMu.Lock()
 	defer jobMu.Unlock()
+	return saveJobLocked(j)
+}
+
+// saveJobLocked is saveJob with the caller holding jobMu — the write half of
+// an atomic load→check→set→save transition.
+func saveJobLocked(j *Job) error {
 	b, err := json.Marshal(j)
 	if err != nil {
 		return err
@@ -256,6 +262,7 @@ func (m *Manager) JobStart(def *Job) (*Job, error) {
 		return nil, err
 	}
 	def.ID = newJobID()
+	StateEventSnap(StateEventJobStart, def.ID, StateActorUser, filepath.Join(jobsDir(), def.ID+".json"))
 	def.Status = JobRunning
 	def.CreatedAt = time.Now()
 	now := time.Now()
@@ -331,13 +338,17 @@ func JobPause(id string) error {
 
 // JobResume continues a paused job from its cursor.
 func (m *Manager) JobResume(id string) (*Job, error) {
+	jobMu.Lock()
 	j, err := GetJob(id)
 	if err != nil {
+		jobMu.Unlock()
 		return nil, err
 	}
 	if j.Status != JobPaused {
+		jobMu.Unlock()
 		return nil, fmt.Errorf("job %s: status %s — only paused jobs resume", id, j.Status)
 	}
+	StateEventSnap(StateEventJobResume, id, StateActorUser, filepath.Join(jobsDir(), id+".json"))
 	j.Status = JobRunning
 	j.PauseNote = ""
 	// Resuming past a breakpoint records the human's confirmation on that
@@ -345,9 +356,11 @@ func (m *Manager) JobResume(id string) (*Job, error) {
 	if j.Cursor < len(j.Steps) && j.Steps[j.Cursor].PauseBefore {
 		j.BreakpointOK = j.Cursor
 	}
-	if err := saveJob(j); err != nil {
+	if err := saveJobLocked(j); err != nil {
+		jobMu.Unlock()
 		return nil, err
 	}
+	jobMu.Unlock()
 	_ = AppendAudit(Audit{Device: "(job)", Command: "resume " + id, Class: "job", Status: AuditOK})
 	m.jobLaunch(j)
 	return j, nil
@@ -355,13 +368,17 @@ func (m *Manager) JobResume(id string) (*Job, error) {
 
 // JobAbort stops a running/paused job for good; remaining steps are skipped.
 func JobAbort(id string) (*Job, error) {
+	jobMu.Lock()
 	j, err := GetJob(id)
 	if err != nil {
+		jobMu.Unlock()
 		return nil, err
 	}
 	if j.Status != JobRunning && j.Status != JobPaused {
+		jobMu.Unlock()
 		return nil, fmt.Errorf("job %s: status %s — only running/paused jobs abort", id, j.Status)
 	}
+	StateEventSnap(StateEventJobAbort, id, StateActorUser, filepath.Join(jobsDir(), id+".json"))
 	jobRunsMu.Lock()
 	if run, ok := jobRuns[id]; ok {
 		j.ActiveMS += time.Since(run.activeFrom).Milliseconds()
@@ -377,9 +394,11 @@ func JobAbort(id string) (*Job, error) {
 	}
 	now := time.Now()
 	j.EndedAt = &now
-	if err := saveJob(j); err != nil {
+	if err := saveJobLocked(j); err != nil {
+		jobMu.Unlock()
 		return nil, err
 	}
+	jobMu.Unlock()
 	_ = AppendAudit(Audit{Device: "(job)", Command: "abort " + id, Class: "job", Status: AuditFailure})
 	return j, nil
 }
@@ -492,8 +511,10 @@ func (m *Manager) jobRunner(ctx context.Context, run *jobRun, id string) {
 			_ = saveJob(j)
 			continue
 		default: // pause — the human decides resume/abort
+			jobMu.Lock()
 			j.ActiveMS = activeMS
 			m.jobFreezeLocked(run, j, "步骤 "+step.Name+" 失败："+firstLine(state.Error)+" — on-fail=pause")
+			jobMu.Unlock()
 			return
 		}
 	}
@@ -549,6 +570,8 @@ func (m *Manager) runJobStep(ctx context.Context, j *Job, idx int, step JobStep)
 }
 
 func (m *Manager) jobFreeze(run *jobRun, id, note string) {
+	jobMu.Lock()
+	defer jobMu.Unlock()
 	j, err := GetJob(id)
 	if err != nil || j.Status != JobRunning {
 		return
@@ -558,23 +581,27 @@ func (m *Manager) jobFreeze(run *jobRun, id, note string) {
 }
 
 func (m *Manager) jobFreezeLocked(run *jobRun, j *Job, note string) {
+	StateEventSnap(StateEventJobPause, j.ID, StateActorSystem, filepath.Join(jobsDir(), j.ID+".json"))
 	j.Status = JobPaused
 	j.PauseNote = note
-	_ = saveJob(j)
+	_ = saveJobLocked(j)
 	_ = AppendAudit(Audit{Device: "(job)", Command: "pause " + j.ID, Class: "job", Status: AuditFailure, Error: note})
 }
 
 func (m *Manager) jobFinish(run *jobRun, id, status, note string) {
+	jobMu.Lock()
+	defer jobMu.Unlock()
 	j, err := GetJob(id)
 	if err != nil || j.Status != JobRunning {
 		return
 	}
+	StateEventSnap(StateEventJobFinish, id, StateActorSystem, filepath.Join(jobsDir(), id+".json"))
 	j.ActiveMS += time.Since(run.activeFrom).Milliseconds()
 	j.Status = status
 	j.PauseNote = note
 	now := time.Now()
 	j.EndedAt = &now
-	_ = saveJob(j)
+	_ = saveJobLocked(j)
 	_ = AppendAudit(Audit{Device: "(job)", Command: "end " + id + " " + status, Class: "job", Status: AuditOK})
 }
 

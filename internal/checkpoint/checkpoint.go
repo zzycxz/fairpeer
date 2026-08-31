@@ -11,6 +11,8 @@
 package checkpoint
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -33,6 +35,13 @@ type FileSnap struct {
 	Content  *string       `json:"content"`
 	Encoding *fileenc.Kind `json:"encoding,omitempty"`
 	Perm     *uint32       `json:"perm,omitempty"`
+	// Hash is the sha256 of the snapshotted (pre-edit) decoded text — the
+	// rewind preview uses it to detect edits made outside this agent.
+	Hash string `json:"hash,omitempty"`
+	// PostHash is the sha256 of the file's decoded text right after the writer
+	// tool that touched it completed (updated on every edit within the turn),
+	// so the preview can tell "agent wrote this last" from "changed since".
+	PostHash string `json:"postHash,omitempty"`
 }
 
 // Checkpoint anchors the pre-edit state of every distinct file touched during one
@@ -61,6 +70,7 @@ type Meta struct {
 type Store struct {
 	dir  string // <session>.ckpt/, or "" for in-memory only
 	root string // workspace root, for restore path-escape guards
+	max  int    // retention cap; oldest finalized checkpoints are pruned past it
 
 	mu   sync.Mutex
 	done []*Checkpoint   // finalized turns
@@ -77,7 +87,18 @@ const maxCheckpointsPerSession = 50
 // checkpoints already persisted under dir. A "" dir disables persistence (the
 // store still works in memory for the session).
 func New(dir, root string) *Store {
-	s := &Store{dir: dir, root: root, seen: map[string]bool{}}
+	return NewWithLimit(dir, root, maxCheckpointsPerSession)
+}
+
+// NewWithLimit is New with a custom retention cap. Event-oriented consumers
+// (e.g. the netdev state history, one checkpoint per state transition rather
+// than per conversation turn) fire far more often than a chat session and pass
+// a larger cap. max < 1 is clamped to 1.
+func NewWithLimit(dir, root string, max int) *Store {
+	if max < 1 {
+		max = 1
+	}
+	s := &Store{dir: dir, root: root, max: max, seen: map[string]bool{}}
 	if dir != "" {
 		s.load()
 		s.prune()
@@ -86,15 +107,20 @@ func New(dir, root string) *Store {
 }
 
 // prune deletes the oldest checkpoint files (and their in-memory entries) once
-// the count exceeds maxCheckpointsPerSession. Called once at load; safe for a
-// pure in-memory store (dir == "") — it's a no-op there.
+// the count exceeds the retention cap. Runs at load and after every Begin; safe
+// for a pure in-memory store (dir == "") — it's a no-op there.
 func (s *Store) prune() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.done) <= maxCheckpointsPerSession {
+	s.pruneLocked()
+}
+
+// pruneLocked is prune without taking the lock; caller holds s.mu.
+func (s *Store) pruneLocked() {
+	if len(s.done) <= s.max {
 		return
 	}
-	excess := len(s.done) - maxCheckpointsPerSession
+	excess := len(s.done) - s.max
 	// done is append-ordered by turn (ascending), so the first `excess` entries
 	// are the oldest. Delete their files and slice them off.
 	for i := 0; i < excess; i++ {
@@ -137,6 +163,25 @@ func (s *Store) Begin(turn int, prompt string, msgIndex int) {
 	s.cur = &Checkpoint{Turn: turn, Time: time.Now(), Prompt: prompt, MsgIndex: msgIndex}
 	s.seen = map[string]bool{}
 	s.persist(s.cur)
+	s.pruneLocked()
+}
+
+// Finalize closes the active checkpoint so it reports its Paths through List and
+// participates in restore bookkeeping as a completed entry. Conversation-turn
+// consumers leave the turn open until the next Begin (an in-progress turn's
+// files must not propagate CanCode); event-oriented consumers (netdev state
+// history) finalize immediately after each event so the newest entry is fully
+// visible. A no-op when no checkpoint is open.
+func (s *Store) Finalize() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cur == nil {
+		return
+	}
+	s.done = append(s.done, s.cur)
+	s.cur = nil
+	s.seen = map[string]bool{}
+	s.pruneLocked()
 }
 
 // Bounds returns turn → MsgIndex over all checkpoints (persisted + current), so
@@ -178,8 +223,174 @@ func (s *Store) Snapshot(ch diff.Change) {
 		old := ch.OldText
 		content = &old
 	}
-	s.cur.Files = append(s.cur.Files, FileSnap{Path: ch.Path, Content: content, Encoding: enc, Perm: s.detectPerm(ch.Path)})
+	snap := FileSnap{Path: ch.Path, Content: content, Encoding: enc, Perm: s.detectPerm(ch.Path)}
+	if content != nil {
+		snap.Hash = hashString(*content)
+	}
+	s.cur.Files = append(s.cur.Files, snap)
 	s.persist(s.cur)
+}
+
+func hashString(v string) string {
+	sum := sha256.Sum256([]byte(v))
+	return hex.EncodeToString(sum[:])
+}
+
+// hashFile returns the sha256 of the file's decoded text at abs ("" when the
+// file can't be read).
+func hashFile(abs string) string {
+	b, err := os.ReadFile(abs)
+	if err != nil {
+		return ""
+	}
+	enc, _ := fileenc.Detect(b)
+	return hashString(string(fileenc.Decode(b, enc)))
+}
+
+// NotePostEdit records the file's on-disk content hash after the writer tool
+// that touched it completed, on the current turn's snapshot for that path
+// (no-op when the path wasn't snapshotted this turn). The rewind preview
+// compares it against the current hash to classify a rewind as safe (nothing
+// external since the agent's last write) or unsafe.
+func (s *Store) NotePostEdit(path string) {
+	if path == "" {
+		return
+	}
+	abs, err := safePath(s.root, path)
+	if err != nil {
+		return
+	}
+	h := hashFile(abs)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cur == nil {
+		return
+	}
+	for i := range s.cur.Files {
+		if s.cur.Files[i].Path == path {
+			s.cur.Files[i].PostHash = h
+		}
+	}
+	s.persist(s.cur)
+}
+
+// CurrentHash returns the file's decoded-text hash now ("" when absent or
+// unreadable) — the "now" side of the rewind safety classification.
+func (s *Store) CurrentHash(path string) string {
+	abs, err := safePath(s.root, path)
+	if err != nil {
+		return ""
+	}
+	if _, serr := os.Stat(abs); serr != nil {
+		return ""
+	}
+	return hashFile(abs)
+}
+
+// SuffixPaths lists every distinct path touched from fromTurn onward — exactly
+// the set a code rewind of fromTurn would restore.
+func (s *Store) SuffixPaths(fromTurn int) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := map[string]bool{}
+	var out []string
+	for _, c := range s.all() {
+		if c.Turn < fromTurn {
+			continue
+		}
+		for _, f := range c.Files {
+			if !seen[f.Path] {
+				seen[f.Path] = true
+				out = append(out, f.Path)
+			}
+		}
+	}
+	return out
+}
+
+// SuffixFileInfo is what the rewind preview needs for one suffix path.
+type SuffixFileInfo struct {
+	Path     string
+	PreHash  string // hash of the earliest snapshot's content
+	PostHash string // latest post-edit hash recorded across the suffix
+}
+
+// SuffixInfo summarizes the suffix of fromTurn per path: the earliest snapshot
+// (what a rewind restores to) and the most recent post-edit hash (the last
+// state the agent itself wrote).
+func (s *Store) SuffixInfo(fromTurn int) []SuffixFileInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	info := map[string]*SuffixFileInfo{}
+	var order []string
+	for _, c := range s.all() {
+		if c.Turn < fromTurn {
+			continue
+		}
+		for _, f := range c.Files {
+			e, ok := info[f.Path]
+			if !ok {
+				e = &SuffixFileInfo{Path: f.Path, PreHash: f.Hash}
+				info[f.Path] = e
+				order = append(order, f.Path)
+			}
+			if f.PostHash != "" {
+				e.PostHash = f.PostHash
+			}
+		}
+	}
+	out := make([]SuffixFileInfo, 0, len(order))
+	for _, p := range order {
+		out = append(out, *info[p])
+	}
+	return out
+}
+
+// KeepCurrent snapshots the CURRENT on-disk content of paths as a finalized
+// synthetic checkpoint — the reverse side of a rewind. Restoring back to that
+// checkpoint replays (reapplies) the rewound edits; a path absent now is kept
+// as a create marker so the replay deletes it again. msgIndex is the
+// conversation boundary to record for the synthetic turn. Returns the new
+// turn, or -1 when there was nothing to keep.
+func (s *Store) KeepCurrent(prompt string, msgIndex int, paths []string) int {
+	if len(paths) == 0 {
+		return -1
+	}
+	s.mu.Lock()
+	turn := 0
+	for _, c := range s.all() {
+		if c.Turn >= turn {
+			turn = c.Turn + 1
+		}
+	}
+	s.mu.Unlock()
+
+	s.Begin(turn, prompt, msgIndex)
+	for _, p := range paths {
+		abs, err := safePath(s.root, p)
+		if err != nil {
+			continue
+		}
+		data, rerr := os.ReadFile(abs)
+		if rerr != nil {
+			s.Snapshot(diff.Change{Path: p, Kind: diff.Create})
+			continue
+		}
+		enc, _ := fileenc.Detect(data)
+		s.Snapshot(diff.Change{Path: p, Kind: diff.Modify, OldText: string(fileenc.Decode(data, enc))})
+	}
+	s.Finalize()
+	// The kept state IS the agent's last known write for these paths — mark it
+	// so a preview of the replay itself classifies as safe.
+	s.mu.Lock()
+	if n := len(s.done); n > 0 && s.done[n-1].Turn == turn {
+		for i := range s.done[n-1].Files {
+			s.done[n-1].Files[i].PostHash = s.done[n-1].Files[i].Hash
+		}
+		s.persist(s.done[n-1])
+	}
+	s.mu.Unlock()
+	return turn
 }
 
 func (s *Store) detectEncoding(p string) *fileenc.Kind {
@@ -197,12 +408,13 @@ func (s *Store) detectEncoding(p string) *fileenc.Kind {
 
 // restorePerm resolves the permission bits to use when restoring a file: the
 // snapshotted perm if present (preserving executability), else the current
-// file's perm (a rollback of a non-exec edit), else the 0644 default.
-func restorePerm(snap FileSnap) os.FileMode {
+// file's perm (a rollback of a non-exec edit), else the 0644 default. abs is
+// the safePath-resolved target — snapshot paths may be root-relative.
+func restorePerm(snap FileSnap, abs string) os.FileMode {
 	if snap.Perm != nil && *snap.Perm != 0 {
 		return os.FileMode(*snap.Perm)
 	}
-	if info, err := os.Stat(snap.Path); err == nil {
+	if info, err := os.Stat(abs); err == nil {
 		return info.Mode().Perm()
 	}
 	return 0o644
@@ -338,7 +550,7 @@ func (s *Store) RestoreCode(fromTurn int) (written, deleted []string, err error)
 		} else if current := detectCurrentEncoding(abs); current != nil {
 			enc = *current
 		}
-		if wErr := os.WriteFile(abs, fileenc.Encode(*snap.Content, enc), restorePerm(snap)); wErr != nil {
+		if wErr := os.WriteFile(abs, fileenc.Encode(*snap.Content, enc), restorePerm(snap, abs)); wErr != nil {
 			err = wErr
 			continue
 		}
@@ -398,7 +610,14 @@ func (s *Store) DiffForTurn(turn int) []diff.Change {
 		if f.Content != nil {
 			snap = *f.Content
 		}
-		data, err := os.ReadFile(f.Path)
+		// Resolve through safePath: snapshot paths may be root-relative, and the
+		// process CWD is not necessarily the root (multi-root desktop tabs, the
+		// netdev state store rooted at the user config dir).
+		abs, perr := safePath(s.root, f.Path)
+		if perr != nil {
+			continue
+		}
+		data, err := os.ReadFile(abs)
 		if err != nil {
 			// Gone since the snapshot — the rewind would bring it back.
 			out = append(out, diff.Build(f.Path, "", snap, diff.Create))

@@ -249,6 +249,7 @@ func (h *host) register() {
 	c.Handle("session/searchText", h.sessionSearchText)
 	c.Handle("session/checkpoints", h.sessionCheckpoints)
 	c.Handle("session/checkpointDiff", h.sessionCheckpointDiff)
+	c.Handle("session/rewindPreview", h.sessionRewindPreview)
 	c.Handle("session/checkpointHasBoundary", h.sessionCheckpointHasBoundary)
 	c.Handle("session/rewind", h.sessionRewind)
 	c.Handle("session/fork", h.sessionFork)
@@ -817,6 +818,18 @@ func (h *host) sessionCheckpointDiff(_ context.Context, raw json.RawMessage) (an
 		return nil, err
 	}
 	return CheckpointDiffResult{Changes: rawJSON(s.ctrl.CheckpointDiff(p.Turn))}, nil
+}
+
+func (h *host) sessionRewindPreview(_ context.Context, raw json.RawMessage) (any, error) {
+	var p CheckpointDiffParams
+	if err := decodeParams("session/rewindPreview", raw, &p); err != nil {
+		return nil, err
+	}
+	s, err := h.session(p.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	return RewindPreviewResult{Classes: rawJSON(s.ctrl.RewindPreview(p.Turn))}, nil
 }
 
 func (h *host) sessionCheckpointHasBoundary(_ context.Context, raw json.RawMessage) (any, error) {

@@ -18,6 +18,10 @@ import type {
   BotSettingsView,
   CapabilitiesView,
   CheckpointMeta,
+  RewindPreviewFileView,
+  NetDevStateEventView,
+  NetDevStateFileDiff,
+  NetDevStateRestoreResultView,
   CoWorkSettingsView,
   CommandInfo,
   ContextInfo,
@@ -256,6 +260,7 @@ export interface AppBindings {
   BranchesForTab(tabID: string): Promise<{ id: string; name?: string; parentId?: string; path: string; preview?: string; turns?: number; updatedAt: number; current?: boolean }[]>;
   SwitchBranchForTab(tabID: string, ref: string): Promise<void>;
   CheckpointDiffForTab(tabID: string, turn: number): Promise<{ path: string; kind: string; added: number; removed: number; diff: string }[]>;
+  RewindPreviewForTab(tabID: string, turn: number): Promise<RewindPreviewFileView[]>;
   Rewind(turn: number, scope: string): Promise<void>;
   Fork(turn: number): Promise<TabMeta>;
   SummarizeFrom(turn: number): Promise<void>;
@@ -565,6 +570,11 @@ export interface AppBindings {
   NetDevGoldenInfo(device: string): Promise<NetDevGoldenInfo>;
   NetDevGoldenCheck(device: string): Promise<string>;
   NetDevNotifyTest(): Promise<void>;
+  // State history (三层回退之"状态回退"): pre-mutation snapshots of ops state
+  // files; restore is local-records-only, devices are never touched.
+  NetDevStateEvents(): Promise<NetDevStateEventView[]>;
+  NetDevStateEventDiff(id: number): Promise<NetDevStateFileDiff[]>;
+  NetDevStateRestore(id: number): Promise<NetDevStateRestoreResultView>;
   // ProbeMailAccount tests a saved mailbox's IMAP login by actually connecting.
   // An empty name probes the Default account; a non-empty name probes that
   // named account. Returns ok/error/unconfigured so the mail card can show a
@@ -2151,6 +2161,12 @@ function makeMockApp(): AppBindings {
   const mockNetDevJobs: NetDevJob[] = [];
   const mockNetDevCutovers: NetDevCutoverRun[] = [];
   const mockNetDevTemplates: NetDevTemplate[] = [];
+  // 状态历史 mock（浏览器演示）：两条可回退事件 + 一条被活跃实体阻塞的。
+  const mockStateEvents: NetDevStateEventView[] = [
+    { id: 3, time: Date.now() - 240_000, kind: "approve", entity: "P-20260831-1", actor: "user", paths: ["netdev/proposals/P-20260831-1.json"], live: [], canRestore: true, canRedo: false },
+    { id: 2, time: Date.now() - 900_000, kind: "propose", entity: "P-20260831-1", actor: "agent", paths: ["netdev/proposals/P-20260831-1.json"], live: [], canRestore: true, canRedo: false },
+    { id: 1, time: Date.now() - 3_600_000, kind: "cutover-start", entity: "C-20260830-2", actor: "user", paths: ["netdev/cutovers/C-20260830-2.json"], live: [{ type: "cutover", id: "C-20260830-2", status: "running" }], canRestore: false, canRedo: false },
+  ];
 
   let mockNetDev: any = {
     enabled: false,
@@ -2447,6 +2463,13 @@ function makeMockApp(): AppBindings {
       return { device, status: "error", detail: "browser dev mock: no device backend" };
     },
     async NetDevTrustHostKey(_fingerprint: string) {},
+    async NetDevStateEvents(): Promise<NetDevStateEventView[]> { return mockStateEvents; },
+    async NetDevStateEventDiff(_id: number): Promise<NetDevStateFileDiff[]> { return []; },
+    async NetDevStateRestore(id: number): Promise<NetDevStateRestoreResultView> {
+      const ev = mockStateEvents.find(e => e.id === id);
+      if (ev && !ev.canRestore) throw new Error("mock: restore blocked (live entity)");
+      return { written: ev ? ev.paths : [], deleted: [], reverseEventId: Date.now() };
+    },
     async NetDevProposals() { return [] as NetDevProposal[]; },
     async NetDevRunInspection() { return null; },
     async NetDevRunBaseline() { return null; },
@@ -3033,6 +3056,9 @@ function makeMockApp(): AppBindings {
         },
         async SwitchBranchForTab() {},
     async CheckpointDiffForTab() {
+      return [];
+    },
+    async RewindPreviewForTab(): Promise<RewindPreviewFileView[]> {
       return [];
     },
     async Rewind() {},

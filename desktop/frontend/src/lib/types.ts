@@ -333,6 +333,15 @@ export interface CheckpointMeta {
   time: number; // unix ms
   canCode?: boolean;
   canConversation?: boolean;
+  // Marks the synthetic reverse checkpoint the latest code rewind left
+  // behind; rewinding code to it replays (reapplies) that rewind.
+  reapply?: boolean;
+}
+
+// One file's ZCode-style safety verdict for a code rewind.
+export interface RewindPreviewFileView {
+  path: string;
+  class: string; // safe | unsafe | ignored
 }
 
 // SessionMeta is one saved session for the history panel.
@@ -1802,6 +1811,38 @@ export interface NetDevAuditChainStatus {
   chained: number;
   ok: boolean;
   firstBroken?: string;
+}
+
+export interface NetDevStateEventView {
+  id: number;
+  time: number; // unix ms
+  kind: string;
+  entity?: string;
+  actor: string;
+  paths: string[];
+  live: NetDevStateLiveEntity[];
+  canRestore: boolean;
+  canRedo: boolean;
+}
+
+export interface NetDevStateLiveEntity {
+  type: string;
+  id: string;
+  status: string;
+}
+
+export interface NetDevStateFileDiff {
+  path: string;
+  kind: string;
+  added: number;
+  removed: number;
+  diff: string;
+}
+
+export interface NetDevStateRestoreResultView {
+  written: string[];
+  deleted: string[];
+  reverseEventId: number;
 }
 
 // One [[netdev.db_sources]] entry; password is write-only (blank = keep).

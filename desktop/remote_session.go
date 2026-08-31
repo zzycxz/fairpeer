@@ -482,6 +482,18 @@ func (s *remoteSession) CheckpointHasBoundary(turn int) bool {
 	return res.Has
 }
 
+// RewindPreview classifies the suffix of a code rewind over the remote host's
+// checkpoint store (same buckets as the local controller).
+func (s *remoteSession) RewindPreview(turn int) []control.RewindFileClass {
+	var res remotehost.RewindPreviewResult
+	if err := s.call("session/rewindPreview", remotehost.CheckpointDiffParams{SessionID: s.id, Turn: turn}, &res); err != nil {
+		return nil
+	}
+	var classes []control.RewindFileClass
+	_ = json.Unmarshal(res.Classes, &classes)
+	return classes
+}
+
 func (s *remoteSession) Rewind(turn int, scope control.RewindScope) error {
 	var scopeStr string
 	switch scope {

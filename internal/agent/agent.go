@@ -207,6 +207,12 @@ type Agent struct {
 	// Set via SetPreEditHook.
 	onPreEdit func(diff.Change)
 
+	// onPostEdit, when non-nil, is called with each previewed path after the
+	// writer tool succeeded — the seam the checkpoint store uses to record the
+	// file's post-edit content hash, so a rewind preview can tell agent edits
+	// from external changes made since. Set via SetPostEditHook.
+	onPostEdit func(string)
+
 	// contextFilter, when non-nil, projects the session messages into the
 	// context sent to the model — a read-side transform that can rewrite or
 	// summarize specific messages (e.g. swap a full expert-collab transcript
@@ -384,6 +390,11 @@ func (a *Agent) SetMemoryQueue(q memory.Queue) { a.memQueue = q }
 // SetPreEditHook installs the pre-edit snapshot hook (see onPreEdit). The
 // controller wires it to its per-session checkpoint store; nil disables capture.
 func (a *Agent) SetPreEditHook(fn func(diff.Change)) { a.onPreEdit = fn }
+
+// SetPostEditHook installs the post-edit hash hook (see onPostEdit). The
+// controller wires it to its checkpoint store's NotePostEdit; nil disables the
+// rewind safety classification.
+func (a *Agent) SetPostEditHook(fn func(string)) { a.onPostEdit = fn }
 
 // PreviewToolCall computes the per-file changes the named tool call would make,
 // for the approval card a frontend renders before the permission decision.
@@ -698,6 +709,11 @@ type Options struct {
 	// to sub-agents (run_skill/task), whose file writes must rewind the same way.
 	PreEditHook func(diff.Change)
 
+	// PostEditHook, when set, receives each previewed path after the writer
+	// tool succeeded — paired with PreEditHook so the store can record the
+	// post-edit hash for the rewind safety classification.
+	PostEditHook func(string)
+
 	// Jobs is the session's background-job manager (nil disables background tools).
 	Jobs *jobs.Manager
 
@@ -758,6 +774,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		gate:              gate,
 		hooks:             hooks,
 		onPreEdit:         opts.PreEditHook,
+		onPostEdit:        opts.PostEditHook,
 		jobs:              opts.Jobs,
 		evidence:          evidence.NewLedger(),
 		projectChecks:     append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
@@ -1867,6 +1884,14 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall, preview 
 	// call succeeded or errored, since the tool did run.
 	if a.hooks != nil {
 		a.hooks.PostToolUse(ctx, call.Name, json.RawMessage(call.Arguments), result)
+	}
+	// Post-edit hash: after a writer tool succeeds, record the touched files'
+	// new content hashes so a rewind preview can tell agent edits from external
+	// changes made since (the safe/unsafe/ignored classification).
+	if a.onPostEdit != nil && err == nil && !t.ReadOnly() {
+		for _, change := range preview {
+			a.onPostEdit(change.Path)
+		}
 	}
 	if err != nil {
 		detail := result

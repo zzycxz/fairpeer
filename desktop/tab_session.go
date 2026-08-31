@@ -65,6 +65,7 @@ type tabSession interface {
 	Checkpoints() []checkpoint.Meta
 	CheckpointDiff(turn int) []diff.Change
 	CheckpointHasBoundary(turn int) bool
+	RewindPreview(turn int) []control.RewindFileClass
 	Rewind(turn int, scope control.RewindScope) error
 	ForkSession(turn int, name string) (string, error)
 	Branches() ([]agent.BranchInfo, error)

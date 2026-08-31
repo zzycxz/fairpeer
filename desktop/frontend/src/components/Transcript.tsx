@@ -346,6 +346,12 @@ export function Transcript({
 
   const userTurn = useMemo(() => new Map(questions.map((question) => [question.id, question.turn])), [questions]);
   const checkpointsByTurn = useMemo(() => new Map(checkpoints.map((checkpoint) => [checkpoint.turn, checkpoint])), [checkpoints]);
+  // The newest checkpoint, when it is a rewind-keep (the reverse side of the
+  // latest code rewind), is the reapply target offered in the rewind menu.
+  const reapplyTurn = useMemo(() => {
+    const last = checkpoints[checkpoints.length - 1];
+    return last?.reapply ? last.turn : undefined;
+  }, [checkpoints]);
 
   // ── JumpBar integration ───────────────────────────────────────────────────
   const jumpToQuestion = (question: QuestionAnchor) => {
@@ -439,6 +445,7 @@ export function Transcript({
           openMenu={openMenu}
           onOpenMenu={(menu) => setOpenAction(menu ? { turn, menu } : null)}
           checkpoint={checkpointsByTurn.get(turn)}
+          reapplyTurn={reapplyTurn}
           actionPending={actionPending}
           rewindDisabled={rewindDisabled}
           onRewind={(targetTurn, scope) => {

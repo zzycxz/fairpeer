@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
@@ -172,6 +172,7 @@ export function TurnActions({
   onOpenMenu,
   onRewind,
   checkpoint,
+  reapplyTurn,
   actionPending = false,
   rewindDisabled = false,
 }: {
@@ -181,6 +182,7 @@ export function TurnActions({
   onOpenMenu?: (menu: TurnActionMenu | null) => void;
   onRewind?: (turn: number, scope: MessageActionScope) => void;
   checkpoint?: CheckpointMeta;
+  reapplyTurn?: number;
   actionPending?: boolean;
   rewindDisabled?: boolean;
 }) {
@@ -190,6 +192,25 @@ export function TurnActions({
   // checkpoint store; null = closed.
   const [rewindPreview, setRewindPreview] = useState<{ path: string; kind: string; added: number; removed: number; diff: string }[] | null>(null);
   useEffect(() => { setRewindPreview(null); }, [openMenu]);
+  // ZCode-style safety classification for the confirm step: fetched when the
+  // user arms a code/both rewind; null = not loaded.
+  const [rewindClasses, setRewindClasses] = useState<{ path: string; class: string }[] | null>(null);
+  useEffect(() => {
+    setRewindClasses(null);
+    if (confirmScope !== "code" && confirmScope !== "both") return;
+    app.RewindPreviewForTab("", turn as number)
+      .then((files) => setRewindClasses(files ?? []))
+      .catch(() => setRewindClasses([]));
+  }, [confirmScope, turn]);
+  const classCounts = useMemo(() => {
+    const c = { safe: 0, unsafe: 0, ignored: 0 };
+    for (const f of rewindClasses ?? []) c[f.class as "safe" | "unsafe" | "ignored"] = (c[f.class as "safe" | "unsafe" | "ignored"] ?? 0) + 1;
+    return c;
+  }, [rewindClasses]);
+  // Reapply (the latest code rewind's reverse checkpoint): own armed state so
+  // it rides the same onRewind("code") flow against the keep turn.
+  const [reapplyArmed, setReapplyArmed] = useState(false);
+  useEffect(() => { setReapplyArmed(false); }, [openMenu]);
   const canAct = onRewind != null && turn != null;
   const actionDisabledReason = (scope: string): string => {
     if (rewindDisabled || actionPending) return t("rewind.disabledRunning");
@@ -340,6 +361,42 @@ export function TurnActions({
                 {renderAction("conversation")}
                 {renderAction("code")}
                 {renderAction("both", true)}
+                {(confirmScope === "code" || confirmScope === "both") && rewindClasses && rewindClasses.length > 0 && (
+                  <div className="rewind__preview">
+                    <div className="rewind__preview-file" style={{ color: "var(--ok, #30a46c)" }}>{t("rewind.classSafe", { n: classCounts.safe })}</div>
+                    {classCounts.unsafe > 0 && (
+                      <div className="rewind__preview-file" style={{ color: "var(--danger, #e5484d)" }}>
+                        {t("rewind.classUnsafe", { n: classCounts.unsafe })}
+                        {(rewindClasses ?? []).filter(f => f.class === "unsafe").map(f => (
+                          <div key={f.path} style={{ paddingLeft: 8 }} title={f.path}>· {f.path}</div>
+                        ))}
+                      </div>
+                    )}
+                    {classCounts.ignored > 0 && (
+                      <div className="rewind__preview-file" style={{ opacity: 0.7 }}>
+                        {t("rewind.classIgnored", { n: classCounts.ignored })}
+                        {(rewindClasses ?? []).filter(f => f.class === "ignored").map(f => (
+                          <div key={f.path} style={{ paddingLeft: 8 }} title={f.path}>· {f.path}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {reapplyTurn != null && !rewindDisabled && !actionPending && (
+                  <button
+                    className={`rewind__menu-item${reapplyArmed ? " rewind__menu-confirm" : ""}`}
+                    type="button"
+                    title={t("rewind.reapplyTip")}
+                    onClick={() => {
+                      if (!reapplyArmed) { setReapplyArmed(true); return; }
+                      setReapplyArmed(false);
+                      onOpenMenu?.(null);
+                      onRewind?.(reapplyTurn, "code");
+                    }}
+                  >
+                    <span>{reapplyArmed ? t("rewind.reapplyConfirm") : t("rewind.reapply")}</span>
+                  </button>
+                )}
                 {!!checkpoint?.files?.length && (
                   <button
                     className="rewind__menu-item"

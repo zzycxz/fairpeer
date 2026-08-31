@@ -55,6 +55,7 @@ func SetGoldenFromBackup(device, versionID string) error {
 	if err := os.MkdirAll(goldenDir(), 0o700); err != nil {
 		return err
 	}
+	StateEventSnap(StateEventGolden, device, StateActorUser, goldenFile(device), goldenMeta(device))
 	if err := os.WriteFile(goldenFile(device), []byte(text), 0o600); err != nil {
 		return err
 	}

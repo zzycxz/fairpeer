@@ -78,6 +78,10 @@ type TaskTool struct {
 	// writer tools feed the parent's checkpoint store (sub-agent edits must
 	// rewind like main-loop edits). Wired via WithPreEditHook.
 	preEdit func(diff.Change)
+	// postEdit, when set, is installed as the sub-agent's PostEditHook so the
+	// checkpoint store also records post-edit hashes for sub-agent writes.
+	// Wired via WithPostEditHook.
+	postEdit func(string)
 }
 
 // NewTaskTool wires a task tool to the parent agent's environment so its
@@ -132,6 +136,13 @@ func (t *TaskTool) WithTranscriptIdentityResolver(resolve func(modelRef, effort 
 // default) keeps sub-agent edits un-checkpointed, as before.
 func (t *TaskTool) WithPreEditHook(fn func(diff.Change)) *TaskTool {
 	t.preEdit = fn
+	return t
+}
+
+// WithPostEditHook routes sub-agent writer post-edits into the caller's
+// post-edit hash seam (typically a SharedPostEditHook owned by boot).
+func (t *TaskTool) WithPostEditHook(fn func(string)) *TaskTool {
+	t.postEdit = fn
 	return t
 }
 
@@ -472,6 +483,7 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 		CompactForceRatio: t.compactForceRatio,
 		ArchiveDir:        t.archiveDir,
 		PreEditHook:       t.preEdit,
+		PostEditHook:      t.postEdit,
 	}, sink)
 }
 

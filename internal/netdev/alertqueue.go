@@ -119,6 +119,13 @@ func transitionFinding(id, to string, learn bool) error {
 			suppressIncr(f.Source)
 			f.Detail += "\n[误报学习] 已登记抑制键 " + f.Source + "；同类自动告警将降级。"
 		}
+		kind := StateEventFindAck
+		paths := []string{filepath.Join(FindingsDir(), id+".json")}
+		if learn {
+			kind = StateEventFindFP
+			paths = append(paths, suppressionFile()) // the learned key unwinds with the verdict
+		}
+		StateEventSnap(kind, id, StateActorUser, paths...)
 		return SaveFinding(f)
 	}
 	return nil

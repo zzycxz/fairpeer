@@ -36,3 +36,29 @@ func (h *SharedPreEditHook) Fire(ch diff.Change) {
 		fn(ch)
 	}
 }
+
+// SharedPostEditHook is the post-edit twin of SharedPreEditHook: it carries the
+// checkpoint store's post-edit hash recorder to sub-agents constructed before
+// the controller exists. Until Set installs the function, Fire is a no-op.
+type SharedPostEditHook struct {
+	mu sync.Mutex
+	fn func(string)
+}
+
+func NewSharedPostEditHook() *SharedPostEditHook { return &SharedPostEditHook{} }
+
+func (h *SharedPostEditHook) Set(fn func(string)) {
+	h.mu.Lock()
+	h.fn = fn
+	h.mu.Unlock()
+}
+
+// Fire is the hook handed to agent.Options.PostEditHook; safe for concurrent use.
+func (h *SharedPostEditHook) Fire(path string) {
+	h.mu.Lock()
+	fn := h.fn
+	h.mu.Unlock()
+	if fn != nil {
+		fn(path)
+	}
+}

@@ -3,6 +3,7 @@ package checkpoint
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -295,5 +296,193 @@ func TestLazyDirectoryCreation(t *testing.T) {
 	turnPath := filepath.Join(dir, "turn-0.json")
 	if _, err := os.Stat(turnPath); err != nil {
 		t.Fatalf("turn file should now exist: %v", err)
+	}
+}
+
+// An open turn's paths are hidden from List (in-progress turns must not
+// propagate CanCode); Finalize closes it so the newest event reports its paths —
+// the netdev state history depends on this to show its latest event.
+func TestFinalizeMakesCurrentTurnVisibleInList(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a.txt")
+	write(t, a, "v0")
+	s := New("", root)
+
+	s.Begin(0, "event", 0)
+	s.Snapshot(diff.Change{Path: a, Kind: diff.Modify, OldText: "v0"})
+
+	if metas := s.List(); len(metas) != 1 || metas[0].Paths != nil {
+		t.Fatalf("open turn should hide paths, got %+v", metas)
+	}
+
+	s.Finalize()
+	metas := s.List()
+	if len(metas) != 1 || len(metas[0].Paths) != 1 || metas[0].Paths[0] != a {
+		t.Fatalf("finalized turn should report paths, got %+v", metas)
+	}
+
+	// Finalize with nothing open is a no-op (event stores call it unconditionally).
+	s.Finalize()
+	if metas := s.List(); len(metas) != 1 {
+		t.Fatalf("double Finalize changed the list: %+v", metas)
+	}
+}
+
+// Event-oriented stores exceed the default cap quickly; pruning must run during
+// Begin (not only at load), deleting the oldest turn files on disk.
+func TestNewWithLimitPrunesDuringBegin(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "state.ckpt")
+	s := NewWithLimit(dir, root, 2)
+
+	for turn := 0; turn < 4; turn++ {
+		s.Begin(turn, fmt.Sprintf("e%d", turn), 0)
+		s.Finalize()
+	}
+
+	metas := s.List()
+	if len(metas) != 2 {
+		t.Fatalf("retained %d checkpoints, want 2 (the cap)", len(metas))
+	}
+	for _, m := range metas {
+		if m.Turn < 2 {
+			t.Fatalf("pruned the wrong end: kept turn %d", m.Turn)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "turn-0.json")); !os.IsNotExist(err) {
+		t.Fatalf("turn-0.json should have been deleted from disk: %v", err)
+	}
+	if s.NextTurn() != 4 {
+		t.Fatalf("NextTurn = %d, want 4 (numbering must not regress after prune)", s.NextTurn())
+	}
+}
+
+// Snapshot paths may be root-relative (the netdev state store); DiffForTurn and
+// restore must resolve them against root regardless of the process CWD.
+func TestRootRelativePathsWorkFromAnyCWD(t *testing.T) {
+	root := t.TempDir()
+	rel := filepath.Join("netdev", "proposals", "p-1.json")
+	abs := filepath.Join(root, rel)
+	write(t, abs, "v0")
+	write(t, filepath.Join(root, "config.toml"), "keep")
+
+	t.Chdir(t.TempDir()) // CWD is nowhere near root
+
+	s := New("", root)
+	s.Begin(0, "approve", 0)
+	s.Snapshot(diff.Change{Path: rel, Kind: diff.Modify, OldText: "v0"})
+	write(t, abs, "v1")
+
+	changes := s.DiffForTurn(0)
+	if len(changes) != 1 {
+		t.Fatalf("DiffForTurn returned %d changes, want 1", len(changes))
+	}
+	if changes[0].Path != rel {
+		t.Fatalf("diff path = %q, want %q", changes[0].Path, rel)
+	}
+
+	if _, _, err := s.RestoreCode(0); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, abs); got != "v0" {
+		t.Fatalf("restored = %q, want v0", got)
+	}
+}
+
+// NotePostEdit + SuffixInfo power the rewind safety classification: a path
+// whose current content matches the agent's last post-edit hash is safe; an
+// external edit after that flips it to unsafe; a never-hashed (legacy) path
+// reports no provenance.
+func TestSuffixInfoClassification(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a.txt")
+	b := filepath.Join(root, "b.txt")
+	write(t, a, "v0")
+	write(t, b, "b0")
+	s := New("", root)
+
+	s.Begin(0, "edit", 0)
+	s.Snapshot(diff.Change{Path: a, Kind: diff.Modify, OldText: "v0"})
+	s.Snapshot(diff.Change{Path: b, Kind: diff.Modify, OldText: "b0"})
+	write(t, a, "v1")
+	write(t, b, "b1")
+	s.NotePostEdit(a) // agent's last write to a is v1; b stays unhashed (legacy)
+	s.Finalize()
+
+	// Untouched since the agent's last write → PostHash known; a external edit
+	// after v1 must show as a mismatch.
+	write(t, a, "v2-external")
+
+	info := map[string]SuffixFileInfo{}
+	for _, fi := range s.SuffixInfo(0) {
+		info[fi.Path] = fi
+	}
+	if len(info) != 2 {
+		t.Fatalf("suffix info = %v, want 2 paths", info)
+	}
+	if info[a].PostHash == "" || info[a].PostHash == info[a].PreHash {
+		t.Fatalf("a post-hash = %q, want the v1 hash (≠ pre v0 hash)", info[a].PostHash)
+	}
+	if info[b].PostHash != "" || info[b].PreHash == "" {
+		t.Fatalf("b should be legacy (pre-hash only): %+v", info[b])
+	}
+	if cur := s.CurrentHash(a); cur == "" || cur == info[a].PostHash {
+		t.Fatalf("current hash of a = %q, want the external v2 (≠ post-hash)", cur)
+	}
+	// b was edited (b0→b1) but never post-hash noted: legacy provenance — its
+	// current hash is simply the on-disk b1 content, which no recorded hash
+	// matches, so the preview classifies it "ignored".
+	if cur := s.CurrentHash(b); cur != hashString("b1") {
+		t.Fatalf("current hash of b = %q, want hash of b1", cur)
+	}
+}
+
+// KeepCurrent is the reverse side of a rewind: current values become a
+// finalized synthetic checkpoint whose restore replays the rewound edits,
+// and a path absent at keep time replays as a delete.
+func TestKeepCurrentReplaysRewind(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a.txt")
+	nb := filepath.Join(root, "new.txt")
+	write(t, a, "v0")
+	s := New("", root)
+
+	s.Begin(0, "edit", 0)
+	s.Snapshot(diff.Change{Path: a, Kind: diff.Modify, OldText: "v0"})
+	s.Snapshot(diff.Change{Path: nb, Kind: diff.Create}) // pre-edit hook saw it absent
+	write(t, a, "v1")
+	write(t, nb, "created-during-turn")
+
+	keep := s.KeepCurrent("rewind-keep → 0", 1, []string{a, nb})
+	if keep < 0 {
+		t.Fatal("KeepCurrent returned no turn")
+	}
+
+	if _, _, err := s.RestoreCode(0); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, a); got != "v0" {
+		t.Fatalf("after rewind a = %q, want v0", got)
+	}
+	if _, err := os.Stat(nb); !os.IsNotExist(err) {
+		t.Fatalf("rewind should delete the created file: %v", err)
+	}
+
+	// Reapply = restore back to the keep turn.
+	if _, _, err := s.RestoreCode(keep); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, a); got != "v1" {
+		t.Fatalf("after reapply a = %q, want v1", got)
+	}
+	if got := read(t, nb); got != "created-during-turn" {
+		t.Fatalf("after reapply new file = %q, want it back", got)
+	}
+
+	// The keep turn shows its paths (finalized) and carries post-hashes.
+	metas := s.List()
+	last := metas[len(metas)-1]
+	if last.Turn != keep || len(last.Paths) != 2 {
+		t.Fatalf("keep meta = %+v, want turn %d with 2 paths", last, keep)
 	}
 }

@@ -1792,6 +1792,9 @@ type CheckpointMeta struct {
 	Time            int64    `json:"time"`  // unix milliseconds
 	CanCode         bool     `json:"canCode"`
 	CanConversation bool     `json:"canConversation"`
+	// Reapply marks the synthetic reverse checkpoint the latest code rewind
+	// left behind: rewinding code to it replays (reapplies) that rewind.
+	Reapply bool `json:"reapply,omitempty"`
 }
 
 // Checkpoints lists the session's rewind points, oldest first, for the rewind UI.
@@ -1998,6 +2001,38 @@ func (a *App) CheckpointsForTab(tabID string) []CheckpointMeta {
 			hasCodeAfter = true
 		}
 		out[i].CanCode = hasCodeAfter
+	}
+	// The newest checkpoint, when it is a rewind-keep (the reverse side of the
+	// latest code rewind), is the reapply target.
+	if n := len(out); n > 0 && strings.HasPrefix(out[n-1].Prompt, "rewind-keep") {
+		out[n-1].Reapply = true
+	}
+	return out
+}
+
+// RewindPreviewFileView is one file's safety verdict for a code rewind.
+type RewindPreviewFileView struct {
+	Path  string `json:"path"`
+	Class string `json:"class"` // safe | unsafe | ignored
+}
+
+// RewindPreviewForTab classifies every file a code-scope rewind of `turn`
+// would restore (ZCode-style buckets: safe = unchanged since the agent's last
+// write; unsafe = externally modified since; ignored = no hash provenance).
+func (a *App) RewindPreviewForTab(tabID string, turn int) []RewindPreviewFileView {
+	a.mu.RLock()
+	var ctrl tabSession
+	if tab := a.tabByIDLocked(tabID); tab != nil {
+		ctrl = tab.Ctrl
+	}
+	a.mu.RUnlock()
+	if ctrl == nil {
+		return []RewindPreviewFileView{}
+	}
+	classes := ctrl.RewindPreview(turn)
+	out := make([]RewindPreviewFileView, 0, len(classes))
+	for _, c := range classes {
+		out = append(out, RewindPreviewFileView{Path: c.Path, Class: c.Class})
 	}
 	return out
 }

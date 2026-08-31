@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { AlertTriangle, Activity, BookOpen, CalendarClock, ClipboardCheck, FileText, HeartPulse, MousePointerClick, Network, PanelLeft, ScanSearch, ScrollText, Server, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, Activity, BookOpen, CalendarClock, ClipboardCheck, FileText, HeartPulse, History, MousePointerClick, Network, PanelLeft, ScanSearch, ScrollText, Server, SlidersHorizontal } from "lucide-react";
 import { app, onNetdevHealth, onNetdevLive } from "../lib/bridge";
 import { ProfileSegmented } from "../components/AppChrome";
 import { useConfirm } from "../lib/confirm";
@@ -15,6 +15,7 @@ import { SrvConfCard } from "../components/netdev/SrvConfCard";
 import { HealthPanel } from "../components/netdev/HealthPanel";
 import { BrowserConsolePanel } from "../components/netdev/BrowserConsolePanel";
 import { JobsPanel } from "../components/netdev/JobsPanel";
+import { StateHistoryPanel } from "../components/netdev/StateHistoryPanel";
 import { AlertSetupWizard } from "../components/netdev/AlertSetupWizard";
 import { DockTabs, useDockTabState } from "../components/DockTabs";
 import type { NetDevSettingsView, NetDevDeviceHealth, NetDevFinding, NetDevAggregatedFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph, NetDevBackupVersion, NetDevCutoverRun } from "../lib/types";
@@ -201,7 +202,7 @@ function benchParam(): "logs" | "sec" | null {
   } catch { return null; }
 }
 
-type DockTab = "live" | "devices" | "context" | "topology" | "findings" | "proposals" | "audit" | "logs" | "health" | "jobs" | "browser";
+type DockTab = "live" | "devices" | "context" | "topology" | "findings" | "proposals" | "audit" | "state" | "logs" | "health" | "jobs" | "browser";
 // Fresh installs open a curated set — 操作实况 leads (supervision first), the
 // rest join via the "+" dropdown or the bottom-nav entries on demand. Stored
 // state always wins after the user customizes.
@@ -215,7 +216,7 @@ const NETDEV_DOCK_TABS_LIVE_SEEDED = "fairpeer.netdevDockTabs.live-seeded";
 // ?dock=audit) so panels are screenshot-testable without driving the tab
 // strip first. ?live=1 stays as a ?dock=live alias. The open-tabs correction
 // effect OPENs this tab instead of correcting away from it.
-const DOCK_PARAM_KEYS: readonly string[] = ["live", "devices", "context", "topology", "findings", "proposals", "audit", "logs", "health", "jobs", "browser"];
+const DOCK_PARAM_KEYS: readonly string[] = ["live", "devices", "context", "topology", "findings", "proposals", "audit", "state", "logs", "health", "jobs", "browser"];
 function dockParam(): DockTab | null {
   try {
     if (typeof window !== "undefined" && !window.runtime) {
@@ -775,6 +776,7 @@ export function NetDevLayout({
     { key: "findings", label: "发现", group: "需要我决策", dot: findingsHot, badge: scopedFindings.length || undefined, icon: <AlertTriangle size={13} /> },
     { key: "proposals", label: "提案", group: "需要我决策", badge: pendingCount || undefined, icon: <ClipboardCheck size={13} /> },
     { key: "audit", label: "审计", group: "留档备查", icon: <ScrollText size={13} /> },
+    { key: "state", label: "状态历史", group: "留档备查", icon: <History size={13} /> },
     { key: "jobs", label: "作业", group: "留档备查", icon: <CalendarClock size={13} /> },
     { key: "browser", label: "浏览器", group: "什么状态", icon: <MousePointerClick size={13} /> },
   ];
@@ -1438,6 +1440,7 @@ export function NetDevLayout({
             <div className="ndv__hint ndv__hint--flush" style={{ marginTop: 8 }}>结构性只读：写命令无执行路径 · 全量审计中。审计只记命令与字节数，输出原文不入档（脱敏在进入上下文之前完成）。</div>
           </div>
         )}
+        {tab === "state" && <StateHistoryPanel />}
         </div>
       </div>
       )}

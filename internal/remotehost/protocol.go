@@ -224,6 +224,12 @@ type CheckpointHasBoundaryResult struct {
 	Has bool `json:"has"`
 }
 
+// RewindPreviewResult carries the per-path safety classification
+// ([]control.RewindFileClass) for a code-scope rewind preview.
+type RewindPreviewResult struct {
+	Classes json.RawMessage `json:"classes"`
+}
+
 type RewindParams struct {
 	SessionID string `json:"sessionId"`
 	Turn      int    `json:"turn"`
