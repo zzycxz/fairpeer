@@ -57,6 +57,17 @@ jobs:
           
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      # Locale parity gate (WORKSPACE_GIT_SPEC F2): en/zh key-set equality and
+      # "zh values must not be untranslated English sentences". One matrix leg
+      # only — the check is OS-independent; the full npm test suite is not yet
+      # validated on CI runners.
+      - name: Locale parity guard
+        if: ${{ matrix.goos == 'linux' && matrix.goarch == 'amd64' }}
+        working-directory: desktop/frontend
+        run: |
+          npm ci
+          npx vitest run src/__tests__/locale-parity.test.ts
         
       - name: Build
         working-directory: desktop

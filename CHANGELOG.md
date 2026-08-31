@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(desktop): 工作区 Git 进展面板 + 检查点补洞 + 体验修复（WORKSPACE_GIT_SPEC G1–G3/G5–G7/F1–F4）
+
+- **G1 分支名**：改动页签摘要行显示当前分支（本地+远程，detached 标注）——修复 `gitBranch` 后端已取、前端 `loadWorkspaceChanges` 丢弃的断链；非 git 仓库降级显示 gitUnavailable
+- **G2 增删统计**：摘要行追加 `+N -N ?N`（绿/红/黄，与 CLI 状态栏同语义）——桌面搬 CLI 的 numstat 解析（二进制 `-` 列跳过，8 组单测）+ 远程 host `git/status` 同步 numstat
+- **G3 分支切换**：分支名变下拉触发器（AnchoredPopover + 内置确认步骤，会话改动非空时警告）→ `GitCheckout` 后三连刷新（改动/历史/文件树）；运行中/待审批禁用（Tooltip 说明）、远程 tab 后端双重拒绝；>12 分支出过滤框
+- **G5 子代理检查点补洞**：`SharedPreEditHook`（boot 建占位、controller 构造后注入快照函数）让 `task`/`run_skill` 子代理的写工具进检查点——办公模式技能写文件首次可 rewind；专项测试覆盖 hook 触发与后置 Set 语义
+- **G6 轮次 diff**：会话改动条目悬停出现 diff 按钮，按检查点渲染该文件最后一次被改轮次的改动（接已有 `CheckpointDiffForTab` 桥）——非 git 项目首次可见"改了什么"；快照过期降级提示
+- **G7 TodoPanel**：任务 5/5 后自动折叠为一行，新 todo_write 重展开
+- **F1** `tt("ndv.gs.footer")` JSX 泄漏修复（补花括号）；**F3** 内核 notice 相邻去重（×N 徽标）+ 四条固定文案 i18n（"resumed session…"不再英文裸刷）；**F4** 发现队列清理（`DismissFinding`/`ClearFindings` 后端+桥+单测，前端按钮随运维批次）
+- **F2 防回归闸**：`locale-parity.test.ts`（en/zh 键集一致 + zh 值非英文句，7 键白名单）挂入 npm test/test:all，并在 ci.yml 增设独立步骤（linux/amd64 单腿跑 vitest——全量前端测试未在 CI 验证过，暂不全上）
+- 验证：go 双模块 build/vet/test 绿（vet 仅 2 条预存 UIA 警告）；tsc 相对 HEAD 零新增错误；前端 43+2 测试通过；**已实测**（2026-08-31 新构建）：分支 main + `+6 ?1` 与 git numstat 一致、非 git 降级、切换 popover 正常
+- 提交切分说明：共享文件（locales/NetDevLayout 等）按 hunk 手术只纳入本批——运维 i18n 243 键翻译与 F1/F4 前端按钮与另一在途批次逐行融合，随该批次提交
+
 ### docs(netdev): SPEC v2.1——原 R6 批次改组为「按需停车场」
 
 R1-R5 落地后原「R6 规模化与战略批」以功能菜单式批次呈现，读起来像排期承诺，实则多数条目无需求牵引。§八重写：**每条目挂启动条件 + 最小可用面**（真启动时先交付的一小块，按使用证据再加，不照菜单全做）——规模化（>200 台实测触发）、gNMI（轮询成为实测瓶颈且设备真支持）、sFlow/NetFlow（ISP 真实用户）、GPU 面（dogfooding 痛点清单驱动，原七项菜单降级为素材库）、BGP/光层（骨干网需求）；**拓扑人工覆盖层与 CSV 批量导入摘出为 §8.7 小件池**（自动布局出错第一天就有用、首次批量上架 20 台就疼——都不该锁在战略批门槛后，无门槛随时可做）；§九路线图行与全文 9 处 R6 引用同步改写，不设批次验收（立项时按最小可用面定当期验收）。规格版本 v2.0 → v2.1。
