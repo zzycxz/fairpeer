@@ -602,7 +602,7 @@ BGP 视图（`display bgp` 系列已在驱动读表、peer/前缀数入时序、
 3. **密封断言**：docker/k8s/db 客户端代码路径无写 verb（静态断言 + 单测）；工具面 `tool_scope` 断言扩展到新工具。
 4. **预算与洪水**：log_search 预算耗尽的覆盖率报告；trap 风暴聚合与熔断阈值测试。
 5. **审计哈希链**：篡改检测、损坏点定位、链续接。
-6. **UI 契约（发布门禁）**：dock 页签目录恒为 11（live/devices/context/topology/findings/proposals/audit/logs/health/jobs/browser，断言）；工作台 ≤3 且单开对话时切换条不渲染（DOM 断言）；设备卡可见动作 ≤8；未配置能力的入口不出现（kind 注册前后快照对比）；纯对话视图与 v1.1 基线做视觉回归对比；设置中表单类交互不出现在弹框（仅阻塞确认类可用 dialog）；表单项默认值全覆盖、控件选型符合 §10.9 选择题/填空题规则（抽样断言）；L3 动画尊重 `prefers-reduced-motion`。
+6. **UI 契约（发布门禁）**：dock 页签目录恒为 12（live/devices/context/topology/findings/proposals/audit/state/logs/health/jobs/browser，断言）；工作台 ≤3 且单开对话时切换条不渲染（DOM 断言）；设备卡可见动作 ≤8；未配置能力的入口不出现（kind 注册前后快照对比）；纯对话视图与 v1.1 基线做视觉回归对比；设置中表单类交互不出现在弹框（仅阻塞确认类可用 dialog）；表单项默认值全覆盖、控件选型符合 §10.9 选择题/填空题规则（抽样断言）；L3 动画尊重 `prefers-reduced-motion`。
 7. **新面回归**：时钟偏差 fixture（人为偏移的多源日志 → 时间线 ⚠ 徽标必须生效）；割接模式故障注入（验证门失败必须停在回退决策点而非继续）；报告/诊断包导出物做敏感模式 grep 抽样（脱敏器覆盖率）；IPv6 目标（连接/发现/locate/暴露面）CI fixture 覆盖。
 
 ---
@@ -679,3 +679,75 @@ BGP 视图（`display bgp` 系列已在驱动读表、peer/前缀数入时序、
 - 不做 getshell / 提权利用 / 防护绕过 / 持久化 / 自动化横向移动；
 - exploit 执行永远在产品之外（用户自有工具），产品只做：**授权、侦察、验证、证据、报告、修复**；
 - 字典 / payload / 模板 / API key 一律用户自备，产品零分发。
+
+---
+
+## 附录 D：状态历史与三层回退（2026-08-31 增补，已落地）
+
+> 对齐 Claude Code / ZCode 的现行 checkpoint 实践（写前快照、按事件原子回退、
+> 事前安全分类、回退后可重做），并把 WORKSPACE_GIT_SPEC §5 停车场的
+> 「配置历史 git（运维）」项以**快照而非 git** 的方式落地。
+
+### D.1 三层回退模型（各管各的，互不越界）
+
+| 层 | 管什么 | 入口 | 模式 |
+|---|---|---|---|
+| 对话回退 | 会话消息本身 | 每条用户消息的 rewind 菜单（编码/运维通用；运维会话无文件编辑，code 选项自动置灰） | 既有 |
+| **状态回退** | **本地记录**：提案/作业/割接/模板/发现裁决/工单/拓扑设计/golden 基线/设备清单（config.toml） | 运维 dock「状态历史」页签（归档组，紧挨审计） | **本增补** |
+| 设备回退 | 网络设备上的配置 | 提案回滚 / 割接回退按钮 | 既有，不动 |
+
+与审计的关系：**审计 = 不可变的"发生了什么"**（哈希链）；**状态历史 = 可回退的
+"之前长什么样"**（写前快照）。互为表里，不可互相替代。
+
+### D.2 快照机制（internal/netdev/statehist.go）
+
+- 复用 `internal/checkpoint.Store` 的第二个实例（root = fairpeer 配置目录，
+  同时覆盖 `netdev/**` 与 `config.toml`；事件上限 200，落
+  `netdev/state.ckpt/turn-N.json`）。
+- **挂点 = 状态迁移审计同址**（~26 处，每处一行 `StateEventSnap`）：提案
+  propose/approve/reject/execute/rollback/delete/close-watch；job
+  start/pause/resume/abort/freeze/finish；cutover
+  start/continue/rollback/abort/hold/finish；模板 save/delete/apply；发现
+  ack/false-positive/resolve/dismiss/clear；设置保存/纳管/线索移除/导入/拓扑/
+  golden/工单。actor ∈ user/agent/im/system（割接 runner 经 `CtxStateActor`
+  标 system）。
+- **明确不纳入**：audit.jsonl、journal/*、series、metrics.db、syslog-counts、
+  backups/、srvconf/（只增库）、humantty、export-*、**secrets.enc.json**
+  （加密敏感，非目标）、discovered 后台合并写、观察期 tick 劣化备注写。
+
+### D.3 回退语义与安全分类
+
+- **后缀回退**（与 Claude Code/ZCode 的"按轮回退"对齐）：回退到事件 E 之前 =
+  E 及之后所有事件触碰的每个文件还原到各自**动手前**的内容（文件原不存在则
+  删除）。恢复前先写 `restore-keep` 反向事件（当前值留底）→ 回退本身可重做；
+  **重做守卫**：反向事件之后一旦有新事件即禁用（防连坐）。
+- **ZCode 式事前分类**：事件不可回退的唯一条件 = 后缀触碰了**活跃实体**
+  （提案 executing/watching、作业 running/paused、割接 running/hold），
+  分类随事件列表返回并在确认层列出实体名；执行时二次复检（预检竞态兜底）。
+- **config.toml 专属警告**：整文件快照，回退会连带恢复 [netdev] 之外的同文件
+  配置（如 bot 设置）在间隙内的改动——确认层固定警告。
+- **绝不自动**：回退永远是人的点击；**绝不触碰设备**：UI 固定文案声明
+  「仅恢复本地记录，设备回退请用提案/割接回滚」。
+
+### D.4 编码模式对齐增量（同批落地）
+
+1. **rewind 三分类**：`FileSnap` 增 `Hash`（快照前哈希）+ `PostHash`（写工具
+   执行后经 `SetPostEditHook`/`SharedPostEditHook` 记录的"代理最后写入"哈希）；
+   `Controller.RewindPreview(turn)` 按当前盘哈希分类
+   safe（=PostHash）/ unsafe（≠PostHash，回退会丢外部修改）/ ignored（无哈希
+   留痕的旧快照）；Message.tsx 确认层三档展示。
+2. **Reapply**：`Rewind(code/both)` 先以 `Store.KeepCurrent` 把后缀各路径的
+   当前值写成合成反向检查点（`rewind-keep` 前缀、边界取截断后的消息数），
+   最新反向检查点在 rewind 菜单露出「重新应用上次回退」（对它做 code 恢复
+   即重放；重放自身再留反向 → undo/redo 可持续翻转）。
+3. checkpoint 包顺带修复：`Finalize()`（未结束事件的路径不再被 List 隐藏）、
+   `NewWithLimit`、Begin/Finalize 后持续 prune、`DiffForTurn`/`restorePerm`
+   改走 `safePath`（相对路径 + CWD≠root 的存量缺陷）。
+
+### D.5 验收要点
+
+- 建提案→批准→执行：状态历史出现三事件；回退到批准前提案回 draft；重做复原。
+- 活跃割接/执行中提案：对应事件显示"不可回退（活跃实体）"，恢复调用被拒。
+- 改 bot 设置后回退更早的 netdev 设置事件：确认层出现 config.toml 连带警告。
+- 编码会话：外部手改被回退文件 → rewind 确认层列"会丢失外部修改"；
+  回退后菜单出现「重新应用」，点按即复原。

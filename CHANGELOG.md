@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(netdev/desktop): 状态历史与三层回退——对齐 Claude Code/ZCode checkpoint 实践 + 编码模式 rewind 增量
+
+**运维模式（状态回退层，NETDEV_SPEC_V2 附录 D）**：此前 proposals/jobs/cutovers/templates/清单 TOML 全部原地覆写、零版本化——本批给每个状态迁移加"写前快照"，配 dock 新页签「状态历史」（归档组，紧挨审计：审计=不可变事实，状态历史=可回退留底）。
+
+- **快照层** `internal/netdev/statehist.go`：复用 `checkpoint.Store` 第二实例（root=fairpeer 配置目录，同盖 `netdev/**` 与 `config.toml`，上限 200 事件）；挂点与状态迁移审计同址（~26 处：提案 propose/approve/reject/execute/rollback/delete/close-watch、job 全生命周期、cutover 全生命周期、模板、发现裁决、设置/纳管/导入/拓扑/golden/工单），actor 分 user/agent/im/system（割接 runner 经 `CtxStateActor` 标 system）；secrets/审计流水/journal/只增库明确排除
+- **回退引擎**：后缀语义（回到事件 E 前 = E 起所有触碰文件还原到各自动手前，文件原不存在则删除）；恢复前写 `restore-keep` 反向事件 → 可重做（守卫：反向事件后出现新事件即禁用）；ZCode 式事前安全分类（唯一拦截条件 = 后缀触碰活跃实体：执行中/观察期提案、运行/暂停作业、运行/hold 割接，列出实体名；执行时二次复检）；config.toml 专属连带警告；UI 固定声明"仅恢复本地记录，设备回退走提案/割接回滚"
+- **桥/UI**：`NetDevStateEvents/StateEventDiff/StateRestore` + StateHistoryPanel（2.5s 轮询、逐文件 unified diff、三分类确认、重做按钮）+ zh/en 各 ~62 键（ndv.hist.*）
+
+**编码模式（对齐增量）**：rewind 三分类 + Reapply。
+
+- **三分类**：`FileSnap` 增 `Hash`（快照前哈希）+ `PostHash`（写工具执行后由新增 `SetPostEditHook`/`SharedPostEditHook` 钩子链记录的"代理最后写入"哈希）；`Controller.RewindPreview` → safe（未再变）/ unsafe（外部改过，回退会丢）/ ignored（旧快照无哈希留痕）；Message.tsx 确认层三档展示（`RewindPreviewForTab` 桥；远端 tab 无 RPC 优雅降级）
+- **Reapply**：`Rewind(code/both)` 以 `Store.KeepCurrent` 写合成反向检查点（`rewind-keep` 前缀）；最新反向检查点在 rewind 菜单露「重新应用上次回退」（对它做 code 恢复即重放，重放再留底 → undo/redo 翻转）；`CheckpointsForTab` 增 reapply 标志
+- **checkpoint 包顺带修复**：`Finalize()`（未结束事件不再被 List 隐藏路径——事件型存储必需）；`NewWithLimit` + Begin/Finalize 后持续 prune（原只加载时裁剪）；`DiffForTurn`/`restorePerm` 改走 `safePath`（相对路径 + CWD≠root 的存量缺陷，netdev 实例全踩）
+- Rewind 内部顺序调整为"先截断对话再恢复代码"（合成留底事件的会话边界取截断后消息数；失败时先拒后改文件）
+- 验证：go 双模块 build/vet/test 绿；checkpoint 8 个新单测（Finalize 可见性/prune 时机/CWD 无关/分类/KeepCurrent 重放）+ netdev statehist 5 个（往返/建删/活跃拦截/重做守卫/config 同 root）；tsc 零错 + locale-parity 过；§11.6 页签契约 11→12
+
 ### feat(desktop): 工作区 Git 进展面板 + 检查点补洞 + 体验修复（WORKSPACE_GIT_SPEC G1–G3/G5–G7/F1–F4）
 
 - **G1 分支名**：改动页签摘要行显示当前分支（本地+远程，detached 标注）——修复 `gitBranch` 后端已取、前端 `loadWorkspaceChanges` 丢弃的断链；非 git 仓库降级显示 gitUnavailable
