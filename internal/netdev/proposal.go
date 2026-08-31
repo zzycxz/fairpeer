@@ -31,8 +31,9 @@ const (
 	ProposalApproved  = "approved"
 	ProposalExecuting = "executing"
 	ProposalDone      = "done"
-	ProposalPartial   = "partial" // some steps applied, later ones skipped — frozen for a human
-	ProposalFailed    = "failed"  // rollback attempted and failed — alert
+	ProposalPartial   = "partial"  // some steps applied, later ones skipped — frozen for a human
+	ProposalFailed    = "failed"   // rollback attempted and failed — alert
+	ProposalRejected  = "rejected" // human vetoed (completion-spec §4.1): agent sees the reason next turn
 )
 
 // Structured step types (§7.1): the proposal step grew from a CLI command
@@ -101,6 +102,10 @@ type Proposal struct {
 	Approver   string         `json:"approver,omitempty"`
 	Confirm2   bool           `json:"confirm2"`       // secondary confirmation for proposal+confirm2 groups
 	Note       string         `json:"note,omitempty"` // freeze/rollback reason trail
+	// 驳回（completion-spec §4.1）：draft/approved 可被人否决；Reason 随提案
+	// 持久化，agent 下一轮读到提案即见被拒原因。
+	RejectedAt   time.Time `json:"rejected_at,omitempty"`
+	RejectReason string    `json:"reject_reason,omitempty"`
 	// 观察期（§7.1）：done → watching（默认 30 分钟）→ closed；劣化触发 Finding。
 	WatchUntil *time.Time `json:"watch_until,omitempty"`
 	WatchNote  string     `json:"watch_note,omitempty"`
@@ -442,6 +447,64 @@ func (m *Manager) ApproveProposal(id string, confirm2 bool) (*Proposal, error) {
 	}
 	_ = AppendAudit(Audit{Device: "(proposal)", Command: "approve " + id, Class: "proposal", Status: AuditOK})
 	return p, nil
+}
+
+// RejectProposal is the human veto (completion-spec §4.1): the write path's
+// gate could only say yes — this is the "no". draft/approved may be rejected
+// (approved-but-not-executed vetoes cost nothing; executing states are past
+// the point of veto and must ride rollback instead). The reason is persisted
+// on the proposal so the agent's next turn sees WHY it was turned down.
+func (m *Manager) RejectProposal(id, reason string) (*Proposal, error) {
+	proposalMu.Lock()
+	defer proposalMu.Unlock()
+	p, err := GetProposal(id)
+	if err != nil {
+		return nil, err
+	}
+	if p.Status != ProposalDraft && p.Status != ProposalApproved {
+		return nil, fmt.Errorf("proposal %s: status %s, only draft/approved proposals can be rejected (executing ones ride rollback)", id, p.Status)
+	}
+	StateEventSnap(StateEventReject, id, StateActorUser, filepath.Join(ProposalsDir(), id+".json"))
+	p.Status = ProposalRejected
+	p.RejectedAt = time.Now()
+	p.RejectReason = strings.TrimSpace(reason)
+	if p.RejectReason == "" {
+		p.RejectReason = "(no reason given)"
+	}
+	// Note is the human-readable trail the existing UI already renders.
+	p.Note = "驳回：" + p.RejectReason
+	if err := saveProposalLocked(p); err != nil {
+		return nil, err
+	}
+	_ = AppendAudit(Audit{Device: "(proposal)", Command: "reject " + id, Class: "proposal", Status: AuditFailure, Error: p.RejectReason})
+	return p, nil
+}
+
+// DeleteProposal removes a proposal file. Only draft and terminal states
+// (rejected/done/failed/closed) may be deleted — the live pipeline
+// (approved/executing/partial/watching) must stay auditable. partial keeps
+// its record because the applied steps are still on the devices.
+func (m *Manager) DeleteProposal(id string) error {
+	proposalMu.Lock()
+	defer proposalMu.Unlock()
+	if _, busy := proposalInflight[id]; busy {
+		return fmt.Errorf("proposal %s: a transition is running (execute/rollback) — wait for it to finish before deleting", id)
+	}
+	p, err := GetProposal(id)
+	if err != nil {
+		return err
+	}
+	switch p.Status {
+	case ProposalDraft, ProposalRejected, ProposalDone, ProposalFailed, ProposalClosed:
+	default:
+		return fmt.Errorf("proposal %s: status %s is in the live pipeline — reject or close it before deleting", id, p.Status)
+	}
+	StateEventSnap(StateEventDelete, id, StateActorUser, filepath.Join(ProposalsDir(), id+".json"))
+	if err := os.Remove(filepath.Join(ProposalsDir(), id+".json")); err != nil {
+		return err
+	}
+	_ = AppendAudit(Audit{Device: "(proposal)", Command: "delete " + id, Class: "proposal", Status: AuditOK})
+	return nil
 }
 
 // backupCommand returns the driver's running-config dump command.

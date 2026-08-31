@@ -9,8 +9,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Store is an encrypted key→value secret store. Values are sealed with
@@ -339,6 +341,34 @@ func (s *Store) Set(key, value string) error {
 // Get returns the decrypted value for key. ok is false when the key is absent
 // (not an error). A decrypt failure (e.g. keystore locked/reset) returns
 // ok=false and the error so the caller can prompt to re-enter the secret.
+// HealthStats reports the store's key list and last-change time WITHOUT
+// decrypting any value (works while the keystore is locked): the count is
+// the raw secrets map's size, the age is the file's mtime — the store is a
+// single file, so any Set/Delete rewrites it whole.
+func (s *Store) HealthStats() (keys []string, lastChanged time.Time, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	raw, err := os.ReadFile(s.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, time.Time{}, nil // empty store: zero keys, zero time
+		}
+		return nil, time.Time{}, err
+	}
+	var doc onDisk
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, time.Time{}, err
+	}
+	for k := range doc.Secrets {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if fi, err := os.Stat(s.path); err == nil {
+		lastChanged = fi.ModTime()
+	}
+	return keys, lastChanged, nil
+}
+
 func (s *Store) Get(key string) (value string, ok bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

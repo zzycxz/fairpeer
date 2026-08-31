@@ -53,6 +53,8 @@ export function Welcome({
     t("welcome.netdevEx2"),
     t("welcome.netdevEx3"),
     t("welcome.netdevEx4"),
+    t("welcome.netdevEx5"),
+    t("welcome.netdevEx6"),
   ];
 
   const isCowork = profile === "cowork";

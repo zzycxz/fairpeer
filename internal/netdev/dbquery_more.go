@@ -77,7 +77,7 @@ func (m *Manager) mongoQuery(ctx context.Context, src config.NetDevDBSource, que
 			return "", err
 		}
 		if !ok {
-			return "", fmt.Errorf("secret %s not set — add the password in the 运维 settings", src.PasswordEnv)
+			return "", fmt.Errorf("secret %s not set — add the password in 运维设置", src.PasswordEnv)
 		}
 		pass = v
 	}
@@ -141,7 +141,7 @@ func dbSecretPass(src config.NetDevDBSource) (string, error) {
 		return "", err
 	}
 	if !ok {
-		return "", fmt.Errorf("secret %s not set — add the password in the 运维 settings", src.PasswordEnv)
+		return "", fmt.Errorf("secret %s not set — add the password in 运维设置", src.PasswordEnv)
 	}
 	return v, nil
 }

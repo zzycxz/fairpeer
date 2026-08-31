@@ -54,6 +54,8 @@ type smtpConfig struct {
 // EnsureNotifier wires the outlets from config (idempotent; SharedManager
 // calls it on every config load so settings changes go live without restart).
 func EnsureNotifier(cfg *config.Config) {
+	// 升级链巡检（§5.2）：出口一就位即启动，进程内只起一次。
+	StartEscalationWatcher()
 	notifyMu.Lock()
 	defer notifyMu.Unlock()
 	if cfg == nil {
@@ -174,7 +176,7 @@ func notifyFindingNow(f *Finding, count int) {
 	}
 	o := outlets()
 
-	text := fmt.Sprintf("[fairpeer 运维] %s（%s，%s）%s\n%s\n回复 /netdev 详情 %s 查看证据", f.Title, f.Severity, strings.Join(f.Devices, "、"), "fairpeer://finding/"+f.ID, detail, f.ID)
+	text := fmt.Sprintf("[fairpeer 运维] %s（%s，%s）%s\n%s\n回复 /netdev 详情 %s 查看证据；确认收到回 /netdev ack %s", f.Title, f.Severity, strings.Join(f.Devices, "、"), "fairpeer://finding/"+f.ID, detail, f.ID, f.ID)
 	if o.smc != nil {
 		subject := fmt.Sprintf("[fairpeer 运维] %s（%s，%s）", f.Title, f.Severity, strings.Join(f.Devices, "、"))
 		go smtpSendText(o.smc, subject, text)

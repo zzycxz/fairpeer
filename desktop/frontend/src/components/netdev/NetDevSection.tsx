@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { app } from "../../lib/bridge";
 import { useConfirm } from "../../lib/confirm";
+import { useT } from "../../lib/i18n";
 import { useToast } from "../../lib/toast";
 import type {
   NetDevAlertRuleView,
@@ -11,7 +12,7 @@ import type {
   NetDevSSHImportCandidate,
 } from "../../lib/types";
 
-// NetDevSection is the 运维 settings tab: device/hop inventory (persisted to
+// NetDevSection is 运维设置 tab: device/hop inventory (persisted to
 // the USER config — the [netdev] section is globally pinned), credentials
 // (secret store, never in TOML), scan scopes, and the audit tail. The agent
 // itself has no tool to edit any of this — inventory changes are human-only.
@@ -49,12 +50,13 @@ const emptyHop = (): EditHop => ({
 });
 
 export function NetDevSection() {
+  const t = useT();
   const confirm = useConfirm();
   const { showToast } = useToast();
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {}, projects: [], presets: [], inspectionInterval: "", backupInterval: "", dbSources: [], pollIntervalSeconds: 0, alertRules: [], syslogPort: 0, defaultMode: "", maxSessionsPerDevice: 0, discoveryRate: 0, discoveryMode: "", probeFallback: "", groupDefs: [], notifyWebhook: "", notifyFormat: "", notifyMinSeverity: "", notifyBotDest: "", notifySMTPHost: "", notifySMTPPort: 587, notifySMTPUser: "", notifySMTPFrom: "", notifySMTPTo: [], notifySMTPPassSet: false, briefingPushTime: "" });
+  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {}, projects: [], presets: [], inspectionInterval: "", backupInterval: "", scheduledBaseline: false, dbSources: [], pollIntervalSeconds: 0, alertRules: [], syslogPort: 0, defaultMode: "", maxSessionsPerDevice: 0, discoveryRate: 0, discoveryMode: "", probeFallback: "", groupDefs: [], notifyWebhook: "", notifyFormat: "", notifyMinSeverity: "", notifyBotDest: "", notifySMTPHost: "", notifySMTPPort: 587, notifySMTPUser: "", notifySMTPFrom: "", notifySMTPTo: [], notifySMTPPassSet: false, briefingPushTime: "", weakCredDict: "" });
   const [sub, setSub] = useState<SubTab>("inventory");
   const [editingDevice, setEditingDevice] = useState<EditDevice | null>(null);
   const [editingDB, setEditingDB] = useState<NetDevDBSourceView | null>(null);
@@ -63,6 +65,7 @@ export function NetDevSection() {
   const [notifySMTPPassword, setNotifySMTPPassword] = useState("");
   const [notifyTesting, setNotifyTesting] = useState(false);
   const [syslogStatus, setSyslogStatus] = useState<{ listening: boolean; port: number; buffered: number } | null>(null);
+  const [trapStatus, setTrapStatus] = useState<{ listening: boolean; port: number; buffered: number } | null>(null);
   const testNotify = async () => {
     setNotifyTesting(true);
     try {
@@ -105,6 +108,7 @@ export function NetDevSection() {
 
   useEffect(() => { void reload(); }, [reload]);
   useEffect(() => { app.NetDevSyslogStatus().then(setSyslogStatus).catch(() => {}); }, [view.syslogPort]);
+  useEffect(() => { app.NetDevTrapStatus().then(setTrapStatus).catch(() => {}); }, []);
 
   const save = useCallback(async (v: NetDevSettingsView) => {
     setBusy(true);
@@ -130,7 +134,7 @@ export function NetDevSection() {
       if (r.status === "unknown-host-key") {
         const ok = await confirm({
           title: "UNTRUSTED HOST KEY",
-          message: `首次连接 ${device}（${r.host}）\n主机密钥指纹：\n  ${r.keyType}  ${r.fingerprint}\n\n确认信任此密钥？（确认后写入本机 known_hosts）`,
+          message: t("ndv.sets.tofuMsg", { device, host: r.host ?? "", keyType: r.keyType ?? "", fp: r.fingerprint ?? "" }),
           danger: true
         });
         if (!ok) { setErr("[SYS] KEY REJECTED"); return; }
@@ -138,7 +142,7 @@ export function NetDevSection() {
         await app.NetDevTrustHostKey(r.fingerprint);
         r = await app.NetDevTestConnection(device);
       }
-      setErr(r.status === "ok" ? "[SYS] TARGET VERIFIED (VTY SESSION OPEN)" : `测试失败（${r.status}）：${r.detail ?? ""}`);
+      setErr(r.status === "ok" ? "[SYS] TARGET VERIFIED (VTY SESSION OPEN)" : t("ndv.sets.testFailed", { status: r.status, detail: r.detail ?? "" }));
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -146,22 +150,40 @@ export function NetDevSection() {
     }
   }, []);
 
+  // C1.5 凭证清除：从密钥库删除已存凭证（NetDevDeleteSecret），随后清空
+  // 实体上的 env 指针——保存后 passwordSet 回到未设态。删除前确认。
+  const clearCreds = async (label: string, entries: { kind: string; env?: string; what: string }[], onDone: () => void) => {
+    const live = entries.filter(e => (e.env ?? "").trim());
+    if (live.length === 0) { setErr(t("ndv.sets.noCreds")); return; }
+    if (!(await confirm({
+      title: "CLEAR CREDENTIALS",
+      message: t("ndv.sets.clearCredsMsg", { label, list: live.map(e => e.what).join("、") }),
+      danger: true, confirmLabel: t("ndv.sets.clearCredsBtn"),
+    }))) return;
+    try {
+      for (const e of live) await app.NetDevDeleteSecret(e.kind, (e.env ?? "").trim());
+      setErr("");
+      showToast(t("ndv.sets.credsCleared", { label }), "info");
+      onDone();
+    } catch (e) { setErr(String(e)); }
+  };
+
   if (!loaded) return <div className="mem-hint">…</div>;
 
   const SUBTABS: { key: SubTab; label: string; count?: number }[] = [
-    { key: "inventory", label: "设备与跳板", count: view.devices.length + view.hops.length },
-    { key: "guardrails", label: "护栏与读表" },
-    { key: "sites", label: "站点与自动化" },
-    { key: "advanced", label: "高级" },
+    { key: "inventory", label: t("ndv.sets.tabInventory"), count: view.devices.length + view.hops.length },
+    { key: "guardrails", label: t("ndv.sets.tabGuardrails") },
+    { key: "sites", label: t("ndv.sets.tabSites") },
+    { key: "advanced", label: t("ndv.sets.tabAdvanced") },
   ];
 
   return (
     <div className="settings-page settings-page--form">
       <div className="settings-page__header">
-        <h2 className="settings-page__title">运维</h2>
+        <h2 className="settings-page__title">{t("ndv.sets.title")}</h2>
         <p className="settings-page__desc">
-          设备清单与凭证存于用户全局配置（项目级 fairpeer.toml 注入无效）；密码只写入加密密钥库，绝不进 TOML。
-          诊断能力结构性只读：写/危险命令一律拒执行并落审计。
+          {t("ndv.sets.desc1")}
+          {t("ndv.sets.desc2")}
         </p>
       </div>
 
@@ -170,13 +192,13 @@ export function NetDevSection() {
       <div className="optional-module__controls optional-module__controls--inline" style={{ marginBottom: 12 }}>
         <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input type="checkbox" checked={view.enabled} onChange={e => patch({ enabled: e.target.checked })} />
-          启用运维（netdev）能力
+          {t("ndv.sets.enable")}
         </label>
         <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          网络名称
-          <input className="mem-input" style={{ width: 180 }} value={view.networkName ?? ""} placeholder="如：总部生产网" onChange={e => patch({ networkName: e.target.value })} />
+          {t("ndv.sets.networkName")}
+          <input className="mem-input" style={{ width: 180 }} value={view.networkName ?? ""} placeholder={t("ndv.sets.phNetwork")} onChange={e => patch({ networkName: e.target.value })} />
         </label>
-        <span className="btn btn--primary btn--small" role="button" onClick={() => void save(view)}>{busy ? "保存中…" : "保存"}</span>
+        <span className="btn btn--primary btn--small" role="button" onClick={() => void save(view)}>{busy ? t("ndv.sets.saving") : t("ndv.sets.save")}</span>
       </div>
 
       <div className="settings-subtabs">
@@ -198,11 +220,11 @@ export function NetDevSection() {
       {sub === "inventory" && (
         <>
           <Section
-            title={`设备（${view.devices.length}）`}
-            desc="设备是运维世界的一切入口：未录入的地址 AI 不可见、不可连。"
+            title={t("ndv.sets.devicesTitle", { n: view.devices.length })}
+            desc={t("ndv.sets.devicesDesc")}
             actions={
               <>
-                <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice(emptyDevice())}>+ 添加设备</span>
+                <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice(emptyDevice())}>{"+ "}{t("ndv.sets.addDevice")}</span>
                 <span
                   className="btn btn--secondary btn--small" role="button"
                   onClick={async () => {
@@ -211,7 +233,7 @@ export function NetDevSection() {
                       setSSHCandidates(c ?? []);
                     } catch (e) { setErr(String(e)); }
                   }}
-                >从 ~/.ssh/config 导入</span>
+                >{t("ndv.sets.importSsh")}</span>
               </>
             }
           >
@@ -230,12 +252,12 @@ export function NetDevSection() {
               </div>
             )}
             {view.devices.length === 0 && (
-              <div className="mem-hint">还没有设备。添加设备或从 ~/.ssh/config 导入，测试连接通过后即可在运维页看到它。</div>
+              <div className="mem-hint">{t("ndv.sets.noDevices")}</div>
             )}
             {view.devices.length > 0 && (
               <table className="mem-hint" style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
-                  <tr style={{ textAlign: "left" }}><th>名称</th><th>厂商/OS</th><th>地址</th><th>路由</th><th>凭证</th><th /></tr>
+                  <tr style={{ textAlign: "left" }}><th>{t("ndv.sets.colName")}</th><th>{t("ndv.sets.colVendorOs")}</th><th>{t("ndv.sets.colAddr")}</th><th>{t("ndv.sets.colRoute")}</th><th>{t("ndv.sets.colCred")}</th><th /></tr>
                 </thead>
                 <tbody>
                   {view.devices.map(d => (
@@ -243,12 +265,12 @@ export function NetDevSection() {
                       <td>{d.name}{d.group ? `（${d.group}）` : ""}</td>
                       <td>{d.vendor}/{d.os}</td>
                       <td>{d.address}{d.port && d.port !== 22 ? `:${d.port}` : ""}</td>
-                      <td>{(d.via ?? []).join("→") || "直连"}</td>
-                      <td>{d.passwordSet ? "✓ 已设" : "✗ 未设"}</td>
+                      <td>{(d.via ?? []).join("→") || t("ndv.sets.direct")}</td>
+                      <td>{d.passwordSet ? t("ndv.sets.credSet") : t("ndv.sets.credUnset")}</td>
                       <td>
-                        <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice({ ...d, password: "" })}>编辑</span>{" "}
-                        <span className="btn btn--secondary btn--small" role="button" title="删除"
-                          onClick={async () => { if (await confirm({ title: "DELETE DEVICE", message: `删除设备 ${d.name}？（不影响已存凭证）`, danger: true })) void save({ ...view, devices: view.devices.filter(x => x.name !== d.name) }); }}>×</span>
+                        <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice({ ...d, password: "" })}>{t("common.edit")}</span>{" "}
+                        <span className="btn btn--secondary btn--small" role="button" title={t("common.delete")}
+                          onClick={async () => { if (await confirm({ title: "DELETE DEVICE", message: t("ndv.sets.delDeviceMsg", { name: d.name }), danger: true })) void save({ ...view, devices: view.devices.filter(x => x.name !== d.name) }); }}>×</span>
                       </td>
                     </tr>
                   ))}
@@ -258,18 +280,18 @@ export function NetDevSection() {
           </Section>
 
           <Section
-            title={`跳板/堡垒机（${view.hops.length}）`}
-            desc="跳板只能人工注册——探测结果永远不会自动晋升为路由。"
-            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingHop(emptyHop())}>+ 添加跳板</span>}
+            title={t("ndv.sets.hopsTitle", { n: view.hops.length })}
+            desc={t("ndv.sets.hopsDesc")}
+            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingHop(emptyHop())}>{"+ "}{t("ndv.sets.addHop")}</span>}
           >
-            {view.hops.length === 0 && <div className="mem-hint">暂无跳板。大多数设备直连即可——只有需要先登录堡垒机再跳转时才配置。</div>}
+            {view.hops.length === 0 && <div className="mem-hint">{t("ndv.sets.noHops")}</div>}
             {view.hops.map(h => (
               <div key={h.name} className="mem-hint" style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
-                <span style={{ minWidth: 160 }}>{h.name} → {h.host}{h.proxyJump ? `（经 ${h.proxyJump}）` : ""}</span>
-                <span>{h.passwordSet ? "✓ 凭证已设" : "✗ 未设"}</span>
-                <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingHop({ ...h, password: "" })}>编辑</span>
-                <span className="btn btn--secondary btn--small" role="button" title="删除"
-                  onClick={async () => { if (await confirm({ title: "DELETE HOP", message: `删除跳板 ${h.name}？`, danger: true })) void save({ ...view, hops: view.hops.filter(x => x.name !== h.name) }); }}>×</span>
+                <span style={{ minWidth: 160 }}>{h.name} → {h.host}{h.proxyJump ? t("ndv.sets.viaHop", { name: h.proxyJump }) : ""}</span>
+                <span>{h.passwordSet ? t("ndv.sets.hopCredSet") : t("ndv.sets.credUnset")}</span>
+                <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingHop({ ...h, password: "" })}>{t("common.edit")}</span>
+                <span className="btn btn--secondary btn--small" role="button" title={t("common.delete")}
+                  onClick={async () => { if (await confirm({ title: "DELETE HOP", message: t("ndv.sets.delHopMsg", { name: h.name }), danger: true })) void save({ ...view, hops: view.hops.filter(x => x.name !== h.name) }); }}>×</span>
               </div>
             ))}
           </Section>
@@ -279,7 +301,7 @@ export function NetDevSection() {
       {/* ── 子页签 2：护栏与读表 ────────────────────────────────────────── */}
       {sub === "guardrails" && (
         <>
-          <Section title="护栏" desc="控制到每一次询问与每一条工具命令。">
+          <Section title={t("ndv.sets.guardTitle")} desc={t("ndv.sets.guardDesc")}>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input
@@ -287,42 +309,42 @@ export function NetDevSection() {
                   checked={!!view.guardConfirmEach}
                   onChange={e => patch({ guardConfirmEach: e.target.checked })}
                 />
-                每条命令确认：netdev_exec / netdev_netconf 执行前弹审批卡（优先级压过全自动模式，"记住允许"也无效）
+                {t("ndv.sets.guardConfirmEach")}
               </label>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                每轮命令预算
+                {t("ndv.sets.guardBudget")}
                 <input
                   className="mem-input" style={{ width: 70 }} type="number" min={0}
                   value={view.guardTurnBudget ?? 0}
                   onChange={e => patch({ guardTurnBudget: Math.max(0, Number(e.target.value) || 0) })}
                 />
-                条（0 = 不限；每次你发送消息预算重置，超出后 agent 收到提醒并停下汇总）
+                {t("ndv.sets.guardBudgetNote")}
               </label>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                设备组作用域
+                {t("ndv.sets.guardGroups")}
                 <input
                   className="mem-input" style={{ width: "50%" }}
                   value={(view.guardAllowedGroups ?? []).join(", ")}
-                  placeholder="留空 = 全部组；例：核心, 汇聚"
+                  placeholder={t("ndv.sets.phGroups")}
                   onChange={e => patch({ guardAllowedGroups: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })}
                 />
               </label>
               <div style={{ opacity: 0.6, fontSize: 11.5 }}>
-                作用域非空时，范围外的设备对 AI 完全不可见（netdev_devices 列表也过滤）——在第一个 token 花出去之前就完成控制。脱敏提醒与拒绝提醒默认常开，无需配置。
+                {t("ndv.sets.guardGroupsNote")}
               </div>
             </div>
           </Section>
 
-          <Section title="探测范围白名单" desc="CIDR 列表（逗号分隔）；范围外探测一律拒绝——永不关闭的护栏。">
+          <Section title={t("ndv.sets.scopesTitle")} desc={t("ndv.sets.scopesDesc")}>
             <input
               className="mem-input" style={{ width: "100%" }}
               value={(view.scopes ?? []).join(", ")}
-              placeholder="例：10.30.0.0/16, 10.31.0.0/16"
+              placeholder={t("ndv.sets.phScopes")}
               onChange={e => patch({ scopes: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })}
             />
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8, fontSize: 12, alignItems: "center" }}>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                发现模式
+                {t("ndv.sets.discoveryMode")}
                 <select className="mem-select" value={view.discoveryMode || "auto"}
                   onChange={e => patch({ discoveryMode: e.target.value })}>
                   <option value="auto">auto</option>
@@ -331,15 +353,15 @@ export function NetDevSection() {
                 </select>
               </label>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                并发上限
-                <input className="mem-input" type="number" style={{ width: 70 }} placeholder="0=默认"
+                {t("ndv.sets.concurrency")}
+                <input className="mem-input" type="number" style={{ width: 70 }} placeholder={t("ndv.sets.phRate")}
                   value={view.discoveryRate ?? 0}
                   onChange={e => patch({ discoveryRate: Math.max(0, Number(e.target.value) || 0) })} />
               </label>
             </div>
           </Section>
 
-          <Section title="读表扩展" desc="用户教会 AI 识别更多只读命令——模型永远不能自我声明。">
+          <Section title={t("ndv.sets.readExtTitle")} desc={t("ndv.sets.readExtDesc")}>
             {READ_VENDORS.map(vendor => {
               const list = view.extraRead?.[vendor] ?? [];
               const draft = readAdd[vendor] ?? "";
@@ -347,13 +369,13 @@ export function NetDevSection() {
                 <div key={vendor} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
                   <span style={{ minWidth: 60, fontWeight: 600 }}>{vendor}</span>
                   {list.map(cmd => (
-                    <span key={cmd} className="btn btn--secondary btn--small" role="button" title="点击移除"
+                    <span key={cmd} className="btn btn--secondary btn--small" role="button" title={t("ndv.sets.clickRemove")}
                       onClick={() => patch({ extraRead: { ...view.extraRead, [vendor]: list.filter(c => c !== cmd) } })}>
                       {cmd} ×
                     </span>
                   ))}
                   <input
-                    className="mem-input" style={{ width: 200 }} placeholder="只读命令，如 display health"
+                    className="mem-input" style={{ width: 200 }} placeholder={t("ndv.sets.phReadCmd")}
                     value={draft}
                     onChange={e => setReadAdd(r => ({ ...r, [vendor]: e.target.value }))}
                     onKeyDown={e => {
@@ -367,12 +389,12 @@ export function NetDevSection() {
                       if (!draft.trim()) return;
                       patch({ extraRead: { ...view.extraRead, [vendor]: [...list, draft.trim()] } });
                       setReadAdd(r => ({ ...r, [vendor]: "" }));
-                    }}>+ 添加</span>
+                    }}>{"+ "}{t("ndv.sets.add")}</span>
                 </div>
               );
             })}
             <div style={{ opacity: 0.6, fontSize: 11.5 }}>
-              对话中被拒绝的未知命令也会在设备卡上出现「允许此命令」一键加入。扩展只让更多命令「可读」，永远不可能放开写操作。
+              {t("ndv.sets.readExtNote")}
             </div>
           </Section>
         </>
@@ -382,118 +404,124 @@ export function NetDevSection() {
       {sub === "sites" && (
         <>
           <Section
-            title={`项目（${(view.projects ?? []).length}）`}
-            desc="站点级作用域（一个机房/园区/客户网络）——运维页标题栏可快速切换。"
-            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingProject({ draft: { name: "", groups: [], note: "" }, index: -1 })}>+ 新建项目</span>}
+            title={t("ndv.sets.projectsTitle", { n: (view.projects ?? []).length })}
+            desc={t("ndv.sets.projectsDesc")}
+            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingProject({ draft: { name: "", groups: [], note: "" }, index: -1 })}>{"+ "}{t("ndv.sets.newProject")}</span>}
           >
-            {(view.projects ?? []).length === 0 && <div className="mem-hint">暂无项目。不建项目时全部设备同属一个范围。</div>}
+            {(view.projects ?? []).length === 0 && <div className="mem-hint">{t("ndv.sets.noProjects")}</div>}
             {(view.projects ?? []).map((p, i) => (
               <div key={p.name + i} className="mem-hint" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
                 <span style={{ fontWeight: 600, minWidth: 80 }}>{p.name}</span>
                 <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
                   {(p.groups ?? []).length > 0 ? p.groups.map(g => (
                     <span key={g} className="btn btn--secondary btn--small" role="button" style={{ borderColor: "var(--accent, #7ab8ff)", color: "var(--accent, #7ab8ff)", opacity: 1 }}>{g}</span>
-                  )) : <span style={{ opacity: 0.55 }}>（未选分组）</span>}
+                  )) : <span style={{ opacity: 0.55 }}>{t("ndv.sets.noGroups")}</span>}
                 </span>
                 {p.note && <span style={{ opacity: 0.6 }}>{p.note}</span>}
-                <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingProject({ draft: { ...p, groups: [...(p.groups ?? [])] }, index: i })}>编辑</span>
-                <span className="btn btn--secondary btn--small" role="button" title="删除"
+                <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingProject({ draft: { ...p, groups: [...(p.groups ?? [])] }, index: i })}>{t("common.edit")}</span>
+                <span className="btn btn--secondary btn--small" role="button" title={t("common.delete")}
                   onClick={() => patch({ projects: (view.projects ?? []).filter((_, j) => j !== i) })}>×</span>
               </div>
             ))}
           </Section>
 
           <Section
-            title={`诊断命令组合（${(view.presets ?? []).length}）`}
-            desc="设备卡「诊断组合」一键逐条执行，走密封只读路径。"
-            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingPreset({ draft: { name: "", commands: [], vendors: [] }, index: -1 })}>+ 新建组合</span>}
+            title={t("ndv.sets.presetsTitle", { n: (view.presets ?? []).length })}
+            desc={t("ndv.sets.presetsDesc")}
+            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingPreset({ draft: { name: "", commands: [], vendors: [] }, index: -1 })}>{"+ "}{t("ndv.sets.newPreset")}</span>}
           >
-            {(view.presets ?? []).length === 0 && <div className="mem-hint">暂无组合。建一个「接口体检」（display interface brief 等）试试。</div>}
+            {(view.presets ?? []).length === 0 && <div className="mem-hint">{t("ndv.sets.noPresets")}</div>}
             {(view.presets ?? []).map((p, i) => (
               <div key={p.name + i} className="mem-hint" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
                 <span style={{ fontWeight: 600, minWidth: 80 }}>{p.name}</span>
                 <span style={{ flex: 1, minWidth: 200, fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace", fontSize: 11.5 }}>
                   {(p.commands ?? []).join("; ")}
                 </span>
-                {(p.vendors ?? []).length > 0 && <span style={{ opacity: 0.55 }}>仅 {p.vendors.join("/")}</span>}
-                <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingPreset({ draft: { ...p, commands: [...(p.commands ?? [])], vendors: [...(p.vendors ?? [])] }, index: i })}>编辑</span>
-                <span className="btn btn--secondary btn--small" role="button" title="删除"
+                {(p.vendors ?? []).length > 0 && <span style={{ opacity: 0.55 }}>{t("ndv.sets.vendorsOnly", { list: p.vendors.join("/") })}</span>}
+                <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingPreset({ draft: { ...p, commands: [...(p.commands ?? [])], vendors: [...(p.vendors ?? [])] }, index: i })}>{t("common.edit")}</span>
+                <span className="btn btn--secondary btn--small" role="button" title={t("common.delete")}
                   onClick={() => patch({ presets: (view.presets ?? []).filter((_, j) => j !== i) })}>×</span>
               </div>
             ))}
           </Section>
 
-          <Section title="定时任务" desc="到点自动巡检/全量配置备份（密封读+脱敏落版本）；结果分别进「发现」和设备卡的备份历史。">
+          <Section title={t("ndv.sets.schedTitle")} desc={t("ndv.sets.schedDesc")}>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                巡检周期
-                <input className="mem-input" style={{ width: 90 }} placeholder="如 1h / 30m，留空=关"
+                {t("ndv.sets.inspectionCycle")}
+                <input className="mem-input" style={{ width: 90 }} placeholder={t("ndv.sets.phInspection")}
                   value={view.inspectionInterval ?? ""}
                   onChange={e => patch({ inspectionInterval: e.target.value })} />
               </label>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                备份周期
-                <input className="mem-input" style={{ width: 90 }} placeholder="如 24h，留空=关"
+                <input type="checkbox" checked={view.scheduledBaseline ?? false}
+                  onChange={e => patch({ scheduledBaseline: e.target.checked })} />
+                {t("ndv.sets.schedBaseline")}
+              </label>
+              <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {t("ndv.sets.backupCycle")}
+                <input className="mem-input" style={{ width: 90 }} placeholder={t("ndv.sets.phBackup")}
                   value={view.backupInterval ?? ""}
                   onChange={e => patch({ backupInterval: e.target.value })} />
               </label>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                SNMP 健康轮询
-                <input className="mem-input" type="number" style={{ width: 90 }} placeholder="秒，0=关"
+                {t("ndv.sets.snmpPolling")}
+                <input className="mem-input" type="number" style={{ width: 90 }} placeholder={t("ndv.sets.phSeconds")}
                   value={view.pollIntervalSeconds ?? 0}
                   onChange={e => patch({ pollIntervalSeconds: Math.max(0, Number(e.target.value) || 0) })} />
               </label>
-              <div className="mem-hint">轮询所有带 [snmp] 块的设备（可达性/uptime/接口状态）→ 运维页「健康」页卡。设备编辑表单里配团体字。</div>
+              <div className="mem-hint">{t("ndv.sets.snmpPollNote")}</div>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                syslog 接收端口
-                <input className="mem-input" type="number" style={{ width: 90 }} placeholder="0=关，如 5140"
+                {t("ndv.sets.syslogPort")}
+                <input className="mem-input" type="number" style={{ width: 90 }} placeholder={t("ndv.sets.phSyslogPort")}
                   value={view.syslogPort ?? 0}
                   onChange={e => patch({ syslogPort: Math.max(0, Number(e.target.value) || 0) })} />
               </label>
-              <div className="mem-hint">设备 syslog 指向本机该端口（UDP）；按设备聚合进「日志」页卡的 syslog 源，链路翻动/认证失败等模式自动升级为发现。改端口需重启应用。{syslogStatus ? ` 当前：${syslogStatus.listening ? `监听中 :${syslogStatus.port} · 缓冲 ${syslogStatus.buffered} 行` : "未监听"}` : ""}</div>
+              <div className="mem-hint">{t("ndv.sets.syslogNote")}{syslogStatus ? " " + (syslogStatus.listening ? t("ndv.sets.listening", { port: syslogStatus.port, n: syslogStatus.buffered }) : t("ndv.sets.notListening")) : ""}</div>
+              <div className="mem-hint">{t("ndv.sets.trapStatus", { state: trapStatus ? (trapStatus.listening ? t("ndv.sets.trapListening", { port: trapStatus.port, n: trapStatus.buffered }) : t("ndv.sets.trapNotListening")) : t("ndv.sets.trapUnknown") })}</div>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                默认模式
+                {t("ndv.sets.defaultMode")}
                 <select className="mem-select" value={view.defaultMode || "diagnose"}
                   onChange={e => patch({ defaultMode: e.target.value })}>
-                  <option value="diagnose">diagnose（诊断）</option>
-                  <option value="assess">assess（评估）</option>
+                  <option value="diagnose">{t("ndv.sets.modeDiagnose")}</option>
+                  <option value="assess">{t("ndv.sets.modeAssess")}</option>
                 </select>
               </label>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                每设备最大会话数
-                <input className="mem-input" type="number" style={{ width: 70 }} placeholder="0=默认"
+                {t("ndv.sets.maxSessions")}
+                <input className="mem-input" type="number" style={{ width: 70 }} placeholder={t("ndv.sets.phRate")}
                   value={view.maxSessionsPerDevice ?? 0}
                   onChange={e => patch({ maxSessionsPerDevice: Math.max(0, Number(e.target.value) || 0) })} />
               </label>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                每日早报推送
-                <input className="mem-input" style={{ width: 80 }} placeholder="08:00，空=关"
+                {t("ndv.sets.briefingPush")}
+                <input className="mem-input" style={{ width: 80 }} placeholder={t("ndv.sets.phBriefing")}
                   value={view.briefingPushTime ?? ""}
                   onChange={e => patch({ briefingPushTime: e.target.value })} />
               </label>
-              <div className="mem-hint">到点合成 24h 早报（发现/审计/提案/备份概览）并经上方「通知出口」推送——IM/邮件/webhook 配了哪个走哪个。</div>
+              <div className="mem-hint">{t("ndv.sets.briefingNote")}</div>
             </div>
           </Section>
 
           <Section
-            title="分组策略"
-            desc="分组的提案策略与维护窗口：窗口外的写提案需二次确认或拒绝；read-only 组的写提案直接拒绝。"
+            title={t("ndv.sets.groupPolicyTitle")}
+            desc={t("ndv.sets.groupPolicyDesc")}
           >
             {(() => {
               const defs = view.groupDefs && view.groupDefs.length > 0
                 ? view.groupDefs
                 : [...new Set((view.devices ?? []).map(d => d.group).filter(Boolean))].map(n => ({ name: n, policy: "", changeWindow: "" }));
-              if (defs.length === 0) return <div className="mem-hint">还没有分组——设备编辑里给设备填分组后，这里可配策略与维护窗口。</div>;
+              if (defs.length === 0) return <div className="mem-hint">{t("ndv.sets.noGroupsDefs")}</div>;
               return defs.map((g, i) => (
                 <div key={g.name} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, marginBottom: 6 }}>
                   <span style={{ minWidth: 90, fontWeight: 600 }}>{g.name}</span>
                   <select className="mem-select" style={{ width: 170 }} value={g.policy || "read-only"}
                     onChange={e => patch({ groupDefs: defs.map((x, j) => j === i ? { ...x, policy: e.target.value } : x) })}>
-                    <option value="read-only">read-only（拒绝写提案）</option>
-                    <option value="proposal">proposal（人工签核）</option>
-                    <option value="proposal+confirm2">proposal+confirm2（二次确认）</option>
+                    <option value="read-only">{t("ndv.sets.policyRo")}</option>
+                    <option value="proposal">{t("ndv.sets.policyProposal")}</option>
+                    <option value="proposal+confirm2">{t("ndv.sets.policyConfirm2")}</option>
                   </select>
-                  <input className="mem-input" style={{ flex: 1 }} placeholder="维护窗口，如 tue,thu 22:00-24:00，空=不限"
+                  <input className="mem-input" style={{ flex: 1 }} placeholder={t("ndv.sets.phWindow")}
                     value={g.changeWindow ?? ""}
                     onChange={e => patch({ groupDefs: defs.map((x, j) => j === i ? { ...x, changeWindow: e.target.value } : x) })} />
                 </div>
@@ -502,18 +530,18 @@ export function NetDevSection() {
           </Section>
 
           <Section
-            title="通知出口"
-            desc="告警 Finding 推送到人：webhook（飞书/钉钉/企微自定义机器人或通用 JSON）、SMTP 邮件、内嵌 IM 网关直推——任选组合。同一告警源 5 分钟内自动合并，防轰炸。"
-            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => void testNotify()}>{notifyTesting ? "发送中…" : "发送测试消息"}</span>}
+            title={t("ndv.sets.notifyTitle")}
+            desc={t("ndv.sets.notifyDesc")}
+            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => void testNotify()}>{notifyTesting ? t("ndv.sets.sending") : t("ndv.sets.sendTest")}</span>}
           >
             <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                严重度门槛
+                {t("ndv.sets.severityGate")}
                 <select className="mem-select" value={view.notifyMinSeverity || "warning"}
                   onChange={e => patch({ notifyMinSeverity: e.target.value })}>
-                  <option value="info">info 及以上</option>
-                  <option value="warning">warning 及以上（默认）</option>
-                  <option value="critical">仅 critical</option>
+                  <option value="info">{t("ndv.sets.sevInfo")}</option>
+                  <option value="warning">{t("ndv.sets.sevWarning")}</option>
+                  <option value="critical">{t("ndv.sets.sevCritical")}</option>
                 </select>
               </label>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -522,36 +550,36 @@ export function NetDevSection() {
                   value={view.notifyWebhook ?? ""} onChange={e => patch({ notifyWebhook: e.target.value })} />
               </label>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                格式
+                {t("ndv.sets.format")}
                 <select className="mem-select" value={view.notifyFormat || "generic"}
                   onChange={e => patch({ notifyFormat: e.target.value })}>
-                  <option value="generic">generic（JSON）</option>
+                  <option value="generic">{t("ndv.sets.fmtGeneric")}</option>
                   <option value="feishu">feishu</option>
                   <option value="dingtalk">dingtalk</option>
                   <option value="wecom">wecom</option>
                 </select>
               </label>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                IM 直推
-                <input className="mem-input" style={{ flex: 1 }} placeholder="feishu:oc_xxx / weixin:wxid_xxx（需先在 设置→Bot 启用网关）"
+                {t("ndv.sets.imPush")}
+                <input className="mem-input" style={{ flex: 1 }} placeholder={t("ndv.sets.phBotDest")}
                   value={view.notifyBotDest ?? ""} onChange={e => patch({ notifyBotDest: e.target.value })} />
               </label>
-              <div className="set-label" style={{ marginBottom: -2 }}>SMTP 邮件（可选）</div>
+              <div className="set-label" style={{ marginBottom: -2 }}>{t("ndv.sets.smtpSection")}</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <input className="mem-input" style={{ flex: 2, minWidth: 140 }} placeholder="SMTP 主机"
+                <input className="mem-input" style={{ flex: 2, minWidth: 140 }} placeholder={t("ndv.sets.phSmtpHost")}
                   value={view.notifySMTPHost ?? ""} onChange={e => patch({ notifySMTPHost: e.target.value })} />
                 <input className="mem-input" type="number" style={{ width: 70 }} placeholder="587"
                   value={view.notifySMTPPort || 587} onChange={e => patch({ notifySMTPPort: Number(e.target.value) || 587 })} />
-                <input className="mem-input" style={{ flex: 1, minWidth: 100 }} placeholder="用户"
+                <input className="mem-input" style={{ flex: 1, minWidth: 100 }} placeholder={t("ndv.sets.phUser")}
                   value={view.notifySMTPUser ?? ""} onChange={e => patch({ notifySMTPUser: e.target.value })} />
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <input className="mem-input" type={view.notifySMTPPassSet ? "password" : "text"} style={{ flex: 1, minWidth: 120 }}
-                  placeholder={view.notifySMTPPassSet ? "密码（留空=保持不变）" : "密码"}
+                  placeholder={view.notifySMTPPassSet ? t("ndv.sets.phPwdKeep") : t("ndv.sets.phPwd")}
                   value={notifySMTPPassword} onChange={e => setNotifySMTPPassword(e.target.value)} />
-                <input className="mem-input" style={{ flex: 1, minWidth: 120 }} placeholder="发件人 from@"
+                <input className="mem-input" style={{ flex: 1, minWidth: 120 }} placeholder={t("ndv.sets.phFrom")}
                   value={view.notifySMTPFrom ?? ""} onChange={e => patch({ notifySMTPFrom: e.target.value })} />
-                <input className="mem-input" style={{ flex: 2, minWidth: 160 }} placeholder="收件人，逗号分隔"
+                <input className="mem-input" style={{ flex: 2, minWidth: 160 }} placeholder={t("ndv.sets.phTo")}
                   value={(view.notifySMTPTo ?? []).join(", ")}
                   onChange={e => patch({ notifySMTPTo: e.target.value.split(/[,，]/).map(x => x.trim()).filter(Boolean) })} />
               </div>
@@ -559,12 +587,12 @@ export function NetDevSection() {
           </Section>
 
           <Section
-            title="告警规则"
-            desc="随 SNMP 健康轮询评估（需先在上面开启轮询间隔）：命中自动生成「发现」（带告警中徽标），条件清除后自动标记已恢复；也可在发现卡手动标记已处理。"
-            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingRule({ name: "", metric: "reachable", op: "==", value: 0, severity: "warning", enabled: true })}>添加规则</span>}
+            title={t("ndv.sets.rulesTitle")}
+            desc={t("ndv.sets.rulesDesc")}
+            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingRule({ name: "", metric: "reachable", op: "==", value: 0, severity: "warning", enabled: true })}>{t("ndv.sets.addRule")}</span>}
           >
             {(view.alertRules ?? []).length === 0 && (
-              <div className="mem-hint">还没有规则。常用：「设备不可达」（reachable == 0, critical）、「接口掉线 ≥1」（if_down_count &gt;= 1, warning）、「设备重启」（uptime_reset == 1, warning）。</div>
+              <div className="mem-hint">{t("ndv.sets.noRules")}</div>
             )}
             {(view.alertRules ?? []).map((r, i) => (
               <div key={r.name} className="ndv__device">
@@ -572,29 +600,29 @@ export function NetDevSection() {
                 <span className="ndv__device-name">{r.name}</span>
                 <span className="ndv__device-addr">{r.metric} {r.op} {r.value} · {r.severity}</span>
                 <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: "auto" }}
-                  onClick={() => setEditingRule({ ...r })}>编辑</span>
+                  onClick={() => setEditingRule({ ...r })}>{t("common.edit")}</span>
                 <span className="btn btn--secondary btn--small" role="button"
-                  onClick={() => patch({ alertRules: (view.alertRules ?? []).filter((_, j) => j !== i) })}>删除</span>
+                  onClick={() => patch({ alertRules: (view.alertRules ?? []).filter((_, j) => j !== i) })}>{t("common.delete")}</span>
               </div>
             ))}
           </Section>
 
           <Section
-            title="数据库源（只读诊断）"
-            desc="连接数/慢查询/主从延迟类诊断。硬边界有两条：账号本身必须只读授权；白名单是精确语句（如 SHOW PROCESSLIST），不含的语句在连接前即被拒绝。"
-            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDB({ name: "", type: "mysql", host: "", port: 3306, username: "", passwordEnv: "", passwordSet: false, database: "", allowlist: ["SHOW PROCESSLIST"], password: "" })}>添加源</span>}
+            title={t("ndv.sets.dbTitle")}
+            desc={t("ndv.sets.dbDesc")}
+            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDB({ name: "", type: "mysql", host: "", port: 3306, username: "", passwordEnv: "", passwordSet: false, database: "", allowlist: ["SHOW PROCESSLIST"], password: "" })}>{t("ndv.sets.addSource")}</span>}
           >
             {(view.dbSources ?? []).length === 0 && (
-              <div className="mem-hint">还没有数据库源。密码进加密存储，白名单语句逐条列出（一行一条）。</div>
+              <div className="mem-hint">{t("ndv.sets.noDbSources")}</div>
             )}
             {(view.dbSources ?? []).map((s, i) => (
               <div key={s.name} className="ndv__device">
                 <span className="ndv__device-name">{s.name}</span>
-                <span className="ndv__device-addr">{s.type} · {s.host}{s.passwordSet ? " · 密码已存" : ""}</span>
+                <span className="ndv__device-addr">{s.type} · {s.host}{s.passwordSet ? " · " + t("ndv.sets.pwdStored") : ""}</span>
                 <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: "auto" }}
-                  onClick={() => setEditingDB({ ...s, password: "" })}>编辑</span>
+                  onClick={() => setEditingDB({ ...s, password: "" })}>{t("common.edit")}</span>
                 <span className="btn btn--secondary btn--small" role="button"
-                  onClick={() => patch({ dbSources: (view.dbSources ?? []).filter((_, j) => j !== i) })}>删除</span>
+                  onClick={() => patch({ dbSources: (view.dbSources ?? []).filter((_, j) => j !== i) })}>{t("common.delete")}</span>
               </div>
             ))}
           </Section>
@@ -605,52 +633,61 @@ export function NetDevSection() {
       {sub === "advanced" && (
         <>
           <Section
-            title="扫描导入"
-            desc="把已有的 nmap 扫描结果变成发现（Finding）——清单外主机标「待确认」，导入本身不拨号。"
-            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => { setScanXml(""); setScanOpen(true); }}>导入 nmap XML</span>}
+            title={t("ndv.sets.scanTitle")}
+            desc={t("ndv.sets.scanDesc")}
+            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => { setScanXml(""); setScanOpen(true); }}>{t("ndv.sets.importNmap")}</span>}
           >
-            <div className="mem-hint">nmap -oX 输出的主机与开放端口会汇总为一条发现；不在设备清单内的地址标记「待确认」，AI 不会主动连接。</div>
+            <div className="mem-hint">{t("ndv.sets.scanNote")}</div>
           </Section>
 
-          <Section title="审计" desc="每条设备命令（含拒绝）都落审计；这里只控制保留期。">
+          <Section title={t("ndv.sets.dictTitle")} desc={t("ndv.sets.dictDesc")}>
             <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              审计保留
+              {t("ndv.sets.dictPath")}
+              <input className="mem-input" style={{ width: 340 }} placeholder={t("ndv.sets.phDict")}
+                value={view.weakCredDict ?? ""} onChange={e => patch({ weakCredDict: e.target.value })} />
+            </label>
+            <div className="mem-hint">{t("ndv.sets.dictNote")}</div>
+          </Section>
+
+          <Section title={t("ndv.sets.auditTitle")} desc={t("ndv.sets.auditDesc")}>
+            <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {t("ndv.sets.auditRetention")}
               <input
-                className="mem-input" style={{ width: 90 }} placeholder="如 180d，留空=默认"
+                className="mem-input" style={{ width: 90 }} placeholder={t("ndv.sets.phRetention")}
                 value={view.auditRetention ?? ""}
                 onChange={e => patch({ auditRetention: e.target.value })}
               />
             </label>
-            <div className="mem-hint">审计只记命令与字节数，输出原文不入档（脱敏在进入上下文之前完成）。</div>
+            <div className="mem-hint">{t("ndv.sets.auditNote")}</div>
           </Section>
 
-          <Section title="日常操作" desc="巡检、审计、发现（含证据链）、提案审批都在运维页的左下角与右栏——本页只放配置。">
-            <div className="mem-hint">本页改动（设备、跳板、项目、护栏、读表、组合、探测范围、周期）记得点顶部「保存」。</div>
+          <Section title={t("ndv.sets.opsTitle")} desc={t("ndv.sets.opsDesc")}>
+            <div className="mem-hint">{t("ndv.sets.opsNote")}</div>
           </Section>
         </>
       )}
 
       {/* 设备编辑表单 */}
       {editingDevice && (
-        <L3Panel crumbs={["运维 / 设备与跳板", view.devices.some(d => d.name === editingDevice.name) ? `编辑 ${editingDevice.name}` : "添加设备"]} onBack={() => setEditingDevice(null)} confirmDiscard>
+        <L3Panel crumbs={[t("ndv.sets.crumbInv"), view.devices.some(d => d.name === editingDevice.name) ? t("ndv.sets.editX", { name: editingDevice.name }) : t("ndv.sets.addDevice")]} onBack={() => setEditingDevice(null)} confirmDiscard>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <Field label="名称 *"><input className="mem-input" value={editingDevice.name} onChange={e => setEditingDevice({ ...editingDevice, name: e.target.value })} /></Field>
-            <Field label="厂商">
+            <Field label={t("ndv.sets.fName")}><input className="mem-input" value={editingDevice.name} onChange={e => setEditingDevice({ ...editingDevice, name: e.target.value })} /></Field>
+            <Field label={t("ndv.sets.fVendor")}>
               <select className="mem-select" value={editingDevice.vendor} onChange={e => setEditingDevice({ ...editingDevice, vendor: e.target.value, os: (OSES[e.target.value] ?? [""])[0] })}>
                 {VENDORS.map(v => <option key={v} value={v}>{v}</option>)}
               </select>
             </Field>
-            <Field label="OS">
+            <Field label={t("ndv.sets.fOs")}>
               <select className="mem-select" value={editingDevice.os} onChange={e => setEditingDevice({ ...editingDevice, os: e.target.value })}>
                 {(OSES[editingDevice.vendor] ?? []).map(o => <option key={o} value={o}>{o}</option>)}
               </select>
             </Field>
-            <Field label="型号"><input className="mem-input" value={editingDevice.model} onChange={e => setEditingDevice({ ...editingDevice, model: e.target.value })} /></Field>
-            <Field label="地址 *"><input className="mem-input" value={editingDevice.address} onChange={e => setEditingDevice({ ...editingDevice, address: e.target.value })} /></Field>
-            <Field label="端口"><input className="mem-input" type="number" value={editingDevice.port} onChange={e => setEditingDevice({ ...editingDevice, port: Number(e.target.value) || 22 })} /></Field>
-            <Field label="分组">
+            <Field label={t("ndv.sets.fModel")}><input className="mem-input" value={editingDevice.model} onChange={e => setEditingDevice({ ...editingDevice, model: e.target.value })} /></Field>
+            <Field label={t("ndv.sets.fAddress")}><input className="mem-input" value={editingDevice.address} onChange={e => setEditingDevice({ ...editingDevice, address: e.target.value })} /></Field>
+            <Field label={t("ndv.sets.fPort")}><input className="mem-input" type="number" value={editingDevice.port} onChange={e => setEditingDevice({ ...editingDevice, port: Number(e.target.value) || 22 })} /></Field>
+            <Field label={t("ndv.sets.fGroup")}>
               <input
-                className="mem-input" list="ndv-groups" placeholder="如 core / edge（可新起名）"
+                className="mem-input" list="ndv-groups" placeholder={t("ndv.sets.phGroup")}
                 value={editingDevice.group ?? ""}
                 onChange={e => setEditingDevice({ ...editingDevice, group: e.target.value })}
               />
@@ -658,85 +695,86 @@ export function NetDevSection() {
                 {(view.groups ?? []).map(g => <option key={g} value={g} />)}
               </datalist>
             </Field>
-            <Field label="登录用户"><input className="mem-input" value={editingDevice.username} onChange={e => setEditingDevice({ ...editingDevice, username: e.target.value })} /></Field>
-            <Field label={editingDevice.passwordSet ? "密码（留空=保持不变）" : "密码"}>
+            <Field label={t("ndv.sets.fUser")}><input className="mem-input" value={editingDevice.username} onChange={e => setEditingDevice({ ...editingDevice, username: e.target.value })} /></Field>
+            <Field label={editingDevice.passwordSet ? t("ndv.sets.phPwdKeep") : t("ndv.sets.phPwd")}>
               <input className="mem-input" type="password" value={editingDevice.password} onChange={e => setEditingDevice({ ...editingDevice, password: e.target.value })} />
             </Field>
-            <Field label="路由 via（跳板名，逗号分隔）">
+            <Field label={t("ndv.sets.fVia")}>
               <input className="mem-input" value={(editingDevice.via ?? []).join(",")}
                 onChange={e => setEditingDevice({ ...editingDevice, via: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })} />
             </Field>
-            <Field label="编码">
+            <Field label={t("ndv.sets.fEncoding")}>
               <select className="mem-select" value={editingDevice.encoding || "auto"} onChange={e => setEditingDevice({ ...editingDevice, encoding: e.target.value })}>
                 {["auto", "utf-8", "gbk"].map(x => <option key={x} value={x}>{x}</option>)}
               </select>
             </Field>
-            <Field label="日志路径白名单（逗号分隔）">
+            <Field label={t("ndv.sets.fLogPaths")}>
               <input
-                className="mem-input" placeholder="/var/log 已默认放行；如 /opt/app/logs、/usr/local/tomcat/logs"
+                className="mem-input" placeholder={t("ndv.sets.phLogPaths")}
                 value={(editingDevice.logPaths ?? []).join(",")}
                 onChange={e => setEditingDevice({ ...editingDevice, logPaths: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })}
               />
             </Field>
-            <Field label="配置路径白名单（§7.3，逗号分隔）">
+            <Field label={t("ndv.sets.fConfigPaths")}>
               <input
-                className="mem-input" placeholder="配置文件管理：快照/diff/drift 与 restore-verify 限这些根；如 /etc/nginx"
+                className="mem-input" placeholder={t("ndv.sets.phConfigPaths")}
                 value={(editingDevice.configPaths ?? []).join(",")}
                 onChange={e => setEditingDevice({ ...editingDevice, configPaths: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })}
               />
             </Field>
-            <Field label="带外入口 oob_url（§6.3）">
+            <Field label={t("ndv.sets.fOob")}>
               <input
-                className="mem-input" placeholder="ESXi/堡垒/BMC Web UI 深链（https://…）——设备卡「带外」一键直达，点击入审计"
+                className="mem-input" placeholder={t("ndv.sets.phOob")}
                 value={editingDevice.oobUrl ?? ""}
                 onChange={e => setEditingDevice({ ...editingDevice, oobUrl: e.target.value })}
               />
             </Field>
-            <Field label="SNMP（健康轮询）">
+            <Field label={t("ndv.sets.fSnmp")}>
               <select className="mem-select" value={editingDevice.snmpVersion ?? ""}
                 onChange={e => setEditingDevice({ ...editingDevice, snmpVersion: e.target.value })}>
-                <option value="">（不启用）</option>
+                <option value="">{t("ndv.sets.optOff")}</option>
                 <option value="v2c">v2c</option>
               </select>
             </Field>
-            <Field label={editingDevice.snmpCommunitySet ? "SNMP 团体字（留空=保持不变）" : "SNMP 团体字"}>
+            <Field label={editingDevice.snmpCommunitySet ? t("ndv.sets.fSnmpCommKeep") : t("ndv.sets.fSnmpComm")}>
               <input className="mem-input" type="password" value={editingDevice.snmpCommunity ?? ""}
                 onChange={e => setEditingDevice({ ...editingDevice, snmpCommunity: e.target.value })} />
             </Field>
-            <Field label="协议优先级（逗号分隔）">
+            <Field label={t("ndv.sets.fProtocols")}>
               <input className="mem-input" placeholder="ssh, netconf"
                 value={(editingDevice.protocols ?? []).join(", ")}
                 onChange={e => setEditingDevice({ ...editingDevice, protocols: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })} />
             </Field>
-            <Field label="数据面 kind">
+            <Field label={t("ndv.sets.fKind")}>
               <select className="mem-select" value={editingDevice.kind ?? ""} onChange={e => setEditingDevice({ ...editingDevice, kind: e.target.value })}>
-                <option value="">自动（按厂商——网络设备/主机 CLI）</option>
-                <option value="docker">docker（Docker Engine API 只读）</option>
-                <option value="k8s">k8s（Kubernetes API 只读）</option>
-                <option value="firewall">firewall（FortiOS REST 只读）</option>
+                <option value="">{t("ndv.sets.kAuto")}</option>
+                <option value="docker">{t("ndv.sets.kDocker")}</option>
+                <option value="k8s">{t("ndv.sets.kK8s")}</option>
+                <option value="firewall">{t("ndv.sets.kFirewall")}</option>
               </select>
+              <span style={{ opacity: 0.6, fontSize: 11 }}>{t("ndv.sets.kindNote")}</span>
             </Field>
             {(editingDevice.kind ?? "") === "docker" && (
               <Field label="Docker socket">
-                <input className="mem-input" placeholder="留空 = 本地默认（Windows npipe / Linux unix sock）；或 tcp://10.0.0.9:2375"
+                <input className="mem-input" placeholder={t("ndv.sets.phDockerSock")}
                   value={editingDevice.dockerSocket ?? ""}
                   onChange={e => setEditingDevice({ ...editingDevice, dockerSocket: e.target.value })} />
               </Field>
             )}
             {(editingDevice.kind ?? "") === "k8s" && (
               <>
-                <Field label={editingDevice.k8sKubeconfigSet ? "kubeconfig（密钥库已存；粘贴 = 替换）" : "kubeconfig（粘贴全文，存密钥库）"}>
+                <Field label={editingDevice.k8sKubeconfigSet ? t("ndv.sets.fKcKeep") : t("ndv.sets.fKc")}>
                   <textarea className="mem-input" rows={4} style={{ width: "100%", fontFamily: "var(--font-mono, monospace)", fontSize: 11 }}
                     placeholder="apiVersion: v1&#10;kind: Config&#10;…"
                     value={editingDevice.k8sKubeconfig ?? ""}
                     onChange={e => setEditingDevice({ ...editingDevice, k8sKubeconfig: e.target.value })} />
                 </Field>
-                <Field label="固定 context（可空）">
-                  <input className="mem-input" placeholder="留空 = kubeconfig 的 current-context"
+                <Field label={t("ndv.sets.fContext")}>
+                  <input className="mem-input" placeholder={t("ndv.sets.phContext")}
                     value={editingDevice.k8sContext ?? ""}
                     onChange={e => setEditingDevice({ ...editingDevice, k8sContext: e.target.value })} />
                 </Field>
-                <Field label="命名空间白名单（逗号分隔，空 = 全部）">
+                <Field label={t("ndv.sets.fNsWhitelist")}>
                   <input className="mem-input" placeholder="prod, kube-system"
                     value={(editingDevice.k8sNamespaces ?? []).join(", ")}
                     onChange={e => setEditingDevice({ ...editingDevice, k8sNamespaces: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })} />
@@ -744,7 +782,7 @@ export function NetDevSection() {
               </>
             )}
             {(editingDevice.kind ?? "") === "firewall" && (
-              <Field label={editingDevice.fwApiTokenSet ? "REST API token（密钥库已存；粘贴 = 替换）" : "REST API token（粘贴，存密钥库）"}>
+              <Field label={editingDevice.fwApiTokenSet ? t("ndv.sets.fTokenKeep") : t("ndv.sets.fToken")}>
                 <input className="mem-input" type="password" placeholder="FortiOS REST API token"
                   value={editingDevice.fwApiToken ?? ""}
                   onChange={e => setEditingDevice({ ...editingDevice, fwApiToken: e.target.value })} />
@@ -755,29 +793,38 @@ export function NetDevSection() {
             <span
               className="btn btn--secondary btn--small" role="button"
               onClick={() => { if (editingDevice.name.trim()) void testConnection(editingDevice.name); }}
-              title="连接 → 主机密钥确认（首次） → CLI 会话验证"
-            >{testing ? "测试中…" : "测试连接"}</span>
-            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice(null)}>取消</span>
+              title={t("ndv.sets.testTip")}
+            >{testing ? t("ndv.sets.testing") : t("ndv.sets.testConn")}</span>
+            {(editingDevice.passwordSet || editingDevice.snmpCommunitySet || editingDevice.fwApiTokenSet || editingDevice.k8sKubeconfigSet) && (
+              <span className="btn btn--secondary btn--small" role="button" title={t("ndv.sets.clearCredsTip")}
+                onClick={() => void clearCreds(t("ndv.sets.devLabel", { name: editingDevice.name }), [
+                  { kind: "password", env: editingDevice.passwordEnv, what: t("ndv.sets.whatPwd") },
+                  { kind: "password", env: editingDevice.snmpCommunityEnv, what: t("ndv.sets.whatSnmp") },
+                  { kind: "api-token", env: editingDevice.fwApiTokenEnv, what: t("ndv.sets.whatToken") },
+                  { kind: "kubeconfig", env: editingDevice.k8sKubeconfigEnv, what: "kubeconfig" },
+                ], () => setEditingDevice(d => d && ({ ...d, passwordEnv: "", snmpCommunityEnv: "", fwApiTokenEnv: "", k8sKubeconfigEnv: "", passwordSet: false, snmpCommunitySet: false, fwApiTokenSet: false, k8sKubeconfigSet: false })))}>{t("ndv.sets.clearCredsBtn2")}</span>
+            )}
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice(null)}>{t("common.cancel")}</span>
             <span
               className="btn btn--primary btn--small" role="button"
               onClick={() => {
-                if (!editingDevice.name.trim() || !editingDevice.address.trim()) { setErr("名称和地址必填"); return; }
+                if (!editingDevice.name.trim() || !editingDevice.address.trim()) { setErr(t("ndv.sets.needNameAddr")); return; }
                 const exists = view.devices.some(d => d.name === editingDevice.name);
                 const devices = exists ? view.devices.map(d => d.name === editingDevice.name ? editingDevice : d) : [...view.devices, editingDevice];
                 setEditingDevice(null);
                 void save({ ...view, devices, notifySMTPPassword });
               }}
-            >保存设备</span>
+            >{t("ndv.sets.saveDevice")}</span>
           </div>
         </L3Panel>
       )}
 
       {/* 数据库源编辑表单 */}
       {editingDB && (
-        <L3Panel crumbs={["运维", view.dbSources?.some(s => s.name === editingDB.name) ? "编辑数据库源" : "添加数据库源"]} onBack={() => setEditingDB(null)} confirmDiscard>
+        <L3Panel crumbs={[t("ndv.sets.crumbOps"), view.dbSources?.some(s => s.name === editingDB.name) ? t("ndv.sets.editDb") : t("ndv.sets.addDb")]} onBack={() => setEditingDB(null)} confirmDiscard>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <Field label="名称 *"><input className="mem-input" value={editingDB.name} onChange={e => setEditingDB({ ...editingDB, name: e.target.value })} /></Field>
-            <Field label="类型">
+            <Field label={t("ndv.sets.fName")}><input className="mem-input" value={editingDB.name} onChange={e => setEditingDB({ ...editingDB, name: e.target.value })} /></Field>
+            <Field label={t("ndv.sets.fType")}>
               <select className="mem-select" value={editingDB.type} onChange={e => {
                 const t = e.target.value;
                 const DEF_PORTS: Record<string, number> = { mysql: 3306, postgres: 5432, redis: 6379, mongodb: 27017, mssql: 1433, clickhouse: 8123, elasticsearch: 9200 };
@@ -786,135 +833,147 @@ export function NetDevSection() {
                 {["mysql", "postgres", "redis", "mongodb", "mssql", "clickhouse", "elasticsearch"].map(x => <option key={x} value={x}>{x}</option>)}
               </select>
             </Field>
-            <Field label="地址 *"><input className="mem-input" value={editingDB.host} onChange={e => setEditingDB({ ...editingDB, host: e.target.value })} /></Field>
-            <Field label="端口"><input className="mem-input" type="number" value={editingDB.port} onChange={e => setEditingDB({ ...editingDB, port: Number(e.target.value) || 3306 })} /></Field>
-            <Field label="只读账号 *"><input className="mem-input" value={editingDB.username} onChange={e => setEditingDB({ ...editingDB, username: e.target.value })} /></Field>
-            <Field label={editingDB.passwordSet ? "密码（留空=保持不变）" : "密码"}>
+            <Field label={t("ndv.sets.fAddress")}><input className="mem-input" value={editingDB.host} onChange={e => setEditingDB({ ...editingDB, host: e.target.value })} /></Field>
+            <Field label={t("ndv.sets.fPort")}><input className="mem-input" type="number" value={editingDB.port} onChange={e => setEditingDB({ ...editingDB, port: Number(e.target.value) || 3306 })} /></Field>
+            <Field label={t("ndv.sets.fRoAccount")}><input className="mem-input" value={editingDB.username} onChange={e => setEditingDB({ ...editingDB, username: e.target.value })} /></Field>
+            <Field label={editingDB.passwordSet ? t("ndv.sets.phPwdKeep") : t("ndv.sets.phPwd")}>
               <input className="mem-input" type="password" value={editingDB.password} onChange={e => setEditingDB({ ...editingDB, password: e.target.value })} />
             </Field>
-            <Field label="默认库（可空）"><input className="mem-input" value={editingDB.database} onChange={e => setEditingDB({ ...editingDB, database: e.target.value })} /></Field>
+            <Field label={t("ndv.sets.fDatabase")}><input className="mem-input" value={editingDB.database} onChange={e => setEditingDB({ ...editingDB, database: e.target.value })} /></Field>
           </div>
           <div style={{ marginTop: 8 }}>
-            <div className="set-label" style={{ marginBottom: 4 }}>语句白名单（一行一条，精确语句——这是硬边界）</div>
+            <div className="set-label" style={{ marginBottom: 4 }}>{t("ndv.sets.allowlistLabel")}</div>
             <textarea
               className="mem-input" rows={5} style={{ width: "100%", fontFamily: "var(--font-mono, monospace)", fontSize: 11.5 }}
-              placeholder={editingDB.type === "redis" ? "redis 无需白名单（内置只读诊断命令集）" : "SHOW PROCESSLIST\nSHOW ENGINE INNODB STATUS\nSELECT * FROM information_schema.processlist"}
+              placeholder={editingDB.type === "redis" ? t("ndv.sets.phRedisAllow") : "SHOW PROCESSLIST\nSHOW ENGINE INNODB STATUS\nSELECT * FROM information_schema.processlist"}
               value={(editingDB.allowlist ?? []).join("\n")}
               onChange={e => setEditingDB({ ...editingDB, allowlist: e.target.value.split("\n").map(s => s.trim()).filter(Boolean) })}
             />
           </div>
           <div style={{ marginTop: 8 }}>
-            <div className="set-label" style={{ marginBottom: 4 }}>经跳板（可选——填堡垒名；生产库在堡垒后面的正解）</div>
+            <div className="set-label" style={{ marginBottom: 4 }}>{t("ndv.sets.viaLabel")}</div>
             <input
               className="mem-input" style={{ width: "100%" }}
-              placeholder="留空 = 直连；如 l1"
+              placeholder={t("ndv.sets.phVia")}
               value={(editingDB.via ?? []).join(", ")}
               onChange={e => setEditingDB({ ...editingDB, via: e.target.value.split(/[,，]/).map(x => x.trim()).filter(Boolean) })}
             />
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDB(null)}>取消</span>
+            {editingDB.passwordSet && (
+              <span className="btn btn--secondary btn--small" role="button" title={t("ndv.sets.clearDbTip")}
+                onClick={() => void clearCreds(t("ndv.sets.dbLabel", { name: editingDB.name }), [
+                  { kind: "password", env: editingDB.passwordEnv, what: t("ndv.sets.whatDbPwd") },
+                ], () => setEditingDB(s => s && ({ ...s, passwordEnv: "", passwordSet: false })))}>{t("ndv.sets.clearCredsBtn2")}</span>
+            )}
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDB(null)}>{t("common.cancel")}</span>
             <span
               className="btn btn--primary btn--small" role="button"
               onClick={() => {
-                if (!editingDB.name.trim() || !editingDB.host.trim()) { setErr("名称和地址必填"); return; }
-                if (editingDB.type !== "redis" && (editingDB.allowlist ?? []).length === 0) { setErr("mysql/postgres 源至少一条白名单语句"); return; }
+                if (!editingDB.name.trim() || !editingDB.host.trim()) { setErr(t("ndv.sets.needNameAddr")); return; }
+                if (editingDB.type !== "redis" && (editingDB.allowlist ?? []).length === 0) { setErr(t("ndv.sets.needAllowlist")); return; }
                 const exists = (view.dbSources ?? []).some(s => s.name === editingDB.name);
                 const dbSources = exists ? (view.dbSources ?? []).map(s => s.name === editingDB.name ? editingDB : s) : [...(view.dbSources ?? []), editingDB];
                 setEditingDB(null);
                 void save({ ...view, dbSources, notifySMTPPassword });
               }}
-            >保存源</span>
+            >{t("ndv.sets.saveSource")}</span>
           </div>
         </L3Panel>
       )}
 
       {/* 告警规则编辑表单 */}
       {editingRule && (
-        <L3Panel crumbs={["运维", (view.alertRules ?? []).some(r => r.name === editingRule.name) ? "编辑告警规则" : "添加告警规则"]} onBack={() => setEditingRule(null)} confirmDiscard>
+        <L3Panel crumbs={[t("ndv.sets.crumbOps"), (view.alertRules ?? []).some(r => r.name === editingRule.name) ? t("ndv.sets.editRule") : t("ndv.sets.addRule")]} onBack={() => setEditingRule(null)} confirmDiscard>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <Field label="名称 *"><input className="mem-input" value={editingRule.name} onChange={e => setEditingRule({ ...editingRule, name: e.target.value })} /></Field>
-            <Field label="指标">
+            <Field label={t("ndv.sets.fName")}><input className="mem-input" value={editingRule.name} onChange={e => setEditingRule({ ...editingRule, name: e.target.value })} /></Field>
+            <Field label={t("ndv.sets.fMetric")}>
               <select className="mem-select" value={editingRule.metric} onChange={e => setEditingRule({ ...editingRule, metric: e.target.value, value: e.target.value === "reachable" || e.target.value === "uptime_reset" ? 0 : 1 })}>
-                <option value="reachable">设备可达（1=在线 0=不可达）</option>
-                <option value="if_down_count">掉线接口数</option>
-                <option value="uptime_reset">重启检测（uptime 回绕）</option>
-                <option value="flap_count">链路抖动（1 小时内可达性翻转，动态）</option>
-                <option value="if_down_above_p90">掉线口数偏离基线（&gt;24h P90，动态）</option>
+                <option value="reachable">{t("ndv.sets.mReachable")}</option>
+                <option value="if_down_count">{t("ndv.sets.mIfDown")}</option>
+                <option value="uptime_reset">{t("ndv.sets.mReboot")}</option>
+                <option value="flap_count">{t("ndv.sets.mFlap")}</option>
+                <option value="if_down_above_p90">{t("ndv.sets.mDrift")}</option>
               </select>
             </Field>
-            <Field label="比较">
+            <Field label={t("ndv.sets.fOp")}>
               <select className="mem-select" value={editingRule.op || ">="} onChange={e => setEditingRule({ ...editingRule, op: e.target.value })}>
                 {["==", ">=", "<="].map(x => <option key={x} value={x}>{x}</option>)}
               </select>
             </Field>
-            <Field label="阈值"><input className="mem-input" type="number" value={editingRule.value} onChange={e => setEditingRule({ ...editingRule, value: Number(e.target.value) || 0 })} /></Field>
-            <Field label="严重度">
+            <Field label={t("ndv.sets.fValue")}><input className="mem-input" type="number" value={editingRule.value} onChange={e => setEditingRule({ ...editingRule, value: Number(e.target.value) || 0 })} /></Field>
+            <Field label={t("ndv.sets.fSeverity")}>
               <select className="mem-select" value={editingRule.severity || "warning"} onChange={e => setEditingRule({ ...editingRule, severity: e.target.value })}>
                 {["info", "warning", "critical"].map(x => <option key={x} value={x}>{x}</option>)}
               </select>
             </Field>
-            <Field label="启用">
+            <Field label={t("ndv.sets.fEnabled")}>
               <select className="mem-select" value={editingRule.enabled ? "1" : "0"} onChange={e => setEditingRule({ ...editingRule, enabled: e.target.value === "1" })}>
-                <option value="1">启用</option>
-                <option value="0">停用</option>
+                <option value="1">{t("ndv.sets.optOn")}</option>
+                <option value="0">{t("ndv.sets.optOff2")}</option>
               </select>
             </Field>
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingRule(null)}>取消</span>
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingRule(null)}>{t("common.cancel")}</span>
             <span
               className="btn btn--primary btn--small" role="button"
               onClick={() => {
-                if (!editingRule.name.trim()) { setErr("规则名必填"); return; }
+                if (!editingRule.name.trim()) { setErr(t("ndv.sets.needRuleName")); return; }
                 const exists = (view.alertRules ?? []).some(r => r.name === editingRule.name);
                 const alertRules = exists ? (view.alertRules ?? []).map(r => r.name === editingRule.name ? editingRule : r) : [...(view.alertRules ?? []), editingRule];
                 setEditingRule(null);
                 void save({ ...view, alertRules, notifySMTPPassword });
               }}
-            >保存规则</span>
+            >{t("ndv.sets.saveRule")}</span>
           </div>
         </L3Panel>
       )}
 
       {/* 跳板编辑表单 */}
       {editingHop && (
-        <L3Panel crumbs={["运维", view.hops.some(h => h.name === editingHop.name) ? "编辑跳板" : "添加跳板"]} onBack={() => setEditingHop(null)} confirmDiscard>
+        <L3Panel crumbs={[t("ndv.sets.crumbOps"), view.hops.some(h => h.name === editingHop.name) ? t("ndv.sets.editHop") : t("ndv.sets.addHop")]} onBack={() => setEditingHop(null)} confirmDiscard>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <Field label="名称 *"><input className="mem-input" value={editingHop.name} onChange={e => setEditingHop({ ...editingHop, name: e.target.value })} /></Field>
-            <Field label="地址 *"><input className="mem-input" value={editingHop.host} onChange={e => setEditingHop({ ...editingHop, host: e.target.value })} /></Field>
-            <Field label="端口"><input className="mem-input" type="number" value={editingHop.port} onChange={e => setEditingHop({ ...editingHop, port: Number(e.target.value) || 22 })} /></Field>
-            <Field label="用户"><input className="mem-input" value={editingHop.user} onChange={e => setEditingHop({ ...editingHop, user: e.target.value })} /></Field>
-            <Field label={editingHop.passwordSet ? "密码（留空=保持不变）" : "密码"}>
+            <Field label={t("ndv.sets.fName")}><input className="mem-input" value={editingHop.name} onChange={e => setEditingHop({ ...editingHop, name: e.target.value })} /></Field>
+            <Field label={t("ndv.sets.fAddress")}><input className="mem-input" value={editingHop.host} onChange={e => setEditingHop({ ...editingHop, host: e.target.value })} /></Field>
+            <Field label={t("ndv.sets.fPort")}><input className="mem-input" type="number" value={editingHop.port} onChange={e => setEditingHop({ ...editingHop, port: Number(e.target.value) || 22 })} /></Field>
+            <Field label={t("ndv.sets.phUser")}><input className="mem-input" value={editingHop.user} onChange={e => setEditingHop({ ...editingHop, user: e.target.value })} /></Field>
+            <Field label={editingHop.passwordSet ? t("ndv.sets.phPwdKeep") : t("ndv.sets.phPwd")}>
               <input className="mem-input" type="password" value={editingHop.password} onChange={e => setEditingHop({ ...editingHop, password: e.target.value })} />
             </Field>
-            <Field label="上级跳板（可选，名称）"><input className="mem-input" value={editingHop.proxyJump} onChange={e => setEditingHop({ ...editingHop, proxyJump: e.target.value })} /></Field>
+            <Field label={t("ndv.sets.fProxyJump")}><input className="mem-input" value={editingHop.proxyJump} onChange={e => setEditingHop({ ...editingHop, proxyJump: e.target.value })} /></Field>
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingHop(null)}>取消</span>
+            {editingHop.passwordSet && (
+              <span className="btn btn--secondary btn--small" role="button" title={t("ndv.sets.clearHopTip")}
+                onClick={() => void clearCreds(t("ndv.sets.hopLabel", { name: editingHop.name }), [
+                  { kind: "password", env: editingHop.passwordEnv, what: t("ndv.sets.whatPwd") },
+                ], () => setEditingHop(h => h && ({ ...h, passwordEnv: "", passwordSet: false })))}>{t("ndv.sets.clearCredsBtn2")}</span>
+            )}
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingHop(null)}>{t("common.cancel")}</span>
             <span
               className="btn btn--primary btn--small" role="button"
               onClick={() => {
-                if (!editingHop.name.trim() || !editingHop.host.trim()) { setErr("名称和地址必填"); return; }
+                if (!editingHop.name.trim() || !editingHop.host.trim()) { setErr(t("ndv.sets.needNameAddr")); return; }
                 const exists = view.hops.some(h => h.name === editingHop.name);
                 const hops = exists ? view.hops.map(h => h.name === editingHop.name ? editingHop : h) : [...view.hops, editingHop];
                 setEditingHop(null);
                 void save({ ...view, hops });
               }}
-            >保存跳板</span>
+            >{t("ndv.sets.saveHop")}</span>
           </div>
         </L3Panel>
       )}
 
       {/* 项目编辑表单 */}
       {editingProject && (
-        <L3Panel crumbs={["运维", editingProject.index >= 0 ? "编辑项目" : "新建项目"]} onBack={() => setEditingProject(null)} confirmDiscard>
+        <L3Panel crumbs={[t("ndv.sets.crumbOps"), editingProject.index >= 0 ? t("ndv.sets.editProject") : t("ndv.sets.newProject")]} onBack={() => setEditingProject(null)} confirmDiscard>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <Field label="名称 *">
-              <input className="mem-input" placeholder="如：一号机房 / 总部生产网" value={editingProject.draft.name}
+            <Field label={t("ndv.sets.fName")}>
+              <input className="mem-input" placeholder={t("ndv.sets.phProject")} value={editingProject.draft.name}
                 onChange={e => setEditingProject({ ...editingProject, draft: { ...editingProject.draft, name: e.target.value } })} />
             </Field>
-            <Field label="包含分组（点选）">
+            <Field label={t("ndv.sets.fGroups")}>
               <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
                 {(view.groups ?? []).map(g => {
                   const on = editingProject.draft.groups.includes(g);
@@ -929,40 +988,40 @@ export function NetDevSection() {
                     >{g}</span>
                   );
                 })}
-                {(view.groups ?? []).length === 0 && <span style={{ opacity: 0.55, fontSize: 11.5 }}>还没有分组——先在设备编辑里给设备填分组</span>}
+                {(view.groups ?? []).length === 0 && <span style={{ opacity: 0.55, fontSize: 11.5 }}>{t("ndv.sets.noGroupsYet")}</span>}
               </span>
             </Field>
-            <Field label="备注（悬停可见）">
+            <Field label={t("ndv.sets.fNote")}>
               <input className="mem-input" value={editingProject.draft.note}
                 onChange={e => setEditingProject({ ...editingProject, draft: { ...editingProject.draft, note: e.target.value } })} />
             </Field>
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingProject(null)}>取消</span>
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingProject(null)}>{t("common.cancel")}</span>
             <span
               className="btn btn--primary btn--small" role="button"
               onClick={() => {
-                if (!editingProject.draft.name.trim()) { setErr("项目名称必填"); return; }
+                if (!editingProject.draft.name.trim()) { setErr(t("ndv.sets.needProjectName")); return; }
                 const projects = [...(view.projects ?? [])];
                 if (editingProject.index >= 0) projects[editingProject.index] = editingProject.draft;
                 else projects.push(editingProject.draft);
                 setEditingProject(null);
                 void save({ ...view, projects });
               }}
-            >保存项目</span>
+            >{t("ndv.sets.saveProject")}</span>
           </div>
         </L3Panel>
       )}
 
       {/* 诊断组合编辑表单 */}
       {editingPreset && (
-        <L3Panel crumbs={["运维", editingPreset.index >= 0 ? "编辑组合" : "新建组合"]} onBack={() => setEditingPreset(null)} confirmDiscard>
+        <L3Panel crumbs={[t("ndv.sets.crumbOps"), editingPreset.index >= 0 ? t("ndv.sets.editPreset") : t("ndv.sets.newPreset")]} onBack={() => setEditingPreset(null)} confirmDiscard>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <Field label="名称 *">
-              <input className="mem-input" placeholder="如：接口体检" value={editingPreset.draft.name}
+            <Field label={t("ndv.sets.fName")}>
+              <input className="mem-input" placeholder={t("ndv.sets.phPreset")} value={editingPreset.draft.name}
                 onChange={e => setEditingPreset({ ...editingPreset, draft: { ...editingPreset.draft, name: e.target.value } })} />
             </Field>
-            <Field label="命令（分号或换行分隔，全部走只读密封路径）">
+            <Field label={t("ndv.sets.fCommands")}>
               <textarea
                 className="mem-input" rows={5} style={{ width: "100%", resize: "vertical", fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace", fontSize: 12 }}
                 placeholder={"display interface brief\ndisplay interface description"}
@@ -970,7 +1029,7 @@ export function NetDevSection() {
                 onChange={e => setEditingPreset({ ...editingPreset, draft: { ...editingPreset.draft, commands: e.target.value.split(/[;\n]/).map(c => c.trim()).filter(Boolean) } })}
               />
             </Field>
-            <Field label="适用厂商（不选 = 全部）">
+            <Field label={t("ndv.sets.fVendors")}>
               <span style={{ display: "inline-flex", gap: 4 }}>
                 {READ_VENDORS.map(v => {
                   const on = editingPreset.draft.vendors.includes(v);
@@ -989,27 +1048,27 @@ export function NetDevSection() {
             </Field>
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingPreset(null)}>取消</span>
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingPreset(null)}>{t("common.cancel")}</span>
             <span
               className="btn btn--primary btn--small" role="button"
               onClick={() => {
-                if (!editingPreset.draft.name.trim() || editingPreset.draft.commands.length === 0) { setErr("名称与至少一条命令必填"); return; }
+                if (!editingPreset.draft.name.trim() || editingPreset.draft.commands.length === 0) { setErr(t("ndv.sets.needPreset")); return; }
                 const presets = [...(view.presets ?? [])];
                 if (editingPreset.index >= 0) presets[editingPreset.index] = editingPreset.draft;
                 else presets.push(editingPreset.draft);
                 setEditingPreset(null);
                 void save({ ...view, presets });
               }}
-            >保存组合</span>
+            >{t("ndv.sets.savePreset")}</span>
           </div>
         </L3Panel>
       )}
 
       {/* 扫描导入弹框 */}
       {scanOpen && (
-        <Modal title="导入 nmap XML" onClose={() => setScanOpen(false)}>
+        <Modal title={t("ndv.sets.importNmap")} onClose={() => setScanOpen(false)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div className="mem-hint">粘贴 nmap -oX 输出全文。主机与开放端口会汇总为一条发现；清单外地址标「待确认」，导入不拨号。</div>
+            <div className="mem-hint">{t("ndv.sets.scanModalNote")}</div>
             <textarea
               className="mem-input" rows={12} style={{ width: "100%", resize: "vertical", fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace", fontSize: 11.5 }}
               placeholder='<?xml version="1.0"?>&#10;<nmaprun>…</nmaprun>'
@@ -1018,7 +1077,7 @@ export function NetDevSection() {
             />
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <span className="btn btn--secondary btn--small" role="button" onClick={() => setScanOpen(false)}>取消</span>
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => setScanOpen(false)}>{t("common.cancel")}</span>
             <span
               className="btn btn--primary btn--small" role="button"
               onClick={async () => {
@@ -1026,12 +1085,12 @@ export function NetDevSection() {
                 setScanBusy(true);
                 try {
                   const f = await app.NetDevImportNmap(scanXml);
-                  showToast(f ? f.title : "导入完成", "info");
+                  showToast(f ? f.title : t("ndv.sets.importDone"), "info");
                   setScanOpen(false);
                 } catch (e) { setErr(String(e)); }
                 finally { setScanBusy(false); }
               }}
-            >{scanBusy ? "导入中…" : "导入"}</span>
+            >{scanBusy ? t("ndv.sec.importing") : t("ndv.sets.importBtn")}</span>
           </div>
         </Modal>
       )}
@@ -1070,9 +1129,10 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 // 留给阻塞确认类。confirmDiscard 的表单在返回/Esc 前确认丢弃未保存修改。
 function L3Panel({ crumbs, onBack, confirmDiscard, children }: { crumbs: string[]; onBack: () => void; confirmDiscard?: boolean; children: React.ReactNode }) {
   const confirm = useConfirm();
+  const t = useT();
   const back = useCallback(async () => {
     if (confirmDiscard) {
-      const ok = await confirm({ title: "放弃未保存的修改？", message: "返回将丢弃表单里未保存的修改。", danger: true, confirmLabel: "放弃并返回" });
+      const ok = await confirm({ title: t("ndv.sets.discardTitle"), message: t("ndv.sets.discardMsg"), danger: true, confirmLabel: t("ndv.sets.discardBtn") });
       if (!ok) return;
     }
     onBack();
@@ -1085,7 +1145,7 @@ function L3Panel({ crumbs, onBack, confirmDiscard, children }: { crumbs: string[
   return (
     <div className="ndv-l3" role="dialog" aria-label={crumbs.join(" / ")}>
       <div className="ndv-l3__head">
-        <button className="btn btn--secondary btn--small" onClick={() => void back()}>← 返回</button>
+        <button className="btn btn--secondary btn--small" onClick={() => void back()}>← {t("ndv.sets.back")}</button>
         <span className="ndv-l3__crumbs">{crumbs.join(" / ")}</span>
       </div>
       <div className="ndv-l3__body">{children}</div>

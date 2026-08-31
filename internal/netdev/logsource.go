@@ -85,7 +85,7 @@ func composeLogCommand(d config.NetDevDevice, source string, fetchN int, since s
 	case "file":
 		rest = strings.TrimSpace(rest)
 		if !logPathAllowed(rest, LogAllowedRoots(d)) {
-			return "", fmt.Errorf("path %q is outside the device's log whitelist (/var/log or the device's log_paths) — add it to log_paths in the 运维 settings", rest)
+			return "", fmt.Errorf("path %q is outside the device's log whitelist (/var/log or the device's log_paths) — add it to log_paths in 运维设置", rest)
 		}
 		return fmt.Sprintf("tail -n %d %s", fetchN, path.Clean(rest)), nil
 	case "journal":
@@ -129,7 +129,7 @@ func (m *Manager) LogRead(ctx context.Context, deviceName, source string, tailN 
 	device, ok := m.cfg.NetDevDeviceByName(deviceName)
 	if !ok {
 		return ExecResult{Device: deviceName, Command: "log " + source, Refused: true,
-			Refusal: fmt.Sprintf("device %q is not in the user-global netdev inventory (add it in the 运维 settings; the agent cannot add devices itself)", deviceName)}
+			Refusal: fmt.Sprintf("device %q is not in the user-global netdev inventory (add it in 运维设置; the agent cannot add devices itself)", deviceName)}
 	}
 	if tailN <= 0 {
 		tailN = logTailDefault

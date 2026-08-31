@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity } from "lucide-react";
 import { app, onNetdevLive } from "../../lib/bridge";
+import { useI18n } from "../../lib/i18n";
 import type { NetDevLiveEvent, NetDevLiveSnapshot } from "../../lib/types";
 import {
   applyLiveEvent, isDeviceLive, liveStateFromSnapshot,
@@ -21,7 +22,10 @@ import {
 // unit-tested); this component only renders. Every chunk the backend sends is
 // already ANSI-stripped and REDACTED — secrets never reach this stream.
 
-const CLASS_LABEL: Record<string, string> = { read: "读", write: "写", dangerous: "危险", unknown: "未知", guardrail: "护栏", assess: "评估" };
+const CLASS_LABEL_KEYS: Record<string, string> = {
+  read: "ndv.cls.read", write: "ndv.cls.write", dangerous: "ndv.cls.dangerous",
+  unknown: "ndv.cls.unknown", guardrail: "ndv.cls.guardrail", assess: "ndv.cls.assess",
+};
 const STATUS_ICON: Record<string, string> = { ok: "✓", "device-error": "⚠", failure: "✕", refused: "⛔", running: "⏳" };
 
 function classColor(cls: string): string {
@@ -36,20 +40,24 @@ function fmtClock(ms: number): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-function stateDot(state: string): { color: string; label: string } {
+// stateDot takes the translator so labels follow the UI locale.
+function stateDot(t: (k: never) => string, state: string): { color: string; label: string } {
   switch (state) {
-    case "connected": return { color: "var(--ok)", label: "已连接" };
-    case "connecting": return { color: "var(--warn)", label: "连接中" };
-    case "reconnecting": return { color: "var(--warn)", label: "重连中" };
-    case "idle-closed": return { color: "var(--fg-faint)", label: "空闲回收" };
-    case "stopped": return { color: "var(--danger)", label: "已断开" };
-    default: return { color: "var(--fg-faint)", label: "未连接" };
+    case "connected": return { color: "var(--ok)", label: t("ndv.live.stConnected" as never) };
+    case "connecting": return { color: "var(--warn)", label: t("ndv.live.stConnecting" as never) };
+    case "reconnecting": return { color: "var(--warn)", label: t("ndv.live.stReconnecting" as never) };
+    case "idle-closed": return { color: "var(--fg-faint)", label: t("ndv.live.stIdle" as never) };
+    case "stopped": return { color: "var(--danger)", label: t("ndv.live.stStopped" as never) };
+    default: return { color: "var(--fg-faint)", label: t("ndv.live.stNever" as never) };
   }
 }
 
 export function LiveOpsPanel() {
+  const { t } = useI18n();
   const [state, setState] = useState<LiveOpsState>(() => ({ devices: new Map(), spent: 0, budget: 0, guardrails: [] }));
   const [ready, setReady] = useState(false);
+  // C3.8：已收起的护栏行（key = at-index）——仅 UI 归档，审计不受影响。
+  const [dismissed, setDismissed] = useState<string[]>([]);
   // Mutable fold target. applyLiveEvent mutates device records in place (ring
   // buffers keep folding O(1)); folding must happen OUTSIDE the setState
   // updater — React StrictMode double-invokes updaters in dev, which would
@@ -96,34 +104,38 @@ export function LiveOpsPanel() {
     <div className="ndv__card ndv__live">
       <div className="ndv__live-budget">
         <span className="ndv__live-budget-label">
-          <Activity size={12} /> 本轮预算
+          <Activity size={12} /> {t("ndv.live.budget")}
         </span>
         <span className="ndv__live-budget-meter">
           {state.budget > 0
             ? Array.from({ length: Math.min(state.budget, 30) }, (_, i) => (
                 <span key={i} className={`ndv__live-seg${i < Math.min(state.spent, 30) ? " ndv__live-seg--on" : ""}`} />
               ))
-            : <span className="ndv__live-budget-num">不限</span>}
+            : <span className="ndv__live-budget-num">{t("ndv.live.unlimited")}</span>}
         </span>
         <span className="ndv__live-budget-num">{state.budget > 0 ? `${Math.min(state.spent, state.budget)}/${state.budget}` : String(state.spent)}</span>
         <span className="ndv__live-budget-sep">·</span>
-        <span>活动 {active.length} 台</span>
+        <span>{t("ndv.live.activeDevices", { n: active.length })}</span>
         <span className="ndv__live-budget-sep">·</span>
-        <span>拦截/写 <span style={{ color: writeCount > 0 ? "var(--danger)" : "inherit" }}>{writeCount}</span></span>
+        <span>{t("ndv.live.intercepts")} <span style={{ color: writeCount > 0 ? "var(--danger)" : "inherit" }}>{writeCount}</span></span>
+        <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: "auto", fontSize: 10.5, padding: "1px 8px" }}
+          title={t("ndv.live.refreshTip")} onClick={() => void app.NetDevLiveSnapshot()
+            .then(snap => { foldRef.current = liveStateFromSnapshot(snap); setState({ ...foldRef.current, devices: new Map(foldRef.current.devices) }); })
+            .catch(() => {})}>{t("ndv.refresh")}</span>
       </div>
 
       {active.length === 0 && state.guardrails.length === 0 && (
         <div className="ndv__live-empty">
           <div className="ndv__hint ndv__hint--flush" style={{ maxWidth: 260 }}>
             {ready
-              ? "AI 在设备上执行命令时，这里实时显示每条命令与输出——供你随时检查。设备状态灯也会跟随连接/重连变化。"
-              : "正在连接实况通道…"}
+              ? t("ndv.live.empty")
+              : t("ndv.live.connecting")}
           </div>
         </div>
       )}
 
       {active.map((d) => {
-        const dot = stateDot(d.state);
+        const dot = stateDot(t as unknown as (k: never) => string, d.state);
         return (
           <div key={d.device} className="ndv__live-card">
             <div className="ndv__live-card-head">
@@ -135,7 +147,7 @@ export function LiveOpsPanel() {
                 <span
                   className="ndv__live-vty"
                   style={d.vtyUse > d.vtyCap ? { color: "var(--danger)", fontWeight: 700 } : undefined}
-                  title="会话占用 / 设备上限（CLI + NETCONF 共享 VTY）"
+                  title={t("ndv.live.vtyTip")}
                 >
                   {d.vtyUse}/{d.vtyCap} VTY
                 </span>
@@ -146,7 +158,7 @@ export function LiveOpsPanel() {
                 <span className="ndv__live-spinner" />
                 <span className="ndv__live-cmd">{d.current.command}</span>
                 <span className="ndv__live-badge" style={{ color: classColor(d.current.class), borderColor: classColor(d.current.class) }}>
-                  {CLASS_LABEL[d.current.class] ?? d.current.class}
+                  {CLASS_LABEL_KEYS[d.current.class] ? t(CLASS_LABEL_KEYS[d.current.class] as never) : d.current.class}
                 </span>
               </div>
             )}
@@ -170,21 +182,29 @@ export function LiveOpsPanel() {
 
       {idle.length > 0 && (
         <div className="ndv__live-idle" title={idle.map((d) => d.device).join("、")}>
-          {idle.length} 台设备空闲（{idle.slice(0, 5).map((d) => d.device).join("、")}{idle.length > 5 ? "…" : ""}）
+          {t("ndv.live.idle", { n: idle.length, list: idle.slice(0, 5).map((d) => d.device).join("、"), more: idle.length > 5 ? "…" : "" })}
         </div>
       )}
 
       {state.guardrails.length > 0 && (
         <div className="ndv__live-guardrails">
-          {state.guardrails.map((g, i) => (
+          {state.guardrails.filter((g, i) => !dismissed.includes(`${g.at}-${i}`)).map((g, i) => (
             <div key={`${g.at}-${i}`} className="ndv__live-guardrail">
               <span className="ndv__live-guardrail-time">{fmtClock(g.at)}</span>
               <span className="ndv__live-guardrail-main">
-                拦截：<b>{g.device}</b> <code>{g.command}</code>
+                {t("ndv.live.guardrailPrefix")}<b>{g.device}</b> <code>{g.command}</code>
               </span>
               <span className="ndv__live-guardrail-reason">{g.reason}</span>
+              <span role="button" style={{ cursor: "pointer", opacity: 0.45, marginLeft: 4 }} title={t("ndv.live.dismissTip")}
+                onClick={() => setDismissed(d => [...d, `${g.at}-${i}`])}>×</span>
             </div>
           ))}
+          {dismissed.length > 0 && (
+            <div className="ndv__hint ndv__hint--flush" style={{ fontSize: 10.5 }}>
+              {t("ndv.live.dismissed", { n: dismissed.length })}
+              <span role="button" style={{ cursor: "pointer", textDecoration: "underline", marginLeft: 4 }} onClick={() => setDismissed([])}>{t("ndv.live.expandAll")}</span>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -200,6 +220,7 @@ function applyLiveBatch(state: LiveOpsState, events: NetDevLiveEvent[]) {
 // the user scrolls up (hover pauses auto-scroll). The box flexes to fill the
 // device card's leftover height (netdev.css .ndv__live-card chain).
 function TailView({ lines, device }: { lines: string[]; device: string }) {
+  const { t } = useI18n();
   const [pinned, setPinned] = useState(true);
   const boxRef = useRef<HTMLDivElement>(null);
   const prevCount = useRef(0);
@@ -215,7 +236,7 @@ function TailView({ lines, device }: { lines: string[]; device: string }) {
 
   return (
     <div className="ndv__live-tail">
-      <div className="ndv__live-tail-head">输出尾随 · {device}</div>
+      <div className="ndv__live-tail-head">{t("ndv.live.tail")} · {device}</div>
       <div
         ref={boxRef}
         className="ndv__live-tail-box"

@@ -65,7 +65,7 @@ type CVEMatch struct {
 func (m *Manager) MatchCVEs() ([]CVEMatch, error) {
 	raw, err := os.ReadFile(cveFile())
 	if err != nil {
-		return nil, fmt.Errorf("no CVE feed imported — paste one via the 运维 settings or NetDevImportCVEs")
+		return nil, fmt.Errorf("no CVE feed imported — paste one via 运维设置 or NetDevImportCVEs")
 	}
 	var f cveFeed
 	if err := json.Unmarshal(raw, &f); err != nil {

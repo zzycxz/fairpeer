@@ -969,11 +969,13 @@
 .app--windows .app-chrome--native-tabs .app-chrome__tab-strip,
 .app--linux .app-chrome--native-tabs .app-chrome__tab-strip {
   display: flex;
-  --wails-draggable: no-drag;
+  /* 顶栏拖拽手柄（DASHBOARD 轮修）：strip 现在承载合并后的 topicbar——
+     Windows/Linux 下此前被一刀切 no-drag（含 * 后代），整个标题栏拖不动。
+     恢复 drag；交互子元素经 .app-chrome button/input 与各 chip 自身的
+     no-drag 退出。tabbar 若回归（自带拖拽排序语义）另行处理。 */
+  --wails-draggable: drag;
 }
 
-.app--windows .app-chrome--native-tabs .app-chrome__tab-strip *,
-.app--linux .app-chrome--native-tabs .app-chrome__tab-strip *,
 .app--windows .app-chrome--native-tabs .tabbar,
 .app--linux .app-chrome--native-tabs .tabbar,
 .app--windows .app-chrome--native-tabs .tabbar *,

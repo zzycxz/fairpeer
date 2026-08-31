@@ -1,6 +1,7 @@
 package netdev
 
 import (
+	"path/filepath"
 	"context"
 	"fmt"
 	"net"
@@ -29,6 +30,11 @@ func TestDiscoverTCPFindsOpenPort(t *testing.T) {
 	fmt.Sscanf(portStr, "%d", &port)
 
 	m := discoverTestManager(t, "127.0.0.0/8")
+	// Isolate the 待确认区 store: the cache-TTL filter would otherwise skip
+	// hosts recorded by a previous run in the real state dir.
+	oldDir := discoveredDirOverr
+	discoveredDirOverr = filepath.Join(t.TempDir(), "discovered")
+	t.Cleanup(func() { discoveredDirOverr = oldDir })
 	res, err := m.DiscoverTCP(context.Background(), "", host+"/32", []int{port, port + 1})
 	if err != nil {
 		t.Fatalf("DiscoverTCP: %v", err)

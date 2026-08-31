@@ -379,7 +379,7 @@
   container-type: size;
   display: grid;
   place-items: center;
-  overflow: hidden;
+  overflow: auto;
   padding: 16px 32px;
 }
 .transcript--empty > * {
@@ -658,8 +658,6 @@
   --welcome-brand-height: 280px;
   --welcome-brand-gap: 26px;
   width: min(100%, 600px);
-  max-height: 100%;
-  min-height: 0;
   display: grid;
   align-content: center;
   justify-items: center;
@@ -667,7 +665,6 @@
   align-items: center;
   text-align: center;
   color: var(--fg-faint);
-  overflow: hidden;
 }
 .welcome--brand {
   margin-top: -20px;
@@ -757,7 +754,8 @@
    A 3-column grid lays them out as a tidy 3×2 block and gives each prompt a
    little more breathing room, since office prompts read more like labels than
    the dev profile's sentence-length examples. */
-.welcome--cowork .welcome__examples {
+.welcome--cowork .welcome__examples,
+.welcome--netdev .welcome__examples {
   grid-template-columns: repeat(3, 1fr);
   max-width: 560px;
 }
@@ -1025,6 +1023,24 @@
 .msg__text + .msg-attachments {
   padding-top: 2px;
 }
+.msg-attachment__topo {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  font-size: 10px;
+  border-radius: 50%;
+  background: var(--accent-soft, #2a3f6b);
+  color: var(--accent, #7aa2f7);
+  cursor: pointer;
+  z-index: 2;
+  user-select: none;
+}
+.msg-attachment__topo:hover { filter: brightness(1.2); }
+
 .msg-attachment {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr);

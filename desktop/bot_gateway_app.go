@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -368,4 +369,57 @@ func (netdevIMBridge) NetdevFindingByID(id string) bot.NetdevFindingDetail {
 		return d
 	}
 	return bot.NetdevFindingDetail{NotFound: true}
+}
+
+// The mutating IM commands (completion-spec §5.3): ack and proposal decisions
+// run the SAME guarded backend paths as the desktop UI — group policy,
+// change-window checks and audit all apply; IM is just another human surface.
+
+func (netdevIMBridge) NetdevAckFinding(id string) bot.NetdevActionResult {
+	if err := netdev.AckFindingByID(id); err != nil {
+		return bot.NetdevActionResult{OK: false, Msg: fmt.Sprintf("确认失败：%v", err)}
+	}
+	return bot.NetdevActionResult{OK: true}
+}
+
+func (netdevIMBridge) NetdevProposals() []bot.NetdevProposalSummary {
+	ps, err := netdev.ListProposals()
+	if err != nil {
+		return nil
+	}
+	var out []bot.NetdevProposalSummary
+	for _, p := range ps {
+		if p.Status == "rejected" || p.Status == "rolledback" {
+			continue
+		}
+		out = append(out, bot.NetdevProposalSummary{ID: p.ID, Status: p.Status, Title: p.Intent})
+	}
+	return out
+}
+
+func (netdevIMBridge) NetdevProposalApprove(id string) bot.NetdevActionResult {
+	cfg, err := config.Load()
+	if err != nil {
+		return bot.NetdevActionResult{Msg: err.Error()}
+	}
+	p, err := netdev.SharedManager(cfg).ApproveProposal(id, false)
+	if err != nil {
+		return bot.NetdevActionResult{Msg: err.Error()}
+	}
+	return bot.NetdevActionResult{OK: true, Msg: p.Intent}
+}
+
+func (netdevIMBridge) NetdevProposalReject(id, reason string) bot.NetdevActionResult {
+	if reason == "" {
+		reason = "(IM 驳回，未填原因)"
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return bot.NetdevActionResult{Msg: err.Error()}
+	}
+	p, err := netdev.SharedManager(cfg).RejectProposal(id, reason)
+	if err != nil {
+		return bot.NetdevActionResult{Msg: err.Error()}
+	}
+	return bot.NetdevActionResult{OK: true, Msg: p.Intent}
 }

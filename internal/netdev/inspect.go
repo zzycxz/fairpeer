@@ -3,6 +3,7 @@ package netdev
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/netdev/driver"
@@ -59,6 +60,25 @@ func (m *Manager) RunInspection(ctx context.Context) (*Finding, error) {
 	if err := SaveFinding(f); err != nil {
 		return nil, err
 	}
+	// R1 journal（best-effort）：巡检一行汇总 + 电池里 interface-brief 输出的
+	// 行数启发式接口计数（趋势输入，不是逐口台账）。失败不影响巡检结果。
+	crit, warn, info := OpenFindingTallies()
+	ifBrief := map[string]IfBriefCounts{}
+	for _, ev := range evidence {
+		if ev.Device == "" || ev.Output == "" {
+			continue
+		}
+		cl := strings.ToLower(ev.Command)
+		if strings.Contains(cl, "interface brief") || strings.Contains(cl, "interfaces status") {
+			c := SummarizeIfBrief(ev.Output)
+			prev := ifBrief[ev.Device]
+			ifBrief[ev.Device] = IfBriefCounts{Up: prev.Up + c.Up, Down: prev.Down + c.Down}
+		}
+	}
+	_ = AppendInspectionRow(InspectionJournalRow{
+		Kind: "inspection", Devices: len(devices), Checked: len(devices),
+		Critical: crit, Warning: warn, Info: info, IfBrief: ifBrief,
+	})
 	return f, nil
 }
 

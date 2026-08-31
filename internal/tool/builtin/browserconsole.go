@@ -2,7 +2,7 @@ package builtin
 
 // browserconsole.go — the ops console's manual browser-control API.
 //
-// The 运维 dock's 「浏览器」 tab drives the SAME chromedp session
+// 运维 dock 的「浏览器」 tab 驱动同一套 chromedp 会话
 // infrastructure the agent tools use, minus the LLM: the user issues
 // primitives (navigate/type/click/…) from the panel, watches the external
 // browser window, and can record a manual run into a trace that the desktop

@@ -35,6 +35,8 @@ var (
 	// a config snapshot captured at listener startup.
 	syslogCfg      *config.Config
 	syslogLastFire = map[string]time.Time{} // device:class → last auto-Finding
+
+	syslogCountFlusherOnce sync.Once
 )
 
 // syslogClasses: known-bad patterns → finding class. Deliberately short and
@@ -84,6 +86,29 @@ func EnsureSyslogReceiver(cfg *config.Config) {
 	syslogConn = pc
 	syslogMu.Unlock()
 	go syslogLoop(pc)
+	syslogCountFlusherOnce.Do(func() { go syslogCountFlusher() })
+}
+
+// syslogCountFlusher drains the R3 count buckets to the day files every 30s
+// (the receiver itself never blocks on disk).
+func syslogCountFlusher() {
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+	for range t.C {
+		FlushSyslogCounts()
+	}
+}
+
+// syslogClassify returns the first matching rule class for the line, or
+// "other" (R3 buckets).
+func syslogClassify(line string) string {
+	lower := strings.ToLower(line)
+	for _, c := range syslogClasses {
+		if strings.Contains(lower, c.pattern) {
+			return c.class
+		}
+	}
+	return "other"
 }
 
 // SyslogReceiverStatus reports the listener state for the UI.
@@ -136,6 +161,7 @@ func syslogLoop(pc net.PacketConn) {
 		syslogRings[device] = ring
 		syslogMu.Unlock()
 		syslogEscalate(device, line)
+		syslogCountIncr(now, device, syslogClassify(line)) // R3（含 "(unknown)" 桶）
 	}
 }
 

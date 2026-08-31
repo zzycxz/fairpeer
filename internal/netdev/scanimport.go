@@ -3,6 +3,7 @@ package netdev
 import (
 	"encoding/xml"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -72,6 +73,7 @@ func ImportNmapXML(xmlText string, cfg inventory) (*Finding, error) {
 			unknown++
 		}
 		var openPorts []string
+		var dp []DiscoveredPort
 		for _, p := range h.Ports {
 			if p.State.State == "open" {
 				svc := p.Service.Name
@@ -79,8 +81,17 @@ func ImportNmapXML(xmlText string, cfg inventory) (*Finding, error) {
 					svc = p.Proto
 				}
 				openPorts = append(openPorts, fmt.Sprintf("%s/%s(%s)", p.PortID, p.Proto, svc))
+				if port, err := strconv.Atoi(p.PortID); err == nil && p.Proto == "tcp" {
+					dp = append(dp, DiscoveredPort{
+						Port:   port,
+						Banner: "nmap:" + svc, // service name rides the banner slot; Parsed stays zero
+					})
+				}
 			}
 		}
+		// F1: every nmap host also lands in the 待确认区 store — the scan's
+		// asset leads outlive the one-shot Finding.
+		_ = RecordDiscoveredPorts(SourceNmap, ip, name, dp)
 		line := fmt.Sprintf("%s %s [%s] 开放端口: %s", ip, name, tag, strings.Join(openPorts, ", "))
 		if len(openPorts) == 0 {
 			line = fmt.Sprintf("%s %s [%s] 无开放端口（存活）", ip, name, tag)

@@ -6,9 +6,11 @@
 // 草）。
 import { useCallback, useEffect, useState } from "react";
 import { app } from "../../lib/bridge";
+import { useT } from "../../lib/i18n";
 import type { NetDevDeviceView, NetDevSrvConfDriftRow, NetDevSrvConfVersion } from "../../lib/types";
 
 export function SrvConfCard({ device, peers }: { device: NetDevDeviceView; peers: NetDevDeviceView[] }) {
+  const t = useT();
   const roots = device.configPaths ?? [];
   const [path, setPath] = useState(roots[0] ?? "");
   const [versions, setVersions] = useState<NetDevSrvConfVersion[] | null>(null);
@@ -35,7 +37,7 @@ export function SrvConfCard({ device, peers }: { device: NetDevDeviceView; peers
   if (roots.length === 0) {
     return (
       <div className="ndv__hint">
-        配置文件管理（§7.3）：该设备未配置 <code>config_paths</code> 白名单——设置 → 运维 → 设备表单登记（如 /etc/nginx）。
+        {t("ndv.srv.noPaths1")}<code>config_paths</code>{t("ndv.srv.noPaths2")}
       </div>
     );
   }
@@ -65,7 +67,7 @@ export function SrvConfCard({ device, peers }: { device: NetDevDeviceView; peers
     setBusy("drift");
     try {
       const sel = [device.name, ...Object.entries(driftPeers).filter(([, v]) => v).map(([k]) => k)];
-      if (sel.length < 2) throw new Error("选至少一台对照设备");
+      if (sel.length < 2) throw new Error(t("ndv.srv.pickTwo"));
       setDrift(await app.NetDevSrvConfDrift(path, sel));
       setErr("");
     } catch (e) { setErr(String(e)); }
@@ -78,17 +80,17 @@ export function SrvConfCard({ device, peers }: { device: NetDevDeviceView; peers
         <select className="mem-input" value={path} onChange={e => setPath(e.target.value)}>
           {roots.map(r => <option key={r} value={r}>{r}</option>)}
         </select>
-        <input className="mem-input" style={{ flex: 1 }} placeholder="白名单内文件路径，如 /etc/nginx/nginx.conf" value={path.startsWith(roots[0]) ? path : roots[0]} onChange={e => setPath(e.target.value)} />
-        <span className="btn btn--secondary btn--small" role="button" onClick={() => void snapshot()}>{busy === "snap" ? "抓取中…" : "📸 拍快照"}</span>
+        <input className="mem-input" style={{ flex: 1 }} placeholder={t("ndv.srv.phPath")} value={path.startsWith(roots[0]) ? path : roots[0]} onChange={e => setPath(e.target.value)} />
+        <span className="btn btn--secondary btn--small" role="button" onClick={() => void snapshot()}>{busy === "snap" ? t("ndv.srv.snapping") : t("ndv.srv.snapshot")}</span>
       </div>
       {err && <div className="ndv__hint ndv__hint--err">{err}</div>}
       {versions !== null && (
         <div className="ndv__audit-scroll" style={{ maxHeight: 120 }}>
-          {versions.length === 0 && <div className="ndv__hint">还没有快照——拍第一份。</div>}
+          {versions.length === 0 && <div className="ndv__hint">{t("ndv.srv.noSnapshots")}</div>}
           {versions.map(v => (
-            <div key={v.id} className="ndv__audit-row" role="button" style={{ cursor: "pointer", opacity: picked.includes(v.id) ? 1 : 0.7 }} onClick={() => pick(v.id)} title="点选两个版本对比">
+            <div key={v.id} className="ndv__audit-row" role="button" style={{ cursor: "pointer", opacity: picked.includes(v.id) ? 1 : 0.7 }} onClick={() => pick(v.id)} title={t("ndv.srv.pickTwoTip")}>
               <span className="ndv__audit-time">{v.at}</span>
-              <span className="ndv__audit-dev">{v.lines} 行 / {v.bytes}B</span>
+              <span className="ndv__audit-dev">{t("ndv.srv.linesBytes", { lines: v.lines, bytes: v.bytes })}</span>
               <span className="ndv__audit-cmd">{picked.includes(v.id) ? "☑ " : "☐ "}{v.id}</span>
             </div>
           ))}
@@ -96,11 +98,11 @@ export function SrvConfCard({ device, peers }: { device: NetDevDeviceView; peers
       )}
       {diff && (
         <div>
-          <div className="ndv__group-label">版本对比（旧 → 新）</div>
-          <pre className="ndv-cutover__report-body" style={{ maxHeight: 160 }}>{diff || "（无差异）"}</pre>
+          <div className="ndv__group-label">{t("ndv.srv.versionDiff")}</div>
+          <pre className="ndv-cutover__report-body" style={{ maxHeight: 160 }}>{diff || t("ndv.srv.noDiff")}</pre>
         </div>
       )}
-      <div className="ndv__group-label">环境 Drift（同路径跨设备）</div>
+      <div className="ndv__group-label">{t("ndv.srv.envDrift")}</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
         {peers.filter(p => p.name !== device.name).map(p => (
           <label key={p.name} className="ndv__meta" style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
@@ -108,21 +110,21 @@ export function SrvConfCard({ device, peers }: { device: NetDevDeviceView; peers
             {p.name}
           </label>
         ))}
-        <span className="btn btn--secondary btn--small" role="button" onClick={() => void runDrift()}>{busy === "drift" ? "对比中…" : "对比"}</span>
+        <span className="btn btn--secondary btn--small" role="button" onClick={() => void runDrift()}>{busy === "drift" ? t("ndv.comparing") : t("ndv.srv.diffBtn")}</span>
       </div>
       {drift && drift.map(r => (
         <div key={r.device} className="ndv-cutover__pick">
           <div className="ndv-cutover__pick-head">
             <span>{r.device}</span>
             <span className="ndv__meta">
-              {r.status === "same" ? "✅ 一致" : r.status === "drift" ? "⚠ 漂移" : r.status === "absent" ? "∅ 缺失" : "⛔ " + r.error}
+              {r.status === "same" ? t("ndv.srv.stSame") : r.status === "drift" ? t("ndv.srv.stDrift") : r.status === "absent" ? t("ndv.srv.stAbsent") : "⛔ " + r.error}
             </span>
           </div>
           {r.diff && <pre className="ndv-cutover__report-body" style={{ maxHeight: 140 }}>{r.diff}</pre>}
         </div>
       ))}
       <div className="ndv__hint ndv__hint--flush">
-        修改走提案：本地改好整份文件 → 对话让 agent 以 file-upload 步骤起草（备份/校验/一键回滚）；「备份真的能恢复」经 restore-verify 提案步骤演练（恢复到 staging + 验证读）。
+        {t("ndv.srv.changeViaProposal")}
       </div>
     </div>
   );

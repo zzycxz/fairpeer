@@ -68,7 +68,7 @@ type kubeTarget struct {
 func (m *Manager) kubeTarget(deviceName string) (*kubeTarget, error) {
 	d, ok := m.cfg.NetDevDeviceByName(deviceName)
 	if !ok {
-		return nil, fmt.Errorf("device %q is not in the inventory (add it in the 运维 settings)", deviceName)
+		return nil, fmt.Errorf("device %q is not in the inventory (add it in 运维设置)", deviceName)
 	}
 	if d.Kind != "k8s" || d.K8s == nil {
 		return nil, fmt.Errorf("device %q is not a kind=k8s target", deviceName)
@@ -81,7 +81,7 @@ func (m *Manager) kubeTarget(deviceName string) (*kubeTarget, error) {
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("secret kubeconfig/%s not set — paste the kubeconfig into the 运维 settings (content never enters TOML)", d.K8s.KubeconfigEnv)
+		return nil, fmt.Errorf("secret kubeconfig/%s not set — paste the kubeconfig into 运维设置 (content never enters TOML)", d.K8s.KubeconfigEnv)
 	}
 	var kc kubeConfigFile
 	if err := yaml.Unmarshal([]byte(yamlText), &kc); err != nil {

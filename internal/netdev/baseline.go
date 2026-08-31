@@ -214,5 +214,12 @@ func (m *Manager) RunBaseline(ctx context.Context) (*Finding, error) {
 	if err := SaveFinding(summaryFinding); err != nil {
 		return nil, err
 	}
+	// R1 journal + 总览 BaselineAgg 的持久位（best-effort，不影响核查结果）。
+	SaveLastBaseline(*summary)
+	crit, warn, info := OpenFindingTallies()
+	_ = AppendInspectionRow(InspectionJournalRow{
+		Kind: "baseline", Devices: summary.Devices, Checked: summary.Checked,
+		Critical: crit, Warning: warn, Info: info, BaselineHits: summary.Hits,
+	})
 	return summaryFinding, nil
 }

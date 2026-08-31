@@ -11,7 +11,7 @@ const negativeClaimRule = `When you claim something does NOT exist (no caller, n
 // tuiFormatting nudges concise, terminal-friendly output.
 const tuiFormatting = `Keep the final answer compact and terminal-friendly: short paragraphs or bullets, no walls of text, no restating the question.`
 
-// netdevDiagPreamble is the shared discipline header for the 运维 diagnostic
+// netdevDiagPreamble is the shared discipline header for 运维诊断
 // playbooks (spec P2): inventory-first naming, one read command per call,
 // verbatim evidence, finding discipline. The playbooks are INLINE — they run
 // in the main loop where the netdev_* tools (and the seal) live.
@@ -136,7 +136,7 @@ const builtinNetdevDiagInterfaceBody = netdevDiagPreamble + `
 ## 第三步：结论
 netdev_finding 记录：症状 → 根因（含两端证据：哪端的计数在涨、光功率数值）→ 建议变更（换模块/调协商/调 QoS——只描述，交给 netdev_propose）。`
 
-// builtinNetdevHelpBody is the 运维 quick-reference card the agent carries:
+// builtinNetdevHelpBody is 运维快速参考卡片, carried by the agent:
 // the vetted source list (mirrors docs/NETDEV_HELP.md) plus the provenance
 // rules. Inline + zero AllowedTools — pure reference, nothing executable.
 const builtinNetdevHelpBody = `This skill is INLINED — a reference card, no tools. Consult it whenever a netdev question needs an authoritative source, a syntax you are not 100% sure of, or a place to send the user.

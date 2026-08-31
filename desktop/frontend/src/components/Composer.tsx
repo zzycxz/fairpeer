@@ -367,6 +367,7 @@ export function Composer({
   retry,
   transientDismissSignal,
   placeholderOverride,
+  suggestions,
   profile,
 }: {
   running: boolean;
@@ -437,6 +438,9 @@ export function Composer({
   transientDismissSignal?: number;
   // Mode-specific placeholder (netdev): falls back to composer.placeholder.
   placeholderOverride?: string;
+  // Mode-specific suggestion chips (netdev, completion-spec §3.3): shown only
+  // while the composer is empty; clicking fills the textarea (no auto-send).
+  suggestions?: string[];
   // Active product profile — scopes the past:chats session list so a mode only
   // references its own conversations (bridge falls back to the global list).
   profile?: string;
@@ -2164,7 +2168,7 @@ export function Composer({
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
         >
-          {(queued?.steer?.length || queued?.followUp?.length) && (
+          {(queued?.steer?.length ?? 0) + (queued?.followUp?.length ?? 0) > 0 && (
             <div className="composer-queue" aria-live="polite">
               {queued!.steer.map((q, i) => (
                 <span key={`s${i}`} className="composer-queue__chip composer-queue__chip--steer" title={q}>
@@ -2174,6 +2178,17 @@ export function Composer({
               {queued!.followUp.map((q, i) => (
                 <span key={`f${i}`} className="composer-queue__chip composer-queue__chip--next" title={q}>
                   {"⏳ "}{q.length > 60 ? q.slice(0, 59) + "…" : q}
+                </span>
+              ))}
+            </div>
+          )}
+          {!text.trim() && attachments.length === 0 && (suggestions?.length ?? 0) > 0 && (
+            <div className="composer__suggestions" style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "2px 0 6px" }}>
+              {suggestions!.slice(0, 6).map((s, i) => (
+                <span key={i} className="btn btn--secondary btn--small" role="button" title={s}
+                  style={{ fontSize: 11, opacity: 0.75 }}
+                  onClick={() => { setText(s); taRef.current?.focus(); }}>
+                  {s.length > 34 ? s.slice(0, 33) + "…" : s}
                 </span>
               ))}
             </div>

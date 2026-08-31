@@ -69,7 +69,7 @@ func (m *Manager) Triage(ctx context.Context, deviceName string) TriageReport {
 	rep := TriageReport{Device: deviceName, CreatedAt: time.Now()}
 	d, ok := m.cfg.NetDevDeviceByName(deviceName)
 	if !ok {
-		rep.Summary = fmt.Sprintf("device %q is not in the inventory (add it in the 运维 settings)", deviceName)
+		rep.Summary = fmt.Sprintf("device %q is not in the inventory (add it in 运维设置)", deviceName)
 		return rep
 	}
 	rep.Vendor = d.Vendor

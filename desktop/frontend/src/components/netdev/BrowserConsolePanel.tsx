@@ -1,4 +1,4 @@
-// BrowserConsolePanel — the 运维 dock's 「浏览器」 tab: a two-sub-tab console
+// BrowserConsolePanel — 运维 dock 的「浏览器」 tab: a two-sub-tab console
 // for manually driving the console browser session and recording runs into
 // skills. Sub-tab pills follow the ZCode right-dock tab language (transparent
 // inactive / soft-pill active); the driven browser is the external window,
@@ -116,7 +116,7 @@ export function BrowserConsolePanel({ onInsertComposer }: { onInsertComposer?: (
       setDropped([]);
       await app.BrowserConsoleRecordStart();
       setRecording(true);
-      appendLog("● 开始录制");
+      appendLog(t("ndv.brc.recStart"));
     });
 
   const stopRecord = () =>
@@ -131,7 +131,7 @@ export function BrowserConsolePanel({ onInsertComposer }: { onInsertComposer?: (
         // Raw trace (kept + dropped) travels to the editor as the 原始对照
         // so the review can verify nothing meaningful was filtered away.
         setRawTrace(events);
-        appendLog(`■ 录制结束：${filtered.kept.length} 步，过滤 ${filtered.dropped.length} 条`);
+        appendLog(t("ndv.brc.recEnd", { kept: filtered.kept.length, dropped: filtered.dropped.length }));
         await generateSkill(filtered.kept);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));

@@ -39,7 +39,7 @@ type NetDevConfig struct {
 	// "" = off) through the notify outlets.
 	BriefingPushTime string `toml:"briefing_push_time"`
 	// NetworkName is the managed network's display name (e.g. "总部生产网") —
-	// the 运维 page's identity anchor, like a coding workspace's project name.
+	// 运维页面的身份标识, like a coding workspace's project name.
 	NetworkName          string          `toml:"network_name"`
 	DefaultMode          string          `toml:"default_mode"` // diagnose | assess
 	AuditRetention       string          `toml:"audit_retention"`
@@ -53,8 +53,15 @@ type NetDevConfig struct {
 	// ([netdev.extra_read] with vendor tables — see NETDEV_SPEC B-1: the
 	// knowledge-growth path; unknown commands stay refused until classified).
 	ExtraRead map[string][]string `toml:"extra_read"`
+	// WeakCredDict is a local password-dictionary file for the strong tier of
+	// netdev_weak_cred / NetDevWeakCredCheck (completion-spec §5.2). Empty =
+	// basic tier only. The file's CONTENT never enters config or exports.
+	WeakCredDict string `toml:"weak_cred_dict"`
 	// InspectionInterval schedules the read-battery sweep ("1h", "30m"; "" = off).
 	InspectionInterval string `toml:"inspection_interval"`
+	// ScheduledBaseline rides the scheduled inspection sweep: also run the
+	// config-security baseline battery each scheduled pass (default off).
+	ScheduledBaseline bool `toml:"scheduled_baseline"`
 	// BackupInterval schedules the config-backup sweep ("1h", "24h"; "" = off):
 	// every tick snapshots every managed device's running-config into the
 	// versioned vault — the drift/history backbone.
@@ -177,14 +184,20 @@ type NetDevGuardrails struct {
 
 // NetDevDevice is one managed network device (router/switch/firewall).
 type NetDevDevice struct {
-	Name          string   `toml:"name"`
-	Vendor        string   `toml:"vendor"` // huawei | cisco | zte
-	OS            string   `toml:"os"`     // vrp8 | vrp5 | ios | iosxe | zxr10 …
-	Model         string   `toml:"model"`
-	Address       string   `toml:"address"`
-	Port          int      `toml:"port"` // 0 => 22
-	Via           []string `toml:"via"`  // ordered hop names (route to the device)
-	Group         string   `toml:"group"`
+	Name    string   `toml:"name"`
+	Vendor  string   `toml:"vendor"` // huawei | cisco | zte
+	OS      string   `toml:"os"`     // vrp8 | vrp5 | ios | iosxe | zxr10 …
+	Model   string   `toml:"model"`
+	Address string   `toml:"address"`
+	Port    int      `toml:"port"` // 0 => 22
+	Via     []string `toml:"via"`  // ordered hop names (route to the device)
+	Group   string   `toml:"group"`
+	// Role is the user's EXPLICIT device-class override for the topology icon
+	// set (router/switch/firewall/ips/vpn/bastion/server/ap/cloud; Chinese
+	// aliases accepted). Empty = infer (group words → model/name → vendor
+	// default). This is the minimal non-GUI "manual override" of the parked
+	// topology-overlay lot.
+	Role          string   `toml:"role"`
 	Protocols     []string `toml:"protocols"` // priority order: ssh, netconf（telnet 已裁决删除，§6.4）
 	Username      string   `toml:"username"`
 	PasswordEnv   string   `toml:"password_env"`
@@ -269,7 +282,7 @@ type NetDevGroup struct {
 
 // NetDevProject is a SITE-level scope (the Mist "site" / industry
 // site-first pattern): a named collection of device groups — one 机房 / 园区 /
-// 客户网络. The 运维 title bar carries a project switcher; rail, findings and
+// 客户网络. 运维标题栏带有项目切换器; rail, findings and
 // proposals filter to the active project so the operator thinks "which site"
 // first, exactly like every mainstream NMS console.
 type NetDevProject struct {
@@ -285,6 +298,27 @@ type NetDevDiscovery struct {
 	Rate          int      `toml:"rate"`           // parallel probe cap
 	Mode          string   `toml:"mode"`           // tunnel | probe | auto
 	ProbeFallback string   `toml:"probe_fallback"` // tunnel when netprobe can't deploy
+	// SnmpCommunity enables F2's sysDescr fingerprint on discovery: hosts
+	// with an open 161 get ONE v2c GET (no retry). Empty (default) = off —
+	// SNMP stays a per-device metrics channel only.
+	SnmpCommunity string `toml:"snmp_community"`
+	// HTTPProbe enables F3's application fingerprint (default off): one
+	// standard GET / per open 80/443/8080/8443 — title/Server header and the
+	// TLS certificate. Opt-in: it is the only discovery traffic that is more
+	// than a TCP handshake + banner wait.
+	HTTPProbe bool `toml:"http_probe"`
+	// F4 pacing keys (spec §4.7). Zero values take the spec defaults; -1
+	// disables where disabling is a legal posture.
+	FastMode       bool `toml:"fast_mode"`          // rate x4 for authorized windows
+	MaxHostsPerJob int  `toml:"max_hosts_per_job"`  // 0 => 65536 (one /16)
+	WallSec        int  `toml:"discovery_wall_sec"` // 0 => 14400 (4h)
+	PerHostDelayMS int  `toml:"per_host_delay_ms"`  // 0 => 800ms jitter; -1 = off
+	CacheTTLHours  int  `toml:"cache_ttl_hours"`    // 0 => 24; -1 = always re-probe
+	MaxHops        int  `toml:"max_hops"`           // 0 => 2 (clamped 1..4): recursion depth cap
+	// NoMediumConfirm pre-checks /23-/21 nets on the plan card (the key is
+	// inverted so Go's zero value keeps the SAFE default: medium nets stay
+	// unchecked until the operator opts into trusting them).
+	NoMediumConfirm bool `toml:"medium_no_confirm"`
 }
 
 // NetDevSNMP carries SNMP collector credentials for a device (env names only).

@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { app, onBrowserTrial } from "../../lib/bridge";
 import { useConfirm } from "../../lib/confirm";
-import { useT } from "../../lib/i18n";
+import { useT, t as tt } from "../../lib/i18n";
 import {
   collectParams,
   parseSkillDoc,
@@ -32,18 +32,18 @@ import {
 import { summarizeRecordEvent } from "../../lib/recordTrace";
 import type { BrowserConsoleRecordEvent, BrowserConsoleStep, BrowserConsoleStepType } from "../../lib/types";
 
-const STEP_TYPES: { value: BrowserConsoleStepType; label: string }[] = [
-  { value: "navigate", label: "navigate 打开" },
-  { value: "click", label: "click 点击" },
-  { value: "type", label: "type 输入" },
-  { value: "key", label: "key 按键" },
-  { value: "scroll", label: "scroll 滚动" },
-  { value: "select", label: "select 选择" },
-  { value: "upload", label: "upload 上传" },
-  { value: "wait", label: "wait 等待" },
-  { value: "extract", label: "extract 提取" },
-  { value: "screenshot", label: "screenshot 截图" },
-  { value: "evaluate", label: "evaluate 脚本" },
+const STEP_TYPES: { value: BrowserConsoleStepType; labelKey: string }[] = [
+  { value: "navigate", labelKey: "ndv.bse.stNavigate" },
+  { value: "click", labelKey: "ndv.bse.stClick" },
+  { value: "type", labelKey: "ndv.bse.stType" },
+  { value: "key", labelKey: "ndv.bse.stKey" },
+  { value: "scroll", labelKey: "ndv.bse.stScroll" },
+  { value: "select", labelKey: "ndv.bse.stSelect" },
+  { value: "upload", labelKey: "ndv.bse.stUpload" },
+  { value: "wait", labelKey: "ndv.bse.stWait" },
+  { value: "extract", labelKey: "ndv.bse.stExtract" },
+  { value: "screenshot", labelKey: "ndv.bse.stScreenshot" },
+  { value: "evaluate", labelKey: "ndv.bse.stEvaluate" },
 ];
 
 export function BrowserSkillEditor({
@@ -280,7 +280,7 @@ export function BrowserSkillEditor({
                     onChange={(e) => stepOps.update(i, { type: e.target.value as BrowserConsoleStepType })}
                   >
                     {STEP_TYPES.map((opt) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      <option key={opt.value} value={opt.value}>{t(opt.labelKey as never)}</option>
                     ))}
                   </select>
                   {stepFields(s, (patch) => stepOps.update(i, patch))}
@@ -347,6 +347,7 @@ export function BrowserSkillEditor({
 
 // stepFields renders the type-specific inputs for one step row.
 function stepFields(step: BrowserConsoleStep, update: (patch: Partial<BrowserConsoleStep>) => void) {
+  const t = tt; // module-level translator (non-reactive is fine for placeholders)
   switch (step.type) {
     case "navigate":
       return <input className="mem-input" value={step.url ?? ""} placeholder="https://…" onChange={(e) => update({ url: e.target.value })} />;
@@ -354,7 +355,7 @@ function stepFields(step: BrowserConsoleStep, update: (patch: Partial<BrowserCon
       return (
         <>
           <input className="mem-input" value={step.target ?? ""} placeholder="CSS" onChange={(e) => update({ target: e.target.value })} />
-          <input className="mem-input" value={step.text ?? ""} placeholder="{{参数}} / 文本" onChange={(e) => update({ text: e.target.value })} />
+          <input className="mem-input" value={step.text ?? ""} placeholder={t("ndv.bse.phText")} onChange={(e) => update({ text: e.target.value })} />
         </>
       );
     case "key":
@@ -386,15 +387,15 @@ function stepFields(step: BrowserConsoleStep, update: (patch: Partial<BrowserCon
       return (
         <>
           <input className="mem-input" value={step.target ?? ""} placeholder="CSS" onChange={(e) => update({ target: e.target.value })} />
-          <input className="mem-input" value={step.value ?? ""} placeholder="值" onChange={(e) => update({ value: e.target.value })} />
+          <input className="mem-input" value={step.value ?? ""} placeholder={t("ndv.bse.phValue")} onChange={(e) => update({ value: e.target.value })} />
         </>
       );
     case "upload":
-      return <input className="mem-input" value={(step.files ?? []).join(", ")} placeholder="文件路径（逗号分隔）" onChange={(e) => update({ files: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} />;
+      return <input className="mem-input" value={(step.files ?? []).join(", ")} placeholder={t("ndv.bse.phFiles")} onChange={(e) => update({ files: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} />;
     case "extract":
-      return <input className="mem-input" value={step.target ?? ""} placeholder="CSS（空=整页）" onChange={(e) => update({ target: e.target.value })} />;
+      return <input className="mem-input" value={step.target ?? ""} placeholder={t("ndv.bse.phCss")} onChange={(e) => update({ target: e.target.value })} />;
     case "evaluate":
-      return <input className="mem-input" value={step.expression ?? ""} placeholder="JS 表达式" onChange={(e) => update({ expression: e.target.value })} />;
+      return <input className="mem-input" value={step.expression ?? ""} placeholder={t("ndv.bse.phJs")} onChange={(e) => update({ expression: e.target.value })} />;
     default:
       return <input className="mem-input" value={step.target ?? ""} placeholder="CSS" onChange={(e) => update({ target: e.target.value })} />;
   }

@@ -65,7 +65,7 @@ func dockerTransport(socket string) (*http.Transport, error) {
 func (m *Manager) DockerGet(ctx context.Context, deviceName, what, arg string, tailN int) (string, error) {
 	d, ok := m.cfg.NetDevDeviceByName(deviceName)
 	if !ok {
-		return "", fmt.Errorf("device %q is not in the inventory (add it in the 运维 settings)", deviceName)
+		return "", fmt.Errorf("device %q is not in the inventory (add it in 运维设置)", deviceName)
 	}
 	if d.Kind != "docker" || d.Docker == nil {
 		return "", fmt.Errorf("device %q is not a kind=docker target", deviceName)

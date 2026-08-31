@@ -7,6 +7,7 @@ package netdev
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/zzycxz/fairpeer/internal/secret"
 )
@@ -59,6 +60,23 @@ func SetSecret(kind, name, value string) error {
 // process environment (secret.Store.LoadIntoEnv), which coding/office bash
 // children would inherit. That is the data-plane half of the profile
 // isolation (NETDEV_SPEC §7.2).
+// SecretHealth reports the netdev-namespace credential count and the
+// vault file's last-change time (age granularity is the whole store — per-
+// entry timestamps would need a schema bump; honest, coarse, cheap).
+func SecretHealth() (count int, lastChanged time.Time) {
+	keys, at, err := secret.Default().HealthStats()
+	if err != nil {
+		return 0, time.Time{}
+	}
+	n := 0
+	for _, k := range keys {
+		if strings.HasPrefix(k, SecretNamespace+"/") {
+			n++
+		}
+	}
+	return n, at
+}
+
 func GetSecret(kind, name string) (string, bool, error) {
 	key, err := SecretKey(kind, name)
 	if err != nil {

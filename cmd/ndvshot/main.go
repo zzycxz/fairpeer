@@ -1,7 +1,7 @@
 // Command ndvshot borrows the office profile's browser automation
 // (internal/browserlaunch + chromedp — the same engine behind the cowork
-// browser_* tools) to visually verify the 运维 layout in the frontend dev
-// shell: open the dev server, screenshot the default view, click the 运维
+// browser_* tools) to visually verify 运维布局 in the frontend dev
+// shell: open the dev server, screenshot the default view, click 运维
 // profile segment, and screenshot the NetDevLayout.
 //
 // Usage: go run ./cmd/ndvshot -url http://127.0.0.1:5173 -out gui-test-screenshots
@@ -61,7 +61,7 @@ func main() {
 	}
 	fmt.Println("shot: ndv-1-initial.png")
 
-	// Click the 运维 profile segment (third tab in the top switcher).
+	// Click 运维 segment (third tab in the top switcher).
 	if err := chromedp.Run(bctx, jsClick("运维")); err != nil {
 		fatal("click 运维 segment: %v", err)
 	}

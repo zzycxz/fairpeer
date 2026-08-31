@@ -23,7 +23,7 @@ func (m *Manager) SFTPDownload(ctx context.Context, deviceName, remotePath strin
 		return nil, fmt.Errorf("device %q is not in the inventory", deviceName)
 	}
 	if !logPathAllowed(remotePath, LogAllowedRoots(d)) {
-		return nil, fmt.Errorf("path %q is outside the device's whitelist (/var/log or log_paths — add it in the 运维 settings)", remotePath)
+		return nil, fmt.Errorf("path %q is outside the device's whitelist (/var/log or log_paths — add it in 运维设置)", remotePath)
 	}
 	// v1: read via the sealed exec path (cat with log-whitelist override,
 	// capped output) — the dedicated SFTP subsystem channel lands with the

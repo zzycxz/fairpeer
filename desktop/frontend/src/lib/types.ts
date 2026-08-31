@@ -1731,6 +1731,7 @@ export interface NetDevSettingsView {
   projects: NetDevProjectView[];
   // Scheduled sweeps ("1h"/"24h"; empty = off).
   inspectionInterval: string;
+  scheduledBaseline: boolean;
   backupInterval: string;
   // Named diagnostic batteries for the device card.
   presets: NetDevPresetView[];
@@ -1763,6 +1764,7 @@ export interface NetDevSettingsView {
   notifySMTPPassword?: string; // write-only
   // Daily briefing push time (local HH:MM; empty = off).
   briefingPushTime: string;
+  weakCredDict: string;
 }
 
 // One group's policy + maintenance window.
@@ -1796,6 +1798,10 @@ export interface NetDevMetricPoint {
   us: number;
   iu: number;
   id: number;
+  cu?: number;
+  me?: number;
+  io?: number;
+  oo?: number;
 }
 
 // Golden Config baseline state (the 备份时间线 header).
@@ -1813,32 +1819,38 @@ export interface NetDevAuditChainStatus {
   firstBroken?: string;
 }
 
+// ── 状态历史（三层回退之"状态回退"）──────────────────────────────────────────
+// One timeline entry: a pre-mutation snapshot event over the ops state files
+// (proposals/jobs/cutovers/templates/findings/inventory TOML…).
 export interface NetDevStateEventView {
   id: number;
   time: number; // unix ms
-  kind: string;
+  kind: string; // approve | execute | job-start | cutover-hold | settings-save | restore-keep | …
   entity?: string;
-  actor: string;
+  actor: string; // user | agent | im | system
   paths: string[];
-  live: NetDevStateLiveEntity[];
+  live: NetDevStateLiveEntity[]; // non-empty = restoring would fight a live entity
   canRestore: boolean;
   canRedo: boolean;
 }
 
+// An entity the candidate suffix touches that is currently mid-flight.
 export interface NetDevStateLiveEntity {
-  type: string;
+  type: string; // proposal | job | cutover
   id: string;
   status: string;
 }
 
+// One file's previewed restore change (unified diff).
 export interface NetDevStateFileDiff {
   path: string;
-  kind: string;
+  kind: string; // create | modify | delete | binary
   added: number;
   removed: number;
   diff: string;
 }
 
+// What a restore wrote back/deleted + the reverse event enabling redo.
 export interface NetDevStateRestoreResultView {
   written: string[];
   deleted: string[];
@@ -2014,6 +2026,10 @@ export interface NetDevDeviceHealth {
   uptimeSec: number;
   interfaces: NetDevIfHealth[];
   lastError?: string;
+  cpuPct?: number;
+  memPct?: number;
+  inOct?: number;
+  outOct?: number;
 }
 
 export interface NetDevHealthSnapshot {
@@ -2231,6 +2247,8 @@ export interface NetDevProposal {
   approver?: string;
   confirm2?: boolean;
   note?: string;
+  rejected_at?: string;
+  reject_reason?: string;
   watch_until?: string;
   watch_note?: string;
 }
@@ -2397,12 +2415,167 @@ export interface NetDevTopologyNode {
   // band (0 core / 1 agg / 2 access / 3 unmanaged; -1 = not inferred).
   subnet?: string;
   tier?: number;
+  // Device-class icon key (router/switch/firewall/ips/vpn/bastion/server/ap/
+  // cloud; ""/absent = unknown) — orthogonal to tier/health/managed.
+  // role_source records the inference provenance (config|kind|group|model|
+  // vendor|label|none) for the tooltip confidence hint.
+  role?: string;
+  role_source?: string;
 }
 
 export interface NetDevTopologyGraph {
   nodes: NetDevTopologyNode[];
-  edges: { local_device: string; local_port: string; remote_device: string; remote_port?: string; remote_ip?: string; source: string }[];
+  edges: { local_device: string; local_port: string; remote_device: string; remote_port?: string; remote_ip?: string; source: string; platform?: string }[];
   at: string;
+}
+
+// T2a: drawio design import — preview (no side effects) + the persisted
+// design snapshot (topology's third source: plan | design | snapshot).
+export interface NetDevTopoImportStats {
+  total: number;
+  managed: number;
+  new_nodes: number;
+  unresolved_role: number;
+  pages: number;
+  used_page: string;
+}
+
+export interface NetDevTopoImportPreview {
+  graph: NetDevTopologyGraph;
+  stats: NetDevTopoImportStats;
+  warnings: string[];
+}
+
+export interface NetDevTopologyDesign {
+  imported_at: string;
+  source_file: string;
+  graph: NetDevTopologyGraph;
+}
+
+// F5: attack-path SIMULATION — pure data-plane, zero connections. Every
+// field is 推演 (simulated), never measured.
+export interface NetDevAttackPathStep { from: string; to: string; via: string; }
+export interface NetDevAttackPath {
+  exposure_device: string; reason: string; finding_id?: string;
+  steps: NetDevAttackPathStep[]; end_device: string; end_role?: string;
+  end_managed: boolean; hops: number; score: number;
+}
+export interface NetDevExposurePoint { device: string; finding_id?: string; reason: string; paths: number; }
+export interface NetDevCutSuggestion { from: string; to: string; via: string; paths_removed: number; }
+export interface NetDevAttackPathReport {
+  generated_at: string; simulated: boolean; edge_sources: string[];
+  nodes: number; edges: number;
+  exposure_points: NetDevExposurePoint[];
+  paths: NetDevAttackPath[];
+  cut_suggestions: NetDevCutSuggestion[];
+}
+
+// ── 大屏家族（docs/NETDEV_DASHBOARD_SPEC.md v2.0）────────────────────────────
+
+export interface NetDevOvCoverage { managed: number; discovered: number; unreachable: number; no_snmp: number; }
+export interface NetDevOvHealth {
+  polled: number; reachable: number; last_poll_at: number;
+  flap_alerts: number; p90_alerts: number; uptime_spark?: Record<string, number[]>;
+  max_cpu_pct: number; max_cpu_dev?: string; max_mem_pct: number;
+}
+export interface NetDevOvRisk {
+  critical: number; warning: number; info: number; open_total: number;
+  weighted_score: number; risk_level: "safe" | "low" | "medium" | "high" | "critical" | string;
+  cve_matches: number; cve_needs_feed: boolean; weak_creds: number;
+}
+export interface NetDevOvInflight {
+  proposals_pending: number; proposals_watchable: number; jobs_running: number;
+  jobs_paused: number; cutovers_active: number; terminals_open: number;
+}
+export interface NetDevOvEvent { id: string; severity: string; title: string; source: string; at: string; }
+export interface NetDevOvAudit {
+  chain_ok: boolean; chain_total: number; last_entry_at?: string;
+  read_24h: number; write_24h: number; guardrail_24h: number;
+}
+export interface NetDevBaselineAgg { devices: number; checked: number; rules: number; hits: number; at: string; }
+export interface NetDevInspectionRow {
+  at: string; kind: string; devices: number; checked: number;
+  critical: number; warning: number; info: number; baseline_hits?: number;
+  if_brief?: Record<string, { up: number; down: number }>;
+}
+export interface NetDevOvStats {
+  mttr_hours?: number;
+  baseline?: NetDevBaselineAgg | null;
+  cve_by_severity?: Record<string, number>;
+  cve_needs_feed: boolean;
+  job_done: number; job_finished: number;
+  cmd_mix: Record<string, number>; audit_entries: number;
+  device_by_role: Record<string, number>;
+  proposal_funnel: Record<string, number>;
+  risk_trend?: NetDevInspectionRow[];
+  inspection_compliance?: { enabled: boolean; last_run_at?: string; ok: boolean; title?: string; note?: string } | null;
+  cred_health?: { count: number; last_changed_at?: string; age_days: number; stale: boolean } | null;
+}
+export interface NetDevOverviewSnapshot {
+  generated_at: number; stale_after_sec: number;
+  coverage: NetDevOvCoverage; health: NetDevOvHealth; risk: NetDevOvRisk;
+  inflight: NetDevOvInflight; events: NetDevOvEvent[]; audit: NetDevOvAudit; stats: NetDevOvStats;
+  scenario_cutover_active: boolean; scenario_discovery_run: boolean;
+}
+
+export type NetDevChainKind = "event" | "action" | "evidence" | "conclusion" | "remediation" | "verification";
+export interface NetDevChainNode {
+  id: string; kind: NetDevChainKind; label: string; device?: string; at?: string;
+  ref_type?: string; ref_id?: string; status?: string; group?: number;
+}
+export interface NetDevChainEdge { from: string; to: string; label: string; }
+export interface NetDevInvestigationChain {
+  case_id?: string; case_title?: string; has_case: boolean; finding_id?: string;
+  counts: Record<string, number>;
+  nodes: NetDevChainNode[]; edges: NetDevChainEdge[];
+  timeline?: NetDevTimelineEvent[]; truncated: boolean;
+}
+
+export interface NetDevCutoverBoardStep {
+  label: string; status: string; device?: string; proposal_id?: string;
+  gate?: boolean; decision_point?: boolean; est_sec?: number; started_at?: string; ended_at?: string;
+}
+export interface NetDevCutoverBoardDevice { device: string; status: string; rollback_ready: boolean; }
+export interface NetDevCutoverBoardJob {
+  id: string; name: string; status: string; active_ms: number; commands: number;
+  max_wall_sec?: number; max_commands?: number;
+}
+export interface NetDevCutoverBoardAudit { time: string; device: string; command: string; status: string; }
+export interface NetDevCutoverBoard {
+  id: string; name: string; status: string; deadline?: string; remaining_sec: number;
+  frozen: number; steps: NetDevCutoverBoardStep[]; devices: NetDevCutoverBoardDevice[];
+  rollback_ready: boolean; rollback_note?: string;
+  jobs: NetDevCutoverBoardJob[]; audit: NetDevCutoverBoardAudit[];
+  report?: string; has_active: boolean; found: boolean;
+}
+
+export interface NetDevDiscoveryFunnelStep { key: string; count: number; }
+export interface NetDevDiscoveryLayerRow { layer: number; label: string; note?: string; }
+export interface NetDevTriSource { design: number; plan: number; matched: number; only_design: number; only_plan: number; }
+export interface NetDevPortEvent { at: string; ip: string; port: number; kind: string; }
+export interface NetDevDiscoveryBoard {
+  leads: number; fingerprinted: number; pending: number; promoted: number; managed: number;
+  subnets_done: number; subnets_total: number; layer_depth: number; max_hops: number;
+  run_status?: string; run_vantage?: string; run_updated_at?: string;
+  funnel: NetDevDiscoveryFunnelStep[]; layers: NetDevDiscoveryLayerRow[];
+  tri_source: NetDevTriSource; port_events: NetDevPortEvent[];
+}
+
+export interface NetDevExposureMatrixRow {
+  device: string; critical: number; warning: number; info: number;
+  cve_critical: number; cve_high: number; managed: boolean;
+}
+export interface NetDevSyslogCountRow { hour: string; device: string; class: string; n: number; }
+export interface NetDevTopoReconcile {
+  tri: { design: number; plan: number; matched: number; only_design: number; only_plan: number };
+  platforms: Record<string, number>;
+}
+export interface NetDevExposureBoard {
+  simulated: boolean; generated_at: string; critical: number; warning: number;
+  paths: NetDevAttackPath[]; cut_suggestions: NetDevCutSuggestion[];
+  exposure_points: NetDevExposurePoint[]; matrix: NetDevExposureMatrixRow[];
+  cve_by_severity?: Record<string, number>; cve_needs_feed: boolean;
+  unmanaged_ends: number; max_hops: number;
 }
 
 // ── Loop Engineering (docs/loop-engineering-spec.md §4) ──────────────────────
@@ -2456,4 +2629,99 @@ export interface LoopRunStatus {
   tokensUsed: number;
   timeline: LoopRoundRecord[];
   report?: LoopReport;
+}
+
+// ── 迁移导入向导（§5.6 / completion-spec §6 #11）────────────────────────────
+
+export interface NetDevImportDevice {
+  name: string;
+  vendor: string;
+  kind: string;
+  address: string;
+  group: string;
+  via: string[];
+}
+
+export interface NetDevImportDeviceConflict {
+  imported: NetDevImportDevice;
+  local: NetDevImportDevice;
+}
+
+export interface NetDevImportDBSource {
+  name: string;
+  type: string;
+  host: string;
+  port: number;
+  via: string[];
+}
+
+export interface NetDevImportPreview {
+  new_devices: NetDevImportDevice[];
+  conflict_devices: NetDevImportDeviceConflict[];
+  db_new: NetDevImportDBSource[];
+  db_overlap: string[];
+  findings_seen: number;
+  exported_at: string;
+  source: string;
+}
+
+// TCP discovery (App.NetDevDiscover / netdev_discover, completion-spec §5.1).
+export interface NetDevDiscoverHost {
+  ip: string;
+  open: { port: number; banner?: string }[];
+}
+
+// 待确认区 (F1): one unmanaged asset lead. An asset LEAD, never a finding
+// and never an inventory device — promotion is a human act.
+export interface NetDevBannerInfo {
+  kind?: string;
+  product?: string;
+  version?: string;
+  vendor_hint?: string;
+  role_hint?: string;
+}
+
+export interface NetDevDiscoveredHost {
+  ip: string;
+  hostname?: string;
+  vendor_hint?: string;
+  role_hint?: string;
+  first_seen: string;
+  last_seen: string;
+  sources: string[];
+  ports: { port: number; banner?: string; parsed?: NetDevBannerInfo; at: string }[];
+}
+
+export interface NetDevPromoteForm {
+  ip: string;
+  name: string;
+  vendor: string;
+  role: string;
+}
+
+// F4 multi-layer discovery: vantage tables → confirm-first plan.
+export interface NetDevPlanStep { cidr: string; class: string; hosts: number; default_on: boolean; }
+export interface NetDevDiscoverPlan {
+  vantage: string;
+  steps: NetDevPlanStep[];
+  arp_known: number;
+  warnings: string[];
+}
+
+// F4 run state: checkpoint progress of one layered scan (paused runs offer
+// 继续上次发现 in the dialog).
+export interface NetDevDiscoveryRunState {
+  id: string; vantage: string; ports?: number[];
+  cidrs: string[]; done_cidrs: string[];
+  status: "running" | "paused" | "done";
+  started_at: string; updated_at: string; found_so_far: number;
+}
+
+// Human-terminal recordings (completion-spec §6 #5 回放查看): files were
+// ANSI-stripped and redacted at capture time.
+export interface NetDevHumanTTYRecording {
+  device: string;
+  path: string;
+  at: string;
+  bytes: number;
 }

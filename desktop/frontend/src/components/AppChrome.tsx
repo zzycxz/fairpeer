@@ -96,8 +96,20 @@ export function AppChrome({
   // close, mode chips) are asked for again.
   const tabBar = null;
 
+  // 双击标题区切换最大化/还原（Windows 标题栏惯例）。Wails 只防了双击误触
+  // 拖拽（dragTest 的 e.detail !== 1），最大化切换由应用实现；判定与 dragTest
+  // 同源——目标元素 computed --wails-draggable === "drag"，按钮/输入/chip
+  // （no-drag）自动排除。浏览器预览无 runtime，守卫跳过（假按钮同款纪律）。
+  const onTitleDoubleClick = (e: React.MouseEvent<HTMLElement>) => {
+    if (!(window as any).runtime) return;
+    const el = e.target as HTMLElement | null;
+    if (!el) return;
+    if (window.getComputedStyle(el).getPropertyValue("--wails-draggable").trim() !== "drag") return;
+    void WindowToggleMaximise();
+  };
+
   return (
-    <header className={chromeClassName}>
+    <header className={chromeClassName} onDoubleClick={onTitleDoubleClick}>
       {browserPreviewChrome && darwinChrome && (
         <div className="app-chrome__traffic" aria-hidden="true">
           <span />
@@ -198,13 +210,13 @@ export function AppChrome({
           className="app-chrome__window-controls app-chrome__window-controls--windows" 
           aria-hidden="true"
         >
-          <span className="app-chrome__window-control app-chrome__window-control--minimize" onClick={WindowMinimise}>
+          <span className="app-chrome__window-control app-chrome__window-control--minimize" onClick={() => (window as any).runtime && WindowMinimise()}>
             <Minus size={12} strokeWidth={1.9} />
           </span>
-          <span className="app-chrome__window-control app-chrome__window-control--maximize" onClick={WindowToggleMaximise}>
+          <span className="app-chrome__window-control app-chrome__window-control--maximize" onClick={() => (window as any).runtime && WindowToggleMaximise()}>
             {isMaximized ? <Copy size={10} strokeWidth={1.8} /> : <Square size={10} strokeWidth={1.8} />}
           </span>
-          <span className="app-chrome__window-control app-chrome__window-control--close" onClick={Quit}>
+          <span className="app-chrome__window-control app-chrome__window-control--close" onClick={() => (window as any).runtime && Quit()}>
             <X size={12} strokeWidth={1.9} />
           </span>
         </div>

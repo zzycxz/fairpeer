@@ -56,6 +56,29 @@ function imSourceLabel(source: ImSourceMessage, t: ReturnType<typeof useT>): str
   return t("settings.botFeishu");
 }
 
+// T2 entry A: a .drawio attachment chip carries a one-click "parse as
+// topology" action — read via the same ReadFile bridge the viewer uses,
+// parse through NetDevImportTopoPreview, then hand the preview to the
+// netdev dock via a window event (no state lifting across panes).
+async function parseTopoFromAttachment(path: string, name: string): Promise<void> {
+  try {
+    let pv: import("../lib/types").NetDevTopoImportPreview | null = null;
+    if (name.toLowerCase().endsWith(".vsdx")) {
+      // Binary OOXML package: bytes via the capped base64 bridge.
+      const b64 = await app.NetDevAttachmentBytesBase64(path);
+      if (b64) pv = await app.NetDevImportVsdxPreview(b64);
+    } else {
+      const preview = await app.ReadFile(path);
+      if (preview?.binary || !preview?.body) return;
+      pv = await app.NetDevImportTopoPreview(preview.body);
+    }
+    if (!pv) return;
+    window.dispatchEvent(new CustomEvent("fairpeer:netdev-topo-import", { detail: { name, preview: pv } }));
+  } catch {
+    // attachments the bridge cannot read simply keep the viewer-only chip
+  }
+}
+
 function attachmentIcon(kind: "image" | "file" | "folder") {
   if (kind === "image") return <Image size={15} />;
   if (kind === "folder") return <Folder size={15} />;
@@ -131,10 +154,18 @@ export function UserMessage({
         {orderedAttachments.length > 0 && (
           <div className="msg-attachments" aria-label={t("msg.attachments")}>
             {orderedAttachments.map((attachment, index) => (
+              <span key={`${attachment.path}:${index}`} style={{ position: "relative", display: "inline-block" }}>
+              {((attachment.name ?? "").toLowerCase().endsWith(".drawio") || (attachment.name ?? "").toLowerCase().endsWith(".vsdx")) && (
+                <span
+                  role="button"
+                  className="msg-attachment__topo"
+                  title={t("msg.parseTopo")}
+                  onClick={e => { e.stopPropagation(); void parseTopoFromAttachment(attachment.path, attachment.name); }}
+                >↗</span>
+              )}
               <button
                 type="button"
                 className={`msg-attachment msg-attachment--${attachment.kind}`}
-                key={`${attachment.path}:${index}`}
                 title={t("msg.previewAttachment", { name: attachment.name })}
                 onClick={() =>
                   openAttachmentViewer({
@@ -157,6 +188,7 @@ export function UserMessage({
                   </span>
                 </span>
               </button>
+              </span>
             ))}
           </div>
         )}
@@ -408,7 +440,7 @@ export function TurnActions({
                         .catch(() => setRewindPreview([]));
                     }}
                   >
-                    <span>{rewindPreview === null ? "预览改动" : "收起预览"}</span>
+                    <span>{rewindPreview === null ? t("rewind.preview") : t("rewind.collapse")}</span>
                     <span className="rewind__menu-meta">{checkpoint.files.length} files</span>
                   </button>
                 )}

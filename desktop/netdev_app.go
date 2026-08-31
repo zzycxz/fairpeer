@@ -1,12 +1,13 @@
 package main
 
-// netdev_app.go bridges the 运维 (netdev) settings surface to the frontend:
+// netdev_app.go bridges 运维 (netdev) settings surface to the frontend:
 // device/hop inventory editing (persisted to the USER config — the pinned
 // global section), credential capture (secret store, netdev/* namespace),
 // audit tail for the settings page, and ~/.ssh/config import candidates.
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -106,7 +107,7 @@ type NetDevSettingsView struct {
 	// ExtraRead is the read-table extension map (vendor → commands) so the
 	// settings page can show and edit the knowledge-growth path.
 	ExtraRead map[string][]string `json:"extraRead"`
-	// Projects are site-level scopes (name + device groups) for the 运维
+	// Projects are site-level scopes (name + device groups) for 运维
 	// title-bar switcher — the industry site-first navigation pattern.
 	Projects []NetDevProjectView `json:"projects"`
 	// Presets are named diagnostic batteries for the device card.
@@ -133,7 +134,11 @@ type NetDevSettingsView struct {
 	// NotifySMTPPassword is write-only (blank = keep the stored secret).
 	NotifySMTPPassword string `json:"notifySMTPPassword,omitempty"`
 	// BriefingPushTime schedules the daily briefing push ("" = off).
-	BriefingPushTime string `json:"briefingPushTime"`
+	BriefingPushTime  string `json:"briefingPushTime"`
+	ScheduledBaseline bool   `json:"scheduledBaseline"`
+	// WeakCredDict is the strong-tier password-dictionary file path
+	// (completion-spec §5.2; "" = basic tier only).
+	WeakCredDict string `json:"weakCredDict"`
 	// P3 gap closure: config fields previously TOML-only.
 	DefaultMode          string               `json:"defaultMode"` // diagnose | assess
 	MaxSessionsPerDevice int                  `json:"maxSessionsPerDevice"`
@@ -260,6 +265,8 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 		NotifySMTPTo:         orEmptyStrings(cfg.NetDev.NotifySMTPTo),
 		NotifySMTPPassSet:    netdevSecretSet(netdev.SecretKindPassword, strings.TrimSpace(cfg.NetDev.NotifySMTPPassEnv)),
 		BriefingPushTime:     cfg.NetDev.BriefingPushTime,
+		ScheduledBaseline:    cfg.NetDev.ScheduledBaseline,
+		WeakCredDict:         cfg.NetDev.WeakCredDict,
 	}
 	if v.Scopes == nil {
 		v.Scopes = []string{}
@@ -542,6 +549,7 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 			nd.Presets = c.NetDev.Presets
 		}
 		nd.InspectionInterval = c.NetDev.InspectionInterval
+		nd.ScheduledBaseline = v.ScheduledBaseline
 		if strings.TrimSpace(v.BackupInterval) != "" {
 			nd.BackupInterval = strings.TrimSpace(v.BackupInterval)
 		} else {
@@ -583,6 +591,7 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 			nd.NotifySMTPPassEnv = "NETDEV_NOTIFY_SMTP_PASS"
 		}
 		nd.BriefingPushTime = strings.TrimSpace(v.BriefingPushTime)
+		nd.WeakCredDict = strings.TrimSpace(v.WeakCredDict)
 		nd.DefaultMode = strings.TrimSpace(v.DefaultMode)
 		nd.MaxSessionsPerDevice = v.MaxSessionsPerDevice
 		nd.Discovery.Rate = v.DiscoveryRate
@@ -744,7 +753,7 @@ func (a *App) NetDevAddExtraRead(vendor, command string) (err error) {
 }
 
 // NetDevTurnBegin resets the per-turn command budget. The frontend calls it
-// on every user submit while in the 运维 profile, so [netdev.guardrails]
+// on every user submit while in 运维 profile, so [netdev.guardrails]
 // turn_command_budget is a true per-ask control.
 func (a *App) NetDevTurnBegin() {
 	cfg, err := config.Load()
@@ -785,9 +794,22 @@ func startInspectionScheduler(a *App) {
 					continue
 				}
 				time.Sleep(d)
-				ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
+				ctx, cancel := context.WithTimeout(a.ctx, 10*time.Minute)
+				stamp := netdev.ScheduleStamp{Kind: "inspection", At: time.Now().Format("2006-01-02T15:04:05")}
 				if f, err := netdev.SharedManager(cfg).RunInspection(ctx); err == nil && f != nil {
+					stamp.Ok, stamp.Title = true, f.Title
 					slog.Info("scheduled netdev inspection filed", "title", f.Title)
+				} else if err != nil {
+					stamp.Note = err.Error()
+				}
+				// scheduled_baseline（§7.3）：基线电池并入调度巡检（R1 journal
+				// 会多一行 kind=baseline 的汇总）。
+				if cfg.NetDev.ScheduledBaseline {
+					if bf, err := netdev.SharedManager(cfg).RunBaseline(ctx); err == nil && bf != nil {
+						stamp.Title += "；" + bf.Title
+					} else if err != nil {
+						stamp.Note += " baseline: " + err.Error()
+					}
 				}
 				// Golden drift rides the inspection sweep: every baselined
 				// device gets a sealed snapshot + baseline diff; drift
@@ -799,6 +821,9 @@ func startInspectionScheduler(a *App) {
 						}
 					}
 				}
+				// 执行戳（巡检合规卡的数据源）：调度跑没跑、成没成，总览可答。
+				netdev.SaveScheduleStamp(stamp)
+				a.dashEmit("overview")
 				cancel()
 			}
 		}()
@@ -865,7 +890,10 @@ func startBriefingScheduler(a *App) {
 				// we slept.
 				if fresh, err := config.Load(); err == nil && fresh != nil && strings.TrimSpace(fresh.NetDev.BriefingPushTime) != "" {
 					if report, err := a.NetDevDailyBriefing(); err == nil && strings.TrimSpace(report) != "" {
-						netdev.NotifyPushText("briefing", "[fairpeer 运维] 每日早报", report)
+						// 直达链接只追加在推送副本上（应用内渲染的早报原文不变，
+						// 验收口径不受影响）；这些链接在 IM 里点开落对应大屏。
+						push := report + "\n\n直达：调查链 fairpeer://screen/chain ｜ 暴露面 fairpeer://screen/exposure ｜ 总览 fairpeer://screen/overview"
+						netdev.NotifyPushText("briefing", "[fairpeer 运维] 每日早报", push)
 						slog.Info("scheduled netdev briefing pushed", "bytes", len(report))
 					} else if err != nil {
 						slog.Warn("scheduled netdev briefing failed", "err", err)
@@ -918,7 +946,13 @@ func (a *App) NetDevWeakCredCheck(device, tier string) (netdev.WeakCredResult, e
 	a.startNetDevLiveForwarding(cfg)
 	ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
 	defer cancel()
-	return netdev.SharedManager(cfg).WeakCredCheck(ctx, device, tier, "")
+	// completion-spec §5.2: strong tier uses the configured dictionary file
+	// (content stays local; never exported).
+	dict := ""
+	if tier != "basic" {
+		dict = strings.TrimSpace(cfg.NetDev.WeakCredDict)
+	}
+	return netdev.SharedManager(cfg).WeakCredCheck(ctx, device, tier, dict)
 }
 
 // ── 操作实况 (live ops panel) ─────────────────────────────────────────────────
@@ -1003,6 +1037,162 @@ func (a *App) NetDevTopologyPlan() (*netdev.TopologyGraph, error) {
 	return &g, nil
 }
 
+// NetDevImportTopoPreview (T2a): parse a .drawio XML text into a preview —
+// L0-L3 layered, no side effects, malformed input errors (never panics).
+func (a *App) NetDevImportTopoPreview(xmlText string) (*netdev.ImportTopoPreview, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	names, addrs := topoFusionLists(cfg)
+	return netdev.ImportDrawio(xmlText, names, addrs)
+}
+
+// NetDevImportVsdxPreview (T2b): the OOXML twin — b64-encoded .vsdx bytes
+// through the same Preview/Apply seam. Legacy .vsd refuses with guidance.
+func (a *App) NetDevImportVsdxPreview(b64 string) (*netdev.ImportTopoPreview, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(b64))
+	if err != nil {
+		return nil, fmt.Errorf("vsdx: bad base64: %w", err)
+	}
+	names, addrs := topoFusionLists(cfg)
+	return netdev.ImportVsdx(data, names, addrs)
+}
+
+func topoFusionLists(cfg *config.Config) ([]string, map[string]string) {
+	names := make([]string, 0, len(cfg.NetDev.Devices))
+	addrs := map[string]string{}
+	for _, d := range cfg.NetDev.Devices {
+		names = append(names, d.Name)
+		if d.Address != "" {
+			addrs[d.Address] = d.Name
+		}
+	}
+	return names, addrs
+}
+
+// NetDevImportTopoApply persists the confirmed design as the third topology
+// source (plan | design | snapshot). Idempotent overwrite; audited.
+func (a *App) NetDevImportTopoApply(sourceFile string, graph netdev.TopologyGraph) error {
+	if len(graph.Nodes) == 0 {
+		return fmt.Errorf("apply: empty graph")
+	}
+	if err := netdev.SaveTopologyDesign(&netdev.TopologyDesign{SourceFile: sourceFile, Graph: graph}); err != nil {
+		return err
+	}
+	_ = netdev.AppendAudit(netdev.Audit{
+		Time:    time.Now(),
+		Device:  "(import-topo)",
+		Command: "import " + strings.TrimSpace(sourceFile),
+		Class:   "read", Status: netdev.AuditOK,
+	})
+	return nil
+}
+
+// NetDevTopologyDesign returns the stored design snapshot (nil when none).
+func (a *App) NetDevTopologyDesign() (*netdev.TopologyDesign, error) {
+	return netdev.LoadTopologyDesign()
+}
+
+// NetDevDiscoveryRunState returns the persisted run (nil when none) — the
+// dialog uses it to offer 继续上次发现 when a run sits paused.
+func (a *App) NetDevDiscoveryRunState() (*netdev.DiscoveryRunState, error) {
+	return netdev.LoadDiscoveryRun()
+}
+
+// NetDevDiscoverResume continues a paused layered scan from its checkpoint.
+func (a *App) NetDevDiscoverResume() ([]netdev.DiscoverHostResult, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	wall := cfg.NetDev.Discovery.WallSec
+	if wall <= 0 {
+		wall = 14400
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, time.Duration(wall)*time.Second)
+	defer cancel()
+	return netdev.SharedManager(cfg).DiscoverResume(ctx)
+}
+
+// NetDevDiscoverPause cancels the in-flight discovery run (checkpoint is
+// already persisted per net; resume continues the remainder).
+func (a *App) NetDevDiscoverPause() (bool, error) {
+	run, err := netdev.LoadDiscoveryRun()
+	if err != nil || run == nil {
+		return false, nil
+	}
+	ok := netdev.PauseDiscoverRun(run.ID)
+	if ok {
+		_ = netdev.AppendAudit(netdev.Audit{Time: time.Now(), Device: "(discover-layer)", Command: "pause " + run.ID, Class: "read", Status: netdev.AuditOK})
+	}
+	return ok, nil
+}
+
+// NetDevAttachmentBytesBase64 reads ONE attachment file as base64 for the
+// chat chip's vsdx topology import. Workspace-path resolution is the same
+// gate as ReadFile; the size cap keeps a pasted blob from becoming a memory
+// bomb. Text channels stay with ReadFile — this exists for binary only.
+func (a *App) NetDevAttachmentBytesBase64(rel string) (string, error) {
+	const capBytes = 8 << 20 // matches the vsdx parser's page cap posture
+	path, ok, err := a.workspacePath(rel)
+	if err != nil || !ok {
+		return "", fmt.Errorf("invalid path")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("not a regular file")
+	}
+	if info.Size() > capBytes {
+		return "", fmt.Errorf("attachment too large for import (%d bytes > %d)", info.Size(), capBytes)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(b), nil
+}
+
+// NetDevAttackPaths (F5): the pure-data attack-path SIMULATION — exposure
+// findings × zero-session adjacency (IP-plan inference + imported design).
+// No device sessions, no dials; the report is labeled 推演.
+func (a *App) NetDevAttackPaths() (*netdev.AttackPathReport, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	g := netdev.InferTopology(cfg)
+	if d, derr := netdev.LoadTopologyDesign(); derr == nil && d != nil {
+		g.Edges = append(g.Edges, d.Graph.Edges...)
+		known := map[string]bool{}
+		for _, n := range g.Nodes {
+			known[n.Name] = true
+		}
+		for _, n := range d.Graph.Nodes {
+			if !known[n.Name] {
+				g.Nodes = append(g.Nodes, n)
+			}
+		}
+	}
+	findings, _ := netdev.ListFindings()
+	report := netdev.BuildAttackPaths(g, findings)
+	_ = netdev.AppendAudit(netdev.Audit{
+		Time:    time.Now(),
+		Device:  "(attack-path)",
+		Command: "simulate",
+		Class:   "read", Status: netdev.AuditOK,
+	})
+	return report, nil
+}
+
 // NetDevRunBaseline runs the config-security baseline battery (sealed reads +
 // local rules) and files Findings. Human entry point; the agent has the
 // read-only netdev_baseline tool.
@@ -1013,7 +1203,11 @@ func (a *App) NetDevRunBaseline() (*netdev.Finding, error) {
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 3*time.Minute)
 	defer cancel()
-	return netdev.SharedManager(cfg).RunBaseline(ctx)
+	f, err := netdev.SharedManager(cfg).RunBaseline(ctx)
+	if err == nil {
+		a.dashEmit("overview", "exposure")
+	}
+	return f, err
 }
 
 // ── configuration backup vault ─────────────────────────────────────────────
@@ -1093,18 +1287,25 @@ func (a *App) NetDevDailyBriefing() (string, error) {
 			fLines = append(fLines, fmt.Sprintf("- [%s] %s（设备：%s，证据 %d 条）", f.Severity, f.Title, strings.Join(f.Devices, ","), len(f.Evidence)))
 		}
 	}
+	// D3 同源：三计数改读总览快照（buildOverviewData），与看板永不漂移；
+	// 快照失败时回退旧口径（尾部 400 条重算），行为不回归。
 	readN, writeN, refusedN := 0, 0, 0
-	for _, e := range audit {
-		if !recent(StringOrEmpty(e.Time)) {
-			continue
-		}
-		switch e.Class {
-		case "read":
-			readN++
-		case "write", "proposal-write":
-			writeN++
-		case "guardrail":
-			refusedN++
+	snap, serr := a.buildOverviewData(false)
+	if serr == nil {
+		readN, writeN, refusedN = snap.Audit.Read24h, snap.Audit.Write24h, snap.Audit.Guardrail24h
+	} else {
+		for _, e := range audit {
+			if !recent(StringOrEmpty(e.Time)) {
+				continue
+			}
+			switch e.Class {
+			case "read":
+				readN++
+			case "write", "proposal-write":
+				writeN++
+			case "guardrail":
+				refusedN++
+			}
 		}
 	}
 	var pLines []string
@@ -1112,6 +1313,14 @@ func (a *App) NetDevDailyBriefing() (string, error) {
 		pLines = append(pLines, fmt.Sprintf("- %s [%s] %s", p.ID, p.Status, p.Intent))
 	}
 	backups := netdev.ListBackups("")
+	// F5: the daily briefing carries the exposure simulation (labeled 推演) —
+	// the same zero-session graph the topology button computes.
+	attackText := "（暂无暴露点或路径）"
+	if rep, aerr := a.NetDevAttackPaths(); aerr == nil && rep != nil {
+		if s := netdev.RenderAttackPaths(rep); s != "" {
+			attackText = s
+		}
+	}
 	prompt := fmt.Sprintf(`你是运维晨报助手。以下是过去 24 小时本网络（%s）的客观数据。请基于数据输出晨报，不要编造数据之外的事实；如需核实可用只读工具抽查，但不要发起任何变更。
 
 数据：
@@ -1122,6 +1331,9 @@ func (a *App) NetDevDailyBriefing() (string, error) {
 %s
 备份版本总数：%d
 
+暴露面推演（零连接，标注「推演」）：
+%s
+
 输出格式（markdown，简短）：
 1. 一句话总体判断 + 风险等级（低/中/高）
 2. 需要关注的三件事（按优先级；每件标注依据来自哪条数据）
@@ -1130,7 +1342,8 @@ func (a *App) NetDevDailyBriefing() (string, error) {
 		strings.Join(fLines, "\n"),
 		readN, writeN, refusedN,
 		strings.Join(pLines, "\n"),
-		len(backups))
+		len(backups),
+		attackText)
 	if len(fLines) == 0 && readN == 0 && len(pLines) == 0 {
 		return "过去 24 小时没有可汇总的数据——先跑一次巡检或基线核查，明天的晨报就有料了。", nil
 	}
@@ -1171,7 +1384,11 @@ func (a *App) NetDevRunInspection() (*netdev.Finding, error) {
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
 	defer cancel()
-	return netdev.SharedManager(cfg).RunInspection(ctx)
+	f, err := netdev.SharedManager(cfg).RunInspection(ctx)
+	if err == nil {
+		a.dashEmit("overview", "chain")
+	}
+	return f, err
 }
 
 // NetDevFindings lists diagnosis findings newest-first (Finding cards).
@@ -1202,7 +1419,40 @@ func (a *App) NetDevApproveProposal(id string, confirm2 bool) (*netdev.Proposal,
 	if err != nil {
 		return nil, err
 	}
-	return netdev.SharedManager(cfg).ApproveProposal(id, confirm2)
+	p, err := netdev.SharedManager(cfg).ApproveProposal(id, confirm2)
+	if err == nil {
+		a.dashEmit("overview", "chain", "cutover")
+	}
+	return p, err
+}
+
+// NetDevRejectProposal is the human veto (completion-spec §4.1): draft or
+// approved-but-unexecuted proposals only; the reason is persisted so the
+// agent's next turn sees why it was turned down.
+func (a *App) NetDevRejectProposal(id string, reason string) (*netdev.Proposal, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	p, err := netdev.SharedManager(cfg).RejectProposal(id, reason)
+	if err == nil {
+		a.dashEmit("overview", "chain", "cutover")
+	}
+	return p, err
+}
+
+// NetDevDeleteProposal removes a draft/terminal proposal file; live-pipeline
+// states are refused — they must stay auditable.
+func (a *App) NetDevDeleteProposal(id string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if err := netdev.SharedManager(cfg).DeleteProposal(id); err != nil {
+		return err
+	}
+	a.dashEmit("overview", "chain", "cutover")
+	return nil
 }
 
 // NetDevExecuteProposal rolls the approved change device-by-device (backup →
@@ -1214,7 +1464,11 @@ func (a *App) NetDevExecuteProposal(id string) (*netdev.Proposal, error) {
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Minute)
 	defer cancel()
-	return netdev.SharedManager(cfg).ExecuteProposal(ctx, id)
+	p, err := netdev.SharedManager(cfg).ExecuteProposal(ctx, id)
+	if err == nil {
+		a.dashEmit("overview", "chain", "cutover")
+	}
+	return p, err
 }
 
 // NetDevRollbackProposal runs the authored rollback plan over the applied
@@ -1226,7 +1480,11 @@ func (a *App) NetDevRollbackProposal(id string) (*netdev.Proposal, error) {
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Minute)
 	defer cancel()
-	return netdev.SharedManager(cfg).RollbackProposal(ctx, id)
+	p, err := netdev.SharedManager(cfg).RollbackProposal(ctx, id)
+	if err == nil {
+		a.dashEmit("overview", "chain", "cutover")
+	}
+	return p, err
 }
 
 // NetDevTestConnection runs the first-device flow for one device: connect →
@@ -1521,6 +1779,7 @@ func (a *App) NetDevHealthSnapshot() (netdev.HealthSnapshot, error) {
 			if a.ctx != nil {
 				runtime.EventsEmit(a.ctx, "netdev:health", h)
 			}
+			a.dashEmit("overview")
 		})
 		m.EnsureHealthPoller()
 	})
@@ -1561,10 +1820,214 @@ func ensureSyslogReceiver(cfg *config.Config) {
 	})
 }
 
+// NetDevDiscover (completion-spec §5.1): the GUI trigger for the sealed TCP
+// discovery — the exact path, scope check and audit of the agent's
+// netdev_discover tool. Out-of-scope CIDRs are refused before any dial.
+// ports: empty = the default management-plane set (22/23/161/443/830); the
+// discovery dialog passes the user's custom list (F1 spec §4.2.5 — the old
+// hardcoded nil made the GUI deaf to port choices).
+func (a *App) NetDevDiscover(cidr, via string, ports []int) ([]netdev.DiscoverHostResult, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	ctx, cancel := context.WithTimeout(a.ctx, 120*time.Second)
+	defer cancel()
+	res, err := netdev.SharedManager(cfg).DiscoverTCP(ctx, via, strings.TrimSpace(cidr), ports)
+	if err != nil {
+		return nil, err
+	}
+	_ = netdev.AppendAudit(netdev.Audit{
+		Time: time.Now(), Device: "(discover)",
+		Command: "tcp-probe " + strings.TrimSpace(cidr) + " via=" + strings.TrimSpace(via),
+		Class:   "read", Status: netdev.AuditOK,
+	})
+	a.dashEmit("discovery", "overview")
+	return res, nil
+}
+
+// NetDevDiscoveredHosts lists the 待确认区 (F1): asset leads from discovery,
+// nmap imports and (later) neighbor tables. Read-only.
+func (a *App) NetDevDiscoveredHosts() ([]*netdev.DiscoveredHost, error) {
+	return netdev.ListDiscoveredHosts()
+}
+
+// NetDevPromoteForm is one 待确认→纳管 row the user confirmed in the UI.
+// The frontend prefills from the lead (hostname/IP/vendor hint); the human
+// edits before submitting — promotion is never automatic.
+type NetDevPromoteForm struct {
+	IP     string `json:"ip"`
+	Name   string `json:"name"`
+	Vendor string `json:"vendor"`
+	Role   string `json:"role"`
+}
+
+// NetDevPromoteHosts turns confirmed leads into inventory skeletons via the
+// config-apply path (credentials stay empty — wiring creds is a separate
+// human act on the device form). Audited; consumed leads leave the store.
+func (a *App) NetDevPromoteHosts(entries []NetDevPromoteForm) error {
+	if len(entries) == 0 {
+		return fmt.Errorf("no entries to promote")
+	}
+	for _, e := range entries {
+		if strings.TrimSpace(e.IP) == "" || strings.TrimSpace(e.Name) == "" {
+			return fmt.Errorf("promote: every entry needs an IP and a name")
+		}
+	}
+	// State-history snapshot: promotion rewrites the inventory TOML and the
+	// layer ledger, and consumes the leads' files — all revert together.
+	promoteSnap := []string{config.UserConfigPath(), netdev.DeviceLayersPath()}
+	for _, e := range entries {
+		promoteSnap = append(promoteSnap, filepath.Join(netdev.DiscoveredDir(), strings.TrimSpace(e.IP)+".json"))
+	}
+	netdev.StateEventSnap(netdev.StateEventPromote, fmt.Sprintf("%d hosts", len(entries)), netdev.StateActorUser, promoteSnap...)
+	cfgErr := a.applyConfigOnly(func(c *config.Config) error {
+		taken := map[string]bool{}
+		for _, d := range c.NetDev.Devices {
+			taken[d.Name] = true
+		}
+		for _, e := range entries {
+			name := strings.TrimSpace(e.Name)
+			if taken[name] {
+				continue // idempotent re-promotion: existing name wins
+			}
+			c.NetDev.Devices = append(c.NetDev.Devices, config.NetDevDevice{
+				Name:    name,
+				Address: strings.TrimSpace(e.IP),
+				Vendor:  strings.TrimSpace(e.Vendor),
+				Role:    strings.TrimSpace(e.Role),
+				Port:    22,
+			})
+			taken[name] = true
+		}
+		return nil
+	})
+	if cfgErr != nil {
+		return cfgErr
+	}
+	// F4 layer ledger: a promoted lead's depth follows the device, so a
+	// later vantage run enforces max_hops against real recursion depth.
+	if leads, lerr := netdev.ListDiscoveredHosts(); lerr == nil {
+		layerByIP := map[string]int{}
+		for _, h := range leads {
+			layerByIP[h.IP] = h.Layer
+		}
+		for _, e := range entries {
+			_ = netdev.RecordDeviceLayer(strings.TrimSpace(e.Name), layerByIP[e.IP])
+		}
+	}
+	ips := make([]string, 0, len(entries))
+	for _, e := range entries {
+		netdev.RecordPromotion(strings.TrimSpace(e.Name), strings.TrimSpace(e.IP)) // 漏斗第 4 级账本（best-effort）
+		_ = netdev.DeleteDiscoveredHost(e.IP)
+		ips = append(ips, e.IP)
+	}
+	_ = netdev.AppendAudit(netdev.Audit{
+		Time: time.Now(), Device: "(promote)",
+		Command: "promote " + strings.Join(ips, ","),
+		Class:   "write", Status: netdev.AuditOK,
+	})
+	a.dashEmit("discovery", "overview")
+	return nil
+}
+
+// NetDevDeleteDiscoveredHost dismisses one lead (not our asset / stale).
+func (a *App) NetDevDeleteDiscoveredHost(ip string) error {
+	ip = strings.TrimSpace(ip)
+	netdev.StateEventSnap(netdev.StateEventLeadDismiss, ip, netdev.StateActorUser, filepath.Join(netdev.DiscoveredDir(), ip+".json"))
+	if err := netdev.DeleteDiscoveredHost(ip); err != nil {
+		return err
+	}
+	_ = netdev.AppendAudit(netdev.Audit{
+		Time: time.Now(), Device: "(promote)",
+		Command: "dismiss " + strings.TrimSpace(ip),
+		Class:   "read", Status: netdev.AuditOK,
+	})
+	a.dashEmit("discovery")
+	return nil
+}
+
+// NetDevDiscoverPrecheck (F4): read the vantage's interface/route/ARP tables
+// (sealed read path, zero probe traffic) and fold them into the
+// confirm-first plan card.
+func (a *App) NetDevDiscoverPrecheck(vantage string) (*netdev.DiscoverPlan, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
+	defer cancel()
+	return netdev.SharedManager(cfg).DiscoverPrecheck(ctx, strings.TrimSpace(vantage))
+}
+
+// NetDevDiscoverLayer (F4): probe the user-CONFIRMED subnets through the
+// vantage device's SSH tunnel. Scope whitelist applies per CIDR; results
+// land in the 待确认区 as layer-discover.
+func (a *App) NetDevDiscoverLayer(vantage string, cidrs []string, ports []int) ([]netdev.DiscoverHostResult, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	wall := cfg.NetDev.Discovery.WallSec
+	if wall <= 0 {
+		wall = 14400 // spec §4.7: discovery jobs default to 4h
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, time.Duration(wall)*time.Second)
+	defer cancel()
+	res, err := netdev.SharedManager(cfg).DiscoverLayer(ctx, vantage, cidrs, ports)
+	if err == nil {
+		a.dashEmit("discovery", "overview")
+	}
+	return res, err
+}
+
+// NetDevNetconfQuery (completion-spec §5.4): the device card's read-only
+// NETCONF shortcuts — canned RPCs only (interfaces / running-config), through
+// the same NETCONF session pool + redaction as the agent's netdev_netconf.
+func (a *App) NetDevNetconfQuery(device, kind string) (string, error) {
+	var inner string
+	switch kind {
+	case "interfaces":
+		inner = `<rpc><get><filter type="subtree"><interfaces xmlns="urn:ietf:params:xml:ns:yang:ietf-interfaces"/></filter></get></rpc>`
+	case "running":
+		inner = `<rpc><get-config><source><running/></source></get-config></rpc>`
+	default:
+		return "", fmt.Errorf("unknown netconf query %q (interfaces|running)", kind)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
+	defer cancel()
+	reply, err := netdev.SharedManager(cfg).NetconfRPC(ctx, device, inner)
+	if err != nil && reply == "" {
+		return "", err
+	}
+	out, _ := netdev.RedactCounted(reply)
+	return out, nil
+}
+
+// NetDevHumanTTYRecordings lists saved (already redacted) terminal session
+// recordings, newest first (completion-spec §6 #5: 回放查看).
+func (a *App) NetDevHumanTTYRecordings() ([]netdev.HumanTTYRecording, error) {
+	return netdev.ListHumanTTYRecordings()
+}
+
+// NetDevHumanTTYRecordingRead returns one recording's text; paths outside the
+// recordings directory are refused.
+func (a *App) NetDevHumanTTYRecordingRead(path string) (string, error) {
+	return netdev.ReadHumanTTYRecording(path)
+}
+
 // NetDevTrapStatus reports the SNMP trap receiver state.
-func (a *App) NetDevTrapStatus() (bool, int, int, error) {
+func (a *App) NetDevTrapStatus() (netdev.SyslogStatusView, error) {
 	l, p, b := netdev.TrapReceiverStatus()
-	return l, p, b, nil
+	return netdev.SyslogStatusView{Listening: l, Port: p, Buffered: b}, nil
 }
 
 // NetDevCases lists investigation cases (newest first).
@@ -1732,7 +2195,7 @@ func (a *App) NetDevOOBLaunch(device string) (string, error) {
 		runtime.BrowserOpenURL(a.ctx, url)
 		what = "浏览器 " + url + "（BMC Web）"
 	default:
-		return "", fmt.Errorf("device %q has no out-of-band entry — configure oob_url in the 运维 settings (§6.3)", device)
+		return "", fmt.Errorf("device %q has no out-of-band entry — configure oob_url in 运维设置 (§6.3)", device)
 	}
 	_ = netdev.AppendAudit(netdev.Audit{Time: time.Now(), Device: device, Command: "oob-launch " + what, Class: "oob", Status: netdev.AuditOK})
 	return what, nil
@@ -1745,7 +2208,11 @@ func (a *App) NetDevJobStart(def netdev.Job) (*netdev.Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	return netdev.SharedManager(cfg).JobStart(&def)
+	j, err := netdev.SharedManager(cfg).JobStart(&def)
+	if err == nil {
+		a.dashEmit("overview", "cutover")
+	}
+	return j, err
 }
 
 func (a *App) NetDevJobs() ([]*netdev.Job, error) {
@@ -1757,7 +2224,11 @@ func (a *App) NetDevJobGet(id string) (*netdev.Job, error) {
 }
 
 func (a *App) NetDevJobPause(id string) error {
-	return netdev.JobPause(id)
+	if err := netdev.JobPause(id); err != nil {
+		return err
+	}
+	a.dashEmit("overview", "cutover")
+	return nil
 }
 
 func (a *App) NetDevJobResume(id string) (*netdev.Job, error) {
@@ -1765,11 +2236,19 @@ func (a *App) NetDevJobResume(id string) (*netdev.Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	return netdev.SharedManager(cfg).JobResume(id)
+	j, err := netdev.SharedManager(cfg).JobResume(id)
+	if err == nil {
+		a.dashEmit("overview", "cutover")
+	}
+	return j, err
 }
 
 func (a *App) NetDevJobAbort(id string) (*netdev.Job, error) {
-	return netdev.JobAbort(id)
+	j, err := netdev.JobAbort(id)
+	if err == nil {
+		a.dashEmit("overview", "cutover")
+	}
+	return j, err
 }
 
 // ── 割接模式（§7.2）──────────────────────────────────────────────────────
@@ -1779,7 +2258,11 @@ func (a *App) NetDevCutoverStart(def netdev.CutoverRun) (*netdev.CutoverRun, err
 	if err != nil {
 		return nil, err
 	}
-	return netdev.SharedManager(cfg).CutoverStart(&def)
+	c, err := netdev.SharedManager(cfg).CutoverStart(&def)
+	if err == nil {
+		a.dashEmit("cutover", "overview", "chain")
+	}
+	return c, err
 }
 
 func (a *App) NetDevCutovers() ([]*netdev.CutoverRun, error) {
@@ -1795,7 +2278,11 @@ func (a *App) NetDevCutoverContinue(id string) (*netdev.CutoverRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	return netdev.SharedManager(cfg).CutoverContinue(id)
+	c, err := netdev.SharedManager(cfg).CutoverContinue(id)
+	if err == nil {
+		a.dashEmit("cutover", "overview", "chain")
+	}
+	return c, err
 }
 
 func (a *App) NetDevCutoverRollback(id string) (*netdev.CutoverRun, error) {
@@ -1803,7 +2290,11 @@ func (a *App) NetDevCutoverRollback(id string) (*netdev.CutoverRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	return netdev.SharedManager(cfg).CutoverRollback(context.Background(), id)
+	c, err := netdev.SharedManager(cfg).CutoverRollback(context.Background(), id)
+	if err == nil {
+		a.dashEmit("cutover", "overview", "chain")
+	}
+	return c, err
 }
 
 func (a *App) NetDevCutoverAbort(id string) (*netdev.CutoverRun, error) {
@@ -1811,7 +2302,11 @@ func (a *App) NetDevCutoverAbort(id string) (*netdev.CutoverRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	return netdev.SharedManager(cfg).CutoverAbort(id)
+	c, err := netdev.SharedManager(cfg).CutoverAbort(id)
+	if err == nil {
+		a.dashEmit("cutover", "overview", "chain")
+	}
+	return c, err
 }
 
 // NetDevCutoverReport saves the before/after report where the user picks.
@@ -1970,6 +2465,54 @@ func (a *App) NetDevExportState() (string, error) {
 	return netdev.SharedManager(cfg).ExportState()
 }
 
+// NetDevImportPreview reads an export file and returns the confirm-area diff
+// (new devices / conflicts / db sources). No mutation — preview only
+// (completion-spec §6 #11 迁移导入向导).
+func (a *App) NetDevImportPreview(path string) (*netdev.ImportPreview, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).ImportPreview(path)
+}
+
+// NetDevImportApply performs the reviewed merge: adds the checked new
+// entries and takes the imported side of the checked conflicts. Credentials
+// are never migrated — skeletons land empty for the user to re-enter.
+func (a *App) NetDevImportApply(path string, addNames []string, takeOvernames []string) (int, error) {
+	add := map[string]bool{}
+	for _, n := range addNames {
+		add[n] = true
+	}
+	take := map[string]bool{}
+	for _, n := range takeOvernames {
+		take[n] = true
+	}
+	applied := 0
+	// State-history snapshot: migration import merges devices/DB sources into
+	// the inventory TOML — revertible as one event.
+	netdev.StateEventSnap(netdev.StateEventImport, filepath.Base(path), netdev.StateActorUser, config.UserConfigPath())
+	cfgErr := a.applyConfigOnly(func(c *config.Config) error {
+		m := netdev.SharedManager(c)
+		n, err := m.ImportApply(path, addNames, takeOvernames)
+		if err != nil {
+			return err
+		}
+		// SharedManager mutated its own cfg copy; mirror the merged inventory
+		// into the config being persisted.
+		c.NetDev.Devices = m.Cfg().NetDev.Devices
+		c.NetDev.DBSources = m.Cfg().NetDev.DBSources
+		applied = n
+		return nil
+	})
+	_ = add
+	_ = take
+	if cfgErr != nil {
+		return applied, cfgErr
+	}
+	return applied, nil
+}
+
 // ── Golden Config 基线与漂移 ────────────────────────────────────────────────
 
 // NetDevSetGoldenFromBackup marks one backup version as the device's golden
@@ -2029,6 +2572,12 @@ func (a *App) NetDevNotifyTest() error {
 	}
 	netdev.NotifyPushText("test", "[fairpeer 运维] 通知测试", "这是一条测试消息——看到它说明告警推送链路畅通。真正的告警会带设备、证据与「回复 /netdev 详情 <编号>」提示。")
 	return nil
+}
+
+// NetDevImportStageFile persists an in-browser-read export payload and
+// returns the staged path (the wizard then previews/applies by path).
+func (a *App) NetDevImportStageFile(content string) (string, error) {
+	return netdev.ImportStageFile(content)
 }
 
 // ── 状态历史（三层回退之"状态回退"）────────────────────────────────────────
@@ -2116,5 +2665,6 @@ func (a *App) NetDevStateRestore(id int) (NetDevStateRestoreResultView, error) {
 	if err != nil {
 		return view, err
 	}
+	a.dashEmit("overview")
 	return view, nil
 }

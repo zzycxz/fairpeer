@@ -15,6 +15,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -325,6 +327,69 @@ func saveHumanTTYRecording(device string, raw []byte) (string, error) {
 		return "", err
 	}
 	return p, nil
+}
+
+// recNameRe parses recording filenames "<device>-<yyyymmdd>-<hhmmss>" — the
+// device token itself may contain dashes, so anchor on the trailing stamp.
+var recNameRe = regexp.MustCompile(`^(.*)-(\d{8}-\d{6})$`)
+
+// HumanTTYRecording is one saved session recording (completion-spec §6 #5:
+// 回放查看——文件已在落盘时 ANSI 剥离 + 脱敏，此处只做只读罗列/读取).
+type HumanTTYRecording struct {
+	Device string `json:"device"`
+	Path   string `json:"path"`
+	At     string `json:"at"` // yyyymmdd-hhmmss
+	Bytes  int64  `json:"bytes"`
+}
+
+// ListHumanTTYRecordings scans the recording dir, newest first.
+func ListHumanTTYRecordings() ([]HumanTTYRecording, error) {
+	dir := filepath.Join(netdevStateDir(), "humantty")
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := []HumanTTYRecording{}
+	for _, e := range ents {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".txt") {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), ".txt")
+		m := recNameRe.FindStringSubmatch(name)
+		if m == nil {
+			continue
+		}
+		out = append(out, HumanTTYRecording{
+			Device: m[1], At: m[2],
+			Path:  filepath.Join(dir, e.Name()),
+			Bytes: fi.Size(),
+		})
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].At > out[b].At })
+	return out, nil
+}
+
+// ReadHumanTTYRecording returns one recording's (already redacted) text. The
+// path is restricted to the recordings dir — evidence files elsewhere are not
+// readable through this surface.
+func ReadHumanTTYRecording(path string) (string, error) {
+	dir := filepath.Join(netdevStateDir(), "humantty")
+	clean := filepath.Clean(path)
+	if filepath.Dir(clean) != dir {
+		return "", fmt.Errorf("not a human-terminal recording path")
+	}
+	data, err := os.ReadFile(clean)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 func sanitizeFileToken(s string) string {

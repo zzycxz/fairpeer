@@ -87,10 +87,10 @@ func (m *Manager) srvConfDevice(deviceName string) (config.NetDevDevice, error) 
 		return config.NetDevDevice{}, fmt.Errorf("device %q is not in the inventory", deviceName)
 	}
 	if d.Vendor != "linux" {
-		return config.NetDevDevice{}, fmt.Errorf("device %q: 配置文件管理面向 linux SSH 目标（§7.3）", deviceName)
+		return config.NetDevDevice{}, fmt.Errorf("device %q: 配置文件管理仅面向 linux SSH 目标（§7.3）", deviceName)
 	}
 	if len(d.ConfigPaths) == 0 {
-		return config.NetDevDevice{}, fmt.Errorf("device %q 未配置 config_paths 白名单——在运维设置里登记（如 /etc/nginx）", deviceName)
+		return config.NetDevDevice{}, fmt.Errorf("device %q 未配置 config_paths 白名单——在运维设置中登记（如 /etc/nginx）", deviceName)
 	}
 	return d, nil
 }
@@ -223,7 +223,7 @@ func (m *Manager) SrvConfDrift(ctx context.Context, path string, devices []strin
 		row := SrvConfDriftRow{Device: name}
 		d, err := m.srvConfDevice(name)
 		if err == nil && !srvConfAllowed(d, path) {
-			err = fmt.Errorf("path 不在 %s 的 config_paths 白名单", name)
+			err = fmt.Errorf("路径不在 %s 的 config_paths 白名单中", name)
 		}
 		if err != nil {
 			row.Status, row.Error = "error", err.Error()
@@ -236,7 +236,7 @@ func (m *Manager) SrvConfDrift(ctx context.Context, path string, devices []strin
 		case err != nil:
 			row.Status, row.Error = "error", err.Error()
 		case !ok:
-			row.Status, row.Error = "absent", "文件不存在"
+			row.Status, row.Error = "absent", "文件不存在或不可读"
 		case i == 0:
 			base = text
 			row.Status = "same" // the baseline itself
@@ -284,7 +284,7 @@ func (m *Manager) validateRestoreVerify(s *ProposalStep, target config.NetDevDev
 		return fmt.Errorf("proposal: restore-verify step for %q: source %q does not whitelist %s in config_paths", s.Device, s.RestoreDevice, s.RemotePath)
 	}
 	if src.Name == target.Name || src.Group == target.Group {
-		return fmt.Errorf("proposal: restore-verify 演练接收方 %q 与备份源同设备/同组（%q）——生产目标不允许作为演练接收方（§7.3）", s.Device, src.Group)
+		return fmt.Errorf("proposal: restore-verify 演练接收方 %q 与备份源同设备/同组（%q）——生产环境目标不允许作为演练接收方（§7.3）", s.Device, src.Group)
 	}
 	if s.RestoreVersion != "" {
 		if _, err := SrvConfText(s.RestoreVersion); err != nil {
@@ -302,7 +302,7 @@ func (m *Manager) execRestoreVerify(ctx context.Context, target config.NetDevDev
 	if version == "" {
 		vers := SrvConfVersions(s.RestoreDevice, s.RemotePath)
 		if len(vers) == 0 {
-			return fmt.Errorf("source %s has no snapshot of %s — 拍一次快照再演练", s.RestoreDevice, s.RemotePath)
+			return fmt.Errorf("源设备 %s 没有 %s 的快照——请先创建快照再演练", s.RestoreDevice, s.RemotePath)
 		}
 		version = vers[0].ID
 	}

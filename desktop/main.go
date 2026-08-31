@@ -71,6 +71,13 @@ func main() {
 		}
 	}
 
+	// fairpeer:// 深链冷启动（应用未开、协议拉起本进程）：扫 argv 暂存路由，
+	// 前端 boot 后经 NetDevConsumeDeepLink 取走。协议注册随启动（幂等）。
+	registerFairpeerProtocol()
+	if raw := deepLinkArg(os.Args); raw != "" {
+		stashPendingDeepLink(raw)
+	}
+
 	err := wails.Run(&options.App{
 		Title:     "fairpeer",
 		Width:     width,

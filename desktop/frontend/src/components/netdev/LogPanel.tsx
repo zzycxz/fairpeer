@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { app, onNetdevLogFollow } from "../../lib/bridge";
-import type { NetDevDBSourceView, NetDevDeviceView, NetDevLogFollowEvent } from "../../lib/types";
+import { useT } from "../../lib/i18n";
+import { exportTextFile } from "../../lib/netdevExport";
+import type { NetDevDBSourceView, NetDevDeviceView, NetDevLogFollowEvent, NetDevSyslogCountRow } from "../../lib/types";
 
 // LogPanel — the 日志 dock tab: the structured log-source reader/streamer on
 // top of netdev_log_read / log follow. The agent never free-hands shell and
@@ -47,12 +49,21 @@ const levelClass = (line: string): string => {
   return "";
 };
 
-export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench }: {
+export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench, onOpenSettings }: {
   devices: NetDevDeviceView[];
   dbSources: NetDevDBSourceView[];
   onInsertComposer?: (text: string) => void;
   onOpenWorkbench?: () => void;
+  onOpenSettings?: (tab: string) => void;
 }) {
+  const t = useT();
+  // 事件量（R3 journal，页签充实）：挂载拉一次——日志域自己的统计层。
+  const [sysCounts, setSysCounts] = useState<NetDevSyslogCountRow[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    app.NetDevSyslogCounts(500).then(rows => { if (alive) setSysCounts(rows ?? []); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const hosts = useMemo(() => devices.filter(d => d.vendor === "linux" || d.vendor === "windows" || d.vendor === "vmware" || d.kind === "docker" || d.kind === "k8s"), [devices]);
   const [device, setDevice] = useState(hosts[0]?.name ?? "");
   const dev = hosts.find(h => h.name === device);
@@ -141,7 +152,7 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
       if (ev.device !== device) return;
       if (ev.done) {
         setFollowing(false);
-        setNote(`跟踪已停止：${ev.reason ?? ""}`);
+        setNote(t("ndv.logp.followStopped", { reason: ev.reason ?? "" }));
         return;
       }
       if (ev.chunk) appendLines(ev.chunk.split("\n").filter(Boolean));
@@ -162,22 +173,22 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
 
   const read = async () => {
     if (kind === "db") return; // db reads go through the quick-query buttons
-    if (!device || (kind === "docker" && !container.trim()) || (kind === "k8s" && !k8sPod.trim()) || (kind === "winevt" && !evtChannel.trim())) { setNote("请先选择设备/填好源"); return; }    setBusy(true); setNote("");
+    if (!device || (kind === "docker" && !container.trim()) || (kind === "k8s" && !k8sPod.trim()) || (kind === "winevt" && !evtChannel.trim())) { setNote(t("ndv.logp.pickSource")); return; }    setBusy(true); setNote("");
     try {
       if (following) { await app.NetDevLogFollowStop(device); setFollowing(false); }
       if (kind === "syslog") {
         const rows = await app.NetDevSyslogTail(device, tailN, grep);
         setLines(rows);
-        if ((rows ?? []).length === 0) setNote("缓冲区为空——设备需把 syslog 指向本机接收端口（设置 → 运维 → syslog）。");
+        if ((rows ?? []).length === 0) setNote(t("ndv.logp.syslogEmpty"));
         return;
       }
       const res = await app.NetDevLogRead(device, source, tailN, since, grep);
       if (res.refused) {
         setLines([]);
-        setNote(res.refusal ?? "已拒绝");
+        setNote(res.refusal ?? t("ndv.logp.refused"));
       } else {
         setLines((res.output ?? "").split("\n").filter(Boolean));
-        if (res.is_error) setNote("设备返回错误（见输出）");
+        if (res.is_error) setNote(t("ndv.logp.deviceError"));
       }
     } catch (e) {
       setNote(String(e));
@@ -193,7 +204,7 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
       setFollowing(false);
     } else {
       setLines([]);
-      setNote("跟踪中…（硬顶自动断流）");
+      setNote(t("ndv.logp.following"));
       try {
         await app.NetDevLogFollowStart(device, source);
         setFollowing(true);
@@ -241,14 +252,48 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
   const sendToAI = () => {
     if (!onInsertComposer || lines.length === 0) return;
     const excerpt = lines.slice(-80).join("\n");
-    onInsertComposer(`请基于以下来自 ${device || dbSource} 的日志（${source}）诊断问题，先给结论再给证据：\n\n\`\`\`\n${excerpt}\n\`\`\``);
+    onInsertComposer(`${t("ndv.logp.aiPrefix", { dev: device || dbSource, src: source })}\n\n\`\`\`\n${excerpt}\n\`\`\``);
   };
 
   return (
     <div className="ndv__card" style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1 }}>
-      <div className="ndv__card-title">日志{following ? <span style={{ color: "var(--ok)" }}> · 跟踪中</span> : ""}
-        {onOpenWorkbench && <span className="ndv__chip" role="button" style={{ marginLeft: 8, fontWeight: 400 }} title="多源合并时间线与跨设备搜索在主区工作台" onClick={onOpenWorkbench}>⟶ 工作台 · 多源合并</span>}
+      <div className="ndv__card-title">{t("ndv.logp.title")}{following ? <span style={{ color: "var(--ok)" }}> · {t("ndv.logp.followingTag")}</span> : ""}
+        {onOpenWorkbench && <span className="ndv__chip" role="button" style={{ marginLeft: 8, fontWeight: 400 }} title={t("ndv.logp.benchTip")} onClick={onOpenWorkbench}>⟶ {t("ndv.logp.bench")}</span>}
       </div>
+
+      {/* 事件量条（R3）：近 24h 按类目 + 设备排行——点类目即 grep 联动。 */}
+      {(sysCounts?.length ?? 0) > 0 && (
+        <div className="ndv-syscount">
+          {(() => {
+            const cutoff = Date.now() - 24 * 3600 * 1000;
+            const byClass = new Map<string, number>();
+            const byDev = new Map<string, number>();
+            for (const r of sysCounts ?? []) {
+              const ts = Date.parse(r.hour.length === 13 ? r.hour + ":00:00" : r.hour.replace("T", " ")) || 0;
+              if (ts < cutoff) continue;
+              byClass.set(r.class, (byClass.get(r.class) ?? 0) + r.n);
+              byDev.set(r.device, (byDev.get(r.device) ?? 0) + r.n);
+            }
+            const total = Array.from(byClass.values()).reduce((a, b) => a + b, 0);
+            const cls = Array.from(byClass.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
+            const devs = Array.from(byDev.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3);
+            if (total === 0) return null;
+            const max = cls[0]?.[1] || 1;
+            return (<>
+              <span className="ndv-syscount__label">{t("ndv.sysc.title", { n: total })}</span>
+              {cls.map(([k, v]) => (
+                <span key={k} className="ndv-syscount__bar" role="button" title={`${k}: ${v}`}
+                  onClick={() => setGrep(k)}>
+                  <span className="ndv-syscount__k">{k}</span>
+                  <span className="ndv-syscount__track"><span style={{ width: `${Math.max(6, (v / max) * 100)}%` }} /></span>
+                  <span className="ndv-syscount__n">{v}</span>
+                </span>
+              ))}
+              <span className="ndv-syscount__devs dim">{devs.map(([d, v]) => `${d} ${v}`).join(" · ")}</span>
+            </>);
+          })()}
+        </div>
+      )}
 
       {/* Source bar: device + kind + target + params, one row-ish grid. */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
@@ -261,35 +306,35 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
           else setKind("file");
         }} disabled={kind === "db"}>
           {hosts.map(h => <option key={h.name} value={h.name}>{h.name}{h.kind ? `（${h.kind}）` : ""}</option>)}
-          {hosts.length === 0 && <option value="">（无服务器设备）</option>}
+          {hosts.length === 0 && <option value="">{t("ndv.logp.noHosts")}</option>}
         </select>
         <select className="mem-select" value={kind} onChange={e => { void stopFollow(); setKind(e.target.value as typeof kind); }}>
           {dev?.kind !== "k8s" && dev?.kind !== "docker" && <>
-            <option value="file">文件</option>
-            <option value="journal">journald 单元</option>
-            <option value="docker">容器（SSH docker logs）</option>
-            {dbSources.length > 0 && <option value="db">数据库</option>}
-            <option value="syslog">syslog（被动）</option>
+            <option value="file">{t("ndv.logp.kFile")}</option>
+            <option value="journal">{t("ndv.logp.kJournal")}</option>
+            <option value="docker">{t("ndv.logp.kDockerSsh")}</option>
+            {dbSources.length > 0 && <option value="db">{t("ndv.logp.kDb")}</option>}
+            <option value="syslog">{t("ndv.logp.kSyslog")}</option>
           </>}
-          {dev?.kind === "k8s" && <option value="k8s">K8s Pod（只读 API）</option>}
-          {dev?.kind === "docker" && <option value="docker">容器（只读 API）</option>}
-          {dev?.vendor === "windows" && !dev?.kind && <option value="winevt">Windows 事件</option>}
+          {dev?.kind === "k8s" && <option value="k8s">{t("ndv.logp.kK8s")}</option>}
+          {dev?.kind === "docker" && <option value="docker">{t("ndv.logp.kDockerApi")}</option>}
+          {dev?.vendor === "windows" && !dev?.kind && <option value="winevt">{t("ndv.logp.kWinevt")}</option>}
         </select>
         {kind === "file" && (
           <input className="mem-input" style={{ flex: 1, minWidth: 180 }} list="ndv-log-paths" value={target} onChange={e => setTarget(e.target.value)} placeholder="/var/log/nginx/error.log" />
         )}
         {kind === "journal" && (
-          <input className="mem-input" style={{ flex: 1, minWidth: 120 }} value={unit} onChange={e => setUnit(e.target.value)} placeholder="服务名，如 nginx" />
+          <input className="mem-input" style={{ flex: 1, minWidth: 120 }} value={unit} onChange={e => setUnit(e.target.value)} placeholder={t("ndv.logp.phUnit")} />
         )}
         {kind === "docker" && (
           <>
-            <input className="mem-input" style={{ flex: 1, minWidth: 100 }} value={container} onChange={e => setContainer(e.target.value)} placeholder="容器名" />
+            <input className="mem-input" style={{ flex: 1, minWidth: 100 }} value={container} onChange={e => setContainer(e.target.value)} placeholder={t("ndv.logp.phContainer")} />
             {dev?.kind === "docker" && (
               <>
-                <span className="btn btn--secondary btn--small" role="button" onClick={() => void loadContainers()}>{listBusy ? "…" : "列出容器"}</span>
+                <span className="btn btn--secondary btn--small" role="button" onClick={() => void loadContainers()}>{listBusy ? "…" : t("ndv.logp.listContainers")}</span>
                 {ctrList.length > 0 && (
                   <select className="mem-select" style={{ maxWidth: 200 }} value={container} onChange={e => setContainer(e.target.value)}>
-                    <option value="">选择容器（{ctrList.length}）</option>
+                    <option value="">{t("ndv.logp.pickContainer", { n: ctrList.length })}</option>
                     {ctrList.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
                   </select>
                 )}
@@ -299,9 +344,9 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
         )}
         {kind === "k8s" && (
           <>
-            <input className="mem-input" style={{ width: 120 }} value={k8sNs} onChange={e => setK8sNs(e.target.value)} placeholder="命名空间（空=默认）" />
-            <input className="mem-input" style={{ flex: 1, minWidth: 100 }} value={k8sPod} onChange={e => setK8sPod(e.target.value)} placeholder="Pod 名" />
-            <span className="btn btn--secondary btn--small" role="button" onClick={() => void loadPods()}>{listBusy ? "…" : "列出 Pods"}</span>
+            <input className="mem-input" style={{ width: 120 }} value={k8sNs} onChange={e => setK8sNs(e.target.value)} placeholder={t("ndv.logp.phNs")} />
+            <input className="mem-input" style={{ flex: 1, minWidth: 100 }} value={k8sPod} onChange={e => setK8sPod(e.target.value)} placeholder={t("ndv.logp.phPod")} />
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => void loadPods()}>{listBusy ? "…" : t("ndv.logp.listPods")}</span>
             {podList.length > 0 && (
               <select className="mem-select" style={{ maxWidth: 220 }} value="" onChange={e => {
                 const v = e.target.value;
@@ -309,14 +354,14 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
                 const i = v.indexOf("/");
                 if (i > 0) { setK8sNs(v.slice(0, i)); setK8sPod(v.slice(i + 1)); } else { setK8sNs(""); setK8sPod(v); }
               }}>
-                <option value="">选择 Pod（{podList.length}）</option>
+                <option value="">{t("ndv.logp.pickPod", { n: podList.length })}</option>
                 {podList.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
               </select>
             )}
           </>
         )}
         {kind === "winevt" && (
-          <input className="mem-input" style={{ flex: 1, minWidth: 120 }} value={evtChannel} onChange={e => setEvtChannel(e.target.value)} placeholder="通道：Security / System / Application" />
+          <input className="mem-input" style={{ flex: 1, minWidth: 120 }} value={evtChannel} onChange={e => setEvtChannel(e.target.value)} placeholder={t("ndv.logp.phChannel")} />
         )}
         {kind === "db" && (
           <select className="mem-select" value={dbSource} onChange={e => setDbSource(e.target.value)}>
@@ -338,7 +383,11 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
             <span key={q} className="ndv__chip" role="button" onClick={() => void dbQuery(q)}>{q}</span>
           ))}
           {(DB_QUICK[dbSrc.type] ?? []).filter(allowlisted).length === 0 && (
-            <span className="ndv__hint">该源的白名单里没有常用诊断语句——去 设置 → 运维 → 数据库源 添加（如 SHOW PROCESSLIST）。</span>
+            <span className="ndv__hint">
+              {t("ndv.logp.noStatements")}
+              <span className="btn btn--secondary btn--small" role="button" style={{ margin: "0 4px" }} onClick={() => onOpenSettings?.("netdev")}>{t("ndv.goSettings2")}</span>
+              {t("ndv.logp.egProcesslist")}
+            </span>
           )}
         </div>
       )}
@@ -347,18 +396,18 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
       {kind !== "db" && (
         <div style={{ marginBottom: 8 }}>
           <span className={`btn btn--small ${filtersOpen || filterActive ? "btn--primary" : "btn--secondary"}`} role="button"
-            title="行数 / 起始时间 / 正则过滤"
+            title={t("ndv.logp.filterTip")}
             onClick={() => setFiltersOpen(o => !o)}>
-            筛选{filterActive ? ` · ${tailN}行${since.trim() ? ` · ${since.trim()}` : ""}${grep.trim() ? ` · /${grep.trim()}/` : ""}` : ""}
+            {t("ndv.logp.filter")}{filterActive ? ` · ${tailN}${t("ndv.logp.rowsUnit")}${since.trim() ? ` · ${since.trim()}` : ""}${grep.trim() ? ` · /${grep.trim()}/` : ""}` : ""}
           </span>
           {filtersOpen && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6, alignItems: "center" }}>
-              <label className="ndv__meta">行数</label>
+              <label className="ndv__meta">{t("ndv.logp.rows")}</label>
               <input className="mem-input" type="number" style={{ width: 64 }} value={tailN} min={1} max={1000} onChange={e => setTailN(Math.min(1000, Math.max(1, Number(e.target.value) || 100)))} />
-              <label className="ndv__meta">起于</label>
+              <label className="ndv__meta">{t("ndv.logp.since")}</label>
               <input className="mem-input" style={{ width: 130 }} value={since} onChange={e => setSince(e.target.value)} placeholder="2026-08-27 10:00 或 -1h" />
-              <label className="ndv__meta">过滤</label>
-              <input className="mem-input" style={{ width: 110 }} value={grep} onChange={e => setGrep(e.target.value)} placeholder="正则" />
+              <label className="ndv__meta">{t("ndv.logp.grep")}</label>
+              <input className="mem-input" style={{ width: 110 }} value={grep} onChange={e => setGrep(e.target.value)} placeholder={t("ndv.logp.phRegex")} />
             </div>
           )}
         </div>
@@ -366,16 +415,20 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8, alignItems: "center" }}>
         {kind !== "db" && (
           <>
-            <span className="btn btn--secondary btn--small" role="button" onClick={() => void read()}>{busy ? "读取中…" : "读取"}</span>
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => void read()}>{busy ? t("ndv.logp.reading") : t("ndv.logp.read")}</span>
             {kind !== "syslog" && dev?.kind !== "k8s" && dev?.kind !== "docker" && (
-              <span className={`btn btn--small ${following ? "btn--primary" : "btn--secondary"}`} role="button" onClick={() => void toggleFollow()}>{following ? "停止跟踪" : "跟踪"}</span>
+              <span className={`btn btn--small ${following ? "btn--primary" : "btn--secondary"}`} role="button" onClick={() => void toggleFollow()}>{following ? t("ndv.logp.stopFollow") : t("ndv.logp.follow")}</span>
             )}
           </>
         )}
         {onInsertComposer && lines.length > 0 && (
-          <span className="btn btn--secondary btn--small" role="button" onClick={sendToAI}>交给 AI 诊断</span>
+          <span className="btn btn--secondary btn--small" role="button" onClick={sendToAI}>{t("ndv.sendToAI")}</span>
         )}
-        {lines.length > 0 && <span className="btn btn--secondary btn--small" role="button" onClick={() => { setLines([]); setNote(""); }}>清空</span>}
+        {lines.length > 0 && <span className="btn btn--secondary btn--small" role="button" onClick={() => void (async () => {
+          const path = await exportTextFile(`netdev-logs-${device}-${kind}.txt`, lines.join("\n") + "\n");
+          if (path) setNote(t("ndv.exportedTo", { path }));
+        })()}>{t("ndv.export")}</span>}
+        {lines.length > 0 && <span className="btn btn--secondary btn--small" role="button" onClick={() => { setLines([]); setNote(""); }}>{t("ndv.logp.clear")}</span>}
       </div>
 
       {note && <div className="ndv__hint" style={{ marginBottom: 6 }}>{note}</div>}
@@ -386,20 +439,20 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
           <span className={`ndv__chip ${levelFilter === "error" ? "" : "ndv__chip--off"}`} role="button"
             style={levelFilter === "error" ? { borderColor: "var(--danger)", color: "var(--danger)" } : undefined}
             onClick={() => setLevelFilter(f => (f === "error" ? "" : "error"))}>
-            错误 {errCount}
+            {t("ndv.logp.errors", { n: errCount })}
           </span>
           <span className={`ndv__chip ${levelFilter === "warn" ? "" : "ndv__chip--off"}`} role="button"
             style={levelFilter === "warn" ? { borderColor: "var(--warn)", color: "var(--warn)" } : undefined}
             onClick={() => setLevelFilter(f => (f === "warn" ? "" : "warn"))}>
-            警告 {warnCount}
+            {t("ndv.logp.warns", { n: warnCount })}
           </span>
-          {levelFilter && <span className="ndv__meta">显示 {shownLines.length}/{lines.length} 行（仅显示层过滤，「交给 AI」仍取完整缓冲）</span>}
+          {levelFilter && <span className="ndv__meta">{t("ndv.logp.showing", { shown: shownLines.length, total: lines.length })}</span>}
         </div>
       )}
 
       {/* Viewer. */}
       <div ref={boxRef} className="ndv-log__box" style={{ flex: 1, minHeight: 120, overflow: "auto", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 8, fontSize: 11.5, fontFamily: "var(--font-mono, monospace)", lineHeight: 1.5 }}>
-        {lines.length === 0 && !following && <span className="ndv__hint">选择源后「读取」最近日志，或「跟踪」实时流。文件路径限 /var/log 与设备 log_paths 白名单。</span>}
+        {lines.length === 0 && !following && <span className="ndv__hint">{t("ndv.logp.emptyHint")}</span>}
         {jsonCols.length > 0 ? (
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
             <thead><tr>{jsonCols.map(c => <th key={c} style={{ textAlign: "left", borderBottom: "1px solid var(--border)", padding: "2px 6px", position: "sticky", top: 0, background: "var(--bg)", whiteSpace: "nowrap" }}>{c}</th>)}</tr></thead>

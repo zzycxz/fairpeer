@@ -87,7 +87,7 @@ var redisDenied = regexp.MustCompile(`(?i)^(config\s+(set|resetstat|rename)|flus
 func (m *Manager) DBQuery(ctx context.Context, sourceName, query string) (string, error) {
 	src, ok := m.dbSourceByName(sourceName)
 	if !ok {
-		return "", fmt.Errorf("db_source %q is not configured (add it in the 运维 settings — the agent cannot add sources)", sourceName)
+		return "", fmt.Errorf("db_source %q is not configured (add it in 运维设置 — the agent cannot add sources)", sourceName)
 	}
 	label := "db " + src.Type + " " + dbNormalize(query)
 	if src.Type == "redis" {
@@ -107,7 +107,7 @@ func (m *Manager) DBQuery(ctx context.Context, sourceName, query string) (string
 		}
 	} else if !dbQueryAllowed(query, src.Allowlist) {
 		m.dbAuditRefuse(src, query, "not in the source's exact-statement allowlist")
-		return "", fmt.Errorf("netdev_db_query: %q is not in source %q's allowlist (exact statements only — adjust [[netdev.db_sources]] in the 运维 settings if this is a legitimate read)", dbNormalize(query), src.Name)
+		return "", fmt.Errorf("netdev_db_query: %q is not in source %q's allowlist (exact statements only — adjust [[netdev.db_sources]] in 运维设置 if this is a legitimate read)", dbNormalize(query), src.Name)
 	}
 
 	if r, allow := m.guardrailCheck("(db:"+src.Name+")", label); !allow {
@@ -215,7 +215,7 @@ func dbPort(src config.NetDevDBSource, def int) int {
 func dbSQLQuery(ctx context.Context, src config.NetDevDBSource, query string) (string, error) {
 	pass, ok, err := secretGetter(SecretKindPassword, src.PasswordEnv)
 	if err != nil || !ok {
-		return "", fmt.Errorf("secret %s not set — add the password in the 运维 settings (secret store, never TOML)", src.PasswordEnv)
+		return "", fmt.Errorf("secret %s not set — add the password in 运维设置 (secret store, never TOML)", src.PasswordEnv)
 	}
 	driverName := "pgx"
 	if src.Type == "mysql" {
@@ -322,7 +322,7 @@ func (m *Manager) redisQuery(ctx context.Context, src config.NetDevDBSource, n s
 			return "", err
 		}
 		if !ok {
-			return "", fmt.Errorf("secret %s not set — add the password in the 运维 settings", src.PasswordEnv)
+			return "", fmt.Errorf("secret %s not set — add the password in 运维设置", src.PasswordEnv)
 		}
 		pass = v
 	}

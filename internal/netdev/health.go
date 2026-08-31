@@ -25,6 +25,12 @@ type DeviceHealth struct {
 	UptimeSec  int64      `json:"uptimeSec"`
 	Interfaces []IfHealth `json:"interfaces"`
 	LastError  string     `json:"lastError,omitempty"`
+	// 水位（SNMP OID 扩展）：0 = 未采集到（厂商 OID 不适用或设备不答）。
+	CpuPct int `json:"cpuPct,omitempty"`
+	MemPct int `json:"memPct,omitempty"`
+	// 接口 octets 计数器累计和（读取端差分成 bps；0 = 未采集）。
+	InOct  uint64 `json:"inOct,omitempty"`
+	OutOct uint64 `json:"outOct,omitempty"`
 }
 
 // IfHealth is one interface row (ifDescr/ifAdminStatus/ifOperStatus).
@@ -165,10 +171,7 @@ func (m *Manager) PollHealthOnce(ctx context.Context) {
 			_ = RecordMetricPoint(name, MetricPoint{
 				Time: h.Time, Reachable: h.Reachable, UptimeSec: h.UptimeSec,
 				IfUp: h.IfUp(), IfDown: h.IfDown(),
-			})
-			_ = RecordMetricPoint(name, MetricPoint{
-				Time: h.Time, Reachable: h.Reachable, UptimeSec: h.UptimeSec,
-				IfUp: h.IfUp(), IfDown: h.IfDown(),
+				Cpu: h.CpuPct, Mem: h.MemPct, InOct: h.InOct, OutOct: h.OutOct,
 			})
 			if !had || prev.Reachable != h.Reachable || prev.IfDown() != h.IfDown() {
 				notifyHealth(h)
@@ -262,6 +265,9 @@ func (m *Manager) pollDeviceHealth(ctx context.Context, deviceName string) Devic
 		seen[oid] = true
 		h.Interfaces = append(h.Interfaces, IfHealth{Name: name, AdminUp: admin[oid], OperUp: oper[oid]})
 	}
+	// 水位（DASHBOARD spec §7.3）：cpu/mem 厂商 OID 单 GET + 接口 octets 求和
+	// walk——都走已配置的 SNMP 只读通道，一次也不多连。
+	h.CpuPct, h.MemPct, h.InOct, h.OutOct = pollWatermarks(g, device.Vendor)
 	if len(h.Interfaces) == 0 && h.UptimeSec == 0 {
 		h.LastError = "no SNMP response"
 		return h

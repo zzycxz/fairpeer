@@ -1,6 +1,6 @@
 package config
 
-// netdevDefaultPromptAddon sets the diagnostic discipline for the 运维 mode:
+// netdevDefaultPromptAddon sets the diagnostic discipline for 运维 mode:
 // read broadly, reason across devices, never touch configuration. The write
 // path (change proposals) is human-approved by construction; when the model
 // meets a refusal it explains and proposes, it does not retry or route around.

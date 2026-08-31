@@ -98,7 +98,7 @@ func (m *Manager) guardrailCheck(deviceName, command string) (ExecResult, bool) 
 		if d, ok := m.cfg.NetDevDeviceByName(deviceName); ok {
 			if !contains(g.AllowedGroups, d.Group) {
 				r := ExecResult{Device: deviceName, Command: command, Refused: true, Class: "guardrail",
-					Refusal: fmt.Sprintf("device %q is outside this conversation's allowed device groups (%s) — adjust [netdev.guardrails].allowed_groups in the 运维 settings. Do not retry.", deviceName, strings.Join(g.AllowedGroups, ", "))}
+					Refusal: fmt.Sprintf("device %q is outside this conversation's allowed device groups (%s) — adjust [netdev.guardrails].allowed_groups in 运维设置. Do not retry.", deviceName, strings.Join(g.AllowedGroups, ", "))}
 				_ = AppendAudit(Audit{Device: deviceName, Command: command, Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
 				return r, false
 			}
@@ -172,7 +172,7 @@ func (m *Manager) KillAllConnections() int {
 		m.emitConnLive(name, LiveConnStopped)
 	}
 	human := HumanTTYKillAll()
-	_ = AppendAudit(Audit{Device: "(emergency-stop)", Command: fmt.Sprintf("kill all connections (+%d human terminals)", human), Class: "guardrail", Status: AuditOK, OutputBytes: n})
+	_ = AppendAudit(Audit{Device: "(emergency-stop)", Command: fmt.Sprintf("kill all connections (+%d human terminals, +%d discovery runs)", human, CancelDiscoverRuns()), Class: "guardrail", Status: AuditOK, OutputBytes: n})
 	return n
 }
 
@@ -257,7 +257,7 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 	device, ok := m.cfg.NetDevDeviceByName(deviceName)
 	if !ok {
 		return ExecResult{Device: deviceName, Command: command, Refused: true,
-			Refusal: fmt.Sprintf("device %q is not in the user-global netdev inventory (add it in the 运维 settings; the agent cannot add devices itself)", deviceName)}
+			Refusal: fmt.Sprintf("device %q is not in the user-global netdev inventory (add it in 运维设置; the agent cannot add devices itself)", deviceName)}
 	}
 
 	// [netdev.guardrails] gate: group scope + per-turn budget, refused BEFORE
@@ -519,7 +519,7 @@ func secretReader(kind, envName string) func() (string, error) {
 			return "", err
 		}
 		if !ok {
-			return "", fmt.Errorf("secret %s/%s not set — add it in the 运维 settings (credential values live in the secret store, never in TOML)", kind, envName)
+			return "", fmt.Errorf("secret %s/%s not set — add it in 运维设置 (credential values live in the secret store, never in TOML)", kind, envName)
 		}
 		return v, nil
 	}
@@ -557,6 +557,9 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&firewallTool{m: m})
 	reg.Add(&locateTool{m: m})
 	reg.Add(&dbQueryTool{m: m})
+	// fanout (completion-spec §6 #9): one read-only command across many
+	// devices, tabulated — the runtime version of a diagnostic preset.
+	reg.Add(&fanoutTool{m: m, cfg: cfg})
 	// Trust-domain fleet surface (TRUSTDOMAIN_SPEC §15): agent tools exist
 	// only when the host joined a domain — invisible otherwise.
 	if cfg.TrustDomain.Enabled {
@@ -564,6 +567,108 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 		reg.Add(&remoteTool{cfg: cfg})
 		InitAuditAnchoring(cfg) // audit chain head cross-anchors (spec §八)
 	}
+}
+
+// fanoutTool — netdev_fanout: run ONE read-only command across many devices
+// (explicit list or group filter; empty = all in scope) and tabulate results.
+// Every per-device execution goes through the same sealed Exec path as
+// netdev_exec (classifier / budget / redaction / audit) — this tool only adds
+// the fan-out loop and the table rendering.
+type fanoutTool struct {
+	m   *Manager
+	cfg *config.Config
+}
+
+func (t *fanoutTool) Name() string { return "netdev_fanout" }
+
+func (t *fanoutTool) Description() string {
+	return "Run one READ-ONLY command across many devices at once and get a compact per-device table " +
+		"(device → first lines of output / refusal). Targets: explicit devices list, or group filter, or all devices. " +
+		"The command is classifier-checked per device exactly like netdev_exec — writes are refused."
+}
+
+func (t *fanoutTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"command": {"type": "string", "description": "the read-only command, e.g. display clock"},
+			"devices": {"type": "array", "items": {"type": "string"}, "description": "explicit device names"},
+			"group": {"type": "string", "description": "device-group filter (empty with no devices = all)"}
+		},
+		"required": ["command"]
+	}`)
+}
+
+func (t *fanoutTool) ReadOnly() bool { return true }
+
+func (t *fanoutTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		Command string   `json:"command"`
+		Devices []string `json:"devices"`
+		Group   string   `json:"group"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(a.Command) == "" {
+		return "", errors.New("netdev_fanout: command is required")
+	}
+	allow := t.cfg.NetDev.Guardrails.AllowedGroups
+	want := map[string]bool{}
+	for _, d := range a.Devices {
+		want[strings.TrimSpace(d)] = true
+	}
+	var names []string
+	for _, d := range t.cfg.NetDev.Devices {
+		if d.Vendor == "snmp" {
+			continue // SNMP-only targets have no CLI session
+		}
+		if len(allow) > 0 && !contains(allow, d.Group) {
+			continue // outside this conversation's scope — invisible
+		}
+		if len(want) > 0 && !want[d.Name] {
+			continue
+		}
+		if a.Group != "" && d.Group != a.Group {
+			continue
+		}
+		names = append(names, d.Name)
+	}
+	if len(names) == 0 {
+		return "no matching devices in scope", nil
+	}
+	type row struct {
+		Device string `json:"device"`
+		Class  string `json:"class"`
+		Output string `json:"output"`
+	}
+	rows := make([]row, 0, len(names))
+	for _, n := range names {
+		r := t.m.Exec(ctx, n, a.Command)
+		out := r.Output
+		if r.Refused {
+			out = r.Refusal
+		}
+		if r.IsError {
+			out = "[device error] " + out
+		}
+		// keep the table compact: first 6 non-empty lines
+		lines := []string{}
+		for _, l := range strings.Split(out, "\n") {
+			if strings.TrimSpace(l) != "" {
+				lines = append(lines, strings.TrimSpace(l))
+			}
+			if len(lines) == 6 {
+				break
+			}
+		}
+		rows = append(rows, row{Device: n, Class: r.Class, Output: strings.Join(lines, " ⏎ ")})
+	}
+	b, err := json.MarshalIndent(rows, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // dbQueryTool — read-only database diagnostics against a configured
@@ -583,7 +688,7 @@ func (t *dbQueryTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"source": {"type": "string", "description": "db source name from the 运维 settings"},
+			"source": {"type": "string", "description": "db source name from 运维设置"},
 			"query":  {"type": "string", "description": "one plain statement; must match the source's allowlist"}
 		},
 		"required": ["source", "query"]
@@ -810,7 +915,7 @@ func (t *proposeTool) Name() string { return "netdev_propose" }
 
 func (t *proposeTool) Description() string {
 	return "Draft a change proposal (NOT executed): intent + per-device commands + a rollback plan. " +
-		"A human reviews the whole proposal and decides — approving, executing, and rolling back happen only in the 运维 proposal UI. " +
+		"A human reviews the whole proposal and decides — approving, executing, and rolling back happen only in 运维提案界面. " +
 		"Every step needs a rollback plan authored with the change; devices in read-only groups are refused."
 }
 
@@ -854,7 +959,7 @@ func (t *proposeTool) Execute(ctx context.Context, args json.RawMessage) (string
 	}
 	_ = AppendAudit(Audit{Device: "(proposal)", Command: "draft " + p.ID + " (" + a.Intent + ")", Class: "proposal", Status: AuditRefused})
 	needs2 := t.m.ProposalNeedsConfirm2(p)
-	return fmt.Sprintf("proposal %s drafted (status: draft). The user reviews it in 设置 → 运维 → 提案; approval and execution are theirs, not yours.%s",
+	return fmt.Sprintf("proposal %s drafted (status: draft). The user reviews it in 设置 → 运维 → 提案中查看; approval and execution are theirs, not yours.%s",
 		p.ID, map[bool]string{true: " Note: a device in this proposal is in a proposal+confirm2 group — approval demands secondary confirmation.", false: ""}[needs2]), nil
 }
 
@@ -1111,9 +1216,9 @@ func (t *devicesTool) Execute(ctx context.Context, args json.RawMessage) (string
 	}
 	if len(rows) == 0 {
 		if len(t.cfg.NetDev.Devices) > 0 && len(allow) > 0 {
-			return "all devices are outside this conversation's allowed groups (" + strings.Join(allow, ", ") + ") — adjust [netdev.guardrails].allowed_groups in the 运维 settings", nil
+			return "all devices are outside this conversation's allowed groups (" + strings.Join(allow, ", ") + ") — adjust [netdev.guardrails].allowed_groups in 运维设置", nil
 		}
-		return "no devices configured — add them (and their credentials) in the 运维 settings; [netdev] lives in the USER config only", nil
+		return "no devices configured — add them (and their credentials) in 运维设置; [netdev] lives in the USER config only", nil
 	}
 	b, err := json.MarshalIndent(rows, "", "  ")
 	if err != nil {

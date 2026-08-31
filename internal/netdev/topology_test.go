@@ -55,6 +55,13 @@ func TestParseHuaweiLLDP(t *testing.T) {
 	if edges[1].RemoteDevice != "CORE-FW-1" || edges[1].RemotePort != "GigabitEthernet0/1" {
 		t.Fatalf("edge[1] = %+v", edges[1]) // Gig0/1 → GigabitEthernet0/1
 	}
+	// F2: the system description rides the edge as Platform.
+	if edges[0].Platform != "S5735-L48P-EI Huawei Versatile Routing Platform" {
+		t.Fatalf("edge[0].Platform = %q", edges[0].Platform)
+	}
+	if edges[1].Platform != "USG6320 Huawei Versatile Routing Platform" {
+		t.Fatalf("edge[1].Platform = %q", edges[1].Platform)
+	}
 	if edges[2].RemotePort == "" || edges[2].RemotePort == "GigabitEthernet" {
 		t.Fatalf("MAC-typed port id should pass through unchanged: %+v", edges[2])
 	}
@@ -100,6 +107,13 @@ func TestParseCiscoCDP(t *testing.T) {
 	}
 	if edges[1].RemoteDevice != "ROUTER1.corp.example" || edges[1].LocalPort != "GigabitEthernet0/2" {
 		t.Fatalf("edge[1] = %+v", edges[1])
+	}
+	// F2: CDP Platform line — the previously-dead capture is live now.
+	if edges[0].Platform != "cisco WS-C3750G-24TS" {
+		t.Fatalf("edge[0].Platform = %q", edges[0].Platform)
+	}
+	if edges[1].Platform != "cisco ISR4321/K9" {
+		t.Fatalf("edge[1].Platform = %q", edges[1].Platform)
 	}
 	if edges[2].LocalPort != "FastEthernet0/5" || edges[2].RemotePort != "Port 1" {
 		t.Fatalf("edge[2] = %+v (phone Port 1 passes through)", edges[2])

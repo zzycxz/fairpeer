@@ -204,7 +204,7 @@ func (t *assessTool) Name() string { return "netdev_assess" }
 
 func (t *assessTool) Description() string {
 	return "Assessment-mode weak-credential check (NETDEV_SPEC §6.2): test a device's SSH login against the tier's candidate passwords. " +
-		"Gated on the [netdev.assessment] engagement envelope (engagement_id + expires) — refused without an ACTIVE engagement; the user configures it in 设置 → 运维. " +
+		"Gated on the [netdev.assessment] engagement envelope (engagement_id + expires) — refused without an ACTIVE engagement; the user configures it in 设置 → 运维中配置. " +
 		"basic tier = fixed ≤3 candidates (empty/username/admin); dictionary tier = a user-supplied file, hard-capped at 10 (lockout guard). " +
 		"Every attempt is a full auth dial and is audited (passwords never logged). A confirmed weak credential is reported for the user to fix VIA A PROPOSAL — never changed directly."
 }

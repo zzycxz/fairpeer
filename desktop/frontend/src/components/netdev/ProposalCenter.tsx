@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { app } from "../../lib/bridge";
+import { useT } from "../../lib/i18n";
 import { useToast } from "../../lib/toast";
 import { useConfirm } from "../../lib/confirm";
 import type { NetDevProposal } from "../../lib/types";
@@ -19,6 +20,7 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "🔴 回滚失败（需人工处理）",
   watching: "👁 观察期（§7.1）",
   closed: "已关闭",
+  rejected: "⛔ 已驳回",
 };
 
 // 结构化步骤（§7.1）：类型徽标（labels live in proposalStepFormat）。
@@ -30,13 +32,16 @@ export function StepTypeBadge({ type }: { type?: string }) {
 }
 
 // ProposalActions: the approve / execute / rollback buttons with their
-// confirm dialogs. Shared by the settings 提案中心 and the 运维 dock's 提案
+// confirm dialogs. Shared by the settings 提案中心 and 运维 dock 的 提案
 // tab — the human half of the write path lives wherever the human is looking.
 export function
  ProposalActions({ p, onDone }: { p: NetDevProposal; onDone: () => void }) {
+  const t = useT();
   const { showToast } = useToast();
   const confirmDlg = useConfirm();
   const [busy, setBusy] = useState("");
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
   const act = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label);
     try {
@@ -53,42 +58,80 @@ export function
       {p.status === "draft" && (
         <span className="btn btn--primary btn--small" role="button" onClick={() => void act(`approve:${p.id}`, async () => {
           const ok = await confirmDlg({
-            title: `批准提案 ${p.id}`,
+            title: t("ndv.prop.approveTitle", { id: p.id }),
             message:
               `${p.intent}\n\n` +
               (p.steps ?? []).map((s) => `· ${s.device}: ${(s.commands ?? []).join("; ")}`).join("\n") +
               "\n\n回滚计划已随提案起草，批准后仍需手动点击执行。",
-            confirmLabel: "批准",
+            confirmLabel: t("ndv.prop.approve"),
           });
           if (!ok) return;
           await app.NetDevApproveProposal(p.id, true);
         })}>
-          {busy === `approve:${p.id}` ? "…" : "批准"}
+          {busy === `approve:${p.id}` ? "…" : t("ndv.prop.approve")}
         </span>
       )}
       {p.status === "approved" && (
         <span className="btn btn--primary btn--small" role="button" onClick={() => void act(`exec:${p.id}`, async () => {
           if (!(await confirmDlg({
-            title: `执行提案 ${p.id}`,
-            message: "将逐台下发（先备份），任一台失败即冻结。",
-            confirmLabel: "执行",
+            title: t("ndv.prop.execTitle", { id: p.id }),
+            message: t("ndv.prop.execMsg"),
+            confirmLabel: t("ndv.prop.execute"),
           }))) return;
           await app.NetDevExecuteProposal(p.id);
         })}>
-          {busy === `exec:${p.id}` ? "执行中…" : "执行"}
+          {busy === `exec:${p.id}` ? t("ndv.prop.executing") : t("ndv.prop.execute")}
         </span>
       )}
       {(p.status === "partial" || p.status === "done") && (
         <span className="btn btn--secondary btn--small" role="button" onClick={() => void act(`rb:${p.id}`, async () => {
           if (!(await confirmDlg({
-            title: `回滚提案 ${p.id}`,
-            message: "按已起草的回滚计划回滚已执行步骤。",
-            confirmLabel: "回滚",
+            title: t("ndv.prop.rbTitle", { id: p.id }),
+            message: t("ndv.prop.rbMsg"),
+            confirmLabel: t("ndv.prop.rollback"),
             danger: false,
           }))) return;
           await app.NetDevRollbackProposal(p.id);
         })}>
-          {busy === `rb:${p.id}` ? "…" : p.status === "partial" ? "回滚已执行" : "回滚"}
+          {busy === `rb:${p.id}` ? "…" : p.status === "partial" ? t("ndv.prop.rbExecuted") : t("ndv.prop.rollback")}
+        </span>
+      )}
+      {/* 驳回（§4.1）：人工否决权。draft/approved 可驳，原因内联填写并随
+          提案持久化——agent 下一轮读到提案即见被拒原因。 */}
+      {(p.status === "draft" || p.status === "approved") && !rejecting && (
+        <span className="btn btn--danger btn--small" role="button" onClick={() => { setRejecting(true); setReason(""); }}>
+          {t("ndv.prop.rejectEllipsis")}
+        </span>
+      )}
+      {rejecting && (
+        <span style={{ display: "inline-flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            className="mem-input"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder={t("ndv.prop.rejectPh")}
+            style={{ width: 160 }}
+            autoFocus
+          />
+          <span className="btn btn--danger btn--small" role="button" onClick={() => void act(`reject:${p.id}`, async () => {
+            setRejecting(false);
+            await app.NetDevRejectProposal(p.id, reason.trim() || t("ndv.prop.noReason"));
+          })}>{busy === `reject:${p.id}` ? "…" : t("ndv.prop.confirmReject")}</span>
+          <span className="btn btn--secondary btn--small" role="button" onClick={() => setRejecting(false)}>{t("common.cancel")}</span>
+        </span>
+      )}
+      {/* 删除（§4.1 列表治理）：仅 draft/已终结态；活跃管线必须留档。 */}
+      {(p.status === "draft" || p.status === "rejected" || p.status === "done" || p.status === "failed" || p.status === "closed") && (
+        <span className="btn btn--secondary btn--small" role="button" title="删除提案文件（不可恢复）" onClick={() => void act(`del:${p.id}`, async () => {
+          if (!(await confirmDlg({
+            title: `删除提案 ${p.id}`,
+            message: "从磁盘移除提案文件（审计记录保留）。不可恢复。",
+            confirmLabel: "删除",
+            danger: true,
+          }))) return;
+          await app.NetDevDeleteProposal(p.id);
+        })}>
+          {busy === `del:${p.id}` ? "…" : "删除"}
         </span>
       )}
     </span>
@@ -96,6 +139,7 @@ export function
 }
 
 export function ProposalCenter() {
+  const t = useT();
   const confirmDlg = useConfirm();
   const [items, setItems] = useState<NetDevProposal[]>([]);
   const [err, setErr] = useState("");
@@ -135,7 +179,7 @@ export function ProposalCenter() {
         p.steps.map((s) => `· ${stepSummary(s)}`).join("\n") +
         (p.steps.some(s => s.dangerous) ? "\n\n⚠ 含危险动词步骤——已强制二次确认。" : "") +
         "\n\n回滚计划已随提案起草，批准后仍需手动点击执行。",
-      confirmLabel: "批准",
+      confirmLabel: t("ndv.prop.approve"),
     });
     if (!ok) return;
     await app.NetDevApproveProposal(p.id, true);
@@ -144,8 +188,8 @@ export function ProposalCenter() {
   const execute = (p: NetDevProposal) => act(`exec:${p.id}`, async () => {
     if (!(await confirmDlg({
       title: `执行提案 ${p.id}`,
-      message: "将逐台下发（先备份），任一台失败即冻结。",
-      confirmLabel: "执行",
+      message: t("ndv.prop.execMsg"),
+      confirmLabel: t("ndv.prop.execute"),
     }))) return;
     await app.NetDevExecuteProposal(p.id);
   });
@@ -153,8 +197,8 @@ export function ProposalCenter() {
   const rollback = (p: NetDevProposal) => act(`rb:${p.id}`, async () => {
     if (!(await confirmDlg({
       title: `回滚提案 ${p.id}`,
-      message: "按已起草的回滚计划回滚已执行步骤。",
-      confirmLabel: "回滚",
+      message: t("ndv.prop.rbMsg"),
+      confirmLabel: t("ndv.prop.rollback"),
       danger: false,
     }))) return;
     await app.NetDevRollbackProposal(p.id);
@@ -179,17 +223,17 @@ export function ProposalCenter() {
             </span>
             {p.status === "draft" && (
               <span className="btn btn--primary btn--small" role="button" onClick={() => void approve(p)}>
-                {busy === `approve:${p.id}` ? "…" : "批准"}
+                {busy === `approve:${p.id}` ? "…" : t("ndv.prop.approve")}
               </span>
             )}
             {p.status === "approved" && (
               <span className="btn btn--primary btn--small" role="button" onClick={() => void execute(p)}>
-                {busy === `exec:${p.id}` ? "执行中…" : "执行"}
+                {busy === `exec:${p.id}` ? t("ndv.prop.executing") : t("ndv.prop.execute")}
               </span>
             )}
             {(p.status === "partial" || p.status === "done") && (
               <span className="btn btn--secondary btn--small" role="button" onClick={() => void rollback(p)}>
-                {busy === `rb:${p.id}` ? "…" : p.status === "partial" ? "回滚已执行" : "回滚"}
+                {busy === `rb:${p.id}` ? "…" : p.status === "partial" ? t("ndv.prop.rbExecuted") : t("ndv.prop.rollback")}
               </span>
             )}
           </div>

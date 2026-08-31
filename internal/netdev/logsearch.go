@@ -85,7 +85,7 @@ func (m *Manager) LogSearch(ctx context.Context, pattern string, devices, source
 	}
 	res.Total = len(devices)
 	if res.Total == 0 {
-		res.Note = "no linux hosts in the inventory — register one in the 运维 settings or pass explicit device names"
+		res.Note = "no linux hosts in the inventory — register one in 运维设置 or pass explicit device names"
 		return res
 	}
 

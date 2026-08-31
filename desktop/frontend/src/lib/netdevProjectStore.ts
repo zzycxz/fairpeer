@@ -1,4 +1,4 @@
-// netdevProjectStore — the active 运维 project (site scope) shared between the
+// netdevProjectStore — the active 运维项目 (site scope) shared between the
 // NetdevTitleBar's switcher and the NetDevLayout's filtered views. The two
 // mount separately (chrome center slot vs. layout body), so a tiny
 // subscribe-store replaces prop drilling through App.

@@ -14,7 +14,12 @@ func singleInstanceLock(app *App) *options.SingleInstanceLock {
 	}
 	return &options.SingleInstanceLock{
 		UniqueId: singleInstanceID,
-		OnSecondInstanceLaunch: func(options.SecondInstanceData) {
+		OnSecondInstanceLaunch: func(data options.SecondInstanceData) {
+			// fairpeer:// 热路径：IM/邮件里点链接唤起的第二实例——解析
+			// args 里的 URL，推给前端落对应屏，再唤窗到前。
+			if raw := deepLinkArg(data.Args); raw != "" {
+				app.emitDeepLink(raw)
+			}
 			app.secondInstanceLaunch()
 		},
 	}

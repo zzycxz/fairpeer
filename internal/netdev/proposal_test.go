@@ -216,3 +216,63 @@ func fmtSscan(s string, v *int) {
 	}
 	*v = n
 }
+
+// TestProposalRejectDelete covers the human veto (completion-spec §4.1):
+// draft/approved rejectable with a persisted reason the agent's next turn
+// reads; live-pipeline states refuse both veto and delete.
+func TestProposalRejectDelete(t *testing.T) {
+	m := proposalTestManager(t)
+
+	// Reject a draft with a reason.
+	p := draftProposal(m)
+	if err := SaveProposal(p); err != nil {
+		t.Fatal(err)
+	}
+	rejected, err := m.RejectProposal(p.ID, "回滚命令覆盖不完整，重写后再提")
+	if err != nil {
+		t.Fatalf("reject draft: %v", err)
+	}
+	if rejected.Status != ProposalRejected || rejected.RejectReason == "" || !strings.Contains(rejected.Note, "驳回") {
+		t.Fatalf("rejected = %+v", rejected)
+	}
+	// Persisted: reload sees the reason (the agent's visibility path).
+	again, err := GetProposal(p.ID)
+	if err != nil || again.RejectReason != "回滚命令覆盖不完整，重写后再提" {
+		t.Fatalf("reason not persisted: %v %+v", err, again)
+	}
+	// Rejected proposals cannot be approved (terminal).
+	if _, err := m.ApproveProposal(p.ID, false); err == nil {
+		t.Fatal("approve after reject accepted")
+	}
+
+	// Approved-but-unexecuted can also be vetoed.
+	p2 := draftProposal(m)
+	if err := SaveProposal(p2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ApproveProposal(p2.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.RejectProposal(p2.ID, "change window 临近，改期再执行"); err != nil {
+		t.Fatalf("reject approved: %v", err)
+	}
+
+	// Delete: draft and rejected are removable.
+	if err := m.DeleteProposal(p.ID); err != nil {
+		t.Fatalf("delete rejected: %v", err)
+	}
+	if _, err := GetProposal(p.ID); err == nil {
+		t.Fatal("deleted proposal still readable")
+	}
+	// Approved is live pipeline — delete refused.
+	p3 := draftProposal(m)
+	if err := SaveProposal(p3); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ApproveProposal(p3.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.DeleteProposal(p3.ID); err == nil || !strings.Contains(err.Error(), "live pipeline") {
+		t.Fatalf("delete approved accepted: %v", err)
+	}
+}

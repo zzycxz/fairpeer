@@ -30,7 +30,7 @@ import { app, onEvent, onProjectTreeChanged, onSchedulerNotice,
   onRemoteStatus, onBrowserMirror,
 } from "./lib/bridge";
 import { browserMirrorSnapshot, pushBrowserMirrorFrame, requestBrowserMirrorFocus } from "./lib/browserMirror";
-import { onProfileChanged } from "./lib/bridge";
+import { onFairpeerDeepLink, onProfileChanged } from "./lib/bridge";
 import { CoWorkLayout } from "./layouts/CoWorkLayout";
 import { NetDevLayout, NetdevTitleBar } from "./layouts/NetDevLayout";
 import { PreferencePanel } from "./components/cowork/PreferencePanel";
@@ -121,6 +121,9 @@ import { useWindowStatePersistence } from "./lib/windowState";
 import { availableWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
 
 const SIDEBAR_COLLAPSED_KEY = "fairpeer.sidebar.collapsed";
+// netdev 模式的建议 chips（completion-spec §3.3）：覆盖高频 + 低发现度能力
+// （discover/netconf/locate/assess/netconf 厂商命令习惯）的用户语言问法。
+
 const SIDEBAR_DEFAULT_WIDTH = 220;
 const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_MAX_WIDTH = 480;
@@ -815,10 +818,15 @@ export default function App() {
   // emitted after a SwitchProfile rebuild. When true the standard three-pane body
   // is hidden (via the app--cowork class) and a CoWorkLayout is rendered instead.
   const [coworkActive, setCoworkActive] = useState(false);
-  // netdevActive mirrors coworkActive for the 运维 profile: when true the
+  // netdevActive mirrors coworkActive for 运维 profile: when true the
   // standard body is hidden (app--netdev) and the NetDevLayout shell renders.
   // Purely additive — dev/cowork behavior is byte-identical.
   const [netdevActive, setNetdevActive] = useState(false);
+  // fairpeer:// 深链统一入口（DASHBOARD spec §4.12）：冷路径（启动 argv →
+  // NetDevConsumeDeepLink）与热路径（第二实例 → fairpeer:deep-link 事件）都
+  // 汇到这里——不在 netdev profile 时先切过去，落地后按 kind 分发。
+  const [pendingDeepLink, setPendingDeepLink] = useState<{ kind: string; id: string } | null>(null);
+  const deepLinkDispatchRef = useRef(false);
   // Skip the startup splash in the browser dev mock (no Wails runtime to wait
   // for) — only real desktop builds show it. Eliminates the 1.4–6s "stuck"
   // splash devs see when iterating in a browser.
@@ -1759,6 +1767,40 @@ export default function App() {
     },
     [activeTab, tabMetas, switchTab, ensureBlankTab, closeTransientOverlays, notice],
   );
+
+  // fairpeer:// 深链落地（DASHBOARD spec §4.12）：冷路径（启动 argv →
+  // NetDevConsumeDeepLink）与热路径（第二实例 → fairpeer:deep-link 事件）汇到
+  // 这里——不在 netdev profile 先切过去，到位后按 kind 分发（导航型 only，
+  // Go 侧解析器已 fail-closed）。
+  useEffect(() => {
+    const dispatch = (r: { kind: string; id: string }) => {
+      if (r.kind === "finding") {
+        window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-screen", { detail: { screen: "chain", finding: r.id } }));
+      } else if (r.kind === "case") {
+        window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-screen", { detail: { screen: "chain" } }));
+      } else if (r.kind === "cutover") {
+        window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-screen", { detail: { screen: "cutover" } }));
+      } else if (r.kind === "screen") {
+        window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-screen", { detail: { screen: r.id } }));
+      } else if (r.kind === "proposal") {
+        window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-screen", { detail: { tab: "proposals", filter: `id:${r.id}` } }));
+      }
+    };
+    const offLive = onFairpeerDeepLink(r => setPendingDeepLink(r));
+    if (!deepLinkDispatchRef.current) {
+      deepLinkDispatchRef.current = true;
+      app.NetDevConsumeDeepLink().then(r => { if (r) setPendingDeepLink(r); }).catch(() => {});
+    }
+    if (!pendingDeepLink || !netdevActive) return offLive;
+    dispatch(pendingDeepLink);
+    setPendingDeepLink(null);
+    return offLive;
+  }, [pendingDeepLink, netdevActive]);
+
+  // 深链需要 netdev 面：不在就先切（切完上面的 effect 自然落地）。
+  useEffect(() => {
+    if (pendingDeepLink && !netdevActive) void switchProfile("netdev");
+  }, [pendingDeepLink, netdevActive, switchProfile]);
 
   // Startup and workspace/model rebuilds create a fresh controller in normal
   // mode. Re-apply the UI mode once the controller is ready, including the case
@@ -2776,6 +2818,13 @@ export default function App() {
       { id: "cmd-new", group: t("palette.group.commands"), title: t("palette.cmd.newSession"), icon: <SquarePen size={15} />, compact: true, keywords: ["new", "新建"], run: () => void handleNewTab() },
       { id: "cmd-remote-connect", group: t("palette.group.commands"), title: t("remote.trigger"), icon: <Server size={15} />, compact: true, keywords: ["remote", "ssh", "wsl", "docker", "远程"], run: () => setRemoteWizardOpen(true) },
       ...(netdevActive ? [{ id: "cmd-netdev-logs", group: t("palette.group.commands"), title: "日志工作台（多源合并时间线）", icon: <FileText size={15} />, compact: true, keywords: ["logs", "日志", "时间线", "ioc"], run: () => { window.dispatchEvent(new CustomEvent("fairpeer:netdev-bench", { detail: "logs" })); } }] : []),
+      ...(netdevActive ? ([
+        { id: "cmd-ndv-dash-overview", title: "大屏·总览（值守态势）", keywords: ["dash", "overview", "大屏", "总览"] },
+        { id: "cmd-ndv-dash-chain", title: "大屏·调查链（证据链路）", keywords: ["dash", "chain", "调查链", "证据"] },
+        { id: "cmd-ndv-dash-cutover", title: "大屏·割接（变更窗口）", keywords: ["dash", "cutover", "割接", "变更"] },
+        { id: "cmd-ndv-dash-discovery", title: "大屏·发现（资产纳管）", keywords: ["dash", "discovery", "发现", "纳管"] },
+        { id: "cmd-ndv-dash-exposure", title: "大屏·暴露面（推演）", keywords: ["dash", "exposure", "暴露面", "推演"] },
+      ] as const).map(x => ({ id: x.id, group: t("palette.group.commands"), title: x.title, icon: <FileText size={15} />, compact: true, keywords: [...x.keywords], run: () => { window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-screen", { detail: { screen: x.id.replace("cmd-ndv-dash-", "") } })); } })) : []),
       { id: "cmd-history", group: t("palette.group.commands"), title: t("palette.cmd.history"), icon: <History size={15} />, compact: true, keywords: ["history", "历史"], run: () => void openAllHistory() },
       { id: "cmd-trash", group: t("palette.group.commands"), title: t("palette.cmd.trash"), icon: <Trash2 size={15} />, compact: true, keywords: ["trash", "回收站"], run: () => void openTrash() },
       { id: "cmd-settings", group: t("palette.group.commands"), title: t("palette.cmd.settings"), icon: <SettingsIcon size={15} />, compact: true, keywords: ["settings", "设置"], run: () => setSettingsTarget("general") },
@@ -3243,7 +3292,7 @@ ${t("remote.uncPromptBody", { path: picked })}
   );
 
   // Terminal console (Ctrl+`): built once and lent to whichever surface owns
-  // the chat body — the coding-mode chat pane or the 运维 shell — so the
+  // the chat body — the coding-mode chat pane or 运维 shell — so the
   // chrome's terminal toggle works in every mode and the panel never mounts
   // twice.
   const terminalNode = terminalOpen && (
@@ -3265,7 +3314,7 @@ ${t("remote.uncPromptBody", { path: picked })}
 
   // Global banners (startup error / update notice): built once and lent to
   // whichever surface owns the main area — the coding chat pane, the office
-  // main, or the 运维 shell. They used to live only inside the chat pane,
+  // main, or 运维 shell. They used to live only inside the chat pane,
   // which display:none hides in cowork/netdev, so the notices were invisible
   // there; each mode now renders them at the top of its main column.
   const bannersNode = (

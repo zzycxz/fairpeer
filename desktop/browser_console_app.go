@@ -1,6 +1,6 @@
 package main
 
-// browser_console_app.go — Wails bindings for the 运维 dock's 「浏览器」
+// browser_console_app.go — Wails bindings for 运维 dock 的「浏览器」
 // console tab: manual browser-control primitives over the kernel's console
 // session slot, the recording trace → SKILL.md generator (provider-backed,
 // with a naive deterministic fallback), and the skill save/list/read +

@@ -21,6 +21,11 @@ type TopologyEdge struct {
 	RemotePort   string `json:"remote_port,omitempty"`
 	RemoteIP     string `json:"remote_ip,omitempty"`
 	Source       string `json:"source"` // lldp | cdp
+	// Platform is the neighbor's self-described platform/model (F2): CDP
+	// "Platform:" line or LLDP "System description" — vendor/model words that
+	// feed role inference and the 待确认区 hints. Free text from the wire,
+	// display-only.
+	Platform string `json:"platform,omitempty"`
 }
 
 // NeighborCommand returns the read command that yields neighbor information
@@ -41,9 +46,10 @@ func NeighborCommand(driverKey string) (string, bool) {
 var (
 	lldpPortHeader = regexp.MustCompile(`(?m)^(\S+)\s+has\s+\d+\s+neighbor`)
 	lldpField      = map[string]*regexp.Regexp{
-		"system name": regexp.MustCompile(`(?im)^\s*System name\s*:\s*(\S+)`),
-		"port id":     regexp.MustCompile(`(?im)^\s*Port ID\s*:\s*(\S+)`),
-		"mgmt":        regexp.MustCompile(`(?im)^\s*Management address\s*:\s*(\d+\.\d+\.\d+\.\d+)`),
+		"system name":        regexp.MustCompile(`(?im)^\s*System name\s*:\s*(\S+)`),
+		"system description": regexp.MustCompile(`(?im)^\s*System description\s*:\s*(.+?)\s*$`),
+		"port id":            regexp.MustCompile(`(?im)^\s*Port ID\s*:\s*(\S+)`),
+		"mgmt":               regexp.MustCompile(`(?im)^\s*Management address\s*:\s*(\d+\.\d+\.\d+\.\d+)`),
 	}
 )
 
@@ -79,6 +85,7 @@ func parseHuaweiLLDP(out string) []TopologyEdge {
 			RemoteDevice: name,
 			RemotePort:   normalizeIfName(firstGroup(lldpField["port id"], body)),
 			RemoteIP:     firstGroup(lldpField["mgmt"], body),
+			Platform:     firstGroup(lldpField["system description"], body),
 			Source:       "lldp",
 		})
 	}
@@ -114,6 +121,7 @@ func parseCiscoCDP(out string) []TopologyEdge {
 			LocalPort:    normalizeIfName(strings.TrimSpace(m[1])),
 			RemotePort:   normalizeIfName(strings.TrimSpace(m[2])),
 			RemoteIP:     firstGroup(cdpIP, block),
+			Platform:     firstGroup(cdpPlatform, block),
 			Source:       "cdp",
 		})
 	}
@@ -134,6 +142,13 @@ type TopologyNode struct {
 	// present only in the IP-plan view; the LLDP snapshot leaves it at -1
 	// and the map falls back to its degree heuristic.
 	Tier int `json:"tier"`
+	// Role is the device-class icon key (router/switch/firewall/ips/vpn/
+	// bastion/server/ap/cloud; "" = unknown), ORTHOGONAL to tier: tier picks
+	// the band, role picks the icon, health keeps stroke color, managed keeps
+	// solid/dashed. RoleSource records the provenance (config|kind|group|
+	// model|vendor|label|none) for the tooltip's confidence hint.
+	Role       string `json:"role,omitempty"`
+	RoleSource string `json:"role_source,omitempty"`
 }
 
 // TopologyGraph is the merged snapshot for the layout's mini-map.
@@ -174,11 +189,14 @@ func (m *Manager) TopologySnapshot(ctx context.Context) (*TopologyGraph, error) 
 	}
 	// Nodes: every managed device that appears, plus unmanaged neighbors.
 	// Tier stays -1 here: the measured view has no local inference; the map's
-	// degree heuristic assigns bands.
+	// degree heuristic assigns bands. Role runs the full inference chain for
+	// managed devices (topology.go is one of its consumers) and label words
+	// for unmanaged neighbors.
 	for _, d := range m.cfg.NetDev.Devices {
 		if !seenNode[d.Name] {
 			seenNode[d.Name] = true
-			g.Nodes = append(g.Nodes, TopologyNode{Name: d.Name, Managed: true, DeviceIP: d.Address, Tier: -1})
+			role, src := InferDeviceRole(d)
+			g.Nodes = append(g.Nodes, TopologyNode{Name: d.Name, Managed: true, DeviceIP: d.Address, Tier: -1, Role: role, RoleSource: src})
 		}
 	}
 	for _, e := range g.Edges {
@@ -188,7 +206,22 @@ func (m *Manager) TopologySnapshot(ctx context.Context) (*TopologyGraph, error) 
 			if !managed[e.RemoteDevice] {
 				tier = 3
 			}
-			g.Nodes = append(g.Nodes, TopologyNode{Name: e.RemoteDevice, Managed: managed[e.RemoteDevice], DeviceIP: e.RemoteIP, Tier: tier})
+			// F2: the neighbor's self-description backs up the label words —
+			// "USG6320 Huawei…" names a firewall even when the hostname is
+			// generic. Unmanaged neighbors with an IP also file a 待确认区
+			// lead (best-effort; store hiccups never fail the snapshot).
+			role, src := RoleFromName(e.RemoteDevice)
+			if role == RoleUnknown && e.Platform != "" {
+				if r, s := RoleFromName(e.Platform); r != RoleUnknown {
+					role, src = r, s
+				}
+			}
+			if !managed[e.RemoteDevice] && e.RemoteIP != "" {
+				vendor, vrole := hintsFromSysDescr(e.Platform)
+				_ = RecordDiscoveredPorts(SourceTopo, e.RemoteIP, e.RemoteDevice, nil)
+				_ = RecordDiscoveredHints(SourceTopo, e.RemoteIP, vendor, vrole)
+			}
+			g.Nodes = append(g.Nodes, TopologyNode{Name: e.RemoteDevice, Managed: managed[e.RemoteDevice], DeviceIP: e.RemoteIP, Tier: tier, Role: role, RoleSource: src})
 		}
 	}
 	return g, nil

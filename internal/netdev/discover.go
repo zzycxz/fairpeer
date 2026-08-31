@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -37,19 +38,23 @@ const (
 	discoverDefaultRate    = 50
 	discoverProbeTimeout   = 3 * time.Second
 	discoverBannerTimeout  = 2 * time.Second
-	discoverBannerMaxBytes = 96
+	discoverBannerMaxBytes = 256
 )
 
 // DiscoverTCP probes ip:port combinations across a CIDR. via names a
 // configured hop ("" = dial directly from this machine). The requested CIDR
 // must sit INSIDE the configured [netdev.discovery] scopes — enforced here at
 // the dial boundary, not trusted to the caller (guardrail invariant 3).
+// Results land in the 待确认区 store (F1): parse passively, keep forever.
 func (m *Manager) DiscoverTCP(ctx context.Context, via, cidr string, ports []int) ([]DiscoverHostResult, error) {
 	if !m.cfg.NetDev.Enabled {
 		return nil, fmt.Errorf("[netdev] is disabled")
 	}
+	ctx, stopRun := runCtx(ctx, "tcp")
+	defer stopRun()
 	if len(ports) == 0 {
-		ports = []int{22, 23} // default fingerprint: SSH + Telnet
+		// Spec §4.2.5: the management-plane fingerprint set (was 22,23).
+		ports = []int{22, 23, 161, 443, 830}
 	}
 	target, targetNet, err := net.ParseCIDR(strings.TrimSpace(cidr))
 	if err != nil {
@@ -62,6 +67,8 @@ func (m *Manager) DiscoverTCP(ctx context.Context, via, cidr string, ports []int
 	if !m.scopeAllows(targetNet) {
 		return nil, fmt.Errorf("CIDR %s is outside the configured discovery scopes — probing is refused (scopes are a never-off guardrail)", cidr)
 	}
+	// cache_ttl_hours: fresh leads are skipped, only gaps get probed.
+	hosts = cacheTTLFilter(hosts, m.cfg.NetDev.Discovery.CacheTTLHours, time.Now())
 
 	dialer, closeHop, err := m.dialerFor(ctx, via)
 	if err != nil {
@@ -69,10 +76,117 @@ func (m *Manager) DiscoverTCP(ctx context.Context, via, cidr string, ports []int
 	}
 	defer closeHop()
 
-	rate := m.cfg.NetDev.Discovery.Rate
-	if rate <= 0 || rate > 256 {
-		rate = discoverDefaultRate
+	return m.probeHosts(ctx, dialer, hosts, ports)
+}
+
+// Spec §4.7 pacing helpers — zero takes the spec default, and fast_mode
+// multiplies the rate for authorized windows (the red lines don't move).
+func discoveryEffectiveRate(cfgRate int, fast bool) int {
+	if cfgRate <= 0 || cfgRate > 256 {
+		cfgRate = discoverDefaultRate
 	}
+	if fast {
+		cfgRate *= 4
+	}
+	if cfgRate > 256 {
+		cfgRate = 256
+	}
+	return cfgRate
+}
+
+func discoveryHostCap(cfgMax int) int {
+	if cfgMax <= 0 {
+		return 65536
+	}
+	return cfgMax
+}
+
+func discoveryPerHostDelayMs(cfgMs int) int {
+	switch {
+	case cfgMs == 0:
+		return 800 // spec default (±30% jitter)
+	case cfgMs < 0:
+		return 0 // explicitly off
+	default:
+		return cfgMs
+	}
+}
+
+// discoveryHostsWithinCap sums one plan's hosts and refuses past the cap
+// with guidance instead of silently truncating (spec: 超出计划卡指引调参).
+func discoveryHostsWithinCap(cidrs []string, cfgMax int) (int, error) {
+	total := 0
+	for _, c := range cidrs {
+		_, ipnet, err := net.ParseCIDR(strings.TrimSpace(c))
+		if err != nil {
+			continue
+		}
+		ones, _ := ipnet.Mask.Size()
+		total += 1 << uint(32-ones)
+	}
+	if cap := discoveryHostCap(cfgMax); total > cap {
+		return total, fmt.Errorf("plan covers %d addresses, over the max_hosts_per_job budget of %d — split the run or raise [netdev.discovery] max_hosts_per_job", total, cap)
+	}
+	return total, nil
+}
+
+// discoverRuns: in-flight discovery contexts, so the global emergency stop
+// cancels probes together with device sessions and terminals (§15.1 断线即停).
+var (
+	discoverRunsMu sync.Mutex
+	discoverRuns   = map[string]context.CancelFunc{}
+)
+
+func registerDiscoverRun(id string, cancel context.CancelFunc) {
+	discoverRunsMu.Lock()
+	defer discoverRunsMu.Unlock()
+	discoverRuns[id] = cancel
+}
+
+func dropDiscoverRun(id string) {
+	discoverRunsMu.Lock()
+	defer discoverRunsMu.Unlock()
+	delete(discoverRuns, id)
+}
+
+// CancelDiscoverRuns cancels every in-flight discovery run; returns how many.
+func CancelDiscoverRuns() int {
+	discoverRunsMu.Lock()
+	defer discoverRunsMu.Unlock()
+	n := 0
+	for id, cancel := range discoverRuns {
+		cancel()
+		delete(discoverRuns, id)
+		n++
+	}
+	return n
+}
+
+// PauseDiscoverRun cancels ONE run by id (the bridge's 暂停 button); false
+// when the run already finished.
+func PauseDiscoverRun(id string) bool {
+	discoverRunsMu.Lock()
+	defer discoverRunsMu.Unlock()
+	if cancel, ok := discoverRuns[id]; ok {
+		cancel()
+		delete(discoverRuns, id)
+		return true
+	}
+	return false
+}
+
+// runCtx wraps a discovery context with the registry under a run id.
+func runCtx(ctx context.Context, id string) (context.Context, func()) {
+	c, cancel := context.WithCancel(ctx)
+	registerDiscoverRun(id, cancel)
+	return c, func() { dropDiscoverRun(id); cancel() }
+}
+
+// probeHosts is the shared polite worker pool (rate-capped, banner-grabbing
+// probes through one dialer) — used by the hop path and the F4 vantage path.
+func (m *Manager) probeHosts(ctx context.Context, dialer transport.Dialer, hosts []string, ports []int) ([]DiscoverHostResult, error) {
+	rate := discoveryEffectiveRate(m.cfg.NetDev.Discovery.Rate, m.cfg.NetDev.Discovery.FastMode)
+	delayMs := discoveryPerHostDelayMs(m.cfg.NetDev.Discovery.PerHostDelayMS)
 
 	type job struct{ ip string }
 	jobs := make(chan job)
@@ -100,6 +214,16 @@ func (m *Manager) DiscoverTCP(ctx context.Context, via, cidr string, ports []int
 				if len(open) > 0 {
 					results <- DiscoverHostResult{IP: j.ip, Ports: open}
 				}
+				if delayMs > 0 {
+					// Politeness jitter (±30%): a steady drumbeat reads as a
+					// scanner, a jittered one as office hours.
+					d := time.Duration(delayMs) * time.Millisecond
+					jitter := time.Duration(float64(d) * (0.7 + 0.6*rand.Float64()))
+					select {
+					case <-workerCtx.Done():
+					case <-time.After(jitter):
+					}
+				}
 			}
 		}()
 	}
@@ -118,6 +242,48 @@ func (m *Manager) DiscoverTCP(ctx context.Context, via, cidr string, ports []int
 	var out []DiscoverHostResult
 	for r := range results {
 		out = append(out, r)
+	}
+	// F1: results persist to the 待确认区 (best-effort — a store hiccup must
+	// not fail the scan; the next run re-merges). Swept semantics: the probed
+	// list is exact, so closes within it fire R2 newly-closed events.
+	if len(out) > 0 {
+		_ = RecordDiscoveredSwept(SourceDiscover, out, ports)
+	}
+	// F2: when a community is configured, one sysDescr/sysName GET per host
+	// with an open 161 (single attempt, no retry — the probe constitution).
+	if community := strings.TrimSpace(m.cfg.NetDev.Discovery.SnmpCommunity); community != "" {
+		for _, h := range out {
+			has161 := false
+			for _, p := range h.Ports {
+				if p.Port == 161 {
+					has161 = true
+					break
+				}
+			}
+			if !has161 {
+				continue
+			}
+			desc, _ := snmpFingerprint(ctx, h.IP, community)
+			if desc == "" {
+				continue
+			}
+			vendor, role := hintsFromSysDescr(desc)
+			_ = RecordDiscoveredHints(SourceDiscover, h.IP, vendor, role)
+		}
+	}
+	// F3: opt-in application fingerprint — one standard GET per web port,
+	// nothing more (title/Server/cert only land when http_probe is on).
+	if m.cfg.NetDev.Discovery.HTTPProbe {
+		for _, h := range out {
+			for _, p := range h.Ports {
+				if !httpFingerprintPorts[p.Port] {
+					continue
+				}
+				if fp := httpFingerprint(ctx, dialer, h.IP, p.Port, p.Port == 443 || p.Port == 8443); fp != nil {
+					_ = RecordDiscoveredHTTP(h.IP, p.Port, fp)
+				}
+			}
+		}
 	}
 	return out, ctx.Err()
 }

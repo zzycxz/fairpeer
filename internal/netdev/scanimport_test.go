@@ -1,6 +1,7 @@
 package netdev
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -18,6 +19,11 @@ const nmapFixture = `<?xml version="1.0"?>
 </nmaprun>`
 
 func TestImportNmapXML(t *testing.T) {
+	// The import now also records asset leads — keep test writes out of the
+	// real state dir.
+	oldDir := discoveredDirOverr
+	discoveredDirOverr = filepath.Join(t.TempDir(), "discovered")
+	t.Cleanup(func() { discoveredDirOverr = oldDir })
 	f, err := ImportNmapForConfig(nmapFixture, []string{"10.0.0.2"})
 	if err != nil {
 		t.Fatal(err)

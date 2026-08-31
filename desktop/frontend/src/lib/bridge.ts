@@ -19,9 +19,6 @@ import type {
   CapabilitiesView,
   CheckpointMeta,
   RewindPreviewFileView,
-  NetDevStateEventView,
-  NetDevStateFileDiff,
-  NetDevStateRestoreResultView,
   CoWorkSettingsView,
   CommandInfo,
   ContextInfo,
@@ -48,6 +45,9 @@ import type {
   NetDevGoldenInfo,
   NetDevMetricPoint,
   NetDevAuditEntryView,
+  NetDevStateEventView,
+  NetDevStateFileDiff,
+  NetDevStateRestoreResultView,
   NetDevFinding,
   NetDevTopologyGraph,
   NetDevProposal,
@@ -480,7 +480,26 @@ export interface AppBindings {
   // LOCAL IP-plan view: pure computation over the inventory (zero device
   // sessions, zero model calls) — the 拓扑 tab's instant default.
   NetDevTopologyPlan(): Promise<NetDevTopologyGraph | null>;
+  NetDevImportTopoPreview(xmlText: string): Promise<import("./types").NetDevTopoImportPreview | null>;
+  NetDevImportVsdxPreview(b64: string): Promise<import("./types").NetDevTopoImportPreview | null>;
+  NetDevAttachmentBytesBase64(rel: string): Promise<string>;
+  NetDevImportTopoApply(sourceFile: string, graph: import("./types").NetDevTopologyGraph): Promise<void>;
+  NetDevTopologyDesign(): Promise<import("./types").NetDevTopologyDesign | null>;
+  NetDevAttackPaths(): Promise<import("./types").NetDevAttackPathReport | null>;
+  // 大屏家族（DASHBOARD spec v2.0）：总览快照 + 四屏组装
+  NetDevOverview(force: boolean): Promise<import("./types").NetDevOverviewSnapshot | null>;
+  NetDevInvestigationChain(caseID: string, findingID: string, hours: number): Promise<import("./types").NetDevInvestigationChain | null>;
+  NetDevCutoverBoard(id: string): Promise<import("./types").NetDevCutoverBoard | null>;
+  NetDevDiscoveryBoard(): Promise<import("./types").NetDevDiscoveryBoard | null>;
+  NetDevExposureBoard(): Promise<import("./types").NetDevExposureBoard | null>;
+  // fairpeer:// 深链冷路径：boot 时一次性取走启动 argv 里的路由（null=普通启动）。
+  NetDevConsumeDeepLink(): Promise<{ kind: string; id: string } | null>;
+  // 页签充实：syslog 事件量（R3 journal）/ 拓扑对账（离线）
+  NetDevSyslogCounts(limit: number): Promise<import("./types").NetDevSyslogCountRow[]>;
+  NetDevTopoReconcile(): Promise<import("./types").NetDevTopoReconcile | null>;
   NetDevApproveProposal(id: string, confirm2: boolean): Promise<NetDevProposal>;
+  NetDevRejectProposal(id: string, reason: string): Promise<NetDevProposal>;
+  NetDevDeleteProposal(id: string): Promise<void>;
   NetDevExecuteProposal(id: string): Promise<NetDevProposal>;
   NetDevRollbackProposal(id: string): Promise<NetDevProposal>;
   NetDevAuditTail(n: number): Promise<NetDevAuditEntryView[]>;
@@ -502,6 +521,9 @@ export interface AppBindings {
   NetDevCredentialInventory(): Promise<string>;
   NetDevTrapStatus(): Promise<{ listening: boolean; port: number; buffered: number }>;
   NetDevExportState(): Promise<string>;
+  NetDevImportStageFile(content: string): Promise<string>;
+  NetDevImportPreview(path: string): Promise<import("./types").NetDevImportPreview>;
+  NetDevImportApply(path: string, addNames: string[], takeOvernames: string[]): Promise<number>;
   NetDevTimeline(device: string, hours: number): Promise<NetDevTimelineEvent[]>;
   NetDevExpectedState(): Promise<NetDevExpectedStateView>;
   NetDevCases(): Promise<NetDevIncidentCase[]>;
@@ -516,6 +538,19 @@ export interface AppBindings {
   NetDevCVESweep(): Promise<NetDevFinding | null>;
   // Human terminal (§6.1) + SFTP read-only download (§6.2)
   NetDevHumanTTYStart(device: string): Promise<{ device: string; connected: boolean; startedAt: string; bytes: number }>;
+  // completion-spec additions
+  NetDevDiscover(cidr: string, via: string, ports: number[]): Promise<import("./types").NetDevDiscoverHost[]>;
+  NetDevDiscoveredHosts(): Promise<import("./types").NetDevDiscoveredHost[]>;
+  NetDevPromoteHosts(entries: import("./types").NetDevPromoteForm[]): Promise<void>;
+  NetDevDeleteDiscoveredHost(ip: string): Promise<void>;
+  NetDevDiscoverPrecheck(vantage: string): Promise<import("./types").NetDevDiscoverPlan | null>;
+  NetDevDiscoverLayer(vantage: string, cidrs: string[], ports: number[]): Promise<import("./types").NetDevDiscoverHost[]>;
+  NetDevDiscoveryRunState(): Promise<import("./types").NetDevDiscoveryRunState | null>;
+  NetDevDiscoverResume(): Promise<import("./types").NetDevDiscoverHost[]>;
+  NetDevDiscoverPause(): Promise<boolean>;
+  NetDevNetconfQuery(device: string, kind: string): Promise<string>;
+  NetDevHumanTTYRecordings(): Promise<import("./types").NetDevHumanTTYRecording[]>;
+  NetDevHumanTTYRecordingRead(path: string): Promise<string>;
   NetDevHumanTTYWrite(device: string, input: string): Promise<void>;
   NetDevHumanTTYStop(device: string): Promise<void>;
   NetDevHumanTTYStatus(): Promise<{ device: string; connected: boolean; startedAt: string; bytes: number }[]>;
@@ -1016,6 +1051,14 @@ export function emitBrowserTrialMock(st: import("./types").BrowserConsoleTrialSt
 
 // onNetdevHealth subscribes to health change events ("netdev:health": one
 // device's reachability/interface state changed since the previous poll).
+// fairpeer:// 深链热路径：第二实例唤起（IM/邮件里点链接）时 Go 侧 EventsEmit。
+export function onFairpeerDeepLink(cb: (r: { kind: string; id: string }) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("fairpeer:deep-link", (r) => cb(r as { kind: string; id: string }));
+  }
+  return () => {};
+}
+
 export function onNetdevHealth(cb: (h: NetDevDeviceHealth) => void): () => void {
   if (realApp() && typeof window !== "undefined" && window.runtime) {
     return window.runtime.EventsOn("netdev:health", (h) => cb(h as NetDevDeviceHealth));
@@ -2174,7 +2217,7 @@ function makeMockApp(): AppBindings {
     devices: null,
     hops: null, groups: null, auditRetention: "", scopes: null,
     guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: null,
-    inspectionInterval: "", backupInterval: "",
+    inspectionInterval: "", backupInterval: "", scheduledBaseline: false,
     extraRead: null, projects: null, presets: null,
   };
   return {
@@ -2220,6 +2263,9 @@ function makeMockApp(): AppBindings {
     async NetDevTrapStatus(): Promise<{ listening: boolean; port: number; buffered: number }> {
       return { listening: false, port: 0, buffered: 0 };
     },
+    async NetDevImportStageFile(_content: string): Promise<string> { throw new Error("browser dev mock: no import backend"); },
+    async NetDevImportPreview(_path: string): Promise<import("./types").NetDevImportPreview> { throw new Error("browser dev mock: no import backend"); },
+    async NetDevImportApply(_path: string, _add: string[], _take: string[]): Promise<number> { throw new Error("browser dev mock: no import backend"); },
     async NetDevExportState(): Promise<string> {
       return "(browser dev mock)";
     },
@@ -2253,6 +2299,18 @@ function makeMockApp(): AppBindings {
     async NetDevCVESweep(): Promise<NetDevFinding | null> {
       return null;
     },
+    async NetDevDiscover(_c: string, _v: string, _p: number[]): Promise<import("./types").NetDevDiscoverHost[]> { return []; },
+    async NetDevDiscoveredHosts(): Promise<import("./types").NetDevDiscoveredHost[]> { return []; },
+    async NetDevPromoteHosts(_e: import("./types").NetDevPromoteForm[]): Promise<void> { },
+    async NetDevDeleteDiscoveredHost(_ip: string): Promise<void> { },
+    async NetDevDiscoverPrecheck(_v: string): Promise<import("./types").NetDevDiscoverPlan | null> { return null; },
+    async NetDevDiscoverLayer(_v: string, _c: string[], _p: number[]): Promise<import("./types").NetDevDiscoverHost[]> { return []; },
+    async NetDevDiscoveryRunState(): Promise<import("./types").NetDevDiscoveryRunState | null> { return null; },
+    async NetDevDiscoverResume(): Promise<import("./types").NetDevDiscoverHost[]> { return []; },
+    async NetDevDiscoverPause(): Promise<boolean> { return false; },
+    async NetDevNetconfQuery(_d: string, _k: string): Promise<string> { return "browser dev mock: no netconf backend"; },
+    async NetDevHumanTTYRecordings(): Promise<import("./types").NetDevHumanTTYRecording[]> { return []; },
+    async NetDevHumanTTYRecordingRead(_p: string): Promise<string> { return ""; },
     async NetDevHumanTTYStart(_d: string): Promise<{ device: string; connected: boolean; startedAt: string; bytes: number }> {
       // Browser dev: a short banner plays so the device tab renders standalone.
       setTimeout(() => emitNetdevHumanTTYMock({ device: _d, chunk: "\r\n[mock] 人工终端（浏览器开发模拟）——真实会话在桌面端\r\n" }), 100);
@@ -2528,14 +2586,14 @@ function makeMockApp(): AppBindings {
       // Browser-dev stand-in shaped like a real small campus net (FW → 2 core →
       // 2 aggregation → 3 access + an unmanaged neighbor) so the tiered
       // TopologyMap is demoable without the Go backend.
-      const N = (name: string, managed: boolean, ip?: string): NetDevTopologyNode => ({ name, managed, device_ip: ip });
+      const N = (name: string, managed: boolean, ip?: string, role?: string, role_source?: string): NetDevTopologyNode => ({ name, managed, device_ip: ip, role, role_source });
       return {
         nodes: [
-          N("FW-01", true, "10.0.0.1"),
-          N("CORE-01", true, "10.0.0.2"), N("CORE-02", true, "10.0.0.3"),
-          N("AGG-01", true, "10.0.1.1"), N("AGG-02", true, "10.0.1.2"),
-          N("ACC-01", true, "10.0.2.1"), N("ACC-02", true, "10.0.2.2"), N("ACC-03", true, "10.0.2.3"),
-          N("SRV-ESXi", false), N("IPSLA-P", false),
+          N("FW-01", true, "10.0.0.1", "firewall", "label"),
+          N("CORE-01", true, "10.0.0.2", "switch", "model"), N("CORE-02", true, "10.0.0.3", "switch", "model"),
+          N("AGG-01", true, "10.0.1.1", "switch", "vendor"), N("AGG-02", true, "10.0.1.2", "switch", "vendor"),
+          N("ACC-01", true, "10.0.2.1", "switch", "vendor"), N("ACC-02", true, "10.0.2.2", "switch", "vendor"), N("ACC-03", true, "10.0.2.3", "switch", "vendor"),
+          N("SRV-ESXi", false, undefined, "server", "label"), N("IPSLA-P", false),
         ],
         edges: [
           { local_device: "FW-01", local_port: "GE0/0/1", remote_device: "CORE-01", remote_port: "GE1/0/1", source: "lldp" },
@@ -2552,6 +2610,99 @@ function makeMockApp(): AppBindings {
           { local_device: "ACC-03", local_port: "GE0/0/24", remote_device: "IPSLA-P", source: "cdp" },
         ],
         at: new Date().toISOString().slice(0, 19).replace("T", " "),
+      };
+    },
+    async NetDevImportTopoPreview(_x: string): Promise<import("./types").NetDevTopoImportPreview | null> { return null; },
+    async NetDevImportVsdxPreview(_b: string): Promise<import("./types").NetDevTopoImportPreview | null> { return null; },
+    async NetDevAttachmentBytesBase64(_r: string): Promise<string> { return ""; },
+    async NetDevImportTopoApply(_s: string, _g: import("./types").NetDevTopologyGraph): Promise<void> { },
+    async NetDevTopologyDesign(): Promise<import("./types").NetDevTopologyDesign | null> { return null; },
+    async NetDevAttackPaths(): Promise<import("./types").NetDevAttackPathReport | null> { return null; },
+    async NetDevOverview(_force: boolean): Promise<import("./types").NetDevOverviewSnapshot | null> {
+      return {
+        generated_at: Date.now(), stale_after_sec: 300,
+        coverage: { managed: 2, discovered: 3, unreachable: 0, no_snmp: 1 },
+        health: { polled: 1, reachable: 1, last_poll_at: Date.now(), flap_alerts: 0, p90_alerts: 0, uptime_spark: {}, max_cpu_pct: 87, max_cpu_dev: "SW-03", max_mem_pct: 62 },
+        risk: { critical: 0, warning: 1, info: 2, open_total: 3, weighted_score: 4, risk_level: "low", cve_matches: 0, cve_needs_feed: true, weak_creds: 0 },
+        inflight: { proposals_pending: 1, proposals_watchable: 0, jobs_running: 0, jobs_paused: 0, cutovers_active: 0, terminals_open: 0 },
+        events: [{ id: "F-demo", severity: "warning", title: "link-flap SW-03", source: "syslog:SW-03:link-flap", at: "08-29 10:00" }],
+        audit: { chain_ok: true, chain_total: 12, last_entry_at: "08-29 10:05", read_24h: 20, write_24h: 2, guardrail_24h: 0 },
+        stats: {
+          cve_needs_feed: true, job_done: 3, job_finished: 4,
+          cmd_mix: { read: 18, write: 2 }, audit_entries: 20,
+          device_by_role: { switch: 1, router: 1 }, proposal_funnel: { draft: 1, done: 2 },
+          risk_trend: [{ at: "2026-08-29T09:00:00", kind: "inspection", devices: 2, checked: 2, critical: 0, warning: 1, info: 2 }],
+          inspection_compliance: { enabled: true, last_run_at: "2026-08-29T03:00:00", ok: true, title: "巡检 2 台设备，0 项异常" },
+          cred_health: { count: 3, last_changed_at: "2026-05-12", age_days: 109, stale: true },
+        },
+        scenario_cutover_active: false, scenario_discovery_run: false,
+      };
+    },
+    async NetDevInvestigationChain(_caseID: string, _findingID: string, _hours: number): Promise<import("./types").NetDevInvestigationChain | null> {
+      return {
+        has_case: true, case_id: "C-demo", case_title: "OSPF 邻居震荡·SW-03", counts: { event: 1, action: 1, evidence: 2, conclusion: 1, remediation: 1, verification: 1 },
+        nodes: [
+          { id: "event-0", kind: "event", label: "syslog:SW-03:ospf-adjacency", device: "SW-03", at: "08-29 10:00", ref_type: "finding", group: 2 },
+          { id: "conclusion-1", kind: "conclusion", label: "OSPF 邻居 Down", device: "SW-03", status: "critical" },
+          { id: "evidence-2", kind: "evidence", label: "display ospf peer", device: "SW-03" },
+          { id: "action-3", kind: "action", label: "display logbuffer", device: "SW-03", ref_type: "audit" },
+          { id: "remediation-4", kind: "remediation", label: "P-1 调整 hello 定时器", status: "done" },
+          { id: "verification-5", kind: "verification", label: "执行完成", status: "done" },
+        ],
+        edges: [
+          { from: "event-0", to: "conclusion-1", label: "触发" },
+          { from: "evidence-2", to: "conclusion-1", label: "产生" },
+          { from: "action-3", to: "evidence-2", label: "执行" },
+          { from: "conclusion-1", to: "remediation-4", label: "处置" },
+          { from: "remediation-4", to: "verification-5", label: "验证" },
+        ],
+        truncated: false,
+      };
+    },
+    async NetDevCutoverBoard(_id: string): Promise<import("./types").NetDevCutoverBoard | null> {
+      return {
+        id: "CO-demo", name: "核心-SW 上联迁移", status: "running", deadline: "08-30 04:00", remaining_sec: 1800,
+        frozen: 2, rollback_ready: true, rollback_note: "快照 2 台",
+        steps: [
+          { label: "预检", status: "done", device: "SW-01" },
+          { label: "配置下发", status: "running", device: "SW-02", proposal_id: "P-9" },
+          { label: "验证门", status: "pending", gate: true, device: "R-05" },
+        ],
+        devices: [
+          { device: "SW-01", status: "done", rollback_ready: true },
+          { device: "SW-02", status: "running", rollback_ready: true },
+        ],
+        jobs: [], audit: [{ time: "02:31:05", device: "SW-02", command: "shut x/0/1", status: "ok" }],
+        has_active: true, found: true,
+      };
+    },
+    async NetDevDiscoveryBoard(): Promise<import("./types").NetDevDiscoveryBoard | null> {
+      return {
+        leads: 37, fingerprinted: 24, pending: 12, promoted: 8, managed: 22,
+        subnets_done: 6, subnets_total: 9, layer_depth: 2, max_hops: 2,
+        run_status: "done", run_vantage: "NAS", run_updated_at: "08-29 09:05",
+        funnel: [
+          { key: "leads", count: 37 }, { key: "fingerprinted", count: 24 }, { key: "pending", count: 12 },
+          { key: "promoted", count: 8 }, { key: "managed", count: 22 },
+        ],
+        layers: [{ layer: 0, label: "L0", note: "1 台" }, { layer: 1, label: "L1", note: "14 条线索" }],
+        tri_source: { design: 41, plan: 38, matched: 36, only_design: 5, only_plan: 2 },
+        port_events: [{ at: "08-29 09:04:11", ip: "10.1.1.5", port: 445, kind: "newly-opened" }],
+      };
+    },
+    async NetDevConsumeDeepLink(): Promise<{ kind: string; id: string } | null> { return null; },
+    async NetDevSyslogCounts(): Promise<import("./types").NetDevSyslogCountRow[]> {
+      return [{ hour: "2026-08-31T10", device: "SW-03", class: "ospf-adjacency", n: 14 }, { hour: "2026-08-31T10", device: "SW-01", class: "link-flap", n: 3 }];
+    },
+    async NetDevTopoReconcile(): Promise<import("./types").NetDevTopoReconcile | null> {
+      return { tri: { design: 41, plan: 38, matched: 36, only_design: 5, only_plan: 2 }, platforms: { lldp: 18, cdp: 4, design: 12 } };
+    },
+    async NetDevExposureBoard(): Promise<import("./types").NetDevExposureBoard | null> {
+      return {
+        simulated: true, generated_at: "08-29 10:00", critical: 1, warning: 2,
+        paths: [], cut_suggestions: [], exposure_points: [],
+        matrix: [{ device: "EDGE-1", critical: 1, warning: 0, info: 0, cve_critical: 0, cve_high: 0, managed: true }],
+        cve_needs_feed: true, unmanaged_ends: 0, max_hops: 0,
       };
     },
     async NetDevTopologyPlan() {
@@ -2571,6 +2722,8 @@ function makeMockApp(): AppBindings {
       };
     },
     async NetDevApproveProposal(_id: string, _confirm2: boolean) { throw new Error("browser dev mock: no proposal backend"); },
+    async NetDevRejectProposal(_id: string, _reason: string) { throw new Error("browser dev mock: no proposal backend"); },
+    async NetDevDeleteProposal(_id: string) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevExecuteProposal(_id: string) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevRollbackProposal(_id: string) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevAuditTail(_n: number) {
@@ -3568,6 +3721,9 @@ function makeMockApp(): AppBindings {
       return {
         gitAvailable: true,
         gitBranch: "main",
+        added: 142,
+        removed: 37,
+        untracked: 1,
         files: [
           {
             path: "desktop/frontend/src/components/WorkspacePanel.tsx",

@@ -36,7 +36,7 @@ var fwPaths = map[string]string{
 func (m *Manager) FirewallGet(ctx context.Context, deviceName, what string) (string, error) {
 	d, ok := m.cfg.NetDevDeviceByName(deviceName)
 	if !ok {
-		return "", fmt.Errorf("device %q is not in the inventory (add it in the 运维 settings)", deviceName)
+		return "", fmt.Errorf("device %q is not in the inventory (add it in 运维设置)", deviceName)
 	}
 	if d.Kind != "firewall" || d.Fw == nil {
 		return "", fmt.Errorf("device %q is not a kind=firewall target", deviceName)

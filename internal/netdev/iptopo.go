@@ -60,12 +60,15 @@ func InferTopology(cfg *config.Config) TopologyGraph {
 	}
 
 	for _, r := range rows {
+		role, src := InferDeviceRole(r.d)
 		g.Nodes = append(g.Nodes, TopologyNode{
-			Name:     r.d.Name,
-			Managed:  true,
-			DeviceIP: r.d.Address,
-			Subnet:   r.subnet,
-			Tier:     inferTier(r.d, r.subnet, subnetRank, len(ordered)),
+			Name:       r.d.Name,
+			Managed:    true,
+			DeviceIP:   r.d.Address,
+			Subnet:     r.subnet,
+			Tier:       inferTier(r.d, r.subnet, subnetRank, len(ordered)),
+			Role:       role,
+			RoleSource: src,
 		})
 	}
 

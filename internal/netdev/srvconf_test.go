@@ -173,7 +173,7 @@ func TestRestoreVerifyGuards(t *testing.T) {
 
 	sameGroup := base
 	sameGroup.Device = "ng-prod"
-	if err := m.validateStep(&sameGroup, devByName(m, "ng-prod")); err == nil || !strings.Contains(err.Error(), "生产目标") {
+	if err := m.validateStep(&sameGroup, devByName(m, "ng-prod")); err == nil || !strings.Contains(err.Error(), "演练接收方") {
 		t.Fatalf("same-group receiver accepted: %v", err)
 	}
 

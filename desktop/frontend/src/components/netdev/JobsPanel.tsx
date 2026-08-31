@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { app } from "../../lib/bridge";
+import { useI18n } from "../../lib/i18n";
 import type { NetDevJob, RunRecordView, TaskView } from "../../lib/types";
 
 // JobsPanel — the 作业 dock tab, two cards:
@@ -19,6 +20,7 @@ export function JobsPanel() {
 }
 
 function ScheduledTasksCard() {
+  const { t: tr } = useI18n();
   const [tasks, setTasks] = useState<TaskView[] | null>(null);
   const [expanded, setExpanded] = useState<string>("");
   const [history, setHistory] = useState<RunRecordView[] | null>(null);
@@ -70,28 +72,28 @@ function ScheduledTasksCard() {
   return (
     <div className="ndv__card">
       <div className="ndv__card-title">
-        作业中心
-        {ago !== null && <span className="ndv__meta" style={{ marginLeft: 8, fontWeight: 400 }}>{ago < 60 ? `${ago}s 前` : `${Math.round(ago / 60)}m 前`}</span>}
-        <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: "auto" }} onClick={() => void reload()}>刷新</span>
+        {tr("ndv.jobs.title")}
+        {ago !== null && <span className="ndv__meta" style={{ marginLeft: 8, fontWeight: 400 }}>{ago < 60 ? tr("ndv.agoSec", { n: ago }) : tr("ndv.agoMin", { n: Math.round(ago / 60) })}</span>}
+        <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: "auto" }} onClick={() => void reload()}>{tr("ndv.refresh")}</span>
       </div>
       {err && <div className="ndv__hint">{err}</div>}
-      {!tasks && !err && <div className="ndv__hint">加载中…</div>}
+      {!tasks && !err && <div className="ndv__hint">{tr("ndv.loading")}</div>}
       {tasks && tasks.length === 0 && (
-        <div className="ndv__hint">还没有定时任务——设置 → 运维 → 定时任务（巡检/备份在此配置周期）。</div>
+        <div className="ndv__hint">{tr("ndv.jobs.emptyTasks")}</div>
       )}
       {(tasks ?? []).map(t => (
         <div key={t.id} className="ndv__device" style={{ flexDirection: "column", alignItems: "stretch", gap: 4 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span className={`ndv__dot ${t.enabled ? "ndv__dot--ok" : "ndv__dot--down"}`} />
             <span className="ndv__device-name" role="button" onClick={() => void toggle(t.id)}>{t.name}</span>
-            <span className="ndv__device-addr">{t.expression} · 已跑 {t.runCount} 次</span>
+            <span className="ndv__device-addr">{t.expression} · {tr("ndv.jobs.runCount", { n: t.runCount })}</span>
             <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: "auto" }}
-              onClick={() => void runNow(t.id)}>{busy === t.id ? "触发中…" : "立即运行"}</span>
+              onClick={() => void runNow(t.id)}>{busy === t.id ? tr("ndv.jobs.triggering") : tr("ndv.jobs.runNow")}</span>
           </div>
-          {t.lastDeliverErr && <div className="ndv__hint">上次投递失败：{t.lastDeliverErr}</div>}
+          {t.lastDeliverErr && <div className="ndv__hint">{tr("ndv.jobs.lastDeliverErr", { err: t.lastDeliverErr })}</div>}
           {expanded === t.id && (
             <div className="ndv__audit-scroll" style={{ maxHeight: 180 }}>
-              {(history ?? []).length === 0 && <div className="ndv__hint">暂无历史。</div>}
+              {(history ?? []).length === 0 && <div className="ndv__hint">{tr("ndv.jobs.noHistory")}</div>}
               {(history ?? []).map((r, i) => (
                 <div key={i} className="ndv__audit-row">
                   <span className="ndv__audit-time">{String(r.at ?? "").slice(5, 16).replace("T", " ")}</span>
@@ -107,15 +109,16 @@ function ScheduledTasksCard() {
   );
 }
 
-const JOB_STATUS: Record<string, string> = {
-  running: "执行中",
-  paused: "⏸ 已暂停",
-  done: "已完成",
-  failed: "失败",
-  aborted: "已终止",
+const JOB_STATUS_KEYS: Record<string, string> = {
+  running: "ndv.jobs.stRunning",
+  paused: "ndv.jobs.stPaused",
+  done: "ndv.jobs.stDone",
+  failed: "ndv.jobs.stFailed",
+  aborted: "ndv.jobs.stAborted",
 };
 
 function NetDevJobsCard() {
+  const { t } = useI18n();
   const [jobs, setJobs] = useState<NetDevJob[] | null>(null);
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
@@ -162,14 +165,24 @@ function NetDevJobsCard() {
   return (
     <div className="ndv__card" style={{ marginTop: 8 }}>
       <div className="ndv__card-title">
-        诊断作业（runbook）
-        {live && <span className="ndv__meta" style={{ marginLeft: 8 }}>· 进行中</span>}
-        <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: "auto" }} onClick={() => void reload()}>刷新</span>
+        {(() => {
+          const fin = (jobs ?? []).filter(j => j.status === "done" || j.status === "failed" || j.status === "aborted");
+          const done = fin.filter(j => j.status === "done").length;
+          const durs = fin.filter(j => j.started_at && j.ended_at).map(j => (new Date(j.ended_at ?? "").getTime() - new Date(j.started_at ?? "").getTime()) / 1000).filter(d => d >= 0);
+          const avg = durs.length ? Math.round(durs.reduce((a, b) => a + b, 0) / durs.length) : null;
+          if (fin.length === 0) return null;
+          return <span className="ndv__meta" style={{ marginLeft: 8, fontWeight: 400 }}>
+            {t("ndv.jobs.stats", { ok: done, n: fin.length })}{avg !== null ? ` · ${t("ndv.jobs.avgSec", { s: avg })}` : ""}
+          </span>;
+        })()}
+        {t("ndv.jobs.runbookTitle")}
+        {live && <span className="ndv__meta" style={{ marginLeft: 8 }}>· {t("ndv.jobs.inProgress")}</span>}
+        <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: "auto" }} onClick={() => void reload()}>{t("ndv.refresh")}</span>
       </div>
       {err && <div className="ndv__hint">{err}</div>}
-      {!jobs && !err && <div className="ndv__hint">加载中…</div>}
+      {!jobs && !err && <div className="ndv__hint">{t("ndv.loading")}</div>}
       {jobs && jobs.length === 0 && (
-        <div className="ndv__hint">还没有 runbook 作业——一键体检、带 expect/断点的诊断 runbook 会在这里留下轨迹（§4.1/§九 R4）。</div>
+        <div className="ndv__hint">{t("ndv.jobs.emptyRunbooks")}</div>
       )}
       {(jobs ?? []).slice(0, 8).map(j => {
         const c = stepCounts(j);
@@ -180,22 +193,22 @@ function NetDevJobsCard() {
               <span className={`ndv__dot ${j.status === "done" ? "ndv__dot--ok" : j.status === "running" ? "ndv__dot--warn" : j.status === "paused" ? "ndv__dot--down" : ""}`} />
               <span className="ndv__device-name" title={j.id}>{j.name}</span>
               <span className="ndv__device-addr">
-                {JOB_STATUS[j.status] ?? j.status} · ✅{c.ok} ❌{c.failed} ⬜{c.pending} · {Math.round(j.active_ms / 1000)}s
+                {JOB_STATUS_KEYS[j.status] ? t(JOB_STATUS_KEYS[j.status] as never) : j.status} · ✅{c.ok} ❌{c.failed} ⬜{c.pending} · {Math.round(j.active_ms / 1000)}s
               </span>
               {active && (
                 <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
                   {j.status === "running" && (
                     <span className="btn btn--secondary btn--small" role="button" onClick={() => void act(`pause:${j.id}`, () => app.NetDevJobPause(j.id))}>
-                      {busy === `pause:${j.id}` ? "…" : "⏸ 暂停"}
+                      {busy === `pause:${j.id}` ? "…" : t("ndv.jobs.pause")}
                     </span>
                   )}
                   {j.status === "paused" && (
-                    <span className="btn btn--primary btn--small" role="button" title="从断点/失败处继续" onClick={() => void act(`resume:${j.id}`, () => app.NetDevJobResume(j.id))}>
-                      {busy === `resume:${j.id}` ? "…" : "▶ 继续"}
+                    <span className="btn btn--primary btn--small" role="button" title={t("ndv.jobs.resumeTip")} onClick={() => void act(`resume:${j.id}`, () => app.NetDevJobResume(j.id))}>
+                      {busy === `resume:${j.id}` ? "…" : t("ndv.jobs.resume")}
                     </span>
                   )}
                   <span className="btn btn--secondary btn--small" role="button" onClick={() => void act(`abort:${j.id}`, () => app.NetDevJobAbort(j.id))}>
-                    {busy === `abort:${j.id}` ? "…" : "⛔ 终止"}
+                    {busy === `abort:${j.id}` ? "…" : t("ndv.jobs.abort")}
                   </span>
                 </span>
               )}

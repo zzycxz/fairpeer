@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { app } from "../../lib/bridge";
+import { useT } from "../../lib/i18n";
+import { exportTextFile } from "../../lib/netdevExport";
 import type { NetDevDeviceView, NetDevLogSearchResult } from "../../lib/types";
 
 // LogWorkbench — 主区「日志工作台」v1（NETDEV_SPEC_V2 §3.2/§10.3）。
@@ -78,7 +80,7 @@ const levelClass = (line: string): string => {
 };
 
 // 关联源（§5.4 实体360°）：变更/发现/事件合并进同一条时间线。
-const KIND_LABEL: Record<string, string> = { change: "变更", finding: "发现", event: "事件" };
+const KIND_LABEL: Record<string, string> = { change: "ndv.logwb.kChange", finding: "ndv.logwb.kFinding", event: "ndv.logwb.kEvent" };
 
 const sourceOf = (e: SrcEntry) => e.kind === "k8s" ? `k8s:${e.target.trim()}` : `${e.kind}:${e.target.trim()}`;
 
@@ -87,6 +89,7 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
   onInsertComposer?: (text: string) => void;
   hidden?: boolean;
 }) {
+  const t = useT();
   const hosts = useMemo(
     () => devices.filter(d => d.vendor === "linux" || d.vendor === "windows" || d.vendor === "vmware" || d.kind === "docker" || d.kind === "k8s"),
     [devices],
@@ -103,27 +106,30 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
   const [viewGrep, setViewGrep] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
   const [rel, setRel] = useState<{ change: boolean; finding: boolean; event: boolean }>({ change: true, finding: true, event: false });
+  const [relHours, setRelHours] = useState(24);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // 底栏：跨设备 IOC 搜索
+  // 底栏：跨设备 IOC 搜索（C3.6：设备作用域可选——空 = 全网）
   const [pattern, setPattern] = useState("");
   const [searchSince, setSearchSince] = useState("");
   const [search, setSearch] = useState<NetDevLogSearchResult | null>(null);
   const [searchBusy, setSearchBusy] = useState(false);
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const [scope, setScope] = useState<string[]>([]);
 
   const effectiveAddDevice = addDevice || hosts[0]?.name || "";
 
   const addEntry = (device: string, kind: SrcKind, target: string) => {
-    const t = target.trim();
-    if (!device || !t) { setNote("先选设备并填好源目标"); return; }
-    setEntries(prev => [...prev, { id: nextId.current++, device, kind, target: t, active: true }]);
+    const trimmed = target.trim();
+    if (!device || !trimmed) { setNote(t("ndv.logwb.pickSource")); return; }
+    setEntries(prev => [...prev, { id: nextId.current++, device, kind, target: trimmed, active: true }]);
     setNote("");
   };
 
   const fetchAll = async () => {
     const act = entries.filter(e => e.active && e.target.trim());
-    if (act.length === 0) { setNote("先在左侧勾选至少一个源"); return; }
+    if (act.length === 0) { setNote(t("ndv.logwb.pickOne")); return; }
     setBusy(true); setNote("");
     try {
       const results = await Promise.all(act.map(async e => {
@@ -133,15 +139,15 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
       const parts: { device: string; source: string; lines: string[] }[] = [];
       const notes: string[] = [];
       for (const { e, r } of results) {
-        if (r.refused) notes.push(`${e.device} ${sourceOf(e)}：${r.refusal ?? "已拒绝"}`);
-        else if (r.is_error) notes.push(`${e.device} ${sourceOf(e)}：设备返回错误（可能文件不存在）`);
+        if (r.refused) notes.push(t("ndv.logwb.rowNote", { dev: e.device, src: sourceOf(e), msg: r.refusal ?? t("ndv.logp.refused") }));
+        else if (r.is_error) notes.push(t("ndv.logwb.rowErr", { dev: e.device, src: sourceOf(e) }));
         else parts.push({ device: e.device, source: sourceOf(e), lines: (r.output ?? "").split("\n") });
       }
       // 关联源：拉时间线（失败不阻塞日志），按开关与设备集过滤后并入。
       let tlRows: Row[] = [];
       if (rel.change || rel.finding || rel.event) {
         try {
-          const tl = await app.NetDevTimeline("", 24);
+          const tl = await app.NetDevTimeline("", relHours);
           const devSet = new Set(act.map(e => e.device));
           tlRows = (tl ?? [])
             .filter(e => (e.kind === "change" && rel.change) || (e.kind === "finding" && rel.finding) || (e.kind === "event" && rel.event))
@@ -160,7 +166,7 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
       }
       const merged = [...mergeRows(parts), ...tlRows].sort((a, b) => a.ts - b.ts).slice(-MAX_ROWS);
       setRows(merged);
-      setNote(notes.length ? notes.join("；") : (parts.length ? `已合并 ${parts.length} 个源、${rowsCount(parts)} 行${tlRows.length ? ` + 关联事件 ${tlRows.length} 条` : ""}` : (tlRows.length ? `关联事件 ${tlRows.length} 条` : "没有可用输出")));
+      setNote(notes.length ? notes.join("；") : (parts.length ? t("ndv.logwb.mergedN", { n: parts.length, rows: rowsCount(parts), tl: tlRows.length }) : (tlRows.length ? t("ndv.logwb.tlOnly", { n: tlRows.length }) : t("ndv.logwb.noOutput"))));
     } catch (e) {
       setNote(String(e));
     } finally {
@@ -174,13 +180,21 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
     if (!pattern.trim()) return;
     setSearchBusy(true);
     try {
-      setSearch(await app.NetDevLogSearch(pattern.trim(), [], [], searchSince.trim()));
+      setSearch(await app.NetDevLogSearch(pattern.trim(), scope, [], searchSince.trim()));
     } catch (e) {
       setSearch(null);
       setNote(String(e));
     } finally {
       setSearchBusy(false);
     }
+  };
+
+  // C3.2：合并时间线导出为 .txt（含来源文本化）。
+  const exportRows = async () => {
+    if (shown.length === 0) return;
+    const text = shown.map(r => `[${r.tsText || "-"}] ${r.device} ${r.source} ${r.line}`).join("\n") + "\n";
+    const p = await exportTextFile(`netdev-timeline-${new Date().toISOString().slice(0, 10)}.txt`, text);
+    if (p) setNote(t("ndv.exportedTo", { path: p }));
   };
 
   const viewRe = useMemo(() => {
@@ -196,14 +210,14 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
   const sendToAI = () => {
     if (!onInsertComposer || shown.length === 0) return;
     const excerpt = shown.slice(-80).map(r => `[${r.tsText || "-"}] ${r.device} ${r.source} ${r.line}`).join("\n");
-    onInsertComposer(`请基于以下多源合并日志诊断问题，先给结论再给证据：\n\n\`\`\`\n${excerpt}\n\`\`\``);
+    onInsertComposer(`${t("ndv.logwb.aiPrefix")}\n\n\`\`\`\n${excerpt}\n\`\`\``);
   };
 
   return (
     <div className="ndv-logwb" style={hidden ? { display: "none" } : undefined}>
       {/* 左栏：源选择（§10.3 契约：设备 → 源，多选） */}
       <div className="ndv-logwb__srcs">
-        <div className="ndv__card-title" style={{ fontSize: 11.5 }}>源（{entries.filter(e => e.active).length}/{entries.length} 活跃）</div>
+        <div className="ndv__card-title" style={{ fontSize: 11.5 }}>{t("ndv.logwb.sources", { on: entries.filter(e => e.active).length, n: entries.length })}</div>
         {entries.map(e => (
           <div key={e.id} className="ndv-logwb__src">
             <input type="checkbox" checked={e.active} onChange={ev => setEntries(prev => prev.map(x => x.id === e.id ? { ...x, active: ev.target.checked } : x))} />
@@ -211,49 +225,58 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
               <b style={{ fontWeight: 600 }}>{e.device}</b>
               <small> {sourceOf(e)}</small>
             </span>
-            <span role="button" title="移除" style={{ cursor: "pointer", opacity: 0.6 }} onClick={() => setEntries(prev => prev.filter(x => x.id !== e.id))}>×</span>
+            <span role="button" title={t("ndv.logwb.remove")} style={{ cursor: "pointer", opacity: 0.6 }} onClick={() => setEntries(prev => prev.filter(x => x.id !== e.id))}>×</span>
           </div>
         ))}
         <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
           <select className="mem-select" value={effectiveAddDevice} onChange={e => setAddDevice(e.target.value)}>
             {hosts.map(h => <option key={h.name} value={h.name}>{h.name}</option>)}
-            {hosts.length === 0 && <option value="">（无服务器设备）</option>}
+            {hosts.length === 0 && <option value="">{t("ndv.logp.noHosts")}</option>}
           </select>
           <div style={{ display: "flex", gap: 4 }}>
             <select className="mem-select" style={{ width: 74 }} value={addKind} onChange={e => setAddKind(e.target.value as SrcKind)}>
-              <option value="file">文件</option>
-              <option value="journal">单元</option>
-              <option value="docker">容器</option>
+              <option value="file">{t("ndv.logp.kFile")}</option>
+              <option value="journal">{t("ndv.logwb.kUnit")}</option>
+              <option value="docker">{t("ndv.logwb.kContainer")}</option>
               <option value="k8s">K8s</option>
             </select>
             <input className="mem-input" style={{ flex: 1, minWidth: 0 }} value={addTarget} onChange={e => setAddTarget(e.target.value)}
-              placeholder={addKind === "file" ? "/var/log/nginx/error.log" : addKind === "journal" ? "nginx" : addKind === "k8s" ? "namespace/pod（或仅 pod）" : "容器名"} />
+              placeholder={addKind === "file" ? "/var/log/nginx/error.log" : addKind === "journal" ? "nginx" : addKind === "k8s" ? t("ndv.logwb.phK8s") : t("ndv.logp.phContainer")} />
           </div>
-          <span className="btn btn--secondary btn--small" role="button" onClick={() => addEntry(effectiveAddDevice, addKind, addTarget)}>＋ 添加源</span>
+          <span className="btn btn--secondary btn--small" role="button" onClick={() => addEntry(effectiveAddDevice, addKind, addTarget)}>{"＋ "}{t("ndv.logwb.addSource")}</span>
         </div>
-        {(devices.length > 0 && hosts.length === 0) && <div className="ndv__hint">日志源面向服务器设备（linux/windows/vmware）；当前清单里还没有。</div>}
+        {(devices.length > 0 && hosts.length === 0) && <div className="ndv__hint">{t("ndv.logwb.noServerDevices")}</div>}
       </div>
 
       {/* 主区：合并时间线 + 底栏搜索 */}
       <div className="ndv-logwb__main">
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-          <label className="ndv__meta">行数</label>
+          <label className="ndv__meta">{t("ndv.logp.rows")}</label>
           <input className="mem-input" type="number" style={{ width: 60 }} value={tailN} min={1} max={1000}
             onChange={e => setTailN(Math.min(1000, Math.max(1, Number(e.target.value) || 200)))} />
-          <label className="ndv__meta">起于</label>
+          <label className="ndv__meta">{t("ndv.logp.since")}</label>
           <input className="mem-input" style={{ width: 128 }} value={since} onChange={e => setSince(e.target.value)} placeholder="2026-08-27 10:00 或 -1h" />
-          <span className={`btn btn--small ${busy ? "" : "btn--primary"}`} role="button" onClick={() => void fetchAll()}>{busy ? "读取中…" : "读取并合并"}</span>
-          <span className="ndv__meta" style={{ marginLeft: 6 }}>关联源</span>
+          <span className={`btn btn--small ${busy ? "" : "btn--primary"}`} role="button" onClick={() => void fetchAll()}>{busy ? t("ndv.logp.reading") : t("ndv.logwb.readMerge")}</span>
+          <span className="ndv__meta" style={{ marginLeft: 6 }}>{t("ndv.logwb.relSources")}</span>
           {(["change", "finding", "event"] as const).map(k => (
             <span key={k} className={`ndv__chip ndv-logwb__rel${rel[k] ? " ndv-logwb__rel--on" : ""}`} role="button"
-              title={k === "change" ? "审计写路径（提案执行/配置变更）" : k === "finding" ? "发现队列" : "syslog/trap 被动事件"}
-              onClick={() => setRel(r => ({ ...r, [k]: !r[k] }))}>{KIND_LABEL[k]}</span>
+              title={k === "change" ? t("ndv.logwb.relChange") : k === "finding" ? t("ndv.logwb.relFinding") : t("ndv.logwb.relEvent")}
+              onClick={() => setRel(r => ({ ...r, [k]: !r[k] }))}>{t(KIND_LABEL[k] as never)}</span>
           ))}
-          <label className="ndv__meta" style={{ marginLeft: 8 }}>过滤</label>
-          <input className="mem-input" style={{ width: 120 }} value={viewGrep} onChange={e => setViewGrep(e.target.value)} placeholder="正则（仅视图）" />
-          <span className="ndv__meta">{shown.length} 行</span>
+          <select className="mem-select" style={{ width: 64 }} value={String(relHours)} title={t("ndv.logwb.relWindow")}
+            onChange={e => setRelHours(Number(e.target.value))}>
+            <option value="1">1h</option>
+            <option value="24">24h</option>
+            <option value="168">7d</option>
+          </select>
+          <label className="ndv__meta" style={{ marginLeft: 8 }}>{t("ndv.logp.grep")}</label>
+          <input className="mem-input" style={{ width: 120 }} value={viewGrep} onChange={e => setViewGrep(e.target.value)} placeholder={t("ndv.logwb.phRegexView")} />
+          <span className="ndv__meta">{t("ndv.logwb.nLines", { n: shown.length })}</span>
+          {shown.length > 0 && (
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => void exportRows()}>{t("ndv.logwb.exportTxt")}</span>
+          )}
           {onInsertComposer && shown.length > 0 && (
-            <span className="btn btn--secondary btn--small" role="button" onClick={sendToAI}>交给 AI 诊断</span>
+            <span className="btn btn--secondary btn--small" role="button" onClick={sendToAI}>{t("ndv.sendToAI")}</span>
           )}
         </div>
         {note && <div className="ndv__hint">{note}</div>}
@@ -261,12 +284,12 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
         <div className="ndv-logwb__rows">
           {entries.length === 0 && rows.length === 0 && (
             <div className="ndv__hint" style={{ padding: 8 }}>
-              多源合并时间线：添加多个 (设备,源) 后「读取并合并」，按时间戳排成一条线。
-              journal 与 docker 日志无需配置，填服务名/容器名即可；自定义文件路径需先加入设备的 log_paths 白名单（/var/log 始终放行）。勾选「关联源」后，变更/发现/事件会并进同一条时间线（实体 360°）。
+              {t("ndv.logwb.emptyHint1")}
+              {t("ndv.logwb.emptyHint2")}
               {hosts[0] && (
                 <span style={{ display: "inline-flex", gap: 6, marginLeft: 8 }}>
-                  <span className="ndv__chip" role="button" onClick={() => addEntry(hosts[0].name, "file", "/var/log/syslog")}>＋ {hosts[0].name} /var/log/syslog</span>
-                  <span className="ndv__chip" role="button" onClick={() => addEntry(hosts[0].name, "file", "/var/log/auth.log")}>＋ auth.log</span>
+                  <span className="ndv__chip" role="button" onClick={() => addEntry(hosts[0].name, "file", "/var/log/syslog")}>{"＋ "}{hosts[0].name} /var/log/syslog</span>
+                  <span className="ndv__chip" role="button" onClick={() => addEntry(hosts[0].name, "file", "/var/log/auth.log")}>{"＋ "}auth.log</span>
                 </span>
               )}
             </div>
@@ -282,7 +305,7 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
               k === "change" ? "var(--accent-alt)" :
               k === "finding" ? "var(--warn)" :
               k === "event" ? "var(--fg-dim)" : "var(--fg-dim)";
-            const srcText = KIND_LABEL[k] ? `${KIND_LABEL[k]}·${r.device}` : `${r.device}·${r.source.replace(/^(file|journal|docker|k8s):/, "")}`;
+            const srcText = KIND_LABEL[k] ? `${t(KIND_LABEL[k] as never)}·${r.device}` : `${r.device}·${r.source.replace(/^(file|journal|docker|k8s):/, "")}`;
             return (
               <div key={i} className={`ndv-logwb__row ${levelClass(r.line)}`}>
                 {r.tsText && <span className="ts">{r.tsText} </span>}
@@ -296,19 +319,31 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
         {/* 底栏：跨设备搜索（§3.3——一个 IP 搜全网的家） */}
         <div className="ndv-logwb__search">
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-            <span className="ndv__meta" style={{ fontWeight: 600 }}>跨设备搜索</span>
+            <span className="ndv__meta" style={{ fontWeight: 600 }}>{t("ndv.logwb.xdevSearch")}</span>
             <input className="mem-input" style={{ width: 200 }} value={pattern} onChange={e => setPattern(e.target.value)}
-              placeholder="IP / 哈希 / 关键字（正则）" onKeyDown={e => { if (e.key === "Enter") void runSearch(); }} />
+              placeholder={t("ndv.logwb.phSearch")} onKeyDown={e => { if (e.key === "Enter") void runSearch(); }} />
             <input className="mem-input" style={{ width: 110 }} value={searchSince} onChange={e => setSearchSince(e.target.value)} placeholder="-1h" />
-            <span className={`btn btn--small ${searchBusy ? "" : "btn--secondary"}`} role="button" onClick={() => void runSearch()}>{searchBusy ? "搜索中…" : "全网搜索"}</span>
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => setScopeOpen(v => !v)}
+              title={t("ndv.logwb.scopeTip")}>{scope.length === 0 ? t("ndv.logwb.scopeAll") : t("ndv.logwb.scopeN", { n: scope.length })}</span>
+            <span className={`btn btn--small ${searchBusy ? "" : "btn--secondary"}`} role="button" onClick={() => void runSearch()}>{searchBusy ? t("ndv.logwb.searching") : t("ndv.logwb.searchAll")}</span>
             {search && (
               <span className="ndv__meta">
-                覆盖 {search.covered_devices}/{search.total_devices} 台 · 命中 {search.hits.length} 条（{search.devices_with_hits} 台）
-                {search.budget_stopped && <b style={{ color: "var(--danger)" }}> · 中途停止，未覆盖≠干净</b>}
+                {t("ndv.logwb.searchSummary", { covered: search.covered_devices, total: search.total_devices, hits: search.hits.length, devs: search.devices_with_hits })}
+                {search.budget_stopped && <b style={{ color: "var(--danger)" }}> · {t("ndv.logwb.budgetStopped")}</b>}
               </span>
             )}
           </div>
           {search?.note && <div className="ndv__hint">{search.note}</div>}
+          {scopeOpen && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "4px 0" }}>
+              {hosts.map(h => (
+                <span key={h.name} className={`ndv__chip${scope.includes(h.name) ? " ndv-logwb__rel--on" : ""}`} role="button"
+                  onClick={() => setScope(s => s.includes(h.name) ? s.filter(x => x !== h.name) : [...s, h.name])}>{h.name}</span>
+              ))}
+              <span className="btn btn--secondary btn--small" role="button" onClick={() => setScope([])}>{t("ndv.logwb.scopeClear")}</span>
+              <span className="btn btn--secondary btn--small" role="button" onClick={() => setScope(hosts.map(h => h.name))}>{t("ndv.logwb.scopeSelectAll")}</span>
+            </div>
+          )}
           {search && search.hits.length > 0 && (
             <div className="ndv-logwb__hits">
               {search.hits.map((h, i) => (
@@ -322,7 +357,7 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
             </div>
           )}
           {search && search.skipped.length > 0 && (
-            <div className="ndv__hint">跳过：{search.skipped.slice(0, 5).join("；")}{search.skipped.length > 5 ? ` …（共 ${search.skipped.length}）` : ""}</div>
+            <div className="ndv__hint">{t("ndv.logwb.skipped", { list: search.skipped.slice(0, 5).join("；"), more: search.skipped.length > 5 ? t("ndv.logwb.moreN", { n: search.skipped.length }) : "" })}</div>
           )}
         </div>
       </div>

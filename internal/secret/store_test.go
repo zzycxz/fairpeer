@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStoreRoundTrip(t *testing.T) {
@@ -484,5 +485,32 @@ func TestKekIdSeparatesStores(t *testing.T) {
 	json.Unmarshal(bb, &bridgeDoc)
 	if mainDoc.KEKId == bridgeDoc.KEKId {
 		t.Fatal("two stores must not share a kekId")
+	}
+}
+
+// HealthStats must count keys + report mtime WITHOUT decrypting (works on a
+// locked store); an empty store reads zero/zero without error.
+func TestHealthStats(t *testing.T) {
+	dir := t.TempDir()
+	st := New(filepath.Join(dir, "secrets.enc.json"))
+	keys, at, err := st.HealthStats()
+	if err != nil || len(keys) != 0 || !at.IsZero() {
+		t.Fatalf("empty store = %v %v %v", keys, at, err)
+	}
+	if err := st.Set("netdev/password/P1", "x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Set("mail/token/T1", "y"); err != nil {
+		t.Fatal(err)
+	}
+	keys, at, err = st.HealthStats()
+	if err != nil || len(keys) != 2 || at.IsZero() {
+		t.Fatalf("stats = %v %v %v", keys, at, err)
+	}
+	if keys[0] != "mail/token/T1" || keys[1] != "netdev/password/P1" {
+		t.Errorf("keys not sorted: %v", keys)
+	}
+	if time.Since(at) > 5*time.Second {
+		t.Errorf("mtime too old: %v", at)
 	}
 }
