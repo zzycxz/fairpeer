@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(netdev/desktop): 大屏家族 + 发现指纹管线 + 导入向导 + 驳回提案 + ndv i18n 全量翻译
+
+运维侧多批在途工作合并落地（143 文件，含状态历史批次织入宿主函数的挂点与锁加固随批生效）。
+
+- **大屏家族**（NETDEV_DASHBOARD_SPEC）：DashShell 五屏——总览/调查链/割接/发现/暴露面（OverviewPanel·ChainBoard·CutoverBoardView·DiscoveryBoardView·ExposureBoardView）；`netdev_dash_app.go` 桥 + dashEmit 事件流 + `cmd/dashshot` 截图工具；验证截图入库；修 OverviewPanel 健康卡补「可达 {ok}/{total}」说明行（dash-boards 的 honest x/y 断言 4/4 过）
+- **深链召回**：`fairpeer://cutover/<id>` 等 deeplink（跨平台实现+测试）；割接 hold/决策点 IM 推送带深链直达大屏
+- **发现与指纹管线**（NETDEV_IMPORT_AND_FINGERPRINT_SPEC）：discovered 线索库 / discoveryrun 断点续扫 / layerdiscover 分层发现 / httpfp·snmpfp·banner 服务指纹 / role 角色推断 / attackpath 暴露面 / escalate 升级链 / healthwater·metrics 水位 / journal 巡检账本；`netdev_discover`/`netdev_topology` 工具接线
+- **导入向导与自导出**：ImportWizardCard + selfimport/selfexport 台账迁移 + topoimport/topovsdx（drawio/vsdx 拓扑导入，附件芯片一键解析入 dock）
+- **提案驳回与删除**（NETDEV_COMPLETION_SPEC §4.1）：RejectProposal（理由随提案持久化，agent 下一轮可见）+ DeleteProposal（仅草稿/终结态可删）——含状态历史快照挂点与锁内读改写；IM 审批/驳回通道（netdevcmds）
+- **ndv.\* 全量 i18n**：243 键中文翻译补齐 + dock 页签/导航 tt() 化；zh/en 键集一致（locale-parity 门禁）
+- 验证：go 双模块 build/vet/test 全绿（含 dashboards/discovered/discoveryrun/layerdiscover/httpfp/snmpfp/topoimport/attackpath/role/escalate/journal/netdevcmds 新测试）；tsc 零错；vitest 指定集 11 文件/46 用例 + locale-parity 过
+
 ### feat(netdev/desktop): 状态历史与三层回退——对齐 Claude Code/ZCode checkpoint 实践 + 编码模式 rewind 增量
 
 **运维模式（状态回退层，NETDEV_SPEC_V2 附录 D）**：此前 proposals/jobs/cutovers/templates/清单 TOML 全部原地覆写、零版本化——本批给每个状态迁移加"写前快照"，配 dock 新页签「状态历史」（归档组，紧挨审计：审计=不可变事实，状态历史=可回退留底）。
