@@ -471,6 +471,20 @@ export function NetDevLayout({
   // null = 关闭；"" = 创建表单；其余 = 正在查看的 run id。
   const [cutoverId, setCutoverId] = useState<string | null>(null);
   const [cutovers, setCutovers] = useState<NetDevCutoverRun[]>([]);
+  // 状态历史页签徽标（可回退事件数）：轻量独立轮询——面板自身 2.5s 刷新
+  // 详情，这里只喂页签角标（5s 足够，出错静默为 0）。
+  const [stateRestorable, setStateRestorable] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      app.NetDevStateEvents()
+        .then((evs) => { if (alive) setStateRestorable((evs ?? []).filter((e) => e.canRestore).length); })
+        .catch(() => { /* backend away → keep the last count */ });
+    };
+    load();
+    const t = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
 
 
 
@@ -1343,7 +1357,7 @@ export function NetDevLayout({
     { key: "findings", label: tt("ndv.tab.findings"), group: tt("ndv.tabgrp.decide"), dot: findingsHot, badge: scopedFindings.length || undefined, icon: <AlertTriangle size={13} /> },
     { key: "proposals", label: tt("ndv.tab.proposals"), group: tt("ndv.tabgrp.decide"), badge: pendingCount || undefined, icon: <ClipboardCheck size={13} /> },
     { key: "audit", label: tt("ndv.tab.audit"), group: tt("ndv.tabgrp.archive"), icon: <ScrollText size={13} /> },
-    { key: "state", label: tt("ndv.tab.state"), group: tt("ndv.tabgrp.archive"), icon: <History size={13} /> },
+    { key: "state", label: tt("ndv.tab.state"), group: tt("ndv.tabgrp.archive"), badge: stateRestorable || undefined, icon: <History size={13} /> },
   ];
 
   // Active tab closed (or restored state desyncs) → fall back to the last

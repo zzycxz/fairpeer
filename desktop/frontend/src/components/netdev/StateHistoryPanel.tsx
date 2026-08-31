@@ -31,6 +31,12 @@ export function StateHistoryPanel() {
     }
   };
   useEffect(() => { void reload(); }, []);
+  // Live like the other ops panels: state events arrive whenever a transition
+  // lands elsewhere (approve, job lifecycle…), so poll while the tab is open.
+  useEffect(() => {
+    const t = setInterval(() => void reload(), 2500);
+    return () => clearInterval(t);
+  }, []);
 
   const toggle = async (id: number) => {
     if (expanded === id) {

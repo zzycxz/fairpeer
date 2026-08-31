@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **快照层** `internal/netdev/statehist.go`：复用 `checkpoint.Store` 第二实例（root=fairpeer 配置目录，同盖 `netdev/**` 与 `config.toml`，上限 200 事件）；挂点与状态迁移审计同址（~26 处：提案 propose/approve/reject/execute/rollback/delete/close-watch、job 全生命周期、cutover 全生命周期、模板、发现裁决、设置/纳管/导入/拓扑/golden/工单），actor 分 user/agent/im/system（割接 runner 经 `CtxStateActor` 标 system）；secrets/审计流水/journal/只增库明确排除
 - **回退引擎**：后缀语义（回到事件 E 前 = E 起所有触碰文件还原到各自动手前，文件原不存在则删除）；恢复前写 `restore-keep` 反向事件 → 可重做（守卫：反向事件后出现新事件即禁用）；ZCode 式事前安全分类（唯一拦截条件 = 后缀触碰活跃实体：执行中/观察期提案、运行/暂停作业、运行/hold 割接，列出实体名；执行时二次复检）；config.toml 专属连带警告；UI 固定声明"仅恢复本地记录，设备回退走提案/割接回滚"
-- **桥/UI**：`NetDevStateEvents/StateEventDiff/StateRestore` + StateHistoryPanel（2.5s 轮询、逐文件 unified diff、三分类确认、重做按钮）+ zh/en 各 ~62 键（ndv.hist.*）
+- **桥/UI**：`NetDevStateEvents/StateEventDiff/StateRestore` + StateHistoryPanel（**2.5s 自动轮询**、逐文件 unified diff、三分类确认、重做按钮）+ 页签 badge=可回退事件数（5s 轻量轮询）+ zh/en 各 ~62 键（ndv.hist.*）
 
 **编码模式（对齐增量）**：rewind 三分类 + Reapply。
 
