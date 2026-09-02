@@ -683,6 +683,37 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 					_ = saveProposalLocked(pp)
 				}
 			}(p.ID, wu)
+		// P2-3：提案完成即自动复跑关联设备的基线核查——修复有没有生效由
+		// 数据说话（命中更新同一告警、不再命中自动 resolve），不等人想起
+		// 手动重查。失败不影响提案结果（best-effort，入审计）。
+		touched := map[string]bool{}
+		for _, s := range p.Steps {
+			if s.Device != "" {
+				touched[s.Device] = true
+			}
+		}
+		var devs []string
+		for d := range touched {
+			devs = append(devs, d)
+		}
+		if len(devs) > 0 {
+			p.WatchNote = "已触发自动基线复核（结果见发现）"
+			go func(id string, dd []string) {
+				// Test seam: the recheck goroutine must not outlive a test's
+				// state-dir override into the NEXT test's fixtures (it raced
+				// TestWatchDegradationRaisesFinding's finding counts ~1/4 runs).
+				if !proposalAutoRecheck {
+					return
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+				if _, err := m.RunBaselineFor(ctx, dd); err != nil {
+					_ = AppendAudit(Audit{Time: time.Now(), Device: "(proposal)", Command: "baseline recheck after " + id, Class: "proposal", Status: AuditDeviceError, Error: err.Error()})
+					return
+				}
+				_ = AppendAudit(Audit{Time: time.Now(), Device: "(proposal)", Command: "baseline recheck after " + id, Class: "proposal", Status: AuditOK})
+			}(p.ID, devs)
+		}
 	}
 	if err := SaveProposal(p); err != nil {
 		return nil, err
@@ -984,3 +1015,9 @@ func (p *Proposal) stepDevices() []string {
 	}
 	return out
 }
+
+// proposalAutoRecheck gates the post-done baseline recheck goroutine. It is
+// the seam that keeps the goroutine inside its own test: helpers flip it off
+// so a finished proposal's async recheck never writes into a LATER test's
+// overridden findings dir (the ~1/4 flake in TestWatchDegradationRaisesFinding).
+var proposalAutoRecheck = true

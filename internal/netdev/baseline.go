@@ -148,6 +148,25 @@ type BaselineSummary struct {
 // (full audit, redaction before rules run) and files one Finding per violated
 // rule plus a summary Finding. Mirror of RunInspection's flow.
 func (m *Manager) RunBaseline(ctx context.Context) (*Finding, error) {
+	return m.runBaseline(ctx, nil)
+}
+
+// RunBaselineFor is RunBaseline scoped to a device set (nil/empty = all) —
+// the P2-3 proposal-driven re-check runs only the devices a finished
+// proposal actually touched, so an in-flight fix elsewhere can't be
+// auto-resolved out from under its own alert.
+func (m *Manager) RunBaselineFor(ctx context.Context, devices []string) (*Finding, error) {
+	if len(devices) == 0 {
+		return m.RunBaseline(ctx)
+	}
+	set := map[string]bool{}
+	for _, d := range devices {
+		set[d] = true
+	}
+	return m.runBaseline(ctx, set)
+}
+
+func (m *Manager) runBaseline(ctx context.Context, only map[string]bool) (*Finding, error) {
 	if !m.cfg.NetDev.Enabled || len(m.cfg.NetDev.Devices) == 0 {
 		return nil, fmt.Errorf("netdev disabled or no devices configured")
 	}
@@ -156,7 +175,11 @@ func (m *Manager) RunBaseline(ctx context.Context) (*Finding, error) {
 	summary := &BaselineSummary{At: time.Now().Format("01-02 15:04")}
 	var problems []string
 	var summaryEvidence []Evidence
+	var checked []string
 	for _, d := range m.cfg.NetDev.Devices {
+		if only != nil && !only[d.Name] {
+			continue
+		}
 		summary.Devices++
 		drv, ok := m.driverFor(d)
 		if !ok {
@@ -182,6 +205,7 @@ func (m *Manager) RunBaseline(ctx context.Context) (*Finding, error) {
 			continue
 		}
 		summary.Checked++
+		checked = append(checked, d.Name)
 		summary.Rules += len(rules)
 		summaryEvidence = append(summaryEvidence, Evidence{Device: d.Name, Command: cmd,
 			Output: fmt.Sprintf("running-config 已读取并核查（%d 行，已脱敏）", strings.Count(res.Output, "\n")+1)})
@@ -200,6 +224,15 @@ func (m *Manager) RunBaseline(ctx context.Context) (*Finding, error) {
 			mu.Unlock()
 		}
 	}
+	for rule, f := range byRule {
+		// P2-3：基线发现接入 Source 生命周期——同一规则重复核查更新同一告警
+		//（不再堆积），规则不再命中且全部受检设备已复核的自动 resolve。
+		f.Source = "baseline:" + rule
+		f.Status = "active"
+	}
+	if err := reconcileBaselineFindings(byRule, checked); err != nil {
+		problems = append(problems, "reconcile: "+err.Error())
+	}
 	for _, f := range byRule {
 		if err := SaveFinding(f); err != nil {
 			problems = append(problems, "save finding: "+err.Error())
@@ -210,8 +243,9 @@ func (m *Manager) RunBaseline(ctx context.Context) (*Finding, error) {
 		Severity: "info",
 		Detail:   fmt.Sprintf("规则族覆盖 huawei-vrp / cisco-ios（仅收录可精确表述的规则）。%s", strings.Join(problems, "；")),
 		Evidence: summaryEvidence,
+		Source:   "baseline:summary", // 单条滚动：历次运行在巡检日志，发现队列只留一张活卡
 	}
-	if err := SaveFinding(summaryFinding); err != nil {
+	if err := SaveRollingFinding(summaryFinding); err != nil {
 		return nil, err
 	}
 	// R1 journal + 总览 BaselineAgg 的持久位（best-effort，不影响核查结果）。
@@ -222,4 +256,53 @@ func (m *Manager) RunBaseline(ctx context.Context) (*Finding, error) {
 		Critical: crit, Warning: warn, Info: info, BaselineHits: summary.Hits,
 	})
 	return summaryFinding, nil
+}
+
+// reconcileBaselineFindings folds a fresh run into the active baseline
+// findings (P2-3): a rule that still hits UPDATES the existing alert in
+// place (same ID — re-runs stop piling up "基线：…" copies); a rule that no
+// longer hits auto-resolves WHEN every device on the old alert was in this
+// run's checked set — a scoped re-check (proposal devices only) must never
+// resolve an alert it didn't actually re-verify.
+func reconcileBaselineFindings(hit map[string]*Finding, checked []string) error {
+	inRun := map[string]bool{}
+	for _, d := range checked {
+		inRun[d] = true
+	}
+	active, err := ListFindings()
+	if err != nil {
+		return err
+	}
+	for _, f := range active {
+		if !strings.HasPrefix(f.Source, "baseline:") || f.Status == "resolved" || f.Source == "baseline:summary" {
+			continue
+		}
+		if fresh, ok := hit[strings.TrimPrefix(f.Source, "baseline:")]; ok {
+			// Still violated: the fresh finding inherits the alert's identity
+			// and original raise time so the timeline stays one alert.
+			fresh.ID = f.ID
+			fresh.CreatedAt = f.CreatedAt
+			continue
+		}
+		allChecked := len(f.Devices) > 0
+		for _, d := range f.Devices {
+			if !inRun[d] {
+				allChecked = false
+				break
+			}
+		}
+		if !allChecked {
+			continue
+		}
+		now := time.Now()
+		f.Status = "resolved"
+		f.ResolvedAt = &now
+		if f.Detail != "" && !strings.Contains(f.Detail, "已恢复") {
+			f.Detail += "（复核通过，自动恢复）"
+		}
+		if err := SaveFinding(f); err != nil {
+			return err
+		}
+	}
+	return nil
 }

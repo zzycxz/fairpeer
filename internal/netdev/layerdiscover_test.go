@@ -245,3 +245,41 @@ func TestBuildPlanMediumOptIn(t *testing.T) {
 		t.Error("medium_no_confirm must pre-check medium nets")
 	}
 }
+
+func TestSplitForTunnel(t *testing.T) {
+	// Small nets pass through untouched.
+	if got := splitForTunnel("192.168.1.0/24"); len(got) != 1 || got[0] != "192.168.1.0/24" {
+		t.Fatalf("/24 = %v", got)
+	}
+	// A /19 (8192 addrs) splits into two /20 chunks at the right bases.
+	got := splitForTunnel("10.1.0.0/19")
+	if len(got) != 2 || got[0] != "10.1.0.0/20" || got[1] != "10.1.16.0/20" {
+		t.Fatalf("/19 = %v", got)
+	}
+	// A /16 splits into 16 chunks; a /9 stays whole (netprobe's job).
+	if got := splitForTunnel("10.2.0.0/16"); len(got) != 16 || got[0] != "10.2.0.0/20" || got[15] != "10.2.240.0/20" {
+		t.Fatalf("/16 = %v (n=%d)", got, len(got))
+	}
+	if got := splitForTunnel("10.128.0.0/9"); len(got) != 1 {
+		t.Fatalf("/9 should stay whole, got n=%d", len(got))
+	}
+}
+
+func TestBuildPlanSplitsLargeSteps(t *testing.T) {
+	p := &PrecheckResult{
+		Vantage:       "CORE-1",
+		DirectSubnets: []SubnetClass{{CIDR: "10.1.0.0/19"}},
+	}
+	plan := buildPlan(p, false)
+	if len(plan.Steps) != 2 {
+		t.Fatalf("steps = %+v", plan.Steps)
+	}
+	for _, s := range plan.Steps {
+		if s.Class != "large" || s.DefaultOn {
+			t.Errorf("chunk %+v must inherit large/off", s)
+		}
+		if s.Hosts != discoverMaxHosts-2 {
+			t.Errorf("chunk %s hosts = %d, want %d", s.CIDR, s.Hosts, discoverMaxHosts-2)
+		}
+	}
+}

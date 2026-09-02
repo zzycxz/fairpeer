@@ -298,6 +298,10 @@ type NetDevDiscovery struct {
 	Rate          int      `toml:"rate"`           // parallel probe cap
 	Mode          string   `toml:"mode"`           // tunnel | probe | auto
 	ProbeFallback string   `toml:"probe_fallback"` // tunnel when netprobe can't deploy
+	// NmapPath is the user-supplied nmap binary for the service-sweep
+	// orchestrator (empty = LookPath("nmap"); absent = the feature refuses
+	// with install guidance — the product orchestrates, never bundles).
+	NmapPath string `toml:"nmap_path"`
 	// SnmpCommunity enables F2's sysDescr fingerprint on discovery: hosts
 	// with an open 161 get ONE v2c GET (no retry). Empty (default) = off —
 	// SNMP stays a per-device metrics channel only.

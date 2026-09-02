@@ -2,6 +2,7 @@ package netdev
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"regexp"
@@ -174,6 +175,42 @@ func classifySubnet(cidr string, direct bool) (SubnetClass, bool) {
 	return SubnetClass{CIDR: cidr, Class: class, Hosts: hosts, DefaultOn: class == "direct-small" || class == "routed-small"}, true
 }
 
+// splitForTunnel chops one IPv4 CIDR into chunks the tunnel prober accepts
+// (≤ discoverMaxHosts addresses; /20 for the big classes) so a plan step
+// never trips the tunnel-mode cap (PENLAB_CAPABILITY_GAPS P0-2 — the whole
+// netprobe binary is the later-phase answer; until then the plan splits and
+// the chunks run under the same budget/pacing rules). Parent nets larger
+// than 16 chunks (wider than /16) stay whole: they stay default-off and the
+// probe-time refusal keeps its "raise budget / use netprobe" guidance
+// instead of flooding the plan card with hundreds of rows.
+func splitForTunnel(cidr string) []string {
+	_, ipnet, err := net.ParseCIDR(strings.TrimSpace(cidr))
+	if err != nil {
+		return nil
+	}
+	ones, bits := ipnet.Mask.Size()
+	if bits != 32 || 1<<uint(32-ones) <= discoverMaxHosts {
+		return []string{cidr}
+	}
+	chunkOnes := ones
+	for 1<<uint(32-chunkOnes) > discoverMaxHosts {
+		chunkOnes++
+	}
+	if n := 1 << uint(chunkOnes-ones); n > 16 {
+		return []string{cidr}
+	}
+	n := 1 << uint(chunkOnes-ones)
+	base := binary.BigEndian.Uint32(ipnet.IP.To4())
+	step := uint32(1) << uint(32-chunkOnes)
+	out := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		ip4 := make(net.IP, 4)
+		binary.BigEndian.PutUint32(ip4, base+uint32(i)*step)
+		out = append(out, fmt.Sprintf("%s/%d", ip4, chunkOnes))
+	}
+	return out
+}
+
 // buildPlan folds a precheck into the confirm-first plan. mediumOn reflects
 // [netdev.discovery] medium_no_confirm (zero value = medium stays unchecked).
 func buildPlan(p *PrecheckResult, mediumOn bool) *DiscoverPlan {
@@ -185,10 +222,26 @@ func buildPlan(p *PrecheckResult, mediumOn bool) *DiscoverPlan {
 		}
 		if sc, ok := classifySubnet(cidr, direct); ok {
 			seen[cidr] = true
+			on := sc.DefaultOn
 			if sc.Class == "medium" && mediumOn {
-				sc.DefaultOn = true
+				on = true
 			}
-			plan.Steps = append(plan.Steps, PlanStep{CIDR: sc.CIDR, Class: sc.Class, Hosts: sc.Hosts, DefaultOn: sc.DefaultOn})
+			// Chunks inherit the parent's class/default so medium/large keep
+			// needing their explicit opt-in; only the probe unit shrinks.
+			chunks := splitForTunnel(cidr)
+			for _, chunk := range chunks {
+				chunkHosts := sc.Hosts
+				if len(chunks) > 1 {
+					if _, cn, err := net.ParseCIDR(chunk); err == nil {
+						cOnes, _ := cn.Mask.Size()
+						chunkHosts = 1 << uint(32-cOnes)
+						if cOnes <= 30 {
+							chunkHosts -= 2
+						}
+					}
+				}
+				plan.Steps = append(plan.Steps, PlanStep{CIDR: chunk, Class: sc.Class, Hosts: chunkHosts, DefaultOn: on})
+			}
 		}
 	}
 	for _, s := range p.DirectSubnets {

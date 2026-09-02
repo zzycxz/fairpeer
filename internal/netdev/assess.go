@@ -111,20 +111,79 @@ func (m *Manager) WeakCredCheck(ctx context.Context, deviceName, tier, dictPath 
 		res.Attempts = i + 1
 		ok, err := m.dialAuth(ctx, d, cand)
 		status := AuditOK
-		detail := "attempt " + fmt.Sprint(i+1) + " rejected"
+		detail := "attempt " + fmt.Sprintf("%d", i+1) + " rejected"
 		if err != nil {
 			status = AuditFailure
-			detail = "attempt " + fmt.Sprint(i+1) + " transport error: " + err.Error()
+			detail = "attempt " + fmt.Sprintf("%d", i+1) + " transport error: " + err.Error()
 		} else if ok {
 			res.Weak = true
 			res.Detail = fmt.Sprintf("weak credential confirmed after %d attempt(s) — change it via a proposal", res.Attempts)
-			_ = AppendAudit(Audit{Device: deviceName, Command: "weak-cred-check (" + tier + ") attempt " + fmt.Sprint(i+1) + ": CONFIRMED", Class: "assess", Status: AuditDeviceError})
+			_ = AppendAudit(Audit{Device: deviceName, Command: "weak-cred-check (" + tier + ") attempt " + fmt.Sprintf("%d", i+1) + ": CONFIRMED", Class: "assess", Status: AuditDeviceError})
+			m.fileWeakCredFinding(res)
 			return res, nil
 		}
-		_ = AppendAudit(Audit{Device: deviceName, Command: "weak-cred-check (" + tier + ") attempt " + fmt.Sprint(i+1), Class: "assess", Status: status, Error: detail})
+		_ = AppendAudit(Audit{Device: deviceName, Command: "weak-cred-check (" + tier + ") attempt " + fmt.Sprintf("%d", i+1), Class: "assess", Status: status, Error: detail})
 	}
 	res.Detail = fmt.Sprintf("no weak credential in %d attempt(s) (budget %d)", res.Attempts, budget)
+	m.resolveWeakCredFinding(deviceName, tier)
 	return res, nil
+}
+
+// fileWeakCredFinding lands a CONFIRMED weak credential as a critical
+// finding with Source lifecycle ("assess:weak-cred:<device>"): the UI's
+// 「查看发现」jump, the overview risk counters, and the 转修复提案 flow all
+// consume the finding queue — without this filing the loop stopped at the
+// transient result card. Passwords never enter the evidence.
+func (m *Manager) fileWeakCredFinding(res WeakCredResult) {
+	src := "assess:weak-cred:" + res.Tier + ":" + res.Device
+	now := time.Now()
+	f := &Finding{
+		Title:    "弱口令：" + res.Device + " SSH 可被弱口令登录",
+		Severity: SeverityCritical,
+		Devices:  []string{res.Device},
+		Detail:   res.Detail + "。命中于 " + now.Format("01-02 15:04:05") + " 的 " + res.Tier + " 档核查（尝试 " + fmt.Sprintf("%d", res.Attempts) + " 次，预算 " + fmt.Sprintf("%d", res.Budget) + "）。凭证原文不落任何日志。",
+		Evidence: []Evidence{{Device: res.Device, Command: "weak-cred-check (" + res.Tier + ")", Output: "attempt " + fmt.Sprintf("%d", res.Attempts) + " accepted (password not logged)"}},
+		Suggestion: "立即经提案更换该设备登录凭证，并检查同分组其他设备是否复用同一口令。",
+		Source:  src,
+		Status:  "active",
+	}
+	// Dedup: a re-check that still confirms UPDATES the same alert instead of
+	// piling copies (same grammar as reconcileBaselineFindings).
+	if existing, err := ListFindings(); err == nil {
+		for _, old := range existing {
+			if old.Source == src && old.Status != "resolved" {
+				f.ID = old.ID
+				f.CreatedAt = old.CreatedAt
+				break
+			}
+		}
+	}
+	_ = SaveFinding(f)
+}
+
+// resolveWeakCredFinding auto-resolves the device's weak-cred alert when a
+// full-budget re-check of the SAME tier passes (the credential was fixed —
+// the 识别→修复→复核 loop's closing beat). Tier is part of the source key:
+// a basic-tier pass must not resolve a dictionary-tier alert.
+func (m *Manager) resolveWeakCredFinding(device, tier string) {
+	src := "assess:weak-cred:" + tier + ":" + device
+	fs, err := ListFindings()
+	if err != nil {
+		return
+	}
+	for _, f := range fs {
+		if f.Source != src || f.Status == "resolved" {
+			continue
+		}
+		now := time.Now()
+		f.Status = "resolved"
+		f.ResolvedAt = &now
+		if f.Detail != "" && !strings.Contains(f.Detail, "已恢复") {
+			f.Detail += "（复核通过，自动恢复）"
+		}
+		_ = SaveFinding(f)
+		return
+	}
 }
 
 // dialAuth attempts one SSH login with the candidate password. Host keys ride
@@ -259,7 +318,7 @@ func (t *assessTool) Execute(ctx context.Context, args json.RawMessage) (string,
 	}
 	out := fmt.Sprintf("%s: tier=%s, %d/%d attempt(s) — %s", res.Device, res.Tier, res.Attempts, res.Budget, res.Detail)
 	if res.Weak {
-		out += "\n已确认弱口令：请起草变更提案修复（不要直接改密码——评估手不下发配置）。"
+		out += "\n已确认弱口令：该发现已由系统自动立案（严重级 Finding，复查通过会自动恢复），请勿再调用 netdev_finding 重复立案；请起草变更提案修复（不要直接改密码——评估手不下发配置）。"
 	}
 	return out, nil
 }

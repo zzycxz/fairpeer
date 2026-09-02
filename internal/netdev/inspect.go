@@ -53,11 +53,12 @@ func (m *Manager) RunInspection(ctx context.Context) (*Finding, error) {
 		Detail: fmt.Sprintf("battery ran %s–%s over %d devices; %d evidence items collected",
 			start.Format("15:04:05"), time.Now().Format("15:04:05"), len(devices), len(evidence)),
 		Evidence: evidence,
+		Source:   "inspect:summary", // 单条滚动：历史在巡检日志，发现队列只留一张活卡
 	}
 	if len(problems) > 0 {
 		f.Detail += "; problems: " + joinAll(problems, "; ")
 	}
-	if err := SaveFinding(f); err != nil {
+	if err := SaveRollingFinding(f); err != nil {
 		return nil, err
 	}
 	// R1 journal（best-effort）：巡检一行汇总 + 电池里 interface-brief 输出的

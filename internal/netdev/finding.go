@@ -270,3 +270,24 @@ func ListFindings() ([]*Finding, error) {
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
 }
+
+// SaveRollingFinding saves f as the SINGLE rolling entry for its Source:
+// an existing finding with the same Source (any status) is updated in place
+// (ID and original raise time preserved) instead of piling one copy per run.
+// Used by the per-run info summaries (inspection/baseline) — their history
+// lives in the inspection journal; the findings queue keeps one live card.
+func SaveRollingFinding(f *Finding) error {
+	if f.Source == "" {
+		return SaveFinding(f)
+	}
+	if existing, err := ListFindings(); err == nil {
+		for _, old := range existing {
+			if old.Source == f.Source {
+				f.ID = old.ID
+				f.CreatedAt = old.CreatedAt
+				break
+			}
+		}
+	}
+	return SaveFinding(f)
+}

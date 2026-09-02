@@ -137,3 +137,33 @@ func TestAssessToolRefusesWithoutEnvelope(t *testing.T) {
 	col.waitKind(t, LiveCmdStart, 1)
 	col.waitKind(t, LiveCmdEnd, 1)
 }
+
+// P2-3 补件：确认的弱口令必须立案（Source 含档位），复查通过同档自动恢复、
+// 异档不得误恢复。
+func TestWeakCredFindingLifecycle(t *testing.T) {
+	findingsDirOverr = filepath.Join(t.TempDir(), "findings")
+	t.Cleanup(func() { findingsDirOverr = "" })
+
+	m := &Manager{}
+	res := WeakCredResult{Device: "sw9", Tier: "basic", Weak: true, Attempts: 2, Budget: 3,
+		Detail: "weak credential confirmed after 2 attempt(s) — change it via a proposal"}
+	m.fileWeakCredFinding(res)
+	m.fileWeakCredFinding(res) // re-confirm updates the same alert, no pile-up
+	fs, _ := ListFindings()
+	if len(fs) != 1 || fs[0].Source != "assess:weak-cred:basic:sw9" || fs[0].Status != "active" {
+		t.Fatalf("file/dedup = %+v", fs)
+	}
+
+	// A dictionary-tier pass must NOT resolve the basic-tier alert.
+	m.resolveWeakCredFinding("sw9", "dictionary")
+	fs, _ = ListFindings()
+	if fs[0].Status != "active" {
+		t.Fatal("cross-tier pass resolved the alert")
+	}
+	// Same-tier pass resolves it.
+	m.resolveWeakCredFinding("sw9", "basic")
+	fs, _ = ListFindings()
+	if fs[0].Status != "resolved" {
+		t.Fatal("same-tier pass did not resolve the alert")
+	}
+}

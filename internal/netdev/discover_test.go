@@ -86,3 +86,19 @@ func TestExpandCIDRIPv4(t *testing.T) {
 		t.Fatalf("hosts = %v", hosts)
 	}
 }
+
+func TestExtendScopesCandidates(t *testing.T) {
+	existing := []string{"10.0.0.0/8", "192.168.1.0/24"}
+	added, err := ExtendScopesCandidates(existing, []string{"10.5.0.0/16", "192.168.1.0/25", "172.16.0.0/24", " 172.17.0.0/24 "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 10.5/16 is inside 10/8; 192.168.1.0/25 inside the /24; the two 172s are
+	// new (trimmed) and preserved in order.
+	if len(added) != 2 || added[0] != "172.16.0.0/24" || added[1] != "172.17.0.0/24" {
+		t.Fatalf("added = %v", added)
+	}
+	if _, err := ExtendScopesCandidates(existing, []string{"not-a-cidr"}); err == nil {
+		t.Fatal("invalid CIDR must error, not silently drop")
+	}
+}

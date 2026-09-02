@@ -408,6 +408,33 @@ func cidrContains(outer, inner *net.IPNet) bool {
 	return ob <= ib
 }
 
+// ExtendScopesCandidates validates candidate CIDRs (from a precheck plan the
+// user confirmed on the plan card) against the existing scopes and returns
+// only those not already covered (PENLAB_CAPABILITY_GAPS P0-1). The caller
+// persists the extension and audits it — the never-off scope guardrail is
+// EXTENDED by an explicit human decision, never bypassed.
+func ExtendScopesCandidates(existing, candidates []string) ([]string, error) {
+	var out []string
+	for _, raw := range candidates {
+		c := strings.TrimSpace(raw)
+		_, ipnet, err := net.ParseCIDR(c)
+		if err != nil {
+			return nil, fmt.Errorf("scope candidate %q: invalid CIDR", raw)
+		}
+		covered := false
+		for _, s := range existing {
+			if _, sn, err := net.ParseCIDR(strings.TrimSpace(s)); err == nil && cidrContains(sn, ipnet) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
 // expandCIDR lists usable host IPs (network/broadcast excluded for IPv4).
 func expandCIDR(ip net.IP, ipNet *net.IPNet) ([]string, error) {
 	var out []string

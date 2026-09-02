@@ -1857,12 +1857,15 @@ func (a *App) NetDevDiscoveredHosts() ([]*netdev.DiscoveredHost, error) {
 
 // NetDevPromoteForm is one 待确认→纳管 row the user confirmed in the UI.
 // The frontend prefills from the lead (hostname/IP/vendor hint); the human
-// edits before submitting — promotion is never automatic.
+// edits before submitting — promotion is never automatic. Model carries the
+// fingerprint summary (product/version, e.g. "OpenSSH_9.6") so CVE matching
+// works on day one (PENLAB_CAPABILITY_GAPS P1-2: hay = vendor+os+model).
 type NetDevPromoteForm struct {
 	IP     string `json:"ip"`
 	Name   string `json:"name"`
 	Vendor string `json:"vendor"`
 	Role   string `json:"role"`
+	Model  string `json:"model"`
 }
 
 // NetDevPromoteHosts turns confirmed leads into inventory skeletons via the
@@ -1899,6 +1902,7 @@ func (a *App) NetDevPromoteHosts(entries []NetDevPromoteForm) error {
 				Address: strings.TrimSpace(e.IP),
 				Vendor:  strings.TrimSpace(e.Vendor),
 				Role:    strings.TrimSpace(e.Role),
+				Model:   strings.TrimSpace(e.Model),
 				Port:    22,
 			})
 			taken[name] = true
@@ -1962,6 +1966,48 @@ func (a *App) NetDevDiscoverPrecheck(vantage string) (*netdev.DiscoverPlan, erro
 	ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
 	defer cancel()
 	return netdev.SharedManager(cfg).DiscoverPrecheck(ctx, strings.TrimSpace(vantage))
+}
+
+// NetDevDiscoverExtendScopes (PENLAB_CAPABILITY_GAPS P0-1): extend
+// [netdev.discovery] scopes with plan-card CIDRs the user explicitly
+// confirmed on the card. The never-off scope guardrail is EXTENDED by this
+// human decision — never bypassed — and each added scope lands in the audit
+// trail so black-box layer recursion stays explainable after the fact.
+func (a *App) NetDevDiscoverExtendScopes(cidrs []string) ([]string, error) {
+	cleaned := make([]string, 0, len(cidrs))
+	for _, c := range cidrs {
+		if s := strings.TrimSpace(c); s != "" {
+			cleaned = append(cleaned, s)
+		}
+	}
+	if len(cleaned) == 0 {
+		return []string{}, nil
+	}
+	var added []string
+	err := a.applyConfigOnly(func(c *config.Config) error {
+		var err error
+		added, err = netdev.ExtendScopesCandidates(c.NetDev.Discovery.Scopes, cleaned)
+		if err != nil || len(added) == 0 {
+			return err
+		}
+		c.NetDev.Discovery.Scopes = append(c.NetDev.Discovery.Scopes, added...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range added {
+		_ = netdev.AppendAudit(netdev.Audit{
+			Time: time.Now(), Device: "(scopes)",
+			Command: "extend discovery scope " + s,
+			Class:   "guardrail", Status: netdev.AuditOK,
+		})
+	}
+	if len(added) > 0 {
+		netdev.StateEventSnap(netdev.StateEventSettings, "", netdev.StateActorUser, config.UserConfigPath())
+		a.dashEmit("discovery")
+	}
+	return added, nil
 }
 
 // NetDevDiscoverLayer (F4): probe the user-CONFIRMED subnets through the
@@ -2669,4 +2715,19 @@ func (a *App) NetDevStateRestore(id int) (NetDevStateRestoreResultView, error) {
 	}
 	a.dashEmit("overview")
 	return view, nil
+}
+
+// NetDevNmapSweep (PENLAB P1-1): orchestrate the USER-SUPPLIED nmap binary
+// over one in-scope CIDR — engagement-gated like the weak-cred check; the
+// parsed services land in the 待确认区 as asset leads (promote → fingerprint
+// backfill → CVE matching). The product orchestrates, never bundles.
+func (a *App) NetDevNmapSweep(cidr string) (*netdev.NmapSweepResult, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Minute)
+	defer cancel()
+	return netdev.SharedManager(cfg).NmapSweep(ctx, strings.TrimSpace(cidr))
 }
