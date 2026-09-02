@@ -302,6 +302,11 @@ type NetDevDiscovery struct {
 	// orchestrator (empty = LookPath("nmap"); absent = the feature refuses
 	// with install guidance — the product orchestrates, never bundles).
 	NmapPath string `toml:"nmap_path"`
+	// NetprobePath is fairpeer's own netprobe binary (cmd/netprobe) for
+	// in-network liveness sweeps — the user builds/copies it (often onto a
+	// jump host, where SSH-tunnel probing can't reach); the product
+	// orchestrates and parses, same grammar as nmap_path.
+	NetprobePath string `toml:"netprobe_path"`
 	// SnmpCommunity enables F2's sysDescr fingerprint on discovery: hosts
 	// with an open 161 get ONE v2c GET (no retry). Empty (default) = off —
 	// SNMP stays a per-device metrics channel only.

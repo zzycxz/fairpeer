@@ -41,7 +41,7 @@
 
 - **问题**：tunnel 模式单 CIDR 硬顶 4096 台（/20），超过报错指引 "use netprobe"（`discover.go:416-417`）；但 netprobe 二进制是 P3 后期阶段，**未实现**。UDP/ICMP 探测同样缺失。B 段目前只能人工拆成 16 个 /20 分次跑。
 - **落地方案（短期）**：`buildPlan` 自动把超限网段拆成 /20 计划步（`splitForTunnel`，layerdiscover.go）——继承父网段 class 与 default（medium/large 仍需显式勾选），拆块数 >16（父网段宽于 /16）不拆、保持整体 default-off。B 段以内网段计划卡直接可用。
-- **中期**：netprobe 二进制（B 段全量 + UDP/ICMP）仍按原规划另行立项。
+- **落地方案（中期 netprobe 编排，2026-09-02）**：产品侧编排就绪（`netprobeorch.go`）——编排自家的 `cmd/netprobe` 二进制（用户构建并 `netprobe_path` 指定，通常拷到跳板机执行），闸门与 nmap 同级（engagement + scopes），主机预算走 `max_hosts_per_job`（默认 65536 = 一个 /16，不占 tunnel 的 4096 上限），支持 ICMP 存活（需二进制以特权运行）；存活主机回填待确认区（仅 ICMP 存活的主机为无端口行）。agent 工具 `netdev_netprobe`。UDP 探测仍留后续。
 
 ### P1-1 服务级主动漏洞探测缺失 ✅ nmap 编排 v1 已落地（2026-09-02）
 

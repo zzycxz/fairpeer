@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(netdev): netprobe 编排落地（P0-2 中期）+ 红队批立项决策文档
+
+- **netprobe 产品侧编排**（netprobeorch.go）：`cmd/netprobe` 二进制早已存在（TCP 探测 + raw ICMP），但产品只会报错说 "use netprobe" 而没有任何代码跑它。补上编排：`Manager.NetprobeSweep` + agent 工具 `netdev_netprobe`——闸门与 nmap 同级（engagement 信封 → scopes 白名单），主机预算走 `max_hosts_per_job`（默认 65536 = 一个 /16，不占 tunnel 的 4096 上限），二进制 `netprobe_path` 指定或 PATH 查找；存活主机回填待确认区（`source: netprobe`，仅 ICMP 存活的主机为无端口行），单条滚动 info 汇总 + 审计。隧道探测覆盖不了的 ICMP 存活与 /16 级网段由此闭环；UDP 探测留后续
+- **红队批决策文档**（docs/REDTEAM_BATCH_DECISION.md）：不写任何攻击代码——把附录 C 三要素启用门槛（engagement 红队专用信封 / profile 显式配置 / 重启生效）、三档范围选项（R1 只读侦察编排 / R2 无害验证 / R3 利用链编排）与四个拍板前必答问题成文；当前结论维持"靶场阶段不立项"
+- 验证：netdev+config 全量绿（新增 TestNetprobeSweepGates：无信封拒 / 越界拒 / /16 过闸到达二进制查找三断言）
+
+### feat(netdev/desktop): 元素列表随页面跳转自动刷新——URL 看门狗 + 导航即时重抓
+
+用户问："切换网页的时候元素列表是否也需要刷新？"——需要：ref 是快照态的，页面一跳全部作废。此前只有切页卡会刷新（工作台广播事件），普通跳转不刷：
+
+- **URL 看门狗**（面板层）：会话打开期间每 3 秒读一次实时网址（ConsoleStateOf 本就实时查 Location），与元素列表抓取时记录的网址不同 → 静默自动重抓（清目标/清扫描汇总）。覆盖全部跳转来源：地址栏前往、点击跳页、后退/前进、以及用户直接在被控浏览器里手动浏览
+- **导航即时刷新**：地址栏「前往」成功后立即重抓，不等 3 秒轮询
+- **架构归一**：元素列表生命周期（refreshElements/runDeepScan/scanSummary）从 InteractSub 上提到面板层统一管理；手动刷新按钮走 runAction（转圈+报错上浮），看门狗/切页卡/导航后走静默变体（不闪 busy、不刷日志）
+- 手册第二节同步（条目 5/6 重排）；guides-drift 3/3；tsc 本批文件零错（NetDevLayout 的 nmap 报错为并行会话半成品）；vitest 56/56（17 个 no-suite 预存在）；vite build 绿
+
 ### feat(netdev): 残留批——nmap 服务探测编排 v1（P1-1）+ 滚动汇总 + 双立案防护
 
 终检残留清单处理（PENLAB_CAPABILITY_GAPS）：

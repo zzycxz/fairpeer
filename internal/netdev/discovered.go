@@ -52,6 +52,7 @@ type DiscoveredHost struct {
 const (
 	SourceDiscover  = "discover"
 	SourceNmap      = "nmap-import"
+	SourceNetprobe  = "netprobe"
 	SourceTopo      = "topo-neighbor"
 	SourceLocateARP = "locate-arp"
 )

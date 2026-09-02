@@ -61,3 +61,28 @@ func TestNmapSweepGates(t *testing.T) {
 		t.Fatalf("out-of-scope sweep must refuse on scopes, got %v", err)
 	}
 }
+
+func TestNetprobeSweepGates(t *testing.T) {
+	sim := startSimDevice(t)
+	m, _ := testManager(t, sim) // no assessment envelope
+
+	if _, err := m.NetprobeSweep(context.Background(), "10.0.0.0/24", false); err == nil || !strings.Contains(err.Error(), "engagement") {
+		t.Fatalf("no-envelope sweep must refuse on the engagement gate, got %v", err)
+	}
+	m.cfg.NetDev.Assessment = config.NetDevAssessment{
+		EngagementID: "NETPROBE-TEST-1",
+		Expires:      time.Now().AddDate(0, 0, 1).Format("2006-01-02"),
+		Approver:     "tester",
+	}
+	if _, err := m.NetprobeSweep(context.Background(), "203.0.113.0/24", false); err == nil || !strings.Contains(err.Error(), "scopes") {
+		t.Fatalf("out-of-scope sweep must refuse on scopes, got %v", err)
+	}
+	// A /16 is legal for netprobe (per-job budget), unlike tunnel mode's 4096
+	// cap — verified by reaching the binary-lookup stage (scopes gate must
+	// pass for an in-scope /16 first).
+	m.cfg.NetDev.Discovery.Scopes = []string{"198.18.0.0/15"}
+	_, err := m.NetprobeSweep(context.Background(), "198.18.0.0/16", false)
+	if err == nil || !strings.Contains(err.Error(), "netprobe binary not found") {
+		t.Fatalf("in-scope /16 must pass gates and reach the binary lookup, got %v", err)
+	}
+}

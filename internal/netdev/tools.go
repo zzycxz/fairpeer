@@ -548,6 +548,7 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&snmpTool{m: m})
 	reg.Add(&assessTool{m: m})
 	reg.Add(&nmapTool{m: m})
+	reg.Add(&netprobeTool{m: m})
 	reg.Add(&baselineTool{m: m})
 	reg.Add(&redfishTool{m: m})
 	reg.Add(&logReadTool{m: m})
