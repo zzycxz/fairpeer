@@ -540,10 +540,12 @@ export interface AppBindings {
   NetDevHumanTTYStart(device: string): Promise<{ device: string; connected: boolean; startedAt: string; bytes: number }>;
   // completion-spec additions
   NetDevDiscover(cidr: string, via: string, ports: number[]): Promise<import("./types").NetDevDiscoverHost[]>;
+  NetDevNmapSweep(cidr: string): Promise<import("./types").NetDevNmapSweepResult>;
   NetDevDiscoveredHosts(): Promise<import("./types").NetDevDiscoveredHost[]>;
   NetDevPromoteHosts(entries: import("./types").NetDevPromoteForm[]): Promise<void>;
   NetDevDeleteDiscoveredHost(ip: string): Promise<void>;
   NetDevDiscoverPrecheck(vantage: string): Promise<import("./types").NetDevDiscoverPlan | null>;
+  NetDevDiscoverExtendScopes(cidrs: string[]): Promise<string[]>;
   NetDevDiscoverLayer(vantage: string, cidrs: string[], ports: number[]): Promise<import("./types").NetDevDiscoverHost[]>;
   NetDevDiscoveryRunState(): Promise<import("./types").NetDevDiscoveryRunState | null>;
   NetDevDiscoverResume(): Promise<import("./types").NetDevDiscoverHost[]>;
@@ -652,6 +654,8 @@ export interface AppBindings {
   BrowserConsoleForward(): Promise<string>;
   BrowserConsoleExtractTable(selector: string): Promise<string>;
   BrowserConsoleElements(): Promise<import("./types").BrowserConsoleElement[]>;
+  BrowserConsoleDeepScan(maxScrolls: number): Promise<import("./types").BrowserConsoleScanResult>;
+  BrowserConsoleDevTools(): Promise<import("./types").BrowserDevToolsView>;
   BrowserConsoleClick(target: string): Promise<string>;
   BrowserConsoleType(target: string, text: string): Promise<string>;
   BrowserConsoleKey(key: string): Promise<void>;
@@ -1477,6 +1481,37 @@ function mockInitialProfile(): "dev" | "cowork" | "netdev" {
   const value = new URLSearchParams(window.location.search).get("profile")?.trim().toLowerCase();
   return value === "cowork" || value === "netdev" ? value : "dev";
 }
+
+// OPS_MOCK_FRAME: the dev-mock console screenshot — a drawn ops-portal page
+// (SVG data URL) so the dock preview and the workbench mirror show a real
+// frame in dev mode instead of a blank <img>.
+const OPS_MOCK_FRAME = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+<rect width="1280" height="800" fill="#eef1f5"/>
+<rect width="1280" height="56" fill="#243447"/>
+<circle cx="30" cy="28" r="11" fill="#4a90d9"/><text x="52" y="33" font-size="16" fill="#ffffff">运维门户 · Ops Portal</text>
+<rect x="1104" y="16" width="140" height="26" rx="13" fill="#33445c"/><text x="1174" y="33" font-size="12" fill="#c9d4e0" text-anchor="middle">admin ▾</text>
+<rect x="0" y="56" width="1280" height="42" fill="#ffffff"/>
+<rect x="16" y="64" width="760" height="26" rx="13" fill="#eef1f5"/><text x="34" y="81" font-size="12" fill="#5a6b7f">🔒 https://ops.portal.local/home</text>
+<rect x="0" y="98" width="200" height="702" fill="#ffffff"/>
+<rect x="12" y="120" width="176" height="34" rx="6" fill="#eaf2fc"/><text x="26" y="142" font-size="13" fill="#2b6cb0">▍总览</text>
+<text x="26" y="186" font-size="13" fill="#5a6b7f">告警中心</text>
+<text x="26" y="218" font-size="13" fill="#5a6b7f">设备管理</text>
+<text x="26" y="250" font-size="13" fill="#5a6b7f">日志检索</text>
+<text x="26" y="282" font-size="13" fill="#5a6b7f">系统设置</text>
+<rect x="216" y="114" width="384" height="122" rx="8" fill="#ffffff"/>
+<text x="232" y="138" font-size="12" fill="#8a97a5">今日告警</text><text x="232" y="184" font-size="34" font-weight="bold" fill="#d9534f">7</text>
+<rect x="616" y="114" width="384" height="122" rx="8" fill="#ffffff"/>
+<text x="632" y="138" font-size="12" fill="#8a97a5">在线设备</text><text x="632" y="184" font-size="34" font-weight="bold" fill="#2b6cb0">128 / 130</text>
+<rect x="1016" y="114" width="248" height="122" rx="8" fill="#ffffff"/>
+<text x="1032" y="138" font-size="12" fill="#8a97a5">最近巡检</text><text x="1032" y="182" font-size="20" fill="#3f9e4d">09-01 10:24</text>
+<rect x="216" y="252" width="1048" height="516" rx="8" fill="#ffffff"/>
+<text x="232" y="280" font-size="14" font-weight="bold" fill="#37424e">最近告警</text>
+<circle cx="240" cy="316" r="5" fill="#d9534f"/><text x="256" y="320" font-size="12" fill="#37424e">严重 · core-sw-1 OSPF 邻居中断</text><text x="1232" y="320" font-size="12" fill="#8a97a5" text-anchor="end">10:41</text>
+<circle cx="240" cy="352" r="5" fill="#e8a13c"/><text x="256" y="356" font-size="12" fill="#37424e">主要 · rack-3 温度超过阈值 32°C</text><text x="1232" y="356" font-size="12" fill="#8a97a5" text-anchor="end">10:18</text>
+<circle cx="240" cy="388" r="5" fill="#e8a13c"/><text x="256" y="392" font-size="12" fill="#37424e">主要 · db-2 慢查询占比 12%</text><text x="1232" y="392" font-size="12" fill="#8a97a5" text-anchor="end">09:56</text>
+<circle cx="240" cy="424" r="5" fill="#4a90d9"/><text x="256" y="428" font-size="12" fill="#37424e">提示 · 备份任务完成 (node-7)</text><text x="1232" y="428" font-size="12" fill="#8a97a5" text-anchor="end">09:30</text>
+<circle cx="240" cy="460" r="5" fill="#4a90d9"/><text x="256" y="464" font-size="12" fill="#37424e">提示 · 证书将在 14 天后到期</text><text x="1232" y="464" font-size="12" fill="#8a97a5" text-anchor="end">09:02</text>
+</svg>`;
 
 function makeMockApp(): AppBindings {
   const scenario = mockScenario();
@@ -2328,10 +2363,12 @@ function makeMockApp(): AppBindings {
       return null;
     },
     async NetDevDiscover(_c: string, _v: string, _p: number[]): Promise<import("./types").NetDevDiscoverHost[]> { return []; },
+    async NetDevNmapSweep(_c: string): Promise<import("./types").NetDevNmapSweepResult> { return { cidr: _c, hosts: 0, open_ports: 0, results: [], command: "nmap (mock)", duration: "0s" }; },
     async NetDevDiscoveredHosts(): Promise<import("./types").NetDevDiscoveredHost[]> { return []; },
     async NetDevPromoteHosts(_e: import("./types").NetDevPromoteForm[]): Promise<void> { },
     async NetDevDeleteDiscoveredHost(_ip: string): Promise<void> { },
     async NetDevDiscoverPrecheck(_v: string): Promise<import("./types").NetDevDiscoverPlan | null> { return null; },
+    async NetDevDiscoverExtendScopes(_c: string[]): Promise<string[]> { return []; },
     async NetDevDiscoverLayer(_v: string, _c: string[], _p: number[]): Promise<import("./types").NetDevDiscoverHost[]> { return []; },
     async NetDevDiscoveryRunState(): Promise<import("./types").NetDevDiscoveryRunState | null> { return null; },
     async NetDevDiscoverResume(): Promise<import("./types").NetDevDiscoverHost[]> { return []; },
@@ -4900,7 +4937,9 @@ function makeMockApp(): AppBindings {
       return { open: true, session_id: "br_mock", browser: "Chrome (mock)", attached: false, url: url || "about:blank", keep_alive: false, keep_alive_mode: "", keep_alive_url: "", keep_alive_last: 0, keep_alive_err: "" };
     },
     async BrowserConsoleState() {
-      return { open: false, session_id: "", browser: "", attached: false, url: "", keep_alive: false, keep_alive_mode: "", keep_alive_url: "", keep_alive_last: 0, keep_alive_err: "" };
+      // Dev-mock default: an OPEN console session so the panel/workbench
+      // render their rich states in screenshots and browser dev mode.
+      return { open: true, session_id: "br_mock", browser: "Chrome (mock)", attached: false, url: "https://ops.portal.local/home", keep_alive: false, keep_alive_mode: "", keep_alive_url: "", keep_alive_last: 0, keep_alive_err: "" };
     },
     async BrowserConsoleClose() {},
     async BrowserConsoleNavigate(url: string) { await delay(300); return `已导航到 ${url} (mock)`; },
@@ -4918,12 +4957,42 @@ function makeMockApp(): AppBindings {
     async BrowserConsoleExtractTable(selector: string) { await delay(300); return `| 列1 | 列2 |
 |---|---|
 | a | b | (mock, ${selector || "整页"})`; },
+    async BrowserConsoleDevTools() {
+      await delay(200);
+      return {
+        logs: [
+          { type: "info", text: "[mock] page ready", time: Date.now() - 4000 },
+          { type: "error", text: "[mock] Uncaught TypeError: x is not a function", time: Date.now() - 1500 },
+        ],
+        net: [
+          { method: "GET", url: "https://ops.local/api/health", status: "200", res_type: "Fetch", time: Date.now() - 3900 },
+          { method: "POST", url: "https://ops.local/api/query", status: "500", res_type: "Fetch", time: Date.now() - 900 },
+        ],
+      };
+    },
     async BrowserConsoleElements() {
       return [
         { ref: "e1", role: "textbox", name: "用户名", value: "" },
         { ref: "e2", role: "textbox", name: "密码", value: "" },
         { ref: "e3", role: "button", name: "登录" },
       ];
+    },
+    async BrowserConsoleDeepScan(_maxScrolls: number) {
+      await delay(600);
+      // Dev mock: a lazily-fed ops list — anchors (not refs) so the rows
+      // stay "clickable" in screenshots and browser dev mode.
+      const mk = (i: number) => ({
+        role: "link",
+        name: `告警条目 ${i + 1}`,
+        selector: i % 3 === 0 ? `text=告警条目 ${i + 1}` : `#alert-${i + 1}`,
+      });
+      return {
+        elements: Array.from({ length: 64 }, (_, i) => mk(i)),
+        scrolls: 4,
+        screens: 5,
+        new_last: 3,
+        stop: "no-new",
+      };
     },
     async BrowserConsoleClick(target: string) { await delay(200); return `已点击 ${target} (mock)`; },
     async BrowserConsoleType(target: string, text: string) { await delay(200); return `已在 ${target} 输入 ${text.length} 字符 (mock)`; },
@@ -4933,7 +5002,7 @@ function makeMockApp(): AppBindings {
     async BrowserConsoleUploadFile(target: string, files: string[]) { return `已向 ${target} 上传 ${files.length} 个文件 (mock)`; },
     async BrowserConsoleWait(_condition: string, _timeoutSec: number) { await delay(300); return "waited (mock)"; },
     async BrowserConsoleExtract(selector: string) { return selector ? `提取 ${selector} 的内容 (mock)` : "提取整页内容 (mock)"; },
-    async BrowserConsoleScreenshot() { await delay(300); return "data:image/png;base64,"; },
+    async BrowserConsoleScreenshot() { await delay(300); return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(OPS_MOCK_FRAME)}`; },
     async BrowserConsoleEvaluate(_expression: string) { return "undefined (mock)"; },
     async BrowserConsoleRecordStart() { await delay(200); },
     async BrowserConsoleRecordStop() {

@@ -2115,6 +2115,25 @@ export interface BrowserConsoleState {
   keep_alive_err: string;
 }
 
+export interface BrowserConsoleLogEntry {
+  type: string; // log|warning|error|info|debug|exception
+  text: string;
+  time: number;
+}
+
+export interface BrowserNetEntry {
+  method: string;
+  url: string;
+  status: string; // "200" / "404" / "FAIL"
+  res_type?: string;
+  time: number;
+}
+
+export interface BrowserDevToolsView {
+  logs: BrowserConsoleLogEntry[];
+  net: BrowserNetEntry[];
+}
+
 export interface BrowserConsoleTab {
   index: number; // 1-based
   title: string;
@@ -2127,6 +2146,20 @@ export interface BrowserConsoleElement {
   role: string;
   name: string;
   value?: string;
+}
+
+export interface BrowserConsoleScanElement {
+  role: string;
+  name: string;
+  selector: string; // #id | tag[name="…"] | text=可见文字
+}
+
+export interface BrowserConsoleScanResult {
+  elements: BrowserConsoleScanElement[];
+  scrolls: number;
+  screens: number;
+  new_last: number;
+  stop: string; // no-new | bottom | max-scrolls | cap
 }
 
 export interface BrowserConsoleRecordEvent {
@@ -2719,7 +2752,7 @@ export interface NetDevDiscoveredHost {
   first_seen: string;
   last_seen: string;
   sources: string[];
-  ports: { port: number; banner?: string; parsed?: NetDevBannerInfo; at: string }[];
+  ports: { port: number; banner?: string; parsed?: NetDevBannerInfo; http?: { title?: string; server?: string; cert_cn?: string }; at: string }[];
 }
 
 export interface NetDevPromoteForm {
@@ -2727,11 +2760,23 @@ export interface NetDevPromoteForm {
   name: string;
   vendor: string;
   role: string;
+  model: string;
+}
+
+// P1-1 nmap 服务探测编排：产品编排用户自备的 nmap，结果回填待确认区。
+export interface NetDevNmapService { port: number; proto?: string; service?: string; product?: string; version?: string; }
+export interface NetDevNmapHost { ip: string; hostname?: string; services: NetDevNmapService[]; }
+export interface NetDevNmapSweepResult {
+  cidr: string;
+  hosts: number;
+  open_ports: number;
+  results: NetDevNmapHost[];
+  command: string;
+  duration: string;
 }
 
 // F4 multi-layer discovery: vantage tables → confirm-first plan.
-export interface NetDevPlanStep { cidr: string; class: string; hosts: number; default_on: boolean; }
-export interface NetDevDiscoverPlan {
+export interface NetDevPlanStep { cidr: string; class: string; hosts: number; default_on: boolean; }export interface NetDevDiscoverPlan {
   vantage: string;
   steps: NetDevPlanStep[];
   arp_known: number;

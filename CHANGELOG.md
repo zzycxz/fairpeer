@@ -9,6 +9,155 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(netdev): 残留批——nmap 服务探测编排 v1（P1-1）+ 滚动汇总 + 双立案防护
+
+终检残留清单处理（PENLAB_CAPABILITY_GAPS）：
+
+- **nmap 服务探测编排 v1**（P1-1，nmaporch.go）：产品编排用户自备的 nmap（`[netdev.discovery] nmap_path`，空则 PATH 查找；缺失报安装指引——编排外部工具，绝不内置扫描引擎）。闸门与弱口令核查同级：engagement 信封 → scopes 永不可关白名单 → 单 CIDR ≤4096 主机。`-Pn -sT -sV --version-light --open -oX -` 连接扫描免 root；XML 解析（product/version），结果经 `RecordDiscoveredPorts` 回填待确认区（Parsed 直载指纹，纳管即进 CVE 匹配）+ 单条滚动 info 汇总 + 审计。agent 工具 `netdev_nmap` 同步注册（ReadOnly=false，实况面板可见拒绝）
+- **UI 入口**：发现弹窗新增「nmap 服务探测」按钮（NetDevNmapSweep 桥 + 结果卡 + 直达待确认区），i18n 双语
+- **滚动汇总**（残留①）：巡检/基线的 info 级汇总发现 Source 化（`inspect:summary` / `baseline:summary`），`SaveRollingFinding` 每次运行原地更新同一张卡（ID/首次时间保留）；历史在巡检日志。基线 reconcile 显式排除 summary 卡（否则会被自己"不再命中"逻辑误 resolve）
+- **双立案防护**（残留②）：`netdev_assess` 确认弱口令的回话明示"已自动立案，勿再调 netdev_finding"
+- **测试竞态修复**：提案完成复核 goroutine 活过测试边界、把滚动汇总写进下一测试的临时发现目录（TestWatchDegradationRaisesFinding ~1/4 概率挂）——加 `proposalAutoRecheck` 测试缝，两个 Manager 测试助手统一关闭
+- 验证：netdev+config 全量 3× 绿（新增 TestParseNmapXML / TestNmapSweepGates / TestRollingSummaryFindings）；前端 tsc 零错、vitest 56/56；desktop 模块 build 绿
+
+### tune(netdev): 深度扫描体验收紧——预算 12 屏 / 上限 300 元素 / 渐进等待
+
+用户拍板："要限制，不能无限滚动；元素太多也慢，体验不好"。按"宁少勿慢"收紧：
+
+- **预算 20→12 屏**（面板传入）：最坏 ~4-6 秒封顶；无新增/到底仍会提前停
+- **元素上限 400→300**：超出即停并如实上报（`cap`）
+- **渐进式沉淀等待 150→350→650ms**：替换原固定 350ms 轮询——多数信息流首个 150ms 检查即稳定，快页面翻屏成本减半；慢信息流逐步放宽，2.5s 封顶不变
+- **扫描中即时反馈**：点击后汇总行先显示"深度扫描中…（最多 12 屏）"，结束替换为结果汇总——不再只有按钮转圈
+- 验证：go build + 合并单测 + 三场景无头实测（长静态/有界瀑布/真无限流全部按预算终止、scrollY 复位）+ vite build 绿 + vitest 56/56（17 个 no-suite 预存在；tsc 报错为并行会话的 nmap 半成品，与本批无关）
+
+### fix(netdev): 弱口令命中真正立案——补上闭环最后一块断板（终检发现）
+
+P2 批终检发现：`WeakCredCheck` 只返回结果、从不落 Finding，而 UI 结果卡的「查看发现」跳转、总览弱口令计数、转修复提案流程全都消费发现队列——命中弱口令后闭环在临时结果卡处断掉。修复（assess.go）：
+
+- 确认弱口令即立案 critical 发现（Source `assess:weak-cred:<tier>:<device>`，凭证原文永不入证据/日志）；再次确认**更新同一告警**不堆积（复用 ID 与首次时间，同基线 reconcile 语法）
+- 全预算复查通过时**同档自动 resolve**（"复核通过，自动恢复"）；档位编进 Source——basic 档通过不会误恢复 dictionary 档的告警
+- 验证：go build 全绿；netdev 包 3 次全量复跑全过（新增 TestWeakCredFindingLifecycle：立案/去重/同档恢复/异档不误恢复）
+
+### feat(netdev): 元素深度扫描——长页面全覆盖确认 + 瀑布流滚动收集（带停止条件）
+
+用户问：很长的网页能否拿到所有元素？无限流瀑布怎么办？分两类回答：
+
+- **长静态页：本来就能**——元素列表取的是整页无障碍树（含视口外），点击/高亮自带 scrollIntoView；实测 40 屏高页面的底部链接直接可选中
+- **瀑布流/懒加载：定义上拿不到"全部"**（内容滚动前不存在于 DOM）——新增「⇊ 深度扫描」：逐屏下滚（0.85 视口/步）收集**当前屏**新物化的可交互元素，等 scrollHeight 稳定后再滚，锚点去重合并，滚完回原位。停止条件四选一并如实上报：`no-new`（连续 2 步无新增）/ `bottom`（到底）/ `max-scrolls`（滚动预算，面板 20 屏）/ `cap`（400 元素上限）
+- **稳定锚点而非 ref**：ref 随快照失效，滚动收集的行必须滚回后仍可点——每行产出 `#id` / `tag[name=…]` / `text=可见文字` 锚点，与目标栏/技能步骤的多锚词汇完全一致；`ConsoleHighlight` 相应支持 `text=` 锚点（按可见文字在可交互元素里匹配后框选）
+- **前端**：元素区头部新增 ⇊ 按钮（与刷新并列）+ 汇总行（`深度扫描：5 屏 · 214 个 · 无新增，已停`）；扫描结果行点击即框选/填目标；普通「刷新元素」回到 ref 模式并清汇总
+- **验证**：无头 Chrome 三场景实测（长静态页 23 锚点到预算停；有界瀑布流 226 锚点；真无限流按预算终止不挂起；scrollY 复位 0）——注意无头环境不派发 IntersectionObserver/scroll 事件（已实测证实），瀑布流用 scrollBy 补丁模拟物化，真实浏览器物化由 IO 机制保证；mergeScanElements 纯函数单测（去重/首见序/newInLast 信号）；go build + builtin 全测 + tsc + vitest 56/56（17 个 no-suite 为预存在脚本文件）+ guides-drift 3/3；手册第二节同步更新
+
+### fix(netdev/desktop): 元素高亮从未生效——callOnRef 的 IIFE 格式 this=undefined（实测证实）
+
+用户反馈：右侧栏「元素」里点击 link，预览画面不框选对应元素。实为内核 bug，非能力缺失：
+
+- **根因**：`ConsoleHighlight` 与 `hoverPointForTarget` 的 ref 路径把 JS 写成 IIFE `(function(){...})()` 传给 `Runtime.callFunctionOn`——CDP 解析时将其包成 `((...)())` **在解析阶段立即执行**，`this` 为 undefined，所有 `this.xxx` 全部 TypeError。无头 Chrome 实测复现：纯函数声明 `function(){...}` 正常（this=元素、副作用落地），IIFE 格式必抛异常
+- **波及面**：面板元素 hover 闪框、点击持久框选、browser_hover/flow hover 的 **ref 目标**路径自上线以来全部静默失败（CSS 路径经 chromedp.Evaluate 不受影响）；前端 `.catch(() => undefined)` 吞错，用户只见"没反应"
+- **修复**：两处 JS 改为纯函数声明（`function(){ ...this... }`）；hover 探针改返回对象由 `WithReturnByValue` 序列化；其余 8 个 callOnRef 调用点（click/type/select/upload/occlusion 等）核查均为正确格式，未受影响
+- **前端不再吞错**：元素**点击**高亮失败现走上报横幅（提示"先重新拿元素"——ref 是快照态，页面变了属正常指引）；hover 闪框保持静默（每行悬停都弹横幅是噪音）
+- **验证**：无头 Chrome 实测——持久标记 `marked`/类名落地/样式注入/截图含 590+ 橙色描边像素/再点 `cleared` 切换正常，hover 返回坐标 `{"x":40,"y":20}`；go build+vet（uia/screen 的 unsafe 警告预存在）+builtin 测试过；tsc 零错；vitest 56/56
+
+### feat(netdev): 提案驱动复核（P2-3）——基线发现 Source 生命周期 + 完成即自动复跑
+
+PENLAB_CAPABILITY_GAPS 最后一项前端外缺口，「识别→修复→复核」闭环三段全部焊死：
+
+- **基线发现接入 Source 生命周期**（baseline.go）：每条违规发现的 `Source = "baseline:<rule>"`；新增 `reconcileBaselineFindings`——同一规则重复核查**更新同一告警**（复用 ID 与首次立案时间，不再堆积"基线：…"副本）；规则不再命中且旧告警的全部设备都在本次受检集合内时**自动 resolve**（附"复核通过，自动恢复"说明）。定向复核（只查部分设备）不会 resolve 未复核设备的告警——盲区保护
+- **提案完成钩子**（proposal.go）：ExecuteProposal 全部步骤成功进入观察期时，自动对提案涉及的设备跑 `RunBaselineFor`（新增的设备限定版基线核查，空=全网），结果入审计；WatchNote 标注"已触发自动基线复核"。修复是否生效由数据说话：命中刷新原告警、不再命中自动恢复
+- 验证：go build 全绿；netdev 包全量测试过（新增 TestReconcileBaselineFindings：重复命中复用 ID / 修复自动 resolve / 定向复核不误恢复三断言）
+
+### feat(netdev/desktop): 靶场 P1-2/P2 批——纳管指纹回填 + 发现一键转修复提案
+
+PENLAB_CAPABILITY_GAPS 剩余前端可落地项：
+
+- **纳管指纹回填**（P1-2）：`NetDevPromoteForm` 增 `model` 字段——待确认区线索纳管时前端把 banner/HTTP 指纹浓缩成 `product + version`（如 "OpenSSH_9.6" / "nginx 1.24.0"）预填设备 Model，CVE 匹配的 vendor+os+model 文本面从纳管第一天起可用；待确认区行内同步显示指纹摘要徽标（悬停说明用途）
+- **发现一键转修复提案**（P2-1）：FindingRow 未解决态新增「转修复提案」按钮——起草提示词带上发现 id/标题/设备跳对话，走既有 netdev_propose 人工审批流，护栏语义不变；「识别→修复」两段就此焊死
+- 注：P2-2 弱口令核查 UI 由同期「巡检家族」左栏菜单落地（全网 basic/strong 档），未另设重复入口
+- 验证：go build 全绿；前端 tsc 零错、vitest 56/56、vite build 绿
+
+### feat(netdev): 安全导入两补——CVE feed 收 NVD 原生导出（1.1/2.0）+ 案例 IOC 台账批量导入
+
+承接"安全告警导入场景"审计结论：CVE 导入是唯一数据入口但只认简化格式（规范 §4.5 写明"导入器支持 NVD JSON 导出"）；IOC feed 导入是 §4.6 点名来源但只有手工逐条。落地：
+
+- **NVD 原生导入**（cve.go）：`ImportCVEFeed` 格式嗅探——`{"cves":[...]}` 简化格式直存、`{"CVE_Items":[...]}`（legacy 1.1 feed 导出）与 `{"vulnerabilities":[...]}`（API 2.0 响应导出）转换为简化条目后缓存，匹配/扫荡逻辑零改动
+  - 转换规则：CPE 2.3（`cpe23Uri`/`criteria`）取 vendor + product（下划线转空格，`ios_xe`→`ios xe`，对齐清单 vendor+os+model 文本匹配面）——通配符/NA/`vulnerable:false` 过滤，单条目产品去重上限 12；severity 取 V3.1→V3.0→V2 归一小写；描述取首个 en 值截断 500 字；无 CPE 条目丢弃（无法匹配）
+  - 前端 feed 占位文案更新为"简化格式或 NVD 原生导出均可"
+- **IOC 批量导入**（新 `src/lib/ioc.ts` + SecWorkbench 台账区）：组标签行新增「批量导入」开关——粘贴清单（每行一个，IP/IPv6/域名/md5/sha256/关键词类型自动识别，`#` 后为备注、`#` 开头行跳过）并入当前案例台账；大写哈希可识别
+- i18n：+5 键双语（ndv.sec.iocBulk* / phIocBulk）；phFeed 双语更新
+- 验证：netdev 包全量测试过（新增 TestNVD20Import / TestNVD11Import / TestCPEProducts）；tsc 零错；sec-ioc-import 8/8；locale-parity 2/2；vite build 绿（未提交 git）
+
+
+### fix(netdev/desktop): 界面审计修复——浏览器工作台上下 60/40 生效 + F12 时间戳 + 断行/空态打磨
+
+用户要求全面体检界面（"你查查目前的界面是否不够出色？"）。用 scratch/uishot 无头截图（dev mock 深链 `?profile=netdev&dock=browser` / `&bench=browser`）+ 视觉模型逐区评审，实证修复：
+
+- **关键：工作台分栏方向**：`.ndv-wb__body` 漏 `flex-direction: column`，镜像与 F12 实际左右并排（违背"上半 60% 画面、下半 F12"的需求原话）——补 column 后实测几何 60.1%/39.9% 上下堆叠
+- **深链**：`benchParam()` 白名单漏 `"browser"`，`?bench=browser` 深链静默落回对话视图（截图工具与深链均失效）
+- **F12 列表**：日志/网络行新增 `HH:MM:SS` 时间戳列（`time` 字段双端本就有，仅未展示）；`word-break: break-all` 改 `overflow-wrap: anywhere`，英文报错不再从单词中间断开（"x is n/ot a function"）
+- **分区观感**：镜像空态底色 `#fff` → `var(--bg-soft)`（不再一大片刺眼纯白），F12 列表 `var(--bg-elev)` + `--border` 描边，上下两区边界可辨
+- **会话栏**：加 `flex-wrap: wrap`，窄侧栏下按钮换行而非压扁浏览器名
+- **dev mock**：`BrowserConsoleScreenshot` 原返回残缺的 `data:image/png;base64,`（真值但无图，<img> 空白且空态永不触发）——改为内置绘制的运维门户 SVG 帧，dev 模式/截图审计下镜像真实可见
+- 审计排除项：右栏页签收缩截断为共享 Chrome 式页卡行为（容器查询+渐隐，有意设计）；输入框红色占位符经放大复核为普通灰色（视觉模型误报）
+- 验证：tsc 零错；vitest 49/49 过（17 个 tsx 脚本式文件报 no-suite 为预存在）；无头截图 + DOM 几何实测复核
+
+### feat(netdev): 靶场 P0 批——计划卡就地扩围（动态 scopes）+ 大网段自动拆分
+
+PENLAB_CAPABILITY_GAPS P0-1/P0-2 落地，黑盒多层递进（拿下一层 → Precheck 发现新内网网段 → 继续探活）跑通：
+
+- **计划卡就地扩围**（P0-1）：Precheck 计划卡对不在 scopes 白名单内的网段逐条标「越界」徽标并汇总提示；「加入探测范围」按钮经确认后调新桥 `NetDevDiscoverExtendScopes`——后端 `ExtendScopesCandidates` 做 CIDR 校验与已覆盖去重（被现有 scope 包含的直接跳过），经 `applyConfigOnly` 落盘、逐条记 guardrail 类审计、入状态历史快照。scopes 永不可关的红线不变：护栏由人**扩展**而非绕过
+- **大网段计划拆分**（P0-2）：`buildPlan` 对超 tunnel 上限（4096 地址）的 IPv4 网段自动拆成 /20 块（`splitForTunnel`，继承父网段 class/default，medium/large 仍需显式勾选）；父网段宽于 /16（>16 块）不拆——保持整体 default-off，探测期拒绝对应"netprobe/调预算"指引，避免计划卡被几百行淹没
+- i18n：+6 键双语（ndv.disc.outOfScope* / extendScopes / extendConfirm）
+- 验证：go build 全绿；netdev 包全量测试过（新增 TestSplitForTunnel / TestBuildPlanSplitsLargeSteps / TestExtendScopesCandidates）；前端 tsc 零错、vitest 49/49、vite build 绿
+
+### feat(netdev/desktop): UI 引导补全 G1 批——应用内手册页签 + 场景导引分组 + 空态统一
+
+引导审计结论：骨架好但覆盖断（详见 docs/UI_GUIDANCE_SPEC.md）。落地：
+
+- **应用内手册页签**（G1-2）：新 dock 页签「手册」（归档组，BookOpen）——三份仓库指南（NETDEV_USAGE 使用地图 / NETDEV_HELP 求助指引 / browser-ops-guide 浏览器工作台）经 Vite `?raw` 打包嵌入前端、react-markdown 渲染，不新增后端桥；副本放 `src/guides/`，vitest 漂移测试逐字节对比 `docs/` 原件防腐化
+- **场景导引分组**（G1-1）：ScenarioHub 14 卡按 a/b 前缀分「日常保障 / 安全与排障」两组带组头渲染；B 组头部新增 **靶场安全闭环** 主卡（识别→修复→复核路线说明，直达手册使用地图）
+- **空态统一**（G1-3）：findings/proposals/audit 空态升级为「标题+说明+主按钮」——发现→运行安全基线、提案→对话起草（预填提示词）、审计→立即巡检
+- **修复**：设备空态（项目过滤分支）`ndv.dev.emptyDesc` 漏 `{}` 渲染字面量
+- i18n：+24 键双语（ndv.tab.manual / ndv.man.* / ndv.sc.gA/gB/c1* / ndv.fnd.pt.aud.empty*）
+- 验证：tsc 零错；guides-drift 3/3；vitest 49/49 用例过（17 个 tsx 脚本式文件报 no-suite 为预存在，与本批无关）；vite build 绿
+
+### feat(netdev/desktop): 安全工作台一键示例——CVE feed 填入示例 + 示例案例，附空态文案渲染修复
+
+用户反馈：安全告警的 CVE 与案例两个视图在空环境里"看不清"，希望有简单的默认数据帮助理解功能形态。落地（遵循附录 B-4「产品不分发 feed」——示例只帮看，不自动激活）：
+
+- **CVE 视图「填入示例」**：左栏 feed 文本框旁新增按钮，一键填入 4 条著名真实 CVE 组成的示例 JSON（覆盖 cisco/huawei/windows/linux 常见清单厂商）；只填文本框，导入仍需手动点击——feed 依旧是"用户自备、用户导入"
+- **案例空态「创建示例案例」**：案例列表为空时主区空态提供一键建案——本地生成带四类时间线条目（发现/日志/排查/备注，错开时间戳）+ 3 条 IOC 台账（文档保留网段 198.51.100.0/24 与 example.com，不指向真实资产）+ 范围设备自动勾选前两台 linux/windows 主机；建后整个工作台（头部/向导/时间线/台账）一眼可见，可随手删除
+- **修复**：CVE 匹配与案例三处空态文案漏 `{}`（`t("...")` 渲染成字面量）——matchesHint/noMatchesHint/noCasesHint 现已正常翻译显示
+- **附带修复（构建红）**：`npm run build` 在本次改动前就因令牌检查失败——chat.css:1039 z-index 2（已提交代码）与 netdev.css 大屏新样式 22 处裸 z-index/border-radius；按语义归一：z-index 2/200/5 → --z-local-raised/--z-raised/--z-inline-sticky，radius 999/3/4/5/6/8 → pill/xs/xs/--radius/sm/md（5px 用遗留 --radius 令牌保像素不变）
+- i18n：+9 键双语（ndv.sec.fillExample* / exampleCase* / exEntry*）
+- 验证：tsc 零新错；locale-parity 2/2；dash-boards 4/4；双 CSS 令牌检查过；双模块 build 绿（未提交 git）
+
+
+### feat(netdev/desktop): 浏览器工作台 60/40 布局——下半区 F12 切片（控制台日志 + 网络请求）
+
+用户期望：观察窗只占中间栏约 60% 高度，下方放新内容（建议 F12）。落地：
+
+- **布局**：画面镜像 60%（flex 3）+ 下方信息面板 40%（flex 2），不再独占整栏
+- **F12 切片**（内核 browserdevtools.go）：控制台会话启用 runtime+network 域事件监听——页面 console 消息（log/warn/error/exception，参数拼接截断 300 字）与网络请求列表（方法/URL/状态码/资源类型，FAIL 含加载失败）各自环形缓冲 200 条，随会话存亡；BrowserConsoleDevTools 绑定返回双缓冲
+- **下方面板**：「控制台 / 网络」两个子页签（沿用 ZCode 药丸样式），错误/异常计数徽标（红圈数字）、4xx/FAIL 请求红色高亮；可见时 2 秒轮询刷新；等宽字体列表贴合 F12 观感
+- 采集仅控制台会话（agent 会话保持轻量）；mock 提供示例双页签数据供浏览器开发模式演示
+- 验证：tsc 零新错；locale-parity 2/2（+4 键双语）；CSS 语法过；内核测试集过；双模块 build 绿（未提交 git）
+
+
+### fix(browser): 元素点选标记在预览里可见——持久高亮 + 高亮即推帧
+
+用户反馈：点击元素后浏览器观察页面看不到标记。根因有二：高亮只亮 1.5 秒（截图轮询抓不到那一刻）；高亮不推镜像帧（预览只在操作后刷新，点元素行不算操作）。修复：
+
+- **点击改为持久标记**：内核注入 __fp-hl 样式类（橙色描边+底色，!important 盖过站点样式），换选元素自动替换标记，再点同一元素取消；悬停仍是 500ms 短闪（150ms 防抖）
+- **高亮即推帧**：ConsoleHighlight 两条路径（ref/选择器、持久/短闪）末尾都 mirrorAfterAction——侧栏内嵌预览立刻显示带标记的画面
+- **工作台画面源升级**：控制台源优先用镜像分桶里的实时帧（随每个动作更新，含高亮推帧），5 秒轮询降级为兜底（覆盖手动浏览场景）
+- 验证：tsc 零新错；双模块 build 绿（未提交 git，按用户规则等待指示）
+
+
+### fix(netdev/desktop): 同一时刻只留一个画面预览——浏览器工作台激活时侧栏预览整体隐藏
+
+用户反馈：工作台打开后右侧栏预览只是折叠、标题行仍占位，变成两个预览。修复：NetDevLayout 在 bench 切换时广播 fairpeer:netdev-bench-changed 事件；浏览器面板监听——bench=「浏览器」时内嵌预览（含折叠标题行）完全消失，Esc/切回对话后按原状态恢复；深链 ?bench=browser 初始即同步。另：自本条起 git 提交/推送仅在用户明确指示时执行。
+
+
 ### feat(netdev/desktop): 浏览器体验三修——侧栏内嵌预览回归 + 工作台去元素面板（事件同步右侧栏）+ 元素悬停/选中页面高亮
 
 用户三点反馈：

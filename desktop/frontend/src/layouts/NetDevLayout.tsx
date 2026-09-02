@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { AlertTriangle, Activity, ClipboardCheck, FileText, HeartPulse, History, LayoutDashboard, MousePointerClick, Network, PanelLeft, ScanSearch, ScrollText, Server, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, Activity, BookOpen, ClipboardCheck, FileText, HeartPulse, History, LayoutDashboard, MousePointerClick, Network, PanelLeft, ScanSearch, ScrollText, Server, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { t as tt } from "../lib/i18n";
 import { app, onNetdevHealth, onNetdevLive } from "../lib/bridge";
 import { ProfileSegmented } from "../components/AppChrome";
@@ -16,6 +16,7 @@ import { TemplateCard } from "../components/netdev/TemplateCard";
 import { SrvConfCard } from "../components/netdev/SrvConfCard";
 import { HealthPanel } from "../components/netdev/HealthPanel";
 import { BrowserConsolePanel } from "../components/netdev/BrowserConsolePanel";
+import { ManualPanel } from "../components/netdev/ManualPanel";
 import { ImportWizardCard } from "../components/netdev/ImportWizardCard";
 import { JobsPanel } from "../components/netdev/JobsPanel";
 import { StateHistoryPanel } from "../components/netdev/StateHistoryPanel";
@@ -212,7 +213,7 @@ type QuickResult = { command: string; output: string; isError: boolean; refused?
 function benchParam(): "logs" | "sec" | "dash" | "browser" | null {
   try {
     const v = new URLSearchParams(window.location.search).get("bench");
-    return v === "logs" || v === "sec" || v === "dash" ? v : null;
+    return v === "logs" || v === "sec" || v === "dash" || v === "browser" ? v : null;
   } catch { return null; }
 }
 // ?screen=<dash-screen> + ?finding=<id> deep-link the dash shell (§4.4 入口 4).
@@ -223,7 +224,7 @@ function dashScreenParam(): DashScreen | null {
   } catch { return null; }
 }
 
-type DockTab = "overview" | "live" | "devices" | "context" | "topology" | "findings" | "proposals" | "audit" | "state" | "logs" | "health" | "jobs" | "browser";
+type DockTab = "overview" | "live" | "devices" | "context" | "topology" | "findings" | "proposals" | "audit" | "state" | "logs" | "health" | "jobs" | "browser" | "manual";
 
 // C2.1 结果卡（completion-spec §3.1）：全网动作的成功/警告回执——中性样式，
 // 可关闭，可一键跳转对应页签。setErr 只留给真实错误。
@@ -275,7 +276,7 @@ export function proposalMatchesJump(p: NetDevProposal, filter: string): boolean 
 // ?dock=audit) so panels are screenshot-testable without driving the tab
 // strip first. ?live=1 stays as a ?dock=live alias. The open-tabs correction
 // effect OPENs this tab instead of correcting away from it.
-const DOCK_PARAM_KEYS: readonly string[] = ["overview", "live", "devices", "context", "topology", "findings", "proposals", "audit", "state", "logs", "health", "jobs", "browser"];
+const DOCK_PARAM_KEYS: readonly string[] = ["overview", "live", "devices", "context", "topology", "findings", "proposals", "audit", "state", "logs", "health", "jobs", "browser", "manual"];
 function dockParam(): DockTab | null {
   try {
     if (typeof window !== "undefined" && !window.runtime) {
@@ -395,6 +396,8 @@ export function NetDevLayout({
   // §4.10：/ 快捷键聚焦当前页签首个搜索框。
   const dockBodyRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<DockTab>(() => dockParam() ?? "overview");
+  // 手册页签当前选中的篇目（usage/help/browser）——场景闭环卡直达 usage。
+  const [manualDoc, setManualDoc] = useState("usage");
   const [hotTabs, setHotTabs] = useState<Partial<Record<DockTab, boolean>>>({});
   const [alertWizardOpen, setAlertWizardOpen] = useState(false);
   const markHot = useCallback((k: DockTab) => setHotTabs(prev => ({ ...prev, [k]: true })), []);
@@ -519,6 +522,13 @@ export function NetDevLayout({
   }, []);
 
   // 命令面板入口（§10.7 第 5 层）：palette 在 App 层，经自定义事件抵达——
+  // Broadcast bench switches so dock panels can adapt (the browser panel
+  // fully hides its inline mirror while the center browser workbench is the
+  // active view — one preview at a time, not a collapsed duplicate).
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("fairpeer:netdev-bench-changed", { detail: bench }));
+  }, [bench]);
+
   // 与 ?bench= 深链同效，不做状态提升。
   useEffect(() => {
     const onBench = (e: Event) => {
@@ -963,6 +973,8 @@ export function NetDevLayout({
   const [discoverOpen, setDiscoverOpen] = useState(false);
   const [discoverCidr, setDiscoverCidr] = useState("");
   const [discoverBusy, setDiscoverBusy] = useState(false);
+  // P1-1 nmap 服务探测：engagement+scopes 双闸门在后端，前端只管入口与结果。
+  const [nmapBusy, setNmapBusy] = useState(false);
   // F1 待确认区: leads loaded on the devices tab; names editable per row
   // before promotion (the human names their assets, never the scanner).
   const [discovered, setDiscovered] = useState<NetDevDiscoveredHost[]>([]);
@@ -1126,6 +1138,17 @@ export function NetDevLayout({
   // vendor_hint → driver key for promotion prefill; anything else lands as
   // "" (the device form's vendor picker stays the source of truth).
   const VENDOR_DRIVER: Record<string, string> = { huawei: "huawei-vrp", cisco: "cisco-ios", zte: "zte-zxr10" };
+  // P1-2 指纹回填：纳管时把 banner/HTTP 指纹浓缩成 model（product + version，
+  // 如 "OpenSSH_9.6" / "nginx 1.24.0"），CVE 匹配的 vendor+os+model 从第一天起可用。
+  const fingerprintModel = (h: NetDevDiscoveredHost): string => {
+    for (const p of h.ports ?? []) {
+      if (p.parsed?.product) return p.parsed.version ? `${p.parsed.product} ${p.parsed.version}` : p.parsed.product;
+    }
+    for (const p of h.ports ?? []) {
+      if (p.http?.server) return p.http.server;
+    }
+    return "";
+  };
   const promoteDiscovered = useCallback(async () => {
     const rows = discovered.filter(h => discSel.has(h.ip));
     if (rows.length === 0) return;
@@ -1135,6 +1158,7 @@ export function NetDevLayout({
         name: (discNames[h.ip] ?? h.hostname ?? h.ip).trim() || h.ip,
         vendor: VENDOR_DRIVER[h.vendor_hint ?? ""] ?? "",
         role: h.role_hint ?? "",
+        model: fingerprintModel(h),
       })));
       setDiscSel(new Set());
       await loadDiscovered();
@@ -1175,6 +1199,35 @@ export function NetDevLayout({
       setDiscoverBusy(false);
     }
   }, [discoverCidr, discoverPorts, reload, loadDiscovered]);
+
+  // P1-1 nmap 服务探测编排：engagement 信封 + scopes 白名单 + 4096 主机上限
+  // 三道闸门都在后端；结果回填待确认区，纳管后指纹进 CVE 匹配。
+  const runNmapSweep = useCallback(async () => {
+    const c = discoverCidr.trim();
+    if (!c) return;
+    setNmapBusy(true);
+    try {
+      const r = await app.NetDevNmapSweep(c);
+      setDiscoverOpen(false);
+      setOpsResult({
+        title: tt("ndv.nmap.done", { cidr: c }),
+        tone: r.hosts > 0 ? "ok" : "warn",
+        rows: [
+          { label: tt("ndv.nmap.summary"), text: tt("ndv.nmap.summaryText", { a: r.hosts, b: r.open_ports, d: r.duration }) },
+          ...r.results.slice(0, 8).map(h => ({ label: h.ip, text: h.services.map(s => `${s.port}/${s.service || "?"}${s.product ? ` (${s.product}${s.version ? " " + s.version : ""})` : ""}`).join(" ") })),
+        ],
+        warn: tt("ndv.nmap.zoneSaved"),
+        jump: { label: tt("ndv.res.viewFindings"), tab: "devices" },
+        at: Date.now(),
+      });
+      await reload();
+      void loadDiscovered();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setNmapBusy(false);
+    }
+  }, [discoverCidr, reload, loadDiscovered]);
 
   // C4.6 #5：终端会话回放查看（录制文件落盘时已脱敏）。
   const openRecordings = useCallback(async (device: string) => {
@@ -1379,6 +1432,7 @@ export function NetDevLayout({
     { key: "proposals", label: tt("ndv.tab.proposals"), group: tt("ndv.tabgrp.decide"), badge: pendingCount || undefined, icon: <ClipboardCheck size={13} /> },
     { key: "audit", label: tt("ndv.tab.audit"), group: tt("ndv.tabgrp.archive"), icon: <ScrollText size={13} /> },
     { key: "state", label: tt("ndv.tab.state"), group: tt("ndv.tabgrp.archive"), badge: stateRestorable || undefined, icon: <History size={13} /> },
+    { key: "manual", label: tt("ndv.tab.manual"), group: tt("ndv.tabgrp.archive"), icon: <BookOpen size={13} /> },
   ];
 
   // Active tab closed (or restored state desyncs) → fall back to the last
@@ -1664,15 +1718,37 @@ export function NetDevLayout({
                     onClick={() => void runPrecheck()}>{discPlanBusy ? tt("ndv.disc.precheckBusy") : tt("ndv.disc.precheck")}</span>
                 )}
               </div>
-              {discPlan && (
+              {discPlan && (() => {
+                // P0-1：黑盒递进时 Precheck 发现的网段可能不在 scopes 白名单
+                // 内——计划卡就地标识，人工确认后一键扩围（后端验证+审计）。
+                const scopes = settings?.scopes ?? [];
+                const outOfScope = (discPlan.steps ?? []).filter(s => !cidrWithinScopes(s.cidr, scopes)).map(s => s.cidr);
+                const extendScopes = () => {
+                  if (outOfScope.length === 0) return;
+                  if (!window.confirm(tt("ndv.disc.extendConfirm", { n: outOfScope.length, list: outOfScope.join("、") }))) return;
+                  void app.NetDevDiscoverExtendScopes(outOfScope)
+                    .then(() => app.NetDevSettings())
+                    .then(s => { setSettings(s); })
+                    .catch(e => window.alert(String(e)));
+                };
+                return (
                 <div style={{ marginTop: 8, border: "1px dashed var(--border-soft)", borderRadius: 6, padding: 8, maxHeight: 220, overflowY: "auto" }}>
                   <div className="ndv__meta">{tt("ndv.disc.planTitle", { v: discVantage, arp: discPlan.arp_known })}</div>
+                  {outOfScope.length > 0 && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "4px 0" }}>
+                      <span className="ndv__meta" style={{ color: "var(--warn)", fontSize: 11 }}>⚠ {tt("ndv.disc.outOfScopeHint", { n: outOfScope.length })}</span>
+                      <span className="btn btn--secondary btn--small" role="button" onClick={extendScopes}>{tt("ndv.disc.extendScopes")}</span>
+                    </div>
+                  )}
                   {(discPlan.steps ?? []).map(s => (
                     <div key={s.cidr} className="ndv__device" style={{ cursor: "default", alignItems: "center", gap: 6 }}>
                       <input type="checkbox" aria-label={s.cidr}
                         checked={discPlanSel.has(s.cidr)}
                         onChange={e => setDiscPlanSel(prev => { const n = new Set(prev); if (e.target.checked) n.add(s.cidr); else n.delete(s.cidr); return n; })} />
                       <span className="ndv__device-addr">{s.cidr}</span>
+                      {!cidrWithinScopes(s.cidr, scopes) && (
+                        <span className="ndv-health__water" data-hot="true" title={tt("ndv.disc.outOfScopeTip")}>{tt("ndv.disc.outOfScope")}</span>
+                      )}
                       <span className="ndv__meta" style={{ marginLeft: "auto", fontSize: 10 }}>
                         {s.class} · {s.hosts}{s.class === "large" ? tt("ndv.disc.planLarge") : ""}
                       </span>
@@ -1682,7 +1758,8 @@ export function NetDevLayout({
                     <div key={i} className="ndv__meta" style={{ color: "var(--warn)", fontSize: 11 }}>⚠ {w}</div>
                   ))}
                 </div>
-              )}
+                );
+              })()}
               <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <span className="btn btn--secondary btn--small" role="button" onClick={() => { setDiscoverOpen(false); setDiscPlan(null); }}>{tt("common.cancel")}</span>
                 {discPlan ? (
@@ -1695,7 +1772,11 @@ export function NetDevLayout({
                     </span>
                   </>
                 ) : (
-                  <span className="btn btn--primary btn--small" role="button" onClick={() => void runDiscover()}>{discoverBusy ? tt("ndv.disc.busy") : tt("ndv.disc.start")}</span>
+                  <>
+                    <span className="btn btn--secondary btn--small" role="button" title={tt("ndv.nmap.tip")}
+                      onClick={() => void runNmapSweep()}>{nmapBusy ? tt("ndv.nmap.busy") : tt("ndv.nmap.btn")}</span>
+                    <span className="btn btn--primary btn--small" role="button" onClick={() => void runDiscover()}>{discoverBusy ? tt("ndv.disc.busy") : tt("ndv.disc.start")}</span>
+                  </>
                 )}
               </div>
             </div>
@@ -1924,7 +2005,7 @@ export function NetDevLayout({
                 : (
                   <div className="ndv__empty">
                     <div className="ndv__empty-title">{tt("ndv.dev.emptyTitle")}</div>
-                    <div className="ndv__empty-desc">tt("ndv.dev.emptyDesc")</div>
+                    <div className="ndv__empty-desc">{tt("ndv.dev.emptyDesc")}</div>
                     <span className="btn btn--primary btn--small" role="button" onClick={() => onOpenSettings("netdev")}>{tt("ndv.dev.openSettings")}</span>
                   </div>
                 )
@@ -1974,6 +2055,7 @@ export function NetDevLayout({
                   onChange={e => setDiscNames(prev => ({ ...prev, [h.ip]: e.target.value }))} />
                 <span className="ndv__meta" style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                   {h.vendor_hint && <span style={{ fontSize: 10, border: "1px solid var(--border-soft)", borderRadius: 8, padding: "0 6px", opacity: 0.8 }}>{h.vendor_hint}</span>}
+                  {fingerprintModel(h) && <span style={{ fontSize: 10, border: "1px solid var(--accent-soft, #4f8ef7)", borderRadius: 8, padding: "0 6px", opacity: 0.85 }} title={tt("ndv.disc.fpTip")}>{fingerprintModel(h)}</span>}
                   <span title={(h.sources ?? []).join(",")}>{(h.ports ?? []).map(p => p.port).join(" ") || "?"}</span>
                   <span style={{ opacity: 0.5, cursor: "pointer" }} role="button" title={tt("ndv.disc.dismiss")}
                     onClick={() => { void dismissDiscovered(h.ip); }}>×</span>
@@ -2241,6 +2323,7 @@ export function NetDevLayout({
               onCorrelate={() => { setLogsBenchEverOpened(true); setBench("logs"); }}
               onReports={() => openDockTabFn("audit")}
               onK8sGuide={() => onOpenSettings("netdev")}
+              onManual={() => { setManualDoc("usage"); openDockTabFn("manual"); }}
             />
             {alertWizardOpen && settings && (
               <AlertSetupWizard
@@ -2422,8 +2505,19 @@ export function NetDevLayout({
                 >{findingsClearArm ? tt("ndv.fnd.clearConfirm", { n: scopedFindings.length }) : tt("ndv.fnd.clearBtn")}</span>
               )}
             </div>
-            {jumpFilteredFindings.length === 0 && <div className="ndv__hint ndv__hint--flush">{project ? tt("ndv.fnd.emptyProj", { name: project.name }) : tt("ndv.fnd.empty")}</div>}
-            {aggView && aggs.length > 0 ? aggs.map(a => <AggRow key={a.key} a={a} onChanged={() => void reload()} />) : jumpFilteredFindings.slice(0, 20).map(f => <FindingRow key={f.id} f={f} onResolved={() => void reload()} />)}
+            {jumpFilteredFindings.length === 0 && (
+              <div className="ndv__empty">
+                <div className="ndv__empty-title">{tt("ndv.fnd.emptyTitle")}</div>
+                <div className="ndv__empty-desc">{project ? tt("ndv.fnd.emptyProj", { name: project.name }) : tt("ndv.fnd.empty")}</div>
+                <span className="btn btn--primary btn--small" role="button" onClick={() => { void runBaseline(); }}>{tt("ndv.fnd.emptyAct")}</span>
+              </div>
+            )}
+            {aggView && aggs.length > 0 ? aggs.map(a => <AggRow key={a.key} a={a} onChanged={() => void reload()} />) : jumpFilteredFindings.slice(0, 20).map(f => <FindingRow key={f.id} f={f} onResolved={() => void reload()} onPropose={fl => {
+              // P2-1：发现 → 修复提案一键衔接——起草提示词带上发现 id/设备/标题，
+              // 走既有 netdev_propose 人工审批流，护栏语义不变。
+              onInsertComposer?.(tt("ndv.fnd.proposePrompt", { id: fl.id, title: fl.title, dev: (fl.devices ?? []).join("、") || "—" }));
+              openDockTabFn("live");
+            }} />)}
           </div>
         )}
 
@@ -2449,7 +2543,13 @@ export function NetDevLayout({
                 >{f.label}</span>
               ))}
             </div>
-            {filteredProposals.length === 0 && <div className="ndv__hint ndv__hint--flush">{project ? tt("ndv.pt.emptyProj", { name: project.name }) : tt("ndv.pt.empty")}</div>}
+            {filteredProposals.length === 0 && (
+              <div className="ndv__empty">
+                <div className="ndv__empty-title">{tt("ndv.pt.emptyTitle")}</div>
+                <div className="ndv__empty-desc">{project ? tt("ndv.pt.emptyProj", { name: project.name }) : tt("ndv.pt.empty")}</div>
+                <span className="btn btn--primary btn--small" role="button" onClick={() => { onInsertComposer?.(tt("ndv.pt.emptyPrompt")); openDockTabFn("live"); }}>{tt("ndv.pt.emptyAct")}</span>
+              </div>
+            )}
             {filteredProposals.slice(0, proposalPage * PROPOSAL_PAGE_SIZE).map(p => <ProposalRow key={p.id} p={p} onDone={() => void reload()} />)}
             {filteredProposals.length > proposalPage * PROPOSAL_PAGE_SIZE && (
               <div className="ndv__quick-cmds" style={{ marginTop: 4 }}>
@@ -2517,8 +2617,9 @@ export function NetDevLayout({
                 </div>
                 {audit.length === 0 ? (
                   <div className="ndv__audit-empty">
-                    {tt("ndv.aud.empty1")}<br />
-                    {tt("ndv.aud.empty2")}
+                    <div className="ndv__empty-title">{tt("ndv.aud.emptyTitle")}</div>
+                    <div>{tt("ndv.aud.empty1")}<br />{tt("ndv.aud.empty2")}</div>
+                    <span className="btn btn--primary btn--small" role="button" style={{ marginTop: 6 }} onClick={() => { void runInspection(); }}>{tt("ndv.aud.emptyAct")}</span>
                   </div>
                 ) : audit.slice(0, 100).map((a, i) => (
                   <div key={`${a.time}-${i}`} className="ndv__audit-row" title={a.error || a.command}>
@@ -2535,6 +2636,7 @@ export function NetDevLayout({
           </div>
         )}
         {tab === "state" && <StateHistoryPanel />}
+        {tab === "manual" && <ManualPanel initialDoc={manualDoc} />}
         </div>
       </div>
       )}
@@ -2647,8 +2749,9 @@ function AuditChainBadge() {
 
 // ScenarioHub — 场景引导中心：每个场景一句话说明 + 一个动作，动作要么打开
 // 向导（告警接入）、要么填好提示词并打开对应页卡（诊断/巡检/基线）。
+// G1-1：a/b 两组带组头分块渲染；B 组头部是靶场安全闭环路线卡（识别→修复→复核）。
 function ScenarioHub({ onOpenAlertWizard, onDiagnose, onInspect, onLogs, onBaseline, onGolden,
-  onLocate, onTriage, onWeak, onCVE, onSecWizard, onCorrelate, onReports, onK8sGuide }: {
+  onLocate, onTriage, onWeak, onCVE, onSecWizard, onCorrelate, onReports, onK8sGuide, onManual }: {
   onOpenAlertWizard: () => void;
   onDiagnose: () => void;
   onInspect: () => void;
@@ -2663,14 +2766,19 @@ function ScenarioHub({ onOpenAlertWizard, onDiagnose, onInspect, onLogs, onBasel
   onCorrelate: () => void;
   onReports: () => void;
   onK8sGuide: () => void;
+  onManual: () => void;
 }) {
-  const cards: { icon: string; title: string; desc: string; action: string; primary?: boolean; run: () => void }[] = [
+  type Card = { icon: string; title: string; desc: string; action: string; primary?: boolean; run: () => void };
+  const groupA: Card[] = [
     { icon: "⏰", title: tt("ndv.sc.a1t"), desc: tt("ndv.sc.a1d"), action: tt("ndv.sc.a1a"), primary: true, run: onOpenAlertWizard },
     { icon: "🔍", title: tt("ndv.sc.a2t"), desc: tt("ndv.sc.a2d"), action: tt("ndv.sc.a2a"), run: onDiagnose },
     { icon: "🧪", title: tt("ndv.sc.a3t"), desc: tt("ndv.sc.a3d"), action: tt("ndv.insp.runNow"), run: onInspect },
     { icon: "📜", title: tt("ndv.sc.a4t"), desc: tt("ndv.sc.a4d"), action: tt("ndv.sc.a4a"), run: onLogs },
     { icon: "🛡", title: tt("ndv.sc.a5t"), desc: tt("ndv.sc.a5d"), action: tt("ndv.sc.a5a"), run: onBaseline },
     { icon: "📐", title: tt("ndv.sc.a6t"), desc: tt("ndv.sc.a6d"), action: tt("ndv.sc.a6a"), run: onGolden },
+  ];
+  const groupB: Card[] = [
+    { icon: "🎯", title: tt("ndv.sc.c1t"), desc: tt("ndv.sc.c1d"), action: tt("ndv.sc.c1a"), primary: true, run: onManual },
     { icon: "📍", title: tt("ndv.sc.b1t"), desc: tt("ndv.sc.b1d"), action: tt("ndv.sc.b1a"), run: onLocate },
     { icon: "🩺", title: tt("ndv.sc.b2t"), desc: tt("ndv.sc.b2d"), action: tt("ndv.sc.b2a"), run: onTriage },
     { icon: "🔑", title: tt("ndv.sc.b3t"), desc: tt("ndv.sc.b3d"), action: tt("ndv.sc.b3a"), run: onWeak },
@@ -2680,19 +2788,25 @@ function ScenarioHub({ onOpenAlertWizard, onDiagnose, onInspect, onLogs, onBasel
     { icon: "📋", title: tt("ndv.sc.b7t"), desc: tt("ndv.sc.b7d"), action: tt("ndv.sc.b7a"), run: onReports },
     { icon: "🐳", title: tt("ndv.sc.b8t"), desc: tt("ndv.sc.b8d"), action: tt("ndv.sc.b8a"), run: onK8sGuide },
   ];
+  const grid = (cards: Card[]) => (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+      {cards.map(c => (
+        <div key={c.title} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600 }}>{c.icon} {c.title}</div>
+          <div style={{ fontSize: 11, opacity: 0.75, flex: 1 }}>{c.desc}</div>
+          <span className={`btn btn--small ${c.primary ? "btn--primary" : "btn--secondary"}`} role="button" style={{ alignSelf: "flex-start" }} onClick={c.run}>{c.action}</span>
+        </div>
+      ))}
+    </div>
+  );
   return (
     <div className="ndv__card">
       <div className="ndv__card-title">{tt("ndv.sc.title")}</div>
       <div className="mem-hint" style={{ marginBottom: 8 }}>{tt("ndv.sc.hint")}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-        {cards.map(c => (
-          <div key={c.title} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 8, display: "flex", flexDirection: "column", gap: 4 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 600 }}>{c.icon} {c.title}</div>
-            <div style={{ fontSize: 11, opacity: 0.75, flex: 1 }}>{c.desc}</div>
-            <span className={`btn btn--small ${c.primary ? "btn--primary" : "btn--secondary"}`} role="button" style={{ alignSelf: "flex-start" }} onClick={c.run}>{c.action}</span>
-          </div>
-        ))}
-      </div>
+      <div className="ndv__sc-grp">{tt("ndv.sc.gA")}</div>
+      {grid(groupA)}
+      <div className="ndv__sc-grp">{tt("ndv.sc.gB")}</div>
+      {grid(groupB)}
     </div>
   );
 }
@@ -2864,7 +2978,7 @@ function AggRow({ a, onChanged }: { a: NetDevAggregatedFinding; onChanged?: () =
   );
 }
 
-function FindingRow({ f, onResolved }: { f: NetDevFinding; onResolved?: () => void }) {
+function FindingRow({ f, onResolved, onPropose }: { f: NetDevFinding; onResolved?: () => void; onPropose?: (f: NetDevFinding) => void }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   return (
@@ -2889,6 +3003,10 @@ function FindingRow({ f, onResolved }: { f: NetDevFinding; onResolved?: () => vo
             window.dispatchEvent(new CustomEvent("fairpeer:netdev-case", { detail: { title: f.title, device: (f.devices ?? [])[0] ?? "", text: `${f.severity}｜${f.title}｜${(f.detail ?? "").slice(0, 120)}`, ref: f.id } }));
             window.dispatchEvent(new CustomEvent("fairpeer:netdev-bench", { detail: "sec" }));
           }}>{tt("ndv.fnd.createCase")}</span>
+        {f.status !== "resolved" && onPropose && (
+          <span className="btn btn--secondary btn--small" role="button" title={tt("ndv.fnd.proposeTip")}
+            onClick={() => onPropose?.(f)}>{tt("ndv.fnd.propose")}</span>
+        )}
         {f.status === "active" && (
           <span className="btn btn--secondary btn--small" role="button"
             onClick={() => { void app.NetDevResolveFinding(f.id).then(() => onResolved?.()); }}>{tt("ndv.fnd.resolve")}</span>
@@ -3083,4 +3201,29 @@ function TopologyMap({ graph, selected, selectedAddr, onPick, health }: { graph:
       </div>
     </div>
   );
+}
+
+// cidrWithinScopes — P0-1 计划卡越界判断：candidate 必须被某个已配置 scope
+// 完整包含（与后端 scopeAllows/cidrContains 同口径：外层前缀 ≤ 内层前缀）。
+function cidrWithinScopes(cidr: string, scopes: string[]): boolean {
+  const ip4 = (s: string): number | null => {
+    const p = s.trim().split(".").map(Number);
+    if (p.length !== 4 || p.some(x => !Number.isInteger(x) || x < 0 || x > 255)) return null;
+    return ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0;
+  };
+  const parts = cidr.trim().split("/");
+  if (parts.length !== 2) return false;
+  const inner = ip4(parts[0]);
+  const ones = Number(parts[1]);
+  if (inner === null || !Number.isInteger(ones) || ones < 0 || ones > 32) return false;
+  for (const s of scopes) {
+    const sp = s.trim().split("/");
+    if (sp.length !== 2) continue;
+    const outer = ip4(sp[0]);
+    const o = Number(sp[1]);
+    if (outer === null || !Number.isInteger(o) || o > ones) continue;
+    const mask = (o === 0 ? 0 : (0xffffffff << (32 - o))) >>> 0;
+    if ((((inner & mask) >>> 0) === ((outer & mask) >>> 0))) return true;
+  }
+  return false;
 }
