@@ -16,6 +16,8 @@ export function summarizeRecordEvent(ev: BrowserConsoleRecordEvent): string {
       return `回车（${label}）`;
     case "navigate":
       return `打开 ${truncate(ev.url ?? "", 48)}`;
+    case "scroll":
+      return `滚动 ${ev.value || "down"}（${label || "页面"}）`;
     default:
       return label || ev.type;
   }

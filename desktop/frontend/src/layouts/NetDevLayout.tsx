@@ -4,12 +4,13 @@ import { t as tt } from "../lib/i18n";
 import { app, onNetdevHealth, onNetdevLive } from "../lib/bridge";
 import { ProfileSegmented } from "../components/AppChrome";
 import { useConfirm } from "../lib/confirm";
-import { getActiveProject, setActiveProject, subscribeActiveProject, type NetDevProjectScope } from "../lib/netdevProjectStore";
+import { getActiveProject, restoreActiveProject, setActiveProject, subscribeActiveProject, type NetDevProjectScope } from "../lib/netdevProjectStore";
 import { ProposalActions } from "../components/netdev/ProposalCenter";
 import { LiveOpsPanel } from "../components/netdev/LiveOpsPanel";
 import { LogPanel } from "../components/netdev/LogPanel";
 import { LogWorkbench } from "../components/netdev/LogWorkbench";
 import { SecWorkbench } from "../components/netdev/SecWorkbench";
+import { BrowserWorkbench } from "../components/netdev/BrowserWorkbench";
 import { CutoverView } from "../components/netdev/CutoverView";
 import { TemplateCard } from "../components/netdev/TemplateCard";
 import { SrvConfCard } from "../components/netdev/SrvConfCard";
@@ -208,7 +209,7 @@ const REDFISH_QUICK: { label: string; path: string }[] = [
 
 type QuickResult = { command: string; output: string; isError: boolean; refused?: string; refusedUnknown?: boolean };
 // ?bench=<workbench> deep-links the main-area workbench (mirror of ?dock=).
-function benchParam(): "logs" | "sec" | "dash" | null {
+function benchParam(): "logs" | "sec" | "dash" | "browser" | null {
   try {
     const v = new URLSearchParams(window.location.search).get("bench");
     return v === "logs" || v === "sec" || v === "dash" ? v : null;
@@ -447,12 +448,19 @@ export function NetDevLayout({
   // Main-area workbenches (NETDEV_SPEC_V2 §10.2): 对话 is the default view and
   // the return anchor; the 日志 workbench opens on demand and STAYS MOUNTED
   // once opened (closing = switching back to chat, state survives — §10.2).
-  // The switch bar renders only after the first workbench open, so a
-  // chat-only session keeps the exact v1.1 layout (§10.8: 单工作台零新增 chrome).
-  const [bench, setBench] = useState<"chat" | "logs" | "sec" | "dash">(() => (benchParam() === "sec" ? "sec" : benchParam() === "dash" ? "dash" : benchParam() ? "logs" : "chat"));
+  // The switch bar renders only while a workbench is the ACTIVE view (bench
+  // !== "chat"), so the chat view stays pixel-equal to v1.1 even after a
+  // workbench was opened (§10.8: 纯对话零新增 chrome) — dock/sidebar jumps
+  // that deep-link into a bench must not grow permanent chrome on the chat.
+  const [bench, setBench] = useState<"chat" | "logs" | "sec" | "dash" | "browser">(() => (benchParam() === "sec" ? "sec" : benchParam() === "dash" ? "dash" : benchParam() === "browser" ? "browser" : benchParam() ? "logs" : "chat"));
   const [logsBenchEverOpened, setLogsBenchEverOpened] = useState(() => benchParam() === "logs");
   const [secBenchEverOpened, setSecBenchEverOpened] = useState(() => benchParam() === "sec");
   const [dashBenchEverOpened, setDashBenchEverOpened] = useState(() => benchParam() === "dash");
+  const [browserBenchEverOpened, setBrowserBenchEverOpened] = useState(() => benchParam() === "browser");
+  const openBrowserBench = useCallback(() => {
+    setBench("browser");
+    setBrowserBenchEverOpened(true);
+  }, []);
   // 大屏（DASHBOARD spec §4.1）：初始屏/深链 finding；manualSignal 驱动
   // Alt+1..5、命令面板、fairpeer://finding 深链的后到切换。
   const [dashScreen, setDashScreen] = useState<DashScreen | null>(() => dashScreenParam());
@@ -518,6 +526,7 @@ export function NetDevLayout({
       if (d === "logs") openLogsBench();
       if (d === "sec") openSecBench();
       if (d === "dash") openDashBench();
+      if (d === "browser") openBrowserBench();
     };
     const onOpenScreen = (e: Event) => {
       const d = (e as CustomEvent<{ screen?: DashScreen; finding?: string; tab?: DockTab; filter?: string }>).detail;
@@ -539,7 +548,7 @@ export function NetDevLayout({
       window.removeEventListener("fairpeer:netdev-bench", onBench);
       window.removeEventListener("fairpeer:netdev-open-screen", onOpenScreen);
     };
-  }, [openLogsBench, openSecBench, openDashBench]);
+  }, [openLogsBench, openSecBench, openDashBench, openBrowserBench]);
 
   // §4.12 深链路由：notify 推送消息里的 fairpeer://finding/<id> 链接在
   // webview 里没有协议处理器——这里拦截点击，落调查链屏并高亮（把 v1 的
@@ -1275,6 +1284,15 @@ export function NetDevLayout({
   // Active project scope (site switcher in the title bar): null = 全部.
   const [project, setProject] = useState<NetDevProjectScope>(getActiveProject());
   useEffect(() => subscribeActiveProject(() => setProject(getActiveProject())), []);
+  // 启动恢复：定义（settings.projects）到位后按名字找回上次的选择；会话内
+  // 已手选则不打扰；项目已删除则清掉残留。
+  const projectRestoredRef = useRef(false);
+  const settingsProjects = settings?.projects ?? [];
+  useEffect(() => {
+    if (projectRestoredRef.current || settingsProjects.length === 0) return;
+    projectRestoredRef.current = true;
+    restoreActiveProject(settingsProjects);
+  }, [settingsProjects]);
 
   const allDevices = settings?.devices ?? [];
   const inScope = useCallback((group: string | undefined) => {
@@ -1284,7 +1302,10 @@ export function NetDevLayout({
   const devices = allDevices.filter(d => inScope(d.group));
   const scopedDeviceNames = new Set(devices.map(d => d.name));
   const selectedDevice = devices.find(d => d.name === selected);
-  const scopedFindings = findings.filter(f => !project || (f.devices ?? []).some(n => scopedDeviceNames.has(n)));
+  // 项目过滤走 Finding 上的快照标签（后端 save 时固化，不随改组漂移）——不再
+  // 按设备隶属实时推导。未打标（未分组/未知来源/旧数据）在所有项目视图可见，
+  // 盲区规则见后端 finding.go 的 Project 注释。
+  const scopedFindings = findings.filter(f => !project || !f.project || f.project === project.name);
   // 深链过滤层：scopedFindings 之上再套大屏带来的 filter（可清除）。
   const jumpFilteredFindings = (() => {
     if (!dashJumpFilter || dashJumpFilter.tab !== "findings") return scopedFindings;
@@ -1543,15 +1564,20 @@ export function NetDevLayout({
 
       <div className="ndv__main">
         {bannersNode}
-        {(logsBenchEverOpened || secBenchEverOpened || dashBenchEverOpened) && (
+        {/* §10.2「只开对话时切换条完全不渲染」：bar 只在非对话工作台为当前
+            视图时出现，回到对话即隐去——对话主区无论开过什么都与 v1.1 像素
+            等价；工作台本体保持挂载，重进现场不丢。 */}
+        {bench !== "chat" && (
           <div className="ndv-bench__bar" role="tablist" aria-label={tt("ndv.bench.aria")}>
-            <span role="tab" aria-selected={bench === "chat"} className={`ndv-bench__chip${bench === "chat" ? " ndv-bench__chip--on" : ""}`} onClick={() => setBench("chat")}>{tt("ndv.bench.chat")}</span>
+            {/* bar 只在非对话视图渲染，故「对话」chip 永非当前项，仅作返回入口 */}
+            <span role="tab" aria-selected={false} className="ndv-bench__chip" onClick={() => setBench("chat")}>{tt("ndv.bench.chat")}</span>
             <span role="tab" aria-selected={bench === "logs"} className={`ndv-bench__chip${bench === "logs" ? " ndv-bench__chip--on" : ""}`} onClick={openLogsBench}>{tt("ndv.bench.logs")}</span>
             <span role="tab" aria-selected={bench === "sec"} className={`ndv-bench__chip${bench === "sec" ? " ndv-bench__chip--on" : ""}`} onClick={openSecBench}>{tt("ndv.bench.sec")}</span>
             <span role="tab" aria-selected={bench === "dash"} className={`ndv-bench__chip${bench === "dash" ? " ndv-bench__chip--on" : ""}`} onClick={() => openDashBench()} title={tt("ndv.dash.chipTip")}>
               {tt("ndv.bench.dash")}
               <i className="ndv-bench__riskdot" style={{ background: riskDotColor }} />
             </span>
+            <span role="tab" aria-selected={bench === "browser"} className={`ndv-bench__chip${bench === "browser" ? " ndv-bench__chip--on" : ""}`} onClick={openBrowserBench}>{tt("ndv.bench.browser")}</span>
             <span className="ndv-bench__hint"><kbd>Esc</kbd> {tt("ndv.bench.back")}</span>
           </div>
         )}
@@ -1569,6 +1595,7 @@ export function NetDevLayout({
         </div>
         {logsBenchEverOpened && <LogWorkbench devices={settings?.devices ?? []} onInsertComposer={onInsertComposer} hidden={bench !== "logs"} />}
         {secBenchEverOpened && <SecWorkbench devices={settings?.devices ?? []} hidden={bench !== "sec"} />}
+        {browserBenchEverOpened && <BrowserWorkbench hidden={bench !== "browser"} onClose={() => setBench("chat")} />}
         {dashBenchEverOpened && (
           <div className="ndv__dashwrap" style={bench !== "dash" ? { display: "none" } : undefined}>
             <DashShell
@@ -2348,6 +2375,7 @@ export function NetDevLayout({
                 </span>
               )}
             </div>
+            {project && <div className="ndv__hint ndv__hint--flush">{tt("ndv.fnd.projScopeHint", { name: project.name })}</div>}
             <div className="ndv__panel-actions">
               <span
                 className={`btn btn--small ${aggView ? "btn--primary" : "btn--secondary"}`}

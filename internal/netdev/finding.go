@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zzycxz/fairpeer/internal/config"
 )
 
 // Findings (NETDEV_SPEC §10.2): the diagnostic hand's conclusions, each with
@@ -47,6 +49,14 @@ type Finding struct {
 	// Status is the alert lifecycle: "" (human/AI finding) | active | resolved.
 	Status     string     `json:"status,omitempty"`
 	ResolvedAt *time.Time `json:"resolvedAt,omitempty"`
+	// Project is the site-scope snapshot stamped at save time: the project
+	// whose groups own the most of this finding's devices (ProjectForDevices).
+	// "" = 未分组 — such findings (unknown-source syslog, "(all)" sweeps,
+	// pre-Project legacy files) stay visible in EVERY project view so the
+	// blind-spot rule holds: alerts that match no project are never hidden.
+	// Stamped only when empty — a re-save keeps the original stamp; group
+	// membership is a view concern, the stamp is audit history.
+	Project string `json:"project,omitempty"`
 }
 
 var (
@@ -79,6 +89,55 @@ func findingValid(f *Finding) error {
 		return fmt.Errorf("finding: evidence is required — attach the command outputs that support the conclusion")
 	}
 	return nil
+}
+
+// loadConfigForProject is the config source for save-time stamping and
+// list-time backfill; tests swap it. A load failure just leaves the stamp
+// empty ("" = 未分组, visible everywhere) — never blocks the finding itself.
+var loadConfigForProject = func() *config.Config {
+	c, err := config.Load()
+	if err != nil {
+		return nil
+	}
+	return c
+}
+
+// ProjectForDevices maps a device list to the owning project by group
+// membership: the project whose groups contain the most of the listed
+// devices wins; ties go to config order. Ungrouped devices count as the
+// "未分组" group (mirroring the frontend's inScope bucket). Pseudo-devices
+// ("(all)", "(unknown)", "(cve-feed)") and empty lists match nothing → "".
+func ProjectForDevices(cfg *config.Config, devices []string) string {
+	if cfg == nil || len(devices) == 0 || len(cfg.NetDev.Projects) == 0 {
+		return ""
+	}
+	groupOf := make(map[string]string, len(cfg.NetDev.Devices))
+	for _, d := range cfg.NetDev.Devices {
+		g := strings.TrimSpace(d.Group)
+		if g == "" {
+			g = "未分组"
+		}
+		groupOf[d.Name] = g
+	}
+	best, bestN := "", 0
+	for _, p := range cfg.NetDev.Projects {
+		gs := make(map[string]bool, len(p.Groups))
+		for _, g := range p.Groups {
+			if g = strings.TrimSpace(g); g != "" {
+				gs[g] = true
+			}
+		}
+		n := 0
+		for _, name := range devices {
+			if gs[groupOf[name]] {
+				n++
+			}
+		}
+		if n > bestN {
+			best, bestN = p.Name, n
+		}
+	}
+	return best
 }
 
 // DismissFinding deletes one finding by id — the findings queue's per-item ×.
@@ -137,6 +196,13 @@ func SaveFinding(f *Finding) error {
 	if err := findingValid(f); err != nil {
 		return err
 	}
+	// Stamp the project snapshot when absent (see Finding.Project). Stamped
+	// before the notify defer fires, so the notification text carries it too.
+	if f.Project == "" {
+		if cfg := loadConfigForProject(); cfg != nil {
+			f.Project = ProjectForDevices(cfg, f.Devices)
+		}
+	}
 	defer notifyFindingAsync(f) // §5.2 通知出口：配置了 webhook 且严重度过线才发
 	findingsMu.Lock()
 	defer findingsMu.Unlock()
@@ -172,6 +238,20 @@ func ListFindings() ([]*Finding, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Legacy files predate the Project stamp: backfill in-memory with the
+	// CURRENT mapping (files stay untouched — a read must not rewrite
+	// history). The config is loaded lazily, only when a backfill is needed.
+	var cfg *config.Config
+	var cfgLoaded bool
+	backfill := func(f *Finding) {
+		if f.Project != "" {
+			return
+		}
+		if !cfgLoaded {
+			cfg, cfgLoaded = loadConfigForProject(), true
+		}
+		f.Project = ProjectForDevices(cfg, f.Devices)
+	}
 	var out []*Finding
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
@@ -183,6 +263,7 @@ func ListFindings() ([]*Finding, error) {
 		}
 		var f Finding
 		if json.Unmarshal(b, &f) == nil {
+			backfill(&f)
 			out = append(out, &f)
 		}
 	}

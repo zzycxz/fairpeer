@@ -43,6 +43,13 @@ type ConsoleState struct {
 	Browser   string `json:"browser"`
 	Attached  bool   `json:"attached"`
 	URL       string `json:"url"`
+	// Keep-alive (会话保活): a long-idle console session survives both the
+	// kernel's idle reaper and the site's own session expiry.
+	KeepAlive     bool   `json:"keep_alive"`
+	KeepAliveMode string `json:"keep_alive_mode"` // ping|navigate|local
+	KeepAliveURL  string `json:"keep_alive_url"`  // navigate-mode target ("" = current page)
+	KeepAliveLast int64  `json:"keep_alive_last"` // unix millis of the last successful refresh
+	KeepAliveErr  string `json:"keep_alive_err"`  // last refresh failure ("" = ok)
 }
 
 var (
@@ -116,7 +123,8 @@ func ConsoleOpen(cdpURL, startURL string) (ConsoleState, error) {
 	return consoleStateOf(s)
 }
 
-// ConsoleClose stops any active recording, then closes the session.
+// ConsoleClose stops any active recording, then closes the session (the
+// session-level keep-alive loop dies with the session).
 func ConsoleClose() error {
 	_ = ConsoleRecordStop()
 	consoleMu.Lock()
@@ -137,6 +145,13 @@ func consoleStateOf(s *browserSession) (ConsoleState, error) {
 		Browser:   s.browser,
 		Attached:  s.attached,
 	}
+	s.keepMu.Lock()
+	state.KeepAlive = s.keepOn
+	state.KeepAliveMode = s.keepMode
+	state.KeepAliveURL = s.keepURL
+	state.KeepAliveLast = s.keepLast
+	state.KeepAliveErr = s.keepErr
+	s.keepMu.Unlock()
 	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 	defer cancel()
 	_ = chromedp.Run(ctx, chromedp.Location(&state.URL))
@@ -150,6 +165,85 @@ func ConsoleStateOf() (ConsoleState, error) {
 		return ConsoleState{Open: false}, nil
 	}
 	return consoleStateOf(s)
+}
+
+// ConsoleSetKeepAlive arms or disarms the console session's keep-alive loop
+// (session-level machinery lives in browser.go — the same loop the
+// browser_keepalive tool arms on agent sessions) and returns the resulting
+// state. mode: "" or "ping" (page heartbeat fetch), "navigate" (periodic
+// reload), "local" (reaper-side only). intervalSec clamps to [60, 3600]
+// with a 300s default.
+func ConsoleSetKeepAlive(enabled bool, intervalSec int, mode, url string) (ConsoleState, error) {
+	s, err := consoleSession()
+	if err != nil {
+		if !enabled {
+			// Nothing to disarm is not an error for the off-switch.
+			return ConsoleStateOf()
+		}
+		return ConsoleState{}, err
+	}
+	if err := armBrowserKeepAlive(s, enabled, intervalSec, mode, url); err != nil {
+		return ConsoleState{}, err
+	}
+	return consoleStateOf(s)
+}
+
+// ConsoleDetectOnce checks a wait-style condition a single time WITHOUT
+// blocking — the human-breakpoint auto-continue poll. Supported conditions:
+// visible:<selector>, hidden:<selector>, url:<text> (location contains),
+// title:<text> (title contains). Empty condition reports true.
+func ConsoleDetectOnce(condition string) (bool, string, error) {
+	cond := strings.TrimSpace(condition)
+	if cond == "" {
+		return true, "", nil
+	}
+	s, err := consoleSession()
+	if err != nil {
+		return false, "", err
+	}
+	return detectOnce(s, cond)
+}
+
+// detectOnce checks a wait-style condition on one session, non-blocking —
+// shared by the console's human-breakpoint poll and the deterministic flow
+// runner's human steps.
+func detectOnce(s *browserSession, cond string) (bool, string, error) {
+	expr := `(function(){
+		try {
+			var cond = ` + fmt.Sprintf("%q", cond) + `;
+			if (cond.indexOf('visible:') === 0) {
+				var el = document.querySelector(cond.slice(8));
+				return el && el.offsetParent !== null ? 'yes' : 'no';
+			}
+			if (cond.indexOf('hidden:') === 0) {
+				var h = document.querySelector(cond.slice(7));
+				return !h || h.offsetParent === null ? 'yes' : 'no';
+			}
+			if (cond.indexOf('url:') === 0) {
+				return location.href.indexOf(cond.slice(4)) !== -1 ? 'yes' : 'no';
+			}
+			if (cond.indexOf('title:') === 0) {
+				return document.title.indexOf(cond.slice(6)) !== -1 ? 'yes' : 'no';
+			}
+			return 'unsupported';
+		} catch (e) { return 'err ' + (e && e.message ? e.message : 'check failed'); }
+	})()`
+	ctx, cancel := context.WithTimeout(s.ctx, browserActionTimeout)
+	defer cancel()
+	var out string
+	if rerr := chromedp.Run(ctx, chromedp.Evaluate(expr, &out)); rerr != nil {
+		return false, "", fmt.Errorf("检测条件 %q: %w", cond, rerr)
+	}
+	switch {
+	case out == "yes":
+		return true, "", nil
+	case out == "no":
+		return false, "", nil
+	case strings.HasPrefix(out, "err "):
+		return false, "", fmt.Errorf("检测条件 %q: %s", cond, strings.TrimPrefix(out, "err "))
+	default:
+		return false, "", fmt.Errorf("不支持的检测条件 %q（visible:/hidden:/url:/title:）", cond)
+	}
 }
 
 // --- element listing --------------------------------------------------------------
@@ -176,6 +270,12 @@ func ConsoleElements() ([]ConsoleElement, error) {
 		return nil, fmt.Errorf("capture accessibility tree: %w", err)
 	}
 	refs, _ := buildSnapshotRefs(nodes)
+	// Publish the refs into the session exactly like browser_snapshot does —
+	// the panel's click/type go through the agent tools' ref resolution, which
+	// only reads s.refs. Without this store, picking an element from the list
+	// then clicking failed with "no snapshot taken for session".
+	published := refs
+	s.refs.Store(&published)
 	out := make([]ConsoleElement, 0, len(refs))
 	for ref, info := range refs {
 		out = append(out, ConsoleElement{Ref: ref, Role: info.role, Name: info.name, Value: info.value})
@@ -231,6 +331,117 @@ func ConsoleNavigate(url string) (string, error) {
 	return consoleExec(browserNavigate{}.Execute, map[string]any{"url": url})
 }
 
+// ConsoleTab is one open tab of the console session's browser.
+type ConsoleTab struct {
+	Index   int    `json:"index"` // 1-based
+	Title   string `json:"title"`
+	URL     string `json:"url"`
+	Current bool   `json:"current"`
+}
+
+// ConsoleTabs lists the console browser's tabs, marking the one the session
+// drives — the panel's tab strip.
+func ConsoleTabs() ([]ConsoleTab, error) {
+	s, err := consoleSession()
+	if err != nil {
+		return nil, err
+	}
+	infos, err := pageTargetInfos(s)
+	if err != nil {
+		return nil, err
+	}
+	cur := sessionTargetID(s)
+	out := make([]ConsoleTab, 0, len(infos))
+	for i, t := range infos {
+		out = append(out, ConsoleTab{
+			Index:   i + 1,
+			Title:   strings.TrimSpace(t.Title),
+			URL:     t.URL,
+			Current: t.TargetID == cur,
+		})
+	}
+	return out, nil
+}
+
+// ConsoleSwitchTab switches the console session onto another tab (1-based
+// index from ConsoleTabs); the current tab stays open.
+func ConsoleSwitchTab(index int) (string, error) {
+	return consoleExec(browserSwitchTab{}.Execute, map[string]any{"index": index})
+}
+
+// ConsoleHighlight flashes an outline around a target (ref or CSS) and
+// scrolls it into view — the panel's hover/click affordance so the user can
+// SEE which page element a list row refers to. Purely cosmetic: previous
+// inline styles are restored after the duration; no DOM structure changes.
+func ConsoleHighlight(target string, durationMs int) error {
+	s, err := consoleSession()
+	if err != nil {
+		return err
+	}
+	if durationMs <= 0 {
+		durationMs = 800
+	}
+	if durationMs > 5000 {
+		durationMs = 5000
+	}
+	js := `(function(){
+  this.scrollIntoView({block: "center", behavior: "instant"});
+  var el = this;
+  var prevO = el.style.outline, prevOS = el.style.outlineOffset, prevBg = el.style.backgroundColor;
+  el.style.outline = "3px solid #ff8c00";
+  el.style.outlineOffset = "1px";
+  el.style.backgroundColor = "rgba(255,140,0,0.15)";
+  setTimeout(function(){
+    el.style.outline = prevO; el.style.outlineOffset = prevOS; el.style.backgroundColor = prevBg;
+  }, DURATION);
+  return true;
+})()`
+	js = strings.Replace(js, "DURATION", strconv.Itoa(durationMs), 1)
+	ctx, cancel := consoleTabCtx(s)
+	defer cancel()
+	if looksLikeRef(target) {
+		if _, err := callOnRef(ctx, s, target, js); err != nil {
+			return fmt.Errorf("高亮 %q: %w", target, err)
+		}
+		return nil
+	}
+	expr := strings.Replace(`(function(){
+  var el = document.querySelector(SELECTOR);
+  if (!el) return false;
+  el.scrollIntoView({block: "center", behavior: "instant"});
+  var prevO = el.style.outline, prevOS = el.style.outlineOffset, prevBg = el.style.backgroundColor;
+  el.style.outline = "3px solid #ff8c00";
+  el.style.outlineOffset = "1px";
+  el.style.backgroundColor = "rgba(255,140,0,0.15)";
+  setTimeout(function(){
+    el.style.outline = prevO; el.style.outlineOffset = prevOS; el.style.backgroundColor = prevBg;
+  }, DURATION);
+  return true;
+})()`, "SELECTOR", fmt.Sprintf("%q", target), 1)
+	expr = strings.Replace(expr, "DURATION", strconv.Itoa(durationMs), 1)
+	var ok bool
+	if err := chromedp.Run(ctx, chromedp.Evaluate(expr, &ok)); err != nil {
+		return fmt.Errorf("高亮 %q: %w", target, err)
+	}
+	return nil
+}
+
+// ConsoleHover hovers the pointer over a target (ref or CSS) — a real
+// mousemove to the element center, so CSS :hover menus open.
+func ConsoleHover(target string) (string, error) {
+	return consoleExec(browserHover{}.Execute, map[string]any{"target": target})
+}
+
+// ConsoleBack goes back one history entry in the console session.
+func ConsoleBack() (string, error) {
+	return consoleExec(browserBack{}.Execute, map[string]any{})
+}
+
+// ConsoleForward goes forward one history entry in the console session.
+func ConsoleForward() (string, error) {
+	return consoleExec(browserForward{}.Execute, map[string]any{})
+}
+
 // ConsoleClick accepts a snapshot ref ("e5") or a CSS selector.
 func ConsoleClick(target string) (string, error) {
 	return consoleExec(browserClick{}.Execute, map[string]any{"target": target})
@@ -250,6 +461,12 @@ func ConsoleKey(key string) error {
 	if err != nil {
 		return err
 	}
+	return dispatchSpecialKey(s, key)
+}
+
+// dispatchSpecialKey presses enter/tab/escape on a session's page — shared by
+// the console primitive and the deterministic flow runner.
+func dispatchSpecialKey(s *browserSession, key string) error {
 	var keyName, code string
 	var vk int64
 	var text string
@@ -281,7 +498,7 @@ func ConsoleKey(key string) error {
 		WindowsVirtualKeyCode: vk,
 		NativeVirtualKeyCode:  vk,
 	}
-	ctx, cancel := consoleTabCtx(s)
+	ctx, cancel := context.WithTimeout(s.ctx, browserActionTimeout)
 	defer cancel()
 	return chromedp.Run(ctx, down, up)
 }
@@ -321,6 +538,16 @@ func ConsoleExtract(selector string) (string, error) {
 	return consoleExec(browserExtract{}.Execute, args)
 }
 
+// ConsoleExtractTable extracts every <table> under selector (or the page) as
+// markdown — structure-preserving for log grids and result tables.
+func ConsoleExtractTable(selector string) (string, error) {
+	args := map[string]any{"format": "table"}
+	if selector != "" {
+		args["selector"] = selector
+	}
+	return consoleExec(browserExtract{}.Execute, args)
+}
+
 func ConsoleEvaluate(expression string) (string, error) {
 	return consoleExec(browserEvaluate{}.Execute, map[string]any{"expression": expression})
 }
@@ -345,11 +572,11 @@ func ConsoleScreenshot() (string, error) {
 // recording. Password values are never captured — Password marks the field
 // so the generated skill prompts at run time instead.
 type ConsoleRecordEvent struct {
-	Type     string `json:"type"` // click|input|change|submit|navigate|effect
+	Type     string `json:"type"` // click|input|change|submit|navigate|scroll|effect
 	Selector string `json:"selector,omitempty"`
 	Role     string `json:"role,omitempty"`
 	Name     string `json:"name,omitempty"`
-	Value    string `json:"value,omitempty"`
+	Value    string `json:"value,omitempty"` // scroll: "<direction> <screens>"
 	URL      string `json:"url,omitempty"`
 	Time     int64  `json:"time"` // unix millis
 	// Effective (click only, merged from follow-up "effect" events): the
@@ -560,6 +787,41 @@ const consoleRecorderJS = `(() => {
     return tag;
   };
   const pending = {};
+  // Scroll capture (debounced like input): replay needs the page scrolled
+  // far enough for targets to be in-view. Value = "<direction> <screens>".
+  const scrollPos = {};
+  const scrollAcc = {};
+  document.addEventListener("scroll", (e) => {
+    var onDoc = (e.target === document || e.target === document.documentElement);
+    var node = onDoc ? document.body : e.target;
+    var selector = onDoc ? "body" : sel(node);
+    var top = onDoc ? (window.scrollY || document.documentElement.scrollTop || 0) : e.target.scrollTop;
+    var prev = scrollPos[selector];
+    scrollPos[selector] = top;
+    if (prev === undefined || prev === top) return;
+    scrollAcc[selector] = (scrollAcc[selector] || 0) + (top - prev);
+    clearTimeout(pending["scroll:" + selector]);
+    pending["scroll:" + selector] = setTimeout(() => {
+      var total = scrollAcc[selector] || 0;
+      scrollAcc[selector] = 0;
+      if (Math.abs(total) < 200) return; // ignore sub-pixel jitter
+      var dir = total > 0 ? "down" : "up";
+      var amount = Math.max(1, Math.round(Math.abs(total) / 600));
+      send({ type: "scroll", selector: selector, value: dir + " " + amount });
+    }, 800);
+  }, true);
+  // Hover capture (menu-open pattern): mouseenter on clickable-ish elements,
+  // debounced; the deterministic filter keeps only hovers whose NEXT action
+  // lands inside the hovered subtree (menu opened → item clicked).
+  let hoverSel = "", hoverTimer = 0;
+  document.addEventListener("mouseover", (e) => {
+    const el = (e.target.closest && e.target.closest("a,button,[role],li,.menu-item,[onclick],[aria-haspopup]")) || null;
+    const nowSel = el ? sel(el) : "";
+    if (!nowSel || nowSel === hoverSel) return;
+    hoverSel = nowSel;
+    clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(() => send({ type: "hover", selector: hoverSel }), 700);
+  }, true);
   document.addEventListener("click", (e) => {
     const el = (e.target.closest && e.target.closest("a,button,input,select,textarea,[role],[onclick],label")) || e.target;
     const selector = sel(el);
@@ -603,8 +865,39 @@ const consoleRecorderJS = `(() => {
 // — AI semantic cleanup — runs in the desktop layer). It returns the kept
 // events plus everything dropped, so the panel can show the
 // 「已过滤 N 条」disclosure.
+// filterHoverEvents keeps a hover only when the NEXT recorded action clicks
+// or types inside the hovered element's subtree — the menu-open pattern. All
+// other mouseovers are noise (pointer wandering across the page).
+func filterHoverEvents(events []ConsoleRecordEvent) []ConsoleRecordEvent {
+	out := make([]ConsoleRecordEvent, 0, len(events))
+	for i, ev := range events {
+		if ev.Type != "hover" {
+			out = append(out, ev)
+			continue
+		}
+		if i+1 < len(events) {
+			next := events[i+1]
+			if next.Selector != "" && isDescendantSelector(next.Selector, ev.Selector) {
+				out = append(out, ev) // menu opened, item inside it acted on
+			}
+		}
+	}
+	return out
+}
+
+// isDescendantSelector reports whether child plausibly lives inside parent's
+// subtree: exact match, prefix path match, or child carries parent as an
+// ancestor segment ("nav > li" ⊂ "nav").
+func isDescendantSelector(child, parent string) bool {
+	if child == parent || strings.HasPrefix(child, parent+" ") || strings.HasPrefix(child, parent+">") {
+		return true
+	}
+	return strings.HasPrefix(child, parent)
+}
+
 func FilterRecordEvents(events []ConsoleRecordEvent) (kept, dropped []ConsoleRecordEvent) {
 	merged := mergeRecordEffects(events)
+	merged = filterHoverEvents(merged)
 	kept = []ConsoleRecordEvent{}
 	dropped = []ConsoleRecordEvent{}
 

@@ -63,7 +63,7 @@ export function TrustDomainPanel() {
           <strong>{t("trustdomain.domain")}</strong>
           <code title={view.domain ?? ""}>{short(view.domain ?? "", 16)}</code>
           <span className="td-panel__meta">
-            {t("trustdomain.height", { n: view.height })} · quorum {view.quorum} ·{" "}
+            {t("trustdomain.height", { n: view.height })} · {t("trustdomain.quorum", { n: view.quorum ?? 0 })} ·{" "}
             {view.me === "" ? "" : short(view.me ?? "", 8)}
           </span>
         </div>
@@ -73,7 +73,7 @@ export function TrustDomainPanel() {
               {t("trustdomain.resume")}
             </button>
           ) : (
-            <button disabled={busy} className="danger" onClick={() => run(() => app.TrustDomainPause("paused from settings"), t("trustdomain.paused"))}>
+            <button disabled={busy} className="danger" onClick={() => run(() => app.TrustDomainPause(t("trustdomain.pauseReason")), t("trustdomain.paused"))}>
               {t("trustdomain.pause")}
             </button>
           )}

@@ -755,7 +755,7 @@ export function NetDevSection() {
               <span style={{ opacity: 0.6, fontSize: 11 }}>{t("ndv.sets.kindNote")}</span>
             </Field>
             {(editingDevice.kind ?? "") === "docker" && (
-              <Field label="Docker socket">
+              <Field label={t("ndv.sets.fDockerSock")}>
                 <input className="mem-input" placeholder={t("ndv.sets.phDockerSock")}
                   value={editingDevice.dockerSocket ?? ""}
                   onChange={e => setEditingDevice({ ...editingDevice, dockerSocket: e.target.value })} />

@@ -22,6 +22,7 @@ import (
 	cdpbrowser "github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/dom"
+	"github.com/chromedp/cdproto/input"
 	cdprotopage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
 	cdptarget "github.com/chromedp/cdproto/target"
@@ -60,6 +61,11 @@ func BrowserTools() []tool.Tool {
 		browserOpen{},
 		browserAttach{},
 		browserNavigate{},
+		browserTabs{},
+		browserSwitchTab{},
+		browserHover{},
+		browserBack{},
+		browserForward{},
 		browserClick{},
 		browserType{},
 		browserScroll{},
@@ -71,6 +77,7 @@ func BrowserTools() []tool.Tool {
 		browserUploadFile{},
 		browserSetPath{},
 		browserWait{},
+		browserKeepalive{},
 		browserAuto{},
 	}
 }
@@ -93,6 +100,10 @@ type BrowserPanelFrame struct {
 	Text   string `json:"text,omitempty"`
 	URL    string `json:"url,omitempty"`
 	Image  string `json:"image,omitempty"` // data URL (frame only)
+	// SessionID tags every frame with the browser session that produced it,
+	// so the frontend can keep per-session mirrors (the ops viewer shows the
+	// console session AND agent-driven sessions side by side).
+	SessionID string `json:"session_id,omitempty"`
 }
 
 var browserPanelSink func(BrowserPanelFrame)
@@ -191,6 +202,22 @@ type browserSession struct {
 	downloadRecords []downloadRecord
 	// stepTracker tracks action repetition and page stagnation for loop detection.
 	stepTracker *browserStepTracker
+	// tabMu serializes tab switches (auto-follow + browser_switch_tab). The
+	// old tab's context is abandoned, not canceled — chromedp cancel would
+	// CLOSE that target, and the old tab must stay open for switching back.
+	tabMu sync.Mutex
+	// Session keep-alive (会话保活): armed from the ops console toggle or the
+	// browser_keepalive tool. Each tick refreshes lastUsed (beats the idle
+	// reaper) and, per mode, pings the site session from inside the page or
+	// reloads it — long-interval ops tasks keep their login.
+	keepMu       sync.Mutex
+	keepOn       bool
+	keepMode     string // ping|navigate|local
+	keepURL      string
+	keepInterval time.Duration
+	keepLast     int64  // unix millis of the last successful refresh
+	keepErr      string // last refresh failure ("" = ok)
+	keepStop     chan struct{}
 }
 
 // downloadRecord is one completed (or failed) file download in a session.
@@ -527,7 +554,17 @@ func closeBrowserSession(id string) {
 	}
 	delete(browserSessions, id)
 	browserMu.Unlock()
-	EmitBrowserPanel(BrowserPanelFrame{Kind: "status", Source: "tool", Phase: "end"})
+	EmitBrowserPanel(BrowserPanelFrame{Kind: "status", Source: "tool", Phase: "end", SessionID: s.id})
+	// Disarm keep-alive before tearing the tab down so the loop observes the
+	// stop signal deterministically (it also watches ctx.Done as a backstop).
+	s.keepMu.Lock()
+	stop := s.keepStop
+	s.keepStop = nil
+	s.keepOn = false
+	s.keepMu.Unlock()
+	if stop != nil {
+		close(stop)
+	}
 	// Cancelling the tab context closes the CDP target; the allocator stays up.
 	if s.ctxCancel != nil {
 		s.ctxCancel()
@@ -606,7 +643,7 @@ func newBrowserSession() (*browserSession, error) {
 	startDownloadsHandler(s)
 	// Phase 6: Start WebSocket keepalive.
 	startSessionKeepalive(s)
-	EmitBrowserPanel(BrowserPanelFrame{Kind: "status", Source: "tool", Phase: "start", Text: s.browser})
+	EmitBrowserPanel(BrowserPanelFrame{Kind: "status", Source: "tool", Phase: "start", Text: s.browser, SessionID: s.id})
 	return s, nil
 }
 
@@ -667,7 +704,7 @@ func newAttachedSession(cdpURL string) (*browserSession, error) {
 	startDialogHandler(s)
 	startDownloadsHandler(s)
 	startSessionKeepalive(s)
-	EmitBrowserPanel(BrowserPanelFrame{Kind: "status", Source: "tool", Phase: "start", Text: s.browser})
+	EmitBrowserPanel(BrowserPanelFrame{Kind: "status", Source: "tool", Phase: "start", Text: s.browser, SessionID: s.id})
 	return s, nil
 }
 
@@ -757,10 +794,11 @@ func mirrorAfterAction(s *browserSession) {
 		return
 	}
 	EmitBrowserPanel(BrowserPanelFrame{
-		Kind:   "frame",
-		Source: "tool",
-		URL:    url,
-		Image:  "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf),
+		Kind:      "frame",
+		Source:    "tool",
+		URL:       url,
+		Image:     "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf),
+		SessionID: s.id,
 	})
 }
 
@@ -958,6 +996,7 @@ func (browserOpen) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", err
 	}
 	if strings.TrimSpace(p.URL) != "" {
+		p.URL = normalizeNavURL(p.URL)
 		if err := runBrowserAction(ctx, s, chromedp.Navigate(p.URL)); err != nil {
 			closeBrowserSession(s.id)
 			return "", fmt.Errorf("navigate to %s: %w", p.URL, err)
@@ -1077,6 +1116,27 @@ func (browserNavigate) Schema() json.RawMessage {
 
 func (browserNavigate) ReadOnly() bool { return false }
 
+// normalizeNavURL makes scheme-less input navigable: "example.com" →
+// "https://example.com" (the sensible modern default). Scheme-ful URLs and
+// scheme-less pseudo targets (about:, data:, file:, chrome:, …) pass through.
+// Without this, CDP rejects bare domains with the raw English
+// "Cannot navigate to invalid URL (-32000)".
+func normalizeNavURL(u string) string {
+	t := strings.TrimSpace(u)
+	if t == "" {
+		return u
+	}
+	low := strings.ToLower(t)
+	if strings.Contains(low, "://") ||
+		strings.HasPrefix(low, "about:") || strings.HasPrefix(low, "data:") ||
+		strings.HasPrefix(low, "javascript:") || strings.HasPrefix(low, "file:") ||
+		strings.HasPrefix(low, "chrome:") || strings.HasPrefix(low, "edge:") ||
+		strings.HasPrefix(low, "devtools:") {
+		return t
+	}
+	return "https://" + t
+}
+
 func (browserNavigate) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		SessionID string `json:"session_id"`
@@ -1088,6 +1148,7 @@ func (browserNavigate) Execute(ctx context.Context, args json.RawMessage) (strin
 	if p.SessionID == "" || p.URL == "" {
 		return "", errors.New("session_id and url are required")
 	}
+	p.URL = normalizeNavURL(p.URL)
 	s, err := ensureSession(p.SessionID)
 	if err != nil {
 		return "", err
@@ -1252,14 +1313,18 @@ func (browserClick) Execute(ctx context.Context, args json.RawMessage) (string, 
 		// now, surface the new tab + its URL so the agent knows the click had
 		// a side effect and can navigate to it explicitly if needed.
 		if newTabs := newPageTargetsSince(s, tabsBefore); len(newTabs) > 0 {
-			for _, t := range newTabs {
-				label := t.Title
-				if label == "" {
-					label = "(untitled)"
+			// Follow the tab the click opened — a human follows the popup;
+			// staying on the opener tab made every later action land on the
+			// wrong page. The old tab stays open (browser_switch_tab goes back).
+			followed := newTabs[len(newTabs)-1]
+			if swerr := switchSessionTab(s, followed.TargetID); swerr == nil {
+				baseResult += fmt.Sprintf("\n🆕 Followed the new tab opened by the click: %s — the session now drives it (browser_switch_tab switches back)", truncate(firstNonEmptyStr(followed.Title, followed.URL), 80))
+			} else {
+				for _, t := range newTabs {
+					baseResult += fmt.Sprintf("\n🔗 Click opened a new tab: %s — %s (follow failed: %v; use browser_switch_tab)", truncate(t.Title, 50), truncate(t.URL, 80), swerr)
 				}
-				baseResult += fmt.Sprintf("\n🔗 Click opened a new tab: %s — %s. The session is still on the original tab; navigate there explicitly if you need it.", truncate(label, 50), truncate(t.URL, 80))
 			}
-			s.refs.Store(nil)
+
 		} else if isRef && refLooksLikeSubmit(ctx, s, sel) {
 			// No navigation, no new tab, but the clicked element looks like a
 			// form submit button (type=submit, or inside a <form>, or has a
@@ -1635,6 +1700,303 @@ func (browserScroll) Execute(ctx context.Context, args json.RawMessage) (string,
 	return wrapResult(s, "scroll", dir, fmt.Sprintf("scrolled %s %dpx", dir, amt)), nil
 }
 
+// browserTabs lists the browser's open tabs — the multi-tab companion to the
+// click auto-follow: when a click opens a new tab the session follows it, and
+// this tool shows where you are and what else is open.
+type browserTabs struct{}
+
+func (browserTabs) Name() string { return "browser_tabs" }
+
+func (browserTabs) Description() string {
+	return "List the open tabs of the session's browser with index, title and URL, marking the tab the session currently drives. Clicks that open a new tab (target=_blank) are auto-followed — use this to orient after one, and browser_switch_tab to move between tabs."
+}
+
+func (browserTabs) Schema() json.RawMessage {
+	return json.RawMessage(`{
+"type":"object",
+"properties":{
+  "session_id":{"type":"string","description":"Browser session id from browser_open"}
+},
+"required":["session_id"]
+}`)
+}
+
+func (browserTabs) ReadOnly() bool { return true }
+
+func (browserTabs) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var p struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return "", fmt.Errorf("invalid args: %w", err)
+	}
+	s, err := ensureSession(p.SessionID)
+	if err != nil {
+		return "", err
+	}
+	tabs, err := pageTargetInfos(s)
+	if err != nil {
+		return "", fmt.Errorf("list tabs: %w", err)
+	}
+	cur := sessionTargetID(s)
+	var b strings.Builder
+	for i, t := range tabs {
+		mark := "      "
+		if t.TargetID == cur {
+			mark = "[当前] "
+		}
+		fmt.Fprintf(&b, "%s%d. %s — %s\n", mark, i+1, truncate(firstNonEmptyStr(t.Title, "(untitled)"), 50), truncate(t.URL, 90))
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
+}
+
+// browserSwitchTab moves the session onto another open tab (1-based index
+// from browser_tabs). The current tab stays open — switch back anytime.
+type browserSwitchTab struct{}
+
+func (browserSwitchTab) Name() string { return "browser_switch_tab" }
+
+func (browserSwitchTab) Description() string {
+	return "Switch the session to another open tab by its 1-based index from browser_tabs (or an explicit target id). The current tab stays open — you can switch back. Use after a click auto-followed a new tab, or to move between pages of a multi-tab workflow."
+}
+
+func (browserSwitchTab) Schema() json.RawMessage {
+	return json.RawMessage(`{
+"type":"object",
+"properties":{
+  "session_id":{"type":"string","description":"Browser session id from browser_open"},
+  "index":{"type":"integer","description":"1-based tab index from browser_tabs"},
+  "target":{"type":"string","description":"Explicit target id (alternative to index)"}
+},
+"required":["session_id"]
+}`)
+}
+
+func (browserSwitchTab) ReadOnly() bool { return false }
+
+func (browserSwitchTab) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var p struct {
+		SessionID string `json:"session_id"`
+		Index     int    `json:"index"`
+		Target    string `json:"target"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return "", fmt.Errorf("invalid args: %w", err)
+	}
+	if p.SessionID == "" {
+		return "", errors.New("session_id is required")
+	}
+	s, err := ensureSession(p.SessionID)
+	if err != nil {
+		return "", err
+	}
+	tabs, err := pageTargetInfos(s)
+	if err != nil {
+		return "", fmt.Errorf("list tabs: %w", err)
+	}
+	var pick *cdptarget.Info
+	switch {
+	case p.Target != "":
+		for _, t := range tabs {
+			if string(t.TargetID) == p.Target {
+				pick = t
+				break
+			}
+		}
+	case p.Index >= 1 && p.Index <= len(tabs):
+		pick = tabs[p.Index-1]
+	default:
+		return "", fmt.Errorf("index %d out of range — browser_tabs lists 1..%d", p.Index, len(tabs))
+	}
+	if pick == nil {
+		return "", fmt.Errorf("tab %q not found — run browser_tabs for the current list", firstNonEmptyStr(p.Target, fmt.Sprintf("%d", p.Index)))
+	}
+	if pick.TargetID == sessionTargetID(s) {
+		return "already on tab: " + truncate(firstNonEmptyStr(pick.Title, pick.URL), 80), nil
+	}
+	if err := switchSessionTab(s, pick.TargetID); err != nil {
+		return "", err
+	}
+	return "switched to tab: " + truncate(firstNonEmptyStr(pick.Title, pick.URL), 80), nil
+}
+
+// pageTargetInfos lists the browser's page-type targets in stable order.
+func pageTargetInfos(s *browserSession) ([]*cdptarget.Info, error) {
+	infos, err := chromedp.Targets(s.ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := []*cdptarget.Info{}
+	for _, t := range infos {
+		if t.Type == "page" {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+// browserHover — menu-open hover via a REAL mousemove to the element's
+// center: synthetic JS mouseover does NOT trigger CSS :hover (pseudo-classes
+// only apply to trusted pointer input), so coordinate dispatch is required
+// for the hover-menus pattern (hover → submenu → click).
+type browserHover struct{}
+
+func (browserHover) Name() string { return "browser_hover" }
+
+func (browserHover) Description() string {
+	return "Hover the pointer over an element (a real mousemove to its center — triggers CSS :hover, unlike synthetic events). Use BEFORE clicking items in hover-opened menus/dropdowns: hover the menu entry first, then click the revealed item."
+}
+
+func (browserHover) Schema() json.RawMessage {
+	return json.RawMessage(`{
+"type":"object",
+"properties":{
+  "session_id":{"type":"string","description":"Browser session id from browser_open"},
+  "target":{"type":"string","description":"Snapshot ref (e.g. e5) or CSS selector of the element to hover"}
+},
+"required":["session_id","target"]
+}`)
+}
+
+func (browserHover) ReadOnly() bool { return false }
+
+func (browserHover) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var p struct {
+		SessionID string          `json:"session_id"`
+		Target    json.RawMessage `json:"target"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return "", fmt.Errorf("invalid args: %w", err)
+	}
+	if p.SessionID == "" {
+		return "", errors.New("session_id is required")
+	}
+	s, err := ensureSession(p.SessionID)
+	if err != nil {
+		return "", err
+	}
+	x, y, err := hoverPointForTarget(ctx, s, p.Target)
+	if err != nil {
+		return "", wrapError(s, "hover", string(p.Target), err)
+	}
+	if err := runBrowserAction(ctx, s, chromedp.MouseEvent(input.MouseMoved, x, y)); err != nil {
+		return "", wrapError(s, "hover", fmt.Sprintf("%.0f,%.0f", x, y), fmt.Errorf("hover: %w", err))
+	}
+	return fmt.Sprintf("hovered (%.0f, %.0f) — CSS :hover applied; menus depending on it should now be open", x, y), nil
+}
+
+// hoverPointForTarget resolves a ref/selector target to viewport coordinates.
+func hoverPointForTarget(ctx context.Context, s *browserSession, raw json.RawMessage) (float64, float64, error) {
+	sel, _, _, _, isRef, err := selectorFromArgs(raw)
+	if err != nil {
+		return 0, 0, err
+	}
+	if isRef {
+		out, cerr := callOnRef(ctx, s, sel, `JSON.stringify((function(){var r=this.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};})())`)
+		if cerr != nil {
+			return 0, 0, fmt.Errorf("hover ref %q: %w", sel, cerr)
+		}
+		return parseXYJSON(out)
+	}
+	expr := fmt.Sprintf(`(function(){var el=document.querySelector(%q);if(!el)return "";var r=el.getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()`, sel)
+	var out string
+	if rerr := runBrowserAction(ctx, s, chromedp.Evaluate(expr, &out)); rerr != nil {
+		return 0, 0, fmt.Errorf("hover %q: %w", sel, rerr)
+	}
+	return parseXYJSON(out)
+}
+
+func parseXYJSON(out string) (float64, float64, error) {
+	var pt struct {
+		X float64 `json:"x"`
+		Y float64 `json:"y"`
+	}
+	if jerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &pt); jerr != nil || (pt.X == 0 && pt.Y == 0) {
+		return 0, 0, fmt.Errorf("element not found or has no box")
+	}
+	return pt.X, pt.Y, nil
+}
+
+// browserBack / browserForward — history navigation, the primitives the
+// step vocabulary was missing: replaying a "look at A, peek at B, back to A"
+// flow should ride the history stack (state preserved) rather than
+// re-navigating by URL (full reload).
+type browserBack struct{}
+
+func (browserBack) Name() string { return "browser_back" }
+
+func (browserBack) Description() string {
+	return "Go back one entry in the browser session's history (the browser's back button). Prefer over re-navigating by URL when returning to the previous page — it's faster and preserves page state. No previous entry: the page stays unchanged (not an error)."
+}
+
+func (browserBack) Schema() json.RawMessage {
+	return json.RawMessage(`{
+"type":"object",
+"properties":{
+  "session_id":{"type":"string","description":"Browser session id from browser_open"}
+},
+"required":["session_id"]
+}`)
+}
+
+func (browserBack) ReadOnly() bool { return false }
+
+func (browserBack) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	return execHistoryNav(ctx, args, chromedp.NavigateBack(), "back")
+}
+
+type browserForward struct{}
+
+func (browserForward) Name() string { return "browser_forward" }
+
+func (browserForward) Description() string {
+	return "Go forward one entry in the browser session's history (the browser's forward button); the counterpart of browser_back after navigating back. No forward entry: the page stays unchanged (not an error)."
+}
+
+func (browserForward) Schema() json.RawMessage {
+	return json.RawMessage(`{
+"type":"object",
+"properties":{
+  "session_id":{"type":"string","description":"Browser session id from browser_open"}
+},
+"required":["session_id"]
+}`)
+}
+
+func (browserForward) ReadOnly() bool { return false }
+
+func (browserForward) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	return execHistoryNav(ctx, args, chromedp.NavigateForward(), "forward")
+}
+
+// execHistoryNav is the shared back/forward body: run the history action,
+// then report where the session landed.
+func execHistoryNav(ctx context.Context, args json.RawMessage, act chromedp.Action, dir string) (string, error) {
+	var p struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return "", fmt.Errorf("invalid args: %w", err)
+	}
+	if p.SessionID == "" {
+		return "", errors.New("session_id is required")
+	}
+	s, err := ensureSession(p.SessionID)
+	if err != nil {
+		return "", err
+	}
+	if err := runBrowserAction(ctx, s, act, chromedp.WaitReady("body")); err != nil {
+		return "", wrapError(s, "history-"+dir, "", fmt.Errorf("%s: %w", dir, err))
+	}
+	var url string
+	_ = runBrowserAction(ctx, s, chromedp.Location(&url))
+	out := fmt.Sprintf("went %s → %s", dir, url)
+	if summary := autoPageSummary(s); summary != "" {
+		out += "\n" + summary
+	}
+	return out, nil
+}
+
 // browserExtract
 type browserExtract struct{}
 
@@ -1644,7 +2006,9 @@ func (browserExtract) Description() string {
 	return "Extract text content from an OPEN browser session (the page currently loaded in the browser). " +
 		"Use this when the agent is already operating the browser and needs the visible text of the page or a part of it. " +
 		"Do NOT use this to read a URL you haven't navigated to — use web_fetch for arbitrary URLs. " +
-		"With no selector, returns the visible text of the whole page; with a selector, returns that element's text. Output is capped at 200k chars — narrow with a selector or scroll+extract in chunks for long pages."
+		"With no selector, returns the visible text of the whole page; with a selector, returns that element's text. " +
+		"format=\"table\" renders every <table> under the selector (or the page) as markdown tables — use it for log grids, " +
+		"result tables and anything with rows/columns so structure survives extraction. Output is capped at 200k chars — narrow with a selector or scroll+extract in chunks for long pages."
 }
 
 func (browserExtract) Schema() json.RawMessage {
@@ -1652,7 +2016,8 @@ func (browserExtract) Schema() json.RawMessage {
 "type":"object",
 "properties":{
   "session_id":{"type":"string","description":"Browser session id from browser_open"},
-  "selector":{"type":"string","description":"Optional CSS selector to extract from a specific element. Omit for the whole page body."}
+  "selector":{"type":"string","description":"Optional CSS selector to extract from a specific element. Omit for the whole page body."},
+  "format":{"type":"string","enum":["text","table"],"description":"text (default) = visible text; table = every <table> under the selector rendered as markdown (rows/columns preserved)"}
 },
 "required":["session_id"]
 }`)
@@ -1660,10 +2025,44 @@ func (browserExtract) Schema() json.RawMessage {
 
 func (browserExtract) ReadOnly() bool { return true }
 
+// extractTablesJS renders the tables under one root as markdown. The selector
+// is injected as a JSON string (SEL placeholder) — quote-safe by construction.
+const extractTablesJS = `(function(){
+  var root;
+  try { root = SEL ? (document.querySelector(SEL) || document) : document; } catch (e) { root = document; }
+  var tables = root.querySelectorAll('table');
+  if (!tables.length) { return '(no <table> found under ' + (SEL || 'page') + ')'; }
+  var out = [];
+  for (var t = 0; t < tables.length && t < 10; t++) {
+    var rows = tables[t].rows;
+    if (!rows || !rows.length) { continue; }
+    var lines = [];
+    var headerDone = false;
+    for (var i = 0; i < rows.length && lines.length < 200; i++) {
+      var cells = [];
+      for (var c = 0; c < rows[i].cells.length; c++) {
+        var v = String(rows[i].cells[c].innerText || '').replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim();
+        cells.push(v.slice(0, 200));
+      }
+      if (!cells.length) { continue; }
+      lines.push('| ' + cells.join(' | ') + ' |');
+      if (!headerDone) {
+        lines.push('|' + cells.map(function () { return '---'; }).join('|') + '|');
+        headerDone = true;
+      }
+    }
+    if (lines.length) {
+      out.push('### table ' + (t + 1) + ' (' + rows.length + ' rows)\n\n' + lines.join('\n'));
+    }
+  }
+  return out.length ? out.join('\n\n') : '(tables found but empty)';
+})()`
+
 func (browserExtract) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		SessionID string `json:"session_id"`
 		Selector  string `json:"selector"`
+		Format    string `json:"format"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -1677,7 +2076,14 @@ func (browserExtract) Execute(ctx context.Context, args json.RawMessage) (string
 	}
 	sel := strings.TrimSpace(p.Selector)
 	var text string
-	if sel != "" {
+	if strings.EqualFold(strings.TrimSpace(p.Format), "table") {
+		// Table mode: structure-preserving markdown for log grids / result
+		// tables — plain-text extraction flattens columns into noise.
+		expr := strings.Replace(extractTablesJS, "SEL", fmt.Sprintf("%q", sel), 2)
+		if err := runBrowserAction(ctx, s, chromedp.Evaluate(expr, &text)); err != nil {
+			return "", fmt.Errorf("extract tables %q: %w", sel, err)
+		}
+	} else if sel != "" {
 		if err := runBrowserAction(ctx, s, chromedp.Text(sel, &text, chromedp.NodeVisible)); err != nil {
 			return "", fmt.Errorf("extract %q: %w", sel, err)
 		}
@@ -2308,7 +2714,7 @@ type browserWait struct{}
 func (browserWait) Name() string { return "browser_wait" }
 
 func (browserWait) Description() string {
-	return "Wait for a condition before proceeding. Use after navigate or click to ensure the page is ready. Conditions: 'load' (page fully loaded), 'networkidle' (no network requests for 500ms), 'visible:<selector>' (element appears), 'hidden:<selector>' (element disappears), 'title:<text>' (page title contains text). Essential for SPAs and dynamic pages."
+	return "Wait for a condition before proceeding. Use after navigate or click to ensure the page is ready. Conditions: 'load' (page fully loaded), 'networkidle' (no network requests for 500ms), 'visible:<selector>' (element appears), 'hidden:<selector>' (element disappears), 'title:<text>' (page title contains text), 'url:<text>' (page URL contains text, e.g. post-login redirect), 'stable:<selector>' (element's content stops changing for 2s — detects the end of streaming/AI responses). Essential for SPAs and dynamic pages."
 }
 
 func (browserWait) Schema() json.RawMessage {
@@ -2316,7 +2722,7 @@ func (browserWait) Schema() json.RawMessage {
 "type":"object",
 "properties":{
   "session_id":{"type":"string","description":"Session id from browser_open"},
-  "condition":{"type":"string","description":"Wait condition: 'load', 'networkidle', 'visible:<selector>', 'hidden:<selector>', 'title:<text>'"},
+  "condition":{"type":"string","description":"Wait condition: 'load', 'networkidle', 'visible:<selector>', 'hidden:<selector>', 'title:<text>', 'url:<text>', 'stable:<selector>'"},
   "timeout":{"type":"integer","description":"Timeout in seconds (default 15)"}
 },
 "required":["session_id","condition"]
@@ -2395,8 +2801,46 @@ func (browserWait) Execute(ctx context.Context, args json.RawMessage) (string, e
 				setTimeout(() => { clearInterval(poll); resolve(false); }, `+fmt.Sprintf("%d", int(timeout.Milliseconds()))+`);
 			})`, nil))
 
+	case strings.HasPrefix(cond, "url:"):
+		// Poll location.href for a substring — the post-login/redirect signal
+		// human-breakpoint skills wait on. A page object isn't required, so
+		// poll via the executor's target without runBrowserAction's frame push.
+		urlText := strings.TrimSpace(strings.TrimPrefix(cond, "url:"))
+		actx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		err = chromedp.Run(actx, chromedp.Evaluate(
+			`new Promise(resolve => {
+				const needle = `+fmt.Sprintf("%q", urlText)+`;
+				const check = () => location.href.includes(needle);
+				if (check()) return resolve(true);
+				const poll = setInterval(() => { if (check()) { clearInterval(poll); resolve(true); } }, 200);
+				setTimeout(() => { clearInterval(poll); resolve(false); }, `+fmt.Sprintf("%d", int(timeout.Milliseconds()))+`);
+			})`, nil))
+
+	case strings.HasPrefix(cond, "stable:"):
+		// Streaming-completion detector: watch the element's content signature
+		// (text length + child count) and resolve once it stops changing for
+		// 2s — the classic "AI/streaming response finished rendering" signal.
+		stableSel := strings.TrimSpace(strings.TrimPrefix(cond, "stable:"))
+		err = runBrowserAction(ctx, s, chromedp.Evaluate(
+			`new Promise(resolve => {
+				const sel = `+fmt.Sprintf("%q", stableSel)+`;
+				const sig = () => {
+					const el = document.querySelector(sel);
+					if (!el) return 'none';
+					return el.textContent.length + ':' + el.children.length;
+				};
+				let last = sig(), lastAt = Date.now();
+				const poll = setInterval(() => {
+					const cur = sig();
+					if (cur !== last) { last = cur; lastAt = Date.now(); }
+					if (Date.now() - lastAt >= 2000) { clearInterval(poll); resolve(true); }
+				}, 300);
+				setTimeout(() => { clearInterval(poll); resolve(false); }, `+fmt.Sprintf("%d", int(timeout.Milliseconds()))+`);
+			})`, nil))
+
 	default:
-		return "", fmt.Errorf("unknown condition %q; use 'load', 'networkidle', 'visible:<sel>', 'hidden:<sel>', or 'title:<text>'", cond)
+		return "", fmt.Errorf("unknown condition %q; use 'load', 'networkidle', 'visible:<sel>', 'hidden:<sel>', 'title:<text>', 'url:<text>', or 'stable:<sel>'", cond)
 	}
 
 	if err != nil {
@@ -2587,6 +3031,242 @@ func startSessionKeepalive(s *browserSession) {
 	}()
 }
 
+// --- session keep-alive (会话保活) ---------------------------------------------------
+//
+// Long-interval tasks (log in now, next instruction hours later) die twice
+// without help: the idle reaper closes the session after browserIdleTimeout,
+// and the site's own session cookie/contract expires with no traffic. Arming
+// keep-alive beats both — every tick refreshes lastUsed, then per mode:
+//
+//   - ping:     same-origin credentials fetch INSIDE the page (slides the
+//     site's cookie/server session without disturbing the page)
+//   - navigate: reload the keep URL (or current page) — the heavy option for
+//     sites that only renew sessions on full page loads
+//   - local:    reaper-side only, for pages where any traffic is unwanted
+//
+// Armed from the ops console's toggle (ConsoleSetKeepAlive) and from the
+// agent side via the browser_keepalive tool — the chat-driven 值守循环
+// honors the user's keep-alive choice without leaving the conversation.
+
+// kaPingJS is evaluated in the page each ping tick. The fetch is fire-and-
+// forget with its outcome parked on window.__fpKA — chromedp.Evaluate can't
+// await promises portably, so the NEXT tick reads the previous result.
+const kaPingJS = `(function(){
+  try {
+    var target = (window.__fpKAURL || location.href);
+    window.__fpKA = 'pending';
+    fetch(target, {credentials: 'include', cache: 'no-store'})
+      .then(function(r){ window.__fpKA = 'http ' + r.status; })
+      .catch(function(e){ window.__fpKA = 'err ' + (e && e.message ? e.message : 'fetch failed'); });
+  } catch (e) { window.__fpKA = 'err ' + (e && e.message ? e.message : 'setup failed'); }
+  return window.__fpKA;
+})()`
+
+// armBrowserKeepAlive arms/disarms one session's keep-alive loop. intervalSec
+// clamps to [60,3600] (default 300); mode "" → "ping". Re-arming while armed
+// swaps settings in place — the loop reads them fresh each tick.
+func armBrowserKeepAlive(s *browserSession, enabled bool, intervalSec int, mode, url string) error {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch mode {
+	case "", "ping", "navigate", "local":
+	default:
+		return fmt.Errorf("unknown keep-alive mode %q (ping|navigate|local)", mode)
+	}
+	if mode == "" {
+		mode = "ping"
+	}
+	s.keepMu.Lock()
+	defer s.keepMu.Unlock()
+	if !enabled {
+		s.keepOn = false
+		s.keepMode = ""
+		s.keepURL = ""
+		stop := s.keepStop
+		s.keepStop = nil
+		if stop != nil {
+			close(stop)
+		}
+		return nil
+	}
+	if intervalSec <= 0 {
+		intervalSec = 300
+	}
+	if intervalSec < 60 {
+		intervalSec = 60
+	}
+	if intervalSec > 3600 {
+		intervalSec = 3600
+	}
+	s.keepOn = true
+	s.keepMode = mode
+	s.keepURL = strings.TrimSpace(url)
+	s.keepInterval = time.Duration(intervalSec) * time.Second
+	s.keepErr = ""
+	if s.keepStop == nil {
+		s.keepStop = make(chan struct{})
+		go sessionKeepaliveLoop(s, s.keepStop)
+	}
+	return nil
+}
+
+// sessionKeepaliveLoop refreshes until disarmed (stop closed) or the session
+// dies (ctx cancelled). First tick fires ~immediately so the panel shows a
+// fresh last-refresh at once.
+func sessionKeepaliveLoop(s *browserSession, stop chan struct{}) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		s.keepMu.Lock()
+		stopped := s.keepStop == nil || s.keepStop != stop
+		mode, url := s.keepMode, s.keepURL
+		s.keepMu.Unlock()
+		if stopped {
+			return
+		}
+		kaErr := sessionKeepaliveTick(s, mode, url)
+		s.keepMu.Lock()
+		if kaErr != nil {
+			s.keepErr = kaErr.Error()
+		} else {
+			s.keepErr = ""
+			s.keepLast = time.Now().UnixMilli()
+		}
+		s.keepMu.Unlock()
+		ticker.Reset(s.currentKeepInterval())
+	}
+}
+
+// currentKeepInterval reads the armed interval (300s floor for safety).
+func (s *browserSession) currentKeepInterval() time.Duration {
+	s.keepMu.Lock()
+	defer s.keepMu.Unlock()
+	if s.keepInterval <= 0 {
+		return 300 * time.Second
+	}
+	return s.keepInterval
+}
+
+// sessionKeepaliveTick performs one refresh cycle. The reaper-side lastUsed
+// refresh happens even when the site-side half fails — a degraded keep-alive
+// still preserves the fairpeer session.
+func sessionKeepaliveTick(s *browserSession, mode, url string) error {
+	if s.ctx.Err() != nil {
+		return errors.New("session closed")
+	}
+	// Always beat the idle reaper for this tick.
+	s.lastUsed.Store(time.Now().Unix())
+	switch mode {
+	case "local":
+		return nil
+	case "navigate":
+		target := url
+		if target == "" {
+			ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+			_ = chromedp.Run(ctx, chromedp.Location(&target))
+			cancel()
+		}
+		if target == "" {
+			return errors.New("keep-alive target URL unresolved")
+		}
+		raw, _ := json.Marshal(map[string]any{"session_id": s.id, "url": target})
+		ctx, cancel := context.WithTimeout(s.ctx, browserActionTimeout)
+		defer cancel()
+		if _, nerr := (browserNavigate{}).Execute(ctx, raw); nerr != nil {
+			return fmt.Errorf("reload page: %w", nerr)
+		}
+		return nil
+	default: // ping
+		ctx, cancel := context.WithTimeout(s.ctx, browserActionTimeout)
+		defer cancel()
+		var prev string
+		// Read the previous tick's fetch outcome for reporting, then fire the
+		// next heartbeat (result lands next tick via window.__fpKA).
+		_ = chromedp.Run(ctx,
+			chromedp.Evaluate(`window.__fpKAURL = `+fmt.Sprintf("%q", url)+`; void 0;`, nil),
+			chromedp.Evaluate(`(window.__fpKA === undefined) ? "first" : String(window.__fpKA)`, &prev),
+			chromedp.Evaluate(kaPingJS, nil),
+		)
+		if strings.HasPrefix(prev, "err") {
+			return fmt.Errorf("page heartbeat: %s", prev)
+		}
+		if prev == "http 401" || prev == "http 403" {
+			// The heartbeat reached the site but was rejected — the site-side
+			// session is likely gone; surface it instead of pretending alive.
+			return fmt.Errorf("page heartbeat got %s — site session may have expired", prev)
+		}
+		return nil
+	}
+}
+
+// browserKeepalive arms or disarms a session's keep-alive — the chat-driven
+// flow's answer to "下一轮可能几个小时后才来，别让会话掉".
+type browserKeepalive struct{}
+
+func (browserKeepalive) Name() string { return "browser_keepalive" }
+
+func (browserKeepalive) Description() string {
+	return "Arm or disarm keep-alive for a browser session, for long-idle workflows (log in now, next instruction much later). While armed, the session survives idle reaping and the site's session is refreshed: mode 'ping' sends a same-origin credentials fetch inside the page (default, does not disturb the page), 'navigate' reloads the keep URL (or current page), 'local' only prevents local idle reaping. interval_sec clamps to 60..3600 (default 300)."
+}
+
+func (browserKeepalive) Schema() json.RawMessage {
+	return json.RawMessage(`{
+"type":"object",
+"properties":{
+  "session_id":{"type":"string","description":"Session id from browser_open"},
+  "enabled":{"type":"boolean","description":"true to arm, false to disarm"},
+  "interval_sec":{"type":"integer","description":"Refresh interval in seconds (60..3600, default 300)"},
+  "mode":{"type":"string","enum":["ping","navigate","local"],"description":"ping = in-page heartbeat fetch (default); navigate = periodic reload; local = only prevent idle reaping"},
+  "url":{"type":"string","description":"navigate mode target (empty = current page)"}
+},
+"required":["session_id","enabled"]
+}`)
+}
+
+func (browserKeepalive) ReadOnly() bool { return false } // navigate mode reloads the page
+
+func (browserKeepalive) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var p struct {
+		SessionID   string `json:"session_id"`
+		Enabled     bool   `json:"enabled"`
+		IntervalSec int    `json:"interval_sec"`
+		Mode        string `json:"mode"`
+		URL         string `json:"url"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return "", fmt.Errorf("invalid args: %w", err)
+	}
+	if p.SessionID == "" {
+		return "", errors.New("session_id is required")
+	}
+	s, err := ensureSession(p.SessionID)
+	if err != nil {
+		return "", err
+	}
+	if err := armBrowserKeepAlive(s, p.Enabled, p.IntervalSec, p.Mode, p.URL); err != nil {
+		return "", err
+	}
+	s.keepMu.Lock()
+	on, mode, last, kaErr := s.keepOn, s.keepMode, s.keepLast, s.keepErr
+	s.keepMu.Unlock()
+	if !on {
+		return "keep-alive off", nil
+	}
+	status := fmt.Sprintf("keep-alive on (mode=%s, interval=%s)", mode, s.currentKeepInterval())
+	if kaErr != "" {
+		status += "; last refresh error: " + kaErr
+	} else if last > 0 {
+		status += fmt.Sprintf("; last refresh %d ms ago", time.Now().UnixMilli()-last)
+	}
+	return status, nil
+}
+
 // --- Phase 3: auto page summary ---------------------------------------------
 
 // detectCaptchaChallenge runs a lightweight DOM probe looking for well-known
@@ -2775,6 +3455,54 @@ func newPageTargetsSince(s *browserSession, before map[cdptarget.ID]bool) []*cdp
 		}
 	}
 	return newTabs
+}
+
+// switchSessionTab re-points a session onto an existing tab. Attaching a
+// sibling chromedp context via WithTargetID needs only the Browser the
+// session already carries (the old "needs the allocator" concern was
+// overcautious). The previous tab stays open — its context is abandoned,
+// since canceling a chromedp tab context would close the target.
+func firstNonEmptyStr(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func switchSessionTab(s *browserSession, id cdptarget.ID) error {
+	s.tabMu.Lock()
+	defer s.tabMu.Unlock()
+	c := chromedp.FromContext(s.ctx)
+	if c == nil || c.Browser == nil {
+		return errors.New("session browser not connected")
+	}
+	newCtx, cancel := chromedp.NewContext(s.ctx, chromedp.WithTargetID(id))
+	boot := make(chan error, 1)
+	go func() { boot <- chromedp.Run(newCtx) }()
+	select {
+	case err := <-boot:
+		if err != nil {
+			cancel()
+			return fmt.Errorf("attach tab %s: %w", id, err)
+		}
+	case <-time.After(15 * time.Second):
+		cancel()
+		return fmt.Errorf("attach tab %s: timed out", id)
+	}
+	s.ctx = newCtx
+	s.ctxCancel = cancel
+	s.refs.Store(nil) // refs belonged to the abandoned page
+	return nil
+}
+
+// sessionTargetID reports the target (tab) the session currently drives.
+func sessionTargetID(s *browserSession) cdptarget.ID {
+	if c := chromedp.FromContext(s.ctx); c != nil && c.Target != nil {
+		return c.Target.TargetID
+	}
+	return ""
 }
 
 // waitForPageLoad waits for a page to finish loading after a click that

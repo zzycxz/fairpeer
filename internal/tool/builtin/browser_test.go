@@ -13,10 +13,12 @@ func TestBrowserToolsRoster(t *testing.T) {
 	tools := BrowserTools()
 	want := map[string]bool{
 		"browser_open": true, "browser_attach": true, "browser_navigate": true,
+		"browser_tabs": true, "browser_switch_tab": true, "browser_hover": true,
+		"browser_back": true, "browser_forward": true,
 		"browser_click": true, "browser_type": true, "browser_scroll": true,
 		"browser_extract": true, "browser_screenshot": true, "browser_evaluate": true,
 		"browser_snapshot": true, "browser_select_option": true, "browser_upload_file": true,
-		"browser_set_path": true, "browser_wait": true,
+		"browser_set_path": true, "browser_wait": true, "browser_keepalive": true,
 		"browser_auto": true,
 	}
 	if len(tools) != len(want) {
@@ -42,7 +44,7 @@ func TestBrowserToolsRoster(t *testing.T) {
 // would change batching behavior, so lock it in.
 func TestBrowserToolsReadOnlyClassification(t *testing.T) {
 	readOnly := map[string]bool{
-		"browser_extract": true, "browser_screenshot": true, "browser_snapshot": true,
+		"browser_extract": true, "browser_screenshot": true, "browser_snapshot": true, "browser_tabs": true,
 	}
 	for _, tl := range BrowserTools() {
 		got := tl.ReadOnly()

@@ -25,6 +25,38 @@
   display: block;
 }
 
+/* Narrow-window mode (tools.css @media ≤820px) zeroes --sidebar-width for the
+   coding view, but the 运维 rail was never adapted: the 0px track clipped the
+   rail to a padding sliver with no restore path (the chrome's expand toggle
+   only renders when the React collapsed state is set, which a media query
+   never sets). The 运维 shell keeps its rail at every width down to the
+   window's MinWidth — re-assert the width var scoped to netdev. Double-class
+   selectors so this beats the media rule by specificity, not bundle order;
+   the explicit collapsed state is re-handled one notch higher so the
+   brand-row toggle still collapses the rail. */
+.app.app--netdev {
+  --sidebar-width: var(--sidebar-expanded-width, clamp(200px, 14vw, 480px));
+}
+
+.app.app--netdev.app--sidebar-collapsed {
+  --sidebar-width: 0px;
+}
+
+/* The narrow-mode block also stretches the global bottom bar full-width
+   (`.app .global-bottom-bar { width: 100% }`); under netdev it must keep
+   covering just the rail column, collapsed state included. The same block's
+   `.layout { padding-bottom }` reserve is equally coding-view-only — the rail
+   reserves its own bottom strip, so netdev goes flush to the window bottom
+   like it does above the breakpoint. */
+.app.app--netdev .global-bottom-bar {
+  width: var(--sidebar-width, 0px);
+  border-right: 1px solid var(--border-soft);
+}
+
+.app--netdev .layout {
+  padding-bottom: 0;
+}
+
 /* The layout is a grid ITEM inside the app's outer grid, exactly like
    .cowork-layout: spans rows 1-2 (chrome row + body row) and all columns, so
    the rail rises into the chrome row like the coding .sidebar and the global
@@ -1060,6 +1092,417 @@
   font-size: var(--font-control-small);
   color: var(--fg-dim);
 }
+/* browser workbench (浏览器工作台, center bench like logs/sec/dash) */
+.ndv-wb {
+  /* Same placement as the logs/sec workbenches: a flow child of the center
+     cell (ndv__main), NOT an overlay — absolute inset:0 escaped the cell and
+     covered the sidebar + dock. */
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+.ndv-wb__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.ndv-wb__tabs {
+  flex: 1;
+  min-width: 220px;
+}
+.ndv-wb__tools {
+  display: flex;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+.ndv-wb__hint {
+  font-size: var(--font-control-small);
+  color: var(--fg-faint);
+}
+.ndv-wb__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: var(--space-2);
+}
+.ndv-wb__mirror {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.ndv-wb__mirror img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.ndv-wb__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-control-small);
+  color: var(--fg-faint);
+}
+
+/* viewer launcher (sidebar slim control) + center 观察窗 */
+.ndv-brc__view-launch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-dim);
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.ndv-brc__view-launch:hover {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+.ndv-brc__view-launch-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.ndv-brc__view-launch-n {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-faint);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+.ndv-brc-view__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-local-backdrop);
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+.ndv-brc-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(1100px, 92vw);
+  height: min(760px, 88vh);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+.ndv-brc-view__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.ndv-brc-view__tabs {
+  flex: 1;
+  min-width: 0;
+}
+.ndv-brc-view__tools {
+  display: flex;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+.ndv-brc-view__sources {
+  display: flex;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.ndv-brc-view__frame {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.ndv-brc-view__frame img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.ndv-brc-view__empty {
+  font-size: var(--font-control-small);
+  color: var(--fg-faint);
+}
+/* action-log head (记录为技能) */
+.ndv-brc__log-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-control-small);
+  color: var(--fg-dim);
+  margin-bottom: 2px;
+}
+.ndv-brc__log-head .btn {
+  margin-left: auto;
+}
+
+/* tab strip (多页卡) */
+.ndv-brc__tabs {
+  display: flex;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.ndv-brc__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 160px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-dim);
+  font-size: 11px;
+  cursor: pointer;
+  min-width: 0;
+}
+.ndv-brc__tab:hover:not(:disabled) {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+.ndv-brc__tab--cur {
+  border-color: var(--accent);
+  color: var(--fg);
+  background: var(--accent-soft);
+}
+.ndv-brc__tab:disabled {
+  cursor: default;
+}
+.ndv-brc__tab-n {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-faint);
+  flex-shrink: 0;
+}
+.ndv-brc__tab--cur .ndv-brc__tab-n {
+  color: var(--accent);
+}
+.ndv-brc__tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* keep-alive status line (会话保活) */
+.ndv-brc__ka {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.ndv-brc__ka-clock {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-control-small);
+  color: var(--fg-dim);
+}
+.ndv-brc__ka-pulse {
+  color: var(--ok);
+  animation: ndv-brc-pulse 1.6s ease-in-out infinite;
+}
+.ndv-brc__ka-select {
+  width: auto;
+  min-width: 0;
+  flex: 0 0 auto;
+  font-size: var(--font-control-small);
+}
+.ndv-brc__ka-url {
+  flex: 1;
+  min-width: 100px;
+  font-size: var(--font-control-small);
+}
+.ndv-brc__ka-err {
+  font-size: 11px;
+  color: var(--danger);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ndv-brc__ka-btn--on {
+  color: var(--ok);
+}
+/* skill row delete affordance */
+.ndv-brc__skill-del:hover {
+  color: var(--danger);
+}
+/* template gallery popover (新建技能) */
+.ndv-brc__gallery-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.ndv-brc__gallery {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: var(--z-local-popover);
+  width: 340px;
+  max-width: 90vw;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ndv-brc__gallery-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.ndv-brc__gallery-item:hover {
+  background: var(--bg-elev-2, var(--bg-elev));
+}
+.ndv-brc__gallery-group {
+  display: flex;
+  flex-direction: column;
+}
+.ndv-brc__gallery-cat {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+  padding: var(--space-1) var(--space-2) 2px;
+}
+.ndv-brc__gallery-title {
+  font-size: var(--font-control-small);
+  font-weight: 600;
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.ndv-brc__gallery-form {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--fg-faint);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+.ndv-brc__gallery-desc {
+  font-size: 11px;
+  color: var(--fg-dim);
+  line-height: 1.4;
+}
+.ndv-brc__hint-sub {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--fg-faint);
+  line-height: 1.4;
+}
+/* step palette popover (按类型添加) */
+.ndv-brc-editor__palette-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.ndv-brc-editor__palette {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  z-index: var(--z-local-popover);
+  width: 320px;
+  max-width: 90vw;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.ndv-brc-editor__palette-group {
+  display: flex;
+  flex-direction: column;
+}
+.ndv-brc-editor__palette-cat {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+  padding: var(--space-1) var(--space-2) 2px;
+}
+.ndv-brc-editor__palette-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 4px var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+.ndv-brc-editor__palette-item:hover {
+  background: var(--bg-elev-2, var(--bg-elev));
+}
+.ndv-brc-editor__palette-name {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  flex-shrink: 0;
+  min-width: 64px;
+}
+.ndv-brc-editor__palette-desc {
+  font-size: 11px;
+  color: var(--fg-dim);
+  line-height: 1.35;
+}
+/* ask-step reply input inside the waiting banner */
+.ndv-brc-editor__humanwait-input {
+  width: 200px;
+  flex-shrink: 1;
+  font-size: var(--font-control-small);
+}
+/* prose-skill hint banner above the source textarea */
+.ndv-brc-editor__prose-hint {
+  flex-shrink: 0;
+  margin-bottom: var(--space-2);
+}
 .ndv-brc__error {
   flex-shrink: 0;
 }
@@ -1095,17 +1538,16 @@
   max-height: 180px;
   object-fit: contain;
 }
-.ndv-brc__preview-empty {
-  padding: var(--space-3);
-  font-size: var(--font-control-small);
-  color: var(--fg-faint);
-}
 /* body + sections */
 .ndv-brc__body {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   min-height: 0;
+  /* The scroll container — without this, a long element list pushes content
+     past the card and it overlaps whatever sits below in the dock. */
+  overflow-y: auto;
+  padding-right: 2px;
 }
 .ndv-brc__section {
   display: flex;
@@ -1141,6 +1583,23 @@
   min-width: 0;
 }
 /* element list */
+.ndv-brc__elements-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+.ndv-brc__elements-filter {
+  width: 110px;
+  font-size: 11px;
+  padding: 2px 6px;
+}
+.ndv-brc__elements-count {
+  font-size: 10px;
+  color: var(--fg-faint);
+  font-family: var(--mono);
+  flex-shrink: 0;
+}
 .ndv-brc__elements {
   display: flex;
   flex-direction: column;
@@ -1447,6 +1906,41 @@
 .ndv-brc-editor__trial--done { color: var(--ok); }
 .ndv-brc-editor__trial--failed { color: var(--danger); }
 .ndv-brc-editor__trial--running { color: var(--accent); }
+.ndv-brc-editor__trial--waiting { color: var(--warn, #d29922); }
+/* human-breakpoint banner (等待人工操作) */
+.ndv-brc-editor__humanwait {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--warn, #d29922);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--warn, #d29922) 10%, transparent);
+}
+.ndv-brc-editor__humanwait-icon {
+  color: var(--warn, #d29922);
+  flex-shrink: 0;
+  animation: ndv-brc-pulse 1.6s ease-in-out infinite;
+}
+.ndv-brc-editor__humanwait-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.ndv-brc-editor__humanwait-title {
+  font-size: var(--font-control-small);
+  font-weight: 600;
+  color: var(--fg);
+}
+.ndv-brc-editor__humanwait-prompt {
+  font-size: var(--font-control-small);
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .ndv-brc-editor__step-form {
   display: flex;
   gap: var(--space-1);

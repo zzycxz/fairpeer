@@ -176,9 +176,15 @@ func notifyFindingNow(f *Finding, count int) {
 	}
 	o := outlets()
 
-	text := fmt.Sprintf("[fairpeer 运维] %s（%s，%s）%s\n%s\n回复 /netdev 详情 %s 查看证据；确认收到回 /netdev ack %s", f.Title, f.Severity, strings.Join(f.Devices, "、"), "fairpeer://finding/"+f.ID, detail, f.ID, f.ID)
+	// The project tag leads the title so an off-hours push answers "which
+	// site" first ("" = 未分组 → no tag; the tag is the save-time snapshot).
+	proj := ""
+	if f.Project != "" {
+		proj = "[" + f.Project + "] "
+	}
+	text := fmt.Sprintf("[fairpeer 运维] %s%s（%s，%s）%s\n%s\n回复 /netdev 详情 %s 查看证据；确认收到回 /netdev ack %s", proj, f.Title, f.Severity, strings.Join(f.Devices, "、"), "fairpeer://finding/"+f.ID, detail, f.ID, f.ID)
 	if o.smc != nil {
-		subject := fmt.Sprintf("[fairpeer 运维] %s（%s，%s）", f.Title, f.Severity, strings.Join(f.Devices, "、"))
+		subject := fmt.Sprintf("[fairpeer 运维] %s%s（%s，%s）", proj, f.Title, f.Severity, strings.Join(f.Devices, "、"))
 		go smtpSendText(o.smc, subject, text)
 	}
 	if o.botDst != "" && o.pusher != nil {
@@ -195,7 +201,7 @@ func notifyFindingNow(f *Finding, count int) {
 	case "dingtalk", "wecom":
 		body, err = json.Marshal(map[string]any{"msgtype": "text", "text": map[string]string{"content": text}})
 	default:
-		body, err = json.Marshal(map[string]any{
+		payload := map[string]any{
 			"source":     "fairpeer-netdev",
 			"kind":       "finding",
 			"id":         f.ID,
@@ -206,7 +212,11 @@ func notifyFindingNow(f *Finding, count int) {
 			"agg_count":  count,
 			"deep_link":  "fairpeer://finding/" + f.ID,
 			"created_at": f.CreatedAt.Format(time.RFC3339),
-		})
+		}
+		if f.Project != "" {
+			payload["project"] = f.Project
+		}
+		body, err = json.Marshal(payload)
 	}
 	if err != nil {
 		return

@@ -68,6 +68,22 @@ func NewRunSkillToolWithIndex(store, allStore *Store, runner SubagentRunner, pro
 	return t
 }
 
+// FlowRunner executes an `executor:`-routed skill deterministically — the
+// kernel's browser-flow step runner (wired by boot as
+// builtin.RunBrowserFlow). Kept as an injected callback so the skill package
+// stays independent of the tool layer (no import cycle).
+type FlowRunner func(ctx context.Context, sk Skill, arguments string) (string, error)
+
+var flowRunner FlowRunner
+
+// SetFlowRunner binds the deterministic executor. Set once at boot; nil (CLI
+// without browser tools) makes executor-routed skills error clearly.
+func SetFlowRunner(fn FlowRunner) { flowRunner = fn }
+
+// ExecutorBrowserFlow is the frontmatter value that routes a skill to the
+// deterministic step-table runner instead of an LLM loop.
+const ExecutorBrowserFlow = "browser-flow"
+
 func (*runSkillTool) Name() string { return "run_skill" }
 
 // ReadOnly is false: an invoked subagent skill could call writer tools, so
@@ -121,6 +137,20 @@ func (t *runSkillTool) Execute(ctx context.Context, args json.RawMessage) (strin
 	}
 	rawArgs := strings.TrimSpace(p.Arguments)
 	opts := SubagentRunOptions{ContinueFrom: strings.TrimSpace(p.Continue), ForkFrom: strings.TrimSpace(p.Fork)}
+
+	// Executor-routed skills skip the LLM entirely: the kernel runs the 步骤
+	// table verbatim. Long per-site flows stay stable — no per-step model
+	// improvisation — and human/ask breakpoints degrade headlessly with clear
+	// errors instead of an idle agent.
+	if sk.Executor == ExecutorBrowserFlow {
+		if flowRunner == nil {
+			return "", fmt.Errorf("run_skill: skill %q declares executor: browser-flow but no flow runner is configured (browser tools are profile-gated)", name)
+		}
+		if opts.ContinueFrom != "" || opts.ForkFrom != "" {
+			return "", fmt.Errorf("run_skill: continue_from/fork_from are not valid for executor-routed skills")
+		}
+		return flowRunner(ctx, sk, rawArgs)
+	}
 
 	if sk.RunAs == RunSubagent {
 		if t.runner == nil {

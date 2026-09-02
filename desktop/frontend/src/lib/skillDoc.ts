@@ -15,6 +15,9 @@ export interface SkillDoc {
   name: string;
   description: string;
   runAs: string;
+  // "browser-flow" = 对话调用走内核确定性执行器（逐步原样执行步骤表）；
+  // 空 = 常规 subagent（LLM 按正文执行）。
+  executor: string;
   allowedTools: string[];
   // {{参数}} → 默认值（空串 = 运行时询问）
   params: Record<string, string>;
@@ -39,10 +42,10 @@ const SECTION_ALIASES: Record<string, keyof SkillDoc | "title"> = {
   "verification": "verification",
 };
 
-const KNOWN_FRONTMATTER = new Set(["name", "description", "runas", "allowed-tools", "params"]);
+const KNOWN_FRONTMATTER = new Set(["name", "description", "runas", "allowed-tools", "params", "executor"]);
 
 const STEP_TYPES = new Set<string>([
-  "navigate", "click", "type", "key", "scroll", "select", "upload", "wait", "extract", "screenshot", "evaluate",
+  "navigate", "back", "forward", "click", "hover", "type", "key", "scroll", "select", "upload", "wait", "extract", "screenshot", "evaluate", "human", "ask",
 ]);
 
 export function parseSkillDoc(content: string): SkillDoc | null {
@@ -58,6 +61,7 @@ export function parseSkillDoc(content: string): SkillDoc | null {
     name: "",
     description: "",
     runAs: "subagent",
+    executor: "",
     allowedTools: [],
     params: {},
     whenToUse: "",
@@ -85,6 +89,9 @@ export function parseSkillDoc(content: string): SkillDoc | null {
         break;
       case "runas":
         doc.runAs = stripQuotes(value);
+        break;
+      case "executor":
+        doc.executor = stripQuotes(value);
         break;
       case "allowed-tools":
         doc.allowedTools = value.split(",").map((s) => s.trim()).filter(Boolean);
@@ -157,8 +164,14 @@ function stepFromRow(type: BrowserConsoleStepType, target: string, value: string
   switch (type) {
     case "navigate":
       return { type, url: target };
+    case "back":
+    case "forward":
+    case "screenshot":
+      return { type };
     case "click":
     case "extract":
+      return { type, target, value: value.trim().toLowerCase() === "table" ? "table" : undefined };
+    case "hover":
       return { type, target };
     case "type":
       return { type, target, text: value };
@@ -172,10 +185,16 @@ function stepFromRow(type: BrowserConsoleStepType, target: string, value: string
       return { type, direction: target || "down", amount: parseInt(value, 10) || 3 };
     case "upload":
       return { type, target, files: value.split(",").map((s) => s.trim()).filter(Boolean) };
-    case "screenshot":
-      return { type };
     case "evaluate":
       return { type, expression: target };
+    case "human":
+      // 人工断点：目标列 = 自动检测条件（visible:/url:…，可空），
+      // 值列 = 给人看的提示语；超时默认 10 分钟（600s）。
+      return { type, condition: target || undefined, text: value || "", timeout_sec: 600 };
+    case "ask":
+      // 运行时询问：目标列 = 回复绑定的参数名，值列 = 问用户的问题；
+      // 后续步骤以 {{参数名}} 引用回复。超时同 human。
+      return { type, target: target || undefined, text: value || "", timeout_sec: 600 };
     default:
       return null;
   }
@@ -191,6 +210,7 @@ export function serializeSkillDoc(doc: SkillDoc): string {
   fm.push(`name: ${doc.name}`);
   fm.push(`description: ${doc.description.replace(/\n/g, " ")}`);
   fm.push(`runAs: ${doc.runAs || "subagent"}`);
+  if (doc.executor) fm.push(`executor: ${doc.executor}`);
   if (doc.allowedTools.length) fm.push(`allowed-tools: ${doc.allowedTools.join(", ")}`);
   const paramKeys = Object.keys(doc.params);
   if (paramKeys.length) {
@@ -219,7 +239,13 @@ function rowTarget(s: BrowserConsoleStep): string {
     case "evaluate":
       return s.expression ?? "";
     case "screenshot":
+    case "back":
+    case "forward":
       return "";
+    case "human":
+      return s.condition ?? "";
+    case "ask":
+      return s.target ?? "";
     default:
       return s.target ?? "";
   }
@@ -238,6 +264,11 @@ function rowValue(s: BrowserConsoleStep): string {
       return String(s.amount ?? 3);
     case "upload":
       return (s.files ?? []).join(", ");
+    case "extract":
+      return s.value === "table" ? "table" : "";
+    case "human":
+    case "ask":
+      return s.text ?? "";
     default:
       return "";
   }
@@ -284,12 +315,21 @@ export function substituteParams(steps: BrowserConsoleStep[], params: Record<str
 // summarizeStep renders the collapsed row text — DevTools-Recorder style
 // "verb + element label" — for step rows and the live recording stream.
 export function summarizeStep(step: BrowserConsoleStep): string {
-  const label = step.label || step.target || step.url || step.condition || "";
+  // Multi-anchor targets (#a;;text=登录) render as the chain's readable tail.
+  const anchorLabel = (t?: string) =>
+    t && t.includes(";;text=") ? t.split(";;").map((a) => (a.startsWith("text=") ? `「${a.slice(5)}」` : a)).join("→") : t;
+  const label = step.label || anchorLabel(step.target) || step.url || step.condition || "";
   switch (step.type) {
     case "navigate":
       return `打开 ${step.url ?? ""}`;
+    case "back":
+      return "后退一页";
+    case "forward":
+      return "前进一页";
     case "click":
       return `点击 ${label}`;
+    case "hover":
+      return `悬停 ${label}`;
     case "type":
       return `输入 ${step.text ? "…" : ""}（${label}）`;
     case "key":
@@ -303,11 +343,15 @@ export function summarizeStep(step: BrowserConsoleStep): string {
     case "wait":
       return `等待 ${step.condition ?? "networkidle"}`;
     case "extract":
-      return `提取 ${label || "整页"}`;
+      return step.value === "table" ? `提取表格 ${label || "整页"}` : `提取 ${label || "整页"}`;
     case "screenshot":
       return "截图";
     case "evaluate":
       return "执行脚本";
+    case "human":
+      return `等待人工${step.condition ? `（自动检测 ${step.condition}）` : ""}：${step.text || ""}`;
+    case "ask":
+      return `询问${step.target ? ` {{${step.target}}}` : ""}：${step.text || ""}`;
     default:
       return label;
   }

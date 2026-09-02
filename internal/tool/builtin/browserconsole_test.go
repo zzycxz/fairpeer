@@ -118,3 +118,26 @@ func TestFilterRecordEventsDropsMalformed(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+func TestFilterHoverEvents(t *testing.T) {
+	events := []ConsoleRecordEvent{
+		{Type: "navigate", URL: "https://x/", Time: 1},
+		{Type: "hover", Selector: "nav.menu", Time: 2},             // menu opened…
+		{Type: "click", Selector: "nav.menu > li.item-3", Time: 3}, // …item inside clicked → keep
+		{Type: "hover", Selector: "#footer", Time: 4},              // wandering pointer → drop
+		{Type: "click", Selector: "button#go", Time: 5},            // unrelated target
+		{Type: "hover", Selector: "#dangling", Time: 6},            // hover with no follower → drop
+	}
+	got := filterHoverEvents(events)
+	if len(got) != 4 {
+		t.Fatalf("got %d events, want 4: %+v", len(got), got)
+	}
+	if got[1].Type != "hover" || got[1].Selector != "nav.menu" {
+		t.Errorf("menu hover must survive: %+v", got[1])
+	}
+	for _, ev := range got {
+		if ev.Selector == "#footer" || ev.Selector == "#dangling" {
+			t.Errorf("noise hover leaked: %+v", ev)
+		}
+	}
+}

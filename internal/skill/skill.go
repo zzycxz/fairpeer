@@ -69,6 +69,11 @@ type Skill struct {
 	// loop's MaxSteps). Heavy skills (ppt-auto) declare an explicit budget so a
 	// run can't go unbounded; light skills leave it unset.
 	MaxSteps int
+	// Executor, when set to "browser-flow", routes run_skill away from the
+	// LLM subagent loop into the kernel's deterministic step-table runner:
+	// the 步骤 table executes verbatim via the browser primitives (long
+	// per-site flows stay stable — no per-step model improvisation).
+	Executor string
 	// Disabled marks a skill the user turned off. It stays in the pinned skills
 	// index (so the model knows it exists and can suggest re-enabling) but is
 	// not callable via run_skill until re-enabled. Set by callers building the
@@ -479,6 +484,7 @@ func (s *Store) parse(path, stem string, scope Scope) (Skill, bool) {
 		Model:        strings.TrimSpace(fm["model"]),
 		Effort:       strings.TrimSpace(fm["effort"]),
 		MaxSteps:     parseIntFrontmatter(fm["max-steps"], fm["max_steps"]),
+		Executor:     strings.TrimSpace(fm["executor"]),
 	}, true
 }
 

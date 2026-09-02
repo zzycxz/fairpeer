@@ -91,3 +91,22 @@ eq(unknown.state === initial, true, "status without phase is a no-op");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);
+
+// Per-session frames: the ops viewer lists the console session plus
+// agent-driven sessions — frames tagged with session_id land in `sessions`
+// while the aggregate fields keep their historical behavior.
+let ps = 0;
+function st() {
+  return applyBrowserMirrorFrame(base(), { kind: "frame", source: "tool", image: "i" + ++ps, url: "u" + ps, session_id: "br_" + ps });
+}
+function base(): BrowserMirrorState {
+  return { image: "", url: "", source: "", running: false, lastText: "", seq: 0, sessions: {} };
+}
+const s1 = st();
+eq(s1.state.sessions["br_1"] !== undefined && s1.state.sessions["br_1"].image === "i1", true, "frame lands in its session bucket");
+const s2 = applyBrowserMirrorFrame(s1.state, { kind: "frame", source: "tool", image: "i1b", url: "u1b", session_id: "br_1" }).state;
+eq(s2.sessions["br_1"].image, "i1b", "latest frame per session wins");
+const s3 = applyBrowserMirrorFrame(s2, { kind: "status", source: "tool", phase: "start", text: "Chrome", session_id: "br_9" }).state;
+eq(s3.sessions["br_9"] !== undefined, true, "start status registers the session");
+const unt = applyBrowserMirrorFrame(s3, { kind: "frame", source: "tool", image: "noSession" }).state;
+eq(Object.keys(unt.sessions).length, 2, "untagged frames do not create buckets");

@@ -306,3 +306,44 @@ func TestRunSkillDisabledHintWithoutAllStore(t *testing.T) {
 		t.Fatalf("without allStore a disabled skill should fall back to 'unknown skill', got %v", err)
 	}
 }
+
+func TestRunSkillExecutorRouting(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".fairpeer/skills/browser-site-a.md",
+		"---\ndescription: site A flow\nrunAs: subagent\nexecutor: browser-flow\n---\n\n## 步骤\n\n| # | 操作 | 目标 | 值 |\n|---|---|---|---|\n| 1 | navigate | `https://a/` |  |\n")
+
+	// No runner wired → clear error (browser tools are profile-gated).
+	tl := NewRunSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), nil)
+	if _, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"browser-site-a"}`)); err == nil ||
+		!strings.Contains(err.Error(), "flow runner") {
+		t.Errorf("nil flow runner must error clearly, got %v", err)
+	}
+
+	// Wired → routed to the deterministic runner, NOT the subagent runner.
+	prev := flowRunner
+	defer SetFlowRunner(prev)
+	var gotBody, gotArgs string
+	calledSubagent := false
+	SetFlowRunner(func(_ context.Context, sk Skill, arguments string) (string, error) {
+		gotBody, gotArgs = sk.Body, arguments
+		return "flow done", nil
+	})
+	tl2 := NewRunSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}),
+		func(_ context.Context, _ Skill, _ string, _ SubagentRunOptions) (string, error) {
+			calledSubagent = true
+			return "subagent ran", nil
+		})
+	out, err := tl2.Execute(context.Background(), json.RawMessage(`{"name":"browser-site-a","arguments":"工单号=A1"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if out != "flow done" {
+		t.Errorf("executor skill must return the flow result, got %q", out)
+	}
+	if calledSubagent {
+		t.Error("executor-routed skill must bypass the subagent runner")
+	}
+	if !strings.Contains(gotBody, "https://a/") || gotArgs != "工单号=A1" {
+		t.Errorf("flow runner must receive body+arguments, got args %q", gotArgs)
+	}
+}

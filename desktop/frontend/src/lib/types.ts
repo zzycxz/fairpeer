@@ -2095,6 +2095,7 @@ export interface BrowserMirrorFrame {
   text?: string;
   url?: string;
   image?: string; // data URL (frame only)
+  session_id?: string; // the browser session that produced this frame
 }
 
 // ── 浏览器控制台 (ops browser console) ───────────────────────────────────────
@@ -2105,6 +2106,20 @@ export interface BrowserConsoleState {
   browser: string;
   attached: boolean;
   url: string;
+  // 会话保活：长间隔任务下既防内核空闲回收、也用页面心跳/定时刷新
+  // 滑动站点会话有效期。last = 最近一次成功刷新（unix 毫秒）。
+  keep_alive: boolean;
+  keep_alive_mode: string; // ping|navigate|local
+  keep_alive_url: string;
+  keep_alive_last: number;
+  keep_alive_err: string;
+}
+
+export interface BrowserConsoleTab {
+  index: number; // 1-based
+  title: string;
+  url: string;
+  current: boolean;
 }
 
 export interface BrowserConsoleElement {
@@ -2144,10 +2159,17 @@ export interface BrowserConsoleSkill {
   browser: boolean;
 }
 
-// Editor step vocabulary (values parameter-substituted before trial runs).
+// Editor step vocabulary (values carry {{参数}} refs; the trial runner
+// substitutes them at run time, ask replies included). "human" is the 人工断点：
+// 重放时在此暂停，等人在浏览器里完成短信验证码/登录/扫码等操作，人工确认继续或
+// 满足自动检测条件后放行。"ask" 是运行时询问：暂停等用户在面板里输入回复，
+// 回复绑定到参数名（目标列），后续步骤用 {{参数名}} 引用。
 export type BrowserConsoleStepType =
   | "navigate"
+  | "back"
+  | "forward"
   | "click"
+  | "hover"
   | "type"
   | "key"
   | "scroll"
@@ -2156,7 +2178,9 @@ export type BrowserConsoleStepType =
   | "wait"
   | "extract"
   | "screenshot"
-  | "evaluate";
+  | "evaluate"
+  | "human"
+  | "ask";
 
 export interface BrowserConsoleStep {
   type: BrowserConsoleStepType;
@@ -2175,9 +2199,12 @@ export interface BrowserConsoleStep {
 
 export interface BrowserConsoleTrialStatus {
   index: number; // -1 = run terminal event
-  status: "running" | "done" | "failed";
+  status: "running" | "waiting" | "done" | "failed";
   output?: string;
   error?: string;
+  // ask 步骤的等待：横幅带输入框，回复经 TrialResume(reply) 送回并绑定到 bind 参数。
+  await_reply?: boolean;
+  bind?: string;
 }
 
 export interface NetDevLiveDeviceState {
@@ -2405,6 +2432,9 @@ export interface NetDevFinding {
   source?: string;
   status?: string; // "" | active | resolved
   resolvedAt?: string;
+  // Site-scope snapshot stamped at save time (backend finding.go); "" = 未分组
+  // — visible in EVERY project view so unknown-source alerts are never hidden.
+  project?: string;
 }
 
 export interface NetDevTopologyNode {

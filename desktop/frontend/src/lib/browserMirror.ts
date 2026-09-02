@@ -7,6 +7,12 @@
 // store so it can be unit-tested without a DOM.
 import type { BrowserMirrorFrame } from "./types";
 
+export interface MirrorSessionFrame {
+  image: string;
+  url: string;
+  at: number; // unix millis of the latest frame
+}
+
 export interface BrowserMirrorState {
   image: string; // latest screenshot (data URL); "" before the first frame
   url: string; // latest page URL (tool source)
@@ -14,7 +20,13 @@ export interface BrowserMirrorState {
   running: boolean; // between status start and end
   lastText: string; // browser name / latest action / run summary
   seq: number; // increments on every store change
+  // Per-session latest frames (kernel tags frames with session_id): the ops
+  // viewer lists the console session plus agent-driven sessions from here.
+  // Capped by recency; aggregate fields above stay the historical behavior.
+  sessions: Record<string, MirrorSessionFrame>;
 }
+
+const MIRROR_SESSION_CAP = 8;
 
 const initialBrowserMirrorState: BrowserMirrorState = {
   image: "",
@@ -23,7 +35,28 @@ const initialBrowserMirrorState: BrowserMirrorState = {
   running: false,
   lastText: "",
   seq: 0,
+  sessions: {},
 };
+
+// rememberSessionFrame keeps the latest frame per session id, capping the map
+// by recency (oldest entry drops once over the cap).
+function rememberSessionFrame(
+  sessions: Record<string, MirrorSessionFrame>,
+  id: string,
+  patch: Partial<MirrorSessionFrame>,
+): Record<string, MirrorSessionFrame> {
+  if (!id) return sessions;
+  const prev = sessions[id];
+  const next: Record<string, MirrorSessionFrame> = {
+    ...sessions,
+    [id]: { image: prev?.image ?? "", url: prev?.url ?? "", at: Date.now(), ...patch },
+  };
+  const ids = Object.keys(next).sort((a, b) => next[a].at - next[b].at);
+  while (ids.length > MIRROR_SESSION_CAP) {
+    delete next[ids.shift() as string];
+  }
+  return next;
+}
 
 // applyBrowserMirrorFrame is the pure state transition. startedActivity
 // reports "onset of a new browsing activity" — the signal App uses to
@@ -42,6 +75,12 @@ export function applyBrowserMirrorFrame(
         source: frame.source,
         lastText: frame.text || state.lastText,
         seq: state.seq + 1,
+        sessions: frame.session_id
+          ? rememberSessionFrame(state.sessions, frame.session_id, {
+              image: frame.image ?? "",
+              url: frame.url || state.sessions[frame.session_id]?.url || "",
+            })
+          : state.sessions,
       },
       startedActivity: !state.running,
     };
@@ -49,7 +88,16 @@ export function applyBrowserMirrorFrame(
   switch (frame.phase) {
     case "start":
       return {
-        state: { ...state, source: frame.source, running: true, lastText: frame.text ?? "", seq: state.seq + 1 },
+        state: {
+          ...state,
+          source: frame.source,
+          running: true,
+          lastText: frame.text ?? "",
+          seq: state.seq + 1,
+          sessions: frame.session_id
+            ? rememberSessionFrame(state.sessions, frame.session_id, {})
+            : state.sessions,
+        },
         startedActivity: true,
       };
     case "step":

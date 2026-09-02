@@ -1,6 +1,7 @@
 package skill
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -439,6 +440,49 @@ func TestApplyIndexTruncates(t *testing.T) {
 	out := ApplyIndex("BASE", skills)
 	if !strings.Contains(out, "truncated") {
 		t.Error("oversized index should be truncated")
+	}
+	if !strings.Contains(out, "skills omitted to fit") {
+		t.Error("truncation notice should report the omitted-skill count")
+	}
+	// Whole-line cut only: no half-garbled SKILL line at the boundary
+	// (header prose lines legitimately start with "- " too).
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "- skill") && !strings.HasSuffix(line, "d") {
+			t.Errorf("skill line looks mid-cut: %q", line)
+		}
+	}
+}
+
+func TestApplyIndexColdSkillsDegradeFirst(t *testing.T) {
+	// Cold entries move behind active ones — a tight budget eats
+	// hibernating skills before live ones.
+	skills := []Skill{
+		{Name: "aaa-cold", Description: "cold one", RunAs: RunInline, Cold: true},
+		{Name: "zzz-active", Description: "active one", RunAs: RunInline},
+	}
+	out := ApplyIndex("BASE", skills)
+	ai := strings.Index(out, "zzz-active")
+	ci := strings.Index(out, "aaa-cold")
+	if ai < 0 || ci < 0 || ai > ci {
+		t.Errorf("active skill should list before cold one:\n%s", out)
+	}
+
+	// Oversized with cold entries: cold descriptions compress to name-only
+	// before any name is dropped.
+	var many []Skill
+	many = append(many, Skill{Name: "zzz-active", Description: "keep me", RunAs: RunInline})
+	for i := 0; i < 120; i++ {
+		many = append(many, Skill{Name: fmt.Sprintf("cold-%03d", i), Description: strings.Repeat("c", 40), RunAs: RunInline, Cold: true})
+	}
+	out = ApplyIndex("BASE", many)
+	if !strings.Contains(out, "keep me") {
+		t.Error("active description must survive compression")
+	}
+	if !strings.Contains(out, "cold-000 [休眠]") {
+		t.Error("cold skill should compress to name-only line")
+	}
+	if strings.Contains(out, "cccc") {
+		t.Error("cold description should be dropped under budget pressure")
 	}
 }
 

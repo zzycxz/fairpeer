@@ -674,7 +674,7 @@ func builtinSkills() []Skill {
 			// sidecar): use it for multi-step web tasks instead of hand-driving
 			// browser_click/browser_type. The explicit tools remain for precise
 			// single actions on known elements.
-			AllowedTools: []string{"browser_auto", "browser_open", "browser_navigate", "browser_click", "browser_type", "browser_scroll", "browser_extract", "browser_screenshot", "browser_evaluate", "browser_snapshot", "browser_select_option", "browser_wait", "web_search", "web_fetch", "read_file", "write_file"},
+			AllowedTools: []string{"browser_auto", "browser_open", "browser_navigate", "browser_click", "browser_type", "browser_scroll", "browser_extract", "browser_screenshot", "browser_evaluate", "browser_snapshot", "browser_select_option", "browser_wait", "browser_keepalive", "web_search", "web_fetch", "read_file", "write_file"},
 		},
 		{
 			Name:         "desktop-auto",

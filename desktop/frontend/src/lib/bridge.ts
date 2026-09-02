@@ -643,8 +643,14 @@ export interface AppBindings {
   // (per-step trial-run status).
   BrowserConsoleOpen(cdpURL: string, url: string): Promise<import("./types").BrowserConsoleState>;
   BrowserConsoleState(): Promise<import("./types").BrowserConsoleState>;
+  BrowserConsoleTabs(): Promise<import("./types").BrowserConsoleTab[]>;
+  BrowserConsoleHighlight(target: string, durationMs: number): Promise<void>;
+  BrowserConsoleSwitchTab(index: number): Promise<string>;
   BrowserConsoleClose(): Promise<void>;
   BrowserConsoleNavigate(url: string): Promise<string>;
+  BrowserConsoleBack(): Promise<string>;
+  BrowserConsoleForward(): Promise<string>;
+  BrowserConsoleExtractTable(selector: string): Promise<string>;
   BrowserConsoleElements(): Promise<import("./types").BrowserConsoleElement[]>;
   BrowserConsoleClick(target: string): Promise<string>;
   BrowserConsoleType(target: string, text: string): Promise<string>;
@@ -663,7 +669,11 @@ export interface AppBindings {
   BrowserConsoleSaveSkill(content: string, overwrite: boolean): Promise<string>;
   BrowserConsoleListSkills(): Promise<import("./types").BrowserConsoleSkill[]>;
   BrowserConsoleReadSkill(name: string): Promise<string>;
-  BrowserConsoleTrialRun(steps: import("./types").BrowserConsoleStep[]): Promise<void>;
+  BrowserConsoleDeleteSkill(name: string): Promise<void>;
+  BrowserConsoleSetKeepAlive(enabled: boolean, intervalSec: number, mode: string, url: string): Promise<import("./types").BrowserConsoleState>;
+  BrowserConsoleTrialRun(steps: import("./types").BrowserConsoleStep[], params: Record<string, string>): Promise<void>;
+  BrowserConsoleTrialResume(reply: string): Promise<void>;
+  BrowserConsoleTrialAbort(): Promise<void>;
   // Loop Engineering (docs/loop-engineering-spec.md): start/stop/status of the
   // supervised agent loop. Round updates arrive on the "loop:round" event.
   LoopStart(tabID: string, config: LoopConfig): Promise<void>;
@@ -1047,6 +1057,24 @@ const browserTrialListeners = new Set<(st: import("./types").BrowserConsoleTrial
 
 export function emitBrowserTrialMock(st: import("./types").BrowserConsoleTrialStatus) {
   for (const cb of browserTrialListeners) cb(st);
+}
+
+// Mock human-breakpoint gate: the dev-mode TrialRun parks on a promise that
+// Resume/Abort resolves, mirroring the Go-side consoleTrialGate channels. The
+// resume verdict carries the ask step's reply text.
+type MockTrialVerdict = { kind: "resume"; reply: string } | { kind: "abort" };
+
+let mockTrialResolve: ((verdict: MockTrialVerdict) => void) | null = null;
+
+function mockTrialGate(): Promise<MockTrialVerdict> {
+  return new Promise((resolve) => {
+    mockTrialResolve = resolve;
+  });
+}
+
+function mockTrialSignal(verdict: MockTrialVerdict) {
+  mockTrialResolve?.(verdict);
+  mockTrialResolve = null;
 }
 
 // onNetdevHealth subscribes to health change events ("netdev:health": one
@@ -4869,13 +4897,27 @@ function makeMockApp(): AppBindings {
     // 录制/生成给出一条示例轨迹转朴素草稿，试运行模拟三步进度。
     async BrowserConsoleOpen(_cdpURL: string, url: string) {
       await delay(400);
-      return { open: true, session_id: "br_mock", browser: "Chrome (mock)", attached: false, url: url || "about:blank" };
+      return { open: true, session_id: "br_mock", browser: "Chrome (mock)", attached: false, url: url || "about:blank", keep_alive: false, keep_alive_mode: "", keep_alive_url: "", keep_alive_last: 0, keep_alive_err: "" };
     },
     async BrowserConsoleState() {
-      return { open: false, session_id: "", browser: "", attached: false, url: "" };
+      return { open: false, session_id: "", browser: "", attached: false, url: "", keep_alive: false, keep_alive_mode: "", keep_alive_url: "", keep_alive_last: 0, keep_alive_err: "" };
     },
     async BrowserConsoleClose() {},
     async BrowserConsoleNavigate(url: string) { await delay(300); return `已导航到 ${url} (mock)`; },
+    async BrowserConsoleHighlight(_t: string, _d: number) { await delay(120); },
+    async BrowserConsoleTabs() {
+      await delay(150);
+      return [
+        { index: 1, title: "工作台", url: "https://ops.local/home", current: false },
+        { index: 2, title: "告警详情", url: "https://ops.local/alerts", current: true },
+      ];
+    },
+    async BrowserConsoleSwitchTab(index: number) { await delay(250); return `已切换到页卡 ${index} (mock)`; },
+    async BrowserConsoleBack() { await delay(200); return "后退一页 (mock)"; },
+    async BrowserConsoleForward() { await delay(200); return "前进一页 (mock)"; },
+    async BrowserConsoleExtractTable(selector: string) { await delay(300); return `| 列1 | 列2 |
+|---|---|
+| a | b | (mock, ${selector || "整页"})`; },
     async BrowserConsoleElements() {
       return [
         { ref: "e1", role: "textbox", name: "用户名", value: "" },
@@ -4939,13 +4981,56 @@ function makeMockApp(): AppBindings {
     async BrowserConsoleSaveSkill(_content: string, _overwrite: boolean) { return "~/.fairpeer/skills/mock/SKILL.md (mock)"; },
     async BrowserConsoleListSkills() { return [{ name: "mock-skill", description: "浏览器操作技能（mock）", browser: true }]; },
     async BrowserConsoleReadSkill(_name: string) { return "---\nname: mock-skill\ndescription: mock\n---\n\n# mock\n"; },
-    async BrowserConsoleTrialRun(steps) {
+    async BrowserConsoleDeleteSkill(_name: string) { await delay(200); },
+    async BrowserConsoleSetKeepAlive(enabled: boolean, _intervalSec: number, mode: string, _url: string) {
+      await delay(200);
+      return {
+        open: true, session_id: "br_mock", browser: "Chrome (mock)", attached: false, url: "about:blank",
+        keep_alive: enabled, keep_alive_mode: enabled ? mode : "", keep_alive_url: _url,
+        keep_alive_last: enabled ? Date.now() : 0, keep_alive_err: "",
+      };
+    },
+    async BrowserConsoleTrialRun(steps, params) {
+      const bindings: Record<string, string> = { ...(params ?? {}) };
       for (let i = 0; i < steps.length; i++) {
+        if (steps[i].type === "human") {
+          // Mock the human breakpoint: park on a promise the mock Resume/
+          // Abort bindings release, so the editor's waiting banner is
+          // demoable in browser dev mode.
+          emitBrowserTrialMock({ index: i, status: "waiting", output: steps[i].text || "请完成人工操作 (mock)" });
+          const verdict = await mockTrialGate();
+          if (verdict.kind !== "resume") {
+            emitBrowserTrialMock({ index: i, status: "failed", error: "人工中止 (mock)" });
+            emitBrowserTrialMock({ index: -1, status: "failed", error: "人工中止 (mock)" });
+            return;
+          }
+          emitBrowserTrialMock({ index: i, status: "done", output: "人工操作完成 (mock)" });
+          continue;
+        }
+        if (steps[i].type === "ask") {
+          emitBrowserTrialMock({ index: i, status: "waiting", output: steps[i].text || "请输入内容 (mock)", await_reply: true, bind: steps[i].target || "" });
+          const verdict = await mockTrialGate();
+          if (verdict.kind !== "resume") {
+            emitBrowserTrialMock({ index: i, status: "failed", error: "人工中止 (mock)" });
+            emitBrowserTrialMock({ index: -1, status: "failed", error: "人工中止 (mock)" });
+            return;
+          }
+          const bind = (steps[i].target || "").trim();
+          if (bind) bindings[bind] = verdict.reply;
+          emitBrowserTrialMock({ index: i, status: "done", output: verdict.reply ? `收到回复：${verdict.reply}` : "（用户未输入，继续）" });
+          continue;
+        }
         emitBrowserTrialMock({ index: i, status: "running" });
         await delay(400);
         emitBrowserTrialMock({ index: i, status: "done", output: "(mock)" });
       }
       emitBrowserTrialMock({ index: -1, status: "done" });
+    },
+    async BrowserConsoleTrialResume(reply: string) {
+      mockTrialSignal({ kind: "resume", reply: reply ?? "" });
+    },
+    async BrowserConsoleTrialAbort() {
+      mockTrialSignal({ kind: "abort" });
     },
     // Loop Engineering mock: a fast 3-round simulation so the panel's config →
     // running → report flow is demoable without the Go backend.

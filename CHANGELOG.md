@@ -9,6 +9,241 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(netdev/desktop): 浏览器体验三修——侧栏内嵌预览回归 + 工作台去元素面板（事件同步右侧栏）+ 元素悬停/选中页面高亮
+
+用户三点反馈：
+
+- **侧栏内嵌预览回归**：打开浏览器即可在右侧栏看到画面（优先控制台会话自己的帧，无帧不渲染、首帧自动展开）；大图仍走中间工作台（启动条并列）——不用再绕道工作台才能看预览
+- **工作台去掉元素面板**：元素只留右侧栏（单一来源）；工作台切页卡后广播 fairpeer:browser-console-changed 事件，右侧栏自动刷新元素并清旧选中（ref 随旧页面失效）——不同步问题消除
+- **元素悬停/选中页面高亮**：ConsoleHighlight 内核原语（ref 或 CSS → 滚动到可见 + 橙色 outline/底色闪烁，恢复原内联样式，纯视觉无 DOM 改动）；右侧栏元素行悬停短闪 500ms（150ms 防抖）、点选长亮 1500ms——列表行和页面元素终于对上号
+- 验证：tsc 零新错；locale-parity 2/2（移除 wbPickHint）；skill-doc 101/101；CSS 语法过；双模块 build 绿
+
+
+### fix(netdev/desktop): 浏览器工作台只占中间对话区——修正 absolute 全窗覆盖
+
+用户反馈：工作台盖住了左边栏和对话框，应只占中间（参照大屏的位置）。根因：.ndv-wb 用了 position:absolute; inset:0——脱离 .ndv__main 中心格覆盖全窗；日志/安全工作台是流式子元素（flex:1 填满中心格）。改为同款流式布局，左侧导航栏与右侧 dock 不再被盖。
+
+
+### feat(netdev/desktop): 浏览器工作台——第五个中心工作台（页卡切换 + 大画面 + 联动元素面板）
+
+用户澄清：不是把页卡条补回侧栏，而是要像日志/安全/大屏一样**占据中间画布**的工作台，可关闭，且页卡切换要在那里——因为切换影响元素获取。落地：
+
+- **BrowserWorkbench 接入 bench 机制**（与 logs/sec/dash 同款）：切换条新增「浏览器」chip、Esc/对话 chip/关闭钮三路返回、`?bench=browser` 深链与 fairpeer:netdev-bench 事件均可达；侧栏只留启动条（显示页卡数）派发 bench 事件打开
+- **页卡 + 元素联动**（核心诉求）：工作台内切页卡即重取元素列表（ref 随旧页面失效）；元素面板带过滤/计数/截断（50 行），点行复制编号（提示粘贴到侧栏目标框）——切页卡、看画面、拿元素一屏完成
+- **画面**：控制台源 5 秒轮询近实时；agent 会话源帧实时推送（复用镜像分桶）；页卡集 8 秒自动刷新（点击自动跟随/手动开页都能反映）
+- 移除上一版的浮层观察窗（被工作台取代）与侧栏页卡条（用户明确不要）；恢复被切片误删的错误横幅（第二次，已在改动流程里留意）
+- 验证：tsc 零新错；locale-parity 2/2（ndv.bench.browser + brc.wbPickHint 双语）；skill-doc 101/101；CSS 语法/z-index 过
+
+
+### fix(netdev/desktop): 侧栏恢复页卡条——观察窗重构后页卡/预览在侧栏消失的回退
+
+用户反馈：看不到 Chrome 页卡和画面预览了。根因：上上轮「看/做分离」把页卡条和预览整体挪进中间观察窗，侧栏只剩纤细启动条——功能没丢但不可发现，违背用户已习惯的侧栏直视页卡。修复：侧栏恢复页卡条（当前页卡高亮、点击即切、切换刷元素），条尾并列「观察窗」按钮打开大视图（大画面 + agent 会话源）；两处并存各司其职。顺带恢复被切片误删的错误横幅。
+
+
+### feat(browser): hover 步骤全链路 + select 文本锚 + 运维浏览器使用指南
+
+自主收尾批（用户委托"把该做没做的做了"）。做了四件，明确放弃两件（OCR：依赖重、DOM 文本锚已覆盖主场景；ref 失效自动重试：想清楚是错主意——ref 是快照内不透明编号，重拍后同号是别的元素，自动重试会点错，报错引导刷新才是正解）：
+
+- **browser_hover 工具 + hover 步骤全链路**：悬停展开菜单的站点此前重放必缺悬停。内核用**真实 mousemove 到元素中心**（合成 JS 事件不触发 CSS :hover，伪类只认可信指针输入）；录制器 mouseover 防抖采集，过滤器启发式只保留"后续动作落在悬停子树内"的悬停（菜单展开→点子项），闲逛的划过全丢；词汇全链路（编辑器基础操作组/解析序列化/朴素转换/AI prompt/试运行）；名册 20→21
+- **select 的 text= 锚**：按可见标签（label/aria-label/name）找下拉框并选值——多锚链补全（upload 不补：文件输入是隐藏元素，按文本定位不可靠）
+- **孤儿 CSS 清理**：.ndv-brc__preview-empty（预览重构后遗留）
+- **docs/browser-ops-guide.md**：面向团队的运维浏览器使用指南（界面地图/手动操作/三路沉淀技能/多锚写法/确定性执行/定时值守/保活/分享/FAQ）
+- 验证：roster+hover 21 过；TestFilterHoverEvents（菜单悬停保留/闲逛丢弃/无后继丢弃）；skill-doc 101/101（hover 往返+锚链）；locale-parity 2/2；tsc 零新错；双模块 build 绿
+
+
+### feat(netdev/desktop): 观察窗多画面源（控制台 + agent 会话）+ 技能导入导出
+
+上轮盘点的缺口前两项落地：
+
+- **镜像帧带会话标识**（内核）：BrowserPanelFrame 增加 session_id，四处发射点（会话开/关、每帧截图）全带上——前端终于能区分"这是哪个会话的画面"
+- **观察窗画面源切换**：browserMirror 存储新增按会话分桶的最新帧（限量 8 按新旧淘汰，聚合字段行为不变、既有消费者无感）；观察窗在检测到 agent 会话帧时显示画面源 chips——「控制台」（保持 5 秒轮询近实时）+ 每个 agent 会话（`agent br_5`，帧随 agent 动作实时推送）——对话里 /技能 或定时巡检跑起来，运维界面终于能围观
+- **技能导入/导出**：技能行新增「导出」——SKILL.md 存成 .md 文件下载（技能即单文件，团队直接分享）；技能页签新增「导入」——选 .md 文件进编辑器，检查后保存即入列表
+- 验证：browser-mirror 26/26（新增 5 断言：分桶落帧/每会话最新/start 注册/无标签帧不建桶）；skill-doc 97/97；locale-parity 2/2（zh/en 各 +6）；CSS 语法过；双模块 build 绿
+
+
+### feat(netdev/desktop): 浏览器面板看/做分离——中间观察窗（页卡+大画面）+ 动作记录转技能
+
+用户三点反馈落地：
+
+- **看/做分离**（用户提议的绑定关系）：右侧栏回归「驾驶舱」（元素 + 目标/文本/动作 + 动作记录，同源绑定）；新增中间大视图「**浏览器观察窗**」——Chrome 页卡条 + 大画面预览绑定在一起，侧栏只留一条纤细启动器（当前页卡标题 + 页卡数）；Esc/点背景/关闭钮关闭，切换页卡即刷元素
+- **近实时画面**（用户观察到的同步延迟）：镜像帧只在 fairpeer 动作后推送，手动在被控浏览器开页面看不到即时变化——观察窗打开时每 5 秒轮询截图 + 打开即截一帧，手动浏览也近实时
+- **动作记录 → 记录为技能**：面板每个操作（导航/输入/回车/点击/提取）记为结构化步骤；动作记录区新增「记录为技能」（计数 + 一键转 SKILL.md 草稿，默认 executor: browser-flow）与「清空」按钮；草稿进技能编辑器可继续编辑/试运行/保存——面板操作序列直接沉淀为可复用技能
+- 顺带修复重构中误删的错误横幅；新 locale 键 zh/en 各 +9
+- 验证：tsc 零新错；locale-parity 2/2；skill-doc 97/97；CSS 语法/z-index token 过（观察窗用 --z-local-backdrop）
+
+
+### fix(desktop/netdev): 窄窗口（≤820px）运维侧边栏被折叠成裁切残条且无法恢复
+
+用户反馈：窗口缩小后左侧边栏"丢失"。根因：tools.css 的窄窗口媒体查询（@media ≤820px，为编码视图设计的移动适配）把 `--sidebar-width` 置 0，而运维布局 `.ndv` 的 grid 第一列直接引用该变量——rail 被压成 ~25px 的裁切残条；更糟的是没有恢复入口（AppChrome 的展开按钮只在 React `sidebarCollapsed` 状态为真时渲染，CSS 媒体折叠不会置该状态），而窗口 MinWidth=760，760~820 CSS px 整个区间都会中招（显示缩放 >100% 时更容易落入）。修复：netdev.css 以 `.app.app--netdev` 双类特异性重新声明宽度变量（不依赖打包顺序），显式折叠态再高一档保持品牌行收起按钮语义；顺带把同媒体块里 coding 视图专属的 `.global-bottom-bar { width:100% }` 与 `.layout { padding-bottom:36px }` 在 netdev 下还原（底部栏回到只盖 rail 列、主区贴底）。验证：760/780/818/840/1100px 下 rail 宽度/内容/底栏/chrome 位置全部正常，折叠↔展开往返正常，CSS 语法检查过。另注：用户截图当时窗口 ~822px（>820）rail 主体内容完全未绘制（背景/品牌行/边框在）属 WebView2 缩放时的 GPU 合成层未重绘，与本次 CSS 修复无关，出现时划过侧边栏或再缩放即可恢复，频发可用 `FAIRPEER_DESKTOP_DISABLE_WEBVIEW2_GPU=1` 启动规避。
+
+### feat(netdev/desktop): 运维面板页卡条——多页卡可见可切，切换即刷元素
+
+接上一批多页卡内核能力（点击自动跟随 + browser_tabs/switch_tab 工具）：右侧浏览器面板此前看不到自己有几个页卡、也不能手动切换。补齐：
+
+- **页卡条**：会话栏下方横向页卡 chips（序号 + 标题截断，当前页卡高亮、悬停见完整 URL，多条时横向滚动）；随 refreshState 一并拉取（每次操作后自动更新）；仅会话打开时渲染
+- **点击切换**：点非当前页卡即切换（内核 switchSessionTab，旧页卡保持打开）；**切换后自动刷新元素列表并清掉旧选中**（ref 随旧页面失效）——「切换获取元素」一步到位
+- 新绑定 ConsoleTabs/ConsoleSwitchTab（内核原语 pageTargetInfos+sessionTargetID 复用）+ wailsjs/bridge（含 mock 两个页卡）+ types
+- 验证：tsc 零新错；locale-parity 2/2；skill-doc 97/97；CSS 语法过；内核浏览器测试集过；双模块 build 绿
+
+
+### feat(browser): 多页卡——点击自动跟随新页卡 + browser_tabs / browser_switch_tab
+
+用户场景：后台系统点一下常开新页卡（target=_blank / window.open），会话还挂在旧页卡上，后续点击/提取全落空，此前完全无处理（点击只报「开了新页卡」不跟）。落地：
+
+- **点击自动跟随**：browserClick 原有新页卡检测分支从「只报告」升级为「跟随」——切换会话到点击打开的新页卡（chromedp.NewContext(s.ctx, WithTargetID) 挂兄弟上下文，旧注释顾虑的 allocator 重建并不需要），旧页卡保持打开可切回；refs 清空（属于旧页面）；跟随失败回退为原报告文案。面板点击、技能步骤点击、agent 工具全路径生效
+- **browser_tabs**（只读）：列出页卡（序号/标题/URL，标记当前驱动的页卡）；**browser_switch_tab**：按序号或 target id 切换，当前页卡保持打开；名册 18→20，只读分类补 browser_tabs
+- **切换实现**：switchSessionTab 串行化（tabMu）；旧页卡上下文弃用不取消（chromedp 取消会关目标，旧页卡必须留着可切回）；refs 随切清空
+- 验证：roster/分类/浏览器测试集全过；双模块 build 绿
+
+
+### fix(browser/console): 面板元素列表选中的 ref 无法点击——refs 未发布进会话
+
+用户反馈：元素列表选 e13 点「点击」报 `click ref "e13": no snapshot taken for session`。根因：ConsoleElements 用 captureAXTree+buildSnapshotRefs 生成了元素列表，但**没把 refs 发布进会话的快照仓库**（s.refs 只有 browser_snapshot 会写），而面板点击/输入走 agent 工具的 ref 解析只读 s.refs。修复：ConsoleElements 与 browser_snapshot 同一发布模式（构建后整存、不原地改），列表选中的 ref 立即可点/可输入。附带：面板 click/type 的 ref 失效错误本地化为中文指引（「页面变过，点刷新元素重新获取」），不再裸露内核英文。
+
+
+### fix(browser): 裸域名导航自动补 https + 无效网址中文报错
+
+用户反馈：地址栏不带 http 直接输域名报 CDP 原始英文错 `Cannot navigate to invalid URL (-32000)`。修复：内核 normalizeNavURL 在 browser_navigate 与 browser_open 的导航入口统一补全——无 scheme 的输入自动加 `https://`（about:/data:/file:/chrome: 等伪协议原样放行），agent 工具、运维面板、确定性执行器、保活 navigate 全部经此路径受益；面板绑定点把残留的 invalid URL 英文错翻译为中文指引（检查空格/特殊字符、直接输域名即可）。TestNormalizeNavURL 覆盖裸域名/带路径/已带 scheme/伪协议/空串。
+
+
+### fix(netdev/desktop): 元素列表压坏布局——body 滚动容器 + 过滤/计数/截断的元素选择器
+
+用户反馈：点「刷新元素」拿到一堆元素后与下方内容重叠。根因：`.ndv-brc__body` 不是滚动容器，元素区一长就把内容推出卡片外。修复两层：
+
+- **根因**：body 加 `overflow-y: auto`（含技能/录制/交互三个子页签），任何子页签内容过长都在卡片内滚动，不再溢出压到 dock 下方
+- **元素选择器重做**（ElementPicker）：标题行带计数徽标 + 过滤输入框（按角色/名称/ref/值包含匹配）；最多显示 50 行，超出提示「还有 N 项未显示，输入关键字过滤」；刷新后清掉已失效的旧选中 ref（ref 是快照瞬时值）
+- 验证：tsc 零新错；locale-parity 2/2（新增 brc.filterElements/brc.elementsCapped 双语）；CSS 语法检查过
+
+
+### fix(netdev/desktop): 画面预览去空占位——无画面不渲染，首帧自动展开
+
+用户反馈：预览区空占位「操作后这里显示最新画面」又没用又丑。改为：无画面时整个预览区（含标题行）不渲染；第一帧到达后自动展开显示，标题行可折叠回。previewEmpty 文案键 zh/en 移除，locale-parity 保持一致。
+
+
+### fix(netdev/desktop): 运维浏览器技能列表只显示浏览器专属技能
+
+用户反馈：右侧浏览器页签的技能列表混入了 ppt-auto 等非浏览器技能。BrowserConsoleListSkills 原先返回整个 ~/.fairpeer/skills 的全部用户技能；改为只返回 allowed-tools 含 browser_* 的浏览器专属技能（按名排序），办公/全局技能留在全局技能索引、不进运维面板。列表标题「已生成技能」→「浏览器技能」。注意：ppt-auto 出现在该目录说明本机 ~/.fairpeer/skills 下有同名用户副本（内核内置也有一份），过滤后面板不再显示，文件未动。
+
+
+### feat(browser/skill): 多锚定位——目标列回退链 `CSS;;text=可见文字`
+
+用户在编辑器里排技能时问「按你的要求怎么编排、缺哪些占位」。落地三层定位的编排表达（上轮方案修正：分隔符用 `;;` 而非 `|`——竖线会劈开 markdown 表格单元格）：
+
+- **目标列多锚语法**：`#login-btn;;text=登录`——运行按序回退：CSS 锚走原 browser 工具；`text=` 文本锚在 DOM 里按可见文字定位（精确→包含，可点元素/label/placeholder/aria-label 都算标签，命中最深可点祖先）后直接操作——click 走坐标 MouseClickXY、type 走原生 value set+input 事件（React 受控输入同步）、extract 取命中文本；select/upload 暂仅 CSS（诚实边界）。全锚失败才报错并点名链内容
+- **录制→多锚**：朴素转换自动把录到的元素名拼成 `选择器;;text=名称`（≤20 字），AI 归纳 prompt 同步教多锚写法——录完即得带回退链的稳定步骤
+- **前端**：目标输入框 placeholder 提示多锚语法；步骤摘要显示为 `#kw→「百度一下」` 链；skill-doc `;;` 目标与 executor frontmatter 无损往返入守卫
+- OCR 兜底未含在本批（DOM 文本定位已覆盖绝大多数属性漂移场景；Canvas/图片文字再走 PaddleOCR 链）
+- 验证：`TestSplitFlowAnchors`（链解析/纯 CSS 兼容/空段丢弃）；TestNaive 断言升级为多锚形态；skill-doc 97/97；locale-parity 2/2；tsc 零新错；三模块 build 全绿
+
+
+### feat(skill/browser): 确定性执行器 executor: browser-flow——每个站点流程一个稳定技能
+
+用户诉求澄清：不是泛用的 browser-auto，而是**每站点独立技能**（技能1 访问 A 站做 XX 拿什么、技能2 访问 B 站做 YY……流程长、要稳定）。独立技能的形态已有（录制/编辑器/步骤表），缺的稳定性闭环是**对话调用时的执行方式**——此前 `/技能名` 走 LLM 子代理读表临场发挥，长流程易漂。落地：
+
+- **内核步骤执行器**（`internal/tool/builtin/browserflow.go`）：解析 SKILL.md 的步骤表 → 开一个浏览器会话 → 逐步原样执行（navigate/back/forward/click/type/key/scroll/select/upload/wait[含 stable:]/extract[含 table]/screenshot/evaluate），一次 LLM 决策（调用技能）、执行期零；逐步报告 + 失败时保留会话供 browser_* 工具接手排查
+- **run_skill 分发**：frontmatter `executor: browser-flow` → 直接路由内核执行器（跳过子代理循环）；boot 在 cowork/netdev 分支接线；技能索引行标注 `[⚙ 确定性]` 并在索引头说明参数传法（`参数=值`）
+- **断点语义（无面板时的降级，先规划期报错、不弹浏览器）**：human 步骤必须带完成检测条件（浏览器窗口可见，用户人工操作，条件满足自动继续；无条件→明确报错引导）；ask 步骤的值经调用参数注入（`工单号=A123`，无等号整串进 `问题`），缺失则点名报错；运维面板试运行不受影响（交互横幅照旧）
+- **编辑器**：结构化模式新增「确定性执行」开关（写 executor frontmatter）；四个站点模板（登录保活/表单填报/流式问答/数据导出）默认开启，空白模板保持手选
+- 验证：builtin `TestParseFlowTable/Errors`（表格语法全类型+未知操作）、`TestParseFlowParams`（k=v/引号/无等号回退）、`TestRunBrowserFlowPlanningGuards`（缺参点名、无条件 human 规划期报错）；skill `TestRunSkillExecutorRouting`（nil runner 报错、接线后绕过子代理、body+arguments 透传）；skill-doc 92/92（模板 executor 守卫）；tsc/locale-parity 过；三模块 build 全绿
+
+### feat(netdev): 安全告警按项目区分——Finding 项目快照标签 + 通知带项目前缀 + 切换记忆
+
+用户方向：不同项目（站点/客户网络）的告警不应混在一个列表里，且归属要按项目区分。项目定义（[netdev] projects，名称+设备组集合）与标题栏切换器此前已就位，本次把「区分」从查看时刻的临时推导升级为随告警固化的标签：
+
+- **Finding 加 `project` 快照字段**（后端 finding.go）：save 时按「设备组隶属哪个项目最多」固化归属（平票取配置序；"(all)"/"(unknown)"/未分组 → 空标签）。只在字段为空时计算——重保存保留原标签，改组不追溯历史（标签是审计历史，隶属是视图语义）
+- **旧数据读时回填**：ListFindings 对无标签的历史文件按当前映射在内存回填（文件不重写——读不改史）
+- **盲区规则**：空标签（未分组/未知来源 syslog/旧数据）在**所有**项目视图可见——匹配不到项目的告警永远不被隐藏
+- **告警页签过滤改标签制**：从「设备 ∈ 项目设备集」的实时推导改为按 `f.project` 过滤（NetDevLayout），徽标/风险点随之；项目视图下加过滤语义提示行
+- **通知带项目前缀**：webhook/IM/SMTP 推送文本标题前缀 `[项目名]`（半夜收到 critical 先答"哪个站点"），默认 JSON 出口增加 `project` 字段
+- **切换记忆**：活动项目选择按名存 localStorage，定义加载后校验恢复（项目已删则清除；会话内手选优先）
+- 验证：netdev 全包测试过（新增 TestProjectForDevices / TestSaveFindingStampsProject / TestListFindingsBackfillsLegacyProject：多数归属/平票/伪设备/未分组桶、重保存不覆盖、回填不改文件）；locale-parity 2/2；tsc 零新错；dash-boards 4/4
+
+### feat(browser): 浏览器能力加厚——历史导航工具 + 表格提取 + 录制捕获滚动
+
+用户方向：邮件后置，先把浏览器能力丰富。三个缺口补齐：
+
+- **browser_back / browser_forward**（内核工具 + 步骤词汇 + 面板原语 + 试运行）：重放「看 A → 瞄一眼 B → 回 A」类流程走历史栈（保状态、免整页重载），无历史条目时页面不动不算错；入 BrowserTools 名册（16→18）、编辑器基础操作分组、skillDoc 解析/序列化/摘要、wailsjs/bridge/mock
+- **browser_extract 表格模式**（format=table）：把选择器下（或整页）的 `<table>` 渲染为 markdown 表格，行列结构保留（转义 `|`、每表 200 行、至多 10 表、沿用 200k 截断与 untrusted 包裹）——SIEM 日志栅格/结果表不再被纯文本提取拍平；面板提取盒加「表格」勾选，extract 步骤值列写 table 即表格模式
+- **录制捕获滚动**：注入脚本加 scroll 监听（防抖 800ms、按元素记忆位置算增量、<200px 抖动忽略、600px≈1 屏），事件 value=「方向 屏数」；朴素转换输出 scroll 步骤（缺省方向 down/3 屏），AI 归纳 prompt 的类型清单同步加 scroll；前端轨迹摘要显示「滚动 down 4」
+- 验证：roster 18 工具过；TestNaiveSkillDraftScrollSteps（滚动→步骤、缺省回退）；skill-doc 87/87（back/forward/table 无损往返 + 摘要）；locale-parity 2/2；tsc 零新错；双模块 build 全绿
+
+### feat(netdev/desktop): 安全日志值守技能 browser-siem-watch——定时巡检安全平台、分析判定、邮件告警
+
+用户场景：用浏览器能力登录安全态势感知平台，定时读取日志实时分析判断，发现问题调用邮箱发送。定时机制本就存在（schedule_create：every/cron/daily，任务跨重启持久化，结果可经 im/email/notify/file 投递，固定在 cowork profile 运行故浏览器+邮箱工具均在），缺的是无人值守适配的技能协议。技能库「循环与值守」组新增 **browser-siem-watch**（第 8 个模板）：
+
+- **无人值守前提**：任何环节不等待人工——掉线的正确动作是 email_send 通知重新登录（防刷屏：只在登录态由好变坏第一次发），不是等人
+- **登录态延续**：靠浏览器持久化配置文件的 cookie（首次人工登录一次）；每次巡检 browser_open+navigate 后做登录态判断（重定向登录页即掉线）
+- **分析判定**：按判定要点（默认高危告警/异地或非工作时间登录/批量失败/策略命中突增，可参数化）分析提取的日志；可疑不确定的列「待人工复核」不告警
+- **告警纪律**：一轮最多一封告警邮件（多条问题合并）；无问题静默；结果摘要永远返回（存档到定时任务，schedule_list 可查，防空黑洞）
+- **无头邮件门控如实写进协议**：无对话页触发时 email_send 默认拒绝（RiskExternal），需设置放行或保持 cowork 页开启
+- 验证：skill-doc 78/78（守卫自动覆盖新模板：browser- 前缀 + runAs:inline）；locale-parity 2/2；tsc 零新错
+
+### fix(skill): 技能索引溢出策略——休眠降级优先于静默截断；运维面板技能列表浏览器优先
+
+用户问：技能一多，对话会不会读太多技能描述？答：正文从不进系统提示（按需经 run_skill 加载），索引每行限 130 字符、整块限 4000 字符（约 35–45 个技能）——但原实现对超 budget 是**字符级静默截断**，多出来的技能模型看不见且截断点任意。修复：
+
+- **分区排序**：活跃技能在前、休眠（[休眠]，长期未用）在后——预算紧张先吃休眠项
+- **分级降级**：超 4000 字符时先把休眠技能压缩为仅名字行（名字仍可调用）→ 仍超才整行截断，且截断提示报告**省略的技能数**（可行动：用户仍可 /名称 直调，长期不用的可去设置退休），不再出现半行乱码
+- **面板列表排序**：BrowserConsoleListSkills 浏览器技能优先、其余按名排序，技能库变大后面板仍可扫读
+- 验证：skill 包全过（新增 TestApplyIndexColdSkillsDegradeFirst：活跃描述在压缩后存活、休眠项转仅名字、顺序活跃在前；截断测试改断言省略数+整行切割）；desktop build/test 过
+
+### fix(netdev/desktop): 工作台切换条回归 SPEC——仅在非对话视图渲染，对话主区恢复 v1.1 像素等价
+
+用户反馈：运维界面右侧 dock 里点几个按钮（日志面板「工作台 · 合并」chip、告警「创建工单/证据链」），对话主区顶部就永久多出一条「对话/日志/安全告警/大屏 + Esc 返回对话」页签栏，回到对话欢迎页也不消失，且默认编码会话从无此物，观感突兀。根因：实现把 SPEC §10.2「只开对话时切换条完全不渲染」落成了 `*BenchEverOpened` 一次性闩锁——开过任一工作台即常驻；且「Esc 返回对话」提示在对话视图下按 Esc 实际无效（误导）。修复：渲染条件改为 `bench !== "chat"`——bar 只在日志/安全/大屏工作台为当前视图时出现，Esc 或「对话」chip 返回即隐去（提示也因此只在真正生效时可见）；工作台本体保持挂载、现场不丢，重进入口不变（侧栏「大屏/安全告警」、dock 日志面板 chip、命令面板、`o`/`Alt+1..5`、`?bench=` 深链）。SPEC §10.2/§10.3 图注/§10.8 隐藏规则/§10.10 发布门禁第 6 条同步改为「对话视图下切换条不渲染（含曾开过工作台后返回对话的场景）」。
+
+### refactor(netdev/desktop): 技能库命名加 browser- 域前缀
+
+用户指出：模板技能保存后是全局技能（对话里随处 / 调用），裸名（data-export、page-patrol）易与未来的非浏览器技能撞名。全部模板默认名改为 `browser-*`（browser-login-keep / browser-form-submit / browser-stream-query / browser-data-export / browser-page-patrol / browser-site-console / browser-my-skill），跟随内核内置技能的域前缀惯例（browser-auto / desktop-auto / email-auto）；选 browser- 而非 netdev- 是因为技能域是浏览器操作（cowork 与运维通用），不是网络设备专属。守卫测试同步锁定：库内所有模板名必须以 browser- 开头。skill-doc 75/75；tsc、locale-parity 过。
+
+### feat(netdev/desktop): 运维技能库——浏览器页签内置七个专门运维 skill 模板
+
+用户要求：运维界面的浏览器应有多个专门的浏览器运维操作 skill，不止一个。模板内容抽到 `src/lib/skillTemplates.ts` 统一维护，「新建技能」画廊改为**分组技能库**（每卡带说明与形态徽标）：
+
+- **快速起步**：空白步骤表
+- **常用运维操作**（步骤表形态，可结构化编辑/试运行）：**登录与保活**（human 登录 + url: 自动检测 + 登录态验证，长间隔任务衔接「保持会话」）；**表单填报**（ask 拿单号 → 填表 → human 过滑块 → stable 等流式回执 → 提取）；**流式问答/AI 站点**（ask 拿问题 → 填入发送 → stable:.answer 等流式回答完成 → 提取回答）；**数据导出**（ask 拿筛选条件 → 应用 → 导出 → 等完成 → 提取/确认下载）
+- **循环与值守**（对话式 runAs:inline 协议）：**页面巡检**（逐轮提取关键指标与上一轮对比，变化即报，空闲保活、消息唤醒）；**值守循环**（通用形态：逐轮接收指令、定位操作、等流式输出、回报、保活询问）
+- **解析守卫测试**：skill-doc 新增库守卫——表格型模板必须 lossy=false、协议型必须 runAs:inline 且可解析、库 ≥7 个模板；模板破坏编辑器解析器会在 CI 失败而不是在用户面前失败
+- 验证：skill-doc 68/68（含 20 项模板守卫）；locale-parity 2/2（zh/en 各 +13 键）；tsc 零新错；CSS 语法/token 检查新增部分全合规（剩余违规为预存基线）；面板/编辑器行为不变
+
+### feat(netdev/desktop): 技能编辑体验升级——ask 运行时询问 + 分类步骤面板 + 模板画廊
+
+用户澄清：此前给的 7 步流程只是场景之一，真实场景更复杂——不要写死流程，要可扩展；且优先把编辑界面做好用。落地：
+
+- **ask 步骤（运行时询问，表达力扩展的核心）**：步骤表新增 `ask`——目标列=回复绑定的参数名、值列=问用户的问题；试运行到 ask 暂停并在横幅里给出**输入框**，回复经 `TrialResume(reply)` 送回绑定到参数，**后续步骤的 {{参数名}} 在运行时替换**（TrialRun 改收原始步骤+参数表，逐步执行前替换；未绑定引用保持字面量可见，不静默置空）——「用户给数据/指令 → fairpeer 拿去页面操作」的通用机制；与 human（人操作）、wait stable:（流式完成）、源码协议（任意控制流）组合，覆盖比固定模板复杂的真实流程
+- **界面友好（编辑器）**：步骤类型按「基础操作 / 读取 / 等待与检测 / 人工与对话」分组（行内下拉 optgroup + 新的「按类型添加」面板，每步带一句说明）；新步骤带合理默认值；切换类型保留仍适用字段（click→type 留 target，human⇄ask 留提示语）；对话式协议技能（步骤表解析为 lossy）直接以源码模式打开并显示提示横幅（说明 /名称 调用），不再误入空结构化表单
+- **界面友好（技能页签）**：「新建技能」改为**模板画廊**：空白步骤表 / 表单填报（含人工断点，演示 ask→{{参数}}→human→stable 全链路）/ 值守循环（对话式），每张卡带说明；空技能列表给出引导文案（模板起步或去录制生成）
+- **AI 归纳同步**：生成 prompt 增加 ask 规则（运行时才知道的值输出 ask、目标列参数名、后续 {{参数名}} 引用）与 stable: 等流式输出的提示
+- 验证：skill-doc 48/48（ask 无损往返、{{ref}} 收集）；desktop `TestSubstStepParams`（绑定替换 + 未绑定保持字面量）等全过；locale-parity 2/2（zh/en 各 +28 键）；tsc 零新错（TrustDomainPanel 预存本地错误除外）；z-index/radius 检查我的新增全部用 token（剩余违规为预存基线，经 stash 对照确认）；双模块 build 全绿
+
+### feat(netdev/desktop): 值守循环——对话式浏览器技能模板 + 流式输出稳定检测 + 会话级保活工具
+
+用户诉求（第二步）：技能要能表达「打开站点等人登录 → 逐轮接收对话指令 → 在用户指定位置输入/点击 → 等远端流式输出完成 → 判断后回报 → 待机保活 → 用户消息唤醒继续」的循环流程，且从编码对话框 `/技能名` 唤起逐步执行。线性步骤表表达不了循环，落地为三件套：
+
+- **值守循环模板**（技能页签「新建值守循环」）：`runAs: inline` 的散文协议——正文折入对话回合，主模型当编排者，浏览器操作派发给 browser-auto 子代理并跨轮复用同一 session_id（登录态不丢）；开局明确「登录由用户在浏览器窗口手动完成，完成后在对话里回复」并教模型理解「好了/done/已登录」等变体；每轮含定位规则（准确选择器直用 / 描述先 snapshot）、流式等待、结论先行回报；轮末一次性保活询问（用户同意才 arm）；用户任何新消息即唤醒下一轮
+- **`browser_wait` 新增 `stable:<选择器>` 条件**：元素内容签名（文本长度+子元素数）停止变化 ≥2 秒判定流式输出完成——远端 AI/流式回复「是否输出完」的标准检测；`url:`/`stable:` 均入 Description/Schema
+- **会话级保活重构 + `browser_keepalive` 工具**：保活从 console 全局态下移到 `browserSession`（keepMu/keepStop/keepMode… 字段 + 每会话循环，随会话关闭而止）；运维面板「保持会话」开关（ConsoleSetKeepAlive）与 agent 侧 browser_keepalive 工具（已入 BrowserTools 名册与 browser-auto 白名单，主循环照旧 Hide 经子代理调用）arm 同一机制——值守循环里用户说「保活」即可，无需离开对话去点面板；ping 模式页内同源凭据 fetch 滑动站点会话、navigate 定时刷新、local 仅防回收，interval 60–3600s
+- 验证：TestBrowserToolsRoster 更新 16 工具过；builtin browser/console/wait 测试集过；skill 包全过；skill-doc 37/37；locale-parity 2/2；tsc 零新错（TrustDomainPanel 预存本地错误除外）；双模块 build 全绿
+
+### feat(netdev/desktop): 运维浏览器控制台三升级——技能子页签 + 人工断点步骤 + 会话保活
+
+用户诉求：浏览器面板只有「交互/录制」两个子页签，技能编辑能力没有独立位置；短信验证码/登录这类必须人做的操作需要技能在运行时暂停等人给信号；长间隔任务（如登录后 3 小时再来）站点会话与本地会话都会掉，需要保活。
+
+- **技能子页签**（编辑能力的位置）：浏览器面板改为「交互/录制/技能」三子页签；技能列表从录制页签迁出独立成页——新建（空白模板含 human 步骤示例）/编辑/删除（确认后删目录）/▶ 试运行（打开编辑器即自动开跑）；录制页签回归纯录制
+- **人工断点（human 步骤）**：步骤类型新增 `human`——表格目标列写自动检测条件（`visible:<选择器>`/`url:<片段>`/`title:<文案>`/`hidden:`），值列写给人看的提示语；试运行遇 human 步骤暂停并广播 `waiting`，编辑器顶部弹出「等待人工操作」横幅（继续/中止按钮）；自动检测条件每 1.5s 非阻塞轮询（`ConsoleDetectOnce`），满足即自动放行，人也可随时点「已完成，继续」——两条路都通；超时默认 10 分钟；`BrowserConsoleTrialResume/Abort` 新绑定 + 试运行单飞行守卫 + 陈旧令牌排空（防连点继续误放行后续断点）
+- **录制→human 归纳**：AI 生成 prompt 明确「短信/邮箱验证码、扫码、登录密码、人机验证、支付确认一律输出 human 步骤」；朴素转换 fallback 同规则（password 字段与验证码类输入转 human，验证码值绝不落盘）
+- **会话保活**（会话栏「保持会话」开关 + 状态行）：每 tick 先刷 `lastUsed` 防内核 10 分钟空闲回收，再按模式刷站点会话——`ping` 页面内同源 `fetch(location.href, {credentials:'include'})` 心跳滑动 cookie/服务端会话不打扰页面（跨 tick 读 `window.__fpKA` 上报状态，401/403 报「站点会话可能已失效」）；`navigate` 定时整页刷新（可指定 URL）；`local` 仅防本地回收；间隔 1–60 分钟可调（下限 60s 防轰）；状态行显示模式/间隔/上次刷新时间/错误，30s 轮询刷新；ConsoleClose 自动停
+- **kernel**：`browser_wait` 新增 `url:<text>` 条件（登录跳转检测）；`ConsoleState` 扩 keep_alive 五字段
+- 验证：desktop `TestNaive*`/`TestLooksLike*` 过（密码/验证码转 human、验证码值不泄漏）；skill-doc 37/37 过（human 解析/序列化/摘要无损往返）；locale-parity 2/2 过；tsc 零新错（TrustDomainPanel 预存本地错误除外）；双模块 build 全绿
+
+### fix(desktop/i18n): 运维界面中文化补全——ndv.* 残留英文全量翻译 + 信任域/杂项硬编码收口
+
+用户反馈：设置（含 NetOps/信任域页签）与运维大屏在 zh 界面下仍大量英文。上批「ndv 全量翻译」实际只覆盖部分键——短英文（"Loading…"/"⏸ Pause"/列名/状态词，≤15 字符或非小写开头）全部绕过 locale-parity 的启发式护栏，长期滞留。
+
+- **zh 词典补翻 503 键**：ndv.* 490 键（sets 设置四页签全部表单与提示——设备/跳板/项目/预设/告警规则/数据库源/通知出口/弱口令字典/审计；logp·logwb 日志与日志工作台；sec 安全案例/CVE 匹配/入侵排查向导；cut 割接全流程；tpl 变更模板；srv 配置快照与漂移；sc·gs·br 场景导引/快速上手/晨报；topo 拓扑图例；res·disc·rep·dev 结果卡/发现/状态包/设备卡；bse·brc 浏览器技能与控制台）+ 非 ndv 13 键（启动副标题/推理协议/验证令牌/API 地址/OpenAI 兼容/IM 机器人/远程 Server·Token/Hooks 页签等）；终端风格前缀（`>> NULL_DATA:`/`[SYS]`/`● REC`）、§引用、emoji、`{占位符}` 全部保留
+- **硬编码收口 3 处**：TrustDomainPanel 面板头 `quorum {n}` → `trustdomain.quorum`（法定人数）；紧急刹车原因 `"paused from settings"` → `trustdomain.pauseReason`（随界面语言，入域账本可见）；NetDevSection 设备表单 `Docker socket` 标签 → `ndv.sets.fDockerSock`；三键 en/zh 同步新增
+- **保留英文（有意）**：品牌/协议名（Telegram、STARTTLS、WSL…）、格式占位（`sk-…`、`name@domain.com`、`shift+tab`）、mock 演示串与既有白名单键、纯 `{占位符}` 模板——残留清单复核仅此 44 条
+- 验证：locale-parity 2/2 过；en/zh `{var}` 占位符集合逐键比对零错配；tsc 零错；dash-boards + live-ops-state 10/10 过
+
 ### fix(desktop/netdev): 全新环境下启动崩溃——Go nil 切片序列化成 JSON null 被前端直用
 
 真实后端（非 mock）首启即崩 `TypeError: Cannot read properties of null (reading 'slice')`：mock 壳数据恒非空掩盖了该问题。

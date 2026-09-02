@@ -629,6 +629,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			reg.Add(t)
 			reg.Hide(t.Name())
 		}
+		// Deterministic executor for `executor: browser-flow` skills: run_skill
+		// routes those to the kernel step-table runner instead of an LLM
+		// subagent — long per-site flows run verbatim, no per-step drift.
+		// Callback-shaped so the skill package stays independent of the tool
+		// layer (boot is the natural meeting point).
+		skill.SetFlowRunner(func(ctx context.Context, sk skill.Skill, arguments string) (string, error) {
+			return builtin.RunBrowserFlow(ctx, sk.Body, arguments)
+		})
 		// Browser launch options must be wired for netdev too — the ops
 		// console's spawned sessions read the same global config (visible
 		// window + persistent profile + proxy). The proxy URL is resolved
