@@ -40,7 +40,7 @@ export interface DockTabDef<K extends string> {
   label: string;
   title?: string;
   icon: ReactNode;
-  // Numeric count chip (netdev 发现/提案 pending counts).
+  // Numeric count chip (netdev 发现/变更 pending counts).
   badge?: number;
   // Activity dot, shown while the tab is NOT active (coding's changed-dirty).
   dot?: boolean;

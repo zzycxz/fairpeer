@@ -100,6 +100,9 @@ func BuildAttackPaths(g TopologyGraph, findings []*Finding) *AttackPathReport {
 		Simulated:   true,
 		Nodes:       len(g.Nodes),
 		Edges:       len(g.Edges),
+		// Arrays start non-nil: a nil slice marshals to JSON null and the
+		// frontend's paths.length / exposure_points.length white-screens.
+		EdgeSources: []string{}, ExposurePoints: []ExposurePoint{}, Paths: []AttackPath{}, Cuts: []CutSuggestion{},
 	}
 	// Adjacency (undirected: reachability works both ways) + node meta.
 	adj := map[string][]AttackPathStep{}

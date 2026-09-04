@@ -686,6 +686,81 @@ api_key_env = "FAIRPEER_TEST_KEY_UNSET"
 	}
 }
 
+// TestBuildSkillDomainFolding guards the `domain:` frontmatter gate: a USER
+// skill declaring a domain the profile's SkillDomains doesn't cover is folded
+// out of the pinned index (zero prompt cost, no mis-routing) yet stays
+// EXECUTABLE — unlike a profile-hidden shipped skill, which is also disabled.
+// Undomained user skills are never folded. The motivating leak: netdev-assess
+// (domain: netdev) showing up in the coding/office indexes where no netdev_*
+// tools exist.
+func TestBuildSkillDomainFolding(t *testing.T) {
+	dir := robustTempDir(t)
+	home := robustTempDir(t)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Chdir(dir)
+	writeFile(t, home, ".fairpeer/skills/foldme-ops.md", "---\nname: foldme-ops\ndescription: domained browser skill\ndomain: browser-ops\n---\nplaybook")
+	writeFile(t, home, ".fairpeer/skills/keepme-any.md", "---\nname: keepme-any\ndescription: undomained skill\n---\nplaybook")
+	writeFile(t, dir, "fairpeer.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
+`)
+
+	// dev-like profile covers only the "code" sentinel domain: the browser-ops
+	// skill folds out of the index, the undomained one stays listed.
+	devProfile := &config.Profile{Name: config.ProfileDev, SkillDomains: []string{"code"}}
+	ctrl, err := Build(context.Background(), Options{Profile: devProfile})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	sys := systemMessage(ctrl.History())
+	if strings.Contains(sys, "foldme-ops") {
+		t.Fatalf("domain-folded skill must NOT appear in system prompt:\n%s", sys)
+	}
+	if !strings.Contains(sys, "keepme-any") {
+		t.Fatalf("undomained user skill should appear in system prompt:\n%s", sys)
+	}
+	// Folded ≠ disabled: the skill remains callable (run_skill / /<name>).
+	executable := false
+	for _, s := range ctrl.Skills() {
+		if s.Name == "foldme-ops" {
+			executable = true
+		}
+	}
+	if !executable {
+		t.Fatal("domain-folded skill must stay executable via ctrl.Skills()")
+	}
+	ctrl.Close()
+
+	// netdev-like profile covers browser-ops: the same skill is listed.
+	ndProfile := &config.Profile{Name: config.ProfileNetDev, SkillDomains: []string{"browser-ops", "netdev"}}
+	ctrl2, err := Build(context.Background(), Options{Profile: ndProfile})
+	if err != nil {
+		t.Fatalf("Build (netdev): %v", err)
+	}
+	defer ctrl2.Close()
+	sys2 := systemMessage(ctrl2.History())
+	if !strings.Contains(sys2, "foldme-ops") {
+		t.Fatalf("browser-ops skill should appear in a netdev-domain prompt:\n%s", sys2)
+	}
+	if !strings.Contains(sys2, "keepme-any") {
+		t.Fatalf("undomained user skill should appear in a netdev-domain prompt:\n%s", sys2)
+	}
+}
+
 func TestBuildOmitsExcludedSkillRootsFromPromptAndRuntimeList(t *testing.T) {
 	dir := robustTempDir(t)
 	home := robustTempDir(t)

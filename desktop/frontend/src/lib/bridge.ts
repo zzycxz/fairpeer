@@ -31,6 +31,7 @@ import type {
   NetDevExecResult,
   NetDevLogFollowEvent,
   NetDevLogSearchResult,
+  NetDevLogSourceProbe,
   NetDevTriageReport,
   NetDevLocateResult,
   NetDevSeriesPoint,
@@ -508,6 +509,11 @@ export interface AppBindings {
   // diagnostics / SNMP health snapshot. Follow chunks + health changes stream
   // on the "netdev:logfollow" / "netdev:health" channels.
   NetDevLogRead(device: string, source: string, tailN: number, since: string, grep: string): Promise<NetDevExecResult>;
+  NetDevProbeLogSources(device: string): Promise<NetDevLogSourceProbe>;
+  NetDevSerialPorts(): Promise<string[]>;
+  NetDevFileFinding(device: string, source: string, severity: string, lines: string[]): Promise<unknown>;
+  // 浏览器→发现 桥：把运维浏览器当前页（网址+备注）立案为发现。
+  NetDevBrowserFinding(url: string, severity: string, note: string): Promise<unknown>;
   NetDevLogSearch(pattern: string, devices: string[], sources: string[], since: string): Promise<NetDevLogSearchResult>;
   NetDevTriageRun(device: string): Promise<NetDevTriageReport>;
   // kind=docker / kind=k8s read-only API targets (NETDEV_SPEC_V2 §2.2/§2.3).
@@ -574,7 +580,7 @@ export interface AppBindings {
   NetDevCutoverRollback(id: string): Promise<NetDevCutoverRun>;
   NetDevCutoverAbort(id: string): Promise<NetDevCutoverRun>;
   NetDevCutoverReport(id: string): Promise<string>;
-  // 批量模板（§7.2）——渲染预览无副作用；apply 生成提案草稿
+  // 批量模板（§7.2）——渲染预览无副作用；apply 生成变更草稿
   NetDevTemplates(): Promise<NetDevTemplate[]>;
   NetDevTemplateSave(t: NetDevTemplate): Promise<NetDevTemplate>;
   NetDevTemplateDelete(id: string): Promise<void>;
@@ -653,9 +659,10 @@ export interface AppBindings {
   BrowserConsoleBack(): Promise<string>;
   BrowserConsoleForward(): Promise<string>;
   BrowserConsoleExtractTable(selector: string): Promise<string>;
-  BrowserConsoleElements(): Promise<import("./types").BrowserConsoleElement[]>;
+  BrowserConsoleElements(): Promise<import("./types").BrowserElementsResult>;
   BrowserConsoleDeepScan(maxScrolls: number): Promise<import("./types").BrowserConsoleScanResult>;
   BrowserConsoleDevTools(): Promise<import("./types").BrowserDevToolsView>;
+  BrowserConsoleHover(target: string): Promise<string>;
   BrowserConsoleClick(target: string): Promise<string>;
   BrowserConsoleType(target: string, text: string): Promise<string>;
   BrowserConsoleKey(key: string): Promise<void>;
@@ -663,7 +670,7 @@ export interface AppBindings {
   BrowserConsoleSelectOption(target: string, value: string): Promise<string>;
   BrowserConsoleUploadFile(target: string, files: string[]): Promise<string>;
   BrowserConsoleWait(condition: string, timeoutSec: number): Promise<string>;
-  BrowserConsoleExtract(selector: string): Promise<string>;
+  BrowserConsoleExtract(selector: string, format: string): Promise<string>;
   BrowserConsoleScreenshot(): Promise<string>;
   BrowserConsoleEvaluate(expression: string): Promise<string>;
   BrowserConsoleRecordStart(): Promise<void>;
@@ -674,10 +681,22 @@ export interface AppBindings {
   BrowserConsoleListSkills(): Promise<import("./types").BrowserConsoleSkill[]>;
   BrowserConsoleReadSkill(name: string): Promise<string>;
   BrowserConsoleDeleteSkill(name: string): Promise<void>;
+  BrowserConsoleWakeSkill(name: string): Promise<void>;
   BrowserConsoleSetKeepAlive(enabled: boolean, intervalSec: number, mode: string, url: string): Promise<import("./types").BrowserConsoleState>;
   BrowserConsoleTrialRun(steps: import("./types").BrowserConsoleStep[], params: Record<string, string>): Promise<void>;
   BrowserConsoleTrialResume(reply: string): Promise<void>;
   BrowserConsoleTrialAbort(): Promise<void>;
+  // 时间范围短语解析（"最近5分钟" → 字面范围串）；未识别返回空串。
+  BrowserConsoleResolveTimeRange(text: string): Promise<string>;
+  // 对下载目录里的导出文件（.xlsx/.csv）跑 AI 告警研判，返回 markdown 报告。
+  BrowserConsoleAnalyzeDownload(path: string, analysisKind: string): Promise<import("./types").BrowserDownloadAnalysis>;
+  // 定时巡检：按配置（技能/间隔/对齐时间/通知策略）轮跑 browser-flow 技能
+  // （整分对齐闭合窗口），等下载、AI 研判、按研判结论路由通知
+  // （IM bot/邮件/系统通知）；轮次结果经 "browser:watch" 事件推送；
+  // 配置持久化于 browser_watch.json，应用重启自动恢复。
+  BrowserConsoleWatchStart(config: import("./types").BrowserConsoleWatchConfig): Promise<void>;
+  BrowserConsoleWatchStop(): Promise<void>;
+  BrowserConsoleWatchState(): Promise<import("./types").BrowserConsoleWatchState>;
   // Loop Engineering (docs/loop-engineering-spec.md): start/stop/status of the
   // supervised agent loop. Round updates arrive on the "loop:round" event.
   LoopStart(tabID: string, config: LoopConfig): Promise<void>;
@@ -966,6 +985,25 @@ function emitNetdevLiveMock(events: NetDevLiveEvent[]) {
   for (const cb of netdevLiveListeners) cb(events);
 }
 
+// onNetdevFindingSaved subscribes to the saved-finding push channel
+// ("netdev:finding-saved": one NetDevFinding — desktop/netdev_app.go forwards
+// the package-level observer fired after every successful save, so chat-skill
+// runs, CVE/assessment sweeps and alerts all arrive here the moment they land).
+const netdevFindingSavedListeners = new Set<(f: NetDevFinding) => void>();
+export function onNetdevFindingSaved(cb: (f: NetDevFinding) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("netdev:finding-saved", (f) => cb(f as NetDevFinding));
+  }
+  netdevFindingSavedListeners.add(cb);
+  return () => {
+    netdevFindingSavedListeners.delete(cb);
+  };
+}
+
+export function emitNetdevFindingSavedMock(f: NetDevFinding) {
+  for (const cb of netdevFindingSavedListeners) cb(f);
+}
+
 // onNetdevHumanTTY subscribes to the human-terminal output stream
 // ("netdev:humantty": {device, chunk} — desktop/netdev_app.go forwards the
 // Go-side PTY tap). Device tabs filter by device name.
@@ -1063,12 +1101,75 @@ export function emitBrowserTrialMock(st: import("./types").BrowserConsoleTrialSt
   for (const cb of browserTrialListeners) cb(st);
 }
 
+// onBrowserWatch subscribes to the standing watch's state/round stream
+// ("browser:watch": state snapshots and per-round updates).
+export function onBrowserWatch(cb: (ev: import("./types").BrowserConsoleWatchEvent) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("browser:watch", (ev) => cb(ev as import("./types").BrowserConsoleWatchEvent));
+  }
+  browserWatchListeners.add(cb);
+  return () => {
+    browserWatchListeners.delete(cb);
+  };
+}
+
+const browserWatchListeners = new Set<(ev: import("./types").BrowserConsoleWatchEvent) => void>();
+
+export function emitBrowserWatchMock(ev: import("./types").BrowserConsoleWatchEvent) {
+  for (const cb of browserWatchListeners) cb(ev);
+}
+
 // Mock human-breakpoint gate: the dev-mode TrialRun parks on a promise that
 // Resume/Abort resolves, mirroring the Go-side consoleTrialGate channels. The
 // resume verdict carries the ask step's reply text.
 type MockTrialVerdict = { kind: "resume"; reply: string } | { kind: "abort" };
 
 let mockTrialResolve: ((verdict: MockTrialVerdict) => void) | null = null;
+
+// Mock watch state: a repeating synthetic round so the panel's 巡检 log is
+// demoable in browser dev mode.
+let mockWatchTimer = 0;
+
+function stopMockWatch() {
+  if (mockWatchTimer) {
+    window.clearInterval(mockWatchTimer);
+    mockWatchTimer = 0;
+  }
+}
+
+function mockWatchRound(skill: string): import("./types").BrowserConsoleWatchRound {
+  const now = new Date();
+  const fmt = (t: Date) => t.toISOString();
+  return {
+    started_at: fmt(new Date(now.getTime() - 60_000)),
+    finished_at: fmt(now),
+    time_range: "2026-01-01 09:55:00 - 2026-01-01 10:00:00",
+    status: "done",
+    download_name: "alerts-export.xlsx",
+    download_path: `C:\\mock\\browser-downloads\\${skill}-alerts.xlsx`,
+    rows: 42,
+    analysis: "## 概览 (mock)\n共 42 条告警；1 条需关注（SSH 爆破成功），其余为备份网段基线流量。",
+    compromised_hosts: ["10.0.0.5"],
+    attention_count: 1,
+    severity: "high",
+    notified: ["im", "system"],
+    steps: [{ index: 0, type: "type", status: "done", output: "(mock)" }],
+  };
+}
+
+function mockWatchState(config: import("./types").BrowserConsoleWatchConfig): import("./types").BrowserConsoleWatchState {
+  const anchor = new Date();
+  anchor.setSeconds(0, 0);
+  return {
+    active: true,
+    skill: config.skill,
+    interval_sec: config.interval_sec,
+    anchor: anchor.toISOString(),
+    next_at: new Date(anchor.getTime() + config.interval_sec * 1000).toISOString(),
+    notify: config.notify,
+    rounds: [mockWatchRound(config.skill)],
+  };
+}
 
 function mockTrialGate(): Promise<MockTrialVerdict> {
   return new Promise((resolve) => {
@@ -1123,7 +1224,7 @@ function playNetdevLiveMockDemo() {
       { kind: "cmd_output", device: dev, chunk: "<HUAWEI>", time: t() },
       { kind: "cmd_end", device: dev, command: "display ospf peer", class: "read", status: "ok", ms: 880, bytes: 168, time: t() },
     ]],
-    [1400, [{ kind: "cmd_refused", device: dev, command: "save", class: "write", time: t(), reason: "写命令——运维会话结构性只读；变更走人工审批的提案。" }]],
+    [1400, [{ kind: "cmd_refused", device: dev, command: "save", class: "write", time: t(), reason: "写命令——运维会话结构性只读；变更走人工审批的变更。" }]],
   ];
   for (const [delay, events] of script) {
     window.setTimeout(() => emitNetdevLiveMock(events), delay);
@@ -2311,6 +2412,20 @@ function makeMockApp(): AppBindings {
       }, 1000);
     },
     async NetDevLogFollowStop(_device: string) {},
+    async NetDevProbeLogSources(device: string): Promise<import("./types").NetDevLogSourceProbe> {
+      return {
+        device,
+        services: ["sshd", "nginx", "crond", "systemd-journald"],
+        containers: ["web"],
+        files: [
+          { name: "messages", path: "/var/log/messages", size: "814K", allowed: true },
+          { name: "secure", path: "/var/log/secure", size: "42K", allowed: true },
+          { name: "nginx-access.log", path: "/var/log/nginx-access.log", size: "2.1M", allowed: true },
+          { name: "app.log", path: "/opt/myapp/logs/app.log", size: "5.2M", allowed: false },
+        ],
+        errors: [],
+      };
+    },
     async NetDevSeries(_device: string, _hours: number): Promise<Record<string, NetDevSeriesPoint[]>> {
       return {};
     },
@@ -2532,6 +2647,15 @@ function makeMockApp(): AppBindings {
         created_at: new Date().toISOString(),
       };
     },
+    async NetDevSerialPorts(): Promise<string[]> {
+      return ["COM3"];
+    },
+    async NetDevFileFinding(_device: string, _source: string, _severity: string, _lines: string[]): Promise<unknown> {
+      return { id: "mock", title: "日志发现（browser dev mock）" };
+    },
+    async NetDevBrowserFinding(_url: string, _severity: string, _note: string): Promise<unknown> {
+      return { id: "mock", title: "控制台发现（browser dev mock）" };
+    },
     async NetDevLogSearch(pattern: string, _devices: string[], _sources: string[], since: string): Promise<NetDevLogSearchResult> {
       return {
         pattern,
@@ -2629,7 +2753,7 @@ function makeMockApp(): AppBindings {
       return JSON.stringify({ "@odata.type": "#Chassis.v1_20.Chassis", Id: "1", Name: "Mock Chassis", Thermal: { Fans: [{ Name: "Fan1", Reading: 2400, Status: { Health: "OK" } }] } }, null, 2);
     },
     async NetDevDailyBriefing() {
-      return "**总体判断**：网络平稳，风险等级 **低**。\n\n**需要关注**\n1. ACC-01 上行口错包增长（依据：今日发现）\n2. 基线：2 台设备仍在用 SNMP v2c（依据：基线核查）\n\n**建议动作**\n- 只读核查：ACC-01 接口错包计数（可直接做）\n- 变更：SNMPv3 迁移（需起草提案）";
+      return "**总体判断**：网络平稳，风险等级 **低**。\n\n**需要关注**\n1. ACC-01 上行口错包增长（依据：今日发现）\n2. 基线：2 台设备仍在用 SNMP v2c（依据：基线核查）\n\n**建议动作**\n- 只读核查：ACC-01 接口错包计数（可直接做）\n- 变更：SNMPv3 迁移（需起草变更）";
     },
     async NetDevFindings() { return [] as NetDevFinding[]; },
     async NetDevFindingDismiss(_id: string) { console.info("mock NetDevFindingDismiss", _id); },
@@ -2688,7 +2812,7 @@ function makeMockApp(): AppBindings {
         generated_at: Date.now(), stale_after_sec: 300,
         coverage: { managed: 2, discovered: 3, unreachable: 0, no_snmp: 1 },
         health: { polled: 1, reachable: 1, last_poll_at: Date.now(), flap_alerts: 0, p90_alerts: 0, uptime_spark: {}, max_cpu_pct: 87, max_cpu_dev: "SW-03", max_mem_pct: 62 },
-        risk: { critical: 0, warning: 1, info: 2, open_total: 3, weighted_score: 4, risk_level: "low", cve_matches: 0, cve_needs_feed: true, weak_creds: 0 },
+        risk: { critical: 0, warning: 1, info: 2, open_total: 3, weighted_score: 4, risk_level: "low", cve_matches: 0, cve_needs_feed: true, weak_creds: 0, vuln_critical: 0, vuln_warning: 0, vuln_open: 0 },
         inflight: { proposals_pending: 1, proposals_watchable: 0, jobs_running: 0, jobs_paused: 0, cutovers_active: 0, terminals_open: 0 },
         events: [{ id: "F-demo", severity: "warning", title: "link-flap SW-03", source: "syslog:SW-03:link-flap", at: "08-29 10:00" }],
         audit: { chain_ok: true, chain_total: 12, last_entry_at: "08-29 10:05", read_24h: 20, write_24h: 2, guardrail_24h: 0 },
@@ -4971,11 +5095,13 @@ function makeMockApp(): AppBindings {
       };
     },
     async BrowserConsoleElements() {
-      return [
-        { ref: "e1", role: "textbox", name: "用户名", value: "" },
-        { ref: "e2", role: "textbox", name: "密码", value: "" },
-        { ref: "e3", role: "button", name: "登录" },
-      ];
+      return {
+        elements: [
+          { ref: "e1", role: "textbox", name: "用户名", value: "", css: "input#username" },
+          { ref: "e2", role: "textbox", name: "密码", value: "", css: "input#password" },
+          { ref: "e3", role: "button", name: "登录", css: "button.login-btn" },
+        ],
+      };
     },
     async BrowserConsoleDeepScan(_maxScrolls: number) {
       await delay(600);
@@ -4994,6 +5120,7 @@ function makeMockApp(): AppBindings {
         stop: "no-new",
       };
     },
+    async BrowserConsoleHover(_t: string) { await delay(200); return "已悬停 (mock，CSS :hover 生效)"; },
     async BrowserConsoleClick(target: string) { await delay(200); return `已点击 ${target} (mock)`; },
     async BrowserConsoleType(target: string, text: string) { await delay(200); return `已在 ${target} 输入 ${text.length} 字符 (mock)`; },
     async BrowserConsoleKey(_key: string) { await delay(150); },
@@ -5001,7 +5128,7 @@ function makeMockApp(): AppBindings {
     async BrowserConsoleSelectOption(target: string, value: string) { return `已在 ${target} 选择 ${value} (mock)`; },
     async BrowserConsoleUploadFile(target: string, files: string[]) { return `已向 ${target} 上传 ${files.length} 个文件 (mock)`; },
     async BrowserConsoleWait(_condition: string, _timeoutSec: number) { await delay(300); return "waited (mock)"; },
-    async BrowserConsoleExtract(selector: string) { return selector ? `提取 ${selector} 的内容 (mock)` : "提取整页内容 (mock)"; },
+    async BrowserConsoleExtract(_selector: string, format: string) { await delay(300); return format === "markdown" ? "## 标题" + String.fromCharCode(10,10) + "**要点**（mock markdown）" : "提取内容 (mock)"; },
     async BrowserConsoleScreenshot() { await delay(300); return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(OPS_MOCK_FRAME)}`; },
     async BrowserConsoleEvaluate(_expression: string) { return "undefined (mock)"; },
     async BrowserConsoleRecordStart() { await delay(200); },
@@ -5048,7 +5175,8 @@ function makeMockApp(): AppBindings {
       return { name: nameHint || "mock-skill", content, fallback: true, detail: "browser dev mock" };
     },
     async BrowserConsoleSaveSkill(_content: string, _overwrite: boolean) { return "~/.fairpeer/skills/mock/SKILL.md (mock)"; },
-    async BrowserConsoleListSkills() { return [{ name: "mock-skill", description: "浏览器操作技能（mock）", browser: true }]; },
+    async BrowserConsoleListSkills() { return [{ name: "mock-skill", description: "浏览器操作技能（mock）", browser: true, draft: true }]; },
+    async BrowserConsoleWakeSkill(_name: string) { await delay(200); },
     async BrowserConsoleReadSkill(_name: string) { return "---\nname: mock-skill\ndescription: mock\n---\n\n# mock\n"; },
     async BrowserConsoleDeleteSkill(_name: string) { await delay(200); },
     async BrowserConsoleSetKeepAlive(enabled: boolean, _intervalSec: number, mode: string, _url: string) {
@@ -5093,13 +5221,75 @@ function makeMockApp(): AppBindings {
         await delay(400);
         emitBrowserTrialMock({ index: i, status: "done", output: "(mock)" });
       }
-      emitBrowserTrialMock({ index: -1, status: "done" });
+      // Demo the download card: a wait-download step yields a mock export.
+      const downloads = steps.some((s) => s.type === "wait" && (s.condition ?? "").startsWith("download"))
+        ? [{ name: "alerts-export.xlsx", path: "C:\\mock\\browser-downloads\\alerts-export.xlsx", state: "completed" }]
+        : undefined;
+      emitBrowserTrialMock({ index: -1, status: "done", downloads });
     },
     async BrowserConsoleTrialResume(reply: string) {
       mockTrialSignal({ kind: "resume", reply: reply ?? "" });
     },
     async BrowserConsoleTrialAbort() {
       mockTrialSignal({ kind: "abort" });
+    },
+    async BrowserConsoleResolveTimeRange(text: string) {
+      const m = /^(?:最近|近|过去)\s*(\d+)\s*(分钟|小时|天)$/.exec((text ?? "").trim());
+      if (!m) return "";
+      const n = parseInt(m[1], 10);
+      const unit = m[2] === "分钟" ? 60_000 : m[2] === "小时" ? 3_600_000 : 86_400_000;
+      const fmt = (t: Date) =>
+        `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}:${String(t.getSeconds()).padStart(2, "0")}`;
+      const end = new Date();
+      const start = new Date(end.getTime() - n * unit);
+      return `${fmt(start)} - ${fmt(end)}`;
+    },
+    async BrowserConsoleAnalyzeDownload(path: string, _analysisKind: string) {
+      await delay(1200);
+      return {
+        file: path.split(/[\\/]/).pop() ?? path,
+        rows: 42,
+        shown_rows: 42,
+        report: [
+          "## 概览 (mock)",
+          "共 42 条告警，时间跨度 5 分钟，以暴力破解与扫描类为主。",
+          "",
+          "## 需关注告警",
+          "| 行号 | 时间 | 源/目的IP | 告警名称 | 研判理由 | 建议动作 |",
+          "| --- | --- | --- | --- | --- | --- |",
+          "| 3 | 10:02 | 203.0.113.7 → 10.0.0.5 | SSH 爆破成功 | 同源 5 分钟内 37 次失败后出现成功登录 | 立即隔离主机并重置凭据 |",
+          "",
+          "## 疑似误报",
+          "- 行 11-18：备份网段 172.16.0.0/12 互访扫描，历史基线内",
+          "",
+          "## 建议动作",
+          "1. 隔离 10.0.0.5 并排查持久化项",
+          "2. 将 203.0.113.7 加入封禁清单",
+        ].join("\n"),
+      };
+    },
+    async BrowserConsoleWatchStart(config: import("./types").BrowserConsoleWatchConfig) {
+      await delay(200);
+      stopMockWatch();
+      mockWatchTimer = window.setInterval(() => {
+        emitBrowserWatchMock({ type: "round", round: mockWatchRound(config.skill) });
+        emitBrowserWatchMock({ type: "state", state: mockWatchState(config) });
+      }, Math.max(3, Math.min(config.interval_sec, 15)) * 1000);
+      // One immediate round so the panel shows life right away.
+      window.setTimeout(() => {
+        emitBrowserWatchMock({ type: "round", round: mockWatchRound(config.skill) });
+        emitBrowserWatchMock({ type: "state", state: mockWatchState(config) });
+      }, 800);
+      emitBrowserWatchMock({ type: "state", state: mockWatchState(config) });
+    },
+    async BrowserConsoleWatchStop() {
+      await delay(150);
+      stopMockWatch();
+      emitBrowserWatchMock({ type: "state", state: { active: false } });
+    },
+    async BrowserConsoleWatchState() {
+      await delay(100);
+      return mockWatchState({ skill: "mock-skill", interval_sec: 300, notify: { on_event: "compromised", system: true } });
     },
     // Loop Engineering mock: a fast 3-round simulation so the panel's config →
     // running → report flow is demoable without the Go backend.

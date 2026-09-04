@@ -297,6 +297,11 @@ func (c *Controller) RunSkill(input string) (sent string, found bool) {
 	}
 	name := strings.TrimPrefix(fields[0], "/")
 	if sk, ok := c.skillByName(name); ok {
+		if sk.Draft {
+			// Drafts are panel-only until woken — render the refusal as the
+			// turn text so the user sees WHY instead of a silent no-op.
+			return "This skill is still in draft (draft: true) and cannot be invoked yet. Please first wake it up in the ops browser panel's skill page (panel trial runs are not affected), then retry.", true
+		}
 		return skill.Render(sk, strings.Join(fields[1:], " ")), true
 	}
 	return "", false

@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/BurntSushi/toml"
 )
 
 type RenderScope string
@@ -550,6 +552,26 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			if pl.AutoStart != nil {
 				fmt.Fprintf(&b, "auto_start = %v\n", *pl.AutoStart)
 			}
+		}
+	}
+
+	// [netdev] rides the USER config only (pinNetDev drops any project-level
+	// copy, NETDEV_SPEC §7.3), so project scope never renders it — a project
+	// fairpeer.toml carrying devices the user never approved would be dead (and
+	// misleading) text. The section is marshaled from the struct instead of
+	// hand-rendered: its shape is owned by the settings pipeline and a missed
+	// field in a hand-rolled renderer is exactly how the desktop "保存设备
+	// succeeded but nothing persisted" bug happened (2026-09-03).
+	if scope != RenderScopeProject && !reflect.DeepEqual(c.NetDev, NetDevConfig{}) {
+		var nb strings.Builder
+		if err := toml.NewEncoder(&nb).Encode(struct {
+			NetDev NetDevConfig `toml:"netdev"`
+		}{c.NetDev}); err != nil {
+			b.WriteString("# [netdev] render failed — inventory NOT written; report this bug\n\n")
+		} else {
+			b.WriteString("# [netdev] 运维清单：设备/跳板/分组/站点与护栏。机密只进密钥库（*_env 指针），绝不写进本文件。\n")
+			b.WriteString(nb.String())
+			b.WriteString("\n")
 		}
 	}
 

@@ -347,3 +347,25 @@ func TestRunSkillExecutorRouting(t *testing.T) {
 		t.Errorf("flow runner must receive body+arguments, got args %q", gotArgs)
 	}
 }
+
+// TestDraftSkillGated pins the draft gate: run_skill refuses a draft with
+// actionable guidance, and the same skill runs once the draft flag is gone.
+func TestDraftSkillGated(t *testing.T) {
+	home := t.TempDir()
+	store := New(Options{HomeDir: home})
+	writeSkill(t, home, ".fairpeer/skills/draft-flow/SKILL.md", "---\nname: draft-flow\ndescription: d\ndraft: true\n---\nbody")
+	sk, ok := store.Read("draft-flow")
+	if !ok || !sk.Draft {
+		t.Fatalf("draft flag not parsed: %+v", sk)
+	}
+	tool := NewRunSkillTool(store, nil)
+	_, err := tool.Execute(context.Background(), json.RawMessage(`{"name":"draft-flow","arguments":""}`))
+	if err == nil || !strings.Contains(err.Error(), "draft") {
+		t.Fatalf("draft skill must be refused with guidance, got %v", err)
+	}
+	writeSkill(t, home, ".fairpeer/skills/draft-flow/SKILL.md", "---\nname: draft-flow\ndescription: d\n---\nbody")
+	store2 := New(Options{HomeDir: home})
+	if sk2, ok2 := store2.Read("draft-flow"); !ok2 || sk2.Draft {
+		t.Fatalf("woken skill must not parse as draft: %+v", sk2)
+	}
+}

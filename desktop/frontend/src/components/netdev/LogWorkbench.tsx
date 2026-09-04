@@ -11,7 +11,7 @@ import type { NetDevDeviceView, NetDevLogSearchResult } from "../../lib/types";
 // 密封扇出）。所有读取都走后端密封路径（分类器/预算/脱敏/审计），前端只
 // 做编排与呈现。父层保持本组件挂载以兑现 §10.2「关闭重开不丢」。
 
-type SrcKind = "file" | "journal" | "docker" | "k8s";
+type SrcKind = "system" | "file" | "journal" | "docker" | "k8s";
 
 interface SrcEntry {
   id: number;
@@ -82,7 +82,16 @@ const levelClass = (line: string): string => {
 // 关联源（§5.4 实体360°）：变更/发现/事件合并进同一条时间线。
 const KIND_LABEL: Record<string, string> = { change: "ndv.logwb.kChange", finding: "ndv.logwb.kFinding", event: "ndv.logwb.kEvent" };
 
-const sourceOf = (e: SrcEntry) => e.kind === "k8s" ? `k8s:${e.target.trim()}` : `${e.kind}:${e.target.trim()}`;
+// system:main = 整本 systemd journal（后端 logsource.go）——发行版无关的
+// 系统日志，Linux 设备的默认源。
+const sourceOf = (e: SrcEntry) => e.kind === "system" ? "system:main" : e.kind === "k8s" ? `k8s:${e.target.trim()}` : `${e.kind}:${e.target.trim()}`;
+
+// 与 LogPanel 相同的 OS 家系默认：RHEL 家系（centos/rocky）系统日志是
+// /var/log/messages + /var/log/secure，Debian 家系才是 syslog/auth.log。
+const isRhelFamily = (os?: string) => os === "centos" || os === "rocky";
+const defaultFileTarget = (os?: string) => (isRhelFamily(os) ? "/var/log/messages" : "/var/log/syslog");
+const defaultAuthTarget = (os?: string) => (isRhelFamily(os) ? "/var/log/secure" : "/var/log/auth.log");
+const DEFAULT_FILE_TARGETS = ["/var/log/syslog", "/var/log/messages"];
 
 export function LogWorkbench({ devices, onInsertComposer, hidden }: {
   devices: NetDevDeviceView[];
@@ -98,8 +107,10 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
   const [entries, setEntries] = useState<SrcEntry[]>([]);
   const nextId = useRef(1);
   const [addDevice, setAddDevice] = useState("");
-  const [addKind, setAddKind] = useState<SrcKind>("file");
-  const [addTarget, setAddTarget] = useState("/var/log/syslog");
+  const [addKind, setAddKind] = useState<SrcKind>(
+    hosts[0]?.vendor === "linux" && !hosts[0]?.kind ? "system" : "file"
+  );
+  const [addTarget, setAddTarget] = useState(defaultFileTarget(hosts[0]?.os));
 
   const [tailN, setTailN] = useState(200);
   const [since, setSince] = useState("");
@@ -229,21 +240,26 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
           </div>
         ))}
         <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
-          <select className="mem-select" value={effectiveAddDevice} onChange={e => setAddDevice(e.target.value)}>
+          <select className="mem-select" value={effectiveAddDevice} onChange={e => {
+            setAddDevice(e.target.value);
+            const dft = defaultFileTarget(hosts.find(h => h.name === e.target.value)?.os);
+            setAddTarget(tg => (DEFAULT_FILE_TARGETS.includes(tg) ? dft : tg));
+          }}>
             {hosts.map(h => <option key={h.name} value={h.name}>{h.name}</option>)}
             {hosts.length === 0 && <option value="">{t("ndv.logp.noHosts")}</option>}
           </select>
           <div style={{ display: "flex", gap: 4 }}>
             <select className="mem-select" style={{ width: 74 }} value={addKind} onChange={e => setAddKind(e.target.value as SrcKind)}>
+              {hosts.find(h => h.name === effectiveAddDevice)?.vendor === "linux" && <option value="system">{t("ndv.logp.kSystem")}</option>}
               <option value="file">{t("ndv.logp.kFile")}</option>
               <option value="journal">{t("ndv.logwb.kUnit")}</option>
               <option value="docker">{t("ndv.logwb.kContainer")}</option>
               <option value="k8s">K8s</option>
             </select>
             <input className="mem-input" style={{ flex: 1, minWidth: 0 }} value={addTarget} onChange={e => setAddTarget(e.target.value)}
-              placeholder={addKind === "file" ? "/var/log/nginx/error.log" : addKind === "journal" ? "nginx" : addKind === "k8s" ? t("ndv.logwb.phK8s") : t("ndv.logp.phContainer")} />
+              placeholder={addKind === "system" ? "" : addKind === "file" ? "/var/log/nginx/error.log" : addKind === "journal" ? "nginx" : addKind === "k8s" ? t("ndv.logwb.phK8s") : t("ndv.logp.phContainer")} />
           </div>
-          <span className="btn btn--secondary btn--small" role="button" onClick={() => addEntry(effectiveAddDevice, addKind, addTarget)}>{"＋ "}{t("ndv.logwb.addSource")}</span>
+          <span className="btn btn--secondary btn--small" role="button" onClick={() => addEntry(effectiveAddDevice, addKind, addKind === "system" ? "main" : addTarget)}>{"＋ "}{t("ndv.logwb.addSource")}</span>
         </div>
         {(devices.length > 0 && hosts.length === 0) && <div className="ndv__hint">{t("ndv.logwb.noServerDevices")}</div>}
       </div>
@@ -288,8 +304,11 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
               {t("ndv.logwb.emptyHint2")}
               {hosts[0] && (
                 <span style={{ display: "inline-flex", gap: 6, marginLeft: 8 }}>
-                  <span className="ndv__chip" role="button" onClick={() => addEntry(hosts[0].name, "file", "/var/log/syslog")}>{"＋ "}{hosts[0].name} /var/log/syslog</span>
-                  <span className="ndv__chip" role="button" onClick={() => addEntry(hosts[0].name, "file", "/var/log/auth.log")}>{"＋ "}auth.log</span>
+                  {hosts[0].vendor === "linux" && !hosts[0].kind && (
+                    <span className="ndv__chip" role="button" onClick={() => addEntry(hosts[0].name, "system", "main")}>{"＋ "}{hosts[0].name} {t("ndv.logp.kSystem")}</span>
+                  )}
+                  <span className="ndv__chip" role="button" onClick={() => addEntry(hosts[0].name, "file", defaultFileTarget(hosts[0].os))}>{"＋ "}{hosts[0].name} {defaultFileTarget(hosts[0].os)}</span>
+                  <span className="ndv__chip" role="button" onClick={() => addEntry(hosts[0].name, "file", defaultAuthTarget(hosts[0].os))}>{"＋ "}{defaultAuthTarget(hosts[0].os)}</span>
                 </span>
               )}
             </div>

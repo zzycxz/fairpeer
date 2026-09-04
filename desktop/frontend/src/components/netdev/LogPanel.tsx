@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { app, onNetdevLogFollow } from "../../lib/bridge";
 import { useT } from "../../lib/i18n";
 import { exportTextFile } from "../../lib/netdevExport";
-import type { NetDevDBSourceView, NetDevDeviceView, NetDevLogFollowEvent, NetDevSyslogCountRow } from "../../lib/types";
+import type { NetDevDBSourceView, NetDevDeviceView, NetDevLogFollowEvent, NetDevLogSourceProbe, NetDevSyslogCountRow } from "../../lib/types";
 
 // LogPanel — the 日志 dock tab: the structured log-source reader/streamer on
 // top of netdev_log_read / log follow. The agent never free-hands shell and
@@ -49,12 +49,20 @@ const levelClass = (line: string): string => {
   return "";
 };
 
-export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench, onOpenSettings }: {
+// RHEL 家系（centos/rocky）系统日志是 /var/log/messages + /var/log/secure；
+// Debian 家系才是 /var/log/syslog + /var/log/auth.log。文件源默认值跟着
+// 所选设备的 OS 走，centos 用户不再先撞一次 "cannot open /var/log/syslog"。
+const isRhelFamily = (os?: string) => os === "centos" || os === "rocky";
+const defaultFileTarget = (os?: string) => (isRhelFamily(os) ? "/var/log/messages" : "/var/log/syslog");
+const DEFAULT_FILE_TARGETS = ["/var/log/syslog", "/var/log/messages"];
+
+export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench, onOpenSettings, onOpenDiscovery }: {
   devices: NetDevDeviceView[];
   dbSources: NetDevDBSourceView[];
   onInsertComposer?: (text: string) => void;
   onOpenWorkbench?: () => void;
   onOpenSettings?: (tab: string) => void;
+  onOpenDiscovery?: () => void;
 }) {
   const t = useT();
   // 事件量（R3 journal，页签充实）：挂载拉一次——日志域自己的统计层。
@@ -69,8 +77,13 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
   const dev = hosts.find(h => h.name === device);
 
   // Source selection: kind + free-form target (unit / path / container / ns+pod).
-  const [kind, setKind] = useState<"file" | "journal" | "docker" | "k8s" | "db" | "syslog" | "winevt">("file");
-  const [target, setTarget] = useState("/var/log/syslog");
+  // system（整本 journal）是 Linux 设备的默认源：不要求用户知道自己这台
+  // 机器的发行版文件名（syslog vs messages），一个「系统日志」全通用。
+  const isLinuxHost = (d?: NetDevDeviceView) => d?.vendor === "linux" && !d?.kind;
+  const [kind, setKind] = useState<"file" | "journal" | "docker" | "k8s" | "db" | "syslog" | "winevt" | "system">(
+    isLinuxHost(hosts[0]) ? "system" : "file"
+  );
+  const [target, setTarget] = useState(defaultFileTarget(hosts[0]?.os));
   const [unit, setUnit] = useState("nginx");
   const [container, setContainer] = useState("");
   const [k8sNs, setK8sNs] = useState("");
@@ -90,6 +103,37 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const [following, setFollowing] = useState(false);
+  // 导出选项（当前显示 / 时间段）：时间段导出按所选范围重新走一次密封
+  // 读取（tail 拉满、套用当前过滤词）直接落文件，不要求先加载进查看器。
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  // 日志源探测：sealed 只读命令枚举这台机器真实存在的源（运行中的服务/
+  // 容器//var/log 文件），点选即切换——不再靠用户猜文件名。
+  const [probe, setProbe] = useState<NetDevLogSourceProbe | null>(null);
+  const [probeBusy, setProbeBusy] = useState(false);
+  const runProbe = async () => {
+    if (!device) { setNote(t("ndv.logp.pickSource")); return; }
+    setProbeBusy(true);
+    try {
+      if (following) { await app.NetDevLogFollowStop(device); setFollowing(false); }
+      setProbe(await app.NetDevProbeLogSources(device));
+      setNote("");
+    } catch (e) { setNote(String(e)); } finally { setProbeBusy(false); }
+  };
+  // 白名单外目录的一键登记：把目录追加进该设备的 log_paths（同一人工批准
+  // 的用户配置管线），之后 file: 读取即放行。
+  const registerLogPath = async (filePath: string) => {
+    const dir = filePath.slice(0, filePath.lastIndexOf("/"));
+    if (!device || !dir) return;
+    try {
+      const v = await app.NetDevSettings();
+      const devices = (v.devices ?? []).map(d => d.name === device
+        ? { ...d, logPaths: [...new Set([...(d.logPaths ?? []), dir])] }
+        : d);
+      await app.SetNetDevSettings({ ...v, devices });
+      setNote(t("ndv.logp.pathRegistered", { dir }));
+    } catch (e) { setNote(String(e)); }
+  };
   // 筛选收纳：行数/起于/过滤 默认收起（320px dock 里常驻太挤），点「筛选」展开；
   // 有非默认参数时按钮带摘要。levelFilter 是查看器侧的等级过滤（仅显示层）。
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -101,7 +145,7 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
     if (!dbSource && dbSources[0]) setDbSource(dbSources[0].name);
   }, [hosts, dbSources, device, dbSource]);
 
-  const source = kind === "db" ? `db:${dbSource}` : kind === "journal" ? `journal:${unit}` : kind === "docker" ? `docker:${container}` : kind === "k8s" ? `k8s:${k8sNs.trim() ? k8sNs.trim() + "/" : ""}${k8sPod.trim()}` : kind === "winevt" ? `winevt:${evtChannel.trim()}` : `file:${target}`;
+  const source = kind === "db" ? `db:${dbSource}` : kind === "journal" ? `journal:${unit}` : kind === "docker" ? `docker:${container}` : kind === "k8s" ? `k8s:${k8sNs.trim() ? k8sNs.trim() + "/" : ""}${k8sPod.trim()}` : kind === "winevt" ? `winevt:${evtChannel.trim()}` : kind === "system" ? "system:main" : `file:${target}`;
 
   // Pod/容器选择器：k8s/docker 目标一键列出再挑，不再手拼名字。列表只是
   // 选择辅助——密封在读路径上，与选择器无关。
@@ -255,10 +299,43 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
     onInsertComposer(`${t("ndv.logp.aiPrefix", { dev: device || dbSource, src: source })}\n\n\`\`\`\n${excerpt}\n\`\`\``);
   };
 
+  // 时间段导出只对有时间语义的源开放（file/journal/system；syslog 聚合与
+  // DB 快查询没有 since 概念）。since 语法与读取参数一致（-1h / 2026-09-03）。
+  const rangeExportable = kind === "file" || kind === "journal" || kind === "system";
+  const todayStart = () => {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  };
+  const exportByRange = async (tag: string, since: string) => {
+    if (!device) return;
+    setExportBusy(true);
+    try {
+      const res = await app.NetDevLogRead(device, source, 1000, since, grep);
+      const body = res.refused ? `# ${res.refusal}\n` : (res.output ?? "");
+      const path = await exportTextFile(`netdev-logs-${device}-${kind}-${tag}.txt`, body + "\n");
+      if (path) { setNote(t("ndv.exportedTo", { path })); setExportOpen(false); }
+    } catch (e) { setNote(String(e)); } finally { setExportBusy(false); }
+  };
+
+  // 转为发现：把当前查看（含等级过滤）的日志行提交为一条 Finding——原始
+  // 日志行不会自动进总览，运维认为值得跟踪的内容从这里进入发现管线
+  // （发现中心/总览卡片、告警生命周期、通知出口、每日晨报）。
+  const [filing, setFiling] = useState(false);
+  const fileFinding = async () => {
+    if (!device || shownLines.length === 0) return;
+    setFiling(true);
+    try {
+      await app.NetDevFileFinding(device, source, levelFilter === "error" ? "critical" : errCount > 0 ? "warning" : "info", shownLines);
+      setNote(t("ndv.logp.findingFiled", { n: shownLines.length }));
+    } catch (e) { setNote(String(e)); } finally { setFiling(false); }
+  };
+
   return (
     <div className="ndv__card" style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1 }}>
       <div className="ndv__card-title">{t("ndv.logp.title")}{following ? <span style={{ color: "var(--ok)" }}> · {t("ndv.logp.followingTag")}</span> : ""}
         {onOpenWorkbench && <span className="ndv__chip" role="button" style={{ marginLeft: 8, fontWeight: 400 }} title={t("ndv.logp.benchTip")} onClick={onOpenWorkbench}>⟶ {t("ndv.logp.bench")}</span>}
+        {onOpenDiscovery && <span className="ndv__chip" role="button" style={{ marginLeft: 8, fontWeight: 400 }} title={t("ndv.logp.discoverTip")} onClick={onOpenDiscovery}>🧭 {t("ndv.logp.discover")}</span>}
       </div>
 
       {/* 事件量条（R3）：近 24h 按类目 + 设备排行——点类目即 grep 联动。 */}
@@ -303,13 +380,18 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
           const nd = hosts.find(h => h.name === e.target.value);
           if (nd?.kind === "k8s") setKind("k8s");
           else if (nd?.kind === "docker") setKind("docker");
-          else setKind("file");
+          else setKind(isLinuxHost(nd) ? "system" : "file");
+          // 换设备时若目标仍是默认路径，跟着换到新设备 OS 家系的默认值
+          // （用户手输过的路径不动）。
+          const dft = defaultFileTarget(nd?.os);
+          setTarget(tg => (DEFAULT_FILE_TARGETS.includes(tg) ? dft : tg));
         }} disabled={kind === "db"}>
           {hosts.map(h => <option key={h.name} value={h.name}>{h.name}{h.kind ? `（${h.kind}）` : ""}</option>)}
           {hosts.length === 0 && <option value="">{t("ndv.logp.noHosts")}</option>}
         </select>
         <select className="mem-select" value={kind} onChange={e => { void stopFollow(); setKind(e.target.value as typeof kind); }}>
           {dev?.kind !== "k8s" && dev?.kind !== "docker" && <>
+            {isLinuxHost(dev) && <option value="system">{t("ndv.logp.kSystem")}</option>}
             <option value="file">{t("ndv.logp.kFile")}</option>
             <option value="journal">{t("ndv.logp.kJournal")}</option>
             <option value="docker">{t("ndv.logp.kDockerSsh")}</option>
@@ -376,6 +458,51 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
         </datalist>
       </div>
 
+      {/* 探测结果：这台机器上真实存在的日志源——点选候选即切换为当前源。 */}
+      {probe && probe.device === device && (
+        <div className="ndv__hint" style={{ marginBottom: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+          {probe.services.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+              <span className="ndv__meta">{t("ndv.logp.probeServices")}</span>
+              {probe.services.slice(0, 24).map(s => (
+                <span key={s} className="ndv__chip" role="button" onClick={() => { void stopFollow(); setKind("journal"); setUnit(s); }}>journal:{s}</span>
+              ))}
+              {probe.services.length > 24 && <span className="ndv__meta">+{probe.services.length - 24}</span>}
+            </div>
+          )}
+          {probe.containers.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+              <span className="ndv__meta">{t("ndv.logp.probeContainers")}</span>
+              {probe.containers.slice(0, 24).map(c => (
+                <span key={c} className="ndv__chip" role="button" onClick={() => { void stopFollow(); setKind("docker"); setContainer(c); }}>docker:{c}</span>
+              ))}
+            </div>
+          )}
+          {probe.files.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+              <span className="ndv__meta">{t("ndv.logp.probeFiles")}</span>
+              {probe.files.slice(0, 30).map(f => (
+                <span key={f.path} className="ndv__chip" role="button"
+                  title={f.allowed ? f.path : t("ndv.logp.needRegister", { path: f.path })}
+                  style={f.allowed ? undefined : { borderStyle: "dashed", opacity: 0.85 }}
+                  onClick={() => {
+                    void stopFollow();
+                    setKind("file");
+                    setTarget(f.path);
+                    if (!f.allowed) void registerLogPath(f.path);
+                  }}>{f.allowed ? "" : "登记· "}{f.name}{" "}
+                  <span style={{ opacity: 0.6 }}>{f.size}</span></span>
+              ))}
+              {probe.files.length > 30 && <span className="ndv__meta">+{probe.files.length - 30}</span>}
+            </div>
+          )}
+          {probe.services.length === 0 && probe.containers.length === 0 && probe.files.length === 0 && (
+            <span>{t("ndv.logp.probeNone")}</span>
+          )}
+          {probe.errors.length > 0 && <span style={{ opacity: 0.6 }}>{probe.errors.join(" · ")}</span>}
+        </div>
+      )}
+
       {/* db quick queries: allowlisted statements only. */}
       {kind === "db" && dbSrc && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
@@ -392,29 +519,31 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
         </div>
       )}
 
-      {/* Read params (collapsed) + actions. */}
-      {kind !== "db" && (
-        <div style={{ marginBottom: 8 }}>
-          <span className={`btn btn--small ${filtersOpen || filterActive ? "btn--primary" : "btn--secondary"}`} role="button"
-            title={t("ndv.logp.filterTip")}
-            onClick={() => setFiltersOpen(o => !o)}>
-            {t("ndv.logp.filter")}{filterActive ? ` · ${tailN}${t("ndv.logp.rowsUnit")}${since.trim() ? ` · ${since.trim()}` : ""}${grep.trim() ? ` · /${grep.trim()}/` : ""}` : ""}
-          </span>
-          {filtersOpen && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6, alignItems: "center" }}>
-              <label className="ndv__meta">{t("ndv.logp.rows")}</label>
-              <input className="mem-input" type="number" style={{ width: 64 }} value={tailN} min={1} max={1000} onChange={e => setTailN(Math.min(1000, Math.max(1, Number(e.target.value) || 100)))} />
-              <label className="ndv__meta">{t("ndv.logp.since")}</label>
-              <input className="mem-input" style={{ width: 130 }} value={since} onChange={e => setSince(e.target.value)} placeholder="2026-08-27 10:00 或 -1h" />
-              <label className="ndv__meta">{t("ndv.logp.grep")}</label>
-              <input className="mem-input" style={{ width: 110 }} value={grep} onChange={e => setGrep(e.target.value)} placeholder={t("ndv.logp.phRegex")} />
-            </div>
-          )}
+      {/* 展开的读取参数（行数/起于/过滤）——动作按钮收进下面同一行，参数
+          展开区单独占行，避免「筛选/读取/跟随」散在两行。 */}
+      {kind !== "db" && filtersOpen && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8, alignItems: "center" }}>
+          <label className="ndv__meta">{t("ndv.logp.rows")}</label>
+          <input className="mem-input" type="number" style={{ width: 64 }} value={tailN} min={1} max={1000} onChange={e => setTailN(Math.min(1000, Math.max(1, Number(e.target.value) || 100)))} />
+          <label className="ndv__meta">{t("ndv.logp.since")}</label>
+          <input className="mem-input" style={{ width: 130 }} value={since} onChange={e => setSince(e.target.value)} placeholder="2026-08-27 10:00 或 -1h" />
+          <label className="ndv__meta">{t("ndv.logp.grep")}</label>
+          <input className="mem-input" style={{ width: 110 }} value={grep} onChange={e => setGrep(e.target.value)} placeholder={t("ndv.logp.phRegex")} />
         </div>
       )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8, alignItems: "center" }}>
+        {isLinuxHost(dev) && (
+          <span className={`btn btn--small ${probe ? "btn--primary" : "btn--secondary"}`} role="button"
+            title={t("ndv.logp.probeTip")}
+            onClick={() => void runProbe()}>{probeBusy ? t("ndv.logp.probing") : t("ndv.logp.probe")}</span>
+        )}
         {kind !== "db" && (
           <>
+            <span className={`btn btn--small ${filtersOpen || filterActive ? "btn--primary" : "btn--secondary"}`} role="button"
+              title={t("ndv.logp.filterTip")}
+              onClick={() => setFiltersOpen(o => !o)}>
+              {t("ndv.logp.filter")}{filterActive ? ` · ${tailN}${t("ndv.logp.rowsUnit")}${since.trim() ? ` · ${since.trim()}` : ""}${grep.trim() ? ` · /${grep.trim()}/` : ""}` : ""}
+            </span>
             <span className="btn btn--secondary btn--small" role="button" onClick={() => void read()}>{busy ? t("ndv.logp.reading") : t("ndv.logp.read")}</span>
             {kind !== "syslog" && dev?.kind !== "k8s" && dev?.kind !== "docker" && (
               <span className={`btn btn--small ${following ? "btn--primary" : "btn--secondary"}`} role="button" onClick={() => void toggleFollow()}>{following ? t("ndv.logp.stopFollow") : t("ndv.logp.follow")}</span>
@@ -424,12 +553,35 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
         {onInsertComposer && lines.length > 0 && (
           <span className="btn btn--secondary btn--small" role="button" onClick={sendToAI}>{t("ndv.sendToAI")}</span>
         )}
-        {lines.length > 0 && <span className="btn btn--secondary btn--small" role="button" onClick={() => void (async () => {
-          const path = await exportTextFile(`netdev-logs-${device}-${kind}.txt`, lines.join("\n") + "\n");
-          if (path) setNote(t("ndv.exportedTo", { path }));
-        })()}>{t("ndv.export")}</span>}
+        {lines.length > 0 && (
+          <span className="btn btn--secondary btn--small" role="button" title={t("ndv.logp.fileFindingTip")}
+            onClick={() => void fileFinding()}>{filing ? t("ndv.logp.filing") : t("ndv.logp.fileFinding")}</span>
+        )}
+        {(lines.length > 0 || rangeExportable) && (
+          <span className="btn btn--secondary btn--small" role="button" onClick={() => setExportOpen(o => !o)}>
+            {exportBusy ? t("ndv.logp.reading") : t("ndv.export")}{exportOpen ? " ▴" : " ▾"}
+          </span>
+        )}
         {lines.length > 0 && <span className="btn btn--secondary btn--small" role="button" onClick={() => { setLines([]); setNote(""); }}>{t("ndv.logp.clear")}</span>}
       </div>
+
+      {/* 导出选项：当前显示，或按时间段重新读取后直接落文件（上限 1000 行）。 */}
+      {exportOpen && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+          {lines.length > 0 && (
+            <span className="ndv__chip" role="button" onClick={() => void (async () => {
+              const path = await exportTextFile(`netdev-logs-${device}-${kind}.txt`, lines.join("\n") + "\n");
+              if (path) { setNote(t("ndv.exportedTo", { path })); setExportOpen(false); }
+            })()}>{t("ndv.logp.expNow", { n: lines.length })}</span>
+          )}
+          {rangeExportable && <>
+            <span className="ndv__chip" role="button" onClick={() => void exportByRange("1h", "-1h")}>{t("ndv.logp.exp1h")}</span>
+            <span className="ndv__chip" role="button" onClick={() => void exportByRange("6h", "-6h")}>{t("ndv.logp.exp6h")}</span>
+            <span className="ndv__chip" role="button" onClick={() => void exportByRange("24h", "-24h")}>{t("ndv.logp.exp24h")}</span>
+            <span className="ndv__chip" role="button" onClick={() => void exportByRange("today", todayStart())}>{t("ndv.logp.expToday")}</span>
+          </>}
+        </div>
+      )}
 
       {note && <div className="ndv__hint" style={{ marginBottom: 6 }}>{note}</div>}
 

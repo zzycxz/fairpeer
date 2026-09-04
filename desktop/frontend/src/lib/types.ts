@@ -1698,6 +1698,9 @@ export interface NetDevDeviceView {
   snmpCommunityEnv?: string;
   snmpCommunitySet?: boolean;
   snmpCommunity?: string;
+  // Serial console line (COM 口): set => console dial instead of SSH.
+  consolePort?: string;
+  consoleBaud?: number;
   password?: string;
 }
 
@@ -1765,6 +1768,9 @@ export interface NetDevSettingsView {
   // Daily briefing push time (local HH:MM; empty = off).
   briefingPushTime: string;
   weakCredDict: string;
+  // 评估授权信封（engagement envelope）：主动扫描档（nmap/netprobe/弱口令）
+  // 的授权闸门。全空 = 未授权（闸门关闭）。
+  assessment?: { engagementId: string; scopes: string[]; expires: string; approver: string };
 }
 
 // One group's policy + maintenance window.
@@ -1890,6 +1896,19 @@ export interface NetDevLogFollowEvent {
   chunk?: string;
   done?: boolean;
   reason?: string;
+}
+
+// Log-source probe (App.NetDevProbeLogSources): what actually exists on one
+// device — running services (journal: candidates), containers (docker:), and
+// log files (/var/log + common app-log dirs), each group one-click pickable
+// in the 日志页. allowed=false marks files outside the device's log whitelist
+// (their dir needs registering first — the UI offers that on click).
+export interface NetDevLogSourceProbe {
+  device: string;
+  services: string[];
+  containers: string[];
+  files: { name: string; path: string; size: string; allowed: boolean }[];
+  errors: string[];
 }
 
 // Cross-device fan-out search (netdev_log_search / App.NetDevLogSearch) — the
@@ -2146,6 +2165,12 @@ export interface BrowserConsoleElement {
   role: string;
   name: string;
   value?: string;
+  css?: string; // stable selector computed at capture; picking prefers it over the transient ref
+}
+
+export interface BrowserElementsResult {
+  elements: BrowserConsoleElement[];
+  note?: string; // degradation notice (AX-tree capture failed → DOM-only)
 }
 
 export interface BrowserConsoleScanElement {
@@ -2190,6 +2215,7 @@ export interface BrowserConsoleSkill {
   name: string;
   description: string;
   browser: boolean;
+  draft: boolean; // not yet woken — chat invocation gated, panel trial runs still work
 }
 
 // Editor step vocabulary (values carry {{参数}} refs; the trial runner
@@ -2201,6 +2227,7 @@ export type BrowserConsoleStepType =
   | "navigate"
   | "back"
   | "forward"
+  | "switch_tab"
   | "click"
   | "hover"
   | "type"
@@ -2238,6 +2265,96 @@ export interface BrowserConsoleTrialStatus {
   // ask 步骤的等待：横幅带输入框，回复经 TrialResume(reply) 送回并绑定到 bind 参数。
   await_reply?: boolean;
   bind?: string;
+  // 终态事件携带：wait download 步骤收集到的导出文件（供 UI 触发 AI 研判）。
+  downloads?: BrowserConsoleDownload[];
+}
+
+// One finished browser download collected during a run (mirror of Go's
+// builtin.DownloadInfo).
+export interface BrowserConsoleDownload {
+  name: string;
+  path: string;
+  state: string;
+}
+
+// AI alert-triage report for one exported workbook.
+export interface BrowserDownloadAnalysis {
+  file: string;
+  rows: number;
+  shown_rows: number;
+  report: string;
+  // Machine-readable verdict parsed from the report's trailing JSON block.
+  compromised_hosts?: string[];
+  attention_count?: number;
+  severity?: string;
+}
+
+// --- browser watch (定时巡检: poll → download → AI judge → notify) ------------
+
+export interface BrowserConsoleWatchStep {
+  index: number;
+  type: string;
+  status: string; // running|waiting|done|failed
+  output?: string;
+  error?: string;
+}
+
+// Delivery policy: WHICH rounds reach out, through WHICH channels.
+export interface BrowserConsoleWatchNotify {
+  on_event: "compromised" | "attention" | "always" | "never" | "";
+  im_chat_id?: string; // gateway dest "platform:chatId" (QQ 群 "qq:chatType:chatId")
+  im_chat_name?: string;
+  email?: string; // recipient
+  email_account?: string; // sender account from settings
+  system?: boolean;
+}
+
+// Full watch configuration — what the panel submits AND browser_watch.json stores.
+export interface BrowserConsoleWatchConfig {
+  skill: string;
+  interval_sec: number;
+  anchor_min?: string; // "HH:MM" grid alignment; empty = floor(start, minute)
+  analysis?: "alerts" | "generic" | "none"; // post-download treatment
+  notify: BrowserConsoleWatchNotify;
+}
+
+export interface BrowserConsoleWatchRound {
+  started_at: string;
+  finished_at?: string;
+  time_range?: string;
+  status: "running" | "done" | "failed" | "skipped";
+  skipped?: boolean;
+  note?: string;
+  error?: string;
+  download_name?: string;
+  download_path?: string;
+  rows?: number;
+  analysis?: string;
+  steps?: BrowserConsoleWatchStep[];
+  compromised_hosts?: string[];
+  attention_count?: number;
+  severity?: string;
+  notified?: string[]; // im|email|system — channels actually sent
+  notify_error?: string;
+}
+
+export interface BrowserConsoleWatchState {
+  active: boolean;
+  skill?: string;
+  interval_sec?: number;
+  anchor?: string; // RFC3339, wall-clock grid origin
+  next_at?: string; // RFC3339
+  analysis?: "alerts" | "generic" | "none";
+  notify?: BrowserConsoleWatchNotify;
+  last_round?: BrowserConsoleWatchRound;
+  rounds?: BrowserConsoleWatchRound[];
+}
+
+// "browser:watch" event payload.
+export interface BrowserConsoleWatchEvent {
+  type: "state" | "round";
+  state?: BrowserConsoleWatchState;
+  round?: BrowserConsoleWatchRound;
 }
 
 export interface NetDevLiveDeviceState {
@@ -2301,6 +2418,8 @@ export interface NetDevProposal {
   intent: string;
   status: string;
   steps: NetDevProposalStep[];
+  /** 恢复提案来源版本 ID（备份→恢复闭环）：device@nanos */
+  restore_from?: string;
   created_at: string;
   approved_at?: string;
   executed_at?: string;
@@ -2545,6 +2664,7 @@ export interface NetDevOvRisk {
   critical: number; warning: number; info: number; open_total: number;
   weighted_score: number; risk_level: "safe" | "low" | "medium" | "high" | "critical" | string;
   cve_matches: number; cve_needs_feed: boolean; weak_creds: number;
+  vuln_critical: number; vuln_warning: number; vuln_open: number;
 }
 export interface NetDevOvInflight {
   proposals_pending: number; proposals_watchable: number; jobs_running: number;

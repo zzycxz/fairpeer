@@ -108,6 +108,34 @@ func TestSendWithRetryFailsFastOnClientErrors(t *testing.T) {
 	}
 }
 
+// The relay-drop 400 (gateway lost ITS upstream, body "Connection prematurely
+// closed BEFORE response") is a transient server fault in disguise: it must
+// take the retry path and recover when the gateway comes back.
+func TestSendWithRetryRetriesGatewayTransient400(t *testing.T) {
+	if !IsTransientGatewayBody(`{"error":{"code":"400","message":"Request failed","param":"Connection prematurely closed BEFORE response","type":""}}`) {
+		t.Fatal("observed xiaomimimo body should be detected as transient")
+	}
+	if IsTransientGatewayBody(`{"error":{"message":"maximum context length exceeded"}}`) {
+		t.Fatal("a genuine 400 reason must not be classified transient")
+	}
+	calls := 0
+	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return &http.Response{StatusCode: 400, Body: io.NopCloser(strings.NewReader(
+				`{"error":{"code":"400","message":"Request failed","param":"Connection prematurely closed BEFORE response","type":""}}`)), Header: http.Header{}}, nil
+		}
+		return statusResp(200, nil), nil
+	})}
+	resp, err := SendWithRetry(context.Background(), cl, SendOptions{ProvName: "p", KeyEnv: "KEY"}, newDummyReq)
+	if err != nil {
+		t.Fatalf("relay-drop 400 should recover on retry: %v", err)
+	}
+	if resp.StatusCode != 200 || calls != 2 {
+		t.Fatalf("status=%d calls=%d, want 200 after 2 calls", resp.StatusCode, calls)
+	}
+}
+
 func TestSendWithRetryAuthError(t *testing.T) {
 	calls := 0
 	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {

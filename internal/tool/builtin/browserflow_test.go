@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -17,13 +18,17 @@ func TestParseFlowTable(t *testing.T) {
 		"| 5 | scroll | `down` | 4 |\n" +
 		"| 6 | wait | `stable:.answer` | 300s |\n" +
 		"| 7 | extract | `table.logs` | table |\n" +
-		"| 8 | back |  |  |\n"
+		"| 8 | back |  |  |\n" +
+		"| 9 | switch_tab | `2` | 告警详情 |\n" +
+		"| 10 | wait | `stable:.out` | 15000 |\n" +
+		"| 11 | wait | `download` | 300s |\n" +
+		"| 12 | wait | `download:.xlsx` | 480s |\n"
 	steps, err := ParseFlowTable(body)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if len(steps) != 8 {
-		t.Fatalf("got %d steps, want 8", len(steps))
+	if len(steps) != 12 {
+		t.Fatalf("got %d steps, want 12", len(steps))
 	}
 	if steps[0].URL != "https://a/" {
 		t.Errorf("step1 url: %q", steps[0].URL)
@@ -45,6 +50,47 @@ func TestParseFlowTable(t *testing.T) {
 	}
 	if steps[7].Type != "back" {
 		t.Errorf("back: %+v", steps[7])
+	}
+	if steps[8].Type != "switch_tab" || steps[8].Target != "2" || steps[8].Text != "告警详情" {
+		t.Errorf("switch_tab: %+v", steps[8])
+	}
+	// ms-habit values fold to seconds: "15000" means 15s, not 15000s.
+	if steps[9].TimeoutSec != 15 {
+		t.Errorf("wait ms-fold: got %ds, want 15s", steps[9].TimeoutSec)
+	}
+	// download waits: plain + extension-filtered conditions parse through to
+	// the wait step's condition/timeout slots.
+	if steps[10].Condition != "download" || steps[10].TimeoutSec != 300 {
+		t.Errorf("wait download: %+v", steps[10])
+	}
+	if steps[11].Condition != "download:.xlsx" || steps[11].TimeoutSec != 480 {
+		t.Errorf("wait download ext: %+v", steps[11])
+	}
+}
+
+func TestParseFlowTableEvaluateCell(t *testing.T) {
+	// The cybersituational-awareness skill carries an ExtJS-aware evaluate
+	// step: a single-line IIFE with quotes, braces, regex and an embedded
+	// {{参数}} ref — the table dialect must survive it verbatim.
+	cell := `(function(){var el=document.querySelector('input[name="time_range"]');if(!el){throw new Error('未找到时间范围输入框');}var want='{{时间范围}}';var d=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value');d.set.call(el,want);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));try{if(window.Ext&&el.id){var c=Ext.getCmp(el.id.replace(new RegExp('-inputEl$'),''));if(c&&c.setValue){c.setValue(want);}}}catch(e){}if(el.value!==want){throw new Error('时间范围写入失败，当前值: '+el.value);}return '时间范围已设置: '+el.value;})()`
+	body := "## 步骤\n\n| # | 操作 | 目标 | 值 |\n|---|---|---|---|\n" +
+		"| 1 | evaluate | `" + cell + "` |  |\n" +
+		"| 2 | type | `input[name=\"query_string\"]` | (NOT src_ip:(10.0.0.0 OR \"172.16.0.0/12\")) |\n"
+	steps, err := ParseFlowTable(body)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(steps) != 2 || steps[0].Type != "evaluate" || steps[0].Expression != cell {
+		t.Fatalf("evaluate cell mangled: %+v", steps[0])
+	}
+	if !strings.Contains(steps[0].Expression, "{{时间范围}}") {
+		t.Error("param ref inside evaluate cell must survive for lazy substitution")
+	}
+	if steps[1].Target != `input[name="query_string"]` {
+		t.Errorf("query selector: %q", steps[1].Target)
+	}
+	if !strings.HasPrefix(steps[1].Text, "(NOT src_ip:") {
+		t.Errorf("query value: %q", steps[1].Text)
 	}
 }
 
@@ -130,5 +176,39 @@ func TestNormalizeNavURL(t *testing.T) {
 		if got := normalizeNavURL(in); got != want {
 			t.Errorf("normalizeNavURL(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestIsLocateMiss pins the safety classification behind the flow runner's
+// locate-wait: ONLY errors that prove the action never dispatched may poll —
+// anything else must fail through (a retry could double-fire a click).
+func TestIsLocateMiss(t *testing.T) {
+	miss := []string{
+		`页面上找不到可见文本为 "登录" 的可点击元素`,
+		`click ref "e6": element not found`,
+		`hover "#menu": no node found matching selector`,
+		`ref "e3" resolved to no DOM object (page may have changed)`,
+	}
+	for _, m := range miss {
+		if !isLocateMiss(errors.New(m)) {
+			t.Errorf("isLocateMiss(%q) = false, want true (locate miss)", m)
+		}
+	}
+	// Never retried: the action may have fired, the config is wrong, or the
+	// failure is unrecoverable without a new snapshot.
+	noMiss := []string{
+		"点击文本 \"登录\" @(120,40): context deadline exceeded", // transport died mid-action
+		`目标为空`,            // config error
+		`ref "e6" 已失效`,   // page changed; re-locating cannot recover a ref
+		`元素函数抛错: x is not a function`,
+		"unknown ref \"e9\"",
+	}
+	for _, m := range noMiss {
+		if isLocateMiss(errors.New(m)) {
+			t.Errorf("isLocateMiss(%q) = true, want false (unsafe to retry)", m)
+		}
+	}
+	if isLocateMiss(nil) {
+		t.Error("isLocateMiss(nil) = true, want false")
 	}
 }

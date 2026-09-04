@@ -8,7 +8,7 @@ import browserMd from "../../guides/browser-ops-guide.md?raw";
 
 // ManualPanel — 应用内手册（UI_GUIDANCE_SPEC G1-2）：三份仓库指南经 ?raw 打包
 // 嵌入（不新增后端桥），副本与 docs/ 原件的同步由 guides-drift 测试守护。
-// 靶场安全闭环场景卡直达本页签的 usage 篇（六条主流程 §B/E 即闭环路线）。
+// 靶场安全闭环场景卡直达本页签的 usage 篇（七条主流程 §B/E 即闭环路线）。
 
 const DOCS: { key: string; file: string }[] = [
   { key: "usage", file: usageMd },

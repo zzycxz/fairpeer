@@ -131,7 +131,7 @@ func (m *Manager) WeakCredCheck(ctx context.Context, deviceName, tier, dictPath 
 
 // fileWeakCredFinding lands a CONFIRMED weak credential as a critical
 // finding with Source lifecycle ("assess:weak-cred:<device>"): the UI's
-// 「查看发现」jump, the overview risk counters, and the 转修复提案 flow all
+// 「查看发现」jump, the overview risk counters, and the 转修复变更 flow all
 // consume the finding queue — without this filing the loop stopped at the
 // transient result card. Passwords never enter the evidence.
 func (m *Manager) fileWeakCredFinding(res WeakCredResult) {
@@ -143,7 +143,7 @@ func (m *Manager) fileWeakCredFinding(res WeakCredResult) {
 		Devices:  []string{res.Device},
 		Detail:   res.Detail + "。命中于 " + now.Format("01-02 15:04:05") + " 的 " + res.Tier + " 档核查（尝试 " + fmt.Sprintf("%d", res.Attempts) + " 次，预算 " + fmt.Sprintf("%d", res.Budget) + "）。凭证原文不落任何日志。",
 		Evidence: []Evidence{{Device: res.Device, Command: "weak-cred-check (" + res.Tier + ")", Output: "attempt " + fmt.Sprintf("%d", res.Attempts) + " accepted (password not logged)"}},
-		Suggestion: "立即经提案更换该设备登录凭证，并检查同分组其他设备是否复用同一口令。",
+		Suggestion: "立即经变更更换该设备登录凭证，并检查同分组其他设备是否复用同一口令。",
 		Source:  src,
 		Status:  "active",
 	}
@@ -318,7 +318,7 @@ func (t *assessTool) Execute(ctx context.Context, args json.RawMessage) (string,
 	}
 	out := fmt.Sprintf("%s: tier=%s, %d/%d attempt(s) — %s", res.Device, res.Tier, res.Attempts, res.Budget, res.Detail)
 	if res.Weak {
-		out += "\n已确认弱口令：该发现已由系统自动立案（严重级 Finding，复查通过会自动恢复），请勿再调用 netdev_finding 重复立案；请起草变更提案修复（不要直接改密码——评估手不下发配置）。"
+		out += "\n已确认弱口令：该发现已由系统自动立案（严重级 Finding，复查通过会自动恢复），请勿再调用 netdev_finding 重复立案；请起草变更变更修复（不要直接改密码——评估手不下发配置）。"
 	}
 	return out, nil
 }

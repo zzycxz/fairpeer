@@ -435,6 +435,10 @@ func (a *App) startup(ctx context.Context) {
 	// find them via os.Getenv without the user setting system env vars manually.
 	loadCoworkEnvAtStartup()
 	a.initScheduler()
+	// Resume an active browser watch (定时巡检) from browser_watch.json —
+	// fires its own goroutine; a missing skill logs and leaves the config
+	// visible in the panel for manual restart.
+	a.resumeBrowserWatch()
 	a.initCalendar()
 	a.initRAG()
 	a.initExperts()
@@ -3530,6 +3534,9 @@ func (a *App) Commands() []CommandInfo {
 	// composer's slash menu; selecting one submits "/<name>", which the controller
 	// resolves via RunSkill.
 	for _, s := range ctrl.Skills() {
+		if s.Draft {
+			continue // drafts are woken from the ops browser panel, not here
+		}
 		out = append(out, CommandInfo{Name: s.Name, Description: s.Description, Kind: "skill"})
 	}
 	for _, c := range ctrl.Commands() {

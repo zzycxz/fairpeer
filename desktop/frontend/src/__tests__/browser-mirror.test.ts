@@ -110,3 +110,14 @@ const s3 = applyBrowserMirrorFrame(s2, { kind: "status", source: "tool", phase: 
 eq(s3.sessions["br_9"] !== undefined, true, "start status registers the session");
 const unt = applyBrowserMirrorFrame(s3, { kind: "frame", source: "tool", image: "noSession" }).state;
 eq(Object.keys(unt.sessions).length, 2, "untagged frames do not create buckets");
+
+console.log("\nsession end evicts its bucket (ghost chips fix)");
+const withSess = applyBrowserMirrorFrame(base(), {
+  kind: "frame", source: "tool", session_id: "br_7", image: "i7", url: "https://a",
+} as BrowserMirrorFrame);
+eq(withSess.state.sessions["br_7"] !== undefined, true, "session bucket exists while live");
+const sessEnded = applyBrowserMirrorFrame(withSess.state, {
+  kind: "status", source: "tool", phase: "end", session_id: "br_7", text: "done",
+} as BrowserMirrorFrame);
+eq(sessEnded.state.sessions["br_7"], undefined, "end drops the session bucket (no ghost chips)");
+eq(sessEnded.state.image, "i7", "aggregate image still keeps the last frame");

@@ -16,19 +16,24 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronDown,
+  Clock,
   Code2,
+  FileSpreadsheet,
   Hand,
   Loader2,
   Play,
   Plus,
+  RotateCw,
   Save,
   Send,
+  Sparkles,
   Square,
   X,
 } from "lucide-react";
 import { app, onBrowserTrial } from "../../lib/bridge";
 import { useConfirm } from "../../lib/confirm";
 import { useT, t as tt } from "../../lib/i18n";
+import { Markdown } from "../Markdown";
 import {
   collectParams,
   parseSkillDoc,
@@ -37,7 +42,13 @@ import {
   type SkillDoc,
 } from "../../lib/skillDoc";
 import { summarizeRecordEvent } from "../../lib/recordTrace";
-import type { BrowserConsoleRecordEvent, BrowserConsoleStep, BrowserConsoleStepType } from "../../lib/types";
+import type {
+  BrowserConsoleDownload,
+  BrowserConsoleRecordEvent,
+  BrowserConsoleStep,
+  BrowserConsoleStepType,
+  BrowserDownloadAnalysis,
+} from "../../lib/types";
 
 // Step palette: grouped for discoverability — the editor's friendly face. The
 // same taxonomy drives the per-row type select (as optgroups) and the add-step
@@ -49,6 +60,7 @@ const STEP_CATEGORIES: { labelKey: string; steps: { value: BrowserConsoleStepTyp
       { value: "navigate", labelKey: "ndv.bse.stNavigate", descKey: "brc.sdNavigate" },
       { value: "back", labelKey: "ndv.bse.stBack", descKey: "brc.sdBack" },
       { value: "forward", labelKey: "ndv.bse.stForward", descKey: "brc.sdForward" },
+      { value: "switch_tab", labelKey: "ndv.bse.stSwitchTab", descKey: "brc.sdSwitchTab" },
       { value: "click", labelKey: "ndv.bse.stClick", descKey: "brc.sdClick" },
       { value: "hover", labelKey: "ndv.bse.stHover", descKey: "brc.sdHover" },
       { value: "type", labelKey: "ndv.bse.stType", descKey: "brc.sdType" },
@@ -81,6 +93,16 @@ const STEP_CATEGORIES: { labelKey: string; steps: { value: BrowserConsoleStepTyp
   },
 ];
 
+// TIME_RANGE_CHIPS are the quick picks for time-range params — the export
+// window an ops user reaches for 95% of the time.
+const TIME_RANGE_CHIPS = ["最近5分钟", "最近15分钟", "最近30分钟", "最近1小时", "今天"];
+
+// isTimeRangeParam decides whether a {{参数}} gets the time chips/preview
+// treatment: name-based heuristic (时间/time/范围/range/日期/date).
+function isTimeRangeParam(k: string): boolean {
+  return /时间|time|范围|range|日期|date/i.test(k);
+}
+
 // defaultStep seeds sensible fields per type so a freshly added step is
 // immediately runnable/editable (never an empty mystery row).
 function defaultStep(type: BrowserConsoleStepType): BrowserConsoleStep {
@@ -91,6 +113,8 @@ function defaultStep(type: BrowserConsoleStepType): BrowserConsoleStep {
     case "forward":
     case "screenshot":
       return { type };
+    case "switch_tab":
+      return { type, target: "1", text: "" };
     case "hover":
       return { type, target: "" };
     case "type":
@@ -182,6 +206,24 @@ export function BrowserSkillEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc?.name]);
 
+  // 时间范围参数：快捷片 + 防抖换算预览（"最近5分钟" → 字面 "… - …" 范围串，
+  // 与后端 NormalizeTimeRangeParams 同一套解析，预览即运行时实际值）。
+  const [rangePreview, setRangePreview] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const pending = window.setTimeout(() => {
+      for (const k of paramKeys) {
+        if (!isTimeRangeParam(k)) continue;
+        const v = (paramDefaults[k] ?? "").trim();
+        if (!v) continue;
+        app
+          .BrowserConsoleResolveTimeRange(v)
+          .then((r) => setRangePreview((prev) => ({ ...prev, [k]: r })))
+          .catch(() => undefined);
+      }
+    }, 300);
+    return () => window.clearTimeout(pending);
+  }, [paramKeys, paramDefaults]);
+
   // --- trial run ---
   const [trialRunning, setTrialRunning] = useState(false);
   const [trialStates, setTrialStates] = useState<Record<number, { status: string; output?: string; error?: string }>>({});
@@ -190,6 +232,29 @@ export function BrowserSkillEditor({
   // via TrialResume and binds to the step's parameter for later steps).
   const [humanWaiting, setHumanWaiting] = useState<{ index: number; prompt: string; awaitReply: boolean; bind: string } | null>(null);
   const [replyDraft, setReplyDraft] = useState("");
+  // Export downloads collected by "wait download" steps + their AI triage.
+  const [trialDownloads, setTrialDownloads] = useState<BrowserConsoleDownload[]>([]);
+  const [analysis, setAnalysis] = useState<{ path: string; loading: boolean; result?: BrowserDownloadAnalysis; error?: string } | null>(null);
+
+  const runAnalysis = async (path: string) => {
+    setAnalysis({ path, loading: true });
+    try {
+      const result = await app.BrowserConsoleAnalyzeDownload(path, "alerts");
+      setAnalysis({ path, loading: false, result });
+    } catch (err) {
+      setAnalysis({ path, loading: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  // Auto-triage the first spreadsheet once the run's terminal event carries
+  // downloads — "拿到 Excel 之后进行大模型分析" is the default, not an extra click.
+  const autoAnalyze = (downloads: BrowserConsoleDownload[]) => {
+    setTrialDownloads(downloads);
+    setAnalysis(null);
+    const sheet = downloads.find((d) => /\.(xlsx|csv)$/i.test(d.name));
+    if (sheet) void runAnalysis(sheet.path);
+  };
+
   useEffect(
     () =>
       onBrowserTrial((st) => {
@@ -205,6 +270,7 @@ export function BrowserSkillEditor({
           setTrialRunning(false);
           setHumanWaiting(null);
           if (st.status === "failed" && st.error) setError(`${t("brc.trialFailed")}: ${st.error}`);
+          autoAnalyze(st.downloads ?? []);
         }
       }),
     [t],
@@ -225,6 +291,8 @@ export function BrowserSkillEditor({
     setError("");
     setTrialStates({});
     setHumanWaiting(null);
+    setTrialDownloads([]);
+    setAnalysis(null);
     setTrialRunning(true);
     try {
       // Steps travel with {{参数}} refs intact; the runner substitutes at run
@@ -373,6 +441,7 @@ export function BrowserSkillEditor({
           <div className="ndv-brc__field">
             <span className="ndv-brc__field-label">{t("brc.skillDesc")}</span>
             <input className="mem-input" value={doc.description} onChange={(e) => setDoc({ ...doc, description: e.target.value })} />
+            <span className="ndv-brc__hint-inline">{t("brc.skillDescHint")}</span>
           </div>
 
           <label className="ndv-brc__check ndv-brc-editor__exec-toggle" title={t("brc.executorHint")}>
@@ -391,7 +460,7 @@ export function BrowserSkillEditor({
                 <span className="ndv-brc__hint-inline">{t("brc.paramsHint")}</span>
               </div>
               {paramKeys.map((k) => (
-                <div key={k} className="ndv-brc__field ndv-brc__field--inline">
+                <div key={k} className={`ndv-brc__field ndv-brc__field--inline${isTimeRangeParam(k) ? " ndv-brc__field--timewrap" : ""}`}>
                   <span className="ndv-brc__param-key">{`{{${k}}}`}</span>
                   <input
                     className="mem-input"
@@ -399,6 +468,34 @@ export function BrowserSkillEditor({
                     onChange={(e) => setParamDefaults((prev) => ({ ...prev, [k]: e.target.value }))}
                     placeholder={t("brc.paramDefault")}
                   />
+                  {isTimeRangeParam(k) && (
+                    <div className="ndv-brc-param-time">
+                      <div className="ndv-brc-param-time__chips">
+                        {TIME_RANGE_CHIPS.map((chip) => (
+                          <button
+                            key={chip}
+                            type="button"
+                            className={`ndv-brc-param-time__chip${paramDefaults[k] === chip ? " ndv-brc-param-time__chip--on" : ""}`}
+                            onClick={() => setParamDefaults((prev) => ({ ...prev, [k]: chip }))}
+                          >
+                            {chip}
+                          </button>
+                        ))}
+                      </div>
+                      {(paramDefaults[k] ?? "").trim() !== "" && (
+                        <div className="ndv-brc-param-time__preview">
+                          <Clock size={11} />
+                          {rangePreview[k] ? (
+                            <span>
+                              {t("brc.rangePreviewPrefix")} <code>{rangePreview[k]}</code>
+                            </span>
+                          ) : (
+                            <span className="ndv-brc-param-time__raw">{t("brc.rangeRaw")}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -499,6 +596,63 @@ export function BrowserSkillEditor({
               )}
             </div>
           </div>
+
+          {/* Export downloads + AI triage: the terminal trial event carries the
+              files "wait download" steps collected; the first spreadsheet is
+              auto-triaged, others can be run from the card's button. */}
+          {trialDownloads.length > 0 && (
+            <div className="ndv-brc__section">
+              <div className="ndv-brc__section-head">
+                <span>{t("brc.downloads")}</span>
+              </div>
+              {trialDownloads.map((d) => {
+                const sheet = /\.(xlsx|csv)$/i.test(d.name);
+                const active = analysis?.path === d.path;
+                return (
+                  <div key={d.path} className={`ndv-brc-dl${sheet ? " ndv-brc-dl--sheet" : ""}`}>
+                    <FileSpreadsheet size={12} />
+                    <span className="ndv-brc-dl__name">{d.name}</span>
+                    <span className="ndv-brc-dl__path" title={d.path}>
+                      {d.path}
+                    </span>
+                    {sheet && !active && (
+                      <button type="button" className="btn btn--secondary btn--small" onClick={() => void runAnalysis(d.path)}>
+                        <Sparkles size={11} />
+                        <span>{t("brc.analyze")}</span>
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              {analysis && (
+                <div className="ndv-brc-analysis">
+                  <div className="ndv-brc-analysis__head">
+                    <Sparkles size={12} />
+                    <span>{t("brc.analysisTitle")}</span>
+                    {analysis.result && analysis.result.rows > analysis.result.shown_rows && (
+                      <span className="ndv-brc-analysis__meta">{t("brc.analysisTruncated", { n: analysis.result.rows, m: analysis.result.shown_rows })}</span>
+                    )}
+                    {analysis.loading && <Loader2 size={11} className="composer-phase__spin" />}
+                  </div>
+                  {analysis.loading && <div className="ndv-brc-analysis__hint">{t("brc.analysisRunning")}</div>}
+                  {analysis.error && (
+                    <div className="ndv-brc-editor__step-error">
+                      {t("brc.analysisFailed")}: {analysis.error}
+                      <button type="button" className="btn btn--secondary btn--small" onClick={() => void runAnalysis(analysis.path)}>
+                        <RotateCw size={11} />
+                        <span>{t("brc.analysisRetry")}</span>
+                      </button>
+                    </div>
+                  )}
+                  {analysis.result && (
+                    <div className="ndv-brc-analysis__body">
+                      <Markdown text={analysis.result.report} />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {trace && trace.length > 0 && (
             <Fold title={t("brc.rawTrace")}>

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -132,7 +133,7 @@ func TestSubstStepParams(t *testing.T) {
 		Condition:  "url:/{{工单号}}",
 		Files:      []string{"a-{{工单号}}.txt"},
 	}
-	substStepParams(&s, map[string]string{"工单号": "A123"})
+	substStepParams(&s, map[string]string{"工单号": "A123"}, map[string]string{}, nil)
 	for i, got := range []string{s.Target, s.Text, s.URL, s.Value, s.Expression, s.Condition, s.Files[0]} {
 		if strings.Contains(got, "{{工单号}}") || !strings.Contains(got, "A123") {
 			t.Errorf("field %d: %q not substituted", i, got)
@@ -140,8 +141,52 @@ func TestSubstStepParams(t *testing.T) {
 	}
 	// Unbound refs stay literal (visible in step output, not silently empty).
 	s2 := BrowserConsoleStep{Type: "type", Target: "#x", Text: "给 {{未知}} 留言"}
-	substStepParams(&s2, map[string]string{})
+	substStepParams(&s2, map[string]string{}, map[string]string{}, nil)
 	if s2.Text != "给 {{未知}} 留言" {
 		t.Errorf("unbound ref must stay literal, got %q", s2.Text)
+	}
+}
+
+func TestSubstStepParamsLazyTimeRange(t *testing.T) {
+	// A whole-value time phrase resolves at substitution time and reports
+	// through onRange; the cache keeps later steps on the same window.
+	var seen []string
+	s := BrowserConsoleStep{Type: "type", Target: "#range", Text: "{{时间范围}}"}
+	substStepParams(&s, map[string]string{"时间范围": "最近5分钟"}, map[string]string{}, func(r string) { seen = append(seen, r) })
+	if _, _, ok := builtin.TimeRangeBounds(s.Text); !ok {
+		t.Errorf("phrase must resolve to a literal range, got %q", s.Text)
+	}
+	if len(seen) != 1 {
+		t.Errorf("onRange calls: %d, want 1", len(seen))
+	}
+	// Embedded phrases stay literal (search queries must not be rewritten).
+	s2 := BrowserConsoleStep{Type: "type", Target: "#q", Text: "查询 最近5分钟 的报告"}
+	substStepParams(&s2, map[string]string{"查询": "查询 最近5分钟 的报告"}, map[string]string{}, nil)
+	if s2.Text != "查询 最近5分钟 的报告" {
+		t.Errorf("embedded phrase must stay literal, got %q", s2.Text)
+	}
+}
+
+// TestLocalizeConsoleErr covers the raw-CDP → panel-Chinese mappings; the
+// -32000 case is the "ref existed in the snapshot but the page re-rendered
+// without a URL change" failure the user hit (SPA refresh, polling table).
+func TestLocalizeConsoleErr(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"node gone -32000", `高亮 "e6": No node with given id found (-32000)`, "已失效（页面内容变过但网址没变）"},
+		{"no snapshot", `高亮 "e6": no snapshot taken for session "br"`, "编号已失效"},
+		{"unknown ref", `高亮 "e6": unknown ref "e6"`, "不在当前快照里"},
+		{"passthrough", "some other error", "some other error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := localizeConsoleErr(errors.New(tc.in), "e6").Error()
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("localizeConsoleErr(%q) = %q, want substring %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }

@@ -14,6 +14,13 @@ import (
 // linkDown v2c trap → ring line + exactly ONE new Finding (throttled replay
 // adds none). Idempotent against findings left by earlier runs.
 func TestTrapHandleLinkDownEscalates(t *testing.T) {
+	// trapEscalate persists a Finding per fired trap: without the override
+	// the synthetic sw-1 traps land in the user's real findings dir and light
+	// the sidebar risk dot (leaked twice in the wild, 2026-09-04).
+	oldFind := findingsDirOverr
+	t.Cleanup(func() { findingsDirOverr = oldFind })
+	findingsDirOverr = t.TempDir()
+
 	cfg := &config.Config{}
 	cfg.NetDev.Devices = []config.NetDevDevice{{Name: "sw-1", Vendor: "huawei", Address: "10.0.0.9"}}
 	countTrap := func() int {

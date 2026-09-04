@@ -1,4 +1,4 @@
-// proposalStepFormat — 结构化提案步骤（NETDEV_SPEC_V2 §7.1）的纯展示逻辑：
+// proposalStepFormat — 结构化变更步骤（NETDEV_SPEC_V2 §7.1）的纯展示逻辑：
 // 类型标签、人审一行摘要、k8s manifest 一行引用。无 React/桥依赖，可直接
 // 进 tsx 纯逻辑测试（src/__tests__/proposal-step-summary.test.ts）。
 

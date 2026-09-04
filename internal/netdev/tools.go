@@ -153,6 +153,15 @@ func ApplyExtraRead(cfg *config.Config) {
 	}
 }
 
+// closeConn tears down one managed connection; console lines have no client
+// (nil) — the session IS the connection.
+func closeConn(c *managedConn) {
+	c.session.Close()
+	if c.client != nil {
+		c.client.Close()
+	}
+}
+
 // KillAllConnections is the emergency stop: every device connection and CLI
 // session is closed immediately (freeing all VTY lines), audited as such. The
 // Manager stays usable — the next diagnostic command reconnects on demand.
@@ -162,8 +171,7 @@ func (m *Manager) KillAllConnections() int {
 	n := len(m.conns)
 	names := make([]string, 0, n)
 	for name, c := range m.conns {
-		c.session.Close()
-		c.client.Close()
+		closeConn(c)
 		delete(m.conns, name)
 		names = append(names, name)
 	}
@@ -189,8 +197,7 @@ func (m *Manager) Close() {
 	}
 	m.mu.Unlock()
 	for _, c := range conns {
-		c.session.Close()
-		c.client.Close()
+		closeConn(c)
 	}
 }
 
@@ -217,8 +224,7 @@ func (m *Manager) reaper(ctx context.Context) {
 			}
 			m.mu.Unlock()
 			for _, c := range idled {
-				c.session.Close()
-				c.client.Close()
+				closeConn(c)
 			}
 			// Idle-close frees the device's scarce VTY line — visible in the
 			// live panel as the status dot going grey.
@@ -298,7 +304,7 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 		base.Refused = true
 		switch class {
 		case driver.Write:
-			base.Refusal = "write command — not executed. netdev's diagnostic hand is structurally read-only; configuration changes go through a human-approved change proposal (变更提案). Tell the user what change is needed and why."
+			base.Refusal = "write command — not executed. netdev's diagnostic hand is structurally read-only; configuration changes go through a human-approved change proposal (变更变更). Tell the user what change is needed and why."
 		case driver.Dangerous:
 			base.Refusal = "dangerous command — not executed. This class of command (reboot/delete/erase…) is proposal-only and requires secondary confirmation."
 		default:
@@ -408,6 +414,20 @@ func (m *Manager) runRead(ctx context.Context, d config.NetDevDevice, drv driver
 // connect resolves the route (device + via hop chain), credentials, and host
 // key policy, then establishes a supervised transport client and CLI session.
 func (m *Manager) connect(ctx context.Context, d config.NetDevDevice, drv driver.Driver) (*transport.Client, *Session, error) {
+	// Console line (COM 口): no client, no route, no host keys — the session
+	// IS the connection. Everything downstream (classifier, audit, live tap,
+	// idle reaper) rides the same Session contract.
+	if d.ConsolePort != "" {
+		session, err := OpenConsoleSession(ctx, d.ConsolePort, d.ConsoleBaud, drv, d.Encoding)
+		if err != nil {
+			return nil, nil, err
+		}
+		session.SetOutputObserver(func(chunk string) {
+			m.emitLive(LiveEvent{Kind: LiveCmdOutput, Device: d.Name, Chunk: chunk})
+		})
+		m.emitLive(LiveEvent{Kind: LiveConn, Device: d.Name, State: LiveConnConnected})
+		return nil, session, nil
+	}
 	client, err := m.dialDeviceClient(ctx, d)
 	if err != nil {
 		return nil, nil, err
@@ -550,6 +570,7 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&nmapTool{m: m})
 	reg.Add(&netprobeTool{m: m})
 	reg.Add(&baselineTool{m: m})
+	reg.Add(&cveMatchTool{m: m})
 	reg.Add(&redfishTool{m: m})
 	reg.Add(&logReadTool{m: m})
 	reg.Add(&logSearchTool{m: m})
@@ -559,6 +580,7 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&firewallTool{m: m})
 	reg.Add(&locateTool{m: m})
 	reg.Add(&dbQueryTool{m: m})
+	reg.Add(&backupTool{m: m})
 	// fanout (completion-spec §6 #9): one read-only command across many
 	// devices, tabulated — the runtime version of a diagnostic preset.
 	reg.Add(&fanoutTool{m: m, cfg: cfg})
@@ -765,7 +787,55 @@ func (t *baselineTool) Execute(ctx context.Context, args json.RawMessage) (strin
 	if err != nil {
 		return "", err
 	}
-	return f.Title + "。逐项结果见「发现」（每条命中都带脱敏证据与修复建议，修复变更请起草提案）。", nil
+	return f.Title + "。逐项结果见「发现」（每条命中都带脱敏证据与修复建议，修复变更请起草变更）。", nil
+}
+
+// cveMatchTool exposes the cached CVE-feed × inventory match to the agent
+// (the chat-driven 蓝队漏洞核查 flow's grounding step). Read-only and local:
+// it never probes anything — fingerprints still come from netdev_exec reads.
+type cveMatchTool struct{ m *Manager }
+
+func (t *cveMatchTool) Name() string { return "netdev_cve_match" }
+
+func (t *cveMatchTool) Description() string {
+	return "Match the managed inventory against the imported CVE feed (local, read-only, no probing). Returns device × CVE hits (id, severity, matched product substring, description). Returns a hint instead when no feed is imported — the feed is user-supplied (paste in 安全工作台 → CVE)."
+}
+
+func (t *cveMatchTool) Schema() json.RawMessage {
+	return json.RawMessage(`{"type": "object", "properties": {}, "required": []}`)
+}
+
+func (t *cveMatchTool) ReadOnly() bool { return true }
+
+func (t *cveMatchTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	matches, err := t.m.MatchCVEs()
+	if err != nil {
+		// No feed (or unreadable cache) is a guidance case, not a failure —
+		// the agent should tell the user how to bring a feed in.
+		return "尚无可用 CVE 情报源：" + err.Error() +
+			"。请引导用户在「安全工作台 → CVE」页签粘贴导入 feed（简化格式或 NVD 原生导出；产品不分发 feed）。" +
+			"在此之前可继续依赖自身知识列出候选漏洞（须只读验证后再立案）。", nil
+	}
+	if len(matches) == 0 {
+		return "情报源与清单无交集（0 命中）。注意匹配依赖设备的 厂商/系统/型号 字段完整；" +
+			"可先通过指纹读取（版本命令/包清单）补全，再重试。", nil
+	}
+	const cap = 200
+	var b strings.Builder
+	fmt.Fprintf(&b, "命中 %d 条（设备 × CVE）：\n", len(matches))
+	for i, h := range matches {
+		if i >= cap {
+			fmt.Fprintf(&b, "…另有 %d 条未列出\n", len(matches)-cap)
+			break
+		}
+		desc := h.Desc
+		if len(desc) > 90 {
+			desc = desc[:90] + "…"
+		}
+		fmt.Fprintf(&b, "%s | %s [%s] 匹配 %q — %s\n", h.Device, h.CVEID, h.Severity, h.Product, desc)
+	}
+	b.WriteString("以上为 厂商/型号 粗匹配，不是版本级结论——逐条只读验证后方可立案 netdev_finding。")
+	return b.String(), nil
 }
 
 type netconfTool struct{ m *Manager }
@@ -917,7 +987,7 @@ func (t *proposeTool) Name() string { return "netdev_propose" }
 
 func (t *proposeTool) Description() string {
 	return "Draft a change proposal (NOT executed): intent + per-device commands + a rollback plan. " +
-		"A human reviews the whole proposal and decides — approving, executing, and rolling back happen only in 运维提案界面. " +
+		"A human reviews the whole proposal and decides — approving, executing, and rolling back happen only in 运维变更界面. " +
 		"Every step needs a rollback plan authored with the change; devices in read-only groups are refused."
 }
 
@@ -934,7 +1004,8 @@ func (t *proposeTool) Schema() json.RawMessage {
 					"rollback": {"type": "array", "items": {"type": "string"}, "description": "reverse commands, applied newest-first on rollback"}
 				},
 				"required": ["device", "commands", "rollback"]
-			}}
+			}},
+			"restore_from": {"type": "string", "description": "backup version id (device@nanos) when this proposal RESTORES a device to a stored version — validated against the vault and recorded for audit; the restoring steps must target that device"}
 		},
 		"required": ["intent", "steps"]
 	}`)
@@ -944,13 +1015,19 @@ func (t *proposeTool) ReadOnly() bool { return true } // drafts change nothing o
 
 func (t *proposeTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var a struct {
-		Intent string         `json:"intent"`
-		Steps  []ProposalStep `json:"steps"`
+		Intent      string         `json:"intent"`
+		Steps       []ProposalStep `json:"steps"`
+		RestoreFrom string         `json:"restore_from"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
 	}
-	p := &Proposal{Intent: a.Intent, Steps: a.Steps, Status: ProposalDraft}
+	if a.RestoreFrom != "" {
+		if err := ValidateRestoreFrom(a.RestoreFrom, a.Steps); err != nil {
+			return "", err
+		}
+	}
+	p := &Proposal{Intent: a.Intent, Steps: a.Steps, Status: ProposalDraft, RestoreFrom: a.RestoreFrom}
 	if err := t.m.ValidateProposal(p); err != nil {
 		return "", err
 	}
@@ -959,10 +1036,20 @@ func (t *proposeTool) Execute(ctx context.Context, args json.RawMessage) (string
 	if err := SaveProposal(p); err != nil {
 		return "", err
 	}
-	_ = AppendAudit(Audit{Device: "(proposal)", Command: "draft " + p.ID + " (" + a.Intent + ")", Class: "proposal", Status: AuditRefused})
+	draftCmd := "draft " + p.ID + " (" + a.Intent + ")"
+	if a.RestoreFrom != "" {
+		// The source version rides the audit line so a restore is replayable:
+		// "恢复自哪一版" is answerable from the chain alone.
+		draftCmd = "draft " + p.ID + " restore-from " + a.RestoreFrom + " (" + a.Intent + ")"
+	}
+	_ = AppendAudit(Audit{Device: "(proposal)", Command: draftCmd, Class: "proposal", Status: AuditRefused})
 	needs2 := t.m.ProposalNeedsConfirm2(p)
-	return fmt.Sprintf("proposal %s drafted (status: draft). The user reviews it in 设置 → 运维 → 提案中查看; approval and execution are theirs, not yours.%s",
-		p.ID, map[bool]string{true: " Note: a device in this proposal is in a proposal+confirm2 group — approval demands secondary confirmation.", false: ""}[needs2]), nil
+	restoreNote := ""
+	if a.RestoreFrom != "" {
+		restoreNote = " This is a RESTORE proposal (source version " + a.RestoreFrom + "): nothing executes until the human approves the whole proposal."
+	}
+	return fmt.Sprintf("proposal %s drafted (status: draft). The user reviews it in 设置 → 运维 → 变更中查看; approval and execution are theirs, not yours.%s%s",
+		p.ID, restoreNote, map[bool]string{true: " Note: a device in this proposal is in a proposal+confirm2 group — approval demands secondary confirmation.", false: ""}[needs2]), nil
 }
 
 type topologyTool struct{ m *Manager }
@@ -1044,7 +1131,8 @@ func (t *discoverTool) Name() string { return "netdev_discover" }
 func (t *discoverTool) Description() string {
 	return "TCP-probe a CIDR for open device ports (default 22/23) and grab banners, optionally THROUGH a configured hop " +
 		"(via = hop name; empty = direct). The CIDR must be inside the configured discovery scopes — out-of-scope probes are refused. " +
-		"Tunnel mode only (no UDP/ICMP); /20+ networks are refused (use the probe for those)."
+		"Tunnel mode only (no UDP/ICMP); /20+ networks are refused — use netdev_netprobe for those (the ICMP / large-subnet sweep). " +
+		"Note netdev_nmap and netdev_netprobe additionally require the [netdev.assessment] engagement envelope; this tool does not."
 }
 
 func (t *discoverTool) Schema() json.RawMessage {
@@ -1096,15 +1184,17 @@ func (t *discoverTool) Execute(ctx context.Context, args json.RawMessage) (strin
 type execTool struct{ m *Manager }
 
 // logReadTool — the structured log-source read: the agent names a log source
-// (file:/journal:/docker:) instead of free-handing shell; the composed command
-// still rides the sealed Exec path (classifier, budget, redaction, audit).
+// (system:/file:/journal:/docker:) instead of free-handing shell; the composed
+// command still rides the sealed Exec path (classifier, budget, redaction,
+// audit).
 type logReadTool struct{ m *Manager }
 
 func (t *logReadTool) Name() string { return "netdev_log_read" }
 
 func (t *logReadTool) Description() string {
 	return "Read ONE log source on a configured device (usually vendor=linux). " +
-		"Source forms: file:/var/log/nginx/error.log (path must be under /var/log or the device's log_paths whitelist), " +
+		"Source forms: system:main (the WHOLE system journal — distro-agnostic; prefer this for system logs, no need to know syslog vs messages file naming), " +
+		"file:/var/log/nginx/error.log (path must be under /var/log or the device's log_paths whitelist), " +
 		"journal:nginx (a systemd unit, use since/grep for time windows), docker:<container>. " +
 		"Returns the last tail_n lines (default 100, max 1000), optionally filtered by since (ISO date-time or -1h style) and grep (regex), " +
 		"with secrets redacted before they reach the context. Runs through the same read-only seal as netdev_exec."
@@ -1115,7 +1205,7 @@ func (t *logReadTool) Schema() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"device": {"type": "string", "description": "device name from netdev_devices"},
-			"source": {"type": "string", "description": "file:/abs/path | journal:<unit> | docker:<container>"},
+			"source": {"type": "string", "description": "system:main (whole system journal) | file:/abs/path | journal:<unit> | docker:<container>"},
 			"tail_n": {"type": "integer", "description": "lines to return (default 100, max 1000)"},
 			"since":  {"type": "string", "description": "keep lines from this time on: 2026-08-27 10:00:00 or -1h (journal sources pass it server-side)"},
 			"grep":   {"type": "string", "description": "regex filter applied to lines"}

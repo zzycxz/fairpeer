@@ -108,7 +108,19 @@ export function applyBrowserMirrorFrame(
       };
     case "end":
       return {
-        state: { ...state, running: false, lastText: frame.text || state.lastText, seq: state.seq + 1 },
+        state: {
+          ...state,
+          running: false,
+          lastText: frame.text || state.lastText,
+          seq: state.seq + 1,
+          // The session is gone — drop its bucket so the ops viewer's source
+          // chips list LIVE sessions only. Without this, dead br_N sessions
+          // accumulated as unremovable ghost chips. The aggregate image keeps
+          // the last frame visible (historical behavior).
+          sessions: frame.session_id && state.sessions[frame.session_id]
+            ? Object.fromEntries(Object.entries(state.sessions).filter(([id]) => id !== frame.session_id))
+            : state.sessions,
+        },
         startedActivity: false,
       };
     default:

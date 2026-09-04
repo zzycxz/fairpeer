@@ -184,7 +184,7 @@ func (m *Manager) PollHealthOnce(ctx context.Context) {
 	healthLastPoll = time.Now()
 	healthMu.Unlock()
 	m.evaluateAlerts(fresh)
-	// 观察期劣化检测（§7.1）：watching 提案的目标与 watch 起点基线对比。
+	// 观察期劣化检测（§7.1）：watching 变更的目标与 watch 起点基线对比。
 	m.checkWatchingProposals(fresh)
 }
 

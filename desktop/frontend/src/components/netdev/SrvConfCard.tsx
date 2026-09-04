@@ -1,8 +1,8 @@
 // SrvConfCard — 服务器配置文件管理（NETDEV_SPEC_V2 §7.3）：设备卡「变更」区
 // 的配置文件面板。白名单 = 设备 config_paths（log_paths 同款授权模式）：
 // 拍快照入备份库 → 两版本 UnifiedDiff → 环境 Drift（同路径跨设备对比）。
-// **修改不在此发生**：编辑产物以 file-upload 提案提交（人对整份内容签
-// 字）；备份可恢复性由 restore-verify 提案步骤演练（后端已就绪，经对话起
+// **修改不在此发生**：编辑产物以 file-upload 变更提交（人对整份内容签
+// 字）；备份可恢复性由 restore-verify 变更步骤演练（后端已就绪，经对话起
 // 草）。
 import { useCallback, useEffect, useState } from "react";
 import { app } from "../../lib/bridge";

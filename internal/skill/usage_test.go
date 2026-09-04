@@ -143,3 +143,17 @@ func itoa(n int) string {
 func writeFile(path string, data []byte) error {
 	return os.WriteFile(path, data, 0o644)
 }
+
+// TestHasUsed pins the never-used discriminator the boot grace period relies
+// on: a skill with no usage record must report false, one recorded true.
+func TestHasUsed(t *testing.T) {
+	dir := t.TempDir()
+	u := NewUsageTracker(dir)
+	if u.HasUsed("browser-actions") {
+		t.Fatal("never-recorded skill must report HasUsed=false")
+	}
+	u.Record("browser-actions")
+	if !u.HasUsed("browser-actions") {
+		t.Fatal("recorded skill must report HasUsed=true")
+	}
+}

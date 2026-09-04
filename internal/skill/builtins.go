@@ -63,7 +63,7 @@ const builtinNetdevDiagOSPFBody = netdevDiagPreamble + `
 display ospf interface <if> 的 Dead 计时、接口错包（转 netdev-diag-interface）、CPU（display cpu-usage）。
 
 ## 第三步：结论
-netdev_finding 记录：症状 → 根因（哪台设备哪个配置项）→ 证据（命令+输出）→ 建议的变更（只描述，交给提案流程 netdev_propose，不自行执行）。`
+netdev_finding 记录：症状 → 根因（哪台设备哪个配置项）→ 证据（命令+输出）→ 建议的变更（只描述，交给变更流程 netdev_propose，不自行执行）。`
 
 const builtinNetdevDiagBGPBody = netdevDiagPreamble + `
 
@@ -135,6 +135,63 @@ const builtinNetdevDiagInterfaceBody = netdevDiagPreamble + `
 
 ## 第三步：结论
 netdev_finding 记录：症状 → 根因（含两端证据：哪端的计数在涨、光功率数值）→ 建议变更（换模块/调协商/调 QoS——只描述，交给 netdev_propose）。`
+
+// builtinNetdevVulnScanBody — 蓝队漏洞核查：指纹优先的只读核查（对话驱动，
+// 结果实时同步右侧「蓝队核查」页卡）。主动探测受评估信封约束，本 playbook
+// 不开启不绕过；利用性验证一概不做（红队批未立项，docs/REDTEAM_BATCH_DECISION.md）。
+const builtinNetdevVulnScanBody = `This playbook is INLINED — run it in the main loop with the netdev_* tools.
+
+# 蓝队漏洞核查 playbook
+
+适用：用户要求"做一轮漏洞核查/扫描/体检"、"这批设备有什么漏洞"、中间件与系统补丁核对。
+
+## 纪律（不可妥协）
+- 设备名一律取自 netdev_devices 的清单；清单外设备只提示用户添加。
+- 每条命令一次 netdev_exec / netdev_fanout（只读命令）；批量读取后一起关联分析。
+- netdev_exec 拒绝的命令不要换写法重试——说明意图，交给用户决策。
+- 每一条立案的 netdev_finding 必须附真实命令输出作为证据；无证据不下结论。
+- source 固定填 "vulnscan"（对话核查专用来源，右侧「蓝队核查」页卡按它实时展示）。
+- 复查同一设备时在 detail 首行注明"复查"，与旧发现对照（已修复/仍在/新增）。
+
+## 红线（一概不做）
+- 不做任何利用性/破坏性验证（POC/EXP 执行、爆破、溢出尝试、畸形报文）。
+- 不主动发起端口扫描/服务探测——netdev_nmap/netdev_netprobe 需要用户已配置评估模式
+  （engagement 信封 + scopes 白名单）；信封未开时只在结论里建议，并说明开启位置。
+- 模型记忆的漏洞信息只能作为"候选"：必须有一条只读证据（版本/横幅/补丁号比对）才能立案。
+
+## 第一步：指纹发现（越本地越可靠，按优先级）
+- Linux 服务器（linux-shell）: dpkg -l / rpm -qa（包清单 = 精确版本，最强指纹）、
+  pip list / pip3 list、java -version、openssl version、ssh -V、nginx -v、apache2ctl -v、
+  ps、systemctl list-units、docker images（镜像即组件）。
+- Windows 服务器（windows-powershell）: Get-HotFix（补丁级——公告匹配的钥匙）、
+  Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*（已装软件+版本）、
+  Get-Package、systeminfo、tasklist。
+- 网络设备: display version / show version（厂商/型号/固件版本）、netdev_snmp（sysDescr）、
+  存量配置里的版本线索；凭据不通时降级：只用清单的 厂商/系统/型号 字段（粗匹配，
+  结论降级为"待验证"）。
+- 多台同类设备用 netdev_fanout 把同一条只读命令扫过去，再汇总。
+
+## 第二步：候选漏洞（两路来源，都只产出"候选"）
+1. netdev_cve_match：已导入 feed 时返回 设备 × CVE 命中表（厂商/型号子串级粗匹配）。
+   未导入时向用户说明获取与导入方式（安全工作台 → CVE 页签粘贴，产品不分发 feed），
+   然后继续第 2 路，不要中断核查。
+2. 自身知识：按指纹到的 产品+版本 列出已知高危漏洞（标注"模型记忆，须验证"）。
+   知识有截止时间——近期新增漏洞建议用户补 feed 或联网查证，绝不凭记忆断言"无漏洞"。
+
+## 第三步：只读验证（逐条候选）
+- 版本区间比对为主：候选漏洞的受影响区间 vs 指纹到的精确版本；包清单版本可直接
+  裁决的，evidence 引用该包清单行即可。
+- 版本定不了时补一条更细的只读命令（nginx -v、java -version、注册表版本键）；
+  仍定不了 → 立案为 info 级"待人工核对"，绝不凭猜测升级严重度。
+- 补丁级（Windows）：Get-HotFix 的 KB 号 vs 公告要求，缺失即命中。
+
+## 第四步：立案与收尾
+- 每个确认命中一条 netdev_finding：title = 设备/组件 + CVE 或漏洞名；severity 按影响
+  （可远程代码执行且暴露面大 = critical）；devices/evidence/detail 齐全；suggestion 写
+  修复方向（升级到哪个版本/装哪个补丁），实际变更交给变更流程，不自行执行。
+- 收尾报告：指纹覆盖了哪些设备/组件、确认/待验证/排除各多少、下一步建议
+  （补 feed / 开评估信封做主动扫描 / 起草修复变更）。提醒用户：结果已实时同步到
+  右侧「蓝队核查」页卡，修复走变更闭环。`
 
 // builtinNetdevHelpBody is 运维快速参考卡片, carried by the agent:
 // the vetted source list (mirrors docs/NETDEV_HELP.md) plus the provenance
@@ -550,7 +607,7 @@ const builtinNetdevPlaybookBody = `This skill is INLINED — a knowledge card. C
 ## 断网（整段不通）
 1. 路径分析（逐跳）：网关 ARP → 各跳路由表 → 末端监听
 2. BMC/带外先确认硬件活着（Redfish Chassis Power/Thermal）
-3. 找到第一个断点后：改前先备份，变更走提案
+3. 找到第一个断点后：改前先备份，写入走变更审批
 
 ## 输出纪律
 结论=Finding（带证据）；图=mermaid 路径图（坏段红色）；不确定就说"未验证"并给出下一步命令。`
@@ -597,6 +654,14 @@ func builtinSkills() []Skill {
 			Name:        "netdev-diag-interface",
 			Description: "接口故障排查 playbook（运维）: link down (physical vs protocol), CRC/error counters, optical transceiver power, congestion drops. Splits layer-1 from layer-2 symptoms, compares both ends' counters, evidence into netdev_finding. Inline. For the general read-order matrix and other failure classes see netdev-playbook.",
 			Body:        builtinNetdevDiagInterfaceBody,
+			Scope:       ScopeBuiltin,
+			Path:        "(builtin)",
+			RunAs:       RunInline,
+		},
+		{
+			Name:        "netdev-vulnscan",
+			Description: "蓝队漏洞核查 playbook（运维）: fingerprint-driven vulnerability check — local package/version/patch inventory first (dpkg/rpm/pip/Get-HotFix/vendor version reads), then CVE candidates from the imported feed (netdev_cve_match) plus model knowledge, then read-only verification (version-range compare only, no exploitation), evidence into netdev_finding with source=vulnscan (synced live to the 蓝队核查 dock tab). Inline. Active probing (nmap/netprobe) stays behind the assessment envelope — never enabled by this playbook.",
+			Body:        builtinNetdevVulnScanBody,
 			Scope:       ScopeBuiltin,
 			Path:        "(builtin)",
 			RunAs:       RunInline,
@@ -663,7 +728,7 @@ func builtinSkills() []Skill {
 		},
 		{
 			Name:        "browser-auto",
-			Description: "Web tasks (open URLs, navigate, click, type, scrape). For any website/URL use THIS, not desktop-auto.",
+			Description: "Generic web-task fallback — a matching site-specific browser skill wins first; not desktop-auto.",
 			Body:        builtinBrowserAutoBody,
 			Scope:       ScopeBuiltin,
 			Path:        "(builtin)",

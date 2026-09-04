@@ -32,7 +32,7 @@ export function StepTypeBadge({ type }: { type?: string }) {
 }
 
 // ProposalActions: the approve / execute / rollback buttons with their
-// confirm dialogs. Shared by the settings 提案中心 and 运维 dock 的 提案
+// confirm dialogs. Shared by the settings 变更中心 and 运维 dock 的 变更
 // tab — the human half of the write path lives wherever the human is looking.
 export function
  ProposalActions({ p, onDone }: { p: NetDevProposal; onDone: () => void }) {
@@ -62,7 +62,7 @@ export function
             message:
               `${p.intent}\n\n` +
               (p.steps ?? []).map((s) => `· ${s.device}: ${(s.commands ?? []).join("; ")}`).join("\n") +
-              "\n\n回滚计划已随提案起草，批准后仍需手动点击执行。",
+              "\n\n回滚计划已随变更起草，批准后仍需手动点击执行。",
             confirmLabel: t("ndv.prop.approve"),
           });
           if (!ok) return;
@@ -97,7 +97,7 @@ export function
         </span>
       )}
       {/* 驳回（§4.1）：人工否决权。draft/approved 可驳，原因内联填写并随
-          提案持久化——agent 下一轮读到提案即见被拒原因。 */}
+          变更持久化——agent 下一轮读到变更即见被拒原因。 */}
       {(p.status === "draft" || p.status === "approved") && !rejecting && (
         <span className="btn btn--danger btn--small" role="button" onClick={() => { setRejecting(true); setReason(""); }}>
           {t("ndv.prop.rejectEllipsis")}
@@ -122,10 +122,10 @@ export function
       )}
       {/* 删除（§4.1 列表治理）：仅 draft/已终结态；活跃管线必须留档。 */}
       {(p.status === "draft" || p.status === "rejected" || p.status === "done" || p.status === "failed" || p.status === "closed") && (
-        <span className="btn btn--secondary btn--small" role="button" title="删除提案文件（不可恢复）" onClick={() => void act(`del:${p.id}`, async () => {
+        <span className="btn btn--secondary btn--small" role="button" title="删除变更文件（不可恢复）" onClick={() => void act(`del:${p.id}`, async () => {
           if (!(await confirmDlg({
-            title: `删除提案 ${p.id}`,
-            message: "从磁盘移除提案文件（审计记录保留）。不可恢复。",
+            title: `删除变更 ${p.id}`,
+            message: "从磁盘移除变更文件（审计记录保留）。不可恢复。",
             confirmLabel: "删除",
             danger: true,
           }))) return;
@@ -173,12 +173,12 @@ export function ProposalCenter() {
 
   const approve = (p: NetDevProposal) => act(`approve:${p.id}`, async () => {
     const ok = await confirmDlg({
-      title: `批准提案 ${p.id}`,
+      title: `批准变更 ${p.id}`,
       message:
         `${p.intent}\n\n` +
         p.steps.map((s) => `· ${stepSummary(s)}`).join("\n") +
         (p.steps.some(s => s.dangerous) ? "\n\n⚠ 含危险动词步骤——已强制二次确认。" : "") +
-        "\n\n回滚计划已随提案起草，批准后仍需手动点击执行。",
+        "\n\n回滚计划已随变更起草，批准后仍需手动点击执行。",
       confirmLabel: t("ndv.prop.approve"),
     });
     if (!ok) return;
@@ -187,7 +187,7 @@ export function ProposalCenter() {
 
   const execute = (p: NetDevProposal) => act(`exec:${p.id}`, async () => {
     if (!(await confirmDlg({
-      title: `执行提案 ${p.id}`,
+      title: `执行变更 ${p.id}`,
       message: t("ndv.prop.execMsg"),
       confirmLabel: t("ndv.prop.execute"),
     }))) return;
@@ -196,7 +196,7 @@ export function ProposalCenter() {
 
   const rollback = (p: NetDevProposal) => act(`rb:${p.id}`, async () => {
     if (!(await confirmDlg({
-      title: `回滚提案 ${p.id}`,
+      title: `回滚变更 ${p.id}`,
       message: t("ndv.prop.rbMsg"),
       confirmLabel: t("ndv.prop.rollback"),
       danger: false,
@@ -206,12 +206,12 @@ export function ProposalCenter() {
 
   return (
     <div>
-      <div className="set-label" style={{ margin: "14px 0 6px" }}>提案中心（{items.length}）</div>
+      <div className="set-label" style={{ margin: "14px 0 6px" }}>变更中心（{items.length}）</div>
       <div className="mem-hint" style={{ marginBottom: 6 }}>
         agent 只能起草（netdev_propose）；批准、执行、回滚只在此处由人操作。每步的回滚计划在详情中可见。
       </div>
       {err && <div className="banner banner--error" style={{ marginBottom: 6 }}>{err}</div>}
-      {items.length === 0 && <div className="mem-hint">暂无提案。对话中让 agent 用 netdev_propose 起草。</div>}
+      {items.length === 0 && <div className="mem-hint">暂无变更。对话中让 agent 用 netdev_propose 起草。</div>}
       {items.map(p => (
         <div key={p.id} className="mem-hint" style={{ border: "1px solid var(--border, #333)", borderRadius: 6, padding: 8, marginBottom: 6 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -281,7 +281,7 @@ export function ProposalCenter() {
               ))}
               {p.status === "watching" && p.watch_until && (
                 <div style={{ marginBottom: 6, color: "var(--text-warn, #e0a800)" }}>
-                  👁 观察期至 {String(p.watch_until).slice(11, 19)}（§7.1：劣化触发 Finding + 一键回滚提案）
+                  👁 观察期至 {String(p.watch_until).slice(11, 19)}（§7.1：劣化触发 Finding + 一键回滚变更）
                 </div>
               )}
               <div style={{ opacity: 0.6 }}>

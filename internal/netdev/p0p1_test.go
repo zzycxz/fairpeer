@@ -12,6 +12,7 @@ func TestComposeLogFollowCommand(t *testing.T) {
 		{"file:/var/log/nginx/error.log", "tail -F -n 0 /var/log/nginx/error.log"},
 		{"file:/opt/app/logs/app.log", "tail -F -n 0 /opt/app/logs/app.log"},
 		{"journal:nginx", "journalctl -f -u nginx -n 0 --no-pager -q"},
+		{"system:main", "journalctl -f -n 0 --no-pager -q"},
 		{"docker:web", "docker logs -f --tail 0 web"},
 	}
 	for _, c := range ok {
@@ -20,7 +21,7 @@ func TestComposeLogFollowCommand(t *testing.T) {
 			t.Errorf("%s: got %q err %v", c.source, got, err)
 		}
 	}
-	bad := []string{"file:/etc/shadow", "file:/opt/other/x.log", "journal:nginx; reboot", "docker:web;ls", "file:", "x:y"}
+	bad := []string{"file:/etc/shadow", "file:/opt/other/x.log", "journal:nginx; reboot", "docker:web;ls", "system:main; reboot", "file:", "x:y"}
 	for _, s := range bad {
 		if _, err := composeLogFollowCommand(d, s); err == nil {
 			t.Errorf("%q should be refused", s)

@@ -23,6 +23,7 @@ const indexHeader = "# Skills\n\n" +
 	"- `[🧬 subagent]`: spawns an isolated agent; its reasoning/tool calls stay out of your context, only the final answer comes back. Use for context-heavy work, not weak relevance.\n" +
 	"- `[⚙ 确定性]`: executes its step table verbatim in the kernel (no LLM per step). Pass missing runtime values as arguments like `参数=值`.\n" +
 	"- `[关闭]`: disabled by user — not callable. If a task fits a disabled skill, tell the user to enable it in Settings → Skills.\n" +
+	"- `[休眠]`: merely long-unused (the index folds it to save budget). STILL DIRECTLY CALLABLE — invoking wakes it. Never refuse, delay, or ask the user to \"activate\" a skill over this tag, and never treat a description mentioning \"needs polishing\" as a blocker: run the skill, let the user refine afterwards.\n" +
 	"Prefer the dedicated top-level tool when one exists for a built-in subagent skill."
 
 // ApplyIndex appends the skills index to basePrompt, or returns it unchanged

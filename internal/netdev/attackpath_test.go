@@ -1,6 +1,7 @@
 package netdev
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -87,5 +88,11 @@ func TestBuildAttackPathsEmpty(t *testing.T) {
 	}
 	if RenderAttackPaths(r) != "" {
 		t.Error("empty report renders empty")
+	}
+	// JSON contract: the UI maps/.lengths every array — a nil slice would
+	// marshal as null and crash the exposure screen (b.paths.length).
+	j, err := json.Marshal(r)
+	if err != nil || strings.Contains(string(j), "null") {
+		t.Errorf("empty report must marshal arrays as [], got %s (err %v)", j, err)
 	}
 }

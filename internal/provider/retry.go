@@ -77,9 +77,34 @@ func (e *APIError) Error() string {
 
 // RetryableStatus reports whether a backoff can plausibly recover from status s:
 // 408 (request timeout), 429 (rate limit) and 5xx (incl. Anthropic's 529). Other
-// 4xx (400/401/402/422, …) are caller/config problems retrying can't fix.
+// 4xx (400/401/402/422, …) are caller/config problems retrying can't fix —
+// except the relay-drop 400s caught by IsTransientGatewayBody.
 func RetryableStatus(s int) bool {
 	return s == http.StatusRequestTimeout || s == http.StatusTooManyRequests || (s >= 500 && s <= 599)
+}
+
+// gatewayTransientBodies are relay-failure texts that arrive with a 400 even
+// though the caller's request is fine: the gateway lost ITS upstream connection
+// mid-request. Observed in the wild on xiaomimimo's OpenAI-compatible gateway
+// ({"code":"400","message":"Request failed","param":"Connection prematurely
+// closed BEFORE response"}), 2026-09-04. Extend the list as new gateways
+// misbehave the same way.
+var gatewayTransientBodies = []string{
+	"connection prematurely closed",
+	"connection reset by peer",
+}
+
+// IsTransientGatewayBody reports whether an error body carries one of the
+// known relay-drop signatures — retryable regardless of the HTTP status it
+// rode in on.
+func IsTransientGatewayBody(body string) bool {
+	b := strings.ToLower(body)
+	for _, sig := range gatewayTransientBodies {
+		if strings.Contains(b, sig) {
+			return true
+		}
+	}
+	return false
 }
 
 func transientErr(err error) bool {
@@ -200,7 +225,9 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 			return nil, &AuthError{Provider: provName, KeyEnv: keyEnv, Status: resp.StatusCode, HasKey: opts.KeyPresent}
 		}
 		apiErr := &APIError{Provider: provName, Status: resp.StatusCode, Body: strings.TrimSpace(string(msg))}
-		if !RetryableStatus(resp.StatusCode) {
+		// Relay-drop 400: the gateway's upstream died, not our request — same
+		// class as a 502, so it takes the retry path instead of failing fast.
+		if !RetryableStatus(resp.StatusCode) && !(resp.StatusCode == http.StatusBadRequest && IsTransientGatewayBody(apiErr.Body)) {
 			return nil, apiErr
 		}
 		lastErr = apiErr

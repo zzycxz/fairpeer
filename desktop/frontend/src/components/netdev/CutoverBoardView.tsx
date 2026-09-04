@@ -107,7 +107,7 @@ export default function CutoverBoardView({ onJump, onFocusDevice }: Props) {
           <div className="ndv__card-title">{t("ndv.cut.jobs")}</div>
           {b.jobs.length === 0 && <div className="dim" style={{ fontSize: 11.5 }}>{t("ndv.cut.noJobs")}</div>}
           {b.jobs.map(j => (
-            <div key={j.id} className="ndv-cut__job" role="button" onClick={() => onJump?.({ tab: "jobs", filter: `id:${j.id}` })}>
+            <div key={j.id} className="ndv-cut__job" role="button" onClick={() => onJump?.({ tab: "live", filter: `id:${j.id}` })}>
               <span>{j.name}</span>
               <span className={`ndv-cut__devst ndv-cut__devst--${j.status}`}>{t(`ndv.cut.job.${j.status}` as never)}</span>
               <span className="dim">{t("ndv.cut.budget", { c: j.commands, m: j.max_commands || 200, w: Math.round(j.active_ms / 1000), mw: j.max_wall_sec || 1800 })}</span>

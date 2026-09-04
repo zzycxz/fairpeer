@@ -35,7 +35,7 @@ type LogFollowEvent struct {
 func composeLogFollowCommand(d config.NetDevDevice, source string) (string, error) {
 	kind, rest, ok := strings.Cut(source, ":")
 	if !ok || rest == "" {
-		return "", fmt.Errorf("source must be file:<abs path> | journal:<unit> | docker:<container>, got %q", source)
+		return "", fmt.Errorf("source must be file:<abs path> | system:main | journal:<unit> | docker:<container>, got %q", source)
 	}
 	switch kind {
 	case "file":
@@ -44,6 +44,12 @@ func composeLogFollowCommand(d config.NetDevDevice, source string) (string, erro
 			return "", fmt.Errorf("path %q is outside the device's log whitelist (/var/log or the device's log_paths)", rest)
 		}
 		return "tail -F -n 0 " + path.Clean(rest), nil
+	case "system":
+		// Whole-journal follow — the distro-agnostic system log (logsource.go).
+		if !logUnitRe.MatchString(rest) {
+			return "", fmt.Errorf("invalid system source marker %q", rest)
+		}
+		return "journalctl -f -n 0 --no-pager -q", nil
 	case "journal":
 		if !logUnitRe.MatchString(rest) {
 			return "", fmt.Errorf("invalid systemd unit %q", rest)
@@ -78,6 +84,9 @@ func (m *Manager) LogFollow(deviceName, source string, onEvent func(LogFollowEve
 	device, ok := m.cfg.NetDevDeviceByName(deviceName)
 	if !ok {
 		return fmt.Errorf("device %q is not in the inventory", deviceName)
+	}
+	if device.ConsolePort != "" {
+		return fmt.Errorf("streaming follow over a serial console line is not supported yet — read the log source instead (one-shot reads work over the console)")
 	}
 	cmd, err := composeLogFollowCommand(device, source)
 	if err != nil {

@@ -18,6 +18,8 @@ export interface SkillDoc {
   // "browser-flow" = 对话调用走内核确定性执行器（逐步原样执行步骤表）；
   // 空 = 常规 subagent（LLM 按正文执行）。
   executor: string;
+  domain: string;
+  draft: boolean;
   allowedTools: string[];
   // {{参数}} → 默认值（空串 = 运行时询问）
   params: Record<string, string>;
@@ -42,10 +44,10 @@ const SECTION_ALIASES: Record<string, keyof SkillDoc | "title"> = {
   "verification": "verification",
 };
 
-const KNOWN_FRONTMATTER = new Set(["name", "description", "runas", "allowed-tools", "params", "executor"]);
+const KNOWN_FRONTMATTER = new Set(["name", "description", "runas", "allowed-tools", "params", "executor", "domain", "draft"]);
 
 const STEP_TYPES = new Set<string>([
-  "navigate", "back", "forward", "click", "hover", "type", "key", "scroll", "select", "upload", "wait", "extract", "screenshot", "evaluate", "human", "ask",
+  "navigate", "back", "forward", "switch_tab", "click", "hover", "type", "key", "scroll", "select", "upload", "wait", "extract", "screenshot", "evaluate", "human", "ask",
 ]);
 
 export function parseSkillDoc(content: string): SkillDoc | null {
@@ -62,6 +64,8 @@ export function parseSkillDoc(content: string): SkillDoc | null {
     description: "",
     runAs: "subagent",
     executor: "",
+    domain: "",
+    draft: false,
     allowedTools: [],
     params: {},
     whenToUse: "",
@@ -92,6 +96,12 @@ export function parseSkillDoc(content: string): SkillDoc | null {
         break;
       case "executor":
         doc.executor = stripQuotes(value);
+        break;
+      case "domain":
+        doc.domain = stripQuotes(value);
+        break;
+      case "draft":
+        doc.draft = ["true", "yes", "1"].includes(value.trim().toLowerCase());
         break;
       case "allowed-tools":
         doc.allowedTools = value.split(",").map((s) => s.trim()).filter(Boolean);
@@ -168,9 +178,14 @@ function stepFromRow(type: BrowserConsoleStepType, target: string, value: string
     case "forward":
     case "screenshot":
       return { type };
+    case "switch_tab":
+      // 目标列 = 1 起始页卡序号；值列 = 页卡标题（给人看的备注）。
+      return { type, target: target || "1", text: value || undefined };
     case "click":
-    case "extract":
-      return { type, target, value: value.trim().toLowerCase() === "table" ? "table" : undefined };
+    case "extract": {
+      const v = value.trim().toLowerCase();
+      return { type, target, value: v === "table" || v === "markdown" ? v : undefined };
+    }
     case "hover":
       return { type, target };
     case "type":
@@ -202,7 +217,10 @@ function stepFromRow(type: BrowserConsoleStepType, target: string, value: string
 
 function parseSeconds(v: string): number {
   const m = /(\d+)\s*s?/i.exec(v.trim());
-  return m ? parseInt(m[1], 10) : 15;
+  if (!m) return 90;
+  const n = parseInt(m[1], 10);
+  // >600 read as milliseconds (panel-field habit: "15000" means 15s).
+  return n > 600 ? Math.max(1, Math.floor(n / 1000)) : n;
 }
 
 export function serializeSkillDoc(doc: SkillDoc): string {
@@ -211,6 +229,8 @@ export function serializeSkillDoc(doc: SkillDoc): string {
   fm.push(`description: ${doc.description.replace(/\n/g, " ")}`);
   fm.push(`runAs: ${doc.runAs || "subagent"}`);
   if (doc.executor) fm.push(`executor: ${doc.executor}`);
+  if (doc.domain) fm.push(`domain: ${doc.domain}`);
+  if (doc.draft) fm.push(`draft: true`);
   if (doc.allowedTools.length) fm.push(`allowed-tools: ${doc.allowedTools.join(", ")}`);
   const paramKeys = Object.keys(doc.params);
   if (paramKeys.length) {
@@ -259,13 +279,15 @@ function rowValue(s: BrowserConsoleStep): string {
     case "key":
       return s.value ?? "";
     case "wait":
-      return `${s.timeout_sec ?? 15}s`;
+      return `${s.timeout_sec ?? 90}s`;
     case "scroll":
       return String(s.amount ?? 3);
     case "upload":
       return (s.files ?? []).join(", ");
     case "extract":
-      return s.value === "table" ? "table" : "";
+      return s.value === "table" || s.value === "markdown" ? s.value : "";
+    case "switch_tab":
+      return s.text ?? "";
     case "human":
     case "ask":
       return s.text ?? "";
@@ -326,6 +348,8 @@ export function summarizeStep(step: BrowserConsoleStep): string {
       return "后退一页";
     case "forward":
       return "前进一页";
+    case "switch_tab":
+      return `切换到页卡 ${step.target ?? "1"}${step.text ? `「${step.text}」` : ""}`;
     case "click":
       return `点击 ${label}`;
     case "hover":

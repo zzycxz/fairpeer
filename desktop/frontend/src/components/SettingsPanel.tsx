@@ -632,9 +632,9 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
     case "cowork":
       return t("settings.tab.cowork");
     case "netdev":
+      return t("settings.tab.netdev");
     case "trustdomain":
       return t("settings.tab.trustdomain");
-      return t("settings.tab.netdev");
     case "mobile":
       return "移动端";
     default:

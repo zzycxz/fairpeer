@@ -1,8 +1,8 @@
-// TemplateCard — 批量模板（NETDEV_SPEC_V2 §7.2）的家：「提案」页签内的「模
+// TemplateCard — 批量模板（NETDEV_SPEC_V2 §7.2）的家：「变更」页签内的「模
 // 板」入口（§10.6 映射表）。模板 = 步骤序列 + 变量；渲染时逐台 dry-run 预
 // 览（每条标注分类与危险动词，无任何副作用），人审的是「N 份渲染结果」整
-// 体；生成即一份多设备步骤的提案草稿——滚动执行/首败冻结/回滚矩阵全部沿
-// 用提案既有管线。
+// 体；生成即一份多设备步骤的变更草稿——滚动执行/首败冻结/回滚矩阵全部沿
+// 用变更既有管线。
 import { useCallback, useEffect, useState } from "react";
 import { app } from "../../lib/bridge";
 import { useT } from "../../lib/i18n";

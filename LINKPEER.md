@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/platform-Android%20%7C%20iOS-0153e5?style=flat-square" alt="Platform"/>
   <img src="https://img.shields.io/badge/transport-P2P%20WebRTC-161b22?style=flat-square&logo=webrtc&logoColor=white" alt="P2P"/>
   <img src="https://img.shields.io/badge/e2e-AES--256--GCM-dbab09?style=flat-square&logo=lock&logoColor=white" alt="E2E"/>
-  <img src="https://img.shields.io/badge/status-planning%20(M0)-8b949e?style=flat-square" alt="Status"/>
+  <img src="https://img.shields.io/badge/status-in%20progress-2ea043?style=flat-square" alt="Status"/>
   <img src="https://img.shields.io/github/license/zzycxz/fairpeer.svg?style=flat-square&labelColor=161b22" alt="license"/>
 </p>
 
@@ -116,7 +116,7 @@ linkpeer 的设计原则是 **「不信任云端、不信任网络，只信任�
 
 ## 快速开始
 
-> ⚠️ linkpeer 当前处于 **规划阶段（M0 未启动）**，以下为目标使用流程，尚未实现。
+> ⚠️ linkpeer 处于 **开发中**：桌面侧（本仓库）的桥接器 `internal/mobilebridge` 与信令服务 `cmd/linkpeer-signal` 已实现并集成进 fairpeer 主程序，配对、端到端加密、事件镜像/命令通道可用调试服务器验证；移动端 App 是独立 Flutter 仓库、尚未发布，以下完整流程暂以移动端仓库进度为准。
 
 1. **桌面端**：打开 fairpeer → 设置 → 移动端 → 点「配对新设备」，屏幕出现二维码 + 6 位配对码。
 2. **手机**：安装 linkpeer → 首次打开 → 扫描桌面二维码 → 确认指纹一致 → 完成绑定。
@@ -136,15 +136,15 @@ linkpeer 与 fairpeer 桌面端通过单条 WebRTC DataChannel 通信，协议�
 
 ## 状态与路线图
 
-| 阶段 | 目标 |
-|---|---|
-| M0 | 云端信令服务（配对码、候选中转） |
-| M1 | fairpeer 桌面桥接器（`internal/mobilebridge`） |
-| M2 | 同 WiFi 下 P2P + 端到端加密打通 |
-| M3 | 跨网打洞（STUN / UPnP） |
-| M4 | linkpeer 对话界面 |
-| M5 | linkpeer 办公界面 |
-| M6 | Android + iOS 双端上架打磨 |
+| 阶段 | 目标 | 状态（2026-09） |
+|---|---|---|
+| M0 | 云端信令服务（配对码、候选中转） | ✅ `cmd/linkpeer-signal` 已实现 |
+| M1 | fairpeer 桌面桥接器（`internal/mobilebridge`） | ✅ 已实现并集成进主程序（含内嵌 K 零配置、信令模式面板） |
+| M2 | 同 WiFi 下 P2P + 端到端加密打通 | ✅ AES-GCM 帧 / 握手 / rekey / resync，e2e 测试覆盖 |
+| M3 | 跨网打洞（STUN / UPnP） | ✅ 多 STUN / UPnP / 云跳板第二链路 / TURN 粘贴解析 |
+| M4 | linkpeer 对话界面 | 🔜 移动端仓库开发中；桌面侧 permissions / 模板下发通道已就绪 |
+| M5 | linkpeer 办公界面 | ⏳ 待 M4 |
+| M6 | Android + iOS 双端上架打磨 | ⏳ 待 M5 |
 
 详细计划见 [技术方案文档第 10 节](./docs/MOBILE_CLIENT_PLAN.md#10-路线图)。
 

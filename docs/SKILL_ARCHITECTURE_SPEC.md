@@ -61,7 +61,7 @@ run_skill 看到的是两个来源的并集：
 |---|---|---|
 | **编码** | init、explore、**research**、review、security-review、test | dev |
 | **办公** | browser-auto、desktop-auto、ppt-auto、email-auto、rag-auto、schedule-auto、document-auto、expert-auto | cowork |
-| **运维** | **编码全集继承**（init/explore/research/review/security-review/test）+ **netdev-help**（用户方向 2026-08-20：运维先把编码内容全部拿过来；白名单管可见性、tool_scope 封印管行为——test/init 等需 shell/写的技能在封印下降级为只读分析） | netdev |
+| **运维** | **编码全集继承**（init/explore/research/review/security-review/test）+ **netdev 诊断卡**（netdev-help / netdev-playbook / netdev-diag-ospf / netdev-diag-bgp / netdev-diag-interface / netdev-vulnscan）+ **browser-auto**（用户方向 2026-09-04：作为运维界面的通用浏览器兜底——路由规则是站点专用 browser-ops 技能优先、无匹配才走它；封印下其子代理拿不到 bash/写文件，兜底只有浏览器读写。白名单管可见性、tool_scope 封印管行为——test/init 等需 shell/写的技能在封印下降级为只读分析） | netdev |
 | **通用** | install-capability（装技能/MCP，三模式都留） | — |
 
 编码域的 MCP / 工具同样不进其他模式（Profile 新增 `hidden_plugins` 按名隐藏机制）：
@@ -88,7 +88,9 @@ run_skill 看到的是两个来源的并集：
 - **dev 补 explore**：原白名单漏了它（同样靠漂移漏网可见）。
 - **HiddenPlugins 新机制**：`Plugins` 白名单会隐藏一切未点名者（含用户自装 MCP），不能用于 cowork/netdev；新增 `hidden_plugins` 只隐藏**点名**的服务器——内置 profile 用它挡 codegraph/context7，用户为办公装的飞书/日历 MCP 不受影响，toml 可覆盖。
 - **修 codegraph 注入绕过**：codegraph server 原先在插件过滤之后直接 append 进 bgSpecs，Plugins 白名单根本拦不住（注释声称能拦，实际从未生效）；注入点现已自查 allowed + hidden。
-- **白名单只枚举出厂技能**（boot.go `builtinBuiltinSkillNames`，16 项 = 15 代码内置 + ppt-auto），用户自装文件技能不受影响、各模式照常可见。
+- **白名单只枚举出厂技能**（boot.go `builtinBuiltinSkillNames`，21 项 = 20 代码内置 + ppt-auto；`TestBuiltinSkillNamesCoverCodeBuiltins` 守护同步——netdev-vulnscan 漂移就是它抓的），用户自装文件技能不受影响、各模式照常可见。
+- **用户技能按 `domain:` 域折叠**（2026-09-04）：Profile 新增 `SkillDomains`（dev=`["code"]` 哨兵域、cowork=`["browser-ops"]`、netdev=`["browser-ops","netdev"]`）。声明了域的用户技能（如 browser-ops 浏览器技能、netdev 评估向导）在域不匹配的 profile 索引中折叠——只省索引预算、防跨域误路由，`run_skill` / `/名字` 仍可调（与白名单对出厂技能的硬禁用是两道不同的闸）；无域标记的用户技能永不折叠。动机：netdev-assess（domain: netdev）曾出现在办公/编码索引里，而那边没有 netdev_* 工具；浏览器技能在编码界面同样是死条目。`TestBuildSkillDomainFolding` 守护。
+- **专用/通用浏览器技能优先级**（2026-09-04）：cowork 路由表、netdev 路由表、browser-auto 自身描述三处一致写明「站点专用浏览器技能优先，browser-auto 是通用兜底」——替代原先 "Any browser task → browser-auto" 的一刀切，消除专用技能（发票/车票/监控）被通用兜底压过的打架。
 - 前端能力面板按后端 `active` 标记分组展示，白名单改对后 GUI 自动跟随，无需前端改动。
 
 ---

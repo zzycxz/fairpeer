@@ -1,6 +1,6 @@
 # linkpeer × fairpeer 移动端方案（决策锁定版）
 
-> 状态：方案确定，待 M0 启动
+> 状态：开发中——本仓库（Go 桌面侧）M0–M3 已完成：信令服务、桌面桥接器、P2P+端到端加密、跨网打洞，并集成进 fairpeer 主程序；M4+ 的移动端 App 在独立 Flutter 仓库进行（状态行 2026-09-04 更新）
 > 日期：2026-08-11
 > 关联代码：`internal/bot`、`internal/serve`、`internal/event`、`desktop/app.go`、`desktop/tabs.go`、`desktop/sessions.go`、`internal/secret`
 > 产品入口：[`../LINKPEER.md`](../LINKPEER.md)

@@ -42,7 +42,17 @@ const emptyDevice = (): EditDevice => ({
   name: "", vendor: "huawei", os: "vrp8", model: "", address: "", port: 22,
   via: [], group: "", username: "", passwordEnv: "", passwordSet: false,
   identityFile: "", encoding: "auto", password: "", logPaths: [], configPaths: [], oobUrl: "", protocols: [], snmpVersion: "", snmpCommunityEnv: "", snmpCommunitySet: false, snmpCommunity: "",
+  consolePort: "", consoleBaud: 9600,
 });
+// CLI vendors are the ones a serial console can drive (redfish/snmp have no
+// CLI driver; docker/k8s/firewall kinds are API planes).
+const isCliVendor = (v?: string) => !!v && !["redfish", "snmp"].includes(v);
+
+// Mirrors backend ndNameRe (internal/config/netdev.go): device/hop names are
+// spliced into backup/golden FILE PATHS, so they must stay one plain ASCII
+// token. Validating here tells the user at input time, not at save time.
+const ND_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$/;
+const ndNameOk = (name: string) => ND_NAME_RE.test(name.trim());
 
 const emptyHop = (): EditHop => ({
   name: "", host: "", port: 22, user: "", passwordEnv: "", passwordSet: false,
@@ -81,6 +91,9 @@ export function NetDevSection() {
   const [editingProject, setEditingProject] = useState<{ draft: NetDevProjectView; index: number } | null>(null);
   const [editingPreset, setEditingPreset] = useState<{ draft: NetDevPresetView; index: number } | null>(null);
   const [sshCandidates, setSSHCandidates] = useState<NetDevSSHImportCandidate[]>([]);
+  // 本机 COM 口列表（注册表设备映射）——串口控制台字段的候选。
+  const [serialPorts, setSerialPorts] = useState<string[]>([]);
+  useEffect(() => { app.NetDevSerialPorts().then(p => setSerialPorts(p ?? [])).catch(() => {}); }, []);
   const [readAdd, setReadAdd] = useState<Record<string, string>>({});
   const [scanOpen, setScanOpen] = useState(false);
   const [scanXml, setScanXml] = useState("");
@@ -116,17 +129,23 @@ export function NetDevSection() {
       await app.SetNetDevSettings(v);
       await reload();
     } catch (e) {
+      // 应用内 toast + 红色横幅（详情），不再走 WebView 原生 alert——
+      // 那个系统对话框带 "wails.localhost" 标题，观感与应用完全脱节。
       setErr(String(e));
+      showToast(t("entityEdit.saveFailed"), "error");
     } finally {
       setBusy(false);
     }
-  }, [reload]);
+  }, [reload, t]);
 
   const patch = (p: Partial<NetDevSettingsView>) => setView(v => ({ ...v, ...p }));
 
   // First-device flow: connect → TOFU confirm (fingerprint shown verbatim) →
-  // trust → retest. Any other failure is reported as text.
+  // trust → retest. Any other failure is reported as text. Success lands in
+  // okMsg (green banner) — it used to share the red err banner, which read
+  // like a failure ("TARGET VERIFIED" in error red stopped looking like one).
   const [testing, setTesting] = useState(false);
+  const [okMsg, setOkMsg] = useState("");
   const testConnection = useCallback(async (device: string) => {
     setTesting(true);
     try {
@@ -137,18 +156,21 @@ export function NetDevSection() {
           message: t("ndv.sets.tofuMsg", { device, host: r.host ?? "", keyType: r.keyType ?? "", fp: r.fingerprint ?? "" }),
           danger: true
         });
-        if (!ok) { setErr("[SYS] KEY REJECTED"); return; }
-        if (!r.fingerprint) { setErr("[SYS] INTERNAL ERROR: NO FINGERPRINT"); return; }
+        if (!ok) { setErr("[SYS] KEY REJECTED"); setOkMsg(""); return; }
+        if (!r.fingerprint) { setErr("[SYS] INTERNAL ERROR: NO FINGERPRINT"); setOkMsg(""); return; }
         await app.NetDevTrustHostKey(r.fingerprint);
         r = await app.NetDevTestConnection(device);
       }
-      setErr(r.status === "ok" ? "[SYS] TARGET VERIFIED (VTY SESSION OPEN)" : t("ndv.sets.testFailed", { status: r.status, detail: r.detail ?? "" }));
+      if (r.status === "ok") { setErr(""); setOkMsg(t("ndv.sets.testOk")); }
+      else { setOkMsg(""); setErr(t("ndv.sets.testFailed", { status: r.status, detail: r.detail ?? "" })); }
     } catch (e) {
+      setOkMsg("");
       setErr(String(e));
+      showToast(t("ndv.sets.testConnFailed"), "error");
     } finally {
       setTesting(false);
     }
-  }, []);
+  }, [t]);
 
   // C1.5 凭证清除：从密钥库删除已存凭证（NetDevDeleteSecret），随后清空
   // 实体上的 env 指针——保存后 passwordSet 回到未设态。删除前确认。
@@ -188,6 +210,7 @@ export function NetDevSection() {
       </div>
 
       {err && <div className="banner banner--error" style={{ marginBottom: 8 }}>{err}</div>}
+      {!err && okMsg && <div className="banner banner--ok" style={{ marginBottom: 8 }}>{okMsg}</div>}
 
       <div className="optional-module__controls optional-module__controls--inline" style={{ marginBottom: 12 }}>
         <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -264,13 +287,13 @@ export function NetDevSection() {
                     <tr key={d.name}>
                       <td>{d.name}{d.group ? `（${d.group}）` : ""}</td>
                       <td>{d.vendor}/{d.os}</td>
-                      <td>{d.address}{d.port && d.port !== 22 ? `:${d.port}` : ""}</td>
+                      <td>{d.address}{d.port && d.port !== 22 ? `:${d.port}` : ""}{d.consolePort ? ` 🔌${d.consolePort}` : ""}</td>
                       <td>{(d.via ?? []).join("→") || t("ndv.sets.direct")}</td>
                       <td>{d.passwordSet ? t("ndv.sets.credSet") : t("ndv.sets.credUnset")}</td>
                       <td>
                         <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice({ ...d, password: "" })}>{t("common.edit")}</span>{" "}
                         <span className="btn btn--secondary btn--small" role="button" title={t("common.delete")}
-                          onClick={async () => { if (await confirm({ title: "DELETE DEVICE", message: t("ndv.sets.delDeviceMsg", { name: d.name }), danger: true })) void save({ ...view, devices: view.devices.filter(x => x.name !== d.name) }); }}>×</span>
+                          onClick={async () => { if (await confirm({ title: "DELETE DEVICE", message: t("ndv.sets.delDeviceMsg", { name: d.name }), danger: true })) { try { await save({ ...view, devices: view.devices.filter(x => x.name !== d.name) }); } catch (_) {} } }}>×</span>
                       </td>
                     </tr>
                   ))}
@@ -291,7 +314,7 @@ export function NetDevSection() {
                 <span>{h.passwordSet ? t("ndv.sets.hopCredSet") : t("ndv.sets.credUnset")}</span>
                 <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingHop({ ...h, password: "" })}>{t("common.edit")}</span>
                 <span className="btn btn--secondary btn--small" role="button" title={t("common.delete")}
-                  onClick={async () => { if (await confirm({ title: "DELETE HOP", message: t("ndv.sets.delHopMsg", { name: h.name }), danger: true })) void save({ ...view, hops: view.hops.filter(x => x.name !== h.name) }); }}>×</span>
+                  onClick={async () => { if (await confirm({ title: "DELETE HOP", message: t("ndv.sets.delHopMsg", { name: h.name }), danger: true })) { try { await save({ ...view, hops: view.hops.filter(x => x.name !== h.name) }); } catch (_) {} } }}>×</span>
               </div>
             ))}
           </Section>
@@ -301,6 +324,36 @@ export function NetDevSection() {
       {/* ── 子页签 2：护栏与读表 ────────────────────────────────────────── */}
       {sub === "guardrails" && (
         <>
+          <Section title={t("ndv.sets.assessTitle")} desc={t("ndv.sets.assessDesc")}>
+            {(() => {
+              const a = view.assessment ?? { engagementId: "", scopes: [] as string[], expires: "", approver: "" };
+              const setA = (p: Partial<NonNullable<typeof view.assessment>>) => patch({ assessment: { ...a, ...p } });
+              const days = a.expires ? Math.ceil((new Date(a.expires + "T23:59:59").getTime() - Date.now()) / 86400000) : null;
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <input className="mem-input" style={{ flex: 2, minWidth: 140 }} placeholder={t("ndv.sets.phEngagementId")}
+                      value={a.engagementId} onChange={e => setA({ engagementId: e.target.value })} />
+                    <input className="mem-input" style={{ width: 120 }} placeholder={t("ndv.sets.phExpires")}
+                      value={a.expires} onChange={e => setA({ expires: e.target.value })} />
+                    <input className="mem-input" style={{ width: 120 }} placeholder={t("ndv.sets.phApprover")}
+                      value={a.approver} onChange={e => setA({ approver: e.target.value })} />
+                  </div>
+                  <input className="mem-input" style={{ width: "100%" }} placeholder={t("ndv.sets.phEngagementScopes")}
+                    value={(a.scopes ?? []).join(", ")}
+                    onChange={e => setA({ scopes: e.target.value.split(/[,，]/).map(s => s.trim()).filter(Boolean) })} />
+                  <div className="mem-hint">
+                    {t("ndv.sets.assessNote")}
+                    {a.engagementId && (days === null
+                      ? ""
+                      : days < 0 ? ` · ${t("ndv.sets.engExpired", { d: a.expires })}`
+                        : ` · ${t("ndv.sets.engDaysLeft", { n: days })}`)}
+                  </div>
+                </div>
+              );
+            })()}
+          </Section>
+
           <Section title={t("ndv.sets.guardTitle")} desc={t("ndv.sets.guardDesc")}>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12 }}>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -669,9 +722,14 @@ export function NetDevSection() {
 
       {/* 设备编辑表单 */}
       {editingDevice && (
-        <L3Panel crumbs={[t("ndv.sets.crumbInv"), view.devices.some(d => d.name === editingDevice.name) ? t("ndv.sets.editX", { name: editingDevice.name }) : t("ndv.sets.addDevice")]} onBack={() => setEditingDevice(null)} confirmDiscard>
+        <L3Panel crumbs={[t("ndv.sets.crumbInv"), view.devices.some(d => d.name === editingDevice.name) ? t("ndv.sets.editX", { name: editingDevice.name }) : t("ndv.sets.addDevice")]} onBack={() => setEditingDevice(null)} confirmDiscard banner={err || okMsg} bannerOk={!err && !!okMsg}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <Field label={t("ndv.sets.fName")}><input className="mem-input" value={editingDevice.name} onChange={e => setEditingDevice({ ...editingDevice, name: e.target.value })} /></Field>
+            <Field label={t("ndv.sets.fName")}>
+              <input className="mem-input" value={editingDevice.name} onChange={e => setEditingDevice({ ...editingDevice, name: e.target.value })} />
+              {!!editingDevice.name.trim() && !ndNameOk(editingDevice.name) && (
+                <span className="mem-hint" style={{ color: "var(--warn)" }}>{t("ndv.sets.nameRule")}</span>
+              )}
+            </Field>
             <Field label={t("ndv.sets.fVendor")}>
               <select className="mem-select" value={editingDevice.vendor} onChange={e => setEditingDevice({ ...editingDevice, vendor: e.target.value, os: (OSES[e.target.value] ?? [""])[0] })}>
                 {VENDORS.map(v => <option key={v} value={v}>{v}</option>)}
@@ -708,6 +766,29 @@ export function NetDevSection() {
                 {["auto", "utf-8", "gbk"].map(x => <option key={x} value={x}>{x}</option>)}
               </select>
             </Field>
+            {isCliVendor(editingDevice.vendor) && (editingDevice.kind ?? "") === "" && (
+              <>
+                <Field label={t("ndv.sets.fConsolePort")}>
+                  <input
+                    className="mem-input" list="ndv-serial-ports" placeholder={t("ndv.sets.phConsolePort")}
+                    value={editingDevice.consolePort ?? ""}
+                    onChange={e => setEditingDevice({ ...editingDevice, consolePort: e.target.value })}
+                  />
+                  <datalist id="ndv-serial-ports">
+                    {serialPorts.map(p => <option key={p} value={p} />)}
+                  </datalist>
+                </Field>
+                <Field label={t("ndv.sets.fConsoleBaud")}>
+                  <select className="mem-select" value={String(editingDevice.consoleBaud ?? 0)}
+                    onChange={e => setEditingDevice({ ...editingDevice, consoleBaud: Number(e.target.value) || 0 })}>
+                    {["0", "9600", "19200", "38400", "57600", "115200"].map(b => (
+                      <option key={b} value={b}>{b === "0" ? t("ndv.sets.baudDefault") : b}</option>
+                    ))}
+                  </select>
+                  <span style={{ opacity: 0.6, fontSize: 11 }}>{t("ndv.sets.consoleNote")}</span>
+                </Field>
+              </>
+            )}
             <Field label={t("ndv.sets.fLogPaths")}>
               <input
                 className="mem-input" placeholder={t("ndv.sets.phLogPaths")}
@@ -790,11 +871,40 @@ export function NetDevSection() {
             )}
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <span
-              className="btn btn--secondary btn--small" role="button"
-              onClick={() => { if (editingDevice.name.trim()) void testConnection(editingDevice.name); }}
-              title={t("ndv.sets.testTip")}
-            >{testing ? t("ndv.sets.testing") : t("ndv.sets.testConn")}</span>
+            {/* redfish/snmp 没有 SSH CLI 驱动（分别走带外 HTTP 与 SNMP 轮询），后端
+                TestConnection 只拨 CLI——对这两类设备隐藏按钮并说明，而不是让一次
+                必败的测试看起来像卡死。 */}
+            {(editingDevice.vendor === "redfish" || editingDevice.vendor === "snmp") ? (
+              <span className="mem-hint" style={{ alignSelf: "center", marginRight: "auto", maxWidth: "50%" }}>{t("ndv.sets.testNoCli")}</span>
+            ) : (
+              <span
+                className="btn btn--secondary btn--small" role="button"
+                style={{ ...(busy || testing ? { opacity: 0.5, pointerEvents: "none" as const } : null) }}
+                onClick={async () => {
+                  if (busy || testing) return;
+                  if (!editingDevice.name.trim()) { setErr(t("ndv.sets.needNameOrConsole")); return; }
+                  if (!ndNameOk(editingDevice.name)) { setErr(t("ndv.sets.nameRule")); return; }
+                  if (!editingDevice.address.trim() && !(editingDevice.consolePort ?? "").trim()) { setErr(t("ndv.sets.needNameOrConsole")); return; }
+                  // Save first so TestConnection can find the device in config.
+                  const exists = view.devices.some(d => d.name === editingDevice.name);
+                  const devices = exists ? view.devices.map(d => d.name === editingDevice.name ? editingDevice : d) : [...view.devices, editingDevice];
+                  const nextView = { ...view, devices, notifySMTPPassword };
+                  setBusy(true);
+                  try {
+                    await app.SetNetDevSettings(nextView);
+                    await reload();
+                    setErr("");
+                  } catch (e) {
+                    setErr(String(e));
+                    setBusy(false);
+                    return;
+                  }
+                  setBusy(false);
+                  await testConnection(editingDevice.name);
+                }}
+                title={t("ndv.sets.testTip")}
+              >{testing ? t("ndv.sets.testing") : t("ndv.sets.testConn")}</span>
+            )}
             {(editingDevice.passwordSet || editingDevice.snmpCommunitySet || editingDevice.fwApiTokenSet || editingDevice.k8sKubeconfigSet) && (
               <span className="btn btn--secondary btn--small" role="button" title={t("ndv.sets.clearCredsTip")}
                 onClick={() => void clearCreds(t("ndv.sets.devLabel", { name: editingDevice.name }), [
@@ -804,24 +914,39 @@ export function NetDevSection() {
                   { kind: "kubeconfig", env: editingDevice.k8sKubeconfigEnv, what: "kubeconfig" },
                 ], () => setEditingDevice(d => d && ({ ...d, passwordEnv: "", snmpCommunityEnv: "", fwApiTokenEnv: "", k8sKubeconfigEnv: "", passwordSet: false, snmpCommunitySet: false, fwApiTokenSet: false, k8sKubeconfigSet: false })))}>{t("ndv.sets.clearCredsBtn2")}</span>
             )}
-            <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice(null)}>{t("common.cancel")}</span>
+            <span
+              className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice(null)}>{t("common.cancel")}</span>
             <span
               className="btn btn--primary btn--small" role="button"
-              onClick={() => {
-                if (!editingDevice.name.trim() || !editingDevice.address.trim()) { setErr(t("ndv.sets.needNameAddr")); return; }
+              style={{ ...(busy ? { opacity: 0.5, pointerEvents: "none" as const } : null) }}
+              onClick={async () => {
+                if (busy) return;
+                if (!editingDevice.name.trim()) { setErr(t("ndv.sets.needNameOrConsole")); return; }
+                if (!ndNameOk(editingDevice.name)) { setErr(t("ndv.sets.nameRule")); return; }
+                if (!editingDevice.address.trim() && !(editingDevice.consolePort ?? "").trim()) { setErr(t("ndv.sets.needNameOrConsole")); return; }
                 const exists = view.devices.some(d => d.name === editingDevice.name);
                 const devices = exists ? view.devices.map(d => d.name === editingDevice.name ? editingDevice : d) : [...view.devices, editingDevice];
-                setEditingDevice(null);
-                void save({ ...view, devices, notifySMTPPassword });
+                setBusy(true);
+                try {
+                  await app.SetNetDevSettings({ ...view, devices, notifySMTPPassword });
+                  await reload();
+                  setEditingDevice(null);
+                  setErr("");
+                  showToast(t("ndv.sets.deviceSaved"), "info");
+                } catch (e) {
+                  setErr(String(e));
+                } finally {
+                  setBusy(false);
+                }
               }}
-            >{t("ndv.sets.saveDevice")}</span>
+            >{busy ? t("ndv.sets.saving") : t("ndv.sets.saveDevice")}</span>
           </div>
         </L3Panel>
       )}
 
       {/* 数据库源编辑表单 */}
       {editingDB && (
-        <L3Panel crumbs={[t("ndv.sets.crumbOps"), view.dbSources?.some(s => s.name === editingDB.name) ? t("ndv.sets.editDb") : t("ndv.sets.addDb")]} onBack={() => setEditingDB(null)} confirmDiscard>
+        <L3Panel crumbs={[t("ndv.sets.crumbOps"), view.dbSources?.some(s => s.name === editingDB.name) ? t("ndv.sets.editDb") : t("ndv.sets.addDb")]} onBack={() => setEditingDB(null)} confirmDiscard banner={err || okMsg} bannerOk={!err && !!okMsg}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <Field label={t("ndv.sets.fName")}><input className="mem-input" value={editingDB.name} onChange={e => setEditingDB({ ...editingDB, name: e.target.value })} /></Field>
             <Field label={t("ndv.sets.fType")}>
@@ -869,22 +994,31 @@ export function NetDevSection() {
             <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDB(null)}>{t("common.cancel")}</span>
             <span
               className="btn btn--primary btn--small" role="button"
-              onClick={() => {
+              onClick={async () => {
                 if (!editingDB.name.trim() || !editingDB.host.trim()) { setErr(t("ndv.sets.needNameAddr")); return; }
                 if (editingDB.type !== "redis" && (editingDB.allowlist ?? []).length === 0) { setErr(t("ndv.sets.needAllowlist")); return; }
                 const exists = (view.dbSources ?? []).some(s => s.name === editingDB.name);
                 const dbSources = exists ? (view.dbSources ?? []).map(s => s.name === editingDB.name ? editingDB : s) : [...(view.dbSources ?? []), editingDB];
-                setEditingDB(null);
-                void save({ ...view, dbSources, notifySMTPPassword });
+                setBusy(true);
+                try {
+                  await app.SetNetDevSettings({ ...view, dbSources, notifySMTPPassword });
+                  await reload();
+                  setEditingDB(null);
+                  setErr("");
+                } catch (e) {
+                  setErr(String(e));
+                } finally {
+                  setBusy(false);
+                }
               }}
-            >{t("ndv.sets.saveSource")}</span>
+            >{busy ? t("ndv.sets.saving") : t("ndv.sets.saveSource")}</span>
           </div>
         </L3Panel>
       )}
 
       {/* 告警规则编辑表单 */}
       {editingRule && (
-        <L3Panel crumbs={[t("ndv.sets.crumbOps"), (view.alertRules ?? []).some(r => r.name === editingRule.name) ? t("ndv.sets.editRule") : t("ndv.sets.addRule")]} onBack={() => setEditingRule(null)} confirmDiscard>
+        <L3Panel crumbs={[t("ndv.sets.crumbOps"), (view.alertRules ?? []).some(r => r.name === editingRule.name) ? t("ndv.sets.editRule") : t("ndv.sets.addRule")]} onBack={() => setEditingRule(null)} confirmDiscard banner={err || okMsg} bannerOk={!err && !!okMsg}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <Field label={t("ndv.sets.fName")}><input className="mem-input" value={editingRule.name} onChange={e => setEditingRule({ ...editingRule, name: e.target.value })} /></Field>
             <Field label={t("ndv.sets.fMetric")}>
@@ -918,23 +1052,37 @@ export function NetDevSection() {
             <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingRule(null)}>{t("common.cancel")}</span>
             <span
               className="btn btn--primary btn--small" role="button"
-              onClick={() => {
+              onClick={async () => {
                 if (!editingRule.name.trim()) { setErr(t("ndv.sets.needRuleName")); return; }
                 const exists = (view.alertRules ?? []).some(r => r.name === editingRule.name);
                 const alertRules = exists ? (view.alertRules ?? []).map(r => r.name === editingRule.name ? editingRule : r) : [...(view.alertRules ?? []), editingRule];
-                setEditingRule(null);
-                void save({ ...view, alertRules, notifySMTPPassword });
+                setBusy(true);
+                try {
+                  await app.SetNetDevSettings({ ...view, alertRules, notifySMTPPassword });
+                  await reload();
+                  setEditingRule(null);
+                  setErr("");
+                } catch (e) {
+                  setErr(String(e));
+                } finally {
+                  setBusy(false);
+                }
               }}
-            >{t("ndv.sets.saveRule")}</span>
+            >{busy ? t("ndv.sets.saving") : t("ndv.sets.saveRule")}</span>
           </div>
         </L3Panel>
       )}
 
       {/* 跳板编辑表单 */}
       {editingHop && (
-        <L3Panel crumbs={[t("ndv.sets.crumbOps"), view.hops.some(h => h.name === editingHop.name) ? t("ndv.sets.editHop") : t("ndv.sets.addHop")]} onBack={() => setEditingHop(null)} confirmDiscard>
+        <L3Panel crumbs={[t("ndv.sets.crumbOps"), view.hops.some(h => h.name === editingHop.name) ? t("ndv.sets.editHop") : t("ndv.sets.addHop")]} onBack={() => setEditingHop(null)} confirmDiscard banner={err || okMsg} bannerOk={!err && !!okMsg}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <Field label={t("ndv.sets.fName")}><input className="mem-input" value={editingHop.name} onChange={e => setEditingHop({ ...editingHop, name: e.target.value })} /></Field>
+            <Field label={t("ndv.sets.fName")}>
+              <input className="mem-input" value={editingHop.name} onChange={e => setEditingHop({ ...editingHop, name: e.target.value })} />
+              {!!editingHop.name.trim() && !ndNameOk(editingHop.name) && (
+                <span className="mem-hint" style={{ color: "var(--warn)" }}>{t("ndv.sets.nameRule")}</span>
+              )}
+            </Field>
             <Field label={t("ndv.sets.fAddress")}><input className="mem-input" value={editingHop.host} onChange={e => setEditingHop({ ...editingHop, host: e.target.value })} /></Field>
             <Field label={t("ndv.sets.fPort")}><input className="mem-input" type="number" value={editingHop.port} onChange={e => setEditingHop({ ...editingHop, port: Number(e.target.value) || 22 })} /></Field>
             <Field label={t("ndv.sets.phUser")}><input className="mem-input" value={editingHop.user} onChange={e => setEditingHop({ ...editingHop, user: e.target.value })} /></Field>
@@ -953,21 +1101,31 @@ export function NetDevSection() {
             <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingHop(null)}>{t("common.cancel")}</span>
             <span
               className="btn btn--primary btn--small" role="button"
-              onClick={() => {
+              onClick={async () => {
                 if (!editingHop.name.trim() || !editingHop.host.trim()) { setErr(t("ndv.sets.needNameAddr")); return; }
+                if (!ndNameOk(editingHop.name)) { setErr(t("ndv.sets.nameRule")); return; }
                 const exists = view.hops.some(h => h.name === editingHop.name);
                 const hops = exists ? view.hops.map(h => h.name === editingHop.name ? editingHop : h) : [...view.hops, editingHop];
-                setEditingHop(null);
-                void save({ ...view, hops });
+                setBusy(true);
+                try {
+                  await app.SetNetDevSettings({ ...view, hops });
+                  await reload();
+                  setEditingHop(null);
+                  setErr("");
+                } catch (e) {
+                  setErr(String(e));
+                } finally {
+                  setBusy(false);
+                }
               }}
-            >{t("ndv.sets.saveHop")}</span>
+            >{busy ? t("ndv.sets.saving") : t("ndv.sets.saveHop")}</span>
           </div>
         </L3Panel>
       )}
 
       {/* 项目编辑表单 */}
       {editingProject && (
-        <L3Panel crumbs={[t("ndv.sets.crumbOps"), editingProject.index >= 0 ? t("ndv.sets.editProject") : t("ndv.sets.newProject")]} onBack={() => setEditingProject(null)} confirmDiscard>
+        <L3Panel crumbs={[t("ndv.sets.crumbOps"), editingProject.index >= 0 ? t("ndv.sets.editProject") : t("ndv.sets.newProject")]} onBack={() => setEditingProject(null)} confirmDiscard banner={err || okMsg} bannerOk={!err && !!okMsg}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <Field label={t("ndv.sets.fName")}>
               <input className="mem-input" placeholder={t("ndv.sets.phProject")} value={editingProject.draft.name}
@@ -1000,22 +1158,31 @@ export function NetDevSection() {
             <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingProject(null)}>{t("common.cancel")}</span>
             <span
               className="btn btn--primary btn--small" role="button"
-              onClick={() => {
+              onClick={async () => {
                 if (!editingProject.draft.name.trim()) { setErr(t("ndv.sets.needProjectName")); return; }
                 const projects = [...(view.projects ?? [])];
                 if (editingProject.index >= 0) projects[editingProject.index] = editingProject.draft;
                 else projects.push(editingProject.draft);
-                setEditingProject(null);
-                void save({ ...view, projects });
+                setBusy(true);
+                try {
+                  await app.SetNetDevSettings({ ...view, projects });
+                  await reload();
+                  setEditingProject(null);
+                  setErr("");
+                } catch (e) {
+                  setErr(String(e));
+                } finally {
+                  setBusy(false);
+                }
               }}
-            >{t("ndv.sets.saveProject")}</span>
+            >{busy ? t("ndv.sets.saving") : t("ndv.sets.saveProject")}</span>
           </div>
         </L3Panel>
       )}
 
       {/* 诊断组合编辑表单 */}
       {editingPreset && (
-        <L3Panel crumbs={[t("ndv.sets.crumbOps"), editingPreset.index >= 0 ? t("ndv.sets.editPreset") : t("ndv.sets.newPreset")]} onBack={() => setEditingPreset(null)} confirmDiscard>
+        <L3Panel crumbs={[t("ndv.sets.crumbOps"), editingPreset.index >= 0 ? t("ndv.sets.editPreset") : t("ndv.sets.newPreset")]} onBack={() => setEditingPreset(null)} confirmDiscard banner={err || okMsg} bannerOk={!err && !!okMsg}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <Field label={t("ndv.sets.fName")}>
               <input className="mem-input" placeholder={t("ndv.sets.phPreset")} value={editingPreset.draft.name}
@@ -1051,15 +1218,24 @@ export function NetDevSection() {
             <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingPreset(null)}>{t("common.cancel")}</span>
             <span
               className="btn btn--primary btn--small" role="button"
-              onClick={() => {
+              onClick={async () => {
                 if (!editingPreset.draft.name.trim() || editingPreset.draft.commands.length === 0) { setErr(t("ndv.sets.needPreset")); return; }
                 const presets = [...(view.presets ?? [])];
                 if (editingPreset.index >= 0) presets[editingPreset.index] = editingPreset.draft;
                 else presets.push(editingPreset.draft);
-                setEditingPreset(null);
-                void save({ ...view, presets });
+                setBusy(true);
+                try {
+                  await app.SetNetDevSettings({ ...view, presets });
+                  await reload();
+                  setEditingPreset(null);
+                  setErr("");
+                } catch (e) {
+                  setErr(String(e));
+                } finally {
+                  setBusy(false);
+                }
               }}
-            >{t("ndv.sets.savePreset")}</span>
+            >{busy ? t("ndv.sets.saving") : t("ndv.sets.savePreset")}</span>
           </div>
         </L3Panel>
       )}
@@ -1127,7 +1303,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 // L3Panel — 设置三级导航的第三级（NETDEV_SPEC_V2 §10.9）：表单类配置不再用
 // 弹框，而是由右向左翻页进入的整页表单（面包屑 + 返回 + Esc）。弹框从此只
 // 留给阻塞确认类。confirmDiscard 的表单在返回/Esc 前确认丢弃未保存修改。
-function L3Panel({ crumbs, onBack, confirmDiscard, children }: { crumbs: string[]; onBack: () => void; confirmDiscard?: boolean; children: React.ReactNode }) {
+// banner 在表单内部复述页面级 err：面板是全屏遮罩，页面顶部的横幅会被它
+// 盖住——2026-09-03 之前的「测试连接没反应」就是结果写进了看不见的横幅。
+function L3Panel({ crumbs, onBack, confirmDiscard, banner, bannerOk, children }: { crumbs: string[]; onBack: () => void; confirmDiscard?: boolean; banner?: string; bannerOk?: boolean; children: React.ReactNode }) {
   const confirm = useConfirm();
   const t = useT();
   const back = useCallback(async () => {
@@ -1148,7 +1326,10 @@ function L3Panel({ crumbs, onBack, confirmDiscard, children }: { crumbs: string[
         <button className="btn btn--secondary btn--small" onClick={() => void back()}>← {t("ndv.sets.back")}</button>
         <span className="ndv-l3__crumbs">{crumbs.join(" / ")}</span>
       </div>
-      <div className="ndv-l3__body">{children}</div>
+      <div className="ndv-l3__body">
+        {banner ? <div className={`banner ${bannerOk ? "banner--ok" : "banner--error"}`} style={{ marginBottom: 8 }}>{banner}</div> : null}
+        {children}
+      </div>
     </div>
   );
 }

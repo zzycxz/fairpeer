@@ -184,6 +184,11 @@ type browserSession struct {
 	// Close then ONLY disconnects the CDP websocket — it must NOT kill the
 	// browser process, which the user owns. Spawned sessions close the process.
 	attached bool
+	// ownsBrowser marks the PERSISTENT console browser (spawned by us or taken
+	// over from a previous fairpeer run on our fixed port): 关闭浏览器 may
+	// truly close it (graceful Browser.close). Explicit user attaches
+	// (cdpURL) never set this — their browser is theirs to close.
+	ownsBrowser bool
 	// refs holds the ref→node map from the most recent browser_snapshot. It's an
 	// atomic pointer (not a plain field) because navigate clears it (sets nil)
 	// while a concurrent click/type may read it — a plain field would data-race.
@@ -202,6 +207,9 @@ type browserSession struct {
 	downloadRecords []downloadRecord
 	// stepTracker tracks action repetition and page stagnation for loop detection.
 	stepTracker *browserStepTracker
+	// devTools buffers the console session's F12 slice (console messages +
+	// network list) for the ops workbench's bottom pane. nil on agent sessions.
+	devTools *devToolsState
 	// tabMu serializes tab switches (auto-follow + browser_switch_tab). The
 	// old tab's context is abandoned, not canceled — chromedp cancel would
 	// CLOSE that target, and the old tab must stay open for switching back.
@@ -218,14 +226,34 @@ type browserSession struct {
 	keepLast     int64  // unix millis of the last successful refresh
 	keepErr      string // last refresh failure ("" = ok)
 	keepStop     chan struct{}
+	// keepTabs holds one heartbeat CDP session per open tab (ping mode beats
+	// EVERY tab — cookie jars are per-site, so tabs of different sites each
+	// need their own beat). Only the keepalive loop goroutine touches this
+	// map; guarded by keepMu purely for the test path. Contexts derive via
+	// context.WithoutCancel from s.ctx: they must NOT cascade-close tabs when
+	// the session tears down (chromedp cancel closes the target).
+	keepTabs map[cdptarget.ID]*keepTabCtx
+}
+
+// keepTabCtx is one tab's heartbeat session. cancel is invoked ONLY when the
+// tab itself has vanished (CloseTarget on a dead target is a no-op error);
+// cancelling a LIVE tab's context would close the user's tab.
+type keepTabCtx struct {
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // downloadRecord is one completed (or failed) file download in a session.
+// Terminal records are retained (Reported=true after the action summary has
+// surfaced them) so a later "wait download" step can still see a download
+// that completed mid-action — drainDownloadRecords only flips the flag.
 type downloadRecord struct {
 	GUID          string // CDP download guid (pairs willBegin ↔ progress)
 	URL           string // page URL that triggered the download
 	SuggestedName string // filename suggested by the server
 	State         string // "inProgress", "completed", or "canceled"
+	CompletedAt   time.Time
+	Reported      bool
 }
 
 // --- loop detection (Phase 2) -----------------------------------------------
@@ -298,8 +326,22 @@ const typeRefJSBody = `// contenteditable elements (rich-text editors, Quill, so
   var isSpecialInput = nativeSpecial || jQueryDate;
   if (clear || isSpecialInput) { this.value = ''; }
   this.focus();
-  var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-  if (!setter) { setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value'); }
+  // Readonly fields (ExtJS date pickers, disabled-temporary inputs): the
+  // native prototype setter throws "Illegal invocation" on readonly ExtJS
+  // inputs because the framework mangles the prototype chain. Skip the
+  // setter and write .value directly — readonly fields don't need React
+  // reactivity (they're controlled by the framework's own picker).
+  if (this.hasAttribute && this.hasAttribute('readonly')) {
+    this.value = text;
+    this.dispatchEvent(new Event('change', {bubbles: true}));
+    return JSON.stringify({value: this.value, expectFormatChange: true});
+  }
+  // Native prototype setter (React/Vue-controlled fields ignore a plain
+  // .value= assignment): pick THIS element's interface — calling
+  // HTMLInputElement's setter on a <textarea> throws "Illegal invocation"
+  // (native setters verify the receiver's type).
+  var valueProto = this.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+  var setter = Object.getOwnPropertyDescriptor(valueProto, 'value');
   if (setter && setter.set) { setter.set.call(this, text); }
   else { this.value = text; }
   this.dispatchEvent(new Event('input', {bubbles: true}));
@@ -584,8 +626,21 @@ func getBrowserSession(id string) (*browserSession, error) {
 	return s, nil
 }
 
-// newBrowserSession creates and registers a fresh Chromium tab.
+// newBrowserSession creates and registers a session on the PERSISTENT
+// controlled browser (the same one the ops console drives): a leftover
+// instance is taken over — keeping the user's manual logins alive across
+// fairpeer restarts — else the persistent profile+port browser is spawned.
+// The session lands on its own fresh tab: an agent's navigate must never
+// hijack the page the user is looking at. The old behavior (a separate
+// ephemeral exec-allocator Chrome per first browser_open) is retired — two
+// browser windows fighting for attention was the user-visible bug.
 func newBrowserSession() (*browserSession, error) {
+	return persistentBrowserSession(false)
+}
+
+// newBrowserSessionEphemeral spawns the old dedicated exec-allocator Chrome.
+// Retained for callers that genuinely need isolation; currently unused.
+func newBrowserSessionEphemeral() (*browserSession, error) {
 	allocCtx, browserName, err := ensureBrowserAllocator()
 	if err != nil {
 		// No browser found. If detection was cached but the browser was since
@@ -668,20 +723,35 @@ func newAttachedSession(cdpURL string) (*browserSession, error) {
 	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), cdpURL)
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	// Force a real connection within a timeout so a wrong host/port fails here
-	// with a clear message, not on the first action. The first chromedp.Run on a
-	// remote context opens the browser-level websocket and a target.
-	bootCtx, bootCancel := context.WithTimeout(ctx, 15*time.Second)
-	defer bootCancel()
-	if err := chromedp.Run(bootCtx); err != nil {
+	// with a clear message, not on the first action.
+	//
+	// The boot must NOT run on a cancellable derived context: in chromedp
+	// v0.15.x the FIRST Run binds the browser connection's lifetime to the
+	// context it receives — a WithTimeout+defer-cancel here silently kills the
+	// whole connection (every later action then fails "context canceled").
+	// Same lesson as newBrowserSession's boot goroutine: enforce the timeout
+	// OUTSIDE, never by cancelling the boot context.
+	bootDone := make(chan error, 1)
+	go func() { bootDone <- chromedp.Run(ctx) }()
+	select {
+	case err := <-bootDone:
+		if err != nil {
+			cancel()
+			allocCancel()
+			return nil, fmt.Errorf("attach to %s: %w (is Chrome running with --remote-debugging-port and is the port correct?)", cdpURL, err)
+		}
+	case <-time.After(15 * time.Second):
 		cancel()
 		allocCancel()
-		return nil, fmt.Errorf("attach to %s: %w (is Chrome running with --remote-debugging-port and is the port correct?)", cdpURL, err)
+		return nil, fmt.Errorf("attach to %s: 15 秒内未连上（确认浏览器带 --remote-debugging-port 启动且端口正确）", cdpURL)
 	}
 	// Identify which browser we attached to, for the "ready" message. Best-effort:
 	// read navigator.userAgent; fall back to a generic label on any error.
 	browserName := "Chrome (attached)"
 	var ua string
-	if err := runBrowserAction(bootCtx, &browserSession{ctx: ctx}, chromedp.Evaluate(`navigator.userAgent`, &ua)); err == nil {
+	probeCtx, probeCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer probeCancel()
+	if err := runBrowserAction(probeCtx, &browserSession{ctx: ctx}, chromedp.Evaluate(`navigator.userAgent`, &ua)); err == nil {
 		browserName = guessBrowserFromUA(ua) + " (attached)"
 	}
 	id := fmt.Sprintf("br_%d", browserSeq.Add(1))
@@ -692,6 +762,7 @@ func newAttachedSession(cdpURL string) (*browserSession, error) {
 		allocCancel: allocCancel, // dropping the session also frees the allocator
 		browser:     browserName,
 		attached:    true, // close only disconnects; we never kill the user's browser
+		stepTracker: newStepTracker(),
 	}
 	s.lastUsed.Store(time.Now().Unix())
 	browserMu.Lock()
@@ -1254,16 +1325,24 @@ func (browserClick) Execute(ctx context.Context, args json.RawMessage) (string, 
 		// actual post-click state saves the agent a re-snapshot round-trip
 		// and surfaces "I clicked but it didn't toggle" failures immediately.
 		clickJS := `function() {
+			// Refs can resolve to non-Elements (Text nodes, the document root)
+			// — walk up to the containing Element (Playwright text-selector
+			// semantics) or report clearly instead of "this.click is not a
+			// function".
+			var el = this.nodeType === 1 ? this : this.parentElement;
+			if (!el || typeof el.click !== 'function') {
+				return JSON.stringify({error: 'not-an-element', nodeType: this.nodeType});
+			}
 			var before = null;
-			var isToggle = this.tagName === 'INPUT' && (this.type === 'checkbox' || this.type === 'radio');
-			if (isToggle) { before = this.checked ? 'checked' : 'unchecked'; }
-			this.click();
+			var isToggle = el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio');
+			if (isToggle) { before = el.checked ? 'checked' : 'unchecked'; }
+			el.click();
 			var after = null;
-			if (isToggle) { after = this.checked ? 'checked' : 'unchecked'; }
+			if (isToggle) { after = el.checked ? 'checked' : 'unchecked'; }
 			if (isToggle) {
 				return JSON.stringify({toggle: true, before: before, after: after, changed: before !== after});
 			}
-			return JSON.stringify({toggle: false, html: this.outerHTML.slice(0, 80)});
+			return JSON.stringify({toggle: false, html: el.outerHTML.slice(0, 80)});
 		}`
 		// runWithRetry is safe here: it only retries on error (the action func
 		// returns nil on success), so a click that landed is never re-clicked —
@@ -1291,12 +1370,54 @@ func (browserClick) Execute(ctx context.Context, args json.RawMessage) (string, 
 		baseResult = fmt.Sprintf("clicked (%.0f, %.0f)", x, y)
 		actionLabel = fmt.Sprintf("%.0f,%.0f", x, y)
 	} else {
+		// Selector path — JS el.click() like the ref path. chromedp.Click
+		// dispatches through the CDP Input domain, which in some console
+		// browser setups never reaches the page (verified on the ops console:
+		// ref-path JS clicks land, Input-domain selector clicks don't — the
+		// agent never noticed because it drives refs). The JS dispatch also
+		// fails FAST on a missing selector ("element not found" is a locate
+		// miss, so flow anchor chains fall back immediately) instead of
+		// burning the whole ~40s action window waiting for visibility.
+		clickSelJS := `(function(sel){
+			var el = document.querySelector(sel);
+			if (!el || el.nodeType !== 1 || typeof el.click !== 'function') {
+				return JSON.stringify({error: 'not-found'});
+			}
+			el.scrollIntoView({block: 'center'});
+			var isToggle = el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio');
+			var before = isToggle ? (el.checked ? 'checked' : 'unchecked') : null;
+			el.click();
+			var after = isToggle ? (el.checked ? 'checked' : 'unchecked') : null;
+			if (isToggle) {
+				return JSON.stringify({toggle: true, before: before, after: after, changed: before !== after});
+			}
+			return JSON.stringify({toggle: false, html: el.outerHTML.slice(0, 80)});
+		})(` + fmt.Sprintf("%q", sel) + `)`
+		var clickResult string
 		if err := runWithRetry(ctx, s, defaultRetry, func() error {
-			return runBrowserAction(ctx, s, chromedp.Click(sel))
+			return runBrowserAction(ctx, s, chromedp.Evaluate(clickSelJS, &clickResult))
 		}); err != nil {
 			return "", wrapError(s, "click", sel, fmt.Errorf("click %q: %w", sel, err))
 		}
-		baseResult = fmt.Sprintf("clicked %q", sel)
+		var probe struct {
+			Error   string `json:"error"`
+			Toggle  bool   `json:"toggle"`
+			Before  string `json:"before"`
+			After   string `json:"after"`
+			Changed bool   `json:"changed"`
+		}
+		if jerr := json.Unmarshal([]byte(unwrapJSONString(clickResult)), &probe); jerr == nil && probe.Error == "not-found" {
+			// Locate-miss phrasing — the flow anchor chain's wait-and-retry
+			// and fast fallback key on it (isLocateMiss).
+			return "", wrapError(s, "click", sel, fmt.Errorf("click %q: element not found", sel))
+		} else if jerr == nil && probe.Toggle {
+			baseResult = fmt.Sprintf("clicked %q — %s → %s", sel, probe.Before, probe.After)
+			if !probe.Changed {
+				baseResult += " ⚠️ State did NOT change after click — the element may be disabled, or a framework intercepted the click. Verify before relying on the toggle."
+			}
+		} else {
+			baseResult = fmt.Sprintf("clicked %q", sel)
+		}
 		actionLabel = sel
 	}
 	// Phase 4: Detect unexpected page navigation after click.
@@ -1556,9 +1677,15 @@ func formatClickResult(rawResult, ref string) string {
 		After   string `json:"after"`
 		Changed bool   `json:"changed"`
 		HTML    string `json:"html"`
+		Error   string `json:"error"`
 	}
 	if err := json.Unmarshal([]byte(inner), &parsed); err != nil {
 		return fmt.Sprintf("clicked ref %q", ref)
+	}
+	if parsed.Error != "" {
+		// The JS guard reports refs that resolve to non-Elements with no
+		// clickable ancestor — actionable phrasing for the agent/user.
+		return fmt.Sprintf("ref %q 解析到不可点击的节点（文本/文档节点且没有可点击的父元素）——请换一个可交互元素的编号，或用 CSS/文字锚点", ref)
 	}
 	if !parsed.Toggle {
 		return fmt.Sprintf("clicked ref %q (%s)", ref, truncate(parsed.HTML, 60))
@@ -1797,10 +1924,29 @@ func (browserSwitchTab) Execute(ctx context.Context, args json.RawMessage) (stri
 	var pick *cdptarget.Info
 	switch {
 	case p.Target != "":
+		// Target matches in specificity order: exact TargetID, exact title,
+		// then title-contains — humans know tabs by NAME, and indexes drift
+		// as tabs open/close between recording and replay.
 		for _, t := range tabs {
 			if string(t.TargetID) == p.Target {
 				pick = t
 				break
+			}
+		}
+		if pick == nil {
+			for _, t := range tabs {
+				if strings.TrimSpace(t.Title) == p.Target {
+					pick = t
+					break
+				}
+			}
+		}
+		if pick == nil {
+			for _, t := range tabs {
+				if t.Title != "" && strings.Contains(t.Title, p.Target) {
+					pick = t
+					break
+				}
 			}
 		}
 	case p.Index >= 1 && p.Index <= len(tabs):
@@ -1892,7 +2038,9 @@ func hoverPointForTarget(ctx context.Context, s *browserSession, raw json.RawMes
 		return 0, 0, err
 	}
 	if isRef {
-		out, cerr := callOnRef(ctx, s, sel, `JSON.stringify((function(){var r=this.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};})())`)
+		// Plain declaration (callFunctionOn contract): returning the object
+		// lets WithReturnByValue serialize it for parseXYJSON directly.
+		out, cerr := callOnRef(ctx, s, sel, `function(){var r=this.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};}`)
 		if cerr != nil {
 			return 0, 0, fmt.Errorf("hover ref %q: %w", sel, cerr)
 		}
@@ -2027,10 +2175,18 @@ func (browserExtract) ReadOnly() bool { return true }
 
 // extractTablesJS renders the tables under one root as markdown. The selector
 // is injected as a JSON string (SEL placeholder) — quote-safe by construction.
+// Shadow DOM: recursively collects tables from shadow roots.
 const extractTablesJS = `(function(){
   var root;
   try { root = SEL ? (document.querySelector(SEL) || document) : document; } catch (e) { root = document; }
-  var tables = root.querySelectorAll('table');
+  function collectTables(r) {
+    var tables = Array.from(r.querySelectorAll('table'));
+    r.querySelectorAll('*').forEach(function(el){
+      if (el.shadowRoot) tables = tables.concat(collectTables(el.shadowRoot));
+    });
+    return tables;
+  }
+  var tables = collectTables(root);
   if (!tables.length) { return '(no <table> found under ' + (SEL || 'page') + ')'; }
   var out = [];
   for (var t = 0; t < tables.length && t < 10; t++) {
@@ -2076,7 +2232,15 @@ func (browserExtract) Execute(ctx context.Context, args json.RawMessage) (string
 	}
 	sel := strings.TrimSpace(p.Selector)
 	var text string
-	if strings.EqualFold(strings.TrimSpace(p.Format), "table") {
+	if strings.EqualFold(strings.TrimSpace(p.Format), "markdown") {
+		// Markdown mode: structure-preserving render for AI-answer blocks and
+		// rich panels — headings/bold/code/lists survive instead of flattening.
+		var err error
+		text, err = extractMarkdown(ctx, s, sel)
+		if err != nil {
+			return "", err
+		}
+	} else if strings.EqualFold(strings.TrimSpace(p.Format), "table") {
 		// Table mode: structure-preserving markdown for log grids / result
 		// tables — plain-text extraction flattens columns into noise.
 		expr := strings.Replace(extractTablesJS, "SEL", fmt.Sprintf("%q", sel), 2)
@@ -2353,7 +2517,11 @@ func (browserSelectOption) Execute(ctx context.Context, args json.RawMessage) (s
 	body = strings.TrimPrefix(body, "function(value, label) {")
 	body = strings.TrimSuffix(body, "}")
 	body = strings.ReplaceAll(body, "this", "el")
-	expr := fmt.Sprintf(`(function(){var el=document.querySelector(%q);if(!el){return 'error: selector matched nothing'};%s})()`, sel, body)
+	// Re-bind the unwrapped function's PARAMETERS — the bare body still
+	// references value/label, and without them the selector path died with
+	// "ReferenceError: value is not defined" (ref path was fine: callOnRef
+	// passes them as real arguments).
+	expr := fmt.Sprintf(`(function(){var el=document.querySelector(%q);if(!el){return 'error: selector matched nothing'};var value=%q,label=%q;%s})()`, sel, p.Value, p.Label, body)
 	if err := chromedp.Run(actx, chromedp.Evaluate(expr, &result)); err != nil {
 		return "", wrapError(s, "select", sel, fmt.Errorf("select option on %q: %w", sel, err))
 	}
@@ -2714,7 +2882,7 @@ type browserWait struct{}
 func (browserWait) Name() string { return "browser_wait" }
 
 func (browserWait) Description() string {
-	return "Wait for a condition before proceeding. Use after navigate or click to ensure the page is ready. Conditions: 'load' (page fully loaded), 'networkidle' (no network requests for 500ms), 'visible:<selector>' (element appears), 'hidden:<selector>' (element disappears), 'title:<text>' (page title contains text), 'url:<text>' (page URL contains text, e.g. post-login redirect), 'stable:<selector>' (element's content stops changing for 2s — detects the end of streaming/AI responses). Essential for SPAs and dynamic pages."
+	return "Wait for a condition before proceeding. Use after navigate or click to ensure the page is ready. Conditions: 'load' (page fully loaded), 'networkidle' (no network requests for 500ms), 'download' (or 'download:.xlsx' — blocks until a browser download completes and returns its path), 'visible:<selector>' (element appears), 'hidden:<selector>' (element disappears), 'title:<text>' (page title contains text), 'url:<text>' (page URL contains text, e.g. post-login redirect), 'stable:<selector>' (streaming done: waits for MEANINGFUL content — a missing element, empty block, placeholder text (正在/加载/loading…, bare dots), or aria-busy never counts as finished, so a 30-60s pre-first-token thinking pause cannot release the wait; once content streams, its signature (match count + text length + child count) must stay quiet for an adaptive 2-8s — longer streams demand a longer tail, so a mid-generation pause does not read as completion; static content present since the watch began (re-run over a completed block) confirms in 10s when substantial (≥40 chars or rendered children), 90s when short). A condition not met within the timeout FAILS the step — do not record a wait and then extract expecting placeholder text. Essential for SPAs and dynamic pages."
 }
 
 func (browserWait) Schema() json.RawMessage {
@@ -2722,14 +2890,21 @@ func (browserWait) Schema() json.RawMessage {
 "type":"object",
 "properties":{
   "session_id":{"type":"string","description":"Session id from browser_open"},
-  "condition":{"type":"string","description":"Wait condition: 'load', 'networkidle', 'visible:<selector>', 'hidden:<selector>', 'title:<text>', 'url:<text>', 'stable:<selector>'"},
-  "timeout":{"type":"integer","description":"Timeout in seconds (default 15)"}
+  "condition":{"type":"string","description":"Wait condition: 'load', 'networkidle', 'download' (or 'download:.xlsx' — blocks until a browser download completes and returns its path), 'visible:<selector>', 'hidden:<selector>', 'title:<text>', 'url:<text>', 'stable:<selector>'"},
+  "timeout":{"type":"integer","description":"Timeout in seconds (default 90)"}
 },
 "required":["session_id","condition"]
 }`)
 }
 
 func (browserWait) ReadOnly() bool { return false } // wait blocks execution, not read-only
+
+// evalAwaitPromise makes chromedp.Evaluate await a Promise result — the wait
+// conditions resolve booleans from in-page pollers, and without this the
+// RemoteObject is the Promise itself (unmarshal "object into bool" fails).
+func evalAwaitPromise(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+	return p.WithAwaitPromise(true)
+}
 
 func (browserWait) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
@@ -2748,12 +2923,23 @@ func (browserWait) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", err
 	}
 
-	timeout := 15 * time.Second
+	timeout := 90 * time.Second
 	if p.Timeout > 0 {
 		timeout = time.Duration(p.Timeout) * time.Second
 	}
 
 	cond := strings.TrimSpace(p.Condition)
+	// Download completion is detected from the session's CDP download records
+	// (Go-side poll), not a page-evaluate — the export click that started it
+	// has usually navigated nothing and the file lands outside the page.
+	if cond == "download" || strings.HasPrefix(cond, "download:") {
+		rec, path, err := waitDownloadRecord(ctx, s, cond, timeout)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("下载完成: %s（%s）", rec.SuggestedName, path), nil
+	}
+	var ok bool
 	switch {
 	case cond == "load":
 		// Wait for document.readyState === "complete".
@@ -2763,7 +2949,7 @@ func (browserWait) Execute(ctx context.Context, args json.RawMessage) (string, e
 				const check = () => { if (document.readyState === 'complete') resolve(true); };
 				document.addEventListener('readystatechange', check);
 				setTimeout(() => { document.removeEventListener('readystatechange', check); resolve(false); }, `+fmt.Sprintf("%d", int(timeout.Milliseconds()))+`);
-			})`, nil))
+			})`, &ok, evalAwaitPromise))
 
 	case cond == "networkidle":
 		// Wait until no new resource requests for 500ms.
@@ -2777,7 +2963,7 @@ func (browserWait) Execute(ctx context.Context, args json.RawMessage) (string, e
 					if (Date.now() - lastChange > 500) { clearInterval(poll); resolve(true); }
 					if (Date.now() - lastChange > `+fmt.Sprintf("%d", int(timeout.Milliseconds()))+`) { clearInterval(poll); resolve(false); }
 				}, 100);
-			})`, nil))
+			})`, &ok, evalAwaitPromise))
 
 	case strings.HasPrefix(cond, "visible:"):
 		sel := strings.TrimSpace(strings.TrimPrefix(cond, "visible:"))
@@ -2799,7 +2985,7 @@ func (browserWait) Execute(ctx context.Context, args json.RawMessage) (string, e
 				if (document.title.includes(`+fmt.Sprintf("%q", titleText)+`)) return resolve(true);
 				const poll = setInterval(() => { check(); }, 200);
 				setTimeout(() => { clearInterval(poll); resolve(false); }, `+fmt.Sprintf("%d", int(timeout.Milliseconds()))+`);
-			})`, nil))
+			})`, &ok, evalAwaitPromise))
 
 	case strings.HasPrefix(cond, "url:"):
 		// Poll location.href for a substring — the post-login/redirect signal
@@ -2815,36 +3001,83 @@ func (browserWait) Execute(ctx context.Context, args json.RawMessage) (string, e
 				if (check()) return resolve(true);
 				const poll = setInterval(() => { if (check()) { clearInterval(poll); resolve(true); } }, 200);
 				setTimeout(() => { clearInterval(poll); resolve(false); }, `+fmt.Sprintf("%d", int(timeout.Milliseconds()))+`);
-			})`, nil))
+			})`, &ok, evalAwaitPromise))
 
 	case strings.HasPrefix(cond, "stable:"):
-		// Streaming-completion detector: watch the element's content signature
-		// (text length + child count) and resolve once it stops changing for
-		// 2s — the classic "AI/streaming response finished rendering" signal.
+		// Streaming-completion detector: watch the selector's content
+		// signature (match count + first match's text length + child count)
+		// and resolve once MEANINGFUL content stops changing. The pre-first-
+		// token phase — element missing, empty block, placeholder text
+		// ("正在思考…"/"loading…"/bare dots), or aria-busy — NEVER confirms:
+		// first tokens on AI backends routinely take 30-60s and a 30s
+		// static-confirm used to release the wait before the answer existed.
+		// Rising edge requires a change INTO a ready state (an empty block
+		// mounting is a signature change but not content), then an ADAPTIVE
+		// quiet tail (2s floor, 8s cap, growing with how long the stream
+		// ran) so a mid-generation pause on a 60s answer does not read as
+		// completion either. The never-changed static fallback only applies
+		// to ready content and serves re-runs over an already-complete
+		// block: substantial content (≥40 chars or rendered children)
+		// confirms in 10s; SHORT static text ("无告警") waits 90s so an
+		// unrecognized placeholder cannot out-wait the first token.
 		stableSel := strings.TrimSpace(strings.TrimPrefix(cond, "stable:"))
 		err = runBrowserAction(ctx, s, chromedp.Evaluate(
 			`new Promise(resolve => {
 				const sel = `+fmt.Sprintf("%q", stableSel)+`;
-				const sig = () => {
-					const el = document.querySelector(sel);
-					if (!el) return 'none';
-					return el.textContent.length + ':' + el.children.length;
+				const PH = /^(正在|请稍|思考中|生成中|加载中|分析中|检索中|处理中|等待中|loading|thinking|generating|analyzing)/i;
+				const DOTLIKE = /^[\s.\u00B7\u2026\u2025\u2022\u30FB]*$/;
+				const probe = () => {
+					const all = document.querySelectorAll(sel);
+					if (!all.length) return { sig: 'none', present: false, txt: '', kids: 0, busy: false };
+					const el = all[0];
+					return {
+						sig: all.length + ':' + el.textContent.length + ':' + el.children.length,
+						present: true,
+						txt: (el.textContent || '').trim(),
+						kids: el.children.length,
+						busy: el.getAttribute('aria-busy') === 'true' || !!el.closest('[aria-busy="true"]'),
+					};
 				};
-				let last = sig(), lastAt = Date.now();
+				const ready = (p) => p.present && !p.busy && p.txt.length > 0 && !DOTLIKE.test(p.txt) && !PH.test(p.txt);
+				const confirmable = (p) => ready(p) && (p.txt.length >= 40 || p.kids > 0);
+				const limit = `+fmt.Sprintf("%d", int(timeout.Milliseconds()))+`;
+				const started = Date.now();
+				let last = probe();
+				let everChanged = false, armed = false, firstContentAt = 0, lastContentAt = 0;
 				const poll = setInterval(() => {
-					const cur = sig();
-					if (cur !== last) { last = cur; lastAt = Date.now(); }
-					if (Date.now() - lastAt >= 2000) { clearInterval(poll); resolve(true); }
+					const cur = probe();
+					if (cur.sig !== last.sig) {
+						everChanged = true;
+						if (ready(cur)) {
+							if (!armed) { armed = true; firstContentAt = Date.now(); }
+							lastContentAt = Date.now();
+						}
+						last = cur;
+					}
+					if (armed && ready(cur)) {
+						// Adaptive quiet: the longer the content streamed, the
+						// longer the tail must sit still before we call it done.
+						const burst = lastContentAt - firstContentAt;
+						const quiet = Math.min(8000, 2000 + Math.floor(burst / 10));
+						if (Date.now() - lastContentAt >= quiet) { clearInterval(poll); resolve(true); return; }
+					} else if (!everChanged && confirmable(cur) && Date.now() - started >= 10000) {
+						clearInterval(poll); resolve(true); return;
+					} else if (!everChanged && ready(cur) && Date.now() - started >= 90000) {
+						clearInterval(poll); resolve(true); return;
+					}
+					if (Date.now() - started >= limit) { clearInterval(poll); resolve(false); return; }
 				}, 300);
-				setTimeout(() => { clearInterval(poll); resolve(false); }, `+fmt.Sprintf("%d", int(timeout.Milliseconds()))+`);
-			})`, nil))
+			})`, &ok, evalAwaitPromise))
 
 	default:
-		return "", fmt.Errorf("unknown condition %q; use 'load', 'networkidle', 'visible:<sel>', 'hidden:<sel>', 'title:<text>', 'url:<text>', or 'stable:<sel>'", cond)
+		return "", fmt.Errorf("unknown condition %q; use 'load', 'networkidle', 'download' (or 'download:.xlsx'), 'visible:<sel>', 'hidden:<sel>', 'title:<text>', 'url:<text>', or 'stable:<sel>'", cond)
 	}
 
 	if err != nil {
 		return "", fmt.Errorf("wait %q: %w", cond, err)
+	}
+	if !ok {
+		return "", fmt.Errorf("等待 %q 超时（%.0fs）——条件未满足；若页面确已完成，可加大超时或改用其他条件", cond, timeout.Seconds())
 	}
 	return fmt.Sprintf("waited for %q", cond), nil
 }
@@ -2866,11 +3099,12 @@ func (s *browserSession) drainDialogMessages() string {
 }
 
 // drainDownloadRecords returns a one-line summary of files that reached a
-// terminal state (completed/canceled) since the last call and drops those from
-// the buffer; in-progress downloads are kept so the next call can still report
-// them once they finish. Surfaced via autoPageSummary so a "click download
-// link" step reports "download completed: report.pdf" instead of an opaque
-// "clicked". Returns "" when nothing finished.
+// terminal state (completed/canceled) since the last call and marks them
+// reported; in-progress downloads stay pending and terminal records are
+// RETAINED (bounded) so a "wait download" step arriving after this drain can
+// still pair the export click with its file. Surfaced via autoPageSummary so
+// a "click download link" step reports "download completed: report.pdf"
+// instead of an opaque "clicked". Returns "" when nothing finished.
 func (s *browserSession) drainDownloadRecords() string {
 	s.downloadMu.Lock()
 	defer s.downloadMu.Unlock()
@@ -2878,10 +3112,9 @@ func (s *browserSession) drainDownloadRecords() string {
 		return ""
 	}
 	var parts []string
-	kept := s.downloadRecords[:0]
-	for _, d := range s.downloadRecords {
-		if d.State == "inProgress" {
-			kept = append(kept, d)
+	for i := range s.downloadRecords {
+		d := &s.downloadRecords[i]
+		if d.State == "inProgress" || d.Reported {
 			continue
 		}
 		name := d.SuggestedName
@@ -2889,12 +3122,114 @@ func (s *browserSession) drainDownloadRecords() string {
 			name = "(unknown filename)"
 		}
 		parts = append(parts, fmt.Sprintf("%s %s in %s", d.State, name, browserDownloadDir))
+		d.Reported = true
 	}
-	s.downloadRecords = kept
+	s.trimDownloadRecordsLocked()
 	if len(parts) == 0 {
 		return ""
 	}
 	return strings.Join(parts, "; ")
+}
+
+// trimDownloadRecordsLocked keeps the newest downloadHistoryMax records —
+// the buffer is only for reporting/waiting on recent downloads, not an audit
+// log. Caller holds downloadMu.
+func (s *browserSession) trimDownloadRecordsLocked() {
+	if len(s.downloadRecords) > downloadHistoryMax {
+		s.downloadRecords = append(s.downloadRecords[:0], s.downloadRecords[len(s.downloadRecords)-downloadHistoryMax:]...)
+	}
+}
+
+// downloadHistoryMax bounds the retained download records per session.
+const downloadHistoryMax = 20
+
+// --- wait download -----------------------------------------------------------
+
+// downloadWaitGrace is how far before a "wait download" step began we still
+// accept an already-completed record. A fast export can finish while the
+// triggering click is still inside its action summary (which marks the record
+// reported), so state-change detection alone would miss it; anything older
+// than the grace window is a stale/unrelated download and is not accepted.
+const downloadWaitGrace = 20 * time.Second
+
+// waitDownloadRecord blocks until a download reaches a terminal state and
+// returns the record plus its verified path. "Ours" = a record that appeared
+// or transitioned after the wait began, plus the grace window above for
+// mid-action completions. cond may carry an extension filter: "download:.xlsx".
+func waitDownloadRecord(ctx context.Context, s *browserSession, cond string, timeout time.Duration) (downloadRecord, string, error) {
+	wantExt := ""
+	if rest, ok := strings.CutPrefix(cond, "download:"); ok {
+		wantExt = strings.ToLower(strings.TrimSpace(rest))
+	}
+	entered := time.Now()
+	s.downloadMu.Lock()
+	snapshot := make(map[string]string, len(s.downloadRecords))
+	for _, d := range s.downloadRecords {
+		snapshot[d.GUID] = d.State
+	}
+	s.downloadMu.Unlock()
+
+	deadline := entered.Add(timeout)
+	for {
+		s.downloadMu.Lock()
+		var hit *downloadRecord
+		for i := range s.downloadRecords {
+			d := &s.downloadRecords[i]
+			if d.State == "inProgress" {
+				continue
+			}
+			prior, known := snapshot[d.GUID]
+			transitioned := known && prior != d.State
+			fresh := !known || transitioned || d.CompletedAt.After(entered.Add(-downloadWaitGrace))
+			if !fresh {
+				continue
+			}
+			if wantExt != "" && !strings.HasSuffix(strings.ToLower(d.SuggestedName), wantExt) {
+				continue
+			}
+			hit = d
+			break
+		}
+		var rec downloadRecord
+		if hit != nil {
+			rec = *hit
+		}
+		s.downloadMu.Unlock()
+		if hit != nil {
+			if rec.State != "completed" {
+				return rec, "", fmt.Errorf("下载已取消: %s", rec.SuggestedName)
+			}
+			path, err := confirmDownloadOnDisk(rec.SuggestedName, deadline)
+			if err != nil {
+				return rec, "", err
+			}
+			return rec, path, nil
+		}
+		if time.Now().After(deadline) {
+			return rec, "", fmt.Errorf("等待下载超时（%.0fs）——导出未在期限内完成；可加大 wait download 超时", timeout.Seconds())
+		}
+		select {
+		case <-ctx.Done():
+			return rec, "", ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
+// confirmDownloadOnDisk waits briefly for the completed file to be visible
+// and non-partial (Chrome renames *.crdownload → final name a beat after the
+// CDP completed event) and returns its full path.
+func confirmDownloadOnDisk(name string, deadline time.Time) (string, error) {
+	path := filepath.Join(browserDownloadDir, name)
+	for {
+		if info, err := os.Stat(path); err == nil && !strings.HasSuffix(strings.ToLower(name), ".crdownload") && info.Size() > 0 {
+			return path, nil
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("下载已报告完成但磁盘上找不到文件: %s", path)
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
 }
 
 // --- Phase 1: dialog auto-accept --------------------------------------------
@@ -2976,6 +3311,7 @@ func startDownloadsHandler(s *browserSession) {
 					SuggestedName: e.SuggestedFilename,
 					State:         "inProgress",
 				})
+				s.trimDownloadRecordsLocked()
 				s.downloadMu.Unlock()
 			case *cdpbrowser.EventDownloadProgress:
 				// Map CDP state → our terminal state. InProgress updates are
@@ -2996,6 +3332,7 @@ func startDownloadsHandler(s *browserSession) {
 				for i := range s.downloadRecords {
 					if s.downloadRecords[i].GUID == e.GUID {
 						s.downloadRecords[i].State = state
+						s.downloadRecords[i].CompletedAt = time.Now()
 						break
 					}
 				}
@@ -3134,6 +3471,12 @@ func sessionKeepaliveLoop(s *browserSession, stop chan struct{}) {
 		s.keepMu.Lock()
 		if kaErr != nil {
 			s.keepErr = kaErr.Error()
+			var partial errPartialKeepAlive
+			if errors.As(kaErr, &partial) {
+				// Some tabs failed but the survivors still beat the reaper
+				// and their sites' sessions — count the tick as a refresh.
+				s.keepLast = time.Now().UnixMilli()
+			}
 		} else {
 			s.keepErr = ""
 			s.keepLast = time.Now().UnixMilli()
@@ -3166,6 +3509,8 @@ func sessionKeepaliveTick(s *browserSession, mode, url string) error {
 	case "local":
 		return nil
 	case "navigate":
+		// Destructive mode stays CURRENT-TAB only: auto-reloading every tab
+		// would wipe unsaved form state in tabs the user never asked about.
 		target := url
 		if target == "" {
 			ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
@@ -3182,27 +3527,132 @@ func sessionKeepaliveTick(s *browserSession, mode, url string) error {
 			return fmt.Errorf("reload page: %w", nerr)
 		}
 		return nil
-	default: // ping
-		ctx, cancel := context.WithTimeout(s.ctx, browserActionTimeout)
-		defer cancel()
-		var prev string
-		// Read the previous tick's fetch outcome for reporting, then fire the
-		// next heartbeat (result lands next tick via window.__fpKA).
-		_ = chromedp.Run(ctx,
-			chromedp.Evaluate(`window.__fpKAURL = `+fmt.Sprintf("%q", url)+`; void 0;`, nil),
-			chromedp.Evaluate(`(window.__fpKA === undefined) ? "first" : String(window.__fpKA)`, &prev),
-			chromedp.Evaluate(kaPingJS, nil),
-		)
-		if strings.HasPrefix(prev, "err") {
-			return fmt.Errorf("page heartbeat: %s", prev)
+	default: // ping — heartbeat in EVERY open tab
+		return kaPingAllTabs(s, url)
+	}
+}
+
+// kaPingAllTabs fires one heartbeat per open page tab. Cookie jars are
+// per-site: tab 1 (安全平台) and tab 2 (监控系统) hold DIFFERENT site sessions,
+// so each tab needs its own beat. Partial failures degrade (reported via
+// keepErr) as long as at least one tab still beats; total failure is an error.
+func kaPingAllTabs(s *browserSession, url string) error {
+	infos, err := pageTargetInfos(s)
+	if err != nil {
+		return fmt.Errorf("list tabs: %w", err)
+	}
+	if len(infos) == 0 {
+		return errors.New("no open page tabs to keep alive")
+	}
+	s.keepMu.Lock()
+	if s.keepTabs == nil {
+		s.keepTabs = map[cdptarget.ID]*keepTabCtx{}
+	}
+	s.keepMu.Unlock()
+
+	live := map[cdptarget.ID]bool{}
+	var errs []string
+	beaten := 0
+	for _, t := range infos {
+		live[t.TargetID] = true
+		// Only http(s) pages have a site session worth beating — chrome:// /
+		// about: / data: pages (the new-tab page, settings) can neither hold
+		// a site login nor issue a same-origin fetch.
+		if !strings.HasPrefix(t.URL, "http://") && !strings.HasPrefix(t.URL, "https://") {
+			continue
 		}
-		if prev == "http 401" || prev == "http 403" {
-			// The heartbeat reached the site but was rejected — the site-side
-			// session is likely gone; surface it instead of pretending alive.
-			return fmt.Errorf("page heartbeat got %s — site session may have expired", prev)
+		beaten++
+		label := firstNonEmptyStr(strings.TrimSpace(t.Title), t.URL, string(t.TargetID))
+		kt := kaEnsureTabCtx(s, t.TargetID)
+		if kt == nil {
+			errs = append(errs, label+": 连接页卡失败（下轮重试）")
+			continue
 		}
+		if perr := kaPingTab(kt.ctx, url); perr != nil {
+			errs = append(errs, label+": "+perr.Error())
+		}
+	}
+	// Prune tabs that no longer exist — safe to cancel now (CloseTarget on a
+	// dead target is a no-op); cancelling earlier would have CLOSED the tab.
+	s.keepMu.Lock()
+	for id, kt := range s.keepTabs {
+		if !live[id] {
+			kt.cancel()
+			delete(s.keepTabs, id)
+		}
+	}
+	s.keepMu.Unlock()
+	if beaten > 0 && len(errs) == beaten {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	// Partial failure: surfaced via keepErr by the caller's return-nil path.
+	if len(errs) > 0 {
+		return errPartialKeepAlive{strings.Join(errs, "; ")}
+	}
+	return nil
+}
+
+// errPartialKeepAlive marks some-tabs-failed beats: the loop records it in
+// keepErr but still counts the tick as a refresh (the surviving tabs keep the
+// session useful; a hard error would read as "keep-alive dead").
+type errPartialKeepAlive struct{ msg string }
+
+func (e errPartialKeepAlive) Error() string { return e.msg }
+
+// kaEnsureTabCtx returns the tab's heartbeat session, booting it on first use.
+// A boot failure drops the entry (retried next tick) WITHOUT cancelling —
+// chromedp cancel would close a possibly-alive tab.
+func kaEnsureTabCtx(s *browserSession, id cdptarget.ID) *keepTabCtx {
+	s.keepMu.Lock()
+	kt, ok := s.keepTabs[id]
+	s.keepMu.Unlock()
+	if ok {
+		return kt
+	}
+	// WithoutCancel keeps the chromedp context VALUES (browser connection)
+	// while stripping cancellation — the session's teardown must never
+	// cascade CloseTarget into the user's tabs.
+	parent := context.WithoutCancel(s.ctx)
+	ctx, cancel := chromedp.NewContext(parent, chromedp.WithTargetID(id))
+	boot := make(chan error, 1)
+	go func() { boot <- chromedp.Run(ctx) }()
+	select {
+	case berr := <-boot:
+		if berr != nil {
+			cancel() // never attached — nothing to close
+			return nil
+		}
+	case <-time.After(5 * time.Second):
+		cancel()
 		return nil
 	}
+	kt = &keepTabCtx{ctx: ctx, cancel: cancel}
+	s.keepMu.Lock()
+	s.keepTabs[id] = kt
+	s.keepMu.Unlock()
+	return kt
+}
+
+// kaPingTab performs one tab's heartbeat: read the PREVIOUS beat's outcome
+// for reporting, then fire the next (result lands next tick via __fpKA).
+func kaPingTab(ctx context.Context, url string) error {
+	actx, cancel := context.WithTimeout(ctx, browserActionTimeout)
+	defer cancel()
+	var prev string
+	_ = chromedp.Run(actx,
+		chromedp.Evaluate(`window.__fpKAURL = `+fmt.Sprintf("%q", url)+`; void 0;`, nil),
+		chromedp.Evaluate(`(window.__fpKA === undefined) ? "first" : String(window.__fpKA)`, &prev),
+		chromedp.Evaluate(kaPingJS, nil),
+	)
+	if strings.HasPrefix(prev, "err") {
+		return fmt.Errorf("heartbeat: %s", prev)
+	}
+	if prev == "http 401" || prev == "http 403" {
+		// The heartbeat reached the site but was rejected — the site-side
+		// session is likely gone; surface it instead of pretending alive.
+		return fmt.Errorf("heartbeat got %s — site session may have expired", prev)
+	}
+	return nil
 }
 
 // browserKeepalive arms or disarms a session's keep-alive — the chat-driven
@@ -3212,7 +3662,7 @@ type browserKeepalive struct{}
 func (browserKeepalive) Name() string { return "browser_keepalive" }
 
 func (browserKeepalive) Description() string {
-	return "Arm or disarm keep-alive for a browser session, for long-idle workflows (log in now, next instruction much later). While armed, the session survives idle reaping and the site's session is refreshed: mode 'ping' sends a same-origin credentials fetch inside the page (default, does not disturb the page), 'navigate' reloads the keep URL (or current page), 'local' only prevents local idle reaping. interval_sec clamps to 60..3600 (default 300)."
+	return "Arm or disarm keep-alive for a browser session, for long-idle workflows (log in now, next instruction much later). While armed, the session survives idle reaping and the site's session is refreshed: mode 'ping' sends a same-origin credentials fetch inside EVERY open tab (default; each tab's site keeps its own login — tabs of different sites all stay alive, pages are not disturbed), 'navigate' reloads the keep URL (or current page — CURRENT TAB ONLY, reloading all tabs would wipe unsaved form state), 'local' only prevents local idle reaping. interval_sec clamps to 60..3600 (default 300)."
 }
 
 func (browserKeepalive) Schema() json.RawMessage {
@@ -3478,6 +3928,21 @@ func switchSessionTab(s *browserSession, id cdptarget.ID) error {
 	if c == nil || c.Browser == nil {
 		return errors.New("session browser not connected")
 	}
+	oldCtx := s.ctx
+	oldTarget := sessionTargetID(s)
+	// URL of the tab being abandoned: blank tabs are OURS (created by the
+	// attach boot or a fresh session) and are closed on the way out —
+	// switching must not litter the window with orphan about:blank tabs
+	// (the every-run_skill-leaves-a-blank-tab bug). Real pages stay open.
+	oldURL := ""
+	if infos, ierr := pageTargetInfos(s); ierr == nil {
+		for _, t := range infos {
+			if t.TargetID == oldTarget {
+				oldURL = t.URL
+				break
+			}
+		}
+	}
 	newCtx, cancel := chromedp.NewContext(s.ctx, chromedp.WithTargetID(id))
 	boot := make(chan error, 1)
 	go func() { boot <- chromedp.Run(newCtx) }()
@@ -3494,6 +3959,15 @@ func switchSessionTab(s *browserSession, id cdptarget.ID) error {
 	s.ctx = newCtx
 	s.ctxCancel = cancel
 	s.refs.Store(nil) // refs belonged to the abandoned page
+	if oldTarget != "" && oldTarget != id && (oldURL == "" || oldURL == "about:blank") {
+		// Best-effort close through the old context (still newCtx's parent,
+		// browser-domain command rides its connection).
+		closeCtx, closeCancel := context.WithTimeout(oldCtx, 3*time.Second)
+		_ = chromedp.Run(closeCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+			return cdptarget.CloseTarget(oldTarget).Do(ctx)
+		}))
+		closeCancel()
+	}
 	return nil
 }
 

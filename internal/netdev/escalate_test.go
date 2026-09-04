@@ -13,6 +13,13 @@ import (
 func TestEscalationSweep(t *testing.T) {
 	ResetEscalationStateForTest()
 
+	// SaveFinding writes through to the findings dir: without the override
+	// the fixtures land in the user's real state dir and light the sidebar
+	// risk dot with fake criticals (found in the wild, 2026-09-04).
+	oldFind := findingsDirOverr
+	t.Cleanup(func() { findingsDirOverr = oldFind })
+	findingsDirOverr = t.TempDir()
+
 	old := &Finding{
 		ID: "esc-old", Title: "link down", Severity: SeverityCritical,
 		Status: FindingActive, CreatedAt: time.Now().Add(-2 * EscalationTimeout),

@@ -3,7 +3,7 @@ package netdev
 // template.go — 批量模板（NETDEV_SPEC_V2 §7.2）：模板 = 步骤序列 + 变量（按
 // 设备属性渲染：接口名、网段、hostname）。生成时逐台渲染出「N 份结果」整
 // 体预览（dry-run：无任何副作用，逐条标注分类与危险动词），人审后生成一
-// 份多设备步骤的提案草稿——执行/首败冻结/回滚矩阵全部沿用提案既有语义
+// 份多设备步骤的变更草稿——执行/首败冻结/回滚矩阵全部沿用变更既有语义
 // （每台一行：已执行 applied / 已回滚 rolled / 未触达 pending）。变量值只
 // 允许白名单字符集（附录 B-10），渲染产物仍逐条过分类器。
 
@@ -284,7 +284,7 @@ func (m *Manager) TemplateApply(t *Template, userVars map[string]string) (*Propo
 	}
 	for _, pd := range preview {
 		if !pd.Available {
-			return nil, fmt.Errorf("目标 %s 不可用（%s）——模板未生成提案", pd.Device, pd.Reason)
+			return nil, fmt.Errorf("目标 %s 不可用（%s）——模板未生成变更", pd.Device, pd.Reason)
 		}
 		for _, ps := range pd.Steps {
 			step := ProposalStep{Device: pd.Device, Commands: ps.Commands, Rollback: ps.Rollback, Dangerous: ps.Dangerous}

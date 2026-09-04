@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -306,6 +307,27 @@ func TestBuildExposureBoardMatrixAndSim(t *testing.T) {
 	// No CVE feed imported in the temp env → guide state, never zero.
 	if !board.CVENeedsFeed {
 		t.Error("CVE needs-feed must be true without a feed")
+	}
+}
+
+// TestBuildExposureBoardEmptyPayload — 零 finding 的全新环境也要给出可渲染
+// 的数组载荷：paths/exposure_points 曾以 nil 透传，JSON null 使暴露面屏
+// b.paths.length 直接白屏（前端 error boundary 报 null.length）。
+func TestBuildExposureBoardEmptyPayload(t *testing.T) {
+	dashTestEnv(t)
+	cfg := &config.Config{}
+	cfg.NetDev.Enabled = true
+	m := NewManager(cfg)
+
+	board := m.BuildExposureBoard()
+	j, err := json.Marshal(board)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"paths":[]`, `"exposure_points":[]`, `"cut_suggestions":[]`, `"matrix":[]`} {
+		if !strings.Contains(string(j), key) {
+			t.Errorf("empty board must marshal %s, got %s", key, j)
+		}
 	}
 }
 

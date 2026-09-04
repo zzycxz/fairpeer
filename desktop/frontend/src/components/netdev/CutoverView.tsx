@@ -1,7 +1,7 @@
 // CutoverView — 割接模式前端（NETDEV_SPEC_V2 §7.2）：整份 runbook 的总倒计
 // 时 + 步骤 + 语义验证门 + 回退决策点。按 §10 契约不开第四个工作台——它
-// 是「对话」主区里的任务过程视图（Esc 返回对话），入口在「提案」页签。
-// 决策永远是人按的：hold 状态出现 [继续] 与 [回退] 并排，回退走提案回滚
+// 是「对话」主区里的任务过程视图（Esc 返回对话），入口在「变更」页签。
+// 决策永远是人按的：hold 状态出现 [继续] 与 [回退] 并排，回退走变更回滚
 // 全链路（首败冻结 + 备份恢复），结束后可导出前后基线对比报告。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { app } from "../../lib/bridge";

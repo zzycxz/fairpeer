@@ -93,6 +93,8 @@ func TestComposeLogCommand(t *testing.T) {
 		{"journal:nginx", "", 100, "journalctl -u nginx -n 100 --no-pager -q"},
 		{"journal:mysql", "-1h", 200, "journalctl -u mysql --since -1h -n 200 --no-pager -q"},
 		{"docker:web", "", 100, "docker logs --tail 100 web"},
+		{"system:main", "", 100, "journalctl -n 100 --no-pager -q"},
+		{"system:main", "-2h", 300, "journalctl --since -2h -n 300 --no-pager -q"},
 	}
 	for _, c := range cases {
 		got, err := composeLogCommand(d, c.source, c.fetchN, c.since)
@@ -116,6 +118,7 @@ func TestComposeLogCommandRefusals(t *testing.T) {
 		{"file:/opt/app/logs/../../etc/x", ""},  // traversal
 		{"journal:nginx; reboot", ""},           // unit with metachars
 		{"docker:web; rm -rf /", ""},            // container with metachars
+		{"system:main; reboot", ""},             // system marker with metachars
 		{"journal:nginx", `--since "; reboot"`}, // since with quotes/metachars
 		{"journal:nginx", "yesterday; ls"},      // since trailing junk
 		{"whatever:x", ""},                      // unknown kind

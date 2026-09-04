@@ -31,6 +31,13 @@ func TestExplainError(t *testing.T) {
 		t.Errorf("400 should append the provider reason from a JSON body, got %q", jsonBody.Error())
 	}
 
+	// Relay-drop 400: message must say the gateway dropped, not "malformed
+	// request", and the real cause rides in param (observed: xiaomimimo).
+	dropBody := explainError(&provider.APIError{Provider: "test-provider", Status: 400, Body: `{"error":{"code":"400","message":"Request failed","param":"Connection prematurely closed BEFORE response","type":""}}`})
+	if !strings.Contains(dropBody.Error(), i18n.M.ProviderErrGatewayTransient) || !strings.Contains(dropBody.Error(), "Connection prematurely closed BEFORE response") {
+		t.Errorf("relay-drop 400 should map to the gateway-transient message with the param reason, got %q", dropBody.Error())
+	}
+
 	rawBody := explainError(&provider.APIError{Provider: "test-provider", Status: 422, Body: "some unparseable detail"})
 	if !strings.Contains(rawBody.Error(), "some unparseable detail") {
 		t.Errorf("422 should fall back to the raw body, got %q", rawBody.Error())

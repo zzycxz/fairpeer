@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="1000" viewBox="0 0 1240 1000" font-family="Microsoft YaHei, PingFang SC, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6B6B6B"/>
+    </marker>
+  </defs>
+
+  <!-- 背景 -->
+  <rect x="0" y="0" width="1240" height="1000" fill="#FFFFFF"/>
+
+  <!-- 标题 -->
+  <text x="620" y="52" text-anchor="middle" font-size="27" font-weight="bold" fill="#1F2937">无感化智能运维应用总体架构</text>
+  <text x="620" y="78" text-anchor="middle" font-size="13.5" fill="#6B7280">旁路部署 · 原系统零改造 · 模型可本地部署，数据不出机房</text>
+
+  <!-- ======== 入口层 ======== -->
+  <rect x="70" y="100" width="1100" height="115" rx="14" fill="#EAF2FC" stroke="#4A78C2" stroke-width="1.5"/>
+  <rect x="70" y="100" width="96" height="30" rx="8" fill="#4A78C2"/>
+  <text x="118" y="121" text-anchor="middle" font-size="15" font-weight="bold" fill="#FFFFFF">入口层</text>
+  <rect x="100" y="140" width="320" height="60" rx="10" fill="#FFFFFF" stroke="#4A78C2" stroke-width="1.3"/>
+  <text x="260" y="165" text-anchor="middle" font-size="16.5" font-weight="bold" fill="#1F2937">桌面客户端（电脑端）</text>
+  <text x="260" y="187" text-anchor="middle" font-size="12.5" fill="#4B5563">主入口 · 技能库 · 审批操作</text>
+  <rect x="460" y="140" width="320" height="60" rx="10" fill="#FFFFFF" stroke="#4A78C2" stroke-width="1.3"/>
+  <text x="620" y="165" text-anchor="middle" font-size="16.5" font-weight="bold" fill="#1F2937">手机端 LinkPeer</text>
+  <text x="620" y="187" text-anchor="middle" font-size="12.5" fill="#4B5563">局域网直连 · 机房现场 · 夜间响应</text>
+  <rect x="820" y="140" width="320" height="60" rx="10" fill="#FFFFFF" stroke="#4A78C2" stroke-width="1.3"/>
+  <text x="980" y="165" text-anchor="middle" font-size="16.5" font-weight="bold" fill="#1F2937">IM 机器人</text>
+  <text x="980" y="187" text-anchor="middle" font-size="12.5" fill="#4B5563">告警推送 · 晨报 · 点击直达</text>
+
+  <!-- 入口层 <-> 大脑层 箭头 -->
+  <line x1="260" y1="215" x2="260" y2="265" stroke="#6B6B6B" stroke-width="1.6" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <line x1="620" y1="215" x2="620" y2="265" stroke="#6B6B6B" stroke-width="1.6" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <line x1="980" y1="215" x2="980" y2="265" stroke="#6B6B6B" stroke-width="1.6" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="633" y="240" font-size="12.5" fill="#4B5563">↓ 自然语言意图</text>
+  <text x="633" y="257" font-size="12.5" fill="#4B5563">↑ 带证据的结论</text>
+
+  <!-- ======== 大脑层 ======== -->
+  <rect x="70" y="265" width="1100" height="140" rx="14" fill="#F1ECFB" stroke="#7A5FB5" stroke-width="1.5"/>
+  <rect x="70" y="265" width="150" height="30" rx="8" fill="#7A5FB5"/>
+  <text x="145" y="286" text-anchor="middle" font-size="15" font-weight="bold" fill="#FFFFFF">大脑层（智能体）</text>
+  <rect x="100" y="305" width="320" height="80" rx="10" fill="#FFFFFF" stroke="#7A5FB5" stroke-width="1.3"/>
+  <text x="260" y="332" text-anchor="middle" font-size="16.5" font-weight="bold" fill="#1F2937">AI 核心</text>
+  <text x="260" y="354" text-anchor="middle" font-size="12.5" fill="#4B5563">意图识别 · 圈定范围 · 列检查计划</text>
+  <text x="260" y="372" text-anchor="middle" font-size="12.5" fill="#4B5563">调度工具执行</text>
+  <rect x="460" y="305" width="320" height="80" rx="10" fill="#FFFFFF" stroke="#7A5FB5" stroke-width="1.3"/>
+  <text x="620" y="332" text-anchor="middle" font-size="16.5" font-weight="bold" fill="#1F2937">安全护栏</text>
+  <text x="620" y="354" text-anchor="middle" font-size="12.5" fill="#4B5563">每步权限 · 全程审计 · 次数限额</text>
+  <text x="620" y="372" text-anchor="middle" font-size="12.5" fill="#4B5563">写操作必须人签字</text>
+  <rect x="820" y="305" width="320" height="80" rx="10" fill="#FFFFFF" stroke="#7A5FB5" stroke-width="1.3"/>
+  <text x="980" y="332" text-anchor="middle" font-size="16.5" font-weight="bold" fill="#1F2937">模型接入</text>
+  <text x="980" y="354" text-anchor="middle" font-size="12.5" fill="#4B5563">本地模型 · 集团智算算力</text>
+  <text x="980" y="372" text-anchor="middle" font-size="12.5" fill="#4B5563">多端点可切换</text>
+
+  <!-- 大脑层 -> 场景条 箭头 -->
+  <line x1="620" y1="405" x2="620" y2="445" stroke="#6B6B6B" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="633" y="430" font-size="12.5" fill="#4B5563">受控调用（先过护栏）</text>
+
+  <!-- ======== 场景条 ======== -->
+  <rect x="70" y="445" width="1100" height="105" rx="14" fill="#FAFAFC" stroke="#B9B9C8" stroke-width="1.3" stroke-dasharray="6 4"/>
+  <text x="620" y="473" text-anchor="middle" font-size="15" font-weight="bold" fill="#374151">十个应用场景</text>
+  <g font-size="14" fill="#1F2937" text-anchor="middle">
+    <rect x="135" y="486" width="170" height="34" rx="17" fill="#FFFFFF" stroke="#8E8EA0"/>
+    <text x="220" y="508">数通运维</text>
+    <rect x="335" y="486" width="170" height="34" rx="17" fill="#FFFFFF" stroke="#8E8EA0"/>
+    <text x="420" y="508">漏洞管理</text>
+    <rect x="535" y="486" width="170" height="34" rx="17" fill="#FFFFFF" stroke="#8E8EA0"/>
+    <text x="620" y="508">浏览器巡检</text>
+    <rect x="735" y="486" width="170" height="34" rx="17" fill="#FFFFFF" stroke="#8E8EA0"/>
+    <text x="820" y="508">告警联动</text>
+    <rect x="935" y="486" width="170" height="34" rx="17" fill="#FFFFFF" stroke="#8E8EA0"/>
+    <text x="1020" y="508">日志审计</text>
+    <rect x="135" y="528" width="170" height="34" rx="17" fill="#FFFFFF" stroke="#8E8EA0"/>
+    <text x="220" y="550">安全运维</text>
+    <rect x="335" y="528" width="170" height="34" rx="17" fill="#FFFFFF" stroke="#8E8EA0"/>
+    <text x="420" y="550">办公集成</text>
+    <rect x="535" y="528" width="170" height="34" rx="17" fill="#FFFFFF" stroke="#8E8EA0"/>
+    <text x="620" y="550">文员自动化</text>
+    <rect x="735" y="528" width="170" height="34" rx="17" fill="#FFFFFF" stroke="#8E8EA0"/>
+    <text x="820" y="550">移动端</text>
+    <rect x="935" y="528" width="170" height="34" rx="17" fill="#FFFFFF" stroke="#8E8EA0"/>
+    <text x="1020" y="550">编码工具</text>
+  </g>
+
+  <!-- 场景条 -> 通道层 箭头 -->
+  <line x1="620" y1="550" x2="620" y2="585" stroke="#6B6B6B" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="633" y="572" font-size="12.5" fill="#4B5563">统一出口 · 留记录 · 限次数</text>
+
+  <!-- ======== 通道层 ======== -->
+  <rect x="70" y="585" width="1100" height="135" rx="14" fill="#E9F6EC" stroke="#4E9A62" stroke-width="1.5"/>
+  <rect x="70" y="585" width="200" height="30" rx="8" fill="#4E9A62"/>
+  <text x="170" y="606" text-anchor="middle" font-size="15" font-weight="bold" fill="#FFFFFF">通道层（唯一出口）</text>
+  <rect x="100" y="625" width="320" height="78" rx="10" fill="#FFFFFF" stroke="#4E9A62" stroke-width="1.3"/>
+  <text x="260" y="651" text-anchor="middle" font-size="16.5" font-weight="bold" fill="#1F2937">远程登录</text>
+  <text x="260" y="673" text-anchor="middle" font-size="12.5" fill="#4B5563">跳板机 · 堡垒机</text>
+  <text x="260" y="691" text-anchor="middle" font-size="12.5" fill="#4B5563">每条命令先过安全检查</text>
+  <rect x="460" y="625" width="320" height="78" rx="10" fill="#FFFFFF" stroke="#4E9A62" stroke-width="1.3"/>
+  <text x="620" y="651" text-anchor="middle" font-size="16.5" font-weight="bold" fill="#1F2937">受控浏览器</text>
+  <text x="620" y="673" text-anchor="middle" font-size="12.5" fill="#4B5563">技能录制 · 固定步骤回放</text>
+  <text x="620" y="691" text-anchor="middle" font-size="12.5" fill="#4B5563">写操作停在确认页</text>
+  <rect x="820" y="625" width="320" height="78" rx="10" fill="#FFFFFF" stroke="#4E9A62" stroke-width="1.3"/>
+  <text x="980" y="651" text-anchor="middle" font-size="16.5" font-weight="bold" fill="#1F2937">只读查询接口</text>
+  <text x="980" y="673" text-anchor="middle" font-size="12.5" fill="#4B5563">集群查询 · 硬件管理口</text>
+  <text x="980" y="691" text-anchor="middle" font-size="12.5" fill="#4B5563">凭证加密保存</text>
+
+  <!-- 通道层 <-> 设备层 箭头 -->
+  <line x1="260" y1="720" x2="260" y2="760" stroke="#6B6B6B" stroke-width="1.6" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <line x1="620" y1="720" x2="620" y2="760" stroke="#6B6B6B" stroke-width="1.6" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <line x1="980" y1="720" x2="980" y2="760" stroke="#6B6B6B" stroke-width="1.6" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="633" y="737" font-size="12.5" fill="#4B5563">↓ 只读命令 · 页面操作 · 只读查询</text>
+  <text x="633" y="755" font-size="12.5" fill="#4B5563">↑ 回显先抹掉敏感信息</text>
+
+  <!-- ======== 设备层 ======== -->
+  <rect x="70" y="760" width="1100" height="135" rx="14" fill="#FDF3E7" stroke="#C08A3E" stroke-width="1.5"/>
+  <rect x="70" y="760" width="200" height="30" rx="8" fill="#C08A3E"/>
+  <text x="170" y="781" text-anchor="middle" font-size="15" font-weight="bold" fill="#FFFFFF">设备层（零改造）</text>
+  <rect x="86" y="800" width="196" height="72" rx="10" fill="#FFFFFF" stroke="#C08A3E" stroke-width="1.3"/>
+  <text x="184" y="827" text-anchor="middle" font-size="15.5" font-weight="bold" fill="#1F2937">数通设备</text>
+  <text x="184" y="849" text-anchor="middle" font-size="12" fill="#4B5563">路由器 · 交换机</text>
+  <rect x="304" y="800" width="196" height="72" rx="10" fill="#FFFFFF" stroke="#C08A3E" stroke-width="1.3"/>
+  <text x="402" y="827" text-anchor="middle" font-size="15.5" font-weight="bold" fill="#1F2937">安全设备</text>
+  <text x="402" y="849" text-anchor="middle" font-size="12" fill="#4B5563">态势感知 · 防火墙 · IPS</text>
+  <rect x="522" y="800" width="196" height="72" rx="10" fill="#FFFFFF" stroke="#C08A3E" stroke-width="1.3"/>
+  <text x="620" y="827" text-anchor="middle" font-size="15.5" font-weight="bold" fill="#1F2937">服务器</text>
+  <text x="620" y="849" text-anchor="middle" font-size="12" fill="#4B5563">物理机 · 虚拟化</text>
+  <rect x="740" y="800" width="196" height="72" rx="10" fill="#FFFFFF" stroke="#C08A3E" stroke-width="1.3"/>
+  <text x="838" y="827" text-anchor="middle" font-size="15.5" font-weight="bold" fill="#1F2937">智算设备</text>
+  <text x="838" y="849" text-anchor="middle" font-size="12" fill="#4B5563">GPU 服务器 · 智算平台</text>
+  <rect x="958" y="800" width="196" height="72" rx="10" fill="#FFFFFF" stroke="#C08A3E" stroke-width="1.3"/>
+  <text x="1056" y="827" text-anchor="middle" font-size="15.5" font-weight="bold" fill="#1F2937">办公系统</text>
+  <text x="1056" y="849" text-anchor="middle" font-size="12" fill="#4B5563">MOMA · 业务网页</text>
+
+  <!-- 脚注 -->
+  <text x="620" y="948" text-anchor="middle" font-size="13" fill="#8A8F98">原系统零改造：不装组件 · 不开接口 · 账号权限不超出普通工程师 · 全部动作留痕可回放</text>
+</svg>

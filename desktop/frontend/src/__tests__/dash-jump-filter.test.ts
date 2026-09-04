@@ -20,6 +20,12 @@ describe("findingMatchesJump", () => {
     expect(findingMatchesJump(f({ title: "基线：xxx" }), "baseline")).toBe(true);
     expect(findingMatchesJump(f({ source: "syslog:SW-03:x" }), "syslog")).toBe(true);
   });
+  it("vuln matches the blue-team lens (vulnscan*/cve:*), not alert sources", () => {
+    expect(findingMatchesJump(f({ source: "vulnscan:ssh" }), "vuln")).toBe(true);
+    expect(findingMatchesJump(f({ source: "cve:CVE-2026-1234" }), "vuln")).toBe(true);
+    expect(findingMatchesJump(f({ source: "syslog:SW-03:x" }), "vuln")).toBe(false);
+    expect(findingMatchesJump(f(), "vuln")).toBe(false); // no source → not blue-team
+  });
   it("unknown filter falls back to substring (never an empty list by accident)", () => {
     expect(findingMatchesJump(f(), "OSPF")).toBe(true);
     expect(findingMatchesJump(f(), "zzz-not-there")).toBe(false);

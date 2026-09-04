@@ -1,6 +1,6 @@
 package netdev
 
-// proposal_steps.go — 结构化提案步骤（NETDEV_SPEC_V2 §7.1）：cli 之外的四种
+// proposal_steps.go — 结构化变更步骤（NETDEV_SPEC_V2 §7.1）：cli 之外的四种
 // 步骤类型的载荷校验、备份、执行与回滚。全部类型继承现有状态机（首败冻
 // 结、组策略、变更窗口），且只能从 ExecuteProposal / RollbackProposal 到
 // 达——agent 的手没有到这里的路径。

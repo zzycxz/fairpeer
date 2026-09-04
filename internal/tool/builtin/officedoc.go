@@ -3,6 +3,7 @@ package builtin
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -892,4 +893,123 @@ func formatRows(rows [][]string) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// --- exported workbook → LLM table (download analysis) ----------------------
+
+// ReadWorkbookAsTable reads an exported workbook (.xlsx first sheet, or .csv)
+// as a markdown pipe table for LLM alert triage. Streaming row iterator with
+// a maxRows cap — a 50k-row SIEM export never materializes whole, the model
+// gets the first maxRows rows plus the real total so truncation is explicit.
+// Cells are clipped to cellClipRunes runes (wide log-message columns would
+// otherwise drown the table). Legacy .xls is rejected with a hint.
+func ReadWorkbookAsTable(path string, maxRows int) (string, int, error) {
+	if maxRows <= 0 {
+		maxRows = 1000
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	var rows [][]string
+	var total int
+	switch ext {
+	case ".xlsx":
+		f, err := excelize.OpenFile(path)
+		if err != nil {
+			return "", 0, fmt.Errorf("open xlsx (is it a valid .xlsx?): %w", err)
+		}
+		defer f.Close()
+		sheets := f.GetSheetList()
+		if len(sheets) == 0 {
+			return "", 0, fmt.Errorf("xlsx has no sheets")
+		}
+		it, err := f.Rows(sheets[0])
+		if err != nil {
+			return "", 0, fmt.Errorf("read sheet %q: %w", sheets[0], err)
+		}
+		defer it.Close()
+		for it.Next() {
+			total++
+			if len(rows) < maxRows+1 { // +1: header row doesn't count against the cap
+				cols, _ := it.Columns()
+				if cols == nil {
+					cols = []string{}
+				}
+				rows = append(rows, cols)
+			}
+		}
+		if e := it.Error(); e != nil {
+			return "", 0, fmt.Errorf("scan sheet %q: %w", sheets[0], e)
+		}
+	case ".csv":
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", 0, err
+		}
+		r := csv.NewReader(bytes.NewReader(data))
+		r.FieldsPerRecord = -1
+		r.LazyQuotes = true
+		for {
+			rec, rerr := r.Read()
+			if rerr == io.EOF {
+				break
+			}
+			if rerr != nil {
+				return "", 0, fmt.Errorf("read csv: %w", rerr)
+			}
+			total++
+			if len(rows) < maxRows+1 {
+				rows = append(rows, rec)
+			}
+		}
+	default:
+		return "", 0, fmt.Errorf("不支持的导出格式 %q——请在平台上改导出 .xlsx 或 .csv", ext)
+	}
+	if len(rows) == 0 {
+		return "(文件没有数据行)", total, nil
+	}
+	// Rectangular pad so the pipe table renders.
+	width := 0
+	for _, r := range rows {
+		if len(r) > width {
+			width = len(r)
+		}
+	}
+	var b strings.Builder
+	for ri, r := range rows {
+		for i := 0; i < width; i++ {
+			cell := ""
+			if i < len(r) {
+				cell = normalizeNumber(strings.TrimSpace(r[i]))
+			}
+			b.WriteString("| ")
+			b.WriteString(clipTableCell(cell))
+			b.WriteString(" ")
+		}
+		b.WriteString("|\n")
+		if ri == 0 {
+			for i := 0; i < width; i++ {
+				b.WriteString("| --- ")
+			}
+			b.WriteString("|\n")
+		}
+	}
+	shown := len(rows) - 1
+	if shown < 0 {
+		shown = 0
+	}
+	if total > shown+1 {
+		b.WriteString(fmt.Sprintf("\n(共 %d 行数据，受分析上限仅显示前 %d 行；结论请注明基于部分数据)\n", total-1, shown))
+	}
+	return b.String(), total - 1, nil
+}
+
+// cellClipRunes bounds one table cell for the LLM prompt.
+const cellClipRunes = 120
+
+func clipTableCell(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "\n", " ")
+	if r := []rune(s); len(r) > cellClipRunes {
+		return string(r[:cellClipRunes]) + "…"
+	}
+	return s
 }

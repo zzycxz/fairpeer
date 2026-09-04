@@ -1,7 +1,7 @@
 package netdev
 
 // cutover.go — 割接模式（NETDEV_SPEC_V2 §7.2）：整份 runbook 带总倒计时逐
-// 步执行。步骤要么执行一份「已批准」提案（变更动作的唯一形态），要么跑
+// 步执行。步骤要么执行一份「已批准」变更（变更动作的唯一形态），要么跑
 // 一条只读命令；步后可挂语义验证门（Expect 持续 SustainSec 才算过），门
 // 不过或到预设回退决策点即 hold——回退按钮与影响描述并列，决策是人按
 // 的。割接前后各拍一次基线快照（复用配置备份库），结束时产出前后对比
@@ -334,7 +334,7 @@ func (m *Manager) CutoverRollback(ctx context.Context, id string) (*CutoverRun, 
 	}
 	if failed != "" {
 		c.Status = CutoverFailed
-		c.HoldNote = "回退失败：" + failed + " — 人工接管（备份在提案里）"
+		c.HoldNote = "回退失败：" + failed + " — 人工接管（备份在变更里）"
 		_ = saveCutover(c)
 		return c, nil
 	}
@@ -467,11 +467,11 @@ func (m *Manager) cutoverExecStep(ctx context.Context, c *CutoverRun, step Cutov
 			step.Error = err.Error()
 			end := time.Now()
 			step.EndedAt = &end
-			return step, fmt.Errorf("提案 %s 执行失败: %v", step.ProposalID, err)
+			return step, fmt.Errorf("变更 %s 执行失败: %v", step.ProposalID, err)
 		}
 		if p.Status == ProposalPartial || p.Status == ProposalFailed {
 			step.Status = CutoverStepFailed
-			step.Error = "提案 " + step.ProposalID + " 冻结为 " + p.Status + "（首败冻结）"
+			step.Error = "变更 " + step.ProposalID + " 冻结为 " + p.Status + "（首败冻结）"
 			end := time.Now()
 			step.EndedAt = &end
 			return step, fmt.Errorf("%s", step.Error)

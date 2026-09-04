@@ -72,6 +72,11 @@ type NetDevDeviceView struct {
 	SnmpCommunitySet bool   `json:"snmpCommunitySet"`
 	SnmpCommunity    string `json:"snmpCommunity,omitempty"` // write-only
 
+	// Serial console line (COM 口): set => dial the console instead of SSH
+	// (switch console port via USB-serial adapter; no host keys, no auth).
+	ConsolePort string `json:"consolePort"`
+	ConsoleBaud int    `json:"consoleBaud"` // 0 => 9600; 8N1 fixed
+
 	// Password is write-only from the form: blank = leave the stored secret
 	// untouched; non-blank = store it under the netdev namespace.
 	Password string `json:"password,omitempty"`
@@ -146,6 +151,19 @@ type NetDevSettingsView struct {
 	DiscoveryMode        string               `json:"discoveryMode"` // tunnel | probe | auto
 	ProbeFallback        string               `json:"probeFallback"`
 	GroupDefs            []NetDevGroupDefView `json:"groupDefs"`
+	// Assessment is the engagement envelope — previously TOML-only, now the
+	// settings page's 授权信封 card (评估流程第 0 步不再需要手编 config.toml).
+	Assessment *NetDevAssessmentView `json:"assessment"`
+}
+
+// NetDevAssessmentView is the engagement envelope editor (评估授权信封) — the
+// authorization gate for the active-scan tiers. nil (older payloads) preserves
+// the stored envelope; all-fields-empty clears it (gate closes).
+type NetDevAssessmentView struct {
+	EngagementID string   `json:"engagementId"`
+	Scopes       []string `json:"scopes"`
+	Expires      string   `json:"expires"` // YYYY-MM-DD
+	Approver     string   `json:"approver"`
 }
 
 // NetDevGroupDefView carries a group's policy + maintenance window.
@@ -267,6 +285,12 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 		BriefingPushTime:     cfg.NetDev.BriefingPushTime,
 		ScheduledBaseline:    cfg.NetDev.ScheduledBaseline,
 		WeakCredDict:         cfg.NetDev.WeakCredDict,
+		Assessment: &NetDevAssessmentView{
+			EngagementID: cfg.NetDev.Assessment.EngagementID,
+			Scopes:       orEmptyStrings(cfg.NetDev.Assessment.Scopes),
+			Expires:      cfg.NetDev.Assessment.Expires,
+			Approver:     cfg.NetDev.Assessment.Approver,
+		},
 	}
 	if v.Scopes == nil {
 		v.Scopes = []string{}
@@ -322,6 +346,8 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 			SnmpVersion:      snmpVersionOf(d),
 			SnmpCommunityEnv: snmpCommunityEnvOf(d),
 			SnmpCommunitySet: netdevSecretSet(netdev.SecretKindPassword, snmpCommunityEnvOf(d)),
+			ConsolePort:      d.ConsolePort,
+			ConsoleBaud:      d.ConsoleBaud,
 		})
 	}
 	for _, h := range cfg.NetDev.Hops {
@@ -555,7 +581,17 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 		} else {
 			nd.BackupInterval = c.NetDev.BackupInterval
 		}
+		// Assessment envelope: form-owned when sent (the shipped settings page
+		// always sends it); all-fields-empty clears it — the gate closes.
 		nd.Assessment = c.NetDev.Assessment
+		if v.Assessment != nil {
+			nd.Assessment = config.NetDevAssessment{
+				EngagementID: strings.TrimSpace(v.Assessment.EngagementID),
+				Scopes:       v.Assessment.Scopes,
+				Expires:      strings.TrimSpace(v.Assessment.Expires),
+				Approver:     strings.TrimSpace(v.Assessment.Approver),
+			}
+		}
 		nd.DefaultMode = c.NetDev.DefaultMode
 		nd.ProxyDeviceTraffic = c.NetDev.ProxyDeviceTraffic
 		nd.MaxSessionsPerDevice = c.NetDev.MaxSessionsPerDevice
@@ -658,6 +694,8 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 				OOBURL:      strings.TrimSpace(d.OOBURL),
 				Protocols:   d.Protocols,
 				Kind:        strings.TrimSpace(d.Kind),
+				ConsolePort: strings.TrimSpace(d.ConsolePort),
+				ConsoleBaud: d.ConsoleBaud,
 			})
 			if strings.TrimSpace(d.Kind) == "docker" {
 				nd.Devices[len(nd.Devices)-1].Docker = &config.NetDevDockerConfig{
@@ -996,6 +1034,30 @@ func (a *App) startNetDevLiveForwarding(cfg *config.Config) {
 				runtime.EventsEmit(a.ctx, "netdev:live", batch)
 			}
 		}()
+	})
+	// Piggyback: the entry points that open the live channel also open the
+	// finding channel — every netdev bridge call turns both on together.
+	a.startNetDevFindingForwarding()
+}
+
+// netdevFindingOnce guards the one-time install of the finding forwarder.
+var netdevFindingOnce sync.Once
+
+// startNetDevFindingForwarding installs the package-level finding observer
+// (once): every successful SaveFinding — chat-skill runs, CVE/assessment
+// sweeps, alerts — is pushed to the UI as "netdev:finding-saved" (payload:
+// one netdev.Finding) and nudges the dash overview. Findings are
+// low-frequency, so no batching; the observer already fires on its own
+// recovered goroutine and SaveFinding never blocks on us.
+func (a *App) startNetDevFindingForwarding() {
+	netdevFindingOnce.Do(func() {
+		netdev.SetFindingObserver(func(f *netdev.Finding) {
+			if a.ctx == nil {
+				return
+			}
+			runtime.EventsEmit(a.ctx, "netdev:finding-saved", f)
+			a.dashEmit("overview")
+		})
 	})
 }
 
@@ -1487,6 +1549,13 @@ func (a *App) NetDevRollbackProposal(id string) (*netdev.Proposal, error) {
 	return p, err
 }
 
+// NetDevSerialPorts lists the machine's present serial ports (COM ports from
+// the device-map registry — USB-serial adapters appear the moment they plug
+// in) so the device form can offer them for the console-line picker.
+func (a *App) NetDevSerialPorts() ([]string, error) {
+	return netdev.ListConsolePorts(), nil
+}
+
 // NetDevTestConnection runs the first-device flow for one device: connect →
 // TOFU capture (no interactive prompt) → CLI session. Returns ok, or the
 // first-seen host-key question for the UI to confirm, or the failure class.
@@ -1608,6 +1677,98 @@ func (a *App) NetDevLogRead(device, source string, tailN int, since, grep string
 	ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
 	defer cancel()
 	return netdev.SharedManager(cfg).LogRead(ctx, device, source, tailN, since, grep), nil
+}
+
+// NetDevProbeLogSources — the 日志页 probe: three plain read-table commands
+// (systemctl list-units / ls -lh /var/log / docker ps) over the device's
+// sealed session, parsed into one-click log-source candidates. Answers "这
+// 台机器上到底有哪些日志" without the user guessing file names.
+func (a *App) NetDevProbeLogSources(device string) (netdev.LogSourceProbe, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return netdev.LogSourceProbe{}, err
+	}
+	a.startNetDevLiveForwarding(cfg)
+	ctx, cancel := context.WithTimeout(a.ctx, 90*time.Second)
+	defer cancel()
+	return netdev.SharedManager(cfg).ProbeLogSources(ctx, device), nil
+}
+
+// NetDevFileFinding files the current log view as a Finding — the 日志页
+// 「转为发现」button's backend. A HUMAN-only entry (not an agent tool): raw
+// log lines never reach 总览 by themselves; the operator promotes what they
+// are looking at into the findings pipeline (发现中心/总览卡片、告警生命周
+// 期、通知出口、每日晨报) with the lines as redacted evidence.
+func (a *App) NetDevFileFinding(device, source, severity string, lines []string) (*netdev.Finding, error) {
+	if strings.TrimSpace(device) == "" {
+		return nil, fmt.Errorf("device is required")
+	}
+	if len(lines) == 0 {
+		return nil, fmt.Errorf("no lines to file — read a log first")
+	}
+	if len(lines) > 200 {
+		lines = lines[len(lines)-200:]
+	}
+	switch severity {
+	case netdev.SeverityInfo, netdev.SeverityWarning, netdev.SeverityCritical:
+	default:
+		severity = netdev.SeverityWarning
+	}
+	excerpt := netdev.Redact(strings.Join(lines, "\n"))
+	f := &netdev.Finding{
+		Title:    fmt.Sprintf("日志发现：%s（%s）", device, strings.TrimSpace(source)),
+		Severity: severity,
+		Devices:  []string{device},
+		Detail:   fmt.Sprintf("运维人员在日志页人工标记（%d 行证据，已脱敏）。", len(lines)),
+		Evidence: []netdev.Evidence{{Device: device, Command: "log " + strings.TrimSpace(source), Output: excerpt}},
+	}
+	if err := netdev.SaveFinding(f); err != nil {
+		return nil, err
+	}
+	a.dashEmit("overview", "findings")
+	return f, nil
+}
+
+// NetDevBrowserFinding files what the operator is looking at in the 运维浏览
+// 器 as a Finding — the browser half of the 浏览器→发现 lifecycle bridge
+// (twin of the log side's NetDevFileFinding). Same human-only contract:
+// evidence = 网址 + 备注（脱敏后入池），进发现中心/总览/通知/晨报。设备维
+// 度取页面主机名——控制台页面本身就是被操作的资产。
+func (a *App) NetDevBrowserFinding(url, severity, note string) (*netdev.Finding, error) {
+	if strings.TrimSpace(url) == "" {
+		return nil, fmt.Errorf("url is required — 先打开一个页面")
+	}
+	switch severity {
+	case netdev.SeverityInfo, netdev.SeverityWarning, netdev.SeverityCritical:
+	default:
+		severity = netdev.SeverityWarning
+	}
+	host := strings.TrimSpace(url)
+	if i := strings.Index(host, "://"); i >= 0 {
+		host = host[i+3:]
+	}
+	if i := strings.IndexAny(host, "/?#"); i >= 0 {
+		host = host[:i]
+	}
+	if strings.TrimSpace(host) == "" {
+		host = strings.TrimSpace(url)
+	}
+	excerpt := netdev.Redact(strings.TrimSpace(note))
+	if excerpt == "" {
+		excerpt = "（无备注——人工标记的控制台异常）"
+	}
+	f := &netdev.Finding{
+		Title:    fmt.Sprintf("控制台发现：%s", host),
+		Severity: severity,
+		Devices:  []string{host},
+		Detail:   "运维人员在运维浏览器人工标记（证据=网址+备注，已脱敏）。",
+		Evidence: []netdev.Evidence{{Device: host, Command: "browser " + strings.TrimSpace(url), Output: excerpt}},
+	}
+	if err := netdev.SaveFinding(f); err != nil {
+		return nil, err
+	}
+	a.dashEmit("overview", "findings")
+	return f, nil
 }
 
 // NetDevTriageRun runs the one-click host checkup battery on one device from

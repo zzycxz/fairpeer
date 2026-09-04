@@ -135,6 +135,12 @@ func (t *runSkillTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		}
 		return "", fmt.Errorf("unknown skill %q — available: %s", name, availableNames(t.store))
 	}
+	// Draft gate: generated-but-unreviewed skills (draft: true) are not yet
+	// invocable from the chat. Waking happens in the ops browser panel; the
+	// panel's trial runner ignores the gate so the draft can be refined.
+	if sk.Draft {
+		return "", fmt.Errorf("skill %q is a draft (draft: true) — wake it up in the ops browser panel's skill page first; panel trial runs still work", name)
+	}
 	rawArgs := strings.TrimSpace(p.Arguments)
 	opts := SubagentRunOptions{ContinueFrom: strings.TrimSpace(p.Continue), ForkFrom: strings.TrimSpace(p.Fork)}
 

@@ -69,8 +69,16 @@ func (a *App) BrowserConsoleNavigate(url string) (string, error) {
 	return out, err
 }
 
-func (a *App) BrowserConsoleElements() ([]builtin.ConsoleElement, error) {
+func (a *App) BrowserConsoleElements() (builtin.ConsoleElementsResult, error) {
 	return builtin.ConsoleElements()
+}
+
+// BrowserConsoleDeepScan scroll-collects interactive elements for LONG /
+// lazy-loading pages (瀑布流): steps down a viewport at a time, gathers what
+// materialized with stable anchors (#id / name= / text=), stops when the
+// feed stops producing new elements (or the budget hits) and reports why.
+func (a *App) BrowserConsoleDeepScan(maxScrolls int) (builtin.ConsoleScanResult, error) {
+	return builtin.ConsoleDeepScan(maxScrolls)
 }
 
 // BrowserConsoleTabs lists the console browser's tabs for the panel's tab
@@ -79,7 +87,22 @@ func (a *App) BrowserConsoleElements() ([]builtin.ConsoleElement, error) {
 // BrowserConsoleHighlight flashes an outline around a target (ref or CSS)
 // in the browser so the user sees which element a list row refers to.
 func (a *App) BrowserConsoleHighlight(target string, durationMs int) error {
-	return builtin.ConsoleHighlight(target, durationMs)
+	return localizeConsoleErr(builtin.ConsoleHighlight(target, durationMs), target)
+}
+
+// BrowserDevToolsView is the workbench bottom pane's payload: the console
+// session's buffered page-console messages + network request list.
+type BrowserDevToolsView struct {
+	Logs []builtin.ConsoleLogEntry `json:"logs"`
+	Net  []builtin.NetEntry        `json:"net"`
+}
+
+func (a *App) BrowserConsoleDevTools() (BrowserDevToolsView, error) {
+	logs, net, err := builtin.ConsoleDevTools()
+	if err != nil {
+		return BrowserDevToolsView{}, err
+	}
+	return BrowserDevToolsView{Logs: logs, Net: net}, nil
 }
 
 func (a *App) BrowserConsoleTabs() ([]builtin.ConsoleTab, error) {
@@ -88,6 +111,14 @@ func (a *App) BrowserConsoleTabs() ([]builtin.ConsoleTab, error) {
 
 func (a *App) BrowserConsoleSwitchTab(index int) (string, error) {
 	return builtin.ConsoleSwitchTab(index)
+}
+
+// BrowserConsoleHover moves the pointer onto a target (ref or CSS) so CSS
+// :hover menus open — the panel's hover-then-click pattern for
+// hover-revealed menus.
+func (a *App) BrowserConsoleHover(target string) (string, error) {
+	out, err := builtin.ConsoleHover(target)
+	return out, localizeConsoleErr(err, target)
 }
 
 func (a *App) BrowserConsoleClick(target string) (string, error) {
@@ -112,6 +143,10 @@ func localizeConsoleErr(err error, target string) error {
 		return fmt.Errorf("元素 %s 的编号已失效（页面变过）——点「刷新元素」重新获取后再选", strings.TrimSpace(target))
 	case strings.Contains(msg, "unknown ref") || strings.Contains(msg, "not found in snapshot"):
 		return fmt.Errorf("元素 %s 不在当前快照里——点「刷新元素」重新获取", strings.TrimSpace(target))
+	case strings.Contains(msg, "No node with given id found"):
+		// Raw CDP -32000: the ref existed in the snapshot but the page
+		// re-rendered without a URL change (SPA refresh, polling table).
+		return fmt.Errorf("元素 %s 已失效（页面内容变过但网址没变）——点「刷新元素」重新获取", strings.TrimSpace(target))
 	}
 	return err
 }
@@ -136,8 +171,8 @@ func (a *App) BrowserConsoleWait(condition string, timeoutSec int) (string, erro
 	return builtin.ConsoleWait(condition, timeoutSec)
 }
 
-func (a *App) BrowserConsoleExtract(selector string) (string, error) {
-	return builtin.ConsoleExtract(selector)
+func (a *App) BrowserConsoleExtract(selector string, format string) (string, error) {
+	return builtin.ConsoleExtractAs(selector, format)
 }
 
 func (a *App) BrowserConsoleScreenshot() (string, error) {
@@ -200,13 +235,13 @@ SKILL.md 必须遵守：
 1. YAML frontmatter 含 name（小写字母数字与连字符）、description（一句话，≤60字，说明何时用）、runAs: subagent、allowed-tools（从 browser_open, browser_navigate, browser_click, browser_type, browser_wait, browser_extract, browser_screenshot, browser_scroll, browser_select_option 中按需选择）。
 2. 正文四个段落，标题固定：
    ## 何时使用 —— 触发条件
-   ## 步骤 —— 一张 markdown 表格，列：# | 操作 | 目标 | 值。操作只限 navigate/click/hover/type/key/wait/extract/screenshot/scroll/select/human/ask。目标用 CSS 选择器（轨迹里有），可加回退锚：选择器;;text=可见文字（双分号分隔，CSS 失效后按可见文字定位，改版更耐久）。
+   ## 步骤 —— 一张 markdown 表格，列：# | 操作 | 目标 | 值。操作只限 navigate/back/forward/switch_tab/click/hover/type/key/wait/extract/screenshot/scroll/select/human/ask（switch_tab 目标列填 1 起始页卡序号）。目标用 CSS 选择器（轨迹里有），可加回退锚：选择器;;text=可见文字（双分号分隔，CSS 失效后按可见文字定位，改版更耐久）。
    ## 注意事项 —— 轨迹中的坑（失败的尝试、需要等待的页面、易错点）
    ## 验证 —— 怎么确认执行成功（基于轨迹最后的 extract/页面结果）
 3. 人工断点（human 操作，重要）：凡是重放时必须由人来做的步骤——短信/邮箱验证码、扫码确认、登录密码、滑块或人机验证、支付确认——一律输出 human 操作，不要输出 type：值列写给人看的提示语（如「请在浏览器中输入短信验证码并提交」）；目标列写完成检测条件（visible:<登录后元素> 或 url:<登录后地址片段>，能推断就填，推断不出留空）。运行会在 human 步骤暂停，检测条件满足或人工确认后继续。
 4. 运行时询问（ask 操作）：凡是值在录制时不存在、要到运行时才知道的输入（工单号、日期、查询词、用户口头给的数据），输出 ask 操作：值列写问用户的问题（如「要查询哪个工单号？」），目标列写参数名（如 工单号），后续步骤用 {{工单号}} 引用该回复。运行会在 ask 步骤暂停等待用户输入。
 5. 通用性：把会变的值（用户名、日期、单号）写成 {{参数名}} 并在「何时使用」段落列出参数说明；密码不落盘——密码输入已经是 human 步骤；不写死绝对路径。
-6. 步骤要覆盖轨迹的有效操作，但可按意图合并、删除明显冗余；点击后页面加载慢的位置补 wait networkidle 步骤；等待流式输出完成用 wait stable:<输出容器选择器>。
+6. 步骤要覆盖轨迹的有效操作，但可按意图合并、删除明显冗余；点击后页面加载慢的位置补 wait networkidle 步骤；等待流式输出完成用 wait stable:<输出容器选择器>（值列填等待秒数，如 120；超过 600 的数字按毫秒折算）。stable 判稳规则：元素出现或变化后静默 2 秒才算完成；自始静止的内容要静默 10 秒——模型思考期的占位符（如“(AI生成) …”）不算完成；超时未满足该步会失败，宁可调大超时也别在未完成时提取。
 7. 全文不超过 120 行。`
 
 // BrowserConsoleGenerateSkill runs the provider-backed comprehension over a
@@ -485,7 +520,8 @@ func (a *App) consoleProviderChat(ctx context.Context, system, user string) (str
 type BrowserConsoleSkill struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Browser     bool   `json:"browser"` // allowed-tools contains browser_*
+	Browser     bool   `json:"browser"` // panel-domain skill (domain marker/executor)
+	Draft       bool   `json:"draft"`   // not yet woken — chat-invocation gated
 }
 
 func userSkillsDir() (string, error) {
@@ -547,6 +583,28 @@ func (a *App) BrowserConsoleSaveSkill(content string, overwrite bool) (string, e
 	if len([]rune(frontmatterValue(fm, "description"))) > 200 {
 		return "", fmt.Errorf("description 过长（>200 字符）")
 	}
+	// Guard the wait-timeout millisecond heuristic: BOTH parsers (Go
+	// browserflow.go waitSecondsOr / frontend skillDoc.ts parseSeconds) read a
+	// number >600 with an explicit "s" suffix as MILLISECONDS, so a hand-written
+	// "50000s" silently means 50 seconds. Refuse at save time with the fix
+	// spelled out — a bare "15000" (panel-field ms habit) stays allowed.
+	for _, line := range strings.Split(content, "\n") {
+		if !strings.Contains(line, "| wait |") {
+			continue
+		}
+		cells := strings.Split(line, "|")
+		if len(cells) < 5 {
+			continue
+		}
+		val := strings.TrimSpace(cells[len(cells)-2])
+		m := regexp.MustCompile(`^(\d+)\s*s$`).FindStringSubmatch(val)
+		if m == nil {
+			continue
+		}
+		if n, err := strconv.Atoi(m[1]); err == nil && n > 600 {
+			return "", fmt.Errorf("wait 超时 %q 会被按毫秒解析为 %d 秒——请直接写目标秒数（如 600s）", val, n/1000)
+		}
+	}
 	root, err := userSkillsDir()
 	if err != nil {
 		return "", err
@@ -594,13 +652,29 @@ func (a *App) BrowserConsoleListSkills() ([]BrowserConsoleSkill, error) {
 		if serr != nil {
 			continue
 		}
-		if !strings.Contains(fm, "browser_") {
-			continue // not a browser skill — not this panel's business
+		// Panel domain = an explicit marker (domain: browser-ops, written by
+		// the templates and generators) or the deterministic executor. Legacy
+		// recorder drafts without either (browser-skill) are not this
+		// panel's business.
+		if !strings.Contains(fm, "domain: browser-ops") && !strings.Contains(fm, "executor: browser-flow") {
+			continue
+		}
+		// Display name = the frontmatter name (what the skill store registers
+		// and what /<name> must invoke) when it passes the store's own
+		// validity rule — config.IsValidSkillName, which (unlike the save-side
+		// lowercase sanitizer) allows uppercase, matching skill.go's
+		// registration. Showing the directory name for a skill whose
+		// frontmatter differs (e.g. case) sends users to an identifier that
+		// fails the store's exact-match lookup.
+		display := strings.TrimSpace(frontmatterValue(fm, "name"))
+		if display == "" || !config.IsValidSkillName(display) {
+			display = e.Name()
 		}
 		out = append(out, BrowserConsoleSkill{
-			Name:        e.Name(),
+			Name:        display,
 			Description: frontmatterValue(fm, "description"),
 			Browser:     true,
+			Draft:       strings.Contains(fm, "draft: true"),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -640,6 +714,48 @@ func (a *App) BrowserConsoleDeleteSkill(name string) error {
 		return fmt.Errorf("技能 %q 不存在", clean)
 	}
 	return os.RemoveAll(dir)
+}
+
+// BrowserConsoleWakeSkill flips a draft skill (draft: true) to active by
+// rewriting its frontmatter — removing the draft line leaves every other
+// field and the body byte-identical. Once awake the skill enters the model's
+// index and chat invocation works; the panel's trial runner worked all along.
+func (a *App) BrowserConsoleWakeSkill(name string) error {
+	clean := sanitizeSkillName(name)
+	if !skillNameRe.MatchString(clean) {
+		return fmt.Errorf("技能名 %q 无效", name)
+	}
+	root, err := userSkillsDir()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(root, clean, "SKILL.md")
+	raw, rerr := os.ReadFile(path)
+	if rerr != nil {
+		return fmt.Errorf("技能 %q 不存在", clean)
+	}
+	content := strings.TrimPrefix(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\uFEFF")
+	fm, body, serr := splitSkillFrontmatter(content)
+	if serr != nil {
+		return serr
+	}
+	if !strings.Contains(fm, "draft: true") {
+		return nil // already awake — idempotent
+	}
+	lines := strings.Split(fm, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, l := range lines {
+		if strings.TrimSpace(l) == "draft: true" {
+			continue
+		}
+		kept = append(kept, l)
+	}
+	// Trim a leading blank left where the draft line was the first field.
+	out := "---\n" + strings.TrimLeft(strings.Join(kept, "\n"), "\n") + "\n---\n\n" + body
+	if werr := os.WriteFile(path, []byte(out), 0o644); werr != nil {
+		return werr
+	}
+	return nil
 }
 
 func splitSkillFrontmatter(content string) (fm string, body string, err error) {
@@ -690,6 +806,8 @@ type BrowserConsoleStep struct {
 // waiting banner until the user signals BrowserConsoleTrialResume (or a human
 // step's auto-detect condition passes). AwaitReply marks ask steps: the
 // banner carries an input box and the reply binds to Bind's parameter name.
+// The terminal event carries Downloads: files collected by "wait download"
+// steps, so the UI can offer AI triage on the exported workbook.
 type BrowserConsoleTrialStatus struct {
 	Index      int    `json:"index"`
 	Status     string `json:"status"` // running|waiting|done|failed
@@ -697,6 +815,15 @@ type BrowserConsoleTrialStatus struct {
 	Error      string `json:"error,omitempty"`
 	AwaitReply bool   `json:"await_reply,omitempty"`
 	Bind       string `json:"bind,omitempty"`
+	Downloads  []BrowserConsoleDownload `json:"downloads,omitempty"`
+}
+
+// BrowserConsoleDownload is one finished download collected during a run —
+// the frontend mirror of builtin.DownloadInfo.
+type BrowserConsoleDownload struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	State string `json:"state"`
 }
 
 // consoleTrialGate serializes trial runs and carries the parked-step signals:
@@ -858,12 +985,28 @@ var paramRefRe = regexp.MustCompile(`\{\{([^}]+)\}\}`)
 // substStepParams replaces {{name}} refs in one step's string fields from the
 // runtime parameter map (seeded with the editor's defaults, grown by ask-step
 // replies). Unbound refs stay literal — the step's output then shows them, so
-// a missing value is visible instead of silently empty.
-func substStepParams(s *BrowserConsoleStep, params map[string]string) {
+// a missing value is visible instead of silently empty. A param whose WHOLE
+// value is a time-range phrase ("最近5分钟") resolves at THIS instant — the
+// window end is the moment the step runs (typically the time-range type
+// right before 查询), not when the run was started, so session-open and step
+// latency can't skew the window. resolved caches the first resolution per
+// run; onRange (optional) receives every resolved literal range so callers
+// like the watch can record the window that actually hit the page.
+func substStepParams(s *BrowserConsoleStep, params map[string]string, resolved map[string]string, onRange func(string)) {
 	sub := func(v string) string {
 		return paramRefRe.ReplaceAllStringFunc(v, func(m string) string {
 			name := strings.TrimSpace(paramRefRe.FindStringSubmatch(m)[1])
 			if val, ok := params[name]; ok {
+				if r, cached := resolved[name]; cached {
+					return r
+				}
+				if r, rok := builtin.ResolveTimeRange(time.Now(), val); rok {
+					resolved[name] = r
+					if onRange != nil {
+						onRange(r)
+					}
+					return r
+				}
 				return val
 			}
 			return m
@@ -883,11 +1026,13 @@ func substStepParams(s *BrowserConsoleStep, params map[string]string) {
 // BrowserConsoleTrialRun executes steps sequentially against the console
 // session (opening one when closed), emitting progress and stopping at the
 // first failure. Steps travel with their {{参数}} refs intact; params seeds
-// the runtime bindings (the editor's defaults) and ask steps add to them —
-// each step is substituted right before it runs, so an ask reply feeds every
+// the runtime bindings (the editor's defaults — whole-value time phrases like
+// "最近5分钟" are normalized to literal ranges here) and ask steps add to them
+// — each step is substituted right before it runs, so an ask reply feeds every
 // later step. A "human" step pauses for manual operation (SMS code, login,
 // scan) until resumed / auto-detected / timed out; an "ask" step pauses for
-// the user's reply and binds it to the step's Target parameter name.
+// the user's reply and binds it to the step's Target parameter name. The
+// terminal event carries any files collected by "wait download" steps.
 func (a *App) BrowserConsoleTrialRun(steps []BrowserConsoleStep, params map[string]string) error {
 	if len(steps) == 0 {
 		return fmt.Errorf("没有可执行的步骤")
@@ -900,16 +1045,42 @@ func (a *App) BrowserConsoleTrialRun(steps []BrowserConsoleStep, params map[stri
 		return fmt.Errorf("已有试运行在进行中")
 	}
 	defer consoleGate.leave()
-	if state, err := builtin.ConsoleStateOf(); err != nil || !state.Open {
-		if _, oerr := builtin.ConsoleOpen("", ""); oerr != nil {
-			return fmt.Errorf("打开浏览器会话: %w", oerr)
-		}
+	if err := a.ensureConsoleOpen(); err != nil {
+		return err
 	}
 	emit := func(st BrowserConsoleTrialStatus) {
 		if a.ctx != nil {
 			wailsruntime.EventsEmit(a.ctx, "browser:trial", st)
 		}
 	}
+	downloads := a.runConsoleSteps(steps, params, emit, resume, abort, true, nil)
+	emit(BrowserConsoleTrialStatus{Index: -1, Status: "done", Downloads: downloads})
+	return nil
+}
+
+// ensureConsoleOpen opens the persistent console browser when it is closed —
+// shared by trial runs and watch rounds (a round fires hours after the last
+// manual touch, the browser may have been quit meanwhile).
+func (a *App) ensureConsoleOpen() error {
+	if state, err := builtin.ConsoleStateOf(); err != nil || !state.Open {
+		if _, oerr := builtin.ConsoleOpen("", ""); oerr != nil {
+			return fmt.Errorf("打开浏览器会话: %w", oerr)
+		}
+	}
+	return nil
+}
+
+// runConsoleSteps is the shared executor behind trial runs (allowPark=true:
+// human/ask steps park on the gate) and watch rounds (allowPark=false: a
+// human/ask step is a planning error — nobody is watching at 3am). Returns
+// the downloads collected by "wait download" steps; onRange (optional)
+// receives each time range as it resolves at step-run time. Step failures
+// are reported through emit, not as binding errors — same contract as before.
+func (a *App) runConsoleSteps(steps []BrowserConsoleStep, params map[string]string,
+	emit func(BrowserConsoleTrialStatus), resume chan string, abort chan struct{}, allowPark bool,
+	onRange func(string),
+) []BrowserConsoleDownload {
+	var downloads []BrowserConsoleDownload
 	run := func(i int, s BrowserConsoleStep) (string, error) {
 		switch s.Type {
 		case "navigate":
@@ -918,6 +1089,12 @@ func (a *App) BrowserConsoleTrialRun(steps []BrowserConsoleStep, params map[stri
 			return builtin.ConsoleBack()
 		case "forward":
 			return builtin.ConsoleForward()
+		case "switch_tab":
+			// Target: 1-based index OR tab title (exact then contains).
+			if idx, perr := strconv.Atoi(strings.TrimSpace(s.Target)); perr == nil && idx >= 1 {
+				return builtin.ConsoleSwitchTab(idx)
+			}
+			return builtin.ConsoleSwitchTabByTitle(strings.TrimSpace(s.Target))
 		case "click":
 			return builtin.ConsoleClick(s.Target)
 		case "hover":
@@ -933,11 +1110,22 @@ func (a *App) BrowserConsoleTrialRun(steps []BrowserConsoleStep, params map[stri
 		case "upload":
 			return builtin.ConsoleUploadFile(s.Target, s.Files)
 		case "wait":
+			// "download" (or "download:.xlsx") blocks on the CDP download
+			// records and returns the verified file path — the SIEM export
+			// click's 20s–5min tail lives here.
+			if cond := strings.TrimSpace(s.Condition); cond == "download" || strings.HasPrefix(cond, "download:") {
+				info, derr := builtin.ConsoleWaitDownload(s.TimeoutSec)
+				if derr != nil {
+					return "", derr
+				}
+				downloads = append(downloads, BrowserConsoleDownload{Name: info.Name, Path: info.Path, State: info.State})
+				return fmt.Sprintf("下载完成: %s（%s）", info.Name, info.Path), nil
+			}
 			return builtin.ConsoleWait(s.Condition, s.TimeoutSec)
 		case "extract":
-			// Value="table" selects structure-preserving markdown extraction.
-			if strings.EqualFold(strings.TrimSpace(s.Value), "table") {
-				return builtin.ConsoleExtractTable(s.Target)
+			// Value="table" | "markdown" select structure-preserving extraction.
+			if v := strings.ToLower(strings.TrimSpace(s.Value)); v == "table" || v == "markdown" {
+				return builtin.ConsoleExtractAs(s.Target, v)
 			}
 			return builtin.ConsoleExtract(s.Target)
 		case "screenshot":
@@ -947,6 +1135,9 @@ func (a *App) BrowserConsoleTrialRun(steps []BrowserConsoleStep, params map[stri
 		case "human":
 			// The prompt travels in Text (提示语), the optional auto-detect
 			// condition in Condition (e.g. visible:.home or url:/dashboard).
+			if !allowPark {
+				return "", fmt.Errorf("人工步骤不能在无人值守模式下执行（第 %d 步）", i+1)
+			}
 			if _, waitErr := a.parkTrialStep(resume, abort, s, true); waitErr != nil {
 				return "", waitErr
 			}
@@ -963,6 +1154,9 @@ func (a *App) BrowserConsoleTrialRun(steps []BrowserConsoleStep, params map[stri
 		case "ask":
 			// Text is the question, Target the parameter name the reply binds
 			// to (later steps reference it as {{参数名}}).
+			if !allowPark {
+				return "", fmt.Errorf("询问步骤不能在无人值守模式下执行（第 %d 步）", i+1)
+			}
 			reply, waitErr := a.parkTrialStep(resume, abort, s, false)
 			if waitErr != nil {
 				return "", waitErr
@@ -983,9 +1177,10 @@ func (a *App) BrowserConsoleTrialRun(steps []BrowserConsoleStep, params map[stri
 	// via the kernel), so the loop needs no outer timeout — a slow step
 	// simply takes its time and the next one follows. The human/ask steps
 	// park on their own gate instead.
+	resolved := map[string]string{}
 	for i := range steps {
 		s := steps[i]
-		substStepParams(&s, params)
+		substStepParams(&s, params, resolved, onRange)
 		switch s.Type {
 		case "human":
 			prompt := strings.TrimSpace(s.Text)
@@ -1008,14 +1203,19 @@ func (a *App) BrowserConsoleTrialRun(steps []BrowserConsoleStep, params map[stri
 		out, err := run(i, s)
 		if err != nil {
 			emit(BrowserConsoleTrialStatus{Index: i, Status: "failed", Error: err.Error()})
-			emit(BrowserConsoleTrialStatus{Index: -1, Status: "failed", Error: err.Error()})
-			return nil // step failure is a result, not a binding error
+			emit(BrowserConsoleTrialStatus{Index: -1, Status: "failed", Error: err.Error(), Downloads: downloads})
+			return downloads // step failure is a result, not a binding error
 		}
-		if len(out) > 2000 {
-			out = out[:2000] + "…"
+		// Payload steps keep more of their content on the panel too — the
+		// generic 2000-char display trim must not cut an extracted answer.
+		capAt := 2000
+		if s.Type == "extract" || s.Type == "evaluate" {
+			capAt = 6000
+		}
+		if len(out) > capAt {
+			out = out[:capAt] + "…"
 		}
 		emit(BrowserConsoleTrialStatus{Index: i, Status: "done", Output: out})
 	}
-	emit(BrowserConsoleTrialStatus{Index: -1, Status: "done"})
-	return nil
+	return downloads
 }

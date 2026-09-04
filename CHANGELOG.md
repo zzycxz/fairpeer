@@ -9,6 +9,461 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(browser): stable: 判稳重写——首 token 前绝不放行（browser-IT-ops 抓不到慢回答的根因）
+
+用户实测 browser-IT-ops 查哈尔滨池告警：AI 助手回答需 30-60 秒，第五步 `stable:` 等待在回答出现前就放行、第六步 extract 抓空，技能只返回流程日志。原实现（自适应静默版）仍有三个提前放行洞，本批把 `stable:` 重写为就绪态状态机（`internal/tool/builtin/browser.go`）：
+
+- **三个洞**：① 目标元素缺失走「静态短内容 30s 兜底」——恰好短于 30-60s 的首 token 延迟，30s 整点放行；② 空块挂载（签名 none→1:0:0）也算「变化」，2s 静默即放行；③ 「正在…」类短占位文案同样吃 30s 档
+- **新语义**：首 token 之前一律不判稳——目标缺失、空块、占位文案（正在/请稍/思考/生成/加载/分析/检索/处理/等待/loading/thinking/generating/analyzing 前缀）、纯点符（…/···/....）、`aria-busy` 均视为未就绪，只有超时能结束等待；「变化」必须是有内容的就绪态变化；流式判稳保持自适应静默 2-8s；静态兜底两档——充实内容（≥40 字或有渲染子节点）10s、短静态文案 30s→**90s**（盖过 30-60s 首 token 窗口，未识别的占位文案也拖不过首 token 到达）
+- 验证：嵌入 JS 从 Go 源提取后经 node 虚拟时钟跑 9 场景沙盒（慢首 token/缺失/空块/未识别占位/静态两档/快速流式/aria-busy）全过；`TestConsoleWaitStableSemantics` 占位 4s/26s 不放行继续通过；`TestConsoleWaitStableStaticFallback` 静态块改为 ≥40 字钉 10s 档（短文案 90s 契约由沙盒覆盖）；builtin 全包测试通过；工具描述与两份 browser-ops-guide 镜像、browser-it-ops SKILL.md 第 5 步注意事项同步新语义
+
+### feat(netdev): 备份→恢复提案闭环（申报书 T1）+ 审计链路/演示剧本/LinkPeer 状态文档批次
+
+申报书缺口 TODO（`docs/APPLICATION_GAPS_TODO.md`）代码会话批次，T1/T5/T6/T7 四项落地：
+
+- **备份→恢复提案闭环（T1）**：新增 `netdev_backup` agent 工具（`internal/netdev/backup.go`）——list/read/diff-current 三动作，`diff-current` 把库存版本与现拉 running-config 做 unified diff，当前侧走密封 Exec（分类器/预算/脱敏/审计全适用）；`netdev_propose` 新增 `restore_from` 字段（`ValidateRestoreFrom` 校验版本在库且设备与步骤一致），审计行记 `draft … restore-from <id>` 可回放；前端 BackupTimeline/BackupHistory 两处版本列表加「起草恢复提案」按钮（注入起草提示词 + 跳实况页签），提案卡显示"↩ 恢复提案 · 来源版本"。红线不变：AI 只起草，人整份审批后才执行。`TestBackupDiffCurrentAndRestoreFrom` 守护
+- **git 审计链路核实（T6）**：新增 `docs/NETDEV_AUDIT_CHAIN.md`——查清申报书"步骤进入 git 审计"实际对应三条机制（工作区 git 面板只读探针 / netdev 审计 JSONL+SHA-256 哈希链 / trust domain 锚定），**设备操作步骤不进 git commit**，附申报书替换措辞与截图取景说明
+- **故障定界演示脚本包（T5）**：新增 `docs/NETDEV_DEMO_SCRIPTS.md`——IP 失联定位（netdev_locate 并发→端口核查→拓扑标红→Finding 落证据）与变更-故障时间轴关联（Timeline 同轴→备份双版本 diff→恢复提案起草）两个场景的指令包、预期链路、讲解词要点与录屏取景清单
+- **LinkPeer 状态修正（T7）**：LINKPEER.md 徽章 planning(M0)→in progress（灰→绿）+ 路线图表加状态列（Go 桌面侧 M0–M3 完成、移动端仓库 M4+ 进行中）+ 快速开始警示更新；同批修 `internal/mobilebridge/doc.go` 过时的 M0-spike 注释与 `docs/MOBILE_CLIENT_PLAN.md` 状态行
+- prompt addon（`profile_netdev_addon.go`）工具清单补 netdev_backup 与恢复起草纪律；APPLICATION_GAPS_TODO 勾选校准（T4 主链路核实为已接线，仅剩 PPT/Excel 附件）
+- 验证：go build internal+desktop 通过；netdev 备份测试、frontend tsc、locale-parity 通过
+
+### fix(skill): 运维界面技能体系审计修复批次——白名单漂移/浏览器技能打架治理/用户技能域折叠
+
+用户提出五问审计运维界面技能与工具（找全、描述边界、适配性、暴露收紧、专用 vs 通用浏览器技能打架）。逐项取证确认后成批修复：
+
+- **白名单漂移（红测试转绿）**：`builtinBuiltinSkillNames` 漏 `netdev-vulnscan`——仓库自带的 `TestBuiltinSkillNamesCoverCodeBuiltins` 本就在失败，该技能因此绕过 dev/cowork 白名单出现在编码/办公索引。补名册 + 注释更新
+- **browser-auto 进 netdev 白名单**（用户方向 2026-09-04 定稿「启用为通用兜底」）：运维页签恢复通用浏览器能力，散文模板（site-console/page-patrol）的 `run_skill("browser-auto")` 委派链路复活；硬封印下其子代理拿不到 bash/写文件，兜底只有浏览器读写。`TestNetDevWhitelistsBrowserAuto` 钉住该决策
+- **专用/通用打架治理**：cowork 路由表（原 "Any browser task → browser-auto" 一刀切）、netdev 路由表（新增浏览器行）、browser-auto 描述三处一致写明「站点专用浏览器技能优先，browser-auto 是通用兜底」——用户建的发票/车票/监控专用技能不再被通用兜底压过
+- **用户技能按 `domain:` 域折叠**：Profile 新增 `SkillDomains`（dev=`["code"]` 哨兵、cowork=`["browser-ops"]`、netdev=`["browser-ops","netdev"]`）；skill.Skill 新增 `Domain` 字段解析 frontmatter。声明域的用户技能在域不匹配的 profile 索引中折叠（省预算防误路由，run_skill 仍可调——与出厂白名单的硬禁用是两道闸），无域标记永不折叠。动机：netdev-assess（domain: netdev）曾出现在办公/编码索引里而那边没有 netdev_* 工具。`TestBuildSkillDomainFolding` 守护
+- **散文模板三连修**（skillTemplates.ts）：补 `domain: browser-ops`（原保存后从面板列表消失）+ `draft: true`（原绕过唤醒生命周期、保存即全 profile 生效）；siem-watch 补运行环境说明（定时任务在办公 profile 触发工具齐备；运维页签手动运行缺 email_send，可改 im_send）；三处步骤编号错引修正（stream-query ×2、form-submit ×1）
+- **面板防坑**：`BrowserConsoleListSkills` 改显示 frontmatter 注册名（核心库规则校验，允许大写）——修「面板显示的名字对话调不动」的精神分裂；`BrowserConsoleSaveSkill` 拒绝 >600 带秒缀的 wait 超时写法（`50000s` 被双端解析器按毫秒读成 50 秒，实测坑过 browser-it-ops 抓不到慢回答）；编辑器描述字段加「索引每行约可见前 100 字、关键词前置」提示（中英）
+- **工具描述修正**：browser_wait 条件枚举补 `download`（实现早有、描述漏了）；netdev_discover 的 "use the probe" 消歧为明确指名 netdev_netprobe 并注明 nmap/netprobe 的授权信封门槛差异
+- **boot.go 注释更新**：browser 工具注册分支的过时表述改为双路径实况（browser-auto 子代理 + browser-flow 内核执行器）
+- **文档同步**：SKILL_ARCHITECTURE_SPEC 三分域表补全运维技能行（诊断卡系列 + browser-auto）与名册计数（21 项），新增域折叠/优先级两条实施记录；browser-ops-guide（docs 与前端两份镜像）修正 stable 判稳表述（自适应 2-8 秒）并新增超时写法规则（≤600s，>600 带秒缀会被按毫秒读且保存拒绝）
+- 验证：go test boot/config/skill/netdev/tool.builtin/desktop 六包通过；frontend skill-doc 模板守卫 101/101、locale-parity、tsc 干净
+
+### refactor(netdev): 侧栏八标签极简化——对齐办公/编码底部导航样式（用户定稿）
+
+用户复看后定稿：左下角与办公/编码侧栏视觉统一，全部修饰性元素撤除：
+
+- **对齐**：立即巡检从分裂按钮（主区+▾ 24px 溢出）还原为整行单按钮——它此前把该行拆成两截，是八标签无法对齐的直接原因；单击直跑只读网络巡检不变
+- **▾ 溢出菜单删除**：主机分诊/基线/弱口令×2 不再占侧栏。能力不丢——设备卡有单机主机分诊入口，基线在总览场景卡与发现空态，弱口令/全网分诊走对话（netdev_assess / netdev_triage，信封与预算闸门管着）
+- **大屏红点删除**：风险状态信号归总览风险卡（数字+蓝队拆分行）与主区大屏 chip，侧栏不再携带；此前加的计数 tooltip 一并撤除
+- **历史 (0) 删除**：今日审计数从标签里拿掉（提案的待决策计数保留——它是可操作的队列数字，用户未提）
+- 连带清理：inspMenuOpen/triageBusy/weakBusy 状态、runTriageAll/runWeakCredAll 回调（noUnusedLocals 下必须删）、中英各 17 个孤儿 locale key
+- 验证：frontend tsc + 全量 vitest 43 项通过
+
+### feat(netdev): 总览接入蓝队核查存量——风险卡来源拆分 + 事件卡聚合行（深链蓝队透镜）
+
+用户反馈「蓝队核查出一堆问题，总览看不到」。核查现状：风险数字（critical/warning/加权分）本就计入蓝队条目，但事件流只收 syslog/trap/alert——存量不刷流是对的（总览定位"正在发生"，蓝队结果是"已知存量"，全量倒进去会告警疲劳），缺的是一个聚合出口。方案取此前评估的 a+b 双做：
+
+- **后端**（`netdev_dash_app.go`）：`NetDevOvRisk` 增 `vuln_critical/vuln_warning/vuln_open`——统计循环按蓝队透镜同规则（source 前缀 `vulnscan*`/`cve:*`）拆分未闭环计数
+- **风险卡**：critical/warning/info 行下补一行「蓝队核查 {c}C · {w}W」（仅 >0 显示），点击深链发现中心
+- **事件卡**：头部补聚合行「蓝队核查 {n} 条未闭环 →」（sev 徽标随有无 critical 变色），点击同深链
+- **深链语义**：`findingMatchesJump` 新增 `vuln` 过滤器（vulnscan*/cve:*，与发现中心蓝队核查筛选同规则；无 source 的发现不误匹配）
+- 测试：dash-jump-filter 补 vuln 四分支断言；desktop go build + frontend tsc + dash-boards/locale-parity 通过
+
+### fix(provider): 网关瞬断伪装的 400 改走重试 + 报错不再误导（用户实测：发 netdev-assess prompt 直接失败）
+
+用户在对话框发首条评估指令即失败，报「Malformed request (HTTP 400): the request body was rejected. This is likely a bug」。抓包看 body 实为小米 MiMo 网关的 `{"param":"Connection prematurely closed BEFORE response"}`——网关到它上游的连接断了，是服务端瞬时故障套了 400 的壳，与请求内容无关：
+
+- **重试层**（`provider/retry.go`）：新增 `IsTransientGatewayBody`——400 的 body 命中中继断连签名（prematurely closed / connection reset）即按可重试处理，走既有退避循环（至多 10 次）；真正的参数错误 400 仍立即失败不重试
+- **报错文案**（`control/errmsg.go` + i18n 中英）：该类错误改映射到新文案「网关瞬断 (HTTP 400)：模型网关与其上游的连接中断，你的请求本身没有问题。已退避重试；仍失败时重发一次即可」；`providerBodyReason` 补解析 `param` 字段（MiMo 把真实原因放这，message 只有笼统的 "Request failed"）
+- 测试：`TestSendWithRetryRetriesGatewayTransient400`（识别 + 重试恢复 + 真 400 不误判）、errmsg 补网关瞬断分支断言；provider/control/i18n 三包通过
+- 顺带发现（未处理）：app.log 里有 `signal_disconnect dial tcp 127.0.0.1:8080 拒连` 的持续重试噪音，与本次无关，像是 bot 信使桥接的本地服务没起
+
+### fix(netdev): 大屏红点常亮根治（单测夹具泄漏真实状态目录）+「立即巡检」单击直跑
+
+用户报告的两个左下角问题（2026-09-04），一个查出来是测试泄漏、一个是交互设计：
+
+- **① 大屏红点一直亮——根因不在 UI**：红点=「存在未闭环 critical」本属设计信号，但三个单测没重定向状态目录，`SaveFinding` 把夹具直接写进用户真实 `%APPDATA%\fairpeer\netdev\findings\`——escalate_test（esc-\* 四条，含两条 critical active）、locate_notify_test（notify-test-\* 两条）、trap_tunnel_test（合成 trap `[trap] link-down @ sw-1`，真实配置里根本没有 sw-1）。每次 `go test` 都刷新一批假告警，红点永不熄。修复：三处测试补 `findingsDirOverr = t.TempDir()` 隔离（对齐包内其余测试的既有模式）；清理已泄漏的 8 条垃圾（含两条 trap）；全量跑测后对状态目录做前后快照 diff 确认零新增
+- **② 风险点可解释**：色点补计数 tooltip（红=「N 条未闭环 critical」/橙=「N 条未闭环警告」，提示去发现中心处理即熄灭），侧栏「大屏」按钮与主区大屏 chip 两处同享；顺带把 warning 计数从内联 filter 提为 `openWarn` 变量
+- **③「立即巡检」不再弹窗**：改分裂按钮——主区单击直跑只读网络巡检（默认动作，安全无副作用）；主机分诊/基线/弱口令×2 收进右侧 ▾ 溢出菜单（它们有登录/写副作用或字典依赖，必须显式选择，且此处是其唯一电池入口；总览场景卡的对话式入口不变）
+- **④ 八按钮全量审计（用户追问"不止大屏"）**：逐个核过左下角 8 项的徽标与弹窗——设备列表/浏览器/偏好干净；历史是标签内联计数 (N) 非徽标；大屏色点已由 ② 治理；巡检已由 ③ 治理；**安全工作台摘掉 findingsHot 红点**——该活动信号属于「发现中心」dock 页签（访问即清），本按钮开的是案例/IOC 工作台展示不了新发现，挂着就是一枚点了不灭的假红点；发现中心页签自带同款热点（findingsHot||vulnHot），信号不丢，顺手删除失去引用的 `.ndv-nav__hotdot` 死样式。**提案按钮计数徽标补 tooltip**（待决策提案数，处理即减——徽标本就是可自清的队列计数，保留）；hotTabs 清除时机补一档：用户正盯着的页签上到达的新事件不再留点（原来只在切页时清，页签内到达会留一枚死角）
+- 验证：internal/netdev 全量 go test 通过 + 状态目录快照零泄漏；frontend tsc + dash-boards/dash-jump-filter/locale-parity vitest 通过
+
+### refactor(netdev): 右侧 dock 页签合并 13→11——发现中心吸收蓝队核查、历史吸收状态历史
+
+用户审视右边栏后的两处合并（其余组合评估过不建议动：健康/总览粒度不同、设备/拓扑信息密度都高）：
+
+- **① 发现 + 蓝队核查 → 一个「发现中心」**：顶部来源筛选片（全部 / 蓝队核查 / CVE / 告警，按 source 前缀 vulnscan|cve: / cve: / alert:|syslog:|trap 过滤）；选「蓝队核查」时显示评估流程步骤卡 + 蓝队核查实时落卡（对话扫描滚动结果保留），其余透镜走常规发现列表（聚合/深链过滤不变）。热点与自动聚焦合并到发现页签（新蓝队发现点亮发现页签并定位到蓝队核查透镜）；旧 vulnscan 深链/存储页签重定向
+- **② 审计 + 状态历史 → 一个「历史」页签**：命令审计（含链校验徽章/今日统计）在上、配置状态与恢复（StateHistoryPanel）在下；可回退事件数徽标转移到历史页签；旧 state 路由重定向
+- **左下角导航栏（用户审视）**：补「浏览器」常驻入口（运维浏览器是四大工作台之一，此前只有主区 chip 可进）；「审计」按钮随页签合并改标「历史 (N)」；**收敛到 8 项**——去掉「拓扑」纯视图捷径（dock 页签与"+"目录仍可达，是视图捷径里重复度最高的）；**修「巡检」点不动**：侧栏容器 overflow:hidden 会把向右弹出的菜单整体裁掉（用户实测点了没反应），改为向上、在栏内展开
+- 验证：frontend tsc + vitest 12 项通过（未打包，按新节奏攒批）
+
+### feat(netdev): 评估流程的控制补 UI、引导成体系——授权信封卡片/状态徽标/步骤卡/对话技能
+
+上一批结论：评估链"控制完整、引导断链"（授权信封 TOML-only、状态不可见、无流程向导）。本批补齐，长任务按步骤交付、每步自带验收：
+
+- **授权信封进设置页**（后端）：NetDevSettingsView 增 assessment（form-owned；nil 旧负载保持存量、全空=关闭信封）；ValidateNetDev 补信封校验（部分填写拒绝、expires 必须 YYYY-MM-DD；过期是合法保存态——运行闸门拒绝使用，历史可留）。回环测试扩展信封字段 + TestAssessmentEnvelopeValidation 四分支
+- **设置页「评估授权信封」卡片**（护栏与读表页签顶部）：编号/有效期/批准人/授权范围，实时显示剩 N 天或已过期
+- **标题栏状态徽标**：有信封显示 `🛡 ENG-xxx · N天`（绿）/过期（红），点击直达设置；无信封不占位
+- **评估流程步骤卡**（用户复测后调整位置：总览→蓝队核查页卡顶部，可折叠）：授权→测绘→纳管→漏洞→弱口令→攻击路径→报告 七步，状态由真实数据推导（信封/待确认区条数/设备数/发现数），每步直达入口（设置/发现弹窗/设备/发现中心/对话指令/安全工作台）；它是引导不是闸门——闸门仍在后端
+- **对话侧调用方法**：用户级技能 `~/.fairpeer/skills/netdev-assess/SKILL.md`——描述触发即按七步走，每步先查前置（信封缺失停下引导），红线写死（只测授权范围/发现不登录/不主动利用/全程审计），allowed-tools 与实际工具名核对
+- 验证：config/netdev 测试（信封回环+四分支校验）+ desktop go build + frontend tsc + vitest 12 项通过；wails 打包
+
+### feat(netdev): 蓝队漏洞核查——对话驱动技能 + 右侧「蓝队核查」页卡实时结果
+
+用户方向：漏洞知识在模型权重里，产品该做的是指纹发现——对话里发起核查，结果实时落运维界面右侧页卡：
+
+- **技能**：内置 `netdev-vulnscan`（inline，过程在对话可见）：指纹发现（服务器包清单/补丁级，网络设备版本）→ 候选（`netdev_cve_match` feed 匹配 + 模型知识标注"须验证"）→ 只读验证（版本区间比对）→ 证据立案 `netdev_finding`（source=vulnscan）。红线写进技能正文：不做利用、主动扫描须评估信封不代开；挂入 netdev profile 白名单与委派表
+- **新工具 `netdev_cve_match`**（只读本地）：把 CVE feed 匹配从 UI 桥暴露给 agent；无 feed/无交集返回引导文案而非报错
+- **Linux 读表补软件清单动词**：`dpkg -l`/`dpkg-query`/`rpm -qa`/`rpm -q`/`pip(list|freeze)`/`java -version`/`openssl version`/`ssh -V`/`nginx -v`/`apache2ctl -v`/`httpd -v`——纯查询形态，安装/卸载动词仍拒绝；Windows 侧 `get-` 前缀本就放行（Get-HotFix/Get-ItemProperty）
+- **实时推送**：netdev 包级 Finding 观察者（SetFindingObserver，异步 recover，只在保存成功后触发）→ desktop `netdev:finding-saved` Wails 事件（搭 live forwarding 便车装一次）→ 前端 vulnScanState 模块 store（browserMirror 模式，环 100 条、同 ID 滚动覆盖）
+- **页卡**：DockTab 新增 `vulnscan`（待决策组，ShieldCheck），老安装一次性补种；新发现点亮热点 + 首次到达自动开 dock 聚焦（每次挂载至多一次）；VulnScanPanel 合并磁盘种子×实时尾部，行内动作：建案例/跳发现/插修复提案指令；「发起核查」按钮把示例指令插进对话框；CVE 扫查按钮同发现页
+- 验证：driver/tools/netdev/skill/config go 测试 + finding observer 三态单测（成功触发/失败静默/panic 隔离）+ frontend tsc + vuln-scan-state（20 断言）+ locale-parity + guides-drift 通过
+
+### feat(netdev): 串口控制台（COM 口）——USB 转串口线直连交换机 Console
+
+用户任务：交换机 Console 口接入。原生 Windows API 实现（golang.org/x/sys 的 CreateFile/DCB/CommTimeouts，**零第三方依赖**——proxy.golang.org 被墙、镜像拉不到 go.bug.st/serial，索性手写）：
+
+- **串口层**：console_windows.go——`\\.\COMn` 打开、8N1 无流控、20ms 间隔超时读（空闲返回 0,nil 由读循环消化）；COM 口枚举读注册表 SERIALCOMM（USB 转串口即插即见）；非 Windows 构建 stub
+- **会话复用**：OpenConsoleSession 构造 stdin=串口线、缓冲=读 goroutine 的 Session——提示符检测/分页关闭/回显剥离/脱敏/审计/操作实况与 SSH 会话**完全同一套引擎**；Session.Close 加 nil-ssh 守卫；无主机密钥/凭证：物理接入即授权，但只读分类器照常密封每条命令
+- **配置**：`console_port`/`console_baud`（0=>9600）；校验——端口名纯 token、CLI vendor only（redfish/snmp/docker/k8s/firewall 拒绝）、配串口时管理地址可留空（Console 设备往往还不知道 IP）
+- **接线**：Manager.connect/TestConnection 分支走串口；E-STOP/Close/空闲回收统一 closeConn（nil client 守卫）；流式跟随暂不支持串口（明确报错，一次性读取可用）
+- **UI**：设备表单新增「串口控制台（COM 口）+ 波特率」字段（CLI vendor 显示），COM 口 datalist 来自本机枚举；设备列表地址列显示 🔌COM3 标记；地址/串口至少填一项的新校验文案
+- 验证：netdev 全量（201s，含 console 新测试：nil-ssh Close、校验六分支）+ config 全量 + desktop go build + frontend tsc + vitest 通过
+
+### feat(netdev): 日志源探测——「这台机器上到底有哪些日志」一键枚举
+
+用户痛点：连上 SSH 后不知道里面有哪些日志可读，也不该要求用户记住发行版文件名。探测按钮用三条纯只读表命令（`systemctl list-units --type=service --state=running` / `ls -lh /var/log` / `docker ps`）在设备的既有密封会话上枚举真实存在的日志源，**不是**网络发现——不涉及 scope 白名单、不产生设备会话之外的流量，分类器/预算/脱敏/审计全部照旧：
+
+- **后端**：`netdev.LogSourceProbe`（probelog.go）——运行中服务→journal: 候选、容器→docker: 候选、/var/log 常规文件（过滤轮转归档 .gz/.1/-日期后缀、目录、符号链接）→file: 候选（带大小）；docker 不存在记为提示而非错误。三条解析器 fixtures 测试（systemctl 表头/legend、ls 轮转过滤、docker 表 NAMES 列）通过
+- **桥接**：`App.NetDevProbeLogSources`（90s 超时）+ bridge 接口/dev mock
+- **前端**：日志页源栏新增「探测日志源」按钮（仅 Linux 主机显示），结果按 运行中服务 / 容器 / 日志文件 三组渲染为 chip，点击候选即切换为当前日志源（journal:nginx / docker:web / file:/var/log/messages），每组上限 24/30 条折叠计数
+- **应用日志目录**（追问补全）：探测追加扫描常见应用日志根（`ls -d /opt/*/logs /usr/local/*/logs /srv/*/logs /data/logs …`——`*` 不在 ShellMetachars 清单内，由远端 shell 在 ls 内展开，无法链命令），每个目录（≤8）再 `ls -lh` 列文件；ProbeFile 带 allowed 标记（logPathAllowed 对设备白名单判定）。白名单外的文件 chip 虚线样式，点击即把其目录一键登记进设备的 log_paths（同一人工配置管线 SetNetDevSettings）并选为当前源——发现应用日志→登记→读取一气呵成，不再要求用户先去设置页手工填路径
+- **两个独立按钮**（用户要求）：日志页标题栏新增「🧭 网络发现」chip——一键打开子网发现弹窗（选探测起点→预检→计划卡→隧道探测，与设备页签入口同源同逻辑，含中断续跑检测）；「探测日志源」从源栏挪到动作行首位成为与 筛选/读取/跟随 平级的独立按钮（有探测结果时高亮）
+- **「转为发现」按钮**（连接日志页与总览）：原始日志行不会自动进总览——总览聚合的是发现（findings）。新增 App.NetDevFileFinding（人工专属入口，非智能体工具）：把日志页当前视图（含等级过滤）的行提交为一条 Finding（证据脱敏、上限 200 行、severity 随等级过滤自动定级），立即出现在发现中心/总览并进入告警生命周期、通知出口与每日晨报；保存后 dashEmit 刷新总览
+- 验证：go 测试（parseLsFiles 含应用目录 allowed=false 用例）+ desktop go build + frontend tsc + vitest（locale-parity/dash-boards）通过
+
+### feat(netdev): `system:main` 系统日志源——发行版无关，Linux 设备默认
+
+用户反馈：不一定点得对设备是哪个 Linux（centos 还是 debian 决定了系统日志文件名），「只要能获取一个系统日志就可以」。落地：
+
+- **后端**：logsource.go/logfollow.go 新增 `system:` 源——整本 systemd journal（`journalctl [-n N --since X]` / 跟随 `journalctl -f`），所有 systemd 发行版通用，与文件名（syslog vs messages）无关；journalctl 本就在 linux 只读表内，密封路径不变。netdev_log_read 工具描述与 schema 同步（提示模型系统日志优先用 system:main）
+- **前端**：日志页/日志工作台的源类型新增「系统日志（全 journal）」且为 Linux 设备的**默认**源（选到 Linux 主机自动切过去），空态快捷片也加了系统日志一键入口；文件源默认值仍按 OS 家系给（上一条已做），作为系统日志之外的手选路径
+- **导出带时间选择**（用户建议）：日志页「导出」变为可展开选项——当前显示 N 行 / 最近 1h / 6h / 24h / 今天 0 点以来；时间段导出按所选范围重新走一次密封读取（tail 拉满 1000 行、套用当前过滤词）直接落文件（`netdev-logs-<设备>-<类型>-<范围>.txt`），不要求先加载进查看器。时间选项只对 file/journal/system 源开放（syslog 聚合与 DB 快查询无 since 概念）
+- 测试：composeLogCommand/composeLogFollowCommand 新增 system 正反例（含 marker 带元字符拒绝、--since 透传）通过；frontend tsc + vitest（locale-parity/dash-boards）通过
+
+### fix(netdev): centos 服务器日志读取必超时——提示符不识别 RedHat 方括号风格 + ANSI 转义未清洗
+
+用户实测：日志页读取 `/var/log/syslog` 报 `timeout waiting for prompt`，partial output 里命令已执行完、提示符 `[root@honest-fan-1 ~]#` 明明回来了。两个独立问题：
+
+- **提示符形状**：linux-shell 驱动的提示符正则只认 Debian 家系 `user@host:~$`，不认 RedHat 家系（centos/RHEL/Rocky 默认 PS1）的 `[root@host ~]#` 方括号形式——hosts.go 补该分支；driver 提示符 fixtures 测试加 linux 正/反例（含"sigil 后还有正文不是提示符"）
+- **括号粘贴序列**：交互式 bash 在回显后发 `ESC[?2004l`、在提示符前紧贴着发 `ESC[?2004h`（同一行无换行），session 引擎用原始 PTY 字节匹配提示符时行首锚点被打断——completed() 与 OpenSession 首提示符等待改为对 ANSI 清洗后的文本匹配（cleanOutput 本就先清洗，不受影响）。新增 TestSessionCentOSBracketedPromptCompletion 复现现场报文（含 tail 报错后提示符返回的形态）
+- **路径默认值跟 OS 走**：报错里的 `/var/log/syslog` 是 Debian 惯例，centos 对应 `/var/log/messages`（认证日志 secure vs auth.log）——日志页与日志工作台的文件源默认值、空态快捷片改为按所选设备 OS 家系给出，切换设备时若目标仍是默认路径则跟随切换（用户手输的路径不动）
+- **动作按钮合并一行**（用户建议）：日志页「筛选/读取/跟随/交给AI/导出/清空」收进同一行，筛选展开的 行数/起于/过滤 参数单独占行
+- 验证：netdev 全量（198s）+ driver 全量 + 新增测试通过；frontend tsc + vitest（dash-boards/live-ops-state/locale-parity）通过
+
+### fix(netdev/browser): 每次 run_skill 泄漏一个 about:blank 页签
+
+用户实测：browser-IT-ops 每执行一次，受控浏览器就多一个 about:blank 页签。两层根因，都已修：
+
+- **switch_tab 重绑遗弃空白页签**：会话attach时 chromedp 首次 Run 会创建一个空白目标页；switchSessionTab 切换页卡时把 s.ctx 换绑到新目标，但原空白页签的 cancel 被覆盖、目标页永远没人关——每次执行留一个。修复：重绑前记录被遗弃目标的 URL，**空白页（我们自建的）在换绑成功后显式 CloseTarget**；真实页面永不被关。附带修复：控制台接管（pickFirstConsoleTab）也不再留空白页
+- **switch_tab 开头的流程根本不需要新页签**：RunBrowserFlow 原本一律新建空白页签作会话载体，而 browser-IT-ops 首步就是 switch_tab（目标本就是既有页卡）。修复：首步为 switch_tab 的技能，会话直接重绑到第一个真实页面（技能自己的 switch_tab 再切到命名页卡）；navigate 开头的技能保持新建页签语义（agent 的 navigate 不得劫持用户正在看的页面）
+- 验证：builtin 全量（含真实 Chrome 的控制台/接管/判稳测试）+ desktop 全量通过
+
+### fix(netdev/browser): browser-IT-ops 提取到"(AI生成)"占位符 + extract 载荷被报告截断
+
+用户实测：/browser-IT-ops 查询哈尔滨池告警，flow 六步全"成功"但第 6 步 extract 只拿到占位符，模型重试 3 次无果。两处根因，都已修：
+
+- **stable 静态兜底在思考期误判完成**：流式判稳的"自始静止 10 秒兜底"（为重跑已完成块设计）在"模型首字前静默超过 10 秒"的慢后端上把 (AI生成) 占位符当成了完成态——wait 放行时流还没开始。修复：静态兜底分两档——实质性内容（≥40 字符或有渲染子元素）维持 10 秒确认；**短静态内容（占位符形态）要求 30 秒确认**，思考期再长也不会提前放行，真流式出现后仍走 2-8 秒自适应静默路径秒级完成。测试钉住事故场景（占位符静态 26 秒不得放行），既有语义用例（4 秒内不放行/流式边沿判稳/重跑 10 秒兜底）全部保持
+- **extract/evaluate 载荷被 400 字符报告截断**：RunBrowserFlow 外层循环对每步输出统一截 400 字符，extract 步在 flowExecStep 里特意保留的 6000 字符上限形同虚设——表格类回答只有前几行能到达模型（"回答到了但模型只看到表头"）。修复：报告截断按步骤类型区分，extract/evaluate 维持 6000、其余 400；面板试运行同样把 extract/evaluate 从 2000 字符显示截断放宽到 6000
+- 验证：stable 双测试（含新增事故用例）单独+全量通过；builtin/desktop 全量、前端 tsc 通过（全量偶发失败为真实 Chrome 测试并发争用抖动，重跑即绿）
+
+### feat(netdev/browser): 告警导出技能闭环——等待下载 + Excel AI 研判 + 相对时间窗 + 定时巡检
+
+围绕 browser-cybersituational-awareness（态势感知告警导出）技能的三个缺口：导出 Excel 要 20 秒~5 分钟但流程点完"导出"即结束、时间范围是录制时写死的字面量、没有常驻轮询研判。全部落地：
+
+- **wait download（内核）**：browserWait 新增 `download`（或 `download:.xlsx`）条件——Go 侧轮询 CDP 下载记录直到终态并校验磁盘文件，返回"下载完成: 文件名（完整路径）"；步骤表写法 `| n | wait | \`download\` | 300s |`。下载记录改为**保留式**（drain 只标记 Reported 不丢弃，上限 20 条），修复快速完成的下载被上一步动作摘要清掉、后续 wait 永远等不到的竞态；进入时快照 + 20 秒宽限窗区分"本轮导出"与"陈旧下载"。对话路径（run_skill）的执行报告由此带出文件路径，模型可直接用现成 xlsx_read 分析
+- **browserClick 选择器路径切 JS el.click()（内核修复）**：chromedp.Click 经 CDP Input 域派发，运维控制台浏览器环境下实测到不了页面（agent 主走 ref 路径的 JS click 故未暴露；面板/技能的 CSS 选择器点击全部中招）。选择器路径改为 evaluate 执行 scrollIntoView + el.click()（含 checkbox/radio 前后状态核对与"状态未变"告警，对齐 ref 路径契约），命中不到选择器立即返回 "element not found"（isLocateMiss 可识别）。**附带修复链式回退偏慢**：tryFlowAnchors 对 CSS 锚点先做 querySelector 存在性预检（2s 上限，非法选择器/导航中不误判）——坏锚点从烧满 ~40s 动作窗口变为毫秒级失败，在共享 8s 等待预算内轮询后立即回退下一锚点；点击类由 browserClick 内置探针覆盖，type/select 等由通用预检覆盖。**hover 步骤同批改 JS 派发**：flow 的 hover 从真实 CDP MouseEvent（Input 域，同环境不可达）改为 evaluate 派发 pointerover/mouseover/pointermove/mousemove/mouseenter 序列（文字锚与 CSS 锚两条路径）——JS 驱动的悬停菜单（ExtJS/jQuery 组件）生效，CSS :hover 样式需真实指针、步骤输出明示不适用；文字锚点击本就是 JS 派发不受影响
+- **元素选择器阶梯重排（修 TestConsoleElementsInteractiveOnly）**：axRowCSS/scanDomCandidates 的选择器阶梯里 `text=` 兜底原本排在祖先作用域与 nth-of-type 结构路径**之前**——带可见标签且同类名不唯一的元素（Naive-UI 双 textarea 场景）会提前落到 text= 锚，而该行的 css 字段被点选/测试当作原生 querySelectorAll 选择器消费，SyntaxError 直接炸。重排为：稳定 id → name → data-ref → aria-label → ExtJS 前缀 → 唯一类 → 祖先作用域 → 结构路径 → **text=（最后兜底，仅当算不出任何唯一 CSS）**；两处头部注释同步。双 textarea 测试页现在产出 `#app > div:nth-of-type(2) > textarea:nth-of-type(1)` 唯一命中，builtin 全量测试转绿
+- **时间范围解析（内核）**：新增 `builtin.ResolveTimeRange`——整串严格匹配"最近/近/过去 N 分钟|小时|天"、"last N m/h/d"、"今天/昨天/前天/本周/上周"或已格式化的 `Y-m-d H:M:S - Y-m-d H:M:S`，统一换算为平台 time_range 输入格式；嵌入在长文本里的短语不会被误改写。**惰性换算**：短语在**步骤执行那一刻**才换算（flowSubst/substStepParams 内置、按运行缓存一次保证多步同窗）——时间窗末端是"查询时刻"而非"发起时刻"，浏览器打开/输入/点击的秒级延迟不再让"最近5分钟"卡不准；`TimeRangeBounds` 反解字面范围，供巡检续读锚点
+- **AI 研判（桌面）**：`BrowserConsoleAnalyzeDownload(path, analysisKind)`——xlsx（excelize 流式行迭代）/csv 转 markdown 管道表（单元格 120 字符裁剪、6 万字符预算内自适应缩行、截断注明），走 consoleProviderChat（BrowserUse→VLM→当前页签→默认模型链）产出固定结构研判报告。**研判方式三档（巡检普遍化）**：alerts=SIEM 告警研判（概览/需关注告警表/疑似误报/建议动作/失陷主机判定）；generic=通用表格研判（任意导出：清单/日志/监控数据——关键发现/需关注条目/数据质量）；none=仅下载不耗模型不通知。两套结论契约共享解析（失陷主机/关键发现、需关注告警数/条数 归并，`findings()/attention()` 访问器），通知门槛 compromised/attention 对两种研判同样生效；`bindWatchWindow` 容许无时间参数的自包含技能（巡检窗口仅作展示）
+- **定时巡检（桌面）**：`BrowserConsoleWatchStart/Stop/State` + "browser:watch" 事件。**墙钟对齐调度**：锚点=启动时刻取整到分钟，或显式配置"巡检时间"（HH:MM，如 22:38 → 网格对齐到 22:43:00、22:48:00…）；第一轮（隐式锚点）立即执行查 `[锚点-间隔, 锚点]`，之后在 `锚点+N×间隔` 的整分刻度触发（`nextWatchFire` 免疫 Ticker 漂移与慢轮偏移），每轮查询**刚闭合**的固定间隔——窗口边界是整分刻度、与执行延迟完全解耦，轮与轮零重叠零空洞。每轮：consoleGate 抢占（忙则记"跳过"轮）→ 绑定字面窗口 → 复用试运行执行器跑技能（无人值守模式拒绝 human/ask 步骤）→ 等下载 → AI 研判 → 按通知策略投递 → 推送轮次结果。**连续覆盖兜底**：`lastEnd` 记录上一轮实际打到页面的窗口终点（onRange 在时间步执行时回填，轮次记录实时显示平台实际查询范围），跳轮/失败后下一轮自动从 lastEnd 续读补漏（向前钳制防重复查询、超 30 分钟封顶防巨型导出）。**持久化**：配置存 `browser_watch.json`，应用重启自动恢复（启动时 resumeBrowserWatch）；最小间隔 60s
+- **研判结论 + 通知路由（桌面）**：研判系统提示词新增机器可读结论契约——报告尾部必须输出 ```json 块（失陷主机/需关注告警数/最高等级/需通知/通知理由；失陷主机宁缺勿滥，无确凿证据给空数组），`parseAlertVerdict` 取最后一个 JSON 围栏解析。巡检通知策略四档：**确认失陷主机时（默认推荐）/ 发现需关注告警时 / 每轮完成 / 不通知**；通道复用调度器既有桥：IM bot（schedulerIMPusher→bot gateway，负责人从 bot 最近会话下拉选择或手填 chatID）、邮件（schedulerEmailSender→SMTP 多账号）、系统通知（schedulerNotifier→应用内 toast + OS 托盘）；投递失败记入轮次 NotifyError 不失败轮次。轮次卡新增 失陷×N / 需关注×N+等级 / 已通知渠道 徽标与失陷主机清单。`BrowserConsoleAnalyzeDownload` 同步返回判定字段，试运行研判卡可复用
+- **通知投递 UI 重做（前端）**：通知设置改为 68px 定宽标签列 + 控件列的**对齐网格**（控件在格内纵向堆叠，不再挤在一行）；IM 负责人固定渲染下拉（bot 最近会话，手动 chatID 为兜底选项，dest 按 platform:chatType:chatId 组合——QQ 群带 chatType 段，修复之前裸 chatId 推送路由不对的问题）；邮件发件账户下拉读取设置中的邮箱配置（默认账户标注）+ 收件人输入；新增"研判方式"选择（安全告警/通用表格/仅下载），none 时隐藏触发条件与通道设置；轮次卡徽标文案随研判方式切换（失陷×N ↔ 发现×N），运行摘要显示 研判方式·触发条件·IM·账户→收件人·sys
+
+- **面板/编辑器（前端）**：技能编辑器时间类参数（键名含 时间/time/范围/range/日期/date）渲染快捷片（最近5/15/30分钟、1小时、今天）+ 防抖换算预览；试运行终态携带 downloads → 下载卡 + 首个表格文件**自动** AI 研判（Markdown 渲染、失败可重试）。**浏览器面板新增第四个子页签「巡检」（Radar 图标，运行中页签带脉冲活点）**——巡检的一等入口：运行状态头（技能/间隔/整分对齐/下一轮/最近失陷徽标 + 停止）、配置表单（技能下拉 + 共享的间隔/巡检时间/通知投递设置）与轮次日志（状态/时间窗/下载文件/失陷徽标/可展开研判报告与步骤明细）；配置表单抽成共享 `WatchFormFields`，技能页签展开区仍保留按技能快捷配置（启动后自动跳转巡检页）；轮次日志从技能页签底部移至巡检页。bridge 新增方法声明 + dev mock（试运行终态演示携带 mock 下载，巡检轮演示失陷主机与已通知徽标）
+- **技能文件修正**（用户级 `~/.fairpeer/skills/browser-cybersituational-awareness/SKILL.md`）：删除误录的第 2 步 `navigate 支持`（回放必失败）；第 1 步时间改 `{{时间范围}}` 参数化（frontmatter `params: 时间范围=最近1小时`）；末尾加 `wait download 300s`；name 规范化修复 U+2011 不换行连字符；draft 保持 true 待实测后 wake
+- 验证：timerange/browserflow/watch 单测（短语换算/直通/拒识/download 条件行解析/惰性换算与缓存/对齐窗口与补漏续读/30 分钟封顶/下一刻度计算/研判 JSON 解析（末块优先、破损拒识）/通知策略四档决策）通过；builtin 全量除 TestConsoleElementsInteractiveOnly（用户元素提取改造 WIP 的预存失败，与本批无关）；skill 包全量、desktop 全量、frontend tsc + vitest（locale-parity）+ vite 生产构建通过
+
+### fix(netdev): 设置→运维保存静默丢失——[netdev] 段从未写进 config.toml + 全屏表单挡住反馈
+
+用户实测：添加 Linux 主机后「测试连接」无反应、「保存设备」后设备列表找不到、网络名称也消失。日志显示 17:56 一分钟内 25 次 "SetNetDevSettings saved"（devices=1）全部"成功"，但 config.toml 始终没有 [netdev] 段。两层根因，都已修：
+
+- **后端（根因）**：保存管线 SetNetDevSettings → applyConfigOnly → SaveTo → RenderTOMLForScope——手写渲染器只输出 ui/desktop/agent/bot/lsp 等段，[netdev] 整段没有渲染代码，每次保存返回成功却把运维清单静默丢弃；下次 Load 读回空配置，设备"消失"。修复：render.go 在 user/full 作用域补渲染 [netdev]（从 NetDevConfig 结构体经 toml.Marshal 序列化，字段演进不会再漏；project 作用域永不渲染——该段本就 pinNetDev 钉死在用户配置）。新增 TestSaveToNetDevRoundTrips 回环测试（设备/跳板/分组/站点/预设/DB 源/告警规则/discovery/extra_read 全字段往返 + project 作用域不含该段）
+- **前端（反馈被盖）**：测试连接/保存的结果与错误只写页面顶部 err 横幅，而设备编辑表单是 position:fixed 全屏遮罩（z=90）——反馈全部不可见，用户只能反复点击（日志 25 连击即此）。修复：L3Panel 加 banner 属性，六个实体表单内部复述 err；「测试连接」「保存设备」加 busy/testing 防连击（半透明+禁点）；保存成功弹 toast
+- **测试成功不再长得像报错**（用户复测反馈）：原成功文案是红色错误横幅里的英文 "[SYS] TARGET VERIFIED (VTY SESSION OPEN)"，被当成故障。成功与失败分离（okMsg 状态 + banner--ok 绿色横幅，L3Panel 支持 bannerOk），中文明示"SSH 已连通、登录成功、CLI 会话正常"（ndv.sets.testOk，zh/en）
+- **redfish/snmp 设备无 SSH CLI 驱动**（TestConnection 只拨 CLI，对这两类必败）：设备表单对这两个 vendor 隐藏测试按钮、显示说明（带外 HTTP/SNMP 通道无需测试）；huawei/cisco/zte/vmware/linux/windows 六个 vendor 均有注册驱动，测试连接可用
+- **「项目」统一改称「站点」**：内网=整个环境（network_name 为其名，运维标题栏在用，保留），项目（分组集合的过滤视图）与桌面端 coding 工作区的"项目"撞词——zh/en 文案全部改为站点（projectsTitle/newProject/noProjects/editProject/needProjectName/saveProject/tbar 系列），配置字段名不变
+- 遗留：密钥库可能残留指向已丢失设备的孤儿密码（secrets.enc.json 先于配置写入）——同名设备重存密码会覆盖同一 env 键，不影响使用；设备名仅允许 A-Za-z0-9_.@-（会进备份文件路径），中文名会被校验拒绝（报错现已在表单内可见）
+- 验证：internal/config 全量 + 新回环测试通过；desktop go build 通过；frontend tsc --noEmit + vitest（locale-parity/dash-boards/live-ops-state）通过
+
+### fix(netdev): wait stable 误判"未开始"为"已完成"——AI 流式输出提取到占位符
+
+用户实测：browser-IT-ops 六步全过，但提取结果只有"(AI生成) …"。点发送后输出块立即存在但内容是占位符，模型思考期首字前静默常超 2 秒——静默判稳窗口一过就当"生成完成"，随即提取到占位符。三处修复：
+
+- **stable 加变化沿（rising edge）判据**：签名（匹配数+文本长度+子元素数）必须"出现过或变化过"才适用 2 秒静默判稳；自始静止的内容（重跑时早已完成的块）改用 10 秒静默兜底确认，二者都不满足则等到超时
+- **超时不再谎报成功**：load/networkidle/title:/url:/stable 的页面轮询 resolve(false) 原本被丢弃（Evaluate 目标 nil），超时照样回 "waited for"——现在接回布尔值（chromedp Evaluate 加 WithAwaitPromise 选项，否则拿到的是 Promise 对象），超时报"等待 … 超时（Ns）——条件未满足"，让流程失败暴露问题而不是提取占位符
+- **wait 单位消歧**：值列按秒解析，>600 的数字按毫秒折算（用户习惯输 15000 意为 15s，原被解析成 15000 秒）；后端 flow 表解析、ConsoleWait、前端 parseSeconds 三处一致
+- **参数按实测调优**（用户：AI 生成常需 30-60 秒）：默认超时 15s→90s（空值兜底，全链路一致）；判稳静默窗口 2s→自适应 2-8s（生成持续越久要求尾部静默越长——中途取数/工具调用的 3-5 秒停顿不再误判为完成，长回答也不会被截半提取）；模板 stable 步骤 60s→120s，流式建议值统一 120
+- 验证：占位符静态 4 秒内必须超时报错 / 变化后静默判稳 / 静态完整块 10 秒兜底通过 / title 超时报错四断言全过；流程表 15000→15s 折算断言；builtin/desktop 全量 + tsc + vitest（linkpeersignal TestRealIPFromForwarded 为 HEAD 上预存失败，与本批无关）
+
+### fix(netdev): 纯 text= 锚报"not a valid selector" + 名称匹配双向包含——输入框点选输入复活
+
+用户实测：点选输入框后点「输入」直接报 `querySelector: 'text=…' is not a valid selector`。两处根因，都已修：
+
+- **纯文字锚没进锚链机制**：点选兜底会产出 `text=名称`（该行没算出 CSS 时），但输入/点击/悬停/提取四个原语只识别带 `;;` 的链——无 `;;` 的 text= 走了老路径被当 CSS 塞进 querySelector。新增 anchoredTarget 判定（`;;` 链或 text= 开头一律路由锚链执行器）
+- **该行为什么没算出 CSS**：聊天页输入框的无障碍名是 aria-labelledby 拼出的"placeholder+装饰尾巴"长串，DOM 侧标签只有短 placeholder——名称匹配的单向包含（标签⊃全名）永远对不上。改为双向包含（反方向标签≥2 字防单字误配），命中后走唯一性校验的选择器阶梯
+- 验证：测试页第二个 textarea 改造成 aria-labelledby 长名形态（旧单向匹配下 taCSS 必为空），断言算出唯一命中 CSS；纯 text= 输入落值断言；builtin/desktop 全量 + tsc + vitest 56/56
+
+### fix(netdev): 撤销对位匹配——静默错 CSS 比没有 CSS 危害更大；名称匹配加可见性过滤
+
+用户实测：CSS"完全错了"——按角色顺序对号的启发式在 AX 树（只收可见节点）与 DOM 池（混入隐藏节点）可见性语义不一致时指错元素。错误的选择器会让动作静默落在错误元素上，不可接受：
+
+- **撤销对位匹配**：无名义下不再猜（宁可无 CSS 也不给错的）；点选兜底链变回 css;;text=名称 → css → text=名称 → 编号。无名义下极少且多为图标装饰
+- **名称匹配池加可见性过滤**（rect>1px + visibility/display 检查）——隐藏元素即使名称巧合也不参与匹配；名称匹配本身加防重复占用（同名元素按行序领用）
+- "元素变少"非本批所致：无障碍树超时降级为 DOM 扫描（行数骤减、汇总行有提示），流式输出结束后重抓即恢复
+- 验证：对位断言撤除，名称匹配 + 唯一命中断言保留通过；builtin/desktop 全量 + tsc + vitest 56/56
+
+### fix(netdev): 无名元素对位匹配 + 列表行直显 CSS——eN 从点选路径全面退场
+
+用户再看：点选仍出 e11/e12——无障碍名称为空的元素（图标按钮等）被名称匹配直接跳过，永远算不出 CSS。修复：
+
+- **对位匹配**（axRowCSS 第二遍）：名称匹配（带防重复占用）之后，剩余无 CSS 的行按**粗粒度角色分组 + 文档顺序游标**对号入座——每个角色（button/link/textbox/combobox/checkbox/radio）的未匹配行依次领取该角色中"未占用且无名"的池元素，算选择器。无名义下从此也有稳定锚
+- **列表行直显 CSS**：每行右侧新增等宽字体的 CSS 缩略（悬浮看全文）——用户看得见点选会得到什么，不再靠猜
+- axRow 增 Role 字段参与匹配；测试页加无名图标按钮（aria-hidden 版会被 AX 树整个忽略——测试自纠）断言对位匹配产出唯一命中
+- 验证：builtin/desktop 全量 + tsc + vitest 56/56
+
+### fix(netdev): 选择器阶梯升级 + text= 兜底——深嵌套多同类元素也能算出稳定锚
+
+用户实测：点选 textarea 仍填 e36——CSS 计算在其页面失败（类选择器撞多个输入框不唯一、组件树嵌套 10+ 层超过 6 层路径上限 → 阶梯放弃 → 回退编号）。修复：
+
+- **阶梯升级**（axRowCSS 的 selectorFor）：单 class → **全 class 组合**（tag.c1.c2）→ **最近带 id 祖先的作用域后代选择器**（#id tag.classes）→ 结构路径上限 6→**14 层**；每级都验证"恰好命中 1 个元素"才采用
+- **点选兜底链**：css+名称 → `css;;text=名称`；仅 css → css；**无 css 有名称 → `text=名称`**（文字锚同样跨会话稳定）——编号 eN 只在既无 CSS 又无名称时才兜底出现
+- 验证：测试页加第二个同类 textarea（模拟用户页面的多输入框场景），断言阶梯仍产出唯一命中正确元素的 CSS，且输入落值在**对的**那个框；builtin/desktop 全量 + tsc + vitest 56/56
+
+### feat(netdev): 元素点选自动填稳定锚链——eN 编号从技能里根治性退场
+
+用户把列表行的 e36 当 CSS 写进技能，试运行报 no snapshot（编号随快照/会话死）。此前我给的裸类选择器也在多输入框页面命中错误元素（用户实测退回 e36）。两层修复：
+
+- **AX 行携带计算 CSS**（browserconsole_axcss.go）：抓元素时把每行（按无障碍名精确→包含匹配）对到 DOM 元素，跑与 DOM 互补扫描相同的选怪阶梯（#id → 唯一 class → nth-of-type 唯一路径），附在行上；**点选时目标栏自动填 `CSS;;text=名称` 锚链**——当场操作与录制技能都是稳定目标，eN 编号只在找不到 CSS 时兜底
+- **用户技能第 3 步改作用域选择器**：`.question-input-cover textarea.n-input__textarea-el;;text=有什么我可以帮您吗`——.question-input-cover 限定聊天输入区，避免页面上其他 n-input 输入框抢先命中（我上次裸类选择器的实际问题）；注意事项写明编号与 CSS 的区别
+- 连环雷：Go 匿名结构体 JSON 序列化大写键名 → 页面 JS 读 row.ref 全 undefined（诊断日志定位 `{}` 返回）；已改具名 axRow 类型+json 标签
+- 验证：TestConsoleElementsInteractiveOnly 断言 textbox 行 css 非空且 querySelectorAll 恰好命中 1 个元素；builtin/desktop 全量 + tsc + vitest 56/56；手册第二节更新（点选填锚链，编号永不入技能）
+
+### fix(netdev): switch_tab 支持按页卡标题切换——用户只认识名字，序号会漂移
+
+用户实跑复盘：技能第 1 步 `switch_tab 1` 切到了 about:blank（序号随页卡开关漂移，1 已不是 AI智能助手），第 2 步点击连锁失败。用户视角只有页卡名字：
+
+- **内核**：browserSwitchTab 的 Target 匹配扩为三级——TargetID（原语义）→ 标题精确 → 标题包含；非数字目标即按名匹配
+- **链路**：确定性执行器与面板试运行的 switch_tab 目标列支持"标题或序号"（数字→序号，否则→标题）；新增 ConsoleSwitchTabByTitle 原语；**录制改记标题**（观察窗/面板切页卡时目标=标题、备注=第 N 个）；编辑器步骤提示、手册更新
+- **用户技能修复**：browser-IT-ops 第 1 步目标 `1` → `AI智能助手`（按标题匹配），注意事项补说明
+- 验证：TestAgentSessionJoinsPersistentBrowser 扩展——给页卡设名后按名切换成功、未知标题报错；builtin/desktop 全量 + tsc + vitest 56/56 + guides-drift 3/3
+
+### fix(netdev): 结构化编辑器认新字段 + 面板/试运行支持 ;; 锚链
+
+用户报两问题：改后的 browser-IT-ops 无法切回结构化模式（"结构化无法保留的内容"）；试运行报 `'a;;b' is not a valid selector`：
+
+- **编辑器前matter 模型补全**：domain（面板域标记）与 draft（草稿标记）进 SkillDoc 解析/序列化/已知字段集——此前这两个新字段让解析器判 lossy 拒绝切结构化。含 draft 的模板技能同样受益
+- **Console 原语锚链化**：ConsoleClick/Type/Hover/ExtractAs 检测到 `;;` 即路由确定性执行器的锚链机制（runWithAnchors→flowExecStep）——试运行（它调这些原语）与面板手动操作（目标栏粘 `#css;;text=文字`）从此与技能同语义；单锚目标走原路径零变化
+- **连带雷**：flowTypeByTextJS 模板有 4 处 VALUE 占位但只替换前 2（历史编辑引入），第 3/4 处以字面量进 JS 报 ReferenceError——改 Replace(-1) 全量替换
+- 验证：TestConsoleElementsInteractiveOnly 扩展——`坏CSS;;text=placeholder` 链路输入落值成功（CSS 侧故意失效，证明 text 锚真正生效）；builtin/desktop 全量 + tsc + vitest 56/56
+
+### fix(netdev): browser-IT-ops 实跑复盘修复——技能文件重写 + 失败尾注不再误导
+
+用户实跑 /browser-IT-ops 查哈尔滨池告警，第 3 步输入落空（目标还是瞬时 e36、文字写死）、第 5 步提取超时（无等待流式、nth-child 长路径依赖录制时的历史结构）：
+
+- **技能文件重写**（~/.fairpeer/skills/browser-IT-ops/SKILL.md）：输入目标改双锚 `textarea.n-input__textarea-el;;text=有什么我可以帮您吗`；问题参数化 `{{问题}}`（调用整句自动绑定）；发送后插入 `wait stable:#image-wrapper > div:last-child div.chat-ai-generated-block 300s`（等内容稳定 2 秒=流式吐完）；提取改锚"最后一个消息组"的 AI 块 + 回退锚任意 AI 块，格式 markdown；description/何时使用/注意事项/验证按实义填写
+- **失败尾注去误导**：`会话 br_N 保留（可 browser_* 工具接手排查）` → 运维对话里根本没有 browser_* 工具，模型真的去找了一圈然后开始瞎绕（web_fetch 内网被拒、翻工具列表）。改为指向运维面板浏览器页签 + 建议修步骤表重跑
+- 教训沉淀：面板录制 eN 目标 + 无 wait 直 extract 是草稿通病——新草稿模板的注意事项已覆盖（双锚、参数化、stable 等待、markdown 提取），唤醒前试运行即可发现
+- 验证：builtin 全量过；exe 重打包重启
+
+### feat(netdev): 对话/技能会话统一走持久受控浏览器——不再弹第二个浏览器窗口
+
+用户需求：对话框里跑技能（如 /browser-it-ops）会另弹一个全新浏览器；期望与运维面板「打开浏览器」同一能力——已开受控浏览器就直接接管（复用人工登录态），没开过才拉起。落地：
+
+- **newBrowserSession（browser_open / browser-flow 技能的汇聚点）改走持久浏览器**：探测固定端口→有实例就接管（会话标注「接管」，人工登录的页卡原样复用）；没有就用持久 profile+端口拉起。原"首个 browser_open 弹独立临时 Chrome"的行为退役（保留 newBrowserSessionEphemeral 备用，当前无调用方）
+- **控制台与 agent 会话的分工**：持久逻辑泛化为 persistentBrowserSession(resume)——控制台接管后回到用户正看的页卡（resume）；agent/技能会话落在**自己的新页卡**上，技能的 navigate 永远不会把你正看的页面劫走。多会话=同一浏览器多页卡，观察窗来源芯片各自可见
+- 旧 exec-allocator 路径的 CHROME_PATH 检测/重试保留但不再被走（browserlaunch 自带检测）
+- 验证：新增 TestAgentSessionJoinsPersistentBrowser——控制台会话开页后 agent 会话必须（a）标注接管（同一浏览器，无二次拉起）（b）落在不同页卡（c）两页卡并存于同一端点；四个浏览器集成测试 + builtin/desktop 全量过；手册第二节补说明；guides-drift 3/3
+
+### feat(netdev/skill): 技能草稿-唤醒工作流 + 面板技能域过滤（browser-skill 出局）
+
+用户定调：生成的技能默认**不唤醒**，面板技能页提供「唤醒」入口，唤醒的才可以在对话用；browser-skill 不该出现在面板列表：
+
+- **草稿状态（frontmatter `draft: true`）**：动作记录草稿与模板生成的技能自带草稿标记。四层闸门：模型技能索引不收录（boot）；run_skill 拒绝并指引"到运维面板唤醒"；slash 直呼返回说明文字；斜杠菜单隐藏。**面板试运行不受限**——试运行就是唤醒前的打磨环节
+- **唤醒**：技能行「唤醒」按钮（替代 ▶，未唤醒徽标提示）——BrowserConsoleWakeSkill 只重写 frontmatter 删掉 draft 行，正文逐字节不动；幂等。唤醒即进索引、对话可调
+- **面板域过滤**：列表改认 `domain: browser-ops`（模板/生成器新写）或 `executor: browser-flow`——browser-skill（早期录制裸草稿，两者皆无）自然出局；browser-actions/it-ops（有 executor）保留在列
+- 生成器（动作记录/4 个确定性模板）写 draft+domain；TS 类型 + i18n（徽标/按钮/提示双语）+ 徽标 CSS；手册第三节改"生成→试运行打磨→唤醒"节奏
+- 验证：TestDraftSkillGated（草稿拒绝含指引→去标记后可读）；skill/boot/control/builtin/desktop 全量过；tsc + vitest 56/56；guides-drift 3/3
+
+### fix(skill): [休眠] 标签被模型当成"技能不可用"——三处联动误导，全修
+
+用户实测：让 agent 用 browser-it-ops 查告警，模型看到索引里 `[⚙ 确定性] [休眠] — …请完善描述与选择器`，判定技能未激活、拒绝调用、转去检查配置。三处叠加误导：
+
+- **索引头对 [休眠] 零解释**：[关闭] 有"不可调用"说明、[休眠] 没有，模型只能猜——猜成了阻断态。索引头补条目：休眠=长期未用的索引折叠，**仍可直接调用**（调用即唤醒）；明确禁止因该标签或"描述待完善"字样拒绝/延迟/要求激活，先跑再说
+- **从未用过的技能一出生就 [休眠]**：冷判定 includeNeverUsed=true 把无使用记录的新技能全标休眠（boot 注释宣称"新技能不提前退役"，实现却相反）。修复：无使用记录的技能仅在**技能文件 mtime 早于阈值**时才参与冷判定（文件年龄作为"出现时间"代理）——刚记录的技能全文进索引；真正陈年的照样折叠。新增 UsageTracker.HasUsed
+- **草稿描述的祈使句进了索引**：`请完善描述与选择器` 是给作者看的 TODO，但描述字段是索引可见的，模型读成了使用前提。改为中性描述："浏览器操作流程（面板动作记录生成），可直接调用；描述与选择器可逐步打磨"
+- 验证：TestHasUsed（构造器参数踩坑：NewUsageTracker 收目录非文件路径，测试自纠）；skill/boot 全测过；tsc + vitest 56/56
+
+### fix(netdev/global): 用户自建技能被画像白名单整体隐藏 + 提取支持 Markdown + 草稿模板充实
+
+用户三连报：①browser-actions/browser-it-ops 在对话里看不到；②生成的技能"如何使用/注意事项"太空；③想按 Markdown 结构提取 AI 回答块（如 .chat-ai-generated-block 内的文字）：
+
+- **①根因：索引白名单漏豁免用户技能**。画像白名单（运维只列编码+运维内置技能）在索引层把白名单外的**所有**技能标 ProfileHidden 剔除——包括用户自建的浏览器技能（模型完全不知道它们存在，虽然 run_skill 还能执行）。这与 cowork 画像注释宣称的"白名单只约束出厂技能"矛盾（applyProfileToSkillDisabled 那侧有豁免、索引这侧漏了）。修复：profileHidden 只对 builtinBuiltinSkillNames 名单内的出厂技能生效——用户自建技能在所有画像可见；出厂技能的画像裁剪行为不变
+- **②草稿模板充实**：何时使用写明参数化方法（固定文字改 {{参数名}}、调用时 参数名=值）；注意事项补输入步骤参数化、多锚回退链（选择器;;text=文字）、Markdown 提取建议；验证段给具体抓手
+- **③提取 Markdown 全链路**：browser_extract format=markdown（browsermarkdown.go：标题/加粗/斜体/行内代码/代码块/链接/有序无序列表/引用/hr 的 HTML→MD 行走渲染）；面板提取框改三态选择（纯文本/Markdown/表格）并记入动作步骤（值列 markdown）；ConsoleExtractAs 内核原语；技能步骤值列 markdown 在解析/序列化/试运行/确定性执行全链路生效；browser_extract 工具描述同步
+- 验证：boot 全测（出厂裁剪不变）；TestConsoleExtractMarkdown 集成断言（## 标题/**加粗**/`行内代码`/列表/代码块全部存活）；builtin/desktop 全量 + tsc + vitest 56/56；手册同步
+
+### fix(netdev): AX 树读取超时不再空手——元素列表降级为 DOM 扫描并明示
+
+用户报 `capture accessibility tree: context deadline exceeded`。诊断：整页无障碍树序列化要抢渲染主线程，页面巨大（长对话）或正在流式输出时会被饿到超过 60s 动作超时。加宽超时无意义，降级才是正解：
+
+- **ConsoleElements 降级路径**：captureAXTree 失败时不再整体报错——跳过 AX 半边（refs 不动，宁可没有不用过期），DOM 互补扫描照常填充列表（选择器类目标点击/输入/高亮全可用，仅 e 编号类不可用）；返回结构升级为 `{elements, note}`，降级原因通过 note 上浮
+- **面板**：note 显示在元素区汇总行（原扫描汇总位置），手动刷新/看门狗/切页卡三条刷新路径统一消费新结构
+- 验证：elements 集成测试断言正常路径 note 为空；builtin/desktop 全量 + tsc + vitest 56/56 过
+
+### feat(netdev): 指针 div 通用纳入 + 面板悬停按钮——组件库伪按钮的最后盲区
+
+用户问两个裸 div（页签条目、头像图标）为何不在元素里，并明示：**能做成通用能力就做，不写特判**。实现为通用启发式（与那两个元素无任何硬编码关联，仅测试夹具同形）：
+
+- **列表通用放宽**：DOM 互补扫描的候选集纳入 div/span（两者同权）——**计算样式 cursor:pointer 且有可读名字**（可见文字/aria/title）即列出（browser-use 标准启发式；指针样式来自样式表也能命中，属性选择器做不到）；无名字的纯图标可点 div 仍不进列表（列表行无可展示身份），用 F12 复制 CSS 粘目标栏操作。防噪前置：div/span 无 onclick/btn-class 时先做包围盒快速过滤再算计算样式
+- **text= 锚通用生效**：高亮与流程文字定位的候选池同样纳入指针 div/span——`text=新对话` 这类锚对伪按钮 div 全面可用；高亮求值改宽容类型（布尔 false 与字符串分开判），未命中报中文而非反序列化错
+- **面板「悬停」按钮**：目标行新增（输入/点击/悬停并排）——悬浮出菜单的标准操作：先悬停（真实鼠标移动，CSS :hover 生效）再拿元素点菜单项；记入动作为 hover 步骤；补 BrowserConsoleHover 桥接+mock
+- 验证：TestConsoleElementsInteractiveOnly 扩展（带文字指针 div 列出、无文字头像 div 不列出、text= 锚高亮通过）；无特判核查（grep 生产代码零站点路径）；builtin/desktop 全量 + tsc + vitest 56/56 过；手册第二/三节更新
+
+### fix(netdev/desktop): 动作记录区净化——撤双按钮与反馈杂文，只留步骤列表
+
+用户看截图反馈：记录为技能出现两个（标题栏 + 末位橙色主按钮），下方杂文字（运行反馈日志）不知何用且丑：
+
+- **撤掉末位橙色主按钮**——记录为技能只保留标题栏一个
+- **运行反馈日志行整块移除**——动作记录区现在纯粹是步骤列表（序号 + 摘要 + 悬浮删钮 + 拖拽排序），错误仍走顶部横幅，反馈缓冲保留为有界诊断轨迹不再渲染
+- 区块显示条件随之收敛为 history 非空（log 不再参与）；tsc 零错（本批）；vitest 56/56
+
+### feat(netdev/desktop): 动作记录编排五连改——拖拽排序、末位生成钮、技能页让位于配置展开
+
+用户五条反馈落地（第 2 条"切换页卡记成动作"为上轮 switch_tab 的预期行为，确认无需改）：
+
+- **拖拽排序**：历史行 HTML5 DnD（无新依赖），拖动高亮落点（accent 上边线），行光标 grab——修剪不止删除，顺序也可在生成前编好
+- **「记录为技能」按钮补末位**：原按钮在头部小图标区不易发现——步骤列表末尾新增全宽主按钮，"在列表最后找按钮"符合直觉；头部按钮保留
+- **技能页签隐藏动作记录**：该页空间让给技能本身；技能行点击展开**内联配置预览**（读技能文件解析）：执行方式徽标（确定性/AI 子代理）、参数清单、前 6 步摘要（summarizeStep 同款文案）+ 余量提示；无步骤表的过程式技能显示正文首三行——不进编辑器也能看清配置
+- **提取二次加工入册**：动作记录生成的技能草稿注意事项新增"提取结果一般需要二次加工后再使用；extract 放最后一步，输出落在执行报告里便于复制"；手册第二节同步
+- i18n +8 键双语；CSS（拖拽态/末位钮/展开预览/配置芯片）；验证：tsc 零错（本批）、vitest 56/56（含 locale-parity）、guides-drift 3/3
+
+### feat(netdev/desktop): 动作记录逐条可视化 + 可删除——记录先修剪、再成技能去编排
+
+用户明确工作流：动作记录 → 逐条删除（去掉点错的）→ 记录为技能 → 到技能页签编排。此前结构化步骤根本没渲染（只显示日志文本行），也没有逐条删除：
+
+- **步骤行渲染**：动作记录区现在显示结构化步骤列表（序号 + summarizeStep 摘要，与技能编辑器同款文案：打开…/输入…/点击…/切换到页卡…），悬浮行尾出现 ✕；运行反馈日志行保留在步骤列表下方
+- **逐条删除**：✕ 删该步（其余步骤序号自动重排）；头部清空按钮保留（整份重来）。删完点「记录为技能」，幸存步骤生成草稿打开编辑器编排——一条误操作不再污染整份草稿
+- i18n：brc.histDel 双语；CSS：hist-row 悬浮显删钮（默认隐藏降低视觉噪音）；手册三条路表格补说明；guides 同步
+- 验证：tsc 零错（本批）；vitest 56/56（含 locale-parity）；guides-drift 3/3
+
+### feat(netdev): 动作记录降噪 + switch_tab 全链路——切页卡是步骤，选择元素不是
+
+用户问：动作记录准确吗？能否记录切换界面？并指出"切一个元素选择都记录"（噪音）。核对后：
+
+- **结构化历史本来就只记动作**（导航/输入/回车/点击/提取）——选择/高亮元素不进历史；用户看到的噪音是操作日志里的自动恢复行（↻ 页面已更新…）——现在自愈完全静默（错误仍上浮），提取增加一行短结果（`提取完成（N 字符）`，内容本体留在提取框供后续使用，不灌日志）
+- **switch_tab 新步骤全链路**：观察窗/面板切页卡时自动记入历史与日志（带 1 起始序号+页卡标题）；技能编辑器词汇表（基础操作组）+ skillDoc 解析/序列化/摘要 + 面板试运行（ConsoleSwitchTab）+ 确定性执行器（browserSwitchTab，目标列=序号）+ flowOps 白名单 + 技能生成提示词，全链路贯通；「记录为技能」草稿里值列带页卡标题备注
+- 手册第四节补写法；guides 副本同步
+- 验证：TestParseFlowTable 扩展 switch_tab 行断言；tsc 零错（本批）；vitest 56/56（含 locale-parity 双语键）；builtin/desktop 全量过
+
+### fix(netdev): textarea 输入报 Illegal invocation——value 原型 setter 不看元素类型
+
+用户实测：在 Naive-UI 的 textarea（e36）输入"你好"报 `TypeError: Illegal invocation at HTMLTextAreaElement`。根因：受控输入的原生 setter 技巧（绕过 React/Vue 劫持）写死了 `HTMLInputElement.prototype` 的 value 描述符，textarea 的回退分支永远走不到（input 的描述符恒存在）——原生 setter 校验收者接口，拿 input 的 setter 调 textarea 即抛 Illegal invocation。两处同病一并修（typeRefJSBody：面板/agent 的 ref 与选择器双路径共用；flowTypeByTextJS：流程文字锚）：按 `tagName === 'TEXTAREA'` 选对应原型再取 setter
+
+- 验证：TestConsoleElementsInteractiveOnly 扩展——对 textarea 行执行 ConsoleType 后从页面实读 `textarea.value === "你好"`（在会话页卡上下文里读，避免读到空白页）；builtin 全量过
+
+### fix(netdev): img 伪按钮进列表（DOM 可点击互补扫描）+ CSS 目标高亮 undefined 修复
+
+用户在 Naive-UI 站点实测两元素：textarea 输入框列表里没有、发送按钮（`<img>`）也没有。核查：
+
+- **textarea 其实一直在**（实证：Chrome AX 树把 `<textarea>` 报为角色 **textbox**，与 input 同词，角色表本就收录）——之前"看不到"是旧列表被文本节点灌满（200 截断）+ 同页不刷新的叠加；上一轮过滤修复后已在列表中（角色列显示 textbox）。角色表仍补了 "textarea" 拼写以防其他 AX 方言
+- **img 按钮是真缺口**：Vue 把点击监听挂在 JS，`<img>` 无角色无名字——AX 树对"图片做的按钮"天生失明，深度扫描选择器也不含裸 img。新增 **DOM 可点击互补扫描**（browser-use 启发式）：可见 + (img/svg/onclick/class 含 btn 或 button/contenteditable/tabindex) + 指针为 pointer（仅限 img/svg/tabindex，普通 div 的 pointer 是悬停噪音）；每行生成稳定选择器（#id → 唯一 class → text= 锚 → 唯一 nth-of-type 路径，拿不到唯一选择器就跳过），以 selector 作 ref 进列表（与深度扫描行同约定），点击/输入/高亮全可用
+- **潜伏雷 3（CSS 目标高亮 undefined）**：高亮 CSS 路径的外层 IIFE 没有 return——表达式恒为 undefined，chromedp 报 "encountered an undefined value"；此前被前端吞错掩盖，上轮错误可见化后暴露。修为 `return (BODY)`
+- 验证：TestConsoleElementsInteractiveOnly 扩展为同形页面（静态段落+textarea+img 按钮）断言 textarea（textbox 角色+placeholder）与 img 选择器行都在、逐行高亮零报错；builtin/desktop 全量过
+
+### fix(netdev): Vue/Naive-UI 站点元素列表混入非元素节点——高亮报 scrollIntoView is not a function
+
+用户报：某 Vue3 + Element-Plus 站点抓不到元素，高亮报 `TypeError: this.scrollIntoView is not a function at Text.<anonymous>`（还有 `at HTMLDocument.<anonymous>`）。错误栈直接给出根因：
+
+- **根因**：快照 ref 的发放规则是"可交互角色**或带名字的节点**"（AI 读页面内容需要静态文字有 ref）——文本节点（名字=文字内容）和文档根节点（名字=页面标题"AI智能助手"）都拿到了编号；而 ConsoleElements 把整个 ref 表倒进面板列表没过滤。Text/HTMLDocument 没有 `scrollIntoView`/`click`，一点就炸。Naive-UI 这类重文本站点列表几乎全是文字节点
+- **修复 1（治本）**：面板元素列表只保留可交互角色（rolesWorthRef 提为包级 axInteractiveRoles 共用）——button/link/textbox/combobox/option/tab 等 19 种；文字节点/文档根不再出现在选择器里（AI 侧快照不变，仍能读内容）
+- **修复 2（防御）**：高亮/点击 JS 加节点类型防御——`this.nodeType !== 1` 时升到父元素（Playwright 文本选择器语义：点一段文字=点它所在的链接/按钮）；无元素父级则返回明确错误（高亮：「不是可交互节点」；点击：「解析到不可点击的节点…请换编号或用锚点」）而不是裸 TypeError
+- 验证：新增 TestConsoleElementsInteractiveOnly——构造同形页面（静态段落+链接+按钮+输入框），断言列表零非交互角色、逐个高亮全部成功；builtin/desktop 全量过
+
+### fix(netdev): 「关闭浏览器」真正关闭整个受控浏览器——持久化后 UI 失去关浏览器的入口
+
+用户问：观察窗的关闭按钮是不是应该关整个受控浏览器？澄清三级语义并补上缺失的一级：
+
+- **语义分层**：观察窗右上角 ✕（= Esc/对话页签）只关观察窗**视图**，与其他工作台一致，保持不动；面板「关闭浏览器」才管浏览器。但持久化改造后它退化为只断开连接——**整个 UI 再也没有能真正关掉受控浏览器的入口**（只能手点 Chrome 窗口的 X）
+- **修复**：ConsoleClose 对自有持久浏览器（ownsBrowser，拉起或接管两种来路）执行**优雅关闭**——向浏览器级 CDP WebSocket 发裸 `Browser.close`（chromedp 公共执行器拦截该命令并建议 chromedp.Cancel，而 Cancel 对远端分配器只是断开，故绕行走裸帧）：全部页卡+进程退出、profile 先落盘（登录态无损，下次打开重新拉起并恢复页卡）。显式 cdpURL 附着的外部浏览器永不置 ownsBrowser——用户自己的浏览器只断开不关闭
+- 文案：面板按钮「关闭」→「关闭浏览器」（原文案歧义）；手册第二节补「关闭层级」说明
+- 验证：接管测试新增第五阶段——ConsoleClose 后固定端口在 8 秒内停止应答（浏览器真关了）；builtin 全量 + vitest 56/56 + mirror 脚本 22 断言过
+
+### fix(netdev/desktop): 观察窗幽灵来源芯片——会话结束未清理画面桶
+
+用户问：观察窗的「agent br_1/br_2/br_3/控制台」是什么、为什么删不掉。它们是画面来源切换器（观察任一浏览器会话的截图），但会话关闭后画面桶不清理，死会话残留成不可移除的幽灵芯片：
+
+- **根因**：内核在会话关闭时发 `status/end`（带 session_id），前端镜像存储的 end 分支只清 running 标志、不删会话桶——死会话一直挂到 8 个上限按新旧挤出
+- **修复**：end 帧现在删除对应会话桶（聚合画面仍保留最后一帧，历史行为不变）；观察窗正在看的 agent 会话结束时自动回落到「控制台」视角，不再停在空状态
+- **语义澄清**：来源芯片 = 当前活着的浏览器会话（控制台 = 手动驱动的会话，agent br_N = 对话里 AI 开的自动化会话）；会话结束芯片即消失，无需手动删
+- 验证：browser-mirror 脚本测试补 4 断言（桶存在→end 删除→聚合画面保留）全过；tsc 零错；vitest 56/56
+
+### fix(netdev): 接管后状态/预览不可用收尾——首帧直推 + 「受控制」提示条回归 + 接管会话端到端测试
+
+用户报：接管浏览器后状态不同步、预览看不到、「浏览器正在受控制」提示条消失。诊断：
+
+- **状态/预览不可用 = 上轮已修的 attach 启动即断连 bug 的症状**（连接死 → Location/截图全失败）。本轮在接管测试中补齐端到端验证防回归：接管会话上导航 → ConsoleStateOf 可读（状态同步）→ 测试 sink 收到带会话号的镜像帧（预览管线）。四阶段全链路：拉起→关会话→浏览器存活→接管且**真的能用**
+- **接管完成立即推一帧**：接管落点是你正在看的页面，侧栏预览此前要等第一次动作才有画面——现在 newConsoleBrowserSession 接管分支直接 mirrorAfterAction，预览即时出现
+- **「浏览器正在受控制」提示条回归**：持久浏览器启动参数去掉过自动化痕迹，但用户依赖这条提示区分受控浏览器与日常浏览器，消失被读作"同步坏了"——加回 `--enable-automation`（有意保留的可见线索）
+- 验证：接管四阶段测试（3.3s 真浏览器）+ keepalive 测试复跑 + builtin/desktop 全量过 + tsc 本批零错
+
+### fix(netdev): 保活 ping 升级为全页卡心跳 + 连环修复 attach 路径两枚潜伏雷
+
+用户问：保持会话是保所有页卡吗？——不是，原来只作用**当前页卡**（跟随切换）。多页卡多站点场景（页卡1 安全平台 + 页卡2 监控系统）下另一个站登录态没人管，确为缺陷：
+
+- **ping 改为全页卡心跳**：每个打开的 http(s) 页卡各发一次同源心跳（Cookie 按站点隔离，各站各自续命）；chrome:// 新标签页等非 http 页卡跳过（无可保会话、同源 fetch 也发不出）。个别页卡失败=部分降级（记状态行错误、其余照常、仍算刷新），全部失败才算保活失败。navigate 保持**仅当前页卡**（自动刷新所有页卡会冲掉未保存表单）；local 不变
+- **生命周期安全**：每页卡一个心跳 CDP 会话，用 `context.WithoutCancel` 从会话上下文剥离（chromedp 取消页卡上下文会**关掉该页卡**，且会话拆除会级联）——只在页卡自身消失后清理；页卡增减每 tick 自适应（新建即纳入、关闭即剪除）
+- **潜伏雷 1（attach 启动即死）**：newAttachedSession 的启动探测用 `WithTimeout+defer bootCancel`——chromedp v0.15 首次 Run 把浏览器连接生命周期绑在所收 context 上，bootCancel 一执行整条连接静默死亡（attach 后任何动作报 "context canceled"）。改 goroutine+外部超时（newBrowserSession 同款模式）。**影响此前所有 attach 路径**（browser_attach 工具 + 本轮持久浏览器接管）
+- **潜伏雷 2（attach 空指针）**：attach 会话漏初始化 stepTracker，任何带 wrapResult 的动作直接 panic。补 `newStepTracker()`
+- 工具描述/手册第七节更新（ping=全页卡、navigate=仅当前页卡、local=仅防回收）
+- 验证：新增 TestKeepAlivePingAllTabs（真实浏览器双页卡两次 tick，逐页卡断言 `http 200`）+ TestConsoleBrowserSpawnAndTakeover 复跑；测试改自管临时目录带重试清理（Windows 杀进程后异步释放 profile 句柄，t.TempDir 立即清会假失败）；builtin/desktop 全量过；tsc 本批零错；guides-drift 3/3
+
+### feat(netdev): 控制台浏览器持久化——重启 fairpeer 自动接管上次浏览器（页卡+登录态）
+
+用户痛点：每次重开 fairpeer 都要重开浏览器、重开网页、重新登录。方案：控制台浏览器改为**持久实例**（固定 profile + 固定 CDP 端口 9333，避开协作托管浏览器的 9222）：
+
+- **打开即接管**：ConsoleOpen 先探测 9333——上一次 fairpeer 退出后存活的浏览器（browserlaunch 用裸 cmd.Start，进程本就不随 fairpeer 死）直接接管，页卡/登录态原样保留，落点拾取第一个真实页卡而非空白页；会话栏显示「Chrome (接管)」
+- **不在则拉起**：用持久 profile（`~/.fairpeer/console-browser`）+ `--restore-last-session` 拉起——登录态由 profile 恢复，上次页卡由 Chrome 会话恢复；本次运行的 Handle 只记录、**永不 Close**（浏览器必须活得比 fairpeer 久）
+- **关闭语义安全**：持久会话沿用 attached 语义——ConsoleClose/空闲回收/fairpeer 退出都只断开 CDP 连接，浏览器留着等下次接管
+- **降级**：固定端口被非浏览器进程占用或 profile 被僵尸进程锁死时，退回旧的临时浏览器行为（报错说明两个失败原因），不硬失败
+- 代理 session 的 browser_open 不受影响（仍是临时 profile）
+- 验证：TestConsoleBrowserSpawnAndTakeover 真实 Chrome 全链路（拉起→关会话→浏览器存活→重开接管且不重复拉起），隔离端口+临时 profile，泄漏清零（进程级核查 0）；builtin 全量过；tsc 本批零错；guides-drift 3/3；手册第二节更新
+
+### feat(netdev): 流程定位等待默认化 + 重 JS 站点标准搭配进模板/手册
+
+用户指出深层问题："CSS 加载了我们收到了，但按钮的 JS 还没绑好"——元素可见 ≠ 事件已绑。取舍决策：**"等出现"自动化（安全），"等绑好"靠代理信号显式写（没有可靠探针），"没生效就重点"永不自动化（双重提交风险）**：
+
+- **内核：定位等待**（tryFlowAnchors）：click/type/hover/select/extract 的目标没渲染出来时，不再立刻失败——按 300ms 轮询**最多 8 秒**（整个锚点链共享预算），出现后执行一次动作。安全性由 isLocateMiss 严格分类保证：只重试"目标不在页面上"类错误（这些错误在动作派发前抛出，重试不可能双击）；动作已执行/配置错误/ref 失效类立即走下一锚点。等过才成功的步骤在报告里提示「目标 X.Xs 后才出现——建议在步骤前加 wait visible:」（慢站点的可观测性）。文字锚路径此前完全没有重试，CSS 路径仅 ~1.5s 退避，现在统一
+- **模板**：browser-form-submit / browser-stream-query 内置标准搭配——navigate 后 `wait networkidle`（JS 装载执行完）、提交按钮 `:not([disabled])`（等应用宣告就绪，比可见更可靠）、点击后 stable:/效果等待
+- **手册第四节**：新增「定位自带等待」与「重 JS 站点标准搭配」三条写法；guides 副本同步
+- **明确不做**：点击后检测"没生效"自动重点——无法区分延迟生效与未生效，双击即双提交（与"点击不自动重试"既定原则同源）
+- 验证：TestIsLocateMiss 10 用例（定位类可等 / 动作类不可等 / nil）；go build + builtin 全测过；tsc 本批零错（nmap 报错仍为并行会话半成品）；vitest 56/56 含模板重解析
+
+### fix(netdev/desktop): ref 失效报错说人话 + 高亮失效按 角色/名称 自动找回
+
+用户反馈：`高亮 "e6": No node with given id found (-32000)`。这是 ref 失效的第三种形态——网址没变但页面内容变了（SPA 局部刷新/轮询表格/DOM 替换），URL 看门狗比对发现不了：
+
+- **源头友好化**（browsersnapshot.go resolveRefToObjectID）：`dom.ResolveNode` 的裸 CDP -32000 映射为「ref %q 已失效——页面内容在快照后变化了（网址未变）；重新获取元素后再选」——所有 ref 消费方（高亮/点击/输入/hover/flow）一并受益
+- **绑定层兜底**：localizeConsoleErr 补 -32000 映射（防其他路径冒裸错），并把它套到 BrowserConsoleHighlight 上（此前只有 click/type 有）
+- **高亮自动找回**（面板层）：点选 ref 行高亮失败时不再只报错——自动重抓元素列表，按**角色+名称**匹配同位元素，用新 ref 重新框选并更新目标栏，日志记「↻ 页面已更新：登录 编号 e6 → e9，已自动重新框选」；找不到才落横幅。高亮可以安全自动重试（框错立即可见，不像点击是破坏性动作——维持点击不自动重试的既定决策）
+- **附带修复**：CSS/text= 锚点未命中时高亮原先**静默无操作**（JS 返回 false 被当成功，预览不动像"坏了"）——现返回「页面上找不到目标 %q（CSS/文字锚点未命中）」
+- 验证：TestLocalizeConsoleErr 4 用例（-32000/无快照/未知 ref/透传）；go build + builtin 全测 + desktop 全测过；tsc 本批零错（nmap 报错仍为并行会话半成品）；vitest 56/56
+
 ### feat(netdev): netprobe 编排落地（P0-2 中期）+ 红队批立项决策文档
 
 - **netprobe 产品侧编排**（netprobeorch.go）：`cmd/netprobe` 二进制早已存在（TCP 探测 + raw ICMP），但产品只会报错说 "use netprobe" 而没有任何代码跑它。补上编排：`Manager.NetprobeSweep` + agent 工具 `netdev_netprobe`——闸门与 nmap 同级（engagement 信封 → scopes 白名单），主机预算走 `max_hosts_per_job`（默认 65536 = 一个 /16，不占 tunnel 的 4096 上限），二进制 `netprobe_path` 指定或 PATH 查找；存活主机回填待确认区（`source: netprobe`，仅 ICMP 存活的主机为无端口行），单条滚动 info 汇总 + 审计。隧道探测覆盖不了的 ICMP 存活与 /16 级网段由此闭环；UDP 探测留后续

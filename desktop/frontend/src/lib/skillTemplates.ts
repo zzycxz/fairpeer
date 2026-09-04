@@ -70,6 +70,8 @@ function loginKeepSkillContent(): string {
     "description: 打开站点、人工完成登录并验证登录态；配合保持会话支撑长间隔任务。",
     "runAs: subagent",
     "executor: browser-flow",
+    "domain: browser-ops",
+    "draft: true",
     "allowed-tools: browser_open, browser_navigate, browser_wait, browser_extract",
     "params: 站点=https://example.com",
     "---",
@@ -111,6 +113,8 @@ function formSkillContent(): string {
     "description: 问用户拿单号、填表、人工过验证后提交并提取回执。",
     "runAs: subagent",
     "executor: browser-flow",
+    "domain: browser-ops",
+    "draft: true",
     "allowed-tools: browser_open, browser_navigate, browser_type, browser_click, browser_wait, browser_extract",
     "params: 站点=https://example.com/order",
     "---",
@@ -126,19 +130,22 @@ function formSkillContent(): string {
     "| # | 操作 | 目标 | 值 |",
     "|---|------|------|------|",
     "| 1 | navigate | `{{站点}}` |  |",
-    "| 2 | ask | 工单号 | 请输入要提交的工单号： |",
-    "| 3 | type | `#order-no` | {{工单号}} |",
-    "| 4 | click | `button.next` |  |",
-    "| 5 | human | `visible:.captcha-done` | 请在浏览器中完成滑块验证 |",
-    "| 6 | click | `button[type=submit]` |  |",
-    "| 7 | wait | `stable:.receipt` | 60s |",
-    "| 8 | extract | `.receipt` |  |",
+    "| 2 | wait | `networkidle` | 15s |",
+    "| 3 | ask | 工单号 | 请输入要提交的工单号： |",
+    "| 4 | type | `#order-no` | {{工单号}} |",
+    "| 5 | click | `button.next` |  |",
+    "| 6 | human | `visible:.captcha-done` | 请在浏览器中完成滑块验证 |",
+    "| 7 | click | `button[type=submit]:not([disabled])` |  |",
+    "| 8 | wait | `stable:.receipt` | 120s |",
+    "| 9 | extract | `.receipt` |  |",
     "",
     "## 注意事项",
     "",
-    "- ask 的回复存为 {{工单号}}，第 3 步直接引用；试运行时在面板输入框里填",
+    "- ask 的回复存为 {{工单号}}，第 4 步直接引用；试运行时在面板输入框里填",
     "- human 步骤暂停等人工完成滑块，检测条件满足后自动继续",
-    "- 第 7 步 stable: 等回执区域内容稳定（流式输出完成）再提取",
+    "- 重 JS 站点的标准搭配（已内置在本模板）：navigate 后 `networkidle`（JS 装载执行完、事件多半已绑）；提交按钮 `:not([disabled])`（等应用自己宣告就绪，比可见更可靠）；点击后 `stable:`/效果等待确认真的生效",
+    "- 定位类目标（click/type 等）内核自带「最多 8 秒等元素出现」，写错选择器时才会等满 8 秒后报错",
+    "- 第 8 步 stable: 等回执区域内容稳定（流式输出完成）再提取；AI 生成常需 30-60 秒，超时值建议 120",
     "",
     "## 验证",
     "",
@@ -156,6 +163,8 @@ function streamQuerySkillContent(): string {
     "description: 向 AI/对话站点提问，等流式回答输出完成后提取结果。",
     "runAs: subagent",
     "executor: browser-flow",
+    "domain: browser-ops",
+    "draft: true",
     "allowed-tools: browser_open, browser_navigate, browser_type, browser_click, browser_wait, browser_extract",
     "params: 站点=https://chat.example.com",
     "---",
@@ -171,22 +180,23 @@ function streamQuerySkillContent(): string {
     "| # | 操作 | 目标 | 值 |",
     "|---|------|------|------|",
     "| 1 | navigate | `{{站点}}` |  |",
-    "| 2 | human | `url:/chat` | 请在浏览器中完成登录 |",
-    "| 3 | ask | 问题 | 要向站点提什么问题？ |",
-    "| 4 | type | `#prompt-textarea` | {{问题}} |",
-    "| 5 | key | `#prompt-textarea` | enter |",
-    "| 6 | wait | `stable:.answer-body` | 300s |",
-    "| 7 | extract | `.answer-body` |  |",
+    "| 2 | wait | `networkidle` | 15s |",
+    "| 3 | human | `url:/chat` | 请在浏览器中完成登录 |",
+    "| 4 | ask | 问题 | 要向站点提什么问题？ |",
+    "| 5 | type | `#prompt-textarea` | {{问题}} |",
+    "| 6 | key | `#prompt-textarea` | enter |",
+    "| 7 | wait | `stable:.answer-body` | 300s |",
+    "| 8 | extract | `.answer-body` |  |",
     "",
     "## 注意事项",
     "",
     "- 输入框与回答区域的选择器按实际站点改；回答区也可用 main、[data-message] 之类",
-    "- 第 6 步 stable: 判定流式输出停止变化 2 秒即完成，超时 300 秒可按需调大",
+    "- 第 7 步 stable: 流式内容停止变化（自适应静默 2-8 秒）即完成，超时 300 秒可按需调小",
     "- 提问框支持 Ctrl+Enter 的站点，把第 5 步改为点击发送按钮",
     "",
     "## 验证",
     "",
-    "第 7 步提取到非空回答即成功。",
+    "第 8 步提取到非空回答即成功。",
     "",
   ].join("\n");
 }
@@ -200,6 +210,8 @@ function dataExportSkillContent(): string {
     "description: 按条件筛选并导出报表/日志，等待完成后提取导出结果。",
     "runAs: subagent",
     "executor: browser-flow",
+    "domain: browser-ops",
+    "draft: true",
     "allowed-tools: browser_open, browser_navigate, browser_type, browser_click, browser_wait, browser_extract",
     "params: 站点=https://example.com/reports",
     "---",
@@ -232,7 +244,7 @@ function dataExportSkillContent(): string {
     "",
     "## 验证",
     "",
-    "第 9 步提取到导出成功提示或下载完成即成功。",
+    "第 9 步提取到回执编号即成功。",
     "",
   ].join("\n");
 }
@@ -248,6 +260,8 @@ function siemWatchSkillContent(): string {
 name: browser-siem-watch
 description: 安全平台定时巡检——定时读取安全态势感知平台日志并分析判断，发现问题发邮件告警；掉线发邮件通知重新登录，绝不人工等待。
 runAs: inline
+domain: browser-ops
+draft: true
 ---
 
 # 安全日志值守协议（定时巡检）
@@ -278,6 +292,7 @@ runAs: inline
 
 - 绝不代替用户输入密码、验证码；掉线的正确动作是邮件通知，不是等待。
 - 无头触发（触发时没有打开的对话页）email_send 默认被拒绝：要么先在设置里为 email_send 加放行规则，要么保持一个 cowork 对话页开着（交互路径可弹审批）。
+- 运行环境差异：定时任务在办公 profile 下触发（browser-auto/email_send/定时工具齐备）；在运维页签手动运行时没有 email_send——需要邮件告警请在办公页签调用，或把告警改走 im_send。
 - 邮箱防刷屏：掉线通知只在登录态「由好变坏」的第一次发；告警邮件每轮至多一封。
 - 结果永远返回摘要（哪怕是「配置不全」「掉线」），空结果会让定时任务记录变成黑洞。
 `;
@@ -290,6 +305,8 @@ function pagePatrolSkillContent(): string {
 name: browser-page-patrol
 description: 页面巡检循环——逐轮读取指定页面的关键指标并与上一轮对比，变化即报告；空闲保活，用户消息唤醒下一轮。
 runAs: inline
+domain: browser-ops
+draft: true
 ---
 
 # 页面巡检协议
@@ -330,6 +347,8 @@ function supervisorLoopSkillContent(): string {
 name: browser-site-console
 description: 网站值守循环——打开站点等用户人工登录，之后逐轮接收对话指令、定位网页元素操作、等流式输出完成再回报，支持会话保活与跨轮唤醒。
 runAs: inline
+domain: browser-ops
+draft: true
 ---
 
 # 网站值守循环协议
@@ -347,7 +366,7 @@ runAs: inline
 
 1. 理解指令：归类意图（查询 / 填写 / 点击 / 提取 / 组合）；找出用户指定的网页位置——给了准确 CSS 选择器就直接用；给的是描述（如「搜索框」「提交按钮」），让子代理先 browser_snapshot 再定位。
 2. 派发子代理，arguments 必须包含：复用 session_id=<id>（明确写「不要 browser_open，不要新开会话」）、目标元素定位、要执行的操作。
-3. 等待远端回复：远端常见流式输出。要求子代理在操作后先 browser_wait(condition="stable:<输出容器选择器>")（内容稳定 2 秒即完成）；不知道选择器时用 networkidle。完成后再 browser_extract 提取回复内容带回。
+3. 等待远端回复：远端常见流式输出。要求子代理在操作后先 browser_wait(condition="stable:<输出容器选择器>")（流式内容停止变化后静默 2-8 秒即完成，AI 生成常需 30-60 秒，timeout 给到 120）；不知道选择器时用 networkidle。完成后再 browser_extract 提取回复内容带回。
 4. 判断与回报：自己读提取结果，思考后在对话里给出结论；用户要原文才贴原文，长内容给摘录 + 要点。
 5. 保活询问（只在第一轮结束时问一次，记住答复）：「两次指令间隔如果较长，需要我保持网页登录会话吗？」同意 → 派发子代理调用 browser_keepalive(session_id=<id>, enabled=true, interval_sec=300, mode="ping")；拒绝 → 不保活。用户随时可改主意。
 6. 结束回合，等待用户下一条消息——用户的任何新消息就是唤醒信号，回到第 1 步。

@@ -2,6 +2,7 @@ package netdev
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -75,5 +76,77 @@ func TestRunBackupAllDevices(t *testing.T) {
 	vers, err := m.RunBackup(context.Background(), "")
 	if err != nil || len(vers) != 1 || vers[0].Device != "sw1" {
 		t.Fatalf("all-sweep = %+v err=%v (dead device expected in problems, sw1 backed up)", vers, err)
+	}
+}
+
+// 备份→恢复闭环：diff-current 把库存版本与现拉 running-config 对上，且当前侧
+// 走密封 Exec（审计可见）；restore_from 校验把来源版本钉死在它所属的设备上。
+func TestBackupDiffCurrentAndRestoreFrom(t *testing.T) {
+	SetBackupsDir(t.TempDir())
+	t.Cleanup(func() { SetBackupsDir("") })
+	m, auditPath := testManager(t, startSimDevice(t))
+
+	// 先备份一版拿到现网文本，再造一个“多了一行 vlan 999”的旧版本，
+	// 模拟“恢复到改坏之前”的起草场景。
+	live, err := m.RunBackup(context.Background(), "sw1")
+	if err != nil || len(live) != 1 {
+		t.Fatalf("seed backup = %+v err=%v", live, err)
+	}
+	liveText, err := GetBackupText("sw1", live[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vOld, err := saveBackup("sw1", liveText+"\nvlan 999\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := m.BackupDiffCurrent(context.Background(), "sw1", vOld.ID)
+	if err != nil {
+		t.Fatalf("BackupDiffCurrent: %v", err)
+	}
+	if !strings.Contains(diff, "-vlan 999") {
+		t.Fatalf("diff missing the restore delta (-vlan 999):\n%s", diff)
+	}
+	audited := false
+	for _, a := range readAudit(t, auditPath) {
+		if a.Command == "display current-configuration" && a.Status == AuditOK {
+			audited = true // the current side was a sealed read, not a side door
+		}
+	}
+	if !audited {
+		t.Fatal("diff-current's live read left no audit row — must go through the sealed path")
+	}
+
+	// restore_from：好路径 + 三种拒绝（坏格式/库里没有/设备不在步骤里）。
+	ok := []ProposalStep{{Device: "sw1", Commands: []string{"vlan 999"}, Rollback: []string{"undo vlan 999"}}}
+	if err := ValidateRestoreFrom(vOld.ID, ok); err != nil {
+		t.Fatalf("valid restore_from rejected: %v", err)
+	}
+	if err := ValidateRestoreFrom("no-at-sign", ok); err == nil {
+		t.Fatal("malformed version id accepted")
+	}
+	if err := ValidateRestoreFrom("ghost@123", ok); err == nil {
+		t.Fatal("version missing from the vault accepted")
+	}
+	wrongDev := []ProposalStep{{Device: "dead", Commands: []string{"vlan 999"}, Rollback: []string{"undo vlan 999"}}}
+	if err := ValidateRestoreFrom(vOld.ID, wrongDev); err == nil {
+		t.Fatal("restore version pinned to a device with no step in the proposal")
+	}
+
+	// 工具面：list/read/diff-current 三个动作都通，未知动作拒绝。
+	tool := &backupTool{m: m}
+	out, err := tool.Execute(context.Background(), json.RawMessage(`{"device":"sw1","action":"diff-current","id":"`+vOld.ID+`"}`))
+	if err != nil || !strings.Contains(out, "-vlan 999") {
+		t.Fatalf("tool diff-current = %q err=%v", out, err)
+	}
+	if out, err = tool.Execute(context.Background(), json.RawMessage(`{"device":"sw1","action":"list"}`)); err != nil || !strings.Contains(out, vOld.ID) {
+		t.Fatalf("tool list = %q err=%v", out, err)
+	}
+	if out, err = tool.Execute(context.Background(), json.RawMessage(`{"device":"sw1","action":"read","id":"`+vOld.ID+`"}`)); err != nil || !strings.Contains(out, "vlan 999") {
+		t.Fatalf("tool read = %q err=%v", out, err)
+	}
+	if _, err = tool.Execute(context.Background(), json.RawMessage(`{"device":"sw1","action":"explode"}`)); err == nil {
+		t.Fatal("unknown action accepted")
 	}
 }

@@ -43,7 +43,7 @@ type NetdevEvidenceView struct {
 	Output  string
 }
 
-// NetdevProposalSummary is one row of 「提案」 for the IM command surface.
+// NetdevProposalSummary is one row of 「变更」 for the IM command surface.
 type NetdevProposalSummary struct {
 	ID     string
 	Status string
@@ -142,16 +142,18 @@ func (gw *BotGateway) handleNetdevCommand(msg InboundMessage) string {
 			return r.Msg
 		}
 		return fmt.Sprintf("已确认 %s（告警仍在队列，处理完用桌面端标记已处理）。", arg)
-	case "提案", "proposals", "p":
+	case "变更", "提案", "changes", "proposals", "p":
+		// 「变更」是正名（与桌面端变更中心一致）；「提案」保留为别名——
+		// 旧习惯和既有 IM 会话里的命令不失效。
 		act := strings.ToLower(arg)
 		switch act {
 		case "":
 			ps := bridge.NetdevProposals()
 			if len(ps) == 0 {
-				return "当前没有待决策的提案。"
+				return "当前没有待决策的变更。"
 			}
 			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("提案（%d）：\n", len(ps)))
+			sb.WriteString(fmt.Sprintf("变更（%d）：\n", len(ps)))
 			for i, pr := range ps {
 				if i >= 10 {
 					sb.WriteString(fmt.Sprintf("…（其余 %d 条）\n", len(ps)-10))
@@ -159,12 +161,12 @@ func (gw *BotGateway) handleNetdevCommand(msg InboundMessage) string {
 				}
 				sb.WriteString(fmt.Sprintf("· %s [%s] %s\n", pr.ID, pr.Status, pr.Title))
 			}
-			sb.WriteString("回复 /netdev 提案 批准 <编号> 或 /netdev 提案 驳回 <编号> 原因…")
+			sb.WriteString("回复 /netdev 变更 批准 <编号> 或 /netdev 变更 驳回 <编号> 原因…")
 			return sb.String()
 		case "批准", "approve", "ok":
 			if rest == "" {
-				// /netdev 提案 批准 <id> → fields[2]=批准, fields[3]=id
-				return "用法：/netdev 提案 批准 <编号>。"
+				// /netdev 变更 批准 <id> → fields[2]=批准, fields[3]=id
+				return "用法：/netdev 变更 批准 <编号>。"
 			}
 			r := bridge.NetdevProposalApprove(rest)
 			if !r.OK {
@@ -174,7 +176,7 @@ func (gw *BotGateway) handleNetdevCommand(msg InboundMessage) string {
 		case "驳回", "拒绝", "reject":
 			parts := strings.SplitN(rest, " ", 2)
 			if len(parts) == 0 || parts[0] == "" {
-				return "用法：/netdev 提案 驳回 <编号> 原因…。"
+				return "用法：/netdev 变更 驳回 <编号> 原因…。"
 			}
 			r := bridge.NetdevProposalReject(parts[0], strings.TrimSpace(parts[1]))
 			if !r.OK {
@@ -182,11 +184,11 @@ func (gw *BotGateway) handleNetdevCommand(msg InboundMessage) string {
 			}
 			return "已驳回：" + r.Msg
 		default:
-			// /netdev 提案 <id> 之外的第一段当编号处理无意义——引导用法。
-			return "用法：/netdev 提案 | /netdev 提案 批准 <编号> | /netdev 提案 驳回 <编号> 原因…"
+			// /netdev 变更 <id> 之外的第一段当编号处理无意义——引导用法。
+			return "用法：/netdev 变更 | /netdev 变更 批准 <编号> | /netdev 变更 驳回 <编号> 原因…"
 		}
 	default:
-		return "用法：/netdev 发现 | /netdev 详情 <编号> | /netdev ack <编号> | /netdev 提案 [批准|驳回 <编号>]"
+		return "用法：/netdev 发现 | /netdev 详情 <编号> | /netdev ack <编号> | /netdev 变更 [批准|驳回 <编号>]"
 	}
 }
 

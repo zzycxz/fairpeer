@@ -354,12 +354,13 @@ type Messages struct {
 	WriteEnvErr               string // "write .env:" — prefix for env-write failure
 
 	// provider HTTP error explanations — actionable, reason + fix per status code
-	ProviderErrBadRequest    string // 400
-	ProviderErrAuth          string // 401
-	ProviderErrUnprocessable string // 422
-	ProviderErrRateLimited   string // 429
-	ProviderErrServer        string // 500
-	ProviderErrServerBusy    string // 503
+	ProviderErrBadRequest       string // 400
+	ProviderErrGatewayTransient string // 400 whose body is a relay-drop signature
+	ProviderErrAuth             string // 401
+	ProviderErrUnprocessable    string // 422
+	ProviderErrRateLimited      string // 429
+	ProviderErrServer           string // 500
+	ProviderErrServerBusy       string // 503
 
 	// selection menus
 	SelectOneHint      string // "(↑/↓ · Enter · q to cancel)"

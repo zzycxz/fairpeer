@@ -501,6 +501,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// (whitelist active AND not whitelisted). The store already hid the first two
 	// from the live Skills() list; this re-marks them for the index tags.
 	whitelist := profileSkillWhitelist(opts.Profile)
+	domains := profileSkillDomains(opts.Profile)
 	// Cold-skill detection: skills unused longer than the configured threshold
 	// are tagged [休眠] in the index. Built-ins are exempt (they're cheap, and a
 	// user shouldn't lose explore/research just because they haven't needed it).
@@ -513,6 +514,19 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		for _, s := range allSkills {
 			if s.Scope == skill.ScopeBuiltin {
 				continue // never retire built-ins for inactivity
+			}
+			// Never-used skills are cold-eligible ONLY when the skill file
+			// itself is older than the threshold: a freshly recorded/installed
+			// skill must enter the index full-text ([休眠] on first sight made
+			// models refuse to invoke it). File mtime is the closest proxy we
+			// have for "when it appeared".
+			if !ut.HasUsed(s.Name) {
+				if s.Path == "" || s.Path == "(builtin)" {
+					continue
+				}
+				if st, serr := os.Stat(s.Path); serr == nil && time.Since(st.ModTime()) < threshold {
+					continue
+				}
 			}
 			known = append(known, s.Name)
 		}
@@ -540,16 +554,28 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			userDisabledSet[config.SkillNameKey(n)] = true
 		}
 	}
+	// Shipped-skill keys: profile whitelists curate the SHIPPED set per
+	// domain (the cowork profile comment says so explicitly); user-authored
+	// skills are the user's own choice and stay visible in every profile.
+	// Without this exemption the whitelist hid user skills like
+	// browser-actions from the index entirely — the model never learned they
+	// existed even though run_skill could still execute them.
+	shippedSkillKeys := make(map[string]bool, len(builtinBuiltinSkillNames))
+	for _, n := range builtinBuiltinSkillNames {
+		shippedSkillKeys[config.SkillNameKey(n)] = true
+	}
 	for _, s := range allSkills {
 		userDisabled := userDisabledSet[config.SkillNameKey(s.Name)]
-		// A profile whitelist (e.g. the dev profile) hides skills NOT named in it.
-		// This is distinct from a user turning a skill off: profile hiding is
-		// automatic and reversible by switching profile, so it must NOT pollute the
-		// coding model's prompt with office-skill descriptions the user never opted
-		// out of. We tag such skills ProfileHidden and skip them entirely below —
-		// the model neither sees them nor suggests re-enabling. User-disabled skills
-		// stay in the index with [关闭] so the model can hint at re-enabling.
-		profileHidden := !userDisabled && whitelist != nil && !whitelist[config.SkillNameKey(s.Name)]
+		sKey := config.SkillNameKey(s.Name)
+		// A profile whitelist (e.g. the dev profile) hides SHIPPED skills NOT
+		// named in it. This is distinct from a user turning a skill off: profile
+		// hiding is automatic and reversible by switching profile, so it must NOT
+		// pollute the coding model's prompt with office-skill descriptions the
+		// user never opted out of. We tag such skills ProfileHidden and skip them
+		// entirely below — the model neither sees them nor suggests re-enabling.
+		// User-disabled skills stay in the index with [关闭] so the model can
+		// hint at re-enabling.
+		profileHidden := !userDisabled && whitelist != nil && !whitelist[sKey] && shippedSkillKeys[sKey]
 		s.Disabled = userDisabled
 		s.ProfileHidden = profileHidden
 		// Mark cold (long-unused) skills. A skill that's both disabled and cold
@@ -558,8 +584,16 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			s.Cold = true
 		}
 		// Profile-hidden skills are omitted from the pinned index (zero prompt
-		// cost). User-disabled ones still enter it, tagged [关闭].
-		if profileHidden {
+		// cost). User-disabled ones still enter it, tagged [关闭]. Drafts
+		// (generated but not yet woken) are omitted too — the model must not
+		// know them until activation. A USER skill whose `domain:` frontmatter
+		// isn't covered by the profile's SkillDomains is folded the same way —
+		// index budget/relevance only: unlike profileHidden (which also
+		// disables the skill in the live store), a domain-folded skill stays
+		// callable via run_skill / /<name>. Undomained user skills are never
+		// folded.
+		domainFolded := domains != nil && s.Scope != skill.ScopeBuiltin && s.Domain != "" && !domains[strings.ToLower(s.Domain)]
+		if profileHidden || s.Draft || domainFolded {
 			continue
 		}
 		indexedSkills = append(indexedSkills, s)
@@ -619,11 +653,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// doesn't pollute the dev tool list, but allows subagents to work anywhere).
 	profileKey := config.ProfileNameKey(profileName(opts.Profile))
 	if profileKey == config.ProfileCowork || profileKey == config.ProfileNetDev { // Browser automation tools (cowork + netdev: the ops console's
-		// browser tab shares this session infrastructure, and netdev skills
-		// may drive browsers too). Hidden from the main loop's schema: the
-		// model drives the browser through run_skill("browser-auto")
-		// subagents, which reach these via FilterRegistry. This keeps 12
-		// browser tool schemas out of every turn.
+		// browser tab shares this session infrastructure, and the netdev
+		// profile whitelists browser-auto as the generic fallback — the
+		// routing rows say site-specific browser-ops skills win first).
+		// Hidden from the main loop's schema: the model drives the browser
+		// through run_skill("browser-auto") subagents (reached via
+		// FilterRegistry) or executor: browser-flow skills (kernel step
+		// runner). This keeps the browser tool schemas out of every turn.
 		builtin.SetConfiguredBrowserPath(cfg.Cowork.BrowserPath)
 		for _, t := range builtin.BrowserTools() {
 			reg.Add(t)
@@ -2206,14 +2242,15 @@ func applyProfileToSkillDisabled(p *config.Profile, configDisabled []string) []s
 	return out
 }
 
-// builtinBuiltinSkillNames is the fixed list of shipped skill names: the 15
-// code builtins (internal/skill/builtins.go) plus ppt-auto (embedded file
-// skill, released to ~/.fairpeer/skills — listed so profile whitelists govern
-// it too). Used by applyProfileToSkillDisabled to enumerate which shipped
-// skills a whitelist hides — the skill store hasn't been built yet at the
-// point that function runs, so we can't ask it for the list. Keep in sync
-// with builtinSkills(); drift lets a skill escape every whitelist (it stays
-// enabled in dev/cowork/netdev regardless of the profile's domain).
+// builtinBuiltinSkillNames is the fixed list of shipped skill names: the code
+// builtins (internal/skill/builtins.go) plus ppt-auto (embedded file skill,
+// released to ~/.fairpeer/skills — listed so profile whitelists govern it
+// too). Used by applyProfileToSkillDisabled to enumerate which shipped skills
+// a whitelist hides — the skill store hasn't been built yet at the point that
+// function runs, so we can't ask it for the list. Keep in sync with
+// builtinSkills(); drift lets a skill escape every whitelist (it stays enabled
+// in dev/cowork/netdev regardless of the profile's domain) —
+// TestBuiltinSkillNamesCoverCodeBuiltins enforces it.
 var builtinBuiltinSkillNames = []string{
 	"init", "install-capability", "test",
 	"explore", "research", "review", "security-review",
@@ -2223,6 +2260,7 @@ var builtinBuiltinSkillNames = []string{
 	"netdev-help",
 	"netdev-playbook",
 	"netdev-diag-ospf", "netdev-diag-bgp", "netdev-diag-interface",
+	"netdev-vulnscan",
 }
 
 // profileSkillWhitelist returns the profile's EnabledSkills as a SkillNameKey set,
@@ -2235,6 +2273,22 @@ func profileSkillWhitelist(p *config.Profile) map[string]bool {
 	for _, n := range p.EnabledSkills {
 		if k := config.SkillNameKey(n); k != "" {
 			out[k] = true
+		}
+	}
+	return out
+}
+
+// profileSkillDomains returns the profile's SkillDomains as a lowercased set,
+// or nil when the profile declares none (meaning: no domain folding — every
+// user skill is listed regardless of its `domain:` frontmatter).
+func profileSkillDomains(p *config.Profile) map[string]bool {
+	if p == nil || len(p.SkillDomains) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(p.SkillDomains))
+	for _, d := range p.SkillDomains {
+		if d = strings.TrimSpace(strings.ToLower(d)); d != "" {
+			out[d] = true
 		}
 	}
 	return out

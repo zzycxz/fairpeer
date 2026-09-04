@@ -50,6 +50,12 @@ type NetDevOvRisk struct {
 	CVEMatches    int    `json:"cve_matches"`
 	CVENeedsFeed  bool   `json:"cve_needs_feed"`
 	WeakCreds     int    `json:"weak_creds"`
+	// 蓝队核查透镜的未闭环拆分（source 前缀 vulnscan*/cve:*，与发现中心
+	// 「蓝队核查」筛选同规则）：总览数字含蓝队条目，但事件流只收 syslog/
+	// trap/alert——存量需要自己的聚合行与深链（2026-09-04 用户反馈割裂）。
+	VulnCritical int `json:"vuln_critical"`
+	VulnWarning  int `json:"vuln_warning"`
+	VulnOpen     int `json:"vuln_open"`
 }
 
 type NetDevOvInflight struct {
@@ -286,10 +292,20 @@ func (a *App) buildOverviewData(force bool) (*NetDevOverviewSnapshot, error) {
 		default:
 			snap.Risk.Info++
 		}
+		// 蓝队核查透镜（vulnscan*/cve:*，与发现中心筛选同规则）单列——
+		// 它们计入上面的风险数字，但不进下方 Events（存量非事件流）。
+		src := f.Source
+		if strings.HasPrefix(src, "vulnscan") || strings.HasPrefix(src, "cve:") {
+			snap.Risk.VulnOpen++
+			if f.Severity == netdev.SeverityCritical {
+				snap.Risk.VulnCritical++
+			} else if f.Severity == netdev.SeverityWarning {
+				snap.Risk.VulnWarning++
+			}
+		}
 		if f.Severity == netdev.SeverityCritical && isWeakCredFinding(f) {
 			snap.Risk.WeakCreds++
 		}
-		src := f.Source
 		if src != "" && (strings.HasPrefix(src, "syslog") || strings.HasPrefix(src, "trap") || strings.HasPrefix(src, "alert")) {
 			if len(snap.Events) < 20 {
 				snap.Events = append(snap.Events, NetDevOvEvent{

@@ -2,7 +2,7 @@ package netdev
 
 // job.go — Job 引擎（NETDEV_SPEC v1 §10.5 C 批 → v2 §九 R4）：多步骤长任务
 // harness。诊断 runbook 的步骤带 expect/timeout/retry/on-fail 与断点，执行
-// 经 m.Exec 的只读密封（Job 是诊断 harness——写动作仍然只存在于提案，本
+// 经 m.Exec 的只读密封（Job 是诊断 harness——写动作仍然只存在于变更，本
 // 引擎不给任何命令开分类器旁路）；watchdog 预算（墙钟/命令数/连续失败熔
 // 断）在每步之间裁决，超限即暂停等人。断点续跑：paused 状态持久化到盘，
 // JobResume 从断点继续；割接模式（cutover.go）与 R5 入侵排查向导复用本引

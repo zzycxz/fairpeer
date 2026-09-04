@@ -74,6 +74,16 @@ type Skill struct {
 	// the 步骤 table executes verbatim via the browser primitives (long
 	// per-site flows stay stable — no per-step model improvisation).
 	Executor string
+	// Domain, when set (frontmatter `domain:`, e.g. "browser-ops" / "netdev"),
+	// declares which product surface the skill belongs to. boot folds a user
+	// skill out of a profile's pinned index when the profile's SkillDomains
+	// doesn't cover it — visibility only, the skill stays callable by name.
+	Domain string
+	// Draft marks a pre-activation skill (frontmatter `draft: true`): excluded
+	// from the model's skill index and refused by run_skill until woken from
+	// the ops browser panel. The panel's trial runner ignores it — refining a
+	// draft before waking it is exactly what the trial runner is for.
+	Draft bool
 	// Disabled marks a skill the user turned off. It stays in the pinned skills
 	// index (so the model knows it exists and can suggest re-enabling) but is
 	// not callable via run_skill until re-enabled. Set by callers building the
@@ -485,7 +495,19 @@ func (s *Store) parse(path, stem string, scope Scope) (Skill, bool) {
 		Effort:       strings.TrimSpace(fm["effort"]),
 		MaxSteps:     parseIntFrontmatter(fm["max-steps"], fm["max_steps"]),
 		Executor:     strings.TrimSpace(fm["executor"]),
+		Domain:       strings.TrimSpace(fm["domain"]),
+		Draft:        isTrueFrontmatter(fm["draft"]),
 	}, true
+}
+
+// isTrueFrontmatter accepts true/yes/1 (case-insensitive) as an affirmative
+// frontmatter flag.
+func isTrueFrontmatter(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "true", "yes", "1":
+		return true
+	}
+	return false
 }
 
 // Create scaffolds a new skill stub at the chosen scope. Refuses to overwrite.

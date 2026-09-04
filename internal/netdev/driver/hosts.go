@@ -17,9 +17,13 @@ func (linuxShell) Key() string { return "linux-shell" }
 
 func (linuxShell) PagingOff() []string { return nil } // non-interactive; no pager
 
-// Prompt: `user@host:~$ ` / `root@host:~# ` (Debian family) or bare `# `/`$ `.
+// Prompt: `user@host:~$ ` / `root@host:~# ` (Debian family), the RedHat family
+// bracket form `[root@host ~]# ` / `[user@host dir]$ ` (CentOS/RHEL/Rocky
+// default bash PS1), or bare `# `/`$ `.
 func (linuxShell) Prompt() *regexp.Regexp {
-	return regexp.MustCompile(`(?:^|\n)[A-Za-z0-9._@-]{1,64}@[A-Za-z0-9._-]{1,64}:[^\n]{0,80}[$#] ?$|(?:^|\n)\$ ?$|(?:^|\n)# ?$`)
+	return regexp.MustCompile(`(?:^|\n)[A-Za-z0-9._@-]{1,64}@[A-Za-z0-9._-]{1,64}:[^\n]{0,80}[$#] ?$` +
+		`|(?:^|\n)\[[A-Za-z0-9._@-]{1,64}@[A-Za-z0-9._-]{1,64}[^\[\]\n]{0,80}\][$#] ?$` +
+		`|(?:^|\n)\$ ?$|(?:^|\n)# ?$`)
 }
 
 func (linuxShell) Errors() []*regexp.Regexp {
@@ -79,6 +83,15 @@ var linuxTables = classTables{
 		"docker ps", "docker stats --no-stream", "docker inspect", "docker logs --tail",
 		"docker images", "crictl ps", "kubectl get", "kubectl describe", "kubectl logs --tail",
 		"kubectl top",
+		// software inventory — blue-team fingerprint reads. Exact query forms
+		// only: the package managers' mutating verbs (dpkg -r, rpm -e, pip
+		// install…) fall outside these prefixes and stay Unknown = refused.
+		// Note firstWords lowercases, so "ssh -V"/"nginx -V" fold onto the -v
+		// entries below.
+		"dpkg -l", "dpkg --list", "dpkg-query", "rpm -qa", "rpm -q",
+		"pip list", "pip3 list", "pip freeze", "pip3 freeze",
+		"java -version", "openssl version", "ssh -v",
+		"nginx -v", "apache2ctl -v", "apachectl -v", "httpd -v",
 	},
 }
 

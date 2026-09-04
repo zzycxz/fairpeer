@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -784,6 +785,77 @@ func TestSaveToRoundTrips(t *testing.T) {
 	}
 	if got.Plugins[0].AutoStart == nil || *got.Plugins[0].AutoStart {
 		t.Errorf("auto_start should round-trip false, got %+v", got.Plugins[0].AutoStart)
+	}
+}
+
+// TestSaveToNetDevRoundTrips pins the 2026-09-03 desktop bug: the renderer
+// never emitted [netdev], so every 设置→运维 save reported success while the
+// devices/hops/projects silently vanished from config.toml on the rewrite.
+// The inventory is user-pinned (pinNetDev), so the section must survive a
+// user-scope save and stay absent from project scope.
+func TestSaveToNetDevRoundTrips(t *testing.T) {
+	c := Default()
+	c.NetDev = NetDevConfig{
+		Enabled:     true,
+		NetworkName: "总部生产网",
+		DefaultMode: "diagnose",
+		Guardrails:  NetDevGuardrails{ConfirmEachCommand: true, TurnCommandBudget: 12, AllowedGroups: []string{"core"}},
+		Discovery:   NetDevDiscovery{Scopes: []string{"10.0.0.0/8"}, Rate: 64, Mode: "auto"},
+		ExtraRead:   map[string][]string{"huawei": {"display diagnostic-info"}},
+		Devices: []NetDevDevice{{
+			Name: "core-sw-1", Vendor: "huawei", OS: "vrp8", Address: "10.1.1.1", Port: 22,
+			Via: []string{"jump"}, Group: "core", Username: "ops", PasswordEnv: "NETDEV_PWD_core-sw-1",
+			Encoding: "auto", LogPaths: []string{"/var/log"}, SNMP: &NetDevSNMP{Version: "v2c", CommunityEnv: "NETDEV_SNMP_core-sw-1"},
+		}},
+		Hops:     []NetDevHop{{Name: "jump", Host: "203.0.113.7", Port: 2222, User: "bastion", PasswordEnv: "NETDEV_PWD_jump"}},
+		Groups:   []NetDevGroup{{Name: "core", Policy: NetDevPolicyProposal, ChangeWindow: "tue,thu 22:00-24:00"}},
+		Projects: []NetDevProject{{Name: "DC-1", Groups: []string{"core"}, Note: "一号机房"}},
+		Presets:  []NetDevPreset{{Name: "OSPF 邻居全套", Commands: []string{"display ospf peer"}, Vendors: []string{"huawei"}}},
+		DBSources: []NetDevDBSource{{
+			Name: "order-db", Type: "mysql", Host: "10.2.0.5", Port: 3306, Username: "ro",
+			PasswordEnv: "NETDEV_DB_PWD_order-db", Allowlist: []string{"SHOW PROCESSLIST"}, Via: []string{"jump"},
+		}},
+		AlertRules:          []NetDevAlertRule{{Name: "core-down", Metric: "reachable", Op: "==", Value: 0, Severity: "critical", Enabled: true}},
+		PollIntervalSeconds: 60,
+		Syslog:              NetDevSyslogConfig{Port: 5140},
+		Trap:                NetDevTrapConfig{Port: 1162},
+		NotifyWebhook:       "https://example.com/hook",
+		NotifyFormat:        "feishu",
+		NotifyMinSeverity:   "warning",
+		Assessment:          NetDevAssessment{EngagementID: "ENG-2026-001", Scopes: []string{"10.0.0.0/8"}, Expires: "2099-01-01", Approver: "张三"},
+	}
+	if err := ValidateNetDev(c.NetDev); err != nil {
+		t.Fatalf("fixture should validate: %v", err)
+	}
+
+	path := filepath.Join(t.TempDir(), "fairpeer.toml")
+	// SaveTo picks the scope from the path (only the real user config dir maps
+	// to RenderScopeUser); an explicit user-scope save is the exact path the
+	// desktop settings pipeline takes for config.toml.
+	if err := c.SaveToScope(path, RenderScopeUser); err != nil {
+		t.Fatalf("SaveToScope: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "[netdev") {
+		t.Fatalf("saved file has no [netdev] section:\n%s", raw)
+	}
+
+	var got Config
+	if _, err := toml.DecodeFile(path, &got); err != nil {
+		t.Fatalf("saved file does not parse: %v", err)
+	}
+	if !reflect.DeepEqual(got.NetDev, c.NetDev) {
+		t.Errorf("netdev section did not round-trip:\n got %+v\nwant %+v", got.NetDev, c.NetDev)
+	}
+
+	// Project scope must never carry the user-pinned inventory.
+	projectBody := RenderTOMLForScope(c, RenderScopeProject)
+	if strings.Contains(projectBody, "[netdev") {
+		t.Error("project scope should not render [netdev] (user-pinned section)")
 	}
 }
 

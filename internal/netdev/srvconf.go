@@ -5,7 +5,7 @@ package netdev
 // 两版本 UnifiedDiff（复用网络配置 diff 组件）→ 环境 Drift（同名路径跨
 // dev/staging/prod 目标的 diff 视图）。**修改不在此发生**：cp+sed 不允许，
 // 编辑产物以 file-upload 步骤提交（人对整份内容签字）。备份恢复演练走
-// restore-verify 提案步骤类型——把快照恢复到指定 staging 目标并跑验证读，
+// restore-verify 变更步骤类型——把快照恢复到指定 staging 目标并跑验证读，
 // 证明「备份真的能恢复」；生产目标（与源同组）不允许作为演练接收方。
 
 import (
@@ -254,7 +254,7 @@ func (m *Manager) SrvConfDrift(ctx context.Context, path string, devices []strin
 	return rows, nil
 }
 
-// ── restore-verify 提案步骤（§7.3 备份恢复演练）───────────────────────────
+// ── restore-verify 变更步骤（§7.3 备份恢复演练）───────────────────────────
 
 // validateRestoreVerify enforces the drill's structural safety: receiver is a
 // linux target that whitelists the path in its OWN config_paths, and the
@@ -295,7 +295,7 @@ func (m *Manager) validateRestoreVerify(s *ProposalStep, target config.NetDevDev
 }
 
 // execRestoreVerify: 备份接收方现文件 → 恢复快照 → 验证读。证明「备份真的
-// 能恢复」；验证不过即冻结（提案首败语义），回滚恢复接收方原文件。
+// 能恢复」；验证不过即冻结（变更首败语义），回滚恢复接收方原文件。
 func (m *Manager) execRestoreVerify(ctx context.Context, target config.NetDevDevice, s *ProposalStep) error {
 	// Resolve the snapshot ("" = the source's latest for this path).
 	version := s.RestoreVersion

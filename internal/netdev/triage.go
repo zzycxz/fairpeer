@@ -135,7 +135,7 @@ func (m *Manager) Triage(ctx context.Context, deviceName string) TriageReport {
 			Devices:    []string{deviceName},
 			Detail:     strings.Join(rep.Anomalies, "\n"),
 			Evidence:   sectionsEvidence(rep),
-			Suggestion: "结合「实况」输出复核异常项；若持续恶化，用日志工作台的跨设备搜索追 IOC，必要时走提案隔离。",
+			Suggestion: "结合「实况」输出复核异常项；若持续恶化，用日志工作台的跨设备搜索追 IOC，必要时走变更流程隔离。",
 			Source:     "triage:" + deviceName,
 		})
 	}

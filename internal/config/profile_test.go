@@ -240,3 +240,53 @@ func TestImageUnderstandNeverHiddenByBuiltinProfiles(t *testing.T) {
 		}
 	}
 }
+
+// TestBuiltinProfileSkillDomains guards the per-profile user-skill domain
+// folding sets. The contract: cowork and netdev both surface browser-ops (the
+// ops browser tab's library runs in either); only netdev surfaces netdev;
+// dev folds every domained skill (its "code" sentinel matches none yet) since
+// browser/netdev tools aren't registered there.
+func TestBuiltinProfileSkillDomains(t *testing.T) {
+	cfg := Default()
+	cases := []struct {
+		profile string
+		want    []string
+	}{
+		{ProfileDev, []string{"code"}},
+		{ProfileCowork, []string{"browser-ops"}},
+		{ProfileNetDev, []string{"browser-ops", "netdev"}},
+	}
+	for _, tc := range cases {
+		prof, err := cfg.ResolveProfile(tc.profile)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.profile, err)
+		}
+		if len(prof.SkillDomains) != len(tc.want) {
+			t.Fatalf("profile %q SkillDomains = %v, want %v", tc.profile, prof.SkillDomains, tc.want)
+		}
+		for i, d := range tc.want {
+			if prof.SkillDomains[i] != d {
+				t.Fatalf("profile %q SkillDomains = %v, want %v", tc.profile, prof.SkillDomains, tc.want)
+			}
+		}
+	}
+}
+
+// TestNetDevWhitelistsBrowserAuto pins the user direction that browser-auto
+// (the generic browser fallback — site-specific browser-ops skills win first,
+// per the routing rows) is enabled under netdev. Without it the ops browser
+// tab's prose templates break: they delegate browser work to
+// run_skill("browser-auto"), which the whitelist would refuse.
+func TestNetDevWhitelistsBrowserAuto(t *testing.T) {
+	cfg := Default()
+	prof, err := cfg.ResolveProfile(ProfileNetDev)
+	if err != nil {
+		t.Fatalf("netdev: %v", err)
+	}
+	for _, n := range prof.EnabledSkills {
+		if n == "browser-auto" {
+			return
+		}
+	}
+	t.Fatal("netdev EnabledSkills must contain browser-auto (generic browser fallback)")
+}

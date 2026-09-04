@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { app } from "../../lib/bridge";
 import { useT } from "../../lib/i18n";
+import { parseIOCList } from "../../lib/ioc";
 import type { NetDevDeviceView, NetDevIncidentCase } from "../../lib/types";
 
 // SecWorkbench — 主区「安全工作台」（NETDEV_SPEC_V2 §10.4）：第三工作台。
@@ -20,6 +21,15 @@ const KIND_COLOR: Record<string, string> = {
 };
 
 type CVEMatch = { device: string; cve_id: string; desc: string; severity: string; product: string };
+
+// 示例 feed（§2.3）：几条著名真实 CVE，覆盖清单常见厂商。按钮只把 JSON 填进
+// 文本框——导入仍由用户触发；产品不预置、不自动导入 feed（附录 B-4 不分发原则）。
+const SAMPLE_CVE_FEED = `{"cves":[
+{"id":"CVE-2023-20198","desc":"Cisco IOS XE Web UI unauthenticated privilege escalation (exploited in the wild); disable Web UI or upgrade","products":["cisco"],"severity":"critical"},
+{"id":"CVE-2017-17215","desc":"Huawei router UPnP TR-064 remote command execution (used by Mirai variants); disable UPnP or upgrade","products":["huawei"],"severity":"critical"},
+{"id":"CVE-2020-1472","desc":"Windows domain controller Netlogon elevation of privilege (Zerologon); apply the 2020-08 patch","products":["windows"],"severity":"critical"},
+{"id":"CVE-2024-1086","desc":"Linux kernel nf_tables use-after-free, local privilege escalation; update the kernel","products":["linux"],"severity":"high"}
+]}`;
 
 // runPool — bounded-concurrency map（体检并行化的最小实现，失败不中断全队）。
 async function runPool<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<(R | null)[]> {
@@ -48,6 +58,8 @@ export function SecWorkbench({ devices, hidden }: {
   const [noteText, setNoteText] = useState("");
   const [iocValue, setIocValue] = useState("");
   const [iocType, setIocType] = useState("ip");
+  const [iocBulk, setIocBulk] = useState(false);
+  const [iocBulkText, setIocBulkText] = useState("");
   const [iocNoteIdx, setIocNoteIdx] = useState(-1);
   const [iocNoteDraft, setIocNoteDraft] = useState("");
   const [wizPattern, setWizPattern] = useState("");
@@ -124,6 +136,30 @@ export function SecWorkbench({ devices, hidden }: {
     setNewTitle("");
   };
 
+  // 一键示例案例：本地生成带时间线 + IOC 台账的演示数据，让空环境一眼看懂
+  // 工作台全貌（头部/向导/时间线/台账），可随手删除。IOC 用文档保留网段与
+  // example.com，避免指向真实资产。
+  const makeExampleCase = useCallback(() => {
+    const at = (minAgo: number) => new Date(Date.now() - minAgo * 60_000).toISOString();
+    const dev = hosts[0]?.name ?? "";
+    void save({
+      id: "", title: t("ndv.sec.exampleCaseTitle"), status: "open",
+      devices: hosts.slice(0, 2).map(h => h.name),
+      entries: [
+        { time: at(95), kind: "finding", device: dev, text: t("ndv.sec.exEntryFinding") },
+        { time: at(60), kind: "log", device: dev, text: t("ndv.sec.exEntryLog") },
+        { time: at(32), kind: "triage", device: dev, text: t("ndv.sec.exEntryTriage") },
+        { time: at(8), kind: "note", device: "", text: t("ndv.sec.exEntryNote") },
+      ],
+      iocs: [
+        { value: "198.51.100.77", type: "ip", note: "", added_at: at(60) },
+        { value: "beacon.badhost.example.com", type: "domain", note: "", added_at: at(58) },
+        { value: "d41d8cd98f00b204e9800998ecf8427e", type: "hash", note: "", added_at: at(30) },
+      ],
+      created_at: at(95), updated_at: "",
+    });
+  }, [hosts, save, t]);
+
   const addEntry = (kind: string, device: string, text: string, ref?: string) => {
     if (!current) return;
     void save({ ...current, entries: [...(current.entries ?? []), { time: new Date().toISOString(), kind, device, text, ref }] });
@@ -139,6 +175,17 @@ export function SecWorkbench({ devices, hidden }: {
     if (!current || !iocValue.trim()) return;
     void save({ ...current, iocs: [...(current.iocs ?? []), { value: iocValue.trim(), type: iocType, note: "", added_at: new Date().toISOString() }] });
     setIocValue("");
+  };
+  // IOC 批量导入（§4.6 外部 feed 来源）：粘贴清单 → 类型自动识别 → 并入台账。
+  const importIOCs = () => {
+    if (!current) return;
+    const parsed = parseIOCList(iocBulkText);
+    if (parsed.length === 0) { setNote(t("ndv.sec.iocBulkEmpty")); return; }
+    const now = new Date().toISOString();
+    void save({ ...current, iocs: [...(current.iocs ?? []), ...parsed.map(p => ({ ...p, added_at: now }))] });
+    setNote(t("ndv.sec.iocBulkDone", { n: parsed.length }));
+    setIocBulkText("");
+    setIocBulk(false);
   };
 
   // ── {t("ndv.sec.wizTitle")}（§10.7）：五步，各驱动既有桥，结果钉入时间线 ──────────
@@ -244,7 +291,20 @@ export function SecWorkbench({ devices, hidden }: {
             ))}
             {current && (
               <>
-                <div className="ndv__group-label" style={{ marginTop: 10 }}>{t("ndv.sec.iocLedger", { n: current.iocs?.length ?? 0 })}</div>
+                <div className="ndv__group-label" style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 4 }}>
+                  {t("ndv.sec.iocLedger", { n: current.iocs?.length ?? 0 })}
+                  <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: "auto" }}
+                    onClick={() => setIocBulk(!iocBulk)}>{t("ndv.sec.iocBulk")}</span>
+                </div>
+                {iocBulk && (
+                  <>
+                    <textarea className="mem-input" rows={4} style={{ width: "100%", fontSize: 10.5, marginTop: 4, fontFamily: "var(--font-mono, monospace)" }}
+                      placeholder={t("ndv.sec.phIocBulk")} value={iocBulkText} onChange={e => setIocBulkText(e.target.value)} />
+                    <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+                      <span className="btn btn--primary btn--small" role="button" onClick={importIOCs}>{t("ndv.sec.iocBulkGo")}</span>
+                    </div>
+                  </>
+                )}
                 <div style={{ display: "flex", gap: 4 }}>
                   <select className="mem-select" style={{ width: 66 }} value={iocType} onChange={e => setIocType(e.target.value)}>
                     {["ip", "domain", "hash", "keyword"].map(t => <option key={t} value={t}>{t}</option>)}
@@ -286,6 +346,9 @@ export function SecWorkbench({ devices, hidden }: {
               placeholder={t('ndv.sec.phFeed')}
               value={cveFeed} onChange={e => setCveFeed(e.target.value)} />
             <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+              <span className="btn btn--secondary btn--small" role="button"
+                title={t("ndv.sec.fillExampleTip")}
+                onClick={() => setCveFeed(SAMPLE_CVE_FEED)}>{t("ndv.sec.fillExample")}</span>
               <span className="btn btn--secondary btn--small" role="button" onClick={() => void cveImport()}>{cveBusy === "import" ? t("ndv.sec.importing") : t("ndv.sec.importFeed")}</span>
               <span className="btn btn--secondary btn--small" role="button" onClick={() => void cveList()}>{cveBusy === "list" ? t("ndv.sec.refreshing") : t("ndv.sec.refreshMatches")}</span>
               <span className="btn btn--primary btn--small" role="button" onClick={() => void cveSweep()}>{cveBusy === "sweep" ? t("ndv.sec.sweeping") : t("ndv.sec.cveSweep")}</span>
@@ -303,12 +366,12 @@ export function SecWorkbench({ devices, hidden }: {
             {cveMatches === null ? (
               <div className="ndv__empty" style={{ flex: 1 }}>
                 <div className="ndv__empty-title">{t("ndv.sec.noMatchesLoaded")}</div>
-                <div className="ndv__empty-desc">t("ndv.sec.matchesHint")</div>
+                <div className="ndv__empty-desc">{t("ndv.sec.matchesHint")}</div>
               </div>
             ) : cveMatches.length === 0 ? (
               <div className="ndv__empty" style={{ flex: 1 }}>
                 <div className="ndv__empty-title">{t("ndv.sec.noMatches")}</div>
-                <div className="ndv__empty-desc">t("ndv.sec.noMatchesHint")</div>
+                <div className="ndv__empty-desc">{t("ndv.sec.noMatchesHint")}</div>
               </div>
             ) : (
               <table className="mem-hint" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
@@ -332,7 +395,11 @@ export function SecWorkbench({ devices, hidden }: {
         ) : !current ? (
           <div className="ndv__empty" style={{ flex: 1 }}>
             <div className="ndv__empty-title">{t("ndv.sec.noCases")}</div>
-            <div className="ndv__empty-desc">t("ndv.sec.noCasesHint")</div>
+            <div className="ndv__empty-desc">{t("ndv.sec.noCasesHint")}</div>
+            {cases.length === 0 && (
+              <span className="btn btn--secondary btn--small" role="button" style={{ marginTop: 8 }}
+                onClick={() => void makeExampleCase()}>{t("ndv.sec.exampleCaseBtn")}</span>
+            )}
           </div>
         ) : (
           <>

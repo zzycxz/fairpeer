@@ -345,6 +345,44 @@ func simConnection(t *testing.T, sim *simDevice) *transport.Client {
 	return c
 }
 
+// TestSessionCentOSBracketedPromptCompletion — the 2026-09-03 CentOS field
+// report: interactive bash brackets output in paste-mode controls (ESC[?2004l
+// after the echo, ESC[?2004h glued to the prompt with no newline between) and
+// CentOS PS1 is the RedHat bracket form `[root@host ~]#`. Neither the raw-text
+// prompt match nor the old Debian-only regex could see completion — every log
+// read timed out with the prompt sitting in the buffer.
+func TestSessionCentOSBracketedPromptCompletion(t *testing.T) {
+	drv, _ := driver.For("linux", "centos")
+	s := &Session{drv: drv}
+
+	raw := "tail -n 100 /var/log/messages\r\n" +
+		"Sep  3 10:00:01 honest-fan-1 systemd: Started Session 3 of user root.\r\n" +
+		"Sep  3 10:00:02 honest-fan-1 crond[1234]: (root) CMD (/usr/bin/backup)\r\n" +
+		"\x1b[?2004h[root@honest-fan-1 ~]# "
+	if !s.completed("tail -n 100 /var/log/messages", raw) {
+		t.Fatal("centos bracketed prompt (wrapped in paste-mode controls) not detected as completion")
+	}
+
+	out := cleanOutput(raw, "tail -n 100 /var/log/messages", drv)
+	for _, want := range []string{"Started Session", "CMD (/usr/bin/backup)"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("cleaned output missing %q: %q", want, out)
+		}
+	}
+	if strings.Contains(out, "[root@honest-fan-1") || strings.Contains(out, "tail -n 100") {
+		t.Fatalf("prompt or echo leaked into cleaned output: %q", out)
+	}
+
+	// The exact failure shape from the field: tail refuses the (Debian-style)
+	// path, the prompt still returns and must be recognized.
+	failRaw := "\x1b[?2004ltail -n 100 /var/log/syslog\r\n" +
+		"tail: cannot open '/var/log/syslog' for reading: No such file or directory\r\n" +
+		"\x1b[?2004h[root@honest-fan-1 ~]# "
+	if !s.completed("tail -n 100 /var/log/syslog", failRaw) {
+		t.Fatal("completion missed after a command error (prompt back but unseen)")
+	}
+}
+
 func TestSessionReadCommand(t *testing.T) {
 	sim := startSimDevice(t)
 	c := simConnection(t, sim)

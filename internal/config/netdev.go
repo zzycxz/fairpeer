@@ -5,6 +5,7 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -210,6 +211,13 @@ type NetDevDevice struct {
 	// RDP/VNC protocol in-product; the click is audited.
 	OOBURL string      `toml:"oob_url"`
 	SNMP   *NetDevSNMP `toml:"snmp"`
+	// ConsolePort, when set, replaces the SSH dial with a serial console
+	// line (COM3 on Windows — the USB-serial adapter plugged into the
+	// switch's console port). No host keys, no auth: physical presence IS
+	// the authorization; the read-only classifier still seals every command.
+	// ConsoleBaud 0 => 9600, line format fixed at 8N1.
+	ConsolePort string `toml:"console_port"`
+	ConsoleBaud int    `toml:"console_baud"`
 	// LogPaths whitelists additional log-directory roots for this device
 	// (e.g. "/opt/app/logs", "/usr/local/tomcat/logs"). tail/head/grep/wc on
 	// paths under /var/log or one of these roots classify as read — the
@@ -391,6 +399,17 @@ func ValidateNetDev(nd NetDevConfig) error {
 	if !nd.Enabled {
 		return nil // everything else only matters once enabled
 	}
+	// Assessment envelope: partial envelopes are refused (both id and expiry,
+	// or neither); an expired date is a legal saved state — the runtime gate
+	// (AssessmentActive) refuses use, saving history stays possible.
+	if nd.Assessment.EngagementID != "" || nd.Assessment.Expires != "" || nd.Assessment.Approver != "" {
+		if nd.Assessment.EngagementID == "" || nd.Assessment.Expires == "" {
+			return fmt.Errorf("netdev assessment: engagement_id and expires are both required (or clear all fields to close the envelope)")
+		}
+		if _, err := time.ParseInLocation("2006-01-02", nd.Assessment.Expires, time.Local); err != nil {
+			return fmt.Errorf("netdev assessment: expires must be YYYY-MM-DD")
+		}
+	}
 	switch strings.ToLower(strings.TrimSpace(nd.DefaultMode)) {
 	case "", "diagnose", "assess":
 	default:
@@ -454,8 +473,26 @@ func ValidateNetDev(nd NetDevConfig) error {
 			return fmt.Errorf("netdev device %q: duplicate name", d.Name)
 		}
 		seenDevices[d.Name] = true
-		if strings.TrimSpace(d.Address) == "" {
+		if strings.TrimSpace(d.Address) == "" && strings.TrimSpace(d.ConsolePort) == "" {
+			// Console devices may not know their IP yet — the serial line is
+			// the only reach; everyone else still needs an address.
 			return fmt.Errorf("netdev device %q: address is required", d.Name)
+		}
+		if cp := strings.TrimSpace(d.ConsolePort); cp != "" {
+			if !ndNameValid(strings.TrimPrefix(strings.TrimPrefix(cp, `\\.\`), "/dev/")) {
+				return fmt.Errorf("netdev device %q: console_port must be a plain port name (COM3 / /dev/ttyUSB0)", d.Name)
+			}
+			if d.ConsoleBaud < 0 || d.ConsoleBaud > 921600 {
+				return fmt.Errorf("netdev device %q: console_baud must be 0 (=>9600) .. 921600", d.Name)
+			}
+			switch d.Vendor {
+			case "redfish", "snmp":
+				return fmt.Errorf("netdev device %q: console needs a CLI vendor (huawei|cisco|zte|linux|windows|vmware), not %q", d.Name, d.Vendor)
+			}
+			switch d.Kind {
+			case "docker", "k8s", "firewall":
+				return fmt.Errorf("netdev device %q: kind=%s has no CLI console", d.Name, d.Kind)
+			}
 		}
 		if d.Port < 0 || d.Port > 65535 {
 			return fmt.Errorf("netdev device %q: port %d out of range", d.Name, d.Port)

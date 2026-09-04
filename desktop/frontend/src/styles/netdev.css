@@ -1063,6 +1063,15 @@
   background: var(--bg-elev-2, var(--bg-elev));
   color: var(--fg);
 }
+/* Live dot on the 巡检 pill while a watch is running. */
+.ndv-brc__subtab-live {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full, 50%);
+  background: var(--success, #4fae6e);
+  flex-shrink: 0;
+  animation: ndv-brc-pulse 1.6s ease-in-out infinite;
+}
 .ndv-brc__subtab:disabled {
   cursor: default;
 }
@@ -1748,6 +1757,16 @@
   font-size: var(--font-control-small);
   color: var(--fg);
 }
+.ndv-brc__element-css {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent);
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 .ndv-brc__element-value {
   font-size: 11px;
   color: var(--fg-faint);
@@ -1788,6 +1807,10 @@
   display: flex;
   gap: var(--space-1);
 }
+.ndv-brc__extract-format {
+  flex: 0 0 auto;
+  width: 92px;
+}
 .ndv-brc__extract-result {
   margin: 0;
   padding: var(--space-2);
@@ -1802,6 +1825,120 @@
   overflow-wrap: anywhere;
 }
 /* op log */
+.ndv-brc__hist-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+}
+.ndv-brc__hist-row:hover {
+  background: var(--bg-elev);
+}
+.ndv-brc__hist-n {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-faint);
+  flex-shrink: 0;
+  min-width: 14px;
+  text-align: right;
+}
+.ndv-brc__hist-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-control-small);
+  color: var(--fg);
+}
+.ndv-brc__hist-del {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+  opacity: 0;
+}
+.ndv-brc__hist-row:hover .ndv-brc__hist-del {
+  opacity: 1;
+}
+.ndv-brc__hist-row--over {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+.ndv-brc__hist-row[draggable="true"] {
+  cursor: grab;
+}
+.ndv-brc__skill-item {
+  display: flex;
+  flex-direction: column;
+}
+.ndv-brc__skill-draft {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--warn, #d29922);
+  border: 1px solid var(--warn, #d29922);
+  border-radius: var(--radius-full, 50%);
+  padding: 0 6px;
+}
+.ndv-brc__skill-wake {
+  color: var(--ok);
+}
+.ndv-brc__skill-chev {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+.ndv-brc__skill-chev:hover {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+.ndv-brc__skill-cfg {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 var(--space-2) 22px;
+  padding: var(--space-1) var(--space-2);
+  border-left: 2px solid var(--border-soft);
+}
+.ndv-brc__skill-cfg-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: 2px;
+}
+.ndv-brc__skill-cfg-chip {
+  font-size: 10px;
+  color: var(--fg-dim);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-full, 50%);
+  padding: 0 6px;
+}
+.ndv-brc__skill-cfg-step {
+  font-size: var(--font-control-small);
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ndv-brc__hist-del:hover {
+  color: var(--danger);
+  background: var(--bg-elev-2, var(--bg-elev));
+}
 .ndv-brc__log {
   display: flex;
   flex-direction: column;
@@ -2105,6 +2242,397 @@
   color: var(--accent);
   flex-shrink: 0;
 }
+
+/* --- 时间范围参数：快捷片 + 换算预览 --- */
+.ndv-brc__field--timewrap {
+  flex-wrap: wrap;
+}
+.ndv-brc__field--timewrap .mem-input {
+  flex: 1;
+  min-width: 140px;
+}
+.ndv-brc-param-time {
+  flex-basis: 100%;
+}
+.ndv-brc-param-time__chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.ndv-brc-param-time__chip {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--fg-dim);
+  font-size: 10px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.ndv-brc-param-time__chip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.ndv-brc-param-time__chip--on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.ndv-brc-param-time__preview {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--fg-faint);
+  min-width: 0;
+}
+.ndv-brc-param-time__preview code {
+  font-family: var(--mono);
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ndv-brc-param-time__raw {
+  font-style: normal;
+}
+
+/* --- 导出下载卡 + AI 研判卡 --- */
+.ndv-brc-dl {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+.ndv-brc-dl--sheet {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.ndv-brc-dl__name {
+  font-family: var(--mono);
+  flex-shrink: 0;
+}
+.ndv-brc-dl__path {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--fg-faint);
+  font-family: var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ndv-brc-analysis {
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  margin-top: var(--space-1);
+  overflow: hidden;
+}
+.ndv-brc-analysis__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 8px;
+  background: var(--accent-soft);
+  font-size: 11px;
+  color: var(--accent);
+}
+.ndv-brc-analysis__meta {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--fg-faint);
+}
+.ndv-brc-analysis__hint {
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--fg-faint);
+  animation: ndv-brc-pulse 1.6s ease-in-out infinite;
+}
+.ndv-brc-analysis__body {
+  padding: 6px 10px;
+  font-size: 12px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.ndv-brc-analysis__body table {
+  font-size: 11px;
+}
+
+/* --- 定时巡检：控件 + 轮次日志 --- */
+.ndv-brc-watch {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0 2px;
+}
+.ndv-brc-watch__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ndv-brc-watch__row .mem-select {
+  width: 76px;
+  font-size: 11px;
+  padding: 2px 6px;
+}
+.ndv-brc-watch__notify .ndv-brc-watch__row .mem-select {
+  width: auto;
+  max-width: 170px;
+}
+.ndv-brc-watch__anchor {
+  width: 130px;
+  font-size: 11px;
+  padding: 2px 6px;
+}
+.ndv-brc-watch__notify {
+  margin-top: var(--space-1);
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 8px 8px;
+}
+.ndv-brc-watch__notify summary {
+  cursor: pointer;
+  color: var(--fg-dim);
+  font-size: 10px;
+  user-select: none;
+  padding: 4px 0;
+}
+.ndv-brc-watch__notify[open] summary {
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+/* Aligned two-column grid: fixed label column + control column; controls
+   stack vertically inside their cell instead of crowding one row. */
+.ndv-brc-watch__grid {
+  display: grid;
+  grid-template-columns: 68px 1fr;
+  row-gap: 6px;
+  column-gap: var(--space-2);
+  align-items: center;
+}
+.ndv-brc-watch__cell {
+  display: contents;
+}
+.ndv-brc-watch__cell > .ndv-brc-watch__label {
+  font-size: 10.5px;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+.ndv-brc-watch__cell > .mem-select,
+.ndv-brc-watch__cell > .mem-input {
+  width: 100%;
+  max-width: 260px;
+  font-size: 11px;
+  padding: 2px 6px;
+}
+.ndv-brc-watch__cell > .mem-select + .mem-input,
+.ndv-brc-watch__cell > .mem-input + .mem-input {
+  margin-top: 4px;
+}
+.ndv-brc-watch__cell--check > .ndv-brc__check {
+  justify-self: start;
+}
+.ndv-brc-watch__none {
+  font-size: 10px;
+  color: var(--fg-faint);
+  display: inline-block;
+  margin-bottom: 4px;
+}
+/* --- 巡检 sub-tab: status header + skill picker --- */
+.ndv-brc-watch-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 8px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.ndv-brc-watch-status__skill {
+  font-family: var(--mono);
+  color: var(--fg);
+}
+.ndv-brc-watch__skill {
+  flex: 1;
+  min-width: 140px;
+  font-size: 11px;
+  padding: 2px 6px;
+}
+.ndv-brc-watch-round__compromised {
+  font-size: 10px;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-pill);
+  padding: 0 6px;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+.ndv-brc-watch-round__attn {
+  font-size: 10px;
+  color: var(--warn, #c29b3c);
+  border: 1px solid var(--warn, #c29b3c);
+  border-radius: var(--radius-pill);
+  padding: 0 6px;
+  flex-shrink: 0;
+}
+.ndv-brc-watch-round__notified {
+  font-size: 10px;
+  color: var(--success, #4fae6e);
+  flex-shrink: 0;
+}
+.ndv-brc-watch-round__compromised-list {
+  font-size: 11px;
+  color: var(--danger);
+  font-family: var(--mono);
+  margin: 4px 0 2px;
+}
+.ndv-brc-watch__label {
+  font-size: 11px;
+  color: var(--fg-dim);
+  flex-shrink: 0;
+}
+.ndv-brc-watch__next {
+  font-size: 10px;
+  color: var(--fg-faint);
+  font-family: var(--mono);
+}
+.ndv-brc-watch__other {
+  font-size: 10px;
+  color: var(--warn, #c29b3c);
+}
+.ndv-brc-watch__hint {
+  font-size: 10px;
+  color: var(--fg-faint);
+}
+.ndv-brc-watch__live {
+  margin-left: var(--space-2);
+  color: var(--success, #4fae6e);
+  font-size: 10px;
+}
+.ndv-brc-watch-round {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-top: var(--space-1);
+}
+.ndv-brc-watch-round--running {
+  border-color: var(--accent);
+}
+.ndv-brc-watch-round--failed {
+  border-color: var(--danger);
+}
+.ndv-brc-watch-round__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 4px 8px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 11px;
+  color: var(--fg-dim);
+  min-width: 0;
+}
+.ndv-brc-watch-round__head:hover {
+  background: var(--bg-elev);
+}
+.ndv-brc-watch-round__status {
+  font-size: 10px;
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+}
+.ndv-brc-watch-round__status--done { color: var(--success, #4fae6e); border-color: var(--success, #4fae6e); }
+.ndv-brc-watch-round__status--failed { color: var(--danger); border-color: var(--danger); }
+.ndv-brc-watch-round__status--skipped { color: var(--fg-faint); }
+.ndv-brc-watch-round__status--running { color: var(--accent); border-color: var(--accent); animation: ndv-brc-pulse 1.6s ease-in-out infinite; }
+.ndv-brc-watch-round__time {
+  font-family: var(--mono);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.ndv-brc-watch-round__range {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.ndv-brc-watch-round__file {
+  font-size: 10px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.ndv-brc-watch-round__note {
+  font-size: 10px;
+  color: var(--fg-faint);
+  flex-shrink: 0;
+}
+.ndv-brc-watch-round__error {
+  padding: 2px 8px 4px;
+  font-size: 11px;
+  color: var(--danger);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.ndv-brc-watch-round__body {
+  padding: 2px 8px 6px;
+  border-top: 1px dashed var(--border);
+}
+.ndv-brc-watch-round__analysis-title {
+  font-size: 10px;
+  color: var(--fg-faint);
+  margin: 4px 0 2px;
+}
+.ndv-brc-watch-round__analysis {
+  font-size: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.ndv-brc-watch-round__analysis table {
+  font-size: 11px;
+}
+.ndv-brc-watch-round__steps {
+  font-size: 11px;
+  margin-top: 4px;
+}
+.ndv-brc-watch-round__steps summary {
+  cursor: pointer;
+  color: var(--fg-faint);
+  font-size: 10px;
+}
+.ndv-brc-watch-round__step {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 1px 0;
+  min-width: 0;
+}
+.ndv-brc-watch-round__step-out {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.ndv-brc-watch-round__step-err {
+  font-size: 10px;
+  color: var(--danger);
+}
 @keyframes ndv-brc-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
@@ -2137,7 +2665,6 @@
 .ndv-dash__tick { white-space: nowrap; cursor: pointer; opacity: 0.85; }
 .ndv-dash__tick--bad { color: var(--danger, #e5484d); }
 .ndv-bench__riskdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 4px; vertical-align: middle; }
-.ndv-nav__hotdot { width: 7px; height: 7px; border-radius: 50%; background: var(--danger, #e5484d); box-shadow: 0 0 4px var(--danger, #e5484d); margin-left: 6px; }
 .ndv-nav__count { font-size: 10px; background: var(--bg-elevated, #23272e); border: 1px solid var(--border, #2e333d); border-radius: var(--radius-md); padding: 0 5px; margin-left: 6px; font-style: normal; }
 
 /* 总览 */

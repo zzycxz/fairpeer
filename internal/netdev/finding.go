@@ -64,6 +64,36 @@ var (
 	findingsDirOverr string
 )
 
+// findingObserver: package-level sink fired after every SUCCESSFUL SaveFinding
+// (desktop forwards it as the "netdev:finding-saved" Wails event so the UI's
+// 蓝队核查 dock tab updates live while a chat-driven scan works). Fired on its
+// own goroutine with recover — an observer bug must never touch the save path.
+var (
+	findingObserver   func(*Finding)
+	findingObserverMu sync.Mutex
+)
+
+// SetFindingObserver installs the saved-finding callback (replaces any
+// previous one). Same pattern as SetHealthObserver.
+func SetFindingObserver(fn func(*Finding)) {
+	findingObserverMu.Lock()
+	findingObserver = fn
+	findingObserverMu.Unlock()
+}
+
+func notifyFindingObserver(f *Finding) {
+	findingObserverMu.Lock()
+	fn := findingObserver
+	findingObserverMu.Unlock()
+	if fn == nil {
+		return
+	}
+	go func() {
+		defer func() { _ = recover() }()
+		fn(f)
+	}()
+}
+
 // FindingsDir stores findings as one JSON per finding.
 func FindingsDir() string {
 	if findingsDirOverr != "" {
@@ -226,7 +256,11 @@ func SaveFinding(f *Finding) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(FindingsDir(), f.ID+".json"), b, 0o600)
+	if err := os.WriteFile(filepath.Join(FindingsDir(), f.ID+".json"), b, 0o600); err != nil {
+		return err
+	}
+	notifyFindingObserver(f) // fire only on success — a failed save is not news
+	return nil
 }
 
 // ListFindings returns findings newest-first.

@@ -92,18 +92,21 @@ const (
 )
 
 type Proposal struct {
-	ID         string         `json:"id"`
-	Intent     string         `json:"intent"`
-	Status     string         `json:"status"`
-	Steps      []ProposalStep `json:"steps"`
-	CreatedAt  time.Time      `json:"created_at"`
-	ApprovedAt time.Time      `json:"approved_at,omitempty"`
-	ExecutedAt time.Time      `json:"executed_at,omitempty"`
-	Approver   string         `json:"approver,omitempty"`
-	Confirm2   bool           `json:"confirm2"`       // secondary confirmation for proposal+confirm2 groups
-	Note       string         `json:"note,omitempty"` // freeze/rollback reason trail
-	// 驳回（completion-spec §4.1）：draft/approved 可被人否决；Reason 随提案
-	// 持久化，agent 下一轮读到提案即见被拒原因。
+	ID     string         `json:"id"`
+	Intent string         `json:"intent"`
+	Status string         `json:"status"`
+	Steps  []ProposalStep `json:"steps"`
+	// 恢复提案来源（备份→恢复闭环）：从备份版本起草的恢复提案记录来源
+	// 版本 ID（device@nanos）；审计与前端据此回放「恢复自哪一版」。
+	RestoreFrom string    `json:"restore_from,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	ApprovedAt  time.Time `json:"approved_at,omitempty"`
+	ExecutedAt  time.Time `json:"executed_at,omitempty"`
+	Approver    string    `json:"approver,omitempty"`
+	Confirm2    bool      `json:"confirm2"`       // secondary confirmation for proposal+confirm2 groups
+	Note        string    `json:"note,omitempty"` // freeze/rollback reason trail
+	// 驳回（completion-spec §4.1）：draft/approved 可被人否决；Reason 随变更
+	// 持久化，agent 下一轮读到变更即见被拒原因。
 	RejectedAt   time.Time `json:"rejected_at,omitempty"`
 	RejectReason string    `json:"reject_reason,omitempty"`
 	// 观察期（§7.1）：done → watching（默认 30 分钟）→ closed；劣化触发 Finding。
@@ -541,7 +544,7 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 	if online != "" && !strings.Contains(p.Note, "[在线人员] "+online) {
 		p.Note = strings.TrimSpace(p.Note + "\n[在线人员] " + online)
 		_ = SaveProposal(p)
-		return p, fmt.Errorf("执行前确认：目标设备上有其他在线人员（%s）——确认没人正操作后再次点击「执行」（清单已记入提案备注；会话有变化会再次要求确认）", online)
+		return p, fmt.Errorf("执行前确认：目标设备上有其他在线人员（%s）——确认没人正操作后再次点击「执行」（清单已记入变更备注；会话有变化会再次要求确认）", online)
 	}
 
 	// Claim approved→executing atomically: a racing approve/reject used to
@@ -672,20 +675,20 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 		wu := time.Now().Add(30 * time.Minute)
 		p.WatchUntil = &wu
 		p.HealthBase = watchHealthBase(p)
-			go func(id string, until time.Time) {
-				time.Sleep(time.Until(until))
-				proposalMu.Lock()
-				defer proposalMu.Unlock()
-				if pp, err := GetProposal(id); err == nil && pp.Status == ProposalWatching {
-					StateEventSnap(StateEventCloseWatch, id, StateActorSystem, filepath.Join(ProposalsDir(), id+".json"))
-					pp.Status = ProposalClosed
-					pp.WatchNote = "观察期满，自动关闭"
-					_ = saveProposalLocked(pp)
-				}
-			}(p.ID, wu)
-		// P2-3：提案完成即自动复跑关联设备的基线核查——修复有没有生效由
+		go func(id string, until time.Time) {
+			time.Sleep(time.Until(until))
+			proposalMu.Lock()
+			defer proposalMu.Unlock()
+			if pp, err := GetProposal(id); err == nil && pp.Status == ProposalWatching {
+				StateEventSnap(StateEventCloseWatch, id, StateActorSystem, filepath.Join(ProposalsDir(), id+".json"))
+				pp.Status = ProposalClosed
+				pp.WatchNote = "观察期满，自动关闭"
+				_ = saveProposalLocked(pp)
+			}
+		}(p.ID, wu)
+		// P2-3：变更完成即自动复跑关联设备的基线核查——修复有没有生效由
 		// 数据说话（命中更新同一告警、不再命中自动 resolve），不等人想起
-		// 手动重查。失败不影响提案结果（best-effort，入审计）。
+		// 手动重查。失败不影响变更结果（best-effort，入审计）。
 		touched := map[string]bool{}
 		for _, s := range p.Steps {
 			if s.Device != "" {
@@ -986,16 +989,16 @@ func (m *Manager) checkWatchingProposals(fresh map[string]DeviceHealth) {
 			proposalMu.Unlock()
 			continue
 		}
-		cur.WatchNote = "观察期劣化：" + strings.Join(worse, "；") + " — 可回滚（提案页签「回滚」，仍需人按）"
+		cur.WatchNote = "观察期劣化：" + strings.Join(worse, "；") + " — 可回滚（变更页签「回滚」，仍需人按）"
 		_ = saveProposalLocked(cur)
 		proposalMu.Unlock()
 		_ = SaveFinding(&Finding{
 			Title:      "变更观察期劣化：" + p.Intent,
 			Severity:   SeverityCritical,
 			Devices:    p.stepDevices(),
-			Detail:     fmt.Sprintf("提案 %s 执行后观察期内健康劣化：%s。基线（watch 起点）若与变更相关，回滚是第一优先动作。", p.ID, strings.Join(worse, "；")),
+			Detail:     fmt.Sprintf("变更 %s 执行后观察期内健康劣化：%s。基线（watch 起点）若与变更相关，回滚是第一优先动作。", p.ID, strings.Join(worse, "；")),
 			Evidence:   []Evidence{{Device: "(watch)", Command: "proposal " + p.ID, Output: p.WatchNote}},
-			Suggestion: "在「提案」页签对 " + p.ID + " 按「回滚」执行已起草的回滚计划（回滚仍需人批准）",
+			Suggestion: "在「变更」页签对 " + p.ID + " 按「回滚」执行已起草的回滚计划（回滚仍需人批准）",
 			Source:     "watch:" + p.ID,
 			Status:     FindingActive,
 		})

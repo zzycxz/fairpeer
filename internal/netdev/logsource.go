@@ -79,7 +79,7 @@ func composeLogCommand(d config.NetDevDevice, source string, fetchN int, since s
 	}
 	kind, rest, ok := strings.Cut(source, ":")
 	if !ok || rest == "" {
-		return "", fmt.Errorf("source must be file:<abs path> | journal:<unit> | docker:<container>, got %q", source)
+		return "", fmt.Errorf("source must be file:<abs path> | system:main | journal:<unit> | docker:<container>, got %q", source)
 	}
 	switch kind {
 	case "file":
@@ -88,6 +88,26 @@ func composeLogCommand(d config.NetDevDevice, source string, fetchN int, since s
 			return "", fmt.Errorf("path %q is outside the device's log whitelist (/var/log or the device's log_paths) — add it to log_paths in 运维设置", rest)
 		}
 		return fmt.Sprintf("tail -n %d %s", fetchN, path.Clean(rest)), nil
+	case "system":
+		// The distro-agnostic system log: the whole systemd journal. Users
+		// can't be asked to know whether their box writes /var/log/syslog
+		// (Debian family) or /var/log/messages (RHEL family) — journalctl
+		// covers both on every systemd distro. rest is an ignored marker
+		// ("main") kept for the kind:rest grammar.
+		if !logUnitRe.MatchString(rest) {
+			return "", fmt.Errorf("invalid system source marker %q", rest)
+		}
+		var sb strings.Builder
+		sb.WriteString("journalctl")
+		if since != "" {
+			if !logSinceRe.MatchString(since) {
+				return "", fmt.Errorf("since must be an ISO date[-time] or a relative offset like -1h (no quotes/metacharacters), got %q", since)
+			}
+			sb.WriteString(" --since ")
+			sb.WriteString(since)
+		}
+		sb.WriteString(fmt.Sprintf(" -n %d --no-pager -q", fetchN))
+		return sb.String(), nil
 	case "journal":
 		if !logUnitRe.MatchString(rest) {
 			return "", fmt.Errorf("invalid systemd unit %q (single plain token only)", rest)

@@ -1,7 +1,7 @@
 package netdev
 
 // sftp.go — SFTP 只读下载（NETDEV_SPEC_V2 §6.2）：文件拉取方向（日志导出、
-// 配置备份取回、证据收集）。上传方向只存在于提案步骤（file-upload），本文件
+// 配置备份取回、证据收集）。上传方向只存在于变更步骤（file-upload），本文件
 // 不存在任何写路径。路径白名单沿用 log_paths + /var/log。
 
 import (

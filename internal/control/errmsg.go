@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/zzycxz/fairpeer/internal/i18n"
 	"github.com/zzycxz/fairpeer/internal/provider"
@@ -19,6 +20,11 @@ func explainError(err error) error {
 	var apiErr *provider.APIError
 	if errors.As(err, &apiErr) {
 		msg := i18n.M.ProviderStatusMessage(apiErr.Status)
+		// Relay-drop 400: the gateway lost its upstream, the request was fine —
+		// "request body was rejected" would point the user at a nonexistent bug.
+		if provider.IsTransientGatewayBody(apiErr.Body) {
+			msg = i18n.M.ProviderErrGatewayTransient
+		}
 		if msg == "" {
 			return err
 		}
@@ -52,7 +58,9 @@ func requestErrorReason(e *provider.APIError) string {
 }
 
 // providerBodyReason pulls the human reason from an OpenAI/Anthropic-shaped error
-// body ({"error":{"message":…}}), falling back to the trimmed raw body.
+// body ({"error":{"message":…}}), falling back to the trimmed raw body. Relays
+// that stash the real cause in "param" (xiaomimimo: message "Request failed",
+// param "Connection prematurely closed BEFORE response") get it appended.
 func providerBodyReason(body string) string {
 	if body == "" {
 		return ""
@@ -60,10 +68,15 @@ func providerBodyReason(body string) string {
 	var parsed struct {
 		Error struct {
 			Message string `json:"message"`
+			Param   string `json:"param"`
 		} `json:"error"`
 	}
 	if json.Unmarshal([]byte(body), &parsed) == nil && parsed.Error.Message != "" {
-		return clampRunes(parsed.Error.Message, 800)
+		reason := parsed.Error.Message
+		if parsed.Error.Param != "" && !strings.Contains(reason, parsed.Error.Param) {
+			reason += " (" + parsed.Error.Param + ")"
+		}
+		return clampRunes(reason, 800)
 	}
 	return clampRunes(body, 800)
 }

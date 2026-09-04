@@ -148,7 +148,10 @@ func OpenSession(ctx context.Context, client *transport.Client, drv driver.Drive
 	// flush whatever preceded it.
 	deadline := time.Now().Add(sessionOpenTimeout)
 	for {
-		if drv.Prompt().MatchString(s.encode(s.out.snapshot())) {
+		// Match on ANSI-stripped bytes: interactive bash brackets the prompt
+		// with ESC[?2004h on the same line, which breaks the raw match's
+		// line-start anchor (same fix as completed()).
+		if drv.Prompt().MatchString(ansi.Strip(s.encode(s.out.snapshot()))) {
 			s.out.reset()
 			return s, nil
 		}
@@ -250,15 +253,18 @@ func (s *Session) Run(ctx context.Context, cmd string) (Result, error) {
 // the end of the output AND the echoed command (or, when the device does not
 // echo, at least one output line) has been seen. The echo/line guard prevents
 // matching the leftover prompt that precedes the device's processing of the
-// command.
+// command. Prompt matching runs on ANSI-stripped text — bash brackets the
+// prompt with ESC[?2004h/l on the same line, invisible to the raw match
+// (2026-09-03: CentOS reads timed out with the prompt sitting in the buffer).
 func (s *Session) completed(cmd, text string) bool {
-	if !s.drv.Prompt().MatchString(text) {
+	stripped := ansi.Strip(text)
+	if !s.drv.Prompt().MatchString(stripped) {
 		return false
 	}
-	if strings.Contains(strings.ToLower(text), strings.ToLower(cmd)) {
+	if strings.Contains(strings.ToLower(stripped), strings.ToLower(cmd)) {
 		return true
 	}
-	return strings.Count(text, "\n") >= 2
+	return strings.Count(stripped, "\n") >= 2
 }
 
 func (s *Session) finish(cmd, text string) Result {
@@ -354,7 +360,8 @@ func decodeGBK(b []byte) string {
 	return string(out)
 }
 
-// Close ends the session (the transport Client stays connected).
+// Close ends the session (the transport Client stays connected). A console
+// session has no ssh.Session behind it (nil) — only its serial line closes.
 func (s *Session) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -362,6 +369,11 @@ func (s *Session) Close() error {
 		return nil
 	}
 	s.closed = true
-	s.stdin.Close()
-	return s.sess.Close()
+	if s.stdin != nil {
+		s.stdin.Close()
+	}
+	if s.sess != nil {
+		return s.sess.Close()
+	}
+	return nil
 }

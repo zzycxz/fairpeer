@@ -126,6 +126,22 @@ func captureAXTree(s *browserSession) ([]*accessibility.Node, error) {
 // indented text rendering. Only interactive/meaningful nodes get refs (we skip
 // pure-structural nodes like generic divs with no name, to keep the tree short
 // and refs compact). Returns the ref→info map and the rendered string.
+// axInteractiveRoles: AX roles the user/LLM can ACT on. The agent snapshot
+// also refs named nodes (static text carries page content), but the PANEL's
+// element picker and pickability checks use this set alone — a Text node or
+// the WebArea root has no scrollIntoView/click and must never be listed as
+// pickable.
+var axInteractiveRoles = map[string]bool{
+	"button": true, "link": true, "textbox": true, "checkbox": true, "radio": true,
+	"menuitem": true, "menuitemcheckbox": true, "menuitemradio": true,
+	"combobox": true, "listbox": true, "option": true, "tab": true,
+	"slider": true, "spinbutton": true, "searchbox": true, "switch": true,
+	"treeitem": true, "buttonlink": true,
+	// Chrome's AX tree reports <textarea> as "textarea" (distinct from an
+	// input's "textbox") — Naive-UI & friends build their inputs on textarea.
+	"textarea": true,
+}
+
 func buildSnapshotRefs(nodes []*accessibility.Node) (snapshotRefs, string) {
 	// Reset ref numbering per snapshot.
 	refSeq.Store(0)
@@ -141,16 +157,9 @@ func buildSnapshotRefs(nodes []*accessibility.Node) (snapshotRefs, string) {
 
 	// First pass: assign refs to nodes worth surfacing (interactive roles or
 	// named nodes). Track depth for rendering.
-	// rolesWorthRef: elements the LLM can act on. We assign refs to these; purely
+	// axInteractiveRoles: elements the LLM can act on. We assign refs to these; purely
 	// structural nodes (none of these roles AND no name) are rendered without a
 	// ref or skipped entirely to reduce noise.
-	rolesWorthRef := map[string]bool{
-		"button": true, "link": true, "textbox": true, "checkbox": true, "radio": true,
-		"menuitem": true, "menuitemcheckbox": true, "menuitemradio": true,
-		"combobox": true, "listbox": true, "option": true, "tab": true,
-		"slider": true, "spinbutton": true, "searchbox": true, "switch": true,
-		"treeitem": true, "buttonlink": true,
-	}
 
 	// Assign refs to qualifying nodes.
 	for _, n := range nodes {
@@ -159,7 +168,7 @@ func buildSnapshotRefs(nodes []*accessibility.Node) (snapshotRefs, string) {
 		}
 		role := axValueString(n.Role)
 		name := axValueString(n.Name)
-		if rolesWorthRef[role] || name != "" {
+		if axInteractiveRoles[role] || name != "" {
 			ref := fmt.Sprintf("e%d", refSeq.Add(1))
 			info := axNodeInfo{
 				ref:       ref,
@@ -294,6 +303,13 @@ func resolveRefToObjectID(ctx context.Context, s *browserSession, ref string) (r
 	err := chromedp.Run(actx, chromedp.ActionFunc(func(ctx context.Context) error {
 		obj, err := dom.ResolveNode().WithBackendNodeID(info.backendID).Do(ctx)
 		if err != nil {
+			// -32000 "No node with given id found": the ref was in the last
+			// snapshot but the page re-rendered without a URL change (SPA
+			// refresh, polling table) and the node is gone. Raw CDP means
+			// nothing to a panel user — say what to DO about it.
+			if strings.Contains(err.Error(), "No node with given id found") {
+				return fmt.Errorf("ref %q 已失效——页面内容在快照后变化了（网址未变）；重新获取元素后再选", ref)
+			}
 			return err
 		}
 		if obj == nil || obj.ObjectID == "" {

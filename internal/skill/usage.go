@@ -59,6 +59,18 @@ func NewUsageTracker(stateDir string, legacyPath ...string) *UsageTracker {
 	return t
 }
 
+// HasUsed reports whether name has at least one recorded invocation.
+func (u *UsageTracker) HasUsed(name string) bool {
+	if u == nil || u.path == "" {
+		return false
+	}
+	u.mu.Lock()
+	st := u.loadLocked()
+	u.mu.Unlock()
+	e, ok := st.Skills[name]
+	return ok && e.LastUsed != ""
+}
+
 // Record logs one invocation of name: bumps the count and stamps LastUsed to
 // now, then writes the file. Best-effort — a write failure is swallowed because
 // losing one usage sample must never break the skill call that triggered it.

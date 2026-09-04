@@ -94,6 +94,15 @@ export default function OverviewPanel({ compact, actions, onJump, onFocusDevice,
             <span>·</span>
             <span>{t("ndv.ovw.info")} {r.info}</span>
           </div>
+          {/* 来源拆分（2026-09-04）：蓝队核查存量计入上面的数字但事件流不
+              收——单列一行带深链，让「数字涨了、事件流没动静」可解释。 */}
+          {r.vuln_open > 0 && (
+            <div className="ndv-ovw__line dim">
+              <span role="button" style={{ cursor: "pointer" }} onClick={() => jump("findings", "vuln")}>
+                {t("ndv.ovw.vulnSplit", { c: r.vuln_critical, w: r.vuln_warning })}
+              </span>
+            </div>
+          )}
           {(r.cve_needs_feed || r.weak_creds > 0) && (
             <div className="ndv-ovw__urgent" style={{ marginTop: 0, justifyContent: "flex-end", flexWrap: "wrap" }}>
               {r.cve_needs_feed && <span role="button" onClick={() => jump("sec")}>{t("ndv.ovw.cveFeed")}</span>}
@@ -114,12 +123,13 @@ export default function OverviewPanel({ compact, actions, onJump, onFocusDevice,
         {actions && <div>{actions}</div>}
       </div>
 
-      {/* ⭐ 在途动作（sticky 横条） */}
+      {/* ⭐ 在途动作（sticky 横条）——今日待办的聚合入口 */}
       <div className="ndv__card ndv-ovw__inflight">
+        <span role="button" style={{ color: (snap.risk.critical + snap.risk.warning) > 0 ? "var(--danger, #e5484d)" : undefined }} onClick={() => jump("findings")}>{t("ndv.ovw.openFindings", { n: snap.risk.critical + snap.risk.warning })}</span>
         <span role="button" onClick={() => jump("proposals")}>{t("ndv.ovw.pending", { n: snap.inflight.proposals_pending })}</span>
-        <span role="button" onClick={() => jump("jobs")}>{t("ndv.ovw.jobsRun", { n: snap.inflight.jobs_running })}</span>
-        {snap.inflight.jobs_paused > 0 && <span role="button" onClick={() => jump("jobs")}>⏸ {t("ndv.ovw.jobsPause", { n: snap.inflight.jobs_paused })}</span>}
-        <span role="button" onClick={() => jump("chat")}>{t("ndv.ovw.cutover", { n: snap.inflight.cutovers_active })}</span>
+        <span role="button" onClick={() => jump("live")}>{t("ndv.ovw.jobsRun", { n: snap.inflight.jobs_running })}</span>
+        {snap.inflight.jobs_paused > 0 && <span role="button" onClick={() => jump("live")}>⏸ {t("ndv.ovw.jobsPause", { n: snap.inflight.jobs_paused })}</span>}
+        <span role="button" onClick={() => jump("cutovers")}>{t("ndv.ovw.cutover", { n: snap.inflight.cutovers_active })}</span>
         <span>{t("ndv.ovw.terminals", { n: snap.inflight.terminals_open })}</span>
       </div>
 
@@ -182,6 +192,16 @@ export default function OverviewPanel({ compact, actions, onJump, onFocusDevice,
       <div className={compact ? "ndv-ovw__col" : "ndv-ovw__grid"}>
         <div className="ndv__card" data-ovw="events">
           <div className="ndv__card-title"><AlertTriangle size={14} />{t("ndv.ovw.events")}</div>
+          {/* 蓝队核查存量聚合行：事件流只收 syslog/trap/alert（正在发生），
+              蓝队发现（已知存量）不刷流——用一行聚合 + 深链给出口，防「核查
+              出几十条、总览没动静」的感知割裂（2026-09-04 用户反馈）。 */}
+          {r.vuln_open > 0 && (
+            <div className="ndv-ovw__ev" role="button" style={{ color: r.vuln_critical > 0 ? RISK_COLOR.critical : undefined }} onClick={() => jump("findings", "vuln")}>
+              <span className={`ndv-ovw__sev ndv-ovw__sev--${r.vuln_critical > 0 ? "critical" : "warning"}`}>{r.vuln_critical > 0 ? "critical" : "warning"}</span>
+              <span className="ndv-ovw__evtitle">{t("ndv.ovw.vulnOpen", { n: r.vuln_open })}</span>
+              <span className="dim">→</span>
+            </div>
+          )}
           {(snap.events ?? []).length === 0 && <div className="dim" style={{ fontSize: 11.5 }}>{t("ndv.ovw.noEvents")}</div>}
           {(snap.events ?? []).slice(0, compact ? 5 : 10).map(e => (
             <div key={e.id} className="ndv-ovw__ev" role="button" onClick={() => jump("findings", `id:${e.id}`)}>
@@ -223,7 +243,7 @@ export default function OverviewPanel({ compact, actions, onJump, onFocusDevice,
             {t("ndv.ovw.baseline")}{" "}
             <b>{snap.stats.baseline ? t("ndv.ovw.baselineVal", { h: snap.stats.baseline.hits, r: snap.stats.baseline.rules, d: snap.stats.baseline.checked, t: snap.stats.baseline.devices }) : t("ndv.ovw.baselineNever")}</b>
           </span>
-          <span role="button" onClick={() => jump("jobs")}>
+          <span role="button" onClick={() => jump("live")}>
             {t("ndv.ovw.jobRate")} <b>{snap.stats.job_finished > 0 ? `${snap.stats.job_done}/${snap.stats.job_finished}` : "—"}</b>
           </span>
           <span role="button" onClick={() => jump("audit")}>

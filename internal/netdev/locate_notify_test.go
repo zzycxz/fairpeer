@@ -33,6 +33,12 @@ func TestMatchLocateLinesAndIface(t *testing.T) {
 
 func TestNotifyWebhookFiresOnSeverity(t *testing.T) {
 	_ = config.Config{}
+	// SaveFinding persists through to the findings dir — pin it to a scratch
+	// dir or the notify fixtures leak into the user's real finding queue.
+	oldFind := findingsDirOverr
+	t.Cleanup(func() { findingsDirOverr = oldFind })
+	findingsDirOverr = t.TempDir()
+
 	var got atomic.Int64
 	var body atomic.Value
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

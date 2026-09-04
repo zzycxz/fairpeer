@@ -93,7 +93,9 @@ func (m *Manager) TestConnection(ctx context.Context, deviceName string) TestRes
 		}
 		return TestResult{Device: deviceName, Status: TestError, Detail: err.Error()}
 	}
-	defer client.Close()
+	if client != nil {
+		defer client.Close()
+	}
 	defer session.Close()
 	// OpenSession already ran the driver's paging-off commands: reaching here
 	// proves the prompt state machine works on this device.
@@ -105,6 +107,15 @@ func (m *Manager) TestConnection(ctx context.Context, deviceName string) TestRes
 // policy wrapper records what was presented before rejecting.
 func (m *Manager) connectWith(ctx context.Context, d config.NetDevDevice, policy *transport.HostKeyPolicy) (*transport.Client, *Session, error) {
 	drv, _ := m.driverFor(d)
+	// Console line: no host-key ceremony (physical presence), the prompt
+	// state machine waking on the line IS the verification.
+	if d.ConsolePort != "" {
+		session, err := OpenConsoleSession(ctx, d.ConsolePort, d.ConsoleBaud, drv, d.Encoding)
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, session, nil
+	}
 	lookup := m.lookupEntry()
 	resolved, err := transport.ResolveHost(lookup, d.Name, nil)
 	if err != nil {

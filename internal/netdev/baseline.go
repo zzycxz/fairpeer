@@ -55,7 +55,7 @@ var baselineRules = map[string][]baselineRule{
 	"huawei-vrp": {
 		{id: "telnet-enabled", title: "Telnet 管理服务开启", severity: "warning",
 			pattern: regexp.MustCompile(`(?im)^\s*telnet\s+server\s+enable\b`),
-			hint:    "关闭 telnet server，管理面仅保留 SSH（可让 agent 起草提案：undo telnet server enable）"},
+			hint:    "关闭 telnet server，管理面仅保留 SSH（可让 agent 起草变更：undo telnet server enable）"},
 		{id: "snmp-v1v2c", title: "SNMP v1/v2c community 在用", severity: "warning",
 			pattern: regexp.MustCompile(`(?im)^\s*snmp-agent\s+community\b`),
 			hint:    "改用 SNMPv3（USM 用户 + authPriv），移除 community 配置"},

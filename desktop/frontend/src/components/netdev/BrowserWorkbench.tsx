@@ -9,7 +9,7 @@ import { Monitor, RefreshCw, X } from "lucide-react";
 import { app } from "../../lib/bridge";
 import { browserMirrorSnapshot, subscribeBrowserMirror } from "../../lib/browserMirror";
 import { useT } from "../../lib/i18n";
-import type { BrowserConsoleTab } from "../../lib/types";
+import type { BrowserConsoleLogEntry, BrowserConsoleTab, BrowserNetEntry } from "../../lib/types";
 
 
 export function BrowserWorkbench({ hidden, onClose }: { hidden: boolean; onClose: () => void }) {
@@ -19,6 +19,10 @@ export function BrowserWorkbench({ hidden, onClose }: { hidden: boolean; onClose
   const [tabs, setTabs] = useState<BrowserConsoleTab[]>([]);
   const [consoleId, setConsoleId] = useState("");
   const [img, setImg] = useState<string | undefined>(undefined);
+  // Bottom pane (F12 slice): page console messages + network requests.
+  const [paneTab, setPaneTab] = useState<"console" | "net">("console");
+  const [logs, setLogs] = useState<BrowserConsoleLogEntry[]>([]);
+  const [netEntries, setNetEntries] = useState<BrowserNetEntry[]>([]);
   const [source, setSource] = useState<string>("console");
   const [busy, setBusy] = useState("");
 
@@ -43,6 +47,17 @@ export function BrowserWorkbench({ hidden, onClose }: { hidden: boolean; onClose
     return () => window.clearInterval(timer);
   }, [hidden, refreshTabs]);
 
+  useEffect(() => {
+    if (hidden) return;
+    const load = () => void app.BrowserConsoleDevTools().then((v) => {
+      setLogs(v.logs ?? []);
+      setNetEntries(v.net ?? []);
+    }).catch(() => undefined);
+    load();
+    const timer = window.setInterval(load, 2000);
+    return () => window.clearInterval(timer);
+  }, [hidden]);
+
   // Console mirror: poll a fresh screenshot while visible (manual browsing in
   // the controlled browser shows up near-live, not only after fairpeer acts).
   useEffect(() => {
@@ -54,13 +69,25 @@ export function BrowserWorkbench({ hidden, onClose }: { hidden: boolean; onClose
     return () => window.clearInterval(timer);
   }, [hidden, source]);
 
+  // A watched agent session that ended drops its bucket (browserMirror evicts
+  // on the kernel's end event) — fall back to the console view instead of
+  // showing the empty-state for a source that no longer exists.
+  useEffect(() => {
+    if (source !== "console" && !mirror.sessions[source]) setSource("console");
+  }, [source, mirror.sessions]);
+
   const switchTab = (index: number) => {
     setBusy("switch");
     void app.BrowserConsoleSwitchTab(index)
       .then(() => {
         // Elements live in the right dock; refs die with the old page, so
         // broadcast the switch and let the dock re-fetch its element list.
-        window.dispatchEvent(new CustomEvent("fairpeer:browser-console-changed"));
+        // The 1-based index + title ride along so the panel can record a
+        // switch_tab step (a real flow action, not bookkeeping).
+        const switched = tabs.find((tb) => tb.index === index);
+        window.dispatchEvent(new CustomEvent("fairpeer:browser-console-changed", {
+          detail: { index, title: switched?.title ?? "" },
+        }));
         void refreshTabs();
       })
       .catch(() => undefined)
@@ -68,6 +95,14 @@ export function BrowserWorkbench({ hidden, onClose }: { hidden: boolean; onClose
   };
 
   const agentIds = Object.keys(mirror.sessions).filter((id) => id && id !== consoleId);
+
+// fmtTime renders an entry stamp as HH:MM:SS local time (the F12 convention:
+// when it happened matters more than the date for a live ops view).
+function fmtTime(unixMillis: number): string {
+  if (!unixMillis) return "";
+  const d = new Date(unixMillis);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+}
 
   if (hidden) return null;
 
@@ -126,14 +161,56 @@ export function BrowserWorkbench({ hidden, onClose }: { hidden: boolean; onClose
         </div>
       </div>
       <div className="ndv-wb__body">
-        <div className="ndv-wb__mirror">
+        <div className="ndv-wb__mirror" style={{ flex: "3 1 0", minHeight: 0 }}>
           {source === "console" ? (
-            img ? <img src={img} alt="" /> : <div className="ndv-wb__empty"><Monitor size={16} />{t("brc.viewerEmpty")}</div>
+            (mirror.sessions[consoleId]?.image || img) ? (
+              <img src={mirror.sessions[consoleId]?.image || img} alt="" />
+            ) : (
+              <div className="ndv-wb__empty"><Monitor size={16} />{t("brc.viewerEmpty")}</div>
+            )
           ) : mirror.sessions[source]?.image ? (
             <img src={mirror.sessions[source].image} alt="" />
           ) : (
             <div className="ndv-wb__empty">{t("brc.srcAgentEmpty")}</div>
           )}
+        </div>
+        <div className="ndv-wb__pane">
+          <div className="ndv-wb__pane-head">
+            <button type="button" className={`ndv-brc__subtab${paneTab === "console" ? " ndv-brc__subtab--active" : ""}`} onClick={() => setPaneTab("console")}>
+              <span>{t("brc.wbConsole")}</span>
+              {logs.filter((l) => l.type === "error" || l.type === "exception").length > 0 && (
+                <span className="ndv-wb__errcount">{logs.filter((l) => l.type === "error" || l.type === "exception").length}</span>
+              )}
+            </button>
+            <button type="button" className={`ndv-brc__subtab${paneTab === "net" ? " ndv-brc__subtab--active" : ""}`} onClick={() => setPaneTab("net")}>
+              <span>{t("brc.wbNetwork")}</span>
+              {netEntries.filter((n) => n.status === "FAIL" || +n.status >= 400).length > 0 && (
+                <span className="ndv-wb__errcount">{netEntries.filter((n) => n.status === "FAIL" || +n.status >= 400).length}</span>
+              )}
+            </button>
+          </div>
+          <div className="ndv-wb__pane-list">
+            {paneTab === "console"
+              ? logs.length === 0
+                ? <div className="ndv-wb__pane-empty">{t("brc.wbConsoleEmpty")}</div>
+                : logs.map((l, i) => (
+                    <div key={i} className={`ndv-wb__log ndv-wb__log--${l.type}`}>
+                      <span className="ndv-wb__time">{fmtTime(l.time)}</span>
+                      <span className="ndv-wb__log-type">{l.type}</span>
+                      <span className="ndv-wb__log-text">{l.text}</span>
+                    </div>
+                  ))
+              : netEntries.length === 0
+                ? <div className="ndv-wb__pane-empty">{t("brc.wbNetEmpty")}</div>
+                : netEntries.map((n, i) => (
+                    <div key={i} className={`ndv-wb__net${n.status === "FAIL" || +n.status >= 400 ? " ndv-wb__net--bad" : ""}`}>
+                      <span className="ndv-wb__time">{fmtTime(n.time)}</span>
+                      <span className="ndv-wb__net-status">{n.status}</span>
+                      <span className="ndv-wb__net-method">{n.method}</span>
+                      <span className="ndv-wb__net-url">{n.url}</span>
+                    </div>
+                  ))}
+          </div>
         </div>
       </div>
     </div>
