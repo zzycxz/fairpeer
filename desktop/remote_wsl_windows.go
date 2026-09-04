@@ -28,14 +28,6 @@ type wslTransport struct{}
 
 func newWSLTransport() remoteTransport { return &wslTransport{} }
 
-// wslDistro is one installed distro.
-type wslDistro struct {
-	Name    string `json:"name"`
-	State   string `json:"state"`
-	Version int    `json:"version"`
-	Default bool   `json:"default"`
-}
-
 // ListWSLDistros enumerates installed distros via `wsl -l -v`. Returns an
 // empty list when WSL itself is absent (the wizard shows guidance instead).
 func (a *App) ListWSLDistros() []wslDistro {
