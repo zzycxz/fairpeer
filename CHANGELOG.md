@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-09-08
+
 ### feat(netdev/skill): 技能编排收敛落地——seccheck/diag 两个 -auto 子代理 + L4 合同校验 + BLUETEAM 批1 最小切片 + 测绘三合一
 
 SKILL_ORCHESTRATION_SPEC v1 的 P1/P2 内核与 P3 本地项全部落地，技能从 9 张 inline 手册收敛为 **4 个**（知识下沉原则：重的住工具/数据，技能永远薄）：
@@ -38,6 +40,8 @@ NETDEV_WRITE_AUTHZ_SPEC v1 的 P1/P2/P3 本地项全部落地（封的是"写"�
 - **写面盘点（附录 A）**：唯一写通道原则——dangerous/unknown 任何档恒拒、restore 恒提案、HumanTTY 人专属、SFTP/结构化步骤提案专属
 - 红测试 15 个（三档分发/TOML 拦截/headless 拒绝/预算/两锁合成/时间盒/drift/git 镜像/台账锚定/证据纪律），全绿
 - 文档：WRITE_AUTHZ_SPEC + SKILL_ORCHESTRATION_SPEC 两份定稿、NETDEV_SPEC §7.1 改写并入、操作手册×2（含 H 节）、BLUETEAM/架构/场景图同步
+
+## [0.2.1] — 2026-08-28 ~ 2026-09-07
 
 ### fix(cowork/browser): 浏览器迁移第三轮复核——"交给 AI"断链贯通 + dock 自开 + 死代码清理
 
