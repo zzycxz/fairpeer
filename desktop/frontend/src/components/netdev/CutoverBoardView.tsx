@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { app } from "../../lib/bridge";
+import { PanelErrorState } from "./PanelStates";
+import { usePanelData } from "./usePanelData";
 import { useI18n } from "../../lib/i18n";
-import type { NetDevCutoverBoard } from "../../lib/types";
 
 // CutoverBoardView — 割接屏（DASHBOARD spec §4.7）。三行结构：步骤流水线
 // （状态机映射）/ 受影响设备进度+回退点 / 预算与命令流。进行时优先
@@ -20,21 +21,19 @@ interface Props {
 
 export default function CutoverBoardView({ onJump, onFocusDevice }: Props) {
   const { t } = useI18n();
-  const [b, setB] = useState<NetDevCutoverBoard | null>(null);
+  // G1-1：三态 hook（失败与空/加载可区分，失败可重试）。
+  const q = usePanelData(() => app.NetDevCutoverBoard(""), []);
+  const b = q.data;
   const [tick, setTick] = useState(0); // 倒计时走字：加载后经过的秒数（仅显示，无请求）
 
-  const load = useCallback(() => {
-    app.NetDevCutoverBoard("").then(x => { if (x) setB(x); }).catch(() => {});
-  }, []);
-  useEffect(() => { load(); }, [load]);
   useEffect(() => {
     const on = (e: Event) => {
       const screens = (e as CustomEvent<{ screens?: string[] }>).detail?.screens ?? [];
-      if (screens.includes("cutover") || screens.includes("overview")) load();
+      if (screens.includes("cutover") || screens.includes("overview")) q.retry();
     };
     window.addEventListener("fairpeer:netdev-dash", on);
     return () => window.removeEventListener("fairpeer:netdev-dash", on);
-  }, [load]);
+  }, [q.retry]);
   // 窗口倒计时秒级走字（进行时例外：不失焦暂停，只做显示，无请求）。
   useEffect(() => { setTick(0); }, [b?.id]);
   useEffect(() => {
@@ -43,7 +42,8 @@ export default function CutoverBoardView({ onJump, onFocusDevice }: Props) {
     return () => clearInterval(tm);
   }, [b]);
 
-  if (!b) return <div className="ndv__card" style={{ padding: 16 }}>{t("ndv.cut.loading")}</div>;
+  if (q.status === "error") return <PanelErrorState onRetry={q.retry} />;
+  if (q.status === "loading" || !b) return <div className="ndv__card" style={{ padding: 16 }}>{t("ndv.cut.loading")}</div>;
   if (!b.found) {
     return (
       <div className="ndv__card ndv-cut__empty" style={{ padding: 24 }}>
@@ -56,8 +56,29 @@ export default function CutoverBoardView({ onJump, onFocusDevice }: Props) {
   const mm = String(Math.floor(remain / 60)).padStart(2, "0");
   const ss = String(remain % 60).padStart(2, "0");
 
+  const pre = b.precheck_report;
   return (
     <div className="ndv-cut">
+      {/* S1-1：窗口前预检红绿灯——绿=全过/黄=部分/红=有失败（precheck-failed 可放行） */}
+      {pre && (
+        <div className="ndv__card" style={{ padding: "8px 14px", marginBottom: 8, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontWeight: 600 }}>
+            {pre.all_pass ? "🟢" : "🔴"} {t("ndv.cut.preTitle")}
+          </span>
+          <span className="dim" style={{ fontSize: 11.5 }}>
+            {t("ndv.cut.preCount", { ok: pre.items.filter(i => i.pass).length, n: pre.items.length })}
+          </span>
+          <span className="dim" style={{ fontSize: 11, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={pre.items.filter(i => !i.pass).map(i => `${i.device} ${i.check}: ${i.detail ?? ""}`).join("；")}>
+            {pre.items.filter(i => !i.pass).slice(0, 3).map(i => `✗ ${i.device} ${i.check}`).join("；") || t("ndv.cut.preAllOk")}
+          </span>
+          {b.status === "precheck-failed" && (
+            <span className="btn btn--primary btn--small" role="button" title={t("ndv.cut.preOverrideTip")}
+              onClick={() => { void app.NetDevCutoverPrecheckOverride(b.id).then(() => q.retry()).catch(() => {}); }}>
+              {t("ndv.cut.preOverride")}
+            </span>
+          )}
+        </div>
+      )}
       <div className="ndv-cut__head ndv__card">
         <div className="ndv-cut__title">
           <b>{b.id}</b> {b.name}

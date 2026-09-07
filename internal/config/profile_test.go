@@ -242,10 +242,10 @@ func TestImageUnderstandNeverHiddenByBuiltinProfiles(t *testing.T) {
 }
 
 // TestBuiltinProfileSkillDomains guards the per-profile user-skill domain
-// folding sets. The contract: cowork and netdev both surface browser-ops (the
-// ops browser tab's library runs in either); only netdev surfaces netdev;
-// dev folds every domained skill (its "code" sentinel matches none yet) since
-// browser/netdev tools aren't registered there.
+// folding sets. The contract (2026-09-06 定稿：浏览器归办公): only cowork
+// surfaces browser-ops; only netdev surfaces netdev; dev folds every domained
+// skill (its "code" sentinel matches none yet) since browser/netdev tools
+// aren't registered there.
 func TestBuiltinProfileSkillDomains(t *testing.T) {
 	cfg := Default()
 	cases := []struct {
@@ -254,7 +254,7 @@ func TestBuiltinProfileSkillDomains(t *testing.T) {
 	}{
 		{ProfileDev, []string{"code"}},
 		{ProfileCowork, []string{"browser-ops"}},
-		{ProfileNetDev, []string{"browser-ops", "netdev"}},
+		{ProfileNetDev, []string{"netdev"}},
 	}
 	for _, tc := range cases {
 		prof, err := cfg.ResolveProfile(tc.profile)
@@ -272,21 +272,25 @@ func TestBuiltinProfileSkillDomains(t *testing.T) {
 	}
 }
 
-// TestNetDevWhitelistsBrowserAuto pins the user direction that browser-auto
-// (the generic browser fallback — site-specific browser-ops skills win first,
-// per the routing rows) is enabled under netdev. Without it the ops browser
-// tab's prose templates break: they delegate browser work to
-// run_skill("browser-auto"), which the whitelist would refuse.
-func TestNetDevWhitelistsBrowserAuto(t *testing.T) {
+// TestNetDevExcludesBrowserDomain pins the SUPERSEDING user direction
+// (2026-09-06): 浏览器能力/面板/技能三位一体归办公 — netdev no longer
+// indexes the browser-ops domain nor whitelists browser-auto (the
+// 2026-09-04 "generic fallback under netdev" direction is retired; the
+// browser tab moved to the office workbench).
+func TestNetDevExcludesBrowserDomain(t *testing.T) {
 	cfg := Default()
 	prof, err := cfg.ResolveProfile(ProfileNetDev)
 	if err != nil {
 		t.Fatalf("netdev: %v", err)
 	}
-	for _, n := range prof.EnabledSkills {
-		if n == "browser-auto" {
-			return
+	for _, d := range prof.SkillDomains {
+		if d == "browser-ops" {
+			t.Fatal("netdev SkillDomains still contains browser-ops")
 		}
 	}
-	t.Fatal("netdev EnabledSkills must contain browser-auto (generic browser fallback)")
+	for _, n := range prof.EnabledSkills {
+		if n == "browser-auto" {
+			t.Fatal("netdev EnabledSkills still whitelists browser-auto")
+		}
+	}
 }

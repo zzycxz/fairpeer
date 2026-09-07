@@ -2,6 +2,8 @@ package netdev
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -123,18 +125,24 @@ func TestProposalLifecycle(t *testing.T) {
 		t.Fatal("double approve accepted")
 	}
 
-	done, err := m.ExecuteProposal(context.Background(), p.ID)
+	watching, err := m.ExecuteProposal(context.Background(), p.ID)
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if done.Status != ProposalDone || !done.Steps[0].Applied {
-		t.Fatalf("proposal = %+v", done)
+	// Full success enters the observation period (watching), never bare done:
+	// the 30-min auto-close goroutine, CloseProposalWatch and the degradation
+	// checks all key off watching.
+	if watching.Status != ProposalWatching || !watching.Steps[0].Applied {
+		t.Fatalf("proposal = %+v", watching)
 	}
-	if !strings.Contains(done.Steps[0].Backup, "current-configuration snapshot") {
-		t.Fatalf("backup not captured: %.80s", done.Steps[0].Backup)
+	if watching.WatchUntil == nil || !watching.WatchUntil.After(time.Now()) {
+		t.Fatalf("watch deadline = %v", watching.WatchUntil)
+	}
+	if !strings.Contains(watching.Steps[0].Backup, "current-configuration snapshot") {
+		t.Fatalf("backup not captured: %.80s", watching.Steps[0].Backup)
 	}
 
-	// After done: rollback runs the authored plan and returns to draft.
+	// After the run: rollback runs the authored plan and returns to draft.
 	rb, err := m.RollbackProposal(context.Background(), p.ID)
 	if err != nil {
 		t.Fatalf("rollback: %v", err)
@@ -197,6 +205,54 @@ func TestProposalPartialFreeze(t *testing.T) {
 	}
 	if rb.Status != ProposalDraft || rb.Steps[0].Applied {
 		t.Fatalf("rollback after partial = %+v", rb)
+	}
+}
+
+// A command failing MID-STEP leaves the executed prefix on the device: the
+// step records AppliedCmds (how many commands landed) and the rollback runs
+// for it — the old Applied-only check skipped the step and the prefix stayed.
+func TestProposalMidStepFailureRollbackRunsForPrefix(t *testing.T) {
+	m := proposalTestManager(t)
+	p := &Proposal{
+		Intent: "second command fails mid-step",
+		Steps: []ProposalStep{{
+			Device:   "sw1",
+			Commands: []string{"vlan 100", "reboot"}, // sim: vlan ok, reboot rejected
+			Rollback: []string{"undo vlan 100"},
+		}},
+	}
+	if err := m.ValidateProposal(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveProposal(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ApproveProposal(p.ID, true); err != nil { // reboot ⇒ dangerous ⇒ confirm2
+		t.Fatal(err)
+	}
+	part, err := m.ExecuteProposal(context.Background(), p.ID)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if part.Status != ProposalPartial {
+		t.Fatalf("status = %s, want partial (frozen)", part.Status)
+	}
+	s := part.Steps[0]
+	if s.Applied || s.AppliedCmds != 1 {
+		t.Fatalf("applied=%v appliedCmds=%d — the executed prefix must be recorded", s.Applied, s.AppliedCmds)
+	}
+	if !strings.Contains(s.Error, "1/2") {
+		t.Fatalf("error = %q — must record how much of the step applied", s.Error)
+	}
+
+	// Rollback covers the partially-applied step; a clean unwind clears the
+	// prefix count alongside Applied.
+	rb, err := m.RollbackProposal(context.Background(), p.ID)
+	if err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if rb.Status != ProposalDraft || rb.Steps[0].Applied || rb.Steps[0].AppliedCmds != 0 {
+		t.Fatalf("rollback after mid-step failure = %+v", rb.Steps[0])
 	}
 }
 
@@ -274,5 +330,101 @@ func TestProposalRejectDelete(t *testing.T) {
 	}
 	if err := m.DeleteProposal(p3.ID); err == nil || !strings.Contains(err.Error(), "live pipeline") {
 		t.Fatalf("delete approved accepted: %v", err)
+	}
+}
+
+// A crash mid-execution leaves status=executing forever — every lifecycle op
+// refuses it. The lazy sweep in ListProposals turns an executing file that
+// went quiet for staleExecutingAge into partial with a manual-verify note;
+// fresh executions and ones with a live in-flight transition stay untouched.
+func TestRecoverStaleExecuting(t *testing.T) {
+	proposalsDirOverride = filepath.Join(t.TempDir(), "proposals")
+	t.Cleanup(func() { proposalsDirOverride = "" })
+	netdevStateDirOverr = t.TempDir()
+	t.Cleanup(func() { netdevStateDirOverr = "" })
+
+	stale := &Proposal{ID: "P-stale-1", Status: ProposalExecuting, Intent: "runner crashed"}
+	if err := SaveProposal(stale); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-staleExecutingAge - 5*time.Minute)
+	if err := os.Chtimes(filepath.Join(proposalsDirOverride, "P-stale-1.json"), old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	fresh := &Proposal{ID: "P-fresh-1", Status: ProposalExecuting, Intent: "running now"}
+	if err := SaveProposal(fresh); err != nil {
+		t.Fatal(err)
+	}
+
+	// A claimed in-flight transition is a LIVE run — old mtime or not.
+	busy := &Proposal{ID: "P-busy-1", Status: ProposalExecuting, Intent: "slow but alive"}
+	if err := SaveProposal(busy); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(proposalsDirOverride, "P-busy-1.json"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	if !claimProposalInflight("P-busy-1") {
+		t.Fatal("claim inflight")
+	}
+	t.Cleanup(func() { releaseProposalInflight("P-busy-1") })
+
+	if _, err := ListProposals(); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := GetProposal("P-stale-1")
+	if got.Status != ProposalPartial || !strings.Contains(got.Note, "runner died") {
+		t.Fatalf("stale executing not recovered: status=%s note=%q", got.Status, got.Note)
+	}
+	if got, _ = GetProposal("P-fresh-1"); got.Status != ProposalExecuting {
+		t.Fatalf("fresh executing wrongly recovered: %+v", got)
+	}
+	if got, _ = GetProposal("P-busy-1"); got.Status != ProposalExecuting {
+		t.Fatalf("in-flight execution wrongly recovered: %+v", got)
+	}
+}
+
+// The proposal sequence is in-memory: a same-day restart used to regenerate
+// P<date>-1… and SaveProposal silently overwrote the existing file. The ID
+// generator re-seeds from the highest suffix on disk, so today's ids continue
+// past whatever an earlier process already created.
+func TestNewProposalIDResumesPastExisting(t *testing.T) {
+	proposalsDirOverride = filepath.Join(t.TempDir(), "proposals")
+	t.Cleanup(func() { proposalsDirOverride = "" })
+	// Simulate the fresh process (and leave a clean counter for later tests).
+	proposalMu.Lock()
+	proposalSeq, proposalSeqDay = 0, ""
+	proposalMu.Unlock()
+	t.Cleanup(func() {
+		proposalMu.Lock()
+		proposalSeq, proposalSeqDay = 0, ""
+		proposalMu.Unlock()
+	})
+
+	// Yesterday's files must not influence today's numbering.
+	if err := SaveProposal(&Proposal{ID: "P20200101-9", Status: ProposalDraft, Intent: "old"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveProposal(&Proposal{ID: "P" + time.Now().Format("20060102") + "-1", Status: ProposalDraft, Intent: "seeded today"}); err != nil {
+		t.Fatal(err)
+	}
+
+	want := "P" + time.Now().Format("20060102") + "-2"
+	if got := newProposalID(); got != want {
+		t.Fatalf("newProposalID = %q, want %q (restart must not collide with today's -1)", got, want)
+	}
+
+	// The next generated id continues the sequence without clobbering seeds.
+	p := &Proposal{Intent: "new process's first proposal", Status: ProposalDraft}
+	if err := SaveProposal(p); err != nil {
+		t.Fatal(err)
+	}
+	if p.ID != "P"+time.Now().Format("20060102")+"-3" {
+		t.Fatalf("SaveProposal id = %q, want today's -3 (continuing past -2)", p.ID)
+	}
+	seeded, err := GetProposal("P" + time.Now().Format("20060102") + "-1")
+	if err != nil || seeded.Intent != "seeded today" {
+		t.Fatalf("seeded proposal overwritten: %+v (%v)", seeded, err)
 	}
 }

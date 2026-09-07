@@ -222,6 +222,10 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 
 	b.WriteString("[llm]\n")
 	fmt.Fprintf(&b, "rpm = %d   # max requests/minute per API key (0 = unlimited)\n", c.LLM.RPM)
+	if c.LLM.TPM != 0 {
+		fmt.Fprintf(&b, "tpm = %d   # max tokens/minute (reserved, not enforced yet)\n", c.LLM.TPM)
+	}
+	fmt.Fprintf(&b, "reserve_main = %d   # requests reserved for main-agent priority (0 = no reservation)\n", c.LLM.ReserveMain)
 	b.WriteString("\n")
 
 	if shouldRenderProviders(c, defaults, scope) {
@@ -310,6 +314,12 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	fmt.Fprintf(&b, "enabled          = %v   # 后台自进化：Dream 记忆整合 + Distill 工作流提炼\n", c.Dream.Enabled)
 	fmt.Fprintf(&b, "dream_interval   = %d   # Dream 运行周期（天）；0 = 默认 %d\n", c.Dream.DreamIntervalDays(), DefaultDreamInterval)
 	fmt.Fprintf(&b, "distill_interval = %d   # Distill 运行周期（天）；0 = 默认 %d\n", c.Dream.DistillIntervalDays(), DefaultDistillInterval)
+	if c.Dream.SkillColdDays != 0 {
+		fmt.Fprintf(&b, "skill_cold_days = %d   # 技能多少天未用进入冷退役；0 = 默认 %d\n", c.Dream.SkillColdDays, DefaultSkillColdDays)
+	}
+	if c.Dream.IdleMinutes != 0 {
+		fmt.Fprintf(&b, "idle_minutes   = %d   # 用户空闲多少分钟后才允许 Dream 运行；0 = 默认 %d\n", c.Dream.IdleMinutes, DefaultIdleMinutes)
+	}
 	b.WriteString("\n")
 
 	// [cowork] section: PPT, mail (SMTP/IMAP/email_accounts), screenshot, RAG.
@@ -350,6 +360,51 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	if c.Cowork.FastLLMBaseDomain != "" {
 		fmt.Fprintf(&b, "fast_llm_base_domain = %q   # overrides the base URL for direct /chat/completions calls (scheduler/RAG); empty = built-in default\n", c.Cowork.FastLLMBaseDomain)
+	}
+	if c.Cowork.BrowserHeadless {
+		fmt.Fprintf(&b, "browser_headless = %v\n", c.Cowork.BrowserHeadless)
+	}
+	if c.Cowork.BrowserUserDataDir != "" {
+		fmt.Fprintf(&b, "browser_user_data_dir = %q   # persistent profile dir for the driven browser\n", c.Cowork.BrowserUserDataDir)
+	}
+	if c.Cowork.BrowserAttachURL != "" {
+		fmt.Fprintf(&b, "browser_attach_url = %q   # attach to a running CDP endpoint instead of launching\n", c.Cowork.BrowserAttachURL)
+	}
+	if c.Cowork.RAGEnabled != nil {
+		fmt.Fprintf(&b, "rag_enabled = %v   # knowledge-base master switch\n", *c.Cowork.RAGEnabled)
+	}
+	if c.Cowork.VLMBackend != "" {
+		fmt.Fprintf(&b, "vlm_backend = %q\n", c.Cowork.VLMBackend)
+	}
+	if c.Cowork.VLMModel != "" {
+		fmt.Fprintf(&b, "vlm_model = %q   # vision model ref (provider/model)\n", c.Cowork.VLMModel)
+	}
+	if c.Cowork.ExtractModel != "" {
+		fmt.Fprintf(&b, "extract_model = %q   # Hyper-Extract model ref; empty = HE sidecar off\n", c.Cowork.ExtractModel)
+	}
+	if c.Cowork.ExtractInterval != "" {
+		fmt.Fprintf(&b, "extract_interval = %q\n", c.Cowork.ExtractInterval)
+	}
+	if c.Cowork.ExtractConcurrency != 0 {
+		fmt.Fprintf(&b, "extract_concurrency = %d\n", c.Cowork.ExtractConcurrency)
+	}
+	if c.Cowork.HEPort != 0 {
+		fmt.Fprintf(&b, "he_port = %d   # Hyper-Extract sidecar port; 0 = auto\n", c.Cowork.HEPort)
+	}
+	if c.Cowork.BrowserUseEnabled {
+		fmt.Fprintf(&b, "browser_use_enabled = %v\n", c.Cowork.BrowserUseEnabled)
+	}
+	if c.Cowork.BrowserUsePython != "" {
+		fmt.Fprintf(&b, "browser_use_python = %q\n", c.Cowork.BrowserUsePython)
+	}
+	if c.Cowork.BrowserUsePort != 0 {
+		fmt.Fprintf(&b, "browser_use_port = %d   # browser-use sidecar port; 0 = auto\n", c.Cowork.BrowserUsePort)
+	}
+	if c.Cowork.BrowserUseModel != "" {
+		fmt.Fprintf(&b, "browser_use_model = %q\n", c.Cowork.BrowserUseModel)
+	}
+	if c.Cowork.BrowserUseMaxSteps != 0 {
+		fmt.Fprintf(&b, "browser_use_max_steps = %d\n", c.Cowork.BrowserUseMaxSteps)
 	}
 
 	// Mail config. When EmailAccounts is set, it's the source of truth and we
@@ -456,15 +511,41 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		}
 		fmt.Fprintf(&b, "max_steps = %d\n", c.Bot.MaxSteps)
 		fmt.Fprintf(&b, "debounce_ms = %d\n", c.Bot.DebounceMs)
+		if len(c.Bot.DesktopWatchers) > 0 {
+			var wb strings.Builder
+			wb.WriteByte('[')
+			for i, w := range c.Bot.DesktopWatchers {
+				if i > 0 {
+					wb.WriteString(", ")
+				}
+				wb.WriteString(renderStringMap(map[string]string{
+					"platform": w.Platform, "chat_type": w.ChatType, "chat_id": w.ChatID,
+				}))
+			}
+			wb.WriteByte(']')
+			fmt.Fprintf(&b, "desktop_watchers = %s   # IM chats subscribed to desktop approval events\n", wb.String())
+		}
 		b.WriteString("\n[bot.allowlist]\n")
 		fmt.Fprintf(&b, "enabled = %v\n", c.Bot.Allowlist.Enabled)
 		fmt.Fprintf(&b, "allow_all = %v\n", c.Bot.Allowlist.AllowAll)
+		allowMode := c.Bot.Allowlist.Mode
+		if allowMode == "" {
+			allowMode = "review"
+		}
+		fmt.Fprintf(&b, "mode = %q   # open = auto-enroll strangers | review = admin approval required\n", allowMode)
 		fmt.Fprintf(&b, "qq_users = %s\n", renderStringArray(c.Bot.Allowlist.QQUsers))
 		fmt.Fprintf(&b, "feishu_users = %s\n", renderStringArray(c.Bot.Allowlist.FeishuUsers))
 		fmt.Fprintf(&b, "weixin_users = %s\n", renderStringArray(c.Bot.Allowlist.WeixinUsers))
+		fmt.Fprintf(&b, "telegram_users = %s\n", renderStringArray(c.Bot.Allowlist.TelegramUsers))
 		fmt.Fprintf(&b, "qq_groups = %s\n", renderStringArray(c.Bot.Allowlist.QQGroups))
 		fmt.Fprintf(&b, "feishu_groups = %s\n", renderStringArray(c.Bot.Allowlist.FeishuGroups))
 		fmt.Fprintf(&b, "weixin_groups = %s\n", renderStringArray(c.Bot.Allowlist.WeixinGroups))
+		fmt.Fprintf(&b, "telegram_groups = %s\n", renderStringArray(c.Bot.Allowlist.TelegramGroups))
+		b.WriteString("# admins (optional): when non-empty, approval commands (/approve, /desktop approve, /netdev 变更 批准) are admin-only\n")
+		fmt.Fprintf(&b, "qq_admins = %s\n", renderStringArray(c.Bot.Allowlist.QQAdmins))
+		fmt.Fprintf(&b, "feishu_admins = %s\n", renderStringArray(c.Bot.Allowlist.FeishuAdmins))
+		fmt.Fprintf(&b, "weixin_admins = %s\n", renderStringArray(c.Bot.Allowlist.WeixinAdmins))
+		fmt.Fprintf(&b, "telegram_admins = %s\n", renderStringArray(c.Bot.Allowlist.TelegramAdmins))
 		b.WriteString("\n[bot.qq]\n")
 		fmt.Fprintf(&b, "enabled = %v\n", c.Bot.QQ.Enabled)
 		fmt.Fprintf(&b, "app_id = %q\n", c.Bot.QQ.AppID)
@@ -571,6 +652,37 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		} else {
 			b.WriteString("# [netdev] 运维清单：设备/跳板/分组/站点与护栏。机密只进密钥库（*_env 指针），绝不写进本文件。\n")
 			b.WriteString(nb.String())
+			b.WriteString("\n")
+		}
+	}
+
+	// [trustdomain] and [mobilebridge] ride the USER config only as well
+	// (cross-profile infrastructure, TRUSTDOMAIN_SPEC §15.1; the mobile bridge
+	// is desktop-global). Same struct-marshal pattern as [netdev]: without an
+	// explicit renderer these sections were silently dropped from every
+	// WriteFile/SaveTo — the trust-domain enable flag and the mobile knock /
+	// relay / signaling settings vanished on the next load.
+	if scope != RenderScopeProject && !reflect.DeepEqual(c.TrustDomain, TrustDomainConfig{}) {
+		var tb strings.Builder
+		if err := toml.NewEncoder(&tb).Encode(struct {
+			TrustDomain TrustDomainConfig `toml:"trustdomain"`
+		}{c.TrustDomain}); err != nil {
+			b.WriteString("# [trustdomain] render failed — section NOT written; report this bug\n\n")
+		} else {
+			b.WriteString("# [trustdomain] 私有网信任域：跨配置档的账本基础设施（docs/TRUSTDOMAIN_SPEC.md）。\n")
+			b.WriteString(tb.String())
+			b.WriteString("\n")
+		}
+	}
+	if scope != RenderScopeProject && !reflect.DeepEqual(c.MobileBridge, MobileBridgeConfig{}) {
+		var mb strings.Builder
+		if err := toml.NewEncoder(&mb).Encode(struct {
+			MobileBridge MobileBridgeConfig `toml:"mobilebridge"`
+		}{c.MobileBridge}); err != nil {
+			b.WriteString("# [mobilebridge] render failed — section NOT written; report this bug\n\n")
+		} else {
+			b.WriteString("# [mobilebridge] linkpeer 移动端桥接：信令 / 配对网卡 / UDP 敲门 / 云跳板。\n")
+			b.WriteString(mb.String())
 			b.WriteString("\n")
 		}
 	}
@@ -815,6 +927,12 @@ func renderBotSessionMappings(mappings []BotConnectionSessionMapping) string {
 		parts := map[string]string{
 			"remote_id":  mapping.RemoteID,
 			"session_id": mapping.SessionID,
+		}
+		if mapping.ChatType != "" {
+			parts["chat_type"] = mapping.ChatType
+		}
+		if mapping.ChatID != "" {
+			parts["chat_id"] = mapping.ChatID
 		}
 		if mapping.Scope != "" {
 			parts["scope"] = mapping.Scope

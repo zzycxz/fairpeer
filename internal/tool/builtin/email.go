@@ -274,9 +274,56 @@ func cleanAddrs(in []string) []string {
 	return out
 }
 
+// checkAddrInjection rejects addresses that could smuggle headers into the
+// assembled message. To/Cc/Bcc come from tool args (model-controlled) and are
+// joined raw into the To/Cc headers — an address containing CR/LF would inject
+// arbitrary header lines (e.g. a Bcc the caller never listed) into every
+// recipient's copy. Full RFC 5322 parsing is overkill here (net/mail is strict
+// about legitimate display names); the injection-relevant rules are enough: no
+// control characters in the addr-spec, and no whitespace in its local part
+// (a space there is malformed and can also fold the header line).
+func checkAddrInjection(field, addr string) error {
+	// "Display Name <local@domain>" — scrutinize the addr-spec inside <>.
+	spec := addr
+	if i := strings.LastIndexByte(addr, '<'); i >= 0 {
+		if j := strings.LastIndexByte(addr, '>'); j > i {
+			spec = addr[i+1 : j]
+		}
+	}
+	for k := 0; k < len(spec); k++ {
+		if c := spec[k]; c < 0x20 || c == 0x7f {
+			return fmt.Errorf("%s address %q contains control characters (header injection risk)", field, addr)
+		}
+	}
+	if at := strings.LastIndexByte(spec, '@'); at >= 0 {
+		if strings.ContainsAny(spec[:at], " \t") {
+			return fmt.Errorf("%s address %q has whitespace in the local part", field, addr)
+		}
+	}
+	return nil
+}
+
 // buildMessage assembles a MIME message. With attachments it uses multipart;
 // without, a simple text/html part. Headers are RFC 5322 compliant.
 func buildMessage(from string, to, cc, bcc []string, subject, body, format string, attachments []string) ([]byte, error) {
+	if err := checkAddrInjection("from", from); err != nil {
+		return nil, err
+	}
+	for _, list := range []struct {
+		field string
+		addrs []string
+	}{{"to", to}, {"cc", cc}, {"bcc", bcc}} {
+		for _, a := range list.addrs {
+			if err := checkAddrInjection(list.field, a); err != nil {
+				return nil, err
+			}
+		}
+	}
+	// The Subject is emitted as a raw header line (QEncoding passes plain
+	// ASCII through unchanged), so CR/LF there would inject headers too.
+	if strings.ContainsAny(subject, "\r\n") {
+		return nil, fmt.Errorf("subject contains line breaks (header injection risk): %q", truncate(subject, 60))
+	}
 	headers := map[string]string{
 		"From":         from,
 		"To":           strings.Join(to, ", "),
@@ -411,6 +458,14 @@ func sendSMTP(ctx context.Context, cfg config.SMTPConfig, to, cc, bcc []string, 
 	// STARTTLS or plain. net/smtp.SendMail has no ctx/timeout support, so run it
 	// on a goroutine and abort by closing the connection under it if ctx is done
 	// or smtpSendTimeout elapses. (Closing the conn causes SendMail to return.)
+	//
+	// KNOWN LEAK (accepted, documented): SendMail dials internally (net.Dial,
+	// no deadline we can inject), so on timeout the goroutine survives until
+	// its own TCP stack gives up (OS-level, tens of seconds to ~2min; a
+	// maliciously stalling server could hold it longer). The caller has
+	// already returned by then and the goroutine holds only its send buffers.
+	// Bounding it properly means reimplementing SendMail's handshake on
+	// net.Dialer.DialContext — revisit if SMTP sends ever run unbounded.
 	sendCtx, cancel := context.WithTimeout(ctx, smtpSendTimeout)
 	defer cancel()
 	done := make(chan error, 1)

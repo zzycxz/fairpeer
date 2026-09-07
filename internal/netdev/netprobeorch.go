@@ -127,7 +127,7 @@ type netprobeTool struct{ m *Manager }
 func (t *netprobeTool) Name() string { return "netdev_netprobe" }
 
 func (t *netprobeTool) Description() string {
-	return "Orchestrated netprobe liveness sweep (NETDEV_SPEC §5.1): runs fairpeer's own netprobe binary (cmd/netprobe — the user builds it and sets [netdev.discovery] netprobe_path, typically on a jump host) over one in-scope CIDR, covering what SSH-tunnel probing cannot: ICMP echo liveness and /16-class subnets (per-job budget, not the tunnel 4096 cap). " +
+	return "Orchestrated netprobe liveness sweep: runs fairpeer's own netprobe binary (cmd/netprobe — the user builds it and sets [netdev.discovery] netprobe_path, typically on a jump host) over one in-scope CIDR, covering what SSH-tunnel probing cannot: ICMP echo liveness and /16-class subnets (per-job budget, not the tunnel 4096 cap). " +
 		"Gated like netdev_assess: requires the [netdev.assessment] engagement envelope; the CIDR must sit inside the configured discovery scopes. Alive hosts land in the 待确认区 (ICMP-only hosts as port-less rows). The binary never logs in to anything."
 }
 

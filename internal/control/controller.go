@@ -1907,10 +1907,12 @@ func (c *Controller) NewSession() error {
 		return nil
 	}
 	// Refuse while a turn is running: the agent's loop appends to the live
-	// Session, and swapping it out mid-turn tears the transcript. The check and
-	// the swap below are each under c.mu; between them only non-session work
-	// (snapshot, hooks) happens, so runGuarded cannot start a turn that writes
-	// to a session we are about to replace.
+	// Session, and swapping it out mid-turn tears the transcript. The initial
+	// check and the swap below are separate critical sections (the snapshot and
+	// SessionEnd hook between them must run unlocked — hooks can block), so a
+	// queued follow-up CAN start a turn in that window; the re-check just before
+	// the swap catches it and aborts rather than swapping the session out from
+	// under the running turn.
 	c.mu.Lock()
 	if c.running {
 		c.mu.Unlock()
@@ -1923,6 +1925,10 @@ func (c *Controller) NewSession() error {
 	c.hooks.SessionEnd(context.Background())
 	newSess := agent.NewSession(c.systemPrompt)
 	c.mu.Lock()
+	if c.running {
+		c.mu.Unlock()
+		return fmt.Errorf("a turn started during session switch")
+	}
 	c.executor.SetSession(newSess)
 	if c.sessionDir != "" {
 		c.sessionPath = agent.NewSessionPath(c.sessionDir, c.label)
@@ -1954,11 +1960,17 @@ func (c *Controller) ClearSession() error {
 	}
 	c.hooks.SessionEnd(context.Background())
 	newSess := agent.NewSession(c.systemPrompt)
-	// Swap the session under one critical section so a turn that passes the
-	// running check and starts between the unlock above and here cannot write a
-	// session we are about to replace (transcript tear). running was false at
-	// the check; this lock is held continuously across the swap.
+	// The running check above and this swap are separate critical sections, and
+	// a turn that passes the check can start in between (the snapshot removal
+	// and SessionEnd hook between them must run unlocked). Re-check running
+	// before swapping: a session swapped out from under a just-started turn
+	// tears the transcript, so abort instead. Holding c.mu across the whole
+	// switch is not an option — hooks can block on user interaction.
 	c.mu.Lock()
+	if c.running {
+		c.mu.Unlock()
+		return fmt.Errorf("a turn started during session switch")
+	}
 	c.executor.SetSession(newSess)
 	if c.sessionDir != "" {
 		c.sessionPath = agent.NewSessionPath(c.sessionDir, c.label)
@@ -2094,13 +2106,20 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 			return c.rewindFail(fmt.Errorf("conversation rewind unavailable for turn %d (resumed session)", turn))
 		}
 		s := c.executor.Session()
+		// Truncate through the session's own locked API (Snapshot copies under
+		// its read lock, Replace installs the prefix under its write lock)
+		// instead of assigning to s.Messages directly — a detached /compact can
+		// be rewriting the log from another goroutine, and a bare slice-assign
+		// would race it.
+		//
 		// boundary is the message-log index at turn start; compaction shrinks the
 		// log without rewriting boundaries, so a stale boundary past the end means
 		// the turn was compacted away — fail loudly instead of skipping silently.
-		if boundary > len(s.Messages) {
+		msgs := s.Snapshot()
+		if boundary > len(msgs) {
 			return c.rewindFail(fmt.Errorf("conversation rewind unavailable for turn %d: the conversation was compacted past this point", turn))
 		}
-		s.Messages = s.Messages[:boundary]
+		s.Replace(msgs[:boundary])
 		c.mu.Lock()
 		c.cpTurn = turn // renumber future turns from here; later turns are gone
 		for k := range c.cpBound {
@@ -2129,6 +2148,16 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 		}
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 			Text: fmt.Sprintf("rewound code to turn %d — %d file(s) restored, %d removed", turn, len(written), len(deleted))})
+	}
+	if scope == RewindConversation || scope == RewindBoth {
+		// The store must follow the renumber above (cpTurn = turn): stale
+		// checkpoints for the discarded turns would collide with the next
+		// beginCheckpoint(turn) — two entries sharing a Turn, picked between
+		// nondeterministically by restore/preview. This runs after the code
+		// branch so a Both rewind can still capture and restore the suffix; it
+		// also drops that pass's rewind-keep entry — after a conversation rewind
+		// those turns no longer exist to reapply onto.
+		c.cp.TruncateFrom(turn)
 	}
 	return nil
 }

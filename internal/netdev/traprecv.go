@@ -99,13 +99,25 @@ func trapHandle(p *gosnmp.SnmpPacket, addr *net.UDPAddr, cfg *config.Config) {
 		return
 	}
 	device := "(unknown)"
+	var devConf *config.NetDevDevice
 	if cfg != nil && addr != nil {
-		for _, d := range cfg.NetDev.Devices {
-			if strings.EqualFold(d.Address, addr.IP.String()) {
-				device = d.Name
+		for i := range cfg.NetDev.Devices {
+			if strings.EqualFold(cfg.NetDev.Devices[i].Address, addr.IP.String()) {
+				device = cfg.NetDev.Devices[i].Name
+				devConf = &cfg.NetDev.Devices[i]
 				break
 			}
 		}
+	}
+	// Community check (v1/v2c both carry one): the source device's community
+	// is resolved exactly where polls resolve it — d.SNMP.CommunityEnv (the
+	// collector credential), or password_env for vendor=snmp (snmp.go's
+	// channel), "public" as the default. Devices with no declared community
+	// and unknown senders are accepted: config carries no global trap
+	// community, and guessing (e.g. an SSH password) would drop good traps.
+	if want, ok := trapCommunityFor(devConf); ok && p.Community != want {
+		_ = AppendAudit(Audit{Time: time.Now(), Device: device, Command: "(trap) community mismatch from " + addr.IP.String(), Class: "guardrail", Status: AuditRefused})
+		return
 	}
 	// v2c: the notification OID rides the SnmpTrapOID var (1.3.6.1.6.3.1.1.4.1.0).
 	trapOID := ""
@@ -145,6 +157,29 @@ func trapHandle(p *gosnmp.SnmpPacket, addr *net.UDPAddr, cfg *config.Config) {
 	trapEscalate(device, trapOID, text)
 }
 
+// trapCommunityFor resolves the expected v2c community for a trap's source
+// device via the same secretGetter path the pollers use. ok=false means "no
+// community is configured for this device" — the trap is then accepted rather
+// than checked against a guess.
+func trapCommunityFor(d *config.NetDevDevice) (string, bool) {
+	env := ""
+	if d != nil {
+		switch {
+		case d.SNMP != nil && d.SNMP.CommunityEnv != "":
+			env = d.SNMP.CommunityEnv // the collector credential (health.go)
+		case strings.EqualFold(d.Vendor, "snmp") && d.PasswordEnv != "":
+			env = d.PasswordEnv // snmp.go's channel: passwordEnv carries the community
+		}
+	}
+	if env == "" {
+		return "public", false
+	}
+	if v, ok, _ := secretGetter(SecretKindPassword, env); ok && v != "" {
+		return v, true
+	}
+	return "public", true
+}
+
 // trapEscalate: link-down / cold-start → one Finding per device+class per 10min.
 func trapEscalate(device, oid, text string) {
 	if device == "(unknown)" {
@@ -175,15 +210,26 @@ func trapEscalate(device, oid, text string) {
 	_ = degraded
 }
 
-// TrapEventsSince returns one device's trap ring entries since t.
+// TrapEventsSince returns one device's trap ring entries since t; device==""
+// merges EVERY ring (same reason as SyslogEventsSince — rings key by device).
 func TrapEventsSince(device string, since time.Time) []NetDevEvent {
 	trapMu.Lock()
-	ring := append([]syslogLine(nil), trapRings[device]...)
+	var rings map[string][]syslogLine
+	if device != "" {
+		rings = map[string][]syslogLine{device: append([]syslogLine(nil), trapRings[device]...)}
+	} else {
+		rings = make(map[string][]syslogLine, len(trapRings))
+		for k, v := range trapRings {
+			rings[k] = append([]syslogLine(nil), v...)
+		}
+	}
 	trapMu.Unlock()
 	var out []NetDevEvent
-	for _, l := range ring {
-		if l.Time.After(since) {
-			out = append(out, NetDevEvent{Time: l.Time, Text: l.Text})
+	for name, ring := range rings {
+		for _, l := range ring {
+			if l.Time.After(since) {
+				out = append(out, NetDevEvent{Time: l.Time, Device: name, Text: l.Text})
+			}
 		}
 	}
 	return out

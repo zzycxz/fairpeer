@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // CVEEntry is one simplified feed item.
@@ -21,6 +23,15 @@ type CVEEntry struct {
 	Desc     string   `json:"desc"`
 	Products []string `json:"products"` // lowercase vendor/product substrings
 	Severity string   `json:"severity"` // critical | high | medium | low
+	// Remediation（S2-2）：feed 自备的修复出处，用户自备 feed 可携带。
+	Remediation *CVERemediation `json:"remediation,omitempty"`
+}
+
+// CVERemediation is the feed-supplied fix reference for one CVE (S2-1/2-2).
+type CVERemediation struct {
+	UpgradeTo string `json:"upgrade_to,omitempty"`
+	KB        string `json:"kb,omitempty"`
+	RefURL    string `json:"ref_url,omitempty"`
 }
 
 type cveFeed struct {
@@ -52,7 +63,7 @@ func ImportCVEFeed(raw string) (int, error) {
 		return 0, err
 	}
 	body, _ := json.Marshal(cveFeed{CVEs: entries})
-	return n, os.WriteFile(cveFile(), body, 0o600)
+	return n, fileutil.AtomicWriteFile(cveFile(), body, 0o600)
 }
 
 // parseCVEFeed sniffs the schema: {"cves":[...]} (simplified/cache format),
@@ -281,12 +292,35 @@ func truncStr(s string, n int) string {
 }
 
 // CVEMatch is one device ↔ CVE hit.
+// cveSweepFixHint picks the first feed-supplied remediation among matches
+// (S2-1)：feed 出处 → verified；全无则 nil（对话研判兜底，模型建议标 model）。
+func cveSweepFixHint(matches []CVEMatch) *FixHint {
+	for _, m := range matches {
+		if r := m.Remediation; r != nil {
+			fx := &FixHint{Type: "upgrade", Confidence: "verified", Link: r.RefURL}
+			switch {
+			case r.UpgradeTo != "":
+				fx.Ref = "升级至 " + r.UpgradeTo
+			case r.KB != "":
+				fx.Type = "patch"
+				fx.Ref = "安装补丁 " + r.KB
+			default:
+				fx.Ref = "见厂商公告"
+			}
+			return fx
+		}
+	}
+	return nil
+}
+
 type CVEMatch struct {
 	Device   string `json:"device"`
 	CVEID    string `json:"cve_id"`
 	Desc     string `json:"desc"`
 	Severity string `json:"severity"`
 	Product  string `json:"product"` // matched product substring
+	// Remediation 透传 feed 的修复出处（S2-1）；无则空。
+	Remediation *CVERemediation `json:"remediation,omitempty"`
 }
 
 // MatchCVEs runs the inventory against the cached feed.
@@ -309,7 +343,7 @@ func (m *Manager) MatchCVEs() ([]CVEMatch, error) {
 			for _, p := range c.Products {
 				p = strings.ToLower(strings.TrimSpace(p))
 				if p != "" && strings.Contains(hay, p) {
-					out = append(out, CVEMatch{Device: d.Name, CVEID: c.ID, Desc: c.Desc, Severity: c.Severity, Product: p})
+					out = append(out, CVEMatch{Device: d.Name, CVEID: c.ID, Desc: c.Desc, Severity: c.Severity, Product: p, Remediation: c.Remediation})
 					break
 				}
 			}
@@ -356,6 +390,7 @@ func (m *Manager) MatchCVEsToFindings() (*Finding, error) {
 		Detail:     summary.String(),
 		Evidence:   []Evidence{{Device: "(cve-feed)", Command: "cve match", Output: fmt.Sprintf("feed %d 条 / 命中 %d", len(matches), len(matches))}},
 		Suggestion: "逐条核对版本范围（匹配是 vendor+model 粗匹配，不是精确版本比对）；修复走变更。",
+		Fix:        cveSweepFixHint(matches),
 		Source:     "cve:sweep",
 		Status:     "active",
 	}

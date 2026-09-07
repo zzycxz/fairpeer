@@ -83,10 +83,11 @@ type Envelope struct {
 
 // Concrete commands. Each adds the fields its handler needs.
 type SubmitCmd struct {
-	T     string `json:"t"`
-	Tab   string `json:"tab"`
-	Input string `json:"input"`
-	CmdID string `json:"cmd_id,omitempty"` // dedup id
+	T           string   `json:"t"`
+	Tab         string   `json:"tab"`
+	Input       string   `json:"input"`
+	CmdID       string   `json:"cmd_id,omitempty"` // dedup id
+	Attachments []string `json:"attachments,omitempty"` // audit C-12: C 端早已发送，S 端此前静默丢弃
 }
 
 type CancelCmd struct {
@@ -109,11 +110,25 @@ type ApproveCmd struct {
 	Persist   bool   `json:"persist,omitempty"`
 }
 
+// QuestionAnswer is one question's reply inside cmd.answer
+// (mirrors desktop app.QuestionAnswer; audit P0-2: the old `[]string`
+// could not carry per-question grouping and the C side sent nested
+// arrays that failed to unmarshal).
+type QuestionAnswer struct {
+	QuestionID string   `json:"questionId"`
+	Selected   []string `json:"selected"`
+}
+
 type AnswerCmd struct {
-	T       string     `json:"t"`
-	Tab     string     `json:"tab"`
-	Ask     string     `json:"askId"`
-	Answers []string   `json:"answers"`
+	T       string           `json:"t"`
+	Tab     string           `json:"tab"`
+	Ask     string           `json:"askId"`
+	Answers []QuestionAnswer `json:"answers"`
+}
+type SetPlanCmd struct {
+	T  string `json:"t"`
+	Tab string `json:"tab"`
+	On bool   `json:"on"`
 }
 
 type SubscribeTabCmd struct {

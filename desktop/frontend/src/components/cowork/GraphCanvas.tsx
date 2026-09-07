@@ -132,25 +132,9 @@ function GraphCanvasInner({
     setLoading(true);
     app.GetTopEntities(collection, 200).then((data) => {
       if (ignore) return;
-      if (!data || !data.nodes || data.nodes.length === 0) {
-        const types = ["产品", "技术", "功能", "人物", "组织", "项目", "概念", "事件", "地点", "主题"];
-        const nodes: any[] = [];
-        const edges: any[] = [];
-        nodes.push({ name: "核心中枢", type: "概念", group: 1, degree: 80, collection: "mock", community: 0, snippet: "核心", metadata: {} });
-        for (let i = 1; i <= 250; i++) {
-          nodes.push({ name: `节点_${i}`, type: types[Math.floor(Math.random() * types.length)], group: Math.floor(Math.random() * 5), degree: Math.floor(Math.random() * 8) + 1, collection: "mock", community: Math.floor(Math.random() * 15), snippet: "", metadata: {} });
-        }
-        for (let i = 1; i <= 350; i++) {
-          const source = Math.floor(Math.random() * 250) + 1;
-          const target = Math.random() > 0.3 ? 0 : Math.floor(Math.random() * 250) + 1;
-          edges.push({ source: nodes[source].name, target: nodes[target].name, type: "关联", weight: Math.random() * 3 + 1, snippet: "", metadata: {} });
-        }
-        setGraphData({ nodes, edges });
-      } else {
-        setGraphData(data);
-      }
+      setGraphData(data && data.nodes ? data : { nodes: [], edges: [] });
       setLoading(false);
-    }).catch(() => { 
+    }).catch(() => {
       if (ignore) return;
       setLoading(false); 
     });

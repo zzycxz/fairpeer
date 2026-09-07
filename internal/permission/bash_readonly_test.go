@@ -125,3 +125,73 @@ func TestBashDangerWarning(t *testing.T) {
 		})
 	}
 }
+
+// TestReadOnlyBashMetaExecutors pins that commands which execute another
+// program can never be classified read-only — an allow would mean arbitrary
+// command execution with no approval prompt.
+func TestReadOnlyBashMetaExecutors(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want bool
+	}{
+		// env executes its first non-assignment operand.
+		{"env", true},
+		{"env -i", true},
+		{"env -0", true},
+		{"env -u FOO", true},
+		{"env FOO=bar", true},
+		{"env FOO=bar BAZ=qux", true},
+		{"env FOO=bar ls", false},
+		{"env rm -rf /important", false},
+		{"env -i sh -c 'echo hi'", false},
+		{"env -u FOO some-tool --flag", false},
+		// Other meta-executors are not whitelisted at all.
+		{"nohup some-tool", false},
+		{"xargs rm", false},
+		{"timeout 10 some-tool", false},
+		{"stdbuf -oL some-tool", false},
+		{"nice -n 10 some-tool", false},
+		{"setsid some-tool", false},
+		{"watch some-tool", false},
+		{"time some-tool", false},
+		{"exec some-tool", false},
+		{"command some-tool", false},
+		{"bash -c 'ls'", false},
+		{"sh -c 'ls'", false},
+		{"powershell -Command ls", false},
+		// find's file-writing predicates.
+		{"find . -name '*.go' -fprint /tmp/out.txt", false},
+		{"find . -fprint /tmp/out.txt", false},
+		{"find . -fprint0 /tmp/out.bin", false},
+		{"find . -fprintf /tmp/out.txt '%p\\n'", false},
+		{"find . -fls /tmp/listing.txt", false},
+		{"find . -name '*.go'", true},
+		// git tag / reflog destructive forms.
+		{"git tag", true},
+		{"git tag -l", false},
+		{"git tag v1.0", false},
+		{"git tag -a v1.0 -m msg", false},
+		{"git tag -d v1.0", false},
+		{"git tag -f v1.0 HEAD", false},
+		{"git reflog", true},
+		{"git reflog show", true},
+		{"git reflog delete HEAD@{0}", false},
+		{"git reflog expire --expire=now --all", false},
+		// System-state setters hidden in read-only-looking commands.
+		{"hostname", true},
+		{"hostname newname.example.com", false},
+		{"date", true},
+		{"date -s '2026-01-01 00:00:00'", false},
+		{"date --set=2026-01-01", false},
+		{"less README.md", true},
+		{"less -o /tmp/session.log bigfile.txt", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.cmd, func(t *testing.T) {
+			if got := isReadOnlyBashSubject(tt.cmd); got != tt.want {
+				t.Errorf("isReadOnlyBashSubject(%q) = %v, want %v", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}

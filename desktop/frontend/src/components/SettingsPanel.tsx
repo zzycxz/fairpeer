@@ -305,7 +305,10 @@ type SectionProps = {
 
 // MobileSection —— linkpeer 移动端配对面板（调 MobileBridge* 绑定）。
 // 开始配对 → 显示二维码/配对码 → linkpeer 扫码 → 待确认设备允许/拒绝。
+// 配对卡走 mobile-pair-panel 网格；网络选项（网卡/信令/敲门/跳板）拆成
+// 独立 SettingsSection + SettingsField 行式布局，与其它设置页同款。
 function MobileSection() {
+  const t = useT();
   const [pairing, setPairing] = useState(false);
   const [qrURL, setQrURL] = useState("");
   const [code, setCode] = useState("");
@@ -367,7 +370,7 @@ function MobileSection() {
     setKMode(mode);
     try {
       await app.MobileBridgeSetKMode(mode, externalKURL);
-      setErr("信令模式已保存，重启 fairpeer 后生效");
+      setErr(t("mobile.kSaved"));
     } catch (e) { setErr(String((e as Error)?.message ?? e)); }
   };
 
@@ -409,191 +412,169 @@ function MobileSection() {
     return () => window.clearInterval(id);
   }, []);
 
-  const confirm = async (pairID: string) => { await app.MobileBridgeConfirm(pairID); refreshStatus(); };
-  const reject = async (pairID: string) => { await app.MobileBridgeReject(pairID); refreshStatus(); };
+  // Confirm/reject surface failures inline: a bare await here would surface as
+  // unhandledrejection and trip the global crash overlay instead of the banner.
+  const confirm = async (pairID: string) => {
+    try {
+      await app.MobileBridgeConfirm(pairID);
+      await refreshStatus();
+    } catch (e) { setErr(String((e as Error)?.message ?? e)); }
+  };
+  const reject = async (pairID: string) => {
+    try {
+      await app.MobileBridgeReject(pairID);
+      await refreshStatus();
+    } catch (e) { setErr(String((e as Error)?.message ?? e)); }
+  };
 
   const pending = status.pending ?? [];
+  const defNic = nics.find((n) => n.isDefault);
   return (
-    <SettingsSection title="linkpeer 移动端配对" description="配对手机/桌面 linkpeer，P2P 直连 + 端到端加密">
-      <div className="mobile-pair-panel">
-        <div className="mobile-pair-panel__qr">
-          {qrURL ? (
-            <>
-              <QRCodeSVG value={qrURL} size={196} marginSize={1} className="mobile-pair-panel__qr-code" />
-              <div className="mobile-pair-panel__code">配对码：<strong>{code}</strong></div>
-              <button className="btn btn--secondary btn--small" onClick={() => { try { navigator.clipboard?.writeText(qrURL); } catch { /* ignore */ } }}>复制配对链接</button>
-              <div className="mobile-pair-panel__url" title={qrURL}>{qrURL}</div>
-            </>
-          ) : (
-            <button className="btn btn--primary" onClick={startPairing} disabled={pairing}>
-              {pairing ? <Loader2 className="spin" size={16} /> : <QrCode size={16} />} 开始配对
-            </button>
-          )}
-        </div>
-        <div className="mobile-pair-panel__body">
-          <div className="mobile-pair-panel__title">linkpeer 移动伴侣端</div>
-          <div className="mobile-pair-panel__status">
-            {status.enabled ? (
-              <span className={status.connected ? "mobile-pair-panel__dot mobile-pair-panel__dot--ok" : "mobile-pair-panel__dot mobile-pair-panel__dot--warn"} />
+    <>
+      <SettingsSection title={t("mobile.sectionPairTitle")} description={t("mobile.sectionPairDesc")}>
+        <div className="mobile-pair-panel">
+          <div className="mobile-pair-panel__qr">
+            {qrURL ? (
+              <>
+                <QRCodeSVG value={qrURL} size={196} marginSize={1} className="mobile-pair-panel__qr-code" />
+                <div className="mobile-pair-panel__code">{t("mobile.pairCode")}：<strong>{code}</strong></div>
+                <button className="btn btn--secondary btn--small" onClick={() => { try { navigator.clipboard?.writeText(qrURL); } catch { /* ignore */ } }}>{t("mobile.copyLink")}</button>
+                <div className="mobile-pair-panel__url" title={qrURL}>{qrURL}</div>
+              </>
             ) : (
-              <span className="mobile-pair-panel__dot mobile-pair-panel__dot--off" />
-            )}
-            {status.enabled
-              ? (status.connected ? `已连接信令 · ${status.signal_url ?? ""}` : `正在连接信令… · ${status.signal_url ?? ""}`)
-              : "桥接未启用"}
-          </div>
-          <p className="mobile-pair-panel__desc">
-            用 linkpeer App 扫描左侧二维码，或在 App「我的 → 扫码配对」粘贴配对链接（桌面 linkpeer 可直接复制上方链接）。两端经云端信令敲门后建立 WebRTC P2P 直连，业务流量全程端到端加密（AES-256-GCM）。
-          </p>
-          {nics.length > 0 && (() => {
-            const def = nics.find((n) => n.isDefault);
-            return (
-              <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12, opacity: 0.7 }}>配对网卡</span>
-                <select
-                  value={pinned}
-                  onChange={(e) => setNic(e.target.value)}
-                  style={{ flex: 1, minWidth: 160, padding: "4px 8px", fontSize: 12 }}
-                >
-                  <option value="">
-                    自动{def ? `（默认 ${def.label} ${def.ip}${def.reason ? ` · ${def.reason}` : ""}）` : ""}
-                  </option>
-                  {nics.map((n) => (
-                    <option key={n.ip} value={n.ip}>
-                      {n.label} · {n.ip}{n.isDefault ? (n.reason ? `（默认 · ${n.reason}）` : "（默认）") : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            );
-          })()}
-          {pinned && (
-            <p className="mobile-pair-panel__desc" style={{ marginTop: 6 }}>
-              已钉死使用 {pinned} 生成配对地址；换网络后如连不上，改回「自动」重新配对。
-            </p>
-          )}
-          <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(128,128,128,0.2)" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, cursor: "pointer" }}>
-              <input type="checkbox" checked={knock} onChange={(e) => saveKnock(e.target.checked, knockServer)} />
-              <span>UDP 单包敲门<span style={{ opacity: 0.6 }}>（NAT 穿透辅助，跨网/4G 连不上时开启）</span></span>
-            </label>
-            {knock && (
-              <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center" }}>
-                <input
-                  type="text"
-                  value={knockServer}
-                  onChange={(e) => setKnockServer(e.target.value)}
-                  onBlur={() => saveKnock(knock, knockServer.trim())}
-                  placeholder="远程 STUN 服务器，如 stun:stun.example.com:3478"
-                  style={{ flex: 1, padding: "4px 8px", fontSize: 12 }}
-                />
-              </div>
-            )}
-            {knock && (
-              <p className="mobile-pair-panel__desc" style={{ marginTop: 6 }}>
-                连接建立前，桌面端从 ICE 同一 UDP 端口向手机的公网映射发敲门包，提前打开 NAT；
-                对锥形 NAT 有效，双对称 NAT 无解（此时两端需同网段）。
-              </p>
+              <button className="btn btn--primary" onClick={startPairing} disabled={pairing}>
+                {pairing ? <Loader2 className="spin" size={16} /> : <QrCode size={16} />} {t("mobile.startPairing")}
+              </button>
             )}
           </div>
-          <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(128,128,128,0.2)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
-              <span style={{ opacity: 0.7 }}>信令模式</span>
-              <select
-                value={kMode}
-                onChange={(e) => saveKMode(e.target.value as "embedded" | "external" | "cloud")}
-                style={{ flex: 1, padding: "4px 8px", fontSize: 12 }}
-              >
-                <option value="embedded">内嵌 K（零配置，默认）</option>
-                <option value="external">外部 K</option>
-                <option value="cloud">仅云 K</option>
-              </select>
+          <div className="mobile-pair-panel__body">
+            <div className="mobile-pair-panel__title">{t("mobile.companionTitle")}</div>
+            <div className="mobile-pair-panel__status">
+              {status.enabled ? (
+                <span className={status.connected ? "mobile-pair-panel__dot mobile-pair-panel__dot--ok" : "mobile-pair-panel__dot mobile-pair-panel__dot--warn"} />
+              ) : (
+                <span className="mobile-pair-panel__dot mobile-pair-panel__dot--off" />
+              )}
+              {status.enabled
+                ? (status.connected ? `${t("mobile.statusConnected")} · ${status.signal_url ?? ""}` : `${t("mobile.statusConnecting")} · ${status.signal_url ?? ""}`)
+                : t("mobile.bridgeOff")}
             </div>
-            {kMode === "external" && (
-              <input
-                type="text"
-                value={externalKURL}
-                onChange={(e) => setExternalKURL(e.target.value)}
-                onBlur={() => saveKMode("external")}
-                placeholder="外部 K 地址，如 http://127.0.0.1:8080"
-                style={{ marginTop: 6, width: "100%", padding: "4px 8px", fontSize: 12 }}
-              />
-            )}
-            <p className="mobile-pair-panel__desc" style={{ marginTop: 6 }}>
-              内嵌 K 开箱即用（装完扫码就通，局域网直连零云）；改动重启 fairpeer 生效。
-            </p>
-          </div>
-          <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(128,128,128,0.2)" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={cloudRelay}
-                onChange={(e) => saveCloudRelay(e.target.checked, cloudURL)}
-              />
-              <span>公网跳板<span style={{ opacity: 0.6 }}>（跨网/4G 配对时经云 K 打洞+中转兜底；同 WiFi 仍走局域网直连）</span></span>
-            </label>
-            {cloudRelay && (
-              <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center" }}>
-                <input
-                  type="text"
-                  value={cloudURL}
-                  onChange={(e) => setCloudURL(e.target.value)}
-                  onBlur={() => saveCloudRelay(true, cloudURL.trim())}
-                  placeholder="云 K 地址，如 https://signal.example.com"
-                  style={{ flex: 1, padding: "4px 8px", fontSize: 12 }}
-                />
-              </div>
-            )}
-            {cloudRelay && (
-              <p className="mobile-pair-panel__desc" style={{ marginTop: 6 }}>
-                二维码会追加云 K 作末位候选：手机同网自动选局域网（零云），跨网回退到云 K 走
-                STUN 打洞 + TURN 中继（中继只转发加密包，服务器无法解密）。
-              </p>
-            )}
-            {cloudRelay && (
-              <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
-                <input
-                  type="text"
-                  value={turnPaste}
-                  onChange={(e) => setTurnPaste(e.target.value)}
-                  placeholder="粘贴 VPS 上 ./scripts/turn-cred.sh 的输出，一键配置 TURN"
-                  style={{ flex: 1, padding: "4px 8px", fontSize: 12 }}
-                />
-                <button
-                  onClick={parseTurn}
-                  disabled={turnPaste.trim() === ""}
-                  style={{ padding: "4px 10px", fontSize: 12 }}
-                >
-                  解析
-                </button>
-              </div>
-            )}
-            {turnParsed && (
-              <p className="mobile-pair-panel__desc" style={{ marginTop: 6 }}>
-                ✓ TURN 已配置（{turnParsed}），重新生成二维码即携带新凭据。
-              </p>
-            )}
-          </div>
-          {pending.length > 0 && (
-            <div className="mobile-pair-panel__pending">
-              <div className="mobile-pair-panel__pending-title">待确认的设备</div>
-              {pending.map((p) => (
-                <div key={p.PairID} className="mobile-pair-panel__device">
-                  <span>{p.DevC}</span>
-                  <div className="mobile-pair-panel__device-actions">
-                    <button className="btn btn--primary btn--small" onClick={() => confirm(p.PairID)}><CheckCircle2 size={14} /> 允许</button>
-                    <button className="btn btn--secondary btn--small" onClick={() => reject(p.PairID)}>拒绝</button>
+            <p className="mobile-pair-panel__desc">{t("mobile.pairDesc")}</p>
+            {pending.length > 0 && (
+              <div className="mobile-pair-panel__pending">
+                <div className="mobile-pair-panel__pending-title">{t("mobile.pendingTitle")}</div>
+                {pending.map((p) => (
+                  <div key={p.PairID} className="mobile-pair-panel__device">
+                    <span>{p.DevC}</span>
+                    <div className="mobile-pair-panel__device-actions">
+                      <button className="btn btn--primary btn--small" onClick={() => confirm(p.PairID)}><CheckCircle2 size={14} /> {t("mobile.allow")}</button>
+                      <button className="btn btn--secondary btn--small" onClick={() => reject(p.PairID)}>{t("mobile.reject")}</button>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {!status.enabled && <div className="mobile-pair-panel__hint">移动端桥接未启用：请在 config.toml 添加 [mobilebridge] 段并设置 signal_url，或用 LINKPEER_SIGNAL 环境变量。</div>}
-          {status.enabled && !status.connected && <div className="mobile-pair-panel__hint">信令连接尚未建立 —— 检查 K (signal_url) 是否在线，或等待重连。</div>}
-          {err && <div className="banner banner--error">{err}</div>}
+                ))}
+              </div>
+            )}
+            {!status.enabled && <div className="mobile-pair-panel__hint">{t("mobile.hintDisabled")}</div>}
+            {status.enabled && !status.connected && <div className="mobile-pair-panel__hint">{t("mobile.hintSignalWait")}</div>}
+            {err && <div className="banner banner--error">{err}</div>}
+          </div>
         </div>
-      </div>
-    </SettingsSection>
+      </SettingsSection>
+
+      <SettingsSection title={t("mobile.sectionConnTitle")}>
+        {nics.length > 0 && (
+          <SettingsField label={t("mobile.nicLabel")} hint={pinned ? t("mobile.nicPinnedHint", { ip: pinned }) : undefined}>
+            <select className="mem-select" value={pinned} onChange={(e) => setNic(e.target.value)}>
+              <option value="">
+                {t("mobile.nicAuto")}{defNic ? `（${t("mobile.nicDefault")} ${defNic.label} ${defNic.ip}${defNic.reason ? ` · ${defNic.reason}` : ""}）` : ""}
+              </option>
+              {nics.map((n) => (
+                <option key={n.ip} value={n.ip}>
+                  {n.label} · {n.ip}{n.isDefault ? (n.reason ? `（${t("mobile.nicDefault")} · ${n.reason}）` : `（${t("mobile.nicDefault")}）`) : ""}
+                </option>
+              ))}
+            </select>
+          </SettingsField>
+        )}
+        <SettingsField label={t("mobile.kModeLabel")} hint={t("mobile.kModeHint")}>
+          <div className="settings-inline-controls">
+            <select
+              className="mem-select set-grow"
+              value={kMode}
+              onChange={(e) => saveKMode(e.target.value as "embedded" | "external" | "cloud")}
+            >
+              <option value="embedded">{t("mobile.kModeEmbedded")}</option>
+              <option value="external">{t("mobile.kModeExternal")}</option>
+              <option value="cloud">{t("mobile.kModeCloud")}</option>
+            </select>
+          </div>
+        </SettingsField>
+        {kMode === "external" && (
+          <SettingsField label={t("mobile.kModeExternal")}>
+            <input
+              className="mem-input set-grow"
+              type="text"
+              value={externalKURL}
+              onChange={(e) => setExternalKURL(e.target.value)}
+              onBlur={() => saveKMode("external")}
+              placeholder={t("mobile.externalKPh")}
+            />
+          </SettingsField>
+        )}
+      </SettingsSection>
+
+      <SettingsSection title={t("mobile.sectionNatTitle")}>
+        <SettingsField label={t("mobile.knockLabel")} hint={knock ? t("mobile.knockDesc") : t("mobile.knockHint")}>
+          <ToggleSegment value={knock} disabled={false} onChange={(v) => saveKnock(v, knockServer)} />
+        </SettingsField>
+        {knock && (
+          <SettingsField label={t("mobile.stunLabel")}>
+            <input
+              className="mem-input set-grow"
+              type="text"
+              value={knockServer}
+              onChange={(e) => setKnockServer(e.target.value)}
+              onBlur={() => saveKnock(knock, knockServer.trim())}
+              placeholder={t("mobile.knockServerPh")}
+            />
+          </SettingsField>
+        )}
+      </SettingsSection>
+
+      <SettingsSection title={t("mobile.sectionRelayTitle")}>
+        <SettingsField label={t("mobile.relayLabel")} hint={cloudRelay ? t("mobile.relayDesc") : t("mobile.relayHint")}>
+          <ToggleSegment value={cloudRelay} disabled={false} onChange={(v) => saveCloudRelay(v, cloudURL)} />
+        </SettingsField>
+        {cloudRelay && (
+          <SettingsField label={t("mobile.relayUrlLabel")}>
+            <input
+              className="mem-input set-grow"
+              type="text"
+              value={cloudURL}
+              onChange={(e) => setCloudURL(e.target.value)}
+              onBlur={() => saveCloudRelay(true, cloudURL.trim())}
+              placeholder={t("mobile.relayUrlPh")}
+            />
+          </SettingsField>
+        )}
+        {cloudRelay && (
+          <SettingsField label="TURN" hint={turnParsed ? t("mobile.turnParsed", { addr: turnParsed }) : undefined}>
+            <div className="settings-inline-controls">
+              <input
+                className="mem-input set-grow"
+                type="text"
+                value={turnPaste}
+                onChange={(e) => setTurnPaste(e.target.value)}
+                placeholder={t("mobile.turnPh")}
+              />
+              <button className="btn btn--secondary btn--small" onClick={parseTurn} disabled={turnPaste.trim() === ""}>
+                {t("mobile.turnParse")}
+              </button>
+            </div>
+          </SettingsField>
+        )}
+      </SettingsSection>
+    </>
   );
 }
 
@@ -636,7 +617,7 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
     case "trustdomain":
       return t("settings.tab.trustdomain");
     case "mobile":
-      return "移动端";
+      return t("settings.tab.mobile");
     default:
       return id;
   }
@@ -672,6 +653,12 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return t("settings.updatesMeta");
     case "cowork":
       return t("settings.tabSub.cowork");
+    case "mobile":
+      return t("settings.tabSub.mobile");
+    case "netdev":
+      return t("settings.tabSub.netdev");
+    case "trustdomain":
+      return t("settings.tabSub.trustdomain");
     default:
       return "";
   }
@@ -1767,25 +1754,35 @@ function BotsSection({ s, busy, apply }: SectionProps) {
   const pollInstall = async (attempt = installAttemptRef.current) => {
     const current = installRef.current;
     if (installAttemptRef.current !== attempt || current.status !== "showing" || !current.result?.installId || !current.target) return;
-    const poll = await app.PollBotConnectionInstall(current.result.installId);
-    if (installAttemptRef.current !== attempt) return;
-    if (poll.done) {
-      clearInstallTimers();
-      setDraft((prev) => ({
-        ...prev,
-        enabled: true,
-        connections: [...prev.connections.filter((c) => c.id !== poll.connection.id), poll.connection],
-      }));
-      setInstall((prev) => ({ ...prev, status: "connected", timeLeft: 0, message: poll.message || t("settings.botInstallConnected") }));
-      return;
+    // The poll is driven by a timer/fire-and-forget void call — a rejected
+    // bridge call here would become an unhandledrejection (global crash
+    // overlay). Surface it as the install card's error state instead.
+    try {
+      const poll = await app.PollBotConnectionInstall(current.result.installId);
+      if (installAttemptRef.current !== attempt) return;
+      if (poll.done) {
+        clearInstallTimers();
+        setDraft((prev) => ({
+          ...prev,
+          enabled: true,
+          connections: [...prev.connections.filter((c) => c.id !== poll.connection.id), poll.connection],
+        }));
+        setInstall((prev) => ({ ...prev, status: "connected", timeLeft: 0, message: poll.message || t("settings.botInstallConnected") }));
+        return;
+      }
+      if (poll.error) {
+        clearInstallTimers();
+        setInstall((prev) => ({ ...prev, status: "error", timeLeft: 0, message: poll.error }));
+        return;
+      }
+      setInstall((prev) => ({ ...prev, message: poll.message || t("settings.botInstallWaiting") }));
+      scheduleInstallPoll(attempt, current.result.interval);
+    } catch (err) {
+      if (installAttemptRef.current === attempt) {
+        clearInstallTimers();
+        setInstall((prev) => ({ ...prev, status: "error", timeLeft: 0, message: err instanceof Error ? err.message : String(err) }));
+      }
     }
-    if (poll.error) {
-      clearInstallTimers();
-      setInstall((prev) => ({ ...prev, status: "error", timeLeft: 0, message: poll.error }));
-      return;
-    }
-    setInstall((prev) => ({ ...prev, message: poll.message || t("settings.botInstallWaiting") }));
-    scheduleInstallPoll(attempt, current.result.interval);
   };
   useEffect(() => {
     if (install.status !== "showing" || install.timeLeft > 0) return;
@@ -1793,25 +1790,35 @@ function BotsSection({ s, busy, apply }: SectionProps) {
     clearInstallTimers();
     setInstall((prev) => prev.status === "showing" ? { ...prev, status: "error", message: t("settings.botInstallExpired") } : prev);
   }, [install.status, install.timeLeft]);
+  // Both run from void fire-and-forget clicks — wrap so a bridge failure lands
+  // in the inline diagnostics line instead of unhandledrejection.
   const diagnoseConnection = async (id: string) => {
-    const diag = await app.DiagnoseBotConnection(id);
-    setDiagnostics((prev) => ({ ...prev, [id]: diag.message || diag.status }));
+    try {
+      const diag = await app.DiagnoseBotConnection(id);
+      setDiagnostics((prev) => ({ ...prev, [id]: diag.message || diag.status }));
+    } catch (e) {
+      setDiagnostics((prev) => ({ ...prev, [id]: e instanceof Error ? e.message : String(e) }));
+    }
   };
   const testConnection = async (connection: BotConnectionView) => {
     const target = (testTargets[connection.id] ?? firstConnectionRemote(connection)).trim();
-    const diag = await app.TestBotConnection(connection.id, target);
-    setDiagnostics((prev) => ({ ...prev, [connection.id]: diag.message || diag.status }));
-    if (diag.messageId && target) {
-      const updatedAt = new Date().toISOString();
-      setConnections((items) => items.map((item) => {
-        if (item.id !== connection.id) return item;
-        const scope = connection.workspaceRoot ? "project" : "global";
-        const sessionMappings = [
-          ...item.sessionMappings.filter((mapping) => mapping.remoteId !== target),
-          { remoteId: target, sessionId: "", scope, workspaceRoot: scope === "project" ? connection.workspaceRoot : "", updatedAt },
-        ];
-        return { ...item, sessionMappings, updatedAt };
-      }));
+    try {
+      const diag = await app.TestBotConnection(connection.id, target);
+      setDiagnostics((prev) => ({ ...prev, [connection.id]: diag.message || diag.status }));
+      if (diag.messageId && target) {
+        const updatedAt = new Date().toISOString();
+        setConnections((items) => items.map((item) => {
+          if (item.id !== connection.id) return item;
+          const scope = connection.workspaceRoot ? "project" : "global";
+          const sessionMappings = [
+            ...item.sessionMappings.filter((mapping) => mapping.remoteId !== target),
+            { remoteId: target, sessionId: "", scope, workspaceRoot: scope === "project" ? connection.workspaceRoot : "", updatedAt },
+          ];
+          return { ...item, sessionMappings, updatedAt };
+        }));
+      }
+    } catch (e) {
+      setDiagnostics((prev) => ({ ...prev, [connection.id]: e instanceof Error ? e.message : String(e) }));
     }
   };
   const saveConnectionSecret = async (connection: BotConnectionView) => {
@@ -4828,15 +4835,15 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
       // picked browser vanished on reopen. The user can still override by
       // editing the path field directly. Detection persists immediately.
       const path = await app.CheckCoworkBrowser();
-      setDraft(d => {
-        const next = {
-          ...d,
-          detectedBrowser: browserDisplayName(path),
-          browserPath: path,
-        };
-        commitDraft(next);
-        return next;
-      });
+      // Persist OUTSIDE the setDraft updater — StrictMode double-invokes
+      // updaters, so a save call inside one fires the backend request twice.
+      const next = {
+        ...draftRef.current,
+        detectedBrowser: browserDisplayName(path),
+        browserPath: path,
+      };
+      setDraft(next);
+      commitDraft(next);
     } finally {
       setBrowserDetecting(false);
     }
@@ -4846,7 +4853,9 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
     try {
       const path = await app.PickPPTTemplate();
       if (path) {
-        setDraft(d => { const n = { ...d, pptActiveTemplate: path }; commitDraft(n); return n; });
+        const n = { ...draftRef.current, pptActiveTemplate: path };
+        setDraft(n);
+        commitDraft(n); // outside the updater — StrictMode double-invokes updaters
       }
     } catch { /* user cancelled */ }
   };
@@ -4875,11 +4884,9 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
       const st = await app.StartManagedBrowser();
       setManagedStatus(st);
       if (st.running) {
-        setDraft(d => {
-          const next = { ...d, browserAttachURL: st.url };
-          commitDraft(next);
-          return next;
-        });
+        const next = { ...draftRef.current, browserAttachURL: st.url };
+        setDraft(next);
+        commitDraft(next); // outside the updater — StrictMode double-invokes updaters
       }
     } catch (e) {
       setManagedStatus({ running: false, url: "http://127.0.0.1:9222", browser: "", profile: "", alreadyRunning: false, detail: String(e) });
@@ -4904,18 +4911,27 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
   // Toggle helpers: disabling clears related fields so the backend treats them
   // as "not configured", and persists immediately (no save button). Enabling
   // just expands the card (user fills in values, saved on blur/enter).
+  // All compute from draftRef.current + commit OUTSIDE the setDraft updater —
+  // StrictMode double-invokes updaters, so a save inside one fires twice.
   const toggleBrowser = (on: boolean) => {
-    if (!on) setDraft(d => { const n = { ...d, browserPath: "", detectedBrowser: "" }; commitDraft(n); return n; });
+    if (on) return;
+    const n = { ...draftRef.current, browserPath: "", detectedBrowser: "" };
+    setDraft(n);
+    commitDraft(n);
   };
   const togglePpt = (on: boolean) => {
-    if (!on) setDraft(d => { const n = { ...d, pptActiveTemplate: "" }; commitDraft(n); return n; });
+    if (on) return;
+    const n = { ...draftRef.current, pptActiveTemplate: "" };
+    setDraft(n);
+    commitDraft(n);
   };
   // Disabling mail clears all accounts AND the legacy single-pair fields.
   // Enabling when the list is empty seeds a 139-preset account so the user has
   // a card to fill in immediately (matches the pre-multiaccount UX where opening
   // mail revealed a 139-prefilled username/auth-code pair).
   const toggleMail = (on: boolean) => {
-    if (!on) setDraft(d => {
+    if (!on) {
+      const d = draftRef.current;
       const n = {
         ...d,
         smtp: { ...d.smtp, host: "", port: 0, from: "", username: "" },
@@ -4923,10 +4939,9 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
         smtpPassword: "", imapPassword: "",
         emailAccounts: [],
       };
-      dirtyRef.current = true;
+      setDraft(n);
       commitDraft(n);
-      return n;
-    });
+    }
     if (on && (draftRef.current.emailAccounts ?? []).length === 0) {
       newAccount();
     }
@@ -4938,20 +4953,18 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
   // chinamobile.com enterprise, QQ, Gmail, etc. Names must be unique — backend
   // dedups by name; the user fills in a friendly handle.
   const newAccount = () => {
-    setDraft(d => {
-      const acct = {
-        name: "",
-        default: (d.emailAccounts ?? []).length === 0,
-        smtp: { host: "", port: 0, from: "", username: "", passwordEnv: "", useTLS: false, encryptionMode: "" },
-        imap: { host: "", port: 0, username: "", passwordEnv: "" },
-        password: "",
-        passwordSet: false,
-      };
-      const n = { ...d, emailAccounts: [...(d.emailAccounts ?? []), acct] };
-      dirtyRef.current = true;
-      commitDraft(n);
-      return n;
-    });
+    const d = draftRef.current;
+    const acct = {
+      name: "",
+      default: (d.emailAccounts ?? []).length === 0,
+      smtp: { host: "", port: 0, from: "", username: "", passwordEnv: "", useTLS: false, encryptionMode: "" },
+      imap: { host: "", port: 0, username: "", passwordEnv: "" },
+      password: "",
+      passwordSet: false,
+    };
+    const n = { ...d, emailAccounts: [...(d.emailAccounts ?? []), acct] };
+    setDraft(n);
+    commitDraft(n); // outside the updater — StrictMode double-invokes updaters
   };
   // patchAccount updates one account by index with a partial update. Marks the
   // draft dirty so the next blur/commit actually persists (the password field
@@ -4968,42 +4981,39 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
   };
   // removeAccount drops one account and reassigns Default to the first survivor.
   const removeAccount = (i: number) => {
-    setDraft(d => {
-      const list = [...(d.emailAccounts ?? [])];
-      const removedDefault = list[i]?.default;
-      list.splice(i, 1);
-      if (removedDefault && list.length > 0) list[0] = { ...list[0], default: true };
-      const n = { ...d, emailAccounts: list };
-      dirtyRef.current = true;
-      commitDraft(n);
-      return n;
-    });
+    const d = draftRef.current;
+    const list = [...(d.emailAccounts ?? [])];
+    const removedDefault = list[i]?.default;
+    list.splice(i, 1);
+    if (removedDefault && list.length > 0) list[0] = { ...list[0], default: true };
+    const n = { ...d, emailAccounts: list };
+    setDraft(n);
+    commitDraft(n); // outside the updater — StrictMode double-invokes updaters
   };
   // setAccountDefault makes one account the sole Default.
   const setAccountDefault = (i: number) => {
-    setDraft(d => {
-      const list = (d.emailAccounts ?? []).map((a, idx) => ({ ...a, default: idx === i }));
-      const n = { ...d, emailAccounts: list };
-      dirtyRef.current = true;
-      commitDraft(n);
-      return n;
-    });
+    const d = draftRef.current;
+    const list = (d.emailAccounts ?? []).map((a, idx) => ({ ...a, default: idx === i }));
+    const n = { ...d, emailAccounts: list };
+    setDraft(n);
+    commitDraft(n); // outside the updater — StrictMode double-invokes updaters
   };
   const toggleRag = (on: boolean) => {
-    if (!on) setDraft(d => { const n = { ...d, embeddingModel: "" }; commitDraft(n); return n; });
+    if (on) return;
+    const n = { ...draftRef.current, embeddingModel: "" };
+    setDraft(n);
+    commitDraft(n);
   };
   // Knowledge-base master switch: persist rag_enabled immediately. When turning
   // off, also clear embeddingModel (reranking can't run without the KB, and we
   // don't want a stale model ref left behind). Turning on leaves embeddingModel
   // alone — the user opts into reranking separately via the sub-toggle.
   const toggleRagEnabled = (on: boolean) => {
-    setDraft(d => {
-      const n = on
-        ? { ...d, ragEnabled: true }
-        : { ...d, ragEnabled: false, embeddingModel: "" };
-      commitDraft(n);
-      return n;
-    });
+    const n = on
+      ? { ...draftRef.current, ragEnabled: true }
+      : { ...draftRef.current, ragEnabled: false, embeddingModel: "" };
+    setDraft(n);
+    commitDraft(n); // outside the updater — StrictMode double-invokes updaters
   };
 
   return (
@@ -5107,7 +5117,7 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
                   type="button"
                   className="btn btn--small btn--danger"
                   disabled={busy}
-                  onClick={() => { setDraft(d => { const n = { ...d, pptActiveTemplate: "" }; commitDraft(n); return n; }); }}
+                  onClick={() => { const n = { ...draftRef.current, pptActiveTemplate: "" }; setDraft(n); commitDraft(n); }}
                   style={{ marginLeft: "4px" }}
                 >
                   ×
@@ -5119,7 +5129,7 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
               <select
                 className="mem-input"
                 value={draft.pptMode || "fast"}
-                onChange={e => setDraft(d => { const n = { ...d, pptMode: e.target.value }; commitDraft(n); return n; })}
+                onChange={e => { const n = { ...draftRef.current, pptMode: e.target.value }; setDraft(n); commitDraft(n); }}
                 style={{ width: "100%" }}
               >
                 <option value="fast">{t("cowork.pptFastMode")}</option>
@@ -5369,12 +5379,11 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
               <input
                 type="checkbox"
                 checked={!!draft.allowHeadlessEmail}
-                onChange={e => setDraft(d => {
-                  const n = { ...d, allowHeadlessEmail: e.target.checked };
-                  dirtyRef.current = true;
-                  commitDraft(n);
-                  return n;
-                })}
+                onChange={e => {
+                  const n = { ...draftRef.current, allowHeadlessEmail: e.target.checked };
+                  setDraft(n);
+                  commitDraft(n); // outside the updater — StrictMode double-invokes updaters
+                }}
               />
               <span>{t("cowork.mailAutoSend")}</span>
             </label>
@@ -5414,7 +5423,7 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
             disabled={busy}
             emptyOptionLabel={t("settings.screenshotVlmNone")}
             emptyOptionHint={t("settings.screenshotVlmNoneHint")}
-            onPick={(vlm) => { setDraft(d => { const n = { ...d, screenshotVlmModel: vlm }; commitDraft(n); return n; }); }}
+            onPick={(vlm) => { const n = { ...draftRef.current, screenshotVlmModel: vlm }; setDraft(n); commitDraft(n); }}
           />
         </SettingsField>
 
@@ -5423,7 +5432,7 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
             <input
               type="checkbox"
               checked={draft.screenshotEnabled ?? false}
-              onChange={e => setDraft(d => { const n = { ...d, screenshotEnabled: e.target.checked }; commitDraft(n); return n; })}
+              onChange={e => { const n = { ...draftRef.current, screenshotEnabled: e.target.checked }; setDraft(n); commitDraft(n); }}
             />
             <span className="cap-switch__track" />
           </label>
@@ -5461,7 +5470,7 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
               <button
                 type="button"
                 className="btn btn--small"
-                onClick={() => setDraft(d => { const n = { ...d, screenshotPrompt: "" }; commitDraft(n); return n; })}
+                onClick={() => { const n = { ...draftRef.current, screenshotPrompt: "" }; setDraft(n); commitDraft(n); }}
               >
                 {t("settings.screenshotPromptReset")}
               </button>

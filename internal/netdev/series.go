@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 type SeriesPoint struct {
@@ -105,5 +107,6 @@ func CleanupSeries() {
 			kept = append(kept, line)
 		}
 	}
-	_ = os.WriteFile(seriesFile(), []byte(strings.Join(kept, "\n")+"\n"), 0o600)
+	_ = os.MkdirAll(filepath.Dir(seriesFile()), 0o700)
+	_ = fileutil.AtomicWriteFile(seriesFile(), []byte(strings.Join(kept, "\n")+"\n"), 0o600)
 }

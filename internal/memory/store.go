@@ -85,7 +85,8 @@ func NormalizeType(s string) Type {
 // under. "dev" is the unprofiled floor (the coding mode a config with no
 // [[profiles]] is always in), so an empty/unknown profile normalises to it —
 // callers that never set a profile keep their existing memory path.
-var validProfiles = map[string]bool{"dev": true, "cowork": true}
+// netdev 加入合法分区（运维偏好/记忆分键；此前 netdev 被折叠进 dev）。
+var validProfiles = map[string]bool{"dev": true, "cowork": true, "netdev": true}
 
 // NormalizeProfile coerces an arbitrary string to a known profile partition,
 // defaulting to "dev" so a sloppy or empty caller never lands memories in a

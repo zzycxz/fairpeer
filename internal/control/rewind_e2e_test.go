@@ -2,6 +2,9 @@ package control
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -97,5 +100,53 @@ func TestRewindConversationSucceedsWithLiveBoundary(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("expected a conversation-rewind success notice")
+	}
+}
+
+// TestRewindConversationRenumbersCheckpoints reproduces the audit finding: a
+// conversation rewind renumbers future turns from the rewound-to turn, so the
+// checkpoint store must drop the rewound-away entries — otherwise the next
+// turn reuses a number already on disk and two entries share a Turn, with
+// restore/preview picking between them nondeterministically.
+func TestRewindConversationRenumbersCheckpoints(t *testing.T) {
+	c, _, _ := runTwoTurns(t) // checkpoint turns 0 and 1
+
+	c.mu.Lock()
+	lastTurn := c.cpTurn - 1
+	c.mu.Unlock()
+	if err := c.Rewind(lastTurn, RewindConversation); err != nil {
+		t.Fatalf("rewind: %v", err)
+	}
+
+	// The rewound-to turn runs again, reusing its number.
+	if err := c.runTurnWithRaw(context.Background(), "retry prompt", "retry prompt"); err != nil {
+		t.Fatalf("retry turn: %v", err)
+	}
+
+	metas := c.Checkpoints()
+	seen := map[int]bool{}
+	for _, m := range metas {
+		if seen[m.Turn] {
+			t.Fatalf("duplicate checkpoint turn %d: %+v", m.Turn, metas)
+		}
+		seen[m.Turn] = true
+	}
+	if len(metas) != 2 || metas[0].Turn != 0 || metas[1].Turn != lastTurn {
+		t.Fatalf("checkpoints = %+v, want exactly turns 0 and %d", metas, lastTurn)
+	}
+
+	// Files on disk match the in-memory list: one turn-N.json per entry.
+	dir := ckptDir(c.SessionPath())
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ents) != len(metas) {
+		t.Fatalf("checkpoint dir holds %d files, want %d", len(ents), len(metas))
+	}
+	for _, m := range metas {
+		if _, serr := os.Stat(filepath.Join(dir, fmt.Sprintf("turn-%d.json", m.Turn))); serr != nil {
+			t.Fatalf("turn %d missing its file: %v", m.Turn, serr)
+		}
 	}
 }

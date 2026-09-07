@@ -36,9 +36,13 @@ func TestTodoWriteRejectsNewCompletedWithoutCompleteStepReceipt(t *testing.T) {
 	ctx := evidence.WithLedger(context.Background(), ledger)
 	args := json.RawMessage(`{"todos":[{"content":"Add parser","status":"completed"}]}`)
 
-	_, err := (todoWrite{}).Execute(ctx, args)
-	if err == nil || !strings.Contains(err.Error(), "complete_step") {
-		t.Fatalf("new completion without complete_step should be rejected, got %v", err)
+	// G4-1（SCENARIO_SPEC）：软降级语义——不再硬拒，ack 输出带 ⚠ 警告。
+	out, err := (todoWrite{}).Execute(ctx, args)
+	if err != nil {
+		t.Fatalf("soft-degrade must not hard-fail: %v", err)
+	}
+	if !strings.Contains(out, "⚠") || !strings.Contains(out, "complete_step") {
+		t.Fatalf("ack should carry the warning, got %q", out)
 	}
 }
 
@@ -78,8 +82,12 @@ func TestTodoWriteIgnoresFailedCompleteStepReceipt(t *testing.T) {
 	ctx := evidence.WithLedger(context.Background(), ledger)
 	args := json.RawMessage(`{"todos":[{"content":"Add parser","status":"completed"}]}`)
 
-	_, err := (todoWrite{}).Execute(ctx, args)
-	if err == nil || !strings.Contains(err.Error(), "complete_step") {
-		t.Fatalf("failed complete_step should not authorize new completion, got %v", err)
+	// G4-1：软降级——失败签收同样只警告不硬拒。
+	out, err := (todoWrite{}).Execute(ctx, args)
+	if err != nil {
+		t.Fatalf("soft-degrade must not hard-fail: %v", err)
+	}
+	if !strings.Contains(out, "⚠") {
+		t.Fatalf("ack should carry the warning, got %q", out)
 	}
 }

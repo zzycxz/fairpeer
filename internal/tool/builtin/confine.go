@@ -67,6 +67,8 @@ func ConfineWriters(roots []string) []tool.Tool {
 		// that escapes the workspace boundary entirely (it also lacks a Workspace
 		// override), so it could write ~/.bashrc or .git/config.
 		mindmapCreate{roots: rs},
+		// rag_mindmap is also a file writer with an LLM-controlled output path.
+		ragMindMap{roots: rs},
 	}
 }
 

@@ -38,6 +38,8 @@ export interface LiveOpsState {
   devices: Map<string, LiveDevice>;
   spent: number;
   budget: number; // 0 = unlimited
+  wspent: number; // direct writes this turn (WRITE_AUTHZ — independent budget)
+  wbudget: number; // 0 = default 10
   guardrails: LiveGuardrail[];
 }
 
@@ -51,10 +53,12 @@ export function isPseudoDevice(name: string | undefined): boolean {
 }
 
 export function liveStateFromSnapshot(snap: NetDevLiveSnapshot | null | undefined): LiveOpsState {
-  const state: LiveOpsState = { devices: new Map(), spent: 0, budget: 0, guardrails: [] };
+  const state: LiveOpsState = { devices: new Map(), spent: 0, budget: 0, wspent: 0, wbudget: 0, guardrails: [] };
   if (!snap) return state;
   state.spent = snap.spent ?? 0;
   state.budget = snap.budget ?? 0;
+  state.wspent = snap.wspent ?? 0;
+  state.wbudget = snap.wbudget ?? 0;
   for (const d of snap.devices ?? []) {
     state.devices.set(d.device, {
       device: d.device, vendor: d.vendor, os: d.os, group: d.group,
@@ -88,6 +92,7 @@ export function applyLiveEvent(state: LiveOpsState, ev: NetDevLiveEvent) {
   // Panel-wide events first — they never create a device card.
   if (ev.kind === "turn") {
     state.spent = 0; // per-ask budget reset (backend TurnBegin fired)
+    state.wspent = 0; // write budget resets with the same ask (WRITE_AUTHZ §6⑤)
     return;
   }
   if (isPseudoDevice(ev.device)) return;
@@ -128,7 +133,12 @@ export function applyLiveEvent(state: LiveOpsState, ev: NetDevLiveEvent) {
       };
       d.current = null;
       pushCmd(d, done);
-      if (done.status === "ok") state.spent += 1;
+      if (done.status === "ok") {
+        state.spent += 1;
+        // Direct writes count against the INDEPENDENT write budget too —
+        // they ride the same class field the classifier stamped ("write").
+        if (done.class === "write") state.wspent += 1;
+      }
       break;
     }
     case "cmd_refused":

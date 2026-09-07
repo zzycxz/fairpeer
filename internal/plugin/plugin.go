@@ -933,7 +933,26 @@ func answerElicitation(ctx context.Context, asker agent.Asker, raw json.RawMessa
 	return sel[0] == "允许", ""
 }
 
+// withCallTimeout applies Spec.CallTimeout to a call whose caller context has
+// no deadline, so a slow or hung MCP server cannot block the agent
+// indefinitely — the same contract the stdio transport applies in-transport.
+// This is the transport-agnostic choke point: covering http and sse too, where
+// a request would otherwise sit on the server forever. Like stdio: zero/negative
+// spec values use the 60s default, and a caller-supplied deadline always wins.
+func (c *Client) withCallTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	timeout := c.spec.CallTimeout
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
 func (c *Client) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	ctx, cancel := c.withCallTimeout(ctx)
+	defer cancel()
 	res, err := c.t.call(ctx, method, params)
 	if err == nil {
 		return res, nil
@@ -1185,11 +1204,16 @@ func parseToolResult(res json.RawMessage) (string, error) {
 	}
 	var sb strings.Builder
 	truncated := false
+	afterMarker := false // last write was an omission marker: next text starts on a fresh line
 	for _, c := range out.Content {
 		if truncated {
 			break // stop accumulating once over cap; ignore remaining chunks
 		}
 		if c.Type == "text" {
+			if afterMarker && sb.Len() > 0 {
+				sb.WriteByte('\n')
+			}
+			afterMarker = false
 			if sb.Len()+len(c.Text) > maxMCPResultBytes {
 				// Fill up to the cap and mark truncated.
 				remaining := maxMCPResultBytes - sb.Len()
@@ -1201,6 +1225,15 @@ func parseToolResult(res json.RawMessage) (string, error) {
 				continue
 			}
 			sb.WriteString(c.Text)
+		} else {
+			// Non-text blocks (image, audio, resource, …) can't be flattened
+			// to the plain-text tool-result channel. Leave a marker line so the
+			// model knows content existed instead of silently dropping it.
+			if sb.Len() > 0 {
+				sb.WriteByte('\n')
+			}
+			sb.WriteString(fmt.Sprintf("[mcp: non-text content block of type %s omitted]", c.Type))
+			afterMarker = true
 		}
 	}
 	text := sb.String()

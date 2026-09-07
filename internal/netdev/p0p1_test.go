@@ -65,9 +65,11 @@ func TestDBQueryAllowed(t *testing.T) {
 func TestRedisQueryAllowed(t *testing.T) {
 	ok := []string{"slowlog get", "slowlog get 10", "info", "info memory", "dbsize", "client list", "latency history", "config get maxmemory"}
 	bad := []string{
+		"slowlog", // bare command: no subcommand to check — used to panic the gate
 		"config set maxmemory 100mb", // write
 		"flushdb", "flushall", "shutdown", "keys *",
 		"slowlog reset", // write-ish
+		"slowlog len",  // read-only but outside the allowed GET shape
 		"eval return 1 0",
 		"get somekey", // data access, not diagnostics
 	}

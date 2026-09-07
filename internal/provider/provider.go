@@ -286,8 +286,17 @@ type ToolSchema struct {
 type Request struct {
 	Messages    []Message
 	Tools       []ToolSchema
+	// Temperature is the sampling temperature. Zero means "unset": providers
+	// omit the field so the endpoint's own default applies. That mirrors the
+	// config layer, where an omitted TOML temperature and an explicit 0 are
+	// indistinguishable — callers that need to pin what the float cannot
+	// express (an explicit 0, e.g. for deterministic decoding) set
+	// TemperatureExplicit, which wins over this field.
 	Temperature float64
-	MaxTokens   int
+	// TemperatureExplicit, when non-nil, is sent verbatim as the wire
+	// temperature — including 0. It supersedes Temperature.
+	TemperatureExplicit *float64
+	MaxTokens           int
 	// CacheKey identifies the conversation for providers with explicit
 	// cache-affinity routing (OpenAI prompt_cache_key): same key → same cache
 	// shard, so a session's turns keep hitting each other's prefix cache even

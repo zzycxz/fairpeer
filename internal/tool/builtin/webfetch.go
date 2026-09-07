@@ -70,6 +70,11 @@ func ssrfGuardedTransport(proxyURL string) *http.Transport {
 		if err != nil {
 			return nil, err
 		}
+		if len(ips) == 0 {
+			// LookupIPAddr can return an empty slice with a nil error; the
+			// ips[0] below would panic.
+			return nil, fmt.Errorf("host %s resolved to no addresses", host)
+		}
 		for _, ip := range ips {
 			if blockedFetchIP(ip.IP) {
 				return nil, fmt.Errorf("refusing to fetch internal address %s (resolves to %s)", host, ip.IP)

@@ -165,8 +165,12 @@ function parseStepsTable(body: string, doc: SkillDoc): void {
       continue;
     }
     const target = stripBackticks(targetCell);
+    const controlCell = cells.length > 4 ? stripBackticks(cells[4] ?? "") : "";
     const step = stepFromRow(op.toLowerCase() as BrowserConsoleStepType, target, valueCell ?? "");
-    if (step) doc.steps.push(step);
+    if (step) {
+      if (controlCell) step.control = controlCell;
+      doc.steps.push(step);
+    }
   }
 }
 
@@ -241,7 +245,9 @@ export function serializeSkillDoc(doc: SkillDoc): string {
   fm.push("## 何时使用", "", doc.whenToUse.trim() || "（待补充）", "");
   fm.push("## 步骤", "", "| # | 操作 | 目标 | 值 |", "|---|------|------|------|");
   doc.steps.forEach((s, i) => {
-    fm.push(`| ${i + 1} | ${s.type} | \`${rowTarget(s)}\` | ${rowValue(s)} |`);
+    // The 控制 column only appears when the row carries a harness spec —
+    // legacy 4-column skills serialize byte-identically.
+    fm.push(s.control ? `| ${i + 1} | ${s.type} | \`${rowTarget(s)}\` | ${rowValue(s)} | ${s.control} |` : `| ${i + 1} | ${s.type} | \`${rowTarget(s)}\` | ${rowValue(s)} |`);
   });
   fm.push("", "## 注意事项", "", doc.pitfalls.trim() || "（待补充）", "");
   fm.push("## 验证", "", doc.verification.trim() || "（待补充）", "");

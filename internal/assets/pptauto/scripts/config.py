@@ -41,7 +41,10 @@ WORKFLOWS_DIR = PROJECT_ROOT / 'workflows'
 # Repository root directory
 REPO_ROOT = PROJECT_ROOT.parent.parent
 EXAMPLES_DIR = REPO_ROOT / 'examples'
-PROJECTS_DIR = REPO_ROOT / 'projects'
+# G2-6（SCENARIO_SPEC）：工作产物目录可由宿主注入（fairpeer 桌面端设
+# FAIRPEER_PPT_PROJECTS_DIR=~/.fairpeer/ppt-projects），避免产物落进技能
+# 目录被版本刷新/重装清掉；未注入时保持旧布局兼容。
+PROJECTS_DIR = Path(os.environ.get('FAIRPEER_PPT_PROJECTS_DIR') or '') if os.environ.get('FAIRPEER_PPT_PROJECTS_DIR') else REPO_ROOT / 'projects'
 
 # Template subdirectories
 CHART_TEMPLATES_DIR = TEMPLATES_DIR / 'charts'

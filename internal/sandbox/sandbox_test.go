@@ -3,6 +3,7 @@ package sandbox
 import (
 	"os/exec"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -186,6 +187,9 @@ func TestCommandNonDarwin(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("testing non-darwin path")
 	}
+	if Available() {
+		t.Skip("bwrap present — backend available, not the unconfined fallback path")
+	}
 	spec := Spec{Mode: "enforce", WriteRoots: []string{"/tmp"}}
 	cmd, wrapped := Command(spec, Shell{Kind: ShellBash, Path: "sh"}, "echo hi")
 	if wrapped {
@@ -193,6 +197,35 @@ func TestCommandNonDarwin(t *testing.T) {
 	}
 	if len(cmd) != 3 || cmd[0] != "sh" || cmd[1] != "-c" || cmd[2] != "echo hi" {
 		t.Errorf("unexpected cmd: %v", cmd)
+	}
+}
+
+// TestCommandNonDarwinRequireAvailableFailsClosed guards the audit fix: on a
+// platform with no OS sandbox backend (no bwrap), enforce + require_available
+// must fail CLOSED — the returned argv refuses instead of running the command
+// unconfined (the darwin path already refused). The refusal is an argv (not
+// nil, which the bash tool would panic on since it ignores the wrapped bool
+// and indexes argv[0]) that runs the shell with a refusal script.
+func TestCommandNonDarwinRequireAvailableFailsClosed(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("testing non-darwin path")
+	}
+	if Available() {
+		t.Skip("bwrap present — backend available, not the fail-closed path")
+	}
+	spec := Spec{Mode: "enforce", RequireAvailable: true}
+	cmd, wrapped := Command(spec, Shell{Kind: ShellBash, Path: "sh"}, "echo hi")
+	if wrapped {
+		t.Error("refusal should not report wrapped")
+	}
+	if len(cmd) < 3 {
+		t.Fatalf("refusal argv must be a full shell argv (bool-ignoring callers index argv[0]), got %v", cmd)
+	}
+	if cmd[0] != "sh" || cmd[1] != "-c" {
+		t.Errorf("refusal argv should run the shell itself, got %v", cmd)
+	}
+	if cmd[2] == "echo hi" || !strings.Contains(cmd[2], "refusing") {
+		t.Errorf("refusal argv must carry a refusal script, not the command, got %q", cmd[2])
 	}
 }
 

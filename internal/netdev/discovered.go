@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // discovered.go — F1's 待确认区 store (spec §4.2.2). One JSON per IP beside
@@ -71,8 +73,15 @@ func DiscoveredDir() string {
 }
 
 func discoveredFile(ip string) string {
-	// IPv6 colons are hostile to filenames; dots are fine.
+	// IPv6 colons are hostile to filenames; dots are fine. The key is usually
+	// an IP but the vantage/layer stamps also run device NAMES through here,
+	// so validation rejects the traversal shapes (path separators, parent
+	// refs) instead of demanding a parseable IP — hostnames stay allowed.
+	// "" = unkeyable; callers skip so nothing can escape the store dir.
 	safe := strings.ReplaceAll(strings.TrimSpace(ip), ":", "-")
+	if safe == "" || safe == "." || safe == ".." || strings.ContainsAny(safe, `/\`) || strings.Contains(safe, "..") {
+		return ""
+	}
 	return filepath.Join(DiscoveredDir(), safe+".json")
 }
 
@@ -112,6 +121,9 @@ func recordDiscoveredSwept(source string, hosts []DiscoverHostResult, swept map[
 			continue
 		}
 		path := discoveredFile(h.IP)
+		if path == "" {
+			continue // unkeyable (traversal-shaped) — never written
+		}
 		rec := &DiscoveredHost{IP: h.IP, FirstSeen: now, LastSeen: now}
 		if b, err := os.ReadFile(path); err == nil {
 			_ = json.Unmarshal(b, rec) // corrupt file → start a fresh record
@@ -172,7 +184,7 @@ func recordDiscoveredSwept(source string, hosts []DiscoverHostResult, swept map[
 		if err != nil {
 			return fmt.Errorf("discovered %s: %w", h.IP, err)
 		}
-		if err := os.WriteFile(path, b, 0o600); err != nil {
+		if err := fileutil.AtomicWriteFile(path, b, 0o600); err != nil {
 			return fmt.Errorf("discovered %s: %w", h.IP, err)
 		}
 	}
@@ -189,6 +201,9 @@ func RecordDiscoveredPorts(source, ip, hostname string, ports []DiscoveredPort) 
 		return err
 	}
 	path := discoveredFile(ip)
+	if path == "" {
+		return nil // unkeyable (traversal-shaped) — never written
+	}
 	rec := &DiscoveredHost{IP: ip, FirstSeen: now, LastSeen: now}
 	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, rec)
@@ -220,7 +235,7 @@ func RecordDiscoveredPorts(source, ip, hostname string, ports []DiscoveredPort) 
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o600)
+	return fileutil.AtomicWriteFile(path, b, 0o600)
 }
 
 // RecordDiscoveredHTTP files F3's application fingerprint for one ip:port
@@ -235,6 +250,9 @@ func RecordDiscoveredHTTP(ip string, port int, fp *HTTPFingerprint) error {
 		return err
 	}
 	path := discoveredFile(ip)
+	if path == "" {
+		return nil
+	}
 	now := time.Now()
 	rec := &DiscoveredHost{IP: ip, FirstSeen: now, LastSeen: now}
 	if b, err := os.ReadFile(path); err == nil {
@@ -260,7 +278,7 @@ func RecordDiscoveredHTTP(ip string, port int, fp *HTTPFingerprint) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o600)
+	return fileutil.AtomicWriteFile(path, b, 0o600)
 }
 
 // cacheTTLFilter drops IPs whose leads were last seen inside the TTL —
@@ -301,6 +319,9 @@ func StampDiscoveredVantage(vantage string, ips []string) error {
 			continue
 		}
 		path := discoveredFile(ip)
+		if path == "" {
+			continue
+		}
 		rec := &DiscoveredHost{IP: ip}
 		if b, err := os.ReadFile(path); err == nil {
 			_ = json.Unmarshal(b, rec)
@@ -310,7 +331,7 @@ func StampDiscoveredVantage(vantage string, ips []string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(path, b, 0o600); err != nil {
+		if err := fileutil.AtomicWriteFile(path, b, 0o600); err != nil {
 			return err
 		}
 	}
@@ -326,6 +347,9 @@ func StampDiscoveredLayer(layer int, ips []string) error {
 			continue
 		}
 		path := discoveredFile(ip)
+		if path == "" {
+			continue
+		}
 		rec := &DiscoveredHost{IP: ip}
 		if b, err := os.ReadFile(path); err == nil {
 			_ = json.Unmarshal(b, rec)
@@ -335,7 +359,7 @@ func StampDiscoveredLayer(layer int, ips []string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(path, b, 0o600); err != nil {
+		if err := fileutil.AtomicWriteFile(path, b, 0o600); err != nil {
 			return err
 		}
 	}
@@ -354,6 +378,9 @@ func RecordDiscoveredHints(source, ip, vendor, role string) error {
 		return err
 	}
 	path := discoveredFile(ip)
+	if path == "" {
+		return nil
+	}
 	rec := &DiscoveredHost{IP: ip, FirstSeen: time.Now(), LastSeen: time.Now()}
 	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, rec)
@@ -374,7 +401,7 @@ func RecordDiscoveredHints(source, ip, vendor, role string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o600)
+	return fileutil.AtomicWriteFile(path, b, 0o600)
 }
 
 // ListDiscoveredHosts returns leads newest-first (LastSeen).
@@ -412,7 +439,11 @@ func ListDiscoveredHosts() ([]*DiscoveredHost, error) {
 func DeleteDiscoveredHost(ip string) error {
 	discoveredMu.Lock()
 	defer discoveredMu.Unlock()
-	err := os.Remove(discoveredFile(ip))
+	path := discoveredFile(ip)
+	if path == "" {
+		return fmt.Errorf("discovered: invalid host key %q", ip)
+	}
+	err := os.Remove(path)
 	if os.IsNotExist(err) {
 		return nil
 	}

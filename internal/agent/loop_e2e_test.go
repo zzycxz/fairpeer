@@ -173,3 +173,75 @@ func TestRunWellFormedToolLoopRoundTrips(t *testing.T) {
 		t.Errorf("repair mutated a well-formed session: %d -> %d", before, after)
 	}
 }
+
+// TestRunTruncatedToolCallPersistsAssistantBeforeSkipResults pins the persisted
+// order after a "length"-truncated tool-call turn: the assistant message
+// carrying the calls must land BEFORE the interceptor's skip results. Skip
+// results persisted first were orphans — OpenAI/Anthropic reject an unmatched
+// tool result, so every later call in the session 400'd, and the broken order
+// went to the JSONL on save.
+func TestRunTruncatedToolCallPersistsAssistantBeforeSkipResults(t *testing.T) {
+	mp := testutil.NewMock("m",
+		testutil.Turn{
+			// Arguments deliberately cut mid-JSON — the truncation this whole
+			// path exists to guard against.
+			ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"trunc`}},
+			Usage:     &provider.Usage{FinishReason: "length"},
+		},
+		testutil.Turn{Text: "recovered"},
+	)
+	a := New(mp, echoRegistry(), NewSession(""), Options{}, event.Discard)
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	msgs := a.Session().Messages
+	asstIdx, toolIdx := -1, -1
+	for i, m := range msgs {
+		if m.Role == provider.RoleAssistant && len(m.ToolCalls) == 1 && m.ToolCalls[0].ID == "c1" {
+			asstIdx = i
+		}
+		if m.Role == provider.RoleTool && m.ToolCallID == "c1" {
+			toolIdx = i
+		}
+	}
+	if asstIdx < 0 || toolIdx < 0 {
+		t.Fatalf("truncated turn lost from session: %+v", msgs)
+	}
+	if toolIdx != asstIdx+1 {
+		t.Fatalf("skip result at %d must directly follow its tool_calls message at %d: %+v", toolIdx, asstIdx, msgs)
+	}
+	if got := provider.ContentString(msgs[toolIdx].Content); !strings.Contains(got, "tool call skipped") {
+		t.Fatalf("skip result should carry the truncation reason, got %q", got)
+	}
+	// The wire-side repair must be a no-op: it silently drops orphan tool
+	// results, which would hide the failure from the model entirely.
+	if got := provider.SanitizeToolPairing(msgs); len(got) != len(msgs) {
+		t.Fatalf("truncated turn left a malformed history: %d -> %d after repair", len(msgs), len(got))
+	}
+
+	// The retry request replays the session — the pairing must survive there
+	// too, in order, or the provider rejects the whole call.
+	reqs := mp.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("provider calls = %d, want exactly one retry after the truncation skip", len(reqs))
+	}
+	seenAsst, seenTool := false, false
+	for _, m := range reqs[1].Messages {
+		switch {
+		case m.Role == provider.RoleAssistant && len(m.ToolCalls) == 1 && m.ToolCalls[0].ID == "c1":
+			if seenTool {
+				t.Fatalf("retry request has a tool result before its tool_calls message")
+			}
+			seenAsst = true
+		case m.Role == provider.RoleTool && m.ToolCallID == "c1":
+			if !seenAsst {
+				t.Fatalf("retry request carries an orphan tool result for c1: %+v", reqs[1].Messages)
+			}
+			seenTool = true
+		}
+	}
+	if !seenTool {
+		t.Fatalf("retry request dropped the skip result — the model never learns why its calls failed")
+	}
+}

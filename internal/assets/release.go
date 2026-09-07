@@ -15,7 +15,7 @@ import (
 // that should force a refresh of the released copy. Bump this when you update
 // the embedded scripts/templates/SKILL.md and want existing users to get the
 // new version on next launch.
-const SkillVersion = "48" // 48: decisions — CJK width is the sole overflow criterion (S-05 enforced), fast mode gains hard content-floor/overflow/overlap checks (region blocks exempt via metadata), config.py dead SVG_CONSTRAINTS removed (rules live in template_config.json)
+const SkillVersion = "49" // 49: G2-6 projects dir env-redirect (FAIRPEER_PPT_PROJECTS_DIR) + one-time migration out of the skill tree // 48: decisions — CJK width is the sole overflow criterion (S-05 enforced), fast mode gains hard content-floor/overflow/overlap checks (region blocks exempt via metadata), config.py dead SVG_CONSTRAINTS removed (rules live in template_config.json)
 
 // versionFileName is written into the released skill dir so we can tell whether
 // the on-disk copy matches the embedded version.
@@ -102,6 +102,49 @@ func EnsurePPTAutoSkill() error {
 	// version changes. Best-effort: a failure here just means we re-walk once.
 	_ = os.WriteFile(filepath.Join(dst, versionFileName), []byte(SkillVersion), 0o644)
 	return nil
+}
+
+// MigratePPTProjects moves ppt-auto WORK PRODUCTS out of the released skill
+// tree (skills/ppt-auto/projects) into ~/.fairpeer/ppt-projects and pins that
+// location via FAIRPEER_PPT_PROJECTS_DIR for every child python process
+// (SCENARIO_SPEC G2-6 — artifacts inside the skill dir die on version refresh
+// or reinstall). Idempotent: existing destinations win, leftovers are skipped.
+func MigratePPTProjects() error {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return errors.New("assets: cannot determine user home dir")
+	}
+	dst := filepath.Join(home, ".fairpeer", "ppt-projects")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	os.Setenv("FAIRPEER_PPT_PROJECTS_DIR", dst)
+
+	old := filepath.Join(home, ".fairpeer", "skills", "ppt-auto", "projects")
+	entries, err := os.ReadDir(old)
+	if err != nil {
+		return nil // nothing to migrate (or already gone) — fine
+	}
+	for _, e := range entries {
+		target := filepath.Join(dst, e.Name())
+		if _, err := os.Stat(target); err == nil {
+			continue // destination exists — keep it, drop the stale copy
+		}
+		_ = os.Rename(filepath.Join(old, e.Name()), target)
+	}
+	// Remove the old dir when empty (best-effort; a failed rename leaves it).
+	if empty, _ := isEmptyDir(old); empty {
+		_ = os.Remove(old)
+	}
+	return nil
+}
+
+func isEmptyDir(path string) (bool, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return false, err
+	}
+	return len(entries) == 0, nil
 }
 
 // PPTAutoSkillDir returns the absolute path where EnsurePPTAutoSkill releases

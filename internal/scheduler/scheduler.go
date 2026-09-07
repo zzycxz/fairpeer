@@ -60,6 +60,8 @@ type ScheduledTask struct {
 	LastResult string    `json:"last_result,omitempty"` // truncated run output / error
 	OutputMode string    `json:"output_mode,omitempty"` // "" | "im" | "file" | "email" | "notify"
 	OutputDest string    `json:"output_dest,omitempty"` // IM channel / file path / email "to" / (notify: unused)
+	// G4-1（SCENARIO_SPEC）：>4 次/日的任务需显式确认才创建。
+	ConfirmHighFrequency bool `json:"confirm_high_frequency,omitempty"`
 	// OutputAccount selects the named mailbox used for "email" delivery (empty
 	// = the default account). Lets one task send from a work mailbox and another
 	// from a personal one.
@@ -179,6 +181,7 @@ type Scheduler struct {
 	mu            sync.Mutex
 	tasks         []ScheduledTask
 	history       []RunRecord // newest last; capped at historyMax
+	maxRuns       int         // [scheduler] max_runs_per_day cap (0 = default 48)
 	runner        Runner
 	imPusher      IMPusher
 	emailer       EmailSender
@@ -186,6 +189,13 @@ type Scheduler struct {
 	accountProber AccountProber
 	stopCh        chan struct{}
 	running       bool // true while the loop goroutine is alive; guards double-Start
+	// inFlight tracks task IDs whose run is currently executing (set in fireDue
+	// before spawning runOne, cleared after the run's bookkeeping completes).
+	// While a task is in-flight, its NextRun is a stale past-due instant, so
+	// armNextTimerLocked and fireDue must ignore it — otherwise any
+	// Create/Update/Delete/Start during the run re-arms a 0-delay timer and the
+	// same task fires twice concurrently.
+	inFlight map[string]bool
 	// nextTimer is the precise OS-level timer for the nearest due task. Unlike a
 	// fixed-interval poller, it fires at the EXACT NextRun of the closest task
 	// (second-level precision, zero CPU between fires). Re-armed on every
@@ -217,6 +227,7 @@ func New(storePath string) *Scheduler {
 		store:       newStore(storePath),
 		historyPath: storePath + ".history",
 		stopCh:      make(chan struct{}),
+		inFlight:    make(map[string]bool),
 		logf:        func(string, ...any) {},
 	}
 }
@@ -397,11 +408,17 @@ func (s *Scheduler) armNextTimerLocked() {
 		s.nextTimer.Stop()
 		s.nextTimer = nil
 	}
-	// Find the earliest NextRun among enabled, scheduled tasks.
+	// Find the earliest NextRun among enabled, scheduled tasks. In-flight
+	// tasks are skipped: their NextRun is a stale past-due instant (it is
+	// recomputed when the run completes, which re-arms the timer), so arming
+	// on it would schedule an immediate duplicate fire.
 	var nearest time.Time
 	for _, t := range s.tasks {
 		if !t.Enabled || t.NextRun.IsZero() {
 			continue
+		}
+		if s.inFlight[t.ID] {
+			continue // running: completion path reschedules it
 		}
 		if nearest.IsZero() || t.NextRun.Before(nearest) {
 			nearest = t.NextRun
@@ -446,11 +463,25 @@ func (s *Scheduler) fireAndReschedule() {
 // prompt run can be long; parallelism would multiply token cost unpredictably).
 func (s *Scheduler) fireDue(now time.Time) {
 	s.mu.Lock()
+	if s.inFlight == nil {
+		s.inFlight = make(map[string]bool)
+	}
 	due := make([]int, 0)
 	for i, t := range s.tasks {
-		if t.Enabled && !t.NextRun.IsZero() && !t.NextRun.After(now) {
-			due = append(due, i)
+		if !t.Enabled || t.NextRun.IsZero() || t.NextRun.After(now) {
+			continue
 		}
+		// A run of this task is already executing (its NextRun is still the
+		// stale instant that launched it) — skip; the in-flight run's
+		// completion block reschedules it.
+		if s.inFlight[t.ID] {
+			continue
+		}
+		due = append(due, i)
+		// Mark in-flight BEFORE spawning the run so any concurrent
+		// Create/Update/Delete/Start (which re-arm the timer) sees it and
+		// cannot arm a 0-delay duplicate fire.
+		s.inFlight[t.ID] = true
 	}
 	runner := s.runner
 	pusher := s.imPusher
@@ -531,6 +562,11 @@ func (s *Scheduler) fireDue(now time.Time) {
 			})
 			_ = s.store.save(s.tasks)
 		}
+		// Run finished (or the task vanished mid-run): clear in-flight so the
+		// timer can be armed for this task again. Its NextRun was just
+		// recomputed above; armNextTimerLocked (fireAndReschedule, or the next
+		// CRUD call) picks it up from there.
+		delete(s.inFlight, t.ID)
 		s.mu.Unlock()
 	}
 }
@@ -746,7 +782,18 @@ func (s *Scheduler) Create(t ScheduledTask) (ScheduledTask, error) {
 	if t.OneShot && t.NextRun.IsZero() {
 		return ScheduledTask{}, errors.New("one-shot time is in the past; pick a future instant")
 	}
-
+	// G4-1（SCENARIO_SPEC，COWORK_HARNESS_SECURITY_PLAN 阶段4）：每日硬顶
+	// max_runs_per_day（默认 48=每半小时）防失控循环刷 token；>4 次/日的高频
+	// 任务返回需要确认的错误——调用方带 confirmHighFrequency 重试。
+	dailyRuns := runsPerDay(t.Expression)
+	if dailyRuns > 4 && !t.ConfirmHighFrequency {
+		// 高频确认一并放行 cap（确认语义覆盖防失控：用户明确知道任务频繁）。
+		return ScheduledTask{}, fmt.Errorf("task fires %d times/day (> 4/day is high-frequency); retry with confirm_high_frequency=true to confirm you want a task running this often", dailyRuns)
+	}
+	if maxRuns := s.maxRunsPerDay(); dailyRuns > maxRuns && !t.ConfirmHighFrequency {
+		return ScheduledTask{}, fmt.Errorf("task fires %d times/day, over the safety cap %d (config [scheduler] max_runs_per_day); refusing to create a runaway loop", dailyRuns, maxRuns)
+	}
+	
 	s.mu.Lock()
 	s.tasks = append(s.tasks, t)
 	err = s.store.save(s.tasks)
@@ -756,6 +803,56 @@ func (s *Scheduler) Create(t ScheduledTask) (ScheduledTask, error) {
 		return ScheduledTask{}, err
 	}
 	return t, nil
+}
+
+// runsPerDay estimates a normalized expression's daily fire count (0 for
+// one-shots). Minute/hour intervals are counted exactly; everything else
+// (5-field cron, "hourly", daily-with-weekdays) is counted by walking nextRun
+// across a fixed 24h window — previously cron expressions fell through to 0,
+// so "* * * * *" (1440/day) silently bypassed the max_runs_per_day cap.
+func runsPerDay(expr string) int {
+	if IsOneShot(expr) {
+		return 0
+	}
+	// "every Nm" style → 24*60/N; "every Nh" → 24/N.
+	var n int
+	if _, err := fmt.Sscanf(expr, "every %dm", &n); err == nil && n > 0 {
+		return 24 * 60 / n
+	}
+	if _, err := fmt.Sscanf(expr, "every %dh", &n); err == nil && n > 0 {
+		return 24 / n
+	}
+	if strings.Contains(expr, "at ") || strings.Contains(expr, ":") {
+		return 1 // daily fixed time
+	}
+	// Everything else — cron ("*/1 * * * *"), "hourly" (24), malformed
+	// expressions that reached the store — count fires by walking nextRun
+	// over a fixed 24h window. The base is a Monday (UTC, DST-free) so
+	// weekday-restricted crons land their weekly fire inside the window;
+	// start one minute before so a midnight-anchored fire ("* * * * *" at
+	// 00:00) is counted. The iteration cap bounds degenerate expressions.
+	const iterCap = 2000
+	base := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC) // Monday
+	limit := base.Add(24 * time.Hour)
+	t := base.Add(-time.Minute)
+	count := 0
+	for i := 0; i < iterCap; i++ {
+		nr := nextRun(expr, t)
+		if nr.IsZero() || !nr.Before(limit) {
+			break
+		}
+		count++
+		t = nr
+	}
+	return count
+}
+
+// maxRunsPerDay reads [scheduler] max_runs_per_day with a safe default.
+func (s *Scheduler) maxRunsPerDay() int {
+	if v := s.maxRuns; v > 0 {
+		return v
+	}
+	return 48
 }
 
 // List returns all tasks (optionally enabled-only).

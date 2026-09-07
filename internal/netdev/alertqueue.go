@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // Finding lifecycle states (beyond "" for human/AI findings).
@@ -52,7 +54,7 @@ func loadSuppressions() suppressionTable {
 func saveSuppressions(t suppressionTable) {
 	_ = os.MkdirAll(netdevStateDir(), 0o700)
 	body, _ := json.Marshal(t)
-	_ = os.WriteFile(suppressionFile(), body, 0o600)
+	_ = fileutil.AtomicWriteFile(suppressionFile(), body, 0o600)
 }
 
 // suppressCount returns the recorded false-positive count for a Source key.

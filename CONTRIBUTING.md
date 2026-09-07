@@ -6,7 +6,7 @@
 
 ## 前置要求
 
-- **Go 1.25+** (工具链 go1.26.4) — 项目使用最新的 Go 稳定版本
+- **Go 1.26+**（go.mod 声明 go 1.26 / toolchain go1.26.5）— 项目使用最新的 Go 稳定版本
 - **Git** — 用于版本控制
 - **Node.js** (可选) — 仅当您需要开发桌面客户端 (`desktop/`) 时才需要
 
@@ -61,7 +61,7 @@ make test     # 运行完整的测试套件
 | `internal/installsource` | 从 URL 安装插件/技能 |
 | `internal/fileutil` | 原子写入、编码检测 |
 | `internal/frontmatter` | 技能/命令的 Frontmatter 解析 |
-| `internal/inspect` | 模型响应结果审查 |
+| ~~`internal/inspect`~~ | （规划中，尚未落地）模型响应结果审查 |
 | `internal/mcpdiag` | MCP 鉴权诊断 |
 | `internal/netclient` | HTTP 客户端抽象层 |
 | `internal/nilutil` | 接口 nil 防御 |
@@ -71,7 +71,7 @@ make test     # 运行完整的测试套件
 | `desktop/` | 基于 Wails 的桌面应用 (独立的 Go 模块) |
 | `npm/` | npm 分发包装器 |
 | `site/` | 基于 Astro 的项目网站 |
-| `workers/crash-report/` | 用于崩溃报告的 Cloudflare Worker |
+| ~~`workers/crash-report/`~~ | （规划中，尚未落地）用于崩溃报告的 Cloudflare Worker |
 | `docs/` | 工程规范、指南、迁移文档 |
 | `benchmarks/` | 端到端基准测试任务集 |
 

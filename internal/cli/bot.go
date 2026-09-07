@@ -149,6 +149,12 @@ func botStart(args []string, version string) int {
 				bot.PlatformWeixin:   cfg.Bot.Allowlist.WeixinGroups,
 				bot.PlatformTelegram: cfg.Bot.Allowlist.TelegramGroups,
 			},
+			Admins: map[bot.Platform][]string{
+				bot.PlatformQQ:       cfg.Bot.Allowlist.QQAdmins,
+				bot.PlatformFeishu:   cfg.Bot.Allowlist.FeishuAdmins,
+				bot.PlatformWeixin:   cfg.Bot.Allowlist.WeixinAdmins,
+				bot.PlatformTelegram: cfg.Bot.Allowlist.TelegramAdmins,
+			},
 		},
 		Debounce: time.Duration(cfg.Bot.DebounceMs) * time.Millisecond,
 	}

@@ -14,6 +14,14 @@ import (
 // scheduler wiring lands with the jobs integration). Everything runs through
 // the sealed read path (classifier + redaction + audit per command).
 func (m *Manager) RunInspection(ctx context.Context) (*Finding, error) {
+	return m.RunInspectionProgress(ctx, nil)
+}
+
+// RunInspectionProgress is RunInspection with a per-device progress callback:
+// progress(done, total) fires after each device's battery completes, total
+// being the driver-resolved device count. The desktop's task-ified 立即巡检
+// renders 巡检中…（N/M） from it without polling.
+func (m *Manager) RunInspectionProgress(ctx context.Context, progress func(done, total int)) (*Finding, error) {
 	if !m.cfg.NetDev.Enabled || len(m.cfg.NetDev.Devices) == 0 {
 		return nil, fmt.Errorf("netdev disabled or no devices configured")
 	}
@@ -22,6 +30,13 @@ func (m *Manager) RunInspection(ctx context.Context) (*Finding, error) {
 	devices := make([]string, 0, len(m.cfg.NetDev.Devices))
 	var problems []string
 
+	total := 0
+	for _, d := range m.cfg.NetDev.Devices {
+		if _, ok := m.driverFor(d); ok {
+			total++
+		}
+	}
+	done := 0
 	for _, d := range m.cfg.NetDev.Devices {
 		drv, ok := m.driverFor(d)
 		if !ok {
@@ -39,6 +54,10 @@ func (m *Manager) RunInspection(ctx context.Context) (*Finding, error) {
 			if res.IsError {
 				problems = append(problems, fmt.Sprintf("%s: %s → device error", d.Name, cmd))
 			}
+		}
+		done++
+		if progress != nil {
+			progress(done, total)
 		}
 	}
 

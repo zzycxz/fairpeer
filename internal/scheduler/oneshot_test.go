@@ -90,7 +90,7 @@ func TestNormalizeInExpressionAtCreate(t *testing.T) {
 // via History().
 func TestHistoryRecordedAfterFire(t *testing.T) {
 	s := New(t.TempDir() + "/sched.json")
-	task, err := s.Create(ScheduledTask{Name: "hist", Expression: "every 1h", Prompt: "x"})
+	task, err := s.Create(ScheduledTask{Name: "hist", Expression: "every 1h", Prompt: "x", ConfirmHighFrequency: true})
 	if err != nil {
 		t.Fatal(err)
 	}

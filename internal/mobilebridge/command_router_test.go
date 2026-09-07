@@ -1,6 +1,7 @@
 package mobilebridge
 
 import (
+	"github.com/zzycxz/fairpeer/internal/mobilebridge/proto"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -40,7 +41,9 @@ func (e *recordingExec) Approve(string, string, bool, bool, bool) error {
 	e.mark("approve")
 	return nil
 }
-func (e *recordingExec) Answer(string, string, []string) error { e.mark("answer"); return nil }
+func (e *recordingExec) Answer(string, string, []proto.QuestionAnswer) error {
+		e.mark("answer"); return nil
+	}
 func (e *recordingExec) SetPlan(string, bool) error            { e.mark("setplan"); return nil }
 func (e *recordingExec) SetModel(tab, m string) error          { e.mark("setmodel"); return nil }
 func (e *recordingExec) ListSessions() ([]SessionInfo, error)  { e.mark("list"); return nil, nil }

@@ -23,7 +23,7 @@ function Sparkline({ device, metric }: { device: string; metric: Metric }) {
   const [pts, setPts] = useState<{ time: string; up: boolean; us: number; iu: number; id: number }[] | null>(null);
   useEffect(() => {
     let alive = true;
-    app.NetDevMetricHistory(device).then(h => { if (alive) setPts(h ?? []); }).catch(() => {});
+    app.NetDevMetricHistory(device).then(h => { if (alive) setPts(h ?? []); }).catch(() => {}); // best-effort: 失败降级不阻塞
     return () => { alive = false; };
   }, [device]);
   if (!pts || pts.length < 2) return null;
@@ -154,7 +154,10 @@ export function HealthPanel({ onOpenSettings }: { onOpenSettings?: (tab: string)
         </div>
       )}
       {snap && snap.devices.length === 0 && (
-        <div className="ndv__hint">{t("ndv.health.noSnmp")}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div className="ndv__hint" style={{ flex: 1 }}>{t("ndv.health.noSnmp")}</div>
+          {onOpenSettings && <button className="btn btn--small" role="button" onClick={() => onOpenSettings("netdev")}>{t("ndv.goSettings")}</button>}
+        </div>
       )}
       {snap && shown.length === 0 && snap.devices.length > 0 && <div className="ndv__hint">{t("ndv.health.noMatch")}</div>}
       {snap && shown.map(d => (

@@ -170,6 +170,14 @@ type App struct {
 	// estopHwnd is the hidden message-only window receiving WM_HOTKEY for the
 	// global emergency-stop hotkey. 0 when the feature is off.
 	estopHwnd uintptr
+
+	// exportPickPaths holds export destinations handed out by PickExportFile
+	// and not yet consumed by SaveExportFile (which only writes into this
+	// one-shot allowlist — a bound save taking arbitrary bytes + an arbitrary
+	// path must not become an arbitrary-file overwrite). exportPickOrder is
+	// the FIFO for bounding the set. Guarded by mu.
+	exportPickPaths map[string]bool
+	exportPickOrder []string
 }
 
 // mediaTokenEntry holds metadata for a workspace media file served via temporary URL.
@@ -338,7 +346,7 @@ func (a *App) workspaceMediaMiddleware() func(http.Handler) http.Handler {
 // NewApp constructs the bound object. Tabs are restored in startup from the
 // last session's desktop-tabs.json.
 func NewApp() *App {
-	return &App{tabs: map[string]*WorkspaceTab{}, mediaTokens: newMediaTokenStore(), botInstalls: map[string]*botInstallSession{}, expertRuns: map[string]*expertRunState{}}
+	return &App{tabs: map[string]*WorkspaceTab{}, mediaTokens: newMediaTokenStore(), botInstalls: map[string]*botInstallSession{}, expertRuns: map[string]*expertRunState{}, exportPickPaths: map[string]bool{}}
 }
 
 func (a *App) bootContext() context.Context {
@@ -1005,8 +1013,20 @@ func (a *App) restoreOrBuildTabs() {
 			}
 		}
 		a.mu.Unlock()
+		// Blank-topic tabs (the foreign-root re-land above) and the topic-less
+		// sessions they wrote must be healed BEFORE controllers build, so each
+		// controller resumes with a topic-scoped session dir and the pinned
+		// transcript already carries its topic stamp.
+		a.repairBlankTopicTabs(toBuild)
+		// G2-4（SCENARIO_SPEC）懒构建：只构建激活 tab，其余标 PendingBuild，
+		// 首次激活/引用时再建（SetActiveTab/OpenProjectTab 触发，SubmitToTab
+		// 有同步重建兜底）——消除恢复期"全量并发构建"的启动风暴。
 		for _, tab := range toBuild {
-			a.startTabControllerBuild(tab)
+			if tab.ID == a.activeTabID {
+				a.startTabControllerBuild(tab)
+			} else {
+				tab.PendingBuild = true
+			}
 		}
 		return
 	}
@@ -1022,6 +1042,7 @@ func (a *App) restoreOrBuildTabs() {
 	a.tabOrder = append(a.tabOrder, tab.ID)
 	a.activeTabID = tab.ID
 	a.mu.Unlock()
+	a.ensureTabTopic(tab)
 	a.startTabControllerBuild(tab)
 }
 
@@ -2298,6 +2319,30 @@ func classifySessionProfile(dir, metaProfile string, namedDirs map[string]string
 	return config.ProfileDev
 }
 
+// isSubagentSession reports whether a transcript belongs to a run_skill /
+// task subagent rather than a user conversation (SCENARIO_SPEC G2-1). Subagent
+// transcripts live under a `subagents/` dir (per-session folder layout) or
+// carry the historical flat `sa_` name prefix; they are internal scratch —
+// listing them in "Recent Sessions" showed rows that can never be opened
+// (no topic), so both the session list and the trash skip them. Preview by
+// explicit path stays allowed.
+func isSubagentSession(path string) bool {
+	base := filepath.Base(path)
+	if strings.HasPrefix(base, "sa_") {
+		return true
+	}
+	// 上溯到根为止；以 Dir(seg)==seg 的固定点判定根（Windows 盘根
+	// "C:\" 的 Dir 是自身——用长度或分隔符判断会在那里死循环）。
+	for seg := path; ; seg = filepath.Dir(seg) {
+		if filepath.Base(seg) == "subagents" {
+			return true
+		}
+		if parent := filepath.Dir(seg); parent == seg {
+			return false
+		}
+	}
+}
+
 func (a *App) listSessions(onlyProfile string) []SessionMeta {
 	out := []SessionMeta{}
 	seen := map[string]bool{} // dedupe by session file path; same dir can be listed more than once
@@ -2329,6 +2374,11 @@ func (a *App) listSessions(onlyProfile string) []SessionMeta {
 			// appear in the "Recent Sessions" sidebar until at least one
 			// conversation has taken place.
 			if s.Turns == 0 {
+				continue
+			}
+			// Skip subagent transcripts (sa_*) — internal scratch, never a
+			// user conversation (G2-1).
+			if isSubagentSession(s.Path) {
 				continue
 			}
 			_, isOpen := open[s.Path]
@@ -2377,6 +2427,9 @@ func (a *App) listTrashedSessions(onlyProfile string) []SessionMeta {
 				continue
 			}
 			if onlyProfile != "" && classifySessionProfile(dir, infos[0].Profile, namedDirs) != onlyProfile {
+				continue
+			}
+			if isSubagentSession(path) {
 				continue
 			}
 			deletedAt := trashedSessionDeletedAt(path)
@@ -2543,6 +2596,13 @@ func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) 
 	if tab == nil {
 		return []HistoryMessage{}, fmt.Errorf("tab is not ready")
 	}
+	// G2-4 懒构建：点击"最近会话"常落在恢复期未构建的后台 tab 上。先触发
+	// 挂起的构建，再等它落定（成功或 StartupErr）——不等就会拿 nil ctrl
+	// 撞出误导性的 "tab is not ready"；构建失败时把真实原因带回去。
+	a.ensureTabBuilt(tabID)
+	if err := a.waitForTabController(tab, 30*time.Second); err != nil {
+		return []HistoryMessage{}, err
+	}
 	// Snapshot ctrl under RLock to avoid TOCTOU.
 	a.mu.RLock()
 	ctrl := tab.Ctrl
@@ -2569,7 +2629,11 @@ func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) 
 	}
 	_ = ctrl.Snapshot() // persist the current session before switching away
 	ctrl.Resume(loaded, sessionPath)
-	a.rememberTabSessionPath(tab, sessionPath)
+	// Re-stamp the tab's identity (scope/root/topic/profile) onto the resumed
+	// session's meta. Normal resumes re-write what's already there; resuming a
+	// topic-less session into a fresh blank tab adopts it onto that tab's
+	// topic, so it lands in the project tree instead of lingering unreachable.
+	a.persistTabSessionPath(tab, sessionPath)
 	return a.HistoryForTab(tabID), nil
 }
 
@@ -6181,18 +6245,31 @@ func (a *App) withActiveWorkspace(fn func() (string, error)) (string, error) {
 	return result, err
 }
 
+// workspaceChdirMu serializes the process-global cwd window inside
+// withActiveWorkspaceDo. os.Chdir mutates state shared by EVERY goroutine, so
+// two interleaved bound calls would run each other's fn in the wrong directory
+// and the deferred restores could resurrect the wrong one. While any
+// withActiveWorkspaceDo call is in flight, nothing outside this window may
+// read or write the process cwd (all other workspace paths are absolute
+// roots). Removing the Chdir outright would mean plumbing roots through the
+// control-package APIs — serialized windows are the contained fix.
+var workspaceChdirMu sync.Mutex
+
 func (a *App) withActiveWorkspaceDo(fn func() error) error {
 	root := a.activeWorkspaceRoot()
-	if root != "" && root != "." {
-		prev, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		if err := os.Chdir(root); err != nil {
-			return err
-		}
-		defer func() { _ = os.Chdir(prev) }()
+	if root == "" || root == "." {
+		return fn()
 	}
+	workspaceChdirMu.Lock()
+	defer workspaceChdirMu.Unlock()
+	prev, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	if err := os.Chdir(root); err != nil {
+		return err
+	}
+	defer func() { _ = os.Chdir(prev) }()
 	return fn()
 }
 
@@ -6240,11 +6317,58 @@ func (a *App) PickExportFile(defaultFilename, mimeType string) (string, error) {
 	if ext != "" && filepath.Ext(path) == "" {
 		path += ext
 	}
+	a.rememberExportPick(filepath.Clean(path))
 	return path, nil
 }
 
+// exportPickPathMax bounds the picker allowlist: every dialog confirmation
+// adds an entry and only a matching SaveExportFile consumes one, so cancelled
+// exports would otherwise accumulate for the whole session.
+const exportPickPathMax = 64
+
+// rememberExportPick records a path handed out by PickExportFile so the
+// matching SaveExportFile call may write to it (one shot). FIFO-bounded by
+// exportPickPathMax; entries are stored cleaned (dialog paths are absolute).
+func (a *App) rememberExportPick(path string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.exportPickPaths == nil {
+		a.exportPickPaths = map[string]bool{}
+	}
+	if a.exportPickPaths[path] {
+		return
+	}
+	a.exportPickPaths[path] = true
+	a.exportPickOrder = append(a.exportPickOrder, path)
+	for len(a.exportPickOrder) > exportPickPathMax {
+		oldest := a.exportPickOrder[0]
+		a.exportPickOrder = a.exportPickOrder[1:]
+		delete(a.exportPickPaths, oldest)
+	}
+}
+
+// consumeExportPick takes one shot at a picked path: it returns true (and
+// removes the entry) only when path is an outstanding PickExportFile result.
+func (a *App) consumeExportPick(path string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.exportPickPaths[path] {
+		return false
+	}
+	delete(a.exportPickPaths, path)
+	for i, p := range a.exportPickOrder {
+		if p == path {
+			a.exportPickOrder = append(a.exportPickOrder[:i], a.exportPickOrder[i+1:]...)
+			break
+		}
+	}
+	return true
+}
+
 // SaveExportFile writes an exported session payload to a path previously picked
-// by PickExportFile. An empty path is treated as a cancelled export.
+// by PickExportFile. An empty path is treated as a cancelled export. Only
+// outstanding picker results are writable — and each is single-use — so the
+// bound save can't be steered at arbitrary paths.
 func (a *App) SaveExportFile(path, payload string, base64Encoded bool) error {
 	if strings.TrimSpace(path) == "" {
 		return nil
@@ -6258,6 +6382,9 @@ func (a *App) SaveExportFile(path, payload string, base64Encoded bool) error {
 		}
 	} else {
 		data = []byte(payload)
+	}
+	if !a.consumeExportPick(filepath.Clean(path)) {
+		return fmt.Errorf("export path %q was not chosen in the export dialog", path)
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return err
@@ -6583,17 +6710,30 @@ type ProfilePresetsPayload struct {
 	Path   string                 `json:"path"`
 }
 
-// ProfilePresets returns the active mode's preference presets for the cowork
-// preference panel. A fresh install gets the factory defaults (in memory only).
+// ProfilePresets returns the active mode's preference presets for the
+// preference panel（编码/办公/运维三模式同款）. Reads the ACTIVE PROFILE's
+// preset file DIRECTLY — the controller only rides the prompt-injection
+// path, so a still-building (lazy) controller must never blank the panel
+//（运维偏好偶发空列表的根因）.
 func (a *App) ProfilePresets() ProfilePresetsPayload {
+	profile := a.activeProfileKey()
+	f := memory.LoadPresets(config.MemoryUserDir(), profile)
+	payload := ProfilePresetsPayload{Active: f.Active, Items: f.Items}
 	a.mu.RLock()
 	ctrl := a.activeCtrlLocked()
 	a.mu.RUnlock()
-	if ctrl == nil {
-		return ProfilePresetsPayload{}
+	if ctrl != nil {
+		if v := ctrl.ProfilePresets(); len(v.Items) > len(payload.Items) || v.Path != "" {
+			// 控制器路径带回写文件位置（含规范化后的视图）；以更全者为准。
+			if len(v.Items) >= len(payload.Items) {
+				payload = ProfilePresetsPayload{Active: v.Active, Items: v.Items, Path: v.Path}
+			}
+		}
 	}
-	v := ctrl.ProfilePresets()
-	return ProfilePresetsPayload{Active: v.Active, Items: v.Items, Path: v.Path}
+	if payload.Path == "" {
+		payload.Path = filepath.Join(config.MemoryUserDir(), "profile", memory.NormalizeProfile(profile)+"-presets.json")
+	}
+	return payload
 }
 
 // SetProfilePresets saves the whole preset list and the active selection in one
@@ -6602,10 +6742,14 @@ func (a *App) SetProfilePresets(p ProfilePresetsPayload) (string, error) {
 	a.mu.RLock()
 	ctrl := a.activeCtrlLocked()
 	a.mu.RUnlock()
-	if ctrl == nil {
-		return "", nil
+	if ctrl != nil {
+		return ctrl.SaveProfilePresets(memory.PresetFile{Active: p.Active, Items: p.Items})
 	}
-	return ctrl.SaveProfilePresets(memory.PresetFile{Active: p.Active, Items: p.Items})
+	// 无控制器（懒构建未完成）也能保存：直接落激活 profile 的分键文件，
+	// 提示词注入在控制器就绪后的下一轮自然生效。
+	profile := memory.NormalizeProfile(a.activeProfileKey())
+	path, err := memory.SavePresets(config.MemoryUserDir(), profile, memory.PresetFile{Active: p.Active, Items: p.Items})
+	return path, err
 }
 
 // parseScope maps a frontend scope id to a memory.Scope, defaulting to project.

@@ -79,6 +79,33 @@ func defaultPresets(profile string) PresetFile {
 				Content: "回复尽量短：直接给结果和关键结论，省略过程描述与步骤解释；优先用列表/表格呈现，能一句话说清的不展开。",
 			},
 		}
+	case "netdev":
+		items = []ProfilePreset{
+			{
+				ID:      "evidence-first",
+				Name:    "证据先行",
+				Builtin: true,
+				Content: "每个结论都附证据：引用设备名、时间与具体数值（命令输出/告警条目/日志行）；没有证据就明确说“未验证”，不要推断；给处置建议时区分“已确认”与“待核实”。",
+			},
+			{
+				ID:      "careful-readonly",
+				Name:    "谨慎只读",
+				Builtin: true,
+				Content: "默认只做只读诊断；任何写操作先说明影响面与回滚方案再等我确认；不确定的命令先解释它的作用和风险；涉及危险命令（重启/删除类）必须单独点名提醒。",
+			},
+			{
+				ID:      "triage-with-score",
+				Name:    "研判带评分",
+				Builtin: true,
+				Content: "告警研判按权威评分表输出：失陷确认=40、横向移动=25、暴露critical资产=20、可利用性=15（命中求和），并给分级（≥70 critical/40-69 warning/<40 info）与处置优先级；研判结论附命中信号，证据不足的信号不计分。",
+			},
+			{
+				ID:      "concise-ops-report",
+				Name:    "简洁汇报",
+				Builtin: true,
+				Content: "汇报直接给结论与影响面，按“结论→证据→建议动作”三段组织；告警类给分级和处置优先级；不堆过程描述，多设备状态用表格。",
+			},
+		}
 	case "dev":
 		items = []ProfilePreset{
 			{

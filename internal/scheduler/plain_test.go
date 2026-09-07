@@ -37,6 +37,7 @@ func TestPlainTaskSkipsRunner(t *testing.T) {
 				Expression: "every 1h",
 				Prompt:     c.prompt,
 				Plain:      c.plain,
+				ConfirmHighFrequency: true,
 			})
 			if err != nil {
 				t.Fatal(err)

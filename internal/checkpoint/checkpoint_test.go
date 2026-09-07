@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -484,5 +485,136 @@ func TestKeepCurrentReplaysRewind(t *testing.T) {
 	last := metas[len(metas)-1]
 	if last.Turn != keep || len(last.Paths) != 2 {
 		t.Fatalf("keep meta = %+v, want turn %d with 2 paths", last, keep)
+	}
+}
+
+// TestTruncateFromLetsRewindReuseTurnNumbers reproduces the audit finding: a
+// conversation rewind renumbers future turns from the rewound-to turn, so the
+// store must drop the rewound-away checkpoints — otherwise the next Begin
+// reuses a number already on disk and two entries share a Turn (with the
+// store's sort picking between them nondeterministically).
+func TestTruncateFromLetsRewindReuseTurnNumbers(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "sess.ckpt")
+	a := filepath.Join(root, "a.txt")
+	write(t, a, "v0")
+	s := New(dir, root)
+
+	s.Begin(1, "first", 1)
+	s.Snapshot(diff.Change{Path: a, Kind: diff.Modify, OldText: "v0"})
+	s.Begin(2, "second", 3)
+	s.Snapshot(diff.Change{Path: a, Kind: diff.Modify, OldText: "v1"})
+
+	// Rewind to turn 1: turns >= 1 no longer exist in the conversation, so they
+	// must be gone from the store too (the finalized turn 1 and open turn 2),
+	// files included.
+	if dropped := s.TruncateFrom(1); dropped != 2 {
+		t.Fatalf("TruncateFrom dropped %d entries, want 2", dropped)
+	}
+	for _, turn := range []int{1, 2} {
+		if _, err := os.Stat(filepath.Join(dir, fmt.Sprintf("turn-%d.json", turn))); !os.IsNotExist(err) {
+			t.Fatalf("turn-%d.json should have been deleted from disk: %v", turn, err)
+		}
+	}
+
+	// The rewound-to turn runs again, reusing its number cleanly.
+	s.Begin(1, "retry", 3)
+	s.Snapshot(diff.Change{Path: a, Kind: diff.Modify, OldText: "v1"})
+	s.Finalize()
+
+	metas := s.List()
+	seen := map[int]bool{}
+	for _, m := range metas {
+		if seen[m.Turn] {
+			t.Fatalf("duplicate checkpoint turn %d: %+v", m.Turn, metas)
+		}
+		seen[m.Turn] = true
+	}
+	if len(metas) != 1 || metas[0].Turn != 1 || metas[0].Prompt != "retry" {
+		t.Fatalf("checkpoints = %+v, want exactly one entry for the retried turn 1", metas)
+	}
+
+	// Disk matches memory: exactly one file per surviving turn, and a fresh
+	// store over the same dir agrees with what just ran.
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ents) != 1 || ents[0].Name() != "turn-1.json" {
+		names := make([]string, len(ents))
+		for i, e := range ents {
+			names[i] = e.Name()
+		}
+		t.Fatalf("checkpoint dir contains %v, want [turn-1.json]", names)
+	}
+	if reloaded := New(dir, root).List(); len(reloaded) != 1 || reloaded[0].Prompt != "retry" {
+		t.Fatalf("reloaded store = %+v, want the single retried turn", reloaded)
+	}
+}
+
+// TruncateFrom below the oldest entry drops everything; a turn that never
+// happened leaves nothing to rewind to.
+func TestTruncateFromZeroesTheStore(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "sess.ckpt")
+	a := filepath.Join(root, "a.txt")
+	write(t, a, "v0")
+	s := New(dir, root)
+
+	s.Begin(0, "first", 1)
+	s.Snapshot(diff.Change{Path: a, Kind: diff.Modify, OldText: "v0"})
+	s.Finalize()
+
+	if dropped := s.TruncateFrom(0); dropped != 1 {
+		t.Fatalf("TruncateFrom dropped %d entries, want 1", dropped)
+	}
+	if metas := s.List(); len(metas) != 0 {
+		t.Fatalf("checkpoints = %+v, want an empty store", metas)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "turn-0.json")); !os.IsNotExist(err) {
+		t.Fatalf("turn-0.json should have been deleted: %v", err)
+	}
+	// Numbering restarts from zero on the empty store.
+	if next := s.NextTurn(); next != 0 {
+		t.Fatalf("NextTurn after truncate = %d, want 0", next)
+	}
+}
+
+// Concurrent KeepCurrent calls must not allocate the same synthetic turn: the
+// number computation and the Begin that records it are one critical section,
+// or two callers clobber each other's turn-N.json.
+func TestKeepCurrentConcurrentDistinctTurns(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "sess.ckpt")
+	a := filepath.Join(root, "a.txt")
+	write(t, a, "v0")
+	s := New(dir, root)
+
+	const n = 8
+	turns := make(chan int, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			turns <- s.KeepCurrent("keep", 0, []string{a})
+		}()
+	}
+	wg.Wait()
+	close(turns)
+
+	seen := map[int]bool{}
+	for turn := range turns {
+		if seen[turn] {
+			t.Fatalf("two concurrent KeepCurrent calls both allocated turn %d", turn)
+		}
+		seen[turn] = true
+	}
+	// One checkpoint per distinct allocated turn, in memory and on disk.
+	if metas := s.List(); len(metas) != n {
+		t.Fatalf("store holds %d checkpoints, want %d (one per distinct turn)", len(metas), n)
+	}
+	if ents, err := os.ReadDir(dir); err != nil || len(ents) != n {
+		t.Fatalf("checkpoint dir err=%v entries=%d, want %d files", err, len(ents), n)
 	}
 }

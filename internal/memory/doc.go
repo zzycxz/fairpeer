@@ -203,10 +203,13 @@ func gitRoot(dir string) string {
 }
 
 // resolveImports inlines lines that are exactly "@<path>" by replacing them with
-// the referenced file's content. Paths resolve relative to baseDir, with a
-// leading ~ expanded to home and absolute paths honored as-is. Recurses up to
-// maxImportDepth with cycle detection via seen (absolute paths). An import that
-// cannot be read is left as-is so the user can see what failed.
+// the referenced file's content. Paths resolve relative to baseDir. Imports are
+// CONFINED to baseDir's subtree: a malicious repo's AGENTS.md could otherwise
+// write `@~/.ssh/id_rsa` (or `@C:\secrets`) and inline arbitrary files into
+// the system prompt shipped to the model provider on every turn — a quiet
+// exfiltration channel disguised as the import feature. Recurses up to
+// maxImportDepth with cycle detection via seen (absolute paths). An import
+// that cannot be read or escapes baseDir is annotated and skipped.
 func resolveImports(body, baseDir string, seen map[string]bool, depth int) string {
 	if depth >= maxImportDepth {
 		return body
@@ -218,6 +221,10 @@ func resolveImports(body, baseDir string, seen map[string]bool, depth int) strin
 			continue
 		}
 		path := resolvePath(target, baseDir)
+		if !withinDir(path, baseDir) {
+			lines[i] = line + "  <!-- skipped: import escapes memory dir -->"
+			continue
+		}
 		abs := absOf(path)
 		if seen[abs] {
 			lines[i] = line + "  <!-- skipped: import cycle -->"
@@ -266,6 +273,20 @@ func resolvePath(p, baseDir string) string {
 		return p
 	}
 	return filepath.Join(baseDir, p)
+}
+
+// withinDir reports whether p (once made absolute and cleaned) stays inside
+// dir's subtree. Lexical only — symlinks are not resolved, which is
+// acceptable here because the attacker-controlled file never controls the
+// symlink creation itself in the same write path.
+func withinDir(p, dir string) bool {
+	absP := absOf(p)
+	absDir := absOf(dir)
+	rel, err := filepath.Rel(absDir, absP)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // absOf returns the absolute form of p, falling back to a cleaned p on error so

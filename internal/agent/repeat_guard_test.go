@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -85,4 +87,38 @@ func TestRepeatGuardAllowsTwoRepeatedWriterSuccesses(t *testing.T) {
 	if last := lastToolResult(a.session, "write_file"); strings.Contains(last, "[loop guard]") {
 		t.Fatalf("second repeated writer call should still be allowed, got %q", last)
 	}
+}
+
+// TestRepeatGuardConcurrentWriterBatch is the regression test for the
+// concurrent-map-write crash: writer batches with disjoint preview paths run
+// via runParallel, so recordRepeatSuccess and repeatedSuccessBlock fire from
+// parallel goroutines whenever a model emits two writer calls in one turn.
+// Run with -race; before repeatMu existed this threw
+// "fatal error: concurrent map read and map write".
+func TestRepeatGuardConcurrentWriterBatch(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "write_file", readOnly: false, calls: new(int32)})
+	reg.Add(fakeTool{name: "edit_file", readOnly: false, calls: new(int32)})
+	a := New(&scriptedProvider{name: "p"}, reg, NewSession(""), Options{}, event.Discard)
+
+	const goroutines = 16
+	const iterations = 200
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			name := "write_file"
+			if g%2 == 1 {
+				name = "edit_file"
+			}
+			call := provider.ToolCall{ID: "c", Name: name, Arguments: `{"path":"f` + strconv.Itoa(g) + `.txt","content":"x"}`}
+			tool, _ := reg.Get(name)
+			for i := 0; i < iterations; i++ {
+				a.recordRepeatSuccess(call, tool)
+				a.repeatedSuccessBlock(call, tool)
+			}
+		}(g)
+	}
+	wg.Wait()
 }

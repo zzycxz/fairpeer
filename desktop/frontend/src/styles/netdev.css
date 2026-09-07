@@ -2195,6 +2195,12 @@
   flex: 1;
   min-width: 90px;
 }
+.ndv-brc-editor__control {
+  flex-basis: 100%;
+  font-size: 10.5px;
+  font-family: var(--mono);
+  color: var(--fg-dim);
+}
 .ndv-brc-editor__step-error {
   font-size: 11px;
   color: var(--danger);
@@ -2659,11 +2665,21 @@
 .ndv-dash__btn--close { font-size: 14px; padding: 2px 8px; }
 .ndv-dash__rot { background: transparent; color: inherit; border: 1px solid var(--border, #2e333d); border-radius: var(--radius); font-size: 11px; }
 .ndv-dash__body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; }
-.ndv-dash__ticker { display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--border, #2e333d); padding: 4px 10px; font-size: 11px; }
+.ndv-dash__ticker { display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--border, #2e333d); padding: 4px 10px; font-size: 11px; min-height: 26px; }
 .ndv-dash__tickerlabel { opacity: 0.6; white-space: nowrap; }
-.ndv-dash__tickerrun { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: thin; }
-.ndv-dash__tick { white-space: nowrap; cursor: pointer; opacity: 0.85; }
-.ndv-dash__tick--bad { color: var(--danger, #e5484d); }
+/* 底条轮播：单条淡入轮换；分类小色点 + ×N 聚合计数 + ‹ › 翻页 */
+.ndv-dash__tickitem { display: inline-flex; gap: 7px; align-items: center; min-width: 0; white-space: nowrap; cursor: pointer; opacity: 0.92; animation: ndv-tickfade .35s ease; }
+.ndv-dash__tickitem--bad { color: var(--danger, #e5484d); }
+.ndv-dash__tickcmd { overflow: hidden; text-overflow: ellipsis; }
+.ndv-dash__tickcount { flex: none; font-size: 10px; padding: 0 5px; border: 1px solid var(--border, #2e333d); border-radius: var(--radius-md); opacity: 0.75; }
+.ndv-dash__tickdot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #8b93a1; opacity: 0.55; }
+.ndv-dash__tickdot--write { background: var(--warn, #f5a524); opacity: 0.8; }
+.ndv-dash__tickdot--guardrail { background: var(--danger, #e5484d); opacity: 0.8; }
+.ndv-dash__tickdot--change { background: #4f8ef7; opacity: 0.8; }
+.ndv-dash__ticknav { margin-left: auto; display: inline-flex; gap: 5px; align-items: center; opacity: 0.7; flex: none; }
+.ndv-dash__ticknav [role="button"] { cursor: pointer; padding: 0 4px; }
+.ndv-dash__ticknav [role="button"]:hover { opacity: 1; }
+@keyframes ndv-tickfade { from { opacity: 0; } to { opacity: 0.92; } }
 .ndv-bench__riskdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 4px; vertical-align: middle; }
 .ndv-nav__count { font-size: 10px; background: var(--bg-elevated, #23272e); border: 1px solid var(--border, #2e333d); border-radius: var(--radius-md); padding: 0 5px; margin-left: 6px; font-style: normal; }
 
@@ -2864,3 +2880,32 @@
 /* 场景导引组头（G1-1） */
 .ndv__sc-grp { font-size: 11px; font-weight: 600; opacity: 0.7; margin: 10px 0 6px; letter-spacing: 0.5px; }
 .ndv__sc-grp:first-of-type { margin-top: 0; }
+
+/* ── WRITE_AUTHZ：confirm 档写命令审批卡 + TOML 放宽拦截横幅（P1） ────────── */
+.ndv-writeclamp-banner {
+  position: fixed; top: 40px; right: 12px; z-index: 60; max-width: 380px;
+  padding: 10px 14px; border: 1px solid var(--danger, #e5484d); border-radius: 8px;
+  background: color-mix(in srgb, var(--danger, #e5484d) 10%, var(--bg, #1e1e1e));
+  font-size: 12px; line-height: 1.6;
+}
+.ndv-writeclamp-banner__title { font-weight: 700; color: var(--danger, #e5484d); margin-bottom: 4px; }
+.ndv-writeclamp-banner__row { opacity: 0.9; }
+.ndv-writeclamp-banner__hint { margin-top: 6px; opacity: 0.65; }
+
+.ndv-writecard {
+  position: fixed; bottom: 76px; right: 12px; z-index: 60; width: 400px; max-width: calc(100vw - 24px);
+  padding: 12px 14px; border: 1px solid var(--warn, #f5a623); border-radius: 10px;
+  background: var(--bg, #1e1e1e); box-shadow: 0 8px 28px rgba(0,0,0,.35);
+  font-size: 12px; line-height: 1.6;
+}
+.ndv-writecard__title { font-weight: 700; color: var(--warn, #f5a623); margin-bottom: 6px; }
+.ndv-writecard__meta { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.ndv-writecard__device { font-family: var(--mono, monospace); font-weight: 600; }
+.ndv-writecard__tier { opacity: 0.7; font-size: 11px; }
+.ndv-writecard__cmd {
+  margin: 0 0 6px; padding: 8px 10px; border-radius: 6px; background: rgba(127,127,127,.12);
+  font-family: var(--mono, monospace); font-size: 12px; white-space: pre-wrap; word-break: break-all;
+  max-height: 120px; overflow: auto;
+}
+.ndv-writecard__note { opacity: 0.65; margin-bottom: 8px; }
+.ndv-writecard__actions { display: flex; gap: 8px; justify-content: flex-end; }

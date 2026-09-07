@@ -50,6 +50,7 @@ import type {
   NetDevStateFileDiff,
   NetDevStateRestoreResultView,
   NetDevFinding,
+  NetDevInspectionState,
   NetDevTopologyGraph,
   NetDevProposal,
   NetDevJob,
@@ -119,6 +120,7 @@ import type {
   LoopRunStatus,
   ManagedBrowserStatus,
   InboxItem,
+  MailFullMessage,
   RagExtractResultView,
   ExpertRunView,
   RecentChatView,
@@ -436,8 +438,10 @@ export interface AppBindings {
   NetDevTrustHostKey(fingerprint: string): Promise<void>;
   // Proposal pipeline (human-only entry points; the agent can only draft).
   NetDevProposals(): Promise<NetDevProposal[]>;
-  // One-click read-battery sweep; files a Finding with evidence.
-  NetDevRunInspection(): Promise<NetDevFinding | null>;
+  // One-click read-battery sweep — task-ified: kicks the round and returns
+  // immediately with its state; progress arrives via "netdev:inspection".
+  NetDevRunInspection(): Promise<NetDevInspectionState>;
+  NetDevInspectionStatus(): Promise<NetDevInspectionState>;
   // Config-security baseline battery (sealed reads + local rules) → Findings.
   NetDevRunBaseline(): Promise<NetDevFinding | null>;
   // Configuration backup vault: snapshot (sealed read, redacted-only), list,
@@ -470,6 +474,13 @@ export interface AppBindings {
   // Reset the per-turn command budget — called on every user submit in the
   // 运维 profile so turn_command_budget is a true per-ask control.
   NetDevTurnBegin(): Promise<void>;
+  // WRITE_AUTHZ (spec §5/§6/§7.3): the confirm-tier write-card channel, the
+  // per-device lock state (settings + badges + clamp banner), the human's
+  // alert-confirmation of a tier widening, and the operation ledger.
+  NetDevResolveWriteApproval(id: string, approved: boolean, reason: string): Promise<boolean>;
+  NetDevWriteTierState(): Promise<{ rows: import("./types").NetDevWriteTierRow[]; warnings: string[] }>;
+  NetDevConfirmWriteTier(device: string, tier: string): Promise<void>;
+  NetDevOpSteps(device: string): Promise<import("./types").NetDevOpStep[]>;
   // Rate-limit budget window status for live UI display (rpm/used/remaining).
   BudgetStatus(): Promise<BudgetStatusView>;
   // One-click read-table growth from a refusal chip (user teaches, never the
@@ -576,7 +587,16 @@ export interface AppBindings {
   NetDevCutoverStart(def: NetDevCutoverRun): Promise<NetDevCutoverRun>;
   NetDevCutovers(): Promise<NetDevCutoverRun[]>;
   NetDevCutoverGet(id: string): Promise<NetDevCutoverRun>;
+  NetDevBriefingBuild(kind: string): Promise<unknown | null>;
+  NetDevBriefingLatestPath(kind: string): Promise<string>;
+  NetDevAuditProjects(): Promise<unknown[] | null>;
+  NetDevAuditProjectSave(p: unknown): Promise<unknown>;
+  NetDevAuditProjectDelete(id: string): Promise<void>;
+  NetDevAuditProjectRun(id: string): Promise<unknown>;
+  NetDevAuditProjectStatus(id: string): Promise<{ project?: unknown; report?: unknown; green?: boolean } | null>;
+  NetDevAuditItemSetStatus(projectID: string, signature: string, status: string): Promise<void>;
   NetDevCutoverContinue(id: string): Promise<NetDevCutoverRun>;
+  NetDevCutoverPrecheckOverride(id: string): Promise<NetDevCutoverRun>;
   NetDevCutoverRollback(id: string): Promise<NetDevCutoverRun>;
   NetDevCutoverAbort(id: string): Promise<NetDevCutoverRun>;
   NetDevCutoverReport(id: string): Promise<string>;
@@ -599,6 +619,9 @@ export interface AppBindings {
   NetDevHealthSnapshot(): Promise<NetDevHealthSnapshot>;
   // Trust domain (docs/TRUSTDOMAIN_SPEC.md §15.3): read-mostly panel + brake.
   TrustDomainStatus(): Promise<TrustDomainView>;
+  TrustDomainInit(): Promise<string>;
+  TrustDomainReset(): Promise<string>;
+  TrustDomainSetEnabled(enabled: boolean): Promise<void>;
   TrustDomainPause(reason: string): Promise<void>;
   TrustDomainResume(): Promise<void>;
   TrustDomainAnchor(): Promise<void>;
@@ -628,6 +651,12 @@ export interface AppBindings {
   // ("INBOX" unread-only, or "Sent" for sent mail), for the cowork dock's
   // "邮件" tab. Returns [] when no mailbox is configured or no mail.
   InboxPreview(mailbox: string, limit: number): Promise<InboxItem[]>;
+  // ReadMailFull fetches ONE message's full body for the dock's reading pane:
+  // index is 0-based into the same newest-first window InboxPreview rendered
+  // (same mailbox + limit), and subject/date are the clicked row's values —
+  // the backend verifies them so a shifted mailbox fails loudly instead of
+  // showing the wrong letter.
+  ReadMailFull(mailbox: string, limit: number, index: number, subject: string, date: string): Promise<MailFullMessage>;
   // Hooks settings (settings.json, global + project scopes). HooksSettings
   // returns the payload for the Hooks tab; Save/Trust write + gate project hooks.
   HooksSettings(scope: string): Promise<HooksSettingsView>;
@@ -985,6 +1014,24 @@ function emitNetdevLiveMock(events: NetDevLiveEvent[]) {
   for (const cb of netdevLiveListeners) cb(events);
 }
 
+// onNetdevWriteApproval subscribes to the confirm-tier write-card channel
+// ("netdev:write-approval": {id, device, command} — desktop/netdev_app.go's
+// Manager-side approver). The Go side times out (declines) after 120s.
+const netdevWriteApprovalListeners = new Set<(req: import("./types").NetDevWriteApproval) => void>();
+export function onNetdevWriteApproval(cb: (req: import("./types").NetDevWriteApproval) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("netdev:write-approval", (req) => cb(req as import("./types").NetDevWriteApproval));
+  }
+  netdevWriteApprovalListeners.add(cb);
+  return () => {
+    netdevWriteApprovalListeners.delete(cb);
+  };
+}
+
+export function emitNetdevWriteApprovalMock(req: import("./types").NetDevWriteApproval) {
+  for (const cb of netdevWriteApprovalListeners) cb(req);
+}
+
 // onNetdevFindingSaved subscribes to the saved-finding push channel
 // ("netdev:finding-saved": one NetDevFinding — desktop/netdev_app.go forwards
 // the package-level observer fired after every successful save, so chat-skill
@@ -1002,6 +1049,51 @@ export function onNetdevFindingSaved(cb: (f: NetDevFinding) => void): () => void
 
 export function emitNetdevFindingSavedMock(f: NetDevFinding) {
   for (const cb of netdevFindingSavedListeners) cb(f);
+}
+
+// onNetdevInspection subscribes to the sweep-state stream ("netdev:inspection":
+// one NetDevInspectionState per start/progress/finish transition, pushed by
+// desktop/netdev_app.go's setInspState — the overview 巡检卡 is event-driven,
+// no polling). The browser dev mock plays a short fake round.
+const netdevInspectionListeners = new Set<(s: NetDevInspectionState) => void>();
+export function onNetdevInspection(cb: (s: NetDevInspectionState) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("netdev:inspection", (s) => cb(s as NetDevInspectionState));
+  }
+  netdevInspectionListeners.add(cb);
+  return () => {
+    netdevInspectionListeners.delete(cb);
+  };
+}
+
+function emitNetdevInspectionMock(s: NetDevInspectionState) {
+  for (const cb of netdevInspectionListeners) cb(s);
+}
+
+// inspection mock state — a kick plays a 3-device fake sweep over ~4.5s.
+let inspectionMock: NetDevInspectionState = {
+  running: false, done: 0, total: 3,
+  lastTitle: "巡检 3 台设备，1 项异常", lastAt: Date.now() - 3_600_000, interval: "30m",
+};
+function inspectionMockState(): NetDevInspectionState { return { ...inspectionMock }; }
+function inspectionMockKick(): NetDevInspectionState {
+  if (inspectionMock.running) return inspectionMockState();
+  inspectionMock = { ...inspectionMock, running: true, manual: true, startedAt: Date.now(), done: 0, total: 3 };
+  emitNetdevInspectionMock(inspectionMockState());
+  for (let i = 1; i <= 3; i += 1) {
+    window.setTimeout(() => {
+      inspectionMock.done = i;
+      emitNetdevInspectionMock(inspectionMockState());
+    }, i * 1500);
+  }
+  window.setTimeout(() => {
+    inspectionMock = {
+      ...inspectionMock, running: false, manual: false, done: 0,
+      lastTitle: "巡检 3 台设备，1 项异常", lastAt: Date.now(),
+    };
+    emitNetdevInspectionMock(inspectionMockState());
+  }, 4800);
+  return inspectionMockState();
 }
 
 // onNetdevHumanTTY subscribes to the human-terminal output stream
@@ -2366,7 +2458,8 @@ function makeMockApp(): AppBindings {
   let mockBackups: { id: string; device: string; at: string; bytes: number; lines: number }[] = [];
   // Job 引擎 / 割接 mock state (R4) — in-memory, mock-run scoped.
   const mockNetDevJobs: NetDevJob[] = [];
-  const mockNetDevCutovers: NetDevCutoverRun[] = [];
+  const auditProjectsMockRef: { arr: unknown[] } = { arr: [] };
+    const mockNetDevCutovers: NetDevCutoverRun[] = [];
   const mockNetDevTemplates: NetDevTemplate[] = [];
   // 状态历史 mock（浏览器演示）：两条可回退事件 + 一条被活跃实体阻塞的。
   const mockStateEvents: NetDevStateEventView[] = [
@@ -2381,7 +2474,7 @@ function makeMockApp(): AppBindings {
     devices: null,
     hops: null, groups: null, auditRetention: "", scopes: null,
     guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: null,
-    inspectionInterval: "", backupInterval: "", scheduledBaseline: false,
+    inspectionInterval: "", backupInterval: "", backupGitMirror: false, scheduledBaseline: false,
     extraRead: null, projects: null, presets: null,
   };
   return {
@@ -2560,6 +2653,20 @@ function makeMockApp(): AppBindings {
       c.report = "# 割接对比报告（浏览器模拟）\n\n无变化\n";
       return c;
     },
+    async NetDevBriefingBuild(kind: string) { return { generated_at: new Date().toISOString(), kind, sections: [] }; },
+    async NetDevBriefingLatestPath(kind: string) { return `C:/mock/briefings/latest-${kind}.json`; },
+    async NetDevAuditProjects() { return auditProjectsMockRef.arr; },
+    async NetDevAuditProjectSave(p: unknown) { return p; },
+    async NetDevAuditProjectDelete(id: string) { auditProjectsMockRef.arr = auditProjectsMockRef.arr.filter((p: unknown) => (p as { id: string }).id !== id); },
+    async NetDevAuditProjectRun(id: string) { return (auditProjectsMockRef.arr.find((p: unknown) => (p as { id: string }).id === id) ?? null); },
+    async NetDevAuditProjectStatus(id: string) { return { project: auditProjectsMockRef.arr.find((p: unknown) => (p as { id: string }).id === id) ?? null, report: null, green: true }; },
+    async NetDevAuditItemSetStatus() {},
+    async NetDevCutoverPrecheckOverride(id: string): Promise<NetDevCutoverRun> {
+      const c = mockNetDevCutovers.find(x => x.id === id);
+      if (!c) throw new Error("browser dev mock: no such cutover");
+      c.status = "running";
+      return c;
+    },
     async NetDevCutoverRollback(id: string): Promise<NetDevCutoverRun> {
       const c = mockNetDevCutovers.find(x => x.id === id);
       if (!c) throw new Error("browser dev mock: no such cutover");
@@ -2678,6 +2785,13 @@ function makeMockApp(): AppBindings {
     async TrustDomainStatus(): Promise<TrustDomainView> {
       return { enabled: false, joined: false, height: 0, paused: false, successionConfigured: false, successionAfterSec: 0, successionLastActive: 0, successionDue: false };
     },
+    async TrustDomainInit(): Promise<string> {
+      return "mock-domain-id";
+    },
+    async TrustDomainReset(): Promise<string> {
+      return "mock-domain-id-2";
+    },
+    async TrustDomainSetEnabled(_enabled: boolean): Promise<void> {},
     async TrustDomainPause(_reason: string): Promise<void> {},
     async TrustDomainResume(): Promise<void> {},
     async TrustDomainAnchor(): Promise<void> {},
@@ -2718,7 +2832,8 @@ function makeMockApp(): AppBindings {
       return { written: ev ? ev.paths : [], deleted: [], reverseEventId: Date.now() };
     },
     async NetDevProposals() { return [] as NetDevProposal[]; },
-    async NetDevRunInspection() { return null; },
+    async NetDevRunInspection() { return inspectionMockKick(); },
+    async NetDevInspectionStatus() { return inspectionMockState(); },
     async NetDevRunBaseline() { return null; },
     async NetDevRunBackup(device: string) {
       mockBackups = [{ id: `${device}@${Date.now() - 3600_000}`, device, at: "08-19 09:00:00", bytes: 4210, lines: 180 },
@@ -2760,6 +2875,11 @@ function makeMockApp(): AppBindings {
     async NetDevFindingsClear() { return 0; },
     async NetDevEmergencyStop() { return 0; },
     async NetDevTurnBegin() {},
+    // WRITE_AUTHZ mocks: no pending cards, all devices sealed, empty ledger.
+    async NetDevResolveWriteApproval(_id: string, _approved: boolean, _reason: string) { return false; },
+    async NetDevWriteTierState() { return { rows: [], warnings: [] }; },
+    async NetDevConfirmWriteTier(_device: string, _tier: string) {},
+    async NetDevOpSteps(_device: string) { return []; },
     async NetDevAddExtraRead(vendor: string, command: string) {
       mockNetDev = { ...mockNetDev, extraRead: { ...mockNetDev.extraRead, [vendor]: [...(mockNetDev.extraRead[vendor] ?? []), command] } };
     },
@@ -5023,6 +5143,9 @@ function makeMockApp(): AppBindings {
     async SetCoWorkSettings(v: any) { settings.cowork = { ...v, detectedBrowser: settings.cowork.detectedBrowser }; },
     async ProbeMailAccount(_name: string) { return { ok: true, status: "unconfigured", message: "" } as MailProbeResult; },
     async InboxPreview(_mailbox: string, _limit: number) { return [] as InboxItem[]; },
+    async ReadMailFull(_mailbox: string, _limit: number, _index: number, _subject: string, _date: string) {
+      throw new Error("ReadMailFull requires the desktop app");
+    },
     async HooksSettings(scope: string) {
       const key = scope === "project" ? "project" : "global";
       return JSON.parse(JSON.stringify(hookSettings[key])) as HooksSettingsView;

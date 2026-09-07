@@ -52,6 +52,16 @@ var linuxTriageBattery = []struct{ name, cmd string }{
 	{"时钟同步", "timedatectl"},
 }
 
+// gpuTriageBattery（SCENARIO_SPEC S1-2）：GPU/智算主机的追加档——只读三
+// 表（概览/温度显存/XID 事件）。XID>0 即 GPU 硬件/驱动异常，analyzeTriage
+// 立案。
+var gpuTriageBattery = []struct{ name, cmd string }{
+	{"GPU 概览", "nvidia-smi"},
+	{"GPU 温度显存", "nvidia-smi --query-gpu=index,name,temperature.gpu,memory.used,memory.total,utilization.gpu --format=csv,nounits"},
+	{"GPU XID 事件", "nvidia-smi -q"},
+	{"NPU 概览(昇腾)", "npu-smi info"},
+}
+
 var windowsTriageBattery = []struct{ name, cmd string }{
 	{"进程", "tasklist"},
 	{"网络连接", "netstat -ano"},
@@ -82,6 +92,11 @@ func (m *Manager) Triage(ctx context.Context, deviceName string) TriageReport {
 	default:
 		rep.Summary = fmt.Sprintf("triage v1 covers linux/windows hosts (vendor=%s)", d.Vendor)
 		return rep
+	}
+	// S1-2：GPU/智算主机追加只读 GPU 档（命令不在主机上时该节标 refused，
+	// 不影响其余电池——on-fail=continue）。
+	if d.GPU && d.Vendor == "linux" {
+		battery = append(append([]struct{ name, cmd string }{}, battery...), gpuTriageBattery...)
 	}
 
 	def := &Job{
@@ -163,6 +178,35 @@ func analyzeTriage(rep TriageReport) []string {
 			}
 		}
 		return nil
+	}
+
+	// GPU（S1-2）：XID>0 = 硬件/驱动异常（立案）；温度/显存水位超限提示。
+	if s := section("GPU XID 事件"); s != nil && s.Ok {
+		for _, ln := range s.Lines {
+			if m := regexp.MustCompile(`Xid[^0-9]*([1-9][0-9]*)`).FindStringSubmatch(ln); m != nil {
+				anomalies = append(anomalies, "GPU XID 异常事件 #"+m[1]+"（nvidia-smi -q 报告）——硬件/驱动级错误，建议检查 dmesg 与 GPU 日志")
+				break
+			}
+		}
+	}
+	// Positional CSV parse: the query above fixes the column order (index,
+	// name, temperature.gpu, memory.used, memory.total, utilization.gpu) and
+	// nounits keeps every field a bare number.
+	if s := section("GPU 温度显存"); s != nil && s.Ok {
+		for _, ln := range s.Lines {
+			f := strings.Split(ln, ",")
+			if len(f) < 6 || strings.EqualFold(strings.TrimSpace(f[0]), "index") {
+				continue // header / short rows
+			}
+			temp, err := strconv.Atoi(strings.TrimSpace(f[2]))
+			if err != nil {
+				continue // non-numeric (a GPU name containing commas shifts columns)
+			}
+			if temp >= 85 {
+				anomalies = append(anomalies, fmt.Sprintf("GPU 温度 %d℃ ≥85（%s）", temp, strings.TrimSpace(ln)))
+			}
+			break // first GPU row decides, as before
+		}
 	}
 
 	// Failed logins: lastb lines (linux) or 4625 events (windows), aggregated

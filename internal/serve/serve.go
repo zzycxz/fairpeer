@@ -6,6 +6,7 @@
 package serve
 
 import (
+	"net"
 	"context"
 	"crypto/sha256"
 	_ "embed"
@@ -39,6 +40,12 @@ type Server struct {
 	bc        *Broadcaster
 	titleProv provider.Provider // lightweight flash provider for session titles
 	titles    *titleCache
+
+	// bindHost is the host portion of the listen address, set by Run/
+	// RunGraceful before serving. The host guard uses it to reject
+	// DNS-rebinding pages (attacker.com resolving to 127.0.0.1 sends
+	// Host: attacker.com — same-origin to the browser, no preflight).
+	bindHost string
 }
 
 // New builds a Server. bc must be the controller's event sink.
@@ -230,7 +237,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /sessions", s.sessions)
 	mux.HandleFunc("GET /skills", s.skills)
 	mux.HandleFunc("POST /delete-session", s.deleteSession)
-	return logMiddleware(csrfGuard(mux))
+	return logMiddleware(hostGuard(s, bodyLimit(csrfGuard(mux))))
 }
 
 // csrfGuard rejects state-changing requests that don't carry a JSON content type.
@@ -256,17 +263,101 @@ func csrfGuard(next http.Handler) http.Handler {
 	})
 }
 
+// serveMaxBodyBytes caps request bodies (32 MiB is generous for prompts with
+// pasted images; without a cap a single unauthenticated POST can stream
+// gigabytes into memory).
+const serveMaxBodyBytes = 32 << 20
+
+// bodyLimit bounds request bodies before any handler decodes them.
+func bodyLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, serveMaxBodyBytes)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// hostGuard rejects requests whose Host header does not name the interface
+// the server bound. This closes the DNS-rebinding hole: a page at
+// attacker.com (which resolves to 127.0.0.1) becomes same-origin to the
+// browser, so the Content-Type CSRF check alone no longer helps — the
+// browser happily sends application/json without a preflight. When bindHost
+// is unset (tests, direct Handler() use) the guard allows everything.
+func hostGuard(s *Server, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.bindHost != "" && !s.hostAllowed(r.Host) {
+			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// hostAllowed reports whether the request's Host header is acceptable for a
+// server bound to s.bindHost. An unset bindHost (tests, direct Handler use)
+// allows everything.
+func (s *Server) hostAllowed(hostHeader string) bool {
+	if s.bindHost == "" {
+		return true
+	}
+	host := hostHeader
+	// Strip the port, tolerating IPv6 forms like [::1]:8787.
+	if i := strings.LastIndexByte(host, ':'); i >= 0 && !strings.Contains(host[i:], "]") {
+		host = host[:i]
+	}
+	host = strings.Trim(strings.ToLower(host), "[]")
+	if host == "" {
+		return false
+	}
+	// A rebinding page always sends its own domain as Host — never a loopback
+	// literal — so loopback names/addresses are safe to accept for any bind.
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return true
+	}
+	switch s.bindHost {
+	case "0.0.0.0", "::", "*":
+		// Wildcard bind: private LAN hosts the operator might legitimately
+		// browse from; public-looking names are still rebinding suspects.
+		if ip := net.ParseIP(host); ip != nil && ip.IsPrivate() {
+			return true
+		}
+		return false
+	}
+	return host == s.bindHost
+}
+
 // Run serves until the process is killed. Interactive approval is enabled so
 // "ask" decisions surface as approval_request events answered via POST /approve.
 func (s *Server) Run(addr string) error {
+	s.setBindHost(addr)
 	s.ctl().EnableInteractiveApproval()
-	return http.ListenAndServe(addr, s.Handler())
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           s.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	return srv.ListenAndServe()
+}
+
+// setBindHost records the host portion of the listen address for hostGuard.
+func (s *Server) setBindHost(addr string) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	s.bindHost = strings.ToLower(host)
 }
 
 // RunGraceful serves with graceful shutdown. It listens for SIGINT/SIGTERM on
 // the provided context and drains active connections for up to 10 seconds
 // before returning.
 func (s *Server) RunGraceful(ctx context.Context, addr string) error {
+	s.setBindHost(addr)
 	s.ctl().EnableInteractiveApproval()
 	srv := &http.Server{
 		Addr:              addr,
@@ -725,6 +816,30 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Path == "" {
 		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+	// The path is client-supplied and otherwise unvalidated: without this
+	// containment check /resume is an arbitrary-file-read primitive (the
+	// parsed content is then served back via GET /history). Same guard as
+	// deleteSession.
+	dir := s.ctl().SessionDir()
+	if dir == "" {
+		http.Error(w, "sessions disabled", http.StatusBadRequest)
+		return
+	}
+	abs, err := filepath.Abs(body.Path)
+	if err != nil {
+		http.Error(w, "invalid session path", http.StatusBadRequest)
+		return
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		http.Error(w, "invalid session dir", http.StatusBadRequest)
+		return
+	}
+	rel, err := filepath.Rel(absDir, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		http.Error(w, "path outside session dir", http.StatusForbidden)
 		return
 	}
 	// Snapshot the current session before switching away.

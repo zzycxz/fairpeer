@@ -950,7 +950,9 @@ async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, acti
   }
 }
 
-export function useController(getProfile?: () => string) {
+// onNotice（可选）：会话恢复等后台操作失败时的用户可见提示通道
+// （SCENARIO_SPEC G2-5——resume 失败不再静默）。
+export function useController(getProfile?: () => string, onNotice?: (msg: string) => void) {
   const statesRef = useRef<TabStates>(new Map());
   // Per-tab last-token timestamp for the stale-stream watchdog. A single global
   // value would cross-talk between tabs: tokens from a background tab's stream
@@ -1050,7 +1052,10 @@ export function useController(getProfile?: () => string) {
     for (let attempt = 0; attempt < 60; attempt += 1) {
       const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
       const tab = tabs.find((candidate) => candidate.id === tabId);
-      if (!tab || tab.ready || tab.startupErr) return;
+      if (!tab || tab.ready) return;
+      // 构建失败不再静默放行：把后端的真实原因抛给调用方（resume 的
+      // toast 会显示它），否则用户只会看到误导性的 "tab is not ready"。
+      if (tab.startupErr) throw new Error(tab.startupErr);
       await new Promise((resolve) => window.setTimeout(resolve, 100));
     }
   }, []);
@@ -1340,7 +1345,12 @@ export function useController(getProfile?: () => string) {
     if (!targetTabId) return;
     if (tabId) await waitForTabReady(tabId);
     const messages = asArray(
-      await (tabId ? app.ResumeSessionForTab(tabId, path) : app.ResumeSession(path)).catch(() => [] as HistoryMessage[]),
+      await (tabId ? app.ResumeSessionForTab(tabId, path) : app.ResumeSession(path)).catch((err: any) => {
+        // G2-5：后端真实原因（tab 未就绪/运行中/路径不匹配）直达用户，
+        // 不再静默返回导致"点了没反应"。
+        onNotice?.(err?.message || String(err));
+        return [] as HistoryMessage[];
+      }),
     );
     if (messages.length === 0) return;
     dispatchTo(targetTabId, { type: "reset" });

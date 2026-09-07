@@ -4,9 +4,12 @@
 // covers usage/cost/cache and the workspace tabs cover files. What stayed is
 // the content nothing else shows — the per-turn history (duration / retries /
 // tool volume / token+cache split) plus a compact stat strip, which also
-// serves cowork mode where no UsageChip exists. Data comes straight from App
-// state (ContextInfo with session telemetry); only the turn facts still poll
-// their own bridge. All visible text is routed through the i18n dictionary.
+// serves cowork mode where no UsageChip exists; the strip carries the two
+// facts cowork can't see anywhere else (context-window pressure bar and
+// session cost). Mounted as the "turns" tab by BOTH docks (coding and
+// cowork). Data comes straight from App state (ContextInfo with session
+// telemetry); only the turn facts still poll their own bridge. All visible
+// text is routed through the i18n dictionary.
 import { useCallback, useEffect, useState } from "react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
@@ -43,13 +46,19 @@ function fmtTokensShort(n: number): string {
   return String(n);
 }
 
+function fmtCost(cost: number, currency?: string): string {
+  const sym = currency || "$";
+  return `${sym}${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(3)}`;
+}
+
 export function ContextPanel({ tabId, context, sessionTokens, refreshKey, busy }: ContextPanelProps) {
   const t = useT();
   const { showToast } = useToast();
   const [compacting, setCompacting] = useState(false);
 
-  // Compact entry for surfaces without the composer UsageChip (cowork mode's
-  // overview tab; the coding-mode turns tab shares it for convenience).
+  // Compact entry for surfaces without the composer UsageChip (the cowork
+  // dock's turns tab is its only entry; the coding-mode tab shares it for
+  // convenience alongside the UsageChip hot-state button).
   const handleCompact = useCallback(() => {
     if (compacting) return;
     setCompacting(true);
@@ -84,16 +93,42 @@ export function ContextPanel({ tabId, context, sessionTokens, refreshKey, busy }
   const tokens = sessionTokens && sessionTokens > 0 ? sessionTokens : context?.sessionTokens ?? 0;
   const requests = context?.requestCount ?? 0;
 
+  // Context-window pressure — cowork mode has no UsageChip, so this card is
+  // its only view of compaction pressure; thresholds mirror the chip (≥85%
+  // hot). Coding mode tolerates the duplication for an at-a-glance summary.
+  const used = context?.used ?? 0;
+  const ctxWindow = context?.window ?? 0;
+  const ctxPct = ctxWindow > 0 ? used / ctxWindow : null;
+  const ctxTone = ctxPct == null ? undefined : ctxPct >= 0.85 ? "warn" : ctxPct >= 0.6 ? "notice" : "good";
+  const cost = context?.sessionCost;
+  // Session token split on hover — the same breakdown the UsageChip detail
+  // shows in coding mode; reasoning only appears when the model emits it.
+  const tokensTitle = context && (context.sessionPromptTokens || context.sessionCompletionTokens)
+    ? `${t("composer.usageDetail.input")} ${(context.sessionPromptTokens ?? 0).toLocaleString()}`
+      + ` · ${t("composer.usageDetail.output")} ${(context.sessionCompletionTokens ?? 0).toLocaleString()}`
+      + (context.sessionReasoningTokens
+        ? ` · ${t("composer.usageDetail.reasoning")} ${context.sessionReasoningTokens.toLocaleString()}`
+        : "")
+    : undefined;
+
   return (
     <div className="context-panel">
       <div className="context-panel__body">
         <section className="context-panel__section">
           <SectionHeading title={t("context.runtimeMetrics")} />
           <div className="context-panel__stats">
-            <MetricCard label={t("context.sessionTokens")} value={tokens > 0 ? tokens.toLocaleString() : "-"} />
-            <MetricCard label={t("context.requests")} value={requests > 0 ? String(requests) : "-"} />
+            <MetricCard
+              label={t("context.context")}
+              value={ctxPct == null ? "-" : `${Math.round(ctxPct * 100)}%`}
+              tone={ctxTone}
+              meter={ctxPct ?? undefined}
+              title={ctxWindow > 0 ? `${used.toLocaleString()} / ${ctxWindow.toLocaleString()} tokens` : undefined}
+            />
+            <MetricCard label={t("context.sessionTokens")} value={tokens > 0 ? tokens.toLocaleString() : "-"} title={tokensTitle} />
             <MetricCard label={t("context.cacheHit")} value={cachePct > 0 ? `${cachePct}%` : "-"} tone="accent" />
+            <MetricCard label={t("context.cost")} value={cost != null && cost > 0 ? fmtCost(cost, context?.sessionCostCurrency) : "-"} />
             <MetricCard label={t("composer.usageDetail.elapsed")} value={elapsedMs > 0 ? fmtDuration(elapsedMs) : "-"} />
+            <MetricCard label={t("context.requests")} value={requests > 0 ? String(requests) : "-"} />
           </div>
           <button
             className="btn btn--small context-panel__compact-btn"
@@ -147,12 +182,17 @@ function SectionHeading({ title, meta }: { title: string; meta?: string }) {
   );
 }
 
-function MetricCard({ label, value, tone }: { label: string; value: string; tone?: "accent" | "good" | "notice" | "warn" }) {
+function MetricCard({ label, value, tone, meter, title }: { label: string; value: string; tone?: "accent" | "good" | "notice" | "warn"; meter?: number; title?: string }) {
   const toneClass = tone ? ` context-panel__metric--${tone}` : "";
   return (
-    <div className={`context-panel__metric${toneClass}`}>
+    <div className={`context-panel__metric${toneClass}`} title={title}>
       <span>{label}</span>
       <strong>{value}</strong>
+      {meter != null && (
+        <i className="context-panel__bar" aria-hidden="true">
+          <i style={{ width: `${Math.min(100, Math.max(0, meter * 100))}%` }} />
+        </i>
+      )}
     </div>
   );
 }

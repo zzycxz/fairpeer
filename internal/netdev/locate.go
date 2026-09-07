@@ -135,10 +135,9 @@ func (m *Manager) Locate(ctx context.Context, target string) LocateResult {
 		}
 		res.Devices = append(res.Devices, name)
 		res.Covered++
-		var lines []string
-		if strings.HasSuffix(cmd, target) { // server-side filtered already
-			lines = strings.Split(r.Output, "\n")
-		}
+		// Client-side match for every vendor: matchLocateLines filters (the
+		// server-side `| include` forms simply pre-filter, never exclude).
+		lines := strings.Split(r.Output, "\n")
 		res.Hits = append(res.Hits, matchLocateLines(name, lines, target)...)
 	}
 	if res.BudgetStop {

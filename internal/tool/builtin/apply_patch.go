@@ -330,6 +330,14 @@ func (a applyPatch) Execute(ctx context.Context, args json.RawMessage) (string, 
 		newContent string
 		changeType string       // "add", "update", "delete", "move"
 		enc        fileenc.Kind // detected encoding to preserve on write (update/move)
+
+		// For moves: whether the destination existed BEFORE this change, and
+		// its content/encoding if so. Rollback uses this to restore the
+		// destination instead of deleting it (os.Remove on a pre-existing
+		// destination would destroy data the patch never owned).
+		moveDestExisted bool
+		moveDestOld     string
+		moveDestEnc     fileenc.Kind
 	}
 	var changes []fileChange
 
@@ -375,10 +383,29 @@ func (a applyPatch) Execute(ctx context.Context, args json.RawMessage) (string, 
 			}
 
 			movePath := ""
+			var moveDestOld string
+			var moveDestEnc fileenc.Kind
+			moveDestExisted := false
 			if hunk.movePath != "" {
 				movePath = resolveIn(a.workDir, hunk.movePath)
 				if err := confine(a.roots, movePath); err != nil {
 					return "", err
+				}
+				// A move onto the file itself is self-destructive: Phase 2
+				// writes the new content to movePath and then os.Remove's the
+				// (identical) source path — deleting what was just written and
+				// reporting success. Reject at validation time.
+				if filepath.Clean(movePath) == filepath.Clean(filePath) {
+					return "", fmt.Errorf("apply_patch verify: update of %s cannot move to itself", filePath)
+				}
+				// Capture a pre-existing destination so rollback can restore
+				// it instead of os.Remove'ing a file the patch never owned.
+				if _, err := os.Stat(movePath); err == nil {
+					destOld, destEnc, rerr := readFileEncoded(movePath)
+					if rerr != nil {
+						return "", fmt.Errorf("apply_patch verify: read move destination %s: %w", movePath, rerr)
+					}
+					moveDestOld, moveDestEnc, moveDestExisted = destOld, destEnc, true
 				}
 			}
 
@@ -393,7 +420,10 @@ func (a applyPatch) Execute(ctx context.Context, args json.RawMessage) (string, 
 					}
 					return ""
 				}()],
-				enc: enc,
+				enc:             enc,
+				moveDestExisted: moveDestExisted,
+				moveDestOld:     moveDestOld,
+				moveDestEnc:     moveDestEnc,
 			})
 		}
 	}
@@ -425,7 +455,16 @@ func (a applyPatch) Execute(ctx context.Context, args json.RawMessage) (string, 
 					restoreWarns = append(restoreWarns, fmt.Sprintf("failed to restore deleted %s: %v", c.path, werr))
 				}
 			case "move":
-				_ = os.Remove(c.movePath)
+				// Only remove the destination when THIS change created it; a
+				// pre-existing destination is restored to its captured content
+				// instead (os.Remove would delete a file the patch never owned).
+				if c.moveDestExisted {
+					if werr := writeFileEncoded(c.movePath, c.moveDestOld, c.moveDestEnc); werr != nil {
+						restoreWarns = append(restoreWarns, fmt.Sprintf("failed to restore move destination %s: %v", c.movePath, werr))
+					}
+				} else {
+					_ = os.Remove(c.movePath)
+				}
 				if werr := writeFileEncoded(c.path, c.oldContent, c.enc); werr != nil {
 					restoreWarns = append(restoreWarns, fmt.Sprintf("failed to restore moved %s: %v", c.path, werr))
 				}
@@ -587,6 +626,9 @@ func (a applyPatch) PreviewFiles(args json.RawMessage) ([]diff.Change, error) {
 			movePath := resolveIn(a.workDir, hunk.movePath)
 			if err := confine(a.roots, movePath); err != nil {
 				return nil, err
+			}
+			if filepath.Clean(movePath) == filepath.Clean(filePath) {
+				return nil, fmt.Errorf("apply_patch verify: update of %s cannot move to itself", filePath)
 			}
 			changes = append(changes, diff.Build(filePath, oldContent, "", diff.Delete))
 			changes = append(changes, diff.Build(movePath, "", newContent, diff.Create))

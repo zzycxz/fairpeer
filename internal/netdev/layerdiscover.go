@@ -310,8 +310,9 @@ func (m *Manager) DiscoverPrecheck(ctx context.Context, vantage string) (*Discov
 
 // DiscoverLayer probes the CONFIRMED subnets through the vantage device's
 // own SSH tunnel (direct-tcpip from its network position). Scope whitelist
-// applies per CIDR at the dial boundary; results record as layer-discover.
-func (m *Manager) DiscoverLayer(ctx context.Context, vantage string, cidrs []string, ports []int) ([]DiscoverHostResult, error) {
+// applies per CIDR at the dial boundary; results record as layer-discover
+// (once — probeHosts records under the threaded source).
+func (m *Manager) DiscoverLayer(ctx context.Context, vantage string, cidrs []string, ports []int) (out []DiscoverHostResult, err error) {
 	if !m.cfg.NetDev.Enabled {
 		return nil, fmt.Errorf("[netdev] is disabled")
 	}
@@ -340,8 +341,17 @@ func (m *Manager) DiscoverLayer(ctx context.Context, vantage string, cidrs []str
 	defer stopRun()
 	run := &DiscoveryRunState{ID: runID, Vantage: d.Name, Ports: ports, Cidrs: cidrs, Status: "running", StartedAt: time.Now().Format(time.RFC3339)}
 	defer func() {
-		if run.Status == "running" && ctx.Err() != nil {
-			run.Status = "paused"
+		// Terminal default: a run must never persist as "running" after the
+		// function exits — ctx-cancelled is "paused" (resumable), anything
+		// else that slipped out mid-flight is "failed" with the reason on the
+		// audit chain (the run state has no free-text field).
+		if run.Status == "running" {
+			if ctx.Err() != nil {
+				run.Status = "paused"
+			} else {
+				run.Status = "failed"
+				_ = AppendAudit(Audit{Time: time.Now(), Device: d.Name, Command: "(discover-layer) run " + runID + " failed", Class: "read", Status: AuditFailure, Error: firstLine(fmt.Sprint(err))})
+			}
 		}
 		_ = SaveDiscoveryRun(run)
 	}()
@@ -358,7 +368,6 @@ func (m *Manager) DiscoverLayer(ctx context.Context, vantage string, cidrs []str
 	}
 	dialer := sshDialer{client: sshClient}
 
-	var out []DiscoverHostResult
 	for _, cidr := range cidrs {
 		cidr = strings.TrimSpace(cidr)
 		if cidr == "" {
@@ -378,13 +387,15 @@ func (m *Manager) DiscoverLayer(ctx context.Context, vantage string, cidrs []str
 			continue
 		}
 		hosts = cacheTTLFilter(hosts, m.cfg.NetDev.Discovery.CacheTTLHours, time.Now())
-		res, err := m.probeHosts(ctx, dialer, hosts, ports)
+		res, err := m.probeHosts(ctx, dialer, hosts, ports, SourceLayer)
 		if err != nil {
 			return out, err
 		}
 		_ = AppendAudit(Audit{Time: time.Now(), Device: d.Name, Command: "(discover-layer) tcp-probe " + cidr, Class: "read", Status: AuditOK})
 		if len(res) > 0 {
-			_ = RecordDiscoveredSwept(SourceLayer, res, ports)
+			// probeHosts already recorded the batch under SourceLayer — the
+			// former second RecordDiscoveredSwept(SourceDiscover…) recorded
+			// every layer lead twice under two sources.
 			ips := make([]string, 0, len(res))
 			for _, h := range res {
 				ips = append(ips, h.IP)

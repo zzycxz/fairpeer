@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // ImportPreview is the human-review diff for one import run.
@@ -199,7 +200,7 @@ func ImportStageFile(content string) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(netdevStateDir(), "import-staged.json")
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+	if err := fileutil.AtomicWriteFile(path, []byte(content), 0o600); err != nil {
 		return "", err
 	}
 	return path, nil

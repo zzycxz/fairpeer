@@ -10,6 +10,7 @@ package event
 
 import (
 	"encoding/json"
+	"sync"
 
 	"github.com/zzycxz/fairpeer/internal/evidence"
 	"fmt"
@@ -18,6 +19,15 @@ import (
 // ItemAdapter wraps a Sink and emits ItemEvents alongside legacy kinds.
 type ItemAdapter struct {
 	inner Sink
+	// mu serializes Emit/Reset against each other. The agent's sink is this
+	// adapter, and emission is NOT single-threaded anymore: parallel writer
+	// batches and background job agents Emit from their own goroutines. The
+	// minted item IDs and the streaming-item cursors are per-adapter state —
+	// without the lock, concurrent Emits mint colliding IDs or splice deltas
+	// into another goroutine's item. Held across both inner emits so a
+	// consumer never observes an Item before its legacy twin, or two items
+	// interleaved.
+	mu sync.Mutex
 	// seq mints stable item IDs (per turn; the agent resets per Run).
 	seq int
 	// current tracks the item ID for kinds that stream (Reasoning, Text)
@@ -39,12 +49,22 @@ func NewItemAdapter(inner Sink) *ItemAdapter {
 	return &ItemAdapter{inner: inner}
 }
 
-// Reset clears per-turn state (call at TurnStarted).
+// Reset clears per-turn state (call at TurnStarted). Safe to call from any
+// goroutine; serialised against in-flight Emits.
 func (a *ItemAdapter) Reset() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.resetLocked()
+}
+
+// resetLocked is Reset without re-taking the lock, for the internal call site
+// in deriveItem (already called with the lock held). Caller MUST hold mu.
+func (a *ItemAdapter) resetLocked() {
 	a.currentAgentMsg = ""
 	a.currentReason = ""
 }
 
+// nextID mints the next stable item ID. Caller MUST hold mu.
 func (a *ItemAdapter) nextID(prefix string) string {
 	a.seq++
 	return fmt.Sprintf("%s-%d", prefix, a.seq)
@@ -52,6 +72,9 @@ func (a *ItemAdapter) nextID(prefix string) string {
 
 // Emit implements Sink: forward the legacy event AND emit the Item form.
 func (a *ItemAdapter) Emit(e Event) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	// Always forward the original.
 	a.inner.Emit(e)
 
@@ -62,11 +85,12 @@ func (a *ItemAdapter) Emit(e Event) {
 	}
 }
 
-// deriveItem maps one legacy event to its ItemEvent form.
+// deriveItem maps one legacy event to its ItemEvent form. Caller MUST hold mu
+// (it mutates the streaming-item cursors via nextID/resetLocked).
 func (a *ItemAdapter) deriveItem(e Event) *ItemEvent {
 	switch e.Kind {
 	case TurnStarted:
-		a.Reset()
+		a.resetLocked()
 		return nil // turn boundary, not a timeline item
 
 	case Reasoning:

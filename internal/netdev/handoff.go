@@ -25,7 +25,9 @@ func (m *Manager) HandoffReport(since time.Time) string {
 		}
 	}
 	for _, f := range fs {
-		if !strings.Contains(f.Title, "已解决") && !strings.HasPrefix(f.Severity, "resolved") && f.CreatedAt.Before(since) {
+		// Unclosed = lifecycle says so (resolved/false-positive); the old
+		// Title/Severity heuristics misfiled resolved findings as open.
+		if f.Status != FindingResolved && f.Status != FindingFalsePos && f.CreatedAt.Before(since) {
 			open = append(open, f)
 		}
 	}

@@ -1,21 +1,26 @@
 import { useEffect, useState, type ReactNode, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { BookOpen, CalendarDays, PanelLeft, Users, SlidersHorizontal } from "lucide-react";
+import { BookOpen, CalendarDays, Mail, PanelLeft, Users, SlidersHorizontal } from "lucide-react";
 
 import { ProfileSegmented } from "../components/AppChrome";
 import { useT } from "../lib/i18n";
 import { app, onExpertsCollab } from "../lib/bridge";
 import { CalendarTaskPanel } from "../components/cowork/CalendarTaskPanel";
 import logoSymbol from "../assets/logo-symbol.png";
+import { requestBrowserMirrorFocus } from "../lib/browserMirror";
+import { BrowserWorkbench } from "../components/netdev/BrowserWorkbench";
 import { RagPanel } from "../components/cowork/RagPanel";
 import { PreferencePanel } from "../components/cowork/PreferencePanel";
+import { MousePointerClick } from "lucide-react";
 import { ExpertPanel } from "../components/cowork/ExpertPanel";
-import { CoworkDock } from "../components/cowork/CoworkDock";
+import { CoworkDock, requestCoworkDockTab } from "../components/cowork/CoworkDock";
 import type { ContextInfo } from "../lib/types";
 
-export type CoWorkPanel = "taskCenter" | "preference" | "calendarTask" | "rag" | "experts";
+export type CoWorkPanel = "taskCenter" | "preference" | "calendarTask" | "rag" | "experts" | "skills";
 
 export interface CoWorkLayoutProps {
   mainNode?: ReactNode;
+  /** 插入文本到对话输入框（浏览器面板"交给 AI"等入口）。 */
+  onInsertComposer?: (text: string) => void;
   footerNode?: ReactNode;
   terminalNode?: ReactNode;
   // Global banners (startup error / update notice) — rendered at the top of
@@ -44,6 +49,9 @@ export interface CoWorkLayoutProps {
   dockMaximized?: boolean;
   dockOnClose?: () => void;
   dockOnToggleMaximized?: () => void;
+  // 侧栏「邮件」直达：dock 可能被用户关掉，先请求重开再切页签
+  //（netdev 侧栏 onDockOpen 同款语义）。
+  onDockOpen?: () => void;
   // Right dock width resizer — the cowork dock shares the same width state and
   // drag logic as the coding-mode workspace panel, so App.tsx hands the same
   // handlers in. Without these the cowork dock had no resizer and couldn't be
@@ -75,6 +83,7 @@ export interface CoWorkLayoutProps {
 
 export function CoWorkLayout({
   mainNode,
+  onInsertComposer,
   footerNode,
   terminalNode,
   bannersNode,
@@ -91,6 +100,7 @@ export function CoWorkLayout({
   dockMaximized = false,
   dockOnClose,
   dockOnToggleMaximized,
+  onDockOpen,
   dockWidth,
   dockMinWidth,
   dockMaxAriaWidth,
@@ -111,6 +121,44 @@ export function CoWorkLayout({
 }: CoWorkLayoutProps) {
   const t = useT();
   const [activePanel, setActivePanel] = useState<CoWorkPanel>("taskCenter");
+  // 浏览器工作台常驻挂载（切走只藏不卸，保留观察窗/页卡状态）。
+  const [browserBenchEverOpened, setBrowserBenchEverOpened] = useState(false);
+
+  // Esc 退出浏览器工作台回任务中心（对齐原运维工作台的 Esc 语义）。
+  useEffect(() => {
+    if (activePanel !== "skills") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
+        setActivePanel("taskCenter");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activePanel]);
+
+  // 进入浏览器工作台时自动展开右 dock 的 browser 页签（控制台面板就位——
+  // 复用既有 mirror-focus 通道：开 dock + 切 browser 页）。
+
+  // 迁移接线（浏览器归办公 2026-09-06）：BrowserConsolePanel/BrowserSkillEditor
+  // 里的"打开观察窗""去重录"按钮派发 fairpeer:netdev-bench detail="browser"——
+  // 原运维监听已撤，办公侧接管：切到浏览器工作台页签。
+  useEffect(() => {
+    const onBench = (e: Event) => {
+      if ((e as CustomEvent<string>).detail === "browser") {
+        setBrowserBenchEverOpened(true);
+        setActivePanel("skills");
+        requestBrowserMirrorFocus();
+        onDockOpen?.();
+      }
+    };
+    window.addEventListener("fairpeer:netdev-bench", onBench);
+    return () => window.removeEventListener("fairpeer:netdev-bench", onBench);
+  }, []);
+
+  // 工作台激活时通知面板收起内联镜像（一屏一画面；netdev 侧同款机制迁来）。
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("fairpeer:netdev-bench-changed", { detail: activePanel === "skills" ? "browser" : "other" }));
+  }, [activePanel]);
   const [preferenceOpen, setPreferenceOpen] = useState(false);
 
   // When an expert-team run kicks off from the chat (the agent called
@@ -232,6 +280,17 @@ export function CoWorkLayout({
             <SlidersHorizontal size={14} />
             <span>{t("cowork.preference") || "办公偏好"}</span>
           </button>
+          {/* S7-1（SCENARIO_SPEC）：文员/办公技能运行器——浏览器技能库+一键试运行，
+                与运维浏览器面板同组件（单源），零 AI 门槛执行报表填报/数据导出等录好的技能。 */}
+          <button
+            type="button"
+            className={`cowork-sidebar__item ${activePanel === "skills" ? "cowork-sidebar__item--active" : ""}`}
+            onClick={() => { setBrowserBenchEverOpened(true); setActivePanel("skills"); requestBrowserMirrorFocus(); onDockOpen?.(); }}
+            title={t("cowork.panel.skillsTip")}
+          >
+            <MousePointerClick size={14} />
+            <span>{t("cowork.panel.skills")}</span>
+          </button>
           <button
             className={`cowork-sidebar__item ${activePanel === "experts" ? "cowork-sidebar__item--active" : ""}`}
             onClick={() => {
@@ -241,6 +300,22 @@ export function CoWorkLayout({
           >
             <Users size={14} />
             <span>{t("cowork.expert") || "专家团"}</span>
+          </button>
+          {/* 邮件直达（侧栏第 6 项，2026-09-06）：dock 的邮件页签是办公的
+              核心面（收件箱+探针），此前只能经 dock 页签到达。rag 面板激活
+              时 DefaultDock 未挂载——先回工作台再请求，pending 机制兜底送达。 */}
+          <button
+            type="button"
+            className="cowork-sidebar__item"
+            onClick={() => {
+              onDockOpen?.();
+              setActivePanel("taskCenter");
+              requestCoworkDockTab("mail");
+            }}
+            title={t("cowork.panel.mailTip")}
+          >
+            <Mail size={14} />
+            <span>{t("coworkDock.mail")}</span>
           </button>
           <button
             className={`cowork-sidebar__item ${activePanel === "calendarTask" ? "cowork-sidebar__item--active" : ""}`}
@@ -296,6 +371,12 @@ export function CoWorkLayout({
         {activePanel === "rag" && (
           <RagPanel />
         )}
+
+        {/* S7+/浏览器归属办公（用户定稿 2026-09-06）：完整浏览器工作台——
+            交互/记录/技能库/巡检四页签 + 观察窗镜像（自运维界面迁入，单源组件）。 */}
+        {browserBenchEverOpened && (
+          <BrowserWorkbench hidden={activePanel !== "skills"} onClose={() => setActivePanel("taskCenter")} />
+        )}
       </section>
 
       {/* Right dock width resizer — mirrors the coding-mode
@@ -324,6 +405,7 @@ export function CoWorkLayout({
           cwd={dockCwd}
           maximized={dockMaximized}
           onClose={dockOnClose ?? (() => {})}
+          onInsertComposer={onInsertComposer}
           onToggleMaximized={dockOnToggleMaximized ?? (() => {})}
           mode={activePanel === "rag" ? "rag" : "default"}
           onEntityClick={(name) => {

@@ -136,12 +136,16 @@ export function TerminalPanel({
   };
 
   // Mirror the bash tool events of OUR in-flight RunShell call into the
-  // running terminal's history. RunShell is serialized, so at most one tab is
-  // running at a time; events are routed by that flag, not tab identity.
+  // running terminal's history. Correlation is by the tool id: user-initiated
+  // shells ("!" / RunShell) carry "shell-"-prefixed ids (see useController's
+  // isShellTool), while agent-initiated bash calls use provider ids like
+  // "call_xxx". Routing by the "some tab is running" flag alone would pour the
+  // agent's own bash output into the user's console tab whenever both ran.
   useEffect(() => {
     return onEvent((e: WireEvent) => {
       const tool: WireTool | undefined = e.tool;
       if (!tool || tool.name !== "bash") return;
+      if (!tool.id || !tool.id.startsWith("shell-")) return;
       const runningTerm = termsRef.current.find((term) => term.running);
       if (!runningTerm) return;
       if (e.kind === "tool_progress") {

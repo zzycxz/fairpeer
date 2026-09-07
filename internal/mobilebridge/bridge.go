@@ -378,7 +378,8 @@ func (b *Bridge) handleOffer(msg SignalMsg, from *SignalClient) {
 	})
 	conn, err := NewConn(b.sPriv, b.sPub, b.pairing, router, b.audit)
 	if err != nil {
-		b.mu.Unlock()
+		// The lock was already released above (max-connections check);
+		// unlocking again here would panic with "unlock of unlocked mutex".
 		b.audit.Error("newconn", msg.From, err)
 		return
 	}
@@ -654,7 +655,9 @@ func (b *Bridge) ForwardEvent(tabID string, wireEventJSON []byte) {
 	// NR/AUDIT-4: seq 盖进事件本体——C 侧据此记录每 tab 的最新序号，
 	// resync 发 sinceSeq 才能落在同一序号空间（此前 C 用本地计数器，
 	// 两个空间对不上导致永远 resync_full 全量拉）。
-	stamped := stampSeq(wireEventJSON, r.seq)
+	// audit B-1: 顺带盖事件归属 tab——C 端按此记 per-tab resync 游标、
+	// 分桶缓存（原仅盖 seq，C 只能按 UI currentTab 猜，多 tab 必串号）。
+	stamped := stampSeq(wireEventJSON, r.seq, tabID)
 	r.entries = append(r.entries, ringEntry{seq: r.seq, json: stamped})
 	if len(r.entries) > ringCap {
 		r.entries = r.entries[len(r.entries)-ringCap:]
@@ -762,12 +765,13 @@ var _ SignalHandler = (*Bridge)(nil)
 
 // stampSeq 把 ring seq 写进 wireEvent JSON 的顶层 "seq" 字段（原值保留
 // 兼容）。事件体 ≤32KB，chat 频率下 decode/encode 成本可忽略。
-func stampSeq(wire []byte, seq uint64) []byte {
+func stampSeq(wire []byte, seq uint64, tabID string) []byte {
 	var m map[string]any
 	if json.Unmarshal(wire, &m) != nil {
 		return wire // 非 JSON（不应发生）：原样转发不阻塞
 	}
 	m["seq"] = seq
+	m["tab"] = tabID
 	out, err := json.Marshal(m)
 	if err != nil {
 		return wire

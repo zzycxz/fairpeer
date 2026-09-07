@@ -25,6 +25,18 @@ var (
 	remoteErr  error
 )
 
+// ResetSharedRemoteNode drops the cached embedded node so the next
+// SharedRemoteNode call re-opens identity + ledger from disk. Used after the
+// desktop GUI creates/joins a domain within one process lifetime — the
+// sync.Once would otherwise pin the pre-init "未入域" error until restart.
+// Not synchronized with concurrent SharedRemoteNode callers: the desktop
+// buttons that trigger it are user-paced, and a racing re-open is harmless.
+func ResetSharedRemoteNode() {
+	remoteOnce = sync.Once{}
+	remoteNode = nil
+	remoteErr = nil
+}
+
 // SharedRemoteNode lazily opens this host's embedded trust-domain node:
 // identity + persisted ledger + peers from [trustdomain].bootstrap_peers.
 // One instance per process (the CLI daemon and agent tools must share it).

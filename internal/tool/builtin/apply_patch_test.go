@@ -333,6 +333,106 @@ func TestApplyPatch_EmptyPatchText(t *testing.T) {
 	}
 }
 
+// TestApplyPatch_UpdateMoveToSamePathRejected guards the audit case: an Update
+// File with a Move to the SAME path used to write the new content to movePath
+// and then os.Remove the (identical) source — deleting what was just written
+// while reporting success. It must now be rejected in validation, in both
+// Execute and PreviewFiles, with the file left untouched.
+func TestApplyPatch_UpdateMoveToSamePathRejected(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "same.txt")
+	original := "line1\nline2\n"
+	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	patch := `*** Begin Patch
+*** Update File: ` + filePath + `
+*** Move to: ` + filePath + `
+@@
+ line1
+-line2
++line2 changed
+*** End Patch`
+
+	a := applyPatch{workDir: dir}
+	if _, err := a.Execute(context.TODO(), mustJSON(patch)); err == nil {
+		t.Fatal("update+move to the same path must be rejected")
+	} else if !strings.Contains(err.Error(), "move to itself") {
+		t.Fatalf("error should explain the self-move, got: %v", err)
+	}
+	if _, err := a.PreviewFiles(mustJSON(patch)); err == nil {
+		t.Fatal("PreviewFiles must reject a self-move too")
+	}
+
+	// The file must be untouched (the old flow reported success AND deleted it).
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != original {
+		t.Fatalf("file must be unchanged, got: %q", content)
+	}
+}
+
+// TestApplyPatch_RollbackRestoresPreexistingMoveDest guards the rollback path:
+// when a move lands on a PRE-EXISTING destination and a later change fails,
+// rollback must restore the destination's original content — not os.Remove it
+// (which destroyed a file the patch never owned).
+func TestApplyPatch_RollbackRestoresPreexistingMoveDest(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.go")
+	dst := filepath.Join(dir, "dst.go")
+	victim := filepath.Join(dir, "victim.go")
+	srcBody := "package main\n\nfunc src() {}\n"
+	dstBody := "package main\n\nfunc destOriginal() {}\n"
+	victimBody := "package main\n\nfunc victim() {\n\tok()\n}\n"
+	for p, body := range map[string]string{src: srcBody, dst: dstBody, victim: victimBody} {
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	patch := `*** Begin Patch
+*** Update File: ` + src + `
+*** Move to: ` + dst + `
+@@
+-func src() {}
++func src() { renamed() }
+*** Update File: ` + victim + `
+@@
+-func victim() {
++func victim() {
+ 	ok()
+-}
++this is not valid go ]]
+*** End Patch`
+
+	a := applyPatch{workDir: dir}
+	_, err := a.Execute(context.TODO(), mustJSON(patch))
+	if err == nil {
+		t.Fatal("patch with a syntax-broken final hunk must fail")
+	}
+
+	// src must be restored (move rolled back).
+	content, rerr := os.ReadFile(src)
+	if rerr != nil {
+		t.Fatalf("src must exist after rollback: %v", rerr)
+	}
+	if !strings.Contains(string(content), "func src()") {
+		t.Fatalf("src not restored: %q", content)
+	}
+	// dst must still hold ITS original content — not be deleted, not hold the
+	// moved content.
+	content, rerr = os.ReadFile(dst)
+	if rerr != nil {
+		t.Fatalf("pre-existing move destination must survive rollback: %v", rerr)
+	}
+	if string(content) != dstBody {
+		t.Fatalf("destination must be restored to its original content, got: %q", content)
+	}
+}
+
 func mustJSON(patchText string) []byte {
 	b, _ := json.Marshal(map[string]string{"patchText": patchText})
 	return b

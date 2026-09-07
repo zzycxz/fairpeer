@@ -1,0 +1,29 @@
+# 网段先验表（BLUETEAM_SKILL_SPEC §5.2 表1）——netdev-seccheck-auto 入口=网段 的
+# L3/L4 阶梯数据。引擎（body 的调度逻辑）读本表；知识可独立更新、可被用户
+# user-knowledge/ 同名文件覆盖。schema 见 knowledge.go 的 validateSegmentPriors。
+version: 1
+source: builtin
+# L3 定点指纹：网关候选的探测次序（先验：绝大多数段的网关在两端）。
+gateway_candidates: [".1", ".254", ".249", ".2", ".253"]
+# L4 微采样：按信息量排的点位选择器（.1 之外抽基础设施区一点、中段一点、
+# 末端一点、随机一点；命中的"分布形状"直接读出段角色）。
+sample_points: [".1", ".2-.19", ".100", ".254", "random"]
+# 验证闸门：≥2 活 = 段入地图；0 活 = 标"证据不足"即止，绝不重扫。
+min_alive: 2
+# TTL 解读表（ping 读 TTL 定跳数/OS 家族）。
+ttl_map:
+  "64": "Linux 直连"
+  "128": "Windows 直连"
+  "127": "有 NAT/L3（隔一跳）"
+  "63": "隔一跳路由"
+# 段职能指纹 → 动作（收尾路由）。
+role_signals:
+  - ports: [445, 88]
+    role: "域段"
+    action: "优先核查队列（域控/认证面）"
+  - printer_oui_dense: true
+    role: "办公段"
+    action: "跳过（DHCP 池，低价值）"
+  - snmp_community_hit: true
+    role: "可读表段"
+    action: "转 L2 深挖（display 路由表/ARP）"

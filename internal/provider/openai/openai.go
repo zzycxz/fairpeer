@@ -301,8 +301,17 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 			// separate "audio" capability flag to gate on.
 			if m.Role == provider.RoleUser {
 				if parts, ok := m.Content.([]provider.ContentPart); ok {
-					if (ModelSupportsVision(c.model, c.vision) && hasImageParts(parts)) || hasAudioParts(parts) {
+					if !ModelSupportsVision(c.model, c.vision) {
+						// No vision: image_url parts must never reach the wire
+						// for this model — strip them (text and audio stay).
+						parts = stripImageParts(parts)
+					}
+					if hasImageParts(parts) || hasAudioParts(parts) {
 						cm.Content = imageContentParts(parts, c.visionDetail)
+					} else {
+						// Text-only (possibly after the strip above): emit the
+						// text parts directly.
+						cm.Content = textContentParts(parts)
 					}
 				}
 			}
@@ -324,8 +333,19 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		Tools:         tools,
 		Stream:        true,
 		StreamOptions: &streamOptions{IncludeUsage: true},
-		Temperature:   req.Temperature,
 		MaxTokens:     req.MaxTokens,
+	}
+	// Temperature: an explicit value (TemperatureExplicit, including a pinned
+	// 0) goes verbatim; a plain non-zero float means "configured" and is sent
+	// as-is; 0/unset means "provider default" and omits the field entirely —
+	// a float64+omitempty would silently drop a deliberate 0, hence the
+	// pointer on the wire struct.
+	switch {
+	case req.TemperatureExplicit != nil:
+		out.Temperature = req.TemperatureExplicit
+	case req.Temperature != 0:
+		v := req.Temperature
+		out.Temperature = &v
 	}
 	// Cache-affinity routing (upgrade spec 4-6): same conversation → same
 	// shard. The API caps the key at 64 chars; truncate by runes to stay valid.
@@ -338,10 +358,15 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		if name == "" {
 			name = "result"
 		}
-		out.ResponseFormat = &chatResponseFormat{
-			Type:       "json_schema",
-			JSONSchema: chatJSONSchemaFmt{Name: name, Schema: req.ResponseSchema},
+		fmtv := chatJSONSchemaFmt{Name: name, Schema: req.ResponseSchema}
+		// strict=true only when the schema itself qualifies (closed objects,
+		// every property required — see schema_strict.go). Sending strict with
+		// a non-conforming schema makes the API reject the whole request;
+		// omitting it just relaxes the guarantee.
+		if schemaStrictCompatible(req.ResponseSchema) {
+			fmtv.Strict = true
 		}
+		out.ResponseFormat = &chatResponseFormat{Type: "json_schema", JSONSchema: fmtv}
 	}
 	switch {
 	case c.minimax:
@@ -579,7 +604,9 @@ type chatRequest struct {
 	Tools           []chatTool     `json:"tools,omitempty"`
 	Stream          bool           `json:"stream"`
 	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
-	Temperature     float64        `json:"temperature,omitempty"`
+	// Temperature is a pointer so an explicit 0 (deterministic decoding) can
+	// be expressed on the wire; nil omits the field (endpoint default).
+	Temperature     *float64        `json:"temperature,omitempty"`
 	MaxTokens       int            `json:"max_tokens,omitempty"`
 	ReasoningEffort string         `json:"reasoning_effort,omitempty"` // OpenAI standard
 	Thinking        *thinkingMode  `json:"thinking,omitempty"`
@@ -599,7 +626,10 @@ type chatResponseFormat struct {
 type chatJSONSchemaFmt struct {
 	Name   string          `json:"name"`
 	Schema json.RawMessage `json:"schema"`
-	Strict bool            `json:"strict"`
+	// Strict opts into OpenAI's strict structured outputs. Omitted (never
+	// false) unless the schema is verified strict-compatible — the API 400s
+	// on a strict flag paired with a non-conforming schema.
+	Strict bool `json:"strict,omitempty"`
 }
 
 type thinkingMode struct {
@@ -740,6 +770,33 @@ func imageContentParts(parts []provider.ContentPart, detail string) []chatConten
 					},
 				})
 			}
+		}
+	}
+	return out
+}
+
+// stripImageParts returns parts without any image_url entries — used when the
+// target model has no vision, so image content never reaches the wire (text
+// and audio parts pass through).
+func stripImageParts(parts []provider.ContentPart) []provider.ContentPart {
+	out := make([]provider.ContentPart, 0, len(parts))
+	for _, p := range parts {
+		if p.Type != "image_url" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// textContentParts keeps only the text parts of a multimodal message, dropping
+// image and audio. Used when the target model can't accept them (vision
+// disabled, no audio): the wire contract for such models is text-only content
+// — raw image_url parts must not reach the request body.
+func textContentParts(parts []provider.ContentPart) []chatContentPart {
+	out := make([]chatContentPart, 0, len(parts))
+	for _, p := range parts {
+		if p.Type == "text" {
+			out = append(out, chatContentPart{Type: "text", Text: p.Text})
 		}
 	}
 	return out

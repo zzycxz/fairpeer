@@ -148,7 +148,7 @@ func TestRestoreVerifyProposalE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != ProposalDone || !got.Steps[0].Applied {
+	if got.Status != ProposalWatching || !got.Steps[0].Applied { // full success → observation period
 		t.Fatalf("status=%s step=%+v", got.Status, got.Steps[0])
 	}
 	cur, _ := simFSGet("/etc/nginx/nginx.conf")

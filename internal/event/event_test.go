@@ -255,3 +255,46 @@ func TestFuncSinkForwardsEachConcurrentEmit(t *testing.T) {
 		t.Errorf("count = %d, want 100", count)
 	}
 }
+
+// --- ItemAdapter ---
+
+// The agent's sink IS the ItemAdapter, and emission is not single-threaded
+// anymore: parallel writer batches and background job agents Emit from their
+// own goroutines. The adapter's seq/cursor state must survive that. Under
+// `go test -race` the unlocked adapter fails this outright; the unique-ID
+// assertion also catches the user-visible damage (two items sharing one ID)
+// without -race.
+func TestItemAdapterConcurrentEmitMintsUniqueIDs(t *testing.T) {
+	var mu sync.Mutex
+	seen := make(map[string]bool)
+	inner := FuncSink(func(e Event) {
+		if e.Kind != Item || e.Item == nil || e.Item.Phase != ItemStarted {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if seen[e.Item.ItemID] {
+			t.Errorf("duplicate item ID minted: %s", e.Item.ItemID)
+		}
+		seen[e.Item.ItemID] = true
+	})
+	adapter := NewItemAdapter(inner)
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 50; i++ {
+				adapter.Emit(Event{Kind: Notice, Text: "hi"})
+			}
+		}()
+	}
+	wg.Wait()
+	mu.Lock()
+	defer mu.Unlock()
+	// Every Notice mints a fresh item, so 8×50 goroutine-local emissions must
+	// yield exactly 400 distinct IDs.
+	if len(seen) != 400 {
+		t.Errorf("minted %d unique item IDs, want 400", len(seen))
+	}
+}

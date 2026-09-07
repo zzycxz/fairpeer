@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // topoimport.go — T2a: the draw.io design-import pipeline (spec §3).
@@ -76,7 +78,10 @@ func SaveTopologyDesign(d *TopologyDesign) error {
 		return err
 	}
 	StateEventSnap(StateEventTopo, "", StateActorUser, designFile())
-	return os.WriteFile(designFile(), b, 0o600)
+	if err := os.MkdirAll(filepath.Dir(designFile()), 0o700); err != nil {
+		return err
+	}
+	return fileutil.AtomicWriteFile(designFile(), b, 0o600)
 }
 
 // LoadTopologyDesign returns the stored design, or nil when none exists.

@@ -763,6 +763,8 @@ export default function App() {
   // the topic to the active profile without stale-closure issues.
   const profileRef = useRef<"dev" | "cowork" | "netdev">("dev");
   const getProfile = useCallback(() => profileRef.current, []);
+  // 提前到 useController 之前声明：resume 等后台失败提示经它注入（G2-5）。
+  const { showToast } = useToast();
   const {
     state,
     activeTabId,
@@ -801,7 +803,7 @@ export default function App() {
     reorderTabs,
     syncActiveTab,
     ensureBlankTab,
-  } = useController(getProfile);
+  } = useController(getProfile, showToast);
   const { locale, setPref: setLocalePref } = useI18n();
   const t = useT();
   const [modesByTab, setModesByTab] = useState<Record<string, Mode>>({});
@@ -861,7 +863,6 @@ export default function App() {
   const [loopOpen, setLoopOpen] = useState(false);
   const [paletteSessions, setPaletteSessions] = useState<SessionMeta[]>([]);
   const [paletteCapabilities, setPaletteCapabilities] = useState<CapabilitiesView | null>(null);
-  const { showToast } = useToast();
   const confirm = useConfirm();
   const [sidebarImConnections, setSidebarImConnections] = useState<SidebarImConnection[]>([]);
   const [imTopicSources, setImTopicSources] = useState<Record<string, SidebarImTopicSource>>({});
@@ -1440,6 +1441,20 @@ export default function App() {
   useEffect(() => {
     refreshSidebarSessions();
   }, [coworkActive, netdevActive, refreshSidebarSessions]);
+  // G2-2：会话落盘事件驱动刷新——新会话完成首轮即入"最近会话"，不必切
+  // 页签。按当前 profile 过滤（后端事件带写入方 profile），300ms 防抖。
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.runtime) return;
+    let timer: number | undefined;
+    const off = window.runtime.EventsOn("session:saved", (payload: unknown) => {
+      const savedProfile = String((payload as { profile?: string } | null)?.profile ?? "").toLowerCase();
+      const current = profileRef.current;
+      if (savedProfile && current && savedProfile !== current) return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void refreshSidebarSessions(), 300);
+    });
+    return () => { window.clearTimeout(timer); off(); };
+  }, [refreshSidebarSessions]);
   // Project tree topic IDs for deduplication: sessions already visible in the
   // tree are hidden from the "Recent" list to avoid showing the same entry twice.
   const [projectTreeTopicIds, setProjectTreeTopicIds] = useState<Set<string>>(new Set());
@@ -2050,6 +2065,9 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const poll = () => {
+      // Idle guard: the queue strip only matters mid-turn; skip the bridge
+      // round-trip when no turn is running (stale items are cleared below).
+      if (!queuedActiveRef.current) return;
       app.QueuedMessages()
         .then((q) => { if (!cancelled) setQueuedMsgs(q ?? {}); })
         .catch(() => {});
@@ -2763,6 +2781,13 @@ export default function App() {
           targetTab = await openProjectTab(session.workspaceRoot, session.topicId);
         } else if (scope === "global" && session.topicId) {
           targetTab = await openGlobalTab(session.topicId);
+        } else if (!session.topicId && !session.isExpert) {
+          // Orphan session: written by a blank-topic tab (the pre-repair
+          // restore re-land), so it has scope/root/profile but no topic and
+          // no tree node to open. Fall back to a blank tab on the session's
+          // own root+profile — its controller session dir matches where the
+          // transcript lives, so resume swaps it in directly.
+          targetTab = await ensureBlankTab("project", session.workspaceRoot || "", session.profile || profileRef.current);
         } else {
           throw new Error(scope === "global" && !session.topicId
             ? t("history.failedOpenSession")
@@ -2774,15 +2799,19 @@ export default function App() {
         setTabRevealSignal((signal) => signal + 1);
       } catch (err: any) {
         setHistView(null);
-        if (scope === "project" && session.workspaceRoot) {
+        if (err?.message) {
+          // Surface the backend's real reason (e.g. 项目属于其他模式) instead
+          // of burying it under a generic "workspace does not exist".
+          showToast(err.message);
+        } else if (scope === "project" && session.workspaceRoot) {
           const name = workspaceDisplayName(session.workspaceRoot);
           showToast(t("history.failedOpenProject", { name, path: session.workspaceRoot }));
         } else {
-          showToast(err?.message || String(err));
+          showToast(String(err));
         }
       }
     },
-    [openGlobalTab, openProjectTab, refreshTabMetas, state.running, resumeSession, t, showToast],
+    [ensureBlankTab, openGlobalTab, openProjectTab, profileRef, refreshTabMetas, state.running, resumeSession, t, showToast],
   );
 
   // Command palette: ⌘K / Ctrl+K opens a fuzzy navigator over commands and
@@ -2876,7 +2905,7 @@ export default function App() {
     }));
 
     return [...cmds, ...skillItems, ...mcpItems, ...sessionItems];
-  }, [t, paletteSessions, paletteCapabilities, handleNewTab, openAllHistory, openTrash, onResumeSession]);
+  }, [t, paletteSessions, paletteCapabilities, handleNewTab, openAllHistory, openTrash, onResumeSession, netdevActive]);
   // Delete / rename act on disk, then re-fetch so the panel reflects the change.
   const onDeleteSession = useCallback(
     async (path: string) => {
@@ -3507,6 +3536,7 @@ ${t("remote.uncPromptBody", { path: picked })}
         {coworkActive && (
           <CoWorkLayout
           onPickProject={openProfileProject}
+          onInsertComposer={addWorkspaceTextToComposer}
           onAddProject={() => { void switchFolder(); }}
           onSwitchMode={(mode) => { void switchProfile(mode).catch(() => { /* revert handled in switchProfile */ }); }}
             mainNode={mainNode}
@@ -3524,6 +3554,7 @@ ${t("remote.uncPromptBody", { path: picked })}
             dockCwd={state.meta?.cwd}
             dockMaximized={workspacePanelMaximized}
             dockOnClose={() => closeWorkspacePanel()}
+            onDockOpen={() => setCoworkDockOpen(true)}
             dockOnToggleMaximized={() => {
               closeTransientOverlays();
               setWorkspacePanelMaximized((value) => !value);

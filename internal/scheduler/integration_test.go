@@ -125,7 +125,7 @@ func TestIntegrationSchedulerMatrix(t *testing.T) {
 		// every 1m 循环任务（调度器最小间隔 1m，防热循环）。backdate 到 2s 后触发首次，
 		// 验证首次触发后定时器重新武装（NextRun 被重算且 nextTimer 非 nil）。
 		_, err := s.Create(ScheduledTask{
-			Name: "心跳", Expression: "every 1m", Prompt: "beat", OutputMode: "notify",
+			Name: "心跳", Expression: "every 1m", Prompt: "beat", OutputMode: "notify", ConfirmHighFrequency: true,
 		})
 		if err != nil {
 			t.Fatal(err)

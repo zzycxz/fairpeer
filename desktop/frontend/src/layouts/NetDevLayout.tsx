@@ -1,7 +1,9 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { AlertTriangle, Activity, BookOpen, ClipboardCheck, FileText, HeartPulse, LayoutDashboard, MousePointerClick, Network, PanelLeft, ScanSearch, ScrollText, Server, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { PreferencePanel } from "../components/cowork/PreferencePanel";
+import { AlertTriangle, Activity, BookOpen, ClipboardCheck, FileText, HeartPulse, LayoutDashboard, Network, PanelLeft, ScrollText, Server, SlidersHorizontal } from "lucide-react";
 import { t as tt } from "../lib/i18n";
 import { app, onNetdevHealth, onNetdevLive, onNetdevFindingSaved } from "../lib/bridge";
+import { WriteAuthLayer } from "../components/netdev/WriteAuthLayer";
 import { ProfileSegmented } from "../components/AppChrome";
 import { useConfirm } from "../lib/confirm";
 import { useToast } from "../lib/toast";
@@ -11,12 +13,10 @@ import { LiveOpsPanel } from "../components/netdev/LiveOpsPanel";
 import { LogPanel } from "../components/netdev/LogPanel";
 import { LogWorkbench } from "../components/netdev/LogWorkbench";
 import { SecWorkbench } from "../components/netdev/SecWorkbench";
-import { BrowserWorkbench } from "../components/netdev/BrowserWorkbench";
 import { CutoverView } from "../components/netdev/CutoverView";
 import { TemplateCard } from "../components/netdev/TemplateCard";
 import { SrvConfCard } from "../components/netdev/SrvConfCard";
 import { HealthPanel } from "../components/netdev/HealthPanel";
-import { BrowserConsolePanel } from "../components/netdev/BrowserConsolePanel";
 import { VulnScanPanel } from "../components/netdev/VulnScanPanel";
 import { pushVulnScanFinding } from "../lib/vulnScanState";
 import { ManualPanel } from "../components/netdev/ManualPanel";
@@ -26,7 +26,7 @@ import { StateHistoryPanel } from "../components/netdev/StateHistoryPanel";
 import { AlertSetupWizard } from "../components/netdev/AlertSetupWizard";
 import { TopoIcon, topoRoleKey } from "../components/netdev/TopoIcon";
 import { DockTabs, useDockTabState } from "../components/DockTabs";
-import type { NetDevSettingsView, NetDevDeviceHealth, NetDevFinding, NetDevAggregatedFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph, NetDevBackupVersion, NetDevCutoverRun, NetDevDiscoveredHost, NetDevTopoImportPreview, NetDevAttackPathReport, NetDevDiscoverPlan, NetDevDiscoveryRunState, NetDevOverviewSnapshot, NetDevTopoReconcile } from "../lib/types";
+import type { NetDevSettingsView, NetDevDeviceHealth, NetDevFinding, NetDevAggregatedFinding, NetDevProposal, NetDevAuditEntryView, NetDevTopologyGraph, NetDevBackupVersion, NetDevCutoverRun, NetDevDiscoveredHost, NetDevTopoImportPreview, NetDevAttackPathReport, NetDevDiscoverPlan, NetDevDiscoveryRunState, NetDevOverviewSnapshot, NetDevTopoReconcile, NetDevOpStep } from "../lib/types";
 import { useT } from "../lib/i18n";
 import logoSymbol from "../assets/logo-symbol.png";
 import { Markdown } from "../components/Markdown";
@@ -229,10 +229,10 @@ const REDFISH_QUICK: { label: string; path: string }[] = [
 
 type QuickResult = { command: string; output: string; isError: boolean; refused?: string; refusedUnknown?: boolean };
 // ?bench=<workbench> deep-links the main-area workbench (mirror of ?dock=).
-function benchParam(): "logs" | "sec" | "dash" | "browser" | null {
+function benchParam(): "logs" | "sec" | "dash" | null {
   try {
     const v = new URLSearchParams(window.location.search).get("bench");
-    return v === "logs" || v === "sec" || v === "dash" || v === "browser" ? v : null;
+    return v === "logs" || v === "sec" || v === "dash" ? v : null;
   } catch { return null; }
 }
 // ?screen=<dash-screen> + ?finding=<id> deep-link the dash shell (§4.4 入口 4).
@@ -243,7 +243,7 @@ function dashScreenParam(): DashScreen | null {
   } catch { return null; }
 }
 
-type DockTab = "overview" | "live" | "devices" | "findings" | "proposals" | "audit" | "logs" | "health" | "browser" | "manual";
+type DockTab = "overview" | "live" | "devices" | "findings" | "proposals" | "audit" | "logs" | "health" | "manual";
 
 // C2.1 结果卡（completion-spec §3.1）：全网动作的成功/警告回执——中性样式，
 // 可关闭，可一键跳转对应页签。setErr 只留给真实错误。
@@ -277,7 +277,7 @@ export function findingMatchesJump(f: NetDevFinding, filter: string): boolean {
   if (q.startsWith("id:")) return f.id === q.slice(3);
   if (q.startsWith("device:")) return (f.devices ?? []).includes(q.slice(7));
   if (q === "assess") return src.startsWith("assess") || /弱口令|weak/i.test(f.title);
-  if (q === "baseline") return f.title.startsWith("基线");
+  if (q === "baseline") return src.startsWith("baseline") || f.title.startsWith("基线");
   if (q === "syslog") return src.startsWith("syslog");
   if (q === "vuln") return src.startsWith("vulnscan") || src.startsWith("cve:");
   return f.title.includes(q) || src.includes(q) || (f.detail ?? "").includes(q);
@@ -296,7 +296,7 @@ export function proposalMatchesJump(p: NetDevProposal, filter: string): boolean 
 // ?dock=audit) so panels are screenshot-testable without driving the tab
 // strip first. ?live=1 stays as a ?dock=live alias. The open-tabs correction
 // effect OPENs this tab instead of correcting away from it.
-const DOCK_PARAM_KEYS: readonly string[] = ["overview", "live", "devices", "findings", "proposals", "audit", "logs", "health", "browser", "manual"];
+const DOCK_PARAM_KEYS: readonly string[] = ["overview", "live", "devices", "findings", "proposals", "audit", "logs", "health", "manual"];
 function dockParam(): DockTab | null {
   try {
     if (typeof window !== "undefined" && !window.runtime) {
@@ -396,6 +396,8 @@ export function NetDevLayout({
 }) {
   const t = useT();
   const [settings, setSettings] = useState<NetDevSettingsView | null>(null);
+  // 运维偏好面板（与编码偏好/办公偏好同款 PreferencePanel，mode=netdev）。
+  const [preferenceOpen, setPreferenceOpen] = useState(false);
   const [findings, setFindings] = useState<NetDevFinding[]>([]);
   const [proposals, setProposals] = useState<NetDevProposal[]>([]);
   const [audit, setAudit] = useState<NetDevAuditEntryView[]>([]);
@@ -409,7 +411,6 @@ export function NetDevLayout({
   const [topo, setTopo] = useState<NetDevTopologyGraph | null>(null);
   const [topoBusy, setTopoBusy] = useState(false);
   const [topoNotice, setTopoNotice] = useState("");
-  const [inspBusy, setInspBusy] = useState(false);
   // 应用内 confirm/toast：netdev 面的确认与报错不再弹 WebView 原生
   // window.confirm/alert（系统对话框带 "wails.localhost" 标题，观感脱节）。
   const confirm = useConfirm();
@@ -420,7 +421,7 @@ export function NetDevLayout({
   // §4.10：/ 快捷键聚焦当前页签首个搜索框。
   const dockBodyRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<DockTab>(() => dockParam() ?? "overview");
-  // 手册页签当前选中的篇目（usage/help/browser）——场景闭环卡直达 usage。
+  // 手册页签当前选中的篇目（usage/help/browser；browser 篇为跨域参考——浏览器已归办公）。
   const [manualDoc, setManualDoc] = useState("usage");
   const [hotTabs, setHotTabs] = useState<Partial<Record<DockTab, boolean>>>({});
   const [alertWizardOpen, setAlertWizardOpen] = useState(false);
@@ -435,7 +436,7 @@ export function NetDevLayout({
       const m: Record<string, NetDevDeviceHealth> = {};
       for (const d of snap?.devices ?? []) m[d.device] = d;
       setHealthMap(m);
-    }).catch(() => {});
+    }).catch(() => {}); // best-effort: 失败降级不阻塞
     const off1 = onNetdevHealth(h => {
       setHealthMap(prev => ({ ...prev, [h.device]: h }));
       markHot("health");
@@ -480,15 +481,10 @@ export function NetDevLayout({
   // !== "chat"), so the chat view stays pixel-equal to v1.1 even after a
   // workbench was opened (§10.8: 纯对话零新增 chrome) — dock/sidebar jumps
   // that deep-link into a bench must not grow permanent chrome on the chat.
-  const [bench, setBench] = useState<"chat" | "logs" | "sec" | "dash" | "browser">(() => (benchParam() === "sec" ? "sec" : benchParam() === "dash" ? "dash" : benchParam() === "browser" ? "browser" : benchParam() ? "logs" : "chat"));
+  const [bench, setBench] = useState<"chat" | "logs" | "sec" | "dash">(() => (benchParam() === "sec" ? "sec" : benchParam() === "dash" ? "dash" : benchParam() ? "logs" : "chat"));
   const [logsBenchEverOpened, setLogsBenchEverOpened] = useState(() => benchParam() === "logs");
   const [secBenchEverOpened, setSecBenchEverOpened] = useState(() => benchParam() === "sec");
   const [dashBenchEverOpened, setDashBenchEverOpened] = useState(() => benchParam() === "dash");
-  const [browserBenchEverOpened, setBrowserBenchEverOpened] = useState(() => benchParam() === "browser");
-  const openBrowserBench = useCallback(() => {
-    setBench("browser");
-    setBrowserBenchEverOpened(true);
-  }, []);
   // 大屏（DASHBOARD spec §4.1）：初始屏/深链 finding；manualSignal 驱动
   // Alt+1..5、命令面板、fairpeer://finding 深链的后到切换。
   const [dashScreen, setDashScreen] = useState<DashScreen | null>(() => dashScreenParam());
@@ -570,8 +566,9 @@ export function NetDevLayout({
   }, []);
 
   // 命令面板入口（§10.7 第 5 层）：palette 在 App 层，经自定义事件抵达——
-  // Broadcast bench switches so dock panels can adapt (the browser panel
-  // fully hides its inline mirror while the center browser workbench is the
+  // Broadcast bench switches so dock panels can adapt (浏览器工作台已迁办公
+  // 2026-09-06；办公侧 CoWorkLayout 以同款事件驱动面板镜像收起——本广播仅剩
+  // logs/sec/dash 三个值，但机制保留：
   // active view — one preview at a time, not a collapsed duplicate).
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("fairpeer:netdev-bench-changed", { detail: bench }));
@@ -584,7 +581,6 @@ export function NetDevLayout({
       if (d === "logs") openLogsBench();
       if (d === "sec") openSecBench();
       if (d === "dash") openDashBench();
-      if (d === "browser") openBrowserBench();
     };
     const onOpenScreen = (e: Event) => {
       const d = (e as CustomEvent<{ screen?: DashScreen; finding?: string; tab?: string; filter?: string }>).detail;
@@ -605,13 +601,27 @@ export function NetDevLayout({
         openDockTabFnRef.current?.(tabKey);
       }
     };
+    // G1-4 空态动作事件：面板内按钮无 props 通道时的落点（割接空态→变更
+    // 页签；作业/健康空态→运维设置）。
+    const onOpenDockTab = (e: Event) => {
+      const tab = (e as CustomEvent<{ tab?: string }>).detail?.tab as DockTab | undefined;
+      if (tab) { onDockOpen?.(); openDockTabFnRef.current?.(tab); }
+    };
+    const onOpenSettingsEv = (e: Event) => {
+      const target = (e as CustomEvent<string | undefined>).detail;
+      onOpenSettings(target || "netdev");
+    };
     window.addEventListener("fairpeer:netdev-bench", onBench);
     window.addEventListener("fairpeer:netdev-open-screen", onOpenScreen);
+    window.addEventListener("fairpeer:netdev-open-dock", onOpenDockTab);
+    window.addEventListener("fairpeer:netdev-open-settings", onOpenSettingsEv);
     return () => {
       window.removeEventListener("fairpeer:netdev-bench", onBench);
       window.removeEventListener("fairpeer:netdev-open-screen", onOpenScreen);
+      window.removeEventListener("fairpeer:netdev-open-dock", onOpenDockTab);
+      window.removeEventListener("fairpeer:netdev-open-settings", onOpenSettingsEv);
     };
-  }, [openLogsBench, openSecBench, openDashBench, openBrowserBench]);
+  }, [openLogsBench, openSecBench, openDashBench, onDockOpen, onOpenSettings]);
 
   // §4.12 深链路由：notify 推送消息里的 fairpeer://finding/<id> 链接在
   // webview 里没有协议处理器——这里拦截点击，落调查链屏并高亮（把 v1 的
@@ -730,14 +740,14 @@ export function NetDevLayout({
   useEffect(() => {
     if (tab !== "audit" && tab !== "devices") return;
     let alive = true;
-    app.NetDevOverview(false).then(sp => { if (alive && sp) setAuditProfile(sp); }).catch(() => {});
+    app.NetDevOverview(false).then(sp => { if (alive && sp) setAuditProfile(sp); }).catch(() => {}); // best-effort: 失败降级不阻塞
     return () => { alive = false; };
   }, [tab]);
 
   useEffect(() => {
     if (tab !== "devices" || netView !== "topo") return;
     let alive = true;
-    app.NetDevTopoReconcile().then(r => { if (alive && r) setTopoRec(r); }).catch(() => {});
+    app.NetDevTopoReconcile().then(r => { if (alive && r) setTopoRec(r); }).catch(() => {}); // best-effort: 失败降级不阻塞
     return () => { alive = false; };
   }, [tab, netView]);
 
@@ -754,29 +764,16 @@ export function NetDevLayout({
       }).catch(() => ""),
     ]).then(([ov, lastBackup]) => {
       if (alive && ov) setDevStats({ roles: ov.roles, polled: ov.polled, managed: ov.managed, lastBackupAt: lastBackup });
-    }).catch(() => {});
+    }).catch(() => {}); // best-effort: 失败降级不阻塞
     return () => { alive = false; };
   }, [tab]);
 
-  // C3.10 快捷键最小集：r 刷新（输入焦点时不抢键）、/ 聚焦页内首个搜索框。
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === "r") { void reload(); }
-      else if (e.key === "/") {
-        const el = document.querySelector<HTMLElement>(".ndv__dock-body:not([style*='none']) input.mem-input");
-        if (el) { e.preventDefault(); el.focus(); }
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [reload]);
+  // C3.10 快捷键已并入上方 §4.10 处理器（r/o//、Alt+1..5、Esc）——两个同时挂载的
+  // keydown 监听会导致 r// 双触发（双 reload、双聚焦），这里不再重复注册。
 
   // 聚合视图随 reload 刷新（告警队列，§4.10）——reload 闭包内拉取，避免声明序依赖。
   useEffect(() => {
-    app.NetDevAggregatedFindings().then(list => setAggs(list ?? [])).catch(() => {});
+    app.NetDevAggregatedFindings().then(list => setAggs(list ?? [])).catch(() => {}); // best-effort: 失败降级不阻塞
   }, [findings]);
 
   const [reloadTick, setReloadTick] = useState(0);
@@ -967,18 +964,8 @@ export function NetDevLayout({
     }
   }, [tab, netView, loadPlan]);
 
-  const runInspection = useCallback(async () => {
-    setInspBusy(true);
-    try {
-      const f = await app.NetDevRunInspection();
-      if (f) setErr(`[SYS] INSPECTION COMPLETE: ${f.title}`);
-      await reload();
-    } catch (e) {
-      setErr(String(e));
-    } finally {
-      setInspBusy(false);
-    }
-  }, [reload]);
+  // 网络巡检的触发已迁至总览「网络巡检」卡（任务化 + 事件流）；此处只剩
+  // 审计空态的引导动作——kick 即返，进度与结果看总览卡/发现中心。
 
   // Security posture: sealed config reads + local rule battery → Findings.
   const [baseBusy, setBaseBusy] = useState(false);
@@ -1016,7 +1003,7 @@ export function NetDevLayout({
       const out: Record<string, { t: number; v: number }[]> = {};
       for (const [metric, pts] of Object.entries(m ?? {})) out[metric] = (pts ?? []).map(p => ({ t: p.t, v: p.v }));
       setCardSeries(out);
-    }).catch(() => {});
+    }).catch(() => {}); // best-effort: 失败降级不阻塞
     return () => { alive = false; };
   }, [selected, reloadTick]);
   const [locateTarget, setLocateTarget] = useState("");
@@ -1031,6 +1018,8 @@ export function NetDevLayout({
   // before promotion (the human names their assets, never the scanner).
   const [discovered, setDiscovered] = useState<NetDevDiscoveredHost[]>([]);
   const [discSel, setDiscSel] = useState<Set<string>>(new Set());
+  // WRITE_AUTHZ：转正批量写档（默认继承 = sealed 安全缺省）。
+  const [discWriteTier, setDiscWriteTier] = useState("");
   const [discNames, setDiscNames] = useState<Record<string, string>>({});
   const [discBusy, setDiscBusy] = useState(false);
   // 自定义端口列表（F1 §4.2.5）：空 = 后端默认 22/23/161/443/830。
@@ -1211,6 +1200,7 @@ export function NetDevLayout({
         vendor: VENDOR_DRIVER[h.vendor_hint ?? ""] ?? "",
         role: h.role_hint ?? "",
         model: fingerprintModel(h),
+        writeTier: discWriteTier,
       })));
       setDiscSel(new Set());
       await loadDiscovered();
@@ -1439,7 +1429,6 @@ export function NetDevLayout({
     // 页签合并 ③：设备 + 拓扑 → 「网络」——同一批对象的清单/图双视图，
     // 拓扑的三角校验与攻击路径跟图视图走（面板内 netView 切换）。
     { key: "devices", label: tt("ndv.tab.network"), group: tt("ndv.tabgrp.state"), badge: devices.length || undefined, icon: <Network size={13} /> },
-    { key: "browser", label: tt("ndv.tab.browser"), group: tt("ndv.tabgrp.state"), icon: <MousePointerClick size={13} /> },
     { key: "findings", label: tt("ndv.tab.findings"), group: tt("ndv.tabgrp.decide"), dot: findingsHot, badge: scopedFindings.length || undefined, icon: <AlertTriangle size={13} /> },
     { key: "proposals", label: tt("ndv.tab.proposals"), group: tt("ndv.tabgrp.decide"), badge: pendingCount || undefined, icon: <ClipboardCheck size={13} /> },
     // 页签合并 ②：审计 + 状态历史 → 一个「历史」页签（命令审计 + 配置状态与
@@ -1484,6 +1473,9 @@ export function NetDevLayout({
 
   return (
     <div className="ndv">
+      {/* WRITE_AUTHZ P1：confirm 档写命令审批卡 + TOML 放宽拦截横幅。
+          浮层自订阅 "netdev:write-approval"，挂一次全屏生效。 */}
+      <WriteAuthLayer />
       {/* Rail width resizer — same class/handlers as the coding sidebar's
           (the .app--netdev rule hides the app-level copy; this one re-shows). */}
       {!sidebarCollapsed && onSidebarResizeStart && (
@@ -1543,14 +1535,15 @@ export function NetDevLayout({
             </section>
           )}
         {/* 运维专属导航 — the pinned bottom-left group, mirroring the
-            coding/office sidebars' bottom nav. §4.5 扩到 8 项；设备清单在
-            右侧 dock，巡检是直接动作，偏好开设置，其余直达各视图。 */}
+            coding/office sidebars' bottom nav。现 6 项（2026-09-06 定稿）：
+            设备清单在右侧 dock，偏好开偏好面板，其余直达各视图。 */}
         </div>
         <section className="cowork-sidebar__group" style={{ marginBottom: '0px', marginTop: 'auto' }}>
-          {/* §4.5 八项目录：看状态（大屏/设备/拓扑）→ 做动作（巡检）→ 处队列
-              （安全/变更）→ 查档案（审计）→ 调配置（偏好）。2026-09-04 用户
-              定稿：侧栏完全对齐办公/编码的极简样式——无徽标、无色点、无
-              溢出菜单；信号类内容归 dock 页签与总览。 */}
+          {/* 看状态（大屏/设备/拓扑）→ 处队列（变更）→ 查档案（审计）→
+              调配置（偏好）。2026-09-04 用户定稿：侧栏完全对齐办公/编码的
+              极简样式——无徽标、无色点、无溢出菜单；信号类内容归 dock 页签
+              与总览。安全工作台撤出侧栏（2026-09-06 用户定稿：低频应急工具
+              不占常驻位）——工作台切换条「安全」chip 与总览 CVE 卡深链仍达。 */}
           <button
             className={`cowork-sidebar__item ${bench === "dash" ? "cowork-sidebar__item--active" : ""}`}
             onClick={() => openDashBench()}
@@ -1560,52 +1553,40 @@ export function NetDevLayout({
             <span>{tt("ndv.dash.title")}</span>
           </button>
           <button
-            className={`cowork-sidebar__item ${dockOpen && tab === "devices" ? "cowork-sidebar__item--active" : ""}`}
+            className={`cowork-sidebar__item ${dockOpen && tab === "devices" && netView !== "topo" ? "cowork-sidebar__item--active" : ""}`}
             onClick={() => {
               onDockOpen?.();
+              setNetView("list");
               openDockTabFn("devices");
             }}
           >
             <Server size={14} />
             <span>{tt("ndv.dev.titlePlain")}</span>
           </button>
-          {/* 拓扑不占侧栏位（8 项封顶）：dock 页签与"+"目录仍可达——纯视图
-              捷径里重复度最高的一项。 */}
-          {/* 运维浏览器：四大工作台之一，此前只有主区 chip 可进——补上常驻
-              入口（页签合并审视时的遗漏项）。 */}
+          {/* 拓扑（2026-09-06 六项定稿补位）：与设备共用 dock 页签、netView
+              切换——语义与大屏深链（topology jump）同款。 */}
           <button
-            className={`cowork-sidebar__item ${bench === "browser" ? "cowork-sidebar__item--active" : ""}`}
-            onClick={() => openBrowserBench()}
-            title={tt("ndv.bench.browserTip")}
+            className={`cowork-sidebar__item ${dockOpen && tab === "devices" && netView === "topo" ? "cowork-sidebar__item--active" : ""}`}
+            onClick={() => {
+              onDockOpen?.();
+              setNetView("topo");
+              openDockTabFn("devices");
+            }}
+            title={tt("ndv.net.topoTip")}
           >
-            <MousePointerClick size={14} />
-            <span>{tt("ndv.bench.browser")}</span>
+            <Network size={14} />
+            <span>{tt("ndv.net.topo")}</span>
           </button>
-          {/* 立即巡检：单击直跑只读网络巡检（先后去掉弹窗与 ▾ 溢出，均为
-              2026-09-04 用户反馈）。主机分诊/基线/弱口令的入口在别处：设备
-              卡单机分诊、总览场景卡、对话（netdev_assess 等工具，信封闸门
-              管着）。 */}
-          <button
-            className="cowork-sidebar__item"
-            onClick={() => void runInspection()}
-            title={tt("ndv.insp.runTip")}
-          >
-            <ScanSearch size={14} />
-            <span>{inspBusy ? tt("ndv.insp.triaging") : baseBusy ? tt("ndv.insp.baselining") : tt("ndv.insp.runNow")}</span>
-          </button>
-          {/* 安全工作台不带 findings hot dot（2026-09-04 八按钮审计）：该
-              信号属于「发现中心」dock 页签，只有切到那个页签才会清；本按钮
-              打开的是案例/IOC 工作台，展示不了新发现——挂着就是一枚点了
-              不灭的假红点。发现中心页签自带同款热点（findingsHot||vulnHot）
-              且访问即清，信号不丢。 */}
-          <button
-            className={`cowork-sidebar__item ${bench === "sec" ? "cowork-sidebar__item--active" : ""}`}
-            onClick={() => openSecBench()}
-            title={tt("ndv.nav.secTip")}
-          >
-            <ShieldCheck size={14} />
-            <span>{tt("ndv.nav.sec")}</span>
-          </button>
+          {/* 浏览器工作台已整体迁至办公界面（用户定稿 2026-09-06：浏览器
+              能力/面板/技能三位一体归办公）——运维侧不再挂浏览器入口；站点
+              技能（态势感知/IT 平台问答）经办公界面或对话 run_skill 调用。 */}
+          {/* 立即巡检已迁至总览大屏的「网络巡检」卡（2026-09-05）：手动触发
+              任务化（kick 即返、进度走 netdev:inspection 事件），侧栏不再挂
+              busy 态按钮——旧版把几分钟的同步巡检挤在按钮文案上（还错标成
+              “分诊中…”），卡顿观感即来源于此。主机分诊/基线/弱口令的入口在
+              别处：设备卡单机分诊、总览场景卡、对话（netdev_assess 等工具，
+              信封闸门管着）。安全工作台的入口：工作台切换条「安全」chip、
+              总览 CVE 卡深链、设备卡单机分诊。 */}
           <button
             className={`cowork-sidebar__item ${dockOpen && tab === "proposals" ? "cowork-sidebar__item--active" : ""}`}
             onClick={() => { onDockOpen?.(); openDockTabFn("proposals"); }}
@@ -1622,12 +1603,17 @@ export function NetDevLayout({
             <ScrollText size={14} />
             <span>{tt("ndv.tbar.historyLabel")}</span>
           </button>
+          {/* 运维偏好：与编码偏好/办公偏好同款（个人偏好模板，netdev 分键
+              存储、激活项注入运维提示词）；运维设置是另一件事（设备/护栏/
+              信封的基础设施配置），不再占侧栏位（2026-09-06 六项定稿）——
+              标题栏项目菜单「管理」与 fairpeer:netdev-open-settings 事件
+              仍直达，入口不丢。 */}
           <button
-            className="cowork-sidebar__item"
-            onClick={() => onOpenSettings("netdev")}
+            className={`cowork-sidebar__item ${preferenceOpen ? "cowork-sidebar__item--active" : ""}`}
+            onClick={() => setPreferenceOpen(true)}
           >
             <SlidersHorizontal size={14} />
-            <span>{tt("ndv.tbar.prefs")}</span>
+            <span>{tt("ndv.preference")}</span>
           </button>
         </section>
       </div>
@@ -1647,7 +1633,6 @@ export function NetDevLayout({
               {tt("ndv.bench.dash")}
               <i className="ndv-bench__riskdot" style={{ background: riskDotColor }} title={riskDotTip} />
             </span>
-            <span role="tab" aria-selected={bench === "browser"} className={`ndv-bench__chip${bench === "browser" ? " ndv-bench__chip--on" : ""}`} onClick={openBrowserBench}>{tt("ndv.bench.browser")}</span>
             <span className="ndv-bench__hint"><kbd>Esc</kbd> {tt("ndv.bench.back")}</span>
           </div>
         )}
@@ -1665,7 +1650,6 @@ export function NetDevLayout({
         </div>
         {logsBenchEverOpened && <LogWorkbench devices={settings?.devices ?? []} onInsertComposer={onInsertComposer} hidden={bench !== "logs"} />}
         {secBenchEverOpened && <SecWorkbench devices={settings?.devices ?? []} hidden={bench !== "sec"} />}
-        {browserBenchEverOpened && <BrowserWorkbench hidden={bench !== "browser"} onClose={() => setBench("chat")} />}
         {dashBenchEverOpened && (
           <div className="ndv__dashwrap" style={bench !== "dash" ? { display: "none" } : undefined}>
             <DashShell
@@ -1841,6 +1825,10 @@ export function NetDevLayout({
         )}
 
         {terminalNode}
+        {/* 运维偏好面板（mode=netdev，与编码/办公偏好同款）：开时占满主区。 */}
+        {preferenceOpen && (
+          <PreferencePanel mode="netdev" onClose={() => setPreferenceOpen(false)} />
+        )}
       </div>
 
       {/* Right dock width resizer — same class/handlers as the coding
@@ -1982,8 +1970,9 @@ export function NetDevLayout({
               >{tt("ndv.ovw.bigView")}</span>
             }
             onJump={(j) => {
-              const key = j.tab as DockTab | "sec" | "cutovers" | "topology";
+              const key = j.tab as DockTab | "sec" | "cutovers" | "topology" | "settings";
               if (key === "sec") { openSecBench(); return; }
+              if (key === "settings") { onOpenSettings("netdev"); return; } // G1-4：空态"去添加设备"落点
               if (key === "cutovers") {
                 // 同 dash 侧：割接 chip 的落点是运行中的 runbook 或割接看板，
                 // 不是 "chat"（dock 枚举无此 tab，旧跳转落地空白面板）。
@@ -2003,7 +1992,7 @@ export function NetDevLayout({
 
         {tab === "live" && (
           <>
-            <LiveOpsPanel />
+            <LiveOpsPanel onInsertComposer={onInsertComposer} />
             <div style={{ marginTop: 8 }}>
               <JobsPanel />
             </div>
@@ -2016,7 +2005,6 @@ export function NetDevLayout({
         }} />}
 
         {tab === "health" && <HealthPanel onOpenSettings={onOpenSettings} />}
-        {tab === "browser" && <BrowserConsolePanel onInsertComposer={onInsertComposer} />}
         {/* 蓝队核查页卡（含评估流程步骤卡）在上方统一渲染 */}
 
         {/* 「网络」页签的双视图切换：清单（默认）/ 拓扑。 */}
@@ -2093,6 +2081,7 @@ export function NetDevLayout({
               onInsertComposer?.(tt("ndv.bkt.restorePrompt", { dev: selected, id: v.id, at: v.at }));
               openDockTabFn("live");
             }} />}
+            {selected && <OpStepsLedger device={selected} onInsertComposer={onInsertComposer} />}
           </div>
         )}
 
@@ -2127,6 +2116,14 @@ export function NetDevLayout({
                   onClick={() => setDiscSel(discovered.every(h => discSel.has(h.ip)) ? new Set<string>() : new Set(discovered.map(h => h.ip)))}>
                   {discovered.every(h => discSel.has(h.ip)) ? tt("ndv.disc.clearSel") : tt("ndv.disc.selectAll")}
                 </span>
+                {/* WRITE_AUTHZ §4.2：转正即定锁——默认继承（=sealed 安全缺省）。 */}
+                <select className="mem-select" style={{ width: 150 }} title={tt("ndv.sets.grpWriteTip")}
+                  value={discWriteTier} onChange={e => setDiscWriteTier(e.target.value)}>
+                  <option value="">{tt("ndv.sets.writeInherit")}</option>
+                  <option value="sealed">🔒 sealed</option>
+                  <option value="confirm">🔐 confirm</option>
+                  <option value="auto">⚡ auto</option>
+                </select>
                 <span className="btn btn--primary btn--small" role="button" style={{ marginLeft: "auto" }}
                   title={tt("ndv.disc.promoteTip")}
                   onClick={() => void promoteDiscovered()}>{tt("ndv.disc.promote", { n: discSel.size })}</span>
@@ -2141,7 +2138,8 @@ export function NetDevLayout({
               <div className="ndv__card-title">{selectedDevice.name}
                 {(cardSeries["if_down"] ?? []).length > 1 && <Sparkline points={cardSeries["if_down"]} bad />}
                 {(cardSeries["reachable"] ?? []).length > 1 && <Sparkline points={cardSeries["reachable"]} />}
-                <span className="ndv__card-sub">· {selectedDevice.vendor}/{selectedDevice.os} · {selectedDevice.address}{(selectedDevice.via ?? []).length ? tt("ndv.dev.viaList", { list: (selectedDevice.via ?? []).join("→") }) : ""}</span></div>
+                <span className="ndv__card-sub">· {selectedDevice.vendor}/{selectedDevice.os} · {selectedDevice.address}{(selectedDevice.via ?? []).length ? tt("ndv.dev.viaList", { list: (selectedDevice.via ?? []).join("→") }) : ""}</span>
+                {selectedDevice.gpu && <span className="ndv__badge" style={{ marginLeft: 6 }} title={tt("ndv.dev.gpuTip")}>{tt("ndv.dev.gpuBadge")}</span>}</div>
               <div className="ndv__group-label">{tt("ndv.dev.quick")}</div>
               {selectedDevice.vendor === "redfish" ? (
                 <div className="ndv__quick-cmds">
@@ -2608,7 +2606,7 @@ export function NetDevLayout({
             {aggView && aggs.length > 0 ? aggs.map(a => <AggRow key={a.key} a={a} onChanged={() => void reload()} />) : jumpFilteredFindings.slice(0, 20).map(f => <FindingRow key={f.id} f={f} onResolved={() => void reload()} onPropose={fl => {
               // P2-1：发现 → 修复变更一键衔接——起草提示词带上发现 id/设备/标题，
               // 走既有 netdev_propose 人工审批流，护栏语义不变。
-              onInsertComposer?.(tt("ndv.fnd.proposePrompt", { id: fl.id, title: fl.title, dev: (fl.devices ?? []).join("、") || "—" }));
+              onInsertComposer?.(tt("ndv.fnd.proposePrompt", { id: fl.id, title: fl.title, dev: (fl.devices ?? []).join("、") || "—" }) + (fl.fix ? `（结构化修复建议：${fl.fix.type} → ${fl.fix.ref}${fl.fix.confidence === "verified" ? "（已核实出处）" : "（模型推断，须验证）"}）` : ""));
               openDockTabFn("live");
             }} />)}
               </div>
@@ -2714,7 +2712,7 @@ export function NetDevLayout({
                   <div className="ndv__audit-empty">
                     <div className="ndv__empty-title">{tt("ndv.aud.emptyTitle")}</div>
                     <div>{tt("ndv.aud.empty1")}<br />{tt("ndv.aud.empty2")}</div>
-                    <span className="btn btn--primary btn--small" role="button" style={{ marginTop: 6 }} onClick={() => { void runInspection(); }}>{tt("ndv.aud.emptyAct")}</span>
+                    <span className="btn btn--primary btn--small" role="button" style={{ marginTop: 6 }} onClick={() => { void app.NetDevRunInspection().catch(() => {}); }}>{tt("ndv.aud.emptyAct")}</span>
                   </div>
                 ) : audit.slice(0, 100).map((a, i) => (
                   <div key={`${a.time}-${i}`} className="ndv__audit-row" title={a.error || a.command}>
@@ -2745,8 +2743,69 @@ export function NetDevLayout({
 // backup now, and a two-pick diff. Restore stays proposal-shaped on purpose:
 // "从此版本恢复" hands the version to the agent as DRAFT context (the human
 // approves the actual change in the 变更 pipeline).
-function BackupTimeline({ device, onRestore }: { device: string; onRestore?: (v: { id: string; at: string }) => void }) {
-  const [versions, setVersions] = useState<{ id: string; at: string; bytes: number; lines: number }[] | null>(null);
+// OpStepsLedger — 操作台账（WRITE_AUTHZ_SPEC §7.3）：设备的写步时间线，
+// 每步带状态、diff 摘要与回退指针。「回退此步」把恢复起草指令注入
+// composer——agent 起草 restore_from 提案 → 变更中心人工审批（回退永远
+// 走人的门，spec §8.3；一键省的是"人找版本拼指令"，不是省审批）。
+// 「回退本轮全部写」按 Turn 锚逆序起草整轮恢复。
+function OpStepsLedger({ device, onInsertComposer }: { device: string; onInsertComposer?: (text: string) => void }) {
+  const [steps, setSteps] = useState<NetDevOpStep[] | null>(null);
+  const reload = useCallback(async () => {
+    try {
+      setSteps(await app.NetDevOpSteps(device));
+    } catch {
+      setSteps([]);
+    }
+  }, [device]);
+  useEffect(() => { setSteps(null); void reload(); }, [reload]);
+  const statusIcon = (s: string) => (s === "ok" ? "✓" : s === "device-error" ? "⚠" : "✕");
+  const rollbackStep = (s: NetDevOpStep) => {
+    onInsertComposer?.(tt("ndv.ops.rollbackStepPrompt", { dev: s.Device, id: s.RollbackTo ?? "", cmd: s.Command, at: s.At.slice(0, 19).replace("T", " ") }));
+  };
+  const rollbackTurn = () => {
+    const rows = steps ?? [];
+    if (rows.length === 0) return;
+    const turn = rows[0].Turn; // 最新一轮
+    const mine = rows.filter(r => (r.Turn ?? 0) === (turn ?? 0) && r.RollbackTo).reverse(); // 逆序：最近的最先恢复
+    if (mine.length === 0) return;
+    const list = mine.map(r => `「${r.Command}」(${r.RollbackTo})`).join(" → ");
+    onInsertComposer?.(tt("ndv.ops.rollbackTurnPrompt", { dev: device, n: mine.length, list }));
+  };
+  const rows = steps ?? [];
+  const lastTurn = rows.find(r => (r.Turn ?? 0) > 0)?.Turn;
+  return (
+    <div className="ndv__section-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+      <div className="ndv__section-row">
+        <div className="ndv__section">{tt("ndv.ops.title", { dev: device })}</div>
+        {lastTurn != null && (rows.filter(r => (r.Turn ?? 0) === (lastTurn ?? 0) && r.RollbackTo).length > 0) && (
+          <span className="btn btn--secondary btn--small ndv__section-btn" role="button"
+            title={tt("ndv.ops.rollbackTurnTip")}
+            onClick={rollbackTurn}>{tt("ndv.ops.rollbackTurn")}</span>
+        )}
+        <span className="btn btn--secondary btn--small ndv__section-btn" role="button"
+          onClick={() => void reload()}>{tt("ndv.refresh")}</span>
+      </div>
+      {rows.length === 0 && <div className="ndv__hint">{tt("ndv.ops.empty")}</div>}
+      {rows.slice(0, 12).map(s => (
+        <div key={s.ID} className="ndv__device" style={{ alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span className="ndv__device-addr">{s.At.slice(5, 16).replace("T", " ")}</span>
+          <span className="ndv__device-addr" title={s.Actor}>{statusIcon(s.Status)}</span>
+          <span className="ndv__device-addr" style={{ fontFamily: "ui-monospace, Consolas, monospace", fontSize: 11, flex: 1, minWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.Command}>{s.Command}</span>
+          {s.DiffSummary && (
+            <span className="ndv__meta" style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.DiffSummary}>{s.DiffSummary.split("\n")[0]}</span>
+          )}
+          {s.RollbackTo && (
+            <span className="btn btn--secondary btn--small" role="button"
+              title={tt("ndv.ops.rollbackStepTip", { id: s.RollbackTo })}
+              onClick={() => rollbackStep(s)}>{tt("ndv.ops.rollbackStep")}</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BackupTimeline({ device, onRestore }: { device: string; onRestore?: (v: { id: string; at: string }) => void }) {  const [versions, setVersions] = useState<{ id: string; at: string; bytes: number; lines: number }[] | null>(null);
   const [pick, setPick] = useState<string[]>([]);
   const [diff, setDiff] = useState("");
   const [busy, setBusy] = useState(false);
@@ -2771,7 +2830,11 @@ function BackupTimeline({ device, onRestore }: { device: string; onRestore?: (v:
     if (pick.length !== 2) return;
     setBusy(true);
     try {
-      setDiff(await app.NetDevBackupDiff(device, pick[0], pick[1]));
+      // 统一按时间序传参 diff(old → new)（与 BackupHistory 一致）——按点选
+      // 顺序传入会让同一对版本的正反向结果取决于点击先后。
+      const ts = (v?: { at: string }) => Date.parse(v?.at ?? "") || 0;
+      const sel = pick.map(id => versions?.find(v => v.id === id)).sort((a, b) => ts(a) - ts(b));
+      setDiff(await app.NetDevBackupDiff(device, sel[0]?.id ?? pick[0], sel[1]?.id ?? pick[1]));
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -3135,8 +3198,10 @@ function BackupHistory({ device, onRestore }: { device: string; onRestore?: (v: 
   const showDiff = async () => {
     if (pick.length !== 2) return;
     try {
-      // pick[0] is newer, pick[1] older → diff(old → new)
-      setDiff(await app.NetDevBackupDiff(device, pick[1], pick[0]));
+      // 固定按时间序 diff(old → new)（与 BackupTimeline 一致），不按点选顺序。
+      const ts = (v?: NetDevBackupVersion) => Date.parse(v?.at ?? "") || 0;
+      const sel = pick.map(id => versions.find(v => v.id === id)).sort((a, b) => ts(a) - ts(b));
+      setDiff(await app.NetDevBackupDiff(device, sel[0]?.id ?? pick[1], sel[1]?.id ?? pick[0]));
     } catch (e) {
       setErr(String(e));
     }
@@ -3252,6 +3317,7 @@ function FindingRow({ f, onResolved, onPropose }: { f: NetDevFinding; onResolved
           onClick={() => { void app.NetDevFindingDismiss(f.id).then(() => onResolved?.()); }}>{tt("ndv.fnd.dismissBtn")}</span>
       </div>
       <div className="ndv__meta">{(f.devices ?? []).join("、")}{f.suggestion ? "" : ""}</div>
+      {f.fix && <div className="ndv__finding-suggestion">{"fix"}：{f.fix.type} → {f.fix.ref}{f.fix.link ? <a href={f.fix.link} target="_blank" rel="noreferrer" style={{ marginLeft: 6 }}>{"↗"}</a> : null}{f.fix.confidence === "verified" ? " ✓" : " ⚠"}</div>}
       {f.suggestion && !open && <div className="ndv__finding-suggestion">{tt("ndv.fnd.suggest", { s: f.suggestion })}</div>}
       {open && (
         <div style={{ marginTop: 4 }}>

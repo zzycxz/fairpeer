@@ -599,11 +599,24 @@ func (a *App) ProbeMailAccount(name string) (result MailProbeResult, err error) 
 // view of builtin.EmailMessage — the dock only needs envelope + preview, not
 // attachments, to keep the JSON payload small for a sidebar list.
 type InboxItem struct {
-	From    string `json:"from"`
-	To      string `json:"to"` // recipient(s); shown instead of From in the Sent view
-	Subject string `json:"subject"`
-	Date    string `json:"date"`
-	Preview string `json:"preview"`
+	From        string                     `json:"from"`
+	To          string                     `json:"to"` // recipient(s); shown instead of From in the Sent view
+	Subject     string                     `json:"subject"`
+	Date        string                     `json:"date"`
+	Preview     string                     `json:"preview"`
+	Attachments []builtin.EmailAttachment  `json:"attachments,omitempty"` // 📎 chips on the list row
+}
+
+// MailFullMessage is the dock reading pane's payload: one message's envelope,
+// FULL plain-text body (capped at 64k chars) and attachment metadata. The list
+// stays cheap (InboxItem); opening a letter fetches this on demand.
+type MailFullMessage struct {
+	From        string                    `json:"from"`
+	To          string                    `json:"to"`
+	Subject     string                    `json:"subject"`
+	Date        string                    `json:"date"`
+	Body        string                    `json:"body"`
+	Attachments []builtin.EmailAttachment `json:"attachments,omitempty"`
 }
 
 // InboxPreview reads the most recent messages (up to limit) from the default
@@ -632,14 +645,53 @@ func (a *App) InboxPreview(mailbox string, limit int) ([]InboxItem, error) {
 	out := make([]InboxItem, 0, len(msgs))
 	for _, m := range msgs {
 		out = append(out, InboxItem{
-			From:    m.From,
-			To:      m.To,
-			Subject: m.Subject,
-			Date:    m.Date,
-			Preview: m.Preview,
+			From:        m.From,
+			To:          m.To,
+			Subject:     m.Subject,
+			Date:        m.Date,
+			Preview:     m.Preview,
+			Attachments: m.Attachments,
 		})
 	}
 	return out, nil
+}
+
+// ReadMailFull fetches one message's FULL body for the dock's reading pane.
+// mailbox/limit/index select the same newest-first window InboxPreview rendered
+// (index is 0-based into that list); subject/date are the clicked row's values
+// and are verified against the refetched message — mail that arrived in between
+// shifts sequence numbers, and without this check the pane would silently show
+// a DIFFERENT letter. Like ProbeMailAccount, panics are recovered (IMAP edge
+// cases must not kill the Wails UI) and config is reloaded so a just-saved
+// mailbox works without restart.
+func (a *App) ReadMailFull(mailbox string, limit, index int, subject, date string) (result MailFullMessage, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("ReadMailFull panic", "index", index, "panic", r)
+			result = MailFullMessage{}
+			err = fmt.Errorf("内部错误：%v", r)
+		}
+	}()
+	cfg, err := config.Load()
+	if err != nil {
+		return MailFullMessage{}, fmt.Errorf("读取配置失败：%s", err.Error())
+	}
+	acct, ok := cfg.Cowork.DefaultEmailAccount()
+	if !ok || strings.TrimSpace(acct.IMAP.Host) == "" {
+		return MailFullMessage{}, fmt.Errorf("未配置邮箱")
+	}
+	m, err := builtin.ReadMailFull(acct.IMAP, mailbox, limit, index, subject, date)
+	if err != nil {
+		return MailFullMessage{}, err
+	}
+	return MailFullMessage{
+		From:        m.From,
+		To:          m.To,
+		Subject:     m.Subject,
+		Date:        m.Date,
+		Body:        m.Preview, // ReadMailFull's Preview IS the capped full body
+		Attachments: m.Attachments,
+	}, nil
 }
 
 // CheckCoworkBrowser runs browser auto-detection and returns the display name

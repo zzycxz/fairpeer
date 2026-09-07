@@ -97,7 +97,9 @@ func serveMsg(sess *session, m msg, node *trustdomain.Node, handler WorkHandler)
 	case kindGetBlocks:
 		blocks := node.Chain().Blocks()
 		h := node.Chain().Height()
-		if m.From > h {
+		// From/To come from the (authenticated but untrusted) peer — a
+		// malformed range like From=10,To=2 must not panic the handler.
+		if m.From > h || m.From > m.To {
 			return sess.send(msg{Kind: kindBlocks})
 		}
 		to := m.To

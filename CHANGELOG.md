@@ -9,6 +9,185 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(netdev/skill): 技能编排收敛落地——seccheck/diag 两个 -auto 子代理 + L4 合同校验 + BLUETEAM 批1 最小切片 + 测绘三合一
+
+SKILL_ORCHESTRATION_SPEC v1 的 P1/P2 内核与 P3 本地项全部落地，技能从 9 张 inline 手册收敛为 **4 个**（知识下沉原则：重的住工具/数据，技能永远薄）：
+
+- **netdev-seccheck-auto**（RunSubagent·20 工具·MaxSteps 200）：吸收 vulnscan+audit-project；**三种入口形态**——清单（逐台闭环）/ 套餐（五阶段，source=audit+项目锚点）/ 主机（H0-H5 分层纵深，深度计收尾）/ 网段（L0-L5 证据阶梯，≥2 活闸门、0 活即止、永不到达 10/8 无界扫）
+- **netdev-diag-auto**（RunSubagent·15 工具·MaxSteps 120）：吸收 playbook+三张协议卡——症状路由→分支深查→逐跳定位→根因立案+mermaid 路径图，主对话不进几十条回显
+- **断言式 body**（BLUETEAM §5.1 八段骨架）：每步=命令+期望输出+失败分支；todo_write+complete_step 证据闸进工具面（无证据不让标完成）
+- **别名表下沉 Store.Read**：旧名 run_skill / /旧名 / 历史会话回放全兼容；禁用新名连带禁用别名（收紧优先）；netdev-draft 并入 config-vault 配置生命周期卡（起草/台账/drift/恢复四阶段）
+- **L4 合同后校验**：FindingGen 代数计数器 + skillRunner 程序化检查"立案先行才作答"——违约先打回补一轮（续跑保留上下文），仍违约打标记横幅；谓词提取 `skill.RequiresFindingsContract` 与 CI 共享
+- **知识数据外置**（internal/netdev/knowledge/）：内置三表（segment-priors/credential-spots/host-risk-checks）embed→释放→**user-knowledge 同 id 覆盖**（升级不冲掉用户改动）；YAML schema 校验；`netdev_knowledge` 加载通道（内容哈希入审计链——结论可追溯哪版表）
+- **测绘三合一 netdev_probe(cidr, depth, mode)**：discover/nmap/netprobe 模型面收敛为一个——depth=L3 定点指纹（知识表派生网关候选）/ L4 微采样（分布形状读段角色）/ L5 已验证段全扫（mode auto 回退 netprobe→nmap→隧道）；scopes 预检硬拒（出界零发包）；工具 24→22
+- **audit finding 同源**（§3.5-G）：页签风险清单改为消费 Findings——本轮电池立案 ∪ chat 套餐立案（source=audit+锚点），drift/历史/别项目噪音出清；复扫合并/放行判定不变
+- **CI mock 场景组第一层**：mock SubagentRunner 驱动 run_skill 真实分发——三入口 arguments 透传、别名分发、缺参报错、非 netdev 子代理豁免合同
+- 委托可见性：操作实况本轮 sweep 进度条（触达/读/写）+ 读预算撞顶"▶ 继续核查"动作位（新一轮预算+continue_from 语义）
+- 红测试：orchestration 5 个 + 场景 6 个 + knowledge 4 个 + probe 4 个 + audit 同源 2 个，全绿
+
+### feat(netdev/write-authz): 设备写授权两把锁——分级受控写 + 三明治快照 + 操作台账三粒度回退 + 自动备份三件套
+
+NETDEV_WRITE_AUTHZ_SPEC v1 的 P1/P2/P3 本地项全部落地（封的是"写"，不是"自主性"；硬底线任何档不可解锁）：
+
+- **两把锁取严**：锁 1=对话框模式（变更询问/自动编辑/完全访问，只能收紧不能放宽）；锁 2=设备写档 sealed/confirm/auto（接入必配、组默认+设备 tighten-only 覆盖）——enforcement 全在 Manager 层（headless/定时同样生效），auto 档写调用经 `execTool.ReadOnlyCall` 合成到 permission 模式回退（完全访问冲不掉 confirm 的卡）
+- **放宽告警确认**：sealed→confirm/auto 每次弹独立告警卡（auto 档输组名仪式）→ 确认落审计链；**手改 TOML 绕不过**——confirmed-lock 存档比对，未确认放宽按 sealed 降级加载+界面告警；auto_expires 时间盒到期自动降回 confirm
+- **三明治管线**：每条直写 pre 快照→执行→post 快照→自动 diff→审计，失败即停（写前状态必已在库）；独立 turn_write_budget（默认 10/轮）
+- **OpStep 操作台账**：每条写步（直写/提案步/回退本身）一行——pre/post 指针、diff 摘要、Turn 锚定；设备卡台账视图：每步「↩ 回退此步」+「回退本轮全部写」（逆序起草恢复提案，一键省拼指令不省审批门）
+- **自动备份三件套**：drift 看护（定时快照 vs 上一版 diff→自动立案 source=drift，vault diff 即证据）；git 镜像（备份目录成 git 仓库，去重/blame/log -p，缺 git 优雅降级）；提案执行快照统一落 vault（三条历史线一个库）；`netdev_backup action=drift` 全网 sweep 工具化
+- **全套 UI**：设置页锁管理（设备/组写档下拉+徽标列+clamp 角标）、confirm 档写命令审批卡（Manager 通道，120s 超时按拒）、TOML 拦截横幅、转正对话框写档必选、实况双预算条+直写计数、i18n 中英
+- **写面盘点（附录 A）**：唯一写通道原则——dangerous/unknown 任何档恒拒、restore 恒提案、HumanTTY 人专属、SFTP/结构化步骤提案专属
+- 红测试 15 个（三档分发/TOML 拦截/headless 拒绝/预算/两锁合成/时间盒/drift/git 镜像/台账锚定/证据纪律），全绿
+- 文档：WRITE_AUTHZ_SPEC + SKILL_ORCHESTRATION_SPEC 两份定稿、NETDEV_SPEC §7.1 改写并入、操作手册×2（含 H 节）、BLUETEAM/架构/场景图同步
+
+### fix(cowork/browser): 浏览器迁移第三轮复核——"交给 AI"断链贯通 + dock 自开 + 死代码清理
+
+- **onInsertComposer 三级贯通**：App→CoWorkLayout→CoworkDock→BrowserConsolePanel——办公浏览器面板的"交给 AI"按钮此前灰死（netdev 布局有此通道、办公没接）
+- **进工作台自动开右 dock**：requestBrowserMirrorFocus 只切页签不开 dock 本体，两处入口补 onDockOpen()；Esc 退出工作台回任务中心（对齐原运维 Esc 语义）
+- **死代码清理**：BrowserMirrorPanel（旧 dock 纯镜像面板）删除
+- **复核确认（无需改）**：netdev.css 经两布局静态 import 全局生效（办公下 ndv-wb/ndv-brc 样式正常）；后端 browser 桥无 profile 门控；App 镜像 suppress 与 coworkActive 门控方向一致
+- SPEC 六之二追加第 12-15 项（三轮共 15 项）
+- 验证：tsc 绿；重建 fairpeer-final.exe（v0.2.1）
+
+### fix(cowork/browser): 办公浏览器右栏空——dock browser 页签挂完整控制台面板
+
+用户实测"浏览器的右边栏还是空的"。根因：迁移时完整工作台（镜像+F12）进了办公主区，但**控制台面板**（交互/记录/技能库/巡检四页签——操作 UI）在原运维布局住在 dock 的 browser 页签，迁移时未跟迁——办公 dock 该页签仍是旧的纯镜像面板，且被上一轮"防双画面"压制逻辑压住，右栏因此空白。修复：
+
+- dock 的 browser 页签改挂 **BrowserConsolePanel**（完整控制台，与中心工作台互补：主区=大镜像+F12、右栏=操作面板）——纯镜像面板退役；面板内联镜像在中心工作台激活时经 bench-changed 自动收起（双画面由面板内部机制防，撤销上一轮错误的页签压制）
+- 进入浏览器工作台（侧栏按钮或面板"打开观察窗"/"去重录"跳转）时经 mirror-focus 通道**自动展开右 dock 并切到 browser 页签**——右栏即有内容，不用手动找
+- 验证：tsc 绿；重建 fairpeer-final.exe（v0.2.1）
+
+### fix(boot): 浏览器迁移第二轮完整性复核——修 netdev 流程执行器功能回归 + 契约/文案/文档四层清零
+
+用户质询"肯定有遗漏"触发分层全量清查（前端/后端/测试/文档四层），4 项发现全部修复：
+
+- **功能回归（最重要）**：昨日 boot.go 收窄把 netdev 的 browser-flow 执行器一并移除——站点技能（browser-IT-ops 等）在运维对话按名 run_skill 会报 "no flow runner"，违反迁移 SPEC 不变量 2。修为分层注册：netdev 保留 SetFlowRunner+浏览器路径（RunBrowserFlow 直调 builtin 工具结构体、不经 Registry，零 schema 暴露），工具注册面仍仅 cowork。新增 `skill.RunFlow` 导出 + `TestNetDevKeepsBrowserFlowRunner` 守卫（不变量从今有测试钉住）
+- **契约漂移**：`TestBuildSkillDomainFolding` 仍断言 netdev 覆盖 browser-ops 域——反转（netdev 下必须折叠）
+- **文案指针**：skillTemplates siem-watch"在运维浏览器登录/运维页签运行"改为办公提法；brc.tgCommon 去"运维"；ndv.man.browser 篇名标"办公"
+- **文档失真**：NETDEV_HELP 场景表浏览器行标注办公入口；SKILL_ARCHITECTURE_SPEC 运维白名单行改为 09-04 决策推翻记录
+- SPEC 六之二重写为两轮完整清单（10 项）+ 迁移验收三步方法论（分层 grep/不变量反证/文案指针清零）
+- 验证：boot/skill 包测试、tsc、locale-parity + skill-doc 113/113 全绿
+
+### refactor(desktop): 浏览器归属办公——工作台整体迁入 + 技能域/工具注册收窄（用户定稿 2026-09-06）
+
+用户裁决：浏览器能力（工具）、入口（面板）、技能（站点技能）三位一体归**办公界面**；运维界面回归网络设备作业的纯粹身份。此前浏览器工作台因态势感知场景先落在运维（路径依赖），S7 下沉技能库后又出现双入口困惑（用户实测提问"办公技能库是干什么的"即证据）。
+
+- **办公界面**：「技能库」页签升级为完整**浏览器工作台**（BrowserWorkbench 单源迁入：交互/记录/技能库/巡检四页签 + 观察窗镜像，切走只藏不卸保留状态）；侧栏入口更名「浏览器」
+- **运维界面撤除全部 5 个挂点**：侧栏按钮/工作台切换 chip/工作台本体/dock「浏览器」页签/`fairpeer:netdev-bench` 事件路由——bench 枚举与 DockTab 类型同步收紧
+- **技能域收窄**：netdev `SkillDomains` 移除 browser-ops（站点浏览器技能只在办公索引；run_skill 按名调用不受限）；netdev 白名单移除 browser-auto（**推翻 2026-09-04"通用兜底"决策**，TestNetDevWhitelistsBrowserAuto → TestNetDevExcludesBrowserDomain 反转钉住）
+- **工具注册收窄**：boot.go 浏览器工具组 + browser-flow 执行器仅 cowork 注册（netdev 分支移除）
+- 文档同步：能力地图③④⑦行改指办公工作台、netdev-help 矩阵浏览器行标注"入口在办公界面"、spec 九句路由⑤⑥归办公、browser-ops-guide 顶部迁址注记
+- **迁移接线收尾**：办公侧接管 `fairpeer:netdev-bench "browser"`（面板"打开观察窗"/编辑器"去重录"按钮落点）与 `netdev-bench-changed` 镜像隐藏信号——三处死事件复活，单源组件零改动
+- **迁移 SPEC**：`docs/BROWSER_OFFICE_MIGRATION_SPEC.md`——决策链（含 2026-09-04 决策推翻记录）、旧→新映射表、五条不变量、行为变化须知、守护测试、遗留清单
+- **完整性复核批**（用户质询触发）：benchParam 类型漏改收紧；3 个死 locale 键×双端移除；办公 dock 镜像页签在工作台激活时临时收起（一屏一画面，订阅 bench-changed，持久化布局不动）；netdev 手册 browser 篇标注跨域参考；迁移 SPEC 补"六之二 完整性复核"表（六项发现五修一确认）
+- 验证：config/boot 包测试（含域收窄契约更新）、双模块 build、tsc、npm test 43/43 全绿
+
+### feat(netdev): 运维偏好面板（与编码/办公偏好同款）+ 入口正名 + 版本归 V0.2.1
+
+用户两点定稿：① 本轮全部改动归 **V0.2.1**（不跳 0.3.0）；② 运维要有真正的「运维偏好」，与「编码偏好/办公偏好」同款。落地：
+
+- **运维偏好面板**：PreferencePanel 复用（mode=netdev），侧栏新增「运维偏好」入口（SlidersHorizontal 图标）；三个运维工厂预设——证据先行/谨慎只读/简洁汇报（Go `defaultPresets` + 前端 `builtinPresets.ts` 双端镜像）；偏好按 `netdev-presets.json` 分键存储、激活项注入运维提示词（memory 既有机制）
+- **修一个真 bug**：memory `validProfiles` 漏 netdev——此前运维 tab 的偏好/记忆被 NormalizeProfile 折叠进 dev 分区（`TestDefaultPresetsNetdev` 抓出：netdev 取到 4 条 dev 预设）；补齐后 netdev 成为合法记忆分区
+- **入口正名**：原「运维偏好」按钮实际打开运维设置，更名为「运维设置」（ShieldCheck 图标）——基础设施配置与个人偏好两个入口并存、名实相符
+- **提示与示例对齐**：偏好内容编辑器的示例 placeholder 补运维专属文案（此前 netdev 错落编码示例）；工厂预设增至 4 条——证据先行/谨慎只读/研判带评分（按权威评分表给分级与命中信号）/简洁汇报，Go 与前端 builtinPresets 双端镜像、TestDefaultPresetsNetdev 守护
+- **修空列表根因**：ProfilePresets 原走激活 controller——懒构建未完成时返回空、面板只加载一次即永远"暂无模板"。改为直读激活 profile 的分键文件（无 controller 也返回工厂预设/可保存），TestProfilePresetsWithoutController 钉住
+- 验证：memory/desktop 桥测试、tsc、locale-parity 全绿；构建 v0.2.1（fairpeer.exe 已含全部运维偏好内容）
+
+### feat(netdev): SCENARIO_SPEC M2-M4 全量落地——值守减负 / 窗口与项目 / 全员可用
+
+M2 值守减负：
+- **S4 告警分级**：研判权威 rubric 固化（internal/netdev/alertrubric.go：失陷40/横移25/暴露20/可利用15，≥70/40-69/<40 三档）——watch 研判 JSON 契约带危险信号/评分/建议动作，轮次记录/推送摘要/面板徽标全链展示；**夜班窗口** [netdev.alerts] night_window/night_min，窗口内低于分级静默（NightSilenced 标记+晨报补账）；netdev-help 加"告警研判评分"节（对话与巡检同源）
+- **S2 修复建议结构化**：Finding.Fix{type/ref/link/confidence}——baseline 规则/弱口令/cve feed remediation 三处 verified 来源；netdev_finding 工具 schema 与 vulnscan 第四步按结构产出（模型推断标 model）；发现卡/蓝队卡渲染 fix 徽标行；起草提案提示词自动注入
+- **S3/K5 技能自检**：试运行失败定位步+锚（anchor/stable/other 三类诊断+去重录按钮）；连续 2 次锚失败技能库标"待重录"
+
+M3 窗口与项目：
+- **S1-1 割接 precheck**：runbook Precheck{battery,probes}——变更前跑只读电池/基线比对/ping·command 探测，红灯 precheck-failed 停窗前，CutoverPrecheckOverride 人工放行（审计留痕）；割接大屏红绿灯条；红/绿两测试
+- **S1-2 GPU 并入**：linux-shell 读表放行 nvidia-smi/npu-smi 全只读形态；设备 gpu 标记（设置+往返）；triage GPU 档（概览/温度显存/XID——XID>0 立案，温度≥85 告警）；设备卡 GPU 徽标
+- **S5 项目审计**：AuditProject/AuditReport 实体（audit-projects.jsonl）+ 套餐引擎（基线/vuln/日志/暴露面/信封内弱口令——信封闸不绕过）+ 复扫签名合并自动转 fixed + 放行判定（全 fixed∨accepted）；安全工作台「项目审计」页签（新建/发起/逐项处置）；K2-2 netdev-audit-project 技能（对话与面板同引擎）
+
+M4 全员与收尾：
+- **S6 运维简报**：Briefing{kind,sections} 脱敏摘要（风险清单/巡检摘要/变更统计）双格式落 ~/.fairpeer/briefings/（latest 覆盖+归档）；总览巡检卡"生成运维简报"按钮；**K2-4 办公消费**：cowork 路由表加 OPS WEEKLY REPORT 行（read briefing JSON → ppt-auto，缺文件提示不编造）
+- **S7 文员面板**：办公布局挂「技能库」页签（BrowserConsolePanel 同组件单源）；**K2-5 文员三模板**：模板库"文员场景"分组（form-submit/data-export/expense-submit——报销单含 human 金额核对断点）
+- **G3**：netdev-draft 命令起草技能（读写分流：读直执/写进提案）；NotifyPushTextWithAttachments（SMTP multipart，IM 降级路径清单）；browser-soc-response 态势处置骨架（draft:true 红线：停在确认页人工点执行）
+- **G4-1 安全欠账落地**：todo_write 校验失败改 ack+⚠ 警告软降级（防重试死循环，测试同步）；调度器 max_runs_per_day 硬顶（默认 48，确认可放行）+ >4 次/日高频确认
+- **G4-2/3/4 文档对齐**：NETDEV_USAGE 诚实清单复核（移除已落地四项，两份镜像）；fairpeer_vs_pi P2/P3 勾选；PPT_SKILL_PLAN 嵌入分发回填；IMPROVEMENT/MODEL_REGISTRY 状态注记；NETDEV_HELP 场景速查节（与技能卡同源）
+- **G1-6**：技能文档骨架双语（getLocale 按界面语言）
+- **S7 补**：审计技能文案同步 §八约定
+
+### fix(netdev/desktop): SCENARIO_SPEC M1 卫生批落地——G1 体验一致性 + G2 会话可靠性
+
+- **G1-1 面板三态化**：新增 `usePanelData` hook（loading/error+重试/empty/ok，错误保留 last data）与 `PanelErrorState` 共享组件；调查链/割接/发现/暴露面四块大屏接入——拉取失败不再与空数据不可区分
+- **G1-4 空态三要素**：`EmptyState` 组件 + 重点 8 处补引导动作（总览空态双入口、割接无批准变更跳变更页签、Jobs/Health/LogPanel/LogWorkbench 去设置按钮）；新增 `fairpeer:netdev-open-dock/-settings` 空态动作事件并在布局层接线
+- **G1-5 ProposalCenter i18n**：状态表/确认框/步骤详情/时间行约 40 处硬编码中文全部走 t()，zh/en 补 36 键——英文界面变更中心零中文
+- **G1-7 错误码化**：技能保存重名错误加 `[duplicate]` 码前缀，编辑器按码分支（文案改字不再破坏流程，含旧版兜底）；参数名启发式补 time/range/date/period/window/interval
+- **G1-6（部分）**：控制台"提取完成/切换页卡"文案 i18n；技能文档模板双语化遗留 M4（记录于 spec）
+- **G1-2/3/8/9/10/11**：布局主数据错误标记、29 处辅助吞错补 best-effort 标记、"基线"标题前缀改 source 判定、写死日期改动态、DashShell 死分支删除
+- **G2-2 会话保存事件**：快照落盘后 emit `session:saved`（tabId/profile/path），侧栏订阅按 profile 过滤 300ms 防抖刷新——新会话完成首轮即入"最近会话"
+- **G2-3 分区枚举健壮化**：`knownSessionDirs` 增加三 profile 主分区+各自项目索引的固定推导，tab 目录降级为补充——分区 tab 全关历史不消失
+- **G2-4 tab 懒构建**：恢复期只构建激活 tab，其余 `PendingBuild` 标记，`ensureTabBuilt` 在 SetActiveTab/OpenProjectTab 激活时触发（SubmitToTab 原有同步重建兜底、reviveParkedTabs 排除 pending）——消除 70 tab 级启动并发风暴
+- **G2-6 ppt-auto 产物迁移**：`MigratePPTProjects` 一次性把 skills/ppt-auto/projects/* 迁 `~/.fairpeer/ppt-projects/` 并以 `FAIRPEER_PPT_PROJECTS_DIR` 钉址（子进程 python 继承），SkillVersion 48→49 强刷
+- 验证：desktop/internal 双模块构建+定向测试、tsc、locale-parity、npm test 全绿
+
+### feat(netdev): 场景规划批 M1 治理项——SCENARIO_SPEC v3.0 落地（K1/K2-1/K3/K4/G2-1/G2-5）
+
+用户批准九场景整备规划（`docs/SCENARIO_SPEC.md`，K/H/S 三篇）。本批落地治理先行项：
+
+- **K1 能力地图**：`docs/SCENARIO_CAPABILITY_MAP.md`——九场景×四列（技能/工具/模板面板/MCP）单一权威视图，无能力格显式标注；附 K5-1 登记制维护规则
+- **K2-1 `netdev-config-vault` 内置技能**：【场景：配置版本化与恢复】阶段化向导（版本台账/两版对比/与现网 drift/恢复提案 restore_from，任意入口）；红线=恢复永不直接执行；白名单/名册/场景矩阵三处登记，名册守卫测试过
+- **K3 工具注册按场景分组**：RegisterTools 六组重排（诊断→评估测绘→主机中间件→变更保管→知识日志→可信域），组序即 system prompt 工具清单序、组名零 token；`TestRegisterToolsScenarioOrder` 钉组序
+- **K4 MCP 决策固化**：SCENARIO_SPEC §MCP 记录封印理由与只读解锁草稿；profile.go 注释指向，开印必先更新决策记录
+- **G2-1 子代理会话过滤**：`isSubagentSession`（subagents/ 路径段∨sa_ 前缀，盘根固定点上溯防死循环——测试当场抓出的真 bug）；listSessions/listTrashedSessions 双处过滤；单测钉住（"最近会话"不再混入内部转录）
+- **G2-5 resume 失败可见化**：useController 注入 onNotice 通道，恢复失败 toast 后端真实原因；App.tsx showToast 提前声明防 TDZ
+
+### refactor(netdev): 技能层按场景重组——netdev-help 升级场景导航 / 评估技能更名 / 站点技能场景前缀
+
+用户定稿"按场景、功能写 skill、对接工具、方便用户找到"。落地（SKILL_ARCHITECTURE_SPEC §九）：
+
+- **netdev-help 升级为场景导航**：正文新增「场景速查」矩阵——十个运维场景（故障排查/安全评估/漏洞核查/告警问答/告警导出研判/日常巡检/变更保管/主机中间件健康/资产测绘/本地知识查证）各给"首选（技能或界面直达）+ 配套工具"；description 改为"不确定用哪个技能/工具时先查本卡"。矩阵分清三类去向（走技能/走界面/直接用工具），站点级用户技能标注"若已安装"
+- **评估技能更名 netdev-assess → netdev-security-assessment**（用户目录）：场景命名，与 netdev_assess 工具从名字上彻底分离；netdev_assess 工具描述的交叉引用同步
+- **站点技能场景前缀**：browser-IT-ops / browser-cybersituational-awareness description 加【场景：…】前缀（问答 vs 导出研判），netdev-security-assessment 同规格
+- 原则固化：技能=场景层（场景命名+编排），工具=能力层（技术命名，不面向检索）；索引型技能点名工具名是 §八规则 2 的豁免
+
+### refactor(netdev): 运维技能/工具/MCP 全面审计与文案统一整改
+
+用户要求清点运维界面全部技能、工具、MCP 并按使用场景统一整改。清点：26 个 netdev_* 工具 + 可信域条件工具 2 + RAG 2 + browser_* 21（隐藏、子代理用）+ 内置技能 6 + 用户技能 3 + 散文模板 3；MCP 在 netdev 白名单钉死为空（安全设计）。判定：diag 三兄弟/playbook/help 的"固定"是领域方法学（协议状态机/读序矩阵），保留不动；vulnscan 四步流水线同理保留。整改的统一规则落进 SKILL_ARCHITECTURE_SPEC §八（阶段化 vs 流水线的判据、正文不点工具名、禁 UI 菜单路径、内部编号不进描述、名物冲突双向消歧、同域技能互相指路）：
+
+- **工具描述去 UI 路径/内部编号**：netdev_assess（"设置 → 运维中配置"→"ops settings"，删 §6.2）、netdev_cve_match（"安全工作台 → CVE"→抽象表述）、netdev_nmap（删 PENLAB P1-1）、netdev_netprobe（删 §5.1）
+- **名物冲突消歧**：`netdev-assess` 技能（流程统筹）↔ `netdev_assess` 工具（单台弱口令专项）——两侧 description 互写分工与交接口
+- **同域近义技能互指**：browser-IT-ops（AI 助手问答）↔ browser-cybersituational-awareness（告警导出研判）description 尾部各加"什么情况改用另一个"
+- **vulnscan 正文/描述去 UI 挂载点**：「蓝队核查」页卡/dock tab → 蓝队核查视图、"安全工作台 → CVE 页签粘贴" → CVE 导入处（source=vulnscan 数据契约保留）
+- **netdev-assess 技能 v2**（用户目录，前批）：瀑布→阶段状态机 + 写作约定段，随本批纳入统一规则
+
+### feat(desktop): 设置三页卡补齐批次——导航副标题 / 移动端重排 / 信任域一键开启 + 渲染器丢段修复
+
+用户反馈三点：设置左侧导航的 移动端/运维/信任域 三个页卡没有副标题、高度比别的矮一截；移动端页全是内联样式裸控件没有布局；信任域页只显示一句"未启用"、开启方式不明。取证后顺带挖出一个**持久化级真 bug**（见第一条）。
+
+- **渲染器丢段修复（internal/config/render.go）**：手写 TOML 渲染器没有 `[trustdomain]` 和 `[mobilebridge]` 段——凡经 `WriteFile/SaveTo` 的写入这两个段都被静默丢弃（`[netdev]` 注释里记载过的同类 bug）：信任域 enabled 标志写不进配置，移动端的 UDP 敲门/公网跳板/信令模式/配对网卡**重启即丢**。照 `[netdev]` 的结构体序列化模式补上两个段（user 域专属，非零才渲染）
+- **信任域一键开启**（desktop/trustdomain_app.go）：新增 `TrustDomainInit`（生成身份密钥 + 创世块 quorum=1 引导域，已有账本则复用不覆盖，写 enabled=true）与 `TrustDomainSetEnabled`（join 路径只翻标志）；`netdev.ResetSharedRemoteNode` 让 GUI 建域后状态视图即刻刷新（`sync.Once` 缓存的"未入域"错误原本要重启才能清掉）；未开启/未入域态从一句裸 `<p>` 重写为开启引导卡——方案一"创建并开启"按钮（带确认弹窗）+ 方案二加入已有域的 4 步 CLI 指引（identity/admit/join 命令行一键复制 + "开启配置"按钮）。**开启走 `applyConfigOnly` 而非 `applyConfigChange`**（用户复现：未配置模型的机器上点开启 → 顶栏常驻"启动错误：unknown model …"）——`rebuild()` 的 `boot.Build` 在无默认模型时必败并把错误写进 `tab.StartupErr`，而信任域是与模型无关的基础设施：配置写盘即生效，`netdev_fleet/netdev_remote` 在下一次控制器构建（boot.Build → netdev.RegisterTools 每次按配置注册）自然带上；回归测试钉死"活 ctx + 无标签页（rebuild 必败路径）下开启仍成功"（裸 `&App{}` 因 ctx==nil 提前返回，之前测不出来）
+- **设置导航三页卡补副标题**（SettingsPanel）：`settingsTabMeta` 对 mobile/netdev/trustdomain 返回空串导致这三项没有 `<small>` 副标题、高度参差；补 `settings.tabSub.*` + `settings.tab.mobile`（原先硬编码"移动端"未走 i18n）+ `settings.pageDesc.mobile/trustdomain` 页头描述
+- **移动端页重排**（SettingsPanel MobileSection）：内联样式裸 checkbox/select 全部重写——配对卡（QR/状态/待确认设备）保留 `mobile-pair-panel` 网格，网卡/信令模式/NAT 敲门/公网跳板拆成四个 `SettingsSection`，控件统一 `SettingsField` 行布局 + `mem-input/mem-select` + `ToggleSegment` 开关段，长说明收进字段 hint（开启后渐进展示）；全部文案接入 i18n（`mobile.*` 约 40 键，en/zh 双端）
+- **移动端页 CMD 闪窗修复（internal/mobilebridge/pairing.go）**：点开移动端页卡时 `ListPairNics → defaultLanIPInfo → windowsDefaultRoutes` 会 spawn `route.exe print -4` 读默认路由——GUI 父进程（`-H windowsgui`）没有可继承的控制台，Windows 就为这个控制台子进程新建一个，即用户看到的 CMD 一闪而过；补 `proc.HideWindow`（CREATE_NO_WINDOW，仓库既有辅助），route 解析逻辑不变
+- **信任域看板去黑话批次**（用户截图反馈"名词看不懂/不好用/报错不规范"）：术语改人话——"高度"→**账本高度**、"法定人数"→**审批门槛**、"本机身份"裸哈希加"本机"标签（原代码就没有 label）、"能力令牌"空态改为一句解释令牌是什么+谁签发；全部统计项/哈希/角色/自证加 tooltip（悬停讲清"域 ID=创世哈希、加入时核对的就是它"）；成员列表本机条目加**「本机」徽标**；按钮从浏览器默认样式接入 `btn` 体系（解除=primary/刹车/互锚=secondary，刹车保留 danger 色）；**紧急刹车加确认弹窗**（此前随手点到即全网刹停——用户截图里域正处在刹车态多半就是这么来的）；所有动作报错统一 `"{action}失败：{detail}"` 前缀，不再裸 Go 错误串 toast；刹车横幅文案补"跨机委托停止、本机不受影响"边界
+- **信任域回退路径补齐**（用户问"创建并开启是不是不能回退了"——确实没有 UI 回退入口，关闭开关后端有但没放按钮、重建只有 CLI init --force）：后端抽出 `tdCreateBootstrapDomain(force)`，新增 `TrustDomainReset`（init --force 同款：丢弃账本重建引导域，身份密钥保留）；看板底部新增「维护」行——**关闭信任域**（软回退：仅 enabled=false，账本/密钥留盘，重新开启原样恢复，普通确认）与**重置域**（硬回退：危险确认；检测到多成员时确认文案切换为"其它成员将孤立、需逐台重置"强警告）；"创建并开启"确认弹窗补一句"随时可回退：维护里可关闭或重置"；回归测试：重复 init 复用同域 / reset 产新域且回到单管理员创世态（域 ID=创世哈希含秒级时间戳，同一秒内 init+reset 哈希相同，测试跨秒断言）
+- 新增 `td-onboarding` 卡片样式（panels.css，tokens 合规）；验证：双模块 build+test 全绿（desktop 全量含新增 3 个建域测试：init 建引导域/enabled 落盘/重复 init 复用同域、reset 重建新域、SetEnabled 不动账本），config/netdev/trustdomain/mobilebridge 包测试通过，tsc + locale-parity + css token 检查 + 43 vitest 通过
+
+### fix(netdev): 立即巡检迁入总览「网络巡检」卡——触发任务化 + 进度事件流
+
+用户反馈：点左下角「立即巡检」后界面卡顿、按钮错标"分诊中…"。取证：`NetDevRunInspection` 是**同步绑定**——逐台设备串行 SSH 只读电池（5 分钟超时）跑完才返回，几分钟里按钮挂着从 `ndv.insp.triaging`（主机分诊的文案）借来的 busy 态；完成时还把成功消息塞进 `setErr` 错误横幅。用户定稿：立即巡检应住在巡检自己的界面里。
+
+- **总览大屏新增「网络巡检」卡**（OverviewPanel，紧邻风险趋势卡）：定时巡检周期 + 上轮结果（可点跳发现中心）+ 最近两轮 R1 摘要（`risk_trend` 的 inspection 行）+「立即巡检」按钮（busy 显示"巡检中… N/M"，进度即设备推进）——侧栏按钮移除，`ndv.insp.runNow/runTip/baselining` 死键双端清理（`triaging` 保留给设备卡单机分诊）
+- **触发任务化**（desktop/netdev_app.go）：`NetDevRunInspection` 改为 kick 即返（goroutine 跑一轮，进行中再点是 no-op），新增 `NetDevInspectionStatus`；状态经 `netdev:inspection` 事件推送（`setInspState`），总览卡零定时器、纯事件驱动（与 §8.4 一致）；**定时调度器同走 `runInspectionRound`**，卡上"上次巡检"手动/定时两源都覆盖；审计空态的引导动作同步改 kick
+- **内核进度钩子**（internal/netdev/inspect.go）：`RunInspectionProgress(ctx, progress)` 每台设备电池完成回调 (done,total)，`RunInspection` 保持原签名委托；`TestRunInspectionProgress` 钉单调性/终止契约
+- 前端 bridge/types/mock 同步（`onNetdevInspection` 订阅 + dev mock 假三轮）；验证：go 双模块 build+test、tsc、npm test（43 vitest + 全部脚本式）全绿
+
+### fix(desktop): 无 topic 会话修复批次——空白标签补 topic / 孤儿会话领养回树 / 最近会话双击兜底
+
+用户报告运维/办公的「最近会话」双击报"无法打开会话"、部分新会话在项目工作区不显示。取证（真实 `%APPDATA%\fairpeer` 数据复现）定位为同一根因的两面：**恢复期外来根重落地的标签页没有 topic**（`restoreOrBuildTabs` 传空 topicID，`buildTabController` 只给已退役的 global scope 自动补），在该标签里聊天后 `saveTabSessionMeta` 把空 topic 写进会话 meta——这类会话 turns>0 会出现在「最近会话」，但双击时 `onResumeSession` 因无 topicId 直接抛"无法打开会话"，且永远进不了按 topic 组织的项目工作区树：
+
+- **启动修复（`desktop/blank_topic_repair.go`）**：`restoreOrBuildTabs` 在控制器构建前调用 `repairBlankTopicTabs`——每个空白 project 标签分配新 topic 并登记进 profile 索引（`ensureTabTopic`，首启工作台标签同样覆盖）；随后按 profile 扫描各分区，把已落盘的无 topic 会话**领养**回树：优先复用所绑定标签的新 topic，否则新建，标题取首条用户消息，注册进所属根的索引并回写 meta（`adoptTopiclessSessions`）。领养以 meta 的 profile 戳为权威归属（dev 扫描隔着 `sessions/cowork|netdev` 一层能看到扁平文件，归属不符即跳过）；subagent（`subagents/` 目录约定 + ParentID）、bot、专家会话排除；幂等
+- **resume 回写**：`ResumeSessionForTab` 由只记路径升级为 `persistTabSessionPath`——正常恢复是同值重写；兜底路径把空白标签的 topic 直接落到会话 meta，领养即完成
+- **前端兜底（App.tsx `onResumeSession`）**：无 topicId 的会话不再直接报错，改为在其自身 root+profile 上开空白标签直接 resume（控制器分区即会话所在分区）；失败 toast 优先显示后端真实原因（如「项目属于其他模式」），不再一律"不存在"
+- 验证：新增 5 个测试（绑定领养/无主领养/三类跳过含无 parent_id 的老 subagent/幂等/专家与远程标签跳过）；用真实用户数据副本端到端验证——两条孤儿会话均以 netdev 归属入树、索引净增恰 +2、subagents 7 条全跳过；desktop 全包测试、frontend tsc + 测试全绿
+
 ### fix(browser): stable: 判稳重写——首 token 前绝不放行（browser-IT-ops 抓不到慢回答的根因）
 
 用户实测 browser-IT-ops 查哈尔滨池告警：AI 助手回答需 30-60 秒，第五步 `stable:` 等待在回答出现前就放行、第六步 extract 抓空，技能只返回流程日志。原实现（自适应静默版）仍有三个提前放行洞，本批把 `stable:` 重写为就绪态状态机（`internal/tool/builtin/browser.go`）：
@@ -155,6 +334,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **路径默认值跟 OS 走**：报错里的 `/var/log/syslog` 是 Debian 惯例，centos 对应 `/var/log/messages`（认证日志 secure vs auth.log）——日志页与日志工作台的文件源默认值、空态快捷片改为按所选设备 OS 家系给出，切换设备时若目标仍是默认路径则跟随切换（用户手输的路径不动）
 - **动作按钮合并一行**（用户建议）：日志页「筛选/读取/跟随/交给AI/导出/清空」收进同一行，筛选展开的 行数/起于/过滤 参数单独占行
 - 验证：netdev 全量（198s）+ driver 全量 + 新增测试通过；frontend tsc + vitest（dash-boards/live-ops-state/locale-parity）通过
+
+### docs(netdev/browser): 浏览器工作流完整规格 browser-flow-spec.md
+
+沉淀本轮全部设计的系统级 spec（docs/browser-flow-spec.md，13 节）：技能文件格式与步骤词汇（17 种操作的目标/值语义）、锚点系统（多级回退链/CSS 预检快失败/JS 点击与悬停）、时间范围惰性换算、**harness 控制列契约**（重试/校验/复核再重发/失败策略/留证，含执行伪码）、wait 条件词汇（download/stable 两档静态兜底）、三条执行路径与会话页签生命周期（switch_tab-first 不建空白页）、定时巡检（整分对齐/连续覆盖/持久化）、研判 verdict 双 schema 与通知路由、UI 契约、已知限制（视觉挂钩预留未接线）与验证清单（逐条对应既有测试）。
+
+### feat(netdev/browser): 步骤 harness 控制列——兼顾速度与质量的执行契约
+
+在确定性 flow 的步骤表加第 5 列「控制」（可选、向后兼容，不写=现行为零开销），把"做 X"升级为"保证 X 做成了，没做成按策略处理"：
+
+- **语法**（空格分隔，中英文键等价）：`重试=N 校验=<条件> 校验预算=Ns 失败=停止|继续|视觉`；解析在表格解析期完成，拼写错误在打开浏览器前就报错（planning-time 契约）
+- **速度优先的设计**：控制列为空 = 单次裸执行零额外延迟；校验是短预算复查（默认 10s，复用既有 wait 条件词汇表 url:/visible:/networkidle/download/stable:，零新增条件代码）；重试退避 1s/2s/4s
+- **防重复触发（质量）**：校验失败先"复核再重发"——退避后花 3s 复查校验条件，通过则判定为信号滞后（动作已生效）不重发动作，杜绝慢信号导致的二次点击/二次导出
+- **失败策略**：停止（默认）/ 继续（记录失败跑完后续步骤，终态事件与报告汇总"⚠️ N 步失败但放行"，巡检由补漏窗口衔接）/ 视觉（预留挂钩，当前按停止处理并注明）
+- **失败留证**：最终失败自动截图存 `%LOCALAPPDATA%/fairpeer/browser-evidence/<步骤>-<时间戳>.jpg`，路径写进步骤错误（后续 VLM 失败诊断的挂接点）
+- **三路径一致**：run_skill（RunBrowserFlow）与面板试运行/巡检（runConsoleSteps）共用同一套语义与解析器（builtin.ParseStepControl）；面板试运行启动前校验控制列
+- **编辑器**：步骤行新增"控制"输入（placeholder 示例 + 悬浮说明），skillDoc 解析/序列化第 5 列（老技能 4 列序列化字节不变）
+- 示例：`| 4 | click | \`text=导出\` | | 重试=1 校验=networkidle |`（点了没反应 1 秒后复核再点一次）；`| 7 | extract | \`table.logs\` | table | 失败=继续 |`（单组采集失败不炸全流程）
+- 验证：ParseStepControl（中英键/非法值拒识）/表格第 5 列解析与 planning 期报错/前端 5 列回环（老行序列化不变）单测通过；builtin 全量 + desktop 全量 + 前端 tsc/vitest 全绿
+
+### fix(netdev/browser): about:blank 空白页签仍在累积——CloseTarget 走错通道被静默拒绝 + 恢复页签竞态
+
+用户实测：上一批修复后操作网页仍经常弹出 about:blank。两个残余根因，都已修：
+
+- **CloseTarget 发送通道错误（上批修复实际无效）**：switchSessionTab 关闭遗弃空白页时把 Target.closeTarget 挂在页面会话的 ctx 上执行——Chrome 对"浏览器级命令走页面会话"静默拒绝，`_ =` 吞掉错误，空白页原样存活。修复：新增 `closeTargetBrowserLevel`，经 `chromedp.FromContext(ctx).Browser.Execute` 走浏览器连接发送（SetDownloadBehavior 的既有先例通道）
+- **--restore-last-session 还原历史空白页 + 异步竞态**：持久浏览器重启会还原上次会话的全部页签（包括 fairpeer 被强杀时来不及取消的会话遗留空白页）；且还原是异步的，attach 后立即清扫会扑空。修复：**空白页清道夫**——ConsoleOpen（接管与 spawn 两条路径）后延迟异步清扫（2s + 6s 双保险），关闭所有 about:blank/空 URL 的页目标、保留会话当前页与真实页面
+- 验证：新增 TestConsoleOpenSweepsBlankTabs（造 2 个空白页 + 1 个真实页 → 关闭重开 → 清扫后仅剩会话自身驱动的空白页、真实页存活）；builtin 全量（真实 Chrome）+ desktop 全量通过
 
 ### fix(netdev/browser): 每次 run_skill 泄漏一个 about:blank 页签
 
@@ -1050,8 +1255,6 @@ R4 剩余四件（规格 `docs/NETDEV_SPEC_V2.md` §7.1/§7.2/§6.1 + v1 §10.5 
 - **压缩按钮运行态收敛**：两处压缩入口（用量条热态按钮、精简面板常驻按钮）在活动 tab 流式进行中禁用（`state.running` 经 `dockBusy` 穿 CoWorkLayout→CoworkDock），避免压缩写了一半的上下文；`fmtDuration` 提取到 `lib/duration.ts` 双处共用
 - 验证：`go build/vet/test`（desktop 全量）+ 前端 `build`（css 检查 + tsc + vite）+ `test:all` 全绿；vitest 曾现一次 worker 超时（Windows jsdom 抖动，单跑即过，非代码问题）；dev 服务器模块探针（7 个改动文件 transform 全 200）。**真机交互冒烟仍待做**：热态按钮（需真实 ≥85% 上下文）、「轮次」tab 轮次表（dev mock 的 TurnFacts 为空，需真实会话）、办公模式新概览
 - 已知取舍：「用时」= 累计轮次耗时非会话墙上时钟（后端本就无 session start 追踪，如实命名）；办公模式概览降级为统计条 + 轮次表（用户裁定，压缩入口经统计卡区按钮保留）
-
-## [0.1.10] — 2026-08-27
 
 ### 运维能力扩展 R1-R3（NETDEV_SPEC v2.0 落地）
 

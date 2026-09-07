@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/diff"
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 	fileenc "github.com/zzycxz/fairpeer/internal/fileutil/encoding"
 )
 
@@ -149,7 +150,7 @@ func (s *Store) load() {
 			s.done = append(s.done, &c)
 		}
 	}
-	sort.Slice(s.done, func(i, j int) bool { return s.done[i].Turn < s.done[j].Turn })
+	sort.SliceStable(s.done, func(i, j int) bool { return s.done[i].Turn < s.done[j].Turn })
 }
 
 // Begin opens a checkpoint for a new user turn, finalizing the previous one. The
@@ -157,6 +158,11 @@ func (s *Store) load() {
 func (s *Store) Begin(turn int, prompt string, msgIndex int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.beginLocked(turn, prompt, msgIndex)
+}
+
+// beginLocked is Begin without taking the lock; caller holds s.mu.
+func (s *Store) beginLocked(turn int, prompt string, msgIndex int) {
 	if s.cur != nil {
 		s.done = append(s.done, s.cur)
 	}
@@ -182,6 +188,41 @@ func (s *Store) Finalize() {
 	s.cur = nil
 	s.seen = map[string]bool{}
 	s.pruneLocked()
+}
+
+// TruncateFrom drops every checkpoint at `turn` or later — finalized entries and
+// an open current turn alike — deleting their persisted turn-N.json files
+// (best-effort) so those turn numbers can be reused cleanly. It is the
+// store-side half of a conversation rewind: the controller renumbers its turn
+// counter back to `turn`, and without this the next Begin(turn) would coexist
+// with stale snapshots of the discarded turns — two entries sharing a Turn,
+// picked between nondeterministically by RestoreCode/SuffixInfo/DiffForTurn.
+// Returns how many entries were dropped.
+func (s *Store) TruncateFrom(turn int) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dropped := 0
+	kept := make([]*Checkpoint, 0, len(s.done))
+	for _, c := range s.done {
+		if c.Turn >= turn {
+			dropped++
+			if s.dir != "" {
+				_ = os.Remove(filepath.Join(s.dir, fmt.Sprintf("turn-%d.json", c.Turn)))
+			}
+			continue
+		}
+		kept = append(kept, c)
+	}
+	s.done = kept
+	if s.cur != nil && s.cur.Turn >= turn {
+		if s.dir != "" {
+			_ = os.Remove(filepath.Join(s.dir, fmt.Sprintf("turn-%d.json", s.cur.Turn)))
+		}
+		s.cur = nil
+		s.seen = map[string]bool{}
+		dropped++
+	}
+	return dropped
 }
 
 // Bounds returns turn → MsgIndex over all checkpoints (persisted + current), so
@@ -356,16 +397,14 @@ func (s *Store) KeepCurrent(prompt string, msgIndex int, paths []string) int {
 	if len(paths) == 0 {
 		return -1
 	}
+	// Allocating the synthetic turn and opening its checkpoint is ONE critical
+	// section: computing the number, dropping the lock, then calling Begin let
+	// two concurrent KeepCurrent calls pick the same turn and clobber each
+	// other's turn-N.json.
 	s.mu.Lock()
-	turn := 0
-	for _, c := range s.all() {
-		if c.Turn >= turn {
-			turn = c.Turn + 1
-		}
-	}
+	turn := s.nextTurnLocked()
+	s.beginLocked(turn, prompt, msgIndex)
 	s.mu.Unlock()
-
-	s.Begin(turn, prompt, msgIndex)
 	for _, p := range paths {
 		abs, err := safePath(s.root, p)
 		if err != nil {
@@ -448,7 +487,9 @@ func (s *Store) persist(c *Checkpoint) {
 		slog.Warn("checkpoint: create dir failed", "dir", s.dir, "err", err)
 		return
 	}
-	if err := os.WriteFile(filepath.Join(s.dir, fmt.Sprintf("turn-%d.json", c.Turn)), b, 0o644); err != nil {
+	// Atomic (tmp+rename): a crash mid-write would otherwise leave a truncated
+	// JSON that load() silently skips — losing that turn's pre-edit snapshots.
+	if err := fileutil.AtomicWriteFile(filepath.Join(s.dir, fmt.Sprintf("turn-%d.json", c.Turn)), b, 0o644); err != nil {
 		slog.Warn("checkpoint: persist failed", "turn", c.Turn, "err", err)
 	}
 }
@@ -459,6 +500,11 @@ func (s *Store) persist(c *Checkpoint) {
 func (s *Store) NextTurn() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.nextTurnLocked()
+}
+
+// nextTurnLocked is NextTurn without taking the lock; caller holds s.mu.
+func (s *Store) nextTurnLocked() int {
 	next := 0
 	for _, c := range s.done {
 		if c.Turn >= next {
@@ -497,7 +543,7 @@ func (s *Store) all() []*Checkpoint {
 	if s.cur != nil {
 		cps = append(cps, s.cur)
 	}
-	sort.Slice(cps, func(i, j int) bool { return cps[i].Turn < cps[j].Turn })
+	sort.SliceStable(cps, func(i, j int) bool { return cps[i].Turn < cps[j].Turn })
 	return cps
 }
 

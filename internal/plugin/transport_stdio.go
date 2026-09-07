@@ -410,16 +410,27 @@ func mergePathLists(primary, secondary string) string {
 const maxMCPStdioLine = 16 << 20 // 16 MiB
 
 // readBoundedLine reads one '\n'-terminated line from r, refusing lines longer
-// than maxBytes. It wraps ReadBytes with a size check so a multi-GB line (no
-// '\n') is rejected before it exhausts memory. EOF is propagated (as io.EOF, or
-// with partial data + io.EOF) so the caller can detect process exit — same
-// contract as ReadBytes.
+// than maxBytes. It accumulates ReadSlice chunks and aborts the moment the
+// running length passes the cap, so a multi-GB line (no '\n') is rejected
+// without ever being buffered in full — ReadBytes would grow to the whole line
+// before the check ran. EOF is propagated (as io.EOF, or with partial data +
+// io.EOF) so the caller can detect process exit — same contract as ReadBytes.
 func readBoundedLine(r *bufio.Reader, maxBytes int) ([]byte, error) {
-	line, err := r.ReadBytes('\n')
-	if len(line) > maxBytes {
-		return nil, fmt.Errorf("MCP stdio line exceeded %d-byte limit (got %d); the server may be misbehaving", maxBytes, len(line))
+	var buf []byte
+	for {
+		chunk, err := r.ReadSlice('\n')
+		if n := len(buf) + len(chunk); n > maxBytes {
+			return nil, fmt.Errorf("MCP stdio line exceeded %d-byte limit (got %d); the server may be misbehaving", maxBytes, n)
+		}
+		buf = append(buf, chunk...)
+		if err == nil {
+			return buf, nil
+		}
+		if err == bufio.ErrBufferFull {
+			continue // delimiter not in this chunk — keep accumulating
+		}
+		return buf, err // io.EOF (possibly with partial data) or a real read error
 	}
-	return line, err
 }
 
 // readLoop owns stdout for the transport's lifetime: it reads one JSON-RPC

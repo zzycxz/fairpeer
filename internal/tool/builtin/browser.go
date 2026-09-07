@@ -1981,6 +1981,57 @@ func pageTargetInfos(s *browserSession) ([]*cdptarget.Info, error) {
 	return out, nil
 }
 
+// closeBlankPageTargets closes leftover about:blank page targets except
+// `keep` — the persistent browser accumulates them across restarts
+// (--restore-last-session resurrects blanks from crashed/killed fairpeer
+// runs whose session cancels never ran), and every attach boot adds one
+// before pickFirstConsoleTab rebinds away. Real pages are never touched.
+func closeBlankPageTargets(s *browserSession, keep cdptarget.ID) {
+	infos, err := pageTargetInfos(s)
+	if err != nil {
+		return
+	}
+	for _, t := range infos {
+		if t.TargetID == keep || (t.URL != "" && t.URL != "about:blank") {
+			continue
+		}
+		closeTargetBrowserLevel(s.ctx, t.TargetID)
+	}
+}
+
+// closeTargetBrowserLevel sends Target.closeTarget over the BROWSER
+// connection. Routing it through a page-session context gets it silently
+// rejected by Chrome (browser-level command on a page session) — the reason
+// earlier close attempts left the blank tabs alive.
+func closeTargetBrowserLevel(ctx context.Context, id cdptarget.ID) {
+	c := chromedp.FromContext(ctx)
+	if c == nil || c.Browser == nil {
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	params := cdptarget.CloseTargetParams{TargetID: id}
+	var res json.RawMessage
+	_ = c.Browser.Execute(cctx, cdptarget.CommandCloseTarget, params, &res)
+}
+
+// sweepBlankTabsLater runs the blank-tab janitor on a delay: the persistent
+// browser's --restore-last-session materializes its tabs ASYNCHRONOUSLY, so
+// an immediate sweep races them and misses exactly the tabs it exists to
+// clean. Two passes (2s + 6s) cover slow restores; each pass keeps the tab
+// the session currently drives and never touches real pages. Bounded by the
+// session ctx — a session that dies mid-sweep just fails its CDP calls.
+func sweepBlankTabsLater(s *browserSession) {
+	for _, delay := range []time.Duration{2 * time.Second, 6 * time.Second} {
+		select {
+		case <-time.After(delay):
+		case <-s.ctx.Done():
+			return
+		}
+		closeBlankPageTargets(s, sessionTargetID(s))
+	}
+}
+
 // browserHover — menu-open hover via a REAL mousemove to the element's
 // center: synthetic JS mouseover does NOT trigger CSS :hover (pseudo-classes
 // only apply to trusted pointer input), so coordinate dispatch is required
@@ -3960,13 +4011,9 @@ func switchSessionTab(s *browserSession, id cdptarget.ID) error {
 	s.ctxCancel = cancel
 	s.refs.Store(nil) // refs belonged to the abandoned page
 	if oldTarget != "" && oldTarget != id && (oldURL == "" || oldURL == "about:blank") {
-		// Best-effort close through the old context (still newCtx's parent,
-		// browser-domain command rides its connection).
-		closeCtx, closeCancel := context.WithTimeout(oldCtx, 3*time.Second)
-		_ = chromedp.Run(closeCtx, chromedp.ActionFunc(func(ctx context.Context) error {
-			return cdptarget.CloseTarget(oldTarget).Do(ctx)
-		}))
-		closeCancel()
+		// Best-effort close of the abandoned blank — over the browser
+		// connection (page-session routing gets silently rejected).
+		closeTargetBrowserLevel(oldCtx, oldTarget)
 	}
 	return nil
 }

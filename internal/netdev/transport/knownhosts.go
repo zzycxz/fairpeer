@@ -13,6 +13,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // HostKeyQuestion describes a first-seen (TOFU) host key awaiting the user's
@@ -274,7 +276,7 @@ func (p *HostKeyPolicy) loadCallback() (ssh.HostKeyCallback, string, error) {
 		// knownhosts.New requires each file to exist; create an empty managed
 		// file on first use.
 		if _, err := os.Stat(managed); os.IsNotExist(err) {
-			if err := os.WriteFile(managed, nil, 0o600); err != nil {
+			if err := fileutil.AtomicWriteFile(managed, nil, 0o600); err != nil {
 				return nil, "", err
 			}
 		}

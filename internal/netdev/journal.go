@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // journal.go — L1 三件留存（DASHBOARD spec §7.2）。全部 best-effort：
@@ -128,7 +130,7 @@ func compactJournalsLocked(now time.Time) {
 	if b, err := os.ReadFile(stampPath); err == nil && strings.TrimSpace(string(b)) == now.Format("2006-01-02") {
 		return
 	}
-	_ = os.WriteFile(stampPath, []byte(now.Format("2006-01-02")), 0o600)
+	_ = fileutil.AtomicWriteFile(stampPath, []byte(now.Format("2006-01-02")), 0o600)
 
 	cut := now.AddDate(0, 0, -90).Format("2006-01-02T15:04:05")
 	raw, err := os.ReadFile(filepath.Join(journalDir(), "inspections.jsonl"))
@@ -186,7 +188,7 @@ func compactJournalsLocked(now time.Time) {
 		}
 		f.Close()
 	}
-	_ = os.WriteFile(filepath.Join(journalDir(), "inspections.jsonl"), []byte(strings.Join(keep, "\n")+"\n"), 0o600)
+	_ = fileutil.AtomicWriteFile(filepath.Join(journalDir(), "inspections.jsonl"), []byte(strings.Join(keep, "\n")+"\n"), 0o600)
 }
 
 func maxOf(a, b int) int {
@@ -447,7 +449,7 @@ func SaveLastBaseline(s BaselineSummary) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(journalDir(), "baseline-summary.json"), b, 0o600)
+	_ = fileutil.AtomicWriteFile(filepath.Join(journalDir(), "baseline-summary.json"), b, 0o600)
 }
 
 // LoadLastBaseline reads it back; nil when never run (引导态，不是 0).
@@ -536,7 +538,7 @@ func SaveScheduleStamp(st ScheduleStamp) {
 	if err != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(journalDir(), "schedule-last.json"), b, 0o600)
+	_ = fileutil.AtomicWriteFile(filepath.Join(journalDir(), "schedule-last.json"), b, 0o600)
 }
 
 // LoadScheduleStamp reads it back; nil = the scheduler never fired.

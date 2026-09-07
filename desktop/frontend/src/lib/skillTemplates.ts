@@ -1,4 +1,4 @@
-// skillTemplates — the ops browser tab's skill library (运维技能库): ready-made
+// skillTemplates — the office browser workbench's skill library (办公浏览器技能库): ready-made
 // starting points for recurring ops workflows. Table-form templates parse
 // losslessly in the structured editor; prose-form ones are conversational
 // protocols (runAs:inline) the chat model follows turn by turn — the editor
@@ -201,6 +201,55 @@ function streamQuerySkillContent(): string {
   ].join("\n");
 }
 
+// expenseSkillContent（K2-5 文员三模板之一）：报销单据填报——问员工拿
+// 报销信息 → 打开报销系统 → 填单 → 人工核对金额后提交 → 提取回执编号。
+function expenseSkillContent(): string {
+  return [
+    "---",
+    "name: browser-expense-submit",
+    "description: 报销单据网页填报：问员工拿报销信息，填单后停在人工核对页，确认后提交并提取回执编号。",
+    "runAs: subagent",
+    "executor: browser-flow",
+    "domain: browser-ops",
+    "draft: true",
+    "allowed-tools: browser_open, browser_navigate, browser_type, browser_click, browser_wait, browser_extract",
+    "params: 站点=https://expense.example.com/new",
+    "---",
+    "",
+    "# 报销单填报",
+    "",
+    "## 何时使用",
+    "",
+    "员工要提交一笔报销时。参数：{{站点}} 为报销系统新建单页。",
+    "",
+    "## 步骤",
+    "",
+    "| # | 操作 | 目标 | 值 |",
+    "|---|------|------|------|",
+    "| 1 | navigate | `{{站点}}` |  |",
+    "| 2 | wait | `networkidle` | 15s |",
+    "| 3 | ask | 报销事项 | 请输入报销事项（如差旅-北京出差）： |",
+    "| 4 | ask | 金额 | 请输入金额（元）： |",
+    "| 5 | ask | 发票号 | 请输入发票号： |",
+    "| 6 | type | `input#subject` | {{报销事项}} |",
+    "| 7 | type | `input#amount` | {{金额}} |",
+    "| 8 | type | `input#invoice-no` | {{发票号}} |",
+    "| 9 | human | `visible:.preview-loaded` | 请核对预览页金额与发票信息，确认无误后点【继续】 |",
+    "| 10 | click | `button[type=submit]` |  |",
+    "| 11 | wait | `stable:.receipt-no` | 30s |",
+    "| 12 | extract | `.receipt-no` | text |",
+    "",
+    "## 注意事项",
+    "",
+    "- 第 9 步 human 断点必留：**金额与发票必须人工核对**，AI 不做最终确认",
+    "- 目标选择器按实际报销系统录制替换（此模板是骨架）",
+    "",
+    "## 验证",
+    "",
+    "第 12 步提取到回执编号即成功。",
+  ].join("\n");
+}
+
 // dataExportSkillContent — 数据导出：ask 拿筛选条件 → 应用筛选 → 导出 →
 // 等下载/渲染完成 → 提取结果。
 function dataExportSkillContent(): string {
@@ -277,7 +326,7 @@ draft: true
 
 ## 首次设置（人工，一次性）
 
-在运维浏览器或对话里先完整登录一次平台（验证码/密码由人完成）——浏览器持久化配置文件会记住登录 cookie，后续定时巡检靠它免登录。设置定时：对对话说「每 30 分钟运行一次 browser-siem-watch」即可，agent 会用 schedule_create 建任务（支持 every 30m / cron / daily 09:00，任务跨重启持久化，结果存档可查，还可在任务上配置 im/email/notify 二次投递）。
+在办公界面的浏览器工作台或对话里先完整登录一次平台（验证码/密码由人完成）——浏览器持久化配置文件会记住登录 cookie，后续定时巡检靠它免登录。设置定时：对对话说「每 30 分钟运行一次 browser-siem-watch」即可，agent 会用 schedule_create 建任务（支持 every 30m / cron / daily 09:00，任务跨重启持久化，结果存档可查，还可在任务上配置 im/email/notify 二次投递）。
 
 ## 每次巡检（定时触发或手动运行）
 
@@ -292,7 +341,7 @@ draft: true
 
 - 绝不代替用户输入密码、验证码；掉线的正确动作是邮件通知，不是等待。
 - 无头触发（触发时没有打开的对话页）email_send 默认被拒绝：要么先在设置里为 email_send 加放行规则，要么保持一个 cowork 对话页开着（交互路径可弹审批）。
-- 运行环境差异：定时任务在办公 profile 下触发（browser-auto/email_send/定时工具齐备）；在运维页签手动运行时没有 email_send——需要邮件告警请在办公页签调用，或把告警改走 im_send。
+- 运行环境：浏览器工作台与定时任务都在办公 profile 下（browser-auto/email_send/定时工具齐备）——浏览器已整体归办公（2026-09-06 迁移）。
 - 邮箱防刷屏：掉线通知只在登录态「由好变坏」的第一次发；告警邮件每轮至多一封。
 - 结果永远返回摘要（哪怕是「配置不全」「掉线」），空结果会让定时任务记录变成黑洞。
 `;
@@ -396,13 +445,20 @@ export const SKILL_TEMPLATE_GROUPS: SkillTemplateGroup[] = [
     ],
   },
   {
+    id: "clerk",
+    labelKey: "brc.tgClerk",
+    templates: [
+      { id: "form-submit", form: "table", titleKey: "brc.tplFormTitle", descKey: "brc.tplFormDesc", build: formSkillContent },
+      { id: "data-export", form: "table", titleKey: "brc.tplExportTitle", descKey: "brc.tplExportDesc", build: dataExportSkillContent },
+      { id: "expense-submit", form: "table", titleKey: "brc.tplExpenseTitle", descKey: "brc.tplExpenseDesc", build: expenseSkillContent },
+    ],
+  },
+  {
     id: "common",
     labelKey: "brc.tgCommon",
     templates: [
       { id: "login-keep", form: "table", titleKey: "brc.tplLoginTitle", descKey: "brc.tplLoginDesc", build: loginKeepSkillContent },
-      { id: "form-submit", form: "table", titleKey: "brc.tplFormTitle", descKey: "brc.tplFormDesc", build: formSkillContent },
       { id: "stream-query", form: "table", titleKey: "brc.tplStreamTitle", descKey: "brc.tplStreamDesc", build: streamQuerySkillContent },
-      { id: "data-export", form: "table", titleKey: "brc.tplExportTitle", descKey: "brc.tplExportDesc", build: dataExportSkillContent },
     ],
   },
   {

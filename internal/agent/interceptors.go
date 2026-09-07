@@ -77,8 +77,11 @@ type truncationInterceptor struct {
 	agent *Agent
 }
 
-// checkTruncated returns true when the stream was truncated and the calls
-// were failed (already persisted); the caller should continue the loop.
+// intercepted returns true when the stream was truncated and the calls were
+// failed (the tool-role skip results are persisted here); the caller should
+// continue the loop. The caller must have already persisted the assistant
+// message carrying the calls: a tool result may only follow its tool_calls
+// message, and this method appends the results without re-adding the calls.
 func (ti truncationInterceptor) intercepted(calls []provider.ToolCall, usage *provider.Usage) bool {
 	if usage == nil || (usage.FinishReason != "length" && usage.FinishReason != "repetition_truncation") || len(calls) == 0 {
 		return false

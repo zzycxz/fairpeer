@@ -1280,6 +1280,9 @@ func (s *Store) ensureVecCache(collection, model string) error {
 			continue
 		}
 		vec := bytesToFloat32Slice(vecBlob)
+		if len(vec) == 0 {
+			continue // skip empty embedding blobs entirely
+		}
 		if dims == 0 {
 			dims = len(vec)
 		} else if len(vec) != dims {

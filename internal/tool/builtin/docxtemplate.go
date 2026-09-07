@@ -265,28 +265,37 @@ func applyParagraphReplace(body []byte, ops []paragraphReplaceOp) []byte {
 					tableDepth--
 				}
 			} else if strings.HasPrefix(s[i:], "<w:p") {
-				// Check it's a real <w:p> not <w:pPr>.
+				// Check it's a real <w:p> not <w:pPr>. A self-closing <w:p/> is
+				// an EMPTY paragraph — docxwrite emits one after every table
+				// (OOXML requires a paragraph there), and doc_read counts it
+				// (its tag scanner runs the open+close processing for
+				// self-closed tags), so it must advance paraIdx here too or
+				// every paragraph after a table gets an index one lower than
+				// doc_read reported. There's no text inside to replace, so a
+				// targeted index on it is a no-op.
 				afterTag := s[i+4:]
-				if len(afterTag) > 0 && (afterTag[0] == '>' || afterTag[0] == ' ') {
+				if len(afterTag) > 0 && (afterTag[0] == '>' || afterTag[0] == ' ' || afterTag[0] == '/') {
 					if tableDepth == 0 {
 						paraIdx++
-						// Is this paragraph targeted for replacement?
-						newText, targeted := replacements[paraIdx]
-						if targeted {
-							// Find </w:p> and replace the entire paragraph's text content.
-							pClose := strings.Index(s[i:], "</w:p>")
-							if pClose < 0 {
-								out.WriteByte(s[i])
-								i++
+						if afterTag[0] != '/' {
+							// Is this paragraph targeted for replacement?
+							newText, targeted := replacements[paraIdx]
+							if targeted {
+								// Find </w:p> and replace the entire paragraph's text content.
+								pClose := strings.Index(s[i:], "</w:p>")
+								if pClose < 0 {
+									out.WriteByte(s[i])
+									i++
+									continue
+								}
+								pEnd := i + pClose + len("</w:p>")
+								// Extract the paragraph, rewrite its text.
+								para := s[i:pEnd]
+								newPara := replaceParagraphText(para, newText)
+								out.WriteString(newPara)
+								i = pEnd
 								continue
 							}
-							pEnd := i + pClose + len("</w:p>")
-							// Extract the paragraph, rewrite its text.
-							para := s[i:pEnd]
-							newPara := replaceParagraphText(para, newText)
-							out.WriteString(newPara)
-							i = pEnd
-							continue
 						}
 					}
 				}

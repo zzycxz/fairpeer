@@ -272,10 +272,12 @@ func lineTrimMatch(content, old string) (string, bool, bool) {
 	}
 	trimmedContent := strings.Join(trimmedContentLines, "\n")
 
-	count := strings.Count(trimmedContent, trimmedOld)
+	// Count only line-boundary-anchored matches. A mid-line substring hit
+	// (old's first line matching a SUFFIX of a content line) would map back to
+	// whole original lines and delete text outside old_string.
+	count, idx := lineAnchoredCount(trimmedContent, trimmedOld)
 	if count == 1 {
 		// Find the position in trimmed content and map back to original.
-		idx := strings.Index(trimmedContent, trimmedOld)
 		if region, ok := mapTrimmedToOriginal(content, trimmedContent, idx, len(trimmedOld)); ok {
 			return region, true, true
 		}
@@ -297,10 +299,11 @@ func indentNormMatch(content, old string) (string, bool, bool) {
 	}
 
 	contentNorm := stripAllIndent(content)
-	count := strings.Count(contentNorm, oldNorm)
+	// Line-boundary anchored, same as lineTrimMatch: a mid-line hit would map
+	// back to whole original lines and delete text outside old_string.
+	count, idx := lineAnchoredCount(contentNorm, oldNorm)
 	if count == 1 {
 		// Find the position in normalized content and map back.
-		idx := strings.Index(contentNorm, oldNorm)
 		if region, ok := mapNormalizedToOriginal(content, contentNorm, idx, len(oldNorm)); ok {
 			return region, true, true
 		}
@@ -311,6 +314,15 @@ func indentNormMatch(content, old string) (string, bool, bool) {
 	}
 	return "", false, false
 }
+
+// blankMiddleGapCap bounds how many lines may sit between the anchors when
+// old's middle is entirely blank. The anchors alone verify nothing in that
+// case, so without a cap old "func f() {\n\n}" would match ANY span between a
+// "func f() {" line and a "}" line — deleting a 5000-line body between them
+// (audit data-loss case). 100 is generous for a blank gap (old itself said the
+// middle is empty) while making wholesale deletion of unrelated bodies
+// impossible; spans larger than the cap are treated as no-match.
+const blankMiddleGapCap = 100
 
 // blockAnchorMatch finds old's first and last non-empty lines in content, then
 // verifies the middle lines appear in order between them.
@@ -359,6 +371,14 @@ func blockAnchorMatch(content, old string) (string, bool, bool) {
 				}
 			}
 
+			if len(middleOld) == 0 {
+				// Blank middle: the anchors alone prove nothing, so only accept
+				// a plausibly-small gap (see blankMiddleGapCap) — an unbounded
+				// gap would match any span between the anchors and delete it.
+				if endIdx-startIdx-1 > blankMiddleGapCap {
+					continue
+				}
+			}
 			if len(middleOld) == 0 || linesContainInOrder(middleContent, middleOld) {
 				// Build the matched region from original content.
 				region := strings.Join(contentLines[startIdx:endIdx+1], "\n")
@@ -378,6 +398,43 @@ func blockAnchorMatch(content, old string) (string, bool, bool) {
 }
 
 // --- helpers ---
+
+// lineAnchoredCount counts occurrences of needle in joined (a newline-joined
+// line array) that are anchored to line boundaries on BOTH ends: the match
+// starts at offset 0 or immediately after a '\n', and ends at len(joined) or
+// immediately before a '\n'. Returns the count and the byte offset of the sole
+// match (-1 when there isn't exactly one).
+//
+// Substring matches that begin or end MID-LINE are rejected on purpose: the
+// line-based matchers map a hit back to WHOLE original lines, so a mid-line hit
+// would make Replace delete text outside old_string (audit case: content
+// "x = foobar\ny = baz", old "bar\nbaz" — "bar" is a suffix of the first line
+// and must not match). strings.Count can't express this, hence the custom scan.
+func lineAnchoredCount(joined, needle string) (count, soleIdx int) {
+	if needle == "" {
+		return 0, -1
+	}
+	soleIdx = -1
+	for off := 0; off+len(needle) <= len(joined); {
+		p := strings.Index(joined[off:], needle)
+		if p < 0 {
+			return
+		}
+		at := off + p
+		end := at + len(needle)
+		startOK := at == 0 || joined[at-1] == '\n'
+		endOK := end == len(joined) || joined[end] == '\n'
+		if startOK && endOK {
+			count++
+			soleIdx = at
+		}
+		off = end
+	}
+	if count != 1 {
+		soleIdx = -1 // only meaningful when there is exactly one match
+	}
+	return
+}
 
 // trimLines trims each line and joins with \n, dropping leading/trailing empty lines.
 func trimLines(lines []string) string {

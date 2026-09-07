@@ -1793,3 +1793,42 @@ func TestLegacySkillRenameAppliedToWhitelist(t *testing.T) {
 		}
 	}
 }
+
+// TestNetDevKeepsBrowserFlowRunner（BROWSER_OFFICE_MIGRATION_SPEC 不变量 2）：
+// netdev 不再注册浏览器工具 schema，但 browser-flow 执行器必须接线——站点
+// 技能（browser-IT-ops 等）在运维对话按名 run_skill 仍可执行。
+func TestNetDevKeepsBrowserFlowRunner(t *testing.T) {
+	dir := robustTempDir(t)
+	home := robustTempDir(t)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Chdir(dir)
+	writeFile(t, dir, "fairpeer.toml", `
+default_model = "test-model"
+
+[codegraph]
+enabled = false
+
+[agent]
+system_prompt = "BASE"
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+api_key_env = "FAIRPEER_TEST_KEY_UNSET"
+base_url = "http://127.0.0.1:9"
+models = ["test-model"]
+`)
+	ndProfile := &config.Profile{Name: config.ProfileNetDev}
+	ctrl, err := Build(context.Background(), Options{Profile: ndProfile, Model: "test-model"})
+	if err != nil {
+		t.Fatalf("Build (netdev): %v", err)
+	}
+	defer ctrl.Close()
+	if _, err := skill.RunFlow(context.Background(), skill.Skill{Name: "x", Executor: "browser-flow"}, ""); err == nil {
+		t.Fatal("netdev must keep the browser-flow runner wired (empty steps erroring is fine; nil-runner error is not)")
+	} else if strings.Contains(err.Error(), "no flow runner is configured") {
+		t.Fatalf("flow runner missing in netdev: %v", err)
+	}
+}

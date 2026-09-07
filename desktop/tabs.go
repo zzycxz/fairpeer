@@ -47,6 +47,10 @@ type WorkspaceTab struct {
 	Label      string        // model label (for the tab badge)
 	Ready      bool          // true once boot.Build (or the remote session attach) completes
 	StartupErr string        // build error, surfaced to the frontend
+	// PendingBuild（G2-4 懒构建，SCENARIO_SPEC）：恢复期未构建的 tab 由首次
+	// 激活/引用时再建（SetActiveTab/OpenProjectTab/SubmitToTab 兜底），消除
+	// "恢复全量并发构建" 的启动风暴。运行时态，不持久化。
+	PendingBuild bool
 	sink       *tabEventSink // routes events with this tab's ID
 	// readyCh is closed when the current build attempt finishes (success or
 	// failure). It replaces the 100ms poll loop that waitForExpertTab used to
@@ -703,7 +707,11 @@ func (a *App) OpenProjectTab(args ...string) (TabMeta, error) {
 			a.activeTabID = tab.ID
 			meta := a.tabMeta(tab, true)
 			a.saveTabsLocked()
+			pending := tab.Ctrl == nil && tab.PendingBuild // G2-4：激活触发懒构建
 			a.mu.Unlock()
+			if pending {
+				a.ensureTabBuilt(tab.ID)
+			}
 			return meta, nil
 		}
 	}
@@ -775,7 +783,11 @@ func (a *App) OpenExpertSessionTab(teamID, teamName string) (TabMeta, error) {
 			tab.ExpertTeamName = teamName
 			meta := a.tabMeta(tab, true)
 			a.saveTabsLocked()
+			pending := tab.Ctrl == nil && tab.PendingBuild // G2-4：激活触发懒构建
 			a.mu.Unlock()
+			if pending {
+				a.ensureTabBuilt(tab.ID)
+			}
 			return meta, nil
 		}
 	}
@@ -850,7 +862,11 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot, profile string) (TabMeta, err
 			a.activeTabID = tab.ID
 			meta := a.tabMeta(tab, true)
 			a.saveTabsLocked()
+			pending := tab.Ctrl == nil && tab.PendingBuild // G2-4：激活触发懒构建
 			a.mu.Unlock()
+			if pending {
+				a.ensureTabBuilt(tab.ID)
+			}
 			return meta, nil
 		}
 	}
@@ -970,15 +986,22 @@ func (a *App) indexedBlankTopicIDLocked(scope, workspaceRoot, profile string) st
 // already active or unknown.
 func (a *App) SetActiveTab(tabID string) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if _, ok := a.tabs[tabID]; !ok {
+	tab, ok := a.tabs[tabID]
+	if !ok {
+		a.mu.Unlock()
 		return fmt.Errorf("tab %q not found", tabID)
 	}
 	if a.activeTabID == tabID {
+		a.mu.Unlock()
 		return nil
 	}
 	a.activeTabID = tabID
 	a.saveTabsLocked()
+	pending := tab.Ctrl == nil && tab.PendingBuild // G2-4：激活触发懒构建
+	a.mu.Unlock()
+	if pending {
+		a.ensureTabBuilt(tabID)
+	}
 	return nil
 }
 
@@ -1076,6 +1099,52 @@ func (a *App) startTabControllerBuild(tab *WorkspaceTab) {
 		return
 	}
 	go a.buildTabController(tab)
+}
+
+// ensureTabBuilt fires a pending lazy build (G2-4). No-op when the controller
+// exists, the tab was never marked pending, or a build already raced in.
+func (a *App) ensureTabBuilt(tabID string) {
+	a.mu.Lock()
+	tab, ok := a.tabs[tabID]
+	if !ok || tab.Ctrl != nil || !tab.PendingBuild {
+		a.mu.Unlock()
+		return
+	}
+	tab.PendingBuild = false
+	a.mu.Unlock()
+	a.startTabControllerBuild(tab)
+}
+
+// waitForTabController blocks until the tab's controller exists, the build
+// fails (StartupErr), or the deadline passes. Wakes instantly on readyCh
+// (closed by markBuilt on every build exit path); re-reads state under the
+// lock each iteration so a reset rebuild channel is picked up too.
+func (a *App) waitForTabController(tab *WorkspaceTab, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		a.mu.RLock()
+		ctrl := tab.Ctrl
+		ch := tab.readyCh
+		sErr := tab.StartupErr
+		a.mu.RUnlock()
+		if ctrl != nil {
+			return nil
+		}
+		if sErr != "" {
+			return fmt.Errorf("%s", sErr)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("tab is not ready: controller build did not finish within %s", timeout)
+		}
+		if ch != nil {
+			select {
+			case <-ch:
+			case <-time.After(100 * time.Millisecond):
+			}
+		} else {
+			time.Sleep(100 * time.Millisecond) // build not started yet; ch appears shortly
+		}
+	}
 }
 
 // markBuilt closes the tab's ready signal, waking any goroutine blocked on
@@ -1495,6 +1564,15 @@ func (a *App) tabSnapshotLoop(tab *WorkspaceTab) {
 			if err := ctrl.Snapshot(); err == nil {
 				if !a.maybeAutoTitleTopic(tab) {
 					a.emitProjectTreeChanged()
+				}
+				// G2-2（SCENARIO_SPEC）：会话落盘事件——前端"最近会话"侧栏订阅
+				// 后按 profile 过滤刷新，新会话完成首轮即入列，不必再切页签。
+				if a.ctx != nil {
+					runtime.EventsEmit(a.ctx, "session:saved", map[string]any{
+						"tabId":   tab.ID,
+						"profile": normalizeProfileName(tab.profile),
+						"path":    tab.SessionPath,
+					})
 				}
 			}
 		}
@@ -3024,28 +3102,31 @@ func (a *App) DeleteTopic(topicID string) error {
 	profileKey := a.activeProfileKey()
 	f := loadProjectsFile(profileKey)
 	found := false
+	// Sidecar reads/writes must pass profileKey: cowork/netdev topics live in
+	// profile-suffixed buckets, and the bare form would scan the dev bucket and
+	// "not find" the topic (RenameTopic's call sites show the keyed form).
 	for _, p := range f.Projects {
-		m := loadTopicTitles(p.Root)
+		m := loadTopicTitles(p.Root, profileKey)
 		if _, ok := m[topicID]; ok {
 			delete(m, topicID)
-			_ = saveTopicTitles(p.Root, m)
-			sources := loadTopicTitleSources(p.Root)
+			_ = saveTopicTitles(p.Root, m, profileKey)
+			sources := loadTopicTitleSources(p.Root, profileKey)
 			delete(sources, topicID)
-			_ = saveTopicTitleSources(p.Root, sources)
-			deleteTopicCreatedAt(p.Root, topicID)
+			_ = saveTopicTitleSources(p.Root, sources, profileKey)
+			deleteTopicCreatedAt(p.Root, topicID, profileKey)
 			found = true
 			break
 		}
 	}
 	if !found {
-		m := loadTopicTitles("")
+		m := loadTopicTitles("", profileKey)
 		if _, ok := m[topicID]; ok {
 			delete(m, topicID)
-			_ = saveTopicTitles("", m)
-			sources := loadTopicTitleSources("")
+			_ = saveTopicTitles("", m, profileKey)
+			sources := loadTopicTitleSources("", profileKey)
 			delete(sources, topicID)
-			_ = saveTopicTitleSources("", sources)
-			deleteTopicCreatedAt("", topicID)
+			_ = saveTopicTitleSources("", sources, profileKey)
+			deleteTopicCreatedAt("", topicID, profileKey)
 			f.GlobalTopics = removeString(f.GlobalTopics, topicID)
 			found = true
 		}
@@ -3145,6 +3226,13 @@ func (a *App) TrashTopic(topicID string) error {
 		a.mu.Unlock()
 	}
 
+	// Delete the topic metadata BEFORE trashing session files: DeleteTopic is
+	// the lookup that can still fail (e.g. title sidecars unreadable), and
+	// failing after the files are already trashed would leave the tree pointing
+	// at nothing. Failing here aborts with sessions intact — a clean retry.
+	if err := a.DeleteTopic(topicID); err != nil {
+		return err
+	}
 	for _, dir := range a.knownSessionDirs() {
 		infos, err := agent.ListSessions(dir)
 		if err != nil {
@@ -3162,9 +3250,6 @@ func (a *App) TrashTopic(topicID string) error {
 				return err
 			}
 		}
-	}
-	if err := a.DeleteTopic(topicID); err != nil {
-		return err
 	}
 	if needsFallback {
 		if fallbackScope == "global" {
@@ -3737,6 +3822,16 @@ func (a *App) knownSessionDirs() []string {
 		add(desktopSessionDir(project.Root))
 		add(desktopSessionDirFor(project.Root, a.activeProfileKey()))
 	}
+	// G2-3（SCENARIO_SPEC）：固定分区兜底——历史枚举不得依赖"该分区的 tab
+	// 恰好开着"。三个 profile 的主分区 + 各自项目索引里的项目分区全部入列
+	//（dedupe 由 seen 保证），tab 目录降级为补充来源。
+	for _, key := range allProfileKeys {
+		add(desktopSessionDirFor(profileHomeRoot(key), key)) // home 工作台 → sessions[/cowork|netdev]
+		for _, project := range loadProjectsFile(key).Projects {
+			add(desktopSessionDir(project.Root))
+			add(desktopSessionDirFor(project.Root, key))
+		}
+	}
 	a.mu.RLock()
 	for _, tab := range a.tabs {
 		add(tabSessionDir(tab))
@@ -3821,7 +3916,7 @@ func (a *App) reviveParkedTabs() {
 	a.mu.Lock()
 	var parked []*WorkspaceTab
 	for _, tab := range a.tabs {
-		if tab.Ctrl == nil && tab.StartupErr == "" && !tab.IsExpertSession {
+		if tab.Ctrl == nil && tab.StartupErr == "" && !tab.IsExpertSession && !tab.PendingBuild {
 			parked = append(parked, tab)
 		}
 	}

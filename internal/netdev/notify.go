@@ -10,8 +10,13 @@ package netdev
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
+	"net/textproto"
+	"os"
+	"path/filepath"
 	"log/slog"
 	"net/http"
 	"net/smtp"
@@ -234,6 +239,20 @@ func NotifyConfigured() bool {
 // NotifyPushText pushes one outbound text (the daily briefing, future
 // digests) through every configured outlet. The webhook variant carries it
 // as JSON {kind, title, text}.
+// NotifyPushTextWithAttachments（G3-2 SCENARIO_SPEC）：带附件推送——SMTP 走
+// multipart/mixed；IM/webhook 通道不支持附件，降级为正文追加附件路径清单。
+func NotifyPushTextWithAttachments(kind, title, text string, attachments []string) {
+	o := outlets()
+	if o.smc != nil {
+		go smtpSendTextWithAttachments(o.smc, title, text, attachments)
+		return
+	}
+	if len(attachments) > 0 {
+		text += "\n附件（本通道不支持附件，路径如下）：\n" + strings.Join(attachments, "\n")
+	}
+	NotifyPushText(kind, title, text)
+}
+
 func NotifyPushText(kind, title, text string) {
 	o := outlets()
 	if o.smc != nil {
@@ -281,6 +300,48 @@ func postWebhookJSON(url string, body []byte) {
 		}
 		_ = resp.Body.Close()
 	}()
+}
+
+// smtpSendTextWithAttachments mails text + files as multipart/mixed (G3-2).
+// Attachment names use base64 encoding for CJK safety.
+func smtpSendTextWithAttachments(c *smtpConfig, subject, body string, attachments []string) {
+	b := &bytes.Buffer{}
+	w := multipart.NewWriter(b)
+	hdr := fmt.Sprintf("To: %s\r\nFrom: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=%s\r\n\r\n",
+		strings.Join(c.to, ","), c.from, subject, w.Boundary())
+	b.WriteString(hdr)
+	// 文本部分
+	tw, err := w.CreatePart(textproto.MIMEHeader{"Content-Type": {"text/plain; charset=UTF-8"}})
+	if err == nil {
+		tw.Write([]byte(body))
+	}
+	// 附件部分
+	for _, path := range attachments {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		aw, err := w.CreatePart(textproto.MIMEHeader{
+			"Content-Type":              {"application/octet-stream"},
+			"Content-Disposition":       {"attachment; filename=\"" + filepath.Base(path) + "\""},
+			"Content-Transfer-Encoding": {"base64"},
+		})
+		if err != nil {
+			continue
+		}
+		enc := base64.NewEncoder(base64.StdEncoding, aw)
+		enc.Write(data)
+		enc.Close()
+	}
+	w.Close()
+	addr := fmt.Sprintf("%s:%d", c.host, c.port)
+	var auth smtp.Auth
+	if c.user != "" {
+		auth = smtp.PlainAuth("", c.user, c.pass, c.host)
+	}
+	if err := smtp.SendMail(addr, auth, c.from, c.to, b.Bytes()); err != nil {
+		slog.Warn("netdev notify smtp(att) failed", "err", err)
+	}
 }
 
 // smtpSendText mails a plain-text notice. Best-effort like every outlet:

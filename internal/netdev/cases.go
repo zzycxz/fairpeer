@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // CaseIOC is one indicator in the case ledger.
@@ -107,7 +109,7 @@ func SaveCase(c *IncidentCase) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(CasesDir(), c.ID+".json"), body, 0o600)
+	return fileutil.AtomicWriteFile(filepath.Join(CasesDir(), c.ID+".json"), body, 0o600)
 }
 
 // DeleteCase removes one case by id.

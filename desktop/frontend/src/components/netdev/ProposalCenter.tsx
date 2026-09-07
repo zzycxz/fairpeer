@@ -11,16 +11,17 @@ import { STEP_TYPE_LABEL, stepSummary, k8sRef } from "./proposalStepFormat";
 // Buttons surface per status; frozen partials show what applied and what did
 // not, with the rollback plan visible before anyone presses it.
 
-const STATUS_LABEL: Record<string, string> = {
-  draft: "草稿（待审阅）",
-  approved: "已批准（待执行）",
-  executing: "执行中…",
-  done: "已完成",
-  partial: "⚠ 部分执行（已冻结）",
-  failed: "🔴 回滚失败（需人工处理）",
-  watching: "👁 观察期（§7.1）",
-  closed: "已关闭",
-  rejected: "⛔ 已驳回",
+// G1-5：状态文案走 i18n（原为硬编码中文表）。
+const PROP_STATUS_KEY: Record<string, string> = {
+  draft: "ndv.prop.st.draft",
+  approved: "ndv.prop.st.approved",
+  executing: "ndv.prop.st.executing",
+  done: "ndv.prop.st.done",
+  partial: "ndv.prop.st.partial",
+  failed: "ndv.prop.st.failed",
+  watching: "ndv.prop.st.watching",
+  closed: "ndv.prop.st.closed",
+  rejected: "ndv.prop.st.rejected",
 };
 
 // 结构化步骤（§7.1）：类型徽标（labels live in proposalStepFormat）。
@@ -62,7 +63,7 @@ export function
             message:
               `${p.intent}\n\n` +
               (p.steps ?? []).map((s) => `· ${s.device}: ${(s.commands ?? []).join("; ")}`).join("\n") +
-              "\n\n回滚计划已随变更起草，批准后仍需手动点击执行。",
+              "\n\n" + t("ndv.prop.approveTail"),
             confirmLabel: t("ndv.prop.approve"),
           });
           if (!ok) return;
@@ -122,16 +123,16 @@ export function
       )}
       {/* 删除（§4.1 列表治理）：仅 draft/已终结态；活跃管线必须留档。 */}
       {(p.status === "draft" || p.status === "rejected" || p.status === "done" || p.status === "failed" || p.status === "closed") && (
-        <span className="btn btn--secondary btn--small" role="button" title="删除变更文件（不可恢复）" onClick={() => void act(`del:${p.id}`, async () => {
+        <span className="btn btn--secondary btn--small" role="button" title={t("ndv.prop.delTip")} onClick={() => void act(`del:${p.id}`, async () => {
           if (!(await confirmDlg({
-            title: `删除变更 ${p.id}`,
-            message: "从磁盘移除变更文件（审计记录保留）。不可恢复。",
-            confirmLabel: "删除",
+            title: t("ndv.prop.delTitle", { id: p.id }),
+            message: t("ndv.prop.delMsg"),
+            confirmLabel: t("ndv.prop.delBtn"),
             danger: true,
           }))) return;
           await app.NetDevDeleteProposal(p.id);
         })}>
-          {busy === `del:${p.id}` ? "…" : "删除"}
+          {busy === `del:${p.id}` ? "…" : t("ndv.prop.delBtn")}
         </span>
       )}
     </span>
@@ -173,12 +174,12 @@ export function ProposalCenter() {
 
   const approve = (p: NetDevProposal) => act(`approve:${p.id}`, async () => {
     const ok = await confirmDlg({
-      title: `批准变更 ${p.id}`,
+      title: t("ndv.prop.approveTitle", { id: p.id }),
       message:
         `${p.intent}\n\n` +
         p.steps.map((s) => `· ${stepSummary(s)}`).join("\n") +
-        (p.steps.some(s => s.dangerous) ? "\n\n⚠ 含危险动词步骤——已强制二次确认。" : "") +
-        "\n\n回滚计划已随变更起草，批准后仍需手动点击执行。",
+        (p.steps.some(s => s.dangerous) ? "\n\n" + t("ndv.prop.dangerousNote") : "") +
+        "\n\n" + t("ndv.prop.approveTail"),
       confirmLabel: t("ndv.prop.approve"),
     });
     if (!ok) return;
@@ -187,7 +188,7 @@ export function ProposalCenter() {
 
   const execute = (p: NetDevProposal) => act(`exec:${p.id}`, async () => {
     if (!(await confirmDlg({
-      title: `执行变更 ${p.id}`,
+      title: t("ndv.prop.execTitle", { id: p.id }),
       message: t("ndv.prop.execMsg"),
       confirmLabel: t("ndv.prop.execute"),
     }))) return;
@@ -196,7 +197,7 @@ export function ProposalCenter() {
 
   const rollback = (p: NetDevProposal) => act(`rb:${p.id}`, async () => {
     if (!(await confirmDlg({
-      title: `回滚变更 ${p.id}`,
+      title: t("ndv.prop.rbTitle", { id: p.id }),
       message: t("ndv.prop.rbMsg"),
       confirmLabel: t("ndv.prop.rollback"),
       danger: false,
@@ -206,20 +207,20 @@ export function ProposalCenter() {
 
   return (
     <div>
-      <div className="set-label" style={{ margin: "14px 0 6px" }}>变更中心（{items.length}）</div>
+      <div className="set-label" style={{ margin: "14px 0 6px" }}>{t("ndv.prop.centerTitle", { n: items.length })}</div>
       <div className="mem-hint" style={{ marginBottom: 6 }}>
-        agent 只能起草（netdev_propose）；批准、执行、回滚只在此处由人操作。每步的回滚计划在详情中可见。
+        {t("ndv.prop.centerHint")}
       </div>
       {err && <div className="banner banner--error" style={{ marginBottom: 6 }}>{err}</div>}
-      {items.length === 0 && <div className="mem-hint">暂无变更。对话中让 agent 用 netdev_propose 起草。</div>}
+      {items.length === 0 && <div className="mem-hint">{t("ndv.prop.empty")}</div>}
       {items.map(p => (
         <div key={p.id} className="mem-hint" style={{ border: "1px solid var(--border, #333)", borderRadius: 6, padding: 8, marginBottom: 6 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ minWidth: 110, fontWeight: 600 }}>{p.id}</span>
-            <span style={{ minWidth: 130 }}>{STATUS_LABEL[p.status] ?? p.status}</span>
+            <span style={{ minWidth: 130 }}>{PROP_STATUS_KEY[p.status] ? t(PROP_STATUS_KEY[p.status] as never) : p.status}</span>
             <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.intent}>{p.intent}</span>
             <span className="btn btn--secondary btn--small" role="button" onClick={() => setOpenID(openID === p.id ? "" : p.id)}>
-              {openID === p.id ? "收起" : "详情"}
+              {openID === p.id ? t("ndv.prop.collapse") : t("ndv.prop.details")}
             </span>
             {p.status === "draft" && (
               <span className="btn btn--primary btn--small" role="button" onClick={() => void approve(p)}>
@@ -243,51 +244,51 @@ export function ProposalCenter() {
               {p.steps.map((s, i) => (
                 <div key={i} style={{ marginBottom: 6 }}>
                   <div>
-                    {s.device} — {s.applied ? "✅ 已下发" : s.error ? "❌ " + s.error : "⬜ 未执行"}
+                    {s.device} — {s.applied ? t("ndv.prop.applied") : s.error ? "❌ " + s.error : t("ndv.prop.notApplied")}
                     <StepTypeBadge type={s.type} />
-                    {s.dangerous && <span className="ndv__badge ndv__badge--warn" style={{ marginLeft: 6 }}>⚠ 危险动词 · 已强制二次确认</span>}
+                    {s.dangerous && <span className="ndv__badge ndv__badge--warn" style={{ marginLeft: 6 }}>{t("ndv.prop.dangerousBadge")}</span>}
                   </div>
                   {(!s.type || s.type === "cli") && (
                     <>
-                      <div style={{ marginLeft: 12 }}>变更：{(s.commands ?? []).join("；")}</div>
-                      <div style={{ marginLeft: 12 }}>回滚：{(s.rollback ?? []).join("；") || "（无）"}</div>
+                      <div style={{ marginLeft: 12 }}>{t("ndv.prop.changeLabel")}{(s.commands ?? []).join("；")}</div>
+                      <div style={{ marginLeft: 12 }}>{t("ndv.prop.rollbackLabel")}{(s.rollback ?? []).join("；") || t("ndv.prop.noneLabel")}</div>
                     </>
                   )}
                   {s.type === "k8s-apply" && (
                     <div style={{ marginLeft: 12 }}>
-                      变更：server-side apply — <code>{k8sRef(s.yaml)}</code>
+                      {t("ndv.prop.changeLabel")}server-side apply — <code>{k8sRef(s.yaml)}</code>
                       <pre style={{ margin: "4px 0", opacity: 0.75, maxHeight: 120, overflow: "auto" }}>{s.yaml}</pre>
-                      回滚依据：apply 前的 live 对象备份（resourceVersion 钉住）
+                      {t("ndv.prop.k8sRollback")}
                     </div>
                   )}
                   {s.type === "sql-migration" && (
                     <div style={{ marginLeft: 12 }}>
-                      <div>变更（Up）：<pre style={{ margin: "4px 0", opacity: 0.75, maxHeight: 120, overflow: "auto" }}>{s.up_sql}</pre></div>
-                      <div>回滚（Down{s.down_sql ? "" : " ⚠ 缺失——该类型不可提交"}）：
-                        <pre style={{ margin: "4px 0", opacity: 0.75, maxHeight: 120, overflow: "auto" }}>{s.down_sql || "（无）"}</pre>
+                      <div>{t("ndv.prop.sqlUp")}<pre style={{ margin: "4px 0", opacity: 0.75, maxHeight: 120, overflow: "auto" }}>{s.up_sql}</pre></div>
+                      <div>{t("ndv.prop.sqlDown")}{s.down_sql ? "" : " " + t("ndv.prop.sqlDownMissing")}：
+                        <pre style={{ margin: "4px 0", opacity: 0.75, maxHeight: 120, overflow: "auto" }}>{s.down_sql || t("ndv.prop.noneLabel")}</pre>
                       </div>
                     </div>
                   )}
                   {(s.type === "file-upload" || s.type === "cert-replace") && (
                     <div style={{ marginLeft: 12 }}>
-                      变更：{s.local_path} → {s.remote_path}
+                      {t("ndv.prop.changeLabel")}{s.local_path} → {s.remote_path}
                       {s.type === "cert-replace" && <>；私钥 {s.key_local_path} → {s.key_remote_path}；reload <code>{s.reload_cmd}</code></>}
                       {s.checksum && <>；sha256 <code>{s.checksum.slice(0, 12)}…</code></>}
-                      <div style={{ opacity: 0.75 }}>回滚依据：目标现文件备份（上传前自动抓取）</div>
+                      <div style={{ opacity: 0.75 }}>{t("ndv.prop.fileRollback")}</div>
                     </div>
                   )}
-                  {s.backup && <div style={{ marginLeft: 12, opacity: 0.7 }}>备份已存档（{s.backup.length} 字符）</div>}
+                  {s.backup && <div style={{ marginLeft: 12, opacity: 0.7 }}>{t("ndv.prop.backupArchived", { n: s.backup.length })}</div>}
                 </div>
               ))}
               {p.status === "watching" && p.watch_until && (
                 <div style={{ marginBottom: 6, color: "var(--text-warn, #e0a800)" }}>
-                  👁 观察期至 {String(p.watch_until).slice(11, 19)}（§7.1：劣化触发 Finding + 一键回滚变更）
+                  {t("ndv.prop.watchUntil", { time: String(p.watch_until).slice(11, 19) })}
                 </div>
               )}
               <div style={{ opacity: 0.6 }}>
-                创建 {p.created_at ? String(p.created_at).slice(0, 19).replace("T", " ") : "-"}
-                {p.approved_at ? ` · 批准 ${String(p.approved_at).slice(0, 19).replace("T", " ")}` : ""}
-                {p.executed_at ? ` · 执行 ${String(p.executed_at).slice(0, 19).replace("T", " ")}` : ""}
+                {t("ndv.prop.createdAt", { at: p.created_at ? String(p.created_at).slice(0, 19).replace("T", " ") : "-" })}
+                {p.approved_at ? " · " + t("ndv.prop.approvedAt", { at: String(p.approved_at).slice(0, 19).replace("T", " ") }) : ""}
+                {p.executed_at ? " · " + t("ndv.prop.executedAt", { at: String(p.executed_at).slice(0, 19).replace("T", " ") }) : ""}
               </div>
             </div>
           )}

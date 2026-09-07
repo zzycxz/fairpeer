@@ -185,7 +185,9 @@ export function PreferencePanel({
 
   const defaultTitle = mode === "cowork"
     ? (t("cowork.preference") || "办公偏好")
-    : (t("preference.title") || "编码偏好");
+    : mode === "netdev"
+      ? (t("ndv.preference") || "运维偏好")
+      : (t("preference.title") || "编码偏好");
 
   if (loading) {
     return (
@@ -279,7 +281,11 @@ export function PreferencePanel({
                     style={{ flex: 1, minHeight: 0 }}
                     value={selected.content}
                     onChange={e => patchSelected({ content: e.target.value })}
-                    placeholder={mode === "cowork" ? t("preference.contentPlaceholderCowork") : t("preference.contentPlaceholderDev")}
+                    placeholder={mode === "cowork"
+																					? t("preference.contentPlaceholderCowork")
+																					: mode === "netdev"
+																						? t("preference.contentPlaceholderNetdev")
+																						: t("preference.contentPlaceholderDev")}
                     spellCheck={false}
                   />
                   <div className="preference-preset-editor__actions">

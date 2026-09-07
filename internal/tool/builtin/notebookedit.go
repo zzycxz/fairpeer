@@ -119,6 +119,11 @@ func (n notebookEdit) Preview(raw json.RawMessage) (diff.Change, error) {
 		return diff.Change{}, err
 	}
 	a.Path = resolveIn(n.workDir, a.Path)
+	// Same confinement Execute enforces — without it a pre-approval Preview
+	// could read (and surface) notebooks outside the workspace roots.
+	if err := confine(n.roots, a.Path); err != nil {
+		return diff.Change{}, err
+	}
 	data, err := os.ReadFile(a.Path)
 	if err != nil {
 		return diff.Change{}, fmt.Errorf("read %s: %w", a.Path, err)

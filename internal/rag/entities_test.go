@@ -165,6 +165,50 @@ type testErr struct{ s string }
 
 func (e *testErr) Error() string { return e.s }
 
+// TestSearchEntitiesByVectorSkipsEmptyEmbedding proves an empty (zero-length)
+// embedding blob is skipped by the vector cache loader. Previously the first
+// empty blob left dims=0 while its meta was still appended, so a later
+// non-empty row set dims and SearchEntitiesByVector sliced vecs out of range
+// for the empty row's index — a panic.
+func TestSearchEntitiesByVectorSkipsEmptyEmbedding(t *testing.T) {
+	s := newTestStore(t)
+	src := Source{Path: "/v.md", Chunk: 0}
+	if err := s.UpsertEntity("docs", Entity{NameRaw: "empty"}, src); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertEntity("docs", Entity{NameRaw: "real"}, src); err != nil {
+		t.Fatal(err)
+	}
+	ents, err := s.SearchEntities("", "docs", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var emptyID, realID int64
+	for _, e := range ents {
+		switch e.Name {
+		case "empty":
+			emptyID = e.ID
+		case "real":
+			realID = e.ID
+		}
+	}
+	// Insert the empty blob FIRST so it is scanned first (rowid order).
+	if err := s.UpsertEntityEmbedding(emptyID, "docs", "m", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertEntityEmbedding(realID, "docs", "m", []float32{1, 0, 0, 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.SearchEntitiesByVector("docs", "m", []float32{1, 0, 0, 0}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "real" {
+		t.Errorf("expected only the real-vector entity, got %+v", got)
+	}
+}
+
 func itoa(i int) string {
 	if i == 0 {
 		return "0"

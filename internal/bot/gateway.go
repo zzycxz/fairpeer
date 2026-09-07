@@ -61,6 +61,10 @@ type AllowlistConfig struct {
 	Mode     string // "open"（自动加入）| "review"（需审批）
 	Users    map[Platform][]string
 	Groups   map[Platform][]string
+	// Admins 是可选的管理员列表（按平台）。为空时所有白名单用户都可使用
+	// 审批类命令（向后兼容）；一旦为某平台配置了管理员，该平台的
+	// /approve、/desktop approve|deny、/netdev 变更 批准|驳回 仅限管理员。
+	Admins map[Platform][]string
 }
 
 // BotGateway 是 fairpeer bot 消息网关，管理 Controller 生命周期、session 并发、
@@ -74,6 +78,7 @@ type BotGateway struct {
 	controllers    map[string]*sessionState // session key -> active state
 	allowlist      map[Platform]map[string]bool
 	groupAllowlist map[Platform]map[string]bool
+	admins         map[Platform]map[string]bool
 
 	logger *slog.Logger
 
@@ -184,6 +189,7 @@ func NewGateway(cfg GatewayConfig, adapters map[Platform]Adapter, logger *slog.L
 		controllers:    make(map[string]*sessionState),
 		allowlist:      make(map[Platform]map[string]bool),
 		groupAllowlist: make(map[Platform]map[string]bool),
+		admins:         make(map[Platform]map[string]bool),
 		logger:         logger.With("component", "bot_gateway"),
 	}
 	gw.buildAllowlist()
@@ -193,6 +199,10 @@ func NewGateway(cfg GatewayConfig, adapters map[Platform]Adapter, logger *slog.L
 func (gw *BotGateway) buildAllowlist() {
 	for _, plat := range []Platform{PlatformQQ, PlatformFeishu, PlatformWeixin, PlatformTelegram} {
 		gw.allowlist[plat] = make(map[string]bool)
+		gw.admins[plat] = make(map[string]bool)
+		for _, uid := range gw.cfg.Allowlist.Admins[plat] {
+			gw.admins[plat][uid] = true
+		}
 		if !gw.cfg.Allowlist.Enabled {
 			continue
 		}
@@ -205,6 +215,21 @@ func (gw *BotGateway) buildAllowlist() {
 		}
 	}
 }
+
+// isAdmin reports whether the sender may use approval-class commands
+// (/approve, /desktop approve|deny, /netdev 变更 批准|驳回). With no admins
+// configured for the platform every allowlisted user may (backward compat);
+// once an admin list exists, only admins may.
+func (gw *BotGateway) isAdmin(plat Platform, userID string) bool {
+	if len(gw.admins[plat]) == 0 {
+		return true
+	}
+	return gw.admins[plat][userID]
+}
+
+// adminGateRefusal is the reply for approval-class commands from
+// non-admin senders when an admin list is configured.
+const adminGateRefusal = "⛔ 该命令仅限管理员使用（[bot.allowlist] *_admins）。请联系 bot 管理员操作。"
 
 // Start 启动所有已启用的平台适配器并开始处理消息。
 func (gw *BotGateway) Start(ctx context.Context) error {
@@ -423,16 +448,25 @@ func (gw *BotGateway) handleMessage(ctx context.Context, plat Platform, adapter 
 
 	// allowlist 检查
 	if !gw.checkAllowlist(plat, msg) {
+		// 群聊只服务显式配置过群白名单的群——任何模式下都如此。
+		// 此前"未配置任何群 = 放行所有群"的回退让群白名单形同虚设。
+		if gw.cfg.Allowlist.Enabled && chatUsesGroupAllowlist(msg.ChatType) && !gw.groupAllowlist[plat][msg.ChatID] {
+			gw.logger.Info("group not in group allowlist", "platform", plat, "chat_id", msg.ChatID)
+			_ = gw.sendText(ctx, adapter, msg, "⚠️ 本群未启用 bot。请联系管理员将群 ID 加入 [bot.allowlist] 对应平台的 *_groups 白名单。")
+			return
+		}
 		if gw.cfg.Allowlist.Mode == "review" {
 			// 审核模式：拒绝并显示 user_id
 			gw.logger.Info("user not in allowlist (review mode)", "platform", plat, "user_id", msg.UserID)
 			_ = gw.sendText(ctx, adapter, msg, fmt.Sprintf("⏳ 您尚未获得使用权限。\n\n您的 user_id: %s\n\n请将此 ID 发送给管理员，等待审批通过后即可使用。", msg.UserID))
 			return
 		}
-		// 开放模式（默认）：自动加入
+		// 开放模式：自动加入——但触发加入的这条消息本身绝不执行，
+		// 否则任何陌生人的第一条消息就能直接驱动 agent。
 		gw.logger.Info("user not in allowlist, auto-adding", "platform", plat, "user_id", msg.UserID)
 		gw.autoAddToAllowlist(plat, msg.UserID)
-		_ = gw.sendText(ctx, adapter, msg, "👋 您好！您已被自动加入白名单，现在可以正常使用了。")
+		_ = gw.sendText(ctx, adapter, msg, "👋 您好！您已被自动加入白名单。请重新发送您的消息以开始。")
+		return
 	}
 
 	src := msg.Session()
@@ -509,8 +543,9 @@ func (gw *BotGateway) checkAllowlist(plat Platform, msg InboundMessage) bool {
 	if !gw.allowlist[plat][msg.UserID] {
 		return false
 	}
-	groups := gw.groupAllowlist[plat]
-	if chatUsesGroupAllowlist(msg.ChatType) && len(groups) > 0 && !groups[msg.ChatID] {
+	// Group chats require an explicit group-allowlist entry — an empty group
+	// list no longer falls through to "any group".
+	if chatUsesGroupAllowlist(msg.ChatType) && !gw.groupAllowlist[plat][msg.ChatID] {
 		return false
 	}
 	return true
@@ -555,6 +590,10 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		_ = gw.sendText(ctx, adapter, msg, "已开始新会话。")
 
 	case strings.HasPrefix(msg.Text, "/approve"):
+		if !gw.isAdmin(msg.Platform, msg.UserID) {
+			_ = gw.sendText(ctx, adapter, msg, adminGateRefusal)
+			return
+		}
 		// 从消息中解析 approval ID
 		parts := strings.Fields(msg.Text)
 		if len(parts) < 2 {
@@ -570,6 +609,10 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		}
 
 	case strings.HasPrefix(msg.Text, "/deny"):
+		if !gw.isAdmin(msg.Platform, msg.UserID) {
+			_ = gw.sendText(ctx, adapter, msg, adminGateRefusal)
+			return
+		}
 		parts := strings.Fields(msg.Text)
 		if len(parts) < 2 {
 			_ = gw.sendText(ctx, adapter, msg, "用法: /deny <id>")

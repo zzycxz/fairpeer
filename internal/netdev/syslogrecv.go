@@ -67,14 +67,19 @@ func EnsureSyslogReceiver(cfg *config.Config) {
 	}
 	syslogMu.Lock()
 	syslogCfg = cfg
-	current := syslogConn
-	syslogMu.Unlock()
 	if port <= 0 {
-		if current != nil {
-			_ = current.Close()
+		// Disable: close and CLEAR under the lock (capture-and-clear), so a
+		// later re-enable sees a nil conn and binds fresh — and status stops
+		// reporting listening immediately.
+		if syslogConn != nil {
+			_ = syslogConn.Close()
+			syslogConn = nil
 		}
+		syslogMu.Unlock()
 		return
 	}
+	current := syslogConn
+	syslogMu.Unlock()
 	if current != nil {
 		return // already listening; a port change needs the app restart note in UI
 	}
@@ -207,15 +212,27 @@ func SyslogTail(device string, tailN int, grep string) []string {
 	return out
 }
 
-// SyslogEventsSince returns one device's ring entries (structured) since t.
+// SyslogEventsSince returns one device's ring entries (structured) since t;
+// device=="" merges EVERY ring — rings are keyed by device, so a literal
+// rings[""] read would silently drop all events for the all-devices view.
 func SyslogEventsSince(device string, since time.Time) []NetDevEvent {
 	syslogMu.Lock()
-	ring := append([]syslogLine(nil), syslogRings[device]...)
+	var rings map[string][]syslogLine
+	if device != "" {
+		rings = map[string][]syslogLine{device: append([]syslogLine(nil), syslogRings[device]...)}
+	} else {
+		rings = make(map[string][]syslogLine, len(syslogRings))
+		for k, v := range syslogRings {
+			rings[k] = append([]syslogLine(nil), v...)
+		}
+	}
 	syslogMu.Unlock()
 	var out []NetDevEvent
-	for _, l := range ring {
-		if l.Time.After(since) {
-			out = append(out, NetDevEvent{Time: l.Time, Text: l.Text})
+	for name, ring := range rings {
+		for _, l := range ring {
+			if l.Time.After(since) {
+				out = append(out, NetDevEvent{Time: l.Time, Device: name, Text: l.Text})
+			}
 		}
 	}
 	return out

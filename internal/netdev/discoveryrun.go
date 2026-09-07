@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // discoveryrun.go — F4's closing deviations (spec §9.2): checkpoint/resume
@@ -78,7 +80,7 @@ func saveDiscoveryRunLocked(r *DiscoveryRunState) error {
 	if err := os.MkdirAll(filepath.Dir(discoveryRunFile()), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(discoveryRunFile(), b, 0o600)
+	return fileutil.AtomicWriteFile(discoveryRunFile(), b, 0o600)
 }
 
 // LoadDiscoveryRun returns the current run (nil when none/corrupt).
@@ -155,7 +157,7 @@ func RecordDeviceLayer(device string, layer int) error {
 	if err := os.MkdirAll(filepath.Dir(deviceLayersFile()), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(deviceLayersFile(), b, 0o600)
+	return fileutil.AtomicWriteFile(deviceLayersFile(), b, 0o600)
 }
 
 // maxHopsEffective: 0 → spec default 2, clamped to 1..4.

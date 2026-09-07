@@ -29,7 +29,7 @@ import {
 import { app, onBrowserRecord, onBrowserWatch } from "../../lib/bridge";
 import { parseSkillDoc, summarizeStep } from "../../lib/skillDoc";
 import { useConfirm } from "../../lib/confirm";
-import { useT, type Translator } from "../../lib/i18n";
+import { getLocale, useT, type Translator } from "../../lib/i18n";
 import { Markdown } from "../Markdown";
 import type {
   BrowserConsoleElement,
@@ -187,8 +187,8 @@ export function BrowserConsolePanel({ onInsertComposer }: { onInsertComposer?: (
       if (res.note) setScanSummary(res.note);
       void app.BrowserConsoleState().then((st) => {
         lastElementsUrlRef.current = st.url;
-      }).catch(() => undefined);
-    }).catch(() => undefined);
+      }).catch(() => undefined); // best-effort: 失败降级不阻塞
+    }).catch(() => undefined); // best-effort: 失败降级不阻塞
   }, []);
 
   // The center workbench broadcasts tab switches — refresh state + elements
@@ -204,7 +204,7 @@ export function BrowserConsolePanel({ onInsertComposer }: { onInsertComposer?: (
         // Target = the tab TITLE (indexes drift as tabs open/close); the
         // 1-based index rides along as a note for humans.
         recordStep({ type: "switch_tab", target: detail.title || String(detail.index), text: `第 ${detail.index} 个页卡` });
-        appendLog(`已切换到页卡 ${detail.index}${detail.title ? `「${detail.title}」` : ""}`);
+        appendLog(t("brc.switchedTab", { i: detail.index, title: detail.title ? `「${detail.title}」` : "" }));
       }
       setTarget("");
       void refreshState();
@@ -227,7 +227,7 @@ export function BrowserConsolePanel({ onInsertComposer }: { onInsertComposer?: (
           return;
         }
         refreshElementsSilent();
-      }).catch(() => undefined);
+      }).catch(() => undefined); // best-effort: 失败降级不阻塞
     }, 3000);
     return () => window.clearInterval(timer);
   }, [state?.open, refreshElementsSilent]);
@@ -278,7 +278,7 @@ export function BrowserConsolePanel({ onInsertComposer }: { onInsertComposer?: (
       if (res.note) setScanSummary(res.note);
       void app.BrowserConsoleState().then((st) => {
         lastElementsUrlRef.current = st.url;
-      }).catch(() => undefined);
+      }).catch(() => undefined); // best-effort: 失败降级不阻塞
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runAction]);
@@ -297,7 +297,7 @@ export function BrowserConsolePanel({ onInsertComposer }: { onInsertComposer?: (
         setElements(els);
         void app.BrowserConsoleState().then((st) => {
           lastElementsUrlRef.current = st.url;
-        }).catch(() => undefined);
+        }).catch(() => undefined); // best-effort: 失败降级不阻塞
         const match = els.find((x) => x.role === el.role && x.name === el.name && x.ref !== el.ref);
         if (match) {
           setTarget(match.ref);
@@ -327,7 +327,7 @@ export function BrowserConsolePanel({ onInsertComposer }: { onInsertComposer?: (
       setElements(res.elements.map((e) => ({ ref: e.selector, role: e.role, name: e.name })));
       void app.BrowserConsoleState().then((st) => {
         lastElementsUrlRef.current = st.url;
-      }).catch(() => undefined);
+      }).catch(() => undefined); // best-effort: 失败降级不阻塞
       const stopText =
         res.stop === "bottom" ? t("brc.scanStop.bottom")
           : res.stop === "cap" ? t("brc.scanStop.cap")
@@ -689,7 +689,7 @@ function ElementPicker(props: {
   // silently and the preview just doesn't frame, which reads as "broken".
   const hoverTimerRef = useRef<number>(0);
   const flash = (ref: string, ms: number) => {
-    void app.BrowserConsoleHighlight(ref, ms).catch(() => undefined);
+    void app.BrowserConsoleHighlight(ref, ms).catch(() => undefined); // best-effort: 失败降级不阻塞
   };
   // stableTarget: the row's computed CSS with a text fallback anchor - picking
   // fills the target with THIS, so the recorded step survives session changes
@@ -995,7 +995,7 @@ function ExtractBox(props: {
               // The extracted CONTENT stays in the 提取 box for downstream
               // use — the log only carries a length so the trail shows the
               // step happened without dumping the payload.
-              return `提取完成（${out.length} 字符）`;
+              return t("brc.extractDone", { n: out.length });
             });
           }}
         >
@@ -1113,7 +1113,9 @@ function historySkillContent(steps: BrowserConsoleStep[]): string {
   return [
     "---",
     "name: browser-actions",
-    "description: 浏览器操作流程（面板动作记录生成），可直接调用；描述与选择器可逐步打磨。",
+    getLocale() === "en"
+      ? "description: Browser flow recorded from the panel; directly invocable. Polish description and selectors per step."
+      : "description: 浏览器操作流程（面板动作记录生成），可直接调用；描述与选择器可逐步打磨。",
     "runAs: subagent",
     "executor: browser-flow",
     "domain: browser-ops",
@@ -1121,27 +1123,37 @@ function historySkillContent(steps: BrowserConsoleStep[]): string {
     "allowed-tools: browser_open, browser_navigate, browser_click, browser_type, browser_wait, browser_extract",
     "---",
     "",
-    "# 面板动作技能",
+    getLocale() === "en" ? "# Browser action skill" : "# 面板动作技能",
     "",
-    "## 何时使用",
+    getLocale() === "en" ? "## When to use" : "## 何时使用",
     "",
-    "（说明何时用这个流程。**参数化**：每次会变的内容改成 {{参数名}}——比如输入步骤的固定文字改成 {{问题}}，调用时以 问题=xxx 传入；对话调用 /技能名 问题=xxx，面板试运行会弹输入框）",
+    getLocale() === "en"
+      ? "(Say when this flow applies. **Parameterize**: turn per-run values into {{param}} placeholders — e.g. a typed step's fixed text becomes {{question}}; invoke with question=xxx in chat, the panel trial run prompts for it.)"
+      : "（说明何时用这个流程。**参数化**：每次会变的内容改成 {{参数名}}——比如输入步骤的固定文字改成 {{问题}}，调用时以 问题=xxx 传入；对话调用 /技能名 问题=xxx，面板试运行会弹输入框）",
     "",
-    "## 步骤",
+    getLocale() === "en" ? "## Steps" : "## 步骤",
     "",
     "| # | 操作 | 目标 | 值 |",
     "|---|------|------|------|",
     rows,
     "",
-    "## 注意事项",
+    getLocale() === "en" ? "## Notes" : "## 注意事项",
     "",
-    "- 由面板动作记录生成；快照编号（eN）是瞬时值，改用 CSS 选择器或 text= 可见文字锚（目标支持回退链：选择器;;text=文字）",
-    "- 输入类步骤记录的是当时的固定文字——需要每次可变就改成 {{参数名}}",
-    "- 提取结果一般需要二次加工（整理/改写）后再使用；把 extract 放在最后一步，输出落在执行报告里便于复制；AI 生成的富文本块可用 Markdown 提取保留结构",
+    getLocale() === "en"
+      ? "- Generated from the panel's action history; snapshot refs (eN) are transient — swap them for CSS selectors or text= anchors (targets support fallback chains: selector;;text=label)"
+      : "- 由面板动作记录生成；快照编号（eN）是瞬时值，改用 CSS 选择器或 text= 可见文字锚（目标支持回退链：选择器;;text=文字）",
+    getLocale() === "en"
+      ? "- Typed steps record the text captured at record time — turn it into {{param}} when it should vary per run"
+      : "- 输入类步骤记录的是当时的固定文字——需要每次可变就改成 {{参数名}}",
+    getLocale() === "en"
+      ? "- Extract output usually needs post-processing; keep extract as the LAST step so the payload lands in the run report; rich AI blocks extract as Markdown"
+      : "- 提取结果一般需要二次加工（整理/改写）后再使用；把 extract 放在最后一步，输出落在执行报告里便于复制；AI 生成的富文本块可用 Markdown 提取保留结构",
     "",
-    "## 验证",
+    getLocale() === "en" ? "## Verification" : "## 验证",
     "",
-    "（如何确认执行成功——通常看最后一步提取到的内容或页面跳转结果）",
+    getLocale() === "en"
+      ? "(How to confirm success — usually the last step's extracted content or the resulting page transition.)"
+      : "（如何确认执行成功——通常看最后一步提取到的内容或页面跳转结果）",
     "",
   ].join("\n");
 }
@@ -1165,7 +1177,7 @@ function mergeWatchRounds(rounds: BrowserConsoleWatchRound[] | undefined, r: Bro
 function useBrowserWatch(): BrowserConsoleWatchState {
   const [state, setState] = useState<BrowserConsoleWatchState>({ active: false });
   useEffect(() => {
-    app.BrowserConsoleWatchState().then(setState).catch(() => undefined);
+    app.BrowserConsoleWatchState().then(setState).catch(() => undefined); // best-effort: 失败降级不阻塞
     return onBrowserWatch((ev) => {
       if (ev.type === "state" && ev.state) {
         setState(ev.state);
@@ -1243,13 +1255,13 @@ function WatchFormFields(props: {
     app
       .ListRecentBotChats()
       .then(setChats)
-      .catch(() => undefined);
+      .catch(() => undefined); // best-effort: 失败降级不阻塞
     app
       .Settings()
       .then((sv) => {
         setEmailAccounts((sv.cowork?.emailAccounts ?? []).map((a) => ({ name: a.name, default: a.default })));
       })
-      .catch(() => undefined);
+      .catch(() => undefined); // best-effort: 失败降级不阻塞
   }, []);
   const pickedChat = chats.find((c) => c.chatId === imPick);
   const imDest = imPick ? composeImDest(pickedChat?.platform ?? "", pickedChat, imManual) : imManual.trim();
@@ -1477,6 +1489,16 @@ function WatchRoundsLog(props: { t: Translator; state: BrowserConsoleWatchState 
                   {r.severity ? ` · ${r.severity}` : ""}
                 </span>
               )}
+              {/* S4-1：危险评分徽标（rubric 分级）；S4-2 夜班静默标记 */}
+              {!!r.danger_band && (
+                <span
+                  className={`ndv-brc-watch-round__attn${r.danger_band === "critical" ? " ndv-brc-watch-round__compromised" : ""}`}
+                  title={(r.danger_signals ?? []).join("、")}
+                >
+                  {t("brc.watchDanger", { score: r.danger_score ?? 0, band: r.danger_band })}
+                </span>
+              )}
+              {!!r.night_silenced && <span className="ndv-brc-watch-round__attn">{t("brc.watchNightSilenced")}</span>}
               <span className="ndv-brc-watch-round__time">{formatWatchTime(r.started_at)}</span>
               {r.time_range && <span className="ndv-brc-watch-round__range" title={r.time_range}>{r.time_range}</span>}
               {r.download_name && <span className="ndv-brc-watch-round__file">{r.download_name}{(r.rows ?? 0) > 0 ? ` · ${r.rows} ${t("brc.watchRows")}` : ""}</span>}
@@ -1757,7 +1779,7 @@ function SkillsSub(props: {
           if (!file) return;
           void file.text().then((content) => {
             openEditor({ name: "", content, fallback: false }, false);
-          }).catch(() => undefined);
+          }).catch(() => undefined); // best-effort: 失败降级不阻塞
         }}
       />
       {editError && <div className="banner banner--error ndv-brc__error">{editError}</div>}
@@ -1786,6 +1808,10 @@ function SkillsSub(props: {
               </button>
               <span className="ndv-brc__skill-name" role="button" title={t("brc.skillCfgToggle")} onClick={() => void toggleSkill(s.name)}>{s.name}</span>
               {s.draft && <span className="ndv-brc__skill-draft" title={t("brc.draftHint")}>{t("brc.draftBadge")}</span>}
+              {/* K5-3：连续 2 次锚类试运行失败 → 标"待重录"（编辑器成功后清除） */}
+              {Number(typeof localStorage !== "undefined" ? localStorage.getItem(`fairpeer.skill-health.${s.name}`) ?? "0" : "0") >= 2 && (
+                <span className="ndv-brc__skill-draft" style={{ color: "var(--warn, #e0a800)" }} title={t("brc.rerecordHint")}>{t("brc.rerecordBadge")}</span>
+              )}
               <span className="ndv-brc__skill-desc">{s.description}</span>
             {s.draft ? (
               <button

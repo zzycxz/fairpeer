@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync/atomic"
 
 	"github.com/chromedp/cdproto/accessibility"
 	"github.com/chromedp/cdproto/cdp"
@@ -35,9 +34,13 @@ import (
 // accessibility tree is text (token-cheap) rather than a screenshot (VLM-only,
 // resolution-dependent). Microsoft validated this approach at scale.
 
-// refSeq generates short, human-readable ref ids per session. Reset on each
-// snapshot so the numbering stays compact (e1..eN, not e8472).
-var refSeq atomic.Int64
+// Refs are minted from a PER-BUILD counter (see buildSnapshotRefs), so
+// concurrent snapshots — different sessions, or two snapshots racing on one
+// session — never share numbering state. Refs only need to be unique within
+// the snapshot that renders them (resolution is per-session against the last
+// published map); a global counter that was reset per snapshot let two
+// concurrent builds mint the same "eN" for different nodes and corrupt each
+// other's maps.
 
 // axNodeInfo is the flattened, ref-tagged view of one accessibility node.
 type axNodeInfo struct {
@@ -143,8 +146,9 @@ var axInteractiveRoles = map[string]bool{
 }
 
 func buildSnapshotRefs(nodes []*accessibility.Node) (snapshotRefs, string) {
-	// Reset ref numbering per snapshot.
-	refSeq.Store(0)
+	// Ref numbering is per-build: local counter, compact e1..eN per snapshot,
+	// and immune to a concurrent build resetting (or racing) shared state.
+	refSeq := 0
 	// Index by NodeID for parent/child linking.
 	byID := make(map[accessibility.NodeID]*accessibility.Node, len(nodes))
 	for _, n := range nodes {
@@ -169,7 +173,8 @@ func buildSnapshotRefs(nodes []*accessibility.Node) (snapshotRefs, string) {
 		role := axValueString(n.Role)
 		name := axValueString(n.Name)
 		if axInteractiveRoles[role] || name != "" {
-			ref := fmt.Sprintf("e%d", refSeq.Add(1))
+			refSeq++
+			ref := fmt.Sprintf("e%d", refSeq)
 			info := axNodeInfo{
 				ref:       ref,
 				role:      role,

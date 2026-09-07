@@ -73,10 +73,12 @@ func (m *Manager) ProbeLogSources(ctx context.Context, deviceName string) LogSou
 	return out
 }
 
-// appLogDirPatterns are the common non-/var/log application log roots. The
-// glob is expanded by the device's own shell inside a plain `ls -d` (a * is
-// not a ShellMetachar — it cannot chain commands, it only feeds ls paths).
-const appLogDirsCmd = "ls -d /opt/*/logs /opt/*/log /usr/local/*/logs /srv/*/logs /data/logs /data/*/logs /home/*/logs"
+// appLogDirsCmd lists the common non-/var/log application log roots with
+// `ls -ld` so every match renders as a `drwx… /path` line the parser below
+// expects (a bare `ls -d` prints only paths, which the perm-column parser
+// would drop). The glob is expanded by the device's own shell (a * is not a
+// ShellMetachar — it cannot chain commands, it only feeds ls paths).
+const appLogDirsCmd = "ls -ld /opt/*/logs /opt/*/log /usr/local/*/logs /srv/*/logs /data/logs /data/*/logs /home/*/logs"
 
 // probeAppLogDirs lists one ls -lh per discovered app-log directory (≤8) and
 // returns its files, each marked against the device's log whitelist. A miss

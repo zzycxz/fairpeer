@@ -8,6 +8,45 @@ on:
     branches: [main]
 
 jobs:
+  # Quality gate (audit §8-1): vet + race-detector tests for both Go modules
+  # and a frontend type check. Runs before/parallel to the build matrix —
+  # every concurrency bug class fixed in the audit batches was invisible to
+  # the old CI because neither vet nor -race ran anywhere.
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Root module — vet
+        run: go vet ./...
+
+      - name: Root module — tests (race)
+        run: go test -race ./...
+
+      - name: Desktop module — vet
+        working-directory: desktop
+        run: go vet ./...
+
+      - name: Desktop module — tests (race)
+        working-directory: desktop
+        run: go test -race ./...
+
+      - name: Frontend — type check
+        working-directory: desktop/frontend
+        run: |
+          npm ci
+          npx tsc --noEmit
+
   build:
     runs-on: ${{ matrix.os }}
     strategy:

@@ -216,7 +216,7 @@ type nmapTool struct{ m *Manager }
 func (t *nmapTool) Name() string { return "netdev_nmap" }
 
 func (t *nmapTool) Description() string {
-	return "Orchestrated nmap service sweep (PENLAB P1-1): runs the USER-SUPPLIED nmap binary (set [netdev.discovery] nmap_path) over one in-scope CIDR, parses the XML, and files the open services into the 待确认区 (asset leads) — promote them to inventory and the fingerprint backfill feeds CVE matching. " +
+	return "Orchestrated nmap service sweep: runs the USER-SUPPLIED nmap binary (set [netdev.discovery] nmap_path) over one in-scope CIDR, parses the XML, and files the open services into the 待确认区 (asset leads) — promote them to inventory and the fingerprint backfill feeds CVE matching. " +
 		"Gated like netdev_assess: requires the [netdev.assessment] engagement envelope; the CIDR must sit inside the configured discovery scopes; single-CIDR cap = 4096 hosts. The product orchestrates the external tool — it never bundles a scanner and never touches device logins."
 }
 

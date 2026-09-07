@@ -6,7 +6,7 @@
 
 1. **配置与插件驱动的核心。** 核心代码只关心接口。具体的模型和工具通过名称从注册表（registry）中解析、在配置中声明，或由插件注入。绝不允许代码中出现硬编码的 `switch model`。
 2. **单一静态二进制文件。** `CGO_ENABLED=0`；支持一键交叉编译；CLI 工具开箱即用。
-3. **极简依赖。** 默认使用 Go 标准库。任何引入的第三方依赖必须是纯 Go 实现、轻量级，且绝不能影响项目的单一二进制/跨平台/分发特性。目前唯一接受的外部依赖是 TOML 解析库。
+3. **依赖克制。** 默认使用 Go 标准库。任何引入的第三方依赖必须是纯 Go 实现、轻量级，且绝不能影响项目的单一二进制/跨平台/分发特性（历史原则曾是"唯一外部依赖为 TOML 解析库"，随 chromedp/excelize/sqlite/webrtc 等能力落地已放宽为按需引入，新增依赖仍需逐个评审）。
 4. **两层扩展体系。** 编译时内置功能（通过 `init()` 自动注册），以及运行时外部插件（通过 stdio JSON-RPC 通信的子进程，兼容 MCP 协议）。
 5. **接口优先 & 基于注册表。** `Provider` 和 `Tool` 均为抽象接口。
 6. **持续演进，拒绝过度设计。**
@@ -17,8 +17,8 @@
 
 ```
 fairpeer/
-├── go.mod / go.sum          # Go 模块文件；仅依赖 BurntSushi/toml
-├── Makefile                 # 包含 build / cross / vet / fmt / test 指令
+├── go.mod / go.sum          # Go 模块文件（依赖清单见 go.mod；desktop/ 为独立 Wails 子模块）
+├── scripts/                 # 构建脚本（desktop-build.sh 等；构建指令见 CONTRIBUTING.md）
 ├── README.md / README.zh-CN.md
 ├── fairpeer.example.toml    # 示例配置文件
 ├── docs/SPEC.md             # 本文件

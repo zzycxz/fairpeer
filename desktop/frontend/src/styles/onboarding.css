@@ -3124,7 +3124,8 @@
 }
 
 .workbench-dock__body > .context-panel,
-.workbench-dock__body > .workspace-panel {
+.workbench-dock__body > .workspace-panel,
+.workbench-dock__body > .side-session {
   height: 100%;
 }
 
@@ -3226,6 +3227,49 @@
 
 .context-panel__metric--accent strong {
   color: var(--accent);
+}
+
+.context-panel__metric--good strong {
+  color: var(--ok);
+}
+
+.context-panel__metric--notice strong {
+  color: var(--warn);
+}
+
+.context-panel__metric--warn strong {
+  color: var(--danger);
+}
+
+/* Context-window pressure bar (the context card's meter variant); fill color
+   follows the card tone — good <60%, notice 60–85%, warn ≥85% (UsageChip's
+   hot threshold). */
+.context-panel__bar {
+  display: block;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--border-soft);
+  overflow: hidden;
+}
+
+.context-panel__bar > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--dur-fast) var(--ease-out);
+}
+
+.context-panel__metric--good .context-panel__bar > i {
+  background: var(--ok);
+}
+
+.context-panel__metric--notice .context-panel__bar > i {
+  background: var(--warn);
+}
+
+.context-panel__metric--warn .context-panel__bar > i {
+  background: var(--danger);
 }
 
 /* Compact action in the stats section (cowork's only compact entry; the

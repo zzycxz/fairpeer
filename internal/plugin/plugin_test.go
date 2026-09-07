@@ -641,3 +641,23 @@ func TestHelperProcess(t *testing.T) {
 		os.Stdout.Write(append(b, '\n'))
 	}
 }
+
+// TestParseToolResultMarksNonTextBlocks checks non-text content blocks (image,
+// audio, resource) leave a marker line instead of vanishing silently — the
+// model otherwise can't tell the tool returned more than the text shows.
+func TestParseToolResultMarksNonTextBlocks(t *testing.T) {
+	res := json.RawMessage(`{"content":[
+		{"type":"text","text":"screenshot captured"},
+		{"type":"image","data":"AAAA","mimeType":"image/png"},
+		{"type":"audio","data":"BBBB"},
+		{"type":"text","text":"done"}
+	]}`)
+	got, err := parseToolResult(res)
+	if err != nil {
+		t.Fatalf("parseToolResult: %v", err)
+	}
+	want := "screenshot captured\n[mcp: non-text content block of type image omitted]\n[mcp: non-text content block of type audio omitted]\ndone"
+	if got != want {
+		t.Fatalf("parseToolResult = %q, want %q", got, want)
+	}
+}

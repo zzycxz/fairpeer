@@ -353,7 +353,11 @@ func calendarSearch(p calendarParams) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d result(s):\n", len(events))
 	for _, e := range events {
-		fmt.Fprintf(&b, "- [%s] %s @ %s\n", e.ID[:12], e.Title, e.StartTime.Format("01-02 15:04"))
+		id := e.ID
+		if len(id) > 12 {
+			id = id[:12] // short display form; ids may be shorter than 12
+		}
+		fmt.Fprintf(&b, "- [%s] %s @ %s\n", id, e.Title, e.StartTime.Format("01-02 15:04"))
 	}
 	return b.String(), nil
 }

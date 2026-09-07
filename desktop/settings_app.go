@@ -766,18 +766,36 @@ func (a *App) SetDefaultModel(ref string) error {
 	if tab == nil {
 		return fmt.Errorf("no active tab")
 	}
+	// tab.model is guarded by a.mu on every other path (buildTabController,
+	// saveTabsLocked) — stage the optimistic switch, write the resolved ref,
+	// and roll back all under the lock, but never HOLD it across
+	// applyConfigChange: that does config I/O and a controller rebuild, which
+	// takes a.mu itself.
+	a.mu.Lock()
 	prev := tab.model
 	tab.model = ref
+	a.mu.Unlock()
+	resolved := ""
 	if err := a.applyConfigChange(func(c *config.Config) error {
-		resolved, err := selectableDesktopModelRef(c, ref)
+		r, err := selectableDesktopModelRef(c, ref)
 		if err != nil {
 			return err
 		}
-		c.DefaultModel = resolved
-		tab.model = resolved
+		resolved = r
+		c.DefaultModel = r
+		a.mu.Lock()
+		tab.model = r
+		a.mu.Unlock()
 		return nil
 	}); err != nil {
-		tab.model = prev
+		// Roll back only a value we staged: if a concurrent writer (tab close,
+		// another switch) replaced the model meanwhile, theirs wins and must
+		// not be clobbered back to our prev.
+		a.mu.Lock()
+		if tab.model == ref || (resolved != "" && tab.model == resolved) {
+			tab.model = prev
+		}
+		a.mu.Unlock()
 		return err
 	}
 	a.reviveParkedTabs()

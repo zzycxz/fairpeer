@@ -356,14 +356,20 @@ Supported features:
 ### Email Integration
 
 ```toml
-[cowork]
 [[cowork.email_accounts]]
-name = "Work Email"
-smtp_host = "smtp.gmail.com"
-smtp_port = 587
-imap_host = "imap.gmail.com"
-imap_port = 993
-username = "your@email.com"
+name    = "Work Email"
+default = true
+[cowork.email_accounts.smtp]
+host            = "smtp.gmail.com"
+port            = 587
+from            = "your@email.com"
+username        = "your@email.com"
+password_env    = "EMAIL_PASSWORD"
+encryption_mode = "starttls"
+[cowork.email_accounts.imap]
+host         = "imap.gmail.com"
+port         = 993
+username     = "your@email.com"
 password_env = "EMAIL_PASSWORD"
 ```
 
@@ -374,13 +380,14 @@ Supported features:
 
 ### Calendar Tasks
 
-```toml
-[cowork]
-[[cowork.schedules]]
-name = "Daily Reminder"
-cron = "0 9 * * *"
-prompt = "Remind me about the morning meeting"
+Scheduling is configured at runtime via the agent's `schedule_create` tool
+(or the desktop scheduler panel), not TOML — ask the assistant:
+
+```text
+"每天早上 9 点提醒我晨会"   # → schedule_create with cron "0 9 * * *"
 ```
+
+A built-in safety cap (48 runs/day per task) guards against runaway loops.
 
 Supported features:
 - Cron expression scheduling

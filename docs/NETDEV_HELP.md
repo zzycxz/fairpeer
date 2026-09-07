@@ -1,4 +1,21 @@
 # 运维求助指引 — 搜索链接速查
+## 场景速查（按场景找能力——与 netdev-help 技能卡同源）
+
+| 场景 | 首选 | 配套 |
+|---|---|---|
+| 网络故障排查 | netdev-diag-auto（整任务委托 sweep） | exec/fanout/snmp/topology/locate；结论立 finding+路径图 |
+| 内网安全评估 | netdev-security-assessment（阶段化） | discover/nmap/netprobe/assess（信封闸） |
+| 漏洞核查（整批 sweep，隔离子代理） | netdev-seccheck-auto（入口=清单或套餐） | cve_match/baseline/exec/fanout；立案同步蓝队视图 |
+| 命令起草 | netdev-draft（NL→命令，读写分流） | 读类直执；写类走 propose |
+| 配置版本化/恢复 | netdev-config-vault | backup（diff-current）/propose |
+| 项目上线前审计 | netdev-seccheck-auto（入口=套餐）+ 项目审计页签 | 基线/CVE/日志/暴露面/信封内弱口令 |
+| 告警问答/导出研判 | browser-IT-ops / browser-cybersituational-awareness（站点技能；**入口在办公界面**——浏览器归办公 2026-09-06） | 浏览器工具组（办公注册） |
+| 日常巡检 | 总览网络巡检卡 | 结果进发现中心与巡检日志 |
+| 变更管理 | 提案中心 | backup/propose；AI 只起草 |
+| GPU/智算 | 设备卡 GPU 徽标主机的一键分诊 | nvidia-smi/npu-smi 只读三表+XID 立案 |
+| 告警研判评分 | 对话研判与巡检同源 rubric | 40失陷/25横移/20暴露/15可利用；≥70/40-69/<40 三档 |
+
+
 
 遇到问题时的查找顺序建议：**先查本地（读表/规格/审计）→ 再查厂商官方 → 最后社区**。
 下面 `{kw}` 处替换成你的关键词（命令名、告警号、报错原文、协议名…）。

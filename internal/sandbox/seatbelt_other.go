@@ -5,13 +5,15 @@ package sandbox
 import "os/exec"
 
 // Command runs the command unwrapped: no OS sandbox is implemented for this
-// platform yet (Linux bubblewrap/landlock is the next step). The permission
-// layer still gates the call.
+// platform beyond bubblewrap on Linux (the permission layer still gates the
+// call).
 //
 // When spec.Mode is "enforce" and bubblewrap (bwrap) is available on PATH,
 // the command is wrapped in a bubblewrap sandbox with a profile analogous to
 // macOS Seatbelt: writes confined to WriteRoots, network denied unless
-// spec.Network is true. When bwrap is unavailable the command runs unconfined
+// spec.Network is true. When bwrap is unavailable, enforce + RequireAvailable
+// fails CLOSED (mirroring the darwin path): the returned argv refuses instead
+// of running unconfined. Without RequireAvailable the command runs unconfined
 // (boot and acp warn about this once at startup).
 func Command(spec Spec, sh Shell, command string) ([]string, bool) {
 	if !spec.enforce() {
@@ -21,9 +23,25 @@ func Command(spec Spec, sh Shell, command string) ([]string, bool) {
 		argv := append([]string{bwrap}, bwrapArgs(spec, sh, command)...)
 		return argv, true
 	}
-	// enforce requested but bwrap unavailable — boot/acp already warned at
-	// startup; fall back to unconfined (the false result signals "not sandboxed").
+	// enforce requested but bwrap unavailable. RequireAvailable fails closed
+	// like the darwin path — but instead of a nil argv (darwin's refusal
+	// signal, checked by callers that honor the bool), return an argv that
+	// runs the SHELL with a refusal script. The bash tool ignores the second
+	// return and indexes argv[0], so nil would panic it; a refusal argv keeps
+	// it error-safe: nothing executes and the model sees a clear reason.
+	if spec.RequireAvailable {
+		return refuseArgv(sh), false
+	}
+	// No RequireAvailable: boot/acp already warned at startup; fall back to
+	// unconfined (the false result signals "not sandboxed").
 	return sh.argv(command), false
+}
+
+// refuseArgv builds a shell argv that reports the sandbox refusal on stderr
+// and exits non-zero WITHOUT running the command. Works under both bash and
+// PowerShell (echo >&2 and exit are valid in both).
+func refuseArgv(sh Shell) []string {
+	return sh.argv(`echo 'bash sandbox: enforce requested with require_available=true but no OS sandbox backend is available on this platform; refusing to run unconfined' >&2; exit 126`)
 }
 
 // Available reports whether an OS sandbox is available on this platform.

@@ -73,12 +73,23 @@ func (l listDir) Execute(ctx context.Context, args json.RawMessage) (string, err
 }
 
 // listRecursive walks a directory tree depth-first, skipping noise dirs.
-// Depth is capped to guard against symlink loops.
+// Depth is capped to guard against symlink loops. A single unreadable entry
+// (permissions, broken junction, vanished-in-a-race) is noted and skipped —
+// one locked directory must not abort the whole listing.
 func (l listDir) listRecursive(root string) (string, error) {
 	var b strings.Builder
 	err := filepath.WalkDir(root, func(p string, d os.DirEntry, wErr error) error {
 		if wErr != nil {
-			return wErr
+			// The walk root itself failing means nothing can be listed.
+			if p == root {
+				return wErr
+			}
+			rel, rErr := filepath.Rel(root, p)
+			if rErr != nil || rel == "" || strings.HasPrefix(rel, "..") {
+				rel = p
+			}
+			fmt.Fprintf(&b, "%s\t(unreadable: %v)\n", filepath.ToSlash(rel), wErr)
+			return nil
 		}
 		if p == root {
 			return nil

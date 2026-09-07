@@ -22,7 +22,7 @@ type CommandExecutor interface {
 	Pause(tab string) error
 	Resume(tab string) error
 	Approve(tab, approvalID string, allow, session, persist bool) error
-	Answer(tab, askID string, answers []string) error
+	Answer(tab, askID string, answers []proto.QuestionAnswer) error
 	SetPlan(tab string, on bool) error
 	SetModel(tab, model string) error
 	ListSessions() ([]SessionInfo, error)
@@ -37,6 +37,9 @@ type CommandExecutor interface {
 	FileEnd(tab, name string) error
 	LoadSession(tab string) ([]map[string]any, error)
 }
+
+// QuestionAnswer re-exports proto.QuestionAnswer (cmd.answer payload row).
+type QuestionAnswer = proto.QuestionAnswer
 
 // SessionInfo is one row of the session list sent to C.
 type SessionInfo struct {
@@ -145,6 +148,12 @@ var readOnlyOK = map[string]bool{
 }
 
 // Route parses a decrypted command, enforces permissions, dispatches.
+// isFileCmd reports whether the command belongs to the file_drop family
+// (file_start / file_chunk / file_end).
+func isFileCmd(t string) bool {
+	return t == proto.CmdFileStart || t == proto.CmdFileChunk || t == proto.CmdFileEnd
+}
+
 func (r *CommandRouter) Route(plaintext []byte) error {
 	var env proto.Envelope
 	if err := json.Unmarshal(plaintext, &env); err != nil {
@@ -153,11 +162,19 @@ func (r *CommandRouter) Route(plaintext []byte) error {
 
 	if r.perm.ReadOnly && !readOnlyOK[env.T] {
 		r.audit.Denied(r.devC, env.T, "readonly")
+		// audit B-10: Route 的返回错误在 peer.go 被丢弃（`_ =`），C 端
+		// 对权限拒绝零感知——回一帧 error 让手机能看到「被拒绝」。
+		if r.onError != nil {
+			r.onError("forbidden:"+env.T, "readonly")
+		}
 		return ErrForbidden
 	}
 	// High-risk gating (office_run / file_*) — separate from ReadOnly.
-	if env.T == proto.CmdOfficeRun && !r.perm.AllowHighRisk {
+	if (env.T == proto.CmdOfficeRun || isFileCmd(env.T)) && !r.perm.AllowHighRisk {
 		r.audit.Denied(r.devC, env.T, "high_risk")
+		if r.onError != nil {
+			r.onError("forbidden:"+env.T, "high_risk")
+		}
 		return ErrForbidden
 	}
 
@@ -213,9 +230,12 @@ func (r *CommandRouter) Route(plaintext []byte) error {
 		json.Unmarshal(plaintext, &c)
 		return r.exec.Answer(c.Tab, c.Ask, c.Answers)
 	case proto.CmdSetPlan:
-		var c proto.CancelCmd
+		var c proto.SetPlanCmd
+		// audit B-9: parse "on" for real — the old placeholder fed
+		// env.T == "set_plan" (always true), so plan mode could never
+		// be turned off from the phone.
 		json.Unmarshal(plaintext, &c)
-		return r.exec.SetPlan(c.Tab, env.T == "set_plan") // placeholder; real impl parses "on"
+		return r.exec.SetPlan(c.Tab, c.On)
 	case proto.CmdSetModel:
 		var c proto.SetModelCmd
 		json.Unmarshal(plaintext, &c)

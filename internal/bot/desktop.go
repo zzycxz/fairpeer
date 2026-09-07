@@ -117,6 +117,9 @@ func (gw *BotGateway) handleDesktopCommand(msg InboundMessage) string {
 			return desktopCommandUsage
 		}
 	case "approve", "deny":
+		if !gw.isAdmin(msg.Platform, msg.UserID) {
+			return adminGateRefusal
+		}
 		if len(fields) < 3 {
 			return desktopCommandUsage
 		}

@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/zzycxz/fairpeer/releases"><img src="https://img.shields.io/badge/version-v0.1.0-0153e5?style=flat-square" alt="Version 0.1.0"/></a>
+  <a href="https://github.com/zzycxz/fairpeer/releases"><img src="https://img.shields.io/badge/version-v0.1.10-0153e5?style=flat-square" alt="Version 0.1.10"/></a>
   <a href="https://github.com/zzycxz/fairpeer/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zzycxz/fairpeer/ci.yml?style=flat-square&label=ci&labelColor=161b22&logo=githubactions&logoColor=white" alt="CI"/></a>
   <a href="./LICENSE"><img src="https://img.shields.io/github/license/zzycxz/fairpeer.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
   <a href="https://github.com/zzycxz/fairpeer/stargazers"><img src="https://img.shields.io/github/stars/zzycxz/fairpeer.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
@@ -23,7 +23,7 @@
 
 <h3 align="center">全场景通用 AI 编程助手 + 办公自动化平台。</h3>
 <p align="center">
-  对接 18 家供应商（11 直连 + 7 Coding Plan），300+ 模型。<br/>
+  对接 26 个供应商模板（11 直连 + 15 Coding Plan/本地聚合），300+ 模型。<br/>
   内置 Word/Excel/PPT 办公自动化能力。<br/>
   单一静态 Go 二进制，零运行时依赖，多平台无缝覆盖。
 </p>
@@ -133,7 +133,7 @@ brew install zzycxz/fairpeer/fairpeer    # macOS 用户
 make build    # 编译到 bin/ 目录
 make cross    # 交叉编译至 dist/（生成 6 个目标平台二进制）
 ```
-*(需安装 Go 1.25+)*
+*(需安装 Go 1.26+)*
 
 ## 快速上手与配置
 
@@ -148,7 +148,7 @@ echo "解释这段代码" | fairpeer run
 
 ## 接入模型 Provider
 
-fairpeer 不绑定任何模型平台：通过统一的 Provider 抽象接入 18 家供应商（11 直连 + 7 Coding Plan）。完整模板见 [`fairpeer.example.toml`](./fairpeer.example.toml)。
+fairpeer 不绑定任何模型平台：通过统一的 Provider 抽象接入 26 个内置供应商模板（11 直连 + 15 Coding Plan/本地聚合）。完整模板见 [`fairpeer.example.toml`](./fairpeer.example.toml)。
 
 ### 直连供应商（11 家）
 
@@ -222,7 +222,7 @@ models      = ["deepseek-v4-pro", "deepseek-v4-flash"]
 | `zhipu/glm-5.2` | 开源 SOTA，1M 上下文 | 通用编码、跨模块重构 |
 | `deepseek/deepseek-v4-flash` | 极速响应，代码专精 | 代码片段补全、快速重构、单元测试生成 |
 
-> fairpeer 支持 18 家供应商、300+ 模型。详见 [`fairpeer.example.toml`](./fairpeer.example.toml) 的完整配置模板。只需修改 `default_model` 字段即可无缝切换，零代码侵入。
+> fairpeer 支持 26 个内置供应商模板、300+ 模型。详见 [`fairpeer.example.toml`](./fairpeer.example.toml) 的完整配置模板。只需修改 `default_model` 字段即可无缝切换，零代码侵入。
 
 ## 💰 赞助支持
 

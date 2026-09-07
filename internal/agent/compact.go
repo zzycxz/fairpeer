@@ -216,7 +216,10 @@ func estimateTextTokens(s string) int {
 // summarize so the UI can show a "compacting…" placeholder, and a Done event
 // (carrying the summary) replaces it.
 func (a *Agent) compact(ctx context.Context, trigger, instructions string, force bool) error {
-	msgs := a.session.Messages
+	// /compact (CompactNow) runs detached from the run loop, so the message log
+	// must be read as the locked snapshot — a direct Messages read here races a
+	// concurrently appending turn (torn slice or a mid-rewrite compaction view).
+	msgs := a.session.Snapshot()
 	head, start, ok := a.planCompaction(msgs, minCompactMessages)
 	if !ok {
 		// A single huge message can still be worth folding. Keep the normal
@@ -358,7 +361,9 @@ func (a *Agent) emitCompactionAborted(trigger string) {
 // boundary (a user message), so the split never severs a tool_call/result pair —
 // those live within one turn. A no-op when the region is empty.
 func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
-	msgs := a.session.Messages
+	// Snapshot, not a direct Messages read: the rewind/serve/remotehost callers
+	// invoke this outside the run loop, concurrent with turn appends.
+	msgs := a.session.Snapshot()
 	if fromIdx < 0 || fromIdx >= len(msgs) {
 		return nil
 	}
@@ -386,7 +391,8 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 // a single summary, keeping toIdx onward verbatim ("summarize up to here"). toIdx
 // is a turn boundary, so no tool pair is split. A no-op when the region is empty.
 func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
-	msgs := a.session.Messages
+	// Snapshot for the same reason as SummarizeFrom: detached callers.
+	msgs := a.session.Snapshot()
 	head := 0
 	if len(msgs) > 0 && msgs[0].Role == provider.RoleSystem {
 		head = 1
@@ -583,8 +589,10 @@ func tailStart(msgs []provider.Message, head, budgetTokens int, tokPerChar float
 // actually sent (the provider strips it). Falls back to ~4 chars/token before
 // any usage is known, and ignores absurd ratios.
 func (a *Agent) tokPerChar() float64 {
+	// Reachable from the detached /compact path (via planCompaction), so the
+	// char count must come from the locked snapshot like compact's own read.
 	if u := a.lastUsage.Load(); u != nil && u.PromptTokens > 0 {
-		if c := charsOfMessages(a.session.Messages); c > 0 {
+		if c := charsOfMessages(a.session.Snapshot()); c > 0 {
 			if r := float64(u.PromptTokens) / float64(c); r > 0.05 && r < 2 {
 				return r
 			}

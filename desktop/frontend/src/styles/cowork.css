@@ -586,10 +586,6 @@
   background: var(--bg);
 }
 
-:root[data-theme-style] .cowork-mailtab__item--open {
-  background: var(--bg);
-}
-
 :root[data-theme-style] .cowork-mailtab__item-head {
   display: flex;
   align-items: baseline;
@@ -625,19 +621,143 @@
   text-overflow: ellipsis;
 }
 
+/* List-row snippet: always-on under the subject, clamped to 2 lines so rows
+   stay scannable — the FULL letter lives in the reading pane, not here. */
 :root[data-theme-style] .cowork-mailtab__preview {
-  margin-top: 6px;
-  padding: 7px 9px;
+  margin-top: 2px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--fg-faint);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* 📎 attachment count chip on a list row. */
+:root[data-theme-style] .cowork-mailtab__clip {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--fg-faint);
+}
+
+/* --- 邮件阅读面板（列表 ⇄ 阅读 双态，2026-09-06） ----------------------- */
+:root[data-theme-style] .cowork-mailread__back {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+:root[data-theme-style] .cowork-mailread__back:hover {
+  color: var(--fg);
+  background: var(--bg);
+}
+
+:root[data-theme-style] .cowork-mailread {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  overflow: hidden;
+}
+
+:root[data-theme-style] .cowork-mailread__subject {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+:root[data-theme-style] .cowork-mailread__meta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--fg-faint);
+}
+
+:root[data-theme-style] .cowork-mailread__from {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+:root[data-theme-style] .cowork-mailread__date {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme-style] .cowork-mailread__atts {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+}
+
+:root[data-theme-style] .cowork-mailread__attslabel {
+  color: var(--fg-faint);
+}
+
+:root[data-theme-style] .cowork-mailread__att {
+  padding: 1px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--fg-dim);
+  max-width: 220px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+:root[data-theme-style] .cowork-mailread__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   background: var(--bg);
-  border: 1px solid var(--border-soft);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.6;
   color: var(--fg-dim);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 160px;
-  overflow-y: auto;
+}
+
+:root[data-theme-style] .cowork-mailread__ask {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+:root[data-theme-style] .cowork-mailread__ask:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+:root[data-theme-style] .cowork-mailread__ask:hover:not(:disabled) {
+  background: var(--bg);
 }
 
 /* --- CoWork 2.0 智能行政决策卡与邮件协同操作杠 --- */

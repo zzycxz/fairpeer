@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -916,18 +917,22 @@ func (s *Store) RenameCollection(oldName, newName string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	// Rename exact match and path-prefix children ("工作" → "工作资料",
-	// "工作/领导材料" → "工作资料/领导材料").
-	tables := []string{"rag_fts", "rag_jobs", "rag_entities", "rag_relations", "rag_chunks"}
+	// "工作/领导材料" → "工作资料/领导材料"). rag_chunks is intentionally absent:
+	// it has no collection column and keys off job_id, so its rows follow the
+	// renamed rag_jobs row automatically.
+	tables := []string{"rag_fts", "rag_jobs", "rag_entities", "rag_relations"}
 	for _, table := range tables {
 		// Exact match.
 		if _, err := tx.Exec(fmt.Sprintf(`UPDATE %s SET collection = ? WHERE collection = ?`, table), newName, oldName); err != nil {
 			return err
 		}
-		// Path-prefix children: "工作/xxx" → "工作资料/xxx"
+		// Path-prefix children: "工作/xxx" → "工作资料/xxx". A per-table failure
+		// here (e.g. a table missing the column in an older schema) is logged
+		// and skipped so the rest of the rename still applies.
 		oldPrefix := oldName + "/"
 		newPrefix := newName + "/"
 		if _, err := tx.Exec(fmt.Sprintf(`UPDATE %s SET collection = ? || substr(collection, ?) WHERE collection LIKE ?`, table), newPrefix, len(oldPrefix)+1, oldPrefix+"%"); err != nil {
-			// rag_chunks may not have collection column — skip gracefully.
+			slog.Warn("rename collection: prefix update skipped", "table", table, "error", err)
 			continue
 		}
 	}

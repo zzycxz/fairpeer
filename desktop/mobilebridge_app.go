@@ -237,7 +237,20 @@ func (e *execAdapter) Approve(tab, id string, allow, session, persist bool) erro
 	}
 	return nil
 }
-func (e *execAdapter) Answer(string, string, []string) error { return nil } // TODO: wire to AskRequest
+func (e *execAdapter) Answer(tab, askID string, answers []mobilebridge.QuestionAnswer) error {
+	// audit P0-2: wire to AskRequest — the old stub returned nil without
+	// delivering anything, so the model waited forever.
+	t := e.app.resolveMobileTab(tab)
+	if t == "" || askID == "" {
+		return nil
+	}
+	qa := make([]QuestionAnswer, len(answers))
+	for i, a := range answers {
+		qa[i] = QuestionAnswer{QuestionID: a.QuestionID, Selected: a.Selected}
+	}
+	go e.app.AnswerQuestionForTab(t, askID, qa)
+	return nil
+}
 func (e *execAdapter) SetPlan(_ string, on bool) error       { go e.app.SetPlanMode(on); return nil }
 func (e *execAdapter) SetModel(tab, model string) error {
 	if tab = e.app.resolveMobileTab(tab); tab != "" {

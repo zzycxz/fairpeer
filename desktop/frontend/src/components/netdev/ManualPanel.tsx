@@ -13,6 +13,8 @@ import browserMd from "../../guides/browser-ops-guide.md?raw";
 const DOCS: { key: string; file: string }[] = [
   { key: "usage", file: usageMd },
   { key: "help", file: helpMd },
+  // 浏览器篇为跨域参考（浏览器已归办公 2026-09-06）：保留在这里供运维
+  // 同事就近查阅站点技能用法，权威入口是办公浏览器工作台。
   { key: "browser", file: browserMd },
 ];
 

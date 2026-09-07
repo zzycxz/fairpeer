@@ -3547,3 +3547,27 @@
 .td-panel__member--admin{border-left:2px solid var(--accent);}
 .td-panel__member--revoked{opacity:.55;border-left:2px solid var(--danger,currentColor);}
 .td-panel__members em,.td-panel__tokens small{font-style:normal;color:var(--fg-faint);font-size:10.5px;}
+.td-panel__sep{color:var(--fg-faint);}
+.td-panel__meta [title],.td-panel__members [title],.td-panel__head code[title]{cursor:help;}
+.td-panel__self{font-size:10px;font-weight:600;color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);border-radius:var(--radius-pill);padding:1px 7px;line-height:1.5;}
+.td-panel__maint{display:flex;align-items:center;gap:8px;padding-top:10px;border-top:1px dashed color-mix(in srgb,var(--fg) 15%,transparent);}
+.td-panel__maint-label{font-size:10.5px;color:var(--fg-faint);text-transform:uppercase;letter-spacing:0.04em;}
+.td-panel__maint .danger{color:var(--danger,var(--fg));}
+
+/* td-onboarding — trust domain enable guide (the disabled / not-joined
+   states of the settings panel card): what-it-is banner + two path cards. */
+.td-onboarding{display:flex;flex-direction:column;gap:14px;}
+.td-onboarding__loading{font-size:12.5px;color:var(--fg-faint);margin:0;}
+.td-onboarding__intro,.td-onboarding__notice{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border:1px solid color-mix(in srgb,var(--fg) 12%,transparent);border-radius:var(--radius-md);background:var(--bg-soft);}
+.td-onboarding__intro>svg{flex-shrink:0;margin-top:2px;color:var(--accent);}
+.td-onboarding__notice{border-left:2px solid var(--warn,var(--accent));}
+.td-onboarding__title{font-size:13.5px;font-weight:650;color:var(--fg);}
+.td-onboarding__intro p,.td-onboarding__notice p,.td-onboarding__card-desc{margin:4px 0 0;font-size:12px;line-height:1.65;color:var(--fg-dim);}
+.td-onboarding__steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;align-items:start;}
+.td-onboarding__card{display:flex;flex-direction:column;gap:10px;align-items:flex-start;padding:14px 16px;border:1px solid color-mix(in srgb,var(--fg) 12%,transparent);border-radius:var(--radius-md);}
+.td-onboarding__card-title{font-size:12.5px;font-weight:650;color:var(--fg);}
+.td-onboarding__card .btn{align-self:flex-start;}
+.td-onboarding__step{display:flex;flex-direction:column;gap:4px;width:100%;font-size:12px;color:var(--fg-dim);}
+.td-onboarding__step>span{font-size:11.5px;font-weight:600;color:var(--fg);}
+.td-onboarding__cmd{display:flex;align-items:center;gap:6px;width:100%;}
+.td-onboarding__cmd code{flex:1;min-width:0;padding:5px 8px;border:1px solid color-mix(in srgb,var(--fg) 12%,transparent);border-radius:var(--radius-sm);font-size:11px;color:var(--fg);word-break:break-all;background:color-mix(in srgb,var(--fg) 4%,transparent);}

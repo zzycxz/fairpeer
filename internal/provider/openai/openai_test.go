@@ -557,3 +557,77 @@ func TestBuildRequestContentNullForAssistantToolCalls(t *testing.T) {
 		t.Errorf("no-param tool should serialize a valid empty-object schema: %s", s)
 	}
 }
+
+// TestBuildRequestVisionDisabledStripsMultimodalParts pins the config
+// contract: a model without vision never receives image content parts on the
+// wire — text survives, and audio still converts (audio targets the explicitly
+// configured voice_model, which is audio-capable by definition and typically
+// not vision-flagged; dropping it would break STT). Previously the raw image
+// parts were marshalled verbatim, sending image_url payloads to text-only
+// models.
+func TestBuildRequestVisionDisabledStripsMultimodalParts(t *testing.T) {
+	parts := []provider.ContentPart{
+		{Type: "text", Text: "look at this"},
+		{Type: "image_url", ImageURL: &provider.ImageURL{URL: "data:image/png;base64,AAAA"}},
+		{Type: "input_audio", InputAudio: &provider.InputAudio{Data: "AAAA", Format: "wav"}},
+	}
+
+	noVision := (&client{model: "text-only"}).buildRequest(provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: parts}},
+	})
+	b, err := json.Marshal(noVision.Messages)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), "image_url") {
+		t.Fatalf("non-vision model received image parts: %s", b)
+	}
+	if !strings.Contains(string(b), "look at this") {
+		t.Fatalf("text part should survive the strip: %s", b)
+	}
+	if !strings.Contains(string(b), "input_audio") {
+		t.Fatalf("audio part should still convert for voice models: %s", b)
+	}
+
+	// Control: a vision-capable model still converts image parts to the wire
+	// format rather than dropping them.
+	vision := (&client{model: "vision-model", vision: true, visionDetail: "auto"}).buildRequest(provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: parts}},
+	})
+	b, err = json.Marshal(vision.Messages)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), "image_url") {
+		t.Fatalf("vision model should receive image parts: %s", b)
+	}
+}
+
+// TestBuildRequestTemperature covers the wire temperature semantics: unset is
+// omitted, a configured non-zero float is sent, and an explicit 0 (which a
+// float64+omitempty silently dropped) is expressible and wins.
+func TestBuildRequestTemperature(t *testing.T) {
+	c := &client{model: "m"}
+	msgs := []provider.Message{{Role: provider.RoleUser, Content: "hi"}}
+
+	if got := c.buildRequest(provider.Request{Messages: msgs}).Temperature; got != nil {
+		t.Fatalf("unset temperature = %v, want omitted (nil)", *got)
+	}
+	b, _ := json.Marshal(c.buildRequest(provider.Request{Messages: msgs}))
+	if strings.Contains(string(b), "temperature") {
+		t.Fatalf("unset temperature leaked onto the wire: %s", b)
+	}
+
+	if got := c.buildRequest(provider.Request{Messages: msgs, Temperature: 0.7}).Temperature; got == nil || *got != 0.7 {
+		t.Fatalf("configured temperature = %v, want 0.7", got)
+	}
+
+	zero := 0.0
+	b, _ = json.Marshal(c.buildRequest(provider.Request{Messages: msgs, TemperatureExplicit: &zero}))
+	if !strings.Contains(string(b), `"temperature":0`) {
+		t.Fatalf("explicit 0 must reach the wire: %s", b)
+	}
+	if got := c.buildRequest(provider.Request{Messages: msgs, Temperature: 0.9, TemperatureExplicit: &zero}).Temperature; got == nil || *got != 0 {
+		t.Fatalf("TemperatureExplicit should win over Temperature: %v", got)
+	}
+}

@@ -198,11 +198,14 @@ type LiveDeviceState struct {
 }
 
 // LiveSnapshot is the panel's mount-time state: per-device connection/VTY
-// state plus the per-turn budget counters.
+// state plus the per-turn budget counters (read AND direct-write — the write
+// budget counts independently, WRITE_AUTHZ_SPEC §6⑤).
 type LiveSnapshot struct {
 	Devices []LiveDeviceState `json:"devices"`
-	Spent   int               `json:"spent"`  // commands spent this turn
+	Spent   int               `json:"spent"`  // read commands spent this turn
 	Budget  int               `json:"budget"` // turn_command_budget (0 = unlimited)
+	WSpend  int               `json:"wspent"`  // direct writes spent this turn
+	WBudget int               `json:"wbudget"` // turn_write_budget (default 10)
 }
 
 // LiveState builds the snapshot over the configured inventory.
@@ -220,5 +223,9 @@ func (m *Manager) LiveState() LiveSnapshot {
 		})
 	}
 	m.mu.Unlock()
+	m.waMu.Lock()
+	out.WSpend = m.turnWrites
+	m.waMu.Unlock()
+	out.WBudget = m.cfg.NetDev.Write.TurnWriteBudgetOrDefault()
 	return out
 }

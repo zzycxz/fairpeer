@@ -69,7 +69,7 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
   const [sysCounts, setSysCounts] = useState<NetDevSyslogCountRow[] | null>(null);
   useEffect(() => {
     let alive = true;
-    app.NetDevSyslogCounts(500).then(rows => { if (alive) setSysCounts(rows ?? []); }).catch(() => {});
+    app.NetDevSyslogCounts(500).then(rows => { if (alive) setSysCounts(rows ?? []); }).catch(() => {}); // best-effort: 失败降级不阻塞
     return () => { alive = false; };
   }, []);
   const hosts = useMemo(() => devices.filter(d => d.vendor === "linux" || d.vendor === "windows" || d.vendor === "vmware" || d.kind === "docker" || d.kind === "k8s"), [devices]);
@@ -266,6 +266,18 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
     setFollowing(false);
   };
 
+  // Unmount（离开页签）也必须停掉服务端跟随——否则后端会话继续白白推流。
+  // ref 持有最近一次提交的 device/following，卸载闭包不会读到过期值
+  // （例如切设备时 stopFollow 已按旧设备停过，这里就不会重复/停错对象）。
+  const followStateRef = useRef({ device: "", active: false });
+  useEffect(() => {
+    followStateRef.current = { device, active: following };
+  }, [device, following]);
+  useEffect(() => () => {
+    const s = followStateRef.current;
+    if (s.active && s.device) void app.NetDevLogFollowStop(s.device).catch(() => {});
+  }, []);
+
   const dbQuery = async (q: string) => {
     setBusy(true); setNote("");
     try {
@@ -389,6 +401,7 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
           {hosts.map(h => <option key={h.name} value={h.name}>{h.name}{h.kind ? `（${h.kind}）` : ""}</option>)}
           {hosts.length === 0 && <option value="">{t("ndv.logp.noHosts")}</option>}
         </select>
+        {hosts.length === 0 && <button className="btn btn--small" role="button" onClick={() => window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-settings", { detail: "netdev" }))}>{t("ndv.goSettings")}</button>}
         <select className="mem-select" value={kind} onChange={e => { void stopFollow(); setKind(e.target.value as typeof kind); }}>
           {dev?.kind !== "k8s" && dev?.kind !== "docker" && <>
             {isLinuxHost(dev) && <option value="system">{t("ndv.logp.kSystem")}</option>}
@@ -526,7 +539,7 @@ export function LogPanel({ devices, dbSources, onInsertComposer, onOpenWorkbench
           <label className="ndv__meta">{t("ndv.logp.rows")}</label>
           <input className="mem-input" type="number" style={{ width: 64 }} value={tailN} min={1} max={1000} onChange={e => setTailN(Math.min(1000, Math.max(1, Number(e.target.value) || 100)))} />
           <label className="ndv__meta">{t("ndv.logp.since")}</label>
-          <input className="mem-input" style={{ width: 130 }} value={since} onChange={e => setSince(e.target.value)} placeholder="2026-08-27 10:00 或 -1h" />
+          <input className="mem-input" style={{ width: 130 }} value={since} onChange={e => setSince(e.target.value)} placeholder={`${new Date().toISOString().slice(0, 10)} 10:00 或 -1h`} />
           <label className="ndv__meta">{t("ndv.logp.grep")}</label>
           <input className="mem-input" style={{ width: 110 }} value={grep} onChange={e => setGrep(e.target.value)} placeholder={t("ndv.logp.phRegex")} />
         </div>

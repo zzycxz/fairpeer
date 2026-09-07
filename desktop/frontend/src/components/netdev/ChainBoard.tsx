@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { app } from "../../lib/bridge";
+import { PanelErrorState } from "./PanelStates";
+import { usePanelData } from "./usePanelData";
 import { useI18n } from "../../lib/i18n";
 import type { NetDevChainKind, NetDevChainNode, NetDevIncidentCase, NetDevInvestigationChain } from "../../lib/types";
 
@@ -45,7 +47,6 @@ function layout(chain: NetDevInvestigationChain) {
 
 export default function ChainBoard({ caseID, findingID, onJump, onFocusDevice }: Props) {
   const { t } = useI18n();
-  const [chain, setChain] = useState<NetDevInvestigationChain | null>(null);
   const [cases, setCases] = useState<NetDevIncidentCase[]>([]);
   const [sel, setSel] = useState(caseID ?? "");
   const [hl, setHl] = useState<string | null>(null); // node hover → highlight neighborhood
@@ -54,21 +55,24 @@ export default function ChainBoard({ caseID, findingID, onJump, onFocusDevice }:
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const fittedRef = useRef(false); // 用户一旦手动缩放/拖拽，不再自动适配
 
-  const load = useCallback(() => {
-    app.NetDevInvestigationChain(sel, findingID ?? "", 24)
-      .then(c => { if (c) setChain(c); })
-      .catch(() => {});
-  }, [sel, findingID]);
-  useEffect(() => { load(); }, [load]);
+  // G1-1：主数据走三态 hook（失败/空/加载可区分）；案例列表为辅助数据，
+  // 失败降级不阻塞。
+  const chainQ = usePanelData(
+    () => app.NetDevInvestigationChain(sel, findingID ?? "", 24),
+    [sel, findingID],
+  );
+  const chain = chainQ.data;
   useEffect(() => {
-    app.NetDevCases().then(cs => setCases(cs ?? [])).catch(() => {});
+    // alive 旗标防乱序回写：effect 重跑/卸载后迟到的旧响应不再覆盖新列表。
+    let alive = true;
+    app.NetDevCases().then(cs => { if (alive) setCases(cs ?? []); }).catch(() => {}); // best-effort: 案例列表缺失不阻塞图
     const on = (e: Event) => {
       const screens = (e as CustomEvent<{ screens?: string[] }>).detail?.screens ?? [];
-      if (screens.includes("chain")) load();
+      if (screens.includes("chain")) chainQ.retry();
     };
     window.addEventListener("fairpeer:netdev-dash", on);
-    return () => window.removeEventListener("fairpeer:netdev-dash", on);
-  }, [load]);
+    return () => { alive = false; window.removeEventListener("fairpeer:netdev-dash", on); };
+  }, [chainQ.retry]);
 
   const { pos, width, height } = useMemo(() => chain ? layout(chain) : { pos: {}, width: 0, height: 0 }, [chain]);
   // 初始适配（§4.6 六列同屏）：容器宽度装不下画布时按宽比缩放到恰好放下。
@@ -100,7 +104,9 @@ export default function ChainBoard({ caseID, findingID, onJump, onFocusDevice }:
     return set;
   }, [chain, hl]);
 
-  if (!chain) return <div className="ndv__card" style={{ padding: 16 }}>{t("ndv.chain.empty")}</div>;
+  if (chainQ.status === "error") return <PanelErrorState onRetry={chainQ.retry} />;
+  if (chainQ.status === "loading") return <div className="ndv__card" style={{ padding: 16 }}>{t("ndv.panel.loading")}</div>;
+  if (chainQ.status === "empty" || !chain) return <div className="ndv__card" style={{ padding: 16 }}>{t("ndv.chain.empty")}</div>;
 
   const jumpNode = (n: NetDevChainNode) => {
     if (n.device) onFocusDevice?.(n.device);

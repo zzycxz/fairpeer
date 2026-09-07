@@ -219,7 +219,7 @@ func TestFileUploadProposalE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != ProposalDone || !got.Steps[0].Applied {
+	if got.Status != ProposalWatching || !got.Steps[0].Applied { // full success → observation period
 		t.Fatalf("status=%s step=%+v", got.Status, got.Steps[0])
 	}
 	remote, ok := simFSGet("/etc/app/app.conf")
@@ -288,5 +288,133 @@ func TestFileUploadChecksumGuard(t *testing.T) {
 	}
 	if _, ok := simFSGet("/etc/app/app.conf"); ok {
 		t.Fatal("mismatched checksum still uploaded the file")
+	}
+}
+
+// The cert-replace backup pair must round-trip ABSENT slots in both encodings:
+// the legacy "\x00" join collided with the "\x00absent" marker (cert-absent
+// backups split into an empty cert + a corrupt key), and the JSON pair
+// replaces it for new backups while the legacy shapes still read.
+func TestCertBackupPairRoundtrip(t *testing.T) {
+	// New encoding: every presence combination survives encode → decode.
+	for _, c := range []struct{ certOK, keyOK bool }{{true, true}, {true, false}, {false, true}, {false, false}} {
+		enc := encodeCertBackup("CERT\n", c.certOK, "KEY\n", c.keyOK)
+		cert, certOK, key, keyOK, err := decodeCertBackup(enc)
+		if err != nil {
+			t.Fatalf("%v: %v", c, err)
+		}
+		if certOK != c.certOK || keyOK != c.keyOK || (certOK && cert != "CERT\n") || (keyOK && key != "KEY\n") {
+			t.Fatalf("%v: decoded (%q,%v,%q,%v) from %q", c, cert, certOK, key, keyOK, enc)
+		}
+	}
+
+	// Legacy "\x00"-joined shapes still decode, including the previously
+	// misparsed cert-absent one.
+	legacy := []struct {
+		name              string
+		raw               string
+		wantCert, wantKey string
+		certOK, keyOK     bool
+	}{
+		{"both present", "CERT\x00KEY", "CERT", "KEY", true, true},
+		{"cert absent", absentMarker + "\x00KEY", "", "KEY", false, true},
+		{"key absent", "CERT\x00" + absentMarker, "CERT", "", true, false},
+		{"both absent", absentMarker + "\x00" + absentMarker, "", "", false, false},
+	}
+	for _, l := range legacy {
+		cert, certOK, key, keyOK, err := decodeCertBackup(l.raw)
+		if err != nil {
+			t.Fatalf("%s: %v", l.name, err)
+		}
+		if cert != l.wantCert || key != l.wantKey || certOK != l.certOK || keyOK != l.keyOK {
+			t.Fatalf("%s: decoded (%q,%v,%q,%v) from %q", l.name, cert, certOK, key, keyOK, l.raw)
+		}
+	}
+
+	if _, _, _, _, err := decodeCertBackup("only-cert-no-separator"); err == nil {
+		t.Fatal("unpairable backup must fail the restore")
+	}
+}
+
+// E2E over the sim: replacing a pair where the CERT did not exist but the KEY
+// did — the exact case the legacy encoding corrupted (restore uploaded an
+// empty cert). The JSON backup restores the old key and removes the new cert.
+func TestCertReplaceAbsentCertE2E(t *testing.T) {
+	m := uploadManager(t)
+	simFSPut("/etc/tls/k.pem", []byte("OLD-KEY"))
+	cert := filepath.Join(t.TempDir(), "c.pem")
+	os.WriteFile(cert, []byte("NEW-CERT"), 0o600)
+	key := filepath.Join(t.TempDir(), "k.pem")
+	os.WriteFile(key, []byte("NEW-KEY"), 0o600)
+
+	p := &Proposal{Intent: "rotate pair", Steps: []ProposalStep{{
+		Device: "host1", Type: StepCertReplace, LocalPath: cert, RemotePath: "/etc/tls/c.pem",
+		KeyLocalPath: key, KeyRemotePath: "/etc/tls/k.pem", ReloadCmd: "nginx -s reload",
+	}}}
+	if err := m.ValidateProposal(p); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if err := SaveProposal(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ApproveProposal(p.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.ExecuteProposal(context.Background(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != ProposalWatching || !got.Steps[0].Applied {
+		t.Fatalf("status=%s step=%+v", got.Status, got.Steps[0])
+	}
+	if b, ok := simFSGet("/etc/tls/c.pem"); !ok || string(b) != "NEW-CERT" {
+		t.Fatalf("uploaded cert = %q (ok=%v)", b, ok)
+	}
+
+	// Rollback: the old key comes back, the new cert (no predecessor) goes.
+	if _, err := m.RollbackProposal(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if b, ok := simFSGet("/etc/tls/k.pem"); !ok || string(b) != "OLD-KEY" {
+		t.Fatalf("restored key = %q (ok=%v) — want the pre-change key", b, ok)
+	}
+	if _, ok := simFSGet("/etc/tls/c.pem"); ok {
+		t.Fatal("rollback left the new cert behind — it did not exist before (must be removed, not emptied)")
+	}
+}
+
+// E2E over the sim: replacing a pair where NEITHER file existed — both slots
+// restore by removal.
+func TestCertReplaceAbsentPairE2E(t *testing.T) {
+	m := uploadManager(t)
+	cert := filepath.Join(t.TempDir(), "c.pem")
+	os.WriteFile(cert, []byte("NEW-CERT"), 0o600)
+	key := filepath.Join(t.TempDir(), "k.pem")
+	os.WriteFile(key, []byte("NEW-KEY"), 0o600)
+
+	p := &Proposal{Intent: "install pair", Steps: []ProposalStep{{
+		Device: "host1", Type: StepCertReplace, LocalPath: cert, RemotePath: "/etc/tls/c.pem",
+		KeyLocalPath: key, KeyRemotePath: "/etc/tls/k.pem", ReloadCmd: "nginx -s reload",
+	}}}
+	if err := m.ValidateProposal(p); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if err := SaveProposal(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ApproveProposal(p.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ExecuteProposal(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.RollbackProposal(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := simFSGet("/etc/tls/c.pem"); ok {
+		t.Fatal("rollback left the new cert behind")
+	}
+	if _, ok := simFSGet("/etc/tls/k.pem"); ok {
+		t.Fatal("rollback left the new key behind")
 	}
 }

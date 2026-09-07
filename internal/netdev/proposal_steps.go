@@ -12,6 +12,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,7 +26,9 @@ import (
 )
 
 // absentMarker in step.Backup means the remote file did not exist before the
-// upload — rolling back removes it again.
+// upload — rolling back removes it again. Used by the SINGLE-slot backups
+// (file-upload, k8s-apply), where the exact-equality comparison is
+// unambiguous; the cert-replace PAIR cannot use it (see encodeCertBackup).
 const absentMarker = "\x00absent"
 
 // dangerVerbRe flags destructive verbs in any step's command/script text
@@ -334,7 +337,8 @@ func (m *Manager) runMigrationScript(ctx context.Context, source, script, auditC
 	if !ok {
 		return fmt.Errorf("db_source %q vanished from config", source)
 	}
-	for _, stmt := range splitSQLStatements(script) {
+	stmts := splitSQLStatements(script)
+	for i, stmt := range stmts {
 		err := m.dbExecStatement(ctx, src, stmt)
 		st := AuditOK
 		var msg string
@@ -343,7 +347,13 @@ func (m *Manager) runMigrationScript(ctx context.Context, source, script, auditC
 		}
 		_ = AppendAudit(Audit{Device: "(db:" + src.Name + ")", Command: "sql " + firstLine(stmt), Class: auditClass, Status: st, Error: msg})
 		if err != nil {
-			return fmt.Errorf("statement %q: %w", firstLine(stmt), err)
+			// Statements before the failure are already committed (each runs
+			// as its own implicit transaction) — the operator must know the
+			// prefix so the down script runs against the right state.
+			if i > 0 {
+				return fmt.Errorf("statement %d/%d %q failed — the first %d statement(s) are committed and stay until the down script runs: %w", i+1, len(stmts), firstLine(stmt), i, err)
+			}
+			return fmt.Errorf("statement %d/%d %q: %w", i+1, len(stmts), firstLine(stmt), err)
 		}
 	}
 	return nil
@@ -434,13 +444,8 @@ func (m *Manager) execFileRestore(ctx context.Context, d config.NetDevDevice, re
 		return fmt.Errorf("no backup captured for %s", remotePath)
 	}
 	if backup == absentMarker {
-		client, err := m.dialDeviceClient(ctx, d)
-		if err != nil {
+		if err := m.sshRemoveFile(ctx, d, remotePath); err != nil {
 			return err
-		}
-		defer client.Close()
-		if _, err := client.ExecInput(ctx, "rm -f '"+remotePath+"'", nil); err != nil {
-			return fmt.Errorf("remove %s: %w", remotePath, err)
 		}
 		_ = AppendAudit(Audit{Device: d.Name, Command: "file-restore(rm) " + remotePath, Class: "proposal-rollback", Status: AuditOK})
 		return nil
@@ -459,17 +464,17 @@ func (m *Manager) execCertReplace(ctx context.Context, d config.NetDevDevice, s 
 	if err != nil {
 		return fmt.Errorf("read key %s: %w", s.KeyLocalPath, err)
 	}
-	// Back up the current pair (raw — restore PUTs these exact bytes).
-	if cur, ok, err := m.sshCatFile(ctx, d, s.RemotePath); err != nil {
+	// Back up the current pair (raw — restore PUTs these exact bytes), encoded
+	// per-slot so "absent" survives any content.
+	certCur, certOK, err := m.sshCatFile(ctx, d, s.RemotePath)
+	if err != nil {
 		return fmt.Errorf("cert backup: %w", err)
-	} else {
-		s.Backup = backupPair(cur, ok)
 	}
-	if cur, ok, err := m.sshCatFile(ctx, d, s.KeyRemotePath); err != nil {
+	keyCur, keyOK, err := m.sshCatFile(ctx, d, s.KeyRemotePath)
+	if err != nil {
 		return fmt.Errorf("key backup: %w", err)
-	} else {
-		s.Backup += "\x00" + backupPair(cur, ok)
 	}
+	s.Backup = encodeCertBackup(certCur, certOK, keyCur, keyOK)
 	_ = AppendAudit(Audit{Device: s.Device, Via: d.Via, Command: "cert-replace " + s.RemotePath + " + reload", Class: "proposal-write", Status: AuditOK})
 	if err := m.sshB64Upload(ctx, d, cert, s.RemotePath); err != nil {
 		return err
@@ -480,11 +485,58 @@ func (m *Manager) execCertReplace(ctx context.Context, d config.NetDevDevice, s 
 	return m.sshReload(ctx, d, s.ReloadCmd)
 }
 
-func backupPair(cur string, ok bool) string {
-	if !ok {
-		return absentMarker
+// encodeCertBackup serializes the cert-replace backup pair. The LEGACY
+// encoding joined the two blobs with "\x00" and used absentMarker for "did
+// not exist" — but the marker itself starts with the join separator, so a
+// cert-absent backup split into ("", "absent\x00…"): the restore uploaded an
+// EMPTY cert and a corrupt key. New backups are a JSON 2-array with null
+// marking the absent slot — unambiguous for any content.
+func encodeCertBackup(cert string, certOK bool, key string, keyOK bool) string {
+	pair := [2]*string{nil, nil}
+	if certOK {
+		pair[0] = &cert
 	}
-	return cur
+	if keyOK {
+		pair[1] = &key
+	}
+	b, _ := json.Marshal(pair[:])
+	return string(b)
+}
+
+// decodeCertBackup reverses encodeCertBackup and still reads the legacy
+// "\x00"-joined form (a legacy backup whose cert content is itself a JSON
+// 2-array would misparse as new-format — PEM never starts with '[').
+func decodeCertBackup(s string) (cert string, certOK bool, key string, keyOK bool, err error) {
+	var pair []*string
+	if jerr := json.Unmarshal([]byte(s), &pair); jerr == nil {
+		if len(pair) != 2 {
+			return "", false, "", false, fmt.Errorf("cert backup is a %d-array, want 2", len(pair))
+		}
+		if pair[0] != nil {
+			cert, certOK = *pair[0], true
+		}
+		if pair[1] != nil {
+			key, keyOK = *pair[1], true
+		}
+		return cert, certOK, key, keyOK, nil
+	}
+	// Legacy pair: the leading marker (when present) is the cert slot — a
+	// split at the FIRST separator used to swallow it.
+	if strings.HasPrefix(s, absentMarker) {
+		rest := strings.TrimPrefix(s, absentMarker+"\x00")
+		if rest != absentMarker {
+			key, keyOK = rest, true
+		}
+		return "", false, key, keyOK, nil
+	}
+	parts := strings.SplitN(s, "\x00", 2)
+	if len(parts) != 2 {
+		return "", false, "", false, fmt.Errorf("cert backup missing — cannot restore")
+	}
+	if parts[1] != absentMarker {
+		key, keyOK = parts[1], true
+	}
+	return parts[0], true, key, keyOK, nil
 }
 
 func (m *Manager) sshReload(ctx context.Context, d config.NetDevDevice, reloadCmd string) error {
@@ -504,30 +556,19 @@ func (m *Manager) sshReload(ctx context.Context, d config.NetDevDevice, reloadCm
 
 // execCertRestore: 恢复旧证书对 → reload（回滚依据 = 旧证书备份 + reload）。
 func (m *Manager) execCertRestore(ctx context.Context, d config.NetDevDevice, s *ProposalStep) error {
-	parts := strings.SplitN(s.Backup, "\x00", 2)
-	if len(parts) != 2 {
-		return fmt.Errorf("cert backup missing — cannot restore")
+	certBak, certOK, keyBak, keyOK, err := decodeCertBackup(s.Backup)
+	if err != nil {
+		return err
 	}
-	certBak, keyBak := parts[0], parts[1]
-	if certBak == absentMarker {
-		client, err := m.dialDeviceClient(ctx, d)
-		if err != nil {
-			return err
-		}
-		defer client.Close()
-		if _, err := client.ExecInput(ctx, "rm -f '"+s.RemotePath+"'", nil); err != nil {
+	if !certOK {
+		if err := m.sshRemoveFile(ctx, d, s.RemotePath); err != nil {
 			return fmt.Errorf("remove old cert: %w", err)
 		}
 	} else if err := m.sshB64Upload(ctx, d, []byte(certBak), s.RemotePath); err != nil {
 		return err
 	}
-	if keyBak == absentMarker {
-		client, err := m.dialDeviceClient(ctx, d)
-		if err != nil {
-			return err
-		}
-		defer client.Close()
-		if _, err := client.ExecInput(ctx, "rm -f '"+s.KeyRemotePath+"'", nil); err != nil {
+	if !keyOK {
+		if err := m.sshRemoveFile(ctx, d, s.KeyRemotePath); err != nil {
 			return fmt.Errorf("remove old key: %w", err)
 		}
 	} else if err := m.sshB64Upload(ctx, d, []byte(keyBak), s.KeyRemotePath); err != nil {
@@ -535,4 +576,18 @@ func (m *Manager) execCertRestore(ctx context.Context, d config.NetDevDevice, s 
 	}
 	_ = AppendAudit(Audit{Device: d.Name, Command: "cert-restore " + s.RemotePath, Class: "proposal-rollback", Status: AuditOK})
 	return m.sshReload(ctx, d, s.ReloadCmd)
+}
+
+// sshRemoveFile deletes a remote file over a one-shot exec channel — the
+// rollback of an upload onto a path that did not exist before.
+func (m *Manager) sshRemoveFile(ctx context.Context, d config.NetDevDevice, remotePath string) error {
+	client, err := m.dialDeviceClient(ctx, d)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if _, err := client.ExecInput(ctx, "rm -f '"+remotePath+"'", nil); err != nil {
+		return fmt.Errorf("remove %s: %w", remotePath, err)
+	}
+	return nil
 }

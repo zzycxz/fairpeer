@@ -137,6 +137,27 @@ func TestStateHistoryLiveEntityBlocks(t *testing.T) {
 	}
 }
 
+// partial proposals are live like executing/watching ones: the step backups
+// (the ONLY recovery material for what is already on the devices) live in the
+// partial file, and a rewind to an earlier status drops them. Approved is
+// deliberately NOT live — the undo-approve rewind returns it to draft without
+// any device-state loss (the round-trip test above codifies that flow).
+func TestStateHistoryPartialBlocksApproveRewinds(t *testing.T) {
+	stateHistTestEnv(t)
+	saveTestProposal(t, "P-part", ProposalPartial)
+	ev := StateEventSnap(StateEventRollback, "P-part", StateActorUser, filepath.Join(ProposalsDir(), "P-part.json"))
+	if ev < 0 {
+		t.Fatal("no event")
+	}
+	metas := StateEventMetas()
+	if metas[0].CanRestore || len(metas[0].Live) != 1 || metas[0].Live[0].ID != "P-part" || metas[0].Live[0].Status != ProposalPartial {
+		t.Fatalf("partial must classify as live: %+v", metas[0])
+	}
+	if _, err := StateRestore(ev, StateActorUser); err == nil {
+		t.Fatal("partial proposal must block restore")
+	}
+}
+
 // Redo is only offered while the restore-keep event is the newest one; any
 // later event disables it (a redo would collateral-revert that event's suffix).
 func TestStateHistoryRedoGuardNewestOnly(t *testing.T) {

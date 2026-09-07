@@ -49,6 +49,8 @@ type NetDevDeviceView struct {
 	ConfigPaths []string `json:"configPaths"`
 	// OOBURL is the 带外启动器 deep link (§6.3): ESXi/堡垒/BMC Web UI.
 	OOBURL string `json:"oobUrl"`
+	// GPU 标记（S1-2）：分诊电池追加 GPU 档、设备卡 GPU 徽标。
+	GPU bool `json:"gpu,omitempty"`
 	// Kind is the data-plane discriminator (NETDEV_SPEC_V2 §2.1): ""(=按厂商)
 	// | docker | k8s. DockerSocket / K8s* apply per kind.
 	Kind         string `json:"kind"`
@@ -77,6 +79,10 @@ type NetDevDeviceView struct {
 	ConsolePort string `json:"consolePort"`
 	ConsoleBaud int    `json:"consoleBaud"` // 0 => 9600; 8N1 fixed
 
+	// WriteOverride tightens (never widens) this device's write tier below its
+	// group's (WRITE_AUTHZ_SPEC §4.1). "" = inherit the group/global tier.
+	WriteOverride string `json:"writeOverride,omitempty"`
+
 	// Password is write-only from the form: blank = leave the stored secret
 	// untouched; non-blank = store it under the netdev namespace.
 	Password string `json:"password,omitempty"`
@@ -97,6 +103,7 @@ type NetDevHopView struct {
 // NetDevSettingsView is the whole settings payload.
 type NetDevSettingsView struct {
 	BackupInterval string             `json:"backupInterval"`
+	BackupGitMirror bool              `json:"backupGitMirror"`
 	Enabled        bool               `json:"enabled"`
 	NetworkName    string             `json:"networkName"`
 	Devices        []NetDevDeviceView `json:"devices"`
@@ -171,6 +178,10 @@ type NetDevGroupDefView struct {
 	Name         string `json:"name"`
 	Policy       string `json:"policy"`       // read-only | proposal | proposal+confirm2
 	ChangeWindow string `json:"changeWindow"` // e.g. "tue,thu 22:00-24:00"; "" = any time
+	// Write is the group's default write tier (""=inherit global; sealed |
+	// confirm | auto — WRITE_AUTHZ_SPEC §4.1). Widening past the confirmed
+	// baseline still needs the per-device alert confirm (Manager clamp).
+	Write string `json:"write"`
 }
 
 // NetDevAlertRuleView is one alert rule row for the settings editor.
@@ -252,6 +263,7 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 		NetworkName:          cfg.NetDev.NetworkName,
 		AuditRetention:       cfg.NetDev.AuditRetention,
 		BackupInterval:       cfg.NetDev.BackupInterval,
+		BackupGitMirror:      cfg.NetDev.BackupGitMirror,
 		Scopes:               cfg.NetDev.Discovery.Scopes,
 		GuardConfirmEach:     cfg.NetDev.Guardrails.ConfirmEachCommand,
 		GuardTurnBudget:      cfg.NetDev.Guardrails.TurnCommandBudget,
@@ -308,7 +320,7 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 		v.Presets = append(v.Presets, NetDevPresetView{Name: p.Name, Commands: p.Commands, Vendors: p.Vendors})
 	}
 	for _, g := range cfg.NetDev.Groups {
-		v.GroupDefs = append(v.GroupDefs, NetDevGroupDefView{Name: g.Name, Policy: g.Policy, ChangeWindow: g.ChangeWindow})
+		v.GroupDefs = append(v.GroupDefs, NetDevGroupDefView{Name: g.Name, Policy: g.Policy, ChangeWindow: g.ChangeWindow, Write: g.Write})
 	}
 	for _, r := range cfg.NetDev.AlertRules {
 		v.AlertRules = append(v.AlertRules, NetDevAlertRuleView{
@@ -335,6 +347,7 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 			ConfigPaths:      d.ConfigPaths,
 			OOBURL:           d.OOBURL,
 			Protocols:        d.Protocols,
+			GPU:              d.GPU,
 			Kind:             d.Kind,
 			DockerSocket:     dockerSocketOf(d),
 			K8sKubeconfigEnv: k8sKubeconfigEnvOf(d),
@@ -348,6 +361,7 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 			SnmpCommunitySet: netdevSecretSet(netdev.SecretKindPassword, snmpCommunityEnvOf(d)),
 			ConsolePort:      d.ConsolePort,
 			ConsoleBaud:      d.ConsoleBaud,
+			WriteOverride:    d.WriteOverride,
 		})
 	}
 	for _, h := range cfg.NetDev.Hops {
@@ -578,6 +592,7 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 		nd.ScheduledBaseline = v.ScheduledBaseline
 		if strings.TrimSpace(v.BackupInterval) != "" {
 			nd.BackupInterval = strings.TrimSpace(v.BackupInterval)
+			nd.BackupGitMirror = v.BackupGitMirror
 		} else {
 			nd.BackupInterval = c.NetDev.BackupInterval
 		}
@@ -657,10 +672,11 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 				edited[strings.TrimSpace(g.Name)] = g
 			}
 			for _, g := range c.NetDev.Groups {
-				ng := config.NetDevGroup{Name: g.Name, Policy: g.Policy, ChangeWindow: g.ChangeWindow}
+				ng := config.NetDevGroup{Name: g.Name, Policy: g.Policy, ChangeWindow: g.ChangeWindow, Write: g.Write}
 				if e, ok := edited[g.Name]; ok {
 					ng.Policy = strings.TrimSpace(e.Policy)
 					ng.ChangeWindow = strings.TrimSpace(e.ChangeWindow)
+					ng.Write = strings.TrimSpace(e.Write)
 					delete(edited, g.Name)
 				}
 				nd.Groups = append(nd.Groups, ng)
@@ -693,9 +709,13 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 				ConfigPaths: cleanLogPaths(d.ConfigPaths),
 				OOBURL:      strings.TrimSpace(d.OOBURL),
 				Protocols:   d.Protocols,
+				GPU:         d.GPU,
 				Kind:        strings.TrimSpace(d.Kind),
 				ConsolePort: strings.TrimSpace(d.ConsolePort),
 				ConsoleBaud: d.ConsoleBaud,
+				// WRITE_AUTHZ：设备写档覆盖（只许收紧——校验在 ValidateNetDev；
+				// 放宽的生效还须经告警确认，Manager 侧 clamp 兜底）。
+				WriteOverride: strings.TrimSpace(d.WriteOverride),
 			})
 			if strings.TrimSpace(d.Kind) == "docker" {
 				nd.Devices[len(nd.Devices)-1].Docker = &config.NetDevDockerConfig{
@@ -834,9 +854,11 @@ func startInspectionScheduler(a *App) {
 				time.Sleep(d)
 				ctx, cancel := context.WithTimeout(a.ctx, 10*time.Minute)
 				stamp := netdev.ScheduleStamp{Kind: "inspection", At: time.Now().Format("2006-01-02T15:04:05")}
-				if f, err := netdev.SharedManager(cfg).RunInspection(ctx); err == nil && f != nil {
-					stamp.Ok, stamp.Title = true, f.Title
-					slog.Info("scheduled netdev inspection filed", "title", f.Title)
+				// 走 runInspectionRound：调度轮与手动轮共用同一份状态流，
+				// 总览巡检卡的「上次巡检」两个来源都覆盖。
+				if title, err := a.runInspectionRound(false); err == nil && title != "" {
+					stamp.Ok, stamp.Title = true, title
+					slog.Info("scheduled netdev inspection filed", "title", title)
 				} else if err != nil {
 					stamp.Note = err.Error()
 				}
@@ -889,6 +911,11 @@ func startBackupScheduler(a *App) {
 				ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
 				if vers, err := netdev.SharedManager(cfg).RunBackup(ctx, ""); err == nil {
 					slog.Info("scheduled netdev backup filed", "versions", len(vers))
+					// WRITE_AUTHZ §7.1 drift 看护：定时快照 vs 上一版 diff，
+					// 变化自动立案（source=drift:<device>）——持续回答"谁改了什么"。
+					if fs := netdev.FileDriftFindings(vers); len(fs) > 0 {
+						slog.Info("netdev drift findings filed", "n", len(fs))
+					}
 				}
 				cancel()
 			}
@@ -1038,6 +1065,136 @@ func (a *App) startNetDevLiveForwarding(cfg *config.Config) {
 	// Piggyback: the entry points that open the live channel also open the
 	// finding channel — every netdev bridge call turns both on together.
 	a.startNetDevFindingForwarding()
+	// …and the confirm-tier write-approval channel (WRITE_AUTHZ_SPEC §6②):
+	// the Manager's approval cards surface to the UI through it.
+	a.startWriteApprovalChannel(cfg)
+}
+
+// ── WRITE_AUTHZ：confirm 档写命令审批卡通道 + 写档桥（spec §5/§6） ──────────
+
+type writeApprovalDecision struct {
+	Approved bool
+	Reason   string
+}
+
+type writeApprovalReq struct {
+	id      string
+	device  string
+	command string
+	ch      chan writeApprovalDecision
+}
+
+var (
+	writeApprovalOnce sync.Once
+	writeApprovalMu   sync.Mutex
+	writeApprovalSeq  int64
+	writeApprovalReqs = map[string]*writeApprovalReq{}
+)
+
+// startWriteApprovalChannel installs the Manager-side WriteApprover (once):
+// a confirm-tier write pushes a pending card to the UI on the
+// "netdev:write-approval" channel ({id, device, command}) and blocks until
+// the user answers via NetDevResolveWriteApproval. Timeout DECLINES — the
+// channel never default-allows (headless semantics, spec §12.9).
+func (a *App) startWriteApprovalChannel(cfg *config.Config) {
+	writeApprovalOnce.Do(func() {
+		netdev.SharedManager(cfg).SetWriteApprover(func(device, command string) (bool, string) {
+			writeApprovalMu.Lock()
+			writeApprovalSeq++
+			req := &writeApprovalReq{
+				id:      fmt.Sprintf("wa-%d", writeApprovalSeq),
+				device:  device,
+				command: command,
+				ch:      make(chan writeApprovalDecision, 1),
+			}
+			writeApprovalReqs[req.id] = req
+			writeApprovalMu.Unlock()
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "netdev:write-approval", map[string]string{
+					"id": req.id, "device": device, "command": command,
+				})
+			}
+			select {
+			case d := <-req.ch:
+				return d.Approved, d.Reason
+			case <-time.After(120 * time.Second):
+				writeApprovalMu.Lock()
+				delete(writeApprovalReqs, req.id)
+				writeApprovalMu.Unlock()
+				return false, "审批超时（120 秒无人响应，按拒绝处理）"
+			}
+		})
+	})
+}
+
+// NetDevResolveWriteApproval answers a pending confirm-tier write card from
+// the UI. Returns false when the card is unknown (already timed out).
+func (a *App) NetDevResolveWriteApproval(id string, approved bool, reason string) bool {
+	writeApprovalMu.Lock()
+	req := writeApprovalReqs[id]
+	delete(writeApprovalReqs, id)
+	writeApprovalMu.Unlock()
+	if req == nil {
+		return false
+	}
+	req.ch <- writeApprovalDecision{Approved: approved, Reason: reason}
+	return true
+}
+
+// NetDevWriteTierRow is one device's lock state — the settings page and the
+// device-card badges both render from this.
+type NetDevWriteTierRow struct {
+	Device     string `json:"device"`
+	Configured string `json:"configured"` // TOML tier (group chain resolved)
+	Confirmed  string `json:"confirmed"`  // last human-confirmed tier ("" = sealed baseline)
+	Effective  string `json:"effective"`  // what a write must obey NOW
+	Clamped    bool   `json:"clamped"`    // configured wider than confirmed → degraded
+}
+
+// NetDevWriteTierState returns every managed device's lock state plus the
+// pending clamp warnings — surfaced as a one-time banner after a hand-edited
+// TOML relaxation (spec §5.3: the config file is an application, not an
+// authority).
+func (a *App) NetDevWriteTierState() map[string]any {
+	empty := map[string]any{"rows": []NetDevWriteTierRow{}, "warnings": []string{}}
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return empty
+	}
+	m := netdev.SharedManager(cfg)
+	rows := make([]NetDevWriteTierRow, 0, len(cfg.NetDev.Devices))
+	for _, d := range cfg.NetDev.Devices {
+		configured := cfg.NetDev.NetDevWriteTierFor(d)
+		effective := m.EffectiveWriteTier(d)
+		rows = append(rows, NetDevWriteTierRow{
+			Device: d.Name, Configured: string(configured),
+			Confirmed: m.ConfirmedTier(d.Name), Effective: string(effective),
+			Clamped: configured != effective,
+		})
+	}
+	return map[string]any{"rows": rows, "warnings": m.WriteTierWarnings()}
+}
+
+// NetDevConfirmWriteTier records the human's alert-confirmation of a tier
+// WIDENING (call AFTER the risk dialog — spec §5.2). The TOML tier itself is
+// written by the normal settings save; this records the confirmation that
+// lets the wider tier take effect (without it the loader clamps to sealed).
+func (a *App) NetDevConfirmWriteTier(device, tier string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		return fmt.Errorf("config unavailable")
+	}
+	return netdev.SharedManager(cfg).ConfirmWriteTier(device, tier, "local-user")
+}
+
+// NetDevOpSteps returns the operation ledger for the UI (device "" = every
+// device; newest first) — per-step diff display and "回退此步" actions read
+// from here (spec §7.3).
+func (a *App) NetDevOpSteps(device string) []netdev.OpStep {
+	return netdev.ListOpSteps(device, 100)
 }
 
 // netdevFindingOnce guards the one-time install of the finding forwarder.
@@ -1437,20 +1594,103 @@ func (a *App) NetDevEmergencyStop() (int, error) {
 	return n, nil
 }
 
-// NetDevRunInspection sweeps all devices with the read battery and files one
-// Finding with the evidence (the manual 定时巡检; scheduler wiring later).
-func (a *App) NetDevRunInspection() (*netdev.Finding, error) {
+// ── 网络巡检（task-ified 手动触发 + 状态流）────────────────────────────────
+// NetDevInspectionState is the overview 巡检卡's model: one sweep's live
+// progress plus the last completed round (manual OR scheduled — both write
+// the same state). Frontend receives it via the "netdev:inspection" event and
+// the NetDevInspectionStatus binding.
+type NetDevInspectionState struct {
+	Running   bool   `json:"running"`
+	Manual    bool   `json:"manual"`             // current round user-kicked?
+	StartedAt int64  `json:"startedAt,omitempty"` // unix ms
+	Done      int    `json:"done"`                // devices completed this round
+	Total     int    `json:"total"`               // driver-resolved device count
+	LastTitle string `json:"lastTitle,omitempty"`
+	LastAt    int64  `json:"lastAt,omitempty"` // unix ms
+	LastErr   string `json:"lastErr,omitempty"`
+	Interval  string `json:"interval,omitempty"` // configured cycle ("" = off), filled on reads
+}
+
+var (
+	inspStateMu sync.Mutex
+	inspState   NetDevInspectionState
+)
+
+// setInspState mutates the sweep state under its lock and pushes the snapshot
+// to the frontend (event-driven; the overview's dock 档 runs zero timers).
+func setInspState(a *App, mut func(*NetDevInspectionState)) {
+	inspStateMu.Lock()
+	mut(&inspState)
+	s := inspState
+	inspStateMu.Unlock()
+	if a != nil && a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "netdev:inspection", s)
+	}
+}
+
+// runInspectionRound runs ONE full sweep synchronously (battery + journal row
+// + rolling Finding), updating the shared state as it goes. Both entries —
+// the task-ified manual kick and the periodic scheduler — come through here
+// so the 巡检卡's last-round line covers either source.
+func (a *App) runInspectionRound(manual bool) (string, error) {
+	setInspState(a, func(s *NetDevInspectionState) {
+		s.Running, s.Manual, s.StartedAt, s.Done, s.Total = true, manual, time.Now().UnixMilli(), 0, 0
+	})
 	cfg, err := config.Load()
 	if err != nil {
-		return nil, err
+		setInspState(a, func(s *NetDevInspectionState) { s.Running = false; s.LastErr, s.LastAt = err.Error(), time.Now().UnixMilli() })
+		return "", err
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
 	defer cancel()
-	f, err := netdev.SharedManager(cfg).RunInspection(ctx)
+	f, err := netdev.SharedManager(cfg).RunInspectionProgress(ctx, func(done, total int) {
+		setInspState(a, func(s *NetDevInspectionState) { s.Done, s.Total = done, total })
+	})
+	title := ""
+	setInspState(a, func(s *NetDevInspectionState) {
+		s.Running, s.Manual = false, false
+		if err != nil {
+			s.LastErr, s.LastAt = err.Error(), time.Now().UnixMilli()
+			return
+		}
+		s.LastErr = ""
+		if f != nil {
+			s.LastTitle, s.LastAt = f.Title, time.Now().UnixMilli()
+			title = f.Title
+		}
+	})
 	if err == nil {
 		a.dashEmit("overview", "chain")
 	}
-	return f, err
+	return title, err
+}
+
+// NetDevRunInspection kicks a full-network read-battery sweep in the
+// background and returns IMMEDIATELY with the round state. The overview's
+// 巡检卡 renders progress from "netdev:inspection" events — the pre-task-ify
+// form blocked this binding for the whole sweep (minutes with many devices)
+// and showed a misleading 分诊中… on the sidebar button. A round already
+// running is a no-op: the returned state says so.
+func (a *App) NetDevRunInspection() (NetDevInspectionState, error) {
+	inspStateMu.Lock()
+	running := inspState.Running
+	inspStateMu.Unlock()
+	if !running {
+		go func() { _, _ = a.runInspectionRound(true) }()
+	}
+	return a.NetDevInspectionStatus(), nil
+}
+
+// NetDevInspectionStatus returns the current sweep state with the configured
+// schedule interval attached ("" = 定时巡检 off) for the overview card.
+func (a *App) NetDevInspectionStatus() NetDevInspectionState {
+	inspStateMu.Lock()
+	s := inspState
+	inspStateMu.Unlock()
+	if cfg, err := config.Load(); err == nil && cfg != nil {
+		s.Interval = strings.TrimSpace(cfg.NetDev.InspectionInterval)
+	}
+	return s
 }
 
 // NetDevFindings lists diagnosis findings newest-first (Finding cards).
@@ -2027,6 +2267,10 @@ type NetDevPromoteForm struct {
 	Vendor string `json:"vendor"`
 	Role   string `json:"role"`
 	Model  string `json:"model"`
+	// WriteTier is the promoted device's write tier (WRITE_AUTHZ §4.2: 转正必选
+	// 锁——"" = 继承组/全局（= sealed 缺省）。Only tightening values are useful
+	// here; validation catches wider-than-group overrides.
+	WriteTier string `json:"writeTier"`
 }
 
 // NetDevPromoteHosts turns confirmed leads into inventory skeletons via the
@@ -2065,6 +2309,8 @@ func (a *App) NetDevPromoteHosts(entries []NetDevPromoteForm) error {
 				Role:    strings.TrimSpace(e.Role),
 				Model:   strings.TrimSpace(e.Model),
 				Port:    22,
+				// WRITE_AUTHZ：转正即定锁——空 = 继承（= sealed 安全缺省）。
+				WriteOverride: strings.TrimSpace(e.WriteTier),
 			})
 			taken[name] = true
 		}
@@ -2462,6 +2708,106 @@ func (a *App) NetDevJobAbort(id string) (*netdev.Job, error) {
 
 // ── 割接模式（§7.2）──────────────────────────────────────────────────────
 
+// ── 项目上线前审计（SCENARIO_SPEC S5）───────────────────────────────────
+
+type NetDevAuditProjectView = netdev.AuditProject
+type NetDevAuditReportView = netdev.AuditReport
+
+func (a *App) NetDevAuditProjects() ([]*netdev.AuditProject, error) {
+	return netdev.ListAuditProjects()
+}
+
+func (a *App) NetDevAuditProjectSave(p netdev.AuditProject) (*netdev.AuditProject, error) {
+	if err := netdev.SaveAuditProject(&p); err != nil {
+		return nil, err
+	}
+	a.dashEmit("overview")
+	return &p, nil
+}
+
+func (a *App) NetDevAuditProjectDelete(id string) error {
+	if err := netdev.DeleteAuditProject(id); err != nil {
+		return err
+	}
+	a.dashEmit("overview")
+	return nil
+}
+
+// NetDevAuditProjectRun executes the checklist battery and returns the fresh
+// risk list.
+func (a *App) NetDevAuditProjectRun(id string) (*netdev.AuditReport, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	projects, err := netdev.ListAuditProjects()
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range projects {
+		if p.ID == id {
+			rep, rerr := netdev.SharedManager(cfg).RunProjectAudit(p)
+			if rerr == nil {
+				a.dashEmit("overview", "chain")
+			}
+			return rep, rerr
+		}
+	}
+	return nil, fmt.Errorf("audit project %s not found", id)
+}
+
+// NetDevAuditProjectStatusView carries the tri-value result (Wails bindings
+// take a single return value).
+type NetDevAuditProjectStatusView struct {
+	Project *netdev.AuditProject `json:"project,omitempty"`
+	Report  *netdev.AuditReport  `json:"report,omitempty"`
+	Green   bool                 `json:"green"`
+}
+
+// NetDevAuditProjectStatus returns project + latest report + green light.
+func (a *App) NetDevAuditProjectStatus(id string) (*NetDevAuditProjectStatusView, error) {
+	p, rep, green, err := netdev.AuditProjectStatus(id)
+	if err != nil {
+		return nil, err
+	}
+	return &NetDevAuditProjectStatusView{Project: p, Report: rep, Green: green}, nil
+}
+
+func (a *App) NetDevAuditItemSetStatus(projectID, signature, status string) error {
+	if err := netdev.SetAuditItemStatus(projectID, signature, status); err != nil {
+		return err
+	}
+	a.dashEmit("overview")
+	return nil
+}
+
+// ── 运维简报（SCENARIO_SPEC S6-1）───────────────────────────────────────
+
+// NetDevBriefingBuild generates + publishes a briefing (kind: daily|weekly|
+// inspection). Pure read-side digest — no device contact, redacted sources
+// only. Returns the briefings dir path for the toast.
+func (a *App) NetDevBriefingBuild(kind string) (*netdev.Briefing, error) {
+	b, err := netdev.BuildBriefing(kind)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := netdev.WriteBriefing(b); err != nil {
+		return nil, err
+	}
+	a.dashEmit("overview")
+	return b, nil
+}
+
+// NetDevBriefingLatestPath returns the latest-<kind>.json path (office skills
+// read from here — the file-level one-way publish channel).
+func (a *App) NetDevBriefingLatestPath(kind string) (string, error) {
+	dir, err := netdev.BriefingsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, fmt.Sprintf("latest-%s.json", kind)), nil
+}
+
 func (a *App) NetDevCutoverStart(def netdev.CutoverRun) (*netdev.CutoverRun, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -2488,6 +2834,20 @@ func (a *App) NetDevCutoverContinue(id string) (*netdev.CutoverRun, error) {
 		return nil, err
 	}
 	c, err := netdev.SharedManager(cfg).CutoverContinue(id)
+	if err == nil {
+		a.dashEmit("cutover", "overview", "chain")
+	}
+	return c, err
+}
+
+// NetDevCutoverPrecheckOverride is the human 放行 after a red precheck
+// (SCENARIO_SPEC S1-1) — audit-logged, then the window starts.
+func (a *App) NetDevCutoverPrecheckOverride(id string) (*netdev.CutoverRun, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	c, err := netdev.SharedManager(cfg).CutoverPrecheckOverride(id)
 	if err == nil {
 		a.dashEmit("cutover", "overview", "chain")
 	}

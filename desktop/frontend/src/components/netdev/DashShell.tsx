@@ -16,6 +16,14 @@ import ExposureBoardView from "./ExposureBoardView";
 export type DashScreen = "overview" | "chain" | "cutover" | "discovery" | "exposure";
 const SCREENS: DashScreen[] = ["overview", "chain", "cutover", "discovery", "exposure"];
 
+// 底条分类 → 小色点档位（audit.class → CSS 修饰符）。读取类不着色（默认
+// 灰点），写/评估=琥珀，护栏=红，割接/提案=蓝——只做轻量示意，不做告警式
+// 排版；失败态由条目红字表达。
+const TICK_DOT: Record<string, string> = {
+  write: "write", assess: "write", guardrail: "guardrail",
+  cutover: "change", proposal: "change", "proposal-write": "change", "proposal-rollback": "change",
+};
+
 interface Props {
   initialScreen?: DashScreen;
   initialFinding?: string;
@@ -51,10 +59,10 @@ export default function DashShell({ initialScreen, initialFinding, onClose, onTo
         else if (s.scenario_discovery_run) setScreen("discovery");
         else setScreen("overview");
       }
-    }).catch(() => {});
+    }).catch(() => {}); // best-effort: 失败降级不阻塞
   }, []);
   const loadTicker = useCallback(() => {
-    app.NetDevAuditTail(20).then(a => setTicker(a ?? [])).catch(() => {});
+    app.NetDevAuditTail(20).then(a => setTicker(a ?? [])).catch(() => {}); // best-effort: 失败降级不阻塞
   }, []);
 
   useEffect(() => { loadSnap(true); loadTicker(); }, [loadSnap, loadTicker]);
@@ -69,7 +77,6 @@ export default function DashShell({ initialScreen, initialFinding, onClose, onTo
     const tm = setInterval(() => {
       const cutoverException = screen === "cutover";
       if (visible || cutoverException) { loadSnap(false); loadTicker(); }
-      if (visible && screen !== "overview" && screen !== "chain") { /* 屏自己按事件刷新 */ }
     }, 60_000);
     return () => { document.removeEventListener("visibilitychange", onVis); clearInterval(tm); };
   }, [paused, screen, loadSnap, loadTicker]);
@@ -83,6 +90,28 @@ export default function DashShell({ initialScreen, initialFinding, onClose, onTo
     window.addEventListener("fairpeer:netdev-dash", on);
     return () => window.removeEventListener("fairpeer:netdev-dash", on);
   }, [loadSnap, loadTicker]);
+
+  // 底条轮播素材：同设备同动作聚合（"attempt N"/": CONFIRMED" 后缀归并），
+// 时间保留该组最新一条——golden check 每轮记两条、弱口令连试 3 次这类
+// 高频重复压成 "×N"，20 条原始尾通常只剩几条有效信息。
+const tickItems = useMemo(() => {
+  const seen = new Map<string, { time: string; device: string; command: string; cls: string; status: string; n: number }>();
+  for (const a of ticker ?? []) { // ticker 已新→旧排序：首见即最新
+    const key = `${a.device}|${a.command.replace(/\s*attempt \d+(?:: CONFIRMED)?$/i, "")}`;
+    const hit = seen.get(key);
+    if (hit) hit.n++;
+    else seen.set(key, { time: a.time, device: a.device, command: a.command, cls: a.class, status: a.status, n: 1 });
+  }
+  return [...seen.values()];
+}, [ticker]);
+const [tickIdx, setTickIdx] = useState(0);
+const [tickHover, setTickHover] = useState(false);
+useEffect(() => { setTickIdx(0); }, [tickItems]);
+useEffect(() => {
+  if (tickHover || tickItems.length < 2) return;
+  const tm = setInterval(() => setTickIdx(i => (i + 1) % tickItems.length), 4000);
+  return () => clearInterval(tm);
+}, [tickHover, tickItems]);
 
   // 投影模式（§4.11）：轮播 + 悬停暂停 + Esc 先退投影。
   useEffect(() => {
@@ -142,16 +171,35 @@ export default function DashShell({ initialScreen, initialFinding, onClose, onTo
         {screenBody}
       </div>
 
-      <div className="ndv-dash__ticker">
+      {/* 底条（§4.11）：审计尾的轮播呈现——单条淡入轮换（4s）+ 悬停暂停 +
+          ‹ › 手动翻页；条目按设备+动作聚合（×N），分类只以小色点示意，
+          失败条目沿用红字。整条点击进审计页。 */}
+      <div className="ndv-dash__ticker" onMouseEnter={() => setTickHover(true)} onMouseLeave={() => setTickHover(false)}>
         <span className="ndv-dash__tickerlabel">{t("ndv.dash.ticker")}</span>
-        <div className="ndv-dash__tickerrun">
-          {(ticker || []).slice().reverse().map((a, i) => (
-            <span key={i} className={`ndv-dash__tick${a.status !== "ok" ? " ndv-dash__tick--bad" : ""}`} role="button"
-              onClick={() => onJump?.({ tab: "audit" })}>
-              <span className="dim">{a.time}</span> {a.device} · {a.command}
+        {tickItems.length === 0 ? (
+          <span className="dim">{t("ndv.dash.tickEmpty")}</span>
+        ) : (() => {
+          const idx = tickIdx % tickItems.length;
+          const it = tickItems[idx];
+          return (
+            <span key={idx} className={`ndv-dash__tickitem${it.status !== "ok" ? " ndv-dash__tickitem--bad" : ""}`} role="button"
+              title={it.command} onClick={() => onJump?.({ tab: "audit" })}>
+              <span className={`ndv-dash__tickdot ndv-dash__tickdot--${TICK_DOT[it.cls] ?? ""}`} />
+              <span className="dim">{(it.time ?? "").slice(0, 16)}</span>
+              <span>{it.device || "—"}</span>
+              <span className="dim">·</span>
+              <span className="ndv-dash__tickcmd">{it.command}</span>
+              {it.n > 1 && <span className="ndv-dash__tickcount">×{it.n}</span>}
             </span>
-          ))}
-        </div>
+          );
+        })()}
+        {tickItems.length > 1 && (
+          <span className="ndv-dash__ticknav">
+            <span role="button" title={t("ndv.dash.tickPrev")} onClick={() => setTickIdx(i => (i - 1 + tickItems.length) % tickItems.length)}>‹</span>
+            <span className="dim">{(tickIdx % tickItems.length) + 1}/{tickItems.length}</span>
+            <span role="button" title={t("ndv.dash.tickNext")} onClick={() => setTickIdx(i => (i + 1) % tickItems.length)}>›</span>
+          </span>
+        )}
       </div>
     </div>
   );

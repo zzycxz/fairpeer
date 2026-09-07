@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // TemplateStep is one per-device step's COMMAND TEMPLATE ({{var}} placeholders).
@@ -106,7 +107,7 @@ func SaveTemplate(t *Template) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(templatesDir(), t.ID+".json"), b, 0o600)
+	return fileutil.AtomicWriteFile(filepath.Join(templatesDir(), t.ID+".json"), b, 0o600)
 }
 
 func validateTemplateDef(t *Template) error {
@@ -138,6 +139,9 @@ func validateTemplateDef(t *Template) error {
 
 // GetTemplate loads one template.
 func GetTemplate(id string) (*Template, error) {
+	if !validStoreID(id) {
+		return nil, fmt.Errorf("template %s: invalid id", id)
+	}
 	b, err := os.ReadFile(filepath.Join(templatesDir(), id+".json"))
 	if err != nil {
 		return nil, err

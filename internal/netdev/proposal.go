@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 	"github.com/zzycxz/fairpeer/internal/netdev/driver"
 )
 
@@ -71,10 +72,17 @@ type ProposalStep struct {
 	RestoreVersion string `json:"restore_version,omitempty"` // snapshot id; "" = latest at execute time
 	VerifyCmd      string `json:"verify_cmd,omitempty"`      // e.g. `nginx -t`
 
-	Backup    string `json:"backup,omitempty"` // captured pre-change state (redacted)
-	Applied   bool   `json:"applied"`
-	Error     string `json:"error,omitempty"`
-	Dangerous bool   `json:"dangerous,omitempty"` // destructive verb scan ⇒ forces confirm2 (§7.1)
+	Backup  string `json:"backup,omitempty"` // captured pre-change state (redacted)
+	Applied bool   `json:"applied"`
+	// AppliedCmds is how much of the step actually landed: cli counts applied
+	// commands (a mid-step failure keeps the executed prefix — those commands
+	// are on the device even though Applied stays false), unitary types count
+	// 1 when the whole step applied. Rollback runs for any step with
+	// AppliedCmds > 0, not just fully-applied ones (missing field = 0 keeps
+	// old proposals' behavior: Applied alone decides).
+	AppliedCmds int    `json:"applied_cmds,omitempty"`
+	Error       string `json:"error,omitempty"`
+	Dangerous   bool   `json:"dangerous,omitempty"` // destructive verb scan ⇒ forces confirm2 (§7.1)
 }
 
 // stepType normalizes the discriminator.
@@ -130,8 +138,11 @@ func ProposalsDir() string {
 }
 
 var (
-	proposalMu  sync.Mutex
-	proposalSeq int
+	proposalMu sync.Mutex
+	// proposalSeq is the in-memory same-day counter; proposalSeqDay is the
+	// day it was last seeded from disk.
+	proposalSeq    int
+	proposalSeqDay string
 	// proposalInflight marks ids with a long-running transition (execute,
 	// rollback) so a concurrent delete can't yank the file mid-flight.
 	proposalInflight = map[string]struct{}{}
@@ -157,7 +168,7 @@ func SaveProposal(p *Proposal) error {
 	}
 	proposalMu.Lock()
 	defer proposalMu.Unlock()
-	return os.WriteFile(filepath.Join(ProposalsDir(), p.ID+".json"), b, 0o600)
+	return fileutil.AtomicWriteFile(filepath.Join(ProposalsDir(), p.ID+".json"), b, 0o600)
 }
 
 // saveProposalLocked is SaveProposal with the caller holding proposalMu — the
@@ -170,7 +181,7 @@ func saveProposalLocked(p *Proposal) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(ProposalsDir(), p.ID+".json"), b, 0o600)
+	return fileutil.AtomicWriteFile(filepath.Join(ProposalsDir(), p.ID+".json"), b, 0o600)
 }
 
 // claimProposalInflight reserves id for a long-running transition. false
@@ -193,6 +204,9 @@ func releaseProposalInflight(id string) {
 
 // GetProposal loads one proposal.
 func GetProposal(id string) (*Proposal, error) {
+	if !validStoreID(id) {
+		return nil, fmt.Errorf("proposal %s: invalid id", id)
+	}
 	b, err := os.ReadFile(filepath.Join(ProposalsDir(), id+".json"))
 	if err != nil {
 		return nil, err
@@ -204,7 +218,11 @@ func GetProposal(id string) (*Proposal, error) {
 	return &p, nil
 }
 
-// ListProposals returns proposals newest-first.
+// ListProposals returns proposals newest-first. It doubles as the crash
+// recovery point for executions orphaned by a dead runner: an executing
+// proposal whose file has gone untouched for staleExecutingAge transitions to
+// partial here, because executing blocks every lifecycle op and used to stick
+// forever after a mid-run crash.
 func ListProposals() ([]*Proposal, error) {
 	entries, err := os.ReadDir(ProposalsDir())
 	if os.IsNotExist(err) {
@@ -213,6 +231,7 @@ func ListProposals() ([]*Proposal, error) {
 	if err != nil {
 		return nil, err
 	}
+	recoverStaleExecuting(entries)
 	var out []*Proposal
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
@@ -226,11 +245,94 @@ func ListProposals() ([]*Proposal, error) {
 	return out, nil
 }
 
+// staleExecutingAge is how long an executing proposal may sit untouched before
+// the lazy sweep concludes its runner died: a live execution re-saves after
+// every step, so the file's mtime is the runner's heartbeat.
+const staleExecutingAge = 30 * time.Minute
+
+// recoverStaleExecuting transitions executing proposals whose file has not
+// been written for staleExecutingAge to partial ("runner died — verify
+// devices manually"). Ids with an in-flight transition are skipped — that is
+// a LIVE run, however slow. Called lazily from ListProposals, so there is no
+// init wiring; only entries whose mtime already crossed the threshold are
+// examined further. The repair is audited but writes no state-history event —
+// rewinding it back to executing would just re-brick the proposal until the
+// next sweep caught it again.
+func recoverStaleExecuting(entries []os.DirEntry) {
+	cutoff := time.Now().Add(-staleExecutingAge)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".json")
+		if !validStoreID(id) {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil || !fi.ModTime().Before(cutoff) {
+			continue
+		}
+		recoverStaleExecutingOne(id)
+	}
+}
+
+func recoverStaleExecutingOne(id string) {
+	proposalMu.Lock()
+	defer proposalMu.Unlock()
+	if _, busy := proposalInflight[id]; busy {
+		return // an execute/rollback transition is genuinely running
+	}
+	p, err := GetProposal(id)
+	if err != nil || p.Status != ProposalExecuting {
+		return
+	}
+	p.Status = ProposalPartial
+	p.Note = strings.TrimSpace(p.Note + "\nrunner died — verify devices manually (execution went quiet for " +
+		staleExecutingAge.String() + "; applied steps carry their backups)")
+	if err := saveProposalLocked(p); err != nil {
+		return
+	}
+	_ = AppendAudit(Audit{Device: "(proposal)", Command: "recover-stale " + id, Class: "proposal",
+		Status: AuditDeviceError, Error: "executing proposal untouched for " + staleExecutingAge.String() + " — marked partial; verify devices manually"})
+}
+
+// newProposalID assigns P<YYYYMMDD>-N. The sequence is in-memory, so a
+// same-day restart used to regenerate P<date>-1… and SaveProposal silently
+// overwrote the existing file. On the first issue of a day the sequence is
+// re-seeded from the highest suffix on disk, so ids continue past whatever
+// the earlier process already created (midnight crossings re-seed too —
+// today's files include everything the process itself wrote).
 func newProposalID() string {
 	proposalMu.Lock()
 	defer proposalMu.Unlock()
+	day := time.Now().Format("20060102")
+	if proposalSeq == 0 || proposalSeqDay != day {
+		proposalSeq = maxProposalSeqForDay(day)
+		proposalSeqDay = day
+	}
 	proposalSeq++
-	return fmt.Sprintf("P%s-%d", time.Now().Format("20060102"), proposalSeq)
+	return fmt.Sprintf("P%s-%d", day, proposalSeq)
+}
+
+// maxProposalSeqForDay scans the proposals dir for the highest -N suffix of
+// the given day (0 when none exist yet).
+func maxProposalSeqForDay(day string) int {
+	entries, err := os.ReadDir(ProposalsDir())
+	if err != nil {
+		return 0
+	}
+	prefix := "P" + day + "-"
+	best := 0
+	for _, e := range entries {
+		name := strings.TrimSuffix(e.Name(), ".json")
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		if n, err := strconv.Atoi(strings.TrimPrefix(name, prefix)); err == nil && n > best {
+			best = n
+		}
+	}
+	return best
 }
 
 // ── policy gate ─────────────────────────────────────────────────────────────
@@ -526,6 +628,8 @@ func backupCommand(drvKey string) string {
 // → mark. The FIRST failure freezes the proposal as partial (later steps
 // untouched) — a human then decides rollback (which runs the authored plan
 // over the already-applied steps) or keep. There is no automatic rollback.
+// A fully-applied run enters the observation period as watching (auto-closes
+// after 30 minutes).
 func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, error) {
 	p, err := GetProposal(id)
 	if err != nil {
@@ -588,6 +692,7 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 				frozen = s.Error
 			} else {
 				s.Applied = true
+				s.AppliedCmds = 1
 			}
 		case StepK8sApply, StepFileUpload, StepCertReplace, StepRestoreVerify:
 			d, ok := m.cfg.NetDevDeviceByName(s.Device)
@@ -612,6 +717,7 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 				frozen = s.Error
 			} else {
 				s.Applied = true
+				s.AppliedCmds = 1
 			}
 		default: // cli
 			d, ok := m.cfg.NetDevDeviceByName(s.Device)
@@ -631,6 +737,9 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 			if bc := backupCommand(drv.Key()); bc != "" {
 				if res, err := m.runUnclassified(ctx, d, drv, bc); err == nil && !res.IsError {
 					s.Backup = Redact(res.Output)
+					// WRITE_AUTHZ §7.1 事件快照：提案执行的备份统一落 vault——
+					// 三明治/定时/提案三条历史线汇进同一个版本库。
+					_, _ = saveBackup(d.Name, res.Output)
 				} else {
 					s.Error = "backup failed: " + firstLine(errText(err, res))
 					frozen = s.Error
@@ -638,8 +747,11 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 				}
 			}
 
-			// Apply (the only write path in netdev; audited per command).
-			for _, cmd := range s.Commands {
+			// Apply (the only write path in netdev; audited per command). The
+			// applied-command count survives a mid-step failure: commands
+			// before the failing one already changed the device, and the
+			// rollback decision below needs to see that prefix.
+			for ci, cmd := range s.Commands {
 				res, err := m.runUnclassified(ctx, d, drv, cmd)
 				_ = AppendAudit(Audit{
 					Device: s.Device, Via: d.Via, Command: cmd, Class: "proposal-write",
@@ -647,13 +759,15 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 					Error: errText(err, res),
 				})
 				if err != nil || res.IsError {
-					s.Error = fmt.Sprintf("command %q failed: %s", cmd, firstLine(errText(err, res)))
+					s.Error = fmt.Sprintf("command %q failed after %d/%d applied: %s", cmd, ci, len(s.Commands), firstLine(errText(err, res)))
 					frozen = s.Error
 					break
 				}
+				s.AppliedCmds = ci + 1
 			}
 			if frozen == "" {
 				s.Applied = true
+				s.AppliedCmds = len(s.Commands)
 			}
 		}
 		if frozen != "" {
@@ -668,7 +782,14 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 		p.Status = ProposalPartial
 		p.Note = "frozen: " + frozen + " — later steps untouched; a human decides rollback or keep"
 	} else {
-		p.Status = ProposalDone
+		// All steps applied: done work lands in the observation period
+		// (§7.1). Status goes straight to watching — "done" used to be the
+		// terminal stop and NOTHING ever flipped it to watching, leaving the
+		// whole pipeline (auto-close goroutine, CloseProposalWatch,
+		// checkWatchingProposals) dead code. watching → closed after the
+		// default 30 minutes; degradation inside the window raises a Finding
+		// and points at rollback.
+		p.Status = ProposalWatching
 		// 观察期（§7.1）：默认 30 分钟后自动 closed；观察期内的劣化检测由
 		// 健康轮询承担（checkWatchingProposals——与 watch 起点基线对比，
 		// 劣化即最高级 Finding + 回滚提示，回滚仍需人批准）。
@@ -726,8 +847,12 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 }
 
 // RollbackProposal runs the authored rollback plan over the APPLIED steps
-// only, oldest-last so state unwinds in reverse. Frozen/failed proposals only.
-// A rollback failure marks the proposal failed (alert) and stops.
+// only, oldest-last so state unwinds in reverse. A step whose commands failed
+// MID-STEP still rolls back (AppliedCmds > 0): the commands before the failure
+// are on the device, and the authored plan is the recovery contract for the
+// whole step. Partial/done/watching proposals only (watching is the
+// degradation flow's exit). A rollback failure marks the proposal failed
+// (alert) and stops.
 func (m *Manager) RollbackProposal(ctx context.Context, id string) (*Proposal, error) {
 	// The rollback loop runs device I/O for minutes — claim the proposal so a
 	// concurrent rollback or delete can't interleave (double-rollback would run
@@ -745,14 +870,14 @@ func (m *Manager) RollbackProposal(ctx context.Context, id string) (*Proposal, e
 	if err != nil {
 		return nil, err
 	}
-	if p.Status != ProposalPartial && p.Status != ProposalDone {
-		return nil, fmt.Errorf("proposal %s: status %s — only partial/done proposals roll back", id, p.Status)
+	if p.Status != ProposalPartial && p.Status != ProposalDone && p.Status != ProposalWatching {
+		return nil, fmt.Errorf("proposal %s: status %s — only partial/done/watching proposals roll back", id, p.Status)
 	}
 	StateEventSnap(StateEventRollback, id, stateActorFromCtx(ctx), filepath.Join(ProposalsDir(), id+".json"))
 	for i := len(p.Steps) - 1; i >= 0; i-- {
 		s := &p.Steps[i]
-		if !s.Applied {
-			continue
+		if !s.Applied && s.AppliedCmds == 0 {
+			continue // nothing of this step ever reached the device
 		}
 		var rerr error
 		switch stepType(s) {
@@ -802,6 +927,7 @@ func (m *Manager) RollbackProposal(ctx context.Context, id string) (*Proposal, e
 			return p, nil
 		}
 		s.Applied = false
+		s.AppliedCmds = 0
 	}
 	p.Status = ProposalDraft // rolled back cleanly; re-approval required to try again
 	p.Note = "rolled back via the authored plan"
@@ -835,7 +961,8 @@ func auditStatus(res Result, err error) string {
 }
 
 func auditStatusFor(status string) string {
-	if status == ProposalDone {
+	switch status {
+	case ProposalDone, ProposalWatching:
 		return AuditOK
 	}
 	return AuditFailure

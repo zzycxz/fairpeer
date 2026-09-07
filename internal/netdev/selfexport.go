@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // ExportState writes one JSON snapshot into the netdev state dir and returns
@@ -71,7 +73,7 @@ func (m *Manager) ExportState() (string, error) {
 	if err := os.MkdirAll(netdevStateDir(), 0o700); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(path, body, 0o600); err != nil {
+	if err := fileutil.AtomicWriteFile(path, body, 0o600); err != nil {
 		return "", err
 	}
 	return path, nil

@@ -35,6 +35,16 @@ type Manager struct {
 	netconfInflight map[string]int
 	liveMu          sync.Mutex
 	liveFn          func(LiveEvent)
+	// write-auth state (WRITE_AUTHZ_SPEC): confirmed locks + clamp warnings +
+	// the confirm-tier approver + the per-turn direct-write counter. All under
+	// waMu; enforcement is Manager-level so headless/scheduled runs inherit it.
+	waMu        sync.Mutex
+	waConfirmed map[string]confirmedLock
+	waWarned    map[string]bool
+	waWarnings  []string
+	waApprover  WriteApprover
+	turnWrites  int
+	turnSeq     int // user-turn anchor stamped into OpStep rows (session rollback filter)
 }
 
 type managedConn struct {
@@ -61,6 +71,7 @@ func SharedManager(cfg *config.Config) *Manager {
 	} else {
 		shared.cfg = cfg
 	}
+	SetBackupGitMirror(cfg.NetDev.BackupGitMirror)
 	EnsureNotifier(cfg)
 	return shared
 }
@@ -76,14 +87,18 @@ func NewManager(cfg *config.Config) *Manager {
 	return m
 }
 
-// TurnBegin resets the per-turn command budget. The desktop bridge calls it
-// on every user submit (netdev mode), making turn_command_budget a true
-// per-ask control: each question the user asks buys a fresh budget of read
-// commands, and nothing carries over.
+// TurnBegin resets the per-turn command budget (read AND direct-write —
+// WRITE_AUTHZ_SPEC §6: the write budget is counted independently). The desktop
+// bridge calls it on every user submit (netdev mode), making both budgets true
+// per-ask controls: each question the user asks buys fresh budgets.
 func (m *Manager) TurnBegin() {
 	m.mu.Lock()
 	m.turnCommands = 0
 	m.mu.Unlock()
+	m.waMu.Lock()
+	m.turnWrites = 0
+	m.turnSeq++
+	m.waMu.Unlock()
 	// The live panel's budget meter follows the per-ask reset (§6.6: the
 	// frontend calls this on every user submit).
 	m.emitLive(LiveEvent{Kind: LiveTurnBegin, Device: "(turn)"})
@@ -301,6 +316,35 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 	}
 	base := ExecResult{Device: deviceName, Command: command, Class: class.String()}
 	if class != driver.Read {
+		// WRITE_AUTHZ_SPEC §3/§8: write-class commands route by the device's
+		// EFFECTIVE tier — confirm → per-command approval card (Manager
+		// channel, full-access cannot skip), auto → sandwich pipeline under
+		// the write budget. Sealed falls through to the proposal routing
+		// below. Dangerous/unknown are hard-floored for EVERY tier (§8.1/2).
+		if class == driver.Write {
+			switch m.EffectiveWriteTier(device) {
+			case config.NetDevWriteConfirm:
+				approved, reason := m.writeApproved(deviceName, command)
+				if !approved {
+					m.audit(device, command, class, AuditRefused, 0, nil)
+					m.liveCmdRefused(deviceName, command, class.String(), reason)
+					return ExecResult{Device: deviceName, Command: command, Refused: true, Class: class.String(), Refusal: reason}
+				}
+				return m.runControlledWrite(ctx, device, drv, command)
+			case config.NetDevWriteAuto:
+				if !m.writeBudgetLeft() {
+					budget := m.cfg.NetDev.Write.TurnWriteBudgetOrDefault()
+					m.waMu.Lock()
+					spent := m.turnWrites
+					m.waMu.Unlock()
+					reason := fmt.Sprintf("turn write budget exhausted (%d/%d direct writes this turn) — summarize what changed and ask the user before continuing.", spent, budget)
+					m.audit(device, command, class, AuditRefused, 0, nil)
+					m.liveCmdRefused(deviceName, command, class.String(), reason)
+					return ExecResult{Device: deviceName, Command: command, Refused: true, Class: class.String(), Refusal: reason}
+				}
+				return m.runControlledWrite(ctx, device, drv, command)
+			}
+		}
 		base.Refused = true
 		switch class {
 		case driver.Write:
@@ -345,9 +389,12 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 
 func (m *Manager) audit(d config.NetDevDevice, cmd string, class driver.Class, status string, outBytes int, err error) {
 	e := Audit{
-		Device:      d.Name,
-		Via:         d.Via,
-		Command:     cmd,
+		Device: d.Name,
+		Via:    d.Via,
+		// Redact centrally: refused commands carry the credential verbatim
+		// (e.g. a refused "snmp-agent community read S3cret"), and the audit
+		// file is re-exported by selfexport — secrets must never land in it.
+		Command:     Redact(cmd),
 		Class:       class.String(),
 		Status:      status,
 		OutputBytes: outBytes,
@@ -558,34 +605,44 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	// emergency stop leaving the agent's device sessions alive.
 	m := SharedManager(cfg)
 	ApplyExtraRead(cfg)
+	// 注册顺序=场景分组（SCENARIO_CAPABILITY_MAP 工具列序；组序进 system
+	// prompt 的工具清单，组名不写进任何 Description——零 token 增量的场景
+	// 归组，K3）。六组：诊断 → 评估/测绘 → 主机与中间件 → 变更保管 →
+	// 知识/日志横切 → 可信域。
+	// ① 诊断组（故障排查）
 	reg.Add(&execTool{m: m})
 	reg.Add(&devicesTool{cfg: cfg})
-	reg.Add(&discoverTool{m: m})
+	reg.Add(&fanoutTool{m: m, cfg: cfg})
 	reg.Add(&topologyTool{m: m})
-	reg.Add(&proposeTool{m: m})
-	reg.Add(&findingTool{})
+	reg.Add(&locateTool{m: m})
 	reg.Add(&netconfTool{m: m})
 	reg.Add(&snmpTool{m: m})
+	reg.Add(&redfishTool{m: m})
+	// ② 评估/测绘组（安全评估与资产发现；扫描档受信封闸）
 	reg.Add(&assessTool{m: m})
-	reg.Add(&nmapTool{m: m})
-	reg.Add(&netprobeTool{m: m})
+	// 测绘三合一（SKILL_ORCHESTRATION_SPEC §6.1）：discover/nmap/netprobe
+	// 的模型面收敛为 netdev_probe——引擎选择下沉为 depth 分档（L3 定点
+	// 指纹 / L4 微采样 / L5 已验证段全扫）+ mode 自动回退；闸门沿用各
+	// 引擎自带（scopes / 评估信封）。旧工具类型保留（引擎封装），不再
+	// 注册——模型面只见一个探测通道。
+	reg.Add(&probeTool{m: m})
 	reg.Add(&baselineTool{m: m})
 	reg.Add(&cveMatchTool{m: m})
-	reg.Add(&redfishTool{m: m})
-	reg.Add(&logReadTool{m: m})
-	reg.Add(&logSearchTool{m: m})
+	// ③ 主机与中间件组（服务器/容器/DB 健康）
 	reg.Add(&triageTool{m: m})
 	reg.Add(&dockerTool{m: m})
 	reg.Add(&kubeTool{m: m})
 	reg.Add(&firewallTool{m: m})
-	reg.Add(&locateTool{m: m})
 	reg.Add(&dbQueryTool{m: m})
+	// ④ 变更保管组（提案闸门；AI 只起草）
+	reg.Add(&proposeTool{m: m})
 	reg.Add(&backupTool{m: m})
-	// fanout (completion-spec §6 #9): one read-only command across many
-	// devices, tabulated — the runtime version of a diagnostic preset.
-	reg.Add(&fanoutTool{m: m, cfg: cfg})
-	// Trust-domain fleet surface (TRUSTDOMAIN_SPEC §15): agent tools exist
-	// only when the host joined a domain — invisible otherwise.
+	// ⑤ 知识/日志横切组（立案与多机检索）
+	reg.Add(&findingTool{})
+	reg.Add(&knowledgeTool{})
+	reg.Add(&logReadTool{m: m})
+	reg.Add(&logSearchTool{m: m})
+	// ⑥ 可信域组（TRUSTDOMAIN_SPEC §15）：仅加入域的主机可见。
 	if cfg.TrustDomain.Enabled {
 		reg.Add(&fleetTool{cfg: cfg})
 		reg.Add(&remoteTool{cfg: cfg})
@@ -798,7 +855,7 @@ type cveMatchTool struct{ m *Manager }
 func (t *cveMatchTool) Name() string { return "netdev_cve_match" }
 
 func (t *cveMatchTool) Description() string {
-	return "Match the managed inventory against the imported CVE feed (local, read-only, no probing). Returns device × CVE hits (id, severity, matched product substring, description). Returns a hint instead when no feed is imported — the feed is user-supplied (paste in 安全工作台 → CVE)."
+	return "Match the managed inventory against the imported CVE feed (local, read-only, no probing). Returns device × CVE hits (id, severity, matched product substring, description). Returns a hint instead when no feed is imported — the feed is user-supplied (imported in the security workbench's CVE section)."
 }
 
 func (t *cveMatchTool) Schema() json.RawMessage {
@@ -957,7 +1014,13 @@ func (t *findingTool) Schema() json.RawMessage {
 				},
 				"required": ["device", "command", "output"]
 			}},
-			"suggestion": {"type": "string", "description": "optional: the change worth drafting via netdev_propose"}
+			"suggestion": {"type": "string", "description": "optional: the change worth drafting via netdev_propose"},
+			"fix": {"type": "object", "description": "structured remediation (preferred over free-text suggestion): {type: upgrade|patch|config|credential|procedure, ref: target version / KB / command, link: vendor advisory, confidence: verified|model}. confidence=verified ONLY when sourced from a feed or rule library; model-derived fixes must say model.", "properties": {
+				"type": {"type": "string", "enum": ["upgrade", "patch", "config", "credential", "procedure"]},
+				"ref": {"type": "string"},
+				"link": {"type": "string"},
+				"confidence": {"type": "string", "enum": ["verified", "model"]}
+			}}
 		},
 		"required": ["title", "evidence"]
 	}`)
@@ -1182,6 +1245,32 @@ func (t *discoverTool) Execute(ctx context.Context, args json.RawMessage) (strin
 }
 
 type execTool struct{ m *Manager }
+
+// ReadOnlyCall implements tool.ReadOnlyCallChecker — the two-lock synthesis
+// (WRITE_AUTHZ_SPEC §2.3): a write-classified command on an AUTO-tier device
+// counts as a writer call at the permission layer, so the dialog mode applies
+// (变更询问 → card; 自动编辑/完全访问 → direct). Confirm-tier writes stay
+// "read" here on purpose: their card comes from the Manager approval channel,
+// which full-access mode cannot skip — keeping this layer out of it avoids
+// double cards. Sealed writes are refused inside Exec regardless.
+func (t *execTool) ReadOnlyCall(args json.RawMessage) bool {
+	var a struct {
+		Device  string `json:"device"`
+		Command string `json:"command"`
+	}
+	if json.Unmarshal(args, &a) != nil || strings.TrimSpace(a.Command) == "" {
+		return true
+	}
+	d, ok := t.m.cfg.NetDevDeviceByName(a.Device)
+	if !ok {
+		return true
+	}
+	drv, ok := driver.For(d.Vendor, d.OS)
+	if !ok || drv.Classify(a.Command) != driver.Write {
+		return true
+	}
+	return t.m.EffectiveWriteTier(d) != config.NetDevWriteAuto
+}
 
 // logReadTool — the structured log-source read: the agent names a log source
 // (system:/file:/journal:/docker:) instead of free-handing shell; the composed

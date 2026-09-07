@@ -299,7 +299,14 @@ func nextRun(expr string, from time.Time) time.Time {
 		}
 		return t
 	case low == "hourly" || strings.HasPrefix(low, "every "):
-		d, _ := parseEvery(low)
+		d, err := parseEvery(low)
+		if err != nil {
+			// Malformed expression that slipped past Create-time validation
+			// (Load recomputes NextRun without validating): back off an hour
+			// like the cron fallback instead of returning now, which would
+			// hot-loop immediate refires forever.
+			return now.Add(time.Hour)
+		}
 		return now.Add(d)
 	case strings.HasPrefix(low, "daily"):
 		_, days, err := parseDaily(expr)

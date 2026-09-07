@@ -2,14 +2,17 @@ package builtin
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
-// untrustedCloseTag is the fence we wrap content in. A malicious page/document
-// that embeds this exact string can prematurely close the fence and inject
-// instructions after it — the classic prompt-injection escape. We neutralize
-// any literal occurrence inside content before wrapping.
-const untrustedCloseTag = "</untrusted_content>" //nolint:unused
+// untrustedTagRe matches the fence tags case-insensitively on the ORIGINAL
+// string. Matching must never go through a transformed copy: strings.ToLower
+// can change a rune's UTF-8 length (U+0130 İ 2→1, U+212A K 3→1, U+017F ſ 2→1),
+// so byte offsets taken from the lowered copy drift from the original and
+// slice the wrong span — corrupting output and, with enough shrinkage before
+// a tag, leaving the closing fence partially intact.
+var untrustedTagRe = regexp.MustCompile(`(?i)</?untrusted_content`)
 
 // WrapUntrusted wraps externally-sourced content (web pages, browser DOM, RAG
 // snippets) in an <untrusted_content> tag. The cowork system prompt instructs
@@ -49,34 +52,16 @@ func WrapUntrusted(source, content string) string {
 // </UNTRUSTED_CONTENT> or <UNTRUSTED_CONTENT ...>. See security review finding:
 // the close-tag-only sanitize left open-tag forgery possible.
 func sanitizeUntrusted(content string) string {
-	lower := strings.ToLower(content)
-	closeNeedle := "</untrusted_content"
-	openNeedle := "<untrusted_content"
-	if !strings.Contains(lower, closeNeedle) && !strings.Contains(lower, openNeedle) {
-		return content // fast path: no fence-tag sequence present
+	// Fast path detector on a lowered copy is sound (ToLower can only map a
+	// cased rune to a form whose lowercase contains the needle if the original
+	// did, case-insensitively) — only OFFSETS derived from the copy are unsafe,
+	// and the replacement below never uses them.
+	if !strings.Contains(strings.ToLower(content), "untrusted_content") {
+		return content
 	}
-	// Scan left-to-right, replacing whichever needle appears next (open or close)
-	// with its entity-encoded form. This preserves the original text around each
-	// occurrence and handles interleaved open/close forgeries in one pass.
-	var b strings.Builder
-	for {
-		ci := strings.Index(lower, closeNeedle)
-		oi := strings.Index(lower, openNeedle)
-		// Pick the earliest occurrence; -1 (not found) sorts after any real idx.
-		var idx int
-		var needle, replacement string
-		switch {
-		case ci < 0 && oi < 0:
-			b.WriteString(content)
-			return b.String()
-		case ci < 0 || (oi >= 0 && oi < ci):
-			idx, needle, replacement = oi, openNeedle, "&lt;untrusted_content"
-		default:
-			idx, needle, replacement = ci, closeNeedle, "&lt;/untrusted_content"
-		}
-		b.WriteString(content[:idx])
-		b.WriteString(replacement)
-		content = content[idx+len(needle):]
-		lower = lower[idx+len(needle):]
-	}
+	// Replace on the original string, preserving the matched text's case and
+	// everything around it byte-for-byte.
+	return untrustedTagRe.ReplaceAllStringFunc(content, func(m string) string {
+		return "&lt;" + m[1:]
+	})
 }

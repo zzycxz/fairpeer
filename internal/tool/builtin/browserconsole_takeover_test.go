@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	cdptarget "github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 
 	"github.com/zzycxz/fairpeer/internal/browserlaunch"
@@ -243,5 +244,75 @@ func TestAgentSessionJoinsPersistentBrowser(t *testing.T) {
 	infos, terr := pageTargetInfos(console)
 	if terr != nil || len(infos) < 2 {
 		t.Fatalf("expected both tabs on the persistent browser, got %d (err %v)", len(infos), terr)
+	}
+}
+
+// TestConsoleOpenSweepsBlankTabs pins the blank-tab janitor: leftover
+// about:blank targets (what --restore-last-session resurrects from crashed
+// runs, and what each attach boot used to leave behind) are closed on the
+// next console open; the tab the session drives is kept, real pages untouched.
+func TestConsoleOpenSweepsBlankTabs(t *testing.T) {
+	withIsolatedConsoleBrowser(t)
+	if _, err := ConsoleOpen("", ""); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	s, err := consoleSession()
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	// Two stray blanks, as a crashed run would leave behind.
+	for i := 0; i < 2; i++ {
+		cctx, ccancel := context.WithTimeout(s.ctx, 5*time.Second)
+		_ = chromedp.Run(cctx, chromedp.ActionFunc(func(ctx context.Context) error {
+			_, err := cdptarget.CreateTarget("about:blank").Do(ctx)
+			return err
+		}))
+		ccancel()
+	}
+	// One real page too — must survive the sweep.
+	cctx, ccancel := context.WithTimeout(s.ctx, 5*time.Second)
+	_ = chromedp.Run(cctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		_, err := cdptarget.CreateTarget("data:text/html,<html><body>real</body></html>").Do(ctx)
+		return err
+	}))
+	ccancel()
+	if err := ConsoleClose(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	// Reopen → takeover path runs the janitor.
+	if _, err := ConsoleOpen("", ""); err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	s2, err := consoleSession()
+	if err != nil {
+		t.Fatalf("session2: %v", err)
+	}
+	// The sweep runs on a delay (session restore materializes tabs
+	// asynchronously) — poll until it settles.
+	var blanks, reals int
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		infos, ierr := pageTargetInfos(s2)
+		if ierr != nil {
+			t.Fatalf("targets: %v", ierr)
+		}
+		blanks, reals = 0, 0
+		for _, ti := range infos {
+			if ti.URL == "" || ti.URL == "about:blank" {
+				blanks++
+			} else {
+				reals++
+			}
+		}
+		if blanks <= 1 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if blanks != 1 { // the tab the session itself drives
+		t.Errorf("blank tabs after sweep: %d, want 1 (the driven one)", blanks)
+	}
+	if reals < 1 {
+		t.Errorf("real tabs must survive the sweep, got %d", reals)
 	}
 }

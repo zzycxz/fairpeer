@@ -68,6 +68,10 @@ var linuxTables = classTables{
 		"uname ", "uname", "uptime", "date", "hostname", "hostname ", "id", "who", "w",
 		"last ", "lastlog", "lastb", "vmstat ", "iostat ", "dstat ", "lscpu", "lsblk", "lsusb", "lspci",
 		"cat /proc", "cat /sys", "cat /etc/os-release", "cat /etc/hostname", "cat /etc/passwd", "timedatectl",
+		// GPU/智算只读档（SCENARIO_SPEC S1-2）：nvidia-smi 全只读形态 + 昇腾
+		// npu-smi info。无任何设置/复位子命令（那些是 write/proposal 面）。
+		"nvidia-smi", "nvidia-smi -q", "nvidia-smi --query", "nvidia-smi --format",
+		"nvidia-smi -l", "npu-smi info", "npu-smi info -t",
 		// services & logs
 		"systemctl status", "systemctl list-units", "systemctl list-unit-files",
 		"systemctl is-active", "systemctl is-enabled", "systemctl is-failed",

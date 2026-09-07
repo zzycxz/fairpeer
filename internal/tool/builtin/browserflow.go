@@ -20,8 +20,11 @@ package builtin
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -44,6 +47,67 @@ type FlowStep struct {
 	TimeoutSec int      `json:"timeout_sec,omitempty"`
 	Files      []string `json:"files,omitempty"`
 	Expression string   `json:"expression,omitempty"`
+	// Control is the raw 5th-column harness spec (重试=/校验=/失败=/校验预算=),
+	// validated at table-parse time and parsed again at execution. Kept raw so
+	// the desktop wire format and SKILL.md stay byte-identical.
+	Control string `json:"control,omitempty"`
+}
+
+// StepControl is one step's parsed harness: the speed/quality contract around
+// a single action. Empty everywhere = today's bare behavior (zero overhead).
+type StepControl struct {
+	Retry        int    // extra attempts after a failed action/verify (0-5)
+	Verify       string // post-action condition (wait vocabulary: url:/visible:/networkidle/download/…)
+	VerifyBudget int    // verify wait budget seconds (default 10)
+	OnFail       string // stop | continue | vision
+}
+
+// ParseStepControl parses the 5th-column control cell. Both Chinese and
+// English keys are accepted (重试/retry, 校验/verify, 校验预算/verify-budget,
+// 失败/on-fail); unknown keys/values fail loudly so typos surface at
+// planning time, never mid-run.
+func ParseStepControl(s string) (StepControl, error) {
+	out := StepControl{}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return out, nil
+	}
+	for _, tok := range strings.Fields(s) {
+		k, v, ok := strings.Cut(tok, "=")
+		if !ok || v == "" {
+			return out, fmt.Errorf("控制项 %q 无效（应为 键=值，如 重试=1 校验=networkidle 失败=继续）", tok)
+		}
+		switch k {
+		case "重试", "retry":
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 || n > 5 {
+				return out, fmt.Errorf("控制项 重试=%q 无效（0-5 的整数）", v)
+			}
+			out.Retry = n
+		case "校验", "verify":
+			out.Verify = v
+		case "校验预算", "verify-budget", "verifybudget":
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 || n > 120 {
+				return out, fmt.Errorf("控制项 校验预算=%q 无效（1-120 的整数秒）", v)
+			}
+			out.VerifyBudget = n
+		case "失败", "on-fail", "onfail":
+			switch v {
+			case "停止", "stop":
+				out.OnFail = "stop"
+			case "继续", "continue":
+				out.OnFail = "continue"
+			case "视觉", "vision":
+				out.OnFail = "vision"
+			default:
+				return out, fmt.Errorf("控制项 失败=%q 无效（停止/继续/视觉）", v)
+			}
+		default:
+			return out, fmt.Errorf("未知控制项 %q（支持 重试/校验/校验预算/失败）", k)
+		}
+	}
+	return out, nil
 }
 
 var flowOps = map[string]bool{
@@ -80,14 +144,22 @@ func ParseFlowTable(body string) ([]FlowStep, error) {
 		if !flowOps[op] {
 			return nil, fmt.Errorf("步骤表第 %d 行：未知操作 %q", len(steps)+1, op)
 		}
-		target, value := "", ""
+		target, value, control := "", "", ""
 		if len(cells) > 2 {
 			target = cells[2]
 		}
 		if len(cells) > 3 {
 			value = cells[3]
 		}
-		steps = append(steps, flowStepFromRow(op, target, value))
+		if len(cells) > 4 {
+			control = cells[4]
+		}
+		// Validate the control cell here so a typo fails at planning time
+		// (before any browser window opens), not mid-run.
+		if _, cerr := ParseStepControl(control); cerr != nil {
+			return nil, fmt.Errorf("步骤表第 %d 行：%w", len(steps)+1, cerr)
+		}
+		steps = append(steps, flowStepFromRow(op, target, value, control))
 	}
 	if len(steps) == 0 {
 		return nil, fmt.Errorf("「## 步骤」段落没有可执行的表格行")
@@ -109,8 +181,8 @@ func findFlowSection(body string) string {
 	return rest
 }
 
-func flowStepFromRow(op, target, value string) FlowStep {
-	st := FlowStep{Type: op}
+func flowStepFromRow(op, target, value, control string) FlowStep {
+	st := FlowStep{Type: op, Control: control}
 	switch op {
 	case "switch_tab":
 		// 目标列 = 1 起始页卡序号；值列 = 页卡标题（备注，执行不依赖）。
@@ -890,11 +962,21 @@ func RunBrowserFlow(ctx context.Context, body, arguments string) (string, error)
 	}
 
 	resolved := map[string]string{}
+	failedSteps := 0
 	for i := range steps {
 		st := steps[i]
 		flowSubst(&st, params, resolved)
-		out, stepErr := flowExecStep(ctx, s, st)
+		out, stepErr := runFlowStepHarness(ctx, s, st)
 		if stepErr != nil {
+			h, _ := ParseStepControl(st.Control)
+			if h.OnFail == "continue" {
+				failedSteps++
+				report = append(report, fmt.Sprintf("%d. %s — ✕ %v（失败=继续）", i+1, st.Type, stepErr))
+				continue
+			}
+			if h.OnFail == "vision" {
+				stepErr = fmt.Errorf("%w\n（失败=视觉：视觉兜底尚未接入，先按停止处理）", stepErr)
+			}
 			return fail(i, st, stepErr)
 		}
 		// Payload steps (extract/evaluate) carry content the caller needs —
@@ -910,8 +992,82 @@ func RunBrowserFlow(ctx context.Context, body, arguments string) (string, error)
 		}
 		report = append(report, fmt.Sprintf("%d. %s — %s", i+1, st.Type, firstNonEmpty(strings.TrimSpace(out), "ok")))
 	}
+	if failedSteps > 0 {
+		report = append(report, fmt.Sprintf("⚠️ %d 个步骤失败但按 失败=继续 放行（结果可能不完整）", failedSteps))
+	}
 	report = append(report, fmt.Sprintf("会话 %s 保持打开（10 分钟空闲后自动回收；长间隔复用请 browser_keepalive）", s.id))
 	return "browser-flow 执行完成：\n" + strings.Join(report, "\n"), nil
+}
+
+// runFlowStepHarness wraps one step with its 5th-column control contract:
+// act → verify → retry (recheck-before-refire) → evidence on final failure.
+// Speed first: no control spec = one bare execution, zero added latency; the
+// verify budget is short (10s default) and retries back off 1s/2s/4s.
+func runFlowStepHarness(ctx context.Context, s *browserSession, st FlowStep) (string, error) {
+	h, err := ParseStepControl(st.Control)
+	if err != nil {
+		return "", err // validated at table-parse time; unreachable in practice
+	}
+	verify := func(budget int) error {
+		if h.Verify == "" {
+			return nil
+		}
+		_, verr := callBrowserTool(ctx, s, browserWait{}, map[string]any{"condition": h.Verify, "timeout": budget})
+		return verr
+	}
+	budget := h.VerifyBudget
+	if budget == 0 {
+		budget = 10
+	}
+	var lastErr error
+	for attempt := 0; attempt <= h.Retry; attempt++ {
+		if attempt > 0 {
+			// Recheck-before-refire: the previous action may have landed while
+			// its verify signal lagged — a quick 3s re-verify BEFORE firing
+			// again keeps a slow signal from causing a double click/export.
+			if h.Verify != "" && verify(3) == nil {
+				return "上一次动作已生效（校验信号滞后，复核通过）", nil
+			}
+			select {
+			case <-time.After(time.Duration(1<<uint(attempt-1)) * time.Second): // 1s, 2s, 4s…
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}
+		out, aerr := flowExecStep(ctx, s, st)
+		if aerr != nil {
+			lastErr = aerr
+			continue
+		}
+		if verr := verify(budget); verr != nil {
+			lastErr = fmt.Errorf("动作成功但校验 %q 未在 %ds 内通过: %w", h.Verify, budget, verr)
+			continue
+		}
+		if h.Verify != "" {
+			out += "（校验通过）"
+		}
+		return out, nil
+	}
+	if path := saveStepEvidence(s, st.Type); path != "" {
+		lastErr = fmt.Errorf("%w\n[失败留证: %s]", lastErr, path)
+	}
+	return "", lastErr
+}
+
+// scrollScreensPx is the pixel equivalent of one "screen" when converting the
+// flow-table / console scroll unit (screens, default 3) into browser_scroll's
+// pixel unit. 600 matches browser_scroll's own default single-scroll amount;
+// the exact viewport height isn't worth a CDP round-trip at this boundary.
+const scrollScreensPx = 600
+
+// scrollScreensToPx converts a screen-count scroll amount into pixels.
+// Non-positive input yields the tool's default (one screen) rather than a
+// no-op 0/negative scroll.
+func scrollScreensToPx(screens int) int {
+	if screens <= 0 {
+		screens = 1
+	}
+	return screens * scrollScreensPx
 }
 
 // flowExecStep runs one step through the agent's browser tools (the same
@@ -952,7 +1108,16 @@ func flowExecStep(ctx context.Context, s *browserSession, st FlowStep) (string, 
 			if a.kind == "text" {
 				return flowTypeByText(ctx, s, a.val, st.Text)
 			}
-			return call(browserType{}, map[string]any{"target": a.val, "text": st.Text, "clear": true})
+			// browserType reads ref/selector, NOT "target" — a target key was
+			// silently ignored and the text landed in the focused element. Map
+			// the anchor like the select/upload branches below.
+			args := map[string]any{"text": st.Text, "clear": true}
+			if looksLikeRef(a.val) {
+				args["ref"] = a.val
+			} else {
+				args["selector"] = a.val
+			}
+			return call(browserType{}, args)
 		})
 	case "key":
 		if err := dispatchSpecialKey(s, st.Value); err != nil {
@@ -972,7 +1137,11 @@ func flowExecStep(ctx context.Context, s *browserSession, st FlowStep) (string, 
 			return flowHoverByCSS(ctx, s, a.val)
 		})
 	case "scroll":
-		return call(browserScroll{}, map[string]any{"direction": st.Direction, "amount": st.Amount})
+		// st.Amount counts SCREENS (table dialect, default 3) while
+		// browser_scroll's amount is PIXELS (default 600) — feeding 3 through
+		// verbatim scrolled 3px, an invisible no-op. Convert at this boundary;
+		// browser_scroll keeps its raw-pixel contract.
+		return call(browserScroll{}, map[string]any{"direction": st.Direction, "amount": scrollScreensToPx(st.Amount)})
 	case "select":
 		return tryFlowAnchors(ctx, s, st.Target, func(ctx context.Context, s *browserSession, a flowAnchor) (string, error) {
 			if a.kind == "text" {
@@ -1085,4 +1254,43 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// --- failure evidence ---------------------------------------------------------
+
+// browserEvidenceDir is where harness failure screenshots land — a sibling of
+// the downloads dir so both live under the same fairpeer cache root.
+func browserEvidenceDir() string {
+	if err := initBrowserDownloadDir(); err != nil {
+		return ""
+	}
+	dir := filepath.Join(filepath.Dir(browserDownloadDir), "browser-evidence")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	return dir
+}
+
+// saveStepEvidence drops one JPEG screenshot of the session's current page
+// into the evidence dir. Best-effort: any failure returns "" and the step
+// error surfaces without a path.
+func saveStepEvidence(s *browserSession, label string) string {
+	dir := browserEvidenceDir()
+	if dir == "" {
+		return ""
+	}
+	b64 := captureThumbnailBase64(s)
+	if b64 == "" {
+		return ""
+	}
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	safe := regexp.MustCompile(`[^a-zA-Z0-9_-]`).ReplaceAllString(label, "_")
+	path := filepath.Join(dir, fmt.Sprintf("%s-%d.jpg", safe, time.Now().UnixMilli()))
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return ""
+	}
+	return path
 }

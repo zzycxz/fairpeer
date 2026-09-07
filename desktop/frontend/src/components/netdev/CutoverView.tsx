@@ -275,6 +275,8 @@ function CutoverCreate({
         status: "",
         cursor: 0,
         created_at: "",
+        // S1-1：变更窗口前预检（只读电池）默认开启；红灯需在割接屏人工放行。
+        precheck: { battery: "standard" },
       });
       onCreated(created.id);
     } catch (e) {
@@ -298,7 +300,12 @@ function CutoverCreate({
         </div>
 
         <div className="ndv__group-label" style={{ marginTop: 10 }}>{tt("ndv.cut.approvedProposals")}</div>
-        {approved.length === 0 && <div className="ndv__hint">{tt("ndv.cut.noApproved")}</div>}
+        {approved.length === 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="ndv__hint" style={{ flex: 1 }}>{tt("ndv.cut.noApproved")}</div>
+            <button className="btn btn--small" role="button" onClick={() => window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-dock", { detail: { tab: "proposals" } }))}>{tt("ndv.cut.goProposals")}</button>
+          </div>
+        )}
         {approved.map((p) => {
           const d = sel[p.id];
           return (

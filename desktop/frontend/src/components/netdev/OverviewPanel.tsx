@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ShieldAlert, Server, Activity, AlertTriangle, FileText, LayoutDashboard } from "lucide-react";
-import { app } from "../../lib/bridge";
+import { ShieldAlert, Server, Activity, AlertTriangle, FileText, LayoutDashboard, ScanSearch } from "lucide-react";
+import { app, onNetdevInspection } from "../../lib/bridge";
 import { useI18n } from "../../lib/i18n";
-import type { NetDevOverviewSnapshot } from "../../lib/types";
+import { EmptyState } from "./PanelStates";
+import type { NetDevOverviewSnapshot, NetDevInspectionState } from "../../lib/types";
 
 // OverviewPanel — 总览屏（DASHBOARD spec §4.2）。两档一套数据：dock 紧凑
 // 单列（compact）与 bench 双列渲染同一组件（响应式断点 <520/≥800 由容器
@@ -11,7 +12,7 @@ import type { NetDevOverviewSnapshot } from "../../lib/types";
 //   bench 档由 DashShell 负责 60s 可见兜底，本组件不重复起 timer。
 // 诚实分母（§6）：一切比率 x/y；CVE 无 feed / 基线从未跑 = 引导态不是 0。
 
-export interface OverviewJump { tab: string; filter?: string }
+export interface OverviewJump { tab: string; filter?: string } // tab 也接受 "settings"（空态落点）
 
 interface Props {
   compact?: boolean;
@@ -48,12 +49,27 @@ export default function OverviewPanel({ compact, actions, onJump, onFocusDevice,
     setBusy(true);
     app.NetDevOverview(force)
       .then(s => { if (s) setSnap(s); })
-      .catch(() => {})
+      .catch(() => {}) // best-effort: 失败降级不阻塞
       .finally(() => setBusy(false));
   }, []);
 
   useEffect(() => { if (!snapshot) load(true); }, [snapshot, load]);
   useEffect(() => { if (snapshot) setSnap(snapshot); }, [snapshot]);
+
+  // 巡检卡状态：初始拉一次 + 订阅 "netdev:inspection" 事件流（零定时器，
+  // 与 dock 档 §8.4 一致）。按钮任务化——kick 立即返回，进度走事件。
+  const [insp, setInsp] = useState<NetDevInspectionState | null>(null);
+  // S6-1 简报按钮的即时反馈（useState——渲染期局部变量在下次渲染即丢失，
+  // 原先的模块级缓存写法从不显示；完成后落 briefDone，失败静默回落）。
+  const [briefState, setBriefState] = useState("");
+  useEffect(() => {
+    app.NetDevInspectionStatus().then(setInsp).catch(() => {}); // best-effort: 失败降级不阻塞
+    return onNetdevInspection((s) => setInsp(s));
+  }, []);
+  const kickInspection = useCallback(() => {
+    app.NetDevRunInspection().then(setInsp).catch(() => {}); // best-effort: 失败降级不阻塞
+  }, []);
+
   // dock 档零定时器（§8.4）：事件驱动刷新，无 setInterval。
   useEffect(() => {
     const on = (e: Event) => {
@@ -70,7 +86,18 @@ export default function OverviewPanel({ compact, actions, onJump, onFocusDevice,
   }, [snap]);
 
   if (!snap) {
-    return <div className="ndv__card" style={{ padding: 16 }}>{busy ? t("ndv.ovw.loading") : t("ndv.ovw.empty")}</div>;
+    if (busy) return <div className="ndv__card" style={{ padding: 16 }}>{t("ndv.ovw.loading")}</div>;
+    // G1-4：空态三要素——说明+原因+下一步动作（添加设备/跑发现）。
+    return (
+      <div className="ndv__card" style={{ padding: 16 }}>
+        <EmptyState
+          title={t("ndv.ovw.empty")}
+          reason={t("ndv.ovw.emptyReason")}
+          action={{ label: t("ndv.ovw.emptyAddDevice"), onClick: () => onJump?.({ tab: "settings" }) }}
+        />
+        <div><button className="btn btn--small" role="button" onClick={() => onJump?.({ tab: "logs" })}>{t("ndv.ovw.emptyDiscover")}</button></div>
+      </div>
+    );
   }
   const jump = (tab: string, filter?: string) => onJump?.({ tab, filter });
   const r = snap.risk;
@@ -188,6 +215,51 @@ export default function OverviewPanel({ compact, actions, onJump, onFocusDevice,
       </div>
 
       {riskBar}
+
+      {/* 网络巡检卡（立即巡检的家——2026-09-05 从左下角侧栏按钮迁入）：
+          调度状态 + 上轮结果 + 最近轮次（risk_trend 的 inspection 行），
+          手动触发任务化：kick 即返、进度走 netdev:inspection 事件。 */}
+      <div className="ndv__card" data-ovw="inspect">
+        <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="ndv__card-title"><ScanSearch size={14} />{t("ndv.ovw.inspect")}</div>
+            <div className="ndv-ovw__line dim" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {t("ndv.ovw.inspectSched", { iv: insp?.interval || t("ndv.ovw.inspectOff") })}
+              {insp?.lastAt ? <> · <span role="button" style={{ cursor: "pointer" }} onClick={() => jump("findings")}>{t("ndv.ovw.inspectLast", { at: new Date(insp.lastAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), title: insp.lastTitle || "" })}</span></> : null}
+              {insp?.lastErr ? <span style={{ color: "var(--danger, #e5484d)" }} title={insp.lastErr}> · {t("ndv.ovw.inspectErr")}</span> : null}
+            </div>
+            {(snap.stats?.risk_trend ?? []).filter(row => row.kind === "inspection").slice(0, 2).map((row) => (
+              <div key={row.at} className="ndv-ovw__line dim" role="button" style={{ cursor: "pointer" }} onClick={() => jump("findings")} title={row.at}>
+                {String(row.at).slice(11, 16)} · {t("ndv.ovw.inspectRow", { n: row.devices, c: row.critical, w: row.warning, i: row.info })}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+          <button
+            className="btn btn--secondary btn--small"
+            onClick={() => {
+              // S6-1：一键生成运维简报（脱敏摘要落 briefings/；办公技能读 latest JSON）。
+              setBriefState(t("ndv.ovw.briefDoing"));
+              void app.NetDevBriefingBuild("weekly")
+                .then(() => setBriefState(t("ndv.ovw.briefDone")))
+                .catch(() => setBriefState(""));
+            }}
+            title={t("ndv.ovw.briefTip")}
+          >
+            {t("ndv.ovw.briefBtn")}
+          </button>
+          <span className="dim" style={{ fontSize: 10.5 }}>{briefState}</span>
+          <button
+            className="btn btn--primary btn--small"
+            disabled={!!insp?.running}
+            onClick={kickInspection}
+            title={t("ndv.ovw.inspectTip")}
+          >
+            {insp?.running ? t("ndv.ovw.inspectRunning", { done: insp.done, total: insp.total || "?" }) : t("ndv.ovw.inspectRunNow")}
+          </button>
+          </div>
+        </div>
+      </div>
 
       <div className={compact ? "ndv-ovw__col" : "ndv-ovw__grid"}>
         <div className="ndv__card" data-ovw="events">

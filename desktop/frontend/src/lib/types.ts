@@ -1573,6 +1573,26 @@ export interface InboxItem {
   subject: string;
   date: string;
   preview: string;
+  to?: string; // shown instead of from in the Sent view
+  attachments?: MailAttachment[]; // 📎 chips on the list row
+}
+
+// MailAttachment is one email attachment's metadata (name + byte size).
+export interface MailAttachment {
+  name: string;
+  size: number;
+}
+
+// MailFullMessage is the dock reading pane's payload — one message fetched on
+// demand (ReadMailFull) with its FULL plain-text body instead of the list's
+// 2000-char snippet.
+export interface MailFullMessage {
+  from: string;
+  to: string;
+  subject: string;
+  date: string;
+  body: string;
+  attachments?: MailAttachment[];
 }
 
 export interface SettingsView {
@@ -1691,6 +1711,8 @@ export interface NetDevDeviceView {
   configPaths?: string[];
   // 带外启动器 deep link (§6.3): ESXi/堡垒/BMC Web UI.
   oobUrl?: string;
+  // GPU/智算主机标记（S1-2）：分诊追加 GPU 档、设备卡 GPU 徽标。
+  gpu?: boolean;
   // Dial-priority order (ssh, netconf).
   protocols?: string[];
   // SNMP collector credentials (community write-only, blank = keep).
@@ -1701,6 +1723,8 @@ export interface NetDevDeviceView {
   // Serial console line (COM 口): set => console dial instead of SSH.
   consolePort?: string;
   consoleBaud?: number;
+  // WRITE_AUTHZ：设备写档覆盖——只许收紧（""=继承组/全局档）。
+  writeOverride?: string;
   password?: string;
 }
 
@@ -1736,6 +1760,8 @@ export interface NetDevSettingsView {
   inspectionInterval: string;
   scheduledBaseline: boolean;
   backupInterval: string;
+  // Vault git mirror (WRITE_AUTHZ §7.2): every snapshot also commits.
+  backupGitMirror: boolean;
   // Named diagnostic batteries for the device card.
   presets: NetDevPresetView[];
   // Read-only database diagnostic endpoints (netdev_db_query).
@@ -1778,6 +1804,8 @@ export interface NetDevGroupDefView {
   name: string;
   policy: string;       // "" | read-only | proposal | proposal+confirm2
   changeWindow: string; // e.g. "tue,thu 22:00-24:00"; "" = any time
+  // 组默认写档（""=继承全局；sealed|confirm|auto——WRITE_AUTHZ §4.1）。
+  write?: string;
 }
 
 // One [[netdev.alert_rules]] entry.
@@ -2255,6 +2283,8 @@ export interface BrowserConsoleStep {
   files?: string[];
   expression?: string;
   label?: string;
+  // 5th-column harness spec (重试=/校验=/失败=/校验预算=), raw string.
+  control?: string;
 }
 
 export interface BrowserConsoleTrialStatus {
@@ -2334,6 +2364,10 @@ export interface BrowserConsoleWatchRound {
   compromised_hosts?: string[];
   attention_count?: number;
   severity?: string;
+  danger_score?: number;
+  danger_band?: "critical" | "warning" | "info";
+  danger_signals?: string[];
+  night_silenced?: boolean;
   notified?: string[]; // im|email|system — channels actually sent
   notify_error?: string;
 }
@@ -2371,6 +2405,8 @@ export interface NetDevLiveSnapshot {
   devices: NetDevLiveDeviceState[];
   spent: number; // commands spent this turn
   budget: number; // turn_command_budget (0 = unlimited)
+  wspent?: number; // direct writes spent this turn (WRITE_AUTHZ §6⑤)
+  wbudget?: number; // turn_write_budget (default 10)
 }
 
 // Assessment-mode weak-credential check result (netdev_assess /
@@ -2502,9 +2538,11 @@ export interface NetDevCutoverRun {
   name: string;
   deadline: string;
   steps: NetDevCutoverStep[];
-  status: string; // running | hold | done | failed | aborted
+  status: string; // running | hold | done | failed | aborted | precheck-failed
   hold_note?: string;
   cursor: number;
+  precheck?: { battery?: string; probes?: { kind: string; device: string; target?: string; cmd?: string; expect?: string }[] };
+  precheck_report?: { started_at: string; all_pass: boolean; items: { device: string; check: string; pass: boolean; detail?: string }[] };
   pre_snapshot?: Record<string, string>;
   post_snapshot?: Record<string, string>;
   report?: string;
@@ -2570,6 +2608,42 @@ export interface NetDevFindingEvidence {
   output: string;
 }
 
+// NetDevWriteApproval is one pending confirm-tier write card pushed on the
+// "netdev:write-approval" channel (WRITE_AUTHZ_SPEC §6②): the Manager's
+// approval channel — full-access mode cannot skip it.
+export interface NetDevWriteApproval {
+  id: string;
+  device: string;
+  command: string;
+}
+
+// NetDevWriteTierRow is one device's lock state — settings UI and badges.
+export interface NetDevWriteTierRow {
+  device: string;
+  configured: string; // TOML tier (group chain resolved)
+  confirmed: string; // last human-confirmed tier ("" = sealed baseline)
+  effective: string; // what a write must obey NOW
+  clamped: boolean; // configured wider than confirmed → degraded
+}
+
+// NetDevOpStep is one operation-ledger row (spec §7.3): every write action —
+// direct write, proposal step, rollback itself — lands exactly one.
+export interface NetDevOpStep {
+  ID: string;
+  At: string;
+  Actor: string;
+  Device: string;
+  Command: string;
+  Status: string;
+  Turn?: number; // user-turn anchor (session rollback filter)
+  PreID?: string;
+  PostID?: string;
+  DiffSummary?: string;
+  Error?: string;
+  RollbackTo?: string;
+  Link?: string;
+}
+
 export interface NetDevFinding {
   id: string;
   title: string;
@@ -2587,6 +2661,7 @@ export interface NetDevFinding {
   // Site-scope snapshot stamped at save time (backend finding.go); "" = 未分组
   // — visible in EVERY project view so unknown-source alerts are never hidden.
   project?: string;
+  fix?: { type?: string; ref?: string; link?: string; confidence?: "verified" | "model" };
 }
 
 export interface NetDevTopologyNode {
@@ -2681,6 +2756,18 @@ export interface NetDevInspectionRow {
   critical: number; warning: number; info: number; baseline_hits?: number;
   if_brief?: Record<string, { up: number; down: number }>;
 }
+/** One network sweep's live state — backend NetDevInspectionState ("netdev:inspection" events). */
+export interface NetDevInspectionState {
+  running: boolean;
+  manual?: boolean;
+  startedAt?: number;
+  done: number;
+  total: number;
+  lastTitle?: string;
+  lastAt?: number;
+  lastErr?: string;
+  interval?: string;
+}
 export interface NetDevOvStats {
   mttr_hours?: number;
   baseline?: NetDevBaselineAgg | null;
@@ -2728,6 +2815,7 @@ export interface NetDevCutoverBoard {
   id: string; name: string; status: string; deadline?: string; remaining_sec: number;
   frozen: number; steps: NetDevCutoverBoardStep[]; devices: NetDevCutoverBoardDevice[];
   rollback_ready: boolean; rollback_note?: string;
+  precheck_report?: { started_at: string; all_pass: boolean; items: { device: string; check: string; pass: boolean; detail?: string }[] };
   jobs: NetDevCutoverBoardJob[]; audit: NetDevCutoverBoardAudit[];
   report?: string; has_active: boolean; found: boolean;
 }
@@ -2881,6 +2969,8 @@ export interface NetDevPromoteForm {
   vendor: string;
   role: string;
   model: string;
+  // WRITE_AUTHZ：转正即定锁（""=继承 = sealed 安全缺省）。
+  writeTier?: string;
 }
 
 // P1-1 nmap 服务探测编排：产品编排用户自备的 nmap，结果回填待确认区。

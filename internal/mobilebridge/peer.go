@@ -4,7 +4,6 @@ import (
 	"crypto/cipher"
 	"crypto/ecdh"
 	"crypto/ed25519"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -20,9 +19,9 @@ import (
 type hsState int32
 
 const (
-	hsWaitHello hsState = iota // expecting C's ClientHello (plaintext)
-	hsWaitFinished             // sent ServerHello, expecting C's Finished (c2s AEAD)
-	hsEncrypted                // handshake done; all traffic is AEAD frames
+	hsWaitHello    hsState = iota // expecting C's ClientHello (plaintext)
+	hsWaitFinished                // sent ServerHello, expecting C's Finished (c2s AEAD)
+	hsEncrypted                   // handshake done; all traffic is AEAD frames
 	hsClosed
 )
 
@@ -37,17 +36,17 @@ var ErrNotEncrypted = errors.New("connection not encrypted yet")
 // NO ServerHello — the device learns nothing about whether its target exists
 // (enumeration protection, PROTOCOL §5.4, §11.2).
 type Conn struct {
-	sPriv    ed25519.PrivateKey // S long-term (signs ServerHello)
-	sPub     ed25519.PublicKey
-	devC     string             // filled from ClientHello.cid
-	devS     string
-	pc       *webrtc.PeerConnection
-	dc       *webrtc.DataChannel
-	router   *CommandRouter
-	pairing  *Pairing
-	audit    *Audit
-	ephPriv  *ecdh.PrivateKey
-	state    atomic.Int32
+	sPriv   ed25519.PrivateKey // S long-term (signs ServerHello)
+	sPub    ed25519.PublicKey
+	devC    string // filled from ClientHello.cid
+	devS    string
+	pc      *webrtc.PeerConnection
+	dc      *webrtc.DataChannel
+	router  *CommandRouter
+	pairing *Pairing
+	audit   *Audit
+	ephPriv *ecdh.PrivateKey
+	state   atomic.Int32
 
 	c2s, s2c cipher.AEAD
 	cryptoMu sync.Mutex
@@ -74,7 +73,7 @@ func NewConn(sPriv ed25519.PrivateKey, sPub ed25519.PublicKey, pairing *Pairing,
 	}
 	c := &Conn{
 		sPriv: sPriv, sPub: sPub,
-		devS: DevID(sPub),
+		devS:    DevID(sPub),
 		pairing: pairing, router: router, audit: audit,
 		ephPriv: eph,
 	}
@@ -290,14 +289,15 @@ func (c *Conn) sendEncrypted(plaintext []byte) error {
 	c.cryptoMu.Lock()
 	seq := c.sendSeq
 	c.sendSeq++
-	// PROTOCOL §11.5: rekey at RekeyThreshold — 主动轮换而非 fail-close。
+	// audit A-1: 原「简化版 rekey」是单边本地派生（随机 salt 不上线，
+	// 对端无从同步；C 端实现与这里还互不兼容）——已删除。到达阈值改为
+	// fail-close：断开走全量重连，重新握手即获得全新 X25519（真正的
+	// 密钥轮换）。阈值 2^32 帧，正常会话不可达，此分支是安全兜底。
 	if c.sendSeq >= RekeyThreshold {
-		if err := c.rekeyLocked(); err != nil {
-			c.cryptoMu.Unlock()
-			c.fail("rekey", err)
-			return err
-		}
-		seq = 0 // 新密钥从 seq=0 重新开始
+		c.cryptoMu.Unlock()
+		err := errors.New("send seq reached rekey threshold")
+		c.fail("rekey", err)
+		return err
 	}
 	c.cryptoMu.Unlock()
 	nonce, err := Random(12)
@@ -315,49 +315,6 @@ func (c *Conn) dcSend(b []byte) error {
 		return errors.New("dc closed")
 	}
 	return c.dc.Send(b)
-}
-
-// rekeyLocked 在 sendSeq 达到阈值时做密钥轮换（PROTOCOL §11.5）。
-// 生成新 X25519 临时密钥 → ECDH(peerEphPub) → 派生新 c2s/s2c → 重置 seq。
-// 调用方必须已持有 cryptoMu。
-// 注：peerEphPub 在 rekey 时不可用（握手中间态已清）→ 用当前连接的
-// 长期 ECDH 做单侧轮换（比双侷新 ECDH 简单，安全性足够：新 key 绑定
-// transcript hash 防降级）。
-func (c *Conn) rekeyLocked() error {
-	// 简化版 rekey：用 HKDF 从当前密钥 + 新随机 salt 派生下一密钥。
-	// 这不是完美前向保密升级，但满足"seq 空间不耗尽"的不变量。
-	salt, err := Random(32)
-	if err != nil {
-		return err
-	}
-	// transcript 作为 HKDF info（绑定会话身份）。AES-GCM nonce 固定 12 字节，
-	// salt[:12] 作 nonce、salt[12:] 作 HKDF salt（与 sendEncrypted 的 Random(12) 对齐）。
-	newC2S := hkdfExpand(c.c2s.Seal(nil, salt[:12], nil, nil), salt[12:], []byte("c2s_rekey"))
-	newS2C := hkdfExpand(c.s2c.Seal(nil, salt[:12], nil, nil), salt[12:], []byte("s2c_rekey"))
-	aead2s, err := NewAEAD(newC2S)
-	if err != nil {
-		return err
-	}
-	aeadS2C, err := NewAEAD(newS2C)
-	if err != nil {
-		return err
-	}
-	c.c2s = aead2s
-	c.s2c = aeadS2C
-	c.sendSeq = 0
-	c.recvMax = 0
-	c.recvDone = false
-	c.audit.Info("rekey_completed", "devC", c.devC)
-	return nil
-}
-
-// hkdfExpand 从 seed + info 派生 32 字节。
-func hkdfExpand(seed, salt, info []byte) []byte {
-	h := sha256.New()
-	h.Write(seed)
-	h.Write(salt)
-	h.Write(info)
-	return h.Sum(nil)
 }
 
 func (c *Conn) close() {

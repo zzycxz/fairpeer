@@ -107,12 +107,14 @@ func (m *Manager) WeakCredCheck(ctx context.Context, deviceName, tier, dictPath 
 	}
 
 	res := WeakCredResult{Device: deviceName, Tier: tier, Budget: budget}
+	transportFails := 0
 	for i, cand := range candidates {
 		res.Attempts = i + 1
 		ok, err := m.dialAuth(ctx, d, cand)
 		status := AuditOK
 		detail := "attempt " + fmt.Sprintf("%d", i+1) + " rejected"
 		if err != nil {
+			transportFails++
 			status = AuditFailure
 			detail = "attempt " + fmt.Sprintf("%d", i+1) + " transport error: " + err.Error()
 		} else if ok {
@@ -123,6 +125,13 @@ func (m *Manager) WeakCredCheck(ctx context.Context, deviceName, tier, dictPath 
 			return res, nil
 		}
 		_ = AppendAudit(Audit{Device: deviceName, Command: "weak-cred-check (" + tier + ") attempt " + fmt.Sprintf("%d", i+1), Class: "assess", Status: status, Error: detail})
+	}
+	// Unreachable device: EVERY attempt died on transport — nothing was
+	// actually re-tested, so the CONFIRMED finding must NOT auto-resolve
+	// (复核通过 would lie). Leave it untouched for a reachable re-check.
+	if res.Attempts > 0 && transportFails == res.Attempts {
+		res.Detail = fmt.Sprintf("device unreachable — all %d attempt(s) hit transport errors, verdict unknown; any weak-credential finding was left untouched", res.Attempts)
+		return res, nil
 	}
 	res.Detail = fmt.Sprintf("no weak credential in %d attempt(s) (budget %d)", res.Attempts, budget)
 	m.resolveWeakCredFinding(deviceName, tier)
@@ -144,6 +153,7 @@ func (m *Manager) fileWeakCredFinding(res WeakCredResult) {
 		Detail:   res.Detail + "。命中于 " + now.Format("01-02 15:04:05") + " 的 " + res.Tier + " 档核查（尝试 " + fmt.Sprintf("%d", res.Attempts) + " 次，预算 " + fmt.Sprintf("%d", res.Budget) + "）。凭证原文不落任何日志。",
 		Evidence: []Evidence{{Device: res.Device, Command: "weak-cred-check (" + res.Tier + ")", Output: "attempt " + fmt.Sprintf("%d", res.Attempts) + " accepted (password not logged)"}},
 		Suggestion: "立即经变更更换该设备登录凭证，并检查同分组其他设备是否复用同一口令。",
+		Fix:     &FixHint{Type: "credential", Ref: "经变更提案更换该设备 SSH 登录凭证（并排查同分组口令复用）", Confidence: "verified"},
 		Source:  src,
 		Status:  "active",
 	}
@@ -187,7 +197,9 @@ func (m *Manager) resolveWeakCredFinding(device, tier string) {
 }
 
 // dialAuth attempts one SSH login with the candidate password. Host keys ride
-// the normal TOFU policy (HostKeyPrompt / managed file).
+// the normal TOFU policy (HostKeyPrompt / managed file). The returned error is
+// a TRANSPORT failure (unreachable, timeout, bad route) — the verdict for that
+// attempt is unknown; a rejected candidate is (false, nil).
 func (m *Manager) dialAuth(ctx context.Context, d config.NetDevDevice, password string) (bool, error) {
 	lookup := m.lookupEntry()
 	resolved, err := transport.ResolveHost(lookup, d.Name, nil)
@@ -220,12 +232,15 @@ func (m *Manager) dialAuth(ctx context.Context, d config.NetDevDevice, password 
 		return false, err
 	}
 	if err := client.Start(ctx); err != nil {
+		client.Close()
 		if errors.Is(err, transport.ErrAuthFailed) {
-			client.Close()
 			return false, nil // candidate rejected — expected outcome
 		}
-		client.Close()
-		return false, nil // transient errors count as a spent attempt (conservative)
+		// Transport failure: the attempt is still SPENT (conservative — devices
+		// lock accounts), but folding it into (false, nil) made it read as a
+		// clean rejection and the post-loop auto-resolve cleared findings
+		// nothing had re-tested. Surface it instead.
+		return false, err
 	}
 	client.Close()
 	return true, nil // LOGIN SUCCEEDED with the candidate — weak
@@ -262,10 +277,11 @@ type assessTool struct{ m *Manager }
 func (t *assessTool) Name() string { return "netdev_assess" }
 
 func (t *assessTool) Description() string {
-	return "Assessment-mode weak-credential check (NETDEV_SPEC §6.2): test a device's SSH login against the tier's candidate passwords. " +
-		"Gated on the [netdev.assessment] engagement envelope (engagement_id + expires) — refused without an ACTIVE engagement; the user configures it in 设置 → 运维中配置. " +
+	return "Assessment-mode weak-credential check: test ONE device's SSH login against the tier's candidate passwords. " +
+		"Gated on the [netdev.assessment] engagement envelope (engagement_id + expires) — refused without an ACTIVE engagement; the user configures it in the ops settings. " +
 		"basic tier = fixed ≤3 candidates (empty/username/admin); dictionary tier = a user-supplied file, hard-capped at 10 (lockout guard). " +
-		"Every attempt is a full auth dial and is audited (passwords never logged). A confirmed weak credential is reported for the user to fix VIA A PROPOSAL — never changed directly."
+		"Every attempt is a full auth dial and is audited (passwords never logged). A confirmed weak credential is reported for the user to fix VIA A PROPOSAL — never changed directly. " +
+		"Single-device specialty: for the full staged assessment workflow use the netdev-security-assessment skill."
 }
 
 func (t *assessTool) Schema() json.RawMessage {

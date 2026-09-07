@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
 import { app } from "../../lib/bridge";
+import { PanelErrorState } from "./PanelStates";
+import { usePanelData } from "./usePanelData";
 import { useI18n } from "../../lib/i18n";
-import type { NetDevExposureBoard } from "../../lib/types";
 
 // ExposureBoardView — 暴露面屏（DASHBOARD spec §4.9）。事实（矩阵/CVE 融合）
 // 与推演（BuildAttackPaths 路径/剪断建议）同屏分区、推演角标常驻（§1
@@ -14,22 +15,21 @@ interface Props {
 
 export default function ExposureBoardView({ onJump, onFocusDevice }: Props) {
   const { t } = useI18n();
-  const [b, setB] = useState<NetDevExposureBoard | null>(null);
+  // G1-1：三态 hook（失败与空/加载可区分，失败可重试）。
+  const q = usePanelData(() => app.NetDevExposureBoard(), []);
+  const b = q.data;
 
-  const load = useCallback(() => {
-    app.NetDevExposureBoard().then(x => { if (x) setB(x); }).catch(() => {});
-  }, []);
-  useEffect(() => { load(); }, [load]);
   useEffect(() => {
     const on = (e: Event) => {
       const screens = (e as CustomEvent<{ screens?: string[] }>).detail?.screens ?? [];
-      if (screens.includes("exposure") || screens.includes("overview")) load();
+      if (screens.includes("exposure") || screens.includes("overview")) q.retry();
     };
     window.addEventListener("fairpeer:netdev-dash", on);
     return () => window.removeEventListener("fairpeer:netdev-dash", on);
-  }, [load]);
+  }, [q.retry]);
 
-  if (!b) return <div className="ndv__card" style={{ padding: 16 }}>{t("ndv.exp.loading")}</div>;
+  if (q.status === "error") return <PanelErrorState onRetry={q.retry} />;
+  if (q.status === "loading" || !b) return <div className="ndv__card" style={{ padding: 16 }}>{t("ndv.exp.loading")}</div>;
 
   return (
     <div className="ndv-exp">

@@ -28,12 +28,19 @@ type sseTransport struct {
 	headers  map[string]string
 	client   *http.Client
 	endpoint string // POST URL from the endpoint event
-	eventCh  chan json.RawMessage
-	errCh    chan error
-	closeCh  chan struct{}
+	// endpointReady is closed exactly once, when the endpoint event first sets
+	// t.endpoint. Calls block on it instead of polling: the event can land
+	// after a caller already started its handshake, and a poll loop with a
+	// default arm would fail the initialize race every time.
+	endpointReady chan struct{}
+	eventCh       chan json.RawMessage
+	errCh         chan error
+	closeCh       chan struct{}
 
 	mu     sync.Mutex
 	nextID int
+	// endpointOnce guards the single close of endpointReady.
+	endpointOnce sync.Once
 	// pending maps request id → response channel; the SSE dispatcher routes
 	// responses by id.
 	pending map[int]chan json.RawMessage
@@ -44,14 +51,15 @@ func newSSETransport(ctx context.Context, s Spec) (*sseTransport, error) {
 		return nil, fmt.Errorf("sse plugin %q: url is required", s.Name)
 	}
 	t := &sseTransport{
-		name:    s.Name,
-		baseURL: s.URL,
-		headers: s.Headers,
-		client:  &http.Client{},
-		eventCh: make(chan json.RawMessage, 64),
-		errCh:   make(chan error, 1),
-		closeCh: make(chan struct{}),
-		pending: make(map[int]chan json.RawMessage),
+		name:          s.Name,
+		baseURL:       s.URL,
+		headers:       s.Headers,
+		client:        &http.Client{},
+		endpointReady: make(chan struct{}),
+		eventCh:       make(chan json.RawMessage, 64),
+		errCh:         make(chan error, 1),
+		closeCh:       make(chan struct{}),
+		pending:       make(map[int]chan json.RawMessage),
 	}
 	go t.readStream(ctx)
 	return t, nil
@@ -92,13 +100,16 @@ func (t *sseTransport) readStream(ctx context.Context) {
 		switch {
 		case strings.HasPrefix(line, "event:"):
 			eventType.Reset()
-			eventType.WriteString(strings.TrimPrefix(line, "event:"))
+			// TrimSpace: spec-style servers send "event: endpoint" — the
+			// delimiter-space would otherwise defeat the == comparison below.
+			eventType.WriteString(strings.TrimSpace(strings.TrimPrefix(line, "event:")))
 		case strings.HasPrefix(line, "data:"):
 			data := strings.TrimPrefix(line, "data:")
 			if eventType.String() == "endpoint" {
 				t.mu.Lock()
 				t.endpoint = t.resolveURL(strings.TrimSpace(data))
 				t.mu.Unlock()
+				t.endpointOnce.Do(func() { close(t.endpointReady) })
 				continue
 			}
 			dataBuf.WriteString(data)
@@ -159,25 +170,19 @@ func (t *sseTransport) resolveURL(ep string) string {
 }
 
 func (t *sseTransport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	// Wait for the endpoint event
+	// Wait for the endpoint event. Block on endpointReady — the event can
+	// arrive after the first call (typically initialize) has already started,
+	// so returning early here would race the handshake and fail it.
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("sse %q: no endpoint received (server didn't send the POST URL): %w", t.name, ctx.Err())
+	case err := <-t.errCh:
+		return nil, err
+	case <-t.endpointReady:
+	}
 	t.mu.Lock()
 	ep := t.endpoint
 	t.mu.Unlock()
-	for ep == "" {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case err := <-t.errCh:
-			return nil, err
-		default:
-		}
-		t.mu.Lock()
-		ep = t.endpoint
-		t.mu.Unlock()
-		if ep == "" {
-			return nil, fmt.Errorf("sse %q: no endpoint received (server didn't send the POST URL)", t.name)
-		}
-	}
 
 	t.mu.Lock()
 	t.nextID++
@@ -217,7 +222,19 @@ func (t *sseTransport) call(ctx context.Context, method string, params any) (jso
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case raw := <-ch:
-		return raw, nil
+		// Unwrap the JSON-RPC envelope: callers expect the inner result (the
+		// http/stdio transports do the same at their decode boundary).
+		var env struct {
+			Result json.RawMessage `json:"result"`
+			Error  *rpcError       `json:"error"`
+		}
+		if err := json.Unmarshal(raw, &env); err != nil {
+			return nil, fmt.Errorf("sse %q: decode response: %w", t.name, err)
+		}
+		if env.Error != nil {
+			return nil, fmt.Errorf("plugin %q: %w", t.name, env.Error)
+		}
+		return env.Result, nil
 	case err := <-t.errCh:
 		return nil, err
 	}

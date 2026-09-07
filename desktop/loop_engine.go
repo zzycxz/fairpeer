@@ -126,12 +126,6 @@ const (
 // that project's root, and the agent rounds submit to that tab's controller,
 // so the loop stays anchored to one project even if the user switches tabs.
 func (a *App) LoopStart(tabID string, cfg LoopConfig) error {
-	a.mu.RLock()
-	runner := a.loopRunState
-	a.mu.RUnlock()
-	if runner != nil {
-		return fmt.Errorf("循环工程已有进行中的任务(先停止或等待完成)")
-	}
 	if strings.TrimSpace(cfg.VerifyCommand) == "" && cfg.Autonomy != "L1" {
 		return fmt.Errorf("L2 及以上需要验收命令")
 	}
@@ -188,7 +182,17 @@ func (a *App) LoopStart(tabID string, cfg LoopConfig) error {
 			run.endTime = end
 		}
 	}
-	a.setLoopRun(run)
+	// Install the run with a compare-and-set under ONE lock acquisition: two
+	// concurrent LoopStarts can both pass validation against a nil slot, and
+	// only the first install may spawn — the loser unwinds before its goroutine
+	// exists, so two runs can never interleave rounds on the same tab.
+	a.mu.Lock()
+	if a.loopRunState != nil {
+		a.mu.Unlock()
+		return fmt.Errorf("循环工程已有进行中的任务(先停止或等待完成)")
+	}
+	a.loopRunState = run
+	a.mu.Unlock()
 	go a.loopExecute(run, ctrl)
 	return nil
 }
@@ -237,9 +241,15 @@ func (a *App) LoopStatus() *LoopRunStatus {
 	return &snapshot
 }
 
-func (a *App) setLoopRun(run *loopRun) {
+// clearLoopRun releases the active-run slot only when it still belongs to this
+// run. A blind nil write from a finishing run's defer could otherwise clear a
+// successor installed in the window between the last round and the defer — the
+// compare makes each run release exactly what it owns.
+func (a *App) clearLoopRun(run *loopRun) {
 	a.mu.Lock()
-	a.loopRunState = run
+	if a.loopRunState == run {
+		a.loopRunState = nil
+	}
 	a.mu.Unlock()
 }
 
@@ -255,7 +265,7 @@ func (a *App) loopExecute(run *loopRun, ctrl tabSession) {
 		run.status.EndedAt = time.Now().UnixMilli()
 		run.status.Report = buildLoopReport(run)
 		run.mu.Unlock()
-		a.setLoopRun(nil)
+		a.clearLoopRun(run)
 		a.loopEmit(run)
 	}()
 
@@ -319,8 +329,24 @@ func (a *App) loopExecute(run *loopRun, ctrl tabSession) {
 
 		// 2) Agent round — the prompt carries the sensor output, the goal,
 		//    the acceptance contract, and the output discipline.
+		// Safety snapshot FIRST, and only when this round can end in a
+		// rollback (L2+ with a verify command): capture the pre-round worktree
+		// so a failed verify restores the user's own uncommitted work instead
+		// of wiping it. Snapshot failure skips the round — running unprotected
+		// is how the old `git checkout -- .` rollback destroyed user work.
+		snapshotRef := ""
+		if cfg.Autonomy != "L1" && strings.TrimSpace(cfg.VerifyCommand) != "" {
+			snap, snapErr := a.loopSnapshot(run)
+			if snapErr != nil {
+				rec.Note = appendNote(rec.Note, "安全快照失败,跳过本轮: "+snapErr.Error())
+				a.loopAppend(run, rec, started)
+				continue
+			}
+			snapshotRef = snap
+		}
 		ctrl.Submit(loopRoundPrompt(cfg, round, sensorOut))
 		if !a.loopWaitTurn(run, ctrl) {
+			a.loopDropSnapshot(run, snapshotRef)
 			a.loopAppend(run, rec, started)
 			return // stopped mid-round
 		}
@@ -333,13 +359,18 @@ func (a *App) loopExecute(run *loopRun, ctrl tabSession) {
 			rec.Changed = a.loopChangedFiles(run)
 			if _, err := a.loopCommand(run, cfg.VerifyCommand); err == nil {
 				rec.Verify = "pass"
+				a.loopDropSnapshot(run, snapshotRef) // round kept — release the safety net
 				run.mu.Lock()
 				run.noProgress = 0
 				run.mu.Unlock()
 			} else {
 				// 4) Roll the round back — the anti-degradation guarantee:
-				//    a night's worst outcome is "wasted", never "worse".
-				if _, rbErr := a.loopCommand(run, "git checkout -- ."); rbErr != nil {
+				//    a night's worst outcome is "wasted", never "worse". The
+				//    restore targets the round's safety snapshot, so the
+				//    user's pre-round uncommitted work survives the rollback.
+				rbErr := a.loopRollback(run, snapshotRef)
+				a.loopDropSnapshot(run, snapshotRef)
+				if rbErr != nil {
 					rec.Verify = "fail-rolled-back"
 					rec.Note = "验证失败且回滚失败: " + rbErr.Error()
 				} else {
@@ -429,6 +460,82 @@ func (a *App) loopAppend(run *loopRun, rec LoopRoundRecord, started time.Time) {
 	run.status.Timeline = append(run.status.Timeline, rec)
 	run.mu.Unlock()
 	a.loopEmit(run)
+}
+
+// ── round safety snapshot ────────────────────────────────────────────────────
+
+// loopSnapshot captures the pre-round worktree as a rollback baseline for
+// verify-armed rounds (L2+). `git stash create` commits the current index+
+// worktree WITHOUT touching either (pure plumbing), and `git stash store`
+// parks the commit in the stash stack so it survives a crash or GC until the
+// round resolves. A clean worktree yields no stash — HEAD itself is the
+// baseline. Returns the rollback ref (stash sha or "HEAD").
+func (a *App) loopSnapshot(run *loopRun) (string, error) {
+	out, err := a.loopCommand(run, "git stash create")
+	if err != nil {
+		return "", err
+	}
+	// loopCommand merges stderr, and git may prefix the sha with warnings (e.g.
+	// CRLF notices); a clean worktree prints no sha at all — so only a bare hex
+	// line counts as the ref.
+	sha := firstGitSha(out)
+	if sha == "" {
+		return "HEAD", nil
+	}
+	if _, err := a.loopCommand(run, "git stash store -m \"fairpeer loop safety\" "+sha); err != nil {
+		return "", err
+	}
+	return sha, nil
+}
+
+// isGitSha reports whether s is a bare commit sha (40 hex chars, or 64 for
+// SHA-256 object repos).
+func isGitSha(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	for _, r := range s {
+		if !strings.ContainsRune("0123456789abcdef", r) {
+			return false
+		}
+	}
+	return true
+}
+
+// firstGitSha returns the first bare sha line in git output ("" when none).
+func firstGitSha(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); isGitSha(line) {
+			return line
+		}
+	}
+	return ""
+}
+
+// loopRollback restores the worktree to a round's safety snapshot.
+// `git read-tree --reset -u <ref>` rewrites index+worktree to the snapshot's
+// tree WITHOUT moving HEAD or the branch: the round's edits (including files
+// it staged) disappear, while the user's own uncommitted work — captured in
+// the snapshot — comes back. The old `git checkout -- .` wiped both.
+// Untracked files are left in place, matching the previous rollback's reach.
+func (a *App) loopRollback(run *loopRun, snapshotRef string) error {
+	_, err := a.loopCommand(run, "git read-tree --reset -u "+snapshotRef)
+	return err
+}
+
+// loopDropSnapshot releases the round's safety stash once its fate is sealed
+// (kept or rolled back). The stored entry sits at stash@{0}; re-verify it's
+// still ours before dropping so a user stash that raced in between isn't
+// discarded. A missed drop (crash, stack shift) only leaves a recoverable
+// entry in `git stash list` — safe by construction.
+func (a *App) loopDropSnapshot(run *loopRun, snapshotRef string) {
+	if snapshotRef == "" || snapshotRef == "HEAD" {
+		return
+	}
+	if out, err := a.loopCommand(run, "git rev-parse --verify stash@{0}"); err != nil || firstGitSha(out) != snapshotRef {
+		return
+	}
+	_, _ = a.loopCommand(run, "git stash drop stash@{0}")
 }
 
 // loopCommand runs shell text in the run's cwd, returning combined output.

@@ -16,6 +16,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // GoldenInfo describes one device's baseline for the UI.
@@ -56,11 +58,11 @@ func SetGoldenFromBackup(device, versionID string) error {
 		return err
 	}
 	StateEventSnap(StateEventGolden, device, StateActorUser, goldenFile(device), goldenMeta(device))
-	if err := os.WriteFile(goldenFile(device), []byte(text), 0o600); err != nil {
+	if err := fileutil.AtomicWriteFile(goldenFile(device), []byte(text), 0o600); err != nil {
 		return err
 	}
 	at := time.Now().Format(time.RFC3339)
-	return os.WriteFile(goldenMeta(device), []byte(at), 0o600)
+	return fileutil.AtomicWriteFile(goldenMeta(device), []byte(at), 0o600)
 }
 
 // GoldenInfoOf reports the baseline's presence for the timeline header.

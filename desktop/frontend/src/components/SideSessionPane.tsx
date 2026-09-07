@@ -100,9 +100,11 @@ export function SideSessionPane({
 
   if (!selected) {
     return (
-      <div className="side-session__empty">
-        <MessageSquare size={20} />
-        <div>{t("sideSession.emptyHint")}</div>
+      <div className="side-session">
+        <div className="side-session__empty">
+          <MessageSquare size={20} />
+          <div>{t("sideSession.emptyHint")}</div>
+        </div>
       </div>
     );
   }

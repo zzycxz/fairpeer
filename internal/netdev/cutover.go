@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // Cutover statuses.
@@ -28,6 +30,8 @@ const (
 	CutoverDone    = "done"
 	CutoverFailed  = "failed"
 	CutoverAborted = "aborted"
+	// S1-1：预检红灯停在窗口前——CutoverPrecheckOverride 人工放行后恢复。
+	CutoverPrecheckFailed = "precheck-failed"
 )
 
 // Cutover step statuses.
@@ -70,6 +74,38 @@ type CutoverStep struct {
 	Error     string     `json:"error,omitempty"`
 }
 
+// CutoverPrecheckDef（SCENARIO_SPEC S1-1）：变更窗口前的故障先行探测——
+// 执行前对影响设备跑只读电池/基线比对/探测，红灯需人工放行才进入变更。
+type CutoverPrecheckDef struct {
+	// Battery: "standard"（每设备只读电池，默认）| "baseline"（+基线违例比对）| "off"。
+	Battery string             `json:"battery,omitempty"`
+	Probes  []CutoverPreProbe  `json:"probes,omitempty"` // 追加探测（设备可达/业务命令）
+}
+
+// CutoverPreProbe is one extra pre-window probe.
+type CutoverPreProbe struct {
+	Kind   string `json:"kind"`             // ping | command
+	Device string `json:"device"`           // 执行设备（ping 从该设备源发）
+	Target string `json:"target,omitempty"` // ping 的目标 IP
+	Cmd    string `json:"cmd,omitempty"`    // command 的只读命令
+	Expect string `json:"expect,omitempty"` // 输出须命中的正则（空=仅要不报错）
+}
+
+// PrecheckItem is one check's outcome.
+type PrecheckItem struct {
+	Device string `json:"device"`
+	Check  string `json:"check"` // battery:<cmd> | probe:<kind>:<target> | baseline
+	Pass   bool   `json:"pass"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// PrecheckReport is the window-front health snapshot (S1-1)，与步后 Gate 对照。
+type PrecheckReport struct {
+	StartedAt time.Time      `json:"started_at"`
+	AllPass   bool           `json:"all_pass"`
+	Items     []PrecheckItem `json:"items"`
+}
+
 // CutoverRun is one cutover execution.
 type CutoverRun struct {
 	ID       string        `json:"id"`
@@ -79,6 +115,10 @@ type CutoverRun struct {
 	Status   string        `json:"status"`
 	HoldNote string        `json:"hold_note,omitempty"`
 	Cursor   int           `json:"cursor"`
+
+	// S1-1：变更前预检定义与报告（红灯 → precheck-failed，人工放行后进入）。
+	Precheck       *CutoverPrecheckDef `json:"precheck,omitempty"`
+	PrecheckReport *PrecheckReport     `json:"precheck_report,omitempty"`
 
 	// 割接前后基线快照（device → backup id）+ 对比报告。
 	PreSnapshot  map[string]string `json:"pre_snapshot,omitempty"`
@@ -128,7 +168,7 @@ func saveCutoverLocked(c *CutoverRun) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(cutoversDir(), c.ID+".json"), b, 0o600)
+	return fileutil.AtomicWriteFile(filepath.Join(cutoversDir(), c.ID+".json"), b, 0o600)
 }
 
 // GetCutover loads one run.
@@ -243,6 +283,19 @@ func (m *Manager) CutoverStart(def *CutoverRun) (*CutoverRun, error) {
 	def.StartedAt = &now
 	def.Cursor = 0
 
+	// S1-1：变更窗口前预检（故障先行探测）。红灯 → precheck-failed 停在窗口
+	// 前，CutoverPrecheckOverride 人工放行后才会启动 runner。
+	if err := m.runCutoverPrecheck(def, devices); err != nil {
+		return nil, err
+	}
+	if def.Status == CutoverPrecheckFailed {
+		if err := saveCutover(def); err != nil {
+			return nil, err
+		}
+		_ = AppendAudit(Audit{Device: "(cutover)", Command: "precheck-failed " + def.ID, Class: "cutover", Status: AuditDeviceError})
+		return def, nil
+	}
+
 	// 割接前全网基线快照（§7.2：割接前后自动各拍一次）。
 	def.PreSnapshot = map[string]string{}
 	for name := range devices {
@@ -280,6 +333,135 @@ func (m *Manager) cutoverLaunch(id string) {
 }
 
 // CutoverContinue presses 继续 at a hold.
+// runCutoverPrecheck executes the window-front battery over the run's devices
+// (S1-1). nil Precheck or Battery=="off" skips (report marks skipped).
+func (m *Manager) runCutoverPrecheck(def *CutoverRun, devices map[string]bool) error {
+	pc := def.Precheck
+	if pc == nil || pc.Battery == "off" {
+		def.PrecheckReport = &PrecheckReport{StartedAt: time.Now(), AllPass: true}
+		return nil
+	}
+	rep := &PrecheckReport{StartedAt: time.Now(), Items: []PrecheckItem{}}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	battery := pc.Battery
+	if battery == "" {
+		battery = "standard"
+	}
+	for name := range devices {
+		d, ok := m.cfg.NetDevDeviceByName(name)
+		if !ok {
+			continue
+		}
+		drv, ok := m.driverFor(d)
+		if !ok {
+			continue
+		}
+		for _, cmd := range inspectionBattery(drv) {
+			res := m.Exec(ctx, name, cmd)
+			item := PrecheckItem{Device: name, Check: "battery:" + cmd, Pass: !res.Refused && !res.IsError, Detail: firstLineOf(refusalOrOutput(res))}
+			rep.Items = append(rep.Items, item)
+		}
+		if battery == "baseline" {
+			// 读 running-config + 纯函数规则比对（不立案——预检只出报告）。
+			if cmd, ok := RunningConfigCommand(drv.Key()); ok {
+				if res, rerr := m.runRead(ctx, d, drv, cmd); rerr == nil {
+					vs := CheckBaseline(drv.Key(), res.Output)
+					pass := true
+					for _, v := range vs {
+						if v.Severity == SeverityCritical || v.Severity == SeverityWarning {
+							pass = false
+							rep.Items = append(rep.Items, PrecheckItem{Device: name, Check: "baseline:" + v.Rule, Pass: false, Detail: v.Title})
+						}
+					}
+					if pass {
+						rep.Items = append(rep.Items, PrecheckItem{Device: name, Check: "baseline", Pass: true, Detail: "no critical/warning violations"})
+					}
+				} else {
+					rep.Items = append(rep.Items, PrecheckItem{Device: name, Check: "baseline", Pass: false, Detail: "config read failed: " + rerr.Error()})
+				}
+			}
+		}
+	}
+	for _, pr := range pc.Probes {
+		switch pr.Kind {
+		case "ping":
+			cmd := "ping " + strings.TrimSpace(pr.Target)
+			if strings.ContainsAny(cmd, "\n\r") || pr.Target == "" {
+				rep.Items = append(rep.Items, PrecheckItem{Device: pr.Device, Check: "probe:ping:" + pr.Target, Pass: false, Detail: "bad probe target"})
+				continue
+			}
+			res := m.Exec(ctx, pr.Device, cmd)
+			rep.Items = append(rep.Items, PrecheckItem{Device: pr.Device, Check: "probe:ping:" + pr.Target, Pass: !res.Refused && !res.IsError, Detail: firstLineOf(refusalOrOutput(res))})
+		case "command":
+			res := m.Exec(ctx, pr.Device, pr.Cmd)
+			pass := !res.Refused && !res.IsError
+			if pass && pr.Expect != "" {
+				re, err := regexp.Compile(pr.Expect)
+				pass = err == nil && re.MatchString(res.Output)
+			}
+			rep.Items = append(rep.Items, PrecheckItem{Device: pr.Device, Check: "probe:command:" + pr.Cmd, Pass: pass, Detail: firstLineOf(refusalOrOutput(res))})
+		}
+	}
+	rep.AllPass = true
+	for _, it := range rep.Items {
+		if !it.Pass {
+			rep.AllPass = false
+			break
+		}
+	}
+	def.PrecheckReport = rep
+	if !rep.AllPass {
+		def.Status = CutoverPrecheckFailed
+		def.HoldNote = "预检红灯——人工放行后进入变更窗口（放行动作入审计）"
+	}
+	return nil
+}
+
+// refusalOrOutput picks the human-readable line from an ExecResult.
+func refusalOrOutput(res ExecResult) string {
+	if res.Refusal != "" {
+		return res.Refusal
+	}
+	return res.Output
+}
+
+// firstLineOf keeps item details to one line.
+func firstLineOf(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexAny(s, "\n\r\\"); i >= 0 {
+		s = s[:i]
+	}
+	if r := []rune(s); len(r) > 120 {
+		return string(r[:117]) + "…"
+	}
+	return s
+}
+
+// CutoverPrecheckOverride is the human 放行 after a red precheck (S1-1):
+// audit-logged, then the runner starts as if precheck passed.
+func (m *Manager) CutoverPrecheckOverride(id string) (*CutoverRun, error) {
+	cutoverMu.Lock()
+	c, err := GetCutover(id)
+	if err != nil {
+		cutoverMu.Unlock()
+		return nil, err
+	}
+	if c.Status != CutoverPrecheckFailed {
+		cutoverMu.Unlock()
+		return nil, fmt.Errorf("cutover %s is %s — 只有 precheck-failed 可放行", id, c.Status)
+	}
+	c.Status = CutoverRunning
+	c.HoldNote = ""
+	cutoverMu.Unlock()
+	_ = saveCutover(c) // saveCutover 自取 cutoverMu——必须解锁后调用
+	StateEventSnap(StateEventCutoverStart, c.ID, StateActorUser, "precheck-override")
+	_ = AppendAudit(Audit{Device: "(cutover)", Command: "precheck-override " + c.ID, Class: "cutover", Status: AuditOK})
+	m.cutoverLaunch(c.ID)
+	return c, nil
+}
+
 func (m *Manager) CutoverContinue(id string) (*CutoverRun, error) {
 	cutoverMu.Lock()
 	c, err := GetCutover(id)

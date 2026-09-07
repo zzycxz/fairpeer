@@ -23,8 +23,9 @@ export function AgentDashboard({
   onStop: (tabId: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  if (!open) return null;
-
+  // Hooks must run unconditionally: the panel mounts with open=false, so an
+  // early return before useMemo would change the hook count between renders
+  // and crash React ("Rendered more hooks") the first time open flips true.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return tabs;
@@ -34,6 +35,8 @@ export function AgentDashboard({
         .some((v) => String(v).toLowerCase().includes(q)),
     );
   }, [tabs, query]);
+
+  if (!open) return null;
 
   const running = filtered.filter((t) => t.running);
   const idle = filtered.filter((t) => !t.running);

@@ -68,7 +68,6 @@ func AuditWindow(days int) *AuditWindowStats {
 		return s
 	}
 	auditStatsMu.Unlock()
-
 	cut := time.Now().AddDate(0, 0, -days)
 	dayAgo := time.Now().AddDate(0, 0, -1)
 	out := &AuditWindowStats{ByClass: map[string]int{}}
@@ -106,9 +105,11 @@ func AuditWindow(days int) *AuditWindowStats {
 			}
 		}
 	}
-	auditStatsMu.Lock()
-	auditStatsCache.size, auditStatsCache.mtime, auditStatsCache.stats = fi.Size(), fi.ModTime(), out
-	auditStatsMu.Unlock()
+	if fi != nil { // a vanished file: report fresh stats, skip caching
+		auditStatsMu.Lock()
+		auditStatsCache.size, auditStatsCache.mtime, auditStatsCache.stats = fi.Size(), fi.ModTime(), out
+		auditStatsMu.Unlock()
+	}
 	return out
 }
 
@@ -244,12 +245,12 @@ func (m *Manager) BuildInvestigationChain(caseID, findingID string, hours int) *
 				devs[e.Device] = true
 			}
 		}
-		if len(inScope) == 0 {
-			// no pinned findings: fall back to window findings touching the case devices
-			for _, f := range findings {
-				if !f.CreatedAt.After(now.Add(-time.Duration(hours)*time.Hour)) && anyIn(f.Devices, devs) {
-					inScope[f.ID] = true
-				}
+			if len(inScope) == 0 {
+				// no pinned findings: fall back to window findings touching the case devices
+				for _, f := range findings {
+					if f.CreatedAt.After(now.Add(-time.Duration(hours)*time.Hour)) && anyIn(f.Devices, devs) {
+						inScope[f.ID] = true
+					}
 				if len(inScope) >= 20 {
 					break
 				}

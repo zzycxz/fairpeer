@@ -186,6 +186,12 @@ func pluginEntryFromMCPSpec(name string, s mcpServerSpec) PluginEntry {
 // already declare. fairpeer.toml's [[plugins]] win on a name collision: it is the
 // fairpeer-specific, more explicit of the two, so it overrides the shared,
 // checked-in .mcp.json rather than the other way round.
+//
+// SECURITY: .mcp.json ships inside the repository — a cloned project must not
+// be able to make fairpeer spawn arbitrary commands on session start. Entries
+// sourced from it are appended with auto_start = false, so boot never spawns
+// them; the user opts in via the MCP manager (/mcp or desktop settings),
+// which persists the entry to fairpeer.toml where it wins on future merges.
 func (c *Config) mergeMCPJSON(entries []PluginEntry) {
 	have := make(map[string]bool, len(c.Plugins))
 	for _, p := range c.Plugins {
@@ -196,6 +202,8 @@ func (c *Config) mergeMCPJSON(entries []PluginEntry) {
 			continue
 		}
 		have[e.Name] = true
+		noAutoStart := false
+		e.AutoStart = &noAutoStart
 		c.Plugins = append(c.Plugins, e)
 	}
 }

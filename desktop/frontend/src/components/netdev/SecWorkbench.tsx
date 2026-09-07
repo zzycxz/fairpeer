@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { app } from "../../lib/bridge";
 import { useT } from "../../lib/i18n";
 import { parseIOCList } from "../../lib/ioc";
+import { AuditProjectPanel } from "./AuditProjectPanel";
 import type { NetDevDeviceView, NetDevIncidentCase } from "../../lib/types";
 
 // SecWorkbench — 主区「安全工作台」（NETDEV_SPEC_V2 §10.4）：第三工作台。
@@ -31,6 +32,17 @@ const SAMPLE_CVE_FEED = `{"cves":[
 {"id":"CVE-2024-1086","desc":"Linux kernel nf_tables use-after-free, local privilege escalation; update the kernel","products":["linux"],"severity":"high"}
 ]}`;
 
+// fmtEntryTime — 时间线条目时间的显示格式化。写入侧统一存 toISOString()
+// （UTC），直接字符串切片会把 UTC 墙钟当本地墙钟显示（UTC+8 偏 8 小时）；
+// 这里解析成 Date 再按本地时区取字段。旧数据同为 ISO（带 Z），一并兼容；
+// 解析失败时退回原字符串切片，绝不丢显示。
+function fmtEntryTime(raw: string): string {
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return String(raw ?? "").replace("T", " ").slice(5, 19);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 // runPool — bounded-concurrency map（体检并行化的最小实现，失败不中断全队）。
 async function runPool<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<(R | null)[]> {
   const out: (R | null)[] = new Array(items.length).fill(null);
@@ -50,7 +62,7 @@ export function SecWorkbench({ devices, hidden }: {
   hidden?: boolean;
 }) {
   const t = useT();
-  const [view, setView] = useState<"cases" | "cve">("cases");
+  const [view, setView] = useState<"cases" | "cve" | "audit">("cases");
   const [cases, setCases] = useState<NetDevIncidentCase[]>([]);
   const [currentId, setCurrentId] = useState("");
   const [note, setNote] = useState("");
@@ -273,6 +285,7 @@ export function SecWorkbench({ devices, hidden }: {
         <div className="ndv-sec__views" style={{ display: "flex", gap: 4, marginBottom: 6 }}>
           <span className={`btn btn--small ${view === "cases" ? "btn--primary" : "btn--secondary"}`} role="button" onClick={() => setView("cases")}>{t("ndv.sec.tabCases")}</span>
           <span className={`btn btn--small ${view === "cve" ? "btn--primary" : "btn--secondary"}`} role="button" onClick={() => setView("cve")}>{t("ndv.sec.tabCve")}</span>
+          <span className={`btn btn--small ${view === "audit" ? "btn--primary" : "btn--secondary"}`} role="button" onClick={() => setView("audit")}>{t("ndv.sec.tabAudit")}</span>
         </div>
         {view === "cases" && (
           <>
@@ -339,6 +352,7 @@ export function SecWorkbench({ devices, hidden }: {
             )}
           </>
         )}
+        {view === "audit" && <AuditProjectPanel devices={devices} />}
         {view === "cve" && (
           <>
             <div className="ndv__card-title" style={{ fontSize: 11.5 }}>{t("ndv.sec.cveFeed")}</div>
@@ -475,7 +489,7 @@ export function SecWorkbench({ devices, hidden }: {
               {[...(current.entries ?? [])].reverse().map((e, i) => (
                 <div key={i} className={`ndv-sec__entry ndv-sec__entry--${e.kind}`}>
                   <span className="ndv-sec__entry-dot" style={{ background: KIND_COLOR[e.kind] ?? "var(--fg-faint)" }} />
-                  <span className="ndv-sec__entry-time">{String(e.time ?? "").replace("T", " ").slice(5, 19)}</span>
+                  <span className="ndv-sec__entry-time">{fmtEntryTime(String(e.time ?? ""))}</span>
                   <span className="ndv-sec__entry-kind" style={{ color: KIND_COLOR[e.kind] ?? "var(--fg-faint)" }}>{t(KIND_LABEL[e.kind] as never) ?? e.kind}{e.device ? `·${e.device}` : ""}</span>
                   <span className="ndv-sec__entry-text">{e.text}</span>
                   <span role="button" style={{ cursor: "pointer", opacity: 0.4, paddingLeft: 4 }} title={t("ndv.sec.deleteEntry")}

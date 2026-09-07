@@ -167,3 +167,46 @@ func TestWeakCredFindingLifecycle(t *testing.T) {
 		t.Fatal("same-tier pass did not resolve the alert")
 	}
 }
+
+// An unreachable device must NOT auto-resolve a CONFIRMED weak-cred finding:
+// dialAuth used to fold transport failures into (false, nil) — the same shape
+// as a clean rejection — so a full-budget "pass" that never reached the device
+// cleared the alert (复核通过 lied). The verdict is unknown; the finding stays.
+func TestWeakCredUnreachableDoesNotResolveFinding(t *testing.T) {
+	findingsDirOverr = filepath.Join(t.TempDir(), "findings")
+	t.Cleanup(func() { findingsDirOverr = "" })
+
+	cfg := config.Default()
+	cfg.NetDev = config.NetDevConfig{
+		Enabled: true,
+		Assessment: config.NetDevAssessment{
+			EngagementID: "ASSESS-UNREACH-1",
+			Scopes:       []string{"127.0.0.0/8"},
+			Expires:      time.Now().AddDate(0, 0, 1).Format("2006-01-02"),
+			Approver:     "tester",
+		},
+		Devices: []config.NetDevDevice{{
+			Name: "dead9", Vendor: "linux", Address: "127.0.0.1", Port: 1, Username: "root", PasswordEnv: "TEST_ENV",
+		}},
+	}
+	m := NewManager(cfg)
+	t.Cleanup(m.Close)
+
+	// A previously CONFIRMED basic-tier alert for that device.
+	m.fileWeakCredFinding(WeakCredResult{Device: "dead9", Tier: WeakTierBasic, Weak: true, Attempts: 1, Budget: weakBudgetBasic, Detail: "weak credential confirmed"})
+
+	res, err := m.WeakCredCheck(context.Background(), "dead9", WeakTierBasic, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Weak {
+		t.Fatal("unreachable device reported a weak credential")
+	}
+	if !strings.Contains(res.Detail, "unreachable") || !strings.Contains(res.Detail, "unknown") {
+		t.Fatalf("detail = %q — must state the verdict is unknown", res.Detail)
+	}
+	fs, _ := ListFindings()
+	if len(fs) != 1 || fs[0].Status != "active" {
+		t.Fatalf("finding auto-resolved by an unreachable re-check: %+v", fs)
+	}
+}

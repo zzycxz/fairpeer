@@ -72,6 +72,93 @@ func readPartFromDocx(t *testing.T, path, name string) string {
 	return ""
 }
 
+// TestDocTemplateParagraphReplaceCountsSelfClosingP guards the audit case:
+// docxwrite emits a self-closing <w:p/> after every table, and doc_read COUNTS
+// it as a paragraph. applyParagraphReplace used to skip it, so every paragraph
+// after a table carried an index one lower than doc_read reported — replacing
+// "doc_read index 2" hit the paragraph doc_read called 1 (or nothing at all).
+func TestDocTemplateParagraphReplaceCountsSelfClosingP(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "tpl.docx")
+	dst := filepath.Join(dir, "out.docx")
+	// Body shaped like docxwrite output: paragraph, table, the mandatory
+	// <w:p/> after it, then two more paragraphs.
+	bodyXML := `<w:p><w:r><w:t>intro</w:t></w:r></w:p>` +
+		`<w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>` +
+		`<w:p/>` +
+		`<w:p><w:r><w:t>after-table</w:t></w:r></w:p>` +
+		`<w:p><w:r><w:t>last</w:t></w:r></w:p>`
+	makeTemplateDocx(t, src, bodyXML)
+
+	// What doc_read reports: the empty <w:p/> consumes index 1, so
+	// "after-table" is paragraph 2 and "last" is 3.
+	blocks := parseBlocks([]byte(bodyXML))
+	wantIdx := map[string]int{}
+	for _, b := range blocks {
+		if b.Type == "paragraph" && b.Index != nil {
+			wantIdx[b.Text] = *b.Index
+		}
+	}
+	if wantIdx["intro"] != 0 || wantIdx["after-table"] != 2 || wantIdx["last"] != 3 {
+		t.Fatalf("doc_read indexes changed: %+v (want intro=0, after-table=2, last=3)", wantIdx)
+	}
+
+	// paragraph_replace using doc_read's numbering must hit that paragraph.
+	args := mustJSONArgs(t, map[string]any{
+		"source": src,
+		"path":   dst,
+		"paragraph_replace": []map[string]any{
+			{"index": wantIdx["after-table"], "text": "REPLACED"},
+		},
+	})
+	if _, err := (docWrite{}).Execute(context.Background(), args); err != nil {
+		t.Fatalf("paragraph_replace failed: %v", err)
+	}
+	body := readPartFromDocx(t, dst, "word/document.xml")
+	if !strings.Contains(body, "REPLACED") {
+		t.Fatalf("replacement missing; body:\n%s", body)
+	}
+	if strings.Contains(body, "after-table") {
+		t.Fatalf("doc_read paragraph %d was NOT replaced (index divergence); body:\n%s", wantIdx["after-table"], body)
+	}
+	// The empty <w:p/> itself must survive (still a structural paragraph).
+	if !strings.Contains(body, "<w:p/>") {
+		t.Fatalf("self-closing <w:p/> lost; body:\n%s", body)
+	}
+}
+
+// TestApplyParagraphReplace_SelfClosingPCounted is the unit-level view of the
+// same fix: applyParagraphReplace's paragraph counter must agree with
+// parseBlocks' on a body containing <w:p/> after a table.
+func TestApplyParagraphReplace_SelfClosingPCounted(t *testing.T) {
+	body := []byte(`<w:p><w:r><w:t>a</w:t></w:r></w:p>` +
+		`<w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>` +
+		`<w:p/>` +
+		`<w:p><w:r><w:t>b</w:t></w:r></w:p>`)
+	// parseBlocks: a=0, <w:p/>=1 (consumed), b=2.
+	blocks := parseBlocks(body)
+	var idxB int = -1
+	for _, blk := range blocks {
+		if blk.Text == "b" && blk.Index != nil {
+			idxB = *blk.Index
+		}
+	}
+	if idxB != 2 {
+		t.Fatalf("parseBlocks gave b index %d, want 2", idxB)
+	}
+	out := applyParagraphReplace(body, []paragraphReplaceOp{{Index: idxB, Text: "B2"}})
+	got := string(out)
+	if strings.Contains(got, ">b<") {
+		t.Fatalf("replace at doc_read index %d did not hit paragraph b; output:\n%s", idxB, got)
+	}
+	if !strings.Contains(got, "B2") {
+		t.Fatalf("replacement text missing; output:\n%s", got)
+	}
+	if !strings.Contains(got, ">a<") || !strings.Contains(got, ">cell<") {
+		t.Fatalf("untargeted text must be preserved; output:\n%s", got)
+	}
+}
+
 // TestDocTemplateOmitsPathAutoCopy verifies that when `path` is omitted, the
 // tool generates a "<name>-filled.docx" alongside the source and fills it.
 // This is the default "fill my word" behavior — the user gets a filled copy,

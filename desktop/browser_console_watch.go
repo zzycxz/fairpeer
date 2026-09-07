@@ -29,6 +29,8 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/zzycxz/fairpeer/internal/tool/builtin"
+	"github.com/zzycxz/fairpeer/internal/netdev"
+	"github.com/zzycxz/fairpeer/internal/config"
 )
 
 // --- time range preview -------------------------------------------------------
@@ -54,6 +56,11 @@ type BrowserDownloadAnalysis struct {
 	CompromisedHosts []string `json:"compromised_hosts,omitempty"`
 	AttentionCount   int      `json:"attention_count,omitempty"`
 	Severity         string   `json:"severity,omitempty"`
+	// S4-1（SCENARIO_SPEC）：危险评分——研判按权威 rubric（internal/netdev
+	// AlertDangerSignalWeights）打分，分级驱动通知路由与夜班静默。
+	DangerScore   int      `json:"danger_score,omitempty"`
+	DangerBand    string   `json:"danger_band,omitempty"`
+	DangerSignals []string `json:"danger_signals,omitempty"`
 }
 
 // alertVerdict is the machine-readable conclusion parsed from the report's
@@ -69,6 +76,22 @@ type alertVerdict struct {
 	Severity         string   `json:"最高等级"`
 	Notify           bool     `json:"需通知"`
 	Reason           string   `json:"通知理由"`
+	// S4-1：模型按 rubric 报告的评分结论（分值缺失时由 dangerScore() 兜底重算）。
+	DangerSignals []string `json:"危险信号"`
+	DangerScore   int      `json:"危险评分"`
+	SuggestedAct  string   `json:"建议动作"`
+}
+
+// dangerScore 兜底：模型漏报分值时按权威 rubric 权重对命中信号求和。
+func (v alertVerdict) dangerScore() int {
+	if v.DangerScore > 0 {
+		return v.DangerScore
+	}
+	sum := 0
+	for _, sig := range v.DangerSignals {
+		sum += netdev.AlertDangerSignalWeights[strings.TrimSpace(sig)]
+	}
+	return sum
 }
 
 // findings returns the round's confirmed-compromised hosts (alerts kind) or
@@ -150,6 +173,9 @@ func (a *App) BrowserConsoleAnalyzeDownload(path, analysisKind string) (BrowserD
 	out := BrowserDownloadAnalysis{File: filepath.Base(path), Rows: total, ShownRows: shown, Report: report}
 	if v, ok := parseAlertVerdict(report); ok {
 		out.CompromisedHosts, out.AttentionCount, out.Severity = v.findings(), v.attention(), v.Severity
+		out.DangerScore = v.dangerScore()
+		out.DangerBand = netdev.AlertDangerBand(out.DangerScore)
+		out.DangerSignals = v.DangerSignals
 	}
 	return out, nil
 }
@@ -201,14 +227,17 @@ const alertTriageSystemPrompt = `你是网络安全告警研判助手。用户�
 
 ` + "报告正文结束后，必须另起一行输出一个 ```json 代码块（机器可读结论，用于通知路由），格式示例：\n" +
 	"```json\n" +
-	`{"失陷主机": ["10.0.0.5"], "需关注告警数": 3, "最高等级": "high", "需通知": true, "通知理由": "SSH 爆破成功且出现外联"}` + "\n" +
+	`{"失陷主机": ["10.0.0.5"], "需关注告警数": 3, "最高等级": "high", "需通知": true, "通知理由": "SSH 爆破成功且出现外联", "危险信号": ["失陷确认", "横向移动"], "危险评分": 65, "建议动作": "立即隔离 10.0.0.5 并排查横向移动目标"}` + "\n" +
 	"```\n" + `
 字段要求：
 - 失陷主机: 仅列"有明确失陷证据（爆破成功+异常外联/提权/落盘等）"的 IP 数组；没有确凿证据就给空数组，宁可漏报不可误报
 - 需关注告警数: 「需关注告警」表格的行数（整数）
 - 最高等级: critical|high|medium|low|none（本次需关注告警中的最高）
 - 需通知: 是否建议立即通知安全负责人（布尔）
-- 通知理由: 一句话`
+- 通知理由: 一句话
+- 危险信号: 命中的信号数组，取值仅限【失陷确认|横向移动|暴露critical资产|可利用性】四项（依据"需关注告警"行证据判定；没命中给空数组）
+- 危险评分: 命中信号权重之和（权威评分表：失陷确认=40、横向移动=25、暴露critical资产=20、可利用性=15；分级 ≥70 critical / 40-69 warning / <40 info）——只按权重求和，不要自定分值
+- 建议动作: 一句话给出最高优先级的处置动作`
 
 // genericTableAnalysisPrompt is the skill-agnostic counterpart: any exported
 // table (inventory, orders, logs, monitor data…) gets a structured read with
@@ -273,7 +302,13 @@ type BrowserConsoleWatchRound struct {
 	CompromisedHosts []string `json:"compromised_hosts,omitempty"`
 	AttentionCount   int      `json:"attention_count,omitempty"`
 	Severity         string   `json:"severity,omitempty"`
-	Notified         []string `json:"notified,omitempty"` // im|email|system
+	// S4-1：危险评分/分级/命中信号（rubric 见 internal/netdev/alertrubric.go）。
+	DangerScore   int      `json:"danger_score,omitempty"`
+	DangerBand    string   `json:"danger_band,omitempty"`
+	DangerSignals []string `json:"danger_signals,omitempty"`
+	// S4-2：夜班窗口内被静默（轮次照常入档，晨报补账）。
+	NightSilenced bool     `json:"night_silenced,omitempty"`
+	Notified      []string `json:"notified,omitempty"` // im|email|system
 	NotifyError      string   `json:"notify_error,omitempty"`
 }
 
@@ -708,12 +743,46 @@ func (a *App) runWatchRound(cfg BrowserConsoleWatchConfig, scheduled time.Time) 
 	round.CompromisedHosts = analysis.CompromisedHosts
 	round.AttentionCount = analysis.AttentionCount
 	round.Severity = analysis.Severity
+	round.DangerScore, round.DangerBand, round.DangerSignals = analysis.DangerScore, analysis.DangerBand, analysis.DangerSignals
 	round.Status = "done"
 	// Verdict-gated delivery: "确认失陷主机才通知" (alerts) / "发现关键结论才通知"
 	// (generic) is OnEvent=compromised — the round only reaches the 负责人
 	// when the analysis actually confirmed findings (or per policy).
 	a.deliverWatchNotification(cfg, &round)
 	finish()
+}
+
+// watchNightGate reports (band, nightMin, active) for the [netdev.alerts]
+// night window ("22:00-07:00", may cross midnight). Empty window ⇒ inactive.
+func (a *App) watchNightGate() (band string, min string, active bool) {
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return "", "critical", false
+	}
+	w := strings.TrimSpace(cfg.NetDev.Alerts.NightWindow)
+	if w == "" {
+		return "", cfg.NetDev.Alerts.NightMinOrDefault(), false
+	}
+	parts := strings.Split(w, "-")
+	if len(parts) != 2 {
+		return "", cfg.NetDev.Alerts.NightMinOrDefault(), false
+	}
+	var h1, m1, h2, m2 int
+	if _, err := fmt.Sscanf(parts[0], "%d:%d", &h1, &m1); err != nil {
+		return "", cfg.NetDev.Alerts.NightMinOrDefault(), false
+	}
+	if _, err := fmt.Sscanf(parts[1], "%d:%d", &h2, &m2); err != nil {
+		return "", cfg.NetDev.Alerts.NightMinOrDefault(), false
+	}
+	now := time.Now()
+	cur := now.Hour()*60 + now.Minute()
+	s, e := h1*60+m1, h2*60+m2
+	if s <= e {
+		active = cur >= s && cur < e
+	} else { // 跨午夜
+		active = cur >= s || cur < e
+	}
+	return "window", cfg.NetDev.Alerts.NightMinOrDefault(), active
 }
 
 // deliverWatchNotification evaluates the watch's notify policy against the
@@ -724,6 +793,14 @@ func (a *App) deliverWatchNotification(cfg BrowserConsoleWatchConfig, round *Bro
 		CompromisedHosts: round.CompromisedHosts,
 		AttentionAlerts:   round.AttentionCount,
 	}) || round.Status != "done" || round.Analysis == "" {
+		return
+	}
+	// S4-2 夜班值守窗：窗口内低于 night_min 分级的通知静默（轮次入档，
+	// 晨报/简报补账）——夜班只叫人看高价值告警。
+	if band, min, inWindow := a.watchNightGate(); inWindow && netdev.AlertDangerRank(round.DangerBand) < netdev.AlertDangerRank(min) {
+		round.NightSilenced = true
+		round.Note = fmt.Sprintf("夜班静默（评分 %d/%s，窗口内最低打扰分级 %s）", round.DangerScore, round.DangerBand, min)
+		_ = band
 		return
 	}
 	generic := cfg.Analysis == watchAnalysisGeneric
@@ -808,6 +885,9 @@ func watchNotifySummary(cfg BrowserConsoleWatchConfig, round *BrowserConsoleWatc
 	if round.Severity != "" {
 		b.WriteString("（最高等级 " + round.Severity + "）")
 	}
+	if round.DangerBand != "" {
+		b.WriteString(fmt.Sprintf("［危险评分 %d/%s；命中: %s］", round.DangerScore, round.DangerBand, strings.Join(round.DangerSignals, "、")))
+	}
 	if round.Rows >= 0 {
 		b.WriteString("\n数据: " + round.DownloadName + fmt.Sprintf("（%d 行）", round.Rows))
 	} else {
@@ -873,6 +953,7 @@ func parseUserFlowSkill(raw string) ([]BrowserConsoleStep, map[string]string, er
 			Type: f.Type, Target: f.Target, URL: f.URL, Text: f.Text, Value: f.Value,
 			Direction: f.Direction, Amount: f.Amount, Condition: f.Condition,
 			TimeoutSec: f.TimeoutSec, Files: f.Files, Expression: f.Expression,
+			Control: f.Control,
 		})
 	}
 	return steps, parseSkillFrontmatterParams(raw), nil

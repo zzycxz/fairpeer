@@ -255,17 +255,20 @@ func fromWireAsk(a Ask) event.Ask {
 	return out
 }
 
-// FromWire decodes a wire event back into an event.Event so a desktop-side sink
-// can consume a remote host's stream exactly like a local controller's. It is
-// the inverse of ToWire; the only lossy fields are Pricing (its cost is
-// precomputed into Usage.Cost on the wire) and a TurnDone error's type (a
-// string error is rebuilt).
-func FromWire(w Event) event.Event {
-	e := event.Event{Text: w.Text, Reasoning: w.Reasoning}
-	if k, ok := wireKinds[w.Kind]; ok {
-		e.Kind = k
+// FromWireOK decodes a wire event back into an event.Event and reports whether
+// the wire kind maps to anything. ok=false means the kind is unmapped — a kind
+// this build predates, or one of the drop-listed names (Paused, Resumed, Item,
+// ExpertCollab) — and the caller MUST drop the event: event.Kind has no
+// "unknown" value (its zero is TurnStarted), so decoding it anyway fabricates a
+// phantom — most visibly a forwarded "paused" resurfacing as a turn restart.
+// In-repo consumers should prefer this over FromWire.
+func FromWireOK(w Event) (event.Event, bool) {
+	k, ok := wireKinds[w.Kind]
+	if !ok {
+		return event.Event{}, false
 	}
-	switch e.Kind {
+	e := event.Event{Kind: k, Text: w.Text, Reasoning: w.Reasoning}
+	switch k {
 	case event.Notice:
 		if w.Level == "warn" {
 			e.Level = event.LevelWarn
@@ -333,6 +336,24 @@ func FromWire(w Event) event.Event {
 		e.RetryAttempt = w.RetryAttempt
 		e.RetryMax = w.RetryMax
 		e.RetryAfterMs = w.RetryAfterMs
+	}
+	return e, true
+}
+
+// FromWire decodes a wire event back into an event.Event so a desktop-side sink
+// can consume a remote host's stream exactly like a local controller's. It is
+// the inverse of ToWire; the only lossy fields are Pricing (its cost is
+// precomputed into Usage.Cost on the wire) and a TurnDone error's type (a
+// string error is rebuilt).
+//
+// For an unmapped wire kind it returns the zero Event — which still carries
+// Kind TurnStarted, since event.Kind has no unknown value. A FromWire caller
+// therefore cannot distinguish "drop" from "turn started"; it must migrate to
+// FromWireOK, whose ok=false is the explicit drop signal.
+func FromWire(w Event) event.Event {
+	e, ok := FromWireOK(w)
+	if !ok {
+		return event.Event{}
 	}
 	return e
 }

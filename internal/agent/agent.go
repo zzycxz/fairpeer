@@ -321,7 +321,10 @@ type Agent struct {
 	// succeeded in this user turn. This catches the complementary loop shape to
 	// stormSig: a model keeps doing the same successful write, so there is no
 	// error for the failure-only storm breaker to see.
-	repeatSuccessCounts map[string]int
+	// repeatMu guards it: writer batches with disjoint preview paths execute
+	// concurrently (runParallel), so record/block fire from parallel goroutines.
+	repeatMu             sync.Mutex
+	repeatSuccessCounts  map[string]int
 	// repeatText detects streamed-output repetition (the same passage emitted
 	// over and over) within a single answer. Advisory only: it surfaces a
 	// Notice on detection, it never aborts the turn — distinct from the
@@ -809,7 +812,9 @@ func (a *Agent) Run(ctx context.Context, input any) error {
 	if a.evidence != nil {
 		a.evidence.Reset()
 	}
+	a.repeatMu.Lock()
 	a.repeatSuccessCounts = nil
+	a.repeatMu.Unlock()
 	a.repeatText.reset()
 	a.repeatTextWarned = false
 	if a.opGate != nil {
@@ -890,6 +895,23 @@ func (a *Agent) Run(ctx context.Context, input any) error {
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
 		}
 
+		// Keep reasoning_content on the assistant turn for display and session
+		// archive. It is NOT re-uploaded to the API: the openai provider drops it
+		// when building the request, since re-sent reasoning is billable prompt
+		// input for no cache or coherence gain. This must be persisted BEFORE any
+		// interceptor appends tool-role messages for the turn's calls: the API
+		// contract is assistant tool_calls first, then their results, and the
+		// session is the JSONL — persisting results without their calls stores
+		// orphans every later request this session replays (and OpenAI/Anthropic
+		// reject with a 400 on sight).
+		a.session.Add(provider.Message{
+			Role:               provider.RoleAssistant,
+			Content:            text,
+			ReasoningContent:   reasoning,
+			ReasoningSignature: signature,
+			ToolCalls:          calls,
+		})
+
 		// Truncation safety: a "length"/"repetition_truncation" finish means the
 		// output was cut off mid-generation, so a tool call's JSON arguments may be
 		// half-written (e.g. edit_file old_string ends mid-token). Executing such a
@@ -898,25 +920,13 @@ func (a *Agent) Run(ctx context.Context, input any) error {
 		// every call in the turn instead, persist the tool-role messages so the next
 		// round re-injects the failure, and loop so the model retries. content_filter
 		// is excluded: the call args are complete, only the text was filtered.
-		// Truncation safety interceptor (spec 3-11): a "length" finish means
-		// tool-call args are truncated mid-token. Fail every call, persist the
-		// tool-role messages, and loop so the model retries.
+		// The assistant message above already carries the (possibly truncated)
+		// calls, so the skip results this appends pair with them — the model sees
+		// why its calls failed instead of a history with orphans.
 		if (truncationInterceptor{agent: a}).intercepted(calls, usage) {
 			a.maybeCompact(ctx, usage)
 			continue
 		}
-
-		// Keep reasoning_content on the assistant turn for display and session
-		// archive. It is NOT re-uploaded to the API: the openai provider drops it
-		// when building the request, since re-sent reasoning is billable prompt
-		// input for no cache or coherence gain.
-		a.session.Add(provider.Message{
-			Role:               provider.RoleAssistant,
-			Content:            text,
-			ReasoningContent:   reasoning,
-			ReasoningSignature: signature,
-			ToolCalls:          calls,
-		})
 
 		if len(calls) == 0 {
 			// Pre-answer interceptor chain (spec 3-11): readiness (todo/
@@ -1377,6 +1387,11 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 			}
 		case provider.ChunkToolCall:
 			partialToolStarted = true
+			// A provider that emits a nil ToolCall here would panic the whole
+			// turn; the Start branch above already guards the same shape.
+			if chunk.ToolCall == nil {
+				continue
+			}
 			calls = append(calls, *chunk.ToolCall)
 		case provider.ChunkToolArgsDelta:
 			partialToolStarted = true
@@ -1790,7 +1805,18 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall, preview 
 		}
 	}
 	if a.gate != nil {
-		allow, reason, err := a.gate.Check(ctx, call.Name, json.RawMessage(call.Arguments), t.ReadOnly())
+		// Two-lock synthesis (WRITE_AUTHZ_SPEC §2.3): a statically read-only
+		// tool can flag specific WRITER calls via ReadOnlyCallChecker — the
+		// gate then applies the writer fallback (mode) to just those calls.
+		// netdev_exec uses this so auto-tier device writes follow the dialog
+		// mode while reads never prompt.
+		readOnly := t.ReadOnly()
+		if readOnly {
+			if rc, ok := t.(tool.ReadOnlyCallChecker); ok && !rc.ReadOnlyCall(json.RawMessage(call.Arguments)) {
+				readOnly = false
+			}
+		}
+		allow, reason, err := a.gate.Check(ctx, call.Name, json.RawMessage(call.Arguments), readOnly)
 		if err != nil {
 			return toolOutcome{
 				output:  fmt.Sprintf("blocked: %s (%v)", reason, err),
@@ -1961,7 +1987,12 @@ func extractImageAttachments(s string) []event.Attachment {
 
 func (a *Agent) repeatedSuccessBlock(call provider.ToolCall, t tool.Tool) (string, bool) {
 	sig, ok := repeatSuccessSignature(call, t)
-	if !ok || a.repeatSuccessCounts == nil {
+	if !ok {
+		return "", false
+	}
+	a.repeatMu.Lock()
+	defer a.repeatMu.Unlock()
+	if a.repeatSuccessCounts == nil {
 		return "", false
 	}
 	count := a.repeatSuccessCounts[sig]
@@ -1978,6 +2009,8 @@ func (a *Agent) recordRepeatSuccess(call provider.ToolCall, t tool.Tool) {
 	if !ok {
 		return
 	}
+	a.repeatMu.Lock()
+	defer a.repeatMu.Unlock()
 	if a.repeatSuccessCounts == nil {
 		a.repeatSuccessCounts = make(map[string]int)
 	}

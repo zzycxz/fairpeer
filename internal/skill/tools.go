@@ -80,6 +80,16 @@ var flowRunner FlowRunner
 // without browser tools) makes executor-routed skills error clearly.
 func SetFlowRunner(fn FlowRunner) { flowRunner = fn }
 
+// RunFlow executes an executor:browser-flow skill through the wired runner.
+// Exported for boot-level guard tests (netdev keeps the runner wired per
+// BROWSER_OFFICE_MIGRATION_SPEC invariant 2).
+func RunFlow(ctx context.Context, sk Skill, arguments string) (string, error) {
+	if flowRunner == nil {
+		return "", fmt.Errorf("run_skill: skill %q declares executor: browser-flow but no flow runner is configured (browser tools are profile-gated)", sk.Name)
+	}
+	return flowRunner(ctx, sk, arguments)
+}
+
 // ExecutorBrowserFlow is the frontmatter value that routes a skill to the
 // deterministic step-table runner instead of an LLM loop.
 const ExecutorBrowserFlow = "browser-flow"

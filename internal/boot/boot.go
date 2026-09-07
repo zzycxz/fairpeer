@@ -465,6 +465,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// the skill store scans, so the just-released skill is discovered this run.
 	// Best-effort: a failure is logged but never aborts startup, since the user
 	// may already have a working skill from a prior release or a manual install.
+	_ = assets.MigratePPTProjects() // G2-6：产物出技能树 + 钉死新址（best-effort）
 	if err := assets.EnsurePPTAutoSkill(); err != nil {
 		slog.Warn("assets: failed to release embedded ppt-auto skill", "err", err)
 	}
@@ -652,18 +653,20 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// from the main loop via reg.Hide, so registering them unconditionally
 	// doesn't pollute the dev tool list, but allows subagents to work anywhere).
 	profileKey := config.ProfileNameKey(profileName(opts.Profile))
-	if profileKey == config.ProfileCowork || profileKey == config.ProfileNetDev { // Browser automation tools (cowork + netdev: the ops console's
-		// browser tab shares this session infrastructure, and the netdev
-		// profile whitelists browser-auto as the generic fallback — the
-		// routing rows say site-specific browser-ops skills win first).
-		// Hidden from the main loop's schema: the model drives the browser
-		// through run_skill("browser-auto") subagents (reached via
-		// FilterRegistry) or executor: browser-flow skills (kernel step
-		// runner). This keeps the browser tool schemas out of every turn.
+	if profileKey == config.ProfileCowork || profileKey == config.ProfileNetDev {
+		// 浏览器归属办公（用户定稿 2026-09-06）——本分支的注册面按 profile 分层：
+		// · cowork：完整注册（工具 schema 进 Registry 但 Hide——browser-auto
+		//   子代理经 FilterRegistry 取用；主循环提示词零成本）。
+		// · netdev：仅接线浏览器路径 + browser-flow 执行器（RunBrowserFlow 直调
+		//   builtin 工具结构体、不经 Registry）——迁移 SPEC 不变量 2：站点技能
+		//   （browser-IT-ops 等）在运维对话按名调用必须仍可执行；工具 schema
+		//   与 browser-auto 子代理面不再为运维注册。
 		builtin.SetConfiguredBrowserPath(cfg.Cowork.BrowserPath)
-		for _, t := range builtin.BrowserTools() {
-			reg.Add(t)
-			reg.Hide(t.Name())
+		if profileKey == config.ProfileCowork {
+			for _, t := range builtin.BrowserTools() {
+				reg.Add(t)
+				reg.Hide(t.Name())
+			}
 		}
 		// Deterministic executor for `executor: browser-flow` skills: run_skill
 		// routes those to the kernel step-table runner instead of an LLM
@@ -769,7 +772,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// reused by RAGContextFn below so auto-injection stays consistent.
 		ragEnabled := cfg.Cowork.RAGEnabledOrDefault()
 		if ragEnabled {
-			for _, t := range builtin.RAGTools() {
+			for _, t := range builtin.RAGTools(writeRoots) {
 				reg.Add(t)
 				reg.Hide(t.Name())
 			}
@@ -1394,20 +1397,20 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				return "", prepErr
 			}
 		}
-	defer run.Release()
-	// Step budget: a skill may declare its own cap (frontmatter max-steps:) for
-	// heavy subagents (ppt-auto); otherwise default to half the main loop's
-	// MaxSteps (floor 5), as before.
-	steps := maxSteps
-	if steps > 0 {
-		if steps /= 2; steps < 5 {
-			steps = 5
+		defer run.Release()
+		// Step budget: a skill may declare its own cap (frontmatter max-steps:) for
+		// heavy subagents (ppt-auto); otherwise default to half the main loop's
+		// MaxSteps (floor 5), as before.
+		steps := maxSteps
+		if steps > 0 {
+			if steps /= 2; steps < 5 {
+				steps = 5
+			}
 		}
-	}
-	if sk.MaxSteps > 0 {
-		steps = sk.MaxSteps
-	}
-		answer, err := agent.RunSubAgentWithSession(sctx, prov, subReg, run.Session, task, agent.Options{
+		if sk.MaxSteps > 0 {
+			steps = sk.MaxSteps
+		}
+		subOpts := agent.Options{
 			MaxSteps:      steps,
 			Temperature:   cfg.Agent.Temperature,
 			Pricing:       price,
@@ -1416,9 +1419,26 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			ArchiveDir:    config.ArchiveDir(),
 			PreEditHook:   subagentPreEdit.Fire,
 			PostEditHook:  subagentPostEdit.Fire,
-		}, agent.NestedSink(sctx, event.Discard))
+		}
+		// L4 合同后校验（SKILL_ORCHESTRATION_SPEC §11-L4）：工具面含
+		// netdev_finding 的编排子代理受"立案先行才作答"合同约束——作答时
+		// finding 代数未动 = 违约。先打回补一轮（子代理保留上下文，续跑
+		// 而非重跑），仍违约则在结果上显式标记——用代码验证 LLM 的合同
+		// 履行，不信任它读过手册。
+		hasFinding := skill.RequiresFindingsContract(sk)
+		genBefore := netdev.FindingGen()
+		answer, err := agent.RunSubAgentWithSession(sctx, prov, subReg, run.Session, task, subOpts, agent.NestedSink(sctx, event.Discard))
 		if err != nil {
 			return "", errors.Join(err, subagentStore.SaveFailed(run))
+		}
+		if hasFinding && netdev.FindingGen() == genBefore {
+			nudge := "你违反了输出合同：作答前必须先完成 netdev_finding 立案（每条结论带证据），但本次运行没有新增任何立案。现在按任务补齐立案，然后重新给出最终答复（摘要/覆盖率/Top 风险/续跑指引）。"
+			if nudgeAns, nerr := agent.RunSubAgentWithSession(sctx, prov, subReg, run.Session, nudge, subOpts, agent.NestedSink(sctx, event.Discard)); nerr == nil {
+				answer = nudgeAns
+			}
+			if netdev.FindingGen() == genBefore {
+				answer = "[合同违约·已标记] 本次 sweep 未立案即作答，补立案后仍未立案——以下答复未经立案背书，请人工核验：\n\n" + answer
+			}
 		}
 		if err := subagentStore.SaveCompleted(run); err != nil {
 			return "", errors.Join(err, subagentStore.SaveFailed(run))
@@ -2181,14 +2201,22 @@ var netdevExcludedToolPrefixes = []string{
 // whitelist written before a rename keeps working instead of silently losing
 // its grip on the renamed skill.
 var legacySkillRenames = map[string]string{
-	"computer-auto": "desktop-auto", // renamed 2026-08: GUI-only scope
+	"computer-auto": "desktop-auto",   // renamed 2026-08: GUI-only scope
 	"rag-auto":      "knowledge-auto", // renamed 2026-08: name said the tech (RAG), not the job (knowledge base)
 }
 
-// normalizeSkillName applies legacySkillRenames (case-insensitive) and returns
-// the empty string for unrenamed names.
+// normalizeSkillName applies legacy renames (case-insensitive) and returns
+// the empty string for unrenamed names. The netdev merge aliases live in the
+// skill package (skillAliases — the store-level table that also keeps old-name
+// run_skill/slash/replay working) and are consulted FIRST so config lists and
+// interactive lookups share one source of truth (SKILL_ORCHESTRATION_SPEC
+// §3.5-E).
 func normalizeSkillName(name string) string {
-	if v, ok := legacySkillRenames[strings.ToLower(strings.TrimSpace(name))]; ok {
+	key := strings.ToLower(strings.TrimSpace(name))
+	if v := skill.ResolveSkillAlias(key); v != "" {
+		return v
+	}
+	if v, ok := legacySkillRenames[key]; ok {
 		return v
 	}
 	return ""
@@ -2258,9 +2286,10 @@ var builtinBuiltinSkillNames = []string{
 	"email-auto", "knowledge-auto", "schedule-auto",
 	"document-auto", "expert-auto",
 	"netdev-help",
-	"netdev-playbook",
-	"netdev-diag-ospf", "netdev-diag-bgp", "netdev-diag-interface",
-	"netdev-vulnscan",
+	"netdev-seccheck-auto",
+	"netdev-diag-auto",
+	"netdev-config-vault",
+	"netdev-draft",
 }
 
 // profileSkillWhitelist returns the profile's EnabledSkills as a SkillNameKey set,

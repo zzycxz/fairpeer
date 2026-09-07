@@ -132,9 +132,11 @@ func ReadInboxFor(cfg config.IMAPConfig, mailbox string, limit int, unreadOnly b
 	if limit <= 0 {
 		limit = 30
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return imapRead(ctx, cfg, mailbox, limit, unreadOnly, false, time.Time{}, time.Time{})
+	// withBody=true：预览文本与附件元数据都从 MIME 正文里解析——此前传
+	// false，dock 邮件页签点开任何一封预览都是空的（envelope 里没有正文）。
+	return imapRead(ctx, cfg, mailbox, limit, unreadOnly, true, time.Time{}, time.Time{})
 }
 
 // ProbeIMAPConfig verifies a standalone IMAP config can connect + log in +
@@ -514,13 +516,22 @@ func parseMessage(msg *imap.Message) EmailMessage {
 	return m
 }
 
-// extractTextPreview parses a raw MIME message and returns the first ~500 chars
-// of its text/plain part (preferred) or text/html (tags stripped, fallback).
+// extractTextPreview parses a raw MIME message and returns the first ~2000 chars
+// of its text/plain part (or text/html stripped, fallback).
 func extractTextPreview(raw []byte) string {
+	return extractTextCapped(raw, 2000)
+}
+
+// extractTextCapped returns up to maxChars characters of the message's text:
+// text/plain preferred, first text/* part (HTML stripped) as fallback — the
+// same MIME walk extractTextPreview has always done, with the cap as a
+// parameter so the dock's reading pane can request the whole letter. Malformed
+// MIME degrades to a raw slice.
+func extractTextCapped(raw []byte, maxChars int) string {
 	mr, err := mail.CreateReader(strings.NewReader(string(raw)))
 	if err != nil {
 		// Not a parseable MIME message — return a raw slice.
-		return truncatePreview(strings.TrimSpace(string(raw)), 500)
+		return truncatePreview(strings.TrimSpace(string(raw)), maxChars)
 	}
 	defer mr.Close()
 	for {
@@ -531,7 +542,7 @@ func extractTextPreview(raw []byte) string {
 		ct := part.Header.Get("Content-Type")
 		if strings.HasPrefix(ct, "text/plain") {
 			data, _ := io.ReadAll(part.Body)
-			return truncatePreview(strings.TrimSpace(decodeBodyCharset(data, ct)), 2000)
+			return truncatePreview(strings.TrimSpace(decodeBodyCharset(data, ct)), maxChars)
 		}
 	}
 	// No text/plain found — fall back to first text part (html) stripped.
@@ -546,11 +557,138 @@ func extractTextPreview(raw []byte) string {
 			ct := part.Header.Get("Content-Type")
 			if strings.HasPrefix(ct, "text/") {
 				data, _ := io.ReadAll(part.Body)
-				return truncatePreview(strings.TrimSpace(stripHTMLText(decodeBodyCharset(data, ct))), 500)
+				return truncatePreview(strings.TrimSpace(stripHTMLText(decodeBodyCharset(data, ct))), maxChars)
 			}
 		}
 	}
 	return ""
+}
+
+// ReadMailFull fetches ONE message — the index-th newest in the exact window
+// InboxPreview/ReadInboxFor read (same mailbox aliases, same unread filter, same
+// newest-first order) — with its full plain-text body (capped) instead of the
+// list's 2000-char snippet. Powers the dock reading pane: the list stays cheap,
+// opening a letter pays one extra IMAP round trip. expectSubject/expectDate
+// (the list row's values) are verified against the fetched message so a mailbox
+// that changed between list load and click fails loudly instead of showing the
+// WRONG letter.
+func ReadMailFull(cfg config.IMAPConfig, mailbox string, limit, index int, expectSubject, expectDate string) (EmailMessage, error) {
+	if index < 0 {
+		return EmailMessage{}, fmt.Errorf("邮件序号越界：%d", index)
+	}
+	if limit <= 0 {
+		limit = 30
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	c, err := imapConnect(ctx, cfg)
+	if err != nil {
+		return EmailMessage{}, err
+	}
+	defer func() { _ = c.Logout() }()
+
+	mbox, err := selectMailboxRO(c, mailbox)
+	if err != nil {
+		return EmailMessage{}, err
+	}
+	criteria := &imap.SearchCriteria{}
+	if strings.TrimSpace(mailbox) != "Sent" && mbox == "INBOX" {
+		criteria.WithoutFlags = []string{imap.SeenFlag} // mirror InboxPreview: inbox is unread-only
+	}
+	seqs, err := c.Search(criteria)
+	if err != nil {
+		return EmailMessage{}, fmt.Errorf("search: %w", err)
+	}
+	if len(seqs) == 0 {
+		return EmailMessage{}, fmt.Errorf("邮箱为空，没有可读的邮件")
+	}
+	if len(seqs) > limit {
+		seqs = seqs[len(seqs)-limit:]
+	}
+	for i, j := 0, len(seqs)-1; i < j; i, j = i+1, j-1 {
+		seqs[i], seqs[j] = seqs[j], seqs[i] // newest-first, same as imapRead
+	}
+	if index >= len(seqs) {
+		return EmailMessage{}, fmt.Errorf("邮件序号越界：%d（列表共 %d 封）", index, len(seqs))
+	}
+
+	seqset := new(imap.SeqSet)
+	seqset.AddNum(seqs[index])
+	messages := make(chan *imap.Message, 1)
+	if err := c.Fetch(seqset, []imap.FetchItem{imap.FetchEnvelope, imap.FetchItem("BODY[]")}, messages); err != nil {
+		return EmailMessage{}, fmt.Errorf("fetch: %w", err)
+	}
+	msg, ok := <-messages
+	if !ok || msg == nil {
+		return EmailMessage{}, fmt.Errorf("邮件读取失败：服务器未返回该邮件")
+	}
+	m := parseMessageFull(msg, 64_000)
+	if expectSubject != "" && m.Subject != expectSubject {
+		return EmailMessage{}, fmt.Errorf("邮件列表已变化（主题不匹配），请刷新后重试")
+	}
+	if expectDate != "" && m.Date != expectDate {
+		return EmailMessage{}, fmt.Errorf("邮件列表已变化（时间不匹配），请刷新后重试")
+	}
+	return m, nil
+}
+
+// selectMailboxRO selects a mailbox read-only, falling back through the common
+// provider aliases (已发送/Sent Messages/…) for non-INBOX names — the same
+// sentinel logic imapRead carries, factored out so the single-message reader
+// doesn't grow a third copy.
+func selectMailboxRO(c *client.Client, mailbox string) (string, error) {
+	mbox := strings.TrimSpace(mailbox)
+	if mbox == "" {
+		mbox = "INBOX"
+	}
+	if _, err := c.Select(mbox, true); err != nil {
+		if mbox != "INBOX" {
+			bestMbox := ""
+			bestCount := -1
+			for _, alias := range []string{"已发送", "已发送邮件", "Sent Messages", "Sent", "[Gmail]/Sent Mail", "Drafts", "垃圾邮件"} {
+				if st, e := c.Select(alias, true); e == nil && st != nil {
+					if int(st.Messages) > bestCount {
+						bestCount = int(st.Messages)
+						bestMbox = alias
+					}
+				}
+			}
+			if bestMbox != "" {
+				if _, err := c.Select(bestMbox, true); err == nil {
+					return bestMbox, nil
+				}
+			}
+		}
+		return "", fmt.Errorf("select %s: %w", mbox, err)
+	}
+	return mbox, nil
+}
+
+// parseMessageFull is parseMessage with the body text capped at bodyCap chars
+// instead of the 2000-char preview — the reading pane fetches one message and
+// wants the whole (plain-text) letter. Attachments are extracted the same way.
+func parseMessageFull(msg *imap.Message, bodyCap int) EmailMessage {
+	m := EmailMessage{}
+	if env := msg.Envelope; env != nil {
+		m.From = formatAddresses(env.From)
+		m.To = formatAddresses(env.To)
+		m.Subject = decodeRFC2047(env.Subject)
+		if env.Date != (time.Time{}) {
+			m.rawDate = env.Date
+			m.Date = env.Date.Format(time.RFC3339)
+		}
+	}
+	var bodyBytes []byte
+	section := &imap.BodySectionName{}
+	r := msg.GetBody(section)
+	if r != nil {
+		bodyBytes, _ = io.ReadAll(r)
+	}
+	if len(bodyBytes) > 0 {
+		m.Preview = extractTextCapped(bodyBytes, bodyCap)
+		m.Attachments = extractAttachmentMeta(bodyBytes)
+	}
+	return m
 }
 
 // decodeBodyCharset converts a mail body part from its declared charset to

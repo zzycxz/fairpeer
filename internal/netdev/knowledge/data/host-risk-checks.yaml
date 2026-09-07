@@ -1,0 +1,25 @@
+# 本机风险检查表（H2 层数据，linpeas/Seatbelt 分组的蓝队化）——只列风险不利用，
+# 每项"阳性判据+误报回退"（P6 攻防同条目）。
+version: 1
+source: builtin
+checks:
+  - id: suid-binaries
+    os: [linux]
+    check: {linux: "find / -perm -4000 -type f 2>/dev/null | head -30"}
+    positive: "存在非常见路径的 SUID 二进制"
+    fallback: "全部在常规路径（passwd/sudo/mount 等）= 阴性记录"
+  - id: writable-service-paths
+    os: [windows]
+    check: {windows: "Get-CimInstance Win32_Service | Where-Object {$_.PathName -and $_.State -eq 'Running'} | Select-Object Name,PathName"}
+    positive: "服务可执行文件落在用户可写目录"
+    fallback: "全部在 Program Files/Windows = 阴性记录"
+  - id: patch-level
+    os: [linux, windows]
+    check: {linux: "uname -r && cat /etc/os-release", windows: "Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 5"}
+    positive: "内核/系统补丁明显落后（对照版本公告）"
+    fallback: "无法判断时 info 级'待人工核对'，不升级结论"
+  - id: sched-tasks
+    os: [windows]
+    check: {windows: "schtasks /query /fo LIST | findstr /i TaskName"}
+    positive: "非常规名称/路径的计划任务"
+    fallback: "仅系统默认任务 = 阴性记录"

@@ -17,6 +17,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 	"github.com/zzycxz/fairpeer/internal/netclient"
 	"github.com/zzycxz/fairpeer/internal/provider"
 )
@@ -774,7 +775,7 @@ func (c CoworkConfig) EmailAccountByName(name string) (EmailAccount, bool) {
 type BotAllowlist struct {
 	Enabled        bool     `toml:"enabled"`
 	AllowAll       bool     `toml:"allow_all"`
-	Mode           string   `toml:"mode"` // "open"（默认，自动加入）| "review"（需管理员审批）
+	Mode           string   `toml:"mode"` // "review"（默认，需管理员审批）| "open"（自动加入）
 	QQUsers        []string `toml:"qq_users"`
 	FeishuUsers    []string `toml:"feishu_users"`
 	WeixinUsers    []string `toml:"weixin_users"`
@@ -783,6 +784,13 @@ type BotAllowlist struct {
 	FeishuGroups   []string `toml:"feishu_groups"`
 	WeixinGroups   []string `toml:"weixin_groups"`
 	TelegramGroups []string `toml:"telegram_groups"`
+	// Admins 是可选的审批管理员（按平台）。为空时所有白名单用户都可使用
+	// 审批类命令（向后兼容）；配置后 /approve、/desktop approve|deny、
+	// /netdev 变更 批准|驳回 仅限管理员。
+	QQAdmins       []string `toml:"qq_admins"`
+	FeishuAdmins   []string `toml:"feishu_admins"`
+	WeixinAdmins   []string `toml:"weixin_admins"`
+	TelegramAdmins []string `toml:"telegram_admins"`
 }
 
 // QQBotConfig QQ 官方 Bot API v2 配置。
@@ -1582,7 +1590,7 @@ func Default() *Config {
 		Bot: BotConfig{
 			MaxSteps:   25,
 			DebounceMs: 1500,
-			Allowlist:  BotAllowlist{Enabled: true},
+			Allowlist:  BotAllowlist{Enabled: true, Mode: "review"},
 			QQ:         QQBotConfig{AppSecretEnv: "QQ_BOT_APP_SECRET"},
 			Feishu:     FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
 			Weixin:     WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
@@ -1995,7 +2003,7 @@ func migrateLegacyMCPTiersFile(path string) error {
 	if !changed {
 		return nil
 	}
-	return os.WriteFile(path, []byte(next), info.Mode().Perm())
+	return fileutil.AtomicWriteFile(path, []byte(next), info.Mode().Perm())
 }
 
 func stripLegacyMCPTierLines(raw string) (string, bool) {
@@ -2393,8 +2401,10 @@ func SourcePathForRoot(root string) string {
 }
 
 // WriteFile writes the configuration to path as annotated TOML.
+// Atomic (tmp+rename): a crash mid-write must not truncate the user's
+// fairpeer.toml — provider keys and pairing state live here.
 func (c *Config) WriteFile(path string) error {
-	return os.WriteFile(path, []byte(RenderTOMLForScope(c, renderScopeForPath(path))), 0o644)
+	return fileutil.AtomicWriteFile(path, []byte(RenderTOMLForScope(c, renderScopeForPath(path))), 0o644)
 }
 
 // Provider returns the named provider entry.

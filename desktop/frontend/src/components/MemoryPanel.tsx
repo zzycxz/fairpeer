@@ -1000,7 +1000,8 @@ export function MemorySettingsPage() {
 									onClick={() => void submitNote()}
 									disabled={busy || !note.trim()}
 								>
-							</button>
+									{t("memory.remember")}
+								</button>
 							</div>
 						</div>
 					</div>

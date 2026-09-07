@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { app } from "../../lib/bridge";
 import { useConfirm } from "../../lib/confirm";
+import { writeTierLabel } from "./WriteAuthLayer";
 import { useT } from "../../lib/i18n";
 import { useToast } from "../../lib/toast";
 import type {
@@ -66,11 +67,18 @@ export function NetDevSection() {
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {}, projects: [], presets: [], inspectionInterval: "", backupInterval: "", scheduledBaseline: false, dbSources: [], pollIntervalSeconds: 0, alertRules: [], syslogPort: 0, defaultMode: "", maxSessionsPerDevice: 0, discoveryRate: 0, discoveryMode: "", probeFallback: "", groupDefs: [], notifyWebhook: "", notifyFormat: "", notifyMinSeverity: "", notifyBotDest: "", notifySMTPHost: "", notifySMTPPort: 587, notifySMTPUser: "", notifySMTPFrom: "", notifySMTPTo: [], notifySMTPPassSet: false, briefingPushTime: "", weakCredDict: "" });
+  const [view, setView] = useState<NetDevSettingsView>({ enabled: false, networkName: "", devices: [], hops: [], groups: [], auditRetention: "", scopes: [], guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: [], extraRead: {}, projects: [], presets: [], inspectionInterval: "", backupInterval: "", backupGitMirror: false, scheduledBaseline: false, dbSources: [], pollIntervalSeconds: 0, alertRules: [], syslogPort: 0, defaultMode: "", maxSessionsPerDevice: 0, discoveryRate: 0, discoveryMode: "", probeFallback: "", groupDefs: [], notifyWebhook: "", notifyFormat: "", notifyMinSeverity: "", notifyBotDest: "", notifySMTPHost: "", notifySMTPPort: 587, notifySMTPUser: "", notifySMTPFrom: "", notifySMTPTo: [], notifySMTPPassSet: false, briefingPushTime: "", weakCredDict: "" });
   const [sub, setSub] = useState<SubTab>("inventory");
   const [editingDevice, setEditingDevice] = useState<EditDevice | null>(null);
   const [editingDB, setEditingDB] = useState<NetDevDBSourceView | null>(null);
   const [editingRule, setEditingRule] = useState<NetDevAlertRuleView | null>(null);
+  // 各编辑态的“原名”：编辑已有实体时记下打开时的名字，保存按原名替换——
+  // 若按改名后的名字做存在性判断，重命名会被当成新增，旧实体残留成重复项。
+  // 空串 = 新增（此时按当前名字去重，行为与原来一致）。
+  const [editingDeviceOrig, setEditingDeviceOrig] = useState("");
+  const [editingDBOrig, setEditingDBOrig] = useState("");
+  const [editingRuleOrig, setEditingRuleOrig] = useState("");
+  const [editingHopOrig, setEditingHopOrig] = useState("");
   // notifySMTPPassword lives outside `view`: write-only, never round-trips.
   const [notifySMTPPassword, setNotifySMTPPassword] = useState("");
   const [notifyTesting, setNotifyTesting] = useState(false);
@@ -111,6 +119,10 @@ export function NetDevSection() {
         projects: v.projects ?? [],
         presets: v.presets ?? [],
       });
+      // WRITE_AUTHZ：记录"服务端现状"的组写档（放宽检测的比对基准）+ 锁状态
+      // 徽标数据。tierState 失败静默——徽标是增强显示，不阻塞设置页。
+      origGroupWrite.current = Object.fromEntries((v.groupDefs ?? []).map(g => [g.name, g.write ?? ""]));
+      app.NetDevWriteTierState().then(st => setTierRows(st?.rows ?? [])).catch(() => {});
       setErr("");
     } catch (e) {
       setErr(String(e));
@@ -123,7 +135,30 @@ export function NetDevSection() {
   useEffect(() => { app.NetDevSyslogStatus().then(setSyslogStatus).catch(() => {}); }, [view.syslogPort]);
   useEffect(() => { app.NetDevTrapStatus().then(setTrapStatus).catch(() => {}); }, []);
 
+  // ── WRITE_AUTHZ（spec §5）：放宽告警确认 + 锁徽标 ─────────────────────────
+  const origGroupWrite = useRef<Record<string, string>>({});
+  const [tierRows, setTierRows] = useState<{ device: string; configured: string; confirmed: string; effective: string; clamped: boolean }[]>([]);
+  // pending = 因待确认的放宽被拦下的整份设置；groups = 被放宽的组（含目标档）。
+  const [widenPending, setWidenPending] = useState<{ view: NetDevSettingsView; groups: { name: string; tier: string }[] } | null>(null);
+  const [widenTyped, setWidenTyped] = useState("");
+
+  const tierRank = (t?: string) => (t === "auto" ? 2 : t === "confirm" ? 1 : 0);
+
   const save = useCallback(async (v: NetDevSettingsView) => {
+    // 放宽检测（spec §5.1）：任一组的写档比服务端现状更宽 → 先弹告警确认，
+    // 不直接落盘。确认后落盘 + 为每个成员设备记录 ConfirmWriteTier。
+    const widened: { name: string; tier: string }[] = [];
+    for (const g of v.groupDefs ?? []) {
+      const from = origGroupWrite.current[g.name] ?? "";
+      if (tierRank(g.write ?? "") > tierRank(from) && (g.write ?? "") !== from) {
+        widened.push({ name: g.name, tier: g.write ?? "" });
+      }
+    }
+    if (widened.length > 0) {
+      setWidenPending({ view: v, groups: widened });
+      setWidenTyped("");
+      return;
+    }
     setBusy(true);
     try {
       await app.SetNetDevSettings(v);
@@ -137,6 +172,31 @@ export function NetDevSection() {
       setBusy(false);
     }
   }, [reload, t]);
+
+  // confirmWiden：仪式完成（auto 档逐组输入组名）→ 落盘 + 记录确认。
+  const confirmWiden = useCallback(async () => {
+    if (!widenPending) return;
+    const { view: v, groups } = widenPending;
+    setWidenPending(null);
+    setBusy(true);
+    try {
+      await app.SetNetDevSettings(v);
+      for (const g of groups) {
+        for (const d of v.devices ?? []) {
+          if ((d.group ?? "") === g.name) {
+            await app.NetDevConfirmWriteTier(d.name, g.tier).catch(() => {});
+          }
+        }
+      }
+      await reload();
+      showToast(t("common.save"), "info");
+    } catch (e) {
+      setErr(String(e));
+      showToast(t("entityEdit.saveFailed"), "error");
+    } finally {
+      setBusy(false);
+    }
+  }, [widenPending, reload, t]);
 
   const patch = (p: Partial<NetDevSettingsView>) => setView(v => ({ ...v, ...p }));
 
@@ -247,7 +307,7 @@ export function NetDevSection() {
             desc={t("ndv.sets.devicesDesc")}
             actions={
               <>
-                <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice(emptyDevice())}>{"+ "}{t("ndv.sets.addDevice")}</span>
+                <span className="btn btn--secondary btn--small" role="button" onClick={() => { setEditingDevice(emptyDevice()); setEditingDeviceOrig(""); }}>{"+ "}{t("ndv.sets.addDevice")}</span>
                 <span
                   className="btn btn--secondary btn--small" role="button"
                   onClick={async () => {
@@ -265,11 +325,11 @@ export function NetDevSection() {
                 {sshCandidates.slice(0, 12).map(c => (
                   <span key={c.alias}
                     className="btn btn--secondary btn--small" role="button" style={{ marginRight: 6 }}
-                    onClick={() => setEditingDevice({
+                    onClick={() => { setEditingDevice({
                       ...emptyDevice(),
                       name: c.alias, address: c.host || c.alias, username: c.user || "",
                       port: c.port || 22,
-                    })}
+                    }); setEditingDeviceOrig(""); }}
                   >{c.alias}</span>
                 ))}
               </div>
@@ -280,23 +340,30 @@ export function NetDevSection() {
             {view.devices.length > 0 && (
               <table className="mem-hint" style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
-                  <tr style={{ textAlign: "left" }}><th>{t("ndv.sets.colName")}</th><th>{t("ndv.sets.colVendorOs")}</th><th>{t("ndv.sets.colAddr")}</th><th>{t("ndv.sets.colRoute")}</th><th>{t("ndv.sets.colCred")}</th><th /></tr>
+                  <tr style={{ textAlign: "left" }}><th>{t("ndv.sets.colName")}</th><th>{t("ndv.sets.colVendorOs")}</th><th>{t("ndv.sets.colAddr")}</th><th>{t("ndv.sets.colRoute")}</th><th>{t("ndv.sets.colCred")}</th><th>{t("ndv.sets.thWrite")}</th><th /></tr>
                 </thead>
                 <tbody>
-                  {view.devices.map(d => (
+                  {view.devices.map(d => {
+                    const tier = tierRows.find(r => r.device === d.name);
+                    return (
                     <tr key={d.name}>
                       <td>{d.name}{d.group ? `（${d.group}）` : ""}</td>
                       <td>{d.vendor}/{d.os}</td>
                       <td>{d.address}{d.port && d.port !== 22 ? `:${d.port}` : ""}{d.consolePort ? ` 🔌${d.consolePort}` : ""}</td>
                       <td>{(d.via ?? []).join("→") || t("ndv.sets.direct")}</td>
                       <td>{d.passwordSet ? t("ndv.sets.credSet") : t("ndv.sets.credUnset")}</td>
+                      <td title={tier?.clamped ? t("ndv.sets.tierClamped") : undefined}>
+                        {writeTierLabel(tier?.effective)}
+                        {tier?.clamped ? <span style={{ color: "var(--warn)" }}> ⚠</span> : null}
+                      </td>
                       <td>
-                        <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDevice({ ...d, password: "" })}>{t("common.edit")}</span>{" "}
+                        <span className="btn btn--secondary btn--small" role="button" onClick={() => { setEditingDevice({ ...d, password: "" }); setEditingDeviceOrig(d.name); }}>{t("common.edit")}</span>{" "}
                         <span className="btn btn--secondary btn--small" role="button" title={t("common.delete")}
                           onClick={async () => { if (await confirm({ title: "DELETE DEVICE", message: t("ndv.sets.delDeviceMsg", { name: d.name }), danger: true })) { try { await save({ ...view, devices: view.devices.filter(x => x.name !== d.name) }); } catch (_) {} } }}>×</span>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -305,14 +372,14 @@ export function NetDevSection() {
           <Section
             title={t("ndv.sets.hopsTitle", { n: view.hops.length })}
             desc={t("ndv.sets.hopsDesc")}
-            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingHop(emptyHop())}>{"+ "}{t("ndv.sets.addHop")}</span>}
+            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => { setEditingHop(emptyHop()); setEditingHopOrig(""); }}>{"+ "}{t("ndv.sets.addHop")}</span>}
           >
             {view.hops.length === 0 && <div className="mem-hint">{t("ndv.sets.noHops")}</div>}
             {view.hops.map(h => (
               <div key={h.name} className="mem-hint" style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
                 <span style={{ minWidth: 160 }}>{h.name} → {h.host}{h.proxyJump ? t("ndv.sets.viaHop", { name: h.proxyJump }) : ""}</span>
                 <span>{h.passwordSet ? t("ndv.sets.hopCredSet") : t("ndv.sets.credUnset")}</span>
-                <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingHop({ ...h, password: "" })}>{t("common.edit")}</span>
+                <span className="btn btn--secondary btn--small" role="button" onClick={() => { setEditingHop({ ...h, password: "" }); setEditingHopOrig(h.name); }}>{t("common.edit")}</span>
                 <span className="btn btn--secondary btn--small" role="button" title={t("common.delete")}
                   onClick={async () => { if (await confirm({ title: "DELETE HOP", message: t("ndv.sets.delHopMsg", { name: h.name }), danger: true })) { try { await save({ ...view, hops: view.hops.filter(x => x.name !== h.name) }); } catch (_) {} } }}>×</span>
               </div>
@@ -517,6 +584,11 @@ export function NetDevSection() {
                   value={view.backupInterval ?? ""}
                   onChange={e => patch({ backupInterval: e.target.value })} />
               </label>
+              <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }} title={t("ndv.sets.gitMirrorTip")}>
+                <input type="checkbox" checked={!!view.backupGitMirror}
+                  onChange={e => patch({ backupGitMirror: e.target.checked })} />
+                {t("ndv.sets.gitMirror")}
+              </label>
               <label className="set-label" style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 {t("ndv.sets.snmpPolling")}
                 <input className="mem-input" type="number" style={{ width: 90 }} placeholder={t("ndv.sets.phSeconds")}
@@ -563,16 +635,23 @@ export function NetDevSection() {
             {(() => {
               const defs = view.groupDefs && view.groupDefs.length > 0
                 ? view.groupDefs
-                : [...new Set((view.devices ?? []).map(d => d.group).filter(Boolean))].map(n => ({ name: n, policy: "", changeWindow: "" }));
+                : [...new Set((view.devices ?? []).map(d => d.group).filter(Boolean))].map(n => ({ name: n, policy: "", changeWindow: "", write: "" }));
               if (defs.length === 0) return <div className="mem-hint">{t("ndv.sets.noGroupsDefs")}</div>;
               return defs.map((g, i) => (
                 <div key={g.name} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, marginBottom: 6 }}>
                   <span style={{ minWidth: 90, fontWeight: 600 }}>{g.name}</span>
-                  <select className="mem-select" style={{ width: 170 }} value={g.policy || "read-only"}
+                  <select className="mem-select" style={{ width: 150 }} value={g.policy || "read-only"}
                     onChange={e => patch({ groupDefs: defs.map((x, j) => j === i ? { ...x, policy: e.target.value } : x) })}>
                     <option value="read-only">{t("ndv.sets.policyRo")}</option>
                     <option value="proposal">{t("ndv.sets.policyProposal")}</option>
                     <option value="proposal+confirm2">{t("ndv.sets.policyConfirm2")}</option>
+                  </select>
+                  <select className="mem-select" style={{ width: 130 }} value={g.write ?? ""} title={t("ndv.sets.grpWriteTip")}
+                    onChange={e => patch({ groupDefs: defs.map((x, j) => j === i ? { ...x, write: e.target.value } : x) })}>
+                    <option value="">{t("ndv.sets.writeInherit")}</option>
+                    <option value="sealed">🔒 sealed</option>
+                    <option value="confirm">🔐 confirm</option>
+                    <option value="auto">⚡ auto</option>
                   </select>
                   <input className="mem-input" style={{ flex: 1 }} placeholder={t("ndv.sets.phWindow")}
                     value={g.changeWindow ?? ""}
@@ -642,7 +721,7 @@ export function NetDevSection() {
           <Section
             title={t("ndv.sets.rulesTitle")}
             desc={t("ndv.sets.rulesDesc")}
-            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingRule({ name: "", metric: "reachable", op: "==", value: 0, severity: "warning", enabled: true })}>{t("ndv.sets.addRule")}</span>}
+            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => { setEditingRule({ name: "", metric: "reachable", op: "==", value: 0, severity: "warning", enabled: true }); setEditingRuleOrig(""); }}>{t("ndv.sets.addRule")}</span>}
           >
             {(view.alertRules ?? []).length === 0 && (
               <div className="mem-hint">{t("ndv.sets.noRules")}</div>
@@ -653,7 +732,7 @@ export function NetDevSection() {
                 <span className="ndv__device-name">{r.name}</span>
                 <span className="ndv__device-addr">{r.metric} {r.op} {r.value} · {r.severity}</span>
                 <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: "auto" }}
-                  onClick={() => setEditingRule({ ...r })}>{t("common.edit")}</span>
+                  onClick={() => { setEditingRule({ ...r }); setEditingRuleOrig(r.name); }}>{t("common.edit")}</span>
                 <span className="btn btn--secondary btn--small" role="button"
                   onClick={() => patch({ alertRules: (view.alertRules ?? []).filter((_, j) => j !== i) })}>{t("common.delete")}</span>
               </div>
@@ -663,7 +742,7 @@ export function NetDevSection() {
           <Section
             title={t("ndv.sets.dbTitle")}
             desc={t("ndv.sets.dbDesc")}
-            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingDB({ name: "", type: "mysql", host: "", port: 3306, username: "", passwordEnv: "", passwordSet: false, database: "", allowlist: ["SHOW PROCESSLIST"], password: "" })}>{t("ndv.sets.addSource")}</span>}
+            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => { setEditingDB({ name: "", type: "mysql", host: "", port: 3306, username: "", passwordEnv: "", passwordSet: false, database: "", allowlist: ["SHOW PROCESSLIST"], password: "" }); setEditingDBOrig(""); }}>{t("ndv.sets.addSource")}</span>}
           >
             {(view.dbSources ?? []).length === 0 && (
               <div className="mem-hint">{t("ndv.sets.noDbSources")}</div>
@@ -673,7 +752,7 @@ export function NetDevSection() {
                 <span className="ndv__device-name">{s.name}</span>
                 <span className="ndv__device-addr">{s.type} · {s.host}{s.passwordSet ? " · " + t("ndv.sets.pwdStored") : ""}</span>
                 <span className="btn btn--secondary btn--small" role="button" style={{ marginLeft: "auto" }}
-                  onClick={() => setEditingDB({ ...s, password: "" })}>{t("common.edit")}</span>
+                  onClick={() => { setEditingDB({ ...s, password: "" }); setEditingDBOrig(s.name); }}>{t("common.edit")}</span>
                 <span className="btn btn--secondary btn--small" role="button"
                   onClick={() => patch({ dbSources: (view.dbSources ?? []).filter((_, j) => j !== i) })}>{t("common.delete")}</span>
               </div>
@@ -752,6 +831,16 @@ export function NetDevSection() {
               <datalist id="ndv-groups">
                 {(view.groups ?? []).map(g => <option key={g} value={g} />)}
               </datalist>
+            </Field>
+            <Field label={t("ndv.sets.fWriteTier")}>
+              <select className="mem-select" value={editingDevice.writeOverride ?? ""}
+                onChange={e => setEditingDevice({ ...editingDevice, writeOverride: e.target.value })}>
+                <option value="">{t("ndv.sets.writeInherit")}</option>
+                <option value="sealed">🔒 sealed</option>
+                <option value="confirm">🔐 confirm</option>
+                <option value="auto">⚡ auto</option>
+              </select>
+              <span className="mem-hint">{t("ndv.sets.writeTierHint")}</span>
             </Field>
             <Field label={t("ndv.sets.fUser")}><input className="mem-input" value={editingDevice.username} onChange={e => setEditingDevice({ ...editingDevice, username: e.target.value })} /></Field>
             <Field label={editingDevice.passwordSet ? t("ndv.sets.phPwdKeep") : t("ndv.sets.phPwd")}>
@@ -835,6 +924,12 @@ export function NetDevSection() {
               </select>
               <span style={{ opacity: 0.6, fontSize: 11 }}>{t("ndv.sets.kindNote")}</span>
             </Field>
+            <Field label={t("ndv.sets.fGpu")}>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+                <input type="checkbox" checked={editingDevice.gpu ?? false} onChange={e => setEditingDevice({ ...editingDevice, gpu: e.target.checked })} />
+                {t("ndv.sets.gpuNote")}
+              </label>
+            </Field>
             {(editingDevice.kind ?? "") === "docker" && (
               <Field label={t("ndv.sets.fDockerSock")}>
                 <input className="mem-input" placeholder={t("ndv.sets.phDockerSock")}
@@ -886,8 +981,11 @@ export function NetDevSection() {
                   if (!ndNameOk(editingDevice.name)) { setErr(t("ndv.sets.nameRule")); return; }
                   if (!editingDevice.address.trim() && !(editingDevice.consolePort ?? "").trim()) { setErr(t("ndv.sets.needNameOrConsole")); return; }
                   // Save first so TestConnection can find the device in config.
-                  const exists = view.devices.some(d => d.name === editingDevice.name);
-                  const devices = exists ? view.devices.map(d => d.name === editingDevice.name ? editingDevice : d) : [...view.devices, editingDevice];
+                  // Replacement matches on the ORIGINAL name (rename-safe).
+                  const matchDev = editingDeviceOrig || editingDevice.name;
+                  const devices = view.devices.some(d => d.name === matchDev)
+                    ? view.devices.map(d => d.name === matchDev ? editingDevice : d)
+                    : [...view.devices, editingDevice];
                   const nextView = { ...view, devices, notifySMTPPassword };
                   setBusy(true);
                   try {
@@ -924,13 +1022,18 @@ export function NetDevSection() {
                 if (!editingDevice.name.trim()) { setErr(t("ndv.sets.needNameOrConsole")); return; }
                 if (!ndNameOk(editingDevice.name)) { setErr(t("ndv.sets.nameRule")); return; }
                 if (!editingDevice.address.trim() && !(editingDevice.consolePort ?? "").trim()) { setErr(t("ndv.sets.needNameOrConsole")); return; }
-                const exists = view.devices.some(d => d.name === editingDevice.name);
-                const devices = exists ? view.devices.map(d => d.name === editingDevice.name ? editingDevice : d) : [...view.devices, editingDevice];
+                // Replacement matches on the ORIGINAL name so a rename edits
+                // in place instead of appending a renamed duplicate.
+                const matchDev = editingDeviceOrig || editingDevice.name;
+                const devices = view.devices.some(d => d.name === matchDev)
+                  ? view.devices.map(d => d.name === matchDev ? editingDevice : d)
+                  : [...view.devices, editingDevice];
                 setBusy(true);
                 try {
                   await app.SetNetDevSettings({ ...view, devices, notifySMTPPassword });
                   await reload();
                   setEditingDevice(null);
+                  setEditingDeviceOrig("");
                   setErr("");
                   showToast(t("ndv.sets.deviceSaved"), "info");
                 } catch (e) {
@@ -997,13 +1100,17 @@ export function NetDevSection() {
               onClick={async () => {
                 if (!editingDB.name.trim() || !editingDB.host.trim()) { setErr(t("ndv.sets.needNameAddr")); return; }
                 if (editingDB.type !== "redis" && (editingDB.allowlist ?? []).length === 0) { setErr(t("ndv.sets.needAllowlist")); return; }
-                const exists = (view.dbSources ?? []).some(s => s.name === editingDB.name);
-                const dbSources = exists ? (view.dbSources ?? []).map(s => s.name === editingDB.name ? editingDB : s) : [...(view.dbSources ?? []), editingDB];
+                // Replacement matches on the ORIGINAL name (rename-safe).
+                const matchDB = editingDBOrig || editingDB.name;
+                const dbSources = (view.dbSources ?? []).some(s => s.name === matchDB)
+                  ? (view.dbSources ?? []).map(s => s.name === matchDB ? editingDB : s)
+                  : [...(view.dbSources ?? []), editingDB];
                 setBusy(true);
                 try {
                   await app.SetNetDevSettings({ ...view, dbSources, notifySMTPPassword });
                   await reload();
                   setEditingDB(null);
+                  setEditingDBOrig("");
                   setErr("");
                 } catch (e) {
                   setErr(String(e));
@@ -1054,13 +1161,17 @@ export function NetDevSection() {
               className="btn btn--primary btn--small" role="button"
               onClick={async () => {
                 if (!editingRule.name.trim()) { setErr(t("ndv.sets.needRuleName")); return; }
-                const exists = (view.alertRules ?? []).some(r => r.name === editingRule.name);
-                const alertRules = exists ? (view.alertRules ?? []).map(r => r.name === editingRule.name ? editingRule : r) : [...(view.alertRules ?? []), editingRule];
+                // Replacement matches on the ORIGINAL name (rename-safe).
+                const matchRule = editingRuleOrig || editingRule.name;
+                const alertRules = (view.alertRules ?? []).some(r => r.name === matchRule)
+                  ? (view.alertRules ?? []).map(r => r.name === matchRule ? editingRule : r)
+                  : [...(view.alertRules ?? []), editingRule];
                 setBusy(true);
                 try {
                   await app.SetNetDevSettings({ ...view, alertRules, notifySMTPPassword });
                   await reload();
                   setEditingRule(null);
+                  setEditingRuleOrig("");
                   setErr("");
                 } catch (e) {
                   setErr(String(e));
@@ -1104,13 +1215,17 @@ export function NetDevSection() {
               onClick={async () => {
                 if (!editingHop.name.trim() || !editingHop.host.trim()) { setErr(t("ndv.sets.needNameAddr")); return; }
                 if (!ndNameOk(editingHop.name)) { setErr(t("ndv.sets.nameRule")); return; }
-                const exists = view.hops.some(h => h.name === editingHop.name);
-                const hops = exists ? view.hops.map(h => h.name === editingHop.name ? editingHop : h) : [...view.hops, editingHop];
+                // Replacement matches on the ORIGINAL name (rename-safe).
+                const matchHop = editingHopOrig || editingHop.name;
+                const hops = view.hops.some(h => h.name === matchHop)
+                  ? view.hops.map(h => h.name === matchHop ? editingHop : h)
+                  : [...view.hops, editingHop];
                 setBusy(true);
                 try {
                   await app.SetNetDevSettings({ ...view, hops });
                   await reload();
                   setEditingHop(null);
+                  setEditingHopOrig("");
                   setErr("");
                 } catch (e) {
                   setErr(String(e));
@@ -1267,6 +1382,47 @@ export function NetDevSection() {
                 finally { setScanBusy(false); }
               }}
             >{scanBusy ? t("ndv.sec.importing") : t("ndv.sets.importBtn")}</span>
+          </div>
+        </Modal>
+      )}
+
+      {/* WRITE_AUTHZ §5：放宽告警确认弹窗——每次必弹、无"不再提示"；
+          auto 档逐组输入组名（仪式），确认记录进审计链。 */}
+      {widenPending && (
+        <Modal title={t("ndv.widen.title")} onClose={() => setWidenPending(null)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12.5 }}>
+            <div style={{ color: "var(--danger, #e5484d)", fontWeight: 700 }}>{t("ndv.widen.heading")}</div>
+            {widenPending.groups.map(g => (
+              <div key={g.name} className="mem-hint" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ fontWeight: 600 }}>{g.name}</span>
+                <span>→</span>
+                <span style={{ fontWeight: 700 }}>{writeTierLabel(g.tier)}</span>
+                {g.tier === "auto" && (
+                  <span style={{ opacity: 0.7 }}>
+                    （{t("ndv.widen.typePrompt", { name: g.name })}）
+                  </span>
+                )}
+              </div>
+            ))}
+            <div className="mem-hint">{t("ndv.widen.risk")}</div>
+            {widenPending.groups.some(g => g.tier === "auto") && (
+              <input
+                className="mem-input" placeholder={t("ndv.widen.typePlaceholder")}
+                value={widenTyped}
+                onChange={e => setWidenTyped(e.target.value)}
+              />
+            )}
+          </div>
+          <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => setWidenPending(null)}>{t("common.cancel")}</span>
+            <span
+              className="btn btn--primary btn--small" role="button"
+              onClick={() => {
+                const need = widenPending.groups.filter(g => g.tier === "auto").map(g => g.name);
+                if (need.length > 0 && widenTyped.trim() !== need.join(", ")) return;
+                void confirmWiden();
+              }}
+            >{t("ndv.widen.confirm")}</span>
           </div>
         </Modal>
       )}

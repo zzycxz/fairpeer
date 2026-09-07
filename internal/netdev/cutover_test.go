@@ -2,7 +2,12 @@ package netdev
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -196,5 +201,168 @@ func TestCutoverRequiresApprovedProposals(t *testing.T) {
 		Steps: []CutoverStep{{Label: "x", Device: "sw1"}},
 	}); err == nil {
 		t.Fatal("empty step accepted")
+	}
+}
+
+// TestCutoverPrecheckRedLightOverride（SCENARIO_SPEC S1-1）：影响设备含一台
+// 不可达机 → 预检红灯停窗前（precheck-failed，runner 未启动）；人工放行后
+// 恢复 running 并真正进入变更窗口。
+func TestCutoverPrecheckRedLightOverride(t *testing.T) {
+	m := cutoverTestManager(t)
+	pid := approvedVlanProposal(t, m)
+
+	def := &CutoverRun{
+		Name:     "precheck-red",
+		Deadline: time.Now().Add(20 * time.Minute),
+		Steps: []CutoverStep{{
+			Label: "payload", ProposalID: pid,
+		}},
+		Precheck: &CutoverPrecheckDef{Battery: "standard"},
+	}
+	c, err := m.CutoverStart(def)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if c.Status != CutoverPrecheckFailed {
+		t.Fatalf("status = %s, want precheck-failed（dead 设备电池应失败）", c.Status)
+	}
+	if c.PrecheckReport == nil || c.PrecheckReport.AllPass {
+		t.Fatalf("precheck report = %+v", c.PrecheckReport)
+	}
+	// 窗口未启动：cursor 应仍为 0 且无 StartedAt 推进痕迹——Status 已证。
+	// 人工放行 → running。
+	c2, err := m.CutoverPrecheckOverride(c.ID)
+	if err != nil {
+		t.Fatalf("override: %v", err)
+	}
+	if c2.Status != CutoverRunning {
+		t.Fatalf("after override status = %s, want running", c2.Status)
+	}
+	// 放行后 runner 启动并推进到终态（无决策点的提案步直通 approved/done）。
+	got := waitCutover(t, c.ID, CutoverDone, "")
+	if len(got.Steps) == 0 || got.Steps[0].Status != CutoverStepApproved {
+		t.Fatalf("runner did not advance after override: %+v", got.Steps)
+	}
+}
+
+// TestCutoverPrecheckGreenLight：可达设备全过 → 直接 running，不停窗前。
+func TestCutoverPrecheckGreenLight(t *testing.T) {
+	m := cutoverTestManager(t)
+	pid := approvedVlanProposal(t, m)
+	def := &CutoverRun{
+		Name:     "precheck-green",
+		Deadline: time.Now().Add(20 * time.Minute),
+		Steps: []CutoverStep{{Label: "payload", ProposalID: pid,
+			Device: "sw1", Command: "display version"}},
+		Precheck: &CutoverPrecheckDef{Battery: "off", Probes: []CutoverPreProbe{
+			{Kind: "command", Device: "sw1", Cmd: "display version", Expect: "Versatile"},
+		}},
+	}
+	c, err := m.CutoverStart(def)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if c.Status == CutoverPrecheckFailed {
+		t.Fatalf("unexpected red light: %+v", c.PrecheckReport)
+	}
+	if c.Status != CutoverRunning {
+		t.Fatalf("status = %s, want running", c.Status)
+	}
+}
+
+// TestSaveCutoverAtomicConcurrentReads: saveCutover lands via tmp+rename, so a
+// concurrent reader must never observe a torn JSON store — 50 saves racing a
+// read+parse loop. Platform caveat: on Windows, fileutil.ReplaceFile's
+// rename→copy fallback (a reader holding dest open blocks the rename, since Go
+// opens lack FILE_SHARE_DELETE) briefly truncates dest in place, so a
+// zero-length read is tolerated ONLY when the very next reads recover; any
+// nonzero partial JSON, a persistent empty store, or a save whose post-read
+// fails to parse is a failure.
+func TestSaveCutoverAtomicConcurrentReads(t *testing.T) {
+	cutoversDirOverride = t.TempDir()
+	t.Cleanup(func() { cutoversDirOverride = "" })
+
+	c := &CutoverRun{ID: "CT-atomic", Name: "atomic save", Status: CutoverRunning,
+		Deadline: time.Now().Add(time.Hour)}
+	if err := saveCutover(c); err != nil {
+		t.Fatalf("initial save: %v", err)
+	}
+	if got, err := GetCutover(c.ID); err != nil || got.Name != c.Name {
+		t.Fatalf("read back after save: %v, %+v", err, got)
+	}
+	path := filepath.Join(cutoversDir(), c.ID+".json")
+	parses := func(b []byte) bool { return json.Unmarshal(b, new(CutoverRun)) == nil }
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	readFail := make(chan error, 1)
+	fail := func(format string, args ...any) {
+		select {
+		case readFail <- fmt.Errorf(format, args...):
+		default:
+		}
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		openErrs := 0
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			b, err := os.ReadFile(path)
+			if err != nil {
+				openErrs++ // transient sharing violation while the writer swaps files
+				if openErrs > 500 {
+					fail("dest unreadable: %v", err)
+					return
+				}
+				continue
+			}
+			openErrs = 0
+			if !parses(b) {
+				if len(b) == 0 { // fallback truncate window: must recover immediately
+					recovered := false
+					for i := 0; i < 200 && !recovered; i++ {
+						time.Sleep(100 * time.Microsecond)
+						if rb, err := os.ReadFile(path); err == nil && parses(rb) {
+							recovered = true
+						}
+					}
+					if !recovered {
+						fail("empty store persisted across retries")
+						return
+					}
+					continue
+				}
+				fail("torn store (%d bytes)", len(b))
+				return
+			}
+			time.Sleep(100 * time.Microsecond) // let some renames land uncontended too
+		}
+	}()
+	for i := 0; i < 50; i++ {
+		c.HoldNote = fmt.Sprintf("pass %d", i)
+		if err := saveCutover(c); err != nil {
+			close(stop)
+			wg.Wait()
+			t.Fatalf("save %d: %v", i, err)
+		}
+		// A returned save must already be a complete, parseable document.
+		b, err := os.ReadFile(path)
+		if err != nil || !parses(b) {
+			close(stop)
+			wg.Wait()
+			t.Fatalf("post-save read %d: %v (parses=%v, %d bytes)", i, err, parses(b), len(b))
+		}
+	}
+	close(stop)
+	wg.Wait()
+	select {
+	case err := <-readFail:
+		t.Fatal(err)
+	default:
 	}
 }

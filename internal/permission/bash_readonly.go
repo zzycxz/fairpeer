@@ -97,7 +97,9 @@ func containsShellSyntax(cmd string) bool {
 func hasUnsafeReadOnlyArgs(base string, args []string) bool {
 	switch base {
 	case "find":
-		return hasAnyArg(args, "-exec", "-execdir", "-delete")
+		// -exec/-execdir/-delete execute or remove; -fprint*/-fls write files.
+		return hasAnyArg(args, "-exec", "-execdir", "-delete", "-fls") ||
+			hasArgWithPrefix(args, "-fprint")
 	case "sed":
 		for _, arg := range args {
 			if strings.HasPrefix(arg, "-i") || strings.HasPrefix(arg, "--in-place") {
@@ -106,6 +108,37 @@ func hasUnsafeReadOnlyArgs(base string, args []string) bool {
 		}
 	case "sort":
 		return hasArgWithPrefix(args, "-o") || hasAnyArg(args, "--output") || hasArgWithPrefix(args, "--output=")
+	case "env":
+		// env is a meta-executor: `env VAR=x <cmd>` runs <cmd>. Only a bare
+		// env — optionally with flags and VAR=value assignments — is
+		// read-only; any other word is a command for env to execute.
+		consumesOperand := false // -u/--unset take a NAME operand
+		for _, arg := range args {
+			if consumesOperand {
+				consumesOperand = false
+				continue
+			}
+			if arg == "-u" || arg == "--unset" {
+				consumesOperand = true
+				continue
+			}
+			if strings.HasPrefix(arg, "-") {
+				continue
+			}
+			if i := strings.Index(arg, "="); i > 0 {
+				continue // VAR=value assignment
+			}
+			return true
+		}
+	case "hostname":
+		// `hostname <name>` sets the system hostname (root).
+		return len(args) > 0
+	case "date":
+		// `date -s`/`--set` sets the system clock (root).
+		return hasArgWithPrefix(args, "-s") || hasArgWithPrefix(args, "--set")
+	case "less":
+		// `less -o FILE`/`--LOG-FILE=FILE` copies output to a file.
+		return hasArgWithPrefix(args, "-o") || hasArgWithPrefix(args, "--LOG-FILE")
 	}
 	return false
 }
@@ -116,6 +149,14 @@ func hasUnsafePrefixArgs(base, subcmd string, args []string) bool {
 		switch subcmd {
 		case "diff", "show", "log":
 			return hasAnyArg(args, "--output") || hasArgWithPrefix(args, "--output=")
+		case "tag":
+			// Bare `git tag` lists tags; any argument creates/deletes/moves
+			// a ref (git tag v1, git tag -d x, git tag -f v1 commit).
+			return len(args) > 0
+		case "reflog":
+			// Bare `git reflog` (and `git reflog show`) is read-only;
+			// delete/expire destroy history.
+			return hasAnyArg(args, "delete", "expire")
 		}
 	case "go":
 		if subcmd == "env" {

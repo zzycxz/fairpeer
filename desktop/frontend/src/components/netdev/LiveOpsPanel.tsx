@@ -52,9 +52,9 @@ function stateDot(t: (k: never) => string, state: string): { color: string; labe
   }
 }
 
-export function LiveOpsPanel() {
+export function LiveOpsPanel({ onInsertComposer }: { onInsertComposer?: (text: string) => void }) {
   const { t } = useI18n();
-  const [state, setState] = useState<LiveOpsState>(() => ({ devices: new Map(), spent: 0, budget: 0, guardrails: [] }));
+  const [state, setState] = useState<LiveOpsState>(() => ({ devices: new Map(), spent: 0, budget: 0, wspent: 0, wbudget: 0, guardrails: [] }));
   const [ready, setReady] = useState(false);
   // C3.8：已收起的护栏行（key = at-index）——仅 UI 归档，审计不受影响。
   const [dismissed, setDismissed] = useState<string[]>([]);
@@ -62,7 +62,7 @@ export function LiveOpsPanel() {
   // buffers keep folding O(1)); folding must happen OUTSIDE the setState
   // updater — React StrictMode double-invokes updaters in dev, which would
   // fold every batch twice and visibly duplicate tail lines/chips.
-  const foldRef = useRef<LiveOpsState>({ devices: new Map(), spent: 0, budget: 0, guardrails: [] });
+  const foldRef = useRef<LiveOpsState>({ devices: new Map(), spent: 0, budget: 0, wspent: 0, wbudget: 0, guardrails: [] });
 
   useEffect(() => {
     let cancelled = false;
@@ -100,6 +100,15 @@ export function LiveOpsPanel() {
     return n;
   }, [state]);
 
+  // 本轮触达设备数（有过命令的设备卡）——sweep 覆盖率的显示源。
+  const touched = useMemo(() => {
+    let n = 0;
+    for (const d of state.devices.values()) {
+      if ((d.cmds?.length ?? 0) > 0 || d.current) n++;
+    }
+    return n;
+  }, [state]);
+
   return (
     <div className="ndv__card ndv__live">
       <div className="ndv__live-budget">
@@ -115,6 +124,15 @@ export function LiveOpsPanel() {
         </span>
         <span className="ndv__live-budget-num">{state.budget > 0 ? `${Math.min(state.spent, state.budget)}/${state.budget}` : String(state.spent)}</span>
         <span className="ndv__live-budget-sep">·</span>
+        {/* WRITE_AUTHZ §6⑤：直写预算独立计量（默认 10/轮，与读预算互不挤占）。 */}
+        <span className="ndv__live-budget-label" title={t("ndv.live.wbudgetTip")}>✍ {t("ndv.live.wbudget")}</span>
+        <span className="ndv__live-budget-meter">
+          {Array.from({ length: Math.min(state.wbudget || 10, 20) }, (_, i) => (
+            <span key={i} className={`ndv__live-seg${i < Math.min(state.wspent, 20) ? " ndv__live-seg--on" : ""}`} />
+          ))}
+        </span>
+        <span className="ndv__live-budget-num">{state.wspent}/{state.wbudget || 10}</span>
+        <span className="ndv__live-budget-sep">·</span>
         <span>{t("ndv.live.activeDevices", { n: active.length })}</span>
         <span className="ndv__live-budget-sep">·</span>
         <span>{t("ndv.live.intercepts")} <span style={{ color: writeCount > 0 ? "var(--danger)" : "inherit" }}>{writeCount}</span></span>
@@ -123,6 +141,21 @@ export function LiveOpsPanel() {
             .then(snap => { foldRef.current = liveStateFromSnapshot(snap); setState({ ...foldRef.current, devices: new Map(foldRef.current.devices) }); })
             .catch(() => {})}>{t("ndv.refresh")}</span>
       </div>
+
+      {/* 委托卡·轻量版（SKILL_ORCHESTRATION P2）：本轮 sweep 进度（触达设备/
+          读/写），读预算撞顶时给"继续核查"动作位——一轮新预算 + continue_from
+          语义由 agent 兜底。 */}
+      {(touched > 0 || state.wspent > 0) && (
+        <div className="ndv__live-budget" style={{ marginTop: 2 }}>
+          <span className="ndv__live-budget-label">🧪 {t("ndv.live.sweep")}</span>
+          <span>{t("ndv.live.sweepMeta", { d: touched, r: state.spent, w: state.wspent })}</span>
+          {state.budget > 0 && state.spent >= state.budget && onInsertComposer && (
+            <span className="btn btn--primary btn--small" role="button" style={{ marginLeft: "auto", fontSize: 10.5, padding: "1px 8px" }}
+              title={t("ndv.live.sweepContinueTip")}
+              onClick={() => onInsertComposer(t("ndv.live.sweepContinue"))}>{t("ndv.live.sweepContinueBtn")}</span>
+          )}
+        </div>
+      )}
 
       {active.length === 0 && state.guardrails.length === 0 && (
         <div className="ndv__live-empty">

@@ -225,22 +225,27 @@ func (m *Manager) runFollow(ctx context.Context, deviceName, cmd string, caps co
 
 	nLines, totalBytes := 0, 0
 	var linesCh chan string = lines
+	doneCh := done // one-shot: nil-ed after the first receive so the terminal read never blocks twice
+	var doneErr error
 	for {
 		if linesCh == nil {
 			// Scanner finished; only the session-exit case remains.
-			err := <-done
+			if doneCh != nil {
+				doneErr, doneCh = <-doneCh, nil
+			}
 			if ctx.Err() != nil {
 				return "stopped by user"
 			}
-			if err != nil {
-				return "stream ended: " + err.Error()
+			if doneErr != nil {
+				return "stream ended: " + doneErr.Error()
 			}
 			return "stream ended"
 		}
 		select {
 		case <-ctx.Done():
 			return "stopped by user"
-		case err := <-done:
+		case err := <-doneCh:
+			doneErr, doneCh = err, nil // nil-channel idiom: later selects skip this case
 			if err == nil && linesCh != nil {
 				// Session exited but the scanner may still have buffered
 				// lines; drain once the channel closes (next receive).

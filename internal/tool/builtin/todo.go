@@ -85,11 +85,15 @@ func (todoWrite) Execute(ctx context.Context, args json.RawMessage) (string, err
 			return "", fmt.Errorf("todo %d: invalid status %q (want pending|in_progress|completed)", i+1, t.Status)
 		}
 	}
+	// G4-1（SCENARIO_SPEC，COWORK_HARNESS_SECURITY_PLAN 阶段2）：未过
+	// complete_step 的完成项不再硬失败——降级为 ack+警告（模型下一轮可补
+	// 签收），防 reasonix #5128 类"卡死在重试"循环。
+	var warning string
 	if err := verifyTodoCompletionTransitions(ctx, p.Todos); err != nil {
-		return "", err
+		warning = " ⚠ " + err.Error()
 	}
-	return fmt.Sprintf("Todos updated: %d total — %d completed, %d in progress, %d pending.",
-		len(p.Todos), done, active, pending), nil
+	return fmt.Sprintf("Todos updated: %d total — %d completed, %d in progress, %d pending.%s",
+		len(p.Todos), done, active, pending, warning), nil
 }
 
 func verifyTodoCompletionTransitions(ctx context.Context, todos []todoItem) error {

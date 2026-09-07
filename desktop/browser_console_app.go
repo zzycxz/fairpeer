@@ -612,7 +612,8 @@ func (a *App) BrowserConsoleSaveSkill(content string, overwrite bool) (string, e
 	dir := filepath.Join(root, name)
 	target := filepath.Join(dir, "SKILL.md")
 	if _, statErr := os.Stat(target); statErr == nil && !overwrite {
-		return "", fmt.Errorf("已存在同名技能 %q——保存将覆盖它", name)
+		// G1-7：错误消息带稳定码前缀，前端按码分支（不再匹配中文文案）。
+		return "", fmt.Errorf("[duplicate] 已存在同名技能 %q——保存将覆盖它", name)
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -798,6 +799,9 @@ type BrowserConsoleStep struct {
 	Files      []string `json:"files,omitempty"`
 	Expression string   `json:"expression,omitempty"`
 	Label      string   `json:"label,omitempty"`
+	// Control is the raw 5th-column harness spec (重试=/校验=/失败=/校验预算=),
+	// parsed and validated before the run starts.
+	Control string `json:"control,omitempty"`
 }
 
 // BrowserConsoleTrialStatus is one per-step progress event ("browser:trial";
@@ -1040,6 +1044,13 @@ func (a *App) BrowserConsoleTrialRun(steps []BrowserConsoleStep, params map[stri
 	if params == nil {
 		params = map[string]string{}
 	}
+	// Validate harness control cells up front — a typo must fail before any
+	// browser window opens (same planning-time contract as the flow path).
+	for i, st := range steps {
+		if _, cerr := builtin.ParseStepControl(st.Control); cerr != nil {
+			return fmt.Errorf("第 %d 步：%w", i+1, cerr)
+		}
+	}
 	resume, abort, ok := consoleGate.enter()
 	if !ok {
 		return fmt.Errorf("已有试运行在进行中")
@@ -1178,6 +1189,7 @@ func (a *App) runConsoleSteps(steps []BrowserConsoleStep, params map[string]stri
 	// simply takes its time and the next one follows. The human/ask steps
 	// park on their own gate instead.
 	resolved := map[string]string{}
+	failedSteps := 0
 	for i := range steps {
 		s := steps[i]
 		substStepParams(&s, params, resolved, onRange)
@@ -1200,10 +1212,63 @@ func (a *App) runConsoleSteps(steps []BrowserConsoleStep, params map[string]stri
 		default:
 			emit(BrowserConsoleTrialStatus{Index: i, Status: "running"})
 		}
-		out, err := run(i, s)
-		if err != nil {
-			emit(BrowserConsoleTrialStatus{Index: i, Status: "failed", Error: err.Error()})
-			emit(BrowserConsoleTrialStatus{Index: -1, Status: "failed", Error: err.Error(), Downloads: downloads})
+		// Harness (5th-column 控制): act → verify → retry with
+		// recheck-before-refire → evidence on final failure. Empty spec = one
+		// bare run, zero added latency (today's behavior).
+		h, _ := builtin.ParseStepControl(s.Control)
+		verify := func(budget int) error {
+			if h.Verify == "" {
+				return nil
+			}
+			_, verr := builtin.ConsoleWait(h.Verify, budget)
+			return verr
+		}
+		vBudget := h.VerifyBudget
+		if vBudget == 0 {
+			vBudget = 10
+		}
+		var out string
+		var stepErr error
+		for attempt := 0; attempt <= h.Retry; attempt++ {
+			if attempt > 0 {
+				// Recheck-before-refire: the previous action may have landed
+				// while its verify signal lagged — 3s re-verify first so a
+				// slow signal doesn't cause a double click/export.
+				if h.Verify != "" && verify(3) == nil {
+					out, stepErr = "上一次动作已生效（校验信号滞后，复核通过）", nil
+					break
+				}
+				time.Sleep(time.Duration(1<<uint(attempt-1)) * time.Second) // 1s, 2s, 4s…
+			}
+			var aerr error
+			out, aerr = run(i, s)
+			if aerr != nil {
+				stepErr = aerr
+				continue
+			}
+			if verr := verify(vBudget); verr != nil {
+				stepErr = fmt.Errorf("动作成功但校验 %q 未在 %ds 内通过: %w", h.Verify, vBudget, verr)
+				continue
+			}
+			if h.Verify != "" {
+				out += "（校验通过）"
+			}
+			stepErr = nil
+			break
+		}
+		if stepErr != nil {
+			if path := builtin.ConsoleSaveStepEvidence(s.Type); path != "" {
+				stepErr = fmt.Errorf("%w\n[失败留证: %s]", stepErr, path)
+			}
+			emit(BrowserConsoleTrialStatus{Index: i, Status: "failed", Error: stepErr.Error()})
+			if h.OnFail == "continue" {
+				failedSteps++
+				continue // 记录失败继续 — the watch's catch-up covers the gap
+			}
+			if h.OnFail == "vision" {
+				stepErr = fmt.Errorf("%w\n（失败=视觉：视觉兜底尚未接入，先按停止处理）", stepErr)
+			}
+			emit(BrowserConsoleTrialStatus{Index: -1, Status: "failed", Error: stepErr.Error(), Downloads: downloads})
 			return downloads // step failure is a result, not a binding error
 		}
 		// Payload steps keep more of their content on the panel too — the
@@ -1216,6 +1281,9 @@ func (a *App) runConsoleSteps(steps []BrowserConsoleStep, params map[string]stri
 			out = out[:capAt] + "…"
 		}
 		emit(BrowserConsoleTrialStatus{Index: i, Status: "done", Output: out})
+	}
+	if failedSteps > 0 {
+		emit(BrowserConsoleTrialStatus{Index: -1, Status: "done", Output: fmt.Sprintf("⚠️ %d 个步骤失败但按 失败=继续 放行（结果可能不完整）", failedSteps), Downloads: downloads})
 	}
 	return downloads
 }

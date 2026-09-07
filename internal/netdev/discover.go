@@ -76,7 +76,7 @@ func (m *Manager) DiscoverTCP(ctx context.Context, via, cidr string, ports []int
 	}
 	defer closeHop()
 
-	return m.probeHosts(ctx, dialer, hosts, ports)
+	return m.probeHosts(ctx, dialer, hosts, ports, SourceDiscover)
 }
 
 // Spec §4.7 pacing helpers — zero takes the spec default, and fast_mode
@@ -184,7 +184,9 @@ func runCtx(ctx context.Context, id string) (context.Context, func()) {
 
 // probeHosts is the shared polite worker pool (rate-capped, banner-grabbing
 // probes through one dialer) — used by the hop path and the F4 vantage path.
-func (m *Manager) probeHosts(ctx context.Context, dialer transport.Dialer, hosts []string, ports []int) ([]DiscoverHostResult, error) {
+// source is the store provenance the batch records under (SourceDiscover for
+// plain TCP sweeps, SourceLayer for layered scans — recording once here).
+func (m *Manager) probeHosts(ctx context.Context, dialer transport.Dialer, hosts []string, ports []int, source string) ([]DiscoverHostResult, error) {
 	rate := discoveryEffectiveRate(m.cfg.NetDev.Discovery.Rate, m.cfg.NetDev.Discovery.FastMode)
 	delayMs := discoveryPerHostDelayMs(m.cfg.NetDev.Discovery.PerHostDelayMS)
 
@@ -247,7 +249,7 @@ func (m *Manager) probeHosts(ctx context.Context, dialer transport.Dialer, hosts
 	// not fail the scan; the next run re-merges). Swept semantics: the probed
 	// list is exact, so closes within it fire R2 newly-closed events.
 	if len(out) > 0 {
-		_ = RecordDiscoveredSwept(SourceDiscover, out, ports)
+		_ = RecordDiscoveredSwept(source, out, ports)
 	}
 	// F2: when a community is configured, one sysDescr/sysName GET per host
 	// with an open 161 (single attempt, no retry — the probe constitution).

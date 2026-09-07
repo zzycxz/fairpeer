@@ -32,6 +32,15 @@ const DEFAULT_BINDINGS: Record<string, ShortcutCombo> = {
   "shell.toggle": { key: "b", ctrl: true },
   "agents.dashboard": { key: "i", ctrl: true },
   "branches.show": { key: "b", ctrl: true, shift: true },
+  // Text size follows the browser zoom convention (Ctrl+= / Ctrl+- / Ctrl+0).
+  // Note the parser matches event.key verbatim: Ctrl+= reports key "=" even on
+  // layouts where it is the unshifted "+", so "=" is the portable spelling.
+  "textSize.increase": { key: "=", ctrl: true },
+  "textSize.decrease": { key: "-", ctrl: true },
+  "textSize.reset": { key: "0", ctrl: true },
+  // Pause/resume the in-flight turn. Ctrl+Shift+P avoids every other binding
+  // (Ctrl+P alone is print; DashShell's Alt+P projection is a different mod set).
+  "turn.pauseToggle": { key: "p", ctrl: true, shift: true },
 };
 
 export function registerShortcut(_shortcut: KeyboardShortcut) {

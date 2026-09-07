@@ -37,7 +37,7 @@ func (m *mockExecutor) Steer(string, string) error                        { retu
 func (m *mockExecutor) Pause(string) error                                { return nil }
 func (m *mockExecutor) Resume(string) error                               { return nil }
 func (m *mockExecutor) Approve(string, string, bool, bool, bool) error    { return nil }
-func (m *mockExecutor) Answer(string, string, []string) error             { return nil }
+func (m *mockExecutor) Answer(string, string, []proto.QuestionAnswer) error { return nil }
 func (m *mockExecutor) SetPlan(string, bool) error                        { return nil }
 func (m *mockExecutor) SetModel(string, string) error                     { return nil }
 func (m *mockExecutor) ListSessions() ([]SessionInfo, error)              { return nil, nil }

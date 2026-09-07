@@ -100,7 +100,7 @@ const TIME_RANGE_CHIPS = ["最近5分钟", "最近15分钟", "最近30分钟", "
 // isTimeRangeParam decides whether a {{参数}} gets the time chips/preview
 // treatment: name-based heuristic (时间/time/范围/range/日期/date).
 function isTimeRangeParam(k: string): boolean {
-  return /时间|time|范围|range|日期|date/i.test(k);
+  return /时间|time|范围|range|日期|date|period|window|窗口|interval/i.test(k); // G1-7：补英文与近义参数名
 }
 
 // defaultStep seeds sensible fields per type so a freshly added step is
@@ -218,7 +218,7 @@ export function BrowserSkillEditor({
         app
           .BrowserConsoleResolveTimeRange(v)
           .then((r) => setRangePreview((prev) => ({ ...prev, [k]: r })))
-          .catch(() => undefined);
+          .catch(() => undefined); // best-effort: 失败降级不阻塞
       }
     }, 300);
     return () => window.clearTimeout(pending);
@@ -226,6 +226,7 @@ export function BrowserSkillEditor({
 
   // --- trial run ---
   const [trialRunning, setTrialRunning] = useState(false);
+  const [diagnosis, setDiagnosis] = useState<{ step: number; target: string; kind: string; error: string } | null>(null);
   const [trialStates, setTrialStates] = useState<Record<number, { status: string; output?: string; error?: string }>>({});
   // The parked human/ask step: null while running free; while set, the banner
   // shows the prompt (and an input box for ask steps — the reply travels back
@@ -269,7 +270,33 @@ export function BrowserSkillEditor({
         } else if (st.status === "done" || st.status === "failed") {
           setTrialRunning(false);
           setHumanWaiting(null);
-          if (st.status === "failed" && st.error) setError(`${t("brc.trialFailed")}: ${st.error}`);
+          if (st.status === "failed" && st.error) {
+            setError(`${t("brc.trialFailed")}: ${st.error}`);
+            // S3-1/K5-2（SCENARIO_SPEC）：失败定位到步+锚，给出"疑似站点改版
+            // 建议重录"诊断；K5-3 连续 2 次锚类失败 → 技能库标"待重录"。
+            let failedIdx = -1;
+            setTrialStates((prev) => {
+              for (let j = doc?.steps.length ?? 0; j >= 0; j -= 1) {
+                if (prev[j]?.status === "failed") { failedIdx = j; break; }
+              }
+              return prev;
+            });
+            const anchorish = /锚|anchor|未找到|not found|定位/i.test(st.error);
+            const stableish = /stable|判稳|超时|timeout/i.test(st.error);
+            setDiagnosis({
+              step: failedIdx,
+              target: failedIdx >= 0 && doc?.steps[failedIdx]?.target ? String(doc.steps[failedIdx].target) : "",
+              kind: anchorish ? "anchor" : stableish ? "stable" : "other",
+              error: st.error,
+            });
+            if (anchorish) {
+              const key = `fairpeer.skill-health.${doc?.name ?? ""}`;
+              const n = Number(localStorage.getItem(key) ?? "0") + 1;
+              localStorage.setItem(key, String(n));
+            }
+          } else if (st.status === "done") {
+            localStorage.removeItem(`fairpeer.skill-health.${doc?.name ?? ""}`);
+          }
           autoAnalyze(st.downloads ?? []);
         }
       }),
@@ -290,6 +317,7 @@ export function BrowserSkillEditor({
     if (!doc || doc.steps.length === 0) return;
     setError("");
     setTrialStates({});
+    setDiagnosis(null);
     setHumanWaiting(null);
     setTrialDownloads([]);
     setAnalysis(null);
@@ -347,7 +375,8 @@ export function BrowserSkillEditor({
       onSaved();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("已存在同名技能")) {
+      // G1-7：按后端错误码 [duplicate] 分支；includes 兜底兼容无码前缀的旧二进制。
+      if (msg.startsWith("[duplicate]") || msg.includes("已存在同名技能")) {
         const ok = await confirm({
           title: t("brc.overwriteTitle"),
           message: msg,
@@ -419,6 +448,22 @@ export function BrowserSkillEditor({
 
       {switchNotice && <div className="banner banner--error ndv-brc__error">{switchNotice}</div>}
       {error && <div className="banner banner--error ndv-brc__error">{error}</div>}
+      {diagnosis && (
+        <div className="banner banner--error ndv-brc__error" style={{ opacity: 0.92 }}>
+          <div>{t("brc.diagStep", { n: diagnosis.step + 1 })}{diagnosis.target ? ` · ${t("brc.diagAnchor")}: ${diagnosis.target}` : ""}</div>
+          <div style={{ fontSize: 12 }}>
+            {diagnosis.kind === "anchor" ? t("brc.diagAnchorHint") : diagnosis.kind === "stable" ? t("brc.diagStableHint") : t("brc.diagOtherHint")}
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+            {diagnosis.step >= 0 && (
+              <span className="btn btn--secondary btn--small" role="button" onClick={() => {
+                window.dispatchEvent(new CustomEvent("fairpeer:netdev-bench", { detail: "browser" }));
+              }}>{t("brc.diagRerecord")}</span>
+            )}
+            <span className="btn btn--secondary btn--small" role="button" onClick={() => setDiagnosis(null)}>{t("common.close")}</span>
+          </div>
+        </div>
+      )}
 
       {mode === "source" ? (
         <div className="ndv-brc-editor__source-wrap" style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1 }}>
@@ -548,6 +593,14 @@ export function BrowserSkillEditor({
                     ))}
                   </select>
                   {stepFields(s, (patch) => stepOps.update(i, patch))}
+                  <input
+                    className="mem-input ndv-brc-editor__control"
+                    value={s.control ?? ""}
+                    onChange={(e) => stepOps.update(i, { control: e.target.value })}
+                    placeholder={t("brc.ctrlPh")}
+                    title={t("brc.ctrlHint")}
+                    spellCheck={false}
+                  />
                 </div>
                 {trialStates[i]?.error && <div className="ndv-brc-editor__step-error">{trialStates[i]?.error}</div>}
                 {trialStates[i]?.output && <div className="ndv-brc-editor__step-output">{trialStates[i]?.output}</div>}

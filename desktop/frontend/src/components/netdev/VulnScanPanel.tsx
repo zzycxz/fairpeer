@@ -4,11 +4,12 @@ import { useT } from "../../lib/i18n";
 import type { NetDevFinding } from "../../lib/types";
 import { isVulnScanSource, subscribeVulnScan, vulnScanSnapshot } from "../../lib/vulnScanState";
 
-// VulnScanPanel — 右侧 dock「蓝队核查」页卡：对话驱动的 netdev-vulnscan
-// 技能（source=vulnscan）与 CVE 扫查（cve:*）的发现实时落卡处。种子数据
+// VulnScanPanel — 右侧 dock「蓝队核查」页卡：netdev-seccheck-auto sweep
+// 子代理（source=vulnscan 数据标签）与 CVE 扫查（cve:*）的发现实时落卡处。种子数据
 // 来自布局传入的全量 findings（30s 轮询），实时尾部来自 vulnScanState 模块
-// store（onNetdevFindingSaved 推送，页签未开也不丢）。指纹→候选→验证→立案
-// 的过程在对话里看；这里只呈现结果与下一步动作（建案例/修复变更/跳发现）。
+// store（onNetdevFindingSaved 推送，页签未开也不丢）。范围排序→单机闭环
+// （指纹+暴露面→候选→验证→立案）的过程在对话里看；这里只呈现结果与
+// 下一步动作（建案例/修复变更/跳发现）。
 
 const SEV_COLOR: Record<string, string> = { info: "var(--accent)", warning: "var(--warn)", critical: "var(--danger)" };
 const DISPLAY_CAP = 50;
@@ -97,6 +98,9 @@ export function VulnScanPanel({ findings, onInsertComposer }: {
                     {(f.devices ?? []).length > 0 && (
                       <div className="ndv__meta">{t("ndv.vs.devices")}: {(f.devices ?? []).join(", ")}</div>
                     )}
+                    {f.fix && (
+                      <div className="ndv__meta">fix：{f.fix.type} → {f.fix.ref}{f.fix.confidence === "verified" ? " ✓" : " ⚠（须验证）"}{f.fix.link ? <> · <a href={f.fix.link} target="_blank" rel="noreferrer">{t("ndv.vs.fixRef")}</a></> : null}</div>
+                    )}
                     {(f.detail ?? "") && <div className="ndv__pre" style={{ whiteSpace: "pre-wrap", maxHeight: 160, overflowY: "auto" }}>{f.detail}</div>}
                     {(f.evidence ?? []).slice(0, 3).map((ev, i) => (
                       <div key={i} className="ndv__pre" style={{ whiteSpace: "pre-wrap", maxHeight: 120, overflowY: "auto" }}>
@@ -111,7 +115,7 @@ export function VulnScanPanel({ findings, onInsertComposer }: {
                       <span className="btn btn--secondary btn--small" role="button" onClick={() => {
                         window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-screen", { detail: { tab: "findings", filter: `id:${f.id}` } }));
                       }}>{t("ndv.vs.gotoFindings")}</span>
-                      <span className="btn btn--secondary btn--small" role="button" onClick={() => onInsertComposer?.(t("ndv.vs.proposePrompt", { title: f.title, id: f.id }))}>{t("ndv.vs.propose")}</span>
+                      <span className="btn btn--secondary btn--small" role="button" onClick={() => onInsertComposer?.(t("ndv.vs.proposePrompt", { title: f.title, id: f.id }) + (f.fix ? `（结构化修复建议：${f.fix.type} → ${f.fix.ref}${f.fix.confidence === "verified" ? "（已核实出处）" : "（模型推断，须验证）"}）` : ""))}>{t("ndv.vs.propose")}</span>
                     </div>
                   </div>
                 )}

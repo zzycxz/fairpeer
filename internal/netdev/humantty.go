@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 	"github.com/zzycxz/fairpeer/internal/netdev/transport"
 )
 
@@ -67,6 +68,7 @@ type humanTTYSession struct {
 	recMu     sync.Mutex
 	rec       bytes.Buffer
 	writeMu   sync.Mutex // serializes stdin writes
+	decMu     sync.Mutex // serializes the stream decoder (stdout AND stderr taps share it)
 	lastError string
 }
 
@@ -181,7 +183,10 @@ func (m *Manager) HumanTTYStart(deviceName string, onData func(chunk string)) (*
 	return &HumanTTYState{Device: deviceName, Connected: true, StartedAt: sess.started}, nil
 }
 
-// Write is the PTY output tap: decode → stream to the bridge → record.
+// Write is the PTY output tap: decode → stream to the bridge → record. Both
+// the stdout and the stderr pipes land here (x/crypto/ssh reads them on
+// separate goroutines), so the decoder push rides decMu — an unlocked share
+// would race d.pending across the two streams.
 func (s *humanTTYSession) Write(p []byte) (int, error) {
 	s.recMu.Lock()
 	s.bytes += int64(len(p))
@@ -191,7 +196,10 @@ func (s *humanTTYSession) Write(p []byte) (int, error) {
 	}
 	s.recMu.Unlock()
 	if s.onData != nil {
-		if text := s.decode.push(p); text != "" {
+		s.decMu.Lock()
+		text := s.decode.push(p)
+		s.decMu.Unlock()
+		if text != "" {
 			s.onData(text)
 		}
 	}
@@ -296,6 +304,7 @@ func (s *humanTTYSession) finish(waitErr error) {
 	recPath := ""
 	s.recMu.Lock()
 	raw := append([]byte(nil), s.rec.Bytes()...)
+	outBytes := s.bytes // bytes is written under recMu (Write tap)
 	s.recMu.Unlock()
 	if len(raw) > 0 {
 		if p, err := saveHumanTTYRecording(s.device, raw); err == nil {
@@ -303,7 +312,10 @@ func (s *humanTTYSession) finish(waitErr error) {
 		}
 	}
 
-	note := fmt.Sprintf("human-terminal close (%d bytes out, %d bytes in)", s.bytes, s.inBytes)
+	s.writeMu.Lock()
+	inBytes := s.inBytes // inBytes is written under writeMu (keystroke path)
+	s.writeMu.Unlock()
+	note := fmt.Sprintf("human-terminal close (%d bytes out, %d bytes in)", outBytes, inBytes)
 	if recPath != "" {
 		note += " recording: " + recPath
 	}
@@ -323,7 +335,7 @@ func saveHumanTTYRecording(device string, raw []byte) (string, error) {
 	name := fmt.Sprintf("%s-%s.txt", sanitizeFileToken(device), time.Now().Format("20060102-150405"))
 	p := filepath.Join(dir, name)
 	// 录制脱敏（§6.1）：ANSI 剥离后走统一脱敏器——密码/密钥不落盘。
-	if err := os.WriteFile(p, []byte(Redact(ansi.Strip(string(raw)))), 0o600); err != nil {
+	if err := fileutil.AtomicWriteFile(p, []byte(Redact(ansi.Strip(string(raw)))), 0o600); err != nil {
 		return "", err
 	}
 	return p, nil

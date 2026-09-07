@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // Job statuses.
@@ -136,7 +138,7 @@ func saveJobLocked(j *Job) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(jobsDir(), j.ID+".json"), b, 0o600)
+	return fileutil.AtomicWriteFile(filepath.Join(jobsDir(), j.ID+".json"), b, 0o600)
 }
 
 // GetJob loads one job.
@@ -240,8 +242,11 @@ func (j *Job) normalize() error {
 // ── runner registry ──────────────────────────────────────────────────────────
 
 type jobRun struct {
-	cancel     context.CancelFunc
+	cancel context.CancelFunc
+	// pauseReq is closed ONCE on the first user pause (pauseOnce guards the
+	// close — a second JobPause racing the first must not double-close).
 	pauseReq   chan struct{} // user pause — honored between steps/retries
+	pauseOnce  sync.Once
 	activeFrom time.Time     // wall-clock accounting anchor
 	done       chan struct{} // closed when the runner goroutine exits
 }
@@ -332,7 +337,8 @@ func JobPause(id string) error {
 	if !ok {
 		return fmt.Errorf("job %s: no live runner (state drift — reload the list)", id)
 	}
-	close(run.pauseReq)
+	// Idempotent close: concurrent JobPause calls must not double-close.
+	run.pauseOnce.Do(func() { close(run.pauseReq) })
 	return nil
 }
 

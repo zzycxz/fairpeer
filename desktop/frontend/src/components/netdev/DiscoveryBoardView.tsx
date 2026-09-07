@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
 import { app } from "../../lib/bridge";
+import { PanelErrorState } from "./PanelStates";
+import { usePanelData } from "./usePanelData";
 import { useI18n } from "../../lib/i18n";
-import type { NetDevDiscoveryBoard } from "../../lib/types";
 
 // DiscoveryBoardView — 发现屏（DASHBOARD spec §4.8）。漏斗（哪一步丢了
 // 多少线索）+ 层级账本（vantage 出发的深度）+ 图实一致性（设计↔IP 规划
@@ -16,22 +17,21 @@ const RISK_PORTS = new Set([23, 445, 3389, 5900, 21, 69, 161]);
 
 export default function DiscoveryBoardView({ onJump, onFocusDevice }: Props) {
   const { t } = useI18n();
-  const [b, setB] = useState<NetDevDiscoveryBoard | null>(null);
+  // G1-1：三态 hook（失败与空/加载可区分，失败可重试）。
+  const q = usePanelData(() => app.NetDevDiscoveryBoard(), []);
+  const b = q.data;
 
-  const load = useCallback(() => {
-    app.NetDevDiscoveryBoard().then(x => { if (x) setB(x); }).catch(() => {});
-  }, []);
-  useEffect(() => { load(); }, [load]);
   useEffect(() => {
     const on = (e: Event) => {
       const screens = (e as CustomEvent<{ screens?: string[] }>).detail?.screens ?? [];
-      if (screens.includes("discovery") || screens.includes("overview")) load();
+      if (screens.includes("discovery") || screens.includes("overview")) q.retry();
     };
     window.addEventListener("fairpeer:netdev-dash", on);
     return () => window.removeEventListener("fairpeer:netdev-dash", on);
-  }, [load]);
+  }, [q.retry]);
 
-  if (!b) return <div className="ndv__card" style={{ padding: 16 }}>{t("ndv.discboard.loading")}</div>;
+  if (q.status === "error") return <PanelErrorState onRetry={q.retry} />;
+  if (q.status === "loading" || !b) return <div className="ndv__card" style={{ padding: 16 }}>{t("ndv.discboard.loading")}</div>;
   const max = Math.max(1, ...b.funnel.map(f => f.count));
   const triTotal = Math.max(1, b.tri_source.design + b.tri_source.only_plan);
 

@@ -200,10 +200,20 @@ draft → approved → executing → done
 
 ### 7.1 工具面双向密封（新增 `tool_scope`）
 
+### 7.1 工具面双向密封（`tool_scope`）——已由 WRITE_AUTHZ_SPEC 修订为"分级受控写"
+
+> **修订（2026-09-07，已落地）**：本节原"结构性只读"由 `NETDEV_WRITE_AUTHZ_SPEC.md` v1
+> 改写并入。现行语义：**两把锁取严**——锁 1 = 对话模式（变更询问/自动编辑/完全访问），
+> 会话姿态，只能收紧不能放宽；锁 2 = 设备写档 sealed/confirm/auto（接入必配、放宽必
+> 告警确认、AI 无开锁路径），Manager 层强制（headless/定时同样生效）。每条直写走三明治
+> 管线（pre/post 快照 + diff + OpStep 台账，三粒度回退）。**硬底线不变**：dangerous 类
+> 任何档不可直写、unknown 恒拒、时间点恢复恒提案、scopes/组隔离/审计/脱敏全档照旧。
+> 细节（合成矩阵、写面盘点、红测试）全部以 WRITE_AUTHZ_SPEC 为准。
+
 | 方向 | 规则 | 防的攻击 |
 |------|------|----------|
 | dev/cowork → netdev | `netdev_*` 仅在 netdev profile boot 分支注册，其他 Registry 中**不存在**（不用 `HiddenTools`——那是软隔离） | 恶意仓库指令让编码会话摸设备 |
-| netdev → dev/cowork | netdev profile **无 bash、无文件写**；工具集 = `netdev_*` + `rag_search`(netdev 命名空间) + 受限文本处理工具（见附录 B-12） | banner/MOTD 注入借 bash 旁路绕过分类器 |
+| netdev → dev/cowork | netdev profile **无 bash、无文件写**；工具集 = `netdev_*` + `rag_search`(netdev 命名空间) + 受限文本处理工具（见附录 B-12）；写类命令按设备写档经唯一写通道（三明治）放行 | banner/MOTD 注入借 bash 旁路绕过分类器 |
 
 ### 7.2 数据面
 

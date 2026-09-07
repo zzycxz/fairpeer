@@ -356,8 +356,17 @@ func stateLiveEntities(relPaths []string) []StateLiveEntity {
 	for _, rel := range relPaths {
 		typ, id := stateEntityOf(filepath.Join(root, filepath.FromSlash(rel)))
 		switch typ {
+		// partial joins executing/watching as live: the step backups — the
+		// ONLY recovery material for what is already on the devices — live in
+		// the partial proposal's file, and rewinding it to an earlier status
+		// (approved/draft, from before the backups were captured) silently
+		// drops them. DeleteProposal protects approved too, but a rewind of
+		// an approved proposal only returns it to draft — no device has been
+		// touched and the human gate is re-grantable — so the undo-approve
+		// rewind stays allowed (the round-trip test codifies it).
 		case "proposal":
-			if p, err := GetProposal(id); err == nil && (p.Status == ProposalExecuting || p.Status == ProposalWatching) {
+			if p, err := GetProposal(id); err == nil && (p.Status == ProposalExecuting ||
+				p.Status == ProposalPartial || p.Status == ProposalWatching) {
 				add(typ, id, p.Status)
 			}
 		case "job":

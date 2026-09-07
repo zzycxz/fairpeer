@@ -79,7 +79,10 @@ function ScheduledTasksCard() {
       {err && <div className="ndv__hint">{err}</div>}
       {!tasks && !err && <div className="ndv__hint">{tr("ndv.loading")}</div>}
       {tasks && tasks.length === 0 && (
-        <div className="ndv__hint">{tr("ndv.jobs.emptyTasks")}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div className="ndv__hint" style={{ flex: 1 }}>{tr("ndv.jobs.emptyTasks")}</div>
+          <button className="btn btn--small" role="button" onClick={() => window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-settings", { detail: "netdev" }))}>{tr("ndv.goSettings")}</button>
+        </div>
       )}
       {(tasks ?? []).map(t => (
         <div key={t.id} className="ndv__device" style={{ flexDirection: "column", alignItems: "stretch", gap: 4 }}>

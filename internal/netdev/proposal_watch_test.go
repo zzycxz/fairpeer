@@ -110,8 +110,19 @@ func TestPreExecOnlineCheckSkipsNetworkCLIs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if got.Status != ProposalDone {
+	// Production now reaches the observation period directly (done→watching
+	// used to never fire): a clean network run lands in watching, not done.
+	if got.Status != ProposalWatching {
 		t.Fatalf("network proposal paused unexpectedly: %s (note %q)", got.Status, got.Note)
+	}
+	// The watch pipeline is live on it: the manual close works (the 30-min
+	// auto-close goroutine fires on the same status check).
+	if err := CloseProposalWatch(p.ID); err != nil {
+		t.Fatalf("close watch: %v", err)
+	}
+	closed, _ := GetProposal(p.ID)
+	if closed.Status != ProposalClosed {
+		t.Fatalf("status after close = %s, want closed", closed.Status)
 	}
 }
 

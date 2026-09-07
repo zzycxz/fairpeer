@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/zzycxz/fairpeer/releases"><img src="https://img.shields.io/badge/version-v0.1.5-0153e5?style=flat-square" alt="Version 0.1.5"/></a>
+  <a href="https://github.com/zzycxz/fairpeer/releases"><img src="https://img.shields.io/badge/version-v0.1.10-0153e5?style=flat-square" alt="Version 0.1.10"/></a>
   <a href="https://github.com/zzycxz/fairpeer/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zzycxz/fairpeer/ci.yml?style=flat-square&label=ci&labelColor=161b22&logo=githubactions&logoColor=white" alt="CI"/></a>
   <a href="./LICENSE"><img src="https://img.shields.io/github/license/zzycxz/fairpeer.svg?style=flat-square&color=8b949e&labelColor=161b22" alt="license"/></a>
   <a href="https://github.com/zzycxz/fairpeer/stargazers"><img src="https://img.shields.io/github/stars/zzycxz/fairpeer.svg?style=flat-square&color=dbab09&labelColor=161b22&logo=github&logoColor=white" alt="GitHub stars"/></a>
@@ -23,7 +23,7 @@
 
 <h3 align="center">Universal Multi-Vendor AI Coding Assistant + Office Automation Platform.</h3>
 <p align="center">
-  Connect to 18 vendors (11 direct + 7 Coding Plan aggregators), 300+ models.<br/>
+  Connect to 26 vendor templates (11 direct + 15 Coding Plan/local aggregators), 300+ models.<br/>
   Built-in Word/Excel/PPT office automation capabilities.<br/>
   Single static Go binary, zero runtime dependencies, seamless cross-platform coverage.
 </p>
@@ -32,7 +32,7 @@
 
 ## What is fairpeer?
 
-fairpeer is a **universal AI coding assistant** that supports 11 direct vendors and 7 Coding Plan aggregator platforms, providing complete office automation capabilities.
+fairpeer is a **universal AI coding assistant** that supports 11 direct vendors plus 15 aggregator/local-platform templates (26 shipped registry templates), providing complete office automation capabilities.
 
 ### Core Features
 
@@ -197,17 +197,17 @@ fairpeer run "Refactor authentication module, add JWT support, write unit tests"
 
 ### Goal (Goal Mode)
 
-```bash
-# Autonomous execution until completion
-fairpeer goal "Fix all TypeScript errors"
+```text
+# In an interactive session (fairpeer chat / desktop), switch a tab into goal mode:
+/goal Fix all TypeScript errors
 # → Autonomous work → Detect blockers → Complete/Report
 ```
 
 ### Expert Teams
 
 ```bash
-# Multi-expert collaboration
-fairpeer team review "Review this PR"
+# Multi-expert collaboration (single review pass)
+fairpeer review "Review this PR"
 # → Security expert + Performance expert + Architecture expert → Comprehensive report
 ```
 
@@ -217,15 +217,11 @@ fairpeer team review "Review this PR"
 
 ### Skills
 
-```bash
-# List available skills
-fairpeer skill list
-
-# Install skill
-fairpeer skill install code-review
-
-# Create custom skill
-fairpeer skill new my-skill
+```text
+# Inside an interactive session:
+/skills                 # list, enable/disable, and inspect skills
+# Install from the skill market (agent tool, or ask the assistant):
+"install the code-review skill from the market"
 ```
 
 ### MCP Plugins

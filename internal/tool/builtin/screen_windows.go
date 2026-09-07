@@ -87,7 +87,14 @@ func init() {
 const (
 	smCXScreen = 0 // GetSystemMetrics: screen width
 	smCYScreen = 1 // GetSystemMetrics: screen height
-	srccopy    = 0x00CC0020
+	// Virtual-screen metrics: the bounding rect of ALL monitors. Region
+	// clamping uses these (not just the primary screen) so a region on a
+	// secondary monitor placed at negative coordinates still validates.
+	smXVirtualScreen  = 76
+	smYVirtualScreen  = 77
+	smCXVirtualScreen = 78
+	smCYVirtualScreen = 79
+	srccopy           = 0x00CC0020
 
 	inputMouse    uint32 = 0
 	inputKeyboard uint32 = 1
@@ -221,8 +228,21 @@ func captureScreen(hasRegion bool, rx, ry, rw, rh int) (*image.RGBA, error) {
 		return nil, err
 	}
 	x, y, w, h := 0, 0, screenW, screenH
-	if hasRegion && rw > 0 && rh > 0 {
-		x, y, w, h = rx, ry, rw, rh
+	if hasRegion {
+		if rw <= 0 || rh <= 0 {
+			return nil, fmt.Errorf("invalid region {x:%d, y:%d, w:%d, h:%d}: w and h must be positive", rx, ry, rw, rh)
+		}
+		// Clamp to the virtual screen BEFORE allocating. Pathological sizes
+		// (e.g. 100000x100000) would try to allocate tens of GB at the
+		// make([]byte, w*h*4) below long before BitBlt could fail; negative
+		// or off-screen rectangles intersect to nothing and error out.
+		vx, vy, vw, vh := virtualScreen()
+		x0, y0 := max(rx, vx), max(ry, vy)
+		x1, y1 := min(rx+rw, vx+vw), min(ry+rh, vy+vh)
+		if x1 <= x0 || y1 <= y0 {
+			return nil, fmt.Errorf("region {x:%d, y:%d, w:%d, h:%d} lies outside the screen bounds (%d,%d %dx%d)", rx, ry, rw, rh, vx, vy, vw, vh)
+		}
+		x, y, w, h = x0, y0, x1-x0, y1-y0
 	}
 
 	hdc, _, callErr := procGetDC.Call(0)
@@ -286,6 +306,31 @@ func systemMetrics(index int) (int, error) {
 		return 0, fmt.Errorf("GetSystemMetrics(%d): %w", index, err)
 	}
 	return int(int32(v)), nil
+}
+
+// virtualScreen returns the bounding rect of the entire virtual screen (all
+// monitors) in physical pixels. Used to sanity-clamp screenshot regions. The
+// X/Y origins can legitimately be 0 or negative (single monitor at the origin,
+// or a secondary monitor placed left of/above the primary), so they are read
+// without the zero-is-error guard systemMetrics applies.
+func virtualScreen() (x, y, w, h int) {
+	var wErr, hErr error
+	if w, wErr = systemMetrics(smCXVirtualScreen); wErr != nil {
+		w = 0
+	}
+	if h, hErr = systemMetrics(smCYVirtualScreen); hErr != nil {
+		h = 0
+	}
+	if w <= 0 || h <= 0 {
+		// Virtual-screen metrics unavailable (pre-multi-monitor support) —
+		// fall back to the primary screen.
+		w, _ = systemMetrics(smCXScreen)
+		h, _ = systemMetrics(smCYScreen)
+		return 0, 0, w, h
+	}
+	xr, _, _ := procGetSystemSM.Call(uintptr(smXVirtualScreen))
+	yr, _, _ := procGetSystemSM.Call(uintptr(smYVirtualScreen))
+	return int(int32(xr)), int(int32(yr)), w, h
 }
 
 // --- Win32 input ------------------------------------------------------------
@@ -553,20 +598,58 @@ func pressKey(keyName string) error {
 	return sendInput(inputKeyboard, unsafe.Pointer(&ki), int(unsafe.Sizeof(ki)))
 }
 
+// winInputShape mirrors the native INPUT record's layout math so the wire
+// offsets are derived, not hardcoded: a DWORD type prefix followed by a union
+// shaped like MOUSEINPUT (the largest member), whose ULONG_PTR drives the
+// union's alignment. On 64-bit targets that puts the union at byte 8 (4-byte
+// type + 4 bytes padding) and the record at 40 bytes; on 32-bit it would be
+// byte 4 / 28 bytes — same as the platform SDK headers.
+type winInputShape struct {
+	Type  uint32
+	Union struct {
+		DX        int32
+		DY        int32
+		MouseData uint32
+		Flags     uint32
+		Time      uint32
+		Extra     uintptr
+	}
+}
+
+var (
+	inputUnionOffset = int(unsafe.Offsetof(winInputShape{}.Union)) // 8 on x64/arm64
+	inputRecordSize  = int(unsafe.Sizeof(winInputShape{}))         // 40 on x64/arm64
+)
+
 // sendInput wraps the Win32 SendInput call for a single INPUT record. The INPUT
-// struct is { DWORD type; union{MOUSEINPUT;KEYBDINPUT;HARDWAREINPUT} }, 40 bytes
-// on x64. We build it from the typed struct by copying its bytes into a 40-byte
-// buffer and setting the type prefix.
+// struct is { DWORD type; union{MOUSEINPUT;KEYBDINPUT;HARDWAREINPUT} } — the
+// union sits at inputUnionOffset (byte 8 on x64). The typed Go structs
+// (mouseInput/keyboardInput) instead pack {type; union fields} back to back
+// (union at byte 4), so a verbatim struct copy puts every union field 4 bytes
+// too early and SendInput reads dx from what we wrote as padding — clicks, keys
+// and scroll silently no-op'd. buildInputRecord does the correct marshalling.
 func sendInput(inputType uint32, data unsafe.Pointer, size int) error {
-	const inputSize = 40
-	in := make([]byte, inputSize)
-	copy(in, (*[40]byte)(data)[:size])
-	*(*uint32)(unsafe.Pointer(&in[0])) = inputType
-	sent, _, err := procSendInput.Call(1, uintptr(unsafe.Pointer(&in[0])), inputSize)
+	in := buildInputRecord(inputType, data, size)
+	sent, _, err := procSendInput.Call(1, uintptr(unsafe.Pointer(&in[0])), uintptr(inputRecordSize))
 	if sent == 0 {
 		return fmt.Errorf("SendInput failed: %w", err)
 	}
 	return nil
+}
+
+// buildInputRecord marshals a typed input struct (mouseInput/keyboardInput,
+// passed as data/size) into the native INPUT wire layout. The type is written
+// to bytes 0-3 and ONLY the union bytes — the struct's bytes from 4 on, i.e.
+// the fields after Type — are copied to the union offset. The struct's own
+// union packing is tighter than the native one (no padding before dwExtraInfo),
+// so dwExtraInfo would land 4 bytes early; nothing in this package ever sets
+// Extra, so those bytes staying zero is harmless. Extracted from sendInput so
+// tests can assert the wire layout without synthesizing real input.
+func buildInputRecord(inputType uint32, data unsafe.Pointer, size int) []byte {
+	in := make([]byte, inputRecordSize)
+	*(*uint32)(unsafe.Pointer(&in[0])) = inputType
+	copy(in[inputUnionOffset:], (*[40]byte)(data)[4:size])
+	return in
 }
 
 // randInt returns a random int in [min, max]. Used for human-like jitter/timing

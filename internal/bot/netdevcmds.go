@@ -163,18 +163,24 @@ func (gw *BotGateway) handleNetdevCommand(msg InboundMessage) string {
 			}
 			sb.WriteString("回复 /netdev 变更 批准 <编号> 或 /netdev 变更 驳回 <编号> 原因…")
 			return sb.String()
-		case "批准", "approve", "ok":
-			if rest == "" {
-				// /netdev 变更 批准 <id> → fields[2]=批准, fields[3]=id
-				return "用法：/netdev 变更 批准 <编号>。"
-			}
-			r := bridge.NetdevProposalApprove(rest)
-			if !r.OK {
-				return r.Msg
-			}
-			return "已批准：" + r.Msg + "（执行仍在桌面端运维页操作）。"
-		case "驳回", "拒绝", "reject":
-			parts := strings.SplitN(rest, " ", 2)
+	case "批准", "approve", "ok":
+		if !gw.isAdmin(msg.Platform, msg.UserID) {
+			return adminGateRefusal
+		}
+		if rest == "" {
+			// /netdev 变更 批准 <id> → fields[2]=批准, fields[3]=id
+			return "用法：/netdev 变更 批准 <编号>。"
+		}
+		r := bridge.NetdevProposalApprove(rest)
+		if !r.OK {
+			return r.Msg
+		}
+		return "已批准：" + r.Msg + "（执行仍在桌面端运维页操作）。"
+	case "驳回", "拒绝", "reject":
+		if !gw.isAdmin(msg.Platform, msg.UserID) {
+			return adminGateRefusal
+		}
+		parts := strings.SplitN(rest, " ", 2)
 			if len(parts) == 0 || parts[0] == "" {
 				return "用法：/netdev 变更 驳回 <编号> 原因…。"
 			}

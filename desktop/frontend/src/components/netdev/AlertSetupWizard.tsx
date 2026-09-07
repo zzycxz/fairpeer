@@ -63,8 +63,10 @@ export function AlertSetupWizard({ settings, onClose, onSaved, onOpenSettings, o
   const saveAndTest = async () => {
     setBusy(true); setErr("");
     try {
+      // 落库的是翻译后的名称（t(r.name)），不是 i18n key——持久化 key 会让
+      // 设置页/Go 侧 finding 文本直接露出 "ndv.wiz.pUnreachable" 这类裸键。
       const rules = RULE_PRESETS.filter(r => picked.includes(r.key)).map(r => ({
-        name: r.name, metric: r.metric, op: r.op, value: r.value, severity: r.severity, enabled: true,
+        name: t(r.name as never), metric: r.metric, op: r.op, value: r.value, severity: r.severity, enabled: true,
       }));
       const merged = [...(settings.alertRules ?? []).filter(r => !rules.some(n => n.name === r.name)), ...rules];
       await app.SetNetDevSettings({

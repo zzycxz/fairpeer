@@ -268,6 +268,35 @@ func TestRunInspection(t *testing.T) {
 	}
 }
 
+// TestRunInspectionProgress pins the task-ified sweep's contract: progress
+// fires once per driver-resolved device, monotonically, ending at (total,total).
+func TestRunInspectionProgress(t *testing.T) {
+	sim := startSimDevice(t)
+	m, _ := testManager(t, sim)
+	var calls []int
+	last, total := 0, 0
+	f, err := m.RunInspectionProgress(context.Background(), func(done, tot int) {
+		if total == 0 {
+			total = tot
+		}
+		if tot != total {
+			t.Errorf("progress total drifted: %d after %d", tot, total)
+		}
+		if done != last+1 {
+			t.Errorf("progress not monotonic: %d after %d", done, last)
+		}
+		last = done
+		calls = append(calls, done)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// harness: sw1 + dead both have drivers, so both count.
+	if f == nil || len(calls) != total || last != total || total != 2 {
+		t.Fatalf("calls=%v last=%d total=%d", calls, last, total)
+	}
+}
+
 func TestNetconfGet(t *testing.T) {
 	sim := startSimDevice(t)
 	m, _ := testManager(t, sim)

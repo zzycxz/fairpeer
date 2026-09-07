@@ -94,6 +94,62 @@ func TestParseFlowTableEvaluateCell(t *testing.T) {
 	}
 }
 
+func TestParseStepControl(t *testing.T) {
+	c, err := ParseStepControl("重试=2 校验=networkidle 失败=继续 校验预算=15")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if c.Retry != 2 || c.Verify != "networkidle" || c.OnFail != "continue" || c.VerifyBudget != 15 {
+		t.Errorf("control: %+v", c)
+	}
+	// English keys, bilingual values.
+	c, err = ParseStepControl("retry=1 verify=download on-fail=vision")
+	if err != nil || c.Retry != 1 || c.Verify != "download" || c.OnFail != "vision" {
+		t.Errorf("en keys: ok=%v %+v", err == nil, c)
+	}
+	c, err = ParseStepControl("失败=停止")
+	if err != nil || c.OnFail != "stop" {
+		t.Errorf("stop: %+v", c)
+	}
+	if c, err := ParseStepControl(""); err != nil || c != (StepControl{}) {
+		t.Errorf("empty must be a no-op: %+v %v", c, err)
+	}
+	// Typos fail loudly (planning time, never mid-run).
+	for _, bad := range []string{"重试=9", "重试=x", "失败=爆炸", "未知=1", "重试1", "校验="} {
+		if _, err := ParseStepControl(bad); err == nil {
+			t.Errorf("bad control %q must error", bad)
+		}
+	}
+}
+
+func TestParseFlowTableControlColumn(t *testing.T) {
+	body := "## 步骤\n\n| # | 操作 | 目标 | 值 | 控制 |\n|---|---|---|---|---|\n" +
+		"| 1 | click | `text=导出` |  | 重试=1 校验=networkidle |\n" +
+		"| 2 | extract | `table.logs` | table | 失败=继续 |\n" +
+		"| 3 | wait | `download` | 300s |  |\n"
+	steps, err := ParseFlowTable(body)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if steps[0].Control != "重试=1 校验=networkidle" {
+		t.Errorf("step1 control: %q", steps[0].Control)
+	}
+	if c, _ := ParseStepControl(steps[0].Control); c.Retry != 1 || c.Verify != "networkidle" {
+		t.Errorf("step1 parsed: %+v", c)
+	}
+	if steps[1].Control != "失败=继续" {
+		t.Errorf("step2 control: %q", steps[1].Control)
+	}
+	if steps[2].Control != "" {
+		t.Errorf("empty control cell must stay empty: %q", steps[2].Control)
+	}
+	// A typo'd control cell fails the whole table at planning time.
+	bad := "## 步骤\n\n| # | 操作 | 目标 | 值 | 控制 |\n|---|---|---|---|---|\n| 1 | click | `#a` |  | 重试=99 |\n"
+	if _, err := ParseFlowTable(bad); err == nil || !strings.Contains(err.Error(), "重试") {
+		t.Errorf("bad control must fail at parse: %v", err)
+	}
+}
+
 func TestParseFlowTableErrors(t *testing.T) {
 	if _, err := ParseFlowTable("---\nname: x\n---\n\n## 何时使用\n\nno table"); err == nil {
 		t.Error("missing 步骤 section must error")

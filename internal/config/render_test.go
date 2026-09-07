@@ -97,11 +97,77 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	ds, _ := orig.Provider("test-provider")
 	ds.Effort = "max"
 
+	// Guard against the "renderer drops fields" bug class (audit C1): every
+	// field below was silently lost on save by an earlier renderer version.
+	orig.LLM.TPM = 90000
+	orig.LLM.ReserveMain = 3
+	orig.Dream.SkillColdDays = 45
+	orig.Dream.IdleMinutes = 25
+	orig.Cowork.BrowserHeadless = true
+	orig.Cowork.BrowserUserDataDir = "C:/browser-profile"
+	orig.Cowork.BrowserAttachURL = "http://127.0.0.1:9222"
+	orig.Cowork.RAGEnabled = boolPtr(false)
+	orig.Cowork.VLMBackend = "openai"
+	orig.Cowork.VLMModel = "test-provider"
+	orig.Cowork.ExtractModel = "test-provider"
+	orig.Cowork.ExtractInterval = "30m"
+	orig.Cowork.ExtractConcurrency = 6
+	orig.Cowork.HEPort = 18877
+	orig.Cowork.BrowserUseEnabled = true
+	orig.Cowork.BrowserUsePython = "python3.12"
+	orig.Cowork.BrowserUsePort = 19922
+	orig.Cowork.BrowserUseModel = "test-provider"
+	orig.Cowork.BrowserUseMaxSteps = 44
+	orig.Bot.DesktopWatchers = []BotDesktopWatcher{{Platform: "feishu", ChatType: "group", ChatID: "oc_1"}}
+	orig.Bot.Allowlist.Mode = "review"
+	orig.Bot.Allowlist.TelegramUsers = []string{"tg_1"}
+	orig.Bot.Allowlist.TelegramGroups = []string{"tg_group_1"}
+	orig.Bot.Allowlist.FeishuAdmins = []string{"feishu_admin"}
+	if len(orig.Bot.Connections) == 1 {
+		orig.Bot.Connections[0].SessionMappings[0].ChatType = "p2p"
+		orig.Bot.Connections[0].SessionMappings[0].ChatID = "oc_123"
+	}
+
 	rendered := RenderTOML(orig)
 
 	var got Config
 	if _, err := toml.Decode(rendered, &got); err != nil {
 		t.Fatalf("rendered TOML does not parse: %v\n---\n%s", err, rendered)
+	}
+
+	// The previously-dropped fields must survive the round trip.
+	if got.LLM.TPM != 90000 || got.LLM.ReserveMain != 3 {
+		t.Errorf("[llm] dropped: tpm=%d reserve_main=%d, want 90000/3", got.LLM.TPM, got.LLM.ReserveMain)
+	}
+	if got.Dream.SkillColdDays != 45 || got.Dream.IdleMinutes != 25 {
+		t.Errorf("[dream] dropped: skill_cold_days=%d idle_minutes=%d, want 45/25", got.Dream.SkillColdDays, got.Dream.IdleMinutes)
+	}
+	if !got.Cowork.BrowserHeadless || got.Cowork.BrowserUserDataDir != "C:/browser-profile" || got.Cowork.BrowserAttachURL != "http://127.0.0.1:9222" {
+		t.Errorf("[cowork] browser fields dropped: headless=%v data_dir=%q attach=%q", got.Cowork.BrowserHeadless, got.Cowork.BrowserUserDataDir, got.Cowork.BrowserAttachURL)
+	}
+	if got.Cowork.RAGEnabled == nil || *got.Cowork.RAGEnabled {
+		t.Errorf("[cowork] rag_enabled tri-state dropped: %v", got.Cowork.RAGEnabled)
+	}
+	if got.Cowork.VLMBackend != "openai" || got.Cowork.VLMModel != "test-provider" {
+		t.Errorf("[cowork] vlm fields dropped: backend=%q model=%q", got.Cowork.VLMBackend, got.Cowork.VLMModel)
+	}
+	if got.Cowork.ExtractModel != "test-provider" || got.Cowork.ExtractInterval != "30m" || got.Cowork.ExtractConcurrency != 6 || got.Cowork.HEPort != 18877 {
+		t.Errorf("[cowork] extract/he fields dropped: model=%q interval=%q concurrency=%d he_port=%d", got.Cowork.ExtractModel, got.Cowork.ExtractInterval, got.Cowork.ExtractConcurrency, got.Cowork.HEPort)
+	}
+	if !got.Cowork.BrowserUseEnabled || got.Cowork.BrowserUsePython != "python3.12" || got.Cowork.BrowserUsePort != 19922 || got.Cowork.BrowserUseModel != "test-provider" || got.Cowork.BrowserUseMaxSteps != 44 {
+		t.Errorf("[cowork] browser_use fields dropped: enabled=%v python=%q port=%d model=%q steps=%d", got.Cowork.BrowserUseEnabled, got.Cowork.BrowserUsePython, got.Cowork.BrowserUsePort, got.Cowork.BrowserUseModel, got.Cowork.BrowserUseMaxSteps)
+	}
+	if len(got.Bot.DesktopWatchers) != 1 || got.Bot.DesktopWatchers[0].ChatID != "oc_1" {
+		t.Errorf("[bot] desktop_watchers dropped: %+v", got.Bot.DesktopWatchers)
+	}
+	if got.Bot.Allowlist.Mode != "review" || len(got.Bot.Allowlist.TelegramUsers) != 1 || len(got.Bot.Allowlist.TelegramGroups) != 1 || len(got.Bot.Allowlist.FeishuAdmins) != 1 {
+		t.Errorf("[bot.allowlist] fields dropped: mode=%q tg_users=%v tg_groups=%v admins=%v", got.Bot.Allowlist.Mode, got.Bot.Allowlist.TelegramUsers, got.Bot.Allowlist.TelegramGroups, got.Bot.Allowlist.FeishuAdmins)
+	}
+	if len(got.Bot.Connections) == 1 {
+		sm := got.Bot.Connections[0].SessionMappings[0]
+		if sm.ChatType != "p2p" || sm.ChatID != "oc_123" {
+			t.Errorf("session_mapping chat fields dropped: chat_type=%q chat_id=%q", sm.ChatType, sm.ChatID)
+		}
 	}
 
 	if got.DefaultModel != "test-provider" {

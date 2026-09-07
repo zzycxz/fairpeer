@@ -24,6 +24,7 @@ import (
 	internaldiff "github.com/zzycxz/fairpeer/internal/diff"
 
 	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // SrvConfVersion is one config-file snapshot.
@@ -146,7 +147,7 @@ func saveSrvConf(device, path, text string) (SrvConfVersion, error) {
 	if err != nil {
 		return SrvConfVersion{}, err
 	}
-	if err := os.WriteFile(filepath.Join(dir, id+".json"), b, 0o600); err != nil {
+	if err := fileutil.AtomicWriteFile(filepath.Join(dir, id+".json"), b, 0o600); err != nil {
 		return SrvConfVersion{}, err
 	}
 	return SrvConfVersion{
@@ -185,6 +186,9 @@ func SrvConfVersions(device, path string) []SrvConfVersion {
 
 // SrvConfText returns one snapshot's content.
 func SrvConfText(id string) (string, error) {
+	if !validStoreID(id) {
+		return "", fmt.Errorf("srvconf %s: invalid id", id)
+	}
 	data, err := os.ReadFile(filepath.Join(srvConfDir(), id+".json"))
 	if err != nil {
 		return "", fmt.Errorf("srvconf %s: not found", id)

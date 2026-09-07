@@ -346,10 +346,16 @@ func (s *Store) List() []Skill {
 }
 
 // Read resolves one skill by name, scanning the roots in priority order then the
-// built-ins. ok is false when no such skill exists or the file is unreadable.
+// built-ins. Retired names resolve through the alias table first (see
+// ResolveSkillAlias), so old-name run_skill calls, /<old-name> slashes, and
+// historical-session replays keep working after a merge. The disabled check
+// runs on the CANONICAL name — disabling the successor disables the alias too.
 func (s *Store) Read(name string) (Skill, bool) {
 	if !IsValidName(name) {
 		return Skill{}, false
+	}
+	if canon := ResolveSkillAlias(name); canon != "" && canon != name {
+		name = canon
 	}
 	if s.disabledName(name) {
 		return Skill{}, false
@@ -360,6 +366,20 @@ func (s *Store) Read(name string) (Skill, bool) {
 		}
 	}
 	return Skill{}, false
+}
+
+// skillAliases maps retired skill names to their successors — the STORE-LEVEL
+// half of the merge compatibility story (SKILL_ORCHESTRATION_SPEC §3.5-E):
+// boot's legacySkillRenames migrates config lists, this table keeps the
+// interactive surface (run_skill by old name, /<old-name>, historical session
+// replays/continue_from) resolving after the merge. The map is defined beside
+// the merged skills in builtins.go so the two stay in lockstep.
+var skillAliases = map[string]string{}
+
+// ResolveSkillAlias returns the canonical name for a (possibly retired) skill
+// name; empty when the name has no alias.
+func ResolveSkillAlias(name string) string {
+	return skillAliases[strings.ToLower(strings.TrimSpace(name))]
 }
 
 func (s *Store) discoverRoot(r Root) []Skill {

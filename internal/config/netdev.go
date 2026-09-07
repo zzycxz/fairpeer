@@ -18,6 +18,23 @@ import (
 // agent would then connect to with the user's global credentials
 // (NETDEV_SPEC §7.3). Secrets never live here: entries name credential env
 // vars (*_env) whose values sit in the secret store under netdev/*.
+// NetDevAlertsConfig（[netdev.alerts]）：夜班值守窗口。night_window 形如
+// "22:00-07:00"（可跨午夜；空=无夜班窗口）；night_min 为窗口内允许打扰的
+// 最低分级 critical|warning（默认 critical——夜班只叫人看高价值告警）。
+type NetDevAlertsConfig struct {
+	NightWindow string `toml:"night_window"`
+	NightMin    string `toml:"night_min"`
+}
+
+// NightMinOrDefault returns the configured night-shift minimum band with the
+// critical default applied.
+func (c NetDevAlertsConfig) NightMinOrDefault() string {
+	if strings.TrimSpace(c.NightMin) == "" {
+		return "critical"
+	}
+	return strings.TrimSpace(c.NightMin)
+}
+
 type NetDevConfig struct {
 	Enabled bool             `toml:"enabled"`
 	Trap    NetDevTrapConfig `toml:"trap"`
@@ -39,6 +56,9 @@ type NetDevConfig struct {
 	// BriefingPushTime schedules the daily briefing push ("08:00" local;
 	// "" = off) through the notify outlets.
 	BriefingPushTime string `toml:"briefing_push_time"`
+	// Alerts 是告警联动的值守策略（SCENARIO_SPEC S4-2）：夜班窗口内低于
+	// night_min 分级的巡检通知静默（轮次照常记录，晨报补账）。
+	Alerts NetDevAlertsConfig `toml:"alerts"`
 	// NetworkName is the managed network's display name (e.g. "总部生产网") —
 	// 运维页面的身份标识, like a coding workspace's project name.
 	NetworkName          string          `toml:"network_name"`
@@ -66,11 +86,20 @@ type NetDevConfig struct {
 	// BackupInterval schedules the config-backup sweep ("1h", "24h"; "" = off):
 	// every tick snapshots every managed device's running-config into the
 	// versioned vault — the drift/history backbone.
-	BackupInterval string           `toml:"backup_interval"`
-	Assessment     NetDevAssessment `toml:"assessment"`
+	BackupInterval string `toml:"backup_interval"`
+	// BackupGitMirror turns the vault's git mirror on (WRITE_AUTHZ_SPEC §7.2):
+	// every saveBackup also commits into a git repo inside the backups dir —
+	// dedup'd, blame-able, human-readable history. Missing git binary degrades
+	// gracefully (vault stays the runtime authority).
+	BackupGitMirror bool             `toml:"backup_git_mirror"`
+	Assessment      NetDevAssessment `toml:"assessment"`
 	// Guardrails are the per-ask / per-tool-call controls (NETDEV_SPEC §6):
 	// they reach DOWN into every LLM turn, not just the mode level.
 	Guardrails NetDevGuardrails `toml:"guardrails"`
+	// Write is the device write-authorization block (NETDEV_WRITE_AUTHZ_SPEC):
+	// the global tier floor and the per-turn direct-write budget. Enforcement
+	// lives in the netdev Manager (session-independent), NOT in permission.
+	Write NetDevWriteConfig `toml:"write"`
 	// Projects are site-level scopes (collections of device groups) for the
 	// title-bar switcher — see NetDevProject.
 	Projects []NetDevProject `toml:"projects"`
@@ -183,6 +212,61 @@ type NetDevGuardrails struct {
 	AllowedGroups      []string `toml:"allowed_groups"`
 }
 
+// NetDevWriteTier is a device's write-authorization tier (WRITE_AUTHZ_SPEC §3):
+// sealed (default) = direct writes refused, changes go through proposals;
+// confirm = write commands run directly but each pops an approval card;
+// auto = write commands run directly under the sandwich pipeline (lab).
+type NetDevWriteTier string
+
+const (
+	NetDevWriteSealed  NetDevWriteTier = "sealed"
+	NetDevWriteConfirm NetDevWriteTier = "confirm"
+	NetDevWriteAuto    NetDevWriteTier = "auto"
+)
+
+// ParseNetDevWriteTier validates a configured tier string; empty resolves to
+// sealed — Go's zero value keeps the SAFE default (same convention as
+// NetDevDiscovery.NoMediumConfirm's inverted key).
+func ParseNetDevWriteTier(s string) (NetDevWriteTier, error) {
+	switch NetDevWriteTier(strings.ToLower(strings.TrimSpace(s))) {
+	case "", NetDevWriteSealed:
+		return NetDevWriteSealed, nil
+	case NetDevWriteConfirm:
+		return NetDevWriteConfirm, nil
+	case NetDevWriteAuto:
+		return NetDevWriteAuto, nil
+	default:
+		return "", fmt.Errorf("unknown write tier %q (want sealed|confirm|auto)", s)
+	}
+}
+
+// writeTierRank orders sealed < confirm < auto; "wider" = higher rank.
+func writeTierRank(t NetDevWriteTier) int {
+	switch t {
+	case NetDevWriteConfirm:
+		return 1
+	case NetDevWriteAuto:
+		return 2
+	default:
+		return 0
+	}
+}
+
+// NetDevWriteConfig is the [netdev.write] block: the global tier floor and
+// the per-turn direct-write budget (independent of the read budget).
+type NetDevWriteConfig struct {
+	DefaultTier     string `toml:"default_tier"`      // "" = sealed
+	TurnWriteBudget int    `toml:"turn_write_budget"` // 0 => 10; must be >= 0
+}
+
+// TurnWriteBudgetOrDefault fills the safe default (10 per user turn).
+func (w NetDevWriteConfig) TurnWriteBudgetOrDefault() int {
+	if w.TurnWriteBudget > 0 {
+		return w.TurnWriteBudget
+	}
+	return 10
+}
+
 // NetDevDevice is one managed network device (router/switch/firewall).
 type NetDevDevice struct {
 	Name    string   `toml:"name"`
@@ -193,19 +277,26 @@ type NetDevDevice struct {
 	Port    int      `toml:"port"` // 0 => 22
 	Via     []string `toml:"via"`  // ordered hop names (route to the device)
 	Group   string   `toml:"group"`
+	// WriteOverride tightens (never widens) the device's write tier below its
+	// group's tier (WRITE_AUTHZ_SPEC §4.1: auto 组里的设备可单独降回 sealed，
+	// 反向不行 — validation rejects wider overrides).
+	WriteOverride string `toml:"write_override"`
 	// Role is the user's EXPLICIT device-class override for the topology icon
 	// set (router/switch/firewall/ips/vpn/bastion/server/ap/cloud; Chinese
 	// aliases accepted). Empty = infer (group words → model/name → vendor
 	// default). This is the minimal non-GUI "manual override" of the parked
 	// topology-overlay lot.
-	Role          string   `toml:"role"`
-	Protocols     []string `toml:"protocols"` // priority order: ssh, netconf（telnet 已裁决删除，§6.4）
-	Username      string   `toml:"username"`
-	PasswordEnv   string   `toml:"password_env"`
-	IdentityFile  string   `toml:"identity_file"`
-	PassphraseEnv string   `toml:"passphrase_env"`
-	UseSSHConfig  bool     `toml:"use_ssh_config"`
-	Encoding      string   `toml:"encoding"` // auto | utf-8 | gbk
+	Role      string   `toml:"role"`
+	Protocols []string `toml:"protocols"` // priority order: ssh, netconf（telnet 已裁决删除，§6.4）
+	// GPU（SCENARIO_SPEC S1-2）：智算主机标记——分诊电池追加 GPU 档
+	// （nvidia-smi/npu-smi 只读三表 + XID 异常立案），设备卡显示 GPU 徽标。
+	GPU           bool   `toml:"gpu"`
+	Username      string `toml:"username"`
+	PasswordEnv   string `toml:"password_env"`
+	IdentityFile  string `toml:"identity_file"`
+	PassphraseEnv string `toml:"passphrase_env"`
+	UseSSHConfig  bool   `toml:"use_ssh_config"`
+	Encoding      string `toml:"encoding"` // auto | utf-8 | gbk
 	// OOBURL is the 带外启动器 deep link (NETDEV_SPEC_V2 §6.3): ESXi/堡垒/BMC
 	// Web UI entry. FairPeer only launches the local browser/RDP client — no
 	// RDP/VNC protocol in-product; the click is audited.
@@ -286,6 +377,34 @@ type NetDevGroup struct {
 	Name         string `toml:"name"`
 	Policy       string `toml:"policy"`        // read-only | proposal | proposal+confirm2
 	ChangeWindow string `toml:"change_window"` // e.g. "tue,thu 22:00-24:00"; "" = any time
+	// Write is the group's default write tier (sealed|confirm|auto; "" = inherit
+	// [netdev.write].default_tier). Members inherit it; device overrides may
+	// only tighten. WIDENING this past the confirmed-lock state still needs the
+	// alert confirmation (Manager-side clamp).
+	Write string `toml:"write"`
+	// AutoExpires time-boxes the auto tier (WRITE_AUTHZ_SPEC §3: "72h"): once
+	// the human-confirmed window elapses, the tier degrades to confirm — a
+	// temporary lab grant is never left forgotten open. "" = no box.
+	AutoExpires string `toml:"auto_expires"`
+}
+
+// NetDevWriteTierFor resolves a device's configured write tier: global
+// default → group → device override. Validation enforces tighten-only at load;
+// this resolver also clamps a wider override as a second line of defense
+// (config could be hand-edited past validation by a partially-updated file).
+func (nd NetDevConfig) NetDevWriteTierFor(d NetDevDevice) NetDevWriteTier {
+	tier, _ := ParseNetDevWriteTier(nd.Write.DefaultTier)
+	if g, ok := ndGroupByName(nd, d.Group); ok {
+		if gt, err := ParseNetDevWriteTier(g.Write); err == nil && strings.TrimSpace(g.Write) != "" {
+			tier = gt
+		}
+	}
+	if ot, err := ParseNetDevWriteTier(d.WriteOverride); err == nil && strings.TrimSpace(d.WriteOverride) != "" {
+		if writeTierRank(ot) <= writeTierRank(tier) {
+			tier = ot
+		}
+	}
+	return tier
 }
 
 // NetDevProject is a SITE-level scope (the Mist "site" / industry
@@ -417,6 +536,39 @@ func ValidateNetDev(nd NetDevConfig) error {
 	}
 	if nd.Guardrails.TurnCommandBudget < 0 {
 		return fmt.Errorf("netdev guardrails: turn_command_budget must be >= 0 (0 = unlimited)")
+	}
+	// Write tiers (WRITE_AUTHZ_SPEC §4): parse every configured tier loudly, and
+	// enforce tighten-only overrides — a device may drop below its group's tier
+	// but never widen past it (widening belongs to the group + alert flow).
+	if _, err := ParseNetDevWriteTier(nd.Write.DefaultTier); err != nil {
+		return fmt.Errorf("netdev write: default_tier: %v", err)
+	}
+	if nd.Write.TurnWriteBudget < 0 {
+		return fmt.Errorf("netdev write: turn_write_budget must be >= 0 (0 = default 10)")
+	}
+	for _, g := range nd.Groups {
+		if _, err := ParseNetDevWriteTier(g.Write); err != nil {
+			return fmt.Errorf("netdev group %q: write: %v", g.Name, err)
+		}
+		if s := strings.TrimSpace(g.AutoExpires); s != "" {
+			if d, err := time.ParseDuration(s); err != nil || d <= 0 {
+				return fmt.Errorf("netdev group %q: auto_expires must be a positive duration (e.g. 72h), got %q", g.Name, s)
+			}
+		}
+	}
+	for _, d := range nd.Devices {
+		ot, err := ParseNetDevWriteTier(d.WriteOverride)
+		if err != nil {
+			return fmt.Errorf("netdev device %q: write_override: %v", d.Name, err)
+		}
+		base := nd.Write.DefaultTier
+		if g, ok := ndGroupByName(nd, d.Group); ok {
+			base = g.Write
+		}
+		bt, _ := ParseNetDevWriteTier(base)
+		if writeTierRank(ot) > writeTierRank(bt) {
+			return fmt.Errorf("netdev device %q: write_override %q is wider than its group tier %q — overrides may only tighten (raise the group tier instead)", d.Name, ot, bt)
+		}
 	}
 	seenProjects := map[string]bool{}
 	for _, p := range nd.Projects {

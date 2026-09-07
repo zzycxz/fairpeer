@@ -261,7 +261,12 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
           </div>
           <span className="btn btn--secondary btn--small" role="button" onClick={() => addEntry(effectiveAddDevice, addKind, addKind === "system" ? "main" : addTarget)}>{"＋ "}{t("ndv.logwb.addSource")}</span>
         </div>
-        {(devices.length > 0 && hosts.length === 0) && <div className="ndv__hint">{t("ndv.logwb.noServerDevices")}</div>}
+        {(devices.length > 0 && hosts.length === 0) && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="ndv__hint" style={{ flex: 1 }}>{t("ndv.logwb.noServerDevices")}</div>
+            <button className="btn btn--small" role="button" onClick={() => window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-settings", { detail: "netdev" }))}>{t("ndv.goSettings")}</button>
+          </div>
+        )}
       </div>
 
       {/* 主区：合并时间线 + 底栏搜索 */}
@@ -271,7 +276,7 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
           <input className="mem-input" type="number" style={{ width: 60 }} value={tailN} min={1} max={1000}
             onChange={e => setTailN(Math.min(1000, Math.max(1, Number(e.target.value) || 200)))} />
           <label className="ndv__meta">{t("ndv.logp.since")}</label>
-          <input className="mem-input" style={{ width: 128 }} value={since} onChange={e => setSince(e.target.value)} placeholder="2026-08-27 10:00 或 -1h" />
+          <input className="mem-input" style={{ width: 128 }} value={since} onChange={e => setSince(e.target.value)} placeholder={`${new Date().toISOString().slice(0, 10)} 10:00 或 -1h`} />
           <span className={`btn btn--small ${busy ? "" : "btn--primary"}`} role="button" onClick={() => void fetchAll()}>{busy ? t("ndv.logp.reading") : t("ndv.logwb.readMerge")}</span>
           <span className="ndv__meta" style={{ marginLeft: 6 }}>{t("ndv.logwb.relSources")}</span>
           {(["change", "finding", "event"] as const).map(k => (

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -218,5 +219,97 @@ func TestGatewaySessionOptionsUseChannelOverride(t *testing.T) {
 	model, root = gw.sessionOptionsForPlatform(PlatformQQ)
 	if model != "global-model" || root != "/global" {
 		t.Fatalf("qq options = %q,%q; want global defaults", model, root)
+	}
+}
+
+// --- P0-3 regression tests: allowlist default-safety semantics ---
+
+// TestGatewayGroupRequiresExplicitEntry closes the "no groups configured =
+// every group allowed" escape: a group chat must match an explicit entry.
+func TestGatewayGroupRequiresExplicitEntry(t *testing.T) {
+	cfg := GatewayConfig{
+		Allowlist: AllowlistConfig{
+			Enabled: true,
+			Users: map[Platform][]string{
+				PlatformQQ: {"allowed_user"},
+			},
+			// No Groups configured at all.
+		},
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(cfg, nil, logger)
+
+	if gw.checkAllowlist(PlatformQQ, InboundMessage{Platform: PlatformQQ, ChatType: ChatGroup, ChatID: "any_group", UserID: "allowed_user"}) {
+		t.Error("group chat with empty group allowlist must be rejected, not fall through")
+	}
+}
+
+// TestGatewayOpenModeEnrollingMessageNotExecuted pins that in open mode the
+// message that triggers auto-enrollment is never executed — only acknowledged.
+func TestGatewayOpenModeEnrollingMessageNotExecuted(t *testing.T) {
+	adapter := newFakeAdapter(PlatformQQ, "fake-qq")
+	cfg := GatewayConfig{
+		Enabled:   map[Platform]bool{PlatformQQ: true},
+		Allowlist: AllowlistConfig{Enabled: true, Mode: "open"},
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(cfg, map[Platform]Adapter{PlatformQQ: adapter}, logger)
+
+	gw.handleMessage(context.Background(), PlatformQQ, adapter, InboundMessage{
+		Platform: PlatformQQ, ChatType: ChatDM, ChatID: "dm1", UserID: "stranger", Text: "run evil command",
+	})
+
+	sent := adapter.sentMessages()
+	if len(sent) == 0 || !strings.Contains(sent[0].Text, "重新发送") {
+		t.Fatalf("expected enrollment ack asking to resend, got %+v", sent)
+	}
+	// The user IS enrolled for subsequent messages…
+	if !gw.checkAllowlist(PlatformQQ, InboundMessage{Platform: PlatformQQ, ChatType: ChatDM, ChatID: "dm1", UserID: "stranger"}) {
+		t.Error("stranger should be enrolled after the first message")
+	}
+	// …but no turn was started for the enrolling message itself.
+	gw.mu.Lock()
+	turns := len(gw.controllers)
+	gw.mu.Unlock()
+	if turns != 0 {
+		t.Fatalf("enrolling message must not start a turn, got %d controllers", turns)
+	}
+}
+
+// TestGatewayAdminGate: with admins configured, approval-class commands are
+// admin-only; with no admins configured everyone allowlisted may use them.
+func TestGatewayAdminGate(t *testing.T) {
+	cfg := GatewayConfig{
+		Allowlist: AllowlistConfig{
+			Enabled: true,
+			Users: map[Platform][]string{
+				PlatformQQ: {"admin_1", "plain_user"},
+			},
+			Admins: map[Platform][]string{
+				PlatformQQ: {"admin_1"},
+			},
+		},
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(cfg, nil, logger)
+
+	if !gw.isAdmin(PlatformQQ, "admin_1") {
+		t.Error("admin_1 should be admin")
+	}
+	if gw.isAdmin(PlatformQQ, "plain_user") {
+		t.Error("plain_user should not be admin once an admin list exists")
+	}
+	if !gw.isAdmin(PlatformFeishu, "anyone") {
+		t.Error("platform without configured admins keeps backward-compat allow-all")
+	}
+
+	// /approve from a non-admin is refused before touching controllers.
+	adapter := newFakeAdapter(PlatformQQ, "fake-qq")
+	gw.handleSlashCommand(context.Background(), adapter, "qq:dm:plain", InboundMessage{
+		Platform: PlatformQQ, ChatType: ChatDM, ChatID: "dm", UserID: "plain_user", Text: "/approve 123",
+	})
+	sent := adapter.sentMessages()
+	if len(sent) == 0 || !strings.Contains(sent[0].Text, "仅限管理员") {
+		t.Fatalf("expected admin-gate refusal for /approve, got %+v", sent)
 	}
 }

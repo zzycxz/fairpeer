@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -102,3 +103,77 @@ func (n testNotifierCount) Notify(name, body string) { *n.count++ }
 type notifierCaptureTime struct{ t *time.Time }
 
 func (n notifierCaptureTime) Notify(name, body string) { *n.t = time.Now() }
+
+// TestInFlightTaskNotDoubleFired guards the concurrent double-fire fix: while
+// a task's run is executing, its NextRun is still the stale past-due instant
+// that launched it (it is recomputed only when the run completes). Any
+// Create/Update/Delete/Start during the run used to re-arm a 0-delay timer
+// that fired the SAME task again while the first run was still in-flight.
+// fireDue now skips in-flight tasks and armNextTimerLocked ignores their
+// stale NextRun, so the handler must run exactly once.
+func TestInFlightTaskNotDoubleFired(t *testing.T) {
+	s := New(t.TempDir() + "/inflight.json")
+	s.SetLogger(func(f string, a ...any) { t.Logf("[LOG] "+f, a...) })
+	task, err := s.Create(ScheduledTask{Name: "blocker", Expression: "every 1h", Prompt: "x", ConfirmHighFrequency: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Backdate so the task is immediately due when Start arms the timer.
+	s.mu.Lock()
+	s.tasks[0].NextRun = time.Now().Add(-time.Second)
+	s.mu.Unlock()
+
+	var calls int32
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	s.SetRunner(fakeRunner{fn: func(context.Context, string, string) (string, error) {
+		atomic.AddInt32(&calls, 1)
+		entered <- struct{}{}
+		<-release // hold the task in-flight ~the test's whole duration
+		return "ran", nil
+	}})
+	s.Start()
+	defer s.Stop()
+
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task never fired")
+	}
+
+	// While the run holds the task in-flight, exercise the re-arm paths that
+	// previously armed a 0-delay timer for the stale past-due NextRun. (No
+	// mid-run Update here: Update itself recomputes NextRun to a future
+	// instant, closing the race window — that path is covered by
+	// TestFireDueRespectsMidRunUpdate.)
+	if _, err := s.Create(ScheduledTask{Name: "other", Expression: "daily 09:00", Prompt: "y"}); err != nil {
+		t.Fatal(err)
+	}
+	s.Stop()
+	s.Start()
+	// Give any (buggy) duplicate timer ample time to fire.
+	time.Sleep(500 * time.Millisecond)
+
+	// Let the first (and only) run finish, wait for its bookkeeping.
+	close(release)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if tk, ok := s.Get(task.ID); ok && tk.RunCount == 1 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	time.Sleep(500 * time.Millisecond) // let any stray duplicate land
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("handler ran %d times, want exactly 1 (concurrent double-fire)", got)
+	}
+	tk, _ := s.Get(task.ID)
+	if tk.RunCount != 1 {
+		t.Errorf("RunCount = %d, want 1", tk.RunCount)
+	}
+	// Completion must reschedule into the future (and the timer re-arm).
+	if !tk.NextRun.After(time.Now()) {
+		t.Errorf("NextRun = %v, want a future instant after the completed run", tk.NextRun)
+	}
+}

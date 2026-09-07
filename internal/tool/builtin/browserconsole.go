@@ -135,6 +135,10 @@ func persistentBrowserSession(resume bool) (*browserSession, error) {
 			s.ownsBrowser = true
 			if resume {
 				pickFirstConsoleTab(s)
+				// Sweep leftover blank tabs (session-restore resurrects the
+				// ones crashed runs never cancelled) — delayed, the restore
+				// materializes tabs asynchronously.
+				go sweepBlankTabsLater(s)
 				// Push the first frame at once — the takeover lands on a page
 				// the user was already looking at, and the panel preview
 				// should show it immediately, not only after the next action.
@@ -187,6 +191,10 @@ func finishConsoleSpawn(h *browserlaunch.Handle) (*browserSession, error) {
 	consoleMu.Lock()
 	consoleSpawnHandle = h
 	consoleMu.Unlock()
+	// A fresh spawn still restores last session's tabs — including any blank
+	// tabs crashed runs left behind. Sweep them on a delay (the restore is
+	// asynchronous); keep the tab we're driving.
+	go sweepBlankTabsLater(s)
 	// newAttachedSession already sets attached=true: closing the console
 	// session (or the idle reaper, or fairpeer's exit) only disconnects —
 	// the persistent browser stays alive for the next takeover.
@@ -977,7 +985,11 @@ func ConsoleScroll(direction string, amount int) (string, error) {
 	if amount <= 0 {
 		amount = 3
 	}
-	return consoleExec(browserScroll{}.Execute, map[string]any{"direction": direction, "amount": amount})
+	// amount counts SCREENS here (panel/manual-scroll dialect) while
+	// browser_scroll takes pixels — convert at this boundary so a "3-screen"
+	// scroll isn't a 3px no-op. browser_scroll's raw-pixel contract is
+	// unchanged.
+	return consoleExec(browserScroll{}.Execute, map[string]any{"direction": direction, "amount": scrollScreensToPx(amount)})
 }
 
 // ConsoleSelectOption picks an option on a <select> by value or label.
@@ -1010,6 +1022,16 @@ func ConsoleWait(condition string, timeoutSec int) (string, error) {
 		timeoutSec = 90
 	}
 	return consoleExec(browserWait{}.Execute, map[string]any{"condition": condition, "timeout": timeoutSec})
+}
+
+// ConsoleSaveStepEvidence drops a screenshot of the console session's current
+// page into the evidence dir (harness failure 留证). Returns "" on failure.
+func ConsoleSaveStepEvidence(label string) string {
+	s, err := consoleSession()
+	if err != nil {
+		return ""
+	}
+	return saveStepEvidence(s, label)
 }
 
 // DownloadInfo describes one finished browser download — the structured form

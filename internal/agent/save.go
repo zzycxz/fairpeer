@@ -57,15 +57,15 @@ func loadSessionHMACKey() ([]byte, error) {
 			if !os.IsNotExist(sessionKeyCache.err) {
 				return // unreadable for a non-missing reason — surface it
 			}
-			// First run: generate and persist a random 32-byte key.
+			// First run: generate and persist a random 32-byte key. CSPRNG, not
+			// a timestamp: a time-seeded key is guessable to anyone who can
+			// bracket the key file's creation window, and the HMAC is the only
+			// thing standing between that attacker and forged tool calls.
 			k := make([]byte, 32)
-			for i := range k {
-				k[i] = byte(time.Now().UnixNano() >> uint(i%8*8))
+			if _, rerr := rand.Read(k); rerr != nil {
+				sessionKeyCache.err = fmt.Errorf("session integrity: generate key: %v", rerr)
+				return
 			}
-			// Mix in higher-resolution entropy if available; fall back to the
-			// time-seeded bytes above. crypto/rand would be ideal but we avoid a
-			// new import here — the key just needs to be stable & unguessable by
-			// an attacker who can't already read the key file (0600).
 			if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
 				sessionKeyCache.err = fmt.Errorf("session integrity: mkdir key dir: %w", err)
 				return

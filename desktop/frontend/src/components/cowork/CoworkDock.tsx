@@ -47,7 +47,7 @@ import { useToast } from "../../lib/toast";
 import { CustomSelect } from "./CustomSelect";
 import { ContextPanel } from "../ContextPanel";
 import { DockTabs, useDockTabState } from "../DockTabs";
-import { BrowserMirrorPanel } from "./BrowserMirrorPanel";
+import { BrowserConsolePanel } from "../netdev/BrowserConsolePanel";
 
 // realApp mirrors bridge.ts's private helper: returns the Wails binding only
 // when window.go.main.App is present (i.e. we are inside the desktop shell).
@@ -60,6 +60,8 @@ import { useT } from "../../lib/i18n";
 import type {
   CalendarEventView,
   ContextInfo,
+  InboxItem,
+  MailFullMessage,
   MailProbeResult,
   RagCollectionView,
   RagNodeView,
@@ -85,17 +87,6 @@ const PALETTE: string[] = [
   "var(--danger, #f85149)",
   "var(--info, #58a6ff)",
 ];
-
-// InboxItem is the trimmed envelope returned by app.InboxPreview. types.ts
-// declares preview as required, but the backend may omit it on some mails, so
-// we mirror the runtime shape with an optional preview here.
-interface InboxItem {
-  from: string;
-  to: string;
-  date: string;
-  subject: string;
-  preview?: string;
-}
 
 // Window.runtime type for the wails EventsOn binding.
 interface WailsRuntimeLike {
@@ -136,15 +127,19 @@ function formatDateTime(value: string): string {
 
 export interface CoworkDockProps {
   cwd?: string;
+  /** 浏览器控制台面板"交给 AI"的对话插入通道。 */
+  onInsertComposer?: (text: string) => void;
   maximized: boolean;
   onClose: () => void;
   onToggleMaximized: () => void;
   mode?: "default" | "rag";
   onEntityClick?: (name: string) => void;
   onFileClick?: (path: string) => void;
-  // Context overview tab data — forwarded to DefaultDock's "概览" (Overview)
-  // tab, which renders the slim ContextPanel (stats strip + turn facts).
-  // busy disables the compact button while the active tab is streaming.
+  // Turns-tab data — forwarded to DefaultDock's "轮次" (Turns) tab, which
+  // renders the same slim ContextPanel (stats strip + turn facts) as the
+  // coding-mode dock; cowork has no UsageChip, so that strip is its only
+  // usage/context-pressure view. busy disables the compact button while the
+  // active tab is streaming.
   contextInfo?: ContextInfo;
   sessionTokens?: number;
   activeTabId?: string;
@@ -154,6 +149,7 @@ export interface CoworkDockProps {
 
 export function CoworkDock({
   cwd,
+  onInsertComposer,
   maximized,
   onClose,
   onToggleMaximized,
@@ -171,6 +167,7 @@ export function CoworkDock({
   ) : (
     <DefaultDock
       cwd={cwd}
+      onInsertComposer={onInsertComposer}
       maximized={maximized}
       onClose={onClose}
       onToggleMaximized={onToggleMaximized}
@@ -197,8 +194,21 @@ type DefaultTab = "today" | "mail" | "files" | "overview" | "browser";
 const DEFAULT_TAB_CATALOG: readonly DefaultTab[] = ["today", "mail", "files", "overview"];
 const COWORK_DOCK_TABS_KEY = "fairpeer.coworkDockTabs";
 
+// --- 侧栏页签直达（邮件等） -----------------------------------------------
+// 侧栏入口请求 dock 切到某个页签。activePanel==="rag" 时 DefaultDock 未
+// 挂载（RagDock 顶替），直接事件会丢——请求落进 pending，DefaultDock 每次
+// 挂载先补消费一次，调用方配合先 setActivePanel("taskCenter") 即可靠送达。
+let pendingDockTab: DefaultTab | null = null;
+const dockTabRequestListeners = new Set<() => void>();
+
+export function requestCoworkDockTab(tab: DefaultTab): void {
+  pendingDockTab = tab;
+  for (const listener of dockTabRequestListeners) listener();
+}
+
 function DefaultDock({
   cwd,
+  onInsertComposer,
   maximized,
   onClose,
   onToggleMaximized,
@@ -209,6 +219,7 @@ function DefaultDock({
   busy,
 }: {
   cwd?: string;
+  onInsertComposer?: (text: string) => void;
   maximized: boolean;
   onClose: () => void;
   onToggleMaximized: () => void;
@@ -260,11 +271,29 @@ function DefaultDock({
     [],
   );
 
+  // 侧栏页签直达（requestCoworkDockTab）：挂载即补消费 pending 请求——
+  // rag→default 切换期间到达的请求在监听器就位前不会丢。
+  useEffect(() => {
+    const consume = () => {
+      if (!pendingDockTab) return;
+      const key = pendingDockTab;
+      pendingDockTab = null;
+      openTab(key);
+    };
+    dockTabRequestListeners.add(consume);
+    consume();
+    return () => {
+      dockTabRequestListeners.delete(consume);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
   const TAB_DEFS: { key: DefaultTab; label: string; icon: React.ReactNode }[] = [
     { key: "today", label: t("coworkDock.today"), icon: <CalendarDays size={13} /> },
     { key: "mail", label: t("coworkDock.mail"), icon: <Mail size={13} /> },
     { key: "files", label: t("coworkDock.files"), icon: <FileText size={13} /> },
-    { key: "overview", label: t("coworkDock.overview"), icon: <Activity size={13} /> },
+    { key: "overview", label: t("rightDock.turns"), icon: <Activity size={13} /> },
     { key: "browser", label: t("coworkDock.browser"), icon: <MonitorPlay size={13} /> },
   ];
 
@@ -314,7 +343,8 @@ function DefaultDock({
             busy={busy}
           />
         )}
-        {tab === "browser" && <BrowserMirrorPanel />}
+        {/* 浏览器归属办公（2026-09-06）：dock 的 browser 页签挂完整控制台面板（交互/记录/技能库/巡检）——中心工作台是大镜像+F12，右侧是操作面板；面板内联镜像在中心工作台激活时自动收起（bench-changed），无双画面。 */}
+        {tab === "browser" && <BrowserConsolePanel onInsertComposer={onInsertComposer} />}
       </div>
     </aside>
   );
@@ -626,7 +656,6 @@ function MailView() {
   const [probe, setProbe] = useState<MailProbeResult | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [openKey, setOpenKey] = useState<string | null>(null);
   // folder: "inbox" (unread INBOX) or "sent" (Sent folder). Drives which mailbox
   // InboxPreview reads and the tab label.
   const [folder, setFolder] = useState<"inbox" | "sent">("inbox");
@@ -634,6 +663,16 @@ function MailView() {
   // Cache both folders so switching inbox/sent is instant (no re-fetch).
   const [inboxData, setInboxData] = useState<InboxItem[]>([]);
   const [sentData, setSentData] = useState<InboxItem[]>([]);
+
+  // Reading pane (2026-09-06): the list only carries a 2000-char snippet, so
+  // opening a row swaps the list for the full letter, fetched on demand
+  // (ReadMailFull — one IMAP round trip per open). `reading` is the row's
+  // index; null means list mode.
+  const [reading, setReading] = useState<number | null>(null);
+  const [full, setFull] = useState<MailFullMessage | null>(null);
+  const [fullLoading, setFullLoading] = useState(false);
+  const [fullErr, setFullErr] = useState("");
+  const [inserted, setInserted] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -643,15 +682,9 @@ function MailView() {
       // mount and on explicit refresh-button click — NOT on folder switch, so
       // switching tabs is instant.
       const [mb, inb, sent] = await Promise.all([
-        (app as unknown as { ProbeMailAccount: (name: string) => Promise<MailProbeResult> })
-          .ProbeMailAccount("")
-          .catch(() => ({ ok: false, status: "error", message: t("cowork.wailsError") } as MailProbeResult)),
-        (app as unknown as { InboxPreview?: (mailbox: string, n: number) => Promise<InboxItem[]> })
-          .InboxPreview?.("INBOX", 30) ??
-          Promise.resolve([] as InboxItem[]),
-        (app as unknown as { InboxPreview?: (mailbox: string, n: number) => Promise<InboxItem[]> })
-          .InboxPreview?.("Sent", 10) ??
-          Promise.resolve([] as InboxItem[]),
+        app.ProbeMailAccount("").catch(() => ({ ok: false, status: "error", message: t("cowork.wailsError") }) as MailProbeResult),
+        app.InboxPreview("INBOX", 30).catch(() => [] as InboxItem[]),
+        app.InboxPreview("Sent", 10).catch(() => [] as InboxItem[]),
       ]);
       setProbe(mb);
       setInboxData(inb);
@@ -661,12 +694,48 @@ function MailView() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   // Load once on mount only (not on folder switch).
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  const openMessage = useCallback(async (item: InboxItem, index: number, box: "inbox" | "sent") => {
+    setReading(index);
+    setFull(null);
+    setFullErr("");
+    setInserted(false);
+    setFullLoading(true);
+    try {
+      // limit 必须与 refresh() 拉该文件夹列表用的窗口一致（收件箱 30 /
+      // 已发送 10）——后端按同一窗口把 index 定位到具体邮件，窗口不一致
+      // 时序号指向另一封信，防错校验会把正常点击误报成"列表已变化"。
+      const limit = box === "sent" ? 10 : 30;
+      setFull(await app.ReadMailFull(box === "sent" ? "Sent" : "INBOX", limit, index, item.subject, item.date));
+    } catch (e) {
+      setFullErr(String(e instanceof Error ? e.message : e));
+    } finally {
+      setFullLoading(false);
+    }
+  }, []);
+
+  const backToList = useCallback(() => {
+    setReading(null);
+    setFull(null);
+    setFullErr("");
+    setInserted(false);
+  }, []);
+
+  // 让 AI 处理：把信头 + 正文引文塞进办公对话输入框——收发/回复/总结都
+  // 由对话里的邮件工具接力（本面板只读，不直接发信）。
+  const askAI = useCallback(() => {
+    if (!full) return;
+    const quoted = `请帮我处理这封邮件。\n主题：${full.subject}\n发件人：${full.from}\n时间：${formatDateTime(full.date)}\n正文：\n${full.body}`;
+    window.dispatchEvent(new CustomEvent("cowork:insert-text", { detail: quoted }));
+    setInserted(true);
+    window.setTimeout(() => setInserted(false), 2500);
+  }, [full]);
 
   // The displayed list comes from the cached folder data — instant switch.
   const inbox = folder === "sent" ? sentData : inboxData;
@@ -677,29 +746,36 @@ function MailView() {
   return (
     <div className="cowork-mailtab">
       <div className="cowork-mailtab__head">
-        <div className="cowork-mailtab__status">
-          <span
-            className={"mail-status-dot mail-status-dot--" + (mailOk ? "ok" : mailUnconfigured ? "idle" : "error")}
-          />
-          <span>
-            {mailUnconfigured
-              ? t("coworkDock.mailUnconfigured")
-              : mailOk
-                ? t("coworkDock.mailConnected")
-                : probe?.message || t("coworkDock.mailError")}
-          </span>
-        </div>
+        {reading !== null ? (
+          <button className="cowork-mailread__back" onClick={backToList} title={t("coworkDock.mailBack")}>
+            ‹ {t("coworkDock.mailBack")}
+          </button>
+        ) : (
+          <div className="cowork-mailtab__status">
+            <span
+              className={"mail-status-dot mail-status-dot--" + (mailOk ? "ok" : mailUnconfigured ? "idle" : "error")}
+            />
+            <span>
+              {mailUnconfigured
+                ? t("coworkDock.mailUnconfigured")
+                : mailOk
+                  ? t("coworkDock.mailConnected")
+                  : probe?.message || t("coworkDock.mailError")}
+            </span>
+          </div>
+        )}
         <button
           className="cowork-mailtab__refresh"
-          onClick={() => refresh()}
+          onClick={() => { backToList(); refresh(); }}
           title={t("common.refresh")}
         >
           <RefreshCw size={13} className={loading ? "spin" : ""} />
         </button>
       </div>
 
-      {/* Inbox / Sent folder switch. Only show when mail is configured. */}
-      {!mailUnconfigured && !error && (
+      {/* Inbox / Sent folder switch. Only show when mail is configured and the
+          list (not the reading pane) is up. */}
+      {!mailUnconfigured && !error && reading === null && (
         <div className="cowork-mailtab__folders">
           <button
             className={"cowork-mailtab__folder" + (folder === "inbox" ? " cowork-mailtab__folder--active" : "")}
@@ -716,7 +792,35 @@ function MailView() {
         </div>
       )}
 
-      {loading ? (
+      {reading !== null ? (
+        fullLoading ? (
+          <div className="cowork-dock__loading">…</div>
+        ) : fullErr ? (
+          <div className="cowork-today__empty">{fullErr}</div>
+        ) : full ? (
+          <div className="cowork-mailread">
+            <div className="cowork-mailread__subject" title={full.subject}>{full.subject}</div>
+            <div className="cowork-mailread__meta">
+              <span className="cowork-mailread__from" title={full.from}>{full.from}</span>
+              <span className="cowork-mailread__date">{formatDateTime(full.date)}</span>
+            </div>
+            {!!full.attachments?.length && (
+              <div className="cowork-mailread__atts">
+                <span className="cowork-mailread__attslabel">{t("coworkDock.mailAttach")}</span>
+                {full.attachments.map((a, i) => (
+                  <span key={i} className="cowork-mailread__att" title={a.name}>
+                    📎 {a.name}{a.size > 0 ? ` (${formatMailSize(a.size)})` : ""}
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="cowork-mailread__body">{full.body || t("coworkDock.mailNoBody")}</div>
+            <button className="cowork-mailread__ask" onClick={askAI} disabled={!full.body}>
+              {inserted ? t("coworkDock.mailInserted") : t("coworkDock.mailAskAI")}
+            </button>
+          </div>
+        ) : null
+      ) : loading ? (
         <div className="cowork-dock__loading">…</div>
       ) : error ? (
         <div className="cowork-today__empty">{error}</div>
@@ -731,29 +835,26 @@ function MailView() {
       ) : mailOk ? (
         inbox && inbox.length !== 0 ? (
           <ul className="cowork-mailtab__list">
-            {inbox.map((m, i) => {
-              const key = `${m.date}-${i}`;
-              const open = openKey === key;
-              return (
-                <li
-                  key={key}
-                  className={"cowork-mailtab__item" + (open ? " cowork-mailtab__item--open" : "")}
-                  onClick={() => setOpenKey(open ? null : key)}
-                >
-                  <div className="cowork-mailtab__item-head">
-                    {/* Inbox shows sender (from); Sent shows recipient (to). */}
-                    <span className="cowork-mailtab__from" title={folder === "sent" ? m.to : m.from}>
-                      {folder === "sent" ? (m.to) : m.from}
-                    </span>
-                    <span className="cowork-mailtab__date">{formatDateTime(m.date)}</span>
-                  </div>
-                  <div className="cowork-mailtab__subject" title={m.subject}>
-                    {m.subject}
-                  </div>
-                  {open && m.preview && <div className="cowork-mailtab__preview">{m.preview}</div>}
-                </li>
-              );
-            })}
+            {inbox.map((m, i) => (
+              <li
+                key={`${m.date}-${i}`}
+                className="cowork-mailtab__item"
+                onClick={() => void openMessage(m, i, folder)}
+              >
+                <div className="cowork-mailtab__item-head">
+                  {/* Inbox shows sender (from); Sent shows recipient (to). */}
+                  <span className="cowork-mailtab__from" title={folder === "sent" ? m.to : m.from}>
+                    {folder === "sent" ? (m.to) : m.from}
+                  </span>
+                  {!!m.attachments?.length && <span className="cowork-mailtab__clip" title={t("coworkDock.mailAttach")}>📎{m.attachments.length}</span>}
+                  <span className="cowork-mailtab__date">{formatDateTime(m.date)}</span>
+                </div>
+                <div className="cowork-mailtab__subject" title={m.subject}>
+                  {m.subject}
+                </div>
+                {m.preview && <div className="cowork-mailtab__preview">{m.preview}</div>}
+              </li>
+            ))}
           </ul>
         ) : (
           <div className="cowork-today__empty">{t("coworkDock.noUnreadMail")}</div>
@@ -763,6 +864,14 @@ function MailView() {
       )}
     </div>
   );
+}
+
+// formatMailSize renders an attachment byte size as B/KB/MB for the 📎 chips.
+function formatMailSize(bytes: number): string {
+  if (!bytes || bytes <= 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // 递归过滤 RagNodeView 树结构，若子树有匹配项则保留并展示父级文件夹
@@ -1369,7 +1478,7 @@ function RagDock({
                         onStartExtract={(n) => {
                           if (n.path) {
                             (app as unknown as { RagStartExtract: (c: string, t: string, m: string) => Promise<void> })
-                              .RagStartExtract(activeCollection, n.path, "incremental")
+                              .RagStartExtract(n.collection || activeCollection, n.path, "incremental")
                               .then(() => refreshTree())
                               .catch(() => refreshTree());
                           }
@@ -1387,7 +1496,7 @@ function RagDock({
                           void confirm({ title: t("cowork.deleteExtracted"), message: t("cowork.deleteExtractedMsg", { path: n.path }) }).then((ok) => {
                             if (!ok) return;
                             (app as unknown as { RagRemovePath: (c: string, p: string) => Promise<void> })
-                              .RagRemovePath(activeCollection, n.path)
+                              .RagRemovePath(n.collection || activeCollection, n.path)
                               .then(() => refreshTree())
                               .catch(() => refreshTree());
                           });

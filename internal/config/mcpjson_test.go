@@ -481,3 +481,54 @@ func TestLoadLegacyMCP(t *testing.T) {
 		t.Errorf("empty path: got %+v, want nil", got)
 	}
 }
+
+// TestMergeMCPJSONRequiresOptIn is the supply-chain regression: servers from a
+// cloned repo's .mcp.json must never auto-start — boot would otherwise execute
+// the repo's arbitrary `command` on session start without any user approval.
+func TestMergeMCPJSONRequiresOptIn(t *testing.T) {
+	entries := []PluginEntry{
+		{Name: "repo-server", Type: "stdio", Command: "evil-helper"},           // no explicit autostart
+		{Name: "eager-repo-server", Type: "stdio", Command: "evil-helper-2"},   // even if the file says true…
+	}
+	autoTrue := true
+	entries[1].AutoStart = &autoTrue
+
+	c := Default()
+	before := len(c.Plugins)
+	c.mergeMCPJSON(entries)
+	if len(c.Plugins) != before+2 {
+		t.Fatalf("entries not merged: %d -> %d", before, len(c.Plugins))
+	}
+	for _, p := range c.AutoStartPlugins() {
+		if p.Name == "repo-server" || p.Name == "eager-repo-server" {
+			t.Errorf(".mcp.json-sourced server %q appears in AutoStartPlugins — boot would spawn it", p.Name)
+		}
+	}
+
+	// TOML still wins: once the user has an entry in fairpeer.toml, the merge
+	// leaves it (and its autostart choice) alone.
+	c2 := Default()
+	c2.Plugins = append(c2.Plugins, PluginEntry{Name: "repo-server", Type: "stdio", Command: "my-own-build", AutoStart: &autoTrue})
+	c2.mergeMCPJSON(entries)
+	repoCount := 0
+	for _, p := range c2.Plugins {
+		if p.Name == "repo-server" {
+			repoCount++
+		}
+	}
+	if repoCount != 1 {
+		t.Fatalf("TOML entry was duplicated by the merge: %d occurrences", repoCount)
+	}
+	found := false
+	for _, p := range c2.AutoStartPlugins() {
+		if p.Name == "repo-server" {
+			found = true
+			if p.Command != "my-own-build" {
+				t.Errorf("TOML entry was overridden by .mcp.json: command=%q", p.Command)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("user's TOML autostart entry no longer autostarts")
+	}
+}

@@ -125,12 +125,15 @@ func (c *SignalClient) connectAndServe(ctx context.Context) error {
 	ts := time.Now().Unix()
 	sig := ed25519.Sign(c.longPriv, []byte(c.devID+strconv.FormatInt(ts, 10)))
 	uEnc := base64.URLEncoding.WithPadding(base64.NoPadding)
-	// cfg.SignalURL is http(s):// (Pairing uses plain HTTP POSTs against the
-	// same host); the WS dialer needs ws(s)://.
+	// cfg.SignalURL is ws(s):// or http(s):// (Pairing uses plain HTTP POSTs
+	// against the same host); the WS dialer needs ws(s)://. An explicit wss://
+	// must stay encrypted — silently rewriting it to ws:// would send the
+	// signed auth query (and SDP) in the clear.
 	base := c.signalURL
 	if i := strings.Index(base, "://"); i >= 0 {
 		scheme := "ws"
-		if strings.HasPrefix(base, "https://") {
+		switch {
+		case strings.HasPrefix(base, "wss://"), strings.HasPrefix(base, "https://"):
 			scheme = "wss"
 		}
 		base = scheme + "://" + base[i+3:]

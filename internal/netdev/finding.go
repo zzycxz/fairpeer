@@ -8,9 +8,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // Findings (NETDEV_SPEC §10.2): the diagnostic hand's conclusions, each with
@@ -33,6 +35,14 @@ type Evidence struct {
 }
 
 // Finding is one diagnosis conclusion.
+// FixHint is the structured remediation attached to a Finding (S2-1).
+type FixHint struct {
+	Type       string `json:"type"`           // upgrade|patch|config|credential|procedure
+	Ref        string `json:"ref,omitempty"`  // 目标版本 / KB 号 / 命令 / 流程名
+	Link       string `json:"link,omitempty"` // 厂商公告/参考链接
+	Confidence string `json:"confidence"`     // verified|model
+}
+
 type Finding struct {
 	ID         string     `json:"id"`
 	Title      string     `json:"title"`
@@ -40,8 +50,12 @@ type Finding struct {
 	Devices    []string   `json:"devices"`
 	Detail     string     `json:"detail"`
 	Evidence   []Evidence `json:"evidence"`
-	Suggestion string     `json:"suggestion,omitempty"` // what change to draft (netdev_propose), if any
-	CreatedAt  time.Time  `json:"created_at"`
+	Suggestion string     `json:"suggestion,omitempty"` // free-text fallback; structured Fix preferred (S2-1)
+	// Fix（SCENARIO_SPEC S2-1）：结构化修复建议——发现卡渲染、一键起草提案
+	// 时自动进提案步骤。Confidence：verified（feed/规则库出处）| model（模型
+	// 记忆，须验证）。Suggestion 保留为旧数据的自由文本兜底。
+	Fix       *FixHint  `json:"fix,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 	// Source marks the automatic origin ("alert:<rule>:<device>",
 	// "syslog:<device>:<class>") — auto-findings dedup and auto-resolve by it;
 	// human/AI findings leave it empty.
@@ -221,19 +235,28 @@ func ClearFindings() (int, error) {
 	return n, nil
 }
 
+// findingGen is the findings-store generation counter: bumped on every
+// successful SaveFinding. The skill runner's contract validator snapshots it
+// around an orchestration subagent run to verify "立案先行才作答"
+// (SKILL_ORCHESTRATION_SPEC §11-L4) — a sweep that answers without filing
+// anything it claimed is a contract violation, caught in code not trust.
+var findingGen atomic.Int64
+
+// FindingGen returns the current findings-store generation (monotonic).
+func FindingGen() int64 { return findingGen.Load() }
+
 // SaveFinding validates and persists one finding.
 func SaveFinding(f *Finding) error {
 	if err := findingValid(f); err != nil {
 		return err
 	}
 	// Stamp the project snapshot when absent (see Finding.Project). Stamped
-	// before the notify defer fires, so the notification text carries it too.
+	// before the notify below fires, so the notification text carries it too.
 	if f.Project == "" {
 		if cfg := loadConfigForProject(); cfg != nil {
 			f.Project = ProjectForDevices(cfg, f.Devices)
 		}
 	}
-	defer notifyFindingAsync(f) // §5.2 通知出口：配置了 webhook 且严重度过线才发
 	findingsMu.Lock()
 	defer findingsMu.Unlock()
 	if f.ID == "" {
@@ -256,10 +279,12 @@ func SaveFinding(f *Finding) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(FindingsDir(), f.ID+".json"), b, 0o600); err != nil {
+	if err := fileutil.AtomicWriteFile(filepath.Join(FindingsDir(), f.ID+".json"), b, 0o600); err != nil {
 		return err
 	}
 	notifyFindingObserver(f) // fire only on success — a failed save is not news
+	notifyFindingAsync(f)    // §5.2 通知出口：配置了 webhook 且严重度过线才发（只在落盘成功后）
+	findingGen.Add(1)
 	return nil
 }
 

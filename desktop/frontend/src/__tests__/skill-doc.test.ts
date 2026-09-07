@@ -328,5 +328,53 @@ const maAgain = parseSkillDoc(serializeSkillDoc(maDoc!));
 eq(maAgain?.steps[0].target, "#kw;;text=百度一下", "anchor chain survives round-trip");
 eq(summarizeStep({ type: "click", target: "#kw;;text=百度一下" }), "点击 #kw→「百度一下」", "multi-anchor summary");
 
+// --- 5th-column control (harness) round-trip ---
+const ctlDoc = parseSkillDoc(
+  [
+    "---",
+    "name: ctl-demo",
+    "description: d",
+    "executor: browser-flow",
+    "---",
+    "",
+    "# t",
+    "",
+    "## 何时使用",
+    "",
+    "x",
+    "",
+    "## 步骤",
+    "",
+    "| # | 操作 | 目标 | 值 | 控制 |",
+    "|---|------|------|------|------|",
+    "| 1 | click | `text=导出` |  | 重试=1 校验=networkidle |",
+    "| 2 | extract | `table.logs` | table | 失败=继续 |",
+    "| 3 | wait | `download` | 300s |  |",
+    "",
+    "## 注意事项",
+    "",
+    "无。",
+    "",
+    "## 验证",
+    "",
+    "无。",
+    "",
+  ].join("\n"),
+);
+eq(ctlDoc !== null && ctlDoc.lossy, false, "control table is lossless");
+eq(ctlDoc?.steps[0].control, "重试=1 校验=networkidle", "control cell parsed");
+eq(ctlDoc?.steps[1].control, "失败=继续", "on-fail cell parsed");
+eq(ctlDoc?.steps[2].control, undefined, "empty control stays undefined");
+const ctlAgain = parseSkillDoc(serializeSkillDoc(ctlDoc!));
+eq(ctlAgain?.steps[0].control, "重试=1 校验=networkidle", "control survives round-trip");
+eq(ctlAgain?.steps[2].control, undefined, "empty control stays empty on round-trip");
+eq(
+  serializeSkillDoc(ctlDoc!)
+    .split("\n")
+    .some((l) => l.startsWith("| 3 | wait |") && (l.match(/\|/g) || []).length === 5),
+  true,
+  "legacy 4-column rows serialize without a 5th cell",
+);
+
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

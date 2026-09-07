@@ -52,7 +52,7 @@ export function BrowserWorkbench({ hidden, onClose }: { hidden: boolean; onClose
     const load = () => void app.BrowserConsoleDevTools().then((v) => {
       setLogs(v.logs ?? []);
       setNetEntries(v.net ?? []);
-    }).catch(() => undefined);
+    }).catch(() => undefined); // best-effort: 失败降级不阻塞
     load();
     const timer = window.setInterval(load, 2000);
     return () => window.clearInterval(timer);
@@ -62,9 +62,9 @@ export function BrowserWorkbench({ hidden, onClose }: { hidden: boolean; onClose
   // the controlled browser shows up near-live, not only after fairpeer acts).
   useEffect(() => {
     if (hidden || source !== "console") return;
-    void app.BrowserConsoleScreenshot().then(setImg).catch(() => undefined);
+    void app.BrowserConsoleScreenshot().then(setImg).catch(() => undefined); // best-effort: 失败降级不阻塞
     const timer = window.setInterval(() => {
-      void app.BrowserConsoleScreenshot().then(setImg).catch(() => undefined);
+      void app.BrowserConsoleScreenshot().then(setImg).catch(() => undefined); // best-effort: 失败降级不阻塞
     }, 5000);
     return () => window.clearInterval(timer);
   }, [hidden, source]);
@@ -90,7 +90,7 @@ export function BrowserWorkbench({ hidden, onClose }: { hidden: boolean; onClose
         }));
         void refreshTabs();
       })
-      .catch(() => undefined)
+      .catch(() => undefined) // best-effort: 失败降级不阻塞
       .finally(() => setBusy(""));
   };
 
@@ -151,7 +151,7 @@ function fmtTime(unixMillis: number): string {
         <div className="ndv-wb__tools">
           <button type="button" className="btn btn--secondary btn--small" title={t("brc.viewerRefresh")} onClick={() => {
             void refreshTabs();
-            if (source === "console") void app.BrowserConsoleScreenshot().then(setImg).catch(() => undefined);
+            if (source === "console") void app.BrowserConsoleScreenshot().then(setImg).catch(() => undefined); // best-effort: 失败降级不阻塞
           }}>
             <RefreshCw size={12} />
           </button>

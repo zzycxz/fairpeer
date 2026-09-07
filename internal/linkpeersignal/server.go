@@ -1,6 +1,7 @@
 package linkpeersignal
 
 import (
+	"net"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -44,40 +45,40 @@ func NewServer(cfg Config, audit *Audit) *Server {
 // rate limiting would see only the proxy's internal IP and be useless.
 //
 // SECURITY (SIGNAL_SPEC §13.5): XFF is ONLY trusted when the request comes
-// from a trusted proxy (127.0.0.1 / ::1 / docker 172.x). If K's port were
+// from a trusted proxy (loopback / link-local / RFC1918). If K's port were
 // exposed directly, a client could forge XFF to bypass IP rate limiting.
+// We take the RIGHTMOST XFF entry — the one appended by our own trusted
+// proxy — so a client-supplied spoofed leftmost entry can't choose its
+// rate-limit bucket.
 func realIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" && isTrustedProxy(r.RemoteAddr) {
-		for i := 0; i < len(xff); i++ {
-			if xff[i] == ',' {
-				return xff[:i]
-			}
+		parts := strings.Split(xff, ",")
+		candidate := strings.TrimSpace(parts[len(parts)-1])
+		if candidate != "" {
+			return candidate
 		}
-		return xff
 	}
-	host := r.RemoteAddr
-	for i := 0; i < len(host); i++ {
-		if host[i] == ':' {
-			return host[:i]
-		}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
 	}
 	return host
 }
 
-// isTrustedProxy returns true if the direct peer is localhost or a Docker
-// internal address (172.16-31.x / 10.x / 192.168.x). Caddy runs alongside K
-// in docker-compose, so the upstream is always one of these.
+// isTrustedProxy returns true if the direct peer is loopback or an RFC1918 /
+// link-local address. Caddy runs alongside K in docker-compose, so the
+// upstream is always one of these. Uses net.ParseIP rather than string
+// prefixes so public space like 172.1-31.x / 172.32-255.x is NOT trusted.
 func isTrustedProxy(remoteAddr string) bool {
-	host := remoteAddr
-	for i := 0; i < len(host); i++ {
-		if host[i] == ':' {
-			host = host[:i]
-			break
-		}
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
 	}
-	return host == "127.0.0.1" || host == "::1" ||
-		strings.HasPrefix(host, "172.") || strings.HasPrefix(host, "10.") ||
-		strings.HasPrefix(host, "192.168.")
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
 // --- /pair/register ---

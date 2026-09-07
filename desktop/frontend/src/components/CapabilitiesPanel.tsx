@@ -24,6 +24,7 @@ export function CapabilitiesPanel({
   initialTab?: CapTab;
 }) {
   const t = useT();
+  const { showToast } = useToast();
   const [view, setView] = useState<CapabilitiesView | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -200,10 +201,10 @@ export function CapabilitiesPanel({
                           if (!text?.trim()) return;
                           try {
                             const n = await app.ImportMCPServersJSON(text.trim());
-                            useToast().showToast(t("caps.mcpImported", { n: String(n) }), "info");
+                            showToast(t("caps.mcpImported", { n: String(n) }), "info");
                             void reload();
                           } catch (e) {
-                            useToast().showToast(String(e), "error");
+                            showToast(String(e), "error");
                           }
                         }}
                       >

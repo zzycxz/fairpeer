@@ -376,21 +376,42 @@ func workspaceOldEnough(sessionDir string, interval time.Duration) bool {
 		return false
 	}
 	var oldest time.Time
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
+	consider := func(mt time.Time) {
+		if oldest.IsZero() || mt.Before(oldest) {
+			oldest = mt
 		}
-		name := e.Name()
-		if filepath.Ext(name) != ".jsonl" {
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
 			continue
 		}
 		info, err := e.Info()
 		if err != nil {
 			continue
 		}
-		mt := info.ModTime()
-		if oldest.IsZero() || mt.Before(oldest) {
-			oldest = mt
+		consider(info.ModTime())
+	}
+	// Per-session folder layout (2026-08-21): <dir>/<id>/<id>.jsonl — a
+	// workspace whose sessions all use the new layout has nothing at the top
+	// level, so without this descent the cold-start gate never passes and
+	// auto Dream/Distill stay permanently off. Mirrors ListSessions' scan.
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		sub, err := os.ReadDir(filepath.Join(sessionDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		for _, f := range sub {
+			if f.IsDir() || filepath.Ext(f.Name()) != ".jsonl" {
+				continue
+			}
+			info, err := f.Info()
+			if err != nil {
+				continue
+			}
+			consider(info.ModTime())
 		}
 	}
 	if oldest.IsZero() {

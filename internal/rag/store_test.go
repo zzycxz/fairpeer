@@ -505,6 +505,96 @@ func newTempStore(t *testing.T) *Store {
 	return s
 }
 
+// TestRenameCollectionMovesJobsEntitiesRelations proves RenameCollection
+// succeeds and moves rag_jobs (with its rag_chunks following via job_id),
+// rag_entities and rag_relations. rag_chunks has no collection column, so the
+// rename must not attempt to UPDATE it directly (a previous version did and
+// the whole rename failed).
+func TestRenameCollectionMovesJobsEntitiesRelations(t *testing.T) {
+	store := newTempStore(t)
+	defer store.Close()
+
+	// Seed a job with chunk rows, an entity and a relation.
+	jobID, err := store.CreateJob(JobRow{
+		Collection: "work", Path: "/docs/a.md", Status: "running",
+	}, []string{"chunk one", "chunk two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertEntity("work", Entity{NameRaw: "Alice", Type: "person"}, Source{Path: "/docs/a.md", Chunk: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertRelation("work", Relation{Source: "alice", Target: "project", Type: "负责"}, Source{Path: "/docs/a.md", Chunk: 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.RenameCollection("work", "work2"); err != nil {
+		t.Fatalf("RenameCollection failed: %v", err)
+	}
+
+	// Job moved to the new collection, gone from the old one.
+	jobsByColl := func(coll string) int {
+		t.Helper()
+		all, err := store.AllJobs()
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, j := range all {
+			if j.Collection == coll && j.ID == jobID {
+				n++
+			}
+		}
+		return n
+	}
+	if got := jobsByColl("work2"); got != 1 {
+		t.Errorf("job not moved to work2: got %d matching jobs", got)
+	}
+	if got := jobsByColl("work"); got != 0 {
+		t.Errorf("job still present under old collection: got %d matching jobs", got)
+	}
+	// Chunk rows survive and still resolve through the renamed job.
+	pending, err := store.PendingChunksForJob(jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 2 {
+		t.Errorf("expected 2 chunk rows attached to job after rename, got %d", len(pending))
+	}
+	// Entities and relations moved.
+	if ents, _ := store.SearchEntities("", "work2", 10); len(ents) != 1 || ents[0].Name != "alice" {
+		t.Errorf("entity not moved to work2: %+v", ents)
+	}
+	if ents, _ := store.SearchEntities("", "work", 10); len(ents) != 0 {
+		t.Errorf("entity still under old collection: %+v", ents)
+	}
+	if rels, _ := store.RelationsOf("work2", "alice", false); len(rels) != 1 {
+		t.Errorf("relation not moved to work2: %+v", rels)
+	}
+
+	// Path-prefix children rename too: "work2/sub" style children are covered
+	// by the prefix branch; create one and rename the parent again.
+	if _, err := store.CreateJob(JobRow{Collection: "work2/sub", Path: "/docs/b.md", Status: "done"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RenameCollection("work2", "work3"); err != nil {
+		t.Fatalf("second RenameCollection failed: %v", err)
+	}
+	all, err := store.AllJobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := false
+	for _, j := range all {
+		if j.Path == "/docs/b.md" && j.Collection == "work3/sub" {
+			moved = true
+		}
+	}
+	if !moved {
+		t.Errorf("child collection job not renamed to work3/sub: %+v", all)
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

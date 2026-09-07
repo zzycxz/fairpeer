@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zzycxz/fairpeer/internal/proc"
 )
 
 // pairCodeAlphabet omits confusable 0/O/1/I/L (31 chars; NOT a base32 encoding,
@@ -333,7 +335,11 @@ type routeEntry struct {
 func windowsDefaultRoutes() []routeEntry {
 	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "route", "print", "-4").Output()
+	cmd := exec.CommandContext(ctx, "route", "print", "-4")
+	// route.exe 是控制台程序，而 GUI 父进程没有可继承的控制台——不设
+	// CREATE_NO_WINDOW 的话，每次枚举配对网卡都会闪一个 CMD 窗口。
+	proc.HideWindow(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil
 	}

@@ -310,9 +310,19 @@ func (a *App) waitForExpertTab(tabID string, timeout time.Duration) tabSession {
 	case <-timer.C:
 		return nil
 	}
+	// The tab may have been closed while we waited — look it up (nil-safe)
+	// instead of dereferencing the map entry taken before the wait, which
+	// would panic and take the whole app down. Mirrors recordReadTelemetry.
 	a.mu.RLock()
-	ctrl := a.tabs[tabID].Ctrl
+	tab, ok := a.tabs[tabID]
+	var ctrl tabSession
+	if ok && tab != nil {
+		ctrl = tab.Ctrl
+	}
 	a.mu.RUnlock()
+	if !ok || tab == nil {
+		return nil // tab closed mid-build; the run abandons gracefully
+	}
 	return ctrl
 }
 

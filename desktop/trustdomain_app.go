@@ -115,6 +115,94 @@ func (a *App) TrustDomainStatus() TrustDomainView {
 	return view
 }
 
+// TrustDomainInit is the GUI "创建并开启域" button (spec §15.2 init): generate
+// the local identity + genesis block (single-admin quorum=1 bootstrap), reuse
+// an existing on-disk ledger instead of overwriting it (a prior init/join),
+// then flip [trustdomain] enabled so the panel and agent tools come alive.
+// Returns the domain ID (genesis hash) for the success toast.
+func (a *App) TrustDomainInit() (string, error) {
+	return a.tdCreateBootstrapDomain(false)
+}
+
+// TrustDomainReset is init --force from the GUI: discard the current ledger
+// and bootstrap a FRESH single-admin domain (identity key is kept). This is
+// the rollback path for a mistaken create — and it orphans every other member
+// of a multi-host domain, so the UI gates it behind a danger confirm.
+func (a *App) TrustDomainReset() (string, error) {
+	return a.tdCreateBootstrapDomain(true)
+}
+
+func (a *App) tdCreateBootstrapDomain(force bool) (string, error) {
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		return "", fmt.Errorf("配置读取失败: %w", err)
+	}
+	dir := cfg.TrustDomain.DataDirOrDefault()
+	if dir == "" {
+		return "", fmt.Errorf("无法解析数据目录：请在配置中设置 [trustdomain].data_dir")
+	}
+	id, err := trustdomain.LoadOrCreateIdentity(dir)
+	if err != nil {
+		return "", fmt.Errorf("身份密钥: %w", err)
+	}
+	var chain *trustdomain.Chain
+	if !force {
+		if store, serr := trustdomain.OpenStore(dir); serr == nil {
+			if c, lerr := store.Load(); lerr == nil {
+				chain = c // existing init/join output — reuse, never overwrite
+			}
+		}
+	}
+	if chain == nil {
+		gen, err := trustdomain.BuildGenesis([]*trustdomain.Identity{id}, 1, "fairpeer-domain", uint64(time.Now().Unix()))
+		if err != nil {
+			return "", err
+		}
+		c, err := trustdomain.ValidateChain([]*trustdomain.Block{gen})
+		if err != nil {
+			return "", err
+		}
+		store, err := trustdomain.OpenStore(dir)
+		if err != nil {
+			return "", err
+		}
+		if err := store.Save(c); err != nil {
+			return "", err
+		}
+		chain = c
+	}
+	domainID := trustdomain.DomainID(chain)
+	// applyConfigOnly, NOT applyConfigChange: rebuild()'s boot.Build fails on
+	// installs with no default model configured ("unknown model \"\"") and
+	// poisons the topbar 启动错误 banner — the enable itself already
+	// succeeded. The trust domain is model-independent infrastructure; its
+	// agent tools (netdev_fleet/netdev_remote) register at the next controller
+	// build (boot.Build → netdev.RegisterTools reads the config each time).
+	if err := a.applyConfigOnly(func(c *config.Config) error {
+		c.TrustDomain.Enabled = true
+		return nil
+	}); err != nil {
+		return "", err
+	}
+	netdev.ResetSharedRemoteNode()
+	return domainID, nil
+}
+
+// TrustDomainSetEnabled flips the [trustdomain] enabled flag without touching
+// the ledger — the config half of the join path (join itself stays CLI:
+// admission is a multi-party flow, spec §15.2). Same applyConfigOnly rule as
+// TrustDomainInit: no controller rebuild, see the comment there.
+func (a *App) TrustDomainSetEnabled(enabled bool) error {
+	if err := a.applyConfigOnly(func(c *config.Config) error {
+		c.TrustDomain.Enabled = enabled
+		return nil
+	}); err != nil {
+		return err
+	}
+	netdev.ResetSharedRemoteNode()
+	return nil
+}
+
 // TrustDomainPause engages the emergency brake (spec §6.4). Offline
 // proposal — succeeds directly on single-admin domains; multi-admin
 // surfaces the quorum error (run it from a networked node via CLI).

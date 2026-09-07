@@ -100,3 +100,7 @@ runs_latest.json
 desktop/sign.exe
 ndvshot.exe
 desktop/frontend/dist-crash/
+
+# build artifacts & dev screenshots (audit batch 6)
+gui-test-screenshots/
+*.exe

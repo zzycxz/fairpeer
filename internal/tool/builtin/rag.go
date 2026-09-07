@@ -244,8 +244,10 @@ func refuseNetDevNamespace(collection string) error {
 }
 
 // RAGTools returns the knowledge-base tools for cowork registration.
-func RAGTools() []tool.Tool {
-	return []tool.Tool{ragImport{}, ragSearch{}, ragGraph{}, ragMindMap{}, ragList{}, ragDelete{}}
+// RAGTools returns the cowork knowledge-base tools. roots confines
+// rag_mindmap's output path to the workspace write boundary.
+func RAGTools(roots []string) []tool.Tool {
+	return []tool.Tool{ragImport{}, ragSearch{}, ragGraph{}, ragMindMap{roots: realRoots(roots)}, ragList{}, ragDelete{}}
 }
 
 // --- rag_import -------------------------------------------------------------
@@ -631,7 +633,11 @@ func (ragGraph) Execute(ctx context.Context, args json.RawMessage) (string, erro
 	return WrapUntrusted("rag", capOutput(b.String())), nil
 }
 
-type ragMindMap struct{}
+type ragMindMap struct {
+	// roots confines the output path (workspace write boundary). Empty =
+	// unconfined (CLI default); the desktop/boot path always passes roots.
+	roots []string
+}
 
 func (ragMindMap) Name() string { return "rag_mindmap" }
 
@@ -655,7 +661,7 @@ func (ragMindMap) Schema() json.RawMessage {
 
 func (ragMindMap) ReadOnly() bool { return false }
 
-func (ragMindMap) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (m ragMindMap) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Root       string `json:"root"`
 		Collection string `json:"collection"`
@@ -697,6 +703,12 @@ func (ragMindMap) Execute(ctx context.Context, args json.RawMessage) (string, er
 	branches := buildRAGBranches(s, p.Collection, rootKey, p.Depth, visited)
 	abs, err := filepath.Abs(p.Path)
 	if err != nil {
+		return "", err
+	}
+	// Same workspace confinement as every other writer: without this the
+	// LLM-controlled output path could overwrite arbitrary user files
+	// (e.g. ~/.bashrc), bypassing [sandbox] workspace_root.
+	if err := confine(m.roots, abs); err != nil {
 		return "", err
 	}
 	in := MMInput{Path: abs, Title: p.Root, Branches: branches, Format: p.Format}

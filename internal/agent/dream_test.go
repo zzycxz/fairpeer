@@ -93,6 +93,45 @@ func TestWorkspaceOldEnough(t *testing.T) {
 	}
 }
 
+// TestWorkspaceOldEnoughFolderLayoutOnly: since the 2026-08-21 layout, sessions
+// live at <dir>/<id>/<id>.jsonl — a workspace that never had a flat-layout file
+// looks empty to a top-level-only scan, so the cold-start gate never passed and
+// auto Dream/Distill stayed permanently off. The oldest mtime must be taken
+// across both levels.
+func TestWorkspaceOldEnoughFolderLayoutOnly(t *testing.T) {
+	dir := t.TempDir()
+	folder := filepath.Join(dir, "20260101-000000-abcd")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	old := filepath.Join(folder, "20260101-000000-abcd.jsonl")
+	if err := os.WriteFile(old, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	past := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(old, past, past); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+	if !workspaceOldEnough(dir, time.Hour) {
+		t.Fatalf("new-layout-only workspace with a 2h-old session should be old enough for a 1h interval")
+	}
+	if workspaceOldEnough(dir, 3*time.Hour) {
+		t.Fatalf("2h-old session should NOT satisfy a 3h interval")
+	}
+	// The oldest file across levels wins: a newer flat-layout session must not
+	// mask the older folder-layout one when deciding project age.
+	flat := filepath.Join(dir, "20260601-000000-ffff.jsonl")
+	if err := os.WriteFile(flat, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write flat: %v", err)
+	}
+	if !workspaceOldEnough(dir, time.Hour) {
+		t.Fatalf("adding a newer flat session must not disqualify the older folder session")
+	}
+	if workspaceOldEnough(dir, 3*time.Hour) {
+		t.Fatalf("oldest session is 2h old; a 3h interval must still not pass")
+	}
+}
+
 type recordingSink struct{ events []event.Event }
 
 func (r *recordingSink) Emit(e event.Event) { r.events = append(r.events, e) }

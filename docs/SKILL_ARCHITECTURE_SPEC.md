@@ -23,7 +23,7 @@
 
 run_skill 看到的是两个来源的并集：
 
-### 来源一：代码内置（`internal/skill/builtins.go` 的 `builtinSkills()`，15 个）
+### 来源一：代码内置（`internal/skill/builtins.go` 的 `builtinSkills()`，23 个；历史版本为 15 个，随 netdev/办公域扩充增长——以 `TestBuiltinSkillNamesCoverCodeBuiltins` 守护的代码为准）
 
 | 技能 | RunAs | 职责（摘要） |
 |---|---|---|
@@ -38,7 +38,7 @@ run_skill 看到的是两个来源的并集：
 | browser-auto | subagent | 网页任务（导航 / 点击 / 输入 / 抓取 / 截图） |
 | desktop-auto | subagent | 桌面 GUI 自动化（WPS / Excel / 系统对话框），GUI-only + 代码优先 |
 | email-auto | subagent | SMTP/IMAP 收发读搜邮件 |
-| rag-auto | subagent | 本地知识库（FTS5 + 实体）检索 / 导入 / 管理 |
+| knowledge-auto（旧名 rag-auto，已改名） | subagent | 本地知识库（FTS5 + 实体）检索 / 导入 / 管理 |
 | schedule-auto | subagent | 定时任务增删改查 |
 | document-auto | subagent | Office 文档读写 / 填充 / 转换（docx / xlsx / pptx / pdf / csv / md） |
 | expert-auto | subagent | 多专家团队评审提案或文档内容 |
@@ -61,7 +61,7 @@ run_skill 看到的是两个来源的并集：
 |---|---|---|
 | **编码** | init、explore、**research**、review、security-review、test | dev |
 | **办公** | browser-auto、desktop-auto、ppt-auto、email-auto、rag-auto、schedule-auto、document-auto、expert-auto | cowork |
-| **运维** | **编码全集继承**（init/explore/research/review/security-review/test）+ **netdev 诊断卡**（netdev-help / netdev-playbook / netdev-diag-ospf / netdev-diag-bgp / netdev-diag-interface / netdev-vulnscan）+ **browser-auto**（用户方向 2026-09-04：作为运维界面的通用浏览器兜底——路由规则是站点专用 browser-ops 技能优先、无匹配才走它；封印下其子代理拿不到 bash/写文件，兜底只有浏览器读写。白名单管可见性、tool_scope 封印管行为——test/init 等需 shell/写的技能在封印下降级为只读分析） | netdev |
+| **运维** | **编码全集继承**（init/explore/research/review/security-review/test）+ **netdev 技能族**（netdev-help 导航卡 + 两个编排子代理 netdev-diag-auto / netdev-seccheck-auto + inline 卡 config-vault / draft——SKILL_ORCHESTRATION_SPEC v1 合并终态，旧名经别名表兼容）+ ~~browser-auto~~（**2026-09-06 浏览器归属办公后移出运维白名单**——原 2026-09-04"通用兜底"决策由 BROWSER_OFFICE_MIGRATION_SPEC 推翻；站点 browser-ops 技能仍可在运维对话按名调用，browser-flow 执行器对 netdev 保留接线） | netdev |
 | **通用** | install-capability（装技能/MCP，三模式都留） | — |
 
 编码域的 MCP / 工具同样不进其他模式（Profile 新增 `hidden_plugins` 按名隐藏机制）：
@@ -88,7 +88,7 @@ run_skill 看到的是两个来源的并集：
 - **dev 补 explore**：原白名单漏了它（同样靠漂移漏网可见）。
 - **HiddenPlugins 新机制**：`Plugins` 白名单会隐藏一切未点名者（含用户自装 MCP），不能用于 cowork/netdev；新增 `hidden_plugins` 只隐藏**点名**的服务器——内置 profile 用它挡 codegraph/context7，用户为办公装的飞书/日历 MCP 不受影响，toml 可覆盖。
 - **修 codegraph 注入绕过**：codegraph server 原先在插件过滤之后直接 append 进 bgSpecs，Plugins 白名单根本拦不住（注释声称能拦，实际从未生效）；注入点现已自查 allowed + hidden。
-- **白名单只枚举出厂技能**（boot.go `builtinBuiltinSkillNames`，21 项 = 20 代码内置 + ppt-auto；`TestBuiltinSkillNamesCoverCodeBuiltins` 守护同步——netdev-vulnscan 漂移就是它抓的），用户自装文件技能不受影响、各模式照常可见。
+- **白名单只枚举出厂技能**（boot.go `builtinBuiltinSkillNames`，21 项 = 20 代码内置 + 文件技能 ppt-auto（SKILL_ORCHESTRATION 合并后）；`TestBuiltinSkillNamesCoverCodeBuiltins` 守护同步——netdev-vulnscan 漂移就是它抓的），用户自装文件技能不受影响、各模式照常可见。
 - **用户技能按 `domain:` 域折叠**（2026-09-04）：Profile 新增 `SkillDomains`（dev=`["code"]` 哨兵域、cowork=`["browser-ops"]`、netdev=`["browser-ops","netdev"]`）。声明了域的用户技能（如 browser-ops 浏览器技能、netdev 评估向导）在域不匹配的 profile 索引中折叠——只省索引预算、防跨域误路由，`run_skill` / `/名字` 仍可调（与白名单对出厂技能的硬禁用是两道不同的闸）；无域标记的用户技能永不折叠。动机：netdev-assess（domain: netdev）曾出现在办公/编码索引里，而那边没有 netdev_* 工具；浏览器技能在编码界面同样是死条目。`TestBuildSkillDomainFolding` 守护。
 - **专用/通用浏览器技能优先级**（2026-09-04）：cowork 路由表、netdev 路由表、browser-auto 自身描述三处一致写明「站点专用浏览器技能优先，browser-auto 是通用兜底」——替代原先 "Any browser task → browser-auto" 的一刀切，消除专用技能（发票/车票/监控）被通用兜底压过的打架。
 - 前端能力面板按后端 `active` 标记分组展示，白名单改对后 GUI 自动跟随，无需前端改动。
@@ -212,7 +212,7 @@ boot.go 两处注释与 `builtinBuiltinSkillNames` 名单、`internal/tool/tool.
 | 技能 | 模式 | 判定 |
 |---|---|---|
 | browser-auto | browser_auto 单次自主调用（sidecar） | ✅ 标杆 |
-| email-auto / rag-auto / schedule-auto / expert-auto | 工具粒度 = 任务粒度 | ✅ 天然合规 |
+| email-auto / knowledge-auto / schedule-auto / expert-auto | 工具粒度 = 任务粒度 | ✅ 天然合规 |
 | document-auto | doc_read → doc_write 各一次；模板填充单调用 | ✅ 合规 |
 | test | 有界重试（同失败 2 次即停） | ✅ 合规 |
 | **ppt-auto** | 模型当渲染引擎：逐页手写 SVG + 每页 fix/check 往返 + QA 回路 | ❌ 最大违反者（Part 六 5 刀治理，items 10-14） |
@@ -286,3 +286,24 @@ harness 级观察项（**不采纳**）：complete_step 每步一次额外回合
 | 23 | HiddenPlugins / codegraph 域门控的测试覆盖（PluginHiddenByProfile 单测 + boot 级"cowork 不加载 codegraph"断言） | `internal/config/profile_test.go` + `internal/boot/boot_test.go` | ✅ 已实施 |
 | 24 | render.go 示例配置补 `hidden_plugins` 渲染（新 toml 字段可发现性） | `internal/config/render.go` | ✅ 已实施 |
 | 25 | CapabilitiesPanel 补"运维"域分组（现仅 office/其余二分；netdev 模式下 active 的只有 netdev-help，无域标签） | 前端 CapabilitiesPanel.tsx | ✅ 已实施 |
+
+## 八、运维技能/工具文案写作约定（2026-09-05 统一整改）
+
+背景：netdev-assess v1 按固定瀑布写死（阶段不可裁剪、正文点工具名、写 UI 菜单路径、绑部署策略），工具描述里也混进菜单路径与内部规格编号。整改后把规则固化如下，新增/修改运维技能与工具描述时遵守：
+
+1. **流程向导型技能必须阶段化**：阶段表（目的/前置/产出）+ 开场摸现场（识别范围/深度/关注点，从当前状态续跑），支持任意入口与裁剪；只校验所选阶段的前置。**流水线型技能允许固定顺序**——当顺序本身是方法学（如 vulnscan 的 范围排序→单机闭环（指纹+暴露面→候选→只读验证→立案）→跨设备汇总、diag 系列的协议状态机分支），固定是特性不是缺陷，不要为改而改。
+2. **正文不点工具名**：描述"要做什么"，调用由运行时按当前工具清单解析——工具增删不再牵连技能正文。`allowed-tools` frontmatter 白名单必须精确（那是机器读的契约）。诊断类正文点名**稳定读写原语**（netdev_exec/devices/finding/propose）目前豁免（已验证的调用引导），编排器/档案类工具（nmap/netprobe/cve_match）一律以能力指代。
+3. **不写 UI 菜单路径**（对模型可见的一切文案：技能 description/正文、工具 Description）："在运维设置中""安全工作台的 CVE 导入处"这类抽象位置——菜单层级随版本漂移。前端界面文案（给用户看的）不受此限，应写具体路径。数据契约（source=vulnscan 与蓝队核查视图的联动）保留。
+4. **内部规格编号不进描述**：PENLAB P1-1 / NETDEV_SPEC §x.y 这类仓库内部编号对模型是噪音，删除；规格引用留在代码注释。
+5. **技能名与工具名冲突必须双向消歧**：`netdev-assess`（技能：流程统筹）与 `netdev_assess`（工具：单台弱口令专项）——两边的 description 都写明分工与交接口。
+6. **同域近义技能互相指路**：browser-IT-ops（AI 助手问答）↔ browser-cybersituational-awareness（告警导出研判）这类同域技能，description 尾部各加一句"什么情况改用另一个"，防路由摇摆。
+7. **MCP 面**：netdev profile 白名单钉死为空（防 write/exec MCP 绕过 tool_scope 封印），codegraph 双保险隐藏——这是安全设计，不是缺陷；需要外部能力时走产品内工具（已覆盖 26+ netdev_*）。
+
+## 九、按场景组织技能层（2026-09-05 用户定稿）
+
+用户定稿："按照场景、功能去写 skill，去对接工具，让用户更方便地找到它们。"落地形态：
+
+1. **技能是场景层，工具是能力层**：技能按用户场景命名与撰写（description 以【场景：…】或等价的场景短语开头），场景内技能负责流程编排并对接工具；工具保持技术命名（API 已固化），不直接面向用户检索。
+2. **netdev-help 是场景导航入口**：正文首段为「场景速查」矩阵（用户场景 → 首选技能/界面 → 配套工具），description 声明"不确定用哪个技能/工具时先查本卡"。索引型技能点名工具名是 §八规则 2 的豁免（路由表本身就是机器契约）。
+3. **矩阵中三类去向要分清**：走技能（模型编流程）/ 走界面（"界面直达"项把用户指到 UI，如巡检卡、提案中心、发现中心）/ 直接用工具（主机与中间件类，无需技能包装）。矩阵引用站点级用户技能时标注"（站点技能，若已安装）"，出厂安装不误导。
+4. **技能名与工具名彻底分离**：评估流程技能更名 `netdev-security-assessment`（场景命名），与 `netdev_assess` 工具（能力命名）从名字上不再同形。

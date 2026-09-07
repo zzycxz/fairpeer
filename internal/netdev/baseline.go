@@ -43,6 +43,10 @@ type baselineRule struct {
 	id       string
 	title    string
 	severity string
+	// fix 是该规则的结构化修复（S2-1）：基线违例属"已核实配置问题"，
+	// Confidence=verified，Ref 即修复命令。
+	fixType string // config|credential
+	fixRef  string
 	// present rules fire when pattern MATCHES a config line (violation).
 	pattern *regexp.Regexp
 	// absent rules fire when presence NEVER matches the whole config.
@@ -53,10 +57,10 @@ type baselineRule struct {
 
 var baselineRules = map[string][]baselineRule{
 	"huawei-vrp": {
-		{id: "telnet-enabled", title: "Telnet 管理服务开启", severity: "warning",
+		{id: "telnet-enabled", title: "Telnet 管理服务开启", severity: "warning", fixType: "config", fixRef: "undo telnet server enable",
 			pattern: regexp.MustCompile(`(?im)^\s*telnet\s+server\s+enable\b`),
 			hint:    "关闭 telnet server，管理面仅保留 SSH（可让 agent 起草变更：undo telnet server enable）"},
-		{id: "snmp-v1v2c", title: "SNMP v1/v2c community 在用", severity: "warning",
+		{id: "snmp-v1v2c", title: "SNMP v1/v2c community 在用", severity: "warning", fixType: "config", fixRef: "snmp-agent 迁移 SNMPv3（USM+authPriv）",
 			pattern: regexp.MustCompile(`(?im)^\s*snmp-agent\s+community\b`),
 			hint:    "改用 SNMPv3（USM 用户 + authPriv），移除 community 配置"},
 		{id: "plaintext-password", title: "存在 simple 明文密码", severity: "critical",
@@ -106,7 +110,7 @@ func CheckBaseline(driverKey, config string) []BaselineViolation {
 	for _, r := range rules {
 		if r.absence {
 			if !r.presence.MatchString(config) {
-				out = append(out, BaselineViolation{Rule: r.id, Title: r.title, Severity: r.severity, Suggestion: r.hint, Evidence: []string{"（整份配置未出现 " + r.presence.String() + "）"}})
+				out = append(out, BaselineViolation{Rule: r.id, Title: r.title, Severity: r.severity, Suggestion: r.hint, Fix: baselineRuleFix(r), Evidence: []string{"（整份配置未出现 " + r.presence.String() + "）"}})
 			}
 			continue
 		}
@@ -120,7 +124,7 @@ func CheckBaseline(driverKey, config string) []BaselineViolation {
 			}
 		}
 		if len(ev) > 0 {
-			out = append(out, BaselineViolation{Rule: r.id, Title: r.title, Severity: r.severity, Suggestion: r.hint, Evidence: ev})
+			out = append(out, BaselineViolation{Rule: r.id, Title: r.title, Severity: r.severity, Suggestion: r.hint, Fix: baselineRuleFix(r), Evidence: ev})
 		}
 	}
 	return out
@@ -132,6 +136,7 @@ type BaselineViolation struct {
 	Title      string   `json:"title"`
 	Severity   string   `json:"severity"`
 	Suggestion string   `json:"suggestion,omitempty"`
+	Fix        *FixHint `json:"fix,omitempty"` // S2-1：结构化修复（verified）
 	Evidence   []string `json:"evidence"`
 }
 
@@ -147,6 +152,21 @@ type BaselineSummary struct {
 // RunBaseline reads every device's running-config through the sealed path
 // (full audit, redaction before rules run) and files one Finding per violated
 // rule plus a summary Finding. Mirror of RunInspection's flow.
+// baselineRuleFix renders a rule's structured fix (S2-1)：verified 来源。
+func baselineRuleFix(r baselineRule) *FixHint {
+	if r.fixRef == "" {
+		return nil
+	}
+	return &FixHint{Type: orDefault(r.fixType, "config"), Ref: r.fixRef, Confidence: "verified"}
+}
+
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
+
 func (m *Manager) RunBaseline(ctx context.Context) (*Finding, error) {
 	return m.runBaseline(ctx, nil)
 }
@@ -213,7 +233,7 @@ func (m *Manager) runBaseline(ctx context.Context, only map[string]bool) (*Findi
 			mu.Lock()
 			f, ok := byRule[v.Rule]
 			if !ok {
-				f = &Finding{Title: "基线：" + v.Title, Severity: v.Severity, Suggestion: v.Suggestion}
+				f = &Finding{Title: "基线：" + v.Title, Severity: v.Severity, Suggestion: v.Suggestion, Fix: v.Fix}
 				byRule[v.Rule] = f
 			}
 			f.Devices = append(f.Devices, d.Name)

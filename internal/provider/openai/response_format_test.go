@@ -76,3 +76,77 @@ func TestResponseFormatAndCacheKeyOnWire(t *testing.T) {
 		t.Fatalf("plain request leaked optional fields: %s", bodies[1])
 	}
 }
+
+// TestSchemaStrictCompatible gates json_schema.strict: only schemas meeting
+// OpenAI's strict-mode rules (every object closed via additionalProperties:false
+// and every property required, recursively) may set it — the API 400s otherwise.
+func TestSchemaStrictCompatible(t *testing.T) {
+	cases := []struct {
+		name   string
+		schema string
+		want   bool
+	}{
+		{"fully strict", `{"type":"object","additionalProperties":false,"required":["a","b"],"properties":{"a":{"type":"string"},"b":{"type":"object","additionalProperties":false,"required":["c"],"properties":{"c":{"type":"number"}}}}}`, true},
+		{"closed empty object", `{"type":"object","additionalProperties":false}`, true},
+		{"optional property", `{"type":"object","additionalProperties":false,"required":["a"],"properties":{"a":{"type":"string"},"b":{"type":"string"}}}`, false},
+		{"open object", `{"type":"object","required":["a"],"properties":{"a":{"type":"string"}}}`, false},
+		{"missing additionalProperties literal", `{"type":"object","required":[],"properties":{},"additionalProperties":{"type":"string"}}`, false},
+		{"open nested object", `{"type":"object","additionalProperties":false,"required":["a"],"properties":{"a":{"type":"object","required":[],"properties":{}}}}`, false},
+		{"composition", `{"type":"object","additionalProperties":false,"required":["a"],"properties":{"a":{"anyOf":[{"type":"string"},{"type":"number"}]}}}`, false},
+		{"ref", `{"type":"object","additionalProperties":false,"required":["a"],"properties":{"a":{"$ref":"#/$defs/x"}}}`, false},
+		{"array items strict", `{"type":"object","additionalProperties":false,"required":["a"],"properties":{"a":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["k"],"properties":{"k":{"type":"string"}}}}}}`, true},
+		{"array items open", `{"type":"object","additionalProperties":false,"required":["a"],"properties":{"a":{"type":"array","items":{"type":"object"}}}}`, false},
+		{"no required key", `{"type":"object","additionalProperties":false,"properties":{"a":{"type":"string"}}}`, false},
+		{"non-object root", `{"type":"string"}`, false},
+		{"invalid json", `{`, false},
+	}
+	for _, tc := range cases {
+		if got := schemaStrictCompatible(json.RawMessage(tc.schema)); got != tc.want {
+			t.Errorf("%s: schemaStrictCompatible(%s) = %v, want %v", tc.name, tc.schema, got, tc.want)
+		}
+	}
+}
+
+// TestResponseFormatStrictOnWire checks the strict flag reaches the request
+// body only for a qualifying schema — and is omitted (not false) otherwise.
+func TestResponseFormatStrictOnWire(t *testing.T) {
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "t", BaseURL: srv.URL, Model: "t/m", APIKey: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain := func(schema string) {
+		body = ""
+		ch, err := p.Stream(context.Background(), provider.Request{
+			Messages:       []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+			ResponseSchema: json.RawMessage(schema),
+			SchemaName:     "verdict",
+		})
+		if err != nil {
+			t.Fatalf("Stream: %v", err)
+		}
+		for range ch {
+		}
+		if body == "" {
+			t.Fatal("no request body captured")
+		}
+	}
+
+	drain(`{"type":"object","additionalProperties":false,"required":["ok"],"properties":{"ok":{"type":"boolean"}}}`)
+	if !strings.Contains(body, `"strict":true`) {
+		t.Fatalf("strict-compatible schema should set strict:true: %s", body)
+	}
+
+	drain(`{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}}`)
+	if strings.Contains(body, `"strict"`) {
+		t.Fatalf("non-strict schema must omit strict entirely: %s", body)
+	}
+}

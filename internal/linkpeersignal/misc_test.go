@@ -74,10 +74,39 @@ func TestServerSweepNoPanic(t *testing.T) {
 }
 
 func TestRealIPFromForwarded(t *testing.T) {
+	// Trusted proxy (loopback): take the RIGHTMOST entry — the one our own
+	// proxy appended. A client-supplied spoofed leftmost entry must not be
+	// able to pick its rate-limit bucket.
 	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "127.0.0.1:5555"
 	r.Header.Set("X-Forwarded-For", "9.9.9.9, 10.0.0.1")
-	if got := realIP(r); got != "9.9.9.9" {
-		t.Fatalf("want 9.9.9.9 got %s", got)
+	if got := realIP(r); got != "10.0.0.1" {
+		t.Fatalf("want rightmost 10.0.0.1, got %s", got)
+	}
+
+	// Untrusted direct peer (public address): XFF is ignored entirely.
+	r2 := httptest.NewRequest("GET", "/", nil)
+	r2.RemoteAddr = "203.0.113.7:5555"
+	r2.Header.Set("X-Forwarded-For", "1.2.3.4")
+	if got := realIP(r2); got != "203.0.113.7" {
+		t.Fatalf("want remote addr 203.0.113.7 for untrusted peer, got %s", got)
+	}
+
+	// Public 172.x is NOT an RFC1918 address — must not be treated as a
+	// trusted proxy (the old string-prefix check trusted all of 172/8).
+	r3 := httptest.NewRequest("GET", "/", nil)
+	r3.RemoteAddr = "172.32.0.5:5555"
+	r3.Header.Set("X-Forwarded-For", "1.2.3.4")
+	if got := realIP(r3); got != "172.32.0.5" {
+		t.Fatalf("want remote addr 172.32.0.5 for public-172 peer, got %s", got)
+	}
+
+	// Private 172.16-31.x IS trusted (docker network).
+	r4 := httptest.NewRequest("GET", "/", nil)
+	r4.RemoteAddr = "172.17.0.2:5555"
+	r4.Header.Set("X-Forwarded-For", "8.8.8.8")
+	if got := realIP(r4); got != "8.8.8.8" {
+		t.Fatalf("want appended 8.8.8.8 via trusted docker proxy, got %s", got)
 	}
 }
 

@@ -168,3 +168,22 @@ func tail(s string, n int) string {
 	}
 	return string(r[len(r)-n:])
 }
+
+// 运维偏好工厂预设（netdev 分键）：三条、均 builtin、默认不激活。
+func TestDefaultPresetsNetdev(t *testing.T) {
+	f := defaultPresets("netdev")
+	if len(f.Items) != 4 {
+		t.Fatalf("netdev presets = %d, want 4", len(f.Items))
+	}
+	for _, it := range f.Items {
+		if !it.Builtin {
+			t.Fatalf("netdev preset %q must be builtin", it.ID)
+		}
+	}
+	if f.Active != "" {
+		t.Fatalf("fresh install must have no active preset, got %q", f.Active)
+	}
+	if p := presetsPath("u", "netdev"); len(p) == 0 {
+		t.Fatal("netdev presets path empty")
+	}
+}

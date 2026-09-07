@@ -291,8 +291,9 @@ func redisQueryAllowed(query string) bool {
 		}
 		rest := len(fields) - 1
 		if a.args == -1 || rest == a.args {
-			// SLOWLOG's single arg must be GET.
-			if a.cmd == "slowlog" && fields[1] != "get" {
+			// SLOWLOG's single arg must be GET (bare "slowlog" used to index
+			// fields[1] past the slice and panic).
+			if a.cmd == "slowlog" && (len(fields) < 2 || fields[1] != "get") {
 				return false
 			}
 			// CONFIG's second word must be GET.

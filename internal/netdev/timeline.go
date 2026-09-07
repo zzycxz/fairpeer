@@ -11,10 +11,12 @@ import (
 	"time"
 )
 
-// NetDevEvent is one structured ring entry (syslog/trap).
+// NetDevEvent is one structured ring entry (syslog/trap); Device carries the
+// ring (device name) it came from.
 type NetDevEvent struct {
-	Time time.Time
-	Text string
+	Time   time.Time
+	Device string
+	Text   string
 }
 
 // TimelineEvent is one correlation entry on the unified axis.
@@ -67,12 +69,12 @@ func (m *Manager) Timeline(device string, hours int) []TimelineEvent {
 		}
 	}
 
-	// 事件：syslog / trap 环形缓冲
+	// 事件：syslog / trap 环形缓冲（device=="" 时两个 Since 合并所有环）
 	for _, ev := range SyslogEventsSince(device, since) {
-		out = append(out, TimelineEvent{Time: ev.Time, Kind: "event", Device: device, Title: ev.Text})
+		out = append(out, TimelineEvent{Time: ev.Time, Kind: "event", Device: ev.Device, Title: ev.Text})
 	}
 	for _, ev := range TrapEventsSince(device, since) {
-		out = append(out, TimelineEvent{Time: ev.Time, Kind: "event", Device: device, Title: ev.Text})
+		out = append(out, TimelineEvent{Time: ev.Time, Kind: "event", Device: ev.Device, Title: ev.Text})
 	}
 
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Time.Before(out[j].Time) })
