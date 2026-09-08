@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(builtin): 评审 P1 清零——TOOL-1 邮件头 display-name 注入 + TOOL-2 浏览器流重试盲发（附 TOOL-8）
+
+- **TOOL-1【P1】display-name 注入绕过**：checkAddrInjection 原来只查 `<...>` 内的 addr-spec——`"Foo\r\nBcc: evil@x" <a@b>` 的 spec 干净但 display name 的 CRLF 原样进 To 头。改为**整串控制字符先拒**（CR/LF/0x00-0x1F/0x7F），再做 spec 级检查（local-part 空白规则保留）；合法 display name 地址不受影响
+- **TOOL-8【P3】纯文本构造器同洞**：buildPlainTextMessage（scheduler/日历提醒路径）原本零校验——复用 checkAddrInjection + subject CR/LF 拒绝，签名改返回 error
+- **TOOL-2【P1】browserflow 重试盲发**：重试循环原来对任何错误无条件重发，违反本包自述契约"动作已发出后的错误绝不能重试"。改为**重发前 isLocateMiss 分流**——只有锚点未命中（动作从未发出）才重发；动作成功但校验未过也直接失败留证（信号滞后由既有 recheck-before-refire 兜住）。结构性修正无浏览器 harness 可单测，isLocateMiss 判定模式已有测试钉住
+- 测试：display-name 注入四形态（CRLF/LF/裸 tab/DEL）双路径拒绝 + 合法地址放行；builtin 全量（114s）+ scheduler（纯文本调用方）全绿
+- 至此评审 5 个 P1 全部清零（VET-1/FE-1 前批已修，AGENT-1 上批，本批 TOOL-1/2）
+
 ### feat(ops): 运维平台 Phase 1 第三切片——Finding/Proposal 挂 request_id，产出物归属请求轨迹
 
 - **netdev_finding / netdev_propose 接受可选 `request_id`**：编号经台账存在性校验（fail-closed——拼错即拒绝，不静默挂错），落档到 Finding/Proposal 的新字段；两个工具的 schema 同步说明

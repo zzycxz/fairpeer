@@ -772,7 +772,7 @@ func isLocateMiss(err error) bool {
 	}
 	s := err.Error()
 	for _, p := range []string{
-		"页面上找不到",      // text-anchor finder misses
+		"页面上找不到",            // text-anchor finder misses
 		"element not found", // chromedp selector misses
 		"no node found",
 		"no DOM object",
@@ -1028,6 +1028,11 @@ func runFlowStepHarness(ctx context.Context, s *browserSession, st FlowStep) (st
 			if h.Verify != "" && verify(3) == nil {
 				return "上一次动作已生效（校验信号滞后，复核通过）", nil
 			}
+			// TOOL-2（评审 P1）：只有锚点未命中（动作从未发出）才允许重发。
+			// 动作发出之后的任何错误重跑都可能双击/重复提交——直接失败留证。
+			if lastErr != nil && !isLocateMiss(lastErr) {
+				break
+			}
 			select {
 			case <-time.After(time.Duration(1<<uint(attempt-1)) * time.Second): // 1s, 2s, 4s…
 			case <-ctx.Done():
@@ -1040,8 +1045,10 @@ func runFlowStepHarness(ctx context.Context, s *browserSession, st FlowStep) (st
 			continue
 		}
 		if verr := verify(budget); verr != nil {
+			// 动作已成功发出、仅校验未过：重发就是重复执行（recheck 分支
+			// 上面已兜住信号滞后），失败留证交给尾部。
 			lastErr = fmt.Errorf("动作成功但校验 %q 未在 %ds 内通过: %w", h.Verify, budget, verr)
-			continue
+			break
 		}
 		if h.Verify != "" {
 			out += "（校验通过）"

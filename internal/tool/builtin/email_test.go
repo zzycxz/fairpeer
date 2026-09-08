@@ -118,3 +118,30 @@ func TestBuildMessageRejectsHeaderInjection(t *testing.T) {
 		t.Errorf("display-name address wrongly rejected: %v", err)
 	}
 }
+
+// TestBuildMessageRejectsDisplayNameInjection guards review TOOL-1: the
+// display-name part reaches headers verbatim, so CRLF there injects a header
+// line even though the addr-spec inside <> is perfectly clean.
+func TestBuildMessageRejectsDisplayNameInjection(t *testing.T) {
+	bad := []string{
+		"\"Foo\r\nBcc: attacker@evil.com\" <a@x.com>",
+		"\"Foo\nBcc: attacker@evil.com\" <a@x.com>",
+		"Tab\tname <a@x.com>", // raw tab in the display name folds the header
+		"置顶\x7f <a@x.com>",
+	}
+	for _, addr := range bad {
+		if _, err := buildMessage("from@x.com", []string{addr}, nil, nil, "S", "b", "text", nil); err == nil {
+			t.Errorf("display-name injection %q should be rejected", addr)
+		}
+	}
+	// The plain-text path (scheduler / calendar reminders) must reject too.
+	if _, err := buildPlainTextMessage("from@x.com", []string{"\"Foo\r\nBcc: evil@x\" <a@x.com>"}, "S", "b"); err == nil {
+		t.Error("plain-text path should reject display-name injection")
+	}
+	if _, err := buildPlainTextMessage("from@x.com", []string{"a@x.com"}, "S\r\nBcc: evil@x", "b"); err == nil {
+		t.Error("plain-text path should reject CRLF in subject")
+	}
+	if _, err := buildPlainTextMessage("Zhang San <from@x.com>", []string{"Li Si <a@x.com>"}, "S", "b"); err != nil {
+		t.Errorf("legitimate display-name rejected on plain-text path: %v", err)
+	}
+}

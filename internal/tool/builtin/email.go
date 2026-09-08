@@ -67,13 +67,29 @@ func SendPlainTextAs(ctx context.Context, account, to, subject, body string) err
 	if cfg.From == "" {
 		return fmt.Errorf("email account %q has no from address", account)
 	}
-	msg := buildPlainTextMessage(cfg.From, []string{to}, subject, body)
+	msg, err := buildPlainTextMessage(cfg.From, []string{to}, subject, body)
+	if err != nil {
+		return err
+	}
 	return sendSMTP(ctx, cfg, []string{to}, nil, nil, msg)
 }
 
 // buildPlainTextMessage assembles a minimal RFC822 message with a UTF-8 text
-// body (Chinese content renders correctly via base64-encoded UTF-8).
-func buildPlainTextMessage(from string, to []string, subject, body string) []byte {
+// body (Chinese content renders correctly via base64-encoded UTF-8). The same
+// header-injection checks as the MIME path apply (review TOOL-8): these
+// fields reach raw header lines verbatim.
+func buildPlainTextMessage(from string, to []string, subject, body string) ([]byte, error) {
+	if err := checkAddrInjection("from", from); err != nil {
+		return nil, err
+	}
+	for _, a := range to {
+		if err := checkAddrInjection("to", a); err != nil {
+			return nil, err
+		}
+	}
+	if strings.ContainsAny(subject, "\r\n") {
+		return nil, fmt.Errorf("subject contains line breaks (header injection risk): %q", truncate(subject, 60))
+	}
 	var buf strings.Builder
 	fmt.Fprintf(&buf, "From: %s\r\n", from)
 	fmt.Fprintf(&buf, "To: %s\r\n", strings.Join(to, ", "))
@@ -90,7 +106,7 @@ func buildPlainTextMessage(from string, to []string, subject, body string) []byt
 		buf.WriteString(encoded[i:end])
 		buf.WriteString("\r\n")
 	}
-	return []byte(buf.String())
+	return []byte(buf.String()), nil
 }
 
 // emailAccounts holds the multi-mailbox config injected at boot (and refreshed
@@ -283,16 +299,19 @@ func cleanAddrs(in []string) []string {
 // control characters in the addr-spec, and no whitespace in its local part
 // (a space there is malformed and can also fold the header line).
 func checkAddrInjection(field, addr string) error {
-	// "Display Name <local@domain>" — scrutinize the addr-spec inside <>.
+	// Whole-string control-char rejection FIRST (review TOOL-1): the display
+	// name reaches headers verbatim too — `"Foo\r\nBcc: evil@x" <a@b>` passes
+	// an addr-spec-only check while injecting an extra header line.
+	for k := 0; k < len(addr); k++ {
+		if c := addr[k]; c < 0x20 || c == 0x7f {
+			return fmt.Errorf("%s address %q contains control characters (header injection risk)", field, addr)
+		}
+	}
+	// "Display Name <local@domain>" — then the addr-spec rules inside <>.
 	spec := addr
 	if i := strings.LastIndexByte(addr, '<'); i >= 0 {
 		if j := strings.LastIndexByte(addr, '>'); j > i {
 			spec = addr[i+1 : j]
-		}
-	}
-	for k := 0; k < len(spec); k++ {
-		if c := spec[k]; c < 0x20 || c == 0x7f {
-			return fmt.Errorf("%s address %q contains control characters (header injection risk)", field, addr)
 		}
 	}
 	if at := strings.LastIndexByte(spec, '@'); at >= 0 {
