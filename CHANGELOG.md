@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(agent): AGENT-1 丢更新竞态收口——全部日志重写走 CAS（ReplaceIfUnchanged），并发追加不再被静默丢弃
+
+2026-09-07 代码评审 P1 首项：compact/SummarizeFrom/SummarizeUpTo/prune×2 的「快照→计算→无条件 Replace」在脱离 run loop 运行时，会把快照后并发追加的消息（用户输入、assistant 回复、tool result）静默丢弃且持久化。运维平台的长会话/定时任务正是高危场景，作为 B 轮第一项修掉：
+
+- **Session.ReplaceIfUnchanged(msgs, seenVersion, seenLen)**：版本+长度双 CAS；版本必须在快照**之前**读取（落在两者之间的重写会失败而非用过期版本通过）；成功即递增 rewriteVersion；旧 Replace 保留（run loop 专用）但语义改为同样递增版本——任何整体换日志都是一次重写
+- **七个调用点全部收口**：compact×3（contended 时中止压缩并返回可重试的 ErrRewriteContended）、prune×2（后台维护静默跳过、下次再试；顺带修掉 SoftTrim/PruneStale 的裸 Messages 直读——连撕裂读都没防）、controller rewind、DeleteExpertCollab（contended 时明确报错）
+- 其余三处直赋值核查为安全（load 重建、fork/branch 新建会话）
+- 测试：CAS 三态（干净通过/并发追加拒绝且消息保留/交错重写拒绝）+ 哨兵错误；agent/control 套件全绿
+
 ### feat(event/reducer): 4-1 契约补全 + Spec-5 Phase 2 tool_call 片——item 流完整驱动工具生命周期
 
 - **契约扩展（ItemEvent.DeltaKind）**：tool_call 的 delta 带类别——`args`（补丁预览流）/`output`（流式 stdout，新补 ToolProgress→item 映射，纯 item 消费者不再丢进度）；ToolCallItem 补 Lossless 字段（parent_id/profile/attachments/truncated——适配器"lossless"自述此前对这四项不实，纯 item 渲染与 legacy 逐字段等价）；双 wire.go 透传 deltaKind

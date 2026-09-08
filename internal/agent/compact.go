@@ -219,6 +219,9 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	// /compact (CompactNow) runs detached from the run loop, so the message log
 	// must be read as the locked snapshot — a direct Messages read here races a
 	// concurrently appending turn (torn slice or a mid-rewrite compaction view).
+	// The version is captured BEFORE the snapshot so a rewrite landing between
+	// the two fails the CAS below instead of succeeding against a stale view.
+	v0 := a.session.RewriteVersion()
 	msgs := a.session.Snapshot()
 	head, start, ok := a.planCompaction(msgs, minCompactMessages)
 	if !ok {
@@ -339,8 +342,12 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 			summaryTagClose,
 	})
 	compacted = append(compacted, msgs[start:]...)
-	a.session.Replace(compacted)
-	a.session.IncrementRewrite()
+	if !a.session.ReplaceIfUnchanged(compacted, v0, len(msgs)) {
+		// A concurrent append or rewrite landed mid-compaction — applying this
+		// result would silently drop it (AGENT-1). Abort; retrying is safe.
+		a.emitCompactionAborted(trigger)
+		return fmt.Errorf("compact: %w", ErrRewriteContended)
+	}
 
 	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
 		Trigger: trigger, Messages: len(fold), Summary: summary, Archive: archived,
@@ -363,6 +370,7 @@ func (a *Agent) emitCompactionAborted(trigger string) {
 func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 	// Snapshot, not a direct Messages read: the rewind/serve/remotehost callers
 	// invoke this outside the run loop, concurrent with turn appends.
+	v0 := a.session.RewriteVersion()
 	msgs := a.session.Snapshot()
 	if fromIdx < 0 || fromIdx >= len(msgs) {
 		return nil
@@ -381,7 +389,9 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 		Role:    provider.RoleUser,
 		Content: "Summary of the later conversation (compacted from here on):\n" + summary,
 	})
-	a.session.Replace(next)
+	if !a.session.ReplaceIfUnchanged(next, v0, len(msgs)) {
+		return fmt.Errorf("summarize: %w", ErrRewriteContended)
+	}
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d later messages → summary", len(region))})
 	return nil
@@ -392,6 +402,7 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 // is a turn boundary, so no tool pair is split. A no-op when the region is empty.
 func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 	// Snapshot for the same reason as SummarizeFrom: detached callers.
+	v0 := a.session.RewriteVersion()
 	msgs := a.session.Snapshot()
 	head := 0
 	if len(msgs) > 0 && msgs[0].Role == provider.RoleSystem {
@@ -415,7 +426,9 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 		Content: "Summary of earlier conversation (compacted up to here):\n" + summary,
 	})
 	next = append(next, msgs[toIdx:]...)
-	a.session.Replace(next)
+	if !a.session.ReplaceIfUnchanged(next, v0, len(msgs)) {
+		return fmt.Errorf("summarize: %w", ErrRewriteContended)
+	}
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d earlier messages → summary", len(region))})
 	return nil

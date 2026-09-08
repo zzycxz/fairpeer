@@ -291,8 +291,8 @@ type Options struct {
 	// compaction cards) to <session>.present.jsonl so a frontend can rebuild the
 	// exact transcript after a reload. The sidecar never feeds the LLM. Off by
 	// default; boot turns it on for desktop sessions that render a rich UI.
-	Present   bool
-	AutoPlan  string
+	Present  bool
+	AutoPlan string
 	// GoalJudge enables the independent goal judge: when the model reports
 	// [goal:complete], a separate LLM call verifies completion based on the
 	// transcript. nil disables the judge (model self-report is trusted).
@@ -357,37 +357,37 @@ func New(opts Options) *Controller {
 		})
 	}
 	c := &Controller{
-		runner:           opts.Runner,
-		executor:         opts.Executor,
-		dreamProvider:    opts.DreamProvider,
-		sink:             sink,
-		policy:           opts.Policy,
-		label:            opts.Label,
-		systemPrompt:     opts.SystemPrompt,
-		sessionDir:       opts.SessionDir,
-		sessionPath:      opts.SessionPath,
-		host:             opts.Host,
-		commands:         opts.Commands,
-		skills:           opts.Skills,
-		allSkills:        opts.AllSkills,
-		skillStore:       opts.SkillStore,
-		allSkillStore:    opts.AllSkillStore,
-		hooks:            opts.Hooks,
-		mem:              opts.Memory,
-		cleanup:          opts.Cleanup,
-		autoPlan:         normalizeAutoPlan(opts.AutoPlan),
-		goalJudge:        opts.GoalJudge,
-		classifier:       classifier,
-		onRemember:       opts.OnRemember,
-		onTurnEnd:        opts.OnTurnEnd,
-		ragContextFn:     opts.RAGContextFn,
-		jobs:             opts.Jobs,
-		reg:              opts.Registry,
-		pluginCtx:        pluginCtx,
-		cpRoot:           opts.WorkspaceRoot,
-		toolApprovalMode: ToolApprovalAsk,
-		approvals:        map[string]pendingApproval{},
-		asks:             map[string]pendingAsk{},
+		runner:             opts.Runner,
+		executor:           opts.Executor,
+		dreamProvider:      opts.DreamProvider,
+		sink:               sink,
+		policy:             opts.Policy,
+		label:              opts.Label,
+		systemPrompt:       opts.SystemPrompt,
+		sessionDir:         opts.SessionDir,
+		sessionPath:        opts.SessionPath,
+		host:               opts.Host,
+		commands:           opts.Commands,
+		skills:             opts.Skills,
+		allSkills:          opts.AllSkills,
+		skillStore:         opts.SkillStore,
+		allSkillStore:      opts.AllSkillStore,
+		hooks:              opts.Hooks,
+		mem:                opts.Memory,
+		cleanup:            opts.Cleanup,
+		autoPlan:           normalizeAutoPlan(opts.AutoPlan),
+		goalJudge:          opts.GoalJudge,
+		classifier:         classifier,
+		onRemember:         opts.OnRemember,
+		onTurnEnd:          opts.OnTurnEnd,
+		ragContextFn:       opts.RAGContextFn,
+		jobs:               opts.Jobs,
+		reg:                opts.Registry,
+		pluginCtx:          pluginCtx,
+		cpRoot:             opts.WorkspaceRoot,
+		toolApprovalMode:   ToolApprovalAsk,
+		approvals:          map[string]pendingApproval{},
+		asks:               map[string]pendingAsk{},
 		granted:            map[string]bool{},
 		present:            rec,
 		presentPath:        opts.SessionPath,
@@ -2115,11 +2115,17 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 		// boundary is the message-log index at turn start; compaction shrinks the
 		// log without rewriting boundaries, so a stale boundary past the end means
 		// the turn was compacted away — fail loudly instead of skipping silently.
+		// CAS install (AGENT-1): a detached append or rewrite landing between
+		// the Snapshot and here must abort the rewind, not be silently dropped.
+		// Version is captured BEFORE the snapshot (see ReplaceIfUnchanged).
+		v0 := s.RewriteVersion()
 		msgs := s.Snapshot()
 		if boundary > len(msgs) {
 			return c.rewindFail(fmt.Errorf("conversation rewind unavailable for turn %d: the conversation was compacted past this point", turn))
 		}
-		s.Replace(msgs[:boundary])
+		if !s.ReplaceIfUnchanged(msgs[:boundary], v0, len(msgs)) {
+			return c.rewindFail(fmt.Errorf("conversation rewind unavailable for turn %d: %w", turn, agent.ErrRewriteContended))
+		}
 		c.mu.Lock()
 		c.cpTurn = turn // renumber future turns from here; later turns are gone
 		for k := range c.cpBound {
@@ -2846,7 +2852,10 @@ func (c *Controller) DeleteExpertCollab(ordinal int) error {
 	sess := c.executor.Session()
 	// Find the ordinal-th expert_team_collab message in the snapshot and map it
 	// back to a live index to remove. Computing over a snapshot then re-locking
-	// is safe because c.running is false (the run loop is the only other writer).
+	// is safe because c.running is false (the run loop is the only other
+	// writer); the CAS install additionally covers detached rewrites
+	// (compact/summarize), which don't hold c.mu.
+	v0 := sess.RewriteVersion()
 	snap := sess.Snapshot()
 	target := -1
 	seen := 0
@@ -2867,7 +2876,10 @@ func (c *Controller) DeleteExpertCollab(ordinal int) error {
 	filtered := make([]provider.Message, 0, len(snap)-1)
 	filtered = append(filtered, snap[:target]...)
 	filtered = append(filtered, snap[target+1:]...)
-	sess.Replace(filtered)
+	if !sess.ReplaceIfUnchanged(filtered, v0, len(snap)) {
+		c.mu.Unlock()
+		return fmt.Errorf("delete collaboration: %w", agent.ErrRewriteContended)
+	}
 	c.mu.Unlock()
 	_ = c.snapshot(true)
 	return nil

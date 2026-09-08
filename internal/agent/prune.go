@@ -38,7 +38,11 @@ func (a *Agent) PruneStaleToolResults() (PruneStats, error) {
 	if a.contextWindow <= 0 {
 		return st, nil
 	}
-	msgs := a.session.Messages
+	// Snapshot + version for the CAS below: prune runs detached from the run
+	// loop, and an unconditional Replace from this snapshot would drop any
+	// concurrently appended messages (AGENT-1).
+	v0 := a.session.RewriteVersion()
+	msgs := a.session.Snapshot()
 	head, start, ok := a.planCompaction(msgs, 1)
 	if !ok {
 		return st, nil
@@ -74,8 +78,12 @@ func (a *Agent) PruneStaleToolResults() (PruneStats, error) {
 		next[i] = m
 		st.Results++
 	}
-	a.session.Replace(next)
-	a.session.IncrementRewrite()
+	if !a.session.ReplaceIfUnchanged(next, v0, len(msgs)) {
+		// Contended by a concurrent append/rewrite — skip this pass entirely
+		// (stats would describe a rewrite that never landed). Background
+		// maintenance: silent, retried on the next pass.
+		return PruneStats{}, nil
+	}
 	return st, nil
 }
 
@@ -90,7 +98,11 @@ func (a *Agent) SoftTrimLargeResults() (PruneStats, error) {
 	if a.contextWindow <= 0 {
 		return st, nil
 	}
-	msgs := a.session.Messages
+	// Snapshot + version for the CAS below — same AGENT-1 reasoning as
+	// PruneStaleToolResults; this also replaces the previous direct Messages
+	// read, which was itself a torn-read risk off the run loop.
+	v0 := a.session.RewriteVersion()
+	msgs := a.session.Snapshot()
 	head, start, ok := a.planCompaction(msgs, 1)
 	if !ok {
 		return st, nil
@@ -119,8 +131,10 @@ func (a *Agent) SoftTrimLargeResults() (PruneStats, error) {
 		}
 	}
 	if changed {
-		a.session.Replace(next)
-		a.session.IncrementRewrite()
+		if !a.session.ReplaceIfUnchanged(next, v0, len(msgs)) {
+			// Contended — skip this pass; retried on the next maintenance sweep.
+			return PruneStats{}, nil
+		}
 	}
 	return st, nil
 }
