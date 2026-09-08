@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(builtin): 评审 P2 择优三连——TOOL-4 apply_patch 覆盖式 add 回滚删原文件 + TOOL-6 日历 ID 截断 + TOOL-3 IMAP 正文无上限
+
+- **TOOL-4【P2·数据安全】**：apply_patch 的 `add` 落在**已存在路径**上时（覆盖式 add），中途失败回滚一律 `os.Remove`——删掉的是用户的原文件（move 目标早有恢复纪律，唯 add 不对称）。修法：Phase 1 对 add 目标 Stat，存在则捕获旧内容与编码（`addExisted`），回滚恢复而非删除；新增回归测试钉住「覆盖式 add + 后续 hunk 语法失败 → 原内容完整恢复」
+- **TOOL-6【P2】**：日历搜索展示截断到 12 字符的 ID，而 update/delete 按完整 ID 精确匹配（`evt_<UnixNano>` 恒超 12）——模型拿到的引用必然不可用。改为展示完整 ID
+- **TOOL-3【P2】**：dock 邮件列表对最多 30 封全量 `FETCH BODY[]` 入内存且无上限——恶意/巨型邮箱可致数百 MB 峰值。正文读取 `io.LimitReader` 封顶 5 MiB（预览仅需 ~2000 字符、附件仅需元数据；截断只优雅降级不静默损坏）
+- 验证：apply_patch 全组（含新回归）+ builtin 全量（112s）绿；日历为展示行修正无既有 harness、store 精确匹配路径未动
+
 ### fix(builtin): 评审 P1 清零——TOOL-1 邮件头 display-name 注入 + TOOL-2 浏览器流重试盲发（附 TOOL-8）
 
 - **TOOL-1【P1】display-name 注入绕过**：checkAddrInjection 原来只查 `<...>` 内的 addr-spec——`"Foo\r\nBcc: evil@x" <a@b>` 的 spec 干净但 display name 的 CRLF 原样进 To 头。改为**整串控制字符先拒**（CR/LF/0x00-0x1F/0x7F），再做 spec 级检查（local-part 空白规则保留）；合法 display name 地址不受影响

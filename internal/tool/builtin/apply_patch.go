@@ -338,6 +338,10 @@ func (a applyPatch) Execute(ctx context.Context, args json.RawMessage) (string, 
 		moveDestExisted bool
 		moveDestOld     string
 		moveDestEnc     fileenc.Kind
+		// For adds: the same discipline when the patch OVERWRITES an existing
+		// path (add-as-overwrite) — rollback restores the prior content
+		// instead of os.Remove'ing a file the patch never owned (TOOL-4).
+		addExisted bool
 	}
 	var changes []fileChange
 
@@ -349,11 +353,24 @@ func (a applyPatch) Execute(ctx context.Context, args json.RawMessage) (string, 
 
 		switch hunk.typ {
 		case hunkAdd:
-			changes = append(changes, fileChange{
+			fc := fileChange{
 				path:       filePath,
 				newContent: hunk.contents,
 				changeType: "add",
-			})
+			}
+			// Capture the prior content when the add targets an existing path
+			// (TOOL-4): a mid-Phase-2 failure then RESTORES the original
+			// instead of os.Remove'ing it. Mirrors the move-destination rule.
+			if _, serr := os.Stat(filePath); serr == nil {
+				old, enc, rerr := readFileEncoded(filePath)
+				if rerr != nil {
+					return "", fmt.Errorf("apply_patch verify: read %s: %w", filePath, rerr)
+				}
+				fc.addExisted = true
+				fc.oldContent = old
+				fc.enc = enc
+			}
+			changes = append(changes, fc)
 
 		case hunkDelete:
 			if _, err := os.Stat(filePath); err != nil {
@@ -449,7 +466,17 @@ func (a applyPatch) Execute(ctx context.Context, args json.RawMessage) (string, 
 			c := changes[j]
 			switch c.changeType {
 			case "add":
-				_ = os.Remove(c.path)
+				// Only remove the file when THIS change created it; an
+				// add-as-overwrite restores the captured prior content
+				// instead (os.Remove would delete a file the patch never
+				// owned — TOOL-4, same rule as move destinations).
+				if c.addExisted {
+					if werr := writeFileEncoded(c.path, c.oldContent, c.enc); werr != nil {
+						restoreWarns = append(restoreWarns, fmt.Sprintf("failed to restore overwritten %s: %v", c.path, werr))
+					}
+				} else {
+					_ = os.Remove(c.path)
+				}
 			case "delete":
 				if werr := writeFileEncoded(c.path, c.oldContent, c.enc); werr != nil {
 					restoreWarns = append(restoreWarns, fmt.Sprintf("failed to restore deleted %s: %v", c.path, werr))

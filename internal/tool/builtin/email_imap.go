@@ -503,11 +503,16 @@ func parseMessage(msg *imap.Message) EmailMessage {
 		}
 	}
 	// Read the raw message bytes and parse MIME for a body preview + attachments.
+	// Capped (TOOL-3): a list fetch pulls up to `limit` messages, and a huge
+	// or hostile mailbox BODY[] could otherwise balloon memory by the hundreds
+	// of MB. The preview needs ~2000 chars and attachments only metadata —
+	// truncation at the cap degrades those gracefully (a later part's
+	// attachment may be omitted), never silently corrupts what's shown.
+	const maxRawBodyBytes = 5 << 20 // 5 MiB
 	var bodyBytes []byte
 	section := &imap.BodySectionName{}
-	r := msg.GetBody(section)
-	if r != nil {
-		bodyBytes, _ = io.ReadAll(r)
+	if r := msg.GetBody(section); r != nil {
+		bodyBytes, _ = io.ReadAll(io.LimitReader(r, maxRawBodyBytes))
 	}
 	if len(bodyBytes) > 0 {
 		m.Preview = extractTextPreview(bodyBytes)

@@ -433,6 +433,52 @@ func TestApplyPatch_RollbackRestoresPreexistingMoveDest(t *testing.T) {
 	}
 }
 
+// TestApplyPatch_RollbackRestoresOverwrittenAdd guards TOOL-4: an add that
+// OVERWRITES a pre-existing file, followed by a failing later change, must
+// roll back to the ORIGINAL content — the old rollback os.Remove'd the file,
+// destroying data the patch never owned (the move-destination rule, applied
+// to adds).
+func TestApplyPatch_RollbackRestoresOverwrittenAdd(t *testing.T) {
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "existing.go")
+	original := "package main\n\nfunc userOriginal() {}\n"
+	if err := os.WriteFile(existing, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(dir, "victim.go")
+	if err := os.WriteFile(victim, []byte("package main\n\nfunc victim() {\n\tok()\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	patch := `*** Begin Patch
+*** Add File: ` + existing + `
++package main
++
++func replaced() {}
+*** Update File: ` + victim + `
+@@
+-func victim() {
++func victim() {
+ 	ok()
+-}
++this is not valid go ]]
+*** End Patch`
+
+	a := applyPatch{workDir: dir}
+	_, err := a.Execute(context.TODO(), mustJSON(patch))
+	if err == nil {
+		t.Fatal("patch with a syntax-broken final hunk must fail")
+	}
+
+	content, rerr := os.ReadFile(existing)
+	if rerr != nil {
+		t.Fatalf("overwritten file must survive rollback: %v", rerr)
+	}
+	if string(content) != original {
+		t.Fatalf("original content must be restored, got: %q", content)
+	}
+}
+
 func mustJSON(patchText string) []byte {
 	b, _ := json.Marshal(map[string]string{"patchText": patchText})
 	return b
