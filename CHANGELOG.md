@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(desktop/toolcard): 分层 ToolCard 首批（Spec-1）——agent bash 命令行卡 + 办公写路径卡 + email 卡
+
+FAIRPEER_CODEX_GAP_SPEC Spec-1 首批落地（复核后口径：ToolCard 管线已有状态指示器/subject/stat/head-tail 折叠/quiet，grep/web_fetch 等经 tools.ts 启发式已达标；真正的缺口是 agent bash 的 args JSON dump 与办公写工具无正文）：
+
+- **bash（agent 发起）**：注册 ShellCardBody——`$ 命令` 行 + 输出头尾折叠（8+12 行、60 行内全显）+ 展开全部 + 截断/错误注记；`!` 前缀用户 shell（isShell）保持原实时流分支不重复渲染
+- **办公写工具**（doc_write/csv_write/xlsx_write/mindmap_create/doc_convert）：OfficeWriteCardBody——目标路径行（doc_convert 显 `源 → 产物`）+ 工具摘要输出，替代 args JSON
+- **email_send**：收件人 + 主题行 + 发送回执
+- **netdev_probe 注册补齐**（测绘三合一后的新名此前无卡片）；netdev_discover 保留（弃用别名期间继续工作）；全部真实工具名，无死条目
+- 后续批次（另行）：read/edit/write 语法高亮卡、BrowserActionCard（cowork 21+7+5 工具类聚合）、Exploring 只读分组折叠
+- 验证：tsc 绿；npm run test:all 全绿
+
 ### feat(desktop/search): 对话内全文搜索（Spec-2，超越 codex）——Ctrl+F 搜索栏 + 匹配计数 + 暖区展开跳转
 
 FAIRPEER_CODEX_GAP_SPEC Spec-2 落地。codex 无对话内搜索（仅 Ctrl+T overlay 浏览）：
@@ -101,6 +112,8 @@ diff/files 证据此前只认 7 个编码写工具，办公 profile 的步骤签
 - **导入改按 CVE-ID 合并 + 清空重置**：NVD API 2.0 导出常是时间窗增量，原整体覆盖语义会把缓存缩到最后一窗——合并语义＝同 ID 新条目覆盖旧条目、既有条目永不删除（增量导出可反复导入）；「清空情报源」两击确认是唯一重置路径（NetDevCVEClear 桥接）；TestCVEImportMergeAndClear 钉住合并/覆盖/清空/幂等
 - **「从文件导入」**：NVD 原生导出几十 MB，textarea 承载不了——读本地 JSON 直接导入并自动刷新匹配，不经文本框（粘贴通道保留给小 feed/示例）
 - **导入即扫查（自动闭环）**：导入（粘贴/文件两路）与转正后都自动刷新匹配并滚动扫查一次——feed 与清单是匹配仅有的两个输入，变化即扫；输入不变时盲跑时间定时器是空转，故不做
+- **滚动卡生命周期闭环（bug 修复）**：零命中扫查此前直接 return、清空 feed 也不回收——旧命中卡永远停在 active「N 台命中」（设备已修复/移除后成了僵尸卡）。现在零命中扫查与「清空情报源」都走 `ResolveCVESweep`（复用告警的条件解除自动恢复语义：active→resolved + 标注），TestCVESweepResolveOnZero 钉住命中→active→零命中→resolved 全程
+- **文案与手册对齐**：场景卡「按清单版本自动匹配」改为「按设备 厂商/系统/型号」（匹配输入本就无版本字段）；操作手册第十一章导入路径由不存在的「设置 → 运维 → 安全工作台」改为「主区 安全工作台 → CVE」并补示例档/文件导入/合并语义
 - **CVE 透镜专用空态**：透镜为空时区分三种原因（未导入 feed / 未扫查 / 零命中——多半是设备厂商·系统·型号指纹字段为空），一键**直达**安全工作台 CVE 视图（复用 fairpeer:netdev-cve 事件）；原通用空态（跑基线）对其余透镜保留
 - **引导文案三处补齐**：`netdev_cve_match` 无 feed 引导提及示例按钮与文件导入（tools.go）；扫查空结果提示补零命中成因（设备指纹字段为空）；sweepEmptyHint 同步
 - **扫查改滚动发现（bug 修复）**：`MatchCVEsToFindings` 注释声称 re-runs update，实际每次 `SaveFinding` 新开一张卡——重复扫查把发现中心堆满重复的「CVE 匹配」卡。改走 `SaveRollingFinding`（同 cve:sweep 原地更新、保留首次立案时间），新增 TestCVESweepRolling 钉住「两次扫查一张卡、ID/时间稳定」；调试中发现 `ListFindings` 对「能反序列化但无标题的 JSON」无防御（目录混入外来 json 会显示成空卡）——按 findingValid 的 title 必填口径加守卫

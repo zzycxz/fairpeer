@@ -2156,6 +2156,27 @@
 .tool__showall:hover {
   background: color-mix(in srgb, var(--accent-soft) 60%, transparent);
 }
+/* Spec-1 卡片正文：bash 命令行 + 办公写路径行 */
+.toolcard-shell__cmd {
+  margin: 0 0 6px;
+  padding: 5px 8px;
+  font-family: var(--mono, ui-monospace, Consolas, monospace);
+  font-size: 11.5px;
+  color: var(--fg);
+  background: var(--bg-elev);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.toolcard-office__path {
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  font-size: 11.5px;
+  color: var(--fg);
+  background: var(--bg-elev);
+  border-radius: var(--radius-sm);
+  word-break: break-all;
+}
 .tool__err {
   margin: 0 11px 10px 30px;
   padding: 7px 10px;
