@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(evidence): 办公证据链接通——isWriter/isReader 认办公工具 + doc_convert out_path 提取
+
+FAIRPEER_CODEX_GAP_SPEC P0 落地（2026-09-08 复核修订后口径）。complete_step 的
+diff/files 证据此前只认 7 个编码写工具，办公 profile 的步骤签核实效断链（diff 轮内
+与跨轮全失败；files 跨轮经 PathsProvenInSession 回退部分放行）：
+
+- **isWriterTool** += `apply_patch`（原名单就漏的编码写工具）、`doc_write/csv_write/
+  xlsx_write/doc_convert/mindmap_create`；**isReaderTool** += `doc_read/csv_read/
+  xlsx_read/xlsx_query`（跨轮回退以该名单判定读语义）
+- **extractPaths 键表 += `out_path`**——doc_convert 产物参数此前提取不到，转换输出
+  无法被引用为证据（复核时新发现的缺口）
+- **机制澄清后明确不做**：extractPaths 本就工具无关（原 spec 3.2 删）；diff 证据是
+  回执制（只验"路径有成功写入回执"）而非文本 diff，不存在二进制问题、无需 mtime
+  窗口校验（原 spec 3.3 删）；无 path 参数的工具（email_send 等）与 netdev 设备写
+  不进名单——后者 verification 证据已认 netdev_exec，配置变更 sign-off 对接 OpStep
+  台账另立 spec
+- 测试：办公写/读回执、doc_convert 双路径、email_send 不产生路径回执、轮内与跨轮
+  办公 diff/files 验证；go test ./internal/evidence/... ./internal/tool/...
+  ./internal/agent/... ./internal/boot/... 全绿
+- **同批文档**：FAIRPEER_CODEX_GAP_SPEC 全文修订（基线按 profile 分区注册更正、删
+  不存在工具名 xlsx_edit/mindmap_read/ppt_create、Spec-4 改为接线既有
+  ConPTY/TerminalSession 降至 ~2 天并提前 P1 首位、总工作量 20→15 天）；
+  DEV_COWORK_TOOL_COMPARISON 加过时标注（"72 工具"口径作废，防再抄）
+
 ### fix(netdev/skill): 入口形态路由最后一公里——addon 补 主机/网段 委托行 + 扩半径委托侧纪律
 
 0.2.2 复核发现的遗漏：seccheck-auto body 支持四种入口（清单|套餐|主机|网段），但主循环 addon 路由表只教了 清单/套餐 两种委托——用户说"从这台主机排查"/"这个 IP 接在哪"主循环没有路由指引（BLUETEAM_SKILL_SPEC §8③、ORCHESTRATION 状态行同记）。修复：

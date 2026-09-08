@@ -547,3 +547,47 @@ func TestCompleteStepSessionFallbackSkipsFailedWrite(t *testing.T) {
 		t.Fatal("a failed write must not satisfy cross-turn diff evidence")
 	}
 }
+
+// Office (cowork) evidence: document/spreadsheet writers produce writer
+// receipts, so diff/files evidence verifies for office work the same way it
+// does for code.
+func TestCompleteStepVerifiesOfficeEvidence(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("doc_write",
+		json.RawMessage(`{"path":"reports/weekly.docx","content":"x"}`), true, false))
+	ledger.Record(evidence.ReceiptFromToolCall("xlsx_query",
+		json.RawMessage(`{"path":"reports/budget.xlsx","op":"sum","column":"B"}`), true, true))
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	out, err := completeStep{}.Execute(ctx, json.RawMessage(`{
+		"step":"Write the weekly report",
+		"result":"report written and budget totals checked",
+		"evidence":[
+			{"kind":"diff","summary":"weekly report written","paths":["reports/weekly.docx"]},
+			{"kind":"files","summary":"budget totals verified","paths":["reports/budget.xlsx"]}
+		]}`))
+	if err != nil {
+		t.Fatalf("office evidence should verify: %v", err)
+	}
+	if !strings.Contains(out, "host-verified 2") {
+		t.Fatalf("ack should report host verification, got %q", out)
+	}
+}
+
+func TestCompleteStepSessionFallbackResolvesOfficeDiffPaths(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "w1", Name: "mindmap_create",
+			Arguments: `{"path":"notes/arch.md","title":"arch","branches":[]}`,
+		}}},
+		{Role: provider.RoleTool, ToolCallID: "w1", Name: "mindmap_create", Content: "wrote notes/arch.md"},
+	}
+	ctx := evidence.WithLedger(context.Background(), evidence.NewLedger())
+	ctx = evidence.WithSessionMessages(ctx, msgs)
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"x","result":"y",
+		"evidence":[{"kind":"diff","summary":"mindmap generated","paths":["notes/arch.md"]}]}`)); err != nil {
+		t.Fatalf("cross-turn office diff citation rejected: %v", err)
+	}
+}

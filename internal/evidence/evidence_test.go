@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
 func TestLedgerRecordsSuccessAndFailureReceipts(t *testing.T) {
@@ -121,6 +123,100 @@ func TestReceiptFromToolCallExtractsEvidenceFields(t *testing.T) {
 	read := ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"internal/tool/builtin/completestep.go"}`), true, true)
 	if !read.Read || len(read.Paths) != 1 {
 		t.Fatalf("read receipt not extracted: %+v", read)
+	}
+}
+
+func TestReceiptFromToolCallTreatsOfficeToolsAsWritersAndReaders(t *testing.T) {
+	writers := map[string]string{
+		"doc_write":      `{"path":"reports/weekly.docx","content":"x"}`,
+		"csv_write":      `{"path":"reports/data.csv","content":[["a"],["b"]]}`,
+		"xlsx_write":     `{"path":"reports/budget.xlsx","content":"x"}`,
+		"mindmap_create": `{"path":"notes/arch.md","title":"arch","branches":[]}`,
+	}
+	for name, args := range writers {
+		r := ReceiptFromToolCall(name, json.RawMessage(args), true, false)
+		if !r.Write {
+			t.Fatalf("%s should produce a writer receipt: %+v", name, r)
+		}
+		if len(r.Paths) != 1 {
+			t.Fatalf("%s path not extracted: %+v", name, r)
+		}
+	}
+
+	// doc_convert: both the source ("path") and the converted output
+	// ("out_path") must land on the receipt so citing either file verifies.
+	conv := ReceiptFromToolCall("doc_convert", json.RawMessage(`{"path":"notes/spec.md","out_path":"notes/spec.html"}`), true, false)
+	if !conv.Write {
+		t.Fatal("doc_convert should produce a writer receipt")
+	}
+	if len(conv.Paths) != 2 {
+		t.Fatalf("doc_convert should extract source and output paths: %+v", conv)
+	}
+
+	// apply_patch embeds its paths inside patchText, so it carries a writer
+	// flag with no extractable paths — still a writer for receipt ordering.
+	patch := ReceiptFromToolCall("apply_patch", json.RawMessage(`{"patchText":"*** Begin Patch"}`), true, false)
+	if !patch.Write {
+		t.Fatal("apply_patch should produce a writer receipt")
+	}
+
+	// Cross-turn fallback shape (readOnly=false): office readers need explicit
+	// isReaderTool membership to count.
+	readers := map[string]string{
+		"doc_read":   `{"path":"reports/weekly.docx"}`,
+		"csv_read":   `{"path":"reports/data.csv"}`,
+		"xlsx_read":  `{"path":"reports/budget.xlsx"}`,
+		"xlsx_query": `{"path":"reports/budget.xlsx","op":"sum","column":"B"}`,
+	}
+	for name, args := range readers {
+		r := ReceiptFromToolCall(name, json.RawMessage(args), true, false)
+		if !r.Read {
+			t.Fatalf("%s should produce a reader receipt: %+v", name, r)
+		}
+	}
+
+	// Mailbox tools operate without path args, so they never produce
+	// path-backed evidence either way.
+	email := ReceiptFromToolCall("email_send", json.RawMessage(`{"to":["a@b.c"],"subject":"s","body":"x"}`), true, false)
+	if email.Write || email.Read {
+		t.Fatalf("email_send must not produce a read/write receipt: %+v", email)
+	}
+}
+
+func TestLedgerVerifiesOfficeEvidence(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(ReceiptFromToolCall("doc_write", json.RawMessage(`{"path":"reports/weekly.docx","content":"x"}`), true, false))
+	ledger.Record(ReceiptFromToolCall("doc_convert", json.RawMessage(`{"path":"notes/spec.md","out_path":"notes/spec.html"}`), true, false))
+	ledger.Record(ReceiptFromToolCall("xlsx_query", json.RawMessage(`{"path":"reports/budget.xlsx","op":"sum","column":"B"}`), true, true))
+
+	if !ledger.HasSuccessfulWrite([]string{`reports\weekly.docx`}) {
+		t.Fatal("doc_write receipt should verify diff evidence for the document")
+	}
+	if !ledger.HasSuccessfulWrite([]string{`notes\spec.html`}) {
+		t.Fatal("doc_convert receipt should verify the converted output path")
+	}
+	if !ledger.HasSuccessfulReadOrWrite([]string{"reports/budget.xlsx"}) {
+		t.Fatal("xlsx_query receipt should verify files evidence for the workbook")
+	}
+}
+
+func TestPathsProvenInSessionCoversOfficeTools(t *testing.T) {
+	msgs := []provider.Message{{
+		Role:      provider.RoleAssistant,
+		ToolCalls: []provider.ToolCall{{ID: "c1", Name: "doc_write", Arguments: `{"path":"reports/weekly.docx"}`}},
+	}, {
+		Role:      provider.RoleAssistant,
+		ToolCalls: []provider.ToolCall{{ID: "c2", Name: "doc_read", Arguments: `{"path":"reports/older.docx"}`}},
+	}}
+
+	if !PathsProvenInSession(msgs, []string{"reports/weekly.docx"}, true) {
+		t.Fatal("office writer should satisfy wantWrite session fallback")
+	}
+	if !PathsProvenInSession(msgs, []string{"reports/older.docx"}, false) {
+		t.Fatal("office reader should satisfy wantRead session fallback")
+	}
+	if PathsProvenInSession(msgs, []string{"reports/older.docx"}, true) {
+		t.Fatal("office reader must not satisfy wantWrite session fallback")
 	}
 }
 

@@ -569,7 +569,13 @@ func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, re
 
 func isWriterTool(name string) bool {
 	switch name {
-	case "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol":
+	// coding
+	case "write_file", "edit_file", "multi_edit", "move_file", "notebook_edit", "delete_range", "delete_symbol", "apply_patch":
+		return true
+	// office (cowork): document/spreadsheet/mindmap writers carry a "path" arg
+	// (doc_convert's output arrives via "out_path"), so they produce usable
+	// writer receipts; mailbox tools (email_send) have no path arg and stay out.
+	case "doc_write", "csv_write", "xlsx_write", "doc_convert", "mindmap_create":
 		return true
 	default:
 		return false
@@ -578,7 +584,10 @@ func isWriterTool(name string) bool {
 
 func isReaderTool(name string) bool {
 	switch name {
-	case "read_file", "ls", "grep":
+	case "read_file", "ls", "grep",
+		// office readers: PathsProvenInSession (the cross-turn fallback) passes
+		// readOnly=false, so office reads need explicit membership here.
+		"doc_read", "csv_read", "xlsx_read", "xlsx_query":
 		return true
 	default:
 		return false
@@ -587,7 +596,7 @@ func isReaderTool(name string) bool {
 
 func extractPaths(fields map[string]json.RawMessage) []string {
 	var paths []string
-	for _, key := range []string{"path", "file_path", "notebook_path", "source_path", "destination_path"} {
+	for _, key := range []string{"path", "file_path", "notebook_path", "source_path", "destination_path", "out_path"} {
 		if s := stringField(fields, key); s != "" {
 			paths = append(paths, s)
 		}

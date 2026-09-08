@@ -2,6 +2,14 @@
 
 > 基于当前代码（v0.4.0），所有工具名从源码逐行核实。
 > 日期：2026-07-05
+>
+> **⚠️ 已过时（2026-09-08 标注）**：本文的核心前提 "两个模式共用同一个工具注册池
+> （72 个）" 已不成立——注册现已按 profile 分区（`internal/boot/boot.go:632-853`），
+> cowork/netdev 的工具组只在对应分支注册；浏览器工具已 21 个（非 12），schedule
+> 为 6 个，documents 为 9 个，另有 calendar/im_send/xlsx_query/mindmap_create
+> 等新增，且不存在 `background_job` 工具（实为 bash_output/kill_shell/wait）。
+> 引用工具数字请以 `docs/FAIRPEER_CODEX_GAP_SPEC.md` 的基线（2026-09-08 复核）
+> 或直接以 boot.go 为准；本文仅存档 2026-07 的口径。
 
 ---
 
