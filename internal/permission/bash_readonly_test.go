@@ -177,6 +177,13 @@ func TestReadOnlyBashMetaExecutors(t *testing.T) {
 		{"git reflog show", true},
 		{"git reflog delete HEAD@{0}", false},
 		{"git reflog expire --expire=now --all", false},
+		// PERM-1: git ≥ 2.43's reflog drop destroys entries too.
+		{"git reflog drop HEAD@{0}", false},
+		// PERM-2: the log family's --output write bypass, extended.
+		{"git whatchanged --output=/tmp/x", false},
+		{"git whatchanged", true},
+		{"git reflog show --output=/tmp/x", false},
+		{"git log --output=/tmp/x", false},
 		// System-state setters hidden in read-only-looking commands.
 		{"hostname", true},
 		{"hostname newname.example.com", false},

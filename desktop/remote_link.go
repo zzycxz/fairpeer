@@ -59,7 +59,12 @@ func newRemoteHostLink(ctx context.Context, stdin io.Reader, stdout io.Writer, p
 			return
 		}
 		if s := l.session(p.SessionID); s != nil {
-			s.consumeEvent(eventwire.FromWire(p.Event))
+			// FromWireOK (CORE-4): an unmapped wire kind MUST be dropped —
+			// decoding it anyway fabricates a phantom TurnStarted (a
+			// forwarded "paused" would resurface as a turn restart).
+			if ev, ok := eventwire.FromWireOK(p.Event); ok {
+				s.consumeEvent(ev)
+			}
 		}
 	})
 	conn.Handle("permission/request", func(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -71,7 +76,12 @@ func newRemoteHostLink(ctx context.Context, stdin io.Reader, stdout io.Writer, p
 		if s == nil {
 			return remotehost.PermissionRequestResult{}, nil
 		}
-		return s.awaitPermission(ctx, eventwire.FromWire(p.Event))
+		if ev, ok := eventwire.FromWireOK(p.Event); ok {
+			return s.awaitPermission(ctx, ev)
+		}
+		// Unmappable event — there is nothing to await; answer "no decision"
+		// rather than blocking on an event we can never see.
+		return remotehost.PermissionRequestResult{}, nil
 	})
 	conn.Handle("ask/request", func(ctx context.Context, raw json.RawMessage) (any, error) {
 		var p remotehost.AskRequestParams
@@ -82,7 +92,10 @@ func newRemoteHostLink(ctx context.Context, stdin io.Reader, stdout io.Writer, p
 		if s == nil {
 			return remotehost.AskRequestResult{}, nil
 		}
-		return s.awaitAsk(ctx, eventwire.FromWire(p.Event))
+		if ev, ok := eventwire.FromWireOK(p.Event); ok {
+			return s.awaitAsk(ctx, ev)
+		}
+		return remotehost.AskRequestResult{}, nil
 	})
 	go func() {
 		_ = conn.Serve(serveCtx)

@@ -110,9 +110,9 @@ func TestCronExpand(t *testing.T) {
 func TestSchedulerCreateListDelete(t *testing.T) {
 	s := New(t.TempDir() + "/sched.json")
 	task, err := s.Create(ScheduledTask{
-		Name:       "test",
-		Expression: "every 1h",
-		Prompt:     "hello",
+		Name:                 "test",
+		Expression:           "every 1h",
+		Prompt:               "hello",
 		ConfirmHighFrequency: true,
 	})
 	if err != nil {
@@ -269,5 +269,34 @@ func TestNextRunMalformedEveryBacksOff(t *testing.T) {
 		if !got.Equal(want) {
 			t.Errorf("nextRun(%q) = %v, want %v (1h backoff)", expr, got, want)
 		}
+	}
+}
+
+// TestUpdateRechecksFrequencyGate guards CORE-3: mutating a task's expression
+// to a runaway frequency via Update hits the same G4-1 gate as Create, and a
+// rejected mutation is rolled back out of the live slice.
+func TestUpdateRechecksFrequencyGate(t *testing.T) {
+	s := New(t.TempDir() + "/sched.json")
+	task, err := s.Create(ScheduledTask{Name: "daily", Expression: "daily 07:30", Prompt: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(task.ID, func(t *ScheduledTask) {
+		t.Expression = "* * * * *" // 1440/day — runaway
+	}); err == nil {
+		t.Fatal("updating to a runaway expression must be refused")
+	}
+	got := s.List(false)[0]
+	if got.Expression != "daily 07:30" {
+		t.Fatalf("rejected mutation leaked into the live task: %q", got.Expression)
+	}
+	if _, err := s.Update(task.ID, func(t *ScheduledTask) {
+		t.Expression = "every 30m"
+		t.ConfirmHighFrequency = true
+	}); err != nil {
+		t.Fatalf("confirmed high-frequency update should pass: %v", err)
+	}
+	if got := s.List(false)[0]; got.Expression != "every 30m" {
+		t.Fatalf("confirmed update not applied: %q", got.Expression)
 	}
 }

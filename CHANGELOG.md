@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(sec): 评审 P2 安全/正确性四连——PERM-1/2 只读命令封堵旁路 + SERVE-1 hostGuard 静默失效 + CORE-3 定时任务防失控闸门 + CORE-4 远端事件幽灵解码
+
+- **PERM-1**：`git reflog drop`（git ≥ 2.43 新子命令，销毁 reflog 条目）未在只读封堵列表——补 `drop`；**PERM-2**：`--output` 写文件旁路只盖 diff/show/log——`whatchanged`（log 家族）入列、`reflog show --output=` 补查；测试补六用例（drop/whatchoined 双向/reflog --output）
+- **SERVE-1**：`--addr :8787`（空主机=通配绑定，常见 Go 惯用法）经 SplitHostPort 得空串，而空 bindHost 语义是"测试直用全放行"——**静默整体禁用 hostGuard**。修法：空 host 归一化为 `*` 走通配分支（私网/回环过滤）+ WARN 日志；测试钉住归一化与过滤语义。顺手清 SERVE-2（serve.go gofmt 遗留）
+- **CORE-3**：scheduler Update 改表达式不复查 runsPerDay——1 次/日的任务 Update 成 `* * * * *` 静默过闸。修法：G4-1 闸门抽 `checkFrequencyGate` 供 Create/Update 共用；Update 先快照再改，任何失败（表达式非法/one-shot 过去/闸门拒绝）回滚还原——顺带修掉 mut 后失败原地残留的既有隐患；测试钉住拒绝+不泄漏+确认高频可过
+- **CORE-4**：remote_link 三处事件解码仍用旧 `FromWire`——未映射 kind 解码为零值 Kind（= TurnStarted），转发的 paused 会重现为"回合重启"。换 `FromWireOK`：未映射即丢弃（事件流），permission/ask 未映射答"无决定"而非空等
+- 验证：permission/serve/scheduler/eventwire 套件 + desktop 全量（含 remote_link 构建）全绿
+
 ### fix(builtin): 评审 P2 择优三连——TOOL-4 apply_patch 覆盖式 add 回滚删原文件 + TOOL-6 日历 ID 截断 + TOOL-3 IMAP 正文无上限
 
 - **TOOL-4【P2·数据安全】**：apply_patch 的 `add` 落在**已存在路径**上时（覆盖式 add），中途失败回滚一律 `os.Remove`——删掉的是用户的原文件（move 目标早有恢复纪律，唯 add 不对称）。修法：Phase 1 对 add 目标 Stat，存在则捕获旧内容与编码（`addExisted`），回滚恢复而非删除；新增回归测试钉住「覆盖式 add + 后续 hunk 语法失败 → 原内容完整恢复」

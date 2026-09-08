@@ -147,7 +147,8 @@ func hasUnsafePrefixArgs(base, subcmd string, args []string) bool {
 	switch base {
 	case "git":
 		switch subcmd {
-		case "diff", "show", "log":
+		case "diff", "show", "log", "whatchanged":
+			// whatchanged is the log family and inherits --output (PERM-2).
 			return hasAnyArg(args, "--output") || hasArgWithPrefix(args, "--output=")
 		case "tag":
 			// Bare `git tag` lists tags; any argument creates/deletes/moves
@@ -155,8 +156,10 @@ func hasUnsafePrefixArgs(base, subcmd string, args []string) bool {
 			return len(args) > 0
 		case "reflog":
 			// Bare `git reflog` (and `git reflog show`) is read-only;
-			// delete/expire destroy history.
-			return hasAnyArg(args, "delete", "expire")
+			// delete/expire/drop destroy history (drop landed in git 2.43 —
+			// PERM-1); `reflog show --output=X` writes a file like log does.
+			return hasAnyArg(args, "delete", "expire", "drop") ||
+				hasAnyArg(args, "--output") || hasArgWithPrefix(args, "--output=")
 		}
 	case "go":
 		if subcmd == "env" {

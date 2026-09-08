@@ -101,3 +101,21 @@ func TestServeBodyLimit(t *testing.T) {
 		t.Errorf("oversized body status = %d, want 413 or 400", resp.StatusCode)
 	}
 }
+
+// TestSetBindHostEmptyHostMeansWildcardNotDisabled guards SERVE-1: ":8787"
+// (empty host = bind-all, a common Go idiom) must normalize to the wildcard
+// branch — landing in bindHost == "" would silently allow-everything and
+// disable the hostGuard entirely.
+func TestSetBindHostEmptyHostMeansWildcardNotDisabled(t *testing.T) {
+	s := &Server{}
+	s.setBindHost(":8787")
+	if s.bindHost != "*" {
+		t.Fatalf("bindHost = %q, want * (wildcard semantics)", s.bindHost)
+	}
+	if !s.hostAllowed("192.168.1.10:8787") {
+		t.Error("wildcard normalization should allow private LAN hosts")
+	}
+	if s.hostAllowed("evil.example:8787") {
+		t.Error("wildcard normalization must still refuse public host names")
+	}
+}

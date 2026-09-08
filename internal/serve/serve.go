@@ -6,13 +6,13 @@
 package serve
 
 import (
-	"net"
 	"context"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -350,7 +350,17 @@ func (s *Server) setBindHost(addr string) {
 	if err != nil {
 		host = addr
 	}
-	s.bindHost = strings.ToLower(host)
+	host = strings.ToLower(host)
+	// SERVE-1: ":8787" (empty host = bind-all, a common Go idiom) must NOT
+	// land in bindHost == "" — that value means "tests / direct Handler use,
+	// allow everything" and would silently disable the whole hostGuard.
+	// Normalize to the wildcard branch (private/loopback Host filtering) and
+	// say so loudly.
+	if host == "" {
+		host = "*"
+		slog.Warn("serve: wildcard bind address — hostGuard restricts Host headers to loopback/private addresses")
+	}
+	s.bindHost = host
 }
 
 // RunGraceful serves with graceful shutdown. It listens for SIGINT/SIGTERM on

@@ -785,15 +785,10 @@ func (s *Scheduler) Create(t ScheduledTask) (ScheduledTask, error) {
 	// G4-1（SCENARIO_SPEC，COWORK_HARNESS_SECURITY_PLAN 阶段4）：每日硬顶
 	// max_runs_per_day（默认 48=每半小时）防失控循环刷 token；>4 次/日的高频
 	// 任务返回需要确认的错误——调用方带 confirmHighFrequency 重试。
-	dailyRuns := runsPerDay(t.Expression)
-	if dailyRuns > 4 && !t.ConfirmHighFrequency {
-		// 高频确认一并放行 cap（确认语义覆盖防失控：用户明确知道任务频繁）。
-		return ScheduledTask{}, fmt.Errorf("task fires %d times/day (> 4/day is high-frequency); retry with confirm_high_frequency=true to confirm you want a task running this often", dailyRuns)
+	if err := s.checkFrequencyGate(&t); err != nil {
+		return ScheduledTask{}, err
 	}
-	if maxRuns := s.maxRunsPerDay(); dailyRuns > maxRuns && !t.ConfirmHighFrequency {
-		return ScheduledTask{}, fmt.Errorf("task fires %d times/day, over the safety cap %d (config [scheduler] max_runs_per_day); refusing to create a runaway loop", dailyRuns, maxRuns)
-	}
-	
+
 	s.mu.Lock()
 	s.tasks = append(s.tasks, t)
 	err = s.store.save(s.tasks)
@@ -803,6 +798,21 @@ func (s *Scheduler) Create(t ScheduledTask) (ScheduledTask, error) {
 		return ScheduledTask{}, err
 	}
 	return t, nil
+}
+
+// checkFrequencyGate is the G4-1 runaway guard shared by Create AND Update
+// (CORE-3): a 1/day task mutated to "* * * * *" is the same runaway loop as
+// creating it — Update must not be the bypass.
+func (s *Scheduler) checkFrequencyGate(t *ScheduledTask) error {
+	dailyRuns := runsPerDay(t.Expression)
+	if dailyRuns > 4 && !t.ConfirmHighFrequency {
+		// 高频确认一并放行 cap（确认语义覆盖防失控：用户明确知道任务频繁）。
+		return fmt.Errorf("task fires %d times/day (> 4/day is high-frequency); retry with confirm_high_frequency=true to confirm you want a task running this often", dailyRuns)
+	}
+	if maxRuns := s.maxRunsPerDay(); dailyRuns > maxRuns && !t.ConfirmHighFrequency {
+		return fmt.Errorf("task fires %d times/day, over the safety cap %d (config [scheduler] max_runs_per_day); refusing a runaway loop", dailyRuns, maxRuns)
+	}
+	return nil
 }
 
 // runsPerDay estimates a normalized expression's daily fire count (0 for
@@ -891,9 +901,15 @@ func (s *Scheduler) Update(id string, mut func(*ScheduledTask)) (ScheduledTask, 
 	defer s.mu.Unlock()
 	for i := range s.tasks {
 		if s.tasks[i].ID == id {
+			// mut() edits the task in place — snapshot first so ANY failure
+			// below (bad expression, one-shot in the past, frequency gate)
+			// restores the prior task instead of leaving a mutated-but-
+			// unsaved entry in the live slice.
+			before := s.tasks[i]
 			mut(&s.tasks[i])
 			normalized, err := NormalizeExpression(s.tasks[i].Expression, time.Now())
 			if err != nil {
+				s.tasks[i] = before
 				return ScheduledTask{}, fmt.Errorf("expression: %w", err)
 			}
 			s.tasks[i].Expression = normalized
@@ -901,11 +917,18 @@ func (s *Scheduler) Update(id string, mut func(*ScheduledTask)) (ScheduledTask, 
 			if s.tasks[i].Enabled {
 				nr := nextRun(s.tasks[i].Expression, time.Now())
 				if s.tasks[i].OneShot && nr.IsZero() {
+					s.tasks[i] = before
 					return ScheduledTask{}, errors.New("one-shot time is in the past; pick a future instant")
 				}
 				s.tasks[i].NextRun = nr
 			} else {
 				s.tasks[i].NextRun = time.Time{}
+			}
+			// CORE-3: the G4-1 runaway gate applies to updates too — without
+			// this, a 1/day task mutates into "* * * * *" silently.
+			if err := s.checkFrequencyGate(&s.tasks[i]); err != nil {
+				s.tasks[i] = before
+				return ScheduledTask{}, err
 			}
 			_ = s.store.save(s.tasks)
 			s.armNextTimerLocked() // schedule/enabled may have changed — re-arm
