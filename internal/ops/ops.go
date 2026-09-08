@@ -109,8 +109,8 @@ type Request struct {
 	// asset set at start time so a mid-run config change can't widen reach.
 	Project       string   `json:"project,omitempty"`
 	Targets       []string `json:"targets,omitempty"`
-	Intent        string   `json:"intent,omitempty"` // incident_diagnosis | health_check | vulnerability_assessment | change_request | ...
-	Risk          string   `json:"risk,omitempty"`   // read | assess | change | verify
+	Intent        string   `json:"intent,omitempty"` // §4.2：incident_diagnosis | health_check | …（13 意图白名单见 tools.go）
+	Risk          string   `json:"risk,omitempty"`   // §18 四类边界：read | assess | propose | execute
 	ScopeSnapshot string   `json:"scope_snapshot,omitempty"`
 	Budget        *Budget  `json:"budget,omitempty"`
 

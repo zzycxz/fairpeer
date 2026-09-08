@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(ops): 运维平台 Phase 1 第二切片——ops_classify 请求入口 + ops_plan 主机校验计划
+
+- **ops_classify**：统一请求入口——新建（text 必填）或补分类已有请求；intent 走 §4.2 十三意图白名单、risk 走 §18 四类边界（read/assess/propose/execute，宁低勿高）；记录目标/项目/澄清问题，received→classified；已分类请求拒绝重分
+- **ops_plan**：模型起草、**主机校验**（§7.3 全清单）——目标必须在管（netdev 注入纳管设备名，§6.2 发现≠可连；未注入则 fail-closed）、kind 白名单 read|assess|propose|execute|verify、on_failure 白名单、timeout 1-600、步骤 id 唯一、**禁止隐式写入**（read/assess 级请求携带 propose/execute 步骤直接拒绝）；含 execute/verify 的计划自动 Approval=required；classified→scoped→planned 两跳落轨迹；计划拒绝不修补（退回模型重提）
+- 工具面：⑤b 组 1→3（classify/plan/status）；managedAssetNames 注入纳管设备清单
+- 测试：classify 三拒绝 + 落档、plan 六用例矩阵（合法/未知资产/坏 kind/重复 id/隐式写入/超范围 timeout）+ execute 自动审批 + fail-closed——全绿；netdev/config 表面测试无扰
+- Phase 1 余项：Job/Finding/Case/Proposal 挂 request_id、UI 状态卡、Run/Orchestrator（Phase 2 起）
+
 ### feat(ops): 运维平台 Phase 1 首切片——统一请求模型落地（Request 数据结构/§7.1 状态机/持久台账/ops_status）
 
 OPS_AUTOMATION_PLATFORM_SPEC Phase 1 从零起步（复核确认全仓无 ops_classify/request_id 实现，且与感知智能运维批不撞线）：

@@ -662,13 +662,30 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&logReadTool{m: m})
 	reg.Add(&logSearchTool{m: m})
 	// ⑤b 平台请求横切（OPS_AUTOMATION_PLATFORM_SPEC Phase 1）：统一请求
-	// 台账的状态查询——对话/定时/告警统一为 request_id 的第一阶段面。
+	// 台账的入口/计划/状态三件套——对话/定时/告警统一为 request_id。
+	reg.Add(&ops.ClassifyTool{})
+	reg.Add(&ops.PlanTool{Assets: managedAssetNames(cfg)})
 	reg.Add(&ops.StatusTool{})
 	// ⑥ 可信域组（TRUSTDOMAIN_SPEC §15）：仅加入域的主机可见。
 	if cfg.TrustDomain.Enabled {
 		reg.Add(&fleetTool{cfg: cfg})
 		reg.Add(&remoteTool{cfg: cfg})
 		InitAuditAnchoring(cfg) // audit chain head cross-anchors (spec §八)
+	}
+}
+
+// managedAssetNames feeds ops.PlanTool's in-scope asset check: the configured
+// netdev devices (§6.2 managed-only — discovered ≠ connectable). Hosts join
+// when the trustdomain fleet lands in a later phase.
+func managedAssetNames(cfg *config.Config) func() []string {
+	return func() []string {
+		names := make([]string, 0, len(cfg.NetDev.Devices))
+		for _, d := range cfg.NetDev.Devices {
+			if d.Name != "" {
+				names = append(names, d.Name)
+			}
+		}
+		return names
 	}
 }
 

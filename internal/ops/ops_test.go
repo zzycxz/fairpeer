@@ -145,3 +145,103 @@ func TestStatusToolListAndDetail(t *testing.T) {
 		t.Fatal("path traversal id must be rejected")
 	}
 }
+
+func TestClassifyToolCreatesAndClassifies(t *testing.T) {
+	testStore(t)
+	ctx := context.Background()
+
+	// Bad intent / bad risk are rejected without side effects.
+	if _, err := (ClassifyTool{}).Execute(ctx, json.RawMessage(`{"text":"x","intent":"fix_it","risk":"read"}`)); err == nil {
+		t.Fatal("non-whitelisted intent must be rejected")
+	}
+	if _, err := (ClassifyTool{}).Execute(ctx, json.RawMessage(`{"text":"x","intent":"reporting","risk":"yolo"}`)); err == nil {
+		t.Fatal("non-whitelisted risk must be rejected")
+	}
+	if _, err := (ClassifyTool{}).Execute(ctx, json.RawMessage(`{"intent":"reporting","risk":"read"}`)); err == nil {
+		t.Fatal("creating without text must be rejected")
+	}
+
+	out, err := (ClassifyTool{}).Execute(ctx, json.RawMessage(`{
+		"text":"core-sw-1 丢包排查","intent":"incident_diagnosis","risk":"read",
+		"targets":["core-sw-1"],"clarify":["丢包从什么时候开始的？"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strings.TrimSpace(strings.Split(out, " ")[1])
+	r, err := GetRequest(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.State != StateClassified || r.Intent != "incident_diagnosis" || r.Risk != "read" || r.Targets[0] != "core-sw-1" {
+		t.Fatalf("classified request = %+v", r)
+	}
+
+	// Re-classifying an already-classified request is refused.
+	if _, err := (ClassifyTool{}).Execute(ctx, json.RawMessage(`{"request_id":"`+id+`","intent":"reporting","risk":"read"}`)); err == nil {
+		t.Fatal("re-classification must be refused")
+	}
+}
+
+func TestPlanToolValidatesAndInstalls(t *testing.T) {
+	testStore(t)
+	ctx := context.Background()
+	tool := PlanTool{Assets: func() []string { return []string{"core-sw-1", "core-sw-2"} }}
+
+	mk := func(risk string) string {
+		out, err := (ClassifyTool{}).Execute(ctx, json.RawMessage(`{"text":"x","intent":"incident_diagnosis","risk":"`+risk+`","targets":["core-sw-1"]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(strings.Split(out, " ")[1])
+	}
+
+	cases := []struct {
+		name    string
+		risk    string
+		body    string
+		wantErr string
+	}{
+		{name: "happy read plan", risk: "read", body: `{"request_id":"%s","steps":[{"id":"s1","kind":"read","asset":"core-sw-1","operation":"interface_health","timeout_sec":30,"on_failure":"continue"}],"expected_outputs":["suspect_interface"]}`, wantErr: ""},
+		{name: "unknown asset", risk: "read", body: `{"request_id":"%s","steps":[{"id":"s1","kind":"read","asset":"not-managed"}]}`, wantErr: "不在管"},
+		{name: "bad kind", risk: "read", body: `{"request_id":"%s","steps":[{"id":"s1","kind":"shell"}]}`, wantErr: "白名单"},
+		{name: "duplicate step id", risk: "read", body: `{"request_id":"%s","steps":[{"id":"s1","kind":"read"},{"id":"s1","kind":"read"}]}`, wantErr: "不重复"},
+		{name: "implicit write", risk: "read", body: `{"request_id":"%s","steps":[{"id":"s1","kind":"read"},{"id":"s2","kind":"execute","asset":"core-sw-1"}]}`, wantErr: "禁止携带"},
+		{name: "timeout out of range", risk: "read", body: `{"request_id":"%s","steps":[{"id":"s1","kind":"read","timeout_sec":900}]}`, wantErr: "600"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			id := mk(tc.risk)
+			_, err := tool.Execute(ctx, json.RawMessage(strings.Replace(tc.body, "%s", id, 1)))
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("should pass: %v", err)
+				}
+				r, gerr := GetRequest(id)
+				if gerr != nil || r.State != StatePlanned || r.Plan == nil {
+					t.Fatalf("request not planned: %+v err=%v", r, gerr)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v, want containing %q", err, tc.wantErr)
+			}
+		})
+	}
+
+	// execute-classified plans auto-require approval.
+	id := mk("execute")
+	if _, err := tool.Execute(ctx, json.RawMessage(`{"request_id":"`+id+`","steps":[{"id":"s1","kind":"execute","asset":"core-sw-1"}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := GetRequest(id)
+	if r.Plan.Approval != "required" {
+		t.Fatalf("execute plan approval = %q, want required", r.Plan.Approval)
+	}
+
+	// No asset list injected → asset steps fail closed.
+	closed := PlanTool{}
+	id2 := mk("read")
+	if _, err := closed.Execute(ctx, json.RawMessage(`{"request_id":"`+id2+`","steps":[{"id":"s1","kind":"read","asset":"core-sw-1"}]}`)); err == nil {
+		t.Fatal("nil asset list must fail closed for asset steps")
+	}
+}
