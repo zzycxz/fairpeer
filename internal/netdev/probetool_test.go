@@ -104,9 +104,10 @@ func TestProbeSurfaceMergedInRegistry(t *testing.T) {
 	}
 }
 
-// 办公模式收口（browser_* 先例）：攻通道/知识表是编排内部面——注册但
-// 对主循环隐藏（Schemas 不含、Get 仍可解析供 FilterRegistry 子代理取用）；
-// 快诊面（exec/devices/backup/propose/baseline…）保持可见。
+// 可见面收口（修正版）：唯一隐藏的是 netdev_knowledge（纯内部数据通道，
+// 主循环零场景）；probe/assess 是自带闸门的宏操作（信封/ scopes 在工具
+// 里），必须对主循环可见——快查与 inline 用户技能（netdev-security-
+// assessment 的测绘/弱口令阶段）依赖可见性，"不可见"不是第二种闸门。
 func TestOrchestrationOnlyToolsHiddenFromMainLoop(t *testing.T) {
 	writeAuthTestEnv(t)
 	cfg := &config.Config{}
@@ -115,29 +116,32 @@ func TestOrchestrationOnlyToolsHiddenFromMainLoop(t *testing.T) {
 	reg := tool.NewRegistry()
 	RegisterTools(reg, cfg)
 
-	for _, name := range []string{"netdev_probe", "netdev_assess", "netdev_knowledge"} {
-		if !reg.IsHidden(name) {
-			t.Fatalf("%s must be hidden from the main-loop schema (orchestration-internal)", name)
-		}
-		if _, ok := reg.Get(name); !ok {
-			t.Fatalf("%s hidden must stay resolvable for subagent FilterRegistry", name)
-		}
+	// knowledge：藏（去噪，不破门）。
+	if !reg.IsHidden("netdev_knowledge") {
+		t.Fatal("netdev_knowledge must be hidden (internal data channel, zero main-loop scenarios)")
 	}
-	hidden := map[string]bool{}
+	if _, ok := reg.Get("netdev_knowledge"); !ok {
+		t.Fatal("hidden must stay resolvable for subagent FilterRegistry")
+	}
+	inSchema := map[string]bool{}
 	for _, s := range reg.Schemas() {
-		hidden[s.Name] = true
+		inSchema[s.Name] = true
 	}
-	for _, name := range []string{"netdev_probe", "netdev_assess", "netdev_knowledge"} {
-		if hidden[name] {
-			t.Fatalf("%s must not ride the main-loop schema every turn", name)
-		}
+	if inSchema["netdev_knowledge"] {
+		t.Fatal("netdev_knowledge must not ride the main-loop schema")
 	}
-	for _, name := range []string{"netdev_exec", "netdev_devices", "netdev_fanout", "netdev_backup", "netdev_propose", "netdev_baseline", "netdev_cve_match"} {
+	// probe/assess：可见（闸门在工具里；inline 用户技能直调依赖此面）。
+	for _, name := range []string{"netdev_probe", "netdev_assess",
+		"netdev_exec", "netdev_devices", "netdev_fanout", "netdev_backup",
+		"netdev_propose", "netdev_baseline", "netdev_cve_match"} {
 		if _, ok := reg.Get(name); !ok {
-			t.Fatalf("quick-diagnosis tool %s must stay registered", name)
+			t.Fatalf("%s must stay registered", name)
 		}
 		if reg.IsHidden(name) {
-			t.Fatalf("quick-diagnosis tool %s must stay visible to the main loop", name)
+			t.Fatalf("%s must stay visible — its gate lives in the tool, invisibility is not a second gate", name)
+		}
+		if !inSchema[name] {
+			t.Fatalf("%s must ride the main-loop schema (quick-path & inline user skills)", name)
 		}
 	}
 }
