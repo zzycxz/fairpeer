@@ -424,7 +424,10 @@ func summarizeDiff(diff string) string {
 // ── OpStep ledger (§7.3) ─────────────────────────────────────────────────────
 
 func (m *Manager) appendOpStep(s OpStep) {
-	s.ID = fmt.Sprintf("%s@%d", s.Device, time.Now().UnixNano())
+	// ID 复用 backup 的单调纳秒守卫（nextBackupNanos）：Windows 时钟
+	// 粒度下两次连续落库会拿到同一纳秒——裸 UnixNano 曾让第二行静默
+	// 覆盖第一行（TestOpStepTurnAnchor 间歇失败的根因）。
+	s.ID = fmt.Sprintf("%s@%d", s.Device, nextBackupNanos())
 	if s.Turn == 0 {
 		m.waMu.Lock()
 		s.Turn = m.turnSeq
