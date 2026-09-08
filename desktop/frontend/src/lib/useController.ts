@@ -590,6 +590,114 @@ function completeAssistant(s: State, text?: string, reasoning?: string): State {
   return { ...s, items: next, live: undefined, currentAssistant: undefined, seq };
 }
 
+// ToolCallItemPayload mirrors the backend event.ToolCallItem wire shape
+// (snake_case json tags, 4-1 contract).
+interface ToolCallItemPayload {
+  name?: string;
+  args?: string;
+  output?: string;
+  err?: string;
+  file_diff?: { diff: string; added: number; removed: number };
+  read_only?: boolean;
+  duration_ms?: number;
+  status?: string;
+  parent_id?: string;
+  profile?: { model?: string; effort?: string };
+  attachments?: { path: string; kind: string }[];
+  truncated?: boolean;
+}
+
+// parseItemPayload unwraps an item payload that may arrive as an already-
+// parsed object (the wire frame's nested JSON) or a raw string (defensive).
+function parseItemPayload(raw: unknown): Record<string, unknown> {
+  if (!raw) return {};
+  if (typeof raw === "string") {
+    try {
+      const v = JSON.parse(raw);
+      return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  }
+  if (typeof raw === "object") return raw as Record<string, unknown>;
+  return {};
+}
+
+function parseToolItemPayload(raw: unknown): ToolCallItemPayload {
+  return parseItemPayload(raw) as ToolCallItemPayload;
+}
+
+// applyToolItemEvent drives one tool_call item transition (Spec-5 Phase 2):
+// started creates/updates the running card (payload carries the lossless
+// fields — parentId/profile/fileDiff), categorized deltas stream argsDiff vs
+// output, completed finalizes from the full payload. Mirrors the legacy
+// tool_dispatch/args_delta/progress/result cases.
+function applyToolItemEvent(s: State, it: NonNullable<WireEvent["item"]>): State {
+  const id = it.itemId;
+  if (!id) return s;
+  const driven: State = { ...s, itemDriven: true };
+  const idx = driven.items.findIndex((x) => x.kind === "tool" && x.id === id);
+  const next = [...driven.items];
+
+  if (it.phase === "item_started") {
+    const p = parseToolItemPayload(it.item);
+    const tool: Item = {
+      kind: "tool",
+      id,
+      name: p.name ?? "tool",
+      args: p.args ?? "",
+      readOnly: p.read_only ?? false,
+      status: "running",
+      isShell: isShellTool(p.name ?? "tool", id),
+      parentId: p.parent_id,
+      profile: p.profile,
+      fileDiff: p.file_diff,
+    };
+    if (idx >= 0) {
+      next[idx] = tool;
+      return { ...driven, items: next };
+    }
+    return { ...driven, seq: driven.seq + 1, items: [...driven.items, tool] };
+  }
+
+  if (it.phase === "item_delta") {
+    if (idx < 0) return driven;
+    const x = next[idx];
+    if (x.kind === "tool") {
+      next[idx] =
+        it.deltaKind === "args"
+          ? { ...x, argsDiff: it.delta ?? "" }
+          : { ...x, output: (x.output ?? "") + (it.delta ?? "") };
+    }
+    return { ...driven, items: next };
+  }
+
+  // item_completed
+  const p = parseToolItemPayload(it.item);
+  const status = p.status === "error" ? "error" : "done";
+  const finalized: Item = {
+    kind: "tool",
+    id,
+    name: p.name ?? (idx >= 0 && next[idx].kind === "tool" ? next[idx].name : "tool"),
+    args: p.args ?? (idx >= 0 && next[idx].kind === "tool" ? next[idx].args : ""),
+    readOnly: p.read_only ?? false,
+    status,
+    output: p.output,
+    error: p.err || undefined,
+    truncated: p.truncated,
+    durationMs: p.duration_ms,
+    isShell: idx >= 0 && next[idx].kind === "tool" ? next[idx].isShell : isShellTool(p.name ?? "tool", id),
+    parentId: p.parent_id ?? (idx >= 0 && next[idx].kind === "tool" ? next[idx].parentId : undefined),
+    profile: p.profile ?? (idx >= 0 && next[idx].kind === "tool" ? next[idx].profile : undefined),
+    attachments: p.attachments,
+  };
+  if (idx >= 0) {
+    next[idx] = finalized;
+    return { ...driven, items: next };
+  }
+  return { ...driven, seq: driven.seq + 1, items: [...driven.items, finalized] };
+}
+
 export function applyEvent(s: State, e: WireEvent): State {
   if (s.discardTurn) {
     if (e.kind === "turn_done") return { ...s, discardTurn: false, running: false, turnActive: false, currentAssistant: undefined, live: undefined };
@@ -625,6 +733,7 @@ export function applyEvent(s: State, e: WireEvent): State {
       return completeAssistant(s, e.text, e.reasoning);
     }
     case "tool_dispatch": {
+      if (s.itemDriven) return s; // tool_call renders from the item stream
       const t = e.tool;
       if (!t) return s;
       const id = t.id || `tool${s.seq}`;
@@ -638,6 +747,7 @@ export function applyEvent(s: State, e: WireEvent): State {
       return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "tool", id, name: t.name, args: t.args ?? "", readOnly: t.readOnly, status: "running", isShell: isShellTool(t.name, id), parentId: t.parentId, profile: t.profile, fileDiff: t.fileDiff }] };
     }
     case "tool_result": {
+      if (s.itemDriven) return s; // finalized by the item_completed twin
       const t = e.tool;
       if (!t) return s;
       const next = [...s.items];
@@ -657,6 +767,7 @@ export function applyEvent(s: State, e: WireEvent): State {
     case "tool_args_delta": {
       // Live patch preview (spec 3-3): attach the partial patch to the
       // running tool card created by the Partial dispatch.
+      if (s.itemDriven) return s; // args deltas ride the item stream
       const t = e.tool;
       if (!t) return s;
       const next = [...s.items];
@@ -674,6 +785,7 @@ export function applyEvent(s: State, e: WireEvent): State {
       return { ...s, items: next };
     }
     case "tool_progress": {
+      if (s.itemDriven) return s; // streamed output rides the item stream
       const t = e.tool;
       if (!t?.id) return s;
       const idx = s.items.findIndex((it) => it.kind === "tool" && it.id === t.id);
@@ -719,28 +831,22 @@ export function applyEvent(s: State, e: WireEvent): State {
     case "resumed":
       return { ...s, paused: false };
     case "item": {
-      // 4-1 item-model dual-track, Phase 2 first tranche: agent text and
-      // reasoning render FROM the item stream once observed (itemDriven);
-      // the legacy twins are suppressed in their cases above. The adapter
-      // emits legacy first then the item twin, and item_started carries no
-      // delta, so the interleaved sequence never double-appends.
+      // 4-1 item-model dual-track, Phase 2: agent text/reasoning and
+      // tool_call lifecycles render FROM the item stream once observed
+      // (itemDriven); the legacy twins are suppressed in their cases above.
+      // The adapter emits legacy first then the item twin, and item_started
+      // carries no delta, so the interleaved sequence never double-appends.
       const it = e.item;
-      if (!it || (it.itemKind !== "agent_message" && it.itemKind !== "reasoning")) return s;
+      if (!it) return s;
+      if (it.itemKind === "tool_call") return applyToolItemEvent(s, it);
+      if (it.itemKind !== "agent_message" && it.itemKind !== "reasoning") return s;
       const driven: State = { ...s, itemDriven: true };
       if (it.phase === "item_delta" && it.delta) {
         return appendLive(driven, it.itemKind === "reasoning" ? "reasoning" : "text", it.delta);
       }
       if (it.phase === "item_completed" && it.itemKind === "agent_message") {
-        let text: string | undefined;
-        let reasoning: string | undefined;
-        try {
-          const p = JSON.parse(String(it.item ?? "{}")) as { text?: string; reasoning?: string };
-          text = p.text;
-          reasoning = p.reasoning;
-        } catch {
-          /* unparseable payload — complete from live */
-        }
-        return completeAssistant(driven, text, reasoning);
+        const p = parseItemPayload(it.item) as { text?: string; reasoning?: string };
+        return completeAssistant(driven, p.text, p.reasoning);
       }
       // item_started: marks the turn item-driven; the bubble itself is
       // ensured on the first delta (or already exists from the legacy twin).

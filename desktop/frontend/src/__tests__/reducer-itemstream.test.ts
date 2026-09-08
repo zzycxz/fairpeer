@@ -133,12 +133,48 @@ describe("applyEvent item stream (Spec-5 Phase 2)", () => {
     expect(s.itemDriven).toBe(false);
   });
 
-  it("tool_call item events stay legacy-driven (no-op this tranche)", () => {
+  it("interleaved tool lifecycle renders once with output streaming", () => {
+    // Adapter order: legacy first, item twin second — the first dispatch
+    // creates the card, the item twin flips itemDriven, subsequent legacy
+    // twins are suppressed, output arrives via categorized item deltas.
     const s = run([
       ev({ kind: "turn_started" }),
-      item({ phase: "item_started", itemId: "t1", itemKind: "tool_call", item: { name: "bash", status: "running" } }),
+      ev({ kind: "tool_dispatch", tool: { name: "bash", args: "{}", readOnly: false, id: "t1" } }),
+      item({ phase: "item_started", itemId: "t1", itemKind: "tool_call", item: { name: "bash", args: "{}", read_only: false, status: "running" } }),
+      ev({ kind: "tool_progress", tool: { name: "bash", readOnly: false, id: "t1", output: "out1" } }),
+      item({ phase: "item_delta", itemId: "t1", itemKind: "tool_call", delta: "out1", deltaKind: "output" }),
+      ev({ kind: "tool_progress", tool: { name: "bash", readOnly: false, id: "t1", output: "out2" } }),
+      item({ phase: "item_delta", itemId: "t1", itemKind: "tool_call", delta: "out2", deltaKind: "output" }),
+      ev({ kind: "tool_result", tool: { name: "bash", readOnly: false, id: "t1", output: "out1out2", durationMs: 9 } }),
+      item({ phase: "item_completed", itemId: "t1", itemKind: "tool_call", item: { name: "bash", output: "out1out2", duration_ms: 9, status: "done" } }),
+      ev({ kind: "turn_done" }),
     ]);
-    expect(s.itemDriven).toBe(false); // untouched by non-text item kinds
-    expect(s.items.some((it) => it.kind === "tool")).toBe(false);
+    const tools = s.items.filter((it) => it.kind === "tool");
+    expect(tools).toHaveLength(1);
+    const tool = tools[0] as Extract<(typeof s.items)[number], { kind: "tool" }>;
+    expect(tool).toMatchObject({ id: "t1", name: "bash", status: "done", output: "out1out2", durationMs: 9, isShell: true });
+  });
+
+  it("pure item tool stream: started → args delta → output delta → completed", () => {
+    const s = run([
+      ev({ kind: "turn_started" }),
+      item({ phase: "item_started", itemId: "t9", itemKind: "tool_call", item: { name: "apply_patch", args: "{}", read_only: false, status: "running", parent_id: "p1" } }),
+      item({ phase: "item_delta", itemId: "t9", itemKind: "tool_call", delta: "*** Begin Patch", deltaKind: "args" }),
+      item({ phase: "item_delta", itemId: "t9", itemKind: "tool_call", delta: "patched", deltaKind: "output" }),
+      item({ phase: "item_completed", itemId: "t9", itemKind: "tool_call", item: { name: "apply_patch", status: "done", output: "patched", truncated: true } }),
+    ]);
+    const tool = s.items.find((it) => it.kind === "tool") as Extract<(typeof s.items)[number], { kind: "tool" }>;
+    expect(tool).toMatchObject({ id: "t9", name: "apply_patch", status: "done", output: "patched", truncated: true, parentId: "p1" });
+    expect(s.itemDriven).toBe(true);
+  });
+
+  it("tool item error status finalizes as error with message", () => {
+    const s = run([
+      ev({ kind: "turn_started" }),
+      item({ phase: "item_started", itemId: "t2", itemKind: "tool_call", item: { name: "web_fetch", read_only: true, status: "running" } }),
+      item({ phase: "item_completed", itemId: "t2", itemKind: "tool_call", item: { name: "web_fetch", status: "error", err: "boom" } }),
+    ]);
+    const tool = s.items.find((it) => it.kind === "tool") as Extract<(typeof s.items)[number], { kind: "tool" }>;
+    expect(tool).toMatchObject({ status: "error", error: "boom" });
   });
 });

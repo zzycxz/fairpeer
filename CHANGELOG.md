@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(event/reducer): 4-1 契约补全 + Spec-5 Phase 2 tool_call 片——item 流完整驱动工具生命周期
+
+- **契约扩展（ItemEvent.DeltaKind）**：tool_call 的 delta 带类别——`args`（补丁预览流）/`output`（流式 stdout，新补 ToolProgress→item 映射，纯 item 消费者不再丢进度）；ToolCallItem 补 Lossless 字段（parent_id/profile/attachments/truncated——适配器"lossless"自述此前对这四项不实，纯 item 渲染与 legacy 逐字段等价）；双 wire.go 透传 deltaKind
+- **reducer tool_call 片**：item started 建/更运行卡（含 isShell/parentId/fileDiff），分类 delta 分别驱动 argsDiff 与输出追加，completed 按全量载荷收束（status/output/err/duration/truncated/attachments）；itemDriven 下四类 legacy 工具事件（dispatch/args_delta/progress/result）全部抑制——交错序列每块输出恰好应用一次
+- 顺带修首片隐患：item 载荷在 wire 上是已解析对象，`JSON.parse(String(obj))` 必然失败（此前靠 live 回退掩盖）——统一 parseItemPayload 双形态处理
+- 测试：adapter delta 分类与"legacy 先行"次序钉死（新增 itemadapter_test）；wire deltaKind 断言双包；reducer 13 例（交错工具生命周期/纯 item 工具流/args-output 分流/error 收束）——全套 56 例
+- 验证：tsc 绿；test:all 全绿；主仓+desktop 双 Go module 构建通过
+
+### feat(desktop/markdown): Spec-2 Phase 3——搜索高亮穿透 Markdown（HAST 层 rehype 插件）
+
+- react-markdown 的 rehype 管线内切分文本节点插 `<mark>`（React 拥有一致树，不做渲染后 DOM 包装——那会与 reconciliation 打架）；code/pre 跳过（对齐编辑器"代码块内不高亮"惯例）；查询经 SearchHighlightContext + useDeferredValue 流入，输入不卡流式渲染
+- 助手消息（Markdown）至此全部可高亮；工具输出（语法高亮器内部）维持不高亮，已记入 spec
+
 ### feat(desktop/reducer): Spec-5 Phase 2 首片——agent 文本/推理渲染迁移到 item 事件流（itemDriven 双轨择源）
 
 - **先补安全网**：applyEvent/State 导出，新增 reducer 金样本测试（legacy 路径钉死：turn 生命周期/text 流/tool 三段式/message 收束/notice；item 路径：交错流不重复、抑制语义、纯 item 流、reasoning 流、itemDriven 按轮重置）——11 例入 vitest 套件（全套 54 例）

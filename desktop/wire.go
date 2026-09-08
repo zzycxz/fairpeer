@@ -59,11 +59,12 @@ type wireCollabAnswer struct {
 // (started/delta/completed) dual-track with the flat kinds. Item is the raw
 // kind-specific payload; consumers switch on ItemKind.
 type wireItem struct {
-	Phase    string          `json:"phase"`
-	ItemID   string          `json:"itemId"`
-	ItemKind string          `json:"itemKind"`
-	Delta    string          `json:"delta,omitempty"`
-	Item     json.RawMessage `json:"item,omitempty"`
+	Phase     string          `json:"phase"`
+	ItemID    string          `json:"itemId"`
+	ItemKind  string          `json:"itemKind"`
+	Delta     string          `json:"delta,omitempty"`
+	DeltaKind string          `json:"deltaKind,omitempty"`
+	Item      json.RawMessage `json:"item,omitempty"`
 }
 
 // wireCompaction is the JSON form of an event.Compaction. On a compaction_started
@@ -335,7 +336,7 @@ func toWireCollab(c event.Collab) *wireCollab {
 func toWireItem(it *event.ItemEvent) *wireItem {
 	return &wireItem{
 		Phase: string(it.Phase), ItemID: it.ItemID, ItemKind: string(it.ItemKind),
-		Delta: it.Delta, Item: it.Item,
+		Delta: it.Delta, DeltaKind: string(it.DeltaKind), Item: it.Item,
 	}
 }
 

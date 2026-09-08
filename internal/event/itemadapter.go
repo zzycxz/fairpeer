@@ -12,8 +12,8 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/zzycxz/fairpeer/internal/evidence"
 	"fmt"
+	"github.com/zzycxz/fairpeer/internal/evidence"
 )
 
 // ItemAdapter wraps a Sink and emits ItemEvents alongside legacy kinds.
@@ -136,13 +136,22 @@ func (a *ItemAdapter) deriveItem(e Event) *ItemEvent {
 			Item: mustJSON(ToolCallItem{
 				Name: e.Tool.Name, Args: e.Tool.Args, ReadOnly: e.Tool.ReadOnly,
 				FileDiff: &e.Tool.FileDiff, Status: "running",
+				ParentID: e.Tool.ParentID, Profile: e.Tool.Profile,
 			}),
 		}
 
 	case ToolArgsDelta:
 		return &ItemEvent{
 			Phase: ItemDelta, ItemID: e.Tool.ID, ItemKind: ItemToolCall,
-			Delta: e.Text,
+			Delta: e.Text, DeltaKind: ItemDeltaArgs,
+		}
+	case ToolProgress:
+		// 4-1 contract (Phase 2 migration): streamed stdout chunks ride the
+		// item stream as output-category deltas, so a pure item consumer can
+		// render tool progress without the legacy twin.
+		return &ItemEvent{
+			Phase: ItemDelta, ItemID: e.Tool.ID, ItemKind: ItemToolCall,
+			Delta: e.Tool.Output, DeltaKind: ItemDeltaOutput,
 		}
 
 	case ToolResult:
@@ -156,6 +165,8 @@ func (a *ItemAdapter) deriveItem(e Event) *ItemEvent {
 				Name: e.Tool.Name, Args: e.Tool.Args, Output: e.Tool.Output,
 				Err: e.Tool.Err, ReadOnly: e.Tool.ReadOnly,
 				DurationMs: e.Tool.DurationMs, Status: status,
+				Profile: e.Tool.Profile, Attachments: e.Tool.Attachments,
+				Truncated: e.Tool.Truncated,
 			}),
 		}
 

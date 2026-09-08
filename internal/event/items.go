@@ -8,9 +8,9 @@
 // one tool call card, one reasoning block, one notice. Items have a stable
 // ID and a three-phase lifecycle:
 //
-//   item_started    → the item exists (card appears)
-//   item_delta      → incremental content (streaming text, partial patch)
-//   item_completed  → the item is final (card settles)
+//	item_started    → the item exists (card appears)
+//	item_delta      → incremental content (streaming text, partial patch)
+//	item_completed  → the item is final (card settles)
 //
 // This maps 1:1 to how the desktop reducer already works internally; the
 // ItemEvent form makes that structure explicit on the wire so any frontend
@@ -53,10 +53,22 @@ type ItemEvent struct {
 	ItemKind ItemKind            `json:"item_kind"`
 	// Delta carries the incremental text for ItemDelta (streaming).
 	Delta string `json:"delta,omitempty"`
+	// DeltaKind disambiguates tool_call deltas (4-1 contract, Phase 2
+	// migration): "" = plain text, "args" = the patch-preview stream
+	// (ToolArgsDelta), "output" = streamed stdout chunks (ToolProgress).
+	DeltaKind ItemDeltaKind `json:"delta_kind,omitempty"`
 	// Item carries the full item payload on ItemStarted/ItemCompleted.
 	// Structure depends on ItemKind; consumers switch on ItemKind.
 	Item json.RawMessage `json:"item,omitempty"`
 }
+
+// ItemDeltaKind categorizes an ItemDelta for tool_call items.
+type ItemDeltaKind string
+
+const (
+	ItemDeltaArgs   ItemDeltaKind = "args"
+	ItemDeltaOutput ItemDeltaKind = "output"
+)
 
 // AgentMessageItem is the payload for ItemAgentMessage.
 type AgentMessageItem struct {
@@ -66,14 +78,21 @@ type AgentMessageItem struct {
 
 // ToolCallItem is the payload for ItemToolCall.
 type ToolCallItem struct {
-	Name      string     `json:"name"`
-	Args      string     `json:"args,omitempty"`
-	Output    string     `json:"output,omitempty"`
-	Err       string     `json:"err,omitempty"`
-	FileDiff  *FileDiff  `json:"file_diff,omitempty"`
-	ReadOnly  bool       `json:"read_only"`
+	Name       string    `json:"name"`
+	Args       string    `json:"args,omitempty"`
+	Output     string    `json:"output,omitempty"`
+	Err        string    `json:"err,omitempty"`
+	FileDiff   *FileDiff `json:"file_diff,omitempty"`
+	ReadOnly   bool      `json:"read_only"`
 	DurationMs int64     `json:"duration_ms,omitempty"`
-	Status    string     `json:"status"` // running | done | error | stopped
+	Status     string    `json:"status"` // running | done | error | stopped
+	// Lossless-carrier fields (4-1 contract): sub-agent nesting and result
+	// side-data so a pure item consumer renders identically to the legacy
+	// tool_dispatch/tool_result pair.
+	ParentID    string       `json:"parent_id,omitempty"`
+	Profile     *Profile     `json:"profile,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
+	Truncated   bool         `json:"truncated,omitempty"`
 }
 
 // NoticeItem is the payload for ItemNotice.
@@ -84,9 +103,9 @@ type NoticeItem struct {
 
 // ApprovalItem is the payload for ItemApproval.
 type ApprovalItem struct {
-	Tool    string          `json:"tool"`
-	Subject string          `json:"subject"`
-	Changes []FileChange    `json:"changes,omitempty"`
+	Tool    string       `json:"tool"`
+	Subject string       `json:"subject"`
+	Changes []FileChange `json:"changes,omitempty"`
 }
 
 // CompactionItem is the payload for ItemCompaction.

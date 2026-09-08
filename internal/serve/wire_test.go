@@ -115,3 +115,13 @@ func TestToWireItemCollabResumedKinds(t *testing.T) {
 		}
 	})
 }
+
+func TestToWireItemToolDeltaKind(t *testing.T) {
+	w := toWire(event.Event{Kind: event.Item, Item: &event.ItemEvent{
+		Phase: event.ItemDelta, ItemID: "t1", ItemKind: event.ItemToolCall,
+		Delta: "chunk", DeltaKind: event.ItemDeltaOutput,
+	}})
+	if w.Item == nil || w.Item.DeltaKind != "output" {
+		t.Fatalf("tool delta kind not carried: %+v", w.Item)
+	}
+}

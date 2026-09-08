@@ -60,6 +60,7 @@ export interface WireItemEvent {
   itemId: string;
   itemKind: string; // "user_message" | "agent_message" | "reasoning" | "tool_call" | "approval" | …
   delta?: string; // item_delta: the incremental text
+  deltaKind?: "args" | "output"; // tool_call deltas: patch-preview vs streamed output (4-1 contract)
   item?: unknown; // started/completed: the full item payload
 }
 
