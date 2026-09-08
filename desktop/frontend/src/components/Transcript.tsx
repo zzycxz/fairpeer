@@ -11,6 +11,7 @@ import { ProcessCompactIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
 import { AlertTriangle, ChevronRight, FileDiff, Info, RotateCcw , ExternalLink } from "lucide-react";
 import { Welcome } from "./Welcome";
+import { TranscriptSearch } from "./TranscriptSearch";
 import { getDisplayMode, onDisplayModeChange, type DisplayMode } from "../lib/displayMode";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
@@ -48,6 +49,33 @@ const WARM_PAGE_SIZE = 20; // cold-zone pagination batch
 
 function questionAnchorId(id: string): string {
   return `question-anchor-${id}`;
+}
+
+// itemSearchText flattens one transcript item into the text Ctrl+F searches
+// (Spec-2). Every kind contributes its model-visible prose; tools additionally
+// contribute name + args + output so a search reaches command output too.
+function itemSearchText(it: Item): string {
+  switch (it.kind) {
+    case "user": return it.text;
+    case "assistant": return `${it.text}\n${it.reasoning}`;
+    case "phase": return it.text;
+    case "notice": return it.text;
+    case "compaction": return `${it.summary}\n${it.archive}`;
+    case "turn_summary": return it.files.map((f) => `${f.path}\n${f.diff}`).join("\n");
+    case "expert_collab": return `${it.collab.task}\n${it.collab.synthesis}\n${it.collab.rounds.flat().map((a) => a.text).join("\n")}`;
+    case "tool": return `${it.name}\n${it.args}\n${it.output ?? ""}\n${it.error ?? ""}`;
+    default: return "";
+  }
+}
+
+// snippetAround cuts a ±40-char window around the match at `at` for the
+// search bar's context preview.
+function snippetAround(text: string, at: number): string {
+  const start = Math.max(0, at - 40);
+  const end = Math.min(text.length, at + 40);
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < text.length ? "…" : "";
+  return `${prefix}${text.slice(start, end).replace(/\s+/g, " ").trim()}${suffix}`;
 }
 
 function compactQuestionText(text: string): string {
@@ -381,6 +409,88 @@ export function Transcript({
     jumpToQuestion(question);
   }, [turnGroups.length]);
 
+  // ── In-conversation search (Spec-2) ───────────────────────────────────────
+  // Matches search every item's text (user/assistant/reasoning, tool name +
+  // args + output, notices, summaries) over the FULL item list — including
+  // collapsed warm/cold turns. Jumps expand the containing turn and scroll to
+  // its user-message anchor (the same machinery the JumpBar uses); the bar's
+  // snippet preview shows the match context.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchIdx, setSearchIdx] = useState(0);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  const searchMatches = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [] as { anchorUserId: string; snippet: string }[];
+    const out: { anchorUserId: string; snippet: string }[] = [];
+    let lastUserId = "";
+    for (const it of items) {
+      if (it.kind === "user") lastUserId = it.id;
+      const text = itemSearchText(it);
+      const at = text.toLowerCase().indexOf(q);
+      if (at >= 0) out.push({ anchorUserId: lastUserId, snippet: snippetAround(text, at) });
+    }
+    return out.reverse(); // newest match first, like browser find
+  }, [searchQuery, items]);
+
+  const jumpSearchTo = useCallback((anchorUserId: string) => {
+    if (!anchorUserId) return; // pre-first-user items have no turn anchor
+    const el = scrollRef.current;
+    const node = document.getElementById(questionAnchorId(anchorUserId));
+    if (!el || !node) return;
+    const turn = questions.find((q) => q.id === anchorUserId)?.turn;
+    if (turn !== undefined) {
+      const warmTurnStart = turnGroups.length - HOT_TURNS;
+      if (turn < warmTurnStart) {
+        setExpandedWarmTurns((prev) => {
+          if (prev.has(turn)) return prev;
+          return new Set([...prev, turn]);
+        });
+      }
+    }
+    stick.current = false;
+    requestAnimationFrame(() => {
+      const scrollerRect = el.getBoundingClientRect();
+      const nodeRect = node.getBoundingClientRect();
+      const top = el.scrollTop + nodeRect.top - scrollerRect.top - 48;
+      el.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    });
+  }, [questions, turnGroups.length]);
+
+  // New query → reset to the newest match and jump.
+  useEffect(() => {
+    if (!searchOpen || searchMatches.length === 0) return;
+    setSearchIdx(0);
+    jumpSearchTo(searchMatches[0].anchorUserId);
+    // searchMatches/jumpSearchTo intentionally excluded: the jump should fire
+    // on query change, not on every items mutation (streaming tokens).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, searchOpen]);
+
+  const gotoSearchMatch = (delta: number) => {
+    if (searchMatches.length === 0) return;
+    const next = (searchIdx + delta + searchMatches.length) % searchMatches.length;
+    setSearchIdx(next);
+    jumpSearchTo(searchMatches[next].anchorUserId);
+  };
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchIdx(0);
+  };
+
   // ── Hot zone: fully rendered from hotStartIdx to end ─────────────────────
   // Memoized separately from the assembly so streaming tokens don't rebuild
   // the warm/cold zone JSX trees. Uses LiveStreamContext for streaming data
@@ -598,6 +708,22 @@ export function Transcript({
 
       {!empty && showQuestionNav && (
         <QuestionJumpBar questions={questions} onJump={handleJumpToQuestion} />
+      )}
+
+      {searchOpen && (
+        <TranscriptSearch
+          query={searchQuery}
+          onQuery={(q) => {
+            setSearchQuery(q);
+            setSearchIdx(0);
+          }}
+          matchCount={searchMatches.length}
+          matchIndex={searchMatches.length ? Math.min(searchIdx, searchMatches.length - 1) : -1}
+          snippet={searchMatches.length ? searchMatches[Math.min(searchIdx, searchMatches.length - 1)].snippet : ""}
+          onPrev={() => gotoSearchMatch(-1)}
+          onNext={() => gotoSearchMatch(1)}
+          onClose={closeSearch}
+        />
       )}
 
       <LiveStreamContext.Provider value={live}>

@@ -18,7 +18,7 @@ function eq(a: unknown, b: unknown, label: string) {
   }
 }
 
-const initial: BrowserMirrorState = { image: "", url: "", source: "", running: false, lastText: "", seq: 0 };
+const initial: BrowserMirrorState = { image: "", url: "", source: "", running: false, lastText: "", seq: 0, sessions: {} };
 
 console.log("\nrun lifecycle (browser_auto)");
 const started = applyBrowserMirrorFrame(initial, {

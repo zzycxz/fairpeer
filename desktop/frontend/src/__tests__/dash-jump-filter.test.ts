@@ -35,7 +35,7 @@ describe("findingMatchesJump", () => {
 
 const p = (over: Partial<NetDevProposal> = {}): NetDevProposal => ({
   id: "P-1", intent: "调整 hello 定时器", status: "done",
-  steps: [{ device: "SW-03", commands: [] }], created_at: "2026-08-29T10:00:00", ...over,
+  steps: [{ device: "SW-03", commands: [], applied: true }], created_at: "2026-08-29T10:00:00", ...over,
 });
 
 describe("proposalMatchesJump", () => {

@@ -548,6 +548,61 @@
   margin-left: auto;
   margin-right: -48px;
 }
+/* TranscriptSearch (Spec-2 Ctrl+F)：吸顶搜索栏 */
+.tsearch {
+  position: sticky;
+  top: 8px;
+  z-index: calc(var(--z-inline-sticky) + 1);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 620px;
+  margin: 0 auto 8px;
+  padding: 5px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+.tsearch__input {
+  flex: 1 1 140px;
+  min-width: 120px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+.tsearch__count {
+  color: var(--fg-faint);
+  white-space: nowrap;
+  font-size: 11px;
+}
+.tsearch__snippet {
+  flex: 2 1 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-faint);
+  font-size: 11px;
+}
+.tsearch__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+.tsearch__btn:hover {
+  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
+  color: var(--fg);
+}
 .jump-bar {
   position: sticky;
   top: 50%;

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(desktop/search): 对话内全文搜索（Spec-2，超越 codex）——Ctrl+F 搜索栏 + 匹配计数 + 暖区展开跳转
+
+FAIRPEER_CODEX_GAP_SPEC Spec-2 落地。codex 无对话内搜索（仅 Ctrl+T overlay 浏览）：
+
+- **Ctrl+F 吸顶搜索栏**（TranscriptSearch）：增量搜索 + 匹配计数 N/M + Enter/Shift+Enter 上下跳转 + Esc 关闭 + 无匹配提示，中英文案
+- **搜索范围全量**：用户消息、AI 回复与 reasoning、工具名/args/output/err、通知、压缩摘要、轮次变更摘要、专家协作卡——含折叠的暖区/冷区轮次（搜的是 items 数据不是 DOM）
+- **跳转语义**：命中项按其所属轮次自动展开暖区并滚动到该轮用户消息锚点（复用 JumpBar 的 questionAnchor 机制）；搜索栏内联显示命中上下文片段（±40 字符）辅助定位
+- Phase 2（另行）：mark 标签级命中高亮需穿透 Markdown/工具卡渲染器
+- **顺手修前端测试卫生**（先期批次遗留）：browser-mirror/dash-jump-filter fixture 补新必填字段（sessions/applied）；test:all 脚本把 5 个已迁移 vitest 风格的测试从 tsx 链摘除（重复执行在 tsx 下崩溃）
+- 验证：tsc 绿；test:typecheck 绿；npm run test:all 全绿（tsx 链 + vitest 43 例）
+
 ### feat(plugin/mcp): 服务端通知路由贯通（Spec-6）——tools/list_changed 触发工具面热刷新
 
 FAIRPEER_CODEX_GAP_SPEC Spec-6 落地。此前三种传输层（stdio/SSE/HTTP）把所有带 method 无 id 的服务端通知静默丢弃——动态 MCP 服务器换了工具表，fairpeer 要到下次启动才看得见：
@@ -82,20 +93,22 @@ diff/files 证据此前只认 7 个编码写工具，办公 profile 的步骤签
 - **守护测试** TestNetdevAddonEntryRoutingAndRadiusDiscipline：钉住四入口委托行与扩半径纪律标记；禁用 seccheck 时三行委托随 pruneSkillRoutingRows 剪除、diag 行保留
 - spec 状态同步：BLUETEAM §6 批1 尾差清零 / §8③ 判决改"已落地" / ORCHESTRATION 状态行移除该项
 
-### feat(netdev/security): CVE 匹配冷启动断头路修复——入门示例档（15 条）+ 文件导入 + CVE 透镜空态引导
+### feat(netdev/security): CVE 匹配冷启动断头路修复——入门示例档（15 条）+ 合并导入 + 文件导入 + CVE 透镜空态引导 + 自动扫查闭环
 
 用户反馈发现页「CVE」透镜常空且无从知因（2026-09-08）：根因链为 feed 未导入（产品不分发）→ 无自动扫查 → 零命中不落库，而透镜与导入处都不解释。修复：
 
-- **入门示例档**（安全工作台 → CVE「填入示例」）：**15 条公开知名网络设备 CVE，全部经厂商公告与 NVD 核实**（数据截至 2026-09），覆盖 Cisco×3/华为×3/H3C/锐捷/Fortinet×2/Juniper/Palo Alto/F5/Citrix/Zyxel 十家厂商；4 条带 `remediation` 演示 S2-1 结构化修复建议链路；填入即显格式说明与免责（仅示范+冷启动、非情报源、导入整体覆盖现有 feed、正式覆盖走 NVD 导出）。原 4 条示例中 2 条 Windows/Linux 死条目出清
+- **入门示例档**（安全工作台 → CVE「填入示例」）：**15 条公开知名网络设备 CVE，全部经厂商公告与 NVD 核实**（数据截至 2026-09），覆盖 Cisco×3/华为×3/H3C/锐捷/Fortinet×2/Juniper/Palo Alto/F5/Citrix/Zyxel 十家厂商；4 条带 `remediation` 演示 S2-1 结构化修复建议链路；填入即显格式说明与免责（仅示范+冷启动、非情报源、正式覆盖走 NVD 导出）。原 4 条示例中 2 条 Windows/Linux 死条目出清
+- **导入改按 CVE-ID 合并 + 清空重置**：NVD API 2.0 导出常是时间窗增量，原整体覆盖语义会把缓存缩到最后一窗——合并语义＝同 ID 新条目覆盖旧条目、既有条目永不删除（增量导出可反复导入）；「清空情报源」两击确认是唯一重置路径（NetDevCVEClear 桥接）；TestCVEImportMergeAndClear 钉住合并/覆盖/清空/幂等
 - **「从文件导入」**：NVD 原生导出几十 MB，textarea 承载不了——读本地 JSON 直接导入并自动刷新匹配，不经文本框（粘贴通道保留给小 feed/示例）
+- **导入即扫查（自动闭环）**：导入（粘贴/文件两路）与转正后都自动刷新匹配并滚动扫查一次——feed 与清单是匹配仅有的两个输入，变化即扫；输入不变时盲跑时间定时器是空转，故不做
 - **CVE 透镜专用空态**：透镜为空时区分三种原因（未导入 feed / 未扫查 / 零命中——多半是设备厂商·系统·型号指纹字段为空），一键**直达**安全工作台 CVE 视图（复用 fairpeer:netdev-cve 事件）；原通用空态（跑基线）对其余透镜保留
 - **引导文案三处补齐**：`netdev_cve_match` 无 feed 引导提及示例按钮与文件导入（tools.go）；扫查空结果提示补零命中成因（设备指纹字段为空）；sweepEmptyHint 同步
-- **扫查改滚动发现（bug 修复）**：`MatchCVEsToFindings` 注释声称 re-runs update，实际每次 `SaveFinding` 新开一张卡——重复扫查把发现中心堆满重复的「CVE 匹配」卡。改走 `SaveRollingFinding`（同 cve:sweep 原地更新、保留首次立案时间），新增 TestCVESweepRolling 钉住「两次扫查一张卡、ID/时间稳定」
+- **扫查改滚动发现（bug 修复）**：`MatchCVEsToFindings` 注释声称 re-runs update，实际每次 `SaveFinding` 新开一张卡——重复扫查把发现中心堆满重复的「CVE 匹配」卡。改走 `SaveRollingFinding`（同 cve:sweep 原地更新、保留首次立案时间），新增 TestCVESweepRolling 钉住「两次扫查一张卡、ID/时间稳定」；调试中发现 `ListFindings` 对「能反序列化但无标题的 JSON」无防御（目录混入外来 json 会显示成空卡）——按 findingValid 的 title 必填口径加守卫
 - **转正自动匹配兑现（承诺补线）**：AssessFlowCard s3 文案承诺「转正后指纹→CVE 自动匹配」，但 `promoteDiscovered` 从未接线——现在转正成功后自动跑一次 CVE 扫查（有 feed 滚动更新发现卡；没 feed 静默跳过）
 - **匹配盲区可见性**：CVE 匹配视图显示「可参与匹配 N/M 台——K 台 厂商/系统/型号 为空（盲区）」（与后端 hay 判空同口径）；设备表单型号字段下加提示「三段是 CVE 匹配的输入」——把零命中最大的成因在录入端和匹配端都摆到明面
 - **stale tooltip 修正**：发现页「CVE 匹配」按钮提示指向不存在的「设置 → 运维 高级」粘贴入口，改为 安全工作台 → CVE（填入示例/粘贴/从文件导入）
 - **规格红线补例外裁决**：OPS_AUTOMATION_PLATFORM_SPEC §2.2 与 NETDEV_SPEC_V2 §617 的"不分发 CVE feed"补「入门示例档」例外——少量公开条目仅填框、不预置、不自动导入，对齐弱口令"默认档内置、字典自备"先例（2026-09-08 裁决）
-- **文档**：NETDEV_USAGE（docs + guides 两份）§G 补「CVE feed 格式与入门示例」——字段语义、products 与 厂商/系统/型号 的子串匹配规则、NVD 1.1/2.0 原生导出兼容、文件导入通道、覆盖语义
+- **文档**：NETDEV_USAGE（docs + guides 两份）§G 补「CVE feed 格式与入门示例」——字段语义、products 与 厂商/系统/型号 的子串匹配规则、NVD 1.1/2.0 原生导出兼容、文件导入通道、合并语义与自动扫查
 
 ## [0.2.2] — 2026-09-08
 
