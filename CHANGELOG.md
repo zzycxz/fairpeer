@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(desktop/toolcard): Spec-1 批 2——BrowserActionCard（cowork 浏览器/桌面 33 工具一卡）+ 标准模式 Exploring 只读分组
+
+- **BrowserActionCardBody**：browser_* 21 + screenshot/get_ui_tree/screen_* 5 + window_* 5 全量注册——动作目标行（url/selector/text/keys/query…取首个非空）+ 结果预览，替代 args JSON dump；名称逐一对照后端注册表（BrowserTools/ScreenTools/WindowTools），无死条目
+- **标准模式 Exploring 分组（Spec-1.3）**：连续完成的只读工具折叠为一行 ReadOnlyBatch（"N 步 · 读了 x · 搜了 y · 时长"，展开逐条）——复用 compact 模式既有组件；registry noQuiet 工具（netdev 证据卡）与带图片附件的工具保持独立；运行中的只读工具实时渲染
+- **read/edit/write 专卡经评估不做**：generic 管线（serverDiff/UnifiedDiff/CodeViewer + subject/stat 摘要）已覆盖 codex ExecCell 的对等能力，专卡冗余——裁决记入 gap spec
+- **netdev 台账证据对接拆出独立规格书**：docs/NETDEV_OPSTEP_EVIDENCE_SPEC.md（伪路径 `device:<name>` + appendOpStep→Receipt 桥接 + complete_step 台账验证，估 2 天）
+- 验证：tsc 绿；npm run test:all 全绿
+
 ### feat(desktop/toolcard): 分层 ToolCard 首批（Spec-1）——agent bash 命令行卡 + 办公写路径卡 + email 卡
 
 FAIRPEER_CODEX_GAP_SPEC Spec-1 首批落地（复核后口径：ToolCard 管线已有状态指示器/subject/stat/head-tail 折叠/quiet，grep/web_fetch 等经 tools.ts 启发式已达标；真正的缺口是 agent bash 的 args JSON dump 与办公写工具无正文）：

@@ -1,5 +1,6 @@
 import { createContext, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { subjectOf } from "../lib/tools";
+import { toolCardSpec } from "../lib/toolCards";
 import { UnifiedDiff } from "./editors/UnifiedDiff";
 import type { Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
@@ -658,9 +659,38 @@ export function Transcript({
       flushCollapseBatch();
       pushTurnActions();
     } else {
-      // Standard mode: flat rendering
+      // Standard mode: flat rendering. Spec-1.3 (Exploring): consecutive
+      // completed read-only tools fold into one ReadOnlyBatch row — the same
+      // "读了 x · 搜了 y" summary compact mode uses — instead of a trail of
+      // quiet cards. Registry noQuiet tools (netdev evidence) and tools with
+      // image attachments stay individual; a RUNNING read-only tool flushes
+      // the batch and renders live so progress stays visible.
+      const roBatch: ToolItem[] = [];
+      const flushRO = () => {
+        if (roBatch.length === 0) return;
+        out.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={roBatch} subcalls={subcallsByParent} />);
+        roBatch.length = 0;
+      };
       for (let i = hotStartIdx; i < items.length; i++) {
         const it = items[i];
+        if (
+          it.kind === "tool" &&
+          it.readOnly &&
+          !it.parentId &&
+          it.name !== "todo_write" &&
+          it.name !== "exit_plan_mode" &&
+          !(it.attachments && it.attachments.length) &&
+          !toolCardSpec(it.name)?.noQuiet
+        ) {
+          if (it.status === "running") {
+            flushRO();
+            out.push(<ToolCard key={it.id} item={it} subcalls={subcallsByParent.get(it.id)} />);
+            continue;
+          }
+          roBatch.push(it);
+          continue;
+        }
+        flushRO();
         switch (it.kind) {
           case "user": {
             pushTurnActions();
@@ -689,6 +719,7 @@ export function Transcript({
           case "compaction": out.push(<CompactionCard key={it.id} item={it} />); break;
         }
       }
+      flushRO();
       pushTurnActions();
     }
     return out;

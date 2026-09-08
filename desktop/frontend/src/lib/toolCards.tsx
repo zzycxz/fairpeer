@@ -125,6 +125,26 @@ function EmailCardBody({ item }: { item: ToolItem }) {
   );
 }
 
+// BrowserActionCardBody (Spec-1.2): one card shape for the cowork browser/
+// screen/window surface (33 tools) — the action's target (url / selector /
+// text / …) up front, the tool's result below, instead of the args JSON dump.
+function BrowserActionCardBody({ item }: { item: ToolItem }) {
+  const target = argField(
+    item,
+    "url", "cdp_url", "selector", "css", "text", "keys", "key", "query",
+    "path", "file_path", "file", "tab", "window", "title", "target", "script", "expression",
+  );
+  return (
+    <div className="toolcard-office">
+      {target && <div className="toolcard-office__path">{target}</div>}
+      {item.output && <CodeViewer value={item.output} maxHeight={260} />}
+      {item.error && <div className="tool__err">{item.error}</div>}
+    </div>
+  );
+}
+
+const browserActionBody = (item: ToolItem) => <BrowserActionCardBody item={item} />;
+
 const registry: Record<string, ToolCardSpec> = {
   // Search results read as links and snippets, not as a JSON args dump.
   web_search: {
@@ -141,6 +161,42 @@ const registry: Record<string, ToolCardSpec> = {
   mindmap_create: { body: (item) => <OfficeWriteCardBody item={item} /> },
   doc_convert: { body: (item) => <OfficeWriteCardBody item={item} /> },
   email_send: { body: (item) => <EmailCardBody item={item} /> },
+  // Cowork browser/desktop automation (Spec-1.2): one action-card shape for
+  // the whole browser_* / screen_* / window_* surface. Names enumerated from
+  // the backend registration lists (BrowserTools/ScreenTools/WindowTools).
+  browser_open: { body: browserActionBody },
+  browser_attach: { body: browserActionBody },
+  browser_navigate: { body: browserActionBody },
+  browser_tabs: { body: browserActionBody },
+  browser_switch_tab: { body: browserActionBody },
+  browser_hover: { body: browserActionBody },
+  browser_back: { body: browserActionBody },
+  browser_forward: { body: browserActionBody },
+  browser_click: { body: browserActionBody },
+  browser_type: { body: browserActionBody },
+  browser_scroll: { body: browserActionBody },
+  browser_extract: { body: browserActionBody },
+  browser_screenshot: { body: browserActionBody },
+  browser_evaluate: { body: browserActionBody },
+  browser_snapshot: { body: browserActionBody },
+  browser_select_option: { body: browserActionBody },
+  browser_upload_file: { body: browserActionBody },
+  browser_set_path: { body: browserActionBody },
+  browser_wait: { body: browserActionBody },
+  browser_keepalive: { body: browserActionBody },
+  browser_auto: { body: browserActionBody },
+  screenshot: { body: browserActionBody },
+  get_ui_tree: { body: browserActionBody },
+  screen_click: { body: browserActionBody },
+  screen_key: { body: browserActionBody },
+  screen_type: { body: browserActionBody },
+  screen_scroll: { body: browserActionBody },
+  screen_perceive: { body: browserActionBody },
+  window_focus: { body: browserActionBody },
+  window_maximize: { body: browserActionBody },
+  window_restore: { body: browserActionBody },
+  window_move: { body: browserActionBody },
+  window_close: { body: browserActionBody },
   // Ops evidence stays readable: the command output is the point of the card,
   // so it opens by default and never fades to quiet after completion.
   netdev_exec: { forceOpen: true, noQuiet: true },
