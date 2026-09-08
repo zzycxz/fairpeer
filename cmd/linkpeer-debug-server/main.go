@@ -84,7 +84,9 @@ func (e *replyExec) Steer(tab, text string) error { fmt.Printf("[CMD] steer   ta
 func (e *replyExec) Pause(string) error           { return nil }
 func (e *replyExec) Resume(string) error          { return nil }
 func (e *replyExec) Approve(string, string, bool, bool, bool) error { return nil }
-func (e *replyExec) Answer(string, string, []string) error          { return nil }
+func (e *replyExec) Answer(string, string, []mobilebridge.QuestionAnswer) error {
+	return nil
+}
 func (e *replyExec) SetPlan(string, bool) error                     { return nil }
 func (e *replyExec) SetModel(string, string) error                  { return nil }
 func (e *replyExec) ListSessions() ([]mobilebridge.SessionInfo, error) { return nil, nil }

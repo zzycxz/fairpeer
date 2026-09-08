@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(mobilebridge/debug): linkpeer 联调服务器跟进 Answer 新签名——修复 ./... 构建断裂
+
+审计整改 P0-2 把 `CommandExecutor.Answer` 的 `[]string` 改为
+`[]proto.QuestionAnswer`（携带逐题分组），桌面端适配器已跟进，联调服务器的空实现
+漏改签名导致 `cmd/linkpeer-debug-server` 自该批起编译不过、`go build ./...` 断。
+对齐签名（空实现语义不变）即恢复全库构建。
+
 ### fix(evidence): 办公证据链接通——isWriter/isReader 认办公工具 + doc_convert out_path 提取
 
 FAIRPEER_CODEX_GAP_SPEC P0 落地（2026-09-08 复核修订后口径）。complete_step 的
