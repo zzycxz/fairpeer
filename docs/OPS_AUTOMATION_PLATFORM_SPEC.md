@@ -653,10 +653,12 @@ audit_chain_verify_failure_total
 
 ### Phase 1：统一请求和结果
 
-> 进度（2026-09-08 首切片 landed，`internal/ops`）：Request/Plan/Budget 数据结构、
-> §7.1 状态机（含 abort 强制理由）、持久台账（REQ-YYYYMMDD-NNNN）、`ops_status`
-> 工具（netdev 面注册）已落地。余项：`ops_classify`、`ops_plan`、
-> Job/Finding/Case/Proposal 挂 `request_id`、UI 计划与运行状态卡。
+> 进度（2026-09-08 两切片 landed，`internal/ops`）：Request/Plan/Budget 数据结构、
+> §7.1 状态机（含 abort 强制理由）、持久台账（REQ-YYYYMMDD-NNNN）、`ops_classify`
+> （§4.2 意图白名单 + §18 四类风险边界）、`ops_plan`（§7.3 主机校验全清单——在管
+> 目标/kind/on_failure/timeout/禁止隐式写入，execute 自动需审批）、`ops_status`
+> 均已落地（netdev ⑤b 组注册）。余项：Job/Finding/Case/Proposal 挂
+> `request_id`、UI 计划与运行状态卡、Run/Orchestrator（Phase 2 起）。
 
 - 建立 Request、Classification、Plan、Run、Coverage 数据结构。
 - 把现有 `Job`、Finding、Case、Proposal 统一关联到 `request_id`。

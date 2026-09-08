@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-09-08
+
+> 本版主题：codex 对标六项全量落地（终端双轨/对话搜索/证据链/事件架构/MCP 通知/分层卡片）、
+> OpStep 台账 × 证据链对接、运维平台 Phase 1 起步（统一请求模型 + ops 三工具）、
+> 评审 P1 首项（AGENT-1 丢更新竞态）收口、CVE 冷启动两批、构建与测试卫生修复。
+
 ### feat(ops): 运维平台 Phase 1 第二切片——ops_classify 请求入口 + ops_plan 主机校验计划
 
 - **ops_classify**：统一请求入口——新建（text 必填）或补分类已有请求；intent 走 §4.2 十三意图白名单、risk 走 §18 四类边界（read/assess/propose/execute，宁低勿高）；记录目标/项目/澄清问题，received→classified；已分类请求拒绝重分
