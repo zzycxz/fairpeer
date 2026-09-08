@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,6 +51,10 @@ type stdioTransport struct {
 	// readLoop asks it and writes the decision back on the wire. At most one
 	// call runs per transport at a time (callMu), so one slot suffices.
 	elicit func(id json.RawMessage, params json.RawMessage)
+	// onNotify surfaces server-initiated notifications (upgrade spec 3-7④) —
+	// everything with a method except progress (token-routed above) and
+	// elicitation (a request). nil = drop with a debug log, the old behaviour.
+	onNotify func(method string, params json.RawMessage)
 	readErr  error // set once the reader goroutine exits; further calls fail fast
 
 	waitOnce sync.Once
@@ -478,6 +483,15 @@ func (t *stdioTransport) readLoop() {
 						fn(n.Params.Message)
 					}
 				}
+				continue
+			}
+			t.mu.Lock()
+			fn := t.onNotify
+			t.mu.Unlock()
+			if fn != nil {
+				fn(probe.Method, line)
+			} else {
+				slog.Debug("mcp stdio: dropped server notification", "server", t.name, "method", probe.Method)
 			}
 			continue // server notification/request, not a response to one of our calls
 		}
@@ -514,6 +528,15 @@ func (t *stdioTransport) registerProgress(token string, fn func(string)) {
 func (t *stdioTransport) setElicitation(fn func(id json.RawMessage, params json.RawMessage)) {
 	t.mu.Lock()
 	t.elicit = fn
+	t.mu.Unlock()
+}
+
+// setNotificationHandler installs the sink for server-initiated notifications
+// (upgrade spec 3-7④). Progress stays token-routed; elicitation stays a
+// request — neither reaches fn.
+func (t *stdioTransport) setNotificationHandler(fn func(method string, params json.RawMessage)) {
+	t.mu.Lock()
+	t.onNotify = fn
 	t.mu.Unlock()
 }
 

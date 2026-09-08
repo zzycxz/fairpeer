@@ -1098,6 +1098,18 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 	}
 
+	// tools/list_changed (upgrade spec 3-7④): a server that swapped its tool
+	// list mid-session gets its registry namespace dropped and re-added live,
+	// so the model sees the new surface without a restart. Applies to every
+	// tier — the notification handler lives on the shared host.
+	pluginHost.ToolsRefreshed = func(server string, tools []tool.Tool) {
+		prefix := tool.MCPNamePrefix + server + "__"
+		reg.RemovePrefix(prefix)
+		for _, t := range tools {
+			reg.Add(t)
+		}
+	}
+
 	// Lazy / background: register placeholder tools now; the real spawn waits
 	// for either the first model call (lazy) or a goroutine kicked off here
 	// (background). Both share the same pluginHost so /mcp status, hot-add,

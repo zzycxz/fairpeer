@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -44,6 +45,9 @@ type sseTransport struct {
 	// pending maps request id → response channel; the SSE dispatcher routes
 	// responses by id.
 	pending map[int]chan json.RawMessage
+	// onNotify surfaces server-initiated notifications (upgrade spec 3-7④):
+	// frames with a method and no id. nil = drop with a debug log.
+	onNotify func(method string, params json.RawMessage)
 }
 
 func newSSETransport(ctx context.Context, s Spec) (*sseTransport, error) {
@@ -132,18 +136,34 @@ func (t *sseTransport) readStream(ctx context.Context) {
 	}
 }
 
-// dispatch routes a JSON-RPC response to its pending caller by id.
+// dispatch routes a JSON-RPC response to its pending caller by id, and
+// server-initiated notifications (method, no id) to the notification sink.
 func (t *sseTransport) dispatch(raw json.RawMessage) {
 	var env struct {
 		ID     *int            `json:"id"`
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
 		Result json.RawMessage `json:"result"`
 		Error  *struct {
 			Code    int    `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(raw, &env); err != nil || env.ID == nil {
-		return // notification or malformed — ignore (fairpeer is a consumer)
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return // malformed — ignore
+	}
+	if env.ID == nil {
+		if env.Method != "" {
+			t.mu.Lock()
+			fn := t.onNotify
+			t.mu.Unlock()
+			if fn != nil {
+				fn(env.Method, env.Params)
+			} else {
+				slog.Debug("mcp sse: dropped server notification", "server", t.name, "method", env.Method)
+			}
+		}
+		return // notification — fairpeer is a consumer
 	}
 	t.mu.Lock()
 	ch, ok := t.pending[*env.ID]
@@ -152,6 +172,14 @@ func (t *sseTransport) dispatch(raw json.RawMessage) {
 	if ok && ch != nil {
 		ch <- raw
 	}
+}
+
+// setNotificationHandler installs the sink for server-initiated notifications
+// (upgrade spec 3-7④).
+func (t *sseTransport) setNotificationHandler(fn func(method string, params json.RawMessage)) {
+	t.mu.Lock()
+	t.onNotify = fn
+	t.mu.Unlock()
 }
 
 // resolveURL turns the endpoint event's relative/absolute path into a full URL.

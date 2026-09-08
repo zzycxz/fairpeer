@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -61,6 +62,13 @@ type httpTransport struct {
 	mu      sync.Mutex
 	nextID  int
 	session string // Mcp-Session-Id, captured from responses
+	// onNotify surfaces server-initiated notifications (upgrade spec 3-7④):
+	// SSE frames with a method and no id that arrive mixed into a response
+	// stream. nil = drop with a debug log. Guarded by its OWN mutex: mu is
+	// held across a whole request/response cycle (readSSEResponse runs inside
+	// it), so locking mu from the notification path would self-deadlock.
+	notifyMu sync.Mutex
+	onNotify func(method string, params json.RawMessage)
 }
 
 func newHTTPTransport(s Spec) (*httpTransport, error) {
@@ -193,7 +201,13 @@ func (t *httpTransport) readSSEResponse(body io.Reader, id int) (json.RawMessage
 			return nil, false, nil // not a JSON-RPC message we care about
 		}
 		if resp.ID != id {
-			return nil, false, nil // a notification or another call's response
+			// A notification (no id on the wire, so it decodes as 0 — our ids
+			// start at 1) or another call's response (a real id ≠ ours, which
+			// parseServerNotification rejects). Surface notifications; skip the rest.
+			if method, params, ok := parseServerNotification([]byte(payload)); ok {
+				t.notifyServer(method, params)
+			}
+			return nil, false, nil
 		}
 		if resp.Error != nil {
 			return nil, false, fmt.Errorf("plugin %q: %w", t.name, resp.Error)
@@ -224,6 +238,28 @@ func (t *httpTransport) readSSEResponse(body io.Reader, id int) (json.RawMessage
 		return res, err
 	}
 	return nil, fmt.Errorf("plugin %q: SSE stream ended without a response to id %d", t.name, id)
+}
+
+// notifyServer surfaces one parsed server notification to the sink (upgrade
+// spec 3-7④), logging at debug when nobody is listening. notifyMu, not mu —
+// see the struct comment.
+func (t *httpTransport) notifyServer(method string, params json.RawMessage) {
+	t.notifyMu.Lock()
+	fn := t.onNotify
+	t.notifyMu.Unlock()
+	if fn != nil {
+		fn(method, params)
+	} else {
+		slog.Debug("mcp http: dropped server notification", "server", t.name, "method", method)
+	}
+}
+
+// setNotificationHandler installs the sink for server-initiated notifications
+// (upgrade spec 3-7④).
+func (t *httpTransport) setNotificationHandler(fn func(method string, params json.RawMessage)) {
+	t.notifyMu.Lock()
+	t.onNotify = fn
+	t.notifyMu.Unlock()
 }
 
 // decodeRPCResult parses a single application/json JSON-RPC response body.

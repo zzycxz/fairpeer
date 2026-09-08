@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(plugin/mcp): 服务端通知路由贯通（Spec-6）——tools/list_changed 触发工具面热刷新
+
+FAIRPEER_CODEX_GAP_SPEC Spec-6 落地。此前三种传输层（stdio/SSE/HTTP）把所有带 method 无 id 的服务端通知静默丢弃——动态 MCP 服务器换了工具表，fairpeer 要到下次启动才看得见：
+
+- **传输层**：三传输实现 notificationSink（setNotificationHandler）；stdio readLoop 除 progress（按 token 路由）与 elicitation（请求）外的通知上报；SSE dispatch 对 id==nil 帧解析 method 上报；HTTP readSSEResponse 对混入响应流的 SSE 通知帧上报（rpcResponse.ID 解码为 0，本方 id 从 1 起，不冲突）
+- **Host 路由**（notification.go）：tools/list_changed → 重跑 tools/list（每 client 防抖）→ 更新 /mcp 状态计数 + **改写跨启动握手缓存**（SaveCachedSchema，防止下次启动从磁盘复活旧工具表）→ 经 ToolsRefreshed 回调交还新鲜列表；prompts/resources list_changed → 复用既有 fetchPrompts/fetchResources；resources/updated 及其余 → 日志
+- **boot 接线**：ToolsRefreshed 落地为注册表热换——RemovePrefix("mcp__&lt;server&gt;__") + 逐个 Add，模型无需重启即见新工具面；eager/lazy/background 三层共享同一 host，全覆盖
+- **实现注记**：httpTransport 的通知回调用独立 notifyMu——mu 在整个请求/响应周期内持有（readSSEResponse 在其中运行），从通知路径再锁 mu 会自死锁（TestHTTPTransportSSE 抓到后修正）
+- 测试：解析/SSE 路由/HTTP 混流/stdio 上报/Host 刷新全链（含缓存改写断言）；go test ./internal/plugin/ 全绿、./internal/boot/ 全绿
+- 注：internal/plugin 下 oauth.go/plugin.go/progress_route_test.go 存在历史 gofmt 遗留（import 排序/字段对齐），非本批引入
+
 ### fix(wire): 三类事件序列化边界丢弃修复——Item 通线（Spec-5）+ resumed/expert_collab 两个实锤断流
 
 FAIRPEER_CODEX_GAP_SPEC Spec-5 落地，并把复核中发现的两个同类缺口一并修掉。internal/serve/wire.go 与 desktop/wire.go（手工保持同步的两份）的 kindNames 均缺三个 Kind：事件以 `{"kind":""}` 空帧发出、被前端 default 分支静默忽略：

@@ -135,6 +135,13 @@ type Host struct {
 	// Detached stats/schema-cache writers from Start; off the boot path but
 	// drained by Close so cleanup can't race a still-open cache file.
 	bgWrites sync.WaitGroup
+
+	// ToolsRefreshed, when set, receives a server's fresh tool list after its
+	// tools/list_changed notification was honoured (upgrade spec 3-7④). The
+	// owner (boot) swaps the live registry namespace: RemovePrefix(
+	// "mcp__<server>__") + Add each. Optional — without it a refresh only
+	// updates status counts and the persisted handshake cache.
+	ToolsRefreshed func(serverName string, tools []tool.Tool)
 }
 
 // Prompts returns every MCP prompt discovered across connected servers.
@@ -427,6 +434,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			continue
 		}
 		h.clients = append(h.clients, r.client)
+		h.attachNotificationHandler(r.client)
 		tools = append(tools, r.tools...)
 		// prompts/resources are filled in later by StartPhaseB.
 	}
@@ -574,6 +582,11 @@ type Client struct {
 	prompts   []Prompt
 	resources []Resource
 	tools     []ToolInfo
+
+	// refreshMu/refreshing debounce tools/list_changed refreshes (servers may
+	// emit the notification in bursts).
+	refreshMu  sync.Mutex
+	refreshing bool
 }
 
 func (c *Client) auxiliaryClient(ctx context.Context) (*Client, context.Context, context.CancelFunc, error) {
@@ -767,6 +780,7 @@ func (h *Host) addConnected(ctx context.Context, s Spec) ([]tool.Tool, error) {
 		return nil, fmt.Errorf("plugin host is closed")
 	}
 	h.clients = append(h.clients, c)
+	h.attachNotificationHandler(c)
 	h.clearFailure(s.Name)
 	h.mu.Unlock()
 	// Prompts and resources stream in on the long ctx the caller passed (Host.Add
