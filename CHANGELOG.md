@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(ops): 运维平台 Phase 1 首切片——统一请求模型落地（Request 数据结构/§7.1 状态机/持久台账/ops_status）
+
+OPS_AUTOMATION_PLATFORM_SPEC Phase 1 从零起步（复核确认全仓无 ops_classify/request_id 实现，且与感知智能运维批不撞线）：
+
+- **internal/ops 包**：Request 请求信封（§7.2：request_id/source/actor/text/project/targets/intent/risk/scope_snapshot/budget）+ Plan/PlanStep（§7.3：主机校验后的计划对象，步骤 kind 白名单 read|assess|propose|execute|verify）+ Budget 执行包络
+- **§7.1 状态机**：14 态全图（received→…→archived + 任意态→aborted）；非法迁移与"无理由中止"均拒绝——abort 必须写原因（规格红线），轨迹带时间戳全留痕
+- **持久台账**：<用户配置>/fairpeer/ops/requests/ 一请求一 JSON（原子写，同 OpStep 纪律）；REQ-YYYYMMDD-NNNN 按日序列号；List 新序在前
+- **ops_status 工具**（netdev ⑤b 平台横切组注册，25+1 面）：无参列最近请求（编号/来源/意图/风险/状态/目标），带 request_id 出完整轨迹与计划摘要；只读
+- 测试：状态机合法性（8 合法/5 非法/任意态可中止）、轨迹与 abort 理由强制、台账读写与序列号、工具列表/详情/路径穿越拒绝——全绿；boot 套件确认注册无扰
+- 后续片（§17 Phase 1 余项）：ops_classify（意图/风险分类）、ops_plan（计划编译与校验）、Job/Finding/Case/Proposal 挂 request_id、UI 状态卡
+
 ### fix(agent): AGENT-1 丢更新竞态收口——全部日志重写走 CAS（ReplaceIfUnchanged），并发追加不再被静默丢弃
 
 2026-09-07 代码评审 P1 首项：compact/SummarizeFrom/SummarizeUpTo/prune×2 的「快照→计算→无条件 Replace」在脱离 run loop 运行时，会把快照后并发追加的消息（用户输入、assistant 回复、tool result）静默丢弃且持久化。运维平台的长会话/定时任务正是高危场景，作为 B 轮第一项修掉：

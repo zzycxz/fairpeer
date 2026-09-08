@@ -13,6 +13,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/netdev/driver"
 	"github.com/zzycxz/fairpeer/internal/netdev/transport"
+	"github.com/zzycxz/fairpeer/internal/ops"
 	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
@@ -660,6 +661,9 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Hide("netdev_knowledge")
 	reg.Add(&logReadTool{m: m})
 	reg.Add(&logSearchTool{m: m})
+	// ⑤b 平台请求横切（OPS_AUTOMATION_PLATFORM_SPEC Phase 1）：统一请求
+	// 台账的状态查询——对话/定时/告警统一为 request_id 的第一阶段面。
+	reg.Add(&ops.StatusTool{})
 	// ⑥ 可信域组（TRUSTDOMAIN_SPEC §15）：仅加入域的主机可见。
 	if cfg.TrustDomain.Enabled {
 		reg.Add(&fleetTool{cfg: cfg})
