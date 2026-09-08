@@ -2177,6 +2177,61 @@
   border-radius: var(--radius-sm);
   word-break: break-all;
 }
+/* Spec-2 Phase 2：搜索命中 mark + 跳转闪烁 */
+.ts-mark {
+  color: inherit;
+  background: color-mix(in srgb, var(--accent, #89b4fa) 32%, transparent);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.ts-flash {
+  animation: ts-flash-kf 1.4s ease-out;
+}
+@keyframes ts-flash-kf {
+  0% { background: color-mix(in srgb, var(--accent, #89b4fa) 26%, transparent); }
+  70% { background: color-mix(in srgb, var(--accent, #89b4fa) 26%, transparent); }
+  100% { background: transparent; }
+}
+/* 签核卡证据行 + device 徽标（NETDEV_OPSTEP_EVIDENCE_SPEC） */
+.toolcard-step__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 3px;
+  font-size: 11.5px;
+}
+.toolcard-step__kind {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent, #89b4fa) 14%, transparent);
+  color: var(--fg);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+}
+.toolcard-step__summary {
+  flex: 1 1 200px;
+  min-width: 120px;
+  color: var(--fg);
+  word-break: break-word;
+}
+.toolcard-step__path {
+  font-size: 10.5px;
+  color: var(--fg-faint);
+}
+.toolcard-device-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, #a6e3a1 18%, transparent);
+  color: var(--fg);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+}
 .tool__err {
   margin: 0 11px 10px 30px;
   padding: 7px 10px;

@@ -143,6 +143,41 @@ function BrowserActionCardBody({ item }: { item: ToolItem }) {
   );
 }
 
+// CompleteStepCardBody (NETDEV_OPSTEP_EVIDENCE_SPEC 前端尾巴): the sign-off
+// renders as the step + its evidence rows — device references ("device:<name>",
+// OpStep 台账验证) show as badges, file citations as plain code.
+function CompleteStepCardBody({ item }: { item: ToolItem }) {
+  let step = "";
+  let evidence: { kind?: string; summary?: string; command?: string; paths?: string[] }[] = [];
+  try {
+    const a = JSON.parse(item.args || "{}");
+    if (typeof a.step === "string") step = a.step;
+    if (Array.isArray(a.evidence)) evidence = a.evidence;
+  } catch {
+    /* fall through */
+  }
+  return (
+    <div className="toolcard-office">
+      {step && <div className="toolcard-office__path">✅ {step}</div>}
+      {evidence.map((e, i) => (
+        <div key={i} className="toolcard-step__row">
+          <span className="toolcard-step__kind">{e.kind ?? "?"}</span>
+          <span className="toolcard-step__summary">{e.summary ?? ""}</span>
+          {(e.paths ?? []).map((p, j) =>
+            p.toLowerCase().startsWith("device:") ? (
+              <span key={j} className="toolcard-device-badge" title={`OpStep 台账验证：${p.slice(7)}`}>{p.slice(7)}</span>
+            ) : (
+              <code key={j} className="toolcard-step__path">{p}</code>
+            ),
+          )}
+        </div>
+      ))}
+      {item.output && <CodeViewer value={item.output} maxHeight={140} />}
+      {item.error && <div className="tool__err">{item.error}</div>}
+    </div>
+  );
+}
+
 const browserActionBody = (item: ToolItem) => <BrowserActionCardBody item={item} />;
 
 const registry: Record<string, ToolCardSpec> = {
@@ -161,6 +196,9 @@ const registry: Record<string, ToolCardSpec> = {
   mindmap_create: { body: (item) => <OfficeWriteCardBody item={item} /> },
   doc_convert: { body: (item) => <OfficeWriteCardBody item={item} /> },
   email_send: { body: (item) => <EmailCardBody item={item} /> },
+  // 签核卡（Spec-3 / NETDEV_OPSTEP_EVIDENCE_SPEC）：步骤 + 证据行 + device 徽标；
+  // noQuiet——签核是审计痕迹，完成后不淡出。
+  complete_step: { body: (item) => <CompleteStepCardBody item={item} />, noQuiet: true },
   // Cowork browser/desktop automation (Spec-1.2): one action-card shape for
   // the whole browser_* / screen_* / window_* surface. Names enumerated from
   // the backend registration lists (BrowserTools/ScreenTools/WindowTools).

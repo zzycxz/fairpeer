@@ -13,6 +13,7 @@ import { ToolCard } from "./ToolCard";
 import { AlertTriangle, ChevronRight, FileDiff, Info, RotateCcw , ExternalLink } from "lucide-react";
 import { Welcome } from "./Welcome";
 import { TranscriptSearch } from "./TranscriptSearch";
+import { SearchHighlightContext, HighlightText } from "../lib/searchHighlight";
 import { getDisplayMode, onDisplayModeChange, type DisplayMode } from "../lib/displayMode";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
@@ -466,6 +467,10 @@ export function Transcript({
       const nodeRect = node.getBoundingClientRect();
       const top = el.scrollTop + nodeRect.top - scrollerRect.top - 48;
       el.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+      // Flash the landed-on anchor so the eye finds it after the scroll
+      // (matched text inside also carries <mark> highlights).
+      node.classList.add("ts-flash");
+      window.setTimeout(() => node.classList.remove("ts-flash"), 1400);
     });
   }, [questions, turnGroups.length]);
 
@@ -758,6 +763,7 @@ export function Transcript({
       )}
 
       <LiveStreamContext.Provider value={live}>
+        <SearchHighlightContext.Provider value={searchOpen ? searchQuery : ""}>
         {turnGroups.length > HOT_TURNS && (
           <WarmZone
             turnGroups={turnGroups}
@@ -787,6 +793,7 @@ export function Transcript({
           />
         )}
         {hotZoneNodes}
+        </SearchHighlightContext.Provider>
       </LiveStreamContext.Provider>
     </div>
   );
@@ -1374,7 +1381,7 @@ function NoticeCard({ level, text, retryable, repeat }: { level: NoticeItem["lev
   return (
     <div className={`notice-line notice-line--${level}`}>
       <span className="notice-line__icon">{level === "warn" ? <AlertTriangle size={13} /> : <Info size={13} />}</span>
-      <span className="notice-line__text">{localizeNoticeText(text, t)}</span>
+      <span className="notice-line__text"><HighlightText text={localizeNoticeText(text, t)} /></span>
       {(repeat ?? 1) > 1 && <span className="notice-line__count">×{repeat}</span>}
       {retryable && onRetry && (
         <button type="button" className="notice-line__retry" onClick={onRetry}>

@@ -8,7 +8,8 @@
 > `netdev.ListOpSteps`（netdev 不 import builtin，无环；非 netdev profile 下
 > 台账目录为空，device: 引用自然拒绝）；桥接在 `appendOpStep(ctx, …)` 内经
 > ctx 取证据 Ledger（desktop 多标签各有 Ledger，全局回调会串台）。
-> 前端 device: 徽标渲染未包含在本批（卡片当前按普通路径显示）。
+> 前端：complete_step 签核卡渲染步骤 + 证据行，`device:` 引用显示设备徽标
+> （2026-09-08 收尾批）。
 
 ---
 

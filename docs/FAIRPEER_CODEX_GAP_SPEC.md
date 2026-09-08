@@ -15,7 +15,7 @@
 | # | 不足项 | 严重度 | codex 参考 | 改进方案 | 状态 |
 |---|--------|--------|-----------|---------|------|
 | 1 | 工具卡片渲染低覆盖 | 中 | HistoryCell trait + 按工具类型分组件 | 分层 ToolCard 体系 | **两批已实施**（批 1：bash/办公写/email/netdev_probe；批 2：BrowserActionCard 全量 33 工具 + 标准模式 Exploring 只读分组。read/edit/write 专卡经评估不做——generic 管线 + tools.ts 摘要已覆盖，专卡冗余） |
-| 2 | 对话内无全文搜索 | 中 | codex 也没有（仅有 Ctrl+T overlay） | 超越 codex：Ctrl+F 搜索 + 高亮 | **已实施**（mark 级高亮 Phase 2） |
+| 2 | 对话内无全文搜索 | 中 | codex 也没有（仅有 Ctrl+T overlay） | 超越 codex：Ctrl+F 搜索 + 高亮 | **已实施**（Phase 2：用户消息/通知 mark 高亮 + 跳转闪烁；Markdown/工具输出的高亮穿透为 Phase 3） |
 | 3 | 证据链不认办公工具 | 高 | codex 无此概念（update_plan 不验证） | 名单扩展 + out_path 提取 | **已实施**（netdev 台账对接另立 Spec） |
 | 4 | 主终端未接 PTY | 中 | portable-pty + ProcessHandle 抽象 | 接线既有 ConPTY + 补 Unix 存根 | **已实施** |
 | 5 | Item 事件前端未消费 | 低 | SQ/EQ + TurnItem tagged enum + delta | 双 wire.go 补 event.Item 映射 | **已实施**（含 resumed/expert_collab 两个同源断流修复；渲染迁移 Phase 2） |

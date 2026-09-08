@@ -8,6 +8,7 @@ import { parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/at
 import { app } from "../lib/bridge";
 import { UnifiedDiff } from "./editors/UnifiedDiff";
 import { useT } from "../lib/i18n";
+import { HighlightText } from "../lib/searchHighlight";
 import type { Item, MessageActionScope } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 
@@ -148,7 +149,7 @@ export function UserMessage({
             )}
           </div>
         ) : (
-          displayText && <div className="msg__text">{displayText}</div>
+          displayText && <div className="msg__text"><HighlightText text={displayText} /></div>
         )}
         {failed && <div className="msg__send-failed">{t("msg.sendFailed")}</div>}
         {orderedAttachments.length > 0 && (
