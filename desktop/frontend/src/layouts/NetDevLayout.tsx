@@ -1202,6 +1202,9 @@ export function NetDevLayout({
         model: fingerprintModel(h),
         writeTier: discWriteTier,
       })));
+      // 转正即匹配（AssessFlowCard s3 的承诺「转正后指纹→CVE 自动匹配」）：
+      // 有 feed 就滚动更新 cve:sweep 发现卡；没 feed 是常态，静默跳过不打扰。
+      try { await app.NetDevCVESweep(); } catch { /* no feed yet — fine */ }
       setDiscSel(new Set());
       await loadDiscovered();
       await reload();
@@ -2598,9 +2601,15 @@ export function NetDevLayout({
             </div>
             {jumpFilteredFindings.length === 0 && (
               <div className="ndv__empty">
-                <div className="ndv__empty-title">{tt("ndv.fnd.emptyTitle")}</div>
-                <div className="ndv__empty-desc">{project ? tt("ndv.fnd.emptyProj", { name: project.name }) : tt("ndv.fnd.empty")}</div>
-                <span className="btn btn--primary btn--small" role="button" onClick={() => { void runBaseline(); }}>{tt("ndv.fnd.emptyAct")}</span>
+                {/* CVE 透镜专用空态：常空的三种原因各给一条出路（2026-09-08
+                    用户反馈「CVE 卡总是空的」——透镜本身不解释原因就是断头路）。 */}
+                <div className="ndv__empty-title">{fndFilter === "cve" ? tt("ndv.fnd.cveEmptyTitle") : tt("ndv.fnd.emptyTitle")}</div>
+                <div className="ndv__empty-desc">
+                  {fndFilter === "cve" ? tt("ndv.fnd.cveEmpty") : project ? tt("ndv.fnd.emptyProj", { name: project.name }) : tt("ndv.fnd.empty")}
+                </div>
+                {fndFilter === "cve"
+                  ? <span className="btn btn--primary btn--small" role="button" onClick={() => { openSecBench(); window.dispatchEvent(new CustomEvent("fairpeer:netdev-cve")); }}>{tt("ndv.fnd.cveEmptyAct")}</span>
+                  : <span className="btn btn--primary btn--small" role="button" onClick={() => { void runBaseline(); }}>{tt("ndv.fnd.emptyAct")}</span>}
               </div>
             )}
             {aggView && aggs.length > 0 ? aggs.map(a => <AggRow key={a.key} a={a} onChanged={() => void reload()} />) : jumpFilteredFindings.slice(0, 20).map(f => <FindingRow key={f.id} f={f} onResolved={() => void reload()} onPropose={fl => {

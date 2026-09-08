@@ -81,6 +81,19 @@ agent 整任务委托 `netdev-seccheck-auto` 子代理（过程在操作实况�
 红线：不做利用性验证；主动扫描（nmap/netprobe）须评估信封，核查不开不绕；
 feed 用户自备（安全工作台 → CVE 粘贴导入，产品不分发）。
 
+**CVE feed 格式与入门示例**：安全工作台 → CVE 页「填入示例」可一键填入 15 条
+公开知名网络设备 CVE（入门示例档：格式示范 + 冷启动，覆盖 Cisco/华为/H3C/
+锐捷/Fortinet/Juniper/Palo Alto/F5/Citrix/Zyxel 十家厂商，覆盖面极小，不能
+当情报源用；数据截至 2026-09，导入仍需手动点击）。字段：`id` / `desc` /
+`products`（小写厂商·产品子串，与每台设备的 厂商/系统/型号 三段拼接文本做
+子串匹配——三段全空的设备直接跳过）/ `severity`（critical|high|medium|low）/
+`remediation`（可选：`upgrade_to` 升级目标 / `kb` 补丁号 / `ref_url` 厂商
+公告，命中立案时升级为结构化修复建议）。也直接收 NVD 原生导出（1.1
+`CVE_Items` 或 2.0 `vulnerabilities`，无 CPE 条目自动丢弃）；大文件走
+「从文件导入」直接读本地 JSON，不经文本框。注意：导入会整体覆盖现有 feed；
+发现页「CVE」透镜只在扫查有命中时才有卡，空态会引导回这里。
+
+
 ### H. 写档与备份（锁管理；`NETDEV_WRITE_AUTHZ_SPEC.md` v1，随 P1/P2 落地）
 
 **给设备定锁（接入时必做）**：每台设备/工作区在接入时必须选写档，默认 sealed。

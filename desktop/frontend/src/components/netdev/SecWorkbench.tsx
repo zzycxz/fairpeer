@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { app } from "../../lib/bridge";
 import { useT } from "../../lib/i18n";
 import { parseIOCList } from "../../lib/ioc";
@@ -23,13 +23,28 @@ const KIND_COLOR: Record<string, string> = {
 
 type CVEMatch = { device: string; cve_id: string; desc: string; severity: string; product: string };
 
-// 示例 feed（§2.3）：几条著名真实 CVE，覆盖清单常见厂商。按钮只把 JSON 填进
-// 文本框——导入仍由用户触发；产品不预置、不自动导入 feed（附录 B-4 不分发原则）。
+// 入门示例 feed（§2.3）：15 条公开知名的网络设备 CVE（厂商公告/NVD 可查，数据
+// 截至 2026-09），覆盖 Cisco/华为/H3C/锐捷/Fortinet/Juniper/Palo Alto/F5/
+// Citrix/Zyxel 十家常见厂商，其中 4 条带 remediation 演示 S2-1 修复建议链路。
+// 按钮只把 JSON 填进文本框——导入仍由用户触发；产品不预置、不自动导入 feed
+// （附录 B-4 不分发原则，示例档定位同弱口令「默认档内置、字典自备」先例：
+// 格式示范 + 冷启动，不构成情报覆盖）。
 const SAMPLE_CVE_FEED = `{"cves":[
-{"id":"CVE-2023-20198","desc":"Cisco IOS XE Web UI unauthenticated privilege escalation (exploited in the wild); disable Web UI or upgrade","products":["cisco"],"severity":"critical"},
-{"id":"CVE-2017-17215","desc":"Huawei router UPnP TR-064 remote command execution (used by Mirai variants); disable UPnP or upgrade","products":["huawei"],"severity":"critical"},
-{"id":"CVE-2020-1472","desc":"Windows domain controller Netlogon elevation of privilege (Zerologon); apply the 2020-08 patch","products":["windows"],"severity":"critical"},
-{"id":"CVE-2024-1086","desc":"Linux kernel nf_tables use-after-free, local privilege escalation; update the kernel","products":["linux"],"severity":"high"}
+{"id":"CVE-2023-20198","desc":"Cisco IOS XE Web UI 未授权提权（已在野利用）；关闭 Web UI 或升级","products":["cisco"],"severity":"critical","remediation":{"ref_url":"https://nvd.nist.gov/vuln/detail/CVE-2023-20198"}},
+{"id":"CVE-2017-3881","desc":"Cisco IOS/IOS XE SNMP 远程代码执行（CISA KEV 在册）；升级至已修复版本","products":["cisco","ios"],"severity":"critical","remediation":{"ref_url":"https://www.cisco.com/c/en/us/support/docs/csa/cisco-sa-20170629-snmp.html"}},
+{"id":"CVE-2018-0171","desc":"Cisco IOS Smart Install 远程代码执行（TCP 4786，无认证）；no vstack 关闭或升级","products":["cisco","ios"],"severity":"critical"},
+{"id":"CVE-2017-17215","desc":"华为路由器 UPnP/TR-064 远程命令执行（Mirai 变种在用）；关闭 UPnP 或升级","products":["huawei"],"severity":"critical"},
+{"id":"CVE-2021-22393","desc":"华为 CloudEngine 系列交换机远程拒绝服务（CVSS 7.5）；升级 VRP 软件","products":["huawei","cloudengine"],"severity":"high"},
+{"id":"CVE-2019-5285","desc":"华为 S 系列交换机未认证远程拒绝服务（CVSS 7.5）；升级软件版本","products":["huawei"],"severity":"high"},
+{"id":"CVE-2022-45963","desc":"H3C SecPath 系列防火墙权限绕过（≤3.10 ESS6703，CVSS 9.8）；升级固件","products":["h3c","secpath"],"severity":"critical"},
+{"id":"CVE-2020-36870","desc":"锐捷 EG/NBR 系列网关 EWEB 管理系统代码执行（特定认证功能开启时可利用）；升级固件","products":["ruijie"],"severity":"critical"},
+{"id":"CVE-2022-40684","desc":"Fortinet FortiOS/FortiProxy 管理面认证绕过（在野利用）；升级至 7.2.2+/7.0.7+","products":["fortinet","fortios","fortiproxy"],"severity":"critical","remediation":{"upgrade_to":"7.2.2 或以上","ref_url":"https://nvd.nist.gov/vuln/detail/CVE-2022-40684"}},
+{"id":"CVE-2024-55591","desc":"Fortinet FortiOS 管理面 websocket 认证绕过（零日在野利用）；升级至 7.0.17+","products":["fortinet","fortios"],"severity":"critical","remediation":{"upgrade_to":"7.0.17 或以上","ref_url":"https://fortiguard.com/psirt/FG-IR-24-535"}},
+{"id":"CVE-2023-36845","desc":"Juniper Junos OS J-Web（SRX/EX 系列）链式预认证远程代码执行；升级或限制 J-Web 访问","products":["juniper","junos"],"severity":"critical"},
+{"id":"CVE-2024-3400","desc":"Palo Alto PAN-OS GlobalProtect 命令注入（CVSS 10.0，零日在野利用）；立即打补丁","products":["palo alto","pan-os"],"severity":"critical"},
+{"id":"CVE-2022-1388","desc":"F5 BIG-IP iControl REST 认证绕过致 root 远程代码执行（在野利用）；升级或限制管理面访问","products":["f5","big-ip"],"severity":"critical"},
+{"id":"CVE-2023-3519","desc":"Citrix NetScaler ADC/Gateway（网关/SAML 配置）未认证远程代码执行（零日在野利用）；升级固件并排查 webshell","products":["citrix","netscaler"],"severity":"critical"},
+{"id":"CVE-2023-28771","desc":"Zyxel ATP/USG FLEX/VPN 系列防火墙 IKEv2 未认证命令注入（在野利用）；升级固件","products":["zyxel"],"severity":"critical"}
 ]}`;
 
 // fmtEntryTime — 时间线条目时间的显示格式化。写入侧统一存 toISOString()
@@ -248,6 +263,7 @@ export function SecWorkbench({ devices, hidden }: {
   };
 
   // ── CVE 视图（§2.3）：feed 导入 → 匹配清单 → 扫荡 ──────────────────────
+  const cveFileRef = useRef<HTMLInputElement>(null);
   const cveImport = async () => {
     if (!cveFeed.trim()) return;
     setCveBusy("import");
@@ -257,6 +273,20 @@ export function SecWorkbench({ devices, hidden }: {
       setNote(t("ndv.sec.feedImported", { n }));
       setCveFeed("");
     } catch (e) { setNote(String(e)); } finally { setCveBusy(""); }
+  };
+  // 大文件通道（NVD 原生导出几十 MB，textarea 承载不了）：读本地文件直接导入，
+  // 导入成功即刷新匹配——不经文本框评审（文件本身就是用户自备的权威源）。
+  const cveImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setCveBusy("import");
+    setCveSweepHint("");
+    try {
+      const n = await app.NetDevImportCVEs(await f.text());
+      setNote(t("ndv.sec.feedImported", { n }));
+      await cveList();
+    } catch (err) { setNote(String(err)); } finally { setCveBusy(""); }
   };
   const cveList = async () => {
     setCveBusy("list");
@@ -362,8 +392,12 @@ export function SecWorkbench({ devices, hidden }: {
             <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
               <span className="btn btn--secondary btn--small" role="button"
                 title={t("ndv.sec.fillExampleTip")}
-                onClick={() => setCveFeed(SAMPLE_CVE_FEED)}>{t("ndv.sec.fillExample")}</span>
+                onClick={() => { setCveFeed(SAMPLE_CVE_FEED); setCveSweepHint(t("ndv.sec.exampleHint")); }}>{t("ndv.sec.fillExample")}</span>
               <span className="btn btn--secondary btn--small" role="button" onClick={() => void cveImport()}>{cveBusy === "import" ? t("ndv.sec.importing") : t("ndv.sec.importFeed")}</span>
+              <span className="btn btn--secondary btn--small" role="button"
+                title={t("ndv.sec.importFileTip")}
+                onClick={() => cveFileRef.current?.click()}>{t("ndv.sec.importFile")}</span>
+              <input ref={cveFileRef} type="file" accept=".json,application/json" style={{ display: "none" }} onChange={e => void cveImportFile(e)} />
               <span className="btn btn--secondary btn--small" role="button" onClick={() => void cveList()}>{cveBusy === "list" ? t("ndv.sec.refreshing") : t("ndv.sec.refreshMatches")}</span>
               <span className="btn btn--primary btn--small" role="button" onClick={() => void cveSweep()}>{cveBusy === "sweep" ? t("ndv.sec.sweeping") : t("ndv.sec.cveSweep")}</span>
             </div>
@@ -377,6 +411,9 @@ export function SecWorkbench({ devices, hidden }: {
         {view === "cve" ? (
           <>
             <div className="ndv__card-title" style={{ fontSize: 11.5 }}>{t("ndv.sec.cveMatches")}</div>
+            {cveMatches !== null && cveBlind.blind > 0 && (
+              <div className="ndv__hint" style={{ padding: "2px 0 6px" }}>{t("ndv.sec.blindHint", { ok: cveBlind.ok, total: cveBlind.total, blind: cveBlind.blind })}</div>
+            )}
             {cveMatches === null ? (
               <div className="ndv__empty" style={{ flex: 1 }}>
                 <div className="ndv__empty-title">{t("ndv.sec.noMatchesLoaded")}</div>

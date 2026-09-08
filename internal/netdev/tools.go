@@ -888,7 +888,7 @@ func (t *cveMatchTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		// No feed (or unreadable cache) is a guidance case, not a failure —
 		// the agent should tell the user how to bring a feed in.
 		return "尚无可用 CVE 情报源：" + err.Error() +
-			"。请引导用户在「安全工作台 → CVE」页签粘贴导入 feed（简化格式或 NVD 原生导出；产品不分发 feed）。" +
+			"。请引导用户在「安全工作台 → CVE」页签导入 feed——「填入示例」可一键载入 15 条入门示例条目（格式示范+冷启动），正式覆盖请粘贴或「从文件导入」NVD 原生导出（产品不分发 feed）。" +
 			"在此之前可继续依赖自身知识列出候选漏洞（须只读验证后再立案）。", nil
 	}
 	if len(matches) == 0 {
