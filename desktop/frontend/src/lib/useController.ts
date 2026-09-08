@@ -81,7 +81,7 @@ export type Item =
       argsDiff?: string; // live partial patch while the model streams apply_patch args (3-3)
     };
 
-interface State {
+export interface State {
   items: Item[];
   running: boolean;
   turnActive: boolean;
@@ -103,6 +103,10 @@ interface State {
   live?: LiveStream;
   pendingUser?: string;
   discardTurn?: boolean;
+  // itemDriven: the 4-1 item stream (Spec-5 Phase 2) was observed for this
+  // turn — text/reasoning render from item events and the legacy twins are
+  // suppressed so identical deltas don't double. Reset on turn_started.
+  itemDriven?: boolean;
   turnStartAt: number;
   turnTokens: number;
   turnTotalTokens: number;
@@ -565,15 +569,35 @@ function flushPendingUser(s: State): State {
   };
 }
 
-function applyEvent(s: State, e: WireEvent): State {
+// appendLive and completeAssistant drive the live assistant bubble for BOTH
+// the legacy flat events and the 4-1 item stream (Spec-5 Phase 2) — the two
+// sources carry identical content, the itemDriven flag decides which one a
+// given turn renders from.
+function appendLive(s: State, kind: "text" | "reasoning", delta: string): State {
+  const { items, id, seq } = ensureAssistant(s);
+  const base = s.live?.id === id ? s.live : { id, text: "", reasoning: "" };
+  const live = kind === "text" ? { ...base, text: base.text + delta } : { ...base, reasoning: base.reasoning + delta };
+  return { ...s, items, live, currentAssistant: id, seq };
+}
+
+function completeAssistant(s: State, text?: string, reasoning?: string): State {
+  const { items, id, seq } = ensureAssistant(s);
+  const next = items.map((it) =>
+    it.kind === "assistant" && it.id === id
+      ? { ...it, text: text ?? s.live?.text ?? it.text, reasoning: reasoning ?? s.live?.reasoning ?? it.reasoning, streaming: false }
+      : it,
+  );
+  return { ...s, items: next, live: undefined, currentAssistant: undefined, seq };
+}
+
+export function applyEvent(s: State, e: WireEvent): State {
   if (s.discardTurn) {
     if (e.kind === "turn_done") return { ...s, discardTurn: false, running: false, turnActive: false, currentAssistant: undefined, live: undefined };
     return s;
   }
   if (s.pendingUser !== undefined && e.kind !== "turn_done") {
     s = flushPendingUser(s);
-  }
-  if (e.kind === "retrying") {
+  }  if (e.kind === "retrying") {
     return { ...s, retry: { attempt: e.retryAttempt ?? 0, max: e.retryMax ?? 0, afterMs: e.retryAfterMs } };
   }
   if (s.retry) s = { ...s, retry: undefined };
@@ -586,24 +610,19 @@ function applyEvent(s: State, e: WireEvent): State {
       let cur: State = s;
       if (cur.pendingUser !== undefined) cur = flushPendingUser(cur);
       const { items, id, seq } = ensureAssistant(cur);
-      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "" }, running: true, turnActive: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0, turnItemStart: items.length };
+      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "" }, running: true, turnActive: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0, turnItemStart: items.length, itemDriven: false };
     }
     case "text":
     case "reasoning": {
-      const { items, id, seq } = ensureAssistant(s);
-      const delta = e.text ?? e.reasoning ?? "";
-      const base = s.live?.id === id ? s.live : { id, text: "", reasoning: "" };
-      const live = e.kind === "text" ? { ...base, text: base.text + delta } : { ...base, reasoning: base.reasoning + delta };
-      return { ...s, items, live, currentAssistant: id, seq };
+      // Spec-5 Phase 2: once the item stream drives this turn, the legacy
+      // twins are suppressed (identical deltas — the ItemAdapter derives
+      // item events from the same emission).
+      if (s.itemDriven) return s;
+      return appendLive(s, e.kind, e.text ?? e.reasoning ?? "");
     }
     case "message": {
-      const { items, id, seq } = ensureAssistant(s);
-      const next = items.map((it) =>
-        it.kind === "assistant" && it.id === id
-          ? { ...it, text: e.text ?? s.live?.text ?? it.text, reasoning: e.reasoning ?? s.live?.reasoning ?? it.reasoning, streaming: false }
-          : it,
-      );
-      return { ...s, items: next, live: undefined, currentAssistant: undefined, seq };
+      if (s.itemDriven) return s; // finalized by the item_completed twin
+      return completeAssistant(s, e.text, e.reasoning);
     }
     case "tool_dispatch": {
       const t = e.tool;
@@ -699,11 +718,34 @@ function applyEvent(s: State, e: WireEvent): State {
       return { ...s, paused: true, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `p${s.seq}`, level: "info", text: e.text ?? "已暂停" }] };
     case "resumed":
       return { ...s, paused: false };
-    case "item":
-      // 4-1 item-model dual-track (Phase 1): the payload now reaches the
-      // frontend; rendering still consumes the flat kinds above. Phase 2
-      // migrates the transcript onto item events.
-      return s;
+    case "item": {
+      // 4-1 item-model dual-track, Phase 2 first tranche: agent text and
+      // reasoning render FROM the item stream once observed (itemDriven);
+      // the legacy twins are suppressed in their cases above. The adapter
+      // emits legacy first then the item twin, and item_started carries no
+      // delta, so the interleaved sequence never double-appends.
+      const it = e.item;
+      if (!it || (it.itemKind !== "agent_message" && it.itemKind !== "reasoning")) return s;
+      const driven: State = { ...s, itemDriven: true };
+      if (it.phase === "item_delta" && it.delta) {
+        return appendLive(driven, it.itemKind === "reasoning" ? "reasoning" : "text", it.delta);
+      }
+      if (it.phase === "item_completed" && it.itemKind === "agent_message") {
+        let text: string | undefined;
+        let reasoning: string | undefined;
+        try {
+          const p = JSON.parse(String(it.item ?? "{}")) as { text?: string; reasoning?: string };
+          text = p.text;
+          reasoning = p.reasoning;
+        } catch {
+          /* unparseable payload — complete from live */
+        }
+        return completeAssistant(driven, text, reasoning);
+      }
+      // item_started: marks the turn item-driven; the bubble itself is
+      // ensured on the first delta (or already exists from the legacy twin).
+      return driven;
+    }
     case "approval_request": return { ...s, approval: e.approval };
     case "ask_request": return { ...s, ask: e.ask };
     case "turn_done": {

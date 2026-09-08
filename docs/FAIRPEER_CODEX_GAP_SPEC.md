@@ -18,7 +18,7 @@
 | 2 | 对话内无全文搜索 | 中 | codex 也没有（仅有 Ctrl+T overlay） | 超越 codex：Ctrl+F 搜索 + 高亮 | **已实施**（Phase 2：用户消息/通知 mark 高亮 + 跳转闪烁；Markdown/工具输出的高亮穿透为 Phase 3） |
 | 3 | 证据链不认办公工具 | 高 | codex 无此概念（update_plan 不验证） | 名单扩展 + out_path 提取 | **已实施**（netdev 台账对接另立 Spec） |
 | 4 | 主终端未接 PTY | 中 | portable-pty + ProcessHandle 抽象 | 接线既有 ConPTY + 补 Unix 存根 | **已实施** |
-| 5 | Item 事件前端未消费 | 低 | SQ/EQ + TurnItem tagged enum + delta | 双 wire.go 补 event.Item 映射 | **已实施**（含 resumed/expert_collab 两个同源断流修复；渲染迁移 Phase 2） |
+| 5 | Item 事件前端未消费 | 低 | SQ/EQ + TurnItem tagged enum + delta | 双 wire.go 补 event.Item 映射 | **已实施**（含 resumed/expert_collab 断流修复；Phase 2 首片：agent 文本/推理经 item 流渲染（itemDriven 择源 + reducer 金样本安全网），tool_call 迁移留后续片） |
 | 6 | MCP 通知被丢弃 | 中 | LoggingClientHandler（仅日志） | 日志 + tools/list_changed 自动刷新 | **已实施**（含注册表热换） |
 
 工具面基线（profile 分区注册，`internal/boot/boot.go:632-853`）：全库实现 ~125 个工具；

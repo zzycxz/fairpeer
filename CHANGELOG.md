@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(desktop/reducer): Spec-5 Phase 2 首片——agent 文本/推理渲染迁移到 item 事件流（itemDriven 双轨择源）
+
+- **先补安全网**：applyEvent/State 导出，新增 reducer 金样本测试（legacy 路径钉死：turn 生命周期/text 流/tool 三段式/message 收束/notice；item 路径：交错流不重复、抑制语义、纯 item 流、reasoning 流、itemDriven 按轮重置）——11 例入 vitest 套件（全套 54 例）
+- **迁移首片**：agent_message/reasoning 的渲染源切到 item 事件——首轮观察到 item 流即置 itemDriven，legacy text/reasoning/message 孪生事件被抑制（ItemAdapter 派生自同一发射、内容恒等；adapter 先发 legacy 后发 item、started 不带 delta，交错序列天然不双计）；tool_call 等其余 item 类别本片不动（legacy 继续驱动）
+- 纯 item 流（无 legacy 事件）现在也能完整渲染并收束——移动网桥/未来远端消费者直接可用
+- turn_started 重置 itemDriven；历史回放不经 reducer，零影响
+- 验证：tsc 绿；test:all 54 例全绿
+
 ### feat(desktop/search,toolcard): Spec-2 Phase 2 命中高亮 + 签核卡（device 徽标）——收尾批
 
 - **搜索命中 mark 高亮（Spec-2 Phase 2）**：SearchHighlightContext 把当前查询注入文本渲染层——用户消息与通知的命中子串渲染为 `<mark>` 高亮块；跳转落点锚点 1.4s 闪烁动画辅助定位。Markdown 渲染的助手消息与语法高亮的工具输出不穿透（Phase 3 另行）
