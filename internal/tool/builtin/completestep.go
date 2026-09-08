@@ -8,6 +8,7 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/evidence"
 	"github.com/zzycxz/fairpeer/internal/instruction"
+	"github.com/zzycxz/fairpeer/internal/netdev"
 	"github.com/zzycxz/fairpeer/internal/provider"
 	"github.com/zzycxz/fairpeer/internal/tool"
 )
@@ -62,7 +63,7 @@ func (completeStep) Schema() json.RawMessage {
         "kind":{"type":"string","enum":["verification","diff","files","manual"],"description":"verification = a command/test was run (command REQUIRED); diff = a concrete code change (paths REQUIRED); files = files created/edited/inspected (paths REQUIRED); manual = a manual check."},
         "summary":{"type":"string","description":"The evidence itself: the test result, what the diff does, or what was confirmed."},
         "command":{"type":"string","description":"REQUIRED for verification evidence: the command as it actually ran (e.g. \"go test ./...\") — it is checked against this session's real command history."},
-        "paths":{"type":"array","items":{"type":"string"},"description":"REQUIRED for diff/files evidence: the files this evidence refers to, as the paths were passed to the tools that touched them."}
+        "paths":{"type":"array","items":{"type":"string"},"description":"REQUIRED for diff/files evidence: the files this evidence refers to, as the paths were passed to the tools that touched them. netdev config changes cite the device as \"device:<name>\" (verified against the op-step ledger)."}
       },
       "required":["kind","summary"]
     }
@@ -158,16 +159,20 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 			if len(e.Paths) == 0 {
 				return 0, 0, fmt.Errorf("evidence %d: diff evidence requires paths for host verification — cite the files you changed", i+1)
 			}
-			if !ledger.HasSuccessfulWrite(e.Paths) && !verifyPathsFromSession(ctx, e.Paths, true) {
-				return 0, 0, fmt.Errorf("evidence %d: diff paths have no matching successful writer receipt in this turn%s", i+1, receiptHint("files written this turn", ledger.TouchedPaths(8, true)))
+			files, devices := splitDevicePaths(e.Paths)
+			if (len(files) > 0 && !ledger.HasSuccessfulWrite(files) && !verifyPathsFromSession(ctx, files, true)) ||
+				(len(devices) > 0 && !ledger.HasSuccessfulWrite(devices) && !devicesProvenFromOpSteps(devices)) {
+				return 0, 0, fmt.Errorf("evidence %d: diff paths have no matching successful writer receipt in this turn%s", i+1, diffRejectionHint(ledger, files, devices))
 			}
 			hostVerified++
 		case "files":
 			if len(e.Paths) == 0 {
 				return 0, 0, fmt.Errorf("evidence %d: files evidence requires paths for host verification — cite the files you touched", i+1)
 			}
-			if !ledger.HasSuccessfulReadOrWrite(e.Paths) && !ledger.HasSuccessfulBashMentioningPaths(e.Paths) && !verifyPathsFromSession(ctx, e.Paths, false) {
-				return 0, 0, fmt.Errorf("evidence %d: file paths have no matching successful read/write receipt in this turn%s", i+1, receiptHint("files touched this turn", ledger.TouchedPaths(8, false)))
+			files, devices := splitDevicePaths(e.Paths)
+			if (len(files) > 0 && !ledger.HasSuccessfulReadOrWrite(files) && !ledger.HasSuccessfulBashMentioningPaths(files) && !verifyPathsFromSession(ctx, files, false)) ||
+				(len(devices) > 0 && !ledger.HasSuccessfulReadOrWrite(devices) && !devicesProvenFromOpSteps(devices)) {
+				return 0, 0, fmt.Errorf("evidence %d: file paths have no matching successful read/write receipt in this turn%s", i+1, filesRejectionHint(ledger, files, devices))
 			}
 			hostVerified++
 		case "manual":
@@ -175,6 +180,88 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 		}
 	}
 	return hostVerified, manualUnverified, nil
+}
+
+// splitDevicePaths separates "device:<name>" references (netdev OpStep
+// evidence, NETDEV_OPSTEP_EVIDENCE_SPEC) from ordinary file paths so each
+// class verifies against its own ledger — a mixed citation checks both.
+func splitDevicePaths(paths []string) (files []string, devices []string) {
+	for _, p := range paths {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(p)), "device:") {
+			devices = append(devices, p)
+		} else {
+			files = append(files, p)
+		}
+	}
+	return files, devices
+}
+
+// devicesProvenFromOpSteps is the cross-turn fallback for device references:
+// the per-turn evidence ledger resets each turn, but the OpStep ledger
+// persists (Turn-anchored). Every cited device must have at least one ok row;
+// failure/device-error rows never count.
+func devicesProvenFromOpSteps(devices []string) bool {
+	rows := netdev.ListOpSteps("", 200)
+	okDevices := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		if r.Status == "ok" {
+			okDevices[r.Device] = true
+		}
+	}
+	for _, p := range devices {
+		name := deviceNameOf(p)
+		if name == "" || !okDevices[name] {
+			return false
+		}
+	}
+	return true
+}
+
+func deviceNameOf(path string) string {
+	s := strings.TrimSpace(path)
+	if len(s) >= 7 && strings.EqualFold(s[:7], "device:") {
+		return s[7:]
+	}
+	return ""
+}
+
+func deviceLedgerHint(devices []string) string {
+	if len(devices) == 0 {
+		return ""
+	}
+	rows := netdev.ListOpSteps("", 20)
+	parts := make([]string, 0, 3)
+	for _, r := range rows {
+		if len(parts) >= 3 {
+			parts = append(parts, "…")
+			break
+		}
+		cmd := r.Command
+		if r := []rune(cmd); len(r) > 40 {
+			cmd = string(r[:40]) + "…"
+		}
+		parts = append(parts, fmt.Sprintf("%s: %q → %s", r.Device, cmd, r.Status))
+	}
+	if len(parts) == 0 {
+		return "; op-step ledger is empty — device writes go through netdev_exec/netdev_netconf (device: paths cite the device a config change landed on)"
+	}
+	return fmt.Sprintf("; op-step ledger rows: %s", strings.Join(parts, ", "))
+}
+
+func diffRejectionHint(ledger *evidence.Ledger, files, devices []string) string {
+	hints := receiptHint("files written this turn", ledger.TouchedPaths(8, true))
+	if len(devices) > 0 {
+		hints += deviceLedgerHint(devices)
+	}
+	return hints
+}
+
+func filesRejectionHint(ledger *evidence.Ledger, files, devices []string) string {
+	hints := receiptHint("files touched this turn", ledger.TouchedPaths(8, false))
+	if len(devices) > 0 {
+		hints += deviceLedgerHint(devices)
+	}
+	return hints
 }
 
 func verifyProjectChecks(ctx context.Context, items []stepEvidence) (int, error) {

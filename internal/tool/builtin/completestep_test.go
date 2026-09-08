@@ -3,11 +3,14 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/zzycxz/fairpeer/internal/evidence"
 	"github.com/zzycxz/fairpeer/internal/instruction"
+	"github.com/zzycxz/fairpeer/internal/netdev"
 	"github.com/zzycxz/fairpeer/internal/provider"
 )
 
@@ -529,6 +532,84 @@ func TestCompleteStepSessionFallbackResolvesDiffPaths(t *testing.T) {
 		"evidence":[{"kind":"diff","summary":"added bar","paths":["internal/foo/bar.go"]}]}`)); err != nil {
 		t.Fatalf("cross-turn diff citation of a written file rejected: %v", err)
 	}
+}
+
+// netdev device references (NETDEV_OPSTEP_EVIDENCE_SPEC): diff/files evidence
+// may cite "device:<name>" — verified against the OpStep ledger (in-turn via
+// the mirrored receipt, cross-turn via the persisted rows).
+func TestCompleteStepVerifiesDeviceOpStepEvidence(t *testing.T) {
+	// Isolate the op-step ledger and drop rows directly (files on disk, the
+	// shape Manager.appendOpStep persists).
+	opdir := t.TempDir()
+	netdev.SetOpStepsDir(opdir)
+	t.Cleanup(func() { netdev.SetOpStepsDir("") })
+	writeOpStepRow := func(name string, step netdev.OpStep) {
+		step.ID = name
+		b, err := json.Marshal(step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(opdir, name+".json"), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeOpStepRow("SW-01@1", netdev.OpStep{Device: "SW-01", Command: "interface Gi0/1", Status: "ok", DiffSummary: "+ desc"})
+	writeOpStepRow("SW-02@2", netdev.OpStep{Device: "SW-02", Command: "vlan 10", Status: "failure", Error: "lost"})
+
+	t.Run("in-turn receipt", func(t *testing.T) {
+		ledger := evidence.NewLedger()
+		ledger.Record(evidence.Receipt{
+			ToolName: "netdev_opstep", Success: true, Write: true,
+			Command: "interface Gi0/1", Paths: []string{"device:SW-01"},
+		})
+		ctx := evidence.WithLedger(context.Background(), ledger)
+		out, err := completeStep{}.Execute(ctx, json.RawMessage(`{
+			"step":"调整接口描述",
+			"result":"描述已下发",
+			"evidence":[{"kind":"diff","summary":"接口描述变更","paths":["device:SW-01"]}]}`))
+		if err != nil {
+			t.Fatalf("device diff evidence should verify in-turn: %v", err)
+		}
+		if !strings.Contains(out, "host-verified 1") {
+			t.Fatalf("ack should report host verification, got %q", out)
+		}
+	})
+
+	t.Run("cross-turn op-step fallback", func(t *testing.T) {
+		// Fresh ledger (new turn): only the persisted ledger can prove SW-01.
+		ctx := evidence.WithLedger(context.Background(), evidence.NewLedger())
+		if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+			"step":"x","result":"y",
+			"evidence":[{"kind":"diff","summary":"earlier change","paths":["device:SW-01"]}]}`)); err != nil {
+			t.Fatalf("persisted ok row should satisfy cross-turn device evidence: %v", err)
+		}
+	})
+
+	t.Run("failure row never authorizes", func(t *testing.T) {
+		ctx := evidence.WithLedger(context.Background(), evidence.NewLedger())
+		_, err := completeStep{}.Execute(ctx, json.RawMessage(`{
+			"step":"x","result":"y",
+			"evidence":[{"kind":"diff","summary":"claimed","paths":["device:SW-02"]}]}`))
+		if err == nil {
+			t.Fatal("failure-only device must be rejected")
+		}
+		for _, want := range []string{"writer receipt", "op-step ledger"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("error %q missing %q", err, want)
+			}
+		}
+	})
+
+	t.Run("mixed file and device citation", func(t *testing.T) {
+		ledger := evidence.NewLedger()
+		ledger.Record(evidence.Receipt{ToolName: "write_file", Success: true, Paths: []string{"runbook.md"}, Write: true})
+		ctx := evidence.WithLedger(context.Background(), ledger)
+		if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+			"step":"x","result":"y",
+			"evidence":[{"kind":"diff","summary":"runbook + device","paths":["runbook.md","device:SW-01"]}]}`)); err != nil {
+			t.Fatalf("mixed citation should verify both classes: %v", err)
+		}
+	})
 }
 
 func TestCompleteStepSessionFallbackSkipsFailedWrite(t *testing.T) {

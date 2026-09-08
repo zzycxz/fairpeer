@@ -4,6 +4,7 @@ package netdev
 // 校验的地基）、drift 看护立案、git 镜像（有 git 才跑）、OpStep Turn 锚定。
 
 import (
+	"context"
 	"os/exec"
 
 	"github.com/zzycxz/fairpeer/internal/config"
@@ -79,9 +80,9 @@ func TestBackupGitMirrorCommits(t *testing.T) {
 func TestOpStepTurnAnchor(t *testing.T) {
 	m := newWriteAuthManager(t, "auto", labDevice())
 	m.TurnBegin() // turn 1
-	m.appendOpStep(OpStep{Device: "sw1", Command: "sysname A", Status: "ok"})
+	m.appendOpStep(context.Background(), OpStep{Device: "sw1", Command: "sysname A", Status: "ok"})
 	m.TurnBegin() // turn 2
-	m.appendOpStep(OpStep{Device: "sw1", Command: "sysname B", Status: "ok"})
+	m.appendOpStep(context.Background(), OpStep{Device: "sw1", Command: "sysname B", Status: "ok"})
 	steps := ListOpSteps("sw1", 10)
 	if len(steps) != 2 {
 		t.Fatalf("expected 2 ledger rows, got %d", len(steps))

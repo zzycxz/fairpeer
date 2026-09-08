@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/evidence"
 	"github.com/zzycxz/fairpeer/internal/fileutil"
 	"github.com/zzycxz/fairpeer/internal/netdev/driver"
 )
@@ -296,7 +297,7 @@ func (m *Manager) runControlledWrite(ctx context.Context, d config.NetDevDevice,
 			reason := fmt.Sprintf("写前快照失败，写命令未执行（失败即停——写前状态保护优先）：first line: %s", firstLine(errText(err, res)))
 			m.audit(d, command, driver.Write, AuditFailure, 0, fmt.Errorf("%s", reason))
 			m.liveCmdRefused(d.Name, command, "write", reason)
-			m.appendOpStep(OpStep{At: time.Now().Format(time.RFC3339), Actor: "agent", Device: d.Name, Command: command, Status: "failure", Error: reason})
+			m.appendOpStep(ctx, OpStep{At: time.Now().Format(time.RFC3339), Actor: "agent", Device: d.Name, Command: command, Status: "failure", Error: reason})
 			base.Refused = true
 			base.Refusal = reason
 			return base
@@ -348,7 +349,7 @@ func (m *Manager) runControlledWrite(ctx context.Context, d config.NetDevDevice,
 	} else if status == AuditFailure {
 		stepStatus = "failure"
 	}
-	m.appendOpStep(OpStep{
+	m.appendOpStep(ctx, OpStep{
 		At: time.Now().Format(time.RFC3339), Actor: "agent", Device: d.Name,
 		Command: command, Status: stepStatus, PreID: preID, PostID: postID,
 		DiffSummary: diffSummary, Error: errText(err, res), RollbackTo: preID,
@@ -423,7 +424,7 @@ func summarizeDiff(diff string) string {
 
 // ── OpStep ledger (§7.3) ─────────────────────────────────────────────────────
 
-func (m *Manager) appendOpStep(s OpStep) {
+func (m *Manager) appendOpStep(ctx context.Context, s OpStep) {
 	// ID 复用 backup 的单调纳秒守卫（nextBackupNanos）：Windows 时钟
 	// 粒度下两次连续落库会拿到同一纳秒——裸 UnixNano 曾让第二行静默
 	// 覆盖第一行（TestOpStepTurnAnchor 间歇失败的根因）。
@@ -442,6 +443,21 @@ func (m *Manager) appendOpStep(s OpStep) {
 		return
 	}
 	_ = fileutil.AtomicWriteFile(filepath.Join(dir, s.ID+".json"), b, 0o600)
+
+	// Evidence bridge (NETDEV_OPSTEP_EVIDENCE_SPEC): mirror the ledger row
+	// into the turn's evidence ledger as a "device:<name>" receipt so
+	// complete_step can cite a config change as diff/files evidence. Only ok
+	// rows carry Success+Write — failure/device-error rows stay audit-only
+	// and never authorize a sign-off.
+	if ledger, ok := evidence.FromContext(ctx); ok {
+		ledger.Record(evidence.Receipt{
+			ToolName: "netdev_opstep",
+			Success:  s.Status == "ok",
+			Write:    s.Status == "ok",
+			Command:  s.Command,
+			Paths:    []string{"device:" + s.Device},
+		})
+	}
 }
 
 // ListOpSteps returns a device's ledger rows newest-first ("" = every device).

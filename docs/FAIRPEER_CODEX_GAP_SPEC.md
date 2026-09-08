@@ -290,10 +290,9 @@ func SearchAllProfiles(query string) []SearchHit {
 - **netdev 不走文件证据**：`netdev_exec`/`netdev_netconf` 改的是远端设备、无本地
   路径，塞进 isWriterTool 同样产生不出回执。现状是 `verification` 证据已认
   `netdev_exec`（`HasSuccessfulCommand`，`evidence.go:101` 与 bash 同列）；配置
-  变更的 sign-off 对接 netdev 已有的 OpStep 操作台账（三粒度，见
-  daa2f2b2/11f9e6dd）——**已拆出 `docs/NETDEV_OPSTEP_EVIDENCE_SPEC.md`**（伪路径
-  `device:<name>` + appendOpStep 桥接 + complete_step 台账验证，估 2 天），不在
-  本规格书展开。
+  变更的 sign-off 对接 netdev 已有的 OpStep 操作台账——**已拆出并实施
+  `docs/NETDEV_OPSTEP_EVIDENCE_SPEC.md`**（伪路径 `device:<name>` +
+  appendOpStep→回执桥接 + complete_step 台账验证，2026-09-08 落地）。
 
 ---
 

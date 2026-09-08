@@ -6,6 +6,7 @@ package netdev
 // 两锁合成、台账与 diff 摘要。
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -246,7 +247,7 @@ func TestExecReadOnlyCallSynthesis(t *testing.T) {
 
 func TestOpStepLedgerAndSummarizeDiff(t *testing.T) {
 	m := newWriteAuthManager(t, "auto", labDevice())
-	m.appendOpStep(OpStep{At: "2026-09-07T10:00:00Z", Actor: "agent", Device: "sw1",
+	m.appendOpStep(context.Background(), OpStep{At: "2026-09-07T10:00:00Z", Actor: "agent", Device: "sw1",
 		Command: "sysname CORE-1", Status: "ok", PreID: "sw1@1", PostID: "sw1@2",
 		DiffSummary: "+1/-1 行", RollbackTo: "sw1@1"})
 	steps := ListOpSteps("sw1", 10)

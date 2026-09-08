@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(netdev/evidence): OpStep 台账 × 证据链对接——device: 伪路径可签核配置变更（NETDEV_OPSTEP_EVIDENCE_SPEC 落地）
+
+netdev 配置变更此前无法被 complete_step 签核验证（diff/files 证据是本地路径回执制，设备写无本地路径；模型只能退回 manual）：
+
+- **桥接**：`appendOpStep` 改带 ctx，落台账的同时把行镜像进本轮证据 Ledger——伪路径 `device:<name>`、仅 `Status==ok` 行携带 Success/Write（failure/device-error 行只审计、永不授权签核）。桥接走 ctx（desktop 多标签各有 Ledger，全局回调会串台）；无 Ledger 的 headless 场景只落盘不受影响
+- **complete_step 验证**：diff/files 证据的 paths 支持 `device:<name>`——与文件路径分开各自验证（混合引用两边都查）；轮内走回执，跨轮走 `netdev.ListOpSteps` 持久台账回退（Turn 锚定）；schema 提示模型 device: 引法
+- **拒绝语义**：引用无 ok 行的设备 → 拒绝并列出台账近期行（设备/命令/状态）；台账为空时提示 device: 的语义（配置变更落在哪台设备）
+- **非 netdev 零影响**：台账目录为空时 device: 引用自然拒绝，文件路径行为逐字节不变（既有测试全绿背书）
+- 测试：netdev 侧（ok 行可验证/failure 不授权/无 Ledger 持盘）+ builtin 侧（轮内回执/跨轮回退/failure 拒绝含提示/混合引用）四例全绿；netdev/builtin/evidence/agent/boot 全套件通过
+- spec 文档同步为已实施（含 as-built 差异注记）
+
 ### feat(desktop/toolcard): Spec-1 批 2——BrowserActionCard（cowork 浏览器/桌面 33 工具一卡）+ 标准模式 Exploring 只读分组
 
 - **BrowserActionCardBody**：browser_* 21 + screenshot/get_ui_tree/screen_* 5 + window_* 5 全量注册——动作目标行（url/selector/text/keys/query…取首个非空）+ 结果预览，替代 args JSON dump；名称逐一对照后端注册表（BrowserTools/ScreenTools/WindowTools），无死条目

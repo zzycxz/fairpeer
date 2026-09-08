@@ -2,7 +2,13 @@
 
 > 从 FAIRPEER_CODEX_GAP_SPEC Spec-3 拆出（2026-09-08 复核裁决：netdev 配置变更
 > 不走文件证据——`netdev_exec`/`netdev_netconf` 无本地 path，塞进 isWriterTool
-> 产生不出路径回执）。日期：2026-09-08 | 状态：Draft
+> 产生不出路径回执）。日期：2026-09-08 | 状态：**已实施（同日）**
+>
+> As-built 与草案的差异：跨轮查询未走"controller 注入"，而是 builtin 直接
+> `netdev.ListOpSteps`（netdev 不 import builtin，无环；非 netdev profile 下
+> 台账目录为空，device: 引用自然拒绝）；桥接在 `appendOpStep(ctx, …)` 内经
+> ctx 取证据 Ledger（desktop 多标签各有 Ledger，全局回调会串台）。
+> 前端 device: 徽标渲染未包含在本批（卡片当前按普通路径显示）。
 
 ---
 
