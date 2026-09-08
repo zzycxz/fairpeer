@@ -32,8 +32,13 @@ import (
 const absentMarker = "\x00absent"
 
 // dangerVerbRe flags destructive verbs in any step's command/script text
-// (§7.1: delete/scale-down 类动词落 dangerous + confirm2).
-var dangerVerbRe = regexp.MustCompile(`(?i)\b(delete|drop|truncate|erase|undo|reset|shutdown|reboot|restart|scale[- ]?down|rm\s+-[rf])\b`)
+// (§7.1: delete/scale-down 类动词落 dangerous + confirm2). Bare `reload` is
+// NOT here — `systemctl reload`/`nginx -s reload` are benign service reloads;
+// the destructive form is a Cisco box reload, a command that STARTS with
+// reload (deviceReloadRe, NETDEV-11).
+var dangerVerbRe = regexp.MustCompile(`(?i)\b(delete|drop|truncate|erase|undo|reset|shutdown|reboot|restart|format|poweroff|halt|mkfs|scale[- ]?down|rm\s+-[rf]|dd\s|init\s+[06]|systemctl\s+(stop|disable|mask))\b`)
+
+var deviceReloadRe = regexp.MustCompile(`(?im)^\s*reload\b`)
 
 // dangerScan reports whether any of the step's executable text carries a
 // destructive verb.
@@ -45,7 +50,14 @@ func dangerScan(s *ProposalStep) bool {
 	texts := append([]string{}, s.Commands...)
 	texts = append(texts, s.UpSQL, s.ReloadCmd, s.YAML)
 	for _, t := range texts {
-		if dangerVerbRe.MatchString(t) {
+		if dangerVerbRe.MatchString(t) || deviceReloadRe.MatchString(t) {
+			return true
+		}
+		// NETDEV-11: a CLI `no <x>` negation destroys configuration it names
+		// (no vlan 10 / no ip route …) — one-approval must not suffice.
+		// Over-matching plain prose is acceptable here: this only routes the
+		// step to confirm2, never blocks it.
+		if stepType(s) == StepCLI && regexp.MustCompile(`(?i)^\s*no\s+\S`).MatchString(t) {
 			return true
 		}
 	}

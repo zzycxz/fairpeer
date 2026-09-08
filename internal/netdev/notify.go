@@ -13,13 +13,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"mime/multipart"
+	"net/http"
+	"net/smtp"
 	"net/textproto"
 	"os"
 	"path/filepath"
-	"log/slog"
-	"net/http"
-	"net/smtp"
 	"strings"
 	"sync"
 	"time"
@@ -243,14 +243,16 @@ func NotifyConfigured() bool {
 // multipart/mixed；IM/webhook 通道不支持附件，降级为正文追加附件路径清单。
 func NotifyPushTextWithAttachments(kind, title, text string, attachments []string) {
 	o := outlets()
+	// SMTP 发真附件（异步），但不再独占返回（NETDEV-2）：通知必须全通道
+	// 扇出——只配 SMTP 的用户无感，同时配了 bot/webhook 的用户此前在
+	// IM/群里静默丢推送。
 	if o.smc != nil {
 		go smtpSendTextWithAttachments(o.smc, title, text, attachments)
-		return
 	}
 	if len(attachments) > 0 {
 		text += "\n附件（本通道不支持附件，路径如下）：\n" + strings.Join(attachments, "\n")
 	}
-	NotifyPushText(kind, title, text)
+	pushBotAndWebhook(o, kind, title, text)
 }
 
 func NotifyPushText(kind, title, text string) {
@@ -258,6 +260,13 @@ func NotifyPushText(kind, title, text string) {
 	if o.smc != nil {
 		go smtpSendText(o.smc, title, text)
 	}
+	pushBotAndWebhook(o, kind, title, text)
+}
+
+// pushBotAndWebhook is NotifyPushText's non-SMTP fan-out, split out so the
+// attachments variant can send SMTP once (with real attachments) and still
+// reach the bot/webhook outlets with the degraded path list.
+func pushBotAndWebhook(o outletSnapshot, kind, title, text string) {
 	if o.botDst != "" && o.pusher != nil {
 		pushBotText(o.pusher, o.botDst, title+"\n\n"+text)
 	}

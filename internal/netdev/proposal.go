@@ -236,6 +236,7 @@ func ListProposals() ([]*Proposal, error) {
 		return nil, err
 	}
 	recoverStaleExecuting(entries)
+	closeExpiredWatching(entries)
 	var out []*Proposal
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
@@ -247,6 +248,35 @@ func ListProposals() ([]*Proposal, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
+}
+
+// closeExpiredWatching lazily closes watching proposals whose watch window
+// has passed (NETDEV-1): the auto-close is a data deadline (WatchUntil), not
+// an in-memory timer — a restart during the window used to strand the
+// proposal in watching forever (delete refused, health polling spinning).
+// Same lazy-sweep slot as recoverStaleExecuting.
+func closeExpiredWatching(entries []os.DirEntry) {
+	now := time.Now()
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".json")
+		p, err := GetProposal(id)
+		if err != nil || p.Status != ProposalWatching || p.WatchUntil == nil || now.Before(*p.WatchUntil) {
+			continue
+		}
+		proposalMu.Lock()
+		// Re-read under the lock and re-check: the auto-close goroutine (or
+		// another sweep) may have closed it already.
+		if pp, err := GetProposal(id); err == nil && pp.Status == ProposalWatching && pp.WatchUntil != nil && now.After(*pp.WatchUntil) {
+			StateEventSnap(StateEventCloseWatch, id, StateActorSystem, filepath.Join(ProposalsDir(), id+".json"))
+			pp.Status = ProposalClosed
+			pp.WatchNote = "观察期满，自动关闭（重启后惰性扫描补关）"
+			_ = saveProposalLocked(pp)
+		}
+		proposalMu.Unlock()
+	}
 }
 
 // staleExecutingAge is how long an executing proposal may sit untouched before
@@ -910,7 +940,14 @@ func (m *Manager) RollbackProposal(ctx context.Context, id string) (*Proposal, e
 			if !ok {
 				continue
 			}
-			for _, cmd := range s.Rollback {
+			// NETDEV-10：mid-step 失败的步骤只回滚已落地的前缀——跑全表会让
+			// 第 k+1 条反演命令操作不存在的配置，设备报错中断回滚，更早的
+			// 未遍历步骤从此不再回滚（现场与状态不一致）。
+			roll := s.Rollback
+			if !s.Applied && s.AppliedCmds > 0 && s.AppliedCmds < len(s.Rollback) {
+				roll = s.Rollback[:s.AppliedCmds]
+			}
+			for _, cmd := range roll {
 				res, err := m.runUnclassified(ctx, d, drv, cmd)
 				_ = AppendAudit(Audit{
 					Device: s.Device, Via: d.Via, Command: cmd, Class: "proposal-rollback",

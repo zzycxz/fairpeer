@@ -84,6 +84,9 @@ func SaveAuditProject(p *AuditProject) error {
 	if strings.TrimSpace(p.ID) == "" {
 		p.ID = fmt.Sprintf("AP%s", time.Now().Format("20060102-150405"))
 	}
+	if !validStoreID(p.ID) {
+		return fmt.Errorf("audit project id %q is not a safe store id (path traversal guard, NETDEV-12)", p.ID)
+	}
 	if p.CreatedAt == "" {
 		p.CreatedAt = time.Now().Format(time.RFC3339)
 	}
@@ -98,6 +101,9 @@ func SaveAuditProject(p *AuditProject) error {
 func DeleteAuditProject(id string) error {
 	auditProjMu.Lock()
 	defer auditProjMu.Unlock()
+	if !validStoreID(id) {
+		return fmt.Errorf("audit project id %q is not a safe store id (path traversal guard, NETDEV-12)", id)
+	}
 	if err := os.Remove(auditProjectPath(id)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -145,6 +151,13 @@ func ListAuditProjects() ([]*AuditProject, error) {
 func latestAuditReport(projectID string) *AuditReport {
 	auditProjMu.Lock()
 	defer auditProjMu.Unlock()
+	return latestAuditReportLocked(projectID)
+}
+
+// latestAuditReportLocked is latestAuditReport without taking auditProjMu —
+// for callers already inside the critical section (SetAuditItemStatus's
+// read-modify-write, NETDEV-13).
+func latestAuditReportLocked(projectID string) *AuditReport {
 	entries, _ := os.ReadDir(auditDir())
 	var best *AuditReport
 	for _, e := range entries {
@@ -320,6 +333,9 @@ func saveAuditReportForTest(r *AuditReport) error {
 // AuditProjectStatus returns the project + its latest report (nil report when
 // never scanned) + the green-light verdict: 全部 fixed∨accepted 才 true.
 func AuditProjectStatus(id string) (*AuditProject, *AuditReport, bool, error) {
+	if !validStoreID(id) {
+		return nil, nil, false, fmt.Errorf("audit project id %q is not a safe store id (path traversal guard, NETDEV-12)", id)
+	}
 	auditProjMu.Lock()
 	data, err := os.ReadFile(auditProjectPath(id))
 	auditProjMu.Unlock()
@@ -350,7 +366,17 @@ func SetAuditItemStatus(projectID, signature, status string) error {
 	if status != "open" && status != "fixed" && status != "accepted" {
 		return fmt.Errorf("bad status %q", status)
 	}
-	rep := latestAuditReport(projectID)
+	if !validStoreID(projectID) {
+		return fmt.Errorf("audit project id %q is not a safe store id (path traversal guard, NETDEV-12)", projectID)
+	}
+	// NETDEV-13: the whole read-modify-write sits in the critical section and
+	// re-reads the LATEST report — the old shape (read unlocked, write locked)
+	// let two concurrent decisions overwrite each other, and a report landing
+	// in between wrote the decision onto the previous At file, silently losing
+	// it to the next read.
+	auditProjMu.Lock()
+	defer auditProjMu.Unlock()
+	rep := latestAuditReportLocked(projectID)
 	if rep == nil {
 		return fmt.Errorf("project %s has no report yet", projectID)
 	}
@@ -363,8 +389,6 @@ func SetAuditItemStatus(projectID, signature, status string) error {
 	if err != nil {
 		return err
 	}
-	auditProjMu.Lock()
-	defer auditProjMu.Unlock()
 	return fileutil.AtomicWriteFile(auditReportPath(projectID, rep.At), data, 0o644)
 }
 

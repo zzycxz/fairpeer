@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(netdev): 评审 P2 netdev 七连——危险词表/路径穿越/审计原子性/割接竞态/回滚截断/watching 懒关/通知全通道
+
+- **NETDEV-11**：危险动词表补 `format|poweroff|halt|mkfs|dd|init 0/6|systemctl stop|disable|mask`；`reload` 只认命令开头形态（Cisco 整机重启）——`systemctl reload`/`nginx -s reload` 是良性服务重载不误伤；CLI `no <x>` 否定形态（no vlan/no ip route）落 confirm2（宁误报）；测试：7 危险 + 3 良性
+- **NETDEV-12**：auditproject 四入口（Save/Delete/Status/SetItemStatus）统一 `validStoreID` 路径穿越守卫（同批 storeid.go 已有而新文件漏套）；测试钉穿越拒绝
+- **NETDEV-13**：SetAuditItemStatus 读-改-写整段进临界区并改用 `latestAuditReportLocked`（抽出无锁版防死锁）——旧形状并发互相覆盖、新报告落盘时写旧 At 文件静默丢放行判定
+- **NETDEV-9**：CutoverPrecheckOverride 状态翻转与落盘同临界区（saveCutoverLocked，对齐 CutoverContinue 范式）——旧形状双击放行可回卷 Cursor 导致 direct-command 重打设备
+- **NETDEV-10**：mid-step 失败的回滚按 `AppliedCmds` 截断前缀——全表回滚会在第 k+1 条反演命令上报错中断，更早的未回滚步骤从此搁置
+- **NETDEV-1/14**：watching 提案过期改数据截止时间语义——ListProposals 惰性扫描补关（锁内重读+复用 auto-close 落档），重启不再永久滞留；测试钉过期即闭/未过期不动
+- **NETDEV-2/17**：NotifyPushTextWithAttachments 不再 SMTP 独占返回——抽 pushBotAndWebhook 全通道扇出，bot/webhook 收路径清单降级；不再重复发 SMTP
+- 验证：netdev 全量（288s）绿；测试侧补 proposals 目录隔离（writeAuthTestEnv 不含该目录，此前误写真实用户目录，已清理）
+
 ### fix(sec): 评审 P2 安全/正确性四连——PERM-1/2 只读命令封堵旁路 + SERVE-1 hostGuard 静默失效 + CORE-3 定时任务防失控闸门 + CORE-4 远端事件幽灵解码
 
 - **PERM-1**：`git reflog drop`（git ≥ 2.43 新子命令，销毁 reflog 条目）未在只读封堵列表——补 `drop`；**PERM-2**：`--output` 写文件旁路只盖 diff/show/log——`whatchanged`（log 家族）入列、`reflog show --output=` 补查；测试补六用例（drop/whatchoined 双向/reflog --output）

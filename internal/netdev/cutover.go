@@ -78,8 +78,8 @@ type CutoverStep struct {
 // 执行前对影响设备跑只读电池/基线比对/探测，红灯需人工放行才进入变更。
 type CutoverPrecheckDef struct {
 	// Battery: "standard"（每设备只读电池，默认）| "baseline"（+基线违例比对）| "off"。
-	Battery string             `json:"battery,omitempty"`
-	Probes  []CutoverPreProbe  `json:"probes,omitempty"` // 追加探测（设备可达/业务命令）
+	Battery string            `json:"battery,omitempty"`
+	Probes  []CutoverPreProbe `json:"probes,omitempty"` // 追加探测（设备可达/业务命令）
 }
 
 // CutoverPreProbe is one extra pre-window probe.
@@ -442,6 +442,10 @@ func firstLineOf(s string) string {
 // CutoverPrecheckOverride is the human 放行 after a red precheck (S1-1):
 // audit-logged, then the runner starts as if precheck passed.
 func (m *Manager) CutoverPrecheckOverride(id string) (*CutoverRun, error) {
+	// NETDEV-9：状态翻转与落盘同临界区（saveCutoverLocked）——旧形状解锁后
+	// 才写文件，双击"放行"时第二个 override 能通过文件里仍是 precheck-failed
+	// 的检查，且第一个的迟到保存把 Cursor 回卷，runner 重读后对已执行的
+	// direct-command step 再打一遍设备。同文件 CutoverContinue 同范式。
 	cutoverMu.Lock()
 	c, err := GetCutover(id)
 	if err != nil {
@@ -454,8 +458,8 @@ func (m *Manager) CutoverPrecheckOverride(id string) (*CutoverRun, error) {
 	}
 	c.Status = CutoverRunning
 	c.HoldNote = ""
+	_ = saveCutoverLocked(c)
 	cutoverMu.Unlock()
-	_ = saveCutover(c) // saveCutover 自取 cutoverMu——必须解锁后调用
 	StateEventSnap(StateEventCutoverStart, c.ID, StateActorUser, "precheck-override")
 	_ = AppendAudit(Audit{Device: "(cutover)", Command: "precheck-override " + c.ID, Class: "cutover", Status: AuditOK})
 	m.cutoverLaunch(c.ID)

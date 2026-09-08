@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zzycxz/fairpeer/internal/config"
 )
@@ -267,5 +268,82 @@ func TestOpStepLedgerAndSummarizeDiff(t *testing.T) {
 	}
 	if got := summarizeDiff("no changes here"); !strings.Contains(got, "无文本差异") {
 		t.Fatalf("empty diff should say so: %s", got)
+	}
+}
+
+// ── 评审 P2 清偿（2026-09-08 批）红测试 ─────────────────────────────────────
+
+func TestDangerScanCatchesNewVerbsAndNoForms(t *testing.T) {
+	dangerous := []ProposalStep{
+		{Device: "sw1", Commands: []string{"reload"}},
+		{Device: "sw1", Commands: []string{"format flash:"}},
+		{Device: "h1", Commands: []string{"poweroff"}},
+		{Device: "h1", Commands: []string{"systemctl stop nginx"}},
+		{Device: "h1", Commands: []string{"dd if=/dev/zero of=/dev/sda"}},
+		{Device: "sw1", Commands: []string{"no vlan 10"}},
+		{Device: "sw1", Commands: []string{"no ip route 10.0.0.0 255.0.0.0"}},
+	}
+	for i, s := range dangerous {
+		if !dangerScan(&dangerous[i]) {
+			t.Errorf("dangerScan(%v) = false, want true (NETDEV-11)", s.Commands)
+		}
+	}
+	benign := []ProposalStep{
+		{Device: "sw1", Commands: []string{"interface GigabitEthernet0/1"}},
+		{Device: "h1", Commands: []string{"df -h"}},
+		{Device: "h1", Commands: []string{"systemctl status nginx"}},
+	}
+	for i, s := range benign {
+		if dangerScan(&benign[i]) {
+			t.Errorf("dangerScan(%v) = true, want false (false positive)", s.Commands)
+		}
+	}
+}
+
+func TestAuditProjectRejectsTraversalIDs(t *testing.T) {
+	writeAuthTestEnv(t)
+	if err := SaveAuditProject(&AuditProject{ID: `..\..\evil`}); err == nil {
+		t.Fatal("traversal project id must be rejected (NETDEV-12)")
+	}
+	if err := DeleteAuditProject(`../evil`); err == nil {
+		t.Fatal("traversal delete id must be rejected (NETDEV-12)")
+	}
+	if err := SetAuditItemStatus(`..\evil`, "sig", "fixed"); err == nil {
+		t.Fatal("traversal status id must be rejected (NETDEV-12)")
+	}
+	if _, _, _, err := AuditProjectStatus(`a/b`); err == nil {
+		t.Fatal("traversal status-read id must be rejected (NETDEV-12)")
+	}
+}
+
+func TestWatchingProposalsCloseLazilyAfterExpiry(t *testing.T) {
+	writeAuthTestEnv(t)
+	proposalsDirOverride = t.TempDir() // writeAuthTestEnv 不含提案目录——必须显式隔离
+	t.Cleanup(func() { proposalsDirOverride = "" })
+	past := time.Now().Add(-time.Minute)
+	p := &Proposal{ID: "P-W1", Intent: "x", Status: ProposalWatching, WatchUntil: &past,
+		Steps: []ProposalStep{{Device: "sw1", Commands: []string{"int g0/1"}, Rollback: []string{"no int g0/1"}}}}
+	if err := SaveProposal(p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ListProposals()
+	if err != nil || len(got) != 1 {
+		t.Fatalf("ListProposals = %d err=%v", len(got), err)
+	}
+	if got[0].Status != ProposalClosed {
+		t.Fatalf("expired watching proposal = %s, want closed (NETDEV-1 lazy sweep)", got[0].Status)
+	}
+	// Unexpired watching stays watching.
+	future := time.Now().Add(20 * time.Minute)
+	q := &Proposal{ID: "P-W2", Intent: "x", Status: ProposalWatching, WatchUntil: &future,
+		Steps: []ProposalStep{{Device: "sw1", Commands: []string{"int g0/2"}, Rollback: []string{"no int g0/2"}}}}
+	if err := SaveProposal(q); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = ListProposals()
+	for _, g := range got {
+		if g.ID == "P-W2" && g.Status != ProposalWatching {
+			t.Fatalf("unexpired watching proposal = %s, want watching", g.Status)
+		}
 	}
 }
