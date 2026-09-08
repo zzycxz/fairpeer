@@ -14,12 +14,12 @@
 
 | # | 不足项 | 严重度 | codex 参考 | 改进方案 | 状态 |
 |---|--------|--------|-----------|---------|------|
-| 1 | 工具卡片渲染低覆盖 | 中 | HistoryCell trait + 按工具类型分组件 | 分层 ToolCard 体系 | 待做 |
-| 2 | 对话内无全文搜索 | 中 | codex 也没有（仅有 Ctrl+T overlay） | 超越 codex：Ctrl+F 搜索 + 高亮 | 待做 |
-| 3 | 证据链不认办公工具 | 高 | codex 无此概念（update_plan 不验证） | 名单扩展 + out_path 提取 | **核心已实施** |
-| 4 | 主终端未接 PTY | 中 | portable-pty + ProcessHandle 抽象 | 接线既有 ConPTY + 补 Unix 存根 | 待做（工作量下调） |
-| 5 | Item 事件前端未消费 | 低 | SQ/EQ + TurnItem tagged enum + delta | 双 wire.go 补 event.Item 映射 | 待做 |
-| 6 | MCP 通知被丢弃 | 中 | LoggingClientHandler（仅日志） | 日志 + tools/list_changed 缓存失效 | 待做 |
+| 1 | 工具卡片渲染低覆盖 | 中 | HistoryCell trait + 按工具类型分组件 | 分层 ToolCard 体系 | **首批已实施**（bash/办公写/email/netdev_probe；语法高亮卡与 BrowserActionCard 后续批次） |
+| 2 | 对话内无全文搜索 | 中 | codex 也没有（仅有 Ctrl+T overlay） | 超越 codex：Ctrl+F 搜索 + 高亮 | **已实施**（mark 级高亮 Phase 2） |
+| 3 | 证据链不认办公工具 | 高 | codex 无此概念（update_plan 不验证） | 名单扩展 + out_path 提取 | **已实施**（netdev 台账对接另立 Spec） |
+| 4 | 主终端未接 PTY | 中 | portable-pty + ProcessHandle 抽象 | 接线既有 ConPTY + 补 Unix 存根 | **已实施** |
+| 5 | Item 事件前端未消费 | 低 | SQ/EQ + TurnItem tagged enum + delta | 双 wire.go 补 event.Item 映射 | **已实施**（含 resumed/expert_collab 两个同源断流修复；渲染迁移 Phase 2） |
+| 6 | MCP 通知被丢弃 | 中 | LoggingClientHandler（仅日志） | 日志 + tools/list_changed 自动刷新 | **已实施**（含注册表热换） |
 
 工具面基线（profile 分区注册，`internal/boot/boot.go:632-853`）：全库实现 ~125 个工具；
 dev 注册 ~37（基础 24 + meta 9 + 探索/评审包装 4）；cowork ~82–94（browser 21、
@@ -574,6 +574,10 @@ schema 缓存）功能重叠。改为**扩展 cache.go**：在既有 CacheEntry 
 
 ## 修订记录
 
+- **2026-09-08（晚）**：Spec-2/4/5/6 全量落地、Spec-1 首批落地（bash/办公写/email/
+  netdev_probe 卡片），状态表同步；实现中顺手修了三个既有断流/卫生问题——
+  httpTransport 通知回调与请求周期的互斥自锁、browser-mirror/dash-jump-filter
+  两个过期测试 fixture、test:all 脚本对 5 个 vitest 风格测试的重复 tsx 执行。
 - **2026-09-08**：逐条代码复核后修订——基线数字按 profile 分区注册更正
   （弃用 "72 工具"，源自过时的 DEV_COWORK_TOOL_COMPARISON.md 2026-07-05）；
   删除不存在工具名 xlsx_edit/mindmap_read/ppt_create；Spec-3 拆出已实施部分
