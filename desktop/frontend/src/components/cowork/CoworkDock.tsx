@@ -15,7 +15,7 @@
 // All backend methods are wrapped with .catch fallbacks since the backend may
 // not implement every one yet.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
   CalendarClock,
@@ -673,6 +673,10 @@ function MailView() {
   const [fullLoading, setFullLoading] = useState(false);
   const [fullErr, setFullErr] = useState("");
   const [inserted, setInserted] = useState(false);
+  // FE-3: monotonically increasing open sequence — a slow ReadMailFull for a
+  // previously opened letter must never overwrite the pane of a newer open.
+  const openSeqRef = useRef(0);
+  const insertedTimerRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -702,6 +706,7 @@ function MailView() {
   }, [refresh]);
 
   const openMessage = useCallback(async (item: InboxItem, index: number, box: "inbox" | "sent") => {
+    const mySeq = ++openSeqRef.current;
     setReading(index);
     setFull(null);
     setFullErr("");
@@ -712,15 +717,20 @@ function MailView() {
       // 已发送 10）——后端按同一窗口把 index 定位到具体邮件，窗口不一致
       // 时序号指向另一封信，防错校验会把正常点击误报成"列表已变化"。
       const limit = box === "sent" ? 10 : 30;
-      setFull(await app.ReadMailFull(box === "sent" ? "Sent" : "INBOX", limit, index, item.subject, item.date));
+      const got = await app.ReadMailFull(box === "sent" ? "Sent" : "INBOX", limit, index, item.subject, item.date);
+      // FE-3: a newer open (or back-to-list) superseded this one — discard.
+      if (openSeqRef.current !== mySeq) return;
+      setFull(got);
     } catch (e) {
+      if (openSeqRef.current !== mySeq) return;
       setFullErr(String(e instanceof Error ? e.message : e));
     } finally {
-      setFullLoading(false);
+      if (openSeqRef.current === mySeq) setFullLoading(false);
     }
   }, []);
 
   const backToList = useCallback(() => {
+    openSeqRef.current++; // invalidate any in-flight open
     setReading(null);
     setFull(null);
     setFullErr("");
@@ -734,8 +744,17 @@ function MailView() {
     const quoted = `请帮我处理这封邮件。\n主题：${full.subject}\n发件人：${full.from}\n时间：${formatDateTime(full.date)}\n正文：\n${full.body}`;
     window.dispatchEvent(new CustomEvent("cowork:insert-text", { detail: quoted }));
     setInserted(true);
-    window.setTimeout(() => setInserted(false), 2500);
+    if (insertedTimerRef.current !== null) window.clearTimeout(insertedTimerRef.current);
+    insertedTimerRef.current = window.setTimeout(() => setInserted(false), 2500);
   }, [full]);
+
+  // Clear a pending inserted-flag timer on unmount (FE-3 附带): setState
+  // after unmount is a no-op warning at best and a stale reset at worst.
+  useEffect(() => {
+    return () => {
+      if (insertedTimerRef.current !== null) window.clearTimeout(insertedTimerRef.current);
+    };
+  }, []);
 
   // The displayed list comes from the cached folder data — instant switch.
   const inbox = folder === "sent" ? sentData : inboxData;

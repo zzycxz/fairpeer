@@ -25,6 +25,11 @@ var (
 	trapListener *gosnmp.TrapListener
 	trapPortLive int
 	trapLastFire = map[string]time.Time{}
+	// trapCfg is the receiver's CURRENT view of the inventory, refreshed by
+	// every EnsureTrapReceiver call (NETDEV-16, mirroring syslogCfg): the
+	// OnNewTrap closure must not ride on the config snapshot captured at
+	// listener startup — devices added later would never map past "(unknown)".
+	trapCfg *config.Config
 )
 
 // trapOIDs: standard v2c notification OIDs (RFC 3418) → class.
@@ -45,6 +50,7 @@ func EnsureTrapReceiver(cfg *config.Config) {
 		port = cfg.NetDev.Trap.Port
 	}
 	trapMu.Lock()
+	trapCfg = cfg // refresh on EVERY call, not only on listener start
 	cur, curPort := trapListener, trapPortLive
 	trapMu.Unlock()
 	if port <= 0 {
@@ -70,6 +76,10 @@ func EnsureTrapReceiver(cfg *config.Config) {
 	l.Params = gosnmp.Default
 	l.Params.Community = "public" // v2c community check is per-trap below
 	l.OnNewTrap = func(p *gosnmp.SnmpPacket, addr *net.UDPAddr) {
+		// Read the CURRENT inventory snapshot under the lock (NETDEV-16).
+		trapMu.Lock()
+		cfg := trapCfg
+		trapMu.Unlock()
 		trapHandle(p, addr, cfg)
 	}
 	go func() {
@@ -177,7 +187,12 @@ func trapCommunityFor(d *config.NetDevDevice) (string, bool) {
 	if v, ok, _ := secretGetter(SecretKindPassword, env); ok && v != "" {
 		return v, true
 	}
-	return "public", true
+	// NETDEV-15: the device DECLARES a community channel but the secret can't
+	// be resolved right now — guessing "public" and enforcing it would drop
+	// every real trap from that device. Skip the comparison instead (same
+	// accept posture as an unconfigured device); the audit trail still shows
+	// the traps arrived.
+	return "", false
 }
 
 // trapEscalate: link-down / cold-start → one Finding per device+class per 10min.

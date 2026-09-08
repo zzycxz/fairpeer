@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(netdev,frontend): 评审清仓——NETDEV-15/16 trap 双修 + FE-3 邮件阅读乱序保护（P2 清偿 21/22）
+
+- **NETDEV-15【P3】**：设备声明了 community 通道但 secret 此刻解析不出来时，原来猜 "public" 并强制比对——真实 community 非 public 的设备全部 trap 被静默丢弃。改为返回 ok=false 跳过比对（与未配置设备同一放行姿态，审计仍留痕）
+- **NETDEV-16【P3】**：trap 接收器 OnNewTrap 闭包钉死启动时的 cfg 快照——后加设备恒 "(unknown)"。照搬 syslog 侧既有修法：包级 trapCfg 每次 EnsureTrapReceiver 刷新，回调在锁内取当前快照
+- **FE-3【P2】**：MailView 阅读面板无乱序保护——快速连点两封信，慢响应迟到覆盖新信内容/提前熄 loading。加单调 openSeqRef 序号守卫（过期的 ReadMailFull 结果/错误/loading 全部丢弃）；backToList 递增序号作废在途请求；附带修 askAI 的 2500ms inserted 计时器无清理（卸载后 setState）
+- 验证：netdev trap 测试 + tsc + 前端 56 例全绿；CORE-1/2 与 UI 状态卡（netdev_app.go 等仍被并行会话持有）与 NETDEV-18（briefing.go 已被持有）待其收尾
+- **P2 清偿进度：21/22**（仅剩 CORE-1/2，被持有）
+
 ### fix(misc): 评审 P2/P3 收尾五连——CORE-5 会话归属劫持 + PERM-3/4 只读命令误伤/挂起 + SERVE-3 符号链接穿越 + TOOL-7 清扫竞态 + FE-4 改名重复设备
 
 - **CORE-5【P2·行为回归】**：saveTabSessionMeta 无条件重写会话的 TopicID/Scope——topic B 的会话 resume 进 topic A 的 tab 后被改判到 A，B 的项目树节点从此找不到它。改为**只收养无主会话或同 topic 复位**（与 adoptTopiclessSessions 的谨慎语义对齐）；空 tab 也不清空既有归属
