@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(desktop/terminal): TerminalPanel v2 接线——主终端双轨（一次性 pipe ⇄ 交互 PTY），ConPTY 端到端贯通
+
+FAIRPEER_CODEX_GAP_SPEC Spec-4 落地（复核后改为"接线"任务——ConPTY 后端与 xterm 前端组件此前均已建好、只是未挂载）：
+
+- **本地页签模式切换（一次性 ⇄ PTY）**：pipe 保留 v1 RunShell 行为与行历史；pty 挂载既有 TerminalSession（xterm.js + ConPTY 绑定，原为死代码），vim/top 等交互程序可用，切走即 PTYKill
+- **环境对齐**：App 传入当前 Wails tabID → PTYCreateForTab 按页签环境落地（本地 cmd / `wsl --cd` / `docker exec` / ssh，与代理同环境）——远端页签的集成终端不再退化成本地 shell
+- TerminalSession 加 embedded 形态（面板页签内无自带工具条；退出/错误角标覆盖层），「已退出」文案 i18n 化；页签条 pty 徽标；模式切换按钮 + 中英文案
+- 新增 desktop/pty_stub.go（!windows）：PTY 绑定返回明确错误而非缺方法，Wails 绑定面跨平台一致，前端降级一次性模式
+- 验证：tsc 绿；desktop module Windows/Linux 双构建通过
+
 ### fix(mobilebridge/debug): linkpeer 联调服务器跟进 Answer 新签名——修复 ./... 构建断裂
 
 审计整改 P0-2 把 `CommandExecutor.Answer` 的 `[]string` 改为

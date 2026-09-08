@@ -2375,6 +2375,44 @@
   background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
   color: var(--fg);
 }
+/* v2 双轨（Spec-4）：pipe ⇄ pty 模式切换按钮与 PTY 宿主 */
+.terminal-panel__mode {
+  width: auto;
+  padding: 0 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.terminal-panel__mode--pty {
+  background: color-mix(in srgb, var(--accent, #89b4fa) 18%, transparent);
+  color: var(--fg);
+}
+.terminal-panel__tab-pty {
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent, #89b4fa) 18%, transparent);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+}
+.terminal-panel__pty {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 6px;
+}
+.termsession--embedded {
+  position: relative;
+  height: 100%;
+  border-radius: var(--radius-sm);
+}
+.termsession__overlay {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  display: flex;
+  gap: 8px;
+  pointer-events: none;
+}
 .terminal-panel__out {
   flex: 1 1 auto;
   min-height: 0;

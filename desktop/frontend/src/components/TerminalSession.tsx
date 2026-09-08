@@ -17,9 +17,13 @@ import { useT } from "../lib/i18n";
 export function TerminalSession({
   onClose,
   tabId,
+  embedded = false,
 }: {
-  onClose: () => void;
+  onClose?: () => void;
   tabId?: string;
+  // Embedded inside a TerminalPanel tab: no own bar/close chrome — the panel
+  // tab's × handles the kill (unmount cleanup already PTYKills).
+  embedded?: boolean;
 }) {
   const t = useT();
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -106,15 +110,31 @@ export function TerminalSession({
     };
   }, []);
 
+  if (embedded) {
+    return (
+      <div className="termsession termsession--embedded">
+        <div ref={hostRef} className="termsession__host" />
+        {(error || exited) && (
+          <div className="termsession__overlay">
+            {error && <span className="termsession__err">{error}</span>}
+            {exited && !error && <span className="termsession__exited">{t("terminal.exited")}</span>}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="termsession">
       <div className="termsession__bar">
         <span className="termsession__title">{t("terminal.title")}</span>
         {error && <span className="termsession__err">{error}</span>}
-        {exited && <span className="termsession__exited">已退出</span>}
-        <button className="termsession__close" onClick={onClose} title={t("common.close")}>
-          <XCircle size={14} />
-        </button>
+        {exited && <span className="termsession__exited">{t("terminal.exited")}</span>}
+        {onClose && (
+          <button className="termsession__close" onClick={onClose} title={t("common.close")}>
+            <XCircle size={14} />
+          </button>
+        )}
       </div>
       <div ref={hostRef} className="termsession__host" />
     </div>

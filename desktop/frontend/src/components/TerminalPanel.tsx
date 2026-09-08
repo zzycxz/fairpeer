@@ -17,6 +17,7 @@ import { useT } from "../lib/i18n";
 import type { WireEvent, WireTool } from "../lib/types";
 import { getScopedItem, setScopedItem } from "../lib/profileScopedStorage";
 import { DeviceTerminal } from "./DeviceTerminal";
+import { TerminalSession } from "./TerminalSession";
 
 const TERMINAL_OPEN_KEY = "fairpeer.terminalOpen";
 const MAX_LINES = 500;
@@ -49,6 +50,9 @@ interface TermState {
   id: number;
   lines: TermLine[];
   running: boolean;
+  // v2 双轨（spec 3-4 / FAIRPEER_CODEX_GAP_SPEC Spec-4）：pipe = 一次性
+  // RunShell（默认，v1 行为）；pty = 交互式 ConPTY/xterm（vim、top 等）。
+  mode?: "pipe" | "pty";
   // §10.5 设备页签: a device terminal tab renders DeviceTerminal instead of
   // the local console (the PTY lives Go-side; state survives remounts).
   device?: string;
@@ -73,6 +77,7 @@ export function TerminalPanel({
   cwd,
   sessionPane,
   openDevice,
+  tabID,
 }: {
   onClose: () => void;
   cwd?: string;
@@ -82,6 +87,10 @@ export function TerminalPanel({
   // 设备页签入口（§10.5）: App bumps `seq` per "fairpeer:netdev-terminal"
   // event; the panel opens (or reactivates) that device's tab.
   openDevice?: { device: string; seq: number };
+  // Wails chat tab id — PTY mode passes it to PTYCreateForTab so the
+  // integrated terminal lands in the tab's own environment (cmd / wsl /
+  // docker exec / ssh, see pty_windows.go).
+  tabID?: string;
 }) {
   const t = useT();
   const [terms, setTerms] = useState<TermState[]>(() => cachedTerms ?? [newTerm()]);
@@ -189,6 +198,17 @@ export function TerminalPanel({
     });
   };
 
+  // v2 双轨切换（Spec-4）：pipe ⇄ pty。切走 pty 时 TerminalSession 卸载，
+  // 其 cleanup 已 PTYKill；切走 pipe 时保留行历史，切回可继续看。
+  const toggleMode = () => {
+    if (!active || active.device) return;
+    patchTerm(active.id, (term) => ({
+      ...term,
+      mode: term.mode === "pty" ? "pipe" : "pty",
+      running: false,
+    }));
+  };
+
   const submit = () => {
     const cmd = value.trim();
     if (!cmd || !active || active.running) return;
@@ -256,6 +276,7 @@ export function TerminalPanel({
                 >
                   <TerminalSquare size={11} />
                   <span>{t("terminal.tabTitle", { n: String(index + 1) })}</span>
+                  {term.mode === "pty" && <span className="terminal-panel__tab-pty">pty</span>}
                   {term.running && <span className="terminal-panel__tab-run" aria-hidden="true" />}
                 </button>
                 <button
@@ -299,6 +320,18 @@ export function TerminalPanel({
         {cwd && !sessionTabActive && !active?.device && <span className="terminal-panel__cwd" title={cwd}>{cwd}</span>}
         <span className="terminal-panel__spacer" />
         {!sessionTabActive && active && !active.device && (
+          <button
+            type="button"
+            className={`terminal-panel__btn terminal-panel__mode${active.mode === "pty" ? " terminal-panel__mode--pty" : ""}`}
+            onClick={toggleMode}
+            aria-pressed={active.mode === "pty"}
+            title={t("terminal.modeToggle")}
+            aria-label={t("terminal.modeToggle")}
+          >
+            {active.mode === "pty" ? t("terminal.modePTY") : t("terminal.modePipe")}
+          </button>
+        )}
+        {!sessionTabActive && active && !active.device && (
           <button type="button" className="terminal-panel__btn" onClick={() => patchTerm(active.id, (term) => ({ ...term, lines: [] }))} aria-label={t("terminal.clear")} title={t("terminal.clear")}>
             <Eraser size={12} />
           </button>
@@ -312,6 +345,10 @@ export function TerminalPanel({
       ) : active?.device ? (
         <div className="terminal-panel__device">
           <DeviceTerminal device={active.device} />
+        </div>
+      ) : active?.mode === "pty" ? (
+        <div className="terminal-panel__pty">
+          <TerminalSession embedded tabId={tabID} />
         </div>
       ) : (
         <>

@@ -3329,6 +3329,7 @@ ${t("remote.uncPromptBody", { path: picked })}
       onClose={toggleTerminal}
       cwd={state.meta?.cwd}
       openDevice={openDeviceTerm}
+      tabID={activeTabId ?? undefined}
       sessionPane={
         <SideSessionPane
           tabs={tabMetas}
