@@ -187,11 +187,23 @@ func TestReadOnlyBashMetaExecutors(t *testing.T) {
 		// System-state setters hidden in read-only-looking commands.
 		{"hostname", true},
 		{"hostname newname.example.com", false},
+		{"hostname -F /etc/hostname", false},
+		{"hostname -f", true}, // PERM-3: FQDN/IP/domain queries are read-only
+		{"hostname -i", true},
+		{"hostname -d", true},
 		{"date", true},
 		{"date -s '2026-01-01 00:00:00'", false},
 		{"date --set=2026-01-01", false},
 		{"less README.md", true},
 		{"less -o /tmp/session.log bigfile.txt", false},
+		// PERM-4: hang-forever forms are not "read-only" in an unattended pipe.
+		{"tail -n 50 app.log", true},
+		{"tail -f app.log", false},
+		{"tail -F app.log", false},
+		{"tail --follow app.log", false},
+		{"top -b -n 1", true},
+		{"top", false},
+		{"htop", false},
 	}
 
 	for _, tt := range tests {

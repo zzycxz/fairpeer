@@ -994,6 +994,10 @@ export function NetDevSection() {
                   try {
                     await app.SetNetDevSettings(nextView);
                     await reload();
+                    // FE-4：这次保存已把（可能的）改名落进配置——orig 必须跟
+                    // 上新名字，否则紧随的主保存按旧名匹配不到、走追加分支
+                    // 产生重复设备。
+                    setEditingDeviceOrig(editingDevice.name);
                     setErr("");
                   } catch (e) {
                     setErr(String(e));

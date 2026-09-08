@@ -2022,13 +2022,21 @@ func closeTargetBrowserLevel(ctx context.Context, id cdptarget.ID) {
 // the session currently drives and never touches real pages. Bounded by the
 // session ctx — a session that dies mid-sweep just fails its CDP calls.
 func sweepBlankTabsLater(s *browserSession) {
+	// Snapshot the tab identity under tabMu (TOOL-7): switchSessionTab
+	// replaces s.ctx under the same lock — unlocked reads here raced it
+	// (-race reproducible). The sweep then works off the snapshot; a switch
+	// mid-sweep simply makes the next tick re-read the new identity.
+	s.tabMu.Lock()
+	ctx := s.ctx
+	keep := sessionTargetID(s)
+	s.tabMu.Unlock()
 	for _, delay := range []time.Duration{2 * time.Second, 6 * time.Second} {
 		select {
 		case <-time.After(delay):
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			return
 		}
-		closeBlankPageTargets(s, sessionTargetID(s))
+		closeBlankPageTargets(s, keep)
 	}
 }
 

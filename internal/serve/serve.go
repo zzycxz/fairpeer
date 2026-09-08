@@ -847,6 +847,15 @@ func (s *Server) resume(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid session dir", http.StatusBadRequest)
 		return
 	}
+	// Resolve symlinks before the Rel comparison (SERVE-3): a symlink inside
+	// the session dir pointing elsewhere used to pass lexical containment
+	// while reading outside it. Unresolvable paths fail closed.
+	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil {
+		abs = resolved
+	}
+	if resolved, rerr := filepath.EvalSymlinks(absDir); rerr == nil {
+		absDir = resolved
+	}
 	rel, err := filepath.Rel(absDir, abs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		http.Error(w, "path outside session dir", http.StatusForbidden)

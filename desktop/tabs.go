@@ -44,14 +44,14 @@ type WorkspaceTab struct {
 	// host (P1: WSL). The controller runs in the host process over RPC;
 	// WorkspaceRoot and SessionPath above are remote-side strings.
 	Remote     *RemoteRef
-	Label      string        // model label (for the tab badge)
-	Ready      bool          // true once boot.Build (or the remote session attach) completes
-	StartupErr string        // build error, surfaced to the frontend
+	Label      string // model label (for the tab badge)
+	Ready      bool   // true once boot.Build (or the remote session attach) completes
+	StartupErr string // build error, surfaced to the frontend
 	// PendingBuild（G2-4 懒构建，SCENARIO_SPEC）：恢复期未构建的 tab 由首次
 	// 激活/引用时再建（SetActiveTab/OpenProjectTab/SubmitToTab 兜底），消除
 	// "恢复全量并发构建" 的启动风暴。运行时态，不持久化。
 	PendingBuild bool
-	sink       *tabEventSink // routes events with this tab's ID
+	sink         *tabEventSink // routes events with this tab's ID
 	// readyCh is closed when the current build attempt finishes (success or
 	// failure). It replaces the 100ms poll loop that waitForExpertTab used to
 	// spin while waiting for boot.Build: callers now block on <-readyCh and wake
@@ -3742,6 +3742,13 @@ func saveTabSessionMeta(tab *WorkspaceTab, path string) error {
 	m, err := agent.EnsureBranchMeta(path)
 	if err != nil {
 		return err
+	}
+	// CORE-5：只收养无主会话、或同 topic 复位——topic B 的会话被 resume 进
+	// topic A 的 tab 后仍属于 B（否则 B 的项目树节点从此找不到它；这与
+	// adoptTopiclessSessions 只收养无主会话的谨慎语义一致）。空 tab 也不
+	// 清空已有归属。
+	if m.TopicID != "" && tab.TopicID != m.TopicID {
+		return nil
 	}
 	m.Scope = tab.Scope
 	m.WorkspaceRoot = tab.WorkspaceRoot

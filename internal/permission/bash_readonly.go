@@ -131,14 +131,33 @@ func hasUnsafeReadOnlyArgs(base string, args []string) bool {
 			return true
 		}
 	case "hostname":
-		// `hostname <name>` sets the system hostname (root).
-		return len(args) > 0
+		// `hostname <name>` sets the system hostname (root). Query flags
+		// (-f/-i/-d/-s/-a) are read-only (PERM-3); a non-flag operand sets,
+		// and -F/--file reads the name to set FROM a file.
+		for _, arg := range args {
+			if arg == "-F" || strings.HasPrefix(arg, "--file") {
+				return true
+			}
+			if !strings.HasPrefix(arg, "-") {
+				return true
+			}
+		}
+		return false
 	case "date":
 		// `date -s`/`--set` sets the system clock (root).
 		return hasArgWithPrefix(args, "-s") || hasArgWithPrefix(args, "--set")
 	case "less":
 		// `less -o FILE`/`--LOG-FILE=FILE` copies output to a file.
 		return hasArgWithPrefix(args, "-o") || hasArgWithPrefix(args, "--LOG-FILE")
+	case "tail":
+		// tail -f/-F never exits — in an unattended pipe it hangs the tool
+		// until timeout (PERM-4).
+		return hasArgWithPrefix(args, "-f") || hasArgWithPrefix(args, "-F") ||
+			hasAnyArg(args, "--follow") || hasArgWithPrefix(args, "--follow=")
+	case "top", "htop":
+		// Interactive full-screen mode hangs an unattended pipe; batch mode
+		// (-b) produces one snapshot and exits (PERM-4).
+		return !hasArgWithPrefix(args, "-b") && !hasAnyArg(args, "--batch")
 	}
 	return false
 }

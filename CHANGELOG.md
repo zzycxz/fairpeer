@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(misc): 评审 P2/P3 收尾五连——CORE-5 会话归属劫持 + PERM-3/4 只读命令误伤/挂起 + SERVE-3 符号链接穿越 + TOOL-7 清扫竞态 + FE-4 改名重复设备
+
+- **CORE-5【P2·行为回归】**：saveTabSessionMeta 无条件重写会话的 TopicID/Scope——topic B 的会话 resume 进 topic A 的 tab 后被改判到 A，B 的项目树节点从此找不到它。改为**只收养无主会话或同 topic 复位**（与 adoptTopiclessSessions 的谨慎语义对齐）；空 tab 也不清空既有归属
+- **PERM-3【P3】**：hostname 一刀切拒全部参数误伤 `-f/-i/-d` 只读查询——改为仅拒非 flag 操作数与 `-F/--file`
+- **PERM-4【P3】**：挂起型"只读"命令（`tail -f/-F/--follow`、无 `-b` 的 `top/htop`）在无人值守管道挂到超时——拒绝跟随形态、top 要求批量模式；测试补十用例
+- **SERVE-3【P3】**：/resume 收拢不解析符号链接——Abs+Rel 前先 `EvalSymlinks`（不可解析即失败收口），会话目录内指向外部的 symlink 不再越过 containment
+- **TOOL-7【P3】**：blank 页清扫协程无锁读 `s.ctx` 与 switchSessionTab 的写构成数据竞争（-race 可复现）——tabMu 下快照 ctx/target 再进延迟循环
+- **FE-4【P2】**：设备"测试连接"保存路径不更新 `editingDeviceOrig`——改名后先测连再保存会按旧名匹配不到、走追加分支产生重复设备；测连保存成功即把 orig 跟到新名
+- 验证：permission/serve/desktop（Go）+ 前端 tsc/56 例全绿
+
 ### fix(netdev): 评审 P2 netdev 七连——危险词表/路径穿越/审计原子性/割接竞态/回滚截断/watching 懒关/通知全通道
 
 - **NETDEV-11**：危险动词表补 `format|poweroff|halt|mkfs|dd|init 0/6|systemctl stop|disable|mask`；`reload` 只认命令开头形态（Cisco 整机重启）——`systemctl reload`/`nginx -s reload` 是良性服务重载不误伤；CLI `no <x>` 否定形态（no vlan/no ip route）落 confirm2（宁误报）；测试：7 危险 + 3 良性
