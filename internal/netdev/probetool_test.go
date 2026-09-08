@@ -97,9 +97,15 @@ func TestProbeSurfaceMergedInRegistry(t *testing.T) {
 	if _, ok := reg.Get("netdev_probe"); !ok {
 		t.Fatal("netdev_probe must be registered")
 	}
+	// 旧名不再作为独立引擎工具存在——只以弃用别名（probeAliasTool）保留，
+	// 供已装用户技能的旧调用兼容；闸门语义经别名原样透传。
 	for _, old := range []string{"netdev_discover", "netdev_nmap", "netdev_netprobe"} {
-		if _, ok := reg.Get(old); ok {
-			t.Fatalf("old probing tool %q must no longer be registered (merged into netdev_probe)", old)
+		got, ok := reg.Get(old)
+		if !ok {
+			t.Fatalf("compat alias %q must stay registered for installed user skills", old)
+		}
+		if _, isAlias := got.(*probeAliasTool); !isAlias {
+			t.Fatalf("%q must be a deprecated probeAliasTool, not a standalone engine tool", old)
 		}
 	}
 }
@@ -143,5 +149,33 @@ func TestOrchestrationOnlyToolsHiddenFromMainLoop(t *testing.T) {
 		if !inSchema[name] {
 			t.Fatalf("%s must ride the main-loop schema (quick-path & inline user skills)", name)
 		}
+	}
+}
+
+// 旧名兼容别名：注册在案、参数映射到 probe 的 L5 显式 mode、闸门语义
+// 原样透传（discover=出界 scopes 拒；netprobe=无信封拒）——已装用户
+// 技能的旧调用不断。
+func TestProbeAliasesPreserveOldCalls(t *testing.T) {
+	writeAuthTestEnv(t)
+	cfg := &config.Config{}
+	cfg.NetDev.Enabled = true
+	cfg.NetDev.Discovery.Scopes = []string{"192.0.2.0/24"}
+	cfg.NetDev.Devices = []config.NetDevDevice{labDevice()}
+	reg := tool.NewRegistry()
+	RegisterTools(reg, cfg)
+	for _, name := range []string{"netdev_discover", "netdev_nmap", "netdev_netprobe"} {
+		if _, ok := reg.Get(name); !ok {
+			t.Fatalf("compat alias %s must stay registered for installed user skills", name)
+		}
+	}
+	// discover（隧道引擎）：出界 → scopes 拒（零发包，语义原样）。
+	d := &probeAliasTool{oldName: "netdev_discover", mode: "tunnel", inner: &probeTool{m: NewManager(cfg)}}
+	if _, err := d.Execute(t.Context(), []byte(`{"cidr":"10.30.2.0/24"}`)); err == nil || !strings.Contains(err.Error(), "scopes") {
+		t.Fatalf("discover alias must pass the scope gate through: %v", err)
+	}
+	// netprobe（信封引擎）：无信封 → engagement 拒。
+	n := &probeAliasTool{oldName: "netdev_netprobe", mode: "netprobe", inner: &probeTool{m: NewManager(cfg)}}
+	if _, err := n.Execute(t.Context(), []byte(`{"cidr":"192.0.2.0/24"}`)); err == nil || !strings.Contains(err.Error(), "engagement") {
+		t.Fatalf("netprobe alias must pass the envelope gate through: %v", err)
 	}
 }

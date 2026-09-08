@@ -345,3 +345,58 @@ func atoiSafe(s string) (int, bool) {
 	}
 	return n, true
 }
+
+// probeAliasTool — 旧工具名兼容别名（netdev_discover / netdev_nmap /
+// netdev_netprobe → netdev_probe）。已装用户技能（如 netdev-security-
+// assessment，inline 在主循环执行）的 body 还写着旧名——别名以显式
+// mode 精确等价旧行为（discover=隧道全扫；nmap/netprobe=信封内编排），
+// 闸门语义分毫不变（scopes/信封在底层引擎里照常拒）。描述标注弃用，
+// 新代码一律 netdev_probe。
+type probeAliasTool struct {
+	oldName string
+	mode    string // tunnel | nmap | netprobe
+	inner   *probeTool
+}
+
+func (t *probeAliasTool) Name() string { return t.oldName }
+
+func (t *probeAliasTool) Description() string {
+	return "[弃用别名 → netdev_probe] 本次调用等价 netdev_probe(depth=L5, mode=" + t.mode + ")。旧名仅为已安装技能的兼容保留，新代码请直接使用 netdev_probe。"
+}
+
+func (t *probeAliasTool) ReadOnly() bool { return t.oldName == "netdev_discover" }
+
+func (t *probeAliasTool) Schema() json.RawMessage {
+	switch t.oldName {
+	case "netdev_discover":
+		return json.RawMessage(`{"type":"object","properties":{"cidr":{"type":"string"},"ports":{"type":"array","items":{"type":"integer"}},"via":{"type":"string"}},"required":["cidr"]}`)
+	case "netdev_netprobe":
+		return json.RawMessage(`{"type":"object","properties":{"cidr":{"type":"string"},"icmp":{"type":"boolean"}},"required":["cidr"]}`)
+	default: // nmap
+		return json.RawMessage(`{"type":"object","properties":{"cidr":{"type":"string"}},"required":["cidr"]}`)
+	}
+}
+
+func (t *probeAliasTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		CIDR  string `json:"cidr"`
+		Ports []int  `json:"ports"`
+		Via   string `json:"via"`
+		ICMP  bool   `json:"icmp"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", err
+	}
+	mapped, err := json.Marshal(map[string]any{
+		"cidr": a.CIDR, "depth": "L5", "mode": t.mode,
+		"via": a.Via, "ports": a.Ports, "icmp": a.ICMP,
+	})
+	if err != nil {
+		return "", err
+	}
+	out, err := t.inner.Execute(ctx, mapped)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", t.oldName, err)
+	}
+	return "[经由弃用别名，等价 netdev_probe L5/" + t.mode + "]\n" + out, nil
+}

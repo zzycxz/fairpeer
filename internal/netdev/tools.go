@@ -626,6 +626,15 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	// 引擎自带（scopes / 评估信封）。旧工具类型保留（引擎封装），不再
 	// 注册——模型面只见一个探测通道。
 	reg.Add(&probeTool{m: m})
+	// 旧名兼容别名（弃用）：已装用户技能的 body 还写着 discover/nmap/
+	// netprobe——别名以显式 mode 精确等价，闸门语义不变。
+	for _, a := range []struct{ name, mode string }{
+		{"netdev_discover", "tunnel"},
+		{"netdev_nmap", "nmap"},
+		{"netdev_netprobe", "netprobe"},
+	} {
+		reg.Add(&probeAliasTool{oldName: a.name, mode: a.mode, inner: &probeTool{m: m}})
+	}
 	// 注意：probe/assess 保持对主循环可见——它们是自带闸门的宏操作
 	// （L5 引擎自查信封+scopes；assess 无信封自拒），"闸门在工具里"是
 	// netdev 的既定原则，不可见不是第二种闸门。快查（单设备弱口令、

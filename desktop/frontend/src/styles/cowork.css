@@ -4797,9 +4797,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 24px;
+  gap: 16px;
   flex: 1;
-  padding: 0 24px;
+  padding: 0 16px;
 }
 
 /* Ensure tooltip triggers perfectly wrap the buttons to catch hover events */

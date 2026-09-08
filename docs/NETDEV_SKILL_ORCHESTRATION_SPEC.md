@@ -253,9 +253,9 @@ netconf/snmp/redfish 之于网络协议，正如 docx/xlsx 之于文档格式；
 把协议复杂性封进各自工具，不是合成万能 query。组合发生在编排层（巡检
 battery、技能 body），不发生在工具层。
 
-**通道化组织**（收敛后 24 个工具，替代原六组注册注释的分组心智）：
+**通道化组织**（收敛后 25 个工具 = 24 + netdev_knowledge；另注册 discover/nmap/netprobe 三个**弃用别名**→probe，保已装用户技能兼容，不算新面）：
 读通道（exec/devices/fanout/topology/locate/netconf/snmp/redfish）·
-攻通道（probe/assess，信封后置）· 主机面（triage/docker/k8s/firewall/db_query）·
+攻通道（probe 三合一/assess，信封后置；旧名经弃用别名兼容）· 主机面（triage/docker/k8s/firewall/db_query）·
 配置面（propose/backup[含 drift]）· 横切（finding/log/rag）· 可信域
 （fleet/remote）。**每条通道一个闸门语义，技能 = 通道的编排。**
 

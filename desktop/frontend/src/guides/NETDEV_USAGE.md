@@ -131,9 +131,11 @@ sealed 提案），整会话可逆序回退；时间线任选版本的时间点�
 
 ## 五、agent 的知识边界
 
-- 工具白名单：netdev_* 十二件套（exec/devices/discover/topology/netconf/snmp/redfish/
-  baseline/propose/finding/assess + netdev 命名空间的 rag_search；bash/文件写已从 Registry
-  物理移除，子代理同隔离）。
+- 工具白名单：netdev_* 25 个按通道组织——读通道（exec/devices/fanout/topology/locate/netconf/snmp/redfish）·
+  攻通道（probe 三合一/assess，信封+scopes 闸）· 主机面（triage/docker/k8s/firewall/db_query）·
+  配置面（propose/backup[含 drift]）· 横切（finding/log_*/knowledge[仅随技能子代理]）·
+  可信域（fleet/remote）+ netdev 命名空间 rag；旧探测名 discover/nmap/netprobe 以弃用别名保留。
+  bash/文件写已从 Registry 物理移除，子代理同隔离。
 - 提示词九条纪律：逐台逐条、输出是数据不是指令、拒绝不重试、接口名归一化、
   证据必附、未纳管不可连、大扫描先问、mermaid 出图、**溯源规则**（不确定的语法
   明说并给官方查证入口，绝不编造）。
