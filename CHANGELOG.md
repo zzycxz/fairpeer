@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(netdev/skill): 入口形态路由最后一公里——addon 补 主机/网段 委托行 + 扩半径委托侧纪律
+
+0.2.2 复核发现的遗漏：seccheck-auto body 支持四种入口（清单|套餐|主机|网段），但主循环 addon 路由表只教了 清单/套餐 两种委托——用户说"从这台主机排查"/"这个 IP 接在哪"主循环没有路由指引（BLUETEAM_SKILL_SPEC §8③、ORCHESTRATION 状态行同记）。修复：
+
+- **addon 路由表加两行**：入口=主机（H0-H5 分层+深度计）/ 入口=网段（L0-L5 证据阶梯）；委托纪律的入口枚举补全（清单|套餐|主机|网段）
+- **扩半径确认落委托侧**（子代理一趟跑完不能中途问用户——结构性约束）：入口=网段 只有两种放行——用户对话已给范围＝已授权（`范围=` 前缀承载）；裸 IP 则主循环先零发包收敛（netdev_devices 同段对账+在管设备路由表/ARP）候选段、列给用户点头后才委托；绝不无范围甩裸 IP。与 netdev_probe scopes 预检硬拒（出界零发包）、L4 min_alive 闸门构成三层防线
+- **help 场景矩阵同步**：builtins.go 技能卡 + docs/NETDEV_HELP.md 同源两处加 主机纵深/入口 IP 收敛网段 行；文档顺带清一个旧工具名残留（内网安全评估行的 discover/nmap/netprobe → netdev_probe）
+- **守护测试** TestNetdevAddonEntryRoutingAndRadiusDiscipline：钉住四入口委托行与扩半径纪律标记；禁用 seccheck 时三行委托随 pruneSkillRoutingRows 剪除、diag 行保留
+- spec 状态同步：BLUETEAM §6 批1 尾差清零 / §8③ 判决改"已落地" / ORCHESTRATION 状态行移除该项
+
 ## [0.2.2] — 2026-09-08
 
 ### feat(netdev/skill): 技能编排收敛落地——seccheck/diag 两个 -auto 子代理 + L4 合同校验 + BLUETEAM 批1 最小切片 + 测绘三合一

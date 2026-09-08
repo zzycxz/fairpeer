@@ -626,6 +626,13 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	// 引擎自带（scopes / 评估信封）。旧工具类型保留（引擎封装），不再
 	// 注册——模型面只见一个探测通道。
 	reg.Add(&probeTool{m: m})
+	// 办公模式（browser_* 先例）：攻通道是编排流程的内部面——注册（
+	// seccheck 子代理经 FilterRegistry 取用）但从主循环 schema 隐藏。
+	// 主循环的探测一律走 seccheck 的阶梯（信封/闸门/先验表都在那边），
+	// 快 ping 用 netdev_exec；主循环因此保持"路由器+快诊操作员"单一职责，
+	// 不被流程内工具的描述淹没（每轮 schema 25→22）。
+	reg.Hide("netdev_probe")
+	reg.Hide("netdev_assess")
 	reg.Add(&baselineTool{m: m})
 	reg.Add(&cveMatchTool{m: m})
 	// ③ 主机与中间件组（服务器/容器/DB 健康）
@@ -639,7 +646,10 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	reg.Add(&backupTool{m: m})
 	// ⑤ 知识/日志横切组（立案与多机检索）
 	reg.Add(&findingTool{})
+	// 知识表加载通道同样是编排内部面（入口=主机/网段的 body 吃表）——
+	// 主循环不直接读表，隐藏（子代理照常取用）。
 	reg.Add(&knowledgeTool{})
+	reg.Hide("netdev_knowledge")
 	reg.Add(&logReadTool{m: m})
 	reg.Add(&logSearchTool{m: m})
 	// ⑥ 可信域组（TRUSTDOMAIN_SPEC §15）：仅加入域的主机可见。

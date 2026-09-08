@@ -14,18 +14,22 @@
    工业级先例——Netdisco（读 SNMP/CDP/ARP/FDB 建拓扑，零 ping sweep）、BloodHound/
    SharpHound（读 LDAP 目录替代扫网段）、fscan（从本机 IP 推 C 段、两级收敛）、
    linpeas 默认档全本地。方向不动，差距在**工程化程度**。
-2. **两个真实场景的能力缺口**：现有 netdev-vulnscan 只覆盖"在管设备清单"这一种形态；
+2. **两个真实场景的能力缺口**：原 netdev-vulnscan 只覆盖"在管设备清单"这一种形态；
    缺（a）**拿到一台主机权限后的分层纵深排查**（靶场分工=人工打点、产品管侦察，
    见 REDTEAM_BATCH_DECISION 背景）；缺（b）**只给一个入口 IP 时的快速网段收敛**
-   （避免 A 类私网盲扫）。两者各落一个新技能卡（§3/§4）。
+   （避免 A 类私网盲扫）。两者已落为 `netdev-seccheck-auto` 的主机/网段两个入口
+   形态（ORCHESTRATION 收敛后；0.2.2 落地，§3/§4 是其内容设计）。
 3. **skill 写法有一套业界收敛的解剖结构**（yaklang/hack-skills、Anthropic-Cybersecurity-
    Skills、atomic-red-team、Sigma、Velociraptor artifacts 五方互证）：触发式 description →
    When to Use/Not → Prerequisites → 分步 Workflow（每步=命令+期望输出+失败分支）→
    Verification 关卡 → Output 契约 → Guardrails → 升级路由。本文 §5 定版为我们的
-   skill 写法规范，现有技能按 §5.5 映射表补齐。
+   skill 写法规范；两个 -auto body 已按此骨架断言式重写并过预算 lint（0.2.2）。
 4. **知识外置**是头部项目的共同选择（nuclei 模板、GTFOBins YAML、SecLists 字典、
    linpeas↔HackTricks 分离）：把网段先验、凭据存放点清单、指纹→职能→动作映射做成
    数据文件，SKILL.md 只写引擎逻辑——知识可独立更新、可被审计、可社区化。
+   （0.2.2 已落地：segment-priors / credential-spots / host-risk-checks 三表 +
+   `netdev_knowledge` 加载通道，哈希入审计链。注意第三张落的是 host-risk-checks
+   ——H2 本机风险的支撑表；本文原规划的"指纹→职能→动作"映射表未落，转批 3。）
 5. 红线一律不变：不做利用、不做爆破、主动探测留在评估信封后、scopes 永不可关。
 
 ## 1. 研究方法与筛选结果
@@ -189,10 +193,12 @@ v1 的方法论全部保留，本节吸收外部证据后定版，并记两处�
   skill 正文只写阶梯调度逻辑。调研确认"网段边界抽点+N 点置信度判定"没有现成开源
   实现——这是本流程的差异化点，数据表化之后可独立演进。
 
-### 4.3 工具咬合（不变）
+### 4.3 工具咬合（0.2.2 更新：测绘三合一）
 
-L2 走 netdev_exec 只读密封（display/show=read 已验证）；L3/L4 的发包走
-netdev_discover/netdev_netprobe（信封+scopes）；L5 输入只准是"已验证段"；
+L2 走 netdev_exec 只读密封（display/show=read 已验证）；L3/L4/L5 的发包统一走
+`netdev_probe(cidr, depth, mode)`（discover/nmap/netprobe 的收敛面：depth=L3 定点
+指纹 / L4 微采样 / L5 已验证段全扫，mode=auto 自动回退引擎；scopes 预检硬拒——
+出界零发包）；L5 输入只准是"已验证段"；
 段地图落 netdev_finding，蓝队核查视图按角色排序消费（对齐 MITRE T1018→T1046 链序：
 先列主机、后扫服务）。
 
@@ -225,18 +231,20 @@ mitre_attack: [T1018, T1046]   # 可选，蓝队核查视图按战术折叠
 对照现状：netdev-vulnscan 已有纪律/红线/闭环（相当于 Guardrails/Output 就位），
 缺 When-NOT、每步期望输出样例、显式 Verification 段——按 §5.5 映射补齐。
 
-### 5.2 知识外置（三张表先行）
+### 5.2 知识外置（0.2.2 落地：机制全落 + 三表，第四张转批 3）
 
-知识=数据文件（YAML/文本，仓库内 `internal/netdev/knowledge/` 或技能 assets），
-SKILL.md 只写引擎。首批评三张：
+知识=数据文件（YAML，`internal/netdev/knowledge/` embed→释放→`user-knowledge/`
+同 id 覆盖，升级不冲掉用户改动；schema 校验入 CI；`netdev_knowledge` 工具加载，
+内容哈希入审计链——机制按 ORCHESTRATION §3.5-D 全部落地）。表状态：
 
-1. **网段先验表**（服务场景二）：网关候选次序、采样点位选择器、阈值、放大动作、
-   TTL 解读表。格式对齐 nuclei 模板（id/severity/tags/matchers/workflow 的精神：
-   条目=判据+动作+路由）。
-2. **凭据存放点巡检表**（服务场景一 H1）：类目 × OS × 检查点（路径/键/命令模板）×
-   阳性判据 × fix 建议——LaZagne 类目清单的蓝队化。
-3. **指纹→段职能→动作映射表**（服务两场景收尾）：445+88→域段→优先核查队列；
-   打印机 OUI 密集→办公段→跳过；SNMP community 命中→可读表→转 L2 深挖。
+1. **网段先验表 ✅**（segment-priors.yaml，服务场景二）：网关候选次序、采样点位
+   选择器（sample_points）、min_alive 阈值、TTL 解读。
+2. **凭据存放点巡检表 ✅**（credential-spots.yaml，服务场景一 H1）：类目 × OS ×
+   检查点（路径/键/命令模板）× 阳性判据——LaZagne 类目清单的蓝队化。
+3. **主机风险检查表 ✅**（host-risk-checks.yaml，服务场景一 H2）：linpeas/Seatbelt
+   分组检查的蓝队化条目（阳性判据+误报回退成对，P6）。
+4. **指纹→段职能→动作映射表 ⬜（批 3）**：445+88→域段→优先核查队列；打印机 OUI
+   密集→办公段→跳过；SNMP community 命中→可读表→转 L2 深挖。
 
 外置的好处即 nuclei/GTFOBins 已验证的：知识独立更新、可审计、可测试（YAML 可
 schema 校验）、未来可开放用户自扩。
@@ -283,7 +291,7 @@ netdev-seccheck-auto（编排子代理；常驻路由=主循环 addon 路由表 
 
 | 技能（终态名） | 已就位 | 补齐（对应骨架段） |
 |---|---|---|
-| netdev-seccheck-auto（←vulnscan+audit-project） | Guardrails/Output/单机闭环 | When-NOT；第 1-4 步各加期望输出样例+失败分支；显式 Verification 段（候选→只读验证的判据表已有，提为独立段）；frontmatter 加 mitre_attack；网段入口加扩段确认硬步骤（§8③） |
+| netdev-seccheck-auto（←vulnscan+audit-project） | Guardrails/Output/单机闭环 | When-NOT；第 1-4 步各加期望输出样例+失败分支；显式 Verification 段（候选→只读验证的判据表已有，提为独立段）；frontmatter 加 mitre_attack（✅ 以上已随 0.2.2 断言式重写落地）；扩段确认落委托侧（✅ 2026-09-08 addon 行已补） |
 | netdev-security-assessment（用户文件技能） | 阶段化裁剪 | 阶段间加 Verification 关卡（现按顺序推进，改为"上阶段通过记录才开下阶段"）；测绘阶段输入收窄为段地图产出；入口语义随 seccheck-auto 终态对齐 |
 | netdev-diag-auto（←playbook+diag 三卡） | 读序矩阵、证据落 finding | 不动内容——合并时按 ORCHESTRATION §3.2 搬节，形态即本表的样板 |
 | netdev-help | 场景导航矩阵 | 加入口形态路由矩阵（在管清单/一台主机/一个裸 IP/一条告警 → 对应入口或 SecWorkbench 案例；ORCHESTRATION §3.3） |
@@ -299,27 +307,34 @@ netdev-seccheck-auto（编排子代理；常驻路由=主循环 addon 路由表 
 + 网段收敛节（§4 阶梯；L3-L5 调 `netdev_probe` 的 depth 分档）；netdev-help 入口
 形态路由矩阵。扩段确认硬步骤（§8③）随网段节在案。
 验收：每节过 §5.1 八段检查单；红线段逐字保留。
+**状态：✅ 落地（0.2.2 最小切片 + 2026-09-08 尾差清零：addon 主机/网段委托行、
+扩半径委托侧纪律、help 矩阵两处同步、守护测试 TestNetdevAddonEntryRoutingAndRadiusDiscipline）。**
 
 **批 1.5（工作流接线，小改，§8 新增）**：segmap 段地图工件（source=`segmap` 的
 finding，蓝队页卡按 source 分组渲染）；整轮案例开卷约定（每轮自动开/续 SecWorkbench
 案例，轮末 新增/仍在/已修复 diff 钉入时间线）。
+**状态：⬜ 未动工（代码无 segmap 痕迹、无轮次案例约定）。**
 
 **批 2（知识外置，随 ORCHESTRATION P3-D）**：三张数据表（§5.2）入库——机制按
 ORCHESTRATION §3.5-D（embedded `knowledge/` 释放 + `user-knowledge/` 同 id 覆盖 +
 schema 校验 + 内容哈希入审计链），本 spec 定内容。
 验收：表改动不需改 body；YAML 校验入 CI。
+**状态：✅ 已落地（0.2.2：机制+segment-priors/credential-spots/host-risk-checks
+三表；原规划第三张"职能映射"表转批 3，见 §5.2-4）。**
 
 **批 3（工具缺口，按需立项）**：未纳管主机的"排查卡回填"轻量通道（用户贴输出→
 结构化入 finding）；采样判读下沉为 `netdev_probe` 输出的注解字段；知识回填约定
-（§8⑤：轮内确认判据先落 user-knowledge/，验证后再上游化）。
+（§8⑤：轮内确认判据先落 user-knowledge/，验证后再上游化）；指纹→段职能→动作
+映射表（§5.2-4）。
 验收：不引入任何写路径与主动探测能力，仅编排与解析。
+**状态：⬜ 未动工。**
 
 ## 7. 红线（不变，全部批次适用）
 
 - 不做利用性/破坏性验证（POC/EXP、爆破、溢出、畸形报文）——REDTEAM_BATCH_DECISION
   未立项前无任何例外。
-- 主动探测（nmap/netprobe/discover）一律信封+scopes 后置；scopes 永不可关；
-  拒绝不重试、不换写法。
+- 主动探测（`netdev_probe`——discover/nmap/netprobe 的收敛面）一律信封+scopes
+  后置；scopes 永不可关、预检出界零发包；拒绝不重试、不换写法。
 - 凭据巡检只判"存在与暴露"，不取值、不破解、不外传；LSASS 只判可达性。
 - 每条结论必须有只读证据（netdev_finding evidence），无证据不下结论；
   扩半径（新段/新层）必须有"通过"的检验记录，跨段还需用户确认。
@@ -335,7 +350,7 @@ profile。要改的是工作流形态——从"一次漏洞核查工具"到"以�
 |---|---|---|---|---|
 | ① 入口路由前置 | **已被 ORCHESTRATION 覆盖** | ORCHESTRATION §3.5-A：body 入口识别节置顶（≤300 字符）+ `入口=清单\|主机\|网段` 显式前缀 + help 路由矩阵 + 主循环 addon 路由行 | 无需重复设计；本 spec 批 1 只供内容（help 矩阵行、两个入口节 body） |
 | ② 地图一等公民 | **轻改：工件先行，UI 缓建** | VulnScanPanel 是 findings 点列表（DISPLAY_CAP=50，按 source 过滤），无段地图工件与队列视图；但 finding.source 已是分流机制（vulnscan/cve:*） | 段地图落 **finding 工件**（source=`segmap`，title=CIDR，detail=证据源×置信度×角色×队列位次）；蓝队页卡按 source 加分组渲染即可。独立地图视图等真实排查跑过 2-3 轮再立项 | 批 1.5 |
-| ③ 扩半径确认闸门 | **半覆盖：补一条硬步骤** | 工具面闸门已由 ORCHESTRATION §3.5-C 收敛（netdev_probe 三合一，信封+scopes 运行时即拒）；待确认区模式已存在（发现线索人工转正，DiscoveryBoardView pending）——但"下探新段须用户确认"尚无成文规则 | 不新增 UI：seccheck-auto 网段入口节把"新段进入采样 = 证据链呈现 → 用户确认 → 才调 netdev_probe"写成 Workflow 硬步骤（缺确认不得调用）；主循环 addon 委托纪律写明扩段确认留在主循环（对齐 §5.3 修订注）。AppendAudit 自然留痕 | 批 1 |
+| ③ 扩半径确认闸门 | **已落地（2026-09-08 委托侧清零）** | seccheck-auto 是一趟跑完的子代理，**无法中途问用户**——"段中途确认"结构性不可行。实际闸门三层：`netdev_probe` scopes 预检硬拒（出界零发包）+ L4 验证闸门（min_alive，body"下探新段须有通过记录"）+ **委托侧放行** | 委托侧纪律已写进主循环 addon：入口=网段 只有两种放行（用户对话已给范围＝已授权；裸 IP 则主循环先零发包收敛候选段、列给用户点头后才委托），绝不无范围甩裸 IP；禁用 seccheck 时委托行随剪（pruneSkillRoutingRows），守护测试钉住 | 批 1 ✅ |
 | ④ 轮次账本 | **轻改：家已存在** | SecWorkbench 案例+时间线+IOC+CaseBundle 复盘导出已存在；vulnscan"复查注明"纪律散在 detail 首行；VulnScanPanel 已有 fairpeer:netdev-case 开案例事件 | 每轮核查自动开/续一个案例：入口形态+地图版本+队列完成度+深度计进时间线；轮末把 新增/仍在/已修复 diff 作为一条 triage 条目钉入——轮与轮之间可对照，不再从头对表 | 批 1.5 |
 | ⑤ 知识反哺闭环 | **缓：管道已由 ORCHESTRATION 建好** | ORCHESTRATION §3.5-D：`knowledge/` 释放 + `user-knowledge/` 同 id 覆盖 + 内容哈希入审计链——回填管道天然存在，缺的只是约定 | 批 2 落表后加约定：轮内确认的段职能指纹/误报判据先写 user-knowledge/（升级不冲掉、哈希可溯源），验证过再上游化进内置表；此前先在轮次案例 note 人工沉淀 | 批 3 |
 

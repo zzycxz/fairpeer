@@ -192,6 +192,8 @@ const builtinNetdevHelpBody = `This skill is INLINED — a reference card, no to
 | 网络故障排查（端口 down / 邻居起不来 / 网慢 / 断网） | netdev-diag-auto（整任务委托子代理：症状路由→分支深查→根因立案+路径图） | 主循环快读直用 netdev_exec 等工具；结论立 netdev_finding |
 | 内网安全评估 / 摸底（用户技能） | netdev-security-assessment（阶段化，任意入口可裁剪） | 测绘 netdev_probe（depth L3/L4/L5，L5 需评估信封）、弱口令 netdev_assess（信封）；攻击路径 netdev_topology / netdev_fanout |
 | 漏洞核查（这批设备有什么漏洞） | netdev-seccheck-auto（入口=清单） | netdev_cve_match / netdev_baseline / netdev_exec / netdev_fanout |
+| 拿到一台主机权限做纵深排查（靶场/委托） | netdev-seccheck-auto（入口=主机：H0-H5 分层+深度计收尾） | 知识表 credential-spots / host-risk-checks（netdev_knowledge 取）；跨段仅信封内定点 |
+| 一个入口 IP 收敛网段（接在哪/这段里有什么） | netdev-seccheck-auto（入口=网段：L0-L5 证据阶梯）——扩半径先经用户放行（addon 委托纪律） | segment-priors 知识表；netdev_probe depth 分档；段地图落 finding |
 | 告警问答（站点技能，若已安装；**入口在办公界面**——浏览器归办公 2026-09-06） | browser-IT-ops | 浏览器工具组（子代理驱动） |
 | 告警导出研判 / 定时巡检（站点技能，若已安装；**入口在办公界面**） | browser-cybersituational-awareness | 同上 + 通知策略 |
 | 日常全网巡检 | 总览的网络巡检卡（手动 + 定时，界面直达） | 结果进发现中心与巡检日志 |

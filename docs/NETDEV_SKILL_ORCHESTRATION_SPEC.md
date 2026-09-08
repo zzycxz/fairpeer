@@ -1,6 +1,11 @@
 # 运维技能编排收敛 Spec（NETDEV_SKILL_ORCHESTRATION_SPEC v1）
 
-> 日期：2026-09-07。状态：设计定稿，待实施（落地批次见 §9）。
+> 日期：2026-09-07。状态：**P1/P2 内核与 P3 本地项已落地（0.2.2，2026-09-08）**
+> ——两 -auto 子代理注册、断言式 body、别名下沉 Store.Read、L4 合同后校验、
+> 知识三表外置、netdev_probe 三合一、audit finding 同源、委托可见性、红测试 21 个
+> 全绿；**入口形态路由最后一公里已补（2026-09-08）：addon 主机/网段委托行 +
+> 扩半径委托侧纪律 + help 矩阵同步 + 守护测试**。剩余外围项：靶场三指标实测
+> （§8-P2 验证）、netdev 家族索引配额 lint、可选 netdev_log 合并（§6-3）。
 > 关联文档：SKILL_ARCHITECTURE_SPEC.md（技能体系总纲，本 spec 是其 netdev 章节
 > 的修订）、NETDEV_BLUETEAM_SKILL_SPEC.md（蓝队技能族规划，本 spec 修订其 §5.3
 > 入口卡设计）、NETDEV_WRITE_AUTHZ_SPEC.md（写授权两把锁，本 spec §7 引用其不变量）。

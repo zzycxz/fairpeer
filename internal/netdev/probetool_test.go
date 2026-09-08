@@ -103,3 +103,41 @@ func TestProbeSurfaceMergedInRegistry(t *testing.T) {
 		}
 	}
 }
+
+// 办公模式收口（browser_* 先例）：攻通道/知识表是编排内部面——注册但
+// 对主循环隐藏（Schemas 不含、Get 仍可解析供 FilterRegistry 子代理取用）；
+// 快诊面（exec/devices/backup/propose/baseline…）保持可见。
+func TestOrchestrationOnlyToolsHiddenFromMainLoop(t *testing.T) {
+	writeAuthTestEnv(t)
+	cfg := &config.Config{}
+	cfg.NetDev.Enabled = true
+	cfg.NetDev.Devices = []config.NetDevDevice{labDevice()}
+	reg := tool.NewRegistry()
+	RegisterTools(reg, cfg)
+
+	for _, name := range []string{"netdev_probe", "netdev_assess", "netdev_knowledge"} {
+		if !reg.IsHidden(name) {
+			t.Fatalf("%s must be hidden from the main-loop schema (orchestration-internal)", name)
+		}
+		if _, ok := reg.Get(name); !ok {
+			t.Fatalf("%s hidden must stay resolvable for subagent FilterRegistry", name)
+		}
+	}
+	hidden := map[string]bool{}
+	for _, s := range reg.Schemas() {
+		hidden[s.Name] = true
+	}
+	for _, name := range []string{"netdev_probe", "netdev_assess", "netdev_knowledge"} {
+		if hidden[name] {
+			t.Fatalf("%s must not ride the main-loop schema every turn", name)
+		}
+	}
+	for _, name := range []string{"netdev_exec", "netdev_devices", "netdev_fanout", "netdev_backup", "netdev_propose", "netdev_baseline", "netdev_cve_match"} {
+		if _, ok := reg.Get(name); !ok {
+			t.Fatalf("quick-diagnosis tool %s must stay registered", name)
+		}
+		if reg.IsHidden(name) {
+			t.Fatalf("quick-diagnosis tool %s must stay visible to the main loop", name)
+		}
+	}
+}

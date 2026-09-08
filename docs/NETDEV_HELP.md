@@ -4,8 +4,10 @@
 | 场景 | 首选 | 配套 |
 |---|---|---|
 | 网络故障排查 | netdev-diag-auto（整任务委托 sweep） | exec/fanout/snmp/topology/locate；结论立 finding+路径图 |
-| 内网安全评估 | netdev-security-assessment（阶段化） | discover/nmap/netprobe/assess（信封闸） |
+| 内网安全评估 | netdev-security-assessment（阶段化） | netdev_probe（depth 分档）/assess（信封闸） |
 | 漏洞核查（整批 sweep，隔离子代理） | netdev-seccheck-auto（入口=清单或套餐） | cve_match/baseline/exec/fanout；立案同步蓝队视图 |
+| 主机纵深排查（已拿到一台主机权限） | netdev-seccheck-auto（入口=主机：H0-H5+深度计） | credential-spots / host-risk-checks 知识表；跨段仅信封内定点 |
+| 入口 IP 收敛网段 | netdev-seccheck-auto（入口=网段：L0-L5 阶梯；扩半径先经用户放行） | segment-priors 表；netdev_probe depth 分档 |
 | 命令起草 | netdev-draft（NL→命令，读写分流） | 读类直执；写类走 propose |
 | 配置版本化/恢复 | netdev-config-vault | backup（diff-current）/propose |
 | 项目上线前审计 | netdev-seccheck-auto（入口=套餐）+ 项目审计页签 | 基线/CVE/日志/暴露面/信封内弱口令 |
