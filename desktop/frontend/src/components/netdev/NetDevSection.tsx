@@ -819,7 +819,10 @@ export function NetDevSection() {
                 {(OSES[editingDevice.vendor] ?? []).map(o => <option key={o} value={o}>{o}</option>)}
               </select>
             </Field>
-            <Field label={t("ndv.sets.fModel")}><input className="mem-input" value={editingDevice.model} onChange={e => setEditingDevice({ ...editingDevice, model: e.target.value })} /></Field>
+            <Field label={t("ndv.sets.fModel")}>
+              <input className="mem-input" value={editingDevice.model} onChange={e => setEditingDevice({ ...editingDevice, model: e.target.value })} />
+              <span className="mem-hint">{t("ndv.sets.fModelHint")}</span>
+            </Field>
             <Field label={t("ndv.sets.fAddress")}><input className="mem-input" value={editingDevice.address} onChange={e => setEditingDevice({ ...editingDevice, address: e.target.value })} /></Field>
             <Field label={t("ndv.sets.fPort")}><input className="mem-input" type="number" value={editingDevice.port} onChange={e => setEditingDevice({ ...editingDevice, port: Number(e.target.value) || 22 })} /></Field>
             <Field label={t("ndv.sets.fGroup")}>

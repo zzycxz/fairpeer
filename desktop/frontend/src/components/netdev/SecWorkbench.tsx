@@ -262,6 +262,13 @@ export function SecWorkbench({ devices, hidden }: {
     void save({ ...current, devices: ds.includes(name) ? ds.filter(d => d !== name) : [...ds, name] });
   };
 
+  // 匹配盲区（与后端 cve.go 的 hay 判空同口径）：厂商/系统/型号 三段全空的
+  // 设备不参与匹配——命不命中都看不见它，必须把数字摆出来用户才知道去补指纹。
+  const cveBlind = useMemo(() => {
+    const ok = devices.filter(d => `${d.vendor} ${d.os} ${d.model}`.trim() !== "").length;
+    return { ok, total: devices.length, blind: devices.length - ok };
+  }, [devices]);
+
   // ── CVE 视图（§2.3）：feed 导入 → 匹配清单 → 扫荡 ──────────────────────
   const cveFileRef = useRef<HTMLInputElement>(null);
   const cveImport = async () => {

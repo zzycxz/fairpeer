@@ -58,6 +58,10 @@ diff/files 证据此前只认 7 个编码写工具，办公 profile 的步骤签
 - **「从文件导入」**：NVD 原生导出几十 MB，textarea 承载不了——读本地 JSON 直接导入并自动刷新匹配，不经文本框（粘贴通道保留给小 feed/示例）
 - **CVE 透镜专用空态**：透镜为空时区分三种原因（未导入 feed / 未扫查 / 零命中——多半是设备厂商·系统·型号指纹字段为空），一键**直达**安全工作台 CVE 视图（复用 fairpeer:netdev-cve 事件）；原通用空态（跑基线）对其余透镜保留
 - **引导文案三处补齐**：`netdev_cve_match` 无 feed 引导提及示例按钮与文件导入（tools.go）；扫查空结果提示补零命中成因（设备指纹字段为空）；sweepEmptyHint 同步
+- **扫查改滚动发现（bug 修复）**：`MatchCVEsToFindings` 注释声称 re-runs update，实际每次 `SaveFinding` 新开一张卡——重复扫查把发现中心堆满重复的「CVE 匹配」卡。改走 `SaveRollingFinding`（同 cve:sweep 原地更新、保留首次立案时间），新增 TestCVESweepRolling 钉住「两次扫查一张卡、ID/时间稳定」
+- **转正自动匹配兑现（承诺补线）**：AssessFlowCard s3 文案承诺「转正后指纹→CVE 自动匹配」，但 `promoteDiscovered` 从未接线——现在转正成功后自动跑一次 CVE 扫查（有 feed 滚动更新发现卡；没 feed 静默跳过）
+- **匹配盲区可见性**：CVE 匹配视图显示「可参与匹配 N/M 台——K 台 厂商/系统/型号 为空（盲区）」（与后端 hay 判空同口径）；设备表单型号字段下加提示「三段是 CVE 匹配的输入」——把零命中最大的成因在录入端和匹配端都摆到明面
+- **stale tooltip 修正**：发现页「CVE 匹配」按钮提示指向不存在的「设置 → 运维 高级」粘贴入口，改为 安全工作台 → CVE（填入示例/粘贴/从文件导入）
 - **规格红线补例外裁决**：OPS_AUTOMATION_PLATFORM_SPEC §2.2 与 NETDEV_SPEC_V2 §617 的"不分发 CVE feed"补「入门示例档」例外——少量公开条目仅填框、不预置、不自动导入，对齐弱口令"默认档内置、字典自备"先例（2026-09-08 裁决）
 - **文档**：NETDEV_USAGE（docs + guides 两份）§G 补「CVE feed 格式与入门示例」——字段语义、products 与 厂商/系统/型号 的子串匹配规则、NVD 1.1/2.0 原生导出兼容、文件导入通道、覆盖语义
 

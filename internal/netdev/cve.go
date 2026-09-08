@@ -395,7 +395,9 @@ func (m *Manager) MatchCVEsToFindings() (*Finding, error) {
 		Status:     "active",
 	}
 	f.CreatedAt = time.Now()
-	if err := SaveFinding(f); err != nil {
+	// 滚动落卡（SaveRollingFinding）：同 Source（cve:sweep）原地更新而非每次
+	// 新开一张——重复扫查/转正自动匹配不会把发现中心堆满重复的「CVE 匹配」卡。
+	if err := SaveRollingFinding(f); err != nil {
 		return nil, err
 	}
 	return f, nil

@@ -55,6 +55,48 @@ func TestCVEFeedRoundTrip(t *testing.T) {
 	}
 }
 
+// Rolling sweep: repeated MatchCVEsToFindings runs update the ONE cve:sweep
+// finding in place (same id, same raise time) instead of piling duplicates —
+// pinned after 2026-09-08 found SaveFinding piling a new card per sweep.
+func TestCVESweepRolling(t *testing.T) {
+	dir := t.TempDir()
+	old := netdevStateDirOverr
+	oldF := findingsDirOverr
+	defer func() { netdevStateDirOverr = old; findingsDirOverr = oldF }()
+	netdevStateDirOverr = dir
+	findingsDirOverr = dir
+
+	feed := `{"cves":[{"id":"CVE-2026-0003","desc":"vrp flaw","products":["vrp"],"severity":"critical"}]}`
+	if _, err := ImportCVEFeed(feed); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{}
+	cfg.NetDev.Devices = []config.NetDevDevice{{Name: "gw-1", Vendor: "huawei", OS: "vrp8", Model: "AR6300"}}
+	m := NewManager(cfg)
+
+	f1, err := m.MatchCVEsToFindings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f2, err := m.MatchCVEsToFindings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ListFindings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("repeated sweeps must keep ONE rolling finding, got %d", len(got))
+	}
+	if got[0].ID != f1.ID || f2.ID != f1.ID {
+		t.Fatalf("rolling id must be stable: f1=%s f2=%s list=%s", f1.ID, f2.ID, got[0].ID)
+	}
+	if !got[0].CreatedAt.Equal(f1.CreatedAt) {
+		t.Fatalf("rolling raise time must stay at first sweep: %v vs %v", got[0].CreatedAt, f1.CreatedAt)
+	}
+}
+
 // NVD API 2.0 export ({"vulnerabilities":[...]}) converts and matches.
 func TestNVD20Import(t *testing.T) {
 	dir := t.TempDir()

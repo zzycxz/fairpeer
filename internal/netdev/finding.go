@@ -321,7 +321,11 @@ func ListFindings() ([]*Finding, error) {
 			continue
 		}
 		var f Finding
-		if json.Unmarshal(b, &f) == nil {
+		// Skip files that unmarshal into nothing finding-shaped: title is
+		// required at save time, so a title-less JSON is either a foreign file
+		// dropped in the dir (e.g. a test fixture sharing cves.json into this
+		// dir) or a corrupt write — it must never surface as an empty card.
+		if json.Unmarshal(b, &f) == nil && strings.TrimSpace(f.Title) != "" {
 			backfill(&f)
 			out = append(out, &f)
 		}
