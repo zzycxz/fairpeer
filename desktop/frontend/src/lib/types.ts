@@ -22,7 +22,8 @@ export type EventKind =
   | "steer"
   | "paused"
   | "resumed"
-  | "expert_collab";
+  | "expert_collab"
+  | "item";
 
 export interface WireCompaction {
   trigger?: string; // "auto" | "manual"
@@ -48,6 +49,18 @@ export interface WireCollab {
   rounds: WireCollabAnswer[][];
   synthesis: string;
   createdAt: number; // unix ms
+}
+
+// WireItemEvent is the payload of an "item" event: one item-model transition
+// (4-1 dual-track with the flat kinds). `item` is the kind-specific payload —
+// consumers switch on itemKind. Phase 1 only carries it to the frontend;
+// rendering migrates onto it later.
+export interface WireItemEvent {
+  phase: "item_started" | "item_delta" | "item_completed";
+  itemId: string;
+  itemKind: string; // "user_message" | "agent_message" | "reasoning" | "tool_call" | "approval" | …
+  delta?: string; // item_delta: the incremental text
+  item?: unknown; // started/completed: the full item payload
 }
 
 export interface WireProfile {
@@ -151,6 +164,7 @@ export interface WireEvent {
   ask?: WireAsk;
   compaction?: WireCompaction;
   collab?: WireCollab;
+  item?: WireItemEvent;
   err?: string;
   retryAttempt?: number;
   retryMax?: number;

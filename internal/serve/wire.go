@@ -1,6 +1,10 @@
 package serve
 
-import "github.com/zzycxz/fairpeer/internal/event"
+import (
+	"encoding/json"
+
+	"github.com/zzycxz/fairpeer/internal/event"
+)
 
 // wireEvent is the JSON shape an event.Event takes on the SSE stream. It uses
 // explicit lowercase tags (a clean contract for a JS client) and flattens the
@@ -23,6 +27,40 @@ type wireEvent struct {
 	RetryAttempt int   `json:"retryAttempt,omitempty"`
 	RetryMax     int   `json:"retryMax,omitempty"`
 	RetryAfterMs int64 `json:"retryAfterMs,omitempty"`
+	// Collab carries a finished expert-team collaboration (kind expert_collab).
+	Collab *wireCollab `json:"collab,omitempty"`
+	// Item carries an item-model transition (kind item; 4-1 dual-track with
+	// the flat kinds above).
+	Item *wireItem `json:"item,omitempty"`
+}
+
+// wireCollab is the JSON form of an event.Collab (kept in step with the
+// frontend WireCollab).
+type wireCollab struct {
+	RunID     string               `json:"runId"`
+	TeamID    string               `json:"teamId"`
+	TeamName  string               `json:"teamName"`
+	Task      string               `json:"task"`
+	Mode      string               `json:"mode"`
+	Rounds    [][]wireCollabAnswer `json:"rounds"`
+	Synthesis string               `json:"synthesis"`
+	CreatedAt int64                `json:"createdAt"`
+}
+
+type wireCollabAnswer struct {
+	ExpertName string `json:"expertName"`
+	Text       string `json:"text"`
+}
+
+// wireItem is the JSON form of an event.ItemEvent — the item-model transition
+// (started/delta/completed) dual-track with the flat kinds. Item is the raw
+// kind-specific payload; consumers switch on ItemKind.
+type wireItem struct {
+	Phase    string          `json:"phase"`
+	ItemID   string          `json:"itemId"`
+	ItemKind string          `json:"itemKind"`
+	Delta    string          `json:"delta,omitempty"`
+	Item     json.RawMessage `json:"item,omitempty"`
 }
 
 // wireCompaction is the JSON form of an event.Compaction. On a compaction_started
@@ -160,6 +198,9 @@ var kindNames = map[event.Kind]string{
 	event.MCPSurfaceReady:   "mcp_surface_ready",
 	event.Retrying:          "retrying",
 	event.Steer:             "steer",
+	event.Resumed:           "resumed",
+	event.ExpertCollab:      "expert_collab",
+	event.Item:              "item",
 }
 
 // toWireAsk converts an event.Ask into its JSON wire form.
@@ -251,8 +292,39 @@ func toWire(e event.Event) wireEvent {
 		w.RetryAttempt = e.RetryAttempt
 		w.RetryMax = e.RetryMax
 		w.RetryAfterMs = e.RetryAfterMs
+	case event.Resumed:
+		// kind-only: clears the frontend's paused indicator
+	case event.ExpertCollab:
+		w.Collab = toWireCollab(e.Collab)
+	case event.Item:
+		if e.Item != nil {
+			w.Item = toWireItem(e.Item)
+		}
 	}
 	return w
+}
+
+func toWireCollab(c event.Collab) *wireCollab {
+	rounds := make([][]wireCollabAnswer, len(c.Rounds))
+	for i, round := range c.Rounds {
+		ans := make([]wireCollabAnswer, len(round))
+		for j, a := range round {
+			ans[j] = wireCollabAnswer{ExpertName: a.ExpertName, Text: a.Text}
+		}
+		rounds[i] = ans
+	}
+	return &wireCollab{
+		RunID: c.RunID, TeamID: c.TeamID, TeamName: c.TeamName,
+		Task: c.Task, Mode: c.Mode, Rounds: rounds,
+		Synthesis: c.Synthesis, CreatedAt: c.CreatedAt,
+	}
+}
+
+func toWireItem(it *event.ItemEvent) *wireItem {
+	return &wireItem{
+		Phase: string(it.Phase), ItemID: it.ItemID, ItemKind: string(it.ItemKind),
+		Delta: it.Delta, Item: it.Item,
+	}
 }
 
 func toWireCacheDiagnostics(d *event.CacheDiagnostics) *wireCacheDiagnostics {

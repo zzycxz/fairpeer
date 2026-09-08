@@ -80,3 +80,38 @@ func TestToWire(t *testing.T) {
 		}
 	})
 }
+
+func TestToWireItemCollabResumedKinds(t *testing.T) {
+	t.Run("resumed kind-only", func(t *testing.T) {
+		w := toWire(event.Event{Kind: event.Resumed})
+		if w.Kind != "resumed" {
+			t.Errorf("resumed kind = %q", w.Kind)
+		}
+	})
+	t.Run("expert collab payload", func(t *testing.T) {
+		w := toWire(event.Event{Kind: event.ExpertCollab, Collab: event.Collab{
+			RunID: "r1", TeamID: "t1", TeamName: "netops", Task: "diagnose", Mode: "parallel",
+			Rounds:    [][]event.CollabAnswer{{{ExpertName: "A", Text: "ans A"}, {ExpertName: "B", Text: "ans B"}}},
+			Synthesis: "syn", CreatedAt: 1700000000,
+		}})
+		if w.Kind != "expert_collab" || w.Collab == nil {
+			t.Fatalf("collab wire = %+v / %+v", w, w.Collab)
+		}
+		if w.Collab.RunID != "r1" || w.Collab.TeamName != "netops" || len(w.Collab.Rounds) != 1 ||
+			len(w.Collab.Rounds[0]) != 2 || w.Collab.Rounds[0][1].ExpertName != "B" ||
+			w.Collab.Synthesis != "syn" || w.Collab.CreatedAt != 1700000000 {
+			t.Errorf("collab payload = %+v", w.Collab)
+		}
+	})
+	t.Run("item transition", func(t *testing.T) {
+		w := toWire(event.Event{Kind: event.Item, Item: &event.ItemEvent{
+			Phase: event.ItemDelta, ItemID: "i1", ItemKind: event.ItemAgentMessage, Delta: "hello",
+		}})
+		if w.Kind != "item" || w.Item == nil {
+			t.Fatalf("item wire = %+v / %+v", w, w.Item)
+		}
+		if w.Item.Phase != "item_delta" || w.Item.ItemID != "i1" || w.Item.ItemKind != "agent_message" || w.Item.Delta != "hello" {
+			t.Errorf("item payload = %+v", w.Item)
+		}
+	})
+}

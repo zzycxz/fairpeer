@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(wire): 三类事件序列化边界丢弃修复——Item 通线（Spec-5）+ resumed/expert_collab 两个实锤断流
+
+FAIRPEER_CODEX_GAP_SPEC Spec-5 落地，并把复核中发现的两个同类缺口一并修掉。internal/serve/wire.go 与 desktop/wire.go（手工保持同步的两份）的 kindNames 均缺三个 Kind：事件以 `{"kind":""}` 空帧发出、被前端 default 分支静默忽略：
+
+- **event.Item（Spec-5 本体）**：ItemAdapter 生成的 item 模型事件（started/delta/completed，4-1 双轨）此前在两处序列化边界全丢。双 wire.go 补 kind="item" + wireItem 载荷（phase/itemId/itemKind/delta/item 原文）；前端 types.ts 补 WireItemEvent 与 EventKind，useController 加显式 Phase-1 case（载荷到达、渲染仍走扁平事件，Phase 2 迁移）
+- **event.Resumed（实锤断流）**：agent.go 恢复暂停时发出、前端 `case "resumed"` 消费（清 Paused 徽标）——后端从未成功送达，暂停后前端永远不知道已恢复
+- **event.ExpertCollab（实锤断流）**：专家协作完成卡（EmitExpertCollab → 前端折叠卡渲染链路完整）——实时事件被剥空帧，用户只能在历史重载后才看到协作卡；补 wireCollab（runId/teamId/rounds/synthesis/createdAt，与前端 WireCollab 镜像）
+- 守护测试：TestToWireItemCollabResumedKinds 双包各一份，钉住三个 kind 的映射与载荷
+- 验证：go test internal/serve + internal/event + desktop 全绿；tsc 绿
+- 注：internal/serve/serve.go 存在历史遗留 gofmt 未格式化（import 排序），非本批引入，未顺手改以保持批次干净
+
 ### feat(desktop/terminal): TerminalPanel v2 接线——主终端双轨（一次性 pipe ⇄ 交互 PTY），ConPTY 端到端贯通
 
 FAIRPEER_CODEX_GAP_SPEC Spec-4 落地（复核后改为"接线"任务——ConPTY 后端与 xterm 前端组件此前均已建好、只是未挂载）：

@@ -699,6 +699,11 @@ function applyEvent(s: State, e: WireEvent): State {
       return { ...s, paused: true, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `p${s.seq}`, level: "info", text: e.text ?? "已暂停" }] };
     case "resumed":
       return { ...s, paused: false };
+    case "item":
+      // 4-1 item-model dual-track (Phase 1): the payload now reaches the
+      // frontend; rendering still consumes the flat kinds above. Phase 2
+      // migrates the transcript onto item events.
+      return s;
     case "approval_request": return { ...s, approval: e.approval };
     case "ask_request": return { ...s, ask: e.ask };
     case "turn_done": {
