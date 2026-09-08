@@ -198,19 +198,20 @@ func splitDevicePaths(paths []string) (files []string, devices []string) {
 
 // devicesProvenFromOpSteps is the cross-turn fallback for device references:
 // the per-turn evidence ledger resets each turn, but the OpStep ledger
-// persists (Turn-anchored). Every cited device must have at least one ok row;
-// failure/device-error rows never count.
+// persists (Turn-anchored). Every cited device must have at least one ok row
+// in the recent ledger window; failure/device-error rows never count. The
+// name match is case-insensitive — model citations drift in case
+// (ListOpSteps' own filter is exact, so the window is scanned here).
 func devicesProvenFromOpSteps(devices []string) bool {
-	rows := netdev.ListOpSteps("", 200)
-	okDevices := make(map[string]bool, len(rows))
-	for _, r := range rows {
+	okDevices := make(map[string]bool)
+	for _, r := range netdev.ListOpSteps("", 500) {
 		if r.Status == "ok" {
-			okDevices[r.Device] = true
+			okDevices[strings.ToLower(r.Device)] = true
 		}
 	}
 	for _, p := range devices {
 		name := deviceNameOf(p)
-		if name == "" || !okDevices[name] {
+		if name == "" || !okDevices[strings.ToLower(name)] {
 			return false
 		}
 	}

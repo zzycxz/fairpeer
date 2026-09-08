@@ -41,12 +41,16 @@ func requestsDir() string {
 }
 
 // NewRequest mints a request in `received` with a per-day sequential id
-// (REQ-YYYYMMDD-NNNN). Sequencing scans the directory for today's prefix —
-// file counts are small and minting is rare; no counter state to corrupt.
+// (REQ-YYYYMMDD-NNNN). Prefer MintAndSaveRequest on creation paths: mint and
+// persist must be one atomic step or two concurrent creators can mint the
+// same id (both scan the dir before either saves).
 func NewRequest(source, actor, text string) *Request {
 	now := time.Now()
+	mu.Lock()
+	id := mintRequestIDLocked(now)
+	mu.Unlock()
 	r := &Request{
-		ID:        mintRequestID(now),
+		ID:        id,
 		Source:    source,
 		Actor:     actor,
 		Text:      text,
@@ -57,7 +61,38 @@ func NewRequest(source, actor, text string) *Request {
 	return r
 }
 
-func mintRequestID(now time.Time) string {
+// MintAndSaveRequest creates the request and persists it under one lock —
+// the id-sequencing scan and the file write can't interleave with another
+// creator's, so concurrent ops_classify calls get distinct ids.
+func MintAndSaveRequest(source, actor, text string) (*Request, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	now := time.Now()
+	r := &Request{
+		ID:        mintRequestIDLocked(now),
+		Source:    source,
+		Actor:     actor,
+		Text:      text,
+		State:     StateReceived,
+		CreatedAt: now.UTC().Format(time.RFC3339),
+		UpdatedAt: now.UTC().Format(time.RFC3339),
+	}
+	dir := requestsDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	b, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := fileutil.AtomicWriteFile(filepath.Join(dir, r.ID+".json"), b, 0o600); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// mintRequestIDLocked is mintRequestID with mu already held.
+func mintRequestIDLocked(now time.Time) string {
 	prefix := fmt.Sprintf("REQ-%s-", now.Format("20060102"))
 	max := 0
 	if entries, err := os.ReadDir(requestsDir()); err == nil {

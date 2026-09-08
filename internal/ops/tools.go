@@ -87,7 +87,13 @@ func (ClassifyTool) Execute(_ context.Context, args json.RawMessage) (string, er
 		if strings.TrimSpace(p.Text) == "" {
 			return "", fmt.Errorf("新建请求必须带 text（用户原话诉求）")
 		}
-		r = NewRequest("chat", "agent", p.Text)
+		// Mint+persist atomically (concurrent creators must not mint the
+		// same id); classification fields land on the follow-up save below.
+		var err error
+		r, err = MintAndSaveRequest("chat", "agent", p.Text)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	r.Intent = p.Intent

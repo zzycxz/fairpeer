@@ -672,3 +672,22 @@ func TestCompleteStepSessionFallbackResolvesOfficeDiffPaths(t *testing.T) {
 		t.Fatalf("cross-turn office diff citation rejected: %v", err)
 	}
 }
+
+// 排查补强（2026-09-09 十遍清查）：设备名大小写漂移——模型引 "device:sw-01"、
+// 台账存 "SW-01" 时跨轮回退必须仍命中（ EqualFold 语义）。
+func TestCompleteStepDeviceEvidenceCaseInsensitive(t *testing.T) {
+	opdir := t.TempDir()
+	netdev.SetOpStepsDir(opdir)
+	t.Cleanup(func() { netdev.SetOpStepsDir("") })
+	step := netdev.OpStep{Device: "SW-01", Command: "sysname X", Status: "ok", DiffSummary: "+d"}
+	b, _ := json.Marshal(step)
+	if err := os.WriteFile(filepath.Join(opdir, "SW-01@1.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := evidence.WithLedger(context.Background(), evidence.NewLedger())
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"x","result":"y",
+		"evidence":[{"kind":"diff","summary":"lower-cased citation","paths":["device:sw-01"]}]}`)); err != nil {
+		t.Fatalf("case-drifted device citation should verify: %v", err)
+	}
+}

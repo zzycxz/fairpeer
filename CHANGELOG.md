@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(ops,evidence): 十遍清查修正三处——设备名大小写漂移漏配 + ops 请求编号并发撞号 + NewRequest 补锁
+
+对本会话全部 27 笔提交做十透镜逐行清查（构建/静态分析/四组逐文件审读/并发锁序/错误路径/行为回归/文档一致性）抓出并修正：
+
+- **设备引用大小写漂移**：complete_step 跨轮回退的设备名比对大小写敏感——引 `device:sw-01` 而台账存 `SW-01` 会漏配。改 ToLower 归一比对；语义明确为"近期台账窗口内存在 ok 行"；新增大小写漂移回归测试
+- **ops 请求编号并发撞号**：NewRequest 的 scan+mint 与 SaveRequest 非原子——两个并发 ops_classify 可同扫到同一 max 撞号覆盖。新增 MintAndSaveRequest（mint+落盘同一临界区），ops_classify 改用；新增并发安全说明
+- **NewRequest 补锁**：直调路径的 mint 也持 mu（原为无锁调 locked 版）
+- 其余七透镜未发现新问题（gofmt 三处标记均为历史遗留非本会话引入；race 检测器因环境无 gcc 不可用，以人工锁序审读+定向并发测试替代，如实记录）
+
 ### fix(netdev,frontend): 评审清仓——NETDEV-15/16 trap 双修 + FE-3 邮件阅读乱序保护（P2 清偿 21/22）
 
 - **NETDEV-15【P3】**：设备声明了 community 通道但 secret 此刻解析不出来时，原来猜 "public" 并强制比对——真实 community 非 public 的设备全部 trap 被静默丢弃。改为返回 ok=false 跳过比对（与未配置设备同一放行姿态，审计仍留痕）
