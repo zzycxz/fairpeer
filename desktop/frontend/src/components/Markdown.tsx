@@ -1,4 +1,4 @@
-import { memo, useEffect, useDeferredValue, useLayoutEffect, useRef, useState } from "react";
+import { memo, useContext, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -9,6 +9,7 @@ import { CodeViewer } from "./CodeViewer";
 import { MermaidViewer } from "./MermaidViewer";
 import { openAttachmentViewer } from "./AttachmentViewer";
 import { normalizeMath } from "./mathNormalize";
+import { SearchHighlightContext } from "../lib/searchHighlight";
 import { app, openExternal } from "../lib/bridge";
 
 // Markdown rendering via react-markdown + remark-gfm (tables, task lists,
@@ -154,6 +155,57 @@ const components: Components = {
   ),
 };
 
+// Search highlight (Spec-2 Phase 3): the transcript search query splits text
+// nodes at the HAST level — inside the markdown compile pipeline, so React
+// still owns a consistent tree (post-DOM wrapping would fight reconciliation).
+// Code blocks stay unhighlighted, matching editor find-in-file behavior.
+type HastNode = { type?: string; tagName?: string; value?: string; children?: HastNode[]; properties?: Record<string, unknown> };
+
+function splitWithMarks(text: string, q: string): HastNode[] | null {
+  const lower = text.toLowerCase();
+  let pos = lower.indexOf(q);
+  if (pos < 0) return null;
+  const out: HastNode[] = [];
+  let cursor = 0;
+  while (pos >= 0) {
+    if (pos > cursor) out.push({ type: "text", value: text.slice(cursor, pos) });
+    out.push({
+      type: "element",
+      tagName: "mark",
+      properties: { className: ["ts-mark"] },
+      children: [{ type: "text", value: text.slice(pos, pos + q.length) }],
+    });
+    cursor = pos + q.length;
+    pos = lower.indexOf(q, cursor);
+  }
+  if (cursor < text.length) out.push({ type: "text", value: text.slice(cursor) });
+  return out;
+}
+
+function highlightHastNode(node: HastNode, q: string): void {
+  if (!node.children) return;
+  if (node.tagName === "code" || node.tagName === "pre") return;
+  for (let i = 0; i < node.children.length; i++) {
+    const child = node.children[i];
+    if (child.type === "text" && typeof child.value === "string") {
+      const replaced = splitWithMarks(child.value, q);
+      if (replaced) {
+        node.children.splice(i, 1, ...replaced);
+        i += replaced.length - 1;
+      }
+    } else {
+      highlightHastNode(child, q);
+    }
+  }
+}
+
+function makeSearchHighlightPlugin(query: string) {
+  const q = query.trim().toLowerCase();
+  return function rehypeSearchHighlight(tree: HastNode) {
+    if (q) highlightHastNode(tree, q);
+  };
+}
+
 export const Markdown = memo(function Markdown({
   text,
   showCursor,
@@ -163,6 +215,8 @@ export const Markdown = memo(function Markdown({
 }) {
   const deferred = useDeferredValue(text);
   const containerRef = useRef<HTMLDivElement>(null);
+  const searchQuery = useDeferredValue(useContext(SearchHighlightContext));
+  const highlightPlugin = useMemo(() => makeSearchHighlightPlugin(searchQuery), [searchQuery]);
 
   // Inject / remove cursor after every React render cycle so the cursor
   // always sits at the tail of the current streaming content — without
@@ -181,7 +235,7 @@ export const Markdown = memo(function Markdown({
     <div className="md" ref={containerRef}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={searchQuery.trim() ? [rehypeKatex, highlightPlugin] : [rehypeKatex]}
         components={components}
       >
         {normalizeMath(deferred)}
