@@ -247,14 +247,26 @@ func (t PlanTool) validate(r *Request, steps []PlanStep) error {
 	return nil
 }
 
+// Link is one data-plane artifact hanging off a request (finding / proposal /
+// case / job) — injected by the profile so ops stays decoupled from netdev.
+type Link struct {
+	Kind  string `json:"kind"`
+	ID    string `json:"id"`
+	Title string `json:"title,omitempty"`
+}
+
 // StatusTool implements `ops_status`: one request's lifecycle trail, or the
 // recent request list when no id is given. Read-only by construction.
-type StatusTool struct{}
+// Links, when injected, lists the request's linked artifacts (Phase 1:
+// findings and proposals stamped with request_id).
+type StatusTool struct {
+	Links func(requestID string) []Link
+}
 
 func (StatusTool) Name() string { return "ops_status" }
 
 func (StatusTool) Description() string {
-	return "查看统一运维请求（Request）的状态：不传 request_id 时列出最近的请求（编号/来源/意图/风险/状态/更新时间）；传 request_id 时给出该请求的完整生命周期轨迹（状态历史、计划摘要）。运维平台把对话、定时任务、告警统一建模为带 request_id 的请求，后续诊断/变更/评估都挂在它下面——排查“之前那件事做到哪了”用它。"
+	return "查看统一运维请求（Request）的状态：不传 request_id 时列出最近的请求（编号/来源/意图/风险/状态/更新时间）；传 request_id 时给出该请求的完整生命周期轨迹（状态历史、计划摘要、挂在该请求下的发现与变更提案）。运维平台把对话、定时任务、告警统一建模为带 request_id 的请求，后续诊断/变更/评估都挂在它下面——排查“之前那件事做到哪了”用它。"
 }
 
 func (StatusTool) Schema() json.RawMessage {
@@ -269,7 +281,7 @@ func (StatusTool) Schema() json.RawMessage {
 
 func (StatusTool) ReadOnly() bool { return true }
 
-func (StatusTool) Execute(_ context.Context, args json.RawMessage) (string, error) {
+func (t StatusTool) Execute(_ context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		RequestID string `json:"request_id"`
 		Limit     int    `json:"limit"`
@@ -280,7 +292,7 @@ func (StatusTool) Execute(_ context.Context, args json.RawMessage) (string, erro
 		}
 	}
 	if id := strings.TrimSpace(p.RequestID); id != "" {
-		return statusDetail(id)
+		return statusDetail(id, t.Links)
 	}
 	return statusList(p.Limit)
 }
@@ -305,7 +317,7 @@ func statusList(limit int) (string, error) {
 	return b.String(), nil
 }
 
-func statusDetail(id string) (string, error) {
+func statusDetail(id string, links func(string) []Link) (string, error) {
 	r, err := GetRequest(id)
 	if err != nil {
 		return "", fmt.Errorf("找不到请求 %s（%v）——先用不带参数的 ops_status 列出可用编号", id, err)
@@ -319,6 +331,14 @@ func statusDetail(id string) (string, error) {
 		fmt.Fprintf(&b, "计划 %s：%d 步（审批: %s）\n", r.Plan.ID, len(r.Plan.Steps), r.Plan.Approval)
 		for _, s := range r.Plan.Steps {
 			fmt.Fprintf(&b, "  %s. %s %s %s（失败时 %s）\n", s.ID, s.Kind, s.Asset, s.Operation, orDash(s.OnFailure))
+		}
+	}
+	if links != nil {
+		if ls := links(r.ID); len(ls) > 0 {
+			b.WriteString("关联产出:\n")
+			for _, l := range ls {
+				fmt.Fprintf(&b, "  [%s] %s %s\n", l.Kind, l.ID, firstLine(l.Title, 60))
+			}
 		}
 	}
 	if len(r.StateHistory) > 0 {

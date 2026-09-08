@@ -71,6 +71,10 @@ type Finding struct {
 	// Stamped only when empty — a re-save keeps the original stamp; group
 	// membership is a view concern, the stamp is audit history.
 	Project string `json:"project,omitempty"`
+	// RequestID links the finding to its unified ops request
+	// (OPS_AUTOMATION_PLATFORM_SPEC Phase 1)：ops_status 据此把诊断产出
+	// 归到请求轨迹下。创建时校验编号存在于台账——拒绝静默挂错。
+	RequestID string `json:"request_id,omitempty"`
 }
 
 var (

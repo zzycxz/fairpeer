@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(ops): 运维平台 Phase 1 第三切片——Finding/Proposal 挂 request_id，产出物归属请求轨迹
+
+- **netdev_finding / netdev_propose 接受可选 `request_id`**：编号经台账存在性校验（fail-closed——拼错即拒绝，不静默挂错），落档到 Finding/Proposal 的新字段；两个工具的 schema 同步说明
+- **ops_status 详情新增「关联产出」段**：经注入式 Links 查询列出挂在该请求下的发现与变更提案（netdev 注入 requestLinks——ops 包不反向依赖 netdev，方向保持 netdev→ops）
+- Job/Case 的挂接留给其创建流 request 化时（Phase 2 编排器）——本片只动模型面的两个产出物
+- 测试：bogus 编号双拒（finding/propose 各一）+ 合法编号落档回读 + ops_status 关联段断言；ops/netdev 全量/boot 全绿
+
 ## [0.2.3] — 2026-09-08
 
 > 本版主题：codex 对标六项全量落地（终端双轨/对话搜索/证据链/事件架构/MCP 通知/分层卡片）、

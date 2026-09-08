@@ -117,6 +117,10 @@ type Proposal struct {
 	// 持久化，agent 下一轮读到变更即见被拒原因。
 	RejectedAt   time.Time `json:"rejected_at,omitempty"`
 	RejectReason string    `json:"reject_reason,omitempty"`
+	// RequestID links the proposal to its unified ops request
+	// (OPS_AUTOMATION_PLATFORM_SPEC Phase 1)：起草时校验编号在台账——
+	// ops_status 把变更产出归到请求轨迹下。
+	RequestID string `json:"request_id,omitempty"`
 	// 观察期（§7.1）：done → watching（默认 30 分钟）→ closed；劣化触发 Finding。
 	WatchUntil *time.Time `json:"watch_until,omitempty"`
 	WatchNote  string     `json:"watch_note,omitempty"`

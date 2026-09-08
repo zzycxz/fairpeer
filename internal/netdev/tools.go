@@ -665,7 +665,7 @@ func RegisterTools(reg *tool.Registry, cfg *config.Config) {
 	// 台账的入口/计划/状态三件套——对话/定时/告警统一为 request_id。
 	reg.Add(&ops.ClassifyTool{})
 	reg.Add(&ops.PlanTool{Assets: managedAssetNames(cfg)})
-	reg.Add(&ops.StatusTool{})
+	reg.Add(&ops.StatusTool{Links: requestLinks})
 	// ⑥ 可信域组（TRUSTDOMAIN_SPEC §15）：仅加入域的主机可见。
 	if cfg.TrustDomain.Enabled {
 		reg.Add(&fleetTool{cfg: cfg})
@@ -687,6 +687,28 @@ func managedAssetNames(cfg *config.Config) func() []string {
 		}
 		return names
 	}
+}
+
+// requestLinks feeds ops.StatusTool's 关联产出 section: the findings and
+// proposals stamped with a request_id (Phase 1's two model-facing artifacts;
+// cases/jobs join when their creation flows become request-aware).
+func requestLinks(requestID string) []ops.Link {
+	var out []ops.Link
+	if findings, err := ListFindings(); err == nil {
+		for _, f := range findings {
+			if f.RequestID == requestID {
+				out = append(out, ops.Link{Kind: "finding", ID: f.ID, Title: f.Title})
+			}
+		}
+	}
+	if proposals, err := ListProposals(); err == nil {
+		for _, p := range proposals {
+			if p.RequestID == requestID {
+				out = append(out, ops.Link{Kind: "proposal", ID: p.ID, Title: p.Intent})
+			}
+		}
+	}
+	return out
 }
 
 // fanoutTool — netdev_fanout: run ONE read-only command across many devices
@@ -1059,7 +1081,8 @@ func (t *findingTool) Schema() json.RawMessage {
 				"ref": {"type": "string"},
 				"link": {"type": "string"},
 				"confidence": {"type": "string", "enum": ["verified", "model"]}
-			}}
+			}},
+			"request_id": {"type": "string", "description": "归属的统一运维请求编号（ops_classify 取得；必须在台账中存在，否则拒绝）"}
 		},
 		"required": ["title", "evidence"]
 	}`)
@@ -1071,6 +1094,11 @@ func (t *findingTool) Execute(ctx context.Context, args json.RawMessage) (string
 	var f Finding
 	if err := json.Unmarshal(args, &f); err != nil {
 		return "", err
+	}
+	if f.RequestID != "" {
+		if _, err := ops.GetRequest(f.RequestID); err != nil {
+			return "", fmt.Errorf("request_id %q 不在统一请求台账——先 ops_classify 拿编号（拒绝静默挂错）", f.RequestID)
+		}
 	}
 	if err := SaveFinding(&f); err != nil {
 		return "", err
@@ -1107,7 +1135,8 @@ func (t *proposeTool) Schema() json.RawMessage {
 				},
 				"required": ["device", "commands", "rollback"]
 			}},
-			"restore_from": {"type": "string", "description": "backup version id (device@nanos) when this proposal RESTORES a device to a stored version — validated against the vault and recorded for audit; the restoring steps must target that device"}
+			"restore_from": {"type": "string", "description": "backup version id (device@nanos) when this proposal RESTORES a device to a stored version — validated against the vault and recorded for audit; the restoring steps must target that device"},
+			"request_id": {"type": "string", "description": "归属的统一运维请求编号（ops_classify 取得；必须在台账中存在，否则拒绝）"}
 		},
 		"required": ["intent", "steps"]
 	}`)
@@ -1120,6 +1149,7 @@ func (t *proposeTool) Execute(ctx context.Context, args json.RawMessage) (string
 		Intent      string         `json:"intent"`
 		Steps       []ProposalStep `json:"steps"`
 		RestoreFrom string         `json:"restore_from"`
+		RequestID   string         `json:"request_id"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", err
@@ -1129,7 +1159,12 @@ func (t *proposeTool) Execute(ctx context.Context, args json.RawMessage) (string
 			return "", err
 		}
 	}
-	p := &Proposal{Intent: a.Intent, Steps: a.Steps, Status: ProposalDraft, RestoreFrom: a.RestoreFrom}
+	if a.RequestID != "" {
+		if _, err := ops.GetRequest(a.RequestID); err != nil {
+			return "", fmt.Errorf("request_id %q 不在统一请求台账——先 ops_classify 拿编号（拒绝静默挂错）", a.RequestID)
+		}
+	}
+	p := &Proposal{Intent: a.Intent, Steps: a.Steps, Status: ProposalDraft, RestoreFrom: a.RestoreFrom, RequestID: a.RequestID}
 	if err := t.m.ValidateProposal(p); err != nil {
 		return "", err
 	}
