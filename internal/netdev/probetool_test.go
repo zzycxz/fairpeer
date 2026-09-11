@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/netdev/knowledge"
 	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
@@ -177,5 +178,68 @@ func TestProbeAliasesPreserveOldCalls(t *testing.T) {
 	n := &probeAliasTool{oldName: "netdev_netprobe", mode: "netprobe", inner: &probeTool{m: NewManager(cfg)}}
 	if _, err := n.Execute(t.Context(), []byte(`{"cidr":"192.0.2.0/24"}`)); err == nil || !strings.Contains(err.Error(), "engagement") {
 		t.Fatalf("netprobe alias must pass the envelope gate through: %v", err)
+	}
+}
+
+// 批 D②审查修复：形状注解的网关位以 gateway_candidates 交集为准（.254 是
+// 网关候选、.2 不是），ports 型信号命中按表给角色候选。
+func TestProbeL4Shape(t *testing.T) {
+	priors := &segmentPriors{
+		GatewayCandidates: []string{".1", ".254"},
+		RoleSignals: []struct {
+			Ports           []string `yaml:"ports"`
+			PrinterOUIDense bool     `yaml:"printer_oui_dense"`
+			SNMPHit         bool     `yaml:"snmp_community_hit"`
+			Role            string   `yaml:"role"`
+			Action          string   `yaml:"action"`
+		}{
+			{Ports: []string{"445", "88"}, Role: "域段", Action: "优先核查队列"},
+		},
+	}
+	// 仅网关位活（.1+.254 都在候选集）→ 候选已验证段，而非「多点分布」。
+	out := probeL4Shape("10.30.2.0/24", 2, 5,
+		map[string]bool{"10.30.2.1": true, "10.30.2.254": true},
+		[]string{"10.30.2.1", "10.30.2.254"},
+		map[int]bool{22: true}, priors)
+	if !strings.Contains(out, "仅网关位活") {
+		t.Fatalf(".1+.254 hits must read gateway-only: %q", out)
+	}
+	if !strings.Contains(out, "printer_oui_dense") {
+		t.Fatalf("non-ports signals must be honestly declared out of scope: %q", out)
+	}
+	// 445 开放 → 域段信号行出现。
+	out = probeL4Shape("10.30.2.0/24", 2, 5,
+		map[string]bool{"10.30.2.1": true},
+		[]string{"10.30.2.1", "10.30.2.100"},
+		map[int]bool{22: true, 445: true}, priors)
+	if !strings.Contains(out, "域段") {
+		t.Fatalf("445 hit must fire the role signal: %q", out)
+	}
+}
+
+// D2 审查补钉：真实 segment-priors.yaml → segmentPriors 的往返——具名字段
+// 的 yaml tag 不受编译保护，写错会静默零值（role_signals 永不触发）。
+func TestLoadSegmentPriorsShipped(t *testing.T) {
+	knowledge.SetStateDir(t.TempDir())
+	p, err := loadSegmentPriors()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.GatewayCandidates) == 0 || len(p.SamplePoints) == 0 {
+		t.Fatalf("gateway/sample points must round-trip: %+v", p)
+	}
+	if len(p.RoleSignals) == 0 {
+		t.Fatalf("role_signals must round-trip (445/88 域段信号依赖它): %+v", p)
+	}
+	hasDomain := false
+	for _, s := range p.RoleSignals {
+		for _, port := range s.Ports {
+			if port == "445" {
+				hasDomain = true
+			}
+		}
+	}
+	if !hasDomain {
+		t.Fatalf("445 域段信号 missing from shipped table: %+v", p.RoleSignals)
 	}
 }

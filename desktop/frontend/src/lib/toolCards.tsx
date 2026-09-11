@@ -10,9 +10,12 @@
 // ToolCard pipeline, so one registration serves all three layouts.
 import { useState } from "react";
 import type { ReactNode } from "react";
+import { FolderSearch } from "lucide-react";
 import { Markdown } from "../components/Markdown";
 import { CodeViewer } from "../components/CodeViewer";
+import { openAttachmentViewer } from "../components/AttachmentViewer";
 import { useT } from "./i18n";
+import { app } from "./bridge";
 import type { Item } from "./useController";
 
 export type ToolItem = Extract<Item, { kind: "tool" }>;
@@ -78,17 +81,53 @@ function ShellCardBody({ item }: { item: ToolItem }) {
   );
 }
 
-// OfficeWriteCardBody (Spec-1.2): office writers produce a file, not code —
+// OfficeWriteCardBody (Spec-1.2, X6): office writers produce a file, not code —
 // show the target path (doc_convert also its source) and the tool's own
-// summary output, instead of the raw args JSON.
-function OfficeWriteCardBody({ item }: { item: ToolItem }) {
+// summary output, instead of the raw args JSON. The path row is actionable
+// (X6): clicking opens the artifact (editor; default browser for .html
+// markmap pages), a folder icon reveals it, and `preview` adds a 预览 button
+// that reuses the attachment lightbox — its ReadFile pipeline already
+// text-extracts docx/xlsx/pptx and streams PDFs natively.
+function OfficeWriteCardBody({ item, preview }: { item: ToolItem; preview?: boolean }) {
+  const t = useT();
   const path = argField(item, "path", "file_path", "out_path");
   const source = argField(item, "source_path", "path");
+  // markmap .html output is an interactive page (scripts + CDN) — the editor
+  // and the sandboxed lightbox can't render it, so it opens in the browser.
+  const isHtml = path.toLowerCase().endsWith(".html");
+  const settled = item.status === "done" && !item.error;
+  const name = path.split(/[/\\]/).filter(Boolean).pop() ?? path;
   return (
     <div className="toolcard-office">
       {path && (
-        <div className="toolcard-office__path">
-          {source && source !== path ? `${source} → ${path}` : path}
+        <div className="toolcard-office__pathrow">
+          <button
+            type="button"
+            className="toolcard-office__path toolcard-office__path--link"
+            title={`${path} — ${isHtml ? t("common.openInBrowser") : t("common.openInEditor")}`}
+            onClick={() => {
+              void (isHtml ? app.OpenWorkspacePath(path) : app.OpenInEditorAt(path, 0)).catch(() => {});
+            }}
+          >
+            {source && source !== path ? `${source} → ${path}` : path}
+          </button>
+          <button
+            type="button"
+            className="tool__editor-open"
+            title={t("workspace.revealInFileManager")}
+            onClick={() => { void app.RevealWorkspacePath(path).catch(() => {}); }}
+          >
+            <FolderSearch size={11} />
+          </button>
+          {preview && settled && (
+            <button
+              type="button"
+              className="tool__showall"
+              onClick={() => openAttachmentViewer({ path, name, kind: "file", source: "workspace" })}
+            >
+              {t("common.preview")}
+            </button>
+          )}
         </div>
       )}
       {item.output && <CodeViewer value={item.output} maxHeight={200} />}
@@ -190,11 +229,20 @@ const registry: Record<string, ToolCardSpec> = {
   // branch — returning undefined defers to it (avoids rendering both).
   bash: { body: (item) => (item.isShell ? undefined : <ShellCardBody item={item} />) },
   // Office writers (Spec-1): target path + tool summary instead of args JSON.
-  doc_write: { body: (item) => <OfficeWriteCardBody item={item} /> },
+  // X6: the path row is clickable (editor / browser for .html), carries a
+  // reveal affordance, and doc/xlsx writes offer 预览 via the attachment
+  // lightbox (text extraction / native PDF) on success.
+  doc_write: { body: (item) => <OfficeWriteCardBody item={item} preview /> },
   csv_write: { body: (item) => <OfficeWriteCardBody item={item} /> },
-  xlsx_write: { body: (item) => <OfficeWriteCardBody item={item} /> },
+  xlsx_write: { body: (item) => <OfficeWriteCardBody item={item} preview /> },
   mindmap_create: { body: (item) => <OfficeWriteCardBody item={item} /> },
   doc_convert: { body: (item) => <OfficeWriteCardBody item={item} /> },
+  // Office readers (X6): same card shape — a clickable source path (header
+  // link already existed; now the body row matches) above the extracted
+  // content, instead of the generic args JSON dump.
+  doc_read: { body: (item) => <OfficeWriteCardBody item={item} /> },
+  xlsx_read: { body: (item) => <OfficeWriteCardBody item={item} /> },
+  csv_read: { body: (item) => <OfficeWriteCardBody item={item} /> },
   email_send: { body: (item) => <EmailCardBody item={item} /> },
   // 签核卡（Spec-3 / NETDEV_OPSTEP_EVIDENCE_SPEC）：步骤 + 证据行 + device 徽标；
   // noQuiet——签核是审计痕迹，完成后不淡出。

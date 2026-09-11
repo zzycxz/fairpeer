@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronsUpDown, Shield, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Check, ChevronsUpDown, List, Shield, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useT } from "../lib/i18n";
 import type { DictKey } from "../lib/i18n";
 import type { ToolApprovalMode } from "../lib/types";
@@ -14,6 +14,11 @@ import { Tooltip } from "./Tooltip";
 // while the full explanation is still one hover away. The trigger is tinted per
 // mode (full access reads as a warning) because the active posture is
 // safety-relevant state the user should see without opening anything.
+//
+// Below the three tiers sits a separated plan-mode row: an exposure alias of
+// the intent-menu toggle (same CollaborationMode axis), NOT a fourth permission
+// tier — plan composes with any of the three postures, so it must render as a
+// checkbox with a switch, never as a radio peer of ask/auto/yolo.
 const MODES: Array<{
   value: ToolApprovalMode;
   icon: typeof Shield;
@@ -48,10 +53,16 @@ export function ApprovalModeSwitcher({
   mode,
   disabled = false,
   onPick,
+  planModeOn,
+  planDisabled = false,
+  onTogglePlanMode,
 }: {
   mode: ToolApprovalMode;
   disabled?: boolean;
   onPick: (mode: ToolApprovalMode) => void;
+  planModeOn: boolean;
+  planDisabled?: boolean;
+  onTogglePlanMode: () => void;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -139,6 +150,25 @@ export function ApprovalModeSwitcher({
               </button>
             </Tooltip>
           ))}
+        </div>
+        <div className="composer-access-menu__section">
+          <div className="composer-access-menu__label">{t("composer.intentMenuTitle")}</div>
+          <Tooltip label={t("composer.planModeDesc")} side="top">
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={planModeOn}
+              className={`composer-access-menu__item approvalsw__item${planModeOn ? " composer-access-menu__item--active" : ""}`}
+              disabled={planDisabled}
+              onClick={() => closeMenu(() => onTogglePlanMode())}
+            >
+              <List size={15} />
+              <span className="composer-access-menu__title approvalsw__label">{t("composer.accessPlan")}</span>
+              <span className={`composer-intent-switch${planModeOn ? " composer-intent-switch--on" : ""}`} aria-hidden="true">
+                <span />
+              </span>
+            </button>
+          </Tooltip>
         </div>
       </AnchoredPopover>
     </div>

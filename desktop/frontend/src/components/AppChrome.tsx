@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { CalendarDays, Code2, Command, Minus, Network, PanelLeft, PanelRight, Square, TerminalSquare, X, Copy } from "lucide-react";
+import { BellRing, Briefcase, Code2, Command, Minus, Network, PanelLeft, PanelRight, Square, TerminalSquare, X, Copy } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { TabMeta } from "../lib/types";
 import { useT } from "../lib/i18n";
@@ -42,6 +42,13 @@ interface AppChromeProps {
   onToggleTerminal?: () => void;
   // Command palette (⌘K / Ctrl+K) — icon button in the right cluster.
   onOpenPalette?: () => void;
+  // Cross-tab approval badge (X8b): count of tabs (any, not just the active
+  // one) blocked on an approval/ask prompt. The modal only renders in the
+  // owning tab, so this is the chrome-level summary that makes a background
+  // tab's pending decision visible everywhere. Clicking jumps to the first
+  // pending tab when a handler is supplied.
+  approvalPendingCount?: number;
+  onOpenApprovalPending?: () => void;
   // Product profile (dev/cowork). profile is the active tab's mode; onSwitchProfile
   // rebuilds the controller with the new profile's bundle.
   profile: string;
@@ -55,6 +62,8 @@ export function AppChrome({
   terminalOpen,
   onToggleTerminal,
   onOpenPalette,
+  approvalPendingCount,
+  onOpenApprovalPending,
   sidebarTogglePressed,
   sidebarExpandBlocked,
   sidebarCollapsed,
@@ -80,7 +89,10 @@ export function AppChrome({
 
   const [isMaximized, setIsMaximized] = useState(false);
   useEffect(() => {
-    if (platform !== "windows" || !(window as any).runtime) return;
+    // macOS renders native traffic lights and never shows the in-app cluster,
+    // so maximise-state polling is meaningless there; Windows and Linux both
+    // use this component's controls (Frameless:true is global in main.go).
+    if (platform === "darwin" || !(window as any).runtime) return;
     const checkMax = () => {
       WindowIsMaximised().then(setIsMaximized).catch(() => {});
     };
@@ -158,6 +170,21 @@ export function AppChrome({
         </>
       )}
 
+      {/* Cross-tab approval badge (X8b): a warn-tinted pill left of the
+          palette toggle. Passive indicator unless a jump handler is wired —
+          same right-cluster grammar as its icon neighbours. */}
+      {(approvalPendingCount ?? 0) > 0 && (
+        <button
+          className="app-chrome__approval-badge"
+          type="button"
+          onClick={onOpenApprovalPending}
+          title={t("chrome.approvalPending", { n: approvalPendingCount ?? 0 })}
+          aria-label={t("chrome.approvalPending", { n: approvalPendingCount ?? 0 })}
+        >
+          <BellRing size={14} />
+          <span className="app-chrome__approval-badge-count">{approvalPendingCount}</span>
+        </button>
+      )}
       {/* Command palette (⌘K): icon-only, same grammar as its neighbours.
           Rendered in EVERY mode — the chrome's right cluster is part of the
           shared framework (parity with the coding view). */}
@@ -204,21 +231,42 @@ export function AppChrome({
           <PanelRight size={16} />
         </button>
       )}
-      {/* Profile segmented switcher was moved to the sidebar */}
-      {platform === "windows" && (
-        <div 
-          className="app-chrome__window-controls app-chrome__window-controls--windows" 
-          aria-hidden="true"
+      {/* Window controls: the window is Frameless on Windows AND Linux
+          (desktop/main.go Frameless:true global), so both need this cluster.
+          macOS has native traffic lights (TitleBarHiddenInset) and must not
+          render a duplicate. Buttons (not spans) so keyboard/AT users can
+          reach minimise/maximise/close. */}
+      {platform !== "darwin" && (
+        <div
+          className={`app-chrome__window-controls app-chrome__window-controls--${platform}`}
         >
-          <span className="app-chrome__window-control app-chrome__window-control--minimize" onClick={() => (window as any).runtime && WindowMinimise()}>
+          <button
+            type="button"
+            className="app-chrome__window-control app-chrome__window-control--minimize"
+            onClick={() => (window as any).runtime && WindowMinimise()}
+            aria-label={t("chrome.windowMinimize")}
+            title={t("chrome.windowMinimize")}
+          >
             <Minus size={12} strokeWidth={1.9} />
-          </span>
-          <span className="app-chrome__window-control app-chrome__window-control--maximize" onClick={() => (window as any).runtime && WindowToggleMaximise()}>
+          </button>
+          <button
+            type="button"
+            className="app-chrome__window-control app-chrome__window-control--maximize"
+            onClick={() => (window as any).runtime && WindowToggleMaximise()}
+            aria-label={t("chrome.windowMaximize")}
+            title={t("chrome.windowMaximize")}
+          >
             {isMaximized ? <Copy size={10} strokeWidth={1.8} /> : <Square size={10} strokeWidth={1.8} />}
-          </span>
-          <span className="app-chrome__window-control app-chrome__window-control--close" onClick={() => (window as any).runtime && Quit()}>
+          </button>
+          <button
+            type="button"
+            className="app-chrome__window-control app-chrome__window-control--close"
+            onClick={() => (window as any).runtime && Quit()}
+            aria-label={t("chrome.windowClose")}
+            title={t("chrome.windowClose")}
+          >
             <X size={12} strokeWidth={1.9} />
-          </span>
+          </button>
         </div>
       )}
     </header>
@@ -243,7 +291,7 @@ const PROFILE_SEGMENTS: ReadonlyArray<{
   Icon: LucideIcon;
 }> = [
   { key: "dev", labelKey: "cowork.badgeDev", titleKey: "cowork.switchToDev", Icon: Code2 },
-  { key: "cowork", labelKey: "cowork.badgeCoWork", titleKey: "cowork.switchToCoWork", Icon: CalendarDays },
+  { key: "cowork", labelKey: "cowork.badgeCoWork", titleKey: "cowork.switchToCoWork", Icon: Briefcase },
   { key: "netdev", labelKey: "cowork.badgeNetDev", titleKey: "cowork.switchToNetDev", Icon: Network },
 ];
 

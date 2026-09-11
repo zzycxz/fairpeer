@@ -236,11 +236,18 @@ func runAgent(args []string) int {
 	if rc := chdirTo(*dir); rc != 0 {
 		return rc
 	}
-	cfg, _ := config.Load()
-	// Surface load-time notices (e.g. untrusted-project plugin/MCP skips from
-	// the G3 trust gate) — run mode has no welcome banner to carry them.
-	for _, w := range cfg.UntrustedProjectNotices {
-		fmt.Fprintln(os.Stderr, "note: "+w)
+	// cfg can be nil when the project config fails to parse — report the load
+	// error and continue on defaults; the notice loop must not nil-deref (P1-1).
+	cfg, loadErr := config.Load()
+	if loadErr != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, loadErr)
+	}
+	if cfg != nil {
+		// Surface load-time notices (e.g. untrusted-project plugin/MCP skips from
+		// the G3 trust gate) — run mode has no welcome banner to carry them.
+		for _, w := range cfg.UntrustedProjectNotices {
+			fmt.Fprintln(os.Stderr, "note: "+w)
+		}
 	}
 	configureCLIThemeFromConfigForTTYOutput()
 
@@ -395,6 +402,7 @@ func runServe(args []string) int {
 
 	fmt.Printf("fairpeer serve — %s on http://%s\n", ctrl.Label(), displayAddr(*addr))
 	srv := serve.New(ctrl, bc)
+	srv.SetNotifySink(sink)
 	if *token != "" {
 		srv.SetAuthToken(*token)
 		fmt.Println("auth: bearer token enabled (Authorization: Bearer <token> or ?token=…)")
@@ -415,14 +423,15 @@ func runServe(args []string) int {
 	return 0
 }
 
-// isLoopbackHost reports whether the bind host is loopback (or a wildcard,
-// which for this warning's purpose is "reachable from the network").
+// isLoopbackHost reports whether the bind host is loopback only. A wildcard
+// or empty host (":8787" binds all interfaces) is NOT loopback — it must not
+// suppress the no-token warning.
 func isLoopbackHost(host string) bool {
-	switch host {
-	case "localhost", "127.0.0.1", "::1", "":
+	if host == "localhost" {
 		return true
 	}
-	return net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // displayAddr rewrites a wildcard listen address into the URL a local user can
@@ -1478,37 +1487,40 @@ func groupByFamily(providers []config.ProviderEntry) ([]string, map[string][]int
 // data from its own registry); the generic family flow below handles the key
 // prompt and the live /models probe, so an entry here is all it takes.
 func cloudVendorPresets() []config.ProviderEntry {
-	mk := func(name, baseURL, keyEnv, def, fast string, models []string, vision bool) config.ProviderEntry {
+	mk := func(name, baseURL, keyEnv, def, fast string, models []string, vision bool, ctx int) config.ProviderEntry {
 		e := config.ProviderEntry{Name: name, Kind: "openai", BaseURL: baseURL, APIKeyEnv: keyEnv,
-			Default: def, FastModel: fast, Models: models}
+			Default: def, FastModel: fast, Models: models, ContextWindow: ctx}
 		if vision {
 			e.Vision = true
 		}
 		return e
 	}
+	// ctx mirrors fairpeer.example.toml's context_window per vendor (NEW-22:
+	// without it compaction is disabled entirely for wizard-configured
+	// vendors — the session grows until a hard API overflow).
 	return []config.ProviderEntry{
 		mk("qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1", "QWEN_API_KEY", "qwen3.7-max", "qwen3.6-flash",
-			[]string{"qwen3.7-max", "qwen3.7-plus", "qwen3.6-flash"}, true),
+			[]string{"qwen3.7-max", "qwen3.7-plus", "qwen3.6-flash"}, true, 1_000_000),
 		mk("deepseek", "https://api.deepseek.com", "DEEPSEEK_API_KEY", "deepseek-v4-pro", "deepseek-v4-flash",
-			[]string{"deepseek-v4-pro", "deepseek-v4-flash"}, true),
+			[]string{"deepseek-v4-pro", "deepseek-v4-flash"}, true, 1_000_000),
 		mk("volcengine", "https://ark.cn-beijing.volces.com/api/v3", "VOLCENGINE_API_KEY", "doubao-seed-evolving", "doubao-seed-2.1-turbo",
-			[]string{"doubao-seed-evolving", "doubao-seed-2.1-turbo"}, true),
+			[]string{"doubao-seed-evolving", "doubao-seed-2.1-turbo"}, true, 1_000_000),
 		mk("zhipu", "https://open.bigmodel.cn/api/paas/v4", "ZHIPU_API_KEY", "glm-5.2", "glm-4.7-flash",
-			[]string{"glm-5.2", "glm-5v-turbo", "glm-4.7-flash"}, true),
+			[]string{"glm-5.2", "glm-5v-turbo", "glm-4.7-flash"}, true, 1_000_000),
 		mk("minimax", "https://api.minimaxi.com/v1", "MINIMAX_API_KEY", "minimax-m3", "minimax-m2.5",
-			[]string{"minimax-m3", "minimax-m2.5"}, true),
+			[]string{"minimax-m3", "minimax-m2.5"}, true, 1_000_000),
 		mk("moonshot", "https://api.moonshot.cn/v1", "MOONSHOT_API_KEY", "kimi-k3", "kimi-k2.6",
-			[]string{"kimi-k3", "kimi-k2.6"}, true),
+			[]string{"kimi-k3", "kimi-k2.6"}, true, 1_000_000),
 		mk("mimo", "https://api.xiaomimimo.com/v1", "MIMO_API_KEY", "mimo-v2.5-pro", "mimo-v2.5",
-			[]string{"mimo-v2.5-pro", "mimo-v2.5"}, true),
+			[]string{"mimo-v2.5-pro", "mimo-v2.5"}, true, 1_000_000),
 		mk("stepfun", "https://api.stepfun.com/v1", "STEPFUN_API_KEY", "step-3.7-flash", "step-3.5-flash",
-			[]string{"step-3.7-flash", "step-3.5-flash"}, true),
+			[]string{"step-3.7-flash", "step-3.5-flash"}, true, 256_000),
 		mk("xfyun", "https://spark-api-open.xf-yun.com/v1", "XFYUN_API_KEY", "glm-5.2", "qwen3.6-35b-a3b",
-			[]string{"glm-5.2", "qwen3.5-397b-a17b", "qwen3.6-35b-a3b"}, false),
+			[]string{"glm-5.2", "qwen3.5-397b-a17b", "qwen3.6-35b-a3b"}, true, 128_000),
 		mk("openai", "https://api.openai.com/v1", "OPENAI_API_KEY", "gpt-5.6-terra", "gpt-5.6-luna",
-			[]string{"gpt-5.6-terra", "gpt-5.6-luna"}, true),
+			[]string{"gpt-5.6-terra", "gpt-5.6-luna"}, true, 1_050_000),
 		mk("xai", "https://api.x.ai/v1", "XAI_API_KEY", "grok-4.6", "grok-4.5",
-			[]string{"grok-4.6", "grok-4.5", "grok-4.3"}, true),
+			[]string{"grok-4.6", "grok-4.5", "grok-4.3"}, true, 500_000),
 	}
 }
 

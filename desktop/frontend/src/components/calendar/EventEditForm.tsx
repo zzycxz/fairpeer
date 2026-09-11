@@ -10,10 +10,18 @@
 // In edit mode a Delete button is offered via onDelete.
 
 import { useState } from "react";
-import { X } from "lucide-react";
+import { X, Zap } from "lucide-react";
 
 import type { CalendarEventInput, CalendarEventView } from "../../lib/types";
 import { useT } from "../../lib/i18n";
+
+// Running-partition options for the event's 到点动作 (the compiled task runs
+// in this profile's context). Same set as TaskForm's selector.
+const PROFILE_OPTIONS = [
+  { value: "dev", label: "编码" },
+  { value: "cowork", label: "办公" },
+  { value: "netdev", label: "运维" },
+] as const;
 
 // toLocalInput produces a "YYYY-MM-DDTHH:MM" string from a Date suitable as a
 // value for <input type="datetime-local">. datetime-local does not carry a
@@ -33,11 +41,17 @@ function defaultStartForNew(): string {
 
 export function EventEditForm({
   initial,
+  initialActionPrompt,
+  defaultProfile = "cowork",
   onSubmit,
   onDelete,
   onCancel,
 }: {
   initial: CalendarEventView | null;
+  // Seeds the 到点动作 textarea in edit mode (the linked task's prompt — the
+  // panel looks it up from the loaded task list).
+  initialActionPrompt?: string;
+  defaultProfile?: string;
   onSubmit: (input: CalendarEventInput) => Promise<void>;
   onDelete?: () => Promise<void>;
   onCancel: () => void;
@@ -58,6 +72,12 @@ export function EventEditForm({
   // parsed back to number[] / string[] on submit.
   const [reminders, setReminders] = useState((initial?.reminders ?? []).join(","));
   const [tags, setTags] = useState((initial?.tags ?? []).join(","));
+  // P4 到点动作: a non-empty prompt compiles the event with a linked one-shot
+  // task firing at the event's start. The event's own partition carries over
+  // as the task's run identity (this form is human-only by construction).
+  const [actionPrompt, setActionPrompt] = useState(initialActionPrompt ?? "");
+  const [actionProfile, setActionProfile] = useState(initial?.profile || defaultProfile);
+  const hasRecurrence = !!(initial?.recurrence ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>("");
 
@@ -93,6 +113,8 @@ export function EventEditForm({
         recurrenceEnd: initial?.recurrenceEnd ?? "",
         reminders: parseReminders(reminders),
         tags: tags.split(",").map((s) => s.trim()).filter(Boolean),
+        profile: actionPrompt.trim() ? actionProfile : (initial?.profile ?? ""),
+        actionPrompt: actionPrompt.trim(),
         outputMode: initial?.outputMode,
         outputDest: initial?.outputDest,
         outputAccount: initial?.outputAccount,
@@ -221,6 +243,44 @@ export function EventEditForm({
                 placeholder={t("eventEdit.tagsPlaceholder")}
                 onChange={(e) => setTags(e.target.value)}
               />
+            </label>
+          </div>
+
+          {/* P4 到点动作：编译为关联的一次性调度任务（到事件开始时间运行）。
+              仅人类 UI 可设；循环事件暂不支持（提示改用定时任务）。 */}
+          <div className="cowork-taskform__section">
+            <label className="cowork-taskform__label cowork-taskform__label--top">
+              <span className="cowork-taskform__labeltext">
+                <Zap size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                {t("eventEdit.actionTitle")}
+              </span>
+              {hasRecurrence ? (
+                <span className="cowork-taskform__picker-hint">{t("eventEdit.actionRecurringHint")}</span>
+              ) : (
+                <>
+                  <textarea
+                    className="cowork-taskform__textarea"
+                    value={actionPrompt}
+                    rows={3}
+                    placeholder={t("eventEdit.actionPlaceholder")}
+                    onChange={(e) => setActionPrompt(e.target.value)}
+                  />
+                  {actionPrompt.trim() && (
+                    <select
+                      className="cowork-taskform__input"
+                      style={{ marginTop: 8 }}
+                      value={actionProfile}
+                      onChange={(e) => setActionProfile(e.target.value)}
+                      title={t("cal.taskRunsUnder")}
+                    >
+                      {PROFILE_OPTIONS.map((p) => (
+                        <option key={p.value} value={p.value}>{p.label}</option>
+                      ))}
+                    </select>
+                  )}
+                  <span className="cowork-taskform__picker-hint">{t("eventEdit.actionHint")}</span>
+                </>
+              )}
             </label>
           </div>
 

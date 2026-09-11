@@ -108,8 +108,8 @@ func TestListFindingsBackfillsLegacyProject(t *testing.T) {
 
 	legacy := map[string]any{
 		"id": "F20260901-1", "title": "legacy", "severity": "info",
-		"devices": []string{"db1"},
-		"evidence": []map[string]string{{"device": "db1", "command": "c", "output": "o"}},
+		"devices":    []string{"db1"},
+		"evidence":   []map[string]string{{"device": "db1", "command": "c", "output": "o"}},
 		"created_at": time.Now().Format(time.RFC3339),
 	}
 	b, _ := json.Marshal(legacy)

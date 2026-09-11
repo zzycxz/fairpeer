@@ -25,7 +25,7 @@ CODEX_GAP_AUDIT_2026-09-09 的 G5/G6 落地（G1 Windows 沙箱与 G4 网络 per
 - config.go：ConfigWarnings 字段（load 时告警的载体的既有打印目标）
 - 依赖补全使干净检出可编译；均源自并行批次已写好的在途实现，按其工作区原样入库
 
-## [0.3.0] — 2026-09-12
+## [0.2.3] — 2026-09-12
 
 ### feat(netdev): 统一急停 + GPU/智算采集面 P0——FDE/AI infra 承接第一批（FDE_AIINFRA_OPS_GAP_SPEC §4.0/§4.1）
 

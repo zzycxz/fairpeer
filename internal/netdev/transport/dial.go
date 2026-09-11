@@ -135,6 +135,26 @@ func newSSHClient(ctx context.Context, conn net.Conn, host ResolvedHost, auth *A
 		HostKeyAlgorithms: hostKeyAlgorithms,
 		Timeout:           timeout,
 	}
+	if host.LegacyAlgo {
+		// Per-device interop profile: keep the modern defaults AND add the
+		// legacy algorithms x/crypto implements but never offers (aes128-cbc,
+		// 3des-cbc, dh-group1-sha1 — note aes256-cbc is NOT implemented
+		// upstream, only aes128-cbc is). Host keys already include
+		// ssh-rsa/ssh-dss by default, so only ciphers and KEX need widening.
+		clientCfg.Config = ssh.Config{
+			Ciphers: []string{
+				"aes128-gcm@openssh.com", "aes256-gcm@openssh.com", "chacha20-poly1305@openssh.com",
+				"aes128-ctr", "aes192-ctr", "aes256-ctr",
+				"aes128-cbc", "3des-cbc",
+			},
+			KeyExchanges: []string{
+				"curve25519-sha256", "curve25519-sha256@libssh.org",
+				"ecdh-sha2-nistp256", "ecdh-sha2-nistp384", "ecdh-sha2-nistp521",
+				"diffie-hellman-group14-sha256", "diffie-hellman-group14-sha1",
+				"diffie-hellman-group1-sha1",
+			},
+		}
+	}
 	// Bound the handshake even for ProxyJump channel connections, whose
 	// SetDeadline method returns "deadline not supported". A watcher closes the
 	// connection on timeout/cancellation; the acknowledgement prevents a late

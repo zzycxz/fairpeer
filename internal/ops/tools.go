@@ -96,23 +96,24 @@ func (ClassifyTool) Execute(_ context.Context, args json.RawMessage) (string, er
 		}
 	}
 
-	r.Intent = p.Intent
-	r.Risk = p.Risk
-	if len(p.Targets) > 0 {
-		r.Targets = p.Targets
-	}
-	if strings.TrimSpace(p.Project) != "" {
-		r.Project = p.Project
-	}
-	if err := r.Transition(StateClassified, ""); err != nil {
-		return "", err
-	}
-	if err := SaveRequest(r); err != nil {
+	intent, risk, targets := "", "", ""
+	if err := UpdateRequest(r.ID, func(r *Request) error {
+		r.Intent = p.Intent
+		r.Risk = p.Risk
+		if len(p.Targets) > 0 {
+			r.Targets = p.Targets
+		}
+		if strings.TrimSpace(p.Project) != "" {
+			r.Project = p.Project
+		}
+		intent, risk, targets = r.Intent, r.Risk, strings.Join(r.Targets, ", ")
+		return r.Transition(StateClassified, "")
+	}); err != nil {
 		return "", err
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "请求 %s 已登记并分类：intent=%s risk=%s targets=%s。\n", r.ID, r.Intent, r.Risk, orDash(strings.Join(r.Targets, ", ")))
+	fmt.Fprintf(&b, "请求 %s 已登记并分类：intent=%s risk=%s targets=%s。\n", r.ID, intent, risk, orDash(targets))
 	if len(p.Clarify) > 0 {
 		fmt.Fprintf(&b, "待澄清（先问用户再计划）：%s\n", strings.Join(p.Clarify, "；"))
 	}
@@ -179,11 +180,6 @@ func (t PlanTool) Execute(_ context.Context, args json.RawMessage) (string, erro
 		return "", err
 	}
 
-	if r.State == StateClassified {
-		if err := r.Transition(StateScoped, ""); err != nil {
-			return "", err
-		}
-	}
 	needsApproval := false
 	for _, s := range p.Steps {
 		if s.Kind == "execute" || s.Kind == "verify" {
@@ -191,20 +187,29 @@ func (t PlanTool) Execute(_ context.Context, args json.RawMessage) (string, erro
 			break
 		}
 	}
-	r.Plan = &Plan{
-		ID:              "PLAN-" + r.ID + "-01",
-		RequestID:       r.ID,
-		Steps:           p.Steps,
-		ExpectedOutputs: p.ExpectedOutputs,
-		Approval:        map[bool]string{true: "required", false: "none"}[needsApproval],
-	}
-	if err := r.Transition(StatePlanned, ""); err != nil {
+	planID, planApproval := "", ""
+	if err := UpdateRequest(r.ID, func(r *Request) error {
+		// Both transitions belong inside the locked span: UpdateRequest reloads
+		// the request, so a Scoped transition applied to the outer copy would
+		// be lost and Planned would jump straight from Classified.
+		if r.State == StateClassified {
+			if err := r.Transition(StateScoped, ""); err != nil {
+				return err
+			}
+		}
+		r.Plan = &Plan{
+			ID:              "PLAN-" + r.ID + "-01",
+			RequestID:       r.ID,
+			Steps:           p.Steps,
+			ExpectedOutputs: p.ExpectedOutputs,
+			Approval:        map[bool]string{true: "required", false: "none"}[needsApproval],
+		}
+		planID, planApproval = r.Plan.ID, r.Plan.Approval
+		return r.Transition(StatePlanned, "")
+	}); err != nil {
 		return "", err
 	}
-	if err := SaveRequest(r); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("计划 %s 已校验并落档：%d 步，审批=%s（请求 %s → planned）。执行编排属后续阶段；当前按计划逐步执行并保持证据链。", r.Plan.ID, len(p.Steps), r.Plan.Approval, r.ID), nil
+	return fmt.Sprintf("计划 %s 已校验并落档：%d 步，审批=%s（请求 %s → planned）。执行编排属后续阶段；当前按计划逐步执行并保持证据链。", planID, len(p.Steps), planApproval, r.ID), nil
 }
 
 // validate enforces the §7.3 host checks. It rejects, never repairs — an

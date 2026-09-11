@@ -48,6 +48,14 @@ type BranchMeta struct {
 	// session was last saved, so Resume can restore it. Restoring plan mode is
 	// safe (it only restricts writes, never starts background work). See C8.
 	PlanMode bool `json:"plan_mode,omitempty"`
+	// Goal persistence (P1-E4 slice): an auto-advancing goal used to die with
+	// the process ("intentionally NOT restored", audit C8). The text, status
+	// and turn budget now ride the sidecar; Resume restores them WITHOUT
+	// auto-firing — the loop only advances after the user's next message, so
+	// "继续" is still the explicit trigger.
+	Goal       string `json:"goal,omitempty"`
+	GoalStatus string `json:"goal_status,omitempty"`
+	GoalTurns  int    `json:"goal_turns,omitempty"`
 	// ToolApprovalMode records the writer-tool approval stance ("ask"/"auto"/
 	// "yolo") so Resume can restore it. Restoring YOLO is intentional — if the
 	// user had auto-approve on, they expect it to stay on across a restart.

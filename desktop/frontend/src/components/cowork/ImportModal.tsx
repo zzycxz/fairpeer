@@ -1,8 +1,10 @@
-import { useState } from "react";
-import { FolderUp, FilePlus, Sparkles, Folder, CheckSquare, Square } from "lucide-react";
+import { useEffect, useState } from "react";
+import { FolderUp, FilePlus, Sparkles, Folder, CheckSquare } from "lucide-react";
 import { CustomSelect } from "./CustomSelect";
 import { app } from "../../lib/bridge";
 import { useToast } from "../../lib/toast";
+import { useT } from "../../lib/i18n";
+import { humanizeRagError } from "../../lib/ragError";
 import type { RagCollectionView } from "../../lib/types";
 
 interface ImportModalProps {
@@ -24,9 +26,16 @@ export function ImportModal({
 }: ImportModalProps) {
   const [importType, setImportType] = useState<ImportType>("folder");
   const [targetCollection, setTargetCollection] = useState(defaultCollection);
-  const [autoExtract, setAutoExtract] = useState(false);
   const [loading, setLoading] = useState(false);
   const { showToast } = useToast();
+  const t = useT();
+
+  // Re-sync the target collection each time the modal opens — the dock keeps
+  // this component mounted, so a stale previous selection would otherwise
+  // survive into the next open.
+  useEffect(() => {
+    if (isOpen) setTargetCollection(defaultCollection);
+  }, [isOpen, defaultCollection]);
 
   if (!isOpen) return null;
 
@@ -57,20 +66,16 @@ export function ImportModal({
       }
 
       const res = await app.RagImportPaths(chosenCollection, paths);
-      showToast(`成功导入 ${res.files} 个文件到「${chosenCollection}」！FTS5 全文检索已就绪`, "info");
-
-      if (autoExtract) {
-        void app.RagStartExtract(chosenCollection, "general/graph", "incremental").then(() => {
-          showToast(`已为您自动开启「${chosenCollection}」的深度智能抽取与知识图谱建库！`, "info");
-        }).catch((err) => {
-          showToast(`抽取提示: ${String(err)}`, "error");
-        });
-      }
+      // res.message carries the full receipt: import counts, extraction cost
+      // preview (calls + duration), and any files that failed to parse — the
+      // extraction itself is already queued by the import, so no separate
+      // start call happens here.
+      showToast(res.message || `成功导入 ${res.files} 个文件到「${chosenCollection}」`, "info");
 
       onSuccess(chosenCollection);
       onClose();
     } catch (e) {
-      showToast(String(e), "error");
+      showToast(humanizeRagError(String(e), t), "error");
     } finally {
       setLoading(false);
     }
@@ -220,31 +225,29 @@ export function ImportModal({
             </div>
           </div>
 
-          {/* 智能增强与构建开关 (Advanced Automation) */}
+          {/* 智能增强与建库说明（导入即建库：抽取在导入成功后自动排队，
+              结果消息会给出调用次数与耗时预估，无需单独开关） */}
           <div
-            onClick={() => setAutoExtract(!autoExtract)}
             style={{
               padding: "12px 14px",
               borderRadius: 10,
-              background: autoExtract ? "rgba(234, 179, 8, 0.08)" : "var(--bg-soft)",
-              border: autoExtract ? "1px solid rgba(234, 179, 8, 0.4)" : "1px solid var(--border-soft)",
+              background: "rgba(234, 179, 8, 0.08)",
+              border: "1px solid rgba(234, 179, 8, 0.4)",
               display: "flex",
               alignItems: "flex-start",
               gap: 10,
-              cursor: "pointer",
-              transition: "all 0.15s",
             }}
           >
-            <div style={{ color: autoExtract ? "var(--warn)" : "var(--fg-dim)", marginTop: 2 }}>
-              {autoExtract ? <CheckSquare size={16} /> : <Square size={16} />}
+            <div style={{ color: "var(--warn)", marginTop: 2 }}>
+              <CheckSquare size={16} />
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 600, color: autoExtract ? "var(--warn)" : "var(--fg)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 600, color: "var(--warn)" }}>
                 <Sparkles size={14} style={{ color: "var(--warn)" }} />
-                <span>导入后立即开启智能分析与建库 (自研推荐)</span>
+                <span>导入成功后自动开始智能分析与知识图谱建库</span>
               </div>
               <span style={{ fontSize: 11, color: "var(--fg-faint)", lineHeight: 1.4 }}>
-                后台自动调用高精度 LLM 解析全文实体与多层级关系图谱，导入完成直接可查。
+                后台自动调用高精度 LLM 解析全文实体与多层级关系图谱（结果消息含调用次数与耗时预估）。部分失败的块可稍后在知识库面板一键补采。
               </span>
             </div>
           </div>

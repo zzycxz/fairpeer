@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/fileutil"
@@ -57,6 +58,25 @@ func CasesDir() string {
 
 var casesDirOverr string
 
+// AppendCaseEntry atomically appends one entry to the case (读改写全程持
+// casesMu，整对象 SaveCase 无法插队丢条目)。案例不存在返回 false。
+func AppendCaseEntry(id string, e CaseEntry) bool {
+	casesMu.Lock()
+	defer casesMu.Unlock()
+	cases, err := ListCases()
+	if err != nil {
+		return false
+	}
+	for _, c := range cases {
+		if c.ID != id {
+			continue
+		}
+		c.Entries = append(c.Entries, e)
+		return saveCaseLocked(c) == nil
+	}
+	return false
+}
+
 // ListCases returns all cases, newest-updated first.
 func ListCases() ([]*IncidentCase, error) {
 	entries, err := os.ReadDir(CasesDir())
@@ -84,8 +104,19 @@ func ListCases() ([]*IncidentCase, error) {
 	return out, nil
 }
 
+// casesMu 串行化案例文件的读改写：SaveCase 整对象写与 AppendCaseEntry 的
+// append 窗口互斥（无它，轮次收尾的 append 会被并发的整对象写静默覆盖）。
+// 跨进程（桌面 + fairpeer run 共盘）仍不设防——文件锁超出范围。
+var casesMu sync.Mutex
+
 // SaveCase persists one case (id/时间戳在空时生成).
 func SaveCase(c *IncidentCase) error {
+	casesMu.Lock()
+	defer casesMu.Unlock()
+	return saveCaseLocked(c)
+}
+
+func saveCaseLocked(c *IncidentCase) error {
 	c.Title = strings.TrimSpace(c.Title)
 	if c.Title == "" {
 		return fmt.Errorf("case: title is required")

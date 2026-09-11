@@ -251,7 +251,7 @@ func (e *execAdapter) Answer(tab, askID string, answers []mobilebridge.QuestionA
 	go e.app.AnswerQuestionForTab(t, askID, qa)
 	return nil
 }
-func (e *execAdapter) SetPlan(_ string, on bool) error       { go e.app.SetPlanMode(on); return nil }
+func (e *execAdapter) SetPlan(_ string, on bool) error { go e.app.SetPlanMode(on); return nil }
 func (e *execAdapter) SetModel(tab, model string) error {
 	if tab = e.app.resolveMobileTab(tab); tab != "" {
 		go e.app.SetModelForTab(tab, model)
@@ -544,14 +544,14 @@ func (a *App) MobileBridgeStatus() map[string]any {
 		return map[string]any{"enabled": false, "connected": false}
 	}
 	return map[string]any{
-		"enabled":        true,
-		"connected":      mb.SignalConnected(),
-		"signal_url":     mb.SignalURL(),
-		"embedded":       mobilebridgeEmbedded,
-		"pending":        mb.PendingPairings(),
-		"udp_knock":      mb.KnockEnabled(),
-		"knock_server":   mb.KnockServer(),
-		"cloud_relay":    mb.CloudRelayURL(),
+		"enabled":         true,
+		"connected":       mb.SignalConnected(),
+		"signal_url":      mb.SignalURL(),
+		"embedded":        mobilebridgeEmbedded,
+		"pending":         mb.PendingPairings(),
+		"udp_knock":       mb.KnockEnabled(),
+		"knock_server":    mb.KnockServer(),
+		"cloud_relay":     mb.CloudRelayURL(),
 		"cloud_connected": mb.CloudConnected(),
 	}
 }
@@ -654,6 +654,7 @@ func (a *App) MobileBridgeSetCloudRelay(enabled bool, url string) error {
 //   - "embedded"：清空 signal_url → 下次启动进程内起嵌入式 K（零配置默认）
 //   - "external"：写入手填的外部 K 地址（独立 K / debug-server）
 //   - "cloud"：signal_url = cloud_signal_url（纯跨网，无本地 K）
+//
 // 返回最终模式供面板回显。当前运行中的 Bridge 不热切（信令重建复杂，
 // 重启 fairpeer 生效——面板有提示文案）。
 func (a *App) MobileBridgeSetKMode(mode, externalURL string) (string, error) {

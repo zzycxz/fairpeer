@@ -243,8 +243,9 @@ mitre_attack: [T1018, T1046]   # 可选，蓝队核查视图按战术折叠
    检查点（路径/键/命令模板）× 阳性判据——LaZagne 类目清单的蓝队化。
 3. **主机风险检查表 ✅**（host-risk-checks.yaml，服务场景一 H2）：linpeas/Seatbelt
    分组检查的蓝队化条目（阳性判据+误报回退成对，P6）。
-4. **指纹→段职能→动作映射表 ⬜（批 3）**：445+88→域段→优先核查队列；打印机 OUI
-   密集→办公段→跳过；SNMP community 命中→可读表→转 L2 深挖。
+4. **指纹→段职能→动作映射表 ✅（批 3 落地，裁决并入）**：role_signals 内置于
+   segment-priors（445+88→域段→优先核查队列；OUI/SNMP 信号注明由 L2/SNMP
+   证据消费），引擎消费落 probe L4 形状注解——不独立建表。
 
 外置的好处即 nuclei/GTFOBins 已验证的：知识独立更新、可审计、可测试（YAML 可
 schema 校验）、未来可开放用户自扩。
@@ -312,8 +313,11 @@ netdev-seccheck-auto（编排子代理；常驻路由=主循环 addon 路由表 
 
 **批 1.5（工作流接线，小改，§8 新增）**：segmap 段地图工件（source=`segmap` 的
 finding，蓝队页卡按 source 分组渲染）；整轮案例开卷约定（每轮自动开/续 SecWorkbench
-案例，轮末 新增/仍在/已修复 diff 钉入时间线）。
-**状态：⬜ 未动工（代码无 segmap 痕迹、无轮次案例约定）。**
+案例，轮末 新增/仍在/已恢复 diff 钉入时间线）。
+**状态：✅ 落地（2026-09-11，按 §9 批 C）：segmap 工件（body 网段出口约定
+source=segmap + VulnScanPanel 置顶分组渲染）；轮次案例（boot skillRunner 宿主
+接线 BeginCaseRun/Finish——开/续当日同入口案例，轮末 新增/仍在/已恢复 diff +
+答复摘要钉时间线；子代理工具面零新增）；守护测试 TestCaseRunScope。**
 
 **批 2（知识外置，随 ORCHESTRATION P3-D）**：三张数据表（§5.2）入库——机制按
 ORCHESTRATION §3.5-D（embedded `knowledge/` 释放 + `user-knowledge/` 同 id 覆盖 +
@@ -327,7 +331,13 @@ schema 校验 + 内容哈希入审计链），本 spec 定内容。
 （§8⑤：轮内确认判据先落 user-knowledge/，验证后再上游化）；指纹→段职能→动作
 映射表（§5.2-4）。
 验收：不引入任何写路径与主动探测能力，仅编排与解析。
-**状态：⬜ 未动工。**
+**状态：✅ 落地（2026-09-11，按 §9 批 D）：①排查卡回填（蓝队页卡按钮→composer
+模板，零后端）；②采样判读下沉（netdev_probe L4 形状注解——网关位/散点分布 +
+role_signals 信号→角色候选，引擎判读不再靠模型即兴）；③知识反哺通道
+（knowledge.SaveUser + NetDevKnowledgeSave 桥——Validate 过才写 user-knowledge/
+，哈希入审计链；蓝队页卡内联回填行）；④职能映射表裁决：role_signals 已内置
+于 segment-priors（§5.2 拆出时即含），本批补齐引擎消费即闭环——独立第四表
+冗余不建；打印机 OUI 识别需 ARP/OUI 数据面，评估模式外不做（停车场）。**
 
 ## 7. 红线（不变，全部批次适用）
 
@@ -351,7 +361,7 @@ profile。要改的是工作流形态——从"一次漏洞核查工具"到"以�
 | ① 入口路由前置 | **已被 ORCHESTRATION 覆盖** | ORCHESTRATION §3.5-A：body 入口识别节置顶（≤300 字符）+ `入口=清单\|主机\|网段` 显式前缀 + help 路由矩阵 + 主循环 addon 路由行 | 无需重复设计；本 spec 批 1 只供内容（help 矩阵行、两个入口节 body） |
 | ② 地图一等公民 | **轻改：工件先行，UI 缓建** | VulnScanPanel 是 findings 点列表（DISPLAY_CAP=50，按 source 过滤），无段地图工件与队列视图；但 finding.source 已是分流机制（vulnscan/cve:*） | 段地图落 **finding 工件**（source=`segmap`，title=CIDR，detail=证据源×置信度×角色×队列位次）；蓝队页卡按 source 加分组渲染即可。独立地图视图等真实排查跑过 2-3 轮再立项 | 批 1.5 |
 | ③ 扩半径确认闸门 | **已落地（2026-09-08 委托侧清零）** | seccheck-auto 是一趟跑完的子代理，**无法中途问用户**——"段中途确认"结构性不可行。实际闸门三层：`netdev_probe` scopes 预检硬拒（出界零发包）+ L4 验证闸门（min_alive，body"下探新段须有通过记录"）+ **委托侧放行** | 委托侧纪律已写进主循环 addon：入口=网段 只有两种放行（用户对话已给范围＝已授权；裸 IP 则主循环先零发包收敛候选段、列给用户点头后才委托），绝不无范围甩裸 IP；禁用 seccheck 时委托行随剪（pruneSkillRoutingRows），守护测试钉住 | 批 1 ✅ |
-| ④ 轮次账本 | **轻改：家已存在** | SecWorkbench 案例+时间线+IOC+CaseBundle 复盘导出已存在；vulnscan"复查注明"纪律散在 detail 首行；VulnScanPanel 已有 fairpeer:netdev-case 开案例事件 | 每轮核查自动开/续一个案例：入口形态+地图版本+队列完成度+深度计进时间线；轮末把 新增/仍在/已修复 diff 作为一条 triage 条目钉入——轮与轮之间可对照，不再从头对表 | 批 1.5 |
+| ④ 轮次账本 | **轻改：家已存在** | SecWorkbench 案例+时间线+IOC+CaseBundle 复盘导出已存在；vulnscan"复查注明"纪律散在 detail 首行；VulnScanPanel 已有 fairpeer:netdev-case 开案例事件 | 每轮核查自动开/续一个案例：入口形态+地图版本+队列完成度+深度计进时间线；轮末把 新增/仍在/已恢复 diff 作为一条 triage 条目钉入——轮与轮之间可对照，不再从头对表 | 批 1.5 |
 | ⑤ 知识反哺闭环 | **缓：管道已由 ORCHESTRATION 建好** | ORCHESTRATION §3.5-D：`knowledge/` 释放 + `user-knowledge/` 同 id 覆盖 + 内容哈希入审计链——回填管道天然存在，缺的只是约定 | 批 2 落表后加约定：轮内确认的段职能指纹/误报判据先写 user-knowledge/（升级不冲掉、哈希可溯源），验证过再上游化进内置表；此前先在轮次案例 note 人工沉淀 | 批 3 |
 
 **裁决要点**：③④ 的"新交互"都不新建——待确认区与案例时间线就是为"人放行/
@@ -362,6 +372,36 @@ profile。要改的是工作流形态——从"一次漏洞核查工具"到"以�
 **不建议做的**（重申）：开蓝队专属 profile（无新工具面，纯增维护成本）；追攻击
 自动化（REDTEAM_BATCH_DECISION 未立项）；全自动闭环（每轮产出是"可决策的地图"，
 空段/证据不足即止，比多扫两段更专业）。
+
+## 9. 内容覆盖与套餐补全修复计划（2026-09-11 复核，逐条经代码核实）
+
+§6 批 1/批 2 落地后的复核结论：骨架与纪律是完成态，短板集中在**内容覆盖**
+（单轮召回与准确）与**工作流沉淀**（多轮效率）两类。七个缺口按六个批次推进，
+先补召回、再补效率；落点全部写文件级，开做时按批立项、验收后才翻状态。
+
+| 批 | 内容 | 落点（文件级） | 验收 |
+|---|---|---|---|
+| **A（P1 召回）基线规则外置+扩厂** | 6 规则×2 厂 → 表外置 + H3C Comware/锐捷 RGOS 扩厂 | ① `knowledge/data/baseline-rules.yaml` 第四张表（driver→规则集，字段同 baselineRule + read_command）；② `knowledge.go` Validate 加 schema 分支（user-knowledge 覆盖自动生效）；③ `baseline.go` baselineRules 启动时 Load 合并（解析失败显式报错不静默），RunningConfigCommand 补 h3c/ruijie（键已存在于 driver/driver.go:105,107）；④ Comware 与 VRP 同源，规则可先镜像再实测修正，**每厂规则 golden 测试** | H3C/锐捷跑基线产出有据违例；表改动不改 Go；YAML 校验入 CI |
+| **B（P1 准确）CVE 版本区间** | vendor/model 子串粗匹配 → CPE 版本区间判定 | ① `cve.go` CVEEntry 加 versions（nvd11/nvd20 转换器提取 start/end incl/excl），MatchCVEs 版本判定：设备版本取 model 指纹摘要（`产品 版本`），无版本输入标 `unverified` 且**行为与现状完全一致**（不新增漏报）；② `tools.go` cveMatchTool 输出逐条标注「版本在区间内/需人工比对」；③ seccheck body 验证步改为只复核 unverified 项（已随批 B 落进 builtins.go 验证步） | 区间边界 golden（含通配/开闭端）；无版本设备命中率与现状持平 |
+| **C（P1.5，= §6 批 1.5）segmap 工件 + 轮次案例** | 轮间可对照、地图数据形态先验证 | segmap：body 约定网段入口收尾必立 source=`segmap` finding（title=CIDR，detail=证据源×置信度×角色×队列位次）；`VulnScanPanel.tsx` 按 source 分组渲染（segmap 组置顶折叠）。轮次案例：**desktop 侧接线、不加子代理工具**——skill runner 已知 seccheck 委托起止，开卷自动建/续案例（标题含日期+入口形态），结束把 新增/仍在/已恢复 diff 钉时间线（复用 NetDevCaseSave） | 跑一轮网段核查 → segmap 卡出现 + 案例时间线两轮 diff 可见 |
+| **D（P2，= §6 批 3 四项）回填/注解/反哺/职能表** | 见 §6 批 3 原文 | ① 回填卡：VulnScanPanel「回填」按钮 → 粘贴输出插 composer 模板（零后端，agent 走 netdev_finding 立案）；② 采样判读：`netdev_probe` L4 输出加形状注解行（alive/total+分布+角色候选，读 segment-priors）；③ 知识反哺：bridge `NetDevKnowledgeSave(id,yaml)`（Validate 过才写 user-knowledge/，哈希入审计链）+ body 回填约定；④ 段职能映射：后裁决并入 segment-priors 的 role_signals + probe L4 引擎消费，不独立建表（见 §6 批 3 状态行） | 批 3 红线：不引入任何设备写路径与主动探测 |
+| **E（P2 套餐补全）exposure 接线 + 弱口令编排** | 五电池真实执行 | ① `auditproject.go` stages["exposure"] 调 `BuildAttackPaths(TopologySnapshot, 项目 findings)`（纯函数已就绪），BatteryNotes 写路径数+Top 暴露点（不重复收编风险清单——路径结论经 finding 同源管道已在 collect 视野内）；② `AuditProject` 加 weakcred_tier/dict_path（默认 basic），电池读参传 WeakCredCheck，dict 档仍过信封闸 | 审计报告 exposure 有攻击路径结论；字典档不绕信封 |
+| **F（P3 观察）NVD 引导拉取** | 情报供给从手工导出到本机拉取 | 设置填 API key（**凭证走 secret ref 不进 TOML**）+ bridge 拉增量 → ImportCVEFeed（合并语义已就位）。立项评审点：红线禁的是**分发**，用户授权的本机拉取是否放行需裁决后再动工 | — |
+
+**裁决要点**：A/B 先做（每轮核查直接受益于召回与准确）；C 承接既定批 1.5；
+**不做**：独立段地图视图 UI（维持 §8② 缓建判决，跑过 2-3 轮再立项）、基线猜语法
+（Comware 镜像 VRP 须标注待实测，ZXR10 维持排除——准确性纪律不松）、CVE 判定
+失败时改变现状行为（宁多报不漏报）、内置 NVD 镜像（B-4 不变，F 是拉取不是分发）。
+
+**落地状态（2026-09-11）**：批 A ✅（baseline-rules.yaml 第四表 + h3c-comware
+六族 + 坏覆盖回退内置 + TestCheckBaselineH3CComware/TestBaselineRules*；锐捷经
+驱动映射 cisco-ios 已在覆盖内，另修 RunningConfigCommand 缺 h3c 条目——H3C
+备份/割接读配置此前是断的）；批 B ✅（CVEEntry.Versions CPE 区间 + 三态判定
+in_range/out_of_range/unverified——区间外保留供核对绝不静默丢弃 + 工具/扫查
+逐条标注 + TestVersionInRange/TestCVEMatchVersionStatus）；批 C ✅（见 §6 批
+1.5）；批 D ✅（见 §6 批 3）；批 E ✅（exposure 电池接 BuildAttackPaths——
+暴露点/路径/Top 剪边进 BatteryNotes；AuditProject 加 weakcred_tier/dict_path
+编排档，字典档信封闸照旧）；批 F ⬜ 待立项裁决。
 
 ## 附录 A：库筛查总表（125 库次，判断：★=重点借鉴 / 借鉴 / 一般 / 索引 / 跳过）
 

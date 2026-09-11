@@ -13,6 +13,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/agent"
 	"github.com/zzycxz/fairpeer/internal/checkpoint"
 	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/hook"
 	"github.com/zzycxz/fairpeer/internal/permission"
 	"github.com/zzycxz/fairpeer/internal/plugin"
 	"github.com/zzycxz/fairpeer/internal/provider"
@@ -254,6 +255,7 @@ func TestDisconnectMCPServerRemovesLazyPlaceholder(t *testing.T) {
 func TestRemoveMCPServerRemovesUnconnectedLazyPlaceholder(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
+	hook.Trust(dir, "") // P0-1 后置新增的项目信任门：未信根的 [[plugins]] 会被跳过
 	if err := os.WriteFile("fairpeer.toml", []byte(`
 [[plugins]]
 name = "mock"

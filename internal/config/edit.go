@@ -78,23 +78,19 @@ func (c *Config) SetAutoPlan(mode string) error {
 }
 
 // SetDreamEnabled toggles the background self-evolution master switch. When
-// disabled, neither Dream nor Distill spawns automatically or via manual trigger.
+// disabled, Dream does not spawn automatically or via manual trigger.
 func (c *Config) SetDreamEnabled(enabled bool) {
 	c.Dream.Enabled = enabled
 }
 
-// SetDreamIntervals configures the Dream and Distill automatic-run cadence in
-// days. A non-positive value is rejected (use the package defaults by leaving
-// the field at 0 in TOML, not by passing <=0 here). Both intervals must be >= 1.
-func (c *Config) SetDreamIntervals(dreamDays, distillDays int) error {
+// SetDreamInterval configures the Dream automatic-run cadence in days.
+// A non-positive value is rejected (use the package defaults by leaving
+// the field at 0 in TOML, not by passing <=0 here).
+func (c *Config) SetDreamInterval(dreamDays int) error {
 	if dreamDays < 1 {
 		return fmt.Errorf("dream_interval %d: must be >= 1", dreamDays)
 	}
-	if distillDays < 1 {
-		return fmt.Errorf("distill_interval %d: must be >= 1", distillDays)
-	}
 	c.Dream.DreamInterval = dreamDays
-	c.Dream.DistillInterval = distillDays
 	return nil
 }
 
@@ -209,6 +205,16 @@ func (c *Config) SetDesktopCloseBehavior(mode string) error {
 	default:
 		return fmt.Errorf("close behavior %q: must be quit|background", mode)
 	}
+	return nil
+}
+
+// SetDesktopAutostart records the launch-at-login preference. It only flips
+// the config bit — the OS-specific registration (registry Run key / launchd
+// agent / XDG autostart entry) lives in the desktop layer, which calls this
+// after the registration succeeds or fails so the config never lies about a
+// registration that didn't take.
+func (c *Config) SetDesktopAutostart(enabled bool) error {
+	c.Desktop.Autostart = &enabled
 	return nil
 }
 

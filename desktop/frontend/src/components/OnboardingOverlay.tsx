@@ -190,7 +190,7 @@ export function VendorStep({ direct, aggregators, locals, onPick, syncing, onSyn
           disabled={syncing}
         >
           {syncing ? <Loader2 size={12} className="onboarding__spinner" /> : <RefreshCw size={12} />}
-          {t("settings.registryCheckUpdate") || "同步模型"}
+          {t("settings.registryCheckUpdate")}
         </button>
       </div>
 
@@ -441,9 +441,9 @@ export function ModelStep({ template, apiKey, onDone, t }: {
         </div>
         
         <div>
-          <label className="set-label" style={{ display: "block", marginBottom: "0.25rem" }}>{t("settings.screenshotVlmLabel") || "图片识别模型"}</label>
+          <label className="set-label" style={{ display: "block", marginBottom: "0.25rem" }}>{t("settings.screenshotVlmLabel")}</label>
           <select className="mem-select" style={{ width: "100%" }} value={visionPick} onChange={(e) => setVisionPick(e.target.value)}>
-            <option value="none">{t("settings.screenshotVlmNone") || "未配置"}</option>
+            <option value="none">{t("settings.screenshotVlmNone")}</option>
             {models.map((m) => (
               <option key={m} value={m}>{modelLabel(m)}</option>
             ))}
@@ -451,9 +451,9 @@ export function ModelStep({ template, apiKey, onDone, t }: {
         </div>
 
         <div>
-          <label className="set-label" style={{ display: "block", marginBottom: "0.25rem" }}>{t("settings.voiceModelLabel") || "语音识别模型"}</label>
+          <label className="set-label" style={{ display: "block", marginBottom: "0.25rem" }}>{t("settings.voiceModelLabel")}</label>
           <select className="mem-select" style={{ width: "100%" }} value={voicePick} onChange={(e) => setVoicePick(e.target.value)}>
-            <option value="none">{t("settings.voiceModelNone") || "未配置"}</option>
+            <option value="none">{t("settings.voiceModelNone")}</option>
             {models.map((m) => (
               <option key={m} value={m}>{modelLabel(m)}</option>
             ))}
@@ -461,9 +461,9 @@ export function ModelStep({ template, apiKey, onDone, t }: {
         </div>
         
         <div>
-          <label className="set-label" style={{ display: "block", marginBottom: "0.25rem" }}>{t("settings.fastTaskModel") || "迅捷任务模型"}</label>
+          <label className="set-label" style={{ display: "block", marginBottom: "0.25rem" }}>{t("settings.fastTaskModel")}</label>
           <select className="mem-select" style={{ width: "100%" }} value={fastPick} onChange={(e) => setFastPick(e.target.value)}>
-            <option value="follow">{t("settings.fastTaskNone") || "跟随默认"}</option>
+            <option value="follow">{t("settings.fastTaskNone")}</option>
             {models.map((m) => (
               <option key={m} value={m}>{modelLabel(m)}</option>
             ))}

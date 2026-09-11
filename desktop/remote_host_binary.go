@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // localLinuxHostBinaryFor finds the prebuilt Linux CLI for a GOARCH. arch is
@@ -29,7 +30,19 @@ func localLinuxHostBinaryFor(arch string) (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("Linux host binary not found (looked in %%LOCALAPPDATA%%\\fairpeer\\hosts and beside the desktop exe). Run scripts/build-hosts.sh (or `GOOS=linux GOARCH=%s go build -o <cache>/fairpeer/hosts/fairpeer-linux-%s ./cmd/fairpeer`) and retry", arch, arch)
+	// Build the message from the candidates actually searched (the user cache
+	// dir differs per OS — %LocalAppData% on Windows, ~/Library/Caches on macOS,
+	// $XDG_CACHE_HOME|~/.cache on Linux) so mac/linux users see their real paths
+	// instead of a Windows-only hint.
+	searched := make([]string, 0, len(candidates))
+	searched = append(searched, candidates...)
+	if _, err := os.UserCacheDir(); err != nil {
+		// The cache root itself couldn't be resolved — explain that too, since
+		// the first candidate above was skipped for exactly this reason.
+		searched = append(searched, fmt.Sprintf("(user cache dir unavailable: %v)", err))
+	}
+	return "", fmt.Errorf("Linux host binary fairpeer-linux-%s not found. Searched:\n  %s\nBuild it with scripts/build-hosts.sh (or `GOOS=linux GOARCH=%s go build -o <cache>/fairpeer/hosts/fairpeer-linux-%s ./cmd/fairpeer`) and retry",
+		arch, strings.Join(searched, "\n  "), arch, arch)
 }
 
 // goarchFromUname maps `uname -m` output onto a GOARCH.

@@ -47,7 +47,7 @@ acquireSharedHost  →  snapshot 历史  →  Ctrl.Close()
 | 类别 | 工具 | 平台/配置依赖 |
 |---|---|---|
 | 浏览器（11）| `browser_*` 全套（含 snapshot/select/set_path）| 需 Chromium 内核浏览器；**built-in，dev + cowork 都可用**（与 web_search 同级）|
-| 桌面（5）| `screenshot`/`screen_click`/`screen_type`/`screen_scroll`/`get_ui_tree`（含子控件枚举）| **仅 Windows**（Win32 BitBlt/SendInput/EnumWindows/EnumChildWindows）|
+| 桌面（5）| `screenshot`/`screen_click`/`screen_type`/`screen_scroll`/`get_ui_tree`（含子控件枚举）| 跨平台（Windows Win32/UIA；macOS cliclick+screencapture；Linux xdotool+scrot；get_ui_tree 在 Unix 为窗口级）|
 | PPT（23）| `mcp__wps-ppt__*`（via wps-ppt-mcp-server）| 需 `[cowork] wps_ppt_server_path` + Python(fastmcp/pywin32) + WPS Office |
 | 定时（4）| `schedule_create`/`list`/`delete`/`update`（含 IM/file 推送）| 需 desktop app 注入 Runner（CLI/TUI 下报 offline）|
 | 邮件（3）| `email_send`（SMTP）/ `email_read`（IMAP）/ `email_search`（IMAP FROM）| send 需 `[cowork.smtp]`；read/search 需 `[cowork.imap]` |

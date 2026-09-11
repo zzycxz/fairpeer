@@ -25,9 +25,8 @@ func TestDreamStateRecordAndRead(t *testing.T) {
 		t.Fatalf("expected no prior dream run in fresh dir")
 	}
 
-	// Record a dream run, then a distill run.
+	// Record a dream run.
 	appendDreamRun(sessionsDir, DreamRun{Kind: KindDream, Trigger: TriggerAuto, StartedAt: time.Now(), Status: "ok"})
-	appendDreamRun(sessionsDir, DreamRun{Kind: KindDistill, Trigger: TriggerManual, StartedAt: time.Now().Add(-time.Hour), Status: "ok"})
 
 	last, ok := LastDreamRun(sessionsDir, KindDream)
 	if !ok || last.Kind != KindDream || last.Status != "ok" {
@@ -38,10 +37,6 @@ func TestDreamStateRecordAndRead(t *testing.T) {
 	if len(dreamHist) != 1 {
 		t.Fatalf("dream history len = %d, want 1", len(dreamHist))
 	}
-	distillHist := DreamHistory(sessionsDir, KindDistill)
-	if len(distillHist) != 1 || distillHist[0].Trigger != TriggerManual {
-		t.Fatalf("distill history = %+v, want one manual run", distillHist)
-	}
 }
 
 // TestTrimDreamRunsCapsPerKind ensures the state file stays bounded: each kind
@@ -50,20 +45,16 @@ func TestTrimDreamRunsCapsPerKind(t *testing.T) {
 	var runs []DreamRun
 	for i := 0; i < dreamStateHistory+5; i++ {
 		runs = append(runs, DreamRun{Kind: KindDream, StartedAt: time.Unix(int64(i), 0)})
-		runs = append(runs, DreamRun{Kind: KindDistill, StartedAt: time.Unix(int64(i), 0)})
 	}
 	got := trimDreamRuns(runs)
-	dream, distill := 0, 0
+	dream := 0
 	for _, r := range got {
-		switch r.Kind {
-		case KindDream:
+		if r.Kind == KindDream {
 			dream++
-		case KindDistill:
-			distill++
 		}
 	}
-	if dream != dreamStateHistory || distill != dreamStateHistory {
-		t.Fatalf("after trim: dream=%d distill=%d, want both %d", dream, distill, dreamStateHistory)
+	if dream != dreamStateHistory {
+		t.Fatalf("after trim: dream=%d, want %d", dream, dreamStateHistory)
 	}
 }
 
@@ -96,7 +87,7 @@ func TestWorkspaceOldEnough(t *testing.T) {
 // TestWorkspaceOldEnoughFolderLayoutOnly: since the 2026-08-21 layout, sessions
 // live at <dir>/<id>/<id>.jsonl — a workspace that never had a flat-layout file
 // looks empty to a top-level-only scan, so the cold-start gate never passed and
-// auto Dream/Distill stayed permanently off. The oldest mtime must be taken
+// auto Dream stayed permanently off. The oldest mtime must be taken
 // across both levels.
 func TestWorkspaceOldEnoughFolderLayoutOnly(t *testing.T) {
 	dir := t.TempDir()
@@ -164,7 +155,7 @@ func TestQuietDreamSinkDropsContentEvents(t *testing.T) {
 		q.Emit(event.Event{Kind: kind})
 	}
 	q.Emit(event.Event{Kind: event.Usage})
-	q.Emit(event.Event{Kind: event.Notice, Text: "distill done"})
+	q.Emit(event.Event{Kind: event.Notice, Text: "dream done"})
 	q.Emit(event.Event{Kind: event.TurnDone})
 
 	for _, leaked := range []event.Kind{event.TurnStarted, event.Text, event.Message, event.Reasoning, event.ToolDispatch, event.ToolResult} {

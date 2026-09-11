@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -36,24 +38,66 @@ type browserProbe struct {
 	Paths   []string // absolute install paths to probe
 }
 
-// browserProbeCandidates mirrors the priority order in tool/builtin/browserdetect.go
-// (Chrome → Edge → Brave). Duplicated here to avoid the init side effects of
-// importing the tool registry from the desktop settings layer. If a path is
-// added upstream, mirror it here.
+// browserProbeCandidates mirrors the priority order in internal/tool/builtin/browserdetect.go
+// (Chrome → Edge → Brave, per-OS install locations). Duplicated here to avoid
+// the init side effects of importing the tool registry from the desktop settings
+// layer. If a path is added upstream, mirror it here.
 func browserProbeCandidates() []browserProbe {
-	return []browserProbe{
-		{Display: "Chrome", Name: "chrome", Paths: []string{
-			`C:\Program Files\Google\Chrome\Application\chrome.exe`,
-			`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
-		}},
-		{Display: "Edge", Name: "msedge", Paths: []string{
-			`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
-			`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
-		}},
-		{Display: "Brave", Name: "brave", Paths: []string{
-			`C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe`,
-			`C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe`,
-		}},
+	switch runtime.GOOS {
+	case "darwin":
+		// macOS: browsers live in /Applications as .app bundles; the executable
+		// is inside Contents/MacOS. Same set as upstream detectBrowser.
+		return []browserProbe{
+			{Display: "Chrome", Name: "chrome", Paths: []string{
+				`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`,
+				filepath.Join(os.Getenv("HOME"), `Applications/Google Chrome.app/Contents/MacOS/Google Chrome`),
+			}},
+			{Display: "Edge", Name: "edge", Paths: []string{
+				`/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge`,
+			}},
+			{Display: "Brave", Name: "brave", Paths: []string{
+				`/Applications/Brave Browser.app/Contents/MacOS/Brave Browser`,
+			}},
+			{Display: "Chromium", Name: "chromium", Paths: []string{
+				`/Applications/Chromium.app/Contents/MacOS/Chromium`,
+			}},
+		}
+	case "linux":
+		// Linux: browsers are found via PATH (distro package names), no absolute
+		// install dirs to probe.
+		return []browserProbe{
+			{Display: "Chrome", Name: "google-chrome"},
+			{Display: "Chrome", Name: "google-chrome-stable"},
+			{Display: "Chromium", Name: "chromium"},
+			{Display: "Chromium", Name: "chromium-browser"},
+			{Display: "Edge", Name: "microsoft-edge"},
+			{Display: "Brave", Name: "brave-browser"},
+			// Domestic (信创) Chromium forks, probed last — names verified from
+			// the vendors' published debs; see browserdetect.go.
+			{Display: "UOS Browser", Name: "browser"},
+			{Display: "Qianxin Browser", Name: "qaxbrowser-safe-stable"},
+			{Display: "Qianxin Browser", Name: "qaxbrowser-safe"},
+			{Display: "360 Browser", Name: "browser360-cn-stable"},
+			{Display: "360 Browser", Name: "browser360-cn"},
+			{Display: "360 Browser", Name: "browser360"},
+			{Display: "Qianxin Browser (legacy name)", Name: "qianxin-browser"},
+			{Display: "QQ Browser", Name: "qqbrowser"},
+		}
+	default: // windows
+		return []browserProbe{
+			{Display: "Chrome", Name: "chrome", Paths: []string{
+				`C:\Program Files\Google\Chrome\Application\chrome.exe`,
+				`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
+			}},
+			{Display: "Edge", Name: "msedge", Paths: []string{
+				`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
+				`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
+			}},
+			{Display: "Brave", Name: "brave", Paths: []string{
+				`C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe`,
+				`C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe`,
+			}},
+		}
 	}
 }
 

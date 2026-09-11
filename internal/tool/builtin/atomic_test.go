@@ -146,15 +146,15 @@ func TestCleanupStaleTempsMissingDirIsNoop(t *testing.T) {
 // rows-write path's helper. Leading-zero IDs stay text; bare numbers go numeric.
 func TestSetCellAutoType(t *testing.T) {
 	cases := []struct {
-		val      string
-		numeric  bool
+		val     string
+		numeric bool
 	}{
 		{"100", true},
 		{"1.5", true},
 		{"-2", true},
 		{"0", true},
 		{"0.5", true},
-		{"001", false},   // leading-zero ID
+		{"001", false},    // leading-zero ID
 		{"010000", false}, // postal code
 		{"hello", false},
 		{"", false},

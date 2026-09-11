@@ -5,12 +5,12 @@
 // parent's session context drives whether to apply them).
 //
 // Design:
-// - Only create a worktree when the sub-agent has writer tools (read-only
-//   sub-agents share the parent's workspace freely).
-// - The worktree lives under `.fairpeer/worktrees/<call-id>/` and is removed
-//   after the diff is extracted.
-// - The diff is returned to the model as a unified diff it can choose to
-//   apply via apply_patch, keeping the approval flow intact.
+//   - Only create a worktree when the sub-agent has writer tools (read-only
+//     sub-agents share the parent's workspace freely).
+//   - The worktree lives under `.fairpeer/worktrees/<call-id>/` and is removed
+//     after the diff is extracted.
+//   - The diff is returned to the model as a unified diff it can choose to
+//     apply via apply_patch, keeping the approval flow intact.
 package agent
 
 import (

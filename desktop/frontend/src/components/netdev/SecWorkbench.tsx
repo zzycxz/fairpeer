@@ -6,11 +6,12 @@ import { AuditProjectPanel } from "./AuditProjectPanel";
 import type { NetDevDeviceView, NetDevIncidentCase } from "../../lib/types";
 
 // SecWorkbench — 主区「安全工作台」（NETDEV_SPEC_V2 §10.4）：第三工作台。
-// 左栏案例列表 + 当前案例 IOC 台账；主区时间线（引用卡：Finding/日志命中/
-// 体检项/人工笔记）。入侵排查向导（§10.7）是案例的出生方式之一——五步
-// checklist 驱动既有桥（体检/全网搜索/导出），每步结果钉进案例时间线。
-// 案例纯本地存储；复盘导出 = CaseBundle（含相关 Finding 与 24h 变更）。
-// CVE 视图（completion-spec §2.3）：feed 导入 → 匹配清单 → 一键扫荡。
+// 左栏三个视图：案例列表 + 当前案例 IOC 台账 / CVE（feed 导入→匹配清单→
+// 扫荡，completion-spec §2.3）/ 项目审计（AuditProjectPanel 五电池）。
+// 主区时间线（引用卡：Finding/日志命中/体检项/人工笔记）。入侵排查向导
+// （§10.7）是案例的出生方式之一——五步 checklist 驱动既有桥，每步结果钉进
+// 案例时间线。案例纯本地存储；复盘导出 = CaseBundle（含相关 Finding 与
+// 24h 变更）。
 
 const KIND_LABEL: Record<string, string> = { finding: "ndv.sec.kFinding", log: "ndv.sec.kLog", audit: "ndv.sec.kAudit", triage: "ndv.sec.kTriage", note: "ndv.sec.kNote" };
 const KIND_COLOR: Record<string, string> = {
@@ -21,7 +22,17 @@ const KIND_COLOR: Record<string, string> = {
   note: "var(--fg-faint)",
 };
 
-type CVEMatch = { device: string; cve_id: string; desc: string; severity: string; product: string };
+type CVEMatch = { device: string; cve_id: string; desc: string; severity: string; product: string; version_status?: string; device_version?: string };
+
+// versionBadge renders the batch-B three-state version verdict (in_range /
+// out_of_range 保留供核对 / unverified 需人工比对).
+function versionBadge(m: CVEMatch): string {
+  switch (m.version_status) {
+    case "in_range": return `✓ ${m.device_version ?? ""}`;
+    case "out_of_range": return `✗ ${m.device_version ?? ""}`;
+    default: return m.device_version ? `? ${m.device_version}` : "?";
+  }
+}
 
 // 入门示例 feed（§2.3）：15 条公开知名的网络设备 CVE（厂商公告/NVD 可查，数据
 // 截至 2026-09），覆盖 Cisco/华为/H3C/锐捷/Fortinet/Juniper/Palo Alto/F5/
@@ -129,11 +140,11 @@ export function SecWorkbench({ devices, hidden }: {
   // Finding 卡「建案例」入口（findings 页签 → 本工作台）：事件带首条条目。
   useEffect(() => {
     const onNew = (ev: Event) => {
-      const d = (ev as CustomEvent<{ title?: string; device?: string; text?: string }>).detail ?? {};
+      const d = (ev as CustomEvent<{ title?: string; device?: string; text?: string; ref?: string }>).detail ?? {};
       const c: NetDevIncidentCase = {
         id: "", title: d.title || t("ndv.sec.defaultCaseTitle"), status: "open",
         devices: d.device ? [d.device] : [],
-        entries: d.text ? [{ time: new Date().toISOString(), kind: "finding", device: d.device ?? "", text: d.text }] : [],
+        entries: d.text ? [{ time: new Date().toISOString(), kind: "finding", device: d.device ?? "", text: d.text, ref: d.ref }] : [],
         iocs: [], created_at: "", updated_at: "",
       };
       void app.NetDevCaseSave(c).then(saved => {
@@ -215,7 +226,7 @@ export function SecWorkbench({ devices, hidden }: {
     setIocBulk(false);
   };
 
-  // ── {t("ndv.sec.wizTitle")}（§10.7）：五步，各驱动既有桥，结果钉入时间线 ──────────
+  // ── 入侵排查向导（§10.7）：五步，各驱动既有桥，结果钉入时间线 ──────────
   const wizTriage = async () => {
     if (!current) return;
     const targets = (current.devices ?? []).filter(d => hosts.some(h => h.name === d));
@@ -271,14 +282,24 @@ export function SecWorkbench({ devices, hidden }: {
 
   // ── CVE 视图（§2.3）：feed 导入 → 匹配清单 → 扫荡 ──────────────────────
   const cveFileRef = useRef<HTMLInputElement>(null);
+  const [cveClearArm, setCveClearArm] = useState(false);
+  // 导入即扫查：feed 与清单是匹配仅有的两个输入，导入后立即刷新匹配并滚动
+  // 更新 cve:sweep 发现卡——不需要时间定时器（输入不变时重扫是空转）。扫查
+  // 静默：零命中不留新卡、只把过期命中卡标记恢复（2026-09-08 收口），反馈经
+  // note 通道已足够；这里的 catch 只兜后端异常。
+  const cveAfterImport = async () => {
+    try { await cveList(); } catch { /* 匹配视图是参考面，失败不打断导入 */ }
+    try { await app.NetDevCVESweep(); } catch { /* 零命中/暂无清单都正常 */ }
+  };
   const cveImport = async () => {
-    if (!cveFeed.trim()) return;
+    if (cveBusy || !cveFeed.trim()) return; // busy 期间整体拒点：导入/清空/扫查互斥
     setCveBusy("import");
     setCveSweepHint("");
     try {
       const n = await app.NetDevImportCVEs(cveFeed);
       setNote(t("ndv.sec.feedImported", { n }));
       setCveFeed("");
+      await cveAfterImport();
     } catch (e) { setNote(String(e)); } finally { setCveBusy(""); }
   };
   // 大文件通道（NVD 原生导出几十 MB，textarea 承载不了）：读本地文件直接导入，
@@ -286,14 +307,24 @@ export function SecWorkbench({ devices, hidden }: {
   const cveImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     e.target.value = "";
-    if (!f) return;
+    if (!f || cveBusy) return;
     setCveBusy("import");
     setCveSweepHint("");
     try {
       const n = await app.NetDevImportCVEs(await f.text());
       setNote(t("ndv.sec.feedImported", { n }));
-      await cveList();
+      await cveAfterImport();
     } catch (err) { setNote(String(err)); } finally { setCveBusy(""); }
+  };
+  const cveClear = async () => {
+    if (cveBusy) return;
+    setCveBusy("clear"); // 独立 busy：复用 "import" 会把导入按钮错标成「导入中」
+    try {
+      await app.NetDevCVEClear();
+      setNote(t("ndv.sec.clearedFeed"));
+      setCveMatches([]);
+      setCveSweepHint(""); // 清空后残留指向旧 feed 的提示只会误导
+    } catch (e) { setNote(String(e)); } finally { setCveBusy(""); }
   };
   const cveList = async () => {
     setCveBusy("list");
@@ -357,7 +388,7 @@ export function SecWorkbench({ devices, hidden }: {
                 )}
                 <div style={{ display: "flex", gap: 4 }}>
                   <select className="mem-select" style={{ width: 66 }} value={iocType} onChange={e => setIocType(e.target.value)}>
-                    {["ip", "domain", "hash", "keyword"].map(t => <option key={t} value={t}>{t}</option>)}
+                    {["ip", "domain", "hash", "keyword"].map(k => <option key={k} value={k}>{k}</option>)}
                   </select>
                   <input className="mem-input" style={{ flex: 1, minWidth: 0 }} value={iocValue} onChange={e => setIocValue(e.target.value)}
                     placeholder={t("ndv.bse.phValue")} onKeyDown={e => { if (e.key === "Enter") addIOC(); }} />
@@ -396,7 +427,7 @@ export function SecWorkbench({ devices, hidden }: {
             <textarea className="mem-input" rows={4} style={{ width: "100%", fontSize: 10.5, fontFamily: "var(--font-mono, monospace)" }}
               placeholder={t('ndv.sec.phFeed')}
               value={cveFeed} onChange={e => setCveFeed(e.target.value)} />
-            <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+            <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
               <span className="btn btn--secondary btn--small" role="button"
                 title={t("ndv.sec.fillExampleTip")}
                 onClick={() => { setCveFeed(SAMPLE_CVE_FEED); setCveSweepHint(t("ndv.sec.exampleHint")); }}>{t("ndv.sec.fillExample")}</span>
@@ -407,8 +438,28 @@ export function SecWorkbench({ devices, hidden }: {
               <input ref={cveFileRef} type="file" accept=".json,application/json" style={{ display: "none" }} onChange={e => void cveImportFile(e)} />
               <span className="btn btn--secondary btn--small" role="button" onClick={() => void cveList()}>{cveBusy === "list" ? t("ndv.sec.refreshing") : t("ndv.sec.refreshMatches")}</span>
               <span className="btn btn--primary btn--small" role="button" onClick={() => void cveSweep()}>{cveBusy === "sweep" ? t("ndv.sec.sweeping") : t("ndv.sec.cveSweep")}</span>
+              {/* 两击确认：span 不可聚焦，onBlur 是死代码——armed 状态会跨任意
+                  无关操作滞留，第二击误触破坏性清空。tabIndex + Escape 复位 +
+                  失焦复位让确认语义真实生效（键盘也可达）。 */}
+              <span
+                className={`btn btn--small ${cveClearArm ? "btn--primary" : "btn--secondary"}`}
+                role="button"
+                tabIndex={0}
+                title={t("ndv.sec.clearFeedTip")}
+                onClick={() => {
+                  if (!cveClearArm) { setCveClearArm(true); return; }
+                  setCveClearArm(false);
+                  void cveClear();
+                }}
+                onKeyDown={e => {
+                  if (e.key === "Escape") setCveClearArm(false);
+                }}
+                onBlur={() => setCveClearArm(false)}
+              >{cveClearArm ? t("ndv.sec.clearFeedConfirm") : t("ndv.sec.clearFeed")}</span>
             </div>
             {cveSweepHint && <div className="ndv__hint" style={{ padding: "4px 0" }}>{cveSweepHint}</div>}
+            {/* note 只在案例视图渲染——CVE 视图的导入/清空反馈曾全部不可见。 */}
+            {note && <div className="ndv__hint" style={{ padding: "4px 0" }}>{note}</div>}
           </>
         )}
       </div>
@@ -434,7 +485,7 @@ export function SecWorkbench({ devices, hidden }: {
             ) : (
               <table className="mem-hint" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                 <thead>
-                  <tr style={{ textAlign: "left" }}><th>{t("ndv.sec.colDevice")}</th><th>CVE</th><th>{t("ndv.sec.colSeverity")}</th><th>{t("ndv.sec.colProduct")}</th><th>{t("ndv.sec.colDesc")}</th></tr>
+                  <tr style={{ textAlign: "left" }}><th>{t("ndv.sec.colDevice")}</th><th>CVE</th><th>{t("ndv.sec.colSeverity")}</th><th>{t("ndv.sec.colVersion")}</th><th>{t("ndv.sec.colProduct")}</th><th>{t("ndv.sec.colDesc")}</th></tr>
                 </thead>
                 <tbody>
                   {cveMatches.map((m, i) => (
@@ -442,6 +493,7 @@ export function SecWorkbench({ devices, hidden }: {
                       <td>{m.device}</td>
                       <td style={{ fontFamily: "var(--font-mono, monospace)" }}>{m.cve_id}</td>
                       <td style={{ color: m.severity === "high" || m.severity === "critical" ? "var(--err, #e5484d)" : undefined }}>{m.severity}</td>
+                      <td title={m.device_version ? `设备版本 ${m.device_version}` : undefined}>{versionBadge(m)}</td>
                       <td>{m.product}</td>
                       <td style={{ opacity: 0.75 }}>{m.desc?.slice(0, 80)}</td>
                     </tr>
@@ -479,9 +531,9 @@ export function SecWorkbench({ devices, hidden }: {
               <span className="btn btn--secondary btn--small" role="button" onClick={() => void app.NetDevCaseDelete(current.id).then(refresh)}>{t("ndv.tpl.delete")}</span>
             </div>
 
-            {/* {t("ndv.sec.wizTitle")}（五步 checklist，§10.7） */}
+            {/* 入侵排查向导（五步 checklist，§10.7） */}
             <div className="ndv-sec__wiz">
-              <span className="ndv__meta" style={{ fontWeight: 700 }}>{t("ndv.sec.wizTitle")}</span>
+              <span className="ndv__meta" style={{ fontWeight: 700 }}>入侵排查向导</span>
               <div className="ndv-sec__wiz-row">
                 <span className="ndv-sec__wiz-n">1</span>
                 <span className="ndv__meta">{t("ndv.sec.wizScope", { n: (current.devices ?? []).length })}</span>

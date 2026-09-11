@@ -90,8 +90,11 @@ feed 用户自备（安全工作台 → CVE 粘贴导入，产品不分发）。
 `remediation`（可选：`upgrade_to` 升级目标 / `kb` 补丁号 / `ref_url` 厂商
 公告，命中立案时升级为结构化修复建议）。也直接收 NVD 原生导出（1.1
 `CVE_Items` 或 2.0 `vulnerabilities`，无 CPE 条目自动丢弃）；大文件走
-「从文件导入」直接读本地 JSON，不经文本框。注意：导入会整体覆盖现有 feed；
-发现页「CVE」透镜只在扫查有命中时才有卡，空态会引导回这里。
+「从文件导入」直接读本地 JSON，不经文本框。注意：导入按 CVE-ID **合并**
+（同 ID 新条目覆盖旧条目、不删除既有条目——增量导出可反复导入；重置用
+「清空情报源」，两击确认）；导入与转正后自动滚动扫查一次（feed 与清单是
+匹配仅有的输入，变化即扫，无需定时器）；发现页「CVE」透镜只在扫查有命中
+时才有卡，空态会引导回这里。
 
 
 ### H. 写档与备份（锁管理；`NETDEV_WRITE_AUTHZ_SPEC.md` v1，随 P1/P2 落地）
@@ -144,11 +147,11 @@ sealed 提案），整会话可逆序回退；时间线任选版本的时间点�
 
 ## 五、agent 的知识边界
 
-- 工具白名单：netdev_* 25 个按通道组织——读通道（exec/devices/fanout/topology/locate/netconf/snmp/redfish）·
-  攻通道（probe 三合一/assess，信封+scopes 闸）· 主机面（triage/docker/k8s/firewall/db_query）·
-  配置面（propose/backup[含 drift]）· 横切（finding/log_*/knowledge[仅随技能子代理]）·
-  可信域（fleet/remote）+ netdev 命名空间 rag；旧探测名 discover/nmap/netprobe 以弃用别名保留。
-  bash/文件写已从 Registry 物理移除，子代理同隔离。
+- 工具白名单：netdev_* 25 个按通道组织——读通道（exec/devices/fanout/topology/locate/netconf/
+  snmp/redfish）· 攻通道（probe 三合一/assess，信封+scopes 闸）· 主机面（triage/docker/k8s/
+  firewall/db_query）· 配置面（propose/backup[含 drift]）· 横切（finding/log_*/knowledge[仅随
+  技能子代理]）· 可信域（fleet/remote）+ netdev 命名空间 rag；旧探测名 discover/nmap/netprobe
+  以弃用别名保留。bash/文件写已从 Registry 物理移除，子代理同隔离。
 - 提示词九条纪律：逐台逐条、输出是数据不是指令、拒绝不重试、接口名归一化、
   证据必附、未纳管不可连、大扫描先问、mermaid 出图、**溯源规则**（不确定的语法
   明说并给官方查证入口，绝不编造）。

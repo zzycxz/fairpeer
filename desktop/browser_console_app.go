@@ -813,12 +813,12 @@ type BrowserConsoleStep struct {
 // The terminal event carries Downloads: files collected by "wait download"
 // steps, so the UI can offer AI triage on the exported workbook.
 type BrowserConsoleTrialStatus struct {
-	Index      int    `json:"index"`
-	Status     string `json:"status"` // running|waiting|done|failed
-	Output     string `json:"output,omitempty"`
-	Error      string `json:"error,omitempty"`
-	AwaitReply bool   `json:"await_reply,omitempty"`
-	Bind       string `json:"bind,omitempty"`
+	Index      int                      `json:"index"`
+	Status     string                   `json:"status"` // running|waiting|done|failed
+	Output     string                   `json:"output,omitempty"`
+	Error      string                   `json:"error,omitempty"`
+	AwaitReply bool                     `json:"await_reply,omitempty"`
+	Bind       string                   `json:"bind,omitempty"`
 	Downloads  []BrowserConsoleDownload `json:"downloads,omitempty"`
 }
 

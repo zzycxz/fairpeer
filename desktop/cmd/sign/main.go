@@ -34,8 +34,10 @@ import (
 
 // platforms are the manifest keys we publish. A built artifact is matched to a key
 // by substring (file names embed the key, e.g. fairpeer-darwin-arm64.zip), so the
-// generator and the updater agree on update.PlatformKey output.
-var platforms = []string{"darwin-arm64", "darwin-amd64", "windows-amd64", "windows-arm64", "linux-amd64", "linux-arm64"}
+// generator and the updater agree on update.PlatformKey output. linux-loong64 is
+// the new-world LoongArch channel (kernel >= 5.19); artifacts only enter the
+// manifest when built and present.
+var platforms = []string{"darwin-arm64", "darwin-amd64", "windows-amd64", "windows-arm64", "linux-amd64", "linux-arm64", "linux-loong64"}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -194,7 +196,10 @@ func genManifest(dir, version, tag string) error {
 			return err
 		}
 		url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, tag, name)
-		sigURL := fmt.Sprintf("https://github.com/%s/releases/download/%s-sigs/%s.minisig", repo, tag, name)
+		// The .minisig files ride the SAME release as the artifacts (see the
+		// publish job's files list) — a separate <tag>-sigs release is never
+		// created, so pointing there would 404 every updater signature fetch.
+		sigURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s.minisig", repo, tag, name)
 		m.Platforms[key] = update.Asset{URL: url, Sig: sigURL, Size: size, SHA256: sum}
 		fmt.Printf("manifest: %s -> %s (%d bytes)\n", key, name, size)
 	}
@@ -220,6 +225,12 @@ func matchPlatform(name string) string {
 	// the platform key must deterministically pin the installer. Skip portable
 	// exes — otherwise whichever of the two iterated last would win the map slot.
 	if strings.Contains(name, "-portable.") {
+		return ""
+	}
+	// CI packaging zips (7z bundles of build/bin) must never satisfy a
+	// platform key: applyWindows executes the asset as an NSIS installer, and
+	// a zip would brick the update. Zips are human-download bundles only.
+	if strings.HasSuffix(name, ".zip") {
 		return ""
 	}
 	for _, p := range platforms {

@@ -1,0 +1,11 @@
+{
+  "appid": "com.fairpeer.desktop",
+  "name": "fairpeer",
+  "version": "@VERSION@",
+  "arch": ["@ARCH@"],
+  "permissions": {
+    "notification": true,
+    "trayicon": true,
+    "clipboard": true
+  }
+}

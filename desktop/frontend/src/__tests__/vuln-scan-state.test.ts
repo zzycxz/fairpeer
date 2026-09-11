@@ -85,3 +85,9 @@ if (failed > 0) {
   process.exit(1);
 }
 console.log(`\nall ${passed} passed\n`);
+
+// 审查补钉：前缀方向——vulnscan 变体（vulnscan:xxx）必须仍在透镜内，
+// 防止有人把 startsWith 改回精确相等。
+eq(isVulnScanSource("vulnscan2"), true, "vulnscan prefix variants stay in lens");
+eq(isVulnScanSource("vulnscan:entry-host"), true, "source suffix stays in lens");
+console.log("all 22 passed");

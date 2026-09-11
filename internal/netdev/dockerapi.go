@@ -12,6 +12,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -22,6 +24,32 @@ import (
 
 const dockerBodyCap = 256 * 1024
 
+// defaultDockerSocket resolves the engine socket for an empty config. Windows
+// uses the Docker Desktop named pipe. On macOS /var/run/docker.sock usually
+// does not exist: Docker Desktop exposes ~/.docker/run/docker.sock, and colima
+// installs its own at ~/.colima/docker.sock — probe in that order and fall
+// back to the conventional /var/run/docker.sock so the dial error stays the
+// familiar one when nothing is installed. Linux keeps the conventional default.
+func defaultDockerSocket() string {
+	if runtime.GOOS == "windows" {
+		return "npipe:////./pipe/docker_engine"
+	}
+	if runtime.GOOS == "darwin" {
+		if home, err := os.UserHomeDir(); err == nil {
+			for _, p := range []string{
+				filepath.Join(home, ".docker", "run", "docker.sock"),
+				"/var/run/docker.sock",
+				filepath.Join(home, ".colima", "docker.sock"),
+			} {
+				if st, err := os.Stat(p); err == nil && !st.IsDir() {
+					return "unix://" + p
+				}
+			}
+		}
+	}
+	return "unix:///var/run/docker.sock"
+}
+
 // dockerIDRe constrains container IDs/names used in paths — one plain token,
 // no slashes or metacharacters (path-injection guard).
 var dockerIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
@@ -30,11 +58,7 @@ var dockerIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 func dockerTransport(socket string) (*http.Transport, error) {
 	socket = strings.TrimSpace(socket)
 	if socket == "" {
-		if runtime.GOOS == "windows" {
-			socket = "npipe:////./pipe/docker_engine"
-		} else {
-			socket = "unix:///var/run/docker.sock"
-		}
+		socket = defaultDockerSocket()
 	}
 	switch {
 	case strings.HasPrefix(socket, "npipe://"):

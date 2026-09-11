@@ -1,0 +1,37 @@
+{
+  "id": "china-mobile",
+  "name": "中国移动",
+  "keywords": ["中国移动", "中移", "移动公司", "CMCC"],
+  "description": "中国移动品牌预设：主蓝 #1084CD 做结构色，活力橙 #FF7F00 只做关键数据/警示的点状强调，品牌绿 #8CC63F 少量呼应。命中关键词时由 preflight --preset china-mobile 机械套用，跳过颜色识别。",
+  "colors": {
+    "brand": "#1084CD",
+    "primary": "#1084CD",
+    "accent": "#FF7F00",
+    "brand_green": "#8CC63F",
+    "background": "#FFFFFF",
+    "background_type": "solid",
+    "card_bg": "rgba(255,255,255,0.8)",
+    "line": "#D9EAF7",
+    "secondary": "#D9EAF7",
+    "secondary_light": "#EAF5FC",
+    "text": "#333333",
+    "text_muted": "#B0B7C3",
+    "text_secondary": "#888888",
+    "white": "#FFFFFF"
+  },
+  "rules": {
+    "color_usage": "每页以白底和主蓝 #1084CD 为主，浅蓝 #D9EAF7/#EAF5FC 用于表头/细线/弱底色；活力橙 #FF7F00 只用于关键数据、按钮、警告和风险标记，橙色视觉面积不超过 5%，每页最多 1 个橙色焦点；品牌绿 #8CC63F 只做品牌呼应，少量使用；禁止紫色、棕色、土黄色、霓虹色和彩虹图表",
+    "background_rules": {
+      "content_page": "可叠加浅蓝卡片、细线、表格和图表；避免大面积色块、强渐变、重阴影和复杂装饰",
+      "cover_page": "只叠加标题文字，不要添加任何装饰元素",
+      "ending_page": "只叠加致谢文字（感谢聆听+副标题+联系方式），不要添加卡片、图表、色块等装饰元素，保持简洁"
+    },
+    "content_density": {
+      "vertical_coverage": {
+        "min_zones_with_content": 4
+      }
+    }
+  },
+  "default_prompt_style": "专业简洁，蓝色商务风格，信息密度高",
+  "template_seed": "default.pptx"
+}

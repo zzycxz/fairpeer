@@ -50,7 +50,7 @@ func TestDocReadTextStreamsLargeFile(t *testing.T) {
 	// ~525k times. Each line is short so the line count is high but the file
 	// is genuinely over the old cap.
 	line := strings.Repeat("x", 110) + "\n" // 111 bytes
-	const targetBytes = 60 * 1024 * 1024     // 60 MiB, above the 50 MiB old cap
+	const targetBytes = 60 * 1024 * 1024    // 60 MiB, above the 50 MiB old cap
 	f, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)

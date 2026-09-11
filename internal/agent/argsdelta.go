@@ -114,8 +114,8 @@ func hex4(s string) (rune, bool) {
 // argsPreviewAccum tracks one call's raw args and the last emit time, so the
 // agent can throttle preview events (the model emits many small fragments).
 type argsPreviewAccum struct {
-	raw       strings.Builder
-	lastEmit  int64 // unix ms of the last emitted preview
+	raw      strings.Builder
+	lastEmit int64 // unix ms of the last emitted preview
 }
 
 // minPreviewIntervalMs throttles preview emissions per call; the final

@@ -110,6 +110,11 @@ type App struct {
 	backgroundMaximised atomic.Bool
 	trayReady           bool
 	tray                *desktopTray
+	// shutdownOnce guards the shutdown body: it can be reached from Wails'
+	// OnShutdown (normal window close) AND from the SIGTERM/SIGINT handler in
+	// main.go — whichever fires first performs the cleanup, the second call is
+	// a no-op.
+	shutdownOnce sync.Once
 
 	mediaTokens *mediaTokenStore
 	botInstalls map[string]*botInstallSession
@@ -143,6 +148,24 @@ type App struct {
 	ragStore    *ragpkg.Store
 	ragPipeline *ragpkg.Pipeline
 	ragSession  *ragpkg.SessionRAGContext
+	// ragExtractRunning guards RagStartExtract against double-fire: two
+	// concurrent starts would double-enqueue the same files (double LLM
+	// token burn). Graph extraction itself is now uniformly the Go pipeline;
+	// Hyper-Extract stays dedicated to embeddings/summarize/semantic search.
+	ragExtractRunning atomic.Bool
+	// heMu guards the idle-time auto-retry scanner's lifecycle fields below
+	// (spawn in startRagAutoRetry vs close in shutdownBody).
+	heMu sync.Mutex
+	// Idle-time auto-retry engine (R3, opt-in): ragAutoRetryEnabled is the
+	// runtime switch (booted from config, flippable via RagAutoRetryToggle),
+	// ragAutoRetryActive marks an in-flight tick, ragAutoRetryStop cancels the
+	// scanner goroutine at shutdown, ragAutoRetryReported dedupes
+	// "rounds exhausted" notifications until the failure set changes.
+	ragAutoRetryEnabled   atomic.Bool
+	ragAutoRetryActive    atomic.Bool
+	ragAutoRetryMaxRounds atomic.Int64
+	ragAutoRetryStop      chan struct{}
+	ragAutoRetryReported  map[string]bool
 	// ragExtractor holds the configured extraction model (legacyExtractor, or
 	// nil when no extract model is set). Kept on the App so boot.RebindRAGBudget
 	// can re-inject the global RPM budget after each boot.Build — without it,
@@ -505,7 +528,7 @@ func (a *App) initRAG() {
 		// Resolve which model the RAG extractor uses, in priority order:
 		//   1. [cowork] extract_model — explicit override (rarely needed);
 		//   2. [agent] fast_task_model — the "迅捷任务模型" from Settings → Model,
-		//      same one dream/distill use (designed for fast background work);
+		//      same one dream uses (designed for fast background work);
 		//   3. default_model — the main chat model.
 		// All three go through config.ResolveModel, which yields a ProviderEntry
 		// with the right base_url + api_key_env + bare model name — so the
@@ -549,9 +572,26 @@ func (a *App) initRAG() {
 		// priority (reserve_main protects interactive requests).
 		a.ragExtractor = extractor
 	}
+	// lastRagChanged is touched from worker goroutines (Concurrency can be >1)
+	// and must not tear — guard it like the rest of the callback state.
+	var ragChangedMu sync.Mutex
+	var lastRagChanged time.Time
 	a.ragPipeline = ragpkg.NewPipeline(store, extractor, cfg, func(ev ragpkg.ProgressEvent) {
-		if a.ctx != nil {
-			runtime.EventsEmit(a.ctx, "rag:progress", ev)
+		if a.ctx == nil {
+			return
+		}
+		runtime.EventsEmit(a.ctx, "rag:progress", ev)
+		// Terminal job states change the tree/collection health, but only
+		// rag:progress was emitted — GraphCanvas/RagPanel listen exclusively
+		// to rag:changed and never saw extraction finish. Re-emit it here
+		// (300ms throttle: a batch of terminals must not flood full refreshes).
+		if ev.Kind == ragpkg.EventKindTerminal {
+			ragChangedMu.Lock()
+			defer ragChangedMu.Unlock()
+			if time.Since(lastRagChanged) > 300*time.Millisecond {
+				lastRagChanged = time.Now()
+				runtime.EventsEmit(a.ctx, "rag:changed")
+			}
 		}
 	})
 	a.ragPipeline.SetLogger(func(format string, args ...any) {
@@ -563,6 +603,20 @@ func (a *App) initRAG() {
 	// longer silently drop in-flight work.
 	if n := a.ragPipeline.Resume(); n > 0 {
 		slog.Info("rag: resumed interrupted extraction", "chunks", n)
+	}
+	// Idle-time auto-retry engine (R3): strictly opt-in via [cowork]
+	// extract_auto_retry — default off means background behavior is unchanged.
+	// The round cap is ALWAYS synced from config (default 2), so Status matches
+	// the settings panel even while opted out, and a later Toggle(true) does
+	// not silently downgrade a configured cap to the default.
+	a.ragAutoRetryMaxRounds.Store(2)
+	if c, err := config.Load(); err == nil {
+		if c.Cowork.ExtractAutoRetryMaxRounds > 0 {
+			a.ragAutoRetryMaxRounds.Store(int64(c.Cowork.ExtractAutoRetryMaxRounds))
+		}
+		if c.Cowork.ExtractAutoRetry {
+			a.startRagAutoRetry(int(a.ragAutoRetryMaxRounds.Load()))
+		}
 	}
 
 	// Start Hyper-Extract Python server (optional — failure is non-fatal).
@@ -716,7 +770,13 @@ func (p schedulerIMPusher) Push(ctx context.Context, dest, text string) error {
 		// sees "bot 未启动" and knows to start the bot.
 		return schedulerpkg.ErrIMOffline
 	}
-	return gw.Push(ctx, dest, text)
+	err := gw.Push(ctx, dest, text)
+	// Platform adapter not connected (bot up but that platform isn't) is the
+	// same "offline, skipped with reason" class — not a hard delivery failure.
+	if errors.Is(err, bot.ErrPlatformOffline) {
+		return schedulerpkg.ErrIMOffline
+	}
+	return err
 }
 
 // schedulerRunner implements scheduler.Runner by running a prompt in a tab of
@@ -785,24 +845,26 @@ func runScheduledPrompt(ctx context.Context, ctrl tabSession, prompt string) (st
 	return "ran", nil
 }
 
-// runHeadlessScheduled builds a throwaway headless cowork controller, runs the
+// runHeadlessScheduled builds a throwaway headless controller, runs the
 // prompt, then tears the controller down (releasing the shared plugin host).
-// WorkspaceRoot is the cowork home project 工作台 since scheduled tasks are not
-// bound to a specific project. See C7.
+// WorkspaceRoot is the TASK'S profile home project 工作台 — scheduled tasks are
+// not bound to a specific project, but they must still run in their own
+// profile's context (a dev task needs the dev workspace roots, not cowork's;
+// this used to hardcode cowork — globalization review finding F). See C7.
 func (a *App) runHeadlessScheduled(ctx context.Context, profileName, prompt string) (string, error) {
-	root := ensureProfileHomeRoot(config.ProfileCowork)
-	cfg, err := config.LoadForRoot(root)
-	if err != nil {
-		return "", fmt.Errorf("scheduled task: load config: %w", err)
-	}
 	// Resolve the product profile (default cowork for scheduled tasks). Empty
 	// or "dev" yields a nil profile → unprofiled coding behaviour; any other
 	// name resolves against config + builtins, mirroring tabs.go.
-	var profile *config.Profile
 	name := strings.TrimSpace(profileName)
 	if name == "" {
 		name = config.ProfileCowork
 	}
+	root := ensureProfileHomeRoot(name)
+	cfg, err := config.LoadForRoot(root)
+	if err != nil {
+		return "", fmt.Errorf("scheduled task: load config: %w", err)
+	}
+	var profile *config.Profile
 	if !strings.EqualFold(name, config.ProfileDev) {
 		if p, perr := cfg.ResolveProfile(name); perr == nil {
 			profile = p
@@ -844,6 +906,10 @@ func assistantText(m provider.Message) string {
 	return ""
 }
 
+// backgroundWithoutTrayWarned logs the no-tray close fallback exactly once per
+// process (beforeClose fires on every close click; one log line is enough).
+var backgroundWithoutTrayWarned sync.Once
+
 func (a *App) beforeClose(ctx context.Context) bool {
 	if a.forceQuit.Swap(false) || consumeSystemQuitRequested() {
 		return false
@@ -853,6 +919,16 @@ func (a *App) beforeClose(ctx context.Context) bool {
 		cfg = config.LoadForEdit(config.UserConfigPath())
 	}
 	if cfg.DesktopCloseBehavior() == "background" {
+		if !traySupported() {
+			// "background" hides the window, recoverable via the tray — but on
+			// macOS there is no tray (tray_supported_darwin.go) and on vanilla
+			// GNOME there is no StatusNotifierWatcher either, so hiding would
+			// orphan the window with no way back. Fall through to a real quit.
+			backgroundWithoutTrayWarned.Do(func() {
+				slog.Info("close-behavior: 'background' configured but no tray is available on this platform (macOS / GNOME without StatusNotifierItem); closing the window quits the app instead of hiding it")
+			})
+			return false
+		}
 		a.backgroundMaximised.Store(runtime.WindowIsMaximised(ctx))
 		a.saveWindowStateSync()
 		a.snapshotAllTabs()
@@ -1079,7 +1155,14 @@ func (a *App) snapshotAllTabs() {
 }
 
 // shutdown snapshots all tabs, saves the final window geometry, and closes tabs.
+// It is the shared idempotent teardown: called by Wails' OnShutdown on normal
+// close and by the SIGTERM/SIGINT handler in main.go. The sync.Once makes the
+// double call (signal racing a user-initiated quit) harmless.
 func (a *App) shutdown(context.Context) {
+	a.shutdownOnce.Do(a.shutdownBody)
+}
+
+func (a *App) shutdownBody() {
 	a.stopBotGateway()
 	a.stopTray()
 	// Tear down remote host processes (WSL/Docker/SSH/Server links).
@@ -1097,6 +1180,24 @@ func (a *App) shutdown(context.Context) {
 	if a.ragPipeline != nil {
 		a.ragPipeline.Stop()
 	}
+	// Close the RAG store: it runs in WAL mode, and SQLite checkpoints the
+	// -wal back into the main database file only when the last connection
+	// closes. With SetMaxOpenConns(1) this Close is that connection — skipping
+	// it leaves all recent writes stranded in rag.db-wal.
+	if a.ragStore != nil {
+		if err := a.ragStore.Close(); err != nil {
+			slog.Warn("rag: close store on shutdown", "err", err)
+		}
+	}
+	// Stop the idle-time auto-retry scanner (no-op when the user never opted
+	// in — the channel is only created by startRagAutoRetry). Same heMu guard
+	// as the spawn path; nil-ing makes a stray double shutdown harmless.
+	a.heMu.Lock()
+	if a.ragAutoRetryStop != nil {
+		close(a.ragAutoRetryStop)
+		a.ragAutoRetryStop = nil
+	}
+	a.heMu.Unlock()
 	// Kill the Hyper-Extract Python subprocess so it doesn't leak as an orphan
 	// when the app exits (Windows especially leaves it running otherwise).
 	if a.heService != nil {
@@ -1141,10 +1242,12 @@ func (a *App) domReady(_ context.Context) {
 	state, ok := loadWindowState()
 	if ok {
 		// Validate saved position against current screens. Wails v2 doesn't
-		// expose per-screen origin (x,y offsets) so we can only do a basic
-		// sanity check: ensure the window origin falls within a generous
-		// estimate of the screen area. If the user unplugged an external
-		// display, negative or out-of-bounds coordinates are caught here.
+		// expose per-screen origin (x,y offsets), so the tightest sound check
+		// is: the window ORIGIN must land inside the largest current screen —
+		// anything beyond that (e.g. a coordinate from an unplugged external
+		// display that X<=2*maxW used to tolerate) restores the window
+		// off-screen where the user can't reach it. Failing the check centers
+		// the window instead.
 		valid := state.X >= 0 && state.Y >= 0
 		if valid {
 			screens, err := runtime.ScreenGetAll(a.ctx)
@@ -1158,7 +1261,7 @@ func (a *App) domReady(_ context.Context) {
 						maxH = sc.Size.Height
 					}
 				}
-				if state.X > maxW*2 || state.Y > maxH*2 {
+				if state.X >= maxW || state.Y >= maxH {
 					valid = false
 				}
 			}
@@ -1244,6 +1347,14 @@ func (a *App) SubmitToTab(tabID, input string) {
 func (a *App) mayPreparePPTReference(input string) string {
 	if !hasPPTIntent(strings.ToLower(input)) {
 		return input
+	}
+	// Brand keyword (e.g. 中国移动): steer the model to the mechanical brand
+	// preset — exact colors, no recognition guesswork. Model-facing [system]
+	// note only; the display copy stays clean. Applies with or without a
+	// reference attachment (a reference shapes layout, the preset fixes colors).
+	if preset := matchBrandPreset(strings.ToLower(input)); preset != "" {
+		pptVisionDebugLog("brand preset matched: %s", preset)
+		input += "\n\n[system] 检测到品牌关键词：生成 PPT 时请在调用 ppt-auto 的任务参数中带上品牌预设标记 brand=" + preset + "，并指示其 Step 0 运行 preflight 时带 --preset " + preset + "（机械套用 references/brand-presets/" + preset + ".json 的品牌配色，跳过颜色识别）。"
 	}
 	// Reference form 1: an uploaded attachment token. Form 2: an absolute local
 	// path typed/pasted into the message (e.g. C:\Users\me\Desktop\shot.png) —
@@ -3369,6 +3480,10 @@ type Meta struct {
 	RagScope         string `json:"ragScope,omitempty"`
 	Goal             string `json:"goal,omitempty"`
 	GoalStatus       string `json:"goalStatus,omitempty"`
+	// GoalTurns/GoalMaxTurns let the UI show the auto-advance budget ("第
+	// N/50 轮") before it trips. Zero when no goal is running.
+	GoalTurns    int `json:"goalTurns,omitempty"`
+	GoalMaxTurns int `json:"goalMaxTurns,omitempty"`
 	// ExpertSession is set when this tab is an expert-team collaboration session.
 	ExpertSession *ExpertSessionMeta `json:"expertSession,omitempty"`
 }
@@ -3421,8 +3536,10 @@ func (a *App) MetaForTab(tabID string) Meta {
 		goal = ctrl.Goal()
 	}
 	var goalStatus string
+	goalTurns, goalMax := 0, 0
 	if ctrl != nil {
 		goalStatus = ctrl.GoalStatus()
+		goalTurns, goalMax = ctrl.GoalTurns()
 	} else if strings.TrimSpace(goal) != "" {
 		goalStatus = control.GoalStatusRunning
 	} else {
@@ -3447,6 +3564,8 @@ func (a *App) MetaForTab(tabID string) Meta {
 		RagScope:         ragScope,
 		Goal:             goal,
 		GoalStatus:       goalStatus,
+		GoalTurns:        goalTurns,
+		GoalMaxTurns:     goalMax,
 		ExpertSession:    expertSession,
 	}
 }
@@ -3965,7 +4084,7 @@ func (a *App) Capabilities() CapabilitiesView {
 	return out
 }
 
-// DreamRunView is one Dream/Distill run record for the settings panel.
+// DreamRunView is one Dream run record for the settings panel.
 type DreamRunView struct {
 	Kind      string `json:"kind"`
 	Trigger   string `json:"trigger"`
@@ -3976,18 +4095,15 @@ type DreamRunView struct {
 }
 
 // DreamStatusView is the self-evolution panel's data: the live config (master
-// switch + cadence), the most recent run of each kind, and whether one is in
-// flight. The "last run" times come from the on-disk dream_state.json so manual
-// and automatic runs are both reflected.
+// switch + cadence), the most recent run, and whether one is in flight. The
+// "last run" times come from the on-disk dream_state.json so manual and
+// automatic runs are both reflected.
 type DreamStatusView struct {
-	Enabled         bool           `json:"enabled"`
-	DreamInterval   int            `json:"dreamInterval"`
-	DistillInterval int            `json:"distillInterval"`
-	DreamInFlight   bool           `json:"dreamInFlight"`
-	DistillInFlight bool           `json:"distillInFlight"`
-	LastDream       *DreamRunView  `json:"lastDream,omitempty"`
-	LastDistill     *DreamRunView  `json:"lastDistill,omitempty"`
-	History         []DreamRunView `json:"history"`
+	Enabled       bool           `json:"enabled"`
+	DreamInterval int            `json:"dreamInterval"`
+	DreamInFlight bool           `json:"dreamInFlight"`
+	LastDream     *DreamRunView  `json:"lastDream,omitempty"`
+	History       []DreamRunView `json:"history"`
 }
 
 // DreamStatus returns the self-evolution status for the active session's panel.
@@ -3996,29 +4112,21 @@ func (a *App) DreamStatus() DreamStatusView {
 	if cfg, err := config.Load(); err == nil {
 		view.Enabled = cfg.Dream.Enabled
 		view.DreamInterval = cfg.Dream.DreamIntervalDays()
-		view.DistillInterval = cfg.Dream.DistillIntervalDays()
 	} else {
 		d := config.Default().Dream
-		view.Enabled, view.DreamInterval, view.DistillInterval = d.Enabled, d.DreamIntervalDays(), d.DistillIntervalDays()
+		view.Enabled, view.DreamInterval = d.Enabled, d.DreamIntervalDays()
 	}
 	a.mu.RLock()
 	ctrl := a.activeCtrlLocked()
 	a.mu.RUnlock()
 	view.DreamInFlight = agent.DreamInFlight(agent.KindDream)
-	view.DistillInFlight = agent.DreamInFlight(agent.KindDistill)
 	if ctrl == nil {
 		return view
 	}
 	if r, ok := ctrl.LastDreamRun(agent.KindDream); ok {
 		view.LastDream = dreamRunView(r)
 	}
-	if r, ok := ctrl.LastDreamRun(agent.KindDistill); ok {
-		view.LastDistill = dreamRunView(r)
-	}
 	for _, r := range agent.DreamHistory(ctrl.SessionDir(), agent.KindDream) {
-		view.History = append(view.History, *dreamRunView(r))
-	}
-	for _, r := range agent.DreamHistory(ctrl.SessionDir(), agent.KindDistill) {
 		view.History = append(view.History, *dreamRunView(r))
 	}
 	return view
@@ -4043,10 +4151,10 @@ func (a *App) SetDreamEnabled(enabled bool) error {
 	})
 }
 
-// SetDreamIntervals sets the Dream and Distill cadence (days) in the config.
-func (a *App) SetDreamIntervals(dreamDays, distillDays int) error {
+// SetDreamInterval sets the Dream cadence (days) in the config.
+func (a *App) SetDreamInterval(dreamDays int) error {
 	return a.applyConfigChange(func(cfg *config.Config) error {
-		return cfg.SetDreamIntervals(dreamDays, distillDays)
+		return cfg.SetDreamInterval(dreamDays)
 	})
 }
 
@@ -4062,21 +4170,6 @@ func (a *App) TriggerDream() (DreamRunView, error) {
 	r, ran := ctrl.TriggerDream(context.Background())
 	if !ran {
 		return DreamRunView{}, fmt.Errorf("dream did not run: %s", r.Error)
-	}
-	return *dreamRunView(r), nil
-}
-
-// TriggerDistill runs a Distill workflow-extraction pass now (blocking).
-func (a *App) TriggerDistill() (DreamRunView, error) {
-	a.mu.RLock()
-	ctrl := a.activeCtrlLocked()
-	a.mu.RUnlock()
-	if ctrl == nil {
-		return DreamRunView{}, fmt.Errorf("no active session")
-	}
-	r, ran := ctrl.TriggerDistill(context.Background())
-	if !ran {
-		return DreamRunView{}, fmt.Errorf("distill did not run: %s", r.Error)
 	}
 	return *dreamRunView(r), nil
 }
@@ -6156,7 +6249,9 @@ func revealPath(path string) error {
 		if info, err := os.Stat(path); err == nil && !info.IsDir() {
 			dir = filepath.Dir(path)
 		}
-		return exec.Command("xdg-open", dir).Start()
+		// Route through openWorkspacePath so linux gets the same
+		// xdg-open → gio → kde-open fallback chain as openInFileExplorer.
+		return openWorkspacePath(dir)
 	}
 }
 
@@ -6714,7 +6809,7 @@ type ProfilePresetsPayload struct {
 // preference panel（编码/办公/运维三模式同款）. Reads the ACTIVE PROFILE's
 // preset file DIRECTLY — the controller only rides the prompt-injection
 // path, so a still-building (lazy) controller must never blank the panel
-//（运维偏好偶发空列表的根因）.
+// （运维偏好偶发空列表的根因）.
 func (a *App) ProfilePresets() ProfilePresetsPayload {
 	profile := a.activeProfileKey()
 	f := memory.LoadPresets(config.MemoryUserDir(), profile)

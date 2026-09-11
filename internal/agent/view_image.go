@@ -18,9 +18,10 @@ import (
 // viewImageMarker must stay in sync with the builtin view_image tool's output.
 const viewImageMarker = "view_image: "
 
-// maxViewImageBytes mirrors the tool's own cap; the agent re-checks because it
-// reads the bytes for the data URL.
-const maxViewImageBytes = 8 << 20
+// maxViewImageBytes mirrors the tool's cap (3 MiB raw ≈ 4 MB encoded — inside
+// Anthropic's 5 MB-per-image wire limit); the agent re-checks because it reads
+// the bytes for the data URL.
+const maxViewImageBytes = 3 << 20
 
 // viewMediaTypes maps the extensions view_image accepts to the MIME type the
 // data URL needs.

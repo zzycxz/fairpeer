@@ -13,9 +13,11 @@ import (
 
 func init() { tool.RegisterBuiltin(viewImageTool{}) }
 
-// maxViewImageBytes caps one image read: 8 MiB covers any screenshot or photo
-// a model can meaningfully use; larger files are rejected with guidance.
-const maxViewImageBytes = 8 << 20
+// maxViewImageBytes caps one image read at 3 MiB raw (≈4 MiB base64-encoded) —
+// inside Anthropic's 5 MB-per-image wire limit with headroom, and far below
+// every openai-compatible vision endpoint's practical ceiling. Larger files
+// are rejected with guidance.
+const maxViewImageBytes = 3 << 20
 
 // viewImageMarker prefixes the success output; everything after it is the
 // absolute path the agent loop converts into an image content part
@@ -42,7 +44,7 @@ type viewImageTool struct {
 func (viewImageTool) Name() string { return "view_image" }
 
 func (viewImageTool) Description() string {
-	return "Read an image file (png/jpg/jpeg/webp/gif, up to 8MB) so you can SEE it: on vision-capable models the image is attached to your context directly. Use it to inspect screenshots, generated images, diagrams, or photos referenced in the task. For text files use read_file."
+	return "Read an image file (png/jpg/jpeg/webp/gif, up to 3MB) so you can SEE it: on vision-capable models the image is attached to your context directly. Use it to inspect screenshots, generated images, diagrams, or photos referenced in the task. For text files use read_file."
 }
 
 func (viewImageTool) Schema() json.RawMessage {

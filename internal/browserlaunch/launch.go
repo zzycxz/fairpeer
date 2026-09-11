@@ -67,7 +67,11 @@ type Handle struct {
 	// Port is the bound remote-debugging port.
 	Port int
 
-	cmd     *exec.Cmd
+	cmd *exec.Cmd
+	// job is the tracking handle from proc.StartTracked: a Windows Job Object
+	// (0 when assignment failed — KillTracked then falls back to KillTree), or
+	// 0 off Windows, where the process group KillTracked signals is enough.
+	job     uintptr
 	userDir string // profile dir; owned (deletable) only when ownTempDir is true
 	// ownTempDir is true when we created the profile dir (fresh temp). When
 	// false (the caller supplied a persistent --user-data-dir via opts), Close
@@ -212,21 +216,23 @@ func startBrowser(ctx context.Context, exePath, name string, port int, userDataD
 	// host otherwise pops one). No-op elsewhere.
 	proc.HideWindow(cmd)
 
-	// StartTracked starts the process AND assigns it to a tracking handle (a
-	// Windows Job Object, or a process group elsewhere) so the whole tree dies
-	// with the parent on a hard crash — no orphaned Chrome holding the profile
-	// lock. Do NOT call cmd.Start() separately; StartTracked does it.
-	if err := cmd.Start(); err != nil {
+	// StartTracked starts the process AND assigns it to a tracking handle — a
+	// Windows Job Object with KILL_ON_JOB_CLOSE, or its own process group
+	// (Setpgid) elsewhere — so the whole tree dies when we kill the handle
+	// (KillTracked) or the process: no orphaned Chrome holding the profile
+	// lock. It merges into any SysProcAttr already set above (HideWindow's
+	// CREATE_NO_WINDOW survives), and resumes the child it suspended for job
+	// assignment, so this is the one and only Start.
+	job, err := proc.StartTracked(cmd)
+	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("browserlaunch: start %s: %w", name, err)
 	}
-	// Re-arm process-group/job tracking on the already-started process. (We keep
-	// the explicit Start above rather than StartTracked so the HideWindow flags
-	// and SysProcAttr set there aren't clobbered by StartTracked's own setup.)
 	h := &Handle{
 		BrowserName: name,
 		Port:        port,
 		cmd:         cmd,
+		job:         job,
 		userDir:     userDataDir,
 		ownTempDir:  ownTempDir,
 		cancel:      cancel,
@@ -266,10 +272,12 @@ func startBrowser(ctx context.Context, exePath, name string, port int, userDataD
 // the failure paths of startBrowser.
 func (h *Handle) killAndCleanup(ownTempDir bool) {
 	h.cancel()
-	// KillTree fells the whole tree (a plain Process.Kill only hits the direct
-	// child and can orphan helper processes holding the profile lock).
+	// KillTracked kills the whole tree: on Windows it terminates the Job Object
+	// first (catching even detached descendants), then KillTree; off Windows the
+	// child runs in its own process group (Setpgid in StartTracked), so the
+	// negative-pid kill reaches every descendant instead of failing with ESRCH.
 	if h.cmd != nil && h.cmd.Process != nil {
-		proc.KillTree(h.cmd)
+		proc.KillTracked(h.cmd, h.job)
 	}
 	if ownTempDir && h.userDir != "" {
 		_ = os.RemoveAll(h.userDir)
@@ -291,7 +299,7 @@ func (h *Handle) Close() error {
 	if h.cmd != nil && h.cmd.Process != nil {
 		// Persistent profile: give Chrome a moment to flush state to disk before
 		// the forced tree-kill. A graceful signal (SIGTERM on Unix, the WM_CLOSE
-		// equivalent isn't portable from Go) is preferable, but KillTree is the
+		// equivalent isn't portable from Go) is preferable, but KillTracked is the
 		// reliable cross-platform fallback. The short bounded wait covers the
 		// common case where the process exits on its own after we cancel context.
 		// For an ephemeral temp profile there's nothing to flush, so kill now.
@@ -300,10 +308,10 @@ func (h *Handle) Close() error {
 			case <-h.done:
 				// Process already exited (e.g. context-cancelled) — state flushed.
 			case <-time.After(1500 * time.Millisecond):
-				proc.KillTree(h.cmd)
+				proc.KillTracked(h.cmd, h.job)
 			}
 		} else {
-			proc.KillTree(h.cmd)
+			proc.KillTracked(h.cmd, h.job)
 		}
 	}
 	// Don't block forever if Wait is somehow stalled.
@@ -649,7 +657,7 @@ func resolveBrowser(override string) (path string, name string, err error) {
 				return
 			}
 		}
-		detected, detectedAs, detectErr = "", "", fmt.Errorf("%w: install Chrome or Edge, or set CHROME_PATH", ErrNoBrowser)
+		detected, detectedAs, detectErr = "", "", fmt.Errorf("%w: install Chrome/Edge (or the bundled UOS/360 browser), or set CHROME_PATH", ErrNoBrowser)
 	})
 	return detected, detectedAs, detectErr
 }
@@ -702,6 +710,18 @@ func candidates() []candidate {
 			{Name: "chromium-browser"},
 			{Name: "microsoft-edge"},
 			{Name: "brave-browser"},
+			// Domestic (信创) Chromium forks, probed last. Names verified from
+			// the vendors' published debs (2026-09) — see browserdetect.go for
+			// the full note: qaxbrowser-safe-stable (Qianxin, Chromium 107 on
+			// all four arches), browser360-cn-stable (360, Chromium 126 amd64).
+			{Name: "browser", Paths: []string{"/usr/bin/browser"}},
+			{Name: "qaxbrowser-safe-stable", Paths: []string{"/usr/bin/qaxbrowser-safe-stable"}},
+			{Name: "qaxbrowser-safe", Paths: nil},
+			{Name: "browser360-cn-stable", Paths: []string{"/usr/bin/browser360-cn-stable"}},
+			{Name: "browser360-cn", Paths: nil},
+			{Name: "browser360", Paths: []string{"/usr/bin/browser360"}},
+			{Name: "qianxin-browser", Paths: []string{"/usr/bin/qianxin-browser"}},
+			{Name: "qqbrowser"},
 		}
 	}
 }

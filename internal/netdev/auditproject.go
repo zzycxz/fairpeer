@@ -29,7 +29,11 @@ type AuditProject struct {
 	// Checklist picks the battery stages: baseline|vuln|logs|exposure|weakcred.
 	// weakcred 仅在评估信封有效时执行（信封闸不因审计绕过）。
 	Checklist []string `json:"checklist"`
-	CreatedAt string   `json:"created_at"`
+	// 批 E 弱口令编排档：basic（默认）| dictionary；dictionary 缺 dict_path
+	// 按 basic 兜底并写进 BatteryNotes。信封闸照常强制。
+	WeakCredTier     string `json:"weakcred_tier,omitempty"`
+	WeakCredDictPath string `json:"weakcred_dict_path,omitempty"`
+	CreatedAt        string `json:"created_at"`
 }
 
 // AuditItem is one risk line in a report — a Finding signature + lifecycle.
@@ -254,19 +258,59 @@ func (m *Manager) RunProjectAudit(p *AuditProject) (*AuditReport, error) {
 	}
 	if stages["exposure"] {
 		edges := 0
-		if g, err := m.TopologySnapshot(ctx); err == nil {
+		extra := ""
+		note := "已执行"
+		if g, err := m.TopologySnapshot(ctx); err != nil {
+			// 快照失败不是「图为空」——伪装成已执行会让 0 邻接不可信。
+			note = "失败：" + err.Error()
+		} else {
 			edges = len(g.Edges)
+			// 批 E：exposure 电池接攻击路径推演（BuildAttackPaths 纯函数）——
+			// 推演非实测，产线是可决策的路径/暴露点/剪边建议，不落变更。
+			fs, ferr := ListFindings()
+			if ferr == nil {
+				if rpt := BuildAttackPaths(*g, fs); rpt != nil {
+					extra = fmt.Sprintf("；推演：暴露点 %d 个 / 攻击路径 %d 条（Top 剪边 %s-%s）",
+						len(rpt.ExposurePoints), len(rpt.Paths), firstCutFrom(rpt), firstCutTo(rpt))
+				}
+			}
 		}
-		rep.BatteryNotes["exposure"] = fmt.Sprintf("已执行：邻接 %d 条（暴露面推演走对话/拓扑视图）", edges)
+		rep.BatteryNotes["exposure"] = fmt.Sprintf("%s：邻接 %d 条%s（暴露面细节走对话/拓扑视图）", note, edges, extra)
 	}
 	if stages["weakcred"] {
 		if AssessmentActive(m.cfg.NetDev) != nil {
 			rep.BatteryNotes["weakcred"] = "跳过：评估信封未开（安全设计——审计不绕过信封闸）"
 		} else {
-			for _, dev := range p.Devices {
-				_, _ = m.WeakCredCheck(ctx, dev, "basic", "")
+			// 批 E：项目可配 weakcred_tier/dict_path（默认 basic）；字典档仍过
+			// 信封闸（WeakCredCheck 内已强制），缺字典路径按 basic 兜底并注明。
+			tier, dictPath := p.WeakCredTier, p.WeakCredDictPath
+			if tier == "" {
+				tier = "basic"
 			}
-			rep.BatteryNotes["weakcred"] = "已执行（basic 档，信封内）"
+			note := ""
+			if tier == "dictionary" && strings.TrimSpace(dictPath) == "" {
+				tier = "basic"
+				note = "，原配 dictionary 档缺 weakcred_dict_path 已按 basic 兜底"
+			}
+			weakHits, executed, failed, firstErr := 0, 0, 0, ""
+			for _, dev := range p.Devices {
+				res, err := m.WeakCredCheck(ctx, dev, tier, dictPath)
+				if err != nil {
+					failed++
+					if firstErr == "" {
+						firstErr = fmt.Sprintf("%s: %v", dev, err)
+					}
+					continue
+				}
+				executed++
+				if res.Weak {
+					weakHits++
+				}
+			}
+			rep.BatteryNotes["weakcred"] = fmt.Sprintf("已执行 %d/%d 台（%s 档，信封内）：弱口令确认 %d 台%s", executed, executed+failed, tier, weakHits, note)
+			if failed > 0 {
+				rep.BatteryNotes["weakcred"] += fmt.Sprintf("；失败 %d 台（首错 %s）", failed, firstErr)
+			}
 		}
 	}
 
@@ -448,4 +492,19 @@ func deviceSet(names []string) map[string]bool {
 		set[n] = true
 	}
 	return set
+}
+
+// firstCutFrom/firstCutTo — Top 剪边建议的起终点（无建议时占位 —）。
+func firstCutFrom(r *AttackPathReport) string {
+	if len(r.Cuts) > 0 {
+		return r.Cuts[0].From
+	}
+	return "—"
+}
+
+func firstCutTo(r *AttackPathReport) string {
+	if len(r.Cuts) > 0 {
+		return r.Cuts[0].To
+	}
+	return "—"
 }

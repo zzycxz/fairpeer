@@ -29,12 +29,26 @@ import (
 const pairCodeAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 func genPairCode() string {
-	b := make([]byte, 6)
-	_, _ = rand.Read(b)
-	for i := range b {
-		b[i] = pairCodeAlphabet[int(b[i])%len(pairCodeAlphabet)]
+	// Rejection sampling: a raw byte mod 31 biases the alphabet's first
+	// characters (256 % 31 != 0). Bytes >= 31*8 (=248) are discarded before the
+	// modulo, so all 31 symbols are equiprobable; ~3.3% of bytes are dropped,
+	// and a fresh batch is drawn until the code is full.
+	const rejectAt = 31 * 8 // 248 = the largest multiple of 31 that fits a byte
+	out := make([]byte, 0, 6)
+	buf := make([]byte, 6)
+	for len(out) < 6 {
+		_, _ = rand.Read(buf) // same posture as before: crypto/rand failures leave zeros, which still sample below
+		for _, c := range buf {
+			if c >= rejectAt {
+				continue
+			}
+			out = append(out, pairCodeAlphabet[int(c)%len(pairCodeAlphabet)])
+			if len(out) == 6 {
+				break
+			}
+		}
 	}
-	return string(b)
+	return string(out)
 }
 
 // ErrNoPending means no C is waiting at the given pairId when Confirm is called.

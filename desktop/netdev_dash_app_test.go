@@ -14,9 +14,9 @@ func TestRiskLevelFromScore(t *testing.T) {
 		{10, 0, 0, "medium"},
 		{30, 0, 0, "high"},
 		{31, 0, 0, "critical"},
-		{1, 1, 0, "high"},   // floor: critical CVE
-		{0, 0, 1, "high"},   // floor: weak cred confirmed
-		{2, 0, 1, "high"},   // floor beats low
+		{1, 1, 0, "high"},      // floor: critical CVE
+		{0, 0, 1, "high"},      // floor: weak cred confirmed
+		{2, 0, 1, "high"},      // floor beats low
 		{31, 1, 0, "critical"}, // floor never lowers
 		{0, 0, 0, "safe"},
 	}

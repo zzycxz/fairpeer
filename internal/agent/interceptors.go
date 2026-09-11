@@ -18,12 +18,12 @@ import (
 // preAnswerState is what the readiness/empty-answer interceptors see after a
 // stream completes with no tool calls — the "model is trying to finish" point.
 type preAnswerState struct {
-	Text       string
-	Reasoning  string
-	Usage      *provider.Usage
-	Step       int
-	finalBlocks  int
-	emptyBlocks  int
+	Text        string
+	Reasoning   string
+	Usage       *provider.Usage
+	Step        int
+	finalBlocks int
+	emptyBlocks int
 }
 
 // preAnswerVerdict is an interceptor's decision.

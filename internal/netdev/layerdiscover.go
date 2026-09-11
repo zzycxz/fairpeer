@@ -55,14 +55,21 @@ type DiscoverPlan struct {
 }
 
 // layerCommands returns (ifbrief, routes, arp) read commands per driver key.
+// The host-driver keys are what drvKey actually produces ("linux-shell",
+// "windows-powershell" — driver.Driver.Key()); plain "linux"/"" are accepted
+// for robustness. Windows yields its best-parseable trio: the shared parsers
+// read `arp -a` fully, while ipconfig/route print output yields empty tables
+// (never wrong ones) until dedicated parsers exist.
 func layerCommands(driverKey string) (string, string, string, bool) {
 	switch driverKey {
 	case "huawei-vrp":
 		return "display ip interface brief", "display ip routing-table", "display arp", true
 	case "cisco-ios":
 		return "show ip interface brief", "show ip route", "show ip arp", true
-	case "linux", "":
+	case "linux-shell", "linux", "":
 		return "ip -4 addr", "ip route", "ip neigh", true // host vantages
+	case "windows-powershell":
+		return "ipconfig", "route print -4", "arp -a", true // host vantages
 	default:
 		return "", "", "", false
 	}

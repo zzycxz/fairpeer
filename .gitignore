@@ -104,3 +104,12 @@ desktop/frontend/dist-crash/
 # build artifacts & dev screenshots (audit batch 6)
 gui-test-screenshots/
 *.exe
+*.deb
+/projects/
+/cua-replay.exe
+/e2ebench
+/e2ebench.exe
+/fairpeer-plugin-example
+/fairpeer-plugin-example.exe
+/context-maintenance-e2e.exe
+spike/stt/api/*.exe

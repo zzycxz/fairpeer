@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"time"
 
+	goruntime "runtime"
+
 	"github.com/zzycxz/fairpeer/internal/proc"
 	"github.com/zzycxz/fairpeer/internal/runtime"
 )
@@ -38,9 +40,12 @@ type Result struct {
 const DefaultTimeout = 3 * time.Minute
 
 // FindScript searches the conventional locations for a bundled Python script
-// (e.g. "doc_converter.py", "ocr_pdf.py"): the current working directory first,
-// then next to the running executable and up to two parent directories. Returns
-// "" when not found. This is the single source of truth that the three former
+// (e.g. "doc_converter.py", "ocr_pdf.py"): the MANAGED copy under
+// ~/.fairpeer/scripts first (boot refreshes it from the embedded assets on
+// every start, so it is always current — P0-3: an older copy sitting next to
+// the exe used to shadow fixes), then the current working directory, then next
+// to the running executable and up to three parent directories. Returns ""
+// when not found. This is the single source of truth that the three former
 // duplicated finders resolved to.
 func FindScript(name string) string {
 	for _, c := range ScriptCandidates(name) {
@@ -54,7 +59,17 @@ func FindScript(name string) string {
 // ScriptCandidates returns the ordered list of paths to probe for a bundled
 // script of the given name. Exposed so tests can inspect/override the list.
 func ScriptCandidates(name string) []string {
-	candidates := []string{name}
+	// ~/.fairpeer/scripts is where boot releases the EMBEDDED copies
+	// (assets.EnsureHelperScripts rewrites them on every start when content
+	// differs) — probe it FIRST: it is the only copy guaranteed current, so a
+	// stale script dropped next to the exe (or an old checkout in cwd) cannot
+	// shadow fixes. Devs editing a script in the repo should delete the managed
+	// copy or rerun the desktop app to refresh it.
+	var candidates []string
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		candidates = append(candidates, filepath.Join(home, ".fairpeer", "scripts", name))
+	}
+	candidates = append(candidates, name)
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
 		candidates = append(candidates,
@@ -66,12 +81,6 @@ func ScriptCandidates(name string) []string {
 			filepath.Join(dir, "..", "..", "..", name),
 		)
 	}
-	// ~/.fairpeer/scripts is where boot releases the EMBEDDED copies
-	// (assets.EnsureHelperScripts) — the only probe guaranteed to resolve for a
-	// packaged binary launched from an arbitrary location/cwd.
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		candidates = append(candidates, filepath.Join(home, ".fairpeer", "scripts", name))
-	}
 	return candidates
 }
 
@@ -82,6 +91,11 @@ func pythonExe() (string, []string) {
 	cmd, prefix, err := runtime.ResolvePython()
 	if err != nil {
 		// Fallback: keep the old behavior so we never hard-fail at import time.
+		// "python3" doesn't exist on stock Windows (the interpreter is "python"
+		// there) — same rule as desktop/he_service.go.
+		if goruntime.GOOS == "windows" {
+			return "python", nil
+		}
 		return "python3", nil
 	}
 	return cmd, prefix

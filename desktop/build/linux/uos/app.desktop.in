@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=fairpeer
+Comment=fairpeer desktop — AI 运维与办公智能体
+# UOS store rule: Exec must point inside /opt/apps/<appid>/files/. The
+# launcher wrapper fixes IME env before exec'ing the real binary; %u carries
+# the fairpeer:// deep link (deeplink.go deepLinkArg).
+Exec=/opt/apps/@APPID@/files/bin/fairpeer --deep-link %u
+Icon=@APPID@
+Categories=Development;Utility;
+Terminal=false
+StartupWMClass=fairpeer-desktop
+MimeType=x-scheme-handler/fairpeer;

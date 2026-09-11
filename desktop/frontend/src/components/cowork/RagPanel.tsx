@@ -14,6 +14,7 @@ import { app, onFilesDropped, onRagChanged } from "../../lib/bridge";
 import type { RagCollectionView } from "../../lib/types";
 import { useToast } from "../../lib/toast";
 import { useT } from "../../lib/i18n";
+import { PaneErrorBoundary } from "../ErrorBoundary";
 import { GraphCanvas } from "./GraphCanvas";
 import { GraphToolbar, type SearchMode } from "./GraphToolbar";
 import { GraphLegend } from "./GraphLegend";
@@ -130,15 +131,63 @@ export function RagPanel() {
 
 
   // Drag-and-drop import.
-  useEffect(() => {
-    return onFilesDropped((paths) => {
-      if (paths.length === 0) return;
-      void app.RagImportPaths(activeCollection || "default", paths).then((res) => {
-        showToast(res.message, "info");
-        void refresh();
-      }).catch((e) => showToast(String(e), "error"));
-    });
+  const importDroppedPaths = useCallback((paths: string[]) => {
+    if (paths.length === 0) return;
+    void app.RagImportPaths(activeCollection || "default", paths).then((res) => {
+      showToast(res.message, "info");
+      void refresh();
+    }).catch((e) => showToast(String(e), "error"));
   }, [activeCollection, refresh, showToast]);
+
+  useEffect(() => {
+    return onFilesDropped(importDroppedPaths);
+  }, [importDroppedPaths]);
+
+  // Platform: Wails v2.13 ships a drop implementation only on Windows, so the
+  // native onFilesDropped listener above is dead on macOS/Linux. There we fall
+  // back to DOM drop events (below); on Windows the native path stays in charge.
+  const [platform, setPlatform] = useState("");
+  useEffect(() => {
+    app.Platform().then(setPlatform).catch(() => setPlatform(""));
+  }, []);
+  const domDropSupported = platform !== "" && platform !== "windows";
+
+  const readFileAsDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+
+  const hasFileDrag = (dataTransfer: DataTransfer): boolean =>
+    Array.from(dataTransfer.items).some((it) => it.kind === "file") || dataTransfer.files.length > 0;
+
+  const onPanelDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!domDropSupported || !hasFileDrag(e.dataTransfer)) return;
+    e.preventDefault(); // required for the drop event to fire
+    e.dataTransfer.dropEffect = "copy";
+  };
+
+  // DOM drop fallback: the webview hands us file bytes (no paths), so stage each
+  // file via SavePastedFile and feed the saved temp paths through the same
+  // RagImportPaths call the native handler uses.
+  const onPanelDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    if (!domDropSupported) return;
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    e.preventDefault();
+    const paths: string[] = [];
+    for (const file of files) {
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        paths.push(await app.SavePastedFile(file.name, dataUrl));
+      } catch {
+        // skip an unreadable file; keep ingesting the rest
+      }
+    }
+    importDroppedPaths(paths);
+  };
 
   // Selection mode: clear when toggling off.
   useEffect(() => {
@@ -194,6 +243,8 @@ export function RagPanel() {
     <div
       className="rag-panel"
       style={{ "--wails-drop-target": "drop" } as React.CSSProperties}
+      onDragOver={onPanelDragOver}
+      onDrop={(e) => void onPanelDrop(e)}
     >
       {/* Top toolbar: ALWAYS keep visible to preserve product layout and navigation */}
       <GraphToolbar
@@ -217,20 +268,24 @@ export function RagPanel() {
       {/* Graph canvas area: display GraphCanvas when data exists; display modern embedded Guide when empty */}
       <div className="rag-panel__graph" style={{ position: "relative", flex: 1, display: "flex", flexDirection: "column" }}>
         {hasData ? (
-          <GraphCanvas
-            collection={activeCollection}
-            searchQuery={searchQuery}
-            searchMode={searchMode}
-            filterTypes={filterTypes}
-            selectionMode={selectionMode}
-            selectedEntities={selectedEntities}
-            selectedRelations={selectedRelations}
-            onNodeClick={handleNodeClick}
-            onSelectionChange={(ents, rels) => {
-              setSelectedEntities(ents);
-              setSelectedRelations(rels);
-            }}
-          />
+          /* GPU-less WebKitGTK can fail WebGL context creation; without this
+             boundary that crash takes the whole app to the root error boundary. */
+          <PaneErrorBoundary message={t("cowork.ragGraphError")}>
+            <GraphCanvas
+              collection={activeCollection}
+              searchQuery={searchQuery}
+              searchMode={searchMode}
+              filterTypes={filterTypes}
+              selectionMode={selectionMode}
+              selectedEntities={selectedEntities}
+              selectedRelations={selectedRelations}
+              onNodeClick={handleNodeClick}
+              onSelectionChange={(ents, rels) => {
+                setSelectedEntities(ents);
+                setSelectedRelations(rels);
+              }}
+            />
+          </PaneErrorBoundary>
         ) : (
           <div className="rag-panel__empty-canvas-guide empty-state" style={{ flex: 1 }}>
             <div className="empty-state__icon"><FolderPlus size={28} /></div>

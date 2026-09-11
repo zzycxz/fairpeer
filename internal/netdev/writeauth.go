@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -440,9 +441,17 @@ func (m *Manager) appendOpStep(ctx context.Context, s OpStep) {
 	}
 	b, err := json.Marshal(s)
 	if err != nil {
+		m.opStepWriteFailed(ctx, s, fmt.Errorf("marshal opstep: %w", err))
 		return
 	}
-	_ = fileutil.AtomicWriteFile(filepath.Join(dir, s.ID+".json"), b, 0o600)
+	if err := fileutil.AtomicWriteFile(filepath.Join(dir, s.ID+".json"), b, 0o600); err != nil {
+		// P0-7: the ledger row is the sign-off evidence — a silently dropped
+		// write used to vanish without a trace. Don't fail the (already
+		// executed) device change, but make the loss loud: log it and mirror
+		// an audit-only failure receipt so the evidence chain shows the gap.
+		m.opStepWriteFailed(ctx, s, err)
+		return
+	}
 
 	// Evidence bridge (NETDEV_OPSTEP_EVIDENCE_SPEC): mirror the ledger row
 	// into the turn's evidence ledger as a "device:<name>" receipt so
@@ -455,6 +464,21 @@ func (m *Manager) appendOpStep(ctx context.Context, s OpStep) {
 			Success:  s.Status == "ok",
 			Write:    s.Status == "ok",
 			Command:  s.Command,
+			Paths:    []string{"device:" + s.Device},
+		})
+	}
+}
+
+// opStepWriteFailed reports a ledger row that could not be persisted: the
+// device change already happened, so the operation itself must not be retried —
+// but the evidence gap must be visible (log + audit-only failure receipt).
+func (m *Manager) opStepWriteFailed(ctx context.Context, s OpStep, err error) {
+	slog.Warn("netdev: opstep ledger write failed", "id", s.ID, "device", s.Device, "err", err)
+	if ledger, ok := evidence.FromContext(ctx); ok {
+		ledger.Record(evidence.Receipt{
+			ToolName: "netdev_opstep",
+			Success:  false,
+			Command:  fmt.Sprintf("%s (opstep ledger write failed: %v)", s.Command, err),
 			Paths:    []string{"device:" + s.Device},
 		})
 	}

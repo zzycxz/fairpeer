@@ -13,8 +13,8 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/agent"
 	"github.com/zzycxz/fairpeer/internal/checkpoint"
-	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/command"
+	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/control"
 	"github.com/zzycxz/fairpeer/internal/diff"
 	"github.com/zzycxz/fairpeer/internal/event"
@@ -59,6 +59,9 @@ type tabSession interface {
 	SetGoal(goal string)
 	Goal() string
 	GoalStatus() string
+	// GoalTurns reports (current, max) auto-advance turns for the UI budget
+	// chip. The remote session does not sync these yet (0,0 = hide the chip).
+	GoalTurns() (int, int)
 	SetRAGScope(scope string)
 
 	// Checkpoints / branches / summarize.
@@ -102,9 +105,8 @@ type tabSession interface {
 	SkillEnabled(name string) bool
 	SetSkillEnabled(name string, enabled bool) error
 
-	// Dream/distill (host-side in P2; remote sessions report none).
+	// Dream (host-side in P2; remote sessions report none).
 	TriggerDream(ctx context.Context) (agent.DreamRun, bool)
-	TriggerDistill(ctx context.Context) (agent.DreamRun, bool)
 	LastDreamRun(kind agent.DreamKind) (agent.DreamRun, bool)
 
 	// MCP hot-add (desktop-local plugin host; remote sessions reject).

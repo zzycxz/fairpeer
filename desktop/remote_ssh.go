@@ -11,6 +11,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -296,6 +298,20 @@ func resolveSSHHost(creds *sshCredentials) (transport.ResolvedHost, *transport.A
 	return resolved, auth, nil
 }
 
+// fileSHA256 hex-digests a local file (provisioning integrity check).
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // provisionSSHHost ensures ~/.fairpeer/bin/fairpeer exists remotely with the
 // same byte size as the local host binary, streaming the upload through an
 // exec session's stdin (no SFTP dependency).
@@ -309,15 +325,19 @@ func provisionSSHHost(ctx context.Context, client *ssh.Client) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	localInfo, err := os.Stat(local)
-	if err != nil {
-		return "", err
+	localHash, lerr := fileSHA256(local)
+	if lerr != nil {
+		return "", lerr
 	}
 	remoteBin := "~/.fairpeer/bin/fairpeer"
 
+	// Skip the upload only when the remote binary matches the local one byte
+	// for byte — size alone accepted any same-length file (e.g. a truncated
+	// or tampered binary from an earlier partial upload).
 	needUpload := true
-	if out, err := sshExecOutput(client, "wc -c < ~/.fairpeer/bin/fairpeer 2>/dev/null"); err == nil {
-		if size, perr := strconv.ParseInt(strings.TrimSpace(out), 10, 64); perr == nil && size == localInfo.Size() {
+	if out, err := sshExecOutput(client, "sha256sum < ~/.fairpeer/bin/fairpeer 2>/dev/null"); err == nil {
+		fields := strings.Fields(out)
+		if len(fields) >= 1 && strings.EqualFold(fields[0], localHash) {
 			needUpload = false
 		}
 	}

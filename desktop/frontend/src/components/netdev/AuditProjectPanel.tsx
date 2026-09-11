@@ -16,6 +16,9 @@ interface AuditProject {
   contacts?: string;
   launch_window?: string;
   checklist: string[];
+  // 批 E 弱口令编排档：basic（默认）| dictionary（配 dict 路径，信封闸照旧）
+  weakcred_tier?: string;
+  weakcred_dict_path?: string;
   created_at: string;
 }
 
@@ -161,6 +164,20 @@ export function AuditProjectPanel({ devices }: { devices: NetDevDeviceView[] }) 
               </label>
             ))}
           </div>
+          {editing.checklist.includes("weakcred") && (
+            <div style={{ display: "flex", gap: 4, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span className="ndv__group-label" style={{ marginBottom: 0 }}>{t("ndv.ap.weakTier")}</span>
+              <select className="mem-select" style={{ width: 110 }} value={editing.weakcred_tier ?? "basic"}
+                onChange={e => setEditing({ ...editing, weakcred_tier: e.target.value })}>
+                <option value="basic">basic（默认/空/工号口令）</option>
+                <option value="dictionary">dictionary（字典自备）</option>
+              </select>
+              {editing.weakcred_tier === "dictionary" && (
+                <input className="mem-input" style={{ flex: 1, minWidth: 160 }} placeholder={t("ndv.ap.weakDictPh")}
+                  value={editing.weakcred_dict_path ?? ""} onChange={e => setEditing({ ...editing, weakcred_dict_path: e.target.value })} />
+              )}
+            </div>
+          )}
           <span className="btn btn--primary btn--small" role="button" onClick={() => void save()}>{t("common.save")}</span>
           <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditing(null)}>{t("common.cancel")}</span>
         </div>

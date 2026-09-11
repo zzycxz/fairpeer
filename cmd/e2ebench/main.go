@@ -230,7 +230,15 @@ func grade(work, taskDir string) bool {
 	if err := copyFile(verify, dst); err != nil {
 		return false
 	}
-	cmd := exec.Command("bash", "verify.sh")
+	// Grading scripts are POSIX shell; on Windows require an explicit bash on
+	// PATH (Git Bash) instead of silently failing every task — and never let
+	// WSL's bash.exe resolve here (different cwd/filesystem semantics).
+	bash := "bash"
+	if _, err := exec.LookPath(bash); err != nil {
+		fmt.Fprintln(os.Stderr, "e2ebench: grading requires bash on PATH (Git Bash on Windows); task marked failed")
+		return false
+	}
+	cmd := exec.Command(bash, "verify.sh")
 	cmd.Dir = work
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr

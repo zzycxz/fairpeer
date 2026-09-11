@@ -440,6 +440,13 @@
   border-right: 1px solid var(--border-soft);
 }
 
+/* macOS: with the sidebar collapsed the chrome's left edge IS the window's
+   left edge, where the native traffic lights sit (TitleBarHiddenInset,
+   44px header) — shift the toggle past them. */
+.app--darwin .app-chrome__panel-toggle--left {
+  left: var(--chrome-left-safe-offset);
+}
+
 .app-chrome__panel-toggle--right {
   position: relative;
   right: auto;
@@ -469,6 +476,31 @@
   color: var(--fg);
   background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
   opacity: 1;
+}
+
+/* Cross-tab approval badge (X8b): in-flow pill left of the palette toggle.
+   Warn-tinted so a pending decision reads as "needs you", count included. */
+.app-chrome__approval-badge {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 2px;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in srgb, var(--warn, #d29922) 45%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--warn, #d29922) 12%, transparent);
+  color: var(--warn, #d29922);
+  cursor: pointer;
+}
+.app-chrome__approval-badge:hover {
+  filter: brightness(1.12);
+}
+.app-chrome__approval-badge-count {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .app-chrome__terminal-toggle--active {
@@ -590,6 +622,9 @@
   }
 }
 
+/* Window controls render on Windows AND Linux (the window is Frameless on both;
+   macOS keeps native traffic lights). The `--windows`/`--linux` modifier picks
+   the same geometry — only the platform class differs. */
 .app-chrome__window-controls {
   position: absolute;
   top: 0;
@@ -602,7 +637,15 @@
   --wails-draggable: no-drag;
 }
 
+/* The controls are real <button>s now — reset the UA chrome so they keep the
+   original span look (flat, full-height 46px cells). */
 .app-chrome__window-control {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  line-height: 0;
   width: 46px;
   height: 100%;
   display: inline-flex;
@@ -613,6 +656,11 @@
   transition:
     background 0.12s ease,
     color 0.12s ease;
+}
+
+.app-chrome__window-control:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .app-chrome__window-control:hover {

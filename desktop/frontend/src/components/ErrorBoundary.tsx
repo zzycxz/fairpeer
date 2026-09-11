@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from "react";
 import { reportCrash } from "../lib/crash";
+import { t } from "../lib/i18n";
 
 export class ErrorBoundary extends Component<{ children: ReactNode }, { crashed: boolean }> {
   state = { crashed: false };
@@ -19,11 +20,12 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { crashed:
 
 // PaneErrorBoundary — a localized boundary for major layout regions (sidebar,
 // transcript, right dock, bottom bar). A crash degrades that region to a
-// compact "此区域遇到错误" card instead of blanking the whole tree; the rest
-// of the app keeps working (2026-08-21 — the netdev topology crash taught us
-// one component's null deref shouldn't take down the composer).
+// compact error card instead of blanking the whole tree; the rest of the app
+// keeps working (2026-08-21 — the netdev topology crash taught us one
+// component's null deref shouldn't take down the composer). Class component,
+// so it reads the module-level translator mirror instead of useT.
 export class PaneErrorBoundary extends Component<
-  { children: ReactNode; label?: string },
+  { children: ReactNode; label?: string; message?: string },
   { error: Error | null }
 > {
   state = { error: null as Error | null };
@@ -54,7 +56,7 @@ export class PaneErrorBoundary extends Component<
             background: "var(--bg, #1a1a1a)",
           }}
         >
-          <span>⚠ {this.props.label ?? "此区域"}遇到错误，已安全隔离</span>
+          <span>⚠ {this.props.message ?? t("common.regionError", { label: this.props.label ?? t("common.region") })}</span>
           <button
             type="button"
             onClick={() => this.setState({ error: null })}
@@ -68,7 +70,7 @@ export class PaneErrorBoundary extends Component<
               cursor: "pointer",
             }}
           >
-            重试
+            {t("common.retry")}
           </button>
         </div>
       );

@@ -51,13 +51,19 @@ func fixCJKSpaces(s string) string {
 }
 
 // readPDF extracts text from a .pdf file. Prefers the Python pipeline
-// (pdfplumber for tables + PaddleOCR for scanned pages). Falls back to
-// ledongthuc/pdf (pure Go) when the Python script is unavailable.
+// (pdfplumber for tables + PaddleOCR for scanned pages) driven in PAGE-RANGE
+// batches — long scanned PDFs previously ran the whole document in one
+// 10-minute call, so >100 pages (PaddleOCR 2-5s/page) died at the timeout and
+// produced nothing. Batches keep every subprocess call inside the budget and
+// accumulate partial text: a failure at page 200 still yields pages 1-199.
+// Falls back to markitdown, then ledongthuc/pdf (pure Go) when the Python
+// script is unavailable or extracts nothing.
 func readPDF(path string) (string, error) {
-	// Try Python pipeline first (pdfplumber + PaddleOCR).
+	// Page-range OCR batches first.
 	if findOCRScript() != "" {
-		text, err := readPDFWithOCR(path)
-		if err == nil && utf8.RuneCountInString(text) > 0 {
+		if text, ok := runOCRBatches(func(first, last int) (ocrBatchResult, error) {
+			return readPDFWithOCR(path, first, last)
+		}); ok {
 			return fixCJKSpaces(text), nil
 		}
 	}
@@ -107,9 +113,81 @@ func readPDF(path string) (string, error) {
 	return fixCJKSpaces(result), nil
 }
 
+// ocrBatchPages is the page range per OCR subprocess call (pages per batch ×
+// 2-5s PaddleOCR/page stays comfortably inside the per-batch timeout).
+const ocrBatchPages = 20
+
+// ocrBatchResult mirrors ocr_pdf.py's JSON output for one page-range batch.
+type ocrBatchResult struct {
+	Text       string   `json:"text"`
+	PagesTotal int      `json:"pages_total"`
+	First      int      `json:"first"`
+	Last       int      `json:"last"`
+	Warnings   []string `json:"warnings"`
+}
+
+// runOCRBatches walks the document in ocrBatchPages chunks through run until
+// the script reports the last page. Returns the accumulated text and whether
+// ANY text was extracted. A batch error stops the walk — text from earlier
+// batches is still returned so a page-300 failure doesn't discard pages 1-299.
+// Split from its IO wrapper so tests can drive it with a fake runner.
+func runOCRBatches(run func(first, last int) (ocrBatchResult, error)) (string, bool) {
+	first := 1
+	var parts []string
+	var warnings []string
+	for batch := 0; batch < 60; batch++ { // hard cap: 60×20 = 1200 pages
+		res, err := run(first, first+ocrBatchPages-1)
+		if err != nil {
+			// A failed batch must not vanish silently: record the lost page
+			// range as a warning line (F7) and keep earlier batches.
+			warnings = append(warnings, fmt.Sprintf("pages %d and beyond unavailable: %v", first, err))
+			return assembleOCRText(parts, warnings), len(parts) > 0
+		}
+		// Warnings travel in their own struct field — runOCRBatches attaches
+		// them ONCE at the end, so a 6-batch document doesn't index six
+		// duplicate ops-report blocks in the searchable body.
+		warnings = append(warnings, res.Warnings...)
+		if t := strings.TrimSpace(res.Text); t != "" {
+			parts = append(parts, t)
+		}
+		if res.PagesTotal <= 0 || res.Last >= res.PagesTotal {
+			return assembleOCRText(parts, warnings), len(parts) > 0
+		}
+		// Guarantee forward progress even against a misbehaving runner that
+		// echoes a non-advancing range — otherwise the 60-batch cap would be
+		// reached re-fetching and re-accumulating the same pages.
+		next := res.Last + 1
+		if next <= first {
+			next = first + ocrBatchPages
+		}
+		first = next
+	}
+	warnings = append(warnings, "[OCR warnings]\n- document truncated at the 1200-page batch cap; remaining pages are missing")
+	return assembleOCRText(parts, warnings), len(parts) > 0
+}
+
+// assembleOCRText joins batch texts and appends the collected [OCR warnings]
+// blocks once at the end, clearly separated from document content (the P0-3
+// contract: ops reports never interleave with the clauses).
+// assembleOCRText joins batch texts and appends ONE [OCR warnings] block at
+// the end listing every warning line, clearly separated from document content
+// (the P0-3 contract: ops reports never interleave with the clauses).
+func assembleOCRText(parts, warnings []string) string {
+	text := strings.Join(parts, "\n\n")
+	if len(warnings) > 0 {
+		lines := make([]string, 0, len(warnings))
+		for _, w := range warnings {
+			lines = append(lines, "- "+strings.TrimSpace(w))
+		}
+		text += "\n\n[OCR warnings]\n" + strings.Join(lines, "\n")
+	}
+	return text
+}
+
 // ReadPDF is the exported wrapper around readPDF so other packages (e.g. the
 // document tools in internal/tool/builtin) can reuse the same PDF extraction
-// pipeline (ocr_pdf.py → markitdown → pure-Go fallback) without duplicating it.
+// pipeline (page-batched pdfplumber+PaddleOCR → markitdown → pure-Go fallback)
+// without duplicating it.
 func ReadPDF(path string) (string, error) { return readPDF(path) }
 
 // ocrScriptCandidates lists possible locations of ocr_pdf.py.
@@ -137,18 +215,27 @@ func convertWithMarkitdown(path string) (string, error) {
 	return docconv.ConvertText(path)
 }
 
-// readPDFWithOCR calls the ocr_pdf.py Python script to extract text from a
-// scanned PDF using PaddleOCR. Returns the OCR'd text or an error.
-func readPDFWithOCR(path string) (string, error) {
+// readPDFWithOCR calls the ocr_pdf.py Python script for ONE page range
+// (1-based inclusive; last=0 → end of document) using pdfplumber + PaddleOCR.
+// Returns the batch's text plus the script's page accounting (pages_total and
+// the echoed range) so the caller can walk long documents batch by batch.
+func readPDFWithOCR(path string, first, last int) (ocrBatchResult, error) {
 	script := findOCRScript()
 	if script == "" {
-		return "", fmt.Errorf("ocr_pdf.py not found")
+		return ocrBatchResult{}, fmt.Errorf("ocr_pdf.py not found")
 	}
 	pyCmd, pyPrefix, _ := rt.ResolvePython()
 	if pyCmd == "" {
-		pyCmd = "python3"
+		// "python3" doesn't exist on stock Windows (the interpreter is "python"
+		// there) — same rule as desktop/he_service.go.
+		if goruntime.GOOS == "windows" {
+			pyCmd = "python"
+		} else {
+			pyCmd = "python3"
+		}
 	}
-	args := append(append([]string{}, pyPrefix...), script, path)
+	args := append(append([]string{}, pyPrefix...), script, path,
+		"--first", strconv.Itoa(first), "--last", strconv.Itoa(last))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -160,20 +247,34 @@ func readPDFWithOCR(path string) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("ocr script: %w: %s", err, stderr.String())
+		return ocrBatchResult{}, fmt.Errorf("ocr script: %w: %s", err, stderr.String())
 	}
 
 	var result struct {
-		Text  string `json:"text"`
-		Error string `json:"error"`
+		Text       string   `json:"text"`
+		Error      string   `json:"error"`
+		Warnings   []string `json:"warnings"`
+		PagesTotal int      `json:"pages_total"`
+		First      int      `json:"first"`
+		Last       int      `json:"last"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-		return "", fmt.Errorf("ocr parse: %w", err)
+		return ocrBatchResult{}, fmt.Errorf("ocr parse: %w", err)
 	}
 	if result.Error != "" {
-		return "", fmt.Errorf("ocr: %s", result.Error)
+		return ocrBatchResult{}, fmt.Errorf("ocr: %s", result.Error)
 	}
-	return result.Text, nil
+	// Warnings (dependency installs, per-page OCR failures) travel in the
+	// struct field — runOCRBatches attaches them ONCE at the end as a labeled
+	// block, never interleaved with the clauses (P0-3). Inlining them here
+	// would duplicate the block per batch AND get indexed as body content.
+	return ocrBatchResult{
+		Text:       result.Text,
+		PagesTotal: result.PagesTotal,
+		First:      result.First,
+		Last:       result.Last,
+		Warnings:   result.Warnings,
+	}, nil
 }
 
 // readDOCX extracts text from word/document.xml, joining paragraphs with newlines.

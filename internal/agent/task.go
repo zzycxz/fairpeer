@@ -157,6 +157,7 @@ func (t *TaskTool) Schema() json.RawMessage {
 "type":"object",
 "properties":{
   "prompt":{"type":"string","description":"What the sub-agent should accomplish. Be specific about the deliverable — the sub-agent does not see this conversation."},
+  "concurrent":{"type":"boolean","description":"Set true on INDEPENDENT sub-tasks issued as consecutive task calls in one reply: they then run in parallel (up to 3 at a time) instead of one-after-another. Only when the sub-tasks touch different files/areas and neither needs the other's output; write-type sub-agents still get isolated git-worktree copies."},
   "description":{"type":"string","description":"Short label for the sub-task (3-7 words). Surfaced in the dispatch line so the user sees what's running."},
   "tools":{"type":"array","items":{"type":"string"},"description":"Optional tool whitelist. Subagent/skill meta-tools are still excluded so delegation stays one layer deep."},
   "max_steps":{"type":"integer","description":"Optional cap on tool-call rounds. Defaults to half the parent's cap (min 5).","minimum":1},
@@ -303,15 +304,13 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if err != nil {
 		return "", errors.Join(err, t.transcripts.SaveFailed(run))
 	}
-	// Worktree isolation: the sub-agent's changes live in its worktree. Report
-	// them as a diff the model can apply to the main workspace (the parent
-	// decides — apply_patch, review, or discard).
+	// NEW-03 (honest reporting): the worktree is created but sub-agents were
+	// never routed into it — their writes land in the MAIN workspace (verified
+	// by runtime test). Claiming "isolated worktree / no file changes" was a
+	// double lie. Report the main-workspace reality instead; the checkpoint
+	// pre-edit hook already captured these writes for rewind.
 	if wt.Active() {
-		if diff := wt.Diff(); diff != "" {
-			answer += "\n\n[sub-agent changes (isolated worktree, not yet applied to the main workspace):]\n" + diff
-		} else {
-			answer += "\n[sub-agent ran in an isolated worktree and made no file changes]"
-		}
+		answer += "\n[sub-agent wrote directly to the main workspace (worktree isolation is not yet wired); use git diff / checkpoints to review]"
 	}
 	if t.transcripts != nil && run.Ref != "" {
 		if err := t.transcripts.SaveCompleted(run); err != nil {

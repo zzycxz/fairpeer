@@ -22,6 +22,7 @@ type wireEvent struct {
 	Ask        *wireAsk        `json:"ask,omitempty"`
 	Compaction *wireCompaction `json:"compaction,omitempty"`
 	Err        string          `json:"err,omitempty"`
+	Cancelled  bool            `json:"cancelled,omitempty"`
 	// Retrying: which attempt is about to be made, of how many, after what
 	// backoff (0 = immediate) — enough for a client to render a countdown.
 	RetryAttempt int   `json:"retryAttempt,omitempty"`
@@ -289,6 +290,7 @@ func toWire(e event.Event) wireEvent {
 		if e.Err != nil {
 			w.Err = e.Err.Error()
 		}
+		w.Cancelled = e.Cancelled
 	case event.Retrying:
 		w.RetryAttempt = e.RetryAttempt
 		w.RetryMax = e.RetryMax

@@ -10,13 +10,78 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
 
-// MaxRetries is the number of times SendWithRetry re-attempts the connection +
-// header phase after the initial try (so up to MaxRetries+1 total attempts).
-const MaxRetries = 10
+// DefaultMaxRetries is the default number of times SendWithRetry re-attempts
+// the connection + header phase after the initial try (so up to N+1 total
+// attempts).
+const DefaultMaxRetries = 10
+
+// defaultMaxBackoff caps the exponential backoff.
+const defaultMaxBackoff = 15 * time.Second
+
+// RetryPolicy is the package-wide retry configuration (P1-A3). MaxRetries <= 0
+// falls back to DefaultMaxRetries; MaxBackoff <= 0 to defaultMaxBackoff.
+// Mode "always" lifts the attempt cap entirely for retryable failures — for
+// unattended multi-hour runs, a half-dead gateway then gets waited out instead
+// of killing the turn once the budget is spent (the runtime-proven failure
+// mode: budget exhausted → TurnDone error). Values are read once per attempt,
+// so a config reload applies to in-flight requests on their next retry.
+type RetryPolicy struct {
+	MaxRetries int
+	MaxBackoff time.Duration
+	Mode       string // "" | "normal" | "always"
+}
+
+var (
+	policyMu    sync.RWMutex
+	policyCur   = RetryPolicy{MaxRetries: DefaultMaxRetries, MaxBackoff: defaultMaxBackoff, Mode: "normal"}
+	retryPolicy = func() RetryPolicy {
+		policyMu.RLock()
+		defer policyMu.RUnlock()
+		return policyCur
+	}
+)
+
+// SetRetryPolicy installs the package-wide retry configuration. Zero value
+// restores defaults.
+func SetRetryPolicy(p RetryPolicy) {
+	if p.MaxRetries <= 0 {
+		p.MaxRetries = DefaultMaxRetries
+	}
+	if p.MaxBackoff <= 0 {
+		p.MaxBackoff = defaultMaxBackoff
+	}
+	if strings.EqualFold(p.Mode, "always") {
+		p.Mode = "always"
+	} else {
+		p.Mode = "normal"
+	}
+	policyMu.Lock()
+	policyCur = p
+	policyMu.Unlock()
+}
+
+func maxRetries() int {
+	if p := retryPolicy(); p.Mode == "always" {
+		// A very large but finite cap keeps attempt counters sane in UI strings.
+		return 1_000_000
+	}
+	if n := retryPolicy().MaxRetries; n > 0 {
+		return n
+	}
+	return DefaultMaxRetries
+}
+
+func maxBackoffCap() time.Duration {
+	if d := retryPolicy().MaxBackoff; d > 0 {
+		return d
+	}
+	return defaultMaxBackoff
+}
 
 // maxAuthRetries is the number of times a 401/403 is retried when the key has
 // previously authenticated successfully (transient auth failures under load).
@@ -29,8 +94,6 @@ type SendOptions struct {
 	KeyPresent bool   // a non-empty key was configured
 	RetryAuth  bool   // retry 401/403 up to maxAuthRetries (key previously worked)
 }
-
-const maxBackoff = 15 * time.Second
 
 // RetryInfo describes a backoff about to happen: Attempt is the 1-based retry
 // number (of Max) and Delay is how long SendWithRetry will wait before it.
@@ -140,14 +203,14 @@ func IsConnReset(err error) bool {
 
 func backoffDelay(attempt int, retryAfter time.Duration) time.Duration {
 	if retryAfter > 0 {
-		if retryAfter > maxBackoff {
-			return maxBackoff
+		if retryAfter > maxBackoffCap() {
+			return maxBackoffCap()
 		}
 		return retryAfter
 	}
 	d := time.Duration(1<<(attempt-1)) * 500 * time.Millisecond
-	if d > maxBackoff {
-		d = maxBackoff
+	if d > maxBackoffCap() {
+		d = maxBackoffCap()
 	}
 	return d + time.Duration(rand.Intn(250))*time.Millisecond
 }
@@ -178,11 +241,11 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 	var retryAfter time.Duration
 	authRetries := 0
 
-	for attempt := 0; attempt <= MaxRetries; attempt++ {
+	for attempt := 0; attempt <= maxRetries(); attempt++ {
 		if attempt > 0 {
 			delay := backoffDelay(attempt, retryAfter)
 			if notify != nil {
-				notify(RetryInfo{Attempt: attempt, Max: MaxRetries, Delay: delay, Err: lastErr})
+				notify(RetryInfo{Attempt: attempt, Max: maxRetries(), Delay: delay, Err: lastErr})
 			}
 			select {
 			case <-ctx.Done():

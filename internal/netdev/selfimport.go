@@ -27,7 +27,7 @@ type ImportPreview struct {
 	DBOverlap []string         `json:"db_overlap"`
 	// SkippedCounts are informational: findings/series/audit tails are
 	// import-read-only (the local audit chain stays append-only).
-	FindingsSeen int `json:"findings_seen"`
+	FindingsSeen int    `json:"findings_seen"`
 	ExportedAt   string `json:"exported_at"`
 	Source       string `json:"source"`
 }
@@ -50,10 +50,10 @@ type ImportDeviceConflict struct {
 
 // ImportDBSource is a db_sources skeleton.
 type ImportDBSource struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Host string `json:"host"`
-	Port int    `json:"port"`
+	Name string   `json:"name"`
+	Type string   `json:"type"`
+	Host string   `json:"host"`
+	Port int      `json:"port"`
 	Via  []string `json:"via"`
 }
 
@@ -182,7 +182,6 @@ func (m *Manager) ImportApply(path string, addNames, takeOvernames []string) (in
 
 // importNowStamp keeps the timestamp helper local (used by tests).
 func importNowStamp() string { return time.Now().Format("20060102-150405") }
-
 
 // Cfg exposes the manager's live config (the desktop import-apply bridge
 // mirrors the merged inventory into the config being persisted).

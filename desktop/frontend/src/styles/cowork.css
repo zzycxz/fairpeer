@@ -4490,6 +4490,21 @@
 :root[data-theme-style] .ragft-status--error {
   color: var(--err);
 }
+:root[data-theme-style] .ragft-status--partial {
+  color: var(--warn);
+}
+:root[data-theme-style] .ragft-node--partial > .ragft-row::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--warn);
+  opacity: 0.65;
+}
 :root[data-theme-style] .ragft-status--cancelled {
   color: var(--fg-faint);
   opacity: 0.6;

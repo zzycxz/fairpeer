@@ -36,6 +36,10 @@ export function RemoteConnectWizard({ onClose }: { onClose: () => void }) {
   const t = useT();
   const [step, setStep] = useState<Step>("kind");
   const [kind, setKind] = useState<string>("wsl");
+  // Host platform (same app.Platform() pattern as ProjectTree): WSL only
+  // exists on Windows, so the WSL card is gated and SSH is the default kind
+  // on macOS/Linux.
+  const [platform, setPlatform] = useState("");
   const [distros, setDistros] = useState<WslDistro[] | null>(null);
   const [distro, setDistro] = useState("");
   const [containers, setContainers] = useState<DockerContainer[] | null>(null);
@@ -86,7 +90,21 @@ export function RemoteConnectWizard({ onClose }: { onClose: () => void }) {
   }, [step, kind, containers]);
 
   useEffect(() => {
-    if (step !== "kind" || distros !== null) return;
+    let cancelled = false;
+    void app.Platform().then((value) => {
+      if (cancelled) return;
+      setPlatform(value);
+      // Non-Windows hosts can never run WSL: fall back to SSH as the default.
+      setKind((cur) => (cur === "wsl" && value !== "windows" ? "ssh" : cur));
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    // Skip the WSL distro probe entirely on non-Windows hosts.
+    if (step !== "kind" || distros !== null || platform !== "windows") return;
     app.ListWSLDistros()
       .then((list) => {
         setDistros(list ?? []);
@@ -94,7 +112,7 @@ export function RemoteConnectWizard({ onClose }: { onClose: () => void }) {
         if (def) setDistro(def.name);
       })
       .catch(() => setDistros([]));
-  }, [step, distros]);
+  }, [step, distros, platform]);
 
   const currentPath = useMemo(() => "/" + cwd.join("/"), [cwd]);
 
@@ -238,20 +256,24 @@ export function RemoteConnectWizard({ onClose }: { onClose: () => void }) {
         {step === "kind" && (
           <div className="remote-wizard-body">
             <div className="remote-kinds">
-              {KINDS.map((k) => (
-                <button
-                  key={k.id}
-                  className="remote-kind"
-                  data-selected={kind === k.id}
-                  disabled={!k.available}
-                  onClick={() => setKind(k.id)}
-                >
-                  <span className="remote-kind-name">{t(`remote.kind.${k.id}` as DictKey)}</span>
-                  <span className="remote-kind-desc">
-                    {k.available ? t(`remote.kindDesc.${k.id}` as DictKey) : t("remote.comingSoon")}
-                  </span>
-                </button>
-              ))}
+              {KINDS.map((k) => {
+                // WSL is only offered on Windows; the other kinds work everywhere.
+                const available = k.id === "wsl" ? platform === "windows" : k.available;
+                return (
+                  <button
+                    key={k.id}
+                    className="remote-kind"
+                    data-selected={kind === k.id}
+                    disabled={!available}
+                    onClick={() => setKind(k.id)}
+                  >
+                    <span className="remote-kind-name">{t(`remote.kind.${k.id}` as DictKey)}</span>
+                    <span className="remote-kind-desc">
+                      {available ? t(`remote.kindDesc.${k.id}` as DictKey) : t("remote.comingSoon")}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
             <footer className="remote-wizard-foot">
               <button className="remote-btn" onClick={close}>{t("common.cancel")}</button>

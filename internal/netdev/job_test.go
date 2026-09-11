@@ -136,7 +136,9 @@ func TestJobWatchdogCommandBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	waitJobStatus(t, j.ID, JobPaused, "watchdog")
+	// P1-E6: budget pause notes are operator-facing Chinese with a next step
+	// (the raw "watchdog: ..." string read like a crash with no way out).
+	waitJobStatus(t, j.ID, JobPaused, "预算暂停")
 }
 
 // Expect gates the step: a never-matching pattern fails the step even though

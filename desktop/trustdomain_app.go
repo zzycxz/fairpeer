@@ -18,11 +18,11 @@ import (
 
 // TrustDomainMemberView is one member card.
 type TrustDomainMemberView struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Role         string `json:"role"` // admin | member
-	Attestation  string `json:"attestation,omitempty"`
-	AdmittedAt   uint64 `json:"admittedAt"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Role        string `json:"role"` // admin | member
+	Attestation string `json:"attestation,omitempty"`
+	AdmittedAt  uint64 `json:"admittedAt"`
 }
 
 // TrustDomainTokenView is one capability token row.

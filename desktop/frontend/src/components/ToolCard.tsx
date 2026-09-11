@@ -8,6 +8,7 @@ import { useT } from "../lib/i18n";
 import { diffsFor, subjectOf, summarize } from "../lib/tools";
 import { toolCardSpec } from "../lib/toolCards";
 import { useShellExpand } from "../lib/shellExpand";
+import { stripAnsi } from "../lib/ansi";
 import { app } from "../lib/bridge";
 import type { Item } from "../lib/useController";
 import { getInitialOpenState, shouldKeepMounted } from "./toolcardLogic";
@@ -20,6 +21,30 @@ function baseName(path: string): string {
 }
 
 const SUBAGENT_TOOLS = new Set(["task", "run_skill", "explore", "research"]);
+
+// File writers whose collapsed header leads with the target path; clicking it
+// opens the file in the editor (same affordance as the external-link button).
+const WRITER_TOOLS = new Set(["write_file", "edit_file", "multi_edit", "apply_patch"]);
+
+/** First line of a tool error, truncated so the collapsed header stays one row. */
+function errorHeadline(error: string): string {
+  const first = error.split("\n", 1)[0].trim();
+  return first.length > 80 ? `${first.slice(0, 80)}…` : first;
+}
+
+/** +N/-N tallies from unified-diff text (the live argsDiff preview). Body
+ *  lines only — the +++/--- file headers are skipped. */
+function unifiedDiffStat(text: string): { add: number; del: number } {
+  let add = 0;
+  let del = 0;
+  for (const line of text.split("\n")) {
+    if (line.startsWith("+++")) continue;
+    if (line.startsWith("---")) continue;
+    if (line.startsWith("+")) add++;
+    else if (line.startsWith("-")) del++;
+  }
+  return { add, del };
+}
 
 /** Lines shown by default in a shell output block: head + tail around the
  *  "… +N lines" marker. Errors live at the END of a log, but build steps
@@ -126,13 +151,23 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
     SUBAGENT_TOOLS.has(item.name) && item.profile
       ? [item.profile.model, item.profile.effort ? `effort ${item.profile.effort}` : ""].filter(Boolean).join(" · ")
       : "";
-  // Header meta line: line tallies for writers (server preview first), output
-  // shape for read tools (N matches / N lines), once the call has settled.
-  const statText = serverDiff
-    ? `+${serverDiff.added} -${serverDiff.removed}`
-    : item.status === "running"
+  // Header meta line: colored +N/-N counters for diffs (server preview first,
+  // live argsDiff preview while the patch generates), output shape for read
+  // tools (N matches / N lines), once the call has settled.
+  const diffStat = serverDiff
+    ? { add: serverDiff.added, del: serverDiff.removed }
+    : item.argsDiff
+      ? unifiedDiffStat(item.argsDiff)
+      : null;
+  const statText =
+    item.status === "running"
       ? ""
       : summarize(item.name, item.args, item.output, item.error);
+  // A failed call replaces the subject with the first line of its error —
+  // the collapsed row shows what went wrong at a glance.
+  const errorHead = item.error ? errorHeadline(item.error) : "";
+  // Writer cards lead with the target path itself, clickable into the editor.
+  const writerPath = WRITER_TOOLS.has(item.name) && editPath ? editPath : "";
 
   // A task's summary is its step count; everything else derives from the result.
   const summary =
@@ -150,8 +185,9 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
   const hasCustomBody = customBody !== undefined && customBody !== null;
   const hasArgsOrOutput = !hasDiffBody && !hasCustomBody && (!!item.args || !!item.output);
 
-  // Shell output: head+tail preview + "show all" toggle.
-  const shellOutput = item.isShell && item.output ? item.output : null;
+  // Shell output: head+tail preview + "show all" toggle. ANSI color/cursor
+  // codes are stripped for display only (X10a) — the raw payload is untouched.
+  const shellOutput = item.isShell && item.output ? stripAnsi(item.output) : null;
   const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_HEAD_LINES, SHELL_TAIL_LINES, SHELL_FULL_THRESHOLD) : null;
   const hasAttachments = Boolean(item.attachments && item.attachments.some((a) => a.kind === "image"));
   const hasBody = Boolean(summary || hasDiffBody || hasCustomBody || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error || hasAttachments);
@@ -226,14 +262,34 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
         {item.status === "error" && <XCircle size={13} className="tool__status tool__status--error" />}
         <span className="tool__label-group">
           <span className="tool__name">{item.name}</span>
-          {subject && <span className="tool__subject">{subject}</span>}
+          {errorHead ? (
+            <span className="tool__subject tool__subject--error">{errorHead}</span>
+          ) : writerPath ? (
+            <button
+              type="button"
+              className="tool__path"
+              title={`${writerPath} — ${t("common.openInEditor")}`}
+              onClick={(e) => { e.stopPropagation(); void app.OpenInEditorAt(writerPath, 0).catch(() => {}); }}
+            >
+              {writerPath}
+            </button>
+          ) : (
+            subject && <span className="tool__subject">{subject}</span>
+          )}
         </span>
-        {statText && <span className="tool__stat">{statText}</span>}
-        {editPath && (
+        {diffStat ? (
+          <span className="tool__stat tool__stat--diff">
+            <span className="tool__stat-add">+{diffStat.add}</span>
+            <span className="tool__stat-del">-{diffStat.del}</span>
+          </span>
+        ) : (
+          statText && <span className="tool__stat">{statText}</span>
+        )}
+        {editPath && !writerPath && (
           <button
             type="button"
             className="tool__editor-open"
-            title={`${editPath} — 在编辑器中打开`}
+            title={`${editPath} — ${t("common.openInEditor")}`}
             onClick={(e) => { e.stopPropagation(); void app.OpenInEditorAt(editPath, 0).catch(() => {}); }}
           >
             <ExternalLink size={11} />
@@ -263,7 +319,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
           <div className="tool__argsdiff">
             <div className="tool__argsdiff-head">
               <Loader2 size={11} className="tool__status--running" />
-              <span>补丁生成中——实时预览</span>
+              <span>{t("tool.patchPreview")}</span>
             </div>
             <UnifiedDiff value={item.argsDiff} maxHeight={280} showToggle={false} />
           </div>
@@ -301,7 +357,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls }: { item: ToolI
             {item.args && <CodeViewer value={pretty(item.args)} language="json" maxHeight={180} />}
             {item.output && (
               <>
-                <CodeViewer value={item.output} maxHeight={600} />
+                <CodeViewer value={stripAnsi(item.output)} maxHeight={600} />
                 {item.truncated && <div className="tool__note">{t("tool.truncated")}</div>}
               </>
             )}

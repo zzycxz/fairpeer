@@ -41,11 +41,11 @@ func makeTemplateDocx(t *testing.T, path, bodyXML string) {
 	defer f.Close()
 	zw := zip.NewWriter(f)
 	for name, body := range map[string]string{
-		"[Content_Types].xml":           ctXML,
-		"_rels/.rels":                   `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
-		"word/document.xml":             docXML,
-		"word/_rels/document.xml.rels":  relsXML,
-		"word/styles.xml":               stylesXML,
+		"[Content_Types].xml":          ctXML,
+		"_rels/.rels":                  `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
+		"word/document.xml":            docXML,
+		"word/_rels/document.xml.rels": relsXML,
+		"word/styles.xml":              stylesXML,
 	} {
 		w, _ := zw.Create(name)
 		w.Write([]byte(body))
@@ -170,7 +170,7 @@ func TestDocTemplateOmitsPathAutoCopy(t *testing.T) {
 
 	args := mustJSONArgs(t, map[string]any{
 		// NOTE: no "path" — tool should default to template-filled.docx.
-		"source": src,
+		"source":       src,
 		"find_replace": []map[string]string{{"find": "{{title}}", "replace": "My Title"}},
 	})
 	out, err := (docWrite{}).Execute(context.Background(), args)

@@ -973,7 +973,9 @@
 }
 
 .settings-field__control > .mem-input,
-.settings-field__control > .mem-select {
+.settings-field__control > .mem-select,
+.settings-inline-controls > .mem-input,
+.settings-inline-controls > .mem-select {
   width: 100%;
   max-width: 520px;
 }
@@ -984,6 +986,20 @@
 
 .settings-field--stacked .settings-field__control > * {
   max-width: 100%;
+}
+
+.settings-field--stacked .settings-field__control > .mem-input,
+.settings-field--stacked .settings-field__control > .mem-select,
+.settings-field--stacked .settings-field__control > .settings-inline-controls > .mem-input,
+.settings-field--stacked .settings-field__control > .settings-inline-controls > .mem-select {
+  max-width: 520px;
+  margin-left: auto;
+}
+
+.settings-field--stacked .settings-field__control > .set-seg {
+  display: flex;
+  width: max-content;
+  margin-left: auto;
 }
 
 .settings-field--stacked .settings-field__control > .settings-model-picker {

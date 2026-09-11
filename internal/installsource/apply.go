@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/proc"
 	"github.com/zzycxz/fairpeer/internal/skill"
 )
 
@@ -164,12 +167,34 @@ func (t *installSourceTool) applyLinkSkill(req request, act *action) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
-	if err := os.Symlink(act.skill.SourcePath, target); err != nil {
+	if err := linkOrJunction(act.skill.SourcePath, target); err != nil {
 		return err
 	}
 	act.Target = target
 	act.CanonicalPath = canonical
 	return t.verifySkill(req.Scope, act.skill.Name, act)
+}
+
+// linkOrJunction creates target as a link to source. os.Symlink needs
+// Developer Mode (or an elevated token) on stock Windows, so there a failed
+// symlink falls back to a directory junction — the same end user experience
+// (the link resolves transparently) without any privilege requirement. If even
+// the junction fails, the error tells the user their two ways out: enable
+// Developer Mode, or reinstall with mode=copy. Off Windows this is a plain
+// os.Symlink.
+func linkOrJunction(source, target string) error {
+	err := os.Symlink(source, target)
+	if err == nil || runtime.GOOS != "windows" {
+		return err
+	}
+	junction := exec.Command("cmd", "/c", "mklink", "/J", target, source)
+	proc.HideWindow(junction)
+	if out, jerr := junction.CombinedOutput(); jerr != nil {
+		return fmt.Errorf("symlink %s -> %s failed (%v) and directory junction fallback failed (%v: %s); "+
+			"enable Windows Developer Mode to allow symlinks, or install this skill with mode=copy instead",
+			target, source, err, jerr, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // isLinkTargetSafe reports whether a symlink source is allowed. The link

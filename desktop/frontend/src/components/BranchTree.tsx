@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, GitBranch, X } from "lucide-react";
 import { app } from "../lib/bridge";
+import { useT } from "../lib/i18n";
 
 interface BranchRow {
   id: string;
@@ -27,6 +28,13 @@ function fmtAgo(ms: number): string {
   return `${Math.round(s / 86400)}d`;
 }
 
+// U-6：name 通常为空，行标题退化为时间戳 ID；后端已经带出的 preview 一直
+// 没渲染。折叠空白并截到 ~40 字符（CSS ellipsis 兜底更窄的窗口）。
+function previewLine(p?: string): string {
+  const s = (p ?? "").trim().replace(/\s+/g, " ");
+  return s.length > 40 ? `${s.slice(0, 40)}…` : s;
+}
+
 export function BranchTree({
   open,
   onClose,
@@ -36,6 +44,7 @@ export function BranchTree({
   onClose: () => void;
   onSwitched: () => void;
 }) {
+  const t = useT();
   const [rows, setRows] = useState<BranchRow[]>([]);
   const [err, setErr] = useState("");
   const [busyID, setBusyID] = useState("");
@@ -89,32 +98,38 @@ export function BranchTree({
       <div className="agd__card">
         <div className="agd__head">
           <GitBranch size={14} />
-          <span className="agd__title">分支</span>
-          <span className="agd__search" style={{ opacity: 0.6 }}>{rows.length} 个会话节点</span>
+          <span className="agd__title">{t("branch.title")}</span>
+          <span className="agd__search" style={{ opacity: 0.6 }}>{t("branch.nodeCount", { n: rows.length })}</span>
           <button type="button" className="agd__close" onClick={onClose}><X size={14} /></button>
         </div>
         <div className="agd__body">
           {err && <div className="agd__empty">{err}</div>}
-          {ordered.map(({ row, depth }) => (
-            <button
-              key={row.id}
-              type="button"
-              className={`agd__jump${row.current ? " agd__row--active" : ""}`}
-              style={{ paddingLeft: 8 + depth * 18 }}
-              onClick={() => switchTo(row)}
-              disabled={Boolean(row.current) || busyID === row.id}
-              title={row.path}
-            >
-              <ChevronRight size={12} style={{ opacity: 0.4, flex: "none" }} />
-              <span className="agd__label">{row.name || row.id}</span>
-              <span className="agd__meta">
-                {row.turns ? `${row.turns} 轮 · ` : ""}{fmtAgo(row.updatedAt)}
-              </span>
-              {row.current && <span className="branch-tree__cur">当前</span>}
-            </button>
-          ))}
+          {ordered.map(({ row, depth }) => {
+            const preview = previewLine(row.preview);
+            return (
+              <button
+                key={row.id}
+                type="button"
+                className={`agd__jump${row.current ? " agd__row--active" : ""}`}
+                style={{ paddingLeft: 8 + depth * 18 }}
+                onClick={() => switchTo(row)}
+                disabled={Boolean(row.current) || busyID === row.id}
+                title={row.path}
+              >
+                <ChevronRight size={12} style={{ opacity: 0.4, flex: "none" }} />
+                <span className="branch-tree__texts">
+                  <span className="agd__label">{row.name || row.id}</span>
+                  {preview && <span className="branch-tree__preview">{preview}</span>}
+                </span>
+                <span className="agd__meta">
+                  {row.turns ? t("branch.turnsPrefix", { n: row.turns }) : ""}{fmtAgo(row.updatedAt)}
+                </span>
+                {row.current && <span className="branch-tree__cur">{t("branch.current")}</span>}
+              </button>
+            );
+          })}
           {rows.length === 0 && !err && (
-            <div className="agd__empty">此会话还没有分支——在消息操作栏 Fork 或 Rewind 即可创建</div>
+            <div className="agd__empty">{t("branch.empty")}</div>
           )}
         </div>
       </div>

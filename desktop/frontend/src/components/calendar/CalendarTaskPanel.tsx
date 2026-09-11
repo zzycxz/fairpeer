@@ -1,23 +1,28 @@
 // CalendarTaskPanel merges calendar events and scheduled tasks into one panel.
 // Left: calendar grid (month/week/list). Right: task list + templates.
-// Subscribes to "calendar:changed", "scheduler:changed", "scheduler:notice",
-// and "calendar:reminder" events.
+// GLOBAL surface (was cowork-only): the office layout mounts it directly, and
+// the coding/netdev entry points reach the same panel. Data flows through
+// useCalendarTasks (single merge + subscription point). Toasts for
+// scheduler:notice / calendar:reminder live at App ROOT so they fire on every
+// page — this panel no longer subscribes to either (it used to double-fire
+// the notice toast alongside the root listener, defect D).
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Plus, ChevronLeft, ChevronRight, Calendar as CalendarIcon, Search,
   List as ListIcon, Grid3X3, Columns3, Download, Upload,
   PlayCircle, Pause, Play, Pencil, Trash2, History as HistoryIcon,
-  LayoutTemplate, Clock, MessageSquare, Mail, MapPin, Repeat, Zap,
+  LayoutTemplate, Clock, MessageSquare, Mail, MapPin, Repeat, Zap, Bot,
 } from "lucide-react";
 
 import {
-  app, onCalendarChanged, onSchedulerChanged, onSchedulerNotice,
+  app,
 } from "../../lib/bridge";
 import type {
   CalendarEventView, CalendarEventInput,
   TaskView, TaskInput, TemplateView,
 } from "../../lib/types";
+import { useCalendarEvents, useScheduledTasks } from "../../hooks/useCalendarTasks";
 import { TaskForm } from "./TaskForm";
 import { EventEditForm } from "./EventEditForm";
 import { RunHistory } from "./RunHistory";
@@ -29,10 +34,33 @@ const WEEKDAY_KEYS = ["cal.mon", "cal.tue", "cal.wed", "cal.thu", "cal.fri", "ca
 const HOURS = Array.from({ length: 14 }, (_, i) => i + 8);
 const COLORS = ["#FF4444", "#4488FF", "#44BB44", "#FF8800", "#AA44FF", "#FF44AA", "#44CCCC", "#888888"];
 
+// Profile partition accents — the fallback tint when an event/task carries no
+// user-set color, so the merged "all profiles" grid reads at a glance
+// (dev blue / cowork green / netdev orange).
+const PROFILE_COLORS: Record<string, string> = {
+  dev: "#4488FF",
+  cowork: "#44BB44",
+  netdev: "#FF8800",
+};
+function profileAccent(p: string | undefined): string {
+  return PROFILE_COLORS[(p ?? "").toLowerCase()] ?? "";
+}
+// profileDisplayName renders a partition key with its localized product name
+// (dev=编码, cowork=办公, netdev=运维); unknown keys pass through verbatim.
+function profileDisplayName(p: string | undefined): string {
+  switch ((p ?? "").toLowerCase()) {
+    case "dev": return "编码";
+    case "cowork": return "办公";
+    case "netdev": return "运维";
+    default: return p || "办公";
+  }
+}
+
 // colorForEvent picks a color for an event. User-set color wins; otherwise we
 // auto-classify by tags/source so the calendar reads at a glance: holidays=red,
-// work=blue, personal=green, agent-created=purple, etc. Falls back to a stable
-// hash of the title so the same event always gets the same color.
+// work=blue, personal=green, agent-created=purple, etc. The profile partition
+// accent is the last auto-stop before the stable title hash, so the merged
+// grid tints each cabinet even for untagged events.
 function colorForEvent(e: CalendarEventView): string {
   if (e.color) return e.color;
   // Tag-based auto-coloring (first matching tag wins).
@@ -43,6 +71,8 @@ function colorForEvent(e: CalendarEventView): string {
   if (tags.includes("个人") || tags.includes("personal")) return "#44BB44"; // green
   if (source === "agent") return "#AA44FF"; // purple
   if (source === "email") return "#FF8800"; // orange
+  const accent = profileAccent(e.profile);
+  if (accent) return accent;
   // Stable hash → pick from the palette so identical titles stay consistent.
   let h = 0;
   for (let i = 0; i < e.title.length; i++) h = (h * 31 + e.title.charCodeAt(i)) | 0;
@@ -81,16 +111,18 @@ function formatDate(dateStr: string, t: Translator): string {
 }
 
 type ViewMode = "month" | "week" | "list";
-type TaskFilter = "all" | "manual" | "calendar";
+// Task filter: all partitions (human view) / this mounting page's partition /
+// AI-created only (audit). The old "manual"/"calendar" pair compared a field
+// the backend never sent — both buttons filtered nothing (defect B).
+type TaskFilter = "all" | "mine" | "agent";
 type CreateMode = "event" | "task" | "template";
 
-export function CalendarTaskPanel() {
+export function CalendarTaskPanel({ profile = "cowork" }: { profile?: string }) {
   const t = useT();
   const { showToast } = useToast();
   const confirm = useConfirm();
 
   // Calendar state
-  const [events, setEvents] = useState<CalendarEventView[]>([]);
   const [viewDate, setViewDate] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
@@ -99,7 +131,6 @@ export function CalendarTaskPanel() {
   const [holidays, setHolidays] = useState<CalendarEventView[]>([]);
 
   // Task state
-  const [tasks, setTasks] = useState<TaskView[] | null>(null);
   const [templates, setTemplates] = useState<TemplateView[]>([]);
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
 
@@ -112,33 +143,18 @@ export function CalendarTaskPanel() {
   // Pure calendar event (no associated task) form state.
   const [eventFormOpen, setEventFormOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalendarEventView | null>(null);
+  // Seeds EventEditForm's 到点动作 with the linked task's prompt (P4).
+  const [editingAction, setEditingAction] = useState<string>("");
 
-  // --- Data loading ---
-  const refreshEvents = useCallback(async () => {
-    const y = viewDate.getFullYear(), m = viewDate.getMonth();
-    const since = `${y}-${String(m + 1).padStart(2, "0")}-01`;
-    const before = new Date(y, m + 2, 1);
-    const beforeStr = `${before.getFullYear()}-${String(before.getMonth() + 1).padStart(2, "0")}-01`;
-    try { setEvents(await app.ListScheduledTasksAsEvents(since, beforeStr)); } catch { setEvents([]); }
-  }, [viewDate]);
+  // --- Data loading (shared hook: merged grid + live task list) ---
+  const y = viewDate.getFullYear(), m = viewDate.getMonth();
+  const since = `${y}-${String(m + 1).padStart(2, "0")}-01`;
+  const beforeD = new Date(y, m + 2, 1);
+  const before = `${beforeD.getFullYear()}-${String(beforeD.getMonth() + 1).padStart(2, "0")}-01`;
+  const { events, refresh: refreshEvents } = useCalendarEvents(since, before);
+  const { tasks } = useScheduledTasks();
 
-  const refreshTasks = useCallback(async () => {
-    try { setTasks(await app.ListScheduledTasks()); } catch { setTasks([]); }
-  }, []);
-
-  useEffect(() => { void refreshEvents(); }, [refreshEvents]);
-  useEffect(() => { void refreshTasks(); void app.ScheduledTaskTemplates().then(setTemplates).catch(() => setTemplates([])); }, []);
-  useEffect(() => onCalendarChanged(() => void refreshEvents()), [refreshEvents]);
-  useEffect(() => onSchedulerChanged(() => void refreshTasks()), [refreshTasks]);
-  useEffect(() => onSchedulerNotice((e) => showToast(`${e.name}: ${(e.result || "").slice(0, 100)}`, "info")), [showToast]);
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.runtime) {
-      return window.runtime.EventsOn("calendar:reminder", (...args: unknown[]) => {
-        const d = (args?.[0] ?? {}) as { title?: string; body?: string };
-        showToast(`${d.title || t("cal.reminder")}: ${d.body || ""}`, "info");
-      });
-    }
-  }, [showToast]);
+  useEffect(() => { void app.ScheduledTaskTemplates().then(setTemplates).catch(() => setTemplates([])); }, []);
   useEffect(() => { app.GetChineseHolidays(viewDate.getFullYear()).then(setHolidays).catch(() => setHolidays([])); }, [viewDate.getFullYear()]);
 
   const grid = useMemo(() => buildGrid(viewDate.getFullYear(), viewDate.getMonth()), [viewDate]);
@@ -146,8 +162,14 @@ export function CalendarTaskPanel() {
   const todayEvents = selectedDay ? eventsForDay(events, selectedDay) : eventsForDay(events, new Date());
   const filteredTasks = useMemo(() => {
     if (!tasks) return [];
-    return tasks.filter((tk) => taskFilter === "all" || tk.source === taskFilter);
-  }, [tasks, taskFilter]);
+    if (taskFilter === "mine") {
+      return tasks.filter((tk) => (tk.profile || "cowork").toLowerCase() === profile.toLowerCase());
+    }
+    if (taskFilter === "agent") {
+      return tasks.filter((tk) => tk.source === "agent");
+    }
+    return tasks;
+  }, [tasks, taskFilter, profile]);
 
   // --- Navigation ---
   const prev = () => { if (viewMode === "week") { const d = new Date(selectedDay || new Date()); d.setDate(d.getDate() - 7); setSelectedDay(d); } else setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1)); };
@@ -168,17 +190,24 @@ export function CalendarTaskPanel() {
   const handleTogglePause = async (task: TaskView) => { try { if (task.enabled) await app.PauseScheduledTask(task.id); else await app.ResumeScheduledTask(task.id); } catch (e) { showToast(String(e), "error"); } };
 
   // --- Pure calendar event CRUD (events with no associated task) ---
-  // onEventClick routes a clicked calendar event: task-bound events open the
-  // task editor; otherwise (agent/ICS/imported events with no taskId) the
-  // EventEditForm is shown so they can be edited/deleted too.
+  // onEventClick routes a clicked calendar event:
+  //  - task PROJECTIONS (id "task:<id>", no calendar row) open the task editor;
+  //  - real event rows open EventEditForm — including rows with a linked
+  //    action task (P4), whose prompt seeds the 动作 textarea so the event
+  //    and its compiled task stay editable from one place.
   const onEventClick = (e: CalendarEventView) => {
-    const task = (tasks || []).find(t => t.id === e.taskId);
-    if (task) { setEditingTask(task); setTaskFormOpen(true); }
-    else { setEditingEvent(e); setEventFormOpen(true); }
+    const linked = (tasks || []).find(t => t.id === e.taskId);
+    if (e.id.startsWith("task:")) {
+      if (linked) { setEditingTask(linked); setTaskFormOpen(true); }
+      return;
+    }
+    setEditingEvent(e);
+    setEditingAction(linked?.prompt ?? "");
+    setEventFormOpen(true);
   };
-  const handleCreateEvent = async (input: CalendarEventInput) => { await app.CreateCalendarEvent(input); setEventFormOpen(false); setEditingEvent(null); void refreshEvents(); };
-  const handleUpdateEvent = async (input: CalendarEventInput) => { if (editingEvent) await app.UpdateCalendarEvent({ ...input, id: editingEvent.id }); setEventFormOpen(false); setEditingEvent(null); void refreshEvents(); };
-  const handleDeleteEvent = async () => { if (!editingEvent) return; if (!(await confirm({ title: t("cal.deleteEvent"), message: t("cal.deleteEventMsg", { name: editingEvent.title }) }))) return; try { await app.DeleteCalendarEvent(editingEvent.id); setEventFormOpen(false); setEditingEvent(null); void refreshEvents(); } catch (e) { showToast(String(e), "error"); } };
+  const handleCreateEvent = async (input: CalendarEventInput) => { await app.CreateCalendarEvent(input); setEventFormOpen(false); setEditingEvent(null); setEditingAction(""); void refreshEvents(); };
+  const handleUpdateEvent = async (input: CalendarEventInput) => { if (editingEvent) await app.UpdateCalendarEvent({ ...input, id: editingEvent.id }); setEventFormOpen(false); setEditingEvent(null); setEditingAction(""); void refreshEvents(); };
+  const handleDeleteEvent = async () => { if (!editingEvent) return; if (!(await confirm({ title: t("cal.deleteEvent"), message: t("cal.deleteEventMsg", { name: editingEvent.title }) }))) return; try { await app.DeleteCalendarEvent(editingEvent.id); setEventFormOpen(false); setEditingEvent(null); setEditingAction(""); void refreshEvents(); } catch (e) { showToast(String(e), "error"); } };
 
   // --- Create menu ---
   const openCreateMenu = () => setCreateMode(null);
@@ -226,7 +255,7 @@ export function CalendarTaskPanel() {
             {createMode === null && (
               <div className="cowork-calendar-task__create-menu" onClick={closeCreateMenu}>
                 <div className="cowork-calendar-task__create-item" onClick={chooseCreateTask}><Clock size={13} /> {t("cal.newTask")}</div>
-                <div className="cowork-calendar-task__create-item" onClick={() => { setCreateMode(null); setEditingEvent(null); setEventFormOpen(true); }}><CalendarIcon size={13} /> {t("cal.newEvent")}</div>
+                <div className="cowork-calendar-task__create-item" onClick={() => { setCreateMode(null); setEditingEvent(null); setEditingAction(""); setEventFormOpen(true); }}><CalendarIcon size={13} /> {t("cal.newEvent")}</div>
                 <div className="cowork-calendar-task__create-divider" />
                 <div className="cowork-calendar-task__create-label">{t("cal.fromTemplate")}</div>
                 {templates.map((tpl) => (
@@ -377,12 +406,16 @@ export function CalendarTaskPanel() {
             )}
           </div>
 
-          {/* Task filters */}
+      {/* Task filters: All (each partition colored) / This page's partition / AI-created.
+          The old manual/calendar pair compared a field the backend never sent. */}
           <div className="cowork-calendar-task__sidebar-section">
             <div className="cowork-calendar-task__task-filters">
               <button className={`cowork-calendar-task__filter ${taskFilter === "all" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("all")}>{t("cal.filterAll")}</button>
-              <button className={`cowork-calendar-task__filter ${taskFilter === "manual" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("manual")}><Clock size={13} /> {t("cal.filterManual")}</button>
-              <button className={`cowork-calendar-task__filter ${taskFilter === "calendar" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("calendar")}><CalendarIcon size={13} /> {t("cal.filterCalendar")}</button>
+              <button className={`cowork-calendar-task__filter ${taskFilter === "mine" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("mine")}>
+                <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: profileAccent(profile), marginRight: 4 }} />
+                {t("cal.filterMine", { profile: profileDisplayName(profile) })}
+              </button>
+              <button className={`cowork-calendar-task__filter ${taskFilter === "agent" ? "cowork-calendar-task__filter--active" : ""}`} onClick={() => setTaskFilter("agent")}><Bot size={13} /> {t("cal.filterAgent")}</button>
             </div>
           </div>
 
@@ -398,7 +431,21 @@ export function CalendarTaskPanel() {
                   <div className="cowork-calendar-task__task-head">
                     <span className={`cowork-calendar-task__task-dot ${task.enabled ? "cowork-calendar-task__task-dot--on" : ""}`} />
                     <span className="cowork-calendar-task__task-name">{task.name}</span>
-                    {task.source === "calendar" && <span className="cowork-calendar-task__badge cowork-calendar-task__badge--calendar"><CalendarIcon size={12} /></span>}
+                    {/* Partition badge: which profile the task RUNS under (its
+                        prompt executes in that profile's context). */}
+                    {(taskFilter === "all" || task.source === "agent") && (
+                      <span
+                        className="cowork-calendar-task__badge"
+                        title={`${t("cal.taskRunsUnder")}: ${profileDisplayName(task.profile)}`}
+                        style={{ background: profileAccent(task.profile) || "#888888" }}
+                      >
+                        {profileDisplayName(task.profile)}
+                      </span>
+                    )}
+                    {/* Source badge: AI tool call vs human UI (audit trail). */}
+                    {task.source === "agent" && (
+                      <span className="cowork-calendar-task__badge cowork-calendar-task__badge--task" title={t("cal.agentCreated")}><Bot size={12} /></span>
+                    )}
                     {task.oneShot && <span className="cowork-calendar-task__badge">{t("cal.oneShot")}</span>}
                   </div>
                   <div className="cowork-calendar-task__task-meta">
@@ -424,6 +471,7 @@ export function CalendarTaskPanel() {
           initial={editingTask}
           initialTemplate={presetTemplate}
           templates={templates}
+          defaultProfile={profile}
           onSubmit={(input) => editingTask ? handleUpdateTask(input) : handleCreateTask(input)}
           onCancel={() => { setTaskFormOpen(false); setEditingTask(null); setPresetTemplate(null); }}
           onDelete={editingTask ? () => { void confirm({ title: t("cal.deleteTask"), message: t("cal.deleteTaskMsg", { name: editingTask.name }) }).then((ok) => { if (ok) { void app.DeleteScheduledTask(editingTask.id).then(() => { setTaskFormOpen(false); setEditingTask(null); }); } }); } : undefined}
@@ -434,9 +482,11 @@ export function CalendarTaskPanel() {
       {eventFormOpen && (
         <EventEditForm
           initial={editingEvent}
+          initialActionPrompt={editingAction}
+          defaultProfile={profile}
           onSubmit={editingEvent ? handleUpdateEvent : handleCreateEvent}
           onDelete={editingEvent ? handleDeleteEvent : undefined}
-          onCancel={() => { setEventFormOpen(false); setEditingEvent(null); }}
+          onCancel={() => { setEventFormOpen(false); setEditingEvent(null); setEditingAction(""); }}
         />
       )}
 

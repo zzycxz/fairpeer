@@ -36,14 +36,14 @@ func seedTopicTurn(t *testing.T, scope, root, topicID, profile string) {
 		t.Fatal(err)
 	}
 	meta := agent.BranchMeta{
-		ID:           name,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-		Scope:        scope,
+		ID:            name,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		Scope:         scope,
 		WorkspaceRoot: root,
-		TopicID:      topicID,
-		Profile:      profile,
-		CachedTurns:  1,
+		TopicID:       topicID,
+		Profile:       profile,
+		CachedTurns:   1,
 		CachedPreview: "seed turn",
 	}
 	metaBytes, err := json.Marshal(meta)

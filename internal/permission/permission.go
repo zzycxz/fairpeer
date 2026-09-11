@@ -6,6 +6,7 @@
 package permission
 
 import (
+	"runtime"
 	"context"
 	"encoding/json"
 	"path/filepath"
@@ -464,6 +465,21 @@ func Subject(args json.RawMessage) string {
 	return ""
 }
 
+// pathLikeSubject reports whether a rule subject denotes a filesystem path:
+// an absolute posix/home path or a drive-letter path. Case folding for
+// Windows rule matching keys off this shape, so bash commands like
+// "git status" are never folded.
+func pathLikeSubject(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	if strings.HasPrefix(s, "/") || strings.HasPrefix(s, "~/") {
+		return true
+	}
+	return len(s) >= 3 && s[1] == ':' && (s[2] == '/' || s[2] == '\\')
+}
+
 // matchGlob reports whether name matches pattern, where '*' matches any run of
 // characters (including separators) and '?' matches exactly one. Unlike
 // path.Match, '*' is not stopped by '/', which is what command-line and path
@@ -699,6 +715,14 @@ func ruleSubjectMatches(rule Rule, subject string) bool {
 	}
 	if subject == "" {
 		return false
+	}
+	// Windows treats paths case-insensitively: a deny rule for
+	// C:/work/secrets/* must not be evaded by C:\WORK\Secrets\x. Only
+	// path-shaped subjects fold (detected by form, not by tool name — every
+	// tool that takes a path subject flows through here); bash commands and
+	// grep patterns stay byte-exact.
+	if runtime.GOOS == "windows" && pathLikeSubject(rule.Subject) && pathLikeSubject(subject) {
+		rule.Subject, subject = strings.ToLower(rule.Subject), strings.ToLower(subject)
 	}
 	if rule.Literal {
 		return rule.Subject == subject

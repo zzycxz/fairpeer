@@ -84,8 +84,10 @@ def load_style(home):
         fonts = cfg.get("fonts") or {}
     except (OSError, ValueError):
         pass
+    accent = colors.get("accent") or "#4472C4"
     return {
-        "accent": colors.get("accent") or "#4472C4",
+        "brand": colors.get("brand") or accent,
+        "accent": accent,
         "text": colors.get("text") or "#1A1A1A",
         "muted": colors.get("text_secondary") or "#666666",
         "line": colors.get("line") or "rgba(0,0,0,0.35)",
@@ -167,10 +169,10 @@ def _place(parts, n, lines, x, y, w, h, fs, style, row_h=None):
     cx, cy = x + w / 2, y + h / 2
     if n.kind == "decision":
         pts = "%.0f,%.0f %.0f,%.0f %.0f,%.0f %.0f,%.0f" % (cx, y, x + w, cy, cx, y + rh, x, cy)
-        parts.append('<polygon points="%s" fill="rgba(230,0,18,0.06)" stroke="%s" stroke-width="2"/>' % (pts, style["accent"]))
+        parts.append('<polygon points="%s" fill="rgba(230,0,18,0.06)" stroke="%s" stroke-width="2"/>' % (pts, style["brand"]))
     elif n.kind == "terminal":
-        parts.append('<rect x="%.0f" y="%.0f" width="%.0f" height="%.0f" rx="%.0f" fill="%s" opacity="0.12"/>' % (x, y, w, h, h / 2, style["accent"]))
-        parts.append('<rect x="%.0f" y="%.0f" width="%.0f" height="%.0f" rx="%.0f" fill="none" stroke="%s" stroke-width="2"/>' % (x, y, w, h, h / 2, style["accent"]))
+        parts.append('<rect x="%.0f" y="%.0f" width="%.0f" height="%.0f" rx="%.0f" fill="%s" opacity="0.12"/>' % (x, y, w, h, h / 2, style["brand"]))
+        parts.append('<rect x="%.0f" y="%.0f" width="%.0f" height="%.0f" rx="%.0f" fill="none" stroke="%s" stroke-width="2"/>' % (x, y, w, h, h / 2, style["brand"]))
     else:
         parts.append('<rect x="%.0f" y="%.0f" width="%.0f" height="%.0f" rx="8" fill="rgba(255,255,255,0.85)" stroke="%s" stroke-width="1.5"/>' % (x, y, w, h, style["line"]))
     ty = cy - (len(lines) - 1) * fs * 0.7 + fs * 0.35
@@ -239,13 +241,13 @@ def render_flow(nodes, edges, fs, style):
             if label:
                 lx = (acx + bcx) / 2
                 parts.append('<rect x="%.0f" y="%.0f" width="%d" height="16" fill="#FFFFFF" opacity="0.9"/>' % (lx - len(label) * 6, mid - 8, len(label) * 12 + 6))
-                parts.append('<text x="%.0f" y="%.0f" font-size="11" fill="%s" text-anchor="middle">%s</text>' % (lx + 3, mid + 4, style["accent"], esc(label)))
+                parts.append('<text x="%.0f" y="%.0f" font-size="11" fill="%s" text-anchor="middle">%s</text>' % (lx + 3, mid + 4, style["brand"], esc(label)))
     return parts, y
 
 
 def render_timeline(chain, fs, style):
     """chain: list of (date, task). Horizontal snake: 1 row ≤ 9 nodes else 2."""
-    parts = ['<line x1="80" y1="240" x2="1200" y2="240" stroke="%s" stroke-width="2"/>' % style["accent"]]
+    parts = ['<line x1="80" y1="240" x2="1200" y2="240" stroke="%s" stroke-width="2"/>' % style["brand"]]
     n = len(chain)
     rows = 1 if n <= 9 else 2
     per = (n + rows - 1) // rows
@@ -253,7 +255,7 @@ def render_timeline(chain, fs, style):
         r, c = divmod(i, per)
         x = 100 + c * (1040 / max(1, per - 1)) if per > 1 else 640
         y = 240 if r == 0 or rows == 1 else 470
-        parts.append('<circle cx="%.0f" cy="%d" r="7" fill="%s"/>' % (x, y, style["accent"]))
+        parts.append('<circle cx="%.0f" cy="%d" r="7" fill="%s"/>' % (x, y, style["brand"]))
         above = (r == 0 and rows == 2) or (rows == 1 and i % 2 == 0)
         lines = wrap_units(task, 11.5, 16.0)
         ty = y - 22 - len(lines) * 14 if above else y + 34
@@ -284,7 +286,7 @@ def main():
     if args.title:
         parts.append('<text x="60" y="46" font-size="26" font-weight="bold" fill="%s">%s</text>'
                      % (style["text"], esc(args.title)))
-        parts.append('<rect x="60" y="58" width="60" height="3" fill="%s"/>' % style["accent"])
+        parts.append('<rect x="60" y="58" width="60" height="3" fill="%s"/>' % style["brand"])
 
     summary = {}
     if args.timeline:

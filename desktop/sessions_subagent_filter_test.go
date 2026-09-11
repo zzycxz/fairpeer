@@ -43,8 +43,8 @@ func TestListSessionsSkipsSubagentTranscripts(t *testing.T) {
 
 func TestIsSubagentSession(t *testing.T) {
 	cases := map[string]bool{
-		filepath.Join("s", "subagents", "sa_x.jsonl"): true,
-		filepath.Join("s", "sa_20260905_x.jsonl"):     true,
+		filepath.Join("s", "subagents", "sa_x.jsonl"):     true,
+		filepath.Join("s", "sa_20260905_x.jsonl"):         true,
 		filepath.Join("s", "20260905-1/20260905-1.jsonl"): false,
 		"conv.jsonl":          false,
 		"sample_subagents.md": false,

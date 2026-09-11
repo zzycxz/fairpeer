@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
@@ -875,8 +876,26 @@ func saveAttachmentsFromRaw(raw []byte, dir string) int {
 		if name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
 			continue
 		}
-		data, _ := io.ReadAll(part.Body)
+		// NEW-25: cap the attachment body (the preview path already caps the
+		// raw message; the download path did not) — a huge attachment must not
+		// exhaust memory.
+		data, err := io.ReadAll(io.LimitReader(part.Body, maxAttachmentBytes+1))
+		if err != nil || len(data) > maxAttachmentBytes {
+			continue
+		}
+		// NEW-25: attacker-controlled names must not clobber existing files —
+		// add a numeric suffix until unused (report.docx → report.1.docx).
 		path := filepath.Join(dir, name)
+		if _, err := os.Stat(path); err == nil {
+			ext := filepath.Ext(name)
+			stem := strings.TrimSuffix(name, ext)
+			for n := 1; ; n++ {
+				path = filepath.Join(dir, fmt.Sprintf("%s.%d%s", stem, n, ext))
+				if _, err := os.Stat(path); os.IsNotExist(err) {
+					break
+				}
+			}
+		}
 		if err := os.WriteFile(path, data, 0o644); err != nil {
 			continue
 		}
@@ -884,6 +903,9 @@ func saveAttachmentsFromRaw(raw []byte, dir string) int {
 	}
 	return saved
 }
+
+// maxAttachmentBytes caps a single saved attachment (NEW-25).
+const maxAttachmentBytes = 25 << 20 // 25 MiB
 
 // sensitiveAttachmentSubdirs lists path segments that, if they appear in a
 // save_attachments target, mark it as too dangerous to write attacker-controlled
@@ -1110,6 +1132,12 @@ func formatMessages(msgs []EmailMessage) string {
 func truncatePreview(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	// Back the cut point up to a UTF-8 rune boundary so a multi-byte rune
+	// (CJK, emoji) at the edge isn't sliced mid-sequence — a split rune renders
+	// as mojibake in the preview. Same pattern as desktop's trimUTF8PartialSuffix.
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n] + "…"
 }

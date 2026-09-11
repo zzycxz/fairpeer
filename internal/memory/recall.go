@@ -39,14 +39,16 @@ func (recallTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"name": {"type": "string", "description": "The slug of a saved memory to read in full. Omit or leave empty to list all saved memories (name + first line)."}
+			"name": {"type": "string", "description": "The slug of a saved memory to read in full. Omit or leave empty to list all saved memories (name + first line)."},
+			"query": {"type": "string", "description": "Keyword search (case-insensitive) across saved memory names AND bodies, returning matches with the matching line. Use when you remember the TOPIC but not the slug — e.g. query=数据库 finds a memory saved as 'db-migration-rules'."}
 		}
 	}`)
 }
 
 func (t recallTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var in struct {
-		Name string `json:"name"`
+		Name  string `json:"name"`
+		Query string `json:"query"`
 	}
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &in); err != nil {
@@ -54,6 +56,39 @@ func (t recallTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 		}
 	}
 	name := strings.TrimSpace(in.Name)
+
+	// P1-B3: keyword mode. The name-or-list-everything interface meant the
+	// model had to GUESS the slug; a topic keyword now finds it. Pure local
+	// scan over the same files list mode reads.
+	if q := strings.TrimSpace(in.Query); q != "" && name == "" {
+		needle := strings.ToLower(q)
+		var hits []string
+		for _, m := range t.store.List() {
+			hay := strings.ToLower(m.Name + "\n" + m.Body)
+			if !strings.Contains(hay, needle) {
+				continue
+			}
+			matchLine := ""
+			for _, line := range strings.Split(m.Body, "\n") {
+				if strings.Contains(strings.ToLower(line), needle) {
+					matchLine = strings.TrimSpace(line)
+					break
+				}
+			}
+			if matchLine == "" {
+				matchLine = oneLine(firstLine(m.Body))
+			}
+			hits = append(hits, fmt.Sprintf("- %s — %s", m.Name, matchLine))
+			if len(hits) >= 20 {
+				hits = append(hits, "…(more matches — narrow the query)")
+				break
+			}
+		}
+		if len(hits) == 0 {
+			return fmt.Sprintf("No saved memory matches %q. Call recall with no arguments to list all slugs.", q), nil
+		}
+		return fmt.Sprintf("Memories matching %q:\n%s", q, strings.Join(hits, "\n")), nil
+	}
 
 	// Single-fact read: return the full body.
 	if name != "" {

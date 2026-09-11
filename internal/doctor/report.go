@@ -39,7 +39,27 @@ type Report struct {
 	Permission PermissionReport `json:"permission"`
 	Runtime    RuntimeReport    `json:"runtime"`
 	Secrets    SecretsReport    `json:"secrets"`
+	DesktopEnv DesktopEnvReport `json:"desktop_env,omitempty"`
 	Warnings   []string         `json:"warnings,omitempty"`
+}
+
+// DesktopEnvReport carries the domestic-OS (统信UOS/银河麒麟) desktop
+// environment checks from docs/国产化适配实施方案.md §10.5 R5-4: whether the
+// Wails GUI's engine and session are present, whether the Chinese-IME launcher
+// env is set, whether netdev's ICMP probe may run, and the descriptor budget.
+// Collected on Linux only; the zero value renders no section.
+type DesktopEnvReport struct {
+	DisplayServer string   `json:"display_server,omitempty"` // x11 | wayland | none
+	IME           string   `json:"ime,omitempty"`            // fcitx | ibus | ""
+	WebKitGTK     string   `json:"webkitgtk,omitempty"`      // "webkit2gtk-4.0 2.38.x" | ""
+	Helpers       []string `json:"helpers,omitempty"`        // notify-send/clipboard-image/screenshot/window-input found
+	OpenSSH       string   `json:"openssh,omitempty"`        // ssh binary (transport shells to `ssh -G`)
+	CAPNetRaw     bool     `json:"cap_net_raw,omitempty"`    // netprobe ICMP allowed
+	NoFileSoft    int      `json:"nofile_soft,omitempty"`    // RLIMIT_NOFILE soft limit
+	TmpNoexec     bool     `json:"tmp_noexec,omitempty"`     // /tmp mounted noexec
+	PageSize      int      `json:"page_size,omitempty"`      // kernel page size (64K on Kylin server arm64)
+	Locale        string   `json:"locale,omitempty"`
+	SSHAgentSock  bool     `json:"ssh_agent_sock,omitempty"` // SSH_AUTH_SOCK reached this process
 }
 
 // SecretsReport shows the at-rest encryption backend of the secret store
@@ -141,6 +161,9 @@ func Collect(opts Options) Report {
 			cfg = config.Default()
 		}
 	}
+	// Unknown TOML keys (e.g. a default-model typo) — surfaced here so
+	// "agent 不干活" trips land one diagnosis earlier (P1-F10②).
+	warnings = append(warnings, cfg.ConfigWarnings...)
 	cwd, _ := os.Getwd()
 	report := Report{
 		Version: opts.Version,
@@ -180,8 +203,9 @@ func Collect(opts Options) Report {
 			AskRules:   len(cfg.Permissions.Ask),
 			DenyRules:  len(cfg.Permissions.Deny),
 		},
-		Secrets:  collectSecrets(),
-		Warnings: warnings,
+		Secrets:    collectSecrets(),
+		DesktopEnv: collectDesktopEnv(),
+		Warnings:   warnings,
 	}
 	report.Sessions.Dir = redactHome(report.Sessions.Dir)
 	if p, ok := codegraph.Resolve(cfg.Codegraph.Path); ok {
@@ -241,6 +265,19 @@ func Collect(opts Options) Report {
 	} else {
 		report.Runtime.NPX = "not found"
 	}
+
+	// Domestic-OS desktop warnings (Linux only — see DesktopEnvReport).
+	if de := report.DesktopEnv; de.DisplayServer != "" {
+		if de.DisplayServer == "none" {
+			warnings = append(warnings, "no graphical session (DISPLAY/WAYLAND_DISPLAY unset): the desktop GUI cannot run here — use `fairpeer serve` (headless) instead")
+		} else if de.WebKitGTK == "" {
+			warnings = append(warnings, "webkit2gtk not found: the desktop GUI needs libwebkit2gtk-4.0-37 (or 4.1) installed")
+		}
+		if (de.DisplayServer == "x11" || de.DisplayServer == "wayland") && de.IME == "" {
+			warnings = append(warnings, "IME env unset (GTK_IM_MODULE/QT_IM_MODULE/XMODIFIERS): Chinese input in the GUI may not work")
+		}
+	}
+	report.Warnings = warnings
 
 	return report
 }
@@ -334,12 +371,50 @@ func RenderText(r Report) string {
 	backendLine := r.Secrets.Backend
 	switch {
 	case r.Secrets.Backend == "unavailable":
-		backendLine += " (keystore locked or reset: stored secrets read as unset until it is restored)"
+		backendLine += " (keystore locked/reset, or the store was migrated from another machine/OS: stored secrets read as unset until it is restored — set FAIRPEER_SECRET_PASSPHRASE to the original passphrase or re-enter credentials here)"
 	case r.Secrets.Degraded:
 		backendLine += " (degraded: machine-bound encryption recomputable by any local process; set FAIRPEER_SECRET_PASSPHRASE or use a system with a keychain/secret service)"
 	}
 	fmt.Fprintf(&b, "  backend      %s\n", backendLine)
 	fmt.Fprintf(&b, "  store        %s\n", valueOr(r.Secrets.Path, "unavailable"))
+
+	// Domestic-OS desktop checks — empty section on non-Linux hosts.
+	if de := r.DesktopEnv; de.DisplayServer != "" || de.WebKitGTK != "" || len(de.Helpers) > 0 {
+		fmt.Fprintf(&b, "\ndesktop env\n")
+		fmt.Fprintf(&b, "  display      %s\n", valueOr(de.DisplayServer, "?"))
+		fmt.Fprintf(&b, "  webkitgtk    %s\n", valueOr(de.WebKitGTK, "not found (GUI needs libwebkit2gtk-4.0-37 / 4.1)"))
+		if de.IME != "" {
+			fmt.Fprintf(&b, "  ime          %s\n", de.IME)
+		} else if de.DisplayServer == "x11" || de.DisplayServer == "wayland" {
+			fmt.Fprintf(&b, "  ime          (unset — Chinese input in the GUI needs GTK_IM_MODULE/QT_IM_MODULE/XMODIFIERS; fcitx or ibus)\n")
+		}
+		if len(de.Helpers) > 0 {
+			fmt.Fprintf(&b, "  helpers      %s\n", strings.Join(de.Helpers, ", "))
+		} else {
+			fmt.Fprintf(&b, "  helpers      (none of notify-send/xclip/wl-paste/scrot/xdotool found — clipboard-paste, screenshots and desktop input degrade)\n")
+		}
+		if de.OpenSSH != "" {
+			fmt.Fprintf(&b, "  ssh client   %s\n", de.OpenSSH)
+		}
+		if de.CAPNetRaw {
+			fmt.Fprintf(&b, "  cap_net_raw  yes (netprobe ICMP allowed)\n")
+		} else if de.DisplayServer != "" {
+			fmt.Fprintf(&b, "  cap_net_raw  no (netprobe ICMP needs setcap cap_net_raw=+ep or sudo; TCP-only probing still works)\n")
+		}
+		if de.NoFileSoft > 0 {
+			fmt.Fprintf(&b, "  ulimit -n    %d\n", de.NoFileSoft)
+		}
+		if de.PageSize > 0 && de.PageSize != 4096 {
+			fmt.Fprintf(&b, "  page size    %d (non-4K kernel: old WebKitGTK builds abort here; modern ones run JIT-less)\n", de.PageSize)
+		}
+		if de.TmpNoexec {
+			fmt.Fprintf(&b, "  /tmp         noexec (extract-and-run helpers must use the cache dir)\n")
+		}
+		if de.Locale != "" {
+			fmt.Fprintf(&b, "  locale       %s\n", de.Locale)
+		}
+		fmt.Fprintf(&b, "  ssh agent    %v\n", de.SSHAgentSock)
+	}
 	return b.String()
 }
 

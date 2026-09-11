@@ -1,10 +1,10 @@
 package netdev
 
 import (
-	"path/filepath"
 	"context"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strings"
 	"testing"
 

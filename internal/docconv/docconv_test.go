@@ -1,14 +1,30 @@
 package docconv
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
-// TestScriptCandidatesIncludesExeDir verifies the candidate list probes the
-// conventional locations (cwd + relative to the executable).
-func TestScriptCandidatesIncludesExeDir(t *testing.T) {
+// TestScriptCandidatesOrder verifies the probe order: the MANAGED copy under
+// ~/.fairpeer/scripts comes first (boot refreshes it from the embedded assets,
+// so a stale script next to the exe can never shadow fixes — P0-3), then cwd,
+// then the exe-adjacent probes.
+func TestScriptCandidatesOrder(t *testing.T) {
 	got := ScriptCandidates("doc_converter.py")
-	// The cwd-relative name must always be first.
-	if len(got) == 0 || got[0] != "doc_converter.py" {
-		t.Fatalf("first candidate = %v, want doc_converter.py", got)
+	if len(got) == 0 {
+		t.Fatal("no candidates")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skipf("no home dir: %v", err)
+	}
+	wantFirst := filepath.Join(home, ".fairpeer", "scripts", "doc_converter.py")
+	if got[0] != wantFirst {
+		t.Fatalf("first candidate = %q, want managed copy %q", got[0], wantFirst)
+	}
+	if got[1] != "doc_converter.py" {
+		t.Fatalf("second candidate = %q, want cwd-relative name", got[1])
 	}
 }
 

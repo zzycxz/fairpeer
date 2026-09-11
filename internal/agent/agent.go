@@ -1714,16 +1714,11 @@ func parallelisable(r *tool.Registry, name string, args json.RawMessage) bool {
 	if t.ReadOnly() {
 		return true
 	}
-	// P1-D1: task is a writer, but INDEPENDENT sub-tasks opted in with
-	// concurrent=true fan out alongside the read-only run (write-type
-	// sub-agents already run in isolated git worktrees, so parallel writes
-	// don't collide). The cap lives in runParallel.
-	if name == "task" {
-		var p struct {
-			Concurrent bool `json:"concurrent"`
-		}
-		return json.Unmarshal(args, &p) == nil && p.Concurrent
-	}
+	// P1-D1 (SUSPENDED, NEW-03 verification): concurrent=true task fan-out ran
+	// sub-agents on the SHARED main workspace — a runtime test proved a lost
+	// update on a shared file, because worktree isolation is not wired.
+	// Concurrent tasks now fall through to the serial writer batch (ordered,
+	// race-free). Re-enable only together with real isolation.
 	return false
 }
 

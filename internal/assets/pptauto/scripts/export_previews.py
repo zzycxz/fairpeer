@@ -46,6 +46,11 @@ def main():
     print(f"导出截图: {pptx_path}")
 
     # 检测办公软件
+    if sys.platform != "win32":
+        # find_office_app 走 comtypes（Windows-COM），macOS/Linux 上装不上也
+        # 用不了——诚实报平台限制，导出 PDF 请改用 export_pdf.py 的 soffice 路径。
+        print("ERROR: preview export requires Windows with PowerPoint/WPS (COM automation); on macOS/Linux use export_pdf.py (LibreOffice path)")
+        sys.exit(1)
     app_name = find_office_app()
     if not app_name:
         print("ERROR: No office application found")

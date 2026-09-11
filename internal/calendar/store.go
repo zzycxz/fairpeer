@@ -5,11 +5,13 @@
 package calendar
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -18,17 +20,22 @@ import (
 // Event is the core calendar entity. Times are stored as UTC in SQLite and
 // converted to the event's Timezone for display.
 type Event struct {
-	ID            string    `json:"id"`
-	Title         string    `json:"title"`
-	Description   string    `json:"description"`
-	Location      string    `json:"location"`
-	StartTime     time.Time `json:"start_time"`
-	EndTime       time.Time `json:"end_time"`
-	AllDay        bool      `json:"all_day"`
-	Timezone      string    `json:"timezone"`
-	Color         string    `json:"color"`
-	Status        string    `json:"status"` // confirmed / cancelled / tentative
-	Source        string    `json:"source"` // manual / email / agent
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	Location    string    `json:"location"`
+	StartTime   time.Time `json:"start_time"`
+	EndTime     time.Time `json:"end_time"`
+	AllDay      bool      `json:"all_day"`
+	Timezone    string    `json:"timezone"`
+	Color       string    `json:"color"`
+	Status      string    `json:"status"` // confirmed / cancelled / tentative
+	Source      string    `json:"source"` // manual / email / agent / ics
+	// Profile is the owning product-profile partition (dev / cowork / netdev).
+	// The agent-facing tools filter by it so each profile's agent sees only its
+	// own events; the human UI reads all partitions. Empty = legacy cowork (the
+	// calendar shipped as a cowork-only feature).
+	Profile       string    `json:"profile,omitempty"`
 	Recurrence    string    `json:"recurrence"`
 	RecurrenceEnd time.Time `json:"recurrence_end"`
 	Reminders     []int     `json:"reminders"` // minutes before
@@ -67,7 +74,10 @@ func Open(dbPath string) (*Store, error) {
 	if err := mkdirAll(filepath.Dir(dbPath)); err != nil {
 		return nil, fmt.Errorf("calendar: mkdir %s: %w", filepath.Dir(dbPath), err)
 	}
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	// modernc.org/sqlite only consumes "_pragma=" DSN params — the legacy
+	// "_journal_mode=" form is silently ignored, leaving delete-journal mode and
+	// no busy timeout. Match rag/store.go.
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("calendar: open %s: %w", dbPath, err)
 	}
@@ -79,8 +89,14 @@ func Open(dbPath string) (*Store, error) {
 	return s, nil
 }
 
-// Close closes the database.
-func (s *Store) Close() error { return s.db.Close() }
+// Close checkpoints the WAL into the main db file, then closes. A clean
+// close already checkpoints implicitly, but the explicit TRUNCATE guarantees
+// the .db is self-contained for backup/copy migration (copying just the .db
+// while a -wal sidecar exists loses its un-checkpointed tail).
+func (s *Store) Close() error {
+	_, _ = s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	return s.db.Close()
+}
 
 // migrate creates tables if they don't exist, and adds columns added in later
 // versions via idempotent ALTER TABLE (SQLite has no IF NOT EXISTS for ADD
@@ -139,6 +155,19 @@ CREATE INDEX IF NOT EXISTS idx_exceptions_event ON event_exceptions(event_id);
 			return err
 		}
 	}
+	// Profile partitioning (scheduler/calendar globalization): existing rows
+	// backfill to cowork — the calendar shipped as a cowork-only feature, so
+	// every pre-partition event belongs to the cowork cabinet by construction.
+	// DEFAULT 'cowork' covers new INSERTs that omit the column.
+	if err := s.addColumnIfMissing("events", "profile", "TEXT DEFAULT 'cowork'"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE events SET profile = 'cowork' WHERE profile IS NULL OR profile = ''`); err != nil {
+		return fmt.Errorf("calendar migrate: backfill profile: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_events_profile ON events(profile)`); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -186,16 +215,19 @@ func (s *Store) Create(e *Event) error {
 	if e.Source == "" {
 		e.Source = "manual"
 	}
+	if e.Profile == "" {
+		e.Profile = "cowork"
+	}
 
 	remindersJSON, _ := json.Marshal(e.Reminders)
 	tagsJSON, _ := json.Marshal(e.Tags)
 
 	_, err := s.db.Exec(`INSERT INTO events
-(id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+(id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, profile, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID, e.Title, e.Description, e.Location,
 		e.StartTime.UTC(), e.EndTime.UTC(), boolToInt(e.AllDay),
-		e.Timezone, e.Color, e.Status, e.Source,
+		e.Timezone, e.Color, e.Status, e.Source, e.Profile,
 		e.Recurrence, nullTime(e.RecurrenceEnd),
 		string(remindersJSON), e.TaskID, string(tagsJSON),
 		e.OutputMode, e.OutputDest, e.OutputAccount,
@@ -206,7 +238,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
 // Get returns a single event by ID.
 func (s *Store) Get(id string) (*Event, error) {
-	row := s.db.QueryRow(`SELECT id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, reminded_at, created_at, updated_at FROM events WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, profile, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, reminded_at, created_at, updated_at FROM events WHERE id = ?`, id)
 	return scanEvent(row)
 }
 
@@ -217,11 +249,11 @@ func (s *Store) Update(e *Event) error {
 	tagsJSON, _ := json.Marshal(e.Tags)
 
 	_, err := s.db.Exec(`UPDATE events SET
-title=?, description=?, location=?, start_time=?, end_time=?, all_day=?, timezone=?, color=?, status=?, source=?, recurrence=?, recurrence_end=?, reminders=?, task_id=?, tags=?, output_mode=?, output_dest=?, output_account=?, updated_at=?
+title=?, description=?, location=?, start_time=?, end_time=?, all_day=?, timezone=?, color=?, status=?, source=?, profile=?, recurrence=?, recurrence_end=?, reminders=?, task_id=?, tags=?, output_mode=?, output_dest=?, output_account=?, updated_at=?
 WHERE id=?`,
 		e.Title, e.Description, e.Location,
 		e.StartTime.UTC(), e.EndTime.UTC(), boolToInt(e.AllDay),
-		e.Timezone, e.Color, e.Status, e.Source,
+		e.Timezone, e.Color, e.Status, e.Source, e.Profile,
 		e.Recurrence, nullTime(e.RecurrenceEnd),
 		string(remindersJSON), e.TaskID, string(tagsJSON),
 		e.OutputMode, e.OutputDest, e.OutputAccount,
@@ -243,7 +275,7 @@ func (s *Store) Delete(id string) error {
 // List returns events whose time range overlaps [since, before).
 // For recurring events, the original event is returned (caller must expand).
 func (s *Store) List(since, before time.Time) ([]Event, error) {
-	rows, err := s.db.Query(`SELECT id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, reminded_at, created_at, updated_at FROM events WHERE end_time > ? AND start_time < ? ORDER BY start_time`, since.UTC(), before.UTC())
+	rows, err := s.db.Query(`SELECT id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, profile, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, reminded_at, created_at, updated_at FROM events WHERE end_time > ? AND start_time < ? ORDER BY start_time`, since.UTC(), before.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +285,7 @@ func (s *Store) List(since, before time.Time) ([]Event, error) {
 
 // ListAll returns all events (for export).
 func (s *Store) ListAll() ([]Event, error) {
-	rows, err := s.db.Query(`SELECT id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, reminded_at, created_at, updated_at FROM events ORDER BY start_time`)
+	rows, err := s.db.Query(`SELECT id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, profile, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, reminded_at, created_at, updated_at FROM events ORDER BY start_time`)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +298,7 @@ func (s *Store) Search(q string, limit int) ([]Event, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, reminded_at, created_at, updated_at FROM events WHERE title LIKE ? OR description LIKE ? ORDER BY start_time LIMIT ?`,
+	rows, err := s.db.Query(`SELECT id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, profile, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, reminded_at, created_at, updated_at FROM events WHERE title LIKE ? OR description LIKE ? ORDER BY start_time LIMIT ?`,
 		"%"+q+"%", "%"+q+"%", limit)
 	if err != nil {
 		return nil, err
@@ -277,12 +309,64 @@ func (s *Store) Search(q string, limit int) ([]Event, error) {
 
 // ListByTaskID returns events linked to a schedule task.
 func (s *Store) ListByTaskID(taskID string) ([]Event, error) {
-	rows, err := s.db.Query(`SELECT id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, reminded_at, created_at, updated_at FROM events WHERE task_id = ? ORDER BY start_time`, taskID)
+	rows, err := s.db.Query(`SELECT id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, profile, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, reminded_at, created_at, updated_at FROM events WHERE task_id = ? ORDER BY start_time`, taskID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	return scanEvents(rows)
+}
+
+// --- Profile partitioning ----------------------------------------------------
+
+// NormalizeProfile maps an event/task profile to its partition key. Empty is
+// the legacy default: the calendar shipped cowork-only, so unattributed rows
+// belong to the cowork cabinet.
+func NormalizeProfile(profile string) string {
+	if p := strings.TrimSpace(profile); p != "" {
+		return strings.ToLower(p)
+	}
+	return "cowork"
+}
+
+// ListForProfile is List scoped to one profile partition — the agent-facing
+// tools use this; the human UI keeps List (the user owns every partition).
+func (s *Store) ListForProfile(profile string, since, before time.Time) ([]Event, error) {
+	rows, err := s.db.Query(`SELECT id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, profile, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, reminded_at, created_at, updated_at FROM events WHERE profile = ? AND end_time > ? AND start_time < ? ORDER BY start_time`,
+		NormalizeProfile(profile), since.UTC(), before.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEvents(rows)
+}
+
+// SearchForProfile is Search scoped to one profile partition.
+func (s *Store) SearchForProfile(profile, q string, limit int) ([]Event, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`SELECT id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, profile, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, reminded_at, created_at, updated_at FROM events WHERE profile = ? AND (title LIKE ? OR description LIKE ?) ORDER BY start_time LIMIT ?`,
+		NormalizeProfile(profile), "%"+q+"%", "%"+q+"%", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEvents(rows)
+}
+
+// GetForProfile returns a single event ONLY when it belongs to the profile
+// partition. Cross-partition reads report not-found — the agent tools must not
+// learn that an id exists in another cabinet.
+func (s *Store) GetForProfile(id, profile string) (*Event, error) {
+	e, err := s.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	if NormalizeProfile(e.Profile) != NormalizeProfile(profile) {
+		return nil, sql.ErrNoRows
+	}
+	return e, nil
 }
 
 // --- Exceptions ---
@@ -339,7 +423,7 @@ func (s *Store) DeleteException(id string) error {
 // occurrence could fall within the lookahead window. The start_time bounds are
 // relaxed to include recurring events whose original start_time is in the past.
 func (s *Store) DueReminders(now time.Time) ([]Event, error) {
-	rows, err := s.db.Query(`SELECT id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, reminded_at, created_at, updated_at FROM events WHERE status != 'cancelled' AND reminders != '[]' AND reminders != ''`)
+	rows, err := s.db.Query(`SELECT id, title, description, location, start_time, end_time, all_day, timezone, color, status, source, profile, recurrence, recurrence_end, reminders, task_id, tags, output_mode, output_dest, output_account, reminded_at, created_at, updated_at FROM events WHERE status != 'cancelled' AND reminders != '[]' AND reminders != ''`)
 	if err != nil {
 		return nil, err
 	}
@@ -367,7 +451,7 @@ func scanEvent(row *sql.Row) (*Event, error) {
 	var remindersJSON, tagsJSON string
 	err := row.Scan(&e.ID, &e.Title, &e.Description, &e.Location,
 		&e.StartTime, &e.EndTime, &allDay, &e.Timezone, &e.Color,
-		&e.Status, &e.Source, &e.Recurrence, &recEnd,
+		&e.Status, &e.Source, &e.Profile, &e.Recurrence, &recEnd,
 		&remindersJSON, &e.TaskID, &tagsJSON, &e.OutputMode, &e.OutputDest, &e.OutputAccount, &remindedAt, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
@@ -399,7 +483,7 @@ func scanEvents(rows *sql.Rows) ([]Event, error) {
 		var remindersJSON, tagsJSON string
 		if err := rows.Scan(&e.ID, &e.Title, &e.Description, &e.Location,
 			&e.StartTime, &e.EndTime, &allDay, &e.Timezone, &e.Color,
-			&e.Status, &e.Source, &e.Recurrence, &recEnd,
+			&e.Status, &e.Source, &e.Profile, &e.Recurrence, &recEnd,
 			&remindersJSON, &e.TaskID, &tagsJSON, &e.OutputMode, &e.OutputDest, &e.OutputAccount, &remindedAt, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
@@ -438,7 +522,17 @@ func nullTime(t time.Time) interface{} {
 }
 
 func genID() string {
-	return fmt.Sprintf("evt_%d", time.Now().UnixNano())
+	// Random suffix, not a nanosecond timestamp: under WAL the three sequential
+	// Creates in a tight loop (and scheduler-driven bursts in production) can
+	// land in the same clock tick, and a colliding evt_<ns> PRIMARY KEY makes
+	// the INSERT fail with a UNIQUE error that callers routinely ignore.
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand failing is effectively "no entropy source" — fall back
+		// to the timestamp rather than not creating the event at all.
+		return fmt.Sprintf("evt_%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("evt_%x", b)
 }
 
 // mkdirAll creates a directory and all parents.

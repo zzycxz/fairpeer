@@ -54,23 +54,37 @@ func ExportICS(path string, events []Event) error {
 	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
+// ParseResult is the outcome of parsing one .ics stream: the events that
+// survived parsing plus diagnostic counts the import surface can warn about.
+type ParseResult struct {
+	// Events are the parsed events that have a usable start time.
+	Events []Event
+	// SkippedNoStart counts VEVENTs dropped because their start time failed to
+	// parse or resolve — most commonly an unresolvable TZID (missing tzdata
+	// zone), which makes GetStartAt fail and leaves StartTime zero. Importers
+	// surface this so the UI can warn that the import was lossy instead of
+	// silently dropping events.
+	SkippedNoStart int
+}
+
 // ImportICS reads an .ics file and returns parsed events.
-func ImportICS(path string) ([]Event, error) {
+func ImportICS(path string) (ParseResult, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("ics read: %w", err)
+		return ParseResult{}, fmt.Errorf("ics read: %w", err)
 	}
 	return ParseICS(string(data))
 }
 
 // ParseICS parses .ics content and returns events.
-func ParseICS(content string) ([]Event, error) {
+func ParseICS(content string) (ParseResult, error) {
 	cal, err := ics.ParseCalendar(strings.NewReader(content))
 	if err != nil {
-		return nil, fmt.Errorf("ics parse: %w", err)
+		return ParseResult{}, fmt.Errorf("ics parse: %w", err)
 	}
 
 	var events []Event
+	skippedNoStart := 0
 	for _, component := range cal.Events() {
 		e := Event{
 			ID:     component.Id(),
@@ -128,7 +142,11 @@ func ParseICS(content string) ([]Event, error) {
 			e.Title = "(无标题)"
 		}
 		if e.StartTime.IsZero() {
-			continue // skip events without start time
+			// Dropped (not parsed as an event): start missing or unresolvable —
+			// usually a TZID our tzdata can't resolve. Counted so callers can
+			// warn instead of silently losing events.
+			skippedNoStart++
+			continue
 		}
 		if e.EndTime.IsZero() {
 			e.EndTime = e.StartTime.Add(time.Hour)
@@ -142,7 +160,7 @@ func ParseICS(content string) ([]Event, error) {
 
 		events = append(events, e)
 	}
-	return events, nil
+	return ParseResult{Events: events, SkippedNoStart: skippedNoStart}, nil
 }
 
 // parseTriggerMinutes parses an iCal trigger value like "-PT15M" into minutes.

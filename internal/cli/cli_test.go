@@ -878,12 +878,21 @@ func TestWithBuiltinFamiliesAddsMissingTestProvider(t *testing.T) {
 		{Name: "test-provider", Kind: "openai", BaseURL: "https://api.example.com"},
 	}
 	got := withBuiltinFamilies(cfg)
-	if len(got) != len(cfg) {
-		t.Fatalf("withBuiltinFamilies changed provider count: got %d, want %d (no built-in injection)", len(got), len(cfg))
+	// P1-F10①: the wizard now always offers the cloud vendor presets as
+	// selectable FAMILIES (menu candidates — nothing is saved unless picked).
+	// The user's own provider must survive unduplicated, and a preset whose
+	// family the user already configured must not be injected twice.
+	if len(got) != len(cfg)+len(cloudVendorPresets()) {
+		t.Fatalf("withBuiltinFamilies count = %d, want %d+%d (user + cloud presets)", len(got), len(cfg), len(cloudVendorPresets()))
 	}
 	order, _, info := groupByFamily(got)
-	if len(order) != 1 || info["test-provider"].name != "test-provider" {
-		t.Fatalf("wizard families = %v, want only the user's test-provider", order)
+	if info["test-provider"].name != "test-provider" {
+		t.Fatalf("wizard families = %v, user's test-provider missing", order)
+	}
+	for _, vp := range cloudVendorPresets() {
+		if n := len(groupByFamilyKeys(got, vp.Name)); n != 1 {
+			t.Fatalf("preset %s members = %d, want exactly 1", vp.Name, n)
+		}
 	}
 	// A user's customized provider must not be duplicated.
 	if n := len(groupByFamilyKeys(got, "test-provider")); n != 1 {

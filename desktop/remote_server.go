@@ -141,8 +141,18 @@ func (t *serverTransport) Dial(ctx context.Context, ref RemoteRef) (io.Reader, i
 			return nil, nil, nil, fmt.Errorf("server: certificate fingerprint changed (pinned %s, got %s) — server identity changed; run ServerForget and re-confirm", shortFP(pinned), shortFP(presented))
 		}
 		if pinned == "" && presented != "" {
-			if store := desktopSecretStore(); store != nil {
-				_ = store.Set(serverPinKey(addr), presented)
+			// First connect: pin the presented cert. The pin IS the identity
+			// check (InsecureSkipVerify delegates entirely to it) — if the
+			// secret store cannot persist it, fail closed instead of silently
+			// TOFU-ing every future connect to whatever cert is presented.
+			store := desktopSecretStore()
+			if store == nil {
+				tlsConn.Close()
+				return nil, nil, nil, fmt.Errorf("server: tls: cannot pin the server certificate — secret store unavailable; unlock or configure the secret store and retry")
+			}
+			if err := store.Set(serverPinKey(addr), presented); err != nil {
+				tlsConn.Close()
+				return nil, nil, nil, fmt.Errorf("server: tls: cannot persist the server certificate pin: %w", err)
 			}
 		}
 		conn = tlsConn
@@ -180,7 +190,6 @@ func (t *serverTransport) Dial(ctx context.Context, ref RemoteRef) (io.Reader, i
 	_ = conn.SetReadDeadline(time.Time{})
 	return br, conn, &serverProc{conn: conn}, nil
 }
-
 
 // shortFP renders a fingerprint prefix for error messages.
 func shortFP(fp string) string {

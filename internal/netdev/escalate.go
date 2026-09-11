@@ -85,4 +85,3 @@ func ResetEscalationStateForTest() {
 	defer escalateMu.Unlock()
 	escalatedIDs = map[string]bool{}
 }
-

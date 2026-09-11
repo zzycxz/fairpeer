@@ -122,6 +122,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		} else {
 			b.WriteString("# no_proxy   = \"localhost,127.0.0.1,.local\"   # honored for proxy_mode = \"custom\"\n")
 		}
+		if c.NetworkUpdateBaseURL() != "" {
+			fmt.Fprintf(&b, "update_base_url = %q   # self-update mirror; replaces the GitHub endpoints entirely\n", c.NetworkUpdateBaseURL())
+		} else {
+			b.WriteString("# update_base_url = \"https://updates.internal.example.com/fairpeer/releases\"   # intranet self-update mirror (replaces GitHub endpoints)\n")
+		}
 		b.WriteString("\n[network.proxy]\n")
 		proxyType := c.Network.Proxy.Type
 		if proxyType == "" {
@@ -184,7 +189,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	fmt.Fprintf(&b, "compact_ratio       = %s   # try compacting when prompt reaches this fraction\n", formatFloat(c.Agent.CompactRatio))
 	fmt.Fprintf(&b, "compact_force_ratio = %s   # force compacting at this high-water mark\n", formatFloat(c.Agent.CompactForceRatio))
 	if c.Agent.FastTaskModel != "" {
-		fmt.Fprintf(&b, "fast_task_model = %q   # lightweight model for background tasks (dream/distill/rag-extract)\n", c.Agent.FastTaskModel)
+		fmt.Fprintf(&b, "fast_task_model = %q   # lightweight model for background tasks (dream/rag-extract)\n", c.Agent.FastTaskModel)
 	} else {
 		b.WriteString("# fast_task_model = \"<provider>/<model>\"   # lightweight model for background tasks\n")
 	}
@@ -217,6 +222,20 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "output_style = %q   # persona/tone folded into the prompt\n", c.Agent.OutputStyle)
 	} else {
 		b.WriteString("# output_style = \"explanatory\"   # explanatory | learning | concise | custom; empty = default\n")
+	}
+	// NEW-12: without these lines any SaveTo rewrite silently dropped the
+	// user's values (the decoder accepts the keys; the renderer must too).
+	if c.Agent.StreamRecoveries != 0 {
+		fmt.Fprintf(&b, "stream_recoveries = %d   # mid-stream recovery retries per turn (0 = default 3)\n", c.Agent.StreamRecoveries)
+	}
+	if c.Agent.RetryMaxAttempts != 0 {
+		fmt.Fprintf(&b, "retry_max_attempts = %d   # provider HTTP send retries (0 = default 10)\n", c.Agent.RetryMaxAttempts)
+	}
+	if c.Agent.RetryBackoffMaxSec != 0 {
+		fmt.Fprintf(&b, "retry_backoff_max_sec = %d   # backoff ceiling in seconds (0 = default 15)\n", c.Agent.RetryBackoffMaxSec)
+	}
+	if c.Agent.RetryMode != "" {
+		fmt.Fprintf(&b, "retry_mode = %q   # normal | always (always = no attempt cap, for unattended runs)\n", c.Agent.RetryMode)
 	}
 	b.WriteString("\n")
 
@@ -307,15 +326,14 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	b.WriteString("\n")
 
-	// [dream] toggles the background self-evolution agents. Without this section
-	// in the rendered file, SetDreamEnabled/Intervals writes were silently dropped
-	// (LoadForRoot fell back to defaults), so the master switch never persisted.
+	// [dream] toggles the background self-evolution agent. Without this section
+	// in the rendered file, SetDreamEnabled/SetDreamInterval writes were silently
+	// dropped (LoadForRoot fell back to defaults), so the master switch never persisted.
 	b.WriteString("[dream]\n")
-	fmt.Fprintf(&b, "enabled          = %v   # 后台自进化：Dream 记忆整合 + Distill 工作流提炼\n", c.Dream.Enabled)
+	fmt.Fprintf(&b, "enabled          = %v   # 后台自进化：Dream 记忆整合\n", c.Dream.Enabled)
 	fmt.Fprintf(&b, "dream_interval   = %d   # Dream 运行周期（天）；0 = 默认 %d\n", c.Dream.DreamIntervalDays(), DefaultDreamInterval)
-	fmt.Fprintf(&b, "distill_interval = %d   # Distill 运行周期（天）；0 = 默认 %d\n", c.Dream.DistillIntervalDays(), DefaultDistillInterval)
 	if c.Dream.SkillColdDays != 0 {
-		fmt.Fprintf(&b, "skill_cold_days = %d   # 技能多少天未用进入冷退役；0 = 默认 %d\n", c.Dream.SkillColdDays, DefaultSkillColdDays)
+		fmt.Fprintf(&b, "skill_cold_days = %d   # 技能多少天未用标记为 [休眠]；0 = 默认 %d\n", c.Dream.SkillColdDays, DefaultSkillColdDays)
 	}
 	if c.Dream.IdleMinutes != 0 {
 		fmt.Fprintf(&b, "idle_minutes   = %d   # 用户空闲多少分钟后才允许 Dream 运行；0 = 默认 %d\n", c.Dream.IdleMinutes, DefaultIdleMinutes)
@@ -387,6 +405,12 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	if c.Cowork.ExtractConcurrency != 0 {
 		fmt.Fprintf(&b, "extract_concurrency = %d\n", c.Cowork.ExtractConcurrency)
+	}
+	if c.Cowork.ExtractAutoRetry {
+		fmt.Fprintf(&b, "extract_auto_retry = true   # idle-time auto-retry of failed chunks (opt-in; visible + pausable)\n")
+	}
+	if c.Cowork.ExtractAutoRetryMaxRounds > 0 && c.Cowork.ExtractAutoRetryMaxRounds != 2 {
+		fmt.Fprintf(&b, "extract_auto_retry_max_rounds = %d\n", c.Cowork.ExtractAutoRetryMaxRounds)
 	}
 	if c.Cowork.HEPort != 0 {
 		fmt.Fprintf(&b, "he_port = %d   # Hyper-Extract sidecar port; 0 = auto\n", c.Cowork.HEPort)

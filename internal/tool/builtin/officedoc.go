@@ -37,15 +37,39 @@ import (
 // trailing .0 for readability.
 
 func readXLSX(path string) ([][]string, error) {
+	return readXLSXSheetFilter(path, "")
+}
+
+// readXLSXSheetFilter reads one workbook; a non-empty onlySheet restricts the
+// result to that single sheet (B-2: xlsx_read's full mode silently ignored the
+// sheet parameter and returned EVERY sheet — token bloat plus the requested
+// sheet could fall past the 200k truncation). An unknown sheet name errors
+// with the list of available names so the model can self-correct.
+func readXLSXSheetFilter(path, onlySheet string) ([][]string, error) {
 	f, err := excelize.OpenFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("open xlsx (is it a valid .xlsx?): %w", err)
 	}
 	defer f.Close()
 
-	sheets := f.GetSheetList()
-	if len(sheets) == 0 {
+	all := f.GetSheetList()
+	if len(all) == 0 {
 		return nil, nil
+	}
+	sheets := all
+	if onlySheet != "" {
+		found := false
+		for _, n := range all {
+			if strings.EqualFold(n, onlySheet) {
+				onlySheet = n // canonical casing
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("sheet %q not found (available: %s)", onlySheet, strings.Join(all, ", "))
+		}
+		sheets = []string{onlySheet}
 	}
 	var allRows [][]string
 	for si, sheet := range sheets {
@@ -105,6 +129,11 @@ func XLSXWriteRows(path string, rows [][]string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
+	// Probe before generation: an Excel/WPS-held target would only fail at the
+	// final rename, with a raw "Access is denied" after all the work.
+	if err := rejectLockedTarget(path); err != nil {
+		return err
+	}
 	f := excelize.NewFile()
 	defer f.Close()
 	sheet := "Sheet1"
@@ -112,6 +141,11 @@ func XLSXWriteRows(path string, rows [][]string) error {
 		for ci, val := range row {
 			cell, err := excelize.CoordinatesToCellName(ci+1, ri+1)
 			if err != nil {
+				return err
+			}
+			// Excel's hard per-cell limit: overflow yields a file Excel refuses
+			// to open. checkCellValue existed for this but was never wired in.
+			if err := checkCellValue(val, cell); err != nil {
 				return err
 			}
 			// Auto-type numeric-looking values so SUM/AVERAGE treat them as
@@ -183,20 +217,20 @@ func readXLSXOverview(path, sheet string) (string, error) {
 		Sample []string `json:"sample,omitempty"`
 	}
 	type sheetInfo struct {
-		Name      string    `json:"name"`
-		Rows      int       `json:"rows"`
-		Cols      int       `json:"cols"`
-		RowsExact bool      `json:"rows_exact"`
-		Columns   []colInfo `json:"columns,omitempty"`
+		Name      string     `json:"name"`
+		Rows      int        `json:"rows"`
+		Cols      int        `json:"cols"`
+		RowsExact bool       `json:"rows_exact"`
+		Columns   []colInfo  `json:"columns,omitempty"`
 		FirstRows [][]string `json:"first_rows,omitempty"`
 	}
 	// Just report the requested sheet in detail; list the others by name only.
 	type overviewOut struct {
-		File   string      `json:"file"`
-		Sheet  string      `json:"sheet"`
-		Sheets []string    `json:"sheets"`
-		Detail sheetInfo   `json:"detail"`
-		Note   string      `json:"note"`
+		File   string    `json:"file"`
+		Sheet  string    `json:"sheet"`
+		Sheets []string  `json:"sheets"`
+		Detail sheetInfo `json:"detail"`
+		Note   string    `json:"note"`
 	}
 
 	rows, cols, exact := xlsxDimensions(f, sheet)

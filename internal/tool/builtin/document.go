@@ -21,6 +21,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/tool"
 	"github.com/zzycxz/fairpeer/internal/validation"
 	"golang.org/x/text/transform"
+	"unicode/utf8"
 )
 
 // Document tools for the office/cowork agent. doc_read/doc_write cover the
@@ -42,8 +43,26 @@ import (
 // optimizer can parallelize reads.
 
 // DocumentTools returns the document tools for cowork registration.
-func DocumentTools() []tool.Tool {
-	return []tool.Tool{docRead{}, docWrite{}, csvRead{}, csvWrite{}, xlsxRead{}, xlsxWrite{}, xlsxQuery{}, docConvert{}, mindmapCreate{}}
+// DocumentTools returns the cowork document toolset. roots confines the four
+// writers (doc_write/csv_write/xlsx_write/doc_convert) and mindmap_create to
+// the workspace — these instances are the FIRST AND ONLY registration of these
+// tools in the cowork profile (they are not init-builtins), so a zero-value
+// registration here means the writers run unconfined (NEW-05: that was exactly
+// the shipped behavior). doc readers are unaffected (read isolation is opt-in
+// via ConfineReaders).
+func DocumentTools(roots []string) []tool.Tool {
+	rs := realRoots(roots)
+	return []tool.Tool{
+		docRead{},
+		docWrite{roots: rs},
+		csvRead{},
+		csvWrite{roots: rs},
+		xlsxRead{},
+		xlsxWrite{roots: rs},
+		xlsxQuery{},
+		docConvert{roots: rs},
+		mindmapCreate{roots: rs},
+	}
 }
 
 // maxDocReadBytes caps the stat-size of a text file that doc_read will load
@@ -76,6 +95,22 @@ func (docRead) Schema() json.RawMessage {
 }
 
 func (docRead) ReadOnly() bool { return true }
+
+// truncateAtMax cuts s at ~max BYTES without splitting a UTF-8 rune (a raw
+// byte slice can cut a 3-byte CJK character in half and hand the model
+// mojibake — P1-B5). The marker reports how many characters were dropped,
+// rune-counted.
+func truncateAtMax(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	dropped := utf8.RuneCountInString(s[cut:])
+	return s[:cut] + fmt.Sprintf("\n\n[...已截断，还有 %d 字符 — 二进制格式请用 xlsx_read/doc_read 分页读取剩余部分]", dropped)
+}
 
 func (r docRead) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
@@ -122,7 +157,7 @@ func (r docRead) Execute(ctx context.Context, args json.RawMessage) (string, err
 		}
 		content := formatRows(rows)
 		if len(content) > max {
-			content = content[:max] + fmt.Sprintf("\n\n[...truncated, %d more chars]", len(content)-max)
+			content = truncateAtMax(content, max)
 		}
 		return content, nil
 	case "docx":
@@ -131,7 +166,7 @@ func (r docRead) Execute(ctx context.Context, args json.RawMessage) (string, err
 			return "", err
 		}
 		if len(content) > max {
-			content = content[:max] + fmt.Sprintf("\n\n[...truncated, %d more chars]", len(content)-max)
+			content = truncateAtMax(content, max)
 		}
 		return content, nil
 	case "pptx":
@@ -140,7 +175,7 @@ func (r docRead) Execute(ctx context.Context, args json.RawMessage) (string, err
 			return "", err
 		}
 		if len(content) > max {
-			content = content[:max] + fmt.Sprintf("\n\n[...truncated, %d more chars]", len(content)-max)
+			content = truncateAtMax(content, max)
 		}
 		return content, nil
 	case "pdf":
@@ -153,7 +188,7 @@ func (r docRead) Execute(ctx context.Context, args json.RawMessage) (string, err
 			return "", err
 		}
 		if len(content) > max {
-			content = content[:max] + fmt.Sprintf("\n\n[...truncated, %d more chars]", len(content)-max)
+			content = truncateAtMax(content, max)
 		}
 		return content, nil
 	case "html", "htm":
@@ -172,7 +207,7 @@ func (r docRead) Execute(ctx context.Context, args json.RawMessage) (string, err
 		if md, ok := extractMindMapMarkdown(htmlContent); ok {
 			out := "[extracted from mindmap HTML]\n" + md
 			if len(out) > max {
-				out = out[:max] + fmt.Sprintf("\n\n[...truncated, %d more chars]", len(out)-max)
+				out = truncateAtMax(out, max)
 			}
 			return out, nil
 		}
@@ -226,7 +261,7 @@ func (r docRead) Execute(ctx context.Context, args json.RawMessage) (string, err
 			}
 		}
 		if len(content) > max {
-			content = content[:max] + fmt.Sprintf("\n\n[...truncated, %d more chars]", len(content)-max)
+			content = truncateAtMax(content, max)
 		}
 		return content, nil
 	}
@@ -386,6 +421,9 @@ func paginateText(content string, offset, limit int) string {
 }
 
 func formatCSV(data []byte) (string, error) {
+	// csv_write emits a UTF-8 BOM (Excel/WPS CJK interop); strip it so the BOM
+	// doesn't leak into the first cell of the first row.
+	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
 	r := csv.NewReader(strings.NewReader(string(data)))
 	// Read all rows without limit.
 	var rows [][]string
@@ -449,7 +487,7 @@ type docWrite struct{ roots []string }
 func (docWrite) Name() string { return "doc_write" }
 
 func (docWrite) Description() string {
-	return "Write a document to a path, creating parent dirs. Format by extension: .md/.txt/.html/code, .json, .csv, .xlsx, .docx (structured sections). Overwrites by default; set append=true to extend (.docx: insert sections; .md/.txt/.html: text append; .csv/.json: append is ignored — overwrite). If 'source' is provided for a .docx file, doc_write acts as a template filler: it reads the source template, applies find_replace, paragraph_replace, table_fill, header/footer modifications, and writes the NEW filled document to 'path' (the template is never modified). Content is capped at 5 MiB; an overwrite identical to the existing content is a no-op. Writes are crash-atomic and preserve the existing file's encoding (GBK/UTF-16/BOM) on .md/.txt/.html."
+	return "Write a document to a path, creating parent dirs. Format by extension: .md/.txt/.html/code, .json, .csv, .xlsx, .docx (structured sections). Overwrites by default; set append=true to extend (.docx: insert sections; .md/.txt/.html: text append; .csv/.json: append is ignored — overwrite; .xlsx: append is rejected while the file exists — read then write the full workbook). If 'source' is provided for a .docx file, doc_write acts as a template filler: it reads the source template, applies find_replace, paragraph_replace, table_fill, header/footer modifications, and writes the NEW filled document to 'path' (the template is never modified). Content is capped at 5 MiB; an overwrite identical to the existing content is a no-op. Writes are crash-atomic and preserve the existing file's encoding (GBK/UTF-16/BOM) on .md/.txt/.html."
 }
 
 func (docWrite) Schema() json.RawMessage {
@@ -476,22 +514,22 @@ func (docWrite) ReadOnly() bool { return false }
 
 func (w docWrite) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
-		Source           string               `json:"source"`
-		Path             string               `json:"path"`
-		Content          json.RawMessage      `json:"content"`
-		Sections         json.RawMessage      `json:"sections"`
-		Title            string               `json:"title"`
-		Append           bool                 `json:"append"`
-		FindReplace      []findReplacePair    `json:"find_replace"`
-		TableFill        []tableFillOp        `json:"table_fill"`
-		ParagraphReplaceRaw json.RawMessage      `json:"paragraph_replace"`
-		Header           *headerFooterSpec    `json:"header"`
-		Footer           *headerFooterSpec    `json:"footer"`
+		Source              string            `json:"source"`
+		Path                string            `json:"path"`
+		Content             json.RawMessage   `json:"content"`
+		Sections            json.RawMessage   `json:"sections"`
+		Title               string            `json:"title"`
+		Append              bool              `json:"append"`
+		FindReplace         []findReplacePair `json:"find_replace"`
+		TableFill           []tableFillOp     `json:"table_fill"`
+		ParagraphReplaceRaw json.RawMessage   `json:"paragraph_replace"`
+		Header              *headerFooterSpec `json:"header"`
+		Footer              *headerFooterSpec `json:"footer"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
-	
+
 	var paragraphReplace []paragraphReplaceOp
 	var paragraphReplaceWarn string
 	if len(p.ParagraphReplaceRaw) > 0 && string(p.ParagraphReplaceRaw) != "null" {
@@ -543,7 +581,7 @@ func (w docWrite) Execute(ctx context.Context, args json.RawMessage) (string, er
 			}
 		}
 	}
-	
+
 	if ext == "docx" && strings.TrimSpace(p.Source) != "" {
 		src := strings.TrimSpace(p.Source)
 		srcAbs, err := filepath.Abs(src)
@@ -601,6 +639,18 @@ func (w docWrite) Execute(ctx context.Context, args json.RawMessage) (string, er
 				return "", fmt.Errorf("docx sections must be an array: %w", err)
 			}
 		}
+		// Zero sections writes a structurally-valid but EMPTY document and used
+		// to report success ("wrote X (0 sections)") — typically the model put
+		// body text into `content`, which docx ignores. Refuse instead: the
+		// user must never open a blank file the assistant called done.
+		if len(sections) == 0 {
+			msg := "docx requires a non-empty sections array"
+			if len(strings.TrimSpace(string(p.Content))) > 0 {
+				msg += "; body text in `content` is ignored for docx — put it in `sections` as paragraph/heading items"
+			}
+			return "", DocError{Code: ErrInvalidArg, Message: msg,
+				Suggestion: `sections: [{"type":"heading1","text":"Title"},{"type":"paragraph","text":"..."}]`}
+		}
 		if err := writeDOCX(DocInput{Path: abs, Title: p.Title, Sections: sections, Append: p.Append}); err != nil {
 			return "", err
 		}
@@ -608,6 +658,17 @@ func (w docWrite) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 	// Binary xlsx: structured {sheets:[...]} object OR a simple rows array.
 	if ext == "xlsx" {
+		// append=true used to silently overwrite the workbook (this branch
+		// returns before the csv-style "(append not supported…; overwrote)"
+		// notice) — a data-loss path for "add March's data to the sheet".
+		// Refuse while the previous file exists; a fresh create is fine.
+		if p.Append {
+			if _, statErr := os.Stat(abs); statErr == nil {
+				return "", DocError{Code: ErrInvalidArg,
+					Message:    fmt.Sprintf("append is not supported for .xlsx and would overwrite the existing %s", abs),
+					Suggestion: "read the current sheet with xlsx_read, then write the full workbook (old rows + new rows) in one xlsx_write"}
+			}
+		}
 		trimmed := strings.TrimSpace(string(p.Content))
 		// Structured form: content is an object with "sheets" (and a "path"
 		// that may be omitted since the tool's path wins).
@@ -666,7 +727,10 @@ func (w docWrite) Execute(ctx context.Context, args json.RawMessage) (string, er
 		if err := w.Error(); err != nil {
 			return "", err
 		}
-		data = []byte(b.String())
+		// UTF-8 BOM: without it Excel/WPS assume ANSI (e.g. CP936 on a Chinese
+		// Windows) and render CJK as mojibake. csv never takes the append path
+		// below (that's text-formats-only), so the BOM always leads the file.
+		data = append([]byte{0xEF, 0xBB, 0xBF}, b.String()...)
 	default:
 		// Text: content is a string.
 		var s string
@@ -843,6 +907,20 @@ func (r xlsxRead) Execute(ctx context.Context, args json.RawMessage) (string, er
 	case "page":
 		return readXLSXPage(abs, p.Sheet, p.Offset, p.Limit)
 	case "", "full":
+		// B-2: doc_read has no sheet parameter, so a full-mode read with sheet
+		// set used to silently return EVERY sheet. Honor it here; sheet
+		// omitted keeps the every-sheet behavior (doc_read parity).
+		if strings.TrimSpace(p.Sheet) != "" {
+			rows, err := readXLSXSheetFilter(abs, p.Sheet)
+			if err != nil {
+				return "", err
+			}
+			content := formatRows(rows)
+			if len(content) > 200_000 {
+				content = truncateAtMax(content, 200_000)
+			}
+			return content, nil
+		}
 		// Backward-compatible: fall through to doc_read's xlsx behavior.
 		return docRead{roots: r.roots}.Execute(ctx, args)
 	default:
@@ -888,11 +966,11 @@ func (xlsxQuery) Schema() json.RawMessage {
 func (xlsxQuery) ReadOnly() bool { return true }
 func (q xlsxQuery) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
-		Path   string         `json:"path"`
-		Op     string         `json:"op"`
-		Column string         `json:"column"`
+		Path   string          `json:"path"`
+		Op     string          `json:"op"`
+		Column string          `json:"column"`
 		Where  []xlsxWhereCond `json:"where"`
-		Sheet  string         `json:"sheet"`
+		Sheet  string          `json:"sheet"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)

@@ -197,7 +197,7 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
             tab.running ? "Running" : "",
             planMode ? "Plan" : "",
             goalMode ? "Goal" : "",
-            (tab.profile ?? "").toLowerCase() === "cowork" ? t("cowork.badgeCoWork") : (((tab.profile ?? "").toLowerCase() === "dev" || !(tab.profile ?? "")) ? (t("cowork.badgeDev") || "编码") : ""),
+            (tab.profile ?? "").toLowerCase() === "cowork" ? t("cowork.badgeCoWork") : (((tab.profile ?? "").toLowerCase() === "dev" || !(tab.profile ?? "")) ? t("cowork.badgeDev") : ""),
           ].filter(Boolean).join(" · ");
           const annotatedTitle = stateTitle ? `${stateTitle} · ${fullTitle}` : fullTitle;
           return (
@@ -264,7 +264,7 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
                 <span className="tabbar__mode-badge tabbar__mode-badge--netdev">{t("cowork.badgeNetDev")}</span>
               )}
               {((tab.profile ?? "").toLowerCase() === "dev" || !(tab.profile ?? "")) && (
-                <span className="tabbar__mode-badge tabbar__mode-badge--dev">{t("cowork.badgeDev") || "编码"}</span>
+                <span className="tabbar__mode-badge tabbar__mode-badge--dev">{t("cowork.badgeDev")}</span>
               )}
               <span
                 className="tabbar__tab-close"

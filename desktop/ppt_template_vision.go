@@ -27,6 +27,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -72,46 +73,102 @@ type templateStyleResult struct {
 }
 
 // analyzeTemplateStyleAsync is the goroutine entry point. It runs the full
-// pipeline (zip read → image find → encode → VLM → write JSON) and swallows
-// all errors — this is a best-effort enhancement, never a blocking failure.
+// pipeline (zip read → image find → encode → VLM → write JSON). Failures are
+// still non-blocking, but every degradation is logged to the ppt vision debug
+// log — a silent failure here meant colors silently fell back to the Python
+// extraction path, which users could only discover from wrong output colors.
 func (a *App) analyzeTemplateStyleAsync(templatePath string) {
 	ctx := context.Background()
 	if a.ctx != nil {
 		ctx = a.ctx
 	}
 
+	pptVisionDebugLog("analyzeTemplateStyle: start template=%s", templatePath)
 	result, err := extractTemplateStyle(ctx, templatePath)
 	if err != nil || result == nil {
-		// Silent degradation — extract_template_colors.py is the fallback.
+		// Degradation (logged, not silent): extract_template_colors.py is the fallback.
+		pptVisionDebugLog("analyzeTemplateStyle: FAILED err=%v — colors fall back to Python extraction", err)
 		return
 	}
 
 	// Write to ~/.fairpeer/ppt-template-style.json
 	home, _ := os.UserHomeDir()
 	outPath := filepath.Join(home, ".fairpeer", "ppt-template-style.json")
-	data, _ := jsonMarshal(result)
-	_ = os.WriteFile(outPath, data, 0o644)
+	data, err := jsonMarshal(result)
+	if err != nil {
+		pptVisionDebugLog("analyzeTemplateStyle: marshal failed: %v", err)
+		return
+	}
+	if err := os.WriteFile(outPath, data, 0o644); err != nil {
+		pptVisionDebugLog("analyzeTemplateStyle: write %s failed: %v", outPath, err)
+		return
+	}
+	pptVisionDebugLog("analyzeTemplateStyle: wrote %s source=%s background=%s accents=%v",
+		outPath, result.Source, result.Background, result.AccentColors)
 }
 
 // extractTemplateStyle finds the full-screen background image in the pptx,
 // sends it to the VLM, and parses the JSON response.
 func extractTemplateStyle(ctx context.Context, pptxPath string) (*templateStyleResult, error) {
-	imgBytes, imgFmt, err := findFullScreenBackgroundImage(pptxPath)
-	if err != nil {
-		return nil, err
+	var imgBytes []byte
+	var imgFmt string
+	var err error
+
+	// 1. Prioritize docProps/thumbnail.jpeg because it contains the fully rendered
+	// first slide (background + logos + text styles), which is perfect for the VLM.
+	imgBytes, imgFmt, err = extractThumbnail(pptxPath)
+	if err != nil || len(imgBytes) == 0 {
+		// 2. Fallback to extracting the background image if no thumbnail exists.
+		imgBytes, imgFmt, err = findFullScreenBackgroundImage(pptxPath)
+		if err != nil {
+			pptVisionDebugLog("extractTemplateStyle: no image for VLM (thumbnail and full-screen bg both missing): %v", err)
+			return nil, err
+		}
+		pptVisionDebugLog("extractTemplateStyle: image source=full-screen-bg fmt=%s bytes=%d", imgFmt, len(imgBytes))
+	} else {
+		pptVisionDebugLog("extractTemplateStyle: image source=thumbnail fmt=%s bytes=%d", imgFmt, len(imgBytes))
 	}
 
 	dataURL, err := encodeImageForVLM(imgBytes, imgFmt)
 	if err != nil {
+		pptVisionDebugLog("extractTemplateStyle: encode failed: %v", err)
 		return nil, err
 	}
 
 	resp, err := builtin.CallVLM(ctx, dataURL, vlmColorPrompt)
 	if err != nil {
+		pptVisionDebugLog("extractTemplateStyle: CallVLM failed (VLM unconfigured/unreachable — Python extraction takes over): %v", err)
 		return nil, err
 	}
+	pptVisionDebugLog("extractTemplateStyle: VLM responded len=%d", len(resp))
 
 	return parseVLMStyleResponse(resp), nil
+}
+
+// extractThumbnail reads the docProps/thumbnail.* from the PPTX zip.
+func extractThumbnail(pptxPath string) ([]byte, string, error) {
+	zr, err := zip.OpenReader(pptxPath)
+	if err != nil {
+		return nil, "", err
+	}
+	defer zr.Close()
+	for _, f := range zr.File {
+		name := strings.ToLower(f.Name)
+		if strings.HasPrefix(name, "docprops/thumbnail.") {
+			ext := "jpeg"
+			if strings.HasSuffix(name, ".png") {
+				ext = "png"
+			} else if strings.HasSuffix(name, ".jpg") || strings.HasSuffix(name, ".jpeg") {
+				ext = "jpeg"
+			} else {
+				continue // Unsupported thumbnail format (e.g., .emf, .wmf)
+			}
+
+			data, err := readZipFile(f)
+			return data, ext, err
+		}
+	}
+	return nil, "", fmt.Errorf("no thumbnail found")
 }
 
 // vlmColorPrompt asks the vision model for structured color/style info.
@@ -199,7 +256,24 @@ func findFullScreenBlipRID(xmlData []byte) string {
 
 // scanForFullScreenBlip does a targeted text scan for full-screen pics.
 func scanForFullScreenBlip(text string) string {
-	// Split on <p:pic to get individual pic blocks. (Also handles <p:pic/>.)
+	// 1. Check for standard slide backgrounds: <p:bg> ... <a:blipFill> ...
+	// These are guaranteed to be full-screen backgrounds.
+	for _, rest := range splitXMLBlock(text, "<p:bg") {
+		if rest == "" {
+			continue
+		}
+		bgBlock := truncateToClosing(rest, "p:bg")
+		if bgBlock == "" {
+			bgBlock = rest
+		}
+		rid := extractBlipRID(bgBlock)
+		if rid != "" {
+			return rid
+		}
+	}
+
+	// 2. Check for manual picture shapes <p:pic> that happen to be full-screen
+	// (common when users paste a background image).
 	for _, rest := range splitXMLBlock(text, "<p:pic") {
 		if rest == "" {
 			continue
@@ -222,6 +296,14 @@ func scanForFullScreenBlip(text string) string {
 		offY := extractAttrInt(xfrmBlock, "<a:off", "y")
 		cx := extractAttrInt(xfrmBlock, "<a:ext", "cx")
 		cy := extractAttrInt(xfrmBlock, "<a:ext", "cy")
+
+		// If x or y are missing (extractAttrInt returns -1), OOXML defaults them to 0.
+		if off < 0 {
+			off = 0
+		}
+		if offY < 0 {
+			offY = 0
+		}
 
 		if !isFullScreenEMU(off, offY, cx, cy) {
 			continue
@@ -440,14 +522,15 @@ func encodeImageForVLM(imgBytes []byte, fmtStr string) (string, error) {
 	return downscaleAndEncodeJPEG(img), nil
 }
 
-// downscaleAndEncodeJPEG downscales to at most pptVlmMaxDim on the long edge
-// and returns a base64 JPEG data URL.
+// downscaleAndEncodeJPEG downscales to at most pptVlmMaxDim on the long edge,
+// composites over a white background (to prevent transparent areas from turning
+// black), and returns a base64 JPEG data URL.
 func downscaleAndEncodeJPEG(img image.Image) string {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
-	scaled := img
+
+	nw, nh := w, h
 	if w > pptVlmMaxDim || h > pptVlmMaxDim {
-		nw, nh := w, h
 		if w >= h {
 			nw = pptVlmMaxDim
 			nh = h * pptVlmMaxDim / w
@@ -455,15 +538,65 @@ func downscaleAndEncodeJPEG(img image.Image) string {
 			nh = pptVlmMaxDim
 			nw = w * pptVlmMaxDim / h
 		}
-		dst := image.NewRGBA(image.Rect(0, 0, nw, nh))
-		draw.CatmullRom.Scale(dst, dst.Bounds(), img, b, draw.Over, nil)
-		scaled = dst
 	}
+
+	// Determine the padding color based on the original image's opaque pixels.
+	var totalY, count, totalPixels int64
+	stepX := b.Dx() / 50
+	if stepX < 1 {
+		stepX = 1
+	}
+	stepY := b.Dy() / 50
+	if stepY < 1 {
+		stepY = 1
+	}
+	for y := b.Min.Y; y < b.Max.Y; y += stepY {
+		for x := b.Min.X; x < b.Max.X; x += stepX {
+			totalPixels++
+			r, g, b_col, a := img.At(x, y).RGBA()
+			if a > 32768 {
+				// Go's Color.RGBA() returns alpha-premultiplied values!
+				// We must un-premultiply to get the true color luminance.
+				if a < 65535 {
+					r = (r * 65535) / a
+					g = (g * 65535) / a
+					b_col = (b_col * 65535) / a
+				}
+				yVal := (299*r + 587*g + 114*b_col) / 1000
+				totalY += int64(yVal)
+				count++
+			}
+		}
+	}
+	padColor := color.Color(color.White)
+	if count > 0 && totalPixels > 0 {
+		avgY := totalY / count
+		opacityRatio := float64(count) / float64(totalPixels)
+		if avgY > 55000 && opacityRatio < 0.25 {
+			padColor = color.Black
+		}
+	}
+
+	// Create a new RGBA image with the adaptive background. This is critical because
+	// JPEG does not support transparency. If we just encode a transparent PNG,
+	// the transparent pixels (RGBA 0,0,0,0) will become solid black, fooling the
+	// VLM into thinking the template is dark. If the graphic itself is white,
+	// padding it with white would make it invisible.
+	dst := image.NewRGBA(image.Rect(0, 0, nw, nh))
+	draw.Draw(dst, dst.Bounds(), &image.Uniform{padColor}, image.Point{}, draw.Src)
+
+	// Scale or copy the original image over the white background
+	if nw != w || nh != h {
+		draw.CatmullRom.Scale(dst, dst.Bounds(), img, b, draw.Over, nil)
+	} else {
+		draw.Draw(dst, dst.Bounds(), img, b.Min, draw.Over)
+	}
+
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, scaled, &jpeg.Options{Quality: 85}); err != nil {
+	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 85}); err != nil {
 		// Fallback: PNG
 		buf.Reset()
-		_ = png.Encode(&buf, scaled)
+		_ = png.Encode(&buf, dst)
 		return "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
 	}
 	return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())

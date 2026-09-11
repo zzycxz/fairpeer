@@ -4,7 +4,7 @@ import { BookOpen, CalendarDays, Mail, PanelLeft, Users, SlidersHorizontal } fro
 import { ProfileSegmented } from "../components/AppChrome";
 import { useT } from "../lib/i18n";
 import { app, onExpertsCollab } from "../lib/bridge";
-import { CalendarTaskPanel } from "../components/cowork/CalendarTaskPanel";
+import { CalendarTaskPanel } from "../components/calendar/CalendarTaskPanel";
 import logoSymbol from "../assets/logo-symbol.png";
 import { requestBrowserMirrorFocus } from "../lib/browserMirror";
 import { BrowserWorkbench } from "../components/netdev/BrowserWorkbench";
@@ -359,7 +359,7 @@ export function CoWorkLayout({
 
 
         {activePanel === "calendarTask" && (
-          <CalendarTaskPanel />
+          <CalendarTaskPanel profile="cowork" />
         )}
 
         {/* ExpertPanel stays mounted (hidden when inactive) so streaming

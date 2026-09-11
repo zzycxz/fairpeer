@@ -22,15 +22,9 @@ import (
 func TestPionEcho(t *testing.T) {
 	cfg := webrtc.Configuration{ICEServers: []webrtc.ICEServer{}}
 
-	offerer, err := webrtc.NewPeerConnection(cfg)
-	if err != nil {
-		t.Fatalf("offerer PC: %v", err)
-	}
+	offerer := newLoopbackPC(t, cfg)
 	defer offerer.Close()
-	answerer, err := webrtc.NewPeerConnection(cfg)
-	if err != nil {
-		t.Fatalf("answerer PC: %v", err)
-	}
+	answerer := newLoopbackPC(t, cfg)
 	defer answerer.Close()
 
 	// Wire ICE candidate exchange directly (in-process signaling).

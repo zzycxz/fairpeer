@@ -204,11 +204,11 @@ func findTCEnd(result []byte, tagEnd int) int {
 }
 
 // rewriteTC robustly fills a table cell with a new value.
-// - If the cell has top-level <w:t> tags, it replaces the FIRST one's content
-//   with the value, and EMPTIES the content of all subsequent <w:t> tags. This
-//   prevents leftover placeholder text from breaking layout.
-// - If the cell has ZERO <w:t> tags (a completely empty cell), it injects a
-//   fresh <w:r><w:t>VALUE</w:t></w:r> right before the cell's last </w:p>.
+//   - If the cell has top-level <w:t> tags, it replaces the FIRST one's content
+//     with the value, and EMPTIES the content of all subsequent <w:t> tags. This
+//     prevents leftover placeholder text from breaking layout.
+//   - If the cell has ZERO <w:t> tags (a completely empty cell), it injects a
+//     fresh <w:r><w:t>VALUE</w:t></w:r> right before the cell's last </w:p>.
 func rewriteTC(tcFragment []byte, value string, style DocStyle) ([]byte, bool) {
 	hasT := false
 	tblDepth := 0
@@ -377,10 +377,10 @@ func spliceBytes(result []byte, start, end int, repl []byte) []byte {
 // --- table model (read-only pre-pass: per-row physical cell count + vMerge flags) ---
 
 type gridModel struct {
-	rows           int        // number of <w:tr> in this table
-	cols           int        // visual grid width (max gridSpan sum across rows) — used only for bounds on row
-	rowCellCounts  []int      // rowCellCounts[r] = number of physical <w:tc> in row r
-	rowVMergeCont  [][]bool   // rowVMergeCont[r][c] = true if cell c in row r is a vMerge continuation
+	rows          int      // number of <w:tr> in this table
+	cols          int      // visual grid width (max gridSpan sum across rows) — used only for bounds on row
+	rowCellCounts []int    // rowCellCounts[r] = number of physical <w:tc> in row r
+	rowVMergeCont [][]bool // rowVMergeCont[r][c] = true if cell c in row r is a vMerge continuation
 }
 
 // buildAllGrids parses body to construct a gridModel per top-level table.

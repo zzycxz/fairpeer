@@ -51,14 +51,14 @@ fairpeer 反超。没有发现"推倒重来"级的缺口。
 - fairpeer：沙箱 Network 开关（默认断网）+ `[network.proxy]` 系统代理；无域名粒度策略。
   Windows 上沙箱本就缺位（G1），网络面实际靠 permission 静态分析。
 
-### G5【P2】exec 工具无持久交互会话（codex unified_exec）
+### G5【P2→已修复 2026-09-12】exec 工具无持久交互会话（codex unified_exec）
 - codex：`exec_command` 带 tty/yield_time_ms/max_output_tokens，unified_exec 进程管理器
   支持持久 shell 会话 + write_stdin 喂入。
 - fairpeer：`bash`（后台任务）+ `bash_output`/`kill_shell` 覆盖了"跑长命令收输出"，
   但**无交互式 stdin 会话**（vim/ssh/python REPL 这类需要喂 stdin 的交互程序，
   代理只能靠 one-shot 技巧）。设备 PTY（HumanTTY）仅限 netdev 人工终端。
 
-### G6【P2】read_file 不能读图（codex view_image）
+### G6【P2→已修复 2026-09-12】read_file 不能读图（codex view_image）
 - codex：`view_image` 工具把图片直接喂给多模态模型；统一 image 预算管理。
 - fairpeer：read_file 仅文本；视觉走独立 `image_understand`（VLM 转述）——多一跳、
   丢细节，且与主模型的视觉能力脱节。多模态主模型（GPT-4o/Qwen-VL 类）无法直接看图。

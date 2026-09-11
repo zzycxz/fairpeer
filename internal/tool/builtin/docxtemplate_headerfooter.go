@@ -235,9 +235,10 @@ func splitOnFields(s string) []textPart {
 }
 
 // fieldRunXML emits a Word field as run XML:
-//   <w:r><w:fldChar w:fldCharType="begin"/></w:r>
-//   <w:r><w:instrText> PAGE </w:instrText></w:r>
-//   <w:r><w:fldChar w:fldCharType="end"/></w:r>
+//
+//	<w:r><w:fldChar w:fldCharType="begin"/></w:r>
+//	<w:r><w:instrText> PAGE </w:instrText></w:r>
+//	<w:r><w:fldChar w:fldCharType="end"/></w:r>
 func fieldRunXML(field string) string {
 	return fmt.Sprintf(`<w:r><w:fldChar w:fldCharType="begin"/></w:r>`+
 		`<w:r><w:instrText xml:space="preserve"> %s </w:instrText></w:r>`+

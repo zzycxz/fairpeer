@@ -183,8 +183,8 @@ func (u *UsageTracker) storeLocked(st usageFile) {
 }
 
 // trimLocked caps the entry count, evicting the oldest LastUsed first so the
-// file stays bounded even as distill keeps adding skills. Built-in skills are
-// exempt from eviction (they're cheap to re-track).
+// file stays bounded. Built-in skills are exempt from eviction (they're cheap
+// to re-track).
 func (u *UsageTracker) trimLocked(st *usageFile) {
 	if len(st.Skills) <= usageHistory {
 		return

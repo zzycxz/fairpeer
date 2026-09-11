@@ -109,11 +109,11 @@ func removeRemoteProject(ref RemoteRef, root string) {
 // session path). Empty when the link is down — the tree then shows the bare
 // project node, matching the offline badge.
 type remoteTopicSummary struct {
-	TopicID       string
-	Title         string
-	Turns         int
+	TopicID        string
+	Title          string
+	Turns          int
 	LastActivityMs int64
-	NewestSession string
+	NewestSession  string
 }
 
 func remoteTopicsForRef(m *remoteHostManager, ref RemoteRef, root string) []remoteTopicSummary {
@@ -170,7 +170,6 @@ func remoteTopicsForRef(m *remoteHostManager, ref RemoteRef, root string) []remo
 	sort.SliceStable(out, func(a, b int) bool { return out[a].LastActivityMs > out[b].LastActivityMs })
 	return out
 }
-
 
 // bootCtxBackground is a bounded context for registry RPC calls.
 func bootCtxBackground() context.Context {

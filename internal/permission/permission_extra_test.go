@@ -502,3 +502,29 @@ func TestHeadlessAllowsOrdinaryWriter(t *testing.T) {
 		t.Error("headless write_file should be allowed (ordinary writer, not irreversible outward)")
 	}
 }
+
+// TestHeadlessDeniesScheduledTaskTools pins the scheduler-globalization
+// hardening: schedule_create and schedule_run_now are RiskExternal, so an
+// unattended (headless) run — including one launched BY a scheduled task —
+// cannot persist new unattended executions or fire existing tasks on demand.
+// im_send joins the outward set: pushing to a real IM channel is as outward as
+// sending email, and it previously classified as RiskWriteLocal (auto-allowed
+// headless — the gap this closes).
+func TestHeadlessDeniesScheduledTaskTools(t *testing.T) {
+	p := New("ask", nil, nil, nil) // default mode, no allow/deny rules
+	g := NewGate(p, nil)           // Approver=nil → headless
+	for _, tool := range []string{"schedule_create", "schedule_run_now", "im_send"} {
+		t.Run(tool, func(t *testing.T) {
+			allow, _, _ := g.Check(context.Background(), tool, json.RawMessage(`{}`), false)
+			if allow {
+				t.Errorf("headless %s should be denied (external-risk, no interactive user)", tool)
+			}
+		})
+	}
+	// schedule_remind must NOT be in the set: a plain reminder runs nothing and
+	// leaves the machine nothing — denying it headless would break the one
+	// scheduler capability an unattended run legitimately has.
+	if allow, _, _ := g.Check(context.Background(), "schedule_remind", json.RawMessage(`{}`), false); allow == false {
+		t.Error("headless schedule_remind should stay allowed (local notification only, not external-risk)")
+	}
+}

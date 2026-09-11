@@ -28,11 +28,11 @@
     "tui"
   ],
   "optionalDependencies": {
-    "@zzycxz/fairpeer-cli-darwin-arm64": "0.0.0",
-    "@zzycxz/fairpeer-cli-darwin-x64": "0.0.0",
-    "@zzycxz/fairpeer-cli-linux-arm64": "0.0.0",
-    "@zzycxz/fairpeer-cli-linux-x64": "0.0.0",
-    "@zzycxz/fairpeer-cli-win32-arm64": "0.0.0",
-    "@zzycxz/fairpeer-cli-win32-x64": "0.0.0"
+    "@fairpeer/cli-darwin-arm64": "0.0.0",
+    "@fairpeer/cli-darwin-x64": "0.0.0",
+    "@fairpeer/cli-linux-arm64": "0.0.0",
+    "@fairpeer/cli-linux-x64": "0.0.0",
+    "@fairpeer/cli-win32-arm64": "0.0.0",
+    "@fairpeer/cli-win32-x64": "0.0.0"
   }
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { app } from "../../lib/bridge";
+import { app, onSchedulerChanged } from "../../lib/bridge";
 import { useI18n } from "../../lib/i18n";
 import type { NetDevJob, RunRecordView, TaskView } from "../../lib/types";
 
@@ -40,6 +40,11 @@ function ScheduledTasksCard() {
   };
 
   useEffect(() => { void reload(); }, []);
+  // Live refresh (globalization fix, defect E): this card used to load ONCE on
+  // mount — tasks created/edited from any other page (calendar panel, a
+  // cowork agent tool call) never showed up until manual refresh. The shared
+  // scheduler:changed event keeps the list live, same as the calendar panel.
+  useEffect(() => onSchedulerChanged(() => void reload()), []);
   const ago = updatedAt ? Math.max(0, Math.round((Date.now() - updatedAt.getTime()) / 1000)) : null;
 
   const runNow = async (id: string) => {

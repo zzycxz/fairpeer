@@ -36,6 +36,16 @@ const IM_PLATFORMS = [
   { value: "telegram", label: "Telegram" },
 ] as const;
 
+// Running-partition options. The task's prompt executes in the selected
+// profile's context (its tabs, skills, seal). Default = the page the form was
+// opened from (defaultProfile prop); the human may cross-assign (e.g. plan in
+// 运维, run in 办公) — agents never can (server-pinned identity).
+const PROFILE_OPTIONS = [
+  { value: "dev", label: "编码" },
+  { value: "cowork", label: "办公" },
+  { value: "netdev", label: "运维" },
+] as const;
+
 // exprToPickerValue converts a one-shot scheduler expression ("at 2026-07-31
 // 09:50") back into the "YYYY-MM-DDTHH:MM" value an <input type="datetime-local">
 // expects. The scheduler stores time with a SPACE separator (see parseAt in
@@ -87,6 +97,7 @@ export function TaskForm({
   initial,
   initialTemplate,
   templates,
+  defaultProfile = "cowork",
   onSubmit,
   onCancel,
   onDelete,
@@ -94,6 +105,7 @@ export function TaskForm({
   initial: TaskView | null;
   initialTemplate: TemplateView | null;
   templates: TemplateView[];
+  defaultProfile?: string;
   onSubmit: (input: TaskInput) => Promise<void>;
   onCancel: () => void;
   onDelete?: () => void;
@@ -105,6 +117,7 @@ export function TaskForm({
   const [name, setName] = useState(initial?.name ?? seedTpl?.name ?? "");
   const [expression, setExpression] = useState(initial?.expression ?? seedTpl?.expression ?? "");
   const [prompt, setPrompt] = useState(initial?.prompt ?? seedTpl?.prompt ?? "");
+  const [profile, setProfile] = useState(initial?.profile || defaultProfile);
   const [outputMode, setOutputMode] = useState(initial?.outputMode ?? seedTpl?.outputMode ?? "notify");
   const [outputDest, setOutputDest] = useState(initial?.outputDest ?? "");
   const [outputAccount, setOutputAccount] = useState(initial?.outputAccount ?? "");
@@ -138,6 +151,10 @@ export function TaskForm({
     return idx > 0 ? d.slice(0, idx) : "feishu";
   });
   const [error, setError] = useState<string>("");
+  // High-frequency gate warning: the backend rejected the save because the
+  // expression fires >4 times/day; "仍要保存" retries with
+  // confirmHighFrequency=true (the human-only confirm the gate requires).
+  const [hfWarn, setHfWarn] = useState(false);
 
   // Live preview of the expression as the user types. Debounced via a microtask
   // gate so we don't spam the bridge on every keystroke.
@@ -238,8 +255,9 @@ export function TaskForm({
     }
   };
 
-  const save = async () => {
+  const save = async (opts?: { confirmHighFrequency?: boolean }) => {
     setError("");
+    setHfWarn(false);
     if (!name.trim()) {
       setError(t("cowork.automationFormName"));
       return;
@@ -255,6 +273,7 @@ export function TaskForm({
         name: name.trim(),
         expression: expression.trim(),
         prompt: prompt.trim(),
+        profile,
         outputMode,
         outputDest: outputDest.trim(),
         outputAccount: outputAccount.trim(),
@@ -262,9 +281,20 @@ export function TaskForm({
         color,
         location: location.trim(),
         plain,
+        // Only set on the explicit retry after the gate warning below — this
+        // flag is the human confirm for >4 runs/day; agent tools can't set it.
+        confirmHighFrequency: opts?.confirmHighFrequency ?? false,
       });
     } catch (e) {
-      setError(String(e instanceof Error ? e.message : e));
+      const msg = String(e instanceof Error ? e.message : e);
+      if (msg.includes("confirm_high_frequency")) {
+        // The >4/day runaway gate rejected the save. That gate is exactly the
+        // "user must knowingly confirm" checkpoint — surface it as an inline
+        // confirm instead of a bare error, and retry with the flag on OK.
+        setHfWarn(true);
+      } else {
+        setError(msg);
+      }
     } finally {
       setSaving(false);
     }
@@ -312,6 +342,24 @@ export function TaskForm({
                   onChange={(e) => setLocation(e.target.value)}
                 />
               </div>
+            </label>
+          </div>
+
+          {/* Running profile — the partition whose context executes the
+              prompt (its tabs, skills, seal). Defaults to the page the form
+              opened from; the human may cross-assign. Agents never can. */}
+          <div className="cowork-taskform__section">
+            <label className="cowork-taskform__label">
+              <span className="cowork-taskform__labeltext">运行模式</span>
+              <select
+                className="cowork-taskform__input"
+                value={profile}
+                onChange={(e) => setProfile(e.target.value)}
+              >
+                {PROFILE_OPTIONS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </select>
             </label>
           </div>
 
@@ -593,6 +641,19 @@ export function TaskForm({
             </label>
           </div>
 
+          {hfWarn && (
+            <div className="cowork-taskform__warn">
+              该任务的触发频率超过每天 4 次（防失控闸门）。确认要创建如此高频的任务吗？
+              <button
+                type="button"
+                className="cowork-taskform__warn-btn"
+                onClick={() => void save({ confirmHighFrequency: true })}
+                disabled={saving}
+              >
+                仍要保存
+              </button>
+            </div>
+          )}
           {error && <div className="cowork-taskform__error">{error}</div>}
         </div>
 

@@ -76,6 +76,30 @@ func lowerForTest(s string) string {
 	return string(out)
 }
 
+// TestMatchBrandPreset guards the brand-preset gatekeeper: unambiguous China
+// Mobile mentions (incl. case-insensitive CMCC) must map to the preset, while
+// bare "移动" (移动硬盘/鼠标移动) and other brands must NOT — a false match
+// silently overrides color recognition for unrelated decks.
+func TestMatchBrandPreset(t *testing.T) {
+	yes := map[string]string{
+		"中国移动5G建设成效":   "china-mobile",
+		"帮我做一张中移的汇报":   "china-mobile",
+		"移动公司年度网络质量报告": "china-mobile",
+		"CMCC 5G PPT":  "china-mobile",
+	}
+	for in, want := range yes {
+		if got := matchBrandPreset(lowerForTest(in)); got != want {
+			t.Errorf("matchBrandPreset(%q) = %q, want %q", in, got, want)
+		}
+	}
+	no := []string{"移动硬盘导购PPT", "把这张图移动一下做slides", "华为5G介绍", "做一个通用的PPT"}
+	for _, s := range no {
+		if got := matchBrandPreset(lowerForTest(s)); got != "" {
+			t.Errorf("matchBrandPreset(%q) = %q, want empty (no false brand match)", s, got)
+		}
+	}
+}
+
 // TestLocalPathReference verifies the second reference form: an ABSOLUTE local
 // path pasted as text (e.g. 把 C:\Users\me\Desktop\shot.png 转成PPT). Guards three
 // failure modes: existing paths must route (previously this form bypassed the

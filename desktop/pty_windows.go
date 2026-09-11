@@ -188,7 +188,8 @@ func (s *ptySession) read(b []byte) (int, error) {
 	var n uint32
 	err := windows.ReadFile(s.outRead, b, &n, nil)
 	if err != nil {
-		return 0, err
+		// Broken pipe may still carry a final partial chunk — don't drop it.
+		return int(n), err
 	}
 	return int(n), nil
 }
@@ -223,6 +224,14 @@ func (s *ptySession) close() {
 	procClosePseudoConsole.Call(uintptr(s.handle))
 	windows.CloseHandle(s.inWrite)
 	windows.CloseHandle(s.outRead)
+}
+
+// isClosed reads the closed flag under the session's own mutex — get() holds
+// ptyManager.mu, not this lock, so a concurrent close() must not race it.
+func (s *ptySession) isClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
 }
 
 // alive reports whether the child process is still running.
@@ -269,7 +278,7 @@ func (m *ptyManager) get(id int) (*ptySession, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.sessions[id]
-	if !ok || s.closed {
+	if !ok || s.isClosed() {
 		return nil, fmt.Errorf("pty %d not found or closed", id)
 	}
 	return s, nil
@@ -319,28 +328,30 @@ func (a *App) PTYCreateForTab(tabID string, cols, rows int) (int, error) {
 	case "docker":
 		parts = []string{"docker", "exec", "-it", ref.Target, "sh"}
 		if root := strings.TrimSpace(tab.WorkspaceRoot); root != "" {
-			parts = append(parts, "-c", "cd "+root+" && exec sh")
+			parts = append(parts, "-c", "cd "+shquotePath(root)+" && exec sh")
 		}
 	case "ssh":
 		host, port := splitSSHTarget(ref.Target)
 		parts = []string{"ssh", "-o", "BatchMode=yes"}
+		// -p must precede the destination: everything after user@host is the
+		// remote command, so a trailing -p 2222 would execute remotely.
+		if port != "" {
+			parts = append(parts, "-p", port)
+		}
 		if u := strings.TrimSpace(ref.User); u != "" {
 			parts = append(parts, u+"@"+host)
 		} else {
 			parts = append(parts, host)
 		}
-		if port != "" {
-			parts = append(parts, "-p", port)
-		}
 		if root := strings.TrimSpace(tab.WorkspaceRoot); root != "" {
-			parts = append(parts, "cd "+root+" && exec $SHELL -l")
+			parts = append(parts, "cd "+shquotePath(root)+" && exec $SHELL -l")
 		} else {
 			parts = append(parts, "$SHELL -l")
 		}
 	default:
 		return ptys.create(cols, rows)
 	}
-	return ptys.createCmd(cols, rows, strings.Join(parts, " "))
+	return ptys.createCmd(cols, rows, quoteWin32CommandLine(parts))
 }
 
 // PTYWrite sends bytes to the pseudoconsole's stdin.

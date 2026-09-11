@@ -98,3 +98,44 @@ func TestReleaseIdempotentAndUnknownID(t *testing.T) {
 		t.Fatalf("unknown id must error naming the override path: %v", err)
 	}
 }
+
+// SaveUser（批 3 知识反哺通道）：接受/拒绝/覆盖三路径。
+func TestSaveUser(t *testing.T) {
+	dir := t.TempDir()
+	SetStateDir(dir)
+	t.Cleanup(func() { SetStateDir("") })
+
+	// unknown id 拒收（纯内存判定，无落盘副作用——user-knowledge 目录不得被创建）。
+	if err := SaveUser("no-such-table", []byte("version: 1\n")); err == nil {
+		t.Fatal("unknown id must be refused")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "user-knowledge")); !os.IsNotExist(err) {
+		t.Fatalf("refused save must not create user-knowledge dir: %v", err)
+	}
+	// 校验不过整份拒收。
+	if err := SaveUser("segment-priors", []byte("version: 1\n")); err == nil {
+		t.Fatal("invalid YAML must be refused")
+	}
+	// 有效覆盖落盘，且 Load 立即可见（user 覆盖优先）。
+	valid, err := embedded.ReadFile("data/segment-priors.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	slightly := strings.Replace(string(valid), "min_alive: 2", "min_alive: 3", 1)
+	if err := SaveUser("segment-priors", []byte(slightly)); err != nil {
+		t.Fatalf("valid override refused: %v", err)
+	}
+	got, err := Load("segment-priors")
+	if err != nil || !strings.Contains(string(got), "min_alive: 3") {
+		t.Fatalf("user override must win on Load: %v %q", err, got)
+	}
+	// 覆盖路径：第二次 SaveUser 同 id 原地替换。
+	slightly2 := strings.Replace(string(valid), "min_alive: 2", "min_alive: 4", 1)
+	if err := SaveUser("segment-priors", []byte(slightly2)); err != nil {
+		t.Fatalf("overwrite refused: %v", err)
+	}
+	got2, _ := Load("segment-priors")
+	if !strings.Contains(string(got2), "min_alive: 4") {
+		t.Fatalf("second save must overwrite: %q", got2)
+	}
+}

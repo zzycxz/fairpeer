@@ -33,13 +33,20 @@ type execSession struct {
 	mu      sync.Mutex
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
-	buf     []byte // accumulated output, front-trimmed when over the ring cap
-	dropped int    // bytes trimmed from the front of buf (absolute-offset bookkeeping)
-	cursor  int    // absolute offset the reader has consumed up to
+	stdinMu sync.Mutex // serialises writes WITHOUT holding mu (a blocked write must not wedge read/kill)
+	buf     []byte     // accumulated output, front-trimmed when over the ring cap
+	dropped int        // bytes trimmed from the front of buf (absolute-offset bookkeeping)
+	cursor  int        // absolute offset the reader has consumed up to
 	exited  bool
+	cancel  context.CancelFunc
+	seq     int // spawn order, for deterministic oldest-exited reclaim
 }
 
-type execSessionTool struct{}
+type execSessionTool struct {
+	// workDir, when non-empty, is the directory sessions spawn in (workspace
+	// binding, same as bash). Empty = process cwd.
+	workDir string
+}
 
 func (execSessionTool) Name() string { return "exec_session" }
 
@@ -69,10 +76,12 @@ type execSessionArgs struct {
 	Command   string `json:"command"`
 	Input     string `json:"input"`
 	TimeoutMs int    `json:"timeout_ms"`
+	workDir   string // injected from the tool binding, not from args
 }
 
-func (execSessionTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (t execSessionTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p execSessionArgs
+	p.workDir = t.workDir
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
@@ -82,7 +91,7 @@ func (execSessionTool) Execute(ctx context.Context, args json.RawMessage) (strin
 	case "write":
 		return execSessionWrite(p)
 	case "read":
-		return execSessionRead(p)
+		return execSessionRead(ctx, p)
 	case "kill":
 		return execSessionKill(p)
 	default:
@@ -101,18 +110,24 @@ func execSessionSpawn(ctx context.Context, p execSessionArgs) (string, error) {
 	if command == "" {
 		return "", fmt.Errorf("spawn requires command")
 	}
+	// Reserve the id/slot in ONE critical section (concurrent spawns must not
+	// both pass the cap check); a placeholder session is inserted immediately so
+	// the slot is truly reserved, and the real execSession replaces it after
+	// Start. Reclaim pick: the LOWEST sequence among EXITED sessions — map
+	// iteration is random, so the minimum makes "oldest reclaimed" true.
 	sessMu.Lock()
-	// Reclaim the oldest EXITED session at capacity — a live session is never
-	// reclaimed (its output may be unread).
 	if len(sessions) >= maxExecSessions {
+		reclaimID, oldest := "", -1
 		for id, s := range sessions {
 			s.mu.Lock()
-			exited := s.exited
+			exited, seq := s.exited, s.seq
 			s.mu.Unlock()
-			if exited {
-				delete(sessions, id)
-				break
+			if exited && (oldest == -1 || seq < oldest) {
+				oldest, reclaimID = seq, id
 			}
+		}
+		if reclaimID != "" {
+			delete(sessions, reclaimID)
 		}
 	}
 	if len(sessions) >= maxExecSessions {
@@ -121,27 +136,49 @@ func execSessionSpawn(ctx context.Context, p execSessionArgs) (string, error) {
 	}
 	sessCounter++
 	id := fmt.Sprintf("es%d", sessCounter)
+	// exited=true makes the placeholder inert: write/read/kill on this id fail
+	// fast instead of dereferencing the nil cmd/stdin before Start replaces it.
+	sessions[id] = &execSession{seq: sessCounter, exited: true}
 	sessMu.Unlock()
 
 	shell, flag := "sh", "-c"
 	if runtime.GOOS == "windows" {
 		shell, flag = "cmd", "/c"
 	}
-	cmd := exec.Command(shell, flag, command)
+	// Session-scoped context: setKillTree installs cmd.Cancel, which the exec
+	// package only honours for CommandContext-created commands; kill() fires it.
+	sctx, scancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(sctx, shell, flag, command)
+	cmd.Dir = p.workDir
+	// 会话与 bash 同纪律：Windows 隐藏控制台窗 + 进程树终止（taskkill /T），
+	// POSIX 自立进程组（组杀）。必须在 Start 之前设置。
+	setKillTree(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		scancel()
+		sessMu.Lock()
+		delete(sessions, id)
+		sessMu.Unlock()
 		return "", err
 	}
 	stdout, err := cmd.StdoutPipe()
 	stderr, err2 := cmd.StderrPipe()
 	if err != nil || err2 != nil {
+		scancel()
+		sessMu.Lock()
+		delete(sessions, id)
+		sessMu.Unlock()
 		return "", fmt.Errorf("output pipes: %v/%v", err, err2)
 	}
 	if err := cmd.Start(); err != nil {
+		scancel()
+		sessMu.Lock()
+		delete(sessions, id)
+		sessMu.Unlock()
 		return "", fmt.Errorf("start: %w", err)
 	}
 
-	s := &execSession{cmd: cmd, stdin: stdin}
+	s := &execSession{cmd: cmd, stdin: stdin, seq: sessCounter, cancel: scancel}
 	sessMu.Lock()
 	sessions[id] = s
 	sessMu.Unlock()
@@ -165,15 +202,19 @@ func execSessionSpawn(ctx context.Context, p execSessionArgs) (string, error) {
 			}
 		}
 	}
-	go drain(stdout)
-	go drain(stderr)
+	var drains sync.WaitGroup
+	drains.Add(2)
+	go func() { defer drains.Done(); drain(stdout) }()
+	go func() { defer drains.Done(); drain(stderr) }()
+	// os/exec contract: Wait must not run while pipe reads are in flight —
+	// join the drains first, or a fast-exiting command's tail output is lost.
 	go func() {
-		_ = cmd.Wait()
+		drains.Wait()
 		s.mu.Lock()
 		s.exited = true
 		s.mu.Unlock()
 	}()
-	return fmt.Sprintf("session %s spawned (pid %d). write = 喂 stdin，read = 取增量输出，kill = 结束。", id, cmd.Process.Pid), nil
+	return fmt.Sprintf("session %s spawned (pid %d); write stdin, read for incremental output, kill to end.", id, cmd.Process.Pid), nil
 }
 
 func execSessionWrite(p execSessionArgs) (string, error) {
@@ -185,27 +226,37 @@ func execSessionWrite(p execSessionArgs) (string, error) {
 		return "", fmt.Errorf("write requires input")
 	}
 	input := p.Input
-	if !strings.HasSuffix(input, "\n") {
-		// Windows pipe readers (findstr/more) treat a bare LF as an incomplete
-		// line — CRLF is the line terminator there.
-		if runtime.GOOS == "windows" {
+	// Line terminators: Windows pipe readers (findstr/more) need CRLF; a bare
+	// LF inside a multi-line input is also normalised so every line terminates
+	// properly. Trailing "\r" (input already ended CRLF) is not doubled.
+	if runtime.GOOS == "windows" {
+		if !strings.HasSuffix(input, "\n") {
 			input += "\r\n"
-		} else {
-			input += "\n"
+		} else if !strings.HasSuffix(input, "\r\n") {
+			input = strings.ReplaceAll(strings.TrimSuffix(input, "\n"), "\n", "\r\n") + "\r\n"
 		}
+	} else if !strings.HasSuffix(input, "\n") {
+		// POSIX regression guard (review P4-A): a line-fed REPL needs the LF.
+		input += "\n"
 	}
+	// Write under stdinMu, NOT s.mu: a child that stops consuming stdin blocks
+	// this write indefinitely — holding s.mu here would wedge read and kill
+	// (and thus the whole session) behind it.
+	s.stdinMu.Lock()
+	defer s.stdinMu.Unlock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.exited {
+		s.mu.Unlock()
 		return "", fmt.Errorf("session %s has exited", p.SessionID)
 	}
+	s.mu.Unlock()
 	if _, err := s.stdin.Write([]byte(input)); err != nil {
 		return "", fmt.Errorf("write to %s stdin: %w", p.SessionID, err)
 	}
 	return fmt.Sprintf("sent %d bytes to %s stdin", len(input), p.SessionID), nil
 }
 
-func execSessionRead(p execSessionArgs) (string, error) {
+func execSessionRead(ctx context.Context, p execSessionArgs) (string, error) {
 	s, err := sessionByID(p.SessionID)
 	if err != nil {
 		return "", err
@@ -228,6 +279,9 @@ func execSessionRead(p execSessionArgs) (string, error) {
 			out := string(s.buf[rel:])
 			s.cursor = s.dropped + len(s.buf)
 			s.mu.Unlock()
+			if s.dropped > 0 && rel == 0 {
+				out = fmt.Sprintf("[... %d bytes of older output trimmed ...]\n", s.dropped) + out
+			}
 			return out, nil
 		}
 		exited := s.exited
@@ -235,10 +289,14 @@ func execSessionRead(p execSessionArgs) (string, error) {
 		if exited {
 			return fmt.Sprintf("session %s has exited (no further output).", p.SessionID), nil
 		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
 		if time.Now().After(deadline) {
 			return "(no new output yet)", nil
 		}
-		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -251,6 +309,12 @@ func execSessionKill(p execSessionArgs) (string, error) {
 	exited := s.exited
 	s.mu.Unlock()
 	if !exited {
+		// 先关 stdin（子进程得到 EOF），再整树终止——cmd /c 的孙子进程
+		// （python/ssh）否则会抱着继承的管道句柄存活成孤儿。
+		_ = s.stdin.Close()
+		if s.cmd.Cancel != nil {
+			_ = s.cmd.Cancel() // setKillTree 装的整树终止（Windows taskkill /T；POSIX 组杀）
+		}
 		_ = s.cmd.Process.Kill()
 	}
 	sessMu.Lock()

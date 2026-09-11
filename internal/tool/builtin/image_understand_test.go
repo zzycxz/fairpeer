@@ -146,9 +146,9 @@ func TestImageUnderstandErrorsWhenNoVLMConfigured(t *testing.T) {
 func TestImageUnderstandSchemaRequiredFields(t *testing.T) {
 	schema := imageUnderstand{}.Schema()
 	var s struct {
-		Type       string            `json:"type"`
-		Properties map[string]any    `json:"properties"`
-		Required   []string          `json:"required"`
+		Type       string         `json:"type"`
+		Properties map[string]any `json:"properties"`
+		Required   []string       `json:"required"`
 	}
 	if err := json.Unmarshal(schema, &s); err != nil {
 		t.Fatalf("schema is not valid JSON: %v", err)

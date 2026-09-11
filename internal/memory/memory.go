@@ -247,7 +247,7 @@ const profileDir = "profile"
 // chars); this is the hard backstop when that soft target is exceeded. Mirrors
 // skill.IndexMaxChars. Truncation leaves a visible marker so the model knows
 // the portrait was clipped and can read the full file itself if it needs to.
-const profileMaxChars = 2000
+const profileMaxChars = 4000
 
 // globalProfileFiles are the mode-agnostic portrait files, injected under every
 // profile. user.md is the stable identity/preferences ("who you are", changes

@@ -180,6 +180,7 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	setKillTree(cmd)
 	cmd.WaitDelay = bashWaitDelay
 	buf := jobs.NewCappedBuffer(jobs.JobOutputCap)
+	buf.EnableSpill("bash") // P1-B1: oversized output stays retrievable via read_file
 	w := io.Writer(buf)
 	if emit, ok := tool.ProgressFrom(ctx); ok {
 		w = io.MultiWriter(buf, newProgressWriter(emit))

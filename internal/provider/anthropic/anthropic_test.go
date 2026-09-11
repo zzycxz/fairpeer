@@ -154,7 +154,10 @@ func TestReadStream(t *testing.T) {
 	c := &client{name: "anthropic"}
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(sseFixture))}
 	ch := make(chan provider.Chunk)
-	go c.readStream(resp, ch)
+	go func() {
+		defer close(ch) // readStream no longer closes the channel: streamWithReconnect owns it (P1-A1)
+		_, _ = c.readStream(resp, ch)
+	}()
 
 	var text strings.Builder
 	var started, full *provider.ToolCall
@@ -201,22 +204,24 @@ func TestReadStream(t *testing.T) {
 	}
 }
 
-// TestReadStreamError surfaces a mid-stream error event as a ChunkError.
+// TestReadStreamError surfaces a mid-stream error event as an error return
+// (the reconnect wrapper converts non-retryable ones to error chunks).
 func TestReadStreamError(t *testing.T) {
 	sse := "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"overloaded\"}}\n\n"
 	c := &client{name: "anthropic"}
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(sse))}
 	ch := make(chan provider.Chunk)
-	go c.readStream(resp, ch)
+	go func() {
+		defer close(ch)
+		_, _ = c.readStream(resp, ch)
+	}()
 
-	var gotErr error
-	for ck := range ch {
-		if ck.Type == provider.ChunkError {
-			gotErr = ck.Err
-		}
-	}
-	if gotErr == nil || !strings.Contains(gotErr.Error(), "overloaded") {
-		t.Fatalf("expected an error chunk mentioning overloaded, got %v", gotErr)
+	// P1-A1: readStream returns transport/SSE errors instead of pushing error
+	// chunks — the reconnect wrapper converts non-retryable ones to ChunkError
+	// for its caller; direct callers see the raw return value.
+	_, streamErr := c.readStream(resp, ch)
+	if streamErr == nil || !strings.Contains(streamErr.Error(), "overloaded") {
+		t.Fatalf("expected an error mentioning overloaded, got %v", streamErr)
 	}
 }
 
@@ -300,7 +305,10 @@ func TestReadStreamThinking(t *testing.T) {
 	c := &client{name: "anthropic"}
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(sseThinking))}
 	ch := make(chan provider.Chunk)
-	go c.readStream(resp, ch)
+	go func() {
+		defer close(ch)
+		_, _ = c.readStream(resp, ch)
+	}()
 
 	var reasoning, text strings.Builder
 	var sig string

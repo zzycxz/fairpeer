@@ -1,15 +1,14 @@
-//go:build !windows
+//go:build !windows && !linux && !darwin && !freebsd && !netbsd && !openbsd && !dragonfly
 
 package netdev
 
-// console_other.go — serial-console stub for non-Windows builds. The v1
-// console line targets the Windows desktop (COM ports via USB-serial
-// adapters); a termios implementation can slot in behind the same
-// openConsoleLine signature later.
+// console_other.go — serial-console stub for unix platforms outside the
+// supported desktop set (linux/darwin/BSD get the real termios line in
+// console_unix.go; exotic ports keep this honest refusal).
 import "fmt"
 
 func openConsoleLine(name string, baud int) (consoleLineIO, error) {
-	return nil, fmt.Errorf("console line %q: serial console is Windows-only in this build", name)
+	return nil, fmt.Errorf("console line %q: serial console is not supported on this platform", name)
 }
 
 func listConsolePorts() []string { return nil }

@@ -35,9 +35,9 @@ func (a *App) SetFastLLMBaseDomain(domain string) error {
 	})
 }
 
-// --- Fast-task model（dream/distill 用）---------------------------------
+// --- Fast-task model（dream 用）---------------------------------
 
-// SetFastTaskModel sets the lightweight model used for background dream/distill
+// SetFastTaskModel sets the lightweight model used for background dream
 // runs (config [agent] fast_task_model, default derived from the fast-task provider). The
 // SettingsPanel exposes this as a per-model picker next to the default-model
 // picker, so the user can route background tasks to a cheaper/faster model
@@ -92,6 +92,15 @@ func (a *App) ListScheduledTasksAsEvents(since, before string) []CalendarEventVi
 		if err != nil {
 			continue
 		}
+		// P4 dedup: a task LINKED to a calendar event (the event's "到点动作")
+		// is already represented on the grid by its event row — projecting it
+		// too would double-render the same instant. Only the link direction
+		// matters: standalone tasks (no representing event) project as usual.
+		if a.calendarStore != nil {
+			if evs, lerr := a.calendarStore.ListByTaskID(view.ID); lerr == nil && len(evs) > 0 {
+				continue
+			}
+		}
 		// Half-open [since, before): include tasks whose next-run is in range.
 		if nextT.Before(sinceT) || !nextT.Before(beforeT) {
 			continue
@@ -108,6 +117,7 @@ func (a *App) ListScheduledTasksAsEvents(since, before string) []CalendarEventVi
 			Location:  view.Location,
 			Status:    "confirmed",
 			Source:    "agent",
+			Profile:   view.Profile, // partition badge/color in the merged UI
 			TaskID:    view.ID,
 			CreatedAt: start,
 		})

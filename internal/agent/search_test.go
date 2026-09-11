@@ -2,8 +2,8 @@ package agent
 
 import (
 	"os"
-	"strings"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 

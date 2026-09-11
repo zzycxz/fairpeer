@@ -243,7 +243,6 @@ func TestListWorkspacesMigratesLegacyWorkspaceList(t *testing.T) {
 	}
 }
 
-
 // findTreeProject returns the tree node for a workspace root (the always-
 // present home project 工作台 means tests must locate nodes by root, not by
 // position).

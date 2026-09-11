@@ -40,7 +40,7 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, complet
   "step": "Step 0: 提取模板配色",
   "result": "已提取模板配色并更新 template_config.json",
   "evidence": [
-    {"kind": "verification", "summary": "extract_template_colors 成功，background=#EDF8FC", "command": "python \"C:\\Users\\13852\\.fairpeer\\skills\\ppt-auto\\scripts\\extract_template_colors.py\" \"C:\\Users\\13852\\.fairpeer\\ppt-template.pptx\" \"C:\\Users\\13852\\.fairpeer\\skills\\ppt-auto\\template_config.json\""}
+    {"kind": "verification", "summary": "extract_template_colors 成功，background=#EDF8FC", "command": "python <skill_dir>/scripts/extract_template_colors.py <ppt_template> <skill_dir>/template_config.json"}
   ]
 }
 ```
@@ -51,7 +51,7 @@ allowed-tools: bash, read_file, write_file, edit_file, grep, todo_write, complet
   "step": "Step 7: 转换 PPTX",
   "result": "PPTX 已生成",
   "evidence": [
-    {"kind": "verification", "summary": "svg_to_pptx 转换成功，57个元素", "command": "python \"C:\\Users\\13852\\.fairpeer\\skills\\ppt-auto\\scripts\\svg_to_pptx.py\" \"<project_dir>\""}
+    {"kind": "verification", "summary": "svg_to_pptx 转换成功，57个元素", "command": "python <skill_dir>/scripts/svg_to_pptx.py <project_dir>"}
   ]
 }
 ```
@@ -92,18 +92,21 @@ write_file 写的文件用 files：
 
 ## 路线 A：SVG 生成（8 步）
 
-### Step 0: preflight（模板配色 + 视觉合并 + 配置 + 项目初始化，一次完成）
+### Step 0: preflight（品牌预设 + 模板配色 + 视觉合并 + 配置 + 项目初始化，一次完成）
 
 ```bash
-python3 <skill_dir>/scripts/preflight.py <project_name>
+python3 <skill_dir>/scripts/preflight.py <project_name> [--preset <brand_id>]
 ```
+
+**品牌预设（优先于一切颜色识别）**：任务文本或任务参数命中品牌关键词（任务参数里带 `brand=<id>` 或 `--preset <id>` 标记）时**必须**带 `--preset <id>`。当前内置：`china-mobile`（触发词：中国移动 / 中移 / 移动公司 / CMCC）。带 preset 时跳过 extract/merge，直接机械套用 `references/brand-presets/<id>.json` 的配色与用色纪律（色值精确，不靠识别），并会在用户没有自选模板时自动播种对应品牌模板。预设清单见 `references/brand-presets/_index.md`。
 
 一个脚本做完原来五步：检查 `~/.fairpeer/ppt-template.pptx` 是否存在 → 有则提取配色（extract_template_colors）→ 合并视觉配色（merge_vlm_style，把 `ppt-template-style.json` / `reference-style.json` 的颜色机械写进 config，reference 优先 > 模板视觉 > extract 基线）→ 初始化项目（project_manager init）→ 打印**合并 JSON 摘要**。
 
 输出的 JSON 就是你需要的全部配置（**不需要再 read_file template_config.json，也不需要单独跑 Step 3/Step 4**）：
 
 - `has_template`：有无模板。**有模板 → SVG 不画任何全屏背景**（模板的背景/装饰/logo 由 PPTX 继承自动透出）；无模板 → SVG 自己画背景色
-- `colors`：最终生效配色（background/accent/text/card_bg 等）——后续写大纲、生成 SVG 时**只能用这些颜色，禁止凭主题名推断品牌色**
+- `colors`：最终生效配色（background/brand/accent/text/card_bg 等）——后续写大纲、生成 SVG 时**只能用这些颜色，禁止凭主题名推断品牌色**。结构色（标题带/描边/表头）用 `brand`，强调色（关键数字/警示）用 `accent`
+- `colors_source`：这批颜色的来源——`preset:<id>`（品牌预设，精确） / `reference-vlm`（参考图） / `template-vlm`（模板 VLM 补充） / `template-extract`（模板机械提取） / `baseline`（默认基线）。排查"颜色不对"时先看这里
 - `fonts.family`：模板字体 + 跨平台降级链，SVG 文字用此字体
 - `mode`：fast / validate（设置面板控制）
 - `reference_style` / `pdf_pages`：参考物存在性（决定 Step 3 读什么）
@@ -189,7 +192,7 @@ read_file <skill_dir>/references/visual-styles/<风格名>.md
 | 视觉提取（最高） | 由 Step 0 `merge_vlm_style.py` 机械合并进 `template_config.json` | 来源：`ppt-template-style.json`（选模板）+ `reference-style.json`（参考图，若有）；reference 优先 |
 | 用户输入 | 自然语言（"用绿色主色"） | 只覆盖明确提及的字段 |
 
-**⚠️ 严禁凭空捏造颜色。严禁凭主题名推断品牌色（如"中国移动"≠ 自己编蓝色）。配色只能从已读的 config 取。**
+**⚠️ 严禁凭空捏造颜色。配色只能从已读的 config 取。**唯一的例外：**品牌预设不是推断**——任务命中品牌关键词时走 Step 0 的 `--preset`（`references/brand-presets/` 里已核实的品牌色值，preflight 机械写入 config，仍是"从 config 取"）。预设目录里没有的品牌（如"华为""腾讯"）**依旧禁止**自己编色。
 
 **⚠️ 有参考图时的颜色权威链**：`~/.fairpeer/reference-style.json` 带颜色字段时，桌面预分析已把参考图真实配色（hex）机械合并进 `template_config.json`——config 的 colors 即参考图的真实颜色。**任务参数里转述的颜色描述**（如"主色调为深蓝色(#1a3c6e)"）是**上游模型看图后的转述，不是用户原话**，hex 常有偏差（实测把 #0078D4 亮蓝转述成 #1a3c6e 暗藏青），**不得作为用户输入覆盖 config**。仅当消息中明确出现"用户要求/用户指定"字样时才按用户输入处理。
 
@@ -218,18 +221,22 @@ init 创建目录结构：
 
 **⚠️ 配色方案必须直接引用 Step 0 读到的 config colors 值，不得自创。**
 
-把大纲写入 `<project_dir>/design_spec.md`（完整性校验必需）。**同时（关键提速）**：凡页面属于骨架类型——`cover`（封面）/`toc`（目录）/`section`（章节过渡）/`cards`（2-4 卡片）/`columns`（两栏对比）/`bullets`（要点列表）/`ending`（结尾）——把该页写成 pages.json 里的一条紧凑 spec（见 Step 6），不要手写这些页的 SVG；表格页/流程页走规则 12/13 的骨架脚本；只有骨架覆盖不了的定制版式才手写 SVG。
+把大纲写入 `<project_dir>/design_spec.md`（完整性校验必需）。**同时（关键提速）**：凡页面属于骨架类型——`cover`（封面）/`toc`（目录）/`section`（章节过渡）/`cards`（2-4 卡片）/`columns`（两栏对比）/`bullets`（要点列表）/`kpi_row`（指标行）/`ending`（结尾）——把该页写成 pages.json 里的一条紧凑 spec（见 Step 6），不要手写这些页的 SVG；表格页/流程页走规则 12/13 的骨架脚本；只有骨架覆盖不了的定制版式才手写 SVG。
+
+**版式选型纪律**：信息量大的内容页**默认用 `composite`（紧凑分区版式）**——一页多块、各块真实字号原生排版（顶部 KPI 行 + 左侧面板/表格 + 右侧要点是最常见的三分区）；整页单一版式（全页 cards / 全页 bullets）只用于内容确实单一的页（章节导语、简单列表）。不要让"一页只装一类样式"导致大片空白——这是最常被用户批评"丑、不紧凑"的成因。
 
 ### Step 6: 逐页生成 SVG
 
-**首选：骨架生成器（pages.json → 一次生成全部骨架页）**。Step 5 已把 cover/toc/section/cards/columns/bullets/ending 类页面写成 pages.json——一条 spec 约 300 token，替代手写 5K token 的整页 SVG：
+**首选：骨架生成器（pages.json → 一次生成全部骨架页）**。Step 5 已把骨架类页面写成 pages.json——一条 spec 约 300 token，替代手写 5K token 的整页 SVG：
 
 ```json
 {"pages": [
   {"type": "cover", "title": "企业数字化转型", "subtitle": "从线上化到数据驱动", "footer": "2026-08"},
   {"type": "toc", "title": "目录", "items": ["背景", "架构", "场景", "收益"]},
   {"type": "cards", "title": "整体架构", "lead": "一套底座三层能力",
-   "items": [{"icon": "tabler-outline/server", "head": "基础设施", "lines": ["混合云", "统一运维"]}]}
+   "items": [{"icon": "tabler-outline/server", "head": "基础设施", "lines": ["混合云", "统一运维"]}]},
+  {"type": "kpi_row", "title": "核心指标",
+   "items": [{"num": "98.7%", "label": "客户满意度", "delta": "+2.1pp"}, {"num": "1.2亿", "label": "用户数"}]}
 ]}
 ```
 
@@ -239,17 +246,21 @@ python3 <skill_dir>/scripts/build_page_skeleton.py <project_dir>/pages.json --pr
 
 有参考图时传 `--autofit`（Step 3 落盘的字号结果）；字号链：config `font_sizes` < `--autofit` < pages.json 每页 `fonts`。
 
-**复合布局（D-06）**：一页要拼两种骨架（如上 60% 时间线 + 下 40% 卡片）时，每块单独生成再拼装——骨架内容会经线性变换缩放进目标区域，各块天然不重叠：
+**复合分区版式（composite，内容页首选）**：一页拼多个区块（KPI 行 / 面板 / 要点 / 卡片），**一次调用生成整页**——每块在自己的 `region`（[x,y,w,h]，1280×720 画布）内按真实字号原生排版，不缩放不变形，各块天然不重叠：
 
-```bash
-# 块 A：上半部（0,0,1280,432）
-python3 <skill_dir>/scripts/build_page_skeleton.py <project_dir>/pages_a.json --project <project_dir> --region 0,0,1280,432
-# 块 B：下半部（0,432,1280,288），或每页 spec 里写 "region": [0,432,1280,288]
+```json
+{"type": "composite", "title": "建设成效总览", "lead": "可选导语",
+ "blocks": [
+   {"region": [50, 104, 1180, 128], "type": "kpi_row",
+    "items": [{"num": "98.7%", "label": "满意度"}, {"num": "34万", "label": "站点"}]},
+   {"region": [50, 252, 770, 418], "type": "panel", "head": "重点工作",
+    "lines": ["700M 重耕完成", "室分改造 1200 处"]},
+   {"region": [840, 252, 390, 418], "type": "bullets", "items": ["投诉 ↓12%", "渗透率 61%"]}]}
 ```
 
-拼装：新建整页 SVG（含全屏背景 rect，规则 1），把各块文件里 `<g transform=...>...</g>` 的内容原样并入；各块先单独 check 再拼，拼好的整页跑 fast 模式 check（深度检查按原始坐标算，跨块会误报）。
+分区配方（常用）：**三分区** = 顶部 KPI 行 (50,104,1180,128) + 左面板 (50,252,770,418) + 右要点 (840,252,390,418)；**上下分区** = 上卡片带 (50,104,1180,240) + 下两栏 (50,364,590,306)/(660,364,570,306)。块类型可用 `cards`/`columns`/`bullets`/`kpi_row`/`panel`。摘要里 `blocks[].lines_dropped` 或 overlap 警告出现时调整 region/内容再生成。
 
-一次调用生成所有骨架页（输出 `slide_NN_<type>.svg`，保持页序）。生成器读 template_config.json 自动执行配色/半透明卡片/背景规则/字体链，图标用规则 14 的占位符，文字自动换行——**你不需要管坐标**。JSON 摘要会报 `lines_dropped`（spec 太长装不下，删行后重新生成）和稀疏页警告（封面/结尾给足 title+subtitle+footer 三条文字）。生成后可用 edit_file 微调个别页，再跑批量检查。
+一次调用生成所有骨架页（输出 `slide_NN_<type>.svg`，保持页序）。生成器读 template_config.json 自动执行配色（结构用 `brand`、强调用 `accent`）/半透明卡片/背景规则/字体链，图标用规则 14 的占位符，文字自动换行——**你不需要管坐标**。JSON 摘要会报 `lines_dropped`（spec 太长装不下，删行后重新生成）和稀疏页警告（封面/章节/结尾给足 3 条文字）。生成后可用 edit_file 微调个别页，再跑批量检查。
 
 **兜底：手写 SVG**（骨架覆盖不了的定制版式）。每页写入 `<project_dir>/svg_output/slide_NN.svg`…。
 

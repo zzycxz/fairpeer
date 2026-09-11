@@ -2435,7 +2435,7 @@ func cacheRateLabel(format string, hit, denom int) string {
 func (m chatTUI) cacheTag() string {
 	now := ""
 	if u := m.ctrl.LastUsage(); u != nil {
-			d := u.CacheHitTokens + u.CacheMissTokens + u.CacheWriteTokens
+		d := u.CacheHitTokens + u.CacheMissTokens + u.CacheWriteTokens
 		if d == 0 {
 			d = u.PromptTokens
 		}
@@ -3712,6 +3712,7 @@ func (m *chatTUI) runExportCommand(input string) {
 		return
 	}
 
+	full := strings.Contains(strings.ToLower(input), "--full")
 	var b strings.Builder
 	b.WriteString("# fairpeer session\n\n")
 	lastRole := provider.Role("")
@@ -3730,15 +3731,48 @@ func (m *chatTUI) runExportCommand(input string) {
 			lastRole = provider.RoleUser
 		case provider.RoleAssistant:
 			content := strings.TrimSpace(provider.ContentString(msg.Content))
-			if content == "" {
+			// --full (P1-D3): keep the reasoning chain and tool calls — sharing
+			// HOW the agent solved it is often the point of an export; the
+			// filtered view stays the default for a clean read.
+			reasoning := ""
+			if full && strings.TrimSpace(msg.ReasoningContent) != "" {
+				reasoning = "<details><summary>reasoning</summary>\n\n" + strings.TrimSpace(msg.ReasoningContent) + "\n\n</details>\n\n"
+			}
+			toolBlock := ""
+			if full {
+				for _, tc := range msg.ToolCalls {
+					args := tc.Arguments
+					if len(args) > 500 {
+						args = args[:500] + " …"
+					}
+					toolBlock += "**→ " + tc.Name + "** `" + args + "`\n\n"
+				}
+			}
+			if content == "" && reasoning == "" && toolBlock == "" {
 				continue
 			}
 			if lastRole != provider.RoleAssistant {
 				b.WriteString("## Assistant\n\n")
 			}
+			b.WriteString(toolBlock)
+			b.WriteString(reasoning)
 			b.WriteString(content)
 			b.WriteString("\n\n")
 			lastRole = provider.RoleAssistant
+		case provider.RoleTool:
+			// Tool results land under the preceding assistant turn (--full),
+			// trimmed hard — they are evidence, not prose.
+			if !full || lastRole != provider.RoleAssistant {
+				continue
+			}
+			out := strings.TrimSpace(provider.ContentString(msg.Content))
+			if out == "" {
+				continue
+			}
+			if len(out) > 800 {
+				out = out[:800] + " …(cut)"
+			}
+			b.WriteString("<details><summary>tool result</summary>\n\n```\n" + out + "\n```\n\n</details>\n\n")
 		}
 	}
 

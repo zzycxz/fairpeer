@@ -38,7 +38,7 @@ type llmExtractor struct {
 	client  *http.Client
 	// budget gates LLM calls through the global RPM limiter so extraction
 	// shares the same per-minute quota as the main agent, subagents, and
-	// dream/distill. nil = limiting disabled (no blocking). Set by boot.go
+	// dream. nil = limiting disabled (no blocking). Set by boot.go
 	// via SetBudget; extraction runs at background priority (false) so it
 	// doesn't starve the interactive conversation.
 	budget    BudgetAcquirer
@@ -182,16 +182,54 @@ func (e *llmExtractor) chatJSON(ctx context.Context, apiKey, userMsg string) (st
 	defer resp.Body.Close()
 	respBytes, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
+		// Some OpenAI-compatible providers reject response_format entirely
+		// (HTTP 400 naming the field). One graceful retry WITHOUT it: the
+		// prompt already demands JSON, so the fence stripper handles the rest.
+		if resp.StatusCode == 400 && reqBodyHasResponseFormat(body) {
+			retryBody, _ := json.Marshal(struct {
+				Model       string        `json:"model"`
+				Messages    []chatMessage `json:"messages"`
+				Temperature float64       `json:"temperature"`
+			}{Model: e.cfg.Model, Messages: []chatMessage{{Role: "user", Content: userMsg}}, Temperature: 0})
+			retryReq, err2 := http.NewRequestWithContext(ctx, "POST", e.baseURL+"/chat/completions", bytes.NewReader(retryBody))
+			if err2 != nil {
+				return "", fmt.Errorf("extract http: %w", err2)
+			}
+			retryReq.Header.Set("Content-Type", "application/json")
+			retryReq.Header.Set("Authorization", "Bearer "+apiKey)
+			resp2, err2 := e.client.Do(retryReq)
+			if err2 != nil {
+				return "", fmt.Errorf("extract http: %w", err2)
+			}
+			defer resp2.Body.Close()
+			respBytes, _ = io.ReadAll(resp2.Body)
+			if resp2.StatusCode != 200 {
+				return "", fmt.Errorf("extract HTTP %d: %s", resp2.StatusCode, truncateStr(string(respBytes), 300))
+			}
+			return extractContent(respBytes)
+		}
 		return "", fmt.Errorf("extract HTTP %d: %s", resp.StatusCode, truncateStr(string(respBytes), 300))
 	}
+	return extractContent(respBytes)
+}
+
+// extractContent pulls the assistant message text out of a chat completions
+// response body.
+func extractContent(body []byte) (string, error) {
 	var cr chatCompletionsResponse
-	if err := json.Unmarshal(respBytes, &cr); err != nil {
+	if err := json.Unmarshal(body, &cr); err != nil {
 		return "", fmt.Errorf("parse chat response: %w", err)
 	}
 	if len(cr.Choices) == 0 {
 		return "", fmt.Errorf("no choices in response")
 	}
 	return stripCodeFence(cr.Choices[0].Message.Content), nil
+}
+
+// reqBodyHasResponseFormat reports whether a marshaled request body actually
+// carried the response_format field (guarding the 400-retry loop).
+func reqBodyHasResponseFormat(body []byte) bool {
+	return strings.Contains(string(body), `"response_format"`)
 }
 
 // formatKnownNodes renders the stage-1 entity list as the bullet list injected

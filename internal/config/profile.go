@@ -114,16 +114,20 @@ func builtinProfiles() []Profile {
 			Name:        ProfileDev,
 			DisplayName: "编码",
 			// Skill whitelist: dev mode is coding-domain. Office skills
-			// (browser/desktop/ppt/email/rag/schedule/document/expert) and the
+			// (browser/desktop/ppt/email/rag/document/expert) and the
 			// ops reference card (netdev-help) are disabled — they don't appear
-			// in the index and run_skill reports them disabled. Users who want
-			// them back can override in fairpeer.toml:
+			// in the index and run_skill reports them disabled. schedule-auto
+			// is the exception: reminders/scheduled tasks are a GLOBAL
+			// capability (profile-partitioned tools, see builtin.SchedulerTools),
+			// and the skill is its operating manual. Users who want the office
+			// skills back can override in fairpeer.toml:
 			//   [[profiles]]
 			//   name = "dev"
 			//   enabled_skills = []   # empty = all skills
 			EnabledSkills: []string{
 				"init", "install-capability", "test",
 				"explore", "research", "review", "security-review",
+				"schedule-auto",
 			},
 			// SkillDomains carries just the "code" sentinel: domained user
 			// skills (browser-ops, netdev — their tools aren't registered in
@@ -196,12 +200,17 @@ func builtinProfiles() []Profile {
 			// but cannot turn the whitelist off.
 			ToolScope:               ToolScopeNetDevOnly,
 			LoadProjectInstructions: &[]bool{false}[0],
+			// schedule-auto rides along the full coding set: reminders are a
+			// global capability and the schedule_* tools are partition-bound +
+			// delivery-clamped, so they cannot pierce the seal below (no bash,
+			// no file writes — the tools only write calendar/scheduler rows).
 			EnabledSkills: []string{
 				"init", "install-capability", "test",
 				"explore", "research", "review", "security-review",
 				"netdev-help",
 				"netdev-seccheck-auto", "netdev-diag-auto",
 				"netdev-config-vault",
+				"schedule-auto",
 			},
 			// 浏览器归属办公（用户定稿 2026-09-06）：browser-ops 域从运维
 			// 索引移除——站点浏览器技能（态势感知/IT 平台问答）在办公界面

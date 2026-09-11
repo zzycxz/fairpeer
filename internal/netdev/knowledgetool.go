@@ -23,7 +23,8 @@ func (t *knowledgeTool) Name() string { return "netdev_knowledge" }
 
 func (t *knowledgeTool) Description() string {
 	return "Load ONE externalized knowledge table for the blue-team entry forms: ids segment-priors (网段先验：网关候选/采样点位/≥2活闸门/TTL 解读/段职能→动作), " +
-		"credential-spots (H1 凭据存放点巡检表——只判存在与暴露，不取值), host-risk-checks (H2 本机风险检查——阳性判据+误报回退成对). " +
+		"credential-spots (H1 凭据存放点巡检表——只判存在与暴露，不取值), host-risk-checks (H2 本机风险检查——阳性判据+误报回退成对), " +
+		"baseline-rules (配置安全基线规则表——按驱动键分族的模式规则，引擎自动加载；此处通常无需读取，排查规则覆盖时用). " +
 		"Run it at the start of 入口=主机/网段 workflows and follow the table entries; the content hash lands in the audit chain."
 }
 
@@ -31,7 +32,7 @@ func (t *knowledgeTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"id": {"type": "string", "enum": ["segment-priors", "credential-spots", "host-risk-checks"], "description": "knowledge table id"}
+			"id": {"type": "string", "enum": ["segment-priors", "credential-spots", "host-risk-checks", "baseline-rules"], "description": "knowledge table id"}
 		},
 		"required": ["id"]
 	}`)

@@ -1509,26 +1509,23 @@ function MemoryTimelineCard({
 	);
 }
 
-// SelfEvolutionSection is the Dream/Distill configuration + status block at the
+// SelfEvolutionSection is the Dream configuration + status block at the
 // top of the Memory settings page. Dream consolidates session knowledge into
-// project memory; Distill extracts repeated workflows into skills. Both run in
-// the background on a cadence; here the user can toggle them, set the cadence,
-// run them on demand, and see when they last ran.
+// project memory. It runs in the background on a cadence; here the user can
+// toggle it, set the cadence, run it on demand, and see when it last ran.
 function SelfEvolutionSection() {
 	const t = useT();
 	const [status, setStatus] = useState<DreamStatusView | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	// Interval drafts are edited locally then saved on blur / button.
+	// Interval draft is edited locally then saved on blur / button.
 	const [dreamDraft, setDreamDraft] = useState("");
-	const [distillDraft, setDistillDraft] = useState("");
 
 	const reload = useCallback(async () => {
 		const s = await app.DreamStatus().catch(() => null);
 		setStatus(s);
 		if (s) {
 			setDreamDraft(String(s.dreamInterval));
-			setDistillDraft(String(s.distillInterval));
 		}
 	}, []);
 	useEffect(() => { void reload(); }, [reload]);
@@ -1564,17 +1561,11 @@ function SelfEvolutionSection() {
 		}
 	};
 
-	const saveIntervals = async () => {
+	const saveInterval = async () => {
 		const d = Math.max(1, Math.floor(Number(dreamDraft) || 0));
-		const di = Math.max(1, Math.floor(Number(distillDraft) || 0));
 		setDreamDraft(String(d));
-		setDistillDraft(String(di));
-		if (status && d === status.dreamInterval && di === status.distillInterval) return;
-		await apply(() => app.SetDreamIntervals(d, di));
-	};
-
-	const trigger = async (kind: "dream" | "distill") => {
-		await apply(() => (kind === "dream" ? app.TriggerDream() : app.TriggerDistill()));
+		if (status && d === status.dreamInterval) return;
+		await apply(() => app.SetDreamInterval(d));
 	};
 
 	const disabled = !status?.enabled;
@@ -1642,7 +1633,7 @@ function SelfEvolutionSection() {
 								disabled={busy || disabled}
 								inputMode="numeric"
 								onChange={(e) => setDreamDraft(e.target.value.replace(/[^\d]/g, ""))}
-								onBlur={() => void saveIntervals()}
+								onBlur={() => void saveInterval()}
 								onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
 							/>
 							<small>{t("dream.days")}</small>
@@ -1651,45 +1642,9 @@ function SelfEvolutionSection() {
 							type="button"
 							className="btn btn--secondary btn--small"
 							disabled={busy || disabled || status.dreamInFlight}
-							onClick={() => void trigger("dream")}
+							onClick={() => void apply(() => app.TriggerDream())}
 						>
 							{status.dreamInFlight ? t("dream.running") : t("dream.runNow")}
-						</button>
-					</div>
-				</div>
-
-				{/* Distill: workflow extraction */}
-				<div className={`dream-card${disabled ? " dream-card--disabled" : ""}`}>
-					<div className="dream-card__head">
-						<strong>{t("dream.distillName")}</strong>
-						<span className="dream-card__status">
-							{status.distillInFlight ? t("dream.running") : t("dream.lastRun", { when: fmtAgo(status.lastDistill) })}
-						</span>
-					</div>
-					<div className="mem-note">{t("dream.distillDesc")}</div>
-					<div className="dream-card__controls">
-						<label className="dream-interval">
-							<span>{t("dream.interval")}</span>
-							<input
-								className="mem-input dream-interval__input"
-								type="number"
-								min={1}
-								value={distillDraft}
-								disabled={busy || disabled}
-								inputMode="numeric"
-								onChange={(e) => setDistillDraft(e.target.value.replace(/[^\d]/g, ""))}
-								onBlur={() => void saveIntervals()}
-								onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-							/>
-							<small>{t("dream.days")}</small>
-						</label>
-						<button
-							type="button"
-							className="btn btn--secondary btn--small"
-							disabled={busy || disabled || status.distillInFlight}
-							onClick={() => void trigger("distill")}
-						>
-							{status.distillInFlight ? t("dream.running") : t("dream.runNow")}
 						</button>
 					</div>
 				</div>
@@ -1700,7 +1655,7 @@ function SelfEvolutionSection() {
 					<div className="dream-history__title">{t("dream.history")}</div>
 					{status.history.slice(0, 6).map((r, i) => (
 						<div key={i} className={`dream-history__row dream-history__row--${r.status}`}>
-							<span className="dream-history__kind">{r.kind === "distill" ? t("dream.distillName") : t("dream.dreamName")}</span>
+							<span className="dream-history__kind">{t("dream.dreamName")}</span>
 							<span className="dream-history__when">{fmtAgo(r)}</span>
 							<span className="dream-history__tag">{r.trigger === "manual" ? t("dream.manual") : t("dream.auto")}</span>
 							<span className="dream-history__state">{r.status === "ok" ? t("dream.ok") : r.status === "timeout" ? t("dream.timeout") : t("dream.failed")}</span>

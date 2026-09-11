@@ -8,6 +8,7 @@ import { useEffect, useState, useRef, useMemo, type ReactNode } from "react";
 import { Plus, X, ChevronDown, Search } from "lucide-react";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { AnchoredPopover } from "./AnchoredPopover";
+import { useT } from "../lib/i18n";
 
 // loadDockTabState reads a persisted open-tab list, falling back to the full
 // catalog when absent/corrupt — the coding dock's DOCK_TABS_KEY pattern.
@@ -68,6 +69,7 @@ export function DockTabs<K extends string>({
   closeLabel: string;
   addLabel: string;
 }) {
+  const t = useT();
   const [addPoint, setAddPoint] = useState<{ left: number; top: number } | null>(null);
   
   const searchButtonRef = useRef<HTMLButtonElement>(null);
@@ -95,8 +97,8 @@ export function DockTabs<K extends string>({
         type="button"
         className="workbench-dock__tab-search-btn"
         onClick={() => { setSearchOpen(!searchOpen); setSearchQuery(""); }}
-        aria-label="搜索标签页"
-        title="搜索标签页"
+        aria-label={t("dock.searchTabs")}
+        title={t("dock.searchTabs")}
       >
         <ChevronDown size={14} />
       </button>
@@ -112,15 +114,15 @@ export function DockTabs<K extends string>({
           <Search size={14} className="dock-search-popover__icon" />
           <input 
             ref={searchInputRef}
-            className="dock-search-popover__input" 
-            placeholder="搜索标签页" 
+            className="dock-search-popover__input"
+            placeholder={t("dock.searchTabs")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
         <div className="dock-search-popover__list">
           {filteredTabs.length === 0 ? (
-            <div className="dock-search-popover__empty">无匹配项</div>
+            <div className="dock-search-popover__empty">{t("dock.noMatches")}</div>
           ) : (
             filteredTabs.map(def => (
               <button
@@ -140,7 +142,7 @@ export function DockTabs<K extends string>({
                     e.stopPropagation();
                     onClose(def.key);
                   }}
-                  title="关闭标签页"
+                  title={closeLabel}
                 >
                   <X size={14} />
                 </button>
@@ -224,7 +226,7 @@ export function DockTabs<K extends string>({
             items.push({
               key: def.key,
               icon: def.icon,
-              label: isOpen(def.key) ? `${def.label} (打开)` : def.label,
+              label: isOpen(def.key) ? t("dock.openSuffix", { label: def.label }) : def.label,
               onSelect: () => {
                 setAddPoint(null);
                 onSelect(def.key);

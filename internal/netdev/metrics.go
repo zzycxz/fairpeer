@@ -87,6 +87,21 @@ func metricsOpen() (*sql.DB, error) {
 	return db, nil
 }
 
+// metricsClose checkpoints the WAL and closes the process-lifetime singleton.
+// Called from Manager.Close so the .db is self-contained for backup/copy
+// migration (same rationale as calendar/rag Store.Close).
+func metricsClose() {
+	metricsMu.Lock()
+	db := metricsDB
+	metricsDB = nil
+	metricsMu.Unlock()
+	if db == nil {
+		return
+	}
+	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	_ = db.Close()
+}
+
 // RecordMetricPoint appends one poll rollup and trims the ring.
 func RecordMetricPoint(device string, p MetricPoint) error {
 	db, err := metricsOpen()

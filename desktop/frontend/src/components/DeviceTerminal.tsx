@@ -44,6 +44,9 @@ export function DeviceTerminal({ device }: { device: string }) {
 
     const term = new Terminal({
       fontSize: 12,
+      // Same stack as TerminalSession so device tabs and PTY tabs render with
+      // identical metrics.
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
       cursorBlink: true,
       convertEol: false,
       cols: DEV_COLS,

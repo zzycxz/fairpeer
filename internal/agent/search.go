@@ -28,9 +28,9 @@ type SearchHit struct {
 }
 
 const (
-	searchHitCap   = 50 // max sessions returned
-	excerptCap     = 2  // excerpts per session
-	excerptContext = 60 // chars of context around the match
+	searchHitCap   = 50       // max sessions returned
+	excerptCap     = 2        // excerpts per session
+	excerptContext = 60       // chars of context around the match
 	maxScanBytes   = 32 << 20 // skip sessions larger than 32MB ( pathological)
 )
 

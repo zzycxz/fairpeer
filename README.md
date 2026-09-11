@@ -68,7 +68,7 @@ irm https://fairpeer.dev/install.ps1 | iex
 fairpeer setup
 
 # Or manually edit config file
-vim ~/.config/fairpeer/fairpeer.toml
+vim ~/.config/fairpeer/config.toml   # Windows: %APPDATA%\fairpeer\config.toml | macOS: ~/Library/Application Support/fairpeer/config.toml
 ```
 
 ### Run
@@ -242,7 +242,9 @@ args = ["server.js"]
 ### Config File Locations
 
 ```
-~/.config/fairpeer/fairpeer.toml    # Global config
+~/.config/fairpeer/config.toml        # Global config (Linux)
+%AppData%\fairpeer\config.toml      # Global config (Windows)
+~/Library/Application Support/fairpeer/config.toml  # Global config (macOS)
 ./fairpeer.toml                     # Project config
 ./.env                              # Environment variables
 ```

@@ -48,6 +48,7 @@ type ProviderView struct {
 	// registry flags reasoning-capable. Display-only (pickers show a badge);
 	// never consulted by the behaviour layer (MODEL_ROUTING_SPEC §5).
 	ReasoningModels []string `json:"reasoningModels,omitempty"`
+	Vision          bool     `json:"vision"`
 }
 
 type PermissionsView struct {
@@ -149,7 +150,7 @@ type WebSearchView struct {
 type SettingsView struct {
 	DefaultModel string `json:"defaultModel"`
 	PlannerModel string `json:"plannerModel"`
-	// FastTaskModel is the lightweight model dream/distill run on (background
+	// FastTaskModel is the lightweight model dream runs on (background
 	// tasks). The SettingsPanel exposes a per-model picker next to the default
 	// model so the user can route background tasks to a cheaper/faster model.
 	FastTaskModel     string             `json:"fastTaskModel"`
@@ -303,6 +304,7 @@ func providerViewFromEntry(p config.ProviderEntry, builtIn, added bool) Provider
 		// Registry-flagged reasoning models among the enabled chat models
 		// (display-only badge; unknown providers yield nil).
 		ReasoningModels: registryReasoningAmong(p.Name, models),
+		Vision:          p.Vision,
 	}
 }
 
@@ -937,6 +939,16 @@ func (a *App) SaveProvider(p ProviderView) error {
 				break
 			}
 		}
+
+		// Restore unexposed registry properties that a bare SaveProvider would
+		// otherwise zero out (or fix ones previously zeroed by older versions).
+		if tmpl := globalRegistry.Find(p.Name); tmpl != nil {
+			e.Vision = tmpl.Vision
+			e.CodingOnly = tmpl.CodingOnly
+			e.Aggregator = tmpl.Aggregator
+			e.FastModel = tmpl.FastModel
+		}
+
 		e.Name = p.Name
 		e.Kind = p.Kind
 		e.BaseURL = p.BaseURL
@@ -946,6 +958,7 @@ func (a *App) SaveProvider(p ProviderView) error {
 		e.ReasoningProtocol = p.ReasoningProtocol
 		e.SupportedEfforts = p.SupportedEfforts
 		e.DefaultEffort = p.DefaultEffort
+		e.Vision = p.Vision
 		e.Model = ""
 		e.Models = nil
 		e.Default = ""

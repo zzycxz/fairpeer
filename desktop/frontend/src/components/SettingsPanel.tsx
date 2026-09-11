@@ -4,6 +4,7 @@ import { Check, CheckCircle2, ChevronDown, Loader2, QrCode, RefreshCw, Trash2, B
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app } from "../lib/bridge";
+import { useToast } from "../lib/toast";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { mergedFetchedProviderModels, providerDefaultModel, providerModelCandidates } from "../lib/providerModels";
 import { useUpdater } from "../lib/useUpdater";
@@ -36,7 +37,7 @@ export const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "cowor
 // SettingsPanel is the desktop settings centre — a centred modal with left
 // navigation and a right content area. It hosts all settings pages plus MCP,
 // Skills, and Memory management, replacing the old per-feature drawers.
-export function SettingsPanel({ onClose, onChanged, initialTab, initialPayload }: { onClose: () => void; onChanged: () => void; initialTab?: SettingsTab; initialPayload?: string }) {
+export function SettingsPanel({ onClose, onChanged, initialTab, initialPayload, platform = "windows" }: { onClose: () => void; onChanged: () => void; initialTab?: SettingsTab; initialPayload?: string; platform?: "darwin" | "windows" | "linux" }) {
   const t = useT();
   const [s, setS] = useState<SettingsView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -134,9 +135,9 @@ export function SettingsPanel({ onClose, onChanged, initialTab, initialPayload }
             ) : (
               <>
                 {tab === "general" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "models" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} /></SettingsPageShell>}
+                {tab === "models" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} platform={platform} /></SettingsPageShell>}
                 {tab === "bots" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "cowork" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><CoWorkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "cowork" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><CoWorkSection s={s} busy={busy} apply={apply} platform={platform} /></SettingsPageShell>}
                 {tab === "netdev" && <NetDevSection />}
                 {tab === "trustdomain" && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><TrustDomainPanel /></SettingsPageShell>}
                 {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy ?? false} apply={apply}><MCPServersSettingsPage initialHighlight={initialPayload} />{s && <WebSearchSection s={s} busy={busy} apply={apply} />}</SettingsPageShell>}
@@ -301,7 +302,17 @@ type SectionProps = {
   s: SettingsView;
   busy: boolean;
   apply: (fn: () => Promise<void>) => Promise<void>;
+  // Desktop OS the panel runs on — only sections with platform-specific
+  // behaviour (currently CoWorkSection's estop hotkey) consume it.
+  platform?: "darwin" | "windows" | "linux";
 };
+
+// Default estop combo per platform. Pause is absent from most Mac keyboards,
+// and the macOS global-key listener only sees modifier chords, so darwin seeds
+// a three-modifier default instead (see settings.estopHintDarwin).
+function defaultEstopHotkey(platform: string | undefined): string {
+  return platform === "darwin" ? "Ctrl+Alt+Cmd+G" : "Ctrl+Shift+Pause";
+}
 
 // MobileSection —— linkpeer 移动端配对面板（调 MobileBridge* 绑定）。
 // 开始配对 → 显示二维码/配对码 → linkpeer 扫码 → 待确认设备允许/拒绝。
@@ -1018,6 +1029,7 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
           ))}
         </div>
       </SettingsField>
+      <AutostartField />
       <SettingsField label={t("settings.expandThinking")}>
         <div className="set-seg">
           {([false, true] as const).map((val) => (
@@ -1064,6 +1076,56 @@ function GeneralSection({ s, busy, apply }: SectionProps) {
         </div>
       </SettingsField>
     </SettingsSection>
+  );
+}
+
+// AutostartField — "开机自启动 / Launch at login" toggle beside the
+// close-behavior control in General. Reads the OS registration on mount,
+// applies via SetAutostart, then re-reads to confirm the backend actually
+// (un)registered the entry; an error or a mismatch surfaces the failure toast
+// and the switch snaps back to the reported truth.
+function AutostartField() {
+  const t = useT();
+  const { showToast } = useToast();
+  const [autostart, setAutostart] = useState(false);
+  const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    app.GetAutostart().then((v) => { if (alive) setAutostart(!!v); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  const toggle = async (next: boolean) => {
+    if (pending) return;
+    setPending(true);
+    setAutostart(next); // optimistic; corrected below from the backend
+    try {
+      await app.SetAutostart(next);
+      const confirmed = await app.GetAutostart();
+      if (confirmed !== next) showToast(t("settings.autostartFailed"), "error");
+      setAutostart(confirmed);
+    } catch {
+      const current = await app.GetAutostart().catch(() => !next);
+      setAutostart(current);
+      showToast(t("settings.autostartFailed"), "error");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <SettingsField label={t("settings.autostart")} hint={t("settings.autostartHint")}>
+      <label className="cap-switch">
+        <input
+          type="checkbox"
+          checked={autostart}
+          disabled={pending}
+          onChange={(e) => void toggle(e.target.checked)}
+        />
+        <span className="cap-switch__track" />
+      </label>
+    </SettingsField>
   );
 }
 
@@ -1329,7 +1391,15 @@ function HooksSection({ onChanged }: { onChanged: () => void }) {
   };
   const pasteHooksJSON = async () => {
     try {
-      const raw = await navigator.clipboard?.readText();
+      // navigator.clipboard.readText is unavailable inside WKWebView (macOS)
+      // and permission-gated in WebKitGTK (Linux) — prefer the backend
+      // binding, which shells out to pbpaste / Get-Clipboard / wl-paste.
+      let raw = "";
+      try {
+        raw = await app.ReadClipboardText();
+      } catch {
+        raw = await navigator.clipboard?.readText();
+      }
       if (!raw) throw new Error(t("settings.hooksJsonClipboardEmpty"));
       setJsonText(raw);
       formatHooksEditorJSON(raw);
@@ -2372,7 +2442,7 @@ function sanitizeBotDraft(draft: BotSettingsView): BotSettingsView {
   };
 }
 
-function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) {
+function ModelsSection({ s, busy, apply, backgroundApply, platform }: ModelsSectionProps) {
   const t = useT();
   const [subtab, setSubtab] = useState<"usage" | "access">("usage");
   const autoRefreshKeyRef = useRef("");
@@ -2480,7 +2550,7 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
                     pptActiveTemplate: "", pptTemplates: [], pptTemplateDir: "",
                     smtpPassword: "", imapPassword: "", smtpPasswordSet: false, imapPasswordSet: false, detectedBrowser: "",
                     screenshotEnabled: false, screenshotHotkey: "Ctrl+Shift+Alt+W", screenshotVlmModel: "", screenshotPrompt: "",
-                    estopHotkey: "Ctrl+Shift+Pause", voiceModel: "",
+                    estopHotkey: defaultEstopHotkey(platform), voiceModel: "",
                   };
                   void apply(() => app.SetCoWorkSettings({ ...base, screenshotVlmModel: vlm } as any));
                 }}
@@ -2501,7 +2571,7 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
                     pptActiveTemplate: "", pptTemplates: [], pptTemplateDir: "",
                     smtpPassword: "", imapPassword: "", smtpPasswordSet: false, imapPasswordSet: false, detectedBrowser: "",
                     screenshotEnabled: false, screenshotHotkey: "Ctrl+Shift+Alt+W", screenshotVlmModel: "", screenshotPrompt: "",
-                    estopHotkey: "Ctrl+Shift+Pause", voiceModel: "",
+                    estopHotkey: defaultEstopHotkey(platform), voiceModel: "",
                   };
                   void apply(() => app.SetCoWorkSettings({ ...base, voiceModel: voice } as any));
                 }}
@@ -4635,7 +4705,7 @@ function browserDisplayName(path: string): string {
   return base ? base.replace(/\.exe$/, "") : "";
 }
 
-function CoWorkSection({ s, busy, apply }: SectionProps) {
+function CoWorkSection({ s, busy, apply, platform = "windows" }: SectionProps) {
   const t = useT();
   const refs = allRefs(s);
   const [draft, setDraft] = useState<CoWorkSettingsView>(() => {
@@ -4644,7 +4714,7 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
       pptActiveTemplate: "", pptTemplates: [], pptTemplateDir: "",
       smtpPassword: "", imapPassword: "", smtpPasswordSet: false, imapPasswordSet: false, detectedBrowser: "",
       screenshotEnabled: false, screenshotHotkey: "Ctrl+Shift+Alt+W", screenshotVlmModel: "", screenshotPrompt: "",
-      estopHotkey: "Ctrl+Shift+Pause", voiceModel: "",
+      estopHotkey: defaultEstopHotkey(platform), voiceModel: "",
     };
     // Default mail provider = 139 (China Mobile). Only when the user hasn't
     // configured mail yet (no saved SMTP host); a saved config — including one
@@ -4757,7 +4827,9 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
       if (e.ctrlKey) parts.push("Ctrl");
       if (e.altKey) parts.push("Alt");
       if (e.shiftKey) parts.push("Shift");
-      if (e.metaKey) parts.push("Win");
+      // Meta keycap label follows the recorded platform: Cmd on macOS,
+      // Super on Linux, Win on Windows (same source as the platform prop).
+      if (e.metaKey) parts.push(platform === "darwin" ? "Cmd" : platform === "linux" ? "Super" : "Win");
       // Single-char keys are upper-cased to match the backend parser (keyToVK
       // accepts A-Z / 0-9); named keys (F1, Enter, Pause…) are kept verbatim.
       const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
@@ -5409,6 +5481,54 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
               />
             </div>
           </OptionalModule>
+          {/* 深度抽取调优：并发 + 空闲自动重试（opt-in，面板常驻可见）。
+              注意：CoWork 区的 onBlur=commitCurrent 模式被 dirtyRef 门控（只有
+              邮件卡片置 dirty），因此数字控件走 onChange+commitDraft 直接落盘。 */}
+          <SettingsField label={t("cowork.extractConcurrencyLabel")} hint={t("cowork.extractConcurrencyHint")}>
+            <input
+              className="mem-input"
+              type="number"
+              min={1}
+              max={8}
+              style={{ width: 80 }}
+              value={draft.extractConcurrency ?? 1}
+              onChange={e => {
+                const v = Math.max(1, Math.min(8, Math.round(Number(e.target.value) || 1)));
+                const n = { ...draftRef.current, extractConcurrency: v };
+                setDraft(n); commitDraft(n);
+              }}
+            />
+          </SettingsField>
+          <SettingsField label={t("cowork.extractAutoRetryLabel")} hint={t("cowork.extractAutoRetryHint")}>
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <label className="cap-switch">
+                <input
+                  type="checkbox"
+                  checked={!!draft.extractAutoRetry}
+                  onChange={e => { const n = { ...draftRef.current, extractAutoRetry: e.target.checked }; setDraft(n); commitDraft(n); }}
+                />
+                <span className="cap-switch__track" />
+              </label>
+              {!!draft.extractAutoRetry && (
+                <label style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 12, color: "var(--fg-dim)" }}>
+                  {t("cowork.extractAutoRetryRoundsLabel")}
+                  <input
+                    className="mem-input"
+                    type="number"
+                    min={1}
+                    max={5}
+                    style={{ width: 64 }}
+                    value={draft.extractAutoRetryMaxRounds ?? 2}
+                    onChange={e => {
+                      const v = Math.max(1, Math.min(5, Math.round(Number(e.target.value) || 2)));
+                      const n = { ...draftRef.current, extractAutoRetryMaxRounds: v };
+                      setDraft(n); commitDraft(n);
+                    }}
+                  />
+                </label>
+              )}
+            </div>
+          </SettingsField>
         </OptionalModule>
 
       </SettingsSection>
@@ -5487,14 +5607,24 @@ function CoWorkSection({ s, busy, apply }: SectionProps) {
       </SettingsSection>
 
       {/* --- 紧急停止（全局热键 → 中断 AI 桌面自动化） --- */}
+      {/* 全局热键现已覆盖全部平台（Windows 原生；Linux 走 xinput/X11 组合键；
+          macOS 仅识别修饰键和弦）。各平台给出能力边界说明，输入不再禁用，
+          避免用户录了平台不支持的组合键（如 macOS 上的 Pause）。 */}
       <SettingsSection title={t("settings.estopTitle")}>
-        <SettingsField label={t("settings.estopHotkeyLabel")} hint={t("settings.estopHotkeyHint")}>
+        <SettingsField
+          label={t("settings.estopHotkeyLabel")}
+          hint={
+            platform === "windows" ? t("settings.estopHotkeyHint")
+            : platform === "linux" ? t("settings.estopHintLinux")
+            : t("settings.estopHintDarwin")
+          }
+        >
           <div className="set-input-browse">
             <input
               className="mem-input"
-              value={recordingEStopHotkey ? t("settings.hotkeyRecord") : (draft.estopHotkey ?? "Ctrl+Shift+Pause")}
+              value={recordingEStopHotkey ? t("settings.hotkeyRecord") : (draft.estopHotkey ?? defaultEstopHotkey(platform))}
               readOnly={recordingEStopHotkey}
-              placeholder="Ctrl+Shift+Pause"
+              placeholder={defaultEstopHotkey(platform)}
               onBlur={() => { if (recordingEStopHotkey) setRecordingEStopHotkey(false); else commitCurrent(); }}
               onChange={e => !recordingEStopHotkey && setDraft(d => { const n = { ...d, estopHotkey: e.target.value }; return n; })}
             />

@@ -8,6 +8,7 @@ import { CustomSelect, type CustomSelectOption } from "./CustomSelect";
 
 import { app } from "../../lib/bridge";
 import { useT } from "../../lib/i18n";
+import { humanizeRagError } from "../../lib/ragError";
 import { asArray } from "../../lib/array";
 import { useToast } from "../../lib/toast";
 import { useConfirm } from "../../lib/confirm";
@@ -57,34 +58,21 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
   const { showToast } = useToast();
   const confirm = useConfirm();
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [heReady, setHeReady] = useState<boolean | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState("general/graph");
   const [jobs, setJobs] = useState<ExtractJob[]>([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<RagExtractResultView | null>(null);
   const [showResult, setShowResult] = useState(false);
-  const [, setDocCount] = useState<number>(-1); // -1 = loading; setter used in effect
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Load templates, HE health, and document count on mount.
+  // Load templates and extraction summary on mount.
   useEffect(() => {
-    app.HEHealth().then((h) => setHeReady(h.ready)).catch(() => setHeReady(false));
     app.RagListHETemplates().then((ts) => {
       if (ts.length > 0) setTemplates(ts);
     }).catch(() => {});
     app.RagExtractResult(collection).then((r) => {
       if (r.hasData) setResult(r);
     }).catch(() => {});
-    // Check if the collection has any documents (flatten tree to find all file nodes).
-    app.ListRagTree(collection).then((tree) => {
-      const flatAll = (nodes: RagNodeView[]): RagNodeView[] => {
-        const out: RagNodeView[] = [];
-        for (const n of nodes) { out.push(n); if (n.children) out.push(...flatAll(n.children)); }
-        return out;
-      };
-      const count = flatAll(tree).filter((n) => n.kind === "file").length;
-      setDocCount(count);
-    }).catch(() => setDocCount(0));
   }, [collection]);
 
   // Clean up polling on unmount.
@@ -148,7 +136,7 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
         ]).then(([tree, extractResult]) => {
           const flat = flatNodes(tree);
           const mapped: ExtractJob[] = flat
-            .filter((n) => n.status === "extracting" || n.status === "queued" || n.status === "error" || n.status === "enriched")
+            .filter((n) => n.status === "extracting" || n.status === "queued" || n.status === "error" || n.status === "enriched" || n.status === "partial")
             .map((n) => ({
               id: n.jobId || n.key,
               collection,
@@ -224,7 +212,7 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
           const flat = flatNodes(tree);
           // Map tree nodes to job-like progress objects.
           const mapped: ExtractJob[] = flat
-            .filter((n) => n.status === "extracting" || n.status === "queued" || n.status === "error" || n.status === "enriched")
+            .filter((n) => n.status === "extracting" || n.status === "queued" || n.status === "error" || n.status === "enriched" || n.status === "partial")
             .map((n) => ({
               id: n.jobId || n.key,
               collection,
@@ -352,9 +340,7 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
       <div className="rag-template__section">
         <span className="rag-template__label">{t("templateSelect.extractEngine")}</span>
         <span className="rag-template__status rag-template__status--ok">
-          {heReady
-            ? t("templateSelect.engineReady") + " (HE enhanced)"
-            : t("templateSelect.engineReady") + " (adaptive two-stage)"}
+          {t("templateSelect.engineReady")} · {t("templateSelect.engineGo")}
         </span>
       </div>
 
@@ -535,7 +521,7 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
                     pendingCount > 0 ? t("templateSelect.waiting", { done: String(doneCount), total: String(total) }) :
                     t("templateSelect.progressDone", { done: String(doneCount), total: String(total) })
                   ) : (
-                    t("templateSelect.progressDone", { done: String(doneCount), total: String(total) }) + (failedCount > 0 ? `, ${failedCount} failed` : "")
+                    t("templateSelect.progressDone", { done: String(doneCount), total: String(total) }) + (failedCount > 0 ? " · " + t("templateSelect.nFailed", { n: failedCount }) : "")
                   )}
                 </span>
               </div>
@@ -548,12 +534,12 @@ export function TemplateSelect({ collection, collections, onCollectionChange, on
               <span className="rag-template__job-status">
                 {j.status === "done" ? `✓ ${j.entities} ${t("templateSelect.entitiesCount").toLowerCase()}` :
                  j.status === "running" || j.status === "extracting" ? `${j.progress}%` :
-                 j.status === "failed" ? `✗ failed` :
-                 j.status === "queued" || j.status === "pending" ? "waiting" :
+                 j.status === "failed" ? t("templateSelect.jobFailed") :
+                 j.status === "queued" || j.status === "pending" ? t("templateSelect.jobWaiting") :
                  j.status}
               </span>
               {j.status === "failed" && (
-                <button className="rag-template__retry" title={j.error} onClick={() => void handleImmediateExtract()}>
+                <button className="rag-template__retry" disabled={loading} title={humanizeRagError(j.error, t)} onClick={() => void handleImmediateExtract()}>
                   <RefreshCw size={12} />
                 </button>
               )}

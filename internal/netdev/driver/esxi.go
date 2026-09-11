@@ -35,6 +35,10 @@ var esxiTables = classTables{
 		"reboot", "halt", "poweroff", "shutdown", "vim-cmd hostsvc/maintenance_mode_enter",
 		"esxcli system shutdown", "esxcli system maintenancehost", "esxcli vm process kill",
 		"esxcli storage filesystem automount", "dd", "mkfs", "fdisk", "partedUtil -w",
+		// "rm " beats the write table's bare "rm" (dangerous scans first), so
+		// "rm -rf" — recursive deletion on a hypervisor — needs the top tier
+		// like every other shell driver (hosts.go).
+		"rm ",
 	},
 	write: []string{
 		"esxcli network vswitch standard add", "esxcli network vswitch standard uplink add",

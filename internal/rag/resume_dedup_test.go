@@ -45,7 +45,7 @@ func TestEnqueueFileDedupSkipsReExtraction(t *testing.T) {
 		t.Fatalf("dedup should return same job id %q, got %v", jid1[0], jid2)
 	}
 	// Job status must remain "done" (not reset to pending).
-	_, status, _, doneChunks, err := store.JobStatusForPath("c1", fpath)
+	_, status, _, doneChunks, _, err := store.JobStatusForPath("c1", fpath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestEnqueueFileDedupRetriggersWhenChanged(t *testing.T) {
 		t.Fatal("expected 1 job")
 	}
 	// The job should have been reset to pending (re-extraction triggered).
-	_, status2, _, _, err := store.JobStatusForPath("c1", fpath)
+	_, status2, _, _, _, err := store.JobStatusForPath("c1", fpath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestEnqueueFileDedupRetriggersOnContentEditSameChunkCount(t *testing.T) {
 	}
 	// A content edit (even with the same chunk count) must re-trigger: the job
 	// should have been reset to pending, NOT dedup-skipped.
-	_, status, _, _, err := store.JobStatusForPath("c1", fpath)
+	_, status, _, _, _, err := store.JobStatusForPath("c1", fpath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func TestReimportFolderPreservesDoneJobs(t *testing.T) {
 		t.Fatalf("re-import of unchanged files should return 3 jobs, got %d", len(jids2))
 	}
 	for _, fpath := range []string{f1, f2, f3} {
-		_, status, _, _, err := store.JobStatusForPath("c1", fpath)
+		_, status, _, _, _, err := store.JobStatusForPath("c1", fpath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -405,9 +405,9 @@ func TestReimportFolderAddsNewFilesOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	// f1, f2 stay done; f3 is pending (newly enqueued).
-	_, s1, _, _, _ := store.JobStatusForPath("c1", f1)
-	_, s2, _, _, _ := store.JobStatusForPath("c1", f2)
-	_, s3, _, _, _ := store.JobStatusForPath("c1", f3)
+	_, s1, _, _, _, _ := store.JobStatusForPath("c1", f1)
+	_, s2, _, _, _, _ := store.JobStatusForPath("c1", f2)
+	_, s3, _, _, _, _ := store.JobStatusForPath("c1", f3)
 	if s1 != JobDone {
 		t.Errorf("f1 status=%q want done (should be preserved)", s1)
 	}

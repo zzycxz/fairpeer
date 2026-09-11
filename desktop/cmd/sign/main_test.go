@@ -53,9 +53,10 @@ func TestSignFiles(t *testing.T) {
 func TestGenManifest(t *testing.T) {
 	dir := t.TempDir()
 	names := []string{
-		"fairpeer-darwin-arm64.zip",
-		"fairpeer-darwin-amd64.zip",
+		"fairpeer-darwin-arm64.tar.gz",
+		"fairpeer-darwin-amd64.tar.gz",
 		"fairpeer-windows-amd64.exe", // CI-produced binary (updater channel)
+		"fairpeer-windows-amd64.zip", // CI bundle — must be SKIPPED (applyWindows runs an installer, not a zip)
 		"fairpeer-linux-amd64.tar.gz",
 		"fairpeer-linux-amd64.deb",            // human download, not the updater channel
 		"fairpeer-linux-amd64.tar.gz.minisig", // must be skipped
@@ -93,7 +94,7 @@ func TestGenManifest(t *testing.T) {
 	if win.URL != wantURL {
 		t.Fatalf("windows url = %q, want %q", win.URL, wantURL)
 	}
-	wantSig := "https://github.com/zzycxz/fairpeer/releases/download/desktop-v1.2.0-sigs/fairpeer-windows-amd64.exe.minisig"
+	wantSig := "https://github.com/zzycxz/fairpeer/releases/download/desktop-v1.2.0/fairpeer-windows-amd64.exe.minisig"
 	if win.Sig != wantSig {
 		t.Fatalf("windows sig = %q, want %q", win.Sig, wantSig)
 	}
@@ -108,5 +109,13 @@ func TestGenManifest(t *testing.T) {
 	}
 	if !strings.HasSuffix(lin.URL, "/fairpeer-linux-amd64.tar.gz") {
 		t.Fatalf("linux-amd64 url = %q, want the .tar.gz, not the .deb", lin.URL)
+	}
+	// CI zip bundles must never satisfy a platform key: applyWindows runs the
+	// asset as an NSIS installer, so a pinned zip would brick the update.
+	if _, ok := m.Platforms["windows-amd64-zip-shadow"]; ok {
+		t.Fatal("windows-amd64-zip-shadow unexpectedly present")
+	}
+	if got := len(m.Platforms); got != 4 {
+		t.Fatalf("platform count = %d, want 4 (zip bundle skipped, exe pinned): %v", got, m.Platforms)
 	}
 }

@@ -16,6 +16,7 @@ package transport
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -112,6 +113,13 @@ func classifyDialError(err error) error {
 		strings.Contains(msg, "password required but no prompt available") ||
 		strings.Contains(msg, "key passphrase required but no prompt available") {
 		return errAuth{err}
+	}
+	if strings.Contains(msg, "no common algorithm") {
+		// Ancient devices (Cisco IOS 12.x, early VRP5/Comware) only speak
+		// aes*-cbc / 3des-cbc / dh-group1-sha1, which the client does not offer
+		// by default. Point the operator at the per-device opt-in instead of
+		// surfacing the raw x/crypto string.
+		return fmt.Errorf("%w — 该设备仅支持遗留 SSH 算法，请为该设备设置 legacy_algo = true 后重试 (the device only speaks legacy SSH algorithms; set legacy_algo = true on this device)", err)
 	}
 	return err
 }

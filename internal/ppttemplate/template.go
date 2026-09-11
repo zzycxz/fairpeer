@@ -196,11 +196,13 @@ func LoadDir(dir string) ([]Template, error) {
 		return []Template{}, err
 	}
 
-	// Collect .json specs first (canonical).
+	// Collect .json specs first (canonical). Extension matching is
+	// case-insensitive: users drop in "Brand.JSON" from case-sensitive
+	// filesystems and it must still load.
 	var out []Template
 	jsonIDs := map[string]bool{}
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".json") {
 			continue
 		}
 		t, err := loadFile(filepath.Join(dir, e.Name()))
@@ -213,10 +215,11 @@ func LoadDir(dir string) ([]Template, error) {
 
 	// Add .pptx files that don't already have a .json spec.
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".pptx" {
+		ext := filepath.Ext(e.Name())
+		if e.IsDir() || !strings.EqualFold(ext, ".pptx") {
 			continue
 		}
-		id := strings.TrimSuffix(e.Name(), ".pptx")
+		id := strings.TrimSuffix(e.Name(), ext) // case-preserving stem ("Brand.PPTX" → "Brand")
 		if jsonIDs[id] {
 			continue // .json spec takes precedence
 		}
@@ -277,7 +280,23 @@ func LoadActive(dir, id string) (*Template, error) {
 		}
 	}
 
-	// 2. Fallback: check for a .pptx file with matching stem.
+	// 2. Fallback: check for a .pptx file with matching stem. Scan the dir and
+	// compare case-insensitively: os.Stat(dir+"/id.pptx") resolves on Windows'
+	// case-insensitive filesystem but fails on macOS/Linux when the file on
+	// disk is e.g. "Brand.PPTX". The direct Stat below is kept as a fallback so
+	// behavior on already-working setups is unchanged.
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.EqualFold(e.Name(), id+".pptx") {
+				continue
+			}
+			return &Template{
+				ID:         id,
+				Name:       id,
+				MasterFile: filepath.Join(dir, e.Name()),
+			}, nil
+		}
+	}
 	pptxPath := filepath.Join(dir, id+".pptx")
 	if _, statErr := os.Stat(pptxPath); statErr == nil {
 		return &Template{

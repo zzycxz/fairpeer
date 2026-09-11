@@ -112,6 +112,13 @@ func mintRequestIDLocked(now time.Time) string {
 
 // SaveRequest persists the request atomically.
 func SaveRequest(r *Request) error {
+	mu.Lock()
+	defer mu.Unlock()
+	return saveRequestLocked(r)
+}
+
+// saveRequestLocked persists r with the caller holding mu.
+func saveRequestLocked(r *Request) error {
 	r.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	dir := requestsDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -121,9 +128,25 @@ func SaveRequest(r *Request) error {
 	if err != nil {
 		return err
 	}
+	return fileutil.AtomicWriteFile(filepath.Join(dir, r.ID+".json"), b, 0o600)
+}
+
+// UpdateRequest loads the request and runs fn under the store lock across the
+// whole load→mutate→save span (P0-7): the GetRequest→mutate→SaveRequest idiom
+// left that span unlocked, so two concurrent tool calls on the same request
+// could drop each other's state transitions. An error from fn aborts without
+// saving.
+func UpdateRequest(id string, fn func(*Request) error) error {
 	mu.Lock()
 	defer mu.Unlock()
-	return fileutil.AtomicWriteFile(filepath.Join(dir, r.ID+".json"), b, 0o600)
+	r, err := GetRequest(id) // no internal locking — safe under the caller's mu
+	if err != nil {
+		return err
+	}
+	if err := fn(r); err != nil {
+		return err
+	}
+	return saveRequestLocked(r)
 }
 
 // GetRequest loads one request by id.

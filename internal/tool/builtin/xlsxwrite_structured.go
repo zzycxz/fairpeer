@@ -107,6 +107,11 @@ func XLSXWriteStructured(wb XLSXWorkbook) (int, error) {
 	if err := os.MkdirAll(filepath.Dir(wb.Path), 0o755); err != nil {
 		return 0, err
 	}
+	// Probe before generation: an Excel/WPS-held target would only fail at the
+	// final rename, with a raw "Access is denied" after all the work.
+	if err := rejectLockedTarget(wb.Path); err != nil {
+		return 0, err
+	}
 	f := excelize.NewFile()
 	defer f.Close()
 	// styleCache dedupes cell styles across the whole workbook: identical
@@ -203,6 +208,11 @@ func writeSheet(f *excelize.File, sheet string, sh XLSXSheet, styleCache map[str
 			// with a non-numeric string; for explicit numbers use the number
 			// field. Leading-zero / thousands-separated strings stay text.
 			v := *c.Value
+			// Excel's hard per-cell limit: overflow yields a file Excel refuses
+			// to open. checkCellValue existed for this but was never wired in.
+			if err := checkCellValue(v, ref); err != nil {
+				return err
+			}
 			if isNumericLiteral(v) {
 				if err := f.SetCellValue(sheet, ref, numericValue(v)); err != nil {
 					return fmt.Errorf("value %s: %w", ref, err)

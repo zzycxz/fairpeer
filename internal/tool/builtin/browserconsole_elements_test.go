@@ -1,10 +1,10 @@
 package builtin
 
 import (
-	"strconv"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -128,7 +128,7 @@ func TestConsoleElementsInteractiveOnly(t *testing.T) {
 	}
 	var hit int
 	if verr := chromedp.Run(s.ctx, chromedp.Evaluate(
-		"document.querySelectorAll(" + strconv.Quote(taCSS) + ").length", &hit)); verr != nil || hit != 1 {
+		"document.querySelectorAll("+strconv.Quote(taCSS)+").length", &hit)); verr != nil || hit != 1 {
 		t.Fatalf("textarea css %q must match exactly one element, got %d (err %v)", taCSS, hit, verr)
 	}
 	for _, el := range els {

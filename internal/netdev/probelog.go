@@ -42,7 +42,10 @@ type LogSourceProbe struct {
 
 // ProbeLogSources probes one configured device. Every command is a read-table
 // line composed here (never model- or user-supplied), so a refusal can only
-// mean the device's driver refused it — reported per leg, never fatal.
+// mean the device's driver refused it — reported per leg, never fatal. The
+// battery branches on the device's driver: a systemd host, a Windows host,
+// and everything else (network CLIs, ESXi, the API kinds) get what actually
+// exists there — never three guaranteed-failing legs.
 func (m *Manager) ProbeLogSources(ctx context.Context, deviceName string) LogSourceProbe {
 	out := LogSourceProbe{Device: deviceName, Services: []string{}, Containers: []string{}, Files: []ProbeFile{}, Errors: []string{}}
 	device, ok := m.cfg.NetDevDeviceByName(deviceName)
@@ -50,27 +53,72 @@ func (m *Manager) ProbeLogSources(ctx context.Context, deviceName string) LogSou
 		out.Errors = append(out.Errors, "device not in inventory")
 		return out
 	}
-	if r := m.Exec(ctx, deviceName, "systemctl list-units --type=service --state=running --no-pager"); r.Refused {
+	switch drvKey(device) {
+	case "linux-shell":
+		m.probeLinuxLogSources(ctx, device, &out)
+	case "windows-powershell":
+		m.probeWindowsLogSources(ctx, device, &out)
+	default:
+		// Network CLIs (huawei/cisco/zte), ESXi, and the kind targets
+		// (docker/k8s/firewall/redfish/snmp) have no journal/文件系统 battery —
+		// one clean note instead of three failing legs.
+		out.Errors = append(out.Errors, "log probe not supported for this vendor")
+	}
+	return out
+}
+
+// probeLinuxLogSources is the systemd-host battery: running units, /var/log,
+// docker ps, and the common app-log roots.
+func (m *Manager) probeLinuxLogSources(ctx context.Context, device config.NetDevDevice, out *LogSourceProbe) {
+	if r := m.Exec(ctx, device.Name, "systemctl list-units --type=service --state=running --no-pager"); r.Refused {
 		out.Errors = append(out.Errors, "services: "+r.Refusal)
 	} else if r.IsError {
 		out.Errors = append(out.Errors, "services: "+firstOutputLine(r.Output))
 	} else {
 		out.Services = parseRunningServices(r.Output)
 	}
-	if r := m.Exec(ctx, deviceName, "ls -lh /var/log"); r.Refused {
+	if r := m.Exec(ctx, device.Name, "ls -lh /var/log"); r.Refused {
 		out.Errors = append(out.Errors, "files: "+r.Refusal)
 	} else if r.IsError {
 		out.Errors = append(out.Errors, "files: "+firstOutputLine(r.Output))
 	} else {
 		out.Files = append(out.Files, parseLsFiles(r.Output, "/var/log", true)...)
 	}
-	if r := m.Exec(ctx, deviceName, "docker ps"); r.Refused || r.IsError {
+	if r := m.Exec(ctx, device.Name, "docker ps"); r.Refused || r.IsError {
 		out.Errors = append(out.Errors, "docker: not available")
 	} else {
 		out.Containers = parseDockerPs(r.Output)
 	}
-	out.Files = append(out.Files, m.probeAppLogDirs(ctx, device, &out)...)
-	return out
+	out.Files = append(out.Files, m.probeAppLogDirs(ctx, device, out)...)
+}
+
+// windowsServicesCmd lists the services (read prefix "get-", no pipes — the
+// shell-metachar guard refuses PowerShell pipelines).
+const windowsServicesCmd = "get-service"
+
+// windowsEventChannelsCmd enumerates the Windows event log channels. The
+// driver's read table carries this exact form (wevtutil qe was already read;
+// enum-logs is the same pure enumeration).
+const windowsEventChannelsCmd = "wevtutil enum-logs"
+
+// probeWindowsLogSources is the Windows-host battery: running services
+// (journal: has no analogue — services feed the picker) and the event-log
+// channels surfaced as winevt: candidates in Files.
+func (m *Manager) probeWindowsLogSources(ctx context.Context, device config.NetDevDevice, out *LogSourceProbe) {
+	if r := m.Exec(ctx, device.Name, windowsServicesCmd); r.Refused {
+		out.Errors = append(out.Errors, "services: "+r.Refusal)
+	} else if r.IsError {
+		out.Errors = append(out.Errors, "services: "+firstOutputLine(r.Output))
+	} else {
+		out.Services = parseWindowsServices(r.Output)
+	}
+	if r := m.Exec(ctx, device.Name, windowsEventChannelsCmd); r.Refused {
+		out.Errors = append(out.Errors, "winevt: "+r.Refusal)
+	} else if r.IsError {
+		out.Errors = append(out.Errors, "winevt: "+firstOutputLine(r.Output))
+	} else {
+		out.Files = append(out.Files, parseEventChannels(r.Output)...)
+	}
 }
 
 // appLogDirsCmd lists the common non-/var/log application log roots with
@@ -191,4 +239,50 @@ func parseDockerPs(out string) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// parseWindowsServices takes `get-service` Format-Table output (columns
+// Status Name [DisplayName…]; the header may be localized) and returns the
+// service names. Format-Table truncates (never wraps) columns, so every data
+// row is "Running audiosrv Windows Audio" with the name as the SECOND token;
+// the "------ ------" separator and the header fall out via the filters.
+func parseWindowsServices(out string) []string {
+	seen := map[string]bool{}
+	svcs := []string{}
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 || strings.HasPrefix(f[0], "-") || strings.HasPrefix(f[1], "-") {
+			continue // blank lines and the dashes separator
+		}
+		if f[0] == "Status" || f[0] == "状态" || f[1] == "Name" || f[1] == "名称" {
+			continue // the (possibly localized) header
+		}
+		if name := f[1]; !seen[name] {
+			seen[name] = true
+			svcs = append(svcs, name)
+		}
+	}
+	sort.Strings(svcs)
+	return svcs
+}
+
+// parseEventChannels takes `wevtutil enum-logs` output (one channel name per
+// line) and returns each channel as a log-source candidate (Path carries the
+// winevt: source the reader consumes; Allowed is true — winevt reads are
+// whitelisted by grammar, not by log_paths). Only channels the winevt: reader
+// accepts (logUnitRe: one plain token) surface — the deep
+// "Provider/Operational" channels would fail composeLogCommand validation.
+func parseEventChannels(out string) []ProbeFile {
+	files := []ProbeFile{}
+	seen := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		ch := strings.TrimSpace(line)
+		if ch == "" || seen[ch] || !logUnitRe.MatchString(ch) {
+			continue
+		}
+		seen[ch] = true
+		files = append(files, ProbeFile{Name: ch, Path: "winevt:" + ch, Allowed: true})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
+	return files
 }

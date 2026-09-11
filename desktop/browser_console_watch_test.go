@@ -65,10 +65,10 @@ func TestNextWatchFire(t *testing.T) {
 		after time.Time
 		want  time.Time
 	}{
-		{watchAnchor.Add(47 * time.Second), watchAnchor.Add(5 * time.Minute)},   // 22:38:47 → 22:43
-		{watchAnchor.Add(5 * time.Minute), watchAnchor.Add(10 * time.Minute)},   // exactly 22:43 → 22:48
-		{watchAnchor.Add(7 * time.Minute), watchAnchor.Add(10 * time.Minute)},   // 22:45 (slow round) → 22:48
-		{watchAnchor.Add(-time.Minute), watchAnchor.Add(5 * time.Minute)},       // clock skew before anchor → first grid point
+		{watchAnchor.Add(47 * time.Second), watchAnchor.Add(5 * time.Minute)}, // 22:38:47 → 22:43
+		{watchAnchor.Add(5 * time.Minute), watchAnchor.Add(10 * time.Minute)}, // exactly 22:43 → 22:48
+		{watchAnchor.Add(7 * time.Minute), watchAnchor.Add(10 * time.Minute)}, // 22:45 (slow round) → 22:48
+		{watchAnchor.Add(-time.Minute), watchAnchor.Add(5 * time.Minute)},     // clock skew before anchor → first grid point
 	}
 	for _, c := range cases {
 		if got := nextWatchFire(watchAnchor, 5*time.Minute, c.after); !got.Equal(c.want) {
@@ -113,7 +113,7 @@ func TestWatchNotifyShould(t *testing.T) {
 		want   bool
 	}{
 		{"compromised", alertVerdict{CompromisedHosts: []string{"10.0.0.5"}}, true},
-		{"compromised", alertVerdict{KeyFindings: []string{"订单异常"}}, true}, // generic findings gate too
+		{"compromised", alertVerdict{KeyFindings: []string{"订单异常"}}, true},         // generic findings gate too
 		{"compromised", alertVerdict{AttentionAlerts: 5, Severity: "high"}, false}, // 关注≠失陷
 		{"attention", alertVerdict{AttentionAlerts: 1}, true},
 		{"attention", alertVerdict{AttentionItems: 1}, true},

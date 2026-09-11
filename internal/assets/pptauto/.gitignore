@@ -1,0 +1,3 @@
+
+# generated ppt demo projects must never ship inside the go:embed tree
+scripts/projects/

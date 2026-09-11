@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-
 // TestEscalationSweep exercises the pure sweep logic with an injected clock:
 // old critical actives escalate once; resolved/young/non-critical never do.
 func TestEscalationSweep(t *testing.T) {

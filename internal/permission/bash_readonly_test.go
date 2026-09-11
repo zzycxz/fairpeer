@@ -214,3 +214,64 @@ func TestReadOnlyBashMetaExecutors(t *testing.T) {
 		})
 	}
 }
+
+// P1-C2 regression: whitelist entries that execute dependency code are not
+// read-only. `npm audit fix` installs packages and runs lifecycle scripts;
+// `cargo check`/`cargo doc` compile dependencies and run their build.rs. The
+// plain report forms stay auto-allowed.
+func TestDependencyExecutorsNotReadOnly(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want bool
+	}{
+		{"npm audit fix", false},
+		{"npm audit fix --force", false},
+		{"npm audit fix-force", false},
+		{"npm audit", true},
+		{"npm audit --json", true},
+		{"npm audit --omit=dev", true},
+		{"cargo check", false},
+		{"cargo check --quiet", false},
+		{"cargo doc", false},
+		{"cargo doc --no-deps", false},
+		{"cargo search serde", true},
+		{"cargo version", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.cmd, func(t *testing.T) {
+			if got := isReadOnlyBashSubject(tt.cmd); got != tt.want {
+				t.Errorf("isReadOnlyBashSubject(%q) = %v, want %v", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}
+
+// NEW-14/15 regression: flag-spelling and hang-form escapes from the readonly
+// whitelist.
+func TestWhitelistFlagAndHangEscapes(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want bool
+	}{
+		{"npm audit --fix", false},
+		{"npm audit --fix-force", false},
+		{"env -S whoami", false},
+		{"env --split-string=whoami", false},
+		{"rg --pre cat pattern", false},
+		{"docker stats", false},
+		{"docker stats --no-stream", true},
+		{"docker logs -f web", false},
+		{"kubectl get pods -w", false},
+		{"kubectl logs -f pod", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.cmd, func(t *testing.T) {
+			if got := isReadOnlyBashSubject(tt.cmd); got != tt.want {
+				t.Errorf("isReadOnlyBashSubject(%q) = %v, want %v", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}
+
+// NEW-14/15 regression: flag-spelling and hang-form escapes from the readonly
+// whitelist.

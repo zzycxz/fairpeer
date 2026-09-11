@@ -15,7 +15,7 @@
 | 能力 | 现状 | 证据 | 评级 |
 |------|------|------|------|
 | **代码编辑** | 5 种策略（edit_file/write_file/multi_edit/apply_patch/notebook_edit）+ 5 级模糊匹配（Level 0-4）+ 检查点回滚 | `internal/tool/builtin/edit*.go`、`internal/checkpoint/` | ⭐⭐⭐⭐ |
-| **记忆系统** | portrait 始终注入（user.md + memory.md + mode.md）+ Dream/Distill 子代理 + 自动调度 + RAG 知识库（FTS5 + 实体向量） | `internal/memory/`、`internal/agent/dream.go`（581 行）、`internal/rag/` | ⭐⭐⭐⭐ |
+| **记忆系统** | portrait 始终注入（user.md + memory.md + mode.md）+ Dream 子代理 + 自动调度 + RAG 知识库（FTS5 + 实体向量） | `internal/memory/`、`internal/agent/dream.go`（522 行）、`internal/rag/` | ⭐⭐⭐⭐ |
 | **错误恢复** | 11 次 HTTP 指数退避重试 + Retry-After + 状态码分类（429/5xx/401/403）+ RPM 限流 + **4 种循环检测**（n-gram/stormBreaker/repeatSuccessBlock/repetition_truncation） | `internal/provider/retry.go:19`、`internal/agent/agent.go:1395,1401`、`repeat_text.go` | ⭐⭐⭐⭐ |
 | **模型管理** | **13 个内置模板**（11 直连 + 2 聚合）+ 统一 effort + 动态注册表 | `desktop/default_registry.json`（实测，非上版的 18） | ⭐⭐⭐⭐ |
 | **任务编排** | Auto-plan + Goal 独立验收（goal_judge.go）+ **Max Mode 并行采样**（max_mode.go）+ parallel_tasks/task | `internal/agent/max_mode.go`、`goal_judge.go`、`internal/control/auto_plan.go` | ⭐⭐⭐⭐ |
@@ -24,7 +24,7 @@
 | **插件/Skill** | Markdown skill（项目/全局作用域）+ MCP 插件 + install_source（GitHub/URL 远程安装 + sha256 + uninstall） | `internal/skill/`、`internal/installsource/` | ⭐⭐⭐ |
 | **向量检索（部分）** | 实体级向量搜索**已运行**（SearchEntitiesByVector + 并行余弦）；文档级混合重排**代码已就绪但默认关闭** | `internal/rag/entities.go:1142`、`embedding.go:30`、`boot.go:650`（SetRAGEmbedder(nil)） | ⭐⭐⭐ |
 
-> **核查结论**：FairPeer 已实现 MiMo-Code 的全部招牌功能（max_mode/goal_judge/dream/distill/compose），
+> **核查结论**：FairPeer 已实现 MiMo-Code 的全部招牌功能（max_mode/goal_judge/dream/compose），
 > 甚至更简洁。MiMo-Code 对 FairPeer 的增量价值有限（见 1.3）。
 
 ### 1.2 真实差距（代码证实的缺口）
@@ -482,7 +482,7 @@ dream agent 可整体改写 portrait（含用户核心约束如"永远不要自�
 |------|------|-----------|
 | **DeepSeek-Reasonix** | `swarm-os/DeepSeek-Reasonix/` | 故障恢复门（`internal/recovery/`）、Memory Compiler 简化版（`internal/memorycompiler/`，慎抄） |
 | **openworker** | `swarm-os/openworker/openworker-main/` | 4 级 RiskClass（`coworker/risk.py`）、approval inbox（`coworker/inbox.py`）、无人值守降级（`server/manager.py`） |
-| **MiMo-Code** | `swarm-os/MiMo-Code/MiMo-Code-main/` | context-limit（`config.ts:259`）、Compose Never-Ask 降级、distill SQL 模板 |
+| **MiMo-Code** | `swarm-os/MiMo-Code/MiMo-Code-main/` | context-limit（`config.ts:259`）、Compose Never-Ask 降级 |
 | **rooster** | `swarm-os/rooster/` | 写回去重（`user_writer.py:60`）、红线保护思路（`soul_writer.py:22`，轻量借鉴）、skill 投毒检测（`skills/_loader.py:88`） |
 | **PromptHub** | `swarm-os/PromptHub/` | 多平台分发（`platforms.ts`）、版本指纹（`skill.ts`）、AI 安全报告（`SkillSafetyReport`）、skill 源（`SkillStoreSource`） |
 | **openwork** | `swarm-os/openwork/` | extensions-export 密钥脱敏（`extensions-export.ts`）、skill 目录约定（`skills.ts`） |

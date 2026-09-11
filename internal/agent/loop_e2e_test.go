@@ -117,7 +117,9 @@ func TestRunRecoversInterruptedStreamAfterPartialText(t *testing.T) {
 		t.Fatalf("streamed text = %q, want %q", streamed.String(), "partial continued")
 	}
 	retries := sink.kinds(event.Retrying)
-	if len(retries) != 1 || retries[0].RetryAttempt != 1 || retries[0].RetryMax != maxStreamRecoveries {
+	// P1-A1: the per-turn recovery budget default rose from 1 to 3 and became
+	// configurable (Agent.maxStreamRecoveries / Options / [agent] stream_recoveries).
+	if len(retries) != 1 || retries[0].RetryAttempt != 1 || retries[0].RetryMax != defaultMaxStreamRecoveries {
 		t.Fatalf("retry events = %+v, want one stream recovery retry", retries)
 	}
 }

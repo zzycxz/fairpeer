@@ -1020,7 +1020,19 @@ func (h *host) sessionList(_ context.Context, raw json.RawMessage) (any, error) 
 		return out, nil // no sessions yet
 	}
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+		if e.IsDir() { // NEW-19: current <dir>/<id>/<id>.jsonl layout
+			inner := filepath.Join(dir, e.Name(), e.Name()+".jsonl")
+			if fi, serr := os.Stat(inner); serr == nil && !fi.IsDir() {
+				entry := SessionEntry{Path: inner, ModTimeMs: fi.ModTime().UnixMilli()}
+				if meta, ok, _ := agent.LoadBranchMeta(inner); ok {
+					entry.Turns = meta.CachedTurns
+					entry.TopicID = meta.TopicID
+				}
+				out.Sessions = append(out.Sessions, entry)
+			}
+			continue
+		}
+		if !strings.HasSuffix(e.Name(), ".jsonl") {
 			continue
 		}
 		info, err := e.Info()

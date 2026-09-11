@@ -15,6 +15,10 @@ func openInFileExplorer(dir string) error {
 	case "darwin":
 		return exec.Command("open", dir).Start()
 	default:
-		return exec.Command("xdg-open", dir).Start()
+		// Linux & other unix: same freedesktop opener chain (xdg-open → gio →
+		// kde-open) the workspace opener uses, with a real error when none of
+		// them is installed — instead of a bare xdg-open exec that fails
+		// silently on minimal desktops.
+		return openWorkspacePath(dir)
 	}
 }

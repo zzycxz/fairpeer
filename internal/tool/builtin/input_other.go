@@ -4,9 +4,14 @@ package builtin
 
 import (
 	"fmt"
+	"image/png"
+	"math"
+	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 )
 
 // Non-Windows input backend for the cross-platform screen_* tools. Instead of
@@ -75,7 +80,8 @@ func runCmd(cmd *exec.Cmd, what string) error {
 
 // moveMouse moves the cursor to (x, y) in physical screen pixels.
 //
-//	macOS: cliclick m:x,y
+//	macOS: cliclick m:x,y  (coords are divided by the Retina scale factor first —
+//	                       cliclick takes logical points, screenshots are physical)
 //	Linux: xdotool mousemove x y
 func moveMouse(x, y int) error {
 	path, err := mustInputTool()
@@ -84,7 +90,8 @@ func moveMouse(x, y int) error {
 	}
 	var cmd *exec.Cmd
 	if runtime.GOOS == "darwin" {
-		cmd = exec.Command(path, "m:", fmt.Sprintf("%d,%d", x, y))
+		lx, ly := macToLogical(x, y)
+		cmd = exec.Command(path, "m:", fmt.Sprintf("%d,%d", lx, ly))
 	} else {
 		cmd = exec.Command(path, "mousemove", fmt.Sprintf("%d", x), fmt.Sprintf("%d", y))
 	}
@@ -246,8 +253,12 @@ func scrollWheel(amount int) error {
 // --- macOS key-name translation ---------------------------------------------
 
 // macKeyName maps a platform-agnostic key name to a cliclick key token.
-// Letters stay single-char lowercase; named keys use cliclick's spelling
-// (return/escape/tab/up/down/...). F-keys are f1..f12.
+// Letters stay single-char lowercase; named keys use cliclick's spelling.
+// Tokens are verified against cliclick's source (Actions/KeyPressAction.m,
+// stable across cliclick 3.x–5.x): "delete" IS backspace (keycode 51) and
+// forward-delete has its own token "fwd-delete" (keycode 117) — so the two
+// must map differently (like the Windows backend: delete=VK 0x2E,
+// backspace=VK 0x08). F-keys are f1..f12.
 func macKeyName(name string) (string, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if len(name) == 1 {
@@ -261,32 +272,35 @@ func macKeyName(name string) (string, error) {
 	case "enter", "return":
 		return "return", nil
 	case "esc", "escape":
-		return "escape", nil
+		// cliclick's token is "esc" (no "escape" spelling).
+		return "esc", nil
 	case "tab":
 		return "tab", nil
 	case "space":
 		return "space", nil
 	case "delete", "del":
-		// macOS "delete" is backspace; forward-delete is "fn+delete".
-		return "delete", nil
+		// Forward-delete (the "del" analog of Windows VK_DELETE). cliclick's
+		// plain "delete" is the backspace key, so it must NOT be used here.
+		return "fwd-delete", nil
 	case "backspace":
+		// cliclick "delete" = the backspace key (macOS labels it "delete").
 		return "delete", nil
 	case "home":
 		return "home", nil
 	case "end":
 		return "end", nil
 	case "pageup":
-		return "pageup", nil
+		return "page-up", nil
 	case "pagedown":
-		return "pagedown", nil
+		return "page-down", nil
 	case "arrowup", "up":
-		return "up", nil
+		return "arrow-up", nil
 	case "arrowdown", "down":
-		return "down", nil
+		return "arrow-down", nil
 	case "arrowleft", "left":
-		return "left", nil
+		return "arrow-left", nil
 	case "arrowright", "right":
-		return "right", nil
+		return "arrow-right", nil
 	case "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12":
 		return name, nil
 	}
@@ -327,6 +341,93 @@ func macKeyCombo(modName, keyName string) (string, error) {
 		parts = append([]string{tok}, parts...) // modifiers first, key last
 	}
 	return strings.Join(parts, "+"), nil
+}
+
+// --- macOS Retina coordinate scaling ----------------------------------------
+
+// On Retina displays, screencapture PNGs are PHYSICAL pixels (2x) while
+// cliclick consumes LOGICAL points — so a VLM reading a screenshot and calling
+// screen_click at the coordinates it sees would land at 2x the intended
+// position. The scale (captured width ÷ logical width) is probed once per
+// session and used to divide coordinates in the mac input paths. If the probe
+// fails for any reason, the scale defaults to 1 (pre-Retina behavior).
+
+var (
+	macScreenProbeOnce       sync.Once
+	macScreenScale           float64 // physical/logical ratio; 1 when unknown
+	macLogicalW, macLogicalH int
+	macLogicalOK             bool
+)
+
+// macScreenMetrics probes and caches (scale, logicalW, logicalH) for the main
+// display. The logical size comes from Finder's desktop window bounds
+// ("0, 0, W, H"); the scale is that probed width ÷ the width of an actual
+// screencapture PNG (header-only decode — no pixel processing).
+func macScreenMetrics() (scale float64, logicalW, logicalH int, ok bool) {
+	macScreenProbeOnce.Do(func() {
+		macScreenScale, macLogicalW, macLogicalH, macLogicalOK = probeMacScreenMetrics()
+	})
+	return macScreenScale, macLogicalW, macLogicalH, macLogicalOK
+}
+
+// probeMacScreenMetrics does the one-shot Retina probe. Any failure → scale 1
+// with ok=false (no clamping, 1:1 coordinates — the historical behavior).
+func probeMacScreenMetrics() (scale float64, logicalW, logicalH int, ok bool) {
+	scale = 1
+	// 1. Logical bounds via Finder's desktop window: returns "0, 0, W, H".
+	out, err := exec.Command("osascript", "-e",
+		`tell application "Finder" to get bounds of window of desktop`).Output()
+	if err != nil {
+		return scale, 0, 0, false
+	}
+	parts := strings.Split(strings.TrimSpace(string(out)), ",")
+	if len(parts) < 4 {
+		return scale, 0, 0, false
+	}
+	logicalW, err = strconv.Atoi(strings.TrimSpace(parts[2]))
+	if err != nil || logicalW <= 0 {
+		return scale, 0, 0, false
+	}
+	logicalH, err = strconv.Atoi(strings.TrimSpace(parts[3]))
+	if err != nil || logicalH <= 0 {
+		return scale, 0, 0, false
+	}
+	ok = true
+	// 2. Captured (physical) width from a throwaway screenshot.
+	tmp, err := os.CreateTemp("", "fairpeer-scale-*.png")
+	if err != nil {
+		return scale, logicalW, logicalH, ok
+	}
+	tmpName := tmp.Name()
+	tmp.Close()
+	defer os.Remove(tmpName)
+	if err := runCmd(exec.Command("screencapture", "-x", tmpName), "Retina scale probe"); err != nil {
+		return scale, logicalW, logicalH, ok
+	}
+	f, err := os.Open(tmpName)
+	if err != nil {
+		return scale, logicalW, logicalH, ok
+	}
+	cfg, err := png.DecodeConfig(f)
+	f.Close()
+	if err != nil || cfg.Width <= 0 {
+		return scale, logicalW, logicalH, ok
+	}
+	if s := float64(cfg.Width) / float64(logicalW); s > scale {
+		scale = s
+	}
+	return scale, logicalW, logicalH, ok
+}
+
+// macToLogical converts physical-pixel screenshot coordinates into the logical
+// points cliclick expects. 1:1 when the probe failed or the display is
+// non-Retina (scale ≤ 1).
+func macToLogical(x, y int) (int, int) {
+	s, _, _, ok := macScreenMetrics()
+	if !ok || s <= 1 {
+		return x, y
+	}
+	return int(math.Round(float64(x) / s)), int(math.Round(float64(y) / s))
 }
 
 // --- Linux (X11) key-name translation ---------------------------------------

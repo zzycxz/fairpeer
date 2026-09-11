@@ -68,6 +68,13 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		"xlsx_write":     xlsxWrite{roots: roots},
 		"doc_convert":    docConvert{roots: roots},
 		"mindmap_create": mindmapCreate{roots: roots},
+		// image_generate writes an output file; ConfineWriters bound it but this
+		// map missed it, so the desktop path used the roots==nil zero value.
+		"image_generate": imageGenerate{roots: roots},
+		// Multi-path file writers, same confinement as ConfineWriters (they were
+		// previously only reachable as roots==nil init registrations here too).
+		"apply_patch": applyPatch{workDir: w.Dir, roots: roots},
+		"move_file":   moveFile{workDir: w.Dir, roots: roots},
 		// G5/G6 (CODEX_GAP_AUDIT): both resolve paths relative to the workspace —
 		// without these bindings they'd fall back to the process launch cwd.
 		"view_image":   viewImageTool{workDir: w.Dir, roots: roots},

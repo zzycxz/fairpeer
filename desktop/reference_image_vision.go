@@ -24,10 +24,17 @@ package main
 // accent_colors/is_dark/text_color) to recolor the deck to match the reference.
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	_ "golang.org/x/image/webp"
+	"image"
+	"image/color"
+	"image/draw"
+	_ "image/jpeg"
+	"image/png"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -52,7 +59,79 @@ func readImageForVLM(imgPath string) ([]byte, error) {
 	if len(b) > referenceImageMaxBytes {
 		return nil, fmt.Errorf("image too large: %d bytes (max %d) — downscale or crop before using as reference", len(b), referenceImageMaxBytes)
 	}
-	return b, nil
+
+	// Decode the image to flatten any transparency over a white background.
+	// VLMs often convert transparent alpha channels to black, which completely
+	// destroys the color extraction (e.g. reporting a dark background when the
+	// user uploaded a transparent cutout).
+	img, _, err := image.Decode(bytes.NewReader(b))
+	if err != nil {
+		// If we can't decode it (e.g. unsupported format), fall back to raw bytes
+		// and let the VLM deal with it.
+		return b, nil
+	}
+
+	bounds := img.Bounds()
+
+	// Determine the padding color based on the image's opaque pixels.
+	// If a user uploads a white logo with a transparent background, padding with white
+	// would make it completely invisible to the VLM.
+	var totalY, count, totalPixels int64
+	stepX := bounds.Dx() / 50
+	if stepX < 1 {
+		stepX = 1
+	}
+	stepY := bounds.Dy() / 50
+	if stepY < 1 {
+		stepY = 1
+	}
+	for y := bounds.Min.Y; y < bounds.Max.Y; y += stepY {
+		for x := bounds.Min.X; x < bounds.Max.X; x += stepX {
+			totalPixels++
+			r, g, b, a := img.At(x, y).RGBA()
+			if a > 32768 {
+				// Go's Color.RGBA() returns alpha-premultiplied values!
+				// We must un-premultiply to get the true color luminance.
+				if a < 65535 {
+					r = (r * 65535) / a
+					g = (g * 65535) / a
+					b = (b * 65535) / a
+				}
+				yVal := (299*r + 587*g + 114*b) / 1000
+				totalY += int64(yVal)
+				count++
+			}
+		}
+	}
+	padColor := color.Color(color.White)
+	if count > 0 && totalPixels > 0 {
+		avgY := totalY / count
+		opacityRatio := float64(count) / float64(totalPixels)
+		// If the image is extremely bright (average luminance > 85%) AND sparse (e.g. a logo),
+		// pad with black to ensure white graphics remain visible to the VLM.
+		// We restrict to sparse images (< 25% opaque) to avoid turning large white backgrounds
+		// with transparent cutouts into half-black images.
+		if avgY > 55000 && opacityRatio < 0.25 {
+			padColor = color.Black
+		}
+	}
+
+	bg := image.NewRGBA(bounds)
+	draw.Draw(bg, bounds, &image.Uniform{C: padColor}, image.Point{}, draw.Src)
+	draw.Draw(bg, bounds, img, bounds.Min, draw.Over)
+
+	// Encode back to PNG losslessly. (We don't use JPEG here because JPEG q85
+	// smears edges and text, which degrades OCR/layout recognition for references).
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, bg); err != nil {
+		return b, nil // fallback to raw on encoding failure
+	}
+
+	// If the flattened PNG is somehow larger than the cap, fall back to the original
+	if buf.Len() > referenceImageMaxBytes {
+		return b, nil
+	}
+	return buf.Bytes(), nil
 }
 
 // referenceColorPrompt asks the VLM for the reference image's color scheme as a

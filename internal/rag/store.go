@@ -22,6 +22,8 @@ import (
 	"sync"
 	"unicode"
 
+	fileenc "github.com/zzycxz/fairpeer/internal/fileutil/encoding"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -68,7 +70,13 @@ func Open(dbPath string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	// modernc.org/sqlite ignores the legacy "_journal_mode=" / "_busy_timeout="
+	// DSN params silently (it only consumes "_pragma="), which left this store
+	// running in delete-journal mode with no busy timeout — a second writer
+	// would hit "database is locked" immediately. Use the _pragma= form; WAL
+	// also requires closing the store on shutdown so the -wal gets
+	// checkpointed back into the main file (desktop shutdownBody does this).
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("open rag db: %w", err)
 	}
@@ -86,6 +94,20 @@ func Open(dbPath string) (*Store, error) {
 	// ON DELETE CASCADE didn't fire because PRAGMA foreign_keys was off).
 	// Safe no-op if none exist.
 	_, _ = db.Exec(`DELETE FROM rag_chunks WHERE job_id NOT IN (SELECT id FROM rag_jobs)`)
+	// Purge zombie jobs: total_chunks=0 can never reach a terminal state (the
+	// flip guard requires total>0), so pending/extracting rows would sit
+	// forever — showing 进行中 in the UI and keeping HasActiveExtractJobs
+	// permanently true. They hold no chunks and nothing to retry.
+	_, _ = db.Exec(`DELETE FROM rag_jobs WHERE total_chunks = 0 AND status IN ('pending','extracting')`)
+	// Backfill failed_chunks from the chunk rows. Databases upgraded from
+	// before v8 get the column with DEFAULT 0 — historical partial jobs (done
+	// with some errored chunks) would otherwise keep showing a clean 已抽取.
+	// Cheap (jobs table is small) and self-heals any drift on every open.
+	_, _ = db.Exec(`UPDATE rag_jobs SET failed_chunks = (SELECT COUNT(*) FROM rag_chunks WHERE job_id = rag_jobs.id AND status = 'error')`)
+	// Backfill job-level error_msg for errored jobs written by pre-R1 code
+	// (which never persisted the reason on the job row — the UI could only
+	// show a bare 出错). Takes the latest errored chunk's message.
+	_, _ = db.Exec(`UPDATE rag_jobs SET error_msg = (SELECT COALESCE(error_msg,'') FROM rag_chunks WHERE job_id = rag_jobs.id AND status = 'error' AND COALESCE(error_msg,'') != '' ORDER BY rowid DESC LIMIT 1) WHERE status = 'error' AND COALESCE(error_msg,'') = ''`)
 	// Clean up dangling relations (source/target entity no longer exists).
 	_, _ = db.Exec(`DELETE FROM rag_relations WHERE source NOT IN (SELECT name FROM rag_entities) OR target NOT IN (SELECT name FROM rag_entities)`)
 	return &Store{db: db}, nil
@@ -192,7 +214,7 @@ CREATE INDEX IF NOT EXISTS idx_entity_emb_collection ON rag_entity_embeddings(co
 // ragSchemaVersion is the current schema version. Bump this whenever a migration
 // step is added to ragMigrations below. PRAGMA user_version tracks the version
 // on disk so existing databases upgrade forward without manual intervention.
-var ragSchemaVersion = 7
+var ragSchemaVersion = 9
 
 // ragMigrations maps a target version → the statements to run when upgrading
 // FROM version-1 TO that version. Each step runs inside a transaction; SQLite
@@ -250,6 +272,21 @@ var ragMigrations = map[int][]string{
 	// burning a markitdown subprocess (which was flashing CMD windows).
 	7: {
 		"ALTER TABLE rag_jobs ADD COLUMN stat_key TEXT",
+	},
+	// Version 8: rag_jobs gains a failed_chunks column (count of chunks whose
+	// last extraction attempt errored). A done job with failed_chunks>0 is a
+	// PARTIAL extraction — the tree shows 部分失败 instead of a misleading
+	// 已抽取, and collection health summaries can surface the damage. Kept in
+	// sync by MarkChunkDone alongside done_chunks.
+	8: {
+		"ALTER TABLE rag_jobs ADD COLUMN failed_chunks INTEGER NOT NULL DEFAULT 0",
+	},
+	// Version 9: rag_jobs gains a retry_rounds column — how many idle-time
+	// auto-retry rounds the job has consumed (R3). Persisted so an app restart
+	// can't reset the counter and re-burn rounds on a hopeless job; reset to 0
+	// when the job finally converges clean.
+	9: {
+		"ALTER TABLE rag_jobs ADD COLUMN retry_rounds INTEGER NOT NULL DEFAULT 0",
 	},
 }
 
@@ -485,6 +522,10 @@ func (s *Store) Close() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
+	// Explicit TRUNCATE checkpoint: keeps the .db self-contained for
+	// backup/copy migration (a copied .db without its -wal sidecar loses the
+	// un-checkpointed tail). See calendar/store.go Close for the same.
+	_, _ = s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	return s.db.Close()
 }
 
@@ -929,9 +970,14 @@ func (s *Store) RenameCollection(oldName, newName string) error {
 		// Path-prefix children: "工作/xxx" → "工作资料/xxx". A per-table failure
 		// here (e.g. a table missing the column in an older schema) is logged
 		// and skipped so the rest of the rename still applies.
+		// substr() counts CHARACTERS, not bytes — the offset must be computed
+		// from the rune length of the prefix. len(oldPrefix) (bytes) made
+		// every non-ASCII rename shred its sub-collections ("工作" → substr
+		// offset 7 on a 4-character string produced "").
 		oldPrefix := oldName + "/"
 		newPrefix := newName + "/"
-		if _, err := tx.Exec(fmt.Sprintf(`UPDATE %s SET collection = ? || substr(collection, ?) WHERE collection LIKE ?`, table), newPrefix, len(oldPrefix)+1, oldPrefix+"%"); err != nil {
+		prefixRunes := len([]rune(oldPrefix)) + 1
+		if _, err := tx.Exec(fmt.Sprintf(`UPDATE %s SET collection = ? || substr(collection, ?) WHERE collection LIKE ?`, table), newPrefix, prefixRunes, oldPrefix+"%"); err != nil {
 			slog.Warn("rename collection: prefix update skipped", "table", table, "error", err)
 			continue
 		}
@@ -1064,7 +1110,7 @@ func readDoc(path string) (string, string, error) {
 			if err != nil {
 				return "", "", err
 			}
-			return stripHTML(string(data)), ext, nil
+			return stripHTML(decodeTextBytes(data)), ext, nil
 		default:
 			// Formats like doc, ppt, xls, epub, msg have no Go fallback parser.
 			return "", ext, fmt.Errorf(".%s requires markitdown to parse properly (or parsing failed)", ext)
@@ -1075,7 +1121,18 @@ func readDoc(path string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	return string(data), ext, nil
+	return decodeTextBytes(data), ext, nil
+}
+
+// decodeTextBytes converts raw file bytes to UTF-8 text via the shared
+// fileutil/encoding cascade (BOM → BOM-less UTF-16 → strict UTF-8 → GB18030 →
+// lossy UTF-8 — same heuristics as the document tools). Plain-text imports
+// (txt/md/csv/json/html) written in GBK or UTF-16 — the default for Chinese
+// Excel CSV exports and Windows Notepad "Unicode" files — would otherwise be
+// indexed as mojibake and never match any query.
+func decodeTextBytes(data []byte) string {
+	enc, _ := fileenc.Detect(data)
+	return string(fileenc.Decode(data, enc))
 }
 
 // chunkDoc splits a document into indexable chunks. Strategy: split on double
@@ -1199,10 +1256,11 @@ func chunkMarkdown(body string, max int) []string {
 
 		// Large table guard: flush table block if it exceeds 4x max.
 		if inTable && cur.Len()+len(line)+1 > max*4 && cur.Len() > 0 {
+			hdr := tableHeader // flush() resets tableHeader — capture it first
 			flush()
 			// Repeat header for the continuation.
-			if tableHeader != "" {
-				cur.WriteString(tableHeader)
+			if hdr != "" {
+				cur.WriteString(hdr)
 				cur.WriteByte('\n')
 			}
 		}
@@ -1493,7 +1551,14 @@ func expandCJKBigrams(s string) string {
 			// run (flushRun reads it at run-end, after the run accumulated).
 			run = append(run, r)
 		} else {
+			// Symmetric boundary: a latin/digit char right after a CJK run
+			// also needs the separating space — unicode61 treats "管线A" as
+			// ONE token, which made "管线" unsearchable at the boundary.
+			hadCJK := len(run) > 0
 			flushRun()
+			if hadCJK {
+				b.WriteByte(' ')
+			}
 			b.WriteRune(r)
 			pendingBoundary = true // next CJK run needs a boundary space
 		}

@@ -40,7 +40,10 @@ benchmarks/**/*.sh text eol=lf
 *.dockerfile text eol=lf
 Dockerfile  text eol=lf
 Makefile    text eol=lf
-*.nsi       text eol=lf
 *.desktop   text eol=lf
 .editorconfig text eol=lf
 .gitattributes text eol=lf
+dev         text eol=lf
+# UOS store templates: consumed inside the Linux build container (sed-expanded
+# into the info manifest / .desktop entry) — a CRLF byte would corrupt both.
+*.in        text eol=lf

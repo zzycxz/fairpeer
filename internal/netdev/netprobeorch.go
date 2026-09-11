@@ -31,13 +31,13 @@ type NetprobeHost struct {
 
 // NetprobeSweepResult summarizes one orchestrated sweep.
 type NetprobeSweepResult struct {
-	CIDR      string `json:"cidr"`
-	ICMP      bool   `json:"icmp"`
-	Alive     int    `json:"alive"`
-	WithPorts int    `json:"with_ports"`
+	CIDR      string         `json:"cidr"`
+	ICMP      bool           `json:"icmp"`
+	Alive     int            `json:"alive"`
+	WithPorts int            `json:"with_ports"`
 	Results   []NetprobeHost `json:"results"`
-	Command   string `json:"command"`
-	Duration  string `json:"duration"`
+	Command   string         `json:"command"`
+	Duration  string         `json:"duration"`
 }
 
 // NetprobeSweep orchestrates cmd/netprobe over one in-scope CIDR. Leads land

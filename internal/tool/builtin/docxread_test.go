@@ -64,7 +64,6 @@ func TestDocReadStructureMode(t *testing.T) {
 	}
 }
 
-
 // TestDocReadLegacyTablesModeRoutesToStructure verifies the legacy "tables"
 // mode name now routes to structure (the single read mode), so old prompts
 // don't break — they just get the fuller structure view.

@@ -98,6 +98,35 @@ func detectBrowserPathUncached() (path string, name string, err error) {
 	return "", "", fmt.Errorf("%w: install Chrome or Edge, or set [cowork] browser_path (or CHROME_PATH) to a Chromium-based browser executable", ErrNoBrowser)
 }
 
+// browserExamplePath returns a per-OS example of where the user's Chromium
+// browser executable lives, for tool descriptions. The sentence structure
+// stays identical on every OS; only the example changes.
+func browserExamplePath() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"`
+	case "linux":
+		return `"google-chrome", "chromium", or the bundled UOS/360 browser on PATH`
+	default: // windows
+		return `"C:\Program Files\Google\Chrome\Application\chrome.exe"`
+	}
+}
+
+// browserExamplePaths is the richer variant used by browser_open's no-browser
+// error: it names the per-OS candidates and the override where that's
+// idiomatic (CHROME_PATH on unix; on Windows the examples are the well-known
+// install paths, mirroring browserCandidates).
+func browserExamplePaths() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return `on macOS: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" (or set the CHROME_PATH env var)`
+	case "linux":
+		return `on Linux: "google-chrome", "chromium", or the bundled UOS/360 browser on PATH (or set the CHROME_PATH env var)`
+	default: // windows
+		return `on Windows: "C:\Program Files\Google\Chrome\Application\chrome.exe" or "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"`
+	}
+}
+
 // browserCandidates returns the prioritized list of browser binary names/paths
 // to search for on the current OS. Order matters: Chrome first (canonical),
 // then Edge (preinstalled on Windows), then other Chromium variants.
@@ -150,6 +179,22 @@ func browserCandidates() []browserCandidate {
 			{Name: "chromium-browser", Paths: nil},
 			{Name: "microsoft-edge", Paths: nil},
 			{Name: "brave-browser", Paths: nil},
+			// Domestic (信创) Chromium forks, probed last. Names verified from
+			// the vendors' published debs (2026-09): the UOS bundled browser is
+			// /usr/bin/browser; Qianxin Trusted is qaxbrowser-safe-stable →
+			// /opt/qianxin.com/qaxbrowser/qaxbrowser-safe (identical Chromium
+			// 107 on amd64/arm64/mips64el/loongarch64); 360 Secure ships
+			// browser360-cn-stable (Chromium 126 on amd64) and, in older
+			// builds, the plain browser360 name. All expose the standard CDP
+			// surface we drive via chromedp.
+			{Name: "browser", Paths: []string{"/usr/bin/browser"}},
+			{Name: "qaxbrowser-safe-stable", Paths: []string{"/usr/bin/qaxbrowser-safe-stable"}},
+			{Name: "qaxbrowser-safe", Paths: nil},
+			{Name: "browser360-cn-stable", Paths: []string{"/usr/bin/browser360-cn-stable"}},
+			{Name: "browser360-cn", Paths: nil},
+			{Name: "browser360", Paths: []string{"/usr/bin/browser360"}},
+			{Name: "qianxin-browser", Paths: []string{"/usr/bin/qianxin-browser"}},
+			{Name: "qqbrowser", Paths: nil},
 		}
 	}
 }

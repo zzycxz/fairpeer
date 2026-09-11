@@ -71,6 +71,12 @@ type CoWorkSettingsView struct {
 	ScreenshotHotkey   string `json:"screenshotHotkey"`
 	ScreenshotVLMModel string `json:"screenshotVlmModel"`
 	ScreenshotPrompt   string `json:"screenshotPrompt"`
+	// Deep-extraction tuning (spec R2/R3): concurrency of chunk extraction,
+	// and the opt-in idle-time auto-retry of failed chunks. All mirror
+	// [cowork] extract_concurrency / extract_auto_retry / _max_rounds.
+	ExtractConcurrency        int  `json:"extractConcurrency"`
+	ExtractAutoRetry          bool `json:"extractAutoRetry"`
+	ExtractAutoRetryMaxRounds int  `json:"extractAutoRetryMaxRounds"`
 	// VoiceModel is the provider/model ref for speech-to-text (voice input +
 	// audio attachment understanding), e.g. "mimo/mimo-v2.5-asr". Empty = voice
 	// input disabled. Mirrors [cowork] voice_model.
@@ -141,20 +147,23 @@ func coworkSettingsView(c config.CoworkConfig) CoWorkSettingsView {
 	}
 
 	v := CoWorkSettingsView{
-		BrowserPath:        c.BrowserPath,
-		BrowserAttachURL:   c.BrowserAttachURL,
-		EmbeddingModel:     c.EmbeddingModel,
-		RAGEnabled:         c.RAGEnabled,
-		PPTActiveTemplate:  c.PPTActiveTemplate,
-		PPTTemplates:       templates,
-		PPTTemplateDir:     skillTplDir,
-		PPTMode:            c.PPTMode,
-		ScreenshotEnabled:  c.ScreenshotEnabled,
-		ScreenshotHotkey:   c.ScreenshotHotkey,
-		ScreenshotVLMModel: c.ScreenshotVLMModel,
-		ScreenshotPrompt:   c.ScreenshotPrompt,
-		VoiceModel:         c.VoiceModel,
-		EStopHotkey:        c.EStopHotkey,
+		BrowserPath:               c.BrowserPath,
+		BrowserAttachURL:          c.BrowserAttachURL,
+		EmbeddingModel:            c.EmbeddingModel,
+		RAGEnabled:                c.RAGEnabled,
+		PPTActiveTemplate:         c.PPTActiveTemplate,
+		PPTTemplates:              templates,
+		PPTTemplateDir:            skillTplDir,
+		PPTMode:                   c.PPTMode,
+		ScreenshotEnabled:         c.ScreenshotEnabled,
+		ScreenshotHotkey:          c.ScreenshotHotkey,
+		ScreenshotVLMModel:        c.ScreenshotVLMModel,
+		ScreenshotPrompt:          c.ScreenshotPrompt,
+		ExtractConcurrency:        c.ExtractConcurrency,
+		ExtractAutoRetry:          c.ExtractAutoRetry,
+		ExtractAutoRetryMaxRounds: c.ExtractAutoRetryMaxRounds,
+		VoiceModel:                c.VoiceModel,
+		EStopHotkey:               c.EStopHotkey,
 		SMTP: SMTPSettings{
 			Host:           smtp.Host,
 			Port:           smtp.Port,
@@ -378,6 +387,11 @@ func (a *App) SetCoWorkSettings(v CoWorkSettingsView) (err error) {
 		c.Cowork.ScreenshotHotkey = strings.TrimSpace(v.ScreenshotHotkey)
 		c.Cowork.ScreenshotVLMModel = strings.TrimSpace(v.ScreenshotVLMModel)
 		c.Cowork.ScreenshotPrompt = v.ScreenshotPrompt
+		c.Cowork.ExtractConcurrency = v.ExtractConcurrency
+		c.Cowork.ExtractAutoRetry = v.ExtractAutoRetry
+		if v.ExtractAutoRetryMaxRounds > 0 {
+			c.Cowork.ExtractAutoRetryMaxRounds = v.ExtractAutoRetryMaxRounds
+		}
 		c.Cowork.VoiceModel = strings.TrimSpace(v.VoiceModel)
 		c.Cowork.EStopHotkey = strings.TrimSpace(v.EStopHotkey)
 		smtp := config.SMTPConfig{
@@ -528,6 +542,23 @@ func (a *App) SetCoWorkSettings(v CoWorkSettingsView) (err error) {
 	a.StopEStopHotkey()
 	a.StartEStopHotkey()
 
+	// Hot-sync the idle-time auto-retry engine with the new settings (same
+	// pattern as the hotkeys above): enabling starts the scanner if it wasn't
+	// running; disabling just flips the runtime switch — the goroutine idles
+	// out and any in-flight tick finishes harmlessly.
+	if v.ExtractAutoRetry {
+		// Always refresh the knob (G1-1 P3: running-engine cap changes now
+		// take effect without restart), then ensure the engine runs.
+		maxRounds := v.ExtractAutoRetryMaxRounds
+		if maxRounds <= 0 {
+			maxRounds = 2
+		}
+		a.ragAutoRetryMaxRounds.Store(int64(maxRounds))
+		a.startRagAutoRetry(maxRounds)
+	} else {
+		a.ragAutoRetryEnabled.Store(false)
+	}
+
 	slog.Info("SetCoWorkSettings complete")
 	return nil
 }
@@ -599,12 +630,12 @@ func (a *App) ProbeMailAccount(name string) (result MailProbeResult, err error) 
 // view of builtin.EmailMessage — the dock only needs envelope + preview, not
 // attachments, to keep the JSON payload small for a sidebar list.
 type InboxItem struct {
-	From        string                     `json:"from"`
-	To          string                     `json:"to"` // recipient(s); shown instead of From in the Sent view
-	Subject     string                     `json:"subject"`
-	Date        string                     `json:"date"`
-	Preview     string                     `json:"preview"`
-	Attachments []builtin.EmailAttachment  `json:"attachments,omitempty"` // 📎 chips on the list row
+	From        string                    `json:"from"`
+	To          string                    `json:"to"` // recipient(s); shown instead of From in the Sent view
+	Subject     string                    `json:"subject"`
+	Date        string                    `json:"date"`
+	Preview     string                    `json:"preview"`
+	Attachments []builtin.EmailAttachment `json:"attachments,omitempty"` // 📎 chips on the list row
 }
 
 // MailFullMessage is the dock reading pane's payload: one message's envelope,
@@ -741,10 +772,18 @@ func (a *App) PickPPTTemplate() (string, error) {
 	if err := os.WriteFile(dest, srcData, 0o644); err != nil {
 		return "", fmt.Errorf("写入模板文件失败: %w", err)
 	}
+	// A new template invalidates the previous VLM style analysis. Delete the
+	// stale ppt-template-style.json BEFORE spawning the goroutine: if the new
+	// analysis fails, merge_vlm_style.py would otherwise resurrect the OLD
+	// template's colors over the new one.
+	stylePath := filepath.Join(home, ".fairpeer", "ppt-template-style.json")
+	if err := os.Remove(stylePath); err == nil {
+		pptVisionDebugLog("PickPPTTemplate: removed stale ppt-template-style.json (new template picked)")
+	}
 	// Kick off async vision-based color/style extraction. This writes
 	// ~/.fairpeer/ppt-template-style.json which the ppt-auto skill reads
-	// (Step 0) as the highest-priority color source. Best-effort: silently
-	// degrades if no VLM configured or no full-screen bg image found.
+	// (Step 0). Best-effort: degrades to Python extraction, logged to the
+	// ppt vision debug log.
 	go a.analyzeTemplateStyleAsync(dest)
 	// Return the filename for display.
 	return filepath.Base(path), nil

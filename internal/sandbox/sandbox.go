@@ -4,10 +4,11 @@
 // allowed. This is the *enforcement* layer beneath the permission rules
 // (*policy*): a permitted command still cannot escape the box.
 //
-// Only macOS (Seatbelt via sandbox-exec) is implemented; on every other OS, or
-// when the OS tooling is missing, Command falls back to running the command
-// unwrapped (see Available). Confining the in-process file-writer built-ins is
-// handled separately, in package tool/builtin.
+// macOS (Seatbelt via sandbox-exec) and Linux (bubblewrap) are implemented; on
+// every other OS, or when the OS tooling is missing/unusable, Command falls
+// back to running the command unwrapped (see Available). Confining the
+// in-process file-writer built-ins is handled separately, in package
+// tool/builtin.
 package sandbox
 
 // Spec describes how to confine one command. The zero value (Mode == "") does
@@ -28,13 +29,13 @@ type Spec struct {
 	// commands) if no OS sandbox backend exists on this platform, rather than
 	// silently degrading to unconfined. Mirrors config.SandboxConfig.RequireAvailable.
 	RequireAvailable bool
-	// StrictWrites narrows the toolchain-cache write grants (macOS Seatbelt) to
-	// true cache subdirs only — e.g. ~/.cargo/registry/cache instead of all of
-	// ~/.cargo. Default (false) keeps the broad grants so `go install`/`cargo
-	// build`/`npm install` keep working (they write to bin/pkg dirs outside the
-	// cache). High-security deployments that don't expect build-tool execution
-	// turn this on to close the "drop a binary in ~/.cargo/bin" persistence
-	// vector. Audit A8.
+	// StrictWrites narrows the toolchain-cache write grants (macOS Seatbelt and
+	// Linux bubblewrap alike) to true cache subdirs only — e.g.
+	// ~/.cargo/registry/cache instead of all of ~/.cargo. Default (false) keeps
+	// the broad grants so `go install`/`cargo build`/`npm install` keep working
+	// (they write to bin/pkg dirs outside the cache). High-security deployments
+	// that don't expect build-tool execution turn this on to close the "drop a
+	// binary in ~/.cargo/bin" persistence vector. Audit A8.
 	StrictWrites bool
 }
 

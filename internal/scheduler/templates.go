@@ -60,7 +60,7 @@ var BuiltinTemplates = []Template{
 		Expression: "daily 09:00",
 		Prompt:     "打开浏览器，抓取昨日关键业务数据（销售/流量/库存），汇总为 CSV 并保存到桌面。",
 		OutputMode: "file",
-		OutputHint: "填写保存路径，如 C:\\Users\\me\\Desktop\\daily.csv",
+		OutputHint: "填写保存路径，如 ~/Desktop/daily.csv（Windows 可写 C:\\Users\\me\\Desktop\\daily.csv）",
 	},
 	{
 		ID:         "system_check",

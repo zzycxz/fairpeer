@@ -61,9 +61,23 @@ var (
 // configured — typically headless Linux without a session keyring). The
 // ciphertext is then recomputable by any local process, so the user should
 // know and optionally set FAIRPEER_SECRET_PASSPHRASE(_FILE).
+//
+// The "unavailable" state gets its own notice: an existing v2 store whose KEK
+// no backend here can reach. Beyond a locked keystore, this is exactly what a
+// state-dir migration between machines/OSes looks like (Windows DPAPI blob on
+// Linux, keyring KEK on a host without that keyring, machine-bound KEK after
+// a hostname change) — stored secrets read as unset and writes fail closed
+// until the original passphrase is set or credentials are re-entered.
 func warnDegradedSecretStore(stderr io.Writer, store *secret.Store) {
 	backend, degraded := store.SecurityMode()
 	if !degraded {
+		return
+	}
+	if backend == "unavailable" {
+		secretDegradedOnce.Do(func() {
+			fmt.Fprintf(stderr, "warning: secret store keystore unavailable (keystore locked/reset, or the store was copied from another machine or OS); "+
+				"stored secrets read as unset until it is restored — set FAIRPEER_SECRET_PASSPHRASE to the original passphrase, or re-enter credentials on this machine\n")
+		})
 		return
 	}
 	secretDegradedOnce.Do(func() {
@@ -628,6 +642,16 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	bashTimeout := time.Duration(cfg.BashTimeoutSeconds()) * time.Second
 	addBuiltins(reg, cfg.Tools.Enabled, writeRoots, cfg.ReadRoots(), bashSpec, bashTimeout, searchSpec, stderr, root, proxySpec)
 
+	// P1-B2: model-side past-session retrieval ("按上次的方案"). Scoped to the
+	// tab's session dir; the current session's path is injected later once the
+	// session file is chosen (SetSessionSearchSelf via controller wiring).
+	// netdev never registers it — its registry stays hard-sealed and must not
+	// read other profiles' transcripts.
+	if config.ProfileNameKey(profileName(opts.Profile)) != config.ProfileNetDev {
+		agent.SetSessionSearchScope(stateSessionDir, "")
+		reg.Add(agent.SessionSearchTool())
+	}
+
 	// netdev-only tools: registered ONLY in the netdev profile branch — the
 	// reverse half of the hard seal (dev/cowork registries never contain them;
 	// NETDEV_SPEC §7.1). netdev_exec is read-only by construction: the driver
@@ -647,12 +671,35 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 	}
 
-	// coWork-only capabilities: desktop automation, scheduled tasks, email,
-	// RAG, PPT. These are office-specific and stay gated to the cowork profile
-	// so the dev tool list stays focused on coding. (Update: they are hidden
-	// from the main loop via reg.Hide, so registering them unconditionally
-	// doesn't pollute the dev tool list, but allows subagents to work anywhere).
+	// Calendar + scheduled-task tools: a GLOBAL capability, registered in
+	// EVERY profile but profile-BOUND. The instances carry the building
+	// profile, so tasks/events an agent creates land in its partition and its
+	// reads/mutations are partition-scoped (builtin.SchedulerTools guards the
+	// full invariant list). Hidden from the main loop's schema — driven via
+	// run_skill("schedule-auto") subagents, like the heavy office tools below
+	// (token cost stays out of the coding surface). The security posture:
+	// field-whitelisted parsing (no profile/confirm_high_frequency smuggling),
+	// delivery clamped to local notify, schedule_create/run_now RiskExternal
+	// (headless denies), and Ask rules for create/update/delete (approval
+	// card; see the policy section above).
 	profileKey := config.ProfileNameKey(profileName(opts.Profile))
+	for _, t := range builtin.SchedulerTools(profileKey) {
+		reg.Add(t)
+		reg.Hide(t.Name())
+	}
+	// Calendar store injected by the desktop (calendar_app.go) via
+	// builtin.SetCalendarStore; CLI/TUI leaves it nil and the tool reports
+	// "offline".
+	for _, t := range builtin.CalendarTools(profileKey) {
+		reg.Add(t)
+		reg.Hide(t.Name())
+	}
+
+	// coWork-only capabilities: desktop automation, email, RAG, PPT. These are
+	// office-specific and stay gated to the cowork profile so the dev tool
+	// list stays focused on coding. (They are hidden from the main loop via
+	// reg.Hide, so registering them doesn't pollute other profiles' schemas,
+	// but cowork subagents can reach them.)
 	if profileKey == config.ProfileCowork || profileKey == config.ProfileNetDev {
 		// 浏览器归属办公（用户定稿 2026-09-06）——本分支的注册面按 profile 分层：
 		// · cowork：完整注册（工具 schema 进 Registry 但 Hide——browser-auto
@@ -684,10 +731,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		builtin.SetBrowserLaunchOptions(cfg.Cowork.BrowserHeadless, cfg.Cowork.BrowserUserDataDir, resolveBrowserProxyURL(proxySpec))
 	}
 	if profileKey == config.ProfileCowork {
-		// Desktop automation tools (screenshot, screen_click/type/scroll,
-		// get_ui_tree). Windows-native (Win32 BitBlt/SendInput); on other
-		// platforms ScreenTools returns nil so nothing registers and cowork
-		// still works minus desktop control. Hidden from the main loop's schema:
+		// Desktop automation tools (screenshot, screen_click/type/scroll/key,
+		// screen_perceive, get_ui_tree). Windows uses the Win32/UIA-native set
+		// (BitBlt/SendInput/UIA); other platforms get their own unix set —
+		// cliclick/xdotool input, screencapture/scrot capture, VLM-only
+		// perceive, and the window-level get_ui_tree (see screen_other.go).
+		// Hidden from the main loop's schema:
 		// the model drives desktop ops through run_skill("desktop-auto")
 		// subagents, which reach these via FilterRegistry.
 		for _, t := range builtin.ScreenTools() {
@@ -705,14 +754,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			reg.Add(t)
 			reg.Hide(t.Name())
 		}
-		// Scheduled-task tools. The scheduler instance is injected by the
-		// desktop app (see app.go) via builtin.SetScheduler; boot just
-		// registers the tool surface here. When no scheduler is bound (CLI/TUI
-		// cowork), the tools return a clear "offline" error.
-		for _, t := range builtin.SchedulerTools() {
-			reg.Add(t)
-			reg.Hide(t.Name())
-		}
+		// Scheduled-task + calendar tools moved to the COMMON registration
+		// block above (global capability, profile-bound instances).
 		// Email tools (SMTP send + IMAP read/search). Config injected from
 		// [cowork.smtp] and [cowork.imap]; when a side is unset, that side's
 		// tool returns a config error (the other still works).
@@ -745,12 +788,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			reg.Add(t)
 			reg.Hide(t.Name())
 		}
-		// Calendar tools. The store is injected by the desktop app
-		// (calendar_app.go) via builtin.SetCalendarStore; boot registers the tool surface.
-		for _, t := range builtin.CalendarTools() {
-			reg.Add(t)
-			reg.Hide(t.Name())
-		}
+		// Calendar tools: see the common registration block above.
 		// IM push tool (im_send). The bot gateway is injected by the desktop app
 		// (bot_gateway_app.go) via builtin.SetIMPusher; boot registers the tool
 		// surface. Under the CLI/TUI or when the bot is off, the tool reports
@@ -838,7 +876,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 		// Document tools (csv/json/md/txt read + write + convert). Text-based
 		// formats only; binary Office handled elsewhere (ppt via WPS MCP).
-		for _, t := range builtin.DocumentTools() {
+		for _, t := range builtin.DocumentTools(writeRoots) {
 			reg.Add(t)
 			reg.Hide(t.Name())
 		}
@@ -1244,6 +1282,20 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			permission.Rule{Tool: "netdev_netconf"},
 		)
 	}
+	// [scheduler] confirm_agent_tasks (DEFAULT ON): agent-created AI-executing
+	// tasks pop an approval card before they are saved. Same Ask-outranks-
+	// everything mechanism as the netdev guardrail above — the card survives
+	// YOLO/full-access mode, and in headless runs schedule_create is denied
+	// outright via the RiskExternal table (an unattended run must not persist
+	// future unattended executions). Plain reminders (schedule_remind) never
+	// card: nothing executes and nothing leaves the machine.
+	if cfg.Scheduler.ConfirmAgentTasksOrDefault() {
+		policy.Ask = append(policy.Ask,
+			permission.Rule{Tool: "schedule_create"},
+			permission.Rule{Tool: "schedule_update"},
+			permission.Rule{Tool: "schedule_delete"},
+		)
+	}
 	riskOverrides := buildRiskOverrides(cfg.Plugins)
 	// Sub-agent gate (upgrade spec 3-10): same policy as the main gate but
 	// headless — the sub-agent runs unattended inside the main agent's turn.
@@ -1439,8 +1491,17 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// 履行，不信任它读过手册。
 		hasFinding := skill.RequiresFindingsContract(sk)
 		genBefore := netdev.FindingGen()
+		// 轮次案例开卷（BLUETEAM §6 批 1.5 / §8④）：seccheck 委托自动开/续
+		// 当日案例，轮末 diff 钉时间线——宿主侧接线，子代理工具面零新增。
+		var caseRun *netdev.CaseRunScope
+		if sk.Name == "netdev-seccheck-auto" {
+			caseRun = netdev.BeginCaseRun(task)
+		}
 		answer, err := agent.RunSubAgentWithSession(sctx, prov, subReg, run.Session, task, subOpts, agent.NestedSink(sctx, event.Discard))
 		if err != nil {
+			// 委托失败也要收卷——失败恰恰是最值得在案例时间线注一笔的场景，
+			// 只留「轮次开卷」没有「轮次收尾」的账是断头账。
+			caseRun.Finish("（委托失败：" + err.Error() + "）")
 			return "", errors.Join(err, subagentStore.SaveFailed(run))
 		}
 		if hasFinding && netdev.FindingGen() == genBefore {
@@ -1452,6 +1513,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				answer = "[合同违约·已标记] 本次 sweep 未立案即作答，补立案后仍未立案——以下答复未经立案背书，请人工核验：\n\n" + answer
 			}
 		}
+		// 收卷在合同 nudge 之后：diff 要含补立案的 finding，摘要钉最终答复。
+		caseRun.Finish(answer)
 		if err := subagentStore.SaveCompleted(run); err != nil {
 			return "", errors.Join(err, subagentStore.SaveFailed(run))
 		}
@@ -1520,28 +1583,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		reg.Add(t)
 	}
 
-	// Register the post-distill skill-retirement hook. Two tiers of decay:
-	//   soft (every Build) — skills past SkillColdDays are tagged [休眠] and
-	//     demoted to the dormant tail of the index (still callable; a call wakes
-	//     them by refreshing their last-used time).
-	//   hard (after Distill) — skills past 2× the threshold are persisted to
-	//     disabled_skills so they drop out of the registry entirely on the next
-	//     Build (the model can no longer call them, but the file is kept and the
-	//     user can re-enable via Settings → Skills). This mirrors memory's
-	//     dormant→archive progression.
-	// The hook closes over allSkillStore (for the usage tracker + known names)
-	// and config.UserConfigPath (for persistence). Best-effort throughout.
-	if cfg.Dream.Enabled {
-		captureStore := allSkillStore
-		captureColdDays := cfg.Dream.SkillColdDaysEffective()
-		agent.RegisterDistillComplete(func() string {
-			return retireColdSkills(captureStore, captureColdDays, config.UserConfigPath())
-		})
-	} else {
-		agent.RegisterDistillComplete(nil) // dream disabled → no retirement
-	}
-
-	// Dream/distill provider: use the fast_task_model when configured so the
+	// Dream provider: use the fast_task_model when configured so the
 	// background self-evolution runs on a cheaper model instead of the main
 	// model — keeping per-run cost negligible.
 	// Falls back to the main provider when fast_task_model is unset, so behaviour
@@ -1560,9 +1602,26 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 	}
 
+	// P1-B3: anchor the model in real time once per process — deadline and
+	// schedule reasoning (and memories with expiry semantics like "30 天后")
+	// were unjudgeable without it. Boot-time (not per-turn) so the stable
+	// prefix stays byte-identical across turns and history stays clean; a
+	// session crossing midnight runs at most a few hours stale.
+	if !strings.HasSuffix(sysPrompt, "\n") {
+		sysPrompt += "\n"
+	}
+	sysPrompt += "Current date: " + time.Now().Format("2006-01-02 (Mon)") + ".\n"
 	execSess := agent.NewSession(sysPrompt)
+	// P1-A3: install the package-wide retry policy before any provider dials.
+	provider.SetRetryPolicy(provider.RetryPolicy{
+		MaxRetries: cfg.Agent.RetryMaxAttempts,
+		MaxBackoff: time.Duration(cfg.Agent.RetryBackoffMaxSec) * time.Second,
+		Mode:       cfg.Agent.RetryMode,
+	})
+
 	executor := agent.New(execProv, reg, execSess, agent.Options{
 		MaxSteps:             maxSteps,
+		MaxStreamRecoveries:  cfg.Agent.StreamRecoveries,
 		Temperature:          cfg.Agent.Temperature,
 		Pricing:              entry.Price,
 		Gate:                 headlessGate,
@@ -2198,6 +2257,7 @@ func pluginSpecNames(specs []plugin.Spec) []string {
 // the netdev diagnostic hand reads broadly and writes nothing.
 var netdevExcludedToolPrefixes = []string{
 	"bash",          // process execution (and bash_output)
+	"exec_session",  // persistent process sessions (G5) — same execution surface as bash
 	"kill_shell",    // process management
 	"edit_file",     // file writes
 	"write_file",    // file writes
@@ -2460,53 +2520,4 @@ func providerNames(cfg *config.Config) string {
 		names[i] = p.Name
 	}
 	return strings.Join(names, "/")
-}
-
-// retireColdSkills is the post-distill hard-decay step: skills unused for more
-// than 2× the cold threshold are persisted to disabled_skills, dropping them
-// from the registry on the next Build (the soft [休眠] tag is the first tier at
-// 1×; this is the second). Built-ins are exempt. Returns a human-readable
-// summary of what was retired, or "" when nothing changed. Best-effort: any
-// error (missing store, unreadable config) returns "" without panicking —
-// retirement is cleanup, never a primary outcome.
-func retireColdSkills(store *skill.Store, coldDays int, configPath string) string {
-	if store == nil || coldDays <= 0 {
-		return ""
-	}
-	ut := store.Usage()
-	if ut == nil {
-		return "" // tracking disabled (no StateDir)
-	}
-	// 2× threshold for hard retirement: soft decay ([休眠]) kicks in at 1×, hard
-	// (disabled) at 2× — giving a long grace window before a skill is truly
-	// benched. The user can always re-enable from Settings → Skills.
-	hardThreshold := time.Duration(coldDays*2) * 24 * time.Hour
-	var known []string
-	for _, s := range store.List() {
-		if s.Scope == skill.ScopeBuiltin {
-			continue
-		}
-		known = append(known, s.Name)
-	}
-	cold := ut.ColdSkillNames(hardThreshold, true, known)
-	if len(cold) == 0 {
-		return ""
-	}
-	cfg := config.LoadForEdit(configPath)
-	var retired []string
-	for _, name := range cold {
-		// SetSkillEnabled(name, false) is idempotent — a skill already disabled
-		// stays disabled; we just ensure the threshold-eligible ones are in the
-		// disabled set so the next Build drops them from the live registry.
-		if err := cfg.SetSkillEnabled(name, false); err == nil {
-			retired = append(retired, name)
-		}
-	}
-	if len(retired) == 0 {
-		return ""
-	}
-	if err := cfg.SaveTo(configPath); err != nil {
-		return "retired " + strings.Join(retired, ", ") + " (persist failed: " + err.Error() + ")"
-	}
-	return fmt.Sprintf("retired %d dormant skill(s): %s", len(retired), strings.Join(retired, ", "))
 }

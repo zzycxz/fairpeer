@@ -2883,8 +2883,8 @@
 
 /* ── WRITE_AUTHZ：confirm 档写命令审批卡 + TOML 放宽拦截横幅（P1） ────────── */
 .ndv-writeclamp-banner {
-  position: fixed; top: 40px; right: 12px; z-index: 60; max-width: 380px;
-  padding: 10px 14px; border: 1px solid var(--danger, #e5484d); border-radius: 8px;
+  position: fixed; top: 40px; right: 12px; z-index: var(--z-app-chrome); max-width: 380px;
+  padding: 10px 14px; border: 1px solid var(--danger, #e5484d); border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--danger, #e5484d) 10%, var(--bg, #1e1e1e));
   font-size: 12px; line-height: 1.6;
 }
@@ -2893,8 +2893,8 @@
 .ndv-writeclamp-banner__hint { margin-top: 6px; opacity: 0.65; }
 
 .ndv-writecard {
-  position: fixed; bottom: 76px; right: 12px; z-index: 60; width: 400px; max-width: calc(100vw - 24px);
-  padding: 12px 14px; border: 1px solid var(--warn, #f5a623); border-radius: 10px;
+  position: fixed; bottom: 76px; right: 12px; z-index: var(--z-app-chrome); width: 400px; max-width: calc(100vw - 24px);
+  padding: 12px 14px; border: 1px solid var(--warn, #f5a623); border-radius: var(--radius-md);
   background: var(--bg, #1e1e1e); box-shadow: 0 8px 28px rgba(0,0,0,.35);
   font-size: 12px; line-height: 1.6;
 }
@@ -2903,7 +2903,7 @@
 .ndv-writecard__device { font-family: var(--mono, monospace); font-weight: 600; }
 .ndv-writecard__tier { opacity: 0.7; font-size: 11px; }
 .ndv-writecard__cmd {
-  margin: 0 0 6px; padding: 8px 10px; border-radius: 6px; background: rgba(127,127,127,.12);
+  margin: 0 0 6px; padding: 8px 10px; border-radius: var(--radius-sm); background: rgba(127,127,127,.12);
   font-family: var(--mono, monospace); font-size: 12px; white-space: pre-wrap; word-break: break-all;
   max-height: 120px; overflow: auto;
 }

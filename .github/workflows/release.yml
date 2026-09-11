@@ -11,6 +11,13 @@ on:
 permissions:
   contents: write
 
+# GOAMD64=v1 is a hard compatibility floor, not an optimization choice: the
+# domestic x86 fleet is dominated by Zhaoxin KX-5000/KX-6000 (AVX, NO AVX2) —
+# a v3 build would SIGILL on the largest installed base at first exec. Do not
+# raise it without a Zhaoxin/Hygon regression pass.
+env:
+  GOAMD64: v1
+
 jobs:
   build:
     strategy:
@@ -92,11 +99,11 @@ jobs:
         shell: bash
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
-            wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-X main.version=${{ github.ref_name }}" -tags codegraph_embed -webview2 embed -nsis
+            wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-s -w -X main.version=${{ github.ref_name }}" -tags codegraph_embed -webview2 embed -nsis
           elif [ "${{ runner.os }}" = "Linux" ]; then
-            wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-X main.version=${{ github.ref_name }}" -tags codegraph_embed,webkit2_41
+            wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-s -w -X main.version=${{ github.ref_name }}" -tags codegraph_embed,webkit2_41
           else
-            wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-X main.version=${{ github.ref_name }}" -tags codegraph_embed
+            wails build -platform ${{ matrix.platform }} -clean -trimpath -ldflags "-s -w -X main.version=${{ github.ref_name }}" -tags codegraph_embed
           fi
 
       - name: Package Artifact
@@ -109,18 +116,22 @@ jobs:
             # portable (installation-free) exe. Both come from the same
             # -tags codegraph_embed build, so both carry the embedded
             # CodeGraph runtime — the portable exe has no other channel.
+            # wails.json outputfilename is fairpeer-desktop, so the binary is
+            # fairpeer-desktop(.exe) — the desktop updater's applyLinux also
+            # expects the tar member to be named fairpeer-desktop.
             if ls *-installer.exe 1>/dev/null 2>&1; then
               mv *-installer.exe fairpeer-${PLAT_NAME}-installer.exe
-              mv fairpeer.exe fairpeer-${PLAT_NAME}-portable.exe
+              mv fairpeer-desktop.exe fairpeer-${PLAT_NAME}-portable.exe
             else
-              mv fairpeer.exe fairpeer-${PLAT_NAME}.exe
+              mv fairpeer-desktop.exe fairpeer-${PLAT_NAME}.exe
             fi
           elif [ "${{ runner.os }}" = "macOS" ]; then
             # Compress .app to tar.gz to preserve permissions
-            tar -czf fairpeer-${PLAT_NAME}.tar.gz fairpeer.app
+            tar -czf fairpeer-${PLAT_NAME}.tar.gz fairpeer-desktop.app
           else
-            # Linux produces a binary without extension
-            tar -czf fairpeer-${PLAT_NAME}.tar.gz fairpeer
+            # Linux produces a binary without extension; archive it under the
+            # name the desktop updater extracts (fairpeer-desktop).
+            tar -czf fairpeer-${PLAT_NAME}.tar.gz fairpeer-desktop
           fi
 
       - name: Upload Artifact
@@ -132,8 +143,127 @@ jobs:
             desktop/build/bin/*.tar.gz
           retention-days: 1
 
+  # 统信 UOS 20 / 麒麟 V10 桌面版 build leg (docs/国产化适配实施方案.md §七 A1).
+  # Those distros are Debian-10-era (glibc 2.28) and only ship webkit2gtk-4.0
+  # (libsoup2) — binaries from the main Linux legs (Ubuntu 24.04, glibc 2.39,
+  # webkit2_41 tag) neither load nor install there. Strategy:
+  #   - frontend is built on the runner with modern Node (output is plain
+  #     static JS/CSS, runnable anywhere);
+  #   - the Go/Wails link runs inside a debian:buster-slim container so the
+  #     binary's glibc floor is 2.28 and it links WebKitGTK 4.0 (NO
+  #     webkit2_41 tag);
+  #   - an objdump assertion fails the build if the glibc floor creeps above
+  #     2.28;
+  #   - artifacts are named fairpeer-uos-<arch>.tar.gz deliberately WITHOUT a
+  #     "linux-<arch>" substring — cmd/sign matchPlatform would otherwise
+  #     poison the updater manifest's linux keys with a glibc-2.28 binary the
+  #     mainline updater must never download.
+  build-uos:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+            cg_asset: codegraph-linux-x64.tar.gz
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            cg_asset: codegraph-linux-arm64.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build Frontend
+        working-directory: desktop/frontend
+        run: |
+          npm install
+          npx vite build
+
+      - name: Fetch CodeGraph runtime (embed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          CG_VERSION="v1.0.0"
+          mkdir -p internal/codegraph/assets
+          curl -fL --retry 3 -o internal/codegraph/assets/codegraph_runtime.bin \
+            "https://github.com/colbymchenry/codegraph/releases/download/${CG_VERSION}/${{ matrix.cg_asset }}"
+          echo "staged ${{ matrix.cg_asset }} ($(wc -c < internal/codegraph/assets/codegraph_runtime.bin) bytes)"
+
+      # wails build -s skips the frontend hooks (dist already built above) so
+      # no Node is needed inside the buster container; Go itself is a static
+      # binary and runs on glibc 2.28 fine.
+      - name: Build in Debian buster container (glibc 2.28 / WebKitGTK 4.0)
+        env:
+          GO_TARBALL: https://go.dev/dl/go1.26.5.linux-${{ matrix.arch }}.tar.gz
+          BUILD_VERSION: ${{ github.ref_name }}
+          ARCH: ${{ matrix.arch }}
+        shell: bash
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src \
+            -e GO_TARBALL -e BUILD_VERSION -e ARCH \
+            debian:buster-slim bash -euxc '
+              echo "deb http://archive.debian.org/debian buster main" > /etc/apt/sources.list
+              echo "deb http://archive.debian.org/debian-security buster/updates main" >> /etc/apt/sources.list
+              apt-get -o Acquire::Check-Valid-Until=false update
+              apt-get install -y --no-install-recommends \
+                ca-certificates curl xz-utils build-essential pkg-config binutils \
+                imagemagick \
+                libgtk-3-dev libwebkit2gtk-4.0-dev
+              curl -fL --retry 3 "$GO_TARBALL" | tar -C /usr/local -xz
+              export PATH=/usr/local/go/bin:/root/go/bin:$PATH
+              go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+              cd desktop
+              wails build -platform linux/"$ARCH" -clean -trimpath \
+                -ldflags "-s -w -X main.version=$BUILD_VERSION" \
+                -tags codegraph_embed -s
+              cd build/bin
+              worst=$(objdump -T fairpeer-desktop | grep -o "GLIBC_[0-9.]*" | sed "s/GLIBC_//" | sort -Vu | tail -1)
+              echo "glibc floor: $worst (must be <= 2.28)"
+              if [ "$(printf "%s\n2.28\n" "$worst" | sort -Vu | tail -1)" != "2.28" ]; then
+                echo "FAIL: glibc floor $worst exceeds 2.28 — the buster toolchain leaked a newer symbol" >&2
+                exit 1
+              fi
+              cd /src
+              # UOS store-spec .deb (same glibc-2.28/WebKitGTK-4.0 binary):
+              # /opt/apps layout + 4-segment numeric version. The tag arrives
+              # as v0.2.3 or desktop-v0.2.3; anything else falls back to a
+              # run-number build segment.
+              VER="${BUILD_VERSION#desktop-}"; VER="${VER#v}"
+              if ! [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+                # workflow_dispatch on a branch ref or an odd tag: shipping a
+                # 0.0.0.99 deb would poison the store version forever — fail loud.
+                echo "FAIL: cannot derive a numeric X.Y.Z version from '$BUILD_VERSION' (tag releases only)" >&2
+                exit 1
+              fi
+              bash scripts/uos-deb.sh desktop/build/bin/fairpeer-desktop "$ARCH" "$VER" \
+                "desktop/build/bin/fairpeer-uos-$ARCH.deb"
+            '
+
+      - name: Package Artifact
+        working-directory: desktop/build/bin
+        shell: bash
+        run: |
+          # Name deliberately avoids the "linux-<arch>" substring: cmd/sign
+          # matchPlatform must NOT map this artifact onto the updater's
+          # linux-amd64/linux-arm64 manifest keys.
+          tar -czf fairpeer-uos-${{ matrix.arch }}.tar.gz fairpeer-desktop
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifact-uos-${{ matrix.arch }}
+          path: |
+            desktop/build/bin/*.tar.gz
+            desktop/build/bin/*.deb
+          retention-days: 1
+
   publish:
-    needs: build
+    needs: [build, build-uos]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -151,6 +281,22 @@ jobs:
           pattern: build-artifact-*
           merge-multiple: true
 
+      - name: Build remote-host binaries
+        run: |
+          # The desktop's remote-workspace transports (SSH/Docker) provision
+          # this Linux helper onto the remote on first connect. Without it a
+          # shipped desktop fails every remote workspace until the user builds
+          # it manually. Kept OUT of build/bin and named with a "hosts" infix:
+          # matchPlatform substrings on "<goos>-<goarch>", so a colliding name
+          # would poison the updater manifest's linux keys.
+          ./scripts/build-hosts.sh
+          cache="${XDG_CACHE_HOME:-$HOME/.cache}/fairpeer/hosts"
+          mkdir -p desktop/build/hosts
+          for f in "$cache"/fairpeer-linux-*; do
+            base=$(basename "$f")
+            tar -czf "desktop/build/hosts/fairpeer-hosts-${base#fairpeer-}.tar.gz" -C "$cache" "$base"
+          done
+
       - name: Sign and Generate latest.json
         working-directory: desktop
         env:
@@ -159,9 +305,14 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           tag="${{ github.ref_name }}"
+          # The manifest wants <version> as the semver the updater compares
+          # (v0.2.3) and <tag> as the GitHub release tag (desktop-v0.2.3) —
+          # passing the raw tag twice breaks version comparison for
+          # desktop-v* tags.
+          version="${tag#desktop-}"
           # The cmd/sign requires bash or sh to glob, so we'll just run it with bash
           go run ./cmd/sign sign build/bin/*
-          go run ./cmd/sign manifest build/bin $tag $tag
+          go run ./cmd/sign manifest build/bin "$version" "$tag"
         shell: bash
 
       - name: Publish Release
@@ -170,6 +321,8 @@ jobs:
           files: |
             desktop/build/bin/*.exe
             desktop/build/bin/*.tar.gz
+            desktop/build/bin/*.deb
             desktop/build/bin/*.minisig
             desktop/build/bin/latest.json
+            desktop/build/hosts/*.tar.gz
           generate_release_notes: true

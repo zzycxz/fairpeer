@@ -6,7 +6,7 @@
 // the attachable Chrome (companion tier, §3.6).
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, Loader2, MonitorPlay, RefreshCw } from "lucide-react";
-import { app } from "../lib/bridge";
+import { app, openExternal } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 
 function normalizeUrl(raw: string): string {
@@ -163,7 +163,7 @@ export function PreviewPane({ url, onUrlCommit }: { url: string; onUrlCommit?: (
         <button
           type="button"
           className="preview-pane__btn"
-          onClick={() => window.open(current, "_blank", "noopener")}
+          onClick={() => openExternal(current)}
           aria-label={t("preview.openExternal")}
           title={t("preview.openExternal")}
         >

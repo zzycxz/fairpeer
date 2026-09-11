@@ -45,6 +45,7 @@ type TaskView struct {
 	Color          string `json:"color"`
 	Location       string `json:"location"`
 	Plain          bool   `json:"plain"`          // 纯提醒：到点直接弹原文，不调 AI
+	Source         string `json:"source"`         // manual / agent ("" = legacy manual)
 	LastDeliverErr string `json:"lastDeliverErr"` // "" if last delivery was ok / skipped
 	LastDeliverAt  string `json:"lastDeliverAt"`  // "" if never delivered
 	HumanSchedule  string `json:"humanSchedule"`  // friendly description, e.g. "每天 18:00"
@@ -85,11 +86,17 @@ type SchedulePreview struct {
 }
 
 // TaskInput is the create/update payload from the UI. Empty ID = create new.
+// Profile/ConfirmHighFrequency are UI-only powers (the agent tools parse field
+// whitelists and can never set them): Profile assigns the task's running
+// partition — including cross-partition assignments the human may make (an
+// ops-planned task that runs under cowork); ConfirmHighFrequency is the
+// user's explicit OK for >4 runs/day after Create rejected with the gate error.
 type TaskInput struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	Expression    string `json:"expression"`
 	Prompt        string `json:"prompt"`
+	Profile       string `json:"profile"`
 	OutputMode    string `json:"outputMode"`
 	OutputDest    string `json:"outputDest"`
 	OutputAccount string `json:"outputAccount"`
@@ -97,6 +104,8 @@ type TaskInput struct {
 	Color         string `json:"color"`
 	Location      string `json:"location"`
 	Plain         bool   `json:"plain"` // 纯提醒：到点直接弹原文，不调 AI
+	// ConfirmHighFrequency retries a create that the >4/day gate rejected.
+	ConfirmHighFrequency bool `json:"confirmHighFrequency"`
 }
 
 const (
@@ -127,6 +136,7 @@ func (a *App) CreateScheduledTask(in TaskInput) (TaskView, error) {
 		Name:          in.Name,
 		Expression:    in.Expression,
 		Prompt:        in.Prompt,
+		Profile:       in.Profile, // human may assign any partition (incl. cross-profile run identity)
 		OutputMode:    in.OutputMode,
 		OutputDest:    in.OutputDest,
 		OutputAccount: in.OutputAccount,
@@ -134,6 +144,10 @@ func (a *App) CreateScheduledTask(in TaskInput) (TaskView, error) {
 		Color:         in.Color,
 		Location:      in.Location,
 		Plain:         in.Plain,
+		Source:        "manual",
+		// The UI confirm flag is the legitimate retry path for the >4/day gate
+		// (the agent tools can never set it).
+		ConfirmHighFrequency: in.ConfirmHighFrequency,
 	})
 	if err != nil {
 		return TaskView{}, err
@@ -151,6 +165,7 @@ func (a *App) UpdateScheduledTask(in TaskInput) (TaskView, error) {
 		t.Name = in.Name
 		t.Expression = in.Expression
 		t.Prompt = in.Prompt
+		t.Profile = in.Profile // human may re-assign the running partition
 		t.OutputMode = in.OutputMode
 		t.OutputDest = in.OutputDest
 		t.OutputAccount = in.OutputAccount
@@ -158,6 +173,10 @@ func (a *App) UpdateScheduledTask(in TaskInput) (TaskView, error) {
 		t.Color = in.Color
 		t.Location = in.Location
 		t.Plain = in.Plain
+		t.Source = "manual" // a human edited it — the audit trail reflects the last writer
+		if in.ConfirmHighFrequency {
+			t.ConfirmHighFrequency = true
+		}
 	})
 	if err != nil {
 		return TaskView{}, err
@@ -384,12 +403,12 @@ func (n schedulerNotifier) Notify(name, result string) {
 		"name":   name,
 		"result": result,
 	})
-	// Fire a LONG-duration (25s) OS toast so the reminder stays on screen long
-	// enough to read (the default 7s flashes and is easy to miss), then persists
-	// to Windows Action Center. We bypass Wails' SendNotification (hardcoded 7s
-	// Short, no override) and call go-toast directly with Duration=Long, reusing
-	// the AUMID/COM registration from InitializeNotifications. Best-effort.
-	go notifyLongDurationToast(name, apihelper.Truncate(result, 200))
+	// Fire an OS notification so the reminder is visible without the window
+	// (the default 7s in-app toast flashes and is easy to miss). Windows gets a
+	// LONG-duration (25s) go-toast that persists to Action Center; macOS/Linux
+	// fall back to Wails' cross-platform notification (go-toast is a no-op off
+	// Windows). Best-effort.
+	go notifyLongDurationToast(n.app.ctx, name, apihelper.Truncate(result, 200))
 }
 
 // --- helpers ----------------------------------------------------------------
@@ -412,6 +431,7 @@ func toTaskView(t scheduler.ScheduledTask) TaskView {
 		Color:          t.Color,
 		Location:       t.Location,
 		Plain:          t.Plain,
+		Source:         t.Source,
 		LastDeliverErr: t.LastDeliverErr,
 		HumanSchedule:  describeSchedule(t.Expression),
 	}

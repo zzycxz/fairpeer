@@ -115,13 +115,13 @@ func guardDecompressionBomb(zipPath string) error {
 		totalUncompressed += int64(f.UncompressedSize64)
 		if totalUncompressed > maxUncompressedBytes {
 			return DocError{Code: ErrDecompBomb,
-				Message: fmt.Sprintf("package uncompressed size exceeds %d-byte limit", maxUncompressedBytes),
+				Message:    fmt.Sprintf("package uncompressed size exceeds %d-byte limit", maxUncompressedBytes),
 				Suggestion: "the file is unusually large; if it's legitimate, split it into smaller documents"}
 		}
 		if f.UncompressedSize64 > 0 && f.CompressedSize64 > 0 {
 			if ratio := int64(f.UncompressedSize64) / int64(f.CompressedSize64); ratio > maxCompressionRatio {
 				return DocError{Code: ErrDecompBomb,
-					Message: fmt.Sprintf("entry %s has compression ratio %d× (limit %d×)", f.Name, ratio, maxCompressionRatio),
+					Message:    fmt.Sprintf("entry %s has compression ratio %d× (limit %d×)", f.Name, ratio, maxCompressionRatio),
 					Suggestion: "the file may be a zip bomb; obtain it from a trusted source"}
 			}
 		}
@@ -164,6 +164,19 @@ func checkFileLocked(path string) error {
 	}
 	f.Close()
 	return nil
+}
+
+// rejectLockedTarget is the write-path wrapper around checkFileLocked: when the
+// target already exists, verify it isn't held open by Word/Excel/WPS BEFORE any
+// generation work starts. Without this, docx/xlsx writes hit the raw
+// "Access is denied" from the final rename (after minutes of work) with no hint
+// that closing the app fixes it. A missing target is the normal create path and
+// passes.
+func rejectLockedTarget(path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	return checkFileLocked(path)
 }
 
 // --- BOM stripping ---------------------------------------------------------

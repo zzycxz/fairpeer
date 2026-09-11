@@ -3,6 +3,7 @@ import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } 
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import {
   Activity,
+  CalendarDays,
   Globe,
   SquarePen,
   FileText,
@@ -26,7 +27,7 @@ import { useConfirm } from "./lib/confirm";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, useI18n, useT, type Translator } from "./lib/i18n";
 import { useController, type Item, type LiveStream } from "./lib/useController";
-import { app, onEvent, onProjectTreeChanged, onSchedulerNotice,
+import { app, onEvent, onProjectTreeChanged, onSchedulerNotice, onCalendarReminder,
   onRemoteStatus, onBrowserMirror,
 } from "./lib/bridge";
 import { browserMirrorSnapshot, pushBrowserMirrorFrame, requestBrowserMirrorFocus } from "./lib/browserMirror";
@@ -34,6 +35,7 @@ import { onFairpeerDeepLink, onProfileChanged } from "./lib/bridge";
 import { CoWorkLayout } from "./layouts/CoWorkLayout";
 import { NetDevLayout, NetdevTitleBar } from "./layouts/NetDevLayout";
 import { PreferencePanel } from "./components/cowork/PreferencePanel";
+import { CalendarTaskPanel } from "./components/calendar/CalendarTaskPanel";
 import { Transcript } from "./components/Transcript";
 import { ExpertSessionView } from "./components/cowork/ExpertSessionView";
 import { Composer } from "./components/Composer";
@@ -152,7 +154,7 @@ const SIDEBAR_COLLAPSE_THRESHOLD = 96;
 const DOCK_CLOSE_THRESHOLD = 180;
 const RIGHT_DOCK_MAX_WIDTH = 3840;
 
-type RightDockMode = "turns" | "files" | "changed" | "preview" | "session";
+type RightDockMode = "turns" | "files" | "changed" | "preview" | "session" | "calendar";
 
 const RIGHT_DOCK_MODE_KEY = "fairpeer.rightDockMode";
 const PREVIEW_URL_KEY = "fairpeer.previewUrl";
@@ -160,8 +162,11 @@ const DOCK_TABS_KEY = "fairpeer.dockTabs";
 
 // All tabs the dock's "+" menu can open, in canonical order. Persisted dock
 // tab lists are filtered against this, so entries saved before the 2026-08-27
-// rename (the old "context" overview tab) are dropped on load.
-const DOCK_TAB_CATALOG: RightDockMode[] = ["turns", "files", "changed", "preview", "session"];
+// rename (the old "context" overview tab) are dropped on load. "calendar" is
+// the global schedule surface (calendar + scheduled tasks) — the coding dock
+// mounts it so dev has first-class reach into the shared calendar without
+// leaving the profile.
+const DOCK_TAB_CATALOG: RightDockMode[] = ["turns", "files", "changed", "preview", "session", "calendar"];
 
 const DEFAULT_DOCK_TABS: RightDockMode[] = ["files", "changed", "preview"];
 
@@ -181,7 +186,7 @@ function loadDockTabs(): RightDockMode[] {
 function loadRightDockMode(): RightDockMode {
   try {
     const v = getScopedItem(RIGHT_DOCK_MODE_KEY, true);
-    if (v === "turns" || v === "files" || v === "changed" || v === "preview" || v === "session") return v;
+    if (v === "turns" || v === "files" || v === "changed" || v === "preview" || v === "session" || v === "calendar") return v;
   } catch { /* storage unavailable */ }
   return "files";
 }
@@ -768,6 +773,8 @@ export default function App() {
   const {
     state,
     activeTabId,
+    approvalPendingTabs,
+    initialLoading,
     send,
     runShell,
     steer,
@@ -1072,10 +1079,11 @@ export default function App() {
     });
   }, []);
   // Loop Engineering emergency stop (spec §2.4): Ctrl+Shift+\ kills the loop
-  // from anywhere, mirroring the netdev e-stop precedent.
+  // from anywhere, mirroring the netdev e-stop precedent. macOS accepts
+  // Cmd+Shift+\ (Cmd is the primary modifier there).
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.ctrlKey && event.shiftKey && event.code === "Backslash") {
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.code === "Backslash") {
         event.preventDefault();
         void app.LoopStop("emergency-hotkey");
       }
@@ -1085,7 +1093,8 @@ export default function App() {
   }, []);
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.ctrlKey && event.code === "Backquote") {
+      // Ctrl or Cmd (macOS primary modifier) + Backquote toggles the panel.
+      if ((event.ctrlKey || event.metaKey) && event.code === "Backquote") {
         event.preventDefault();
         setTerminalOpen((v) => {
           saveTerminalOpen(!v);
@@ -1289,6 +1298,19 @@ export default function App() {
       showToast(`${e.name}: ${(e.result || "").slice(0, 100)}`, "info");
     });
   }, [showToast]);
+
+  // Global calendar reminder — same registration discipline as the scheduler
+  // notice above. The reminder event ("calendar:reminder") used to be heard
+  // ONLY by the calendar panel: with the panel unmounted (any other page),
+  // reminders fired into the void. The panel no longer subscribes at all
+  // (that also killed the double-toast when it WAS mounted), so this root
+  // listener is the single in-app surface; the backend additionally fires an
+  // OS toast (calendarNotifier), giving reminders two visible channels.
+  useEffect(() => {
+    return onCalendarReminder((e) => {
+      showToast(`${e.title || t("cal.reminder")}: ${e.body || ""}`, "info");
+    });
+  }, [showToast, t]);
 
   // PPT reference pre-analysis degraded: the desktop layer analyzed (or failed
   // to analyze) a reference image/PDF BEFORE the message reached the model
@@ -1794,7 +1816,11 @@ export default function App() {
       } else if (r.kind === "case") {
         window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-screen", { detail: { screen: "chain" } }));
       } else if (r.kind === "cutover") {
-        window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-screen", { detail: { screen: "cutover" } }));
+        // 带 id（fairpeer://cutover/CO-9）直达该 run 的 runbook 视图
+        //（NetDevLayout 的 cutoverId 选择态）；无 id 落割接屏看板。
+        window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-screen", {
+          detail: r.id ? { screen: "cutover", cutover: r.id } : { screen: "cutover" },
+        }));
       } else if (r.kind === "screen") {
         window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-screen", { detail: { screen: r.id } }));
       } else if (r.kind === "proposal") {
@@ -2773,7 +2799,12 @@ export default function App() {
   const onResumeSession = useCallback(
     async (session: SessionMeta) => {
       window.dispatchEvent(new CustomEvent("cowork:reset-panel"));
-      if (state.running) return;
+      // F9：运行中的回合会让这次点击成为"死点击"（菜单关闭、无任何反馈），
+      // 至少给出一条可见提示，而不是静默 return。
+      if (state.running) {
+        showToast(t("history.resumeBlockedRunning"), "warn");
+        return;
+      }
       const scope = session.scope || (session.workspaceRoot ? "project" : "global");
       try {
         let targetTab: TabMeta;
@@ -3203,6 +3234,7 @@ ${t("remote.uncPromptBody", { path: picked })}
           profile={coworkActive ? "cowork" : netdevActive ? "netdev" : "dev"}
           onInsert={addWorkspaceTextToComposer}
           modelLabel={state.meta?.label}
+          loading={initialLoading}
         />
       )}
     </main>
@@ -3259,6 +3291,8 @@ ${t("remote.uncPromptBody", { path: picked })}
         placeholderOverride={netdevActive ? "描述故障现象或要查的状态，如「core-sw-1 的 OSPF 邻居一直 down」…" : undefined}
         toolApprovalMode={toolApprovalMode}
         goal={goal}
+        goalTurns={state.meta?.goalTurns}
+        goalMaxTurns={state.meta?.goalMaxTurns}
         cwd={state.meta?.cwd}
         modelLabel={state.meta?.label ?? t("status.connecting")}
         tabId={activeTabId}
@@ -3319,6 +3353,20 @@ ${t("remote.uncPromptBody", { path: picked })}
   const dedupedSidebarSessions = sidebarSessions.filter(
     (s) => !s.topicId || !projectTreeTopicIds.has(s.topicId),
   );
+
+  // X8b cross-tab approval badge: map the per-tab pending-prompt store onto
+  // sidebar rows by topicId (tabs and sessions share that key). Topics already
+  // shown in the project tree carry their own backend waiting_confirmation
+  // status; this covers the remaining sidebar rows.
+  const approvalPendingTopicIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (approvalPendingTabs.length === 0) return ids;
+    for (const tabId of approvalPendingTabs) {
+      const topicId = tabMetas.find((tab) => tab.id === tabId)?.topicId;
+      if (topicId) ids.add(topicId);
+    }
+    return ids;
+  }, [approvalPendingTabs, tabMetas]);
 
   // Terminal console (Ctrl+`): built once and lent to whichever surface owns
   // the chat body — the coding-mode chat pane or 运维 shell — so the
@@ -3491,6 +3539,7 @@ ${t("remote.uncPromptBody", { path: picked })}
   const sidebarSessionsNode = (
     <SidebarSessions
       sessions={dedupedSidebarSessions}
+      approvalTopicIds={approvalPendingTopicIds}
       onResume={(session) => {
         void onResumeSession(session);
         window.setTimeout(refreshSidebarSessions, 500);
@@ -3639,6 +3688,12 @@ ${t("remote.uncPromptBody", { path: picked })}
           center={netdevActive
             ? <NetdevTitleBar leading={headerNode} onOpenSettings={(t) => { setSettingsTarget(t as never); setSettingsPayload(null); }} />
             : headerNode}
+          approvalPendingCount={approvalPendingTabs.length}
+          onOpenApprovalPending={() => {
+            // Jump to the first tab blocked on a prompt — its modal takes over.
+            const first = approvalPendingTabs[0];
+            if (first) void handleTabChange(first);
+          }}
           onOpenPalette={() => void openPalette()}
           terminalOpen={terminalOpen}
           onToggleTerminal={toggleTerminal}
@@ -3654,7 +3709,7 @@ ${t("remote.uncPromptBody", { path: picked })}
             className={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""}`}
             aria-label={t("sidebar.navigation")}
           >
-          <PaneErrorBoundary label="侧栏">
+          <PaneErrorBoundary label={t("common.sidebarPane")}>
           <div className="sidebar__brandrow">
             {/* Logo retired (2026-08-19): the collapse toggle takes the leftmost
                 slot, the mode name follows it; new-session stays right. */}
@@ -3741,7 +3796,7 @@ ${t("remote.uncPromptBody", { path: picked })}
           onDoubleClick={() => setExpandedSidebarWidth(defaultSidebarWidth())}
         />
 
-        <PaneErrorBoundary label="对话区">
+        <PaneErrorBoundary label={t("common.transcriptPane")}>
           <section className="chat-pane">
           {/* Dev-profile topicbar moved into the top chrome (AppChrome center
               slot). The coding chat body below is DEV-ONLY: cowork/netdev
@@ -3804,12 +3859,14 @@ ${t("remote.uncPromptBody", { path: picked })}
                           : mode === "files" ? <FileText size={13} />
                           : mode === "changed" ? <GitBranch size={13} />
                           : mode === "preview" ? <Globe size={13} />
+                          : mode === "calendar" ? <CalendarDays size={13} />
                           : <MessageSquare size={13} />}
                         <span className="workbench-dock__tab-label">
                           {mode === "turns" ? t("rightDock.turns")
                             : mode === "files" ? t("workspace.filesTab")
                             : mode === "changed" ? t("workspace.changedTab")
                             : mode === "preview" ? t("preview.tabTitle")
+                            : mode === "calendar" ? t("cal.dockTab")
                             : t("sideSession.tabTitle")}
                         </span>
                         {mode === "changed" && changedDirty && rightDockMode !== "changed" && (
@@ -3860,12 +3917,14 @@ ${t("remote.uncPromptBody", { path: picked })}
                       : mode === "files" ? <FileText size={13} />
                       : mode === "changed" ? <GitBranch size={13} />
                       : mode === "preview" ? <Globe size={13} />
+                      : mode === "calendar" ? <CalendarDays size={13} />
                       : <MessageSquare size={13} />,
                     label:
                       mode === "turns" ? t("rightDock.turns")
                       : mode === "files" ? t("workspace.filesTab")
                       : mode === "changed" ? t("workspace.changedTab")
                       : mode === "preview" ? t("preview.tabTitle")
+                      : mode === "calendar" ? t("cal.dockTab")
                       : t("sideSession.tabTitle"),
                     onSelect: () => {
                       setDockAddMenuPoint(null);
@@ -3893,6 +3952,12 @@ ${t("remote.uncPromptBody", { path: picked })}
                   selectedId={sideSessionTabId}
                   onSelect={setSideSessionTabId}
                 />
+              ) : rightDockMode === "calendar" ? (
+                /* Global schedule surface in the coding dock: same panel the
+                   office layout mounts, pinned to THIS page's partition as the
+                   create default (the task list still shows every partition —
+                   the human owns all cabinets). */
+                <CalendarTaskPanel profile="dev" />
               ) : (
                 <WorkspacePanel
                   open={workspacePanelRenderable}
@@ -3973,6 +4038,7 @@ ${t("remote.uncPromptBody", { path: picked })}
         <SettingsPanel
           initialTab={settingsTarget}
           initialPayload={settingsPayload ?? undefined}
+          platform={desktopPlatform}
           onClose={() => {
             setSettingsTarget(null);
             setSettingsPayload(null);

@@ -294,3 +294,29 @@ func TestNetDevExcludesBrowserDomain(t *testing.T) {
 		}
 	}
 }
+
+// TestProfilesExposeScheduleSkill pins the globalization decision: reminders
+// and scheduled tasks are a GLOBAL capability, so every builtin profile's
+// skill whitelist carries schedule-auto (the operating manual for the
+// schedule_*/calendar tools). The tools themselves are partition-bound at
+// registration (boot), so indexing the skill everywhere cannot leak data
+// across profiles.
+func TestProfilesExposeScheduleSkill(t *testing.T) {
+	cfg := Default()
+	for _, name := range []string{ProfileDev, ProfileCowork, ProfileNetDev} {
+		prof, err := cfg.ResolveProfile(name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		found := false
+		for _, s := range prof.EnabledSkills {
+			if s == "schedule-auto" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s EnabledSkills missing schedule-auto (global capability)", name)
+		}
+	}
+}

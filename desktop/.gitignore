@@ -26,14 +26,21 @@
 !/build/linux
 /build/linux/*
 !/build/linux/nfpm.yaml
-!/build/linux/MoMAPeer.desktop
+!/build/linux/fairpeer.desktop
+# UOS store-spec packaging inputs (scripts/uos-deb.sh consumes these): the info
+# manifest template, the store .desktop template, and the IME/GPU launcher wrapper.
+!/build/linux/uos
+/build/linux/uos/*
+!/build/linux/uos/info.in
+!/build/linux/uos/app.desktop.in
+!/build/linux/uos/launcher.sh
 
 # Go test binaries
 *.test
 
 # Local config symlinks for `wails dev` (point at the repo-root MoMAPeer.toml/.env
 # so the desktop app resolves the same config/keys the CLI does). Never commit.
-/MoMAPeer.toml
+/fairpeer.toml
 /.env
 
 # `go build` binary produced in-tree (module MoMAPeer/desktop → "desktop")

@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import mermaid from "mermaid";
 import { FileCode, ImageDown, Loader2 } from "lucide-react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
+import { getResolvedTheme } from "../lib/theme";
 import {
   APP_MERMAID_CONFIG,
   extractMermaidTitle,
+  mermaidThemeFor,
   safeMermaidFilename,
   sanitizeMermaidCode,
 } from "./mermaidLogic";
@@ -16,8 +18,38 @@ import {
   svgWithBackground,
 } from "../lib/mermaidExport";
 
-// Initialize mermaid with specific settings for the app's aesthetic
+// Initialize mermaid with the app-wide base settings. The THEME is not set
+// here — mermaid.render bakes the theme into the SVG at call time, so a
+// module-load theme would freeze every diagram to the theme active at app
+// boot. Each render resolves it instead (see mermaidTheme / the render effect).
 mermaid.initialize(APP_MERMAID_CONFIG);
+
+// Shared subscription for resolved-theme flips (attribute change on <html>, or
+// an OS scheme flip while theme is "auto"). One MutationObserver +
+// MediaQueryList serves every mounted viewer regardless of diagram count.
+const themeSubs = new Set<() => void>();
+let schemeQuery: MediaQueryList | null = null;
+let themeAttrObserver: MutationObserver | null = null;
+const notifyThemeSubs = () => themeSubs.forEach((fn) => fn());
+
+function subscribeResolvedTheme(onChange: () => void): () => void {
+  themeSubs.add(onChange);
+  if (themeSubs.size === 1) {
+    schemeQuery = window.matchMedia("(prefers-color-scheme: light)");
+    schemeQuery.addEventListener("change", notifyThemeSubs);
+    themeAttrObserver = new MutationObserver(notifyThemeSubs);
+    themeAttrObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  }
+  return () => {
+    themeSubs.delete(onChange);
+    if (themeSubs.size === 0) {
+      schemeQuery?.removeEventListener("change", notifyThemeSubs);
+      schemeQuery = null;
+      themeAttrObserver?.disconnect();
+      themeAttrObserver = null;
+    }
+  };
+}
 
 // The backdrop used when rasterizing: read from the on-screen card (the svg
 // container itself is transparent — the background lives on .mermaid-viewer)
@@ -39,6 +71,12 @@ export function MermaidViewer({ chart }: { chart: string }) {
   const [error, setError] = useState<string>("");
   const [busyKind, setBusyKind] = useState<"png" | "svg" | null>(null);
   const [exportError, setExportError] = useState("");
+  // Resolved at each render ("default" for light, "dark" for dark) so diagrams
+  // follow the app theme; flipping it re-runs the render effect below.
+  const mermaidTheme = useSyncExternalStore(
+    subscribeResolvedTheme,
+    () => mermaidThemeFor(getResolvedTheme()),
+  );
 
   const title = extractMermaidTitle(chart);
   const safeChart = sanitizeMermaidCode(chart);
@@ -50,6 +88,7 @@ export function MermaidViewer({ chart }: { chart: string }) {
       try {
         // mermaid.render needs a unique id
         const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
+        mermaid.initialize({ ...APP_MERMAID_CONFIG, theme: mermaidTheme });
         const { svg: renderedSvg } = await mermaid.render(id, safeChart);
 
         if (!cancelled) {
@@ -70,7 +109,7 @@ export function MermaidViewer({ chart }: { chart: string }) {
     return () => {
       cancelled = true;
     };
-  }, [safeChart]);
+  }, [safeChart, mermaidTheme]);
 
   const exportDiagram = async (kind: "png" | "svg") => {
     if (busyKind || !safeChart) return;
@@ -78,7 +117,10 @@ export function MermaidViewer({ chart }: { chart: string }) {
     setBusyKind(kind);
     try {
       const background = containerBackground(containerRef.current);
-      const exportSvg = await renderMermaidSvgForExport(safeChart);
+      // Pass the resolved theme explicitly — with the theme no longer baked
+      // into the global config, an unset override would default exports to
+      // mermaid's light palette even in dark mode.
+      const exportSvg = await renderMermaidSvgForExport(safeChart, mermaidTheme);
       const base = safeMermaidFilename(title);
       if (kind === "svg") {
         const path = await app.PickExportFile(`${base}.svg`, "image/svg+xml");

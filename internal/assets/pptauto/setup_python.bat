@@ -10,17 +10,24 @@ setlocal
 set "SKILL_DIR=%~dp0"
 set "REQ=%SKILL_DIR%requirements.txt"
 
-REM 选择可用的解释器（优先 python3，回退 python）
-where python3 >nul 2>&1 && (
-    set "PY=python3"
+REM 选择可用的解释器（优先 py -3 启动器，回退 python，再回退 python3）。
+REM 不能只用 where 探测：Windows 商店的 python3 别名占位程序能被 where 找到，
+REM 但运行时只会打印商店提示、pip 完全不可用。所以每个候选都要实际执行
+REM --version 验证成功后才采用，失败则继续尝试下一个。
+py -3 --version >nul 2>&1 && (
+    set "PY=py -3"
     goto :install
 )
-where python >nul 2>&1 && (
+python --version >nul 2>&1 && (
     set "PY=python"
     goto :install
 )
+python3 --version >nul 2>&1 && (
+    set "PY=python3"
+    goto :install
+)
 
-echo ERROR: 未找到 python3/python。请先安装 Python 3.10+：
+echo ERROR: 未找到可用的 Python（py -3 / python / python3 均失败）。请先安装 Python 3.10+：
 echo   https://www.python.org/downloads/   （安装时勾选 "Add to PATH"）
 exit /b 1
 

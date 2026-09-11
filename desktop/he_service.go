@@ -33,6 +33,7 @@ type HEService struct {
 	client   *rag.HEClient
 	port     int
 	python   string
+	pyPrefix []string // interpreter prefix args (e.g. uv's ["run","python"]) — dropped here once, killing the sidecar on every uv-only host
 	script   string
 	running  bool
 	heAvail  bool // Hyper-Extract library actually loaded (not just HTTP up)
@@ -44,10 +45,12 @@ func NewHEService(pythonPath string, scriptPath string, port int) *HEService {
 	if port <= 0 {
 		port = defaultHEPort
 	}
+	var pyPrefix []string
 	if pythonPath == "" {
 		// Use the unified runtime resolver (prefers uv if bundled).
-		if cmd, _, err := runtimepkg.ResolvePython(); err == nil {
+		if cmd, prefix, err := runtimepkg.ResolvePython(); err == nil {
 			pythonPath = cmd
+			pyPrefix = prefix
 		} else {
 			pythonPath = "python3"
 			if runtime.GOOS == "windows" {
@@ -56,10 +59,11 @@ func NewHEService(pythonPath string, scriptPath string, port int) *HEService {
 		}
 	}
 	return &HEService{
-		port:   port,
-		python: pythonPath,
-		script: scriptPath,
-		client: rag.NewHEClient(port),
+		port:     port,
+		python:   pythonPath,
+		pyPrefix: pyPrefix,
+		script:   scriptPath,
+		client:   rag.NewHEClient(port),
 	}
 }
 
@@ -95,10 +99,11 @@ func (s *HEService) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancelFn = cancel
 
-	s.cmd = exec.CommandContext(ctx, s.python, s.script,
-		"--port", fmt.Sprintf("%d", s.port),
-		"--host", "127.0.0.1",
-	)
+	s.cmd = exec.CommandContext(ctx, execCommandName(s.python, s.pyPrefix),
+		execCommandArgs(s.pyPrefix, s.script,
+			"--port", fmt.Sprintf("%d", s.port),
+			"--host", "127.0.0.1",
+		)...)
 	proc.HideWindow(s.cmd)
 	s.cmd.Stdout = os.Stdout
 	s.cmd.Stderr = os.Stderr
@@ -217,5 +222,19 @@ func FindScript() string {
 	if _, err := os.Stat("hyper_extract_server.py"); err == nil {
 		return "hyper_extract_server.py"
 	}
+	// ~/.fairpeer/scripts is where boot releases the EMBEDDED copy
+	// (assets.EnsureHelperScripts) — the only probe guaranteed to resolve for a
+	// packaged binary. Dev paths above win, so a repo checkout is always used
+	// during development.
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if c := filepath.Join(home, ".fairpeer", "scripts", "hyper_extract_server.py"); fileExistsStat(c) {
+			return c
+		}
+	}
 	return ""
+}
+
+func fileExistsStat(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }

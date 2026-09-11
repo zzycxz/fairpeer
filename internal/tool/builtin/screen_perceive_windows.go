@@ -84,7 +84,9 @@ func (screenPerceive) Execute(ctx context.Context, args json.RawMessage) (string
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	labeledPath := filepath.Join(dir, fmt.Sprintf("perceive-%d.png", time.Now().Unix()))
+	// Slash form even on Windows so the emitted path matches the
+	// `.fairpeer/attachments/…` convention the attachment pipeline expects.
+	labeledPath := filepath.ToSlash(filepath.Join(dir, fmt.Sprintf("perceive-%d.png", time.Now().Unix())))
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, labeledImg); err != nil {
 		return "", fmt.Errorf("encode: %w", err)
@@ -144,12 +146,60 @@ func (screenPerceive) Execute(ctx context.Context, args json.RawMessage) (string
 	return formatPerceiveResult(labeledPath, labeled, screenW, screenH, vlmText, confidence, ""), nil
 }
 
-// perceiveNoUIA handles the case where UIA dump failed — send a raw screenshot
-// to the VLM without labels. The VLM does pure visual localization.
+// perceiveNoUIA handles the case where the UIA dump failed — send the raw
+// screenshot to the VLM WITHOUT labels. This is the same VLM-only perceive
+// path the non-Windows build uses as its only implementation
+// (screen_perceive_other.go): the VLM does pure visual localization and
+// returns pixel coordinates. The result keeps formatPerceiveResult's shape
+// (empty element list) so the agent sees one result shape for screen_perceive
+// whether UIA was up or not.
 func perceiveNoUIA(ctx context.Context, img *image.RGBA, taskHint string) (string, error) {
-	// This fallback is simpler: just screenshot + VLM with no element list.
-	// Re-capture as we need the *image.RGBA type.
-	return "", fmt.Errorf("UIA dump failed and screenshot-only fallback not yet implemented")
+	screenW := img.Bounds().Dx()
+	screenH := img.Bounds().Dy()
+
+	// 1. Encode + save the raw screenshot so the agent can inspect it manually.
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return "", fmt.Errorf("encode screenshot: %w", err)
+	}
+	dir := screenAttachmentsDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	shotPath := filepath.ToSlash(filepath.Join(dir, fmt.Sprintf("perceive-%d.png", time.Now().Unix())))
+	if err := os.WriteFile(shotPath, buf.Bytes(), 0o644); err != nil {
+		return "", err
+	}
+
+	// 2. VLM prompt — no element list, no labeled IDs; same free-text JSON
+	// contract as the non-Windows perceive (pixel coordinates).
+	prompt := fmt.Sprintf(`You are looking at a screenshot of a computer screen (%dx%d pixels).
+Task: Find "%s" on this screen.
+
+Respond with ONLY a JSON object (no markdown, no explanation):
+{
+  "found": true/false,
+  "element": "short description of what you found",
+  "x": <pixel x coordinate, integer>,
+  "y": <pixel y coordinate, integer>,
+  "confidence": <0-100>,
+  "note": "any useful detail for the agent"
+}
+
+If you cannot find the requested element, set "found": false and explain in "note".
+Coordinates are in screen pixels (0,0 = top-left corner).`, screenW, screenH, taskHint)
+
+	// 3. Call VLM. On failure, still return the screenshot (empty elements +
+	// vlm_error) so the agent can inspect manually — same policy as the
+	// labeled path above.
+	vlmText, err := CallVLM(ctx, imageDataURL(buf.Bytes(), "png"), prompt)
+	if err != nil {
+		return formatPerceiveResult(shotPath, nil, screenW, screenH, "", 0, "VLM call failed: "+err.Error()), nil
+	}
+
+	// 4. Return in the standard perceive shape; the VLM's JSON (with the pixel
+	// coordinates to screen_click) rides along in vlm_raw.
+	return formatPerceiveResult(shotPath, nil, screenW, screenH, vlmText, parseConfidence(vlmText), ""), nil
 }
 
 // buildPerceivePrompt constructs the VLM prompt with element list + task context.

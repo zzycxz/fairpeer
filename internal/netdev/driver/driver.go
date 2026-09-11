@@ -102,6 +102,12 @@ func resolveKey(vendor, os string) string {
 		}
 	case "zte":
 		return "zte-zxr10"
+	case "h3c":
+		return "h3c-comware" // Comware 7; Comware 5 quirks ride in tables
+	case "ruijie":
+		// RGOS is Cisco-CLI-like (enable/terminal length/hostname#); the IOS
+		// tables classify its surface correctly today.
+		return "cisco-ios"
 	case "vmware":
 		return "vmware-esxi"
 	case "linux":

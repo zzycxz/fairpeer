@@ -4,9 +4,14 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/zzycxz/fairpeer/internal/netdev/knowledge"
 )
 
 // baseline.go — the configuration security baseline check: a LOCAL rule
@@ -16,8 +21,9 @@ import (
 // ambiguous (e.g. "overly permissive ACL" means different things on a core
 // switch vs. a firewall) is deliberately left out.
 //
-// Rule families (huawei-vrp / cisco-ios only — ZXR10 config syntax differs
-// enough that guessing would violate the accuracy bar):
+// Rule families: huawei-vrp / cisco-ios / h3c-comware（锐捷 RGOS 经驱动映射
+// 归入 cisco-ios）；zte-zxr10 仍因语法无法精确表述而不收——准确性纪律不松。
+// 规则本体住在 knowledge/data/baseline-rules.yaml（§9 批 A 外置）：
 //   telnet-enabled      telnet 管理面开启（明文协议）
 //   snmp-v1v2c          SNMP v1/v2c community 在用（v2c 报文可被嗅探）
 //   plaintext-password  simple/0 形式的明文密码（配置文件中可读）
@@ -33,6 +39,8 @@ func RunningConfigCommand(driverKey string) (string, bool) {
 		return "display current-configuration", true
 	case "cisco-ios":
 		return "show running-config", true
+	case "h3c-comware":
+		return "display current-configuration", true
 	case "zte-zxr10":
 		return "show running-config", true
 	}
@@ -55,54 +63,104 @@ type baselineRule struct {
 	hint     string
 }
 
-var baselineRules = map[string][]baselineRule{
-	"huawei-vrp": {
-		{id: "telnet-enabled", title: "Telnet 管理服务开启", severity: "warning", fixType: "config", fixRef: "undo telnet server enable",
-			pattern: regexp.MustCompile(`(?im)^\s*telnet\s+server\s+enable\b`),
-			hint:    "关闭 telnet server，管理面仅保留 SSH（可让 agent 起草变更：undo telnet server enable）"},
-		{id: "snmp-v1v2c", title: "SNMP v1/v2c community 在用", severity: "warning", fixType: "config", fixRef: "snmp-agent 迁移 SNMPv3（USM+authPriv）",
-			pattern: regexp.MustCompile(`(?im)^\s*snmp-agent\s+community\b`),
-			hint:    "改用 SNMPv3（USM 用户 + authPriv），移除 community 配置"},
-		{id: "plaintext-password", title: "存在 simple 明文密码", severity: "critical",
-			pattern: regexp.MustCompile(`(?im)^\s*(?:\S+\s+)*password\s+simple\b`),
-			hint:    "本地用户密码改为 cipher/irreversible-cipher 存储"},
-		{id: "ssh-v1", title: "SSH v1 兼容模式开启", severity: "warning",
-			pattern: regexp.MustCompile(`(?im)^\s*ssh\s+server\s+compatible\s+sshv1\s+enable\b`),
-			hint:    "关闭 SSH v1 兼容：undo ssh server compatible sshv1 enable"},
-		{id: "no-ntp", title: "未配置 NTP 时间同步", severity: "info",
-			absence: true, presence: regexp.MustCompile(`(?im)^\s*ntp-service\s+`),
-			hint: "配置 ntp-service unicast-server；日志与审计的时间戳才有取证价值"},
-		{id: "no-syslog", title: "未配置日志外发", severity: "info",
-			absence: true, presence: regexp.MustCompile(`(?im)^\s*info-center\s+loghost\b`),
-			hint: "配置 info-center loghost 指向日志服务器"},
-	},
-	"cisco-ios": {
-		{id: "telnet-enabled", title: "VTY 线路允许 Telnet 接入", severity: "warning",
-			pattern: regexp.MustCompile(`(?im)^\s*transport\s+input\s+(?:all\b|.*\btelnet\b)`),
-			hint:    "VTY 改为 transport input ssh 仅允许 SSH"},
-		{id: "snmp-v1v2c", title: "SNMP v1/v2c community 在用", severity: "warning",
-			pattern: regexp.MustCompile(`(?im)^\s*snmp-server\s+community\b`),
-			hint:    "改用 SNMPv3（snmp-server group/user，authPriv）"},
-		{id: "plaintext-password", title: "存在 0 级明文密码", severity: "critical",
-			pattern: regexp.MustCompile(`(?im)^\s*(?:\S+\s+)*password\s+0\s`),
-			hint:    "改用加密存储（service password-encryption + secret）"},
-		{id: "ssh-v1", title: "SSH 版本显式设为 v1", severity: "warning",
-			pattern: regexp.MustCompile(`(?im)^\s*ip\s+ssh\s+version\s+1\b`),
-			hint:    "ip ssh version 2"},
-		{id: "no-ntp", title: "未配置 NTP 时间同步", severity: "info",
-			absence: true, presence: regexp.MustCompile(`(?im)^\s*ntp\s+(server|peer)\b`),
-			hint: "配置 ntp server；日志与审计的时间戳才有取证价值"},
-		{id: "no-syslog", title: "未配置日志外发", severity: "info",
-			absence: true, presence: regexp.MustCompile(`(?im)^\s*logging\s+host\b`),
-			hint: "配置 logging host 指向日志服务器"},
-	},
+// baselineRulesLoad lazily resolves the rule table from the knowledge store
+// (BLUETEAM §9 批 A：规则外置 baseline-rules.yaml，user-knowledge 同 id 覆盖）。
+// A corrupt user override degrades to the EMBEDDED builtin and the error is
+// surfaced via BaselineRulesError——显式报错不静默，也绝不静默空表运行
+// （覆盖与内置双失败的角隅：nil 表各路径安全，但那就是空表运行）。
+var (
+	baselineTblOnce sync.Once
+	baselineTbl     map[string][]baselineRule
+	baselineTblErr  error
+)
+
+func baselineRulesTable() (map[string][]baselineRule, error) {
+	baselineTblOnce.Do(func() {
+		if b, err := knowledge.Load("baseline-rules"); err == nil {
+			// Load 结果先过 schema 校验再解析——手工编辑的 user-knowledge 覆盖
+			// 不经 SaveUser，坏数据（空 pattern=全行误报、坏 severity、空
+			// driver 清空整族）必须在这里被拒，而不是静默进引擎。
+			if err = knowledge.Validate("baseline-rules", b); err == nil {
+				baselineTbl, err = parseBaselineRules(b)
+			}
+			if err == nil {
+				return
+			}
+			baselineTblErr = err
+		} else {
+			baselineTblErr = err
+		}
+		if eb, e := knowledge.LoadBuiltin("baseline-rules"); e == nil {
+			if tbl, e := parseBaselineRules(eb); e == nil {
+				baselineTbl = tbl
+			}
+		}
+	})
+	return baselineTbl, baselineTblErr
+}
+
+// BaselineRulesError reports a rule-table load/parse problem (nil = healthy).
+// runBaseline writes it into the summary finding's problems — the UI 发现
+// 队列 is the authoritative surface; CheckBaseline only consumes the
+// (possibly degraded) table.
+func BaselineRulesError() error {
+	_, err := baselineRulesTable()
+	return err
+}
+
+// baselineRuleFile mirrors the YAML schema; the authoritative validation
+// lives in knowledge.Validate("baseline-rules", …) — the engine path runs it
+// before parsing so hand-edited overrides fail loudly.
+type baselineRuleFile struct {
+	Version int    `yaml:"version"`
+	Source  string `yaml:"source"`
+	Drivers map[string][]struct {
+		ID       string `yaml:"id"`
+		Title    string `yaml:"title"`
+		Severity string `yaml:"severity"`
+		FixType  string `yaml:"fix_type"`
+		FixRef   string `yaml:"fix_ref"`
+		Pattern  string `yaml:"pattern"`
+		Absence  bool   `yaml:"absence"`
+		Presence string `yaml:"presence"`
+		Hint     string `yaml:"hint"`
+	} `yaml:"drivers"`
+}
+
+func parseBaselineRules(b []byte) (map[string][]baselineRule, error) {
+	var f baselineRuleFile
+	if err := yaml.Unmarshal(b, &f); err != nil {
+		return nil, err
+	}
+	if f.Version < 1 || len(f.Drivers) == 0 {
+		return nil, fmt.Errorf("baseline-rules: version and drivers are required")
+	}
+	out := make(map[string][]baselineRule, len(f.Drivers))
+	for drv, rules := range f.Drivers {
+		for _, r := range rules {
+			br := baselineRule{id: r.ID, title: r.Title, severity: r.Severity, fixType: r.FixType, fixRef: r.FixRef, absence: r.Absence, hint: r.Hint}
+			var err error
+			if r.Absence {
+				if br.presence, err = regexp.Compile(r.Presence); err != nil {
+					return nil, fmt.Errorf("baseline-rules: %s %s presence: %v", drv, r.ID, err)
+				}
+			} else {
+				if br.pattern, err = regexp.Compile(r.Pattern); err != nil {
+					return nil, fmt.Errorf("baseline-rules: %s %s pattern: %v", drv, r.ID, err)
+				}
+			}
+			out[drv] = append(out[drv], br)
+		}
+	}
+	return out, nil
 }
 
 // CheckBaseline runs the rule battery over one config text and returns the
 // violated rules with their evidence lines (already-redacted text). Pure
 // function — unit-testable without any device.
 func CheckBaseline(driverKey, config string) []BaselineViolation {
-	rules, ok := baselineRules[driverKey]
+	tbl, _ := baselineRulesTable()
+	rules, ok := tbl[driverKey]
 	if !ok {
 		return nil // unknown family: no rules is honest, wrong rules are not
 	}
@@ -167,6 +225,20 @@ func orDefault(s, def string) string {
 	return s
 }
 
+// baselineFamilyNames lists the loaded driver keys sorted — the summary
+// finding's honest statement of what was actually checked.
+func baselineFamilyNames(tbl map[string][]baselineRule) []string {
+	if len(tbl) == 0 {
+		return []string{"（规则表为空）"}
+	}
+	out := make([]string, 0, len(tbl))
+	for k := range tbl {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (m *Manager) RunBaseline(ctx context.Context) (*Finding, error) {
 	return m.runBaseline(ctx, nil)
 }
@@ -194,6 +266,10 @@ func (m *Manager) runBaseline(ctx context.Context, only map[string]bool) (*Findi
 	byRule := map[string]*Finding{}
 	summary := &BaselineSummary{At: time.Now().Format("01-02 15:04")}
 	var problems []string
+	if err := BaselineRulesError(); err != nil {
+		problems = append(problems, fmt.Sprintf("基线规则表异常（已回退内置表）：%v", err))
+	}
+	tbl, _ := baselineRulesTable()
 	var summaryEvidence []Evidence
 	var checked []string
 	for _, d := range m.cfg.NetDev.Devices {
@@ -206,9 +282,9 @@ func (m *Manager) runBaseline(ctx context.Context, only map[string]bool) (*Findi
 			problems = append(problems, fmt.Sprintf("%s: no driver (%s/%s)", d.Name, d.Vendor, d.OS))
 			continue
 		}
-		rules, ok := baselineRules[drv.Key()]
+		rules, ok := tbl[drv.Key()]
 		if !ok {
-			problems = append(problems, fmt.Sprintf("%s: %s 无基线规则（仅 huawei/cisco 提供准确规则）", d.Name, drv.Key()))
+			problems = append(problems, fmt.Sprintf("%s: %s 无基线规则（规则表 knowledge/baseline-rules.yaml）", d.Name, drv.Key()))
 			continue
 		}
 		cmd, ok := RunningConfigCommand(drv.Key())
@@ -261,7 +337,7 @@ func (m *Manager) runBaseline(ctx context.Context, only map[string]bool) (*Findi
 	summaryFinding := &Finding{
 		Title:    fmt.Sprintf("安全基线核查完成：%d 台受检 / %d 台读取成功，命中 %d 项", summary.Devices, summary.Checked, summary.Hits),
 		Severity: "info",
-		Detail:   fmt.Sprintf("规则族覆盖 huawei-vrp / cisco-ios（仅收录可精确表述的规则）。%s", strings.Join(problems, "；")),
+		Detail:   fmt.Sprintf("规则族覆盖 %s（仅收录可精确表述的规则）。%s", strings.Join(baselineFamilyNames(tbl), " / "), strings.Join(problems, "；")),
 		Evidence: summaryEvidence,
 		Source:   "baseline:summary", // 单条滚动：历次运行在巡检日志，发现队列只留一张活卡
 	}

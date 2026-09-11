@@ -65,6 +65,12 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 		return nil, fmt.Errorf("stdio plugin %q: command is required", s.Name)
 	}
 	env := mergeEnv(os.Environ(), s.Env)
+	// Enrich before resolution unconditionally: absolute-path commands (ACP
+	// editor configs, node_modules/.bin shims) skip PATH resolution below, but
+	// their children still need the user's interactive PATH. The probe runs at
+	// most once per process (cachedShellPATH), so this is free after the first
+	// spawn.
+	env = enrichStdioShellPATH(ctx, env)
 	exe, env, err := resolveStdioExecutable(ctx, s, env)
 	if err != nil {
 		return nil, err

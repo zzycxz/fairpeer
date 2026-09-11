@@ -33,6 +33,13 @@ import (
 // atomicWrite writes `write`'s output to a temp file, fsyncs, then atomically
 // renames it over `path`. On any error from `write` or the fsync/rename, the
 // temp file is removed and the original at `path` is left untouched.
+//
+// Permission preservation: os.CreateTemp always creates 0600, so a bare rename
+// would silently strip the target's mode — an executable script stops being
+// executable, a group-readable file becomes private. Before the rename we
+// re-apply the existing target's perm bits (or 0644 for a new file). Chmod
+// failures are ignored: it's a no-op on Windows and best-effort elsewhere, and
+// the rename (not the mode) is this function's contract.
 func atomicWrite(path string, write func(*os.File) error) (err error) {
 	dir := filepath.Dir(path)
 	if e := os.MkdirAll(dir, 0o755); e != nil {
@@ -65,6 +72,14 @@ func atomicWrite(path string, write func(*os.File) error) (err error) {
 	if err = tmp.Close(); err != nil {
 		return fmt.Errorf("atomic write: close temp: %w", err)
 	}
+	// Restore the target's permission bits (CreateTemp forced 0600). An existing
+	// target keeps its mode — including the executable bit; a new file gets the
+	// conventional 0644.
+	perm := os.FileMode(0o644)
+	if targetInfo, statErr := os.Stat(path); statErr == nil {
+		perm = targetInfo.Mode().Perm()
+	}
+	_ = os.Chmod(tmpName, perm)
 	if err = os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("atomic write: rename over %s: %w", path, err)
 	}

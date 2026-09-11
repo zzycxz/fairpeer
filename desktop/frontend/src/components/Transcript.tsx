@@ -208,6 +208,7 @@ export function Transcript({
   profile,
   onInsert,
   modelLabel,
+  loading = false,
 }: {
   items: Item[];
   live?: LiveStream;
@@ -220,6 +221,9 @@ export function Transcript({
   rewindDisabled?: boolean;
   questionNavigator?: boolean;
   defaultExpandThinking?: boolean;
+  // loading: the tab's FIRST session load is still in flight (X9b). Shows a
+  // skeleton instead of flashing the Welcome empty state before content pops in.
+  loading?: boolean;
   // Active model name shown as the assistant message eyebrow (e.g.
   // "deepseek/deepseek-chat" instead of the generic "助手").
   modelLabel?: string;
@@ -235,6 +239,7 @@ export function Transcript({
   const resizeFrame = useRef<number | null>(null);
   const lastClientHeight = useRef<number | null>(null);
   const lastFooterHeight = useRef<number | null>(null);
+  const t = useT();
 
   // Raw items get notice-run collapsing once here; every downstream consumer
   // (turn groups, warm zone, flat list) then renders from the collapsed list.
@@ -383,11 +388,54 @@ export function Transcript({
     return last?.reapply ? last.turn : undefined;
   }, [checkpoints]);
 
-  // ── JumpBar integration ───────────────────────────────────────────────────
-  const jumpToQuestion = (question: QuestionAnchor) => {
+  // ── Jump machinery (JumpBar + in-conversation search) ─────────────────────
+  // A jump target may sit outside the hot zone, where its user-message anchor
+  // only exists in the DOM once (a) the warm card covering that turn is rendered
+  // (cold-zone pagination can hide the OLDEST warm cards) and (b) that card is
+  // expanded. The previous implementation looked the anchor up with
+  // getElementById BEFORE React committed those state updates, so any jump to a
+  // non-expanded turn silently no-opped — the search bar said "3/17" but Next
+  // did nothing (X9a). ensureTurnRendered drives the layer state so the anchor
+  // enters the DOM; the pendingJump effect then scrolls (and flashes) on the
+  // commit where it actually mounts.
+  const [pendingJump, setPendingJump] = useState<{ anchorUserId: string; offset: number; flash: boolean } | null>(null);
+
+  const ensureTurnRendered = useCallback((turn: number | undefined) => {
+    if (turn === undefined) return;
+    const warmTurnStart = turnGroups.length - HOT_TURNS;
+    if (turn >= warmTurnStart) return; // hot zone — always fully rendered
+    // Warm card: expanding renders the user-message anchor inside it.
+    setExpandedWarmTurns((prev) => (prev.has(turn) ? prev : new Set([...prev, turn])));
+    // Cold pagination: rendered warm cards span [warmStartTurn, warmTurnStart)
+    // where warmStartTurn = warmTurnStart - shownWarmStart; shownWarmStart
+    // shrinks as coldPage grows, so step coldPage back until the target's card
+    // re-enters the rendered range (no-op at the default coldPage=0).
+    setColdPage((prev) => Math.min(prev, Math.floor(turn / WARM_PAGE_SIZE)));
+  }, [turnGroups.length]);
+
+  const jumpToAnchor = useCallback((anchorUserId: string, offset: number, flash: boolean) => {
+    if (!anchorUserId) return; // pre-first-user items have no turn anchor
+    setPendingJump((prev) =>
+      prev && prev.anchorUserId === anchorUserId && prev.offset === offset && prev.flash === flash
+        ? prev
+        : { anchorUserId, offset, flash },
+    );
+  }, []);
+
+  const handleJumpToQuestion = useCallback((question: QuestionAnchor) => {
+    ensureTurnRendered(question.turn);
+    jumpToAnchor(question.id, 12, false);
+  }, [ensureTurnRendered, jumpToAnchor]);
+
+  // Runs after every commit that could mount the pending anchor (layer state
+  // changes, item growth). If the anchor still isn't there, the effect simply
+  // re-runs on the next relevant commit — never scrolls to a stale node.
+  useEffect(() => {
+    if (!pendingJump) return;
     const el = scrollRef.current;
-    const node = document.getElementById(questionAnchorId(question.id));
+    const node = document.getElementById(questionAnchorId(pendingJump.anchorUserId));
     if (!el || !node) return;
+    setPendingJump(null);
     stick.current = false;
     if (resizeFrame.current !== null) {
       cancelAnimationFrame(resizeFrame.current);
@@ -395,21 +443,15 @@ export function Transcript({
     }
     const scrollerRect = el.getBoundingClientRect();
     const nodeRect = node.getBoundingClientRect();
-    const top = el.scrollTop + nodeRect.top - scrollerRect.top - 12;
+    const top = el.scrollTop + nodeRect.top - scrollerRect.top - pendingJump.offset;
     el.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
-  };
-
-  const handleJumpToQuestion = useCallback((question: QuestionAnchor) => {
-    // Auto-expand the warm turn when jumping to an old question.
-    const warmTurnStart = turnGroups.length - HOT_TURNS;
-    if (question.turn < warmTurnStart) {
-      setExpandedWarmTurns((prev) => {
-        if (prev.has(question.turn)) return prev;
-        return new Set([...prev, question.turn]);
-      });
+    if (pendingJump.flash) {
+      // Flash the landed-on anchor so the eye finds it after the scroll
+      // (matched text inside also carries <mark> highlights).
+      node.classList.add("ts-flash");
+      window.setTimeout(() => node.classList.remove("ts-flash"), 1400);
     }
-    jumpToQuestion(question);
-  }, [turnGroups.length]);
+  }, [pendingJump, coldPage, expandedWarmTurns, items]);
 
   // ── In-conversation search (Spec-2) ───────────────────────────────────────
   // Matches search every item's text (user/assistant/reasoning, tool name +
@@ -448,31 +490,10 @@ export function Transcript({
 
   const jumpSearchTo = useCallback((anchorUserId: string) => {
     if (!anchorUserId) return; // pre-first-user items have no turn anchor
-    const el = scrollRef.current;
-    const node = document.getElementById(questionAnchorId(anchorUserId));
-    if (!el || !node) return;
     const turn = questions.find((q) => q.id === anchorUserId)?.turn;
-    if (turn !== undefined) {
-      const warmTurnStart = turnGroups.length - HOT_TURNS;
-      if (turn < warmTurnStart) {
-        setExpandedWarmTurns((prev) => {
-          if (prev.has(turn)) return prev;
-          return new Set([...prev, turn]);
-        });
-      }
-    }
-    stick.current = false;
-    requestAnimationFrame(() => {
-      const scrollerRect = el.getBoundingClientRect();
-      const nodeRect = node.getBoundingClientRect();
-      const top = el.scrollTop + nodeRect.top - scrollerRect.top - 48;
-      el.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
-      // Flash the landed-on anchor so the eye finds it after the scroll
-      // (matched text inside also carries <mark> highlights).
-      node.classList.add("ts-flash");
-      window.setTimeout(() => node.classList.remove("ts-flash"), 1400);
-    });
-  }, [questions, turnGroups.length]);
+    ensureTurnRendered(turn);
+    jumpToAnchor(anchorUserId, 48, true);
+  }, [questions, ensureTurnRendered, jumpToAnchor]);
 
   // New query → reset to the newest match and jump.
   useEffect(() => {
@@ -624,7 +645,7 @@ export function Transcript({
         const readOnlyBatch: ToolItem[] = [];
         const flushReadOnlyBatch = () => {
           if (readOnlyBatch.length === 0) return;
-          out.push(<ReadOnlyBatch key={`rob-${readOnlyBatch[0].id}`} items={readOnlyBatch} subcalls={subcallsByParent} />);
+          out.push(<ReadOnlyBatch key={`rob-${readOnlyBatch[0].id}`} items={[...readOnlyBatch]} subcalls={subcallsByParent} />);
           readOnlyBatch.length = 0;
         };
         for (const it of group.items) {
@@ -740,7 +761,20 @@ export function Transcript({
       ref={scrollRef}
       onScroll={onScroll}
     >
-      {empty && <Welcome onPrompt={onPrompt} profile={profile} onInsert={onInsert} onRemoteConnect={onRemoteConnect} />}
+      {empty ? (
+        loading ? (
+          // Initial-load skeleton (X9b): a few shimmer rows while the tab's
+          // first session data loads, instead of a Welcome flash that pops.
+          <div className="skeleton skeleton--transcript" role="status" aria-label={t("common.loading")}>
+            <div className="skeleton__line skeleton__line--w40" />
+            <div className="skeleton__line" />
+            <div className="skeleton__line skeleton__line--w60" />
+            <div className="skeleton__line skeleton__line--w40" />
+          </div>
+        ) : (
+          <Welcome onPrompt={onPrompt} profile={profile} onInsert={onInsert} onRemoteConnect={onRemoteConnect} />
+        )
+      ) : null}
 
       {!empty && showQuestionNav && (
         <QuestionJumpBar questions={questions} onJump={handleJumpToQuestion} />
@@ -1179,7 +1213,7 @@ function TurnCollapse({ items, durationMs, mode, subcalls, modelLabel }: TurnCol
   const roBatch: ToolItem[] = [];
   const flushRO = () => {
     if (roBatch.length === 0) return;
-    body.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={roBatch} subcalls={subcalls} />);
+    body.push(<ReadOnlyBatch key={`rob-${roBatch[0].id}`} items={[...roBatch]} subcalls={subcalls} />);
     roBatch.length = 0;
   };
   for (const it of displayItems) {
@@ -1363,15 +1397,58 @@ type CompactionItem = Extract<Item, { kind: "compaction" }>;
 type NoticeItem = Extract<Item, { kind: "notice" }>;
 type TurnSummaryItem = Extract<Item, { kind: "turn_summary" }>;
 
+// afterPrefix returns the text after `prefix`, or null when the notice doesn't
+// carry it (dynamic-tail notices localize their prefix and pass the tail on).
+function noticeTail(text: string, prefix: string): string | null {
+  return text.length > prefix.length && text.startsWith(prefix) ? text.slice(prefix.length) : null;
+}
+
 // localizeNoticeText maps the kernel's fixed English notice strings to UI copy
 // at render time. The notice channel is free-text protocol (errors, dynamic
 // parts), so only stable phrasings are mapped; anything else shows verbatim.
+// The extended table (X10b) covers the backend's abnormal-finish notices
+// (finishReasonMessage), empty-final / readiness / max-step guards, goal loop
+// stops, and compaction notices — every anchor verified against the Go
+// emitters (internal/agent/agent.go, interceptors.go, compact.go,
+// internal/control/controller.go). English values reconstruct the original
+// string; only zh is rewritten.
 function localizeNoticeText(text: string, t: ReturnType<typeof useT>): string {
   const resumed = /^resumed session with (.+) still active$/.exec(text);
   if (resumed) return t("notice.resumed", { modes: resumed[1] });
   if (text === "compacted") return t("notice.compacted");
   if (text === "context cleared") return t("notice.contextCleared");
   if (text === "new session") return t("notice.newSession");
+  // Abnormal finish_reason (agent.go finishReasonMessage): max-tokens length
+  // truncation, repetition truncation, content filter.
+  if (text === "response truncated: hit max output tokens") return t("notice.finishTruncatedMax");
+  if (text === "response truncated: model repetition detected") return t("notice.finishTruncatedRepetition");
+  if (text === "response blocked by content filter") return t("notice.finishContentFilter");
+  // Goal loop stops (controller.go).
+  if (text === "goal complete") return t("notice.goalComplete");
+  if (text === "goal continuation limit reached") return t("notice.goalLimitReached");
+  if (text === "goal idle: no tool activity for consecutive turns") return t("notice.goalIdle");
+  if (text === "goal strict: completion requires tool-backed work; continuing") return t("notice.goalStrict");
+  let tail: string | null;
+  if ((tail = noticeTail(text, "goal blocked: ")) !== null) return t("notice.goalBlockedPrefix", { rest: tail });
+  if ((tail = noticeTail(text, "goal judge: ")) !== null) return t("notice.goalJudgePrefix", { rest: tail });
+  // Empty-final / readiness / max-step guards (agent.go, interceptors.go).
+  if ((tail = noticeTail(text, "empty final answer blocked: ")) !== null) return t("notice.emptyFinalBlocked", { rest: tail });
+  if ((tail = noticeTail(text, "final-answer readiness blocked: ")) !== null) return t("notice.readinessBlockedPrefix", { rest: tail });
+  const paused = /^paused after (\d+) tool-call rounds (.*)$/.exec(text);
+  if (paused) return t("notice.pausedAfterRounds", { n: paused[1], rest: paused[2] });
+  const noFinal = /^model finished without a visible final answer (\d+) times$/.exec(text);
+  if (noFinal) return t("notice.noVisibleFinalTimes", { n: noFinal[1] });
+  // Compaction notices (compact.go, controller.go).
+  const ctxReached = /^context reached (\d+)% of window; keeping cache-first prefix until compact threshold (\d+)%$/.exec(text);
+  if (ctxReached) return t("notice.contextReached", { n: ctxReached[1], m: ctxReached[2] });
+  const stuck = /^context_window=(\d+) is too small for compaction to help(.*)$/.exec(text);
+  if (stuck) return t("notice.compactionStuck", { n: stuck[1], rest: stuck[2] });
+  if ((tail = noticeTail(text, "compaction skipped: ")) !== null) return t("notice.compactionSkippedPrefix", { rest: tail });
+  if ((tail = noticeTail(text, "compaction failed: ")) !== null) return t("notice.compactionFailedPrefix", { rest: tail });
+  // Loop / op-recovery guards (agent.go).
+  if ((tail = noticeTail(text, "loop guard: ")) !== null) return t("notice.loopGuardPrefix", { rest: tail });
+  if ((tail = noticeTail(text, "op-recovery: ")) !== null) return t("notice.opRecoveryPrefix", { rest: tail });
+  if ((tail = noticeTail(text, "tool output truncated: ")) !== null) return t("notice.toolOutputTruncatedPrefix", { rest: tail });
   return text;
 }
 
@@ -1386,7 +1463,7 @@ function NoticeCard({ level, text, retryable, repeat }: { level: NoticeItem["lev
       {retryable && onRetry && (
         <button type="button" className="notice-line__retry" onClick={onRetry}>
           <RotateCcw size={12} />
-          <span>重试</span>
+          <span>{t("common.retry")}</span>
         </button>
       )}
     </div>
@@ -1427,12 +1504,12 @@ function TurnSummaryCard({ item }: { item: TurnSummaryItem }) {
                 >
                   <span className="approval-changes__path">{f.path}</span>
                   <span className="approval-changes__stat">+{f.added} -{f.removed}</span>
-                  <span
-                    role="button"
-                    className="approval-changes__open"
-                    title="在编辑器中打开"
-                    onClick={(e) => { e.stopPropagation(); void app.OpenInEditorAt(f.path, 0).catch(() => {}); }}
-                  >
+                      <span
+                        role="button"
+                        className="approval-changes__open"
+                        title={t("common.openInEditor")}
+                        onClick={(e) => { e.stopPropagation(); void app.OpenInEditorAt(f.path, 0).catch(() => {}); }}
+                      >
                     <ExternalLink size={11} />
                   </span>
                 </button>

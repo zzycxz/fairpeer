@@ -254,8 +254,8 @@ func TestIsLocateMiss(t *testing.T) {
 	// failure is unrecoverable without a new snapshot.
 	noMiss := []string{
 		"点击文本 \"登录\" @(120,40): context deadline exceeded", // transport died mid-action
-		`目标为空`,            // config error
-		`ref "e6" 已失效`,   // page changed; re-locating cannot recover a ref
+		`目标为空`,         // config error
+		`ref "e6" 已失效`, // page changed; re-locating cannot recover a ref
 		`元素函数抛错: x is not a function`,
 		"unknown ref \"e9\"",
 	}

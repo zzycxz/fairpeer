@@ -50,7 +50,7 @@ func snmpFingerprint(ctx context.Context, ip, community string) (sysDescr, sysNa
 		if v.Type != gosnmp.OctetString {
 			continue
 		}
-		s := strings.TrimSpace(string(v.Value.([]byte)))
+		s := strings.TrimSpace(snmpOctetText(v.Value.([]byte)))
 		switch v.Name {
 		case "." + sysDescrOID:
 			sysDescr = s

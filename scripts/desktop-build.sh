@@ -48,14 +48,23 @@ build_args=(-clean -platform "$PLATFORM" -ldflags "-X main.version=$VERSION -X m
 # Pre-download uv binary into the build's runtimes/ directory so the packaged
 # app can use Python features (PPT, doc-convert, MCP) without requiring the
 # user to install Python/uv manually. uv is ~15MB single-binary.
+# Keyed by os AND arch: bundling a wrong-arch uv is worse than bundling none
+# (it shadows a working system uv until first exec fails). loong64 is skipped
+# — upstream uv publishes no loongarch64 assets at any version; the app falls
+# back to system python3 there.
 UV_VERSION="0.5.11"
 RUNTIMES_DIR="$ROOT/desktop/build/bin/runtimes"
 mkdir -p "$RUNTIMES_DIR"
-case "$os" in
-windows) UV_ASSET="uv-x86_64-pc-windows-msvc.zip"; UV_BIN="uv.exe" ;;
-darwin)  UV_ASSET="uv-aarch64-apple-darwin.tar.gz"; UV_BIN="uv" ;;
-darwin-x86) UV_ASSET="uv-x86_64-apple-darwin.tar.gz"; UV_BIN="uv" ;;
-linux)   UV_ASSET="uv-x86_64-unknown-linux-gnu.tar.gz"; UV_BIN="uv" ;;
+UV_ASSET=""
+UV_BIN=""
+case "${os}-${arch}" in
+windows-amd64)       UV_ASSET="uv-x86_64-pc-windows-msvc.zip";        UV_BIN="uv.exe" ;;
+windows-arm64)       UV_ASSET="";                                     UV_BIN="" ;;  # no upstream aarch64-windows asset at this pin
+darwin-arm64)        UV_ASSET="uv-aarch64-apple-darwin.tar.gz";       UV_BIN="uv" ;;
+darwin-x86)          UV_ASSET="uv-x86_64-apple-darwin.tar.gz";        UV_BIN="uv" ;;
+linux-amd64)         UV_ASSET="uv-x86_64-unknown-linux-gnu.tar.gz";   UV_BIN="uv" ;;
+linux-arm64)         UV_ASSET="uv-aarch64-unknown-linux-gnu.tar.gz";  UV_BIN="uv" ;;
+linux-loong64)       UV_ASSET="";                                     UV_BIN="" ;;
 esac
 if [ -n "$UV_ASSET" ] && [ ! -f "$RUNTIMES_DIR/$UV_BIN" ]; then
 	echo "==> downloading uv $UV_VERSION ($UV_ASSET)"

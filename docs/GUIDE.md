@@ -135,7 +135,7 @@ edits stay in the project), resolving symlinks and `..` so a link can't tunnel
 out. Reads are unrestricted. `bash` is itself jailed on macOS by default
 (`[sandbox] bash`, Seatbelt): commands may write only those same roots (plus
 temp and toolchain caches) and reach the network only when `[sandbox] network`
-is set. Other platforms fall back to running unconfined for now (see
+is set. Linux runs bubblewrap the same way; other platforms fall back to running unconfined unless [sandbox] require_available is set (see
 [`SPEC.md` §9](./SPEC.md#9-roadmap-not-in-current-scope) for the escape-prompt and
 Linux support still to come).
 

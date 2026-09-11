@@ -1,8 +1,11 @@
 package rag
 
 import (
+	"archive/zip"
+	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -145,6 +148,15 @@ func TestReImportReplaces(t *testing.T) {
 }
 
 func TestBinaryFormatRejected(t *testing.T) {
+	// Make the test hermetic: readDoc consults doc_converter.py (markitdown)
+	// for .docx, and FindScript's last probe is ~/.fairpeer/scripts — on a
+	// machine where the desktop app has run, that script exists and leniently
+	// converts even a fake docx, flipping this test's outcome. Point the home
+	// dir at an empty temp dir so the Go fallback parser (which rejects the
+	// fake zip) is what runs.
+	for _, key := range homeEnvKeys() {
+		t.Setenv(key, t.TempDir())
+	}
 	store := newTempStore(t)
 	defer store.Close()
 	p := filepath.Join(t.TempDir(), "doc.docx")
@@ -152,6 +164,49 @@ func TestBinaryFormatRejected(t *testing.T) {
 	_, err := store.Import("c", p, nil)
 	if err == nil {
 		t.Error("docx import should be rejected in Phase 3")
+	}
+}
+
+// homeEnvKeys returns the env vars os.UserHomeDir consults on this platform
+// (USERPROFILE on Windows, HOME elsewhere — set both to be safe).
+func homeEnvKeys() []string {
+	if runtime.GOOS == "windows" {
+		return []string{"USERPROFILE", "HOME"}
+	}
+	return []string{"HOME"}
+}
+
+// The positive counterpart of TestBinaryFormatRejected: office import is a
+// feature, so a VALID .docx must import and be searchable. Hand-rolled minimal
+// docx (zip with word/document.xml) exercises both environment shapes —
+// markitdown converts a real docx where installed, and the readDOCX zip
+// fallback parses the same <w:t> runs where it isn't.
+func TestOfficeDocImportSearchable(t *testing.T) {
+	store := newTempStore(t)
+	defer store.Close()
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("word/document.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const doc = `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>the indemnification clause survives termination</w:t></w:r></w:p></w:body></w:document>`
+	if _, err := w.Write([]byte(doc)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "contract.docx")
+	writeFile(t, p, buf.String())
+
+	if _, err := store.Import("c", p, nil); err != nil {
+		t.Fatalf("valid docx import failed: %v", err)
+	}
+	results, _ := store.Search("indemnification", "c", 5)
+	if len(results) == 0 {
+		t.Error("docx content should be searchable after import")
 	}
 }
 

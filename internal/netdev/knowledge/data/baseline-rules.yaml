@@ -1,0 +1,123 @@
+# 基线核查规则表（BLUETEAM_SKILL_SPEC §9 批 A）——配置安全基线的模式规则，
+# 按驱动键分族（drv.Key()：huawei-vrp / cisco-ios / h3c-comware）。引擎
+# （baseline.go 的加载与匹配逻辑）读本表；用户 user-knowledge/ 同名文件覆盖。
+# 只收录语法可精确表述的规则——含糊判据（"过于宽松的 ACL"）故意不收（准确性
+# 纪律）。pattern = present 规则（命中即违例）；absence+presence = absent 规则
+# （全配置未出现 presence 即违例）。severity ∈ info|warning|critical。
+# 注意：running-config 的读取命令不在本表（RunningConfigCommand 是
+# backup/cutover 共用源，改一处要三处同评）。
+version: 1
+source: builtin
+drivers:
+  huawei-vrp:
+    - id: telnet-enabled
+      title: "Telnet 管理服务开启"
+      severity: warning
+      fix_type: config
+      fix_ref: "undo telnet server enable"
+      pattern: '(?im)^\s*telnet\s+server\s+enable\b'
+      hint: "关闭 telnet server，管理面仅保留 SSH（可让 agent 起草变更：undo telnet server enable）"
+    - id: snmp-v1v2c
+      title: "SNMP v1/v2c community 在用"
+      severity: warning
+      fix_type: config
+      fix_ref: "snmp-agent 迁移 SNMPv3（USM+authPriv）"
+      pattern: '(?im)^\s*snmp-agent\s+community\b'
+      hint: "改用 SNMPv3（USM 用户 + authPriv），移除 community 配置"
+    - id: plaintext-password
+      title: "存在 simple 明文密码"
+      severity: critical
+      pattern: '(?im)^\s*(?:\S+\s+)*password\s+simple\b'
+      hint: "本地用户密码改为 cipher/irreversible-cipher 存储"
+    - id: ssh-v1
+      title: "SSH v1 兼容模式开启"
+      severity: warning
+      pattern: '(?im)^\s*ssh\s+server\s+compatible\s+sshv1\s+enable\b'
+      hint: "关闭 SSH v1 兼容：undo ssh server compatible sshv1 enable"
+    - id: no-ntp
+      title: "未配置 NTP 时间同步"
+      severity: info
+      absence: true
+      presence: '(?im)^\s*ntp-service\s+'
+      hint: "配置 ntp-service unicast-server；日志与审计的时间戳才有取证价值"
+    - id: no-syslog
+      title: "未配置日志外发"
+      severity: info
+      absence: true
+      presence: '(?im)^\s*info-center\s+loghost\b'
+      hint: "配置 info-center loghost 指向日志服务器"
+  cisco-ios:
+    - id: telnet-enabled
+      title: "VTY 线路允许 Telnet 接入"
+      severity: warning
+      pattern: '(?im)^\s*transport\s+input\s+(?:all\b|.*\btelnet\b)'
+      hint: "VTY 改为 transport input ssh 仅允许 SSH"
+    - id: snmp-v1v2c
+      title: "SNMP v1/v2c community 在用"
+      severity: warning
+      pattern: '(?im)^\s*snmp-server\s+community\b'
+      hint: "改用 SNMPv3（snmp-server group/user，authPriv）"
+    - id: plaintext-password
+      title: "存在 0 级明文密码"
+      severity: critical
+      pattern: '(?im)^\s*(?:\S+\s+)*password\s+0\s'
+      hint: "改用加密存储（service password-encryption + secret）"
+    - id: ssh-v1
+      title: "SSH 版本显式设为 v1"
+      severity: warning
+      pattern: '(?im)^\s*ip\s+ssh\s+version\s+1\b'
+      hint: "ip ssh version 2"
+    - id: no-ntp
+      title: "未配置 NTP 时间同步"
+      severity: info
+      absence: true
+      presence: '(?im)^\s*ntp\s+(server|peer)\b'
+      hint: "配置 ntp server；日志与审计的时间戳才有取证价值"
+    - id: no-syslog
+      title: "未配置日志外发"
+      severity: info
+      absence: true
+      presence: '(?im)^\s*logging\s+host\b'
+      hint: "配置 logging host 指向日志服务器"
+  h3c-comware:
+    # Comware 7 与 VRP 同源，六族一一对应；ssh-v1 拼写为 Comware 7 的
+    # compatible-ssh1x（VRP 是 compatible sshv1）。规则先镜像同源语法落表，
+    # 待实测确认的细节按 §8⑤ 约定回填（验证过的改 user-knowledge/ 再上游化）。
+    - id: telnet-enabled
+      title: "Telnet 管理服务开启"
+      severity: warning
+      fix_type: config
+      fix_ref: "undo telnet server enable"
+      pattern: '(?im)^\s*telnet\s+server\s+enable\b'
+      hint: "关闭 telnet server，管理面仅保留 SSH（可让 agent 起草变更：undo telnet server enable）"
+    - id: snmp-v1v2c
+      title: "SNMP v1/v2c community 在用"
+      severity: warning
+      fix_type: config
+      fix_ref: "snmp-agent 迁移 SNMPv3（USM+authPriv）"
+      pattern: '(?im)^\s*snmp-agent\s+community\b'
+      hint: "改用 SNMPv3（USM 用户 + authPriv），移除 community 配置"
+    - id: plaintext-password
+      title: "存在 simple 明文密码"
+      severity: critical
+      pattern: '(?im)^\s*(?:\S+\s+)*password\s+simple\b'
+      hint: "本地用户密码改为 cipher 存储"
+    - id: ssh-v1
+      title: "SSH v1 兼容开启（compatible-ssh1x）"
+      severity: warning
+      fix_type: config
+      fix_ref: "undo ssh server compatible-ssh1x enable"
+      pattern: '(?im)^\s*ssh\s+server\s+compatible-ssh1x\s+enable\b'
+      hint: "关闭 SSH v1 兼容：undo ssh server compatible-ssh1x enable"
+    - id: no-ntp
+      title: "未配置 NTP 时间同步"
+      severity: info
+      absence: true
+      presence: '(?im)^\s*ntp-service\s+'
+      hint: "配置 ntp-service unicast-server；日志与审计的时间戳才有取证价值"
+    - id: no-syslog
+      title: "未配置日志外发"
+      severity: info
+      absence: true
+      presence: '(?im)^\s*info-center\s+loghost\b'
+      hint: "配置 info-center loghost 指向日志服务器"

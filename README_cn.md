@@ -25,7 +25,8 @@
 <p align="center">
   对接 26 个供应商模板（11 直连 + 15 Coding Plan/本地聚合），300+ 模型。<br/>
   内置 Word/Excel/PPT 办公自动化能力。<br/>
-  单一静态 Go 二进制，零运行时依赖，多平台无缝覆盖。
+  CLI 为单一静态 Go 二进制、零运行时依赖；桌面版使用系统 WebKitGTK（Linux）；
+  支持 Windows / macOS / Linux（x86_64 · arm64 · loong64），适配统信 UOS / 银河麒麟（见 docs/国产化适配实施方案.md）。
 </p>
 
 <br/>
@@ -47,7 +48,7 @@ Agent 可以在 **终端**（TUI）、**桌面客户端**（基于 Wails）、**
 - **通用 Provider 架构** — 统一对接任意 OpenAI / Anthropic 兼容端点，支持 thinking mode 协议、reasoning_content 回传、11 个直连厂商 + 7 个聚合平台（Coding Plan），通过 `fairpeer.toml` 完全配置驱动。
 - **MCP 插件生态** — 全面支持 Model Context Protocol (MCP)，外部工具以子进程形式通过 stdio / HTTP 运行，无限扩展 Agent 能力。
 - **内置 Web Search** — 集成 Brave → Exa → Linkup → AnySearch 四引擎链式降级搜索，无需外部 MCP 即可联网检索。
-- **极速轻量分发** — `CGO_ENABLED=0` 单二进制打包，极简部署，支持交叉编译 6 大操作系统架构。
+- **极速轻量分发** — `CGO_ENABLED=0` 单二进制打包，极简部署，支持交叉编译 7 大平台架构。
 
 ### 内置智能工具箱
 
@@ -78,7 +79,7 @@ Agent 可以在 **终端**（TUI）、**桌面客户端**（基于 Wails）、**
 ### 自主智能与自进化
 
 - **Goal 独立 Judge** — 目标达成评估由独立 LLM 模型执行（基于 transcript 证据，temperature=0），防止代理乐观停止。
-- **Dream / Distill 自进化** — Dream（7 天周期）自动沉淀会话知识到项目记忆；Distill（30 天周期）自动发现重复工作流并打包为可复用 Skill。
+- **Dream 自进化** — Dream（7 天周期）自动沉淀会话知识到项目记忆。
 - **Memory Archive 软删除** — 记忆删除后移至 `.archive/` 目录，可追溯恢复，不再永久丢失。
 - **Profile 隔离记忆** — dev/cowork 模式记忆目录完全隔离，切换模式不丢失积累。用户偏好和反馈指导记忆在同模式所有项目间共享。
 
@@ -107,6 +108,18 @@ Agent 可以在 **终端**（TUI）、**桌面客户端**（基于 Wails）、**
 | **企业机器人** | `fairpeer bot start` | 团队协作：企业微信 / 飞书 / QQ 等 IM 网关接入 |
 | **ACP 服务** | `fairpeer acp` | 协议桥接：Agent Control Protocol 远程控制层 |
 
+### 服务器 / 国产化服务器（麒麟服务器版、统信服务器版）部署
+
+`fairpeer serve` 是无头服务器形态（无 GUI 依赖，纯静态二进制 + systemd）：
+
+```sh
+fairpeer serve --addr 127.0.0.1:8787 --token "$FAIRPEER_SERVE_TOKEN"   # 非回环绑定必须带 token
+```
+
+- 日志走 stderr，systemd 部署下自动进 journald：`journalctl -u fairpeer -f`；
+- 远程访问建议：服务器本地绑定 + nginx/caddy 反代加 TLS，或 `ssh -L 8787:127.0.0.1:8787` 隧道；
+- 更多（信创离线安装、UOS/麒麟商店包、内网自更新镜像）见 [docs/国产化适配实施方案.md](docs/国产化适配实施方案.md)。
+
 ## 安装指南
 
 当前版本：**v0.1.0**
@@ -131,7 +144,7 @@ brew install zzycxz/fairpeer/fairpeer    # macOS 用户
 
 ```sh
 make build    # 编译到 bin/ 目录
-make cross    # 交叉编译至 dist/（生成 6 个目标平台二进制）
+make cross    # 交叉编译至 bin/（生成 7 个目标平台二进制）
 ```
 *(需安装 Go 1.26+)*
 

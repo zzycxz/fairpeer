@@ -506,7 +506,7 @@
 - ✅ Bot 集成
 - ✅ 定时任务
 - ✅ Hooks 系统
-- ✅ Dream/Distill 自进化
+- ✅ Dream 自进化
 - ✅ 多邮箱邮件集成
 - ✅ 浏览器控制
 - ✅ 会话 rewind/fork

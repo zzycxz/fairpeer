@@ -593,22 +593,24 @@ func scanRelations(rows *sql.Rows) ([]Relation, error) {
 
 // JobRow is one rag_jobs row, for the pipeline + UI.
 type JobRow struct {
-	ID          string
-	Collection  string
-	Path        string
-	RelPath     string
-	RootPath    string
-	IsDir       bool
-	Status      string
-	TotalChunks int
-	DoneChunks  int
-	ErrorMsg    string
-	ContentHash string // sha256 of chunked body; used for change-based dedup
-	StatKey     string // "size:mtime" of the source file; cheap re-import dedup
-	NodePrompt  string // persisted so Resume restores the original prompt
-	EdgePrompt  string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID           string
+	Collection   string
+	Path         string
+	RelPath      string
+	RootPath     string
+	IsDir        bool
+	Status       string
+	TotalChunks  int
+	DoneChunks   int
+	FailedChunks int    // chunks whose last attempt errored; done+failed>0 = partial
+	ErrorMsg     string // job-level reason (last chunk error) when failed/erroring
+	RetryRounds  int    // idle-time auto-retry rounds consumed (0 = none/fresh)
+	ContentHash  string // sha256 of chunked body; used for change-based dedup
+	StatKey      string // "size:mtime" of the source file; cheap re-import dedup
+	NodePrompt   string // persisted so Resume restores the original prompt
+	EdgePrompt   string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // CreateJob inserts a new extraction job + its pending chunks. Returns the job
@@ -628,6 +630,17 @@ func (s *Store) CreateJob(j JobRow, chunkTexts []string) (string, error) {
 	if j.ID == "" {
 		j.ID = fmt.Sprintf("job_%d", nowTS.UnixNano())
 	}
+	// Reset chunks for this job (delete-then-insert, in case of re-extract) —
+	// BEFORE the upsert. Two reasons: (1) the upsert replaces the job's id, and
+	// rag_chunks.job_id has ON DELETE CASCADE but no ON UPDATE, so mutating the
+	// parent key while children exist violates the now-enforced foreign key;
+	// (2) the collection+path subquery only matches the OLD id while it still
+	// exists — after the upsert it resolved to the new id and the old chunks
+	// were left as orphans until the next startup sweep.
+	if _, err := tx.Exec(`DELETE FROM rag_chunks WHERE job_id IN (SELECT id FROM rag_jobs WHERE collection = ? AND path = ?)`,
+		normalizeCollection(j.Collection), j.Path); err != nil {
+		return "", err
+	}
 	if _, err := tx.Exec(`INSERT INTO rag_jobs (id, collection, path, rel_path, root_path, is_dir, status, total_chunks, done_chunks, error_msg, content_hash, stat_key, node_prompt, edge_prompt, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(collection, path) DO UPDATE SET
@@ -635,6 +648,8 @@ func (s *Store) CreateJob(j JobRow, chunkTexts []string) (string, error) {
 			status=excluded.status,
 			total_chunks=excluded.total_chunks,
 			done_chunks=0,
+			failed_chunks=0,
+			retry_rounds=0,
 			error_msg=NULL,
 			content_hash=excluded.content_hash,
 			stat_key=excluded.stat_key,
@@ -642,12 +657,6 @@ func (s *Store) CreateJob(j JobRow, chunkTexts []string) (string, error) {
 			edge_prompt=excluded.edge_prompt,
 			updated_at=excluded.updated_at`,
 		j.ID, normalizeCollection(j.Collection), j.Path, j.RelPath, j.RootPath, boolToInt(j.IsDir), j.Status, len(chunkTexts), j.ErrorMsg, j.ContentHash, j.StatKey, j.NodePrompt, j.EdgePrompt, now, now); err != nil {
-		return "", err
-	}
-	// Reset chunks for this job (delete-then-insert, in case of re-extract).
-	// Use collection+path subquery to clean up chunks from the old job ID too.
-	if _, err := tx.Exec(`DELETE FROM rag_chunks WHERE job_id IN (SELECT id FROM rag_jobs WHERE collection = ? AND path = ?)`,
-		normalizeCollection(j.Collection), j.Path); err != nil {
 		return "", err
 	}
 	for i, text := range chunkTexts {
@@ -685,13 +694,16 @@ func (s *Store) MarkChunkDone(chunkID string, jobID string, latencyMs int64, err
 		status = ChunkError
 		errMsg = err.Error()
 	}
-	// Skip if this chunk was already marked done/error (idempotent guard
-	// against double-counting from Resume or retry edge cases).
+	// Skip only if this chunk was already marked done (idempotent guard against
+	// double-counting from Resume). An ERRORED chunk must stay writable: retry
+	// and Resume re-run it (PendingChunksForJob returns pending+error), and
+	// skipping here would swallow the retry result — the chunk would stay
+	// errored forever and the job could never converge.
 	var prevStatus string
 	if e := tx.QueryRow(`SELECT status FROM rag_chunks WHERE id = ?`, chunkID).Scan(&prevStatus); e != nil {
 		return e
 	}
-	if prevStatus == ChunkDone || prevStatus == ChunkError {
+	if prevStatus == ChunkDone {
 		return tx.Commit() // already processed — don't double-count
 	}
 	if _, e := tx.Exec(`UPDATE rag_chunks SET status = ?, latency_ms = ?, error_msg = ?, attempts = attempts + 1 WHERE id = ?`,
@@ -700,29 +712,51 @@ func (s *Store) MarkChunkDone(chunkID string, jobID string, latencyMs int64, err
 	}
 	// Count actual done/error chunks rather than incrementing a counter —
 	// avoids overflow when done_chunks gets out of sync.
-	var doneCount int
-	if e := tx.QueryRow(`SELECT COUNT(*) FROM rag_chunks WHERE job_id = ? AND status IN (?, ?)`,
-		jobID, ChunkDone, ChunkError).Scan(&doneCount); e != nil {
+	var doneCount, failCount int
+	if e := tx.QueryRow(`SELECT
+			(SELECT COUNT(*) FROM rag_chunks WHERE job_id = ? AND status IN (?, ?)),
+			(SELECT COUNT(*) FROM rag_chunks WHERE job_id = ? AND status = ?)`,
+		jobID, ChunkDone, ChunkError, jobID, ChunkError).Scan(&doneCount, &failCount); e != nil {
 		return e
 	}
-	if _, e := tx.Exec(`UPDATE rag_jobs SET done_chunks = ?, updated_at = ? WHERE id = ?`,
-		doneCount, time.Now().UTC().Format(time.RFC3339), jobID); e != nil {
+	if _, e := tx.Exec(`UPDATE rag_jobs SET done_chunks = ?, failed_chunks = ?, updated_at = ? WHERE id = ?`,
+		doneCount, failCount, time.Now().UTC().Format(time.RFC3339), jobID); e != nil {
 		return e
 	}
-	// If all chunks done, flip job status.
-	var done, total int
+	// If all chunks processed, flip job status. A cancelled job keeps its
+	// terminal state — in-flight chunks finishing after CancelJob must not
+	// resurrect it as done. Re-flipping an already-terminal job is harmless
+	// idempotence; what matters is that retry_rounds only resets on a CLEAN
+	// convergence (failedCount==0): done_chunks counts done+error, so during
+	// a retry round the counter reaches total early, and an unconditional
+	// reset would let still-failing jobs escape the auto-retry round cap
+	// forever.
+	var done, total, rounds int
 	var failedCount int
-	if e := tx.QueryRow(`SELECT done_chunks, total_chunks, (SELECT count(*) FROM rag_chunks WHERE job_id = ? AND status = ?) FROM rag_jobs WHERE id = ?`,
-		jobID, ChunkError, jobID).Scan(&done, &total, &failedCount); e != nil {
+	var statusStr string
+	if e := tx.QueryRow(`SELECT done_chunks, total_chunks, status, failed_chunks, retry_rounds FROM rag_jobs WHERE id = ?`,
+		jobID).Scan(&done, &total, &statusStr, &failedCount, &rounds); e != nil {
 		return e
 	}
-	if total > 0 && done >= total {
+	if total > 0 && done >= total && statusStr != JobCancelled {
 		finalStatus := JobDone
+		jobErrMsg := "" // clear stale error text on success
 		if failedCount == total {
 			finalStatus = JobError
+			// Persist the last chunk error on the job row so the UI can show
+			// WHY a file failed (the chunk rows carry the details).
+			_ = tx.QueryRow(`SELECT COALESCE(error_msg,'') FROM rag_chunks WHERE job_id = ? AND status = ? ORDER BY rowid DESC LIMIT 1`,
+				jobID, ChunkError).Scan(&jobErrMsg)
 		}
-		if _, e := tx.Exec(`UPDATE rag_jobs SET status = ?, updated_at = ? WHERE id = ?`,
-			finalStatus, time.Now().UTC().Format(time.RFC3339), jobID); e != nil {
+		// retry_rounds survives a partial convergence (still-failing job keeps
+		// its spent rounds so the auto-retry cap can eventually stop it) and
+		// resets only on a clean one.
+		retryRounds := rounds
+		if failedCount == 0 {
+			retryRounds = 0
+		}
+		if _, e := tx.Exec(`UPDATE rag_jobs SET status = ?, error_msg = ?, retry_rounds = ?, updated_at = ? WHERE id = ?`,
+			finalStatus, jobErrMsg, retryRounds, time.Now().UTC().Format(time.RFC3339), jobID); e != nil {
 			return e
 		}
 	}
@@ -738,26 +772,59 @@ func (s *Store) SetJobStatus(jobID, status string) error {
 	return err
 }
 
+// MarkJobExtracting flips a job pending→extracting. The WHERE clause makes the
+// transition conditional: a job the user cancelled (or that already reached a
+// terminal state) is never resurrected to extracting by a stale in-flight task
+// picking it up — the update simply matches zero rows.
+func (s *Store) MarkJobExtracting(jobID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE rag_jobs SET status = ?, updated_at = ? WHERE id = ? AND status = ?`,
+		JobExtracting, time.Now().UTC().Format(time.RFC3339), jobID, JobPending)
+	return err
+}
+
+// SetJobExtracted marks a Hyper-Extract-sourced job done and credits all of
+// its chunks, so the tree shows 已抽取 instead of queued/indexed. HE works on
+// whole files, so there are no per-chunk transitions to replay.
+func (s *Store) SetJobExtracted(jobID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE rag_jobs SET status = ?, done_chunks = total_chunks, failed_chunks = 0, retry_rounds = 0, error_msg = '', updated_at = ? WHERE id = ?`,
+		JobDone, time.Now().UTC().Format(time.RFC3339), jobID)
+	return err
+}
+
+// SetJobFailed marks a Hyper-Extract-sourced job errored and records WHY on
+// the job row, so the tree tooltip can show the reason.
+func (s *Store) SetJobFailed(jobID string, msg string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE rag_jobs SET status = ?, failed_chunks = total_chunks, error_msg = ?, updated_at = ? WHERE id = ?`,
+		JobError, msg, time.Now().UTC().Format(time.RFC3339), jobID)
+	return err
+}
+
 // JobByID returns one job row. ok=false if not found.
+// Selects the FULL column set (not a subset): callers like RetryFailedChunks
+// read NodePrompt/EdgePrompt/ContentHash off the row, and a partial select
+// silently zeroed the persisted template prompts on every retry.
 func (s *Store) JobByID(jobID string) (JobRow, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var j JobRow
-	var isDir int
-	var created, updated string
-	err := s.db.QueryRow(`SELECT id, collection, path, COALESCE(rel_path,''), COALESCE(root_path,''), is_dir, status, total_chunks, done_chunks, COALESCE(error_msg,''), COALESCE(created_at,''), COALESCE(updated_at,'') FROM rag_jobs WHERE id = ?`,
-		jobID).Scan(&j.ID, &j.Collection, &j.Path, &j.RelPath, &j.RootPath, &isDir, &j.Status, &j.TotalChunks, &j.DoneChunks, &j.ErrorMsg, &created, &updated)
-	if err == sql.ErrNoRows {
-		return JobRow{}, false, nil
-	}
+	rows, err := s.db.Query(autoRetrySelectShaped+` WHERE id = ?`, jobID)
 	if err != nil {
 		return JobRow{}, false, err
 	}
-	j.IsDir = isDir != 0
-	j.Collection = normalizeCollection(j.Collection)
-	j.CreatedAt, _ = time.Parse(time.RFC3339, created)
-	j.UpdatedAt, _ = time.Parse(time.RFC3339, updated)
-	return j, true, nil
+	defer rows.Close()
+	js, err := scanJobs(rows)
+	if err != nil {
+		return JobRow{}, false, err
+	}
+	if len(js) == 0 {
+		return JobRow{}, false, nil
+	}
+	return js[0], true, nil
 }
 
 // JobsByPath returns all jobs for a given collection+path (usually 1, but a
@@ -766,7 +833,10 @@ func (s *Store) JobsByPath(collection, path string) ([]JobRow, error) {
 	collection = normalizeCollection(collection)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.Query(`SELECT id, collection, path, COALESCE(rel_path,''), COALESCE(root_path,''), is_dir, status, total_chunks, done_chunks, COALESCE(error_msg,''), COALESCE(created_at,''), COALESCE(updated_at,'') FROM rag_jobs WHERE collection = ? AND path = ? ORDER BY updated_at DESC`,
+	// Column list must match scanJobs exactly: this query previously selected
+	// only 12 columns while scanJobs scans 16 — every row failed Scan and was
+	// silently skipped, so the function always returned an empty slice.
+	rows, err := s.db.Query(`SELECT id, collection, path, COALESCE(rel_path,''), COALESCE(root_path,''), is_dir, status, total_chunks, done_chunks, COALESCE(failed_chunks,0), COALESCE(retry_rounds,0), COALESCE(error_msg,''), COALESCE(content_hash,''), COALESCE(stat_key,''), COALESCE(node_prompt,''), COALESCE(edge_prompt,''), COALESCE(created_at,''), COALESCE(updated_at,'') FROM rag_jobs WHERE collection = ? AND path = ? ORDER BY updated_at DESC`,
 		collection, path)
 	if err != nil {
 		return nil, err
@@ -779,7 +849,7 @@ func (s *Store) JobsByPath(collection, path string) ([]JobRow, error) {
 func (s *Store) AllJobs() ([]JobRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.Query(`SELECT id, collection, path, COALESCE(rel_path,''), COALESCE(root_path,''), is_dir, status, total_chunks, done_chunks, COALESCE(error_msg,''), COALESCE(content_hash,''), COALESCE(stat_key,''), COALESCE(node_prompt,''), COALESCE(edge_prompt,''), COALESCE(created_at,''), COALESCE(updated_at,'') FROM rag_jobs ORDER BY updated_at DESC`)
+	rows, err := s.db.Query(`SELECT id, collection, path, COALESCE(rel_path,''), COALESCE(root_path,''), is_dir, status, total_chunks, done_chunks, COALESCE(failed_chunks,0), COALESCE(retry_rounds,0), COALESCE(error_msg,''), COALESCE(content_hash,''), COALESCE(stat_key,''), COALESCE(node_prompt,''), COALESCE(edge_prompt,''), COALESCE(created_at,''), COALESCE(updated_at,'') FROM rag_jobs ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -839,23 +909,129 @@ func (s *Store) AvgChunkLatencyMs(collection string) (int64, error) {
 	return avg.Int64, nil
 }
 
-// JobStatusForPath returns (jobID, status, totalChunks, doneChunks) for the job
-// matching a collection+path, or ("", "", 0, 0) if none exists. Used by the
-// pipeline's re-import dedup check: if a job is already done with the same
-// chunk count, re-extraction is skipped to avoid burning LLM quota on unchanged
-// files.
-func (s *Store) JobStatusForPath(collection, path string) (jobID, status string, totalChunks, doneChunks int, err error) {
+// JobStatusForPath returns (jobID, status, totalChunks, doneChunks,
+// failedChunks) for the job matching a collection+path, or zeros if none
+// exists. Used by the pipeline's re-import dedup check: a done job with zero
+// failures and the same chunk count skips re-extraction, while a done job
+// WITH failures re-queues so the damage self-heals on the next folder import.
+func (s *Store) JobStatusForPath(collection, path string) (jobID, status string, totalChunks, doneChunks, failedChunks int, err error) {
 	collection = normalizeCollection(collection)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	err = s.db.QueryRow(
-		`SELECT id, status, total_chunks, done_chunks FROM rag_jobs WHERE collection = ? AND path = ?`,
+		`SELECT id, status, total_chunks, done_chunks, COALESCE(failed_chunks,0) FROM rag_jobs WHERE collection = ? AND path = ?`,
 		collection, path,
-	).Scan(&jobID, &status, &totalChunks, &doneChunks)
+	).Scan(&jobID, &status, &totalChunks, &doneChunks, &failedChunks)
 	if err == sql.ErrNoRows {
-		return "", "", 0, 0, nil
+		return "", "", 0, 0, 0, nil
 	}
-	return jobID, status, totalChunks, doneChunks, err
+	return jobID, status, totalChunks, doneChunks, failedChunks, err
+}
+
+// SetJobRetrying flips an errored or partially-done job back to extracting for
+// a failed-chunk retry. Terminal success stays immutable; the WHERE clause is
+// the guard — both branches require failed_chunks>0, so a stale job with no
+// failed chunks (or one already re-enqueued by a racing retry) matches zero
+// rows instead of double-enqueueing.
+func (s *Store) SetJobRetrying(jobID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE rag_jobs SET status = ?, error_msg = '', updated_at = ? WHERE id = ? AND failed_chunks > 0 AND status IN (?, ?)`,
+		JobExtracting, time.Now().UTC().Format(time.RFC3339), jobID, JobError, JobDone)
+	return err
+}
+
+// IncrementJobRetryRounds bumps a job's auto-retry round counter and returns
+// the new value. Persisted, so app restarts can't reset it and re-burn rounds
+// on a hopeless job; it resets on clean convergence (MarkChunkDone terminal
+// flip) and on full re-enqueue (CreateJob upsert).
+func (s *Store) IncrementJobRetryRounds(jobID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var rounds int
+	err := s.db.QueryRow(`UPDATE rag_jobs SET retry_rounds = COALESCE(retry_rounds,0) + 1, updated_at = ? WHERE id = ? RETURNING retry_rounds`,
+		time.Now().UTC().Format(time.RFC3339), jobID).Scan(&rounds)
+	return rounds, err
+}
+
+// autoRetrySelectShaped is the shared column list for the auto-retry listing
+// queries below (must match scanJobs' 18-field Scan).
+const autoRetrySelectShaped = `SELECT id, collection, path, COALESCE(rel_path,''), COALESCE(root_path,''), is_dir, status, total_chunks, done_chunks, COALESCE(failed_chunks,0), COALESCE(retry_rounds,0), COALESCE(error_msg,''), COALESCE(content_hash,''), COALESCE(stat_key,''), COALESCE(node_prompt,''), COALESCE(edge_prompt,''), COALESCE(created_at,''), COALESCE(updated_at,'') FROM rag_jobs`
+
+// FailedJobsForAutoRetry lists jobs eligible for idle-time auto-retry:
+// errored or partial, with rounds still under maxRounds. Oldest first so the
+// most-stuck files get attention first.
+func (s *Store) FailedJobsForAutoRetry(maxRounds int) ([]JobRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.Query(autoRetrySelectShaped+` WHERE ((status = ? AND failed_chunks > 0) OR (status = ? AND failed_chunks > 0)) AND COALESCE(retry_rounds,0) < ? ORDER BY updated_at ASC`,
+		JobError, JobDone, maxRounds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanJobs(rows)
+}
+
+// ExhaustedAutoRetryJobs lists still-failing jobs whose rounds are spent —
+// the "engine gave up, report to the human" set.
+func (s *Store) ExhaustedAutoRetryJobs(maxRounds int) ([]JobRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.Query(autoRetrySelectShaped+` WHERE ((status = ? AND failed_chunks > 0) OR (status = ? AND failed_chunks > 0)) AND COALESCE(retry_rounds,0) >= ? ORDER BY updated_at ASC`,
+		JobError, JobDone, maxRounds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanJobs(rows)
+}
+
+// ChunkLatencyP50Ms returns the median latency of a job's successful chunks —
+// the estimate basis for retry cost previews. The median (not the mean) so a
+// single historical timeout can't inflate the projection.
+func (s *Store) ChunkLatencyP50Ms(jobID string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.Query(`SELECT latency_ms FROM rag_chunks WHERE job_id = ? AND status = ? AND latency_ms IS NOT NULL ORDER BY latency_ms`,
+		jobID, ChunkDone)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var lats []int64
+	for rows.Next() {
+		var v int64
+		if err := rows.Scan(&v); err == nil {
+			lats = append(lats, v)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err // iteration aborted mid-way — partial samples would skew the median
+	}
+	if len(lats) == 0 {
+		return 0, nil
+	}
+	return lats[len(lats)/2], nil
+}
+
+// HasActiveExtractJobs reports whether any job is still queued or in flight
+// (pending/extracting). The desktop entrypoint uses it to honestly reject a
+// second RagStartExtract while a batch is mid-run — the in-memory CAS alone
+// only covers the synchronous enqueue window, and a racing force-start would
+// cascade-delete the chunk rows of the batch still executing.
+func (s *Store) HasActiveExtractJobs() (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var one int
+	err := s.db.QueryRow(`SELECT 1 FROM rag_jobs WHERE status IN (?, ?) AND total_chunks > 0 LIMIT 1`, JobPending, JobExtracting).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // JobContentHashForPath returns the stored content_hash for the job matching a
@@ -926,7 +1102,7 @@ func (s *Store) ChunksByPath(collection, path string) ([]string, error) {
 func (s *Store) ResumableJobs() ([]JobRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.Query(`SELECT id, collection, path, COALESCE(rel_path,''), COALESCE(root_path,''), is_dir, status, total_chunks, done_chunks, COALESCE(error_msg,''), COALESCE(content_hash,''), COALESCE(stat_key,''), COALESCE(node_prompt,''), COALESCE(edge_prompt,''), COALESCE(created_at,''), COALESCE(updated_at,'') FROM rag_jobs WHERE status IN (?, ?)`, JobPending, JobExtracting)
+	rows, err := s.db.Query(`SELECT id, collection, path, COALESCE(rel_path,''), COALESCE(root_path,''), is_dir, status, total_chunks, done_chunks, COALESCE(failed_chunks,0), COALESCE(retry_rounds,0), COALESCE(error_msg,''), COALESCE(content_hash,''), COALESCE(stat_key,''), COALESCE(node_prompt,''), COALESCE(edge_prompt,''), COALESCE(created_at,''), COALESCE(updated_at,'') FROM rag_jobs WHERE status IN (?, ?)`, JobPending, JobExtracting)
 	if err != nil {
 		return nil, err
 	}
@@ -944,7 +1120,11 @@ func scanJobs(rows *sql.Rows) ([]JobRow, error) {
 		// content_hash/stat_key/node_prompt/edge_prompt may be NULL on older
 		// rows; COALESCE in the queries handles it, but scan into NullString
 		// for safety.
-		if err := rows.Scan(&j.ID, &j.Collection, &j.Path, &j.RelPath, &j.RootPath, &isDir, &j.Status, &j.TotalChunks, &j.DoneChunks, &j.ErrorMsg, &contentHash, &statKey, &nodePrompt, &edgePrompt, &created, &updated); err != nil {
+		if err := rows.Scan(&j.ID, &j.Collection, &j.Path, &j.RelPath, &j.RootPath, &isDir, &j.Status, &j.TotalChunks, &j.DoneChunks, &j.FailedChunks, &j.RetryRounds, &j.ErrorMsg, &contentHash, &statKey, &nodePrompt, &edgePrompt, &created, &updated); err != nil {
+			// A column-count drift between a SELECT and this Scan used to
+			// swallow EVERY row silently (JobsByPath was empty for months).
+			// Loud-fail in the log so the next drift is visible immediately.
+			slog.Warn("rag: scanJobs row skipped", "err", err)
 			continue
 		}
 		j.IsDir = isDir != 0

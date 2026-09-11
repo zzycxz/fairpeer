@@ -10,18 +10,29 @@ export function sanitizeMermaidCode(code: string): string {
 
 // The app-wide mermaid initialization: one definition shared by the on-screen
 // MermaidViewer and the export rasterizer (lib/mermaidExport), so the two can
-// never drift into different base configs.
+// never drift into different base configs. `theme` is deliberately NOT baked in
+// — it is resolved from the active app theme at each render call site (see
+// mermaidThemeFor + MermaidViewer); a module-load constant would freeze every
+// diagram to whichever theme was active at app boot.
 export const APP_MERMAID_CONFIG = {
   startOnLoad: false,
-  theme: "dark",
   securityLevel: "strict",
   fontFamily: "inherit",
 } as const;
 
+// Mermaid theme names keyed by the app's resolved theme ("default" is
+// mermaid's light palette; "dark" its dark palette).
+export function mermaidThemeFor(resolvedTheme: "light" | "dark"): "default" | "dark" {
+  return resolvedTheme === "dark" ? "dark" : "default";
+}
+
 // System-only stack: an SVG loaded through <img> cannot fetch webfonts, so
-// export renders must rely on fonts installed on the machine.
+// export renders must rely on fonts installed on the machine. CJK names lead so
+// Chinese text renders with matching metrics on every platform ("Noto Sans CJK
+// SC" is what distro packages actually install; the Google-webfont name
+// "Noto Sans SC" is not aliased by fontconfig on stock Linux).
 export const EXPORT_MERMAID_FONT_FAMILY =
-  "'Segoe UI', 'Noto Sans SC', 'Microsoft YaHei', -apple-system, sans-serif";
+  "'Noto Sans SC', 'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif";
 
 // parseMermaidSvgSize recovers the diagram's natural pixel size. Mermaid emits
 // viewBox="0 0 W H" plus a style max-width (useMaxWidth default), or explicit

@@ -311,6 +311,12 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 					}
 					if hasImageParts(parts) || hasAudioParts(parts) {
 						cm.Content = imageContentParts(parts, c.visionDetail)
+					} else if m.Role == provider.RoleTool {
+						// Text-only tool result: emit the plain string — strict
+						// OpenAI-spec gateways reject arrays on tool messages,
+						// and a vision-off strip leaves nothing but the caption
+						// (P2-2, G6 review).
+						cm.Content = provider.ContentString(m.Content)
 					} else {
 						// Text-only (possibly after the strip above): emit the
 						// text parts directly.
@@ -602,27 +608,27 @@ func normaliseUsage(u *wireUsage) *provider.Usage {
 // --- OpenAI-compatible wire protocol ---
 
 type chatRequest struct {
-	Model           string         `json:"model"`
-	Messages        []chatMessage  `json:"messages"`
-	Tools           []chatTool     `json:"tools,omitempty"`
-	Stream          bool           `json:"stream"`
-	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
+	Model         string         `json:"model"`
+	Messages      []chatMessage  `json:"messages"`
+	Tools         []chatTool     `json:"tools,omitempty"`
+	Stream        bool           `json:"stream"`
+	StreamOptions *streamOptions `json:"stream_options,omitempty"`
 	// Temperature is a pointer so an explicit 0 (deterministic decoding) can
 	// be expressed on the wire; nil omits the field (endpoint default).
-	Temperature     *float64        `json:"temperature,omitempty"`
-	MaxTokens       int            `json:"max_tokens,omitempty"`
-	ReasoningEffort string         `json:"reasoning_effort,omitempty"` // OpenAI standard
-	Thinking        *thinkingMode  `json:"thinking,omitempty"`
+	Temperature     *float64      `json:"temperature,omitempty"`
+	MaxTokens       int           `json:"max_tokens,omitempty"`
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"` // OpenAI standard
+	Thinking        *thinkingMode `json:"thinking,omitempty"`
 	// PromptCacheKey routes same-conversation requests to one cache shard
 	// (OpenAI prefix caching). Clamped to the API's 64-char limit upstream.
-	PromptCacheKey  string `json:"prompt_cache_key,omitempty"`
+	PromptCacheKey string `json:"prompt_cache_key,omitempty"`
 	// ResponseFormat constrains output to the given JSON schema (upgrade spec
 	// 4-7). Only set when the caller passed one.
-	ResponseFormat  *chatResponseFormat `json:"response_format,omitempty"`
+	ResponseFormat *chatResponseFormat `json:"response_format,omitempty"`
 }
 
 type chatResponseFormat struct {
-	Type       string           `json:"type"` // "json_schema"
+	Type       string            `json:"type"` // "json_schema"
 	JSONSchema chatJSONSchemaFmt `json:"json_schema"`
 }
 

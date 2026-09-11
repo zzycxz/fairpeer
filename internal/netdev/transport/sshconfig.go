@@ -432,9 +432,14 @@ func stripSSHComment(line string) string {
 }
 
 func expandHome(p string) string {
-	if p == "~" || strings.HasPrefix(p, "~/") {
+	// "~", "~/…" and "~\…" all expand: Windows ssh_config files routinely use
+	// the backslash form (IdentityFile ~\keys\id_ed25519) which would
+	// otherwise stay literal and the key silently never loads.
+	if p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
 		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(p, "~"), "/"))
+			rest := strings.ReplaceAll(strings.TrimPrefix(p, "~"), `\`, "/")
+			rest = strings.TrimPrefix(rest, "/")
+			return filepath.Join(home, rest)
 		}
 	}
 	return p

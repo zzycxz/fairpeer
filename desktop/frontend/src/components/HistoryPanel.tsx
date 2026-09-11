@@ -20,7 +20,7 @@ type HistoryDateFilter = "all" | "today" | "yesterday" | "older";
 // rename, or delete the selected session.
 // baseName strips directories for a session path chip.
 function baseName(p: string): string {
-  const parts = p.split(/[\/]/).filter(Boolean);
+  const parts = p.split(/[\\/]/).filter(Boolean);
   return parts.length ? parts[parts.length - 1] : p;
 }
 
@@ -197,6 +197,12 @@ export function HistoryPanel({
     if (isTrash) setStatusFilter("all");
   }, [isTrash]);
 
+  // Auto-select the first visible row so the preview pane is never empty.
+  // U-7：filteredSessions 每次击键都会变（query/scope/date 筛选），旧逻辑每
+  // 个 keystroke 都触发一次全量 PreviewSession 加载。给自动兜底选中加
+  // ~300ms 防抖（与上方全文搜索的 250ms 防抖同一手法）。显式选中不受影响：
+  // 行点击的 loadPreview 立即生效，且选中项仍在列表内时下面的 early-return
+  // 保持原样、不会重新加载。
   useEffect(() => {
     setEditing(null);
     if (filteredSessions.length === 0) {
@@ -205,7 +211,8 @@ export function HistoryPanel({
     }
     if (preview && filteredSessions.some((s) => s.path === preview.path)) return;
     const first = filteredSessions.find((s) => !s.current) ?? filteredSessions[0];
-    void loadPreview(first);
+    const timer = window.setTimeout(() => { void loadPreview(first); }, 300); // debounce while typing
+    return () => window.clearTimeout(timer);
   }, [filteredSessions, loadPreview, preview]);
 
   const previewItems = useMemo(() => previewMessagesToItems(preview?.messages ?? []), [preview?.messages]);
@@ -501,7 +508,7 @@ export function HistoryPanel({
                               {isTrash && <span className="hist-item__badge hist-item__badge--deleted">{tr("history.deleted")}</span>}
                               {isTrash && (
                                 <span className="hist-item__badge" style={{ background: s.profile === "cowork" ? "var(--accent-soft)" : "var(--accent-alt-soft)", color: s.profile === "cowork" ? "var(--accent)" : "var(--accent-alt)", border: "none" }}>
-                                  {s.profile === "cowork" ? "办公" : "编码"}
+                                  {s.profile === "cowork" ? tr("cowork.badgeCoWork") : tr("cowork.badgeDev")}
                                 </span>
                               )}
                               {sessionLocation(s, tr) && <span className="hist-item__scope">{sessionLocation(s, tr)}</span>}

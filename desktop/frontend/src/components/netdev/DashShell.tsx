@@ -115,11 +115,13 @@ useEffect(() => {
 
   // 投影模式（§4.11）：轮播 + 悬停暂停 + Esc 先退投影。
   useEffect(() => {
-    if (!projection) return;
     const tm = setInterval(() => { if (!hoverRef.current && !paused) setScreen(s => SCREENS[(SCREENS.indexOf(s) + 1) % SCREENS.length]); }, rotateSec * 1000);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") { e.stopPropagation(); setProjection(false); }
-      if (e.altKey && e.key.toLowerCase() === "p") { e.preventDefault(); setProjection(p => !p); }
+      // e.code, not e.key: on macOS Option+P types "π", so a key-based test
+      // never matches there. KeyP is layout-stable across platforms.
+      if (e.altKey && e.code === "KeyP") { e.preventDefault(); setProjection(p => !p); }
+      if (projection && e.key === "Escape") { setProjection(false); }
     };
     window.addEventListener("keydown", onKey, true);
     return () => { clearInterval(tm); window.removeEventListener("keydown", onKey, true); };

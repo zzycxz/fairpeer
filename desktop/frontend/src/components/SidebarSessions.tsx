@@ -25,11 +25,15 @@ export function compactSessionAge(ts: number): string {
 
 export function SidebarSessions({
   sessions,
+  approvalTopicIds,
   onResume,
   onRename,
   onDelete,
 }: {
   sessions: SessionMeta[];
+  /** Topic ids with a pending approval/ask prompt (X8b cross-tab badge): the
+   *  owning tab's modal is invisible from here, so the row carries a dot. */
+  approvalTopicIds?: ReadonlySet<string>;
   onResume: (session: SessionMeta) => void;
   onRename: (path: string, title: string) => void;
   onDelete: (path: string) => void;
@@ -152,6 +156,9 @@ export function SidebarSessions({
               }}
               title={title}
             >
+              {s.topicId && approvalTopicIds?.has(s.topicId) && (
+                <span className="side-sessions__approval" title={t("sidebar.sessionApproval")} aria-label={t("sidebar.sessionApproval")} />
+              )}
               <span className="side-sessions__title">{title}</span>
               <span className="side-sessions__age">{compactSessionAge(s.lastActivityAt)}</span>
               <button

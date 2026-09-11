@@ -57,6 +57,15 @@ func AtomicWriteFile(dest string, data []byte, perm os.FileMode) error {
 		_ = os.Remove(tmpName)
 		return err
 	}
+	// fsync before the rename: without it the rename can reach the directory
+	// before the data blocks do (page cache ordering), and a power loss on
+	// old kernels / NFS homes lands a truncated or empty dest — the exact
+	// corruption AtomicWriteFile exists to prevent.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpName)
 		return err

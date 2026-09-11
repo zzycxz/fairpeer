@@ -114,6 +114,44 @@ func Load(id string) ([]byte, error) {
 	return nil, fmt.Errorf("knowledge %q not found (looked in user-knowledge/ and knowledge/ under %s)", id, stateDir())
 }
 
+// LoadBuiltin reads ONLY the embedded copy — the fallback when a user
+// override exists but is corrupt (the engine degrades to builtin and
+// surfaces the error; it never runs with zero rules).
+func LoadBuiltin(id string) ([]byte, error) {
+	if !idRe.MatchString(id) {
+		return nil, fmt.Errorf("knowledge: bad id %q", id)
+	}
+	return embedded.ReadFile("data/" + id + ".yaml")
+}
+
+// SaveUser validates and stores a user override (批 3 知识反哺通道：轮内
+// 确认的判据先落 user-knowledge/，升级不冲掉；验证不过整份拒收)。
+func SaveUser(id string, data []byte) error {
+	if !idRe.MatchString(id) {
+		return fmt.Errorf("knowledge: bad id %q", id)
+	}
+	// 用 IDs() 纯内存判定 known-id——Load 探测会触发 EnsureReleased 落盘，
+	// 拒绝路径不应带写副作用。
+	known := false
+	for _, knownID := range IDs() {
+		if knownID == id {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return fmt.Errorf("knowledge: unknown id %q (pick one of: %s)", id, strings.Join(IDs(), ", "))
+	}
+	if err := Validate(id, data); err != nil {
+		return err
+	}
+	dir := filepath.Join(stateDir(), "user-knowledge")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, id+".yaml"), data, 0o600)
+}
+
 // Path returns the LOAD path to teach in a body (informational; Load is the API).
 func Path(id string) string {
 	return filepath.Join(stateDir(), "user-knowledge", id+".yaml (覆盖) / "+filepath.Join(stateDir(), "knowledge", id+".yaml"))
@@ -216,6 +254,59 @@ func Validate(id string, data []byte) error {
 			}
 			if len(c.Check) == 0 {
 				return fmt.Errorf("host-risk-checks: checks[%d] (%s) needs a check command (string or per-os map)", i, c.ID)
+			}
+		}
+		return nil
+	case "baseline-rules":
+		var s struct {
+			Version int    `yaml:"version"`
+			Source  string `yaml:"source"`
+			Drivers map[string][]struct {
+				ID       string `yaml:"id"`
+				Title    string `yaml:"title"`
+				Severity string `yaml:"severity"`
+				FixType  string `yaml:"fix_type"`
+				FixRef   string `yaml:"fix_ref"`
+				Pattern  string `yaml:"pattern"`
+				Absence  bool   `yaml:"absence"`
+				Presence string `yaml:"presence"`
+				Hint     string `yaml:"hint"`
+			} `yaml:"drivers"`
+		}
+		if err := yaml.Unmarshal(data, &s); err != nil {
+			return fmt.Errorf("baseline-rules: %v", err)
+		}
+		if s.Version < 1 || len(s.Drivers) == 0 {
+			return fmt.Errorf("baseline-rules: version and drivers are required")
+		}
+		for drv, rules := range s.Drivers {
+			if len(rules) == 0 {
+				return fmt.Errorf("baseline-rules: driver %q has no rules", drv)
+			}
+			for i, r := range rules {
+				if r.ID == "" || r.Title == "" {
+					return fmt.Errorf("baseline-rules: %s rules[%d] needs id+title", drv, i)
+				}
+				switch r.Severity {
+				case "info", "warning", "critical":
+				default:
+					return fmt.Errorf("baseline-rules: %s rules[%d] (%s) severity must be info|warning|critical", drv, i, r.ID)
+				}
+				if r.Absence {
+					if r.Presence == "" {
+						return fmt.Errorf("baseline-rules: %s rules[%d] (%s) absence rule needs presence", drv, i, r.ID)
+					}
+					if _, err := regexp.Compile(r.Presence); err != nil {
+						return fmt.Errorf("baseline-rules: %s rules[%d] (%s) presence regex: %v", drv, i, r.ID, err)
+					}
+					continue
+				}
+				if r.Pattern == "" {
+					return fmt.Errorf("baseline-rules: %s rules[%d] (%s) needs pattern (or absence+presence)", drv, i, r.ID)
+				}
+				if _, err := regexp.Compile(r.Pattern); err != nil {
+					return fmt.Errorf("baseline-rules: %s rules[%d] (%s) pattern regex: %v", drv, i, r.ID, err)
+				}
 			}
 		}
 		return nil

@@ -202,8 +202,8 @@ type LiveDeviceState struct {
 // budget counts independently, WRITE_AUTHZ_SPEC §6⑤).
 type LiveSnapshot struct {
 	Devices []LiveDeviceState `json:"devices"`
-	Spent   int               `json:"spent"`  // read commands spent this turn
-	Budget  int               `json:"budget"` // turn_command_budget (0 = unlimited)
+	Spent   int               `json:"spent"`   // read commands spent this turn
+	Budget  int               `json:"budget"`  // turn_command_budget (0 = unlimited)
 	WSpend  int               `json:"wspent"`  // direct writes spent this turn
 	WBudget int               `json:"wbudget"` // turn_write_budget (default 10)
 }

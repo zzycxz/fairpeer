@@ -127,10 +127,7 @@ func TestE2EFullLink(t *testing.T) {
 	// C side
 	cWS := dialKWS(t, ts.URL, cPub, cPriv)
 	defer cWS.Close()
-	cPC, err := webrtc.NewPeerConnection(webrtc.Configuration{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	cPC := newLoopbackPC(t, webrtc.Configuration{})
 	defer cPC.Close()
 	dc, err := cPC.CreateDataChannel("linkpeer", nil)
 	if err != nil {

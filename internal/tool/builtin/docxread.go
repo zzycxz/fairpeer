@@ -53,11 +53,11 @@ type docxRunStyle struct {
 	Bold      bool   `json:"bold,omitempty"`
 	Italic    bool   `json:"italic,omitempty"`
 	Underline bool   `json:"underline,omitempty"`
-	Color     string `json:"color,omitempty"`     // hex RRGGBB
-	Size      string `json:"size,omitempty"`      // half-points as string ("24" = 12pt)
-	Font      string `json:"font,omitempty"`      // font family
-	Align     string `json:"align,omitempty"`     // left/center/right/justify
-	StyleID   string `json:"style_id,omitempty"`  // the pStyle id (e.g. "Heading1")
+	Color     string `json:"color,omitempty"`    // hex RRGGBB
+	Size      string `json:"size,omitempty"`     // half-points as string ("24" = 12pt)
+	Font      string `json:"font,omitempty"`     // font family
+	Align     string `json:"align,omitempty"`    // left/center/right/justify
+	StyleID   string `json:"style_id,omitempty"` // the pStyle id (e.g. "Heading1")
 }
 
 type docxTableInfo struct {
@@ -340,12 +340,12 @@ func parseBlocks(body []byte) []docxBlock {
 	var curTable *docxTableInfo
 	var paraText strings.Builder
 	var paraStyle string
-	var paraAlign string                 // <w:jc w:val="..."/>
-	var paraOutlineLvl int               // <w:outlineLvl w:val="N"/>; -1 = not set
-	var paraRunStyle *docxRunStyle       // first run's rPr formatting
-	var inRPr bool                       // inside <w:rPr>
-	var inPPr bool                       // inside <w:pPr>
-	var rPrBuf strings.Builder           // accumulate rPr inner XML
+	var paraAlign string           // <w:jc w:val="..."/>
+	var paraOutlineLvl int         // <w:outlineLvl w:val="N"/>; -1 = not set
+	var paraRunStyle *docxRunStyle // first run's rPr formatting
+	var inRPr bool                 // inside <w:rPr>
+	var inPPr bool                 // inside <w:pPr>
+	var rPrBuf strings.Builder     // accumulate rPr inner XML
 	var inPara, inTable, inRow, inCell bool
 	_ = tcBuf{}
 

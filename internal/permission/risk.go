@@ -43,8 +43,15 @@ const (
 // differs from what the readOnly flag alone would imply. Adding a new outward
 // builtin tool is a one-line addition here — no Gate.Check code change needed.
 var builtinRisk = map[string]RiskClass{
-	"email_send": RiskExternal, // sends real email to real recipients
-	"rag_delete": RiskExternal, // deletes knowledge-base entries irreversibly
+	"email_send":       RiskExternal, // sends real email to real recipients
+	"rag_delete":       RiskExternal, // deletes knowledge-base entries irreversibly
+	"im_send":          RiskExternal, // pushes messages out to real IM channels
+	"schedule_create":  RiskExternal, // persists an unattended future agent execution (prompt-injection → recurring run loop)
+	"schedule_run_now": RiskExternal, // fires an unattended run + its delivery routes on demand
+	// exec_session spawns a persistent shell session whose stdin the model
+	// feeds across turns — same execution surface as bash (RiskExec), even
+	// though the tool name doesn't say "shell".
+	"exec_session": RiskExec,
 }
 
 // Classify determines a tool call's RiskClass. Priority (first match wins):

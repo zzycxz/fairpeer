@@ -29,6 +29,7 @@ package scheduler
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,6 +40,7 @@ import (
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 )
 
 // ScheduledTask is one recurring prompt. Prompt is the agent input fired on each
@@ -82,6 +84,11 @@ type ScheduledTask struct {
 	// reminder, no verb). Plain=false (default) always runs the agent.
 	Plain         bool      `json:"plain,omitempty"`
 	LastDeliverAt time.Time `json:"last_deliver_at,omitempty"` // when the most recent delivery was attempted
+	// Source records who created the task: "manual" (the human, via the calendar
+	// UI) or "agent" (an AI tool call). Audit + policy hinge on it — e.g. UI
+	// badges, and future "agent tasks start paused" gating. Empty = legacy
+	// manual (pre-dating the field).
+	Source string `json:"source,omitempty"`
 }
 
 // Runner is the bridge to a controller: the scheduler calls Run with the task's
@@ -130,6 +137,10 @@ type RunRecord struct {
 	Status     string    `json:"status"`      // "ok" | "error" | "skipped"
 	Result     string    `json:"result"`      // truncated
 	OutputMode string    `json:"output_mode"` // echoed from the task at fire time
+	// Profile is the task's profile partition at fire time, recorded so
+	// HistoryForProfile can attribute runs without a live task join (the task
+	// may since have been deleted). Empty = legacy cowork.
+	Profile string `json:"profile,omitempty"`
 }
 
 // Store persists tasks to a JSON file so they survive restarts. The file is
@@ -166,11 +177,10 @@ func (s *Store) save(tasks []ScheduledTask) error {
 	if err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path)
+	// AtomicWriteFile (fsync + replace): the old hand-rolled tmp+rename had no
+	// fsync (a crash could leave an empty/torn file) and wrote 0o644 — tasks
+	// carry user prompts in plaintext, so 0o600 (P0-7).
+	return fileutil.AtomicWriteFile(s.path, b, 0o600)
 }
 
 // Scheduler owns the task store and the firing goroutine. Create once per app
@@ -559,6 +569,7 @@ func (s *Scheduler) fireDue(now time.Time) {
 				Status:     deliver.forHistory(runErr),
 				Result:     truncate(result, 500),
 				OutputMode: t.OutputMode,
+				Profile:    taskProfile(t),
 			})
 			_ = s.store.save(s.tasks)
 		}
@@ -879,12 +890,63 @@ func (s *Scheduler) List(enabledOnly bool) []ScheduledTask {
 	return out
 }
 
+// taskProfile returns a task's effective profile partition. Empty is the
+// scheduler's historical default: Create pins cowork, so pre-partition tasks
+// belong to the cowork cabinet.
+func taskProfile(t ScheduledTask) string {
+	if p := strings.ToLower(strings.TrimSpace(t.Profile)); p != "" {
+		return p
+	}
+	return config.ProfileCowork
+}
+
+// matchTaskProfile reports whether a task belongs to the profile partition.
+// Callers hold no lock (task snapshots are values).
+func matchTaskProfile(t ScheduledTask, profile string) bool {
+	return taskProfile(t) == strings.ToLower(strings.TrimSpace(profile))
+}
+
+// ListForProfile returns tasks in ONE profile partition (optionally
+// enabled-only). The agent-facing schedule_* tools use this so each profile's
+// agent sees only its own cabinet; the human UI keeps using List for the
+// all-profiles view (the user owns every partition).
+func (s *Scheduler) ListForProfile(profile string, enabledOnly bool) []ScheduledTask {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]ScheduledTask, 0, len(s.tasks))
+	for _, t := range s.tasks {
+		if enabledOnly && !t.Enabled {
+			continue
+		}
+		if !matchTaskProfile(t, profile) {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
 // Delete removes a task by id.
 func (s *Scheduler) Delete(id string) bool {
+	return s.deleteForProfile(id, "")
+}
+
+// DeleteForProfile removes a task by id ONLY if it belongs to the profile
+// partition. A task in another partition is treated as absent — the agent
+// tools use this so cross-partition deletes report "not found" rather than
+// leaking that the id exists elsewhere.
+func (s *Scheduler) DeleteForProfile(id, profile string) bool {
+	return s.deleteForProfile(id, profile)
+}
+
+func (s *Scheduler) deleteForProfile(id, profile string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, t := range s.tasks {
 		if t.ID == id {
+			if profile != "" && !matchTaskProfile(t, profile) {
+				return false
+			}
 			s.tasks = append(s.tasks[:i], s.tasks[i+1:]...)
 			_ = s.store.save(s.tasks)
 			s.armNextTimerLocked() // nearest task may have been the deleted one
@@ -897,10 +959,26 @@ func (s *Scheduler) Delete(id string) bool {
 // Update mutates a task's mutable fields (name/expression/prompt/enabled/...).
 // "in ..." expressions in the mutation are normalized to absolute "at ...".
 func (s *Scheduler) Update(id string, mut func(*ScheduledTask)) (ScheduledTask, error) {
+	return s.updateForProfile(id, "", mut)
+}
+
+// UpdateForProfile mutates a task ONLY within the profile partition — same
+// not-found semantics as DeleteForProfile. Profile/Source are partition/audit
+// identity: the mut callback CAN still set them (the desktop UI uses Update to
+// let the human assign a task's running profile), but agent tools parse an
+// explicit field whitelist before calling, so they cannot.
+func (s *Scheduler) UpdateForProfile(id, profile string, mut func(*ScheduledTask)) (ScheduledTask, error) {
+	return s.updateForProfile(id, profile, mut)
+}
+
+func (s *Scheduler) updateForProfile(id, profile string, mut func(*ScheduledTask)) (ScheduledTask, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.tasks {
 		if s.tasks[i].ID == id {
+			if profile != "" && !matchTaskProfile(s.tasks[i], profile) {
+				break // wrong partition: fall through to not-found
+			}
 			// mut() edits the task in place — snapshot first so ANY failure
 			// below (bad expression, one-shot in the past, frequency gate)
 			// restores the prior task instead of leaving a mutated-but-
@@ -941,13 +1019,34 @@ func (s *Scheduler) Update(id string, mut func(*ScheduledTask)) (ScheduledTask, 
 // History returns recent run records, newest first. If taskID is non-empty, only
 // records for that task are returned. Limited to the in-memory ring buffer.
 func (s *Scheduler) History(taskID string) []RunRecord {
+	return s.historyForProfile("", taskID)
+}
+
+// HistoryForProfile filters history to one profile partition. Records carry the
+// task's profile at fire time, so runs of a since-deleted task stay attributed.
+// Empty-profile legacy records count as cowork (the scheduler default).
+func (s *Scheduler) HistoryForProfile(profile, taskID string) []RunRecord {
+	return s.historyForProfile(profile, taskID)
+}
+
+func (s *Scheduler) historyForProfile(profile, taskID string) []RunRecord {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	want := strings.ToLower(strings.TrimSpace(profile))
 	out := make([]RunRecord, 0, len(s.history))
 	for i := len(s.history) - 1; i >= 0; i-- { // newest first
 		r := s.history[i]
 		if taskID != "" && r.TaskID != taskID {
 			continue
+		}
+		if want != "" {
+			rp := strings.ToLower(strings.TrimSpace(r.Profile))
+			if rp == "" {
+				rp = config.ProfileCowork
+			}
+			if rp != want {
+				continue
+			}
 		}
 		out = append(out, r)
 	}
@@ -975,6 +1074,18 @@ func (s *Scheduler) Get(id string) (ScheduledTask, bool) {
 // usual and a history record is appended. The task's schedule is NOT advanced
 // (it still fires at its next scheduled time). Returns the truncated result.
 func (s *Scheduler) RunNow(id string) (string, error) {
+	return s.runNowForProfile(id, "")
+}
+
+// RunNowForProfile fires a task ONLY within the profile partition (same
+// not-found semantics as DeleteForProfile/UpdateForProfile). The agent tool
+// path uses this so one profile's agent cannot trigger another partition's
+// task — which would both run foreign prompts and fire their delivery routes.
+func (s *Scheduler) RunNowForProfile(id, profile string) (string, error) {
+	return s.runNowForProfile(id, profile)
+}
+
+func (s *Scheduler) runNowForProfile(id, profile string) (string, error) {
 	s.mu.Lock()
 	tp, ok := s.findLocked(id)
 	var t ScheduledTask
@@ -987,6 +1098,9 @@ func (s *Scheduler) RunNow(id string) (string, error) {
 	notifier := s.notifier
 	prober := s.accountProber
 	s.mu.Unlock()
+	if ok && profile != "" && !matchTaskProfile(t, profile) {
+		ok = false // wrong partition: report as absent, not as a permission hit
+	}
 	if !ok {
 		return "", fmt.Errorf("task %q not found", id)
 	}
@@ -1015,6 +1129,7 @@ func (s *Scheduler) RunNow(id string) (string, error) {
 			Status:     deliver.forHistory(runErr),
 			Result:     truncate(result, 500),
 			OutputMode: t.OutputMode,
+			Profile:    taskProfile(t),
 		})
 		_ = s.store.save(s.tasks)
 	}
@@ -1033,7 +1148,17 @@ func (s *Scheduler) findLocked(id string) (*ScheduledTask, bool) {
 }
 
 func taskID() string {
-	return fmt.Sprintf("sched_%d", time.Now().UnixNano())
+	// Random suffix, not a nanosecond timestamp: sequential Creates in a tight
+	// loop (agent tool bursts, UI double-click) can land in the same clock tick
+	// on Windows, and a colliding sched_<ns> id silently aliases two tasks —
+	// RunNow/partition matching then resolve to the wrong one. Mirrors the
+	// calendar store's genID fix (crypto/rand suffix, timestamp fallback when
+	// no entropy source exists).
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("sched_%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("sched_%x", b)
 }
 
 func truncate(s string, n int) string {

@@ -25,6 +25,7 @@ import (
 	"github.com/zzycxz/fairpeer/desktop/internal/update"
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/netclient"
+	"github.com/zzycxz/fairpeer/internal/proc"
 )
 
 // updater.go is the transport-free core of the desktop auto-updater: manifest
@@ -38,9 +39,20 @@ const (
 	httpTimeout    = 15 * time.Second
 )
 
-// manifestEndpoints returns the manifest URLs for GitHub (the fallback).
-// We fetch Gitee first via its API, and use these as fallbacks.
+// manifestEndpoints returns the manifest URLs in fetch order. When
+// [network] update_base_url is configured it REPLACES the GitHub/ghproxy
+// endpoints entirely — air-gapped deployments must never touch github.com —
+// and the mirror layout (…/latest/download/latest.json, canary equivalent)
+// is the operator's contract. Otherwise: GitHub Releases first, then the
+// ghproxy.net mirror as fallback.
 func manifestEndpoints() []string {
+	if base := updateBaseOverride(); base != "" {
+		base = strings.TrimRight(base, "/")
+		if channel == "canary" {
+			return []string{base + "/download/canary/latest.json"}
+		}
+		return []string{base + "/latest/download/latest.json"}
+	}
 	if channel == "canary" {
 		return []string{
 			ghReleasesBase + "/download/canary/latest.json",
@@ -51,6 +63,17 @@ func manifestEndpoints() []string {
 		ghReleasesBase + "/latest/download/latest.json",
 		"https://ghproxy.net/" + ghReleasesBase + "/latest/download/latest.json",
 	}
+}
+
+// updateBaseOverride reads the configured self-update mirror base. A config
+// load failure means "no override" — the default endpoints already handle
+// their own errors downstream.
+func updateBaseOverride() string {
+	cfg, err := config.Load()
+	if err != nil {
+		return ""
+	}
+	return cfg.NetworkUpdateBaseURL()
 }
 
 // downloadPage is the human-facing releases page shown when self-update is
@@ -264,8 +287,19 @@ func extractBinary(targz []byte, name string) ([]byte, error) {
 }
 
 // applyLinux replaces the running binary with the one inside the downloaded
-// tar.gz; the caller relaunches afterwards.
+// tar.gz; the caller relaunches afterwards. A binary under a system prefix
+// (/usr, /opt — the deb/rpm layout) is root-owned, so the in-place swap would
+// fail with EACCES; refuse with a clear pointer to the package manager
+// instead of a raw permission error after a 100 MB download.
 func applyLinux(targz []byte) error {
+	if exe, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
+		if strings.HasPrefix(exe, "/usr/") || strings.HasPrefix(exe, "/opt/") {
+			return fmt.Errorf("update: this copy was installed system-wide (%s) — update it with your package manager (apt/rpm), or download the portable build from the releases page", exe)
+		}
+	}
 	bin, err := extractBinary(targz, "fairpeer-desktop")
 	if err != nil {
 		return err
@@ -273,12 +307,14 @@ func applyLinux(targz []byte) error {
 	return selfupdate.Apply(bytes.NewReader(bin), selfupdate.Options{})
 }
 
-// applyWindows writes the downloaded NSIS installer to a temp file and launches it.
-// The per-user installer needs no admin rights and its finish page relaunches the
-// app; the caller then exits so the installer can replace the running exe. The
-// installer targets the running app's own directory (issue #3217) so an update
-// overwrites in place instead of landing a second copy at the per-user default —
-// this also covers upgrades from builds that predate the registry InstallLocation.
+// applyWindows stages the downloaded NSIS installer (a temp file OUTSIDE the
+// install dir — the asset is an installer, never the app binary, so it must
+// not be swapped over the running exe) behind a batch wrapper that waits for
+// this process to exit, runs the installer silently (/S) pinned to the
+// running app's own directory (/D=, unquoted final token per NSIS), then
+// relaunches the app. The caller shuts down and exits so the installer can
+// replace the binary in place (issue #3217) — this also covers upgrades from
+// builds that predate the registry InstallLocation.
 func applyWindows(newExe []byte) error {
 	currentExe, err := os.Executable()
 	if err != nil {
@@ -288,26 +324,45 @@ func applyWindows(newExe []byte) error {
 		currentExe = resolved
 	}
 
-	// Write the new binary to a temp file beside the current one.
-	tmpPath := currentExe + ".new"
-	if err := os.WriteFile(tmpPath, newExe, 0o755); err != nil {
+	tmp, err := os.CreateTemp("", "fairpeer-update-*.exe")
+	if err != nil {
+		return err
+	}
+	instPath := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.WriteFile(instPath, newExe, 0o755); err != nil {
 		return err
 	}
 
-	// Write a batch script that waits for the current process to exit, replaces
-	// the binary, cleans up, and relaunches.
-	batPath := filepath.Join(filepath.Dir(currentExe), "fairpeer-update.bat")
+	// Wait for the running app by PID before installing: a silent installer
+	// hitting the locked exe would fail outright. tasklist|find matches the
+	// PID digits, so it is locale-independent.
+	pid := os.Getpid()
+	// NSIS takes /D= as the verbatim rest of the line — keep it last and
+	// unquoted; emit it only when the dir resolved.
+	instLine := `start /wait "" "` + instPath + `" /S`
+	if dir := currentInstallDir(); dir != "" {
+		instLine += ` /D=` + dir
+	}
+	batPath := filepath.Join(os.TempDir(), "fairpeer-update.bat")
 	bat := fmt.Sprintf(`@echo off
 :wait
 timeout /t 1 /nobreak >nul
-move /y "%s" "%s" >nul 2>&1
-if errorlevel 1 goto wait
-del "%%~f0" & start "" "%s"
-`, tmpPath, currentExe, currentExe)
-	if err := os.WriteFile(batPath, []byte(bat), 0o755); err != nil {
+tasklist /FI "PID eq %d" | find "%d" >nul
+if not errorlevel 1 goto wait
+%s
+del "%s" >nul 2>&1
+start "" "%s"
+del "%%~f0" >nul 2>&1
+`, pid, pid, instLine, instPath, currentExe)
+	if err := os.WriteFile(batPath, []byte(bat), 0o644); err != nil {
 		return err
 	}
-	return exec.Command("cmd", "/C", batPath).Start()
+	cmd := exec.Command("cmd", "/C", batPath)
+	proc.HideWindow(cmd)
+	return cmd.Start()
 }
 
 // currentInstallDir is the directory of the running executable — the location a

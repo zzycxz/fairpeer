@@ -71,8 +71,8 @@ func TestAgentEmitsRetryingThenStreams(t *testing.T) {
 	if len(retries) != 2 || retries[0].RetryAttempt != 1 || retries[1].RetryAttempt != 2 {
 		t.Fatalf("want two Retrying events (1,2), got %+v", retries)
 	}
-	if retries[0].RetryMax != provider.MaxRetries {
-		t.Errorf("RetryMax = %d, want %d", retries[0].RetryMax, provider.MaxRetries)
+	if retries[0].RetryMax != provider.DefaultMaxRetries {
+		t.Errorf("RetryMax = %d, want %d", retries[0].RetryMax, provider.DefaultMaxRetries)
 	}
 
 	var answer strings.Builder

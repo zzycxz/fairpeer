@@ -23,7 +23,7 @@ const (
 	Version = "v1.0.0"
 	cgRepo  = "colbymchenry/codegraph"
 
-	officialMirrorBase = "" // No CDN mirror; download directly from GitHub
+	officialMirrorBase       = "" // No CDN mirror; download directly from GitHub
 	perSourceDownloadTimeout = 60 * time.Second
 
 	renameAttempts = 5
@@ -116,6 +116,12 @@ func InstallWithClient(ctx context.Context, client *http.Client, log func(string
 		return "", fmt.Errorf("codegraph: no cache directory available")
 	}
 	asset := assetName()
+	if expectedAssetSHA256(asset) == "" {
+		// No checksum entry means the release ships no build for this platform.
+		// Say so here instead of surfacing a cryptic checksum error after a
+		// doomed download (or blindly trusting an embedded bundle).
+		return "", fmt.Errorf("codegraph %s has no build for %s/%s", Version, runtime.GOOS, runtime.GOARCH)
+	}
 
 	// Embedded runtime first (release builds): zero network, zero mirrors. The
 	// bytes pass the same SHA256 table as downloads — a wrong pipeline fetch
@@ -163,6 +169,14 @@ func InstallWithClient(ctx context.Context, client *http.Client, log func(string
 	if err != nil {
 		return "", err
 	}
+	if runtime.GOOS != "windows" {
+		// Defensive: upstream tar modes may lack the exec bit, and cached()
+		// only accepts launchers it can execute — without this the install
+		// loops on a misleading "launcher not found after install".
+		if err := ensureLauncherExec(root); err != nil {
+			return "", err
+		}
+	}
 	if p, ok := cached(); ok {
 		return p, nil // a concurrent session already populated dir
 	}
@@ -174,7 +188,7 @@ func InstallWithClient(ctx context.Context, client *http.Client, log func(string
 	}
 	p, ok := cached()
 	if !ok {
-		return "", fmt.Errorf("codegraph: launcher not found after install (unexpected bundle layout)")
+		return "", fmt.Errorf("codegraph: launcher not found after install (unexpected bundle layout, or the launcher was extracted without exec permission — check the bin/ entries under %s)", dir)
 	}
 	logf(log, "codegraph: installed to %s", dir)
 	return p, nil
@@ -245,6 +259,35 @@ func dedupeStrings(values []string) []string {
 		}
 	}
 	return out
+}
+
+// ensureLauncherExec chmods 0o755 the launcher candidates inside the staged
+// bundle's bin/ dir (staged, i.e. before promote). Some upstream tars ship the
+// launcher without the exec bit; cached() requires an executable file, so an
+// unrestored bit turns every install into a "launcher not found after install"
+// loop. Missing bin/ dir is fine (the Windows zip layout, which skips this).
+func ensureLauncherExec(root string) error {
+	names := map[string]bool{}
+	for _, rel := range launcherNames() {
+		names[filepath.Base(rel)] = true
+	}
+	binDir := filepath.Join(root, "bin")
+	ents, err := os.ReadDir(binDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, ent := range ents {
+		if ent.IsDir() || !names[ent.Name()] {
+			continue
+		}
+		if err := os.Chmod(filepath.Join(binDir, ent.Name()), 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // promote moves the freshly extracted bundle (root) into its versioned home

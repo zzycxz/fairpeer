@@ -39,9 +39,10 @@ import {
   Zap,
   Bot,
   Sparkles,
+  Repeat,
 } from "lucide-react";
 
-import { app, onRagChanged, onRagProgress } from "../../lib/bridge";
+import { app, onRagChanged, onRagProgress, onRagAutoRetry } from "../../lib/bridge";
 import { subscribeBrowserMirrorFocus } from "../../lib/browserMirror";
 import { useToast } from "../../lib/toast";
 import { CustomSelect } from "./CustomSelect";
@@ -56,7 +57,53 @@ function realApp(): unknown | undefined {
     ? (window as unknown as { go?: { main?: { App?: unknown } } }).go?.main?.App
     : undefined;
 }
-import { useT } from "../../lib/i18n";
+
+// patchRagTreeNodes immutably patches the file node matching path (recursing
+// through folders). Returns the ORIGINAL array when nothing matched so React
+// bails out of the re-render — intermediate progress events arrive per chunk
+// and must not rebuild the whole tree state each time.
+function patchRagTreeNodes(nodes: RagNodeView[], path: string, patch: Partial<RagNodeView>): RagNodeView[] {
+  let changed = false;
+  const out = nodes.map((n) => {
+    if (n.path === path) {
+      changed = true;
+      return { ...n, ...patch };
+    }
+    if (n.children && n.children.length) {
+      const kids = patchRagTreeNodes(n.children, path, patch);
+      if (kids !== n.children) {
+        changed = true;
+        return { ...n, children: kids };
+      }
+    }
+    return n;
+  });
+  return changed ? out : nodes;
+}
+
+// fmtEstTime renders seconds for a cost preview ("45 秒" / "3 分钟" / "2 小时 5 分").
+function fmtEstTime(sec: number): string {
+  if (sec < 60) return `${Math.max(1, Math.round(sec))}s`;
+  if (sec < 3600) return `${Math.round(sec / 60)}m`;
+  const h = Math.floor(sec / 3600);
+  const m = Math.round((sec % 3600) / 60);
+  return m > 0 ? `${h}h${m}m` : `${h}h`;
+}
+
+// collectionHealthLabel composes the collection row subtitle: article count
+// plus extraction damage (partial/failed/queued). Undefined when healthy —
+// the resting row stays as quiet as before.
+function collectionHealthLabel(c: RagCollectionView, t: Translator): string | undefined {
+  const parts: string[] = [];
+  if (c.partial > 0) parts.push(t("cowork.ragHealthPartial", { n: c.partial }));
+  if (c.failed > 0) parts.push(t("cowork.ragHealthFailed", { n: c.failed }));
+  if (c.queued > 0) parts.push(t("cowork.ragHealthQueued", { n: c.queued }));
+  if (!parts.length) return undefined;
+  const base = c.documents > 0 ? t("cowork.nArticles", { count: c.documents }) : "";
+  return (base ? base + " · " : "") + parts.join(" · ");
+}
+import { useT, type Translator } from "../../lib/i18n";
+import { humanizeRagError } from "../../lib/ragError";
 import type {
   CalendarEventView,
   ContextInfo,
@@ -65,6 +112,8 @@ import type {
   MailProbeResult,
   RagCollectionView,
   RagNodeView,
+  RagRetryEstimateView,
+  RagAutoRetryStatusView,
   TaskView,
   BotDockStatusView,
 } from "../../lib/types";
@@ -972,6 +1021,7 @@ function RagDock({
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
   const [catSearch, setCatSearch] = useState("");
   const [fileSearch, setFileSearch] = useState("");
+  const [autoRetry, setAutoRetry] = useState<RagAutoRetryStatusView | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importTargetCol, setImportTargetCol] = useState("");
   const [allExpanded, setAllExpanded] = useState(true);
@@ -1091,30 +1141,137 @@ function RagDock({
 
   // rag:progress + rag:changed subscriptions.
   useEffect(() => {
+    const refreshCollections = () => {
+      (app as unknown as { ListRagCollections: () => Promise<RagCollectionView[]> })
+        .ListRagCollections()
+        .then(setCollections)
+        .catch(() => {});
+    };
+    // Terminal refreshes are debounced: a batch of files finishing back-to-back
+    // (Hyper-Extract runs 4 workers) would otherwise fire one full
+    // ListRagTree+ListRagCollections round-trip per file.
+    let terminalTimer: ReturnType<typeof setTimeout> | null = null;
+    // Batch-completion receipts (R2-3): terminal events accumulate for a quiet
+    // window, then one summary toast fires — never one toast per file.
+    let doneCount = 0;
+    let firstPendingAt = 0;
+    const failures: { file: string; msg: string }[] = [];
+    let notifTimer: ReturnType<typeof setTimeout> | null = null;
+    const t_ = t; // stable ref for the closure
+    const flushNotifs = () => {
+      notifTimer = null;
+      firstPendingAt = 0;
+      if (doneCount === 0 && failures.length === 0) return;
+      if (failures.length > 0) {
+        const first = failures[0];
+        const suffix = failures.length > 1 ? ` +${failures.length - 1}` : "";
+        showToast(t_("cowork.ragExtractFailNotif", { file: first.file + suffix, msg: first.msg }), "error");
+      }
+      if (doneCount > 0) {
+        showToast(t_("cowork.ragBatchSummary", { ok: doneCount, fail: failures.length }), failures.length === 0 ? "info" : "warn");
+      }
+      doneCount = 0;
+      failures.length = 0;
+    };
+    const scheduleTerminalRefresh = () => {
+      if (terminalTimer) clearTimeout(terminalTimer);
+      terminalTimer = setTimeout(() => {
+        terminalTimer = null;
+        refreshTree();
+        refreshCollections();
+      }, 300);
+      const now = Date.now();
+      if (firstPendingAt === 0) firstPendingAt = now;
+      if (notifTimer) clearTimeout(notifTimer);
+      // Hard 8s cap: a continuous batch must not postpone the summary forever.
+      const wait = Math.min(2500, Math.max(0, firstPendingAt + 8000 - now));
+      notifTimer = setTimeout(flushNotifs, wait);
+    };
     const offProgress =
       realApp() &&
       typeof window !== "undefined" &&
       (window as unknown as { runtime?: WailsRuntimeLike }).runtime
         ? (window as unknown as { runtime: WailsRuntimeLike }).runtime.EventsOn("rag:progress", (...args) => {
-            const payload = (args?.[0] ?? {}) as Record<string, unknown>;
-            // The bundle destructures these but only uses them to trigger a
-            // tree refresh, so we just call refreshTree() here.
-            void payload;
-            refreshTree();
+            const p = (args?.[0] ?? {}) as Partial<{
+              kind: string; scope: string; path: string; status: string; message: string;
+              doneChunks: number; totalChunks: number; failedChunks: number;
+            }>;
+            if (p.kind === "terminal") {
+              // Job reached a final state — refresh so failed_chunks, error
+              // messages and collection health all come from the source of
+              // truth. (Terminal events are never throttled by the backend.)
+              // A done job WITH failed chunks is a partial failure, not a
+              // success — count it in the failures column of the summary.
+              // Go always sends Path on error events (extract.go emitProgress
+              // fills job.Path), so error events must always be counted.
+              const failed = p.failedChunks ?? 0;
+              if (p.status === "error" || (p.status === "done" && failed > 0)) {
+                failures.push({
+                  file: (p.path ?? "").split(/[\\/]/).pop() ?? (p.path ?? ""),
+                  msg: failed > 0
+                    ? t_("cowork.ragPartialHint", {
+                        ok: Math.max(0, (p.doneChunks ?? 0) - failed),
+                        total: p.totalChunks ?? 0, n: failed,
+                      })
+                    : humanizeRagError(p.message ?? "", t_),
+                });
+              } else if (p.status === "done" || p.status === "enriched") {
+                doneCount++;
+              }
+              scheduleTerminalRefresh();
+              return;
+            }
+            // Intermediate progress: patch the matching node in place instead
+            // of re-fetching the whole tree per chunk (one IPC per event →
+            // O(events) tree rebuilds previously). Only CHUNK-grain events
+            // carry chunk counters — Hyper-Extract (scope "file") sends file
+            // indices in done/total, which would render as garbage progress.
+            if (p.scope && p.scope !== "chunk") return;
+            const path = p.path ?? "";
+            if (!path) return;
+            const patch: Partial<RagNodeView> = {};
+            if (p.status === "extracting") patch.status = "extracting";
+            if (typeof p.doneChunks === "number") patch.doneChunks = p.doneChunks;
+            if (typeof p.totalChunks === "number") patch.totalChunks = p.totalChunks;
+            if (!Object.keys(patch).length) return;
+            setTree((prev) => patchRagTreeNodes(prev, path, patch));
           })
         : () => {};
     const offChanged = onRagChanged(() => {
       refreshTree();
-      (app as unknown as { ListRagCollections: () => Promise<RagCollectionView[]> })
-        .ListRagCollections()
-        .then(setCollections)
-        .catch(() => {});
+      refreshCollections();
     });
     return () => {
+      if (terminalTimer) clearTimeout(terminalTimer);
+      if (notifTimer) clearTimeout(notifTimer);
       offProgress();
       offChanged();
     };
-  }, [refreshTree]);
+  }, [refreshTree, showToast, t]);
+
+  // Idle-time auto-retry visibility (R3-2): badge state on mount + lifecycle
+  // toasts so background work is never silent.
+  useEffect(() => {
+    (app as unknown as { RagAutoRetryStatus: () => Promise<RagAutoRetryStatusView> })
+      .RagAutoRetryStatus()
+      .then(setAutoRetry)
+      .catch(() => {});
+    const off = onRagAutoRetry((ev) => {
+      setAutoRetry((s) => ({
+        enabled: s?.enabled || ev.type === "ready" || ev.type === "round",
+        active: ev.type === "round",
+        maxRounds: ev.maxRounds || s?.maxRounds || 2,
+      }));
+      if (ev.type === "ready") {
+        showToast(t("cowork.ragAutoRetryReady", { n: ev.maxRounds }), "info");
+      } else if (ev.type === "round") {
+        showToast(t("cowork.ragAutoRetryRound", { n: ev.jobs }), "info");
+      } else if (ev.type === "exhausted") {
+        showToast(t("cowork.ragAutoRetryExhausted", { n: ev.jobs, rounds: ev.maxRounds }), "warn");
+      }
+    });
+    return off;
+  }, [showToast, t]);
 
   // rag:entity-click → open entity detail (graph click → dock).
   useEffect(() => {
@@ -1418,13 +1575,25 @@ function RagDock({
                 options={[
                   {
                     value: "",
-                    label: t("cowork.allDocs", { count: String(collections.reduce((acc, c) => acc + (c.documents || 0), 0)) }),
+                    label: (() => {
+                      const docs = collections.reduce((acc, c) => acc + (c.documents || 0), 0);
+                      const sum = (k: "partial" | "failed" | "queued") =>
+                        collections.reduce((acc, c) => acc + (c[k] || 0), 0);
+                      const base = t("cowork.allDocs", { count: String(docs) });
+                      const parts = [
+                        sum("partial") > 0 && t("cowork.ragHealthPartial", { n: sum("partial") }),
+                        sum("failed") > 0 && t("cowork.ragHealthFailed", { n: sum("failed") }),
+                        sum("queued") > 0 && t("cowork.ragHealthQueued", { n: sum("queued") }),
+                      ].filter(Boolean);
+                      return parts.length ? `${base} · ${parts.join(" · ")}` : base;
+                    })(),
                     icon: <Folder size={13} style={{ color: "var(--accent)" }} />,
                   },
                   ...collections.map((c) => ({
                     value: c.path || c.name,
                     label: c.name,
-                    subtitle: c.documents > 0 ? t("cowork.nArticles", { count: String(c.documents) }) : undefined,
+                    subtitle: collectionHealthLabel(c, t)
+                      ?? (c.documents > 0 ? t("cowork.nArticles", { count: String(c.documents) }) : undefined),
                     indent: !!c.parent,
                     icon: <Folder size={13} />,
                   })),
@@ -1452,6 +1621,58 @@ function RagDock({
                   </button>
                 )}
               </label>
+              {/* Toolbar row: collection-level failed-chunk retry (needs a
+                  concrete collection — "" is the all-docs view) + auto-retry
+                  badge (visible + one-click pausable/resumable). */}
+              <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
+                {activeCollection !== "" && (
+                  <button
+                    type="button"
+                    className="ragft-btn ragft-btn--accent"
+                    style={{ fontSize: "11px", padding: "3px 8px", display: "inline-flex", alignItems: "center", gap: 4 }}
+                    title={t("cowork.ragRetryAllTitle")}
+                    onClick={() => {
+                      void confirm({ title: t("cowork.ragRetryAllTitle"), message: t("cowork.ragRetryAllConfirm") }).then((ok) => {
+                        if (!ok) return;
+                        (app as unknown as { RagRetryAllFailed: (c: string) => Promise<number> })
+                          .RagRetryAllFailed(activeCollection)
+                          .then((n) => {
+                            showToast(t("cowork.ragRetryAllQueued", { n }), "info");
+                            refreshTree();
+                          })
+                          .catch((e: unknown) => {
+                            showToast(t("cowork.ragActionFailed", { msg: humanizeRagError(String(e ?? ""), t) }), "error");
+                          });
+                      });
+                    }}
+                  >
+                    <RefreshCw size={12} />{t("cowork.ragRetryAllTitle")}
+                  </button>
+                )}
+                {autoRetry && (
+                  <button
+                    type="button"
+                    style={{
+                      fontSize: "11px", padding: "3px 8px", display: "inline-flex", alignItems: "center", gap: 4,
+                      border: "1px solid var(--border-soft)", borderRadius: 6, background: "transparent",
+                      color: autoRetry.active ? "var(--warn)" : "var(--fg-dim)", cursor: "pointer",
+                    }}
+                    title={autoRetry.enabled ? t("cowork.ragAutoRetryPause") : t("cowork.ragAutoRetryResume")}
+                    onClick={() => {
+                      const next = !autoRetry.enabled;
+                      (app as unknown as { RagAutoRetryToggle: (b: boolean) => Promise<void> })
+                        .RagAutoRetryToggle(next)
+                        .then(() => setAutoRetry((s) => (s ? { ...s, enabled: next, active: next && s.active } : s)))
+                        .catch(() => {});
+                    }}
+                  >
+                    <Repeat size={12} />
+                    {autoRetry.enabled
+                      ? (autoRetry.active ? t("cowork.ragAutoRetryBadgeActive") : t("cowork.ragAutoRetryBadge"))
+                      : t("cowork.ragAutoRetryResume")}
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* 当处于搜索过滤下，若未命中任何项则给出优雅空状态 */}
@@ -1495,19 +1716,56 @@ function RagDock({
                         node={node}
                         depth={0}
                         onStartExtract={(n) => {
-                          if (n.path) {
+                          if (!n.path) return;
+                          const retryable = (n.status === "error" || n.status === "partial") && !!n.jobId;
+                          if (!retryable) {
                             (app as unknown as { RagStartExtract: (c: string, t: string, m: string) => Promise<void> })
                               .RagStartExtract(n.collection || activeCollection, n.path, "incremental")
                               .then(() => refreshTree())
-                              .catch(() => refreshTree());
+                              .catch((e: unknown) => {
+                                refreshTree();
+                                showToast(t("cowork.ragActionFailed", { msg: humanizeRagError(String(e ?? ""), t) }), "error");
+                              });
+                            return;
                           }
+                          // Cheap retry: preview the cost, confirm, re-run ONLY
+                          // the failed chunks (successful chunks are kept).
+                          (app as unknown as { RagRetryEstimate: (j: string) => Promise<RagRetryEstimateView> })
+                            .RagRetryEstimate(n.jobId)
+                            .then((est) => {
+                              const timeHint = est.estSeconds > 0
+                                ? t("cowork.ragRetryTimeHint", { time: fmtEstTime(est.estSeconds) })
+                                : "";
+                              return confirm({
+                                title: t("cowork.ragRetryTitle"),
+                                message: t("cowork.ragRetryConfirm", {
+                                  n: est.failedChunks, calls: est.estCalls, time: timeHint,
+                                }),
+                              }).then((ok) => (ok ? est : null));
+                            })
+                            .then((est) => {
+                              if (!est) return;
+                              return (app as unknown as { RagRetryFailedChunks: (j: string) => Promise<number> })
+                                .RagRetryFailedChunks(est.jobId)
+                                .then((nQueued) => {
+                                  showToast(t("cowork.ragRetryQueued", { n: nQueued }), "info");
+                                  refreshTree();
+                                });
+                            })
+                            .catch((e: unknown) => {
+                              refreshTree();
+                              showToast(t("cowork.ragActionFailed", { msg: humanizeRagError(String(e ?? ""), t) }), "error");
+                            });
                         }}
                         onCancel={(n) => {
                           if (n.jobId) {
                             (app as unknown as { RagCancelExtract: (j: string) => Promise<void> })
                               .RagCancelExtract(n.jobId)
                               .then(() => refreshTree())
-                              .catch(() => refreshTree());
+                              .catch((e: unknown) => {
+                                refreshTree();
+                                showToast(t("cowork.ragActionFailed", { msg: humanizeRagError(String(e ?? ""), t) }), "error");
+                              });
                           }
                         }}
                         onRemove={(n) => {

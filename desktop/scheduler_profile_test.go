@@ -20,8 +20,8 @@ func TestScheduledTargetTabMatchesProfile(t *testing.T) {
 
 	// Active tab of the task's profile → used directly.
 	a := &App{tabs: map[string]*WorkspaceTab{
-		"dev1":  mkTab("dev1", "dev", true),
-		"ndv1":  mkTab("ndv1", "netdev", true),
+		"dev1": mkTab("dev1", "dev", true),
+		"ndv1": mkTab("ndv1", "netdev", true),
 	}, activeTabID: "ndv1"}
 	if got := scheduledTargetTabLocked(a, "netdev"); got == nil || got.ID != "ndv1" {
 		t.Fatalf("netdev task with active netdev tab: got %v", got)

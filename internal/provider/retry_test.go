@@ -79,14 +79,14 @@ func TestBackoffDelay(t *testing.T) {
 	if d := backoffDelay(1, 0); d < 500*time.Millisecond || d >= 750*time.Millisecond {
 		t.Errorf("attempt 1 base delay = %v, want [500ms,750ms)", d)
 	}
-	if d := backoffDelay(20, 0); d > maxBackoff+250*time.Millisecond {
+	if d := backoffDelay(20, 0); d > maxBackoffCap()+250*time.Millisecond {
 		t.Errorf("delay %v exceeds cap+jitter", d)
 	}
 	if d := backoffDelay(5, 3*time.Second); d != 3*time.Second {
 		t.Errorf("Retry-After should win: %v", d)
 	}
-	if d := backoffDelay(1, time.Hour); d != maxBackoff {
-		t.Errorf("Retry-After should be capped to %v, got %v", maxBackoff, d)
+	if d := backoffDelay(1, time.Hour); d != maxBackoffCap() {
+		t.Errorf("Retry-After should be capped to %v, got %v", maxBackoffCap(), d)
 	}
 }
 
@@ -171,7 +171,35 @@ func TestSendWithRetryRecoversAndNotifies(t *testing.T) {
 	if resp.StatusCode != 200 || calls != 2 {
 		t.Fatalf("status=%d calls=%d, want 200 after 2 calls", resp.StatusCode, calls)
 	}
-	if len(infos) != 1 || infos[0].Attempt != 1 || infos[0].Max != MaxRetries {
-		t.Fatalf("retry notify = %#v, want one Attempt 1/%d", infos, MaxRetries)
+	if len(infos) != 1 || infos[0].Attempt != 1 || infos[0].Max != maxRetries() {
+		t.Fatalf("retry notify = %#v, want one Attempt 1/%d", infos, maxRetries())
+	}
+}
+
+// P1-A3: the retry policy is configurable package-wide; "always" lifts the
+// attempt cap for unattended runs.
+func TestRetryPolicyConfigurable(t *testing.T) {
+	defer SetRetryPolicy(RetryPolicy{}) // restore defaults
+
+	SetRetryPolicy(RetryPolicy{MaxRetries: 2, MaxBackoff: time.Second})
+	if got := maxRetries(); got != 2 {
+		t.Errorf("maxRetries() = %d, want 2", got)
+	}
+	if got := maxBackoffCap(); got != time.Second {
+		t.Errorf("maxBackoffCap() = %v, want 1s", got)
+	}
+
+	SetRetryPolicy(RetryPolicy{Mode: "always"})
+	if got := maxRetries(); got < 1000 {
+		t.Errorf("always mode should lift the cap, got %d", got)
+	}
+
+	// Zero value restores defaults.
+	SetRetryPolicy(RetryPolicy{})
+	if got := maxRetries(); got != DefaultMaxRetries {
+		t.Errorf("zero policy maxRetries() = %d, want %d", got, DefaultMaxRetries)
+	}
+	if got := maxBackoffCap(); got != defaultMaxBackoff {
+		t.Errorf("zero policy maxBackoffCap() = %v, want %v", got, defaultMaxBackoff)
 	}
 }

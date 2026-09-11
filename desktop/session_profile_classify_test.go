@@ -11,10 +11,10 @@ import (
 // patterns).
 func TestClassifySessionProfile(t *testing.T) {
 	named := map[string]string{
-		`C:\u\sessions\cowork`: "cowork",
-		`C:\u\sessions\netdev`: "netdev",
-		`C:\c\projects\myproj\cowork\sessions`:  "cowork",
-		`C:\c\projects\cowork\sessions`:         "", // unprofiled project dir — not a partition
+		`C:\u\sessions\cowork`:                 "cowork",
+		`C:\u\sessions\netdev`:                 "netdev",
+		`C:\c\projects\myproj\cowork\sessions`: "cowork",
+		`C:\c\projects\cowork\sessions`:        "", // unprofiled project dir — not a partition
 	}
 
 	cases := []struct {

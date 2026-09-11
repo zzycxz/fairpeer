@@ -1,10 +1,10 @@
 package agent
 
 import (
-	"github.com/zzycxz/fairpeer/internal/diff"
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/zzycxz/fairpeer/internal/diff"
 	"reflect"
 	"strings"
 	"sync/atomic"

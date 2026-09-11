@@ -716,7 +716,7 @@ func mechanicalFoldDigest(n int, archive string) string {
 	if archive != "" {
 		where = " (archived to " + archive + ")."
 	}
-	return fmt.Sprintf("%d earlier message(s) were folded here to free context, but the automatic summary was unavailable%s Ask the user if you need details from before this point.", n, where)
+	return fmt.Sprintf("%d earlier message(s) were folded here to free context, but the automatic summary was unavailable%s Any oversized verbatim input (e.g. a large pasted document) is in that archive and no longer in context — say so explicitly rather than guessing at its contents. Ask the user if you need details from before this point.", n, where)
 }
 
 // renderTranscript flattens messages into a readable transcript for summarization.

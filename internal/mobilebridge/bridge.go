@@ -18,6 +18,13 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
+// seHook 允许测试定制 PeerConnection 的 SettingEngine（loopback_test.go 注入
+// "只绑 127.0.0.1" 的 ICE 接口过滤）：pion 默认在每块网卡上收集 host
+// candidate，Windows 防火墙对非回环监听弹授权窗，而 go test 每次编出的临时
+// exe 路径都不同——不限制的话每跑一次测试弹一次窗。生产路径 hook 恒为 nil，
+// 行为不变。
+var seHook func(*webrtc.SettingEngine)
+
 // Bridge is the desktop-side mobilebridge entry object: it owns S's identity,
 // the Pairing state machine, the SignalClient long-link to K, and the live
 // Conn map. It implements SignalHandler (dispatching K messages) and exposes
@@ -439,6 +446,9 @@ func (b *Bridge) handleOffer(msg SignalMsg, from *SignalClient) {
 			return
 		}
 		se := webrtc.SettingEngine{}
+		if seHook != nil {
+			seHook(&se)
+		}
 		se.SetICEUDPMux(ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: uc}))
 		pc, pcErr := webrtc.NewAPI(webrtc.WithSettingEngine(se)).NewPeerConnection(pcCfg)
 		if pcErr != nil {
@@ -454,9 +464,13 @@ func (b *Bridge) handleOffer(msg SignalMsg, from *SignalClient) {
 		b.attachPC(msg, conn, pc, from)
 		return
 	}
-	pc, err := webrtc.NewPeerConnection(pcCfg)
-	if err != nil {
-		b.audit.Error("newpc", msg.From, err)
+	se := webrtc.SettingEngine{}
+	if seHook != nil {
+		seHook(&se)
+	}
+	pc, pcErr := webrtc.NewAPI(webrtc.WithSettingEngine(se)).NewPeerConnection(pcCfg)
+	if pcErr != nil {
+		b.audit.Error("newpc", msg.From, pcErr)
 		conn.close()
 		return
 	}

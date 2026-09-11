@@ -11,7 +11,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-archs=("${@:-amd64 arm64}")
+# Default to amd64+arm64 — but spell the default out explicitly: `${@:-amd64 arm64}`
+# would substitute ONE word ("amd64 arm64") and break the loop into a single
+# unsupported-GOARCH go build.
+if [ $# -gt 0 ]; then archs=("$@"); else archs=(amd64 arm64); fi
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) cache="${LOCALAPPDATA}\\fairpeer\\hosts" ;;
   Darwin) cache="$HOME/Library/Caches/fairpeer/hosts" ;;

@@ -108,7 +108,7 @@ export function PreferencePanel({
   const addPreset = () => {
     const item: ProfilePreset = {
       id: newPresetId(),
-      name: t("preference.newName") || "新偏好",
+      name: t("preference.newName"),
       content: "",
       builtin: false,
     };
@@ -184,10 +184,10 @@ export function PreferencePanel({
   }, [dirty, onClose]);
 
   const defaultTitle = mode === "cowork"
-    ? (t("cowork.preference") || "办公偏好")
+    ? t("cowork.preference")
     : mode === "netdev"
-      ? (t("ndv.preference") || "运维偏好")
-      : (t("preference.title") || "编码偏好");
+      ? t("ndv.preference")
+      : t("preference.title");
 
   if (loading) {
     return (
@@ -223,7 +223,7 @@ export function PreferencePanel({
                 {t("common.save")}
               </button>
               {onClose && (
-                <button className="btn btn--icon" onClick={requestClose} type="button" aria-label={t("common.close") || "关闭"}>
+                <button className="btn btn--icon" onClick={requestClose} type="button" aria-label={t("common.close")}>
                   <X size={16} />
                 </button>
               )}

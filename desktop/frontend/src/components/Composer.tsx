@@ -332,6 +332,8 @@ export function Composer({
   collaborationMode,
   toolApprovalMode,
   goal,
+  goalTurns,
+  goalMaxTurns,
   cwd,
   modelLabel,
   tabId,
@@ -378,6 +380,9 @@ export function Composer({
   collaborationMode: CollaborationMode;
   toolApprovalMode: ToolApprovalMode;
   goal?: string;
+  // Auto-advance budget from Meta (P1-F2/X11); 0/absent hides the counter.
+  goalTurns?: number;
+  goalMaxTurns?: number;
   cwd?: string;
   modelLabel: string;
   tabId?: string;
@@ -898,6 +903,10 @@ export function Composer({
   const planModeOn = collaborationMode === "plan";
   const activeGoal = (goal ?? "").trim();
   const goalModeOn = collaborationMode === "goal";
+  // "第 N/M 轮" — only while a goal is actually running (budget values are
+  // meaningful then); hidden for remote tabs that don't sync the counters.
+  const goalBudgetLabel =
+    goalModeOn && goalTurns && goalMaxTurns ? `${goalTurns}/${goalMaxTurns}` : "";
 
   // Poll whether a voice model is configured (cheap backend read) so the mic
   // button only renders when voice input is actually available — keeps the
@@ -1718,6 +1727,12 @@ export function Composer({
       requestAnimationFrame(() => taRef.current?.focus());
     });
   };
+  // Access-menu twin of choosePlanMode: the switcher closes its own popover, so
+  // this only flips the CollaborationMode axis and refocuses the textarea.
+  const togglePlanFromAccessMenu = () => {
+    onSetCollaborationMode(planModeOn ? "normal" : "plan");
+    requestAnimationFrame(() => taRef.current?.focus());
+  };
   const chooseGoalMode = () => {
     if (goalModeOn) {
       closeIntentMenu(() => {
@@ -1874,7 +1889,7 @@ export function Composer({
                 </div>
                 {filteredPastChats.length === 0 ? (
                   <div className="slashmenu__item slashmenu__item--empty">
-                    <span className="slashmenu__name">没有匹配的历史会话</span>
+                    <span className="slashmenu__name">{t("composer.historyNoMatch")}</span>
                   </div>
                 ) : (
                   filteredPastChats.map((session, i) => {
@@ -1930,7 +1945,7 @@ export function Composer({
                 setActive(0);
               }}
             >
-              <span className="slashmenu__name">← 返回文件列表</span>
+              <span className="slashmenu__name">{t("composer.backToFileList")}</span>
             </button>
           </div>
         ) : (
@@ -2309,13 +2324,23 @@ export function Composer({
                     <span className="composer-mode-chip__icon composer-mode-chip__icon--dismiss" aria-hidden="true">
                       <X size={11} />
                     </span>
-                    <span className="composer-mode-chip__label">{t("composer.modeGoal")}</span>
+                    <span className="composer-mode-chip__label">
+                      {t("composer.modeGoal")}
+                      {goalBudgetLabel ? ` · ${goalBudgetLabel}` : ""}
+                    </span>
                   </button>
                 </Tooltip>
               )}
             </div>
             <div className="composer-meta__control composer-meta__control--approval">
-              <ApprovalModeSwitcher mode={toolApprovalMode} disabled={disabled} onPick={chooseApprovalMode} />
+              <ApprovalModeSwitcher
+                mode={toolApprovalMode}
+                disabled={disabled}
+                onPick={chooseApprovalMode}
+                planModeOn={planModeOn}
+                planDisabled={disabled || running}
+                onTogglePlanMode={togglePlanFromAccessMenu}
+              />
             </div>
             <div className="composer-meta__control composer-meta__control--model">
               <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />

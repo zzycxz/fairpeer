@@ -39,9 +39,9 @@ type BriefingFinding struct {
 
 // Briefing is the whole document.
 type Briefing struct {
-	GeneratedAt string           `json:"generated_at"`
-	Kind        string           `json:"kind"` // inspection | daily | weekly
-	Network     string           `json:"network,omitempty"`
+	GeneratedAt string            `json:"generated_at"`
+	Kind        string            `json:"kind"` // inspection | daily | weekly
+	Network     string            `json:"network,omitempty"`
 	Sections    []BriefingSection `json:"sections"`
 }
 
@@ -149,9 +149,9 @@ func WriteBriefing(b *Briefing) (string, error) {
 	}
 	stamp := time.Now().Format("20060102-150405")
 	for name, data := range map[string][]byte{
-		fmt.Sprintf("latest-%s.json", b.Kind): jdata,
+		fmt.Sprintf("latest-%s.json", b.Kind):    jdata,
 		fmt.Sprintf("%s-%s.json", b.Kind, stamp): jdata,
-		fmt.Sprintf("latest-%s.md", b.Kind):       []byte(b.Markdown()),
+		fmt.Sprintf("latest-%s.md", b.Kind):      []byte(b.Markdown()),
 	} {
 		if err := fileutil.AtomicWriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
 			return "", err

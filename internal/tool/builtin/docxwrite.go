@@ -86,6 +86,12 @@ func writeDOCX(in DocInput) error {
 	if err := os.MkdirAll(filepath.Dir(in.Path), 0o755); err != nil {
 		return err
 	}
+	// Probe BEFORE generation: if Word holds the target open, the final rename
+	// fails with a raw "Access is denied" after all the work. Both the append
+	// and full-write paths write to in.Path, so one check covers both.
+	if err := rejectLockedTarget(in.Path); err != nil {
+		return err
+	}
 
 	// Collect & validate images up-front (before any file is created). Done
 	// first because both append and full-write paths need the list, and a

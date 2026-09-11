@@ -57,7 +57,7 @@ func profileHomeRoot(profile string) string {
 	if key == "" {
 		key = config.ProfileDev
 	}
-	return filepath.Join(desktopConfigDir(), "home-" + key)
+	return filepath.Join(desktopConfigDir(), "home-"+key)
 }
 
 // ensureProfileHomeRoot mkdirs and returns the profile's home root.

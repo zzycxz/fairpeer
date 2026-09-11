@@ -9,14 +9,14 @@ func TestParseSize(t *testing.T) {
 		in   any
 		want int
 	}{
-		{24, 24},              // int = half-points (legacy back-compat)
-		{"12pt", 24},          // points → half-points
-		{"12", 24},            // bare number = points (NOT half-points)
-		{"0.5cm", 28},         // 0.5cm ≈ 14.17pt ≈ 28.3 → 28
-		{"1in", 144},          // 72pt = 144 half-points
-		{"", 0},               // empty
+		{24, 24},      // int = half-points (legacy back-compat)
+		{"12pt", 24},  // points → half-points
+		{"12", 24},    // bare number = points (NOT half-points)
+		{"0.5cm", 28}, // 0.5cm ≈ 14.17pt ≈ 28.3 → 28
+		{"1in", 144},  // 72pt = 144 half-points
+		{"", 0},       // empty
 		{nil, 0},
-		{12.0, 12},            // float64 like int
+		{12.0, 12}, // float64 like int
 	}
 	for _, c := range cases {
 		got, err := parseSize(c.in)
@@ -44,10 +44,10 @@ func TestParseSpacing(t *testing.T) {
 		in   string
 		want int
 	}{
-		{"12pt", 240},   // 12 × 20
-		{"12", 240},     // bare = points
+		{"12pt", 240}, // 12 × 20
+		{"12", 240},   // bare = points
 		{"1in", 1440},
-		{"0.5cm", 283},  // 0.5 × 566.9 ≈ 283
+		{"0.5cm", 283}, // 0.5 × 566.9 ≈ 283
 	}
 	for _, c := range cases {
 		got, err := parseSpacing(c.in)

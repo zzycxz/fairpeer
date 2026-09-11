@@ -26,6 +26,13 @@ func (a *App) StartScreenshotHotkey() {
 	if err != nil || !cfg.Cowork.ScreenshotEnabled {
 		return
 	}
+	// Validate the hotkey up front (like the Windows/Linux paths) so an invalid
+	// config is reported once here and every in-loop osascript error genuinely
+	// means an osascript failure (permissions), not a parse error.
+	if _, _, err := parseHotkey(cfg.Cowork.ScreenshotHotkey); err != nil {
+		slog.Warn("screenshot: invalid hotkey config", "hotkey", cfg.Cowork.ScreenshotHotkey, "err", err)
+		return
+	}
 	hk := &hotkeyManager{app: a, stopCh: make(chan struct{}), hotkey: cfg.Cowork.ScreenshotHotkey}
 	a.mu.Lock()
 	a.hotkeyMgr = hk
@@ -45,9 +52,18 @@ func (a *App) StopScreenshotHotkey() {
 }
 
 func (h *hotkeyManager) loop() {
-	ticker := time.NewTicker(100 * time.Millisecond)
+	// 250ms instead of the old 100ms: osascript forks a process per tick, and
+	// 10 forks/sec was a needless tax on battery/CPU for a key-state poll.
+	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	lastTrigger := time.Time{}
+	// Edge detection: macOS can only see modifier chords, so without a
+	// wasPressed gate a held chord re-fired the VLM solve on every poll.
+	wasPressed := false
+	// permissionWarned surfaces the (very common) "no Automation permission"
+	// case exactly once — osascript fails silently without it, and users with
+	// a denied prompt never learn why the hotkey does nothing.
+	var permissionWarned sync.Once
 	for {
 		select {
 		case <-h.stopCh:
@@ -58,14 +74,18 @@ func (h *hotkeyManager) loop() {
 			}
 			pressed, err := checkKeysMacOS(h.hotkey)
 			if err != nil {
-				slog.Debug("screenshot: keycheck error", "err", err)
+				permissionWarned.Do(func() {
+					slog.Warn("screenshot: cannot poll keyboard state via osascript; the hotkey will not work — grant fairpeer Automation permission for System Events (and Accessibility if asked) in System Settings → Privacy & Security, then restart the app", "err", err)
+				})
+				wasPressed = false
 				continue
 			}
-			if pressed {
+			if pressed && !wasPressed {
 				lastTrigger = time.Now()
 				slog.Warn("screenshot: HOTKEY DETECTED (macOS)")
 				h.app.triggerScreenshotSolve()
 			}
+			wasPressed = pressed
 		}
 	}
 }
@@ -107,7 +127,10 @@ func checkKeysMacOS(hotkey string) (bool, error) {
 	cmd := exec.Command("osascript", "-e", script)
 	out, err := cmd.Output()
 	if err != nil {
-		return false, nil // osascript may fail if not authorized
+		// Propagate so the polling loop can warn the user once: osascript
+		// fails exactly when the Automation (System Events) permission was
+		// denied or never granted, which otherwise looks like a silent no-op.
+		return false, fmt.Errorf("osascript key-state query failed (Automation permission for System Events?): %w", err)
 	}
 
 	result := strings.TrimSpace(string(out))

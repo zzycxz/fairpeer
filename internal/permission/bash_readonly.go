@@ -45,8 +45,11 @@ var readOnlyBashPrefixes = map[string]map[string]bool{
 		"ls": true, "list": true, "view": true, "info": true,
 		"outdated": true, "audit": true,
 	},
+	// cargo check/doc are deliberately absent: both compile dependencies, and
+	// compilation executes dependency build.rs scripts — arbitrary code, not a
+	// read. cargo search/version stay read-only.
 	"cargo": {
-		"check": true, "doc": true, "search": true,
+		"search": true, "version": true,
 	},
 	"docker": {
 		"ps": true, "images": true, "inspect": true, "logs": true,
@@ -91,7 +94,10 @@ func isReadOnlyBashSubject(subject string) bool {
 }
 
 func containsShellSyntax(cmd string) bool {
-	return strings.ContainsAny(cmd, ";|&<>\n`") || strings.Contains(cmd, "$(")
+	// \r counts: strings.Fields treats it as whitespace (so the read-only
+	// verb is extracted cleanly) while PowerShell treats CR as a statement
+	// separator — "ls\rRemove-Item …" would otherwise pass as read-only.
+	return strings.ContainsAny(cmd, ";|&<>\n`\r") || strings.Contains(cmd, "$(")
 }
 
 func hasUnsafeReadOnlyArgs(base string, args []string) bool {
@@ -122,6 +128,12 @@ func hasUnsafeReadOnlyArgs(base string, args []string) bool {
 				consumesOperand = true
 				continue
 			}
+			if arg == "-S" || arg == "--split-string" {
+				return true // consumes a COMMAND operand (NEW-15)
+			}
+			if strings.HasPrefix(arg, "-S") || strings.HasPrefix(arg, "--split-string=") {
+				return true // glued form: -S'cmd' / --split-string=cmd execute
+			}
 			if strings.HasPrefix(arg, "-") {
 				continue
 			}
@@ -130,6 +142,9 @@ func hasUnsafeReadOnlyArgs(base string, args []string) bool {
 			}
 			return true
 		}
+	case "rg":
+		// --pre runs an arbitrary preprocessor command over every match file.
+		return hasArgWithPrefix(args, "--pre")
 	case "hostname":
 		// `hostname <name>` sets the system hostname (root). Query flags
 		// (-f/-i/-d/-s/-a) are read-only (PERM-3); a non-flag operand sets,
@@ -184,6 +199,28 @@ func hasUnsafePrefixArgs(base, subcmd string, args []string) bool {
 		if subcmd == "env" {
 			return hasAnyArg(args, "-w", "-u")
 		}
+	case "npm":
+		if subcmd == "audit" {
+			// `npm audit fix` installs packages and runs their lifecycle
+			// scripts — code execution, not a read. Plain `npm audit` (with
+			// flags like --json/--omit=dev) only reports; fix, --fix and
+			// fix-force are all the same operation (NEW-14: the word-form
+			// check alone let `npm audit --fix` through).
+			return hasAnyArg(args, "fix") || hasArgWithPrefix(args, "fix") || hasArgWithPrefix(args, "--fix")
+		}
+	case "docker":
+		// stats streams forever without --no-stream; logs -f follows — both
+		// hang the turn while whitelisted (NEW-15).
+		if subcmd == "stats" {
+			return !hasAnyArg(args, "--no-stream")
+		}
+		if subcmd == "logs" {
+			return hasAnyArg(args, "-f", "--follow")
+		}
+	case "kubectl":
+		if subcmd == "get" || subcmd == "logs" || subcmd == "top" {
+			return hasAnyArg(args, "-w", "--watch", "--watch-only", "-f", "--follow")
+		}
 	}
 	return false
 }
@@ -230,13 +267,30 @@ var dangerousBashPatterns = []struct {
 	{"dd if=*", "raw device write"},
 	{"fdisk*", "partition table"},
 	{"> /dev/*", "device overwrite"},
+	// PowerShell / cmd equivalents (Windows hosts without bash): without
+	// these, BashDangerWarning stays empty AND BashCommandPrefix would create
+	// destructive prefix grants that bash-land refuses.
+	{"Remove-Item *-Recurse*", "recursive delete"},
+	{"rm -Recurse*", "recursive delete"},
+	{"rd /s*", "recursive delete"},
+	{"del /q /s*", "recursive delete"},
+	{"del /s /q*", "recursive delete"},
+	{"format*", "filesystem format"},
+	{"Format-Volume*", "filesystem format"},
+	{"Set-ExecutionPolicy*", "execution policy change"},
+	{"iex *", "remote script execution"},
+	{"Invoke-Expression*", "remote script execution"},
+	{"reg add*", "registry write"},
+	{"reg delete*", "registry delete"},
 }
 
 // BashDangerWarning returns a short label if subject matches a known
 // dangerous pattern, or "" when the command looks safe. This is a visual
 // hint only — the Policy rules are the authority.
 func BashDangerWarning(subject string) string {
-	s := strings.TrimSpace(subject)
+	// PowerShell/cmd are case-insensitive ("RD /Q /S" == "rd /q /s"); fold
+	// both sides so the danger warning and the prefix-grant refusal fire.
+	s := strings.ToLower(strings.TrimSpace(subject))
 	for _, d := range dangerousBashPatterns {
 		if matchGlob(d.pattern, s) {
 			return d.label

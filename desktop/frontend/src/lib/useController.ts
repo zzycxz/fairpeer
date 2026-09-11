@@ -867,11 +867,18 @@ export function applyEvent(s: State, e: WireEvent): State {
       // server-side fileDiff on dispatches since the turn started; subagent
       // edits nest in (their cards carry parentId but their diffs count).
       const summaryCard = e.err ? null : turnSummaryCard(finalized, s.turnItemStart, s.seq);
+      // 用户停止（X8a）：cancelled 且无 err 时，结尾补一行安静的 info 标记，
+      // 替代之前的"什么都没有"——与 e.err 的红色 warn 通知不同，这里刻意
+      // 低调（partial 编辑的总结卡仍然照常生成）。
+      const stoppedByUser: Item | null =
+        e.cancelled && !e.err ? { kind: "notice", id: `x${s.seq}`, level: "info", text: t("common.stoppedByUser") } : null;
       const items: Item[] = e.err
         ? [...finalized, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err, retryable: true }]
-        : summaryCard
-          ? [...finalized, summaryCard]
-          : finalized;
+        : stoppedByUser
+          ? [...(summaryCard ? [...finalized, summaryCard] : finalized), stoppedByUser]
+          : summaryCard
+            ? [...finalized, summaryCard]
+            : finalized;
       return { ...s, items, live: undefined, running: false, turnActive: false, paused: false, currentAssistant: undefined, approval: undefined, ask: undefined, seq: s.seq + 1 };
     }
     case "expert_collab": {
@@ -1131,6 +1138,17 @@ export function useController(getProfile?: () => string, onNotice?: (msg: string
   activeTabIdRef.current = activeTabId;
   stateRef.current = activeState;
 
+  // Cross-tab prompt visibility (X8b): every tab — not just the active one —
+  // currently blocked on an approval or ask prompt. Computed from the per-tab
+  // store on each render; dispatchTo bumps the version on every state change,
+  // so a background tab's approval_request arriving over the shared event
+  // channel re-renders this list too. The ApprovalModal only renders in the
+  // owning tab, so this is how other surfaces (chrome badge, sidebar rows)
+  // learn a tab needs the user's decision.
+  const approvalPendingTabs = Array.from(statesRef.current.entries())
+    .filter(([, tab]) => Boolean(tab.approval || tab.ask))
+    .map(([id]) => id);
+
   // Dispatch to a specific tab's state. If the tab doesn't have state yet, it's
   // created. Bumps the version so React re-renders when it becomes active.
   const dispatchTo = useCallback((tabId: string, action: Action) => {
@@ -1145,6 +1163,28 @@ export function useController(getProfile?: () => string, onNotice?: (msg: string
 
   const checkpointRefreshSeq = useRef(new Map<string, number>());
   const sessionLoadSeq = useRef(new Map<string, number>());
+  // X9b: tabs whose from-blank session load (first open, or a forced reset
+  // rebuild) is in flight, keyed by the sessionLoadSeq that marked them. The
+  // transcript renders a skeleton instead of flashing the Welcome empty state
+  // while these run. Reconcile loads of an already-populated tab never mark.
+  // Seq-keying keeps clears correct across races: a superseded load only drops
+  // its own mark, and a newer unmarked reconcile can retire a stale mark.
+  const [initialLoadMarks, setInitialLoadMarks] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const markInitialLoad = useCallback((tabId: string, seq: number, inFlight: boolean) => {
+    setInitialLoadMarks((prev) => {
+      if (inFlight) {
+        if ((prev.get(tabId) ?? 0) >= seq) return prev;
+        const next = new Map(prev);
+        next.set(tabId, seq);
+        return next;
+      }
+      const marked = prev.get(tabId);
+      if (marked === undefined || marked > seq) return prev;
+      const next = new Map(prev);
+      next.delete(tabId);
+      return next;
+    });
+  }, []);
   const bumpSessionLoadSeq = useCallback((tabId: string): number => {
     const seq = (sessionLoadSeq.current.get(tabId) ?? 0) + 1;
     sessionLoadSeq.current.set(tabId, seq);
@@ -1167,6 +1207,11 @@ export function useController(getProfile?: () => string, onNotice?: (msg: string
 
   const loadSessionDataForTab = useCallback(async (tabId: string, reset = false) => {
     const seq = bumpSessionLoadSeq(tabId);
+    // From-blank loads (first open, or reset=true rebuilds) start with an empty
+    // transcript — flag them so the UI shows a skeleton, not a Welcome flash.
+    // Reconciles (reset=false on a tab that already has meta) keep their content
+    // and are never flagged.
+    if (reset || !statesRef.current.get(tabId)?.meta) markInitialLoad(tabId, seq, true);
     const safe = <T,>(p: Promise<T>): Promise<T | undefined> => p.catch(() => undefined);
     const [meta, context, effort, jobs, checkpoints, history, present] = await Promise.all([
       safe(app.MetaForTab(tabId)),
@@ -1177,7 +1222,12 @@ export function useController(getProfile?: () => string, onNotice?: (msg: string
       safe(app.HistoryForTab(tabId)),
       safe(app.PresentForTab(tabId)),
     ]);
-    if (!sessionLoadCurrent(tabId, seq)) return;
+    if (!sessionLoadCurrent(tabId, seq)) {
+      // Superseded by a newer load: retire our mark (no-op if the newer load
+      // re-marked with a higher seq — then that load owns the flag).
+      markInitialLoad(tabId, seq, false);
+      return;
+    }
     if (reset) dispatchTo(tabId, { type: "reset" });
     if (meta) dispatchTo(tabId, { type: "meta", meta });
     if (context) dispatchTo(tabId, { type: "context", context });
@@ -1194,7 +1244,8 @@ export function useController(getProfile?: () => string, onNotice?: (msg: string
     if (present && Array.isArray(present.records) && present.records.length) {
       dispatchTo(tabId, { type: "present", records: present.records });
     }
-  }, [bumpSessionLoadSeq, dispatchTo, sessionLoadCurrent]);
+    markInitialLoad(tabId, seq, false);
+  }, [bumpSessionLoadSeq, dispatchTo, sessionLoadCurrent, markInitialLoad]);
 
   const activeTabFromBackend = useCallback(async (): Promise<TabMeta | undefined> => {
     const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
@@ -1522,11 +1573,25 @@ export function useController(getProfile?: () => string, onNotice?: (msg: string
     void refreshCheckpoints(targetTabId);
   }, [activeTabId, dispatchTo, refreshCheckpoints, waitForTabReady]);
 
-  const previewSession = useCallback(async (path: string): Promise<HistoryMessage[]> => asArray<HistoryMessage>(await app.PreviewSession(path).catch(() => [])), []);
-  const deleteSession = useCallback((path: string) => app.DeleteSession(path).catch(() => {}), []);
-  const restoreSession = useCallback((path: string) => app.RestoreSession(path).catch(() => {}), []);
-  const purgeTrashedSession = useCallback((path: string) => app.PurgeTrashedSession(path).catch(() => {}), []);
-  const renameSession = useCallback((path: string, title: string) => app.RenameSession(path, title).catch(() => {}), []);
+  // G2-5（同上方 resumeSession）：这些写操作失败时后端有真实原因（删除正在
+  // 使用的会话、跨目录路径校验、恢复时重名冲突……），静默吞掉会让用户两步
+  // 确认后只见菜单关闭、行还在，没有任何提示。统一经 onNotice 直达用户；
+  // 返回值保持不变（预览失败退化为空列表），调用方无需改动。
+  const notifySessionError = useCallback((err: unknown) => {
+    onNotice?.(errorMessage(err));
+  }, [onNotice]);
+  const previewSession = useCallback(
+    async (path: string): Promise<HistoryMessage[]> =>
+      asArray<HistoryMessage>(await app.PreviewSession(path).catch((err: unknown) => {
+        notifySessionError(err);
+        return [] as HistoryMessage[];
+      })),
+    [notifySessionError],
+  );
+  const deleteSession = useCallback((path: string) => app.DeleteSession(path).catch((err: unknown) => { notifySessionError(err); }), [notifySessionError]);
+  const restoreSession = useCallback((path: string) => app.RestoreSession(path).catch((err: unknown) => { notifySessionError(err); }), [notifySessionError]);
+  const purgeTrashedSession = useCallback((path: string) => app.PurgeTrashedSession(path).catch((err: unknown) => { notifySessionError(err); }), [notifySessionError]);
+  const renameSession = useCallback((path: string, title: string) => app.RenameSession(path, title).catch((err: unknown) => { notifySessionError(err); }), [notifySessionError]);
 
   const refreshMeta = useCallback(async () => {
     if (!activeTabId) return;
@@ -1689,6 +1754,9 @@ export function useController(getProfile?: () => string, onNotice?: (msg: string
   return {
     state: activeState,
     activeTabId,
+    approvalPendingTabs,
+    // True while the active tab's from-blank session load is in flight (X9b).
+    initialLoading: activeTabId != null && initialLoadMarks.has(activeTabId),
     send, runShell, steer, notice, cancel, pauseToggle, approve, answerQuestion, setCollaborationMode, setToolApprovalMode, setGoal, clearGoal, setRagScope,
     newSession, clearSession, listSessions, listTrashedSessions, resumeSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     refreshMeta, pickWorkspace, switchWorkspace, rewind, deleteExpertCollab, setModel, setEffort,

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 
 import { app } from "../../lib/bridge";
+import { useT } from "../../lib/i18n";
 import type { DocPreviewView } from "../../lib/types";
 
 export interface DocPreviewProps {
@@ -14,11 +15,12 @@ export interface DocPreviewProps {
 }
 
 export function DocPreview({ collection, docPath, onBack }: DocPreviewProps) {
+  const t = useT();
   const [preview, setPreview] = useState<DocPreviewView | null>(null);
   const [loading, setLoading] = useState(false);
   // Track load failures separately from "not found" so the user sees a clear,
-  // retryable error instead of a misleading "文档未找到" when the backend is
-  // temporarily unavailable.
+  // retryable error instead of a misleading "not found" card when the backend
+  // is temporarily unavailable.
   const [error, setError] = useState<string | null>(null);
 
   const load = () => {
@@ -30,26 +32,26 @@ export function DocPreview({ collection, docPath, onBack }: DocPreviewProps) {
       setLoading(false);
     }).catch((e) => {
       setLoading(false);
-      setError(String(e || "加载失败"));
+      setError(String(e || t("cowork.ragLoadFailed")));
     });
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [collection, docPath]);
 
   if (loading) {
-    return <div className="rag-docpreview__loading">加载中...</div>;
+    return <div className="rag-docpreview__loading">{t("common.loading")}</div>;
   }
   if (error) {
     return (
       <div className="rag-docpreview__empty">
-        <div>加载失败</div>
+        <div>{t("cowork.ragLoadFailed")}</div>
         <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>{error}</div>
-        <button className="btn btn--sm" style={{ marginTop: 8 }} onClick={load}>重试</button>
+        <button className="btn btn--sm" style={{ marginTop: 8 }} onClick={load}>{t("common.retry")}</button>
       </div>
     );
   }
   if (!preview) {
-    return <div className="rag-docpreview__empty">文档未找到</div>;
+    return <div className="rag-docpreview__empty">{t("cowork.ragDocNotFound")}</div>;
   }
 
   return (

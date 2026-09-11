@@ -475,6 +475,31 @@ func hasPPTIntent(lowered string) bool {
 	return false
 }
 
+// brandPresetKeywords maps user-input keywords to a ppt-auto brand preset id.
+// When PPT intent co-occurs with a brand keyword, the gatekeeper appends a
+// model-facing [system] note so ppt-auto runs preflight with --preset <id> —
+// mechanically exact brand colors instead of recognition heuristics (which
+// misread image-driven brand templates; see ppt-template-vision docs).
+// Deliberately excludes bare "移动" (matches 移动硬盘/鼠标移动); 中国移动/中移/
+// 移动公司/CMCC are unambiguous. Keep in sync with the skill's
+// references/brand-presets/<id>.json keyword lists.
+var brandPresetKeywords = map[string][]string{
+	"china-mobile": {"中国移动", "中移", "移动公司", "cmcc"},
+}
+
+// matchBrandPreset returns the preset id whose keyword appears in the lowered
+// input, or "" when no brand matched.
+func matchBrandPreset(lowered string) string {
+	for preset, kws := range brandPresetKeywords {
+		for _, kw := range kws {
+			if strings.Contains(lowered, kw) {
+				return preset
+			}
+		}
+	}
+	return ""
+}
+
 // referenceAttachmentExts are attachment extensions that can be a visual reference
 // for PPT generation (images + PDF).
 var referenceAttachmentExts = map[string]bool{

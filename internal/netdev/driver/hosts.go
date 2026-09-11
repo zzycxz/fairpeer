@@ -128,23 +128,28 @@ func (windowsPowerShell) Errors() []*regexp.Regexp {
 var windowsTables = classTables{
 	dangerous: []string{
 		"shutdown", "restart-computer", "stop-computer", "format-volume", "format c",
-		"clear-disk", "initialize-disk", "remove-item -recurse", "bcdedit /set",
+		"clear-disk", "initialize-disk", "remove-item -recurse", "remove-item -force", "remove-item -r", "bcdedit /set",
 		"reg delete", "wevtutil cl",
 	},
 	write: []string{
-		"set-", "new-", "remove-", "stop-", "restart-", "start-", "disable-", "enable-",
+		// Bare cmdlet stems ("set", "remove", ...) rather than dash-stems
+		// ("set-"): prefixMatches requires a space/slash/dash boundary AFTER
+		// the prefix, so trailing-dash entries could never match
+		// "set-service" — the whole write tier was dead until this fix.
+		"set", "new", "remove", "stop", "restart", "start", "disable", "enable",
+		"clear", "reset", "write", "add", "export", "import",
 		"invoke-expression", "invoke-command", "netsh ", "sc config", "sc start", "sc stop",
-		"reg add", "schtasks /create", "schtasks /delete", "net user", "net localgroup",
-		"net stop", "net start", "route add", "route delete", "netsh interface",
+		"reg add", "reg delete", "schtasks /create", "schtasks /delete", "net user", "net localgroup",
+		"net stop", "net start", "route add", "route delete",
 		"set-service", "set-netipinterface", "move-item", "copy-item", "rename-item",
-		"clear-", "reset-", "write-", "out-file", "add-", "export-", "import-",
+		"out-file",
 	},
 	read: []string{
 		"get-", "get", "systeminfo", "ipconfig", "ping ", "ping", "tracert", "nslookup",
 		"netstat", "arp -a", "arp", "route print", "tasklist", "quser", "qwinsta",
 		"whoami", "hostname", "ver", "wmic cpu", "wmic memorychip", "wmic diskdrive",
 		"wmic netuse", "netsh interface show", "netsh advfirewall show", "netsh lan show",
-		"wevtutil qe", "typeperf", "driverquery", "vol ", "dir ", "tree /f",
+		"wevtutil qe", "wevtutil enum-logs", "typeperf", "driverquery", "vol ", "dir ", "tree /f",
 		"test-netconnection", "resolve-dnsname", "get-nettcpconnection", "get-help",
 	},
 }

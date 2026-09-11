@@ -44,14 +44,16 @@ func SkillNameKey(name string) string {
 type Config struct {
 	ConfigVersion int    `toml:"config_version"`
 	DefaultModel  string `toml:"default_model"`
-	Language      string `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $FAIRPEER_LANG
-	// UntrustedProjectNotices carries the G3 trust gate's load-time notices.
-	// Never decoded from or encoded to TOML.
-	UntrustedProjectNotices []string `toml:"-" json:"-"`
 	// ConfigWarnings carries load-time notices (unknown TOML keys from
-	// mergeFile). Never decoded from or encoded to TOML — populated only
-	// by the loader, surfaced by the CLI welcome banner and doctor.
+	// mergeFile). Never decoded from or encoded to TOML — populated only by
+	// the loader, surfaced by the CLI welcome banner and doctor.
 	ConfigWarnings []string `toml:"-" json:"-"`
+	Language       string   `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $FAIRPEER_LANG
+	// UntrustedProjectNotices carries the G3 trust gate's load-time notices:
+	// a project root whose [[plugins]]/.mcp.json were skipped because the root
+	// is not trusted. Never decoded from or encoded to TOML — populated only
+	// by the loader, surfaced by `fairpeer run` (stderr) and the trust command.
+	UntrustedProjectNotices []string `toml:"-" json:"-"`
 	// ReasoningLanguage steers ONLY the visible thinking/reasoning text language
 	// (auto|zh|en), independent of the final-answer language. Default "auto" leaves
 	// it to the provider. It is injected as a transient per-turn block, never into
@@ -81,6 +83,10 @@ type Config struct {
 	// path override. Empty means auto-detect; a non-empty path is tried first
 	// (and the user is guided to set it when no browser is found).
 	Cowork CoworkConfig `toml:"cowork"`
+	// Scheduler holds task-scheduler settings shared by every profile (the
+	// scheduler itself is a global service; agent-facing tools are
+	// profile-partitioned at the tool layer).
+	Scheduler SchedulerConfig `toml:"scheduler"`
 	// LLM holds the global request budget (rate limiting) applied to all
 	// providers. RPM=0 (the default) disables limiting for backward compat.
 	LLM LLMConfig `toml:"llm"`
@@ -157,6 +163,7 @@ type DesktopConfig struct {
 	CloseBehavior  string   `toml:"close_behavior"`  // quit|background; desktop window close behavior
 	DisplayMode    string   `toml:"display_mode"`    // standard|compact|minimal; transcript display mode
 	CheckUpdates   *bool    `toml:"check_updates"`   // startup update checks; nil keeps the default enabled
+	Autostart      *bool    `toml:"autostart"`       // launch at login; nil keeps the default disabled
 	Telemetry      *bool    `toml:"telemetry"`       // anonymous launch ping (install id + version + OS); nil keeps the default enabled
 	Metrics        *bool    `toml:"metrics"`         // opt-in aggregate agent metrics (anonymous signal/bucket counts; no content); nil = disabled
 	ProviderAccess []string `toml:"provider_access"` // desktop-only list of provider entries shown in Settings > Model > Access
@@ -294,6 +301,15 @@ func (c *Config) DesktopCheckUpdates() bool {
 	return *c.Desktop.CheckUpdates
 }
 
+// DesktopAutostart reports whether the desktop registers itself to launch at
+// login. Missing configs default to false — autostart is strictly opt-in.
+func (c *Config) DesktopAutostart() bool {
+	if c == nil || c.Desktop.Autostart == nil {
+		return false
+	}
+	return *c.Desktop.Autostart
+}
+
 // DesktopTelemetry reports whether the desktop sends the anonymous launch ping.
 // It carries no conversation, key, or file data — see desktop/README.md.
 func (c *Config) DesktopTelemetry() bool {
@@ -371,23 +387,37 @@ func (c CodegraphConfig) ResolvedTier() string {
 	return "background"
 }
 
-// DreamConfig controls the background self-evolution agents: Dream consolidates
-// session knowledge into project memory, Distill extracts repeated workflows
-// into reusable skills. Intervals are in days; a value <= 0 falls back to the
-// default so a partially-specified [dream] section still behaves sanely.
+// SchedulerConfig is the user-facing [scheduler] section for the task
+// scheduler. ConfirmAgentTasks gates the approval-card requirement for
+// agent-created AI-executing tasks (schedule_create/update/delete); plain
+// reminders (schedule_remind) never card. The field is a *bool so "unset"
+// (nil) means DEFAULT ON — an explicit false is required to opt out, keeping
+// the confirmation the safe default.
+type SchedulerConfig struct {
+	ConfirmAgentTasks *bool `toml:"confirm_agent_tasks"` // default true
+}
+
+// ConfirmAgentTasksOrDefault resolves the [scheduler] confirmation gate.
+func (c SchedulerConfig) ConfirmAgentTasksOrDefault() bool {
+	return c.ConfirmAgentTasks == nil || *c.ConfirmAgentTasks
+}
+
+// DreamConfig controls the background self-evolution agent: Dream consolidates
+// session knowledge into project memory. Intervals are in days; a value <= 0
+// falls back to the default so a partially-specified [dream] section still
+// behaves sanely.
 type DreamConfig struct {
-	Enabled         bool `toml:"enabled"`          // master switch; false disables both background agents
-	DreamInterval   int  `toml:"dream_interval"`   // days between automatic Dream runs; 0 = default 7
-	DistillInterval int  `toml:"distill_interval"` // days between automatic Distill runs; 0 = default 30
-	SkillColdDays   int  `toml:"skill_cold_days"`  // days a skill is unused before cold-retirement; 0 = default 90
-	IdleMinutes     int  `toml:"idle_minutes"`     // minutes of user inactivity before a Dream run may fire; 0 = default 10
+	Enabled       bool `toml:"enabled"`         // master switch; false disables the background agent
+	DreamInterval int  `toml:"dream_interval"`  // days between automatic Dream runs; 0 = default 7
+	SkillColdDays int  `toml:"skill_cold_days"` // days a skill is unused before [休眠] dormancy tagging; 0 = default 90
+	IdleMinutes   int  `toml:"idle_minutes"`    // minutes of user inactivity before a Dream run may fire; 0 = default 10
 }
 
 // DefaultDreamInterval is the Dream run cadence when [dream].dream_interval is unset.
 const DefaultDreamInterval = 7
 
-// DefaultSkillColdDays is the inactivity threshold for skill retirement when
-// [dream].skill_cold_days is unset: 90 days mirrors memory's ColdDays default.
+// DefaultSkillColdDays is the inactivity threshold for [休眠] dormancy tagging
+// when [dream].skill_cold_days is unset: 90 days mirrors memory's ColdDays default.
 const DefaultSkillColdDays = 90
 
 // DefaultIdleMinutes is how long the user must be inactive before an idle Dream
@@ -396,7 +426,7 @@ const DefaultSkillColdDays = 90
 // contention and matches the "consolidate when idle" intent.
 const DefaultIdleMinutes = 10
 
-// DefaultFastTaskModel is the model dream/distill/rag-extract run on. Empty
+// DefaultFastTaskModel is the model dream/rag-extract run on. Empty
 // means unconfigured — at runtime an empty agent.fast_task_model falls back to
 // the default model; this constant no longer hardcodes a vendor model. Phase 3
 // will resolve it from the configured provider's fast_model role.
@@ -422,9 +452,6 @@ func (d DreamConfig) SkillColdDaysEffective() int {
 	return DefaultSkillColdDays
 }
 
-// DefaultDistillInterval is the Distill run cadence when [dream].distill_interval is unset.
-const DefaultDistillInterval = 30
-
 // DreamIntervalDays returns the effective Dream cadence in days, applying the
 // default when the configured value is non-positive.
 func (d DreamConfig) DreamIntervalDays() int {
@@ -432,14 +459,6 @@ func (d DreamConfig) DreamIntervalDays() int {
 		return d.DreamInterval
 	}
 	return DefaultDreamInterval
-}
-
-// DistillIntervalDays returns the effective Distill cadence in days.
-func (d DreamConfig) DistillIntervalDays() int {
-	if d.DistillInterval > 0 {
-		return d.DistillInterval
-	}
-	return DefaultDistillInterval
 }
 
 // BotConfig 控制多渠道 IM bot 消息网关。
@@ -557,6 +576,16 @@ type CoworkConfig struct {
 	// Keep low to avoid tripping rate limits — extraction is a background task
 	// where throughput matters less than "no errors".
 	ExtractConcurrency int `toml:"extract_concurrency"`
+	// ExtractAutoRetry opts IN to idle-time automatic retry of failed chunks
+	// (spec R3): a background scanner re-queues errored/partial jobs' failed
+	// chunks while the app is running. DEFAULT FALSE — background work must be
+	// something the user explicitly signed up for, and it is always visible
+	// (tray/panel indicator) and pausable (one click).
+	ExtractAutoRetry bool `toml:"extract_auto_retry"`
+	// ExtractAutoRetryMaxRounds caps how many auto-retry rounds a job gets
+	// before the engine gives up on it and reports (default 2; 0 → 2). The
+	// count is persisted per job, so restarts don't reset it.
+	ExtractAutoRetryMaxRounds int `toml:"extract_auto_retry_max_rounds"`
 
 	// ScreenshotEnabled turns on the global-hotkey screenshot-to-VLM feature.
 	// When true, pressing ScreenshotHotkey anywhere (even when FairPeer is in
@@ -886,8 +915,14 @@ type NetworkConfig struct {
 	ProxyURL string `toml:"proxy_url"`
 	// NoProxy is honored for custom proxies. Env/auto modes use NO_PROXY from the
 	// process environment instead.
-	NoProxy string             `toml:"no_proxy"`
-	Proxy   NetworkProxyConfig `toml:"proxy"`
+	NoProxy string `toml:"no_proxy"`
+	// UpdateBaseURL overrides the desktop self-update endpoint (a GitHub
+	// Releases base such as https://github.com/zzycxz/fairpeer/releases, or an
+	// internal mirror serving the same latest.json layout). When set, it
+	// REPLACES the default GitHub/ghproxy endpoints entirely — air-gapped
+	// deployments must never reach github.com. Empty keeps the defaults.
+	UpdateBaseURL string             `toml:"update_base_url"`
+	Proxy         NetworkProxyConfig `toml:"proxy"`
 }
 
 // NetworkProxyConfig is the structured custom-proxy editor shape. Password is
@@ -898,6 +933,16 @@ type NetworkProxyConfig struct {
 	Port     int    `toml:"port"`
 	Username string `toml:"username"`
 	Password string `toml:"password"`
+}
+
+// NetworkUpdateBaseURL returns the configured desktop self-update base URL
+// (trimmed, ${VAR}-expanded like every sibling [network] field; empty = use
+// the built-in GitHub endpoints). See NetworkConfig.UpdateBaseURL.
+func (c *Config) NetworkUpdateBaseURL() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(ExpandVars(c.Network.UpdateBaseURL))
 }
 
 // NetworkProxySpec returns the expanded proxy settings used by netclient.
@@ -1144,17 +1189,28 @@ func (c *Config) BashMode() string {
 // cache tokens). SubagentModel is the optional default for runAs=subagent
 // skills; SubagentModels overrides it per skill name.
 type AgentConfig struct {
-	SystemPrompt     string            `toml:"system_prompt"`
-	SystemPromptFile string            `toml:"system_prompt_file"`
-	MaxSteps         int               `toml:"max_steps"`         // tool-call rounds per turn; 0 = unlimited
-	PlannerMaxSteps  int               `toml:"planner_max_steps"` // planner read-only tool-call rounds; 0 = unlimited
-	Temperature      float64           `toml:"temperature"`
-	PlannerModel     string            `toml:"planner_model"`
-	SubagentModel    string            `toml:"subagent_model"`
-	SubagentModels   map[string]string `toml:"subagent_models"`
-	SubagentEffort   string            `toml:"subagent_effort"`
-	SubagentEfforts  map[string]string `toml:"subagent_efforts"`
-	FastTaskModel    string            `toml:"fast_task_model"` // lightweight model for dream/distill background tasks
+	SystemPrompt     string `toml:"system_prompt"`
+	SystemPromptFile string `toml:"system_prompt_file"`
+	MaxSteps         int    `toml:"max_steps"`         // tool-call rounds per turn; 0 = unlimited
+	PlannerMaxSteps  int    `toml:"planner_max_steps"` // planner read-only tool-call rounds; 0 = unlimited
+	// StreamRecoveries bounds agent-level mid-stream recovery retries per turn
+	// (P1-A1). 0 = default 3. Runtime-proven: 1 let a second disconnect kill
+	// the whole turn while the same scenario on dsh recovered cleanly.
+	StreamRecoveries int `toml:"stream_recoveries"`
+	// Retry policy knobs (P1-A3), applied package-wide to provider HTTP sends.
+	// RetryMaxAttempts 0 = default 10; RetryBackoffMaxSec 0 = default 15;
+	// RetryMode "normal" (default) or "always" (no attempt cap — for unattended
+	// multi-hour runs riding out a half-dead gateway).
+	RetryMaxAttempts   int               `toml:"retry_max_attempts"`
+	RetryBackoffMaxSec int               `toml:"retry_backoff_max_sec"`
+	RetryMode          string            `toml:"retry_mode"`
+	Temperature        float64           `toml:"temperature"`
+	PlannerModel       string            `toml:"planner_model"`
+	SubagentModel      string            `toml:"subagent_model"`
+	SubagentModels     map[string]string `toml:"subagent_models"`
+	SubagentEffort     string            `toml:"subagent_effort"`
+	SubagentEfforts    map[string]string `toml:"subagent_efforts"`
+	FastTaskModel      string            `toml:"fast_task_model"` // lightweight model for dream background tasks
 	// OutputStyle selects a persona/tone block folded into the system prompt at
 	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
 	// .fairpeer/output-styles/<name>.md). Empty = the unmodified prompt.
@@ -1189,7 +1245,7 @@ type ProviderEntry struct {
 	ModelsURL string   `toml:"models_url"` // auto-fetch models from this URL on startup
 	Default   string   `toml:"default"`    // default model when Models is set (else Models[0])
 	// FastModel is the lightweight model used for background/fast tasks
-	// (dream/distill/rag-extract, scheduler time-parse). Empty = fall back to
+	// (dream/rag-extract, scheduler time-parse). Empty = fall back to
 	// Default at runtime. This is the per-provider "fast" role; the global
 	// agent.fast_task_model can override it.
 	FastModel     string            `toml:"fast_model"`
@@ -1589,8 +1645,8 @@ func Default() *Config {
 		// config keeps the user's choice. AutoInstall fetches the runtime into
 		// the cache when enabled and missing.
 		Codegraph: CodegraphConfig{Enabled: false, AutoInstall: true},
-		// Background self-evolution (Dream/Distill) on by default; 7/30 day cadence.
-		Dream: DreamConfig{Enabled: true, DreamInterval: DefaultDreamInterval, DistillInterval: DefaultDistillInterval, SkillColdDays: DefaultSkillColdDays},
+		// Background self-evolution (Dream) on by default; 7 day cadence.
+		Dream: DreamConfig{Enabled: true, DreamInterval: DefaultDreamInterval, SkillColdDays: DefaultSkillColdDays},
 		// LSP tools on by default, but dormant until a language server is on PATH;
 		// a missing server yields an install hint rather than an error.
 		LSP:     LSPConfig{Enabled: true},
@@ -1773,7 +1829,9 @@ func LoadForRoot(root string) (*Config, error) {
 		}
 	}
 	providersDefined := false
-	for _, path := range tomlSources {
+	// 用户/全局源先行合并；项目 TOML 固定在列表末尾，单独合并——
+	// 安全快照必须落在两者之间（G3 v1.1）。
+	for _, path := range tomlSources[:len(tomlSources)-1] {
 		if _, err := os.Stat(path); err == nil {
 			if err := migrateLegacyMCPTiersFile(path); err != nil {
 				slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
@@ -1787,11 +1845,34 @@ func LoadForRoot(root string) (*Config, error) {
 			providersDefined = true
 		}
 	}
+	// G3 v1.1（评审 P1-2/P1-3）：安全/执行面同样不归未信任项目管——
+	// [statusline].command 是任意 shell 命令，[permissions]/[sandbox] 是审批
+	// 门与 OS 监狱本身。快照取在用户源合并之后、项目合并之前。
+	secSnap := snapshotProjectSecurity(cfg)
+	if _, err := os.Stat(projectTOML); err == nil {
+		if err := migrateLegacyMCPTiersFile(projectTOML); err != nil {
+			slog.Warn("config: legacy mcp tier migration failed", "path", projectTOML, "err", err)
+		}
+		defined, err := mergeFile(cfg, projectTOML)
+		if err != nil {
+			return nil, err
+		}
+		if defined {
+			providersDefined = true
+		}
+	}
 	// Defining any [[providers]] replaces the built-in keyless local presets
 	// (Ollama, llama.cpp) wholesale; without user-defined providers the presets
 	// apply so local models work out of the box.
 	if !providersDefined {
 		appendBuiltinLocalProviders(cfg)
+	}
+	// G3 v1.1：未受信任项目不得覆写安全/执行面——从快照恢复（用户全局值优先），
+	// 并把该事实写进通知（与插件/MCP 跳过提示并列）。
+	if !projectTrusted {
+		restoreProjectSecurity(cfg, secSnap)
+		cfg.UntrustedProjectNotices = append(cfg.UntrustedProjectNotices,
+			fmt.Sprintf("项目 %s 未受信任：已忽略其 statusline/permissions/sandbox 覆写", root))
 	}
 	// toml.DecodeFile replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
@@ -1901,6 +1982,9 @@ func normalizeCoworkDefaults(c *Config) {
 	}
 	if strings.TrimSpace(c.Cowork.EStopHotkey) == "" {
 		c.Cowork.EStopHotkey = "Ctrl+Shift+Pause"
+	}
+	if c.Cowork.ExtractAutoRetryMaxRounds <= 0 {
+		c.Cowork.ExtractAutoRetryMaxRounds = 2
 	}
 }
 
@@ -2022,6 +2106,14 @@ func mergeFile(cfg *Config, path string) (providersDefined bool, err error) {
 	md, err := toml.DecodeFile(path, cfg)
 	if err != nil {
 		return false, fmt.Errorf("config %s: %w", path, err)
+	}
+	// Unknown keys are silently ignored by the decoder — a typo like
+	// `default-model` instead of `default_model` then surfaces two layers away
+	// as `unknown model ""`. Record them so the welcome banner and doctor can
+	// point at the actual key (P1-F10②).
+	for _, k := range md.Undecoded() {
+		cfg.ConfigWarnings = append(cfg.ConfigWarnings,
+			fmt.Sprintf("%s: unknown config key %q — typo or unsupported option? (see fairpeer.example.toml)", path, k.String()))
 	}
 	return md.IsDefined("providers"), nil
 }

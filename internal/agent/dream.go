@@ -15,24 +15,21 @@ import (
 	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
-// minSpawnGap prevents rapid-fire automatic dream/distill triggers within a
+// minSpawnGap prevents rapid-fire automatic dream triggers within a
 // single session (e.g. several turns fired in quick succession). It only
 // applies to the automatic path; manual triggers are gated by inFlight instead.
 const minSpawnGap = 10 * time.Second
 
-// dreamTimeout / distillTimeout bound the background sub-agent runs.
-const (
-	dreamTimeout   = 5 * time.Minute
-	distillTimeout = 10 * time.Minute
-)
+// dreamTimeout bounds the background dream sub-agent run.
+const dreamTimeout = 5 * time.Minute
 
-// dreamStateName is the JSON file recording Dream/Distill run history, written
+// dreamStateName is the JSON file recording Dream run history, written
 // in the workspace's .fairpeer/ directory (the parent of sessionDir). It exists
 // because the sub-agents spawned here reuse the parent session in memory and
 // never persist their own .jsonl transcript — so the previous design of scanning
 // sessions/*.jsonl.meta for a topicTitle marker could never match (nothing was
 // ever written). This dedicated state file is the single source of truth for
-// "when did Dream/Distill last run" and the cadence gate.
+// "when did Dream last run" and the cadence gate.
 const dreamStateName = "dream_state.json"
 
 // dreamState caps how many run records we keep per kind, keeping the file tiny.
@@ -41,10 +38,7 @@ const dreamStateHistory = 20
 // DreamKind identifies which self-evolution agent a record describes.
 type DreamKind string
 
-const (
-	KindDream   DreamKind = "dream"
-	KindDistill DreamKind = "distill"
-)
+const KindDream DreamKind = "dream"
 
 // DreamTrigger records how a run was initiated.
 type DreamTrigger string
@@ -54,7 +48,7 @@ const (
 	TriggerManual DreamTrigger = "manual"
 )
 
-// DreamRun is one completed (or failed) Dream/Distill invocation.
+// DreamRun is one completed (or failed) Dream invocation.
 type DreamRun struct {
 	Kind      DreamKind    `json:"kind"`
 	Trigger   DreamTrigger `json:"trigger"`
@@ -70,11 +64,11 @@ type dreamStateFile struct {
 	Runs []DreamRun `json:"runs"`
 }
 
-// spawnCoordinator serialises Dream/Distill spawning within one process. The
+// spawnCoordinator serialises Dream spawning within one process. The
 // previous design used package-level time.Time vars with no lock, which raced
 // once manual triggers (from the desktop UI) and automatic triggers (from the
 // turn loop) could fire concurrently. inFlight is the hard concurrency gate
-// (only one Dream and one Distill run at a time, per kind); lastAuto is the
+// (only one Dream run at a time); lastAuto is the
 // automatic-path debounce that replaces minSpawnGap's stateful side effect.
 //
 // The cadence decision itself NEVER consults this state — it reads the on-disk
@@ -88,36 +82,6 @@ type spawnCoordinator struct {
 var dreamCoord = &spawnCoordinator{
 	inFlight: make(map[DreamKind]bool),
 	lastAuto: make(map[DreamKind]time.Time),
-}
-
-// distillCompleteHook is the post-distill callback boot.go installs to retire
-// cold skills (hard-decay skills unused longer than the configured threshold).
-// It returns a status string the caller may log. Guarded by dreamCoord.mu so a
-// concurrent RegisterDistillComplete can't race the read in notifyDistillComplete.
-// nil = no callback (dream disabled, or boot hasn't wired one yet).
-var distillCompleteHook func() string
-
-// RegisterDistillComplete installs the callback fired after a successful Distill
-// run. boot.go passes a closure that retires cold skills; passing nil disables
-// it (e.g. when [dream] is off). Safe to call at any time; the next Distill run
-// picks up the new hook.
-func RegisterDistillComplete(fn func() string) {
-	dreamCoord.mu.Lock()
-	distillCompleteHook = fn
-	dreamCoord.mu.Unlock()
-}
-
-// notifyDistillComplete fires the registered hook (if any) after a Distill run
-// completes, returning whatever status string the hook produced. Empty when no
-// hook is registered or the hook returned nothing.
-func notifyDistillComplete() string {
-	dreamCoord.mu.Lock()
-	fn := distillCompleteHook
-	dreamCoord.mu.Unlock()
-	if fn == nil {
-		return ""
-	}
-	return fn()
 }
 
 // DreamTask is the prompt fed to a background agent for portrait consolidation.
@@ -242,31 +206,6 @@ func dreamTaskFor(profile string) string {
 	return DreamTask
 }
 
-// DistillTask is the prompt fed to a background agent for workflow extraction.
-const DistillTask = `You are a workflow distillation agent. Your job is to review recent sessions and identify repeated manual workflows that could be automated.
-
-## Instructions
-
-1. Review recent session history for patterns where the same sequence of steps was repeated across multiple sessions.
-2. For each repeated workflow:
-   - Create a skill file (.md) that documents the workflow
-   - Include clear step-by-step instructions
-   - Reference specific tools and commands needed
-   - Make it reusable across similar tasks
-3. Save skills to .fairpeer/skills/ directory.
-4. Focus on workflows that would save significant time if automated.
-
-## Good candidates for skills
-- Common debugging sequences (e.g., "investigate test failure" → check logs → reproduce → fix → verify)
-- Project setup patterns (e.g., "add new feature" → create branch → implement → test → PR)
-- Repetitive code patterns (e.g., "add new API endpoint" → handler → route → test → docs)
-- Multi-step build/deploy processes
-
-## Not good candidates
-- One-off tasks unlikely to repeat
-- Tasks too specific to a single bug/feature
-- Simple single-tool operations`
-
 // dreamConfig loads the live Dream config (live-load so a settings change takes
 // effect on the next turn without restarting the session). A nil error with a
 // zero-value config means "feature disabled / unavailable" — callers treat that
@@ -326,7 +265,7 @@ func appendDreamRun(sessionDir string, run DreamRun) {
 // kind, preserving chronological order.
 func trimDreamRuns(runs []DreamRun) []DreamRun {
 	byKind := make(map[DreamKind][]DreamRun)
-	order := []DreamKind{KindDream, KindDistill}
+	order := []DreamKind{KindDream}
 	for _, r := range runs {
 		byKind[r.Kind] = append(byKind[r.Kind], r)
 	}
@@ -394,7 +333,7 @@ func workspaceOldEnough(sessionDir string, interval time.Duration) bool {
 	// Per-session folder layout (2026-08-21): <dir>/<id>/<id>.jsonl — a
 	// workspace whose sessions all use the new layout has nothing at the top
 	// level, so without this descent the cold-start gate never passes and
-	// auto Dream/Distill stay permanently off. Mirrors ListSessions' scan.
+	// auto Dream stays permanently off. Mirrors ListSessions' scan.
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -420,8 +359,8 @@ func workspaceOldEnough(sessionDir string, interval time.Duration) bool {
 	return time.Since(oldest) >= interval
 }
 
-// shouldAutoRun decides whether an automatic Dream/Distill run is due. It
-// combines: the master switch, the per-kind cadence, the inFlight gate, and the
+// shouldAutoRun decides whether an automatic Dream run is due. It
+// combines: the master switch, the cadence, the inFlight gate, and the
 // minSpawnGap debounce. The cadence itself is read from disk via LastDreamRun,
 // never from in-memory state. A cold-start grace (first session age) only
 // matters when there is no prior run at all.
@@ -471,23 +410,14 @@ func ShouldAutoDream(sessionDir string) bool {
 	return shouldAutoRun(sessionDir, KindDream, dream.DreamIntervalDays())
 }
 
-// ShouldAutoDistill reports whether the Distill agent should run this turn.
-func ShouldAutoDistill(sessionDir string) bool {
-	dream, ok := dreamConfig()
-	if !ok || !dream.Enabled {
-		return false
-	}
-	return shouldAutoRun(sessionDir, KindDistill, dream.DistillIntervalDays())
-}
-
-// runKind executes a Dream or Distill task under the coordinator, recording the
+// runKind executes a Dream task under the coordinator, recording the
 // outcome to dream_state.json. trigger distinguishes automatic vs manual. The
 // automatic path has already passed the cadence + master-switch gate in
-// ShouldAutoDream/ShouldAutoDistill before this is invoked, so here we only
+// ShouldAutoDream before this is invoked, so here we only
 // apply the master switch for manual runs, take the inFlight lock, run, and
 // record. Returns the run record (including any error) and whether a run
 // actually executed.
-// quietDreamSink hides a background dream/distill turn from the hosting tab's
+// quietDreamSink hides a background dream turn from the hosting tab's
 // UI: only accounting (Usage), persistence (TurnDone), and toasts (Notice)
 // pass through. Content events (the task brief, reasoning, tool traffic)
 // stay invisible.
@@ -515,8 +445,7 @@ func runKind(ctx context.Context, sessionDir string, kind DreamKind, task string
 		}
 	}
 
-	// Concurrency gate. inFlight is per-kind so Dream and Distill can run in
-	// parallel, but two Dreams cannot.
+	// Concurrency gate. inFlight prevents two Dreams from running in parallel.
 	dreamCoord.mu.Lock()
 	if dreamCoord.inFlight[kind] {
 		dreamCoord.mu.Unlock()
@@ -539,8 +468,7 @@ func runKind(ctx context.Context, sessionDir string, kind DreamKind, task string
 	// transcript or composer — the task brief leaking into the input box was
 	// the reported bug. The quiet sink drops all content/streaming events;
 	// Usage keeps the tab's token accounting honest, TurnDone keeps the
-	// autosave, Notice keeps the distill-completion toast. Dream status is
-	// surfaced separately via DreamRunView.
+	// autosave. Dream status is surfaced separately via DreamRunView.
 	sub := New(prov, reg, sess, Options{}, quietDreamSink{inner: sink})
 	err := sub.Run(bgCtx, task)
 	run.Duration = time.Since(run.StartedAt).Truncate(time.Second).String()
@@ -555,14 +483,6 @@ func runKind(ctx context.Context, sessionDir string, kind DreamKind, task string
 		run.Error = err.Error()
 	}
 	appendDreamRun(sessionDir, run)
-	// A successful Distill may have produced new skills or surfaced stale ones;
-	// fire the post-distill hook (boot uses it to retire cold skills). Best-effort
-	// — the hook's output is logged, never blocks the run's return.
-	if kind == KindDistill && run.Status == "ok" {
-		if note := notifyDistillComplete(); note != "" {
-			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: note})
-		}
-	}
 	return run, true
 }
 
@@ -586,34 +506,11 @@ func SpawnDream(ctx context.Context, sessionDir, profile string, prov provider.P
 	return true
 }
 
-// SpawnDistill kicks off a background distill agent if an automatic run is due.
-// See SpawnDream for the wg draining contract.
-func SpawnDistill(ctx context.Context, sessionDir string, prov provider.Provider, reg *tool.Registry, sess *Session, sink event.Sink, wg *sync.WaitGroup) bool {
-	if !ShouldAutoDistill(sessionDir) {
-		return false
-	}
-	if wg != nil {
-		wg.Add(1)
-	}
-	go func() {
-		if wg != nil {
-			defer wg.Done()
-		}
-		_, _ = runKind(ctx, sessionDir, KindDistill, DistillTask, distillTimeout, prov, reg, sess, sink, TriggerAuto)
-	}()
-	return true
-}
-
 // RunDreamOnce triggers a manual Dream run. It blocks until the run completes
 // (or times out) and returns the resulting record + whether a run actually
 // executed. The caller (controller → desktop) surfaces the status to the user.
 func RunDreamOnce(ctx context.Context, sessionDir, profile string, prov provider.Provider, reg *tool.Registry, sess *Session, sink event.Sink) (DreamRun, bool) {
 	return runKind(ctx, sessionDir, KindDream, dreamTaskFor(profile), dreamTimeout, prov, reg, sess, sink, TriggerManual)
-}
-
-// RunDistillOnce triggers a manual Distill run. See RunDreamOnce.
-func RunDistillOnce(ctx context.Context, sessionDir string, prov provider.Provider, reg *tool.Registry, sess *Session, sink event.Sink) (DreamRun, bool) {
-	return runKind(ctx, sessionDir, KindDistill, DistillTask, distillTimeout, prov, reg, sess, sink, TriggerManual)
 }
 
 // DreamInFlight reports whether a run of the given kind is currently executing.

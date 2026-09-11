@@ -27,14 +27,9 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 	"unsafe"
-
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-
-	"github.com/zzycxz/fairpeer/internal/config"
 )
 
 const (
@@ -83,9 +78,24 @@ func (a *App) StartEStopHotkey() {
 		// the full explanation).
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
-		if err := em.register(hotkeyStr); err != nil {
+		// Settings toggles Stop→Start back to back: the OLD loop tears its
+		// hotkey down on its next ≤100ms tick, so an immediate RegisterHotKey
+		// here can lose the race and silently kill the feature. Retry briefly.
+		var regErr error
+		for attempt := 0; attempt < 5; attempt++ {
+			regErr = em.register(hotkeyStr)
+			if regErr == nil {
+				break
+			}
+			select {
+			case <-em.stopCh:
+				return
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+		if regErr != nil {
 			slog.Warn("estop: hotkey registration failed (combination may be in use by another app); emergency stop unavailable",
-				"hotkey", hotkeyStr, "err", err)
+				"hotkey", hotkeyStr, "err", regErr)
 			return
 		}
 		slog.Info("estop: global emergency-stop hotkey registered", "hotkey", hotkeyStr)
@@ -104,23 +114,8 @@ func (a *App) StopEStopHotkey() {
 	}
 }
 
-// estopHotkeyString returns the configured combo, defaulting to Ctrl+Shift+Pause.
-// Empty means disabled.
-func (a *App) estopHotkeyString() string {
-	cfg, err := config.Load()
-	if err != nil {
-		return defaultEStopHotkey
-	}
-	if cfg.Cowork.EStopHotkey == "off" || cfg.Cowork.EStopHotkey == "disabled" {
-		return ""
-	}
-	if strings.TrimSpace(cfg.Cowork.EStopHotkey) == "" {
-		return defaultEStopHotkey
-	}
-	return cfg.Cowork.EStopHotkey
-}
-
-const defaultEStopHotkey = "Ctrl+Shift+Pause"
+// estopHotkeyString / defaultEStopHotkey / emitEStopNotice live in
+// estop_shared.go (platform-neutral).
 
 // register creates a hidden message-only window (its own, so the feature works
 // even if the screenshot hotkey is off and created no window) and registers the
@@ -130,8 +125,10 @@ func (e *estopManager) register(hotkeyStr string) error {
 	if hwnd == 0 {
 		return fmt.Errorf("create message window failed")
 	}
+	destroy := func() { procDestroyWindow.Call(hwnd) }
 	mod, vk, err := parseEStopHotkey(hotkeyStr)
 	if err != nil {
+		destroy() // never leak the message-only window on a bad combo
 		return err
 	}
 	r1, _, _ := procRegisterHotKey.Call(
@@ -141,6 +138,7 @@ func (e *estopManager) register(hotkeyStr string) error {
 		uintptr(vk),
 	)
 	if r1 == 0 {
+		destroy()
 		return fmt.Errorf("RegisterHotKey failed (combination may be in use)")
 	}
 	e.hwnd = hwnd
@@ -178,6 +176,11 @@ func (e *estopManager) loop() {
 		}
 		select {
 		case <-e.stopCh:
+			// Teardown here, on the SAME OS thread that registered the hotkey
+			// and owns the message window: DestroyWindow from another thread
+			// fails silently (and UnregisterHotKey raced Stop's shutdown
+			// goroutine). The goroutine holds its locked thread for life.
+			e.teardown()
 			return
 		case <-ticker.C:
 		}
@@ -198,28 +201,22 @@ func (e *estopManager) onHotkey() {
 	e.app.emitEStopNotice()
 }
 
-// Stop unregisters the hotkey and stops the message loop. Idempotent.
+// Stop unregisters the hotkey and stops the message loop. Idempotent. The
+// actual Unregister/Destroy runs on the loop goroutine's locked thread (see
+// loop's stopCh branch) — Stop only signals.
 func (e *estopManager) Stop() {
 	e.stopOnce.Do(func() {
 		close(e.stopCh)
-		if e.hwnd != 0 {
-			procUnregisterHotKey.Call(uintptr(e.hwnd), uintptr(estopHotkeyID))
-			// Destroy the message-only window to avoid leaking HWNDs across
-			// repeated stop/start cycles of the estop feature.
-			procDestroyWindow.Call(uintptr(e.hwnd))
-			e.hwnd = 0
-		}
 	})
 }
 
-// emitEStopNotice pushes a stop-confirmation toast to the frontend. The frontend
-// renders this as a prominent red banner so the user sees the kill landed.
-func (a *App) emitEStopNotice() {
-	if a.ctx == nil {
+// teardown unregisters the hotkey and destroys the message-only window, so
+// repeated stop/start cycles of the estop feature never leak HWNDs.
+func (e *estopManager) teardown() {
+	if e.hwnd == 0 {
 		return
 	}
-	wailsruntime.EventsEmit(a.ctx, "estop:fired", map[string]string{
-		"message": "已紧急停止 AI 操作",
-		"detail":  "全局热键触发的紧急停止已生效，进行中的任务被中断。",
-	})
+	procUnregisterHotKey.Call(uintptr(e.hwnd), uintptr(estopHotkeyID))
+	procDestroyWindow.Call(uintptr(e.hwnd))
+	e.hwnd = 0
 }

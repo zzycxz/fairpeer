@@ -35,11 +35,12 @@ var indexHTML []byte
 // Server wires a controller to its HTTP surface. The Broadcaster must be the
 // same sink the controller was constructed with, so events reach SSE clients.
 type Server struct {
-	mu        sync.RWMutex // guards ctrl, which switchModel swaps at runtime
-	ctrl      *control.Controller
-	bc        *Broadcaster
-	titleProv provider.Provider // lightweight flash provider for session titles
-	titles    *titleCache
+	mu         sync.RWMutex // guards ctrl, which switchModel swaps at runtime
+	ctrl       *control.Controller
+	bc         *Broadcaster
+	notifySink event.Sink        // wrapped sink (notifications); nil when unset
+	titleProv  provider.Provider // lightweight flash provider for session titles
+	titles     *titleCache
 
 	// bindHost is the host portion of the listen address, set by Run/
 	// RunGraceful before serving. The host guard uses it to reject
@@ -51,6 +52,25 @@ type Server struct {
 	// or ?token= query). Empty keeps the loopback-only, unauthenticated
 	// posture.
 	authToken string
+}
+
+// SetNotifySink records the notification-wrapped sink so controller rebuilds
+// (switchModel) keep notifications wired; without it a rebuild silently
+// reverts to the raw broadcaster and notify output dies.
+func (s *Server) SetNotifySink(sink event.Sink) {
+	s.mu.Lock()
+	s.notifySink = sink
+	s.mu.Unlock()
+}
+
+// effectiveSink returns the wrapped sink when present, else the raw one.
+func (s *Server) effectiveSink() event.Sink {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.notifySink != nil {
+		return s.notifySink
+	}
+	return s.bc
 }
 
 // New builds a Server. bc must be the controller's event sink.
@@ -121,7 +141,7 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 
 	newCtrl, err := boot.Build(ctx, boot.Options{
 		Model:  ref,
-		Sink:   s.bc,
+		Sink:   s.effectiveSink(),
 		Stderr: os.Stderr,
 	})
 	if err != nil {
@@ -1045,17 +1065,43 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	current := filepath.Clean(s.ctl().SessionPath())
-	var out []sessionEntry
+	// NEW-19: collect BOTH layouts — legacy flat <dir>/<name>.jsonl and the
+	// current <dir>/<id>/<id>.jsonl (every session created after 2026-08-21).
+	var rels []string
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+		if e.IsDir() {
+			inner := filepath.Join(dir, e.Name(), e.Name()+".jsonl")
+			if _, statErr := os.Stat(inner); statErr == nil {
+				rels = append(rels, filepath.Join(e.Name(), e.Name()+".jsonl"))
+			}
 			continue
 		}
-		path := filepath.Join(dir, e.Name())
-		name := strings.TrimSuffix(e.Name(), ".jsonl")
+		if strings.HasSuffix(e.Name(), ".jsonl") {
+			rels = append(rels, e.Name())
+		}
+	}
+	var out []sessionEntry
+	for _, rel := range rels {
+		path := filepath.Join(dir, rel)
+		name := strings.TrimSuffix(strings.ReplaceAll(rel, string(filepath.Separator), "/"), ".jsonl")
 		entry := sessionEntry{Name: name, Path: path, Current: filepath.Clean(path) == current}
-		if first, turns := previewSessionFile(path); turns > 0 {
+		// NEW-61: prefer the .meta sidecar cache (refreshed every Save) — a
+		// full transcript decode per session per GET made the listing O(all
+		// session bytes). Fall back to the decode only when the cache is cold.
+		first, turns := "", 0
+		if meta, ok, merr := agent.LoadBranchMeta(path); merr == nil && ok && meta.CachedTurns > 0 {
+			turns = meta.CachedTurns
+			first = meta.CachedPreview
+		} else {
+			first, turns = previewSessionFile(path)
+		}
+		if turns > 0 {
+			var modNano int64
+			if fi, serr := os.Stat(path); serr == nil {
+				modNano = fi.ModTime().UnixNano()
+			}
 			entry.Turns = turns
-			entry.Title = s.sessionTitle(r.Context(), e.Name(), first, fileModNano(e))
+			entry.Title = s.sessionTitle(r.Context(), name, first, modNano)
 		}
 		out = append(out, entry)
 	}

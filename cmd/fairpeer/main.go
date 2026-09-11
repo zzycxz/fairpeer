@@ -6,6 +6,11 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/cli"
 
+	// Embed the IANA timezone database so ICS calendar TZID resolution works on
+	// Windows and minimal Linux (no system zoneinfo / GOROOT available).
+	// ~450KB to the binary; the standard fix.
+	_ "time/tzdata"
+
 	// Blank imports wire compile-time built-ins into their registries.
 	_ "github.com/zzycxz/fairpeer/internal/provider/anthropic"
 	_ "github.com/zzycxz/fairpeer/internal/provider/openai"

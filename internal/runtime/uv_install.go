@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -48,6 +49,10 @@ func uvCacheDir() string {
 
 // Install downloads uv to the cache directory. Safe to call from a goroutine
 // at startup. Idempotent: if the binary already exists in cache, returns nil.
+// The downloaded archive is SHA256-verified against the release's published
+// .sha256 sidecar (skipped with a warning when the sidecar is absent), and a
+// successful install resets the package-level uv/python resolution caches so
+// the current process picks up the fresh install immediately.
 func Install(ctx context.Context) error {
 	cacheDir := uvCacheDir()
 	exeName := uvNames()[0] // "uv" or "uv.exe"
@@ -60,7 +65,10 @@ func Install(ctx context.Context) error {
 
 	// Download URL: https://github.com/astral-sh/uv/releases/download/0.5.11/uv-x86_64-pc-windows-msvc.zip
 	// or uv-aarch64-apple-darwin.tar.gz etc.
-	assetName, ext := uvAssetName()
+	assetName, ext, err := uvAssetName()
+	if err != nil {
+		return err
+	}
 	downloadURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s",
 		uvRepo, UVVersion, assetName)
 
@@ -83,6 +91,22 @@ func Install(ctx context.Context) error {
 		return fmt.Errorf("uv install: read body: %w", err)
 	}
 
+	// SHA256-verify the ARCHIVE against astral's published checksum before it
+	// is trusted (fulfills the docstring's long-standing claim). The sidecar
+	// rides next to the asset as <asset-url>.sha256 and hashes the archive
+	// bytes, so the comparison happens pre-extraction. A 404 (offline mirror,
+	// release re-cut without checksums) skips verification with a warning
+	// instead of failing, so mirrored setups keep working.
+	want, err := fetchUVChecksum(ctx, downloadURL+".sha256")
+	if err != nil {
+		return fmt.Errorf("uv install: fetch checksum: %w", err)
+	}
+	if want == "" {
+		slog.Warn("uv install: no published SHA256 found, skipping checksum verification", "url", downloadURL)
+	} else if got := sha256Hex(body); got != want {
+		return fmt.Errorf("uv install: SHA256 mismatch: want %s, got %s", want, got)
+	}
+
 	// Extract the uv binary from the archive.
 	binary, err := extractUV(body, ext)
 	if err != nil {
@@ -102,31 +126,74 @@ func Install(ctx context.Context) error {
 		return fmt.Errorf("uv install: rename: %w", err)
 	}
 
+	// The binary is in place: drop this process's cached uv/python resolution
+	// (likely "not found" — that's why Install ran) so the very next
+	// ResolveUV/ResolvePython picks up the fresh download instead of waiting
+	// for the next launch.
+	resetRuntimeResolution()
+
 	return nil
 }
 
+// fetchUVChecksum downloads and parses a published .sha256 sidecar
+// ("<hex>[  <filename>]"). Any non-200 status — 404 above all — yields ("",
+// nil): the caller skips verification with a warning rather than failing, so
+// releases (or mirrors) that don't publish checksums keep installing.
+func fetchUVChecksum(ctx context.Context, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", nil
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+	if err != nil {
+		return "", err
+	}
+	// Standard checksums(1) format is "<hex>  <name>"; tolerate bare hex and
+	// any whitespace, and normalize case (uppercase digests exist in the wild).
+	fields := strings.Fields(string(body))
+	if len(fields) == 0 {
+		return "", nil
+	}
+	return strings.ToLower(fields[0]), nil
+}
+
 // uvAssetName returns the download asset filename and archive type for the
-// current platform.
-func uvAssetName() (name, ext string) {
-	os := runtime.GOOS
+// current platform. Every released uv triple is mapped explicitly — no default
+// that quietly claims linux-gnu for an unrelated GOOS — so an unsupported
+// platform surfaces as a clear error instead of a bogus download URL that
+// 404s (or worse, a binary built for the wrong ABI).
+func uvAssetName() (name, ext string, err error) {
+	goos := runtime.GOOS
 	arch := runtime.GOARCH
 
 	// Map Go arch to uv's naming.
-	archName := arch
+	var archName string
 	switch arch {
 	case "amd64":
 		archName = "x86_64"
 	case "arm64":
 		archName = "aarch64"
+	default:
+		return "", "", fmt.Errorf("uv auto-install unsupported on %s/%s", goos, arch)
 	}
 
-	switch os {
+	switch goos {
 	case "windows":
-		return fmt.Sprintf("uv-%s-pc-windows-msvc.zip", archName), "zip"
+		return fmt.Sprintf("uv-%s-pc-windows-msvc.zip", archName), "zip", nil
 	case "darwin":
-		return fmt.Sprintf("uv-%s-apple-darwin.tar.gz", archName), "tar.gz"
+		return fmt.Sprintf("uv-%s-apple-darwin.tar.gz", archName), "tar.gz", nil
+	case "linux":
+		return fmt.Sprintf("uv-%s-unknown-linux-gnu.tar.gz", archName), "tar.gz", nil
 	default:
-		return fmt.Sprintf("uv-%s-unknown-linux-gnu.tar.gz", archName), "tar.gz"
+		return "", "", fmt.Errorf("uv auto-install unsupported on %s/%s", goos, arch)
 	}
 }
 
@@ -202,8 +269,8 @@ func cachedUV() (string, bool) {
 	return "", false
 }
 
-// sha256Hex computes the SHA-256 hex digest of data (for future checksum
-// verification when GitHub publishes checksums per release).
+// sha256Hex computes the SHA-256 hex digest of data (compared against the
+// release's published .sha256 sidecar by Install).
 func sha256Hex(data []byte) string {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])

@@ -27,7 +27,7 @@ func TestAlertQueueLifecycle(t *testing.T) {
 			Devices: []string{"sw-1"}, Source: "syslog:sw-1:link-flap",
 			Evidence: []Evidence{{Device: "sw-1", Command: "t", Output: "o"}}}
 	}
-	// 两轮 false-positive → 抑制计数 = 2
+	// P1-F12：阈值升到 3——两轮只是坏了一晚，三轮才算模式。两轮后不降级。
 	for i := 0; i < 2; i++ {
 		f := mk("")
 		_ = SaveFinding(f)
@@ -38,10 +38,25 @@ func TestAlertQueueLifecycle(t *testing.T) {
 	if n := suppressCount("syslog:sw-1:link-flap"); n != 2 {
 		t.Fatalf("suppression count = %d, want 2", n)
 	}
-	// 第三次同键触发 → 降级 info
+	if sev, degraded := suppressedSeverity("syslog:sw-1:link-flap", SeverityWarning); degraded {
+		t.Fatalf("two marks must not degrade yet: %v %v", sev, degraded)
+	}
+	// 第三轮 false-positive → 达到阈值，同键触发降级 info
+	f3 := mk("")
+	_ = SaveFinding(f3)
+	if err := FalsePositiveFindingByID(f3.ID); err != nil {
+		t.Fatal(err)
+	}
 	sev, degraded := suppressedSeverity("syslog:sw-1:link-flap", SeverityWarning)
 	if sev != SeverityInfo || !degraded {
 		t.Fatalf("degraded: %v %v", sev, degraded)
+	}
+	// 解除入口：人工清除后恢复原级别
+	if err := UnsuppressSource("syslog:sw-1:link-flap"); err != nil {
+		t.Fatal(err)
+	}
+	if sev, degraded := suppressedSeverity("syslog:sw-1:link-flap", SeverityWarning); degraded || sev != SeverityWarning {
+		t.Fatalf("after unsuppress: %v %v", sev, degraded)
 	}
 	// ack 路径
 	f := mk("")
@@ -59,11 +74,12 @@ func TestAlertQueueLifecycle(t *testing.T) {
 	if !acked {
 		t.Fatal("ack transition missing")
 	}
-	// 聚合：同键 3 条（2 误报 + 1 ack），open=1
+	// 聚合：同键 4 条（3 误报 + 1 ack），open=1；P1-F12 解除抑制后
+	// Suppressed 归零（该键不再处于抑制态）。
 	aggs := AggregateFindings()
 	for _, a := range aggs {
 		if a.Key == "syslog:sw-1:link-flap" {
-			if a.Count != 3 || a.Open != 1 || a.Suppressed != 2 {
+			if a.Count != 4 || a.Open != 1 || a.Suppressed != 0 {
 				t.Fatalf("aggregate: %+v", a)
 			}
 			if !strings.Contains(a.Title, "link-flap") {

@@ -133,8 +133,10 @@ def load_style(home):
             pass
     colors = cfg.get("colors") or {}
     fonts = cfg.get("fonts") or {}
+    accent = colors.get("accent") or "#4472C4"
     return {
-        "accent": colors.get("accent") or "#4472C4",
+        "brand": colors.get("brand") or accent,
+        "accent": accent,
         "text": colors.get("text") or "#1A1A1A",
         "muted": colors.get("text_secondary") or "#666666",
         "line": colors.get("line") or "rgba(0,0,0,0.15)",
@@ -172,7 +174,7 @@ def render_table(tbl, x, y, w, style, fs, min_row_h=24, pad=8):
         # row background
         if ri == 0:
             rows_svg.append('<rect x="%d" y="%.1f" width="%d" height="%.1f" fill="%s"/>'
-                            % (x, y_cur, w, row_h, style["accent"]))
+                            % (x, y_cur, w, row_h, style["brand"]))
         elif ri % 2 == 0:
             rows_svg.append('<rect x="%d" y="%.1f" width="%d" height="%.1f" fill="rgba(0,0,0,0.035)"/>'
                             % (x, y_cur, w, row_h))
@@ -269,7 +271,7 @@ def main():
     if args.title:
         parts.append('<text x="60" y="46" font-size="26" font-weight="bold" fill="%s">%s</text>'
                      % (style["text"], esc(args.title)))
-        parts.append('<rect x="60" y="58" width="60" height="3" fill="%s"/>' % style["accent"])
+        parts.append('<rect x="60" y="58" width="60" height="3" fill="%s"/>' % style["brand"])
     if args.lead:
         for i, ln in enumerate(wrap_text(args.lead, 14, (avail_w - 20) / 14.0)):
             parts.append('<text x="60" y="%d" font-size="14" fill="%s">%s</text>'

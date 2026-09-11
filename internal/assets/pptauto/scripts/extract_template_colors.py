@@ -50,12 +50,36 @@ def _is_full_screen_bg(x, y, cx, cy):
 
 
 def _pil_average_color(image_bytes):
-    """用 PIL 算图片的平均色和主色，返回 (avg_hex, [top_hexes])。"""
+    """用 PIL 算图片的平均色和主色，返回 (avg_hex, [(top_hex, pixel_count), ...])。"""
     try:
         from PIL import Image
         import io as _io
-        img = Image.open(_io.BytesIO(image_bytes)).convert("RGB")
+        img = Image.open(_io.BytesIO(image_bytes))
         img.thumbnail((200, 200))
+        
+        if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+            img_rgba = img.convert("RGBA")
+            data = img_rgba.getdata()
+            total_y = 0
+            count = 0
+            total_pixels = 0
+            for r, g, b, a in data:
+                total_pixels += 1
+                if a > 127:
+                    y = 0.299*r + 0.587*g + 0.114*b
+                    total_y += y
+                    count += 1
+            pad_color = (255, 255, 255)
+            if count > 0 and total_pixels > 0:
+                opacity_ratio = count / total_pixels
+                if (total_y / count) > 215 and opacity_ratio < 0.25: # roughly > 85% luminance and < 25% area
+                    pad_color = (0, 0, 0)
+            
+            bg_pad = Image.new("RGB", img.size, pad_color)
+            bg_pad.paste(img_rgba, mask=img_rgba.split()[3])
+            img = bg_pad
+        else:
+            img = img.convert("RGB")
         # 平均色（用 numpy 加速，无 numpy 则逐像素）
         try:
             import numpy as np
@@ -68,13 +92,13 @@ def _pil_average_color(image_bytes):
             g = sum(p[1] for p in px) // n
             b = sum(p[2] for p in px) // n
         avg_hex = f"{r:02X}{g:02X}{b:02X}"
-        # 主色聚类（量化到 16 色）
+        # 主色聚类（量化到 16 色），带像素计数供色相聚类
         q_img = img.quantize(colors=16)
         palette = q_img.getpalette()
         counts = q_img.getcolors()
         if counts and palette:
             counts.sort(reverse=True, key=lambda x: x[0])
-            top_hexes = []
+            top_pairs = []
             for count, idx in counts:
                 pr, pg, pb = palette[idx * 3], palette[idx * 3 + 1], palette[idx * 3 + 2]
                 # 跳过接近纯白/纯黑的（背景之外的元素常用）
@@ -83,11 +107,10 @@ def _pil_average_color(image_bytes):
                 if pr < 15 and pg < 15 and pb < 15:
                     continue
                 hex_c = f"{pr:02X}{pg:02X}{pb:02X}"
-                if hex_c not in top_hexes:
-                    top_hexes.append(hex_c)
-                if len(top_hexes) >= 4:
+                top_pairs.append((hex_c, count))
+                if len(top_pairs) >= 6:
                     break
-            return avg_hex, top_hexes
+            return avg_hex, top_pairs
         return avg_hex, []
     except ImportError:
         return None, []
@@ -108,6 +131,93 @@ def _saturation(hex_val):
     b = int(hex_val[4:6], 16) / 255
     mx, mn = max(r, g, b), min(r, g, b)
     return mx - mn if mx > 0 else 0
+
+
+def _hsv(hex_val):
+    r = int(hex_val[:2], 16) / 255
+    g = int(hex_val[2:4], 16) / 255
+    b = int(hex_val[4:6], 16) / 255
+    mx, mn = max(r, g, b), min(r, g, b)
+    d = mx - mn
+    if d == 0:
+        h = 0.0
+    elif mx == r:
+        h = ((g - b) / d) % 6
+    elif mx == g:
+        h = (b - r) / d + 2
+    else:
+        h = (r - g) / d + 4
+    return h * 60.0, d, (mx + mn) / 2  # hue in degrees, saturation, lightness
+
+
+def _color_distance(hex_a, hex_b):
+    """Rough perceptual distance (weighted euclidean) between two hex colors."""
+    r1, g1, b1 = int(hex_a[:2], 16), int(hex_a[2:4], 16), int(hex_a[4:6], 16)
+    r2, g2, b2 = int(hex_b[:2], 16), int(hex_b[2:4], 16), int(hex_b[4:6], 16)
+    return ((2 * (r1 - r2)) ** 2 + (4 * (g1 - g2)) ** 2 + (3 * (b1 - b2)) ** 2) ** 0.5
+
+
+# Office 原厂主题色板（2013+ 默认）。模板作者几乎从不改 theme1.xml，所以一份
+# "accent1-6 恰好等于这六个"的 theme 说明色板是出厂状态——里面的色值不代表模板
+# 品牌色，反而会以 +5 的高权重污染提取（实测把移动模板的 accent 选成 #FFC000）。
+# 六个里命中 ≥4 个即认定（accent5/6 偶有变体）。
+_OFFICE_DEFAULT_ACCENTS = frozenset((
+    "4472C4", "ED7D31", "A5A5A5", "FFC000", "5B9BD5", "70AD47",  # accent1-6
+    "44546A", "E7E6E6",                                            # dk2 / lt2
+    "0563C1", "954F72",                                            # hlink / folHlink
+))
+
+# clrScheme 里计入频率的槽位：超链接色（hlink/folHlink）是每个出厂主题都带的
+# 固定色（#0563C1/#954F72），从不是品牌色，直接跳过。
+_THEME_COUNT_SLOTS = frozenset(("dk2", "lt2", "accent1", "accent2", "accent3",
+                                "accent4", "accent5", "accent6"))
+
+
+def _is_office_default_theme(scheme_map):
+    accents = [scheme_map.get(k, "") for k in
+               ("accent1", "accent2", "accent3", "accent4", "accent5", "accent6")]
+    hits = sum(1 for a in accents if a in _OFFICE_DEFAULT_ACCENTS)
+    return hits >= 4
+
+
+def _cluster_similar_colors(color_counts):
+    """把量化色桶合并成"色相族"，返回 [(representative_hex, family_count), ...]
+    按族计数降序。
+
+    两个目的：
+    1. 同一品牌色被量化拆桶（#1085CD → #1085CF/#1B81C4/#1686CB）时族计数才够大；
+    2. 同族的深浅变体（主蓝 #1085CF 和淡蓝 #74C3F2）算一族，族代表取**饱和度
+       最高**的成员——品牌色总是比它的浅色背景变体更饱和。
+    近灰色（饱和度 < 0.12）按色距合并，不参与色相族。
+    """
+    families = []  # [{reps: {hex: (count, sat)}, total: int}]
+    for hex_val, cnt in sorted(color_counts.items(), key=lambda x: -x[1]):
+        h, s, _l = _hsv(hex_val)
+        fam = None
+        for f in families:
+            rh, rs, _ = _hsv(f["rep"])
+            if s < 0.12 and rs < 0.12:
+                if _color_distance(f["rep"], hex_val) < 48:
+                    fam = f
+                    break
+            elif s >= 0.12 and rs >= 0.12 and _hue_dist(h, rh) < 24:
+                fam = f
+                break
+        if fam is None:
+            families.append({"rep": hex_val, "total": cnt, "best": hex_val,
+                             "best_sat": s})
+        else:
+            fam["total"] += cnt
+            if s > fam["best_sat"]:
+                fam["best"], fam["best_sat"] = hex_val, s
+    out = [(f["best"], f["total"]) for f in families]
+    out.sort(key=lambda x: -x[1])
+    return out
+
+
+def _hue_dist(a, b):
+    d = abs(a - b) % 360
+    return d if d <= 180 else 360 - d
 
 
 def extract_colors_from_pptx(pptx_path):
@@ -135,6 +245,7 @@ def extract_colors_from_pptx(pptx_path):
     # --- 1. 读 theme.xml 的配色方案 + 字体 ---
     scheme_map = {}  # scheme name → hex
     template_fonts = {}  # {heading: "...", body: "..."}
+    office_default_theme = False  # theme 六 accent 恰为 Office 出厂色 → 不代表品牌
     try:
         with zipfile.ZipFile(str(pptx_path)) as zf:
             theme_xml = etree.fromstring(zf.read('ppt/theme/theme1.xml'))
@@ -151,8 +262,19 @@ def extract_colors_from_pptx(pptx_path):
                         hex_val = sys_clr.get('lastClr', '').upper()
                     if hex_val:
                         scheme_map[tag] = hex_val
-                        if hex_val not in ('000000', 'FFFFFF', '00000000'):
-                            all_colors[hex_val] = all_colors.get(hex_val, 0) + 5
+                office_default_theme = _is_office_default_theme(scheme_map)
+                for child in clr_scheme:
+                    tag = child.tag.split('}')[-1]
+                    hex_val = scheme_map.get(tag)
+                    if hex_val and hex_val not in ('000000', 'FFFFFF', '00000000'):
+                        if tag not in _THEME_COUNT_SLOTS:
+                            continue
+                        # 出厂 theme 的默认色不计入频率：它们几乎必然出现在
+                        # XML 里，+5 权重会把真品牌色挤出候选（实测 accent 被
+                        # 选成 Office 默认金黄 #FFC000）
+                        if office_default_theme and hex_val in _OFFICE_DEFAULT_ACCENTS:
+                            continue
+                        all_colors[hex_val] = all_colors.get(hex_val, 0) + 5
             # 提取字体方案（majorFont=标题, minorFont=正文）
             font_scheme = theme_xml.find('.//a:fontScheme', NS)
             if font_scheme is not None:
@@ -200,7 +322,7 @@ def extract_colors_from_pptx(pptx_path):
         collect_colors(master.element)
 
     # --- 3. 检测全屏图片背景 ---
-    image_bg_info = None  # (avg_hex, [top_hexes]) 或 None
+    image_bg_info = None  # (avg_hex, [(family_rep_hex, family_count), ...]) 或 None
 
     with zipfile.ZipFile(str(pptx_path)) as zf:
         names = zf.namelist()
@@ -225,6 +347,27 @@ def extract_colors_from_pptx(pptx_path):
 
         def find_bg_in_part(part, part_type):
             """扫描一个 master/layout 的全屏 blipFill 图片，返回 (bytes, ext) 或 None。"""
+            # 1. 优先检查真正的背景属性 <p:bg>...<a:blipFill>
+            bgs = part.element.findall('.//p:bg', NS)
+            for bg in bgs:
+                blip = bg.find('.//p:bgPr/a:blipFill/a:blip', NS)
+                if blip is None:
+                    blip = bg.find('.//a:blipFill/a:blip', NS)
+                if blip is not None:
+                    rid = blip.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
+                    if rid:
+                        # 找到了官方背景图
+                        partname = str(part.part.partname) if hasattr(part, 'part') else str(part.partname)
+                        rels_name = os.path.basename(partname) + '.rels'
+                        rels_dir = os.path.dirname(partname).lstrip('/')
+                        rels_path = f'{rels_dir}/_rels/{rels_name}'
+                        if rels_path in names:
+                            rels_root = etree.fromstring(zf.read(rels_path))
+                            img_bytes, img_ext = read_image_for_rid(rels_root, rid, os.path.dirname(str(partname)))
+                            if img_bytes:
+                                return img_bytes, img_ext
+
+            # 2. 其次检查满屏的 <p:pic>（用户手动铺满的图片）
             pics = part.element.findall('.//p:pic', NS)
             for pic in pics:
                 xfrm = pic.find('.//p:spPr/a:xfrm', NS)
@@ -258,14 +401,29 @@ def extract_colors_from_pptx(pptx_path):
                     return img_bytes, img_ext
             return None
 
-        # 先扫 slide masters（背景图常在 master 上），再扫 layouts
+        # 先尝试寻找 docProps/thumbnail.*（它包含完整的幻灯片渲染效果和Logo）
         bg_img_bytes = None
-        bg_img_ext = 'png'
-        for master in prs.slide_masters:
-            result = find_bg_in_part(master, 'master')
-            if result:
-                bg_img_bytes, bg_img_ext = result
+        bg_img_ext = None
+        for n in names:
+            nl = n.lower()
+            if nl.startswith('docprops/thumbnail.'):
+                if nl.endswith('.jpeg') or nl.endswith('.jpg'):
+                    bg_img_ext = 'jpeg'
+                elif nl.endswith('.png'):
+                    bg_img_ext = 'png'
+                else:
+                    continue # Ignore .emf or .wmf
+                bg_img_bytes = zf.read(n)
                 break
+
+        # 如果没有缩略图，则回退：先扫 slide masters（背景图常在 master 上），再扫 layouts
+        if not bg_img_bytes:
+            bg_img_ext = 'png'
+            for master in prs.slide_masters:
+                result = find_bg_in_part(master, 'master')
+                if result:
+                    bg_img_bytes, bg_img_ext = result
+                    break
         if bg_img_bytes is None:
             for layout in prs.slide_layouts:
                 result = find_bg_in_part(layout, 'layout')
@@ -275,14 +433,19 @@ def extract_colors_from_pptx(pptx_path):
 
         # 如果找到了背景图，算配色（背景图本身由 PPTX 继承保留，不提取）
         if bg_img_bytes:
-            avg_hex, top_hexes = _pil_average_color(bg_img_bytes)
+            avg_hex, top_pairs = _pil_average_color(bg_img_bytes)
             if avg_hex:
-                image_bg_info = (avg_hex, top_hexes or [])
+                # 色相族聚类：同一个品牌蓝被量化拆成 #1085CF/#1B81C4/#1686CB
+                # 时合并成一族；族代表是饱和度最高的成员（品牌深色而非浅色变体）
+                families = _cluster_similar_colors(dict(top_pairs or []))
+                image_bg_info = (avg_hex, families)
                 if avg_hex not in ('000000', 'FFFFFF'):
                     all_colors[avg_hex] = all_colors.get(avg_hex, 0) + 3
-                for h in (top_hexes or []):
-                    if h not in ('000000', 'FFFFFF'):
-                        all_colors[h] = all_colors.get(h, 0) + 2
+                for h, cnt in families:
+                    if h in ('000000', 'FFFFFF'):
+                        continue
+                    # 族计数（缩略图上千级）缩放到与 XML 频率同量级
+                    all_colors[h] = all_colors.get(h, 0) + max(1, min(15, round(cnt / 100)))
 
         for layout in prs.slide_layouts:
             collect_colors(layout.element)
@@ -301,14 +464,8 @@ def extract_colors_from_pptx(pptx_path):
 
     if image_bg_info is not None:
         # 图片背景：用 PIL 算出的平均色作为背景色
+        # （聚类后的图片主色已按加权并入 all_colors，sorted_colors 直接可用）
         bg_hex = image_bg_info[0]
-        # 图片主色（排除背景后）补充进调色板候选
-        img_top = [h for h in image_bg_info[1]
-                   if h != bg_hex and h not in ('000000', 'FFFFFF')]
-        for h in img_top:
-            if h not in [c for c, _ in sorted_colors[:6]]:
-                sorted_colors.append((h, 1))
-        sorted_colors.sort(key=lambda x: -x[1])
     elif sorted_colors:
         # 纯色背景模板：用最深色
         bg_hex = min(sorted_colors, key=lambda x: _brightness(x[0]))[0]
@@ -345,19 +502,42 @@ def extract_colors_from_pptx(pptx_path):
         colors['card_bg'] = 'rgba(255,255,255,0.75)'
         colors['line'] = 'rgba(0,0,0,0.1)'
 
-    # accent：在前 N 个高频色里选饱和度最高、且不是背景色的。
-    # 只按饱和度选会选到一次性杂色（频率1的高饱和像素），所以限制候选范围。
-    accent_candidates = [(c, cnt) for c, cnt in sorted_colors[:8] if c != bg_hex]
-    if accent_candidates:
-        # 综合饱和度与频率：饱和度为主，频率作微弱加权（log 抑制极端频率）
-        import math
-        def accent_score(c_cnt):
-            c, cnt = c_cnt
-            return _saturation(c) * (1 + math.log(max(cnt, 1)) * 0.1)
-        most_saturated = max(accent_candidates, key=accent_score)[0]
-        colors['accent'] = f"#{most_saturated}"
+    # brand + accent 双槽位。brand = 高频且饱和的主色相族代表（结构性用色：
+    # 标题带、描边、表头）；accent = 与 brand 异族的强调色（关键数据/警示）。
+    # 先做一次跨源族合并：图片浅蓝变体和 XML 深蓝是同一品牌色时必须算一族，
+    # 否则族代表会落在浅色变体上。出厂 theme 的默认色不参与候选。
+    def _candidate(c):
+        return (c != bg_hex and c not in ('000000', 'FFFFFF')
+                and not (office_default_theme and c in _OFFICE_DEFAULT_ACCENTS))
+
+    import math
+    candidate_pool = {c: cnt for c, cnt in sorted_colors if _candidate(c)}
+    families = _cluster_similar_colors(candidate_pool)
+    brand_hex = None
+    if families:
+        def brand_score(pair):
+            c, total = pair
+            return total * (0.3 + _saturation(c))
+        brand_hex = max(families, key=brand_score)[0]
+
+    accent_hex = None
+    if brand_hex:
+        bh, _, _ = _hsv(brand_hex)
+        accent_families = [(c, total) for c, total in families
+                           if c != brand_hex and _saturation(c) >= 0.25
+                           and _hue_dist(_hsv(c)[0], bh) >= 30]
+        if accent_families:
+            def accent_score(pair):
+                c, total = pair
+                return _saturation(c) * (1 + math.log(max(total, 1)) * 0.1)
+            accent_hex = max(accent_families, key=accent_score)[0]
+        else:
+            accent_hex = brand_hex  # 单色族模板：强调色退化为同族，不选杂色
     else:
-        colors['accent'] = '#4472C4'  # 兜底
+        accent_hex = '4472C4'  # 兜底
+
+    colors['brand'] = f"#{brand_hex}" if brand_hex else f"#{accent_hex}"
+    colors['accent'] = f"#{accent_hex}"
 
     colors['white'] = '#FFFFFF'
 
@@ -370,6 +550,7 @@ def extract_colors_from_pptx(pptx_path):
         'extracted_palette': extracted_palette,
         'template_name': Path(pptx_path).stem,
         'fonts': template_fonts if template_fonts else None,
+        'office_default_theme': office_default_theme,
     }
 
 
@@ -449,11 +630,13 @@ def main():
     colors = update_template_config(config_path, extracted)
     print(f"已从模板 {pptx_path.name} 提取配色并更新 {config_path.name}:")
     print(f"  background:      {colors.get('background')} ({colors.get('background_type', 'solid')})")
+    print(f"  brand:           {colors.get('brand')}")
     print(f"  accent:          {colors.get('accent')}")
     print(f"  primary:         {colors.get('primary')}")
     print(f"  text:            {colors.get('text')}")
     print(f"  深色主题:        {extracted['is_dark_theme']}")
     print(f"  图片背景:        {extracted.get('has_image_background', False)}")
+    print(f"  出厂theme:       {extracted.get('office_default_theme', False)}")
     print(f"  提取调色板:      {extracted['extracted_palette']}")
 
 

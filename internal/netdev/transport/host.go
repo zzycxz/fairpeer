@@ -24,6 +24,7 @@ type HostEntry struct {
 	PasswordEnv   string
 	ProxyJump     string // OpenSSH ProxyJump syntax, comma-separated chain
 	UseSSHConfig  bool   // layer ~/.ssh/config values under unset fields
+	LegacyAlgo    bool   // offer legacy ciphers/KEX for ancient network devices
 }
 
 // LookupEntry resolves a configured host name to its entry. The config layer
@@ -44,6 +45,7 @@ type ResolvedHost struct {
 	PassphraseEnv    string   // credential env var name for the key passphrase
 	PasswordEnv      string   // credential env var name for password auth
 	ProxyJump        []string // resolved jump chain, in dial order
+	LegacyAlgo       bool     // offer legacy ciphers/KEX for ancient network devices
 }
 
 // Addr is the host:port dial string.
@@ -170,6 +172,7 @@ func resolveEntry(e HostEntry, sshCfg *SSHConfigSource) (ResolvedHost, error) {
 		IdentityFile:  strings.TrimSpace(e.IdentityFile),
 		PassphraseEnv: strings.TrimSpace(e.PassphraseEnv),
 		PasswordEnv:   strings.TrimSpace(e.PasswordEnv),
+		LegacyAlgo:    e.LegacyAlgo,
 	}
 	if j := strings.TrimSpace(e.ProxyJump); j != "" {
 		r.ProxyJump = splitJumpChain(j)
@@ -237,6 +240,8 @@ func applyHostDefaults(r *ResolvedHost) {
 			r.User = u.Username
 		} else if env := os.Getenv("USER"); env != "" {
 			r.User = env
+		} else if env := os.Getenv("USERNAME"); env != "" {
+			r.User = env // USER is unset on Windows; USERNAME is the native form
 		}
 	}
 }

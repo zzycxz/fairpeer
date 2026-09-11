@@ -107,10 +107,23 @@ func (t *dockerTransport) Dial(ctx context.Context, ref RemoteRef) (io.Reader, i
 	if _, err := dockerOutput("exec", container, "mkdir", "-p", home+"/.fairpeer/bin"); err != nil {
 		return nil, nil, nil, fmt.Errorf("docker: mkdir bin: %w", err)
 	}
-	// docker cp overwrites content; cheap enough to always copy (byte-compare
-	// would need an extra exec round-trip of the whole file hash).
+	// docker cp overwrites content; cheap enough to always copy (a pre-copy
+	// byte-compare would need an extra exec round-trip of the whole file hash).
+	// Integrity is verified after the copy instead, like remote_ssh.go does.
 	if _, err := dockerOutput("cp", local, container+":"+remoteBin); err != nil {
 		return nil, nil, nil, fmt.Errorf("docker: copy host binary: %w", err)
+	}
+	localHash, err := fileSHA256(local)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("docker: hash local host binary: %w", err)
+	}
+	out, err := dockerExecOutput(container, "sha256sum", remoteBin)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("docker: verify host binary: %w", err)
+	}
+	// A truncated or tampered copy would otherwise fail opaquely at start.
+	if fields := strings.Fields(out); len(fields) == 0 || !strings.EqualFold(fields[0], localHash) {
+		return nil, nil, nil, fmt.Errorf("docker: host binary checksum mismatch after copy (want %s, got %q)", localHash, strings.TrimSpace(out))
 	}
 	if _, err := dockerOutput("exec", container, "chmod", "+x", remoteBin); err != nil {
 		return nil, nil, nil, fmt.Errorf("docker: chmod host: %w", err)

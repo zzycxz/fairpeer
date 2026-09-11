@@ -462,6 +462,12 @@
   padding: 0 7px;
 }
 
+/* Plan-mode row: push the intent switch to the trailing edge like the
+   more-menu chevrons so the toggle reads as row state, not a suffix. */
+.approvalsw__menu .composer-intent-switch {
+  margin-left: auto;
+}
+
 .approvalsw__item .approvalsw__label {
   flex: 1 1 auto;
   min-width: 0;

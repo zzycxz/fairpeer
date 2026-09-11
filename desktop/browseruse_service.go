@@ -37,6 +37,7 @@ type BrowserUseService struct {
 	client   *browseruse.Client
 	port     int
 	python   string
+	pyPrefix []string // interpreter prefix args (e.g. uv's ["run","python"]) — dropped here once, killing the sidecar on every uv-only host
 	script   string
 	running  bool
 	buAvail  bool // browser-use library actually imported (not just HTTP up)
@@ -48,9 +49,11 @@ func NewBrowserUseService(pythonPath string, scriptPath string, port int) *Brows
 	if port <= 0 {
 		port = defaultBrowserUsePort
 	}
+	var pyPrefix []string
 	if pythonPath == "" {
-		if cmd, _, err := runtimepkg.ResolvePython(); err == nil {
+		if cmd, prefix, err := runtimepkg.ResolvePython(); err == nil {
 			pythonPath = cmd
+			pyPrefix = prefix
 		} else {
 			pythonPath = "python3"
 			if runtime.GOOS == "windows" {
@@ -59,10 +62,11 @@ func NewBrowserUseService(pythonPath string, scriptPath string, port int) *Brows
 		}
 	}
 	return &BrowserUseService{
-		port:   port,
-		python: pythonPath,
-		script: scriptPath,
-		client: browseruse.NewClient(port),
+		port:     port,
+		python:   pythonPath,
+		pyPrefix: pyPrefix,
+		script:   scriptPath,
+		client:   browseruse.NewClient(port),
 	}
 }
 
@@ -95,10 +99,11 @@ func (s *BrowserUseService) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancelFn = cancel
 
-	s.cmd = exec.CommandContext(ctx, s.python, s.script,
-		"--port", fmt.Sprintf("%d", s.port),
-		"--host", "127.0.0.1",
-	)
+	s.cmd = exec.CommandContext(ctx, execCommandName(s.python, s.pyPrefix),
+		execCommandArgs(s.pyPrefix, s.script,
+			"--port", fmt.Sprintf("%d", s.port),
+			"--host", "127.0.0.1",
+		)...)
 	proc.HideWindow(s.cmd)
 	s.cmd.Stdout = os.Stdout
 	s.cmd.Stderr = os.Stderr
@@ -229,6 +234,15 @@ func FindBrowserUseScript() string {
 			if c := filepath.Join(d, name); fileExists(c) {
 				return c
 			}
+		}
+	}
+	// 4. ~/.fairpeer/scripts is where boot releases the EMBEDDED copy
+	//    (assets.EnsureHelperScripts) — the only probe guaranteed to resolve
+	//    for a packaged binary. Dev paths above win, so a repo checkout is
+	//    always used during development.
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if c := filepath.Join(home, ".fairpeer", "scripts", name); fileExists(c) {
+			return c
 		}
 	}
 	return ""

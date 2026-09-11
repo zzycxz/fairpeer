@@ -7,12 +7,13 @@
 // live tail. Pure transition separated for unit tests without a DOM.
 import type { NetDevFinding } from "./types";
 
-// The tab's lens: chat-driven vuln checks (source "vulnscan") and feed sweeps
-// ("cve:*"). Everything else (baseline/assess/alert/nmap lead findings) keeps
-// its existing home in the 发现 tab — this page is the blue-team workbench
-// view, not a second findings queue.
+// The tab's lens: chat-driven vuln checks (source "vulnscan*" — the panel
+// used to match exactly, the lens list uses prefixes; unify on prefix) and
+// feed sweeps ("cve:*"). Everything else (baseline/assess/alert/nmap lead
+// findings) keeps its existing home in the 发现 tab — this page is the
+// blue-team workbench view, not a second findings queue.
 export function isVulnScanSource(source?: string): boolean {
-  return !!source && (source === "vulnscan" || source.startsWith("cve:"));
+  return !!source && (source.startsWith("vulnscan") || source.startsWith("cve:"));
 }
 
 export interface VulnScanState {

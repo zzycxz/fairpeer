@@ -2,8 +2,13 @@
 Type=Application
 Name=fairpeer
 Comment=fairpeer desktop — a Wails shell around the Go kernel
-Exec=fairpeer-desktop
+# %u carries the fairpeer:// URL when launched as the scheme handler (registered
+# via MimeType below); the app's argv scan (deeplink.go deepLinkArg) ignores the
+# empty flag on normal launches. Same shape as the Windows HKCU registration
+# (`"<exe>" --deep-link "%1"`).
+Exec=fairpeer-desktop --deep-link %u
 Icon=fairpeer-desktop
 Categories=Development;Utility;
 Terminal=false
 StartupWMClass=fairpeer-desktop
+MimeType=x-scheme-handler/fairpeer;

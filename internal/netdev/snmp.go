@@ -157,11 +157,16 @@ func (m *Manager) SnmpQuery(ctx context.Context, deviceName, oid, mode string) (
 	return out2, nil
 }
 
+// snmpOctetText decodes OctetString payloads with the same auto UTF-8→GBK
+// policy as the terminal path (decoderFor): domestic Huawei/H3C builds emit
+// GBK in sysDescr/sysName/ifDescr-style strings.
+var snmpOctetText = decoderFor("auto")
+
 func formatSnmpVar(v gosnmp.SnmpPDU) string {
 	val := ""
 	switch v.Type {
 	case gosnmp.OctetString:
-		val = string(v.Value.([]byte))
+		val = snmpOctetText(v.Value.([]byte))
 	default:
 		val = fmt.Sprintf("%v", v.Value)
 	}

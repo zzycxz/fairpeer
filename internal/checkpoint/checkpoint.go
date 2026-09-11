@@ -596,7 +596,7 @@ func (s *Store) RestoreCode(fromTurn int) (written, deleted []string, err error)
 		} else if current := detectCurrentEncoding(abs); current != nil {
 			enc = *current
 		}
-		if wErr := os.WriteFile(abs, fileenc.Encode(*snap.Content, enc), restorePerm(snap, abs)); wErr != nil {
+		if wErr := fileutil.AtomicWriteFile(abs, fileenc.Encode(*snap.Content, enc), restorePerm(snap, abs)); wErr != nil {
 			err = wErr
 			continue
 		}
@@ -618,6 +618,11 @@ func detectCurrentEncoding(path string) *fileenc.Kind {
 // must never write outside the workspace, even if a snapshot path is hostile or
 // the project moved since it was taken. Uses filepath.IsLocal (Go 1.20+) for
 // robust rejection of "..", UNC paths, and other platform-specific escape vectors.
+// Existing path components are resolved through EvalSymlinks (NEW-09): a
+// symlinked directory inside the workspace otherwise tunnels the restore write
+// to wherever the link points. Components that don't exist yet (the common
+// "restore creates this file" case) are checked textually after resolving the
+// deepest existing ancestor.
 func safePath(root, p string) (string, error) {
 	abs := p
 	if !filepath.IsAbs(abs) {
@@ -630,8 +635,37 @@ func safePath(root, p string) (string, error) {
 		if err != nil || !filepath.IsLocal(rel) {
 			return "", fmt.Errorf("checkpoint path %q escapes workspace %q", p, root)
 		}
+		// Symlink tunnel check: resolve what exists, keep the not-yet-existing
+		// tail textual, then re-verify containment on the resolved form.
+		if resolved, rerr := resolveExisting(abs); rerr == nil {
+			rel2, err2 := filepath.Rel(r, resolved)
+			if err2 != nil || !filepath.IsLocal(rel2) {
+				return "", fmt.Errorf("checkpoint path %q escapes workspace %q through a symlink", p, root)
+			}
+			abs = resolved
+		}
 	}
 	return abs, nil
+}
+
+// resolveExisting resolves the longest existing prefix of abs via
+// filepath.EvalSymlinks and rejoins the remainder. Returns an error when
+// nothing along the path exists.
+func resolveExisting(abs string) (string, error) {
+	dir, file := filepath.Split(abs)
+	if dir == "" {
+		return filepath.EvalSymlinks(abs)
+	}
+	dir = filepath.Clean(dir)
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		return filepath.Join(real, file), nil
+	}
+	// Parent missing too: recurse up one level.
+	parent, err := resolveExisting(dir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, file), nil
 }
 
 // DiffForTurn (upgrade spec 3-6) renders what a code-scope rewind of `turn`

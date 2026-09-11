@@ -58,9 +58,11 @@ type nmapXML struct {
 		} `xml:"address"`
 		Ports struct {
 			Port []struct {
-				PortID  int                               `xml:"portid,attr"`
-				Proto   string                            `xml:"protocol,attr"`
-				State   struct{ State string `xml:"state,attr"` } `xml:"state"`
+				PortID int    `xml:"portid,attr"`
+				Proto  string `xml:"protocol,attr"`
+				State  struct {
+					State string `xml:"state,attr"`
+				} `xml:"state"`
 				Service struct {
 					Name    string `xml:"name,attr"`
 					Product string `xml:"product,attr"`
@@ -244,7 +246,9 @@ func (t *nmapTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 	}
 	start := t.m.liveCmdStart("(nmap)", "nmap sweep "+strings.TrimSpace(a.CIDR), "assess")
 	status := AuditOK
-	defer func() { t.m.liveCmdEnd("(nmap)", "nmap sweep "+strings.TrimSpace(a.CIDR), "assess", status, start, 0, "") }()
+	defer func() {
+		t.m.liveCmdEnd("(nmap)", "nmap sweep "+strings.TrimSpace(a.CIDR), "assess", status, start, 0, "")
+	}()
 	if err := AssessmentActive(t.m.cfg.NetDev); err != nil {
 		t.m.liveCmdRefused("(nmap)", "nmap sweep "+strings.TrimSpace(a.CIDR), "assess", err.Error())
 		return "", fmt.Errorf("netdev_nmap: %w", err)

@@ -18,7 +18,9 @@ import (
 	"github.com/zzycxz/fairpeer/internal/provider"
 
 	"crypto/rand"
-	"encoding/hex")
+	"encoding/hex"
+	"log/slog"
+)
 
 // executorHandoffMarker is the header the (now-removed) two-model Coordinator
 // stamped on the message handing a task from planner to executor. HandoffTask
@@ -42,6 +44,19 @@ var sessionKeyCache struct {
 	sync.Once
 	key []byte
 	err error
+}
+
+// newerSigStale reports whether the transcript file was modified after its
+// signature sidecar — the signature of a crash between the jsonl rename and
+// the .sig write. Best-effort: equal/indeterminate mtimes are NOT stale
+// (conservative — stay a hard failure).
+func newerSigStale(path string) bool {
+	j, err1 := os.Stat(path)
+	sg, err2 := os.Stat(path + ".sig")
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return j.ModTime().After(sg.ModTime())
 }
 
 func loadSessionHMACKey() ([]byte, error) {
@@ -150,6 +165,15 @@ func (s *Session) Save(path string) error {
 			return fmt.Errorf("encode message: %w", err)
 		}
 	}
+	// fsync before the rename (P1-E5): without it the rename can hit the
+	// directory before the data blocks do, and a power loss lands a torn JSONL
+	// tail that LoadSession then rejects wholesale. Same contract as
+	// fileutil.AtomicWriteFile.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("sync session tmp: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpPath)
 		return err
@@ -162,7 +186,12 @@ func (s *Session) Save(path string) error {
 	// save — the load path tolerates a missing .sig.
 	if data, derr := os.ReadFile(path); derr == nil {
 		if sig, serr := computeSessionHMAC(data); serr == nil {
-			_ = os.WriteFile(path+".sig", sig, 0o600)
+			// Atomic (NEW-01): a plain WriteFile here is O_TRUNC+write — a
+			// crash or full disk leaves a truncated/empty .sig, and Load's
+			// mismatch check then bricks a perfectly good session.
+			if werr := fileutil.AtomicWriteFile(path+".sig", sig, 0o600); werr != nil {
+				slog.Warn("session: signature write failed", "path", path+".sig", "err", werr)
+			}
 		}
 	}
 	// Refresh the turn-count + preview cache in the .meta sidecar so ListSessions
@@ -231,7 +260,17 @@ func LoadSession(path string) (*Session, error) {
 			// Key machinery unavailable — proceed without verification rather
 			// than blocking all loads (the .sig may be from another machine).
 		} else if !ok {
-			return nil, fmt.Errorf("session integrity check failed: %s (signature mismatch — file may be corrupted or tampered)", path)
+			// NEW-01: Save writes the .sig AFTER the jsonl rename (atomically
+			// since the fix, but the window between the two writes still
+			// exists). A mismatch where the JSONL is NEWER than the .sig is
+			// that race — the transcript itself is intact, so proceed and let
+			// torn-tail salvage run; the next Save re-signs. A mismatch with
+			// an up-to-date .sig stays a hard failure (real tampering).
+			if newerSigStale(path) {
+				slog.Warn("session: stale signature (crash between save and sign) — accepting", "path", path)
+			} else {
+				return nil, fmt.Errorf("session integrity check failed: %s (signature mismatch — file may be corrupted or tampered)", path)
+			}
 		}
 	}
 	f, err := os.Open(path)
@@ -250,6 +289,14 @@ func LoadSession(path string) (*Session, error) {
 		var m provider.Message
 		if err := dec.Decode(&m); err != nil {
 			if errors.Is(err, io.EOF) {
+				break
+			}
+			// A torn LAST line (power loss between the rename and the data
+			// blocks landing) must not lose the whole session — salvage every
+			// message that decoded cleanly (P1-E5, mirrors present.Load). The
+			// HMAC .sig check above still catches real tampering.
+			if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+				slog.Warn("session: torn tail salvaged — dropping the truncated final message", "path", path)
 				break
 			}
 			return nil, fmt.Errorf("decode %s: %w", path, err)

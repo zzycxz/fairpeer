@@ -147,15 +147,15 @@ func (m *Manager) fileWeakCredFinding(res WeakCredResult) {
 	src := "assess:weak-cred:" + res.Tier + ":" + res.Device
 	now := time.Now()
 	f := &Finding{
-		Title:    "弱口令：" + res.Device + " SSH 可被弱口令登录",
-		Severity: SeverityCritical,
-		Devices:  []string{res.Device},
-		Detail:   res.Detail + "。命中于 " + now.Format("01-02 15:04:05") + " 的 " + res.Tier + " 档核查（尝试 " + fmt.Sprintf("%d", res.Attempts) + " 次，预算 " + fmt.Sprintf("%d", res.Budget) + "）。凭证原文不落任何日志。",
-		Evidence: []Evidence{{Device: res.Device, Command: "weak-cred-check (" + res.Tier + ")", Output: "attempt " + fmt.Sprintf("%d", res.Attempts) + " accepted (password not logged)"}},
+		Title:      "弱口令：" + res.Device + " SSH 可被弱口令登录",
+		Severity:   SeverityCritical,
+		Devices:    []string{res.Device},
+		Detail:     res.Detail + "。命中于 " + now.Format("01-02 15:04:05") + " 的 " + res.Tier + " 档核查（尝试 " + fmt.Sprintf("%d", res.Attempts) + " 次，预算 " + fmt.Sprintf("%d", res.Budget) + "）。凭证原文不落任何日志。",
+		Evidence:   []Evidence{{Device: res.Device, Command: "weak-cred-check (" + res.Tier + ")", Output: "attempt " + fmt.Sprintf("%d", res.Attempts) + " accepted (password not logged)"}},
 		Suggestion: "立即经变更更换该设备登录凭证，并检查同分组其他设备是否复用同一口令。",
-		Fix:     &FixHint{Type: "credential", Ref: "经变更提案更换该设备 SSH 登录凭证（并排查同分组口令复用）", Confidence: "verified"},
-		Source:  src,
-		Status:  "active",
+		Fix:        &FixHint{Type: "credential", Ref: "经变更提案更换该设备 SSH 登录凭证（并排查同分组口令复用）", Confidence: "verified"},
+		Source:     src,
+		Status:     "active",
 	}
 	// Dedup: a re-check that still confirms UPDATES the same alert instead of
 	// piling copies (same grammar as reconcileBaselineFindings).

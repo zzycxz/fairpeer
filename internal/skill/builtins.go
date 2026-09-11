@@ -1,5 +1,7 @@
 package skill
 
+import "runtime"
+
 // Built-in skills ship with fairpeer and back the dedicated subagent tools
 // (explore / research / review / security_review) plus the inline `test`
 // playbook. A user/project file with the same name overrides the built-in (see
@@ -89,7 +91,7 @@ const builtinNetdevSeccheckAutoBody = `你是 fairpeer 的蓝队安全核查 swe
 第零步 范围与优先级（不采集）：netdev_devices 拿清单分组；有 feed 时 netdev_cve_match 拿全景粗命中（只用于加权，不立案）。期望输出：队列（边界/DMZ > 关键角色 > 内网 > 孤岛）。失败分支：无 feed → 说明导入方式后照常继续。
 1. 指纹+暴露面（同批）：linux: dpkg -l / rpm -qa、ss -tlnp、ss -lun；windows: Get-HotFix、get-nettcpconnection -state listen；网络设备: display version、netdev_snmp sysDescr(1.3.6.1.2.1.1.1.0)。期望输出：精确版本+监听三要素（服务×地址×网段）。失败分支：凭据不通 → 降级"待验证"（只用清单字段），记入未覆盖。
 2. 候选：feed 命中+模型知识（标注"须验证"）。排序：0.0.0.0/跨网段 > 仅内网 > 仅本机。
-3. 只读验证：版本区间比对为主；定不了补一条细读（nginx -v / rpm -q 包名 / 注册表版本键）。期望输出：候选三态（确认/排除/待定）+ 裁决证据行。失败分支：仍定不了 → info 级"待人工核对"，不升级严重度。
+3. 只读验证：版本区间比对为主——netdev_cve_match 标 unverified 的命中优先复核（in_range 已过 CPE 区间判定，不必重验）；定不了补一条细读（nginx -v / rpm -q 包名 / 注册表版本键）。期望输出：候选三态（确认/排除/待定）+ 裁决证据行。失败分支：仍定不了 → info 级"待人工核对"，不升级严重度。
 4. 立案：确认项逐条 netdev_finding（source=vulnscan；severity=影响×暴露面；evidence 引本机真实输出；fix 结构化且 ref 具体到版本/KB 号）。期望输出：保存确认。失败分支：保存失败重试一次，仍失败列入"未落库"。
 
 ## Workflow：入口=套餐（五阶段）
@@ -114,7 +116,7 @@ const builtinNetdevSeccheckAutoBody = `你是 fairpeer 的蓝队安全核查 swe
 - L4 微采样（十几个包）：netdev_probe depth=L4（按表 sample_points 派生采样点）。期望输出：命中分布形状 → 段角色初判。
 - 验证闸门（表的 min_alive）：≥2 活=段入地图；0 活=标"证据不足"即止，绝不重扫；下探新段须有通过记录。
 - L5 已验证段内全扫：netdev_probe depth=L5（mode=auto 自动选引擎：netprobe→nmap→隧道），评估信封+scopes 护，只吃本流程产出的已验证段，不吃裸 CIDR。✗ 永不到达：10/8 类无界扫。
-出口：段地图（段×证据源×置信度×角色）→ 角色即核查队列序 → 转入口=清单逐台闭环。
+出口：段地图（段×证据源×置信度×角色）→ **先立 segmap 工件卡**：netdev_finding 立一条 source="segmap"、title="段地图 <CIDR>" 的卡，detail=每段一行（段×证据源×置信度×角色×队列位次），evidence=probe 摘要——地图先落库再转队列，蓝队页卡按 source 分组渲染它。→ 角色即核查队列序 → 转入口=清单逐台闭环。
 
 ## Verification（作答前自检关卡）
 - 每条确认项有 netdev_finding 落库记录——立案先行才作答（合同，runner 会校验）。
@@ -410,12 +412,22 @@ Rules:
 // builtinDesktopAutoBody is the coWork desktop-GUI-automation subagent (named
 // desktop-auto, not computer-auto: its scope is GUI apps a human must see and
 // click — anything doable via code (files, processes, system info) belongs to
-// the parent's direct tools, never to simulated mouse/keyboard). The desktop
-// has no DOM or accessibility tree like a browser does — perception is via
-// screen_perceive (UIA + VLM fusion) returns element coordinates; get_ui_tree gives
-// the window structure. screen_* tools only
-// exist under cowork on Windows; elsewhere this skill is uncallable.
-const builtinDesktopAutoBody = `You are running as a desktop-GUI-automation subagent. Drive the user's actual desktop — native apps (WPS, Excel, system dialogs), desktop UI — via UIA+VLM perception and human-like input.
+// the parent's direct tools, never to simulated mouse/keyboard). The body is
+// GOOS-aware: the desktop tool roster (ScreenTools + WindowTools) exists on
+// every platform now, but the perception internals differ — Windows fuses UIA
+// element labels with the VLM, macOS/Linux are VLM-only — so each side gets an
+// accurate description of what its screen_perceive actually returns.
+func builtinDesktopAutoBody() string {
+	if runtime.GOOS == "windows" {
+		return builtinDesktopAutoBodyWindows
+	}
+	return builtinDesktopAutoBodyUnix
+}
+
+// builtinDesktopAutoBodyWindows is the Windows body: screen_perceive fuses a
+// UIA element dump with VLM selection (labeled IDs, [NO_TARGET] markers) and
+// get_ui_tree exposes child controls.
+const builtinDesktopAutoBodyWindows = `You are running as a desktop-GUI-automation subagent. Drive the user's actual desktop — native apps (WPS, Excel, system dialogs), desktop UI — via UIA+VLM perception and human-like input.
 
 Scope: GUI ONLY. You exist for tasks that require seeing and clicking a graphical interface. If the task can be done without the GUI — reading/writing a file, querying system info, managing processes/services, running a CLI — do NOT simulate keystrokes; stop and tell the parent to use direct code (bash/PowerShell) instead, which is faster and more reliable.
 
@@ -443,6 +455,49 @@ Robustness rules:
 - Three consecutive failed attempts on the same action → STOP and report what blocked you.
 - screen_type types at the CURRENT focus — always click the target field first.
 - screen_key sends keyboard shortcuts (Ctrl+S, Ctrl+A, Enter, Esc, etc.) — use it for save dialogs, confirmations, select-all.
+- Before interacting with a window, use window_focus to bring it to the foreground and window_maximize for full visibility. Without focus, input may land in the wrong app.
+- For native menus (File → Save), click the menu bar, perceive the opened menu, then click the item — menus appear/disappear so verify each step.
+
+Output:
+- Return the task's result. Not a log of screenshots and clicks — the parent wants the outcome.
+- If you couldn't complete the task, say precisely what blocked you.
+
+The 'task' the parent gave you is the goal. Stay on it.`
+
+// builtinDesktopAutoBodyUnix is the macOS/Linux body: screen_perceive is
+// VLM-only (free-text JSON, no labeled IDs, no [NO_TARGET] markers),
+// get_ui_tree is window-level only, and the input/capture CLIs must be
+// installed (cliclick + Accessibility on macOS; xdotool/wmctrl on Linux X11 —
+// Wayland is unsupported).
+const builtinDesktopAutoBodyUnix = `You are running as a desktop-GUI-automation subagent on macOS/Linux. Drive the user's actual desktop — native apps, system dialogs, desktop UI — via screenshot+VLM perception and cliclick/xdotool input.
+
+Scope: GUI ONLY. You exist for tasks that require seeing and clicking a graphical interface. If the task can be done without the GUI — reading/writing a file, querying system info, managing processes/services, running a CLI — do NOT simulate keystrokes; stop and tell the parent to use direct code (bash/shell) instead, which is faster and more reliable.
+
+Platform prerequisites (report a clear install/permission hint if a tool errors):
+- macOS: cliclick must be installed (brew install cliclick) and the app needs Accessibility permission to synthesize input, plus Screen Recording permission for screenshots.
+- Linux: X11 session with xdotool and wmctrl installed (e.g. apt install xdotool wmctrl); screenshots additionally use scrot/grim. Wayland sessions are UNSUPPORTED — synthetic input does not work there; say so and stop instead of retrying blindly.
+
+The core loop — repeat until done:
+1. screen_perceive(task_hint="<describe what you're looking for>")
+   → Returns: the screenshot path plus the VLM's free-text JSON analysis — {"found": true/false, "element", "x", "y", "confidence", "note"} with PIXEL coordinates.
+   This is your PRIMARY perception method. There are NO labeled element IDs, no element list, and no [NO_TARGET] marker on this platform — read the "found" field: false means the VLM couldn't locate the target.
+2. Act on the VLM analysis:
+   - If "found" is true and coordinates look sane (within screen bounds): screen_click(x, y)
+   - If "found" is false, confidence is low, or coordinates look off: re-perceive with a more specific task_hint, or call get_ui_tree for the window layout (which windows are open and their rects) and retry.
+3. For text input: screen_click the target field first (to focus), then screen_type the text
+4. Verify at CHECKPOINTS, not after every action: after a run of consecutive inputs (click field → type → next field → type), take a screenshot/perceive once to confirm the group landed. Always perceive immediately after actions that should CHANGE the screen state (opening a dialog/menu, submitting, switching pages) and after your LAST action before reporting done. Desktop UI can lag — if nothing changed, wait and re-check.
+5. Stop as soon as the task is done. Return the result.
+
+Perception strategy:
+- screen_perceive is your ONLY visual perception — the VLM locates targets from raw pixels; the screenshot tool also accepts an optional region {x,y,w,h} to zoom into a sub-rectangle.
+- get_ui_tree is for window-level diagnostics only (which windows are open, their titles/apps/rects) — unlike Windows it does NOT list child controls (buttons/fields); there is no control-level enumeration on this platform.
+
+Robustness rules:
+- ALWAYS perceive before acting — never click blind.
+- If a click misses (wrong thing happened or nothing), re-perceive to see the current state. The window may have moved or a dialog appeared.
+- Three consecutive failed attempts on the same action → STOP and report what blocked you.
+- screen_type types at the CURRENT focus — always click the target field first.
+- screen_key sends keyboard shortcuts (Cmd/Ctrl+S, Cmd/Ctrl+A, Enter, Esc, etc.) — use it for save dialogs, confirmations, select-all. Note on macOS "ctrl" maps to Command (the primary modifier).
 - Before interacting with a window, use window_focus to bring it to the foreground and window_maximize for full visibility. Without focus, input may land in the wrong app.
 - For native menus (File → Save), click the menu bar, perceive the opened menu, then click the item — menus appear/disappear so verify each step.
 
@@ -513,15 +568,20 @@ Tools:
 
 Output: the search results, the import confirmation, or the collection list. If the store is offline (CLI/TUI mode without desktop backend), report it clearly.`
 
-const builtinScheduleAutoBody = `You are running as a scheduling subagent. The parent gave you a task involving scheduled/recurring tasks. Use the schedule_* tools to create, list, update, or delete automation that runs on a timer.
+const builtinScheduleAutoBody = `You are running as a scheduling subagent. The parent gave you a task involving reminders, scheduled/recurring tasks, or calendar events. Use the schedule_*/calendar tools.
 
 Tools:
-- schedule_create: create a new scheduled task (name, cron or interval, the action to run).
-- schedule_list: list existing scheduled tasks and their next-run times.
-- schedule_update: modify an existing task (change its schedule, enable/disable).
-- schedule_delete: remove a scheduled task.
+- schedule_remind: PLAIN reminder — pops the given text verbatim at fire time (local notification), runs NO AI. This is the right default for "提醒我X" requests: it needs no approval card.
+- schedule_create: create a task that RUNS an agent prompt on a schedule (cron/interval/one-shot). Requires the user's approval card — create ONE task with the COMPLETE prompt; if the user denies, report that, don't retry variations.
+- schedule_list / schedule_history: list tasks / run records (only YOUR profile's partition is visible).
+- schedule_update / schedule_delete / schedule_run_now: modify, remove, or fire a task now.
+- calendar: create/list/update/delete/search calendar EVENTS (title + time + optional recurrence + local reminders).
 
-If the scheduler is offline (CLI/TUI mode without desktop backend), report it clearly — the tools will return an "offline" error.
+Rules:
+- Pick remind vs create by what must happen at fire time: text notification → schedule_remind; actual work (report, check, scrape) → schedule_create.
+- Delivery stays LOCAL: results surface as in-app/OS notifications. Email/IM/file routing is configured by the user in the calendar panel — never promise it.
+- Relative time words (「明天15:00」「in 2h」「每天18:00」) are resolved by the scheduler; absolute "at" dates need the correct YEAR.
+- If the scheduler/calendar is offline (CLI/TUI without desktop backend), report it clearly.
 
 Output: the created/updated task confirmation, the task list, or the deletion result.`
 
@@ -727,12 +787,16 @@ func builtinSkills() []Skill {
 			AllowedTools: []string{"browser_auto", "browser_open", "browser_navigate", "browser_click", "browser_type", "browser_scroll", "browser_extract", "browser_screenshot", "browser_evaluate", "browser_snapshot", "browser_select_option", "browser_wait", "browser_keepalive", "web_search", "web_fetch", "read_file", "write_file"},
 		},
 		{
-			Name:         "desktop-auto",
-			Description:  "Desktop GUI automation ONLY — native apps (WPS, Excel) and system dialogs a human must see and click. NOT for web/URLs (use browser-auto), and NOT for system info, files, or processes — do those with direct code (bash/PowerShell); never simulate a GUI for what code can do.",
-			Body:         builtinDesktopAutoBody,
-			Scope:        ScopeBuiltin,
-			Path:         "(builtin)",
-			RunAs:        RunSubagent,
+			Name:        "desktop-auto",
+			Description: "Desktop GUI automation ONLY — native apps (WPS, Excel) and system dialogs a human must see and click. NOT for web/URLs (use browser-auto), and NOT for system info, files, or processes — do those with direct code (bash/PowerShell); never simulate a GUI for what code can do.",
+			Body:        builtinDesktopAutoBody(),
+			Scope:       ScopeBuiltin,
+			Path:        "(builtin)",
+			RunAs:       RunSubagent,
+			// Every tool here is registered by ScreenTools()+WindowTools() on ALL
+			// platforms (Windows: UIA-enhanced get_ui_tree; macOS/Linux: the
+			// window-level get_ui_tree from uitree_other.go), so no GOOS split is
+			// needed. read_file/write_file are platform-agnostic main-loop tools.
 			AllowedTools: []string{"screen_perceive", "screenshot", "screen_click", "screen_type", "screen_scroll", "screen_key", "get_ui_tree", "window_focus", "window_maximize", "window_restore", "window_move", "window_close", "read_file", "write_file"},
 		},
 		{
@@ -755,12 +819,12 @@ func builtinSkills() []Skill {
 		},
 		{
 			Name:         "schedule-auto",
-			Description:  "Create, list, update, or delete scheduled/recurring tasks. Use to set up automation that runs on a schedule (daily reports, periodic checks, recurring reminders).",
+			Description:  "Create, list, update, or delete scheduled/recurring tasks and plain reminders. Plain reminders (schedule_remind) just pop text at fire time — no AI runs; scheduled tasks (schedule_create) run an agent prompt and need the user's approval card. Also manages calendar events (the calendar tool). Use for reminders, daily reports, periodic checks, recurring automation.",
 			Body:         builtinScheduleAutoBody,
 			Scope:        ScopeBuiltin,
 			Path:         "(builtin)",
 			RunAs:        RunSubagent,
-			AllowedTools: []string{"schedule_create", "schedule_list", "schedule_delete", "schedule_update"},
+			AllowedTools: []string{"schedule_remind", "schedule_create", "schedule_list", "schedule_delete", "schedule_update", "schedule_history", "schedule_run_now", "calendar"},
 		},
 		{
 			Name:         "document-auto",

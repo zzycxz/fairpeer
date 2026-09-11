@@ -681,8 +681,18 @@ const SLASH_CMDS = [
 ];
 
 // ── helpers ──
+// Bearer token for --token mode: taken from ?token=… (the documented
+// entry URL, e.g. http://host:8787/?token=SECRET), stashed in sessionStorage,
+// and stripped from the address bar so it doesn't linger in history.
+const AUTH={token:(()=>{const q=new URLSearchParams(location.search).get('token');
+  if(q){sessionStorage.setItem('fp_serve_token',q);history.replaceState(null,'',location.pathname);}
+  return sessionStorage.getItem('fp_serve_token')||'';})(),
+  headers(){return this.token?{'authorization':'Bearer '+this.token}:{};}};
+function get(path) {
+  return fetch(path, {headers:AUTH.headers()});
+}
 function post(path, body) {
-  return fetch(path, {method:'POST',headers:{'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
+  return fetch(path, {method:'POST',headers:Object.assign({'content-type':'application/json'},AUTH.headers()),body:body?JSON.stringify(body):undefined});
 }
 function scrollDown() { requestAnimationFrame(()=>{log.scrollTop=log.scrollHeight;});}
 function hideWelcome() { if(welcome) welcome.style.display='none';}
@@ -857,7 +867,7 @@ const SCOPES = [
 ];
 
 function openRewindPicker() {
-  fetch('/checkpoints').then(r=>r.json()).then(cps=>{
+  get('/checkpoints').then(r=>r.json()).then(cps=>{
     if(!cps||cps.length===0){log.appendChild(el('div','notice',__('no_checkpoints')));scrollDown();return;}
     rewindCheckpoints=cps; rewindStage=0; rewindSelected=0; rewindScope=0;
     renderRewindPicker();
@@ -949,7 +959,9 @@ function closeSlashMenu(){slashOpen=false;const m=$('#slash-menu');if(m)m.remove
 function acceptSlash(){if(!slashOpen)return;const c=slashFiltered[slashIndex];if(c){input.value='/'+c.cmd+' ';}closeSlashMenu();input.focus();}
 
 // ── SSE ──
-const es=new EventSource('/events');
+// EventSource cannot set headers, so --token mode authenticates the stream
+// via the ?token= query form the guard also accepts.
+const es=new EventSource('/events'+(AUTH.token?('?token='+encodeURIComponent(AUTH.token)):''));
 es.onopen=()=>{setConnState('connected');};
 es.onmessage=ev=>{setConnState('connected');
   const e=JSON.parse(ev.data);
@@ -982,7 +994,7 @@ es.onmessage=ev=>{setConnState('connected');
     case 'ask_request': if(e.ask)showAsk(e.ask); break;
     case 'compaction_started': showCompaction({trigger:e.compaction?.trigger}); break;
     case 'compaction_done': showCompaction(e.compaction||{}); break;
-    case 'turn_done': finalizeMsg(); setRunning(false); if(e.err){log.appendChild(el('div','msg--error','✗ '+e.err));scrollDown();} fetchStatus(); break;
+    case 'turn_done': if(e.cancelled){ addMsg('system','⏹ stopped'); break; } finalizeMsg(); setRunning(false); if(e.err){log.appendChild(el('div','msg--error','✗ '+e.err));scrollDown();} fetchStatus(); break;
   }
 };
 es.onerror=()=>{
@@ -992,7 +1004,7 @@ es.onerror=()=>{
 
 // ── status polling ──
 function fetchStatus(){
-  fetch('/status').then(r=>r.json()).then(s=>{
+  get('/status').then(r=>r.json()).then(s=>{
     if(s.label)statusModel.textContent=s.label;
     // sync mode UI without triggering POST (server is source of truth)
     planMode=!!s.plan;
@@ -1045,12 +1057,12 @@ function renderHistoryMessages(ms){
   });
   currentMsg=null;currentText=null;currentReasoning=null; scrollDown();
 }
-fetch('/history').then(r=>r.json()).then(renderHistoryMessages).catch(()=>{});
+get('/history').then(r=>r.json()).then(renderHistoryMessages).catch(()=>{});
 
 // ── session list ──
 function loadSessions(){
   sessionCount=0;
-  fetch('/sessions').then(r=>r.json()).then(ss=>{
+  get('/sessions').then(r=>r.json()).then(ss=>{
     const list=$('#session-list'); if(!list)return;
     if(!ss||ss.length===0){list.innerHTML='<div style="padding:10px;color:var(--muted-2);font-size:12px">'+__('no_sessions')+'</div>';return;}
     list.innerHTML='';
@@ -1061,7 +1073,7 @@ function loadSessions(){
       const title=s.title||name.replace(/^\w+-/,'').replace(/T/,' ').replace(/[-_]/g,' ').slice(0,30);
       const meta=s.turns?s.turns+' turns':'';
 	      item.innerHTML='<svg class="session-item__icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><div class="session-item__body"><div class="session-item__title">'+escHtml(title)+'</div><div class="session-item__meta">'+escHtml(meta)+'</div></div><button type="button" class="session-del" data-name="'+escAttr(s.name)+'" title="'+escAttr(__('delete_confirm'))+'">&times;</button>';
-      item.onclick=()=>{if(running||s.current)return;post('/resume',{path:s.path}).then(()=>{log.innerHTML='';log.appendChild(welcome);welcome.style.display='';loadSessions();setTimeout(()=>fetch('/history').then(r=>r.json()).then(renderHistoryMessages),300);});};
+      item.onclick=()=>{if(running||s.current)return;post('/resume',{path:s.path}).then(()=>{log.innerHTML='';log.appendChild(welcome);welcome.style.display='';loadSessions();setTimeout(()=>get('/history').then(r=>r.json()).then(renderHistoryMessages),300);});};
       list.appendChild(item);
     });
   }).catch(()=>{const list=$('#session-list');if(list)list.innerHTML='<div style="padding:10px;color:var(--muted-2);font-size:12px">'+__('error_loading')+'</div>';});
@@ -1131,7 +1143,7 @@ function openStats(){
   const modal=$('#stats-modal');
   if(!modal)return;
   // populate from latest status
-  fetch('/status').then(r=>r.json()).then(s=>{
+  get('/status').then(r=>r.json()).then(s=>{
     $('#stats-model').textContent=s.label||'-';
     $('#stats-sessions').textContent=sessionCount||'0';
     const total=cumulativeTokens||s.used||0;

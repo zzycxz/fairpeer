@@ -552,7 +552,7 @@
 .tsearch {
   position: sticky;
   top: 8px;
-  z-index: calc(var(--z-inline-sticky) + 1);
+  z-index: var(--z-local-backdrop);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1259,7 +1259,6 @@
   font-size: 13px;
   color: var(--fg-faint);
   border-radius: var(--radius-sm);
-  -webkit-app-region: no-drag;
 }
 .reasoning__head:hover {
   color: var(--fg);
@@ -1348,7 +1347,6 @@
   text-align: left;
   cursor: pointer;
   border-radius: var(--radius-sm);
-  -webkit-app-region: no-drag;
 }
 .process-card__head:hover {
   color: var(--fg);
@@ -1755,7 +1753,6 @@
   text-align: left;
   cursor: pointer;
   border-radius: var(--radius-sm);
-  -webkit-app-region: no-drag;
   overflow: hidden;
 }
 .tool__head:hover {
@@ -1914,6 +1911,12 @@
   opacity: 0.7;
 }
 
+/* BranchTree rows (U-6): title + dim one-line preview stacked in a column, so
+   unnamed branches (timestamp IDs) stay identifiable. Grows so the meta chip
+   keeps its right edge; preview mirrors agd__meta's dim treatment. */
+.branch-tree__texts { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; gap: 1px; }
+.branch-tree__preview { font-size: 11.5px; opacity: 0.55; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* AgentDashboard (upgrade spec 2-7) */
 .agd { position: fixed; inset: 0; z-index: var(--z-modal); display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; background: color-mix(in srgb, var(--bg) 55%, transparent); }
 .agd__card { width: min(560px, 92vw); background: var(--bg); border: 1px solid var(--border-soft); border-radius: var(--radius-md); box-shadow: 0 12px 40px rgba(0,0,0,0.25); overflow: hidden; }
@@ -1987,6 +1990,20 @@
 .termsession__close:hover { opacity: 1; }
 .termsession__host { flex: 1 1 auto; min-height: 0; padding: 4px 8px; }
 .termsession__host .xterm { height: 100%; }
+
+/* Terminal chrome follows the app theme alongside the xterm palette in
+   TerminalSession (Catppuccin Mocha dark / Latte light). Forced light first,
+   then prefers-light for auto — same order themes.css uses. */
+:root[data-theme="light"] .termsession { background: #eff1f5; }
+:root[data-theme="light"] .termsession__bar { background: #e6e9ef; color: #4c4f69; }
+:root[data-theme="light"] .termsession__err { color: #d20f39; }
+:root[data-theme="light"] .termsession__exited { color: #40a02b; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .termsession { background: #eff1f5; }
+  :root:not([data-theme="dark"]) .termsession__bar { background: #e6e9ef; color: #4c4f69; }
+  :root:not([data-theme="dark"]) .termsession__err { color: #d20f39; }
+  :root:not([data-theme="dark"]) .termsession__exited { color: #40a02b; }
+}
 
 /* UnifiedDiff — server-diff renderer (upgrade spec 1-2) */
 .udiff {
@@ -2097,6 +2114,9 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.tool__stat--diff { display: inline-flex; gap: 4px; }
+.tool__stat-add { color: var(--ok, #3fb950); }
+.tool__stat-del { color: var(--danger, #f85149); }
 .tool__subject {
   flex: 1 1 auto;
   min-width: 0;
@@ -2105,6 +2125,24 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tool__subject--error { color: var(--danger, #f85149); opacity: 0.9; }
+/* Writer cards: the target path doubles as the "open in editor" affordance
+   (same subject layout, button reset). */
+.tool__path {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool__path:hover { color: var(--fg); text-decoration: underline dotted; }
 .tool__profile {
   font-family: var(--mono);
   font-size: var(--font-caption);
@@ -2177,11 +2215,34 @@
   border-radius: var(--radius-sm);
   word-break: break-all;
 }
+/* X6：路径行 = 可点路径 + 揭示/预览小动作（办公产物直达；与卡头的
+   .tool__path / .tool__editor-open 同一交互语法）。 */
+.toolcard-office__pathrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.toolcard-office__pathrow .toolcard-office__path {
+  margin-bottom: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.toolcard-office__path--link {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  border: 0;
+  cursor: pointer;
+}
+.toolcard-office__path--link:hover { color: var(--fg); text-decoration: underline dotted; }
+.toolcard-office__pathrow .tool__showall { margin-top: 0; flex: 0 0 auto; }
 /* Spec-2 Phase 2：搜索命中 mark + 跳转闪烁 */
 .ts-mark {
   color: inherit;
   background: color-mix(in srgb, var(--accent, #89b4fa) 32%, transparent);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   padding: 0 1px;
 }
 .ts-flash {

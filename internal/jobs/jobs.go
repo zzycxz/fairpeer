@@ -22,6 +22,7 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/event"
 	"github.com/zzycxz/fairpeer/internal/nilutil"
+	"github.com/zzycxz/fairpeer/internal/spill"
 )
 
 // Status is a job's lifecycle state.
@@ -88,6 +89,11 @@ type cappedBuffer struct {
 	tailCap   int
 	full      bool
 	truncated int64
+	// spill captures every byte written AFTER the cap engages, so the discarded
+	// middle stays retrievable (P1-B1). Nil until the first overflow (or when
+	// spilling is disabled — tests and small buffers).
+	spill   *spill.Sink
+	spillTo *spill.Sink
 }
 
 // NewCappedBuffer returns a capped buffer retaining at most capBytes (split
@@ -105,10 +111,23 @@ func newCappedBuffer(capBytes int) *cappedBuffer {
 	return &cappedBuffer{tailCap: half}
 }
 
+// EnableSpill turns on overflow capture: once the head fills, everything
+// written from then on also lands in a spill file whose path appears in the
+// truncation marker — the model reads the full overflow back with read_file
+// instead of re-running the tool.
+func (b *cappedBuffer) EnableSpill(label string) {
+	if sink, err := spill.Open(label); err == nil {
+		b.spill = sink
+	}
+}
+
 // Write stores p, honoring the head+tail cap. Always returns len(p), nil so the
 // producer (cmd.Stdout) never errors on a cap overrun.
 func (b *cappedBuffer) Write(p []byte) (int, error) {
 	if b.full {
+		if b.spillTo != nil {
+			b.spillTo.Write(p) // keep the discarded middle retrievable (P1-B1)
+		}
 		b.truncated += int64(len(p))
 		return len(p), nil
 	}
@@ -118,7 +137,13 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	// Head is full: switch to tail mode. Keep the most recent tailCap bytes.
-	b.full = true
+	if !b.full {
+		b.full = true
+		b.spillTo = b.spill
+	}
+	if b.spillTo != nil {
+		b.spillTo.Write(p)
+	}
 	b.tail = append(b.tail, p...)
 	if len(b.tail) > b.tailCap {
 		b.truncated += int64(len(b.tail) - b.tailCap)
@@ -132,9 +157,26 @@ func (b *cappedBuffer) String() string {
 	if !b.full {
 		return b.head.String()
 	}
+	if p := b.spillPath(); p != "" {
+		return b.head.String() +
+			fmt.Sprintf("\n... (truncated %d bytes — full overflow saved to %s; read it with the read_file tool) ...\n", b.truncated, p) +
+			string(b.tail)
+	}
 	return b.head.String() +
 		fmt.Sprintf("\n... (truncated %d bytes) ...\n", b.truncated) +
 		string(b.tail)
+}
+
+func (b *cappedBuffer) spillPath() string {
+	if b.spillTo == nil {
+		return ""
+	}
+	return b.spillTo.Path()
+}
+
+// closeSpill closes the overflow sink (nil-safe) once the job is done writing.
+func (b *cappedBuffer) closeSpill() {
+	b.spillTo.Close()
 }
 
 // Len returns the total retained length (head + tail, excluding discarded).
@@ -188,6 +230,7 @@ func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io
 	id := fmt.Sprintf("%s-%d", kind, m.seq)
 	ctx, cancel := context.WithCancel(m.root)
 	j := &Job{ID: id, Kind: kind, Label: label, status: Running, startedAt: nowMs(), cancel: cancel, done: make(chan struct{}), buf: newCappedBuffer(JobOutputCap)}
+	j.buf.EnableSpill(id) // P1-B1: oversized job output stays retrievable
 	m.jobs[id] = j
 	m.order = append(m.order, id)
 	m.mu.Unlock()
@@ -220,6 +263,7 @@ func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io
 		m.recordCompletion(id, kind, label, st, err)
 
 		j.mu.Lock()
+		j.buf.closeSpill() // the process is done writing — seal the overflow sink
 		j.result = result
 		if j.status != Killed { // a concurrent Kill already published Killed — keep it
 			j.status = st

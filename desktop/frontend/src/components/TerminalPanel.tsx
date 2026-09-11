@@ -14,6 +14,7 @@ import type { ReactNode } from "react";
 import { ChevronDown, Eraser, MessageSquare, Plus, Route, TerminalSquare, X } from "lucide-react";
 import { app, onEvent } from "../lib/bridge";
 import { useT } from "../lib/i18n";
+import { useToast } from "../lib/toast";
 import type { WireEvent, WireTool } from "../lib/types";
 import { getScopedItem, setScopedItem } from "../lib/profileScopedStorage";
 import { DeviceTerminal } from "./DeviceTerminal";
@@ -93,6 +94,7 @@ export function TerminalPanel({
   tabID?: string;
 }) {
   const t = useT();
+  const { showToast } = useToast();
   const [terms, setTerms] = useState<TermState[]>(() => cachedTerms ?? [newTerm()]);
   const [activeId, setActiveId] = useState<number | typeof SESSION_TAB_ID>(() => cachedActiveId ?? terms[0].id);
   useEffect(() => {
@@ -209,6 +211,13 @@ export function TerminalPanel({
     }));
   };
 
+  // PTY 创建失败（后端无 pty 支持/资源受限）：把页签退回一次性命令模式并
+  // 提示。原始 Go 错误只进 console（TerminalSession 已 console.warn）。
+  const fallbackToPipe = (id: number) => {
+    patchTerm(id, (term) => ({ ...term, mode: "pipe", running: false }));
+    showToast(t("terminal.ptyFallback"), "warn");
+  };
+
   const submit = () => {
     const cmd = value.trim();
     if (!cmd || !active || active.running) return;
@@ -245,11 +254,11 @@ export function TerminalPanel({
                   aria-selected={term.id === activeId}
                   className="terminal-panel__tab-btn"
                   onClick={() => setActiveId(term.id)}
-                  title={`人工终端 ${term.device}（§6.1 全程审计录制）`}
+                  title={t("terminal.manualTitle", { device: term.device })}
                 >
                   <Route size={11} />
                   <span>{term.device}</span>
-                  <span className="terminal-panel__tab-rec" aria-label="录制中" title="录制中（审计回放见「审计」页签）" />
+                  <span className="terminal-panel__tab-rec" aria-label={t("terminal.recording")} title={t("terminal.recordingTip")} />
                 </button>
                 <button
                   type="button"
@@ -348,7 +357,11 @@ export function TerminalPanel({
         </div>
       ) : active?.mode === "pty" ? (
         <div className="terminal-panel__pty">
-          <TerminalSession embedded tabId={tabID} />
+          <TerminalSession
+            embedded
+            tabId={tabID}
+            onPtyUnavailable={() => active && fallbackToPipe(active.id)}
+          />
         </div>
       ) : (
         <>

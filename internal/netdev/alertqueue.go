@@ -29,8 +29,25 @@ var (
 	suppressPath string
 )
 
-// suppressionTable maps Source key → false-positive count.
-type suppressionTable map[string]int
+// suppressionEntry is one Source key's false-positive memory. LastAt anchors
+// the TTL: a suppression that never expired meant a twice-flagged noisy source
+// went PERMANENTLY quiet — the 3 a.m. real alarm on the same key never paged
+// anyone (P1-F12). suppressionTTL bounds how long the learning is trusted.
+type suppressionEntry struct {
+	Count  int       `json:"count"`
+	LastAt time.Time `json:"last_at"`
+}
+
+// suppressionTTL is how long a false-positive memory suppresses. 7 days: long
+// enough to calm a flapping source, short enough that a genuinely dead device
+// re-alarms within a weekly on-call rotation.
+const suppressionTTL = 7 * 24 * time.Hour
+
+// suppressionSuppressionFloor… threshold: 3 false-positives (was 2) before a
+// source's severity degrades — two marks is often one bad night, not a pattern.
+const suppressionThreshold = 3
+
+type suppressionTable map[string]suppressionEntry
 
 func suppressionFile() string {
 	if suppressPath == "" {
@@ -46,7 +63,22 @@ func loadSuppressions() suppressionTable {
 	}
 	var t suppressionTable
 	if json.Unmarshal(raw, &t) != nil {
+		// Pre-P1-F12 files were map[string]int — treat as expired (they were
+		// permanent suppressions; expiring them is the point of the TTL).
 		return suppressionTable{}
+	}
+	// Prune expired entries on load; persist the pruning so the file itself
+	// reflects what is actually suppressed.
+	now := time.Now()
+	pruned := false
+	for k, e := range t {
+		if e.LastAt.IsZero() || now.Sub(e.LastAt) > suppressionTTL {
+			delete(t, k)
+			pruned = true
+		}
+	}
+	if pruned {
+		saveSuppressions(t)
 	}
 	return t
 }
@@ -61,7 +93,7 @@ func saveSuppressions(t suppressionTable) {
 func suppressCount(source string) int {
 	suppressMu.Lock()
 	defer suppressMu.Unlock()
-	return loadSuppressions()[source]
+	return loadSuppressions()[source].Count
 }
 
 // suppressIncr bumps the false-positive count for a Source key.
@@ -72,8 +104,30 @@ func suppressIncr(source string) {
 	suppressMu.Lock()
 	defer suppressMu.Unlock()
 	t := loadSuppressions()
-	t[source]++
+	e := t[source]
+	e.Count++
+	e.LastAt = time.Now()
+	t[source] = e
 	saveSuppressions(t)
+}
+
+// UnsuppressSource clears a Source key's false-positive memory — the manual
+// escape hatch when the learning is wrong (the operator knows this alarm is
+// real). Audited so un-suppressing is itself on record.
+func UnsuppressSource(source string) error {
+	if source == "" {
+		return nil
+	}
+	suppressMu.Lock()
+	defer suppressMu.Unlock()
+	t := loadSuppressions()
+	if _, ok := t[source]; !ok {
+		return nil
+	}
+	delete(t, source)
+	saveSuppressions(t)
+	_ = AppendAudit(Audit{Device: "(alerts)", Command: "unsuppress " + source, Class: "alert", Status: AuditOK})
+	return nil
 }
 
 // suppressedSeverity degrades an auto-finding per §4.10 误报学习.
@@ -81,7 +135,7 @@ func suppressedSeverity(source, sev string) (string, bool) {
 	if source == "" {
 		return sev, false
 	}
-	if n := suppressCount(source); n >= 2 {
+	if n := suppressCount(source); n >= suppressionThreshold {
 		return SeverityInfo, true
 	}
 	return sev, false

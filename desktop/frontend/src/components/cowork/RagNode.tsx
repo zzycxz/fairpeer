@@ -14,6 +14,7 @@ import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, Info, Zap, Ban
 import type { RagETAView, RagNodeView } from "../../lib/types";
 import { app } from "../../lib/bridge";
 import { useT, type Translator } from "../../lib/i18n";
+import { humanizeRagError } from "../../lib/ragError";
 import { Tooltip } from "../Tooltip";
 import { fileIconColor } from "./fileTypeColors";
 
@@ -59,7 +60,7 @@ export function RagNode({
   }, [isExtracting, node.jobId]);
 
   return (
-    <div className={`ragft-node${node.status === "enriched" ? " ragft-node--enriched" : ""}${node.status === "error" ? " ragft-node--error" : ""}`}>
+    <div className={`ragft-node${node.status === "enriched" ? " ragft-node--enriched" : ""}${node.status === "error" ? " ragft-node--error" : ""}${node.status === "partial" ? " ragft-node--partial" : ""}`}>
       <div
         className={`ragft-row${active ? " ragft-row--active" : ""}`}
         style={{ paddingLeft: 8 + depth * 14 }}
@@ -123,10 +124,10 @@ export function RagNode({
                 <button
                   type="button"
                   className="ragft-btn ragft-btn--accent"
-                  title={node.status === "enriched" ? t("cowork.ragReExtract") : t("cowork.ragDeepExtract")}
+                  title={node.status === "enriched" ? t("cowork.ragReExtract") : node.status === "partial" || node.status === "error" ? t("cowork.ragRetryTitle") : t("cowork.ragDeepExtract")}
                   onClick={() => onStartExtract(node)}
                 >
-                  {node.status === "error" ? <RefreshCw size={13} /> : <Zap size={13} />}
+                  {node.status === "error" || node.status === "partial" ? <RefreshCw size={13} /> : <Zap size={13} />}
                 </button>
               )}
               <button type="button" className="ragft-btn ragft-btn--danger" title={t("cowork.ragRemove")} onClick={() => onRemove(node)}>
@@ -163,8 +164,15 @@ function statusTitle(node: RagNodeView, t: Translator): string {
       return t("cowork.ragStatusEnriched") + (node.entityCount > 0 ? ` · ${node.entityCount}` : "");
     case "extracting":
       return t("cowork.ragStatusExtracting");
+    case "partial":
+      return t("cowork.ragStatusPartial") + " · " + t("cowork.ragPartialHint")
+        .replace("{ok}", String(Math.max(0, node.doneChunks - node.failedChunks)))
+        .replace("{total}", String(node.totalChunks))
+        .replace("{n}", String(node.failedChunks));
+    case "queued":
+      return t("cowork.ragStatusQueuedTitle");
     case "error":
-      return t("cowork.ragStatusError") + (node.errorMsg ? `: ${node.errorMsg}` : "");
+      return t("cowork.ragStatusError") + (node.errorMsg ? `: ${humanizeRagError(node.errorMsg, t)}` : "");
     case "cancelled":
       return t("cowork.ragStatusCancelled");
     default:
@@ -182,6 +190,10 @@ function statusText(node: RagNodeView, t: Translator): string {
       return node.entityCount > 0 ? `${node.entityCount}` : t("cowork.ragStatusEnriched");
     case "extracting":
       return ""; // progress bar handles this state
+    case "partial":
+      return t("cowork.ragStatusPartial");
+    case "queued":
+      return t("cowork.ragStatusQueued");
     case "error":
       return t("cowork.ragStatusError");
     case "cancelled":

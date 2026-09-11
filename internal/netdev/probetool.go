@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -107,6 +108,10 @@ func (t *probeTool) runSampled(ctx context.Context, cidr string, a struct {
 	ICMP    bool     `json:"icmp"`
 }, l4 bool) (string, error) {
 	var ips []string
+	priors, err := loadSegmentPriors()
+	if err != nil {
+		return "", fmt.Errorf("netdev_probe: %v", err)
+	}
 	if len(a.Targets) > 0 && !l4 {
 		for _, s := range a.Targets {
 			if s = strings.TrimSpace(s); s != "" {
@@ -114,10 +119,6 @@ func (t *probeTool) runSampled(ctx context.Context, cidr string, a struct {
 			}
 		}
 	} else {
-		priors, err := loadSegmentPriors()
-		if err != nil {
-			return "", fmt.Errorf("netdev_probe: %v", err)
-		}
 		if l4 {
 			ips = sampleTargetsFromCIDR(cidr, priors.SamplePoints)
 		} else {
@@ -137,6 +138,13 @@ func (t *probeTool) runSampled(ctx context.Context, cidr string, a struct {
 	// Tunnel engine per /32 — DiscoverTCP's own scope gate refuses
 	// out-of-scope addresses before any packet leaves.
 	var hits []string
+	portsSeen := map[int]bool{}
+	// 网关位 = 采样点 ∩ gateway_candidates 映射集（取 ips 前两位会把 .2 这类
+	// 基础设施区起点误当网关、把 .254 误当非网关——形状判读随之失真）。
+	gwSet := map[string]bool{}
+	for _, g := range gatewayTargetsFromCIDR(cidr, priors.GatewayCandidates) {
+		gwSet[g] = true
+	}
 	var sb strings.Builder
 	kind := map[bool]string{true: "L4 微采样", false: "L3 定点指纹"}[l4]
 	fmt.Fprintf(&sb, "%s %s：%d 个地址（隧道 TCP 探针，scopes 白名单护）\n", kind, cidr, len(ips))
@@ -151,6 +159,7 @@ func (t *probeTool) runSampled(ctx context.Context, cidr string, a struct {
 			ports := make([]string, 0, len(h.Ports))
 			for _, p := range h.Ports {
 				ports = append(ports, fmt.Sprintf("%d", p.Port))
+				portsSeen[p.Port] = true
 			}
 			banner := ""
 			if len(h.Ports) > 0 && h.Ports[0].Banner != "" {
@@ -160,12 +169,55 @@ func (t *probeTool) runSampled(ctx context.Context, cidr string, a struct {
 		}
 	}
 	if l4 {
-		fmt.Fprintf(&sb, "命中 %d/%d。按分布形状判段角色（网关命中=基础设施段；多点均匀=生产段；仅网关=候选已验证，可起草 L5）；≥%d 活才入地图，0 活标\"证据不足\"即止，绝不重扫。\n",
-			len(hits), len(ips), 2)
+		fmt.Fprint(&sb, probeL4Shape(cidr, len(hits), len(ips), gwSet, hits, portsSeen, priors))
 	} else {
 		fmt.Fprintf(&sb, "命中 %d/%d。网关判定请结合 ping TTL（segment-priors.ttl_map）。\n", len(hits), len(ips))
 	}
 	return sb.String(), nil
+}
+
+// probeL4Shape renders the L4 verdict (批 D②：采样判读下沉为输出注解——
+// 分布形状读段角色，ports 型 role_signals 命中时按表给角色候选；OUI/SNMP 型
+// 信号如实注明不在 probe 判读面内）。
+func probeL4Shape(cidr string, hits, total int, gwSet map[string]bool, hitIPs []string, portsSeen map[int]bool, priors *segmentPriors) string {
+	gwHits := 0
+	for _, ip := range hitIPs {
+		if gwSet[ip] {
+			gwHits++
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "形状注解（%s）：命中 %d/%d（网关位命中 %d；隧道探针默认只探 ports [22,23]，传 ports= 扩面）。\n", cidr, hits, total, gwHits)
+	fired := false
+	for _, s := range priors.RoleSignals {
+		if s.Role == "" {
+			continue
+		}
+		match := false
+		for _, ps := range s.Ports {
+			// 端口号不是八位组——atoiSafe 的 255 上限会把 445/88 全部拒掉。
+			if n, err := strconv.Atoi(strings.TrimSpace(ps)); err == nil && portsSeen[n] {
+				match = true
+				break
+			}
+		}
+		if match {
+			fmt.Fprintf(&b, "  信号命中（ports %s）→ 角色 %s → %s\n", strings.Join(s.Ports, ","), s.Role, s.Action)
+			fired = true
+		}
+	}
+	if !fired {
+		switch {
+		case hits == 0:
+			b.WriteString("  0 活：证据不足即止，绝不重扫。\n")
+		case hits == gwHits:
+			b.WriteString("  仅网关位活：候选已验证段，可起草 L5 全扫。\n")
+		default:
+			b.WriteString("  多点分布：生产段候选，可起草 L5 全扫。\n")
+		}
+	}
+	b.WriteString("  ≥2 活才入地图（min_alive）；0 活标\"证据不足\"即止。printer_oui_dense / snmp_community_hit 信号由 L2 读表 / SNMP 证据消费，不在本注解判读面。\n")
+	return b.String()
 }
 
 // runSweep covers L5 — full sweep of an already-verified segment. Engine per
@@ -237,6 +289,17 @@ type segmentPriors struct {
 	Version           int      `yaml:"version"`
 	GatewayCandidates []string `yaml:"gateway_candidates"`
 	SamplePoints      []string `yaml:"sample_points"`
+	// RoleSignals 批 D②：段职能指纹→动作。只有 ports 型信号由 L4 形状注解
+	// 判读（隧道探针默认 ports=[22,23]，模型显式传 ports 才能命中 445/88）；
+	// printer_oui_dense / snmp_community_hit 需要 ARP-OUI / SNMP 证据面，
+	// probe 判读不了——注解里如实注明由 L2/SNMP 证据消费，不假装判读。
+	RoleSignals []struct {
+		Ports           []string `yaml:"ports"`
+		PrinterOUIDense bool     `yaml:"printer_oui_dense"`
+		SNMPHit         bool     `yaml:"snmp_community_hit"`
+		Role            string   `yaml:"role"`
+		Action          string   `yaml:"action"`
+	} `yaml:"role_signals"`
 }
 
 func loadSegmentPriors() (*segmentPriors, error) {

@@ -74,8 +74,8 @@ func decodeWSLOutput(raw []byte) string {
 
 // parseWSLList parses `wsl -l -v` output lines like:
 //
-//	* Ubuntu    Running    2
-//	  Debian    Stopped    1
+//   - Ubuntu    Running    2
+//     Debian    Stopped    1
 func parseWSLList(out string) []wslDistro {
 	distros := []wslDistro{}
 	for _, line := range strings.Split(out, "\n") {

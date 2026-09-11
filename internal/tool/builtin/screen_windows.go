@@ -203,7 +203,10 @@ func (screenCapture) Execute(ctx context.Context, args json.RawMessage) (string,
 	if len(thumb) > 4096 {
 		thumb = thumb[:4096] + "…"
 	}
-	return fmt.Sprintf("screenshot saved: %s (%dx%d)\nbase64 (first 4k): %s", path, img.Bounds().Dx(), img.Bounds().Dy(), thumb), nil
+	// Emit slash-separated paths even on Windows: the agent/attachment pipeline
+	// (attachmentImageRe) and the frontend both key on `.fairpeer/attachments/…`
+	// with forward slashes, mirroring image_generate and the control layer.
+	return fmt.Sprintf("screenshot saved: %s (%dx%d)\nbase64 (first 4k): %s", filepath.ToSlash(path), img.Bounds().Dx(), img.Bounds().Dy(), thumb), nil
 }
 
 // --- Win32 capture ----------------------------------------------------------

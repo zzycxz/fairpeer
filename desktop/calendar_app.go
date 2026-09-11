@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/zzycxz/fairpeer/internal/apihelper"
 	"github.com/zzycxz/fairpeer/internal/calendar"
+	schedulerpkg "github.com/zzycxz/fairpeer/internal/scheduler"
 	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
@@ -35,6 +37,9 @@ type CalendarEventView struct {
 	Reminders     []int    `json:"reminders"`
 	TaskID        string   `json:"taskId"`
 	Tags          []string `json:"tags"`
+	// Profile is the owning partition (dev/cowork/netdev; "" = legacy cowork).
+	// The UI may assign any partition; agent tools are partition-bound.
+	Profile string `json:"profile"`
 	// Output routing for reminders (mirrors Event). Empty outputMode = toast only.
 	OutputMode    string `json:"outputMode"`
 	OutputDest    string `json:"outputDest"`
@@ -57,9 +62,18 @@ type CalendarEventInput struct {
 	RecurrenceEnd string   `json:"recurrenceEnd"`
 	Reminders     []int    `json:"reminders"`
 	Tags          []string `json:"tags"`
-	OutputMode    string   `json:"outputMode"`
-	OutputDest    string   `json:"outputDest"`
-	OutputAccount string   `json:"outputAccount"`
+	Profile       string   `json:"profile"` // dev/cowork/netdev; "" = cowork default
+	// ActionPrompt (P4 事件动作编译): when non-empty, the event is compiled
+	// with a LINKED one-shot scheduled task that runs this prompt at the
+	// event's start time (task.ID stored in Event.TaskID). Human-UI-only by
+	// construction — the agent calendar tool parses a field whitelist with no
+	// action/task_id entry, and ICS imports carry no TaskID, so imported or
+	// agent-sourced events can never attach an execution. Empty on update =
+	// leave the linked task unchanged.
+	ActionPrompt  string `json:"actionPrompt"`
+	OutputMode    string `json:"outputMode"`
+	OutputDest    string `json:"outputDest"`
+	OutputAccount string `json:"outputAccount"`
 }
 
 const calTimeFmt = "2006-01-02T15:04"
@@ -91,6 +105,11 @@ func (a *App) initCalendar() {
 }
 
 // calendarNotifier delivers reminders as desktop toasts via Wails events.
+// The in-app event is heard by the App-root listener (every page); the OS
+// toast makes the reminder visible even when the window is minimized — same
+// two-channel discipline as schedulerNotifier. Previously only the in-app
+// event fired, so with the calendar panel unmounted a reminder was completely
+// invisible (globalization review, defect C).
 type calendarNotifier struct {
 	app *App
 }
@@ -101,6 +120,9 @@ func (n *calendarNotifier) NotifyReminder(title, body string) {
 			"title": title,
 			"body":  body,
 		})
+		// Best-effort long-duration OS toast (Windows persists to Action
+		// Center); see schedulerNotifier for the platform notes.
+		go notifyLongDurationToast(n.app.ctx, title, apihelper.Truncate(body, 200))
 	}
 }
 
@@ -167,6 +189,57 @@ func (a *App) ListCalendarEvents(since, before string) []CalendarEventView {
 	return out
 }
 
+// compileEventAction creates or resyncs the LINKED one-shot task behind an
+// event's "到点动作" (P4: events compile to scheduler tasks — the calendar
+// never gains its own executor). The task fires at the event's start, runs
+// under the event's profile partition, delivers a local notification, and is
+// reachable only from the human UI: the agent calendar tool's field whitelist
+// has no action/task_id entry, and ICS imports carry no TaskID.
+func (a *App) compileEventAction(e *calendar.Event, actionPrompt string) error {
+	if a.scheduler == nil {
+		return fmt.Errorf("scheduler is offline — cannot attach an action to the event")
+	}
+	if e.Recurrence != "" {
+		return fmt.Errorf("循环事件暂不支持到点动作，请改用任务列表新建定时任务")
+	}
+	if actionPrompt == "" {
+		return nil
+	}
+	expr := "at " + e.StartTime.Format("2006-01-02 15:04")
+	profile := e.Profile
+	if profile == "" {
+		profile = "cowork"
+	}
+	if e.TaskID != "" {
+		// Resync an existing link (time/title/prompt may all have moved).
+		if _, err := a.scheduler.Update(e.TaskID, func(t *schedulerpkg.ScheduledTask) {
+			t.Name = e.Title
+			t.Expression = expr
+			t.Prompt = actionPrompt
+			t.Profile = profile
+			t.Source = "manual"
+		}); err != nil {
+			return err
+		}
+		a.emitSchedulerChanged()
+		return nil
+	}
+	task, err := a.scheduler.Create(schedulerpkg.ScheduledTask{
+		Name:       e.Title,
+		Expression: expr,
+		Prompt:     actionPrompt,
+		Profile:    profile,
+		Source:     "manual",
+		OutputMode: "notify",
+	})
+	if err != nil {
+		return err
+	}
+	e.TaskID = task.ID
+	a.emitSchedulerChanged()
+	return nil
+}
+
 // CreateCalendarEvent creates a new event from UI input.
 func (a *App) CreateCalendarEvent(in CalendarEventInput) (CalendarEventView, error) {
 	if a.calendarStore == nil {
@@ -206,6 +279,7 @@ func (a *App) CreateCalendarEvent(in CalendarEventInput) (CalendarEventView, err
 		Timezone:      tz,
 		Color:         in.Color,
 		Source:        "manual",
+		Profile:       in.Profile, // "" → store defaults to cowork
 		Recurrence:    in.Recurrence,
 		Reminders:     in.Reminders,
 		Tags:          in.Tags,
@@ -220,6 +294,14 @@ func (a *App) CreateCalendarEvent(in CalendarEventInput) (CalendarEventView, err
 		}
 	} else if in.Recurrence != "" {
 		e.RecurrenceEnd = start.AddDate(1, 0, 0)
+	}
+
+	// P4: a non-empty action compiles into a linked one-shot task BEFORE the
+	// event is stored, so TaskID lands in the INSERT.
+	if in.ActionPrompt != "" {
+		if err := a.compileEventAction(e, in.ActionPrompt); err != nil {
+			return CalendarEventView{}, err
+		}
 	}
 
 	if err := a.calendarStore.Create(e); err != nil {
@@ -274,8 +356,11 @@ func (a *App) UpdateCalendarEvent(in CalendarEventInput) (CalendarEventView, err
 	if len(in.Tags) > 0 {
 		e.Tags = in.Tags
 	}
-	// "none" clears push routing back to toast-only; otherwise non-empty
-	// overwrites. (Empty = leave unchanged.)
+	if in.Profile != "" {
+		e.Profile = in.Profile // human may re-assign the partition
+	}
+	// Output routing (human UI only): "none" clears push routing back to
+	// toast-only; otherwise non-empty overwrites. (Empty = leave unchanged.)
 	if strings.EqualFold(strings.TrimSpace(in.OutputMode), "none") {
 		e.OutputMode = ""
 		e.OutputDest = ""
@@ -289,6 +374,13 @@ func (a *App) UpdateCalendarEvent(in CalendarEventInput) (CalendarEventView, err
 	if in.OutputAccount != "" {
 		e.OutputAccount = in.OutputAccount
 	}
+	// P4: resync the linked action task — the event's (possibly moved) start
+	// time is the task's fire time. Empty ActionPrompt leaves the link alone.
+	if in.ActionPrompt != "" {
+		if err := a.compileEventAction(e, in.ActionPrompt); err != nil {
+			return CalendarEventView{}, err
+		}
+	}
 	if err := a.calendarStore.Update(e); err != nil {
 		return CalendarEventView{}, err
 	}
@@ -296,13 +388,22 @@ func (a *App) UpdateCalendarEvent(in CalendarEventInput) (CalendarEventView, err
 	return eventToView(*e), nil
 }
 
-// DeleteCalendarEvent deletes an event by ID.
+// DeleteCalendarEvent deletes an event by id, cascading to its linked action
+// task — the compiled task has no meaning without its event.
 func (a *App) DeleteCalendarEvent(id string) error {
 	if a.calendarStore == nil {
 		return fmt.Errorf("calendar store not initialized")
 	}
+	taskID := ""
+	if e, err := a.calendarStore.Get(id); err == nil {
+		taskID = e.TaskID
+	}
 	if err := a.calendarStore.Delete(id); err != nil {
 		return err
+	}
+	if taskID != "" && a.scheduler != nil {
+		a.scheduler.Delete(taskID)
+		a.emitSchedulerChanged()
 	}
 	a.calendarChanged()
 	return nil
@@ -344,6 +445,7 @@ func eventToView(e calendar.Event) CalendarEventView {
 		Reminders:     e.Reminders,
 		TaskID:        e.TaskID,
 		Tags:          e.Tags,
+		Profile:       e.Profile,
 		OutputMode:    e.OutputMode,
 		OutputDest:    e.OutputDest,
 		OutputAccount: e.OutputAccount,
@@ -376,19 +478,25 @@ func (a *App) ImportCalendarEvents(path string) (string, error) {
 	if a.calendarStore == nil {
 		return "", fmt.Errorf("calendar store not initialized")
 	}
-	events, err := calendar.ImportICS(path)
+	res, err := calendar.ImportICS(path)
 	if err != nil {
 		return "", err
 	}
 	imported := 0
-	for _, e := range events {
+	for _, e := range res.Events {
 		if err := a.calendarStore.Create(&e); err != nil {
 			continue
 		}
 		imported++
 	}
 	a.calendarChanged()
-	return fmt.Sprintf("imported %d events from %s", imported, path), nil
+	msg := fmt.Sprintf("imported %d events from %s", imported, path)
+	// Surface lossy parsing (usually unresolvable TZIDs) so the user knows
+	// events were dropped rather than silently missing.
+	if res.SkippedNoStart > 0 {
+		msg += fmt.Sprintf(" (%d events skipped: no parsable start time, e.g. unresolvable TZID)", res.SkippedNoStart)
+	}
+	return msg, nil
 }
 
 // ExportCalendarDialog opens a save-file dialog, then exports all events to the

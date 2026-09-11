@@ -73,23 +73,42 @@ type PipelineConfig struct {
 	MaxRetries  int           // per-chunk retry count (default 3)
 	RetryBase   time.Duration // exponential backoff base (default 2s: 2/4/8s)
 	ChunkSize   int           // override store.chunkDoc default for extraction (0 = 1200)
+	// AttemptTimeout bounds ONE Extract call (a TwoStage extract makes two LLM
+	// requests inside one attempt). Must be well under Budget so a slow first
+	// attempt leaves the retry an actual chance to run.
+	AttemptTimeout time.Duration // default 120s
+	// Budget bounds the WHOLE per-chunk task (all attempts + backoffs).
+	Budget time.Duration // default 300s
 }
 
 // DefaultPipelineConfig returns conservative defaults that prioritize "no
 // errors" over throughput. Low concurrency (1) avoids API rate limits (429).
 func DefaultPipelineConfig() PipelineConfig {
 	return PipelineConfig{
-		Concurrency: 1,
-		Interval:    3 * time.Second,
-		MaxRetries:  2, // 2 attempts per chunk (1 retry); fail fast so progress moves
-		RetryBase:   2 * time.Second,
-		ChunkSize:   0, // use chunkDoc's default (3000 chars)
+		Concurrency:    1,
+		Interval:       3 * time.Second,
+		MaxRetries:     2, // 2 attempts per chunk (1 retry); fail fast so progress moves
+		RetryBase:      2 * time.Second,
+		ChunkSize:      0, // use chunkDoc's default (3000 chars)
+		AttemptTimeout: 120 * time.Second,
+		Budget:         300 * time.Second,
 	}
 }
 
 // ProgressEvent is emitted to the UI on each chunk completion. The frontend
 // computes the visible ETA from AvgLatencyMs × (TotalChunks - DoneChunks) so
 // the backend doesn't have to push a clock that ticks every second.
+// Event kind/scope constants for ProgressEvent. The frontend routes on them:
+// progress events update a tree node in place (cheap, throttled), terminal
+// events trigger a refresh (rare, never throttled — losing one would leave the
+// UI stuck on a stale state forever).
+const (
+	EventKindProgress = "progress" // intermediate update, safe to drop/throttle
+	EventKindTerminal = "terminal" // job reached a final state, must arrive
+	EventScopeChunk   = "chunk"    // per-chunk granularity (Go pipeline)
+	EventScopeFile    = "file"     // per-file granularity (Hyper-Extract)
+)
+
 type ProgressEvent struct {
 	JobID        string `json:"jobId"`
 	Collection   string `json:"collection"`
@@ -99,6 +118,15 @@ type ProgressEvent struct {
 	TotalChunks  int    `json:"totalChunks"`
 	AvgLatencyMs int64  `json:"avgLatencyMs"` // sliding-average ms/chunk
 	Message      string `json:"message"`      // human-readable summary
+	// FailedChunks mirrors the job row at emit time so the frontend can count
+	// a partially-failed job as a failure in batch summaries.
+	FailedChunks int `json:"failedChunks"`
+	// Kind distinguishes intermediate progress (throttled) from terminal
+	// job-state changes (always delivered). Scope distinguishes chunk-grain
+	// (Go pipeline) from file-grain (Hyper-Extract) payloads — Done/Total mean
+	// chunks in the former and files in the latter.
+	Kind  string `json:"kind"`
+	Scope string `json:"scope"`
 }
 
 // ProgressEmitter pushes a ProgressEvent to the frontend. The desktop app
@@ -119,6 +147,12 @@ type Pipeline struct {
 	wake    chan struct{} // signal that new work was enqueued
 	stopCh  chan struct{}
 	started bool
+
+	// emitMu/lastEmit back the 1/sec progress-event throttle. Per-instance (a
+	// package-global made test pipelines share timing state and made the
+	// throttle untestable in parallel).
+	emitMu   sync.Mutex
+	lastEmit time.Time
 }
 
 // chunkTask is one unit of work: extract this chunk, upsert results, mark done.
@@ -144,6 +178,16 @@ func NewPipeline(store *Store, extractor Extractor, cfg PipelineConfig, emit Pro
 	if cfg.Concurrency <= 0 {
 		cfg = DefaultPipelineConfig()
 	}
+	// Normalize ONLY the new timeout fields: Interval/RetryBase of 0 are
+	// legitimate caller choices ("no rate limit" — used heavily by tests), so
+	// they must not be silently replaced with defaults.
+	def := DefaultPipelineConfig()
+	if cfg.AttemptTimeout <= 0 {
+		cfg.AttemptTimeout = def.AttemptTimeout
+	}
+	if cfg.Budget <= 0 {
+		cfg.Budget = def.Budget
+	}
 	return &Pipeline{
 		store:     store,
 		extractor: extractor,
@@ -151,8 +195,11 @@ func NewPipeline(store *Store, extractor Extractor, cfg PipelineConfig, emit Pro
 		emit:      emit,
 		logf:      func(string, ...any) {},
 		latency:   newSlidingWindow(50),
-		wake:      make(chan struct{}, 1),
-		stopCh:    make(chan struct{}),
+		// One wake slot per worker: EnqueuePathsEx broadcasts one signal each
+		// so a multi-worker pipeline actually parallelizes (a single buffered
+		// signal woke ONE worker, which then drained the whole queue alone).
+		wake:   make(chan struct{}, max(cfg.Concurrency, 1)),
+		stopCh: make(chan struct{}),
 	}
 }
 
@@ -237,12 +284,91 @@ func (p *Pipeline) Resume() int {
 	if enqueued > 0 {
 		p.logf("rag: resumed %d pending chunks across %d jobs", enqueued, len(jobs))
 		// Wake workers so they pick up the rehydrated tasks.
+		p.wakeWorkers()
+	}
+	return enqueued
+}
+
+// wakeWorkers posts one wake signal per pipeline worker (non-blocking). The
+// wake channel is buffered to Concurrency, so every sleeping worker gets its
+// own signal and multi-worker pipelines actually parallelize.
+func (p *Pipeline) wakeWorkers() {
+	n := cap(p.wake)
+	for i := 0; i < n; i++ {
 		select {
 		case p.wake <- struct{}{}:
 		default:
+			return
 		}
 	}
-	return enqueued
+}
+
+// RetryFailedChunks re-enqueues ONLY the errored chunks of one job — the
+// "cheap retry" entrypoint. Unlike EnqueuePaths(force) it does not recreate
+// the job row, so successful chunks and their entities survive untouched; a
+// 40-chunk document with 2 failed chunks costs 2 more LLM calls, not 40.
+// Chunk text is re-read from FTS5 (body_raw) exactly like Resume. Returns the
+// number of chunks queued; 0 when the job has nothing to retry.
+func (p *Pipeline) RetryFailedChunks(jobID string) (int, error) {
+	j, ok, err := p.store.JobByID(jobID)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, fmt.Errorf("job %s not found", jobID)
+	}
+	if j.Status != JobError && !(j.Status == JobDone && j.FailedChunks > 0) {
+		return 0, fmt.Errorf("job %s has no failed chunks to retry (status %s)", jobID, j.Status)
+	}
+	chunks, err := p.store.ChunksByPath(j.Collection, j.Path)
+	if err != nil {
+		return 0, fmt.Errorf("read chunks: %w", err)
+	}
+	pending, err := p.store.PendingChunksForJob(jobID)
+	if err != nil {
+		return 0, fmt.Errorf("pending list: %w", err)
+	}
+	if len(pending) == 0 {
+		return 0, nil
+	}
+	if err := p.store.SetJobRetrying(jobID); err != nil {
+		return 0, err
+	}
+	p.mu.Lock()
+	// Skip chunks already sitting in the queue: a manual retry racing an
+	// auto-retry tick would otherwise double-enqueue the same ChunkIDs and
+	// burn duplicate LLM calls (MarkChunkDone's done-guard keeps the books
+	// straight, but the extra calls are pure waste).
+	queued := make(map[string]bool, len(p.queue))
+	for _, q := range p.queue {
+		queued[q.ChunkID] = true
+	}
+	enqueued := 0
+	for _, pc := range pending {
+		if pc.Idx < 0 || pc.Idx >= len(chunks) {
+			continue // chunk count changed since the job ran; skip mismatches
+		}
+		if queued[pc.ChunkID] {
+			continue
+		}
+		enqueued++
+		p.queue = append(p.queue, chunkTask{
+			JobID:      jobID,
+			Collection: j.Collection,
+			Path:       j.Path,
+			ChunkIdx:   pc.Idx,
+			ChunkID:    pc.ChunkID,
+			Text:       chunks[pc.Idx],
+			RootPath:   j.RootPath,
+			RelPath:    j.RelPath,
+			NodePrompt: j.NodePrompt, // persisted template prompts survive retry
+			EdgePrompt: j.EdgePrompt,
+		})
+	}
+	p.mu.Unlock()
+	p.wakeWorkers()
+	p.logf("rag: retry %d failed chunks of %s (job %s)", enqueued, j.Path, jobID)
+	return enqueued, nil
 }
 
 // Stop signals workers to drain and exit. Pending tasks remain in the queue
@@ -271,6 +397,15 @@ func (p *Pipeline) LatencyAvgMs() int64 {
 // This is the "import" entrypoint from the UI: the user gets the file tree +
 // FTS5 search immediately, and extraction runs in the background with progress.
 func (p *Pipeline) EnqueuePaths(collection string, paths []string, nodePrompt, edgePrompt string, force bool) ([]string, error) {
+	ids, _, err := p.EnqueuePathsEx(collection, paths, nodePrompt, edgePrompt, force)
+	return ids, err
+}
+
+// EnqueuePathsEx is EnqueuePaths with per-file skip reporting: skipped carries
+// "basename (reason)" for every supported file that could not be read, so the
+// importer can tell the user "imported 4, 1 failed: x.pdf" instead of the
+// file vanishing silently.
+func (p *Pipeline) EnqueuePathsEx(collection string, paths []string, nodePrompt, edgePrompt string, force bool) ([]string, []string, error) {
 	collection = normalizeCollection(collection)
 	if collection == "" {
 		collection = "default"
@@ -281,6 +416,7 @@ func (p *Pipeline) EnqueuePaths(collection string, paths []string, nodePrompt, e
 		files, err := walkDocs(root)
 		if err != nil {
 			p.logf("rag: walk %s failed: %v", root, err)
+			skippedFiles = append(skippedFiles, fmt.Sprintf("%s (%v)", filepath.Base(root), err))
 			continue
 		}
 		for _, fpath := range files {
@@ -295,16 +431,12 @@ func (p *Pipeline) EnqueuePaths(collection string, paths []string, nodePrompt, e
 			}
 		}
 	}
-	// Wake workers.
-	select {
-	case p.wake <- struct{}{}:
-	default:
-	}
+	p.wakeWorkers()
 	// Log skipped files so they show in the app log and can be surfaced to the user.
 	if len(skippedFiles) > 0 {
 		p.logf("rag: %d files imported, %d skipped: %s", len(jobIDs), len(skippedFiles), strings.Join(skippedFiles, "; "))
 	}
-	return jobIDs, nil
+	return jobIDs, skippedFiles, nil
 }
 
 // enqueueFile imports one file into FTS5 + creates an extraction job + queues
@@ -321,7 +453,7 @@ func (p *Pipeline) enqueueFile(collection, root, fpath, nodePrompt, edgePrompt s
 	// the SAME PDF producing slightly different text on a second pass — the
 	// stat key matches so we never even reach that nondeterministic read).
 	if !force {
-		if jobID, status, _, _, qerr := p.store.JobStatusForPath(collection, fpath); qerr == nil && jobID != "" && status == JobDone {
+		if jobID, status, _, _, failed, qerr := p.store.JobStatusForPath(collection, fpath); qerr == nil && jobID != "" && status == JobDone && failed == 0 {
 			if statKey, serr := fileStatKey(fpath); serr == nil {
 				if prevKey, kerr := p.store.JobStatKeyForPath(collection, fpath); kerr == nil && prevKey != "" && prevKey == statKey {
 					p.logf("rag: skip re-extract %s (job %s done, file size+mtime unchanged)", fpath, jobID)
@@ -358,7 +490,7 @@ func (p *Pipeline) enqueueFile(collection, root, fpath, nodePrompt, edgePrompt s
 	}
 	contentHash := hex.EncodeToString(h.Sum(nil))
 	if !force {
-		if jobID, status, _, _, qerr := p.store.JobStatusForPath(collection, fpath); qerr == nil && jobID != "" && status == JobDone {
+		if jobID, status, _, _, failed, qerr := p.store.JobStatusForPath(collection, fpath); qerr == nil && jobID != "" && status == JobDone && failed == 0 {
 			if prevHash, herr := p.store.JobContentHashForPath(collection, fpath); herr == nil && prevHash == contentHash {
 				p.logf("rag: skip re-extract %s (job %s done, content hash unchanged)", fpath, jobID)
 				return jobID, nil
@@ -472,17 +604,36 @@ func (p *Pipeline) dequeue() (chunkTask, bool) {
 }
 
 // processTask runs one chunk through extract → upsert → mark done with retries.
+//
+// Timeout structure (R0-1): each attempt gets its OWN attempt-timeout context,
+// nested under one per-task budget. The old design gave the whole task a single
+// 180s context equal to the HTTP client timeout, so a slow first attempt
+// exhausted the budget and the retry never actually ran — the stored error was
+// a bare "context deadline exceeded" with the real cause lost.
 func (p *Pipeline) processTask(workerID int, t chunkTask) {
-	// Mark job as extracting (idempotent; first chunk flips pending→extracting).
-	_ = p.store.SetJobStatus(t.JobID, JobExtracting)
+	// A task dequeued before the user cancelled its job must not resurrect the
+	// cancelled state (the conditional update below is the second guard).
+	if job, ok, _ := p.store.JobByID(t.JobID); ok && job.Status == JobCancelled {
+		return
+	}
+	// Mark job as extracting — only from pending; the conditional UPDATE makes
+	// cancelled/done/error states immutable from here.
+	_ = p.store.MarkJobExtracting(t.JobID)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
-	defer cancel()
+	budget := p.cfg.Budget
+	budgetCtx, cancelBudget := context.WithTimeout(context.Background(), budget)
+	defer cancelBudget()
 
 	start := time.Now()
 	var lastErr error
-	for attempt := 0; attempt < p.cfg.MaxRetries; attempt++ {
-		res, err := p.extractor.Extract(ctx, t.Text, t.NodePrompt, t.EdgePrompt)
+	attempts := p.cfg.MaxRetries
+	if attempts < 1 {
+		attempts = 1 // a misconfigured 0 must not mark unprocessed chunks done
+	}
+	for attempt := 0; attempt < attempts; attempt++ {
+		attemptCtx, cancelAttempt := context.WithTimeout(budgetCtx, p.cfg.AttemptTimeout)
+		res, err := p.extractor.Extract(attemptCtx, t.Text, t.NodePrompt, t.EdgePrompt)
+		cancelAttempt()
 		if err == nil {
 			// Drop relations whose endpoints aren't in this chunk's entity set
 			// (LLM hallucinations) before upsert — mirrors HE's
@@ -507,14 +658,15 @@ func (p *Pipeline) processTask(workerID int, t chunkTask) {
 			lastErr = nil
 			break
 		}
+		// Keep the attempt's real error (e.g. "extract http: ...", HTTP 429
+		// bodies). It is never overwritten with a bare ctx.Err() below.
 		lastErr = err
 		p.logf("rag: extract %s chunk %d attempt %d failed: %v", t.Path, t.ChunkIdx, attempt+1, err)
 		if attempt < p.cfg.MaxRetries-1 {
 			backoff := p.cfg.RetryBase << uint(attempt)
 			select {
-			case <-ctx.Done():
-				lastErr = ctx.Err()
-				goto done
+			case <-budgetCtx.Done():
+				goto done // budget exhausted — surface lastErr as-is
 			case <-time.After(backoff):
 			}
 		}
@@ -524,7 +676,11 @@ done:
 	if err := p.store.MarkChunkDone(t.ChunkID, t.JobID, latencyMs, lastErr); err != nil {
 		p.logf("rag: mark chunk done failed: %v", err)
 	}
-	p.latency.Add(time.Duration(latencyMs) * time.Millisecond)
+	// Only successful attempts feed the ETA window — a 180s timeout sample
+	// would inflate the projected remaining time several-fold.
+	if lastErr == nil {
+		p.latency.Add(time.Duration(latencyMs) * time.Millisecond)
+	}
 	p.emitProgress(t)
 }
 
@@ -537,28 +693,33 @@ func (p *Pipeline) upsertRelation(collection string, r Relation, src Source) err
 	return p.store.UpsertRelation(collection, r, src)
 }
 
-// emitProgress sends a ProgressEvent to the UI. Throttled to 1/sec to avoid
-// flooding the webview on large folders.
-var (
-	emitMu       sync.Mutex
-	lastEmitTime time.Time
-)
-
+// emitProgress sends a ProgressEvent to the UI. Intermediate progress is
+// throttled to 1/sec to avoid flooding the webview on large folders; terminal
+// events (job done/error) bypass the throttle entirely — with many small jobs
+// finishing back-to-back, the old unconditional throttle could swallow the
+// LAST event of a batch and leave the UI stuck on a stale state. The throttle
+// window lives on the Pipeline (not a package global) so test pipelines don't
+// share timing state.
 func (p *Pipeline) emitProgress(t chunkTask) {
 	if p.emit == nil {
 		return
 	}
-	emitMu.Lock()
-	if time.Since(lastEmitTime) < time.Second {
-		emitMu.Unlock()
-		return // throttled
-	}
-	lastEmitTime = time.Now()
-	emitMu.Unlock()
-
 	job, ok, err := p.store.JobByID(t.JobID)
 	if err != nil || !ok {
 		return
+	}
+	kind := EventKindProgress
+	if job.Status == JobDone || job.Status == JobError {
+		kind = EventKindTerminal
+	}
+	if kind == EventKindProgress {
+		p.emitMu.Lock()
+		if time.Since(p.lastEmit) < time.Second {
+			p.emitMu.Unlock()
+			return // throttled
+		}
+		p.lastEmit = time.Now()
+		p.emitMu.Unlock()
 	}
 	avg := p.latency.Avg()
 	remaining := job.TotalChunks - job.DoneChunks
@@ -570,7 +731,11 @@ func (p *Pipeline) emitProgress(t chunkTask) {
 		job.DoneChunks, job.TotalChunks, durStr(avg), durStr(eta))
 	switch job.Status {
 	case JobDone:
-		msg = fmt.Sprintf("完成：%d/%d 块已抽取", job.DoneChunks, job.TotalChunks)
+		if job.FailedChunks > 0 {
+			msg = fmt.Sprintf("部分完成：%d/%d 块已抽取，%d 块失败", job.DoneChunks-job.FailedChunks, job.TotalChunks, job.FailedChunks)
+		} else {
+			msg = fmt.Sprintf("完成：%d/%d 块已抽取", job.DoneChunks, job.TotalChunks)
+		}
 	case JobError:
 		msg = fmt.Sprintf("出错：%s", job.ErrorMsg)
 	}
@@ -583,6 +748,9 @@ func (p *Pipeline) emitProgress(t chunkTask) {
 		TotalChunks:  job.TotalChunks,
 		AvgLatencyMs: avg.Milliseconds(),
 		Message:      msg,
+		FailedChunks: job.FailedChunks,
+		Kind:         kind,
+		Scope:        EventScopeChunk,
 	})
 }
 
@@ -642,8 +810,15 @@ func (s *slidingWindow) Avg() time.Duration {
 
 // --- helpers ----------------------------------------------------------------
 
+// skipDirNames are non-dot directories that hold dependency/metadata trees no
+// user ever wants ingested into the knowledge base (R0-6).
+var skipDirNames = map[string]bool{"node_modules": true}
+
 // walkDocs returns all text-like files under root (recursively). root may be a
-// single file (returns [root] if supported) or a directory.
+// single file (returns [root] if supported) or a directory. Hidden
+// (dot-prefixed) directories — .git, .fairpeer, .idea — and dependency trees
+// are pruned: importing a project folder previously ingested .git/objects
+// binaries and fairpeer's own .fairpeer/*.json metadata as "documents".
 func walkDocs(root string) ([]string, error) {
 	info, err := os.Stat(root)
 	if err != nil {
@@ -653,7 +828,9 @@ func walkDocs(root string) ([]string, error) {
 		if isSupportedExt(root) {
 			return []string{root}, nil
 		}
-		return nil, nil
+		// An explicit single-file import of an unsupported type is reported,
+		// not silently dropped (folder walks prune quietly — different case).
+		return nil, fmt.Errorf("unsupported file type: .%s", strings.TrimPrefix(filepath.Ext(root), "."))
 	}
 	var out []string
 	err = filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
@@ -661,6 +838,13 @@ func walkDocs(root string) ([]string, error) {
 			return nil // skip unreadable
 		}
 		if fi.IsDir() {
+			if path == root {
+				return nil
+			}
+			name := fi.Name()
+			if strings.HasPrefix(name, ".") || skipDirNames[name] {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if isSupportedExt(path) {
@@ -671,11 +855,13 @@ func walkDocs(root string) ([]string, error) {
 	return out, err
 }
 
-// isSupportedExt mirrors readDoc's text-format whitelist.
+// isSupportedExt mirrors readDoc's text-format whitelist. Extension-less files
+// are NOT supported: on real project folders they are mostly .git leftovers and
+// lockfiles whose bytes would be force-decoded into garbage chunks.
 func isSupportedExt(path string) bool {
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))
 	switch ext {
-	case "", "txt", "md", "markdown", "csv", "tsv", "json", "html", "htm",
+	case "txt", "md", "markdown", "csv", "tsv", "json", "html", "htm",
 		"py", "go", "js", "ts", "tsx", "java", "c", "cpp", "h", "rs", "yaml", "yml",
 		"docx", "xlsx", "xls", "pptx", "pdf", "epub", "doc", "ppt", "msg": // office formats via markitdown
 		return true
@@ -694,6 +880,29 @@ func relPath(root, fpath string) string {
 func isDirPath(root string) bool {
 	info, err := os.Stat(root)
 	return err == nil && info.IsDir()
+}
+
+// FilterJobsForExtraction picks which jobs (re-)run for a collection-wide
+// extract. full=true (mode "full") re-runs EVERY job; otherwise jobs already
+// done are skipped (incremental/silent). Paths are deduped — AllJobs returns
+// one row per (collection, path) already, but history edits make that cheap
+// insurance. Shared by the Go pipeline and the Hyper-Extract paths so both
+// honor the same incremental contract (the HE path previously re-ran done
+// files — a silent full re-burn on every template extract).
+func FilterJobsForExtraction(jobs []JobRow, full bool) []JobRow {
+	seen := make(map[string]bool, len(jobs))
+	out := make([]JobRow, 0, len(jobs))
+	for _, j := range jobs {
+		if seen[j.Path] {
+			continue
+		}
+		seen[j.Path] = true
+		if !full && j.Status == JobDone {
+			continue
+		}
+		out = append(out, j)
+	}
+	return out
 }
 
 // fileStatKey returns a cheap "is this the same file?" fingerprint

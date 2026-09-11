@@ -102,8 +102,8 @@ func TestResolveTimeRangeRejectsNonPhrases(t *testing.T) {
 		"   ",
 		"(NOT src_ip:(10.0.0.0 OR 192.168.0.0/16))",
 		"最近5分钟的报告帮我看看",
-		"前5分钟",         // 前不受支持（最近/近/过去 only）
-		"5分钟",          // bare duration is not a range phrase
+		"前5分钟", // 前不受支持（最近/近/过去 only）
+		"5分钟",  // bare duration is not a range phrase
 		"查一下告警",
 		"last week report", // trailing word breaks the whole-value match
 	} {

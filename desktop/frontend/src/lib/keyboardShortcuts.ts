@@ -86,13 +86,17 @@ export function formatShortcutCombo(combo: ShortcutCombo, platform: ShortcutPlat
 }
 
 // formatShortcutComboParts returns individual key-cap segments.
+// Note combo.ctrl means the PRIMARY modifier (Ctrl on win/linux, Cmd on macOS —
+// see useGlobalShortcut's matcher), so on darwin it renders ⌘ (not ⌃) to match
+// what the user actually presses. combo.meta is a separate, additional Win/Super
+// modifier (used only by system-level hotkey displays).
 export function formatShortcutComboParts(combo: ShortcutCombo, platform: ShortcutPlatform): string[] {
   const parts: string[] = [];
   const isDarwin = platform === "darwin";
-  if (combo.ctrl) parts.push(isDarwin ? "⌃" : "Ctrl");
+  if (combo.ctrl) parts.push(isDarwin ? "⌘" : "Ctrl");
   if (combo.alt) parts.push(isDarwin ? "⌥" : "Alt");
   if (combo.shift) parts.push(isDarwin ? "⇧" : "Shift");
-  if (combo.meta) parts.push(isDarwin ? "⌘" : "Win");
+  if (combo.meta) parts.push(isDarwin ? "⌘" : platform === "linux" ? "Super" : "Win");
   parts.push(combo.key.length === 1 ? combo.key.toUpperCase() : combo.key);
   return parts;
 }

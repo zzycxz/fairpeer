@@ -99,6 +99,9 @@ cd <项目路径>\fairpeer
 第 1 步，先**完全退出**所有 Chrome，然后带调试端口启动：
 ```powershell
 & "C:\Program Files\Google\Chrome\Application\chrome.exe" `
+
+# macOS:  open -na "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir="$TEMP/fp-cua"
+# Linux:  google-chrome --remote-debugging-port=9222 --user-data-dir="$TEMP/fp-cua"
     --remote-debugging-port=9222 `
     --user-data-dir="C:\Users\<你的用户名>\AppData\Local\Google\Chrome\User Data"
 ```

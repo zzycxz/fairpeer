@@ -40,7 +40,7 @@ make test     # 运行完整的测试套件
 | `internal/hook` | 钩子拦截 (PreToolUse, PostToolUse, UserPromptSubmit, Stop) |
 | `internal/memory` | fairpeer.md 知识分层 + 自动记忆存储 |
 | `internal/skill` | Markdown 技能发现机制 + 内置技能 |
-| `internal/sandbox` | 操作系统级沙盒 (macOS 的 Seatbelt) |
+| `internal/sandbox` | 操作系统级沙盒 (macOS Seatbelt / Linux bubblewrap) |
 | `internal/permission` | 每次调用的权限策略: 允许/询问/拒绝 规则 |
 | `internal/checkpoint` | 基于快照的时光倒流功能 |
 | `internal/bot` | 多通道 IM 机器人网关 (QQ, 飞书, 微信) |
@@ -94,7 +94,7 @@ make test           # go test ./...
 make vet            # go vet ./...
 make fmt            # gofmt -w .
 make hooks          # 安装 git hooks (pre-push: go vet)
-make cross          # 交叉编译到 6 个不同的目标平台
+make cross          # 交叉编译到 7 个不同的目标平台
 ```
 
 ### 运行测试

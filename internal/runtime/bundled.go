@@ -24,14 +24,20 @@ func bundledBaseDir() (string, bool) {
 	return filepath.Join(filepath.Dir(exe), BundleDirName), true
 }
 
-// isExec reports whether path exists and is executable (or has .exe/.cmd/.bat
-// extension on Windows).
+// isExec reports whether path exists and is usable as an executable: on Windows
+// any existing file qualifies (callers filter on .exe/.cmd/.bat extensions); off
+// Windows the file must carry at least one execute bit (owner/group/other). The
+// exec-bit check matters on unix, where a download or archive extraction can
+// leave a 0644 binary that os/exec would refuse to run with a confusing EACCES.
 func isExec(path string) bool {
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
 		return false
 	}
-	return true
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return info.Mode().Perm()&0o111 != 0
 }
 
 // bundledUV looks for uv in the exe-adjacent bundle directory.

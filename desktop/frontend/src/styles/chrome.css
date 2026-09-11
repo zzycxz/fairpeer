@@ -770,6 +770,15 @@
   font-weight: 600;
 }
 .side-sessions__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* X8b：该会话对应的 tab 正等审批/确认——warn 色小点（行内首列）。 */
+.side-sessions__approval {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--warn, #d29922);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn, #d29922) 18%, transparent);
+}
 .side-sessions__age { font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
 .side-sessions__more { display: none; align-items: center; border: none; background: transparent; color: var(--fg-dim); padding: 2px; border-radius: var(--radius-sm); cursor: pointer; flex: 0 0 auto; }
 .side-sessions__row:hover .side-sessions__age { display: none; }

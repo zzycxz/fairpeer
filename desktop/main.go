@@ -9,7 +9,9 @@ package main
 import (
 	"embed"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -17,6 +19,11 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/linux"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
+
+	// Embed the IANA timezone database so ICS calendar TZID resolution works on
+	// Windows (no system zoneinfo) and minimal Linux images (packaged apps have
+	// no GOROOT to fall back on). ~450KB to the binary; the standard fix.
+	_ "time/tzdata"
 
 	// Blank imports wire compile-time built-ins into their registries, exactly as
 	// cmd/fairpeer does — boot.Build resolves providers/tools from these registries.
@@ -58,6 +65,17 @@ func windowsWebview2GPUDisabled() bool {
 }
 
 func main() {
+	// A Go panic normally dies on stderr, which a packaged GUI app has
+	// nowhere to show — especially on macOS/Linux where launches detach from
+	// any terminal. Recover, stamp the trace into the rotating app.log, and
+	// re-panic so the OS crash reporting still sees a failure.
+	defer func() {
+		if r := recover(); r != nil {
+			logPanic(r)
+			panic(r)
+		}
+	}()
+
 	app := NewApp()
 
 	// Restore saved window size, or fall back to the default.
@@ -77,6 +95,26 @@ func main() {
 	if raw := deepLinkArg(os.Args); raw != "" {
 		stashPendingDeepLink(raw)
 	}
+
+	// SIGTERM/SIGINT → the same graceful shutdown as a normal window close.
+	// Wails only routes window-close through OnShutdown, so on Linux a bare
+	// `kill` (or session logout) would skip app.shutdown entirely — tabs never
+	// snapshot/close and sidecars leak as orphans. The handler runs the shared
+	// idempotent shutdown (see App.shutdown's sync.Once — whoever reaches it
+	// first, the signal path or Wails' OnShutdown, does the cleanup) and then
+	// exits the process. Minimal on purpose: no refactoring of the Wails
+	// lifecycle. Calling shutdown from a plain goroutine is safe — its runtime.*
+	// window calls dispatch to the main thread, the same pattern the app already
+	// uses (e.g. `go a.showMainWindow()` from the notification callback), and
+	// every teardown step is nil-safe before startup completes.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		sig := <-sigCh
+		println("signal:", sig.String(), "— shutting down")
+		app.shutdown(nil)
+		os.Exit(0)
+	}()
 
 	err := wails.Run(&options.App{
 		Title:     "fairpeer",
@@ -122,6 +160,20 @@ func main() {
 			// Follow the OS appearance so the title bar matches light/dark system
 			// preference instead of being locked to dark.
 			Appearance: mac.DefaultAppearance,
+			// macOS delivers fairpeer:// URLs as kAEGetURL Apple events, NOT via
+			// argv — without this hook the scheme registered in Info.plist is a
+			// dead end (cold and warm both). Windows/Linux route through argv +
+			// second-instance instead.
+			OnUrlOpen: func(url string) {
+				if raw := deepLinkArg([]string{url}); raw != "" {
+					if app.ctx == nil {
+						stashPendingDeepLink(raw)
+					} else {
+						app.emitDeepLink(raw)
+					}
+					go app.showMainWindow()
+				}
+			},
 		},
 		Windows: &windows.Options{
 			// Follow the OS theme so the title bar matches light/dark system

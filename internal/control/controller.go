@@ -59,7 +59,7 @@ var ErrTurnRunning = errors.New("turn already running")
 type Controller struct {
 	runner   agent.Runner
 	executor *agent.Agent
-	// dreamProvider is the lightweight model dream/distill run on (the configured
+	// dreamProvider is the lightweight model dream runs on (the configured
 	// fast_task_model); nil falls back to the executor's main provider. Wiring it
 	// here lets the idle-dream path spawn on a cheap model without touching the
 	// main agent.
@@ -168,7 +168,7 @@ type Controller struct {
 	// approver). Reset when the execution turn returns.
 	approvedPlanAutoApproveTools bool
 
-	// idleDreamTimer fires Dream/Distill after the user goes quiet for the
+	// idleDreamTimer fires Dream after the user goes quiet for the
 	// configured idle threshold (default 10 min), instead of at turn start. Dream
 	// is meant to run in the user's downtime; triggering it while they are
 	// actively working contends for model/context resources and interrupts the
@@ -261,7 +261,7 @@ type RememberResult struct {
 type Options struct {
 	Runner        agent.Runner
 	Executor      *agent.Agent
-	DreamProvider provider.Provider // lightweight model for dream/distill; nil = main
+	DreamProvider provider.Provider // lightweight model for dream; nil = main
 	Sink          event.Sink
 	Policy        permission.Policy
 	Label         string
@@ -565,7 +565,9 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		if ctx.Err() != nil {
 			err = nil
 		}
-		c.sink.Emit(event.Event{Kind: event.TurnDone, Err: explainError(err)})
+		// Cancelled rides alongside so frontends can render a visible "stopped
+		// by user" trace instead of a silent clean end (P1-F4).
+		c.sink.Emit(event.Event{Kind: event.TurnDone, Err: explainError(err), Cancelled: ctx.Err() != nil})
 		// Follow-up drain (upgrade spec 2-4): prompts queued while the agent
 		// was busy start as independent next turns. Only on natural completion
 		// — a user-initiated Stop empties nothing (they asked for a halt, not
@@ -574,6 +576,19 @@ func (c *Controller) runGuarded(body func(ctx context.Context) error) {
 		if ctx.Err() == nil && c.executor != nil {
 			if next, ok := c.executor.DrainFollowUp(); ok {
 				c.submit(next, next)
+				return
+			}
+			// P1-F1: a background job finishing after the agent's final answer
+			// used to sit unnoticed until the user's NEXT message (Compose-only
+			// injection). Wake the model once with the completion note so it can
+			// read the output and react — the chain is self-limiting: the wake
+			// turn only continues if yet another job completes during it.
+			if c.jobs != nil {
+				if note := c.jobs.DrainCompletedNote(); note != "" {
+					c.notice("后台任务已完成——自动让模型查看结果")
+					wake := "[system] " + note + " If the finished output matters for the task, read it (bash_output) and continue; otherwise reply with a one-line confirmation and stop."
+					c.submit(wake, wake)
+				}
 			}
 		}
 	}()
@@ -778,7 +793,7 @@ func (c *Controller) runTurnWithRawDisplay(ctx context.Context, input any, raw, 
 		return err
 	}
 	// Turn reply is complete and shown to the user; arm the idle-dream countdown.
-	// If the user stays quiet past the threshold, dream/distill consolidate in
+	// If the user stays quiet past the threshold, dream consolidates in
 	// the background. Any new turn calls touchActivity above and cancels this.
 	c.touchActivity()
 	c.mu.Lock()
@@ -1041,6 +1056,9 @@ func (c *Controller) stopGoal(status string) {
 	c.mu.Lock()
 	if strings.TrimSpace(c.goal) != "" && c.goalStatus == GoalStatusRunning {
 		c.goalStatus = status
+		c.mu.Unlock()
+		c.syncModeToMeta(c.sessionPath) // P1-E4: terminal goal state rides the sidecar
+		return
 	}
 	c.mu.Unlock()
 }
@@ -1480,6 +1498,24 @@ func (c *Controller) notice(text string) {
 // headless `fairpeer run` path, where the Sink renders to stdout and the caller
 // just needs the exit status — no TurnDone event, no cancel bookkeeping.
 func (c *Controller) Run(ctx context.Context, input string) error {
+	// NEW-10: headless turns (scheduler prompts, `fairpeer run`) share the
+	// executor with interactive turns on desktop tabs. Without this guard a
+	// scheduled prompt firing mid-user-turn ran CONCURRENTLY on the same
+	// session — interleaved transcripts, and Run skips beginCheckpoint, so
+	// those writes were invisible to rewind. Busy → refuse; the scheduler
+	// records the skip in the task's run history.
+	c.mu.Lock()
+	if c.running {
+		c.mu.Unlock()
+		return fmt.Errorf("controller busy: a turn is already in flight")
+	}
+	c.running = true
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		c.running = false
+		c.mu.Unlock()
+	}()
 	c.maybeSessionStart(ctx)
 	ctx = agent.WithParentSession(ctx, c.parentSessionID())
 	startMessages := c.messageCount()
@@ -1590,13 +1626,22 @@ func (c *Controller) Turn() int {
 // also remembers a grant for the rest of the session so the same approval scope
 // is not re-prompted. Unknown/expired IDs are ignored.
 func (c *Controller) Approve(id string, allow, session, persist bool) {
+	c.ApproveIfPending(id, allow, session, persist)
+}
+
+// ApproveIfPending is Approve with an honest outcome: it reports whether an
+// approval with that id actually existed. Remote responders (IM /approve, the
+// mobile bridge) use this to answer the SECOND approver truthfully ("未找到待
+// 处理的审批") instead of acknowledging a no-op as success.
+func (c *Controller) ApproveIfPending(id string, allow, session, persist bool) bool {
 	c.mu.Lock()
-	pending := c.approvals[id]
+	pending, ok := c.approvals[id]
 	delete(c.approvals, id)
 	c.mu.Unlock()
-	if pending.reply != nil {
+	if ok && pending.reply != nil {
 		pending.reply <- approvalReply{allow: allow, session: session, persist: persist} // buffered, never blocks
 	}
+	return ok
 }
 
 // SetRiskOverrides installs the per-tool risk-class map (SPEC v2 §3.2A) built
@@ -1815,26 +1860,32 @@ func (c *Controller) PlanMode() bool {
 // cache-stable prefix.
 func (c *Controller) SetGoal(goal string) {
 	goal = strings.TrimSpace(goal)
+	changed := false
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if goal == "" {
+		changed = c.goal != "" || c.goalStatus != GoalStatusStopped
 		c.goal = ""
 		c.goalStatus = GoalStatusStopped
 		c.goalTurns = 0
 		c.goalBlocks = 0
 		c.goalBlock = ""
 		c.goalIdleTurns = 0
-		return
+	} else if c.goal == goal && c.goalStatus == GoalStatusRunning {
+		// unchanged
+	} else {
+		changed = true
+		c.goal = goal
+		c.goalStatus = GoalStatusRunning
+		c.goalTurns = 0
+		c.goalBlocks = 0
+		c.goalBlock = ""
+		c.goalIdleTurns = 0
 	}
-	if c.goal == goal && c.goalStatus == GoalStatusRunning {
-		return
+	c.mu.Unlock()
+	// P1-E4: goal state rides the sidecar so a restart can restore it.
+	if changed {
+		c.syncModeToMeta(c.sessionPath)
 	}
-	c.goal = goal
-	c.goalStatus = GoalStatusRunning
-	c.goalTurns = 0
-	c.goalBlocks = 0
-	c.goalBlock = ""
-	c.goalIdleTurns = 0
 }
 
 // SetGoalStrict toggles strict enforcement on the active goal: when on, the goal
@@ -1862,6 +1913,15 @@ func (c *Controller) Goal() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.goal
+}
+
+// GoalTurns reports the current goal turn count and the budget cap, so a UI
+// can show "第 N/50 轮" instead of the budget being invisible until it trips
+// (P1-F2/X11).
+func (c *Controller) GoalTurns() (int, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.goalTurns, maxGoalAutoTurns
 }
 
 func (c *Controller) GoalStatus() string {
@@ -1932,6 +1992,7 @@ func (c *Controller) NewSession() error {
 	c.executor.SetSession(newSess)
 	if c.sessionDir != "" {
 		c.sessionPath = agent.NewSessionPath(c.sessionDir, c.label)
+		agent.SetSessionSearchSelf(c.sessionPath)
 	}
 	c.startedOnce = true // NewSession fires SessionStart itself; don't re-fire on the next turn
 	path := c.sessionPath
@@ -1974,6 +2035,7 @@ func (c *Controller) ClearSession() error {
 	c.executor.SetSession(newSess)
 	if c.sessionDir != "" {
 		c.sessionPath = agent.NewSessionPath(c.sessionDir, c.label)
+		agent.SetSessionSearchSelf(c.sessionPath)
 	}
 	c.startedOnce = true
 	path := c.sessionPath
@@ -2237,6 +2299,7 @@ func (c *Controller) forkNamed(turn int, name string, switchToFork bool) (string
 		c.executor.SetSession(sess)
 		c.mu.Lock()
 		c.sessionPath = newPath
+		agent.SetSessionSearchSelf(c.sessionPath)
 		c.mu.Unlock()
 		c.rebindPresent(newPath)
 		c.rebindCheckpoints(newPath)
@@ -2296,6 +2359,7 @@ func (c *Controller) Branch(name string) (string, error) {
 	c.executor.SetSession(sess)
 	c.mu.Lock()
 	c.sessionPath = newPath
+	agent.SetSessionSearchSelf(c.sessionPath)
 	c.mu.Unlock()
 	c.rebindPresent(newPath)
 	c.rebindCheckpoints(newPath)
@@ -2343,6 +2407,7 @@ func (c *Controller) SwitchBranch(ref string) (agent.BranchInfo, error) {
 	}
 	c.mu.Lock()
 	c.sessionPath = match.Path
+	agent.SetSessionSearchSelf(c.sessionPath)
 	c.mu.Unlock()
 	c.rebindPresent(match.Path)
 	c.rebindCheckpoints(match.Path)
@@ -2442,6 +2507,7 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	}
 	c.mu.Lock()
 	c.sessionPath = path
+	agent.SetSessionSearchSelf(c.sessionPath)
 	c.mu.Unlock()
 	c.rebindPresent(path)
 	c.rebindCheckpoints(path)
@@ -2525,6 +2591,17 @@ func (c *Controller) restoreModeFromMeta(path string) {
 	if meta.ToolApprovalMode != "" && meta.ToolApprovalMode != "ask" {
 		parts = append(parts, meta.ToolApprovalMode+" approval mode")
 	}
+	// P1-E4: restore an interrupted auto-advancing goal. Nothing auto-fires —
+	// the continuation loop only engages after the user's next message, so
+	// "继续" remains the explicit trigger (the C8 auto-resume risk).
+	if strings.TrimSpace(meta.Goal) != "" && meta.GoalStatus == GoalStatusRunning {
+		c.mu.Lock()
+		c.goal = meta.Goal
+		c.goalStatus = GoalStatusRunning
+		c.goalTurns = meta.GoalTurns
+		c.mu.Unlock()
+		parts = append(parts, fmt.Sprintf("active goal “%s” (第 %d/%d 轮 — 发送“继续”接续推进)", truncateForNotice(meta.Goal), meta.GoalTurns, maxGoalAutoTurns))
+	}
 	if len(parts) > 0 {
 		c.notice("resumed session with " + strings.Join(parts, " + ") + " still active")
 	}
@@ -2597,6 +2674,7 @@ func init() { midTurnSnapshotInterval.Store(int64(30 * time.Second)) }
 func (c *Controller) autosaveWhileRunning(ctx context.Context) {
 	t := time.NewTicker(time.Duration(midTurnSnapshotInterval.Load()))
 	defer t.Stop()
+	warned := false // one Notice per autosave goroutine — a turn — not per tick
 	for {
 		select {
 		case <-ctx.Done():
@@ -2604,6 +2682,13 @@ func (c *Controller) autosaveWhileRunning(ctx context.Context) {
 		case <-t.C:
 			if err := c.snapshot(false); err != nil {
 				slog.Warn("controller: mid-turn snapshot", "err", err)
+				if !warned {
+					warned = true
+					// NEW-08: disk-full class failures must not be log-only —
+					// the user believes progress is saved until a crash loses it.
+					c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+						Text: "⚠ 会话自动保存失败：" + err.Error() + "——进度可能无法保留，请检查磁盘空间"})
+				}
 			}
 		}
 	}
@@ -2678,16 +2763,26 @@ func (c *Controller) syncModeToMeta(path string) {
 		return
 	}
 	meta, ok, err := agent.LoadBranchMeta(path)
-	if err != nil || !ok {
+	if err != nil {
 		return
+	}
+	if !ok {
+		// No sidecar yet (e.g. an empty session whose first action is setting a
+		// goal): start one rather than dropping the mode/goal persistence.
+		meta = agent.BranchMeta{}
 	}
 	planMode := c.PlanMode()
 	toolApproval := c.ToolApprovalMode()
-	if meta.PlanMode == planMode && meta.ToolApprovalMode == toolApproval {
+	c.mu.Lock()
+	goal, goalStatus, goalTurns := c.goal, c.goalStatus, c.goalTurns
+	c.mu.Unlock()
+	if meta.PlanMode == planMode && meta.ToolApprovalMode == toolApproval &&
+		meta.Goal == goal && meta.GoalStatus == goalStatus && meta.GoalTurns == goalTurns {
 		return // already current; avoid an unnecessary write
 	}
 	meta.PlanMode = planMode
 	meta.ToolApprovalMode = toolApproval
+	meta.Goal, meta.GoalStatus, meta.GoalTurns = goal, goalStatus, goalTurns
 	if err := agent.SaveBranchMetaPreserveUpdated(path, meta); err != nil {
 		slog.Warn("controller: syncModeToMeta", "err", err)
 	}
@@ -2714,6 +2809,7 @@ func (c *Controller) snapshotActivityIfChanged(startMessages int) {
 func (c *Controller) SetSessionPath(p string) {
 	c.mu.Lock()
 	c.sessionPath = p
+	agent.SetSessionSearchSelf(c.sessionPath)
 	c.mu.Unlock()
 	c.rebindPresent(p)
 	c.rebindCheckpoints(p)
@@ -2771,6 +2867,7 @@ func (c *Controller) ensureSessionPath() {
 	}
 	p := agent.NewSessionPath(c.sessionDir, c.label)
 	c.sessionPath = p
+	agent.SetSessionSearchSelf(c.sessionPath)
 	c.mu.Unlock()
 	c.rebindCheckpoints(p)
 }
@@ -3017,13 +3114,13 @@ func (c *Controller) profileForDream() string {
 	return "dev"
 }
 
-// maybeDreamDistill spawns Dream/Distill from an idle trigger. It is the idle
-// counterpart of the old turn-start hook: instead of firing while the user is
-// busy, it fires only after the idle timer confirms the user has gone quiet.
-// Cadence + master-switch + inFlight gates still apply inside agent.SpawnDream/
-// SpawnDistill, so an idle fire that is not yet due is a cheap no-op.
-// dreamProv returns the provider dream/distill run on: the configured
-// fast_task_model when wired, else the main executor provider.
+// maybeDream spawns Dream from an idle trigger. It is the idle counterpart of
+// the old turn-start hook: instead of firing while the user is busy, it fires
+// only after the idle timer confirms the user has gone quiet. Cadence +
+// master-switch + inFlight gates still apply inside agent.SpawnDream, so an
+// idle fire that is not yet due is a cheap no-op.
+// dreamProv returns the provider dream runs on: the configured fast_task_model
+// when wired, else the main executor provider.
 func (c *Controller) dreamProv() provider.Provider {
 	if c.dreamProvider != nil {
 		return c.dreamProvider
@@ -3034,14 +3131,13 @@ func (c *Controller) dreamProv() provider.Provider {
 	return nil
 }
 
-func (c *Controller) maybeDreamDistill() {
+func (c *Controller) maybeDream() {
 	if c.sessionDir == "" || c.executor == nil {
 		return
 	}
 	ctx := context.Background()
 	prov := c.dreamProv()
 	agent.SpawnDream(ctx, c.sessionDir, c.profileForDream(), prov, c.reg, c.executor.Session(), c.sink, &c.autosaveWG)
-	agent.SpawnDistill(ctx, c.sessionDir, prov, c.reg, c.executor.Session(), c.sink, &c.autosaveWG)
 }
 
 // touchActivity records that the user is active (turn start or turn end) and
@@ -3095,7 +3191,7 @@ func (c *Controller) idleDreamFired() {
 	if threshold > 0 && time.Since(last) < threshold {
 		return // a turn touched activity after we fired; not idle anymore
 	}
-	c.maybeDreamDistill()
+	c.maybeDream()
 }
 
 // stopIdleDream cancels any pending idle-dream timer. Called from Close so a
@@ -3118,14 +3214,6 @@ func (c *Controller) TriggerDream(ctx context.Context) (agent.DreamRun, bool) {
 		return agent.DreamRun{Status: "error", Error: "no active session"}, false
 	}
 	return agent.RunDreamOnce(ctx, c.sessionDir, c.profileForDream(), c.dreamProv(), c.reg, c.executor.Session(), c.sink)
-}
-
-// TriggerDistill runs a Distill workflow-extraction pass on demand. See TriggerDream.
-func (c *Controller) TriggerDistill(ctx context.Context) (agent.DreamRun, bool) {
-	if c.executor == nil {
-		return agent.DreamRun{Status: "error", Error: "no active session"}, false
-	}
-	return agent.RunDistillOnce(ctx, c.sessionDir, c.dreamProv(), c.reg, c.executor.Session(), c.sink)
 }
 
 // LastDreamRun exposes the most recent recorded run of a kind for this session,

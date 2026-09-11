@@ -459,7 +459,7 @@ export function TurnActions({
                   </div>
                 )}
                 {rewindPreview && rewindPreview.length === 0 && (
-                  <div className="rewind__menu-hint">文件与当前状态一致</div>
+                  <div className="rewind__menu-hint">{t("rewind.noChanges")}</div>
                 )}
               </div>
             )}

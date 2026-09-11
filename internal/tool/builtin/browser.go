@@ -1062,7 +1062,7 @@ func (browserOpen) Execute(ctx context.Context, args json.RawMessage) (string, e
 		// the user for a browser path, then browser_set_path it. This is the
 		// "guide the user to input a Chromium browser" requirement.
 		if errors.Is(err, ErrNoBrowser) {
-			return "", fmt.Errorf("%w\n\nTo fix: ask the user for the path to their Chrome or Edge executable (e.g. on Windows: \"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" or \"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\"), then call browser_set_path with it and retry browser_open", err)
+			return "", fmt.Errorf("%w\n\nTo fix: ask the user for the path to their Chrome or Edge executable (e.g. %s), then call browser_set_path with it and retry browser_open", err, browserExamplePaths())
 		}
 		return "", err
 	}
@@ -2782,7 +2782,7 @@ type browserSetPath struct{}
 func (browserSetPath) Name() string { return "browser_set_path" }
 
 func (browserSetPath) Description() string {
-	return "Persist the path to a Chromium-based browser (Chrome/Edge/Brave/Chromium) so browser_* tools can find it. Use after browser_open reports no browser found: ask the user for their browser's exe path (e.g. \"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\"), then call this to validate and save it. The path is written to the user config ([cowork] browser_path) and takes effect on the next browser_open — no restart needed. Pass an empty path to clear the override and revert to auto-detection."
+	return "Persist the path to a Chromium-based browser (Chrome/Edge/Brave/Chromium) so browser_* tools can find it. Use after browser_open reports no browser found: ask the user for their browser's executable path (e.g. " + browserExamplePath() + "), then call this to validate and save it. The path is written to the user config ([cowork] browser_path) and takes effect on the next browser_open — no restart needed. Pass an empty path to clear the override and revert to auto-detection."
 }
 
 func (browserSetPath) Schema() json.RawMessage {

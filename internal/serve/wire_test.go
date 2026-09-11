@@ -73,6 +73,13 @@ func TestToWire(t *testing.T) {
 		}
 	})
 
+	t.Run("turn done cancelled", func(t *testing.T) {
+		w := toWire(event.Event{Kind: event.TurnDone, Cancelled: true})
+		if w.Kind != "turn_done" || !w.Cancelled || w.Err != "" {
+			t.Errorf("cancelled turn_done = %+v", w)
+		}
+	})
+
 	t.Run("steer", func(t *testing.T) {
 		w := toWire(event.Event{Kind: event.Steer, Text: "mid-turn guidance"})
 		if w.Kind != "steer" || w.Text != "mid-turn guidance" {

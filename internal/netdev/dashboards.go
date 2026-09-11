@@ -245,12 +245,12 @@ func (m *Manager) BuildInvestigationChain(caseID, findingID string, hours int) *
 				devs[e.Device] = true
 			}
 		}
-			if len(inScope) == 0 {
-				// no pinned findings: fall back to window findings touching the case devices
-				for _, f := range findings {
-					if f.CreatedAt.After(now.Add(-time.Duration(hours)*time.Hour)) && anyIn(f.Devices, devs) {
-						inScope[f.ID] = true
-					}
+		if len(inScope) == 0 {
+			// no pinned findings: fall back to window findings touching the case devices
+			for _, f := range findings {
+				if f.CreatedAt.After(now.Add(-time.Duration(hours)*time.Hour)) && anyIn(f.Devices, devs) {
+					inScope[f.ID] = true
+				}
 				if len(inScope) >= 20 {
 					break
 				}
@@ -1112,8 +1112,8 @@ func distinct(list []string) []string {
 // TopoReconcile is the topology tab's reconciliation card: the offline
 // design↔plan diff plus neighbor-platform coverage (edges by source).
 type TopoReconcile struct {
-	Tri       TriSourceAgg        `json:"tri"`
-	Platforms map[string]int      `json:"platforms"` // edge source → count (lldp/cdp/design/bastion)
+	Tri       TriSourceAgg   `json:"tri"`
+	Platforms map[string]int `json:"platforms"` // edge source → count (lldp/cdp/design/bastion)
 }
 
 // BuildTopoReconcile is pure over the two offline stores (design import +

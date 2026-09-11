@@ -25,8 +25,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -46,16 +44,20 @@ type RagNodeView struct {
 	RelPath    string `json:"relPath"` // relative to import root
 	IsDir      bool   `json:"isDir"`
 	Collection string `json:"collection"`
-	// Status for files: "indexed" (FTS5 only) | "extracting" | "enriched" | "error" | "cancelled"
+	// Status for files: "indexed" (FTS5 only) | "queued" | "extracting" | "enriched"
+	// | "partial" (done but some chunks failed) | "error" | "cancelled"
 	// Folders aggregate: "" (no status) unless all children share one.
-	Status      string        `json:"status"`
-	HasFTS5     bool          `json:"hasFts5"`    // FTS5 chunks exist for this file
-	JobID       string        `json:"jobId"`      // current/last extraction job
-	DoneChunks  int           `json:"doneChunks"` // extraction progress
-	TotalChunks int           `json:"totalChunks"`
-	EntityCount int           `json:"entityCount"` // extracted entities attributed to this file (best-effort)
-	ErrorMsg    string        `json:"errorMsg"`
-	Children    []RagNodeView `json:"children,omitempty"` // folder recursion
+	Status      string `json:"status"`
+	HasFTS5     bool   `json:"hasFts5"`    // FTS5 chunks exist for this file
+	JobID       string `json:"jobId"`      // current/last extraction job
+	DoneChunks  int    `json:"doneChunks"` // extraction progress
+	TotalChunks int    `json:"totalChunks"`
+	// FailedChunks is the count of chunks whose last attempt errored. A node
+	// with status "enriched" and FailedChunks>0 is really "partial".
+	FailedChunks int           `json:"failedChunks"`
+	EntityCount  int           `json:"entityCount"`        // extracted entities attributed to this file (best-effort)
+	ErrorMsg     string        `json:"errorMsg"`           // job-level failure reason ("" when healthy)
+	Children     []RagNodeView `json:"children,omitempty"` // folder recursion
 }
 
 // RagCollectionView is one named collection summary. Supports path-style
@@ -73,6 +75,14 @@ type RagCollectionView struct {
 	Documents int    `json:"documents"`
 	Chunks    int    `json:"chunks"`
 	Entities  int    `json:"entities"`
+	// Extraction health per collection (from rag_jobs): Complete = done with
+	// zero failed chunks; Partial = done but some chunks failed; Failed =
+	// job-level error; Queued = pending/indexed not yet extracted. The
+	// collection row surfaces these so damage is visible without opening it.
+	Complete int `json:"complete"`
+	Partial  int `json:"partial"`
+	Failed   int `json:"failed"`
+	Queued   int `json:"queued"`
 }
 
 // RagImportResult is returned by RagImportPaths — what the UI shows immediately.
@@ -107,6 +117,10 @@ type RagSnippetView struct {
 	Chunk      int     `json:"chunk"`
 	Snippet    string  `json:"snippet"`
 	Score      float64 `json:"score"`
+	// Status mirrors the source FILE's extraction job status (partial/error/
+	// extracting/…) so search results can flag "this hit comes from a file
+	// whose extraction is incomplete" instead of presenting it as full fact.
+	Status string `json:"status"`
 }
 
 // RagETAView is the on-demand ETA probe for hover tooltips.
@@ -128,6 +142,11 @@ func (a *App) ListRagCollections() []RagCollectionView {
 		return []RagCollectionView{}
 	}
 	out := make([]RagCollectionView, 0, len(cols))
+	// One AllJobs query feeds every collection's health rollup.
+	jobs, err := a.ragStore.AllJobs()
+	if err != nil {
+		jobs = nil
+	}
 	for _, c := range cols {
 		ent, _ := a.ragStore.EntityCount(c.Name)
 		// Derive display name and parent from path-style collection names.
@@ -140,9 +159,27 @@ func (a *App) ListRagCollections() []RagCollectionView {
 			name = path[idx+1:]
 			parent = path[:idx]
 		}
+		normalized := strings.ToLower(strings.TrimSpace(c.Name))
+		complete, partial, failed, queued := 0, 0, 0, 0
+		for _, j := range jobs {
+			if j.Collection != normalized {
+				continue
+			}
+			switch fileStatus(j) {
+			case "enriched", "indexed":
+				complete++
+			case "partial":
+				partial++
+			case "error":
+				failed++
+			case "queued", "extracting":
+				queued++
+			}
+		}
 		out = append(out, RagCollectionView{
 			ID: path, Name: name, Path: path, Parent: parent,
 			Documents: c.Documents, Chunks: c.Chunks, Entities: ent,
+			Complete: complete, Partial: partial, Failed: failed, Queued: queued,
 		})
 	}
 	return out
@@ -168,20 +205,21 @@ func (a *App) ListRagTree(collection string) []RagNodeView {
 		}
 		ent := a.fileEntityCount(j.Path)
 		node := RagNodeView{
-			Key:         j.Path,
-			Label:       filepath.Base(j.Path),
-			Kind:        "file",
-			Path:        j.Path,
-			RelPath:     j.RelPath,
-			IsDir:       false,
-			Collection:  j.Collection,
-			Status:      fileStatus(j),
-			HasFTS5:     true, // jobs only exist for FTS5-imported files
-			JobID:       j.ID,
-			DoneChunks:  j.DoneChunks,
-			TotalChunks: j.TotalChunks,
-			EntityCount: ent,
-			ErrorMsg:    j.ErrorMsg,
+			Key:          j.Path,
+			Label:        filepath.Base(j.Path),
+			Kind:         "file",
+			Path:         j.Path,
+			RelPath:      j.RelPath,
+			IsDir:        false,
+			Collection:   j.Collection,
+			Status:       fileStatus(j),
+			HasFTS5:      true, // jobs only exist for FTS5-imported files
+			JobID:        j.ID,
+			DoneChunks:   j.DoneChunks,
+			TotalChunks:  j.TotalChunks,
+			FailedChunks: j.FailedChunks,
+			EntityCount:  ent,
+			ErrorMsg:     j.ErrorMsg,
 		}
 		insertIntoTree(root, j.RelPath, node)
 	}
@@ -196,6 +234,11 @@ func fileStatus(j rag.JobRow) string {
 	case rag.JobExtracting:
 		return "extracting"
 	case rag.JobDone:
+		if j.FailedChunks > 0 {
+			// All chunks processed, some errored: the extraction is incomplete
+			// and the user must not mistake it for a clean 已抽取.
+			return "partial"
+		}
 		if j.DoneChunks > 0 {
 			return "enriched"
 		}
@@ -231,6 +274,11 @@ func insertIntoTree(root *RagNodeView, relPath string, file RagNodeView) {
 	rel := filepath.ToSlash(relPath)
 	segs := strings.Split(rel, "/")
 	cur := root
+	// relPrefix accumulates the folder path under the collection root; it is
+	// the folder node's Key. (cur.Path is "" for nested folders, which made
+	// same-named folders under different parents share the bare segment name
+	// as Key — violating the unique-Key contract and breaking React keys.)
+	relPrefix := ""
 	for i, seg := range segs {
 		if seg == "" || i == len(segs)-1 {
 			// Last segment = the file itself.
@@ -248,7 +296,8 @@ func insertIntoTree(root *RagNodeView, relPath string, file RagNodeView) {
 		}
 		if child == nil {
 			cur.Children = append(cur.Children, RagNodeView{
-				Key:      filepath.Join(cur.Path, seg),
+				Key:      filepath.Join(relPrefix, seg),
+				Path:     filepath.Join(relPrefix, seg),
 				Label:    seg,
 				Kind:     "folder",
 				IsDir:    true,
@@ -256,6 +305,7 @@ func insertIntoTree(root *RagNodeView, relPath string, file RagNodeView) {
 			})
 			child = &cur.Children[len(cur.Children)-1]
 		}
+		relPrefix = filepath.Join(relPrefix, seg)
 		cur = child
 	}
 }
@@ -271,7 +321,7 @@ func (a *App) RagImportPaths(collection string, paths []string) (RagImportResult
 	if len(paths) == 0 {
 		return RagImportResult{}, fmt.Errorf("no paths given")
 	}
-	jobIDs, err := a.ragPipeline.EnqueuePaths(collection, paths, "", "", false)
+	jobIDs, skipped, err := a.ragPipeline.EnqueuePathsEx(collection, paths, "", "", false)
 	if err != nil {
 		return RagImportResult{}, err
 	}
@@ -285,18 +335,56 @@ func (a *App) RagImportPaths(collection string, paths []string) (RagImportResult
 			ftsChunks += j.TotalChunks
 		}
 	}
+	// Cost preview basis: this collection's historical per-chunk latency.
+	avg, _ := a.ragStore.AvgChunkLatencyMs(normalizeCollectionRag(collection))
 	return RagImportResult{
 		JobIDs:    jobIDs,
 		Files:     files,
 		FTSChunks: ftsChunks,
-		Message:   fmt.Sprintf("已导入 %d 个文件（%d chunks）FTS5 即时可搜；深度抽取已在后台开始", files, ftsChunks),
+		Message:   buildImportMessage(files, ftsChunks, avg, skipped),
 	}, nil
+}
+
+// buildImportMessage assembles the post-import feedback: import counts, the
+// extraction cost preview (chunks × 2 calls + historical duration), and — so
+// failures are never silent — the names of files that could not be parsed.
+func buildImportMessage(files, ftsChunks int, avgMs int64, skipped []string) string {
+	msg := fmt.Sprintf("已导入 %d 个文件（%d chunks）FTS5 即时可搜；深度抽取约 %d 次调用", files, ftsChunks, ftsChunks*2)
+	if avgMs > 0 {
+		estSec := avgMs * int64(ftsChunks) / 1000
+		if estSec > 0 {
+			msg += fmt.Sprintf("，预计 %s", durStrCN(estSec))
+		}
+	}
+	if len(skipped) > 0 {
+		shown := skipped
+		if len(shown) > 3 {
+			shown = append(shown[:3], fmt.Sprintf("…等 %d 个", len(skipped)))
+		}
+		msg += fmt.Sprintf("；另有 %d 个文件无法解析：%s", len(skipped), strings.Join(shown, "、"))
+	}
+	msg += "，完成后将通知您"
+	return msg
+}
+
+// durStrCN renders seconds as a compact Chinese duration ("约 3 分钟" / "约 45 秒").
+func durStrCN(sec int64) string {
+	if sec < 60 {
+		return fmt.Sprintf("%d 秒", sec)
+	}
+	if sec < 3600 {
+		return fmt.Sprintf("%d 分钟", (sec+59)/60)
+	}
+	return fmt.Sprintf("%d 小时 %d 分", sec/3600, (sec%3600+59)/60)
 }
 
 // RagStartExtract triggers deep extraction with a mode selector.
 //   - "incremental" (default): only extract pending/error documents, skip done.
 //   - "full": clear all entities/relations, re-extract everything.
 //   - "silent": same as incremental but the caller returns immediately (no polling).
+//
+// Guarded by ragExtractRunning: a second start while an extract (HE runs async)
+// is in flight returns a busy error instead of double-burning LLM tokens.
 func (a *App) RagStartExtract(collection, template, mode string) error {
 	if collection == "" {
 		collection = "default"
@@ -307,18 +395,18 @@ func (a *App) RagStartExtract(collection, template, mode string) error {
 	}
 	isTemplate := rag.IsTemplate(template)
 
-	// Template-based extraction: prefer Hyper-Extract (Python) when available.
-	if isTemplate && a.heService != nil && a.heService.IsReady() {
-		return a.ragStartHEExtract(collection, template)
+	if !a.ragExtractRunning.CompareAndSwap(false, true) {
+		return fmt.Errorf("已有抽取任务在运行，请等待完成或取消后再试")
 	}
-
-	if a.ragPipeline == nil {
-		return fmt.Errorf("RAG pipeline offline")
-	}
-
-	nodePrompt, edgePrompt := "", ""
-	if isTemplate {
-		nodePrompt, edgePrompt = rag.GetTemplatePrompt(template)
+	defer a.ragExtractRunning.Store(false)
+	// The in-memory flag above only guards the synchronous enqueue window —
+	// after EnqueuePaths returns, the batch keeps running for minutes. The
+	// durable source of truth is the job table: any pending/extracting job
+	// means a batch is genuinely still in flight.
+	if a.ragStore != nil {
+		if active, err := a.ragStore.HasActiveExtractJobs(); err == nil && active {
+			return fmt.Errorf("已有抽取任务在运行，请等待完成或取消后再试")
+		}
 	}
 
 	if isTemplate {
@@ -326,7 +414,9 @@ func (a *App) RagStartExtract(collection, template, mode string) error {
 			return fmt.Errorf("RAG store offline")
 		}
 
-		// "full" mode: wipe entities/relations first so the graph reflects fresh extraction.
+		// "full" mode: wipe entities/relations first so the graph reflects fresh
+		// extraction. Applied BEFORE the HE/Go branch decision — the HE branch
+		// used to return before this ran, silently turning "full" into a merge.
 		if mode == "full" {
 			if err := a.ragStore.DeleteCollectionEntities(collection); err != nil {
 				return fmt.Errorf("clear entities for full re-extract: %w", err)
@@ -334,34 +424,32 @@ func (a *App) RagStartExtract(collection, template, mode string) error {
 			slog.Info("rag: full re-extract (entities cleared)", "collection", collection)
 		}
 
-		jobs, err := a.ragStore.AllJobs()
+		// Graph extraction runs on the Go pipeline for EVERY template
+		// (convergence, spec §7): template prompts are pure built-ins
+		// (GetTemplatePrompt needs no HE server), chunk-grain progress/cancel/
+		// retry all work uniformly, and Hyper-Extract remains dedicated to
+		// embeddings + summarize + semantic search where it adds real value.
+		if a.ragPipeline == nil {
+			return fmt.Errorf("RAG pipeline offline")
+		}
+
+		nodePrompt, edgePrompt := rag.GetTemplatePrompt(template)
+		jobs, err := a.selectExtractJobs(collection, mode)
 		if err != nil {
-			return fmt.Errorf("list jobs: %w", err)
+			return err
 		}
-		var paths []string
-		seen := map[string]bool{}
-		skipped := 0
+		paths := make([]string, 0, len(jobs))
 		for _, j := range jobs {
-			if j.Collection != normalizeCollectionRag(collection) || seen[j.Path] {
-				continue
-			}
-			// In "full" mode, re-extract ALL documents.
-			// In "incremental"/"silent" mode, skip already-done documents.
-			if mode != "full" && j.Status == "done" {
-				skipped++
-				continue
-			}
 			paths = append(paths, j.Path)
-			seen[j.Path] = true
 		}
-		if len(paths) == 0 {
-			return fmt.Errorf("所有文档已提取完成（跳过 %d 个），无需重复提取", skipped)
-		}
-		slog.Info("rag: extract started", "collection", collection, "mode", mode, "to-extract", len(paths), "skipped_done", skipped)
+		slog.Info("rag: extract started", "collection", collection, "mode", mode, "to-extract", len(paths))
 		if _, err := a.ragPipeline.EnqueuePaths(collection, paths, nodePrompt, edgePrompt, true); err != nil {
 			return err
 		}
 	} else {
+		if a.ragPipeline == nil {
+			return fmt.Errorf("RAG pipeline offline")
+		}
 		// Single file path: re-extract just that file (mode ignored for single-file).
 		if _, err := a.ragPipeline.EnqueuePaths(collection, []string{template}, "", "", true); err != nil {
 			return err
@@ -371,111 +459,104 @@ func (a *App) RagStartExtract(collection, template, mode string) error {
 	return nil
 }
 
-// ragStartHEExtract runs Hyper-Extract on all documents in a collection.
-// By default this is incremental: existing entities/relations are preserved
-// and new ones are merged via UpsertEntity/UpsertRelation. Use RagClear to
-// wipe the collection first if a fresh start is needed.
-func (a *App) ragStartHEExtract(collection, template string) error {
-	if a.ragStore == nil {
-		return fmt.Errorf("RAG store offline")
-	}
+// selectExtractJobs narrows a collection's jobs to the ones an extract should
+// (re-)run: incremental/silent skips done, full re-runs everything.
+func (a *App) selectExtractJobs(collection, mode string) ([]rag.JobRow, error) {
 	jobs, err := a.ragStore.AllJobs()
 	if err != nil {
-		return fmt.Errorf("list jobs: %w", err)
+		return nil, fmt.Errorf("list jobs: %w", err)
 	}
-	var paths []string
-	seen := map[string]bool{}
+	var inCollection []rag.JobRow
 	for _, j := range jobs {
-		if j.Collection == normalizeCollectionRag(collection) && !seen[j.Path] {
-			paths = append(paths, j.Path)
-			seen[j.Path] = true
+		if j.Collection == normalizeCollectionRag(collection) {
+			inCollection = append(inCollection, j)
 		}
 	}
-	if len(paths) == 0 {
-		return fmt.Errorf("no documents in collection to extract")
+	picked := rag.FilterJobsForExtraction(inCollection, mode == "full")
+	if len(picked) == 0 {
+		return nil, fmt.Errorf("所有文档已提取完成（跳过 %d 个），无需重复提取", len(inCollection))
 	}
-	// Run HE extraction asynchronously with parallel workers.
-	go func() {
-		client := a.heService.Client()
-		total := len(paths)
-		startTime := time.Now()
-
-		// Worker pool: 4 concurrent extractions.
-		const maxWorkers = 4
-		sem := make(chan struct{}, maxWorkers)
-		var done int32 // atomic counter
-		var wg sync.WaitGroup
-
-		for i, p := range paths {
-			wg.Add(1)
-			go func(idx int, path string) {
-				defer wg.Done()
-				sem <- struct{}{}        // acquire slot
-				defer func() { <-sem }() // release slot
-
-				a.emitHEProgress(collection, path, "extracting", idx, total, 0, "")
-
-				body, _, err := rag.ReadDoc(path)
-				if err != nil {
-					slog.Warn("he: readDoc failed", "path", path, "err", err)
-					a.emitHEProgress(collection, path, "error", idx, total, 0, fmt.Sprintf("read: %v", err))
-					return
-				}
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-				result, err := client.Extract(ctx, body, template, "zh")
-				cancel()
-				if err != nil {
-					slog.Warn("he: extract failed", "path", path, "err", err)
-					a.emitHEProgress(collection, path, "error", idx, total, 0, fmt.Sprintf("extract: %v", err))
-					return
-				}
-				src := rag.Source{Path: path, Chunk: 0}
-				for _, e := range result.Entities {
-					_ = a.ragStore.UpsertEntity(collection, rag.Entity{
-						NameRaw:     e.Name,
-						Type:        e.Type,
-						Description: e.Description,
-					}, src)
-				}
-				for _, r := range result.Relations {
-					_ = a.ragStore.UpsertRelation(collection, rag.Relation{
-						Source:      r.Source,
-						Target:      r.Target,
-						Type:        r.Type,
-						Description: r.Description,
-						Strength:    r.Strength,
-					}, src)
-				}
-				newDone := int(atomic.AddInt32(&done, 1))
-				elapsed := time.Since(startTime).Milliseconds()
-				avgMs := elapsed / int64(newDone)
-				a.emitHEProgress(collection, path, "enriched", newDone, total, avgMs,
-					fmt.Sprintf("%d entities, %d relations", len(result.Entities), len(result.Relations)))
-				slog.Info("he: extracted", "path", path, "entities", len(result.Entities), "relations", len(result.Relations))
-			}(i, p)
-		}
-		wg.Wait()
-		// Clean up dangling relations after HE extraction (HE-side relations
-		// bypass the Go pruneDanglingRelations filter).
-		if n, err := a.ragStore.PruneDanglingRelations(collection); err == nil && n > 0 {
-			slog.Info("he: pruned dangling relations", "collection", collection, "count", n)
-		}
-		a.emitRagChanged()
-	}()
-	return nil
+	return picked, nil
 }
 
 // RagCancelExtract cancels a running extraction job. Pending chunks are dropped;
 // in-flight chunks finish naturally (we don't interrupt an LLM call).
 func (a *App) RagCancelExtract(jobID string) error {
-	if a.ragPipeline == nil {
-		return fmt.Errorf("RAG pipeline offline")
-	}
-	if err := a.ragPipeline.CancelJob(jobID); err != nil {
-		return err
+	if a.ragPipeline != nil {
+		if err := a.ragPipeline.CancelJob(jobID); err != nil {
+			return err
+		}
 	}
 	a.emitRagChanged()
 	return nil
+}
+
+// RagRetryEstimateView previews the cost of a failed-chunk retry for the
+// confirm dialog: how many chunks, how many LLM calls, how long (from this
+// job's own successful-chunk P50 latency; 0 = no history yet).
+type RagRetryEstimateView struct {
+	JobID        string `json:"jobId"`
+	FailedChunks int    `json:"failedChunks"`
+	TotalChunks  int    `json:"totalChunks"`
+	EstCalls     int    `json:"estCalls"`     // failed × 2 (two-stage extraction)
+	EstSeconds   int64  `json:"estSeconds"`   // failed × P50; 0 = unknown
+	AvgLatencyMs int64  `json:"avgLatencyMs"` // the P50 the estimate is based on
+}
+
+// RagRetryEstimate computes the cost preview WITHOUT queueing anything.
+func (a *App) RagRetryEstimate(jobID string) (RagRetryEstimateView, error) {
+	if a.ragStore == nil {
+		return RagRetryEstimateView{}, fmt.Errorf("RAG store offline")
+	}
+	j, ok, err := a.ragStore.JobByID(jobID)
+	if err != nil || !ok {
+		return RagRetryEstimateView{}, fmt.Errorf("job not found")
+	}
+	failed := j.FailedChunks
+	if j.Status == rag.JobError {
+		failed = j.TotalChunks // all-failed job: every chunk retries
+	}
+	// Cancelled jobs are refused by the pipeline guard — estimating for them
+	// would promise a retry that then fails.
+	if j.Status == rag.JobCancelled {
+		return RagRetryEstimateView{}, fmt.Errorf("no failed chunks to retry")
+	}
+	if failed == 0 {
+		return RagRetryEstimateView{}, fmt.Errorf("no failed chunks to retry")
+	}
+	p50, _ := a.ragStore.ChunkLatencyP50Ms(jobID)
+	if p50 == 0 {
+		// No successful history for THIS job — fall back to the collection.
+		p50, _ = a.ragStore.AvgChunkLatencyMs(j.Collection)
+	}
+	return RagRetryEstimateView{
+		JobID:        jobID,
+		FailedChunks: failed,
+		TotalChunks:  j.TotalChunks,
+		EstCalls:     failed * 2,
+		EstSeconds:   int64(p50) * int64(failed) / 1000,
+		AvgLatencyMs: p50,
+	}, nil
+}
+
+// RagRetryFailedChunks re-runs ONLY the errored chunks of one file — the cheap
+// retry entrypoint. Successful chunks and their entities are kept; a 40-chunk
+// document with 2 failures costs 2 more LLM calls, not 40. The work joins the
+// Go pipeline's background queue (rate-limited like any other chunk), so this
+// returns as soon as the chunks are queued.
+func (a *App) RagRetryFailedChunks(jobID string) (int, error) {
+	if a.ragPipeline == nil {
+		return 0, fmt.Errorf("RAG pipeline offline")
+	}
+	n, err := a.ragPipeline.RetryFailedChunks(jobID)
+	if err != nil {
+		return 0, err
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("no failed chunks to retry")
+	}
+	a.emitRagChanged()
+	return n, nil
 }
 
 // RagRemovePath removes a file or folder from the knowledge base (FTS5 chunks +
@@ -553,14 +634,33 @@ func (a *App) RagSearch(collection, query string, topK int) (RagSearchHitView, e
 	}
 	res, err := a.ragStore.Search(query, effective, topK)
 	if err == nil {
+		// Stamp each hit with its source file's extraction status so the UI can
+		// flag results from partially/failed extractions instead of presenting
+		// them as full fact. One AllJobs query builds the path→status map.
+		statusByPath := a.ragStatusByPath()
 		for _, r := range res {
 			out.Snippets = append(out.Snippets, RagSnippetView{
 				Collection: r.Collection, Path: r.Path, Chunk: r.Chunk,
 				Snippet: r.Snippet, Score: r.Score,
+				Status: statusByPath[r.Path],
 			})
 		}
 	}
 	return out, nil
+}
+
+// ragStatusByPath builds a file-path → UI-status map from the job rows
+// (AllJobs returns one row per imported file).
+func (a *App) ragStatusByPath() map[string]string {
+	jobs, err := a.ragStore.AllJobs()
+	if err != nil {
+		return nil
+	}
+	m := make(map[string]string, len(jobs))
+	for _, j := range jobs {
+		m[j.Path] = fileStatus(j)
+	}
+	return m
 }
 
 // RagSemanticSearch searches entities by vector similarity. Requires embeddings
@@ -918,6 +1018,213 @@ type HEHealthView struct {
 	Running bool `json:"running"` // Python HTTP server process is up
 	Ready   bool `json:"ready"`   // HE library actually loaded (extract/summarize usable)
 	Port    int  `json:"port"`
+}
+
+// --- idle-time auto-retry (R3): opt-in, visible, pausable ------------------
+
+// RagAutoRetryStatusView is the panel/tray indicator payload.
+type RagAutoRetryStatusView struct {
+	Enabled   bool `json:"enabled"` // user opted in (config or runtime toggle)
+	Active    bool `json:"active"`  // engine is currently retrying something
+	MaxRounds int  `json:"maxRounds"`
+}
+
+// RagAutoRetryStatus reports the auto-retry engine's state for the UI badge.
+func (a *App) RagAutoRetryStatus() RagAutoRetryStatusView {
+	return RagAutoRetryStatusView{
+		Enabled:   a.ragAutoRetryEnabled.Load(),
+		Active:    a.ragAutoRetryActive.Load(),
+		MaxRounds: int(a.ragAutoRetryMaxRounds.Load()),
+	}
+}
+
+// RagAutoRetryToggle pauses/resumes the engine at runtime (the config value
+// is only read at boot). This is the "one-click stop" the visibility contract
+// requires — background work must always be callable-off.
+func (a *App) RagAutoRetryToggle(enabled bool) error {
+	if enabled {
+		// startRagAutoRetry is a single-engine idempotent starter: it spawns
+		// only the first time and refreshes knobs afterwards, so enabling from
+		// both settings and the toggle never double-ticks.
+		maxRounds := int(a.ragAutoRetryMaxRounds.Load())
+		if maxRounds <= 0 {
+			maxRounds = 2
+		}
+		a.startRagAutoRetry(maxRounds)
+	} else {
+		a.ragAutoRetryEnabled.Store(false)
+	}
+	slog.Info("rag: auto-retry toggled", "enabled", enabled)
+	a.emitRagChanged()
+	return nil
+}
+
+// startRagAutoRetry launches the idle-time scanner when the user opted in
+// (spec R3-1/R3-2). Every tick (5 min after a 30 s warm-up): while no other
+// extract is running, re-queue the failed chunks of errored/partial jobs that
+// still have rounds left, bump their persisted round counter, and notify the
+// UI (rag:auto-retry event) both when a round starts and when jobs come back
+// still-failing with their rounds spent.
+func (a *App) startRagAutoRetry(maxRounds int) {
+	a.ragAutoRetryMaxRounds.Store(int64(maxRounds))
+	a.ragAutoRetryEnabled.Store(true)
+	// Single-engine guard (heMu-protected): the goroutine lives for the whole
+	// process — Toggle off only flips the runtime switch and lets it idle.
+	// Re-invoking this (settings save after a badge pause) must NOT spawn a
+	// second ticker: both would fire rounds (double token burn) and the first
+	// goroutine would leak, its stop channel overwritten. shutdownBody closes
+	// the channel exactly once at shutdown (heMu-guarded, nil-ed after).
+	a.heMu.Lock()
+	if a.ragAutoRetryStop != nil {
+		a.heMu.Unlock()
+		slog.Info("rag: auto-retry engine already running; refreshed knobs", "max_rounds", maxRounds)
+		return
+	}
+	stop := make(chan struct{})
+	a.ragAutoRetryStop = stop
+	a.heMu.Unlock()
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		// Warm-up delay: let boot-time Resume settle first so the engine
+		// doesn't race the startup rehydration.
+		select {
+		case <-stop:
+			return
+		case <-time.After(30 * time.Second):
+		}
+		a.emitAutoRetryEvent("ready", 0, 0)
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				a.runAutoRetryTick()
+			}
+		}
+	}()
+	slog.Info("rag: auto-retry engine started", "max_rounds", maxRounds)
+}
+
+// runAutoRetryTick is one scanner pass. Split from startRagAutoRetry so the
+// logic is testable and the goroutine stays dumb.
+func (a *App) runAutoRetryTick() {
+	if !a.ragAutoRetryEnabled.Load() || a.ragPipeline == nil || a.ragStore == nil {
+		return
+	}
+	// Never fight a manual batch for the pipeline — both the in-memory flag
+	// (synchronous window) and the durable job table (whole batch duration).
+	if a.ragExtractRunning.Load() {
+		return
+	}
+	if active, err := a.ragStore.HasActiveExtractJobs(); err == nil && active {
+		return
+	}
+	jobs, err := a.ragStore.FailedJobsForAutoRetry(int(a.ragAutoRetryMaxRounds.Load()))
+	if err != nil {
+		slog.Warn("rag: auto-retry scan failed", "err", err)
+		return
+	}
+	if len(jobs) == 0 {
+		return
+	}
+	a.ragAutoRetryActive.Store(true)
+	defer a.ragAutoRetryActive.Store(false)
+	retried := 0
+	for _, j := range jobs {
+		// Enqueue FIRST; only a round that actually queued chunks consumes
+		// one of the job's retry rounds — a no-op retry (nothing left to
+		// retry) must not burn the cap and trigger a premature exhausted.
+		n, err := a.ragPipeline.RetryFailedChunks(j.ID)
+		if err != nil {
+			// RetryFailedChunks guards status itself; a race with the user
+			// clicking retry just errors here — fine, next tick re-scans.
+			slog.Warn("rag: auto-retry enqueue failed", "job", j.ID, "err", err)
+			continue
+		}
+		if n > 0 {
+			if _, err := a.ragStore.IncrementJobRetryRounds(j.ID); err != nil {
+				slog.Warn("rag: auto-retry round bump failed", "job", j.ID, "err", err)
+			}
+			retried++
+		}
+	}
+	if retried > 0 {
+		slog.Info("rag: auto-retry round started", "jobs", retried)
+		a.emitAutoRetryEvent("round", retried, int(a.ragAutoRetryMaxRounds.Load()))
+		a.emitRagChanged()
+	}
+	// Rounds-spent report: notify once per new exhaustion (signature guard),
+	// not on every tick.
+	if exhausted, err := a.ragStore.ExhaustedAutoRetryJobs(int(a.ragAutoRetryMaxRounds.Load())); err == nil && len(exhausted) > 0 {
+		sig := make(map[string]bool, len(exhausted))
+		for _, j := range exhausted {
+			sig[j.ID] = true
+		}
+		a.heMu.Lock()
+		same := len(sig) == len(a.ragAutoRetryReported)
+		if same {
+			for id := range sig {
+				if !a.ragAutoRetryReported[id] {
+					same = false
+					break
+				}
+			}
+		}
+		if !same {
+			a.ragAutoRetryReported = sig
+			a.heMu.Unlock()
+			a.emitAutoRetryEvent("exhausted", len(exhausted), int(a.ragAutoRetryMaxRounds.Load()))
+		} else {
+			a.heMu.Unlock()
+		}
+	} else if err == nil && len(exhausted) == 0 {
+		a.heMu.Lock()
+		a.ragAutoRetryReported = nil
+		a.heMu.Unlock()
+	}
+}
+
+// emitAutoRetryEvent pushes a rag:auto-retry lifecycle event to the frontend
+// ({type: ready|round|exhausted, jobs, maxRounds}).
+func (a *App) emitAutoRetryEvent(typ string, jobs, maxRounds int) {
+	if a.ctx == nil {
+		return
+	}
+	runtime.EventsEmit(a.ctx, "rag:auto-retry", map[string]any{
+		"type": typ, "jobs": jobs, "maxRounds": maxRounds,
+	})
+}
+
+// RagRetryAllFailed re-queues the failed chunks of EVERY errored/partial file
+// in a collection — the collection-level counterpart of the per-file cheap
+// retry. Returns how many jobs were re-queued.
+func (a *App) RagRetryAllFailed(collection string) (int, error) {
+	if a.ragPipeline == nil {
+		return 0, fmt.Errorf("RAG pipeline offline")
+	}
+	jobs, err := a.ragStore.AllJobs()
+	if err != nil {
+		return 0, err
+	}
+	normalized := normalizeCollectionRag(collection)
+	retried := 0
+	for _, j := range jobs {
+		if j.Collection != normalized {
+			continue
+		}
+		if j.Status != rag.JobError && !(j.Status == rag.JobDone && j.FailedChunks > 0) {
+			continue
+		}
+		if n, err := a.ragPipeline.RetryFailedChunks(j.ID); err == nil && n > 0 {
+			retried++
+		}
+	}
+	if retried == 0 {
+		return 0, fmt.Errorf("no failed chunks to retry")
+	}
+	a.emitRagChanged()
+	return retried, nil
 }
 
 // HEHealth returns the Hyper-Extract service status.
@@ -1517,9 +1824,16 @@ func (a *App) RagBatchImport(collection string, paths []string) (RagImportResult
 }
 
 // RagBatchExtract starts deep extraction for all files in a collection.
+// Same re-entry guard as RagStartExtract: enqueuing while a batch is running
+// would double-enqueue and double-burn.
 func (a *App) RagBatchExtract(collection string) error {
 	if a.ragPipeline == nil {
 		return fmt.Errorf("RAG pipeline offline")
+	}
+	if a.ragStore != nil {
+		if active, err := a.ragStore.HasActiveExtractJobs(); err == nil && active {
+			return fmt.Errorf("已有抽取任务在运行，请等待完成或取消后再试")
+		}
 	}
 	if a.ragStore == nil {
 		return fmt.Errorf("RAG store offline")
@@ -1641,22 +1955,6 @@ func (a *App) emitRagChanged() {
 		return
 	}
 	runtime.EventsEmit(a.ctx, "rag:changed")
-}
-
-// emitHEProgress emits a rag:progress event for Hyper-Extract per-file progress.
-func (a *App) emitHEProgress(collection, path, status string, done, total int, avgMs int64, message string) {
-	if a.ctx == nil {
-		return
-	}
-	runtime.EventsEmit(a.ctx, "rag:progress", rag.ProgressEvent{
-		Collection:   collection,
-		Path:         path,
-		Status:       status,
-		DoneChunks:   done,
-		TotalChunks:  total,
-		AvgLatencyMs: avgMs,
-		Message:      message,
-	})
 }
 
 // sortRagNodes sorts folder-first, then label — for stable tree rendering.

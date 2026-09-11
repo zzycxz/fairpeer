@@ -28,9 +28,9 @@ import (
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"github.com/zzycxz/fairpeer/internal/tool/builtin"
-	"github.com/zzycxz/fairpeer/internal/netdev"
 	"github.com/zzycxz/fairpeer/internal/config"
+	"github.com/zzycxz/fairpeer/internal/netdev"
+	"github.com/zzycxz/fairpeer/internal/tool/builtin"
 )
 
 // --- time range preview -------------------------------------------------------
@@ -309,7 +309,7 @@ type BrowserConsoleWatchRound struct {
 	// S4-2：夜班窗口内被静默（轮次照常入档，晨报补账）。
 	NightSilenced bool     `json:"night_silenced,omitempty"`
 	Notified      []string `json:"notified,omitempty"` // im|email|system
-	NotifyError      string   `json:"notify_error,omitempty"`
+	NotifyError   string   `json:"notify_error,omitempty"`
 }
 
 // BrowserConsoleWatchNotify is a watch's delivery policy: WHICH rounds reach
@@ -366,14 +366,14 @@ const watchHistoryMax = 50
 const watchMinIntervalSec = 60
 
 type consoleWatch struct {
-	mu          sync.Mutex
-	active      bool
-	cfg         BrowserConsoleWatchConfig
-	stop        chan struct{}
-	anchor      time.Time                  // wall-clock grid origin
-	nextAt      time.Time
-	rounds      []BrowserConsoleWatchRound // newest first
-	lastEnd     time.Time                  // end of the window the last round actually typed
+	mu      sync.Mutex
+	active  bool
+	cfg     BrowserConsoleWatchConfig
+	stop    chan struct{}
+	anchor  time.Time // wall-clock grid origin
+	nextAt  time.Time
+	rounds  []BrowserConsoleWatchRound // newest first
+	lastEnd time.Time                  // end of the window the last round actually typed
 }
 
 var consoleWatchState consoleWatch
@@ -791,7 +791,7 @@ func (a *App) watchNightGate() (band string, min string, active bool) {
 func (a *App) deliverWatchNotification(cfg BrowserConsoleWatchConfig, round *BrowserConsoleWatchRound) {
 	if !watchNotifyShould(cfg.Notify, alertVerdict{
 		CompromisedHosts: round.CompromisedHosts,
-		AttentionAlerts:   round.AttentionCount,
+		AttentionAlerts:  round.AttentionCount,
 	}) || round.Status != "done" || round.Analysis == "" {
 		return
 	}

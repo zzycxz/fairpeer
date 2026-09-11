@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { app, onLoopStatus } from "../../lib/bridge";
 import { LOOP_PRESETS, presetToConfig } from "../../lib/loopPresets";
-import { useT } from "../../lib/i18n";
+import { useI18n } from "../../lib/i18n";
 import type { LoopConfig, LoopRunStatus, TabMeta } from "../../lib/types";
 
 const QUEUE_KEY = "fairpeer.loopQueue";
@@ -70,7 +70,7 @@ export function LoopPanel({
     () => (activeTabId && projectTabs.some((tab) => tab.id === activeTabId) ? activeTabId : projectTabs[0]?.id ?? ""),
   );
   const targetTab = projectTabs.find((tab) => tab.id === targetTabId);
-  const t = useT();
+  const { t, locale } = useI18n();
   const [status, setStatus] = useState<LoopRunStatus | null>(null);
   const [draft, setDraft] = useState<LoopConfig>(() => presetToConfig(LOOP_PRESETS[0]));
   const [queue, setQueue] = useState<LoopConfig[]>(loadQueue);
@@ -143,8 +143,8 @@ export function LoopPanel({
                   onClick={() => setDraft(presetToConfig(preset))}
                 >
                   <Icon size={14} />
-                  <span className="loop-preset__name">{preset.labelZh}</span>
-                  <span className="loop-preset__desc">{preset.descZh}</span>
+                  <span className="loop-preset__name">{locale === "zh" ? preset.labelZh : preset.labelEn}</span>
+                  <span className="loop-preset__desc">{locale === "zh" ? preset.descZh : preset.descEn}</span>
                 </button>
               );
             })}

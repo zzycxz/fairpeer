@@ -9,27 +9,29 @@ PROBLEM this fixes:
   the whole repo confirmed no merge existed. So "VLM overrides config colors" was
   not actually true in code.
 
+PRECEDENCE (per field, since the 2026-09 rework):
+  Mechanical extraction (extract_template_colors.py: XML hex + clustered image
+  families) produces EXACT or well-chosen values; VLM hex values are eyeballed
+  approximations (SKILL.md documents #0078D4 being read as #1a3c6e). So:
+  - brand/accent: mechanical value WINS when extraction found real evidence
+    (colors.brand present and != the #4472C4 fallback). VLM fills them only
+    when extraction found nothing (no template / nothing to extract). A
+    conflicting VLM accent is recorded in _template.vlm_accent_alt + a stderr
+    WARN instead of silently overwriting.
+  - background / is_dark-derived readability palette / text_color: VLM wins —
+    it sees the whole rendered slide and judges "dominant background" better
+    than a single-image PIL average.
+  - fonts / canvas / layout: never touched (unchanged).
+
+  Run AFTER extract_template_colors.py (Step 0).
+
 WHAT this does:
-  Reads ~/.fairpeer/ppt-template-style.json (and, when Phase 2 produces it,
-  ~/.fairpeer/reference-style.json) and merges their colors into the given
-  template_config.json IN PLACE. After this runs, the config that ppt-auto and
-  check_svg.py read already reflects VLM-extracted colors — no LLM discipline needed.
-
-PRIORITY (highest wins, applied last):
-  1. reference-style.json   (Phase 2: reference-image colors, if it carries hex fields)
-  2. ppt-template-style.json (VLM template colors, from PickPPTTemplate)
-  3. template_config.json    (baseline / extract_template_colors.py output from Step 0)
-
-SCOPE (deliberately narrow, per PPT vision spec):
-  Only `colors` are merged (background/accent/text + is_dark-derived secondary/
-  muted/card_bg/line). Fonts, canvas (16:9), font sizes, layout are NOT touched —
-  background stays default.pptx, canvas stays 1280x720, font sizes autofit elsewhere.
-  Run AFTER extract_template_colors.py (Step 0) so VLM colors win over PIL extraction.
+  Reads ~/.fairpeer/ppt-template-style.json and ~/.fairpeer/reference-style.json
+  (whichever exist) and merges their colors into the given template_config.json
+  IN PLACE — so the config ppt-auto and check_svg.py read needs no LLM discipline.
 
 Usage:
     python merge_vlm_style.py <template_config.json> [--home <home_dir>]
-    # reads ~/.fairpeer/{ppt-template-style,reference-style}.json (whichever exist),
-    # merges into <template_config.json> in place.
     # Last stdout line: {"merged": [<files>], "config": <path>}
 """
 import argparse
@@ -76,7 +78,8 @@ def _dark_palette(is_dark):
     }
 
 
-def _apply_vlm_style(config, vlm_style, allow_background_type=True):
+def _apply_vlm_style(config, vlm_style, allow_background_type=True,
+                     override_brand=False):
     """Merge one VLM style dict (ppt-template-style.json shape) into config['colors'].
 
     Maps the VLM result fields (background / is_dark / accent_colors / text_color /
@@ -89,6 +92,13 @@ def _apply_vlm_style(config, vlm_style, allow_background_type=True):
     (no background in SVG, master shows through). reference-style.json's
     background_type describes the reference PAGE's look, not a template's
     existence; copying it made template-less decks lose their background.
+
+    override_brand: True only for reference-style.json (the user attached this
+    image and wants the deck to look like it — no mechanical extraction exists
+    for a bare image, so its VLM colors are the best available and DO override
+    template-derived values). False for ppt-template-style.json: the template's
+    mechanically extracted brand/accent are exact and must not be displaced by
+    eyeballed hexes.
     """
     colors = config.setdefault("colors", {})
 
@@ -115,14 +125,32 @@ def _apply_vlm_style(config, vlm_style, allow_background_type=True):
         else:
             print(f"[merge_vlm_style] WARN non-hex text_color ignored: {tc!r}", file=sys.stderr)
 
-    # accent: first valid hex accent wins; leave existing if none.
+    # accent/brand: mechanical extraction wins when it found real evidence.
+    # Extraction evidence = colors.brand present and not the #4472C4 fallback
+    # (extract sets brand==accent==#4472C4 only when NO candidate was found).
+    # VLM hexes are approximations — never let them displace exact values.
     raw_accents = vlm_style.get("accent_colors") or []
     accents = [a for a in raw_accents if _is_hex(a)]
     if len(accents) < len(raw_accents):
         print(f"[merge_vlm_style] WARN non-hex accent_colors ignored: "
               f"{raw_accents!r}", file=sys.stderr)
+    existing_brand = colors.get("brand")
+    has_mechanical = (existing_brand
+                      and str(existing_brand).upper() != "#4472C4")
     if accents:
-        colors["accent"] = accents[0]
+        if override_brand:
+            colors["accent"] = accents[0]
+            colors["brand"] = accents[0]
+        elif has_mechanical:
+            if accents[0].upper() != str(existing_brand).upper():
+                print(f"[merge_vlm_style] WARN VLM accent {accents[0]} conflicts "
+                      f"with extracted brand {existing_brand}; keeping extraction "
+                      f"(VLM value stashed in _template.vlm_accent_alt)",
+                      file=sys.stderr)
+                config.setdefault("_template", {})["vlm_accent_alt"] = accents[0]
+        else:
+            colors["accent"] = accents[0]
+            colors["brand"] = accents[0]
 
     colors["white"] = "#FFFFFF"
 
@@ -133,22 +161,29 @@ def merge(config_path, home_dir):
 
     fairpeer = os.path.join(home_dir, ".fairpeer")
     # Apply LOWEST priority first so higher priority overwrites.
-    # (reference-style wins over template-style wins over baseline.)
+    # - ppt-template-style.json: fill-only for brand/accent (mechanical extraction
+    #   of the same template is more precise than the VLM's eyeballed hexes).
+    # - reference-style.json: the user's attached reference image — highest
+    #   priority, its colors DO override (no mechanical path exists for a bare
+    #   image; the reference is explicit user intent).
     # allow_background_type only for the template source — see
     # _apply_vlm_style for why a reference's background_type must not
     # flip a template-less deck into template mode.
     sources = [
-        ("ppt-template-style.json", os.path.join(fairpeer, "ppt-template-style.json"), True),
-        ("reference-style.json", os.path.join(fairpeer, "reference-style.json"), False),
+        ("ppt-template-style.json", os.path.join(fairpeer, "ppt-template-style.json"),
+         True, False),
+        ("reference-style.json", os.path.join(fairpeer, "reference-style.json"),
+         False, True),
     ]
     applied = []
-    for name, path, allow_bt in sources:
+    for name, path, allow_bt, override_brand in sources:
         if not os.path.isfile(path):
             continue
         try:
             with open(path, "r", encoding="utf-8") as sf:
                 style = json.load(sf)
-            _apply_vlm_style(config, style, allow_background_type=allow_bt)
+            _apply_vlm_style(config, style, allow_background_type=allow_bt,
+                             override_brand=override_brand)
             applied.append(name)
         except (OSError, ValueError) as e:
             print(f"[merge_vlm_style] WARN skipping {name}: {e}", file=sys.stderr)

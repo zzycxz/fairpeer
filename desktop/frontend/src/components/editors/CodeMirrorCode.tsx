@@ -1,12 +1,12 @@
 import CodeMirror from '@uiw/react-codemirror';
 import type { EditorProps } from "../CodeViewer";
+import { useResolvedTheme } from "../../lib/useResolvedTheme";
 
 export default function CodeMirrorCode({ value, readOnly, maxHeight }: EditorProps) {
-  // Pass the system's global class standard directly,
-  // typically the app determines dark/light mode and sets it in higher-level CSS.
-  // By default, we let CodeMirror use its light or we could wire it to dark mode 
-  // depending on `data-theme-style="graphite"` in styles.css.
-  const theme = "dark"; // Defaulting to dark since it's a graphite theme
+  // Follow the app theme (lib/theme.ts): light app theme renders the light
+  // editor, dark renders dark. The resolved snapshot re-renders on a settings
+  // flip or an OS scheme change under "auto".
+  const theme = useResolvedTheme();
 
   return (
     <div className="cm-wrapper" style={maxHeight ? { maxHeight, overflow: 'auto' } : undefined}>

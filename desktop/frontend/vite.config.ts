@@ -41,7 +41,12 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    target: "es2021",
+    // es2020, not es2021: es2021 syntax (Promise.any, logical assignment)
+    // needs WebKitGTK >= 2.32, but domestic-OS targets ship older engines
+    // (Kylin V10 SP1 = 2.28.1, UOS 20 LTS-updated = 2.38) — es2021 white-
+    // screens there. es2020 (optional chaining / nullish coalescing) is the
+    // floor WebKitGTK 2.28 supports. Same rationale as stripCrossorigin.
+    target: "es2020",
     // Use terser for smaller output (esbuild is faster to build but produces
     // larger bundles). Disabled for dev builds via the default.
     minify: "terser",

@@ -368,8 +368,16 @@ func (gw *BotGateway) Stop() {
 //     whose send URL is chosen by ChatType (dm/group/guild/direct). Omitting
 //     chatType for QQ defaults to dm, which fails for group/channel IDs.
 //
-// No-op (returns nil) if the platform adapter isn't connected — a scheduled
-// push shouldn't fail the task run just because IM is offline.
+// P1-E3⑤: this used to return nil when the platform adapter wasn't connected —
+// a fake success the scheduler recorded as a delivered push. It now returns
+// ErrPlatformOffline (wrapped with the platform name); callers classify: the
+// desktop scheduler bridge maps it to scheduler.ErrIMOffline ("skipped with
+// reason"), calendar and screenshot pushes surface it as a real error.
+//
+// ErrPlatformOffline reports a Push that delivered nothing because the
+// platform's adapter isn't connected (bot not started for that platform).
+var ErrPlatformOffline = errors.New("IM platform adapter not connected")
+
 func (gw *BotGateway) Push(ctx context.Context, dest, text string) error {
 	plat, chatType, chatID := splitPushDest(dest)
 	if plat == "" || chatID == "" {
@@ -378,7 +386,7 @@ func (gw *BotGateway) Push(ctx context.Context, dest, text string) error {
 	adapter, ok := gw.adapters[plat]
 	if !ok {
 		gw.logger.Warn("push: platform adapter not connected", "platform", plat)
-		return nil
+		return fmt.Errorf("%w: %s", ErrPlatformOffline, plat)
 	}
 	out := OutboundMessage{ChatID: chatID, Text: text}
 	if chatType != "" {
@@ -604,8 +612,14 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		state, ok := gw.controllers[key]
 		gw.mu.Unlock()
 		if ok {
-			state.ctrl.Approve(parts[1], true, false, false)
-			_ = gw.sendText(ctx, adapter, msg, "已批准。")
+			// P1-E3⑤: reply honestly. A wrong/expired/already-settled id used to
+			// get "已批准。" for a no-op — a second approver was told success for
+			// a decision that never happened.
+			if state.ctrl.ApproveIfPending(parts[1], true, false, false) {
+				_ = gw.sendText(ctx, adapter, msg, "已批准。")
+			} else {
+				_ = gw.sendText(ctx, adapter, msg, fmt.Sprintf("未找到待处理的审批 %s（可能已在桌面处理或已超时）。", parts[1]))
+			}
 		}
 
 	case strings.HasPrefix(msg.Text, "/deny"):
@@ -622,8 +636,11 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		state, ok := gw.controllers[key]
 		gw.mu.Unlock()
 		if ok {
-			state.ctrl.Approve(parts[1], false, false, false)
-			_ = gw.sendText(ctx, adapter, msg, "已拒绝。")
+			if state.ctrl.ApproveIfPending(parts[1], false, false, false) {
+				_ = gw.sendText(ctx, adapter, msg, "已拒绝。")
+			} else {
+				_ = gw.sendText(ctx, adapter, msg, fmt.Sprintf("未找到待处理的审批 %s（可能已在桌面处理或已超时）。", parts[1]))
+			}
 		}
 
 	case strings.HasPrefix(msg.Text, "/answer"):

@@ -33,10 +33,10 @@ func TestPlainTaskSkipsRunner(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			s := New(t.TempDir() + "/sched.json")
 			_, err := s.Create(ScheduledTask{
-				Name:       c.name,
-				Expression: "every 1h",
-				Prompt:     c.prompt,
-				Plain:      c.plain,
+				Name:                 c.name,
+				Expression:           "every 1h",
+				Prompt:               c.prompt,
+				Plain:                c.plain,
 				ConfirmHighFrequency: true,
 			})
 			if err != nil {

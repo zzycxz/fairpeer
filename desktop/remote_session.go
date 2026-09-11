@@ -448,6 +448,10 @@ func (s *remoteSession) GoalStatus() string {
 	return s.mu.goalStatus
 }
 
+func (s *remoteSession) GoalTurns() (int, int) {
+	return 0, 0 // not synced by the remote protocol yet; UI hides the chip
+}
+
 func (s *remoteSession) SetRAGScope(scope string) {
 	_ = s.call("session/setRagScope", remotehost.SetRagScopeParams{SessionID: s.id, Scope: scope}, nil)
 }
@@ -703,9 +707,6 @@ func (s *remoteSession) EmitExpertCollab(collab event.Collab)    {}
 func (s *remoteSession) DeleteExpertCollab(ordinal int) error    { return errRemoteUnsupported }
 
 func (s *remoteSession) TriggerDream(ctx context.Context) (agent.DreamRun, bool) {
-	return agent.DreamRun{}, false
-}
-func (s *remoteSession) TriggerDistill(ctx context.Context) (agent.DreamRun, bool) {
 	return agent.DreamRun{}, false
 }
 func (s *remoteSession) LastDreamRun(kind agent.DreamKind) (agent.DreamRun, bool) {

@@ -12,8 +12,11 @@ import (
 	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
-// Calendar tools for coWork. The calendar store is injected at boot via
-// SetCalendarStore; when nil the tools return a clear error.
+// Calendar tools. The store is injected at boot via SetCalendarStore; when nil
+// the tools return a clear error. Each instance is BOUND to the registering
+// profile: events it creates land in that profile's partition, and reads/
+// updates/deletes are scoped to it (one profile's agent never sees another
+// cabinet). See SchedulerTools for the shared security invariants.
 
 var calendarStore *calendar.Store
 
@@ -26,11 +29,16 @@ func requireCalendarStore() (*calendar.Store, error) {
 	return calendarStore, nil
 }
 
-func CalendarTools() []tool.Tool {
-	return []tool.Tool{calendarTool{}}
+// CalendarTools returns the calendar tool bound to the calling profile.
+func CalendarTools(profile string) []tool.Tool {
+	return []tool.Tool{calendarTool{profile: profile}}
 }
 
 // calendarParams is the shared request struct for all calendar actions.
+// Deliberately WITHOUT output routing (output_mode/output_dest/output_account)
+// and path fields: the agent never configures outward reminder routing or
+// touches .ics files — both are user-only UI actions (see the create/update
+// handlers). Extra JSON keys the model smuggles in are simply never read.
 type calendarParams struct {
 	Action        string   `json:"action"`
 	ID            string   `json:"id"`
@@ -46,34 +54,26 @@ type calendarParams struct {
 	RecurrenceEnd string   `json:"recurrence_end"`
 	Reminders     []int    `json:"reminders"`
 	Tags          []string `json:"tags"`
-	// Output fields route reminders beyond the desktop toast. output_mode "im"
-	// pushes reminders to output_dest ("platform:chatID"); "email" sends via the
-	// named output_account ("" = default) to output_dest (recipient). Empty/"" =
-	// toast only. Only takes effect when reminders are set.
-	OutputMode    string `json:"output_mode"`
-	OutputDest    string `json:"output_dest"`
-	OutputAccount string `json:"output_account"`
-	Since         string `json:"since"`
-	Before        string `json:"before"`
-	Q             string `json:"q"`
-	Limit         int    `json:"limit"`
-	Path          string `json:"path"`
+	Since         string   `json:"since"`
+	Before        string   `json:"before"`
+	Q             string   `json:"q"`
+	Limit         int      `json:"limit"`
 }
 
 // calendarTool is the unified calendar entry point.
-type calendarTool struct{}
+type calendarTool struct{ profile string }
 
 func (calendarTool) Name() string { return "calendar" }
 
 func (calendarTool) Description() string {
-	return "Manage calendar events. Actions: create (title/start/end required), list (since/before for time range), update (id + fields to change), delete (id required), search (q keyword), freebusy (since/before), export (path for .ics file), import (path to .ics file)."
+	return "Manage calendar events in YOUR profile's partition (other profiles' events are invisible). Actions: create (title/start/end required), list (since/before for time range), update (id + fields to change), delete (id required), search (q keyword), freebusy (since/before), holidays. Reminders fire as local desktop notifications — email/IM routing and .ics import/export are user-only actions in the calendar panel."
 }
 
 func (calendarTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 "type":"object",
 "properties":{
-  "action":{"type":"string","enum":["create","list","update","delete","search","freebusy","export","import","holidays"],"description":"Action to perform"},
+  "action":{"type":"string","enum":["create","list","update","delete","search","freebusy","holidays"],"description":"Action to perform"},
   "id":{"type":"string","description":"Event ID (for update/delete)"},
   "title":{"type":"string","description":"Event title (for create/update)"},
   "description":{"type":"string","description":"Event description"},
@@ -85,16 +85,12 @@ func (calendarTool) Schema() json.RawMessage {
   "color":{"type":"string","description":"Hex color e.g. '#FF4444'"},
   "recurrence":{"type":"string","description":"RFC 5545 RRULE, e.g. 'FREQ=WEEKLY;BYDAY=MO'"},
   "recurrence_end":{"type":"string","description":"Recurrence end date '2026-12-31' (default +1 year)"},
-  "reminders":{"type":"array","items":{"type":"integer"},"description":"Reminder minutes before event, e.g. [15, 5]"},
+  "reminders":{"type":"array","items":{"type":"integer"},"description":"Reminder minutes before event, e.g. [15, 5] — fires as a local desktop notification"},
   "tags":{"type":"array","items":{"type":"string"},"description":"Tags for categorization"},
-  "output_mode":{"type":"string","enum":["","im","email","none"],"description":"Route reminders beyond desktop toast: 'im' pushes to output_dest (platform:chatID), 'email' sends via output_account to output_dest (recipient). Empty = toast only (default). On update, pass 'none' to CLEAR existing push routing back to toast-only. Only takes effect with reminders set."},
-  "output_dest":{"type":"string","description":"IM destination 'platform:chatID' (or 'platform:chatType:chatID' for QQ groups) when output_mode='im'; recipient email when output_mode='email'."},
-  "output_account":{"type":"string","description":"Named mailbox to send from when output_mode='email' (empty = default account)."},
   "since":{"type":"string","description":"List/search start boundary: '2026-07-07' or 'today' or 'this_week'"},
   "before":{"type":"string","description":"List/search end boundary"},
   "q":{"type":"string","description":"Search keyword (for search action)"},
-  "limit":{"type":"integer","description":"Max results for search (default 50)"},
-  "path":{"type":"string","description":"File path for export/import (.ics file)"}
+  "limit":{"type":"integer","description":"Max results for search (default 50)"}
 },
 "required":["action"]
 }`)
@@ -102,7 +98,7 @@ func (calendarTool) Schema() json.RawMessage {
 
 func (calendarTool) ReadOnly() bool { return false }
 
-func (calendarTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (t calendarTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p calendarParams
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -110,29 +106,31 @@ func (calendarTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 
 	switch p.Action {
 	case "create":
-		return calendarCreate(p)
+		return t.calendarCreate(p)
 	case "list":
-		return calendarList(p)
+		return t.calendarList(p)
 	case "update":
-		return calendarUpdate(p)
+		return t.calendarUpdate(p)
 	case "delete":
-		return calendarDelete(p)
+		return t.calendarDelete(p)
 	case "search":
-		return calendarSearch(p)
+		return t.calendarSearch(p)
 	case "freebusy":
-		return calendarFreebusy(p)
-	case "export":
-		return calendarExport(p)
-	case "import":
-		return calendarImport(p)
+		return t.calendarFreebusy(p)
 	case "holidays":
 		return calendarHolidays(p)
+	case "export", "import":
+		// .ics export/import moved to the human UI (Export/ImportCalendarDialog):
+		// the old tool actions took an arbitrary filesystem path — an
+		// any-path write primitive (ExportICS does os.WriteFile with no
+		// confinement). The dialog is the only supported path now.
+		return "", errors.New("ics export/import is a user action — ask the user to use the calendar panel's import/export buttons")
 	default:
 		return "", fmt.Errorf("unknown action %q", p.Action)
 	}
 }
 
-func calendarCreate(p calendarParams) (string, error) {
+func (t calendarTool) calendarCreate(p calendarParams) (string, error) {
 	if p.Title == "" {
 		return "", errors.New("title is required")
 	}
@@ -163,21 +161,23 @@ func calendarCreate(p calendarParams) (string, error) {
 	}
 
 	e := &calendar.Event{
-		Title:         p.Title,
-		Description:   p.Description,
-		Location:      p.Location,
-		StartTime:     start,
-		EndTime:       end,
-		AllDay:        p.AllDay,
-		Timezone:      tz,
-		Color:         p.Color,
-		Source:        "agent",
-		Recurrence:    p.Recurrence,
-		Reminders:     p.Reminders,
-		Tags:          p.Tags,
-		OutputMode:    p.OutputMode,
-		OutputDest:    p.OutputDest,
-		OutputAccount: p.OutputAccount,
+		Title:       p.Title,
+		Description: p.Description,
+		Location:    p.Location,
+		StartTime:   start,
+		EndTime:     end,
+		AllDay:      p.AllDay,
+		Timezone:    tz,
+		Color:       p.Color,
+		Source:      "agent",
+		Profile:     t.profile, // partition pinned to the calling agent
+		Recurrence:  p.Recurrence,
+		Reminders:   p.Reminders,
+		Tags:        p.Tags,
+		// Output routing deliberately NOT copied: an event carrying email/IM
+		// routing fires those channels from the reminder engine — OUTSIDE the
+		// tool permission gate — on a schedule the agent controls. Local
+		// reminders only; the user adds routing in the calendar panel.
 	}
 
 	if p.RecurrenceEnd != "" {
@@ -201,7 +201,7 @@ func calendarCreate(p calendarParams) (string, error) {
 	return msg, nil
 }
 
-func calendarList(p calendarParams) (string, error) {
+func (t calendarTool) calendarList(p calendarParams) (string, error) {
 	store, err := requireCalendarStore()
 	if err != nil {
 		return "", err
@@ -212,7 +212,7 @@ func calendarList(p calendarParams) (string, error) {
 		return "", err
 	}
 
-	events, err := store.List(since, before)
+	events, err := store.ListForProfile(t.profile, since, before)
 	if err != nil {
 		return "", err
 	}
@@ -248,7 +248,7 @@ func calendarList(p calendarParams) (string, error) {
 	return b.String(), nil
 }
 
-func calendarUpdate(p calendarParams) (string, error) {
+func (t calendarTool) calendarUpdate(p calendarParams) (string, error) {
 	if p.ID == "" {
 		return "", errors.New("id is required for update")
 	}
@@ -256,7 +256,9 @@ func calendarUpdate(p calendarParams) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	e, err := store.Get(p.ID)
+	// Partition-scoped read: another profile's event reports not-found (the
+	// agent must not learn it exists).
+	e, err := store.GetForProfile(p.ID, t.profile)
 	if err != nil {
 		return "", fmt.Errorf("event %q not found: %w", p.ID, err)
 	}
@@ -295,29 +297,16 @@ func calendarUpdate(p calendarParams) (string, error) {
 	if len(p.Tags) > 0 {
 		e.Tags = p.Tags
 	}
-	// Output routing: non-empty values overwrite. Pass "none" for output_mode
-	// to CLEAR push routing back to toast-only (the default). output_dest /
-	// output_account are cleared alongside when output_mode is cleared.
-	if strings.EqualFold(strings.TrimSpace(p.OutputMode), "none") {
-		e.OutputMode = ""
-		e.OutputDest = ""
-		e.OutputAccount = ""
-	} else if p.OutputMode != "" {
-		e.OutputMode = p.OutputMode
-	}
-	if p.OutputDest != "" {
-		e.OutputDest = p.OutputDest
-	}
-	if p.OutputAccount != "" {
-		e.OutputAccount = p.OutputAccount
-	}
+	// Output routing deliberately NOT applied: the agent may neither add nor
+	// change email/IM push routing (same invariant as create). A user who
+	// wants routing changed does it in the calendar panel.
 	if err := store.Update(e); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("updated event %q", e.Title), nil
 }
 
-func calendarDelete(p calendarParams) (string, error) {
+func (t calendarTool) calendarDelete(p calendarParams) (string, error) {
 	if p.ID == "" {
 		return "", errors.New("id is required for delete")
 	}
@@ -325,7 +314,7 @@ func calendarDelete(p calendarParams) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	e, err := store.Get(p.ID)
+	e, err := store.GetForProfile(p.ID, t.profile)
 	if err != nil {
 		return "", fmt.Errorf("event %q not found: %w", p.ID, err)
 	}
@@ -335,7 +324,7 @@ func calendarDelete(p calendarParams) (string, error) {
 	return fmt.Sprintf("deleted event %q", e.Title), nil
 }
 
-func calendarSearch(p calendarParams) (string, error) {
+func (t calendarTool) calendarSearch(p calendarParams) (string, error) {
 	if p.Q == "" {
 		return "", errors.New("q (keyword) is required for search")
 	}
@@ -343,7 +332,7 @@ func calendarSearch(p calendarParams) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	events, err := store.Search(p.Q, p.Limit)
+	events, err := store.SearchForProfile(t.profile, p.Q, p.Limit)
 	if err != nil {
 		return "", err
 	}
@@ -360,7 +349,7 @@ func calendarSearch(p calendarParams) (string, error) {
 	return b.String(), nil
 }
 
-func calendarFreebusy(p calendarParams) (string, error) {
+func (t calendarTool) calendarFreebusy(p calendarParams) (string, error) {
 	store, err := requireCalendarStore()
 	if err != nil {
 		return "", err
@@ -369,7 +358,7 @@ func calendarFreebusy(p calendarParams) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	events, err := store.List(since, before)
+	events, err := store.ListForProfile(t.profile, since, before)
 	if err != nil {
 		return "", err
 	}
@@ -385,46 +374,6 @@ func calendarFreebusy(p calendarParams) (string, error) {
 			e.Title)
 	}
 	return b.String(), nil
-}
-
-func calendarExport(p calendarParams) (string, error) {
-	if p.Path == "" {
-		return "", errors.New("path is required for export")
-	}
-	store, err := requireCalendarStore()
-	if err != nil {
-		return "", err
-	}
-	events, err := store.ListAll()
-	if err != nil {
-		return "", err
-	}
-	if err := calendar.ExportICS(p.Path, events); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("exported %d events to %s", len(events), p.Path), nil
-}
-
-func calendarImport(p calendarParams) (string, error) {
-	if p.Path == "" {
-		return "", errors.New("path is required for import")
-	}
-	store, err := requireCalendarStore()
-	if err != nil {
-		return "", err
-	}
-	events, err := calendar.ImportICS(p.Path)
-	if err != nil {
-		return "", err
-	}
-	imported := 0
-	for _, e := range events {
-		if err := store.Create(&e); err != nil {
-			continue // skip duplicates
-		}
-		imported++
-	}
-	return fmt.Sprintf("imported %d events from %s", imported, p.Path), nil
 }
 
 func calendarHolidays(p calendarParams) (string, error) {
