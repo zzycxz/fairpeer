@@ -86,6 +86,8 @@ import type {
   RagNodeView,
   RagProgressEvent,
   RagSearchHitView,
+  RagRetryEstimateView,
+  RagAutoRetryStatusView,
   GraphDataView,
   EntityDetailView,
   EntityPatch,
@@ -185,6 +187,10 @@ interface DesktopWindowState {
 // to AppBindings, then run `pnpm typecheck` to verify.
 export interface AppBindings {
   Platform(): Promise<string>;
+  // Launch-at-login (OS autostart entry). GetAutostart reports the current
+  // registration; SetAutostart returns the resulting state.
+  GetAutostart(): Promise<boolean>;
+  SetAutostart(enabled: boolean): Promise<boolean>;
   Submit(input: string): Promise<void>;
   SubmitToTab(tabID: string, input: string): Promise<void>;
   SubmitDisplay(display: string, input: string): Promise<void>;
@@ -316,9 +322,8 @@ export interface AppBindings {
   SkillMarketInstalledNames(): Promise<Record<string, string>>;
   DreamStatus(): Promise<DreamStatusView>;
   SetDreamEnabled(enabled: boolean): Promise<void>;
-  SetDreamIntervals(dreamDays: number, distillDays: number): Promise<void>;
+  SetDreamInterval(dreamDays: number): Promise<void>;
   TriggerDream(): Promise<DreamRunView>;
-  TriggerDistill(): Promise<DreamRunView>;
   SetMCPServerEnabled(name: string, enabled: boolean): Promise<void>;
   SetMCPServerTier(name: string, tier: string): Promise<void>;
   MCPRegistrySearch(query: string): Promise<MCPRegistryView>;
@@ -338,6 +343,7 @@ export interface AppBindings {
   RevealPath(path: string): Promise<void>;
   SavePastedImage(dataUrl: string): Promise<string>;
   SaveClipboardImage(): Promise<string>;
+  ReadClipboardText(): Promise<string>;
   SavePastedFile(name: string, dataUrl: string): Promise<string>;
   PickExportFile(defaultFilename: string, mimeType: string): Promise<string>;
   SaveExportFile(path: string, payload: string, base64Encoded: boolean): Promise<void>;
@@ -469,7 +475,10 @@ export interface AppBindings {
   // Findings queue hygiene: per-row dismiss and double-confirmed clear-all.
   NetDevFindingDismiss(id: string): Promise<void>;
   NetDevFindingsClear(): Promise<number>;
-  // Emergency stop: close every device connection at once (audited).
+  // Emergency stop: drop every device connection, hold running cutovers at their
+// step boundary, pause running jobs, and freeze executing proposals (audited).
+// Returns dropped-connection count; rejects with a summary if any hold/pause
+// failed (the frontend renders it in red).
   NetDevEmergencyStop(): Promise<number>;
   // Reset the per-turn command budget — called on every user submit in the
   // 运维 profile so turn_command_budget is a true per-ask control.
@@ -551,7 +560,9 @@ export interface AppBindings {
   NetDevFalsePositiveFinding(id: string): Promise<void>;
   NetDevAggregatedFindings(): Promise<NetDevAggregatedFinding[]>;
   NetDevImportCVEs(feedJSON: string): Promise<number>;
-  NetDevCVEMatches(): Promise<{ device: string; cve_id: string; desc: string; severity: string; product: string }[]>;
+  NetDevCVEClear(): Promise<void>;
+  NetDevKnowledgeSave(id: string, content: string): Promise<void>;
+  NetDevCVEMatches(): Promise<{ device: string; cve_id: string; desc: string; severity: string; product: string; version_status?: string; device_version?: string; remediation?: { upgrade_to?: string; kb?: string; ref_url?: string } | null }[]>;
   NetDevCVESweep(): Promise<NetDevFinding | null>;
   // Human terminal (§6.1) + SFTP read-only download (§6.2)
   NetDevHumanTTYStart(device: string): Promise<{ device: string; connected: boolean; startedAt: string; bytes: number }>;
@@ -596,6 +607,7 @@ export interface AppBindings {
   NetDevAuditProjectStatus(id: string): Promise<{ project?: unknown; report?: unknown; green?: boolean } | null>;
   NetDevAuditItemSetStatus(projectID: string, signature: string, status: string): Promise<void>;
   NetDevCutoverContinue(id: string): Promise<NetDevCutoverRun>;
+  NetDevCutoverSkip(id: string, reason: string): Promise<NetDevCutoverRun>;
   NetDevCutoverPrecheckOverride(id: string): Promise<NetDevCutoverRun>;
   NetDevCutoverRollback(id: string): Promise<NetDevCutoverRun>;
   NetDevCutoverAbort(id: string): Promise<NetDevCutoverRun>;
@@ -846,6 +858,11 @@ export interface AppBindings {
   RagStartExtract(collection: string, template: string, mode: string): Promise<void>;
   RagExtractResult(collection: string): Promise<RagExtractResultView>;
   RagCancelExtract(jobId: string): Promise<void>;
+  RagRetryEstimate(jobId: string): Promise<RagRetryEstimateView>;
+  RagRetryFailedChunks(jobId: string): Promise<number>;
+  RagRetryAllFailed(collection: string): Promise<number>;
+  RagAutoRetryStatus(): Promise<RagAutoRetryStatusView>;
+  RagAutoRetryToggle(enabled: boolean): Promise<void>;
   RagRemovePath(collection: string, path: string): Promise<void>;
   RagClear(collection: string): Promise<void>;
   RagCleanCollection(collection: string): Promise<void>;
@@ -1455,6 +1472,20 @@ export function onCalendarChanged(cb: () => void): () => void {
   return () => {};
 }
 
+// onCalendarReminder fires when a calendar-event reminder is due. Payload:
+// {title, body}. Like scheduler:notice, the toast subscribes at app ROOT so
+// reminders surface on every page — the calendar panel used to be the only
+// listener, silently swallowing reminders while unmounted (defect C).
+export function onCalendarReminder(cb: (e: { title: string; body: string }) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("calendar:reminder", (...data: unknown[]) => {
+      const e = (data?.[0] ?? {}) as { title?: string; body?: string };
+      cb({ title: e.title ?? "", body: e.body ?? "" });
+    });
+  }
+  return () => {};
+}
+
 // onRagChanged fires when the RAG tree/collections mutate (import/remove/status
 // change). Payload-free — the panel re-fetches the tree.
 export function onRagChanged(cb: () => void): () => void {
@@ -1466,6 +1497,8 @@ export function onRagChanged(cb: () => void): () => void {
 
 // onRagProgress fires on each chunk extraction completion. Payload is a
 // RagProgressEvent; the panel updates the matching tree node's progress bar.
+// kind defaults to "progress" for events emitted by older backends that lack
+// the field (safe: at most a missed refresh, same as the old behavior).
 export function onRagProgress(cb: (e: RagProgressEvent) => void): () => void {
   if (realApp() && typeof window !== "undefined" && window.runtime) {
     return window.runtime.EventsOn("rag:progress", (...data: unknown[]) => {
@@ -1479,6 +1512,25 @@ export function onRagProgress(cb: (e: RagProgressEvent) => void): () => void {
         totalChunks: e.totalChunks ?? 0,
         avgLatencyMs: e.avgLatencyMs ?? 0,
         message: e.message ?? "",
+        failedChunks: e.failedChunks ?? 0,
+        kind: e.kind ?? "progress",
+        scope: e.scope ?? "chunk",
+      });
+    });
+  }
+  return () => {};
+}
+
+// onRagAutoRetry fires on idle-time auto-retry engine lifecycle changes:
+// {type: "ready"|"round"|"exhausted", jobs, maxRounds}.
+export function onRagAutoRetry(cb: (e: { type: string; jobs: number; maxRounds: number }) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("rag:auto-retry", (...data: unknown[]) => {
+      const e = (data?.[0] ?? {}) as Record<string, unknown>;
+      cb({
+        type: String(e.type ?? ""),
+        jobs: Number(e.jobs ?? 0),
+        maxRounds: Number(e.maxRounds ?? 0),
       });
     });
   }
@@ -1658,6 +1710,10 @@ function browserPlatformOverride(): "darwin" | "windows" | "linux" | "" {
   return value === "darwin" || value === "windows" || value === "linux" ? value : "";
 }
 
+// Browser-mock autostart state (GetAutostart/SetAutostart): module-scoped so
+// the toggle survives panel remounts within a dev session.
+let mockAutostart = false;
+
 function mockScenario(): "demo" | "fresh" | "running" {
   if (typeof window === "undefined") return "demo";
   const value = new URLSearchParams(window.location.search).get("mock")?.trim().toLowerCase();
@@ -1726,7 +1782,7 @@ function makeMockApp(): AppBindings {
     {
       key: "/mock/doc.md", label: "会议纪要.md", kind: "file", path: "/mock/doc.md", relPath: "会议纪要.md",
       isDir: false, collection: "default", status: "extracting", hasFts5: true,
-      jobId: "rag_job_mock_demo", doneChunks: 3, totalChunks: 10, entityCount: 0, errorMsg: "",
+      jobId: "rag_job_mock_demo", doneChunks: 3, totalChunks: 10, failedChunks: 0, entityCount: 0, errorMsg: "",
     },
   ];
   // simulateRagProgress advances a mock node's doneChunks every ~1.5s until done.
@@ -1898,14 +1954,12 @@ function makeMockApp(): AppBindings {
     sessions.splice(0);
     trashedSessions.splice(0);
   }
-  // Mutable dream/distill status so the Memory panel's self-evolution section is
+  // Mutable dream status so the Memory panel's self-evolution section is
   // interactive in browser dev mode (no backend).
   const dreamMock: DreamStatusView = {
     enabled: true,
     dreamInterval: 7,
-    distillInterval: 30,
     dreamInFlight: false,
-    distillInFlight: false,
     history: [],
   };
   // Mutable settings so the Settings panel's edits are observable in browser dev.
@@ -2476,6 +2530,7 @@ function makeMockApp(): AppBindings {
     guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: null,
     inspectionInterval: "", backupInterval: "", backupGitMirror: false, scheduledBaseline: false,
     extraRead: null, projects: null, presets: null,
+    alertRules: [], dbSources: [], pollIntervalSeconds: 60, syslogPort: 0,
   };
   return {
     async NetDevSettings() {
@@ -2561,14 +2616,22 @@ function makeMockApp(): AppBindings {
     async NetDevAggregatedFindings(): Promise<NetDevAggregatedFinding[]> {
       return [];
     },
+    // 写操作 mock 按本文件惯例 throw（对照 NetDevImportStageFile）——
+    // 假成功会让 dev 模式显示「已保存/已清空」的虚假持久化承诺。
     async NetDevImportCVEs(_f: string): Promise<number> {
-      return 0;
+      throw new Error("browser dev mock: no CVE feed backend");
+    },
+    async NetDevCVEClear(): Promise<void> {
+      throw new Error("browser dev mock: no CVE feed backend");
+    },
+    async NetDevKnowledgeSave(_id: string, _content: string): Promise<void> {
+      throw new Error("browser dev mock: no knowledge backend");
     },
     async NetDevCVEMatches(): Promise<{ device: string; cve_id: string; desc: string; severity: string; product: string }[]> {
       return [];
     },
     async NetDevCVESweep(): Promise<NetDevFinding | null> {
-      return null;
+      throw new Error("browser dev mock: no CVE sweep backend");
     },
     async NetDevDiscover(_c: string, _v: string, _p: number[]): Promise<import("./types").NetDevDiscoverHost[]> { return []; },
     async NetDevNmapSweep(_c: string): Promise<import("./types").NetDevNmapSweepResult> { return { cidr: _c, hosts: 0, open_ports: 0, results: [], command: "nmap (mock)", duration: "0s" }; },
@@ -2651,6 +2714,13 @@ function makeMockApp(): AppBindings {
       c.status = "done";
       c.hold_note = "";
       c.report = "# 割接对比报告（浏览器模拟）\n\n无变化\n";
+      return c;
+    },
+    async NetDevCutoverSkip(_id: string, _reason: string): Promise<NetDevCutoverRun> {
+      const c = mockNetDevCutovers.find(x => x.id === _id);
+      if (!c) throw new Error("browser dev mock: no such cutover");
+      c.status = "running";
+      c.hold_note = "";
       return c;
     },
     async NetDevBriefingBuild(kind: string) { return { generated_at: new Date().toISOString(), kind, sections: [] }; },
@@ -2817,7 +2887,7 @@ function makeMockApp(): AppBindings {
     },
     async NetDevNotifyTest(): Promise<void> {},
     async SetNetDevSettings(v: NetDevSettingsView) {
-      mockNetDev = { ...v, devices: [...v.devices], hops: [...v.hops], groups: [...v.groups], scopes: [...v.scopes], guardAllowedGroups: [...(v.guardAllowedGroups ?? [])], projects: v.projects ? [...v.projects] : mockNetDev.projects, presets: v.presets ? [...v.presets] : mockNetDev.presets };
+      mockNetDev = { ...v, devices: [...v.devices], hops: [...v.hops], groups: [...v.groups], scopes: [...v.scopes], guardAllowedGroups: [...(v.guardAllowedGroups ?? [])], projects: v.projects ? [...v.projects] : mockNetDev.projects, presets: v.presets ? [...v.presets] : mockNetDev.presets, alertRules: v.alertRules ? v.alertRules.map(r => ({ ...r })) : mockNetDev.alertRules, dbSources: v.dbSources ? [...v.dbSources] : mockNetDev.dbSources };
     },
     async NetDevDeleteSecret(_kind: string, _envName: string) {},
     async NetDevTestConnection(device: string) {
@@ -3049,6 +3119,13 @@ function makeMockApp(): AppBindings {
       if (/Win/i.test(ua)) return "windows";
       if (/Mac/i.test(ua)) return "darwin";
       return "linux";
+    },
+    async GetAutostart() {
+      return mockAutostart;
+    },
+    async SetAutostart(enabled: boolean) {
+      mockAutostart = enabled;
+      return mockAutostart;
     },
         async Submit(input) {
           cancelled = false;
@@ -3891,20 +3968,16 @@ function makeMockApp(): AppBindings {
       return {
         enabled: dreamMock.enabled,
         dreamInterval: dreamMock.dreamInterval,
-        distillInterval: dreamMock.distillInterval,
         dreamInFlight: dreamMock.dreamInFlight,
-        distillInFlight: dreamMock.distillInFlight,
         lastDream: dreamMock.lastDream,
-        lastDistill: dreamMock.lastDistill,
         history: dreamMock.history,
       };
     },
     async SetDreamEnabled(enabled: boolean) {
       dreamMock.enabled = enabled;
     },
-    async SetDreamIntervals(dreamDays: number, distillDays: number) {
+    async SetDreamInterval(dreamDays: number) {
       dreamMock.dreamInterval = dreamDays;
-      dreamMock.distillInterval = distillDays;
     },
     async TriggerDream(): Promise<DreamRunView> {
       const run: DreamRunView = {
@@ -3915,18 +3988,6 @@ function makeMockApp(): AppBindings {
         status: "ok",
       };
       dreamMock.lastDream = run;
-      dreamMock.history = [run, ...dreamMock.history].slice(0, 20);
-      return run;
-    },
-    async TriggerDistill(): Promise<DreamRunView> {
-      const run: DreamRunView = {
-        kind: "distill",
-        trigger: "manual",
-        startedAt: new Date().toISOString(),
-        duration: "3s",
-        status: "ok",
-      };
-      dreamMock.lastDistill = run;
       dreamMock.history = [run, ...dreamMock.history].slice(0, 20);
       return run;
     },
@@ -4079,6 +4140,16 @@ function makeMockApp(): AppBindings {
     },
     async SaveClipboardImage() {
       return ".fairpeer/attachments/mock-clipboard.png";
+    },
+    async ReadClipboardText() {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        try {
+          return await navigator.clipboard.readText();
+        } catch {
+          return "";
+        }
+      }
+      return "";
     },
     async SavePastedFile(name: string, _dataUrl: string) {
       return `.fairpeer/attachments/mock-${name}`;
@@ -4941,18 +5012,18 @@ function makeMockApp(): AppBindings {
       const m = now.getMonth();
       const d = now.getDate();
       return [
-        { id: "evt_mock_1", title: "周会", description: "讨论本周进展", location: "会议室A", start: `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}T10:00`, end: `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}T11:00`, allDay: false, timezone: "Asia/Shanghai", color: "#FF4444", status: "confirmed", source: "manual", recurrence: "FREQ=WEEKLY;BYDAY=MO", recurrenceEnd: "", reminders: [15], taskId: "", tags: ["工作", "例会"], createdAt: "2026-07-01 10:00", outputMode: "", outputDest: "", outputAccount: "" },
-        { id: "evt_mock_2", title: "代码review", description: "", location: "线上", start: `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}T14:00`, end: `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}T15:00`, allDay: false, timezone: "Asia/Shanghai", color: "#4488FF", status: "confirmed", source: "manual", recurrence: "", recurrenceEnd: "", reminders: [5], taskId: "", tags: ["工作"], createdAt: "2026-07-01 10:00", outputMode: "", outputDest: "", outputAccount: "" },
+        { id: "evt_mock_1", title: "周会", description: "讨论本周进展", location: "会议室A", start: `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}T10:00`, end: `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}T11:00`, allDay: false, timezone: "Asia/Shanghai", color: "#FF4444", status: "confirmed", source: "manual", profile: "cowork", recurrence: "FREQ=WEEKLY;BYDAY=MO", recurrenceEnd: "", reminders: [15], taskId: "", tags: ["工作", "例会"], createdAt: "2026-07-01 10:00", outputMode: "", outputDest: "", outputAccount: "" },
+        { id: "evt_mock_2", title: "代码review", description: "", location: "线上", start: `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}T14:00`, end: `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}T15:00`, allDay: false, timezone: "Asia/Shanghai", color: "#4488FF", status: "confirmed", source: "manual", profile: "cowork", recurrence: "", recurrenceEnd: "", reminders: [5], taskId: "", tags: ["工作"], createdAt: "2026-07-01 10:00", outputMode: "", outputDest: "", outputAccount: "" },
       ];
     },
     async ListScheduledTasksAsEvents(_since: string, _before: string): Promise<CalendarEventView[]> {
       return [];
     },
     async CreateCalendarEvent(input: CalendarEventInput): Promise<CalendarEventView> {
-      return { ...input, outputMode: input.outputMode ?? "", outputDest: input.outputDest ?? "", outputAccount: input.outputAccount ?? "", id: `evt_mock_${Date.now()}`, status: "confirmed", source: "manual", taskId: "", createdAt: new Date().toISOString().slice(0,16).replace("T"," ") };
+      return { ...input, profile: input.profile ?? "cowork", outputMode: input.outputMode ?? "", outputDest: input.outputDest ?? "", outputAccount: input.outputAccount ?? "", id: `evt_mock_${Date.now()}`, status: "confirmed", source: "manual", taskId: "", createdAt: new Date().toISOString().slice(0,16).replace("T"," ") };
     },
     async UpdateCalendarEvent(input: CalendarEventInput): Promise<CalendarEventView> {
-      return { ...input, outputMode: input.outputMode ?? "", outputDest: input.outputDest ?? "", outputAccount: input.outputAccount ?? "", status: "confirmed", source: "manual", taskId: "", createdAt: "2026-07-01 10:00" };
+      return { ...input, profile: input.profile ?? "cowork", outputMode: input.outputMode ?? "", outputDest: input.outputDest ?? "", outputAccount: input.outputAccount ?? "", status: "confirmed", source: "manual", taskId: "", createdAt: "2026-07-01 10:00" };
     },
     async DeleteCalendarEvent(_id: string): Promise<void> {},
     async SearchCalendarEvents(_q: string, _limit: number): Promise<CalendarEventView[]> {
@@ -4978,7 +5049,7 @@ function makeMockApp(): AppBindings {
     // so the panel shows a progress bar outside the Wails shell.
     async ListRagCollections(): Promise<RagCollectionView[]> {
       return [
-        { id: "default", name: "default", path: "default", parent: "", documents: mockRagDocs, chunks: mockRagDocs * 4, entities: mockRagEntities },
+        { id: "default", name: "default", path: "default", parent: "", documents: mockRagDocs, chunks: mockRagDocs * 4, entities: mockRagEntities , complete: mockRagDocs, partial: 0, failed: 0, queued: 0 },
       ];
     },
     async ListRagTree(_collection: string): Promise<RagNodeView[]> {
@@ -4994,7 +5065,7 @@ function makeMockApp(): AppBindings {
         const node: RagNodeView = {
           key: p, label: p.split(/[\\/]/).pop() || p, kind: "file", path: p, relPath: p,
           isDir: false, collection: _collection || "default", status: "extracting",
-          hasFts5: true, jobId: jid, doneChunks: 0, totalChunks: 8, entityCount: 0, errorMsg: "",
+          hasFts5: true, jobId: jid, doneChunks: 0, totalChunks: 8, failedChunks: 0, entityCount: 0, errorMsg: "",
         };
         mockRagTree.push(node);
         // Simulate progress for browser dev.
@@ -5036,11 +5107,26 @@ function makeMockApp(): AppBindings {
     async RagCleanCollection(_collection: string): Promise<void> {
       // mock: no-op
     },
+    async RagRetryEstimate(jobId: string): Promise<RagRetryEstimateView> {
+      // Demo-grade estimate mirroring a plausible partial job — matching the
+      // real backend's zero-failure error would break the dev confirm flow.
+      return { jobId, failedChunks: 2, totalChunks: 8, estCalls: 4, estSeconds: 90, avgLatencyMs: 45000 };
+    },
+    async RagRetryFailedChunks(_jobId: string): Promise<number> {
+      return 0;
+    },
+    async RagRetryAllFailed(_collection: string): Promise<number> {
+      return 0;
+    },
+    async RagAutoRetryStatus(): Promise<RagAutoRetryStatusView> {
+      return { enabled: false, active: false, maxRounds: 2 };
+    },
+    async RagAutoRetryToggle(_enabled: boolean): Promise<void> {},
     async RagSearch(_collection: string, query: string, _topK: number): Promise<RagSearchHitView> {
       return {
         entities: [{ name: query + "（示例实体）", type: "person", description: "mock 命中" }],
         relations: [],
-        snippets: [{ collection: "default", path: "/mock/doc.md", chunk: 0, snippet: `…包含「${query}」的片段…`, score: 0.9 }],
+        snippets: [{ collection: "default", path: "/mock/doc.md", chunk: 0, snippet: `…包含「${query}」的片段…`, score: 0.9, status: "enriched" }],
       };
     },
     async RagSemanticSearch(_collection: string, query: string, _topK: number): Promise<RagSearchHitView> {

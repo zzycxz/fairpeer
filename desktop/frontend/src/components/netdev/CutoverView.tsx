@@ -25,6 +25,10 @@ const STATUS_LABEL: Record<string, string> = {
   done: "ndv.cut.stDone",
   failed: "ndv.cut.stFailed",
   aborted: "ndv.cut.stAborted",
+  // P0-5 的后端出口（继续/放弃）此前在 UI 不可达——补状态标签与按钮
+  // （逐行精读 R2 P1-3）。
+  interrupted: "ndv.cut.stInterrupted",
+  "precheck-failed": "ndv.cut.stPrecheckFailed",
 };
 
 function fmtCountdown(ms: number): string {
@@ -83,6 +87,7 @@ export function CutoverView({
   const countdown = useMemo(() => (run ? fmtCountdown(new Date(run.deadline).getTime() - now) : ""), [run, now]);
 
   const act = async (label: string, fn: () => Promise<unknown>) => {
+    if (busy) return; // 双击守卫：第二发必吃后端状态冲突错（逐行精读 R4 P3-5）
     setBusy(label);
     try {
       await fn();
@@ -114,11 +119,11 @@ export function CutoverView({
         </span>
         <span className="terminal-panel__spacer" />
         {run.report && (
-          <span className="btn btn--secondary btn--small" role="button" onClick={() => void act("report", () => app.NetDevCutoverReport(run.id))}>
+          <span className="btn btn--secondary btn--small" role="button" onClick={() => void act("report", async () => { const p = await app.NetDevCutoverReport(run.id); if (p) setErr(tt("ndv.cut.savedTo") + p); })}>
             {tt("ndv.cut.exportReport")}
           </span>
         )}
-        {(run.status === "running" || run.status === "hold") && (
+        {(run.status === "running" || run.status === "hold" || run.status === "interrupted" || run.status === "precheck-failed") && (
           <span className="btn btn--secondary btn--small" role="button" title={tt("ndv.cut.enterBoard")}
             onClick={() => { window.dispatchEvent(new CustomEvent("fairpeer:netdev-open-screen", { detail: { screen: "cutover" } })); }}>
             {tt("ndv.cut.enterBoard")}
@@ -127,7 +132,7 @@ export function CutoverView({
         <span className="btn btn--secondary btn--small" role="button" onClick={onClose}>{tt("ndv.cut.back")}</span>
       </div>
 
-      {err && <div className="ndv__hint">{err}</div>}
+      {err && <div className="ndv__hint ndv__hint--err">{err}</div>}
 
       {hold && (
         <div className="ndv-cutover__hold">
@@ -144,8 +149,63 @@ export function CutoverView({
             >
               {busy === "rollback" ? tt("ndv.cut.rollingBack") : tt("ndv.cut.rollback")}
             </span>
+            {/* P1-E1：门失败死循环的出口——跳过本步（原因必填，入审计链）。
+                仅当前步 failed/gating 时渲染：决策点/倒计时 hold 的 cursor 指
+                向未执行的 pending 步，后端必拒（逐行精读 R4 P2-2）。 */}
+            {(() => {
+              const cur = (run.steps ?? [])[run.cursor];
+              if (!(cur && (cur.status === "failed" || cur.status === "gating"))) return null;
+              return (
+            <span
+              className="btn btn--secondary btn--small"
+              role="button"
+              title={tt("ndv.cut.skipTip")}
+              onClick={() => {
+                const reason = window.prompt(tt("ndv.cut.skipReasonPrompt"));
+                if (reason === null) return;
+                const trimmed = reason.trim();
+                if (!trimmed) {
+                  setErr(tt("ndv.cut.skipReasonRequired"));
+                  return;
+                }
+                void act("skip", () => app.NetDevCutoverSkip(run.id, trimmed));
+              }}
+            >
+              {busy === "skip" ? tt("ndv.cut.skipping") : tt("ndv.cut.skip")}
+            </span>
+              );
+            })()}
+            {/* X9：hold 态也允许终止——后端 CutoverAbort 本就接受 hold；此前
+                只有 running 态出按钮，hold 态想弃窗只能先继续再中止。样式与
+                running 态的同款（secondary，无确认步——与现行一致）。 */}
+            <span
+              className="btn btn--secondary btn--small"
+              role="button"
+              onClick={() => void act("abort", () => app.NetDevCutoverAbort(run.id))}
+            >
+              {busy === "abort" ? tt("ndv.cut.aborting") : tt("ndv.jobs.abort")}
+            </span>
           </div>
           <div className="ndv__hint">{tt("ndv.cut.rollbackHint")}</div>
+        </div>
+      )}
+      {(run.status === "interrupted" || run.status === "precheck-failed") && (
+        <div className="ndv-cutover__hold">
+          <div className="ndv-cutover__hold-note">{run.hold_note || tt((run.status === "interrupted" ? "ndv.cut.stInterruptedLong" : run.status === "precheck-failed" ? "ndv.cut.stPrecheckFailedLong" : (STATUS_LABEL[run.status] || "ndv.cut.stHold")) as never)}</div>
+          <div className="ndv-cutover__hold-actions">
+            {run.status === "interrupted" && (
+              <span className="btn btn--primary btn--small" role="button" onClick={() => void act("continue", () => app.NetDevCutoverContinue(run.id))}>
+                {busy === "continue" ? tt("ndv.cut.continuing") : tt("ndv.cut.continue")}
+              </span>
+            )}
+            <span
+              className="btn btn--secondary btn--small"
+              role="button"
+              onClick={() => void act("abort", () => app.NetDevCutoverAbort(run.id))}
+            >
+              {busy === "abort" ? tt("ndv.cut.aborting") : tt("ndv.jobs.abort")}
+            </span>
+          </div>
         </div>
       )}
       {run.status === "running" && (

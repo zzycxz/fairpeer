@@ -268,6 +268,10 @@ func TestCutoverPrecheckGreenLight(t *testing.T) {
 	if c.Status != CutoverRunning {
 		t.Fatalf("status = %s, want running", c.Status)
 	}
+	// 等 runner 跑到终态再返回：泄漏的 runner 会与下一个测试 cleanup 写目录
+	// override 全局变量构成数据竞争（-race 实证，），且落盘会
+	// 污染下一个测试的临时目录。
+	waitCutover(t, c.ID, CutoverDone, "")
 }
 
 // TestSaveCutoverAtomicConcurrentReads: saveCutover lands via tmp+rename, so a

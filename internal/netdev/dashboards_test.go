@@ -1,6 +1,7 @@
 package netdev
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -192,6 +193,18 @@ func TestBuildCutoverBoardPipeline(t *testing.T) {
 	b, _ := json.Marshal(run)
 	_ = os.WriteFile(filepath.Join(env.dir, "CO-1.json"), b, 0o600)
 	env.writeAudit(t, Audit{Time: time.Now(), Device: "SW-02", Command: "shut x/0/1", Class: "write", Status: AuditOK})
+	// P0-5：BuildCutoverBoard 经 ListCutovers 的孤儿扫描——盘上 running 但无
+	// 活 runner 的 run 会被转成 interrupted。本测试构造的是"正在进行"的态，
+	// 注册一个活 runner 入口让扫描放行（真后端里 cutoverLaunch 会登记）。
+	cutoverRunsMu.Lock()
+	_, cancel := context.WithCancel(context.Background())
+	cutoverRuns["CO-1"] = &cutoverRunHandle{cancel: cancel}
+	cutoverRunsMu.Unlock()
+	t.Cleanup(func() {
+		cutoverRunsMu.Lock()
+		delete(cutoverRuns, "CO-1")
+		cutoverRunsMu.Unlock()
+	})
 
 	board := BuildCutoverBoard("")
 	if !board.Found || !board.HasActive || board.ID != "CO-1" {

@@ -16,20 +16,23 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/fileutil"
+	"log/slog"
 )
 
 // Job statuses.
 const (
-	JobRunning = "running"
-	JobPaused  = "paused"
-	JobDone    = "done"
-	JobFailed  = "failed"  // a step failed with on-fail=abort — later steps untouched
-	JobAborted = "aborted" // human pressed stop
+	JobRunning     = "running"
+	JobPaused      = "paused"
+	JobDone        = "done"
+	JobFailed      = "failed"      // a step failed with on-fail=abort — later steps untouched
+	JobAborted     = "aborted"     // human pressed stop
+	JobInterrupted = "interrupted" // backend restarted while the runner was live — no live goroutine owns it (P0-5)
 )
 
 // Step statuses.
@@ -111,15 +114,46 @@ func jobsDir() string {
 }
 
 var (
-	jobMu  sync.Mutex
-	jobSeq int
+	jobMu     sync.Mutex
+	jobSeq    int
+	jobSeqDay string
 )
 
+// newJobID mints J<day>-N with N seeded from the JOBS DIR, not memory: the old
+// in-process counter reset on restart, so the first job after a restart
+// silently overwrote the day's existing J<day>-1.json (P0-5). Mirrors
+// newProposalID/maxProposalSeqForDay.
 func newJobID() string {
 	jobMu.Lock()
 	defer jobMu.Unlock()
+	day := time.Now().Format("20060102")
+	if jobSeq == 0 || jobSeqDay != day {
+		jobSeq = maxJobSeqForDay(day)
+		jobSeqDay = day
+	}
 	jobSeq++
-	return fmt.Sprintf("J%s-%d", time.Now().Format("20060102"), jobSeq)
+	return fmt.Sprintf("J%s-%d", day, jobSeq)
+}
+
+// maxJobSeqForDay scans the jobs dir for the highest -N suffix of the day (0
+// when none exist yet).
+func maxJobSeqForDay(day string) int {
+	entries, err := os.ReadDir(jobsDir())
+	if err != nil {
+		return 0
+	}
+	prefix := "J" + day + "-"
+	best := 0
+	for _, e := range entries {
+		name := strings.TrimSuffix(e.Name(), ".json")
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		if n, err := strconv.Atoi(strings.TrimPrefix(name, prefix)); err == nil && n > best {
+			best = n
+		}
+	}
+	return best
 }
 
 func saveJob(j *Job) error {
@@ -163,6 +197,7 @@ func ListJobs() ([]*Job, error) {
 	if err != nil {
 		return nil, err
 	}
+	recoverOrphanedRunningJobs(entries)
 	var out []*Job
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
@@ -174,6 +209,42 @@ func ListJobs() ([]*Job, error) {
 	}
 	sort.Slice(out, func(i, k int) bool { return out[i].CreatedAt.After(out[k].CreatedAt) })
 	return out, nil
+}
+
+// recoverOrphanedRunningJobs sweeps lazily from ListJobs (mirrors proposals'
+// recoverStaleExecuting): a persisted status=running job with NO live runner
+// goroutine means the backend restarted mid-run — the dashboard would keep
+// ticking a dead countdown and every action but Abort would refuse. Mark it
+// interrupted so the UI can say "执行已中断，可继续/放弃" and JobResume can
+// pick the cursor back up (P0-5).
+func recoverOrphanedRunningJobs(entries []os.DirEntry) {
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".json")
+		j, err := GetJob(id)
+		if err != nil || j.Status != JobRunning {
+			continue
+		}
+		jobRunsMu.Lock()
+		_, live := jobRuns[id]
+		jobRunsMu.Unlock()
+		if live {
+			continue
+		}
+		jobMu.Lock()
+		if j2, err := GetJob(id); err == nil && j2.Status == JobRunning {
+			j2.Status = JobInterrupted
+			j2.PauseNote = "后端重启，执行已中断（断点已保留，可继续或放弃）"
+			if err := saveJobLocked(j2); err != nil {
+				slog.Warn("netdev: mark interrupted job failed", "id", id, "err", err)
+			} else {
+				_ = AppendAudit(Audit{Device: "(job)", Command: "interrupted " + id, Class: "job", Status: AuditFailure})
+			}
+		}
+		jobMu.Unlock()
+	}
 }
 
 // ── validation ───────────────────────────────────────────────────────────────
@@ -247,6 +318,7 @@ type jobRun struct {
 	// close — a second JobPause racing the first must not double-close).
 	pauseReq   chan struct{} // user pause — honored between steps/retries
 	pauseOnce  sync.Once
+	pauseNote  string        // why it paused (human vs estop) — read by the runner's pause branch; guarded by jobRunsMu
 	activeFrom time.Time     // wall-clock accounting anchor
 	done       chan struct{} // closed when the runner goroutine exits
 }
@@ -324,6 +396,23 @@ func (m *Manager) jobLaunch(j *Job) {
 // JobPause asks a running job to freeze at the next boundary (between steps or
 // retries). The in-flight attempt finishes — commands are short and read-only.
 func JobPause(id string) error {
+	return JobPauseWithNote(id, "人工暂停")
+}
+
+// JobPauseWithNote is JobPause with an operator-facing reason (first note
+// wins — a later caller cannot rewrite the reason already shown).
+func JobPauseWithNote(id, note string) error {
+	return jobPauseWithNote(id, note, false)
+}
+
+// JobPauseEstop is the emergency-stop variant: the 紧急停止 reason always
+// wins over a human pause note that raced in first — otherwise the job card
+// would misattribute the stop to an operator.
+func JobPauseEstop(id string) error {
+	return jobPauseWithNote(id, "紧急停止：红钮按下，已在步骤边界暂停——可继续或放弃", true)
+}
+
+func jobPauseWithNote(id, note string, force bool) error {
 	j, err := GetJob(id)
 	if err != nil {
 		return err
@@ -333,6 +422,9 @@ func JobPause(id string) error {
 	}
 	jobRunsMu.Lock()
 	run, ok := jobRuns[id]
+	if ok && (force || run.pauseNote == "") {
+		run.pauseNote = note
+	}
 	jobRunsMu.Unlock()
 	if !ok {
 		return fmt.Errorf("job %s: no live runner (state drift — reload the list)", id)
@@ -350,13 +442,19 @@ func (m *Manager) JobResume(id string) (*Job, error) {
 		jobMu.Unlock()
 		return nil, err
 	}
-	if j.Status != JobPaused {
+	if j.Status != JobPaused && j.Status != JobInterrupted {
 		jobMu.Unlock()
-		return nil, fmt.Errorf("job %s: status %s — only paused jobs resume", id, j.Status)
+		return nil, fmt.Errorf("job %s: status %s — only paused/interrupted jobs resume", id, j.Status)
 	}
 	StateEventSnap(StateEventJobResume, id, StateActorUser, filepath.Join(jobsDir(), id+".json"))
 	j.Status = JobRunning
 	j.PauseNote = ""
+	// P1-E6 budget renewal: the wall-clock budget is cumulative and persisted,
+	// so resuming a watchdog wall-clock freeze used to re-freeze on the first
+	// loop tick — "按继续→瞬间又暂停，像坏了". A manual resume is the operator's
+	// explicit re-authorization, so it opens a fresh wall-clock window. The
+	// command count stays cumulative (it measures work done, not time granted).
+	j.ActiveMS = 0
 	// Resuming past a breakpoint records the human's confirmation on that
 	// cursor (the runner would otherwise re-freeze at the same step).
 	if j.Cursor < len(j.Steps) && j.Steps[j.Cursor].PauseBefore {
@@ -430,15 +528,17 @@ func (m *Manager) jobRunner(ctx context.Context, run *jobRun, id string) {
 		}
 
 		// Watchdog budgets (v1 C 批): wall clock, command count, fail streak.
+		// Pause notes are operator-facing Chinese with a next step — the old
+		// raw English strings read like a crash and offered no way out (P1-E6).
 		activeMS := j.ActiveMS + time.Since(run.activeFrom).Milliseconds()
 		why := ""
 		switch {
 		case activeMS > int64(j.Budget.MaxWallSec)*1000:
-			why = fmt.Sprintf("watchdog: wall clock %.1fm exceeds budget %dm", float64(activeMS)/60000, j.Budget.MaxWallSec/60)
+			why = fmt.Sprintf("预算暂停：已运行 %.1f 分钟，超过墙上时钟预算 %d 分钟。确认风险后可“继续”（将重置计时窗口）；如需更长预算请调大 MaxWallSec。", float64(activeMS)/60000, j.Budget.MaxWallSec/60)
 		case j.Commands >= j.Budget.MaxCommands:
-			why = fmt.Sprintf("watchdog: %d commands executed, budget is %d", j.Commands, j.Budget.MaxCommands)
+			why = fmt.Sprintf("预算暂停：已执行 %d 条命令，达到命令数预算 %d。确认后可“继续”；如需更多命令请调大 MaxCommands。", j.Commands, j.Budget.MaxCommands)
 		case failStreak >= j.Budget.FailStreak:
-			why = fmt.Sprintf("watchdog: %d consecutive failed steps — circuit breaker", failStreak)
+			why = fmt.Sprintf("熔断暂停：连续 %d 个步骤失败（阈值 %d）。请检查设备/凭据后“继续”，或“放弃”。", failStreak, j.Budget.FailStreak)
 		}
 		if why != "" {
 			m.jobFreeze(run, id, why)
@@ -479,9 +579,18 @@ func (m *Manager) jobRunner(ctx context.Context, run *jobRun, id string) {
 			if state.Status == JobStepOK {
 				j.Cursor++
 			}
+			jobRunsMu.Lock()
+			note := run.pauseNote
+			run.pauseNote = ""
+			jobRunsMu.Unlock()
+			if note == "" {
+				note = "人工暂停"
+			}
 			j.Status = JobPaused
-			j.PauseNote = "人工暂停"
+			j.PauseNote = note
 			_ = saveJob(j)
+			// 暂停入审计（此前该分支无痕，急停场景只能靠汇总行倒推）。
+			_ = AppendAudit(Audit{Device: "(job)", Command: "pause " + id, Class: "job", Status: AuditFailure, Error: note})
 			return
 		default:
 		}

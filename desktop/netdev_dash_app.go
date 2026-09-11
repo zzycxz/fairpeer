@@ -214,14 +214,18 @@ func (a *App) buildOverviewData(force bool) (*NetDevOverviewSnapshot, error) {
 	}
 	hs := m.HealthSnapshot()
 	polled := 0
+	snmpDevices := map[string]bool{}
 	for _, d := range cfg.NetDev.Devices {
 		if d.SNMP != nil {
 			polled++
+			snmpDevices[d.Name] = true
 		}
 	}
 	snap.Health.Polled = polled
 	for _, h := range hs.Devices {
-		if h.Reachable {
+		// 可达性只统计 SNMP 口径内的设备（：GPU-only 主机经
+		// GPU 通道进快照后，混用分母曾让 Unreachable 算出负数）。
+		if h.Reachable && snmpDevices[h.Device] {
 			snap.Health.Reachable++
 		}
 		if t := h.Time.UnixMilli(); t > snap.Health.LastPollAt {

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"regexp"
 	"strings"
@@ -129,12 +130,18 @@ type NetDevConfig struct {
 
 // NetDevAlertRule is one threshold rule over the health snapshot.
 type NetDevAlertRule struct {
-	Name     string `toml:"name"`
-	Metric   string `toml:"metric"`   // reachable | if_down_count | uptime_reset | flap_count | if_down_above_p90
-	Op       string `toml:"op"`       // >= | <= | ==
-	Value    int64  `toml:"value"`    // reachable: 1=up 0=down; uptime_reset: 1=reboot detected
-	Severity string `toml:"severity"` // info | warning | critical
-	Enabled  bool   `toml:"enabled"`
+	Name   string `toml:"name"`
+	Metric string `toml:"metric"` // reachable | if_down_count | uptime_reset | flap_count | if_down_above_p90 | gpu.xid | gpu.temp | gpu.mem_pct | gpu.count
+	Op     string `toml:"op"`     // >= | <= | ==
+	// Value is float since the GPU metrics are decimal watermarks; TOML
+	// integer literals decode into the float field unchanged (BurntSushi).
+	Value    float64 `toml:"value"`    // reachable: 1=up 0=down; uptime_reset: 1=reboot detected
+	Severity string  `toml:"severity"` // info | warning | critical
+	Enabled  bool    `toml:"enabled"`
+	// ForRounds is the debounce: fire only after the condition held for N
+	// consecutive polls (0/1 = immediately). 语义同割接门的 SustainSec——
+	// 单轮毛刺不立案。
+	ForRounds int `toml:"for_rounds"`
 }
 
 // NetDevTrapConfig bounds the passive SNMP trap receiver (v2c).
@@ -297,6 +304,13 @@ type NetDevDevice struct {
 	PassphraseEnv string `toml:"passphrase_env"`
 	UseSSHConfig  bool   `toml:"use_ssh_config"`
 	Encoding      string `toml:"encoding"` // auto | utf-8 | gbk
+	// LegacyAlgo opts this device into the legacy SSH interop profile: the
+	// client additionally offers aes128-cbc / 3des-cbc / aes256-cbc ciphers and
+	// diffie-hellman-group1-sha1 KEX (implemented but deliberately not offered
+	// by x/crypto defaults). For ancient Cisco IOS 12.x / early VRP5 / Comware
+	// boxes that fail with "no common algorithm". Opt-in per device — legacy
+	// algorithms are cryptographically weak.
+	LegacyAlgo bool `toml:"legacy_algo"`
 	// OOBURL is the 带外启动器 deep link (NETDEV_SPEC_V2 §6.3): ESXi/堡垒/BMC
 	// Web UI entry. FairPeer only launches the local browser/RDP client — no
 	// RDP/VNC protocol in-product; the click is audited.
@@ -649,10 +663,17 @@ func ValidateNetDev(nd NetDevConfig) error {
 		if d.Port < 0 || d.Port > 65535 {
 			return fmt.Errorf("netdev device %q: port %d out of range", d.Name, d.Port)
 		}
+		// Telnet is adjudicated out (§6.4) and no transport exists, but
+		// discovery still probes port 23 — a telnet-only device would
+		// otherwise die later inside the SSH version exchange with an
+		// unexplained x/crypto error. Reject it where the cause is visible.
+		if d.Port == 23 && strings.TrimSpace(d.ConsolePort) == "" {
+			return fmt.Errorf("netdev device %q: port 23 is telnet — telnet transport is not implemented (SSH only); point port at the SSH listener or use console_port for the serial line", d.Name)
+		}
 		switch d.Vendor {
-		case "huawei", "cisco", "zte", "vmware", "redfish", "linux", "windows", "snmp", "":
+		case "huawei", "cisco", "zte", "h3c", "ruijie", "vmware", "redfish", "linux", "windows", "snmp", "":
 		default:
-			return fmt.Errorf("netdev device %q: unknown vendor %q (huawei|cisco|zte)", d.Name, d.Vendor)
+			return fmt.Errorf("netdev device %q: unknown vendor %q (huawei|cisco|zte|h3c|ruijie|vmware|redfish|linux|windows|snmp)", d.Name, d.Vendor)
 		}
 		switch d.Encoding {
 		case "", "auto", "utf-8", "gbk":
@@ -672,6 +693,13 @@ func ValidateNetDev(nd NetDevConfig) error {
 		for _, lp := range d.LogPaths {
 			if err := validateLogPath(d.Name, lp); err != nil {
 				return err
+			}
+		}
+		// ConfigPaths 与 LogPaths 同一授权模型（字段注释自述）——srvconf 的
+		// 路径会进远端 cat 命令，不做同样的注入校验就是漏斗（逐行精读 R3 P2-1）。
+		for _, cp := range d.ConfigPaths {
+			if err := validateLogPath(d.Name, cp); err != nil {
+				return fmt.Errorf("config_paths: %w", err)
 			}
 		}
 		switch d.Kind {
@@ -749,6 +777,11 @@ func ValidateNetDev(nd NetDevConfig) error {
 	if nd.Syslog.Port > 0 && nd.Syslog.Port < 1024 {
 		return fmt.Errorf("netdev syslog: privileged ports (<1024) are not supported — use a high port and forward from the device (e.g. 5140)")
 	}
+	if nd.Trap.Port > 0 && nd.Trap.Port < 1024 {
+		// Same rationale as syslog: a non-root desktop on macOS/Linux cannot
+		// bind 162, and the trap receiver would silently stay off.
+		return fmt.Errorf("netdev trap: privileged ports (<1024) are not supported — use a high port and point the device at it (e.g. 1162)")
+	}
 	seenRules := map[string]bool{}
 	for _, r := range nd.AlertRules {
 		if strings.TrimSpace(r.Name) == "" {
@@ -759,14 +792,28 @@ func ValidateNetDev(nd NetDevConfig) error {
 		}
 		seenRules[r.Name] = true
 		switch r.Metric {
-		case "reachable", "if_down_count", "uptime_reset", "flap_count", "if_down_above_p90":
+		case "reachable", "if_down_count", "uptime_reset", "flap_count", "if_down_above_p90",
+			"gpu.xid", "gpu.temp", "gpu.mem_pct", "gpu.count":
 		default:
-			return fmt.Errorf("netdev alert_rule %q: metric must be reachable|if_down_count|uptime_reset", r.Name)
+			return fmt.Errorf("netdev alert_rule %q: metric must be reachable|if_down_count|uptime_reset|flap_count|if_down_above_p90|gpu.xid|gpu.temp|gpu.mem_pct|gpu.count", r.Name)
+		}
+		if r.ForRounds < 0 || r.ForRounds > 120 {
+			return fmt.Errorf("netdev alert_rule %q: for_rounds must be 0-120 (consecutive polls before firing)", r.Name)
+		}
+		if math.IsNaN(r.Value) || math.IsInf(r.Value, 0) {
+			return fmt.Errorf("netdev alert_rule %q: value must be finite (nan/inf never compares true)", r.Name)
 		}
 		switch r.Op {
 		case "", ">=", "<=", "==":
 		default:
 			return fmt.Errorf("netdev alert_rule %q: op must be >=|<=|==", r.Name)
+		}
+		// == 配小数阈值是静默死规则：全部指标返回整数值 float，92.5 这类
+		// 阈值永远不触发且无任何提示（逐行精读 P3-6）。只对显式 == 生效——
+		// 空 op 在运行时规范化为 >=（ruleCmp），小数阈值合法，不能拒绝
+		// （否则合法配置整份加载失败，逐行精读 R3 P1-1）。
+		if r.Op == "==" && r.Value != math.Trunc(r.Value) {
+			return fmt.Errorf("netdev alert_rule %q: op \"==\" requires an integer value (got %v) — use \">=\" for fractional thresholds", r.Name, r.Value)
 		}
 		switch r.Severity {
 		case "", "info", "warning", "critical":

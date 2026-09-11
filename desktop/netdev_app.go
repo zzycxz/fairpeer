@@ -7,13 +7,16 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	stdruntime "runtime"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +25,7 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/netdev"
+	"github.com/zzycxz/fairpeer/internal/netdev/knowledge"
 	"github.com/zzycxz/fairpeer/internal/netdev/transport"
 )
 
@@ -102,15 +106,15 @@ type NetDevHopView struct {
 
 // NetDevSettingsView is the whole settings payload.
 type NetDevSettingsView struct {
-	BackupInterval string             `json:"backupInterval"`
-	BackupGitMirror bool              `json:"backupGitMirror"`
-	Enabled        bool               `json:"enabled"`
-	NetworkName    string             `json:"networkName"`
-	Devices        []NetDevDeviceView `json:"devices"`
-	Hops           []NetDevHopView    `json:"hops"`
-	Groups         []string           `json:"groups"` // group names (policy editing arrives with the proposal pipeline)
-	AuditRetention string             `json:"auditRetention"`
-	Scopes         []string           `json:"scopes"`
+	BackupInterval  string             `json:"backupInterval"`
+	BackupGitMirror bool               `json:"backupGitMirror"`
+	Enabled         bool               `json:"enabled"`
+	NetworkName     string             `json:"networkName"`
+	Devices         []NetDevDeviceView `json:"devices"`
+	Hops            []NetDevHopView    `json:"hops"`
+	Groups          []string           `json:"groups"` // group names (policy editing arrives with the proposal pipeline)
+	AuditRetention  string             `json:"auditRetention"`
+	Scopes          []string           `json:"scopes"`
 	// Guardrails reach into every ask / every tool call (NETDEV_SPEC §6):
 	// per-command approval, per-turn command budget, per-conversation device scope.
 	GuardConfirmEach  bool     `json:"guardConfirmEach"`
@@ -186,12 +190,13 @@ type NetDevGroupDefView struct {
 
 // NetDevAlertRuleView is one alert rule row for the settings editor.
 type NetDevAlertRuleView struct {
-	Name     string `json:"name"`
-	Metric   string `json:"metric"`
-	Op       string `json:"op"`
-	Value    int64  `json:"value"`
-	Severity string `json:"severity"`
-	Enabled  bool   `json:"enabled"`
+	Name      string  `json:"name"`
+	Metric    string  `json:"metric"`
+	Op        string  `json:"op"`
+	Value     float64 `json:"value"`
+	Severity  string  `json:"severity"`
+	Enabled   bool    `json:"enabled"`
+	ForRounds int     `json:"forRounds"` // 连续 N 轮成立才立案（0/1 = 立即）；恒输出——旧前端缓存回传缺失字段时 Go 侧解码为 0，与"立即"语义一致，不会丢用户配置的非 0 值（升级窗口除外）
 }
 
 // NetDevDBSourceView is one database source row; Password is write-only.
@@ -247,6 +252,13 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 	startInspectionScheduler(a)
 	startBackupScheduler(a)
 	startBriefingScheduler(a)
+	// 健康 poller 同样挂载：CleanupSeriesOnce（时序 14 天清理）、告警规则
+	// 评估、GPU/指标时序采集全部继承它的激活时序——此前只在健康 dock 页
+	// 首开时激活，用户配置了 poll_interval 但没开过健康页 = 全部不生效
+	// （逐行精读 R3 P2）。healthPollOnce 幂等。
+	if cfg0, err0 := config.Load(); err0 == nil && cfg0 != nil {
+		netdev.SharedManager(cfg0).EnsureHealthPoller()
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return NetDevSettingsView{}, err
@@ -325,7 +337,7 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 	for _, r := range cfg.NetDev.AlertRules {
 		v.AlertRules = append(v.AlertRules, NetDevAlertRuleView{
 			Name: r.Name, Metric: r.Metric, Op: r.Op, Value: r.Value,
-			Severity: r.Severity, Enabled: r.Enabled,
+			Severity: r.Severity, Enabled: r.Enabled, ForRounds: r.ForRounds,
 		})
 	}
 	for _, s := range cfg.NetDev.DBSources {
@@ -654,6 +666,7 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 					Name: strings.TrimSpace(r.Name), Metric: strings.TrimSpace(r.Metric),
 					Op: strings.TrimSpace(r.Op), Value: r.Value,
 					Severity: strings.TrimSpace(r.Severity), Enabled: r.Enabled,
+					ForRounds: r.ForRounds,
 				})
 			}
 		} else {
@@ -697,6 +710,13 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 		if nd.AuditRetention == "" {
 			nd.AuditRetention = c.NetDev.AuditRetention
 		}
+		// 表单不承载的字段（Role/UseSSHConfig/LegacyAlgo/PassphraseEnv、
+		// SNMP 的 v3 三件套）按 name 从旧配置保留——此前"运维设置→保存"会
+		// 把 TOML 手工填的这些字段静默清空（逐行精读 R3 P2-3）。
+		prevDevices := map[string]config.NetDevDevice{}
+		for _, pd := range c.NetDev.Devices {
+			prevDevices[pd.Name] = pd
+		}
 		for _, d := range v.Devices {
 			nd.Devices = append(nd.Devices, config.NetDevDevice{
 				Name: strings.TrimSpace(d.Name), Vendor: strings.TrimSpace(d.Vendor),
@@ -727,6 +747,19 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 					KubeconfigEnv: strings.TrimSpace(d.K8sKubeconfigEnv),
 					Context:       strings.TrimSpace(d.K8sContext),
 					Namespaces:    cleanLogPaths(d.K8sNamespaces),
+				}
+				// 保留合并（见上）：新建设备沿用旧配置的非表单字段。
+				if prev, ok := prevDevices[strings.TrimSpace(d.Name)]; ok {
+					ndv := &nd.Devices[len(nd.Devices)-1]
+					ndv.Role = prev.Role
+					ndv.UseSSHConfig = prev.UseSSHConfig
+					ndv.LegacyAlgo = prev.LegacyAlgo
+					ndv.PassphraseEnv = prev.PassphraseEnv
+					if ndv.SNMP != nil && prev.SNMP != nil {
+						ndv.SNMP.Username = prev.SNMP.Username
+						ndv.SNMP.AuthEnv = prev.SNMP.AuthEnv
+						ndv.SNMP.PrivEnv = prev.SNMP.PrivEnv
+					}
 				}
 			}
 			if strings.TrimSpace(d.Kind) == "firewall" {
@@ -852,6 +885,12 @@ func startInspectionScheduler(a *App) {
 					continue
 				}
 				time.Sleep(d)
+				// 睡后重读：interval 可为数小时，睡眠期间改 scheduled_baseline
+				// 或清单要下一整轮才生效（与 briefing 调度器同款 fire-time 重读）。
+				cfg, err = config.Load()
+				if err != nil {
+					continue
+				}
 				ctx, cancel := context.WithTimeout(a.ctx, 10*time.Minute)
 				stamp := netdev.ScheduleStamp{Kind: "inspection", At: time.Now().Format("2006-01-02T15:04:05")}
 				// 走 runInspectionRound：调度轮与手动轮共用同一份状态流，
@@ -868,7 +907,7 @@ func startInspectionScheduler(a *App) {
 					if bf, err := netdev.SharedManager(cfg).RunBaseline(ctx); err == nil && bf != nil {
 						stamp.Title += "；" + bf.Title
 					} else if err != nil {
-						stamp.Note += " baseline: " + err.Error()
+						stamp.Note = strings.TrimSpace(stamp.Note + " baseline: " + err.Error())
 					}
 				}
 				// Golden drift rides the inspection sweep: every baselined
@@ -1582,16 +1621,33 @@ func StringOrEmpty(t any) string {
 	return ""
 }
 
-// NetDevEmergencyStop closes every device connection/session at once (the
-// red button; audited). Returns how many connections were dropped.
+// NetDevEmergencyStop is the red button (audited). 统一急停语义（estop.go）：
+// 杀全部设备连接/人工终端/发现任务 + running 割接置 Hold（步骤边界暂停，
+// 继续/回退/终止由人按——不是 abort，Abort 不回退已执行变更）+ running Job
+// 暂停 + executing 提案步骤边界冻结。返回值保留连接数（前端契约不变），
+// 其余细节进审计与 IM 通知。
 func (a *App) NetDevEmergencyStop() (int, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return 0, err
 	}
-	n := netdev.SharedManager(cfg).KillAllConnections()
-	slog.Warn("netdev emergency stop", "connections", n)
-	return n, nil
+	rep := netdev.SharedManager(cfg).EstopAll()
+	slog.Warn("netdev emergency stop", "connections", rep.Connections,
+		"cutoversHeld", rep.CutoversHeld, "jobsPaused", rep.JobsPaused, "errors", rep.Errors)
+	if len(rep.CutoversHeld) > 0 {
+		// 深链召回：急停把割接停在决策点，值班必须知道要回去按按钮。
+		netdev.NotifyPushText("cutover", "[fairpeer 运维] 紧急停止：割接已暂停待决策",
+			"割接 "+strings.Join(rep.CutoversHeld, "、")+" 已在步骤边界暂停——继续 / 回退 / 终止请到大屏。fairpeer://screen/cutover")
+	}
+	// internal 层特意保留的 Errors 不能在桌面层重新吞掉（逐行精读 R3 P1）：
+	// hold 失败的割接正在继续前进，值班以为已冻结是最危险的误判——以 error
+	// 形式透传，前端红色展示 + IM 召回。
+	if len(rep.Errors) > 0 {
+		summary := "急停部分未完成：" + strings.Join(rep.Errors, "；") + "——请立即到大屏人工确认。fairpeer://screen/cutover"
+		netdev.NotifyPushText("cutover", "[fairpeer 运维] 紧急停止：部分对象未能冻结", summary)
+		return rep.Connections, fmt.Errorf("%s", summary)
+	}
+	return rep.Connections, nil
 }
 
 // ── 网络巡检（task-ified 手动触发 + 状态流）────────────────────────────────
@@ -1601,7 +1657,7 @@ func (a *App) NetDevEmergencyStop() (int, error) {
 // the NetDevInspectionStatus binding.
 type NetDevInspectionState struct {
 	Running   bool   `json:"running"`
-	Manual    bool   `json:"manual"`             // current round user-kicked?
+	Manual    bool   `json:"manual"`              // current round user-kicked?
 	StartedAt int64  `json:"startedAt,omitempty"` // unix ms
 	Done      int    `json:"done"`                // devices completed this round
 	Total     int    `json:"total"`               // driver-resolved device count
@@ -1638,7 +1694,10 @@ func (a *App) runInspectionRound(manual bool) (string, error) {
 	})
 	cfg, err := config.Load()
 	if err != nil {
-		setInspState(a, func(s *NetDevInspectionState) { s.Running = false; s.LastErr, s.LastAt = err.Error(), time.Now().UnixMilli() })
+		setInspState(a, func(s *NetDevInspectionState) {
+			s.Running = false
+			s.LastErr, s.LastAt = err.Error(), time.Now().UnixMilli()
+		})
 		return "", err
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
@@ -2628,6 +2687,14 @@ func (a *App) NetDevOOBLaunch(device string) (string, error) {
 		// The wails runtime import shadows stdlib runtime, so detect the local
 		// RDP client by lookup instead of GOOS — absent on mac/linux hosts.
 		if _, err := exec.LookPath("mstsc"); err != nil {
+			// macOS: hand rdp:// to Windows App (former Microsoft Remote
+			// Desktop) via LaunchServices; elsewhere keep the guidance text.
+			if a.ctx != nil && stdruntime.GOOS == "darwin" {
+				if oerr := exec.Command("open", "rdp://"+d.Address).Start(); oerr == nil {
+					what = "rdp://" + d.Address
+					break
+				}
+			}
 			what = fmt.Sprintf("请在本地 RDP 客户端打开 %s", d.Address)
 		} else {
 			if err := exec.Command("mstsc", "/v:"+d.Address).Start(); err != nil {
@@ -2840,6 +2907,21 @@ func (a *App) NetDevCutoverContinue(id string) (*netdev.CutoverRun, error) {
 	return c, err
 }
 
+// NetDevCutoverSkip presses 跳过 at a gate-failure hold (P1-E1): the reason is
+// mandatory and lands in the audit chain; the step is marked skipped and the
+// runbook continues past it.
+func (a *App) NetDevCutoverSkip(id, reason string) (*netdev.CutoverRun, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	c, err := netdev.SharedManager(cfg).CutoverSkipStep(id, reason)
+	if err == nil {
+		a.dashEmit("cutover", "overview", "chain")
+	}
+	return c, err
+}
+
 // NetDevCutoverPrecheckOverride is the human 放行 after a red precheck
 // (SCENARIO_SPEC S1-1) — audit-logged, then the window starts.
 func (a *App) NetDevCutoverPrecheckOverride(id string) (*netdev.CutoverRun, error) {
@@ -2859,7 +2941,10 @@ func (a *App) NetDevCutoverRollback(id string) (*netdev.CutoverRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	c, err := netdev.SharedManager(cfg).CutoverRollback(context.Background(), id)
+	// 回退持 cutoverMu 跨整段设备 I/O——ctx 必须可取消（app 退出/急停能打断）。
+	rctx, rcancel := context.WithTimeout(a.ctx, 10*time.Minute)
+	defer rcancel()
+	c, err := netdev.SharedManager(cfg).CutoverRollback(rctx, id)
 	if err == nil {
 		a.dashEmit("cutover", "overview", "chain")
 	}
@@ -2973,9 +3058,37 @@ func (a *App) NetDevSrvConfDrift(path string, devices []string) ([]netdev.SrvCon
 	return netdev.SharedManager(cfg).SrvConfDrift(context.Background(), path, devices)
 }
 
-// NetDevImportCVEs caches a user-supplied simplified-NVD feed (§4.5).
+// NetDevImportCVEs caches a user-supplied simplified-NVD feed (§4.5) —
+// merges by CVE-ID, same-ID new entries win (delta exports accumulate).
 func (a *App) NetDevImportCVEs(feedJSON string) (int, error) {
 	return netdev.ImportCVEFeed(feedJSON)
+}
+
+// NetDevCVEClear removes the cached feed — merge imports never delete
+// entries, so this is the only reset. The rolling hit card must not outlive
+// its feed: resolve it (same semantics as the zero-hit sweep).
+func (a *App) NetDevCVEClear() error {
+	if err := netdev.ClearCVEFeed(); err != nil {
+		return err
+	}
+	if cfg, err := config.Load(); err == nil {
+		netdev.SharedManager(cfg).ResolveCVESweep()
+	}
+	return nil
+}
+
+// NetDevKnowledgeSave validates and stores a user knowledge override
+// (BLUETEAM 批 3 知识反哺：轮内确认的判据先落 user-knowledge/，升级不冲掉，
+// 内容哈希入审计链——结论可追溯用的是哪版表)。
+func (a *App) NetDevKnowledgeSave(id, content string) error {
+	if err := knowledge.SaveUser(id, []byte(content)); err != nil {
+		return err
+	}
+	sum := sha256.Sum256([]byte(content))
+	netdev.AppendAudit(netdev.Audit{Device: "(knowledge)",
+		Command: fmt.Sprintf("user-knowledge %s@%s saved", id, hex.EncodeToString(sum[:6])),
+		Class:   "write", Status: netdev.AuditOK})
+	return nil
 }
 
 // NetDevCVEMatches runs the inventory against the cached feed.

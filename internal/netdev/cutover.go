@@ -18,9 +18,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/fileutil"
+	"log/slog"
+	"strconv"
 )
 
 // Cutover statuses.
@@ -32,6 +35,9 @@ const (
 	CutoverAborted = "aborted"
 	// S1-1：预检红灯停在窗口前——CutoverPrecheckOverride 人工放行后恢复。
 	CutoverPrecheckFailed = "precheck-failed"
+	// P0-5：后端重启时 runner 消失但盘上仍是 running——大屏照常倒计时而
+	// 每个动作都被拒；标记为 interrupted 后 Continue 可接续、Abort 可放弃。
+	CutoverInterrupted = "interrupted"
 )
 
 // Cutover step statuses.
@@ -141,15 +147,45 @@ func cutoversDir() string {
 }
 
 var (
-	cutoverMu  sync.Mutex
-	cutoverSeq int
+	cutoverMu     sync.Mutex
+	cutoverSeq    int
+	cutoverSeqDay string
 )
 
+// newCutoverID mints C<day>-N seeded from the CUTOVERS DIR, not memory: the
+// in-process counter reset on restart, so the first cutover after a restart
+// silently overwrote the day's existing file (P0-5). Mirrors newProposalID.
 func newCutoverID() string {
 	cutoverMu.Lock()
 	defer cutoverMu.Unlock()
+	day := time.Now().Format("20060102")
+	if cutoverSeq == 0 || cutoverSeqDay != day {
+		cutoverSeq = maxCutoverSeqForDay(day)
+		cutoverSeqDay = day
+	}
 	cutoverSeq++
-	return fmt.Sprintf("C%s-%d", time.Now().Format("20060102"), cutoverSeq)
+	return fmt.Sprintf("C%s-%d", day, cutoverSeq)
+}
+
+// maxCutoverSeqForDay scans the cutovers dir for the highest -N suffix of the
+// day (0 when none exist yet).
+func maxCutoverSeqForDay(day string) int {
+	entries, err := os.ReadDir(cutoversDir())
+	if err != nil {
+		return 0
+	}
+	prefix := "C" + day + "-"
+	best := 0
+	for _, e := range entries {
+		name := strings.TrimSuffix(e.Name(), ".json")
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		if n, err := strconv.Atoi(strings.TrimPrefix(name, prefix)); err == nil && n > best {
+			best = n
+		}
+	}
+	return best
 }
 
 func saveCutover(c *CutoverRun) error {
@@ -193,6 +229,7 @@ func ListCutovers() ([]*CutoverRun, error) {
 	if err != nil {
 		return nil, err
 	}
+	recoverOrphanedRunningCutovers(entries)
 	var out []*CutoverRun
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
@@ -206,11 +243,56 @@ func ListCutovers() ([]*CutoverRun, error) {
 	return out, nil
 }
 
+// recoverOrphanedRunningCutovers sweeps lazily from ListCutovers (mirrors
+// proposals' recoverStaleExecuting / jobs' recoverOrphanedRunningJobs): a
+// persisted status=running cutover with NO live runner context means the
+// backend restarted mid-run. Mark interrupted so the board can say
+// “执行已中断” and Continue/Abort both work again (P0-5).
+func recoverOrphanedRunningCutovers(entries []os.DirEntry) {
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".json")
+		c, err := GetCutover(id)
+		if err != nil || c.Status != CutoverRunning {
+			continue
+		}
+		cutoverRunsMu.Lock()
+		_, live := cutoverRuns[id]
+		cutoverRunsMu.Unlock()
+		if live {
+			continue
+		}
+		cutoverMu.Lock()
+		if c2, err := GetCutover(id); err == nil && c2.Status == CutoverRunning {
+			c2.Status = CutoverInterrupted
+			c2.HoldNote = "后端重启，执行已中断（已完成步骤保留，可继续或放弃）"
+			if err := saveCutoverLocked(c2); err != nil {
+				slog.Warn("netdev: mark interrupted cutover failed", "id", id, "err", err)
+			} else {
+				_ = AppendAudit(Audit{Device: "(cutover)", Command: "interrupted " + id, Class: "cutover", Status: AuditFailure})
+			}
+		}
+		cutoverMu.Unlock()
+	}
+}
+
 // ── runner registry ──────────────────────────────────────────────────────────
+
+// cutoverRunHandle pairs a runner's cancel with its launch generation: a
+// relaunched runner (Continue after estop-hold) invalidates the stale one, and
+// the stale runner's fold section must not write state (逐行精读 R2 P1-2).
+type cutoverRunHandle struct {
+	cancel context.CancelFunc
+	gen    int64
+}
+
+var cutoverLaunchGen atomic.Int64
 
 var (
 	cutoverRunsMu sync.Mutex
-	cutoverRuns   = map[string]context.CancelFunc{}
+	cutoverRuns   = map[string]*cutoverRunHandle{}
 )
 
 // CutoverStart validates the runbook, snapshots the network baseline, and
@@ -323,13 +405,14 @@ func (m *Manager) CutoverStart(def *CutoverRun) (*CutoverRun, error) {
 
 func (m *Manager) cutoverLaunch(id string) {
 	ctx, cancel := context.WithCancel(context.Background())
+	gen := cutoverLaunchGen.Add(1)
 	cutoverRunsMu.Lock()
 	if old, ok := cutoverRuns[id]; ok {
-		old()
+		old.cancel()
 	}
-	cutoverRuns[id] = cancel
+	cutoverRuns[id] = &cutoverRunHandle{cancel: cancel, gen: gen}
 	cutoverRunsMu.Unlock()
-	go m.cutoverRunner(ctx, id)
+	go m.cutoverRunner(ctx, id, gen)
 }
 
 // CutoverContinue presses 继续 at a hold.
@@ -402,6 +485,10 @@ func (m *Manager) runCutoverPrecheck(def *CutoverRun, devices map[string]bool) e
 				pass = err == nil && re.MatchString(res.Output)
 			}
 			rep.Items = append(rep.Items, PrecheckItem{Device: pr.Device, Check: "probe:command:" + pr.Cmd, Pass: pass, Detail: firstLineOf(refusalOrOutput(res))})
+		default:
+			// 未知 probe kind（拼写错误）必须显式失败——静默丢弃会让预检
+			// 假绿灯，值班以为查了其实没查（逐行精读 R2 P3-13）。
+			rep.Items = append(rep.Items, PrecheckItem{Device: pr.Device, Check: "probe:" + pr.Kind, Pass: false, Detail: "unknown probe kind"})
 		}
 	}
 	rep.AllPass = true
@@ -460,7 +547,7 @@ func (m *Manager) CutoverPrecheckOverride(id string) (*CutoverRun, error) {
 	c.HoldNote = ""
 	_ = saveCutoverLocked(c)
 	cutoverMu.Unlock()
-	StateEventSnap(StateEventCutoverStart, c.ID, StateActorUser, "precheck-override")
+	StateEventSnap(StateEventCutoverStart, c.ID, StateActorUser, filepath.Join(cutoversDir(), c.ID+".json"))
 	_ = AppendAudit(Audit{Device: "(cutover)", Command: "precheck-override " + c.ID, Class: "cutover", Status: AuditOK})
 	m.cutoverLaunch(c.ID)
 	return c, nil
@@ -473,9 +560,9 @@ func (m *Manager) CutoverContinue(id string) (*CutoverRun, error) {
 		cutoverMu.Unlock()
 		return nil, err
 	}
-	if c.Status != CutoverHold {
+	if c.Status != CutoverHold && c.Status != CutoverInterrupted {
 		cutoverMu.Unlock()
-		return nil, fmt.Errorf("cutover %s: status %s — only held cutovers continue", id, c.Status)
+		return nil, fmt.Errorf("cutover %s: status %s — only held/interrupted cutovers continue", id, c.Status)
 	}
 	StateEventSnap(StateEventCutoverGo, id, StateActorUser, filepath.Join(cutoversDir(), id+".json"))
 	c.Status = CutoverRunning
@@ -492,41 +579,134 @@ func (m *Manager) CutoverContinue(id string) (*CutoverRun, error) {
 
 // CutoverRollback presses 回退 at a hold: the run's executed proposals unwind
 // newest-first (each still audited); the run ends aborted.
+//
+// P1-E1④: the whole unwind runs under cutoverMu like Continue/Abort. It used
+// to be a lock-free read-modify-write, so an operator pressing 继续 while
+// another pressed 回退 could have the runner execute step N+1 on a device
+// while step N was being unwound — both sides reporting success.
+//
+// Known trade-off (, accepted): the lock is held across the whole
+// unwind (minutes of device I/O), so an EstopAll arriving mid-rollback waits
+// for it — the red button's cutover-hold is delayed, never skipped. Weakening
+// the lock would break the rollback-vs-continue atomicity this exists for.
 func (m *Manager) CutoverRollback(ctx context.Context, id string) (*CutoverRun, error) {
+	cutoverMu.Lock()
 	c, err := GetCutover(id)
 	if err != nil {
+		cutoverMu.Unlock()
 		return nil, err
 	}
 	if c.Status != CutoverHold {
+		cutoverMu.Unlock()
 		return nil, fmt.Errorf("cutover %s: status %s — rollback happens at a decision point", id, c.Status)
 	}
 	StateEventSnap(StateEventCutoverBack, id, StateActorUser, filepath.Join(cutoversDir(), id+".json"))
 	failed := ""
+	candidates, rolled := 0, 0
 	for i := len(c.Steps) - 1; i >= 0; i-- {
 		s := &c.Steps[i]
-		if s.Status != CutoverStepApproved && s.Status != CutoverStepDone {
-			continue
-		}
 		if s.ProposalID == "" {
 			continue // read steps leave nothing to roll back
 		}
+		// approved/done = 正常落盘的变更步；failed/skipped = 提案已部分执行
+		// 或被跳过但变更仍在设备上（急停冻结的 partial、门未过被跳过）。
+		// 617-621 的 skip 注释一直承诺这一行为，实现此前漏掉了 failed/skipped
+		// ——急停场景（estop 冻结提案 → 步骤 failed）是它最重要的用例。未真正
+		// 执行过的提案会被 RollbackProposal 的前置检查安全拒绝，落入 failed
+		// 记录，不误回滚。
+		switch s.Status {
+		case CutoverStepApproved, CutoverStepDone, CutoverStepFailed, CutoverStepSkipped:
+		default:
+			continue
+		}
+		// 从未落盘的提案（estop 落在第一步边界 → 零步 applied 的 partial、
+		// 或 skipped 时提案还没执行）：无物可回滚——跳过且不计入候选，
+		// 避免"成功回退了一次从未发生的变更"的审计谎报。
+		if pr, err := GetProposal(s.ProposalID); err == nil {
+			landed := false
+			for i := range pr.Steps {
+				if pr.Steps[i].Applied || pr.Steps[i].AppliedCmds > 0 {
+					landed = true
+					break
+				}
+			}
+			if !landed {
+				continue
+			}
+		}
+		candidates++
 		if _, err := m.RollbackProposal(ctx, s.ProposalID); err != nil {
 			failed = fmt.Sprintf("%s: %v", s.ProposalID, err)
 			s.Error = failed
 			break
 		}
+		rolled++
 		s.Status = CutoverStepRolled
-		_ = saveCutover(c)
+		_ = saveCutoverLocked(c)
 	}
 	if failed != "" {
 		c.Status = CutoverFailed
-		c.HoldNote = "回退失败：" + failed + " — 人工接管（备份在变更里）"
-		_ = saveCutover(c)
+		c.HoldNote = fmt.Sprintf("回退失败（已回滚 %d/%d 个变更步）：%s — 人工接管（备份在变更里）", rolled, candidates, failed)
+		_ = saveCutoverLocked(c)
+		cutoverMu.Unlock()
 		return c, nil
 	}
 	c.Status = CutoverAborted
-	c.HoldNote = "已按决策点回退"
+	c.HoldNote = fmt.Sprintf("已按决策点回退（%d/%d 个变更步已回滚）", rolled, candidates)
+	_ = saveCutoverLocked(c)
+	// cutoverFinishReport takes cutoverMu itself — call it AFTER releasing, or
+	// this deadlocks (found by TestCutoverRollbackAtDecisionPoint).
+	cutoverMu.Unlock()
 	m.cutoverFinishReport(context.Background(), c)
+	return c, nil
+}
+
+// CutoverSkipStep presses 跳过 at a gate-failure hold (P1-E1①): the gate
+// failed but the operator accepts it — the step is marked skipped with the
+// reason, the cursor advances, and the run continues. The reason is audited;
+// a proposal step skipped here keeps its change on the device (the proposal
+// already executed), and a later decision-point 回退 still unwinds it.
+func (m *Manager) CutoverSkipStep(id, reason string) (*CutoverRun, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, fmt.Errorf("cutover %s: skip requires a reason (audited)", id)
+	}
+	cutoverMu.Lock()
+	defer cutoverMu.Unlock()
+	c, err := GetCutover(id)
+	if err != nil {
+		return nil, err
+	}
+	if c.Status != CutoverHold {
+		return nil, fmt.Errorf("cutover %s: status %s — only held cutovers skip a step", id, c.Status)
+	}
+	if c.Cursor >= len(c.Steps) {
+		return nil, fmt.Errorf("cutover %s: cursor %d out of range", id, c.Cursor)
+	}
+	step := &c.Steps[c.Cursor]
+	// 步状态前置（逐行精读 R2 P2-5）：只有门失败的步可跳过——决策点/倒计时
+	// hold 的 Cursor 指向未执行的 pending 步，不设防会把"跳过"用在从未执行
+	// 的步上。
+	switch step.Status {
+	case CutoverStepFailed, CutoverStepGating:
+	default:
+		return nil, fmt.Errorf("cutover %s: step %q is %s — only a failed/gating step can be skipped", id, step.Label, step.Status)
+	}
+	prev := step.Status
+	step.Status = CutoverStepSkipped
+	if step.Error == "" {
+		step.Error = "skipped: " + reason
+	}
+	StateEventSnap(StateEventCutoverGo, id, StateActorUser, filepath.Join(cutoversDir(), id+".json"))
+	c.Status = CutoverRunning
+	c.HoldNote = ""
+	c.Cursor++
+	if err := saveCutoverLocked(c); err != nil {
+		return nil, err
+	}
+	// Neither AppendAudit nor cutoverLaunch takes cutoverMu — hold it through.
+	_ = AppendAudit(Audit{Device: "(cutover)", Command: "skip " + id + " @" + step.Label, Class: "cutover", Status: AuditOK, Error: "step was " + prev + "; reason: " + reason})
+	m.cutoverLaunch(id)
 	return c, nil
 }
 
@@ -538,14 +718,18 @@ func (m *Manager) CutoverAbort(id string) (*CutoverRun, error) {
 		cutoverMu.Unlock()
 		return nil, err
 	}
-	if c.Status != CutoverRunning && c.Status != CutoverHold {
+	// interrupted（P0-5 后端重启遗留态）同样可放弃——值班对孤儿 run 的
+	// 唯一合法出口不应只有"先继续再终止"。
+	// precheck-failed 也接受 abort（逐行精读 R2 P2-4）：红灯后值班决定今晚
+	// 不割了，必须有放弃出口，否则 run 永久挂在大屏或被逼着按放行。
+	if c.Status != CutoverRunning && c.Status != CutoverHold && c.Status != CutoverInterrupted && c.Status != CutoverPrecheckFailed {
 		cutoverMu.Unlock()
 		return nil, fmt.Errorf("cutover %s: status %s", id, c.Status)
 	}
 	StateEventSnap(StateEventCutoverAbort, id, StateActorUser, filepath.Join(cutoversDir(), id+".json"))
 	cutoverRunsMu.Lock()
-	if cancel, ok := cutoverRuns[id]; ok {
-		cancel()
+	if handle, ok := cutoverRuns[id]; ok {
+		handle.cancel()
 	}
 	cutoverRunsMu.Unlock()
 	c.Status = CutoverAborted
@@ -568,10 +752,14 @@ func (m *Manager) CutoverAbort(id string) (*CutoverRun, error) {
 
 // ── the runner ───────────────────────────────────────────────────────────────
 
-func (m *Manager) cutoverRunner(ctx context.Context, id string) {
+func (m *Manager) cutoverRunner(ctx context.Context, id string, myGen int64) {
 	defer func() {
 		cutoverRunsMu.Lock()
-		delete(cutoverRuns, id)
+		// 只撤自己的 handle——被 Continue 重启后注册表里已是新 runner 的
+		// （旧实现无条件 delete 会把 Abort 的取消句柄弄丢）。
+		if cur, ok := cutoverRuns[id]; ok && cur.gen == myGen {
+			delete(cutoverRuns, id)
+		}
 		cutoverRunsMu.Unlock()
 	}()
 	for {
@@ -582,7 +770,7 @@ func (m *Manager) cutoverRunner(ctx context.Context, id string) {
 
 		// 总倒计时：窗口耗尽即 hold——深夜割接最不该发生的是「计划外继续」。
 		if time.Now().After(c.Deadline) {
-			m.cutoverHold(id, "总倒计时耗尽——剩余步骤未执行，等待决策")
+			_ = m.cutoverHold(id, "总倒计时耗尽——剩余步骤未执行，等待决策")
 			return
 		}
 		if c.Cursor >= len(c.Steps) {
@@ -590,27 +778,75 @@ func (m *Manager) cutoverRunner(ctx context.Context, id string) {
 			return
 		}
 		step := c.Steps[c.Cursor]
+		startCursor := c.Cursor
 
 		// Execute the step.
 		state, gateErr := m.cutoverExecStep(ctx, c, step)
 
+		// 步后折叠（NETDEV-9 同族 TOCTOU 的急停补丁，FDE_AIINFRA gap §4.0）：
+		// 重读→复核→折叠→保存整段持 cutoverMu。此前「锁外重读、随后保存旧
+		// 快照」的窗口里，急停的 cutoverHold（running→hold）会被迟到保存整体
+		// 写回 running 且 Cursor 已前进——红钮对这条割接完全失效。复核发现
+		// 状态已被外部翻转（急停 Hold 等）时，仍要把已执行的步骤状态落盘
+		// （不推进 Cursor、不覆盖状态机）——否则提案 partial 的去向丢失，
+		// 之后「继续」必败、「回退」够不着这份变更。
+		cutoverMu.Lock()
+		// 代数失效检查：急停 hold 窗口内值班按了「继续」→ launch 代数已换，
+		// 新 runner 接管游标。旧 runner 的 ctx 取消会产生假 gateErr——若在这里
+		// 折叠，会把 "context canceled" 写成验证门失败并再次 hold（值班明明按
+		// 了继续），且与新 runner 交错。直接退场，一个字节都不写。
+		cutoverRunsMu.Lock()
+		cur, live := cutoverRuns[id]
+		stale := !live || cur.gen != myGen
+		cutoverRunsMu.Unlock()
+		if stale {
+			cutoverMu.Unlock()
+			return
+		}
 		c, err = GetCutover(id)
-		if err != nil || c.Status != CutoverRunning {
+		if err != nil {
+			cutoverMu.Unlock()
+			return
+		}
+		// 步身份复核：急停 hold 窗口内值班可能已 SkipStep（hold→running、
+		// Cursor 前进、新 runner 已 launch）。旧 runner 的 state 属于已被
+		// 接管的游标——既不能折叠进新槽位，也不能继续循环（会双 runner），
+		// 直接退场。
+		if c.Cursor != startCursor {
+			cutoverMu.Unlock()
 			return
 		}
 		if c.Cursor < len(c.Steps) {
 			c.Steps[c.Cursor] = state
 		}
+		if c.Status != CutoverRunning {
+			_ = saveCutoverLocked(c)
+			_ = AppendAudit(Audit{Device: "(cutover)", Command: "step folded under external hold " + id + " @" + step.Label + " (" + state.Status + ")", Class: "cutover", Status: AuditOK})
+			cutoverMu.Unlock()
+			return
+		}
 
 		if gateErr != nil {
 			// 门不过即停在回退决策点（§7.2）：回退按钮 + 影响描述并列。
+			// P1-E1②：提案步的变更此时已落盘（提案早已执行完），旧文案只说
+			// “验证门未过”会让值班误以为执行失败而不敢跳过/继续——明确三分：
+			// 变更状态 / 验证结果 / 可选动作。
 			impact := step.Impact
 			if impact == "" {
 				impact = "步骤 " + step.Label + " 验证未通过"
 			}
-			c.HoldNote = "验证门未过：" + gateErr.Error() + " — " + impact
+			landed := ""
+			// NEW-29: a gate-failed proposal step has status Failed, but the
+			// proposal itself was already EXECUTED — the change IS on the
+			// device. The old Approved/Done-only check never fired here, so
+			// the operator saw "执行失败" with no landed-change warning.
+			if step.ProposalID != "" && (state.Status == CutoverStepApproved || state.Status == CutoverStepDone || state.Status == CutoverStepFailed) {
+				landed = fmt.Sprintf("（变更已落盘：提案 %s 已执行，回退清单包含本步骤）", step.ProposalID)
+			}
+			c.HoldNote = "验证门未过：" + gateErr.Error() + landed + " — " + impact + "。可选：跳过本步继续（需填原因）/ 回退 / 终止"
 			c.Status = CutoverHold
-			_ = saveCutover(c)
+			_ = saveCutoverLocked(c)
+			cutoverMu.Unlock()
 			_ = AppendAudit(Audit{Device: "(cutover)", Command: "hold " + id + " @" + step.Label, Class: "cutover", Status: AuditFailure, Error: gateErr.Error()})
 			// 深链召回（§4.12）：半夜窗口期的"回来决策"——IM 推送带
 			// fairpeer://cutover/<id>，点开直达割接大屏（无出口配置时静默）。
@@ -627,15 +863,18 @@ func (m *Manager) cutoverRunner(ctx context.Context, id string) {
 			}
 			c.HoldNote = "决策点：" + impact + " — 继续 or 回退，决策是人按的"
 			c.Status = CutoverHold
-			_ = saveCutover(c)
+			_ = saveCutoverLocked(c)
+			cutoverMu.Unlock()
 			NotifyPushText("cutover", "[fairpeer 运维] 割接到达决策点："+c.Name,
 				c.HoldNote+"\nfairpeer://cutover/"+c.ID)
 			_ = AppendAudit(Audit{Device: "(cutover)", Command: "hold " + id + " @" + step.Label + " (decision)", Class: "cutover", Status: AuditOK})
 			return
 		}
-		if err := saveCutover(c); err != nil {
+		if err := saveCutoverLocked(c); err != nil {
+			cutoverMu.Unlock()
 			return
 		}
+		cutoverMu.Unlock()
 	}
 }
 
@@ -706,11 +945,20 @@ func (m *Manager) cutoverExecStep(ctx context.Context, c *CutoverRun, step Cutov
 // gateWait polls the gate command until Expect matches CONTINUOUSLY for
 // SustainSec. Timeout = TimeoutSec, default 2×sustain + 90s.
 func (m *Manager) gateWait(ctx context.Context, g *CutoverGate) error {
-	re := regexp.MustCompile(g.Expect)
+	re, rerr := regexp.Compile(g.Expect)
+	if rerr != nil {
+		// 磁盘文件可能绕过 CutoverStart 校验（手改/旧版本）——构造错误的
+		// gate 报失败而不是 panic runner（逐行精读 R2 P3-11）。
+		return fmt.Errorf("gate expect: %v", rerr)
+	}
 	sustain := time.Duration(g.SustainSec) * time.Second
 	timeout := time.Duration(g.TimeoutSec) * time.Second
 	if timeout <= 0 {
 		timeout = sustain*2 + 90*time.Second
+	}
+	if timeout < sustain {
+		// SustainSec > TimeoutSec 在数学上永不可能通过——夹到可持续窗口。
+		timeout = sustain + 90*time.Second
 	}
 	interval := sustain / 4
 	if interval < time.Second {
@@ -745,18 +993,27 @@ func (m *Manager) gateWait(ctx context.Context, g *CutoverGate) error {
 	}
 }
 
-func (m *Manager) cutoverHold(id, note string) {
+// cutoverHold flips a running run to hold. err 非 nil = 翻转没有发生（run 不
+// 存在或已不在 running 态）——急停路径据此把失败记进 EstopReport.Errors，
+// 而不是把 hold 成功虚报给值班。
+func (m *Manager) cutoverHold(id, note string) error {
 	cutoverMu.Lock()
 	defer cutoverMu.Unlock()
 	c, err := GetCutover(id)
-	if err != nil || c.Status != CutoverRunning {
-		return
+	if err != nil {
+		return err
+	}
+	if c.Status != CutoverRunning {
+		return fmt.Errorf("cutover %s: status %s — only running cutovers hold", id, c.Status)
 	}
 	StateEventSnap(StateEventCutoverHold, id, StateActorSystem, filepath.Join(cutoversDir(), id+".json"))
 	c.Status = CutoverHold
 	c.HoldNote = note
-	_ = saveCutoverLocked(c)
+	if err := saveCutoverLocked(c); err != nil {
+		return err
+	}
 	_ = AppendAudit(Audit{Device: "(cutover)", Command: "hold " + id, Class: "cutover", Status: AuditFailure, Error: note})
+	return nil
 }
 
 // cutoverFinish completes the run: post-snapshot + before/after report.
@@ -769,6 +1026,11 @@ func (m *Manager) cutoverFinish(id string) {
 }
 
 func (m *Manager) cutoverFinishReport(ctx context.Context, c *CutoverRun) {
+	// PostSnapshot 是逐设备网络 I/O（可达分钟级）。此前整段无锁：期间 Abort/
+	// 急停 Hold 落盘的新状态，会被最后这份几分钟前读出的陈旧 c 整文件回写
+	// 掉——abort 变 done、HoldNote"人工终止"丢失（逐行精读 R2 P1-1）。
+	// 现改为：I/O 完成后锁内重读磁盘最新副本，只合并报告产物；终态仅在
+	// 仍是 running 时才落。
 	c.PostSnapshot = map[string]string{}
 	for name := range c.PreSnapshot {
 		vers, err := m.RunBackup(ctx, name)
@@ -778,24 +1040,43 @@ func (m *Manager) cutoverFinishReport(ctx context.Context, c *CutoverRun) {
 		c.PostSnapshot[name] = vers[len(vers)-1].ID
 	}
 	c.Report = m.cutoverReport(c)
-	c.Status = CutoverDone
-	if c.HoldNote == "已按决策点回退" {
-		c.Status = CutoverAborted
-	}
 	now := time.Now()
-	c.EndedAt = &now
 	cutoverMu.Lock()
+	fresh, err := GetCutover(c.ID)
+	if err != nil {
+		cutoverMu.Unlock()
+		return
+	}
+	fresh.PostSnapshot = c.PostSnapshot
+	fresh.Report = c.Report
+	ended := false
+	if fresh.Status == CutoverRunning {
+		fresh.Status = CutoverDone
+		// 前缀匹配：回退路径的 HoldNote 带「已回滚 N/M」进度后缀。
+		if strings.HasPrefix(fresh.HoldNote, "已按决策点回退") {
+			fresh.Status = CutoverAborted
+		}
+		fresh.EndedAt = &now
+		ended = true
+	}
 	StateEventSnap(StateEventCutoverDone, c.ID, StateActorSystem, filepath.Join(cutoversDir(), c.ID+".json"))
-	_ = saveCutoverLocked(c)
+	_ = saveCutoverLocked(fresh)
+	c.Status = fresh.Status
+	c.EndedAt = fresh.EndedAt
 	cutoverMu.Unlock()
 	_ = AppendAudit(Audit{Device: "(cutover)", Command: "end " + c.ID + " " + c.Status, Class: "cutover", Status: AuditOK})
+	_ = ended
 }
 
 // cutoverReport builds the before/after comparison (§7.2: 哪些接口/路由/流量变了).
 func (m *Manager) cutoverReport(c *CutoverRun) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# 割接对比报告 %s — %s\n\n", c.ID, c.Name)
-	fmt.Fprintf(&b, "- 开始：%s\n", c.StartedAt.Format("15:04:05"))
+	started := "(unknown)"
+	if c.StartedAt != nil {
+		started = c.StartedAt.Format("15:04:05")
+	}
+	fmt.Fprintf(&b, "- 开始：%s\n", started)
 	if c.EndedAt != nil {
 		fmt.Fprintf(&b, "- 结束：%s（%s）\n", c.EndedAt.Format("15:04:05"), c.Status)
 	}

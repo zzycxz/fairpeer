@@ -37,12 +37,12 @@
 前置门槛（规格启动条件）：自有 GPU 集群 dogfooding 产出真实痛点清单——先跑 P0 两周再定范围。
 
 ### P1-1 最小可用面：DCGM XID → Finding
+> **进度注记（2026-09-12）**：代码侧已实现——`internal/netdev/gpuhealth.go`（采集面：nvidia-smi CSV 指标 + journalctl -k -g Xid 证据主源/-q 兜底）、`alert.go`（gpu.xid/temp/mem_pct/count 四指标 + for_rounds）、XID→Finding 分级立案带证据（gpuXidSevere catalog）。**待真机验收**：journalctl -g 可用性（systemd ≥237）、XID 实际输出形态对照、severe 分级表校准。kind=gpu-host 判别式未做（当前以 d.GPU + vendor=linux 表达）。
 - [ ] 痛点清单：基于 P0-1/P0-2 dogfooding 记录高频诉求
-- [ ] kind=gpu-host 判别式落地（`internal/config/netdev.go`，沿用 §2.1 模式）
-- [ ] 采集面：`nvidia-smi -q` / DCGM（XID / ECC / NVLink / MIG 字段）
-- [ ] XID 错误解析 → `netdev_finding`（source=gpu，必带命令输出证据）
-- [ ] 只读密封：新命令全部映射分类器四类（read/write/dangerous/unknown），写路径不存在
-- 验收：注入/回放一次 XID 错误，自动落 Finding 并推送通知
+- [x] 采集面：落地为 `nvidia-smi --query-gpu` CSV（-q 仅作 XID 兜底证据）；ECC/NVLink/MIG 字段与 DCGM 未接——2026-09-12
+- [x] XID 错误解析 → `netdev_finding`（source=gpu:xid:<device>，必带命令输出证据）——2026-09-12 落地（分级：severe→critical）
+- [x] 只读密封：新命令全部映射分类器四类（read/write/dangerous/unknown），写路径不存在——走 execSealed 密封路径，读表白名单内
+- 验收：注入/回放一次 XID 错误，自动落 Finding 并推送通知（待真机）
 
 ### P1-2 后续菜单（按痛点优先级排队，不承诺全部）
 - [ ] Fabric 体检 preset：`ibstat` / `nccl-tests` 只读预设

@@ -552,6 +552,16 @@ func (m *Manager) ApproveProposal(id string, confirm2 bool) (*Proposal, error) {
 	if p.Status != ProposalDraft {
 		return nil, fmt.Errorf("proposal %s: status %s, only drafts can be approved", id, p.Status)
 	}
+	// Re-validate at the approval gate. Draft validation ran when the proposal
+	// was authored, but the inventory may have moved since (device re-vendored
+	// to windows, group policy changed, step payloads edited). The structured
+	// step executors run unix-only commands (base64 -d, sha256sum, sh -c,
+	// rm -f) — a file/cert step that slipped onto a windows target would fail
+	// there, and its rollback would fail identically, leaving the device
+	// changed. This is the last gate before the write path becomes reachable.
+	if err := m.ValidateProposal(p); err != nil {
+		return nil, fmt.Errorf("proposal %s: re-validation at approval failed: %w", id, err)
+	}
 	if m.ProposalNeedsConfirm2(p) && !confirm2 {
 		return nil, fmt.Errorf("proposal %s demands secondary confirmation (group policy proposal+confirm2)", id)
 	}
@@ -665,6 +675,11 @@ func backupCommand(drvKey string) string {
 // A fully-applied run enters the observation period as watching (auto-closes
 // after 30 minutes).
 func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, error) {
+	// estop 代数必须在任何状态变更/确认往返之前捕获：捕获晚于"已标记
+	// executing"的话，estop 落进这个窗口（或落在人工在线确认的往返里——
+	// 可达分钟级）会被这场执行漏掉，所有步骤照常写设备（逐行精读 R1 问题1）。
+	// estop 之后新发起的 execute 属于人工决定，不在冻结范围。
+	estopBefore := EstopGeneration()
 	p, err := GetProposal(id)
 	if err != nil {
 		return nil, err
@@ -677,12 +692,23 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 	// 执行前在线检查（§7.1）：发现其他在线人员则**暂停并列出会话**，人确
 	// 认后才继续——「我要变更，但同事正登着」是最常见的协作事故。确认语
 	// 义 = 再次点击执行：本次会话清单已记入 Note，下一次执行看到同样的清
-	// 单即视为已确认（会话有变化则重新要求确认）。
+	// 单即视为已确认（会话有变化则重新要求确认）。已确认清单用带"|已确认"
+	// 的独立标记精确比对——子串 Contains 会把 "alice, bob" 已确认误判为
+	// "alice" 也已确认（逐行精读 R1 问题8）。
 	online := m.preExecOnlineCheck(ctx, p)
-	if online != "" && !strings.Contains(p.Note, "[在线人员] "+online) {
-		p.Note = strings.TrimSpace(p.Note + "\n[在线人员] " + online)
-		_ = SaveProposal(p)
-		return p, fmt.Errorf("执行前确认：目标设备上有其他在线人员（%s）——确认没人正操作后再次点击「执行」（清单已记入变更备注；会话有变化会再次要求确认）", online)
+	if online != "" && !strings.Contains(p.Note, "[在线人员|已确认] "+online) {
+		if strings.Contains(p.Note, "[在线人员] "+online) {
+			// 同一清单的再次执行 = 已确认：落确认标记后直接放行（精确比对
+			// 基线，会话集变化则标记失配、重新要求确认——逐行精读 R1 问题8
+			// 的子串误判修复）。
+			p.Note = strings.TrimSpace(p.Note + "\n[在线人员|已确认] " + online)
+			_ = SaveProposal(p)
+		} else {
+			// 首次发现：记入清单并拦下，人确认（再次点击执行）后放行。
+			p.Note = strings.TrimSpace(p.Note + "\n[在线人员] " + online)
+			_ = SaveProposal(p)
+			return p, fmt.Errorf("执行前确认：目标设备上有其他在线人员（%s）——确认没人正操作后再次点击「执行」（清单已记入变更备注；会话有变化会再次要求确认）", online)
+		}
 	}
 
 	// Claim approved→executing atomically: a racing approve/reject used to
@@ -716,6 +742,13 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 	frozen := ""
 	for i := range p.Steps {
 		s := &p.Steps[i]
+
+		// 紧急停止（estop.go §4.0）：在步骤边界冻结——已落盘前缀保持原状，
+		// 走既有 partial 语义（人决定回滚或保留），后续步骤不执行。
+		if proposalEstopFrozen(estopBefore) {
+			frozen = "紧急停止：剩余步骤已在步骤边界冻结（本步未开始、未落盘）——回滚（或确认保留）后可重新起草、批准并执行"
+			break
+		}
 
 		// Structured types carry their own backup/apply/verify semantics
 		// (§7.1); cli keeps the classic driver path.
@@ -814,7 +847,9 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 
 	if frozen != "" {
 		p.Status = ProposalPartial
-		p.Note = "frozen: " + frozen + " — later steps untouched; a human decides rollback or keep"
+		// Note 是轨迹字段（在线确认清单、历史冻结原因都在里面）——追加，
+		// 不整行覆盖（逐行精读 R1 问题4）。
+		p.Note = strings.TrimSpace(p.Note + "\nfrozen: " + frozen + " — later steps untouched; a human decides rollback or keep")
 	} else {
 		// All steps applied: done work lands in the observation period
 		// (§7.1). Status goes straight to watching — "done" used to be the
@@ -971,7 +1006,8 @@ func (m *Manager) RollbackProposal(ctx context.Context, id string) (*Proposal, e
 		s.AppliedCmds = 0
 	}
 	p.Status = ProposalDraft // rolled back cleanly; re-approval required to try again
-	p.Note = "rolled back via the authored plan"
+	// Note 是轨迹字段：追加（与冻结路径同款——不抹在线确认/历史冻结痕迹）。
+	p.Note = strings.TrimSpace(p.Note + "\nrolled back via the authored plan")
 	if err := SaveProposal(p); err != nil {
 		return nil, err
 	}
@@ -1049,14 +1085,27 @@ func (m *Manager) preExecOnlineCheck(ctx context.Context, p *Proposal) string {
 		if res.Refused || res.IsError {
 			continue
 		}
-		lines := strings.TrimSpace(res.Output)
-		if lines == "" {
-			continue
+		if n := countUserLines(res.Output); n > 0 {
+			findings = append(findings, fmt.Sprintf("%s: %d 个会话", name, n))
 		}
-		n := len(strings.Split(lines, "\n"))
-		findings = append(findings, fmt.Sprintf("%s: %d 个会话", name, n))
 	}
 	return strings.Join(findings, "；")
+}
+
+// countUserLines counts the session rows in who/quser output. quser prints a
+// header ("USERNAME SESSIONNAME …", localized "用户名 …" on zh-CN) plus the
+// occasional blank line — neither is a session; `who` has no header, so the
+// filter is a no-op there.
+func countUserLines(out string) int {
+	n := 0
+	for _, ln := range strings.Split(out, "\n") {
+		t := strings.TrimSpace(ln)
+		if t == "" || strings.HasPrefix(t, "USERNAME") || strings.HasPrefix(t, "用户名") {
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 // CloseProposalWatch manually ends the watching period.
@@ -1114,14 +1163,24 @@ func watchDegraded(p *Proposal, fresh map[string]DeviceHealth) []string {
 	var worse []string
 	for dev, base := range p.HealthBase {
 		h, ok := fresh[dev]
-		if !ok || !h.Reachable && base == -1 {
-			continue // no fresh signal / already down at base
+		if !ok {
+			continue // no fresh signal
 		}
-		if base >= 0 && !h.Reachable {
+		// GPU-only 主机采集失败的轮次：GPUSampled=false ⇒ Reachable=false，
+		// "我方看不了" ≠ "设备掉了"（与告警引擎同一冻结哲学，逐行精读 R2 P2-2）。
+		if h.GPUOnly && !h.GPUSampled {
+			continue
+		}
+		if base == -1 {
+			// watch 起点就失联的设备：观察期内"恢复"不是劣化——旧逻辑会把
+			// 恢复算成 "down 口 -1→0" 立 critical 卡（逐行精读 R2 P2-2）。
+			continue
+		}
+		if !h.Reachable {
 			worse = append(worse, dev+"（失联）")
 			continue
 		}
-		if h.Reachable && h.IfDown() > base {
+		if h.IfDown() > base {
 			worse = append(worse, fmt.Sprintf("%s（down 口 %d→%d）", dev, base, h.IfDown()))
 		}
 	}

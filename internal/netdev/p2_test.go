@@ -26,7 +26,7 @@ func TestRuleCmpAndMetrics(t *testing.T) {
 		t.Error("reachable should be 1")
 	}
 	if got := ruleMetricValue("if_down_count", h, 0); got != 1 {
-		t.Errorf("if_down_count should be 1 (admin-up oper-down only), got %d", got)
+		t.Errorf("if_down_count should be 1 (admin-up oper-down only), got %g", got)
 	}
 	// uptime_reset: fire only on a drop with a baseline.
 	if ruleMetricValue("uptime_reset", DeviceHealth{Reachable: true, UptimeSec: 100}, 0) != 0 {

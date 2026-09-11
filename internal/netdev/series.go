@@ -9,6 +9,8 @@ package netdev
 import (
 	"bufio"
 	"encoding/json"
+	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -24,6 +26,10 @@ type SeriesPoint struct {
 	Device string  `json:"d"`
 	Metric string  `json:"m"`
 	Value  float64 `json:"v"`
+	// Labels（FDE_AIINFRA gap §4.1-2）：可选标签面（如 {"gpu":"0"}）。读取端
+	// 仍按 (device, metric) 分组——GPU 指标走 gpu.<index>.<metric> 命名规范
+	// 自然分组，labels 供后续聚合查询用（spec §5.3 的 labels_json 前置）。
+	Labels map[string]string `json:"l,omitempty"`
 }
 
 const seriesRetention = 14 * 24 * time.Hour
@@ -43,6 +49,16 @@ func seriesFile() string {
 // RecordSeries appends one point (best-effort; failures are silent — the
 // timeline is a convenience layer, never a blocker).
 func RecordSeries(device, metric string, v float64) {
+	RecordSeriesLabeled(device, metric, nil, v)
+}
+
+// RecordSeriesLabeled appends one point with optional labels.
+func RecordSeriesLabeled(device, metric string, labels map[string]string, v float64) {
+	// NaN/Inf 会写出非法 JSON 字面量（strconv 'g' 直接吐 "NaN"/"+Inf"），
+	// 该行将在读取端被静默丢弃——入口直接拒掉，静默性从将来时堵死。
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return
+	}
 	seriesMu.Lock()
 	defer seriesMu.Unlock()
 	f, err := os.OpenFile(seriesFile(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
@@ -50,12 +66,21 @@ func RecordSeries(device, metric string, v float64) {
 		return
 	}
 	defer f.Close()
-	line := `{"t":` + strconv.FormatInt(time.Now().Unix(), 10) + `,"d":` + quoteJSON(device) + `,"m":` + quoteJSON(metric) + `,"v":` + strconv.FormatFloat(v, 'g', -1, 64) + "}\n"
+	line := `{"t":` + strconv.FormatInt(time.Now().Unix(), 10) + `,"d":` + quoteJSON(device) + `,"m":` + quoteJSON(metric) + `,"v":` + strconv.FormatFloat(v, 'g', -1, 64)
+	if len(labels) > 0 {
+		lb, _ := json.Marshal(labels)
+		line += `,"l":` + string(lb)
+	}
+	line += "}\n"
 	_, _ = f.WriteString(line)
 }
 
+// quoteJSON 双引号包裹并转义。与手写 replacer 的区别在控制字符（\n 会把一行
+// JSONL 撕成两段坏行）——json.Marshal 的字符串编码覆盖全部转义，错误不可
+// 能（string 输入），忽略 err 是安全的。
 func quoteJSON(s string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 // SeriesRead returns one device's points (all metrics) inside the window.
@@ -82,12 +107,26 @@ func SeriesRead(device string, window time.Duration) map[string][]SeriesPoint {
 		}
 		out[p.Metric] = append(out[p.Metric], p)
 	}
+	// 一行超过 scanner 上限会让 Scan 提前返回 false——其后所有行本次全部
+	// 不可见。打日志留痕（自愈靠 CleanupSeries 重写时丢弃坏行）。
+	if err := sc.Err(); err != nil {
+		slog.Warn("series: read truncated", "device", device, "err", err)
+	}
 	seriesMu.Unlock()
 	return out
 }
 
-// CleanupSeries drops points older than the retention (called opportunistically
-// on app start; a rewrite-in-place under the lock).
+var seriesCleanupOnce sync.Once
+
+// CleanupSeriesOnce runs CleanupSeries exactly once per process (the 14-day
+// retention used to be dead code — wired at poller start and poll time so
+// both desktop and headless callers are covered).
+func CleanupSeriesOnce() {
+	seriesCleanupOnce.Do(CleanupSeries)
+}
+
+// CleanupSeries drops points older than the retention (rewrite-in-place under
+// the lock).
 func CleanupSeries() {
 	cutoff := time.Now().Add(-seriesRetention).Unix()
 	seriesMu.Lock()
@@ -108,5 +147,10 @@ func CleanupSeries() {
 		}
 	}
 	_ = os.MkdirAll(filepath.Dir(seriesFile()), 0o700)
-	_ = fileutil.AtomicWriteFile(seriesFile(), []byte(strings.Join(kept, "\n")+"\n"), 0o600)
+	// 全空时写空文件——Join+尾换行会留下一个孤 "\n"（读取端虽跳过，脏）。
+	payload := []byte("")
+	if len(kept) > 0 {
+		payload = []byte(strings.Join(kept, "\n") + "\n")
+	}
+	_ = fileutil.AtomicWriteFile(seriesFile(), payload, 0o600)
 }

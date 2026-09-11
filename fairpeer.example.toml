@@ -5,6 +5,32 @@
 # default_model = "<provider>/<model>"   # uncomment + set after configuring a provider
 # language      = "zh"   # ui language; empty = auto-detect from $LANG / $FAIRPEER_LANG
 
+# ─────────────────────────────────────────────────────────────────────────────
+# network — outbound HTTP (model providers, updater checks, codegraph,
+# web_fetch). Secrets at rest: the desktop encrypts them into the OS keyring
+# (Linux Secret Service / macOS Keychain) and falls back to a passphrase via
+# the FAIRPEER_SECRET_PASSPHRASE / FAIRPEER_SECRET_PASSPHRASE_FILE env vars —
+# set one on headless/domestic-OS servers without a keyring daemon, or every
+# stored key degrades to machine-bound encryption (undecryptable after a
+# hostname change or OS migration).
+#
+# [network]
+# proxy_mode = "auto"   # auto|env|custom|off; auto = env proxy (HTTP_PROXY/
+#                       # HTTPS_PROXY/NO_PROXY) first, then OS proxy where known
+# # proxy_url = "socks5://127.0.0.1:7890"   # proxy_mode = "custom" override
+# # no_proxy  = "localhost,127.0.0.1,.local"
+# # update_base_url = "https://updates.internal.example.com/fairpeer/releases"
+#                       # desktop self-update mirror base: when set it REPLACES
+#                       # the default GitHub/ghproxy endpoints entirely (the
+#                       # mirror must serve the same latest.json layout, e.g.
+#                       # …/latest/download/latest.json). For air-gapped /
+#                       # intranet deployments so the updater never dials out.
+#
+# [network.proxy]       # structured custom proxy (password supports ${VAR})
+# # type = "socks5"     # http|https|socks5|socks5h
+# # server = "127.0.0.1"
+# # port = 7890
+
 [ui]
 theme = "auto"   # auto|dark|light; controls CLI colors only; FAIRPEER_THEME can override per run
 # theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber|ember|midnight|sandstone|porcelain|linen|glacier
@@ -30,12 +56,16 @@ max_steps         = 0    # executor tool-call rounds; 0 = no limit
 planner_max_steps = 12   # planner read-only tool-call rounds; 0 = no limit
 temperature       = 0.0
 auto_plan         = "off"   # off|on; off keeps plan mode manual
+stream_recoveries = 0    # 流中断恢复次数/回合；0 = 默认 3
+retry_max_attempts = 0   # provider HTTP 发送重试次数；0 = 默认 10
+retry_backoff_max_sec = 0  # 退避上限秒数；0 = 默认 15
+retry_mode = "normal"    # normal | always（always = 不限重试次数，无人值守长任务用）
 # auto_plan_classifier = "<provider>/<model>"   # optional; only used for borderline tasks
 soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact
 compact_ratio       = 0.8   # try compacting when prompt reaches this fraction
 compact_force_ratio = 0.9   # force compacting at this high-water mark
 # context_budget_percent = 80   # cap the effective window for compaction (0/100 = full). Lower = compact earlier — saves cost on input pricing tiers and avoids quality drop near the window edge.
-# fast_task_model = "<provider>/<model>"   # lightweight model for background tasks (dream/distill/rag-extract)
+# fast_task_model = "<provider>/<model>"   # lightweight model for background tasks (dream/rag-extract)
 # planner_model = "<provider>/<model>"   # optional: enable two-model collaboration
 # subagent_model = "<provider>/<model>"   # optional default for runAs=subagent skills
 # subagent_models = { review = "<provider>/<model>", security_review = "<provider>/<model>" }   # per-skill overrides
@@ -308,6 +338,14 @@ compact_force_ratio = 0.9   # force compacting at this high-water mark
 # default     = "astron-code-latest"
 # models      = ["astron-code-latest"]
 
+
+[scheduler]
+# 任务调度器（任务日历）共享配置。AI 创建"会运行 AI 的定时任务"
+# （schedule_create/update/delete）时是否弹审批卡；默认开启——审批卡展示
+# 任务全貌（名称/时间/提示词/运行模式），可"本次/本会话/永久允许/拒绝"，
+# 且 YOLO 全自动模式下依然拦截。纯提醒（schedule_remind）与人类 UI 建任务
+# 不受此开关影响；无头环境无论开关如何一律拒绝 AI 建任务。
+# confirm_agent_tasks = true
 
 [tools]
 enabled = []   # empty = all built-in tools
@@ -606,21 +644,45 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # commands = ["display interface brief", "display interface description"]
 # vendors  = ["huawei"]
 #
+# 健康告警规则（每轮健康轮询评估；命中立案为 Finding，条件清除自动恢复）：
+# [[netdev.alert_rules]]
+# name = "gpu-hot"
+# metric = "gpu.temp"        # reachable|if_down_count|uptime_reset|flap_count|if_down_above_p90|gpu.xid|gpu.temp|gpu.mem_pct|gpu.count
+# op = ">="                  # >= | <= | ==
+# value = 85.0
+# severity = "warning"       # info | warning | critical
+# enabled = true
+# for_rounds = 3             # 连续 N 轮成立才立案（0/1 = 立即；防单轮毛刺）
+#
+# [[netdev.alert_rules]]
+# name = "host-down"
+# metric = "reachable"
+# op = "=="
+# value = 0
+# severity = "critical"
+# enabled = true
+
 # [[netdev.devices]]
 # name         = "core-sw-1"
-# vendor       = "huawei"                # huawei | cisco（zte P2）
+# vendor       = "huawei"                # huawei | cisco | zte | h3c | ruijie
 # os           = "vrp8"                  # vrp8 | vrp5 | ios | iosxe
 # model        = "S5735"
 # address      = "10.0.0.1"
 # # port        = 22                     # 0/省略 => 22
 # via          = ["l1"]                  # 声明式路由（顺序为跳转顺序）
 # group        = "core"
-# protocols    = ["ssh"]                 # 前向声明：当前仅实现 SSH 传输（telnet/netconf 未接线）
+# protocols    = ["ssh"]                 # 前向声明：telnet 已裁决删除；netconf 前向声明
 # username     = "netops"
 # password_env = "NETDEV_PWD_CORE1"
 # # identity_file  = "~/.ssh/id_ed25519" # 密钥认证（与密码二选一）
 # # passphrase_env = "NETDEV_PP_CORE1"
 # encoding     = "auto"                  # auto | utf-8 | gbk
+# # legacy_algo = false                  # 老设备互通：额外提供 aes*-cbc / 3des-cbc /
+#                                       # dh-group1-sha1（Cisco IOS 12.x、早期 VRP5/
+#                                       # Comware 仅支持这些弱算法；按设备开启）
+# # console_port = "COM3"                # 串口控制台替代 SSH：Windows 写 COM3 这类
+#                                       # 端口名，Linux 写 ttyUSB0、macOS 写
+#                                       # cu.usbserial-*（自动补 /dev/ 前缀）
 #
 # # [netdev.devices.snmp]                 # SNMP 采集凭证（仅 v2c 已实现；v3 字段为前向声明）
 # # version        = "v2c"

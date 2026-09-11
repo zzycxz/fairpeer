@@ -1,10 +1,12 @@
 package config
 
 import (
-	"strings"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestValidateNetDev(t *testing.T) {
@@ -194,5 +196,41 @@ func TestValidateNetDevRejectsPathLikeNames(t *testing.T) {
 		if err := ValidateNetDev(nd); err != nil {
 			t.Errorf("device name %q should pass: %v", good, err)
 		}
+	}
+}
+
+// TOML 整数字面量 → float64 字段的解码契约（BurntSushi unifyFloat64 接受
+// |n| ≤ 2^53 的整数）：用户 TOML 里 value = 85 必须解码为精确 85.0——
+// 逐行精读 P3-10 要求的解码路径覆盖（此前只测过 Go 字面量构造）。
+func TestNetDevAlertRuleTOMLIntToFloat(t *testing.T) {
+	var cfg struct {
+		NetDev NetDevConfig `toml:"netdev"`
+	}
+	doc := `
+[netdev]
+[[netdev.alert_rules]]
+name = "hot"
+metric = "gpu.temp"
+op = ">="
+value = 85
+severity = "warning"
+enabled = true
+for_rounds = 3
+`
+	if _, err := toml.Decode(doc, &cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(cfg.NetDev.AlertRules) != 1 {
+		t.Fatalf("want 1 rule, got %d", len(cfg.NetDev.AlertRules))
+	}
+	r := cfg.NetDev.AlertRules[0]
+	if r.Value != 85.0 {
+		t.Errorf("value want exactly 85.0, got %v", r.Value)
+	}
+	if r.ForRounds != 3 {
+		t.Errorf("for_rounds want 3, got %d", r.ForRounds)
+	}
+	if err := ValidateNetDev(cfg.NetDev); err != nil {
+		t.Errorf("validate: %v", err)
 	}
 }

@@ -105,9 +105,21 @@ type ExpectedStateView struct {
 func (m *Manager) ExpectedState() ExpectedStateView {
 	snap := m.HealthSnapshot()
 	view := ExpectedStateView{Total: len(snap.Devices)}
+	// 非 linux 的 GPU 设备没有采集器（盲点 #16）——占位卡不算失联，归
+	// NoProbe。
+	noCollector := map[string]bool{}
+	for _, d := range m.cfg.NetDev.Devices {
+		// 只豁免【无采集面】者：带 SNMP 块的非 linux GPU 设备有探针，
+		// 探针说它失联就该进 Missing（逐行精读 R2 P2-1）。
+		if d.SNMP == nil && d.GPU && d.Vendor != "linux" {
+			noCollector[d.Name] = true
+		}
+	}
 	for _, h := range snap.Devices {
 		if h.Reachable {
 			view.Reachable++
+		} else if noCollector[h.Device] {
+			view.NoProbe = append(view.NoProbe, h.Device)
 		} else {
 			view.Missing = append(view.Missing, h)
 		}
@@ -117,7 +129,7 @@ func (m *Manager) ExpectedState() ExpectedStateView {
 		seen[h.Device] = true
 	}
 	for _, d := range m.cfg.NetDev.Devices {
-		if d.SNMP == nil && !seen[d.Name] {
+		if d.SNMP == nil && !seen[d.Name] && !noCollector[d.Name] {
 			view.NoProbe = append(view.NoProbe, d.Name)
 		}
 	}

@@ -104,8 +104,8 @@ export function HealthPanel({ onOpenSettings }: { onOpenSettings?: (tab: string)
     return t("ndv.uptimeMins", { m });
   };
 
-  const ifUp = (d: NetDevDeviceHealth) => (d.interfaces ?? []).filter(i => i.operUp).length;
-  const ifDown = (d: NetDevDeviceHealth) => (d.interfaces ?? []).filter(i => i.adminUp && !i.operUp).length;
+  const ifUp = (d: NetDevDeviceHealth) => ((d.interfaces ?? [])).filter(i => i.operUp).length;
+  const ifDown = (d: NetDevDeviceHealth) => ((d.interfaces ?? [])).filter(i => i.adminUp && !i.operUp).length;
   const isBad = (d: NetDevDeviceHealth) => !d.reachable || ifDown(d) > 0;
 
   const shown = snap
@@ -136,7 +136,7 @@ export function HealthPanel({ onOpenSettings }: { onOpenSettings?: (tab: string)
               ...snap!.devices.map(d => [
                 d.device, d.reachable ? "1" : "0", String(d.uptimeSec),
                 String(ifUp(d)), String(ifDown(d)),
-                esc(d.interfaces.filter(i => i.adminUp && !i.operUp).map(i => i.name).join(" ")),
+                esc((d.interfaces ?? []).filter(i => i.adminUp && !i.operUp).map(i => i.name).join(" ")),
                 esc(d.lastError ?? ""),
               ].join(",")),
             ].join("\n") + "\n";
@@ -168,10 +168,10 @@ export function HealthPanel({ onOpenSettings }: { onOpenSettings?: (tab: string)
             <span className="ndv__device-addr" role="button" style={{ cursor: "pointer" }} title={t("ndv.health.ifDetail")}
               onClick={() => setExpanded(x => x === d.device ? "" : d.device)}>
               {d.reachable
-                ? (d.interfaces.length > 0
+                ? ((d.interfaces ?? []).length > 0
                     ? t("ndv.health.onlineIfs", { uptime: fmtUptime(d.uptimeSec), up: ifUp(d), down: ifDown(d) })
                     : t("ndv.health.online", { uptime: fmtUptime(d.uptimeSec) }))
-                : (d.lastError || t("ndv.health.unreachable"))}
+                : (d.lastError || d.gpuLastError || t("ndv.health.unreachable"))}
             </span>
             {ifDown(d) > 0 && <span className="ndv__badge ndv__badge--warn">{t("ndv.health.ifDownBadge", { n: ifDown(d) })}</span>}
             {(d.cpuPct ?? 0) > 0 && (
@@ -181,9 +181,9 @@ export function HealthPanel({ onOpenSettings }: { onOpenSettings?: (tab: string)
             )}
           </div>
           <Sparkline device={d.device} metric={metric} />
-          {expanded === d.device && d.interfaces.length > 0 && (
+          {expanded === d.device && (d.interfaces ?? []).length > 0 && (
             <div style={{ marginLeft: 22, borderLeft: "1px solid var(--border)", paddingLeft: 8, display: "flex", flexDirection: "column", gap: 1 }}>
-              {d.interfaces.map(i => (
+              {(d.interfaces ?? []).map(i => (
                 <div key={i.name} style={{ display: "flex", gap: 8, fontSize: 11 }}>
                   <span style={{ width: 6, height: 6, borderRadius: "50%", background: i.operUp ? "var(--ok)" : i.adminUp ? "var(--err, #e5484d)" : "var(--fg-faint)", marginTop: 4 }} />
                   <span style={{ fontFamily: "var(--font-mono, monospace)", minWidth: 110 }}>{i.name}</span>

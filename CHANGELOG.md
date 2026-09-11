@@ -9,8 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [Unreleased]
-
 ### feat(tools): G6 view_image 读图 + G5 exec_session 交互式会话——codex 差距审计收尾
 
 CODEX_GAP_AUDIT_2026-09-09 的 G5/G6 落地（G1 Windows 沙箱与 G4 网络 per-host 策略为多日专项，排期待定）：
@@ -27,12 +25,14 @@ CODEX_GAP_AUDIT_2026-09-09 的 G5/G6 落地（G1 Windows 沙箱与 G4 网络 per
 - config.go：ConfigWarnings 字段（load 时告警的载体的既有打印目标）
 - 依赖补全使干净检出可编译；均源自并行批次已写好的在途实现，按其工作区原样入库
 
+## [0.3.0] — 2026-09-12
+
 ### feat(netdev): 统一急停 + GPU/智算采集面 P0——FDE/AI infra 承接第一批（FDE_AIINFRA_OPS_GAP_SPEC §4.0/§4.1）
 
 - **统一急停（§4.0）**：`NetDevEmergencyStop` 从"只杀连接"扩成四件事——杀连接 + running 割接置 Hold（**不是 abort**：Abort 不回退已执行变更，会把设备留在半割接态；Hold 在步骤边界停住，继续/回退/终止由人按）+ running Job 边界暂停（文案"紧急停止"区别于人工暂停，暂停分支补审计）+ executing 提案代际冻结（`estopGen` 代数，步骤边界检测即走既有 partial 冻结）。runner 步后折叠改锁内复核（NETDEV-9 同族 TOCTOU：迟到保存不再能吞掉急停 Hold），折叠带步身份复核（急停 hold 窗口内 SkipStep 不再错位折叠/双 runner）；`CutoverRollback` 回退范围扩展到 failed/skipped 提案步——急停冻结的 partial 变更从此进得来回退路径（`RollbackProposal` 的 partial/done/watching 前置保证未执行提案安全拒绝）。急停枚举失败进 `EstopReport.Errors` 不再静默。
 - **GPU 采集通道（§4.1-1/2）**：新增 `internal/netdev/gpuhealth.go`——GPU=true（linux）主机每轮健康轮询追加只读采集（`nvidia-smi --query-gpu` CSV + XID 证据源），走 `execSealed(internal)` 密封路径：分类/审计/脱敏/只读与 agent 同一套，仅跳过 per-turn 护栏（后台轮询与 agent 会话互不占预算）；GPU 扫描 8 并发 + 每设备 90s 超时；`DeviceHealth` 新增 GPU 段（每卡温度/显存/利用率 + XID + 证据行），健康快照纳入无 SNMP 的 GPU 主机；series 新增 labels 字段，GPU 指标按 `gpu.<index>.<metric>` 命名落时序。
 - **告警引擎开面（§4.1-3）**：新指标 `gpu.xid/gpu.temp/gpu.mem_pct/gpu.count`（GPU 规则只对采样过的主机生效，非 GPU 舰队零误报）；阈值 int64→float64（TOML 整数照常解码）；`for_rounds` 防抖（连续 N 轮成立才立案）；禁用规则自动恢复其遗留 active finding；streak 惰性清理（删规则后同名重建不继承旧轮次）；GPU 规则证据补 GPU 摘要行。设置页规则编辑器支持 GPU 指标（行业标准默认阈值）与连续轮数；向导预设带防抖默认值。
-- **XID→Finding 分级（§4.1-4）**：证据主源内核日志 `journalctl -k -g Xid`（`nvidia-smi -q` 在真实驱动上疑似无 Xid 段——真机校准列入 dogfooding），失败落 -q 兜底；NVIDIA catalog 分级（8/48/63/64/74/79/80-95 → critical 隔离送修，其余 warning 可恢复）；同节点多卡聚合一条；active 期间出现更高级代码原卡升级；采样失败轮次不误 resolve（没采到 ≠ 清除了）。
+- **XID→Finding 分级（§4.1-4）**：证据主源内核日志 `journalctl -k -g Xid`（`nvidia-smi -q` 在真实驱动上疑似无 Xid 段——真机校准列入 dogfooding），失败落 -q 兜底；NVIDIA catalog 分级（8/48/63/64/74/79/80/81/92-95 → critical 隔离送修，82-91 reset/API 族与其余 warning 可恢复）；同节点多卡聚合一条；active 期间出现更高级代码原卡升级；采样失败轮次不误 resolve（没采到 ≠ 清除了）。
 - 调研与规格：`docs/FDE_AIINFRA_OPS_GAP_SPEC.md`（三轮调研 + 缺口规格，五处复审修正）、`docs/PROFILE_CAPABILITY_MATRIX.md`（三台能力矩阵）。
 
 ### feat(netdev/blueteam): 蓝队修复批 A-E——基线外置扩厂 + CVE 版本区间 + segmap/轮次案例 + 回填/反哺 + 套餐补全
@@ -343,7 +343,7 @@ diff/files 证据此前只认 7 个编码写工具，办公 profile 的步骤签
 - **「从文件导入」**：NVD 原生导出几十 MB，textarea 承载不了——读本地 JSON 直接导入并自动刷新匹配，不经文本框（粘贴通道保留给小 feed/示例）
 - **导入即扫查（自动闭环）**：导入（粘贴/文件两路）与转正后都自动刷新匹配并滚动扫查一次——feed 与清单是匹配仅有的两个输入，变化即扫；输入不变时盲跑时间定时器是空转，故不做
 - **滚动卡生命周期闭环（bug 修复）**：零命中扫查此前直接 return、清空 feed 也不回收——旧命中卡永远停在 active「N 台命中」（设备已修复/移除后成了僵尸卡）。现在零命中扫查与「清空情报源」都走 `ResolveCVESweep`（复用告警的条件解除自动恢复语义：active→resolved + 标注），TestCVESweepResolveOnZero 钉住命中→active→零命中→resolved 全程
-- **文案与手册对齐**：场景卡「按清单版本自动匹配」改为「按设备 厂商/系统/型号」（匹配输入本就无版本字段）；操作手册第十一章导入路径由不存在的「设置 → 运维 → 安全工作台」改为「主区 安全工作台 → CVE」并补示例档/文件导入/合并语义
+- **文案与手册对齐**：场景卡 b4d（ndv.sc.b4d，当前未挂卡的死键）文案「按清单版本自动匹配」改为「按设备 厂商/系统/型号」（匹配输入本就无版本字段；属前置纠偏）；操作手册第十一章导入路径由不存在的「设置 → 运维 → 安全工作台」改为「主区 安全工作台 → CVE」并补示例档/文件导入/合并语义
 - **CVE 透镜专用空态 + 告警透镜同款**：CVE 透镜为空时区分三种原因（未导入 feed / 未扫查 / 零命中——多半是设备厂商·系统·型号指纹字段为空），一键**直达**安全工作台 CVE 视图（复用 fairpeer:netdev-cve 事件）；告警透镜为空时解释三来源（SNMP 轮询规则 / 被动 syslog / 被动 trap，后两者需配监听端口）并一键跳总览开告警接入向导（向导挂在总览页签下，先切页签再开）；原通用空态（跑基线）对「全部/蓝队核查」透镜保留
 - **引导文案三处补齐**：`netdev_cve_match` 无 feed 引导提及示例按钮与文件导入（tools.go）；扫查空结果提示补零命中成因（设备指纹字段为空）；sweepEmptyHint 同步
 - **扫查改滚动发现（bug 修复）**：`MatchCVEsToFindings` 注释声称 re-runs update，实际每次 `SaveFinding` 新开一张卡——重复扫查把发现中心堆满重复的「CVE 匹配」卡。改走 `SaveRollingFinding`（同 cve:sweep 原地更新、保留首次立案时间），新增 TestCVESweepRolling 钉住「两次扫查一张卡、ID/时间稳定」；调试中发现 `ListFindings` 对「能反序列化但无标题的 JSON」无防御（目录混入外来 json 会显示成空卡）——按 findingValid 的 title 必填口径加守卫

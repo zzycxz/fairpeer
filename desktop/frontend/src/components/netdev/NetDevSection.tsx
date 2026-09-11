@@ -101,7 +101,7 @@ export function NetDevSection() {
   const [sshCandidates, setSSHCandidates] = useState<NetDevSSHImportCandidate[]>([]);
   // 本机 COM 口列表（注册表设备映射）——串口控制台字段的候选。
   const [serialPorts, setSerialPorts] = useState<string[]>([]);
-  useEffect(() => { app.NetDevSerialPorts().then(p => setSerialPorts(p ?? [])).catch(() => {}); }, []);
+  useEffect(() => { app.NetDevSerialPorts().then(p => setSerialPorts(p ?? [])).catch((e) => { console.warn("serial ports load failed", e); }); }, []);
   const [readAdd, setReadAdd] = useState<Record<string, string>>({});
   const [scanOpen, setScanOpen] = useState(false);
   const [scanXml, setScanXml] = useState("");
@@ -281,7 +281,7 @@ export function NetDevSection() {
           {t("ndv.sets.networkName")}
           <input className="mem-input" style={{ width: 180 }} value={view.networkName ?? ""} placeholder={t("ndv.sets.phNetwork")} onChange={e => patch({ networkName: e.target.value })} />
         </label>
-        <span className="btn btn--primary btn--small" role="button" onClick={() => void save(view)}>{busy ? t("ndv.sets.saving") : t("ndv.sets.save")}</span>
+        <span className="btn btn--primary btn--small" role="button" onClick={() => void save({ ...view, notifySMTPPassword })}>{busy ? t("ndv.sets.saving") : t("ndv.sets.save")}</span>
       </div>
 
       <div className="settings-subtabs">
@@ -721,7 +721,7 @@ export function NetDevSection() {
           <Section
             title={t("ndv.sets.rulesTitle")}
             desc={t("ndv.sets.rulesDesc")}
-            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => { setEditingRule({ name: "", metric: "reachable", op: "==", value: 0, severity: "warning", enabled: true }); setEditingRuleOrig(""); }}>{t("ndv.sets.addRule")}</span>}
+            actions={<span className="btn btn--secondary btn--small" role="button" onClick={() => { setEditingRule({ name: "", metric: "reachable", op: "==", value: 0, severity: "warning", enabled: true, forRounds: 1 }); setEditingRuleOrig(""); }}>{t("ndv.sets.addRule")}</span>}
           >
             {(view.alertRules ?? []).length === 0 && (
               <div className="mem-hint">{t("ndv.sets.noRules")}</div>
@@ -1136,12 +1136,31 @@ export function NetDevSection() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <Field label={t("ndv.sets.fName")}><input className="mem-input" value={editingRule.name} onChange={e => setEditingRule({ ...editingRule, name: e.target.value })} /></Field>
             <Field label={t("ndv.sets.fMetric")}>
-              <select className="mem-select" value={editingRule.metric} onChange={e => setEditingRule({ ...editingRule, metric: e.target.value, value: e.target.value === "reachable" || e.target.value === "uptime_reset" ? 0 : 1 })}>
+              <select className="mem-select" value={editingRule.metric} onChange={e => {
+                // 每个指标的规范默认（value+op 双向重置）：op 残留会一键造出
+                // 恒真规则（gpu.count 的 <= 带到 reachable >= 上无害、但
+                // reachable >= 0 恒真；if_down_count <= 1 常驻误告警——逐行
+                // 精读 R4 P2-1）。metric 变更即回该指标的规范默认，可预期。
+                const metricDefaults: Record<string, { value: number; op: string }> = {
+                  reachable: { value: 0, op: "==" }, if_down_count: { value: 1, op: ">=" },
+                  uptime_reset: { value: 1, op: "==" }, flap_count: { value: 3, op: ">=" },
+                  if_down_above_p90: { value: 1, op: ">=" },
+                  "gpu.xid": { value: 1, op: ">=" }, "gpu.temp": { value: 85, op: ">=" },
+                  "gpu.mem_pct": { value: 90, op: ">=" }, "gpu.count": { value: 0, op: "<=" },
+                };
+                const v = e.target.value;
+                const md = metricDefaults[v] ?? { value: 0, op: ">=" };
+                setEditingRule({ ...editingRule, metric: v, value: md.value, op: md.op });
+              }}>
                 <option value="reachable">{t("ndv.sets.mReachable")}</option>
                 <option value="if_down_count">{t("ndv.sets.mIfDown")}</option>
                 <option value="uptime_reset">{t("ndv.sets.mReboot")}</option>
                 <option value="flap_count">{t("ndv.sets.mFlap")}</option>
                 <option value="if_down_above_p90">{t("ndv.sets.mDrift")}</option>
+                <option value="gpu.xid">{t("ndv.sets.mGpuXid")}</option>
+                <option value="gpu.temp">{t("ndv.sets.mGpuTemp")}</option>
+                <option value="gpu.mem_pct">{t("ndv.sets.mGpuMem")}</option>
+                <option value="gpu.count">{t("ndv.sets.mGpuCount")}</option>
               </select>
             </Field>
             <Field label={t("ndv.sets.fOp")}>
@@ -1149,7 +1168,8 @@ export function NetDevSection() {
                 {["==", ">=", "<="].map(x => <option key={x} value={x}>{x}</option>)}
               </select>
             </Field>
-            <Field label={t("ndv.sets.fValue")}><input className="mem-input" type="number" value={editingRule.value} onChange={e => setEditingRule({ ...editingRule, value: Number(e.target.value) || 0 })} /></Field>
+            <Field label={t("ndv.sets.fValue")}><input className="mem-input" type="number" value={editingRule.value} onChange={e => { const n = e.target.valueAsNumber; setEditingRule({ ...editingRule, value: Number.isFinite(n) ? n : 0 }); }} /></Field>
+            <Field label={t("ndv.sets.fForRounds")}><input className="mem-input" type="number" min={0} max={120} value={editingRule.forRounds ?? 0} onChange={e => setEditingRule({ ...editingRule, forRounds: Math.round(Math.max(0, Math.min(120, Number(e.target.value) || 0))) })} /></Field>
             <Field label={t("ndv.sets.fSeverity")}>
               <select className="mem-select" value={editingRule.severity || "warning"} onChange={e => setEditingRule({ ...editingRule, severity: e.target.value })}>
                 {["info", "warning", "critical"].map(x => <option key={x} value={x}>{x}</option>)}
@@ -1168,6 +1188,11 @@ export function NetDevSection() {
               className="btn btn--primary btn--small" role="button"
               onClick={async () => {
                 if (!editingRule.name.trim()) { setErr(t("ndv.sets.needRuleName")); return; }
+                // 新建时重名拒绝（逐行精读 R4 P2-4）：静默覆盖会让旧规则
+                // 的阈值/开关无声消失。改名场景（editingRuleOrig 非空）不受限。
+                if (!editingRuleOrig && (view.alertRules ?? []).some(r => r.name === editingRule.name.trim())) {
+                  setErr(t("ndv.sets.needRuleName")); return;
+                }
                 // Replacement matches on the ORIGINAL name (rename-safe).
                 const matchRule = editingRuleOrig || editingRule.name;
                 const alertRules = (view.alertRules ?? []).some(r => r.name === matchRule)
@@ -1229,7 +1254,7 @@ export function NetDevSection() {
                   : [...view.hops, editingHop];
                 setBusy(true);
                 try {
-                  await app.SetNetDevSettings({ ...view, hops });
+                  await app.SetNetDevSettings({ ...view, hops, notifySMTPPassword });
                   await reload();
                   setEditingHop(null);
                   setEditingHopOrig("");
@@ -1287,7 +1312,7 @@ export function NetDevSection() {
                 else projects.push(editingProject.draft);
                 setBusy(true);
                 try {
-                  await app.SetNetDevSettings({ ...view, projects });
+                  await app.SetNetDevSettings({ ...view, projects, notifySMTPPassword });
                   await reload();
                   setEditingProject(null);
                   setErr("");
@@ -1347,7 +1372,7 @@ export function NetDevSection() {
                 else presets.push(editingPreset.draft);
                 setBusy(true);
                 try {
-                  await app.SetNetDevSettings({ ...view, presets });
+                  await app.SetNetDevSettings({ ...view, presets, notifySMTPPassword });
                   await reload();
                   setEditingPreset(null);
                   setErr("");

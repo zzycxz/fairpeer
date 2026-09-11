@@ -31,6 +31,19 @@ type DeviceHealth struct {
 	// 接口 octets 计数器累计和（读取端差分成 bps；0 = 未采集）。
 	InOct  uint64 `json:"inOct,omitempty"`
 	OutOct uint64 `json:"outOct,omitempty"`
+	// GPU 段（FDE_AIINFRA gap §4.1，gpuhealth.go 采集）：GPU=true 主机经
+	// SSH 只读轮询 nvidia-smi 的结果。GPUSampled=true 表示采集器真正拿到过
+	// 设备侧应答——gpu.* 告警规则只对采样过的设备生效（未配置的主机不得
+	// 因此告警）。
+	GPU            []GPUCard `json:"gpu,omitempty"`
+	GPUOnly        bool      `json:"gpuOnly,omitempty"` // 该主机没有 SNMP 块，健康面完全由 GPU 通道承载
+	GPUSampled     bool      `json:"gpuSampled,omitempty"`
+	GPUXIDSeen     bool      `json:"gpuXidSeen,omitempty"`     // 本轮至少一个 XID 证据源成功执行——XID 生命周期的 resolve 闸
+	GPUXIDMax      int       `json:"gpuXidMax,omitempty"`      // 本轮最大 XID 代码（0 = 无）
+	GPUXIDCodes    []int     `json:"gpuXidCodes,omitempty"`    // 本轮全部去重代码
+	GPUXIDEvidence []string  `json:"gpuXidEvidence,omitempty"` // 命中行（已脱敏，封顶）
+	GPUXIDSource   string    `json:"gpuXidSource,omitempty"`   // 证据命令（journalctl/-q）
+	GPULastError   string    `json:"gpuLastError,omitempty"`   // GPU 采集失败原因（不影响 SNMP 段）
 }
 
 // IfHealth is one interface row (ifDescr/ifAdminStatus/ifOperStatus).
@@ -111,6 +124,10 @@ func notifyHealth(h DeviceHealth) {
 // to poll_interval_seconds applies within one interval without a restart.
 func (m *Manager) EnsureHealthPoller() {
 	healthPollOnce.Do(func() {
+		// 时序面 14 天滚动清理（series.go）：曾是无接线死代码。CleanupSeriesOnce
+		// 保证进程内恰好一次；PollHealthOnce 也会触发（覆盖不经过本函数的
+		// headless 调用方）。
+		CleanupSeriesOnce()
 		go func() {
 			for {
 				iv := m.cfg.NetDev.PollIntervalSeconds
@@ -135,11 +152,16 @@ func (m *Manager) HealthSnapshot() HealthSnapshot {
 	defer healthMu.Unlock()
 	out := HealthSnapshot{PollIntervalSeconds: m.cfg.NetDev.PollIntervalSeconds, Devices: []DeviceHealth{}}
 	for _, d := range m.cfg.NetDev.Devices {
-		if d.SNMP == nil {
+		// GPU 主机没有 SNMP 块也进健康面（gpuhealth.go 采集通道）。
+		if d.SNMP == nil && !d.GPU {
 			continue
 		}
 		if h, ok := healthState[d.Name]; ok {
 			out.Devices = append(out.Devices, h)
+		} else if d.SNMP == nil && d.GPU && d.Vendor != "linux" {
+			// 非 linux 的 GPU 设备采集器尚未接入（盲点 #16）——占位卡注明，
+			// 不显示为"尚未轮询"这种看似可用的灰卡。
+			out.Devices = append(out.Devices, DeviceHealth{Device: d.Name, LastError: "该 vendor 的 GPU 采集未接入（暂支持 linux）", Interfaces: []IfHealth{}})
 		} else {
 			out.Devices = append(out.Devices, DeviceHealth{Device: d.Name, LastError: "尚未轮询", Interfaces: []IfHealth{}})
 		}
@@ -147,19 +169,31 @@ func (m *Manager) HealthSnapshot() HealthSnapshot {
 	return out
 }
 
+// healthPollConcurrency bounds the per-poll fan-out: each in-flight SNMP poll
+// holds a UDP socket, and servers commonly run with `ulimit -n 1024` — an
+// unbounded fleet sweep exhausts descriptors (EMFILE) long before the sweep
+// finishes.
+const healthPollConcurrency = 64
+
 // PollHealthOnce sweeps every SNMP-configured device once, then evaluates the
 // alert rules over the fresh results.
 func (m *Manager) PollHealthOnce(ctx context.Context) {
+	// headless/CLI 调用方不经过 EnsureHealthPoller——清理在这里兜底触发
+	// （进程内恰好一次，见 CleanupSeriesOnce）。
+	CleanupSeriesOnce()
 	fresh := map[string]DeviceHealth{}
 	var freshMu sync.Mutex
 	var wg sync.WaitGroup
+	sem := make(chan struct{}, healthPollConcurrency)
 	for _, d := range m.cfg.NetDev.Devices {
 		if d.SNMP == nil {
 			continue
 		}
 		wg.Add(1)
+		sem <- struct{}{}
 		go func(name string) {
 			defer wg.Done()
+			defer func() { <-sem }()
 			h := m.pollDeviceHealth(ctx, name)
 			healthMu.Lock()
 			prev, had := healthState[name]
@@ -180,12 +214,35 @@ func (m *Manager) PollHealthOnce(ctx context.Context) {
 		}(d.Name)
 	}
 	wg.Wait()
+	// GPU 采集段（gpuhealth.go）：GPU=true 主机在 SNMP sweep 之后追加一轮
+	// SSH 只读采集，结果并入 fresh——SNMP 规则与 gpu.* 规则一次评估。
+	m.pollGPUDevices(ctx, fresh)
 	healthMu.Lock()
 	healthLastPoll = time.Now()
 	healthMu.Unlock()
 	m.evaluateAlerts(fresh)
 	// 观察期劣化检测（§7.1）：watching 变更的目标与 watch 起点基线对比。
 	m.checkWatchingProposals(fresh)
+}
+
+// uptimeSecondsFromPDU converts a sysUpTime TimeTicks PDU value to seconds.
+// gosnmp v1.38 decodes TimeTicks via parseUint32 → Value 的动态类型是
+// uint32——此前的 switch 只接 uint/uint64，UptimeSec 恒 0，uptime_reset
+// 告警永久哑火（逐行精读 R2 P1-1，全仓无该解码的测试所以一直存活）。
+func uptimeSecondsFromPDU(v any) int64 {
+	switch t := v.(type) {
+	case uint32:
+		return int64(t) / 100
+	case uint:
+		return int64(t) / 100
+	case uint64:
+		return int64(t) / 100
+	case int:
+		if t > 0 {
+			return int64(t) / 100
+		}
+	}
+	return 0
 }
 
 // pollDeviceHealth runs one device's MIB-2 battery: sysUpTime + the ifTable
@@ -227,12 +284,7 @@ func (m *Manager) pollDeviceHealth(ctx context.Context, deviceName string) Devic
 
 	// sysUpTime: 1.3.6.1.2.1.1.3.0 (TimeTicks, hundredths of a second).
 	if res, err := g.Get([]string{"1.3.6.1.2.1.1.3.0"}); err == nil && len(res.Variables) == 1 {
-		switch v := res.Variables[0].Value.(type) {
-		case uint:
-			h.UptimeSec = int64(v) / 100
-		case uint64:
-			h.UptimeSec = int64(v) / 100
-		}
+		h.UptimeSec = uptimeSecondsFromPDU(res.Variables[0].Value)
 	}
 
 	// ifTable columns: descr=2.2.1.2, admin=2.2.1.7, oper=2.2.1.8.

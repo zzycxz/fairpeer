@@ -33,11 +33,11 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 }
 
 const RULE_PRESETS = [
-  { key: "unreachable", name: "ndv.wiz.pUnreachable", metric: "reachable", op: "==", value: 0, severity: "critical" },
-  { key: "ifdown", name: "ndv.wiz.pIfdown", metric: "if_down_count", op: ">=", value: 1, severity: "warning" },
-  { key: "flap", name: "ndv.wiz.pFlap", metric: "flap_count", op: ">=", value: 3, severity: "warning" },
-  { key: "reboot", name: "ndv.wiz.pReboot", metric: "uptime_reset", op: "==", value: 1, severity: "warning" },
-  { key: "drift", name: "ndv.wiz.pDrift", metric: "if_down_above_p90", op: "==", value: 1, severity: "info" },
+  { key: "unreachable", name: "ndv.wiz.pUnreachable", metric: "reachable", op: "==", value: 0, severity: "critical", forRounds: 1 },
+  { key: "ifdown", name: "ndv.wiz.pIfdown", metric: "if_down_count", op: ">=", value: 1, severity: "warning", forRounds: 2 },
+  { key: "flap", name: "ndv.wiz.pFlap", metric: "flap_count", op: ">=", value: 3, severity: "warning", forRounds: 1 },
+  { key: "reboot", name: "ndv.wiz.pReboot", metric: "uptime_reset", op: "==", value: 1, severity: "warning", forRounds: 1 },
+  { key: "drift", name: "ndv.wiz.pDrift", metric: "if_down_above_p90", op: "==", value: 1, severity: "info", forRounds: 1 },
 ];
 
 export function AlertSetupWizard({ settings, onClose, onSaved, onOpenSettings, onFinish }: Props) {
@@ -67,6 +67,7 @@ export function AlertSetupWizard({ settings, onClose, onSaved, onOpenSettings, o
       // 设置页/Go 侧 finding 文本直接露出 "ndv.wiz.pUnreachable" 这类裸键。
       const rules = RULE_PRESETS.filter(r => picked.includes(r.key)).map(r => ({
         name: t(r.name as never), metric: r.metric, op: r.op, value: r.value, severity: r.severity, enabled: true,
+        forRounds: r.forRounds, // 防抖默认（阈值类规则单轮毛刺不立案）
       }));
       const merged = [...(settings.alertRules ?? []).filter(r => !rules.some(n => n.name === r.name)), ...rules];
       await app.SetNetDevSettings({

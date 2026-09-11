@@ -167,6 +167,9 @@ export interface WireEvent {
   collab?: WireCollab;
   item?: WireItemEvent;
   err?: string;
+  // turn_done only: the user pressed Stop — err is empty and the turn ended
+  // mid-flight. Drives the transcript's quiet "stopped by user" marker.
+  cancelled?: boolean;
   retryAttempt?: number;
   retryMax?: number;
   retryAfterMs?: number; // backoff before the retry attempt (0/undefined = immediate)
@@ -200,6 +203,9 @@ export interface TabMeta {
   ragScope?: string;
   goal?: string;
   goalStatus?: GoalStatus;
+  // Auto-advance budget for the goal chip ("第 N/M 轮"); 0/absent = hide.
+  goalTurns?: number;
+  goalMaxTurns?: number;
   startupErr?: string;
   active: boolean;
   cwd: string;
@@ -438,6 +444,8 @@ export interface Meta {
   ragScope?: string;
   goal?: string;
   goalStatus?: GoalStatus;
+  goalTurns?: number;
+  goalMaxTurns?: number;
   expertSession?: ExpertSessionMeta;
 }
 
@@ -751,8 +759,8 @@ export interface TaskView {
   lastDeliverErr: string;
   lastDeliverAt: string;
   humanSchedule: string;
-  source: string;        // "manual" | "calendar"
-  calendarEventId: string;
+  source: string;        // "manual" (UI) | "agent" (AI tool call); "" = legacy manual
+  calendarEventId?: string;
 }
 
 // Create/update payload from the UI. Empty id on create.
@@ -761,6 +769,7 @@ export interface TaskInput {
   name: string;
   expression: string;
   prompt: string;
+  profile?: string;      // running partition (dev/cowork/netdev); human-only power
   outputMode?: string;
   outputDest?: string;
   outputAccount?: string;
@@ -768,6 +777,7 @@ export interface TaskInput {
   color?: string;
   location?: string;
   plain?: boolean;       // 纯提醒：到点直接弹原文，不调 AI
+  confirmHighFrequency?: boolean; // UI retry after the >4/day gate rejected the create
 }
 
 // One run-history record (newest first when listed).
@@ -818,7 +828,8 @@ export interface CalendarEventView {
   timezone: string;
   color: string;
   status: string;   // confirmed / cancelled / tentative
-  source: string;   // manual / email / agent
+  source: string;   // manual / email / agent / ics
+  profile: string;  // owning partition (dev/cowork/netdev; "" = legacy cowork)
   recurrence: string;
   recurrenceEnd: string;
   reminders: number[];
@@ -845,6 +856,11 @@ export interface CalendarEventInput {
   recurrenceEnd: string;
   reminders: number[];
   tags: string[];
+  profile?: string;      // owning partition; human-only power (agents are partition-bound)
+  // P4 事件动作编译：非空时事件编译出一条关联的一次性调度任务（到事件开始
+  // 时间运行该 prompt，TaskID 链接）。仅人类 UI 可设置——agent 工具白名单和
+  // ICS 导入结构上都不含此字段。更新时留空 = 不改动已关联任务。
+  actionPrompt?: string;
   outputMode?: string;
   outputDest?: string;
   outputAccount?: string;
@@ -863,11 +879,14 @@ export interface RagNodeView {
   relPath: string;
   isDir: boolean;
   collection: string;
-  status: string; // "indexed" | "extracting" | "enriched" | "error" | "cancelled"
+  // "indexed" | "queued" | "extracting" | "enriched" | "partial" | "error" | "cancelled"
+  status: string;
   hasFts5: boolean;
   jobId: string;
   doneChunks: number;
   totalChunks: number;
+  // Chunks whose last attempt errored; >0 on a done job means "partial".
+  failedChunks: number;
   entityCount: number;
   errorMsg: string;
   children?: RagNodeView[];
@@ -882,6 +901,12 @@ export interface RagCollectionView {
   documents: number;
   chunks: number;
   entities: number;
+  // Extraction health rollup from rag_jobs — surfaced on the collection row
+  // so damage is visible without opening the collection.
+  complete: number;
+  partial: number;
+  failed: number;
+  queued: number;
 }
 
 // Import result (immediate feedback: FTS5 ready, extraction queued).
@@ -941,6 +966,26 @@ export interface RagSnippetView {
   chunk: number;
   snippet: string;
   score: number;
+  // Source file's extraction status ("partial"/"error"/…) — lets results flag
+  // hits from incompletely extracted files.
+  status: string;
+}
+
+// Idle-time auto-retry engine state (panel/tray badge).
+export interface RagAutoRetryStatusView {
+  enabled: boolean;
+  active: boolean;
+  maxRounds: number;
+}
+
+// Cost preview for a failed-chunk retry (confirm dialog payload).
+export interface RagRetryEstimateView {
+  jobId: string;
+  failedChunks: number;
+  totalChunks: number;
+  estCalls: number;   // failed x 2 (two-stage extraction)
+  estSeconds: number; // failed x P50; 0 = no history yet
+  avgLatencyMs: number;
 }
 
 // On-demand ETA probe (for hover tooltip).
@@ -962,6 +1007,15 @@ export interface RagProgressEvent {
   totalChunks: number;
   avgLatencyMs: number;
   message: string;
+  // Chunks whose last attempt errored at emit time — batch summaries count a
+  // done-with-failures job as a failure, not a success.
+  failedChunks: number;
+  // "progress" = intermediate (throttled, droppable) | "terminal" = job
+  // reached a final state (always delivered; triggers a refresh).
+  kind: string;
+  // "chunk" = Go pipeline granularity (done/total are chunks)
+  // "file" = Hyper-Extract granularity (done/total are files).
+  scope: string;
 }
 
 // --- Graph visualization types (mirrors desktop/rag_app.go) ------------------
@@ -1172,9 +1226,9 @@ export interface MemoryView {
   available: boolean;
 }
 
-// Dream / Distill self-evolution payloads (desktop/app.go DreamStatusView).
+// Dream self-evolution payloads (desktop/app.go DreamStatusView).
 export interface DreamRunView {
-  kind: string; // "dream" | "distill"
+  kind: string; // "dream"
   trigger: string; // "auto" | "manual"
   startedAt: string; // RFC3339
   duration?: string;
@@ -1185,11 +1239,8 @@ export interface DreamRunView {
 export interface DreamStatusView {
   enabled: boolean;
   dreamInterval: number;
-  distillInterval: number;
   dreamInFlight: boolean;
-  distillInFlight: boolean;
   lastDream?: DreamRunView;
-  lastDistill?: DreamRunView;
   history: DreamRunView[];
 }
 
@@ -1215,6 +1266,7 @@ export interface ProviderView {
   // models.dev-flagged reasoning-capable models among `models` — display-only
   // badge in pickers (MODEL_ROUTING_SPEC §5); the behaviour layer never reads it.
   reasoningModels?: string[];
+  vision?: boolean;
 }
 
 // ProviderTemplate is a built-in vendor preset for the onboarding wizard and
@@ -1447,6 +1499,10 @@ export interface CoWorkSettingsView {
   detectedBrowser: string;
   // Screenshot hotkey → VLM feature (off by default; user opts in).
   screenshotEnabled: boolean;
+  // Deep-extraction tuning (optional: older backends omit them).
+  extractConcurrency?: number;
+  extractAutoRetry?: boolean;
+  extractAutoRetryMaxRounds?: number;
   screenshotHotkey: string;
   screenshotVlmModel: string;
   screenshotPrompt: string;
@@ -1826,12 +1882,17 @@ export interface NetDevGroupDefView {
 // One [[netdev.alert_rules]] entry.
 export interface NetDevAlertRuleView {
   name: string;
-  metric: string; // reachable | if_down_count | uptime_reset
+  metric: string; // reachable | if_down_count | uptime_reset | gpu.xid | gpu.temp | gpu.mem_pct | gpu.count
   op: string;     // >= | <= | ==
   value: number;
   severity: string; // info | warning | critical
   enabled: boolean;
+  forRounds?: number; // 连续 N 轮成立才立案（0/1 = 立即）
 }
+
+// NetDevDeviceHealth（types.ts 2131 附近）现在是 SNMP + GPU 采集的合并健康
+// 快照：GPU-only 设备没有 SNMP 字段、interfaces 恒空数组。GPU 段为可选字段
+// （前端当前只透传；DashShell 智算屏落地时消费）——见 gpuhealth.go。
 
 // Passive syslog receiver state.
 export interface NetDevSyslogStatusView {
@@ -2074,11 +2135,20 @@ export interface NetDevTriageReport {
   created_at: string;
 }
 
-// ── SNMP 健康快照 ("netdev:health" changes) ─────────────────────────────────
+// ── SNMP + GPU 采集健康快照 ("netdev:health" changes) ───────────────────────
 export interface NetDevIfHealth {
   name: string;
   adminUp: boolean;
   operUp: boolean;
+}
+
+export interface NetDevGPUCard {
+  index: number;
+  name?: string;
+  tempC?: number;
+  memUsedMB?: number;
+  memTotalMB?: number;
+  utilPct?: number;
 }
 
 export interface NetDevDeviceHealth {
@@ -2092,6 +2162,17 @@ export interface NetDevDeviceHealth {
   memPct?: number;
   inOct?: number;
   outOct?: number;
+  // GPU 段（gpuhealth.go 采集，GPU=true 主机；前端当前透传，
+  // DashShell 智算屏落地时消费）。
+  gpu?: NetDevGPUCard[];
+  gpuOnly?: boolean;      // 无 SNMP 块，健康面完全由 GPU 通道承载（告警冻结判据）
+  gpuSampled?: boolean;   // 本轮采集器真正拿到过设备侧应答
+  gpuXidSeen?: boolean;   // 本轮至少一个 XID 证据源成功执行（resolve 闸）
+  gpuXidMax?: number;     // 本轮最大 XID 代码（0 = 无）
+  gpuXidCodes?: number[];
+  gpuXidEvidence?: string[];
+  gpuXidSource?: string;
+  gpuLastError?: string;
 }
 
 export interface NetDevHealthSnapshot {
@@ -2553,7 +2634,7 @@ export interface NetDevCutoverRun {
   name: string;
   deadline: string;
   steps: NetDevCutoverStep[];
-  status: string; // running | hold | done | failed | aborted | precheck-failed
+  status: string; // running | hold | done | failed | aborted | precheck-failed | interrupted
   hold_note?: string;
   cursor: number;
   precheck?: { battery?: string; probes?: { kind: string; device: string; target?: string; cmd?: string; expect?: string }[] };

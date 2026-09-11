@@ -215,6 +215,7 @@ func (m *Manager) Close() {
 	for _, c := range conns {
 		closeConn(c)
 	}
+	metricsClose()
 }
 
 func (m *Manager) reaper(ctx context.Context) {
@@ -264,6 +265,16 @@ type ExecResult struct {
 
 // Exec runs one command on one configured device under the read-only seal.
 func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResult {
+	return m.execSealed(ctx, deviceName, command, false)
+}
+
+// execSealed is Exec's body. internal=true marks infrastructure callers (the
+// GPU health poller) — they skip the per-turn guardrails (group scope + turn
+// command budget) because those are agent-conversation controls: a background
+// poller would otherwise drain the user's turn budget and be drained by it
+// ( 双向污染). Classification, audit, redaction and the read-only
+// seal are NOT skipped — the poller rides exactly the same read-only doctrine.
+func (m *Manager) execSealed(ctx context.Context, deviceName, command string, internal bool) ExecResult {
 	// One command per call, ENFORCED (the tool description says so, but the
 	// model — or an injection riding device output — must not be able to lean
 	// on a newline: the PTY would execute the extra lines as keystrokes,
@@ -283,10 +294,13 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 	}
 
 	// [netdev.guardrails] gate: group scope + per-turn budget, refused BEFORE
-	// any driver work (and long before a socket opens).
-	if r, allow := m.guardrailCheck(deviceName, command); !allow {
-		m.liveCmdRefused(deviceName, command, "guardrail", r.Refusal)
-		return r
+	// any driver work (and long before a socket opens). Internal callers (the
+	// background GPU poller) skip this — see execSealed's doc.
+	if !internal {
+		if r, allow := m.guardrailCheck(deviceName, command); !allow {
+			m.liveCmdRefused(deviceName, command, "guardrail", r.Refusal)
+			return r
+		}
 	}
 
 	drv, ok := driver.For(device.Vendor, device.OS)
@@ -316,6 +330,16 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 		}
 	}
 	base := ExecResult{Device: deviceName, Command: command, Class: class.String()}
+	if internal && class != driver.Read {
+		// 基础设施调用方按定义只读：internal 未来一旦
+		// 传入 write/dangerous/unknown，一律结构性拒绝——不给 confirm/auto
+		// 分级路由任何绕过轮预算的机会。当前三个调用方全为常量读命令。
+		base.Refused = true
+		base.Refusal = "internal caller is read-only by definition — non-read commands are structurally refused"
+		m.audit(device, command, class, AuditRefused, 0, nil)
+		m.liveCmdRefused(deviceName, command, class.String(), base.Refusal)
+		return base
+	}
 	if class != driver.Read {
 		// WRITE_AUTHZ_SPEC §3/§8: write-class commands route by the device's
 		// EFFECTIVE tier — confirm → per-command approval card (Manager
@@ -373,7 +397,9 @@ func (m *Manager) Exec(ctx context.Context, deviceName, command string) ExecResu
 	if res.IsError {
 		status = AuditDeviceError
 	}
-	m.turnSpend()
+	if !internal {
+		m.turnSpend()
+	}
 	// Redact BEFORE the text crosses into the model context: credential lines
 	// in device output never reach the LLM (or the audit's byte count). The
 	// count becomes a visible reminder — the user sees that masking happened.
@@ -553,6 +579,7 @@ func (m *Manager) lookupEntry() transport.LookupEntry {
 				Name: d.Name, Host: d.Address, Port: d.Port, User: d.Username,
 				IdentityFile: d.IdentityFile, PassphraseEnv: d.PassphraseEnv,
 				PasswordEnv: d.PasswordEnv, UseSSHConfig: d.UseSSHConfig,
+				LegacyAlgo: d.LegacyAlgo,
 			}, true
 		}
 		if h, ok := m.cfg.NetDevHopByName(name); ok {
@@ -947,12 +974,25 @@ func (t *cveMatchTool) Execute(ctx context.Context, args json.RawMessage) (strin
 			break
 		}
 		desc := h.Desc
-		if len(desc) > 90 {
-			desc = desc[:90] + "…"
+		if runes := []rune(desc); len(runes) > 90 {
+			desc = string(runes[:90]) + "…"
 		}
-		fmt.Fprintf(&b, "%s | %s [%s] 匹配 %q — %s\n", h.Device, h.CVEID, h.Severity, h.Product, desc)
+		ver := ""
+		switch h.VersionStatus {
+		case VersionInRange:
+			ver = " | 版本区间内(" + h.DeviceVersion + ")"
+		case VersionOutOfRange:
+			ver = " | 版本区间外(" + h.DeviceVersion + ")——供核对"
+		default:
+			if h.DeviceVersion != "" {
+				ver = " | 需人工比对版本(设备版本 " + h.DeviceVersion + ")"
+			} else {
+				ver = " | 需人工比对版本"
+			}
+		}
+		fmt.Fprintf(&b, "%s | %s [%s] 匹配 %q%s — %s\n", h.Device, h.CVEID, h.Severity, h.Product, ver, desc)
 	}
-	b.WriteString("以上为 厂商/型号 粗匹配，不是版本级结论——逐条只读验证后方可立案 netdev_finding。")
+	b.WriteString("版本判定读 CPE 区间（in_range 已核版本；out_of_range 保留供核对，不静默丢弃；unverified 需只读验证版本后比对）——逐条只读验证后方可立案 netdev_finding。")
 	return b.String(), nil
 }
 
