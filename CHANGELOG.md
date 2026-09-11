@@ -431,7 +431,7 @@ NETDEV_WRITE_AUTHZ_SPEC v1 的 P1/P2/P3 本地项全部落地（封的是"写"�
 
 ### feat(netdev): 运维偏好面板（与编码/办公偏好同款）+ 入口正名 + 版本归 V0.2.1
 
-用户两点定稿：① 本轮全部改动归 **V0.2.1**（不跳 0.3.0）；② 运维要有真正的「运维偏好」，与「编码偏好/办公偏好」同款。落地：
+用户两点定稿：① 本轮全部改动归 **V0.2.1**（不跳小版本号）；② 运维要有真正的「运维偏好」，与「编码偏好/办公偏好」同款。落地：
 
 - **运维偏好面板**：PreferencePanel 复用（mode=netdev），侧栏新增「运维偏好」入口（SlidersHorizontal 图标）；三个运维工厂预设——证据先行/谨慎只读/简洁汇报（Go `defaultPresets` + 前端 `builtinPresets.ts` 双端镜像）；偏好按 `netdev-presets.json` 分键存储、激活项注入运维提示词（memory 既有机制）
 - **修一个真 bug**：memory `validProfiles` 漏 netdev——此前运维 tab 的偏好/记忆被 NormalizeProfile 折叠进 dev 分区（`TestDefaultPresetsNetdev` 抓出：netdev 取到 4 条 dev 预设）；补齐后 netdev 成为合法记忆分区
