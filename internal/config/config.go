@@ -5,6 +5,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
@@ -54,6 +56,12 @@ type Config struct {
 	// is not trusted. Never decoded from or encoded to TOML — populated only
 	// by the loader, surfaced by `fairpeer run` (stderr) and the trust command.
 	UntrustedProjectNotices []string `toml:"-" json:"-"`
+	// loadErr records a parse failure of the underlying TOML file during
+	// LoadForEdit (GAP-17-2): the struct then only carries built-in defaults,
+	// and writing those back via SaveTo would destroy the user's hand-edited
+	// config. SaveTo refuses while this is set; LoadError exposes it. Unexported
+	// so it never leaks into render/decode round-trips.
+	loadErr error
 	// ReasoningLanguage steers ONLY the visible thinking/reasoning text language
 	// (auto|zh|en), independent of the final-answer language. Default "auto" leaves
 	// it to the provider. It is injected as a transient per-turn block, never into
@@ -2080,6 +2088,10 @@ func LoadForEdit(path string) *Config {
 	defined, err := mergeFile(cfg, path)
 	if err != nil {
 		slog.Warn("config: load for edit failed, using defaults", "path", path, "err", err)
+		// GAP-17-2: the file EXISTS but failed to parse — cfg now only carries
+		// built-in defaults. Record the error so SaveTo refuses to write them
+		// back over the user's hand-edited file (LoadError / SaveToForce).
+		cfg.loadErr = err
 	}
 	if !defined {
 		// Mirror Load: no user-defined [[providers]] → seed the keyless local
@@ -2094,6 +2106,18 @@ func LoadForEdit(path string) *Config {
 	normalizeDesktopOfficialProviderAccess(cfg)
 	normalizeEffortConfig(cfg)
 	return cfg
+}
+
+// LoadError returns the parse error recorded when the file at LoadForEdit's
+// path existed but failed to decode; nil when the load was clean (a missing
+// file included). While this is set, SaveTo refuses to write — the in-memory
+// config is only defaults and saving would clobber the unparsable file the
+// user still needs to fix (or delete, or force with SaveToForce).
+func (c *Config) LoadError() error {
+	if c == nil {
+		return nil
+	}
+	return c.loadErr
 }
 
 // mergeFile decodes a TOML file onto cfg if it exists. An absent file is not an
@@ -2418,7 +2442,7 @@ func ProjectSessionDir(workspaceRoot string) string {
 	if abs, err := filepath.Abs(root); err == nil {
 		root = abs
 	}
-	return filepath.Join(base, "projects", WorkspaceSlug(root), "sessions")
+	return filepath.Join(base, "projects", migrateProjectSlugDir(base, root), "sessions")
 }
 
 // ProjectSessionDirFor returns the per-workspace session directory partitioned
@@ -2436,18 +2460,111 @@ func ProjectSessionDirFor(workspaceRoot, profile string) string {
 	if abs, err := filepath.Abs(root); err == nil {
 		root = abs
 	}
+	slug := migrateProjectSlugDir(base, root)
 	key := ProfileNameKey(profile)
 	if key == "" || key == ProfileDev || key == "default" {
 		// Default partition: un-profiled path (backward compatible).
-		return filepath.Join(base, "projects", WorkspaceSlug(root), "sessions")
+		return filepath.Join(base, "projects", slug, "sessions")
 	}
-	return filepath.Join(base, "projects", WorkspaceSlug(root), key, "sessions")
+	return filepath.Join(base, "projects", slug, key, "sessions")
+}
+
+// workspaceSlugMaxRunes bounds the basename part of a slug in RUNES (not
+// bytes), so a CJK basename is never split mid-rune. Worst case
+// 60×4B + "-" + 8B = 249B still fits NAME_MAX (255B).
+const workspaceSlugMaxRunes = 60
+
+// pathIdentityFoldsCase reports whether the host platform's default filesystem
+// is case-insensitive, so the slug folds case too — the same directory reached
+// as C:\A\Proj and c:\a\proj must resolve to ONE session/memory dir. Mirrors
+// the desktop's normalizeProjectRoot folding (GAP-12c).
+func pathIdentityFoldsCase() bool {
+	return runtime.GOOS == "windows" || runtime.GOOS == "darwin"
 }
 
 // WorkspaceSlug flattens an absolute workspace path into the directory name
-// used under <config root>/projects.
+// used under <config root>/projects (the memory store shares it).
+//
+// GAP-12: the old algorithm replaced every separator across the ENTIRE
+// absolute path (legacyWorkspaceSlug below), so (a) a CJK/long path blew past
+// NAME_MAX and mkdir failed — sessions silently never saved; (b) cross-OS
+// moves had no migration story. The new algorithm is
+//
+//	basename-of-cleaned-path (≤60 runes) + "-" + sha256-of-normalized-path[:8]
+//
+// — ≤~80B for ASCII names, ≤249B in the worst case, and stable for any
+// spelling/casing of the same directory (cleaned, slash-normalized, and folded
+// on windows/darwin before hashing).
 func WorkspaceSlug(absPath string) string {
+	clean := filepath.Clean(absPath)
+	name := filepath.Base(clean)
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\:`) {
+		// Degenerate basename (filesystem root "/", drive "C:" …) — fixed
+		// fallback keeps the slug a single usable directory segment.
+		name = "ws"
+	}
+	if pathIdentityFoldsCase() {
+		name = strings.ToLower(name)
+	}
+	if r := []rune(name); len(r) > workspaceSlugMaxRunes {
+		name = string(r[:workspaceSlugMaxRunes])
+	}
+	sum := sha256.Sum256([]byte(strings.ToLower(filepath.ToSlash(clean))))
+	return name + "-" + hex.EncodeToString(sum[:4])
+}
+
+// legacyWorkspaceSlug is the pre-GAP-12 algorithm: the ENTIRE absolute path
+// with path separators replaced by '-'. Kept only so migrateProjectSlugDir can
+// find directories created by older builds; new code must use WorkspaceSlug.
+func legacyWorkspaceSlug(absPath string) string {
 	return strings.NewReplacer(string(os.PathSeparator), "-", "/", "-", "\\", "-", ":", "-").Replace(absPath)
+}
+
+// renameDir is a seam for tests — the rename-failure fallback is otherwise not
+// deterministically reproducible across platforms (a read-only dir bit does not
+// block renames on Windows).
+var renameDir = os.Rename
+
+// migrateProjectSlugDir performs the one-time legacy→new slug rename under
+// <base>/projects: when a directory from the old algorithm exists and the new
+// one doesn't, it is renamed (never copied, never deleted) so existing
+// sessions and memories follow the project to its new slug. The return value
+// is the slug to use NOW — the new one, or the legacy one when the rename
+// failed (e.g. the old dir is locked) so nothing becomes unreachable. Merging
+// is deliberately out of scope: when both dirs exist the new slug wins and the
+// legacy data is left untouched. Idempotent: after a successful rename the
+// legacy dir is gone and every later call short-circuits on its stat.
+func migrateProjectSlugDir(base, absPath string) string {
+	newSlug := WorkspaceSlug(absPath)
+	legacySlug := legacyWorkspaceSlug(absPath)
+	if legacySlug == "" || legacySlug == newSlug {
+		return newSlug
+	}
+	legacyDir := filepath.Join(base, "projects", legacySlug)
+	if _, err := os.Stat(legacyDir); err != nil {
+		return newSlug // 没有旧目录——没有可迁移的数据
+	}
+	newDir := filepath.Join(base, "projects", newSlug)
+	if _, err := os.Stat(newDir); err == nil {
+		// 新旧并存：不自行合并/删除，按新 slug 继续（旧目录保持原样，数据不丢）。
+		return newSlug
+	}
+	if err := renameDir(legacyDir, newDir); err != nil {
+		slog.Warn("config: legacy project dir rename failed, keeping legacy dir", "from", legacyDir, "to", newDir, "err", err)
+		return legacySlug
+	}
+	slog.Info("config: migrated legacy project dir to portable slug", "from", legacySlug, "to", newSlug)
+	return newSlug
+}
+
+// MigrateWorkspaceProjectSlug is migrateProjectSlugDir's exported form. The
+// memory store derives its per-project dirs from the same <userDir>/projects
+// root and must resolve — and migrate — to the same slug.
+func MigrateWorkspaceProjectSlug(base, absPath string) string {
+	if strings.TrimSpace(base) == "" {
+		return WorkspaceSlug(absPath)
+	}
+	return migrateProjectSlugDir(base, absPath)
 }
 
 // CacheDir is the per-user cache root for derived/regenerable artefacts: MCP

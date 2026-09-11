@@ -3,7 +3,6 @@ package builtin
 import (
 	"context"
 	"encoding/json"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -12,9 +11,7 @@ import (
 // echoCommand returns a shell command that echoes stdin lines back — portable
 // across the Windows cmd / unix shells the session tool spawns.
 func echoCommand() string {
-	if runtime.GOOS == "windows" {
-		return "more"
-	}
+	// ResolveShell finds Git Bash on Windows too — cat works in both.
 	return "cat"
 }
 

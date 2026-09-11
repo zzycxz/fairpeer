@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zzycxz/fairpeer/internal/sandbox"
 	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
@@ -46,6 +47,9 @@ type execSessionTool struct {
 	// workDir, when non-empty, is the directory sessions spawn in (workspace
 	// binding, same as bash). Empty = process cwd.
 	workDir string
+	// sb, when non-zero, wraps the spawned shell in the OS sandbox (same as
+	// bash) — exec_session is exec-class and must not be a jail escape hatch.
+	sb sandbox.Spec
 }
 
 func (execSessionTool) Name() string { return "exec_session" }
@@ -77,11 +81,13 @@ type execSessionArgs struct {
 	Input     string `json:"input"`
 	TimeoutMs int    `json:"timeout_ms"`
 	workDir   string // injected from the tool binding, not from args
+	sb        sandbox.Spec
 }
 
 func (t execSessionTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p execSessionArgs
 	p.workDir = t.workDir
+	p.sb = t.sb
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
@@ -141,14 +147,15 @@ func execSessionSpawn(ctx context.Context, p execSessionArgs) (string, error) {
 	sessions[id] = &execSession{seq: sessCounter, exited: true}
 	sessMu.Unlock()
 
-	shell, flag := "sh", "-c"
-	if runtime.GOOS == "windows" {
-		shell, flag = "cmd", "/c"
-	}
+	// OS sandbox wrap — same discipline as bash: an enforce-mode deployment
+	// must not be escapable by swapping bash for exec_session. The sandbox
+	// package resolves the shell and wraps argv.
+	sh := sandbox.ResolveShell()
+	argv, _ := sandbox.Command(p.sb, sh, command)
 	// Session-scoped context: setKillTree installs cmd.Cancel, which the exec
 	// package only honours for CommandContext-created commands; kill() fires it.
 	sctx, scancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(sctx, shell, flag, command)
+	cmd := exec.CommandContext(sctx, argv[0], argv[1:]...)
 	cmd.Dir = p.workDir
 	// 会话与 bash 同纪律：Windows 隐藏控制台窗 + 进程树终止（taskkill /T），
 	// POSIX 自立进程组（组杀）。必须在 Start 之前设置。
