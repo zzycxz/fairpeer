@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"os/signal"
@@ -219,6 +220,7 @@ func runAgent(args []string) int {
 	cont := fs.Bool("continue", false, "resume the most recent saved session")
 	fs.BoolVar(cont, "c", false, "shorthand for --continue")
 	resume := fs.String("resume", "", "resume a specific session file (non-interactive; takes precedence over --continue)")
+	jsonOut := fs.Bool("json", false, "stream machine-readable JSONL events to stdout (one object per line, eventwire contract) and end with a summary {\"kind\":\"result\"} line; human messages go to stderr")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -242,21 +244,29 @@ func runAgent(args []string) int {
 
 	// Live run: render the agent's event stream to stdout. Markdown post-stream
 	// redraw (cursor moves) is enabled only on a TTY; piped / captured output
-	// keeps the raw stream.
+	// keeps the raw stream. --json replaces the human renderer entirely with a
+	// JSONL event stream (CODEX_GAP_AUDIT G2) — stdout is machine-only.
+	var jsonSink *jsonlSink
 	var renderer agent.Renderer
 	termW := 80
-	if isTTY(os.Stdout) {
+	if isTTY(os.Stdout) && !*jsonOut {
 		if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
 			termW = w
 		}
 		renderer = newMarkdownRenderer(termW)
 	}
-	textSink := agent.NewTextSink(os.Stdout, renderer, termW)
-	textSink.SetShowReasoning(*showThinking)
-	var sink event.Sink = textSink
+	var sink event.Sink
+	if *jsonOut {
+		jsonSink = &jsonlSink{w: os.Stdout}
+		sink = jsonSink
+	} else {
+		textSink := agent.NewTextSink(os.Stdout, renderer, termW)
+		textSink.SetShowReasoning(*showThinking)
+		sink = textSink
+	}
 	var metrics *metricsSink
 	if *metricsPath != "" {
-		metrics = &metricsSink{inner: textSink}
+		metrics = &metricsSink{inner: sink}
 		sink = metrics
 	}
 	sink = withNotifications(sink, cfg)
@@ -308,6 +318,9 @@ func runAgent(args []string) int {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		}
 	}
+	if jsonSink != nil {
+		jsonSink.writeResult(runErr == nil, ctrl.SessionPath())
+	}
 	if runErr != nil {
 		fmt.Fprintln(os.Stderr, "\n"+i18n.M.ErrorPrefix, runErr)
 		return 1
@@ -325,13 +338,29 @@ func runServe(args []string) int {
 	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds (0 = use config/default)")
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 	resume := fs.String("resume", "", "resume a saved session file")
+	token := fs.String("token", "", "bearer token guarding every route (also FAIRPEER_SERVE_TOKEN); required posture for non-loopback binds")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if *token == "" {
+		*token = os.Getenv("FAIRPEER_SERVE_TOKEN")
+	}
+
+	// Load config for the sink wrappers below; serve runs headless so a load
+	// failure just means defaults (same posture as run/chat).
+	cfg, _ := config.Load()
 
 	ctx := context.Background()
 	bc := serve.NewBroadcaster()
-	ctrl, err := setup(ctx, *model, *maxSteps, true, bc)
+	// Desktop-injected capabilities are absent in this headless process — say
+	// so ONCE at startup instead of letting the agent discover it mid-task
+	// (see serveOfflineCapabilityBanner for the verified gating).
+	slog.Info(serveOfflineCapabilityBanner())
+	// Notifications ride the same sink wrapper run/chat use: enabled per
+	// [notifications] config. (runServe never wrapped its sink, so serve was a
+	// dead output mode for notify.)
+	sink := withNotifications(bc, cfg)
+	ctrl, err := setup(ctx, *model, *maxSteps, true, sink)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
@@ -351,14 +380,63 @@ func runServe(args []string) int {
 	}
 
 	fmt.Printf("fairpeer serve — %s on http://%s\n", ctrl.Label(), *addr)
+	srv := serve.New(ctrl, bc)
+	if *token != "" {
+		srv.SetAuthToken(*token)
+		fmt.Println("auth: bearer token enabled (Authorization: Bearer <token> or ?token=…)")
+	} else if host, _, err := net.SplitHostPort(*addr); err == nil && !isLoopbackHost(host) {
+		// Non-loopback without a token: say it loudly rather than let an
+		// unauthenticated agent endpoint sit on the LAN silently.
+		fmt.Fprintln(os.Stderr, "warning: serving on a non-loopback address WITHOUT --token; anyone who can reach this port drives the agent")
+	}
 	// Use graceful shutdown so SIGINT/SIGTERM drain active connections.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := serve.New(ctrl, bc).RunGraceful(ctx, *addr); err != nil {
+	if err := srv.RunGraceful(ctx, *addr); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
 	return 0
+}
+
+// isLoopbackHost reports whether the bind host is loopback (or a wildcard,
+// which for this warning's purpose is "reachable from the network").
+func isLoopbackHost(host string) bool {
+	switch host {
+	case "localhost", "127.0.0.1", "::1", "":
+		return true
+	}
+	return net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()
+}
+
+// serveOfflineCapabilityBanner builds the one-line startup notice naming the
+// built-in tools that are offline in serve mode because their desktop
+// injectors are absent. The list mirrors the actual nil-injection checks,
+// verified in internal/tool/builtin and internal/boot:
+//
+//   - schedule_create/list/update/delete/history/run_now —
+//     requireScheduler() (schedule.go) errors while globalScheduler is nil;
+//     injected only by the desktop app via builtin.SetScheduler
+//     (desktop/app.go).
+//   - calendar — requireCalendarStore() (calendar.go) errors while
+//     calendarStore is nil; injected only via builtin.SetCalendarStore
+//     (desktop/calendar_app.go).
+//   - im_send — requireIMPusher() (im.go) errors while globalIMPusher is
+//     nil; injected only via builtin.SetIMPusher (desktop/bot_gateway_app.go).
+//   - browser_auto — the injected runtime's Available() fails while
+//     browserUseClientProvider is nil (boot/browserauto_runtime.go);
+//     injected only via boot.SetBrowserUseClientProvider (desktop/app.go).
+//
+// `fairpeer serve` runs as a standalone CLI process (its only caller is
+// cli.Run's "serve" case) and the desktop app is a separate binary, so those
+// globals are nil here by construction. The tools also register only under
+// the cowork profile, which serve's headless boot.Build (Profile unset) does
+// not select — hence "not available in serve mode" rather than "errored".
+func serveOfflineCapabilityBanner() string {
+	return "serve mode: desktop-injected tools are offline in this process " +
+		"(schedule_create, schedule_list, schedule_update, schedule_delete, schedule_history, schedule_run_now — no scheduler; " +
+		"calendar — no calendar store; im_send — no IM gateway; browser_auto — no browsing sidecar). " +
+		"Run the desktop app or `fairpeer chat` for these capabilities."
 }
 
 // chatREPL is an interactive session: a single persistent agent/session and a
@@ -1361,6 +1439,47 @@ func groupByFamily(providers []config.ProviderEntry) ([]string, map[string][]int
 	return order, members, info
 }
 
+// cloudVendorPresets are the wizard's cloud offerings (P1-F10①): a DeepSeek/
+// 通义/智谱 key-holder previously had to pick "Custom Model" and hand-type
+// base_url + env name — the single biggest first-run leak. The table mirrors
+// fairpeer.example.toml's vendor registry (the desktop wizard serves the same
+// data from its own registry); the generic family flow below handles the key
+// prompt and the live /models probe, so an entry here is all it takes.
+func cloudVendorPresets() []config.ProviderEntry {
+	mk := func(name, baseURL, keyEnv, def, fast string, models []string, vision bool) config.ProviderEntry {
+		e := config.ProviderEntry{Name: name, Kind: "openai", BaseURL: baseURL, APIKeyEnv: keyEnv,
+			Default: def, FastModel: fast, Models: models}
+		if vision {
+			e.Vision = true
+		}
+		return e
+	}
+	return []config.ProviderEntry{
+		mk("qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1", "QWEN_API_KEY", "qwen3.7-max", "qwen3.6-flash",
+			[]string{"qwen3.7-max", "qwen3.7-plus", "qwen3.6-flash"}, true),
+		mk("deepseek", "https://api.deepseek.com", "DEEPSEEK_API_KEY", "deepseek-v4-pro", "deepseek-v4-flash",
+			[]string{"deepseek-v4-pro", "deepseek-v4-flash"}, true),
+		mk("volcengine", "https://ark.cn-beijing.volces.com/api/v3", "VOLCENGINE_API_KEY", "doubao-seed-evolving", "doubao-seed-2.1-turbo",
+			[]string{"doubao-seed-evolving", "doubao-seed-2.1-turbo"}, true),
+		mk("zhipu", "https://open.bigmodel.cn/api/paas/v4", "ZHIPU_API_KEY", "glm-5.2", "glm-4.7-flash",
+			[]string{"glm-5.2", "glm-5v-turbo", "glm-4.7-flash"}, true),
+		mk("minimax", "https://api.minimaxi.com/v1", "MINIMAX_API_KEY", "minimax-m3", "minimax-m2.5",
+			[]string{"minimax-m3", "minimax-m2.5"}, true),
+		mk("moonshot", "https://api.moonshot.cn/v1", "MOONSHOT_API_KEY", "kimi-k3", "kimi-k2.6",
+			[]string{"kimi-k3", "kimi-k2.6"}, true),
+		mk("mimo", "https://api.xiaomimimo.com/v1", "MIMO_API_KEY", "mimo-v2.5-pro", "mimo-v2.5",
+			[]string{"mimo-v2.5-pro", "mimo-v2.5"}, true),
+		mk("stepfun", "https://api.stepfun.com/v1", "STEPFUN_API_KEY", "step-3.7-flash", "step-3.5-flash",
+			[]string{"step-3.7-flash", "step-3.5-flash"}, true),
+		mk("xfyun", "https://spark-api-open.xf-yun.com/v1", "XFYUN_API_KEY", "glm-5.2", "qwen3.6-35b-a3b",
+			[]string{"glm-5.2", "qwen3.5-397b-a17b", "qwen3.6-35b-a3b"}, false),
+		mk("openai", "https://api.openai.com/v1", "OPENAI_API_KEY", "gpt-5.6-terra", "gpt-5.6-luna",
+			[]string{"gpt-5.6-terra", "gpt-5.6-luna"}, true),
+		mk("xai", "https://api.x.ai/v1", "XAI_API_KEY", "grok-4.6", "grok-4.5",
+			[]string{"grok-4.6", "grok-4.5", "grok-4.3"}, true),
+	}
+}
+
 // withBuiltinFamilies merges any built-in default providers into the wizard's
 // offer list. Since FairPeer ships no built-in presets (Default().Providers is
 // empty), this is currently a no-op pass-through — the wizard shows exactly the
@@ -1375,6 +1494,11 @@ func withBuiltinFamilies(providers []config.ProviderEntry) []config.ProviderEntr
 	for _, bp := range config.Default().Providers {
 		if k := familyOf(bp.Name).key; !have[k] {
 			providers = append(providers, bp)
+		}
+	}
+	for _, vp := range cloudVendorPresets() {
+		if k := familyOf(vp.Name).key; !have[k] {
+			providers = append(providers, vp)
 		}
 	}
 	return providers
@@ -1611,6 +1735,12 @@ func welcome(version string) int {
 		fmt.Fprintf(&b, "\n  %s %s\n", padRight(i18n.M.ConfigLabel, 8), yellow(fmt.Sprintf(i18n.M.ConfigErrorFmt, src, cfgErr)))
 	default:
 		fmt.Fprintf(&b, "\n  %s %s\n", padRight(i18n.M.ConfigLabel, 8), src)
+	}
+
+	// Unknown TOML keys (typos like default-model) would otherwise only surface
+	// two layers later as `unknown model ""` — name them at startup instead.
+	for _, w := range cfg.ConfigWarnings {
+		fmt.Fprintf(&b, "  %s %s\n", padRight("", 8), yellow(w))
 	}
 
 	ready := 0

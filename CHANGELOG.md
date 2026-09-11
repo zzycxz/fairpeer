@@ -9,6 +9,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(cli): `fairpeer run --json`——机器可读 JSONL 事件流（codex exec --json 对标，G2 修复）
+
+CODEX_GAP_AUDIT_2026-09-09 复核确认后落地（run 此前只有人读文本 + --metrics）：
+
+- **事件流 JSONL**：`--json` 下 stdout 每行一个 JSON 对象——复用 eventwire 共享契约（与 serve SSE/desktop/remotehost 同一形状），事件全类型覆盖；人读提示与错误保持走 stderr，stdout 纯机读
+- **result 汇总行**：run 结束补 `{"kind":"result","ok","text","sessionPath"[,"error"]}`——text 为最后一条 assistant 完整输出，调用方无需自行拼装
+- **顺手修共享编解码器同源缺口**：eventwire 的 kindNames/ToWire/FromWireOK 缺 Resumed/ExpertCollab/Item 三类（与 accdd1dd 修过的 serve/desktop 同根）——补齐编码与解码，远端会话链路同步受益
+- 测试：run_json_test.go 三例（线契约逐行合法/Item+ExpertCollab+Resumed 载荷/结果行与错误）；eventwire、desktop 全套件绿
+- 注：`--output-schema`/`--ephemeral` 仍为审计报告 G2 的后续项；TestWithBuiltinFamilies 一时红为并行批次改 config.Default 内建预设所致（HEAD 干净树通过），随该批次收口
+
+### feat(calendar,scheduler): 任务日历全局化四期——三模式共享一套引擎 + 四层权限 + 事件动作编译
+
+任务日历从办公独占提升为编码/办公/运维的全局能力。设计定调：一套引擎（一个 SQLite + 一个调度器）、profile 分区（人看全部、agent 各看各柜）、日历是唯一的跨模式调用通道且每次过人审。全部复用现有权限机制（Ask 规则/RiskExternal/注册门控/ReadOnly），零新系统。
+
+- **P0 加固包**（先修坝再开闸）：schedule_create 从"整包 Unmarshal 进任务结构体"改为显式字段白名单（schedule_update 先例写法）——堵死 profile 跨模式提权（封印 netdev agent 借道预约 bash 身份任务）与 confirm_high_frequency 走私绕过 >4/天 runaway 门；`[scheduler] confirm_agent_tasks`（默认开）为 create/update/delete 装 Ask 审批卡（YOLO 亦拦）；risk 表加 schedule_create/schedule_run_now/im_send → RiskExternal（无头一律拒绝，im_send 是外发漏网）；agent 路径投递降级——输出路由收敛 ""/notify，email/IM/file 仅人类 UI 可配（投递管道在权限门外，注入者曾可借用户 SMTP 身份周期外发）；calendar 工具移除 export/import（任意路径写原语），.ics 归人类 UI 对话框
+- **P1 分区**：calendar events 表加 profile 列（幂等迁移 + 存量回填 cowork）；调度任务加 Source（manual/agent 审计）+ RunRecord 带 Profile；新增 ListForProfile/HistoryForProfile/DeleteForProfile/UpdateForProfile/RunNowForProfile——agent 工具按注册身份分区读写，跨分区一律 not found（不泄露存在性）；无头兜底工作区修为任务自身 profile 的家目录（原写死 cowork，dev 任务跑错柜）
+- **P2 工具上移**：SchedulerTools/CalendarTools 注册移出 cowork 独占分支，三模式均注册（绑定各自 profile、保持 Hidden 走 run_skill）；dev/netdev 技能白名单补 schedule-auto（技能本体重写：remind vs create 决策、本地投递纪律）
+- **P3 前端**：四组件搬 components/calendar/（跨模式共享区）；useCalendarTasks 单点数据协调；编码 dock 与运维 dock 各加"日程"入口（+菜单，持久记忆），办公保持侧栏直达；TaskForm 加运行模式下拉（默认当前页，人类可跨指）+ >4/天高频确认重试；任务卡分区徽标 + AI 创建徽标 + 全部/本模式/AI 创建过滤器；提醒双通道全局化（App 根监听 + OS 通知）——修"面板不挂载提醒即消失"；顺手修六缺陷（纯事件不上网格/死过滤器/通知双弹/运维作业卡不刷新/无头工作区错柜/任务纳秒 ID 撞号）
+- **P4 事件动作**：日历事件"到点动作"编译为关联一次性调度任务（TaskID 链接，到事件开始时间以所选模式运行）——编辑重同步、删除级联、网格投影去重；仅人类可设（agent 工具白名单与 ICS 导入结构上不含该字段）；循环事件 v1 明确拒绝
+- **红线未破**：netdev 硬封印清单零改动；日历零新增定时器；两套存储未合并；无头门/高频门机制原样（仅补表项与白名单）
+- **测试**：加固走私/分区/无头拒绝/编译级联 4 个新测试文件 15+ 用例全绿；根模块 + desktop 全量回归、前端 npm test（56）+ tsc + 生产构建全过
+
+### feat(ppt-auto): 配色链路重做 + 中国移动品牌预设 + 紧凑分区版式（composite）
+
+修复"生成的 PPT 颜色不对（黄色框体）"与"一页一式、不紧凑"两大问题。根因取证：品牌色全在模板背景图里（theme1.xml 是未改的 Office 出厂色板，#1084CD 在 XML 中零出现），旧提取给出厂 theme 色 +5 权重、图片量化把主蓝拆成 4 个碎桶 → accent 实测被选成 #FFC000 金黄；且用户机器上 `ppt-template-style.json` 不存在——VLM 分析静默失败无日志，一直在走 Python 兜底。
+
+- **提取升级**（extract_template_colors.py）：量化色做**色相族聚类**（同族深浅变体算一色，族代表取最高饱和度成员）；出厂 Office theme 检测（accent1-6 命中 ≥4）后默认色不再计入频率；hlink/folHlink 超链色剔除；新增 `colors.brand` 主品牌色槽（结构色）与 `accent`（强调色）双槽分工。实测移动模板提取从 `accent=#FFC000` 修正为 `brand=#0070C0` 深蓝族
+- **VLM 优先级反转**（merge_vlm_style.py）：机械提取的精确 hex 不再被 VLM 眼估值覆盖（冲突记 `_template.vlm_accent_alt` + WARN）；VLM 只补缺口（is_dark/背景/风格词）；参考图（reference-style.json）保留覆盖权（用户明确意图，无机械路径）
+- **中国移动品牌预设**：新增 `references/brand-presets/china-mobile.json`（主蓝 #1084CD/活力橙 #FF7F00/品牌绿 #8CC63F + 用色纪律 + 密度收紧 4/4），preflight `--preset china-mobile` 机械套用（跳过识别）并在无自选模板时自动播种品牌模板；桌面 gatekeeper（mayPreparePPTReference）检测"中国移动/中移/移动公司/CMCC"+PPT 意图 → 注入 `[system]` 提示带 preset 参数；SKILL.md 品牌色禁令加预设例外（预设≠凭空推断）。"提到中国移动就走预设"一步到位
+- **preflight 可观测 + 防污染**：输出 `colors_source`（preset/reference-vlm/template-vlm/template-extract/baseline，排查颜色问题先看这里）；新增**基线快照还原**（`_baseline_snapshot`）——每次运行先还原嵌入默认再叠加提取/合并/预设，杜绝上一次任务的颜色泄漏到下一次；换模板时 PickPPTTemplate 先删旧 `ppt-template-style.json`（旧 VLM 结果不再污染新模板）
+- **VLM 失败可见化**（ppt_template_vision.go）：analyzeTemplateStyleAsync 全链路日志（入口/图片来源/VLM 成败/写盘结果）落 ppt-vision-debug.log，不再静默降级
+- **紧凑分区版式**（build_page_skeleton.py 重写）：全部 builder 改 **content-box 驱动**（区域内真实字号原生排版，弃用会压扁字号的 D-06 线性缩放）；新增 `kpi_row`（3-6 数字卡）、`panel`（标题+要点面板）、**`composite` 复合页型**（一页多块一次生成整页：顶部 KPI 行 + 左面板 + 右要点三分区等配方，含重叠检测）；页头瘦身（标题带 y 56→46、内容区顶 150→104，多出 ~50px 内容高度）；窄盒自动降列/紧凑字号
+- **brand 槽位消费**：page/table/flow 三个骨架的结构用色（表头/描边/时间线/标题带）统一切 `brand`，`accent` 只留给强调（KPI delta 等）——实测 composite 页 #1084CD×16、#FF7F00×1（橙色恰好只做点状强调）
+- **文档**：SKILL.md Step 0（--preset/colors_source）、Step 5/6（composite 首选纪律 + 分区配方）、品牌色禁令例外；layout_templates.md 重排（分区配方 + 色槽分工）；brand-presets/_index.md
+- SkillVersion 51→52；新增 TestMatchBrandPreset（含"移动硬盘"反例）；desktop 全测 + 根模块 assets/config 测试 + 预设 E2E 冒烟（preflight→骨架→batch_check 全绿）全过
+
+### fix(desktop): 快捷截屏多图连拍五连修——防抖编译错误 + 连拍无上限 + 拼接静默丢图 + 并发入队乱序 + 规格文档失真
+
+- **P0·编译错误**：防抖归属判定写成了 `debounceCancel == cancel`——`context.CancelFunc` 是函数值，Go 禁止非 nil 函数值 `==` 比较，desktop 模块整体编译失败。改为锁内检查 `ctx.Err() == nil`（ctx 未被新按键撤回即拥有队列）；赢得发包权的协程补调 `cancel()` 释放 ctx；`time.After` 换 `time.NewTimer`+`defer Stop()`
+- **P1·连拍无上限**：队列无张数封顶，高频连拍在 HiDPI 屏可拼出 ~600MB RGBA/超宽长图，且易撞 VLM 单图像素上限（如 Anthropic 8000×8000）。新增 `maxScreenshotBurst=10`（第 11 张触发先行发送+重新计数）与 `maxStitchDim=8000`（超限统一用 box kernel 面积平均降采样，`golang.org/x/image/draw` 已有依赖）
+- **P2·拼接静默丢图**：`stitchImagesVertically` 对解码失败的图 `continue` 无声跳过——5 张坏 3 张时长图只剩 2 张用户无感知。改为任一张解码失败整体报错，回退多图分开发送（不丢任何原图），Toast 明示“自动拼接失败，改为多图发送…”
+- **P2·并发入队乱序**：托盘菜单与热键轮询两个协程都可触发入口，捕获+PNG 编码发生在拿锁前，竞态下后按的图可能先入队→长图上下颠倒。锁改为覆盖捕获→编码→入队全程，同时杜绝防抖协程把一次连拍劈成两半
+- **P3·杂项**：拼接画布透明 padding 改白底（供应商端转 JPEG 不再变黑边）；`docs/SCREENSHOT_MULTI_SPEC.md` 原描述的是已淘汰的 time.AfterFunc 方案且称“无需物理拼接”，重写为 context 防抖+分包+拼接的最终实现
+- 新增 `desktop/screenshot_solve_test.go` 五例（拼接顺序/白底/降采样/坏图报错/空入参）；desktop `go build`+`go vet`+定向测试全绿
+
 ### fix(ops,evidence): 十遍清查修正三处——设备名大小写漂移漏配 + ops 请求编号并发撞号 + NewRequest 补锁
 
 对本会话全部 27 笔提交做十透镜逐行清查（构建/静态分析/四组逐文件审读/并发锁序/错误路径/行为回归/文档一致性）抓出并修正：
@@ -2250,3 +2295,25 @@ provider-agnostic, multi-vendor AI coding and automation assistant.
 - Per-provider role fields (no key leakage across providers)
 - Sandbox with configurable write roots and network policy
 - Hook trust model (project hooks require explicit trust)
+
+---
+
+## [0.2.4] - 2026-09-10
+
+### Removed
+
+- 移除 Distill（蒸馏）后台技能提炼子代理：自动发现重复工作流并打包为可复用 Skill 的功能整体下线。
+  删除范围：`agent.SpawnDistill` / `ShouldAutoDistill` / `RunDistillOnce` / `KindDistill` / `DistillTask`、
+  boot 的 post-distill 硬退役钩子（`RegisterDistillComplete` + `retireColdSkills`）、config 的
+  `[dream].distill_interval` 字段与 `DistillIntervalDays()`、controller 的 `TriggerDistill` /
+  `maybeDreamDistill`、桌面端 `TriggerDistill` 与 `DreamStatusView` distill 字段、前端蒸馏卡片 /
+  桥接绑定 / 双语文案。Dream 记忆整合不受影响
+- 技能冷退役硬 tier（2× 阈值写入 disabled_skills）随 Distill 一并移除；`skill_cold_days` 现仅用于
+  [休眠] 软标记 + 索引降权（技能仍可直接调用，调用即唤醒）
+
+### Changed
+
+- `SetDreamIntervals(dreamDays, distillDays)` 更名为 `SetDreamInterval(dreamDays)`；配置渲染与
+  示例注释同步去除 distill 字样
+- 兼容性（无需手动迁移）：旧 config.toml 中的 `distill_interval` 键被静默忽略；旧
+  dream_state.json 中的 distill 历史记录在下次写入时自动清除

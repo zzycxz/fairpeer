@@ -7,6 +7,7 @@
 package eventwire
 
 import (
+	"encoding/json"
 	"errors"
 
 	"github.com/zzycxz/fairpeer/internal/agent"
@@ -16,19 +17,54 @@ import (
 
 // Event is the JSON shape an event.Event takes across the wire.
 type Event struct {
-	Kind         string          `json:"kind"`
-	Text         string          `json:"text,omitempty"`
-	Reasoning    string          `json:"reasoning,omitempty"`
-	Level        string          `json:"level,omitempty"`
-	Tool         *Tool           `json:"tool,omitempty"`
-	Usage        *Usage          `json:"usage,omitempty"`
-	Approval     *Approval       `json:"approval,omitempty"`
-	Ask          *Ask            `json:"ask,omitempty"`
-	Compaction   *Compaction     `json:"compaction,omitempty"`
-	Err          string          `json:"err,omitempty"`
-	RetryAttempt int             `json:"retryAttempt,omitempty"`
-	RetryMax     int             `json:"retryMax,omitempty"`
-	RetryAfterMs int64           `json:"retryAfterMs,omitempty"`
+	Kind         string      `json:"kind"`
+	Text         string      `json:"text,omitempty"`
+	Reasoning    string      `json:"reasoning,omitempty"`
+	Level        string      `json:"level,omitempty"`
+	Tool         *Tool       `json:"tool,omitempty"`
+	Usage        *Usage      `json:"usage,omitempty"`
+	Approval     *Approval   `json:"approval,omitempty"`
+	Ask          *Ask        `json:"ask,omitempty"`
+	Compaction   *Compaction `json:"compaction,omitempty"`
+	Err          string      `json:"err,omitempty"`
+	Cancelled    bool        `json:"cancelled,omitempty"`
+	RetryAttempt int         `json:"retryAttempt,omitempty"`
+	RetryMax     int         `json:"retryMax,omitempty"`
+	RetryAfterMs int64       `json:"retryAfterMs,omitempty"`
+	// Collab carries a finished expert-team collaboration (kind expert_collab;
+	// same shape desktop/wire.go and the frontend WireCollab exchange).
+	Collab *Collab `json:"collab,omitempty"`
+	// Item carries an item-model transition (kind item; 4-1 dual-track with
+	// the flat kinds above — same shape the frontend WireItemEvent consumes).
+	Item *ItemEvent `json:"item,omitempty"`
+}
+
+// Collab is the JSON form of an event.Collab.
+type Collab struct {
+	RunID     string           `json:"runId"`
+	TeamID    string           `json:"teamId"`
+	TeamName  string           `json:"teamName"`
+	Task      string           `json:"task"`
+	Mode      string           `json:"mode"`
+	Rounds    [][]CollabAnswer `json:"rounds"`
+	Synthesis string           `json:"synthesis"`
+	CreatedAt int64            `json:"createdAt"`
+}
+
+type CollabAnswer struct {
+	ExpertName string `json:"expertName"`
+	Text       string `json:"text"`
+}
+
+// ItemEvent is the JSON form of an event.ItemEvent (started/delta/completed
+// transition; payload raw kind-specific JSON in Item).
+type ItemEvent struct {
+	Phase     string          `json:"phase"`
+	ItemID    string          `json:"itemId"`
+	ItemKind  string          `json:"itemKind"`
+	Delta     string          `json:"delta,omitempty"`
+	DeltaKind string          `json:"deltaKind,omitempty"`
+	Item      json.RawMessage `json:"item,omitempty"`
 }
 
 type Compaction struct {
@@ -44,32 +80,32 @@ type AskOption struct {
 }
 
 type AskQuestion struct {
-	ID      string          `json:"id"`
-	Header  string          `json:"header,omitempty"`
-	Prompt  string          `json:"prompt"`
-	Options []AskOption     `json:"options"`
-	Multi   bool            `json:"multi,omitempty"`
+	ID      string      `json:"id"`
+	Header  string      `json:"header,omitempty"`
+	Prompt  string      `json:"prompt"`
+	Options []AskOption `json:"options"`
+	Multi   bool        `json:"multi,omitempty"`
 }
 
 type Ask struct {
-	ID        string          `json:"id"`
-	Questions []AskQuestion   `json:"questions"`
+	ID        string        `json:"id"`
+	Questions []AskQuestion `json:"questions"`
 }
 
 type Tool struct {
-	ID          string           `json:"id,omitempty"`
-	Name        string           `json:"name"`
-	Args        string           `json:"args,omitempty"`
-	Output      string           `json:"output,omitempty"`
-	Err         string           `json:"err,omitempty"`
-	ReadOnly    bool             `json:"readOnly"`
-	Truncated   bool             `json:"truncated,omitempty"`
-	DurationMs  int64            `json:"durationMs,omitempty"`
-	Partial     bool             `json:"partial,omitempty"`
-	ParentID    string           `json:"parentId,omitempty"`
-	Profile     *Profile         `json:"profile,omitempty"`
-	Attachments []Attachment     `json:"attachments,omitempty"`
-	FileDiff    *FileDiff        `json:"fileDiff,omitempty"`
+	ID          string       `json:"id,omitempty"`
+	Name        string       `json:"name"`
+	Args        string       `json:"args,omitempty"`
+	Output      string       `json:"output,omitempty"`
+	Err         string       `json:"err,omitempty"`
+	ReadOnly    bool         `json:"readOnly"`
+	Truncated   bool         `json:"truncated,omitempty"`
+	DurationMs  int64        `json:"durationMs,omitempty"`
+	Partial     bool         `json:"partial,omitempty"`
+	ParentID    string       `json:"parentId,omitempty"`
+	Profile     *Profile     `json:"profile,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
+	FileDiff    *FileDiff    `json:"fileDiff,omitempty"`
 }
 
 // FileDiff is the JSON form of event.FileDiff (empty Diff = nothing to show).
@@ -90,27 +126,27 @@ type Profile struct {
 }
 
 type Usage struct {
-	PromptTokens     int               `json:"promptTokens"`
-	CompletionTokens int               `json:"completionTokens"`
-	TotalTokens      int               `json:"totalTokens"`
-	CacheHitTokens   int               `json:"cacheHitTokens"`
-	CacheMissTokens  int               `json:"cacheMissTokens"`
-	CacheWriteTokens int               `json:"cacheWriteTokens"`
-	ReasoningTokens  int               `json:"reasoningTokens,omitempty"`
+	PromptTokens     int `json:"promptTokens"`
+	CompletionTokens int `json:"completionTokens"`
+	TotalTokens      int `json:"totalTokens"`
+	CacheHitTokens   int `json:"cacheHitTokens"`
+	CacheMissTokens  int `json:"cacheMissTokens"`
+	CacheWriteTokens int `json:"cacheWriteTokens"`
+	ReasoningTokens  int `json:"reasoningTokens,omitempty"`
 	// Session-cumulative cache tokens; mapped back onto event.Event's
 	// SessionHit/SessionMiss by FromWire.
-	SessionCacheHitTokens  int `json:"sessionCacheHitTokens"`
-	SessionCacheMissTokens int `json:"sessionCacheMissTokens"`
-	Cost     float64 `json:"cost,omitempty"`
-	Currency string  `json:"currency,omitempty"`
+	SessionCacheHitTokens  int     `json:"sessionCacheHitTokens"`
+	SessionCacheMissTokens int     `json:"sessionCacheMissTokens"`
+	Cost                   float64 `json:"cost,omitempty"`
+	Currency               string  `json:"currency,omitempty"`
 }
 
 type Approval struct {
-	ID      string         `json:"id"`
-	Tool    string         `json:"tool"`
-	Subject string         `json:"subject"`
-	Args    string         `json:"args,omitempty"`
-	Changes []FileChange   `json:"changes,omitempty"`
+	ID      string       `json:"id"`
+	Tool    string       `json:"tool"`
+	Subject string       `json:"subject"`
+	Args    string       `json:"args,omitempty"`
+	Changes []FileChange `json:"changes,omitempty"`
 }
 
 // FileChange is one file within a previewed multi-file approval.
@@ -143,6 +179,9 @@ var kindNames = map[event.Kind]string{
 	event.MCPSurfaceReady:   "mcp_surface_ready",
 	event.Retrying:          "retrying",
 	event.Steer:             "steer",
+	event.Resumed:           "resumed",
+	event.ExpertCollab:      "expert_collab",
+	event.Item:              "item",
 }
 
 // wireKinds is the reverse map, plus the few kinds that share no wire name and
@@ -220,14 +259,46 @@ func ToWire(e event.Event) Event {
 		if e.Err != nil {
 			w.Err = e.Err.Error()
 		}
+		w.Cancelled = e.Cancelled
 	case event.Retrying:
 		w.RetryAttempt = e.RetryAttempt
 		w.RetryMax = e.RetryMax
 		w.RetryAfterMs = e.RetryAfterMs
 	case event.Message:
 		w.Text = agent.StripGoalMarkers(e.Text)
+	case event.Resumed:
+		// kind-only: clears the remote side's paused indicator
+	case event.ExpertCollab:
+		w.Collab = toWireCollab(e.Collab)
+	case event.Item:
+		if e.Item != nil {
+			w.Item = toWireItem(e.Item)
+		}
 	}
 	return w
+}
+
+func toWireCollab(c event.Collab) *Collab {
+	rounds := make([][]CollabAnswer, len(c.Rounds))
+	for i, round := range c.Rounds {
+		ans := make([]CollabAnswer, len(round))
+		for j, a := range round {
+			ans[j] = CollabAnswer{ExpertName: a.ExpertName, Text: a.Text}
+		}
+		rounds[i] = ans
+	}
+	return &Collab{
+		RunID: c.RunID, TeamID: c.TeamID, TeamName: c.TeamName,
+		Task: c.Task, Mode: c.Mode, Rounds: rounds,
+		Synthesis: c.Synthesis, CreatedAt: c.CreatedAt,
+	}
+}
+
+func toWireItem(it *event.ItemEvent) *ItemEvent {
+	return &ItemEvent{
+		Phase: string(it.Phase), ItemID: it.ItemID, ItemKind: string(it.ItemKind),
+		Delta: it.Delta, DeltaKind: string(it.DeltaKind), Item: it.Item,
+	}
 }
 
 func toWireAsk(a event.Ask) *Ask {
@@ -257,8 +328,7 @@ func fromWireAsk(a Ask) event.Ask {
 
 // FromWireOK decodes a wire event back into an event.Event and reports whether
 // the wire kind maps to anything. ok=false means the kind is unmapped — a kind
-// this build predates, or one of the drop-listed names (Paused, Resumed, Item,
-// ExpertCollab) — and the caller MUST drop the event: event.Kind has no
+// this build predates — and the caller MUST drop the event: event.Kind has no
 // "unknown" value (its zero is TurnStarted), so decoding it anyway fabricates a
 // phantom — most visibly a forwarded "paused" resurfacing as a turn restart.
 // In-repo consumers should prefer this over FromWire.
@@ -332,10 +402,40 @@ func FromWireOK(w Event) (event.Event, bool) {
 		if w.Err != "" {
 			e.Err = errors.New(w.Err)
 		}
+		e.Cancelled = w.Cancelled
 	case event.Retrying:
 		e.RetryAttempt = w.RetryAttempt
 		e.RetryMax = w.RetryMax
 		e.RetryAfterMs = w.RetryAfterMs
+	case event.Resumed:
+		// kind-only
+	case event.ExpertCollab:
+		if c := w.Collab; c != nil {
+			ec := event.Collab{
+				RunID: c.RunID, TeamID: c.TeamID, TeamName: c.TeamName,
+				Task: c.Task, Mode: c.Mode, Synthesis: c.Synthesis, CreatedAt: c.CreatedAt,
+			}
+			ec.Rounds = make([][]event.CollabAnswer, len(c.Rounds))
+			for i, round := range c.Rounds {
+				ans := make([]event.CollabAnswer, len(round))
+				for j, a := range round {
+					ans[j] = event.CollabAnswer{ExpertName: a.ExpertName, Text: a.Text}
+				}
+				ec.Rounds[i] = ans
+			}
+			e.Collab = ec
+		}
+	case event.Item:
+		if it := w.Item; it != nil {
+			e.Item = &event.ItemEvent{
+				Phase:     event.ItemPhaseTransition(it.Phase),
+				ItemID:    it.ItemID,
+				ItemKind:  event.ItemKind(it.ItemKind),
+				Delta:     it.Delta,
+				DeltaKind: event.ItemDeltaKind(it.DeltaKind),
+				Item:      it.Item,
+			}
+		}
 	}
 	return e, true
 }
