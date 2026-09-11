@@ -48,6 +48,10 @@ type Config struct {
 	// UntrustedProjectNotices carries the G3 trust gate's load-time notices.
 	// Never decoded from or encoded to TOML.
 	UntrustedProjectNotices []string `toml:"-" json:"-"`
+	// ConfigWarnings carries load-time notices (unknown TOML keys from
+	// mergeFile). Never decoded from or encoded to TOML — populated only
+	// by the loader, surfaced by the CLI welcome banner and doctor.
+	ConfigWarnings []string `toml:"-" json:"-"`
 	// ReasoningLanguage steers ONLY the visible thinking/reasoning text language
 	// (auto|zh|en), independent of the final-answer language. Default "auto" leaves
 	// it to the provider. It is injected as a transient per-turn block, never into

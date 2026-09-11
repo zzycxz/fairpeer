@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(serve,config): 补齐已提交 cli 的两个缺失依赖——serve token 守卫 + ConfigWarnings 字段
+
+- serve.go：Server.authToken 字段 + SetAuthToken + tokenGuard 中间件接线（graceful/events 同步守卫）——cli.go runServe 的 --token 调用自此有真实实现
+- config.go：ConfigWarnings 字段（load 时告警的载体的既有打印目标）
+- 依赖补全使干净检出可编译；均源自并行批次已写好的在途实现，按其工作区原样入库
+
+### feat(netdev): 统一急停 + GPU/智算采集面 P0——FDE/AI infra 承接第一批（FDE_AIINFRA_OPS_GAP_SPEC §4.0/§4.1）
+
+- **统一急停（§4.0）**：`NetDevEmergencyStop` 从"只杀连接"扩成四件事——杀连接 + running 割接置 Hold（**不是 abort**：Abort 不回退已执行变更，会把设备留在半割接态；Hold 在步骤边界停住，继续/回退/终止由人按）+ running Job 边界暂停（文案"紧急停止"区别于人工暂停，暂停分支补审计）+ executing 提案代际冻结（`estopGen` 代数，步骤边界检测即走既有 partial 冻结）。runner 步后折叠改锁内复核（NETDEV-9 同族 TOCTOU：迟到保存不再能吞掉急停 Hold），折叠带步身份复核（急停 hold 窗口内 SkipStep 不再错位折叠/双 runner）；`CutoverRollback` 回退范围扩展到 failed/skipped 提案步——急停冻结的 partial 变更从此进得来回退路径（`RollbackProposal` 的 partial/done/watching 前置保证未执行提案安全拒绝）。急停枚举失败进 `EstopReport.Errors` 不再静默。
+- **GPU 采集通道（§4.1-1/2）**：新增 `internal/netdev/gpuhealth.go`——GPU=true（linux）主机每轮健康轮询追加只读采集（`nvidia-smi --query-gpu` CSV + XID 证据源），走 `execSealed(internal)` 密封路径：分类/审计/脱敏/只读与 agent 同一套，仅跳过 per-turn 护栏（后台轮询与 agent 会话互不占预算）；GPU 扫描 8 并发 + 每设备 90s 超时；`DeviceHealth` 新增 GPU 段（每卡温度/显存/利用率 + XID + 证据行），健康快照纳入无 SNMP 的 GPU 主机；series 新增 labels 字段，GPU 指标按 `gpu.<index>.<metric>` 命名落时序。
+- **告警引擎开面（§4.1-3）**：新指标 `gpu.xid/gpu.temp/gpu.mem_pct/gpu.count`（GPU 规则只对采样过的主机生效，非 GPU 舰队零误报）；阈值 int64→float64（TOML 整数照常解码）；`for_rounds` 防抖（连续 N 轮成立才立案）；禁用规则自动恢复其遗留 active finding；streak 惰性清理（删规则后同名重建不继承旧轮次）；GPU 规则证据补 GPU 摘要行。设置页规则编辑器支持 GPU 指标（行业标准默认阈值）与连续轮数；向导预设带防抖默认值。
+- **XID→Finding 分级（§4.1-4）**：证据主源内核日志 `journalctl -k -g Xid`（`nvidia-smi -q` 在真实驱动上疑似无 Xid 段——真机校准列入 dogfooding），失败落 -q 兜底；NVIDIA catalog 分级（8/48/63/64/74/79/80-95 → critical 隔离送修，其余 warning 可恢复）；同节点多卡聚合一条；active 期间出现更高级代码原卡升级；采样失败轮次不误 resolve（没采到 ≠ 清除了）。
+- 调研与规格：`docs/FDE_AIINFRA_OPS_GAP_SPEC.md`（三轮调研 + 缺口规格，五处复审修正）、`docs/PROFILE_CAPABILITY_MATRIX.md`（三台能力矩阵）。
+
+### feat(netdev/blueteam): 蓝队修复批 A-E——基线外置扩厂 + CVE 版本区间 + segmap/轮次案例 + 回填/反哺 + 套餐补全
+
+蓝队模块复核（BLUETEAM_SKILL_SPEC §9，2026-09-11）定案的六个批次，A-E 一次落地，F（NVD 引导拉取）留待立项裁决：
+
+- **批 A 基线规则外置+扩厂**：6 规则×2 厂的硬编码搬进第四张知识表 `baseline-rules.yaml`（user-knowledge 同 id 覆盖；坏覆盖回退内置并显式报错）；新增 h3c-comware 六族（Comware 7 拼写，ssh-v1 是 compatible-ssh1x——VRP 拼写不误报；锐捷经驱动映射 cisco-ios 已覆盖）；顺带修复 `RunningConfigCommand` 缺 h3c 条目——H3C 的备份/割接读配置此前是断的
+- **批 B CVE 版本区间**：NVD 导入保留 CPE 版本边界（CVEEntry.Versions），匹配三态判定——区间内/区间外（保留供核对，绝不静默丢弃）/需人工比对（无版本或无边界，行为与批 B 前一致）；netdev_cve_match 与扫查发现逐条标注；验证步从"模型记忆比对"升级为只复核 unverified 项
+- **批 C segmap 工件 + 轮次案例（=既定批 1.5）**：seccheck body 网段出口约定立 source=segmap 工件卡 + 蓝队页卡置顶分组渲染；轮次案例走宿主侧接线（boot skillRunner 起止钩 BeginCaseRun/Finish——开/续当日同入口案例，新增/仍在/已恢复 diff + 答复摘要钉时间线），子代理工具面零新增
+- **批 D 回填/反哺/判读下沉（=既定批 3）**：排查卡回填按钮（未纳管主机贴输出→对话立案，零后端）；知识反哺通道（knowledge.SaveUser + NetDevKnowledgeSave 桥，Validate 过才写 user-knowledge/，哈希入审计链 + 页卡内联回填行）；netdev_probe L4 形状注解（网关位/散点分布 + role_signals 信号→角色候选）；职能映射表裁决为 role_signals 已内置（§5.2）+ 引擎消费补齐，独立第四表不建
+- **批 E 套餐补全**：exposure 电池接 BuildAttackPaths（暴露点/攻击路径/Top 剪边进 BatteryNotes——推演非实测）；AuditProject 加 weakcred_tier/dict_path 编排档（字典档信封闸照旧，缺路径 basic 兜底并注明）
+- **测试**：TestCheckBaselineH3CComware / TestBaselineRulesTableEmbedded / TestBaselineRulesBadOverrideFallsBack / TestVersionInRange / TestCVEMatchVersionStatus / TestCaseRunScope；前端 tsc + locale-parity 全绿
+
 ### feat(cli): `fairpeer run --json`——机器可读 JSONL 事件流（codex exec --json 对标，G2 修复）
 
 CODEX_GAP_AUDIT_2026-09-09 复核确认后落地（run 此前只有人读文本 + --metrics）：

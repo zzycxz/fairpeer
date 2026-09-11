@@ -46,6 +46,11 @@ type Server struct {
 	// DNS-rebinding pages (attacker.com resolving to 127.0.0.1 sends
 	// Host: attacker.com — same-origin to the browser, no preflight).
 	bindHost string
+
+	// authToken, when set via SetAuthToken, guards every route (Bearer header
+	// or ?token= query). Empty keeps the loopback-only, unauthenticated
+	// posture.
+	authToken string
 }
 
 // New builds a Server. bc must be the controller's event sink.
@@ -237,7 +242,37 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /sessions", s.sessions)
 	mux.HandleFunc("GET /skills", s.skills)
 	mux.HandleFunc("POST /delete-session", s.deleteSession)
-	return logMiddleware(hostGuard(s, bodyLimit(csrfGuard(mux))))
+	h := http.Handler(mux)
+	h = bodyLimit(csrfGuard(h))
+	h = hostGuard(s, h)
+	if s.authToken != "" {
+		h = tokenGuard(s.authToken, h)
+	}
+	return logMiddleware(h)
+}
+
+// SetAuthToken enables bearer-token auth for every route: requests must carry
+// `Authorization: Bearer <token>` or a `?token=<token>` query parameter (the
+// query form exists because EventSource cannot set headers). This is the
+// supported remote-access story for `serve` on a server edition — without it
+// the server is strictly loopback-only.
+func (s *Server) SetAuthToken(token string) {
+	s.authToken = strings.TrimSpace(token)
+}
+
+// tokenGuard rejects requests without the token. The index page is guarded
+// too: serving an unauthenticated shell that then fails every API call is
+// worse than a clean 401.
+func tokenGuard(token string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer "+token || r.URL.Query().Get("token") == token {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"unauthorized: missing or invalid token"}`))
+	})
 }
 
 // csrfGuard rejects state-changing requests that don't carry a JSON content type.
@@ -395,6 +430,9 @@ func (s *Server) RunGraceful(ctx context.Context, addr string) error {
 
 func (s *Server) index(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// The SPA shell is re-served per deploy (hashed asset names live inside it);
+	// a heuristically cached copy would break upgrades until its expiry passed.
+	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = config.MigrateLegacyIfNeeded()
 	lang := "auto"
 	if cfg, err := config.Load(); err == nil {
@@ -427,6 +465,10 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	// nginx buffers proxied responses by default, which would sit on every
+	// event until the buffer filled or the stream ended; this header is the
+	// documented opt-out for ngx_http_proxy_module.
+	w.Header().Set("X-Accel-Buffering", "no")
 
 	ch, unsubscribe := s.bc.Subscribe()
 	defer unsubscribe()
