@@ -173,8 +173,50 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	}
 
 	out := make(chan provider.Chunk)
-	go c.readStream(resp, out)
+	go c.streamWithReconnect(ctx, resp, newReq, out)
 	return out, nil
+}
+
+// maxStreamReconnects caps mid-stream replays per Stream call (P1-A1: the
+// openai client always had this; anthropic turns used to die on the FIRST
+// pre-output connection cut).
+const maxStreamReconnects = 3
+
+// streamWithReconnect drives readStream and, when the connection is cut before
+// any model output has been forwarded, replays the request instead of failing
+// the turn — mirroring the openai client. Once anything was emitted, a replay
+// would duplicate output, so the error surfaces as StreamInterruptedError and
+// the agent-level recovery takes over.
+func (c *client) streamWithReconnect(ctx context.Context, resp *http.Response, newReq func(context.Context) (*http.Request, error), out chan<- provider.Chunk) {
+	defer close(out)
+	for attempt := 0; ; attempt++ {
+		emitted, err := c.readStream(resp, out)
+		if err == nil {
+			return
+		}
+		if !provider.IsConnReset(err) {
+			out <- provider.Chunk{Type: provider.ChunkError, Err: err}
+			return
+		}
+		if emitted {
+			out <- provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{Err: err}}
+			return
+		}
+		if attempt >= maxStreamReconnects {
+			out <- provider.Chunk{Type: provider.ChunkError, Err: err}
+			return
+		}
+		next, rerr := provider.SendWithRetry(ctx, c.http, provider.SendOptions{
+			ProvName:   c.name,
+			KeyEnv:     c.keyEnv,
+			KeyPresent: c.apiKey != "",
+		}, newReq)
+		if rerr != nil {
+			out <- provider.Chunk{Type: provider.ChunkError, Err: rerr}
+			return
+		}
+		resp = next
+	}
 }
 
 // buildRequest converts the transport-agnostic Request into the Messages API shape:
@@ -221,11 +263,39 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 				appendBlocks("user", contentBlock{Type: "text", Text: textContent})
 			}
 		case provider.RoleTool:
-			content := textContent
-			if content == "" {
-				content = "(no output)" // tool_result content must be non-empty
+			block := contentBlock{Type: "tool_result", ToolUseID: m.ToolCallID}
+			// Multimodal tool results (G6, view_image): a []ContentPart result
+			// becomes nested text/image blocks so a vision model sees the image;
+			// non-image parts (audio) have no tool_result representation and are
+			// skipped. A plain string result keeps the simple shape.
+			if parts, ok := m.Content.([]provider.ContentPart); ok {
+				inner := make([]contentBlock, 0, len(parts))
+				for _, p := range parts {
+					switch p.Type {
+					case "text":
+						if p.Text != "" {
+							inner = append(inner, contentBlock{Type: "text", Text: p.Text})
+						}
+					case "image_url":
+						if p.ImageURL != nil {
+							if mt, data, ok := provider.ParseImageDataURL(p.ImageURL.URL); ok {
+								inner = append(inner, contentBlock{Type: "image", Source: &imageSource{Type: "base64", MediaType: mt, Data: data}})
+							}
+						}
+					}
+				}
+				if len(inner) == 0 {
+					inner = append(inner, contentBlock{Type: "text", Text: "(no output)"})
+				}
+				block.Content = inner
+			} else {
+				content := textContent
+				if content == "" {
+					content = "(no output)" // tool_result content must be non-empty
+				}
+				block.Content = content
 			}
-			appendBlocks("user", contentBlock{Type: "tool_result", ToolUseID: m.ToolCallID, Content: content})
+			appendBlocks("user", block)
 		case provider.RoleAssistant:
 			var blocks []contentBlock
 			// Replay the signed thinking block first (Anthropic requires it precede
@@ -303,9 +373,8 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 // and a complete ChunkToolCall when the block closes; usage is assembled from
 // message_start (input/cache) + message_delta (output + stop_reason) and emitted
 // once before ChunkDone.
-func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
+func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) (emitted bool, err error) {
 	defer resp.Body.Close()
-	defer close(out)
 
 	// Close the body if the stream stalls past c.idleTimeout so scanner.Scan()
 	// unblocks instead of hanging on a half-open connection. The watchdog owns the
@@ -367,8 +436,8 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
 		}
 
 		var ev streamEvent
-		if err := json.Unmarshal([]byte(data), &ev); err != nil {
-			out <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: decode stream: %w", c.name, err)}
+		if jerr := json.Unmarshal([]byte(data), &ev); jerr != nil {
+			err = fmt.Errorf("%s: decode stream: %w", c.name, jerr)
 			return
 		}
 
@@ -393,10 +462,12 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
 			switch ev.Delta.Type {
 			case "text_delta":
 				if ev.Delta.Text != "" {
+					emitted = true
 					out <- provider.Chunk{Type: provider.ChunkText, Text: ev.Delta.Text}
 				}
 			case "thinking_delta":
 				if ev.Delta.Thinking != "" {
+					emitted = true
 					out <- provider.Chunk{Type: provider.ChunkReasoning, Text: ev.Delta.Thinking}
 				}
 			case "signature_delta":
@@ -410,6 +481,7 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
 			}
 		case "content_block_stop":
 			if tc := tools[ev.Index]; tc != nil {
+				emitted = true
 				out <- provider.Chunk{Type: provider.ChunkToolCall, ToolCall: tc}
 				delete(tools, ev.Index)
 			}
@@ -428,17 +500,17 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
 			if ev.Error != nil && ev.Error.Message != "" {
 				msg = ev.Error.Message
 			}
-			out <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: %s", c.name, msg)}
+			err = fmt.Errorf("%s: %s", c.name, msg)
 			return
 		}
 	}
 
 	if stalled.Load() {
-		out <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, idleTimeout)}
+		err = fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, idleTimeout)
 		return
 	}
-	if err := scanner.Err(); err != nil {
-		out <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: read stream: %w", c.name, err)}
+	if serr := scanner.Err(); serr != nil {
+		err = fmt.Errorf("%s: read stream: %w", c.name, serr)
 		return
 	}
 
@@ -454,6 +526,7 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk) {
 		}}
 	}
 	out <- provider.Chunk{Type: provider.ChunkDone}
+	return emitted, nil
 }
 
 // mapStopReason translates Anthropic stop reasons to the OpenAI-style finish
@@ -522,7 +595,7 @@ type contentBlock struct {
 	Name         string          `json:"name,omitempty"`        // tool_use
 	Input        json.RawMessage `json:"input,omitempty"`       // tool_use
 	ToolUseID    string          `json:"tool_use_id,omitempty"` // tool_result
-	Content      string          `json:"content,omitempty"`     // tool_result
+	Content      any             `json:"content,omitempty"`     // tool_result: string, or []contentBlock when the result carries images
 	Source       *imageSource    `json:"source,omitempty"`      // image
 	CacheControl *cacheControl   `json:"cache_control,omitempty"`
 }

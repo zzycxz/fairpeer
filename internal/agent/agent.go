@@ -31,7 +31,12 @@ const maxToolOutputBytes = 32 * 1024
 
 const maxFinalReadinessBlocks = 3
 const maxEmptyFinalBlocks = 3
-const maxStreamRecoveries = 1
+
+// defaultMaxStreamRecoveries is per-turn budget for agent-level stream
+// recovery (provider-level replays are separate). Runtime-proven against the
+// dsh mock server: with 1, a SECOND mid-stream disconnect killed the whole
+// turn — raised to 3 and made configurable (P1-A1).
+const defaultMaxStreamRecoveries = 3
 
 // Runner executes one task turn. *Agent satisfies it; the controller and compose
 // hold a Runner so they're agnostic to the concrete executor. (The two-model
@@ -147,6 +152,9 @@ type Agent struct {
 	maxStepsKey string
 	temperature float64
 	pricing     *provider.Pricing
+	// maxStreamRecoveries bounds agent-level stream-recovery retries per turn
+	// (0 falls back to defaultMaxStreamRecoveries).
+	maxStreamRecoveries int
 
 	// sink receives the turn's typed event stream (reasoning/text deltas, tool
 	// dispatch/results, usage, notices). The agent no longer formats output
@@ -323,8 +331,8 @@ type Agent struct {
 	// error for the failure-only storm breaker to see.
 	// repeatMu guards it: writer batches with disjoint preview paths execute
 	// concurrently (runParallel), so record/block fire from parallel goroutines.
-	repeatMu             sync.Mutex
-	repeatSuccessCounts  map[string]int
+	repeatMu            sync.Mutex
+	repeatSuccessCounts map[string]int
 	// repeatText detects streamed-output repetition (the same passage emitted
 	// over and over) within a single answer. Advisory only: it surfaces a
 	// Notice on detection, it never aborts the turn — distinct from the
@@ -676,6 +684,9 @@ func (a *Agent) CompactNow(ctx context.Context, instructions string) error {
 // Options configures an Agent.
 type Options struct {
 	MaxSteps int
+	// MaxStreamRecoveries bounds agent-level stream-recovery retries per turn.
+	// 0 uses the default (3).
+	MaxStreamRecoveries int
 	// MaxStepsKey names the configuration knob shown when the MaxSteps guard is
 	// hit. Empty defaults to agent.max_steps.
 	MaxStepsKey string
@@ -762,13 +773,14 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		maxStepsKey = "agent.max_steps"
 	}
 	return &Agent{
-		prov:              prov,
-		tools:             tools,
-		session:           session,
-		maxSteps:          opts.MaxSteps,
-		maxStepsKey:       maxStepsKey,
-		temperature:       opts.Temperature,
-		pricing:           opts.Pricing,
+		prov:        prov,
+		tools:       tools,
+		session:     session,
+		maxSteps:            opts.MaxSteps,
+		maxStepsKey:         maxStepsKey,
+		maxStreamRecoveries: opts.MaxStreamRecoveries,
+		temperature: opts.Temperature,
+		pricing:     opts.Pricing,
 		// 4-1 dual-track: the agent's sink IS the item adapter, which
 		// forwards to the real sink AND emits structured ItemEvents. Every
 		// a.sink.Emit call produces both forms — old sinks see zero
@@ -826,6 +838,7 @@ func (a *Agent) Run(ctx context.Context, input any) error {
 	finalReadinessBlocks := 0
 	emptyFinalBlocks := 0
 	streamRecoveries := 0
+	overflowRetried := false
 
 	for step := 0; a.maxSteps <= 0 || step < a.maxSteps; step++ {
 		// Graceful pause point: if the user requested a pause, finish any prior
@@ -862,7 +875,11 @@ func (a *Agent) Run(ctx context.Context, input any) error {
 
 		text, reasoning, signature, calls, usage, interrupted, partialToolStarted, err := a.stream(ctx, step+1)
 		if err != nil {
-			if interrupted && streamRecoveries < maxStreamRecoveries {
+			recovMax := a.maxStreamRecoveries
+			if recovMax <= 0 {
+				recovMax = defaultMaxStreamRecoveries
+			}
+			if interrupted && streamRecoveries < recovMax {
 				streamRecoveries++
 				if hasVisibleFinalAnswer(text) {
 					a.session.Add(provider.Message{
@@ -876,8 +893,29 @@ func (a *Agent) Run(ctx context.Context, input any) error {
 					Role:    provider.RoleUser,
 					Content: streamRecoveryMessage(hasVisibleFinalAnswer(text), partialToolStarted),
 				})
-				a.sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: streamRecoveries, RetryMax: maxStreamRecoveries})
+				// A visible separator so the user understands the partial text
+				// above was cut off and a continuation follows (the resume used
+				// to splice new text silently after the half answer — the model
+				// often re-told it, reading like duplication).
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+					Text: fmt.Sprintf("⚠ 连线中断，已保留部分输出，正在续写（第 %d/%d 次恢复）", streamRecoveries, recovMax)})
+				a.sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: streamRecoveries, RetryMax: recovMax})
 				step-- // recovery retries do not consume the tool-round maxSteps budget
+				continue
+			}
+			// P1-A2: a context-window rejection used to kill the turn with a raw
+			// 400. One forced compaction (bypassing the ratio thresholds) and a
+			// retry of the same step recovers it — mirrors dsh's
+			// maxOverflowRetries=1 path. A second overflow in the same turn
+			// means the tail alone exceeds the window (nothing left to fold).
+			if isContextOverflowError(err) && !overflowRetried {
+				overflowRetried = true
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+					Text: "⚠ 请求超出模型上下文窗口——正在强制压缩会话并重试（本回合仅一次）。若再次超出，请缩短输入或换更大窗口的模型。"})
+				if cerr := a.compact(ctx, "context-overflow", "", true); cerr != nil {
+					return err // compaction failed: surface the original overflow
+				}
+				step--
 				continue
 			}
 			return err
@@ -978,7 +1016,7 @@ func (a *Agent) Run(ctx context.Context, input any) error {
 		for i, call := range calls {
 			a.session.Add(provider.Message{
 				Role:       provider.RoleTool,
-				Content:    results[i],
+				Content:    toolResultContent(call.Name, results[i]),
 				ToolCallID: call.ID,
 				Name:       call.Name,
 			})
@@ -1535,7 +1573,16 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 
 	for _, batch := range partitionToolCalls(a.tools, calls, previews) {
 		if batch.parallel && batch.end-batch.start > 1 {
-			runParallel(batch.start, batch.end, run)
+			// Task fan-out batches get the tighter sub-agent cap; read-only
+			// batches keep the wide 8-way pool (P1-D1).
+			width := 8
+			for i := batch.start; i < batch.end; i++ {
+				if calls[i].Name == "task" {
+					width = maxConcurrentTasks
+					break
+				}
+			}
+			runParallelCap(batch.start, batch.end, run, width)
 			continue
 		}
 		for i := batch.start; i < batch.end; i++ {
@@ -1581,10 +1628,10 @@ func partitionToolCalls(r *tool.Registry, calls []provider.ToolCall, previews []
 	var batches []toolCallBatch
 	i := 0
 	for i < len(calls) {
-		if parallelisable(r, calls[i].Name) {
+		if parallelisable(r, calls[i].Name, []byte(calls[i].Arguments)) {
 			start := i
 			i++
-			for i < len(calls) && parallelisable(r, calls[i].Name) {
+			for i < len(calls) && parallelisable(r, calls[i].Name, []byte(calls[i].Arguments)) {
 				i++
 			}
 			batches = append(batches, toolCallBatch{start: start, end: i, parallel: true})
@@ -1609,7 +1656,7 @@ func partitionToolCalls(r *tool.Registry, calls []provider.ToolCall, previews []
 				claimed[p] = true
 			}
 			i++
-			for i < len(calls) && !parallelisable(r, calls[i].Name) &&
+			for i < len(calls) && !parallelisable(r, calls[i].Name, []byte(calls[i].Arguments)) &&
 				calls[i].Name != "complete_step" && calls[i].Name != "todo_write" {
 				next := writerPaths(previewAt(i))
 				if len(next) == 0 {
@@ -1652,17 +1699,47 @@ func writerPaths(preview []diff.Change) []string {
 	return paths
 }
 
-func parallelisable(r *tool.Registry, name string) bool {
+// maxConcurrentTasks caps simultaneous concurrent=true sub-agents (P1-D1):
+// three balances real speedup against token-rate explosion and provider RPM.
+const maxConcurrentTasks = 3
+
+func parallelisable(r *tool.Registry, name string, args json.RawMessage) bool {
 	if name == "complete_step" || name == "todo_write" {
 		return false
 	}
 	t, ok := r.Get(name)
-	return ok && t.ReadOnly()
+	if !ok {
+		return false
+	}
+	if t.ReadOnly() {
+		return true
+	}
+	// P1-D1: task is a writer, but INDEPENDENT sub-tasks opted in with
+	// concurrent=true fan out alongside the read-only run (write-type
+	// sub-agents already run in isolated git worktrees, so parallel writes
+	// don't collide). The cap lives in runParallel.
+	if name == "task" {
+		var p struct {
+			Concurrent bool `json:"concurrent"`
+		}
+		return json.Unmarshal(args, &p) == nil && p.Concurrent
+	}
+	return false
 }
 
 func runParallel(start, end int, run func(int)) {
-	const maxParallel = 8
-	sem := make(chan struct{}, maxParallel)
+	runParallelCap(start, end, run, 8)
+}
+
+// runParallelCap runs run(i) for i in [start,end) with at most width
+// goroutines in flight. Task fan-out batches route through here with a tighter
+// cap (maxConcurrentTasks): three simultaneous sub-agents is the sweet spot
+// between real speedup and token-rate explosion (P1-D1).
+func runParallelCap(start, end int, run func(int), width int) {
+	if width < 1 {
+		width = 1
+	}
+	sem := make(chan struct{}, width)
 	var wg sync.WaitGroup
 	for i := start; i < end; i++ {
 		i := i
@@ -1964,7 +2041,9 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall, preview 
 // tool may emit in its result text (e.g. image_generate's ![image](...) output).
 // We surface them as structured attachments so the frontend can render the
 // picture under the tool card without depending on the model echoing the path.
-var attachmentImageRe = regexp.MustCompile(`\.fairpeer/attachments/[^\s)'"]+\.(?:png|jpg|jpeg|gif|webp|bmp|svg|tif|tiff)`)
+// The separator between components matches both / and \ — some tools
+// (screen_* on Windows) emit backslash paths from filepath.Join.
+var attachmentImageRe = regexp.MustCompile(`\.fairpeer[\\/]+attachments[\\/]+[^\s)'"]+\.(?:png|jpg|jpeg|gif|webp|bmp|svg|tif|tiff)`)
 
 // extractImageAttachments pulls deduped .fairpeer/attachments image paths from a
 // tool result string, preserving first-seen order.

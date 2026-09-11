@@ -299,7 +299,10 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 			// unconditionally — they target models the user explicitly chose as
 			// voice_model, which are audio-capable by definition; there's no
 			// separate "audio" capability flag to gate on.
-			if m.Role == provider.RoleUser {
+			// RoleTool is included (G6): view_image attaches the image to the
+			// tool result so the model sees it; non-vision models get the text
+			// caption after the strip below.
+			if m.Role == provider.RoleUser || m.Role == provider.RoleTool {
 				if parts, ok := m.Content.([]provider.ContentPart); ok {
 					if !ModelSupportsVision(c.model, c.vision) {
 						// No vision: image_url parts must never reach the wire

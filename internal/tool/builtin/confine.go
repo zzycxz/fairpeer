@@ -3,6 +3,7 @@ package builtin
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -55,6 +56,11 @@ func ConfineWriters(roots []string) []tool.Tool {
 		deleteRange{roots: rs},
 		deleteSymbol{roots: rs},
 		notebookEdit{roots: rs},
+		// apply_patch and move_file are multi-path file writers (add/update/delete/
+		// move). They were missing here and from Workspace.Tools — their zero-value
+		// init registrations bypassed [sandbox] workspace_root on both paths.
+		applyPatch{roots: rs},
+		moveFile{roots: rs},
 		// Document tools that write files (doc_write/csv_write/xlsx_write/doc_convert)
 		// are confined here too — without this they'd only do filepath.Abs and could
 		// write anywhere (e.g. ~/.ssh/authorized_keys), bypassing [sandbox] workspace_root.
@@ -92,6 +98,9 @@ func ConfineReaders(roots []string) []tool.Tool {
 	return []tool.Tool{
 		readFile{roots: rs},
 		grepTool{roots: rs},
+		// view_image reads image files by path — same read boundary applies,
+		// otherwise a screenshot outside the roots could still reach the model.
+		viewImageTool{roots: rs},
 		// Document read tools (doc_read/csv_read/xlsx_read/xlsx_query) also read
 		// files by path, so they need the same read-boundary as read_file when
 		// read isolation is enabled — otherwise they'd bypass [sandbox] read_roots.
@@ -186,8 +195,24 @@ func realPath(path string) (string, error) {
 // within reports whether path is at or below root. Both must be absolute,
 // cleaned, symlink-free. It uses filepath.Rel so it is correct across volumes
 // and is not fooled by a prefix that only matches a partial path component
-// (e.g. /work-other is not within /work).
+// (e.g. /work-other is not within /work). Windows paths are case-insensitive
+// (C:\Users and c:\users are the same directory), so there the comparison
+// retries case-insensitively — a drive-letter case difference must not be
+// misread as an escape outside the workspace.
 func within(root, path string) bool {
+	if withinRel(root, path) {
+		return true
+	}
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	// Retry case-insensitively: either Rel failed outright (different-case
+	// volume names) or reported an escape rooted only in casing.
+	return withinRel(strings.ToLower(root), strings.ToLower(path))
+}
+
+// withinRel is the case-sensitive Rel containment check.
+func withinRel(root, path string) bool {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return false

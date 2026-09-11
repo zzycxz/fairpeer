@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [Unreleased]
+
+### feat(tools): G6 view_image 读图 + G5 exec_session 交互式会话——codex 差距审计收尾
+
+CODEX_GAP_AUDIT_2026-09-09 的 G5/G6 落地（G1 Windows 沙箱与 G4 网络 per-host 策略为多日专项，排期待定）：
+
+- **view_image**（新工具，G6）：读图片文件（png/jpg/jpeg/webp/gif，≤8MB）使多模态模型直接看到图像——agent 识别 `view_image:` 标记行，把文件转 base64 data URL 组成 [文字, image_url] content parts 附进 tool 消息；非视觉模型由 provider 层剥离图像、保留文字说明；ConfineReaders 纳入 read_roots 读边界；失败一律降级为纯文本（看图是增强不是依赖）
+- **openai provider**：多模态部件转换从 RoleUser 扩展到 RoleTool——tool 消息的 image_url 部件按 vision 能力发 wire 或剥离
+- **anthropic provider**：RoleTool 的 tool_result 支持嵌套 content blocks（text/image base64 源）——contentBlock.Content 放宽为 any
+- **exec_session**（新工具，G5）：持久交互式管道会话——spawn/write/read/kill 四动作，stdin 喂入（Windows 管道 CRLF 行尾），输出 64KB 环形缓冲 + read 游标增量，会话上限 8、仅回收已退出的；补上 bash 工具"无法喂 stdin"的交互缺口（REPL/逐行协议；全屏 TUI 仍不支持，管道形态对标 codex unified_exec）
+- 测试：view_image 标记/拒绝、agent 转换三态、exec_session 生命周期；builtin/agent/provider 全家绿
+
 ### fix(serve,config): 补齐已提交 cli 的两个缺失依赖——serve token 守卫 + ConfigWarnings 字段
 
 - serve.go：Server.authToken 字段 + SetAuthToken + tokenGuard 中间件接线（graceful/events 同步守卫）——cli.go runServe 的 --token 调用自此有真实实现
