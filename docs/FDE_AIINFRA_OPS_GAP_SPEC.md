@@ -4,6 +4,7 @@
 - 进度更新（2026-09-12，五轮排查后）：§4.0 与 §4.1-1/2/3/4 已实现并经 5 轮×3 子任务排查修复——下文 §2.1 的"GPU 指标采集 ❌/告警枚举 🟡"两行与盲点 #1/#3/#4 已被实现消化（采集/标签化/告警开面落地，行号亦漂移）， 本文其余判据仍有效；XID 证据主源换内核日志（见 §4.1-1 实现注记）。
 - 修订：2026-09-11 第二轮复审修正五处——estop 语义改 hold、P0 标注为范围提案（尊重 GPU_TODO dogfooding 门槛）、分工线表述收敛并补反向边界、AuditProject 改为复用模式不扩类型、新增盲点 16/17 与 AI infra 定位声明（详见 §五修订记录）
 - 性质：调研纪要 + 缺口规格（对 `NETDEV_SPEC_V2.md`、`GPU_TODO.md`、`PROFILE_CAPABILITY_MATRIX.md` 的承接与修正）
+- 后续批次：0.3.0 落地后的排查遗留清仓与待裁决项规格化见 `NETDEV_0301_BATCH_SPEC.md`（批次 A 卫生清仓 / 批次 B 设计取舍 / 批次 C dogfooding）
 - 调研方法：
   - **轮 1（业界对标 × 2）**：FDE 运维侧能力清单 64 条（33 基线/31 进阶，来源：Palantir/OpenAI/Anthropic JD、Troubleshoot.sh/Replicated/sos report、SRE 书籍等）；AI infra 运维侧能力清单 77 条（约 40 条 baseline，来源：NVIDIA DCGM/XID/NVSentinel/Mission Control 文档、vLLM/Triton/NCCL 文档、Meta/ByteDance 论文、Google SRE）。
   - **轮 2（代码承接映射）**：本仓库 15 个引擎内部精读（告警/时序/采集/割接/提案/Job/分诊/kube-docker API/案例包/信封/日志/通知/审计/急停/设备模型），逐项对照业界清单，给出能力边界与扩展点（附行号）。
