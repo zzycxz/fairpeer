@@ -68,6 +68,10 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		"xlsx_write":     xlsxWrite{roots: roots},
 		"doc_convert":    docConvert{roots: roots},
 		"mindmap_create": mindmapCreate{roots: roots},
+		// G5/G6 (CODEX_GAP_AUDIT): both resolve paths relative to the workspace —
+		// without these bindings they'd fall back to the process launch cwd.
+		"view_image":   viewImageTool{workDir: w.Dir, roots: roots},
+		"exec_session": execSessionTool{workDir: w.Dir},
 	}
 	all := tool.Builtins()
 	if len(enabled) == 0 {
