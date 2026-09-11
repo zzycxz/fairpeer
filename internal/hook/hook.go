@@ -461,6 +461,9 @@ func home(override string) string {
 	if override != "" {
 		return override
 	}
+	if trustHomeOverride != "" {
+		return trustHomeOverride
+	}
 	if h, err := os.UserHomeDir(); err == nil {
 		return h
 	}

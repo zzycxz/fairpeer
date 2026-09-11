@@ -350,6 +350,7 @@ var Chinese = Messages{
   fairpeer doctor [--json]                              输出脱敏的本地诊断信息
   fairpeer bot start|doctor|weixin-login                多渠道 IM bot 网关
   fairpeer trustdomain <init|status|run|...>           私有网信任域账本（docs/TRUSTDOMAIN_SPEC.md）
+  fairpeer trust [-remove] [dir]                       信任/撤销信任项目根（放行其 hooks、[[plugins]]、.mcp.json）
   fairpeer version
   fairpeer help
 

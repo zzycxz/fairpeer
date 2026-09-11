@@ -108,6 +108,9 @@ func Run(args []string, version string) int {
 	case "trustdomain":
 		configureCLIThemeFromConfigNoProbe()
 		return trustdomainCommand(rest, version)
+	case "trust":
+		configureCLIThemeFromConfigNoProbe()
+		return trustCommand(rest)
 	case "version", "--version", "-v":
 		fmt.Println("fairpeer", version)
 		return 0
@@ -234,6 +237,11 @@ func runAgent(args []string) int {
 		return rc
 	}
 	cfg, _ := config.Load()
+	// Surface load-time notices (e.g. untrusted-project plugin/MCP skips from
+	// the G3 trust gate) — run mode has no welcome banner to carry them.
+	for _, w := range cfg.UntrustedProjectNotices {
+		fmt.Fprintln(os.Stderr, "note: "+w)
+	}
 	configureCLIThemeFromConfigForTTYOutput()
 
 	prompt := strings.TrimSpace(strings.Join(fs.Args(), " "))
@@ -385,7 +393,7 @@ func runServe(args []string) int {
 		ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
 	}
 
-	fmt.Printf("fairpeer serve — %s on http://%s\n", ctrl.Label(), *addr)
+	fmt.Printf("fairpeer serve — %s on http://%s\n", ctrl.Label(), displayAddr(*addr))
 	srv := serve.New(ctrl, bc)
 	if *token != "" {
 		srv.SetAuthToken(*token)
@@ -395,8 +403,10 @@ func runServe(args []string) int {
 		// unauthenticated agent endpoint sit on the LAN silently.
 		fmt.Fprintln(os.Stderr, "warning: serving on a non-loopback address WITHOUT --token; anyone who can reach this port drives the agent")
 	}
-	// Use graceful shutdown so SIGINT/SIGTERM drain active connections.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Use graceful shutdown so SIGINT/SIGTERM drain active connections. SIGHUP
+	// (SSH session drop) joins them, same as the run path — a dropped SSH
+	// session should stop the server, not orphan it.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	if err := srv.RunGraceful(ctx, *addr); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -413,6 +423,22 @@ func isLoopbackHost(host string) bool {
 		return true
 	}
 	return net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()
+}
+
+// displayAddr rewrites a wildcard listen address into the URL a local user can
+// actually open, for the startup banner: "0.0.0.0:8787" (or ":8787", ":::8787")
+// listens on all interfaces, but "http://0.0.0.0:8787" is not a usable URL —
+// loopback is always one of the bound interfaces.
+func displayAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	switch host {
+	case "", "0.0.0.0", "::":
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, port)
 }
 
 // serveOfflineCapabilityBanner builds the one-line startup notice naming the

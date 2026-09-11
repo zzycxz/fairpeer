@@ -47,6 +47,27 @@ func Trust(projectRoot, homeDir string) error {
 	return writeTrust(homeDir, tf)
 }
 
+// Untrust revokes projectRoot's trust flag. Idempotent — revoking an
+// untrusted (or unknown) root succeeds without error.
+func Untrust(projectRoot, homeDir string) error {
+	if projectRoot == "" {
+		return nil
+	}
+	tf := readTrust(homeDir)
+	if tf.Projects == nil {
+		return nil
+	}
+	tf.Projects[absRoot(projectRoot)] = false
+	return writeTrust(homeDir, tf)
+}
+
+// trustHomeOverride lets tests redirect the trust store away from the real
+// user home. Consulted by home() when the caller passes no explicit override.
+var trustHomeOverride string
+
+// SetTrustHomeForTest redirects the trust store to dir. Pass "" to reset.
+func SetTrustHomeForTest(dir string) { trustHomeOverride = dir }
+
 func absRoot(root string) string {
 	if abs, err := filepath.Abs(root); err == nil {
 		return abs

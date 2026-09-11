@@ -21,6 +21,7 @@ import (
 	"github.com/zzycxz/fairpeer/internal/agent"
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/hook"
 	"github.com/zzycxz/fairpeer/internal/instruction"
 	"github.com/zzycxz/fairpeer/internal/netclient"
 	"github.com/zzycxz/fairpeer/internal/plugin"
@@ -1319,6 +1320,9 @@ name = "legacy-eager"
 command = "fairpeer-missing-legacy-eager-mcp"
 tier = "eager"
 `)
+	if err := hook.Trust(dir, ""); err != nil {
+		t.Fatal(err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -1367,6 +1371,9 @@ name = "legacy-lazy"
 command = "fairpeer-missing-legacy-lazy-mcp"
 tier = "lazy"
 `)
+	if err := hook.Trust(dir, ""); err != nil {
+		t.Fatal(err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -1569,6 +1576,9 @@ name = "slowserver"
 command = "fairpeer-missing-slow-mcp-binary"
 tier = "eager"
 `)
+	if err := hook.Trust(dir, ""); err != nil {
+		t.Fatal(err)
+	}
 
 	var notices []event.Event
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

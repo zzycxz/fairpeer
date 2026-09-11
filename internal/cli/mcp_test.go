@@ -11,6 +11,7 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/control"
+	"github.com/zzycxz/fairpeer/internal/hook"
 	"github.com/zzycxz/fairpeer/internal/plugin"
 )
 
@@ -476,6 +477,9 @@ func TestApplyMCPModeDropsLegacyTier(t *testing.T) {
 	if err := cfg.SaveTo("fairpeer.toml"); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
+	if err := hook.Trust(".", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	m := newTestChatTUI()
 	m.mcp = &mcpManager{
@@ -510,6 +514,9 @@ func TestApplyMCPModeRecordsPluginConnectFailure(t *testing.T) {
 	cfg.Plugins = []config.PluginEntry{{Name: "broken", Command: "definitely-missing-fairpeer-mcp", Tier: "lazy"}}
 	if err := cfg.SaveTo("fairpeer.toml"); err != nil {
 		t.Fatalf("save config: %v", err)
+	}
+	if err := hook.Trust(".", ""); err != nil {
+		t.Fatal(err)
 	}
 
 	m := newTestChatTUI()

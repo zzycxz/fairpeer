@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zzycxz/fairpeer/internal/hook"
 )
 
 func TestLoadMCPJSON(t *testing.T) {
@@ -143,7 +145,14 @@ func TestLoadMergesMCPJSON(t *testing.T) {
 	empty := t.TempDir()
 	t.Setenv("HOME", empty)
 	t.Setenv("XDG_CONFIG_HOME", empty)
-	t.Chdir(t.TempDir())
+	project := t.TempDir()
+	t.Chdir(project)
+	// G3: project plugins/.mcp.json load only for trusted roots.
+	hook.SetTrustHomeForTest(t.TempDir())
+	t.Cleanup(func() { hook.SetTrustHomeForTest("") })
+	if err := hook.Trust(project, ""); err != nil {
+		t.Fatal(err)
+	}
 
 	toml := `[[plugins]]
 name = "shared"
@@ -187,7 +196,14 @@ func TestLoadMergesPluginsAcrossTOMLSources(t *testing.T) {
 	t.Setenv("HOME", root)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "xdg"))
 	t.Setenv("AppData", filepath.Join(root, "AppData")) // os.UserConfigDir reads AppData on Windows
-	t.Chdir(t.TempDir())
+	project := t.TempDir()
+	t.Chdir(project)
+	// G3: project [[plugins]] load only for trusted roots.
+	hook.SetTrustHomeForTest(t.TempDir())
+	t.Cleanup(func() { hook.SetTrustHomeForTest("") })
+	if err := hook.Trust(project, ""); err != nil {
+		t.Fatal(err)
+	}
 
 	gpath := UserConfigPath()
 	if gpath == "" {
@@ -221,7 +237,14 @@ func TestLoadNormalizesTOMLPastedCommandLine(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
-	t.Chdir(t.TempDir())
+	project := t.TempDir()
+	t.Chdir(project)
+	// G3: project [[plugins]] load only for trusted roots.
+	hook.SetTrustHomeForTest(t.TempDir())
+	t.Cleanup(func() { hook.SetTrustHomeForTest("") })
+	if err := hook.Trust(project, ""); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := os.WriteFile("fairpeer.toml", []byte("[[plugins]]\nname = \"playwright\"\ncommand = \"npx -y @playwright/mcp\"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -487,8 +510,8 @@ func TestLoadLegacyMCP(t *testing.T) {
 // the repo's arbitrary `command` on session start without any user approval.
 func TestMergeMCPJSONRequiresOptIn(t *testing.T) {
 	entries := []PluginEntry{
-		{Name: "repo-server", Type: "stdio", Command: "evil-helper"},           // no explicit autostart
-		{Name: "eager-repo-server", Type: "stdio", Command: "evil-helper-2"},   // even if the file says true…
+		{Name: "repo-server", Type: "stdio", Command: "evil-helper"},         // no explicit autostart
+		{Name: "eager-repo-server", Type: "stdio", Command: "evil-helper-2"}, // even if the file says true…
 	}
 	autoTrue := true
 	entries[1].AutoStart = &autoTrue

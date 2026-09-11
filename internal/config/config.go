@@ -18,6 +18,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/zzycxz/fairpeer/internal/fileutil"
+	"github.com/zzycxz/fairpeer/internal/hook"
 	"github.com/zzycxz/fairpeer/internal/netclient"
 	"github.com/zzycxz/fairpeer/internal/provider"
 )
@@ -44,6 +45,9 @@ type Config struct {
 	ConfigVersion int    `toml:"config_version"`
 	DefaultModel  string `toml:"default_model"`
 	Language      string `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $FAIRPEER_LANG
+	// UntrustedProjectNotices carries the G3 trust gate's load-time notices.
+	// Never decoded from or encoded to TOML.
+	UntrustedProjectNotices []string `toml:"-" json:"-"`
 	// ReasoningLanguage steers ONLY the visible thinking/reasoning text language
 	// (auto|zh|en), independent of the final-answer language. Default "auto" leaves
 	// it to the provider. It is injected as a transient per-turn block, never into
@@ -1716,11 +1720,54 @@ func LoadForRoot(root string) (*Config, error) {
 		projectTOML = filepath.Join(root, "fairpeer.toml")
 	}
 
+	// G3（CODEX_GAP_AUDIT）：项目自带的自治面——[[plugins]]（MCP 服务器会
+	// 拉起子进程）与 .mcp.json（同）——只对受信任的项目根加载。克隆一个
+	// 仓库不得静默带入可执行服务器。model/providers 覆写暂不门控（数据
+	// 外泄面向量，v2 处理）。信任旗标复用 hooks 的用户全局 trust.json
+	// （`fairpeer trust <dir>` 或 hooks 信任流程写入）。
+	mcpFile := mcpJSONFile
+	if root != "." {
+		mcpFile = filepath.Join(root, mcpJSONFile)
+	}
+	projectPluginsPresent, projectMCPPresent := false, false
+	if _, err := os.Stat(projectTOML); err == nil {
+		projectPluginsPresent = true
+	}
+	if _, err := os.Stat(mcpFile); err == nil {
+		projectMCPPresent = true
+	}
+	projectTrusted := true
+	if (projectPluginsPresent || projectMCPPresent) && !hook.IsTrusted(root, "") {
+		projectTrusted = false
+		skip := ""
+		switch {
+		case projectPluginsPresent && projectMCPPresent:
+			skip = "项目 fairpeer.toml 的 [[plugins]] 与 .mcp.json 的 MCP 服务器"
+		case projectPluginsPresent:
+			skip = "项目 fairpeer.toml 的 [[plugins]]"
+		default:
+			skip = "项目 .mcp.json 的 MCP 服务器"
+		}
+		cfg.UntrustedProjectNotices = append(cfg.UntrustedProjectNotices,
+			fmt.Sprintf("项目 %s 未受信任：已跳过 %s——执行 `fairpeer trust %s` 信任后生效", root, skip, root))
+	}
+
 	var tomlSources []string
 	if uc := userConfigPath(); uc != "" {
 		tomlSources = append(tomlSources, uc)
 	}
 	tomlSources = append(tomlSources, projectTOML)
+	// 未受信任时项目 TOML 仍参与 model/providers 等字段的合并（v1 只闸自治面），
+	// 但不参与下方 [[plugins]] 的重合并。
+	pluginSources := tomlSources
+	if !projectTrusted {
+		pluginSources = make([]string, 0, len(tomlSources))
+		for _, p := range tomlSources {
+			if p != projectTOML {
+				pluginSources = append(pluginSources, p)
+			}
+		}
+	}
 	providersDefined := false
 	for _, path := range tomlSources {
 		if _, err := os.Stat(path); err == nil {
@@ -1745,7 +1792,7 @@ func LoadForRoot(root string) (*Config, error) {
 	// toml.DecodeFile replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
 	// project fairpeer.toml doesn't drop the global config's MCP servers.
-	plugins, err := mergeTOMLPlugins(tomlSources)
+	plugins, err := mergeTOMLPlugins(pluginSources)
 	if err != nil {
 		return nil, err
 	}
@@ -1754,15 +1801,13 @@ func LoadForRoot(root string) (*Config, error) {
 	// Claude Code's .mcp.json (project root) is read last and merged into
 	// [[plugins]], so a server configured for Claude works here unchanged.
 	// fairpeer.toml wins on a name collision (see mergeMCPJSON).
-	mcpFile := mcpJSONFile
-	if root != "." {
-		mcpFile = filepath.Join(root, mcpJSONFile)
-	}
 	entries, err := loadMCPJSON(mcpFile)
 	if err != nil {
 		return nil, err
 	}
-	cfg.mergeMCPJSON(entries)
+	if projectTrusted || !projectMCPPresent {
+		cfg.mergeMCPJSON(entries)
+	}
 
 	// Lowest priority: the v0.x ~/.fairpeer/config.json's mcpServers, so upgrading
 	// from the TypeScript line keeps MCP servers without rewriting them. Anything

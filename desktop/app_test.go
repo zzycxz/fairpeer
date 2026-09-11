@@ -17,9 +17,21 @@ import (
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/control"
 	"github.com/zzycxz/fairpeer/internal/event"
+	"github.com/zzycxz/fairpeer/internal/hook"
 	"github.com/zzycxz/fairpeer/internal/plugin"
 	"github.com/zzycxz/fairpeer/internal/provider"
 )
+
+// trustTestRoot marks dir trusted (G3 project trust gate): these tests
+// exercise project [[plugins]]/MCP merging, which is skipped for untrusted
+// roots. Isolated user dirs (isolateDesktopUserDirs) keep the flag out of the
+// real user home.
+func trustTestRoot(t *testing.T, dir string) {
+	t.Helper()
+	if err := hook.Trust(dir, ""); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // setTestCtrl creates a minimal workspace tab (if needed) and sets its
 // controller, so tests don't depend on the old App.ctrl field.
@@ -510,12 +522,12 @@ func TestModelsForTabListsTestProviderAPIPaidAccess(t *testing.T) {
 	cfg.DefaultModel = "test-provider/test-model-a"
 	cfg.Desktop.ProviderAccess = []string{"test-provider"}
 	cfg.Providers = append(cfg.Providers, config.ProviderEntry{
-		Name:       "test-provider",
-		Kind:       "openai",
-		BaseURL:    "https://api.example.com",
-		Models:     []string{"test-model-a", "test-model-b"},
-		Default:    "test-model-a",
-		APIKeyEnv:  "FAIRPEER_API_KEY",
+		Name:      "test-provider",
+		Kind:      "openai",
+		BaseURL:   "https://api.example.com",
+		Models:    []string{"test-model-a", "test-model-b"},
+		Default:   "test-model-a",
+		APIKeyEnv: "FAIRPEER_API_KEY",
 	})
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
@@ -1244,22 +1256,22 @@ func TestForkCreatesActiveTabWithoutSwitchingSourceController(t *testing.T) {
 	candidates := sessionTranscriptCandidates(dir)
 	for _, candidate := range candidates {
 		{
-		if candidate == path {
-			continue
-		}
-		m, ok, err := agent.LoadBranchMeta(candidate)
-		if err != nil {
-			t.Fatalf("load fork meta: %v", err)
-		}
-		if ok && m.TopicID == meta.TopicID {
-			forkPath = candidate
-			if m.ParentID != agent.BranchID(path) || m.ForkTurn != 1 || m.ForkMessageIndex != 3 {
-				t.Fatalf("fork branch meta = %+v, want parent %q turn 1 index 3", m, agent.BranchID(path))
+			if candidate == path {
+				continue
 			}
-			if m.Scope != "project" || m.WorkspaceRoot != workspace || m.TopicTitle != "Source topic · 分叉" {
-				t.Fatalf("fork topic meta = %+v", m)
+			m, ok, err := agent.LoadBranchMeta(candidate)
+			if err != nil {
+				t.Fatalf("load fork meta: %v", err)
 			}
-		}
+			if ok && m.TopicID == meta.TopicID {
+				forkPath = candidate
+				if m.ParentID != agent.BranchID(path) || m.ForkTurn != 1 || m.ForkMessageIndex != 3 {
+					t.Fatalf("fork branch meta = %+v, want parent %q turn 1 index 3", m, agent.BranchID(path))
+				}
+				if m.Scope != "project" || m.WorkspaceRoot != workspace || m.TopicTitle != "Source topic · 分叉" {
+					t.Fatalf("fork topic meta = %+v", m)
+				}
+			}
 		}
 	}
 	if forkPath == "" {
@@ -1282,6 +1294,7 @@ args = ["-y", "@playwright/mcp"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	trustTestRoot(t, dir)
 
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
@@ -1349,6 +1362,7 @@ tier = "lazy"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	trustTestRoot(t, dir)
 
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
@@ -1383,6 +1397,7 @@ tier = "lazy"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	trustTestRoot(t, dir)
 
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
@@ -1416,6 +1431,7 @@ tier = "lazy"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	trustTestRoot(t, dir)
 
 	host := plugin.NewHost()
 	host.RecordFailure(plugin.Spec{Name: "figma", Type: "http", URL: "https://mcp.figma.com/mcp"}, errors.New("connect: 401 unauthorized"))
@@ -1453,6 +1469,7 @@ tier = "lazy"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	trustTestRoot(t, dir)
 
 	host := plugin.NewHost()
 	host.RecordFailure(plugin.Spec{Name: "figma", Type: "http", URL: "https://mcp.figma.com/mcp"}, errors.New("connect: 401 unauthorized"))
@@ -1515,6 +1532,7 @@ tier = "lazy"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	trustTestRoot(t, dir)
 
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
@@ -1590,6 +1608,7 @@ args = ["-y", "@playwright/mcp"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	trustTestRoot(t, dir)
 
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
@@ -1630,6 +1649,7 @@ tier = "background"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	trustTestRoot(t, dir)
 
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
@@ -1685,6 +1705,7 @@ tier = "lazy"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	trustTestRoot(t, dir)
 
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
@@ -1850,6 +1871,7 @@ tier = "eager"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	trustTestRoot(t, dir)
 
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Host: plugin.NewHost()}), "")
