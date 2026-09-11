@@ -224,6 +224,12 @@ func runAgent(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if *jsonOut && *showThinking {
+		// --json already streams reasoning as `reasoning` events; the human
+		// rendering toggle has nothing to act on. Say so instead of silently
+		// ignoring the combination.
+		fmt.Fprintln(os.Stderr, "note: --show-thinking is ignored with --json (reasoning deltas are streamed as reasoning events)")
+	}
 	if rc := chdirTo(*dir); rc != 0 {
 		return rc
 	}
