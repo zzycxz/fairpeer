@@ -314,6 +314,10 @@ type Event struct {
 	Approval     Approval   // ApprovalRequest
 	Ask          Ask        // AskRequest
 	Err          error      // TurnDone: non-nil on failure
+	// Cancelled marks a TurnDone that ended because the user pressed Stop:
+	// Err is nil (a clean end, not an error), and frontends use this to leave a
+	// visible "stopped by user" trace instead of an indistinguishable silence.
+	Cancelled    bool       // TurnDone: user-initiated stop (Err nil)
 	Compaction   Compaction // Compaction
 	RetryAttempt int        // Retrying: 1-based attempt about to be made
 	RetryMax     int        // Retrying: total attempts before giving up
