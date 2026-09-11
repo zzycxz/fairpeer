@@ -2717,8 +2717,15 @@ function makeMockApp(): AppBindings {
       return c;
     },
     async NetDevCutoverSkip(_id: string, _reason: string): Promise<NetDevCutoverRun> {
+      if (!_reason || !_reason.trim()) throw new Error("skip requires a reason (audited)");
       const c = mockNetDevCutovers.find(x => x.id === _id);
       if (!c) throw new Error("browser dev mock: no such cutover");
+      if (c.status !== "hold") throw new Error("only held cutovers skip a step");
+      const cur = (c.steps ?? [])[c.cursor ?? 0];
+      if (!cur || (cur.status !== "failed" && cur.status !== "gating")) throw new Error("only a failed/gating step can be skipped");
+      cur.status = "skipped";
+      cur.error = "skipped: " + _reason;
+      c.cursor = (c.cursor ?? 0) + 1;
       c.status = "running";
       c.hold_note = "";
       return c;

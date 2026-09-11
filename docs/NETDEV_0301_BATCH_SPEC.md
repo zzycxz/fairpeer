@@ -41,10 +41,14 @@
 - **验收**：代码审阅；进程退出语义对齐 briefing。
 
 ### A6. 浏览器 mock 的 Cutover 状态机与真实后端相悖
-- **问题**：mock `CutoverStart` 返回 `status:"hold"`（真实只有 running/precheck-failed）；`CutoverContinue` 直接翻 done+伪造 report（真实是 running + runner 接管）；`CutoverSkip` 已补空 reason 拒绝但缺步状态前置与 cursor 推进。浏览器 dev 演示的分支在真机永不触发/时序不符（逐行精读 R4 #3）。
+- **问题**：mock `CutoverStart` 返回 `status:"hold"`（真实只有 running/precheck-failed）；`CutoverContinue` 直接翻 done+伪造 report（真实是 running + runner 接管）；`CutoverSkip` **三道闸全缺**（空 reason 不拒、不校验步状态、cursor 不推进、步不标 skipped）。浏览器 dev 演示的分支在真机永不触发/时序不符（逐行精读 R4 #3；2026-09-12 曾修复后因共享文件被并行回写覆盖而丢失，本批次重新落地，见批次 A 收尾注记）。
 - **修法**：Start → `status:"running"`（如需演示决策点，在 Cutovers 预置一条 hold 态 run）；Continue → `running` + 清 hold_note；Skip 补 `steps[cursor].status=="skipped"`、`cursor++`、非 failed/gating 拒绝。
 - **落点**：`desktop/frontend/src/lib/bridge.ts` mock 区。
 - **验收**：浏览器 dev 下 start→continue→skip 的演示态与真机语义一致。
+
+### A6+. 收尾注记（2026-09-12）
+- 共享文件覆盖事件：`bridge.ts` 曾在提交前被并行整文件回写，本批次的 mock Skip 校验随之丢失（HEAD `7e00e3a2` 中不存在）——2026-09-12 已重新落地（reason/状态/步三道闸 + cursor 推进）。**教训：每次并行批次落地后、提交前，对本批次全部共享文件跑一遍标记清单核对**（本会话已用标记 grep 法执行）。
+- 其余本批次前端编辑经标记盘点全部存活（metricDefaults/valueAsNumber/notifySMTPPassword×7/stoppingRef/noticeTimer/estopTitle/dock 全量目录 等）。
 
 **批次 A 验收门禁**：`go build ./internal/... ./cmd/... && cd desktop && go build ./...`、`go test ./internal/netdev/ ./internal/config/ -count=1`、`go test ./... -count=1`（desktop 模块）、`npx tsc --noEmit` 全绿；行为差异仅限上述各项。
 
