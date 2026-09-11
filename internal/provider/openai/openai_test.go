@@ -39,8 +39,10 @@ func TestStreamRetriesThenSucceeds(t *testing.T) {
 	var attempts []int
 	ctx := provider.WithRetryNotify(context.Background(), func(i provider.RetryInfo) {
 		attempts = append(attempts, i.Attempt)
-		if i.Max != provider.MaxRetries {
-			t.Errorf("RetryInfo.Max = %d, want %d", i.Max, provider.MaxRetries)
+		// No SetRetryPolicy override in this package's tests, so the effective
+		// max is the default (retry.go's MaxRetries var became RetryPolicy).
+		if i.Max != provider.DefaultMaxRetries {
+			t.Errorf("RetryInfo.Max = %d, want %d", i.Max, provider.DefaultMaxRetries)
 		}
 	})
 
