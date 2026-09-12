@@ -49,6 +49,7 @@
 - [ ] 训练日志按 step 对齐（logsource 扩展）
 - [ ] Checkpoint 治理（保留策略 / 完整性 / 跨节点取回，复用 SFTP 通道）
 - [ ] 推理服务面：vLLM / Triton 指标
+- [ ] 模型部署面（spec 见 `NETDEV_MODEL_DEPLOY_SPEC.md`）：D-0 割接编排蓝本（零代码）/ D-1 读表增补（sha256sum 等 4 命令）+ vLLM 部署模板 / D-2 /metrics 抓取进 series
 - [ ] 节点横向对比（rank 速度 / 温度 / ECC）
 
 ---
