@@ -131,3 +131,66 @@ type AccelDriver interface {
 - 昆仑芯：baidu/vLLM-Kunlun（RFC #11162 插件，25+ 模型）、xpu-smi/XRE/BKCL/XDR、kunlunxin.com/xpu、FastDeploy P800。
 - 平头哥：含光 800 封闭自用（无公开栈）、真武 M890+SAIL 开源（2026-07）、阿里云 PAI 替代视角。
 - 编排架构：vLLM plugin system（entry_points/Platform/WorkerBase）、SGLang platforms、K8s device plugin→DRA、HAMi（CNCF Incubating，per-vendor 子仓+主仓统一面）、GPUStack（9 类加速器统一纳管）、Atlas 800/TopsRider 一体机专属栈实例。
+
+
+---
+
+## 八、机型线谱与机型能力档案（补充：2026-09-13 两路机型调研）
+
+> 回答"不同型号有不同配置，我们确定能支持吗"。结论：**能支持，但"支持"必须分层定义，且机型差异在同厂商内的代际间就存在（燧原 G3→G4、昆仑芯 P800→M100），不能按厂商粒度建模。** 解法是第八节的"机型能力档案"：结构化承载差异，展示/校验/建议全部数据驱动。
+
+### 8.1 机型线谱摘要（在售/量产主力，完整表见调研轮 1/2 报告）
+
+| 厂商 | 机型 | 卡数/形态 | 单卡显存 | 部署要点 |
+|---|---|---|---|---|
+| NVIDIA | H100/H200 SXM | 8卡 NVLink 全互联 | 80/141G HBM3e | TP 上限 8；vLLM 原生 |
+| NVIDIA | **H20（特供）** | 8卡 | 96G/141G HBM3 | **高带宽低算力特例**：量化+大 KV 为主要手段 |
+| NVIDIA | A100/A800 | 8卡（A800 特供：NVLink 降 400GB/s） | 40/80G | 唯一 MIG 存量主力 |
+| NVIDIA | L40S/L20/4090D | 1-8卡 PCIe **无 NVLink** | 48G/48G/24G | TP>2 受 PCIe 限制；单卡量化推理为主 |
+| NVIDIA | B200/GB200 NVL72 | 机柜级（72 GPU 单一 NVLink 域） | 180G HBM3e | 部署单元是机柜不是服务器 |
+| 昇腾 | Atlas 800I A2 | 8×910B 整机 | 64G HBM | vllm-ascend **完整支持**（最成熟主力） |
+| 昇腾 | Atlas 800I A3 | 8×910C 整机，可组 384 卡超节点 | HBM3e | 支持（独立 A3 kernels，特性演进中） |
+| 昇腾 | Atlas 300I Duo | **第三方 x86 插卡**，双芯 | 48/96G LPDDR4X | vllm-ascend **Experimental**（固定 v0.10.0rc1） |
+| 燧原 | 云燧 S60（G3） | 8卡 x86 插卡 | 48G HBM2e（第三方预估） | vllm-gcu 三条版本线；**无 FP8**；DeepSeek 仅 AWQ |
+| 燧原 | L600（G4） | 模组，128 卡全互联 | 144G HBM | 原生 FP8；vllm-gcu 矩阵**未列** |
+| 昆仑芯 | P800（Kunlun3） | 8卡 OAM | 96G HBM3 | vLLM-Kunlun **唯一列名硬件**；单机 8 卡 W8A8 跑 671B |
+| 昆仑芯 | M100/M300（四代） | 超节点 | 96G HBM3 | 2026 量产；vLLM-Kunlun 未列入 |
+| 平头哥 | 含光 800 / 真武 810E/M890 | 阿里云内 | — | **不外卖**；以阿里云 PAI 视角替代承接评估 |
+
+### 8.2 机型差异的 12 个维度（同厂商内代际间即存在，非跨厂商才有）
+
+① 互联拓扑决定 TP 上限（SXM 全互联/NVL 成对/无 NVLink/HCCS/超节点）；② 显存容量与类型跨代差（48G→144G）；③ 特供 SKU 算力裁剪（H20/A800/4090D/L20）；④ 精度支持代际差（S60 无 FP8、P800 无 FP8、M100 才有）；⑤ 引擎 readiness 按卡型三分支（昇腾 910b/A3/310p）；⑥ 引擎版本×软件栈成对升级（vllm-gcu 每版绑 TopsRider 最低版）；⑦ 图捕获/PD 分离按卡型可用；⑧ 8 卡服务器与超节点两代形态并存；⑨ 插卡 x86 vs OAM/整机柜交付；⑩ 互联协议私有且各代不同；⑪ 模型支持矩阵=卡型×量化×特性三维查表；⑫ 商业模式决定可得性（含光/真武不外卖）。
+
+### 8.3 设计：机型能力档案（Machine Profile，数据驱动，不写死）
+
+**原则**：采集与展示对机型自适应（已验证：GpuBoard 按采集实况渲染，卡数/显存天然自适应）；**部署建议与校验需要结构化的机型档案**——这是当前唯一真空（config 仅有自由文本 model 字段）。
+
+```toml
+# 机型能力档案（厂商×SKU 一行；运维设置内维护，数据来源=官方规格页+真机校准）
+[[netdev.accel_profiles]]
+accel   = "nvidia"            # nvidia | ascend | enflame | kunlunxin
+sku     = "H20"               # 机型/SKU 名（匹配 device.model 前缀或 accel_model）
+cards   = 8                   # 常见卡数（部署建议用）
+vram_gb = 96                  # 单卡显存
+mem_type = "HBM3"
+interconnect = "nvlink4"      # nvlink4 | nvlink-pair | pcie | hccs | supernode | eccl | xpu-link
+special = "cn-market"         # 特供/裁剪标注（可选）
+readiness = "production"      # 引擎 readiness 档：production | new | experimental | unknown（数据来源=引擎生态矩阵）
+notes   = "高带宽低算力：量化+大 KV 为主要手段"
+```
+
+**消费方**（全部数据驱动，零 per-SKU 代码）：
+1. **部署建议校验**（D-2 起）：runbook/提案声明 `tensor_parallel_size=8` 而目标机型 `cards=4` → 建议性校验告警；声明模型 70B FP16（140G）而 `cards×vram_gb=192G` → 通过（带 KV 余量提示）。
+2. **GpuBoard 徽标**：readiness 档（experimental/特供）显式可见，不按架构推断。
+3. **模板参数渲染**：runbook 模板 `{{tp}}` `{{model_path}}` 由档案缺省填入。
+
+### 8.4 支持度承诺分层（对"确定可以支持吗"的精确回答）
+
+| 层级 | 内容 | 承诺范围 |
+|---|---|---|
+| L1 采集观测 | 健康/温度/显存/利用率采集上板 | **全厂商全机型**（薄驱动归一；缺失厂商按客户硬件排期，见 §五 M-2） |
+| L2 编排治理 | runbook/提案/审计/回退/急停 | **硬件无关**（割接引擎天然不感知机型） |
+| L3 部署建议 | TP/显存/量化适配建议 | **按机型能力档案**——档案是数据，新机型=新档案行，无需发版 |
+| L4 引擎兼容保证 | "这型号跑这引擎一定行" | **不承诺**（引擎生态域）；readiness 作为档案数据展示（vllm-ascend 按 910b/A3/310p 三档、vllm-gcu 仅 S60、vLLM-Kunlun 仅 P800），最终以真机验证为准（dogfooding） |
+
+诚实声明：L4 是引擎生态的动态矩阵（vllm-ascend 按 A2/A3/300I 三条 kernels 分支、vllm-gcu 矩阵仅覆盖 S60、vLLM-Kunlun 仅 P800 列名），运维台的职责是把 readiness **作为数据展示并阻止未验证组合静默上线**，而非替引擎厂商背书。
