@@ -349,6 +349,8 @@ type Messages struct {
 	UnknownCommandFmt         string // "unknown command %q"
 	UsageRunHint              string // "usage: fairpeer run [--model NAME] <task>"
 	ErrorPrefix               string // "error:" — prefix for fatal-error output
+	TrustGranted              string // "trusted: " — prefix for successful trust grant
+	TrustRevoked              string // "trust revoked: " — prefix for successful revocation
 	ReconfigureOnUnknownModel string // shown when the configured model no longer resolves and setup is re-run
 	WriteConfigErr            string // "write config:" — prefix for write failure
 	WriteEnvErr               string // "write .env:" — prefix for env-write failure

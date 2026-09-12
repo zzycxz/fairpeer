@@ -311,6 +311,8 @@ var Chinese = Messages{
 	UnknownCommandFmt:         "未知命令 %q",
 	UsageRunHint:              "用法：fairpeer run [--model NAME] <task>",
 	ErrorPrefix:               "错误：",
+	TrustGranted:              "已信任: ",
+	TrustRevoked:              "已撤销信任: ",
 	ReconfigureOnUnknownModel: "配置的模型已不可用 —— 重新运行引导配置。",
 	WriteConfigErr:            "写入配置失败：",
 	WriteEnvErr:               "写入 .env 失败：",

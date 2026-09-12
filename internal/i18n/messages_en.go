@@ -310,6 +310,8 @@ var English = Messages{
 	UnknownCommandFmt:         "unknown command %q",
 	UsageRunHint:              "usage: fairpeer run [--model NAME] <task>",
 	ErrorPrefix:               "error:",
+	TrustGranted:              "trusted: ",
+	TrustRevoked:              "trust revoked: ",
 	ReconfigureOnUnknownModel: "Configured model is no longer available — re-running setup.",
 	WriteConfigErr:            "write config:",
 	WriteEnvErr:               "write .env:",

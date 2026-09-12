@@ -101,6 +101,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		model:       cfg.Model,
 		thinking:    thinking,
 		effort:      effort,
+		vision:      cfg.Vision,
 		http:        httpClient, // no overall timeout; lifecycle is ctx-driven
 		idleTimeout: defaultStreamIdleTimeout,
 	}, nil
@@ -119,6 +120,7 @@ type client struct {
 	model       string
 	thinking    string // "adaptive" enables extended thinking; "" = off (config-driven)
 	effort      string // output_config.effort: low|medium|high; "" = provider default
+	vision      bool   // when true, image blocks are forwarded; when false, stripped (G6)
 	http        *http.Client
 	idleTimeout time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
 }
@@ -250,7 +252,9 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 			}
 		case provider.RoleUser:
 			// Multimodal: extract image parts from []ContentPart if present.
-			if imgs := provider.ImageParts(m.Content); len(imgs) > 0 {
+			// Non-vision models: image parts are stripped (same semantics as
+			// openai's strip — a text-only model cannot process image blocks).
+			if imgs := provider.ImageParts(m.Content); len(imgs) > 0 && c.vision {
 				if textContent != "" {
 					appendBlocks("user", contentBlock{Type: "text", Text: textContent})
 				}
@@ -268,6 +272,8 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 			// becomes nested text/image blocks so a vision model sees the image;
 			// non-image parts (audio) have no tool_result representation and are
 			// skipped. A plain string result keeps the simple shape.
+			// Non-vision models (β-3): image blocks are stripped — forwarding
+			// them to a text-only model wastes tokens and can trigger 400s.
 			if parts, ok := m.Content.([]provider.ContentPart); ok {
 				inner := make([]contentBlock, 0, len(parts))
 				for _, p := range parts {
@@ -277,7 +283,7 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 							inner = append(inner, contentBlock{Type: "text", Text: p.Text})
 						}
 					case "image_url":
-						if p.ImageURL != nil {
+						if p.ImageURL != nil && c.vision {
 							if mt, data, ok := provider.ParseImageDataURL(p.ImageURL.URL); ok {
 								inner = append(inner, contentBlock{Type: "image", Source: &imageSource{Type: "base64", MediaType: mt, Data: data}})
 							}
