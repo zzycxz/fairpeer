@@ -1718,6 +1718,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// isolation architecture, where tracked injection becomes meaningful
 		// again.
 		Cleanup: func() {
+			builtin.KillAll() // exec_session 进程回收（G5 teardown，α-3）
 			if cleanup != nil {
 				cleanup()
 			}

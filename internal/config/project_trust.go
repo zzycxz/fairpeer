@@ -9,12 +9,20 @@ type projectSecuritySnapshot struct {
 	Statusline  StatuslineConfig
 	Permissions PermissionsConfig
 	Sandbox     SandboxConfig
+	LSP         LSPConfig
+	Search      SearchConfig
+	Cowork      CoworkConfig
+	Scheduler   SchedulerConfig
 }
 
 func snapshotProjectSecurity(cfg *Config) projectSecuritySnapshot {
-	return projectSecuritySnapshot{Statusline: cfg.Statusline, Permissions: cfg.Permissions, Sandbox: cfg.Sandbox}
+	return projectSecuritySnapshot{
+		Statusline: cfg.Statusline, Permissions: cfg.Permissions, Sandbox: cfg.Sandbox,
+		LSP: cfg.LSP, Search: cfg.Tools.Search, Cowork: cfg.Cowork, Scheduler: cfg.Scheduler,
+	}
 }
 
 func restoreProjectSecurity(cfg *Config, s projectSecuritySnapshot) {
 	cfg.Statusline, cfg.Permissions, cfg.Sandbox = s.Statusline, s.Permissions, s.Sandbox
+	cfg.LSP, cfg.Tools.Search, cfg.Cowork, cfg.Scheduler = s.LSP, s.Search, s.Cowork, s.Scheduler
 }

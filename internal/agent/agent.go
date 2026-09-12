@@ -2044,6 +2044,11 @@ var attachmentImageRe = regexp.MustCompile(`\.fairpeer[\\/]+attachments[\\/]+[^\
 // tool result string, preserving first-seen order.
 func extractImageAttachments(s string) []event.Attachment {
 	matches := attachmentImageRe.FindAllString(s, -1)
+	// G6: view_image 的标记行是绝对路径——也作为附件提取，让前端能渲染
+	// 模型看到的那张图（不只限 .fairpeer/attachments/ 下的文件）。
+	if strings.HasPrefix(s, viewImageMarker) {
+		matches = append(matches, strings.TrimSpace(strings.TrimPrefix(strings.SplitN(s, "\n", 2)[0], viewImageMarker)))
+	}
 	if len(matches) == 0 {
 		return nil
 	}
