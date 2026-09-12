@@ -2,6 +2,8 @@ package builtin
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -91,7 +93,27 @@ func (t viewImageTool) Execute(_ context.Context, args json.RawMessage) (string,
 	if err != nil {
 		abs = p.Path
 	}
+	// Copy into .fairpeer/attachments/ so the existing attachment rendering and
+	// AttachmentDataURL bridge work without relaxing any security boundary —
+	// the same pipeline image_generate uses. Idempotent (overwrite by name).
+	attachDir := filepath.Join(".fairpeer", "attachments")
+	_ = os.MkdirAll(attachDir, 0o755)
+	attachName := fmt.Sprintf("view_%x%s", md5sum(abs), ext)
+	attachPath := filepath.Join(attachDir, attachName)
+	data, err := os.ReadFile(p.Path)
+	if err != nil {
+		return "", fmt.Errorf("view_image: read %s: %w", p.Path, err)
+	}
+	if err := os.WriteFile(attachPath, data, 0o644); err != nil {
+		return "", fmt.Errorf("view_image: cache copy: %w", err)
+	}
 	// The FIRST line must stay exactly `view_image: <abs>` — the agent loop
 	// parses the path from it; the size rides the second line for humans.
 	return fmt.Sprintf("%s%s\n(%d bytes)", viewImageMarker, abs, st.Size()), nil
+}
+
+// md5sum returns a short hex hash of s for filename dedup.
+func md5sum(s string) string {
+	h := md5.Sum([]byte(s))
+	return hex.EncodeToString(h[:4])
 }
