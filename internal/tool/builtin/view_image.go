@@ -96,6 +96,8 @@ func (t viewImageTool) Execute(_ context.Context, args json.RawMessage) (string,
 	// Copy into .fairpeer/attachments/ so the existing attachment rendering and
 	// AttachmentDataURL bridge work without relaxing any security boundary —
 	// the same pipeline image_generate uses. Idempotent (overwrite by name).
+	// The marker returns this relative path so the frontend can fetch it via
+	// AttachmentDataURL (which rejects absolute paths for security).
 	attachDir := filepath.Join(".fairpeer", "attachments")
 	_ = os.MkdirAll(attachDir, 0o755)
 	attachName := fmt.Sprintf("view_%x%s", md5sum(abs), ext)
@@ -107,9 +109,9 @@ func (t viewImageTool) Execute(_ context.Context, args json.RawMessage) (string,
 	if err := os.WriteFile(attachPath, data, 0o644); err != nil {
 		return "", fmt.Errorf("view_image: cache copy: %w", err)
 	}
-	// The FIRST line must stay exactly `view_image: <abs>` — the agent loop
-	// parses the path from it; the size rides the second line for humans.
-	return fmt.Sprintf("%s%s\n(%d bytes)", viewImageMarker, abs, st.Size()), nil
+	// The FIRST line is `view_image: <attachPath>` — the agent loop parses the
+	// path from it; the size rides the second line for humans.
+	return fmt.Sprintf("%s%s\n(%d bytes)", viewImageMarker, attachPath, st.Size()), nil
 }
 
 // md5sum returns a short hex hash of s for filename dedup.

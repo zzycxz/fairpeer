@@ -22,8 +22,13 @@ func TestViewImageMarkerOutputAndRejections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(out, viewImageMarker) || !strings.Contains(out, path) {
-		t.Fatalf("output = %q, want marker + path", out)
+	if !strings.HasPrefix(out, viewImageMarker) {
+		t.Fatalf("output = %q, want marker prefix", out)
+	}
+	// The marker returns the .fairpeer/attachments/ relative path (the cached
+	// copy), not the original absolute path.
+	if !strings.Contains(out, ".fairpeer") {
+		t.Fatalf("output should reference the cached copy, got %q", out)
 	}
 
 	// Missing file.
