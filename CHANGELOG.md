@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### fix(tools): webfetch 清理未使用 import + exec_session 环境卫生 + POSIX LF 回归守卫
+
+- webfetch.go：移除 crypto/sha256、crypto/tls、encoding/hex、strconv、fileenc 五个未使用 import（并行会话重构残留）
+- exec_session：POSIX 写入无 LF 时追加——评审 P4-A 回归守卫
+
+### fix(cli): trust_cmd 输出改用 i18n.M——去除硬编码中文残留
+## [Unreleased]
+
 ### fix(netdev): 0.2.4 卫生清仓 + 设计取舍落地（NETDEV_0204_BATCH_SPEC 批次 A/B + 裁决 D1/D2/D3/D5）
 
 批次 A（卫生）：

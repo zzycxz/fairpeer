@@ -18,6 +18,7 @@ import (
 
 	"github.com/zzycxz/fairpeer/internal/netclient"
 	"github.com/zzycxz/fairpeer/internal/tool"
+	"sync"
 )
 
 func init() { tool.RegisterBuiltin(webFetch{}) }
@@ -55,6 +56,24 @@ func (webFetch) ReadOnly() bool { return true }
 // the agent can already reach localhost via bash, so a local dev server stays
 // fetchable. The check runs at dial time on the resolved IP, so a public host
 // that redirects or DNS-rebinds to an internal address is caught too.
+// S-17: transports are expensive (TLS handshake pools) — cache one per proxy
+// URL instead of building a fresh Transport per request/redirect hop.
+var (
+	transportMu   sync.Mutex
+	transportPool = map[string]*http.Transport{}
+)
+
+func guardedTransport(proxyURL string) *http.Transport {
+	transportMu.Lock()
+	defer transportMu.Unlock()
+	if tr, ok := transportPool[proxyURL]; ok {
+		return tr
+	}
+	tr := ssrfGuardedTransport(proxyURL)
+	transportPool[proxyURL] = tr
+	return tr
+}
+
 func ssrfGuardedTransport(proxyURL string) *http.Transport {
 	dialer := &net.Dialer{Timeout: webFetchTimeout}
 
@@ -80,11 +99,22 @@ func ssrfGuardedTransport(proxyURL string) *http.Transport {
 				return nil, fmt.Errorf("refusing to fetch internal address %s (resolves to %s)", host, ip.IP)
 			}
 		}
-		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+		// Happy Eyeballs lite: try vetted IPs in order, first success wins
+		// (an AAAA-first host must not fail when IPv4 works).
+		var lastErr error
+		for _, candidate := range ips {
+			conn, derr := dialer.DialContext(ctx, network, net.JoinHostPort(candidate.IP.String(), port))
+			if derr == nil {
+				return conn, nil
+			}
+			lastErr = derr
+		}
+		return nil, lastErr
 	}
 
 	tr := &http.Transport{
-		DialContext: directDialContext,
+		DialContext:     directDialContext,
+		IdleConnTimeout: 90 * time.Second,
 	}
 
 	if proxyURL != "" {
@@ -162,19 +192,29 @@ func ssrfGuardedTransport(proxyURL string) *http.Transport {
 					pass, _ := pu.User.Password()
 					auth = &proxy.Auth{User: pu.User.Username(), Password: pass}
 				}
-				if sd, err := proxy.SOCKS5("tcp", pu.Host, auth, dialer); err == nil {
-					if cd, ok := sd.(proxy.ContextDialer); ok {
-						tr.Proxy = nil
-						tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-							host, _, err := net.SplitHostPort(addr)
-							if err != nil {
-								return nil, err
-							}
-							if ip := net.ParseIP(host); ip != nil && blockedFetchIP(ip) {
-								return nil, fmt.Errorf("refusing to fetch internal address %s (resolves to %s)", host, ip)
-							}
-							return cd.DialContext(ctx, network, addr)
+				// S-18: a bad socks5 proxy spec used to silently fall back to a
+				// DIRECT connection — the fetch ran without the proxy the user
+				// configured. Instead of returning an error from this
+				// Transport-building function (signature takes no error), defer
+				// the failure to dial time so every request surfaces it.
+				sd, perr := proxy.SOCKS5("tcp", pu.Host, auth, dialer)
+				if perr != nil {
+					socksErr := fmt.Errorf("socks5 proxy %s: %w", pu.Host, perr)
+					tr.Proxy = nil
+					tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+						return nil, socksErr
+					}
+				} else if cd, ok := sd.(proxy.ContextDialer); ok {
+					tr.Proxy = nil
+					tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+						host, _, err := net.SplitHostPort(addr)
+						if err != nil {
+							return nil, err
 						}
+						if ip := net.ParseIP(host); ip != nil && blockedFetchIP(ip) {
+							return nil, fmt.Errorf("refusing to fetch internal address %s (resolves to %s)", host, ip)
+						}
+						return cd.DialContext(ctx, network, addr)
 					}
 				}
 			}
@@ -193,7 +233,7 @@ func (rt webFetchRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 	if err != nil {
 		return nil, fmt.Errorf("resolve proxy: %w", err)
 	}
-	return ssrfGuardedTransport(proxyURL).RoundTrip(req)
+	return guardedTransport(proxyURL).RoundTrip(req)
 }
 
 func ssrfGuardedClient(proxyURLFor func(*http.Request) (string, error)) *http.Client {
@@ -248,6 +288,13 @@ func (wf webFetch) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if err != nil {
 		return "", fmt.Errorf("read body: %w", err)
 	}
+	truncated := len(body) >= webFetchMaxRead
+
+	// Non-UTF-8 pages (GBK legacy sites, locale-dependent servers) are decoded
+	// via the shared charset cascade before text extraction.
+	if decoded, changed := fileenc.Decode(body); changed {
+		body = []byte(decoded)
+	}
 
 	ct := strings.ToLower(resp.Header.Get("Content-Type"))
 	out := string(body)
@@ -258,7 +305,11 @@ func (wf webFetch) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if out == "" {
 		return fmt.Sprintf("(empty body — status %s)", resp.Status), nil
 	}
-	header := fmt.Sprintf("status %s · %s · %d bytes\n\n", resp.Status, contentTypeShort(ct), len(body))
+	truncNote := ""
+	if truncated {
+		truncNote = "\n[fetch truncated at 1 MiB — page may be incomplete]"
+	}
+	header := fmt.Sprintf("status %s · %s · %d bytes%s\n\n", resp.Status, contentTypeShort(ct), len(body), truncNote)
 	// Arbitrary web content is the highest prompt-injection risk — wrap so the
 	// model treats the fetched page as data, never as instructions.
 	return WrapUntrusted("web", header+out), nil

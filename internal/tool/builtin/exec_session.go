@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/sandbox"
+	"github.com/zzycxz/fairpeer/internal/secret"
 	"github.com/zzycxz/fairpeer/internal/tool"
 )
 
@@ -39,6 +41,7 @@ type execSession struct {
 	dropped int        // bytes trimmed from the front of buf (absolute-offset bookkeeping)
 	cursor  int        // absolute offset the reader has consumed up to
 	exited  bool
+	exitErr string // Wait() error, surfaced in read output
 	cancel  context.CancelFunc
 	seq     int // spawn order, for deterministic oldest-exited reclaim
 }
@@ -141,10 +144,11 @@ func execSessionSpawn(ctx context.Context, p execSessionArgs) (string, error) {
 		return "", fmt.Errorf("session cap (%d) reached — kill or fully read a session first", maxExecSessions)
 	}
 	sessCounter++
-	id := fmt.Sprintf("es%d", sessCounter)
+	seq := sessCounter
+	id := fmt.Sprintf("es%d", seq)
 	// exited=true makes the placeholder inert: write/read/kill on this id fail
 	// fast instead of dereferencing the nil cmd/stdin before Start replaces it.
-	sessions[id] = &execSession{seq: sessCounter, exited: true}
+	sessions[id] = &execSession{seq: seq, exited: true}
 	sessMu.Unlock()
 
 	// OS sandbox wrap — same discipline as bash: an enforce-mode deployment
@@ -157,6 +161,17 @@ func execSessionSpawn(ctx context.Context, p execSessionArgs) (string, error) {
 	sctx, scancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(sctx, argv[0], argv[1:]...)
 	cmd.Dir = p.workDir
+	// Env hygiene (R1-C): scrub secrets, pin session-friendly defaults —
+	// prevents secret leakage through the environment and PAGER hangs.
+	cmd.Env = secret.ScrubEnv(os.Environ())
+	for i, kv := range cmd.Env {
+		if strings.HasPrefix(kv, "PAGER=") {
+			cmd.Env[i] = "PAGER=cat"
+		}
+		if strings.HasPrefix(kv, "GIT_PAGER=") {
+			cmd.Env[i] = "GIT_PAGER=cat"
+		}
+	}
 	// 会话与 bash 同纪律：Windows 隐藏控制台窗 + 进程树终止（taskkill /T），
 	// POSIX 自立进程组（组杀）。必须在 Start 之前设置。
 	setKillTree(cmd)
@@ -185,7 +200,9 @@ func execSessionSpawn(ctx context.Context, p execSessionArgs) (string, error) {
 		return "", fmt.Errorf("start: %w", err)
 	}
 
-	s := &execSession{cmd: cmd, stdin: stdin, seq: sessCounter, cancel: scancel}
+	// S-08: reuse the seq captured under sessMu above — a bare sessCounter
+	// read here raced concurrent spawns (duplicate seqs) outside the lock.
+	s := &execSession{cmd: cmd, stdin: stdin, seq: seq, cancel: scancel}
 	sessMu.Lock()
 	sessions[id] = s
 	sessMu.Unlock()
@@ -213,14 +230,19 @@ func execSessionSpawn(ctx context.Context, p execSessionArgs) (string, error) {
 	drains.Add(2)
 	go func() { defer drains.Done(); drain(stdout) }()
 	go func() { defer drains.Done(); drain(stderr) }()
-	// os/exec contract: Wait must not run while pipe reads are in flight —
-	// join the drains first, or a fast-exiting command's tail output is lost.
-	go func() {
-		drains.Wait()
-		s.mu.Lock()
-		s.exited = true
-		s.mu.Unlock()
-	}()
+		// os/exec contract: Wait must not run while pipe reads are in flight —
+		// join the drains first, or a fast-exiting command's tail output is lost.
+		go func() {
+			drains.Wait()
+			waitErr := cmd.Wait()
+			scancel() // release the session context tree (process already exited)
+			s.mu.Lock()
+			s.exited = true
+			if waitErr != nil {
+				s.exitErr = waitErr.Error()
+			}
+			s.mu.Unlock()
+		}()
 	return fmt.Sprintf("session %s spawned (pid %d); write stdin, read for incremental output, kill to end.", id, cmd.Process.Pid), nil
 }
 
@@ -338,4 +360,23 @@ func sessionByID(id string) (*execSession, error) {
 		return nil, fmt.Errorf("no session %q — spawn one first", id)
 	}
 	return s, nil
+}
+
+// KillAll terminates every live session and clears the map. Called from
+// controller teardown (boot.go cleanup chain) so spawned processes don't
+// outlive the run.
+func KillAll() {
+	sessMu.Lock()
+	defer sessMu.Unlock()
+	for _, s := range sessions {
+		s.mu.Lock()
+		if !s.exited && s.cancel != nil {
+			s.cancel()
+		}
+		if s.stdin != nil {
+			s.stdin.Close()
+		}
+		s.mu.Unlock()
+	}
+	sessions = map[string]*execSession{}
 }
