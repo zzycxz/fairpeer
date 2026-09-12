@@ -145,7 +145,7 @@ LLM 是概率性的——同一段提示词，两次执行给出不同的步骤�
 | 2 | series 标签化 | `series.go`（JSONL 行加 labels）+ `metrics.go`（SQLite 加列，已有 ALTER 迁移先例） | 最小做法：metric 命名规范 `gpu.<index>.<metric>` + labels 字段并存；读取端按 (device, metric 前缀) 聚合；schema 一并定保留策略分级（盲点 #17）。**实现注记**：labels/命名已落地（series.go），SQLite 列与保留分级未做 |
 | 3 | 告警引擎开面 | `alert.go` ruleMetricValue/ruleTitle + `config/netdev.go:131-146,779-803` | 新指标进封闭枚举：`gpu.xid / gpu.temp / gpu.mem_pct / gpu.count`（`gpu.mem_used` 只落时序不做告警阈值——阈值语义由 `gpu.mem_pct` 承担；`infer.queue_depth` 随 P2 推理指标抓取一起进枚举，见 §4.3-2）；op 支持 float；加 `for_rounds`（连续 N 轮成立才立案，复用割接 sustain 语义） |
 | 4 | XID → Finding（分级） | 采集器解析 + `triage.go` 分析器 + XID 知识库进 RAG | XID>0 立 Finding 必带命令输出证据；catalog 分级决定 severity 与处置建议（含 nvidia-bug-report 收集建议）；同节点多卡 XID 聚合为一条（防误换好卡） |
-| 5 | 前端 | 设备卡 GPU sparkline（时序已通）；DashShell 第六屏（智算：卡×指标热图/XID 事件流/温度分布） | DashShell 是合法大屏 chip，不违反 §10.1「工作台 ≤3」不变量 |
+| 5 | 前端 | 设备卡 GPU sparkline（时序已通）；DashShell 第六屏（智算：卡×指标热图/XID 事件流/温度分布） | ✅ 已落地（2026-09-12，GpuBoardView + 设备卡温度 sparkline；真机数据验收留 dogfooding）。DashShell 是合法大屏 chip，不违反 §10.1「工作台 ≤3」不变量 |
 
 ### 4.2 P1 —— FDE 交付件实现（对齐 §4.8 已有规格，不是新设计）
 

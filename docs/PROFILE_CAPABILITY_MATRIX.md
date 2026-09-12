@@ -107,14 +107,14 @@ FDE 的本质是"带着授权信封去客户现场：探环境 → 交付 → �
 
 现状是"网络运维视角的浅层 GPU 接入"：设备 GPU 标记 + 徽标、nvidia-smi/npu-smi（昇腾）只读白名单、分诊 GPU 三表（XID>0 立案、≥85℃ 告警）。
 
-> **2026-09-12 进度更新**：下表 P0 的采集器/时序/告警/XID 分级已在 `internal/netdev/gpuhealth.go` + `alert.go` + `series.go` 落地（XID 证据主源换内核日志 journalctl，真机校准留 dogfooding）；智算大屏与设备卡 GPU sparkline 未做。实现细节与审查结论见 `FDE_AIINFRA_OPS_GAP_SPEC.md`。
+> **2026-09-12 进度更新**：下表 P0 的采集器/时序/告警/XID 分级已在 `internal/netdev/gpuhealth.go` + `alert.go` + `series.go` 落地（XID 证据主源换内核日志 journalctl，真机校准留 dogfooding）；智算大屏与设备卡 GPU sparkline 已落地（2026-09-12，GpuBoardView + 设备卡温度 sparkline，真机数据验收留 dogfooding）。实现细节与审查结论见 `FDE_AIINFRA_OPS_GAP_SPEC.md`。
 
 | AI infra 工作 | 复用什么 | 状态 |
 |---|---|---|
 | GPU 主机只读诊断 | hosts 读表 + 分诊三表 | ✅ 已有 |
 | GPU 指标时序 | GPU 采集器：GPU=true 主机经 SSH 周期 `nvidia-smi --query-gpu` CSV（昇腾 `npu-smi`），落 `series.go` | ✅ 已实现（2026-09-12） |
 | GPU 告警 | `alert.go` 规则引擎：gpu.xid/gpu.temp/gpu.mem_pct/gpu.count 四指标 + for_rounds 防抖；XID→Finding 分级（journalctl 证据源） | ✅ 已实现（2026-09-12） |
-| 智算大屏 | DashShell 第六屏：卡×指标利用率矩阵热图、XID 事件流、温度分布；投影轮播自动带上 | 🔨 P0（数据面已就绪） |
+| 智算大屏 | DashShell 第六屏：卡×指标利用率矩阵热图、XID 事件流、温度分布；投影轮播自动带上 | ✅ 已实现（2026-09-12，GpuBoardView；真机数据验收留 dogfooding） |
 | 设备模型 | role 枚举扩展 gpu-node/inference（功能暂由 d.GPU bool 覆盖） | 🔨 P2 降档（随 kind=gpu-host 立项） |
 | 推理服务面 | kind=k8s 上发现推理工作负载（Deployment/vLLM `/metrics`），套 `kubeapi.go` 已验证的 GET-only 模式 | 🔨 P2 |
 | 深层 GPU 诊断 | NVLink/PCIe 拓扑、`dcgmi diag`、进程级 GPU 占用 | 🔨 P2 |
@@ -222,6 +222,6 @@ FDE 的本质是"带着授权信封去客户现场：探环境 → 交付 → �
 
 | 期 | 内容 | 性质 |
 |---|---|---|
-| **P0** | GPU 采集器进 series（`internal/netdev/` 新增 gpuhealth.go）+ GPU 告警规则 + DashShell 第六屏智算大屏 + 设备 role 扩展（**2026-09-12**：采集器/告警已实现见 §3.3；大屏未做；role 扩展降档 P2 随 kind=gpu-host 立项） | 纯增量，不碰现有网络功能；做完界面立刻"能看智算"，FDE 模式同时受益（驻场看 GPU 现场时序切片） |
+| **P0** | GPU 采集器进 series（`internal/netdev/` 新增 gpuhealth.go）+ GPU 告警规则 + DashShell 第六屏智算大屏 + 设备 role 扩展（**2026-09-12**：采集器/告警已实现见 §3.3；大屏与 GPU sparkline 已实现；role 扩展降档 P2 随 kind=gpu-host 立项） | 纯增量，不碰现有网络功能；做完界面立刻"能看智算"，FDE 模式同时受益（驻场看 GPU 现场时序切片） |
 | **P1** | FDE 交付件（非工作台——承载面见 §3.2 作废注记）：readiness 电池、部署 runbook 模板、诊断包导出 | 复用 triage/CutoverRun/CaseBundle 骨架 |
 | **P2** | 推理服务面（k8s/vLLM GET-only）+ 模式预设正式化（前台/时序保留/告警聚合/写档默认按模式切换）+ 对外文案泛化（netdev→运维台，绑定方法名不动） | 域包机制如果 P2 时仍然不疼，可以继续不做 |
