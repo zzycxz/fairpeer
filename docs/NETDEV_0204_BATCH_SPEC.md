@@ -5,6 +5,7 @@
 - 基线：commit `7e00e3a2`（feat(netdev) 已提交，35 文件；版本线统一 0.2.x——本批次标 0.2.4，CHANGELOG 归属 `[0.2.3] — 2026-09-12` 之后的下一小版本）
 - 关联：`FDE_AIINFRA_OPS_GAP_SPEC.md`（承接分期）、`NETDEV_SPEC_V2.md`（§1.4 不变量/§10 UI 契约，全文适用）、`GPU_TODO.md`（批次 C 的 dogfooding 门槛载体）、`CHANGELOG.md [0.3.0]`
 - 分工：批次 A 无设计分歧，做完即清；批次 B 每项给出方案与**推荐**；§四 待裁决项需负责人拍板后才动。
+- **状态（2026-09-12）：批次 A1-A6、批次 B1-B8、裁决 D1/D2/D3/D5 已全部落地并提交**（`83a3501c` + B5 向导侧 `e28ae98a`），门禁全绿（build/vet/netdev 288s/config/desktop/tsc/vite + 定向 race）。未做仅：B9（按本 spec 另立设计）、批次 C（dogfooding 门槛，GPU_TODO 载体）。
 
 ---
 

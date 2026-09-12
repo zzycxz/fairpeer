@@ -653,6 +653,7 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # severity = "warning"       # info | warning | critical
 # enabled = true
 # for_rounds = 3             # 连续 N 轮成立才立案（0/1 = 立即；防单轮毛刺）
+# preset_key = "gpu-hot"     # 向导预设稳定标识（按 key 去重，批次 B5）；手工规则留空
 #
 # [[netdev.alert_rules]]
 # name = "host-down"
@@ -725,7 +726,7 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # signal_url 留空 = 内嵌 K：fairpeer 进程内自动起 linkpeersignal
 #（0.0.0.0:8080），装完扫码即通（局域网直连零云）——新装机器的默认形态。
 # 填地址 = 外部 K；与 cloud_signal_url 相同 = 仅云模式。
-# enabled          = false                          # master switch (default off)
+# enabled          = false                          # （运行时字段，TOML 不读取；见 internal/mobilebridge/config.go）master switch (default off)
 # signal_url       = "wss://signal.example.com"     # your self-hosted signaling K
 # stun_servers     = ["stun:signal.example.com:3478"]
 # turn_enabled     = false                           # opt-in relay (default off; pure P2P)
@@ -733,12 +734,12 @@ bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local ca
 # turn_user        = ""                              # coturn REST 凭据（use-auth-secret）
 # turn_pass        = ""
 # cloud_signal_url = ""                              # 公网跳板 K（跨网配对；空 = 纯局域网/单 K）
-# upnp             = true                            # auto port-map on home routers
-# readonly_default = false                           # new phones default to read-only
-# require_approval = false                           # mobile submits need desktop OK
-# allow_file_drop  = true                            # phone → desktop file delivery
-# allow_high_risk  = false                           # mobile may trigger shell/exec
-# max_connections  = 4                               # concurrent phone clients
+# upnp             = true                            # （运行时字段，TOML 不读取；见 internal/mobilebridge/config.go）auto port-map on home routers
+# readonly_default = false                           # （运行时字段，TOML 不读取；见 internal/mobilebridge/config.go）new phones default to read-only
+# require_approval = false                           # （运行时字段，TOML 不读取；见 internal/mobilebridge/config.go）mobile submits need desktop OK
+# allow_file_drop  = true                            # （运行时字段，TOML 不读取；见 internal/mobilebridge/config.go）phone → desktop file delivery
+# allow_high_risk  = false                           # （运行时字段，TOML 不读取；见 internal/mobilebridge/config.go）mobile may trigger shell/exec
+# max_connections  = 4                               # （运行时字段，TOML 不读取；见 internal/mobilebridge/config.go）concurrent phone clients
 # log_level        = "info"
 #
 # 跨网连接（公网跳板）最小配置——signal_url 指本地 K（局域网直连），另配：
