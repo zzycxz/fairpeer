@@ -1888,6 +1888,7 @@ export interface NetDevAlertRuleView {
   severity: string; // info | warning | critical
   enabled: boolean;
   forRounds?: number; // 连续 N 轮成立才立案（0/1 = 立即）
+  presetKey?: string; // 向导预设稳定标识（按 key 去重，批次 B5；手工规则留空）
 }
 
 // NetDevDeviceHealth（types.ts 2131 附近）现在是 SNMP + GPU 采集的合并健康

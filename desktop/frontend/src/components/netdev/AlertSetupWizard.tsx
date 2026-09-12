@@ -68,11 +68,20 @@ export function AlertSetupWizard({ settings, onClose, onSaved, onOpenSettings, o
     try {
       // 落库的是翻译后的名称（t(r.name)），不是 i18n key——持久化 key 会让
       // 设置页/Go 侧 finding 文本直接露出 "ndv.wiz.pUnreachable" 这类裸键。
+      // 去重键则是稳定的 presetKey（落库为 preset_key，批次 B5）：换语言或
+      // 文案改版重跑向导时按 key 替换旧预设，不再产生重复规则。
       const rules = RULE_PRESETS.filter(r => picked.includes(r.key)).map(r => ({
         name: t(r.name as never), metric: r.metric, op: r.op, value: r.value, severity: r.severity, enabled: true,
         forRounds: r.forRounds, // 防抖默认（阈值类规则单轮毛刺不立案）
+        presetKey: r.key,
       }));
-      const merged = [...(settings.alertRules ?? []).filter(r => !rules.some(n => n.name === r.name)), ...rules];
+      const merged = [
+        ...(settings.alertRules ?? []).filter(r =>
+          !rules.some(n => n.name === r.name) &&
+          !(r.presetKey && rules.some(n => n.presetKey === r.presetKey))
+        ),
+        ...rules,
+      ];
       await app.SetNetDevSettings({
         ...settings,
         pollIntervalSeconds: poll > 0 ? poll : 60,
