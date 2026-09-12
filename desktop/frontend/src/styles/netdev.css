@@ -2909,3 +2909,14 @@
 }
 .ndv-writecard__note { opacity: 0.65; margin-bottom: 8px; }
 .ndv-writecard__actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* GPU 智算屏（gpudash.go / GpuBoardView）：卡×指标矩阵 + 温度色档。 */
+.ndv-gpu__generated { font-size: 11px; opacity: 0.6; margin-bottom: 6px; }
+.ndv-gpu__devices { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.ndv-gpu__matrix { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ndv-gpu__matrix th { text-align: left; opacity: 0.55; font-weight: normal; padding: 2px 10px 2px 0; }
+.ndv-gpu__matrix td { padding: 3px 10px 3px 0; border-top: 1px solid var(--border-soft, rgba(128,128,128,0.2)); }
+.ndv-gpu__model { opacity: 0.75; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ndv-gpu__temp--warm { color: var(--warn, #d97706); font-weight: 600; }
+.ndv-gpu__temp--hot { color: var(--err, #e5484d); font-weight: 700; }
+.ndv-gpu__xidrow { border-top: 1px solid var(--border-soft, rgba(128,128,128,0.15)); }

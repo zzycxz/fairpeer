@@ -7,14 +7,16 @@ import ChainBoard from "./ChainBoard";
 import CutoverBoardView from "./CutoverBoardView";
 import DiscoveryBoardView from "./DiscoveryBoardView";
 import ExposureBoardView from "./ExposureBoardView";
+import GpuBoardView from "./GpuBoardView";
 
 // DashShell — 大屏家族的壳（DASHBOARD spec §4.1/§4.11）。职责：五页签、
 // 场景感知默认页、投影模式、底条审计 ticker、刷新纪律（§8.4：写侧事件
 // 驱动 + 可见时 60s 兜底；割接屏例外不失焦暂停）。总览快照由壳持有并
 // 喂给 OverviewPanel（壳与卡片不双拉）。
 
-export type DashScreen = "overview" | "chain" | "cutover" | "discovery" | "exposure";
-const SCREENS: DashScreen[] = ["overview", "chain", "cutover", "discovery", "exposure"];
+// 智算屏（gpu）列入家族尾位：有 GPU=true 设备才轮播到它（§8.4 数据面）。
+export type DashScreen = "overview" | "chain" | "cutover" | "discovery" | "exposure" | "gpu";
+const SCREENS: DashScreen[] = ["overview", "chain", "cutover", "discovery", "exposure", "gpu"];
 
 // 底条分类 → 小色点档位（audit.class → CSS 修饰符）。读取类不着色（默认
 // 灰点），写/评估=琥珀，护栏=红，割接/提案=蓝——只做轻量示意，不做告警式
@@ -133,6 +135,7 @@ useEffect(() => {
       case "cutover": return <CutoverBoardView onJump={onJump} onFocusDevice={onFocusDevice} />;
       case "discovery": return <DiscoveryBoardView onJump={onJump} onFocusDevice={onFocusDevice} />;
       case "exposure": return <ExposureBoardView onJump={onJump} onFocusDevice={onFocusDevice} />;
+      case "gpu": return <GpuBoardView onJump={onJump} onFocusDevice={onFocusDevice} />;
       default: return <OverviewPanel snapshot={snap} onJump={onJump} onFocusDevice={onFocusDevice} />;
     }
   }, [screen, finding, snap, onJump, onFocusDevice]);

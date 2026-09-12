@@ -179,6 +179,28 @@ interface DesktopWindowState {
   maximised: boolean;
 }
 
+// DoctorCheckView is one desktop-capability row from internal/doctor's Check
+// (GAP-18 capability visibility): whether a capability the desktop stack
+// needs — a macOS TCC grant, a Linux helper binary, the Windows WebView2
+// runtime — is usable, plus the human-facing Detail (which System Settings
+// pane to grant, which package installs the helper).
+export interface DoctorCheckView {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+// DoctorReportView is the light slice of the Go doctor.Report the settings
+// panel renders. Field names mirror the Go JSON tags (desktop / providers /
+// plugins / sandbox) so the real Wails binding satisfies it structurally;
+// the dev mock fills the same shape with canned rows.
+export interface DoctorReportView {
+  desktop: DoctorCheckView[];
+  providers?: Array<Record<string, unknown>>;
+  plugins?: Array<Record<string, unknown>>;
+  sandbox?: { available?: boolean; bash?: string };
+}
+
 // AppBindings is the hand-written contract between the React app and the Go
 // kernel. It uses local types (types.ts) so components don't import generated
 // model classes. _CheckGeneratedBindings catches drift: when a Go method is
@@ -191,6 +213,11 @@ export interface AppBindings {
   // registration; SetAutostart returns the resulting state.
   GetAutostart(): Promise<boolean>;
   SetAutostart(enabled: boolean): Promise<boolean>;
+  // GAP-18 capability visibility: runs internal/doctor on demand for the
+  // settings panel's 环境诊断 section (GUI users never see the CLI doctor
+  // output). The full doctor.Report crosses the bridge; DoctorReportView
+  // declares the slice the UI renders.
+  DoctorReport(): Promise<DoctorReportView>;
   Submit(input: string): Promise<void>;
   SubmitToTab(tabID: string, input: string): Promise<void>;
   SubmitDisplay(display: string, input: string): Promise<void>;
@@ -513,6 +540,7 @@ export interface AppBindings {
   NetDevCutoverBoard(id: string): Promise<import("./types").NetDevCutoverBoard | null>;
   NetDevDiscoveryBoard(): Promise<import("./types").NetDevDiscoveryBoard | null>;
   NetDevExposureBoard(): Promise<import("./types").NetDevExposureBoard | null>;
+  NetDevGPUBoard(): Promise<import("./types").NetDevGPUBoard>;
   // fairpeer:// 深链冷路径：boot 时一次性取走启动 argv 里的路由（null=普通启动）。
   NetDevConsumeDeepLink(): Promise<{ kind: string; id: string } | null>;
   // 页签充实：syslog 事件量（R3 journal）/ 拓扑对账（离线）
@@ -1011,6 +1039,37 @@ export function onUpdaterProgress(cb: (p: UpdateProgress) => void): () => void {
   return () => {
     updaterListeners.delete(cb);
   };
+}
+
+// EnvWarningCheck mirrors doctor.Check for the startup screening banner.
+export interface EnvWarningCheck {
+  name: string;
+  detail: string;
+}
+
+// onEnvWarning subscribes to the one-time startup capability screening
+// (GAP-18): the backend emits the not-OK desktop checks after boot.
+export function onEnvWarning(cb: (checks: EnvWarningCheck[]) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("env:warning", (payload: unknown) => cb(payload as EnvWarningCheck[]));
+  }
+  return () => {};
+}
+
+// onSystemPower subscribes to the backend's sleep/wake notifications
+// (linux logind PrepareForSleep, windows WM_POWERBROADCAST; GAP-10). The
+// payload is the event name itself — sleeping=true means the machine is
+// going down.
+export function onSystemPower(cb: (sleeping: boolean) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    const offSleep = window.runtime.EventsOn("system:sleep", () => cb(true));
+    const offWake = window.runtime.EventsOn("system:wake", () => cb(false));
+    return () => {
+      offSleep();
+      offWake();
+    };
+  }
+  return () => {};
 }
 
 // onNetdevLive subscribes to the 操作实况 batch stream ("netdev:live" —
@@ -3095,6 +3154,23 @@ function makeMockApp(): AppBindings {
         cve_needs_feed: true, unmanaged_ends: 0, max_hops: 0,
       };
     },
+    async NetDevGPUBoard(): Promise<import("./types").NetDevGPUBoard> {
+      const card = (i: number, temp: number, util: number): import("./types").NetDevGPUBoardCard =>
+        ({ index: i, name: "NVIDIA A100-SXM4-40GB", tempC: temp, utilPct: util, memPct: Math.round(util * 0.4), memUsedMB: util * 400, memTotalMB: 40960 });
+      return {
+        generated_at: new Date().toISOString().slice(5, 16).replace("T", " "),
+        devices: [
+          { device: "gpu-1", reachable: true, gpuSampled: true, cards: [card(0, 61, 30), card(1, 72, 95)] },
+          { device: "gpu-2", reachable: true, gpuSampled: true, xidMax: 79, cards: [card(0, 88, 97), card(1, 74, 40)] },
+        ],
+        total_cards: 4,
+        sampled_devices: 2,
+        worst_temp: 88,
+        worst_temp_dev: "gpu-2",
+        xid_active: 1,
+        xid_events: [{ id: "F-mock", device: "gpu-2", maxCode: 79, severity: "critical", at: "09-12 10:00", active: true }],
+      };
+    },
     async NetDevTopologyPlan() {
       // Browser-dev stand-in for the LOCAL IP-plan view: managed devices only,
       // tiers/subnets inferred from the inventory, zero edges (links are never
@@ -3137,6 +3213,19 @@ function makeMockApp(): AppBindings {
     async SetAutostart(enabled: boolean) {
       mockAutostart = enabled;
       return mockAutostart;
+    },
+    async DoctorReport() {
+      await delay(300);
+      return {
+        desktop: [
+          { name: "webview2", ok: true, detail: "WebView2 Runtime 138.0.3351.95 (HKLM\\SOFTWARE\\WOW6432Node\\...\\EdgeUpdate\\Clients)" },
+          { name: "powershell", ok: true, detail: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" },
+          { name: "screen-recording", ok: true, detail: "advisory（无法无损探测）：如果截图只有壁纸，请在 系统设置 → 隐私与安全性 → 屏幕录制 中授权" },
+        ],
+        providers: [{ name: "demo-openai" }],
+        plugins: [],
+        sandbox: { available: false, bash: "enforce" },
+      };
     },
         async Submit(input) {
           cancelled = false;

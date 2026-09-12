@@ -2176,6 +2176,49 @@ export interface NetDevDeviceHealth {
   gpuLastError?: string;
 }
 
+// ── GPU 智算屏（gpudash.go 聚合，§8.4 数据面纯只读汇编） ──────────────────
+export interface NetDevGPUBoardCard {
+  index: number;
+  name?: string;
+  tempC?: number;
+  utilPct?: number;
+  memPct?: number;
+  memUsedMB?: number;
+  memTotalMB?: number;
+  xidMax?: number;
+}
+
+export interface NetDevGPUBoardDevice {
+  device: string;
+  reachable: boolean;
+  gpuSampled: boolean;
+  gpuOnly?: boolean;
+  xidMax?: number;
+  cards: NetDevGPUBoardCard[];
+  lastError?: string;
+  tempSpark?: [number, number][];
+}
+
+export interface NetDevGPUBoardXID {
+  id: string;
+  device: string;
+  maxCode?: number;
+  severity: string;
+  at?: string;
+  active: boolean;
+}
+
+export interface NetDevGPUBoard {
+  generated_at: string;
+  devices: NetDevGPUBoardDevice[];
+  total_cards: number;
+  sampled_devices: number;
+  worst_temp?: number;
+  worst_temp_dev?: string;
+  xid_active: number;
+  xid_events: NetDevGPUBoardXID[];
+}
+
 export interface NetDevHealthSnapshot {
   pollIntervalSeconds: number;
   devices: NetDevDeviceHealth[];

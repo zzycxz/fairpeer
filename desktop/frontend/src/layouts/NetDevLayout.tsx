@@ -259,7 +259,7 @@ function benchParam(): "logs" | "sec" | "dash" | null {
 function dashScreenParam(): DashScreen | null {
   try {
     const v = new URLSearchParams(window.location.search).get("screen");
-    return (["overview", "chain", "cutover", "discovery", "exposure"] as const).includes(v as DashScreen) ? v as DashScreen : null;
+    return (["overview", "chain", "cutover", "discovery", "exposure", "gpu"] as const).includes(v as DashScreen) ? v as DashScreen : null;
   } catch { return null; }
 }
 
@@ -2195,6 +2195,16 @@ export function NetDevLayout({
               <div className="ndv__card-title">{selectedDevice.name}
                 {(cardSeries["if_down"] ?? []).length > 1 && <Sparkline points={cardSeries["if_down"]} bad />}
                 {(cardSeries["reachable"] ?? []).length > 1 && <Sparkline points={cardSeries["reachable"]} />}
+                {selectedDevice.gpu && (() => {
+                  // GPU 温度迷你趋势：全卡 max 逐点归并（时序键 gpu.<i>.temp）。
+                  const temps = new Map<number, number>();
+                  for (const [k, pts] of Object.entries(cardSeries)) {
+                    if (!/^gpu\.\d+\.temp$/.test(k)) continue;
+                    for (const p of pts) temps.set(p.t, Math.max(temps.get(p.t) ?? 0, p.v));
+                  }
+                  const pts = [...temps.entries()].sort((a, b) => a[0] - b[0]).map(([t, v]) => ({ t, v }));
+                  return pts.length > 1 ? <Sparkline points={pts} bad={pts.some(p => p.v > 85)} /> : null;
+                })()}
                 <span className="ndv__card-sub">· {selectedDevice.vendor}/{selectedDevice.os} · {selectedDevice.address}{(selectedDevice.via ?? []).length ? tt("ndv.dev.viaList", { list: (selectedDevice.via ?? []).join("→") }) : ""}</span>
                 {selectedDevice.gpu && <span className="ndv__badge" style={{ marginLeft: 6 }} title={tt("ndv.dev.gpuTip")}>{tt("ndv.dev.gpuBadge")}</span>}</div>
               <div className="ndv__group-label">{tt("ndv.dev.quick")}</div>
