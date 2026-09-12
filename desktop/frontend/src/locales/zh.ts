@@ -3296,7 +3296,7 @@ export const zh: Record<DictKey, string> = {
   "ndv.wiz.okMsg": "✓ 测试消息已发送——请查收。健康页签从现在开始累积数据；动态阈值（震荡/基线漂移）随历史积累自动生效。",
   "ndv.wiz.testFail": "配置已保存，但测试消息未确认送达，请检查设置。",
   "ndv.wiz.laterTune": "之后可在 设置 → 运维 调整（规则 / 轮询间隔 / 通知出口 / 晨报时间）。",
-  "ndv.wiz.prev": "上一步",
+  "ndv.wiz.savedTestFail": "配置已保存；测试推送失败：{e}——可稍后在设置→通知出口重试",  "ndv.wiz.prev": "上一步",
   "ndv.wiz.next": "下一步",
   "ndv.wiz.openHealth": "打开健康页签",
   "ndv.wiz.later": "稍后再说",

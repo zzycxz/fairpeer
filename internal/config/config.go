@@ -1798,8 +1798,10 @@ func LoadForRoot(root string) (*Config, error) {
 		mcpFile = filepath.Join(root, mcpJSONFile)
 	}
 	projectPluginsPresent, projectMCPPresent := false, false
+	projectTOMLSeen := false
 	if _, err := os.Stat(projectTOML); err == nil {
 		projectPluginsPresent = true
+		projectTOMLSeen = true
 	}
 	if _, err := os.Stat(mcpFile); err == nil {
 		projectMCPPresent = true
@@ -1828,7 +1830,13 @@ func LoadForRoot(root string) (*Config, error) {
 	// 未受信任时项目 TOML 仍参与 model/providers 等字段的合并（v1 只闸自治面），
 	// 但不参与下方 [[plugins]] 的重合并。
 	pluginSources := tomlSources
+	// S-05 TOCTOU: re-stat after the merge — a project toml that APPEARED
+	// between the first Stat and here (untrusted, never checked) must not
+	// contribute plugins either.
 	if !projectTrusted {
+		if _, err := os.Stat(projectTOML); err == nil && !projectTOMLSeen {
+			projectTrusted = false
+		}
 		pluginSources = make([]string, 0, len(tomlSources))
 		for _, p := range tomlSources {
 			if p != projectTOML {
@@ -1923,6 +1931,11 @@ func LoadForRoot(root string) (*Config, error) {
 	pinNetDev(cfg)
 	if err := ValidateNetDev(cfg.NetDev); err != nil {
 		return nil, err
+	}
+	// D1 软降级（NETDEV_0204_BATCH_SPEC §四）：坏通道进日志/运行期
+	// LastError/NoProbe，不绑架整份配置启动。
+	for _, warn := range NetDevWarnings(cfg.NetDev) {
+		slog.Warn("netdev config warning", "warn", warn)
 	}
 	return cfg, nil
 }
@@ -2660,9 +2673,10 @@ func SourcePathForRoot(root string) string {
 
 // WriteFile writes the configuration to path as annotated TOML.
 // Atomic (tmp+rename): a crash mid-write must not truncate the user's
-// fairpeer.toml — provider keys and pairing state live here.
+// fairpeer.toml — provider keys and pairing state live here. 0600: the file
+// holds API-key pointers and pairing state; it was world-readable 0644 before.
 func (c *Config) WriteFile(path string) error {
-	return fileutil.AtomicWriteFile(path, []byte(RenderTOMLForScope(c, renderScopeForPath(path))), 0o644)
+	return fileutil.AtomicWriteFile(path, []byte(RenderTOMLForScope(c, renderScopeForPath(path))), 0o600)
 }
 
 // Provider returns the named provider entry.

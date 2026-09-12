@@ -45,12 +45,17 @@ func (m *Manager) Timeline(device string, hours int) []TimelineEvent {
 	since := time.Now().Add(-time.Duration(hours) * time.Hour)
 	var out []TimelineEvent
 
-	// 变更：审计写路径
+	// 变更：审计写路径。被拒的写命令不算"改了什么"（Status=refused，D5）——
+	// 单独以 rejected kind 入轴，排查时与真实变更可区分。
 	for _, e := range readAuditSince(since) {
 		if !timelineChangeClasses[e.Class] {
 			continue
 		}
 		if device != "" && e.Device != device {
+			continue
+		}
+		if e.Status == AuditRefused {
+			out = append(out, TimelineEvent{Time: e.Time, Kind: "rejected", Device: e.Device, Title: e.Command, Detail: e.Class})
 			continue
 		}
 		out = append(out, TimelineEvent{Time: e.Time, Kind: "change", Device: e.Device, Title: e.Command, Detail: e.Class})

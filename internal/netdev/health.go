@@ -301,8 +301,12 @@ func (m *Manager) pollDeviceHealth(ctx context.Context, deviceName string) Devic
 		})
 	}
 	collect("1.3.6.1.2.1.2.2.1.2", func(oid string, p gosnmp.SnmpPDU) {
-		if s, ok := p.Value.(string); ok {
-			descr[oid] = s
+		// gosnmp decodes OctetString to []byte (never string) — without the
+		// []byte branch this assert never matched and Interfaces stayed empty.
+		if b, ok := p.Value.([]byte); ok {
+			if s := snmpOctetText(b); s != "" {
+				descr[oid] = s
+			}
 		}
 	})
 	collect("1.3.6.1.2.1.2.2.1.7", func(oid string, p gosnmp.SnmpPDU) {

@@ -60,6 +60,9 @@ export function AlertSetupWizard({ settings, onClose, onSaved, onOpenSettings, o
 
   const snmpDevices = (settings.devices ?? []).filter(d => d.snmpVersion || d.snmpCommunitySet);
 
+  // 已落库标志（逐行精读 R3 A3）：保存成功而测试失败时，步骤 3 的按钮
+  // 文案不能再是「取消」——配置已经写进去了，"取消"会误导用户以为没保存。
+  const [saved, setSaved] = useState(false);
   const saveAndTest = async () => {
     setBusy(true); setErr("");
     try {
@@ -83,8 +86,14 @@ export function AlertSetupWizard({ settings, onClose, onSaved, onOpenSettings, o
         } : {}),
       });
       onSaved();
-      await app.NetDevNotifyTest();
-      setTestOk(true);
+      setSaved(true);
+      try {
+        await app.NetDevNotifyTest();
+        setTestOk(true);
+      } catch (te) {
+        // 测试失败不回滚配置：规则/出口已生效，失败原因单独展示（A3）。
+        setErr(t("ndv.wiz.savedTestFail", { e: String(te) }));
+      }
       setStep(4);
     } catch (e) {
       setErr(String(e));
@@ -189,7 +198,7 @@ export function AlertSetupWizard({ settings, onClose, onSaved, onOpenSettings, o
         {step > 0 && step < 4 && <span className="btn btn--secondary btn--small" role="button" onClick={() => setStep(s => s - 1)}>{t("ndv.wiz.prev")}</span>}
         {step < 3 && <span className="btn btn--primary btn--small" role="button" style={stepValid ? undefined : { opacity: 0.5 }} onClick={() => { if (stepValid) setStep(s => s + 1); }}>{t("ndv.wiz.next")}</span>}
         {step === 4 && <span className="btn btn--primary btn--small" role="button" onClick={() => { onFinish(); onClose(); }}>{t("ndv.wiz.openHealth")}</span>}
-        {step !== 4 && <span className="btn btn--secondary btn--small" role="button" onClick={onClose}>{step === 3 ? t("common.cancel") : t("ndv.wiz.later")}</span>}
+        {step !== 4 && <span className="btn btn--secondary btn--small" role="button" onClick={onClose}>{step === 3 ? (saved ? t("ndv.wiz.later") : t("common.cancel")) : t("ndv.wiz.later")}</span>}
       </div>
     </Modal>
   );

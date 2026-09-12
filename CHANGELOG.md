@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [Unreleased]
+
+### fix(netdev): 0.2.4 卫生清仓 + 设计取舍落地（NETDEV_0204_BATCH_SPEC 批次 A/B + 裁决 D1/D2/D3/D5）
+
+批次 A（卫生）：
+- **prevUptimes 加锁**（prevUptimesMu 三助手，与 alertStreaks 同纪律）；
+- **备份调度失败补日志**（此前 RunBackup 失败无 else，"定时备份跑没跑"无处可答）；
+- **向导"已保存待验证"态**（保存成功而测试失败时，step3 按钮不再是误导的「取消」）；
+- **回退失败路径补 EndedAt + 前后对比报告**（failed 终态不再缺收尾件）；
+- **inspection/backup 调度器加 ctx.Done 退出**（与 briefing 对齐）；
+- **mock Cutover 状态机对齐真实后端**（Start→running、Continue 需 hold/interrupted、Skip 三道闸+cursor 推进）。
+
+批次 B（设计取舍）：
+- **B2 只重验门**：急停后「继续」重入时，watching/done 的提案步不再重发变更（approved-only 闸必败循环），只重跑语义验证门；
+- **B3 回退**：RollbackProposal 白名单纳入 failed（零 applied 由步级闸安全跳过）；回退循环 break 改逐项汇总——单个坏点不再终结其余候选，HoldNote 列出未回滚清单；
+- **B4**：CutoverStart 先预注册 runner 句柄再落盘——消掉落盘→launch 间隙被并发孤儿扫描误判 interrupted 的窗口；
+- **B5**：alert 规则加 preset_key（向导预设稳定标识，按 key 去重——换语言重跑向导不再产生重复规则）；
+- **B6**：急停的成败提示走独立槽位（与设置加载失败来源分离，互不清除）；
+- **B7**：healthMap 按清单修剪（幽灵设备不再计入健康点）；
+- **B8**：CleanupSeries 流式化（scanner+临时文件+ReplaceFile；读取中断放弃清理保留原文件——宁可不清不能截断）。
+
+裁决落地：
+- **D1 软降级**：新增 NetDevWarnings（SNMP 块/protocols 白名单/proxy_jump 环/alert 值域）——加载通过 + slog 点名，坏通道进运行期 LastError，不硬失败；
+- **D3**：flap_count 口径注释（双通道 SNMP 面抖动计入=保守取向，豁免留待 dogfooding）；
+- **D5**：Timeline「变更」轴过滤被拒写命令（Status=refused 另立 rejected kind）。
+
+
 ### feat(tools): G6 view_image 读图 + G5 exec_session 交互式会话——codex 差距审计收尾
 
 CODEX_GAP_AUDIT_2026-09-09 的 G5/G6 落地（G1 Windows 沙箱与 G4 网络 per-host 策略为多日专项，排期待定）：

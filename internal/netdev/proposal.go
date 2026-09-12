@@ -939,8 +939,11 @@ func (m *Manager) RollbackProposal(ctx context.Context, id string) (*Proposal, e
 	if err != nil {
 		return nil, err
 	}
-	if p.Status != ProposalPartial && p.Status != ProposalDone && p.Status != ProposalWatching {
-		return nil, fmt.Errorf("proposal %s: status %s — only partial/done/watching proposals roll back", id, p.Status)
+	// failed 纳入（批次 B3）：上次回退失败的产物——其已落地前缀仍可按
+	// 步级 Applied/AppliedCmds 闸回滚；零 applied 的 failed 会被步级闸全跳，
+	// 等价"无物可回滚"。
+	if p.Status != ProposalPartial && p.Status != ProposalDone && p.Status != ProposalWatching && p.Status != ProposalFailed {
+		return nil, fmt.Errorf("proposal %s: status %s — only partial/done/watching/failed proposals roll back", id, p.Status)
 	}
 	StateEventSnap(StateEventRollback, id, stateActorFromCtx(ctx), filepath.Join(ProposalsDir(), id+".json"))
 	for i := len(p.Steps) - 1; i >= 0; i-- {

@@ -125,32 +125,59 @@ func CleanupSeriesOnce() {
 	seriesCleanupOnce.Do(CleanupSeries)
 }
 
-// CleanupSeries drops points older than the retention (rewrite-in-place under
-// the lock).
+// CleanupSeries drops points older than the retention. 流式实现（批次 B8）：
+// scanner 逐行读 + 临时文件 + ReplaceFile——整文件 ReadFile 入内存在 GPU
+// 通道接入后会到数百 MB。scanner 中途报错（坏行超长等）则放弃本次清理
+// 保留原文件——宁可不清，不能截断。
 func CleanupSeries() {
 	cutoff := time.Now().Add(-seriesRetention).Unix()
 	seriesMu.Lock()
 	defer seriesMu.Unlock()
-	raw, err := os.ReadFile(seriesFile())
+	in, err := os.Open(seriesFile())
 	if err != nil {
 		return
 	}
-	var kept []string
-	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimSpace(line)
+	defer in.Close()
+	tmp := seriesFile() + ".tmp"
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	w := bufio.NewWriter(out)
+	kept := 0
+	sc := bufio.NewScanner(in)
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
 		if line == "" {
 			continue
 		}
 		var p SeriesPoint
-		if json.Unmarshal([]byte(line), &p) == nil && p.T >= cutoff {
-			kept = append(kept, line)
+		if json.Unmarshal([]byte(line), &p) != nil || p.T < cutoff {
+			continue
+		}
+		if _, err := w.WriteString(line); err == nil {
+			_ = w.WriteByte('\n')
+			kept++
 		}
 	}
-	_ = os.MkdirAll(filepath.Dir(seriesFile()), 0o700)
-	// 全空时写空文件——Join+尾换行会留下一个孤 "\n"（读取端虽跳过，脏）。
-	payload := []byte("")
-	if len(kept) > 0 {
-		payload = []byte(strings.Join(kept, "\n") + "\n")
+	if serr := sc.Err(); serr != nil {
+		// 读取中断（超长行等）：放弃本次清理，保留原文件。
+		slog.Warn("series: cleanup aborted", "err", serr)
+		out.Close()
+		_ = os.Remove(tmp)
+		return
 	}
-	_ = fileutil.AtomicWriteFile(seriesFile(), payload, 0o600)
+	if err := w.Flush(); err != nil {
+		out.Close()
+		_ = os.Remove(tmp)
+		return
+	}
+	out.Close()
+	_ = os.MkdirAll(filepath.Dir(seriesFile()), 0o700)
+	if kept == 0 {
+		_ = fileutil.AtomicWriteFile(seriesFile(), []byte(""), 0o600)
+		return
+	}
+	_ = fileutil.ReplaceFile(tmp, seriesFile())
 }

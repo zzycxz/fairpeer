@@ -2695,7 +2695,9 @@ function makeMockApp(): AppBindings {
       return j;
     },
     async NetDevCutoverStart(def: NetDevCutoverRun): Promise<NetDevCutoverRun> {
-      const c: NetDevCutoverRun = { ...def, id: "C-mock-1", status: "hold", hold_note: "决策点（浏览器模拟）：变更已下发", cursor: 1, created_at: new Date().toISOString(), steps: def.steps.map(s => ({ ...s, status: s.decision_point ? "approved" : "done" })) };
+      // 真实后端 Start 只产出 running / precheck-failed——决策点等运行期状态
+      // 由 runner 推进产生（逐行精读 R3 A6：mock 与真机语义对齐）。
+      const c: NetDevCutoverRun = { ...def, id: "C-mock-1", status: "running", cursor: 0, created_at: new Date().toISOString(), steps: def.steps.map(s => ({ ...s, status: s.decision_point ? "pending" : "done" })) };
       mockNetDevCutovers.length = 0;
       mockNetDevCutovers.push(c);
       return c;
@@ -2711,9 +2713,11 @@ function makeMockApp(): AppBindings {
     async NetDevCutoverContinue(id: string): Promise<NetDevCutoverRun> {
       const c = mockNetDevCutovers.find(x => x.id === id);
       if (!c) throw new Error("browser dev mock: no such cutover");
-      c.status = "done";
+      // 真实语义：Continue 只把 hold/interrupted 翻回 running，runner 接管
+      // 推进；done/report 由 runner 收尾产生（逐行精读 R3 A6）。
+      if (c.status !== "hold" && c.status !== "interrupted") throw new Error("only held/interrupted cutovers continue");
+      c.status = "running";
       c.hold_note = "";
-      c.report = "# 割接对比报告（浏览器模拟）\n\n无变化\n";
       return c;
     },
     async NetDevCutoverSkip(_id: string, _reason: string): Promise<NetDevCutoverRun> {

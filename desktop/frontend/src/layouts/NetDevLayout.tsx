@@ -51,8 +51,8 @@ export function NetdevTitleBar({ leading, onOpenSettings }: { leading?: ReactNod
   const [projects, setProjects] = useState<{ name: string; groups: string[]; note?: string }[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [active, setActive] = useState<{ name: string; groups: string[] } | null>(null);
-  const [err, setErr] = useState("");
-  const [notice, setNotice] = useState(""); // 成功提示（绿色槽位）——急停成功不该复用红色错误槽
+  const [stopMsg, setStopMsg] = useState("");  // 急停成功提示（绿色槽位）
+  const [stopFail, setStopFail] = useState(""); // 急停失败（红色槽位）——与设置加载错误的 err 来源分离（B6）
   // 评估授权信封状态徽标：主动扫描档（nmap/netprobe/弱口令）的闸门状态。
   const [engagement, setEngagement] = useState<{ id: string; days: number } | null>(null);
   useEffect(() => {
@@ -66,7 +66,7 @@ export function NetdevTitleBar({ leading, onOpenSettings }: { leading?: ReactNod
           setEngagement({ id: a.engagementId, days });
         } else setEngagement(null);
       })
-      .catch(e => setErr(String(e)));
+      .catch(e => setStopFail(String(e)));
     const sync = () => setActive(getActiveProject());
     sync();
     return subscribeActiveProject(sync);
@@ -90,14 +90,15 @@ export function NetdevTitleBar({ leading, onOpenSettings }: { leading?: ReactNod
     setStopping(true);
     try {
       const n = await app.NetDevEmergencyStop();
-      setErr(""); // 对称清理：旧红字不清会永久压制绿字
-      setNotice(tt("ndv.tbar.estopSent", { n }));
-      // 8 秒自动消退（逐行精读 R4 P3-1：绿字常驻标题栏会被当成持续状态）
+      // B6：急停走独立槽位——与设置加载失败的 err 来源分离，互不清除。
+      setStopFail("");
+      setStopMsg(tt("ndv.tbar.estopSent", { n }));
+      // 8 秒自动消退（绿字常驻标题栏会被当成持续状态）。
       if (noticeTimer.current) clearTimeout(noticeTimer.current);
-      noticeTimer.current = setTimeout(() => setNotice(""), 8000);
+      noticeTimer.current = setTimeout(() => setStopMsg(""), 8000);
     } catch (e) {
-      setNotice("");
-      setErr(String(e));
+      setStopMsg("");
+      setStopFail(String(e));
     } finally {
       stoppingRef.current = false;
       setStopping(false);
@@ -127,8 +128,8 @@ export function NetdevTitleBar({ leading, onOpenSettings }: { leading?: ReactNod
         </span>
       )}
 
-      {err && <span className="ndv__stat" style={{ color: "var(--err)" }}>{err}</span>}
-      {!err && notice && <span className="ndv__stat" style={{ color: "var(--ok)" }}>{notice}</span>}
+      {stopFail && <span className="ndv__stat" style={{ color: "var(--err)" }}>{stopFail}</span>}
+      {!stopFail && stopMsg && <span className="ndv__stat" style={{ color: "var(--ok)" }}>{stopMsg}</span>}
       {engagement && (
         <span
           className="ndv__stat"
@@ -706,6 +707,14 @@ export function NetDevLayout({
         app.NetDevCutovers().catch(() => [] as NetDevCutoverRun[]),
       ]);
       setSettings(s);
+      // healthMap 按清单修剪（逐行精读 R4 B7）：设备删除/改名后幽灵键
+      // 不再计入健康点与 down 计数。
+      const names = new Set((s.devices ?? []).map(d => d.name));
+      setHealthMap(prev => {
+        const out: Record<string, NetDevDeviceHealth> = {};
+        for (const [k, v] of Object.entries(prev)) if (names.has(k)) out[k] = v;
+        return out;
+      });
       setFindings(f ?? []);
       setProposals(p ?? []);
       setAudit(a ?? []);
@@ -1216,7 +1225,7 @@ export function NetDevLayout({
 
   // vendor_hint → driver key for promotion prefill; anything else lands as
   // "" (the device form's vendor picker stays the source of truth).
-  const VENDOR_DRIVER: Record<string, string> = { huawei: "huawei-vrp", cisco: "cisco-ios", zte: "zte-zxr10" };
+  const VENDOR_DRIVER: Record<string, string> = { huawei: "huawei-vrp", cisco: "cisco-ios", zte: "zte-zxr10", h3c: "h3c-comware", ruijie: "cisco-ios" };
   // P1-2 指纹回填：纳管时把 banner/HTTP 指纹浓缩成 model（product + version，
   // 如 "OpenSSH_9.6" / "nginx 1.24.0"），CVE 匹配的 vendor+os+model 从第一天起可用。
   const fingerprintModel = (h: NetDevDiscoveredHost): string => {

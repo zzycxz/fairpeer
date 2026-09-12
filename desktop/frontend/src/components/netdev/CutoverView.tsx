@@ -58,6 +58,7 @@ export function CutoverView({
   const [run, setRun] = useState<NetDevCutoverRun | null>(null);
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
+  const [skipReason, setSkipReason] = useState(""); // B1：跳过原因内联输入（替代 window.prompt）
   const [now, setNow] = useState(Date.now());
 
   const reload = useCallback(async () => {
@@ -151,28 +152,41 @@ export function CutoverView({
             </span>
             {/* P1-E1：门失败死循环的出口——跳过本步（原因必填，入审计链）。
                 仅当前步 failed/gating 时渲染：决策点/倒计时 hold 的 cursor 指
-                向未执行的 pending 步，后端必拒（逐行精读 R4 P2-2）。 */}
+                向未执行的 pending 步，后端必拒（逐行精读 R4 P2-2）。
+                B1：原因用内联输入——window.prompt 在 WKWebView（macOS）无实现
+                会静默失效，且违背本模块弃用原生对话框的规范。 */}
             {(() => {
               const cur = (run.steps ?? [])[run.cursor];
               if (!(cur && (cur.status === "failed" || cur.status === "gating"))) return null;
               return (
-            <span
-              className="btn btn--secondary btn--small"
-              role="button"
-              title={tt("ndv.cut.skipTip")}
-              onClick={() => {
-                const reason = window.prompt(tt("ndv.cut.skipReasonPrompt"));
-                if (reason === null) return;
-                const trimmed = reason.trim();
-                if (!trimmed) {
-                  setErr(tt("ndv.cut.skipReasonRequired"));
-                  return;
-                }
-                void act("skip", () => app.NetDevCutoverSkip(run.id, trimmed));
-              }}
-            >
-              {busy === "skip" ? tt("ndv.cut.skipping") : tt("ndv.cut.skip")}
-            </span>
+                <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                  <input
+                    className="mem-input"
+                    style={{ maxWidth: 200 }}
+                    placeholder={tt("ndv.cut.skipReasonPrompt")}
+                    value={skipReason}
+                    onChange={e => setSkipReason(e.target.value)}
+                  />
+                  <span
+                    className="btn btn--secondary btn--small"
+                    role="button"
+                    title={tt("ndv.cut.skipTip")}
+                    style={!skipReason.trim() || busy === "skip" ? { opacity: 0.5 } : undefined}
+                    onClick={() => {
+                      const trimmed = skipReason.trim();
+                      if (!trimmed) {
+                        setErr(tt("ndv.cut.skipReasonRequired"));
+                        return;
+                      }
+                      void act("skip", async () => {
+                        await app.NetDevCutoverSkip(run.id, trimmed);
+                        setSkipReason("");
+                      });
+                    }}
+                  >
+                    {busy === "skip" ? tt("ndv.cut.skipping") : tt("ndv.cut.skip")}
+                  </span>
+                </span>
               );
             })()}
             {/* X9：hold 态也允许终止——后端 CutoverAbort 本就接受 hold；此前

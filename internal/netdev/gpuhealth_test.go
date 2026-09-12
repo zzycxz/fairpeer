@@ -34,7 +34,9 @@ func gpuTestManager(t *testing.T, rules []config.NetDevAlertRule) *Manager {
 	alertStreaksMu.Lock()
 	alertStreaks = map[string]int{}
 	alertStreaksMu.Unlock()
+	prevUptimesMu.Lock()
 	prevUptimes = map[string]int64{}
+	prevUptimesMu.Unlock()
 	return m
 }
 

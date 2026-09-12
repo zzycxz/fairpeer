@@ -142,6 +142,9 @@ type NetDevAlertRule struct {
 	// consecutive polls (0/1 = immediately). 语义同割接门的 SustainSec——
 	// 单轮毛刺不立案。
 	ForRounds int `toml:"for_rounds"`
+	// PresetKey 是向导预设的稳定标识（如 "unreachable"）——按 key 去重，
+	// 语言/文案改版不再产生重复规则（批次 B5）。手工规则留空。
+	PresetKey string `toml:"preset_key,omitempty"`
 }
 
 // NetDevTrapConfig bounds the passive SNMP trap receiver (v2c).
@@ -815,6 +818,10 @@ func ValidateNetDev(nd NetDevConfig) error {
 		if r.Op == "==" && r.Value != math.Trunc(r.Value) {
 			return fmt.Errorf("netdev alert_rule %q: op \"==\" requires an integer value (got %v) — use \">=\" for fractional thresholds", r.Name, r.Value)
 		}
+		// preset_key 字符集白名单（附录 B-10 精神：内部标识不自由文本）。
+		if r.PresetKey != "" && !alertPresetKeyRe.MatchString(r.PresetKey) {
+			return fmt.Errorf("netdev alert_rule %q: preset_key must match [a-z0-9_-]{1,64}", r.Name)
+		}
 		switch r.Severity {
 		case "", "info", "warning", "critical":
 		default:
@@ -856,6 +863,8 @@ func ValidateNetDev(nd NetDevConfig) error {
 // ndNameRe bounds inventory entry names: they are spliced into FILE PATHS
 // (backups/<name>@<nanos>.json, golden/<name>.conf) — slashes, "..", and
 // separators must never reach the filesystem layer.
+var alertPresetKeyRe = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
+
 var ndNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$`)
 
 func ndNameValid(name string) bool { return ndNameRe.MatchString(strings.TrimSpace(name)) }
@@ -936,4 +945,81 @@ func (d NetDevDevice) NDPortOrDefault() int {
 		return d.Port
 	}
 	return 22
+}
+
+// NetDevWarnings returns soft-degrade findings for misconfigurations that are
+// safe to keep loading（D1 软降级：坏通道进运行期 LastError/NoProbe，不绑架整份
+// 配置启动）。Hard errors stay in ValidateNetDev. 由 config.Load 记 slog。
+func NetDevWarnings(nd NetDevConfig) []string {
+	var w []string
+	for _, d := range nd.Devices {
+		if d.SNMP != nil {
+			switch d.SNMP.Version {
+			case "v2c":
+				if d.SNMP.CommunityEnv == "" {
+					w = append(w, fmt.Sprintf("device %q: snmp v2c 缺 community_env——该设备不会进健康轮询", d.Name))
+				}
+			case "v3":
+				if d.SNMP.Username == "" || d.SNMP.AuthEnv == "" {
+					w = append(w, fmt.Sprintf("device %q: snmp v3 缺 username/auth_env——该设备不会进健康轮询", d.Name))
+				}
+			case "":
+			default:
+				w = append(w, fmt.Sprintf("device %q: snmp version %q 未实现（仅 v2c/v3）", d.Name, d.SNMP.Version))
+			}
+		}
+		for _, pr := range d.Protocols {
+			if pr != "ssh" && pr != "netconf" {
+				w = append(w, fmt.Sprintf("device %q: protocol %q 无传输（telnet 已裁决删除）", d.Name, pr))
+			}
+		}
+	}
+	// proxy_jump 链成环检测（D1）：ProxyJump 是逗号分隔的 hop 名链，沿链
+	// DFS，重复访问即环——加载期点名，不硬失败。
+	hopByName := map[string]NetDevHop{}
+	for _, h := range nd.Hops {
+		hopByName[h.Name] = h
+	}
+	var hopWalk func(name string, chain []string)
+	hopWalk = func(name string, chain []string) {
+		h, ok := hopByName[name]
+		if !ok {
+			return
+		}
+		for _, jump := range strings.Split(h.ProxyJump, ",") {
+			jump = strings.TrimSpace(jump)
+			if jump == "" {
+				continue
+			}
+			if containsString(append(chain, name), jump) {
+				w = append(w, fmt.Sprintf("hop %q: proxy_jump 链成环（%v → %s）", name, chain, jump))
+				continue
+			}
+			hopWalk(jump, append(chain, jump))
+		}
+	}
+	for _, h := range nd.Hops {
+		hopWalk(h.Name, nil)
+	}
+	for _, r := range nd.AlertRules {
+		switch r.Metric {
+		case "reachable":
+			if r.Value != 0 && r.Value != 1 {
+				w = append(w, fmt.Sprintf("alert_rule %q: reachable 的 value 应为 0/1（当前 %v）——规则永不触发或恒触发", r.Name, r.Value))
+			}
+		case "if_down_count", "flap_count", "if_down_above_p90", "gpu.xid", "gpu.count":
+			if r.Value < 0 {
+				w = append(w, fmt.Sprintf("alert_rule %q: %s 的 value 为负——恒真，会持续立案", r.Name, r.Metric))
+			}
+		case "gpu.temp":
+			if r.Value < 0 || r.Value > 150 {
+				w = append(w, fmt.Sprintf("alert_rule %q: gpu.temp 阈值 %v 超出物理范围 0..150", r.Name, r.Value))
+			}
+		case "gpu.mem_pct":
+			if r.Value < 0 || r.Value > 100 {
+				w = append(w, fmt.Sprintf("alert_rule %q: gpu.mem_pct 阈值 %v 超出 0..100", r.Name, r.Value))
+			}
+		}
+	}
+	return w
 }

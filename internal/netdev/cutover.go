@@ -358,6 +358,19 @@ func (m *Manager) CutoverStart(def *CutoverRun) (*CutoverRun, error) {
 	}
 
 	def.ID = newCutoverID()
+	// B4：先预注册 runner 句柄再落盘——落盘与 launch 之间的间隙里，并发
+	// ListCutovers（大屏/estop 高频调用）的孤儿扫描查不到活 runner 会把
+	// 新 run 误判 interrupted。precheck-failed 路径在返回前清理。
+	_, regCancel := context.WithCancel(context.Background())
+	cutoverRunsMu.Lock()
+	cutoverRuns[def.ID] = &cutoverRunHandle{cancel: regCancel, gen: cutoverLaunchGen.Add(1)}
+	cutoverRunsMu.Unlock()
+	cleanupReg := func() {
+		regCancel()
+		cutoverRunsMu.Lock()
+		delete(cutoverRuns, def.ID)
+		cutoverRunsMu.Unlock()
+	}
 	StateEventSnap(StateEventCutoverStart, def.ID, StateActorUser, filepath.Join(cutoversDir(), def.ID+".json"))
 	def.Status = CutoverRunning
 	def.CreatedAt = time.Now()
@@ -372,9 +385,11 @@ func (m *Manager) CutoverStart(def *CutoverRun) (*CutoverRun, error) {
 	}
 	if def.Status == CutoverPrecheckFailed {
 		if err := saveCutover(def); err != nil {
+			cleanupReg()
 			return nil, err
 		}
 		_ = AppendAudit(Audit{Device: "(cutover)", Command: "precheck-failed " + def.ID, Class: "cutover", Status: AuditDeviceError})
+		cleanupReg()
 		return def, nil
 	}
 
@@ -601,7 +616,7 @@ func (m *Manager) CutoverRollback(ctx context.Context, id string) (*CutoverRun, 
 		return nil, fmt.Errorf("cutover %s: status %s — rollback happens at a decision point", id, c.Status)
 	}
 	StateEventSnap(StateEventCutoverBack, id, StateActorUser, filepath.Join(cutoversDir(), id+".json"))
-	failed := ""
+	unresolved := []string{}
 	candidates, rolled := 0, 0
 	for i := len(c.Steps) - 1; i >= 0; i-- {
 		s := &c.Steps[i]
@@ -636,19 +651,27 @@ func (m *Manager) CutoverRollback(ctx context.Context, id string) (*CutoverRun, 
 		}
 		candidates++
 		if _, err := m.RollbackProposal(ctx, s.ProposalID); err != nil {
-			failed = fmt.Sprintf("%s: %v", s.ProposalID, err)
-			s.Error = failed
-			break
+			// 单个坏点不再终结其余候选的回退（批次 B3）：逐项汇总，
+			// HoldNote 列出未回滚清单，人工接管的范围从"全部"缩小到 M。
+			unresolved = append(unresolved, fmt.Sprintf("%s（%v）", s.ProposalID, err))
+			s.Error = fmt.Sprintf("rollback failed: %v", err)
+			continue
 		}
 		rolled++
 		s.Status = CutoverStepRolled
 		_ = saveCutoverLocked(c)
 	}
-	if failed != "" {
+	if len(unresolved) > 0 {
 		c.Status = CutoverFailed
-		c.HoldNote = fmt.Sprintf("回退失败（已回滚 %d/%d 个变更步）：%s — 人工接管（备份在变更里）", rolled, candidates, failed)
+		c.HoldNote = fmt.Sprintf("回退失败（已回滚 %d/%d 个变更步）——未回滚：%s。人工接管（备份在变更里）",
+			rolled, candidates, strings.Join(unresolved, "；"))
+		now := time.Now()
+		c.EndedAt = &now
 		_ = saveCutoverLocked(c)
 		cutoverMu.Unlock()
+		// failed 终态也补前后对比报告（逐行精读 R2 P3-10 附注）。finishReport
+		// 锁内合并，不改已落盘的 failed 状态。
+		m.cutoverFinishReport(context.Background(), c)
 		return c, nil
 	}
 	c.Status = CutoverAborted
@@ -886,22 +909,32 @@ func (m *Manager) cutoverExecStep(ctx context.Context, c *CutoverRun, step Cutov
 	step.Error = ""
 
 	if step.ProposalID != "" {
-		p, err := m.ExecuteProposal(CtxStateActor(ctx, StateActorSystem), step.ProposalID)
-		if err != nil {
-			step.Status = CutoverStepFailed
-			step.Error = err.Error()
-			end := time.Now()
-			step.EndedAt = &end
-			return step, fmt.Errorf("变更 %s 执行失败: %v", step.ProposalID, err)
+		// 已执行完的提案（watching/done——急停后「继续」重入的典型态）：
+		// 只重验门，不重发变更。重发会被 ExecuteProposal 的 approved-only 闸
+		// 拒绝并打成"执行失败"，值班在门失败 hold 上按「继续」就进了必败
+		// 循环（批次 B2 / 逐行精读 R2 P2-6）。partial/failed 仍走原路径失败
+		// 关闭（变更去向交人裁决）。
+		if p, perr := GetProposal(step.ProposalID); perr == nil &&
+			(p.Status == ProposalWatching || p.Status == ProposalDone) {
+			step.Status = CutoverStepApproved
+		} else {
+			p, err := m.ExecuteProposal(CtxStateActor(ctx, StateActorSystem), step.ProposalID)
+			if err != nil {
+				step.Status = CutoverStepFailed
+				step.Error = err.Error()
+				end := time.Now()
+				step.EndedAt = &end
+				return step, fmt.Errorf("变更 %s 执行失败: %v", step.ProposalID, err)
+			}
+			if p.Status == ProposalPartial || p.Status == ProposalFailed {
+				step.Status = CutoverStepFailed
+				step.Error = "变更 " + step.ProposalID + " 冻结为 " + p.Status + "（首败冻结）"
+				end := time.Now()
+				step.EndedAt = &end
+				return step, fmt.Errorf("%s", step.Error)
+			}
+			step.Status = CutoverStepApproved
 		}
-		if p.Status == ProposalPartial || p.Status == ProposalFailed {
-			step.Status = CutoverStepFailed
-			step.Error = "变更 " + step.ProposalID + " 冻结为 " + p.Status + "（首败冻结）"
-			end := time.Now()
-			step.EndedAt = &end
-			return step, fmt.Errorf("%s", step.Error)
-		}
-		step.Status = CutoverStepApproved
 	} else {
 		res := m.Exec(ctx, step.Device, step.Command)
 		step.Output = tailStr(res.Output, 2048)

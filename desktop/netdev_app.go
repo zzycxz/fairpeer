@@ -196,7 +196,8 @@ type NetDevAlertRuleView struct {
 	Value     float64 `json:"value"`
 	Severity  string  `json:"severity"`
 	Enabled   bool    `json:"enabled"`
-	ForRounds int     `json:"forRounds"` // 连续 N 轮成立才立案（0/1 = 立即）；恒输出——旧前端缓存回传缺失字段时 Go 侧解码为 0，与"立即"语义一致，不会丢用户配置的非 0 值（升级窗口除外）
+	ForRounds int     `json:"forRounds"`           // 连续 N 轮成立才立案（0/1 = 立即）；恒输出——旧前端缓存回传缺失字段时 Go 侧解码为 0，与"立即"语义一致，不会丢用户配置的非 0 值（升级窗口除外）
+	PresetKey string  `json:"presetKey,omitempty"` // 向导预设稳定标识（按 key 去重，批次 B5）
 }
 
 // NetDevDBSourceView is one database source row; Password is write-only.
@@ -338,6 +339,7 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 		v.AlertRules = append(v.AlertRules, NetDevAlertRuleView{
 			Name: r.Name, Metric: r.Metric, Op: r.Op, Value: r.Value,
 			Severity: r.Severity, Enabled: r.Enabled, ForRounds: r.ForRounds,
+			PresetKey: r.PresetKey,
 		})
 	}
 	for _, s := range cfg.NetDev.DBSources {
@@ -666,7 +668,7 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 					Name: strings.TrimSpace(r.Name), Metric: strings.TrimSpace(r.Metric),
 					Op: strings.TrimSpace(r.Op), Value: r.Value,
 					Severity: strings.TrimSpace(r.Severity), Enabled: r.Enabled,
-					ForRounds: r.ForRounds,
+					ForRounds: r.ForRounds, PresetKey: strings.TrimSpace(r.PresetKey),
 				})
 			}
 		} else {
@@ -748,19 +750,6 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 					Context:       strings.TrimSpace(d.K8sContext),
 					Namespaces:    cleanLogPaths(d.K8sNamespaces),
 				}
-				// 保留合并（见上）：新建设备沿用旧配置的非表单字段。
-				if prev, ok := prevDevices[strings.TrimSpace(d.Name)]; ok {
-					ndv := &nd.Devices[len(nd.Devices)-1]
-					ndv.Role = prev.Role
-					ndv.UseSSHConfig = prev.UseSSHConfig
-					ndv.LegacyAlgo = prev.LegacyAlgo
-					ndv.PassphraseEnv = prev.PassphraseEnv
-					if ndv.SNMP != nil && prev.SNMP != nil {
-						ndv.SNMP.Username = prev.SNMP.Username
-						ndv.SNMP.AuthEnv = prev.SNMP.AuthEnv
-						ndv.SNMP.PrivEnv = prev.SNMP.PrivEnv
-					}
-				}
 			}
 			if strings.TrimSpace(d.Kind) == "firewall" {
 				nd.Devices[len(nd.Devices)-1].Fw = &config.NetDevFirewallConfig{
@@ -773,14 +762,41 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 					CommunityEnv: strings.TrimSpace(d.SnmpCommunityEnv),
 				}
 			}
+			// 保留合并（见上）：非表单字段按 name 从旧配置保留——对**所有**
+			// kind 无条件生效（此前只在 k8s 分支内、且位于 SNMP 赋值之前，
+			// v3 三件套的保留是死代码；SSH/docker/firewall 设备每次保存都会
+			// 静默丢 legacy_algo/use_ssh_config/passphrase_env/role）。
+			if prev, ok := prevDevices[strings.TrimSpace(d.Name)]; ok {
+				ndv := &nd.Devices[len(nd.Devices)-1]
+				ndv.Role = prev.Role
+				ndv.UseSSHConfig = prev.UseSSHConfig
+				ndv.LegacyAlgo = prev.LegacyAlgo
+				ndv.PassphraseEnv = prev.PassphraseEnv
+				if ndv.SNMP != nil && prev.SNMP != nil {
+					ndv.SNMP.Username = prev.SNMP.Username
+					ndv.SNMP.AuthEnv = prev.SNMP.AuthEnv
+					ndv.SNMP.PrivEnv = prev.SNMP.PrivEnv
+				}
+			}
+		}
+		prevHops := map[string]config.NetDevHop{}
+		for _, ph := range c.NetDev.Hops {
+			prevHops[ph.Name] = ph
 		}
 		for _, h := range v.Hops {
-			nd.Hops = append(nd.Hops, config.NetDevHop{
+			nh := config.NetDevHop{
 				Name: strings.TrimSpace(h.Name), Host: strings.TrimSpace(h.Host),
 				Port: h.Port, User: strings.TrimSpace(h.User),
 				PasswordEnv: strings.TrimSpace(h.PasswordEnv),
 				ProxyJump:   strings.TrimSpace(h.ProxyJump),
-			})
+			}
+			// 跳板的非表单字段同样按 name 保留（此前每次保存无条件丢失）。
+			if prev, ok := prevHops[strings.TrimSpace(h.Name)]; ok {
+				nh.IdentityFile = prev.IdentityFile
+				nh.PassphraseEnv = prev.PassphraseEnv
+				nh.UseSSHConfig = prev.UseSSHConfig
+			}
+			nd.Hops = append(nd.Hops, nh)
 		}
 		if err := config.ValidateNetDev(nd); err != nil {
 			return err
@@ -884,7 +900,11 @@ func startInspectionScheduler(a *App) {
 					time.Sleep(time.Minute) // off/unparsable — re-check so saves apply live
 					continue
 				}
-				time.Sleep(d)
+				select {
+				case <-time.After(d):
+				case <-a.ctx.Done():
+					return
+				}
 				// 睡后重读：interval 可为数小时，睡眠期间改 scheduled_baseline
 				// 或清单要下一整轮才生效（与 briefing 调度器同款 fire-time 重读）。
 				cfg, err = config.Load()
@@ -946,7 +966,11 @@ func startBackupScheduler(a *App) {
 					time.Sleep(time.Minute)
 					continue
 				}
-				time.Sleep(d)
+				select {
+				case <-time.After(d):
+				case <-a.ctx.Done():
+					return
+				}
 				ctx, cancel := context.WithTimeout(a.ctx, 5*time.Minute)
 				if vers, err := netdev.SharedManager(cfg).RunBackup(ctx, ""); err == nil {
 					slog.Info("scheduled netdev backup filed", "versions", len(vers))
@@ -955,6 +979,10 @@ func startBackupScheduler(a *App) {
 					if fs := netdev.FileDriftFindings(vers); len(fs) > 0 {
 						slog.Info("netdev drift findings filed", "n", len(fs))
 					}
+				} else {
+					// 失败必须有痕（逐行精读 R3 #5）："定时备份跑没跑/成没成"
+					// 不能无处可答。
+					slog.Warn("scheduled netdev backup failed", "err", err)
 				}
 				cancel()
 			}

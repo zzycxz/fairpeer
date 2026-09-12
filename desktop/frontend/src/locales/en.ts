@@ -3306,7 +3306,7 @@ export const en = {
   "ndv.wiz.okMsg": "✓ Test message sent — please confirm receipt. The Health tab starts accumulating data now; dynamic thresholds (flap/baseline drift) activate automatically as history builds.",
   "ndv.wiz.testFail": "Configuration saved, but the test message was not confirmed sent — check the outlet and retry via Settings → notify outlets → send test.",
   "ndv.wiz.laterTune": "Tune later in Settings → NetOps (rules / poll interval / outlets / daily briefing time).",
-  "ndv.wiz.prev": "Back",
+  "ndv.wiz.savedTestFail": "settings saved; test push failed: {e} - retry later under settings > notify",  "ndv.wiz.prev": "Back",
   "ndv.wiz.next": "Next",
   "ndv.wiz.openHealth": "Open the Health tab",
   "ndv.wiz.later": "Later",

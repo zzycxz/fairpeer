@@ -22,18 +22,20 @@ import type {
 // —— 设备与跳板 / 护栏与读表 / 站点与自动化 / 高级；实体编辑（设备、跳板、
 // 项目、诊断组合、扫描导入）全部走弹框，列表行只留 只读摘要 + 编辑/删除。
 
-const VENDORS = ["huawei", "cisco", "zte", "vmware", "redfish", "linux", "windows", "snmp"];
+const VENDORS = ["huawei", "cisco", "zte", "h3c", "ruijie", "vmware", "redfish", "linux", "windows", "snmp"];
 const OSES: Record<string, string[]> = {
   huawei: ["vrp8", "vrp5"],
   cisco: ["ios", "iosxe"],
   zte: ["zxr10"],
+  h3c: ["comware7"],
+  ruijie: ["rgos"],
   vmware: ["esxi8", "esxi7"],
   redfish: ["bmc"],
   linux: ["ubuntu", "debian", "centos", "rocky", ""],
   windows: ["win11", "ws2022", ""],
   snmp: ["v2c"],
 };
-const READ_VENDORS = ["huawei", "cisco", "zte"];
+const READ_VENDORS = ["huawei", "cisco", "zte", "h3c", "ruijie"];
 
 type EditDevice = NetDevSettingsView["devices"][number];
 type EditHop = NetDevSettingsView["hops"][number];

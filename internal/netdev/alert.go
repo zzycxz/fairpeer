@@ -49,6 +49,9 @@ func ruleMetricValue(metric string, h DeviceHealth, prevUptime int64) float64 {
 	case "flap_count":
 		// Reachability up↔down transitions in the last hour — a flapping
 		// device answers most polls yet is clearly unhealthy.
+		// 口径（D3 裁决）：双通道主机的 SNMP 面抖动（GPU 通道在线）也会计入
+		// flap——保守取向，"面不稳"本身值得立案；豁免需可信的面归属判定，
+		// 留待 dogfooding 反馈。
 		return float64(FlapCount(h.Device, time.Hour))
 	case "if_down_above_p90":
 		// Current down interfaces minus the historical 90th percentile:
@@ -100,8 +103,41 @@ func ruleMetricValue(metric string, h DeviceHealth, prevUptime int64) float64 {
 }
 
 // prevUptimes carries the previous poll's uptime per device (the uptime_reset
-// baseline) across polls.
-var prevUptimes = map[string]int64{}
+// baseline) across polls. Guarded by prevUptimesMu — same discipline as
+// alertStreaks (逐行精读 R3 P3-3：评估入口是导出方法，不能靠单 goroutine 约定).
+var (
+	prevUptimesMu sync.Mutex
+	prevUptimes   = map[string]int64{}
+)
+
+func prevUptime(name string) int64 {
+	prevUptimesMu.Lock()
+	defer prevUptimesMu.Unlock()
+	return prevUptimes[name]
+}
+
+// setPrevUptime records the baseline; sec<=0（采集失败轮）不覆写——
+// "没看到"不能清掉"已看到的基线"（重启漏检防线，逐行精读 R1 P3-3）。
+func setPrevUptime(name string, sec int64) {
+	if sec <= 0 {
+		return
+	}
+	prevUptimesMu.Lock()
+	defer prevUptimesMu.Unlock()
+	prevUptimes[name] = sec
+}
+
+// prunePrevUptimes drops keys for devices no longer in the fresh sweep —
+// 设备删光后不残留（与 alertStreaksPrune 对称）.
+func prunePrevUptimes(fresh map[string]DeviceHealth) {
+	prevUptimesMu.Lock()
+	defer prevUptimesMu.Unlock()
+	for name := range prevUptimes {
+		if _, ok := fresh[name]; !ok {
+			delete(prevUptimes, name)
+		}
+	}
+}
 
 // alertStreaks carries per source-key consecutive-fire counts across polls —
 // the for_rounds debounce ("温度 ≥85 连续 3 轮" instead of single-poll fire).
@@ -137,9 +173,7 @@ func (m *Manager) evaluateAlerts(fresh map[string]DeviceHealth) {
 	rules := m.cfg.NetDev.AlertRules
 	if len(rules) == 0 {
 		for name, h := range fresh {
-			if h.UptimeSec > 0 {
-				prevUptimes[name] = h.UptimeSec
-			}
+			setPrevUptime(name, h.UptimeSec)
 		}
 		return
 	}
@@ -148,9 +182,7 @@ func (m *Manager) evaluateAlerts(fresh map[string]DeviceHealth) {
 	active, err := m.activeFindingsBySource()
 	if err != nil {
 		for name, h := range fresh {
-			if h.UptimeSec > 0 {
-				prevUptimes[name] = h.UptimeSec
-			}
+			setPrevUptime(name, h.UptimeSec)
 		}
 		return
 	}
@@ -189,7 +221,7 @@ func (m *Manager) evaluateAlerts(fresh map[string]DeviceHealth) {
 				continue
 			}
 			seen[src] = true
-			v := ruleMetricValue(r.Metric, h, prevUptimes[name])
+			v := ruleMetricValue(r.Metric, h, prevUptime(name))
 			fired := ruleCmp(v, r.Value, r.Op)
 			need := r.ForRounds
 			if need < 1 {
@@ -217,15 +249,9 @@ func (m *Manager) evaluateAlerts(fresh map[string]DeviceHealth) {
 	// 真实重启因 prevUptime==0 永久漏检（与 streak 冻结同一哲学）。
 	// 键随 fresh 淘汰——设备删光后不残留（与 streaksPrune 对称）。
 	for name, h := range fresh {
-		if h.UptimeSec > 0 {
-			prevUptimes[name] = h.UptimeSec
-		}
+		setPrevUptime(name, h.UptimeSec)
 	}
-	for name := range prevUptimes {
-		if _, ok := fresh[name]; !ok {
-			delete(prevUptimes, name)
-		}
-	}
+	prunePrevUptimes(fresh)
 	// 离场清理：active 的 alert:* 键若其 (rule, device) 已不在本轮任何评估
 	// 集合中（规则删除/设备移出清单），遗留卡自动恢复——与禁用规则同哲学。
 	// 其余前缀（gpu:xid:、syslog:、triage:…）有自己的生命周期，不在此触碰。
