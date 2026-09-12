@@ -35,13 +35,13 @@ func trustCommand(args []string) int {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
 		}
-		fmt.Printf("已撤销信任: %s\n", abs)
+		fmt.Printf("%s%s\n", i18n.M.TrustRevoked, abs)
 		return 0
 	}
 	if err := hook.Trust(abs, ""); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
-	fmt.Printf("已信任: %s\n该目录的项目 hooks、[[plugins]] 与 .mcp.json MCP 服务器此后正常加载。\n", abs)
+	fmt.Printf("%s%s\n", i18n.M.TrustGranted, abs)
 	return 0
 }
