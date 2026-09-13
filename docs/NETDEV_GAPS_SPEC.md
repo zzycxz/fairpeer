@@ -145,3 +145,14 @@ build（internal/cmd/desktop）｜vet｜netdev/config 全量测试｜desktop 三
 | 部署（K8s 路径） | ✅ | ✅ | ✅（k8s-apply 一步触达，调度器负责 fan-out） |
 
 路径裁决建议：**Path A（K8s/Helm/KServe/NIM Operator manifest 为大集群部署对象）为正解**，与业界分工一致（调度域归 K8s/HAMi，变更治理/验证/回滚归本台）；Path B（F8-F10 裸机军团引擎改造）仅在真实客户场景出现时立项。超节点形态（Atlas A3/天池/GB200 NVL72）随机带厂商集群软件，归 Path A 同类。
+
+---
+
+## 附：三轮完整检查记录（2026-09-14，/goal 完整检查3遍）
+
+- **方法**：每轮 3 个子代理独立视角（轮1=逐行正确性、轮2=安全对抗复核+宪法合规、轮3=测试覆盖/集成缝隙/文档准确性），主代理汇总修复后由下一轮交叉验证。
+- **轮1 修复**（提交 d0843afb）：9 项 P1 + 12 项 P2/P3——runbook 步形状三处裁决统一、IB 族读表除名、cat Ascend 除名、curl @file/file:// 拒、昇腾 hold 语义、infermetrics gauge seen 门、蓝队双锁运行时、盖章消失 fail-closed、Save ID 校验、restore 回灌。
+- **轮2 修复**（8cfe219d 前半）：模板回滚渲染缺失（安全网必失败）、热重载项目消失域闸 fail-open（只读停摆）、curl 引号/file: 单斜杠/大写 scheme/中缀第二 URL 绕过、counter seen 门、昇腾哨兵改 GPUHealthAbnormal、GetCutover 路径穿越、infer 标签致盲、metrics 直连钉死+拒重定向、审计 Redact×3、apply 审计行、批准人进审计、签名 hex|unix、operator 限长、空盖章执行闸、deny 覆盖批准/执行链。
+- **轮3 修复**（8cfe219d 后半）：设置保存抹 accel/metrics 三字段（断路修）、巡检周期死控件接线、智算屏 60s 自主轮询、mock 样例项目、7 项 P1 回归测试、文档漂移修正（E9 口径/13 条内置/值班手册 curl 措辞/ACCEL 实现形态/设计落定补记）。
+- **记档未修**（会话外/后续批）：域闸 v1.2 工具族覆盖（docker/k8s/netconf/firewall/dbquery）、RollbackProposal 项目域维度（恢复语义豁免，已注记）、remoteOnce 运行中开域的可用性、SeriesRead 时间索引（分片内全扫+全局锁）、job 文件锁 Windows flake（rename-vs-reader，修法=cutover 同款并发测试+保存重试）、RunbookTpl 六 binding 的 UI 入口、ProposalCenter 死组件、estop 不取消 poller ctx、cfg 指针无锁换（race 面）。
+- **归属注记**：8cfe219d 因目录级 git add 卷入并行批次的 18 个未提交文件（transport/、metrics.go 扩展、live/session/writeauth 等）——该部分非三轮检查产出，归属并行批次；整树在提交前已过全量门禁。
