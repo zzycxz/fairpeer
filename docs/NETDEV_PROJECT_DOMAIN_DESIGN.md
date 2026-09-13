@@ -104,3 +104,14 @@ confirmers 空=任意人工）；旧 config 加载通过 + `NetDevWarnings` 提�
 | J4 | 项目外设备可见性 | **✅拍板：只读+拒操作（A）** | guardrail/提案层过滤，视图零改动 |
 | J5 | confirmers 身份强度 | **✅拍板：折中（自报基线+trustdomain 升格）** | G-P1 审批链实现 |
 | K2 落地 | relay vs P2P | relay 为主（原型验证需两台实例，随 G 批排期） | G-L1/G-L2/G-L4 全部数据通道 |
+
+---
+
+## 六、实现落定补记（G-P1 v1/v1.1，2026-09-14）
+
+与上文的差异以本节为准：
+
+1. **会话载体**：设计为 per-session（`NetDevSetSessionProject(sessionID,…)`）；落地为 **Manager 实例级** `SetActiveProject`（projectdomain.go）——单操作员工作站的"会话"就是应用实例，标题栏切换器一次写两处。per-session 细分随多会话需求演进。
+2. **trustdomain 升格**：落地为"操作者须对上本域成员显示名（密钥在本机，自报不可冒名）+ 域私钥 Ed25519 签 `fairpeer/approve|id|operator|unix`，以 `hex|unix` 存 `p.ApproverSig`"（signApprovalWithDomain）；启用未入域 → fail-closed 拒批。跨实例核验随 G-L1。
+3. **allow 语义**：v1.1 定型为"deny 的域内例外白名单"（projectDenyVerdict）——allow 只豁免项目层 deny，全局 guardrail/分类器照常，"只许收紧"不破。
+4. **域闸覆盖面**：v1 只接 execSealed→guardrailCheck 一条路（CLI exec）；docker/k8s/netconf/firewall/dbquery 工具族的项目域维度是 v1.2 项（各工具族自带 WRITE_AUTHZ 分级，域维度未叠加）。

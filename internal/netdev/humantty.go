@@ -326,8 +326,11 @@ func (s *humanTTYSession) finish(waitErr error) {
 }
 
 // saveHumanTTYRecording lands the session's tail as a redacted text file under
-// the netdev state dir (回放复用审计回放视图).
+// the netdev state dir (回放复用审计回放视图). raw is the RAW stream tap
+// (pre-decode) — it goes through the same auto GBK decoder as the live view
+// so GBK-console devices (Huawei/ZTE) produce readable recordings.
 func saveHumanTTYRecording(device string, raw []byte) (string, error) {
+	raw = []byte(decoderFor("auto")(raw))
 	dir := filepath.Join(netdevStateDir(), "humantty")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err

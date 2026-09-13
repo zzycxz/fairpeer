@@ -124,6 +124,12 @@ func (m *Manager) ImportPreview(path string) (*ImportPreview, error) {
 // takes the imported side of the named conflicts. Credentials are NOT
 // migrated — the skeleton lands with empty credential fields and the user
 // re-enters them in settings (spec: 凭证不迁移).
+//
+// Machine-migration shortcut (decision D6): if the OLD machine's secrets were
+// protected by a passphrase KEK (FAIRPEER_SECRET_PASSPHRASE — deterministic
+// argon2id, not the random keyring/DPAPI key), setting the SAME passphrase on
+// the new machine makes secrets.enc.json directly readable, so bulk
+// re-entry can be skipped. That channel is documented, not automated here.
 func (m *Manager) ImportApply(path string, addNames, takeOvernames []string) (int, error) {
 	pv, err := m.ImportPreview(path)
 	if err != nil {

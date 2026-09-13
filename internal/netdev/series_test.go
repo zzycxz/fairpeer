@@ -141,3 +141,44 @@ func TestSeriesShardPathSanitize(t *testing.T) {
 func itoa64(n int64) string {
 	return strconv.FormatInt(n, 10)
 }
+
+// 轮3覆盖 P1：清理中断不截断——>1MB 坏行触发 sc.Err()，原文件逐字节保留。
+func TestSeriesCleanupAbortsOnOversizedLine(t *testing.T) {
+	seriesTestAnchors(t)
+	shard := seriesShardPath("big")
+	_ = os.MkdirAll(seriesDir(), 0o700)
+	good := `{"t":` + itoa64(time.Now().Unix()) + `,"d":"big","m":"m","v":1}` + "\n"
+	huge := `{"t":` + itoa64(time.Now().Unix()) + `,"d":"big","m":"huge","v":` + strings.Repeat("1", 1024*1024+10) + "}\n"
+	orig := good + huge
+	if err := os.WriteFile(shard, []byte(orig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	CleanupSeries()
+	got, err := os.ReadFile(shard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != orig {
+		t.Errorf("aborted cleanup must leave the shard byte-identical")
+	}
+}
+
+// 轮3覆盖 P1：迁移半途失败不双写——坏行使迁移中止，合法点不翻倍、旧文件保留。
+func TestSeriesMigrationAbortedNoDoubleWrite(t *testing.T) {
+	seriesTestAnchors(t)
+	legacy := filepath.Join(netdevStateDir(), "series.jsonl")
+	ts := itoa64(time.Now().Add(-time.Hour).Unix())
+	huge := `{"t":` + ts + `,"d":"x","m":"huge","v":` + strings.Repeat("1", 1024*1024+10) + "}"
+	body := `{"t":` + ts + `,"d":"x","m":"m","v":1}` + "\n" + huge + "\n"
+	if err := os.WriteFile(legacy, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	SeriesRead("x", 24*time.Hour) // 触碰即迁移（半途失败）
+	if _, err := os.Stat(legacy + ".migrated"); !os.IsNotExist(err) {
+		t.Error("aborted migration must not rename the legacy file")
+	}
+	pts := SeriesRead("x", 24*time.Hour)["m"]
+	if len(pts) != 1 {
+		t.Errorf("aborted migration must not duplicate points, got %d", len(pts))
+	}
+}

@@ -553,6 +553,14 @@ export interface AppBindings {
   NetDevApproveProposalAs(id: string, confirm2: boolean, operator: string): Promise<NetDevProposal>;
   // G-P1 会话项目上下文：标题栏切换器的后端半边（空串=清除）。
   NetDevSetActiveProject(name: string): Promise<void>;
+  // Runbook templates (runbook template library: extract from cutover → variable replacement → apply). The frontend does not consume these yet —
+  // the interfaces mirror the Go side to keep _CheckGenToApp from漂移.
+  NetDevRunbookTplSave(t: import("../../wailsjs/go/models").netdev.RunbookTemplate): Promise<import("../../wailsjs/go/models").netdev.RunbookTemplate>;
+  NetDevRunbookTplList(): Promise<import("../../wailsjs/go/models").netdev.RunbookTemplate[]>;
+  NetDevRunbookTplDelete(id: string): Promise<void>;
+  NetDevRunbookTplPreview(id: string, values: Record<string, string>): Promise<import("../../wailsjs/go/models").netdev.RunbookTplPreview>;
+  NetDevRunbookTplApply(id: string, values: Record<string, string>, runName: string): Promise<import("../../wailsjs/go/models").netdev.RunbookApplyResult>;
+  NetDevRunbookTplExtract(runID: string, name: string): Promise<import("../../wailsjs/go/models").netdev.RunbookTemplate>;
   NetDevRejectProposal(id: string, reason: string): Promise<NetDevProposal>;
   NetDevDeleteProposal(id: string): Promise<void>;
   NetDevExecuteProposal(id: string): Promise<NetDevProposal>;
@@ -731,9 +739,6 @@ export interface AppBindings {
   BrowserConsoleSwitchTab(index: number): Promise<string>;
   BrowserConsoleClose(): Promise<void>;
   BrowserConsoleNavigate(url: string): Promise<string>;
-  BrowserConsoleBack(): Promise<string>;
-  BrowserConsoleForward(): Promise<string>;
-  BrowserConsoleExtractTable(selector: string): Promise<string>;
   BrowserConsoleElements(): Promise<import("./types").BrowserElementsResult>;
   BrowserConsoleDeepScan(maxScrolls: number): Promise<import("./types").BrowserConsoleScanResult>;
   BrowserConsoleDevTools(): Promise<import("./types").BrowserDevToolsView>;
@@ -926,7 +931,6 @@ export interface AppBindings {
   GetSessionCollections(): Promise<string[]>;
   RagFeedText(collection: string, label: string, text: string): Promise<void>;
   RagBatchImport(collection: string, paths: string[]): Promise<RagImportResult>;
-  RagBatchExtract(collection: string): Promise<void>;
   // --- Expert team (multi-model collaboration) -----------------------------
   // Backed by desktop/experts_app.go. The panel subscribes to "experts:collab"
   // (onExpertsCollab) for streamed expert outputs and "experts:changed"
@@ -940,6 +944,8 @@ export interface AppBindings {
   DeleteExpertCollab(tabId: string, ordinal: number): Promise<HistoryMessage[]>;
   StartScreenshotHotkey(): Promise<void>;
   StopScreenshotHotkey(): Promise<void>;
+  StartSystemPowerWatch(): Promise<void>;
+  StopSystemPowerWatch(): Promise<void>;
   StartEStopHotkey(): Promise<void>;
   StopEStopHotkey(): Promise<void>;
   RagCreateCollection(name: string): Promise<void>;
@@ -1074,6 +1080,29 @@ export function onSystemPower(cb: (sleeping: boolean) => void): () => void {
       offSleep();
       offWake();
     };
+  }
+  return () => {};
+}
+
+// onNetdevDash subscribes to the 写侧推送 (netdev_dash_app.go dashEmit) that
+// nudges the dash screens after a successful write. The dash components listen
+// on a DOM CustomEvent of the same name, which Wails events never reach — the
+// App-level consumer re-dispatches this onto `window` (App.tsx).
+export function onNetdevDash(cb: (screens: string[]) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("fairpeer:netdev-dash", (payload: unknown) => {
+      const screens = (payload as { screens?: string[] } | undefined)?.screens ?? [];
+      cb(screens);
+    });
+  }
+  return () => {};
+}
+
+// onAuthExpired subscribes to mail-account credential expiry notifications
+// (app.go authNotifier — IMAP/SMTP login failed with an auth error).
+export function onAuthExpired(cb: (account: string) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("auth:expired", (payload: unknown) => cb(typeof payload === "string" ? payload : ""));
   }
   return () => {};
 }
@@ -2594,7 +2623,10 @@ function makeMockApp(): AppBindings {
     hops: null, groups: null, auditRetention: "", scopes: null,
     guardConfirmEach: false, guardTurnBudget: 0, guardAllowedGroups: null,
     inspectionInterval: "", backupInterval: "", backupGitMirror: false, scheduledBaseline: false,
-    extraRead: null, projects: null, presets: null,
+    extraRead: null,
+    // 轮3集成审查：浏览器 dev 也要能演练 G-P1 三段式——塞一条含安全域字段的样例。
+    projects: [{ name: "演示项目", groups: [], note: "浏览器演示", type: "netdev", policy: "proposal", deny: [], allow: [], confirmers: [] }],
+    presets: null,
     alertRules: [], dbSources: [], pollIntervalSeconds: 60, syslogPort: 0,
   };
   return {
@@ -3206,6 +3238,12 @@ function makeMockApp(): AppBindings {
     async NetDevApproveProposal(_id: string, _confirm2: boolean) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevApproveProposalAs(_id: string, _confirm2: boolean, _operator: string) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevSetActiveProject(_name: string) { /* browser mock: frontend store is the only state */ },
+    async NetDevRunbookTplSave(t: import("../../wailsjs/go/models").netdev.RunbookTemplate) { await delay(150); return t; },
+    async NetDevRunbookTplList(): Promise<import("../../wailsjs/go/models").netdev.RunbookTemplate[]> { await delay(150); return []; },
+    async NetDevRunbookTplDelete(_id: string) { /* browser mock */ },
+    async NetDevRunbookTplPreview(): Promise<never> { throw new Error("browser dev mock: no runbook template backend"); },
+    async NetDevRunbookTplApply(): Promise<never> { throw new Error("browser dev mock: no runbook template backend"); },
+    async NetDevRunbookTplExtract(): Promise<never> { throw new Error("browser dev mock: no runbook template backend"); },
     async NetDevRejectProposal(_id: string, _reason: string) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevDeleteProposal(_id: string) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevExecuteProposal(_id: string) { throw new Error("browser dev mock: no proposal backend"); },
@@ -5311,7 +5349,6 @@ function makeMockApp(): AppBindings {
     async RagBatchImport(_collection: string, _paths: string[]): Promise<RagImportResult> {
       return { jobIds: [], files: 0, ftsChunks: 0, message: "mock" };
     },
-    async RagBatchExtract(_collection: string): Promise<void> {},
     // --- Expert team mock (browser dev only) -------------------------------
     async ListExpertTeams(): Promise<TeamView[]> {
       return [
@@ -5342,6 +5379,8 @@ function makeMockApp(): AppBindings {
     },
     async StartScreenshotHotkey() {},
     async StopScreenshotHotkey() {},
+    async StartSystemPowerWatch() {},
+    async StopSystemPowerWatch() {},
     async StartEStopHotkey() {},
     async StopEStopHotkey() {},
     async SetCoWorkSettings(v: any) { settings.cowork = { ...v, detectedBrowser: settings.cowork.detectedBrowser }; },
@@ -5403,11 +5442,6 @@ function makeMockApp(): AppBindings {
       ];
     },
     async BrowserConsoleSwitchTab(index: number) { await delay(250); return `已切换到页卡 ${index} (mock)`; },
-    async BrowserConsoleBack() { await delay(200); return "后退一页 (mock)"; },
-    async BrowserConsoleForward() { await delay(200); return "前进一页 (mock)"; },
-    async BrowserConsoleExtractTable(selector: string) { await delay(300); return `| 列1 | 列2 |
-|---|---|
-| a | b | (mock, ${selector || "整页"})`; },
     async BrowserConsoleDevTools() {
       await delay(200);
       return {

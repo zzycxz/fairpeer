@@ -19,6 +19,7 @@ type auditEntryLite struct {
 	Device  string    `json:"device"`
 	Command string    `json:"command"`
 	Class   string    `json:"class"`
+	Status  string    `json:"status"`
 }
 
 func readAuditSince(since time.Time) []auditEntryLite {

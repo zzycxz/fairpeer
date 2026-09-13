@@ -35,6 +35,15 @@ export default function GpuBoardView({ onJump, onFocusDevice }: Props) {
     return () => window.removeEventListener("fairpeer:netdev-dash", on);
   }, [q.retry]);
 
+  // 轮3集成审查：infer.* 每轮更新但不发事件（"变化才通知"口径），健康静默
+  // 时本屏会冻结——可见时 60s 自主刷新兜底（对齐 DashShell 纪律）。
+  useEffect(() => {
+    const tm = setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") q.retry();
+    }, 60_000);
+    return () => clearInterval(tm);
+  }, [q.retry]);
+
   if (q.status === "error") return <PanelErrorState onRetry={q.retry} />;
   if (q.status === "loading" || !b) return <div className="ndv__card" style={{ padding: 16 }}>{t("ndv.gpu.loading")}</div>;
 

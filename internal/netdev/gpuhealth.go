@@ -413,6 +413,10 @@ func (m *Manager) gpuXidFinding(deviceName string, h DeviceHealth) {
 	}
 	src := "gpu:xid:" + deviceName
 	if h.GPUXIDMax <= 0 {
+		if h.GPUHealthAbnormal {
+			// 昇腾"异常但无码"：hold——异常还在，不能自动消卡（轮2复核）。
+			return
+		}
 		m.resolveFindingBySource(src)
 		return
 	}

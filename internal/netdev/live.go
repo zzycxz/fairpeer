@@ -139,24 +139,65 @@ func (m *Manager) subscribeConnState(device string, client *transport.Client) {
 		default:
 		}
 	})
+	// The drainer must die with its client: each (re)connect dials a fresh
+	// transport.Client, and the race-loser close in runRead discards one
+	// without any other termination signal — without done, one goroutine +
+	// buffered channel leaked per dial.
+	done := make(chan struct{})
+	client.OnClose(func() { close(done) })
 	go func() {
-		for e := range events {
-			var state string
-			switch e.Status {
-			case transport.StatusConnecting:
-				state = LiveConnConnecting
-			case transport.StatusConnected:
-				state = LiveConnConnected
-			case transport.StatusReconnecting:
-				state = LiveConnReconnect
-			case transport.StatusStopped:
-				state = LiveConnStopped
-			default:
-				continue
+		defer func() {
+			// Final drain: Close() publishes StatusStopped into events and
+			// then fires the OnClose hook — both channels can be ready at
+			// once, and a bare select would drop the Stopped transition ~50%
+			// of the time, leaving the panel's dot stuck on "connected".
+			for {
+				select {
+				case e, ok := <-events:
+					if !ok {
+						return
+					}
+					m.forwardConnState(device, e)
+				default:
+					return
+				}
 			}
-			m.emitConnLive(device, state)
+		}()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			select {
+			case <-done:
+				return
+			case e, ok := <-events:
+				if !ok {
+					return
+				}
+				m.forwardConnState(device, e)
+			}
 		}
 	}()
+}
+
+// forwardConnState maps one transport status to its live-event constant.
+func (m *Manager) forwardConnState(device string, e transport.StatusEvent) {
+	var state string
+	switch e.Status {
+	case transport.StatusConnecting:
+		state = LiveConnConnecting
+	case transport.StatusConnected:
+		state = LiveConnConnected
+	case transport.StatusReconnecting:
+		state = LiveConnReconnect
+	case transport.StatusStopped:
+		state = LiveConnStopped
+	default:
+		return
+	}
+	m.emitConnLive(device, state)
 }
 
 // liveCmdStart / liveCmdEnd / liveCmdRefused are the command-lifecycle

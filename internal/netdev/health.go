@@ -43,7 +43,10 @@ type DeviceHealth struct {
 	GPUXIDCodes    []int     `json:"gpuXidCodes,omitempty"`    // 本轮全部去重代码
 	GPUXIDEvidence []string  `json:"gpuXidEvidence,omitempty"` // 命中行（已脱敏，封顶）
 	GPUXIDSource   string    `json:"gpuXidSource,omitempty"`   // 证据命令（journalctl/-q）
-	GPULastError   string    `json:"gpuLastError,omitempty"`   // GPU 采集失败原因（不影响 SNMP 段）
+	// GPUHealthAbnormal（M-1 轮2）：昇腾卡 health 非 OK 但无十进制码值——
+	// gpuXidFinding 据此 hold（不 resolve 在案 finding），码值通道不含哨兵。
+	GPUHealthAbnormal bool   `json:"gpuHealthAbnormal,omitempty"`
+	GPULastError      string `json:"gpuLastError,omitempty"` // GPU 采集失败原因（不影响 SNMP 段）
 }
 
 // IfHealth is one interface row (ifDescr/ifAdminStatus/ifOperStatus).

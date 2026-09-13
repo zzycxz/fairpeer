@@ -34,7 +34,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 测试：TestProjectAllowException / TestProjectReadOnlyFloor（命令层+提案层）/
   TestTrustDomainApprovalUpgrade（启用未入域 fail-closed）。
 
-### feat(netdev): G-P1 项目安全域 v1（批⑤开工，J4/J5 已拍板）——域从视图升格为安全语义
+### fix(netdev): 三轮完整检查（每轮 3 子代理）——P1×12 + P2/P3×20 修复与记档
+
+**轮1（逐行正确性）**：runbook 步形状三处裁决统一（决策点/门=附着物，12 条内置模板改写，
+apply→approve→start 全链测试 TestRunbookApplyThenStart）；IB 计数器族读表除名（复位旗标垫位
+`-a -r` 前缀模型挡不住）；`cat /usr/local/Ascend` 除名（多操作数任意读）；curl `-H @file`/`file://` 拒；
+昇腾失败轮 hold 非 resolve；infermetrics gauge 不造 0（seen 集）；蓝队双锁运行时（ProposalNeedsConfirm2
+读项目 policy）；盖章项目不存在 fail-closed；Save ID 路径穿越；restore 回灌后端。
+**轮2（安全对抗复核）**：内置模板回滚未渲染变量（安全网必失败）；热重载项目消失域闸 fail-open（只读停摆）；
+curl 引号绕过/`file:/` 单斜杠/中缀第二 URL；counter seen 门；昇腾哨兵改 GPUHealthAbnormal 标志；
+GetCutover validStoreID（路径穿越读任意 .json）；infer 标签消毒（series 致盲）；metrics 直连钉死+
+拒重定向；域闸审计行 Redact；apply 审计行；批准人进审计；签名 `hex|unix` 可重构；operator 限长；
+空盖章提案执行闸；deny 覆盖批准/执行链。
+**轮3（覆盖/集成/文档）**：设置保存抹 accel/metrics 三字段（视图往返接线）；巡检周期死控件接线；
+智算屏 60s 自主轮询；mock 样例项目；7 项 P1 回归测试补齐（Save ID/盖章消失/双锁运行时/停摆/
+seen 门/平刻取最大/GPUHealthAbnormal hold/series 清理中断+迁移不双写）；文档漂移修正（值班手册
+curl 措辞、E9 口径注记、内置库 13 条、ACCEL 实现形态补记、设计文档落定补记）。
+记档未修（会话外/后续批）：RollbackProposal 项目域维度、工具族域覆盖 v1.2、remoteOnce 可用性、
+SeriesRead 时间索引、job 文件锁 flake、RunbookTpl 六 binding 的 UI 入口、ProposalCenter 死组件。
+
+### feat(netdev): G-P1 项目安全域 v1### feat(netdev): G-P1 项目安全域 v1（批⑤开工，J4/J5 已拍板）——域从视图升格为安全语义
 
 - **J4/J5 拍板落档**（docs/NETDEV_PROJECT_DOMAIN_DESIGN.md §三/§五）：J4=项目外设备
   只读+拒操作；J5=confirmers 自报基线+trustdomain 开启时签名升格（折中）。
@@ -68,8 +87,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   XID 一致）；逐格容错 + note 通道（孤儿行丢弃留痕，不静默掩盖）。错误码 catalog 登录墙——分级
   表诚实地留真机校准，不猜。
 - **展示归一**：GPUCard/GPUBoardCard 增 `errorCode/errorCodeKind` 列；大屏卡级 ERR 徽标
-  （数字码显 ERR n，字面态显非OK）；读表补 `cat /usr/local/Ascend` 版本文件前缀（E3 纪律 path 收窄）。
-- **模板**：`RBB-deploy-vllm-ascend`（910B 蓝本 9 步 runbook 化：npu-smi 前置→CANN 版本→权重对账→
+  （数字码显 ERR n，字面态显非OK）；读表版本文件读取（初版 `cat /usr/local/Ascend`，轮1审查除名改 `ls -l` 目录列举——cat 多操作数任意读）。
+- **模板**：`RBB-deploy-vllm-ascend`（910B 蓝本 9 步收敛为 7 步模板：npu-smi 前置→CANN 版本目录→权重对账→
   vllm-ascend/MindIE 变更段→HTTP 门→决策点；W8A8 主流量化口径注记）。
 - 批⑥剩余：MindIE/容器形态变体与 enflame/kunlunxin 驱动按客户硬件入批（M-2/M-3 触发池）。
 
@@ -88,7 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   只有 gauge 点（缺基线不造 0）。标签 `svc=<端口>`/`model=<model_name>` 贯穿 series。
 - **告警面**：infer.* 七项进规则枚举（config 校验硬失败兜底）；取 series 最新点跨服务最大（最忙
   实例触发）；**冻结闸**——未登记 metrics_ports 的主机永不参与 infer.* 规则（与 GPU 采样闸同哲学，
-  "我方没数据"≠"条件满足"）；ruleTitle 中文条目八项。
+  "我方没数据"≠"条件满足"）；ruleTitle 中文条目七项。
 - **智算大屏服务层区**（GpuBoard.Services）：一行=(主机,端口,模型)，gauge 取最新、延迟/吞吐取
   15 分钟窗均值；KV ≥80% 琥珀 / ≥90% 红；>5 分钟未更新给陈旧提示。前端 types/view/locales 齐备。
 - 测试链：真实 vLLM 导出样本解析（含转义标签/histogram/坏行）、增量派生（首轮缺基线/回绕重置）、
@@ -129,6 +148,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   全链活教材；Get/List 内建回退合并、Delete 拒内建。
 - desktop 六 binding：save/list/delete/preview/apply/extract。
 - F1b 七变体/F13 组件模板/F15 验收模板为内容库建设，随批③入库（种子骨架已定格式）。
+
+### fix(security): codex 对比修复三轮完整检查——①②轮审计 30+ 发现全修（危险闸门对抗加固 / netdev 密封全量重放 / OAuth state）
+
+「完整检查3遍」的第①②轮（每轮 3 子代理，第③轮见后）。第①轮（正确性审计）20 条、
+第②轮（对抗性安全+集成一致性）13 条，全部 P0/P1/P2 与可速赢 P3 已修，每条带回归测试或
+验证证据：
+
+**第①轮（正确性）关键修复**
+- **危险闸门分段探测**：整串探测对 `echo hi && rm -rf /` 失明（首段良性）——allow 模式零提示执行。Check 改为整串+分段都探测。
+- **整串规则并评**：跨操作符书写的整串规则（字面 deny `bash(echo hi && rm -rf /*)`）在纯分段匹配下漏配——subjects 返回 分段∪整串。
+- **netdev 密封时序**：密封 RemovePrefix 运行在技能工具注册之前，read_skill/install_skill 逃逸（install_skill 是写操作）——注册后重放排除。
+- SEC-3 相对自定义路径先解绝对再判（相对路径在未信任根内此前被保留加载）；技能遮蔽警告 store 级去重（此前每次 Read 重扫重打印）；quota 429 签名精化（裸 "quota"/"billing" 子串会误杀带 Retry-After 的瞬时限流）；长 Retry-After 快速失败改为受 `always` 模式门控且非配额体不再套配额文案；PostureBlock 每节 20 条上限；ApplyIndex 保留已禁用技能的 [关闭] 行；slash 委托文本补计划模式出路；serve /resume 与 remotehost setSessionPath 补 Running 守卫（与 desktop 同款）；OAuth 手动端点 `oauth_auth_url`/`oauth_token_url` 补齐（无元数据服务器此前无路可走）。
+
+**第②轮（对抗性安全）关键修复**
+- **[P0] 危险模式无锚签名层**：全部 glob 锚定串首——`/bin/rm -rf`、`env rm -rf`、`xargs`、`nohup`、`\rm`、`$(rm -rf /)`、`cat <(rm …)`、`sleep 1 & rm …`、花括号组、`rm --recursive --force`、`dd of=/dev/`、`unlink` 全部绕过。BashDangerWarning 加无锚包含签名层（误报代价=多弹一次批，fail-closed）。
+- **[P0] `less -O` 全模式静默覆写**：`-O`（force-overwrite）大小写敏感地躲过 `-o` 前缀检查——读分类器放行 + 危险探测跳过 = 任意文件覆写原语。补 `-O`。
+- **[P1] exec_session 绕过全部 bash 闸门**：同执行面（同 shell 解析、RiskExec）但无分段/无危险探测/无 headless 外险拒——subjectsFor 与 Check 同吃 exec_session。
+- **[P1] netdev 密封漏 8+ 写工具**：delete_symbol、doc/csv/xlsx_write、doc_convert、image_generate、mindmap_create、rag_mindmap、email_read（save_attachments 写模型选的绝对路径）、rag_import/delete、calendar、browser_open、email_send/im_send，且 install_source/skill_market 后注册无审批钩子=任意进程执行面——排除表扩容 + 注册完成后**全表重放密封**。
+- patchSubjects 与解析器同一 \r 规整（裸 \r 行内时 subject 与实际写入目标错位）；OAuth PKCE 补 `state` 参数（回调 fail-closed 校验，关掉本机登录 CSRF 面）。
+- **前端 paused 重放恢复**（第②轮集成面 P2）：present 重放路径此前把 paused/resumed 当瞬态丢弃——重载后 UI 无 Resume 入口（wire 修复的死态在重载路径存活）。重放取最后方向置位 paused。
+- ③处测试按新契约更新 + 新增 posture_test / compact_shrink_test / 危险复合命令与整串 deny 回归；gofmt 清账。
+
+**核对后不修**（记录在案）：email_read 等写入方进 Edit 族授予面（设计取舍，涉及审批语义）；非 Windows 下 token 文件权限（0600/0700 已正确）；子代理 prompt 不含姿态块（执行闸门一致，仅模型侧可预测性缺口）；`-race` 未跑（本机无 C 工具链，待 CI）。
+
+**第③轮（终检）**：20 项已实施主张逐条对码 0 漂移；全量测试/vet/typecheck 绿；对抗复检新出 5 项当轮全修——① exec_session 的 **write 通道**（input 字段喂活 shell，spawn 批准后每条 write 免检）与命令同吃危险探测+回归测试；② netdev_rag_import / calendar 撤出密封表（前者是 NETDEV_SPEC 明文承诺的命名空间受限导入通道、后者是全 profile 全局能力——过度密封会让文档化流程半残）；③ OAuth 回调 channel 改非阻塞发送（并发第二个 mismatch 回调会永久泄漏 handler goroutine）；④ 取消停在暂停里的 turn 后端补发 Resumed（sidecar 最后方向不再卡在 paused）+ 前端 backend_status 非运行态清 paused 双保险；⑤ 补低误报破坏签名（find -delete / truncate / shred / git checkout --）。
+
+**第①轮正确性审计残留清账**（六条记录在案项全部收口）：
+- **空白变体绕过 deny 规则（P2）**：Policy 层此前用原始串匹配规则——`bash(rm -rf*)` 对 "rm  -rf /x"（双空格）不命中。bash subjects 现为 分段∪坍缩副本∪整串（Literal 规则按原始串精确匹配的语义保留，有测试钉住）。
+- **SEC-3 闸门抽为共享 `boot.SkillScopesForRoot`**：desktop 技能面板、CLI 店、DeriveEditableSkill 与 boot 实店同参——管理面此前绕过闸门，会列出 run_skill 拒绝调用的死条目（F4）。
+- 探测店带上 ExcludedPaths（用户已排除的技能不再误触闸门通知，F1）；自定义路径与根先过 EvalSymlinks 再判包含（symlink 词汇缺口，F3）。
+- **嵌套/可空 object 的 properties 补空下沉**（Q-c）：`{"type":["object","null"]}` 与 items/oneOf 内层节点现在同样补空——不再挡住 strict 模式升格。
+- **收缩阶梯去掉每级同尺寸浪费重试**（Q-e）：overflow 错误每级恰一次请求（8→4→2 三次），非 overflow 错误保留同尺寸重试一次；summarizeWithRetry 随之退役删除。
 
 ### feat(agent): codex 对比第④轮第二批——本迭代档 9 项 + 排期档小项全清（CODEX_COMPARE_2026-09-13 施工顺序②③）
 

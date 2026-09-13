@@ -71,15 +71,40 @@ var pagerLinePattern = regexp.MustCompile(`^\s*-{0,4}\s*More\s*-{0,4}\s*$`)
 
 // syncBuffer serializes the ssh mux's session writes against the engine's
 // polls — bytes.Buffer is not goroutine-safe and the mux writes concurrently.
+//
+// The buffer is capped (GAP-20): asynchronous device output arriving between
+// commands (terminal-monitor leftovers, line noise) used to accumulate without
+// bound — unbounded RSS for long-lived sessions, and a growing full copy on
+// every 15ms snapshot poll. Once the buffer exceeds syncBufferCap, Write drops
+// the head down to syncBufferKeep. Both consumers tolerate a dropped head: the
+// prompt/pager matchers and completed()'s echo check only need recent output,
+// and Run's emitLive prefix-resync branch already treats a buffer that stopped
+// being a prefix-extension of the emitted text as a rewrite and resyncs
+// silently.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
 }
 
+const (
+	// syncBufferCap / syncBufferKeep bound retained device output: past 8MB
+	// only the most recent 4MB is kept. Generous enough that a single Run's
+	// output (the buffer is reset before each command) is never truncated in
+	// practice; only inter-command async accumulation hits the cap.
+	syncBufferCap  = 8 << 20
+	syncBufferKeep = 4 << 20
+)
+
 func (b *syncBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.buf.Write(p)
+	n, err := b.buf.Write(p)
+	// Enforce the cap: discard the head beyond syncBufferKeep. Next() consumes
+	// in place (no copy) and the buffer reuses the reclaimed space.
+	if b.buf.Len() > syncBufferCap {
+		b.buf.Next(b.buf.Len() - syncBufferKeep)
+	}
+	return n, err
 }
 
 func (b *syncBuffer) snapshot() []byte {

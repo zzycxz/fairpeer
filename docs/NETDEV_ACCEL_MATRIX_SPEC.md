@@ -89,6 +89,7 @@ type AccelDriver interface {
 - 输出归一到现有 vendor-neutral `GPUCard`/`GPUBoardDevice` 结构，**新增 `ErrorCode int` + `ErrorCodeKind string`**（XID ↔ 昇腾错误码 ↔ 燧原错误码），替代 XID 专属语义；severity 分级查各厂商 catalog 表（对齐既有 XID severe 设计，真机校准随 dogfooding）。
 - 每厂商命令进各自读表白名单（nvidia-smi/journalctl 已在；npu-smi info 已在；enflame-smi/xpu-smi 按客户硬件补）。
 - **密封/审计/脱敏/预算零改动**——薄驱动仍走 execSealed。
+- **实际实现形态（批⑥ M-1 落定，2026-09-14）**：未建 `internal/netdev/accel/` 包——昇腾落地为函数式薄驱动 `pollAscendHealth`（一轮 `npu-smi info`）+ `parseNPUInfo`（accel_ascend.go），无独立 Version/HealthEvents 方法（CANN 版本走读表 `ls -l /usr/local/Ascend`，health 异常经 GPUCard.ErrorCode/Kind 与 GPUHealthAbnormal 标志归一）。接口化留 M-2/M-3 多厂商时再引入。
 
 ### 4.3 编排与展示通杀（已验证）
 

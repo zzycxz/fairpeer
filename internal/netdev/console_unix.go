@@ -73,10 +73,16 @@ type consoleLine struct {
 func (c *consoleLine) Read(p []byte) (int, error) {
 	for {
 		n, err := c.f.Read(p)
-		if n > 0 || err == nil {
-			return n, nil // n==0, err==nil: line idle — next Read re-arms VTIME
+		// See console_read.go: the kernel's bare idle tick AND Go's
+		// eofError-rewritten (0, io.EOF) both mean "line idle" — the real
+		// link-loss signature is a device errno, which propagates below.
+		if out, idle := consoleIdleRead(n, err); idle {
+			return out, nil
 		}
-		if errno, ok := err.(unix.Errno); ok && errno == unix.EINTR {
+		if n > 0 {
+			return n, nil
+		}
+		if errno, ok := err.(unix.Errno); ok && (errno == unix.EINTR || errno == unix.EAGAIN || errno == unix.EWOULDBLOCK) {
 			continue
 		}
 		return 0, err

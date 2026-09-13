@@ -91,8 +91,8 @@
 
 **只读检测**：
 1. `ss -ltnp 'sport = :8000'`：旧进程没退干净占着端口。
-2. `curl -I http://127.0.0.1:8000/health`：本机探活（HEAD-only 读表）。
-3. `firewall-cmd --list-ports`（或 `iptables -L -n` 读形态）：服务端口未放行。
+2. `curl -I http://127.0.0.1:8000/health`：本机探活（走 curlReadOverride 语法白名单——curl 整族已从读表除名，E6）。
+3. 防火墙规则核查：`firewall-cmd --list-ports` / `iptables -L -n` 不在读表白名单——走 extra_read 逐命令授予或用大屏端口视图。
 
 **修复分类**：停旧进程/改 port（变更）；放行端口（变更，防火墙规则走提案——那是数通侧本职）。
 

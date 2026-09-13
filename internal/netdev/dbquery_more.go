@@ -202,8 +202,17 @@ func esPathAllowed(path string, allowlist []string) bool {
 	if !strings.HasPrefix(p, "/") || strings.Contains(p, "..") || strings.ContainsAny(p, " `\"<>") {
 		return false
 	}
-	if u, err := url.Parse(p); err != nil || u.Path == "" {
+	u, err := url.Parse(p)
+	if err != nil || u.Path == "" {
 		return false
+	}
+	// Scan target = raw path + URL-decoded query. The raw path can never carry
+	// whitespace (banned above; control chars fail url.Parse), so the deny scan
+	// can only ever fire on %XX-encoded query bytes — decode them before
+	// scanning or the backstop is dead code.
+	scan := p
+	if q, qerr := url.QueryUnescape(u.RawQuery); qerr == nil && q != "" {
+		scan += "?" + q
 	}
 	for _, a := range allowlist {
 		na := strings.TrimSuffix(strings.TrimSpace(a), "/")
@@ -211,7 +220,9 @@ func esPathAllowed(path string, allowlist []string) bool {
 			continue
 		}
 		if p == na || strings.HasPrefix(p, na+"/") || strings.HasPrefix(p, na+"?") {
-			return true
+			// Same hard-deny backstop as the SQL seal (dbquery.go): an
+			// entry-prefix match must not admit a smuggled clause tail.
+			return !dbSQLDenied.MatchString(scan)
 		}
 	}
 	return false

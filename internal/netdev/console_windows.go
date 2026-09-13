@@ -97,11 +97,14 @@ type consoleLine struct {
 func (c *consoleLine) Read(p []byte) (int, error) {
 	for {
 		n, err := c.f.Read(p)
+		// See console_read.go: a ReadIntervalTimeout idle tick surfaces as
+		// ReadFile success with 0 bytes, which Go rewrites into (0, io.EOF) —
+		// both mean "line idle"; device errors propagate below.
+		if out, idle := consoleIdleRead(n, err); idle {
+			return out, nil
+		}
 		if n > 0 {
 			return n, nil
-		}
-		if err == nil {
-			return 0, nil
 		}
 		var eno windows.Errno
 		if errors.As(err, &eno) && (eno == windows.ERROR_TIMEOUT || eno == windows.ERROR_SEM_TIMEOUT || eno == windows.ERROR_OPERATION_ABORTED) {
@@ -137,6 +140,38 @@ func listConsolePorts() []string {
 			out = append(out, v)
 		}
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return naturalLess(out[i], out[j]) })
 	return out
+}
+
+// naturalLess compares digit runs numerically so COM2 sorts before COM10
+// (plain byte order puts COM10 first). Non-digit runs compare byte-wise.
+func naturalLess(a, b string) bool {
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		ca, cb := a[i], b[j]
+		caD, cbD := ca >= '0' && ca <= '9', cb >= '0' && cb <= '9'
+		switch {
+		case caD && cbD:
+			na, nb := 0, 0
+			for i < len(a) && a[i] >= '0' && a[i] <= '9' {
+				na = na*10 + int(a[i]-'0')
+				i++
+			}
+			for j < len(b) && b[j] >= '0' && b[j] <= '9' {
+				nb = nb*10 + int(b[j]-'0')
+				j++
+			}
+			if na != nb {
+				return na < nb
+			}
+		default:
+			if ca != cb {
+				return ca < cb
+			}
+			i++
+			j++
+		}
+	}
+	return len(a)-i < len(b)-j
 }

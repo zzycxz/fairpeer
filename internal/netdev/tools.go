@@ -118,7 +118,7 @@ func (m *Manager) guardrailCheck(deviceName, command string) (ExecResult, bool) 
 			if !contains(g.AllowedGroups, d.Group) {
 				r := ExecResult{Device: deviceName, Command: command, Refused: true, Class: "guardrail",
 					Refusal: fmt.Sprintf("device %q is outside this conversation's allowed device groups (%s) — adjust [netdev.guardrails].allowed_groups in 运维设置. Do not retry.", deviceName, strings.Join(g.AllowedGroups, ", "))}
-				_ = AppendAudit(Audit{Device: deviceName, Command: command, Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
+				_ = AppendAudit(Audit{Device: deviceName, Command: Redact(command), Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
 				return r, false
 			}
 		}
@@ -128,7 +128,7 @@ func (m *Manager) guardrailCheck(deviceName, command string) (ExecResult, bool) 
 	if _, active := m.ActiveProjectDef(); active {
 		class := m.classifyForDomain(deviceName, command)
 		if r, ok := m.projectDomainVerdict(deviceName, command, class); !ok {
-			_ = AppendAudit(Audit{Device: deviceName, Command: command, Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
+			_ = AppendAudit(Audit{Device: deviceName, Command: Redact(command), Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
 			return r, false
 		}
 	}
@@ -139,7 +139,7 @@ func (m *Manager) guardrailCheck(deviceName, command string) (ExecResult, bool) 
 		if spent >= g.TurnCommandBudget {
 			r := ExecResult{Device: deviceName, Command: command, Refused: true, Class: "guardrail",
 				Refusal: fmt.Sprintf("turn command budget exhausted (%d/%d read commands this turn) — a guardrail against runaway loops. Summarize what you have and ask the user before continuing.", spent, g.TurnCommandBudget)}
-			_ = AppendAudit(Audit{Device: deviceName, Command: command, Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
+			_ = AppendAudit(Audit{Device: deviceName, Command: Redact(command), Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
 			return r, false
 		}
 	}

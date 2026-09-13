@@ -10,9 +10,12 @@ package netdev
 
 import (
 	"database/sql"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,10 +56,34 @@ func metricsOpen() (*sql.DB, error) {
 	if db := func() *sql.DB { metricsMu.Lock(); defer metricsMu.Unlock(); return metricsDB }(); db != nil {
 		return db, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(metricsFile()), 0o700); err != nil {
+	db, err := metricsOpenFile(metricsFile())
+	if err != nil && isCorruptDB(err) {
+		// Corrupt-DB recovery: the file exists but isn't a usable SQLite
+		// database (truncated copy, disk fault). Move it aside — with its
+		// -wal/-shm sidecars — and retry once on a fresh database instead of
+		// failing every health poll forever. The old bytes stay on disk for
+		// manual inspection.
+		if aside := moveCorruptDBAside(metricsFile()); aside != "" {
+			slog.Warn("netdev: corrupt metrics database moved aside; recreating", "old", aside)
+		}
+		db, err = metricsOpenFile(metricsFile())
+	}
+	if err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", metricsFile()+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(3000)")
+	metricsMu.Lock()
+	metricsDB = db
+	metricsMu.Unlock()
+	return db, nil
+}
+
+// metricsOpenFile opens and migrates one metrics database file — split from
+// metricsOpen so the corrupt-DB recovery can run it twice.
+func metricsOpenFile(path string) (*sql.DB, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(3000)")
 	if err != nil {
 		return nil, err
 	}
@@ -75,16 +102,49 @@ func metricsOpen() (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
-	// 迁移：IF NOT EXISTS 建表不会给旧库补列——PRAGMA 对账后 ALTER 补齐。
-	if _, err := db.Exec(`ALTER TABLE metric_points ADD COLUMN cpu INTEGER NOT NULL DEFAULT 0`); err == nil {
-		_, _ = db.Exec(`ALTER TABLE metric_points ADD COLUMN mem INTEGER NOT NULL DEFAULT 0`)
-		_, _ = db.Exec(`ALTER TABLE metric_points ADD COLUMN in_oct INTEGER NOT NULL DEFAULT 0`)
-		_, _ = db.Exec(`ALTER TABLE metric_points ADD COLUMN out_oct INTEGER NOT NULL DEFAULT 0`)
+	// 迁移：IF NOT EXISTS 建表不会给旧库补列——PRAGMA 对账后逐列 ALTER 补齐。
+	// 逐列探测而非以第一条 ALTER 的成败作总闸：迁移中途一旦崩溃，那道门就
+	// 永远关死（cpu 已存在 → err != nil → 其余三列再也不补）。
+	for _, c := range []struct{ name, decl string }{
+		{"cpu", "INTEGER NOT NULL DEFAULT 0"},
+		{"mem", "INTEGER NOT NULL DEFAULT 0"},
+		{"in_oct", "INTEGER NOT NULL DEFAULT 0"},
+		{"out_oct", "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := addColumnIfMissing(db, "metric_points", c.name, c.decl); err != nil {
+			db.Close()
+			return nil, err
+		}
 	}
-	metricsMu.Lock()
-	metricsDB = db
-	metricsMu.Unlock()
 	return db, nil
+}
+
+// addColumnIfMissing adds a column when it isn't already on the table. SQLite
+// lacks "ALTER TABLE ... ADD COLUMN IF NOT EXISTS", so we probe table_info
+// (same shape as calendar/store.go).
+func addColumnIfMissing(db *sql.DB, table, column, decl string) error {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return fmt.Errorf("metrics migrate: probe %s.%s: %w", table, column, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil // already present
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl))
+	return err
 }
 
 // metricsClose checkpoints the WAL and closes the process-lifetime singleton.
@@ -100,6 +160,37 @@ func metricsClose() {
 	}
 	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	_ = db.Close()
+}
+
+// CloseMetrics is the exported shutdown hook for the desktop app: it
+// checkpoints and closes the metrics store so metrics.db is self-contained
+// for backup/copy. Safe to call when never opened (no-op).
+func CloseMetrics() { metricsClose() }
+
+// isCorruptDB reports whether err is SQLite's "this file is not a usable
+// database" family — a truncated/garbage file or damaged pages.
+func isCorruptDB(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "file is not a database") || strings.Contains(s, "database disk image is malformed")
+}
+
+// moveCorruptDBAside renames a corrupt database file — best-effort with its
+// -wal/-shm sidecars — to <path>.corrupt-<timestamp> so a fresh database can
+// be created in its place; the old bytes stay on disk for manual inspection.
+// Returns the aside path, or "" when the rename failed (caller keeps the
+// original error).
+func moveCorruptDBAside(path string) string {
+	aside := path + ".corrupt-" + time.Now().Format("20060102-150405")
+	if err := os.Rename(path, aside); err != nil {
+		return ""
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		_ = os.Rename(path+suffix, aside+suffix)
+	}
+	return aside
 }
 
 // RecordMetricPoint appends one poll rollup and trims the ring.

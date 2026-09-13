@@ -220,3 +220,48 @@ func TestTrustDomainApprovalUpgrade(t *testing.T) {
 		t.Errorf("enabled-but-not-joined must fail closed: %v", err)
 	}
 }
+
+// 轮3覆盖 P1：盖章项目在配置中消失 → 批准/执行双 fail-closed。
+func TestStampedProjectVanishedFailClosed(t *testing.T) {
+	m := projectDomainManager(t)
+	p := &Proposal{Intent: "孤儿", Status: ProposalDraft, Project: "已删项目",
+		Steps: []ProposalStep{{Device: "sw-a1", Type: "cli", Commands: []string{"sys"}, Rollback: []string{"undo sys"}}}}
+	SaveProposal(p)
+	if _, err := m.ApproveProposalAs(p.ID, false, "张三"); err == nil || !strings.Contains(err.Error(), "no longer exists") {
+		t.Errorf("approve must fail closed: %v", err)
+	}
+	p.Status = ProposalApproved
+	SaveProposal(p)
+	if _, err := m.ExecuteProposal(context.Background(), p.ID); err == nil || !strings.Contains(err.Error(), "no longer exists") {
+		t.Errorf("execute must fail closed: %v", err)
+	}
+}
+
+// 轮3覆盖 P1：盖章项目 policy=proposal+confirm2 → 蓝队双锁运行时生效。
+func TestStampedProjectForcesConfirm2(t *testing.T) {
+	m := projectDomainManager(t)
+	p := &Proposal{Intent: "良性命令", Status: ProposalDraft, Project: "蓝队A",
+		Steps: []ProposalStep{{Device: "sw-a1", Type: "cli", Commands: []string{"display version"}, Rollback: []string{"display version"}}}}
+	SaveProposal(p)
+	if !m.ProposalNeedsConfirm2(p) {
+		t.Fatal("blueteam-stamped proposal must demand confirm2 (runtime floor)")
+	}
+	if _, err := m.ApproveProposalAs(p.ID, false, "张三"); err == nil || !strings.Contains(err.Error(), "secondary confirmation") {
+		t.Errorf("single-lock approve must refuse: %v", err)
+	}
+}
+
+// 轮3覆盖 P1：活动项目从 config 消失 → 只读停摆（write 拒 read 放）。
+func TestActiveProjectVanishedReadOnlyStall(t *testing.T) {
+	m := projectDomainManager(t)
+	if err := m.SetActiveProject("蓝队A"); err != nil {
+		t.Fatal(err)
+	}
+	m.cfg.NetDev.Projects = nil // 热重载窗口：项目被删
+	if r, ok := m.projectDomainVerdict("sw-a1", "systemctl restart nginx", driver.Write); ok || !strings.Contains(r.Refusal, "vanished") {
+		t.Errorf("vanished project must stall writes: ok=%v %+v", ok, r)
+	}
+	if _, ok := m.projectDomainVerdict("sw-a1", "display version", driver.Read); !ok {
+		t.Error("reads must stay available during stall")
+	}
+}

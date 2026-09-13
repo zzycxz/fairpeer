@@ -53,11 +53,10 @@ func dbQueryAllowed(query string, allowlist []string) bool {
 		if na == "" {
 			continue
 		}
-		if n == na {
-			return true
-		}
-		if strings.HasPrefix(n, na+" ") {
-			return true
+		if n == na || strings.HasPrefix(n, na+" ") {
+			// Allowlist matched — still run the hard-deny scan so a prefix
+			// match can't smuggle appended clauses past the seal (dbSQLDenied).
+			return !dbSQLDenied.MatchString(n)
 		}
 	}
 	return false
@@ -81,6 +80,14 @@ var redisAllowed = []struct {
 }
 
 var redisDenied = regexp.MustCompile(`(?i)^(config\s+(set|resetstat|rename)|flushdb|flushall|shutdown|bgsave|bgrewriteaof|swapdb|replicaof|slaveof|script|eval|migrate|restore|dump)\b`)
+
+// dbSQLDenied is the hard-deny backstop applied AFTER an allowlist match: a
+// statement-prefix match can still append clauses the allowlist author never
+// intended (`select * from v_status` admits `… union select user,password from
+// mysql.user` and MySQL `… into outfile '/path'` — neither carries the
+// ';'/–-'/*' markers the single-statement checks catch). Read-only
+// diagnostics never need any of these forms, so they refuse outright.
+var dbSQLDenied = regexp.MustCompile(`(?i)\b(union\s+(all\s+)?select|into\s+(outfile|dumpfile)|for\s+update|lock\s+in\s+share\s+mode)\b`)
 
 // DBQuery runs ONE allowlisted read-only statement against a configured
 // [[netdev.db_sources]] entry. Output is JSON lines, redacted, row-capped.

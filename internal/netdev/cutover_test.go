@@ -136,6 +136,15 @@ func TestCutoverRollbackAtDecisionPoint(t *testing.T) {
 	if !strings.Contains(rb.Report, "↩️") {
 		t.Fatalf("report misses rolled marker: %.200q", rb.Report)
 	}
+	// S-13: the rollback SUCCESS path must land EndedAt (the finish-report
+	// merge only sets it from a Running status, which this path had already
+	// replaced with Aborted) and the report must carry the end line.
+	if rb.EndedAt == nil {
+		t.Fatal("rollback success left EndedAt nil — report has no 结束 time")
+	}
+	if !strings.Contains(rb.Report, "结束：") {
+		t.Fatalf("report misses end line: %.200q", rb.Report)
+	}
 }
 
 // A never-matching gate stops the run at the failure with the impact text.

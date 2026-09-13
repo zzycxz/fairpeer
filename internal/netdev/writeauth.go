@@ -326,16 +326,25 @@ func (m *Manager) runControlledWrite(ctx context.Context, d config.NetDevDevice,
 	}
 
 	// ③ post snapshot + ④ diff (only meaningful when the write itself landed).
+	// S-47: capture failures are no longer silent — the ledger row records
+	// "evidence-error" so ops review can distinguish "no config change" from
+	// "evidence capture failed" (the rollback pointer is also lost).
 	postID, diffSummary := "", ""
+	evidenceNote := ""
 	if status == AuditOK {
 		if bc := backupCommand(drv.Key()); bc != "" {
-			if pres, perr := m.runUnclassified(ctx, d, drv, bc); perr == nil && !pres.IsError {
-				if v, serr := saveBackup(d.Name, pres.Output); serr == nil {
-					postID = v.ID
-					if preID != "" {
-						if diff, derr := DiffBackups(d.Name, preID, postID); derr == nil {
-							diffSummary = summarizeDiff(diff)
-						}
+			pres, perr := m.runUnclassified(ctx, d, drv, bc)
+			if perr != nil || pres.IsError {
+				evidenceNote = "post-snapshot failed: " + firstLine(errText(perr, pres))
+			} else if v, serr := saveBackup(d.Name, pres.Output); serr != nil {
+				evidenceNote = "backup save failed: " + serr.Error()
+			} else {
+				postID = v.ID
+				if preID != "" {
+					if diff, derr := DiffBackups(d.Name, preID, postID); derr == nil {
+						diffSummary = summarizeDiff(diff)
+					} else {
+						evidenceNote = "diff failed: " + derr.Error()
 					}
 				}
 			}
@@ -345,7 +354,9 @@ func (m *Manager) runControlledWrite(ctx context.Context, d config.NetDevDevice,
 
 	// ⑤ OpStep ledger (§7.3) — the diff and rollback pointer survive the turn.
 	stepStatus := "ok"
-	if status == AuditDeviceError {
+	if evidenceNote != "" {
+		stepStatus = "evidence-error"
+	} else if status == AuditDeviceError {
 		stepStatus = "device-error"
 	} else if status == AuditFailure {
 		stepStatus = "failure"
@@ -437,6 +448,9 @@ func (m *Manager) appendOpStep(ctx context.Context, s OpStep) {
 	}
 	dir := opstepsDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
+		// S-54: same evidence-gap posture as below — the change already ran,
+		// so don't abort, but the lost ledger row must be loud.
+		m.opStepWriteFailed(ctx, s, fmt.Errorf("mkdir opsteps dir: %w", err))
 		return
 	}
 	b, err := json.Marshal(s)

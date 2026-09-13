@@ -49,18 +49,33 @@ func curlReadOverride(drv driver.Driver, command string) (driver.Class, bool) {
 	if len(fields) < 2 || fields[0] != "curl" {
 		return driver.Unknown, false
 	}
+	// 轮2复核：引号不是 ShellMetachars——经 API 进来的字面引号会让 "-H \"@file\""
+	// 绕过 @ 前缀检查（远端 shell 去引号后照读本地文件）。本通道审计语境
+	// 不需要引号，含引号一律拒。
+	for _, f := range fields[1:] {
+		if strings.ContainsAny(f, "\"'") {
+			return driver.Unknown, false
+		}
+	}
 	url := fields[len(fields)-1]
 	if strings.HasPrefix(url, "-") {
 		// 收尾 token 是 flag 不是 URL——语法不成立（curl 也确实会报
 		// "no URL specified"）。不放行。
 		return driver.Unknown, false
 	}
-	// 轮1审查：file:/// 把读表语义变成本地任意读原语——显式 scheme 只收
-	// http(s)；无 scheme 的 host[:port]/path 形态仍是远程探测（curl 默认
-	// http），放行。
-	if i := strings.Index(url, "://"); i >= 0 &&
-		!strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		return driver.Unknown, false
+	// 轮1/轮2审查：file:/// 与 file:/path（单斜杠合法形态）都把读表语义
+	// 变成本地任意读原语——scheme 提取后小写比对，只收 http(s)；无 scheme
+	// 的 host[:port]/path 形态仍是远程探测（curl 默认 http），放行。
+	if i := strings.Index(url, ":"); i > 0 {
+		scheme := strings.ToLower(url[:i])
+		if strings.Contains(scheme, "/") || strings.Contains(scheme, ".") {
+			scheme = "" // "host:port" 的冒号不是 scheme 分隔
+		}
+		switch scheme {
+		case "", "http", "https":
+		default:
+			return driver.Unknown, false // file/ftp/gopher/FILE… 一律拒
+		}
 	}
 	for i := 1; i < len(fields)-1; i++ {
 		f := fields[i]
@@ -72,10 +87,11 @@ func curlReadOverride(drv driver.Driver, command string) (driver.Class, bool) {
 		case curlReadFlagsWithVal[f]:
 			// 值消费：吞掉后续非 flag 的 middle token（quoted 空格拆分产物）。
 			// 轮1审查：-H @file 是"从文件读请求头"——本地任意文件随请求头
-			// 外传，@ 前缀值一律拒。
+			// 外传，@ 前缀值一律拒。轮2复核：被吞 token 含 :// 即中缀第二
+			// URL（curl 会逐 URL 请求）——"URL 唯一"不变量的补丁。
 			for i+1 < len(fields)-1 && !strings.HasPrefix(fields[i+1], "-") {
 				i++
-				if strings.HasPrefix(fields[i], "@") {
+				if strings.HasPrefix(fields[i], "@") || strings.Contains(fields[i], "://") {
 					return driver.Unknown, false
 				}
 			}

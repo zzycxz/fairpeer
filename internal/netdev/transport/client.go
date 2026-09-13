@@ -52,6 +52,7 @@ type Client struct {
 	hopHosts    map[string]ResolvedHost
 	hopAuths    map[string]*AuthOptions // fallback auth cache, keyed by user+addr
 	hopRawAuths map[string]*AuthOptions // configured auth by alias; aliases may share an endpoint
+	onClose     []func()                // invoked once from Close, outside c.mu
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -257,6 +258,21 @@ func (c *Client) Start(ctx context.Context) error {
 	}
 }
 
+// OnClose registers fn to run once when Close completes (or immediately if
+// the client is already closed). Subscribers that hold per-client resources —
+// e.g. live.go's status drainer goroutine — use it to terminate with the
+// client instead of leaking per dial.
+func (c *Client) OnClose(fn func()) {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		go fn() // already closed — run asynchronously, never under any lock
+		return
+	}
+	c.onClose = append(c.onClose, fn)
+	c.mu.Unlock()
+}
+
 // Close stops the supervisor and releases the connection.
 func (c *Client) Close() error {
 	c.mu.Lock()
@@ -266,6 +282,7 @@ func (c *Client) Close() error {
 	}
 	c.closed = true
 	cancel := c.cancel
+	hooks := c.onClose
 	c.mu.Unlock()
 
 	if cancel != nil {
@@ -274,6 +291,9 @@ func (c *Client) Close() error {
 	} else {
 		c.teardownConn()
 		c.publish(StatusStopped, 0, nil)
+	}
+	for _, fn := range hooks {
+		fn()
 	}
 	return nil
 }

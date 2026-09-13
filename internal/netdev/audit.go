@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/zzycxz/fairpeer/internal/fileutil"
 	"os"
 	"path/filepath"
 	"sync"
@@ -116,23 +117,24 @@ func AppendAudit(e Audit) error {
 	if e.Time.IsZero() {
 		e.Time = time.Now()
 	}
+	// S-07: no defer unlock — maybeAnchorAudit does peer network I/O and must
+	// run with auditMu RELEASED (it re-enters AuditChainHead). Every path
+	// unlocks explicitly before its final statement.
 	auditMu.Lock()
-	defer auditMu.Unlock()
-	// Chain: hash = sha256(prevHash + canonical(entry without hash)). The whole
-	// read-prev → hash → append → cache-update sequence is one critical section:
-	// computing the hash before taking the lock let two concurrent appends chain
-	// off the same prev, silently breaking VerifyAuditChain.
 	prev, err := lastAuditHashLocked()
 	if err != nil {
+		auditMu.Unlock()
 		return err
 	}
 	h, err := auditChainHash(prev, e)
 	if err != nil {
+		auditMu.Unlock()
 		return err
 	}
 	e.Hash = h
 	b, err := json.Marshal(e)
 	if err != nil {
+		auditMu.Unlock()
 		return err
 	}
 	path := auditPath
@@ -140,19 +142,21 @@ func AppendAudit(e Audit) error {
 		path = filepath.Join(netdevStateDir(), "audit.jsonl")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		auditMu.Unlock()
 		return err
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
+		auditMu.Unlock()
 		return err
 	}
 	defer f.Close()
 	if _, err := f.Write(append(b, '\n')); err != nil {
+		auditMu.Unlock()
 		return err
 	}
 	auditLastHash = h
-	// Pass the just-written head: reading it back via AuditChainHead would
-	// re-lock auditMu while we still hold it (non-reentrant deadlock).
+	auditMu.Unlock()
 	maybeAnchorAudit(h)
 	return nil
 }
@@ -250,6 +254,17 @@ func VerifyAuditChain() AuditChainStatus {
 	for i, l := range lines {
 		var e Audit
 		if json.Unmarshal(l, &e) != nil {
+			// S-50: a torn FINAL line (crash mid-append) self-heals by
+			// truncating to the last good line — interior breaks still fail
+			// hard (tampering). Requires auditMu; re-enters via truncate
+			// helper which takes it.
+			if isLastLine(i, lines) {
+				if terr := truncateAuditTornTail(); terr == nil {
+					st.OK = false
+					st.FirstBroken = fmt.Sprintf("第 %d 行不完整（追加时中断）——已自动截断修复，请重跑校验", i+1)
+					return st
+				}
+			}
 			st.OK = false
 			st.FirstBroken = fmt.Sprintf("第 %d 行无法解析", i+1)
 			return st
@@ -272,4 +287,50 @@ func VerifyAuditChain() AuditChainStatus {
 		st.Chained++
 	}
 	return st
+}
+
+// isLastLine reports whether index i is the final line.
+func isLastLine(i int, lines [][]byte) bool { return i == len(lines)-1 }
+
+// truncateAuditTornTail rewrites audit.jsonl without its final (torn) line.
+// Caller must NOT hold auditMu — this takes it. Returns nil when the file was
+// truncated successfully.
+func truncateAuditTornTail() error {
+	auditMu.Lock()
+	defer auditMu.Unlock()
+	path := auditPath
+	if path == "" {
+		path = filepath.Join(netdevStateDir(), "audit.jsonl")
+	}
+	lines, err := readAuditLines()
+	if err != nil {
+		return err
+	}
+	if len(lines) == 0 {
+		return fmt.Errorf("audit file empty")
+	}
+	// S-50 edge: VerifyAuditChain read the file WITHOUT auditMu. A valid line
+	// may have been appended since its snapshot — re-check that the CURRENT
+	// final line is still unparseable before dropping anything.
+	var probe Audit
+	if json.Unmarshal(lines[len(lines)-1], &probe) == nil {
+		return fmt.Errorf("audit final line parses — concurrent append, not truncating")
+	}
+	kept := lines[:len(lines)-1]
+	var b []byte
+	for _, l := range kept {
+		b = append(b, l...)
+		b = append(b, '\n')
+	}
+	auditLastHash = ""
+	if len(kept) > 0 {
+		var lastE Audit
+		if json.Unmarshal(kept[len(kept)-1], &lastE) == nil {
+			auditLastHash = lastE.Hash
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return fileutil.AtomicWriteFile(path, b, 0o600)
 }

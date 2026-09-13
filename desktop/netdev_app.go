@@ -55,6 +55,11 @@ type NetDevDeviceView struct {
 	OOBURL string `json:"oobUrl"`
 	// GPU 标记（S1-2）：分诊电池追加 GPU 档、设备卡 GPU 徽标。
 	GPU bool `json:"gpu,omitempty"`
+	// 轮3集成审查 P1：accel/metrics 登记必须随视图往返——否则任一设置子卡
+	// 保存（全量 devices 提交）都会把昇腾采集与 infer.* 抓取静默清空。
+	Accel        string `json:"accel,omitempty"`
+	MetricsPorts []int  `json:"metricsPorts,omitempty"`
+	MetricsPath  string `json:"metricsPath,omitempty"`
 	// Kind is the data-plane discriminator (NETDEV_SPEC_V2 §2.1): ""(=按厂商)
 	// | docker | k8s. DockerSocket / K8s* apply per kind.
 	Kind         string `json:"kind"`
@@ -106,15 +111,17 @@ type NetDevHopView struct {
 
 // NetDevSettingsView is the whole settings payload.
 type NetDevSettingsView struct {
-	BackupInterval  string             `json:"backupInterval"`
-	BackupGitMirror bool               `json:"backupGitMirror"`
-	Enabled         bool               `json:"enabled"`
-	NetworkName     string             `json:"networkName"`
-	Devices         []NetDevDeviceView `json:"devices"`
-	Hops            []NetDevHopView    `json:"hops"`
-	Groups          []string           `json:"groups"` // group names (policy editing arrives with the proposal pipeline)
-	AuditRetention  string             `json:"auditRetention"`
-	Scopes          []string           `json:"scopes"`
+	BackupInterval string `json:"backupInterval"`
+	// 轮3集成审查 P1：巡检周期此前是死控件（视图不载/保存不收）——接线。
+	InspectionInterval string             `json:"inspectionInterval"`
+	BackupGitMirror    bool               `json:"backupGitMirror"`
+	Enabled            bool               `json:"enabled"`
+	NetworkName        string             `json:"networkName"`
+	Devices            []NetDevDeviceView `json:"devices"`
+	Hops               []NetDevHopView    `json:"hops"`
+	Groups             []string           `json:"groups"` // group names (policy editing arrives with the proposal pipeline)
+	AuditRetention     string             `json:"auditRetention"`
+	Scopes             []string           `json:"scopes"`
 	// Guardrails reach into every ask / every tool call (NETDEV_SPEC §6):
 	// per-command approval, per-turn command budget, per-conversation device scope.
 	GuardConfirmEach  bool     `json:"guardConfirmEach"`
@@ -281,6 +288,7 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 		NetworkName:          cfg.NetDev.NetworkName,
 		AuditRetention:       cfg.NetDev.AuditRetention,
 		BackupInterval:       cfg.NetDev.BackupInterval,
+		InspectionInterval:   cfg.NetDev.InspectionInterval,
 		BackupGitMirror:      cfg.NetDev.BackupGitMirror,
 		Scopes:               cfg.NetDev.Discovery.Scopes,
 		GuardConfirmEach:     cfg.NetDev.Guardrails.ConfirmEachCommand,
@@ -367,6 +375,9 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 			OOBURL:           d.OOBURL,
 			Protocols:        d.Protocols,
 			GPU:              d.GPU,
+			Accel:            d.Accel,
+			MetricsPorts:     d.MetricsPorts,
+			MetricsPath:      d.MetricsPath,
 			Kind:             d.Kind,
 			DockerSocket:     dockerSocketOf(d),
 			K8sKubeconfigEnv: k8sKubeconfigEnvOf(d),
@@ -609,7 +620,13 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 		} else {
 			nd.Presets = c.NetDev.Presets
 		}
-		nd.InspectionInterval = c.NetDev.InspectionInterval
+		// 轮3集成审查：巡检周期从死控件改为表单接管（"" = 关闭；旧载荷
+		// 未携带时保留原值——与 projects 的 form-owned 判据一致）。
+		if v.InspectionInterval != "" || v.BackupInterval != "" || v.ScheduledBaseline {
+			nd.InspectionInterval = strings.TrimSpace(v.InspectionInterval)
+		} else {
+			nd.InspectionInterval = c.NetDev.InspectionInterval
+		}
 		nd.ScheduledBaseline = v.ScheduledBaseline
 		if strings.TrimSpace(v.BackupInterval) != "" {
 			nd.BackupInterval = strings.TrimSpace(v.BackupInterval)
@@ -734,14 +751,17 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 				Via: d.Via, Group: strings.TrimSpace(d.Group),
 				Username: strings.TrimSpace(d.Username), PasswordEnv: strings.TrimSpace(d.PasswordEnv),
 				IdentityFile: strings.TrimSpace(d.IdentityFile), Encoding: strings.TrimSpace(d.Encoding),
-				LogPaths:    cleanLogPaths(d.LogPaths),
-				ConfigPaths: cleanLogPaths(d.ConfigPaths),
-				OOBURL:      strings.TrimSpace(d.OOBURL),
-				Protocols:   d.Protocols,
-				GPU:         d.GPU,
-				Kind:        strings.TrimSpace(d.Kind),
-				ConsolePort: strings.TrimSpace(d.ConsolePort),
-				ConsoleBaud: d.ConsoleBaud,
+				LogPaths:     cleanLogPaths(d.LogPaths),
+				ConfigPaths:  cleanLogPaths(d.ConfigPaths),
+				OOBURL:       strings.TrimSpace(d.OOBURL),
+				Protocols:    d.Protocols,
+				GPU:          d.GPU,
+				Accel:        strings.TrimSpace(d.Accel),
+				MetricsPorts: d.MetricsPorts,
+				MetricsPath:  strings.TrimSpace(d.MetricsPath),
+				Kind:         strings.TrimSpace(d.Kind),
+				ConsolePort:  strings.TrimSpace(d.ConsolePort),
+				ConsoleBaud:  d.ConsoleBaud,
 				// WRITE_AUTHZ：设备写档覆盖（只许收紧——校验在 ValidateNetDev；
 				// 放宽的生效还须经告警确认，Manager 侧 clamp 兜底）。
 				WriteOverride: strings.TrimSpace(d.WriteOverride),
@@ -808,6 +828,26 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 		if err := config.ValidateNetDev(nd); err != nil {
 			return err
 		}
+		// 非 TOML-表单字段（安全信封/trap/夜班窗口/syslog 限速/发现探针族）
+		// 保留合并（S8-A2）：这些键无 UI 输入，整体重建会静默归零——
+		// WRITE_AUTHZ 信封丢失会把写权限回退到 sealed。
+		nd.Write.DefaultTier = c.NetDev.Write.DefaultTier
+		nd.Write.TurnWriteBudget = c.NetDev.Write.TurnWriteBudget
+		nd.Trap.Port = c.NetDev.Trap.Port
+		nd.Alerts.NightWindow = c.NetDev.Alerts.NightWindow
+		nd.Alerts.NightMin = c.NetDev.Alerts.NightMin
+		nd.Discovery.NmapPath = c.NetDev.Discovery.NmapPath
+		nd.Discovery.NetprobePath = c.NetDev.Discovery.NetprobePath
+		nd.Discovery.SnmpCommunity = c.NetDev.Discovery.SnmpCommunity
+		nd.Discovery.HTTPProbe = c.NetDev.Discovery.HTTPProbe
+		nd.Discovery.FastMode = c.NetDev.Discovery.FastMode
+		nd.Discovery.MaxHostsPerJob = c.NetDev.Discovery.MaxHostsPerJob
+		nd.Discovery.WallSec = c.NetDev.Discovery.WallSec
+		nd.Discovery.PerHostDelayMS = c.NetDev.Discovery.PerHostDelayMS
+		nd.Discovery.CacheTTLHours = c.NetDev.Discovery.CacheTTLHours
+		nd.Discovery.MaxHops = c.NetDev.Discovery.MaxHops
+		nd.Discovery.NoMediumConfirm = c.NetDev.Discovery.NoMediumConfirm
+		nd.Syslog.RatePerMin = c.NetDev.Syslog.RatePerMin
 		c.NetDev = nd
 		return nil
 	})

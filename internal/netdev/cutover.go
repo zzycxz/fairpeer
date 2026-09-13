@@ -209,6 +209,11 @@ func saveCutoverLocked(c *CutoverRun) error {
 
 // GetCutover loads one run.
 func GetCutover(id string) (*CutoverRun, error) {
+	// 轮2攻击面审查：id 从 webview 可达（NetDevCutoverGet/RunbookTplExtract
+	// 等直塞进来）——无校验即路径穿越读任意 .json。对齐 storeid 纪律。
+	if !validStoreID(id) {
+		return nil, fmt.Errorf("cutover %q: invalid id", id)
+	}
 	b, err := os.ReadFile(filepath.Join(cutoversDir(), id+".json"))
 	if err != nil {
 		return nil, err
@@ -676,6 +681,11 @@ func (m *Manager) CutoverRollback(ctx context.Context, id string) (*CutoverRun, 
 	}
 	c.Status = CutoverAborted
 	c.HoldNote = fmt.Sprintf("已按决策点回退（%d/%d 个变更步已回滚）", rolled, candidates)
+	// S-13: the success path lands EndedAt HERE — cutoverFinishReport only
+	// sets it when fresh.Status is still Running, and we just saved Aborted,
+	// so without this the report has no 结束 line and EndedAt stays nil.
+	now := time.Now()
+	c.EndedAt = &now
 	_ = saveCutoverLocked(c)
 	// cutoverFinishReport takes cutoverMu itself — call it AFTER releasing, or
 	// this deadlocks (found by TestCutoverRollbackAtDecisionPoint).

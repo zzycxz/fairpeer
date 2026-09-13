@@ -606,6 +606,15 @@ func (m *Manager) ApproveProposalAs(id string, confirm2 bool, operator string) (
 				}
 				approverSig = sig
 			}
+			// 轮2复核 P2-2：项目 deny 前缀必须覆盖提案批准链——项目明令禁止
+			// 的命令形状不能借提案路径畅通。
+			for _, st := range p.Steps {
+				for _, cmd := range st.Commands {
+					if projectDenyVerdict(pj, cmd) {
+						return nil, fmt.Errorf("proposal %s: step %q command matches project %q deny list — 批准拒绝", id, st.Device, pj.Name)
+					}
+				}
+			}
 			break
 		}
 		if !matched {
@@ -751,6 +760,11 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 	if p.Status != ProposalApproved {
 		return nil, fmt.Errorf("proposal %s: status %s, only approved proposals execute", id, p.Status)
 	}
+	// 轮2复核 P2-1：活动项目在场而提案无盖章（起草时刻意清空项目）——
+	// 域闸可被该旁路整体退出，执行拒绝（旧草稿请重新起草入域）。
+	if p.Project == "" && m.ActiveProjectName() != "" {
+		return nil, fmt.Errorf("proposal %s: drafted outside any project while a project is active — 域外草稿拒绝执行（J4）；请切换到目标项目重新起草", id)
+	}
 	// G-P1 跨域拒绝（J4）：盖章项目的域覆盖提案全部目标设备——任何目标落在
 	// 域外 = 拒执行（写面无「域外只读」，视图放行不等于执行放行）。
 	// v1.1 同处补 policy=read-only 写地板：只读项目的提案（含 cli 私有写
@@ -769,6 +783,13 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 		}
 		if proj.Policy == "read-only" {
 			return nil, fmt.Errorf("proposal %s (project %q): project policy is read-only — 提案执行整条拒绝（含 cli 私有写路径步骤）；变更请改到有写权限的项目域", id, p.Project)
+		}
+		for _, s := range p.Steps {
+			for _, cmd := range s.Commands {
+				if projectDenyVerdict(proj, cmd) {
+					return nil, fmt.Errorf("proposal %s (project %q): command matches the project deny list — 执行拒绝", id, p.Project)
+				}
+			}
 		}
 		for _, s := range p.Steps {
 			d, ok := m.cfg.NetDevDeviceByName(s.Device)

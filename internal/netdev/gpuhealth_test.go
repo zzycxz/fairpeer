@@ -444,3 +444,34 @@ func TestPollGPUMergeAndGPUOnly(t *testing.T) {
 		t.Errorf("refused poll must surface lastError")
 	}
 }
+
+// 轮3覆盖 P1：昇腾"异常但无码"→ gpuXidFinding hold（不 resolve 在案 finding）。
+func TestGPUXidFindingHoldsOnHealthAbnormal(t *testing.T) {
+	findingsDirOverr = t.TempDir()
+	SetAuditPath(t.TempDir() + "/audit.jsonl")
+	t.Cleanup(func() { SetAuditPath("") })
+	if err := SaveFinding(&Finding{
+		Title: "[GPU] XID 事件 #79 @ g9", Severity: SeverityCritical,
+		Devices: []string{"g9"}, Source: "gpu:xid:g9", Status: "active",
+		Evidence: []Evidence{{Device: "g9", Command: "journalctl", Output: "Xid 79"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := guardrailManager(t, config.NetDevGuardrails{})
+	// 异常但无码（HealthAbnormal，XIDMax=0，Seen=true）→ hold。
+	m.gpuXidFinding("g9", DeviceHealth{Device: "g9", GPUSampled: true, GPUXIDSeen: true, GPUHealthAbnormal: true, Interfaces: []IfHealth{}})
+	fs, _ := ListFindings()
+	for _, f := range fs {
+		if f.ID != "" && f.Source == "gpu:xid:g9" && f.Status != "active" {
+			t.Fatalf("abnormal-but-codeless round must HOLD the active finding, got %s", f.Status)
+		}
+	}
+	// 恢复正常（无异常无码）→ resolve 照旧。
+	m.gpuXidFinding("g9", DeviceHealth{Device: "g9", GPUSampled: true, GPUXIDSeen: true, Interfaces: []IfHealth{}})
+	fs, _ = ListFindings()
+	for _, f := range fs {
+		if f.ID != "" && f.Source == "gpu:xid:g9" && f.Status == "active" {
+			t.Fatal("clean round must resolve the finding")
+		}
+	}
+}

@@ -57,18 +57,18 @@ func (m *Manager) pollAscendHealth(ctx context.Context, deviceName string) Devic
 		}
 	}
 	// 轮1审查 P2-6：非数值 Health（Warning/Error/十六进制段）无十进制码值
-	// 可归一——但"卡在异常"必须设备级可见且**不 resolve** 在案 finding：
-	// 哨兵码 -1 表"异常待人工读卡"（不出现在任何 catalog 分级，值班看证据）。
+	// 可归一——不造码值。GPUHealthAbnormal 标志让 gpuXidFinding 对"异常但
+	// 无码"走 hold（不 resolve 在案 finding），设备级可见性由卡级徽标承载。
 	for _, c := range cards {
 		if c.ErrorCodeKind == npuHealthKind && c.ErrorCode == 0 {
-			maxCode = -1
+			h.GPUHealthAbnormal = true
 			break
 		}
 	}
 	for _, n := range notes {
 		h.GPULastError = joinNote(h.GPULastError, n)
 	}
-	if maxCode != 0 {
+	if maxCode > 0 {
 		h.GPUXIDMax = maxCode
 		h.GPUXIDCodes = []int{maxCode}
 		h.GPUXIDEvidence = npuEvidenceLines(res.Output)

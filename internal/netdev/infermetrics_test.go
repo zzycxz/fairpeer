@@ -85,10 +85,16 @@ func TestReduceAndDelta(t *testing.T) {
 	if first["infer.kv_usage"] != 83 {
 		t.Errorf("kv_usage want 83 (percent), got %v", first["infer.kv_usage"])
 	}
-	// 下一轮：计数器前移 → 速率点出现。
+	// 下一轮：计数器前移 → 速率点出现（seen 门：真实导出的 counter 才参与）。
 	raw2 := &inferRaw{kvUsagePerc: 0.95, running: 5, queued: 2,
 		preemptTotal: 9, tokensTotal: 265000,
-		ttftSumS: 6.2, ttftCount: 18, e2eSumS: 31.0, e2eCount: 18}
+		ttftSumS: 6.2, ttftCount: 18, e2eSumS: 31.0, e2eCount: 18,
+		seen: map[string]bool{
+			"vllm:num_preemptions_total": true, "vllm:generation_tokens_total": true,
+			"vllm:time_to_first_token_seconds_sum": true, "vllm:time_to_first_token_seconds_count": true,
+			"vllm:e2e_request_latency_seconds_sum": true, "vllm:e2e_request_latency_seconds_count": true,
+			"vllm:gpu_cache_usage_perc": true, "vllm:num_requests_running": true, "vllm:num_requests_waiting": true,
+		}}
 	second := metricsDelta("d|8000|m", t0.Add(2*time.Minute), raw2)
 	if got := second["infer.preemptions_rate"]; got != 1.0 { // (9-7)/2min
 		t.Errorf("preemptions_rate want 1/min, got %v", got)
@@ -103,7 +109,8 @@ func TestReduceAndDelta(t *testing.T) {
 		t.Errorf("e2e_ms want 1500, got %v", got)
 	}
 	// 导出器重启（计数器回绕）：负增量跳过、基线就地重置。
-	raw3 := &inferRaw{preemptTotal: 1, tokensTotal: 500}
+	raw3 := &inferRaw{preemptTotal: 1, tokensTotal: 500,
+		seen: map[string]bool{"vllm:num_preemptions_total": true, "vllm:generation_tokens_total": true}}
 	third := metricsDelta("d|8000|m", t0.Add(4*time.Minute), raw3)
 	if _, ok := third["infer.preemptions_rate"]; ok {
 		t.Error("counter reset must not produce a rate point")
@@ -197,5 +204,58 @@ func TestBuildServicesBoardZone(t *testing.T) {
 	}
 	if strings.Contains("", "never") {
 		t.Fail()
+	}
+}
+
+// 轮3覆盖 P1：seen 门——桶由 gauge 创建而 counter 缺席时不得伪造 0 速率；
+// counter-only 桶不得伪造 0 gauge（"不造 0"纪律对桶内成立）。
+func TestMetricsDeltaSeenGating(t *testing.T) {
+	resetMetricsPrev()
+	t.Cleanup(resetMetricsPrev)
+	t0 := time.Now()
+	// 首轮：全量导出（建基线）。
+	full := &inferRaw{kvUsagePerc: 0.5, running: 1, queued: 1, preemptTotal: 5, tokensTotal: 1000,
+		seen: map[string]bool{"vllm:gpu_cache_usage_perc": true, "vllm:num_requests_running": true,
+			"vllm:num_requests_waiting": true, "vllm:num_preemptions_total": true, "vllm:generation_tokens_total": true}}
+	metricsDelta("g|1|m", t0, full)
+	// 下一轮：counter 全缺席（gauge-only 桶）——不得伪造 0 速率。
+	gaugeOnly := &inferRaw{kvUsagePerc: 0.6, running: 2, queued: 0,
+		seen: map[string]bool{"vllm:gpu_cache_usage_perc": true, "vllm:num_requests_running": true, "vllm:num_requests_waiting": true}}
+	out := metricsDelta("g|1|m", t0.Add(time.Minute), gaugeOnly)
+	if _, ok := out["infer.preemptions_rate"]; ok {
+		t.Error("absent counter must not fabricate 0 preemptions_rate")
+	}
+	if _, ok := out["infer.tokens_rate"]; ok {
+		t.Error("absent counter must not fabricate 0 tokens_rate")
+	}
+	// 反向：counter-only 桶（gauge 全缺席）——不得伪造 0 gauge。
+	resetMetricsPrev()
+	counterOnly := &inferRaw{preemptTotal: 7, tokensTotal: 2000,
+		seen: map[string]bool{"vllm:num_preemptions_total": true, "vllm:generation_tokens_total": true}}
+	metricsDelta("g|1|m", t0, counterOnly)
+	advanced := &inferRaw{preemptTotal: 9, tokensTotal: 2600,
+		seen: map[string]bool{"vllm:num_preemptions_total": true, "vllm:generation_tokens_total": true}}
+	out = metricsDelta("g|1|m", t0.Add(time.Minute), advanced)
+	for _, k := range []string{"infer.kv_usage", "infer.running", "infer.queued"} {
+		if _, ok := out[k]; ok {
+			t.Errorf("absent gauge must not fabricate %s", k)
+		}
+	}
+	if out["infer.preemptions_rate"] != 2 {
+		t.Errorf("real counter rate must still compute, got %v", out["infer.preemptions_rate"])
+	}
+	if out["infer.tokens_rate"] != 10 {
+		t.Errorf("tokens rate want 10, got %v", out["infer.tokens_rate"])
+	}
+}
+
+// 轮3覆盖 P1：平刻多桶取最大（最忙实例可见）。
+func TestLatestInferValueTieBreakMax(t *testing.T) {
+	seriesTestAnchors(t)
+	RecordSeriesLabeled("tie", "infer.kv_usage", map[string]string{"svc": "8000"}, 60)
+	RecordSeriesLabeled("tie", "infer.kv_usage", map[string]string{"svc": "8001"}, 90)
+	v, ok := latestInferValue("tie", "infer.kv_usage")
+	if !ok || v != 90 {
+		t.Errorf("tie must take max, got %v ok=%v", v, ok)
 	}
 }

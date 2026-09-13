@@ -35,7 +35,7 @@ func sampleRunbookTpl() *RunbookTemplate {
 		Steps: []RunbookTplStep{
 			{Label: "前置检查", Device: "{{gpu_host}}", Command: "nvidia-smi"},
 			{Label: "变更：拉起服务", Device: "{{gpu_host}}", ProposalIntent: "启动 vLLM 服务",
-				ProposalCmds:    []string{"systemctl start vllm-{{svc_port}}"},
+				ProposalCmds:     []string{"systemctl start vllm-{{svc_port}}"},
 				ProposalRollback: []string{"systemctl stop vllm-{{svc_port}}"}},
 			{Label: "语义门+决策点", Device: "{{gpu_host}}", Command: "systemctl is-active vllm-{{svc_port}}",
 				GateCmd: "systemctl is-active vllm-{{svc_port}}", GateExpect: "active",
@@ -256,6 +256,16 @@ func TestBuiltinRunbookLibraryRenders(t *testing.T) {
 				t.Errorf("%s step %d: read command missing verdict", tpl.ID, i)
 			}
 		}
+		// 轮2复核加固：每条变更步必须带回滚（缺回滚的提案过不了批准闸），
+		// 且不允许出现 decision-only/gate-only 步（三处裁决统一的形状纪律）。
+		for i, ts := range tpl.Steps {
+			if len(ts.ProposalCmds) > 0 && len(ts.ProposalRollback) == 0 {
+				t.Errorf("%s step %d: proposal step missing rollback", tpl.ID, i)
+			}
+			if ts.Command == "" && len(ts.ProposalCmds) == 0 {
+				t.Errorf("%s step %d: bodyless step", tpl.ID, i)
+			}
+		}
 	}
 }
 
@@ -289,4 +299,22 @@ func TestRunbookApplyThenStart(t *testing.T) {
 		t.Errorf("status want running, got %q", run.Status)
 	}
 	m.CutoverAbort(run.ID) // 停掉 runner（sw1 无真实连接，步骤会失败）
+}
+
+// 轮3覆盖 P1：Save 的 ID 校验（路径穿越 + 内置前缀影子）。
+func TestRunbookTplSaveIDValidation(t *testing.T) {
+	runbookTplTestEnv(t)
+	tpl := sampleRunbookTpl()
+	tpl.ID = "../evil"
+	if err := SaveRunbookTemplate(tpl); err == nil || !strings.Contains(err.Error(), "invalid id") {
+		t.Errorf("path-traversal id must be refused: %v", err)
+	}
+	tpl.ID = "RBB-evil"
+	if err := SaveRunbookTemplate(tpl); err == nil || !strings.Contains(err.Error(), "内置前缀") {
+		t.Errorf("builtin-prefix id must be refused: %v", err)
+	}
+	tpl.ID = "RB-user-ok"
+	if err := SaveRunbookTemplate(tpl); err != nil {
+		t.Errorf("legal custom id must save: %v", err)
+	}
 }

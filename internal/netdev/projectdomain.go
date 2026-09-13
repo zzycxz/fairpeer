@@ -143,6 +143,14 @@ func projectDenyMatches(prefixes []string, command string) bool {
 func (m *Manager) projectDomainVerdict(deviceName, command string, class driver.Class) (ExecResult, bool) {
 	proj, active := m.ActiveProjectDef()
 	if !active {
+		// 轮2复核 P1-1：活动项目名仍在但配置里已删（热重载窗口）→ 域定义
+		// 不可得时**不静默放行**——降级为只读停摆（域外同款 J4-A 语义），
+		// 直到操作员重新选择项目；read 放行维持值班可见性。
+		if m.ActiveProjectName() != "" && class != driver.Read {
+			r := ExecResult{Device: deviceName, Command: command, Refused: true, Class: "guardrail",
+				Refusal: "active project vanished from config — 域定义缺失，写操作停摆（只读）：请重新选择项目或修正配置。Do not retry."}
+			return r, false
+		}
 		return ExecResult{}, true
 	}
 	// deny 前缀（allow 可豁免）：域内外都拒（项目级收紧，与全局 guardrail 叠加）。
@@ -226,10 +234,14 @@ func (m *Manager) signApprovalWithDomain(proposalID, operator string) (string, e
 		!strings.EqualFold(strings.TrimSpace(operator), display) {
 		return "", fmt.Errorf("operator %q 不匹配本域身份 %q（display %q）——域开启时批准必须以域身份进行", operator, id, display)
 	}
-	msg := fmt.Sprintf("fairpeer/approve|%s|%s|%d", proposalID, strings.TrimSpace(operator), time.Now().Unix())
+	unix := time.Now().Unix()
+	msg := fmt.Sprintf("fairpeer/approve|%s|%s|%d", proposalID, strings.TrimSpace(operator), unix)
 	sig := self.Sign([]byte(msg))
 	if len(sig) == 0 {
 		return "", fmt.Errorf("域身份签名失败")
 	}
-	return hex.EncodeToString(sig), nil
+	// 轮2攻击面审查：签名消息必须可从提案记录重构（Approver+ApprovedAt）
+	// ——时间随签名一起落盘为 "hex|unix"，验证方以 ApprovedAt.Unix() 交叉
+	// 校验，不再依赖两次取时一致。
+	return fmt.Sprintf("%s|%d", hex.EncodeToString(sig), unix), nil
 }

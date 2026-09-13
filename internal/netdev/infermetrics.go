@@ -275,10 +275,12 @@ func metricsDelta(key string, now time.Time, raw *inferRaw) map[string]float64 {
 	if dt <= 0 {
 		return out
 	}
-	if raw.preemptTotal >= prev.preemptTotal {
+	// 轮2复核 P2-4：counter 同受 seen 门——桶可由 gauge 创建，缺席 counter
+	// 的 0>=0 恒真会伪造 0 速率进 series。
+	if raw.seen["vllm:num_preemptions_total"] && raw.preemptTotal >= prev.preemptTotal {
 		out["infer.preemptions_rate"] = (raw.preemptTotal - prev.preemptTotal) / dt.Minutes()
 	}
-	if raw.tokensTotal >= prev.tokensTotal {
+	if raw.seen["vllm:generation_tokens_total"] && raw.tokensTotal >= prev.tokensTotal {
 		out["infer.tokens_rate"] = (raw.tokensTotal - prev.tokensTotal) / dt.Seconds()
 	}
 	if raw.ttftCount > prev.ttftCount {
@@ -300,7 +302,14 @@ func resetMetricsPrev() {
 
 // ── 抓取通道 ────────────────────────────────────────────────────────────────
 
-var metricsHTTPClient = &http.Client{Timeout: 10 * time.Second}
+// metricsHTTPClient：直连钉死（不走环境代理——代理可观测/改写内网探测）
+// 且不跟随重定向（登记端点的 302 不能把工作站引去别处取数，ErrUseLastResponse
+// 让非 2xx 自然落审计失败行）。
+var metricsHTTPClient = &http.Client{
+	Timeout:       10 * time.Second,
+	Transport:     &http.Transport{Proxy: nil}, //nolint:gosec — 明确直连，与登记制语义一致
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
 
 // pollMetricsEndpoints scrapes every registered endpoint and folds the mapped
 // points into series. Called from PollHealthOnce BEFORE evaluateAlerts so
@@ -377,13 +386,29 @@ func (m *Manager) scrapeEndpoint(ctx context.Context, device, addr string, port 
 		raw := byModel[model]
 		labels := map[string]string{"svc": svc}
 		if model != "" {
-			labels["model"] = model
+			labels["model"] = sanitizeInferLabel(model) // 轮2：标签有界——无界标签会顶爆 series 读/清 scanner 致盲分片
 		}
 		key := device + "|" + svc + "|" + model
 		for name, v := range metricsDelta(key, now, raw) {
 			RecordSeriesLabeled(device, name, labels, v)
 		}
 	}
+}
+
+// sanitizeInferLabel bounds an exporter-supplied label: 64 bytes of printable
+// non-control content（超长/控制字符会把 JSONL 行顶过读端 scanner 上限，
+// 分片读取被一行毒数据永久致盲）。
+func sanitizeInferLabel(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+	if len(s) > 64 {
+		s = s[:64]
+	}
+	return s
 }
 
 func sortedInferModels(m map[string]*inferRaw) []string {
