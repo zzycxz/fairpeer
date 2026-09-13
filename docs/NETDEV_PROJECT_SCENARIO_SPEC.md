@@ -153,3 +153,16 @@ linkpeersignal=LAN 内多 fairpeer 的**配对与信令层**（Ed25519 公钥交
 | V3 | "AnchorAudit 已是跨锚" | 锚定目标是**本节点 trust domain 链**（node.AnchorAudit → 本地 Propose；注释的 cross-anchor 指审计链头跨到 trust 链，**不是跨机器**）；且 linkpeersignal 仅三个配对端点（/pair/register、exchange、confirm；K 不验业务签名、两端自验），**无消息路由/relay/数据面** | **G-L2 peer 互锚是真实新增**（需 peer 间锚记录提交路径）；**G-L1 四眼确认的可行性从"高"降为"中"**——确认请求需要新数据通道（signal 服务加 relay 端点，或配对后局域网 P2P 直连——已有对方 Ed25519 公钥可加密）。L4 态势共享同依赖该通道。P-3a 估算 ~1 周 → **~2 周（含 relay/P2P 选型）** |
 
 **净结论**：方案方向全部成立（项目安全域/两把锁哲学/六操作矩阵/linkpeer 拓展），但 G-P1 与 G-L1 的工程量各上调约一倍，根因都是"前端态/本域锚/配对信令"距"后端安全语义/跨实例通道"还差一层管道。已同步 GAPS 台账条目口径。
+
+
+---
+
+## 八、G-P1 开工前设计清单（开工审计补，2026-09-13）
+
+G-P1 是下一阶段最大条目（~1.5-2 周），spec 现状=骨架（§二 TOML 草案）+ 修正（§七）。开工前需完成三项设计（ formerly "开工日细化"，升格为开工准入）：
+
+1. **会话项目上下文载体**：候选 (a) per-tab 后端会话态（前端切换→Wails 绑定写后端，tab 级隔离，贴近现有 tab-profile 机制）vs (b) 每绑定显式传 project 参数（无状态、改动面大）。倾向 (a)；设计需定：生命周期（tab 关闭/切换）、与 `NetDevTurnBegin` 的关系（TurnBegin 是否携带项目复核）。
+2. **confirmers 身份模型**（V2 修正的落地设计）：批准时自报名 + 可选 trustdomain 密钥签名；跨实例四眼时 peer 身份即签名。需定：无签名时审计如何记录（"自报：张三"）、confirmers 匹配逻辑（名单 vs 密钥指纹）。
+3. **NetDevProject schema 迁移**：旧配置 projects 无 type/allow/deny——沿用 D1 软降级哲学（缺省=继承全局并只收严，加载通过+警告），不硬失败。需定：type 缺省值（推断：含 GPU 组→aicompute？不，保持 netdata 缺省+警告更诚实）。
+
+以上三项完成前 G-P1 不开工；J4/J5 裁决同为前置。

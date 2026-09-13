@@ -89,7 +89,7 @@
 | 期 | 内容 | 性质 |
 |---|---|---|
 | **D-0（零代码，现在可用）** | 部署 runbook = 割接 runbook 手工编排：§2.1 的 20 步直接翻成 CutoverRun（只读步/提案引用/门/决策点）；本 spec §二 即编排蓝本 | 流程复用 |
-| **D-1（小代码，随 0.2.5）** | ① 读表增补 4 命令（sha256sum / find / python3 --version / curl -s http://127.0.0.1 前缀）；② 部署 runbook 进 runbook 模板库（0.2.4 spec 批次 B-D 交付的模板机制）；③ vLLM 部署参数模板（TP/port/gpu-mem-util/model-path 白名单化） | 编排质量 |
+| **D-1（小代码，随 0.2.5）** | ① 读表增补 4 命令（sha256sum / find / python3 --version / curl -s http://127.0.0.1 前缀）；② 部署 runbook 进 runbook 模板库（**前置 F1a：cutover 侧模板库机制待建**——提案侧 template.go 模式可参照）；③ vLLM 部署参数模板（TP/port/gpu-mem-util/model-path 白名单化） | 编排质量 |
 | **D-2（P2 推理服务面，随 GAP_SPEC §4.1-3 合并）** | `/metrics` 抓取进 series：`vllm:kv_cache_usage_perc / num_preemptions / TTFT / ITL / generation_tokens`；告警规则枚举加 `infer.queue_depth / infer.ttft / infer.preemptions`；GpuBoard 加"推理服务"区（模型名/健康/TTFT 基线） | 观测闭环 |
 
 ### 3.4 拒绝清单（部署面同样适用）

@@ -35,7 +35,8 @@
 
 | # | 缺口 | 现状/证据 | 修法方向 | 依赖 |
 |---|---|---|---|---|
-| **F1** | 部署 runbook 模板库（D-1 主体） | 部署蓝本在 MODEL_DEPLOY_SPEC §2.1，手工编排可用；模板机制（0.2.4 批次 B-D）已就绪但无部署模板 | 「vLLM 单机部署」「vLLM 多机」「昇腾 vllm-ascend」三条模板入库，参数 `{{tp}}/{{model_path}}/{{port}}` 由机型档案缺省填入 | E3/E4 |
+| **F1a** | **cutover runbook 模板库机制**（开工审计修正：F1 原称"模板机制已就绪"不实——0204 批次 B 无此条目；template.go 是提案侧模板，cutover 侧模板库从未建过） | cutover runbook 每次手工起草（逐行精读轮 2 确认）；提案侧 template.go 的"模板=步骤+{{var}}+持久化+dry-run 渲染"模式可参照不可复用 | 照提案模板模式建 CutoverTemplate（骨架=只读步/提案引用/门/决策点+变量，save/render/dry-run/apply 生成 CutoverRun 草稿） | ~3-4 天 |
+| **F1b** | 部署 runbook 三条模板（D-1 主体） | 依赖 F1a 机制 | 「vLLM 单机」「vLLM 多机」「昇腾 vllm-ascend」入库，参数 `{{tp}}/{{model_path}}/{{port}}` 由机型档案缺省填入 | E3/E4 + F1a |
 | **F2** | 权重登记-校验-分发落地 | 三段式设计在 MODEL_DEPLOY_SPEC §3.2（分发走客户通道；台内只做脚本上传+cli 执行+sha256 对账）；脚本模板与对账步未固化 | 下载脚本模板 + sha256 对账检查步进 runbook 模板；E3 的 sha256sum 读表是前置 | E3 |
 | **F3** | 推理指标面（D-2） | `/metrics` 抓取（vllm:kv_cache_usage_perc/num_preemptions/TTFT/ITL/generation_tokens）未做；告警枚举无 infer.*；GpuBoard 无服务层区 | GET 抓取通道（同 GPU 采集薄驱动模式，端点=推理服务而非加速卡）→ series `infer.*` + 告警枚举 + GpuBoard 服务区 | 无（可独立做） |
 | **F4** | M-1 异构最小承接 | 设计在 ACCEL_SPEC §四（accel 维度/npu-smi 薄驱动/GPUBoard ErrorCodeKind 泛化/昇腾模板）；代码未做 | accel 配置维度 + npu-smi 驱动三方法归一 GPUCard + GPUBoard ErrorCodeKind 徽标 | 真机验收依赖批次 C |
