@@ -85,7 +85,10 @@ var linuxTables = classTables{
 		"uname ", "uname", "uptime", "date", "hostname", "hostname ", "id", "who", "w",
 		"last ", "lastlog", "lastb", "vmstat ", "iostat ", "dstat ", "lscpu", "lsblk", "lsusb", "lspci",
 		"cat /proc", "cat /sys", "cat /etc/os-release", "cat /etc/hostname", "cat /etc/passwd", "timedatectl",
-		"cat /usr/local/Ascend", // CANN/驱动版本文件读取（M-1 昇腾前置；path 前缀收窄）
+		// cat /usr/local/Ascend 已除名（轮1审查 P1：cat 多操作数，空格边界
+		// 允许 "cat X /etc/shadow" 第二操作数任意读——E6 复发）。昇腾版本
+		// 目录用 "ls -l /usr/local/Ascend/..."（ls 只泄名字不泄内容）。
+		"ls -l /usr/local/Ascend",
 		// GPU/智算只读档（SCENARIO_SPEC S1-2）：nvidia-smi 全只读形态 + 昇腾
 		// npu-smi info。无任何设置/复位子命令（那些是 write/proposal 面）。
 		"nvidia-smi", "nvidia-smi -q", "nvidia-smi --query", "nvidia-smi --format",
@@ -96,11 +99,12 @@ var linuxTables = classTables{
 		// 删除 MIG 实例是变更，走提案。
 		"nvidia-smi mig -lgi", "nvidia-smi mig -lci",
 		"nvidia-smi mig -lgip", "nvidia-smi mig -lcip",
-		// 互联/时钟只读检查（FULL_CHAIN P8 验收步，2026-09-13 补）：
-		// ibstat=端口状态、ibqueryerrors/perfquery=错误与性能计数器、
-		// chronyc tracking/sources/sourcestats=时钟偏差与源质量。复位形态
-		// 已被危险表的 r 族两条挡下；细节旗标如被误挡走 extra_read 授予。
-		"ibstat", "ibqueryerrors", "perfquery",
+		// 互联/时钟只读检查（FULL_CHAIN P8 验收步；2026-09-14 轮1审查收窄）：
+		// ibstat（无写形态）与 chronyc 子命令锚定读保持直读；
+		// ibqueryerrors/perfquery **除名**——危险表只能挡首参位复位旗标，
+		// "perfquery -a -r" 这类安全旗标垫位的复位形态词边界够不着（E6
+		// 同族教训的复发）。验收步用到的具体形态走 extra_read 逐条授予。
+		"ibstat",
 		"chronyc tracking", "chronyc sources", "chronyc sourcestats",
 		// services & logs
 		"systemctl status", "systemctl list-units", "systemctl list-unit-files",

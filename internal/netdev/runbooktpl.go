@@ -44,9 +44,11 @@ type RunbookTplStep struct {
 	GateTimeout int    `json:"gate_timeout_sec,omitempty"` // default 2×sustain+90
 	// ProposalCmds is the change segment: rendered into a DRAFT proposal the
 	// human must approve before the run can start. ProposalIntent describes
-	// what & why (proposal draft intent).
-	ProposalIntent string   `json:"proposal_intent,omitempty"`
-	ProposalCmds   []string `json:"proposal_cmds,omitempty"`
+	// what & why; ProposalRollback is the authored reverse plan (批准校验强制
+	// ——无回滚的变更不可批，模板必须携带）。
+	ProposalIntent  string   `json:"proposal_intent,omitempty"`
+	ProposalCmds    []string `json:"proposal_cmds,omitempty"`
+	ProposalRollback []string `json:"proposal_rollback,omitempty"`
 	// DecisionPoint / Impact / EstSec map straight onto CutoverStep.
 	DecisionPoint bool   `json:"decision_point,omitempty"`
 	Impact        string `json:"impact,omitempty"`
@@ -112,6 +114,16 @@ func SaveRunbookTemplate(t *RunbookTemplate) error {
 	if err := validateRunbookTpl(t); err != nil {
 		return err
 	}
+	if t.ID != "" {
+		// 轮1审查 P2-1：调用方可携带 ID（webview 可达）——路径穿越与内置
+		// 影子在这里挡死，不依赖 Get/Delete 的事后校验。
+		if !validStoreID(t.ID) {
+			return fmt.Errorf("runbook template %q: invalid id", t.ID)
+		}
+		if strings.HasPrefix(t.ID, BuiltinRunbookIDPrefix) {
+			return fmt.Errorf("runbook template %q: 内置前缀不可用于用户模板（防影子遮蔽内置库）", t.ID)
+		}
+	}
 	if t.ID == "" {
 		t.ID = newRunbookTplID()
 	}
@@ -146,14 +158,19 @@ func validateRunbookTpl(t *RunbookTemplate) error {
 	}
 	for i := range t.Steps {
 		s := &t.Steps[i]
+		// 步形状统一裁决（轮1审查 P1-1）：body = command | proposal_cmds 恰一个；
+		// DecisionPoint 与 Gate 是附着物（与 CutoverStep 语义一致——决策点在
+		// 步完成后 hold，门在步后验证），可附于任一 body。decision-only /
+		// gate-only 步被拒：那是三处机制矛盾的根源（apply 产出的 run 过不了
+		// CutoverStart、复制内置模板存不回、抽取静默丢门）。
 		body := 0
-		for _, ok := range []bool{s.Command != "", len(s.ProposalCmds) > 0, s.DecisionPoint} {
+		for _, ok := range []bool{s.Command != "", len(s.ProposalCmds) > 0} {
 			if ok {
 				body++
 			}
 		}
 		if body != 1 {
-			return fmt.Errorf("runbook template %q step %q: exactly one of command / proposal_cmds / decision_point", t.Name, s.Label)
+			return fmt.Errorf("runbook template %q step %q: exactly one of command / proposal_cmds（决策点与门是附着物，依附于有 body 的步）", t.Name, s.Label)
 		}
 		if s.Command != "" && s.Device == "" {
 			return fmt.Errorf("runbook template %q step %q: command step needs device", t.Name, s.Label)
@@ -171,6 +188,9 @@ const BuiltinRunbookIDPrefix = "RBB-"
 
 // builtinRunbookSkel is the 批② 空模板骨架：一个能渲染、能走完
 // preview→apply→approve→start 全链的最小部署编排示例——机制的活教材。
+// 步形状纪律（轮1审查 P1-1 统一裁决）：决策点与门是附着物，依附于有
+// body（command/proposal_cmds）的步；decision-only / gate-only 步被
+// validate 拒绝——apply 产出的 run 因此必然能过 CutoverStart。
 func builtinRunbookSkel() RunbookTemplate {
 	return RunbookTemplate{
 		ID:        BuiltinRunbookIDPrefix + "skel-vllm-standalone",
@@ -178,14 +198,15 @@ func builtinRunbookSkel() RunbookTemplate {
 		Scenario:  "model-deploy",
 		Vars:      []string{"gpu_host", "svc_port"},
 		WindowMin: 120,
-		Notes:     "内置骨架示例（复制后改）：前置只读→变更段（提案）→语义门→决策点。新场景建议先跑通一次再『另存为模板』。",
+		Notes:     "内置骨架示例（复制后改）：前置只读→变更段（提案）→语义门+决策点。新场景建议先跑通一次再『另存为模板』。",
 		Steps: []RunbookTplStep{
 			{Label: "前置检查", Device: "{{gpu_host}}", Command: "nvidia-smi"},
 			{Label: "变更：拉起服务", Device: "{{gpu_host}}", ProposalIntent: "启动推理服务",
-				ProposalCmds: []string{"systemctl start vllm-{{svc_port}}"}},
-			{Label: "语义门", Device: "{{gpu_host}}", Command: "systemctl is-active vllm-{{svc_port}}",
-				GateCmd: "systemctl is-active vllm-{{svc_port}}", GateExpect: "active"},
-			{Label: "决策点", DecisionPoint: true, Impact: "放流量前人工确认基线压测"},
+				ProposalCmds: []string{"systemctl start vllm-{{svc_port}}"},
+				ProposalRollback: []string{"systemctl stop vllm-{{svc_port}}"}},
+			{Label: "语义门+决策点", Device: "{{gpu_host}}", Command: "systemctl is-active vllm-{{svc_port}}",
+				GateCmd: "systemctl is-active vllm-{{svc_port}}", GateExpect: "active",
+				DecisionPoint: true, Impact: "门过后 hold：放流量前人工确认基线压测"},
 		},
 	}
 }
@@ -206,8 +227,9 @@ func builtinRunbookLibrary() []RunbookTemplate {
 			Scenario:  "model-deploy",
 			Vars:      []string{"gpu_host", "model_path", "served_name", "svc_port", "tp_size", "gpu_mem_util"},
 			WindowMin: 180,
-			Notes: "蓝本 MODEL_DEPLOY_SPEC §2.1 八步走查的单机 systemd 形态。变更段含写 unit 与启动参数" +
-				"（TP={{tp_size}}/mem-util={{gpu_mem_util}}）——建议先跑 NetDevProfileCheck 过机型/模型档案校验。",
+			Notes: "蓝本 MODEL_DEPLOY_SPEC §2.1 八步走查的单机 systemd 形态。unit 文件内容由 file-upload" +
+				" 步先行提供（模板不携带写入内容）；启动参数 TP={{tp_size}}/mem-util={{gpu_mem_util}}——" +
+				"建议先跑 NetDevProfileCheck 过机型/模型档案校验。",
 			Steps: []RunbookTplStep{
 				{Label: "前置：驱动与可见卡", Device: "{{gpu_host}}", Command: "nvidia-smi", EstSec: 30},
 				{Label: "前置：显存水位", Device: "{{gpu_host}}",
@@ -218,18 +240,16 @@ func builtinRunbookLibrary() []RunbookTemplate {
 				{Label: "前置：权重目录", Device: "{{gpu_host}}", Command: "ls -l {{model_path}}", EstSec: 20},
 				{Label: "权重对账（F2 校验段）", Device: "{{gpu_host}}",
 					Command: "sha256sum {{model_path}}/config.json {{model_path}}/model.safetensors.index.json", EstSec: 60},
-				{Label: "变更：写 unit 并启动", Device: "{{gpu_host}}",
+				{Label: "变更：启动服务（unit 文件先行 file-upload）", Device: "{{gpu_host}}",
 					ProposalIntent: "部署 {{served_name}}（TP={{tp_size}}，mem-util={{gpu_mem_util}}，端口 {{svc_port}}）",
 					ProposalCmds: []string{
-						"tee /etc/systemd/system/vllm-{{svc_port}}.service",
 						"systemctl daemon-reload",
 						"systemctl enable --now vllm-{{svc_port}}.service",
-					}, EstSec: 600},
-				{Label: "门：服务存活", Device: "{{gpu_host}}", Command: "systemctl is-active vllm-{{svc_port}}",
-					GateCmd: "systemctl is-active vllm-{{svc_port}}", GateExpect: "active", GateSustain: 15, EstSec: 60},
-				{Label: "门：HTTP 探活", Device: "{{gpu_host}}",
-					GateCmd: "curl -I http://127.0.0.1:{{svc_port}}/health", GateExpect: "200", GateSustain: 30, GateTimeout: 1800, EstSec: 300},
-				{Label: "决策点：放流量", DecisionPoint: true, Impact: "确认模型名={{served_name}} 可列出、基线压测通过后放流量；回退=stop 新服务"},
+					},
+					ProposalRollback: []string{"systemctl disable --now vllm-{{svc_port}}.service"}, EstSec: 600},
+				{Label: "门+决策点：服务存活后放流量", Device: "{{gpu_host}}", Command: "systemctl is-active vllm-{{svc_port}}",
+					GateCmd: "systemctl is-active vllm-{{svc_port}}", GateExpect: "active", GateSustain: 15, EstSec: 60,
+					DecisionPoint: true, Impact: "门过后 hold：确认模型名={{served_name}} 可列出、HTTP /health 200、基线压测通过后放流量；回退=stop 新服务"},
 			},
 		},
 		RunbookTemplate{
@@ -247,16 +267,15 @@ func builtinRunbookLibrary() []RunbookTemplate {
 				{Label: "前置：双机权重目录", Device: "{{head_host}}", Command: "ls -l {{model_path}}", EstSec: 20},
 				{Label: "变更：head 起 Ray 头", Device: "{{head_host}}",
 					ProposalIntent: "Ray head 启动 + vLLM 服务端（nnodes={{nnodes}}，TP={{tp_size}}）",
-					ProposalCmds:   []string{"ray start --head", "systemctl start vllm-{{svc_port}}"}, EstSec: 600},
+					ProposalCmds:   []string{"ray start --head", "systemctl start vllm-{{svc_port}}"},
+					ProposalRollback: []string{"systemctl stop vllm-{{svc_port}}", "ray stop"}, EstSec: 600},
 				{Label: "变更：worker 加入", Device: "{{worker_host}}",
 					ProposalIntent: "worker 加入 Ray 集群（指向 {{head_host}}）",
-					ProposalCmds:   []string{"ray start --address={{head_host}}:6379"}, EstSec: 300},
-				{Label: "门：head 服务存活", Device: "{{head_host}}",
-					GateCmd: "systemctl is-active vllm-{{svc_port}}", GateExpect: "active", GateSustain: 30, EstSec: 120},
-				{Label: "门：head 端口监听", Device: "{{head_host}}",
-					GateCmd: "ss -ltn", GateExpect: ":{{svc_port}}", GateSustain: 30, EstSec: 120},
-				{Label: "决策点：全集群就绪后放流量", DecisionPoint: true,
-					Impact: "确认 nnodes={{nnodes}} 全部在线、worker 无掉卡；回退=双机 stop + ray stop"},
+					ProposalCmds:   []string{"ray start --address={{head_host}}:6379"},
+					ProposalRollback: []string{"ray stop"}, EstSec: 300},
+				{Label: "门+决策点：head 端口监听后放流量", Device: "{{head_host}}", Command: "ss -ltn",
+					GateCmd: "ss -ltn", GateExpect: ":{{svc_port}}", GateSustain: 30, EstSec: 120,
+					DecisionPoint: true, Impact: "门过后 hold：确认 nnodes={{nnodes}} 全部在线、worker 无掉卡；回退=双机 stop + ray stop"},
 			},
 		},
 		RunbookTemplate{
@@ -274,18 +293,18 @@ func builtinRunbookLibrary() []RunbookTemplate {
 					Command: "curl -I http://127.0.0.1:{{port_old}}/health", EstSec: 20},
 				{Label: "变更：新版拉起（新端口，不动旧版）", Device: "{{gpu_host}}",
 					ProposalIntent: "拉起 {{svc_new}}（端口 {{port_new}}），{{svc_old}} 保持在线",
-					ProposalCmds:   []string{"systemctl enable --now {{svc_new}}.service"}, EstSec: 900},
-				{Label: "门：新版 HTTP 探活", Device: "{{gpu_host}}",
-					GateCmd: "curl -I http://127.0.0.1:{{port_new}}/health", GateExpect: "200", GateSustain: 60, GateTimeout: 1800, EstSec: 600},
-				{Label: "决策点：切流确认", DecisionPoint: true,
-					Impact: "新旧版本 TTFT/输出质量对比通过后切流；此刻回退=stop 新版（零影响）"},
+					ProposalCmds:   []string{"systemctl enable --now {{svc_new}}.service"},
+					ProposalRollback: []string{"systemctl disable --now {{svc_new}}.service"}, EstSec: 900},
+				{Label: "门+决策点：新版就绪后切流", Device: "{{gpu_host}}", Command: "systemctl is-active {{svc_new}}",
+					GateCmd: "curl -I http://127.0.0.1:{{port_new}}/health", GateExpect: "200", GateSustain: 60, GateTimeout: 1800, EstSec: 600,
+					DecisionPoint: true, Impact: "新版 TTFT/输出质量对比通过后切流；此刻回退=stop 新版（零影响）"},
 				{Label: "变更：旧版下线", Device: "{{gpu_host}}",
 					ProposalIntent: "停用 {{svc_old}}（流量已在 {{port_new}}）",
-					ProposalCmds:   []string{"systemctl disable --now {{svc_old}}.service"}, EstSec: 120},
-				{Label: "门：新版持续探活", Device: "{{gpu_host}}",
-					GateCmd: "curl -I http://127.0.0.1:{{port_new}}/health", GateExpect: "200", GateSustain: 60, EstSec: 120},
-				{Label: "决策点：关闭回退窗口", DecisionPoint: true,
-					Impact: "观察期过后关闭；此刻起回退需重新部署旧版本"},
+					ProposalCmds:   []string{"systemctl disable --now {{svc_old}}.service"},
+					ProposalRollback: []string{"systemctl enable --now {{svc_old}}.service"}, EstSec: 120},
+				{Label: "门+决策点：观察期后关回退窗", Device: "{{gpu_host}}", Command: "systemctl is-active {{svc_new}}",
+					GateCmd: "curl -I http://127.0.0.1:{{port_new}}/health", GateExpect: "200", GateSustain: 60, EstSec: 120,
+					DecisionPoint: true, Impact: "观察期过后关闭；此刻起回退需重新部署旧版本"},
 			},
 		},
 	)
@@ -312,7 +331,7 @@ func ascendTemplates() []RunbookTemplate {
 			Steps: []RunbookTplStep{
 				{Label: "前置：NPU 可见与健康", Device: "{{npu_host}}", Command: "npu-smi info", EstSec: 30},
 				{Label: "前置：健康明细", Device: "{{npu_host}}", Command: "npu-smi info -t health", EstSec: 30},
-				{Label: "前置：CANN/驱动版本", Device: "{{npu_host}}", Command: "cat /usr/local/Ascend/ascend-toolkit/latest/version.cfg", EstSec: 20},
+				{Label: "前置：CANN 版本目录", Device: "{{npu_host}}", Command: "ls -l /usr/local/Ascend/ascend-toolkit/latest/", EstSec: 20},
 				{Label: "前置：权重目录", Device: "{{npu_host}}", Command: "ls -l {{model_path}}", EstSec: 20},
 				{Label: "权重对账（F2 校验段）", Device: "{{npu_host}}",
 					Command: "sha256sum {{model_path}}/config.json {{model_path}}/model.safetensors.index.json", EstSec: 60},
@@ -320,11 +339,11 @@ func ascendTemplates() []RunbookTemplate {
 					ProposalIntent: "部署 {{served_name}}（vllm-ascend，TP={{tp_size}}，端口 {{svc_port}}）",
 					ProposalCmds: []string{
 						"systemctl enable --now vllm-ascend-{{svc_port}}.service",
-					}, EstSec: 900},
-				{Label: "门：HTTP 探活", Device: "{{npu_host}}",
-					GateCmd: "curl -I http://127.0.0.1:{{svc_port}}/health", GateExpect: "200", GateSustain: 30, GateTimeout: 2400, EstSec: 600},
-				{Label: "决策点：放流量", DecisionPoint: true,
-					Impact: "确认 /v1/models 列出 {{served_name}}、基线压测通过后放流量；回退=stop 服务"},
+					},
+					ProposalRollback: []string{"systemctl disable --now vllm-ascend-{{svc_port}}.service"}, EstSec: 900},
+				{Label: "门+决策点：探活后放流量", Device: "{{npu_host}}", Command: "systemctl is-active vllm-ascend-{{svc_port}}",
+					GateCmd: "curl -I http://127.0.0.1:{{svc_port}}/health", GateExpect: "200", GateSustain: 30, GateTimeout: 2400, EstSec: 600,
+					DecisionPoint: true, Impact: "门过后 hold：确认 /v1/models 列出 {{served_name}}、基线压测通过后放流量；回退=stop 服务"},
 			},
 		},
 	}
@@ -338,24 +357,24 @@ func opsSideTemplates() []RunbookTemplate {
 			ID:        BuiltinRunbookIDPrefix + "ops-scale-dp-replicas",
 			Name:      "运维：DP 扩副本（不停机）",
 			Scenario:  "model-ops",
-			Vars:      []string{"gpu_host", "svc_base", "port_base", "replicas_new"},
+			Vars:      []string{"gpu_host", "svc_base", "replicas_new", "replica_port"},
 			WindowMin: 90,
 			Notes: "DP 扩副本不重启存量实例——可全自动（HPA 指标建议用 KV cache 利用率/排队深度，" +
-				"不是 CPU）。缩副本反向走 ops-decommission 模板（先摘流再停）。",
+				"不是 CPU）。replica_port=新副本实际端口（门探的就是它）。缩副本反向走 " +
+				"ops-decommission 模板（先摘流再停）。",
 			Steps: []RunbookTplStep{
 				{Label: "前置：当前副本存活", Device: "{{gpu_host}}",
 					Command: "systemctl is-active {{svc_base}}-1", EstSec: 20},
 				{Label: "前置：显存余量", Device: "{{gpu_host}}",
 					Command: "nvidia-smi --query-gpu=memory.used,memory.total --format=csv", EstSec: 30},
-				{Label: "变更：拉起新副本", Device: "{{gpu_host}}",
-					ProposalIntent: "扩副本至 {{replicas_new}}（新实例 {{svc_base}}-{{replicas_new}}，端口顺延自 {{port_base}}）",
+				{Label: "变更+门+决策点：拉起新副本并验证", Device: "{{gpu_host}}",
+					ProposalIntent: "扩副本至 {{replicas_new}}（新实例 {{svc_base}}-{{replicas_new}}，端口 {{replica_port}}）",
 					ProposalCmds: []string{
 						"systemctl enable --now {{svc_base}}-{{replicas_new}}.service",
-					}, EstSec: 900},
-				{Label: "门：新副本探活", Device: "{{gpu_host}}",
-					GateCmd: "curl -I http://127.0.0.1:{{port_base}}/health", GateExpect: "200", GateSustain: 45, GateTimeout: 1800, EstSec: 600},
-				{Label: "决策点：流量均衡确认", DecisionPoint: true,
-					Impact: "LB/upstream 挂上新副本并确认分流量；回退=stop 新副本（存量零影响）"},
+					},
+					ProposalRollback: []string{"systemctl disable --now {{svc_base}}-{{replicas_new}}.service"}, EstSec: 900,
+					GateCmd: "curl -I http://127.0.0.1:{{replica_port}}/health", GateExpect: "200", GateSustain: 45, GateTimeout: 1800,
+					DecisionPoint: true, Impact: "门过后 hold：LB/upstream 挂上新副本并确认分流量；回退=stop 新副本（存量零影响）"},
 			},
 		},
 		{
@@ -371,18 +390,20 @@ func opsSideTemplates() []RunbookTemplate {
 					Command: "systemctl is-active {{svc_old}}", EstSec: 20},
 				{Label: "前置：卡拓扑（TP={{tp_new}} 可行性）", Device: "{{gpu_host}}",
 					Command: "nvidia-smi --query-gpu=index,memory.total --format=csv", EstSec: 30},
-				{Label: "变更：新 TP 新端口拉起", Device: "{{gpu_host}}",
+				{Label: "变更：新队拉起（新端口，旧队不动）", Device: "{{gpu_host}}",
 					ProposalIntent: "以 TP={{tp_new}} 拉起 {{svc_new}}（端口 {{port_new}}），{{svc_old}} 在线不动",
-					ProposalCmds:   []string{"systemctl enable --now {{svc_new}}.service"}, EstSec: 1200},
-				{Label: "门：新队探活", Device: "{{gpu_host}}",
-					GateCmd: "curl -I http://127.0.0.1:{{port_new}}/health", GateExpect: "200", GateSustain: 60, GateTimeout: 2400, EstSec: 900},
-				{Label: "决策点：切流（人工核 TP 生效）", DecisionPoint: true,
-					Impact: "人工确认新队卡数=TP={{tp_new}}、TTFT 达标后切流；回退=stop 新队"},
+					ProposalCmds:   []string{"systemctl enable --now {{svc_new}}.service"},
+					ProposalRollback: []string{"systemctl disable --now {{svc_new}}.service"}, EstSec: 1200},
+				{Label: "门+决策点：新队就绪后切流", Device: "{{gpu_host}}", Command: "systemctl is-active {{svc_new}}",
+					GateCmd: "curl -I http://127.0.0.1:{{port_new}}/health", GateExpect: "200", GateSustain: 60, GateTimeout: 2400, EstSec: 900,
+					DecisionPoint: true, Impact: "人工确认新队卡数=TP={{tp_new}}、TTFT 达标后切流；此刻回退=stop 新队"},
 				{Label: "变更：旧队下线", Device: "{{gpu_host}}",
 					ProposalIntent: "停用旧 TP 队 {{svc_old}}",
-					ProposalCmds:   []string{"systemctl disable --now {{svc_old}}.service"}, EstSec: 120},
-				{Label: "决策点：关闭回退窗口", DecisionPoint: true,
-					Impact: "观察期后关闭；此后回退需按旧 TP 重新拉起"},
+					ProposalCmds:   []string{"systemctl disable --now {{svc_old}}.service"},
+					ProposalRollback: []string{"systemctl enable --now {{svc_old}}.service"}, EstSec: 120},
+				{Label: "门+决策点：观察期后关回退窗", Device: "{{gpu_host}}", Command: "systemctl is-active {{svc_new}}",
+					GateCmd: "curl -I http://127.0.0.1:{{port_new}}/health", GateExpect: "200", GateSustain: 60,
+					DecisionPoint: true, Impact: "观察期后关闭；此后回退需按旧 TP 重新拉起"},
 			},
 		},
 		{
@@ -394,21 +415,20 @@ func opsSideTemplates() []RunbookTemplate {
 			Notes: "ECC 阈值自动化边界（实勘）：correctable>10 次/时→drain、反复 uncorrectable→cordon+隔离、" +
 				"物理换卡必人工。GPU 故障占训练中断约 58%——高频流程，备件拉起后复流必经决策点。",
 			Steps: []RunbookTplStep{
-				{Label: "前置：故障证据固化", Device: "{{bad_host}}", Command: "nvidia-smi -q", EstSec: 60},
+				{Label: "前置+决策点：故障证据固化后人工确认摘流", Device: "{{bad_host}}", Command: "nvidia-smi -q", EstSec: 60,
+					DecisionPoint: true, Impact: "核对 XID/ECC 分级（值班手册簇 0）：severe→立即摘流；物理换卡必人工到场"},
 				{Label: "前置：内核 XID 证据", Device: "{{bad_host}}",
 					Command: "journalctl -k -g Xid --no-pager -n 50", EstSec: 30},
-				{Label: "决策点：人工确认摘流", DecisionPoint: true,
-					Impact: "核对 XID/ECC 分级（值班手册簇 0）：severe→立即摘流；物理换卡必人工到场"},
 				{Label: "变更：坏节点摘流", Device: "{{bad_host}}",
 					ProposalIntent: "{{svc_name}} 摘流下线（节点 {{bad_host}}）",
-					ProposalCmds:   []string{"systemctl disable --now {{svc_name}}.service"}, EstSec: 120},
-				{Label: "变更：备件拉起", Device: "{{spare_host}}",
+					ProposalCmds:   []string{"systemctl disable --now {{svc_name}}.service"},
+					ProposalRollback: []string{"systemctl enable --now {{svc_name}}.service"}, EstSec: 120},
+				{Label: "变更+门+决策点：备件拉起验证后复流", Device: "{{spare_host}}",
 					ProposalIntent: "备件 {{spare_host}} 拉起同配置服务",
-					ProposalCmds:   []string{"systemctl enable --now {{svc_name}}.service"}, EstSec: 900},
-				{Label: "门：备件探活", Device: "{{spare_host}}",
-					GateCmd: "curl -I http://127.0.0.1:{{spare_port}}/health", GateExpect: "200", GateSustain: 60, GateTimeout: 1800, EstSec: 600},
-				{Label: "决策点：复流确认", DecisionPoint: true,
-					Impact: "备件基线压测通过后复流；坏节点保持隔离待物理换卡"},
+					ProposalCmds:   []string{"systemctl enable --now {{svc_name}}.service"},
+					ProposalRollback: []string{"systemctl disable --now {{svc_name}}.service"}, EstSec: 900,
+					GateCmd:        "curl -I http://127.0.0.1:{{spare_port}}/health", GateExpect: "200", GateSustain: 60, GateTimeout: 1800,
+					DecisionPoint:  true, Impact: "备件基线压测通过后复流；坏节点保持隔离待物理换卡"},
 			},
 		},
 		{
@@ -417,25 +437,24 @@ func opsSideTemplates() []RunbookTemplate {
 			Scenario:  "model-ops",
 			Vars:      []string{"gpu_host", "svc_name", "port", "archive_path"},
 			WindowMin: 90,
-			Notes: "业界无统一 runbook，结构化即增量：idle 判定→摘流→删 endpoint→权重归档。" +
-				"『确认无人再用』必人工审批——最后决策点不放行就停在归档前，可整体回退。",
+			Notes: "业界无统一 runbook，结构化即增量：idle 判定→摘流→验证停止→『确认无人再用』终审→权重归档。" +
+				"终审决策点不放行就停在归档前，可整体回退。",
 			Steps: []RunbookTplStep{
-				{Label: "前置：服务现状", Device: "{{gpu_host}}",
-					Command: "ss -ltn", EstSec: 20},
-				{Label: "决策点：idle 判定（人工）", DecisionPoint: true,
-					Impact: "确认近 7 天无业务流量（监控面）；误判回退=重新拉起，成本为 0"},
-				{Label: "变更：摘流下线", Device: "{{gpu_host}}",
+				{Label: "前置+决策点：idle 判定", Device: "{{gpu_host}}",
+					Command: "ss -ltn", EstSec: 20,
+					DecisionPoint: true, Impact: "确认近 7 天无业务流量（监控面）；误判回退=重新拉起，成本为 0"},
+				{Label: "变更+门+决策点：摘流→验证停止→终审", Device: "{{gpu_host}}",
 					ProposalIntent: "{{svc_name}} 摘流并停用（端口 {{port}}）",
 					ProposalCmds: []string{
 						"systemctl disable --now {{svc_name}}.service",
-					}, EstSec: 120},
-				{Label: "门：端口已释放", Device: "{{gpu_host}}",
-					GateCmd: "ss -ltn", GateExpect: "LISTEN", GateSustain: 5, EstSec: 60},
-				{Label: "决策点：确认无人再用", DecisionPoint: true,
-					Impact: "最终闸门：放行才进归档（不可逆面）；不放行服务保持下线可随时拉回"},
+					},
+					ProposalRollback: []string{"systemctl enable --now {{svc_name}}.service"}, EstSec: 120,
+					GateCmd:       "systemctl is-active {{svc_name}}", GateExpect: "inactive", GateSustain: 5,
+					DecisionPoint: true, Impact: "门验证已停止后 hold：『确认无人再用』终审（最终闸门，放行才进归档）"},
 				{Label: "变更：权重归档", Device: "{{gpu_host}}",
 					ProposalIntent: "权重目录归档至 {{archive_path}}",
-					ProposalCmds:   []string{"mv /data/models/{{svc_name}} {{archive_path}}/{{svc_name}}"}, EstSec: 600},
+					ProposalCmds:   []string{"mv /data/models/{{svc_name}} {{archive_path}}/{{svc_name}}"},
+					ProposalRollback: []string{"mv {{archive_path}}/{{svc_name}} /data/models/{{svc_name}}"}, EstSec: 600},
 			},
 		},
 	}
@@ -454,12 +473,12 @@ func platformTemplates() []RunbookTemplate {
 			Notes:     "LLM 网关：统一 API 面 + 多上游路由。上游 key 走 secret store，不进 config/模板。",
 			Steps: []RunbookTplStep{
 				{Label: "前置：容器运行时", Device: "{{gpu_host}}", Command: "docker ps", EstSec: 20},
-				{Label: "变更：拉起 LiteLLM", Device: "{{gpu_host}}",
+				{Label: "变更+门+决策点：拉起并验证后接业务", Device: "{{gpu_host}}",
 					ProposalIntent: "LiteLLM 网关（配置 {{config_path}}，端口 {{litellm_port}}）",
-					ProposalCmds:   []string{"docker compose -f {{config_path}} up -d"}, EstSec: 300},
-				{Label: "门：网关探活", Device: "{{gpu_host}}",
-					GateCmd: "curl -I http://127.0.0.1:{{litellm_port}}/health/liveliness", GateExpect: "200", GateSustain: 30, EstSec: 120},
-				{Label: "决策点：接业务", DecisionPoint: true, Impact: "业务侧改指网关 base_url；回退=down"},
+					ProposalCmds:   []string{"docker compose -f {{config_path}} up -d"},
+					ProposalRollback: []string{"docker compose -f {{config_path}} down"}, EstSec: 300,
+					GateCmd:        "curl -I http://127.0.0.1:{{litellm_port}}/health/liveliness", GateExpect: "200", GateSustain: 30,
+					DecisionPoint:  true, Impact: "门过后 hold：业务侧改指网关 base_url；回退=down"},
 			},
 		},
 		{
@@ -471,12 +490,12 @@ func platformTemplates() []RunbookTemplate {
 			Notes:     "向量库 standalone 形态（RAG 检索面）。数据卷落在 compose 定义的宿主目录——前置先核磁盘。",
 			Steps: []RunbookTplStep{
 				{Label: "前置：磁盘与容器", Device: "{{gpu_host}}", Command: "df -h /var/lib/docker", EstSec: 20},
-				{Label: "变更：compose 拉起", Device: "{{gpu_host}}",
+				{Label: "变更+门+决策点：拉起验证后建集合", Device: "{{gpu_host}}",
 					ProposalIntent: "Milvus standalone（{{compose_path}}）",
-					ProposalCmds:   []string{"docker compose -f {{compose_path}} up -d"}, EstSec: 300},
-				{Label: "门：健康检查", Device: "{{gpu_host}}",
-					GateCmd: "curl -I http://127.0.0.1:{{milvus_port}}/healthz", GateExpect: "200", GateSustain: 30, EstSec: 120},
-				{Label: "决策点：建集合接数据", DecisionPoint: true, Impact: "schema 迁移走 sql-migration 面不受本模板管"},
+					ProposalCmds:   []string{"docker compose -f {{compose_path}} up -d"},
+					ProposalRollback: []string{"docker compose -f {{compose_path}} down"}, EstSec: 300,
+					GateCmd:        "curl -I http://127.0.0.1:{{milvus_port}}/healthz", GateExpect: "200", GateSustain: 30,
+					DecisionPoint:  true, Impact: "门过后 hold：建集合接数据（schema 迁移走 sql-migration 面）"},
 			},
 		},
 		{
@@ -488,12 +507,12 @@ func platformTemplates() []RunbookTemplate {
 			Notes:     "依赖 Postgres/Redis，compose 内置；升级=Dify 镜像 tag 变更，走蓝绿模板套用。",
 			Steps: []RunbookTplStep{
 				{Label: "前置：容器与磁盘", Device: "{{gpu_host}}", Command: "docker ps", EstSec: 20},
-				{Label: "变更：compose 拉起", Device: "{{gpu_host}}",
+				{Label: "变更+门+决策点：拉起验证后初始化", Device: "{{gpu_host}}",
 					ProposalIntent: "Dify 全家桶（{{compose_path}}）",
-					ProposalCmds:   []string{"docker compose -f {{compose_path}} up -d"}, EstSec: 420},
-				{Label: "门：API 健康", Device: "{{gpu_host}}",
-					GateCmd: "curl -I http://127.0.0.1:{{dify_port}}/api/health", GateExpect: "200", GateSustain: 30, EstSec: 120},
-				{Label: "决策点：管理员初始化", DecisionPoint: true, Impact: "首个管理员账号注册是带外人工动作"},
+					ProposalCmds:   []string{"docker compose -f {{compose_path}} up -d"},
+					ProposalRollback: []string{"docker compose -f {{compose_path}} down"}, EstSec: 420,
+					GateCmd:        "curl -I http://127.0.0.1:{{dify_port}}/api/health", GateExpect: "200", GateSustain: 30,
+					DecisionPoint:  true, Impact: "门过后 hold：首个管理员账号注册（带外人工动作）"},
 			},
 		},
 		{
@@ -505,12 +524,12 @@ func platformTemplates() []RunbookTemplate {
 			Notes:     "LLM 可观测面（trace/eval）。key 生成后进 secret store；上游接入改 SDK 配置不走本模板。",
 			Steps: []RunbookTplStep{
 				{Label: "前置：容器与磁盘", Device: "{{gpu_host}}", Command: "df -h /var/lib/docker", EstSec: 20},
-				{Label: "变更：compose 拉起", Device: "{{gpu_host}}",
+				{Label: "变更+门+决策点：拉起验证后接 SDK", Device: "{{gpu_host}}",
 					ProposalIntent: "Langfuse（{{compose_path}}）",
-					ProposalCmds:   []string{"docker compose -f {{compose_path}} up -d"}, EstSec: 300},
-				{Label: "门：健康检查", Device: "{{gpu_host}}",
-					GateCmd: "curl -I http://127.0.0.1:{{langfuse_port}}/api/public/health", GateExpect: "200", GateSustain: 30, EstSec: 120},
-				{Label: "决策点：接 SDK", DecisionPoint: true, Impact: "业务应用注入 Langfuse key 后 trace 上报"},
+					ProposalCmds:   []string{"docker compose -f {{compose_path}} up -d"},
+					ProposalRollback: []string{"docker compose -f {{compose_path}} down"}, EstSec: 300,
+					GateCmd:        "curl -I http://127.0.0.1:{{langfuse_port}}/api/public/health", GateExpect: "200", GateSustain: 30,
+					DecisionPoint:  true, Impact: "门过后 hold：业务应用注入 Langfuse key 后 trace 上报"},
 			},
 		},
 	}
@@ -703,8 +722,9 @@ func (m *Manager) PreviewRunbookTemplate(id string, values map[string]string) (*
 			}
 			// apply 阶段才落 draft 提案；预览只标注。
 			ps.Notes = append(ps.Notes, "变更段：apply 时生成为 draft 提案，人批后方可启动")
-		case s.DecisionPoint:
-			ps.Decision = true
+		}
+		if s.DecisionPoint {
+			ps.Decision = true // 决策点是附着物（validate 保证步有 body）
 		}
 		if s.GateCmd != "" {
 			cs.Gate = &CutoverGate{Device: s.Device, Command: s.GateCmd, Expect: s.GateExpect, SustainSec: s.GateSustain, TimeoutSec: s.GateTimeout}
@@ -763,14 +783,14 @@ func (m *Manager) ApplyRunbookTemplate(id string, values map[string]string, runN
 			if s.Device == "" {
 				return nil, fmt.Errorf("步骤 %q：变更段缺设备——提案步必须落清单设备", s.Label)
 			}
-			p.Steps = append(p.Steps, ProposalStep{Device: s.Device, Type: "cli", Commands: s.ProposalCmds})
+			p.Steps = append(p.Steps, ProposalStep{Device: s.Device, Type: "cli", Commands: s.ProposalCmds, Rollback: s.ProposalRollback})
 			if err := SaveProposal(p); err != nil {
 				return nil, fmt.Errorf("步骤 %q：提案草稿落库失败: %v", s.Label, err)
 			}
 			cs.ProposalID = p.ID
 			res.Proposals = append(res.Proposals, p)
-		case s.DecisionPoint:
-			// body 本身就是决策点，无命令。
+		default:
+			// validate 保证不会走到（步必有 body）。
 		}
 		if s.GateCmd != "" {
 			cs.Gate = &CutoverGate{Device: s.Device, Command: s.GateCmd, Expect: s.GateExpect, SustainSec: s.GateSustain, TimeoutSec: s.GateTimeout}
@@ -799,21 +819,20 @@ func ExtractRunbookTemplate(run *CutoverRun, name string) (*RunbookTemplate, err
 	t := &RunbookTemplate{Name: strings.TrimSpace(name), Notes: fmt.Sprintf("抽取自 run %s（状态 %s）", run.ID, run.Status)}
 	t.Steps = make([]RunbookTplStep, 0, len(run.Steps))
 	var extractNotes []string
+	var last *RunbookTplStep // 归并锚点：gate-only run 步的门并入前一个模板步
 	for i := range run.Steps {
 		s := run.Steps[i]
-		ts := RunbookTplStep{
-			Label: s.Label, Impact: s.Impact, EstSec: s.EstSec, DecisionPoint: s.DecisionPoint,
-		}
 		switch {
 		case s.ProposalID != "":
 			p, err := GetProposal(s.ProposalID)
 			if err != nil {
 				extractNotes = append(extractNotes, fmt.Sprintf("步骤 %q：提案 %s 读取失败（已删？）——该步以占位保留", s.Label, s.ProposalID))
-				ts.ProposalIntent = "(提案不可读，需人工补写)"
+				ts := RunbookTplStep{Label: s.Label, Impact: s.Impact, EstSec: s.EstSec, DecisionPoint: s.DecisionPoint, ProposalIntent: "(提案不可读，需人工补写)"}
 				t.Steps = append(t.Steps, ts)
+				last = &t.Steps[len(t.Steps)-1]
 				continue
 			}
-			ts.ProposalIntent = p.Intent
+			ts := RunbookTplStep{Label: s.Label, Impact: s.Impact, EstSec: s.EstSec, DecisionPoint: s.DecisionPoint, ProposalIntent: p.Intent}
 			for _, ps := range p.Steps {
 				if ps.Device != "" && ts.Device == "" {
 					ts.Device = ps.Device
@@ -824,18 +843,31 @@ func ExtractRunbookTemplate(run *CutoverRun, name string) (*RunbookTemplate, err
 					extractNotes = append(extractNotes, fmt.Sprintf("步骤 %q：提案含结构化载荷（%s），无法模板化——apply 时需人工补写", s.Label, ps.Type))
 				}
 			}
-		case s.Device != "" && s.Command != "":
-			ts.Device, ts.Command = s.Device, s.Command
 			if s.Gate != nil {
 				ts.GateCmd, ts.GateExpect = s.Gate.Command, s.Gate.Expect
 				ts.GateSustain, ts.GateTimeout = s.Gate.SustainSec, s.Gate.TimeoutSec
 			}
-		case s.DecisionPoint:
-			// 决策点本体无命令——原样带走。
+			t.Steps = append(t.Steps, ts)
+			last = &t.Steps[len(t.Steps)-1]
+		case s.Device != "" && s.Command != "":
+			ts := RunbookTplStep{Label: s.Label, Impact: s.Impact, EstSec: s.EstSec, DecisionPoint: s.DecisionPoint, Device: s.Device, Command: s.Command}
+			if s.Gate != nil {
+				ts.GateCmd, ts.GateExpect = s.Gate.Command, s.Gate.Expect
+				ts.GateSustain, ts.GateTimeout = s.Gate.SustainSec, s.Gate.TimeoutSec
+			}
+			t.Steps = append(t.Steps, ts)
+			last = &t.Steps[len(t.Steps)-1]
+		case s.Gate != nil && last != nil && last.GateCmd == "":
+			// gate-only run 步：门并入前一步（与 apply 的附着语义镜像），
+			// 不再静默丢弃（轮1审查 P1-1 第 3 点）。
+			last.GateCmd, last.GateExpect = s.Gate.Command, s.Gate.Expect
+			last.GateSustain, last.GateTimeout = s.Gate.SustainSec, s.Gate.TimeoutSec
 		default:
+			if s.DecisionPoint {
+				extractNotes = append(extractNotes, fmt.Sprintf("步骤 %q：决策点-only 步无 body 可依附，已丢弃（新模板决策点应依附于变更步）", s.Label))
+			}
 			continue
 		}
-		t.Steps = append(t.Steps, ts)
 	}
 	if len(t.Steps) == 0 {
 		return nil, fmt.Errorf("runbook extract %s: nothing extractable", run.ID)

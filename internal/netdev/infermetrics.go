@@ -80,6 +80,10 @@ func parsePromText(text string) []promSample {
 		}
 		out = append(out, promSample{name: name, labels: labels, value: v})
 	}
+	if err := sc.Err(); err != nil {
+		// 单行超 scanner 上限会让其后样本静默消失——与 series 同口径留痕。
+		slog.Warn("metrics: parse truncated", "err", err)
+	}
 	return out
 }
 
@@ -165,6 +169,9 @@ type inferRaw struct {
 	ttftCount    float64 // vllm:time_to_first_token_seconds_count
 	e2eSumS      float64 // vllm:e2e_request_latency_seconds_sum → infer.e2e_ms
 	e2eCount     float64 // vllm:e2e_request_latency_seconds_count
+	// seen 记录本 scrape 实际出现的指标名（轮1审查：桶可由任意一条指标
+	// 创建——缺失的 gauge 不造 0，"不造 0"纪律对桶内同样成立）。
+	seen map[string]bool
 }
 
 // reduceSamples folds one endpoint scrape's samples into inferRaw per model
@@ -183,12 +190,13 @@ func reduceSamples(samples []promSample) map[string]*inferRaw {
 			model := s.labels["model_name"]
 			r = out[model]
 			if r == nil {
-				r = &inferRaw{}
+				r = &inferRaw{seen: map[string]bool{}}
 				out[model] = r
 			}
 		default:
 			continue
 		}
+		r.seen[s.name] = true
 		switch s.name {
 		case "vllm:gpu_cache_usage_perc":
 			r.kvUsagePerc = s.value
@@ -230,10 +238,27 @@ var (
 // moved forward (exporter restart resets counters → negative delta skipped,
 // baseline re-armed on the spot).
 func metricsDelta(key string, now time.Time, raw *inferRaw) map[string]float64 {
-	out := map[string]float64{
+	out := map[string]float64{}
+	// gauge 仅在导出面真实出现时输出（不造 0）。
+	for name, v := range map[string]float64{
 		"infer.kv_usage": raw.kvUsagePerc * 100,
 		"infer.running":  raw.running,
 		"infer.queued":   raw.queued,
+	} {
+		switch name {
+		case "infer.kv_usage":
+			if raw.seen["vllm:gpu_cache_usage_perc"] {
+				out[name] = v
+			}
+		case "infer.running":
+			if raw.seen["vllm:num_requests_running"] {
+				out[name] = v
+			}
+		case "infer.queued":
+			if raw.seen["vllm:num_requests_waiting"] {
+				out[name] = v
+			}
+		}
 	}
 	metricsPrevMu.Lock()
 	prev, had := metricsPrev[key]
@@ -387,7 +412,8 @@ func latestInferValue(device, metric string) (float64, bool) {
 	latest := map[string]SeriesPoint{} // svc → newest point
 	for _, p := range pts {
 		svc := p.Labels["svc"]
-		if cur, ok := latest[svc]; !ok || p.T >= cur.T {
+		if cur, ok := latest[svc]; !ok || p.T > cur.T || (p.T == cur.T && p.Value > cur.Value) {
+			// 平刻取最大：同轮多 model 桶时最忙者可见（轮1审查覆盖序问题）
 			latest[svc] = p
 		}
 	}

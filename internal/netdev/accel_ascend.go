@@ -41,11 +41,13 @@ func (m *Manager) pollAscendHealth(ctx context.Context, deviceName string) Devic
 	}
 	h.Reachable = true
 	h.GPUSampled = true
-	h.GPUXIDSeen = true
 	if res.IsError {
+		// 轮1审查 P1-4：失败轮不置 GPUXIDSeen——"我方没看到"≠"已清除"，
+		// 在案错误 finding 走 hold（与 XID 通道的 P1-5 纪律一致）。
 		h.GPULastError = "npu-smi 失败：" + firstLineOf(res.Output)
 		return h
 	}
+	h.GPUXIDSeen = true
 	cards, notes := parseNPUInfo(res.Output)
 	h.GPU = cards
 	maxCode := 0
@@ -54,31 +56,39 @@ func (m *Manager) pollAscendHealth(ctx context.Context, deviceName string) Devic
 			maxCode = c.ErrorCode
 		}
 	}
+	// 轮1审查 P2-6：非数值 Health（Warning/Error/十六进制段）无十进制码值
+	// 可归一——但"卡在异常"必须设备级可见且**不 resolve** 在案 finding：
+	// 哨兵码 -1 表"异常待人工读卡"（不出现在任何 catalog 分级，值班看证据）。
+	for _, c := range cards {
+		if c.ErrorCodeKind == npuHealthKind && c.ErrorCode == 0 {
+			maxCode = -1
+			break
+		}
+	}
 	for _, n := range notes {
 		h.GPULastError = joinNote(h.GPULastError, n)
 	}
-	if maxCode > 0 {
+	if maxCode != 0 {
 		h.GPUXIDMax = maxCode
 		h.GPUXIDCodes = []int{maxCode}
-		h.GPUXIDEvidence = npuEvidenceLines(res.Output, cards)
+		h.GPUXIDEvidence = npuEvidenceLines(res.Output)
 		h.GPUXIDSource = npuInfoCmd
 	}
 	return h
 }
 
-// npuEvidenceLines keeps a bounded evidence excerpt: the health-cell context of
-// every anomalous card, capped like the XID evidence channel.
-func npuEvidenceLines(out string, cards []GPUCard) []string {
+// npuEvidenceLines keeps a bounded evidence excerpt: non-OK health rows from
+// the table, capped like the XID evidence channel.
+func npuEvidenceLines(out string) []string {
 	lines := []string{}
 	for _, ln := range strings.Split(out, "\n") {
 		if len(lines) >= gpuXidLines {
 			break
 		}
-		if strings.Contains(ln, "|") && !strings.Contains(ln, "OK") && strings.TrimSpace(ln) != "" {
+		if strings.Contains(ln, "|") && strings.TrimSpace(ln) != "" && !strings.Contains(ln, " OK ") {
 			lines = append(lines, strings.TrimSpace(ln))
 		}
 	}
-	_ = cards
 	return lines
 }
 
@@ -149,21 +159,19 @@ func parseNPUInfo(out string) (cards []GPUCard, notes []string) {
 
 // mergeNPURows folds one A-row + B-row pair into a normalized card.
 func mergeNPURows(a, b [3]string) (GPUCard, string) {
-	card := GPUCard{ErrorCodeKind: npuHealthKind}
+	card := GPUCard{}
 	// A 行：cell1 = Health、cell2 = "Power Temp Huge"。
 	aF := strings.Fields(a[0]) // [npu, name...]
 	if len(aF) >= 2 {
 		card.Name = strings.Join(aF[1:], " ")
 	}
 	health := strings.Fields(a[1])
-	if len(health) >= 1 {
-		if health[0] != "OK" {
-			if code, err := strconv.Atoi(health[0]); err == nil {
-				card.ErrorCode = code
-			} else {
-				// 非数字健康态（Warning/Error 等字面）：立案但不编造码值。
-				card.ErrorCode = 0
-			}
+	if len(health) >= 1 && health[0] != "OK" {
+		// 非 OK：Kind 标记异常；十进制码可解析则归一，字面态（Warning/
+		// Error/十六进制段）保 0 由设备级哨兵立案（不编造码值）。
+		card.ErrorCodeKind = npuHealthKind
+		if code, err := strconv.Atoi(health[0]); err == nil {
+			card.ErrorCode = code
 		}
 	}
 	aStats := strings.Fields(a[2])

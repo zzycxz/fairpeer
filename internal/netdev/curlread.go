@@ -55,6 +55,13 @@ func curlReadOverride(drv driver.Driver, command string) (driver.Class, bool) {
 		// "no URL specified"）。不放行。
 		return driver.Unknown, false
 	}
+	// 轮1审查：file:/// 把读表语义变成本地任意读原语——显式 scheme 只收
+	// http(s)；无 scheme 的 host[:port]/path 形态仍是远程探测（curl 默认
+	// http），放行。
+	if i := strings.Index(url, "://"); i >= 0 &&
+		!strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return driver.Unknown, false
+	}
 	for i := 1; i < len(fields)-1; i++ {
 		f := fields[i]
 		switch {
@@ -64,8 +71,13 @@ func curlReadOverride(drv driver.Driver, command string) (driver.Class, bool) {
 			continue
 		case curlReadFlagsWithVal[f]:
 			// 值消费：吞掉后续非 flag 的 middle token（quoted 空格拆分产物）。
+			// 轮1审查：-H @file 是"从文件读请求头"——本地任意文件随请求头
+			// 外传，@ 前缀值一律拒。
 			for i+1 < len(fields)-1 && !strings.HasPrefix(fields[i+1], "-") {
 				i++
+				if strings.HasPrefix(fields[i], "@") {
+					return driver.Unknown, false
+				}
 			}
 			continue
 		}

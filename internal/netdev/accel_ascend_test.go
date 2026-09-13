@@ -36,10 +36,10 @@ func TestParseNPUInfo(t *testing.T) {
 		c0.MemUsedMB != 8388 || c0.MemTotalMB != 65536 {
 		t.Errorf("card 0 wrong: %+v", c0)
 	}
-	if c0.ErrorCode != 0 || c0.ErrorCodeKind != npuHealthKind {
-		t.Errorf("healthy card must have no code: %+v", c0)
+	if c0.ErrorCode != 0 || c0.ErrorCodeKind != "" {
+		t.Errorf("healthy card must carry no abnormality marker: %+v", c0)
 	}
-	// Warning（非数字健康态）：立案但码值不编造。
+	// Warning（非数字健康态）：Kind 即异常标记，码值不编造（设备级哨兵立案）。
 	c1 := cards[1]
 	if c1.ErrorCode != 0 || c1.ErrorCodeKind != npuHealthKind {
 		t.Errorf("warning card kind wrong: %+v", c1)

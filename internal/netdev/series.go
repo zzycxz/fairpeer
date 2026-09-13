@@ -299,7 +299,8 @@ func cleanupSeriesShard(path string, cutoff int64) {
 	out.Close()
 	in.Close() // Windows：打开中的文件不能删除/替换——收尾前关掉读端
 	if kept == 0 {
-		_ = os.Remove(path) // 空分片直接删——目录保持紧凑
+		_ = os.Remove(path)
+		_ = os.Remove(tmp) // 轮1审查：空分片连 tmp 一起清，不留 .jsonl.tmp 尸体
 		return
 	}
 	_ = fileutil.ReplaceFile(tmp, path)

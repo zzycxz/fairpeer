@@ -99,7 +99,17 @@ func (m *Manager) classifyForDomain(deviceName, command string) driver.Class {
 	if !ok {
 		return driver.Unknown
 	}
-	return drv.Classify(command)
+	class := drv.Classify(command)
+	if class == driver.Unknown {
+		// 与密封执行器同套旁路（logsource/curlread）——域闸的分类结论
+		// 必须与真正执行时的结论一致，否则"域外只读放行"对这两族失效。
+		if _, allow := logPathReadOverride(d, drv, command); allow {
+			class = driver.Read
+		} else if c, allow := curlReadOverride(drv, command); allow {
+			class = c
+		}
+	}
+	return class
 }
 
 // projectDenyVerdict applies the project's deny prefixes with the allow

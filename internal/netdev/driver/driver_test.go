@@ -307,9 +307,11 @@ func TestLinuxShellClassify(t *testing.T) {
 		"nginx -v", "nginx -V", "apache2ctl -v", "apachectl -v", "httpd -v",
 		// pre-existing families stay readable
 		"ps aux", "systemctl status nginx", "docker ps", "cat /etc/os-release",
-		// 互联/时钟验收只读步（FULL_CHAIN P8 / E9）
-		"ibstat", "ibqueryerrors", "perfquery",
+		// 互联/时钟验收只读步（FULL_CHAIN P8 / E9；ibqueryerrors/perfquery
+		// 已除名——复位旗标垫位绕过，走 extra_read 逐条授予）
+		"ibstat",
 		"chronyc tracking", "chronyc sources", "chronyc sourcestats",
+		"ls -l /usr/local/Ascend/ascend-toolkit/latest/",
 	}
 	for _, c := range reads {
 		if got := drv.Classify(c); got != Read {
@@ -322,10 +324,15 @@ func TestLinuxShellClassify(t *testing.T) {
 		"rpm -e nginx", "rpm -ivh pkg.rpm", "pip install requests", "pip3 uninstall requests",
 		// other exec surfaces of the same binaries
 		"java -jar app.jar", "openssl s_client -connect evil:443", "ssh root@10.0.0.1",
-		// IB 计数器复位销毁验收证据（E9）：r 族旗标危险表先行
+		// IB 计数器复位销毁验收证据（E9 轮1收窄）：整族除名读表——复位
+		// 旗标垫位（-a -r）与长形态变体（--extended_reset）前缀模型挡不住
 		"perfquery -R 1 1", "perfquery --Reset", "ibqueryerrors --reset",
+		"perfquery -a -r", "perfquery -x -r", "ibqueryerrors -c --reset",
+		"perfquery --extended_reset", "perfquery", "ibqueryerrors",
+		// cat 多操作数第二路径任意读（E6 复发形态）
+		"cat /usr/local/Ascend /etc/shadow", "cat /usr/local/Ascend/ascend-toolkit/version.cfg /etc/shadow",
 		// chronyc 时钟变更子命令走写面（提案），不属读
-		"chronyc makestep", "chronyc burst",
+		"chronyc makestep", "chronyc burst", "chronyc delete", "chronyc settime",
 	}
 	for _, c := range refused {
 		if got := drv.Classify(c); got == Read {

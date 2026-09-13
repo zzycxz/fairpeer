@@ -35,10 +35,11 @@ func sampleRunbookTpl() *RunbookTemplate {
 		Steps: []RunbookTplStep{
 			{Label: "前置检查", Device: "{{gpu_host}}", Command: "nvidia-smi"},
 			{Label: "变更：拉起服务", Device: "{{gpu_host}}", ProposalIntent: "启动 vLLM 服务",
-				ProposalCmds: []string{"systemctl start vllm-{{svc_port}}"}},
-			{Label: "语义门", Device: "{{gpu_host}}", Command: "systemctl is-active vllm-{{svc_port}}",
-				GateCmd: "systemctl is-active vllm-{{svc_port}}", GateExpect: "active"},
-			{Label: "决策点", DecisionPoint: true, Impact: "放流量前人工确认基线压测"},
+				ProposalCmds:    []string{"systemctl start vllm-{{svc_port}}"},
+				ProposalRollback: []string{"systemctl stop vllm-{{svc_port}}"}},
+			{Label: "语义门+决策点", Device: "{{gpu_host}}", Command: "systemctl is-active vllm-{{svc_port}}",
+				GateCmd: "systemctl is-active vllm-{{svc_port}}", GateExpect: "active",
+				DecisionPoint: true, Impact: "放流量前人工确认基线压测"},
 		},
 	}
 }
@@ -53,7 +54,7 @@ func TestRunbookTplLifecycle(t *testing.T) {
 		t.Fatalf("ID not assigned: %q", tpl.ID)
 	}
 	got, err := GetRunbookTemplate(tpl.ID)
-	if err != nil || got.Name != tpl.Name || len(got.Steps) != 4 {
+	if err != nil || got.Name != tpl.Name || len(got.Steps) != 3 {
 		t.Fatalf("get: %v %+v", err, got)
 	}
 	list, err := ListRunbookTemplates()
@@ -68,7 +69,7 @@ func TestRunbookTplLifecycle(t *testing.T) {
 	}
 	// 内置骨架：Get 可读、Delete 拒绝、List 始终在列。
 	skel, err := GetRunbookTemplate("RBB-skel-vllm-standalone")
-	if err != nil || len(skel.Steps) != 4 {
+	if err != nil || len(skel.Steps) != 3 {
 		t.Fatalf("builtin skeleton: %v %+v", err, skel)
 	}
 	if err := DeleteRunbookTemplate("RBB-skel-vllm-standalone"); err == nil {
@@ -84,7 +85,7 @@ func TestRunbookTplValidation(t *testing.T) {
 	}{
 		{"no steps", func(t *RunbookTemplate) { t.Steps = nil }},
 		{"bad var name", func(t *RunbookTemplate) { t.Vars = []string{"bad name"} }},
-		{"two bodies", func(t *RunbookTemplate) { t.Steps[0].DecisionPoint = true }},
+		{"decision-only step (no body)", func(t *RunbookTemplate) { t.Steps = []RunbookTplStep{{Label: "orphan", DecisionPoint: true}} }},
 		{"command without device", func(t *RunbookTemplate) { t.Steps[0].Device = "" }},
 		{"gate without expect", func(t *RunbookTemplate) { t.Steps[2].GateExpect = "" }},
 	}
@@ -115,10 +116,10 @@ func TestRunbookTplPreview(t *testing.T) {
 	if p.Steps[1].Class != "" || len(p.Steps[1].ProposalCmd) != 1 {
 		t.Errorf("change segment shape wrong: %+v", p.Steps[1])
 	}
-	if p.Steps[3].Label != "决策点" || !p.Steps[3].Decision {
-		t.Errorf("decision point lost: %+v", p.Steps[3])
+	if !p.Steps[2].Decision {
+		t.Errorf("decision point attachment lost: %+v", p.Steps[2])
 	}
-	if p.Run == nil || len(p.Run.Steps) != 4 || p.Run.Status != "" {
+	if p.Run == nil || len(p.Run.Steps) != 3 || p.Run.Status != "" {
 		t.Errorf("preview run must be assembled but NOT started: %+v", p.Run)
 	}
 	// 变量完整性：缺值拒绝。
@@ -166,8 +167,8 @@ func TestRunbookTplApply(t *testing.T) {
 	if run.Steps[2].Gate == nil || run.Steps[2].Gate.Expect != "active" {
 		t.Errorf("gate mapping lost: %+v", run.Steps[2].Gate)
 	}
-	if run.Steps[3].DecisionPoint != true {
-		t.Errorf("decision point lost")
+	if run.Steps[2].DecisionPoint != true {
+		t.Errorf("decision point attachment lost")
 	}
 	// 磁盘上确实有一份 draft 提案。
 	p2, err := GetProposal(res.Proposals[0].ID)
@@ -191,8 +192,8 @@ func TestRunbookExtractFromRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tpl.Steps) != 4 {
-		t.Fatalf("steps want 4, got %d", len(tpl.Steps))
+	if len(tpl.Steps) != 3 {
+		t.Fatalf("steps want 3, got %d", len(tpl.Steps))
 	}
 	// 变更段命令回拉：提案里的 cli 命令进 ProposalCmds。
 	if len(tpl.Steps[1].ProposalCmds) != 1 || tpl.Steps[1].ProposalCmds[0] != "systemctl start vllm-8000" {
@@ -201,7 +202,7 @@ func TestRunbookExtractFromRun(t *testing.T) {
 	if tpl.Steps[0].Device != "sw1" || tpl.Steps[0].Command != "nvidia-smi" {
 		t.Errorf("read step not carried: %+v", tpl.Steps[0])
 	}
-	if !tpl.Steps[3].DecisionPoint {
+	if !tpl.Steps[2].DecisionPoint {
 		t.Errorf("decision point lost in extraction")
 	}
 	if !strings.Contains(tpl.Notes, "C-test-1") {
@@ -265,4 +266,27 @@ func mustSaveTpl(t *testing.T, tpl *RunbookTemplate) string {
 		t.Fatal(err)
 	}
 	return tpl.ID
+}
+
+// 轮1审查 P1-1 的验收锁：apply 产出的 run（含决策点附着步）必须能过
+// CutoverStart——机制三处裁决统一后的全链闭环断言。
+func TestRunbookApplyThenStart(t *testing.T) {
+	m := runbookTplTestEnv(t)
+	res, err := m.ApplyRunbookTemplate(mustSeedTpl(t), map[string]string{"gpu_host": "sw1", "svc_port": "8000"}, "start 链路")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range res.Proposals {
+		if _, err := m.ApproveProposalAs(p.ID, false, ""); err != nil {
+			t.Fatalf("approve draft: %v", err)
+		}
+	}
+	run, err := m.CutoverStart(res.Run)
+	if err != nil {
+		t.Fatalf("CutoverStart rejected the applied run: %v", err)
+	}
+	if run.Status != CutoverRunning {
+		t.Errorf("status want running, got %q", run.Status)
+	}
+	m.CutoverAbort(run.ID) // 停掉 runner（sw1 无真实连接，步骤会失败）
 }

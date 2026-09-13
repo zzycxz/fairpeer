@@ -117,10 +117,20 @@ export function NetdevTitleBar({ leading, onOpenSettings }: { leading?: ReactNod
       )}
       {menuOpen && (
         <span className="ndv__project-menu" role="menu">
-          <span role="menuitem" onClick={() => { setActiveProject(null); app.NetDevSetActiveProject("").catch(() => {}); setMenuOpen(false); }}>{tt("ndv.tbar.allDevices")}</span>
+          <span role="menuitem" onClick={() => {
+            const prev = getActiveProject();
+            setActiveProject(null);
+            app.NetDevSetActiveProject("").catch(() => { setActiveProject(prev); }); // 轮1审查：后端拒绝必须回滚前端视图
+            setMenuOpen(false);
+          }}>{tt("ndv.tbar.allDevices")}</span>
           {projects.map(p => (
             <span key={p.name} role="menuitem" title={p.note || tt("ndv.tbar.groups", { groups: p.groups.join("、") })}
-              onClick={() => { setActiveProject({ name: p.name, groups: p.groups }); app.NetDevSetActiveProject(p.name).catch(() => {}); setMenuOpen(false); }}>
+              onClick={() => {
+                const prev = getActiveProject();
+                setActiveProject({ name: p.name, groups: p.groups });
+                app.NetDevSetActiveProject(p.name).catch(() => { setActiveProject(prev); });
+                setMenuOpen(false);
+              }}>
               {p.name}{active?.name === p.name ? " ✓" : ""}
             </span>
           ))}
@@ -1373,13 +1383,16 @@ export function NetDevLayout({
   const [project, setProject] = useState<NetDevProjectScope>(getActiveProject());
   useEffect(() => subscribeActiveProject(() => setProject(getActiveProject())), []);
   // 启动恢复：定义（settings.projects）到位后按名字找回上次的选择；会话内
-  // 已手选则不打扰；项目已删除则清掉残留。
+  // 已手选则不打扰；项目已删除则清掉残留。恢复后必须回灌后端（轮1审查
+  // P2-2：前端视图恢复而后端域不激活 = 域闸整体失效的 fail-open）。
   const projectRestoredRef = useRef(false);
   const settingsProjects = settings?.projects ?? [];
   useEffect(() => {
     if (projectRestoredRef.current || settingsProjects.length === 0) return;
     projectRestoredRef.current = true;
     restoreActiveProject(settingsProjects);
+    const restored = getActiveProject();
+    app.NetDevSetActiveProject(restored ? restored.name : "").catch(() => {});
   }, [settingsProjects]);
 
   const allDevices = settings?.devices ?? [];

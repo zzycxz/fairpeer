@@ -695,6 +695,25 @@ func ValidateNetDev(nd NetDevConfig) error {
 		default:
 			return fmt.Errorf("netdev project %q: type must be generic|netdev|aicompute|blueteam", p.Name)
 		}
+		// 轮1审查 P2-5：前缀半边归一化会让大写/带空格的配置静默永不命中——
+		// 校验层就地规范化（保存即小写化去空白），匹配端命令侧归一已对齐。
+		for i, d := range p.Deny {
+			p.Deny[i] = strings.Join(strings.Fields(strings.ToLower(d)), " ")
+		}
+		for i, a := range p.Allow {
+			p.Allow[i] = strings.Join(strings.Fields(strings.ToLower(a)), " ")
+		}
+		for _, list := range []string{"deny", "allow"} {
+			v := p.Deny
+			if list == "allow" {
+				v = p.Allow
+			}
+			for _, d := range v {
+				if d == "" {
+					return fmt.Errorf("netdev project %q: %s 前缀存在空条目", p.Name, list)
+				}
+			}
+		}
 		switch p.Policy {
 		case "", "read-only", "proposal", "proposal+confirm2":
 		default:
@@ -992,10 +1011,15 @@ func ValidateNetDev(nd NetDevConfig) error {
 		if len(d.MetricsPorts) > 4 {
 			return fmt.Errorf("netdev device %q: metrics_ports caps at 4 endpoints per host", d.Name)
 		}
+		seenMP := map[int]bool{}
 		for _, p := range d.MetricsPorts {
 			if p <= 0 || p > 65535 {
 				return fmt.Errorf("netdev device %q: metrics port %d out of range", d.Name, p)
 			}
+			if seenMP[p] {
+				return fmt.Errorf("netdev device %q: duplicate metrics port %d（同轮双抓会造速率尖峰）", d.Name, p)
+			}
+			seenMP[p] = true
 		}
 		if d.MetricsPath != "" && !metricsPathRe.MatchString(d.MetricsPath) {
 			return fmt.Errorf("netdev device %q: metrics_path must match ^/[A-Za-z0-9._~/-]{0,120}$ (no query/fragment/whitespace)", d.Name)
@@ -1031,6 +1055,9 @@ func ValidateNetDev(nd NetDevConfig) error {
 	for _, c := range nd.ModelCards {
 		if strings.TrimSpace(c.Name) == "" {
 			return fmt.Errorf("netdev model_card: name is required")
+		}
+		if math.IsNaN(c.ParamsB) || math.IsNaN(c.ActiveB) || math.IsNaN(c.VRAMGB) {
+			return fmt.Errorf("netdev model_card %q: params_b/active_b/vram_gb must be finite (nan 字面量恒不参与比较)", c.Name)
 		}
 		if c.ParamsB <= 0 || c.ParamsB > 100000 {
 			return fmt.Errorf("netdev model_card %q: params_b %v out of range", c.Name, c.ParamsB)

@@ -474,6 +474,18 @@ func (m *Manager) validateStep(s *ProposalStep, d config.NetDevDevice) error {
 // confirmation: a proposal+confirm2 group (§6.3) OR a step whose verbs scanned
 // as destructive (§7.1 — delete/scale-down 类动词落 dangerous + confirm2).
 func (m *Manager) ProposalNeedsConfirm2(p *Proposal) bool {
+	// G-P1 双锁信封运行时半边（轮1审查）：盖章项目的 policy=proposal+confirm2
+	// （blueteam 类型在 config 校验强制为此值）→ 恒需二次确认，不随 group 降。
+	if p.Project != "" {
+		for _, pj := range m.cfg.NetDev.Projects {
+			if pj.Name == p.Project {
+				if pj.Policy == config.NetDevPolicyProposalConf {
+					return true
+				}
+				break
+			}
+		}
+	}
 	for i := range p.Steps {
 		s := &p.Steps[i]
 		if s.Dangerous || dangerScan(s) {
@@ -570,26 +582,34 @@ func (m *Manager) ApproveProposalAs(id string, confirm2 bool, operator string) (
 	// v1.1 升格：trustdomain 启用且已入域 → 操作者必须对上本机域身份的
 	// 显示名（密钥在本机，自报不可冒名），批准以域私钥签名留证；启用但未
 	// 入域 → fail-closed 拒批（残缺基建不下放第二把锁）。
+	// 轮1审查：盖章项目在配置中已不存在 → fail-closed 拒批（项目改名/删除
+	// 后旧提案不得"脱域"照批）。
 	projName := p.Project
 	if projName == "" {
 		projName = m.ActiveProjectName()
 	}
 	var approverSig string
 	if projName != "" {
+		matched := false
 		for _, pj := range m.cfg.NetDev.Projects {
-			if pj.Name == projName {
-				if ok, why := approveOperatorVerdict(pj, operator); !ok {
-					return nil, fmt.Errorf("proposal %s: %s", id, why)
-				}
-				if m.cfg.TrustDomain.Enabled {
-					sig, err := m.signApprovalWithDomain(id, operator)
-					if err != nil {
-						return nil, fmt.Errorf("proposal %s: trustdomain 升格失败：%v", id, err)
-					}
-					approverSig = sig
-				}
-				break
+			if pj.Name != projName {
+				continue
 			}
+			matched = true
+			if ok, why := approveOperatorVerdict(pj, operator); !ok {
+				return nil, fmt.Errorf("proposal %s: %s", id, why)
+			}
+			if m.cfg.TrustDomain.Enabled {
+				sig, err := m.signApprovalWithDomain(id, operator)
+				if err != nil {
+					return nil, fmt.Errorf("proposal %s: trustdomain 升格失败：%v", id, err)
+				}
+				approverSig = sig
+			}
+			break
+		}
+		if !matched {
+			return nil, fmt.Errorf("proposal %s: stamped project %q no longer exists in config — 项目已删/改名，提案须重新起草（fail-closed）", id, projName)
 		}
 	}
 	// Re-validate at the approval gate. Draft validation ran when the proposal
@@ -735,27 +755,28 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 	// 域外 = 拒执行（写面无「域外只读」，视图放行不等于执行放行）。
 	// v1.1 同处补 policy=read-only 写地板：只读项目的提案（含 cli 私有写
 	// 路径的步骤）整条拒执行——命令层地板盖不住私有写路径，这里是闸门。
+	// 轮1审查：盖章项目已从配置消失 → fail-closed 拒执行（不跳过检查）。
 	if p.Project != "" {
-		var proj config.NetDevProject
-		found := false
+		proj, found := config.NetDevProject{}, false
 		for _, pj := range m.cfg.NetDev.Projects {
 			if pj.Name == p.Project {
 				proj, found = pj, true
 				break
 			}
 		}
-		if found {
-			if proj.Policy == "read-only" {
-				return nil, fmt.Errorf("proposal %s (project %q): project policy is read-only — 提案执行整条拒绝（含 cli 私有写路径步骤）；变更请改到有写权限的项目域", id, p.Project)
+		if !found {
+			return nil, fmt.Errorf("proposal %s: stamped project %q no longer exists in config — 项目已删/改名，提案须重新起草（fail-closed）", id, p.Project)
+		}
+		if proj.Policy == "read-only" {
+			return nil, fmt.Errorf("proposal %s (project %q): project policy is read-only — 提案执行整条拒绝（含 cli 私有写路径步骤）；变更请改到有写权限的项目域", id, p.Project)
+		}
+		for _, s := range p.Steps {
+			d, ok := m.cfg.NetDevDeviceByName(s.Device)
+			if !ok {
+				continue // 清单外设备走既有 ValidateProposal 路径
 			}
-			for _, s := range p.Steps {
-				d, ok := m.cfg.NetDevDeviceByName(s.Device)
-				if !ok {
-					continue // 清单外设备走既有 ValidateProposal 路径
-				}
-				if !deviceInProject(d, proj) {
-					return nil, fmt.Errorf("proposal %s (project %q): device %q is outside the project domain — 跨项目目标拒绝执行（J4）；拆分提案或切换项目域", id, p.Project, s.Device)
-				}
+			if !deviceInProject(d, proj) {
+				return nil, fmt.Errorf("proposal %s (project %q): device %q is outside the project domain — 跨项目目标拒绝执行（J4）；拆分提案或切换项目域", id, p.Project, s.Device)
 			}
 		}
 	}
