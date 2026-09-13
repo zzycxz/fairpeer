@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [Unreleased]
+### feat(netdev): 智算大屏第六屏「智算」+ 设备卡 GPU 温度 sparkline（gpudash.go，随下一切割入库）
+
+- **DashShell 第六屏**（GpuBoardView）：KPI 条（总卡数/采样主机/全舰最高温/活动 XID）+ 卡×指标矩阵（85/70°C 色档与告警引擎阈值对齐）+ XID 事件流（活动徽标/24h 已恢复/跳 Finding）；投影轮播与深链 `?screen=gpu` 自动带上。
+- 后端 `internal/netdev/gpudash.go` BuildGPUBoard 纯只读汇编（健康快照 GPU 段 + series `gpu.<i>.temp` 30 分钟桶降采样 + XID Finding 流），零新探针；桥接 NetDevGPUBoard + 健康 observer dashEmit。
+- 设备卡 GPU 温度 sparkline（全卡 max 归并，>85°C 红）；`NetDevGPUBoard` 类型族 + mock + `ndv.gpu.*` 双语键。
 
 ### fix(tools): webfetch 清理未使用 import + exec_session 环境卫生 + POSIX LF 回归守卫
 
@@ -17,9 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - exec_session：POSIX 写入无 LF 时追加——评审 P4-A 回归守卫
 
 ### fix(cli): trust_cmd 输出改用 i18n.M——去除硬编码中文残留
-## [Unreleased]
-
-### fix(netdev): 0.2.4 卫生清仓 + 设计取舍落地（NETDEV_0204_BATCH_SPEC 批次 A/B + 裁决 D1/D2/D3/D5）
+### fix(netdev): 卫生清仓 + 设计取舍落地（NETDEV_0204_BATCH_SPEC 批次 A/B + 裁决 D1/D2/D3/D5；版本随下一切割定）
 
 批次 A（卫生）：
 - **prevUptimes 加锁**（prevUptimesMu 三助手，与 alertStreaks 同纪律）；
@@ -60,7 +62,7 @@ CODEX_GAP_AUDIT_2026-09-09 的 G5/G6 落地（G1 Windows 沙箱与 G4 网络 per
 - config.go：ConfigWarnings 字段（load 时告警的载体的既有打印目标）
 - 依赖补全使干净检出可编译；均源自并行批次已写好的在途实现，按其工作区原样入库
 
-## [0.2.3] — 2026-09-12
+## [0.2.5] — 2026-09-12
 
 ### feat(netdev): 统一急停 + GPU/智算采集面 P0——FDE/AI infra 承接第一批（FDE_AIINFRA_OPS_GAP_SPEC §4.0/§4.1）
 
@@ -193,6 +195,26 @@ CODEX_GAP_AUDIT_2026-09-09 复核确认后落地（run 此前只有人读文本 
 - **ops_status 详情新增「关联产出」段**：经注入式 Links 查询列出挂在该请求下的发现与变更提案（netdev 注入 requestLinks——ops 包不反向依赖 netdev，方向保持 netdev→ops）
 - Job/Case 的挂接留给其创建流 request 化时（Phase 2 编排器）——本片只动模型面的两个产出物
 - 测试：bogus 编号双拒（finding/propose 各一）+ 合法编号落档回读 + ops_status 关联段断言；ops/netdev 全量/boot 全绿
+
+## [0.2.4] - 2026-09-10
+
+### Removed
+
+- 移除 Distill（蒸馏）后台技能提炼子代理：自动发现重复工作流并打包为可复用 Skill 的功能整体下线。
+  删除范围：`agent.SpawnDistill` / `ShouldAutoDistill` / `RunDistillOnce` / `KindDistill` / `DistillTask`、
+  boot 的 post-distill 硬退役钩子（`RegisterDistillComplete` + `retireColdSkills`）、config 的
+  `[dream].distill_interval` 字段与 `DistillIntervalDays()`、controller 的 `TriggerDistill` /
+  `maybeDreamDistill`、桌面端 `TriggerDistill` 与 `DreamStatusView` distill 字段、前端蒸馏卡片 /
+  桥接绑定 / 双语文案。Dream 记忆整合不受影响
+- 技能冷退役硬 tier（2× 阈值写入 disabled_skills）随 Distill 一并移除；`skill_cold_days` 现仅用于
+  [休眠] 软标记 + 索引降权（技能仍可直接调用，调用即唤醒）
+
+### Changed
+
+- `SetDreamIntervals(dreamDays, distillDays)` 更名为 `SetDreamInterval(dreamDays)`；配置渲染与
+  示例注释同步去除 distill 字样
+- 兼容性（无需手动迁移）：旧 config.toml 中的 `distill_interval` 键被静默忽略；旧
+  dream_state.json 中的 distill 历史记录在下次写入时自动清除
 
 ## [0.2.3] — 2026-09-08
 
@@ -2369,23 +2391,3 @@ provider-agnostic, multi-vendor AI coding and automation assistant.
 - Hook trust model (project hooks require explicit trust)
 
 ---
-
-## [0.2.4] - 2026-09-10
-
-### Removed
-
-- 移除 Distill（蒸馏）后台技能提炼子代理：自动发现重复工作流并打包为可复用 Skill 的功能整体下线。
-  删除范围：`agent.SpawnDistill` / `ShouldAutoDistill` / `RunDistillOnce` / `KindDistill` / `DistillTask`、
-  boot 的 post-distill 硬退役钩子（`RegisterDistillComplete` + `retireColdSkills`）、config 的
-  `[dream].distill_interval` 字段与 `DistillIntervalDays()`、controller 的 `TriggerDistill` /
-  `maybeDreamDistill`、桌面端 `TriggerDistill` 与 `DreamStatusView` distill 字段、前端蒸馏卡片 /
-  桥接绑定 / 双语文案。Dream 记忆整合不受影响
-- 技能冷退役硬 tier（2× 阈值写入 disabled_skills）随 Distill 一并移除；`skill_cold_days` 现仅用于
-  [休眠] 软标记 + 索引降权（技能仍可直接调用，调用即唤醒）
-
-### Changed
-
-- `SetDreamIntervals(dreamDays, distillDays)` 更名为 `SetDreamInterval(dreamDays)`；配置渲染与
-  示例注释同步去除 distill 字样
-- 兼容性（无需手动迁移）：旧 config.toml 中的 `distill_interval` 键被静默忽略；旧
-  dream_state.json 中的 distill 历史记录在下次写入时自动清除
