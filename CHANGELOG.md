@@ -9,6 +9,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(netdev): 0.2.5 批①速赢——档案与容量 + 规模化解堵（E4/E5/E6/E7/E9/F11/F12，GAPS 台账七条全清）
+
+- **E4 机型能力档案**：`[[netdev.accel_profiles]]`（accel×SKU×常见卡数×单卡显存×互联×readiness/特供标注）——
+  部署建议校验（`CheckDeployment`：TP≤卡数、权重≈2GB×B/量化估、模型硬件族×机型 accel 跨族告警、
+  台数估算、experimental 上线前真机验证提示；全部建议性不硬失败）+ 智算大屏 readiness/特供徽标 +
+  档案×实测偏差告警（档案卡数/显存 vs 实采不符 → 徽标行 ⚠ 提示，档案过期/借调卡可见）；
+  验收场景锁定：H20 档案声明 TP=8×4 卡机型 → 告警可见。
+- **E7 模型能力档案**：`[[netdev.model_cards]]`（量化档×硬件族行：H 系=FP8 原生、910B=W8A8、
+  P800=W8A8C16、A 系/4090=BF16+AWQ；MoE 总/激活双参数）+ **内置实勘矩阵 24 模型**（Qwen2.5 全档/
+  Qwen3 MoE 系/DeepSeek V3·R1/R1-Distill 蒸馏系/GLM-4.5·Air/MiniMax-M1/Kimi-K2 标 API/VLM×2/
+  Llama 存量底座），用户行按 (name,quant,hw_family) 覆盖内置行；`NetDevProfileCheck` binding
+  供对话内部署建议。验收：DeepSeek-671B BF16 vs 8×64G → 显存告警+台数估算；Qwen3-30B W8A8
+  vs 910B 单卡 → 通过。
+- **E5 GPU 值班排查手册**：`docs/NETDEV_GPU_DUTY_RUNBOOK.md`——DEPLOY_SPEC 八簇失败模式改写为
+  四段式速查（现象→只读检测→修复分类→升级路径）+ 簇 0 硬件健康（XID severe 分级/温度/显存水位）。
+- **E6 curl 尾参通道收紧（安全）**：`curl -I ` 从读表**除名**——前缀模型的空格边界允许追加
+  `-o`（写文件）/`-T`（上传）/第二 URL/`-X POST`（方法改写），原注释声称的 HEAD-only 对前缀为假；
+  探活改走 `curlReadOverride` token 级语法校验（无值 flag 白名单含合并短旗标 -sI、成对 flag
+  -H/--max-time、URL 必须收尾且唯一）；其余形态走 extra_read 逐条授予。
+- **E9 互联/时钟只读命令**：`ibstat`/`ibqueryerrors`/`perfquery`/`chronyc
+  tracking|sources|sourcestats` 进读表（FULL_CHAIN P8 验收只读步此前被分类器拒）；IB 计数器
+  复位旗标（-R/-r/--reset）进危险表（复位销毁验收证据，属变更）；`chronyc makestep/burst` 进写表。
+- **F11 series 按设备分片（规模化解堵）**：单文件全扫描在 ~20-30 节点退化（100 节点×14 天≈
+  3.4GB/6860 万行）→ `<state>/series/<device>.jsonl`，读写清理只触目标分片；旧文件首次触碰
+  一次性拆片改名 `.migrated`；分片名消毒防路径逃逸；空分片即删；Windows 打开文件改名/删除
+  语义两处显式收口；selfexport 的 series_tail 跨分片有界合并。
+- **F12 并发参数化**：`gpu_poll_concurrency`（0=8，≤64）与 `inspection_concurrency`（0=4，≤16）
+  配置化；巡检串行→有界并发——进度回调持锁串行触发，evidence/devices/problems 按清单序组装
+  （Finding 内容不随完成时序漂移，确定性有测试锁定）。
+
+### feat(security): codex 对比第④轮收敛 + 第一梯队修复——危险命令闸门、项目技能信任门、Paused wire、providers 重合并、技能遥测接线（CODEX_COMPARE_2026-09-13）
+
+对比工作：3 轮 × 3 子代理 + 两遍人工复核（16 条断言核到源码）+ 第④轮盲区补扫（prompt 工程 /
+skills / tools crate / 全 crate 裁决），总报告 `docs/CODEX_COMPARE_2026-09-13.md`
+（3 P0 / 15 P1 / 22 P2 / 33+ P3），补充规格 `docs/CODEX_COMPARE_SUPPLEMENT_SPEC.md`（已实施）。
+本批实施其施工顺序第一梯队 6 项：
+
+- **SEC-1/SEC-2 危险命令闸门（P0）**：`rm -rf` / `sudo` / `mkfs` / 注册表写等破坏性命令此前
+  只受 Policy 规则约束——一条 `"*": "allow"` 或 auto/yolo 模式即可零提示执行。现在
+  `Gate.Check` 对 bash 先做危险模式匹配（空白坍缩，防 `rm  -rf` 双空格逃逸），命中即：
+  交互模式强制弹批（yolo 的自动批准器自然放行——报告认可的取舍），headless 无人值守直接拒绝；
+  Deny 规则仍最优先；普通命令行为不变。已知残留：env 包装 / `$()` / `--force` 同义逃逸需
+  真 shell 解析器（报告已录为 SEC-1 后续项）。
+- **SEC-3 项目技能信任门（P0，第④轮新发现）**：项目作用域技能目录（.fairpeer/.agents/
+  .agent/.claude/skills）此前完全绕过 G3 信任闸门——克隆仓库的技能体直接钉进系统提示索引，
+  且可经 run_skill 作为子代理人格运行（继承工作区工具面）。现在未信任项目若实际携带项目
+  作用域技能，整体跳过项目根与项目内自定义技能路径，追加 UntrustedProjectNotices 提示
+  （`fairpeer trust` 后生效）；内置/全局技能不受影响。技能测试根改经
+  `hook.SetTrustHomeForTest` 隔离显式信任，新增负向测试
+  `TestBuildSkipsUntrustedProjectSkills`。
+- **Paused 事件 wire 映射（P1）**：`event.Paused` 在三处 kindNames（eventwire / serve /
+  desktop）全部缺失——前端 reducer 的 `case "paused"` 是死代码，第二次点击暂停永远重复发送
+  PauseTab 而非 Resume。三处补 `"paused"` 映射，桌面暂停状态机复活。
+- **`[[providers]]` 跨源重合并（P1）**：toml 数组表的整体替换语义使项目 fairpeer.toml 只要带
+  一条 provider 就会静默掉用户全局的全部 provider。现按名字跨源合并（后者胜），与
+  `[[plugins]]` 的 mergeTOMLPlugins 同法（新增 mergeTOMLProviders + 测试）；providers 的
+  信任门控维持既有决议（v2 处理）。
+- **技能用量遥测接线（P1）**：`UsageTracker.Record` 此前生产代码零调用——[休眠] 标签与用量
+  统计对用户真实调用的技能永久错误，冷技能退役机制前提失效。三处接线且无双重计数：
+  run_skill（inline 与 browser-flow 路径）、skillRunner 头（覆盖全部子代理运行——run_skill
+  委派、explore/review 专卡、CaseRun）、`/name` slash 内联路径。
+- **read_skill / install_skill 注册（P2）**：两个工具建成但从未注册，i18n 文案与
+  subagentMetaTools 一直在宣传它们可调用。现随 run_skill 一并注册（read_skill 只读、plan
+  模式可查内联 playbook；install_skill 为模型侧技能编写入口，装后日志经 InstalledHook）；
+  netdev 硬密封排除表同步加入两者——install_skill 是写操作，netdev 面保持只读收口。
+
+新增测试：`danger_gate_test.go`（allow 模式仍弹批 / 空白逃逸 / headless 拒绝 / Deny 优先 /
+普通命令不回归）、`providers_merge_test.go`（按名合并、项目覆写同名、用户条目保留、缺文件
+跳过）、`TestBuildSkipsUntrustedProjectSkills`（未信任项目技能不加载、不进系统提示索引、
+内置技能存活）；boot/permission/config/eventwire/serve/skill/control/agent/cli/desktop 全绿。
+
 ### feat(netdev): 智算大屏第六屏「智算」+ 设备卡 GPU 温度 sparkline（gpudash.go，随下一切割入库）
 
 - **DashShell 第六屏**（GpuBoardView）：KPI 条（总卡数/采样主机/全舰最高温/活动 XID）+ 卡×指标矩阵（85/70°C 色档与告警引擎阈值对齐）+ XID 事件流（活动徽标/24h 已恢复/跳 Finding）；投影轮播与深链 `?screen=gpu` 自动带上。
