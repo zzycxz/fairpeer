@@ -1302,6 +1302,48 @@ export function NetDevSection() {
               <input className="mem-input" value={editingProject.draft.note}
                 onChange={e => setEditingProject({ ...editingProject, draft: { ...editingProject.draft, note: e.target.value } })} />
             </Field>
+            <Field label={t("ndv.sets.fProjType")}>
+              <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+                {(["generic", "netdev", "aicompute", "blueteam"] as const).map(tp => {
+                  const on = (editingProject.draft.type ?? "") === tp;
+                  return (
+                    <span key={tp} className="btn btn--secondary btn--small" role="button"
+                      style={on ? { borderColor: "var(--accent, #7ab8ff)", color: "var(--accent, #7ab8ff)" } : { opacity: 0.55 }}
+                      title={t(`ndv.sets.projTypeTip.${tp}`)}
+                      onClick={() => setEditingProject({ ...editingProject, draft: { ...editingProject.draft, type: on ? "" : tp, policy: tp === "blueteam" ? "proposal+confirm2" : editingProject.draft.policy } })}
+                    >{t(`ndv.sets.projType.${tp}`)}</span>
+                  );
+                })}
+              </span>
+            </Field>
+            <Field label={t("ndv.sets.fProjPolicy")}>
+              <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+                {([
+                  { v: "", k: "ndv.sets.projPolicy.inherit" },
+                  { v: "read-only", k: "ndv.sets.projPolicy.readonly" },
+                  { v: "proposal", k: "ndv.sets.projPolicy.proposal" },
+                  { v: "proposal+confirm2", k: "ndv.sets.projPolicy.pc2" },
+                ] as const).map(({ v, k }) => {
+                  const on = (editingProject.draft.policy ?? "") === v;
+                  return (
+                    <span key={k} className="btn btn--secondary btn--small" role="button"
+                      style={on ? { borderColor: "var(--accent, #7ab8ff)", color: "var(--accent, #7ab8ff)" } : { opacity: 0.55 }}
+                      onClick={() => setEditingProject({ ...editingProject, draft: { ...editingProject.draft, policy: v } })}
+                    >{t(k)}</span>
+                  );
+                })}
+              </span>
+            </Field>
+            <Field label={t("ndv.sets.fProjDeny")}>
+              <input className="mem-input" placeholder={t("ndv.sets.phProjDeny")}
+                value={(editingProject.draft.deny ?? []).join(", ")}
+                onChange={e => setEditingProject({ ...editingProject, draft: { ...editingProject.draft, deny: e.target.value.split(",").map(s => s.trim()).filter(Boolean) } })} />
+            </Field>
+            <Field label={t("ndv.sets.fProjConfirmers")}>
+              <input className="mem-input" placeholder={t("ndv.sets.phProjConfirmers")}
+                value={(editingProject.draft.confirmers ?? []).join(", ")}
+                onChange={e => setEditingProject({ ...editingProject, draft: { ...editingProject.draft, confirmers: e.target.value.split(",").map(s => s.trim()).filter(Boolean) } })} />
+            </Field>
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <span className="btn btn--secondary btn--small" role="button" onClick={() => setEditingProject(null)}>{t("common.cancel")}</span>

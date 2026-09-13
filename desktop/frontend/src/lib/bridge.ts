@@ -549,6 +549,10 @@ export interface AppBindings {
   NetDevSyslogCounts(limit: number): Promise<import("./types").NetDevSyslogCountRow[]>;
   NetDevTopoReconcile(): Promise<import("./types").NetDevTopoReconcile | null>;
   NetDevApproveProposal(id: string, confirm2: boolean): Promise<NetDevProposal>;
+  // G-P1/J5：带操作者身份的批准（confirmers 名单校验；空名单忽略 operator）。
+  NetDevApproveProposalAs(id: string, confirm2: boolean, operator: string): Promise<NetDevProposal>;
+  // G-P1 会话项目上下文：标题栏切换器的后端半边（空串=清除）。
+  NetDevSetActiveProject(name: string): Promise<void>;
   NetDevRejectProposal(id: string, reason: string): Promise<NetDevProposal>;
   NetDevDeleteProposal(id: string): Promise<void>;
   NetDevExecuteProposal(id: string): Promise<NetDevProposal>;
@@ -3200,6 +3204,8 @@ function makeMockApp(): AppBindings {
       };
     },
     async NetDevApproveProposal(_id: string, _confirm2: boolean) { throw new Error("browser dev mock: no proposal backend"); },
+    async NetDevApproveProposalAs(_id: string, _confirm2: boolean, _operator: string) { throw new Error("browser dev mock: no proposal backend"); },
+    async NetDevSetActiveProject(_name: string) { /* browser mock: frontend store is the only state */ },
     async NetDevRejectProposal(_id: string, _reason: string) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevDeleteProposal(_id: string) { throw new Error("browser dev mock: no proposal backend"); },
     async NetDevExecuteProposal(_id: string) { throw new Error("browser dev mock: no proposal backend"); },

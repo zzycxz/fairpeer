@@ -43,6 +43,7 @@ export function
   const [busy, setBusy] = useState("");
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
+  const [operator, setOperator] = useState(""); // J5：批准人自报（confirmers 项目必填）
   const act = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label);
     try {
@@ -67,10 +68,14 @@ export function
             confirmLabel: t("ndv.prop.approve"),
           });
           if (!ok) return;
-          await app.NetDevApproveProposal(p.id, true);
+          await app.NetDevApproveProposalAs(p.id, true, operator);
         })}>
           {busy === `approve:${p.id}` ? "…" : t("ndv.prop.approve")}
         </span>
+      )}
+      {p.status === "draft" && (
+        <input className="mem-input" style={{ maxWidth: 150 }} placeholder={t("ndv.prop.operatorPh")}
+          title={t("ndv.prop.operatorTip")} value={operator} onChange={e => setOperator(e.target.value)} />
       )}
       {p.status === "approved" && (
         <span className="btn btn--primary btn--small" role="button" onClick={() => void act(`exec:${p.id}`, async () => {

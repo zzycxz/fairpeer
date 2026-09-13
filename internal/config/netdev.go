@@ -511,6 +511,14 @@ type NetDevProject struct {
 	Name   string   `toml:"name"`
 	Groups []string `toml:"groups"`
 	Note   string   `toml:"note"`
+	// G-P1 安全域字段（批⑤，D1 软迁移：全部缺省安全值，旧 config 加载通过）。
+	// Type 驱动联动（blueteam 强制双锁信封）；Deny 是项目内额外拒绝的命令
+	// 前缀（只许收紧）；Policy 只许收紧于全局档；Confirmers=confirm2 合格
+	// 批准人（J5：自报基线+trustdomain 升格；空=任意人工）。
+	Type       string   `toml:"type"`      // generic | netdev | aicompute | blueteam（空=generic）
+	Deny       []string `toml:"deny"`      // 项目内拒绝的命令前缀（归一化后前缀匹配）
+	Policy     string   `toml:"policy"`    // read-only | proposal | proposal+confirm2（空=继承全局）
+	Confirmers []string `toml:"confirmers"`
 }
 
 // NetDevDiscovery bounds network probing (the scope whitelist is one of the
@@ -678,6 +686,20 @@ func ValidateNetDev(nd NetDevConfig) error {
 			if _, ok := ndGroupByName(nd, g); !ok {
 				return fmt.Errorf("netdev project %q: references unknown group %q", p.Name, g)
 			}
+		}
+		switch p.Type {
+		case "", "generic", "netdev", "aicompute", "blueteam":
+		default:
+			return fmt.Errorf("netdev project %q: type must be generic|netdev|aicompute|blueteam", p.Name)
+		}
+		switch p.Policy {
+		case "", "read-only", "proposal", "proposal+confirm2":
+		default:
+			return fmt.Errorf("netdev project %q: policy must be read-only|proposal|proposal+confirm2", p.Name)
+		}
+		if p.Type == "blueteam" && (p.Policy == "" || p.Policy == "read-only" || p.Policy == "proposal") {
+			// 蓝队信封：写=提案人批+危险动词二次确认是强制档，不随配置降。
+			return fmt.Errorf("netdev project %q: type blueteam requires policy proposal+confirm2（双锁信封强制）", p.Name)
 		}
 	}
 	seenPresets := map[string]bool{}

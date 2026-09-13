@@ -225,9 +225,13 @@ type NetDevPresetView struct {
 // NetDevProjectView is one site/project for the settings editor and the
 // title-bar switcher.
 type NetDevProjectView struct {
-	Name   string   `json:"name"`
-	Groups []string `json:"groups"`
-	Note   string   `json:"note"`
+	Name       string   `json:"name"`
+	Groups     []string `json:"groups"`
+	Note       string   `json:"note"`
+	Type       string   `json:"type,omitempty"`
+	Policy     string   `json:"policy,omitempty"`
+	Deny       []string `json:"deny,omitempty"`
+	Confirmers []string `json:"confirmers,omitempty"`
 }
 
 // NetDevAuditEntryView is one audit row for the settings page.
@@ -327,7 +331,7 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 		v.ExtraRead = map[string][]string{}
 	}
 	for _, p := range cfg.NetDev.Projects {
-		v.Projects = append(v.Projects, NetDevProjectView{Name: p.Name, Groups: p.Groups, Note: p.Note})
+		v.Projects = append(v.Projects, NetDevProjectView{Name: p.Name, Groups: p.Groups, Note: p.Note, Type: p.Type, Policy: p.Policy, Deny: p.Deny, Confirmers: p.Confirmers})
 	}
 	for _, p := range cfg.NetDev.Presets {
 		v.Presets = append(v.Presets, NetDevPresetView{Name: p.Name, Commands: p.Commands, Vendors: p.Vendors})
@@ -588,6 +592,8 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 			for _, p := range v.Projects {
 				nd.Projects = append(nd.Projects, config.NetDevProject{
 					Name: strings.TrimSpace(p.Name), Groups: p.Groups, Note: strings.TrimSpace(p.Note),
+					Type: strings.TrimSpace(p.Type), Policy: strings.TrimSpace(p.Policy),
+					Deny: p.Deny, Confirmers: p.Confirmers,
 				})
 			}
 		} else {
@@ -1757,6 +1763,26 @@ func (a *App) NetDevRunbookTplExtract(runID, name string) (*netdev.RunbookTempla
 		return nil, err
 	}
 	return netdev.ExtractRunbookTemplate(run, name)
+}
+
+// NetDevSetActiveProject 是 G-P1 会话项目上下文的后端半边：标题栏切换器一次
+// 写两处（前端 store + 这里）。空串=清除。切换即审计。
+func (a *App) NetDevSetActiveProject(name string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	return netdev.SharedManager(cfg).SetActiveProject(strings.TrimSpace(name))
+}
+
+// NetDevApproveProposalAs 是 J5 审批链入口：confirmers 配置了名单的项目，
+// 提案必须由名单内操作者批准（自报基线；trustdomain 开启时升格签名验证）。
+func (a *App) NetDevApproveProposalAs(id string, confirm2 bool, operator string) (*netdev.Proposal, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).ApproveProposalAs(id, confirm2, strings.TrimSpace(operator))
 }
 
 // ── 网络巡检（task-ified 手动触发 + 状态流）────────────────────────────────

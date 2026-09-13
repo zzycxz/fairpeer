@@ -759,6 +759,7 @@ func (m *Manager) ApplyRunbookTemplate(id string, values map[string]string, runN
 				intent = fmt.Sprintf("%s / %s", t.Name, s.Label)
 			}
 			p := &Proposal{Intent: fmt.Sprintf("[runbook %s] %s", t.Name, intent), Status: ProposalDraft}
+			p.Project = m.ActiveProjectName() // G-P1 盖章：与对话内起草同语义
 			if s.Device == "" {
 				return nil, fmt.Errorf("步骤 %q：变更段缺设备——提案步必须落清单设备", s.Label)
 			}

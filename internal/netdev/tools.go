@@ -46,6 +46,9 @@ type Manager struct {
 	waApprover  WriteApprover
 	turnWrites  int
 	turnSeq     int // user-turn anchor stamped into OpStep rows (session rollback filter)
+	// activeProject is the G-P1 安全域的实例级后端态（标题栏切换器一次写两处
+	// 的后端半边；guardrail/提案/审批链从此读它）。mu 保护。
+	activeProject string
 }
 
 type managedConn struct {
@@ -118,6 +121,15 @@ func (m *Manager) guardrailCheck(deviceName, command string) (ExecResult, bool) 
 				_ = AppendAudit(Audit{Device: deviceName, Command: command, Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
 				return r, false
 			}
+		}
+	}
+	// G-P1 项目安全域（projectdomain.go，J4-A 只读+拒操作 + 项目 deny 前缀）。
+	// guardrail 先于分类执行，这里对域外设备需要分类结论——局部驱动分类。
+	if _, active := m.ActiveProjectDef(); active {
+		class := m.classifyForDomain(deviceName, command)
+		if r, ok := m.projectDomainVerdict(deviceName, command, class); !ok {
+			_ = AppendAudit(Audit{Device: deviceName, Command: command, Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
+			return r, false
 		}
 	}
 	if g.TurnCommandBudget > 0 {
@@ -1209,6 +1221,7 @@ func (t *proposeTool) Execute(ctx context.Context, args json.RawMessage) (string
 		}
 	}
 	p := &Proposal{Intent: a.Intent, Steps: a.Steps, Status: ProposalDraft, RestoreFrom: a.RestoreFrom, RequestID: a.RequestID}
+	p.Project = t.m.ActiveProjectName() // G-P1 盖章：创建时的项目域不可事后改
 	if err := t.m.ValidateProposal(p); err != nil {
 		return "", err
 	}

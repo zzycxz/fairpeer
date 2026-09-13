@@ -121,6 +121,9 @@ type Proposal struct {
 	// (OPS_AUTOMATION_PLATFORM_SPEC Phase 1)：起草时校验编号在台账——
 	// ops_status 把变更产出归到请求轨迹下。
 	RequestID string `json:"request_id,omitempty"`
+	// Project 是创建时的项目域盖章（G-P1）：跨项目目标步骤在执行链上被拒
+	// ——域从视图升格为安全语义的关键字段。空=未在任何项目上下文中起草。
+	Project string `json:"project,omitempty"`
 	// 观察期（§7.1）：done → watching（默认 30 分钟）→ closed；劣化触发 Finding。
 	WatchUntil *time.Time `json:"watch_until,omitempty"`
 	WatchNote  string     `json:"watch_note,omitempty"`
@@ -543,6 +546,13 @@ func atoi(s string) int { n, _ := strconv.Atoi(s); return n }
 // section so a racing reject/execute can't interleave (last-write-wins used
 // to silently drop a transition).
 func (m *Manager) ApproveProposal(id string, confirm2 bool) (*Proposal, error) {
+	return m.ApproveProposalAs(id, confirm2, "")
+}
+
+// ApproveProposalAs is ApproveProposal with the operator identity (J5 基线):
+// when the proposal's project configures confirmers, the operator must match
+// the list — the second lock becomes attributable. trustdomain 升格随域接线。
+func (m *Manager) ApproveProposalAs(id string, confirm2 bool, operator string) (*Proposal, error) {
 	proposalMu.Lock()
 	defer proposalMu.Unlock()
 	p, err := GetProposal(id)
@@ -551,6 +561,21 @@ func (m *Manager) ApproveProposal(id string, confirm2 bool) (*Proposal, error) {
 	}
 	if p.Status != ProposalDraft {
 		return nil, fmt.Errorf("proposal %s: status %s, only drafts can be approved", id, p.Status)
+	}
+	// J5：confirmers 名单校验（活动项目或提案盖章项目的名单为准）。
+	projName := p.Project
+	if projName == "" {
+		projName = m.ActiveProjectName()
+	}
+	if projName != "" {
+		for _, pj := range m.cfg.NetDev.Projects {
+			if pj.Name == projName {
+				if ok, why := approveOperatorVerdict(pj, operator); !ok {
+					return nil, fmt.Errorf("proposal %s: %s", id, why)
+				}
+				break
+			}
+		}
 	}
 	// Re-validate at the approval gate. Draft validation ran when the proposal
 	// was authored, but the inventory may have moved since (device re-vendored
@@ -590,6 +615,9 @@ func (m *Manager) ApproveProposal(id string, confirm2 bool) (*Proposal, error) {
 	p.Status = ProposalApproved
 	p.ApprovedAt = time.Now()
 	p.Approver = "local-user"
+	if strings.TrimSpace(operator) != "" {
+		p.Approver = strings.TrimSpace(operator) // J5：确认可归属（自报基线）
+	}
 	p.Confirm2 = confirm2
 	if err := saveProposalLocked(p); err != nil {
 		return nil, err
@@ -686,6 +714,29 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 	}
 	if p.Status != ProposalApproved {
 		return nil, fmt.Errorf("proposal %s: status %s, only approved proposals execute", id, p.Status)
+	}
+	// G-P1 跨域拒绝（J4）：盖章项目的域覆盖提案全部目标设备——任何目标落在
+	// 域外 = 拒执行（写面无「域外只读」，视图放行不等于执行放行）。
+	if p.Project != "" {
+		var proj config.NetDevProject
+		found := false
+		for _, pj := range m.cfg.NetDev.Projects {
+			if pj.Name == p.Project {
+				proj, found = pj, true
+				break
+			}
+		}
+		if found {
+			for _, s := range p.Steps {
+				d, ok := m.cfg.NetDevDeviceByName(s.Device)
+				if !ok {
+					continue // 清单外设备走既有 ValidateProposal 路径
+				}
+				if !deviceInProject(d, proj) {
+					return nil, fmt.Errorf("proposal %s (project %q): device %q is outside the project domain — 跨项目目标拒绝执行（J4）；拆分提案或切换项目域", id, p.Project, s.Device)
+				}
+			}
+		}
 	}
 	StateEventSnap(StateEventExecute, id, stateActorFromCtx(ctx), filepath.Join(ProposalsDir(), id+".json"))
 

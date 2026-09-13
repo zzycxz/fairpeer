@@ -117,10 +117,10 @@ export function NetdevTitleBar({ leading, onOpenSettings }: { leading?: ReactNod
       )}
       {menuOpen && (
         <span className="ndv__project-menu" role="menu">
-          <span role="menuitem" onClick={() => { setActiveProject(null); setMenuOpen(false); }}>{tt("ndv.tbar.allDevices")}</span>
+          <span role="menuitem" onClick={() => { setActiveProject(null); app.NetDevSetActiveProject("").catch(() => {}); setMenuOpen(false); }}>{tt("ndv.tbar.allDevices")}</span>
           {projects.map(p => (
             <span key={p.name} role="menuitem" title={p.note || tt("ndv.tbar.groups", { groups: p.groups.join("、") })}
-              onClick={() => { setActiveProject({ name: p.name, groups: p.groups }); setMenuOpen(false); }}>
+              onClick={() => { setActiveProject({ name: p.name, groups: p.groups }); app.NetDevSetActiveProject(p.name).catch(() => {}); setMenuOpen(false); }}>
               {p.name}{active?.name === p.name ? " ✓" : ""}
             </span>
           ))}
