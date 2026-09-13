@@ -25,13 +25,14 @@
 
 | # | 缺口 | 现状证据 | 影响 | 修法 | 验收 |
 |---|---|---|---|---|---|
-| **E1** | Timeline `rejected` kind 无前端消费 | 后端已产出（timeline.go D5），但 LogWorkbench:83 `KIND_LABEL` 只有 change/finding/event、:164 的 rel 过滤会把 rejected 条目**整体滤掉**——D5 的"另立被拒操作过滤器"只做了后端一半 | 被拒写命令在时间关联轴上不可见，"谁尝试改了什么"的排查视角缺失 | KIND_LABEL 补 `rejected` 键（zh/en）；rel 过滤器补 rejected 开关；分类图标用护栏红点 | 在 LogWorkbench 时间轴可见被拒条目并可过滤 |
-| **E2** | preset_key 后端无唯一性校验 | ValidateNetDev 仅查字符集（netdev.go preset_key 段）；两条规则同 preset_key 后端放行——前端 merged 去重已做，但 TOML 手工编辑或旧客户端可造成同 key 双规则 | 同 key 双规则使向导按 key 替换语义失效（一次替换一条，另一条残留） | ValidateNetDev alert 段：已见 preset_key 非空且重复 → 报错（对齐 name 查重的既有范式） | 同 key 双规则被加载/保存拒绝 |
+| **E1** ✅已修（54d9c409） | Timeline `rejected` kind 无前端消费 | 后端已产出（timeline.go D5），但 LogWorkbench:83 `KIND_LABEL` 只有 change/finding/event、:164 的 rel 过滤会把 rejected 条目**整体滤掉**——D5 的"另立被拒操作过滤器"只做了后端一半 | 被拒写命令在时间关联轴上不可见，"谁尝试改了什么"的排查视角缺失 | KIND_LABEL 补 `rejected` 键（zh/en）；rel 过滤器补 rejected 开关；分类图标用护栏红点 | 在 LogWorkbench 时间轴可见被拒条目并可过滤 |
+| **E2** ✅已修（54d9c409） | preset_key 后端无唯一性校验 | ValidateNetDev 仅查字符集（netdev.go preset_key 段）；两条规则同 preset_key 后端放行——前端 merged 去重已做，但 TOML 手工编辑或旧客户端可造成同 key 双规则 | 同 key 双规则使向导按 key 替换语义失效（一次替换一条，另一条残留） | ValidateNetDev alert 段：已见 preset_key 非空且重复 → 报错（对齐 name 查重的既有范式） | 同 key 双规则被加载/保存拒绝 |
 | **E3** ✅已修（2026-09-13，安全子集收窄） | 原计划 4 命令中 **find/curl 经边界语义核实不可内建**：prefixMatches 空格边界允许尾参——`find -exec/-delete` 是写原语、`curl -o/-T/第二 URL` 是写/外联原语 | 安全子集已入读表：`sha256sum`（纯哈希）、`ls`/`ls -l`（纯列目录）、`python3 --version`（早退语义）；find/curl 走 extra_read 教读表逐命令授予 | 分类测试绿；部署蓝本权重对账/清单步内建可用 |
 | **E4** | 机型能力档案最小实现（accel_profiles） | 设计已在 ACCEL_SPEC §8.3（字段/消费方已定），代码未做 | 部署参数（TP≤卡数、模型显存 vs 机型显存）无校验数据源，全凭人工 | `[[netdev.accel_profiles]]` 配置段 + 部署建议校验（告警不硬失败）+ GpuBoard readiness 徽标消费 | H20 档案下声明 TP=8×不匹配卡数 → 建议性告警可见 |
 | **E5** | GPU 值班 runbook 模板（文档级） | XID 怎么查/显存泄漏怎么查/NCCL hang 怎么查——散在调研报告（DEPLOY_SPEC §2.2 八簇失败模式表），未沉淀为值班手册 | 值班靠人记忆，排查路径不一致 | 把 DEPLOY_SPEC §2.2 八簇改写为《GPU 值班排查手册》（docs/，每簇：现象→只读检测→修复分类→升级路径） | 手册评审入库；值班培训可用 |
 | **E6** | **curl 前缀的尾参通道**（E3 修理过程中发现的既有安全缺口） | 读表既有 `curl -I ` 前缀：空格边界允许追加 `-o`（写文件）/`-T`（上传）/第二 URL——注释声称"HEAD-only 无数据通道"但前缀模型不约束尾参 | curl 类前缀收紧为"URL 后无尾参"的专用校验（logPathReadOverride 同款旁路范式），或引入结构化 http-check 步骤类型替代裸 curl | 恶意/注入场景无法借 curl 读表项获得写原语 |
 | **E7** | **模型能力档案（model card，部署校验的模型侧数据源；2026-09-13 实勘 45 条校准）** | E4 机型档案只覆盖机器侧；模型侧无数据源（"70B FP16 140G"原为 spec 硬编码例子） | `[[netdev.model_cards]]`：name/params_B(总/激活，MoE 双值)/quant 档×**硬件族枚举**（同一模型不同卡主流量化档不同：H 系=FP8 原生、910B=W8A8（950 前无 FP8）、P800=W8A8C16、A 系/4090=BF16+AWQ）/显存估算（BF16≈2GB/B 规则已实勘确认）/kv 余量/多模态视觉塔增量。**内置初始集（实勘主流矩阵）**：Qwen2.5 全档+Qwen3 MoE 系（30B-A3B=智算中心单机标配/235B-A22B/Next-80B）+DeepSeek V3/R1（671B；昇腾官方口径 BF16≥4 台 A2、W8A8≥2 台）+**R1-Distill 蒸馏系（政企一体机主力，1.5-70B）**+GLM-4.5/-Air（106B 轻量档）/4.6+MiniMax-M1（456B，8×H800 可部署）；VLM（Qwen-VL/InternVL）进档案；Kimi K2（1T，官方最小 16×H200）标注"多走 API 少自建"；Llama 标注"占比下降，作蒸馏底座存量" | 声明 DeepSeek-671B BF16 而目标 2×8 卡 64G → 校验告警（需 4 台）；Qwen3-30B W8A8 vs 910B 单卡 → 通过 |
+| **E8** | 深度诊断工具的读表策略（2026-09-13 核查补） | ascend-dmi（昇腾）/dcgmi diag（NVIDIA）未在读表：`-dg`/diag 是**带宽压测类负载**非纯读——裸进读表会给 agent 施压硬件的通道 | 裁决：留教读表（用户逐命令授予）或提案档（作为受控压测步骤）；版本查询形态（ascend-dmi -v）可进读表 | spec 记档即可，随 M-1 顺带 |
 
 ### 批次 F —— 0.3.x（需设计或较大改动）
 
@@ -73,6 +74,24 @@
 用户账号体系/RBAC 细粒度 ACL 矩阵（单机桌面无用户体系，两把锁+可选项哲学）｜算力使用权限分配（K8s RBAC/配额面）｜集群资源池划分（调度域）｜RMA 工单流（客户 ITSM 域）｜容量采购决策（商务域；运维台只供给利用率事实）｜K8s GPU Operator/集群安装（平台域）｜模型训练/微调/量化制作（训练框架域）｜HF 镜像站/权重仓库服务本体（基础设施域）｜算力切分调度（HAMi/device plugin 域）｜推理服务灰度/autoscale 策略（推理平台域）｜CRM/客户关系（非软件域）。
 
 ---
+
+## 二·补、批次 K —— 开工前设计项（各主体批次的准入门槛）
+
+| # | 设计项 | 是谁的前置 | 量级 |
+|---|---|---|---|
+| K1 | G-P1 三件设计：会话项目上下文载体（倾向 per-tab 后端态）/ confirmers 身份模型（自报+可选 trustdomain 签名）/ NetDevProject schema 迁移（D1 软降级）——详见 PROJECT_SCENARIO_SPEC §八 | G-P1（0.3.x 主体） | 半天成文 |
+| K2 | G-L1 通道选型：signal 服务加 relay 端点 vs 配对后 P2P 直连（对方 Ed25519 公钥可用）——V3 修正后从"信令现成"降为"需新数据通道" | G-L1/G-L4（P-3a） | 半天+原型验证 |
+| K3 | F3 指标-阈值映射表：vllm:* 指标（kv_cache_usage_perc/num_preemptions/TTFT/ITL/generation_tokens）→ infer.* 告警枚举与默认阈值——spec 完成度审计确认缺这张表 | F3（推理指标面） | 半天 |
+
+## 二·补、批次 U —— 用户侧待办（非代码，列此使台账完整）
+
+| # | 事项 | 说明 |
+|---|---|---|
+| U1 | 推送分支 | 本地领先远端 71+ 提交（0.2.3~0.2.5 三版内容）；推送触发 CI 权威门禁（race 通道/6 平台构建——本地仅覆盖 Windows） |
+| U2 | 版本切割 | [Unreleased] 三批（智算大屏/卫生清仓/tools 修复）切 0.2.6 标题；desktop/wails.json productVersion 0.2.3 → 对齐实际（0.2.5 已发内容） |
+| U3 | 裁决 J4/J5 | J4 项目外设备可见性（倾向只读+拒操作）/ J5 confirmers 绑身份（倾向绑）——卡 G-P1 开工 |
+| U4 | 真机到位 | G 批全部（XID 校准/昇腾演练/readiness 验证/演示材料/机型档案校准）+ M-1 驱动验收依赖 |
+| U5 | 并行批次协调 | 共享文件整写覆盖已发生两次（mock Skip/CHANGELOG 条目）；按 0204 spec A6+ 标记清单核对法在每次并行落地后核对 |
 
 ## 三、工作流八场景 × 缺口映射（评估结论存档）
 
