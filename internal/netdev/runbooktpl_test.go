@@ -57,7 +57,7 @@ func TestRunbookTplLifecycle(t *testing.T) {
 		t.Fatalf("get: %v %+v", err, got)
 	}
 	list, err := ListRunbookTemplates()
-	if err != nil || len(list) != 2 { // 用户 1 条 + 内置骨架
+	if err != nil || len(list) != len(builtinRunbookLibrary())+1 { // 用户 1 条 + 内置全库
 		t.Fatalf("list: %v %d", err, len(list))
 	}
 	if err := DeleteRunbookTemplate(tpl.ID); err != nil {
@@ -226,6 +226,36 @@ func mustSeedTpl(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return tpl.ID
+}
+
+// 内置库内容门禁：每个内置模板都必须用全变量渲染成功、渲染产物无残留占位
+// 符、只读步有分类结论——抓模板正文的笔误（{{typo}}、变量名不一致等）。
+func TestBuiltinRunbookLibraryRenders(t *testing.T) {
+	m := runbookTplTestEnv(t)
+	for _, tpl := range builtinRunbookLibrary() {
+		values := map[string]string{}
+		for _, v := range tpl.Vars {
+			values[v] = "vx-" + strings.ReplaceAll(v, "_", "-")
+		}
+		p, err := m.PreviewRunbookTemplate(tpl.ID, values)
+		if err != nil {
+			t.Errorf("%s: render failed: %v", tpl.ID, err)
+			continue
+		}
+		if len(p.Steps) != len(tpl.Steps) {
+			t.Errorf("%s: step count drifted", tpl.ID)
+		}
+		for i, ps := range p.Steps {
+			for _, s := range append([]string{ps.Command, ps.Device}, ps.ProposalCmd...) {
+				if strings.Contains(s, "{{") {
+					t.Errorf("%s step %d: leftover placeholder in %q", tpl.ID, i, s)
+				}
+			}
+			if ps.Command != "" && ps.Class == "" {
+				t.Errorf("%s step %d: read command missing verdict", tpl.ID, i)
+			}
+		}
+	}
 }
 
 func mustSaveTpl(t *testing.T, tpl *RunbookTemplate) string {

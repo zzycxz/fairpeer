@@ -170,8 +170,7 @@ func validateRunbookTpl(t *RunbookTemplate) error {
 const BuiltinRunbookIDPrefix = "RBB-"
 
 // builtinRunbookSkel is the 批② 空模板骨架：一个能渲染、能走完
-// preview→apply→approve→start 全链的最小部署编排示例——机制的活教材，
-// 不是内容库（F1b 七变体/F13 组件模板/F15 验收模板随批③入库）。
+// preview→apply→approve→start 全链的最小部署编排示例——机制的活教材。
 func builtinRunbookSkel() RunbookTemplate {
 	return RunbookTemplate{
 		ID:        BuiltinRunbookIDPrefix + "skel-vllm-standalone",
@@ -189,6 +188,108 @@ func builtinRunbookSkel() RunbookTemplate {
 			{Label: "决策点", DecisionPoint: true, Impact: "放流量前人工确认基线压测"},
 		},
 	}
+}
+
+// builtinRunbookLibrary is the F1b 内容库（批③a 模型侧三变体：单机/多机/
+// 蓝绿升级）。内容纪律（MODEL_DEPLOY_SPEC §二/§三）：①只读步命令全部在
+// linux 读表白名单或 curlReadOverride 语法内（门命令同样——门走密封执行，
+// Unknown 会被拒，fail-closed）；②变更段全部走提案（draft，人批后 start）；
+// ③权重对账只核 config.json/index 清单（全量 safetensors 哈希按 F2 走登记
+// manifest，值班手册簇 4）；④多机变体的主机间协同命令（ray join 等）拆成
+// 每台一份提案——绝不出现 ssh 串链（那是分类器绕过原语）。
+func builtinRunbookLibrary() []RunbookTemplate {
+	lib := []RunbookTemplate{builtinRunbookSkel()}
+	lib = append(lib,
+		RunbookTemplate{
+			ID:        BuiltinRunbookIDPrefix + "deploy-vllm-standalone",
+			Name:      "部署：vLLM 单机（systemd）",
+			Scenario:  "model-deploy",
+			Vars:      []string{"gpu_host", "model_path", "served_name", "svc_port", "tp_size", "gpu_mem_util"},
+			WindowMin: 180,
+			Notes: "蓝本 MODEL_DEPLOY_SPEC §2.1 八步走查的单机 systemd 形态。变更段含写 unit 与启动参数" +
+				"（TP={{tp_size}}/mem-util={{gpu_mem_util}}）——建议先跑 NetDevProfileCheck 过机型/模型档案校验。",
+			Steps: []RunbookTplStep{
+				{Label: "前置：驱动与可见卡", Device: "{{gpu_host}}", Command: "nvidia-smi", EstSec: 30},
+				{Label: "前置：显存水位", Device: "{{gpu_host}}",
+					Command: "nvidia-smi --query-gpu=memory.used,memory.total --format=csv", EstSec: 30},
+				{Label: "前置：残留进程（簇 2）", Device: "{{gpu_host}}",
+					Command: "nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv", EstSec: 30},
+				{Label: "前置：/dev/shm（簇 3）", Device: "{{gpu_host}}", Command: "df -h /dev/shm", EstSec: 20},
+				{Label: "前置：权重目录", Device: "{{gpu_host}}", Command: "ls -l {{model_path}}", EstSec: 20},
+				{Label: "权重对账（F2 校验段）", Device: "{{gpu_host}}",
+					Command: "sha256sum {{model_path}}/config.json {{model_path}}/model.safetensors.index.json", EstSec: 60},
+				{Label: "变更：写 unit 并启动", Device: "{{gpu_host}}",
+					ProposalIntent: "部署 {{served_name}}（TP={{tp_size}}，mem-util={{gpu_mem_util}}，端口 {{svc_port}}）",
+					ProposalCmds: []string{
+						"tee /etc/systemd/system/vllm-{{svc_port}}.service",
+						"systemctl daemon-reload",
+						"systemctl enable --now vllm-{{svc_port}}.service",
+					}, EstSec: 600},
+				{Label: "门：服务存活", Device: "{{gpu_host}}", Command: "systemctl is-active vllm-{{svc_port}}",
+					GateCmd: "systemctl is-active vllm-{{svc_port}}", GateExpect: "active", GateSustain: 15, EstSec: 60},
+				{Label: "门：HTTP 探活", Device: "{{gpu_host}}",
+					GateCmd: "curl -I http://127.0.0.1:{{svc_port}}/health", GateExpect: "200", GateSustain: 30, GateTimeout: 1800, EstSec: 300},
+				{Label: "决策点：放流量", DecisionPoint: true, Impact: "确认模型名={{served_name}} 可列出、基线压测通过后放流量；回退=stop 新服务"},
+			},
+		},
+		RunbookTemplate{
+			ID:        BuiltinRunbookIDPrefix + "deploy-vllm-multinode",
+			Name:      "部署：vLLM 多机（head-worker）",
+			Scenario:  "model-deploy",
+			Vars:      []string{"head_host", "worker_host", "model_path", "svc_port", "tp_size", "nnodes"},
+			WindowMin: 240,
+			Notes: "多机形态：主机间协同（ray join）拆成每台一份提案，先后序由割接步骤序保证——绝不 ssh 串链。" +
+				"互联前置用 ibstat（E9 读表）；NCCL hang 按值班手册簇 3。",
+			Steps: []RunbookTplStep{
+				{Label: "前置：head 卡可见", Device: "{{head_host}}", Command: "nvidia-smi", EstSec: 30},
+				{Label: "前置：worker 卡可见", Device: "{{worker_host}}", Command: "nvidia-smi", EstSec: 30},
+				{Label: "前置：互联口状态", Device: "{{head_host}}", Command: "ibstat", EstSec: 30},
+				{Label: "前置：双机权重目录", Device: "{{head_host}}", Command: "ls -l {{model_path}}", EstSec: 20},
+				{Label: "变更：head 起 Ray 头", Device: "{{head_host}}",
+					ProposalIntent: "Ray head 启动 + vLLM 服务端（nnodes={{nnodes}}，TP={{tp_size}}）",
+					ProposalCmds:   []string{"ray start --head", "systemctl start vllm-{{svc_port}}"}, EstSec: 600},
+				{Label: "变更：worker 加入", Device: "{{worker_host}}",
+					ProposalIntent: "worker 加入 Ray 集群（指向 {{head_host}}）",
+					ProposalCmds:   []string{"ray start --address={{head_host}}:6379"}, EstSec: 300},
+				{Label: "门：head 服务存活", Device: "{{head_host}}",
+					GateCmd: "systemctl is-active vllm-{{svc_port}}", GateExpect: "active", GateSustain: 30, EstSec: 120},
+				{Label: "门：head 端口监听", Device: "{{head_host}}",
+					GateCmd: "ss -ltn", GateExpect: ":{{svc_port}}", GateSustain: 30, EstSec: 120},
+				{Label: "决策点：全集群就绪后放流量", DecisionPoint: true,
+					Impact: "确认 nnodes={{nnodes}} 全部在线、worker 无掉卡；回退=双机 stop + ray stop"},
+			},
+		},
+		RunbookTemplate{
+			ID:        BuiltinRunbookIDPrefix + "upgrade-vllm-bluegreen",
+			Name:      "升级：vLLM 蓝绿（双端口并行）",
+			Scenario:  "model-upgrade",
+			Vars:      []string{"gpu_host", "svc_old", "svc_new", "port_old", "port_new"},
+			WindowMin: 120,
+			Notes: "蓝绿升级：新版在新端口拉起→门验证→决策点切流→旧版下线→决策点关回退窗。" +
+				"TP 启动时固定——改 TP 不走本模板（那是 TP 重排=蓝绿换队，批③b 变体）；流量编排=双版本+流量百分比原语。",
+			Steps: []RunbookTplStep{
+				{Label: "前置：旧版健康", Device: "{{gpu_host}}",
+					Command: "systemctl is-active {{svc_old}}", EstSec: 20},
+				{Label: "前置：旧版探活", Device: "{{gpu_host}}",
+					Command: "curl -I http://127.0.0.1:{{port_old}}/health", EstSec: 20},
+				{Label: "变更：新版拉起（新端口，不动旧版）", Device: "{{gpu_host}}",
+					ProposalIntent: "拉起 {{svc_new}}（端口 {{port_new}}），{{svc_old}} 保持在线",
+					ProposalCmds:   []string{"systemctl enable --now {{svc_new}}.service"}, EstSec: 900},
+				{Label: "门：新版 HTTP 探活", Device: "{{gpu_host}}",
+					GateCmd: "curl -I http://127.0.0.1:{{port_new}}/health", GateExpect: "200", GateSustain: 60, GateTimeout: 1800, EstSec: 600},
+				{Label: "决策点：切流确认", DecisionPoint: true,
+					Impact: "新旧版本 TTFT/输出质量对比通过后切流；此刻回退=stop 新版（零影响）"},
+				{Label: "变更：旧版下线", Device: "{{gpu_host}}",
+					ProposalIntent: "停用 {{svc_old}}（流量已在 {{port_new}}）",
+					ProposalCmds:   []string{"systemctl disable --now {{svc_old}}.service"}, EstSec: 120},
+				{Label: "门：新版持续探活", Device: "{{gpu_host}}",
+					GateCmd: "curl -I http://127.0.0.1:{{port_new}}/health", GateExpect: "200", GateSustain: 60, EstSec: 120},
+				{Label: "决策点：关闭回退窗口", DecisionPoint: true,
+					Impact: "观察期过后关闭；此刻起回退需重新部署旧版本"},
+			},
+		},
+	)
+	return lib
 }
 
 // GetRunbookTemplate loads one template; built-in seeds fall through when no
@@ -209,8 +310,10 @@ func GetRunbookTemplate(id string) (*RunbookTemplate, error) {
 		return nil, err
 	}
 	if strings.HasPrefix(id, BuiltinRunbookIDPrefix) {
-		if t := builtinRunbookSkel(); t.ID == id {
-			return &t, nil
+		for _, t := range builtinRunbookLibrary() {
+			if t.ID == id {
+				return &t, nil
+			}
 		}
 	}
 	return nil, os.ErrNotExist
@@ -236,8 +339,10 @@ func ListRunbookTemplates() ([]RunbookTemplate, error) {
 		seen[t.ID] = true
 		out = append(out, *t)
 	}
-	if skel := builtinRunbookSkel(); !seen[skel.ID] {
-		out = append(out, skel)
+	for _, b := range builtinRunbookLibrary() {
+		if !seen[b.ID] {
+			out = append(out, b)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
