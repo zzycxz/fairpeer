@@ -392,6 +392,14 @@ type NetDevDevice struct {
 	// ConsoleBaud 0 => 9600, line format fixed at 8N1.
 	ConsolePort string `toml:"console_port"`
 	ConsoleBaud int    `toml:"console_baud"`
+	// MetricsPorts 登记（F14 端点登记制）：主机上暴露 Prometheus 文本面的
+	// 服务端口（如 vLLM 的 --port）。空 = 不抓取；上限 4（一台主机的服务
+	// 数量级）。抓取是工作站直连 GET（不走共享代理、10s 超时、best-effort），
+	// 指标按 K3 映射落 series infer.*；路径统一 MetricsPath。
+	MetricsPorts []int `toml:"metrics_ports"`
+	// MetricsPath is the Prometheus text endpoint path ("/metrics" default);
+	// charset-bounded（无 query/fragment/空白）——路径进 URL 原样拼接。
+	MetricsPath string `toml:"metrics_path"`
 	// LogPaths whitelists additional log-directory roots for this device
 	// (e.g. "/opt/app/logs", "/usr/local/tomcat/logs"). tail/head/grep/wc on
 	// paths under /var/log or one of these roots classify as read — the
@@ -863,9 +871,14 @@ func ValidateNetDev(nd NetDevConfig) error {
 		seenRules[r.Name] = true
 		switch r.Metric {
 		case "reachable", "if_down_count", "uptime_reset", "flap_count", "if_down_above_p90",
-			"gpu.xid", "gpu.temp", "gpu.mem_pct", "gpu.count":
+			"gpu.xid", "gpu.temp", "gpu.mem_pct", "gpu.count",
+			// F14/F3 推理指标面（K3 映射产物，批④）：值来自 series infer.*
+			// 最新点（跨服务取最大）。ttft_ms/e2e_ms 是轮内增量平均，
+			// preemptions_rate/tokens_rate 是速率——非累计量。
+			"infer.kv_usage", "infer.running", "infer.queued", "infer.ttft_ms",
+			"infer.e2e_ms", "infer.preemptions_rate", "infer.tokens_rate":
 		default:
-			return fmt.Errorf("netdev alert_rule %q: metric must be reachable|if_down_count|uptime_reset|flap_count|if_down_above_p90|gpu.xid|gpu.temp|gpu.mem_pct|gpu.count", r.Name)
+			return fmt.Errorf("netdev alert_rule %q: metric must be reachable|if_down_count|uptime_reset|flap_count|if_down_above_p90|gpu.xid|gpu.temp|gpu.mem_pct|gpu.count|infer.*（K3 映射七项）", r.Name)
 		}
 		if r.ForRounds < 0 || r.ForRounds > 120 {
 			return fmt.Errorf("netdev alert_rule %q: for_rounds must be 0-120 (consecutive polls before firing)", r.Name)
@@ -938,6 +951,21 @@ func ValidateNetDev(nd NetDevConfig) error {
 	}
 	if nd.InspectionConcurrency < 0 || nd.InspectionConcurrency > 16 {
 		return fmt.Errorf("netdev: inspection_concurrency %d out of range (0-16, 0=default)", nd.InspectionConcurrency)
+	}
+	metricsPathRe := regexp.MustCompile(`^/[A-Za-z0-9._~/-]{0,120}$`)
+	for i := range nd.Devices {
+		d := &nd.Devices[i]
+		if len(d.MetricsPorts) > 4 {
+			return fmt.Errorf("netdev device %q: metrics_ports caps at 4 endpoints per host", d.Name)
+		}
+		for _, p := range d.MetricsPorts {
+			if p <= 0 || p > 65535 {
+				return fmt.Errorf("netdev device %q: metrics port %d out of range", d.Name, p)
+			}
+		}
+		if d.MetricsPath != "" && !metricsPathRe.MatchString(d.MetricsPath) {
+			return fmt.Errorf("netdev device %q: metrics_path must match ^/[A-Za-z0-9._~/-]{0,120}$ (no query/fragment/whitespace)", d.Name)
+		}
 	}
 	for _, p := range nd.AccelProfiles {
 		switch p.Accel {

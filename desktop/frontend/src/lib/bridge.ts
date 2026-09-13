@@ -3172,6 +3172,9 @@ function makeMockApp(): AppBindings {
         worst_temp_dev: "gpu-2",
         xid_active: 1,
         xid_events: [{ id: "F-mock", device: "gpu-2", maxCode: 79, severity: "critical", at: "09-12 10:00", active: true }],
+        services: [
+          { device: "gpu-1", svc: "8000", model: "qwen2.5-7b-instruct", ageMin: 0, kvUsage: 83, running: 3, queued: 12, ttftMs: 245, preemptRate: 0.5, tokensRate: 1850 },
+        ],
       };
     },
     async NetDevProfileCheck(device: string, model: string, quant: string, tp: number): Promise<string[]> {

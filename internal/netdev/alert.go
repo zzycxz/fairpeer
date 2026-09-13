@@ -99,6 +99,15 @@ func ruleMetricValue(metric string, h DeviceHealth, prevUptime int64) float64 {
 		// (or nvidia-smi itself) disappears. Only meaningful on sampled hosts.
 		return float64(len(h.GPU))
 	}
+	// F14/F3 推理指标面（批④）：infer.* 来自 series 最新点（K3 映射产物，
+	// 见 infermetrics.go）。规则未命中或数据过期时 0——调用方对 infer.* 先做
+	// 冻结闸（deviceHasMetricsEndpoints），false 永远不参与比较。
+	if strings.HasPrefix(metric, "infer.") {
+		if v, ok := latestInferValue(h.Device, metric); ok {
+			return v
+		}
+		return 0
+	}
 	return 0
 }
 
@@ -204,12 +213,19 @@ func (m *Manager) evaluateAlerts(fresh map[string]DeviceHealth) {
 			continue
 		}
 		isGPU := strings.HasPrefix(r.Metric, "gpu.")
+		isInfer := strings.HasPrefix(r.Metric, "infer.")
 		for name, h := range fresh {
 			src := "alert:" + r.Name + ":" + name
 			if isGPU && !h.GPUSampled {
 				// 采集器从未应答的设备不参与 GPU 规则（非 GPU 舰队零误报）。
 				// streak 冻结不清零——"连续"以采样为准，一次 SSH 抖动不应
 				// 把攒了 N-1 轮的防抖清空。
+				seen[src] = true
+				continue
+			}
+			if isInfer && !m.deviceHasMetricsEndpoints(name) {
+				// infer.* 冻结闸（批④）：未登记 metrics_ports 的主机永不参与
+				// ——没有登记就没有数据，冻结而非比较 0（与 GPU 采样闸同哲学）。
 				seen[src] = true
 				continue
 			}
@@ -340,6 +356,20 @@ func ruleTitle(metric string) string {
 		return "GPU 显存水位"
 	case "gpu.count":
 		return "GPU 可见卡数异常（掉卡）"
+	case "infer.kv_usage":
+		return "KV cache 利用率水位"
+	case "infer.running":
+		return "并发请求数水位"
+	case "infer.queued":
+		return "排队深度（等待请求数）"
+	case "infer.ttft_ms":
+		return "首 token 延迟（轮内均值）"
+	case "infer.e2e_ms":
+		return "端到端请求延迟（轮内均值）"
+	case "infer.preemptions_rate":
+		return "请求抢占速率（次/分）"
+	case "infer.tokens_rate":
+		return "生成吞吐（tok/s）"
 	}
 	return metric
 }

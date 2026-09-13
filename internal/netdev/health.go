@@ -217,6 +217,10 @@ func (m *Manager) PollHealthOnce(ctx context.Context) {
 	// GPU 采集段（gpuhealth.go）：GPU=true 主机在 SNMP sweep 之后追加一轮
 	// SSH 只读采集，结果并入 fresh——SNMP 规则与 gpu.* 规则一次评估。
 	m.pollGPUDevices(ctx, fresh)
+	// 推理指标段（infermetrics.go，批④）：登记了 metrics_ports 的主机直连
+	// GET /metrics，K3 映射落 series infer.*——必须在 evaluateAlerts 之前，
+	// infer.* 规则读的是本轮最新点。
+	m.pollMetricsEndpoints(ctx)
 	healthMu.Lock()
 	healthLastPoll = time.Now()
 	healthMu.Unlock()

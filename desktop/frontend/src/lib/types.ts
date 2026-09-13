@@ -2215,6 +2215,21 @@ export interface NetDevGPUBoardXID {
   active: boolean;
 }
 
+// 批④/F3：推理服务行（series 15 分钟窗聚合；svc=登记端口）。
+export interface NetDevGPUBoardService {
+  device: string;
+  svc: string;
+  model?: string;
+  ageMin: number;
+  kvUsage: number;
+  running: number;
+  queued: number;
+  ttftMs?: number;
+  e2eMs?: number;
+  preemptRate?: number;
+  tokensRate?: number;
+}
+
 export interface NetDevGPUBoard {
   generated_at: string;
   devices: NetDevGPUBoardDevice[];
@@ -2224,6 +2239,7 @@ export interface NetDevGPUBoard {
   worst_temp_dev?: string;
   xid_active: number;
   xid_events: NetDevGPUBoardXID[];
+  services: NetDevGPUBoardService[];
 }
 
 export interface NetDevHealthSnapshot {

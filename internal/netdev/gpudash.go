@@ -73,6 +73,9 @@ type GPUBoard struct {
 	WorstTempDev string           `json:"worst_temp_dev,omitempty"`
 	XIDActive    int              `json:"xid_active"` // 活动 XID Finding 数
 	XIDEvents    []GPUBoardXID    `json:"xid_events"`
+	// 服务层区（批④/F3）：登记了 metrics_ports 的推理服务行（series 15 分钟
+	// 窗聚合）——服务开放后的观测面，全链 13-18 步的闭环件。
+	Services []GPUBoardService `json:"services"`
 }
 
 // BuildGPUBoard assembles the 智算 screen from existing GPU health snapshots,
@@ -166,6 +169,15 @@ func (m *Manager) BuildGPUBoard() *GPUBoard {
 			fmt.Sscanf(f.Title, "[GPU] XID 事件 #%d", &ev.MaxCode)
 			b.XIDEvents = append(b.XIDEvents, ev)
 		}
+	}
+	// 服务层区（批④）：所有登记端点按 series 窗聚合——零新探针，纯读。
+	b.Services = []GPUBoardService{}
+	for i := range m.cfg.NetDev.Devices {
+		d := m.cfg.NetDev.Devices[i]
+		if len(d.MetricsPorts) == 0 {
+			continue
+		}
+		b.Services = append(b.Services, buildServicesBoard(d.Name, 15*time.Minute)...)
 	}
 	return b
 }

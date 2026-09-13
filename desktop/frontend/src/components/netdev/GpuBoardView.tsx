@@ -123,6 +123,46 @@ export default function GpuBoardView({ onJump, onFocusDevice }: Props) {
           </div>
         ))}
       </div>
+
+      <div className="ndv__card" style={{ padding: "10px 12px" }}>
+        <div className="ndv__card-title" title={t("ndv.gpu.svcZoneTip")}>{t("ndv.gpu.svcZone")}</div>
+        {(b.services ?? []).length === 0 && <div className="ndv__meta">{t("ndv.gpu.svcEmpty")}</div>}
+        {(b.services ?? []).length > 0 && (
+          <table className="ndv-gpu__matrix">
+            <thead>
+              <tr>
+                <th>{t("ndv.gpu.svcDevice")}</th>
+                <th>{t("ndv.gpu.svcPort")}</th>
+                <th>{t("ndv.gpu.svcModel")}</th>
+                <th>{t("ndv.gpu.svcKv")}</th>
+                <th>{t("ndv.gpu.svcRunning")}</th>
+                <th>{t("ndv.gpu.svcQueued")}</th>
+                <th>{t("ndv.gpu.svcTtft")}</th>
+                <th>{t("ndv.gpu.svcPreempt")}</th>
+                <th>{t("ndv.gpu.svcTok")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(b.services ?? []).map(s => (
+                <tr key={`${s.device}:${s.svc}:${s.model ?? ""}`}>
+                  <td><span role="button" style={{ cursor: "pointer", textDecoration: "underline dotted" }} onClick={() => onFocusDevice?.(s.device)}>{s.device}</span></td>
+                  <td>:{s.svc}</td>
+                  <td className="ndv-gpu__model">{s.model || "—"}</td>
+                  <td className={(s.kvUsage ?? 0) >= 90 ? "ndv-gpu__temp ndv-gpu__temp--hot" : (s.kvUsage ?? 0) >= 80 ? "ndv-gpu__temp ndv-gpu__temp--warm" : ""}>{s.kvUsage}%</td>
+                  <td>{s.running}</td>
+                  <td>{s.queued}</td>
+                  <td>{s.ttftMs != null ? `${Math.round(s.ttftMs)}ms` : "—"}</td>
+                  <td>{s.preemptRate != null ? `${s.preemptRate.toFixed(1)}/min` : "—"}</td>
+                  <td>{s.tokensRate != null ? `${Math.round(s.tokensRate)}/s` : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {(b.services ?? []).some(s => s.ageMin > 5) && (
+          <div className="ndv__meta" style={{ color: "var(--warn)" }}>{t("ndv.gpu.svcStale")}</div>
+        )}
+      </div>
     </div>
   );
 }
