@@ -289,7 +289,195 @@ func builtinRunbookLibrary() []RunbookTemplate {
 			},
 		},
 	)
+	lib = append(lib, opsSideTemplates()...)
+	lib = append(lib, platformTemplates()...)
 	return lib
+}
+
+// opsSideTemplates is 批③b 运维侧四变体（DP 扩副本/TP 重排/故障节点替换/
+// 服务下线）——全生命周期闭环的运维操作面。实勘口径随条目注明（台账 F1b④）。
+func opsSideTemplates() []RunbookTemplate {
+	return []RunbookTemplate{
+		{
+			ID:        BuiltinRunbookIDPrefix + "ops-scale-dp-replicas",
+			Name:      "运维：DP 扩副本（不停机）",
+			Scenario:  "model-ops",
+			Vars:      []string{"gpu_host", "svc_base", "port_base", "replicas_new"},
+			WindowMin: 90,
+			Notes: "DP 扩副本不重启存量实例——可全自动（HPA 指标建议用 KV cache 利用率/排队深度，" +
+				"不是 CPU）。缩副本反向走 ops-decommission 模板（先摘流再停）。",
+			Steps: []RunbookTplStep{
+				{Label: "前置：当前副本存活", Device: "{{gpu_host}}",
+					Command: "systemctl is-active {{svc_base}}-1", EstSec: 20},
+				{Label: "前置：显存余量", Device: "{{gpu_host}}",
+					Command: "nvidia-smi --query-gpu=memory.used,memory.total --format=csv", EstSec: 30},
+				{Label: "变更：拉起新副本", Device: "{{gpu_host}}",
+					ProposalIntent: "扩副本至 {{replicas_new}}（新实例 {{svc_base}}-{{replicas_new}}，端口顺延自 {{port_base}}）",
+					ProposalCmds: []string{
+						"systemctl enable --now {{svc_base}}-{{replicas_new}}.service",
+					}, EstSec: 900},
+				{Label: "门：新副本探活", Device: "{{gpu_host}}",
+					GateCmd: "curl -I http://127.0.0.1:{{port_base}}/health", GateExpect: "200", GateSustain: 45, GateTimeout: 1800, EstSec: 600},
+				{Label: "决策点：流量均衡确认", DecisionPoint: true,
+					Impact: "LB/upstream 挂上新副本并确认分流量；回退=stop 新副本（存量零影响）"},
+			},
+		},
+		{
+			ID:        BuiltinRunbookIDPrefix + "ops-rearrange-tp-bluegreen",
+			Name:      "运维：TP 重排（蓝绿换队）",
+			Scenario:  "model-ops",
+			Vars:      []string{"gpu_host", "svc_old", "svc_new", "port_old", "port_new", "tp_new"},
+			WindowMin: 150,
+			Notes: "实勘校准：TP degree 启动时固定，改 TP 必全量重启——新队（新 TP）拉起→切流→旧队下线，" +
+				"复用蓝绿机制。MoE Elastic EP 例外可运行时弹性，不走本模板。改 TP 后显存/吞吐按机型档案重估。",
+			Steps: []RunbookTplStep{
+				{Label: "前置：现队健康", Device: "{{gpu_host}}",
+					Command: "systemctl is-active {{svc_old}}", EstSec: 20},
+				{Label: "前置：卡拓扑（TP={{tp_new}} 可行性）", Device: "{{gpu_host}}",
+					Command: "nvidia-smi --query-gpu=index,memory.total --format=csv", EstSec: 30},
+				{Label: "变更：新 TP 新端口拉起", Device: "{{gpu_host}}",
+					ProposalIntent: "以 TP={{tp_new}} 拉起 {{svc_new}}（端口 {{port_new}}），{{svc_old}} 在线不动",
+					ProposalCmds:   []string{"systemctl enable --now {{svc_new}}.service"}, EstSec: 1200},
+				{Label: "门：新队探活", Device: "{{gpu_host}}",
+					GateCmd: "curl -I http://127.0.0.1:{{port_new}}/health", GateExpect: "200", GateSustain: 60, GateTimeout: 2400, EstSec: 900},
+				{Label: "决策点：切流（人工核 TP 生效）", DecisionPoint: true,
+					Impact: "人工确认新队卡数=TP={{tp_new}}、TTFT 达标后切流；回退=stop 新队"},
+				{Label: "变更：旧队下线", Device: "{{gpu_host}}",
+					ProposalIntent: "停用旧 TP 队 {{svc_old}}",
+					ProposalCmds:   []string{"systemctl disable --now {{svc_old}}.service"}, EstSec: 120},
+				{Label: "决策点：关闭回退窗口", DecisionPoint: true,
+					Impact: "观察期后关闭；此后回退需按旧 TP 重新拉起"},
+			},
+		},
+		{
+			ID:        BuiltinRunbookIDPrefix + "ops-replace-fault-node",
+			Name:      "运维：故障节点替换（ECC/XID 摘流）",
+			Scenario:  "model-ops",
+			Vars:      []string{"bad_host", "svc_name", "spare_host", "spare_port"},
+			WindowMin: 120,
+			Notes: "ECC 阈值自动化边界（实勘）：correctable>10 次/时→drain、反复 uncorrectable→cordon+隔离、" +
+				"物理换卡必人工。GPU 故障占训练中断约 58%——高频流程，备件拉起后复流必经决策点。",
+			Steps: []RunbookTplStep{
+				{Label: "前置：故障证据固化", Device: "{{bad_host}}", Command: "nvidia-smi -q", EstSec: 60},
+				{Label: "前置：内核 XID 证据", Device: "{{bad_host}}",
+					Command: "journalctl -k -g Xid --no-pager -n 50", EstSec: 30},
+				{Label: "决策点：人工确认摘流", DecisionPoint: true,
+					Impact: "核对 XID/ECC 分级（值班手册簇 0）：severe→立即摘流；物理换卡必人工到场"},
+				{Label: "变更：坏节点摘流", Device: "{{bad_host}}",
+					ProposalIntent: "{{svc_name}} 摘流下线（节点 {{bad_host}}）",
+					ProposalCmds:   []string{"systemctl disable --now {{svc_name}}.service"}, EstSec: 120},
+				{Label: "变更：备件拉起", Device: "{{spare_host}}",
+					ProposalIntent: "备件 {{spare_host}} 拉起同配置服务",
+					ProposalCmds:   []string{"systemctl enable --now {{svc_name}}.service"}, EstSec: 900},
+				{Label: "门：备件探活", Device: "{{spare_host}}",
+					GateCmd: "curl -I http://127.0.0.1:{{spare_port}}/health", GateExpect: "200", GateSustain: 60, GateTimeout: 1800, EstSec: 600},
+				{Label: "决策点：复流确认", DecisionPoint: true,
+					Impact: "备件基线压测通过后复流；坏节点保持隔离待物理换卡"},
+			},
+		},
+		{
+			ID:        BuiltinRunbookIDPrefix + "ops-decommission",
+			Name:      "运维：服务下线（摘流→归档）",
+			Scenario:  "model-ops",
+			Vars:      []string{"gpu_host", "svc_name", "port", "archive_path"},
+			WindowMin: 90,
+			Notes: "业界无统一 runbook，结构化即增量：idle 判定→摘流→删 endpoint→权重归档。" +
+				"『确认无人再用』必人工审批——最后决策点不放行就停在归档前，可整体回退。",
+			Steps: []RunbookTplStep{
+				{Label: "前置：服务现状", Device: "{{gpu_host}}",
+					Command: "ss -ltn", EstSec: 20},
+				{Label: "决策点：idle 判定（人工）", DecisionPoint: true,
+					Impact: "确认近 7 天无业务流量（监控面）；误判回退=重新拉起，成本为 0"},
+				{Label: "变更：摘流下线", Device: "{{gpu_host}}",
+					ProposalIntent: "{{svc_name}} 摘流并停用（端口 {{port}}）",
+					ProposalCmds: []string{
+						"systemctl disable --now {{svc_name}}.service",
+					}, EstSec: 120},
+				{Label: "门：端口已释放", Device: "{{gpu_host}}",
+					GateCmd: "ss -ltn", GateExpect: "LISTEN", GateSustain: 5, EstSec: 60},
+				{Label: "决策点：确认无人再用", DecisionPoint: true,
+					Impact: "最终闸门：放行才进归档（不可逆面）；不放行服务保持下线可随时拉回"},
+				{Label: "变更：权重归档", Device: "{{gpu_host}}",
+					ProposalIntent: "权重目录归档至 {{archive_path}}",
+					ProposalCmds:   []string{"mv /data/models/{{svc_name}} {{archive_path}}/{{svc_name}}"}, EstSec: 600},
+			},
+		},
+	}
+}
+
+// platformTemplates is F13 AI 平台组件部署模板四条——"建 AI 平台"本身成为
+// 部署模板场景。组件均为容器/compose 形态：门统一走 curl 探活（读语法内）。
+func platformTemplates() []RunbookTemplate {
+	return []RunbookTemplate{
+		{
+			ID:        BuiltinRunbookIDPrefix + "platform-litellm",
+			Name:      "平台：LiteLLM 网关部署",
+			Scenario:  "ai-platform",
+			Vars:      []string{"gpu_host", "litellm_port", "config_path"},
+			WindowMin: 60,
+			Notes:     "LLM 网关：统一 API 面 + 多上游路由。上游 key 走 secret store，不进 config/模板。",
+			Steps: []RunbookTplStep{
+				{Label: "前置：容器运行时", Device: "{{gpu_host}}", Command: "docker ps", EstSec: 20},
+				{Label: "变更：拉起 LiteLLM", Device: "{{gpu_host}}",
+					ProposalIntent: "LiteLLM 网关（配置 {{config_path}}，端口 {{litellm_port}}）",
+					ProposalCmds:   []string{"docker compose -f {{config_path}} up -d"}, EstSec: 300},
+				{Label: "门：网关探活", Device: "{{gpu_host}}",
+					GateCmd: "curl -I http://127.0.0.1:{{litellm_port}}/health/liveliness", GateExpect: "200", GateSustain: 30, EstSec: 120},
+				{Label: "决策点：接业务", DecisionPoint: true, Impact: "业务侧改指网关 base_url；回退=down"},
+			},
+		},
+		{
+			ID:        BuiltinRunbookIDPrefix + "platform-milvus",
+			Name:      "平台：Milvus 向量库（standalone）",
+			Scenario:  "ai-platform",
+			Vars:      []string{"gpu_host", "compose_path", "milvus_port"},
+			WindowMin: 60,
+			Notes:     "向量库 standalone 形态（RAG 检索面）。数据卷落在 compose 定义的宿主目录——前置先核磁盘。",
+			Steps: []RunbookTplStep{
+				{Label: "前置：磁盘与容器", Device: "{{gpu_host}}", Command: "df -h /var/lib/docker", EstSec: 20},
+				{Label: "变更：compose 拉起", Device: "{{gpu_host}}",
+					ProposalIntent: "Milvus standalone（{{compose_path}}）",
+					ProposalCmds:   []string{"docker compose -f {{compose_path}} up -d"}, EstSec: 300},
+				{Label: "门：健康检查", Device: "{{gpu_host}}",
+					GateCmd: "curl -I http://127.0.0.1:{{milvus_port}}/healthz", GateExpect: "200", GateSustain: 30, EstSec: 120},
+				{Label: "决策点：建集合接数据", DecisionPoint: true, Impact: "schema 迁移走 sql-migration 面不受本模板管"},
+			},
+		},
+		{
+			ID:        BuiltinRunbookIDPrefix + "platform-dify",
+			Name:      "平台：Dify 应用编排",
+			Scenario:  "ai-platform",
+			Vars:      []string{"gpu_host", "compose_path", "dify_port"},
+			WindowMin: 60,
+			Notes:     "依赖 Postgres/Redis，compose 内置；升级=Dify 镜像 tag 变更，走蓝绿模板套用。",
+			Steps: []RunbookTplStep{
+				{Label: "前置：容器与磁盘", Device: "{{gpu_host}}", Command: "docker ps", EstSec: 20},
+				{Label: "变更：compose 拉起", Device: "{{gpu_host}}",
+					ProposalIntent: "Dify 全家桶（{{compose_path}}）",
+					ProposalCmds:   []string{"docker compose -f {{compose_path}} up -d"}, EstSec: 420},
+				{Label: "门：API 健康", Device: "{{gpu_host}}",
+					GateCmd: "curl -I http://127.0.0.1:{{dify_port}}/api/health", GateExpect: "200", GateSustain: 30, EstSec: 120},
+				{Label: "决策点：管理员初始化", DecisionPoint: true, Impact: "首个管理员账号注册是带外人工动作"},
+			},
+		},
+		{
+			ID:        BuiltinRunbookIDPrefix + "platform-langfuse",
+			Name:      "平台：Langfuse 观测",
+			Scenario:  "ai-platform",
+			Vars:      []string{"gpu_host", "compose_path", "langfuse_port"},
+			WindowMin: 60,
+			Notes:     "LLM 可观测面（trace/eval）。key 生成后进 secret store；上游接入改 SDK 配置不走本模板。",
+			Steps: []RunbookTplStep{
+				{Label: "前置：容器与磁盘", Device: "{{gpu_host}}", Command: "df -h /var/lib/docker", EstSec: 20},
+				{Label: "变更：compose 拉起", Device: "{{gpu_host}}",
+					ProposalIntent: "Langfuse（{{compose_path}}）",
+					ProposalCmds:   []string{"docker compose -f {{compose_path}} up -d"}, EstSec: 300},
+				{Label: "门：健康检查", Device: "{{gpu_host}}",
+					GateCmd: "curl -I http://127.0.0.1:{{langfuse_port}}/api/public/health", GateExpect: "200", GateSustain: 30, EstSec: 120},
+				{Label: "决策点：接 SDK", DecisionPoint: true, Impact: "业务应用注入 Langfuse key 后 trace 上报"},
+			},
+		},
+	}
 }
 
 // GetRunbookTemplate loads one template; built-in seeds fall through when no
