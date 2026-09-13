@@ -165,29 +165,66 @@ func validateRunbookTpl(t *RunbookTemplate) error {
 	return nil
 }
 
-// GetRunbookTemplate loads one template.
+// BuiltinRunbookIDPrefix marks seed templates that ship with the product
+// (Get falls through to them, Delete refuses them)。
+const BuiltinRunbookIDPrefix = "RBB-"
+
+// builtinRunbookSkel is the 批② 空模板骨架：一个能渲染、能走完
+// preview→apply→approve→start 全链的最小部署编排示例——机制的活教材，
+// 不是内容库（F1b 七变体/F13 组件模板/F15 验收模板随批③入库）。
+func builtinRunbookSkel() RunbookTemplate {
+	return RunbookTemplate{
+		ID:        BuiltinRunbookIDPrefix + "skel-vllm-standalone",
+		Name:      "示例：vLLM 单机部署骨架",
+		Scenario:  "model-deploy",
+		Vars:      []string{"gpu_host", "svc_port"},
+		WindowMin: 120,
+		Notes:     "内置骨架示例（复制后改）：前置只读→变更段（提案）→语义门→决策点。新场景建议先跑通一次再『另存为模板』。",
+		Steps: []RunbookTplStep{
+			{Label: "前置检查", Device: "{{gpu_host}}", Command: "nvidia-smi"},
+			{Label: "变更：拉起服务", Device: "{{gpu_host}}", ProposalIntent: "启动推理服务",
+				ProposalCmds: []string{"systemctl start vllm-{{svc_port}}"}},
+			{Label: "语义门", Device: "{{gpu_host}}", Command: "systemctl is-active vllm-{{svc_port}}",
+				GateCmd: "systemctl is-active vllm-{{svc_port}}", GateExpect: "active"},
+			{Label: "决策点", DecisionPoint: true, Impact: "放流量前人工确认基线压测"},
+		},
+	}
+}
+
+// GetRunbookTemplate loads one template; built-in seeds fall through when no
+// user file shadows them.
 func GetRunbookTemplate(id string) (*RunbookTemplate, error) {
 	if !validStoreID(id) {
 		return nil, fmt.Errorf("runbook template %s: invalid id", id)
 	}
 	b, err := os.ReadFile(filepath.Join(runbookTplsDir(), id+".json"))
-	if err != nil {
+	if err == nil {
+		var t RunbookTemplate
+		if err := json.Unmarshal(b, &t); err != nil {
+			return nil, err
+		}
+		return &t, nil
+	}
+	if !os.IsNotExist(err) {
 		return nil, err
 	}
-	var t RunbookTemplate
-	if err := json.Unmarshal(b, &t); err != nil {
-		return nil, err
+	if strings.HasPrefix(id, BuiltinRunbookIDPrefix) {
+		if t := builtinRunbookSkel(); t.ID == id {
+			return &t, nil
+		}
 	}
-	return &t, nil
+	return nil, os.ErrNotExist
 }
 
-// ListRunbookTemplates returns all templates, newest first.
+// ListRunbookTemplates returns all templates (user files + built-in seeds),
+// newest first.
 func ListRunbookTemplates() ([]RunbookTemplate, error) {
 	entries, err := os.ReadDir(runbookTplsDir())
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
 	out := []RunbookTemplate{}
+	seen := map[string]bool{}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
@@ -196,7 +233,11 @@ func ListRunbookTemplates() ([]RunbookTemplate, error) {
 		if err != nil {
 			continue // 坏文件跳过——模板库是便利层，一张坏卡不拖垮列表
 		}
+		seen[t.ID] = true
 		out = append(out, *t)
+	}
+	if skel := builtinRunbookSkel(); !seen[skel.ID] {
+		out = append(out, skel)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
@@ -206,6 +247,9 @@ func ListRunbookTemplates() ([]RunbookTemplate, error) {
 func DeleteRunbookTemplate(id string) error {
 	if !validStoreID(id) {
 		return fmt.Errorf("runbook template %s: invalid id", id)
+	}
+	if strings.HasPrefix(id, BuiltinRunbookIDPrefix) {
+		return fmt.Errorf("runbook template %s: 内置模板不可删除——复制一份后改副本", id)
 	}
 	StateEventSnap(StateEventTplDelete, id, StateActorUser, filepath.Join(runbookTplsDir(), id+".json"))
 	runbookTplMu.Lock()

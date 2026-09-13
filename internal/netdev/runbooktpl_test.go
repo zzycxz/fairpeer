@@ -57,7 +57,7 @@ func TestRunbookTplLifecycle(t *testing.T) {
 		t.Fatalf("get: %v %+v", err, got)
 	}
 	list, err := ListRunbookTemplates()
-	if err != nil || len(list) != 1 {
+	if err != nil || len(list) != 2 { // 用户 1 条 + 内置骨架
 		t.Fatalf("list: %v %d", err, len(list))
 	}
 	if err := DeleteRunbookTemplate(tpl.ID); err != nil {
@@ -65,6 +65,14 @@ func TestRunbookTplLifecycle(t *testing.T) {
 	}
 	if _, err := GetRunbookTemplate(tpl.ID); err == nil {
 		t.Fatal("deleted template still loads")
+	}
+	// 内置骨架：Get 可读、Delete 拒绝、List 始终在列。
+	skel, err := GetRunbookTemplate("RBB-skel-vllm-standalone")
+	if err != nil || len(skel.Steps) != 4 {
+		t.Fatalf("builtin skeleton: %v %+v", err, skel)
+	}
+	if err := DeleteRunbookTemplate("RBB-skel-vllm-standalone"); err == nil {
+		t.Error("builtin template delete must be refused")
 	}
 }
 
