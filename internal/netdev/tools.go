@@ -327,6 +327,10 @@ func (m *Manager) execSealed(ctx context.Context, deviceName, command string, in
 		// the built-in table. Still one plain metachar-free line at this point.
 		if c, ok := logPathReadOverride(device, drv, command); ok {
 			class = c
+		} else if c, ok := curlReadOverride(drv, command); ok {
+			// curl 尾参收紧（E6，curlread.go）：curl 已从前缀读表除名，
+			// 改走整条命令的 token 级语法校验（URL 收尾、flag 白名单）。
+			class = c
 		}
 	}
 	base := ExecResult{Device: deviceName, Command: command, Class: class.String()}

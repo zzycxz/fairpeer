@@ -69,7 +69,10 @@ var linuxTables = classTables{
 		"ip addr", "ip a", "ip link", "ip l", "ip route", "ip r", "ip neigh", "ip -s link",
 		"ip rule show", "ss ", "netstat ", "ping ", "ping6 ", "traceroute ", "tracepath ",
 		"dig ", "nslookup ", "host ", "ifconfig", "ethtool ", "arp ", "arping ",
-		"curl -I ", // HEAD-only, explicit URL on the command line; no data channel
+		// curl 刻意不在读表（E6，2026-09-13）：前缀模型管不住尾参——`curl -I `
+		// 的空格边界允许追加 -o（写文件）/-T（上传）/第二 URL。探活形态改走
+		// curlReadOverride（token 级语法校验：URL 收尾 + flag 白名单，见
+		// internal/netdev/curlread.go）；其余形态走 extra_read 逐条授予。
 		// system state
 		"ps ", "ps", "top -b", "df ", "df", "free ", "free", "du -sh", "du -s",
 		// 部署只读检查段（MODEL_DEPLOY E3 安全子集，2026-09-13）：
