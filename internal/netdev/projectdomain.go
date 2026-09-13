@@ -14,8 +14,10 @@ package netdev
 //   - 项目 policy/confirmers 在提案审批链生效（approve.go 侧）。
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/zzycxz/fairpeer/internal/config"
 	"github.com/zzycxz/fairpeer/internal/netdev/driver"
@@ -100,11 +102,24 @@ func (m *Manager) classifyForDomain(deviceName, command string) driver.Class {
 	return drv.Classify(command)
 }
 
-// projectDenyMatches checks the project's deny prefixes against the normalized
-// command (word-boundary prefix, same discipline as the classifier tables).
-func projectDenyMatches(p config.NetDevProject, command string) bool {
+// projectDenyVerdict applies the project's deny prefixes with the allow
+// exception (v1.1): deny 命中且 allow 也命中 → 不拒（allow 只豁免项目层——
+// 全局 guardrail 与分类器在后续照常裁决，所以仍只许收紧，不会放大权限）。
+func projectDenyVerdict(p config.NetDevProject, command string) bool {
+	if !projectDenyMatches(p.Deny, command) {
+		return false
+	}
+	if projectDenyMatches(p.Allow, command) {
+		return false // allow 例外：豁免本项目 deny
+	}
+	return true
+}
+
+// projectDenyMatches checks deny/allow prefixes against the normalized command
+// (word-boundary prefix, same discipline as the classifier tables).
+func projectDenyMatches(prefixes []string, command string) bool {
 	normalized := strings.Join(strings.Fields(strings.ToLower(command)), " ")
-	for _, prefix := range p.Deny {
+	for _, prefix := range prefixes {
 		if normalized == prefix || strings.HasPrefix(normalized, prefix+" ") {
 			return true
 		}
@@ -120,8 +135,8 @@ func (m *Manager) projectDomainVerdict(deviceName, command string, class driver.
 	if !active {
 		return ExecResult{}, true
 	}
-	// deny 前缀：域内外都拒（项目级收紧，与全局 guardrail 叠加）。
-	if projectDenyMatches(proj, command) {
+	// deny 前缀（allow 可豁免）：域内外都拒（项目级收紧，与全局 guardrail 叠加）。
+	if projectDenyVerdict(proj, command) {
 		r := ExecResult{Device: deviceName, Command: command, Refused: true, Class: "guardrail",
 			Refusal: fmt.Sprintf("command matches project %q deny list — the active project forbids this operation shape. Do not retry.", proj.Name)}
 		return r, false
@@ -131,6 +146,13 @@ func (m *Manager) projectDomainVerdict(deviceName, command string, class driver.
 		return ExecResult{}, true // 清单外设备走既有路径
 	}
 	if deviceInProject(d, proj) {
+		// v1.1：项目 policy=read-only 运行时写地板——域内也一样，非 read 全拒
+		// （提案 cli 步骤走私有写路径不经此处，由 ExecuteProposal 侧同口径拦截）。
+		if proj.Policy == "read-only" && class != driver.Read {
+			r := ExecResult{Device: deviceName, Command: command, Refused: true, Class: "guardrail",
+				Refusal: fmt.Sprintf("project %q policy is read-only — write/dangerous operations are refused even in-domain. Do not retry.", proj.Name)}
+			return r, false
+		}
 		return ExecResult{}, true // 域内：放行
 	}
 	// 域外（J4-A）：只读放行，其余拒绝——拒绝写明项目与操作类别。
@@ -167,4 +189,37 @@ func approveOperatorVerdict(p config.NetDevProject, operator string) (bool, stri
 		}
 	}
 	return false, fmt.Sprintf("operator %q is not in project %q confirmers — approval refused", op, p.Name)
+}
+
+// signApprovalWithDomain is the J5 升格 half: when trustdomain is enabled AND
+// the local node is admitted, the operator name must match the LOCAL domain
+// member's display name (the key lives on this machine — self-report cannot
+// claim someone else), and the approval is signed with the domain identity
+// key as tamper-evident evidence. 启用但未入域 → fail-closed。
+func (m *Manager) signApprovalWithDomain(proposalID, operator string) (string, error) {
+	node, err := SharedRemoteNode(m.cfg)
+	if err != nil {
+		return "", fmt.Errorf("trustdomain 已启用但本机未入域——第二把锁拒绝降级为自报（先 init/join，或关闭 trustdomain）：%w", err)
+	}
+	self := node.Self()
+	if self == nil {
+		return "", fmt.Errorf("trustdomain 本机身份不可用")
+	}
+	id := node.Identity()
+	var display string
+	if st := node.State(); st != nil {
+		if info := st.Member(id); info != nil {
+			display = info.DisplayName
+		}
+	}
+	if strings.TrimSpace(operator) == "" || display == "" ||
+		!strings.EqualFold(strings.TrimSpace(operator), display) {
+		return "", fmt.Errorf("operator %q 不匹配本域身份 %q（display %q）——域开启时批准必须以域身份进行", operator, id, display)
+	}
+	msg := fmt.Sprintf("fairpeer/approve|%s|%s|%d", proposalID, strings.TrimSpace(operator), time.Now().Unix())
+	sig := self.Sign([]byte(msg))
+	if len(sig) == 0 {
+		return "", fmt.Errorf("域身份签名失败")
+	}
+	return hex.EncodeToString(sig), nil
 }

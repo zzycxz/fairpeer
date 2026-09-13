@@ -18,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   G-P1/G-L1 自此满足开工准入；实现仍待 J4/J5 拍板（G-P1 ~1.5-2 周）与
   K2 原型验证（G-L1 ~2 周）。
 
+### feat(netdev): G-P1 v1.1——allow 例外/policy 只读地板/trustdomain 签名升格（台账 v1.1 剩余三项全清）
+
+- **allow 字段语义**：`Allow` 是项目 deny 的域内例外白名单——deny 命中且
+  allow 也命中则豁免本项目 deny；allow 只豁免**项目层**，全局 guardrail 与
+  分类器照常裁决，"只许收紧"纪律不破。前端项目编辑器补 allow 输入。
+- **policy=read-only 运行时写地板**：命令层——活动项目 policy=read-only 时
+  域内非 read 命令全部拒绝；提案层——盖章到只读项目的提案**整条拒执行**
+  （含走 cli 私有写路径的步骤，命令层地板盖不住的缺口在执行闸门补齐）。
+- **trustdomain 签名升格接线**（K1 §二.2）：trustdomain 启用且本机已入域 →
+  批准操作者必须对上本域成员显示名（密钥在本机，自报不可冒名），批准以域
+  Ed25519 私钥对 "fairpeer/approve|<id>|<operator>|<unix>" 签名，hex 存入
+  `p.ApproverSig`（确认可归属到域密钥；跨实例核验随 G-L1）；启用但未入域 →
+  fail-closed 拒批（残缺基建不下放第二把锁）。
+- 测试：TestProjectAllowException / TestProjectReadOnlyFloor（命令层+提案层）/
+  TestTrustDomainApprovalUpgrade（启用未入域 fail-closed）。
+
 ### feat(netdev): G-P1 项目安全域 v1（批⑤开工，J4/J5 已拍板）——域从视图升格为安全语义
 
 - **J4/J5 拍板落档**（docs/NETDEV_PROJECT_DOMAIN_DESIGN.md §三/§五）：J4=项目外设备

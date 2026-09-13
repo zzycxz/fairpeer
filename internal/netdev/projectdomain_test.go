@@ -14,6 +14,7 @@ func projectDomainManager(t *testing.T) *Manager {
 	findingsDirOverr = t.TempDir()
 	proposalsDirOverride = t.TempDir()
 	SetAuditPath(t.TempDir() + "/audit.jsonl")
+	t.Cleanup(func() { SetAuditPath("") })
 	cfg := config.Default()
 	cfg.NetDev.Enabled = true
 	cfg.NetDev.Groups = []config.NetDevGroup{
@@ -155,5 +156,67 @@ func TestBlueteamEnvelopeValidation(t *testing.T) {
 	err := config.ValidateNetDev(nd)
 	if err == nil || !strings.Contains(err.Error(), "proposal+confirm2") {
 		t.Errorf("blueteam without double-lock must be refused: %v", err)
+	}
+}
+
+// v1.1-1：allow 是 deny 的域内例外白名单——命中 allow 的命令豁免项目 deny；
+// 未命中 allow 的 deny 命中照拒。
+func TestProjectAllowException(t *testing.T) {
+	m := projectDomainManager(t)
+	m.cfg.NetDev.Projects[0].Allow = []string{"undo stp region"} // 例外：区域视图的 undo 放行
+	proj := m.cfg.NetDev.Projects[0]
+	if err := m.SetActiveProject("蓝队A"); err != nil {
+		t.Fatal(err)
+	}
+	// deny 命中且 allow 也命中 → 豁免（verdict 放行）。
+	if _, ok := m.projectDomainVerdict("sw-a1", "undo stp region 1", driver.Write); !ok {
+		t.Error("allow exception must exempt the deny refusal")
+	}
+	// deny 命中但 allow 未命中 → 拒。
+	if _, ok := m.projectDomainVerdict("sw-a1", "undo stp all", driver.Write); ok {
+		t.Error("deny hit without allow match must still refuse")
+	}
+	// 只许收紧：allow 豁免的是项目层——危险分类在分类器层照旧（此处仅验
+	// 项目层不拒；全局层不可被 allow 打开）。
+	if projectDenyVerdict(proj, "undo stp region 1") {
+		t.Error("allow-matched command must skip the project deny verdict")
+	}
+}
+
+// v1.1-2：policy=read-only 运行时写地板——域内 write 也拒，read 放行。
+func TestProjectReadOnlyFloor(t *testing.T) {
+	m := projectDomainManager(t)
+	ro := config.NetDevProject{Name: "只读域", Groups: []string{"campus-a"}, Policy: "read-only"}
+	m.cfg.NetDev.Projects = append(m.cfg.NetDev.Projects, ro)
+	if err := m.SetActiveProject("只读域"); err != nil {
+		t.Fatal(err)
+	}
+	if r, ok := m.projectDomainVerdict("sw-a1", "systemctl restart nginx", driver.Write); ok || !strings.Contains(r.Refusal, "read-only") {
+		t.Errorf("read-only floor must refuse in-domain write: ok=%v %+v", ok, r)
+	}
+	if _, ok := m.projectDomainVerdict("sw-a1", "display version", driver.Read); !ok {
+		t.Error("read must pass under read-only policy")
+	}
+	// 提案层：盖章到只读项目的提案整条拒执行（含 cli 私有写路径步骤）。
+	p := &Proposal{Intent: "只读域内变更", Status: ProposalApproved, Project: "只读域",
+		Steps: []ProposalStep{{Device: "sw-a1", Type: "cli", Commands: []string{"sys"}, Rollback: []string{"undo sys"}}}}
+	SaveProposal(p)
+	if _, err := m.ExecuteProposal(context.Background(), p.ID); err == nil ||
+		!strings.Contains(err.Error(), "read-only") {
+		t.Errorf("read-only project proposal must refuse execution: %v", err)
+	}
+}
+
+// v1.1-3：trustdomain 启用时的批准签名升格——启用但未入域 = fail-closed 拒批
+// （SharedRemoteNode 无法建立节点）；名单校验照旧先行。
+func TestTrustDomainApprovalUpgrade(t *testing.T) {
+	m := projectDomainManager(t)
+	m.cfg.TrustDomain.Enabled = true // 启用但测试环境无账本/数据目录
+	p := &Proposal{Intent: "四眼", Status: ProposalDraft, Project: "蓝队A",
+		Steps: []ProposalStep{{Device: "sw-a1", Type: "cli", Commands: []string{"sys"}, Rollback: []string{"undo sys"}}}}
+	SaveProposal(p)
+	_, err := m.ApproveProposalAs(p.ID, true, "张三")
+	if err == nil || !strings.Contains(err.Error(), "trustdomain") {
+		t.Errorf("enabled-but-not-joined must fail closed: %v", err)
 	}
 }

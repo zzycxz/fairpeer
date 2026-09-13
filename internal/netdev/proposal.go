@@ -124,6 +124,10 @@ type Proposal struct {
 	// Project 是创建时的项目域盖章（G-P1）：跨项目目标步骤在执行链上被拒
 	// ——域从视图升格为安全语义的关键字段。空=未在任何项目上下文中起草。
 	Project string `json:"project,omitempty"`
+	// ApproverSig 是 J5 升格件：trustdomain 启用时，本地域身份对
+	// "fairpeer/approve|<id>|<operator>|<unix>" 的 Ed25519 签名（hex）——
+	// 确认可归属到域密钥，自报名不可冒（跨实例核验随 G-L1）。
+	ApproverSig string `json:"approver_sig,omitempty"`
 	// 观察期（§7.1）：done → watching（默认 30 分钟）→ closed；劣化触发 Finding。
 	WatchUntil *time.Time `json:"watch_until,omitempty"`
 	WatchNote  string     `json:"watch_note,omitempty"`
@@ -563,15 +567,26 @@ func (m *Manager) ApproveProposalAs(id string, confirm2 bool, operator string) (
 		return nil, fmt.Errorf("proposal %s: status %s, only drafts can be approved", id, p.Status)
 	}
 	// J5：confirmers 名单校验（活动项目或提案盖章项目的名单为准）。
+	// v1.1 升格：trustdomain 启用且已入域 → 操作者必须对上本机域身份的
+	// 显示名（密钥在本机，自报不可冒名），批准以域私钥签名留证；启用但未
+	// 入域 → fail-closed 拒批（残缺基建不下放第二把锁）。
 	projName := p.Project
 	if projName == "" {
 		projName = m.ActiveProjectName()
 	}
+	var approverSig string
 	if projName != "" {
 		for _, pj := range m.cfg.NetDev.Projects {
 			if pj.Name == projName {
 				if ok, why := approveOperatorVerdict(pj, operator); !ok {
 					return nil, fmt.Errorf("proposal %s: %s", id, why)
+				}
+				if m.cfg.TrustDomain.Enabled {
+					sig, err := m.signApprovalWithDomain(id, operator)
+					if err != nil {
+						return nil, fmt.Errorf("proposal %s: trustdomain 升格失败：%v", id, err)
+					}
+					approverSig = sig
 				}
 				break
 			}
@@ -618,6 +633,7 @@ func (m *Manager) ApproveProposalAs(id string, confirm2 bool, operator string) (
 	if strings.TrimSpace(operator) != "" {
 		p.Approver = strings.TrimSpace(operator) // J5：确认可归属（自报基线）
 	}
+	p.ApproverSig = approverSig
 	p.Confirm2 = confirm2
 	if err := saveProposalLocked(p); err != nil {
 		return nil, err
@@ -717,6 +733,8 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 	}
 	// G-P1 跨域拒绝（J4）：盖章项目的域覆盖提案全部目标设备——任何目标落在
 	// 域外 = 拒执行（写面无「域外只读」，视图放行不等于执行放行）。
+	// v1.1 同处补 policy=read-only 写地板：只读项目的提案（含 cli 私有写
+	// 路径的步骤）整条拒执行——命令层地板盖不住私有写路径，这里是闸门。
 	if p.Project != "" {
 		var proj config.NetDevProject
 		found := false
@@ -727,6 +745,9 @@ func (m *Manager) ExecuteProposal(ctx context.Context, id string) (*Proposal, er
 			}
 		}
 		if found {
+			if proj.Policy == "read-only" {
+				return nil, fmt.Errorf("proposal %s (project %q): project policy is read-only — 提案执行整条拒绝（含 cli 私有写路径步骤）；变更请改到有写权限的项目域", id, p.Project)
+			}
 			for _, s := range p.Steps {
 				d, ok := m.cfg.NetDevDeviceByName(s.Device)
 				if !ok {

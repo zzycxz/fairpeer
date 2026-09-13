@@ -231,6 +231,7 @@ type NetDevProjectView struct {
 	Type       string   `json:"type,omitempty"`
 	Policy     string   `json:"policy,omitempty"`
 	Deny       []string `json:"deny,omitempty"`
+	Allow      []string `json:"allow,omitempty"`
 	Confirmers []string `json:"confirmers,omitempty"`
 }
 
@@ -331,7 +332,7 @@ func (a *App) NetDevSettings() (NetDevSettingsView, error) {
 		v.ExtraRead = map[string][]string{}
 	}
 	for _, p := range cfg.NetDev.Projects {
-		v.Projects = append(v.Projects, NetDevProjectView{Name: p.Name, Groups: p.Groups, Note: p.Note, Type: p.Type, Policy: p.Policy, Deny: p.Deny, Confirmers: p.Confirmers})
+		v.Projects = append(v.Projects, NetDevProjectView{Name: p.Name, Groups: p.Groups, Note: p.Note, Type: p.Type, Policy: p.Policy, Deny: p.Deny, Allow: p.Allow, Confirmers: p.Confirmers})
 	}
 	for _, p := range cfg.NetDev.Presets {
 		v.Presets = append(v.Presets, NetDevPresetView{Name: p.Name, Commands: p.Commands, Vendors: p.Vendors})
@@ -593,7 +594,7 @@ func (a *App) SetNetDevSettings(v NetDevSettingsView) (err error) {
 				nd.Projects = append(nd.Projects, config.NetDevProject{
 					Name: strings.TrimSpace(p.Name), Groups: p.Groups, Note: strings.TrimSpace(p.Note),
 					Type: strings.TrimSpace(p.Type), Policy: strings.TrimSpace(p.Policy),
-					Deny: p.Deny, Confirmers: p.Confirmers,
+					Deny: p.Deny, Allow: p.Allow, Confirmers: p.Confirmers,
 				})
 			}
 		} else {

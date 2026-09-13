@@ -2255,10 +2255,12 @@ export interface NetDevProjectView {
   groups: string[];
   note: string;
   // G-P1 安全域（批⑤）：类型驱动联动（blueteam 强制双锁）；deny 前缀域内
-  // 也拒；policy 只许收紧；confirmers=J5 审批人名单（空=任意人工）。
+  // 也拒（allow 是 deny 的域内例外，只许收紧）；policy 只许收紧；
+  // confirmers=J5 审批人名单（空=任意人工）。
   type?: string;
   policy?: string;
   deny?: string[];
+  allow?: string[];
   confirmers?: string[];
 }
 

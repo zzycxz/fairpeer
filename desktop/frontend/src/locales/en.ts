@@ -3767,6 +3767,8 @@ export const en = {
   "ndv.sets.projPolicy.pc2": "proposal+confirm2",
   "ndv.sets.fProjDeny": "denied command prefixes in-domain (comma separated)",
   "ndv.sets.phProjDeny": "undo stp, reboot",
+  "ndv.sets.fProjAllow": "allow exceptions to deny (comma separated; exempts only the project layer, global guardrails still apply)",
+  "ndv.sets.phProjAllow": "undo stp region",
   "ndv.sets.fProjConfirmers": "confirm2 approvers (comma separated; empty = any human; J5)",
   "ndv.sets.phProjConfirmers": "alice, bob",
   "ndv.sets.needProjectName": "site name is required",

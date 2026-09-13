@@ -3754,6 +3754,8 @@ export const zh: Record<DictKey, string> = {
   "ndv.sets.projPolicy.pc2": "提案+二次确认",
   "ndv.sets.fProjDeny": "域内拒绝前缀（逗号分隔，如 undo stp, reboot）",
   "ndv.sets.phProjDeny": "undo stp, reboot",
+  "ndv.sets.fProjAllow": "deny 的例外前缀（逗号分隔；只豁免项目层，全局护栏照旧）",
+  "ndv.sets.phProjAllow": "undo stp region",
   "ndv.sets.fProjConfirmers": "二次确认批准人（逗号分隔；空=任意人工；J5）",
   "ndv.sets.phProjConfirmers": "张三, 李四",
   "ndv.sets.needProjectName": "站点名为必填项",

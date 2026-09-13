@@ -513,11 +513,14 @@ type NetDevProject struct {
 	Note   string   `toml:"note"`
 	// G-P1 安全域字段（批⑤，D1 软迁移：全部缺省安全值，旧 config 加载通过）。
 	// Type 驱动联动（blueteam 强制双锁信封）；Deny 是项目内额外拒绝的命令
-	// 前缀（只许收紧）；Policy 只许收紧于全局档；Confirmers=confirm2 合格
+	// 前缀（只许收紧）；Allow 是 Deny 的域内例外白名单（命中 allow 的命令
+	// 豁免本项目 deny——只豁免项目层，全局 guardrail 与分类器照常裁决，
+	// 因此仍然只许收紧）；Policy 只许收紧于全局档；Confirmers=confirm2 合格
 	// 批准人（J5：自报基线+trustdomain 升格；空=任意人工）。
-	Type       string   `toml:"type"`      // generic | netdev | aicompute | blueteam（空=generic）
-	Deny       []string `toml:"deny"`      // 项目内拒绝的命令前缀（归一化后前缀匹配）
-	Policy     string   `toml:"policy"`    // read-only | proposal | proposal+confirm2（空=继承全局）
+	Type       string   `toml:"type"`   // generic | netdev | aicompute | blueteam（空=generic）
+	Deny       []string `toml:"deny"`   // 项目内拒绝的命令前缀（归一化后前缀匹配）
+	Allow      []string `toml:"allow"`  // deny 的域内例外（deny 命中且 allow 也命中 → 不拒）
+	Policy     string   `toml:"policy"` // read-only | proposal | proposal+confirm2（空=继承全局）
 	Confirmers []string `toml:"confirmers"`
 }
 

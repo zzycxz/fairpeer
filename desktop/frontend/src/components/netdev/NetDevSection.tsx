@@ -1339,6 +1339,11 @@ export function NetDevSection() {
                 value={(editingProject.draft.deny ?? []).join(", ")}
                 onChange={e => setEditingProject({ ...editingProject, draft: { ...editingProject.draft, deny: e.target.value.split(",").map(s => s.trim()).filter(Boolean) } })} />
             </Field>
+            <Field label={t("ndv.sets.fProjAllow")}>
+              <input className="mem-input" placeholder={t("ndv.sets.phProjAllow")}
+                value={(editingProject.draft.allow ?? []).join(", ")}
+                onChange={e => setEditingProject({ ...editingProject, draft: { ...editingProject.draft, allow: e.target.value.split(",").map(s => s.trim()).filter(Boolean) } })} />
+            </Field>
             <Field label={t("ndv.sets.fProjConfirmers")}>
               <input className="mem-input" placeholder={t("ndv.sets.phProjConfirmers")}
                 value={(editingProject.draft.confirmers ?? []).join(", ")}
