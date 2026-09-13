@@ -366,10 +366,14 @@ type NetDevDevice struct {
 	Protocols []string `toml:"protocols"` // priority order: ssh, netconf（telnet 已裁决删除，§6.4）
 	// GPU（SCENARIO_SPEC S1-2）：智算主机标记——分诊电池追加 GPU 档
 	// （nvidia-smi/npu-smi 只读三表 + XID 异常立案），设备卡显示 GPU 徽标。
-	GPU           bool   `toml:"gpu"`
-	Username      string `toml:"username"`
-	PasswordEnv   string `toml:"password_env"`
-	IdentityFile  string `toml:"identity_file"`
+	GPU bool `toml:"gpu"`
+	// Accel 是加速卡维度（M-1，ACCEL_SPEC §4.1）：与 vendor 正交——服务器
+	// 是 vendor=linux + accel=ascend。采集电池按此分发（"" → nvidia 缺省；
+	// 探测式缺省随真机校准）。昇腾 health 采集走 npu-smi 薄驱动。
+	Accel        string `toml:"accel"`
+	Username     string `toml:"username"`
+	PasswordEnv  string `toml:"password_env"`
+	IdentityFile string `toml:"identity_file"`
 	PassphraseEnv string `toml:"passphrase_env"`
 	UseSSHConfig  bool   `toml:"use_ssh_config"`
 	Encoding      string `toml:"encoding"` // auto | utf-8 | gbk
@@ -716,6 +720,11 @@ func ValidateNetDev(nd NetDevConfig) error {
 			return fmt.Errorf("netdev device %q: duplicate name", d.Name)
 		}
 		seenDevices[d.Name] = true
+		switch d.Accel {
+		case "", "nvidia", "ascend", "enflame", "kunlunxin", "cambricon":
+		default:
+			return fmt.Errorf("netdev device %q: accel must be nvidia|ascend|enflame|kunlunxin|cambricon (empty = nvidia 缺省)", d.Name)
+		}
 		if strings.TrimSpace(d.Address) == "" && strings.TrimSpace(d.ConsolePort) == "" {
 			// Console devices may not know their IP yet — the serial line is
 			// the only reach; everyone else still needs an address.

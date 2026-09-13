@@ -2186,6 +2186,9 @@ export interface NetDevGPUBoardCard {
   memUsedMB?: number;
   memTotalMB?: number;
   xidMax?: number;
+  // M-1 归一：昇腾 health 异常等非 XID 事件的卡级展示。
+  errorCode?: number;
+  errorCodeKind?: string;
 }
 
 export interface NetDevGPUBoardDevice {

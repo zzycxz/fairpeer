@@ -291,7 +291,43 @@ func builtinRunbookLibrary() []RunbookTemplate {
 	)
 	lib = append(lib, opsSideTemplates()...)
 	lib = append(lib, platformTemplates()...)
+	lib = append(lib, ascendTemplates()...)
 	return lib
+}
+
+// ascendTemplates is 批⑥ M-1 的模板件：昇腾 910B 部署蓝本（调研轮 1 §六
+// 9 步）runbook 化——vllm-ascend/MindIE 引擎二选一由变量承载，命令内容与
+// NVIDIA 版逐段同构（引擎差异属模板层，不属割接引擎层）。
+func ascendTemplates() []RunbookTemplate {
+	return []RunbookTemplate{
+		{
+			ID:        BuiltinRunbookIDPrefix + "deploy-vllm-ascend",
+			Name:      "部署：vLLM-Ascend 单机（910B）",
+			Scenario:  "model-deploy",
+			Vars:      []string{"npu_host", "model_path", "served_name", "svc_port", "tp_size"},
+			WindowMin: 180,
+			Notes: "昇腾 910B：前置走 npu-smi（health 采集已按 accel=ascend 分发）；W8A8 主流量化" +
+				"（950 前无 FP8，模型档案 hw_family=ascend-910b）；驱动/CANN 版本成对升级——" +
+				"版本不符按值班手册簇 1 升级驱动。vllm-ascend 与 MindIE 二选一：改变更段启动命令即可。",
+			Steps: []RunbookTplStep{
+				{Label: "前置：NPU 可见与健康", Device: "{{npu_host}}", Command: "npu-smi info", EstSec: 30},
+				{Label: "前置：健康明细", Device: "{{npu_host}}", Command: "npu-smi info -t health", EstSec: 30},
+				{Label: "前置：CANN/驱动版本", Device: "{{npu_host}}", Command: "cat /usr/local/Ascend/ascend-toolkit/latest/version.cfg", EstSec: 20},
+				{Label: "前置：权重目录", Device: "{{npu_host}}", Command: "ls -l {{model_path}}", EstSec: 20},
+				{Label: "权重对账（F2 校验段）", Device: "{{npu_host}}",
+					Command: "sha256sum {{model_path}}/config.json {{model_path}}/model.safetensors.index.json", EstSec: 60},
+				{Label: "变更：启动服务", Device: "{{npu_host}}",
+					ProposalIntent: "部署 {{served_name}}（vllm-ascend，TP={{tp_size}}，端口 {{svc_port}}）",
+					ProposalCmds: []string{
+						"systemctl enable --now vllm-ascend-{{svc_port}}.service",
+					}, EstSec: 900},
+				{Label: "门：HTTP 探活", Device: "{{npu_host}}",
+					GateCmd: "curl -I http://127.0.0.1:{{svc_port}}/health", GateExpect: "200", GateSustain: 30, GateTimeout: 2400, EstSec: 600},
+				{Label: "决策点：放流量", DecisionPoint: true,
+					Impact: "确认 /v1/models 列出 {{served_name}}、基线压测通过后放流量；回退=stop 服务"},
+			},
+		},
+	}
 }
 
 // opsSideTemplates is 批③b 运维侧四变体（DP 扩副本/TP 重排/故障节点替换/

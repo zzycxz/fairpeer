@@ -89,7 +89,7 @@ export default function GpuBoardView({ onJump, onFocusDevice }: Props) {
                 <tbody>
                   {(d.cards ?? []).map(c => (
                     <tr key={c.index}>
-                      <td>#{c.index}</td>
+                      <td>#{c.index}{c.errorCodeKind && <span className="ndv__badge ndv__badge--warn" style={{ marginLeft: 6 }} title={c.errorCodeKind}>{c.errorCode ? `ERR ${c.errorCode}` : "非OK"}</span>}</td>
                       <td className="ndv-gpu__model">{c.name || "—"}</td>
                       <td className={`ndv-gpu__temp ${tempClass(c.tempC ?? 0)}`}>{c.tempC || "—"}°C</td>
                       <td>{c.utilPct ?? 0}%</td>

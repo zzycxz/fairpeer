@@ -66,6 +66,11 @@ type GPUCard struct {
 	MemUsedMB  uint64 `json:"memUsedMB,omitempty"`
 	MemTotalMB uint64 `json:"memTotalMB,omitempty"`
 	UtilPct    int    `json:"utilPct,omitempty"`
+	// ErrorCode/Kind 归一（M-1，ACCEL_SPEC §4.2）：XID ↔ 昇腾错误码 ↔ 各厂商
+	// 错误码共用同两列。nvidia 卡留空（XID 走设备级 GPUXID* 通道）；
+	// ErrorCodeKind 现值 "npu-health"（昇腾 health 列非 OK）。
+	ErrorCode     int    `json:"errorCode,omitempty"`
+	ErrorCodeKind string `json:"errorCodeKind,omitempty"`
 }
 
 // MemPct returns used/total as a 0-100 int (0 = total unknown).
@@ -190,11 +195,26 @@ func extractXIDs(out string) (codes []int, lines []string) {
 // collector got device-side answers (transport reached the device) — alert
 // rules over gpu.* metrics and the XID finding lifecycle only act on sampled
 // rounds (a refused poll means WE couldn't look, not that the host healed).
+// accelForDevice resolves the collection battery: explicit device accel wins;
+// empty falls to nvidia (the surveyed default silicon) — 探测式缺省（按
+// 命令存在性猜厂商）留真机校准，先不做猜测式执行。
+func accelForDevice(d config.NetDevDevice) string {
+	if d.Accel != "" {
+		return d.Accel
+	}
+	return "nvidia"
+}
+
 func (m *Manager) pollGPUHealth(ctx context.Context, deviceName string) DeviceHealth {
 	h := DeviceHealth{Device: deviceName, Time: time.Now().UTC(), Interfaces: []IfHealth{}}
-	if _, ok := m.cfg.NetDevDeviceByName(deviceName); !ok {
+	d, ok := m.cfg.NetDevDeviceByName(deviceName)
+	if !ok {
 		h.LastError = "not in inventory"
 		return h
+	}
+	// M-1：电池按 accel 维度分发——薄驱动归一到同一 DeviceHealth/GPUCard。
+	if accelForDevice(d) == "ascend" {
+		return m.pollAscendHealth(ctx, deviceName)
 	}
 	res := m.execSealed(ctx, deviceName, gpuQueryCmd, true)
 	if res.Refused {

@@ -28,6 +28,9 @@ type GPUBoardCard struct {
 	MemUsedMB  uint64 `json:"memUsedMB,omitempty"`
 	MemTotalMB uint64 `json:"memTotalMB,omitempty"`
 	XIDMax     int    `json:"xidMax,omitempty"` // 本轮该卡相关 XID（设备级归并，见 GPUBoardDevice）
+	// ErrorCode/Kind（M-1 归一）：昇腾 health 异常等非 XID 事件的卡级展示。
+	ErrorCode     int    `json:"errorCode,omitempty"`
+	ErrorCodeKind string `json:"errorCodeKind,omitempty"`
 }
 
 // GPUBoardDevice is one GPU host's block on the board.
@@ -109,7 +112,8 @@ func (m *Manager) BuildGPUBoard() *GPUBoard {
 			dev.Cards = append(dev.Cards, GPUBoardCard{
 				Index: c.Index, Name: c.Name, TempC: c.TempC, UtilPct: c.UtilPct,
 				MemPct: c.MemPct(), MemUsedMB: c.MemUsedMB, MemTotalMB: c.MemTotalMB,
-				XIDMax: h.GPUXIDMax,
+				XIDMax:    h.GPUXIDMax,
+				ErrorCode: c.ErrorCode, ErrorCodeKind: c.ErrorCodeKind,
 			})
 			b.TotalCards++
 			if c.TempC > b.WorstTemp {
