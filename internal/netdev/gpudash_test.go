@@ -97,13 +97,19 @@ func TestGPUTempSpark(t *testing.T) {
 	netdevStateDirOverr = t.TempDir()
 	t.Cleanup(func() { netdevStateDirOverr = "" })
 	seriesPath = ""
-	t.Cleanup(func() { seriesPath = "" })
+	seriesDirPath = ""
+	seriesMigratedFor = ""
+	t.Cleanup(func() { seriesPath = ""; seriesDirPath = ""; seriesMigratedFor = "" })
 
 	now := time.Now().Unix()
 	// 两个桶、两张卡：桶内取 max。直写 JSONL（RecordSeriesLabeled 不收时间戳）。
-	writeSeries := func(t int64, metric string, v float64) {
-		line := `{"t":` + gpuDashItoa(t) + `,"d":"s1","m":` + gpuDashQ(metric) + `,"v":` + gpuDashFtoa(v) + "}\n"
-		f, _ := os.OpenFile(seriesFile(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	writeSeries := func(ts int64, metric string, v float64) {
+		line := `{"t":` + gpuDashItoa(ts) + `,"d":"s1","m":` + gpuDashQ(metric) + `,"v":` + gpuDashFtoa(v) + "}\n"
+		_ = os.MkdirAll(seriesDir(), 0o700) // 直写绕过 Record 入口，父目录自己建
+		f, err := os.OpenFile(seriesShardPath("s1"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			t.Fatalf("open shard: %v", err)
+		}
 		_, _ = f.WriteString(line)
 		f.Close()
 	}

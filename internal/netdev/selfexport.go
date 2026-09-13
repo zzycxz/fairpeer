@@ -59,7 +59,7 @@ func (m *Manager) ExportState() (string, error) {
 	snap["devices"] = devs
 	snap["db_sources"] = dbs
 	snap["findings"] = fs
-	if tail := fileTail(seriesFile(), 200); len(tail) > 0 {
+	if tail := seriesTailAcrossShards(200); len(tail) > 0 {
 		snap["series_tail"] = tail
 	}
 	if tail := fileTail(AuditPath(), 100); len(tail) > 0 {
@@ -95,4 +95,30 @@ func fileTail(path string, n int) []string {
 		}
 	}
 	return out
+}
+
+// seriesTailAcrossShards merges the recent-activity tail across per-device
+// shards (F11 layout) for the support export: each shard contributes at most
+// `perShard` lines, the union is capped at `total` latest lines in shard
+// order. Diagnostic-grade (not a query API — reads happen under seriesMu in
+// the series package, this only piggybacks on directory stability).
+func seriesTailAcrossShards(total int) []string {
+	seriesMu.Lock()
+	defer seriesMu.Unlock()
+	entries, err := os.ReadDir(seriesDir())
+	if err != nil {
+		return nil
+	}
+	perShard := 200
+	var merged []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		merged = append(merged, fileTail(filepath.Join(seriesDir(), e.Name()), perShard)...)
+	}
+	if len(merged) > total {
+		merged = merged[len(merged)-total:]
+	}
+	return merged
 }

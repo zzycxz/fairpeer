@@ -317,10 +317,12 @@ func TestDisabledRuleResolvesAndPrunes(t *testing.T) {
 func TestRecordGPUSeriesLabeled(t *testing.T) {
 	netdevStateDirOverr = t.TempDir()
 	t.Cleanup(func() { netdevStateDirOverr = "" })
-	// seriesFile() 缓存首次解析的路径（包级）——前一个测试的 TempDir 已被
+	// series 锚点缓存首次解析的路径（包级）——前一个测试的 TempDir 已被
 	// 清理，缓存路径会静默写失败；重置让本测试的 override 生效。
 	seriesPath = ""
-	t.Cleanup(func() { seriesPath = "" })
+	seriesDirPath = ""
+	seriesMigratedFor = ""
+	t.Cleanup(func() { seriesPath = ""; seriesDirPath = ""; seriesMigratedFor = "" })
 	h := DeviceHealth{Device: "g9", Reachable: true, GPUSampled: true,
 		GPU: []GPUCard{{Index: 1, TempC: 66, MemUsedMB: 2048, MemTotalMB: 40960, UtilPct: 30}}}
 	recordGPUSeries(h)
