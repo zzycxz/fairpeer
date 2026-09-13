@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(netdev): 0.2.5 批⑥昇腾双硬件 M-1——accel 维度 + npu-smi 薄驱动 + ErrorCode 归一 + 昇腾部署模板（fixture 先行，真机终验挂 G-C2）
+
+- **accel 维度**（ACCEL_SPEC §4.1）：设备新增 `accel` 字段（nvidia|ascend|enflame|kunlunxin|
+  cambricon，空=nvidia 缺省；探测式缺省挂真机）——与 vendor 正交：服务器=vendor:linux+accel:ascend。
+  GPU 健康采集按 accel 分发电池。
+- **昇腾薄驱动**（accel_ascend.go）：`pollAscendHealth` 一轮 `npu-smi info`（读表白名单形态，密封/
+  审计/脱敏零改动）→ `parseNPUInfo` 两行一芯表解析归一 `GPUCard`（温度/AICore%/显存）；Health 列
+  非 OK → `ErrorCode`+`ErrorCodeKind="npu-health"` 立案、GPUXIDMax/Seen 复用（hold/resume 语义与
+  XID 一致）；逐格容错 + note 通道（孤儿行丢弃留痕，不静默掩盖）。错误码 catalog 登录墙——分级
+  表诚实地留真机校准，不猜。
+- **展示归一**：GPUCard/GPUBoardCard 增 `errorCode/errorCodeKind` 列；大屏卡级 ERR 徽标
+  （数字码显 ERR n，字面态显非OK）；读表补 `cat /usr/local/Ascend` 版本文件前缀（E3 纪律 path 收窄）。
+- **模板**：`RBB-deploy-vllm-ascend`（910B 蓝本 9 步 runbook 化：npu-smi 前置→CANN 版本→权重对账→
+  vllm-ascend/MindIE 变更段→HTTP 门→决策点；W8A8 主流量化口径注记）。
+- 批⑥剩余：MindIE/容器形态变体与 enflame/kunlunxin 驱动按客户硬件入批（M-2/M-3 触发池）。
+
 ### feat(netdev): 0.2.5 批④指标面——/metrics 通用抓取 + series infer.* + 告警枚举 + 智算大屏服务层区（F3+F14+K3）
 
 - **F14 端点登记制抓取**：设备 `metrics_ports`（≤4）/`metrics_path`（默认 /metrics，字符集受控）
