@@ -31,13 +31,14 @@
 | **E4** | 机型能力档案最小实现（accel_profiles） | 设计已在 ACCEL_SPEC §8.3（字段/消费方已定），代码未做 | 部署参数（TP≤卡数、模型显存 vs 机型显存）无校验数据源，全凭人工 | `[[netdev.accel_profiles]]` 配置段 + 部署建议校验（告警不硬失败）+ GpuBoard readiness 徽标消费 | H20 档案下声明 TP=8×不匹配卡数 → 建议性告警可见 |
 | **E5** | GPU 值班 runbook 模板（文档级） | XID 怎么查/显存泄漏怎么查/NCCL hang 怎么查——散在调研报告（DEPLOY_SPEC §2.2 八簇失败模式表），未沉淀为值班手册 | 值班靠人记忆，排查路径不一致 | 把 DEPLOY_SPEC §2.2 八簇改写为《GPU 值班排查手册》（docs/，每簇：现象→只读检测→修复分类→升级路径） | 手册评审入库；值班培训可用 |
 | **E6** | **curl 前缀的尾参通道**（E3 修理过程中发现的既有安全缺口） | 读表既有 `curl -I ` 前缀：空格边界允许追加 `-o`（写文件）/`-T`（上传）/第二 URL——注释声称"HEAD-only 无数据通道"但前缀模型不约束尾参 | curl 类前缀收紧为"URL 后无尾参"的专用校验（logPathReadOverride 同款旁路范式），或引入结构化 http-check 步骤类型替代裸 curl | 恶意/注入场景无法借 curl 读表项获得写原语 |
+| **E7** | **模型能力档案（model card，部署校验的模型侧数据源）** | 开工审计发现：E4 机型档案只覆盖校验的机器侧——"模型 70B FP16(140G) vs 机型 VRAM"的 70B/140G 在 spec 里是硬编码例子，模型侧无数据源 | `[[netdev.model_cards]]`：name/params_B/quant 档（fp16/int8/int4 的 GB 估算=调研规则 FP16≈2GB/B）/kv 余量建议；内置常见系（Qwen/DeepSeek/GLM/Llama）+ 用户可扩；E4 校验消费两侧（模型档 × 机型档 → 建议/告警） | 声明 405B FP8 而机型 4×48G → 校验告警可见 |
 
 ### 批次 F —— 0.3.x（需设计或较大改动）
 
 | # | 缺口 | 现状/证据 | 修法方向 | 依赖 |
 |---|---|---|---|---|
 | **F1a** | **cutover runbook 模板库机制**（开工审计修正：F1 原称"模板机制已就绪"不实——0204 批次 B 无此条目；template.go 是提案侧模板，cutover 侧模板库从未建过） | cutover runbook 每次手工起草（逐行精读轮 2 确认）；提案侧 template.go 的"模板=步骤+{{var}}+持久化+dry-run 渲染"模式可参照不可复用 | 照提案模板模式建 CutoverTemplate（骨架=只读步/提案引用/门/决策点+变量，save/render/dry-run/apply 生成 CutoverRun 草稿） | ~3-4 天 |
-| **F1b** | **部署模板体系（分层组合，非平铺清单）**（用户质询后重定义：原"三条模板"形态限制发挥） | 依赖 F1a 机制 | 四层组合：①基础骨架×1（通用 20 步：前置→环境→权重→校验→启动→验证→决策点→回退）②引擎档×8（vLLM-systemd/Docker/K8s-Helm、SGLang、MindIE、vLLM-Kunlun、vllm-gcu、NIM 容器——参数与命令差异层）③硬件绑定（**不建独立模板**：{{tp}}/{{quant}}/{{mem_limit}} 由 accel_profiles 机型档案填缺省）④规模/操作变体×3（单机、多机 head-worker 序、**版本升级蓝绿**——升级可能比首部署更高频）。种子集 ~10-12 条（组合的常用交点），其余按需组合渲染或"runbook 另存为模板"生成 | E3/E4 + F1a |
+| **F1b** | **部署模板体系（分层组合，非平铺清单）**（用户质询后重定义：原"三条模板"形态限制发挥） | 依赖 F1a 机制 | 四层组合：①基础骨架×1（通用 20 步：前置→环境→权重→校验→启动→验证→决策点→回退）②引擎档×8（vLLM-systemd/Docker/K8s-Helm、SGLang、MindIE、vLLM-Kunlun、vllm-gcu、NIM 容器——参数与命令差异层）③硬件绑定（**不建独立模板**：{{tp}}/{{quant}}/{{mem_limit}} 由 accel_profiles 机型档案填缺省）④规模/操作变体×**6**（单机、多机 head-worker 序、**版本升级蓝绿**、**扩容加节点**（新节点环境+权重+入池验证）、**故障节点替换**（drain→重灌→回池）、**服务下线**（摘流→停服→证书/端口/权重清理）——运维全周期不止部署+升级）。种子集 ~10-12 条（组合的常用交点），其余按需组合渲染或"runbook 另存为模板"生成 | E3/E4 + F1a |
 | **F1c** | 模板生态三出口（防"模板限制发挥"） | — | ①模板=数据非代码上限（TOML/JSON 可自由扩充）②**runbook→模板抽取**（跑通一次的部署可另存为模板，现场经验沉淀）③**agent 起草**（DEPLOY_SPEC 蓝本对 agent 可读：对话中"给这台 910B 部署 Qwen"→agent 按蓝本+机型档案起草 runbook→人审——模板管重复场景，对话管新情况） | F1a |
 | **F2** | 权重登记-校验-分发落地 | 三段式设计在 MODEL_DEPLOY_SPEC §3.2（分发走客户通道；台内只做脚本上传+cli 执行+sha256 对账）；脚本模板与对账步未固化 | 下载脚本模板 + sha256 对账检查步进 runbook 模板；E3 的 sha256sum 读表是前置 | E3 |
 | **F3** | 推理指标面（D-2） | `/metrics` 抓取（vllm:kv_cache_usage_perc/num_preemptions/TTFT/ITL/generation_tokens）未做；告警枚举无 infer.*；GpuBoard 无服务层区 | GET 抓取通道（同 GPU 采集薄驱动模式，端点=推理服务而非加速卡）→ series `infer.*` + 告警枚举 + GpuBoard 服务区 | 无（可独立做） |

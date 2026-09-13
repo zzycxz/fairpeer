@@ -68,7 +68,7 @@
 name = "ascend-a2-01"
 vendor = "linux"        # 服务器 OS 语义（不动 huawei=网络设备 的既有占用）
 gpu = true
-accel = "ascend"        # 新字段：nvidia(默认) | ascend | enflame | kunlunxin | ""(未指定→按探测)
+accel = "ascend"        # 新字段：nvidia(默认) | ascend | enflame | kunlunxin | cambricon | ""(未指定→按探测)
 ```
 
 - 采集驱动按 `accel` 分发；缺省 `""` → 探测（nvidia-smi 存在→nvidia；npu-smi 存在→ascend；以此类推）。
@@ -79,7 +79,7 @@ accel = "ascend"        # 新字段：nvidia(默认) | ascend | enflame | kunlun
 ```go
 // internal/netdev/accel/ — per-vendor thin drivers
 type AccelDriver interface {
-    Key() string                                    // nvidia | ascend | enflame | kunlunxin
+    Key() string                                    // nvidia | ascend | enflame | kunlunxin | cambricon
     Inventory(ctx, device) []GPUCard                // 归一：index/name/temp/util/mem/…
     HealthEvents(ctx, device) []AccelEvent          // 厂商错误码事件（归一前）→ catalog 分级
     Version(ctx, device) (driver, runtime, error)   // nvidia-smi 头部 / npu-smi 头部+CANN version.info / topsinfo / xpu-smi
@@ -111,7 +111,8 @@ type AccelDriver interface {
 |---|---|---|
 | **M-0（零代码）** | 昇腾 910B 部署蓝本：调研轮 1 §六 9 步骨架（npu-smi 前置检查→容器/venv→W8A8 权重→vllm-ascend/MindIE 启动→/v1/models 验证）手工编排为割接 runbook；GPU_TODO P1 演示一并覆盖 | 演示环境走通一条昇腾部署 runbook |
 | **M-1（异构最小承接，约 3-4 天）** | ① `accel` 配置维度 + 驱动分发骨架；② **昇腾 npu-smi 薄驱动**（Inventory/Health/Version 三方法归一 GPUCard；`info -t memory` 解析 HBM；health 列→ErrorCode）；③ 读表增补 enflame-smi/xpu-smi（按客户硬件）；④ GPUBoard/GpuBoardView 泛化（ErrorCodeKind 徽标）；⑤ 昇腾部署 runbook 模板进模板库 | 测试环境（如可得 910B）采集出矩阵；无硬件则以 fixture 测试 + 命令白名单审阅验收 |
-| **M-2（按客户硬件盘点排期）** | 燧原 efsmi 驱动、昆仑芯 xpu-smi 驱动、各家错误码 catalog 精化、推理指标 /metrics 各厂商端点（D-2 合并）、平头哥（真武 SAIL 开源后重评） | 按客户采购清单 |
+| **M-2（按客户硬件盘点排期）** | **寒武纪 MLU 驱动（cnmon，用户点名补入 2026-09-13；vllm-mlu 由 Cambricon 官方组织维护、k8s device plugin/mlu-exporter 齐）**、燧原 efsmi 驱动、昆仑芯 xpu-smi 驱动、各家错误码 catalog 精化、推理指标 /metrics 各厂商端点（D-2 合并）、平头哥（真武 SAIL 开源后重评） | 按客户采购清单；寒武纪优先级=用户点名 |
+| **M-3（远期菜单，HAMi 生态四家）** | 海光 DCU、天数智芯（ixsmi）、沐曦（mx-smi）、摩尔线程（mthreads-gmi）——CLI 名已备案（编排调研轮 3），HAMi 均支持；接入模式同 M-2 薄驱动 | 客户出现该硬件才立项 |
 | **拒绝（长期）** | §4.4 四项不做 | — |
 
 ---
@@ -168,7 +169,7 @@ type AccelDriver interface {
 ```toml
 # 机型能力档案（厂商×SKU 一行；运维设置内维护，数据来源=官方规格页+真机校准）
 [[netdev.accel_profiles]]
-accel   = "nvidia"            # nvidia | ascend | enflame | kunlunxin
+accel   = "nvidia"            # nvidia | ascend | enflame | kunlunxin | cambricon
 sku     = "H20"               # 机型/SKU 名（匹配 device.model 前缀或 accel_model）
 cards   = 8                   # 常见卡数（部署建议用）
 vram_gb = 96                  # 单卡显存
