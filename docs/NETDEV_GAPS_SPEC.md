@@ -33,6 +33,7 @@
 | **E6** | **curl 前缀的尾参通道**（E3 修理过程中发现的既有安全缺口） | 读表既有 `curl -I ` 前缀：空格边界允许追加 `-o`（写文件）/`-T`（上传）/第二 URL——注释声称"HEAD-only 无数据通道"但前缀模型不约束尾参 | curl 类前缀收紧为"URL 后无尾参"的专用校验（logPathReadOverride 同款旁路范式），或引入结构化 http-check 步骤类型替代裸 curl | 恶意/注入场景无法借 curl 读表项获得写原语 |
 | **E7** | **模型能力档案（model card，部署校验的模型侧数据源；2026-09-13 实勘 45 条校准）** | E4 机型档案只覆盖机器侧；模型侧无数据源（"70B FP16 140G"原为 spec 硬编码例子） | `[[netdev.model_cards]]`：name/params_B(总/激活，MoE 双值)/quant 档×**硬件族枚举**（同一模型不同卡主流量化档不同：H 系=FP8 原生、910B=W8A8（950 前无 FP8）、P800=W8A8C16、A 系/4090=BF16+AWQ）/显存估算（BF16≈2GB/B 规则已实勘确认）/kv 余量/多模态视觉塔增量。**内置初始集（实勘主流矩阵）**：Qwen2.5 全档+Qwen3 MoE 系（30B-A3B=智算中心单机标配/235B-A22B/Next-80B）+DeepSeek V3/R1（671B；昇腾官方口径 BF16≥4 台 A2、W8A8≥2 台）+**R1-Distill 蒸馏系（政企一体机主力，1.5-70B）**+GLM-4.5/-Air（106B 轻量档）/4.6+MiniMax-M1（456B，8×H800 可部署）；VLM（Qwen-VL/InternVL）进档案；Kimi K2（1T，官方最小 16×H200）标注"多走 API 少自建"；Llama 标注"占比下降，作蒸馏底座存量" | 声明 DeepSeek-671B BF16 而目标 2×8 卡 64G → 校验告警（需 4 台）；Qwen3-30B W8A8 vs 910B 单卡 → 通过 |
 | **E8** | 深度诊断工具的读表策略（2026-09-13 核查补） | ascend-dmi（昇腾）/dcgmi diag（NVIDIA）未在读表：`-dg`/diag 是**带宽压测类负载**非纯读——裸进读表会给 agent 施压硬件的通道 | 裁决：留教读表（用户逐命令授予）或提案档（作为受控压测步骤）；版本查询形态（ascend-dmi -v）可进读表 | spec 记档即可，随 M-1 顺带 |
+| **E9** | 互联/时钟只读检查命令读表（FULL_CHAIN P8 补） | ibstat/ibqueryerrors/perfquery/chrony tracking 不在读表——互联验收只读步被分类器拒 | linux 读表增补四命令（纯读：端口状态/错误计数/时钟偏差）；**ib_write_bw/nccl-tests/gpu-burn/fio 是流量负载类**按 E8 裁决走提案档 | 四命令分类 read；F15 只读步全通 |
 
 ### 批次 F —— 0.3.x（需设计或较大改动）
 
@@ -54,6 +55,8 @@
 | **F12** | **并发参数化 + 巡检并发化** | gpuPollConcurrency=8 硬编码（100 节点≈56s/轮刚好打满 60s 间隔）；全网巡检纯串行（inspect.go 平 for 循环，100 节点 20-35 分钟/轮） | 两者改信号量并发 + 配置化上限（对齐 healthPollConcurrency=64 先例）；巡检串行→并发需保进度回调线程安全 | >30 节点即触发（与 F11 同批） |
 | **F13** | **AI 平台组件部署模板包**（2026-09-13 两路调研新增：AI-native 企业栈的组件全是 K8s/Docker 部署件，F1 模板体系从模型服务自然扩展到平台组件） | F1 模板现仅覆盖推理引擎档 | LiteLLM 网关/Milvus 或 pgvector/Dify 或 Coze/Langfuse 四条组件部署 runbook 模板（K8s 路径 k8s-apply 审批）；配套只读检查步（/metrics 探活）与升级回滚变体 | 企业从试点→平台化（阶段 2-3）的建平台流程可被本台编排 |
 | **F14** | **F3 /metrics 抓取泛化**（同调研：LiteLLM/Kueue/Milvus/护栏服务全部暴露 Prometheus 格式 /metrics——F3 的抓取设计不必限定 vLLM） | F3 现按推理引擎设计 | F3 实现时抓取器做成通用 Prometheus 文本解析（端点登记制，J2 已裁），指标名前缀区分（vllm:*/litellm:*/自定义）；告警枚举随端点类型 | 一套采集通道覆盖网关/队列/向量库指标 |
+| **F15** | **集群验收 runbook 模板**（FULL_CHAIN 核心产出：验收判定线是数据资产） | 判定线散在调研（busbw 机内≥80%/跨机≥92% 且 verify=0、gpu-burn OK/FAULTY、fio 基线、烤机时长按规模换算、YD/T 6961-2026 行标）无处承载 | 七步验收模板：dcgmi diag→gpu-burn→单机 NCCL→IB→多机 NCCL（判定线内置）→fio→E2E 压测（SLO 决策点）；随批②机制落地 | 测试环境走通一次七步验收 |
+| **F16** | Redfish 批量写操作面（P1 补） | 现状 redfish 仅 GET；批量改 BMC IP/固件升级/BIOS 基线是建设期高频 | 提案编排 Redfish 写（POST/PATCH 白名单）或域外声明——**待裁决 J6** | 可批量设置 BMC IP 演示或域外入库 |
 | **G-P1** | **项目安全域**（PROJECT_SCENARIO_SPEC §二+§七 V1/V2） | 项目现状=纯视图分组（activeProject 是前端 localStorage 态，后端零项目上下文）；提案无 project 字段；confirm2 无身份概念 | 会话项目上下文管道（前端→后端会话态→guardrail/提案/发现）+ 提案补 project 字段 + NetDevProject 升级（type/allow/deny/policy/confirmers+身份定义）+ 三段式表单 | 0.3.x 主体，**~1.5-2 周（V1 上调）** |
 | **G-P2** | 项目化模板联动（同上 §五） | 模板无项目类型过滤 | 部署模板按项目类型缺省 | 小 |
 | **G-L1** | **四眼跨实例 confirm2**（§四 L1+§七 V3） | confirm2 仅同机布尔位；linkpeersignal 只有 /pair/* 三端点、无 relay/数据面 | 新数据通道（signal 加 relay 端点或配对后 P2P 直连，对方 Ed25519 公钥可用）+ 确认请求消息 + 对端确认卡 | P-3a，**可行性中（V3 下调），~2 周** |
