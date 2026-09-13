@@ -4372,6 +4372,8 @@ export const en = {
   "ndv.gpu.xidStream": "XID event stream",
   "ndv.gpu.xidEmpty": "no XID events in 24h",
   "ndv.gpu.xidRecovered": "recovered",
+  "ndv.gpu.readiness": "engine readiness",
+  "ndv.gpu.interconn": "interconnect",
   "ndv.gpu.xidOpen": "open finding",  "ndv.dash.railClose": "⇲ Collapse right rail",
   "ndv.dash.railOpen": "⇲ Expand right rail",
   "ndv.dash.railTip": "Toggle the right dock (bottom-left nav brings it back)",

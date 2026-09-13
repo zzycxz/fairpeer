@@ -122,6 +122,14 @@ type NetDevConfig struct {
 	// AlertRules turn health/syslog signals into auto-Findings (active →
 	// resolved lifecycle). Evaluated on every health poll.
 	AlertRules []NetDevAlertRule `toml:"alert_rules"`
+	// AccelProfiles 是机型能力档案（E4，ACCEL_SPEC §8.3）：厂商×SKU 一行，
+	// 部署建议校验与 GpuBoard readiness 徽标的数据源。档案是数据——新机型=
+	// 新档案行，无需发版。
+	AccelProfiles []NetDevAccelProfile `toml:"accel_profiles"`
+	// ModelCards 是模型能力档案（E7）：量化档×硬件族一行，与 AccelProfiles
+	// 配对做部署校验（权重显存 vs 卡数×单卡显存）。内置实勘初始集在
+	// netdev.BuiltinModelCards，此处用户条目按 (name,quant,hw_family) 覆盖。
+	ModelCards []NetDevModelCard `toml:"model_cards"`
 	// Syslog is the passive receiver (UDP): devices point their syslog here;
 	// lines aggregate per device and known-bad patterns auto-escalate to
 	// Findings. Port 0 = off.
@@ -145,6 +153,56 @@ type NetDevAlertRule struct {
 	// PresetKey 是向导预设的稳定标识（如 "unreachable"）——按 key 去重，
 	// 语言/文案改版不再产生重复规则（批次 B5）。手工规则留空。
 	PresetKey string `toml:"preset_key,omitempty"`
+}
+
+// NetDevAccelProfile is one 机型能力档案 row (E4, ACCEL_SPEC §8.3): vendor×SKU
+// capability data for deployment advisory checks and the GpuBoard readiness
+// badge. Data-driven by design — a new SKU is a new row, not a release.
+type NetDevAccelProfile struct {
+	// Accel is the accelerator family: nvidia | ascend | enflame | kunlunxin |
+	// cambricon（M-1/M-2 批次扩国产枚举）.
+	Accel string `toml:"accel"`
+	// SKU matches device.Model by case-insensitive substring; the longest
+	// matching SKU wins ("H20" vs "H20×8" both match — keep SKUs distinctive).
+	SKU    string  `toml:"sku"`
+	Cards  int     `toml:"cards"`   // 常见单机卡数（部署建议用；0 = 未知）
+	VRAMGB float64 `toml:"vram_gb"` // 单卡显存（0 = 未知）
+	// MemType / Interconnect / Special are display data (badge/tooltip);
+	// interconnect 值不设闭枚举——互联代际（NVL/NVLink5/超节点二代）持续
+	// 演进，闭校验会绑架数据。
+	MemType      string `toml:"mem_type"`
+	Interconnect string `toml:"interconnect"`
+	Special      string `toml:"special"`
+	// Readiness is the engine-readiness tier from the 引擎生态矩阵:
+	// production | new | experimental | unknown（空 = unknown）。展示并阻止
+	// 未验证组合静默上线，不替引擎厂商背书（ACCEL_SPEC §8.4 L4）。
+	Readiness string `toml:"readiness"`
+	Notes     string `toml:"notes"`
+}
+
+// NetDevModelCard is one 模型能力档案 row (E7): quant×hardware-family. The
+// same model ships different primary quants per hardware family (H 系=FP8
+// 原生、910B=W8A8、P800=W8A8C16、A 系/4090=BF16+AWQ) — hence rows, not a
+// per-model quant list.
+type NetDevModelCard struct {
+	// Name is the deployment model name matched case-insensitively
+	// ("deepseek-r1", "qwen2.5-72b-instruct").
+	Name    string  `toml:"name"`
+	ParamsB float64 `toml:"params_b"` // 总参数（十亿计）
+	// ActiveB is the MoE active parameter count (0 = dense). MoE 双参数是
+	// 显存与吞吐估算的分界（E7 实勘口径）。
+	ActiveB float64 `toml:"active_b"`
+	// Quant tier: bf16 | fp8 | w8a8 | w8a8c16 | awq | gptq | int8 | int4 …
+	Quant string `toml:"quant"`
+	// HWFamily is the hardware family the quant row applies to
+	// (nvidia-h | nvidia-a | nvidia-4090 | ascend-910b | ascend-310p |
+	// ascend-a3 | kunlunxin-p800 | enflame-s60 | cambricon-mlu …). 字符集受控
+	// 但不闭枚举——新硬件族=新行（M-1/M-2/M-3 批次扩表）。
+	HWFamily string `toml:"hw_family"`
+	// VRAMGB overrides the weights estimate (0 = estimate by quant, BF16≈2GB/B
+	// 实勘规则).
+	VRAMGB float64 `toml:"vram_gb"`
+	Notes  string  `toml:"notes"`
 }
 
 // NetDevTrapConfig bounds the passive SNMP trap receiver (v2c).
@@ -865,6 +923,59 @@ func ValidateNetDev(nd NetDevConfig) error {
 				return fmt.Errorf("netdev db_source %q: allowlist entries must be single plain statements (no ;, no comments)", s.Name)
 			}
 		}
+	}
+	seenProfile := map[string]bool{}
+	for _, p := range nd.AccelProfiles {
+		switch p.Accel {
+		case "nvidia", "ascend", "enflame", "kunlunxin", "cambricon":
+		default:
+			return fmt.Errorf("netdev accel_profile %q: accel must be nvidia|ascend|enflame|kunlunxin|cambricon", p.SKU)
+		}
+		if strings.TrimSpace(p.SKU) == "" {
+			return fmt.Errorf("netdev accel_profile (accel=%s): sku is required", p.Accel)
+		}
+		key := p.Accel + "/" + strings.ToLower(strings.TrimSpace(p.SKU))
+		if seenProfile[key] {
+			return fmt.Errorf("netdev accel_profile %q: duplicate accel+sku %q", p.SKU, key)
+		}
+		seenProfile[key] = true
+		if p.Cards < 0 || p.Cards > 1024 {
+			return fmt.Errorf("netdev accel_profile %q: cards %d out of range", p.SKU, p.Cards)
+		}
+		if p.VRAMGB < 0 || p.VRAMGB > 4096 {
+			return fmt.Errorf("netdev accel_profile %q: vram_gb %v out of range", p.SKU, p.VRAMGB)
+		}
+		switch p.Readiness {
+		case "", "production", "new", "experimental", "unknown":
+		default:
+			return fmt.Errorf("netdev accel_profile %q: readiness must be production|new|experimental|unknown", p.SKU)
+		}
+	}
+	seenCard := map[string]bool{}
+	for _, c := range nd.ModelCards {
+		if strings.TrimSpace(c.Name) == "" {
+			return fmt.Errorf("netdev model_card: name is required")
+		}
+		if c.ParamsB <= 0 || c.ParamsB > 100000 {
+			return fmt.Errorf("netdev model_card %q: params_b %v out of range", c.Name, c.ParamsB)
+		}
+		if c.ActiveB < 0 || c.ActiveB > c.ParamsB {
+			return fmt.Errorf("netdev model_card %q: active_b must be 0 (dense) or <= params_b", c.Name)
+		}
+		if c.VRAMGB < 0 || c.VRAMGB > 100000 {
+			return fmt.Errorf("netdev model_card %q: vram_gb %v out of range", c.Name, c.VRAMGB)
+		}
+		if !alertPresetKeyRe.MatchString(c.Quant) {
+			return fmt.Errorf("netdev model_card %q: quant must be [a-z0-9_-] (bf16|fp8|w8a8|awq…)", c.Name)
+		}
+		if !alertPresetKeyRe.MatchString(c.HWFamily) {
+			return fmt.Errorf("netdev model_card %q: hw_family must be [a-z0-9_-] (nvidia-h|ascend-910b…)", c.Name)
+		}
+		key := strings.ToLower(c.Name) + "/" + c.Quant + "/" + c.HWFamily
+		if seenCard[key] {
+			return fmt.Errorf("netdev model_card %q: duplicate name+quant+hw_family %q", c.Name, key)
+		}
+		seenCard[key] = true
 	}
 	return nil
 }

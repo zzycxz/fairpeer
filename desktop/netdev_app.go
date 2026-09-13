@@ -1678,6 +1678,39 @@ func (a *App) NetDevEmergencyStop() (int, error) {
 	return rep.Connections, nil
 }
 
+// NetDevGPUBoard feeds the 智算 screen (DashShell 第六屏): 纯只读汇编——健康
+// 快照/series/XID Finding + E4 机型档案徽标与偏差告警。零探针。
+func (a *App) NetDevGPUBoard() (*netdev.GPUBoard, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).BuildGPUBoard(), nil
+}
+
+// NetDevProfileCheck is the E4/E7 部署建议校验入口：机型档案×模型档案×声明
+// TP → 建议性行（绝不硬失败，D1 软降级口径）。模板渲染与提案起草调用；
+// 档案缺失时提示建档而非拒绝。
+func (a *App) NetDevProfileCheck(device, model, quant string, tp int) ([]string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	d, ok := cfg.NetDevDeviceByName(device)
+	if !ok {
+		return nil, fmt.Errorf("device %q not found", device)
+	}
+	p := netdev.AccelProfileForDevice(cfg.NetDev, d)
+	if p == nil {
+		return []string{"设备 " + device + " 未命中机型能力档案（[[netdev.accel_profiles]]）——建议按规格页建档后再做部署校验"}, nil
+	}
+	card, ok := netdev.ResolveModelCardForAccel(cfg.NetDev, p.Accel, model, quant)
+	if !ok {
+		return []string{fmt.Sprintf("模型 %s（%s）在 %s 档案族无实勘行——可在 [[netdev.model_cards]] 添加后重试，校验结果仅供参考", model, quant, p.SKU)}, nil
+	}
+	return netdev.CheckDeployment(p, card, tp), nil
+}
+
 // ── 网络巡检（task-ified 手动触发 + 状态流）────────────────────────────────
 // NetDevInspectionState is the overview 巡检卡's model: one sweep's live
 // progress plus the last completed round (manual OR scheduled — both write
@@ -2269,7 +2302,7 @@ func (a *App) NetDevHealthSnapshot() (netdev.HealthSnapshot, error) {
 			if a.ctx != nil {
 				runtime.EventsEmit(a.ctx, "netdev:health", h)
 			}
-			a.dashEmit("overview")
+			a.dashEmit("overview", "gpu")
 		})
 		m.EnsureHealthPoller()
 	})

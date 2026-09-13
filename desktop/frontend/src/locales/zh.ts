@@ -4357,6 +4357,8 @@ export const zh: Record<DictKey, string> = {
   "ndv.gpu.xidStream": "XID 事件流",
   "ndv.gpu.xidEmpty": "24h 内无 XID 事件",
   "ndv.gpu.xidRecovered": "已恢复",
+  "ndv.gpu.readiness": "引擎就绪度",
+  "ndv.gpu.interconn": "互联",
   "ndv.gpu.xidOpen": "查看 Finding",  "ndv.dash.railClose": "⇲ 收起右侧栏",
   "ndv.dash.railOpen": "⇲ 展开右侧栏",
   "ndv.dash.railTip": "收起/展开右侧 dock（底部左侧导航可随时唤回）",

@@ -2197,6 +2197,13 @@ export interface NetDevGPUBoardDevice {
   cards: NetDevGPUBoardCard[];
   lastError?: string;
   tempSpark?: [number, number][];
+  // E4 机型档案徽标与偏差告警（建议性，值班可见不上立案线）。
+  profileSku?: string;
+  readiness?: string;
+  special?: string;
+  interconn?: string;
+  profileNote?: string;
+  profileAdvisories?: string[];
 }
 
 export interface NetDevGPUBoardXID {

@@ -41,6 +41,16 @@ type GPUBoardDevice struct {
 	LastError  string         `json:"lastError,omitempty"`
 	// TempSpark：24h 全卡最高温趋势（≤48 点降采样）——热图行的迷你趋势。
 	TempSpark [][2]float64 `json:"tempSpark,omitempty"`
+	// 机型档案徽标（E4）：readiness/特供直接可见，不按架构推断
+	// （ACCEL_SPEC §8.3 消费方 2）。
+	ProfileSKU  string `json:"profileSku,omitempty"`
+	Readiness   string `json:"readiness,omitempty"`
+	Special     string `json:"special,omitempty"`
+	Interconn   string `json:"interconn,omitempty"`
+	ProfileNote string `json:"profileNote,omitempty"`
+	// ProfileAdvisories：档案×实测偏差（卡数/显存对不上）——建议性告警，
+	// 值班可见但不上立案线（D1 软降级口径）。
+	ProfileAdvisories []string `json:"profileAdvisories,omitempty"`
 }
 
 // GPUBoardXID is one XID finding on the event stream.
@@ -105,6 +115,28 @@ func (m *Manager) BuildGPUBoard() *GPUBoard {
 		}
 		if h.GPUSampled {
 			b.SampledDevs++
+		}
+		// E4 消费：机型档案徽标 + 档案×实测偏差（卡数/显存对不上 = 档案过期
+		// 或借调卡，建议性提醒）。实测侧只在 GPUSampled 时比——占位卡没有
+		// 可比数据。
+		if d, ok := m.cfg.NetDevDeviceByName(h.Device); ok {
+			if p := AccelProfileForDevice(m.cfg.NetDev, d); p != nil {
+				dev.ProfileSKU, dev.Readiness = p.SKU, p.Readiness
+				dev.Special, dev.Interconn, dev.ProfileNote = p.Special, p.Interconnect, p.Notes
+				if h.GPUSampled {
+					if p.Cards > 0 && len(h.GPU) > 0 && len(h.GPU) != p.Cards {
+						dev.ProfileAdvisories = append(dev.ProfileAdvisories,
+							fmt.Sprintf("档案 %s 声明 %d 卡，实测 %d 卡——档案过期或存在借调/降配卡", p.SKU, p.Cards, len(h.GPU)))
+					}
+					if p.VRAMGB > 0 && len(h.GPU) > 0 && h.GPU[0].MemTotalMB > 0 {
+						sampleGB := float64(h.GPU[0].MemTotalMB) / 1024
+						if diff := sampleGB - p.VRAMGB; diff > 2 || diff < -2 { // 2GB 容忍规格舍入
+							dev.ProfileAdvisories = append(dev.ProfileAdvisories,
+								fmt.Sprintf("档案 %s 单卡 %.0fGB，实测 %.0fGB——核对 SKU/显存档案", p.SKU, p.VRAMGB, sampleGB))
+						}
+					}
+				}
+			}
 		}
 		dev.TempSpark = gpuTempSpark(h.Device)
 		b.Devices = append(b.Devices, dev)

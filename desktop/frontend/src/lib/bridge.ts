@@ -541,6 +541,8 @@ export interface AppBindings {
   NetDevDiscoveryBoard(): Promise<import("./types").NetDevDiscoveryBoard | null>;
   NetDevExposureBoard(): Promise<import("./types").NetDevExposureBoard | null>;
   NetDevGPUBoard(): Promise<import("./types").NetDevGPUBoard>;
+  // E4/E7 部署建议校验：机型档案×模型档案×声明 TP → 建议性行（不硬失败）。
+  NetDevProfileCheck(device: string, model: string, quant: string, tp: number): Promise<string[]>;
   // fairpeer:// 深链冷路径：boot 时一次性取走启动 argv 里的路由（null=普通启动）。
   NetDevConsumeDeepLink(): Promise<{ kind: string; id: string } | null>;
   // 页签充实：syslog 事件量（R3 journal）/ 拓扑对账（离线）
@@ -3160,8 +3162,9 @@ function makeMockApp(): AppBindings {
       return {
         generated_at: new Date().toISOString().slice(5, 16).replace("T", " "),
         devices: [
-          { device: "gpu-1", reachable: true, gpuSampled: true, cards: [card(0, 61, 30), card(1, 72, 95)] },
-          { device: "gpu-2", reachable: true, gpuSampled: true, xidMax: 79, cards: [card(0, 88, 97), card(1, 74, 40)] },
+          { device: "gpu-1", reachable: true, gpuSampled: true, profileSku: "H20", readiness: "production", interconn: "nvlink4", cards: [card(0, 61, 30), card(1, 72, 95)] },
+          { device: "gpu-2", reachable: true, gpuSampled: true, xidMax: 79, profileSku: "H20", readiness: "experimental", special: "cn-market",
+            profileAdvisories: ["档案 H20 声明 8 卡，实测 2 卡——档案过期或存在借调/降配卡"], cards: [card(0, 88, 97), card(1, 74, 40)] },
         ],
         total_cards: 4,
         sampled_devices: 2,
@@ -3170,6 +3173,12 @@ function makeMockApp(): AppBindings {
         xid_active: 1,
         xid_events: [{ id: "F-mock", device: "gpu-2", maxCode: 79, severity: "critical", at: "09-12 10:00", active: true }],
       };
+    },
+    async NetDevProfileCheck(device: string, model: string, quant: string, tp: number): Promise<string[]> {
+      return [
+        `设备 ${device}（浏览器演示）未命中机型能力档案——真机请在 [[netdev.accel_profiles]] 建档`,
+        `${model}（${quant}，TP=${tp}）在演示模式不做显存校验`,
+      ];
     },
     async NetDevTopologyPlan() {
       // Browser-dev stand-in for the LOCAL IP-plan view: managed devices only,

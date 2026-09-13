@@ -59,11 +59,22 @@ export default function GpuBoardView({ onJump, onFocusDevice }: Props) {
           <div key={d.device} className="ndv__card" style={{ padding: "10px 12px" }}>
             <div className="ndv__card-title" style={{ marginBottom: 8 }}>
               <span role="button" style={{ cursor: "pointer" }} onClick={() => onFocusDevice?.(d.device)}>{d.device}</span>
+              {d.profileSku && (
+                <span className={`ndv__badge${d.readiness === "experimental" ? " ndv__badge--warn" : ""}`}
+                  title={[d.readiness && `${t("ndv.gpu.readiness")}: ${d.readiness}`, d.interconn && `${t("ndv.gpu.interconn")}: ${d.interconn}`, d.profileNote].filter(Boolean).join(" · ")}>
+                  {d.profileSku}{d.special ? `·${d.special}` : ""}{d.readiness && d.readiness !== "production" ? `·${d.readiness}` : ""}
+                </span>
+              )}
               {!d.reachable && <span className="ndv__badge" style={{ color: "var(--err)" }}>{t("ndv.gpu.down")}</span>}
               {d.gpuOnly && <span className="ndv__badge" title={t("ndv.gpu.gpuOnlyTip")}>{t("ndv.gpu.gpuOnly")}</span>}
               {(d.xidMax ?? 0) > 0 && <span className={`ndv__badge${(d.xidMax ?? 0) >= 79 ? " ndv__badge--warn" : ""}`}>XID {d.xidMax}</span>}
               {d.lastError && <span className="ndv__meta" style={{ color: "var(--warn)", marginLeft: "auto" }} title={d.lastError}>{d.lastError.length > 60 ? d.lastError.slice(0, 60) + "…" : d.lastError}</span>}
             </div>
+            {(d.profileAdvisories ?? []).length > 0 && (
+              <div className="ndv__meta" style={{ color: "var(--warn)", margin: "-2px 0 6px" }}>
+                {d.profileAdvisories!.map((s, i) => <div key={i}>⚠ {s}</div>)}
+              </div>
+            )}
             {(d.cards ?? []).length > 0 ? (
               <table className="ndv-gpu__matrix">
                 <thead>
