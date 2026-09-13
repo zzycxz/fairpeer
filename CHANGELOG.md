@@ -18,6 +18,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   G-P1/G-L1 自此满足开工准入；实现仍待 J4/J5 拍板（G-P1 ~1.5-2 周）与
   K2 原型验证（G-L1 ~2 周）。
 
+### feat(netdev): G-P1 项目安全域 v1（批⑤开工，J4/J5 已拍板）——域从视图升格为安全语义
+
+- **J4/J5 拍板落档**（docs/NETDEV_PROJECT_DOMAIN_DESIGN.md §三/§五）：J4=项目外设备
+  只读+拒操作；J5=confirmers 自报基线+trustdomain 开启时签名升格（折中）。
+- **NetDevProject schema 扩展**（D1 软迁移，旧 config 全兼容）：`type`（generic|netdev|
+  aicompute|blueteam）、`deny`（项目内额外拒绝前缀）、`policy`（read-only|proposal|
+  proposal+confirm2，只许收紧）、`confirmers`（confirm2 合格批准人，空=任意人工）。
+  **蓝队信封强制**：type=blueteam 必须 policy=proposal+confirm2（config 校验硬失败）。
+- **会话项目上下文后端态**（projectdomain.go）：`SetActiveProject`（标题栏切换器一次写
+  两处的后端半边，切换即审计；不存在的项目拒绝）——单操作员工作站口径，per-session
+  细分随多会话需求演进。
+- **guardrail 域作用域（J4-A）**：活动项目下，域外设备 read 放行、write/dangerous/
+  unknown 拒绝（拒绝文案带项目名进审计）；项目 deny 前缀域内外都拒；无活动项目=
+  现状语义零变化。
+- **提案 project 盖章 + 跨域执行拒绝**：草稿创建时（对话内 propose 工具与 runbook
+  模板 apply 两处）盖创建时的活动项目，不可事后改；ExecuteProposal 对目标设备落点在
+  域外的提案拒绝执行——视图放行≠执行放行。
+- **J5 审批链**：`ApproveProposalAs(id, confirm2, operator)`——confirmers 名单校验
+  （名单外/缺操作者拒绝），批准人自报入 p.Approver（确认可归属）；旧 ApproveProposal
+  签名保留（operator 空）。前端提案中心批准按钮旁增加批准人输入（tooltip 注明 J5 语义）。
+- **前端**：切换器接 NetDevSetActiveProject；项目编辑器扩为三段式（类型/操作档/
+  deny 前缀/批准人）；bridge+mock 同步。
+
 ### feat(netdev): 0.2.5 批⑥昇腾双硬件 M-1——accel 维度 + npu-smi 薄驱动 + ErrorCode 归一 + 昇腾部署模板（fixture 先行，真机终验挂 G-C2）
 
 - **accel 维度**（ACCEL_SPEC §4.1）：设备新增 `accel` 字段（nvidia|ascend|enflame|kunlunxin|
