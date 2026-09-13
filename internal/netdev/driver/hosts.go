@@ -41,6 +41,10 @@ var linuxTables = classTables{
 		"killall", "pkill", "mkfs", "mkfs.ext", "mkfs.xfs", "fdisk", "parted",
 		"dd ", "userdel", "usermod", "passwd", "visudo", "crontab -r",
 		"iptables -F", "iptables -X", "iptables-restore", "nft flush", "rm ", "chmod 777 /",
+		// E9 配套（FULL_CHAIN P8，2026-09-13）：IB 计数器复位销毁验收证据，
+		// 属变更不走读。归一化小写后短形态 "-r" 命中 -R/-r；"--reset" 是双
+		// 横线续词（词边界不含横线内续段）需单列。危险表先于读表裁决。
+		"perfquery -r", "perfquery --reset", "ibqueryerrors -r", "ibqueryerrors --reset",
 	},
 	write: []string{
 		"systemctl start", "systemctl stop", "systemctl restart", "systemctl reload",
@@ -56,6 +60,9 @@ var linuxTables = classTables{
 		"firewall-cmd --remove", "ufw enable", "ufw disable", "ufw allow", "ufw deny",
 		"tc qdisc", "modprobe", "rmmod", "chown ", "chmod ", "setenforce", "hostnamectl set",
 		"date -s", "timedatectl set", "systemd-analyze set", "logger ", "wall ",
+		// chronyc 变更子命令（E9 配套）：强制步进/突发同步改的是时钟状态，
+		// 与 date -s 同性质走写面。
+		"chronyc makestep", "chronyc burst",
 	},
 	read: []string{
 		// network diagnostics
@@ -85,6 +92,12 @@ var linuxTables = classTables{
 		// 删除 MIG 实例是变更，走提案。
 		"nvidia-smi mig -lgi", "nvidia-smi mig -lci",
 		"nvidia-smi mig -lgip", "nvidia-smi mig -lcip",
+		// 互联/时钟只读检查（FULL_CHAIN P8 验收步，2026-09-13 补）：
+		// ibstat=端口状态、ibqueryerrors/perfquery=错误与性能计数器、
+		// chronyc tracking/sources/sourcestats=时钟偏差与源质量。复位形态
+		// 已被危险表的 r 族两条挡下；细节旗标如被误挡走 extra_read 授予。
+		"ibstat", "ibqueryerrors", "perfquery",
+		"chronyc tracking", "chronyc sources", "chronyc sourcestats",
 		// services & logs
 		"systemctl status", "systemctl list-units", "systemctl list-unit-files",
 		"systemctl is-active", "systemctl is-enabled", "systemctl is-failed",
