@@ -43,7 +43,7 @@
 | **F1b** ✅内容库已入库（e202af94：模型侧三变体+运维侧四变体+F13 四组件，内置库 12 条种子；蓝绿×流量编排原语条目注记在模板 Notes；③b 骨架×引擎档×8 的组合矩阵=后续按需组合） | **部署模板体系（分层组合，非平铺清单）**（用户质询后重定义：原"三条模板"形态限制发挥） | 依赖 F1a 机制 | 四层组合：①基础骨架×1（通用 20 步：前置→环境→权重→校验→启动→验证→决策点→回退）②引擎档×8（vLLM-systemd/Docker/K8s-Helm、SGLang、MindIE、vLLM-Kunlun、vllm-gcu、NIM 容器——参数与命令差异层）③硬件绑定（**不建独立模板**：{{tp}}/{{quant}}/{{mem_limit}} 由 accel_profiles 机型档案填缺省）④规模/操作变体×**7**（单机、多机 head-worker 序、**版本升级蓝绿**、**DP 扩副本**（不停机，可全自动；HPA 指标=KV cache 利用率/排队深度而非 CPU）、**TP 重排=蓝绿换队**（实勘校准：TP degree 启动时固定，改 TP 必全量重启——新队拉起→切流→旧队下线；MoE Elastic EP 例外可运行时弹性）、**故障节点替换**（ECC 阈值自动化边界实勘：correctable>10 次/时→drain、反复 uncorrectable→cordon+隔离、物理换卡必人工——GPU 故障占训练中断约 58%，高频流程）、**服务下线**（idle 判定→摘流→删 endpoint→权重归档——业界无统一 runbook，结构化即增量；"确认无人再用"必人工审批））；⑤**流量编排原语**（实勘洞察：金丝雀/灰度/模型回滚本质同一机制=双版本+流量百分比，参照 KServe 三角色 revision 状态机建模；双版本显存翻倍→成本授权人工）。种子集 ~10-12 条（组合的常用交点），其余按需组合渲染或"runbook 另存为模板"生成 | E3/E4 + F1a |
 | **F1c** ✅出口②已修（ExtractRunbookTemplate + binding；出口①模板=数据天然成立；出口③ agent 起草=对话面，机制侧 Save/Preview binding 已就绪） | 模板生态三出口（防"模板限制发挥"） | ①模板=数据非代码上限（TOML/JSON 可自由扩充）②**runbook→模板抽取**（跑通一次的部署可另存为模板，现场经验沉淀）③**agent 起草**（DEPLOY_SPEC 蓝本对 agent 可读：对话中"给这台 910B 部署 Qwen"→agent 按蓝本+机型档案起草 runbook→人审——模板管重复场景，对话管新情况） | F1a |
 | **F2** | 权重登记-校验-分发落地 | 三段式设计在 MODEL_DEPLOY_SPEC §3.2（分发走客户通道；台内只做脚本上传+cli 执行+sha256 对账）；脚本模板与对账步未固化 | 下载脚本模板 + sha256 对账检查步进 runbook 模板；E3 的 sha256sum 读表是前置 | E3 |
-| **F3** | 推理指标面（D-2） | `/metrics` 抓取（vllm:kv_cache_usage_perc/num_preemptions/TTFT/ITL/generation_tokens）未做；告警枚举无 infer.*；GpuBoard 无服务层区 | GET 抓取通道（同 GPU 采集薄驱动模式，端点=推理服务而非加速卡）→ series `infer.*` + 告警枚举 + GpuBoard 服务区 | 无（可独立做） |
+| **F3** ✅已修（批④：infermetrics.go——抓取通道+series infer.*+告警枚举 7 项+GpuBoard 服务层区；K3 表见 docs/NETDEV_INFER_METRICS.md） | 推理指标面（D-2） | `/metrics` 抓取（vllm:kv_cache_usage_perc/num_preemptions/TTFT/ITL/generation_tokens）未做；告警枚举无 infer.*；GpuBoard 无服务层区 | GET 抓取通道（同 GPU 采集薄驱动模式，端点=推理服务而非加速卡）→ series `infer.*` + 告警枚举 + GpuBoard 服务区 | 无（可独立做） |
 | **F4** | M-1 异构最小承接 | 设计在 ACCEL_SPEC §四（accel 维度/npu-smi 薄驱动/GPUBoard ErrorCodeKind 泛化/昇腾模板）；代码未做 | accel 配置维度 + npu-smi 驱动三方法归一 GPUCard + GPUBoard ErrorCodeKind 徽标 | 真机验收依赖批次 C |
 | **F5** | M-2 燧原/昆仑芯驱动 + 错误码 catalog | 依赖客户硬件盘点；efsmi/xpu-smi 读表与解析各一套 | 按客户采购清单排期 | 客户硬件 |
 | **F6** | 审计/实况降噪（B9） | GPU 轮询每主机每轮 2-3 条审计行 + live 事件；审计链完整性优先所以不能简单不打 | 设计项：internal 调用方 live 聚合为一条/轮 + 审计按 class 检索视图 | dogfooding 反馈立项 |
@@ -54,7 +54,7 @@
 | **F11** ✅已修（ce4af8dd） | **series 分区/sqlite 化（R6 解冻，触发条件已量化）** | JSONL 单文件全扫描：100 节点×14 天 ≈ 3.4GB/6860 万行；SeriesRead 每查一台全扫、GpuBoard 构建=100 次全扫、CleanupSeries 整文件重写——**~20-30 节点开始退化，100 节点检查面不可用** | 按设备分片文件（`series/<device>.jsonl`，零新依赖快速解）或 sqlite 化（spec §5.3 原案）；迁移读端 | **>30 GPU 节点即触发（与 Path A/B 无关的硬伤）** |
 | **F12** ✅已修（703a0058） | **并发参数化 + 巡检并发化** | gpuPollConcurrency=8 硬编码（100 节点≈56s/轮刚好打满 60s 间隔）；全网巡检纯串行（inspect.go 平 for 循环，100 节点 20-35 分钟/轮） | 两者改信号量并发 + 配置化上限（对齐 healthPollConcurrency=64 先例）；巡检串行→并发需保进度回调线程安全 | >30 节点即触发（与 F11 同批） |
 | **F13** | **AI 平台组件部署模板包**（2026-09-13 两路调研新增：AI-native 企业栈的组件全是 K8s/Docker 部署件，F1 模板体系从模型服务自然扩展到平台组件） | F1 模板现仅覆盖推理引擎档 | LiteLLM 网关/Milvus 或 pgvector/Dify 或 Coze/Langfuse 四条组件部署 runbook 模板（K8s 路径 k8s-apply 审批）；配套只读检查步（/metrics 探活）与升级回滚变体 | 企业从试点→平台化（阶段 2-3）的建平台流程可被本台编排 |
-| **F14** | **F3 /metrics 抓取泛化**（同调研：LiteLLM/Kueue/Milvus/护栏服务全部暴露 Prometheus 格式 /metrics——F3 的抓取设计不必限定 vLLM） | F3 现按推理引擎设计 | F3 实现时抓取器做成通用 Prometheus 文本解析（端点登记制，J2 已裁），指标名前缀区分（vllm:*/litellm:*/自定义）；告警枚举随端点类型 | 一套采集通道覆盖网关/队列/向量库指标 |
+| **F14** ✅已修（批④：parsePromText 通用 Prometheus 文本解析——引擎无关，映射按前缀择行，现收 vllm:*） | **F3 /metrics 抓取泛化**（同调研：LiteLLM/Kueue/Milvus/护栏服务全部暴露 Prometheus 格式 /metrics——F3 的抓取设计不必限定 vLLM） | F3 现按推理引擎设计 | F3 实现时抓取器做成通用 Prometheus 文本解析（端点登记制，J2 已裁），指标名前缀区分（vllm:*/litellm:*/自定义）；告警枚举随端点类型 | 一套采集通道覆盖网关/队列/向量库指标 |
 | **F15** | **集群验收 runbook 模板**（FULL_CHAIN 核心产出：验收判定线是数据资产） | 判定线散在调研（busbw 机内≥80%/跨机≥92% 且 verify=0、gpu-burn OK/FAULTY、fio 基线、烤机时长按规模换算、YD/T 6961-2026 行标）无处承载 | 七步验收模板：dcgmi diag→gpu-burn→单机 NCCL→IB→多机 NCCL（判定线内置）→fio→E2E 压测（SLO 决策点）；随批②机制落地 | 测试环境走通一次七步验收 |
 | **F16** | Redfish 批量写操作面（P1 补） | 现状 redfish 仅 GET；批量改 BMC IP/固件升级/BIOS 基线是建设期高频 | 提案编排 Redfish 写（POST/PATCH 白名单）或域外声明——**待裁决 J6** | 可批量设置 BMC IP 演示或域外入库 |
 | **G-P1** | **项目安全域**（PROJECT_SCENARIO_SPEC §二+§七 V1/V2） | 项目现状=纯视图分组（activeProject 是前端 localStorage 态，后端零项目上下文）；提案无 project 字段；confirm2 无身份概念 | 会话项目上下文管道（前端→后端会话态→guardrail/提案/发现）+ 提案补 project 字段 + NetDevProject 升级（type/allow/deny/policy/confirmers+身份定义）+ 三段式表单 | 0.3.x 主体，**~1.5-2 周（V1 上调）** |
@@ -86,7 +86,7 @@
 |---|---|---|---|
 | K1 | G-P1 三件设计：会话项目上下文载体（倾向 per-tab 后端态）/ confirmers 身份模型（自报+可选 trustdomain 签名）/ NetDevProject schema 迁移（D1 软降级）——详见 PROJECT_SCENARIO_SPEC §八 | G-P1（0.3.x 主体） | 半天成文 |
 | K2 | G-L1 通道选型：signal 服务加 relay 端点 vs 配对后 P2P 直连（对方 Ed25519 公钥可用）——V3 修正后从"信令现成"降为"需新数据通道" | G-L1/G-L4（P-3a） | 半天+原型验证 |
-| K3 | F3 指标-阈值映射表：vllm:* 指标（kv_cache_usage_perc/num_preemptions/TTFT/ITL/generation_tokens）→ infer.* 告警枚举与默认阈值——spec 完成度审计确认缺这张表 | F3（推理指标面） | 半天 |
+| K3 ✅已修（批④：docs/NETDEV_INFER_METRICS.md——七项映射+建议阈值起步+派生语义纪律） | F3 指标-阈值映射表：vllm:* 指标（kv_cache_usage_perc/num_preemptions/TTFT/ITL/generation_tokens）→ infer.* 告警枚举与默认阈值——spec 完成度审计确认缺这张表 | F3（推理指标面） | 半天 |
 
 ## 二·补、批次 U —— 用户侧待办（非代码，列此使台账完整）
 

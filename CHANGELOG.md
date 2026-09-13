@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(netdev): 0.2.5 批④指标面——/metrics 通用抓取 + series infer.* + 告警枚举 + 智算大屏服务层区（F3+F14+K3）
+
+- **F14 端点登记制抓取**：设备 `metrics_ports`（≤4）/`metrics_path`（默认 /metrics，字符集受控）
+  登记——登记即授权，未登记地址永不抓取；健康轮询每轮工作站直连 GET（不走共享代理、10s 超时、
+  best-effort），每端点每轮一条读类审计行（降噪口径与 GPU 轮询一致）。
+- **通用 Prometheus 文本解析**（`parsePromText`）：exposition 公共子集（标签三种转义、NaN/Inf 跳过、
+  时间戳忽略）——引擎无关；映射按前缀择行，K3 现收 `vllm:*`，SGLang/TGI/网关=后续加映射行。
+- **K3 映射七项**（docs/NETDEV_INFER_METRICS.md 含建议阈值起步表）：`gpu_cache_usage_perc→infer.kv_usage`
+  （百分数）、`num_requests_running/waiting→infer.running/queued`、`num_preemptions_total→
+  infer.preemptions_rate`（次/分）、`generation_tokens_total→infer.tokens_rate`（tok/s）、TTFT/E2E
+  histogram→`infer.ttft_ms/e2e_ms`（轮内增量平均）。**派生语义纪律**：counter/histogram 不落累计值
+  （单调递增永远超阈值的死规则）；导出器重启计数回绕当轮不产速率点、基线就地重置；进程重启首轮
+  只有 gauge 点（缺基线不造 0）。标签 `svc=<端口>`/`model=<model_name>` 贯穿 series。
+- **告警面**：infer.* 七项进规则枚举（config 校验硬失败兜底）；取 series 最新点跨服务最大（最忙
+  实例触发）；**冻结闸**——未登记 metrics_ports 的主机永不参与 infer.* 规则（与 GPU 采样闸同哲学，
+  "我方没数据"≠"条件满足"）；ruleTitle 中文条目八项。
+- **智算大屏服务层区**（GpuBoard.Services）：一行=(主机,端口,模型)，gauge 取最新、延迟/吞吐取
+  15 分钟窗均值；KV ≥80% 琥珀 / ≥90% 红；>5 分钟未更新给陈旧提示。前端 types/view/locales 齐备。
+- 测试链：真实 vLLM 导出样本解析（含转义标签/histogram/坏行）、增量派生（首轮缺基线/回绕重置）、
+  规则取值（跨服务最大/未登记冻结）、服务区聚合（窗口均值/窗外点排除）。
+
 ### feat(netdev): 0.2.5 批③模板内容——F1b 七变体模型/运维两侧 + F13 平台组件四条（内置库 12 条种子）
 
 - **模型侧三变体（③a）**：`deploy-vllm-standalone`（前置六只读步：驱动/显存水位/残留进程[值班簇 2]/
