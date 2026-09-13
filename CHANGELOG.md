@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### docs(netdev): 0.2.5 批⑤⑦开工准入设计——K1 三件设计成文 + K2 通道选型推荐
+
+- `docs/NETDEV_PROJECT_DOMAIN_DESIGN.md`：K1（G-P1 会话项目上下文=per-session
+  后端态一次写入两处、confirmers=自报基线+trustdomain 开启时签名升格、
+  schema=字段级缺省软迁移）+ J4/J5 裁决框（各带推荐与代价）+ K2（relay 为主/
+  P2P 同网段长优化的选型推荐与三步原型验证计划；L2 互锚同通道复用）。
+  G-P1/G-L1 自此满足开工准入；实现仍待 J4/J5 拍板（G-P1 ~1.5-2 周）与
+  K2 原型验证（G-L1 ~2 周）。
+
 ### feat(netdev): 0.2.5 批⑥昇腾双硬件 M-1——accel 维度 + npu-smi 薄驱动 + ErrorCode 归一 + 昇腾部署模板（fixture 先行，真机终验挂 G-C2）
 
 - **accel 维度**（ACCEL_SPEC §4.1）：设备新增 `accel` 字段（nvidia|ascend|enflame|kunlunxin|

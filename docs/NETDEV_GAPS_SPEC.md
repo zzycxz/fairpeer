@@ -84,8 +84,8 @@
 
 | # | 设计项 | 是谁的前置 | 量级 |
 |---|---|---|---|
-| K1 | G-P1 三件设计：会话项目上下文载体（倾向 per-tab 后端态）/ confirmers 身份模型（自报+可选 trustdomain 签名）/ NetDevProject schema 迁移（D1 软降级）——详见 PROJECT_SCENARIO_SPEC §八 | G-P1（0.3.x 主体） | 半天成文 |
-| K2 | G-L1 通道选型：signal 服务加 relay 端点 vs 配对后 P2P 直连（对方 Ed25519 公钥可用）——V3 修正后从"信令现成"降为"需新数据通道" | G-L1/G-L4（P-3a） | 半天+原型验证 |
+| K1 ✅设计成文（docs/NETDEV_PROJECT_DOMAIN_DESIGN.md——会话载体 per-session 后端态/confirmers 自报+trustdomain 升格/schema 字段级缺省迁移；F3 阈值表已随批④交付） | G-P1 三件设计：会话项目上下文载体（倾向 per-tab 后端态）/ confirmers 身份模型（自报+可选 trustdomain 签名）/ NetDevProject schema 迁移（D1 软降级）——详见 PROJECT_SCENARIO_SPEC §八 | G-P1（0.3.x 主体） | 半天成文 |
+| K2 ✅设计成文（同 doc §四——推荐 relay 为主+P2P 同网段长优化，含三步原型验证；落地待拍板） | G-L1 通道选型：signal 服务加 relay 端点 vs 配对后 P2P 直连（对方 Ed25519 公钥可用）——V3 修正后从"信令现成"降为"需新数据通道" | G-L1/G-L4（P-3a） | 半天+原型验证 |
 | K3 ✅已修（批④：docs/NETDEV_INFER_METRICS.md——七项映射+建议阈值起步+派生语义纪律） | F3 指标-阈值映射表：vllm:* 指标（kv_cache_usage_perc/num_preemptions/TTFT/ITL/generation_tokens）→ infer.* 告警枚举与默认阈值——spec 完成度审计确认缺这张表 | F3（推理指标面） | 半天 |
 
 ## 二·补、批次 U —— 用户侧待办（非代码，列此使台账完整）
