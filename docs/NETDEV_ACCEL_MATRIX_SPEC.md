@@ -111,8 +111,8 @@ type AccelDriver interface {
 |---|---|---|
 | **M-0（零代码）** | 昇腾 910B 部署蓝本：调研轮 1 §六 9 步骨架（npu-smi 前置检查→容器/venv→W8A8 权重→vllm-ascend/MindIE 启动→/v1/models 验证）手工编排为割接 runbook；GPU_TODO P1 演示一并覆盖 | 演示环境走通一条昇腾部署 runbook |
 | **M-1（异构最小承接，约 3-4 天）** | ① `accel` 配置维度 + 驱动分发骨架；② **昇腾 npu-smi 薄驱动**（Inventory/Health/Version 三方法归一 GPUCard；`info -t memory` 解析 HBM；health 列→ErrorCode）；③ 读表增补 enflame-smi/xpu-smi（按客户硬件）；④ GPUBoard/GpuBoardView 泛化（ErrorCodeKind 徽标）；⑤ 昇腾部署 runbook 模板进模板库 | 测试环境（如可得 910B）采集出矩阵；无硬件则以 fixture 测试 + 命令白名单审阅验收 |
-| **M-2（按客户硬件盘点排期）** | **寒武纪 MLU 驱动（cnmon，用户点名补入 2026-09-13；vllm-mlu 由 Cambricon 官方组织维护、k8s device plugin/mlu-exporter 齐）**、燧原 efsmi 驱动、昆仑芯 xpu-smi 驱动、各家错误码 catalog 精化、推理指标 /metrics 各厂商端点（D-2 合并）、平头哥（真武 SAIL 开源后重评） | 按客户采购清单；寒武纪优先级=用户点名 |
-| **M-3（远期菜单，HAMi 生态四家）** | 海光 DCU、天数智芯（ixsmi）、沐曦（mx-smi）、摩尔线程（mthreads-gmi）——CLI 名已备案（编排调研轮 3），HAMi 均支持；接入模式同 M-2 薄驱动 | 客户出现该硬件才立项 |
+| **M-2（按客户硬件盘点排期）** | **寒武纪 MLU 驱动（cnmon≈nvidia-smi：温度/功耗/算力/显存；vllm-mlu 官方插件非 fork、DeepSeek-V4 Day0；k8s `cambricon.com/mlu`；torch_mlu 走 PrivateUse1）——注意：错误码完整表在 CNMon 手册登录墙后，Finding 分级先依赖 cnmon 健康/ECC 计数 + device-plugin 健康上报（gated 项：开发者社区账号/商务渠道获取）**、燧原 efsmi 驱动、昆仑芯 xpu-smi 驱动、各家错误码 catalog 精化、推理指标 /metrics 各厂商端点（D-2 合并）、平头哥（真武 SAIL 开源后重评） | 按客户采购清单；寒武纪优先级=用户点名 |
+| **M-3（其余四家，2026-09-13 深度实勘后从"远期菜单"升格为分级菜单）** | **摩尔线程（production：vllm-musa 最活跃，v0.28-dev+V1 引擎+Day0 模型镜像，push 调研当日；mthreads.com/gpu；MT GPU Operator）**、**沐曦（production：vLLM-metax 官方插件月度对齐主线 0.24，C500 64G/C600 144G FP8；MXMACA 类 CUDA 全栈）**、海光（production 但生态封闭：hy-smi（ROCm 系，勘误：非 dcu-smi）；无开源 vLLM 仓，DTK 镜像分发+dcu-inference-cookbook）、天数智芯（early+：ixsmi 公开、推理栈闭源 IxFormer，但 Deep-Spark 开源 K8s 全家桶意外地全；iluvatar.ai/gpu；勘误：产品线为天垓/智铠，"倚天 710"是平头哥 CPU 系张冠李戴） | 客户硬件出现即立项；接入模式同 M-2 薄驱动（各家 smi 全部≈nvidia-smi 形态，映射成本低） |
 | **拒绝（长期）** | §4.4 四项不做 | — |
 
 ---
@@ -157,6 +157,7 @@ type AccelDriver interface {
 | 昆仑芯 | P800（Kunlun3） | 8卡 OAM | 96G HBM3 | vLLM-Kunlun **唯一列名硬件**；单机 8 卡 W8A8 跑 671B |
 | 昆仑芯 | M100/M300（四代） | 超节点 | 96G HBM3 | 2026 量产；vLLM-Kunlun 未列入 |
 | 平头哥 | 含光 800 / 真武 810E/M890 | 阿里云内 | — | **不外卖**；以阿里云 PAI 视角替代承接评估 |
+| 寒武纪 | MLU370-X8 / MLU590（2026 放量）/ 690（媒体口径） | 8卡；590 OAM/PCIe5 | 48G LPDDR5 / **96G HBM2e**（勘误：非 32G） | vllm-mlu 官方插件（v0.11.2-dev，**落后主线 10+ 版**）；cnmon≈nvidia-smi；**错误码手册登录墙（gated）** |
 
 ### 8.2 机型差异的 12 个维度（同厂商内代际间即存在，非跨厂商才有）
 
