@@ -130,6 +130,14 @@ type NetDevConfig struct {
 	// 配对做部署校验（权重显存 vs 卡数×单卡显存）。内置实勘初始集在
 	// netdev.BuiltinModelCards，此处用户条目按 (name,quant,hw_family) 覆盖。
 	ModelCards []NetDevModelCard `toml:"model_cards"`
+	// GPUPollConcurrency bounds the per-round GPU health fan-out（F12，
+	// 0 = 默认 8）：100 节点 @8 并发 ≈56s/轮刚好打满 60s 间隔，大集群按
+	// 采集端承受力调高。
+	GPUPollConcurrency int `toml:"gpu_poll_concurrency"`
+	// InspectionConcurrency bounds the 巡检 sweep fan-out（F12，0 = 默认 4，
+	// 上限 16）：纯串行在 100 节点要 20-35 分钟/轮；并发后结果仍按清单序
+	// 组装（确定性不变），进度回调线程安全。
+	InspectionConcurrency int `toml:"inspection_concurrency"`
 	// Syslog is the passive receiver (UDP): devices point their syslog here;
 	// lines aggregate per device and known-bad patterns auto-escalate to
 	// Findings. Port 0 = off.
@@ -925,6 +933,12 @@ func ValidateNetDev(nd NetDevConfig) error {
 		}
 	}
 	seenProfile := map[string]bool{}
+	if nd.GPUPollConcurrency < 0 || nd.GPUPollConcurrency > 64 {
+		return fmt.Errorf("netdev: gpu_poll_concurrency %d out of range (0-64, 0=default)", nd.GPUPollConcurrency)
+	}
+	if nd.InspectionConcurrency < 0 || nd.InspectionConcurrency > 16 {
+		return fmt.Errorf("netdev: inspection_concurrency %d out of range (0-16, 0=default)", nd.InspectionConcurrency)
+	}
 	for _, p := range nd.AccelProfiles {
 		switch p.Accel {
 		case "nvidia", "ascend", "enflame", "kunlunxin", "cambricon":

@@ -4,10 +4,30 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zzycxz/fairpeer/internal/netdev/driver"
 )
+
+// inspectionConcurrencyDefault is the sweep fan-out when the site config
+// doesn't override [[netdev]] inspection_concurrency（F12）。
+const inspectionConcurrencyDefault = 4
+
+// inspectionConcurrencyMax caps the configured fan-out — the sweep is still
+// one sealed exec per command, but 16 concurrent SSH dials per process is the
+// sane ceiling for a management workstation.
+const inspectionConcurrencyMax = 16
+
+func (m *Manager) inspectionConcurrency() int {
+	if n := m.cfg.NetDev.InspectionConcurrency; n > 0 {
+		if n > inspectionConcurrencyMax {
+			return inspectionConcurrencyMax
+		}
+		return n
+	}
+	return inspectionConcurrencyDefault
+}
 
 // RunInspection sweeps every inventory device with a fixed read battery and
 // files one Finding with the evidence — the manual form of 定时巡检 (the
@@ -21,14 +41,18 @@ func (m *Manager) RunInspection(ctx context.Context) (*Finding, error) {
 // progress(done, total) fires after each device's battery completes, total
 // being the driver-resolved device count. The desktop's task-ified 立即巡检
 // renders 巡检中…（N/M） from it without polling.
+//
+// F12 并发化：设备电池按 inspection_concurrency（0=4，上限 16）有界并发——
+// 纯串行在 100 节点要 20-35 分钟/轮。两处确定性纪律：
+//  1. progress 回调全程持锁串行触发（回调方多为 Wails EventsEmit，不假设
+//     其线程安全）；done 计数与回调原子。
+//  2. evidence/devices/problems 按配置清单序组装——Finding 内容不随完成
+//     时序漂移（审计与对比依赖稳定输出）。
 func (m *Manager) RunInspectionProgress(ctx context.Context, progress func(done, total int)) (*Finding, error) {
 	if !m.cfg.NetDev.Enabled || len(m.cfg.NetDev.Devices) == 0 {
 		return nil, fmt.Errorf("netdev disabled or no devices configured")
 	}
 	start := time.Now()
-	var evidence []Evidence
-	devices := make([]string, 0, len(m.cfg.NetDev.Devices))
-	var problems []string
 
 	total := 0
 	for _, d := range m.cfg.NetDev.Devices {
@@ -36,29 +60,68 @@ func (m *Manager) RunInspectionProgress(ctx context.Context, progress func(done,
 			total++
 		}
 	}
-	done := 0
-	for _, d := range m.cfg.NetDev.Devices {
+
+	type devResult struct {
+		name     string
+		evidence []Evidence
+		problems []string
+	}
+	results := make([]devResult, len(m.cfg.NetDev.Devices))
+	var (
+		wg    sync.WaitGroup
+		resMu sync.Mutex // 保护 progress 计数与回调；results 按 idx 写互不重叠
+		done  int
+		sem   = make(chan struct{}, m.inspectionConcurrency())
+	)
+	for i := range m.cfg.NetDev.Devices {
+		d := m.cfg.NetDev.Devices[i]
 		drv, ok := m.driverFor(d)
 		if !ok {
-			problems = append(problems, fmt.Sprintf("%s: no driver (%s/%s)", d.Name, d.Vendor, d.OS))
+			// name 留空：无驱动设备不进 devices 清单与 evidence（对齐串行版）。
+			results[i] = devResult{problems: []string{fmt.Sprintf("%s: no driver (%s/%s)", d.Name, d.Vendor, d.OS)}}
 			continue
 		}
-		devices = append(devices, d.Name)
-		for _, cmd := range inspectionBattery(drv) {
-			res := m.Exec(ctx, d.Name, cmd)
-			if res.Refused {
-				problems = append(problems, fmt.Sprintf("%s: %s refused (%s)", d.Name, cmd, res.Class))
-				continue
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, name string, drv driver.Driver) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			var r devResult
+			r.name = name
+			for _, cmd := range inspectionBattery(drv) {
+				res := m.Exec(ctx, name, cmd)
+				if res.Refused {
+					r.problems = append(r.problems, fmt.Sprintf("%s: %s refused (%s)", name, cmd, res.Class))
+					continue
+				}
+				r.evidence = append(r.evidence, Evidence{Device: name, Command: cmd, Output: res.Output})
+				if res.IsError {
+					r.problems = append(r.problems, fmt.Sprintf("%s: %s → device error", name, cmd))
+				}
 			}
-			evidence = append(evidence, Evidence{Device: d.Name, Command: cmd, Output: res.Output})
-			if res.IsError {
-				problems = append(problems, fmt.Sprintf("%s: %s → device error", d.Name, cmd))
+			results[i] = r
+			resMu.Lock()
+			done++
+			if progress != nil {
+				progress(done, total)
 			}
+			resMu.Unlock()
+		}(i, d.Name, drv)
+	}
+	wg.Wait()
+
+	var (
+		evidence []Evidence
+		devices  = make([]string, 0, len(results))
+		problems []string
+	)
+	for _, r := range results {
+		if r.name == "" {
+			continue
 		}
-		done++
-		if progress != nil {
-			progress(done, total)
-		}
+		devices = append(devices, r.name)
+		evidence = append(evidence, r.evidence...)
+		problems = append(problems, r.problems...)
 	}
 
 	severity := SeverityInfo

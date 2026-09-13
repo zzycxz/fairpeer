@@ -42,11 +42,18 @@ const gpuXidCmd = "nvidia-smi -q"
 // -g 需 systemd ≥237，旧系统上命令失败 → 落 gpuXidCmd 兜底。-n 50 有界。
 const gpuJournalXidCmd = "journalctl -k -g Xid --no-pager -n 50"
 
-// gpuPollConcurrency bounds the per-round GPU fan-out: unlike the SNMP sweep's
-// UDP sockets these hold SSH sessions, and an unreachable host burns its full
-// dial timeout — unbounded serial sweeps stall the whole health cycle (
-// P1-4).
-const gpuPollConcurrency = 8
+// gpuPollConcurrencyDefault is the per-round GPU fan-out floor when the site
+// config doesn't override [[netdev]] gpu_poll_concurrency（F12）。
+const gpuPollConcurrencyDefault = 8
+
+// gpuPollConcurrency resolves the configured fan-out (kept as a function so
+// tests can drive both paths; the const default preserves pre-F12 behavior).
+func (m *Manager) gpuPollConcurrency() int {
+	if n := m.cfg.NetDev.GPUPollConcurrency; n > 0 {
+		return n
+	}
+	return gpuPollConcurrencyDefault
+}
 
 // gpuPollPerDeviceTimeout bounds one host's whole battery (dial + 3 commands).
 const gpuPollPerDeviceTimeout = 90 * time.Second
@@ -276,7 +283,7 @@ func (m *Manager) pollGPUDevices(ctx context.Context, fresh map[string]DeviceHea
 	var (
 		wg      sync.WaitGroup
 		freshMu sync.Mutex
-		sem     = make(chan struct{}, gpuPollConcurrency)
+		sem     = make(chan struct{}, m.gpuPollConcurrency())
 	)
 	for _, d := range targets {
 		wg.Add(1)
@@ -338,7 +345,10 @@ var gpuMergeState = map[string]DeviceHealth{}
 // 通知" design into firehose (); numerics reach the UI via the
 // series sparklines instead.
 func gpuStructuralChanged(a, b DeviceHealth) bool {
-	if a.Reachable != b.Reachable || a.IfDown() != b.IfDown() || a.UptimeSec != b.UptimeSec {
+	// S-39: UptimeSec ticks every round, so comparing it here made dual-channel
+	// hosts fire notifyHealth on EVERY poll — the "变化才通知" design was defeated
+	// by a field that always changes. Real outages surface via Reachable/IfDown.
+	if a.Reachable != b.Reachable || a.IfDown() != b.IfDown() {
 		return true
 	}
 	if a.GPUXIDMax != b.GPUXIDMax || a.GPULastError != b.GPULastError || len(a.GPU) != len(b.GPU) {
