@@ -79,6 +79,12 @@ var linuxTables = classTables{
 		// npu-smi info。无任何设置/复位子命令（那些是 write/proposal 面）。
 		"nvidia-smi", "nvidia-smi -q", "nvidia-smi --query", "nvidia-smi --format",
 		"nvidia-smi -l", "npu-smi info", "npu-smi info -t",
+		// MIG 只读列表形态（切割后观测，2026-09-13 补）：逐条枚举而非裸
+		// "nvidia-smi mig" 前缀——mig 还有 -cgi/-cci 创建、-dgi/-dci 删除等
+		// 写形态，裸前缀会连带放行（空格边界尾参通道，同 E6 教训）。创建/
+		// 删除 MIG 实例是变更，走提案。
+		"nvidia-smi mig -lgi", "nvidia-smi mig -lci",
+		"nvidia-smi mig -lgip", "nvidia-smi mig -lcip",
 		// services & logs
 		"systemctl status", "systemctl list-units", "systemctl list-unit-files",
 		"systemctl is-active", "systemctl is-enabled", "systemctl is-failed",
