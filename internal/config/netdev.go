@@ -786,6 +786,7 @@ func ValidateNetDev(nd NetDevConfig) error {
 		return fmt.Errorf("netdev trap: privileged ports (<1024) are not supported — use a high port and point the device at it (e.g. 1162)")
 	}
 	seenRules := map[string]bool{}
+	seenPresetKeys := map[string]bool{}
 	for _, r := range nd.AlertRules {
 		if strings.TrimSpace(r.Name) == "" {
 			return fmt.Errorf("netdev alert_rule: name is required")
@@ -821,6 +822,14 @@ func ValidateNetDev(nd NetDevConfig) error {
 		// preset_key 字符集白名单（附录 B-10 精神：内部标识不自由文本）。
 		if r.PresetKey != "" && !alertPresetKeyRe.MatchString(r.PresetKey) {
 			return fmt.Errorf("netdev alert_rule %q: preset_key must match [a-z0-9_-]{1,64}", r.Name)
+		}
+		// preset_key 唯一性（GAPS E2）：同 key 双规则使向导按 key 替换的语义
+		// 失效（一次替换一条，另一条残留）——对齐 name 查重范式硬失败。
+		if r.PresetKey != "" {
+			if seenPresetKeys[r.PresetKey] {
+				return fmt.Errorf("netdev alert_rule %q: duplicate preset_key %q (wizard dedupe key must be unique)", r.Name, r.PresetKey)
+			}
+			seenPresetKeys[r.PresetKey] = true
 		}
 		switch r.Severity {
 		case "", "info", "warning", "critical":

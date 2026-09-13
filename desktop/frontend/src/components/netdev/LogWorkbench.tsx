@@ -80,7 +80,8 @@ const levelClass = (line: string): string => {
 };
 
 // 关联源（§5.4 实体360°）：变更/发现/事件合并进同一条时间线。
-const KIND_LABEL: Record<string, string> = { change: "ndv.logwb.kChange", finding: "ndv.logwb.kFinding", event: "ndv.logwb.kEvent" };
+// rejected=被拒写命令（D5）：不算"改了什么"，但"谁尝试改了什么"是排查视角。
+const KIND_LABEL: Record<string, string> = { change: "ndv.logwb.kChange", finding: "ndv.logwb.kFinding", event: "ndv.logwb.kEvent", rejected: "ndv.logwb.kRejected" };
 
 // system:main = 整本 systemd journal（后端 logsource.go）——发行版无关的
 // 系统日志，Linux 设备的默认源。
@@ -116,7 +117,7 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
   const [since, setSince] = useState("");
   const [viewGrep, setViewGrep] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
-  const [rel, setRel] = useState<{ change: boolean; finding: boolean; event: boolean }>({ change: true, finding: true, event: false });
+  const [rel, setRel] = useState<{ change: boolean; finding: boolean; event: boolean; rejected: boolean }>({ change: true, finding: true, event: false, rejected: true });
   const [relHours, setRelHours] = useState(24);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -156,12 +157,12 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
       }
       // 关联源：拉时间线（失败不阻塞日志），按开关与设备集过滤后并入。
       let tlRows: Row[] = [];
-      if (rel.change || rel.finding || rel.event) {
+      if (rel.change || rel.finding || rel.event || rel.rejected) {
         try {
           const tl = await app.NetDevTimeline("", relHours);
           const devSet = new Set(act.map(e => e.device));
           tlRows = (tl ?? [])
-            .filter(e => (e.kind === "change" && rel.change) || (e.kind === "finding" && rel.finding) || (e.kind === "event" && rel.event))
+            .filter(e => (e.kind === "change" && rel.change) || (e.kind === "finding" && rel.finding) || (e.kind === "event" && rel.event) || (e.kind === "rejected" && rel.rejected))
             .filter(e => devSet.size === 0 || [...devSet].some(d => e.device.includes(d)))
             .map(e => {
               const t = new Date(e.time);
@@ -279,9 +280,9 @@ export function LogWorkbench({ devices, onInsertComposer, hidden }: {
           <input className="mem-input" style={{ width: 128 }} value={since} onChange={e => setSince(e.target.value)} placeholder={`${new Date().toISOString().slice(0, 10)} 10:00 或 -1h`} />
           <span className={`btn btn--small ${busy ? "" : "btn--primary"}`} role="button" onClick={() => void fetchAll()}>{busy ? t("ndv.logp.reading") : t("ndv.logwb.readMerge")}</span>
           <span className="ndv__meta" style={{ marginLeft: 6 }}>{t("ndv.logwb.relSources")}</span>
-          {(["change", "finding", "event"] as const).map(k => (
+          {(["change", "rejected", "finding", "event"] as const).map(k => (
             <span key={k} className={`ndv__chip ndv-logwb__rel${rel[k] ? " ndv-logwb__rel--on" : ""}`} role="button"
-              title={k === "change" ? t("ndv.logwb.relChange") : k === "finding" ? t("ndv.logwb.relFinding") : t("ndv.logwb.relEvent")}
+              title={k === "change" ? t("ndv.logwb.relChange") : k === "rejected" ? t("ndv.logwb.relRejected") : k === "finding" ? t("ndv.logwb.relFinding") : t("ndv.logwb.relEvent")}
               onClick={() => setRel(r => ({ ...r, [k]: !r[k] }))}>{t(KIND_LABEL[k] as never)}</span>
           ))}
           <select className="mem-select" style={{ width: 64 }} value={String(relHours)} title={t("ndv.logwb.relWindow")}

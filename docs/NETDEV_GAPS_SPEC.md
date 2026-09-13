@@ -27,9 +27,10 @@
 |---|---|---|---|---|---|
 | **E1** | Timeline `rejected` kind 无前端消费 | 后端已产出（timeline.go D5），但 LogWorkbench:83 `KIND_LABEL` 只有 change/finding/event、:164 的 rel 过滤会把 rejected 条目**整体滤掉**——D5 的"另立被拒操作过滤器"只做了后端一半 | 被拒写命令在时间关联轴上不可见，"谁尝试改了什么"的排查视角缺失 | KIND_LABEL 补 `rejected` 键（zh/en）；rel 过滤器补 rejected 开关；分类图标用护栏红点 | 在 LogWorkbench 时间轴可见被拒条目并可过滤 |
 | **E2** | preset_key 后端无唯一性校验 | ValidateNetDev 仅查字符集（netdev.go preset_key 段）；两条规则同 preset_key 后端放行——前端 merged 去重已做，但 TOML 手工编辑或旧客户端可造成同 key 双规则 | 同 key 双规则使向导按 key 替换语义失效（一次替换一条，另一条残留） | ValidateNetDev alert 段：已见 preset_key 非空且重复 → 报错（对齐 name 查重的既有范式） | 同 key 双规则被加载/保存拒绝 |
-| **E3** | 部署面读表增补 4 命令 | hosts.go 读表无 sha256sum / find / python3（--version）/ curl -s（本机 GET）——部署 runbook 的权重对账/清单/探活步会被分类器拒（MODEL_DEPLOY_SPEC §3.1-1） | 部署 runbook 的只读检查段跑不全 | linux 读表增补：`sha256sum`、`find`、`python3 --version`、`curl -s http://127.0.0.1`（前缀，限本机探活语义） | 四命令经 execSealed 走通且分类为 read；部署蓝本 20 步的只读段全通 |
+| **E3** ✅已修（2026-09-13，安全子集收窄） | 原计划 4 命令中 **find/curl 经边界语义核实不可内建**：prefixMatches 空格边界允许尾参——`find -exec/-delete` 是写原语、`curl -o/-T/第二 URL` 是写/外联原语 | 安全子集已入读表：`sha256sum`（纯哈希）、`ls`/`ls -l`（纯列目录）、`python3 --version`（早退语义）；find/curl 走 extra_read 教读表逐命令授予 | 分类测试绿；部署蓝本权重对账/清单步内建可用 |
 | **E4** | 机型能力档案最小实现（accel_profiles） | 设计已在 ACCEL_SPEC §8.3（字段/消费方已定），代码未做 | 部署参数（TP≤卡数、模型显存 vs 机型显存）无校验数据源，全凭人工 | `[[netdev.accel_profiles]]` 配置段 + 部署建议校验（告警不硬失败）+ GpuBoard readiness 徽标消费 | H20 档案下声明 TP=8×不匹配卡数 → 建议性告警可见 |
 | **E5** | GPU 值班 runbook 模板（文档级） | XID 怎么查/显存泄漏怎么查/NCCL hang 怎么查——散在调研报告（DEPLOY_SPEC §2.2 八簇失败模式表），未沉淀为值班手册 | 值班靠人记忆，排查路径不一致 | 把 DEPLOY_SPEC §2.2 八簇改写为《GPU 值班排查手册》（docs/，每簇：现象→只读检测→修复分类→升级路径） | 手册评审入库；值班培训可用 |
+| **E6** | **curl 前缀的尾参通道**（E3 修理过程中发现的既有安全缺口） | 读表既有 `curl -I ` 前缀：空格边界允许追加 `-o`（写文件）/`-T`（上传）/第二 URL——注释声称"HEAD-only 无数据通道"但前缀模型不约束尾参 | curl 类前缀收紧为"URL 后无尾参"的专用校验（logPathReadOverride 同款旁路范式），或引入结构化 http-check 步骤类型替代裸 curl | 恶意/注入场景无法借 curl 读表项获得写原语 |
 
 ### 批次 F —— 0.3.x（需设计或较大改动）
 

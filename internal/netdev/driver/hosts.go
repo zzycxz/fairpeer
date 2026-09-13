@@ -65,6 +65,13 @@ var linuxTables = classTables{
 		"curl -I ", // HEAD-only, explicit URL on the command line; no data channel
 		// system state
 		"ps ", "ps", "top -b", "df ", "df", "free ", "free", "du -sh", "du -s",
+		// 部署只读检查段（MODEL_DEPLOY E3 安全子集，2026-09-13）：
+		// sha256sum=纯哈希无副作用（权重对账）；ls=纯列目录（权重清单）；
+		// python3 --version=早退语义（--version 短路 -c）。**刻意不加 find**
+		// （-exec/-delete 是写原语）与 curl -s（-o/-T/第二 URL 是写/外联原语
+		// ——prefixMatches 的空格边界允许尾参，见 E6）：它们走 extra_read
+		// 教读表由用户逐命令授予。
+		"sha256sum", "ls", "ls -l", "python3 --version",
 		"uname ", "uname", "uptime", "date", "hostname", "hostname ", "id", "who", "w",
 		"last ", "lastlog", "lastb", "vmstat ", "iostat ", "dstat ", "lscpu", "lsblk", "lsusb", "lspci",
 		"cat /proc", "cat /sys", "cat /etc/os-release", "cat /etc/hostname", "cat /etc/passwd", "timedatectl",

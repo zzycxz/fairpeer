@@ -234,3 +234,29 @@ for_rounds = 3
 		t.Errorf("validate: %v", err)
 	}
 }
+
+// preset_key 唯一性（GAPS E2）：同 key 双规则硬失败——向导按 key 去重的语义
+// 依赖唯一性，重复即编辑错误。
+func TestNetDevAlertRulePresetKeyUnique(t *testing.T) {
+	ok := NetDevConfig{
+		Enabled: true,
+		AlertRules: []NetDevAlertRule{
+			{Name: "a", Metric: "gpu.temp", Op: ">=", Value: 85, Enabled: true, PresetKey: "gpu-hot"},
+			{Name: "b", Metric: "gpu.temp", Op: ">=", Value: 90, Enabled: true, PresetKey: "other"},
+		},
+	}
+	if err := ValidateNetDev(ok); err != nil {
+		t.Fatalf("distinct keys must pass: %v", err)
+	}
+	dup := ok
+	dup.AlertRules[1].PresetKey = "gpu-hot"
+	if err := ValidateNetDev(dup); err == nil || !strings.Contains(err.Error(), "duplicate preset_key") {
+		t.Fatalf("duplicate preset_key must fail, got %v", err)
+	}
+	// 空 key 不参与唯一性（手工规则无 key 合法并存）。
+	manual := ok
+	manual.AlertRules[1].PresetKey = ""
+	if err := ValidateNetDev(manual); err != nil {
+		t.Fatalf("empty preset_key must not collide: %v", err)
+	}
+}
