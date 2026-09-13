@@ -1711,6 +1711,54 @@ func (a *App) NetDevProfileCheck(device, model, quant string, tp int) ([]string,
 	return netdev.CheckDeployment(p, card, tp), nil
 }
 
+// ── 割接 runbook 模板库（F1a，0.2.5 批②）────────────────────────────────
+// NetDevRunbookTplSave persists one template (ID assigned on create).
+func (a *App) NetDevRunbookTplSave(t netdev.RunbookTemplate) (*netdev.RunbookTemplate, error) {
+	if err := netdev.SaveRunbookTemplate(&t); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+func (a *App) NetDevRunbookTplList() ([]netdev.RunbookTemplate, error) {
+	l, err := netdev.ListRunbookTemplates()
+	if err != nil {
+		return []netdev.RunbookTemplate{}, nil // 空库不是错
+	}
+	return l, nil
+}
+
+func (a *App) NetDevRunbookTplDelete(id string) error { return netdev.DeleteRunbookTemplate(id) }
+
+// NetDevRunbookTplPreview renders dry-run（无副作用，逐条分类标注）。
+func (a *App) NetDevRunbookTplPreview(id string, values map[string]string) (*netdev.RunbookTplPreview, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).PreviewRunbookTemplate(id, values)
+}
+
+// NetDevRunbookTplApply 落 draft 提案 + 未启动的 run 定义——人批提案后才可
+// 走既有 CutoverStart（模板从不代批）。
+func (a *App) NetDevRunbookTplApply(id string, values map[string]string, runName string) (*netdev.RunbookApplyResult, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	return netdev.SharedManager(cfg).ApplyRunbookTemplate(id, values, runName)
+}
+
+// NetDevRunbookTplExtract 是 F1c 出口②：跑完的 run 一键沉淀为模板（终态限
+// 制内建）。
+func (a *App) NetDevRunbookTplExtract(runID, name string) (*netdev.RunbookTemplate, error) {
+	run, err := netdev.GetCutover(runID)
+	if err != nil {
+		return nil, err
+	}
+	return netdev.ExtractRunbookTemplate(run, name)
+}
+
 // ── 网络巡检（task-ified 手动触发 + 状态流）────────────────────────────────
 // NetDevInspectionState is the overview 巡检卡's model: one sweep's live
 // progress plus the last completed round (manual OR scheduled — both write
