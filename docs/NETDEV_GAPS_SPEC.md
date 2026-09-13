@@ -47,10 +47,10 @@
 | **F10** | **权重分发进度跟踪** | 100 节点各自拉 140GB 的进度/断点续传状态无承载结构 | 分发任务实体：per-node 进度（脚本输出解析或文件探针）+ 汇总面板；复用 Job 引擎的步骤状态机 | 同 F8 触发条件 |
 | **F11** | **series 分区/sqlite 化（R6 解冻，触发条件已量化）** | JSONL 单文件全扫描：100 节点×14 天 ≈ 3.4GB/6860 万行；SeriesRead 每查一台全扫、GpuBoard 构建=100 次全扫、CleanupSeries 整文件重写——**~20-30 节点开始退化，100 节点检查面不可用** | 按设备分片文件（`series/<device>.jsonl`，零新依赖快速解）或 sqlite 化（spec §5.3 原案）；迁移读端 | **>30 GPU 节点即触发（与 Path A/B 无关的硬伤）** |
 | **F12** | **并发参数化 + 巡检并发化** | gpuPollConcurrency=8 硬编码（100 节点≈56s/轮刚好打满 60s 间隔）；全网巡检纯串行（inspect.go 平 for 循环，100 节点 20-35 分钟/轮） | 两者改信号量并发 + 配置化上限（对齐 healthPollConcurrency=64 先例）；巡检串行→并发需保进度回调线程安全 | >30 节点即触发（与 F11 同批） |
-| **G-P1** | **项目安全域**（PROJECT_SCENARIO_SPEC §二） | 项目现状=纯视图分组，无白名单/地址域/操作档；guardrails 全局单份 | NetDevProject 升级（type/allow/deny/policy/confirmers）+ guardrailCheck 项目作用域 + 三段式表单 | 0.3.x 主体 |
+| **G-P1** | **项目安全域**（PROJECT_SCENARIO_SPEC §二+§七 V1/V2） | 项目现状=纯视图分组（activeProject 是前端 localStorage 态，后端零项目上下文）；提案无 project 字段；confirm2 无身份概念 | 会话项目上下文管道（前端→后端会话态→guardrail/提案/发现）+ 提案补 project 字段 + NetDevProject 升级（type/allow/deny/policy/confirmers+身份定义）+ 三段式表单 | 0.3.x 主体，**~1.5-2 周（V1 上调）** |
 | **G-P2** | 项目化模板联动（同上 §五） | 模板无项目类型过滤 | 部署模板按项目类型缺省 | 小 |
-| **G-L1** | **四眼跨实例 confirm2**（同上 §四 L1） | confirm2 第二锁只能同机按；大集群确认分量重 | linkpeer 确认请求消息 + 对端确认卡 | P-3a，信令层现成 |
-| **G-L2** | **审计链 peer 互锚**（L2） | AnchorAudit 仅本域锚 | 配对 peer 定期互锚审计链头 | P-3a |
+| **G-L1** | **四眼跨实例 confirm2**（§四 L1+§七 V3） | confirm2 仅同机布尔位；linkpeersignal 只有 /pair/* 三端点、无 relay/数据面 | 新数据通道（signal 加 relay 端点或配对后 P2P 直连，对方 Ed25519 公钥可用）+ 确认请求消息 + 对端确认卡 | P-3a，**可行性中（V3 下调），~2 周** |
+| **G-L2** | **审计链 peer 互锚**（L2+V3） | AnchorAudit 锚定目标=本节点 trust domain 链（非跨机器） | peer 间锚记录提交路径 + 定期互锚调度 | P-3a |
 | **G-L3** | 签名证据包（L3） | 诊断包无签名 | trustdomain 私钥签名+验签 | P-3b |
 | **G-L4** | 态势共享（L4） | linkpeersignal 仅信令无数据面 | 探索 | P-3c |
 

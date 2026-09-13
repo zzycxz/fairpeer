@@ -138,3 +138,18 @@ linkpeersignal=LAN 内多 fairpeer 的**配对与信令层**（Ed25519 公钥交
 - §10 UI：零新框架；项目三段式表单在设置页 L3 内。
 - 链/信令拓展不新增中心化服务（LAN 点对点，重启即忘语义保留）。
 - estop 红线、脱敏全链、信封闸——全部不动。
+
+
+---
+
+## 七、代码验证补记（2026-09-13，spec 落地前精读修正）
+
+对 §二/§四 的四处关键假设做了源码精读验证，**三处需修正**：
+
+| # | 验证点 | 代码事实 | 对方案的影响 |
+|---|---|---|---|
+| V1 | "会话绑定项目（切换器已有）" | **activeProject 是纯前端 localStorage 态**（netdevProjectStore.ts:10，注释自述"only the ACTIVE SELECTION is session state"）；后端零项目上下文——`NetDevTurnBegin()` 无项目参数、guardrailCheck 不感知项目、**提案无 project 字段**（findings 有，是保存时按 groups 推断） | **G-P1 改造量上调**：需新增"会话项目上下文"管道（前端切换→后端会话态→guardrail/提案/发现接线），且提案需补 project 字段（草稿创建时盖章，过滤与跨项目拒绝都靠它）。原估 ~1 周 → **~1.5-2 周** |
+| V2 | confirm2 第二把锁 | `ApproveProposal(id, confirm2 bool)`——**布尔位，无任何身份概念**（谁按的不可知，审计只有"人"） | confirmers 名单需先定义"身份"：桌面无用户体系 → 身份=批准时自报 + 可选 trustdomain 密钥签名（跨实例四眼时 peer 身份自然携带）。G-P1 内含此设计 |
+| V3 | "AnchorAudit 已是跨锚" | 锚定目标是**本节点 trust domain 链**（node.AnchorAudit → 本地 Propose；注释的 cross-anchor 指审计链头跨到 trust 链，**不是跨机器**）；且 linkpeersignal 仅三个配对端点（/pair/register、exchange、confirm；K 不验业务签名、两端自验），**无消息路由/relay/数据面** | **G-L2 peer 互锚是真实新增**（需 peer 间锚记录提交路径）；**G-L1 四眼确认的可行性从"高"降为"中"**——确认请求需要新数据通道（signal 服务加 relay 端点，或配对后局域网 P2P 直连——已有对方 Ed25519 公钥可加密）。L4 态势共享同依赖该通道。P-3a 估算 ~1 周 → **~2 周（含 relay/P2P 选型）** |
+
+**净结论**：方案方向全部成立（项目安全域/两把锁哲学/六操作矩阵/linkpeer 拓展），但 G-P1 与 G-L1 的工程量各上调约一倍，根因都是"前端态/本域锚/配对信令"距"后端安全语义/跨实例通道"还差一层管道。已同步 GAPS 台账条目口径。
