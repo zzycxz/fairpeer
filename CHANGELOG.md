@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(netdev): 0.2.5 批③模板内容——F1b 七变体模型/运维两侧 + F13 平台组件四条（内置库 12 条种子）
+
+- **模型侧三变体（③a）**：`deploy-vllm-standalone`（前置六只读步：驱动/显存水位/残留进程[值班簇 2]/
+  /dev/shm[簇 3]/权重目录/sha256sum 对账[F2 校验段]→变更段写 unit 提案→is-active+HTTP 双门
+  [门超时 1800s 对齐大模型加载]→放流量决策点）；`deploy-vllm-multinode`（ibstat 互联前置[E9]；
+  head/worker 协同**拆每台一份提案**——绝不 ssh 串链；门=端口监听+服务存活）；`upgrade-vllm-bluegreen`
+  （新端口并行→切流决策点→旧版下线→关回退窗；TP 启动固定口径注记指向重排变体）。
+- **运维侧四变体（③b）**：`ops-scale-dp-replicas`（不停机扩副本；HPA 指标口径=KV cache 利用率/
+  排队深度而非 CPU）；`ops-rearrange-tp-bluegreen`（TP degree 启动固定→改 TP=蓝绿换队；MoE Elastic
+  EP 例外注记）；`ops-replace-fault-node`（ECC 阈值实勘边界：correctable>10 次/时→drain、反复
+  uncorrectable→隔离、物理换卡必人工；XID/journalctl 证据固化步）；`ops-decommission`（idle 判定→
+  摘流→「确认无人再用」终审决策点→权重归档——业界无统一 runbook，结构化即增量）。
+- **F13 平台组件四条**：`platform-litellm` / `platform-milvus` / `platform-dify` / `platform-langfuse`
+  ——「建 AI 平台」本身成为模板场景；门统一 curl 探活（curlReadOverride 语法内）。
+- 内容纪律四条（内建注释+测试锁定）：只读步全在读表/curlReadOverride 语法内；门 fail-closed
+  （Unknown 被密封路径拒）；变更段全走 draft 提案人批；主机间协同禁串链。
+  `TestBuiltinRunbookLibraryRenders` 全库渲染门禁抓占位符笔误。
+- 剩余：引擎档×8 组合矩阵与 F15 七步验收模板随后续批次按需入库（种子格式已定）。
+
 ### feat(netdev): 0.2.5 批②模板机制——割接 runbook 模板库（F1a+F1c，GAPS 台账"机制从未建过"项落地）
 
 - **F1a 机制**：`RunbookTemplate`（步骤序列=只读检查步/语义门/变更段/决策点 + `{{var}}` 变量）
