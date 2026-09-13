@@ -52,6 +52,8 @@
 | **F10** | **权重分发进度跟踪** | 100 节点各自拉 140GB 的进度/断点续传状态无承载结构 | 分发任务实体：per-node 进度（脚本输出解析或文件探针）+ 汇总面板；复用 Job 引擎的步骤状态机 | 同 F8 触发条件 |
 | **F11** | **series 分区/sqlite 化（R6 解冻，触发条件已量化）** | JSONL 单文件全扫描：100 节点×14 天 ≈ 3.4GB/6860 万行；SeriesRead 每查一台全扫、GpuBoard 构建=100 次全扫、CleanupSeries 整文件重写——**~20-30 节点开始退化，100 节点检查面不可用** | 按设备分片文件（`series/<device>.jsonl`，零新依赖快速解）或 sqlite 化（spec §5.3 原案）；迁移读端 | **>30 GPU 节点即触发（与 Path A/B 无关的硬伤）** |
 | **F12** | **并发参数化 + 巡检并发化** | gpuPollConcurrency=8 硬编码（100 节点≈56s/轮刚好打满 60s 间隔）；全网巡检纯串行（inspect.go 平 for 循环，100 节点 20-35 分钟/轮） | 两者改信号量并发 + 配置化上限（对齐 healthPollConcurrency=64 先例）；巡检串行→并发需保进度回调线程安全 | >30 节点即触发（与 F11 同批） |
+| **F13** | **AI 平台组件部署模板包**（2026-09-13 两路调研新增：AI-native 企业栈的组件全是 K8s/Docker 部署件，F1 模板体系从模型服务自然扩展到平台组件） | F1 模板现仅覆盖推理引擎档 | LiteLLM 网关/Milvus 或 pgvector/Dify 或 Coze/Langfuse 四条组件部署 runbook 模板（K8s 路径 k8s-apply 审批）；配套只读检查步（/metrics 探活）与升级回滚变体 | 企业从试点→平台化（阶段 2-3）的建平台流程可被本台编排 |
+| **F14** | **F3 /metrics 抓取泛化**（同调研：LiteLLM/Kueue/Milvus/护栏服务全部暴露 Prometheus 格式 /metrics——F3 的抓取设计不必限定 vLLM） | F3 现按推理引擎设计 | F3 实现时抓取器做成通用 Prometheus 文本解析（端点登记制，J2 已裁），指标名前缀区分（vllm:*/litellm:*/自定义）；告警枚举随端点类型 | 一套采集通道覆盖网关/队列/向量库指标 |
 | **G-P1** | **项目安全域**（PROJECT_SCENARIO_SPEC §二+§七 V1/V2） | 项目现状=纯视图分组（activeProject 是前端 localStorage 态，后端零项目上下文）；提案无 project 字段；confirm2 无身份概念 | 会话项目上下文管道（前端→后端会话态→guardrail/提案/发现）+ 提案补 project 字段 + NetDevProject 升级（type/allow/deny/policy/confirmers+身份定义）+ 三段式表单 | 0.3.x 主体，**~1.5-2 周（V1 上调）** |
 | **G-P2** | 项目化模板联动（同上 §五） | 模板无项目类型过滤 | 部署模板按项目类型缺省 | 小 |
 | **G-L1** | **四眼跨实例 confirm2**（§四 L1+§七 V3） | confirm2 仅同机布尔位；linkpeersignal 只有 /pair/* 三端点、无 relay/数据面 | 新数据通道（signal 加 relay 端点或配对后 P2P 直连，对方 Ed25519 公钥可用）+ 确认请求消息 + 对端确认卡 | P-3a，**可行性中（V3 下调），~2 周** |
