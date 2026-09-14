@@ -2173,6 +2173,8 @@ export interface NetDevDeviceHealth {
   gpuXidCodes?: number[];
   gpuXidEvidence?: string[];
   gpuXidSource?: string;
+  // M-1 轮2：昇腾"health 非 OK 但无十进制码值"——hold 标志（不 resolve 在案）。
+  gpuHealthAbnormal?: boolean;
   gpuLastError?: string;
 }
 

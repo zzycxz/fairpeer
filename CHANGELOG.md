@@ -34,6 +34,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 测试：TestProjectAllowException / TestProjectReadOnlyFloor（命令层+提案层）/
   TestTrustDomainApprovalUpgrade（启用未入域 fail-closed）。
 
+### feat(netdev): 收尾批——RunbookTpl 产品入口（含 G-P2 场景联动）+ F2 权重管线落地件 + job 文件锁修复
+
+- **RunbookTplPanel**（割接创建视图顶部，F1a/F1b UI 断路修）：模板列表按场景筛选
+  （**G-P2**：按活动项目 type 联动缺省——netdev→network-cutover、aicompute→model-deploy、
+  blueteam→model-ops）；模板→变量→preview（dry-run 步骤+分类标注）→apply（draft 提案落库
+  + run 进「待启动」列表，localStorage 会话暂存）；提案批齐后一键 NetDevCutoverStart 并跳
+  运行视图——**模板从不代批**的语义在 UI 链路闭环。
+- **F2 权重三段式落地件**：`docs/NETDEV_WEIGHT_PIPELINE.md`——分发脚本模板（hf download
+  断点续传 + manifest.sha256 产物）+ 校验段接口（`sha256sum -c`）+ 三段分工表。
+- **job 文件锁 Windows flake 修复**（轮3定位的根因）：`saveJobLocked` 重试退避（rename-vs-reader
+  撞锁 20ms×4）——暂停/冻结态落盘不再丢失；`TestSaveJobConcurrentReads` 并发回归（读端容忍
+  copyOnto 瞬态半行、收尾后必完整、保存端零失败）。
+- **清理**：ProposalCenter 死组件移除（其旧批准路径无 operator 输入，复活即绕 J5——消除）；
+  NetDevDeviceHealth 前端类型补 gpuHealthAbnormal。
+
 ### fix(netdev): 三轮完整检查（每轮 3 子代理）——P1×12 + P2/P3×20 修复与记档
 
 **轮1（逐行正确性）**：runbook 步形状三处裁决统一（决策点/门=附着物，12 条内置模板改写，

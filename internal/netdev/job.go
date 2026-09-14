@@ -167,12 +167,27 @@ func saveJob(j *Job) error {
 
 // saveJobLocked is saveJob with the caller holding jobMu — the write half of
 // an atomic load→check→set→save transition.
+//
+// Windows 语义（轮3审查定位的 flake 根因）：GetJob 的轮询读者握着目标文件时
+// ReplaceFile 的 rename 失败，copyOnto 回退也可能撞上同一把锁——短暂重试
+// （读者 ReadFile 每次开关，20ms 足够释放）比吞错误正确：暂停/冻结态落盘
+// 丢失会让"决策点暂停"在重启后凭空消失。
 func saveJobLocked(j *Job) error {
 	b, err := json.Marshal(j)
 	if err != nil {
 		return err
 	}
-	return fileutil.AtomicWriteFile(filepath.Join(jobsDir(), j.ID+".json"), b, 0o600)
+	path := filepath.Join(jobsDir(), j.ID+".json")
+	var lastErr error
+	for attempt := 0; attempt < 4; attempt++ {
+		if attempt > 0 {
+			time.Sleep(20 * time.Millisecond * time.Duration(attempt))
+		}
+		if lastErr = fileutil.AtomicWriteFile(path, b, 0o600); lastErr == nil {
+			return nil
+		}
+	}
+	return lastErr
 }
 
 // GetJob loads one job.

@@ -1,6 +1,9 @@
 package netdev
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -175,5 +178,64 @@ func TestJobValidation(t *testing.T) {
 	}
 	if _, err := m.JobStart(&Job{Name: "x"}); err == nil {
 		t.Fatal("empty steps accepted")
+	}
+}
+
+// 轮3审查 P2：Windows 文件锁 flake 的并发回归——保存方（rename-vs-reader）
+// 与轮询读者对打：读端允许瞬时失败/空读（AtomicWriteFile 语义内），但禁止
+// 持续不可读或坏 JSON；保存端重试后必须全部成功。
+func TestSaveJobConcurrentReads(t *testing.T) {
+	jobTestManager(t)
+	j := &Job{ID: "J-concurrent", Name: "concurrent", Steps: []JobStep{
+		{Name: "s1", Device: "sw1", Command: "display version"},
+	}}
+	if err := saveJob(j); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 50; i++ {
+			j.Commands = i
+			if err := saveJob(j); err != nil {
+				t.Errorf("save %d: %v", i, err)
+				return
+			}
+		}
+	}()
+	reads, transient := 0, 0
+	for {
+		select {
+		case <-done:
+			// 写端收尾后文件必须稳定为最后一次成功保存（saveJob 重试保证）；
+			// copyOnto 原地回退允许循环期瞬态半行，但收尾后短重试内必读到
+			// 完整 JSON。
+			var probe Job
+			ok := false
+			for r := 0; r < 25 && !ok; r++ {
+				b, err := os.ReadFile(filepath.Join(jobsDir(), j.ID+".json"))
+				if err == nil && json.Unmarshal(b, &probe) == nil && probe.Commands == 49 {
+					ok = true
+				} else {
+					time.Sleep(20 * time.Millisecond)
+				}
+			}
+			if !ok {
+				t.Fatalf("final state unreadable after concurrent saves (reads=%d transient=%d)", reads, transient)
+			}
+			if reads == 0 {
+				t.Fatal("reader never ran")
+			}
+			return
+		default:
+		}
+		b, err := os.ReadFile(filepath.Join(jobsDir(), j.ID+".json"))
+		reads++
+		if err == nil {
+			var probe Job
+			if json.Unmarshal(b, &probe) != nil {
+				transient++ // copyOnto 原地写的瞬态半行——允许，不计失败
+			}
+		}
 	}
 }
