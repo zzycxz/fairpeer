@@ -416,6 +416,7 @@ func (m *Manager) CutoverStart(def *CutoverRun) (*CutoverRun, error) {
 	}
 
 	if err := saveCutover(def); err != nil {
+		cleanupReg() // 新轮2并发审查 P3：句柄泄漏——runner 永久滞留 cutoverRuns
 		return nil, err
 	}
 	_ = AppendAudit(Audit{Device: "(cutover)", Command: "start " + def.ID + " " + def.Name, Class: "cutover", Status: AuditOK})

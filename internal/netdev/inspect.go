@@ -69,7 +69,7 @@ func (m *Manager) RunInspectionProgress(ctx context.Context, progress func(done,
 	results := make([]devResult, len(m.cfg.NetDev.Devices))
 	var (
 		wg    sync.WaitGroup
-		resMu sync.Mutex // 保护 progress 计数与回调；results 按 idx 写互不重叠
+		resMu sync.Mutex // 保护 progress 计数（回调在锁外触发——新轮2并发审查）；results 按 idx 写互不重叠
 		done  int
 		sem   = make(chan struct{}, m.inspectionConcurrency())
 	)
@@ -100,12 +100,15 @@ func (m *Manager) RunInspectionProgress(ctx context.Context, progress func(done,
 				}
 			}
 			results[i] = r
+			// 新轮2并发审查 P3：锁内只快照计数，回调移出锁外——慢回调
+			// （Wails EventsEmit）不再串行化整场电池并占住 sem 槽。
 			resMu.Lock()
 			done++
-			if progress != nil {
-				progress(done, total)
-			}
+			doneSnapshot, totalSnapshot := done, total
 			resMu.Unlock()
+			if progress != nil {
+				progress(doneSnapshot, totalSnapshot)
+			}
 		}(i, d.Name, drv)
 	}
 	wg.Wait()

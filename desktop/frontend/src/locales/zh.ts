@@ -604,7 +604,7 @@ export const zh: Record<DictKey, string> = {
   "caps.marketTitleCoding": "内置编码",
   "caps.marketTitleOffice": "内置办公",
   "caps.marketTitleActive": "当前模式生效",
-  "caps.skillDesc.init": "为当前项目建立全局记忆与架构约定。它会分析代码结构、规范和测试命令，并生成记忆文件，让智能体在后续对话中更懂您的项目。",
+  "caps.skillDesc.init": "为当前项目建立全局记忆与架构约定：分析代码结构、规范与测试命令，生成 AGENTS.md 记忆文件，让智能体在后续对话中更懂您的项目。",
   "caps.skillDesc.explore": "通过隔离的子智能体大范围探索整个代码库，适合解答跨文件问题。例如：'找出所有使用旧版接口的地方'或'梳理登录流程'。",
   "caps.skillDesc.research": "深度技术调研助手。它能结合网页搜索与本地代码阅读，为您解答类似'如何将 X 升级到 Y'或'对比我们的实现和官方最佳实践'的难题。",
   "caps.skillDesc.install-capability": "技能与 MCP 插件管理器。可以通过网址、GitHub、本地路径等一键安装或卸载扩展能力。",
@@ -623,10 +623,8 @@ export const zh: Record<DictKey, string> = {
   "caps.skillDesc.netdev-diag-auto": "网络故障排查子代理：端口 down、OSPF/BGP 邻居起不来、网速慢、网段不通——按症状路由→分支深查→逐跳定位给出根因结论和路径图；原始回显不进主对话。",
   "caps.skillDesc.netdev-seccheck-auto": "蓝队安全核查子代理：整批设备的漏洞核查闭环（指纹与暴露面→候选→只读验证→立案），或项目上线审计套餐；证据当场立案，只回 Top 风险摘要与覆盖率。",
   "caps.skillDesc.netdev-config-vault": "配置生命周期管家：按意图起草厂商命令（读即执行、写走提案确认可回退）、维护版本台账、对比两版与现网差异、生成恢复回退提案（永不直接执行）。",
-  "caps.skillDesc.browser-cybersituational-awareness": "浏览器自编排技能：按录制好的步骤流到安全平台页面采集网络安全态势数据，逐步确定性执行、不靠模型即兴。",
-  "caps.skillDesc.browser-IT-ops": "浏览器自编排技能：按录制好的步骤流驱动浏览器完成 IT 运维平台的日常查询与操作。",
-  "caps.skillDesc.browser-soc-response": "浏览器自编排技能（草稿）：SOC 安全事件响应的步骤流，尚未录制唤醒——在浏览器运维面板试跑并唤醒后才可调用。",
-  "caps.skillDesc.netdev-security-assessment": "安全渗透评估：以攻击路径视角对设备做安全评估，识别可达路径与弱点；运维模式专用，也是后续渗透流程编排的落点。",
+  // 自编排/市场等用户自有技能不设 caps.skillDesc 键（SKILL_DESC_DISPLAY_SPEC R1）：
+  // 设置页直显其 SKILL.md 描述，浏览器编辑器的修改即时生效，不被覆盖层遮蔽。
   "caps.mySkills": "自编排技能",
   "caps.noUserSkills": "暂无自编排技能。通过浏览器控制台录制生成，或在下方市场安装。",
   "caps.selfOrchBrowser": "浏览器",

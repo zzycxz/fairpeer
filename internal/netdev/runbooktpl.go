@@ -63,7 +63,7 @@ type RunbookTemplate struct {
 	Name      string           `json:"name"`
 	Scenario  string           `json:"scenario,omitempty"`
 	Vars      []string         `json:"vars,omitempty"`
-	WindowMin int              `json:"window_min,omitempty"` // 割接窗口（总倒计时分钟；0=apply 时必传）
+	WindowMin int              `json:"window_min,omitempty"` // 割接窗口（总倒计时分钟；<=0 的模板 apply 即拒——先补窗口）
 	Steps     []RunbookTplStep `json:"steps"`
 	Notes     string           `json:"notes,omitempty"`
 	CreatedAt time.Time        `json:"created_at"`
@@ -762,8 +762,8 @@ func (m *Manager) ApplyRunbookTemplate(id string, values map[string]string, runN
 	if strings.TrimSpace(runName) == "" {
 		runName = t.Name
 	}
-	// 字段注释契约执行（新轮1-C P2）：window_min=0 承诺"apply 时必传"——
-	// 不产 Deadline 的 run 在 CutoverStart 必拒，落进待启动列表就是死端。
+	// window_min 契约（新轮1-C P2）：<=0 的模板 apply 即拒——不产 Deadline
+	// 的 run 在 CutoverStart 必拒，落进待启动列表就是死端。
 	if t.WindowMin <= 0 {
 		return nil, fmt.Errorf("runbook template %q: window_min is 0 — 先在模板补割接窗口分钟数再 apply", t.Name)
 	}
@@ -819,7 +819,14 @@ func ExtractRunbookTemplate(run *CutoverRun, name string) (*RunbookTemplate, err
 	default:
 		return nil, fmt.Errorf("runbook extract %s: status %q is not terminal — 等跑完再沉淀", run.ID, run.Status)
 	}
-	t := &RunbookTemplate{Name: strings.TrimSpace(name), Notes: fmt.Sprintf("抽取自 run %s（状态 %s）", run.ID, run.Status)}
+	// 新轮2复核 P3：抽取模板 window_min=0 会让 apply 被契约拒绝（抽取闭环
+	// 断）——以 run 实际窗口回填：Deadline-StartedAt 剩余分钟，异常时缺省 120。
+	t := &RunbookTemplate{Name: strings.TrimSpace(name), WindowMin: 120, Notes: fmt.Sprintf("抽取自 run %s（状态 %s）", run.ID, run.Status)}
+	if run.StartedAt != nil && !run.Deadline.IsZero() {
+		if mins := int(run.Deadline.Sub(*run.StartedAt).Minutes()); mins > 0 && mins <= 24*60 {
+			t.WindowMin = mins
+		}
+	}
 	t.Steps = make([]RunbookTplStep, 0, len(run.Steps))
 	var extractNotes []string
 	var last *RunbookTplStep // 归并锚点：gate-only run 步的门并入前一个模板步

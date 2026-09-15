@@ -11,11 +11,13 @@ import (
 // 急停扩成四件事，并守住一条红线：
 //
 //  1. KillAllConnections（既有：设备连接 + 人工终端 + 发现任务，已入审计）
-//  2. running 割接 → Hold。**不是 abort**：CutoverAbort 只 cancel 运行器并把
+//  2. running Job → JobPause（既有边界冻结：当前步骤收尾后暂停落盘）。job
+//     腿在割接腿之前执行（新轮2并发审查）：cutover hold 要拿 cutoverMu，
+//     若操作员红钮前已发起回退（持锁跨分钟级 I/O），job 腿会被无界拖住。
+//  3. running 割接 → Hold。**不是 abort**：CutoverAbort 只 cancel 运行器并把
 //     pending 步骤标 skipped，不回退任何已执行变更——直接 abort 会把设备留在
 //     半割接状态。Hold 让 runner 在当前步骤收尾后停在步骤边界（每步都有
 //     超时，有界），继续 / 回退 / 终止由人按。
-//  3. running Job → JobPause（既有边界冻结：当前步骤收尾后暂停落盘）。
 //  4. executing 提案 → 代际冻结：estopGen 代数 +1；ExecuteProposal 在步骤
 //     边界检测到代数变化即走既有 frozen 路径（partial，后续步骤不落盘）。
 //
@@ -57,6 +59,25 @@ func (m *Manager) EstopAll() EstopReport {
 	// 重连——杀连接挡不住它，代数才挡得住）。顺序 = 冻结 → 杀 → hold/pause。
 	estopGen.Add(1)
 	rep := EstopReport{Connections: m.KillAllConnections()}
+	// job 腿在 cutover 腿**之前**（新轮2并发审查 P2）：cutoverHold 要拿
+	// cutoverMu——若操作员在红钮前已发起回退（CutoverRollback 持锁跨分钟级
+	// 设备 I/O），cutover 腿会阻塞到回退收尾，排在后面的 job 暂停腿被无界
+	// 拖住（running job 继续在设备上跑）。先停 job（快、无 cutoverMu 依赖），
+	// 再逐台 hold 割接。
+	if js, err := ListJobs(); err != nil {
+		rep.Errors = append(rep.Errors, "list jobs: "+err.Error())
+	} else {
+		for _, j := range js {
+			if j.Status != JobRunning {
+				continue
+			}
+			if err := JobPauseEstop(j.ID); err == nil {
+				rep.JobsPaused = append(rep.JobsPaused, j.ID)
+			} else {
+				rep.Errors = append(rep.Errors, "pause job "+j.ID+": "+err.Error())
+			}
+		}
+	}
 	if cs, err := ListCutovers(); err != nil {
 		rep.Errors = append(rep.Errors, "list cutovers: "+err.Error())
 	} else {
@@ -71,20 +92,6 @@ func (m *Manager) EstopAll() EstopReport {
 				continue
 			}
 			rep.CutoversHeld = append(rep.CutoversHeld, c.ID)
-		}
-	}
-	if js, err := ListJobs(); err != nil {
-		rep.Errors = append(rep.Errors, "list jobs: "+err.Error())
-	} else {
-		for _, j := range js {
-			if j.Status != JobRunning {
-				continue
-			}
-			if err := JobPauseEstop(j.ID); err == nil {
-				rep.JobsPaused = append(rep.JobsPaused, j.ID)
-			} else {
-				rep.Errors = append(rep.Errors, "pause job "+j.ID+": "+err.Error())
-			}
 		}
 	}
 	status := AuditOK

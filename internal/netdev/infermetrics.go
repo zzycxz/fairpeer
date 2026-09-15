@@ -314,7 +314,17 @@ var metricsHTTPClient = &http.Client{
 // pollMetricsEndpoints scrapes every registered endpoint and folds the mapped
 // points into series. Called from PollHealthOnce BEFORE evaluateAlerts so
 // infer.* rules read this round's values.
+// metricsScrapeConcurrency bounds the scrape fan-out（新轮2并发审查 P2）：
+// 串行时每端点 10s 超时 × N 端点全宕会把 evaluateAlerts 压到轮末无上界延迟。
+const metricsScrapeConcurrency = 8
+
 func (m *Manager) pollMetricsEndpoints(ctx context.Context) {
+	type scrapeJob struct {
+		device, addr string
+		port         int
+		path         string
+	}
+	var jobs []scrapeJob
 	for i := range m.cfg.NetDev.Devices {
 		d := m.cfg.NetDev.Devices[i]
 		if len(d.MetricsPorts) == 0 {
@@ -325,14 +335,32 @@ func (m *Manager) pollMetricsEndpoints(ctx context.Context) {
 			path = "/metrics"
 		}
 		for _, port := range d.MetricsPorts {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			m.scrapeEndpoint(ctx, d.Name, d.Address, port, path)
+			jobs = append(jobs, scrapeJob{device: d.Name, addr: d.Address, port: port, path: path})
 		}
 	}
+	if len(jobs) == 0 {
+		return
+	}
+	var (
+		wg  sync.WaitGroup
+		sem = make(chan struct{}, metricsScrapeConcurrency)
+	)
+loop:
+	for _, jb := range jobs {
+		select {
+		case <-ctx.Done():
+			break loop // break select ≠ break for——取消后必须停止投递
+		default:
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(jb scrapeJob) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			m.scrapeEndpoint(ctx, jb.device, jb.addr, jb.port, jb.path)
+		}(jb)
+	}
+	wg.Wait()
 }
 
 // metricsBodyCap bounds how much of a response enters memory — a runaway

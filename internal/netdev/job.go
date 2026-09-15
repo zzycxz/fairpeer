@@ -590,6 +590,14 @@ func (m *Manager) jobRunner(ctx context.Context, run *jobRun, id string) {
 		// Honor a user pause requested during the step.
 		select {
 		case <-run.pauseReq:
+			// 新轮2并发审查 P3：锁内重读复核状态——与并发 JobAbort 的竞争
+			// 窗口里，abort 已提交 terminated 终态时不得用本快照覆盖回
+			// paused（否则 abort 被"复活"，JobResume 可再启动）。
+			fresh, ferr := GetJob(id)
+			if ferr != nil || fresh.Status != JobRunning {
+				return
+			}
+			j = fresh
 			j.ActiveMS = activeMS
 			if state.Status == JobStepOK {
 				j.Cursor++

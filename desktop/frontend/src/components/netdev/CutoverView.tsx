@@ -102,7 +102,7 @@ export function CutoverView({
   };
 
   if (!watchId) {
-    return <CutoverCreate proposals={proposals} devices={devices} onCreated={(id) => setWatchId(id)} />;
+    return <CutoverCreate proposals={proposals} devices={devices} onCreated={(id) => setWatchId(id)} onChanged={reload} />;
   }
   if (!run) {
     return <div className="ndv__card"><div className="ndv__hint">{err || tt("ndv.loading")}</div></div>;
@@ -289,10 +289,12 @@ function CutoverCreate({
   proposals,
   devices,
   onCreated,
+  onChanged,
 }: {
   proposals: NetDevProposal[];
   devices: { name: string; vendor: string }[];
   onCreated: (id: string) => void;
+  onChanged?: () => void;
 }) {
   const approved = proposals.filter((p) => p.status === "approved");
   const [name, setName] = useState("");
@@ -364,7 +366,7 @@ function CutoverCreate({
   return (
     <div className="ndv-cutover ndv-cutover--create">
       {/* F1a/F1b UI 入口（轮3集成审查补断路）：模板→应用→批提案→启动 */}
-      <RunbookTplPanel devices={devices} proposals={proposals} onCreated={onCreated} />
+      <RunbookTplPanel devices={devices} proposals={proposals} onCreated={onCreated} onChanged={onChanged} />
       <div className="ndv__card">
         <div className="ndv__card-title">{tt("ndv.cut.createTitle")}</div>
         <div className="ndv__hint">

@@ -2864,19 +2864,22 @@ export interface NetDevWriteTierRow {
 // NetDevOpStep is one operation-ledger row (spec §7.3): every write action —
 // direct write, proposal step, rollback itself — lands exactly one.
 export interface NetDevOpStep {
-  ID: string;
-  At: string;
-  Actor: string;
-  Device: string;
-  Command: string;
-  Status: string;
-  Turn?: number; // user-turn anchor (session rollback filter)
-  PreID?: string;
-  PostID?: string;
-  DiffSummary?: string;
-  Error?: string;
-  RollbackTo?: string;
-  Link?: string;
+  // 键 = 后端 writeauth.go 的 json tag（全小写）。新轮3-B 终验：原 PascalCase
+  // 声明骗过 tsc（bridge 直接标类型），运行时 JSON 键对不上 → 设备卡操作
+  // 台账 s.At.slice 即崩。
+  id: string;
+  at: string;
+  actor: string;
+  device: string;
+  command: string;
+  status: string;
+  turn?: number; // user-turn anchor (session rollback filter)
+  pre_id?: string;
+  post_id?: string;
+  diff_summary?: string;
+  error?: string;
+  rollback_to?: string;
+  link?: string;
 }
 
 export interface NetDevFinding {

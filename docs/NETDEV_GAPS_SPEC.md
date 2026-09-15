@@ -31,7 +31,7 @@
 | **E4** ✅已修（dce7e91b） | 机型能力档案最小实现（accel_profiles） | 设计已在 ACCEL_SPEC §8.3（字段/消费方已定），代码未做 | 部署参数（TP≤卡数、模型显存 vs 机型显存）无校验数据源，全凭人工 | `[[netdev.accel_profiles]]` 配置段 + 部署建议校验（告警不硬失败）+ GpuBoard readiness 徽标消费 | H20 档案下声明 TP=8×不匹配卡数 → 建议性告警可见 |
 | **E5** ✅已修（aa89b515） | GPU 值班 runbook 模板（文档级） | XID 怎么查/显存泄漏怎么查/NCCL hang 怎么查——散在调研报告（DEPLOY_SPEC §2.2 八簇失败模式表），未沉淀为值班手册 | 值班靠人记忆，排查路径不一致 | 把 DEPLOY_SPEC §2.2 八簇改写为《GPU 值班排查手册》（docs/，每簇：现象→只读检测→修复分类→升级路径） | 手册评审入库；值班培训可用 |
 | **E6** ✅已修（5635d98d） | **curl 前缀的尾参通道**（E3 修理过程中发现的既有安全缺口） | 读表既有 `curl -I ` 前缀：空格边界允许追加 `-o`（写文件）/`-T`（上传）/第二 URL——注释声称"HEAD-only 无数据通道"但前缀模型不约束尾参 | curl 类前缀收紧为"URL 后无尾参"的专用校验（logPathReadOverride 同款旁路范式），或引入结构化 http-check 步骤类型替代裸 curl | 恶意/注入场景无法借 curl 读表项获得写原语 |
-| **E7** ✅已修（dce7e91b） | **模型能力档案（model card，部署校验的模型侧数据源；2026-09-13 实勘 45 条校准）** | E4 机型档案只覆盖机器侧；模型侧无数据源（"70B FP16 140G"原为 spec 硬编码例子） | `[[netdev.model_cards]]`：name/params_B(总/激活，MoE 双值)/quant 档×**硬件族枚举**（同一模型不同卡主流量化档不同：H 系=FP8 原生、910B=W8A8（950 前无 FP8）、P800=W8A8C16、A 系/4090=BF16+AWQ）/显存估算（BF16≈2GB/B 规则已实勘确认）/kv 余量/多模态视觉塔增量。**内置初始集（实勘主流矩阵）**：Qwen2.5 全档+Qwen3 MoE 系（30B-A3B=智算中心单机标配/235B-A22B/Next-80B）+DeepSeek V3/R1（671B；昇腾官方口径 BF16≥4 台 A2、W8A8≥2 台）+**R1-Distill 蒸馏系（政企一体机主力，1.5-70B）**+GLM-4.5/-Air（106B 轻量档）/4.6+MiniMax-M1（456B，8×H800 可部署）；VLM（Qwen-VL/InternVL）进档案；Kimi K2（1T，官方最小 16×H200）标注"多走 API 少自建"；Llama 标注"占比下降，作蒸馏底座存量" | 声明 DeepSeek-671B BF16 而目标 2×8 卡 64G → 校验告警（需 4 台）；Qwen3-30B W8A8 vs 910B 单卡 → 通过 |
+| **E7** ✅已修（dce7e91b） | **模型能力档案（model card，部署校验的模型侧数据源；2026-09-13 实勘 45 条校准）** | E4 机型档案只覆盖机器侧；模型侧无数据源（"70B FP16 140G"原为 spec 硬编码例子） | `[[netdev.model_cards]]`：name/params_B(总/激活，MoE 双值)/quant 档×**硬件族枚举**（同一模型不同卡主流量化档不同：H 系=FP8 原生、910B=W8A8（950 前无 FP8）、P800=W8A8C16、A 系/4090=BF16+AWQ）/显存估算（BF16≈2GB/B 规则已实勘确认）/kv 余量/多模态视觉塔增量。**内置初始集（实勘主流矩阵）**：Qwen2.5 全档+Qwen3 MoE 系（30B-A3B=智算中心单机标配/235B-A22B/Next-80B）+DeepSeek V3/R1（671B；昇腾官方口径 BF16≥4 台 A2、W8A8≥2 台）+**R1-Distill 蒸馏系（政企一体机主力，1.5-70B）**+GLM-4.5/-Air（106B 轻量档）+MiniMax-M1（456B，8×H800 可部署）；VLM（Qwen-VL/InternVL）进档案；Kimi K2（1T，官方最小 16×H200）标注"多走 API 少自建"；Llama 标注"占比下降，作蒸馏底座存量" | 声明 DeepSeek-671B BF16 而目标 2×8 卡 64G → 校验告警（需 4 台）；Qwen3-30B W8A8 vs 910B 单卡 → 通过 |
 | **E8** | 深度诊断工具的读表策略（2026-09-13 核查补） | ascend-dmi（昇腾）/dcgmi diag（NVIDIA）未在读表：`-dg`/diag 是**带宽压测类负载**非纯读——裸进读表会给 agent 施压硬件的通道 | 裁决：留教读表（用户逐命令授予）或提案档（作为受控压测步骤）；版本查询形态（ascend-dmi -v）可进读表 | spec 记档即可，随 M-1 顺带 |
 | **E9** ✅已修（d30258a7；2026-09-14 轮1复审收窄：perfquery/ibqueryerrors 除名走 extra_read——复位旗标垫位 -a -r 与 --extended_reset 前缀模型挡不住，读表现余 ibstat+chronyc 三子命令） | 互联/时钟只读检查命令读表（FULL_CHAIN P8 补） | ibstat/ibqueryerrors/perfquery/chrony tracking 不在读表——互联验收只读步被分类器拒 | linux 读表增补四命令（纯读：端口状态/错误计数/时钟偏差）；**ib_write_bw/nccl-tests/gpu-burn/fio 是流量负载类**按 E8 裁决走提案档 | 四命令分类 read；F15 只读步全通 |
 
@@ -43,7 +43,7 @@
 | **F1b** ✅内容库已入库（e202af94：模型侧三变体+运维侧四变体+F13 四组件，内置库 13 条种子；蓝绿×流量编排原语条目注记在模板 Notes；③b 骨架×引擎档×8 的组合矩阵=后续按需组合） | **部署模板体系（分层组合，非平铺清单）**（用户质询后重定义：原"三条模板"形态限制发挥） | 依赖 F1a 机制 | 四层组合：①基础骨架×1（通用 20 步：前置→环境→权重→校验→启动→验证→决策点→回退）②引擎档×8（vLLM-systemd/Docker/K8s-Helm、SGLang、MindIE、vLLM-Kunlun、vllm-gcu、NIM 容器——参数与命令差异层）③硬件绑定（**不建独立模板**：{{tp}}/{{quant}}/{{mem_limit}} 由 accel_profiles 机型档案填缺省）④规模/操作变体×**7**（单机、多机 head-worker 序、**版本升级蓝绿**、**DP 扩副本**（不停机，可全自动；HPA 指标=KV cache 利用率/排队深度而非 CPU）、**TP 重排=蓝绿换队**（实勘校准：TP degree 启动时固定，改 TP 必全量重启——新队拉起→切流→旧队下线；MoE Elastic EP 例外可运行时弹性）、**故障节点替换**（ECC 阈值自动化边界实勘：correctable>10 次/时→drain、反复 uncorrectable→cordon+隔离、物理换卡必人工——GPU 故障占训练中断约 58%，高频流程）、**服务下线**（idle 判定→摘流→删 endpoint→权重归档——业界无统一 runbook，结构化即增量；"确认无人再用"必人工审批））；⑤**流量编排原语**（实勘洞察：金丝雀/灰度/模型回滚本质同一机制=双版本+流量百分比，参照 KServe 三角色 revision 状态机建模；双版本显存翻倍→成本授权人工）。种子集 ~10-12 条（组合的常用交点），其余按需组合渲染或"runbook 另存为模板"生成 | E3/E4 + F1a |
 | **F1c** ✅出口②已修（ExtractRunbookTemplate + binding；出口①模板=数据天然成立；出口③ agent 起草=对话面，机制侧 Save/Preview binding 已就绪） | 模板生态三出口（防"模板限制发挥"） | ①模板=数据非代码上限（TOML/JSON 可自由扩充）②**runbook→模板抽取**（跑通一次的部署可另存为模板，现场经验沉淀）③**agent 起草**（DEPLOY_SPEC 蓝本对 agent 可读：对话中"给这台 910B 部署 Qwen"→agent 按蓝本+机型档案起草 runbook→人审——模板管重复场景，对话管新情况） | F1a |
 | **F2** | 权重登记-校验-分发落地 | 三段式设计在 MODEL_DEPLOY_SPEC §3.2（分发走客户通道；台内只做脚本上传+cli 执行+sha256 对账）；脚本模板与对账步未固化 | 下载脚本模板 + sha256 对账检查步进 runbook 模板；E3 的 sha256sum 读表是前置 | E3 |
-| **F3** ✅已修（批④：infermetrics.go——抓取通道+series infer.*+告警枚举 7 项+GpuBoard 服务层区；K3 表见 docs/NETDEV_INFER_METRICS.md） | 推理指标面（D-2） | `/metrics` 抓取（vllm:kv_cache_usage_perc/num_preemptions/TTFT/ITL/generation_tokens）未做；告警枚举无 infer.*；GpuBoard 无服务层区 | GET 抓取通道（同 GPU 采集薄驱动模式，端点=推理服务而非加速卡）→ series `infer.*` + 告警枚举 + GpuBoard 服务区 | 无（可独立做） |
+| **F3** ✅已修（批④：infermetrics.go——抓取通道+series infer.*+告警枚举 7 项+GpuBoard 服务层区；K3 表见 docs/NETDEV_INFER_METRICS.md） | 推理指标面（D-2） | `/metrics` 抓取（vllm:kv_cache_usage_perc/num_preemptions/TTFT/E2E/generation_tokens）未做；告警枚举无 infer.*；GpuBoard 无服务层区 | GET 抓取通道（同 GPU 采集薄驱动模式，端点=推理服务而非加速卡）→ series `infer.*` + 告警枚举 + GpuBoard 服务区 | 无（可独立做） |
 | **F4** ✅已修（批⑥：device.accel 维度 + accel=ascend 分发 pollAscendHealth（npu-smi info 两行一芯 fixture 解析、Health 非 OK→ErrorCode/npu-health 归一、逐格容错 note 通道）+ GPUCard/GPUBoardCard ErrorCode·ErrorCodeKind 归一列 + 大屏卡级 ERR 徽标 + RBB-deploy-vllm-ascend 模板 + CANN 版本读表前缀；catalog 分级与探测式缺省挂真机 G-C2） | M-1 异构最小承接 | 设计在 ACCEL_SPEC §四（accel 维度/npu-smi 薄驱动/GPUBoard ErrorCodeKind 泛化/昇腾模板）；代码未做 | accel 配置维度 + npu-smi 驱动三方法归一 GPUCard + GPUBoard ErrorCodeKind 徽标 | 真机验收依赖批次 C |
 | **F5** | M-2 燧原/昆仑芯驱动 + 错误码 catalog | 依赖客户硬件盘点；efsmi/xpu-smi 读表与解析各一套 | 按客户采购清单排期 | 客户硬件 |
 | **F6** | 审计/实况降噪（B9） | GPU 轮询每主机每轮 2-3 条审计行 + live 事件；审计链完整性优先所以不能简单不打 | 设计项：internal 调用方 live 聚合为一条/轮 + 审计按 class 检索视图 | dogfooding 反馈立项 |
@@ -86,7 +86,7 @@
 |---|---|---|---|
 | K1 ✅设计成文（docs/NETDEV_PROJECT_DOMAIN_DESIGN.md——会话载体 per-session 后端态/confirmers 自报+trustdomain 升格/schema 字段级缺省迁移；F3 阈值表已随批④交付） | G-P1 三件设计：会话项目上下文载体（倾向 per-tab 后端态）/ confirmers 身份模型（自报+可选 trustdomain 签名）/ NetDevProject schema 迁移（D1 软降级）——详见 PROJECT_SCENARIO_SPEC §八 | G-P1（0.3.x 主体） | 半天成文 |
 | K2 ✅设计成文（同 doc §四——推荐 relay 为主+P2P 同网段长优化，含三步原型验证；落地待拍板） | G-L1 通道选型：signal 服务加 relay 端点 vs 配对后 P2P 直连（对方 Ed25519 公钥可用）——V3 修正后从"信令现成"降为"需新数据通道" | G-L1/G-L4（P-3a） | 半天+原型验证 |
-| K3 ✅已修（批④：docs/NETDEV_INFER_METRICS.md——七项映射+建议阈值起步+派生语义纪律） | F3 指标-阈值映射表：vllm:* 指标（kv_cache_usage_perc/num_preemptions/TTFT/ITL/generation_tokens）→ infer.* 告警枚举与默认阈值——spec 完成度审计确认缺这张表 | F3（推理指标面） | 半天 |
+| K3 ✅已修（批④：docs/NETDEV_INFER_METRICS.md——七项映射+建议阈值起步+派生语义纪律） | F3 指标-阈值映射表：vllm:* 指标（kv_cache_usage_perc/num_preemptions/TTFT/E2E/generation_tokens）→ infer.* 告警枚举与默认阈值——spec 完成度审计确认缺这张表 | F3（推理指标面） | 半天 |
 
 ## 二·补、批次 U —— 用户侧待办（非代码，列此使台账完整）
 
@@ -98,7 +98,9 @@
 | U4 | 真机到位 | G 批全部（XID 校准/昇腾演练/readiness 验证/演示材料/机型档案校准）+ M-1 驱动验收依赖 |
 | U5 | 并行批次协调 | 共享文件整写覆盖已发生两次（mock Skip/CHANGELOG 条目）；按 0204 spec A6+ 标记清单核对法在每次并行落地后核对 |
 
-## 三、工作流八场景 × 缺口映射（评估结论存档）
+## 三、工作流八场景 × 缺口映射
+
+> （2026-09-15 注：下表为 2026-09-13 快照——其后批①-⑥与 G-P1 已清账大部分 🟡/❌ 项，当前支持度以台账 ✅ 行为准。）（评估结论存档）
 
 | 场景 | 支持度 | 未闭环项（→台账编号） |
 |---|---|---|
@@ -162,5 +164,13 @@ build（internal/cmd/desktop）｜vet｜netdev/config 全量测试｜desktop 三
   - **测试补齐**：TestInspectionContextCancel / TestInspectionNoDriverDevice / TestDomainGateCurlOverrideEndToEnd（域外 linux 探活放行+huawei Unknown 拒的双语义锁）/ TestSanitizeInferLabel / TestProjectPrefixNormalization / TestMetricsDeltaSeenGating / TestLatestInferValueTieBreakMax / TestGPUXidFindingHoldsOnHealthAbnormal / TestSeriesCleanupAbortsOnOversizedLine / TestSeriesMigrationAbortedNoDoubleWrite / TestStampedProjectVanishedFailClosed / TestStampedProjectForcesConfirm2 / TestActiveProjectVanishedReadOnlyStall / TestRunbookTplSaveIDValidation。
 - **记档未修**（会话外/后续批）：RollbackProposal 项目域维度（恢复语义豁免，已注记）、estop 不取消 poller ctx（审计结论：只读采集不冻结属既有口径，非缺陷）、cfg 指针无锁换（race 面，需全读者改造）、RunbookTpl 场景筛选的 G-P2 自动缺省在设置未加载时的退化（手选仍可用）。
 - **2026-09-14 收尾批完成**（原记档未修项清账）：job 文件锁 flake（saveJobLocked 重试退避 + TestSaveJobConcurrentReads 并发回归）；RunbookTpl 六 binding 的 UI 入口（RunbookTplPanel 挂割接创建视图：场景筛选〔G-P2 按活动项目 type 联动缺省〕→变量→preview→apply→待启动列表→批齐一键启动）；ProposalCenter 死组件移除（旧无 operator 批准路径一并消除）；NetDevDeviceHealth 前端类型补 gpuHealthAbnormal；F2 权重三段式落地件 docs/NETDEV_WEIGHT_PIPELINE.md（分发脚本模板+manifest 校验接口）。
+- **新轮三遍检查记录**（2026-09-15，/goal 再查 3 遍）：审查对象=三轮检查之后的新代码。遍1 逐行
+  （核心/前端/测试断言）——P1×4：域闸停摆死代码（闸条件 def 判据）、curl 中缀 file:/ 复活、
+  FE 批准状态 mount 拉一次、pending deadline 冻结；遍2 对抗复核+并发状态机深潜（割接/Job/轮询
+  三机锁序全单向无环）——P2×5：合并丢 GPUHealthAbnormal、window_min=0 契约、estop 腿序、metrics
+  串行抓取压告警、localStorage 迁移；遍3 终验+前端全量+文档终验——P1×2：OpStep 字段名 PascalCase
+  错位（运行时崩溃，bridge 类型直标骗 tsc 的存量缺陷）、CapabilitiesPanel 构建卡死（并行批次，
+  一字修）；全部修复，终验 10/10 修到位（含终验抓到的自引入回归：零提案 run 启动按钮，已修）。
+  **域闸 v1.2 核实为伪需求**：docker/firewall/dbquery/netconf 四族结构性只读，无未接线写面。
 - **归属注记**：8cfe219d 因目录级 git add 卷入并行批次的 18 个未提交文件（transport/、metrics.go 扩展、live/session/writeauth 等）——该部分非三轮检查产出，归属并行批次；整树在提交前已过全量门禁。
 - **归属注记 2**：2ab74f27 的 zh/en locales 含并行批次的增量键（brc.*/eventEdit 等，~200 行，纯增量无害）——hunk 过滤后被后续整文件 add 覆盖；键为加法不破坏任何现有组件。

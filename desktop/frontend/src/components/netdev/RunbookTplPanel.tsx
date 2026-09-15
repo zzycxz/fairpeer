@@ -27,7 +27,10 @@ type PendingRun = {
 
 function loadPending(): PendingRun[] {
   try {
-    return JSON.parse(localStorage.getItem(LS_KEY) ?? "[]") as PendingRun[];
+    // 新轮2复核 P2：修复前落的条目无 windowMin 字段——undefined 乘法会让
+    // 启动重算 deadline 时 toISOString 抛 RangeError（条目永久不可启动）。
+    return ((JSON.parse(localStorage.getItem(LS_KEY) ?? "[]") as PendingRun[]) ?? [])
+      .map(x => ({ ...x, windowMin: x.windowMin || 120 }));
   } catch {
     return [];
   }
@@ -86,7 +89,6 @@ export default function RunbookTplPanel({ onChanged, onCreated, devices, proposa
     () => new Set((proposals ?? []).filter(p => p.status === "approved").map(p => p.id)),
     [proposals],
   );
-  const allIds = useMemo(() => new Set((proposals ?? []).map(p => p.id)), [proposals]);
   useEffect(() => { void reload(); }, [reload]);
   useEffect(() => { savePending(pending); }, [pending]);
 
@@ -262,17 +264,21 @@ export default function RunbookTplPanel({ onChanged, onCreated, devices, proposa
         <div style={{ marginTop: 8 }}>
           <div className="ndv__group-label">{t("ndv.rbp.pendingTitle")}</div>
           {pending.map(pr => {
-            // 新轮1 FE P2-2：提案"缺失（拒/删）"与"待批准"分开标注——同一
-            // "待批准"标签会误导操作员该去批还是该重 apply。
-            const missing = pr.proposalIds.filter(id => !allIds.has(id));
-            const unapproved = pr.proposalIds.filter(id => !missing.includes(id) && !approvedIds.has(id));
-            const allApproved = pr.proposalIds.length > 0 && missing.length === 0 && unapproved.length === 0;
+            // 新轮1 FE P2-2 + 新轮3-A 终验 A/B：提案"拒/删"（gone：不在列表
+            // 或已是 rejected 终态）与"待批准"分开标注；零提案 run（全直连
+            // 步模板）天然 allApproved——可启动。
+            const gone = pr.proposalIds.filter(id => {
+                const st = (proposals ?? []).find(x => x.id === id)?.status;
+                return !st || st === "rejected";
+            });
+            const unapproved = pr.proposalIds.filter(id => !gone.includes(id) && !approvedIds.has(id));
+            const allApproved = gone.length === 0 && unapproved.length === 0;
             return (
               <div key={pr.key} style={{ display: "flex", gap: 8, alignItems: "center", padding: "3px 0" }}>
                 <span>{pr.name}</span>
                 <span className="ndv__meta">{t("ndv.rbp.proposalsN", { n: String(pr.proposalIds.length) })}</span>
-                {missing.length > 0 && <span className="ndv__meta" style={{ color: "var(--err)" }}>{t("ndv.rbp.proposalsGone", { n: String(missing.length) })}</span>}
-                {missing.length === 0 && unapproved.length > 0 && <span className="ndv__meta" style={{ color: "var(--warn)" }}>{t("ndv.rbp.waitApproval")}</span>}
+                {gone.length > 0 && <span className="ndv__meta" style={{ color: "var(--err)" }}>{t("ndv.rbp.proposalsGone", { n: String(gone.length) })}</span>}
+                {gone.length === 0 && unapproved.length > 0 && <span className="ndv__meta" style={{ color: "var(--warn)" }}>{t("ndv.rbp.waitApproval")}</span>}
                 <span style={{ marginLeft: "auto" }} />
                 {allApproved && (
                   <span className="btn btn--primary btn--small" role="button" onClick={() => void startPending(pr)}>

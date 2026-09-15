@@ -9,13 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(skills): 技能页九项改造——自编排技能分组 / 市场收敛 / 生命周期 / 网格布局
+
+设置→技能页按用户九点反馈整体重构，分类从"前端硬编码名单"改为后端 domain 驱动，外挂技能更名自编排技能并按引擎子组归类：
+
+- **域驱动分类**：`SkillView` 新增 `domain`/`executor`/`draft` 字段；18 个内置技能在 builtins.go 补 Domain（code 6 / office 6 / netdev 4 / 通用 2，随 shipped 名单连 ppt-auto 共 19），嵌入 ppt-auto SKILL.md 补 `domain: office` 并 bump SkillVersion 54→55（重释放带域标记）；前端删除 4 个硬编码名字集合，改 lib/skillDesc.ts 的 `OFFICIAL_SKILL_DOMAIN` 名字兜底（覆盖旧释放副本）。
+- **Active 语义修复**（"当前模式未启用"不准）：`Capabilities()` 镜像 boot.go 索引门——白名单只管 shipped 名单（新增 `boot.ShippedSkillNames()` 统一口径，修 ppt-auto 逃逸）、用户技能按 `profileSkillDomains` 域折叠、draft 单独标记；profile 解析改 `LoadForRoot`（工作区级 profile 不再失明）；徽章按 `inactiveReason` 细分 mode/domain/draft 三态带悬停解释。
+- **自编排技能**（用户定稿）：外挂技能更名，独立分组下挂 浏览器/安全渗透/其他 三个子组；启动时幂等迁移 `desktop/selforch_migrate.go`——browser-flow 技能挪 `skills/browser/`、pentest 技能挪 `skills/pentest/`（netdev-security-assessment 改标 `domain: pentest`），BOM 前缀 frontmatter 兼容；netdev profile SkillDomains 加 pentest；卸载解析兼容分类子目录。
+- **市场收敛**：默认源砍到 官方精选+ClawHub（三个 github-repo 默认源无 token 必挂，删）；新增 `[skills].market_sources` 自定义市场（clawhub-api/github-repo，config 增删+渲染往返+UI 管理）；空关键词=浏览首页（修"切源后空白"）；逐源失败透出 UI；SkillMarketSearch 直调 installsource（废弃 markdown 文本解析往返）；clawhub 客户端 base URL/源 ID 参数化；UI 新增"从 URL / GitHub 安装"（引擎本支持仓库/raw/.mcp.json/本地/包名，补 UI 入口走计划→确认流）。
+- **生命周期**：修卸载后 `.installed.json` 不清理的泄漏（forgetInstall 改按 `act.Name` 判定）；删除按钮覆盖所有文件技能（scope 区分项目/全局根）；`resolveSkillPath` 支持分类子目录；SkillMarketUninstall/Install 的 ProjectRoot 改用活动工作区（修 project 作用域找错根）；`MarketSourceMeta.Custom` 标记修复（自定义源移除徽章恢复显示）。
+- **网格布局**：分区改 `repeat(auto-fill, minmax(240px,1fr))` 卡片网格（专家团样式），点卡片全宽展开详情；启用技能 >25 出"选择困难"提示横幅（文案如实：正文不进上下文，索引封顶 4000 字符）。
+- **派生副本**：DeriveEditableSkill 补写 `domain`/`executor`（副本不再掉进无域堆）。
+- 测试：`capabilities_visibility_test.go` Active 语义矩阵（3 profile × 4 类用户技能）、`selforch_migrate_test.go`（迁移幂等/BOM/行级改写）、`TestDeriveEditableSkillPreservesDomain`、config market_sources 往返、installsource 卸载清 manifest（Name-only 路径）+子目录解析+默认源裁剪+Custom 标记；go build 两模块/tsc/vite/前端套件全绿。
+
+### feat(skills): 技能描述双语化与展示面统一——中文界面全中文，四源治理入档
+
+技能描述此前四个来源（①后端内置英文 ②locale 覆盖层 ③磁盘 SKILL.md ④市场）各自为政，斜杠菜单/Ctrl+K 恒①英文与设置页②中文同屏两套文案，且②遮蔽浏览器编辑器对③的修改。按 `docs/SKILL_DESC_DISPLAY_SPEC.md` 落地 M1+M2：
+
+- **locale 覆盖层**：`caps.skillDesc.*` 补齐全部 19 个官方技能的 zh/en 双语（专有名词逐字保留：AGENTS.md、OSPF/BGP、SMTP/IMAP、Chrome/Edge、WPS、Huawei Info-Finder/Cisco/RFC/NVD 等）；自编排/用户自有技能**不建键**（键集不变式）——设置页直显其 SKILL.md 描述，浏览器面板编辑即时生效不被遮蔽。
+- **展示面统一**：新建 `lib/skillDesc.ts` 的 `skillDisplayDescription(name, fallback)`（tOptional 动态键+回退），设置页网格、侧边抽屉、斜杠菜单（kind=skill）、Ctrl+K 命令面板四面的技能描述全部跟随界面语言；i18n 新增 `tOptional`（缺键返回 undefined 而非字面键名）。
+- **Ctrl+K 状态前缀**：草稿/已停用/模式外技能在 hint 前标注（此前无任何提示）。
+- **搜索双文本**：设置页/抽屉的技能搜索同时匹配原始描述与界面语言文案（中文关键词"数字员工"可命中 browser-auto）。
+- **en 文案收敛**：15 条超长 en 描述改写 ≤132 字符（与 zh 对齐卡片摘要零截断；句子感知截断从兜底退役为异常）。
+- **守护测试** `skill-desc.test.ts`：zh/en ≤132 长度闸、专有名词基线（改文案动不了名词）、键集不变式（用户技能建键即红）、运行时回退行为；locale-parity 继续覆盖键集一致与 zh CJK。
+
+### feat(encoding): 双击编码文件即在右侧面板正确显示——检测级联接入统计式 charset 识别
+
+此前检测级联只认 UTF-8（±BOM）、UTF-16（±BOM）、GB18030：Big5 繁体/Shift-JIS 日文/EUC-KR 韩文文件被 GB18030 强解成乱码汉字，西文 Latin/Cyrillic 单字节文件要么乱码要么被误判。级联在严格 UTF-8 之后、GB18030 回退之前插入 **saintfish/chardet**（Mozilla universalchardet 移植，频率模型）：
+
+- **新增 9 种编码 Kind**：Big5、ShiftJIS、EUCJP、EUCKR、CP1250、CP1251、CP1252（兼 ISO-8859-1/15）、CP1254（兼 ISO-8859-9）、KOI8R——`kindCodecs` 单表同时供 Decode/Encode/Decoder，保持三者不漂移；枚举值纯追加，checkpoint 快照 JSON 里的存量 Kind 值不变。
+- **阈值按族分档**（探测实测）：多字节 CJK 家族真实文本置信度 100，取 ≥50；单字节族天然歧义（同一俄文样本 windows-1251/KOI8-R 双双 37 分），取 ≥30 且要求 ≥64 字节——短样本走原有 GB 回退/lossy 行为，无 NUL 垃圾（实测 6 分）不会误入单字节族。
+- **写回往返不丢编码**：`writeFileEncoded`（write_file/edit_file/apply_patch 系）按检测 Kind 原编码写回；目标字符集表达不了的字符（如 Big5 里写简体专用字）按既有契约回退 UTF-8 字节。grep/read_file 的流式 `Decoder()` 同步补齐新编码（DBCS/单字节均可自同步流式解码）。
+- **收益面**：右侧工作区面板预览、聊天附件 lightbox、agent 的 read_file/grep、checkpoint 快照哈希全部经同一 `Detect`，一次升级处处生效。
+- 测试：`TestDetectStatisticalFamilies`（GB/Big5/SJIS/EUCJP/EUCKR/CP1252 精确钉死 Kind + 三重往返断言：显示解码、原编码写回、流式解码一致；CP1251/KOI8R 双低置信只断言往返）、短样本 GB 回退、短垃圾 lossy 渲染、不可映射字符回退；encoding/tool/checkpoint/rag/netdev/desktop 全套通过。
+
 ### feat(desktop): 右侧工作区面板预览类型扩充——补齐媒体空白 + 新增格式 + 全量语法高亮
 
 - **[P1] 音频/视频/HTML 预览空白修复**：后端 `ReadFile` 早已返回 audio/video/html 三类媒体 token URL，但 `WorkspacePanel.renderMediaPreview` 只画 image/pdf——点开 mp3/mp4/htm 是整块空白。补齐三个分支（`<audio>`/`<video>` 控件、HTML 同附件查看器的 `sandbox=""` 沙箱 iframe），CSS 随配。
 - **[P2] 媒体 MIME 扩充**（只加 WebView/WebKit 原生可解码的格式，避免"坏播放器"不如二进制回退诚实）：图片 +`.ico`/`.avif`/`.jfif`；视频 +`.ogv`；HTML +`.xhtml`。
 - **[P2] 富文档预览扩充**：`officePreviewExts` +`.odt`/`.ods`/`.odp`（OpenDocument 走既有 COM-then-soffice 管线，`legacyToModernExt` 映射到 docx/xlsx/pptx 后复用 Go 解析器）+`.eml`/`.ipynb`（markitdown 提取，缺转换器时回退原文纯文本，与改动前行为一致）；`markitdownSkip` 集合化（odt/ods/odp 与 doc/ppt/rtf 一样跳过注定失败的 markitdown 子进程，省每次点击 ~2s Python 启动）。
 - **[P2] 代码语法高亮全量接通**：`CodeMirrorCode` 原先完全忽略 `language`（纯文本渲染）。接入 `@codemirror/language-data`——`EditorProps` 新增可选 `filename`，工作区预览按文件扩展名匹配（上百种语言），消息/工具卡代码块按语言标签匹配；解析器 chunk 懒加载，未命中语言照旧纯文本即渲染。`languageFor` 扩展名映射 15→45+（同时供选中引用的 markdown fence 标签使用）。
-- 测试：`TestIsOfficeDoc`/`TestLegacyToModernExtOpenDocument`/`TestReadFileMediaPreview`（新增 ico/avif/jfif/ogv/xhtml 分类断言）扩充；go test / tsc / vite build / 前端套件全绿。
+- **[P1] 预览默认以文本打开**：含 NUL 的文件此前在右侧面板是"暂不支持预览"死胡同。现在 `ReadFile` 仍置 `Binary` 标志（选中引用、拖拽入聊以引用代替内联、附件查看器的系统应用打开卡等守卫全部不变），但**剥离 NUL 后继续走编码级联**，把尽力而为的文本放进 `Body`；`LossyUTF8` 分支同样给 body（非法字节经 JSON 桥自然变 U+FFFD）。前端 binary 分支改为警示条（"疑似二进制，已按纯文本显示"）+ 一键"用系统应用打开" + 文本渲染；无 body 时（远程 tab 的 binary/office）回退原提示文案。
+- **[P2] 远程链路一致性**（检查中发现的两处既有/连带缺口）：远端 `mediaKind` 扩展名表镜像本地 `previewMediaMIMEs`（补 avif/ico/jfif/mkv/mov/m4v/ogv/ogg 族/flac/aac/m4a/opus + htm/html/xhtml→新 "html" kind，协议注释同步）；`remoteReadFile` 把 "office" kind 落为 binary 回退（此前透传给前端渲染成空白面板）；超大媒体（超 maxMediaBytes 无 DataURL）报错而不是空白。`OpenWorkspacePath` 补远程路由（WSL 走 UNC 打开，对齐 `RevealWorkspacePath` 既有形态）。
+- **[P2] 对话内文件路径点击打开**：消息里反引号包裹的路径（含 `:42`/`#L3-L9` 行号注记）悬停经 ListDir 对活动工作区做存在性校验（本地/远程通吃，30s 缓存）后显示可点击样式，点击派发 `fairpeer:open-workspace-file` 事件——App 复用 `openWorkspacePanel("files")` 打开文件 dock，WorkspacePanel 新增 `openFileRequest` prop 按 key 去重后走 `selectFile` 既有链路。语法预筛拒绝 URL/邮箱/glob/纯散文词，存在性校验是最终闸门，未命中路径无任何反应；不支持的格式由面板的二进制警示条兜底。
+- 测试：`TestIsOfficeDoc`/`TestLegacyToModernExtOpenDocument`/`TestReadFileMediaPreview`（新增 ico/avif/jfif/ogv/xhtml 分类断言）/`TestReadFilePreviewBinaryClassification`（body 非空、NUL 已剥离、内容未损）扩充；go test / tsc / vite build / 前端套件全绿（desktop 仅存的 `TestEffortForTab*` 两例失败为分支在途 config 改动所致，与本次无关——依赖链 EffortForTab→EffortCapabilityForEntry→explicitReasoningProtocol 不经过任何本次触碰的文件）。
 
 ### fix(desktop): 首启 cmd 闪窗根修——GUI 子进程隐藏窗口三处漏点
 
@@ -136,8 +173,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **job 文件锁 Windows flake 修复**（轮3定位的根因）：`saveJobLocked` 重试退避（rename-vs-reader
   撞锁 20ms×4）——暂停/冻结态落盘不再丢失；`TestSaveJobConcurrentReads` 并发回归（读端容忍
   copyOnto 瞬态半行、收尾后必完整、保存端零失败）。
-- **清理**：ProposalCenter 死组件移除（其旧批准路径无 operator 输入，复活即绕 J5——消除）；
+- **清理**：ProposalCenter 死组件移除（文件保留为 ProposalActions 载体；旧批准路径无 operator 输入，复活即绕 J5——消除）；
   NetDevDeviceHealth 前端类型补 gpuHealthAbnormal。
+
+### fix(netdev): 新一轮三遍检查（每遍 3 子代理）——新代码层 P1×4 + P2×6 + P3 若干
+
+审查对象 = 三轮检查修复之后的新代码（remoteOnce/SeriesRead 优化/RunbookTplPanel/job 重试/
+curl 轮2 加固/域闸轮2 修复）。逐遍：遍1 逐行正确性（核心+前端+测试断言质量）；遍2 对抗复核
++并发状态机深潜（割接/Job/轮询三机锁序与交互——首轮未覆盖）；遍3 终验+前端全量走查+文档终验。
+
+- **P1**：域闸停摆分支死代码（闸条件用 def 判据——热重载删项目后修复不可达，改按活动项目名
+  进闸）；curl 中缀第二 URL 复活（file:/ 单斜杠/host:port 值位穿透，改 knownURLSchemes 白名单
+  终解，顺修 localhost:8080/[::1]/user@host 误拒）；FE 待启动批准状态 mount 拉一次（批完回来
+  按钮永不出现——改由父级 proposals prop 派生）；pending run deadline apply 时刻冻结（批准等待
+  跨窗口后启动必拒——启动时按 windowMin 重算）。
+- **P2**：pollGPUDevices 合并丢 GPUHealthAbnormal（双通道昇腾主机 hold 失效）；window_min=0
+  契约未执行（apply 拒，不产死端 pending）；RunbookTplPanel busy 双击守卫（apply 双落提案/
+  start 并发竞窗）；estop job 腿提前到 cutover 腿前（回退持锁时 job 暂停被无界拖住）；metrics
+  抓取并发化 8 路有界（串行 10s×N 把 evaluateAlerts 压到轮末）；localStorage 旧条目 windowMin
+  迁移；提取模板补 WindowMin（抽取闭环断）；OpStep 字段名 PascalCase→小写 json 对齐（设备卡
+  操作台账 s.At.slice 运行时崩溃——bridge 类型直标骗过 tsc 的存量缺陷）。
+- **P3**：零提案 run 启动按钮回归（终验抓到的自引入，已修）；rejected 归 gone 桶；job 暂停折叠
+  锁内重读复核（abort 不被复活）；saveCutover 失败补 cleanupReg；progress 回调移出 resMu；
+  proposal 删除后 runner 句柄泄漏；签名注释口径；ProposalCenter 措辞；CapabilitiesPanel 构建
+  卡死一字修。
+- 遇留档：knownURLSchemes 未列 scheme 的中缀残余=远程 HEAD（无本地读原语）；停摆窗口 deny
+  对读失效（def 不可得，数据可用性强制的顺序）；域外 curl 在网络 CLI 驱动下 Unknown 拒（与
+  执行器同判）。
 
 ### fix(netdev): 三轮完整检查（每轮 3 子代理）——P1×12 + P2/P3×20 修复与记档
 

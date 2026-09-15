@@ -3,7 +3,8 @@ import { asArray } from "../lib/array";
 import { app, openExternal } from "../lib/bridge";
 import { useToast } from "../lib/toast";
 import { useT } from "../lib/i18n";
-import type { CapabilitiesView, CatalogEntry, MCPServerInput, ServerView, SkillRootSkillView, SkillRootView, SkillView } from "../lib/types";
+import * as skillDescLib from "../lib/skillDesc";
+import type { CapabilitiesView, CatalogEntry, MarketSourceMeta, MCPServerInput, ServerView, SkillRootSkillView, SkillRootView, SkillView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { ResizableDrawer } from "./ResizableDrawer";
 import { Tooltip } from "./Tooltip";
@@ -82,7 +83,9 @@ export function CapabilitiesPanel({
     const q = skillQuery.trim().toLowerCase();
     if (!q) return view.skills;
     return view.skills.filter((sk) => {
-      const text = [sk.name, `/${sk.name}`, sk.description, sk.scope, sk.runAs].join(" ").toLowerCase();
+      // Match the raw backend description AND the UI-language overlay copy, so
+      // a zh keyword like 数字员工 finds browser-auto (SKILL_DESC_DISPLAY_SPEC R3).
+      const text = [sk.name, `/${sk.name}`, sk.description, skillDescLib.skillDisplayDescription(sk.name, ""), sk.scope, sk.runAs].join(" ").toLowerCase();
       return text.includes(q);
     });
   }, [view, skillQuery]);
@@ -93,9 +96,15 @@ export function CapabilitiesPanel({
 
   const serverGroups = useMemo(() => {
     const servers = sortServersForDisplay(view?.servers ?? []);
+    // profileHidden servers (gated out by the active tab's profile — e.g.
+    // codegraph in office/ops mode) get their own visibly-labelled group:
+    // mixing them into the main list as disabled-looking rows read as "the
+    // built-in disappeared".
+    const visible = servers.filter((s) => !s.profileHidden);
     return {
-      failed: servers.filter((s) => s.status === "failed"),
-      active: servers.filter((s) => s.status !== "failed"),
+      failed: visible.filter((s) => s.status === "failed"),
+      active: visible.filter((s) => s.status !== "failed"),
+      hidden: servers.filter((s) => s.profileHidden),
     };
   }, [view]);
 
@@ -227,7 +236,7 @@ export function CapabilitiesPanel({
                   />
                 )}
                 {view.servers.length === 0 && !adding && (
-                  <div className="mem-empty">{t("caps.noServers")}</div>
+                  <div className="mem-empty">{emptyServersLabel(view.session, t)}</div>
                 )}
                 {serverGroups.active.length > 0 && (
                   <div className="cap-server-section">
@@ -235,6 +244,34 @@ export function CapabilitiesPanel({
                     <ServerGroup
                       busy={busy}
                       servers={serverGroups.active}
+                      expanded={expandedServers}
+                      expandedTools={expandedServerTools}
+                      editing={editing}
+                      onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
+                      onEdit={(name) => {
+                        setEditing(name);
+                      }}
+                      onCancelEdit={() => setEditing(null)}
+                      onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+                      onReconnect={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+                      onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
+                      onToggle={(name, on) => void mutate(() => app.SetMCPServerEnabled(name, on))}
+                      onUpdate={(name, input) =>
+                        void mutate(() => app.UpdateMCPServer(name, input)).then((ok) => {
+                          if (ok) setEditing(null);
+                        })
+                      }
+                      onToggleDetails={toggleServer}
+                      onToggleTools={toggleServerTools}
+                    />
+                  </div>
+                )}
+                {serverGroups.hidden.length > 0 && (
+                  <div className="cap-server-section">
+                    <div className="cap-server-section__title">{t("caps.hiddenServersTitle")}</div>
+                    <ServerGroup
+                      busy={busy}
+                      servers={serverGroups.hidden}
                       expanded={expandedServers}
                       expandedTools={expandedServerTools}
                       editing={editing}
@@ -300,13 +337,13 @@ export function CapabilitiesPanel({
                   </div>
                 </div>
                 {view.skills.length === 0 ? (
-                  <div className="mem-empty">{t("caps.noSkills")}</div>
+                  <div className="mem-empty">{emptySkillsLabel(view.session, t)}</div>
                 ) : filteredSkills.length === 0 ? (
                   <div className="mem-empty">{t("caps.noSkillMatches")}</div>
                 ) : (
-                  <div className="cap-skills">
+                  <div className="cap-skill-grid">
                     {filteredSkills.map((sk) => (
-                      <SkillRow
+                      <SkillTile
                         key={sk.name}
                         skill={sk}
                         busy={busy}
@@ -341,6 +378,7 @@ function normalizeCapabilitiesView(view: CapabilitiesView | null | undefined): C
       removable: Boolean(root.removable),
       skillItems: asArray(root.skillItems),
     })),
+    session: view?.session,
   };
 }
 
@@ -350,6 +388,22 @@ function sortServersForDisplay(servers: ServerView[]): ServerView[] {
     if (priority !== 0) return priority;
     return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
   });
+}
+
+// Session-aware empty-state copy: an empty list means different things
+// depending on where Capabilities() got (or didn't get) its data — nothing
+// configured vs session not built vs remote-managed. Keeps users from reading
+// an unbuilt tab's empty page as "the built-ins were removed".
+function emptyServersLabel(session: string | undefined, t: ReturnType<typeof useT>): string {
+  if (session === "none") return t("caps.noServersSession");
+  if (session === "remote") return t("caps.noServersRemote");
+  return t("caps.noServers");
+}
+
+function emptySkillsLabel(session: string | undefined, t: ReturnType<typeof useT>): string {
+  if (session === "none") return t("caps.noSkillsSession");
+  if (session === "remote") return t("caps.noSkillsRemote");
+  return t("caps.noSkills");
 }
 
 function serverDisplayPriority(server: ServerView): number {
@@ -1333,13 +1387,103 @@ function isRemoteTransport(transport?: string): boolean {
   return value === "http" || value === "streamable-http" || value === "sse";
 }
 
-function SkillRow({
+// Domain-bucket classification (2026-09-15 rework): the backend stamps every
+// skill with `domain` (frontmatter `domain:` for file skills, the roster for
+// builtins) plus `executor`; the name fallback in lib/skillDesc.ts only covers
+// derived copies and older released files whose frontmatter predates domain
+// tagging. File skills that are not official-name copies fall into the
+// self-orchestrated group (自编排技能): browser-flow / browser-ops → 浏览器,
+// pentest → 安全渗透, everything else (market installs, misc) → 其他.
+const { OFFICIAL_SKILL_DOMAIN, LEGACY_PENTEST_SKILLS } = skillDescLib;
+
+type SkillBucket = "coding" | "office" | "ops" | "general" | "self-browser" | "self-pentest" | "self-other";
+
+function skillBucketOf(sk: SkillView): SkillBucket {
+	const domain = (sk.domain || "").toLowerCase();
+	if (sk.scope === "builtin" || OFFICIAL_SKILL_DOMAIN[sk.name] !== undefined) {
+		switch (domain || OFFICIAL_SKILL_DOMAIN[sk.name] || "") {
+			case "code": return "coding";
+			case "office": return "office";
+			case "netdev": return "ops";
+			default: return "general";
+		}
+	}
+	if (LEGACY_PENTEST_SKILLS.has(sk.name)) return "self-pentest";
+	const executor = (sk.executor || "").toLowerCase();
+	if (executor === "browser-flow" || domain === "browser-ops") return "self-browser";
+	if (domain === "pentest" || executor === "pentest-flow") return "self-pentest";
+	return "self-other";
+}
+
+// SkillDomainSection is one bucket of the builtin tab (coding / office / ops /
+// general, or a self-orchestrated subgroup when `subgroup` is set). The bucket
+// always lists its skills: mode-deactivated ones stay in place, greyed with an
+// inactivity badge — the catalogue reads by domain, not by "what the current
+// mode happens to enable". Layout is a compact card grid (expert-team style);
+// clicking a tile expands its detail as a full-width row inside the grid.
+function SkillDomainSection({
+	title,
+	subgroup,
+	skills,
+	busy,
+	expandedSkills,
+	onToggle,
+	onToggleEnabled,
+	onDerive,
+	onDelete,
+}: {
+	title: string;
+	subgroup?: boolean;
+	skills: SkillView[];
+	busy: boolean;
+	expandedSkills: Set<string>;
+	onToggle: (name: string) => void;
+	onToggleEnabled: (name: string, enabled: boolean) => void;
+	onDerive: (name: string) => void;
+	onDelete: (skill: SkillView) => void;
+}) {
+	const t = useT();
+	if (skills.length === 0) return null;
+	const activeCount = skills.filter((s) => s.active !== false).length;
+	return (
+		<div className={subgroup ? "cap-market cap-market--subgroup" : "cap-market"}>
+			<div className="cap-skills-head">
+				<div className="cap-skills-head__copy">
+					<div className={`cap-skills-head__title${subgroup ? " cap-skills-head__title--sub" : ""}`}>{title}</div>
+					<div className="cap-skills-head__summary">
+						{t("caps.domainSummary", { active: String(activeCount), total: String(skills.length) })}
+					</div>
+				</div>
+			</div>
+			<div className="cap-skill-grid">
+				{skills.map((sk) => (
+					<SkillTile
+						key={sk.name}
+						skill={sk}
+						busy={busy}
+						expanded={expandedSkills.has(sk.name)}
+						onToggle={() => onToggle(sk.name)}
+						onToggleEnabled={(enabled) => onToggleEnabled(sk.name, enabled)}
+						onDerive={sk.scope === "builtin" ? () => onDerive(sk.name) : undefined}
+						onDelete={(sk.scope === "global" || sk.scope === "project") ? () => onDelete(sk) : undefined}
+					/>
+				))}
+			</div>
+		</div>
+	);
+}
+
+// SkillTile is one compact skill card in the grid. Collapsed: name + enable
+// switch, a 2-line description clamp, and status badges. Expanded: full-width
+// detail row with the complete description, install provenance, and the
+// destructive/derivation actions.
+function SkillTile({
   skill,
   busy,
   expanded,
   onToggle,
   onToggleEnabled,
-  onUninstall,
+  onDelete,
   onDerive,
 }: {
   skill: SkillView;
@@ -1347,29 +1491,27 @@ function SkillRow({
   expanded: boolean;
   onToggle: () => void;
   onToggleEnabled: (enabled: boolean) => void;
-  onUninstall?: () => void;
+  onDelete?: () => void;
   onDerive?: () => void;
 }) {
   const t = useT();
-  const summary = summarizeSkillDescription(skill.description);
-  const canExpand = summary !== skill.description;
+  const description = skillDisplayDescription(skill, t);
+  const summary = summarizeSkillDescription(description);
+  const inactive = skill.active === false;
+  const inactiveBadge = skill.inactiveReason === "draft" ? t("caps.skillDraft")
+	: skill.inactiveReason === "domain" ? t("caps.skillNotActiveDomain")
+	: t("caps.skillNotActiveMode");
+  const inactiveHint = skill.inactiveReason === "domain"
+	? t("caps.skillNotActiveDomainHint", { domain: skill.domain || "—" })
+	: skill.inactiveReason === "draft" ? t("caps.skillDraftHint") : t("caps.skillNotActiveModeHint");
+  const deleteLabel = skill.installedFrom ? t("caps.uninstall") : t("caps.deleteSkill");
   return (
     <div
-      className={`cap-skill-card${expanded ? " cap-skill-card--expanded" : ""}${canExpand ? " cap-skill-card--expandable" : ""}${!skill.enabled ? " cap-skill-card--disabled" : ""}`}
+      className={`cap-skill-tile${expanded ? " cap-skill-tile--expanded" : ""}${!skill.enabled ? " cap-skill-tile--disabled" : ""}${inactive ? " cap-skill-tile--inactive" : ""}`}
     >
-      <div className="cap-skill-card__top">
-        <button className="cap-skill-card__toggle" type="button" onClick={onToggle} aria-expanded={expanded}>
-          <span className="cap-skill-card__head">
-            <span className="cap-skill-card__icon">/</span>
-            <span className="cap-skill-card__main">
-              <span className="cap-skill-card__command">{skill.name}</span>
-              <span className="cap-skill-card__badges">
-                <span className={`cap-skill-badge cap-skill-badge--${skill.scope}`}>{skillScopeLabel(skill.scope, t)}</span>
-                {skill.runAs === "subagent" && <span className="cap-skill-badge cap-skill-badge--run">{t("caps.subagent")}</span>}
-                {!skill.enabled && <span className="cap-skill-badge cap-skill-badge--off">{t("caps.skillDisabled")}</span>}
-              </span>
-            </span>
-          </span>
+      <div className="cap-skill-tile__head">
+        <button className="cap-skill-tile__toggle" type="button" onClick={onToggle} aria-expanded={expanded} title={skill.name}>
+          <span className="cap-skill-tile__command">/{skill.name}</span>
         </button>
         <Tooltip label={skill.enabled ? t("caps.disableSkill") : t("caps.enableSkill")}>
           <label className="cap-switch">
@@ -1382,34 +1524,63 @@ function SkillRow({
             <span className="cap-switch__track" />
           </label>
         </Tooltip>
-        {onUninstall && (
-          <button className="btn btn--small btn--danger" style={{ marginLeft: "8px" }} disabled={busy} onClick={(e) => { e.stopPropagation(); onUninstall(); }}>
-            {t("caps.uninstall")}
-          </button>
+      </div>
+      <button className="cap-skill-tile__desc" type="button" onClick={onToggle} aria-expanded={expanded}>
+        {summary}
+      </button>
+      <div className="cap-skill-tile__foot">
+        <span className={`cap-skill-badge cap-skill-badge--${skill.scope}`}>{skillScopeLabel(skill.scope, t)}</span>
+        {skill.runAs === "subagent" && <span className="cap-skill-badge cap-skill-badge--run">{t("caps.subagent")}</span>}
+        {!skill.enabled && <span className="cap-skill-badge cap-skill-badge--off">{t("caps.skillDisabled")}</span>}
+        {skill.draft && (
+          <Tooltip label={t("caps.skillDraftHint")}>
+            <span className="cap-skill-badge cap-skill-badge--off">{t("caps.skillDraft")}</span>
+          </Tooltip>
         )}
-        {onDerive && (
-          <Tooltip label={t("caps.deriveSkillHint")}>
-            <button className="btn btn--small" style={{ marginLeft: "8px" }} disabled={busy} onClick={(e) => { e.stopPropagation(); onDerive(); }}>
-              {t("caps.deriveSkill")}
-            </button>
+        {inactive && (
+          <Tooltip label={inactiveHint}>
+            <span className="cap-skill-badge cap-skill-badge--inactive">{inactiveBadge}</span>
           </Tooltip>
         )}
       </div>
-      <div className="cap-skill-card__desc">
-        {expanded ? skill.description : summary}
-        {expanded && skill.installedFrom && (
-          <div style={{ marginTop: 8, fontSize: "13px", color: "var(--text-muted)", wordBreak: "break-all" }}>
-            {t("caps.skillInstalledFrom")}: <a href={skill.installedFrom} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "underline" }}>{skill.installedFrom}</a>
-          </div>
-        )}
-      </div>
-      {canExpand && (
-        <button className="cap-skill-card__more" type="button" onClick={onToggle} aria-expanded={expanded}>
-          {expanded ? t("common.collapse") : t("common.expand")}
-        </button>
+      {expanded && (
+        <div className="cap-skill-tile__detail">
+          <div className="cap-skill-tile__detail-desc">{description}</div>
+          {skill.installedFrom && (
+            <div className="cap-skill-tile__detail-src">
+              {t("caps.skillInstalledFrom")}: <a href={skill.installedFrom} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "underline" }}>{skill.installedFrom}</a>
+            </div>
+          )}
+          {(onDerive || onDelete) && (
+            <div className="cap-skill-tile__detail-actions">
+              {onDerive && (
+                <Tooltip label={t("caps.deriveSkillHint")}>
+                  <button className="btn btn--small" disabled={busy} onClick={(e) => { e.stopPropagation(); onDerive(); }}>
+                    {t("caps.deriveSkill")}
+                  </button>
+                </Tooltip>
+              )}
+              {onDelete && (
+                <button className="btn btn--small btn--danger" disabled={busy} onClick={(e) => { e.stopPropagation(); onDelete(); }}>
+                  {deleteLabel}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
+}
+
+// skillDisplayDescription shows the skill's description in the UI language:
+// `caps.skillDesc.<name>` locale copy for shipped/official skills (the only
+// names that have keys — see lib/skillDesc.ts), falling back to the backend/
+// on-disk description for everything else (self-orchestrated skills, market
+// installs), so user edits to SKILL.md show through immediately.
+function skillDisplayDescription(skill: SkillView, t: ReturnType<typeof useT>): string {
+	void t; // t only pins reactivity: the tile re-renders on locale switch
+	return skillDescLib.skillDisplayDescription(skill.name, skill.description);
 }
 
 function skillScopeLabel(scope: string, t: ReturnType<typeof useT>): string {
@@ -1544,9 +1715,13 @@ export function MCPServersSettingsPage({ initialHighlight }: { initialHighlight?
 
 	const serverGroups = useMemo(() => {
 		const servers = sortServersForDisplay(view?.servers ?? []);
+		// Same three-way split as the drawer: profileHidden servers (gated out
+		// by the active tab's profile) render in their own labelled group.
+		const visible = servers.filter((s) => !s.profileHidden);
 		return {
-			failed: servers.filter((s) => s.status === "failed"),
-			active: servers.filter((s) => s.status !== "failed"),
+			failed: visible.filter((s) => s.status === "failed"),
+			active: visible.filter((s) => s.status !== "failed"),
+			hidden: servers.filter((s) => s.profileHidden),
 		};
 	}, [view]);
 
@@ -1602,7 +1777,7 @@ export function MCPServersSettingsPage({ initialHighlight }: { initialHighlight?
 						/>
 					)}
 					{view.servers.length === 0 && !adding && (
-						<div className="mem-empty">{t("caps.noServers")}</div>
+						<div className="mem-empty">{emptyServersLabel(view.session, t)}</div>
 					)}
 					{serverGroups.active.length > 0 && (
 						<div className="cap-server-section">
@@ -1610,6 +1785,32 @@ export function MCPServersSettingsPage({ initialHighlight }: { initialHighlight?
 							<ServerGroup
 								busy={busy}
 								servers={serverGroups.active}
+								expanded={expandedServers}
+								expandedTools={expandedServerTools}
+								editing={editing}
+								onConfirm={(name) => void mutate(() => app.RemoveMCPServer(name))}
+								onEdit={(name) => { setEditing(name); }}
+								onCancelEdit={() => setEditing(null)}
+								onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+								onReconnect={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+								onConfirmClearAuth={(name) => void mutate(() => app.ClearMCPServerAuthentication(name))}
+								onToggle={(name, on) => void mutate(() => app.SetMCPServerEnabled(name, on))}
+								onUpdate={(name, input) =>
+									void mutate(() => app.UpdateMCPServer(name, input)).then((ok) => {
+										if (ok) setEditing(null);
+									})
+								}
+								onToggleDetails={toggleServer}
+								onToggleTools={toggleServerTools}
+							/>
+						</div>
+					)}
+					{serverGroups.hidden.length > 0 && (
+						<div className="cap-server-section">
+							<div className="cap-server-section__title">{t("caps.hiddenServersTitle")}</div>
+							<ServerGroup
+								busy={busy}
+								servers={serverGroups.hidden}
 								expanded={expandedServers}
 								expandedTools={expandedServerTools}
 								editing={editing}
@@ -1699,8 +1900,8 @@ function McpMarketSection({
 		const out: MarketCard[] = [];
 		if (src === "" || src === "builtin") {
 			try {
-				const entries = await app.SkillMarketSearch(q, "builtin-mcp");
-				for (const e of (entries || [])) {
+				const res = await app.SkillMarketSearch(q, "builtin-mcp");
+				for (const e of (res.entries || [])) {
 					const parts = (e.installRef || "").trim().split(/\s+/).filter(Boolean);
 					const name = e.name;
 					out.push({
@@ -1899,7 +2100,7 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 	const [skillQuery, setSkillQuery] = useState(initialHighlight || "");
 	const [expandedSkills, setExpandedSkills] = useState<Set<string>>(() => new Set(initialHighlight ? [initialHighlight] : []));
 	const [skillSubtab, setSkillSubtab] = useState<"builtin" | "market">("builtin");
-	const [pendingUninstall, setPendingUninstall] = useState<string | null>(null);
+	const [pendingUninstall, setPendingUninstall] = useState<{ skill: SkillView } | null>(null);
 	const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
 	const reload = useCallback(async () => {
@@ -1923,13 +2124,17 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 		}
 	};
 
+	// Delete/uninstall share one flow: both remove the skill files via
+	// SkillMarketUninstall (scope decides the root); only the label and the
+	// manifest bookkeeping differ.
 	const confirmUninstall = useCallback(async () => {
 		if (!pendingUninstall) return;
-		const name = pendingUninstall;
+		const { skill } = pendingUninstall;
 		setPendingUninstall(null);
-		const success = await mutate(() => app.SkillMarketUninstall(name, "global"));
+		const scope = skill.scope === "project" ? "project" : "global";
+		const success = await mutate(() => app.SkillMarketUninstall(skill.name, scope));
 		if (success) {
-			setSuccessMsg(t("caps.marketUninstalled"));
+			setSuccessMsg(t("caps.skillDeleted", { name: skill.name }));
 			setTimeout(() => setSuccessMsg(null), 3000);
 		}
 	}, [pendingUninstall, mutate, t]);
@@ -1939,50 +2144,46 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 		const q = skillQuery.trim().toLowerCase();
 		if (!q) return view.skills;
 		return view.skills.filter((sk) => {
-			const text = [sk.name, "/" + sk.name, sk.description, sk.scope, sk.runAs].join(" ").toLowerCase();
+			// Raw description + UI-language overlay copy (SKILL_DESC_DISPLAY_SPEC R3).
+			const text = [sk.name, "/" + sk.name, sk.description, skillDescLib.skillDisplayDescription(sk.name, ""), sk.scope, sk.runAs].join(" ").toLowerCase();
 			return text.includes(q);
 		});
 	}, [view, skillQuery]);
 
-	// Group skills by whether they are IN EFFECT under the current product
-	// profile, not by hardcoded names. The backend tags each skill with
-	// `active` (true when the profile's whitelist surfaces it). This replaces
-	// the old name-based "coding vs office" split which misclassified skills
-	// (email/rag/schedule were dumped into "coding") and broke when a skill was
-	// shadowed by a global override (ppt-auto showed as both builtin-office and
-	// global). Grouping by `active` reflects the real prompt the model sees.
-	const OFFICIAL_SKILLS = useMemo(() => new Set(["init", "explore", "research", "install-capability", "review", "security-review", "test", "document-auto", "email-auto", "schedule-auto", "knowledge-auto", "expert-auto", "browser-auto", "desktop-auto", "ppt-auto"]), []);
-	const OFFICE_SKILLS = useMemo(() => new Set(["document-auto", "email-auto", "schedule-auto", "knowledge-auto", "expert-auto", "browser-auto", "desktop-auto", "ppt-auto"]), []);
-	const OPS_SKILLS = useMemo(() => new Set(["netdev-help"]), []);
-
-	const officialSkills = useMemo(
-		() => filteredSkills.filter((sk) => sk.scope === "builtin" || OFFICIAL_SKILLS.has(sk.name)),
-		[filteredSkills, OFFICIAL_SKILLS],
-	);
-	const activeOfficialSkills = useMemo(
-		() => officialSkills.filter((sk) => sk.active !== false),
-		[officialSkills],
-	);
-	const inactiveOfficialSkills = useMemo(
-		() => officialSkills.filter((sk) => sk.active === false),
-		[officialSkills],
-	);
-
-	const officeSkills = useMemo(
-		() => activeOfficialSkills.filter((sk) => OFFICE_SKILLS.has(sk.name)),
-		[activeOfficialSkills, OFFICE_SKILLS],
-	);
-	const opsSkills = useMemo(
-		() => activeOfficialSkills.filter((sk) => OPS_SKILLS.has(sk.name)),
-		[activeOfficialSkills, OPS_SKILLS],
-	);
-	const generalSkills = useMemo(
-		() => activeOfficialSkills.filter((sk) => !OFFICE_SKILLS.has(sk.name) && !OPS_SKILLS.has(sk.name)),
-		[activeOfficialSkills, OFFICE_SKILLS, OPS_SKILLS],
-	);
+	// Group skills into domain buckets (coding / office / ops / general) plus
+	// the self-orchestrated group (自编排技能: browser / pentest / other).
+	// Classification is backend-driven (`domain` + `executor` on SkillView,
+	// stamped from frontmatter or the builtin roster) with a name fallback for
+	// derived copies and pre-tagging releases — see skillBucketOf. Mode-
+	// deactivated skills stay in place inside their bucket, greyed with an
+	// inactivity badge, so the catalogue reads by domain and the full roster
+	// is always visible.
+	const bucketed = useMemo(() => {
+		const out: Record<SkillBucket, SkillView[]> = {
+			coding: [], office: [], ops: [], general: [],
+			"self-browser": [], "self-pentest": [], "self-other": [],
+		};
+		for (const sk of filteredSkills) out[skillBucketOf(sk)].push(sk);
+		return out;
+	}, [filteredSkills]);
+	const {
+		coding: codingSkills,
+		office: officeSkills,
+		ops: opsSkills,
+		general: generalSkills,
+		"self-browser": selfBrowserSkills,
+		"self-pentest": selfPentestSkills,
+		"self-other": selfOtherSkills,
+	} = bucketed;
 	const userSkills = useMemo(
-		() => filteredSkills.filter((sk) => sk.scope !== "builtin" && !OFFICIAL_SKILLS.has(sk.name)),
-		[filteredSkills, OFFICIAL_SKILLS],
+		() => [...selfBrowserSkills, ...selfPentestSkills, ...selfOtherSkills],
+		[selfBrowserSkills, selfPentestSkills, selfOtherSkills],
+	);
+	// Skills that actually enter the model's index right now — the too-many
+	// warning counts these, not the whole catalogue.
+	const activeEnabledCount = useMemo(
+		() => view?.skills.filter((s) => s.enabled && s.active !== false).length ?? 0,
+		[view?.skills],
 	);
 
 	const skillSummary = useMemo(() => {
@@ -2040,6 +2241,9 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 					onChange={(e) => setSkillQuery(e.target.value)}
 				/>
 			</div>
+			{/* Headline count for profile-hidden builtins was here — after the
+			    domain rework the inactive skills render greyed INSIDE their
+			    domain group, so a pointer banner is no longer needed. */}
 			<SkillSources
 				roots={view.skillRoots ?? []}
 				busy={busy}
@@ -2051,117 +2255,70 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 				onRemove={(path) => mutate(() => app.RemoveSkillPath(path))}
 			/>
 
-			{/* General development skills (active in the current mode). */}
-			{generalSkills.length > 0 && (
-				<div className="cap-market">
-					<div className="cap-skills-head">
-						<div className="cap-skills-head__copy">
-							<div className="cap-skills-head__title">{t("caps.skillCategoryGeneral")}</div>
-							<div className="cap-skills-head__summary">
-								{t("caps.marketSummary", { on: generalSkills.filter((s) => s.enabled).length, total: generalSkills.length })}
-							</div>
-						</div>
-					</div>
-					<div className="cap-skills">
-						{generalSkills.map((sk) => (
-							<SkillRow
-								key={sk.name}
-								skill={sk}
-								busy={busy}
-								expanded={expandedSkills.has(sk.name)}
-								onToggle={() => toggleSkill(sk.name)}
-								onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
-								onDerive={sk.scope === "builtin" ? () => deriveSkill(sk.name) : undefined}
-							/>
-						))}
-					</div>
+			{/* Too-many-skills advisory: skill BODIES never enter the system
+			    prompt (lazy load) and the pinned index is char-capped, but a
+			    long index still makes model selection harder — nudge toward
+			    disabling the unused tail. */}
+			{activeEnabledCount > 25 && (
+				<div className="banner" role="status" style={{ marginBottom: "12px" }}>
+					{t("caps.skillCountWarn", { n: String(activeEnabledCount) })}
 				</div>
 			)}
 
-			{/* Office automation skills (document/email/schedule/rag/browser/etc). */}
-			{officeSkills.length > 0 && (
-				<div className="cap-market">
-					<div className="cap-skills-head">
-						<div className="cap-skills-head__copy">
-							<div className="cap-skills-head__title">{t("caps.skillCategoryOffice")}</div>
-							<div className="cap-skills-head__summary">
-								{t("caps.marketSummary", { on: officeSkills.filter((s) => s.enabled).length, total: officeSkills.length })}
-							</div>
-						</div>
-					</div>
-					<div className="cap-skills">
-						{officeSkills.map((sk) => (
-							<SkillRow
-								key={sk.name}
-								skill={sk}
-								busy={busy}
-								expanded={expandedSkills.has(sk.name)}
-								onToggle={() => toggleSkill(sk.name)}
-								onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
-								onDerive={sk.scope === "builtin" ? () => deriveSkill(sk.name) : undefined}
-							/>
-						))}
-					</div>
-				</div>
-			)}
+			{/* Domain buckets: coding / office / ops / general. Each always lists
+			    its skills — mode-deactivated ones render in place, greyed with a
+			    badge — so the catalogue reads by domain, not by "what the
+			    current mode happens to enable". */}
+			<SkillDomainSection
+				title={t("caps.skillCategoryCoding")}
+				skills={codingSkills}
+				busy={busy}
+				expandedSkills={expandedSkills}
+				onToggle={toggleSkill}
+				onToggleEnabled={(name, enabled) => void mutate(() => app.SetSkillEnabled(name, enabled))}
+				onDerive={deriveSkill}
+				onDelete={(skill) => setPendingUninstall({ skill })}
+			/>
 
-			{/* Ops skills (netdev quick-reference card — active in netdev mode). */}
-			{opsSkills.length > 0 && (
-				<div className="cap-market">
-					<div className="cap-skills-head">
-						<div className="cap-skills-head__copy">
-							<div className="cap-skills-head__title">{t("caps.skillCategoryOps")}</div>
-							<div className="cap-skills-head__summary">
-								{t("caps.marketSummary", { on: opsSkills.filter((s) => s.enabled).length, total: opsSkills.length })}
-							</div>
-						</div>
-					</div>
-					<div className="cap-skills">
-						{opsSkills.map((sk) => (
-							<SkillRow
-								key={sk.name}
-								skill={sk}
-								busy={busy}
-								expanded={expandedSkills.has(sk.name)}
-								onToggle={() => toggleSkill(sk.name)}
-								onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
-								onDerive={sk.scope === "builtin" ? () => deriveSkill(sk.name) : undefined}
-							/>
-						))}
-					</div>
-				</div>
-			)}
+			<SkillDomainSection
+				title={t("caps.skillCategoryOffice")}
+				skills={officeSkills}
+				busy={busy}
+				expandedSkills={expandedSkills}
+				onToggle={toggleSkill}
+				onToggleEnabled={(name, enabled) => void mutate(() => app.SetSkillEnabled(name, enabled))}
+				onDerive={deriveSkill}
+				onDelete={(skill) => setPendingUninstall({ skill })}
+			/>
 
-			{/* Built-in skills the current mode HIDES (profile whitelist). They're
-			    not in the model's prompt; switching mode brings them back. Shown
-			    greyed so the user understands the distinction. */}
-			{inactiveOfficialSkills.length > 0 && (
-				<div className="cap-market cap-market--inactive">
-					<div className="cap-skills-head">
-						<div className="cap-skills-head__copy">
-							<div className="cap-skills-head__title">{t("caps.marketTitleInactive")}</div>
-							<div className="cap-skills-head__summary">
-								{t("caps.marketInactiveSummary", { count: inactiveOfficialSkills.length })}
-							</div>
-						</div>
-					</div>
-					<div className="cap-skills">
-						{inactiveOfficialSkills.map((sk) => (
-							<SkillRow
-								key={sk.name}
-								skill={sk}
-								busy={busy}
-								expanded={expandedSkills.has(sk.name)}
-								onToggle={() => toggleSkill(sk.name)}
-								onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
-								onDerive={sk.scope === "builtin" ? () => deriveSkill(sk.name) : undefined}
-							/>
-						))}
-					</div>
-				</div>
-			)}
+			<SkillDomainSection
+				title={t("caps.skillCategoryOps")}
+				skills={opsSkills}
+				busy={busy}
+				expandedSkills={expandedSkills}
+				onToggle={toggleSkill}
+				onToggleEnabled={(name, enabled) => void mutate(() => app.SetSkillEnabled(name, enabled))}
+				onDerive={deriveSkill}
+				onDelete={(skill) => setPendingUninstall({ skill })}
+			/>
 
-			{/* User's own skills (project / global / custom): managed list. */}
+			{/* Cross-cutting officials (install-capability, schedule-auto, …). */}
+			<SkillDomainSection
+				title={t("caps.skillCategoryGeneral")}
+				skills={generalSkills}
+				busy={busy}
+				expandedSkills={expandedSkills}
+				onToggle={toggleSkill}
+				onToggleEnabled={(name, enabled) => void mutate(() => app.SetSkillEnabled(name, enabled))}
+				onDerive={deriveSkill}
+				onDelete={(skill) => setPendingUninstall({ skill })}
+			/>
+
+			{/* Self-orchestrated skills (自编排技能): flow skills produced by the
+			    orchestration engines (browser recording today, pentest flows
+			    next) plus market installs / misc file skills, subgrouped by
+			    domain. Derived builtin copies do NOT land here — they stay in
+			    their official domain buckets above. */}
 			{userSkills.length > 0 && (
 				<>
 					<div className="cap-skills-head">
@@ -2170,28 +2327,52 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 							<div className="cap-skills-head__summary">{skillSummary}</div>
 						</div>
 					</div>
-					<div className="cap-skills">
-						{userSkills.map((sk) => (
-							<SkillRow
-								key={sk.name}
-								skill={sk}
-								busy={busy}
-								expanded={expandedSkills.has(sk.name)}
-								onToggle={() => toggleSkill(sk.name)}
-								onToggleEnabled={(enabled) => void mutate(() => app.SetSkillEnabled(sk.name, enabled))}
-								onUninstall={sk.installedFrom ? () => setPendingUninstall(sk.name) : undefined}
-							/>
-						))}
-					</div>
+					<SkillDomainSection
+						title={t("caps.selfOrchBrowser")}
+						subgroup
+						skills={selfBrowserSkills}
+						busy={busy}
+						expandedSkills={expandedSkills}
+						onToggle={toggleSkill}
+						onToggleEnabled={(name, enabled) => void mutate(() => app.SetSkillEnabled(name, enabled))}
+						onDerive={deriveSkill}
+						onDelete={(skill) => setPendingUninstall({ skill })}
+					/>
+					<SkillDomainSection
+						title={t("caps.selfOrchPentest")}
+						subgroup
+						skills={selfPentestSkills}
+						busy={busy}
+						expandedSkills={expandedSkills}
+						onToggle={toggleSkill}
+						onToggleEnabled={(name, enabled) => void mutate(() => app.SetSkillEnabled(name, enabled))}
+						onDerive={deriveSkill}
+						onDelete={(skill) => setPendingUninstall({ skill })}
+					/>
+					<SkillDomainSection
+						title={t("caps.selfOrchOther")}
+						subgroup
+						skills={selfOtherSkills}
+						busy={busy}
+						expandedSkills={expandedSkills}
+						onToggle={toggleSkill}
+						onToggleEnabled={(name, enabled) => void mutate(() => app.SetSkillEnabled(name, enabled))}
+						onDerive={deriveSkill}
+						onDelete={(skill) => setPendingUninstall({ skill })}
+					/>
 				</>
 			)}
 			</>
 			)}
 			{pendingUninstall && (
 				<ConfirmModal
-					title={t("caps.marketConfirmUninstall", { name: pendingUninstall })}
-					message={t("caps.marketUninstallWarning", { name: pendingUninstall })}
-					confirmLabel={t("caps.uninstall")}
+					title={pendingUninstall.skill.installedFrom
+						? t("caps.marketConfirmUninstall", { name: pendingUninstall.skill.name })
+						: t("caps.deleteSkillConfirm", { name: pendingUninstall.skill.name })}
+					message={pendingUninstall.skill.installedFrom
+						? t("caps.marketUninstallWarning")
+						: t("caps.deleteSkillWarning")}
+					confirmLabel={pendingUninstall.skill.installedFrom ? t("caps.uninstall") : t("caps.deleteSkill")}
 					cancelLabel={t("common.cancel")}
 					danger={true}
 					onConfirm={() => void confirmUninstall()}
@@ -2203,41 +2384,55 @@ export function SkillsSettingsPage({ initialHighlight }: { initialHighlight?: st
 }
 
 // SkillMarketSection is the marketplace browse/search/install UI embedded at
-// the bottom of the skills page. Users search across all default sources
-// (Anthropic, OpenAI, ClawHub, curated) and install any skill directly from
-// the GUI — no need to go through the agent's natural-language flow.
+// the bottom of the skills page. The source picker lists the backend's sources
+// (curated + ClawHub defaults plus the user's custom [skills].market_sources
+// entries); an EMPTY query browses each source's first page; the URL row
+// installs from any ref the engine understands (GitHub repo / raw SKILL.md /
+// .mcp.json / local folder / package name) through the same plan→confirm flow
+// as search-result installs.
 function SkillMarketSection({ installedNames }: { installedNames: Set<string> }) {
 	const t = useT();
 	const [query, setQuery] = useState("");
 	const [searchSource, setSearchSource] = useState("");
 	const [searching, setSearching] = useState(false);
 	const [results, setResults] = useState<CatalogEntry[] | null>(null);
+	const [failedSources, setFailedSources] = useState<Record<string, string>>({});
 	const [err, setErr] = useState<string | null>(null);
 	const [installing, setInstalling] = useState<string | null>(null);
 	const [installMsg, setInstallMsg] = useState<string | null>(null);
 	const [pendingInstall, setPendingInstall] = useState<{ entry: CatalogEntry; plan: string } | null>(null);
+	const [sources, setSources] = useState<MarketSourceMeta[]>([]);
+	const [showAddSource, setShowAddSource] = useState(false);
+	const [newSourceName, setNewSourceName] = useState("");
+	const [newSourceType, setNewSourceType] = useState<"clawhub-api" | "github-repo">("github-repo");
+	const [newSourceURL, setNewSourceURL] = useState("");
+	const [urlRef, setUrlRef] = useState("");
+
+	const loadSources = useCallback(async () => {
+		try {
+			setSources(await app.SkillMarketSources());
+		} catch {
+			// picker falls back to whatever it already has; searching still works
+		}
+	}, []);
+	useEffect(() => { void loadSources(); }, [loadSources]);
 
 	const sourceLabel = useCallback((sourceId: string) => {
-		switch (sourceId) {
-			case "builtin": return t("caps.sourceBuiltin", { defaultValue: "Curated" });
-			case "clawhub": return "ClawHub";
-			case "anthropic": return "Anthropic";
-			case "openai": return "OpenAI";
-			default: return sourceId;
-		}
-	}, [t]);
+		const s = sources.find((x) => x.id === sourceId);
+		return s ? s.name : sourceId;
+	}, [sources]);
 
+	// Empty query = browse each source's first page (trending); the backend
+	// no longer returns nothing for empty searches.
 	const doSearch = useCallback(async (searchQuery: string, source: string) => {
-		const q = searchQuery.trim();
 		setSearching(true);
 		setErr(null);
 		setResults(null);
+		setFailedSources({});
 		try {
-			let entries: CatalogEntry[] = [];
-			if (q || source) {
-				entries = await app.SkillMarketSearch(q, source);
-			}
-			setResults(entries);
+			const res = await app.SkillMarketSearch(searchQuery.trim(), source);
+			setResults(res.entries);
+			setFailedSources(res.failed ?? {});
 		} catch (e) {
 			setErr(String((e as Error)?.message ?? e));
 		} finally {
@@ -2245,10 +2440,10 @@ function SkillMarketSection({ installedNames }: { installedNames: Set<string> })
 		}
 	}, []);
 
-	// Load builtins on mount
+	// Initial browse on mount — the market tab shows content immediately.
 	useEffect(() => {
-		void doSearch("", searchSource);
-	}, [doSearch, searchSource]);
+		void doSearch("", "");
+	}, [doSearch]);
 
 	const doInstall = useCallback(async (entry: CatalogEntry) => {
 		if (!entry.installRef) return;
@@ -2263,6 +2458,23 @@ function SkillMarketSection({ installedNames }: { installedNames: Set<string> })
 			setInstalling(null);
 		}
 	}, [t]);
+
+	// URL / GitHub install: same plan→confirm flow, name inferred server-side.
+	const doInstallURL = useCallback(async () => {
+		const ref = urlRef.trim();
+		if (!ref) return;
+		setInstalling(ref);
+		setInstallMsg(null);
+		try {
+			const plan = await app.SkillMarketInstall(ref, "", "global", false);
+			setPendingInstall({ entry: { source: "url", name: ref, slug: "", description: "", installs: 0, contentUrl: ref, installRef: ref }, plan });
+			setUrlRef("");
+		} catch (e) {
+			setInstallMsg(t("caps.marketInstallFailed", { msg: String((e as Error)?.message ?? e) }));
+		} finally {
+			setInstalling(null);
+		}
+	}, [t, urlRef]);
 
 	const confirmInstall = useCallback(async () => {
 		if (!pendingInstall) return;
@@ -2279,6 +2491,34 @@ function SkillMarketSection({ installedNames }: { installedNames: Set<string> })
 		}
 	}, [pendingInstall, t]);
 
+	const doAddSource = useCallback(async () => {
+		setErr(null);
+		try {
+			await app.SkillMarketSourceAdd(newSourceName.trim(), newSourceType, newSourceURL.trim());
+			setInstallMsg(t("caps.marketSourceAdded", { name: newSourceName.trim() }));
+			setNewSourceName("");
+			setNewSourceURL("");
+			setShowAddSource(false);
+			await loadSources();
+		} catch (e) {
+			setErr(String((e as Error)?.message ?? e));
+		}
+	}, [loadSources, newSourceName, newSourceType, newSourceURL]);
+
+	const doRemoveSource = useCallback(async (id: string) => {
+		setErr(null);
+		try {
+			await app.SkillMarketSourceRemove(id);
+			setInstallMsg(t("caps.marketSourceRemoved", { id }));
+			if (searchSource === id) setSearchSource("");
+			await loadSources();
+		} catch (e) {
+			setErr(String((e as Error)?.message ?? e));
+		}
+	}, [loadSources, searchSource]);
+
+	const customSources = sources.filter((s) => s.custom);
+
 	return (
 		<div className="cap-market" style={{ marginTop: "24px" }}>
 			<div className="cap-skills-head">
@@ -2289,14 +2529,17 @@ function SkillMarketSection({ installedNames }: { installedNames: Set<string> })
 			<div className="cap-search" style={{ marginBottom: "12px", display: "flex", gap: "8px" }}>
 				<select
 					className="mem-input"
-					style={{ width: "160px", margin: 0 }}
+					style={{ width: "180px", margin: 0 }}
 					value={searchSource}
-					onChange={(e) => setSearchSource(e.target.value)}
+					onChange={(e) => {
+						setSearchSource(e.target.value);
+						void doSearch(query, e.target.value);
+					}}
 				>
 					<option value="">{t("common.all", { defaultValue: "All Sources" })}</option>
-					<option value="clawhub">ClawHub</option>
-					<option value="anthropic">Anthropic</option>
-					<option value="openai">OpenAI</option>
+					{sources.map((s) => (
+						<option key={s.id} value={s.id}>{s.name}</option>
+					))}
 				</select>
 				<input
 					className="mem-input"
@@ -2316,8 +2559,106 @@ function SkillMarketSection({ installedNames }: { installedNames: Set<string> })
 					{searching ? t("caps.marketSearching") : t("caps.marketSearch")}
 				</button>
 			</div>
+
+			{/* Install from a raw URL / GitHub repo — the engine accepts repos
+			    (marketplace.json / .mcp.json / SKILL.md scan), raw files, local
+			    folders, and package names; a plan is confirmed before writing. */}
+			<div className="cap-search" style={{ marginBottom: "12px", display: "flex", gap: "8px" }}>
+				<input
+					className="mem-input"
+					style={{ flex: 1, margin: 0 }}
+					type="search"
+					placeholder={t("caps.marketURLPlaceholder")}
+					title={t("caps.marketURLHint")}
+					value={urlRef}
+					onChange={(e) => setUrlRef(e.target.value)}
+					onKeyDown={(e) => { if (e.key === "Enter") void doInstallURL(); }}
+				/>
+				<button
+					className="btn btn--small"
+					style={{ margin: 0 }}
+					disabled={installing !== null || urlRef.trim() === ""}
+					onClick={() => void doInstallURL()}
+				>
+					{installing && pendingInstall === null ? t("caps.marketInstalling") : t("caps.marketInstallFromURL")}
+				</button>
+			</div>
+
+			{/* Custom market source management: defaults (Curated + ClawHub) are
+			    fixed; users add their own ClawHub-compatible or GitHub-repo
+			    markets here. */}
+			<div style={{ marginBottom: "12px" }}>
+				<button className="btn btn--small" type="button" onClick={() => setShowAddSource((v) => !v)}>
+					{showAddSource ? t("common.collapse", { defaultValue: "Collapse" }) : t("caps.marketAddSource")}
+				</button>
+				{customSources.length > 0 && (
+					<span style={{ marginLeft: "12px", display: "inline-flex", gap: "6px", flexWrap: "wrap" }}>
+						{customSources.map((s) => (
+							<span key={s.id} className="cap-skill-badge" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+								{s.name}
+								<button
+									type="button"
+									className="btn btn--small btn--danger"
+									style={{ margin: 0, padding: "0 6px" }}
+									title={t("caps.marketRemoveSource")}
+									onClick={() => void doRemoveSource(s.id)}
+								>
+									×
+								</button>
+							</span>
+						))}
+					</span>
+				)}
+				{showAddSource && (
+					<div className="cap-search" style={{ marginTop: "8px", display: "flex", gap: "8px" }}>
+						<input
+							className="mem-input"
+							style={{ flex: "0 0 180px", margin: 0 }}
+							type="text"
+							placeholder={t("caps.marketSourceNamePlaceholder")}
+							value={newSourceName}
+							onChange={(e) => setNewSourceName(e.target.value)}
+						/>
+						<select
+							className="mem-input"
+							style={{ flex: "0 0 170px", margin: 0 }}
+							value={newSourceType}
+							onChange={(e) => setNewSourceType(e.target.value as "clawhub-api" | "github-repo")}
+						>
+							<option value="github-repo">{t("caps.marketSourceTypeGithub")}</option>
+							<option value="clawhub-api">{t("caps.marketSourceTypeClawhub")}</option>
+						</select>
+						<input
+							className="mem-input"
+							style={{ flex: 1, margin: 0 }}
+							type="text"
+							placeholder={t("caps.marketSourceURLPlaceholder")}
+							value={newSourceURL}
+							onChange={(e) => setNewSourceURL(e.target.value)}
+						/>
+						<button
+							className="btn btn--small btn--primary"
+							style={{ margin: 0 }}
+							disabled={newSourceName.trim() === "" || newSourceURL.trim() === ""}
+							onClick={() => void doAddSource()}
+						>
+							{t("caps.add")}
+						</button>
+					</div>
+				)}
+			</div>
+
 			{err && <div className="banner banner--error" style={{ marginBottom: "8px" }}>{err}</div>}
 			{installMsg && <div className="banner" style={{ marginBottom: "8px" }}>{installMsg}</div>}
+			{Object.keys(failedSources).length > 0 && results !== null && (
+				<div className="banner" role="status" style={{ marginBottom: "8px" }}>
+					{Object.entries(failedSources).map(([id, reason]) => (
+						<div key={id}>
+							{sourceLabel(id)} — {t("caps.marketSourceFailed")}: {reason}
+						</div>
+					))}
+				</div>
+			)}
 			{results !== null && (
 				<>
 					{results.length === 0 ? (

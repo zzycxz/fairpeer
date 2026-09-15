@@ -38,10 +38,13 @@ var curlReadFlagsWithVal = map[string]bool{
 // 旧启发式对 localhost:8080 / [::1] / user@host 的误拒（可用性回归）。
 var knownURLSchemes = map[string]bool{
 	"http": true, "https": true, "file": true, "ftp": true, "ftps": true,
-	"gopher": true, "gophers": true, "telnet": true, "ldap": true, "ldaps": true,
-	"smb": true, "smbs": true, "scp": true, "sftp": true, "rtsp": true,
-	"rtmp": true, "pop3": true, "pop3s": true, "imap": true, "imaps": true,
-	"smtp": true, "smtps": true, "mqtt": true,
+	"gopher": true, "gophers": true, "telnet": true, "telnets": true,
+	"ldap": true, "ldaps": true, "dict": true, "tftp": true,
+	"smb": true, "smbs": true, "scp": true, "sftp": true,
+	"rtsp": true, "rtmp": true, "rtmpe": true, "rtmps": true,
+	"rtmpt": true, "rtmpte": true, "rtmpts": true,
+	"pop3": true, "pop3s": true, "imap": true, "imaps": true,
+	"smtp": true, "smtps": true, "mqtt": true, "ws": true, "wss": true,
 }
 
 // urlSchemeOf returns the lowercase scheme candidate if the token's first ":"
