@@ -3,7 +3,7 @@ import { app } from "../../lib/bridge";
 import { useT } from "../../lib/i18n";
 import { getActiveProject } from "../../lib/netdevProjectStore";
 import type { netdev } from "../../../wailsjs/go/models";
-import type { NetDevCutoverRun } from "../../lib/types";
+import type { NetDevCutoverRun, NetDevProposal } from "../../lib/types";
 
 type Tpl = netdev.RunbookTemplate;
 type ApplyResult = netdev.RunbookApplyResult;
@@ -20,6 +20,7 @@ type PendingRun = {
   key: string;
   name: string;
   createdAt: number;
+  windowMin: number; // 启动时重算 deadline（apply 时刻冻结的窗口会因批准等待过期——新轮1 FE P1-2）
   proposalIds: string[];
   run: NetDevCutoverRun;
 };
@@ -48,10 +49,11 @@ function scenarioForProjectType(type?: string): string {
   }
 }
 
-export default function RunbookTplPanel({ onChanged, onCreated, devices }: {
+export default function RunbookTplPanel({ onChanged, onCreated, devices, proposals }: {
   onChanged?: () => void;
   onCreated?: (id: string) => void;
   devices?: { name: string; vendor: string }[];
+  proposals?: NetDevProposal[];
 }) {
   const t = useT();
   const [tpls, setTpls] = useState<Tpl[]>([]);
@@ -65,7 +67,6 @@ export default function RunbookTplPanel({ onChanged, onCreated, devices }: {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState("");
   const [pending, setPending] = useState<PendingRun[]>(loadPending);
-  const [proposals, setProposals] = useState<Set<string>>(new Set());
   // E4/E7 部署建议校验（轮3审查 P2：binding 无 UI 消费的断路修）。
   const [pcDevice, setPcDevice] = useState("");
   const [pcModel, setPcModel] = useState("");
@@ -78,11 +79,14 @@ export default function RunbookTplPanel({ onChanged, onCreated, devices }: {
     try {
       setTpls((await app.NetDevRunbookTplList()) ?? []);
     } catch { /* 空库降级为内置骨架（后端 List 已合并内置） */ }
-    try {
-      const ps = await app.NetDevProposals();
-      setProposals(new Set((ps ?? []).filter(p => p.status === "approved").map(p => p.id)));
-    } catch { /* 提案状态仅影响待启动启动按钮可用性 */ }
   }, []);
+  // 新轮1 FE P1-1：批准状态改由父级 proposals prop 派生（CutoverView 随布局
+  // 轮询刷新）——旧实现 mount 拉一次，去提案页批完回来按钮永远不出现。
+  const approvedIds = useMemo(
+    () => new Set((proposals ?? []).filter(p => p.status === "approved").map(p => p.id)),
+    [proposals],
+  );
+  const allIds = useMemo(() => new Set((proposals ?? []).map(p => p.id)), [proposals]);
   useEffect(() => { void reload(); }, [reload]);
   useEffect(() => { savePending(pending); }, [pending]);
 
@@ -119,7 +123,7 @@ export default function RunbookTplPanel({ onChanged, onCreated, devices }: {
   };
 
   const doPreview = async () => {
-    if (!sel) return;
+    if (!sel || busy) return;
     setBusy("preview");
     setErr("");
     try {
@@ -139,7 +143,7 @@ export default function RunbookTplPanel({ onChanged, onCreated, devices }: {
   };
 
   const doApply = async () => {
-    if (!sel) return;
+    if (!sel || busy) return; // 双击守卫：双击 apply 会落两套重复提案
     setBusy("apply");
     setErr("");
     try {
@@ -149,6 +153,7 @@ export default function RunbookTplPanel({ onChanged, onCreated, devices }: {
         key: `${sel.id}-${Date.now()}`,
         name: res.run?.name || sel.name,
         createdAt: Date.now(),
+        windowMin: sel.window_min || 120,
         proposalIds: ids,
         run: res.run!,
       }, ...list].slice(0, 20));
@@ -165,10 +170,14 @@ export default function RunbookTplPanel({ onChanged, onCreated, devices }: {
   };
 
   const startPending = async (p: PendingRun) => {
+    if (busy) return; // 新轮1 FE P2-1：双击守卫（并发 CutoverStart 竞窗）
     setBusy(`start:${p.key}`);
     setErr("");
     try {
-      const created = await app.NetDevCutoverStart(p.run);
+      // 新轮1 FE P1-2：deadline 按 windowMin 重算——apply 时刻冻结的窗口会
+      // 因批准等待过期，CutoverStart 必拒。
+      const run = { ...p.run, deadline: new Date(Date.now() + p.windowMin * 60_000).toISOString() };
+      const created = await app.NetDevCutoverStart(run);
       setPending(list => list.filter(x => x.key !== p.key));
       onChanged?.();
       onCreated?.(created.id); // 跳到运行中的割接视图（与手动创建同语义）
@@ -253,12 +262,17 @@ export default function RunbookTplPanel({ onChanged, onCreated, devices }: {
         <div style={{ marginTop: 8 }}>
           <div className="ndv__group-label">{t("ndv.rbp.pendingTitle")}</div>
           {pending.map(pr => {
-            const allApproved = pr.proposalIds.every(id => proposals.has(id));
+            // 新轮1 FE P2-2：提案"缺失（拒/删）"与"待批准"分开标注——同一
+            // "待批准"标签会误导操作员该去批还是该重 apply。
+            const missing = pr.proposalIds.filter(id => !allIds.has(id));
+            const unapproved = pr.proposalIds.filter(id => !missing.includes(id) && !approvedIds.has(id));
+            const allApproved = pr.proposalIds.length > 0 && missing.length === 0 && unapproved.length === 0;
             return (
               <div key={pr.key} style={{ display: "flex", gap: 8, alignItems: "center", padding: "3px 0" }}>
                 <span>{pr.name}</span>
                 <span className="ndv__meta">{t("ndv.rbp.proposalsN", { n: String(pr.proposalIds.length) })}</span>
-                {!allApproved && <span className="ndv__meta" style={{ color: "var(--warn)" }}>{t("ndv.rbp.waitApproval")}</span>}
+                {missing.length > 0 && <span className="ndv__meta" style={{ color: "var(--err)" }}>{t("ndv.rbp.proposalsGone", { n: String(missing.length) })}</span>}
+                {missing.length === 0 && unapproved.length > 0 && <span className="ndv__meta" style={{ color: "var(--warn)" }}>{t("ndv.rbp.waitApproval")}</span>}
                 <span style={{ marginLeft: "auto" }} />
                 {allApproved && (
                   <span className="btn btn--primary btn--small" role="button" onClick={() => void startPending(pr)}>

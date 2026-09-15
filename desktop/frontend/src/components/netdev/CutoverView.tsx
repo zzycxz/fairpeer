@@ -364,7 +364,7 @@ function CutoverCreate({
   return (
     <div className="ndv-cutover ndv-cutover--create">
       {/* F1a/F1b UI 入口（轮3集成审查补断路）：模板→应用→批提案→启动 */}
-      <RunbookTplPanel devices={devices} onCreated={onCreated} />
+      <RunbookTplPanel devices={devices} proposals={proposals} onCreated={onCreated} />
       <div className="ndv__card">
         <div className="ndv__card-title">{tt("ndv.cut.createTitle")}</div>
         <div className="ndv__hint">

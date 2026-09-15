@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -125,7 +126,10 @@ func (m *Manager) guardrailCheck(deviceName, command string) (ExecResult, bool) 
 	}
 	// G-P1 项目安全域（projectdomain.go，J4-A 只读+拒操作 + 项目 deny 前缀）。
 	// guardrail 先于分类执行，这里对域外设备需要分类结论——局部驱动分类。
-	if _, active := m.ActiveProjectDef(); active {
+	// 闸条件用活动项目【名】而非 def：名在配置已删（热重载窗口）时 def 不可
+	// 得，verdict 内部走只读停摆——若这里用 def 判据，停摆分支是死代码
+	// （新轮1审查 P1-1）。
+	if m.ActiveProjectName() != "" {
 		class := m.classifyForDomain(deviceName, command)
 		if r, ok := m.projectDomainVerdict(deviceName, command, class); !ok {
 			_ = AppendAudit(Audit{Device: deviceName, Command: Redact(command), Class: "guardrail", Status: AuditRefused, OutputBytes: 0})
@@ -446,9 +450,9 @@ func (m *Manager) audit(d config.NetDevDevice, cmd string, class driver.Class, s
 		e.Error = err.Error()
 	}
 	if aerr := AppendAudit(e); aerr != nil {
-		// Surfaced in the result stream is the manager's business; audit file
-		// errors go to stderr via the tool error path only when fatal.
-		_ = aerr
+		// 审计文件是合规/回放链路（selfexport re-export），磁盘满或权限
+		// 不足时必须留痕——静默丢弃等于审计链断链（S8 遍1c 确认）。
+		slog.Warn("netdev: audit append failed", "device", e.Device, "err", aerr)
 	}
 }
 

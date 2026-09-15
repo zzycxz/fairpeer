@@ -762,11 +762,14 @@ func (m *Manager) ApplyRunbookTemplate(id string, values map[string]string, runN
 	if strings.TrimSpace(runName) == "" {
 		runName = t.Name
 	}
+	// 字段注释契约执行（新轮1-C P2）：window_min=0 承诺"apply 时必传"——
+	// 不产 Deadline 的 run 在 CutoverStart 必拒，落进待启动列表就是死端。
+	if t.WindowMin <= 0 {
+		return nil, fmt.Errorf("runbook template %q: window_min is 0 — 先在模板补割接窗口分钟数再 apply", t.Name)
+	}
 	res := &RunbookApplyResult{Proposals: []*Proposal{}, Notes: []string{}}
 	run := &CutoverRun{Name: runName}
-	if t.WindowMin > 0 {
-		run.Deadline = time.Now().Add(time.Duration(t.WindowMin) * time.Minute)
-	}
+	run.Deadline = time.Now().Add(time.Duration(t.WindowMin) * time.Minute)
 	for i := range steps {
 		s := steps[i]
 		cs := CutoverStep{Label: s.Label, Impact: s.Impact, EstSec: s.EstSec, DecisionPoint: s.DecisionPoint}

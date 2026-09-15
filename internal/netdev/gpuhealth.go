@@ -322,6 +322,9 @@ func (m *Manager) pollGPUDevices(ctx context.Context, fresh map[string]DeviceHea
 				base.GPU, base.GPUXIDMax, base.GPUXIDCodes = gh.GPU, gh.GPUXIDMax, gh.GPUXIDCodes
 				base.GPUXIDEvidence, base.GPUSampled = gh.GPUXIDEvidence, gh.GPUSampled
 				base.GPUXIDSeen, base.GPUXIDSource = gh.GPUXIDSeen, gh.GPUXIDSource
+				// 新轮1 P2-3：合并路径丢 GPUHealthAbnormal 会让双通道昇腾主机
+				// 的"异常无码"hold 失效（自动 resolve 在案 finding）。
+				base.GPUHealthAbnormal = gh.GPUHealthAbnormal
 				base.Reachable = base.Reachable || gh.Reachable
 				// 无条件覆盖：GPU 轮成功后陈旧错误必须清掉（粘滞错误会让
 				// 设备卡永远显示上一轮的失败成因）。

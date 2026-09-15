@@ -32,6 +32,33 @@ var curlReadFlagsWithVal = map[string]bool{
 	"-H": true, "--max-time": true, "--connect-timeout": true,
 }
 
+// knownURLSchemes：curl 认识的 URL scheme 集（新轮1审查 P1-2/P2-4 终解）。
+// 判定规则：token 首个 ":" 前的候选落在本表 → 是 URL，只放行 http(s)；
+// 不在本表 → 是 "host:port" / "-H 值" 形态 → 按各自规则继续。这同时修掉
+// 旧启发式对 localhost:8080 / [::1] / user@host 的误拒（可用性回归）。
+var knownURLSchemes = map[string]bool{
+	"http": true, "https": true, "file": true, "ftp": true, "ftps": true,
+	"gopher": true, "gophers": true, "telnet": true, "ldap": true, "ldaps": true,
+	"smb": true, "smbs": true, "scp": true, "sftp": true, "rtsp": true,
+	"rtmp": true, "pop3": true, "pop3s": true, "imap": true, "imaps": true,
+	"smtp": true, "smtps": true, "mqtt": true,
+}
+
+// urlSchemeOf returns the lowercase scheme candidate if the token's first ":"
+// prefix names a KNOWN scheme ("file:/x" → "file"; "127.0.0.1:8000" → ""——
+// 候选不认识即 host:port；"[::1]:8080" → ""）。
+func urlSchemeOf(token string) string {
+	i := strings.Index(token, ":")
+	if i <= 0 {
+		return ""
+	}
+	scheme := strings.ToLower(token[:i])
+	if knownURLSchemes[scheme] {
+		return scheme
+	}
+	return ""
+}
+
 // curlReadOverride classifies a curl command as Read when it matches the
 // strict HEAD-probe grammar: `curl [safe-flags...] URL` — one URL, final
 // token, no write-shaped flags anywhere. Runs after the metachar guard, so
@@ -63,19 +90,12 @@ func curlReadOverride(drv driver.Driver, command string) (driver.Class, bool) {
 		// "no URL specified"）。不放行。
 		return driver.Unknown, false
 	}
-	// 轮1/轮2审查：file:/// 与 file:/path（单斜杠合法形态）都把读表语义
-	// 变成本地任意读原语——scheme 提取后小写比对，只收 http(s)；无 scheme
-	// 的 host[:port]/path 形态仍是远程探测（curl 默认 http），放行。
-	if i := strings.Index(url, ":"); i > 0 {
-		scheme := strings.ToLower(url[:i])
-		if strings.Contains(scheme, "/") || strings.Contains(scheme, ".") {
-			scheme = "" // "host:port" 的冒号不是 scheme 分隔
-		}
-		switch scheme {
-		case "", "http", "https":
-		default:
-			return driver.Unknown, false // file/ftp/gopher/FILE… 一律拒
-		}
+	// 轮1/轮2审查 + 新轮1 P2-4 终解：显式 scheme 只收 http(s)（file:///、
+	// file:/path 单斜杠、FILE:// 大写全拒）；未知候选 = host:port 形态照收。
+	switch urlSchemeOf(url) {
+	case "", "http", "https":
+	default:
+		return driver.Unknown, false
 	}
 	for i := 1; i < len(fields)-1; i++ {
 		f := fields[i]
@@ -86,12 +106,16 @@ func curlReadOverride(drv driver.Driver, command string) (driver.Class, bool) {
 			continue
 		case curlReadFlagsWithVal[f]:
 			// 值消费：吞掉后续非 flag 的 middle token（quoted 空格拆分产物）。
-			// 轮1审查：-H @file 是"从文件读请求头"——本地任意文件随请求头
-			// 外传，@ 前缀值一律拒。轮2复核：被吞 token 含 :// 即中缀第二
-			// URL（curl 会逐 URL 请求）——"URL 唯一"不变量的补丁。
+			// 轮1审查：-H @file 是"从文件读请求头"——@ 前缀值一律拒。
+			// 新轮1 P1-2：被吞 token 若是已知 scheme 的 URL（含 file:/path
+			// 单斜杠形态）即中缀第二 URL——curl 逐 URL 请求，"URL 唯一"不变量。
+			// host:port 形态的值（如 -H Host: internal:8080）放行——头部值
+			// 与第二 URL 词法不可分，残余面=对命令行已可达主机多发一次 HEAD。
 			for i+1 < len(fields)-1 && !strings.HasPrefix(fields[i+1], "-") {
 				i++
-				if strings.HasPrefix(fields[i], "@") || strings.Contains(fields[i], "://") {
+				// 被吞 token 是任何已知 scheme 的 URL（含 http——那就是第二
+				// URL）→ 拒；host:port/纯值形态放行。
+				if strings.HasPrefix(fields[i], "@") || urlSchemeOf(fields[i]) != "" {
 					return driver.Unknown, false
 				}
 			}

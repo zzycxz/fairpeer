@@ -240,8 +240,9 @@ func (m *Manager) signApprovalWithDomain(proposalID, operator string) (string, e
 	if len(sig) == 0 {
 		return "", fmt.Errorf("域身份签名失败")
 	}
-	// 轮2攻击面审查：签名消息必须可从提案记录重构（Approver+ApprovedAt）
-	// ——时间随签名一起落盘为 "hex|unix"，验证方以 ApprovedAt.Unix() 交叉
-	// 校验，不再依赖两次取时一致。
+	// 轮2攻击面审查 + 新轮1-C P2 口径修正：时间随签名落盘为 "hex|unix"——
+	// 验证方用【串内自带的 unix】重构消息（与 Approver、proposal ID 同源于
+	// 提案记录），**不要**用 ApprovedAt 交叉校验（签名时刻与 ApprovedAt 是
+	// 两次取时，跨秒即失配）。
 	return fmt.Sprintf("%s|%d", hex.EncodeToString(sig), unix), nil
 }

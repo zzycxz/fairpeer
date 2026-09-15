@@ -129,6 +129,7 @@ import type {
   BotDockStatusView,
   CatalogEntry,
   MarketSourceMeta,
+  SkillMarketResultView,
   NetDevTopologyNode,
   NetDevBackupVersion,
   NetDevLiveEvent,
@@ -136,6 +137,8 @@ import type {
   NetDevWeakCredResult,
 
   BudgetStatusView,
+  WafAuditEntry,
+  WafSettingsView,
 } from "./types";
 
 
@@ -343,7 +346,9 @@ export interface AppBindings {
   DeriveEditableSkill(name: string): Promise<string>;
   SkillMarketBrowse(): Promise<CatalogEntry[]>;
   SkillMarketSources(): Promise<MarketSourceMeta[]>;
-  SkillMarketSearch(query: string, source?: string): Promise<CatalogEntry[]>;
+  SkillMarketSourceAdd(name: string, type: string, url: string): Promise<void>;
+  SkillMarketSourceRemove(id: string): Promise<void>;
+  SkillMarketSearch(query: string, source?: string): Promise<SkillMarketResultView>;
   SkillMarketInstall(installRef: string, name: string, scope: string, apply: boolean): Promise<string>;
   SkillMarketUninstall(name: string, scope: string): Promise<string>;
   SkillMarketInstalledNames(): Promise<Record<string, string>>;
@@ -451,6 +456,16 @@ export interface AppBindings {
   AddPermissionRule(list: string, rule: string): Promise<void>;
   RemovePermissionRule(list: string, rule: string): Promise<void>;
   SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[]): Promise<void>;
+  SetWafSettings(v: WafSettingsView): Promise<void>;
+  WafAuditTail(n: number): Promise<[WafAuditEntry[], boolean]>;
+  WafEgressDryRun(host: string): Promise<[string, string]>;
+  WafSessionObserve(): Promise<void>;
+  WafStatus(): Promise<string>;
+  WafSessionGrants(): Promise<string[]>;
+  WafRevokeSessionGrant(rule: string): Promise<void>;
+  PermissionRuleDryRun(rule: string, tool: string, subject: string): Promise<boolean>;
+  ProjectPermissionRules(): Promise<{ allow: string[]; ask: string[]; deny: string[]; hardDeny: string[] }>;
+  WafRevealAudit(): Promise<void>;
   SetNetwork(n: NetworkView): Promise<void>;
   SetBotSettings(b: BotSettingsView): Promise<void>;
   // coWork profile settings (browser/PPT/email/RAG). Secrets go to a managed
@@ -553,7 +568,7 @@ export interface AppBindings {
   NetDevApproveProposalAs(id: string, confirm2: boolean, operator: string): Promise<NetDevProposal>;
   // G-P1 会话项目上下文：标题栏切换器的后端半边（空串=清除）。
   NetDevSetActiveProject(name: string): Promise<void>;
-  // Runbook templates (runbook template library: extract from cutover → variable replacement → apply). The frontend does not consume these yet —
+  // Runbook templates (runbook template library: extract from cutover → variable replacement → apply). List/Preview/Apply are consumed by RunbookTplPanel (cutover create view); Save/Delete/Extract have no UI entry yet —
   // the interfaces mirror the Go side to keep _CheckGenToApp from漂移.
   NetDevRunbookTplSave(t: import("../../wailsjs/go/models").netdev.RunbookTemplate): Promise<import("../../wailsjs/go/models").netdev.RunbookTemplate>;
   NetDevRunbookTplList(): Promise<import("../../wailsjs/go/models").netdev.RunbookTemplate[]>;
@@ -763,7 +778,8 @@ export interface AppBindings {
   BrowserConsoleDeleteSkill(name: string): Promise<void>;
   BrowserConsoleWakeSkill(name: string): Promise<void>;
   BrowserConsoleSetKeepAlive(enabled: boolean, intervalSec: number, mode: string, url: string): Promise<import("./types").BrowserConsoleState>;
-  BrowserConsoleTrialRun(steps: import("./types").BrowserConsoleStep[], params: Record<string, string>): Promise<void>;
+  BrowserConsoleTrialRun(steps: import("./types").BrowserConsoleStep[], params: Record<string, string>, from?: number, count?: number): Promise<void>;
+  BrowserConsolePickFiles(): Promise<string[]>;
   BrowserConsoleTrialResume(reply: string): Promise<void>;
   BrowserConsoleTrialAbort(): Promise<void>;
   // 时间范围短语解析（"最近5分钟" → 字面范围串）；未识别返回空串。
@@ -901,6 +917,11 @@ export interface AppBindings {
   RagRetryFailedChunks(jobId: string): Promise<number>;
   RagRetryAllFailed(collection: string): Promise<number>;
   RagAutoRetryStatus(): Promise<RagAutoRetryStatusView>;
+  MarkMailSeen(mailbox: string, subject: string, date: string): Promise<void>;
+  ReadAppLogTail(lines: number): Promise<Array<{ line: string }>>;
+  OpenAppLogFolder(): Promise<void>;
+  SaveMailAttachment(mailbox: string, subject: string, date: string, filename: string, dir: string): Promise<string>;
+  SendMailSimple(to: string, subject: string, body: string): Promise<void>;
   RagAutoRetryToggle(enabled: boolean): Promise<void>;
   RagRemovePath(collection: string, path: string): Promise<void>;
   RagClear(collection: string): Promise<void>;
@@ -2085,7 +2106,8 @@ function makeMockApp(): AppBindings {
     autoPlan: "off",
     providers: [],
     officialProviders: [],
-    permissions: { mode: "ask", allow: ["read_file"], ask: [], deny: ["Bash(rm:*)"] },
+    permissions: { mode: "ask", allow: ["read_file"], ask: [], deny: ["Bash(rm:*)"], hardDeny: [] },
+    waf: { enabled: true, mode: "observe", dlpAction: "ask", dlpSignatures: [], injectionEnabled: true, escalationThreshold: 3, egressDefault: "allow", egressAllow: [], egressDeny: [] },
     sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [] },
     network: {
       proxyMode: "auto",
@@ -4087,16 +4109,18 @@ function makeMockApp(): AppBindings {
     async SkillMarketSources(): Promise<MarketSourceMeta[]> {
       return [
         { id: "builtin", name: "Curated", type: "builtin-catalog" },
-        { id: "anthropics", name: "Anthropic Skills", type: "github-repo" },
-        { id: "openai", name: "OpenAI Skills", type: "github-repo" },
         { id: "clawhub", name: "ClawHub Community", type: "clawhub-api" },
       ];
     },
-    async SkillMarketSearch(_query: string, _source?: string): Promise<CatalogEntry[]> {
-      return [
-        { source: "clawhub", name: "code-review", slug: "code-review", description: "Code review skill", installs: 42, contentUrl: "https://example.com/SKILL.md", installRef: "https://example.com/SKILL.md" },
-        { source: "builtin", name: "pdf", slug: "pdf", description: "PDF tools", installs: 0, contentUrl: "", installRef: "" },
-      ];
+    async SkillMarketSourceAdd(_name: string, _type: string, _url: string): Promise<void> {},
+    async SkillMarketSourceRemove(_id: string): Promise<void> {},
+    async SkillMarketSearch(_query: string, _source?: string): Promise<SkillMarketResultView> {
+      return {
+        entries: [
+          { source: "clawhub", name: "code-review", slug: "code-review", description: "Code review skill", installs: 42, contentUrl: "https://example.com/SKILL.md", installRef: "https://example.com/SKILL.md" },
+          { source: "builtin", name: "pdf", slug: "pdf", description: "PDF tools", installs: 0, contentUrl: "", installRef: "" },
+        ],
+      };
     },
     async MCPRegistrySearch(_query: string): Promise<MCPRegistryView> {
       return {
@@ -4628,6 +4652,32 @@ function makeMockApp(): AppBindings {
     },
         async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[]) {
           settings.sandbox = { bash, network, workspaceRoot, allowWrite };
+        },
+        async SetWafSettings(_v: WafSettingsView) {
+        },
+        async WafAuditTail(_n: number): Promise<[WafAuditEntry[], boolean]> {
+          return [[], true];
+        },
+        async WafEgressDryRun(_host: string): Promise<[string, string]> {
+          return ["allow", "default allow"];
+        },
+        async WafSessionObserve() {
+        },
+        async WafStatus() {
+          return "observe";
+        },
+        async WafSessionGrants() {
+          return [];
+        },
+        async WafRevokeSessionGrant(_rule: string) {
+        },
+        async PermissionRuleDryRun(_rule: string, _tool: string, _subject: string) {
+          return false;
+        },
+        async ProjectPermissionRules() {
+          return { allow: [], ask: [], deny: [], hardDeny: [] };
+        },
+        async WafRevealAudit() {
         },
         async SetNetwork(n: NetworkView) {
           settings.network = n;
@@ -5274,6 +5324,11 @@ function makeMockApp(): AppBindings {
     async RagRetryAllFailed(_collection: string): Promise<number> {
       return 0;
     },
+    async MarkMailSeen(_mailbox: string, _subject: string, _date: string): Promise<void> {},
+    async ReadAppLogTail(_lines: number): Promise<Array<{ line: string }>> { return []; },
+    async OpenAppLogFolder() {},
+    async SaveMailAttachment(_mailbox: string, _subject: string, _date: string, _filename: string, _dir: string): Promise<string> { return ""; },
+    async SendMailSimple(_to: string, _subject: string, _body: string): Promise<void> {},
     async RagAutoRetryStatus(): Promise<RagAutoRetryStatusView> {
       return { enabled: false, active: false, maxRounds: 2 };
     },
@@ -5488,6 +5543,7 @@ function makeMockApp(): AppBindings {
     async BrowserConsoleScroll(_direction: string, _amount: number) { await delay(150); return "已滚动 (mock)"; },
     async BrowserConsoleSelectOption(target: string, value: string) { return `已在 ${target} 选择 ${value} (mock)`; },
     async BrowserConsoleUploadFile(target: string, files: string[]) { return `已向 ${target} 上传 ${files.length} 个文件 (mock)`; },
+    async BrowserConsolePickFiles() { await delay(150); return []; },
     async BrowserConsoleWait(_condition: string, _timeoutSec: number) { await delay(300); return "waited (mock)"; },
     async BrowserConsoleExtract(_selector: string, format: string) { await delay(300); return format === "markdown" ? "## 标题" + String.fromCharCode(10,10) + "**要点**（mock markdown）" : "提取内容 (mock)"; },
     async BrowserConsoleScreenshot() { await delay(300); return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(OPS_MOCK_FRAME)}`; },
@@ -5548,9 +5604,11 @@ function makeMockApp(): AppBindings {
         keep_alive_last: enabled ? Date.now() : 0, keep_alive_err: "",
       };
     },
-    async BrowserConsoleTrialRun(steps, params) {
+    async BrowserConsoleTrialRun(steps, params, from, count) {
       const bindings: Record<string, string> = { ...(params ?? {}) };
-      for (let i = 0; i < steps.length; i++) {
+      const begin = Math.max(0, Math.min(from ?? 0, steps.length - 1));
+      const end = count && count > 0 ? Math.min(steps.length, begin + count) : steps.length;
+      for (let i = begin; i < end; i++) {
         if (steps[i].type === "human") {
           // Mock the human breakpoint: park on a promise the mock Resume/
           // Abort bindings release, so the editor's waiting banner is

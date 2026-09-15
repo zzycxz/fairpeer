@@ -118,6 +118,7 @@ export interface WireApproval {
   id: string;
   tool: string;
   subject: string;
+  reason?: string; // why the ask fired (danger label, WAF DLP hit)
   args?: string; // raw JSON of the call being approved (bash command, target path…)
   changes?: WireFileChange[]; // previewed per-file diffs for writer tools
 }
@@ -606,9 +607,21 @@ export interface SkillView {
   scope: string;
   runAs: string;
   enabled: boolean;
+  /** Product-surface tag (frontmatter `domain:` or the builtin roster):
+   * code / office / netdev / browser-ops / pentest / … Drives the settings
+   * page's domain grouping. */
+  domain?: string;
+  /** Deterministic runner name (e.g. "browser-flow") — marks a self-orchestrated
+   * flow skill rather than a plain prompt. */
+  executor?: string;
+  /** Pre-activation skill: excluded from the index until woken from the panel. */
+  draft?: boolean;
   /** In effect under the current product profile. A profile whitelist can hide a
    * skill the user left enabled — enabled=true, active=false. */
   active?: boolean;
+  /** Why active=false: "mode" (profile whitelist hid a shipped skill),
+   * "domain" (user skill outside the profile's SkillDomains), "draft". */
+  inactiveReason?: string;
   /**
    * InstalledFrom is the marketplace source URL when the skill was installed
    * via install_source (empty for builtins and manually created skills).
@@ -629,11 +642,20 @@ export interface CatalogEntry {
   installRef: string;
 }
 
+/** Market search/browse payload: matched entries plus per-source failures
+ * (source id → reason) so the UI can show why a source is unavailable. */
+export interface SkillMarketResultView {
+  entries: CatalogEntry[];
+  failed?: Record<string, string>;
+}
+
 /** A marketplace source's metadata (for the source list UI). */
 export interface MarketSourceMeta {
   id: string;
   name: string;
   type: string;
+  url?: string;
+  custom?: boolean;
 }
 export interface SkillRootSkillView {
   name: string;
@@ -656,6 +678,10 @@ export interface CapabilitiesView {
   servers: ServerView[];
   skills: SkillView[];
   skillRoots: SkillRootView[];
+  // Where the data came from: "local" (normal tab), "remote" (remote
+  // workspace tab — skills report empty, managed on the remote side),
+  // "none" (session controller not built / failed). Drives empty-state copy.
+  session?: string;
 }
 export interface MCPServerInput {
   name: string;
@@ -1245,7 +1271,7 @@ export interface DreamStatusView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "bots" | "cowork" | "preference" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "network" | "hooks" | "appearance" | "updates" | "mobile" | "netdev" | "trustdomain";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "cowork" | "preference" | "mcp" | "skills" | "memory" | "permissions" | "sandbox" | "waf" | "network" | "hooks" | "appearance" | "updates" | "mobile" | "netdev" | "trustdomain";
 
 // Settings panel payloads (desktop/settings_app.go).
 export interface ProviderView {
@@ -1311,6 +1337,7 @@ export interface PermissionsView {
   allow: string[];
   ask: string[];
   deny: string[];
+  hardDeny: string[]; // red lines (WAF tab card ⑦) — denied in every mode
 }
 
 export interface SandboxView {
@@ -1318,6 +1345,31 @@ export interface SandboxView {
   network: boolean;
   workspaceRoot: string;
   allowWrite: string[];
+}
+
+// WafSettingsView mirrors desktop WafSettingsView (docs/WAF_SPEC.md §9.3):
+// the action-protection posture. Mode is the ceiling — observe never blocks.
+export interface WafSettingsView {
+  enabled: boolean;
+  mode: string; // "observe" | "enforce"
+  dlpAction: string; // "observe" | "ask" | "deny"
+  dlpSignatures: string[]; // user regexes on top of the builtin shapes
+  injectionEnabled: boolean;
+  escalationThreshold: number; // 0 = off
+  // Egress policy ([network.policy]) — host patterns: exact, "*.sub", "**.base".
+  egressDefault: string; // "allow" | "ask" | "deny"
+  egressAllow: string[];
+  egressDeny: string[];
+}
+
+export interface WafAuditEntry {
+  ts: number;
+  session?: string;
+  tool: string;
+  ring: string;
+  label: string;
+  action: string;
+  source?: string;
 }
 
 export interface NetworkProxyView {
@@ -1675,6 +1727,7 @@ export interface SettingsView {
   providers: ProviderView[];
   officialProviders: ProviderView[];
   permissions: PermissionsView;
+  waf: WafSettingsView;
   sandbox: SandboxView;
   network: NetworkView;
   agent: AgentView;
@@ -2392,15 +2445,17 @@ export interface BrowserConsoleScanResult {
 }
 
 export interface BrowserConsoleRecordEvent {
-  type: string; // click|input|change|submit|navigate|effect
+  type: string; // click|input|change|submit|navigate|scroll|effect|upload
   selector?: string;
   role?: string;
   name?: string;
-  value?: string;
+  value?: string; // scroll: "<direction> <screens>"; click: 双击/右键 token
   url?: string;
   time: number;
   effective?: boolean;
   password?: boolean;
+  // upload only: the picked FILE NAMES (content never leaves the page).
+  files?: string[];
 }
 
 export interface BrowserConsoleTraceFilter {
@@ -2444,7 +2499,11 @@ export type BrowserConsoleStepType =
   | "screenshot"
   | "evaluate"
   | "human"
-  | "ask";
+  | "ask"
+  | "check"
+  | "uncheck"
+  | "refresh"
+  | "new_tab";
 
 export interface BrowserConsoleStep {
   type: BrowserConsoleStepType;
@@ -2459,13 +2518,13 @@ export interface BrowserConsoleStep {
   files?: string[];
   expression?: string;
   label?: string;
-  // 5th-column harness spec (重试=/校验=/失败=/校验预算=), raw string.
+  // 5th-column harness spec (重试=/校验=/失败=/校验预算=/存=/逐字/禁用), raw string.
   control?: string;
 }
 
 export interface BrowserConsoleTrialStatus {
   index: number; // -1 = run terminal event
-  status: "running" | "waiting" | "done" | "failed";
+  status: "running" | "waiting" | "done" | "failed" | "skipped";
   output?: string;
   error?: string;
   // ask 步骤的等待：横幅带输入框，回复经 TrialResume(reply) 送回并绑定到 bind 参数。
