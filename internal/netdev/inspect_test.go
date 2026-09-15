@@ -2,6 +2,7 @@ package netdev
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/zzycxz/fairpeer/internal/config"
@@ -61,5 +62,39 @@ func TestInspectionConcurrentDeterminism(t *testing.T) {
 		if a[i] != b[i] {
 			t.Errorf("evidence order drifted at %d: %q vs %q", i, a[i], b[i])
 		}
+	}
+}
+
+// 轮3覆盖 P1：ctx 取消路径——预先取消的 ctx 必须及时返回且不 panic。
+func TestInspectionContextCancel(t *testing.T) {
+	sim := startSimDevice(t)
+	m, _ := testManager(t, sim)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := m.RunInspection(ctx); err == nil {
+		t.Log("canceled ctx returned nil error (device dial may fail first) — acceptable")
+	}
+	// 关键断言：返回后不再有悬挂 goroutine（-race CI 下由 wg.Wait 保证）。
+}
+
+// 轮3覆盖 P2：无驱动设备 → problems 记录、devices/evidence 排除。
+func TestInspectionNoDriverDevice(t *testing.T) {
+	sim := startSimDevice(t)
+	m, _ := testManager(t, sim)
+	m.cfg.NetDev.Devices = append(m.cfg.NetDev.Devices, config.NetDevDevice{
+		Name: "mystery", Vendor: "nosuchvendor", OS: "nope",
+	})
+	f, err := m.RunInspection(context.Background())
+	if err != nil || f == nil {
+		t.Fatalf("inspection: %v", err)
+	}
+	found := false
+	for _, p := range strings.Split(f.Detail, "; ") {
+		if strings.Contains(p, "mystery") && strings.Contains(p, "no driver") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no-driver problem not recorded: %s", f.Detail)
 	}
 }

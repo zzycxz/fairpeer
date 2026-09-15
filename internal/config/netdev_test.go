@@ -260,3 +260,22 @@ func TestNetDevAlertRulePresetKeyUnique(t *testing.T) {
 		t.Fatalf("empty preset_key must not collide: %v", err)
 	}
 }
+
+// 轮3覆盖 P2：项目 deny/allow 前缀校验层归一化（大写/多空白就地收敛，空条目拒）。
+func TestProjectPrefixNormalization(t *testing.T) {
+	nd := NetDevConfig{Enabled: true, Groups: []NetDevGroup{{Name: "g1"}}, Projects: []NetDevProject{
+		{Name: "P", Groups: []string{"g1"}, Deny: []string{"  Systemctl   STOP "}, Allow: []string{"undo  stp region"}},
+	}}
+	if err := ValidateNetDev(nd); err != nil {
+		t.Fatalf("valid config rejected: %v", err)
+	}
+	got := nd.Projects[0]
+	if got.Deny[0] != "systemctl stop" || got.Allow[0] != "undo stp region" {
+		t.Errorf("prefixes must normalize in place, got deny=%q allow=%q", got.Deny[0], got.Allow[0])
+	}
+	bad := nd
+	bad.Projects = []NetDevProject{{Name: "P", Groups: []string{"g1"}, Deny: []string{"  "}}}
+	if err := ValidateNetDev(bad); err == nil {
+		t.Error("empty prefix entry must be refused")
+	}
+}

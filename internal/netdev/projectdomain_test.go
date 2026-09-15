@@ -24,6 +24,7 @@ func projectDomainManager(t *testing.T) *Manager {
 	cfg.NetDev.Devices = []config.NetDevDevice{
 		{Name: "sw-a1", Vendor: "huawei", OS: "vrp8", Group: "campus-a"},
 		{Name: "sw-b1", Vendor: "huawei", OS: "vrp8", Group: "campus-b"},
+		{Name: "srv-b1", Vendor: "linux", Group: "campus-b"},
 	}
 	cfg.NetDev.Projects = []config.NetDevProject{
 		{Name: "蓝队A", Groups: []string{"campus-a"}, Type: "blueteam",
@@ -263,5 +264,27 @@ func TestActiveProjectVanishedReadOnlyStall(t *testing.T) {
 	}
 	if _, ok := m.projectDomainVerdict("sw-a1", "display version", driver.Read); !ok {
 		t.Error("reads must stay available during stall")
+	}
+}
+
+// 轮3覆盖 P2：域闸×curlReadOverride 端到端——域外设备的探活形态放行、
+// 写形态拒绝，域闸分类与密封执行器一致（经 guardrailCheck 真路径）。
+func TestDomainGateCurlOverrideEndToEnd(t *testing.T) {
+	m := projectDomainManager(t)
+	if err := m.SetActiveProject("蓝队A"); err != nil {
+		t.Fatal(err)
+	}
+	// 域外 linux 主机（srv-b1）+ 探活形态 → curlReadOverride 判 Read → 放行。
+	if r, ok := m.guardrailCheck("srv-b1", "curl -I http://127.0.0.1:8000/health"); !ok {
+		t.Errorf("out-of-domain curl probe must pass the domain gate: %+v", r)
+	}
+	// 域外 linux 主机 + 写形态 → 拒。
+	if _, ok := m.guardrailCheck("srv-b1", "systemctl restart nginx"); ok {
+		t.Error("out-of-domain write must refuse")
+	}
+	// 域外 huawei（sw-b1）：curl 在网络 CLI 驱动下本就是 Unknown → 拒（与
+	// 密封执行器同判——域闸不比执行器宽）。
+	if _, ok := m.guardrailCheck("sw-b1", "curl -I http://127.0.0.1:8000/health"); ok {
+		t.Error("network-CLI host curl must classify Unknown and refuse out-of-domain")
 	}
 }

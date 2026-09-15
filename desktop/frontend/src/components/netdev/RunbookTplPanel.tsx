@@ -48,7 +48,11 @@ function scenarioForProjectType(type?: string): string {
   }
 }
 
-export default function RunbookTplPanel({ onChanged, onCreated }: { onChanged?: () => void; onCreated?: (id: string) => void }) {
+export default function RunbookTplPanel({ onChanged, onCreated, devices }: {
+  onChanged?: () => void;
+  onCreated?: (id: string) => void;
+  devices?: { name: string; vendor: string }[];
+}) {
   const t = useT();
   const [tpls, setTpls] = useState<Tpl[]>([]);
   const [scenario, setScenario] = useState("all");
@@ -62,6 +66,13 @@ export default function RunbookTplPanel({ onChanged, onCreated }: { onChanged?: 
   const [busy, setBusy] = useState("");
   const [pending, setPending] = useState<PendingRun[]>(loadPending);
   const [proposals, setProposals] = useState<Set<string>>(new Set());
+  // E4/E7 部署建议校验（轮3审查 P2：binding 无 UI 消费的断路修）。
+  const [pcDevice, setPcDevice] = useState("");
+  const [pcModel, setPcModel] = useState("");
+  const [pcQuant, setPcQuant] = useState("");
+  const [pcTp, setPcTp] = useState("8");
+  const [pcOut, setPcOut] = useState<string[]>([]);
+  const [pcBusy, setPcBusy] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -170,6 +181,18 @@ export default function RunbookTplPanel({ onChanged, onCreated }: { onChanged?: 
 
   const dropPending = (key: string) => setPending(list => list.filter(x => x.key !== key));
 
+  const runProfileCheck = async () => {
+    setPcBusy(true);
+    setErr("");
+    try {
+      setPcOut(await app.NetDevProfileCheck(pcDevice, pcModel, pcQuant, Number(pcTp) || 0));
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setPcBusy(false);
+    }
+  };
+
   return (
     <div className="ndv__card" style={{ marginBottom: 12 }}>
       <div className="ndv__card-title">{t("ndv.rbp.title")}</div>
@@ -248,6 +271,29 @@ export default function RunbookTplPanel({ onChanged, onCreated }: { onChanged?: 
           })}
         </div>
       )}
+
+      {pending.length > 0 && <div style={{ marginTop: 6 }} />}
+
+      <div style={{ marginTop: 8, padding: "8px 10px", border: "1px solid var(--border, #333)" }}>
+        <div className="ndv__group-label">{t("ndv.rbp.pcTitle")}</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <select className="mem-input" style={{ width: 130 }} value={pcDevice} onChange={e => setPcDevice(e.target.value)}>
+            <option value="">{t("ndv.rbp.pcDevice")}</option>
+            {(devices ?? []).map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
+          </select>
+          <input className="mem-input" style={{ width: 180 }} placeholder={t("ndv.rbp.pcModel")} value={pcModel} onChange={e => setPcModel(e.target.value)} />
+          <input className="mem-input" style={{ width: 90 }} placeholder={t("ndv.rbp.pcQuant")} value={pcQuant} onChange={e => setPcQuant(e.target.value)} />
+          <input className="mem-input" style={{ width: 60 }} placeholder="TP" value={pcTp} onChange={e => setPcTp(e.target.value)} />
+          <span className="btn btn--secondary btn--small" role="button" onClick={() => void runProfileCheck()}>
+            {pcBusy ? "…" : t("ndv.rbp.pcRun")}
+          </span>
+        </div>
+        {pcOut.length > 0 && (
+          <div className="ndv__meta" style={{ marginTop: 6 }}>
+            {pcOut.map((l, i) => <div key={i}>· {l}</div>)}
+          </div>
+        )}
+      </div>
 
       {msg && <div className="ndv__meta" style={{ color: "var(--ok, #4caf50)", marginTop: 4 }}>{msg}</div>}
       {err && <div className="ndv__meta" style={{ color: "var(--err)", marginTop: 4 }}>{err}</div>}

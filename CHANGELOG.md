@@ -9,6 +9,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### feat(desktop): 右侧工作区面板预览类型扩充——补齐媒体空白 + 新增格式 + 全量语法高亮
+
+- **[P1] 音频/视频/HTML 预览空白修复**：后端 `ReadFile` 早已返回 audio/video/html 三类媒体 token URL，但 `WorkspacePanel.renderMediaPreview` 只画 image/pdf——点开 mp3/mp4/htm 是整块空白。补齐三个分支（`<audio>`/`<video>` 控件、HTML 同附件查看器的 `sandbox=""` 沙箱 iframe），CSS 随配。
+- **[P2] 媒体 MIME 扩充**（只加 WebView/WebKit 原生可解码的格式，避免"坏播放器"不如二进制回退诚实）：图片 +`.ico`/`.avif`/`.jfif`；视频 +`.ogv`；HTML +`.xhtml`。
+- **[P2] 富文档预览扩充**：`officePreviewExts` +`.odt`/`.ods`/`.odp`（OpenDocument 走既有 COM-then-soffice 管线，`legacyToModernExt` 映射到 docx/xlsx/pptx 后复用 Go 解析器）+`.eml`/`.ipynb`（markitdown 提取，缺转换器时回退原文纯文本，与改动前行为一致）；`markitdownSkip` 集合化（odt/ods/odp 与 doc/ppt/rtf 一样跳过注定失败的 markitdown 子进程，省每次点击 ~2s Python 启动）。
+- **[P2] 代码语法高亮全量接通**：`CodeMirrorCode` 原先完全忽略 `language`（纯文本渲染）。接入 `@codemirror/language-data`——`EditorProps` 新增可选 `filename`，工作区预览按文件扩展名匹配（上百种语言），消息/工具卡代码块按语言标签匹配；解析器 chunk 懒加载，未命中语言照旧纯文本即渲染。`languageFor` 扩展名映射 15→45+（同时供选中引用的 markdown fence 标签使用）。
+- 测试：`TestIsOfficeDoc`/`TestLegacyToModernExtOpenDocument`/`TestReadFileMediaPreview`（新增 ico/avif/jfif/ogv/xhtml 分类断言）扩充；go test / tsc / vite build / 前端套件全绿。
+
+### fix(desktop): 首启 cmd 闪窗根修——GUI 子进程隐藏窗口三处漏点
+
+桌面 GUI 进程 spawn 控制台子程序时未设 CREATE_NO_WINDOW，Windows 上会闪出 cmd/PowerShell 黑框。全仓穷举 112 处 exec.Command 站点逐一核验（多数已带 proc.HideWindow），修复三处真实漏点：
+
+- **[P1] `ensurePPTAutoDeps`（首启弹 cmd 的直接根因）**：ppt-auto 技能依赖预装在无 `.deps-installed` 标记时跑 `cmd /c setup_python.bat`——恰是"首次打开弹 cmd、之后不弹"的指纹（成功写标记后不再跑；失败则每次启动重试、每次都弹）。补 HideWindow。
+- **[P1] Windows toast 通知**：PowerShell（BurntToast）发通知未隐藏——每次桌面通知闪一个 PS 控制台。补 HideWindow。
+- **[P2] netdev 备份 git**：后台备份的 git 调用未隐藏。补 HideWindow。
+
+### fix(security): WAF 对抗性自查修复——显示脱敏接线（P0）+ 姿态升级计数死代码（P0）+ observe 封顶 + UI 收尾
+
+对照 WAF_SPEC 全面自查后修复七项：
+
+- **[P0] 显示脱敏落地接线**：`Redact` 引擎此前已写但零调用点——审批卡 args 预览现在在 Emit 前过 DLP 脱敏（密钥形态替换 `[REDACTED]`），卡片不再是泄露面；审计链不存内容（PR8）天然豁免。
+- **[P0] 姿态升级计数死代码**：`noteWafReject/noteWafSuspicious` 只调阈值判断、从未递增计数器——升级功能实际永不触发。补 `turnRejects++/turnSuspicious++`；新增 `TestTripWafEscalationObserveCap`（observe 不收紧/enforce 达阈触发）锁定，并顺带修 trip 时 nil sink panic 防御。
+- **[P1] 姿态升级 observe 封顶**：trip 条件加 `Mode==enforce`——observe 姿态只计数+提醒不收紧（spec §6.3，此前违规）。
+- **[P2] ⑥卡按钮补齐**：清空视图（仅 UI，文件不可破坏）+ 打开所在位置（`WafRevealAudit` 按平台 explorer/open -R/xdg-open）。
+- **[P2] DLP ask Decision[]**：once/session 两档下发（签名不可按 host 收窄，always 不适用）——G7 契约对两类环完整。
+- **[P2] example.toml 补 [waf] 注释段**；spec 增附录 C"实现偏差记录"（6 条有意取舍：载荷通用扫描、信号器全量扫描、卡上永久拒绝降级等）。
+- **[P3] 界面文案/样式**：SigList 占位文案参数化——主机列表/规则列表此前错用"正则表达式…"占位；徽标 enforce 态配色（绿色）补齐。
+- **[P3] 界面打磨三件**：拦截记录动作徽章（deny/block=红、ask=黄、observe=描边、signal=蓝）；徽标弹层拦截明细可点击跳转设置卡⑥（"在设置中查看全部"），App 经 `setSettingsTarget("waf")` 接线；DLP 卡命中分布微图表（审计尾 500 条按标签计数、Top5 比例条，纯前端零后端改动）。
+
+### feat(security): WAF 批 3——注入信号器（observe-only）+ 姿态升级宿主逻辑 + ⑦红线/必问卡 + 本会话转观察（docs/WAF_SPEC.md §15 批 3）
+
+- **[P1] 注入信号器**：`waf.Signaler` 对工具结果文本（256KB 截断、大小写折叠）做指令注入探针（ignore-previous 族/身份覆写/disregard/system-prompt 指令等 8 探针，源自 install_source 技能扫描器的注入家族）；**observe-only 契约**——只发 `[waf:inj.*]` Notice + 回合内可疑计数，永不改变结果内容（开关两态输出逐字节一致由单测锁定）；boot 侧共享 sink 包装（executor 建流前包入），审计同链。
+- **[P1] 姿态升级**：controller 宿主逻辑——每 turn 计数（OnDeny 拒绝 + 信号器命中），达阈值（`[waf.escalation].threshold`，0=关）后 `escalateGate` 包装会话门：本 turn 剩余的**已放行** External 风险调用重新弹卡确认（ReasonAware 通道带升级理由）；yolo 保持文档化 bypass 不变、headless 由既有 External 硬拒覆盖；RunTurn 起点复位（注入指纹是回合内重试 churn，不跨回合）。
+- **[P2] ⑦红线/必问卡**：`ruleList` 扩 `hard_deny`；WAF tab 红线（硬拒绝，任何模式含 yolo/headless）与必问（yolo 下仍弹卡，批 0 F1 修复的语义）两列编辑——机制走 permissions 引擎（PR9），重新构建后经 boot 装载生效。
+- **[P2] 本会话转观察**：WAF tab 主控卡"误报逃生口"——`WafSessionObserve` 仅对活动会话热降为 observe（不落盘），下次设置保存/重建即恢复存量姿态。
+- **[P1] MCP 结果围栏化落地**（原批 1 因 plugin 包并行 WIP 暂缓）：`parseToolResult` 出口包 `WrapUntrusted("mcp", …)`——第三方工具结果与其它外部面同法对待为数据；plugin 包 8 处精确断言期望更新为围栏形态（mcpFenced 测试助手）。
+- **[P2] Composer WAF 徽标**：姿态角标（off=红/observe=灰/enforce=绿盾）+ 弹层——本会话拦截计数（transcript `[waf:` 前缀通知计数）、会话授权账本（逐条撤销）、本会话转观察快捷入口；`WafStatus/WafSessionGrants/WafRevokeSessionGrant` 三个桥接方法。
+- **[P2] 权限页缺口收口**：项目规则只读卡（活动工作区 fairpeer.toml 的 [permissions] 四列表——审批卡"永久允许"此前在 UI 不可见）；规则测试卡（`PermissionRuleDryRun`：规则 × 样例调用 → 是否命中，`RuleMatchesString` 直连）。
+- **[P2] metrics 接线**：desktop metrics 聚合器 Notice 分支捕获 `[waf:` 前缀，按环/标签计 counter（`waf` signal，bucket=ring.label）——一行接线，Grafana 侧零新增。
+
+### feat(security): WAF 批 2——egress 出口策略环（[network.policy]，Spec-δ-2 轻量路线 Gate 层）+ 会话记忆/永久的 amendment 写回 + 出口卡 dry-run（docs/WAF_SPEC.md §15 批 2）
+
+- **[P1] egress 环**：`waf.Egress` PreRing——从 URL 形态载荷参数提取主机（web_fetch/browser navigate；邮件 SMTP host 属用户自己的账户配置而非载荷属性，按 T30 裁决不入环），按 `[network.policy]` 决策：匹配 `exact / *.子域 / **.主域(含主域)`，优先级 **deny > 会话拒绝 > ask > 会话放行 > allow > default**；全局 `*` deny 与未知 default 加载期拒绝（P8）。deny 在 Approver 之前短路（PR5：yolo 不可越过）；ask 在 headless 降级为拒。
+- **[P1] ask→amendment 闭环**：egress ask 的理由带结构化标记（`[waf:egress.ask] host <h> …`），审批卡答复后 controller 解析标记喂回环——批准入会话放行集；"永久允许"（persist）经 boot 回调写入用户 config `[network.policy].allow`（去重）+ 热重载环 + Notice 回显落点。拒绝暂为单次（永久拒绝经设置卡手动加 deny 列表）。
+- **[P2] 设置卡③**：出口策略卡（未列出主机默认动作 + allow/deny 两列 + **dry-run 测试框**——`WafEgressDryRun` 后端解析返回判定与命中规则，会话集不计入）；SetWafSettings 一次写 `[waf]` 与 `[network.policy]` 两段并热应用。
+- **[P2] egress 红测**：MatchHost 边界表（大小写/尾点/apex 覆盖/后缀伪装 `evilexample.com` 不命中）、优先级矩阵、会话记忆跨 Reload 保持、标记往返、无 URL 参数工具零干扰（default=deny 下仍放行）。
+
+### feat(security): WAF 批 1——internal/waf DLP 环（已知秘密精确检测+形态签名）+ 设置页安全防护卡 + 审计哈希链 + browser_snapshot 围栏化（docs/WAF_SPEC.md §15 批 1）
+
+- **[P0] 出站 DLP 环**：`internal/waf` 新包——对每次工具调用的载荷（全部字符串值 + 附件键文件，各 256KB 截断）做两级检测：①已知秘密**精确匹配**（boot 从 secret store 装载用户凭证值，报告变量名、永不记录/显示值本身，零误报）；②低误报形态签名（PEM 私钥/OpenAI/GitHub/Slack/AWS/高熵赋值>2KB）+ 用户自定义正则（≤50 条、加载期编译 fail-loud）。动作 observe/ask/deny 受 mode 封顶（observe 一律降为提醒）；ask 在 headless 降级为拒；deny 在 Approver 之前短路（PR5：yolo 不可越过）。性能：提示子串预筛后 256KB 扫描 1.08ms（预算 5ms）。
+- **[P1] permission.PreRing 挂点**：宿主环结构化接口（决策字符串 allow/ask/deny + notice），Gate 外部环聚合只升不降（PR4）；ReasonAwareApprover 可选通道——danger 标签与 DLP 命中理由经 Approval.Reason 上审批卡（event/eventwire/desktop wire 三处附加字段，wire 兼容）；observe 命中经 OnNotice 走 LevelWarn Notice（`[waf:dlp.<label>]` 前缀文法）。
+- **[P1] 设置页安全防护 (WAF) tab**：预设三段（观察/标准/严格，旋钮捆绑糖、custom 只派生）+ 总开关（关闭过确认门，不记记忆位）+ DLP 动作/自定义签名列表 + 注入信号开关（配置先行，信号器本体批 3）+ 姿态升级阈值 + 拦截记录卡（哈希链校验徽标）。`SetWafSettings` 落盘后热应用到全部本地 controller（环按调用读快照，零 rebuild）；`/waf` 命令查姿态（桌面+CLI）。
+- **[P2] 审计哈希链**：`<用户配置目录>/waf/audit.jsonl` 追加式 SHA-256 链（netdev 纪律：只记环/签名标签/工具/动作指纹，永不记命中内容），Tail 自校验、首条完整性入链（自审修复：初版从 i=1 起验漏掉首条）。
+- **[P2] browser_snapshot 围栏化**：AX 树镜像页面攻击者可控文本，出口包 `WrapUntrusted("browser", …)` 与其它 web 面同法。MCP 结果围栏化因 internal/plugin 处于并行 WIP（OAuth 相关）暂缓一笔，避免冲突。
+- **[P2] 红测+FP 门禁**：waf 包内建对抗表（大小写折叠/深嵌套/中缀命中）与良性语料零误报门禁；文档化 v1 盲区（base64/分段编码密钥——由已知秘密精确检测补高价值面）。
+
+### feat(security): WAF 批 0——Gate 校验器链形式化 + 拒绝进事件流 + yolo 必问修复（审计 F1）+ [permissions].hard_deny 红线（docs/WAF_SPEC.md §15 批 0）
+
+- **[P0] yolo 必问修复（审计 F1）**：`approvalBypassAllowsLocked` 此前对一切非 plan 工具直接自动应答——netdev `confirm_each_command` 与 scheduler `confirm_agent_tasks` 经 boot 注入的 Ask 规则在 yolo/已批计划窗口被静默放行（与 boot/config 两处源码注释的承诺矛盾）。现 bypass 前以 Mode=Allow 副本重判规则层，命中 Ask 规则即弹卡；yolo 档文案同步改为"跳过常规审批，必问规则与红线仍生效"（en/zh）。行为三态测试锁死：yolo+Ask 规则必弹卡、yolo 无规则维持直通、plan/composeReplan 永不 bypass。
+- **[P1] Gate.Check 链化（纯重构，行为零变化）**：policy 环+danger 环显式化为 gateRing 严格序聚合（Allow<Ask<Deny，环只升不降），为后续 DLP/egress deny 环与后检观察层提供挂点（WAF spec §5.2 三层结构）；golden 表测试锁死决策面（危险分段/exec_session input/外部风险 headless 拒/记住/红线）；零值 Gate 回落默认链不 fail-open。自审中发现并修复链化引入的 readOnly 标志丢失缺陷（非 bash 只读工具会误入 ask 兜底永久等待审批）——ACP e2e 全栈测试当场抓获，回归用例补入 golden 表。
+- **[P1] 拒绝进事件流**：Gate 新增 OnDeny 回调（规则/危险拒绝触发；用户在审批卡上的拒绝不触发），controller 接线为 LevelWarn Notice（`permission denied: <tool> <subject截断120> — <reason>`）——此前拒绝只存在于 blocked 工具结果文本中，用户无独立事件可查。
+- **[P2] [permissions].hard_deny 红线**：用户可声明的不可覆盖拒绝层（同一 "Tool"/"Tool(glob)" 规则形状），boot 装入 HardDeny——任何模式（含 yolo/headless）生效，且位于 Approver 之前结构性不可绕过；controller 快照红线基线，SetPlanMode 由整体替换改为合并——plan 模式开/关不再抹掉配置红线。fairpeer.example.toml 补 [permissions] 注释段。
+
+### fix(security): 对抗性安全收敛——provider 信任门控（P0）+ install_skill 全局持久化约束 + 记忆 provenance + 出站 DLP/渲染双保险
+
+五项经源码逐一核实后修复：
+
+- **[P0] `[[providers]]` 并入 G3 信任门控**（原"v2 处理"决议提前）：providers 是唯一"攻击者即通道"的面——未信任项目的 fairpeer.toml 把同名 provider 的 base_url 换到攻击者服务器，后续所有对话与 api_key 流经它，且发生在任何工具闸门之前。未信任项目的 provider 源整体排除（与 pluginSources 同法）+ UntrustedProjectNotices 通知；受信任项目照常按名覆写。boot/cli/acp 各测试按信任语义修正（trustTestRoot 助手 / hook.Trust）。
+- **[P1] install_skill 全局作用域信任约束**：未信任工作区拒绝 `scope='global'`——SEC-3 挡住了项目作用域，但全局写入会跨项目以用户作用域持久化（SEC-3 盲区），注入诱导的全局安装即持久化后门。受信任后照常；Description 同步说明。
+- **[P1] 记忆 provenance**：remember 工具写入的记忆带双保险标记——frontmatter `agent_written: true`（机器可读，round-trip 保持）+ 正文首行"[agent 记录 — 未经用户确认]"提示（随内容到达 prompt 折叠/面板/导出）。未信任网页诱导写入的记忆从此在每次被引用时自带来源警示。
+- **[P2] Mermaid 渲染双保险**：`sanitizeMermaidSvg`（DOMParser 级：剥 script/foreignObject/iframe、on* 属性、javascript:/data:text/html URL）叠在 app 级 `securityLevel:"strict"` 之上——上游配置漂移或 mermaid 版本回归时仍有第二层。纯标准 API，无新依赖。
+- **[P2] 导出出站 DLP**：`redactSecrets` 应用于全部文本类导出（md/pdf/html/image 共用 sessionItemsToMarkdown 出口）——PEM 私钥块、OpenAI/Anthropic/GitHub/AWS/Slack/Google 令牌形态、key=value 秘密对；键名保留、值替换 [REDACTED]。json 导出保持无损。
+
+配套回归：providers 信任门控（未信任保留/覆写失效+通知、受信任覆写生效）、install_skill 未信任拒绝/受信任放行、remember provenance round-trip、mermaid/导出为前端层（typecheck 清）。
+
 ### docs(netdev): 0.2.5 批⑤⑦开工准入设计——K1 三件设计成文 + K2 通道选型推荐
 
 - `docs/NETDEV_PROJECT_DOMAIN_DESIGN.md`：K1（G-P1 会话项目上下文=per-session
@@ -33,6 +108,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fail-closed 拒批（残缺基建不下放第二把锁）。
 - 测试：TestProjectAllowException / TestProjectReadOnlyFloor（命令层+提案层）/
   TestTrustDomainApprovalUpgrade（启用未入域 fail-closed）。
+
+### feat(netdev): "尽量做"追加批——域闸 v1.2 核实为伪需求 + 可用性/性能/回归三修
+
+- **域闸工具族覆盖核实为伪需求**：docker/firewall/dbquery/netconf 四族逐源勘察全部
+  结构性只读（GET 白名单/只读 allowlist/显式拒 edit-config 族）——设备写面仅
+  execSealed 与提案管线，域闸均已覆盖；台账 v1.2 项转核实结论。
+- **remoteOnce 可用性**：SharedRemoteNode 失败不再被 sync.Once 钉死（G-P1 批准
+  升格抢先调用"未入域"后，用户 init/join 成域也拿不到节点直到重启）——改锁内重试。
+- **SeriesRead 读路径**：读不持全局 seriesMu（O_APPEND/原子替换语义下安全）+
+  mtime 短路（闲置分片 O(1)）——GpuBoard 批量构建不再堵死采集写入。
+- **F12 回归修复**：无驱动设备的 "no driver" problem 在并发组装时被丢弃（轮3
+  测试补齐时抓到）——problems 先于 name 检组装。
+- 测试 +10：inspect ctx 取消/无驱动、域闸 curl override 端到端（linux 放行+huawei
+  Unknown 拒双语义）、标签消毒、deny/allow 归一化、seen 门、平刻取最大、
+  GPUHealthAbnormal hold、series 清理中断/迁移不双写、Save ID、盖章消失 fail-closed。
 
 ### feat(netdev): 收尾批——RunbookTpl 产品入口（含 G-P2 场景联动）+ F2 权重管线落地件 + job 文件锁修复
 

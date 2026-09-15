@@ -20,19 +20,17 @@ import (
 // fleet is invisible to agents on hosts that never joined a domain.
 
 var (
-	remoteOnce sync.Once
+	remoteMu   sync.Mutex
 	remoteNode *trustdomain.Node
 	remoteErr  error
 )
 
 // ResetSharedRemoteNode drops the cached embedded node so the next
 // SharedRemoteNode call re-opens identity + ledger from disk. Used after the
-// desktop GUI creates/joins a domain within one process lifetime — the
-// sync.Once would otherwise pin the pre-init "未入域" error until restart.
-// Not synchronized with concurrent SharedRemoteNode callers: the desktop
-// buttons that trigger it are user-paced, and a racing re-open is harmless.
+// desktop GUI creates/joins a domain within one process lifetime.
 func ResetSharedRemoteNode() {
-	remoteOnce = sync.Once{}
+	remoteMu.Lock()
+	defer remoteMu.Unlock()
 	remoteNode = nil
 	remoteErr = nil
 }
@@ -40,42 +38,52 @@ func ResetSharedRemoteNode() {
 // SharedRemoteNode lazily opens this host's embedded trust-domain node:
 // identity + persisted ledger + peers from [trustdomain].bootstrap_peers.
 // One instance per process (the CLI daemon and agent tools must share it).
+//
+// 轮2审查 P3-4 可用性修复：失败**不再被 sync.Once 钉死**——旧实现一旦在
+// "未入域"状态下被调用（如 G-P1 批准的升格检查抢先跑过一次），错误会缓存
+// 到进程结束，用户随后 init/join 成域也拿不到节点。现在：成功后节点常驻
+// 缓存；失败只记 lastErr，下次调用在锁内重试（磁盘 open 成本可忽略——
+// 失败态本来就没建立网络面）。与 ResetSharedRemoteNode 同锁互斥。
 func SharedRemoteNode(cfg *config.Config) (*trustdomain.Node, error) {
-	remoteOnce.Do(func() {
-		td := cfg.TrustDomain
-		dir := td.DataDirOrDefault()
-		if dir == "" {
-			remoteErr = errors.New("trustdomain: data dir unavailable — set [trustdomain].data_dir")
-			return
-		}
-		id, err := trustdomain.LoadOrCreateIdentity(dir)
-		if err != nil {
-			remoteErr = err
-			return
-		}
-		store, err := trustdomain.OpenStore(dir)
-		if err != nil {
-			remoteErr = err
-			return
-		}
-		chain, err := store.Load()
-		if err != nil {
-			remoteErr = fmt.Errorf("trustdomain: 未入域（先 fairpeer trustdomain init/join）: %w", err)
-			return
-		}
-		var node *trustdomain.Node
-		node = trustdomain.NewNode(id, chain, func() []trustdomain.Peer {
-			var peers []trustdomain.Peer
-			for _, addr := range td.BootstrapPeers {
-				if addr = strings.TrimSpace(addr); addr != "" {
-					peers = append(peers, nettrans.NewNetPeer(addr, id, nettrans.ChainLookup(node.Chain())))
-				}
-			}
-			return peers
-		}, trustdomain.NodeOptions{CheckpointEvery: td.CheckpointEveryBlocks, Store: store})
-		remoteNode = node
-	})
+	remoteMu.Lock()
+	defer remoteMu.Unlock()
+	if remoteNode != nil {
+		return remoteNode, nil
+	}
+	remoteErr = remoteOpenOnce(cfg)
 	return remoteNode, remoteErr
+}
+
+func remoteOpenOnce(cfg *config.Config) error {
+	td := cfg.TrustDomain
+	dir := td.DataDirOrDefault()
+	if dir == "" {
+		return errors.New("trustdomain: data dir unavailable — set [trustdomain].data_dir")
+	}
+	id, err := trustdomain.LoadOrCreateIdentity(dir)
+	if err != nil {
+		return err
+	}
+	store, err := trustdomain.OpenStore(dir)
+	if err != nil {
+		return err
+	}
+	chain, err := store.Load()
+	if err != nil {
+		return fmt.Errorf("trustdomain: 未入域（先 fairpeer trustdomain init/join）: %w", err)
+	}
+	var node *trustdomain.Node
+	node = trustdomain.NewNode(id, chain, func() []trustdomain.Peer {
+		var peers []trustdomain.Peer
+		for _, addr := range td.BootstrapPeers {
+			if addr = strings.TrimSpace(addr); addr != "" {
+				peers = append(peers, nettrans.NewNetPeer(addr, id, nettrans.ChainLookup(node.Chain())))
+			}
+		}
+		return peers
+	}, trustdomain.NodeOptions{CheckpointEvery: td.CheckpointEveryBlocks, Store: store})
+	remoteNode = node
+	return nil
 }
 
 // findCoveringToken picks this member's active token whose scope covers

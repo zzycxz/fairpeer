@@ -259,3 +259,15 @@ func TestLatestInferValueTieBreakMax(t *testing.T) {
 		t.Errorf("tie must take max, got %v ok=%v", v, ok)
 	}
 }
+
+// 轮3覆盖 P2：标签消毒——控制字符剔除 + 64 字节截断。
+func TestSanitizeInferLabel(t *testing.T) {
+	got := sanitizeInferLabel("qwen-7b")
+	if got != "qwen-7b" {
+		t.Errorf("control chars must strip, got %q", got)
+	}
+	long := strings.Repeat("x", 100)
+	if len(sanitizeInferLabel(long)) != 64 {
+		t.Errorf("label must clamp to 64 bytes")
+	}
+}

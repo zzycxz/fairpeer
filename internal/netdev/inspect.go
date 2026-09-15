@@ -116,12 +116,14 @@ func (m *Manager) RunInspectionProgress(ctx context.Context, progress func(done,
 		problems []string
 	)
 	for _, r := range results {
+		// problems 先于 name 空检组装：无驱动设备的 "no driver" 记录不能丢
+		// （F12 改写引入的回归，轮3测试补齐时发现）。
+		problems = append(problems, r.problems...)
 		if r.name == "" {
 			continue
 		}
 		devices = append(devices, r.name)
 		evidence = append(evidence, r.evidence...)
-		problems = append(problems, r.problems...)
 	}
 
 	severity := SeverityInfo

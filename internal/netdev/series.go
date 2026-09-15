@@ -191,13 +191,26 @@ func quoteJSON(s string) string {
 // SeriesRead returns one device's points (all metrics) inside the window.
 // v2：只扫该设备的分片——单设备 14 天数据 ~34MB/680 万行的量级不再随 fleet
 // 规模相乘。
+//
+// 轮3集成审查 P2（SeriesRead 全扫+全局锁）的最小安全缓解：
+//  1. **读不持 seriesMu**——写端 append/cleanup 都走原子替换或 O_APPEND，
+//     读者拿到的要么是旧文件要么是新文件（Windows Go os.Open 带
+//     FILE_SHARE_RWDelete，不会撞锁）；坏行/半行本就有容错。全局锁留给
+//     写与迁移，GpuBoard 批量构建不再堵死 RecordSeries。
+//  2. **mtime 短路**——分片最后修改早于窗口起点 = 窗口内必无数据，免扫描
+//     直接空返回（闲置分片的 24h spark/board 读取从 O(文件) 降到 O(1)）。
 func SeriesRead(device string, window time.Duration) map[string][]SeriesPoint {
 	cutoff := time.Now().Add(-window).Unix()
 	out := map[string][]SeriesPoint{}
+	// 迁移/建目录必须持锁（确保一次）；随后的扫描无锁。
 	seriesMu.Lock()
-	defer seriesMu.Unlock()
 	ensureMigrated()
-	f, err := os.Open(seriesShardPath(device))
+	seriesMu.Unlock()
+	path := seriesShardPath(device)
+	if info, err := os.Stat(path); err != nil || info.ModTime().Before(time.Unix(cutoff, 0)) {
+		return out
+	}
+	f, err := os.Open(path)
 	if err != nil {
 		return out
 	}
