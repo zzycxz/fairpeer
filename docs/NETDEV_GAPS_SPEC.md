@@ -163,3 +163,4 @@ build（internal/cmd/desktop）｜vet｜netdev/config 全量测试｜desktop 三
 - **记档未修**（会话外/后续批）：RollbackProposal 项目域维度（恢复语义豁免，已注记）、estop 不取消 poller ctx（审计结论：只读采集不冻结属既有口径，非缺陷）、cfg 指针无锁换（race 面，需全读者改造）、RunbookTpl 场景筛选的 G-P2 自动缺省在设置未加载时的退化（手选仍可用）。
 - **2026-09-14 收尾批完成**（原记档未修项清账）：job 文件锁 flake（saveJobLocked 重试退避 + TestSaveJobConcurrentReads 并发回归）；RunbookTpl 六 binding 的 UI 入口（RunbookTplPanel 挂割接创建视图：场景筛选〔G-P2 按活动项目 type 联动缺省〕→变量→preview→apply→待启动列表→批齐一键启动）；ProposalCenter 死组件移除（旧无 operator 批准路径一并消除）；NetDevDeviceHealth 前端类型补 gpuHealthAbnormal；F2 权重三段式落地件 docs/NETDEV_WEIGHT_PIPELINE.md（分发脚本模板+manifest 校验接口）。
 - **归属注记**：8cfe219d 因目录级 git add 卷入并行批次的 18 个未提交文件（transport/、metrics.go 扩展、live/session/writeauth 等）——该部分非三轮检查产出，归属并行批次；整树在提交前已过全量门禁。
+- **归属注记 2**：2ab74f27 的 zh/en locales 含并行批次的增量键（brc.*/eventEdit 等，~200 行，纯增量无害）——hunk 过滤后被后续整文件 add 覆盖；键为加法不破坏任何现有组件。
